@@ -1,0 +1,25 @@
+{
+ "schema": "antinel-namespaces-v1",
+ "version": 1,
+ "updated_at": "2026-09-11T12:49:27Z",
+ "namespaces": [
+  {
+   "host": "github.com",
+   "owner": "antinel-security",
+   "note": "Antinel Security Suite official namespace (self; subject of the self-verdict)"
+  }
+ ],
+ "_semantics": {
+  "self": "subject resolves to a namespace in this list",
+  "third-party": "subject resolves to a canonical repo identity NOT in this list",
+  "unattributed": "subject does not resolve, or this list is missing/unverifiable (fail-closed: never guess into third-party)"
+ },
+ "rotation": "public key fingerprint is pinned in README.md; rotate by APPENDING a new key entry",
+ "signature": {
+  "alg": "ed25519",
+  "public_key": "ee52814c5af213972a060fbafaf4c4765fb92e2501d7da6ba949cd5adbdb3914",
+  "public_key_fingerprint": "sha256:b71e570c30ebcbf7",
+  "covers": "canonical JSON (sort_keys, compact) of this document minus the signature block",
+  "value": "8fca63b2ab93c024ac8e37a4c4f0c7ed9e5cf712119d02dd4b41c82124c9ceacbed56a3c3179b349a5c932f072875a0a4395d2444f5427d236a940ebb6e7540c"
+ }
+}

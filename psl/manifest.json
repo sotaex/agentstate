@@ -1,0 +1,45 @@
+{
+ "name": "antinel-security",
+ "version": "0.16.0",
+ "psl_spec": "psl-vs-0.1",
+ "built_at": "2026-09-11T12:49:27Z",
+ "built_from": "D:\\psl\\poc\\r1v3",
+ "spec_document": "ANT-SEC-SPEC-001-FULL-R v1.1-R",
+ "entry": "SKILL.md",
+ "hooks": [
+  "hooks/pre_tool_use.py",
+  "hooks/post_tool_use.py"
+ ],
+ "scripts": [
+  "scripts/install.py",
+  "scripts/scan.py",
+  "scripts/report.py"
+ ],
+ "rules": "rules/default.json",
+ "verification": "scripts/run_harness.py -> psl/judgment.json",
+ "files": {
+  ".github/workflows/verify.yml": "sha256:524e194d4ff1881e4fde7174484b0a4bf5c242ba285b16681e849f0f8b89868f",
+  ".gitignore": "sha256:66fe1dbf9ca836371d53e37a591ce698060403fd37f1cc1ffc678d9d4dd31fa9",
+  "antinel-namespaces.json": "sha256:72b6bab551267a0d741b33760a94816519153fbd4c238a54befb03b41ec36960",
+  "ci/run_verifications.sh": "sha256:108121773825cc1dcf34d560d69c289467a3d596210d6ec6345e4bb1501b049c",
+  "docs/A6收入边界声明.md": "sha256:15cc36dfbe7713b54586083d60f4e9239caa719f89dc978d26753237af7d4c70",
+  "hooks/post_tool_use.py": "sha256:f803028a81c23ab4eeb7563559c35876a41ead7782620f7ce86de664cccbac19",
+  "hooks/pre_tool_use.py": "sha256:d2e5cb4f34708a628994b4fa5d9affe14da8bf0417a1c563342176ee9d4a30b5",
+  "hooks/session_start_banner.py": "sha256:65000b8518475052b5f08323e23a7c810456563fd9221845bee78c0e08030645",
+  "LICENSE": "sha256:55870646eda0539839c60fbcff15f6840a83a458ec7b77186f10f28d77e9351e",
+  "README.md": "sha256:2df43c49a460d1b14268d8bb81e007d8067d3cc6e108f0a72dc670660a34db4c",
+  "references/RULES.md": "sha256:8c8512d44f21a3204e11992c734df8a3e3a6ec8bc290752f04f2e3158f58174f",
+  "references/THREAT_MODEL.md": "sha256:9064c1cfbe9cb2a790b862442a6b4a1ba3effbbc11e8b177b1cf17c64ed53484",
+  "rules/default.json": "sha256:924ff8a8f3202099c5749909558d7372b83c3e5f2f40a14498bb440e2adcb4f6",
+  "scripts/install.py": "sha256:72c5add0ccad7e3b7242533da2a12b255d695301454641651dd6665e5620011d",
+  "scripts/report.py": "sha256:cd90a31a20e8df2488f7f7153d88df2f956cbb67a3773baec0079eec2cbf4e22",
+  "scripts/run_harness.py": "sha256:d1b09d610be7fec324c26389e935bcc2dc5b92c48fa0e16bef8835becc8a91fd",
+  "scripts/scan.py": "sha256:e5828451702992fb8f1f1cd6035d0216be05220305cd8f5eac5a44278c8262e3",
+  "scripts/verification_tests.py": "sha256:1062c764ceec5c4fbfbf1b6d8772bb16530750ea643c7b281f8c6d1c450d36cb",
+  "SKILL.md": "sha256:bcc6dd03b4c383acaff449f6ca367f59ea9e0d842bf4dbdadd4f6a042d753444",
+  "tools/antinel_verify.py": "sha256:7c5041683087ace7c9bc4f590a4d4fc5a2ea82e6e4de393b349beba443b48749",
+  "tools/HOST_PROBE.md": "sha256:a0358f4fda642c3aa225bb9607964fdb42ee99d51c85d9eeb916d62bfd68ba64",
+  "tools/probe_host.py": "sha256:8497d6cee8b64c528fcc658241252c5f92a1e35a3cc44a93fa2d5e8209c06204",
+  "tools/verify_chain.py": "sha256:da20b93d850a2aff18dabfbbcdbf23b74f5f0ba956e76aec500f5a51c2b3df20"
+ }
+}

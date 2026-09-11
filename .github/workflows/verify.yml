@@ -1,0 +1,32 @@
+# T5 cross-platform matrix (U-42): runs the full verification suite on three OS x four Python
+# NOTE(09-11): 3.13 added -- it is the interpreter the author actually runs locally; the old
+# 3.10/3.11/3.12 triple did not cover it, so 'cross-platform verified' was never supportable.
+# versions (3.10-3.13) on every push and PR. The written psl/judgment.json is uploaded as evidence.
+name: verify
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1"   # weekly: re-run the suite after host/runtime updates (D6)
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.10", "3.11", "3.12", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: run verification harness (full suite, stdlib only, no network)
+        run: python scripts/run_harness.py
+      - name: upload judgment record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: judgment-OS-PY
+          path: psl/judgment.json
