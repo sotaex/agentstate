@@ -1,5 +1,5 @@
 {
-  "version": "0.16.0",
+  "version": "0.17.0",
   "description": "Antinel Security Suite default detection rules (22 rules, 4 gates; flat layout: patterns at rule top level)",
   "gates": {
     "secrets": "Gate 2 sensitive surface",
@@ -499,7 +499,7 @@
         }
       ],
       "whitelist_chars": [
-        "\u200d"
+        "‍"
       ],
       "exclude_patterns": [],
       "apply_to_tools": [
@@ -572,6 +572,9 @@
       "exclude_patterns": [
         "localhost",
         "127\\.0\\.0\\.1"
+      ],
+      "apply_to_tools": [
+        "Bash"
       ]
     },
     {
@@ -591,6 +594,9 @@
       ],
       "exclude_patterns": [
         "git\\s+clean\\s+-n(\\s|$)"
+      ],
+      "apply_to_tools": [
+        "Bash"
       ]
     },
     {

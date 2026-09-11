@@ -2,17 +2,18 @@
  "spec": "psl-vs-0.1",
  "card_id": "antinel-security-suite",
  "skill": "antinel-security",
- "skill_version": "0.16.0",
+ "skill_version": "0.17.0",
  "verdict": "PASS",
  "status": {
   "value": "current",
   "derivation": "auto",
   "reason": null,
-  "checkedAt": "2026-09-11T20:53:07+08:00",
-  "note": "re-derive any time: python tools/antinel_verify.py"
+  "checkedAt": "2026-09-12T01:17:51+08:00",
+  "note": "re-derive any time: python tools/antinel_verify.py (--manifest for all 24 shipped files)"
  },
  "scope": {
   "covered": [
+   "antinel-namespaces.json",
    "rules/default.json",
    "hooks/pre_tool_use.py",
    "hooks/post_tool_use.py",
@@ -23,27 +24,29 @@
   ],
   "notCovered": [
    "runtime behaviour of the monitored host",
-   "files outside the seven digests above",
+   "files outside the 8 digests above",
    "the security posture of your machine or environment",
-   "dynamic tool traffic (that is the hooks' job, not this record's)"
+   "dynamic tool traffic (that is the hooks' job, not this record's)",
+   "the 体检 behaviour corpus is not shipped with the package; that reading is not reproducible from this package alone"
   ]
  },
  "discrimination": {
   "instrument": {
    "name": "scripts/verification_tests.py",
-   "object": "this package (the 7 digested files)",
+   "object": "this package (the 8 digested files)",
    "runner": "scripts/run_harness.py",
    "op": "black-box subprocess assertions (stdin JSON in, exit code + stdout/stderr out)"
   },
   "assertions": {
-   "passed": 162,
-   "total": 162
+   "passed": 179,
+   "total": 179
   }
  },
  "platformSpec": true,
  "objectOwnership": "self",
- "assertions_total": 162,
- "assertions_passed": 162,
+ "objectOwnershipBasis": "subject github.com/antinel-security is in the signed namespace list",
+ "assertions_total": 179,
+ "assertions_passed": 179,
  "criteria_independence": "Assertions exercise the hook protocol, rule matching, scanner, installer and reporter as black boxes through subprocesses (stdin JSON in, exit code and stdout/stderr out); they were authored from the design specification ANT-SEC-SPEC-001 v1.1, not from the implementation; third-party re-run supported.",
  "environment": {
   "python": "3.11.4",
@@ -52,19 +55,22 @@
   "network": "none"
  },
  "digests": {
-  "rules/default.json": "sha256:924ff8a8f3202099c5749909558d7372b83c3e5f2f40a14498bb440e2adcb4f6",
-  "hooks/pre_tool_use.py": "sha256:d2e5cb4f34708a628994b4fa5d9affe14da8bf0417a1c563342176ee9d4a30b5",
-  "hooks/post_tool_use.py": "sha256:f803028a81c23ab4eeb7563559c35876a41ead7782620f7ce86de664cccbac19",
-  "scripts/scan.py": "sha256:e5828451702992fb8f1f1cd6035d0216be05220305cd8f5eac5a44278c8262e3",
-  "scripts/install.py": "sha256:72c5add0ccad7e3b7242533da2a12b255d695301454641651dd6665e5620011d",
-  "scripts/report.py": "sha256:cd90a31a20e8df2488f7f7153d88df2f956cbb67a3773baec0079eec2cbf4e22",
-  "scripts/verification_tests.py": "sha256:1062c764ceec5c4fbfbf1b6d8772bb16530750ea643c7b281f8c6d1c450d36cb"
+  "antinel-namespaces.json": "sha256:f70dcf9b563185765c1733a5b7a9cbe269b0557eddfe5824f26250e91525222d",
+  "rules/default.json": "sha256:5d0db21d8c4ae4d48a3b7f60738675aefce88eab622fc75ca8edaa238b3f49d3",
+  "hooks/pre_tool_use.py": "sha256:a1625f0c23e5fefb6a2e1fce80f0f00cb6361df5d9fbbece8cadf16c8b0189e8",
+  "hooks/post_tool_use.py": "sha256:b9fb64eb5070e0ce69ce3b64c81002192c0f8ff723720f0361c5b0ecfb305312",
+  "scripts/scan.py": "sha256:7e55b0c447f2abb9ece1344065170cce0edbe2fec9f90df205808abb6344047e",
+  "scripts/install.py": "sha256:dcff4985f9ebda7281feef27fb428a7bf1cac760c07e6a2592e776fffae46c2b",
+  "scripts/report.py": "sha256:2f6a2037177823cfb145bf0fb02f8f0eba31316c60dd36b803da144d9f824f96",
+  "scripts/verification_tests.py": "sha256:6aea2babd08e23c8717722b6f53ed6048eed4e33802d1a98d194b2b5f28b875e"
  },
  "run": {
-  "started_at": "2026-09-11T20:52:07+0800",
-  "duration_ms": 60921,
+  "started_at": "2026-09-12T01:16:41+0800",
+  "duration_ms": 70002,
+  "duration_note": "wall-clock of a subprocess fan-out suite; machine- and load-dependent, not comparable across environments",
   "executor": "scripts/run_harness.py",
-  "exit_code": 0
+  "exit_code": 0,
+  "bootstrap": false
  },
  "re_run": "python scripts/run_harness.py",
  "verify": "python tools/antinel_verify.py",

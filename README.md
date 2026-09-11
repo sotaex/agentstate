@@ -9,8 +9,13 @@ One command. 22 rules. 4 gates. Local-only, zero network, standard library only.
 ```bash
 python scripts/run_harness.py     # 复跑全部断言，得到你自己的 verdict（写入 psl/judgment.json）
 python tools/antinel_verify.py    # 校验随包判定是否已失效（digest 比对，推导 current/superseded）
+python tools/antinel_verify.py --manifest   # 校验全部随包文件（以 psl/manifest.json 为准）
+python tools/verify_namespaces.py # 命名空间清单验签辅助（输出 canonical 摘要 + openssl 验签命令）
 python scripts/install.py --check # 校验已安装实例与包是否一致（版本 + 哈希）
 ```
+
+退出码约定：`antinel_verify` 0＝current / 1＝superseded / 2＝无法校验；
+`install.py --check` 0＝一致 / 1＝未安装 / 3＝有漂移。
 
 任何第三方复跑出不同结论，即取代随包判定记录（追加式，原记录不删不改）。
 
@@ -81,9 +86,11 @@ python scripts/install.py --root <项目根>   # 不一致时重跑安装，自�
 
 ## 已知边界 / Known limits（诚实声明）
 
+- **规则只匹配工具调用文本，不解析脚本内容**：把删除或越界写入写进一个 `.py`/`.sh` 再执行，四道闸门都不会拦截（实测：Bash 通道没有 `file_path`，DST-02 在该通道上恒不触发；0.17.0 起此类命令中的**显式绝对路径**会以 `dst02_bash_path_suspect` 事件留痕并告警，但**不拦截**）。这是**护栏**的设计边界，不是隔离层；需要隔离请用容器或沙箱
 - Hook 拦截仅覆盖宿主支持 PreToolUse/PostToolUse 的工具与动作；当前在 Windows + ZCode 实测，macOS/Linux 由 CI 矩阵持续验证
 - 只读命令上下文（echo/grep 等提及而非执行的危险词）中的 critical 命中会降级为 alert 并照常记录——这是刻意设计，防止"grep 危险词"被误拦；真正的执行形态仍会拦截
 - `rd`（Windows 删除命令）按"命令位置＋参数语境"匹配：`rd /s /q X` 拦截；Python 代码里的 `rd = 3`、raw 字符串 `r'D:\...'` 放行（0.16.0 修复了旧版对后两者的 critical 误报）
+- 行为语料（含负例）不随包分发；该读数无法仅凭本包复现（见 `psl/judgment.json` 的 `scope.notCovered`）
 - Qoder/TRAE 的字段布局为声明式适配（未实测）
 - 换宿主或宿主大版本更新后，用 tools/probe_host.py 做一次协议探针并把结果发给我们
 - 本套件输出审计日志与安全评估，不是检验检测报告；不能替代内核级防护（那是安信智芯 Link/Tank 的事）

@@ -1,4 +1,4 @@
-# Antinel Security Suite - Threat Model (v0.16.0)
+# Antinel Security Suite - Threat Model (v0.17.0)
 
 ## What we protect against
 An AI coding agent running inside an IDE host (Claude Code, ZCode, ...) executes tools on the
@@ -31,6 +31,20 @@ All hits of one event are collected; the highest severity decides.
   warning-level rules only, whitelist.domains relaxes network rules only; critical non-network rules are never relaxed.
 
 ## Known limits (documented, not hidden)
+- Guardrail, NOT a sandbox: rules match TOOL-CALL TEXT only. A deletion or an
+  out-of-root write placed inside a .py/.sh that the agent later executes is NOT
+  intercepted (measured: the Bash channel has no file_path, so DST-02 never
+  fires there). Since 0.17.0 such commands are SURFACED as
+  dst02_bash_path_suspect alert records, never blocked.
+
+## Non-goals
+- Script-content scanning. Parsing every script the agent writes for dangerous
+  operations would be a sandbox promise this layer cannot keep (and an
+  avalanche of false positives -- test fixtures contain dangerous words by
+  design). Isolation belongs to containers/VMs, not to a PreToolUse hook.
+- Stopping everything. Severity decides: critical blocks, warnings alert and
+  proceed. A hook that blocks a developer's daily build command gets uninstalled
+  on day one -- and an uninstalled hook stops nothing.
 - Hook latency on Windows is about 65 ms per call (interpreter start dominates); Linux/macOS untested.
 - Only actions that pass through the host's PreToolUse hook can be blocked.
 - Qoder / TRAE field layouts are declared profiles, not verified.

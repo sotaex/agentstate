@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Antinel Security Suite v0.16.0 - PostToolUse hook (Claude Code / ZCode compatible).
+"""Antinel Security Suite v0.17.0 - PostToolUse hook (Claude Code / ZCode compatible).
 
 Input (stdin, one JSON line): {session_id, transcript_path, tool_name,
 tool_input, tool_response}. PostToolUse cannot block an action that already
@@ -154,7 +154,13 @@ def append_jsonl(record):
 
 
 def bump_stats(tool_name, alerted):
-    """Tiny per-day counter file; corruption is tolerated (rewritten)."""
+    """Tiny per-day counter file; corruption is tolerated (rewritten).
+
+    0.17.0 (P-B8 / audit C-3): the sensitive-output counter is renamed
+    `alerts` -> `post_alerts`, because it counts ONLY PostToolUse
+    sensitive-output alerts -- while PreToolUse degrades (ro_cmd) and
+    warning-level hits also land `action: "alert"` in the log. One name used
+    to carry two quantities (audit finding N19); now the name says which."""
     p = os.path.join(audit_dir(), "stats.json")
     try:
         with open(p, "r", encoding="utf-8") as f:
@@ -162,12 +168,13 @@ def bump_stats(tool_name, alerted):
     except Exception:
         stats = {}
     day = datetime.now().strftime("%Y-%m-%d")
-    dstat = stats.setdefault(day, {"total": 0, "by_tool": {}, "alerts": 0})
+    dstat = stats.setdefault(day, {"total": 0, "by_tool": {}, "post_alerts": 0})
     dstat["total"] = int(dstat.get("total", 0)) + 1
     by_tool = dstat.setdefault("by_tool", {})
     by_tool[tool_name or "unknown"] = int(by_tool.get(tool_name or "unknown", 0)) + 1
     if alerted:
-        dstat["alerts"] = int(dstat.get("alerts", 0)) + 1
+        # legacy key migrated on first write; new name is the only live one
+        dstat["post_alerts"] = int(dstat.pop("alerts", dstat.get("post_alerts", 0))) + 1
     if len(stats) > 90:                                  # A7: keep the newest 90 days
         for k in sorted(stats.keys())[:len(stats) - 90]:
             stats.pop(k, None)

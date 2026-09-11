@@ -1,10 +1,11 @@
-# Antinel detection rules (generated from rules/default.json v0.16.0 - do not edit by hand)
+# Antinel detection rules (generated from rules/default.json v0.17.0 - do not edit by hand)
 
 Category order = match priority: secrets > destructive > network > injection > context > metadata.
 Severity to action: critical = block, warning = alert (logged, allowed). All hits are collected; highest severity decides.
 
 ## SEC-01  Sensitive file read (.env)
 - category: secrets | severity: critical | static + dynamic | tools: Read, Bash
+- purpose: Prevents an agent reading .env files (live-blocked in ZCode on 09-10; the founding interception)
 - description: Agent attempted to read a .env file which may contain API keys and secrets
 - 说明: 读取 .env 文件可能泄露 API 密钥与机密配置
 - 处理建议: 把 .env 移出 Agent 可读范围；确需变量时手动复制具体几行；测试夹具路径可在 policy.json 白名单登记
@@ -20,6 +21,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 
 ## SEC-02  SSH key file read
 - category: secrets | severity: critical | static + dynamic | tools: Read, Bash
+- purpose: Prevents SSH private key / authorized_keys reads (the credential that outlives every session)
 - description: Agent attempted to read SSH private key or authorized_keys file
 - 说明: 读取 SSH 私钥或 authorized_keys
 - 处理建议: SSH 密钥不要放进 Agent 工作范围；改用 ssh-agent 转发
@@ -33,6 +35,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 
 ## SEC-03  Cloud credential file read
 - category: secrets | severity: critical | static + dynamic | tools: Read, Bash
+- purpose: Prevents cloud credential file reads (aws/kube/gcloud -- the keys that move cloud billings)
 - description: Agent attempted to read cloud provider credentials
 - 说明: 读取云厂商凭证文件
 - 处理建议: 改用云厂商 CLI 的短期令牌；确需操作时请手动执行
@@ -46,6 +49,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 
 ## SEC-04  Wallet/keystore file read
 - category: secrets | severity: critical | static + dynamic | tools: Read, Bash
+- purpose: Prevents wallet/keystore access (irreversible financial loss class)
 - description: Agent attempted to read cryptocurrency wallet or keystore file
 - 说明: 读取加密货币钱包或密钥库文件
 - 处理建议: 钱包目录永远不要交给编码 Agent；必要时移入加密保管
@@ -59,6 +63,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 
 ## SEC-05  Browser data read
 - category: secrets | severity: critical | static + dynamic | tools: Read, Bash
+- purpose: Prevents browser profile reads (live login sessions, not just passwords)
 - description: Agent attempted to read browser stored data (cookies, passwords, sessions)
 - 说明: 读取浏览器数据（Cookie、密码、会话）
 - 处理建议: 浏览器配置目录包含登录态，应完全禁止 Agent 访问
@@ -71,6 +76,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 
 ## NET-01  Shell network request
 - category: network | severity: warning | dynamic (hook only) | tools: Bash
+- purpose: Surfaces shell egress to non-whitelisted domains (first-generation C2 / exfil channel)
 - description: Agent made an external network request via shell command to a non-whitelisted domain
 - 说明: 通过 Shell 向白名单外域名发起网络请求
 - 处理建议: 核对目标域名是否预期；常用下载源可在 policy.json 的 whitelist.domains 登记
@@ -82,6 +88,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 
 ## NET-02  Python network request
 - category: network | severity: warning | dynamic (hook only) | tools: Bash
+- purpose: Surfaces inline-code network calls (the same egress hidden inside python -c)
 - description: Agent code contains Python network request calls
 - 说明: 内联代码包含 Python 网络请求调用
 - 处理建议: 核对请求目标地址后再放行
@@ -94,6 +101,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 
 ## NET-03  Non-whitelisted domain connection
 - category: network | severity: warning | dynamic (hook only) | tools: Bash
+- purpose: Surfaces non-whitelisted domains named in commands (DNS-level comparison is v2)
 - description: Agent command references a domain outside the whitelist (v1 compares command-line domains; DNS-level comparison is a v2 kernel-layer capability)
 - 说明: 命令引用了白名单外的域名
 - 处理建议: 确认域名无害后，写入 policy.json 的 whitelist.domains 即不再提醒
@@ -104,6 +112,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 
 ## DST-01  File deletion
 - category: destructive | severity: critical | dynamic (hook only) | tools: Bash
+- purpose: Blocks deletion commands (rm/del/rd/Remove-Item and library calls -- measured 11 live blocks)
 - description: Agent executed a file or directory deletion command
 - 说明: 执行文件或目录删除命令
 - 处理建议: 确认删除目标无误；构建产物类删除（如 node_modules）已在豁免清单
@@ -134,6 +143,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 
 ## DST-02  Write outside project root
 - category: destructive | severity: critical | dynamic (hook only) | tools: Write, Edit, Bash
+- purpose: Blocks writes outside the project root (the workspace is the trust boundary)
 - description: Agent attempted to write to a file outside the project root directory
 - 说明: 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件
 - 处理建议: 让 Agent 把文件写进项目内；确需写外部路径时请手动执行
@@ -145,6 +155,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 
 ## DST-03  Shell configuration modification
 - category: destructive | severity: critical | dynamic (hook only) | tools: Write, Edit, Bash
+- purpose: Blocks shell-startup edits (persistence that re-executes on every terminal)
 - description: Agent attempted to modify shell startup configuration (persistence mechanism)
 - 说明: 修改 Shell 启动配置（.bashrc 等，属持久化机制）
 - 处理建议: 启动脚本每次开终端都会执行，不要让 Agent 追加内容；确需修改请手动审查后进行
@@ -160,6 +171,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 
 ## DST-04  Persistence mechanism
 - category: destructive | severity: critical | dynamic (hook only) | tools: Write, Edit, Bash
+- purpose: Blocks persistence installs (cron/systemd/registry Run/schtasks -- survives the session)
 - description: Agent attempted to establish persistence (cron job, systemd service, startup item, scheduled task, registry Run key)
 - 说明: 建立持久化机制（计划任务/系统服务/启动项/注册表 Run 键）
 - 处理建议: 持久化会在会话结束后反复执行，必须由你本人确认后手动操作
@@ -184,6 +196,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 
 ## DST-05  Privilege escalation
 - category: destructive | severity: warning | dynamic (hook only) | tools: Bash
+- purpose: Alerts on privilege escalation (sudo/chmod 777 -- sysadmin territory)
 - description: Agent attempted to escalate privileges
 - 说明: 尝试提权操作
 - 处理建议: 涉及提权的步骤建议你本人执行，不给 Agent 提权
@@ -197,6 +210,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 
 ## CTX-01  Environment variable enumeration
 - category: context | severity: warning | dynamic (hook only) | tools: Bash
+- purpose: Alerts on environment enumeration (the precursor to secret exfiltration)
 - description: Agent attempted to enumerate all environment variables (may expose API keys and secrets)
 - 说明: 枚举全部环境变量（可能暴露密钥）
 - 处理建议: 让 Agent 只打印它需要的具体变量名
@@ -209,6 +223,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 
 ## CTX-02  Prompt injection pattern in SKILL.md
 - category: injection | severity: critical | static + dynamic | tools: Read, Write, Edit
+- purpose: Blocks prompt injection in skill instructions (the skill-poisoning payload core)
 - description: Potential prompt injection payload detected in skill instruction file
 - 说明: 技能指令文件中发现提示注入载荷
 - 处理建议: 移除该技能并核查来源；不要运行其中的指令
@@ -225,6 +240,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 
 ## CTX-03  Invisible Unicode characters
 - category: injection | severity: critical | static + dynamic | tools: Read, Write, Edit, Bash
+- purpose: Blocks invisible Unicode (tag/zero-width/RLO -- the human-eye bypass, live-blocked 3x)
 - description: Invisible Unicode character detected (tag characters, zero-width, word joiner, BOM in middle of file)
 - 说明: 检出隐形 Unicode 字符（标签字符/零宽字符等）
 - 处理建议: 清除隐形字符；出现在指令文件中默认按恶意处理
@@ -233,6 +249,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 
 ## CTX-04  Encoded payload
 - category: injection | severity: warning | static + dynamic | tools: Read, Write, Edit
+- purpose: Alerts on long encoded blobs in skills (the payload behind base64/hex laundering)
 - description: Long base64 or hex string detected (potential encoded payload)
 - 说明: 检出超长 base64/hex 编码载荷
 - 处理建议: 先解码审查再决定；正常说明文档极少内嵌长编码
@@ -243,6 +260,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 
 ## CTX-05  Skill name mismatch
 - category: metadata | severity: warning | static + dynamic | tools: Read
+- purpose: Detects SKILL.md identity mismatch (name spoofing / packaging slip)
 - description: SKILL.md frontmatter name field does not match parent directory name
 - 说明: SKILL.md 声明的 name 与目录名不一致
 - 处理建议: 改名保持一致；不一致通常意味着身份伪装或打包疏漏
@@ -250,7 +268,8 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - remediation: Rename the directory or fix the frontmatter; mismatches hide a skill's real identity.
 
 ## DST-06  Remote script piped to interpreter
-- category: destructive | severity: critical | dynamic (hook only) | tools: 
+- category: destructive | severity: critical | dynamic (hook only) | tools: Bash
+- purpose: Blocks remote-script-piped-to-interpreter (the classic supply-chain install)
 - description: Agent downloaded a remote script and piped it straight into a shell or interpreter
 - 说明: 下载远程脚本并直接交给解释器执行
 - 处理建议: 先落盘查看内容再执行；确认来源可信
@@ -265,7 +284,8 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - remediation: Download and inspect the script first; confirm the source is trusted before executing.
 
 ## DST-07  Irreversible git discard
-- category: destructive | severity: critical | dynamic (hook only) | tools: 
+- category: destructive | severity: critical | dynamic (hook only) | tools: Bash
+- purpose: Blocks irreversible git discards (reset --hard / clean -fdx eat uncommitted work)
 - description: Agent ran a git command that irreversibly discards working-tree changes or untracked files
 - 说明: 丢弃工作区改动的 git 命令（不可逆）
 - 处理建议: 先 git stash 或提交，再执行
@@ -278,6 +298,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 
 ## SEC-06  Secret literal in content
 - category: secrets | severity: critical | static + dynamic | tools: Write, Edit, Read, Bash
+- purpose: Catches secret literals IN content (a key pasted into code outlives the file it was meant for)
 - description: Secret-looking literal (API key, private key, token) appeared in written or edited content
 - 说明: 写入或编辑的内容中出现密钥字面量
 - 处理建议: 改用环境变量或密钥管理服务，不要把明文密钥写进文件
@@ -292,6 +313,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 
 ## DST-08  Permission/ownership destruction
 - category: destructive | severity: critical | dynamic (hook only) | tools: Bash
+- purpose: Blocks recursive permission/ownership destruction (denial-of-service class)
 - description: Agent attempted to destroy permissions or ownership recursively (denial of service)
 - 说明: 递归破坏权限或属主，可致服务不可用
 - 处理建议: 递归改权限/属主属于系统管理操作，请人工审查后执行

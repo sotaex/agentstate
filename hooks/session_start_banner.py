@@ -39,6 +39,24 @@ def _banner_quiet():
 
 
 def main():
+    # 0.17.0 (P-A5): session heartbeat. A session that leaves NO trace anywhere
+    # is indistinguishable from "the hook never ran" -- the exact blindness that
+    # audit finding N5 measured. Best-effort: a failed heartbeat write never
+    # breaks the banner (fail-open, A-08).
+    try:
+        d = os.path.join(os.getcwd(), ".psl", "audit")
+        os.makedirs(d, exist_ok=True)
+        from datetime import datetime
+        fn = os.path.join(d, datetime.now().strftime("%Y-%m-%d") + ".jsonl")
+        with open(fn, "a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "ts": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "type": "session_start", "tool": "-", "session": "banner",
+                "decision": "allow", "severity": "none",
+                "reason": "SessionStart heartbeat (hook ran; banner shown)"},
+                ensure_ascii=False) + "\n")
+    except Exception:
+        pass
     if _banner_quiet():
         return 0
     n = _rule_count()

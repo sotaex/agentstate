@@ -14,8 +14,9 @@ The record itself is never modified: `status` here is DERIVED, not written
 this against a clone of the repo - no trust in us required.
 
 Usage:
-  python tools/antinel_verify.py                 # verify <pkg>/psl/judgment.json
+  python tools/antinel_verify.py                    # verify <pkg>/psl/judgment.json digests
   python tools/antinel_verify.py path/to/judgment.json
+  python tools/antinel_verify.py --manifest         # verify ALL files in psl/manifest.json (0.17.0, P-B1)
   python tools/antinel_verify.py --json
 
 Exit codes: 0 = current, 1 = superseded/unreadable, 2 = cannot verify.
@@ -36,6 +37,9 @@ def main(argv=None):
     ap.add_argument("judgment", nargs="?", default=str(DEFAULT),
                     help="path to judgment.json (default: <pkg>/psl/judgment.json)")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
+    ap.add_argument("--manifest", action="store_true",
+                    help="verify every file listed in psl/manifest.json instead of the "
+                         "judgment digests (closes the 16-file verification gap, audit N6)")
     a = ap.parse_args(argv)
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -48,11 +52,24 @@ def main(argv=None):
     except Exception as e:
         print(json.dumps({"status": "error", "reason": "judgment unreadable: %s" % e}))
         return 2
-    digests = rec.get("digests") or {}
+
+    if a.manifest:
+        mpath = PKG / "psl" / "manifest.json"
+        try:
+            man = json.loads(mpath.read_text(encoding="utf-8"))
+        except Exception as e:
+            print(json.dumps({"status": "error", "reason": "manifest unreadable: %s" % e}))
+            return 2
+        digests = man.get("files") or {}
+        base = mpath.resolve().parent.parent
+        scope = "manifest (%d files)" % len(digests)
+    else:
+        digests = rec.get("digests") or {}
+        base = jpath.resolve().parent.parent          # digests are package-relative
+        scope = "judgment digests (%d files)" % len(digests)
     if not digests:
-        print(json.dumps({"status": "error", "reason": "no digests in record"}))
+        print(json.dumps({"status": "error", "reason": "no digests to verify (%s)" % scope}))
         return 2
-    base = jpath.resolve().parent.parent          # digests are package-relative
     changed, missing, checked = [], [], 0
     for rel, want in sorted(digests.items()):
         f = base / rel
@@ -64,13 +81,16 @@ def main(argv=None):
         if got != want:
             changed.append({"file": rel, "recorded": want[:23], "live": got[:23]})
     if changed:
-        status, reason = "superseded", "%d of %d covered files differ from the recorded digests" % (
-            len(changed), checked)
+        status, reason = "superseded", "%d of %d covered files differ (%s)" % (
+            len(changed), checked, scope)
     elif missing:
-        status, reason = "superseded", "%d of %d covered files are missing" % (len(missing), checked)
+        status, reason = "superseded", "%d of %d covered files are missing (%s)" % (
+            len(missing), checked, scope)
     else:
-        status, reason = "current", "all %d covered files hash to their recorded digests" % checked
+        status, reason = "current", "all %d covered files hash to their recorded digests (%s)" % (
+            checked, scope)
     out = {"status": status, "reason": reason, "checked": checked,
+           "mode": "manifest" if a.manifest else "judgment",
            "changed": changed, "missing": missing,
            "record_verdict": rec.get("verdict"),
            "rule": "any failed verification supersedes the record (append-only; "

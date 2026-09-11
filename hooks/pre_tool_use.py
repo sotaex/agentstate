@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Antinel Security Suite v0.16.0 - PreToolUse hook (Claude Code / ZCode compatible).
+"""Antinel Security Suite v0.17.0 - PreToolUse hook (Claude Code / ZCode compatible).
 
 v1.2 fixes over v1.1:
   G-01: rules loaded from PKG_DIR only (install.py snapshot in .psl/ is informational)
@@ -91,7 +91,11 @@ TEXT_EXTS = (".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".py", ".js", ".t
 # G-03: embedded fallback, used only when the rules file is unreadable (flat layout).
 _FALLBACK = [
     {"id": "SEC-01", "category": "secrets", "severity": "critical", "apply_to_tools": ["Read", "Bash"],
-     "file_patterns": [r"\.env$", r"\.env\."], "exclude_patterns": [r"\.env\.(example|template|sample)"],
+     # 0.17.0 (P-B5): excludes kept literally identical to rules/default.json
+     # (three separate strings, not a merged alternation) so the suite's
+     # fallback-subset assertion can compare them mechanically.
+     "file_patterns": [r"\.env$", r"\.env\."],
+     "exclude_patterns": [r"\.env\.example", r"\.env\.template", r"\.env\.sample"],
      "description": "Agent attempted to read a .env file which may contain API keys and secrets"},
     {"id": "SEC-02", "category": "secrets", "severity": "critical", "apply_to_tools": ["Read", "Bash"],
      "file_patterns": [r"\.ssh[/\\]", "id_rsa", "id_ed25519", "id_ecdsa", "authorized_keys"],
@@ -112,7 +116,16 @@ _FALLBACK = [
                           r"\bshutil\.rmtree\b", r"\bos\.remove\b", r"remove-item",
                           r"(?:^|[;&|(]\s*|\s)rd(?:\s*[/][A-Za-z]|\s+[^=\s])"],
      "exclude_patterns": ["rm -rf node_modules", r"rm -rf \.git", r"rm -rf \.psl",
-                          "remove-item node_modules", r"remove-item -recurse.*node_modules"],
+                          "remove-item node_modules", r"remove-item -recurse.*node_modules",
+                          # 0.17.0 (P-B5): the fallback is the DEGRADED mode; it must
+                          # not be noisier than the full rule set. These four excludes
+                          # existed only in rules/default.json, so during a fallback
+                          # `rm -rf dist` went from allowed to BLOCKED. Synced to the
+                          # full 9; the suite now asserts fallback ⊆ rules per id.
+                          r"rm -rf __pycache__",
+                          r"\brm\s+-rf\s+(dist|build|target|venv|\.tox|\.mypy_cache|\.ruff_cache|\.pytest_cache|htmlcov|coverage|out|bin|obj)(\s|$|;)",
+                          r"\brm\s+-rf\s+\S*\.(egg-info|pyc)(\s|$|;)",
+                          r"\brm\s+-rf\s+\.nox\b"],
      "description": "Agent executed a file or directory deletion command"},
     {"id": "DST-02", "category": "destructive", "severity": "critical", "apply_to_tools": ["Write", "Edit"],
      "check": "path_outside_project_root",
@@ -281,7 +294,7 @@ def load_rules():
             for r in data.get("rules", []):
                 rid = r.get("id")
                 if rid and rid in by_id:
-                    for k in ("severity", "action", "enabled"):
+                    for k in ("severity", "action", "enabled", "deprecated"):
                         if k in r:
                             by_id[rid][k] = r[k]
                 elif rid:
@@ -803,7 +816,10 @@ def scan_truncated(*texts):
 
 
 def _disabled(rule):
-    return rule.get("enabled") is False
+    # 0.17.0 (P-B7): `deprecated: true` retires a rule without deleting it --
+    # it stays visible in rules/RULES.md and in the audit of its retirement,
+    # but it never fires. Same fail-direction as `enabled: false`.
+    return rule.get("enabled") is False or rule.get("deprecated") is True
 
 
 def _applies(rule, tool):
@@ -1026,6 +1042,45 @@ def check_outside_root(path, root, extra_roots=()):
         return True
     except Exception:
         return False
+
+
+# 0.17.0 (P-A4): the Bash channel has no file_path, so DST-02's check never
+# fires there -- a script that writes/deletes outside the root is invisible to
+# the boundary check (measured 2026-09-11: six shapes, all through). We do NOT
+# parse script contents (that would be a sandbox promise we cannot keep -- see
+# THREAT_MODEL "Non-goals"), but EXPLICIT absolute paths in the command text are
+# cheap to surface. Recorded as an alert, never a block: `echo x > /tmp/a` is
+# everyday AI-coding traffic, and blocking it would destroy the signal/noise
+# ratio. This closes the "afterwards unfindable" half of the finding, not the
+# "not blocked" half -- that half is a documented boundary.
+_BASH_ABS_PATH_RE = re.compile(
+    r"(?:\b[A-Za-z]:[\\/][^\s\"'`|;&<>)\]]+|(?<![\w~/])\/(?:[A-Za-z0-9._-]+\/){1,}[A-Za-z0-9._-]+)")
+# POSIX pseudo-devices: redirect targets like /dev/null are everyday noise, not
+# boundary events (the first build of this regex flagged every `2>/dev/null`).
+_BASH_PATH_SKIP_PREFIXES = ("/dev/", "/proc/", "/sys/")
+
+
+def _bash_absolute_paths(command):
+    """Explicit absolute paths (Windows drive / POSIX multi-segment) in command text.
+
+    Capped at the first 8 distinct candidates, each at most 200 chars: every
+    candidate costs a realpath in the boundary check, and a padded command can
+    carry multi-hundred-KB "paths" (measured: one 2MB token cost +2.5 s on
+    corpus B-023 -- real paths are short; padded ones are attack noise)."""
+    if not command or len(command) >= SCAN_LIMIT:
+        return []
+    out = []
+    for m in _BASH_ABS_PATH_RE.finditer(command):
+        if len(out) >= 8:
+            break
+        p = m.group(0).rstrip(".,;:")
+        if len(p) > 200:
+            continue
+        if any(p.replace("\\", "/").lower().startswith(q) for q in _BASH_PATH_SKIP_PREFIXES):
+            continue
+        if p not in out:
+            out.append(p)
+    return out
 
 
 # --------------------------------------------- G-05/G-09: invisible Unicode ----
@@ -1307,6 +1362,17 @@ def _append_locked(fn, line):
 
 
 def log_event(rec, mirror=False):
+    """Append one audit record. Returns True when the project-local write was
+    VERIFIED (read back and re-parsed), False otherwise.
+
+    0.17.0 (P-A5): a security product whose evidence log can silently fail must
+    at least SAY so. The write is now read back and re-parsed; on any failure
+    stderr gets AUDIT_WRITE_FAILED (visible, grep-able) instead of the old bare
+    `except: pass`. Whether a lost audit line should also BLOCK the tool call
+    is a policy choice: `global_settings.fail_closed_on_audit_loss` (default
+    false -- a guardrail must not take the host down because its own log
+    directory is read-only)."""
+    ok = False
     try:
         d = os.path.join(os.getcwd(), ".psl", "audit")
         os.makedirs(d, exist_ok=True)
@@ -1314,8 +1380,24 @@ def log_event(rec, mirror=False):
         rec = _chain_fields(fn, rec)
         line = json.dumps(rec, ensure_ascii=False) + "\n"
         _append_locked(fn, line)
+        with open(fn, "rb") as f:                        # write-then-read-back
+            f.seek(max(0, os.path.getsize(fn) - len(line.encode("utf-8")) - 8))
+            # newline-agnostic: _append_locked writes TEXT mode, so Windows
+            # stores \r\n -- compare on normalized tails (first build of this
+            # check compared \n against \r\n and flagged every write).
+            tail = f.read().decode("utf-8", errors="replace").replace("\r\n", "\n").rstrip("\n")
+        ok = bool(tail) and tail.rsplit("\n", 1)[-1] == line.rstrip("\n") \
+            and isinstance(json.loads(tail.rsplit("\n", 1)[-1]), dict)
     except Exception:
-        pass                                            # A-08: never break the host
+        ok = False
+    if not ok:
+        try:
+            sys.stderr.write("[Antinel] AUDIT_WRITE_FAILED: this event's audit record "
+                             "could not be written/read back; the action proceeded "
+                             "(fail-open). Set global_settings.fail_closed_on_audit_loss "
+                             "= true in .psl/policy.json to make audit loss block.\n")
+        except Exception:
+            pass
     # A15: `.psl/audit/` is inside the project, so `rm -rf .psl` -- whitelisted by
     # DST-01 -- erases the record that says it happened. The mirror lives at host
     # level, outside every project; an agent cannot write there without tripping
@@ -1323,16 +1405,16 @@ def log_event(rec, mirror=False):
     # is forensics, not a second source of truth. ANTINEL_HOST_MIRROR=0 opts out
     # (regression suite must not write to the developer's home).
     if not mirror:
-        return
+        return ok
     try:
         d = _host_audit_dir()
-        if not d:
-            return
-        os.makedirs(d, exist_ok=True)
-        fn = os.path.join(d, datetime.now().strftime("%Y-%m-%d") + ".jsonl")
-        _append_locked(fn, json.dumps(rec, ensure_ascii=False) + "\n")
+        if d:
+            os.makedirs(d, exist_ok=True)
+            fn = os.path.join(d, datetime.now().strftime("%Y-%m-%d") + ".jsonl")
+            _append_locked(fn, json.dumps(rec, ensure_ascii=False) + "\n")
     except Exception:
         pass
+    return ok
 
 
 def _host_audit_dir():
@@ -1390,7 +1472,7 @@ def emit_block(rule_id, reason, json_stdout=True):
 # ------------------------------------------------- G-06: multi-hit collection --
 def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=None,
                  workspace_roots=(), ws_allow_log=None, excluded_log=None,
-                 path_wl_log=None):
+                 path_wl_log=None, bash_path_log=None):
     """Run every enabled, applicable rule against the event; return ALL hits.
 
     Match families (all fields read from the rule top level, G-12):
@@ -1481,6 +1563,12 @@ def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=Non
                         path_wl_log.append(file_path)
                 else:
                     hit = (file_path, "path_outside_project_root")
+            elif tool_name == "Bash" and bash_path_log is not None and command:
+                # 0.17.0 (P-A4): surface explicit out-of-root absolute paths in
+                # Bash commands as alerts. Never a block (see _bash_absolute_paths).
+                for cand in _bash_absolute_paths(command):
+                    if check_outside_root(cand, project_root, workspace_roots) and cand not in bash_path_log:
+                        bash_path_log.append(cand)
             elif ws_allow_log is not None and file_path and workspace_roots:
                 # Allowed only because a workspace root covers it -- and it would
                 # have been blocked without them. Record it (constraint 3).
@@ -1569,10 +1657,11 @@ def main():
     ws_allow_log = []
     excluded_log = []
     path_wl_log = []
+    bash_path_log = []
     hits = collect_hits(apply_policy(load_rules(), policy), tool_name, texts, project_root,
                         file_targets, policy, workspace_roots=workspace_roots,
                         ws_allow_log=ws_allow_log, excluded_log=excluded_log,
-                        path_wl_log=path_wl_log)
+                        path_wl_log=path_wl_log, bash_path_log=bash_path_log)
     hits.sort(key=lambda h: SEV_RANK.get(h["severity"], 9))       # stable: keeps category order
     blocking = [h for h in hits if h["action"] == "block"]
     decision = "block" if blocking else ("alert" if hits else "allow")
@@ -1610,6 +1699,35 @@ def main():
                    "decision": "allow", "severity": "critical", "action": "allow",
                    "reason": "path outside the project root but inside policy whitelist.paths",
                    "input": {"file_path": mask_secrets(wp)}}, mirror=True)
+    # 0.17.0 (P-A4): explicit out-of-root absolute paths seen on the Bash channel
+    # -- alert-only evidence, never a block (guardrail boundary, not a sandbox).
+    for cand in bash_path_log:
+        log_event({"ts": ts, "type": "dst02_bash_path_suspect", "tool": raw_tool,
+                   "session": session_id, "host": host_tag, "rule_id": "DST-02",
+                   "decision": "alert", "severity": "warning", "action": "alert",
+                   "reason": "command text references an explicit absolute path outside the "
+                             "project root; scripts are not parsed (THREAT_MODEL Non-goals)",
+                   "input": {"command": mask_secrets(cmd)[:300], "path": mask_secrets(cand)}},
+                  mirror=True)
+        if not notice_gate("DST-02-BASH", cand):
+            try:
+                sys.stderr.write("[DST-02] 提醒: 命令文本中出现项目根之外的显式绝对路径（已记录；脚本内容不解析，"
+                                 "详见 THREAT_MODEL Non-goals）: %s\n" % mask_secrets(cand))
+            except Exception:
+                pass
+    # 0.17.0 (P-A5): heartbeat -- the day's first record proves the hook ran at
+    # all. N5 measured a tool call that left NO trace in any log; a per-day
+    # alive-marker makes "the hook never ran today" distinguishable from "the
+    # hook ran and this call was lost".
+    try:
+        _today_log = os.path.join(os.getcwd(), ".psl", "audit",
+                                  datetime.now().strftime("%Y-%m-%d") + ".jsonl")
+        if not os.path.isfile(_today_log):
+            log_event({"ts": ts, "type": "hook_alive", "tool": raw_tool, "session": session_id,
+                       "host": host_tag, "decision": "allow", "severity": "none",
+                       "reason": "first hook invocation of the day"}, mirror=True)
+    except Exception:
+        pass
     # WS-2/WS-3: a malformed entry used to be visible once a day on stderr and
     # nowhere else -- `report.py` showed no sign of it, so a config that silently
     # stopped widening the boundary could not be diagnosed after the fact. It is now

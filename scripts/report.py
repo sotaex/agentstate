@@ -46,7 +46,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 PKG_DIR = Path(__file__).resolve().parent
-TOOL_VERSION = "0.16.0"
+TOOL_VERSION = "0.17.0"
 RETENTION_DAYS_DEFAULT = 30
 SCRIPT_FILES = ("pre_tool_use.py", "post_tool_use.py", "scan.py", "install.py", "report.py")
 

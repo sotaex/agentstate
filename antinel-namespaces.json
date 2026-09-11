@@ -1,7 +1,7 @@
 {
  "schema": "antinel-namespaces-v1",
  "version": 1,
- "updated_at": "2026-09-11T12:49:27Z",
+ "updated_at": "2026-09-11T17:02:39Z",
  "namespaces": [
   {
    "host": "github.com",
@@ -20,6 +20,6 @@
   "public_key": "ee52814c5af213972a060fbafaf4c4765fb92e2501d7da6ba949cd5adbdb3914",
   "public_key_fingerprint": "sha256:b71e570c30ebcbf7",
   "covers": "canonical JSON (sort_keys, compact) of this document minus the signature block",
-  "value": "8fca63b2ab93c024ac8e37a4c4f0c7ed9e5cf712119d02dd4b41c82124c9ceacbed56a3c3179b349a5c932f072875a0a4395d2444f5427d236a940ebb6e7540c"
+  "value": "c11d47fe7d388dfa7aa7eaa9af406372b428aa4b5d9ecd8722b34cc02a100729ab8c7c3edc5220ca1a8424439fb96f1a7ec9a27d8c016ffe17487ede00d7040c"
  }
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Antinel Security Suite v0.16.0 - self installer (F-07) and uninstaller (F-08).
+"""Antinel Security Suite v0.17.0 - self installer (F-07) and uninstaller (F-08).
 
 Steps (spec part 4):
   1. detect host type            (A-04 algorithm + C-02 refinements)
@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 PKG_DIR = Path(__file__).resolve().parent
-SKILL_VERSION = "0.16.0"
+SKILL_VERSION = "0.17.0"
 PSL_SPEC = "psl-vs-0.1"
 SCRIPT_FILES = ("pre_tool_use.py", "post_tool_use.py", "scan.py", "install.py", "report.py")
 
