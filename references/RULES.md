@@ -1,4 +1,4 @@
-# Antinel detection rules (generated from rules/default.json v0.17.0 - do not edit by hand)
+# Antinel detection rules (generated from rules/default.json v0.18.1 - do not edit by hand)
 
 Category order = match priority: secrets > destructive > network > injection > context > metadata.
 Severity to action: critical = block, warning = alert (logged, allowed). All hits are collected; highest severity decides.
@@ -192,6 +192,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
     - `rc\.local`
     - `\.config[/\\]autostart`
     - `currentversion[/\\]run`
+    - `(?i)start menu.*startup`
 - remediation: Persistence entries survive the session and re-execute code; require explicit human approval.
 
 ## DST-05  Privilege escalation
@@ -280,6 +281,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
     - `\bcurl\b[^\n]{0,200}\b(-o|\-\-output)\s+[^\n]{0,80}\.(sh|ps1)\b[^\n]{0,80}[;&|]\s*(sh|bash|\.)`
     - `\bbase64\b[^\n]{0,60}(-d|--decode)[^\n]{0,80}\|\s*(sh|bash|python)`
     - `\|\s*base64\s+-d\b`
+    - `(?:\[char\]\d+\+){2,}`
 - exclude_patterns: `localhost`, `127\.0\.0\.1`
 - remediation: Download and inspect the script first; confirm the source is trusted before executing.
 

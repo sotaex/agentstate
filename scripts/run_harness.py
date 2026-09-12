@@ -80,8 +80,46 @@ def derive_object_ownership():
             return "self", "subject %s/%s is in the signed namespace list" % (host, owner)
     return "third-party", "subject %s/%s is NOT in the signed namespace list" % (host, owner)
 
+def should_append(prev_row, new_row):
+    """0.18.0 (R-21/HP-14): the ledger-append decision, EXTRACTED so it can be
+    exercised by tests without writing anything (scripts/run_harness.py
+    --check-ledger). The idempotency key includes the assertion count, so a
+    changed denominator always lands a new row."""
+    return not (prev_row
+                and prev_row.get("subject_digest") == new_row.get("subject_digest")
+                and prev_row.get("verdict") == new_row.get("verdict")
+                and prev_row.get("assertions") == new_row.get("assertions"))
+
 def main():
     bootstrap = "--bootstrap" in sys.argv
+    check_ledger = "--check-ledger" in sys.argv
+    if check_ledger:
+        # R-21 (HP-14): dry-run the ledger-append decision AGAINST THE CURRENT
+        # TREE, using the existing judgment record's verdict/assertions -- no
+        # suite run, no writes. Answers "would an official run right now land a
+        # new ledger row?" in under a second, so tests can exercise idempotency.
+        prev = None
+        if LEDGER.is_file():
+            for line in LEDGER.read_text(encoding="utf-8").splitlines():
+                if line.strip():
+                    try: prev = json.loads(line)
+                    except Exception: pass
+        try:
+            old = json.loads(OUT.read_text(encoding="utf-8"))
+            verdict = old.get("verdict", "FAIL")
+            total = int(old.get("assertions_total", 0))
+            passed = int(old.get("assertions_passed", 0))
+        except Exception:
+            print("would_append=unknown (no judgment record -- bootstrap first)")
+            return 0
+        digests = {rel: sha(PKG / rel) for rel in COVERED}
+        ownership, _basis = derive_object_ownership()
+        subject = "sha256:" + hashlib.sha256(
+            "\n".join(digests[k] for k in COVERED).encode()).hexdigest()
+        row = {"subject_digest": subject, "verdict": verdict,
+               "assertions": "%d/%d" % (passed, total)}
+        print("would_append=%s" % str(should_append(prev, row)).lower())
+        return 0
     env = dict(os.environ); env["ANTINEL_PKG"] = str(PKG)
     # P-A1: the layout is DECLARED here. pkg = the record is required (absent
     # record FAILS the suite); bootstrap = build-time run before the record
@@ -115,7 +153,7 @@ def main():
         "spec": "psl-vs-0.1",
         "card_id": "antinel-security-suite",
         "skill": "antinel-security",
-        "skill_version": "0.17.0",
+        "skill_version": "0.18.0",
         "verdict": ("PASS (bootstrap)" if bootstrap and verdict == "PASS" else verdict),
         # V7: status is a status BIT, appended info; this file itself is never
         # edited after publication. A third party derives current/superseded
@@ -160,8 +198,6 @@ def main():
         "anchor": None,
         "note": "v0.1 judgment: single-machine execution by the packaging agent; verification is not a security audit of the user environment. Any failed third-party re-run supersedes this record.",
     }
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps(rec, ensure_ascii=False, indent=1), encoding="utf-8")
     # V6 ledger (minimal form): append-only, idempotent. P-A1: the idempotency
     # key includes the assertion count, so a changed denominator always lands a
     # new row instead of being swallowed. Bootstrap runs NEVER write the ledger.
@@ -180,12 +216,11 @@ def main():
             if line.strip():
                 try: prev = json.loads(line)
                 except Exception: pass
-    same = (prev and prev.get("subject_digest") == subject
-            and prev.get("verdict") == rec["verdict"]
-            and prev.get("assertions") == row["assertions"])
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    OUT.write_text(json.dumps(rec, ensure_ascii=False, indent=1), encoding="utf-8")
     if bootstrap:
         print("harness: bootstrap run -- ledger untouched")
-    elif not same:
+    elif should_append(prev, row):
         with LEDGER.open("a", encoding="utf-8") as f:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
     print("verdict=%s assertions=%d/%d -> %s" % (rec["verdict"], passed, total, OUT))

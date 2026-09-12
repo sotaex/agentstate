@@ -46,7 +46,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 PKG_DIR = Path(__file__).resolve().parent
-TOOL_VERSION = "0.17.0"
+TOOL_VERSION = "0.18.0"
 RETENTION_DAYS_DEFAULT = 30
 SCRIPT_FILES = ("pre_tool_use.py", "post_tool_use.py", "scan.py", "install.py", "report.py")
 
@@ -173,7 +173,10 @@ def build_report(events, scan, manifest, host_label="", root=None):
     # they mean different things (T1): rules fell back (integrity mismatch or
     # unreadable file) and workspace_roots entries were rejected.
     cfg = {"rules_integrity_fallback": 0, "rules_unreadable_fallback": 0,
-           "workspace_config_rejected": 0}
+           "workspace_config_rejected": 0,
+           # 0.18.0 (HP-47): hook health events become visible too -- a hook
+           # that crashed mid-call used to appear ONLY in the raw JSONL.
+           "hook_error": 0, "session_start": 0, "hook_alive": 0}
     for ev in events:
         typ = ev.get("type", "")
         if typ in cfg:
@@ -313,6 +316,10 @@ def render_text(rep, log_label):
     L.append("  config entries rejected: %d | rules fallback (integrity/unreadable): %d/%d" % (
         ch.get("workspace_config_rejected", 0), ch.get("rules_integrity_fallback", 0),
         ch.get("rules_unreadable_fallback", 0)))
+    # 0.18.0 (HP-47): hook health -- a crash count > 0 means at least one call
+    # was allowed by the HOST (fail-open) with no verdict recorded at all.
+    L.append("  hook health: crash=%d | session_start=%d | hook_alive=%d" % (
+        ch.get("hook_error", 0), ch.get("session_start", 0), ch.get("hook_alive", 0)))
     sb = rep.get("score_basis", {})
     L += ["", BAR, " Security Score: %d/100 (%s)" % (rep["score"], rep["grade"]),
           " Score basis: 100 - 20 x %d critical - 5 x %d warning = %d (clamped to %d); dedupe on (rule, target)" % (

@@ -73,9 +73,18 @@ python scripts/install.py --root <项目根>   # 不一致时重跑安装，自�
 - 判定记录 `psl/judgment.json`：断言总数见 `assertions_total` 字段；任何第三方可用
   `python scripts/run_harness.py` 复跑；复跑失败即取代随包记录
 - 判定自带**状态位与作用域**：`status`（current/superseded，用 `tools/antinel_verify.py`
-  随时推导）、`scope`（覆盖 7 个摘要文件，不覆盖什么也写明）、`platformSpec`（单平台诚实
-  标注）、`objectOwnership`（对象归属，清单见 `antinel-namespaces.json`，ed25519 签名）
+  随时推导）、`scope`（覆盖 8 个摘要文件，不覆盖什么也写明）、`platformSpec`（单平台诚实
+  标注）、`objectOwnership`（**真推导**：签名清单＋README 钉定指纹＋git remote /
+  `manifest.namespace` 身份，fail-closed `unattributed`——0.17 前是常量，0.17 起为机制）
 - 追加式台账 `psl/verdict-ledger.jsonl`：第 1 行 = 自证判定；只增不删
+- 审计**日锚** `.psl/audit/day_manifest.json`（0.18.0）：记录每日字节长度与末行哈希（链外
+  独立副本），`verify_chain` 的 tail 校验据此检出"删除末尾 N 条 / 删除整天文件"——
+  0.17 及之前，这类篡改检不出（已知边界，现已被锚收紧为一需同伪两文件）
+- **诚实声明（`--manifest` 的二阶边界）**：`--manifest` 证明的是"树 = 清单"，不证明
+  "清单 = 发布时清单"——`psl/manifest.json` 不在 `judgment.digests` 内，同时改文件与清单
+  可骗过它；防合并篡改需 CI 产物留底或将清单纳入 digests（后续版本评估）
+- `fail_closed_on_audit_loss` 策略键（0.18.0 起真实接线）：审计写失败默认放行（stderr
+  可见 `AUDIT_WRITE_FAILED`），置 true 则阻断——取舍归你，机制归我们
 - 命名空间清单 `antinel-namespaces.json`：ed25519 签名，公钥指纹
   `sha256:b71e570c30ebcbf7`（钉死在本 README；轮换只允许追加新钥匙条目）；
   清单缺失或验签失败时对象归属一律落 `unattributed`（fail-closed）

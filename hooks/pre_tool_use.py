@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Antinel Security Suite v0.17.0 - PreToolUse hook (Claude Code / ZCode compatible).
+"""Antinel Security Suite v0.18.0 - PreToolUse hook (Claude Code / ZCode compatible).
 
 v1.2 fixes over v1.1:
   G-01: rules loaded from PKG_DIR only (install.py snapshot in .psl/ is informational)
@@ -336,7 +336,8 @@ def load_rules():
 
 
 # ------------------------------------------------- F-06 policy (spec C-05) --
-EMPTY_POLICY = {"domains": [], "paths": [], "commands": [], "alert_threshold": "warning"}
+EMPTY_POLICY = {"domains": [], "paths": [], "commands": [], "alert_threshold": "warning",
+                "fail_closed_on_audit_loss": False}
 
 
 def _norm_prefix(p):
@@ -344,12 +345,18 @@ def _norm_prefix(p):
     "C:\\", "c:") normalise to strings that match *every* path, so a single such
     entry switched off all SEC-* critical rules at once (measured: read .env,
     .aws/credentials and .kube/config all went from block to allow). They are
-    rejected here and dropped by the caller."""
+    rejected here and dropped by the caller.
+    0.18.0 (R-19 second half, audit HP-48/H-10): entries containing a mid-path
+    ".." or wildcards are rejected too -- same validation strength as
+    workspace_roots (which already rejected these). Fail-closed: a rejected
+    entry releases nothing."""
     s = (p or "").replace("\\", "/").strip().lower()
     if s in ("", ".", "..", "/"):
         return ""
     s2 = s.lstrip("./")
     if not s2 or s2.endswith(":") or s2.endswith(":/"):
+        return ""
+    if ".." in s2 or any(ch in s2 for ch in "*?["):
         return ""
     return s2
 
@@ -413,7 +420,13 @@ def load_policy():
                     "paths": [q for q in (_norm_prefix(x) for x in wl.get("paths") or []
                                          if isinstance(x, str) and x.strip()) if q],
                     "commands": [c for c in wl.get("commands") or [] if isinstance(c, str) and c],
-                    "alert_threshold": thr if thr in ("warning", "critical") else "warning"}
+                    "alert_threshold": thr if thr in ("warning", "critical") else "warning",
+                    # 0.18.0 (R-18, audit H-05/H11): the key the v0.17 stderr text
+                    # promised is now actually read. Default False (fail-open --
+                    # a guardrail must not take the host down over its own log
+                    # dir); when True, an audit write failure BLOCKS the call.
+                    "fail_closed_on_audit_loss":
+                        str((gs.get("fail_closed_on_audit_loss", False))).lower() == "true"}
         except Exception:
             return dict(EMPTY_POLICY)
     return dict(EMPTY_POLICY)
@@ -433,17 +446,45 @@ def apply_policy(rules, policy):
     return rules
 
 
+_RL_PREFIX_CACHE = {}
+
+
+def _real_prefixes(prefixes, project_root):
+    """0.18.0 (R-19, audit HP-22): realpath the prefixes ONCE per (root, prefixes)
+    and compare realpath(file) against them -- the SAME rule the boundary check
+    uses. Before this, the release was lexical (startswith on the raw string)
+    while the boundary was realpath: a junction/symlink named like a whitelisted
+    prefix released a write whose REAL landing spot was outside the whitelist
+    (and vice versa). Cached: policy prefixes are stable per process."""
+    key = (str(project_root), tuple(prefixes))
+    hit = _RL_PREFIX_CACHE.get(key)
+    if hit is None:
+        out = []
+        for p in prefixes:
+            cand = p if re.match(r"^[A-Za-z]:", p) or p.startswith("/") or p.startswith("\\") \
+                else os.path.join(project_root, p.replace("/", os.sep))
+            rp = _safe_realpath(cand)
+            if rp:
+                out.append(rp.replace("\\", "/").lower().rstrip("/") + "/")
+        hit = tuple(out)
+        _RL_PREFIX_CACHE[key] = hit
+    return hit
+
+
 def path_whitelisted(file_path, project_root, prefixes):
+    """Realpath-based release check: the release rule and the boundary rule are
+    now the same rule. A junction or symlink named like a whitelisted prefix no
+    longer releases a write whose real landing spot is elsewhere."""
     if not file_path or not prefixes:
         return False
-    cands = [file_path.replace("\\", "/").lower()]
-    try:
-        rel = os.path.relpath(os.path.abspath(file_path), project_root).replace("\\", "/").lower()
-        if not rel.startswith("../"):
-            cands.append(rel)
-    except Exception:
-        pass
-    return any(c.startswith(p) for c in cands for p in prefixes)
+    rp = _safe_realpath(file_path)
+    if not rp:
+        return False
+    rp_n = rp.replace("\\", "/").lower().rstrip("/")
+    for base in _real_prefixes(prefixes, project_root):
+        if rp_n == base.rstrip("/") or rp_n.startswith(base):
+            return True
+    return False
 
 
 def command_whitelisted(command, prefixes):
@@ -677,6 +718,12 @@ def command_variants(cmd):
         return [cmd]
     out = [cmd]
     out.append(re.sub(r"\\(?=[A-Za-z0-9$])", "", cmd))
+    # 0.18.0 (HP-01/已登记逃逸 #1/#2/#4): cmd caret-escape and PowerShell
+    # backtick-escape -- `d`el` and `d^el` hid the verb from every pattern.
+    # Conservative: only strips an escape before an alphanumeric (a lone ^ or
+    # one before punctuation is shell syntax, not an escaped verb).
+    out.append(re.sub(r"\^(?=[A-Za-z0-9])", "", cmd))
+    out.append(re.sub(r"`(?=[A-Za-z0-9])", "", cmd))
     q = out[-1]
     for _ in range(3):
         q2 = re.sub(r"([A-Za-z0-9])['\"]([A-Za-z0-9])", r"\1\2", q)
@@ -1192,8 +1239,22 @@ def detect_host_tag():
 
 
 def extract(tool_name, ti, host_tag="generic"):
-    """Extract (command, file_path, content, url) from tool_input for the host's layout."""
+    """Extract (command, file_path, content, url) from tool_input for the host's layout.
+    0.18.0: every value is coerced to str -- a hostile/broken host can send a
+    number or an array where the text belongs; a TypeError here used to fall out
+    to the fail-open handler with ZERO audit record (corpus B-043/044 -- the
+    first catches by the expect_audit criterion, fixed same round)."""
+    def _s(v):
+        if isinstance(v, str):
+            return v
+        if v is None:
+            return ""
+        if isinstance(v, (list, dict)):      # containers (MultiEdit edits[]) must survive
+            return v
+        return str(v)
+
     ti = ti or {}
+    ti = {k: _s(v) for k, v in ti.items()}
     raw_tool = tool_name
     tool_name = TOOL_ALIASES.get(tool_name, tool_name)      # A9 canonical tool name (rules apply)
     if raw_tool == "MultiEdit":
@@ -1361,6 +1422,44 @@ def _append_locked(fn, line):
             pass
 
 
+def _touch_day_manifest(fn):
+    """0.18.0 (R-20, audit HP-06): cheap tail anchor.
+
+    The prev-hash chain detects EDITS but not tail deletions: delete the last N
+    records of a day and the remaining chain is self-consistent -- undetectable.
+    This side file stores each day's byte size and last-line hash OUTSIDE the
+    chain, so a truncated or deleted day no longer verifies (verify_chain --tail).
+    It lives in the same directory, so it raises the tamper bar (two files must
+    be forged instead of one); it does not eliminate it -- THREAT_MODEL says so
+    in exactly those words."""
+    try:
+        size = os.path.getsize(fn)
+        with open(fn, "rb") as f:
+            f.seek(max(0, size - 4096))
+            tail = f.read().decode("utf-8", errors="replace").rstrip("\r\n")
+        last_line = tail.rsplit("\n", 1)[-1] if "\n" in tail else tail
+        last_hash = json.loads(last_line).get("hash", "") if last_line else ""
+        mpath = os.path.join(os.path.dirname(fn), "day_manifest.json")
+        day = os.path.basename(fn)
+        try:
+            with open(mpath, "r", encoding="utf-8") as f:
+                man = json.load(f)
+            if not isinstance(man, dict):
+                man = {}
+        except Exception:
+            man = {}
+        prev = man.get(day) or {}
+        if size >= int(prev.get("size", 0)):        # monotonic; never move back
+            man[day] = {"size": size, "last_hash": last_hash,
+                        "updated_at": datetime.now().isoformat(timespec="seconds")}
+            tmp = mpath + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(man, f, ensure_ascii=False, indent=1)
+            os.replace(tmp, mpath)
+    except Exception:
+        pass                                        # best-effort anchor
+
+
 def log_event(rec, mirror=False):
     """Append one audit record. Returns True when the project-local write was
     VERIFIED (read back and re-parsed), False otherwise.
@@ -1388,6 +1487,8 @@ def log_event(rec, mirror=False):
             tail = f.read().decode("utf-8", errors="replace").replace("\r\n", "\n").rstrip("\n")
         ok = bool(tail) and tail.rsplit("\n", 1)[-1] == line.rstrip("\n") \
             and isinstance(json.loads(tail.rsplit("\n", 1)[-1]), dict)
+        if ok:
+            _touch_day_manifest(fn)
     except Exception:
         ok = False
     if not ok:
@@ -1412,6 +1513,10 @@ def log_event(rec, mirror=False):
             os.makedirs(d, exist_ok=True)
             fn = os.path.join(d, datetime.now().strftime("%Y-%m-%d") + ".jsonl")
             _append_locked(fn, json.dumps(rec, ensure_ascii=False) + "\n")
+            # 0.18.0 (R-20, audit HP-46): the mirror is the OUT-OF-PROJECT
+            # forensic copy -- it gets the same day anchor as the project copy,
+            # so a truncated mirror no longer verifies silently either.
+            _touch_day_manifest(fn)
     except Exception:
         pass
     return ok
@@ -1748,21 +1853,42 @@ def main():
                 "          来源: %s\n"
                 "          修法: 编辑该配置的 workspace_roots 字段，填入绝对路径（或删除该条目）\n"
                 % (bad, ws_source))
+    audit_fail_n = 0
     if hits:
         for h in hits:                                  # one record per hit (report.py reads rules_hit)
-            log_event(dict(base, rules_hit=[h["rule_id"]], severity=h["severity"], action=h["action"],
-                           decision="block" if h["action"] == "block" else "alert",
-                           match_kind=h["match_kind"], match_snippet=h["match_snippet"],
-                           **({"downgraded_from": h["downgraded_from"],
-                               "downgrade_reason": h["downgrade_reason"]}
-                              if h.get("downgraded_from") else {})),
-                      mirror=(h["action"] == "block"))
-        log_event({"ts": ts, "type": "pre_tool_use_summary", "tool": tool_name, "session": session_id,
-                   "total_hits": len(hits), "decision": decision,
-                   "hits": [{"rule_id": h["rule_id"], "severity": h["severity"],
-                             "match_kind": h["match_kind"], "snippet": h["match_snippet"]} for h in hits]})
+            if not log_event(dict(base, rules_hit=[h["rule_id"]], severity=h["severity"], action=h["action"],
+                                  decision="block" if h["action"] == "block" else "alert",
+                                  match_kind=h["match_kind"], match_snippet=h["match_snippet"],
+                                  **({"downgraded_from": h["downgraded_from"],
+                                      "downgrade_reason": h["downgrade_reason"]}
+                                     if h.get("downgraded_from") else {})),
+                             mirror=(h["action"] == "block")):
+                audit_fail_n += 1
+        if not log_event({"ts": ts, "type": "pre_tool_use_summary", "tool": tool_name, "session": session_id,
+                          "total_hits": len(hits), "decision": decision,
+                          "hits": [{"rule_id": h["rule_id"], "severity": h["severity"],
+                                    "match_kind": h["match_kind"], "snippet": h["match_snippet"]} for h in hits]}):
+            audit_fail_n += 1
     else:
-        log_event(dict(base, rules_hit=[], severity="none", action="allow", decision="allow"))
+        if not log_event(dict(base, rules_hit=[], severity="none", action="allow", decision="allow")):
+            audit_fail_n += 1
+
+    # 0.18.0 (R-18, audit HP-11): the switch the v0.17 stderr text promised is
+    # now wired. Default stays fail-open (a guardrail must not take the host
+    # down over its own log dir); with the policy ON, a lost audit record turns
+    # into an explicit block -- the call still happened, but the host is told
+    # WHY the result was withheld evidence.
+    if decision != "block" and audit_fail_n and policy.get("fail_closed_on_audit_loss"):
+        lang = _lang()
+        if lang == "zh":
+            reason = ("Antinel 拦截 [AUDIT-LOSS] 审计记录写入失败且 fail_closed_on_audit_loss=true | "
+                      "失败记录数: %d | 放行/处理: 修复 .psl/audit 可写性后重试；"
+                      "确认接受裸奔可在 .psl/policy.json 将该键改为 false" % audit_fail_n)
+        else:
+            reason = ("Antinel blocked [AUDIT-LOSS] audit write failed with fail_closed_on_audit_loss=true | "
+                      "failed records: %d | to allow: fix .psl/audit writability and retry, "
+                      "or set the policy key to false" % audit_fail_n)
+        emit_block("AUDIT-LOSS", reason, json_stdout=host_tag in ("claude-code", "generic"))
 
     if decision == "block":
         top = blocking[0]
@@ -1802,6 +1928,18 @@ if __name__ == "__main__":
     except Exception:
         try:
             sys.stderr.write("HOOK_ERROR (allow)\n")
+        except Exception:
+            pass
+        # 0.18.0: even an exploding hook must leave a trace -- a silent exit was
+        # exactly the N5 blindness. Best-effort: if logging itself is broken,
+        # there is nothing more we can do (fail-open, A-08).
+        try:
+            log_event({"ts": datetime.now().isoformat(timespec="seconds"),
+                       "type": "hook_error", "tool": "-", "session": "-", "host": "-",
+                       "decision": "allow", "severity": "critical", "action": "alert",
+                       "reason": "hook crashed after accepting the event; action was "
+                                 "allowed by the host (fail-open) and this record is "
+                                 "the only trace"})
         except Exception:
             pass
         sys.exit(0)                                     # A-08: fail open

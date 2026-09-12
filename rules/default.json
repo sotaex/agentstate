@@ -1,5 +1,5 @@
 {
-  "version": "0.17.0",
+  "version": "0.18.1",
   "description": "Antinel Security Suite default detection rules (22 rules, 4 gates; flat layout: patterns at rule top level)",
   "gates": {
     "secrets": "Gate 2 sensitive surface",
@@ -376,7 +376,8 @@
         "LaunchAgents",
         "rc\\.local",
         "\\.config[/\\\\]autostart",
-        "currentversion[/\\\\]run"
+        "currentversion[/\\\\]run",
+        "(?i)start menu.*startup"
       ],
       "exclude_patterns": [],
       "apply_to_tools": [
@@ -567,7 +568,8 @@
         "\\bbash\\s+<\\s*\\(curl",
         "\\bcurl\\b[^\\n]{0,200}\\b(-o|\\-\\-output)\\s+[^\\n]{0,80}\\.(sh|ps1)\\b[^\\n]{0,80}[;&|]\\s*(sh|bash|\\.)",
         "\\bbase64\\b[^\\n]{0,60}(-d|--decode)[^\\n]{0,80}\\|\\s*(sh|bash|python)",
-        "\\|\\s*base64\\s+-d\\b"
+        "\\|\\s*base64\\s+-d\\b",
+        "(?:\\[char\\]\\d+\\+){2,}"
       ],
       "exclude_patterns": [
         "localhost",

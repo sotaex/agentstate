@@ -979,6 +979,102 @@ def main():
     else:
         print("SKIP  P-A3/P-B1 tamper probes (no psl/judgment.json in dev layout)")
 
+    # ================================================================
+    # 0.18.0 capabilities (test-plan upgrade: R-18 fail-closed wiring,
+    # R-19 same-ruler release, R-20 audit day anchor, R-21 ledger dry-run)
+    # ================================================================
+    print("\n-- 0.18.0 capabilities --")
+    # R-19: release and boundary must use the SAME ruler (realpath). A junction
+    # inside the whitelisted prefix whose REAL target is outside the project
+    # must NOT be released (the lexical matcher released it -- audit HP-22).
+    jtarget = WORK / "junction_target_018"
+    jtarget.mkdir(exist_ok=True)
+    (proj / "tests" / "fixtures").mkdir(parents=True, exist_ok=True)
+    jlink = proj / "tests" / "fixtures" / "jlink"
+    subprocess.run(["cmd", "/c", "mklink", "/J", str(jlink), str(jtarget)],
+                   capture_output=True)
+    pol18 = proj / ".psl" / "policy.json"
+    pol18.write_text(json.dumps({"whitelist": {"paths": ["tests/fixtures/"]}}), encoding="utf-8")
+    rc, out, err, _ = hook("Write", {"file_path": str(jlink / "f.txt"), "content": "x"}, proj)
+    record("0.18.0 R-19 junction under whitelisted prefix resolving OUTSIDE is not released",
+           rc == 2 and "DST-02" in (out + err), "rc=%d" % rc)
+    rc, out, err, _ = hook("Write", {"file_path": str(proj / "tests" / "fixtures" / "ok18.txt"),
+                                     "content": "x"}, proj)
+    record("0.18.0 R-19 whitelisted REAL dir is still released", rc == 0, "rc=%d" % rc)
+    pol18.unlink()
+    if jlink.exists() or jlink.is_dir():
+        os.rmdir(str(jlink))            # removes the junction, never the target
+
+    # R-18: fail_closed_on_audit_loss is now WIRED (v0.17's text promised it).
+    # Default false = fail-open (the A5 test above); policy true = audit loss
+    # becomes an explicit block.
+    pol18 = proj / ".psl" / "policy.json"
+    pol18.write_text(json.dumps({"global_settings": {"fail_closed_on_audit_loss": True}}),
+                     encoding="utf-8")
+    rc, out, err, _ = hook("Bash", {"command": "echo r18-ok"}, proj)
+    record("0.18.0 R-18 writable audit + fail_closed=true -> normal allow",
+           rc == 0 and "AUDIT-LOSS" not in (out + err), "rc=%d" % rc)
+    if audit_marker.is_dir():
+        shutil.rmtree(audit_marker)
+    elif audit_marker.exists():
+        audit_marker.unlink()
+    (proj / ".psl" / "audit.txt").write_text("x", encoding="utf-8")
+    os.rename(str(proj / ".psl" / "audit.txt"), str(audit_marker))
+    rc, out, err, _ = hook("Bash", {"command": "echo r18-loss"}, proj)
+    record("0.18.0 R-18 audit loss with fail_closed=true -> BLOCK [AUDIT-LOSS]",
+           rc == 2 and "AUDIT-LOSS" in (out + err), "rc=%d out=%s" % (rc, (out + err).strip()[:70]))
+    audit_marker.unlink()
+    audit_marker.mkdir(parents=True)
+    pol18.unlink()
+
+    # R-20: the day anchor catches what the chain alone cannot -- tail deletion.
+    today18 = proj / ".psl" / "audit" / (datetime.now().strftime("%Y-%m-%d.jsonl"))
+    hook("Bash", {"command": "echo r20-anchor"}, proj)
+    rc, out, err, _ = run("verify_chain.py", [str(proj / ".psl" / "audit")])
+    record("0.18.0 R-20 intact day: chain OK and tail-OK vs day manifest",
+           rc == 0 and "tail-OK" in out, out.strip()[-90:])
+    lines18 = today18.read_text(encoding="utf-8").splitlines(keepends=True)
+    today18.write_text("".join(lines18[:-1]), encoding="utf-8")     # drop LAST record
+    rc, out, err, _ = run("verify_chain.py", [str(proj / ".psl" / "audit")])
+    record("0.18.0 R-20 deleting the LAST record is now DETECTED (chain alone never caught it)",
+           rc == 2 and "TAIL-TAMPERED" in out, out.strip()[-110:])
+    hook("Bash", {"command": "echo r20-reanchor"}, proj)            # new record re-anchors
+    rc, out, err, _ = run("verify_chain.py", [str(proj / ".psl" / "audit")])
+    record("0.18.0 R-20 anchor recovers after new records (monotonic size)", rc == 0,
+           out.strip()[-80:])
+    today18.unlink()                                                # whole-day deletion
+    rc, out, err, _ = run("verify_chain.py", [str(proj / ".psl" / "audit")])
+    record("0.18.0 R-20 deleting the WHOLE day file is detected (manifest-driven)",
+           rc == 2 and "MISSING" in out, out.strip()[-110:])
+
+    # R-21: ledger dry-run -- idempotency without side effects (pkg layout only).
+    if (PKG / "psl" / "judgment.json").is_file():
+        led18 = PKG / "psl" / "verdict-ledger.jsonl"
+        n018 = len([l for l in led18.read_text(encoding="utf-8").splitlines() if l.strip()]) \
+            if led18.is_file() else 0
+        rc, out, err, _ = run("run_harness.py", ["--check-ledger"])
+        first18 = out.strip()
+        record("0.18.0 R-21 --check-ledger executes (dry-run)", rc == 0 and "would_append=" in first18,
+               first18[:40])
+        rf18 = PKG / "scripts" / "report.py"
+        bak18 = rf18.read_bytes()
+        try:
+            rf18.write_bytes(bak18 + b"\n# r21 probe\n")
+            rc, out, err, _ = run("run_harness.py", ["--check-ledger"])
+            record("0.18.0 R-21 pending row detected after a covered file changes",
+                   rc == 0 and "would_append=true" in out, out.strip()[:40])
+        finally:
+            rf18.write_bytes(bak18)
+        rc, out, err, _ = run("run_harness.py", ["--check-ledger"])
+        n118 = len([l for l in led18.read_text(encoding="utf-8").splitlines() if l.strip()]) \
+            if led18.is_file() else 0
+        record("0.18.0 R-21 dry-run is deterministic and side-effect-free "
+               "(same answer as the intact tree; ledger row count unchanged)",
+               rc == 0 and out.strip() == first18 and n118 == n018,
+               "rows %d->%d, answer=%s" % (n018, n118, out.strip()[:28]))
+    else:
+        print("SKIP  0.18.0 R-21 check-ledger probes (dev layout)")
+
     passed = sum(1 for _, ok, _ in results if ok)
     print("\n== SUMMARY: %d/%d passed ==" % (passed, len(results)))
     for name, ok, detail in results:
