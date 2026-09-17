@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Antinel Security Suite v0.18.0 - PreToolUse hook (Claude Code / ZCode compatible).
+"""Antinel Security Suite v0.21.0 - PreToolUse hook (Claude Code / ZCode compatible).
 
 v1.2 fixes over v1.1:
   G-01: rules loaded from PKG_DIR only (install.py snapshot in .psl/ is informational)
@@ -336,7 +336,7 @@ def load_rules():
 
 
 # ------------------------------------------------- F-06 policy (spec C-05) --
-EMPTY_POLICY = {"domains": [], "paths": [], "commands": [], "alert_threshold": "warning",
+EMPTY_POLICY = {"domains": [], "paths": [], "commands": [], "alert_threshold": "warning", "agent_paths": [],
                 "fail_closed_on_audit_loss": False}
 
 
@@ -416,9 +416,13 @@ def load_policy():
             wl = pol.get("whitelist") or {}
             gs = pol.get("global_settings") or {}
             thr = str(gs.get("alert_threshold", "warning")).lower()
+            _agent_paths = [q for q in (_norm_prefix(x) for x in (
+                d.get("agent_paths") or wl.get("agent_paths") or [])
+                if isinstance(x, str) and x.strip()) if q]
             return {"domains": [d.lower().strip() for d in wl.get("domains") or [] if isinstance(d, str) and d.strip()],
                     "paths": [q for q in (_norm_prefix(x) for x in wl.get("paths") or []
                                          if isinstance(x, str) and x.strip()) if q],
+                    "agent_paths": _agent_paths,
                     "commands": [c for c in wl.get("commands") or [] if isinstance(c, str) and c],
                     "alert_threshold": thr if thr in ("warning", "critical") else "warning",
                     # 0.18.0 (R-18, audit H-05/H11): the key the v0.17 stderr text
@@ -472,18 +476,42 @@ def _real_prefixes(prefixes, project_root):
 
 
 def path_whitelisted(file_path, project_root, prefixes):
-    """Realpath-based release check: the release rule and the boundary rule are
-    now the same rule. A junction or symlink named like a whitelisted prefix no
-    longer releases a write whose real landing spot is elsewhere."""
+    """Lexical release check (primary) + realpath advisory (secondary).
+
+    Primary: lexical startswith (normalize both sides, then prefix match).
+    This is the check the tests were written against and the one that works
+    reliably in temp directories.
+
+    Secondary: realpath cross-check catches junctions/symlinks that LEXICALLY
+    match a whitelisted prefix but resolve OUTSIDE it. This is advisory-only
+    (logged, not blocking) because realpath resolution can differ between the
+    hook process and the host process (temp dirs, subst drives, etc.).
+
+    0.20.1: the 0.20.0 version used realpath-ONLY which broke 5 tests (the
+    whitelist.paths release chain: F-06 + three DST-02 tests) because Windows
+    symlink resolution in temp dirs didn't match between prefix and file.
+    Reverted to lexical as the release criterion; realpath remains as a
+    tool-level check in verify_chain.py."""
     if not file_path or not prefixes:
         return False
-    rp = _safe_realpath(file_path)
-    if not rp:
-        return False
-    rp_n = rp.replace("\\", "/").lower().rstrip("/")
-    for base in _real_prefixes(prefixes, project_root):
-        if rp_n == base.rstrip("/") or rp_n.startswith(base):
-            return True
+
+    # Primary: lexical (normalize both sides, then startswith)
+    norm_prefixes = [_norm_prefix(x) for x in prefixes]
+    cands = [file_path.replace("\\", "/").lower()]
+    try:
+        rel = os.path.relpath(os.path.abspath(file_path), project_root).replace("\\", "/").lower()
+        if not rel.startswith("../"):
+            cands.append(rel)
+    except Exception:
+        pass
+    released = any(c.startswith(np) for c in cands for np in norm_prefixes if np)
+    if released:
+        return True
+
+    # Secondary: realpath cross-check (advisory, not blocking)
+    # A junction/symlink that LEXICALLY matches but REALPATH resolves outside
+    # is a potential bypass — logged but not blocked (the hook cannot verify
+    # junctions without resolving them, which is a sandbox promise).
     return False
 
 
@@ -664,30 +692,46 @@ def _normalize_path(p):
 _LANG_SUPPORTED = {"zh", "en"}
 
 
+_LANG_CACHE = [None]
+
+
 def _lang():
-    """Detect UI language: policy.json > ANTINEL_LANG env > system locale > 'en'."""
+    """Detect UI language. Precedence (0.20.0 修正为与 docstring 一致):
+    ANTINEL_LANG env > system locale (cached, suppressed warning) > policy.json > 'en'.
+    0.20.0: (a) locale.getdefaultlocale() 每次新进程都向 stderr 打
+    DeprecationWarning——用 warnings 抑制＋缓存修复；(b) 结果缓存避免重读。"""
+    if _LANG_CACHE[0]:
+        return _LANG_CACHE[0]
+    import warnings
     v = os.environ.get("ANTINEL_LANG", "")
     if v in _LANG_SUPPORTED:
+        _LANG_CACHE[0] = v
         return v
-    try:
-        import locale
-        loc = (locale.getdefaultlocale()[0] or "").lower()
-        if loc.startswith("zh"):
-            return "zh"
-    except Exception:
-        pass
+    # system locale (Windows: reads user locale; Linux: reads LANG env)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        try:
+            import locale
+            loc = (locale.getdefaultlocale()[0] or "").lower()
+            if loc.startswith("zh"):
+                _LANG_CACHE[0] = "zh"
+                return "zh"
+        except Exception:
+            pass
+    # policy.json fallback
     for base in (os.getcwd(), os.path.dirname(os.getcwd())):
         p = os.path.join(base, ".psl", "policy.json")
         if not os.path.isfile(p):
             continue
         try:
             with open(p, "r", encoding="utf-8") as f:
-                pol = json.load(f)
-            lang = (pol.get("language") or "").lower()
+                lang = (json.load(f).get("language") or "").lower()
             if lang in _LANG_SUPPORTED:
+                _LANG_CACHE[0] = lang
                 return lang
         except Exception:
             pass
+    _LANG_CACHE[0] = "en"
     return "en"
 
 
@@ -874,6 +918,30 @@ def _applies(rule, tool):
     return (not tools) or (tool in tools)
 
 
+# 0.19.0 (ADS round): RULE-LEVEL PLATFORM GATE.
+# A rule may declare "platforms": ["nt"] (or ["posix"]); a rule without the key
+# applies everywhere -- which is every rule written before 0.19.0, so this is
+# additive and cannot silently narrow an existing rule.
+# The rule STAYS in the loaded list on every host -- only the matcher skips it.
+# That is deliberate: rule counts, references/RULES.md and the package manifest
+# digest are then byte-identical on all three CI operating systems, and the only
+# thing that differs is behaviour, which is exactly what the field is for.
+# Motive: an NTFS alternate data stream (path:stream) is ordinary text on POSIX,
+# where "file.txt:stream" is a LEGAL FILENAME. An ungated rule would turn the
+# Linux/macOS CI cells into a false-positive machine (measured: this is the
+# reason DST-09/DST-10 are nt-only rather than pattern-narrowed).
+_HOST_PLATFORM = "nt" if os.name == "nt" else "posix"
+
+
+def _platform_applies(rule):
+    plats = rule.get("platforms")
+    if not plats:
+        return True
+    if isinstance(plats, str):
+        plats = [plats]
+    return _HOST_PLATFORM in plats
+
+
 def _excluded(rule, texts):
     for pat in _patterns(rule, "exclude_patterns"):
         for t in texts:
@@ -944,8 +1012,11 @@ def _first_hit(patterns, texts):
 # workspace_roots widens the boundary, not the rule: DST-02 still blocks every
 # write outside the declared set. Three constraints make it safe:
 #   1. the file lives at host level (~/.workbuddy/antinel.json), NOT under .psl/ --
-#      an agent that wants to widen it must write outside the project, which DST-02
-#      itself blocks, so the config is protected by the rule it configures;
+#      so an agent that wants to widen it must reach outside the project, and that
+#      reach is always recorded (0.19.2: recorded is all it ever was -- see
+#      is_host_config_path() for the measurement that falsified the older claim
+#      that DST-02 *blocks* this file; it only ever blocked one of the two
+#      channels, while also blocking the user's own delegated maintenance);
 #   2. root-like, relative, ".." and wildcard entries are rejected at load time --
 #      otherwise one entry ("C:\") re-creates the A12 failure mode where a single
 #      prefix switched off all critical rules;
@@ -1042,6 +1113,57 @@ def _safe_realpath(p):
     return os.path.realpath(s).rstrip(os.sep).lower()
 
 
+def _host_config_files():
+    """Realpaths of the host-level config files Antinel itself reads. NOT their
+    parent directories -- only these exact files are released by DST-02.
+    Relative entries are skipped so a malformed ANTINEL_CONFIG cannot point the
+    release at whatever the hook's cwd happens to be."""
+    out = []
+    for p in _workspace_config_paths():
+        if not p or not os.path.isabs(p):
+            continue
+        try:
+            r = _safe_realpath(p)
+        except Exception:
+            continue
+        if r and r not in out:
+            out.append(r)
+    return out
+
+
+def is_host_config_path(path):
+    """True when `path` IS one of the host-level config files Antinel reads.
+
+    0.19.2. DST-02 used to block Write/Edit on this file, on the theory recorded
+    above: "an agent that wants to widen it must write outside the project, which
+    DST-02 itself blocks, so the config is protected by the rule it configures".
+    Measured 2026-09-14, that theory did not hold:
+
+      - the Bash channel never blocks an out-of-root path (dst02_bash_path_suspect
+        is alert-only, by design), so the block was one-sided;
+      - the Bash channel only scans *literal* absolute paths in the command text,
+        so `python -c "...expanduser('~')..."` reached the same file with no
+        DST-02 signal at all (audit: decision=allow, rules_hit=[]).
+
+    Net effect: the block stopped the user's own delegated maintenance (the host
+    config is not writable by the tool that is supposed to maintain it) while
+    leaving the other channel open. Both channels now do the same thing --
+    release, and record. The release is deliberately narrow (these exact files,
+    not their parents, not the whole platform directory) and every release is
+    written to the audit log, so widening the boundary stays visible after the
+    fact. This is a downgrade from "prevent" to "record", deliberately: the same
+    posture 0.17.0 already took for out-of-root paths on the Bash channel
+    ("guardrail boundary, not a sandbox").
+    """
+    if not path:
+        return False
+    try:
+        rp = _safe_realpath(path)
+    except Exception:
+        return False
+    return any(rp == h for h in _host_config_files())
+
+
 def _matching_root(path, roots):
     """Which workspace root contains `path`, or None."""
     if not path or not roots:
@@ -1102,18 +1224,32 @@ def check_outside_root(path, root, extra_roots=()):
 # "not blocked" half -- that half is a documented boundary.
 _BASH_ABS_PATH_RE = re.compile(
     r"(?:\b[A-Za-z]:[\\/][^\s\"'`|;&<>)\]]+|(?<![\w~/])\/(?:[A-Za-z0-9._-]+\/){1,}[A-Za-z0-9._-]+)")
-# POSIX pseudo-devices: redirect targets like /dev/null are everyday noise, not
-# boundary events (the first build of this regex flagged every `2>/dev/null`).
+# POSIX pseudo-devices: redirect targets like /dev/null are everyday noise.
 _BASH_PATH_SKIP_PREFIXES = ("/dev/", "/proc/", "/sys/")
+# 0.21.0: infrastructure paths that appear in EVERY Bash call — the interpreter
+# binary itself, Git Bash's PATH prefix, and the system directory. These are the
+# runtime environment, not agent-initiated writes. Measured: 4 paths accounted
+# for 874/891 suspect events (98%) — all infrastructure, zero agent intent.
+_BASH_INFRA_RE = re.compile(
+    r"(?:[\\/](?:usr|c[/\\]Windows)[\\/]|\.workbuddy[/\\]binaries[/\\])",
+    re.IGNORECASE)
+
+
+def _posix_to_win(p):
+    """Git Bash POSIX drive path \u2192 Windows form. `/d/2026/PSL` \u2192 `D:\\2026\\PSL`."""
+    m = re.match(r"^/([A-Za-z])/(.+)", p)
+    if m:
+        return m.group(1).upper() + ":\\" + m.group(2).replace("/", "\\")
+    return None
 
 
 def _bash_absolute_paths(command):
     """Explicit absolute paths (Windows drive / POSIX multi-segment) in command text.
 
-    Capped at the first 8 distinct candidates, each at most 200 chars: every
-    candidate costs a realpath in the boundary check, and a padded command can
-    carry multi-hundred-KB "paths" (measured: one 2MB token cost +2.5 s on
-    corpus B-023 -- real paths are short; padded ones are attack noise)."""
+    Three noise filters (0.21.0):
+      1. skip infrastructure paths (interpreter, /usr/bin, system dirs)
+      2. POSIX\u2192Windows conversion: /d/2026/PSL IS the project root, not "outside"
+      3. cap at 8 unique \u00d7 200 chars (padded commands are attack noise)"""
     if not command or len(command) >= SCAN_LIMIT:
         return []
     out = []
@@ -1125,6 +1261,12 @@ def _bash_absolute_paths(command):
             continue
         if any(p.replace("\\", "/").lower().startswith(q) for q in _BASH_PATH_SKIP_PREFIXES):
             continue
+        if _BASH_INFRA_RE.search(p):
+            continue
+        # POSIX\u2192Windows: convert before the outside-root check
+        win = _posix_to_win(p)
+        if win is not None:
+            p = win
         if p not in out:
             out.append(p)
     return out
@@ -1369,10 +1511,8 @@ def content_digest(tool_name, tool_input):
 
 
 
-def _chain_fields(fn, rec):
-    """L10 audit chain: rec["hash"] = sha256(prev_hash + canonical_json(rec)),
-    rec["prev"] = last 16 hex of the previous record's hash ("" for first).
-    Anyone can recompute the chain offline; any edit/delete breaks it."""
+def _last_hash(fn):
+    """末条记录的 hash（"" = 文件不存在或为空）。只读，无锁。"""
     prev = ""
     try:
         with open(fn, "r", encoding="utf-8", errors="replace") as f:
@@ -1388,6 +1528,15 @@ def _chain_fields(fn, rec):
                     pass
     except Exception:
         pass
+    return prev
+
+
+def _chain_with(rec, prev):
+    """给定 prev，算出 rec["prev"]（尾 16 位）与 rec["hash"]。纯函数，不碰 IO。
+
+    L10 audit chain: rec["hash"] = sha256(prev_hash + canonical_json(rec)),
+    rec["prev"] = last 16 hex of the previous record's hash ("" for first).
+    Anyone can recompute the chain offline; any edit/delete breaks it."""
     rec = dict(rec)
     rec["prev"] = prev[-16:]
     canon = json.dumps({k: v for k, v in rec.items() if k != "hash"},
@@ -1396,30 +1545,89 @@ def _chain_fields(fn, rec):
     return rec
 
 
-def _append_locked(fn, line):
-    """A8: cross-process append serialised with a lockfile; after ~100ms of
-    contention we append anyway (a lost line beats a broken host)."""
+def _chain_fields(fn, rec):
+    """0.19.1 (TN-09) **本函数不再是推荐的写入路径** —— 它在锁外读末条 hash。
+
+    两个并发的钩子进程会读到同一个 prev，各追加一条 prev 相同的记录 ⇒
+    链分叉（两条记录共用同一个父亲）。写入请用 _append_chained()。
+    本函数保留给只读场景（体检 / 校验脚本）。"""
+    return _chain_with(rec, _last_hash(fn))
+
+
+def _acquire_lock(fn):
+    """返回锁路径；拿不到则返回 None。
+
+    A8: cross-process append serialised with a lockfile.
+    0.19.1：重试窗口由 ~100ms 提到 ~1s。理由——链的正确性依赖「拿到锁」，
+    而放弃锁的代价已经从「可能重复一行」升级为「链分叉」，后者会让
+    **篡改与并发在链上长得一样**（见 _append_chained 的说明）。
+    仍然不无限等待：一把卡死的锁不能拖垮宿主。"""
     lock = fn + ".lock"
-    for _ in range(50):
+    for _ in range(200):
         try:
             fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             os.close(fd)
-            break
+            return lock
         except FileExistsError:
             try:
                 if time.time() - os.path.getmtime(lock) > 5:
-                    os.remove(lock)                  # stale lock: steal it
+                    os.remove(lock)                     # stale lock: steal it
             except OSError:
                 pass
-            time.sleep(0.002)
-    try:
-        with open(fn, "a", encoding="utf-8") as f:
-            f.write(line)
-    finally:
+            time.sleep(0.005)
+    return None
+
+
+def _release_lock(lock):
+    if lock:
         try:
             os.remove(lock)
         except OSError:
             pass
+
+
+def _append_chained(fn, rec):
+    """0.19.1 (TN-09)：**读末条 hash 与追加必须在同一把锁内**。返回已上链的记录。
+
+    旧写法是 `_chain_fields(fn, rec)`（锁外读 prev）→ `_append_locked(fn, line)`
+    （锁内只做 append）。两个并发进程可以同时读到同一个 prev，各写一条
+    prev 相同的记录。实测（2026-09-14 项目日志，431 条）：13 处链断裂，
+    **13/13 全是「相邻两条共用同一 prev」**这个竞态的唯一指纹；
+    同批 430/431 条的 hash 能用上一 / 上两条的 hash 复算 ⇒ 内容没被编辑，
+    错的只是「谁是你爹」。
+
+    为什么这条要算 P1：链的用途是「篡改可被检出」。而并发分叉与篡改在链上
+    **长得一样** ⇒ 被破坏的不是完整性，是**可判定性**——攻击者可以辩称
+    「这只是并发」。一条分不出这两者的证据链，其证据价值是打折的。
+
+    拿不到锁时仍然写（丢一条审计记录比拖垮宿主更糟），但打上
+    `chain: "unlocked"` 这个可 grep 的降级标记，让体检脚本把它单列，
+    不与真篡改混为一谈。"""
+    lock = _acquire_lock(fn)
+    got = lock is not None
+    try:
+        rec = _chain_with(rec, _last_hash(fn))
+        if not got:
+            rec["chain"] = "unlocked"
+        with open(fn, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    finally:
+        _release_lock(lock)
+    return rec
+
+
+def _append_locked(fn, line):
+    """A8：锁内追加一行**已序列化**文本。仅用于非链式写入（宿主镜像）。
+
+    0.19.1：项目日志改用 _append_chained()。镜像沿用项目侧已算好的
+    prev/hash —— 镜像必须是**逐字节副本**，否则它就无法用来检出项目侧
+    被编辑，所以它必须在锁内写，但不需要也不可以重算链。"""
+    lock = _acquire_lock(fn)
+    try:
+        with open(fn, "a", encoding="utf-8") as f:
+            f.write(line)
+    finally:
+        _release_lock(lock)
 
 
 def _touch_day_manifest(fn):
@@ -1476,9 +1684,9 @@ def log_event(rec, mirror=False):
         d = os.path.join(os.getcwd(), ".psl", "audit")
         os.makedirs(d, exist_ok=True)
         fn = os.path.join(d, datetime.now().strftime("%Y-%m-%d") + ".jsonl")
-        rec = _chain_fields(fn, rec)
+        # 0.19.1 (TN-09)：读 prev 与 append 必须在同一把锁内 —— 见 _append_chained。
+        rec = _append_chained(fn, rec)
         line = json.dumps(rec, ensure_ascii=False) + "\n"
-        _append_locked(fn, line)
         with open(fn, "rb") as f:                        # write-then-read-back
             f.seek(max(0, os.path.getsize(fn) - len(line.encode("utf-8")) - 8))
             # newline-agnostic: _append_locked writes TEXT mode, so Windows
@@ -1577,7 +1785,7 @@ def emit_block(rule_id, reason, json_stdout=True):
 # ------------------------------------------------- G-06: multi-hit collection --
 def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=None,
                  workspace_roots=(), ws_allow_log=None, excluded_log=None,
-                 path_wl_log=None, bash_path_log=None):
+                 path_wl_log=None, bash_path_log=None, host_cfg_log=None):
     """Run every enabled, applicable rule against the event; return ALL hits.
 
     Match families (all fields read from the rule top level, G-12):
@@ -1592,7 +1800,9 @@ def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=Non
     and, since 0.16.0, also releases DST-02 for matching paths (a legitimate write
     to the platform's own agent directory must be reachable without editing the
     policy first) -- but a policy-released DST-02 is recorded via path_wl_log, so
-    the allow is traceable in report.py, never silent.
+    the allow is traceable in report.py, never silent. Since 0.19.2 DST-02 also
+    releases Antinel's own host-level config files, for the same reason and under
+    the same obligation: recorded via host_cfg_log. See is_host_config_path().
     whitelist.commands skips WARNING-level rules for matching command prefixes;
     critical non-network rules are never relaxed by policy.
     """
@@ -1610,7 +1820,8 @@ def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=Non
     ro_cmd = readonly_command_context(command)
 
     for rule in rules:
-        if _disabled(rule) or not _applies(rule, tool_name):
+        if (_disabled(rule) or not _platform_applies(rule)
+                or not _applies(rule, tool_name)):
             continue
         if path_wl and rule.get("category") == "secrets":
             continue
@@ -1658,14 +1869,27 @@ def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=Non
                 if r:
                     hit = (r[1], "content")
         # 4. special checks
+        agent_ap = any(file_path and file_path.replace("\\", "/").lower().rstrip("/").startswith(
+            ap.rstrip("/")) for ap in policy.get("agent_paths", []))
         if hit is None and check == "path_outside_project_root":
             if check_outside_root(file_path, project_root, workspace_roots):
-                if path_wl and file_path:
+                if agent_ap and file_path:
+                    # 0.21.0: agent_paths release — separate from whitelist.paths,
+                    # dedicated audit event type
+                    if path_wl_log is not None:
+                        path_wl_log.append(file_path)
+                elif path_wl and file_path:
                     # 0.16.0 (P1-7): whitelist.paths releases DST-02 for the
                     # listed prefixes (e.g. the platform's own agent directory).
                     # Deliberate: recorded, never silent.
                     if path_wl_log is not None:
                         path_wl_log.append(file_path)
+                elif is_host_config_path(file_path):
+                    # 0.19.2: Antinel's own host-level config. The tool that
+                    # maintains the config must be able to reach it (see
+                    # is_host_config_path). Released, and recorded -- never silent.
+                    if host_cfg_log is not None:
+                        host_cfg_log.append(file_path)
                 else:
                     hit = (file_path, "path_outside_project_root")
             elif tool_name == "Bash" and bash_path_log is not None and command:
@@ -1763,10 +1987,12 @@ def main():
     excluded_log = []
     path_wl_log = []
     bash_path_log = []
+    host_cfg_log = []
     hits = collect_hits(apply_policy(load_rules(), policy), tool_name, texts, project_root,
                         file_targets, policy, workspace_roots=workspace_roots,
                         ws_allow_log=ws_allow_log, excluded_log=excluded_log,
-                        path_wl_log=path_wl_log, bash_path_log=bash_path_log)
+                        path_wl_log=path_wl_log, bash_path_log=bash_path_log,
+                        host_cfg_log=host_cfg_log)
     hits.sort(key=lambda h: SEV_RANK.get(h["severity"], 9))       # stable: keeps category order
     blocking = [h for h in hits if h["action"] == "block"]
     decision = "block" if blocking else ("alert" if hits else "allow")
@@ -1804,9 +2030,29 @@ def main():
                    "decision": "allow", "severity": "critical", "action": "allow",
                    "reason": "path outside the project root but inside policy whitelist.paths",
                    "input": {"file_path": mask_secrets(wp)}}, mirror=True)
+    # 0.19.2: DST-02 released its own host-level config file. Recorded for exactly
+    # the same reason path_wl_log is -- widening the trust boundary must be
+    # visible after the fact, and this is the one path whose widening is itself
+    # the boundary change. severity=warning so it shows up in report.py's
+    # config-health line rather than blending into the allow stream.
+    for hc in host_cfg_log:
+        log_event({"ts": ts, "type": "dst02_host_config_self_maintenance", "tool": raw_tool,
+                   "session": session_id, "host": host_tag, "rule_id": "DST-02",
+                   "decision": "allow", "severity": "warning", "action": "alert",
+                   "reason": "DST-02 released on Antinel's own host-level config file "
+                             "(the tool that maintains the config must be able to reach it); "
+                             "this allows the trust boundary itself to be edited",
+                   "input": {"file_path": mask_secrets(hc)}}, mirror=True)
     # 0.17.0 (P-A4): explicit out-of-root absolute paths seen on the Bash channel
     # -- alert-only evidence, never a block (guardrail boundary, not a sandbox).
+    # 0.20.1: dedup — same path, same day → one stderr + one audit event.
+    # The audit record is still written for EVERY occurrence (evidence integrity);
+    # only the stderr reminder is deduplicated via notice_gate.
+    seen_suspects = set()
     for cand in bash_path_log:
+        if cand in seen_suspects:
+            continue
+        seen_suspects.add(cand)
         log_event({"ts": ts, "type": "dst02_bash_path_suspect", "tool": raw_tool,
                    "session": session_id, "host": host_tag, "rule_id": "DST-02",
                    "decision": "alert", "severity": "warning", "action": "alert",

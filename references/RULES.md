@@ -1,4 +1,4 @@
-# Antinel detection rules (generated from rules/default.json v0.18.1 - do not edit by hand)
+# Antinel detection rules (generated from rules/default.json v0.21.0 - do not edit by hand)
 
 Category order = match priority: secrets > destructive > network > injection > context > metadata.
 Severity to action: critical = block, warning = alert (logged, allowed). All hits are collected; highest severity decides.
@@ -193,6 +193,12 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
     - `\.config[/\\]autostart`
     - `currentversion[/\\]run`
     - `(?i)start menu.*startup`
+    - `(?i)system32[/\\]tasks\b`
+    - `(?i)launchdaemons\b`
+    - `(?i)etc[/\\]cron\b`
+    - `(?i)spool[/\\]cron\b`
+    - `(?i)\.reg\b`
+    - `(?i)currentversion[/\\]winlogon`
 - remediation: Persistence entries survive the session and re-execute code; require explicit human approval.
 
 ## DST-05  Privilege escalation
@@ -324,6 +330,31 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
     - `\bchmod\b[^#\n]{0,40}\s-R\b`
     - `\bchown\b[^#\n]{0,40}\s-R\b`
 - remediation: Permission/ownership recursion is a sysadmin action; do it yourself after review
+
+## DST-09  Alternate data stream write (file path)
+- category: destructive | severity: critical | dynamic (hook only) | tools: Write, Edit
+- purpose: Blocks alternate-data-stream writes from a file tool (Windows-only: path:stream is a legal POSIX filename)
+- description: Agent attempted to write an NTFS alternate data stream (path:stream) -- invisible to dir/ls and carried along by a plain file copy
+- 说明: 写入 NTFS 备用数据流（path:stream）——dir/ls 看不到，随文件复制一起走，是评审盲区
+- 处理建议: ADS 在常规列表中不可见，且复制文件时随行，等于绕开评审；请改写为普通文件以便审查
+- file_patterns:
+    - `\.[^\\/:\s]{1,32}:(?!Zone\.Identifier\b)`
+- platforms: nt (rule is skipped on other hosts; it stays in the loaded set so rule counts are platform-invariant)
+- remediation: Stored in the file's own stream table, an ADS does not show up in normal listings or in the copy that gets reviewed. Write the bytes as a normal file instead.
+
+## DST-10  Alternate data stream write (command)
+- category: destructive | severity: critical | dynamic (hook only) | tools: Bash
+- purpose: Blocks alternate-data-stream writes from a shell (redirect / -Stream / copy / open -- the command half of DST-09)
+- description: Agent attempted to write an NTFS alternate data stream from a shell (redirect / -Stream / copy / open) -- the command-line half of DST-09
+- 说明: 从命令行写入 NTFS 备用数据流（重定向 / -Stream / copy / open）——DST-09 的命令通道
+- 处理建议: 与 DST-09 同一通道的命令行写法，产物同样逃过审查；请改用普通文件
+- command_patterns:
+    - `>\s*[^\s|;&\"'<>]*\.[^\\/:\s]{1,32}:(?!Zone\.Identifier\b)`
+    - `\b(?:Set-Content|Add-Content|Clear-Content)\b[^\n]{0,160}?-Stream\b(?![\s\"']*Zone\.Identifier)`
+    - `\b(?:copy|xcopy|robocopy)\b[^\n]{0,120}?\.[^\\/:\s]{1,32}:(?!Zone\.Identifier\b)`
+    - `\bopen\s*\([^\n)]{0,200}\.[^\\/:\s\"']{1,32}:(?!Zone\.Identifier)[^\"'\n]{0,200}[\"']\s*,\s*[\"'][wa]`
+- platforms: nt (rule is skipped on other hosts; it stays in the loaded set so rule counts are platform-invariant)
+- remediation: Same channel as DST-09 reached from a shell; the file written this way survives review. Use a normal file.
 
 ## Policy file (.psl/policy.json, spec C-05)
 

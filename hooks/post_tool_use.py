@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Antinel Security Suite v0.18.0 - PostToolUse hook (Claude Code / ZCode compatible).
+"""Antinel Security Suite v0.21.0 - PostToolUse hook (Claude Code / ZCode compatible).
 
 Input (stdin, one JSON line): {session_id, transcript_path, tool_name,
 tool_input, tool_response}. PostToolUse cannot block an action that already
 ran (spec A-01); it only records and alerts.
 
 Responsibilities (spec table 2-3):
-  1. append the execution record to .psl/audit/YYYY-MM-DD.jsonl
+  1. append the execution record to .psl/audit/YYYY-MM-DD.jsonl (chained)
   2. inspect tool_response for leaked secrets (keys, tokens, private keys)
   3. observe canary markers CANARY-<skill>-<8hex> (spec C-01, gate g3 evidence)
-  4. keep per-day counters so report.py can print operation statistics
 
 Exit codes (spec A-10): 0 = recorded; 1 = record failed (host unaffected).
 Python 3.10+, stdlib only, no network.
+
+0.20.0 changes:
+  - stats.json / bump_stats() removed: it was a read-modify-write counter with
+    no lock (50.3% data loss measured on 09-16), and report.py never read it.
+    A counter nobody reads that also computes wrong numbers serves only to
+    provide a second, conflicting source of truth.
 """
 import hashlib
 import json
@@ -100,41 +105,18 @@ def audit_dir():
 
 
 def _chain_fields(fn, rec):
-    """L10 audit chain (same recipe as pre_tool_use)."""
-    prev = ""
-    try:
-        with open(fn, "r", encoding="utf-8", errors="replace") as f:
-            for l in f:
-                l = l.strip()
-                if not l:
-                    continue
-                try:
-                    h = json.loads(l).get("hash")
-                    if h:
-                        prev = h
-                except Exception:
-                    pass
-    except Exception:
-        pass
-    rec = dict(rec)
-    rec["prev"] = prev[-16:]
-    canon = json.dumps({k: v for k, v in rec.items() if k != "hash"},
-                       sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-    rec["hash"] = hashlib.sha256((prev + canon).encode("utf-8")).hexdigest()
-    return rec
-
-
-def append_jsonl(record):
-    d = audit_dir()
-    os.makedirs(d, exist_ok=True)
-    fn = os.path.join(d, datetime.now().strftime("%Y-%m-%d") + ".jsonl")
-    record = _chain_fields(fn, record)
-    line = json.dumps(record, ensure_ascii=False) + "\n"
+    """0.20.0 (P0-1): chained write — lock-acquire → lock-read prev → chain →
+    append → release. Same pattern as pre_tool_use._append_chained(). This
+    replaces the old code that read prev OUTSIDE the lock (racing with
+    PreToolUse writes to the same file → same-parent forks in the audit log,
+    audit finding E-06)."""
     lock = fn + ".lock"
-    for _ in range(50):                                  # A8: serialise concurrent appends
+    got_lock = False
+    for _ in range(200):                                 # ~1s window (matches pre side)
         try:
             fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             os.close(fd)
+            got_lock = True
             break
         except FileExistsError:
             try:
@@ -142,10 +124,36 @@ def append_jsonl(record):
                     os.remove(lock)                      # stale lock: steal it
             except OSError:
                 pass
-            time.sleep(0.002)
+            time.sleep(0.005)
     try:
+        # read prev INSIDE the lock (this is the fix — the old code read before locking)
+        prev = ""
+        try:
+            with open(fn, "r", encoding="utf-8", errors="replace") as f:
+                for l in f:
+                    l = l.strip()
+                    if not l:
+                        continue
+                    try:
+                        h = json.loads(l).get("hash")
+                        if h:
+                            prev = h
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        rec = dict(rec)
+        if not got_lock:
+            rec["chain"] = "unlocked"                    # downgrade marker
+        rec["prev"] = prev[-16:]
+        canon = json.dumps({k: v for k, v in rec.items() if k != "hash"},
+                           sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        rec["hash"] = hashlib.sha256((prev + canon).encode("utf-8")).hexdigest()
+        line = json.dumps(rec, ensure_ascii=False) + "\n"
         with open(fn, "a", encoding="utf-8") as f:
             f.write(line)
+        # 0.18.0 day anchor (same as pre_tool_use)
+        _touch_day_manifest(fn)
     finally:
         try:
             os.remove(lock)
@@ -153,33 +161,45 @@ def append_jsonl(record):
             pass
 
 
-def bump_stats(tool_name, alerted):
-    """Tiny per-day counter file; corruption is tolerated (rewritten).
-
-    0.17.0 (P-B8 / audit C-3): the sensitive-output counter is renamed
-    `alerts` -> `post_alerts`, because it counts ONLY PostToolUse
-    sensitive-output alerts -- while PreToolUse degrades (ro_cmd) and
-    warning-level hits also land `action: "alert"` in the log. One name used
-    to carry two quantities (audit finding N19); now the name says which."""
-    p = os.path.join(audit_dir(), "stats.json")
+def _touch_day_manifest(fn):
+    """0.18.0 (R-20): day anchor — same as pre_tool_use._touch_day_manifest."""
     try:
-        with open(p, "r", encoding="utf-8") as f:
-            stats = json.load(f)
+        size = os.path.getsize(fn)
+        with open(fn, "rb") as f:
+            f.seek(max(0, size - 4096))
+            tail = f.read().decode("utf-8", errors="replace").rstrip("\r\n")
+        last_line = tail.rsplit("\n", 1)[-1] if "\n" in tail else tail
+        last_hash = json.loads(last_line).get("hash", "") if last_line else ""
+        mpath = os.path.join(os.path.dirname(fn), "day_manifest.json")
+        day = os.path.basename(fn)
+        try:
+            man = json.load(open(mpath, encoding="utf-8"))
+            if not isinstance(man, dict):
+                man = {}
+        except Exception:
+            man = {}
+        prev = man.get(day) or {}
+        if size >= int(prev.get("size", 0)):
+            man[day] = {"size": size, "last_hash": last_hash,
+                        "updated_at": datetime.now().isoformat(timespec="seconds")}
+            tmp = mpath + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(man, f, ensure_ascii=False, indent=1)
+            os.replace(tmp, mpath)
     except Exception:
-        stats = {}
-    day = datetime.now().strftime("%Y-%m-%d")
-    dstat = stats.setdefault(day, {"total": 0, "by_tool": {}, "post_alerts": 0})
-    dstat["total"] = int(dstat.get("total", 0)) + 1
-    by_tool = dstat.setdefault("by_tool", {})
-    by_tool[tool_name or "unknown"] = int(by_tool.get(tool_name or "unknown", 0)) + 1
-    if alerted:
-        # legacy key migrated on first write; new name is the only live one
-        dstat["post_alerts"] = int(dstat.pop("alerts", dstat.get("post_alerts", 0))) + 1
-    if len(stats) > 90:                                  # A7: keep the newest 90 days
-        for k in sorted(stats.keys())[:len(stats) - 90]:
-            stats.pop(k, None)
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(stats, f, ensure_ascii=False, indent=1)
+        pass
+
+
+def append_jsonl(record):
+    d = audit_dir()
+    os.makedirs(d, exist_ok=True)
+    fn = os.path.join(d, datetime.now().strftime("%Y-%m-%d") + ".jsonl")
+    _chain_fields(fn, record)
+
+
+# 0.20.0: bump_stats() removed entirely — see module docstring.
+# The old stats.json file, if it exists on disk, is left alone (let it age out
+# naturally; report.py never read it anyway).
 
 
 def main():
@@ -229,9 +249,10 @@ def main():
     ok = True
     try:
         append_jsonl(record)
-        bump_stats(tool_name, bool(sensitive))
+        # 0.20.0: bump_stats() removed — it was a read-modify-write counter
+        # with no lock (50.3% data loss measured) and zero consumers.
     except Exception:
-        ok = False                                   # A-08: never affect the host
+        ok = False
 
     if sensitive:
         try:

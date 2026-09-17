@@ -1,6 +1,6 @@
 {
-  "version": "0.18.1",
-  "description": "Antinel Security Suite default detection rules (22 rules, 4 gates; flat layout: patterns at rule top level)",
+  "version": "0.21.0",
+  "description": "Antinel Security Suite default detection rules (24 rules, 4 gates; flat layout: patterns at rule top level)",
   "gates": {
     "secrets": "Gate 2 sensitive surface",
     "network": "Gate 4 behavior (egress)",
@@ -377,7 +377,13 @@
         "rc\\.local",
         "\\.config[/\\\\]autostart",
         "currentversion[/\\\\]run",
-        "(?i)start menu.*startup"
+        "(?i)start menu.*startup",
+        "(?i)system32[/\\\\]tasks\\b",
+        "(?i)launchdaemons\\b",
+        "(?i)etc[/\\\\]cron\\b",
+        "(?i)spool[/\\\\]cron\\b",
+        "(?i)\\.reg\\b",
+        "(?i)currentversion[/\\\\]winlogon"
       ],
       "exclude_patterns": [],
       "apply_to_tools": [
@@ -651,6 +657,59 @@
       "description_zh": "递归破坏权限或属主，可致服务不可用",
       "remediation": "Permission/ownership recursion is a sysadmin action; do it yourself after review",
       "remediation_zh": "递归改权限/属主属于系统管理操作，请人工审查后执行"
+    },
+    {
+      "id": "DST-09",
+      "name": "Alternate data stream write (file path)",
+      "category": "destructive",
+      "severity": "critical",
+      "type": "tool_call",
+      "platforms": [
+        "nt"
+      ],
+      "tool_names": [
+        "Write",
+        "Edit"
+      ],
+      "file_patterns": [
+        "\\.[^\\\\/:\\s]{1,32}:(?!Zone\\.Identifier\\b)"
+      ],
+      "exclude_patterns": [],
+      "apply_to_tools": [
+        "Write",
+        "Edit"
+      ],
+      "description": "Agent attempted to write an NTFS alternate data stream (path:stream) -- invisible to dir/ls and carried along by a plain file copy",
+      "remediation": "Stored in the file's own stream table, an ADS does not show up in normal listings or in the copy that gets reviewed. Write the bytes as a normal file instead.",
+      "description_zh": "写入 NTFS 备用数据流（path:stream）——dir/ls 看不到，随文件复制一起走，是评审盲区",
+      "remediation_zh": "ADS 在常规列表中不可见，且复制文件时随行，等于绕开评审；请改写为普通文件以便审查"
+    },
+    {
+      "id": "DST-10",
+      "name": "Alternate data stream write (command)",
+      "category": "destructive",
+      "severity": "critical",
+      "type": "tool_call",
+      "platforms": [
+        "nt"
+      ],
+      "tool_names": [
+        "Bash"
+      ],
+      "command_patterns": [
+        ">\\s*[^\\s|;&\\\"'<>]*\\.[^\\\\/:\\s]{1,32}:(?!Zone\\.Identifier\\b)",
+        "\\b(?:Set-Content|Add-Content|Clear-Content)\\b[^\\n]{0,160}?-Stream\\b(?![\\s\\\"']*Zone\\.Identifier)",
+        "\\b(?:copy|xcopy|robocopy)\\b[^\\n]{0,120}?\\.[^\\\\/:\\s]{1,32}:(?!Zone\\.Identifier\\b)",
+        "\\bopen\\s*\\([^\\n)]{0,200}\\.[^\\\\/:\\s\\\"']{1,32}:(?!Zone\\.Identifier)[^\\\"'\\n]{0,200}[\\\"']\\s*,\\s*[\\\"'][wa]"
+      ],
+      "exclude_patterns": [],
+      "apply_to_tools": [
+        "Bash"
+      ],
+      "description": "Agent attempted to write an NTFS alternate data stream from a shell (redirect / -Stream / copy / open) -- the command-line half of DST-09",
+      "remediation": "Same channel as DST-09 reached from a shell; the file written this way survives review. Use a normal file.",
+      "description_zh": "从命令行写入 NTFS 备用数据流（重定向 / -Stream / copy / open）——DST-09 的命令通道",
+      "remediation_zh": "与 DST-09 同一通道的命令行写法，产物同样逃过审查；请改用普通文件"
     }
   ]
 }

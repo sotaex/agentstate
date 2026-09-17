@@ -2,7 +2,7 @@
 
 **让每一个 AI 编程工具的用户，在 30 秒内知道自己的 AI 编程环境安不安全——并且持续监控、持续安心。**
 
-One command. 22 rules. 4 gates. Local-only, zero network, standard library only.
+One command. 24 rules. 4 gates. Local-only, zero network, standard library only.
 
 ## 别信我们，自己验 / Don't trust us - verify (30 秒)
 
@@ -26,7 +26,7 @@ python scripts/install.py --check # 校验已安装实例与包是否一致（�
 | 内容安全 | 技能投毒：提示注入、隐形字符、编码载荷 | CTX-02/03/04 |
 | 敏感面 | Agent 读取 .env / SSH 私钥 / 云凭证 / 钱包 / 浏览器数据；内容中的密钥字面量 | SEC-01..06 |
 | 元数据与出联 | 技能身份伪装；白名单外域名 | CTX-05, NET-03 |
-| 行为异常 | 删除、越界写入、启动项篡改、持久化、提权、环境枚举 | DST-01..05, CTX-01, NET-01/02 |
+| 行为异常 | 删除、越界写入、备用数据流写入（Windows）、启动项篡改、持久化、提权、环境枚举 | DST-01..10, CTX-01, NET-01/02 |
 
 真实拦截样例（来自 ZCode 真机）：
 
@@ -88,7 +88,7 @@ python scripts/install.py --root <项目根>   # 不一致时重跑安装，自�
 - 命名空间清单 `antinel-namespaces.json`：ed25519 签名，公钥指纹
   `sha256:b71e570c30ebcbf7`（钉死在本 README；轮换只允许追加新钥匙条目）；
   清单缺失或验签失败时对象归属一律落 `unattributed`（fail-closed）
-- 规则全部开源：`rules/default.json`（22 条，双语说明）；每条审计记录含 content_digest，判据可重算
+- 规则全部开源：`rules/default.json`（24 条，双语说明）；每条审计记录含 content_digest，判据可重算
 - 运行时零网络；仅标准库；无第三方依赖；无驻留进程
 - 收入边界声明见 docs/A6收入边界声明.md：不收通过费、不出售排名、关联方无豁免
 - 中立性靠机制：开源规则 + 可重算判定 + 阴性结果照发 + 免费离线可验
@@ -98,6 +98,8 @@ python scripts/install.py --root <项目根>   # 不一致时重跑安装，自�
 - **规则只匹配工具调用文本，不解析脚本内容**：把删除或越界写入写进一个 `.py`/`.sh` 再执行，四道闸门都不会拦截（实测：Bash 通道没有 `file_path`，DST-02 在该通道上恒不触发；0.17.0 起此类命令中的**显式绝对路径**会以 `dst02_bash_path_suspect` 事件留痕并告警，但**不拦截**）。这是**护栏**的设计边界，不是隔离层；需要隔离请用容器或沙箱
 - Hook 拦截仅覆盖宿主支持 PreToolUse/PostToolUse 的工具与动作；当前在 Windows + ZCode 实测，macOS/Linux 由 CI 矩阵持续验证
 - 只读命令上下文（echo/grep 等提及而非执行的危险词）中的 critical 命中会降级为 alert 并照常记录——这是刻意设计，防止"grep 危险词"被误拦；真正的执行形态仍会拦截
+- **备用数据流（ADS）拆成两半看**（0.19.0）：**写入路径已拦**——`echo x > f.txt:stream`、`Set-Content -Stream`、`copy`、`open(...,"w")` 在 Windows 上命中 DST-09/DST-10，退 2（该规则按 `platforms: nt` 只在 Windows 生效，因为 `path:stream` 在 POSIX 上是合法文件名；`Zone.Identifier` 由浏览器/下载器写入，按设计豁免）；但**流里的内容读不回来**——已写进 ADS 的载荷在工具调用层不可见，属结构性非目标（见 `references/THREAT_MODEL.md` 的 Non-goals）
+- **安防自身的 host 级配置可被 Agent 改写（0.19.2 起，刻意且留痕）**：`~/.workbuddy/antinel.json` 的 `workspace_roots` 就是信任边界本身。0.19.1 及以前 Write/Edit 写它会被 DST-02 拦截，但**同一目标经 Bash 通道（脚本内部用 `expanduser` 拼路径）可以零命中到达**——实测该次写入在审计里是 `decision=allow, rules_hit=[]`。**拦一半等于没拦，却确实挡住了用户自己的正常维护**（审计实证：DST-02 拦下的 `~/.workbuddy` 目标共 4 次，其中 3 次是创建 skill）。0.19.2 起两个通道统一为**放行 + 留痕**：放行精确到该配置文件本身（**不含**其父目录），每次放行写 `dst02_host_config_self_maintenance` 事件，并在 report.py 单列"信任边界编辑次数"。⇒ 这是**从"阻止"降级为"记录"**：需要边界不可改，请用只读挂载或容器
 - `rd`（Windows 删除命令）按"命令位置＋参数语境"匹配：`rd /s /q X` 拦截；Python 代码里的 `rd = 3`、raw 字符串 `r'D:\...'` 放行（0.16.0 修复了旧版对后两者的 critical 误报）
 - 行为语料（含负例）不随包分发；该读数无法仅凭本包复现（见 `psl/judgment.json` 的 `scope.notCovered`）
 - Qoder/TRAE 的字段布局为声明式适配（未实测）

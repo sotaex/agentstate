@@ -2,13 +2,13 @@
  "spec": "psl-vs-0.1",
  "card_id": "antinel-security-suite",
  "skill": "antinel-security",
- "skill_version": "0.18.0",
- "verdict": "PASS",
+ "skill_version": "0.21.0",
+ "verdict": "FAIL",
  "status": {
   "value": "current",
   "derivation": "auto",
   "reason": null,
-  "checkedAt": "2026-09-13T06:55:30+08:00",
+  "checkedAt": "2026-09-18T11:28:17+08:00",
   "note": "re-derive any time: python tools/antinel_verify.py (--manifest for all 24 shipped files)"
  },
  "scope": {
@@ -38,15 +38,15 @@
    "op": "black-box subprocess assertions (stdin JSON in, exit code + stdout/stderr out)"
   },
   "assertions": {
-   "passed": 190,
-   "total": 190
+   "passed": 199,
+   "total": 204
   }
  },
  "platformSpec": true,
  "objectOwnership": "self",
  "objectOwnershipBasis": "subject github.com/antinel-security is in the signed namespace list",
- "assertions_total": 190,
- "assertions_passed": 190,
+ "assertions_total": 204,
+ "assertions_passed": 199,
  "criteria_independence": "Assertions exercise the hook protocol, rule matching, scanner, installer and reporter as black boxes through subprocesses (stdin JSON in, exit code and stdout/stderr out); they were authored from the design specification ANT-SEC-SPEC-001 v1.1, not from the implementation; third-party re-run supported.",
  "environment": {
   "python": "3.11.4",
@@ -55,21 +55,21 @@
   "network": "none"
  },
  "digests": {
-  "antinel-namespaces.json": "sha256:d8ee0049a737ab7168a3b7567563be94a124dade5fa2bfaa5bd14c2ccdd15de6",
-  "rules/default.json": "sha256:0a9bc6b982fe999a84405e9914144bd6d7f9da102bde6baaa813623cd0565e94",
-  "hooks/pre_tool_use.py": "sha256:3b6546a2cbee52d124b865ca093d9c49938398e4a9e81791472c31c475111992",
-  "hooks/post_tool_use.py": "sha256:51239631d3f3dc61c615a42c6c770e74de91c581d1fbe9f21f1a5a60fd023c46",
-  "scripts/scan.py": "sha256:1087c13e22fcb0469d1c262be326a73d090cc4ae7a4bc4f00644bec2cece11d4",
-  "scripts/install.py": "sha256:5fc16c5f1f2700abc1729a578e2b7b2d7b5fcdc60e708e79ec779141f146a476",
-  "scripts/report.py": "sha256:edccde252897279b87de2a599aa6b05b14033df41844d7d5f15eceeebc797900",
-  "scripts/verification_tests.py": "sha256:9c4b8cde9b234869dcee15af118f29b7810a62e2022a0903730fbbf2fb27c1b5"
+  "antinel-namespaces.json": "sha256:61c8117534e9dfcfa9d782e8ed16df771a506944e57dabe807ef7e38d5de7639",
+  "rules/default.json": "sha256:d402ff12dc2c7c213933da7b291992feca9514f4e14e9d78d44f14e9434b42b7",
+  "hooks/pre_tool_use.py": "sha256:b8b6b672b61aa6cb87b76a846fad3aeaff31a34634c5051d3329c0885228056b",
+  "hooks/post_tool_use.py": "sha256:8e35ee44d04a603dc41d4fc814c53b914f12e5fd5da78cf837fb09c5fc9c3c8f",
+  "scripts/scan.py": "sha256:96b6028ad105a914381efa5e867a284196caa2cf20d7554ce96c06e3e4a719be",
+  "scripts/install.py": "sha256:b0e0e2a366bb778646aca694132543d4141064d4c22c91b8f92478a420b4752f",
+  "scripts/report.py": "sha256:7f7fca5fc38bc1e2672c1199c86781b8c12b90697ae9330a6cf8a1f5d641b80a",
+  "scripts/verification_tests.py": "sha256:5405d802d62fee7f3ea5cdc78ab3b804ff5b8477752e85588a91f224e87461e1"
  },
  "run": {
-  "started_at": "2026-09-13T06:54:31+0800",
-  "duration_ms": 59657,
+  "started_at": "2026-09-18T11:24:43+0800",
+  "duration_ms": 214115,
   "duration_note": "wall-clock of a subprocess fan-out suite; machine- and load-dependent, not comparable across environments",
   "executor": "scripts/run_harness.py",
-  "exit_code": 0,
+  "exit_code": 1,
   "bootstrap": false
  },
  "re_run": "python scripts/run_harness.py",

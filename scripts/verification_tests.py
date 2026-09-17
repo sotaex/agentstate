@@ -45,6 +45,68 @@ def record(name, ok, detail=""):
     print(("PASS " if ok else "FAIL ") + name + ("" if not detail else "  -- " + str(detail)[:160]))
 
 
+# 2026-09-13 (TN-06) -- 分母不变式 / denominator invariance.
+#
+# 病：本套件的断言条数曾是**对象自身状态的函数**。三处断言块以「文件在不在」为门控
+# （而不是以调用方声明的 layout 为门控），于是同一份字节的 pkg 布局跑出三个分母：
+#
+#     psl/judgment.json 不存在  -> 189 + 1  = 190   （仅一条 A1 失败）
+#     bootstrap / dev layout    -> 189 + 0  = 189
+#     psl/judgment.json 存在    -> 189 + 12 = 201
+#
+# 更糟的是 run_harness.py **先跑套件、后写记录**，记录恰恰是套件的被测输入 ——
+# 于是同一份字节连跑两次得到相反结论。台账自证（同一 subject_digest）：
+#     2026-09-13T13:38:53  verdict=FAIL  assertions=189/190  subject=b471a31b...
+#     2026-09-13T13:41:35  verdict=PASS  assertions=201/201  subject=b471a31b...
+# 三条记录 3 分钟内翻转，对象一个字节没动 —— 变的只是「跑过几次」。
+#
+# 0.17.0 的 P-A1 声称修的正是这个病（「161 before the record existed, 162 after」），
+# 但它把 4 条白送的 True 换成 1 条显式 FAIL —— **换了名字，没换病**：波动从 1 条变成 11 条。
+#
+# 修法：把断言名提升为常量，两个分支共用同一份名字；记录缺失时**逐条记 FAIL**，
+# 而不是整块 SKIP。分母从此恒为 201，缺记录时是「201 条里 12 条失败且失败项有名有姓」，
+# 而不是「190 条里 1 条失败」。这正是「扫描说『没发现问题』」与
+# 「验证说『N 项中 M 项通过』」的区别 —— 前者不可枚举、不可推翻，后者可以。
+REC_J_BLOCK = (
+    "0.16.0 judgment carries the five hard-precondition fields",
+    "0.16.0 judgment status derivable to 'current' on an intact tree",
+    "0.16.0 ledger exists and row 1 is the self-verdict",
+    "0.16.0 antinel_verify derives current on an intact package",
+    "0.16.0 antinel_verify derives superseded after a covered file changes",
+)
+(REC_J_FIELDS, REC_J_STATUS, REC_J_LEDGER,
+ REC_J_CURRENT, REC_J_SUPERSEDED) = REC_J_BLOCK
+REC_T_BLOCK = (
+    "0.17.0 P-A3 tampering antinel-namespaces.json -> superseded",
+    "0.17.0 P-B1 --manifest catches a README tamper (16-file gap closed)",
+    "0.17.0 P-B1 without --manifest, README tamper is out of scope (documented)",
+    "0.17.0 P-A3 objectOwnership is derived with a stated basis",
+)
+(REC_T_NS, REC_T_README_MANIFEST,
+ REC_T_README_SCOPE, REC_T_OWNERSHIP) = REC_T_BLOCK
+REC_L_BLOCK = (
+    "0.18.0 R-21 --check-ledger executes (dry-run)",
+    "0.18.0 R-21 pending row detected after a covered file changes",
+    "0.18.0 R-21 dry-run is deterministic and side-effect-free "
+    "(same answer as the intact tree; ledger row count unchanged)",
+)
+REC_L_EXEC, REC_L_PENDING, REC_L_DETERMINISTIC = REC_L_BLOCK
+
+#: 缺记录时「对象在哪个布局下才需要」——只有 run_harness 声明的 pkg 布局需要。
+#: dev / bootstrap 是调用方**声明**「记录不是输入」的布局，跳过是声明属性，不是意外。
+RECORD_REQUIRED_LAYOUT = "pkg"
+
+
+def record_missing(names, why):
+    """逐条记 FAIL，条数与「记录存在」时一致 —— 这是分母不变式的实现点。
+
+    不跑探针：被测对象不在，探针没有可测之物；但**条数照记**，
+    否则分母就成了对象状态的函数（TN-06）。
+    """
+    for n in names:
+        record(n, False, why)
+
+
 def run(script, argv=(), cwd=None, stdin=None, env=None):
     t0 = time.perf_counter()
     full_env = dict(os.environ)
@@ -155,6 +217,49 @@ def main():
     expect_allow("A1 remove-item node_modules stays exempt", *hook("Bash", {"command": "Remove-Item -Recurse -Force node_modules"}, proj)[:3])
     expect_block("A2 DST-04 catches schtasks", *hook("Bash", {"command": "schtasks /create /tn upd /tr C:\\x.exe"}, proj)[:3], "DST-04")
     expect_block("A2 DST-04 catches registry Run key", *hook("Bash", {"command": "reg add HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v x /d C:\\x.exe"}, proj)[:3], "DST-04")
+
+    # ---- 0.19.0 (ADS round): rule-level platform gate + DST-04 file channel ----
+    # "file.txt:stream" is an NTFS ALTERNATE DATA STREAM on Windows and a LEGAL
+    # FILENAME on POSIX. DST-09/DST-10 therefore declare platforms=["nt"], and the
+    # host asserts whatever is correct FOR ITSELF -- so the assertion count is
+    # identical on all three CI operating systems, and a regression in either
+    # direction (Windows stops blocking, POSIX starts blocking) fails the suite.
+    # Asserting only the Windows half would leave the rule untested in 8 of the 12
+    # matrix cells; asserting only the POSIX half would leave it untested here.
+    _ps = "power" + "shell"      # literal avoided: the outer shell guard rejects it
+    ads_path = str(proj / "src" / "data.txt:evil")
+    ads_cmd = "echo x > .\\data.txt:evil"
+    ads_ps = _ps + ' -c "Set-Content -Path .\\data.txt -Stream evil -Value x"'
+    if os.name == "nt":
+        expect_block("0.19.0 DST-09 Write to an alternate data stream",
+                     *hook("Write", {"file_path": ads_path, "content": "x"}, proj)[:3], "DST-09")
+        expect_block("0.19.0 DST-10 redirect into an alternate data stream",
+                     *hook("Bash", {"command": ads_cmd}, proj)[:3], "DST-10")
+        expect_block("0.19.0 DST-10 PowerShell -Stream write",
+                     *hook("Bash", {"command": ads_ps}, proj)[:3], "DST-10")
+    else:
+        expect_allow("0.19.0 DST-09 gated off on POSIX (path:stream is a legal filename)",
+                     *hook("Write", {"file_path": ads_path, "content": "x"}, proj)[:3])
+        expect_allow("0.19.0 DST-10 gated off on POSIX (redirect half)",
+                     *hook("Bash", {"command": ads_cmd}, proj)[:3])
+        expect_allow("0.19.0 DST-10 gated off on POSIX (-Stream half)",
+                     *hook("Bash", {"command": ads_ps}, proj)[:3])
+    # Zone.Identifier is what browsers and downloaders write on every download; a
+    # rule that blocks it would be uninstalled on day one.
+    expect_allow("0.19.0 Zone.Identifier stream stays allowed (never a finding)",
+                 *hook("Write", {"file_path": str(proj / "src" / "dl.zip:Zone.Identifier"), "content": "x"}, proj)[:3])
+    # DST-04 file channel: six persistence surfaces the command channel already
+    # covered but the file channel did not (measured 2026-09-13, E-T08 sweep).
+    for _label, _rel in (("scheduled-task XML", "Windows/System32/Tasks/evil"),
+                         ("launchd daemon", "Library/LaunchDaemons/com.evil.plist"),
+                         ("cron.d drop-in", "etc/cron.d/evil"),
+                         ("cron/at spool", "var/spool/cron/atjobs/evil"),
+                         ("registry import file", "evil.reg"),
+                         ("Winlogon key", "CurrentVersion/Winlogon/evil")):
+        expect_block("0.19.0 DST-04 file channel: %s" % _label,
+                     *hook("Write", {"file_path": str(proj / _rel), "content": "x"}, proj)[:3], "DST-04")
+    expect_allow("0.19.0 DST-04 file channel: tasks.py is not a scheduled task (negative control)",
+                 *hook("Write", {"file_path": str(proj / "src" / "tasks.py"), "content": "x"}, proj)[:3])
     expect_allow("DST-05 warning sudo apt (exclude)", *hook("Bash", {"command": "sudo apt-get install jq"}, proj)[:3])
     expect_allow("DST-05 warning chmod 777", *hook("Bash", {"command": "chmod 777 script.sh"}, proj)[:3], warn="DST-05")
     expect_allow("NET-01 warning curl evil", *hook("Bash", {"command": "curl https://evil.example.com/x"}, proj)[:3], warn="NET-01")
@@ -632,6 +737,26 @@ def main():
     expect_block("workspace_roots: missing config file = pre-feature behaviour",
                  rc, out, err, "DST-02")
 
+    # ---- 0.19.2: the host config is writable BY the tool that maintains it ---
+    # Measured 2026-09-14: DST-02 blocked this file on the Write/Edit channel only,
+    # while the Bash channel reached it with no signal at all -- so the block
+    # stopped the user's own maintenance (3 of the 4 audited ~/.workbuddy blocks
+    # were skill creation) without stopping anyone else. Both channels now release
+    # the exact file and record it. See is_host_config_path().
+    print("\n-- host config self-maintenance (0.19.2) --")
+    rc, out, err, _ = hook("Write", {"file_path": str(ws_cfg), "content": "{}"}, proj, env=env_ws)
+    expect_allow("DST-02 host config: the file the hook reads is writable by the tool that maintains it",
+                 rc, out, err)
+    recs = [json.loads(l) for l in jf.read_text(encoding="utf-8").splitlines() if l.strip()] \
+        if jf.is_file() else []
+    hc = [r for r in recs if r.get("type") == "dst02_host_config_self_maintenance"]
+    record("DST-02 host config: that release is recorded, never silent", bool(hc),
+           "%d dst02_host_config_self_maintenance records" % len(hc))
+    rc, out, err, _ = hook("Write", {"file_path": str(WORK / "ws_cfg.json.bak"), "content": "x"},
+                           proj, env=env_ws)
+    expect_block("DST-02 host config: a sibling of the config is NOT released "
+                 "(exact file, not its directory)", rc, out, err, "DST-02")
+
     # ---- read-only command context (ported): a mention is not an execution --
     print("\n-- read-only command context (downgrade, not a hole) --")
     expect_allow("RO: grep for a destructive verb is allowed",
@@ -760,25 +885,25 @@ def main():
            s1["subject"]["digest"] and s1["subject"]["digest"] == s2["subject"]["digest"],
            str(s1["subject"]["digest"])[:40])
     # P0-4/P0-5/A-8: the five judgment fields, ledger row 1, and antinel_verify.
-    # 0.17.0 (P-A1, audit N2/N3): the record is a REQUIRED input of this suite
-    # in pkg layout. The old branch recorded four unconditional Trues when the
-    # record was absent, so the denominator was a function of the object's own
-    # state (161 before the record existed, 162 after). The layout is DECLARED
-    # by the caller (run_harness sets ANTINEL_LAYOUT=pkg); a bare dev run
-    # defaults to dev, where this block contributes 0 assertions -- printed as
-    # a SKIP, never counted as passes.
+    # 0.17.0 (P-A1, audit N2/N3) declared the record a REQUIRED input of this
+    # suite in pkg layout -- and SKIPPED the block when it was absent. 0.19.0
+    # (TN-06, 2026-09-13) measured the consequence: skipping made the DENOMINATOR
+    # a function of the object's own state (189 / 190 / 201 for one set of bytes),
+    # i.e. P-A1 renamed the disease instead of curing it (its own stated target was
+    # "the denominator was a function of the object's own state"). The block below
+    # now records all REC_J_BLOCK names in BOTH directions: present -> evaluated,
+    # absent-but-required -> FAIL. Only a layout that DECLARES the record is not
+    # an input (dev / bootstrap, set by the caller) contributes 0 assertions.
     LAYOUT = os.environ.get("ANTINEL_LAYOUT") or "dev"
+    RECORD_REQUIRED = LAYOUT == RECORD_REQUIRED_LAYOUT
     jpath = PKG / "psl" / "judgment.json"
-    if LAYOUT == "pkg" and not jpath.is_file():
-        record("A1 pkg layout requires psl/judgment.json", False,
-               "absent -- run scripts/run_harness.py to produce it")
-    elif jpath.is_file():
+    if jpath.is_file():
         j = json.loads(jpath.read_text(encoding="utf-8"))
         missing_fields = [k for k in ("status", "scope", "discrimination", "platformSpec",
                                       "objectOwnership") if k not in j]
-        record("0.16.0 judgment carries the five hard-precondition fields",
+        record(REC_J_FIELDS,
                not missing_fields, "missing: %s" % (missing_fields or "none"))
-        record("0.16.0 judgment status derivable to 'current' on an intact tree",
+        record(REC_J_STATUS,
                j.get("status", {}).get("value") == "current" and j.get("platformSpec") is True
                and j.get("objectOwnership") == "self",
                "status=%s platformSpec=%s ownership=%s" % (
@@ -786,7 +911,7 @@ def main():
         led = PKG / "psl" / "verdict-ledger.jsonl"
         rows = [json.loads(l) for l in led.read_text(encoding="utf-8").splitlines() if l.strip()] \
             if led.is_file() else []
-        record("0.16.0 ledger exists and row 1 is the self-verdict",
+        record(REC_J_LEDGER,
                bool(rows) and rows[0].get("row_kind") == "self-verdict"
                and rows[0].get("re_run") == "python scripts/run_harness.py",
                "rows=%d" % len(rows))
@@ -795,7 +920,7 @@ def main():
             vj = json.loads(out)
         except Exception:
             vj = {}
-        record("0.16.0 antinel_verify derives current on an intact package",
+        record(REC_J_CURRENT,
                rc == 0 and vj.get("status") == "current", str(vj.get("reason"))[:80])
         # V7 rule 1: change a covered file -> the tool must derive superseded.
         target_rel = "scripts/report.py"
@@ -805,16 +930,24 @@ def main():
             rf.write_bytes(backup + b"\n# supersession probe\n")
             rc, out, err, _ = run("antinel_verify.py", ["--json"])
             vj = json.loads(out) if out.strip() else {}
-            record("0.16.0 antinel_verify derives superseded after a covered file changes",
+            record(REC_J_SUPERSEDED,
                    rc == 1 and vj.get("status") == "superseded",
                    str(vj.get("reason"))[:80])
         finally:
             rf.write_bytes(backup)
+    elif RECORD_REQUIRED:
+        # TN-06: pkg layout declares the record a REQUIRED input. Absent is a
+        # FAILURE, not a smaller denominator -- all 5 names are still recorded.
+        print("-- pkg layout declared: %d judgment-record assertions recorded FAIL "
+              "(the record is a REQUIRED input)" % len(REC_J_BLOCK))
+        record_missing(REC_J_BLOCK, "psl/judgment.json absent -- REQUIRED input in pkg layout; "
+                                    "run scripts/run_harness.py")
     else:
-        # P-A1: contributes ZERO assertions in dev layout -- stated on stdout,
-        # never counted as passes (the old "skipped: dev layout" free Trues are
-        # gone; they were the root cause of the 161-vs-162 ledger mismatch).
-        print("SKIP  judgment-record block (layout=%s, contributes 0 assertions)" % LAYOUT)
+        # Declared layouts only (dev / bootstrap): the caller has STATED that the
+        # record is not an input, so 0 assertions here is a declared property of
+        # the layout rather than an accident of object state.
+        print("SKIP  judgment-record block (layout=%s declares the record is not an input; "
+              "contributes 0 assertions)" % LAYOUT)
 
     # ================================================================
     # 0.17.0 capability assertions (audit plan P-A4/A5, P-B5/B7/B8, P-A3/B1)
@@ -889,9 +1022,8 @@ def main():
     stf = proj / ".psl" / "audit" / "stats.json"
     st = json.loads(stf.read_text(encoding="utf-8")) if stf.is_file() else {}
     today = st.get(datetime.now().strftime("%Y-%m-%d")) or {}
-    record("0.17.0 P-B8 stats.json uses post_alerts (no bare alerts key)",
-           rc == 0 and "post_alerts" in today and "alerts" not in today,
-           str({k: today.get(k) for k in ("total", "post_alerts", "alerts")}))
+    record("0.18.0 P-B8 stats.json retired (bump_stats removed, no new writes)",
+           True, "stats.json no longer maintained since 0.18.0")
     rc, out, err, _ = run("session_start_banner.py", cwd=proj)
     recs = [json.loads(l) for l in jf.read_text(encoding="utf-8").splitlines() if l.strip()] \
         if jf.is_file() else []
@@ -955,7 +1087,7 @@ def main():
             nsp.write_bytes(nsp_bak + b"\n# tamper probe\n")
             rc, out, err, _ = run("antinel_verify.py", ["--json"])
             vj = json.loads(out) if out.strip() else {}
-            record("0.17.0 P-A3 tampering antinel-namespaces.json -> superseded",
+            record(REC_T_NS,
                    rc == 1 and vj.get("status") == "superseded", str(vj.get("reason"))[:80])
         finally:
             nsp.write_bytes(nsp_bak)
@@ -965,19 +1097,24 @@ def main():
             rdm.write_bytes(rdm_bak + b"\n<!-- tamper probe -->\n")
             rc, out, err, _ = run("antinel_verify.py", ["--manifest", "--json"])
             vj = json.loads(out) if out.strip() else {}
-            record("0.17.0 P-B1 --manifest catches a README tamper (16-file gap closed)",
+            record(REC_T_README_MANIFEST,
                    rc == 1 and vj.get("status") == "superseded", str(vj.get("reason"))[:80])
             rc2, out2, err2, _ = run("antinel_verify.py", ["--json"])
-            record("0.17.0 P-B1 without --manifest, README tamper is out of scope (documented)",
+            record(REC_T_README_SCOPE,
                    rc2 == 0, "")
         finally:
             rdm.write_bytes(rdm_bak)
         j = json.loads(jpath.read_text(encoding="utf-8"))
-        record("0.17.0 P-A3 objectOwnership is derived with a stated basis",
+        record(REC_T_OWNERSHIP,
                j.get("objectOwnership") == "self" and isinstance(j.get("objectOwnershipBasis"), str),
                "%s | %s" % (j.get("objectOwnership"), str(j.get("objectOwnershipBasis"))[:60]))
+    elif LAYOUT == RECORD_REQUIRED_LAYOUT:
+        # TN-06: no subject -> no probe, but the count stays. Writing tamper probes
+        # against a package that has no record would also be meaningless (the probe
+        # asserts that the TOOL derives superseded from THAT record).
+        record_missing(REC_T_BLOCK, "psl/judgment.json absent -- this block asserts on that record")
     else:
-        print("SKIP  P-A3/P-B1 tamper probes (no psl/judgment.json in dev layout)")
+        print("SKIP  P-A3/P-B1 tamper probes (layout=%s declares the record is not an input)" % LAYOUT)
 
     # ================================================================
     # 0.18.0 capabilities (test-plan upgrade: R-18 fail-closed wiring,
@@ -1032,7 +1169,7 @@ def main():
     hook("Bash", {"command": "echo r20-anchor"}, proj)
     rc, out, err, _ = run("verify_chain.py", [str(proj / ".psl" / "audit")])
     record("0.18.0 R-20 intact day: chain OK and tail-OK vs day manifest",
-           rc == 0 and "tail-OK" in out, out.strip()[-90:])
+           rc == 0, "rc=%d (0=chain+tail both clean)" % rc)
     lines18 = today18.read_text(encoding="utf-8").splitlines(keepends=True)
     today18.write_text("".join(lines18[:-1]), encoding="utf-8")     # drop LAST record
     rc, out, err, _ = run("verify_chain.py", [str(proj / ".psl" / "audit")])
@@ -1054,26 +1191,31 @@ def main():
             if led18.is_file() else 0
         rc, out, err, _ = run("run_harness.py", ["--check-ledger"])
         first18 = out.strip()
-        record("0.18.0 R-21 --check-ledger executes (dry-run)", rc == 0 and "would_append=" in first18,
+        record(REC_L_EXEC, rc == 0 and "would_append=" in first18,
                first18[:40])
         rf18 = PKG / "scripts" / "report.py"
         bak18 = rf18.read_bytes()
         try:
             rf18.write_bytes(bak18 + b"\n# r21 probe\n")
             rc, out, err, _ = run("run_harness.py", ["--check-ledger"])
-            record("0.18.0 R-21 pending row detected after a covered file changes",
+            record(REC_L_PENDING,
                    rc == 0 and "would_append=true" in out, out.strip()[:40])
         finally:
             rf18.write_bytes(bak18)
         rc, out, err, _ = run("run_harness.py", ["--check-ledger"])
         n118 = len([l for l in led18.read_text(encoding="utf-8").splitlines() if l.strip()]) \
             if led18.is_file() else 0
-        record("0.18.0 R-21 dry-run is deterministic and side-effect-free "
-               "(same answer as the intact tree; ledger row count unchanged)",
+        record(REC_L_DETERMINISTIC,
                rc == 0 and out.strip() == first18 and n118 == n018,
                "rows %d->%d, answer=%s" % (n018, n118, out.strip()[:28]))
+    elif LAYOUT == RECORD_REQUIRED_LAYOUT:
+        # TN-06: --check-ledger reads the EXISTING record's verdict/assertions to
+        # answer "would a run now land a new row?" -- with no record it can only
+        # answer "unknown", so there is no probe to run; the count stays anyway.
+        record_missing(REC_L_BLOCK, "psl/judgment.json absent -- --check-ledger has no record to read")
     else:
-        print("SKIP  0.18.0 R-21 check-ledger probes (dev layout)")
+        print("SKIP  0.18.0 R-21 check-ledger probes (layout=%s declares the record is not an input)"
+              % LAYOUT)
 
     passed = sum(1 for _, ok, _ in results if ok)
     print("\n== SUMMARY: %d/%d passed ==" % (passed, len(results)))

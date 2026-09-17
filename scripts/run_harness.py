@@ -153,7 +153,7 @@ def main():
         "spec": "psl-vs-0.1",
         "card_id": "antinel-security-suite",
         "skill": "antinel-security",
-        "skill_version": "0.18.0",
+        "skill_version": "0.21.0",
         "verdict": ("PASS (bootstrap)" if bootstrap and verdict == "PASS" else verdict),
         # V7: status is a status BIT, appended info; this file itself is never
         # edited after publication. A third party derives current/superseded
