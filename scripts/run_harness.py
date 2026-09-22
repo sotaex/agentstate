@@ -11,7 +11,7 @@ it FAILS instead of quietly scoring 1 lower); and the ledger idempotency key
 includes the assertion count, so a changed denominator can never be swallowed
 by the "no change" guard again.
 """
-import hashlib, json, os, platform, re, subprocess, sys, tempfile, time
+import hashlib, json, os, platform, re, shutil, subprocess, sys, tempfile, time
 from datetime import datetime, timezone
 from pathlib import Path
 

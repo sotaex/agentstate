@@ -169,9 +169,10 @@ def expect_allow(name, rc, out, err, warn=None):
 
 def _acl_rescue_rmtree(path):
     """0.26: 被护盾 deny ACL 锁过的目录，普通 rmtree 会拒绝访问——
-    先 icacls /reset /T 恢复再删（套件自清理专用）。"""
-    subprocess.run(["icacls", path, "/reset", "/T", "/C"],
-                   capture_output=True, timeout=60)
+    先 icacls /reset /T 恢复再删（套件自清理专用；仅 Windows 有 ACL 语义）。"""
+    if os.name == "nt":
+        subprocess.run(["icacls", path, "/reset", "/T", "/C"],
+                       capture_output=True, timeout=60)
     shutil.rmtree(path, ignore_errors=True)
 
 
@@ -1149,8 +1150,14 @@ def main():
     jtarget.mkdir(exist_ok=True)
     (proj / "tests" / "fixtures").mkdir(parents=True, exist_ok=True)
     jlink = proj / "tests" / "fixtures" / "jlink"
-    subprocess.run(["cmd", "/c", "mklink", "/J", str(jlink), str(jtarget)],
-                   capture_output=True)
+    if os.name == "nt":
+        subprocess.run(["cmd", "/c", "mklink", "/J", str(jlink), str(jtarget)],
+                       capture_output=True)
+    else:
+        try:                                # POSIX: symlink 证明同一条 realpath 语义
+            os.symlink(str(jtarget), str(jlink), target_is_directory=True)
+        except OSError:
+            pass
     pol18 = proj / ".psl" / "policy.json"
     pol18.write_text(json.dumps({"whitelist": {"paths": ["tests/fixtures/"]}}), encoding="utf-8")
     rc, out, err, _ = hook("Write", {"file_path": str(jlink / "f.txt"), "content": "x"}, proj)
