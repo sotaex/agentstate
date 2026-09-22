@@ -8,7 +8,7 @@
   "value": "current",
   "derivation": "auto",
   "reason": null,
-  "checkedAt": "2026-09-22T23:14:04+08:00",
+  "checkedAt": "2026-09-22T23:28:34+08:00",
   "note": "re-derive any time: python tools/antinel_verify.py (--manifest for all 24 shipped files)"
  },
  "scope": {
@@ -87,8 +87,8 @@
   "hub.py": "sha256:2b702a9ea1bc1bf217e285c8a728306d8a781a8350fe1baaa362c38f92e17800"
  },
  "run": {
-  "started_at": "2026-09-22T23:10:27+0800",
-  "duration_ms": 216532,
+  "started_at": "2026-09-22T23:25:01+0800",
+  "duration_ms": 213060,
   "duration_note": "wall-clock of a subprocess fan-out suite; machine- and load-dependent, not comparable across environments",
   "executor": "scripts/run_harness.py",
   "exit_code": 0,
