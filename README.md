@@ -48,7 +48,7 @@ CI 每天用真实钩子生成并验证一条新链（`.github/workflows/daily-c
 ## 安装（60 秒首条记录）
 
 ```bash
-pipx install git+https://github.com/geguang/antinel.git
+pipx install git+https://github.com/sotaex/agentstate.git
 antinel install        # 交互式接入宿主（Claude Code / ZCode / Qoder / WorkBuddy / Codex）
 antinel digest         # 第一份账本
 ```

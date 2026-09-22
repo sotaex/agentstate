@@ -1,11 +1,13 @@
 {
-  "name": "agentstate",
-  "display_name": "AgentState (by Antinel) — AI Agent Audit Chain",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "io.github.sotaex/agentstate",
+  "title": "AgentState (by Antinel) — AI Agent Audit Chain",
   "description": "Local-first audit chain and ledger for AI coding agents: every tool call recorded on a tamper-evident hash chain, dangerous operations intercepted (24 rules / 4 gates), daily ledger (what did it do / what did it cost / what was blocked). Zero cloud, standard library only, third-party verifiable.",
   "version": "0.28.0",
   "author": { "name": "geguang", "email": "geguang@gmail.com" },
   "license": "MIT",
-  "repository": "https://github.com/geguang/antinel",
+  "websiteUrl": "https://github.com/sotaex/agentstate",
+  "repository": { "source": "github", "url": "https://github.com/sotaex/agentstate" },
   "compatibility": { "protocol": "2024-11-05", "transports": ["stdio"] },
   "tools": [
     { "name": "antinel_digest", "description": "Daily ledger: operations, blocks, token spend per project/host (last N days)" },
