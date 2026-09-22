@@ -1484,14 +1484,14 @@ def main():
     # ================================================================
     print("\n-- 0.23.1 capabilities --")
     hub_env = {"ANTINEL_HUB_DIR": str(WORK / "hub")}
-    rc, out, err, _ = run("antinel.py", [], cwd=proj, env=hub_env, stdin=b"")
+    rc, out, err, _ = run("antinel.py", [], cwd=proj, env=hub_env, stdin="")
     record("0.23.1 help shows host line, dialogue routes, commands",
            rc == 0 and "你可以对 Agent 说" in out and "宿主" in out and "antinel digest" in out,
            (out + err).strip()[:70])
-    rc, out, err, _ = run("antinel.py", ["routes", "--markdown"], cwd=proj, env=hub_env, stdin=b"")
+    rc, out, err, _ = run("antinel.py", ["routes", "--markdown"], cwd=proj, env=hub_env, stdin="")
     record("0.23.1 routes --markdown same-source as help",
            rc == 0 and out.count("→") >= 8 and "help 清单" in out)
-    rc, out, err, _ = run("antinel.py", ["domains", "add", "example.org"], cwd=proj, env=hub_env, stdin=b"")
+    rc, out, err, _ = run("antinel.py", ["domains", "add", "example.org"], cwd=proj, env=hub_env, stdin="")
     pol_path231 = proj / ".psl" / "policy.json"
     pol231 = json.loads(pol_path231.read_text(encoding="utf-8")) if pol_path231.is_file() else {}
     record("0.23.1 domains add applies (agent mode, no prompt)",
@@ -1502,25 +1502,25 @@ def main():
            len(pc231) == 1 and pc231[0].get("invoked_by") == "agent"
            and str(pc231[0].get("new_sha256", "")).startswith("sha256:")
            and pc231[0].get("field") == "whitelist.domains", str(pc231)[:90])
-    rc, out, err, _ = run("antinel.py", ["roots", "add", "C:\\"], cwd=proj, env=hub_env, stdin=b"")
+    rc, out, err, _ = run("antinel.py", ["roots", "add", "C:\\"], cwd=proj, env=hub_env, stdin="")
     record("0.23.1 roots add drive-root rejected (fail-closed)",
            rc == 2 and "盘根" in err, err.strip()[:60])
     rc, out, err, _ = run("antinel.py", ["credits", "snapshot", "5755.35",
                                       "--reward", "1900@2026-09-29",
-                                      "--cycle", "2026-09-30"], cwd=proj, env=hub_env, stdin=b"")
+                                      "--cycle", "2026-09-30"], cwd=proj, env=hub_env, stdin="")
     snaps231 = [r for r in _recs22() if r.get("type") == "credits_snapshot"]
     record("0.23.1 credits snapshot chained (user_reported)",
            rc == 0 and len(snaps231) == 1 and snaps231[0].get("user_reported") is True
            and (snaps231[0].get("buckets") or {}).get("reward", {}).get("expires") == "2026-09-29",
            (out + err).strip()[:70])
     rc, out, err, _ = run("antinel.py", ["credits", "snapshot", "5600",
-                                      "--cycle", "2026-09-30"], cwd=proj, env=hub_env, stdin=b"")
-    rc, out, err, _ = run("antinel.py", ["credits", "forecast"], cwd=proj, env=hub_env, stdin=b"")
+                                      "--cycle", "2026-09-30"], cwd=proj, env=hub_env, stdin="")
+    rc, out, err, _ = run("antinel.py", ["credits", "forecast"], cwd=proj, env=hub_env, stdin="")
     record("0.23.1 credits forecast with 2 snapshots",
            rc == 0 and "余额" in out and "周期至" in out, (out + err).strip()[:80])
     rc, out, err, _ = run("antinel.py", ["hub", "register", str(proj), "--host", "workbuddy"],
                        cwd=proj, env=hub_env)
-    rc, out, err, _ = run("antinel.py", ["digest", "--scope", "all"], cwd=proj, env=hub_env, stdin=b"")
+    rc, out, err, _ = run("antinel.py", ["digest", "--scope", "all"], cwd=proj, env=hub_env, stdin="")
     roll_hit = any('"digest_rollup"' in l
                    for f231 in (WORK / "hub" / "rollup").glob("*.jsonl")
                    for l in f231.read_text(encoding="utf-8").splitlines() if l.strip()) \
@@ -1528,10 +1528,10 @@ def main():
     record("0.23.1 digest --scope all prints coverage and chains hub rollup",
            rc == 0 and "【覆盖】" in out and roll_hit, (out + err).strip()[:80])
     hook("Bash", {"command": "echo latest231"}, proj, extra={"session_id": "latest-sess-231"})
-    rc, out, err, _ = run("antinel.py", ["report", "--session", "latest"], cwd=proj, env=hub_env, stdin=b"")
+    rc, out, err, _ = run("antinel.py", ["report", "--session", "latest"], cwd=proj, env=hub_env, stdin="")
     record("0.23.1 report --session latest + human summary line",
            rc == 0 and "【摘要】" in out and "latest-sess-231" in out, (out + err).strip()[:90])
-    rc, out, err, _ = run("antinel.py", ["verify"], cwd=proj, env=hub_env, stdin=b"")
+    rc, out, err, _ = run("antinel.py", ["verify"], cwd=proj, env=hub_env, stdin="")
     record("0.23.1 antinel verify exits 0 on intact chain", rc == 0, "rc=%d" % rc)
 
     # ================================================================
@@ -1558,7 +1558,7 @@ def main():
     z26 = proj / "zone_vault"
     z26.mkdir(exist_ok=True)
     rc, out, err, _ = run("antinel.py", ["zone", "add", str(z26)], cwd=proj,
-                          env=hub_env, stdin=b"")
+                          env=hub_env, stdin="")
     pol26z = json.loads(pol26.read_text(encoding="utf-8")) if pol26.is_file() else {}
     p26 = subprocess.run([PY, "-c",
         "import sys;sys.path.insert(0,r'%s');import host_shield as hs;"
@@ -1577,7 +1577,7 @@ def main():
     (z26 / "t26.txt").unlink(missing_ok=True)
 
     rc, out, err, _ = run("antinel.py", ["host-audit", "--host", "zcode"], cwd=proj,
-                          env=hub_env, stdin=b"")
+                          env=hub_env, stdin="")
     record("0.26 host-audit zcode reports coverage line",
            rc == 0 and "（覆盖声明" in out, (out + err).strip()[:70])
 
