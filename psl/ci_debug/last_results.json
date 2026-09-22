@@ -67,7 +67,7 @@
  {
   "name": "DST-02 Write outside root",
   "pass": true,
-  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_h16"
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /var/folders/36/tjdph2t9"
  },
  {
   "name": "DST-02 Write inside root",
@@ -262,7 +262,7 @@
  {
   "name": "A5 5MB command handled fast (truncated before matching)",
   "pass": true,
-  "detail": "median ms=1736 (runs: 1738, 1729, 1736; load-sensitive; ladder B-021..023 tracks the budget)"
+  "detail": "median ms=3043 (runs: 3044, 3038, 3043; load-sensitive; ladder B-021..023 tracks the budget)"
  },
  {
   "name": "A-08 invalid JSON -> allow",
@@ -337,7 +337,7 @@
  {
   "name": "hook latency median (ms, includes interpreter start)",
   "pass": true,
-  "detail": "median=40 min=40 max=41"
+  "detail": "median=58 min=54 max=61"
  },
  {
   "name": "T3 scan skills (skipped: skills dir not present at D:\\psl\\skills)",
@@ -382,7 +382,7 @@
  {
   "name": "install claude-code: hooks appended, foreign kept",
   "pass": true,
-  "detail": "rc=0 ms=77"
+  "detail": "rc=0 ms=116"
  },
  {
   "name": "D7 .psl/.gitignore auto-written",
@@ -799,8 +799,8 @@
  },
  {
   "name": "F-06 whitelist.paths exempts SEC-01 under tests/fixtures",
-  "pass": true,
-  "detail": "rc=0 err="
+  "pass": false,
+  "detail": "rc=2 err=Antinel 拦截 [SEC-01] 读取 .env 文件可能泄露 API 密钥与机密配置 | 命中: .env | 放行/处理: 把 .env 移出 Age"
  },
  {
   "name": "F-06 whitelist.paths does not exempt other paths",
@@ -885,17 +885,17 @@
  {
   "name": "C9 nested ReDoS pattern '(a+)+$' rejected, hook not wedged",
   "pass": true,
-  "detail": "98ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
+  "detail": "109ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
  },
  {
   "name": "C9 alternation ReDoS pattern '(a|aa)+$' rejected, hook not wedged",
   "pass": true,
-  "detail": "98ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
+  "detail": "110ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
  },
  {
   "name": "C9 inner-optional ReDoS pattern '(a?)+$' rejected, hook not wedged",
   "pass": true,
-  "detail": "98ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
+  "detail": "120ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
  },
  {
   "name": "C9 benign custom rule still loads and fires (read-only downgrade to alert)",
@@ -920,7 +920,7 @@
  {
   "name": "workspace_roots: undeclared location still blocked",
   "pass": true,
-  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_h16"
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /var/folders/36/tjdph2t9"
  },
  {
   "name": "workspace_roots: drive root rejected",
@@ -940,17 +940,17 @@
  {
   "name": "workspace_roots: '..' segment rejected",
   "pass": true,
-  "detail": "rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'/tmp/antinel_harnes"
+  "detail": "rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'/var/folders/36/tjd"
  },
  {
   "name": "workspace_roots: wildcard rejected",
   "pass": true,
-  "detail": "rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'/tmp/antinel_harnes"
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /var/folders/36/tjdph2t9"
  },
  {
   "name": "workspace_roots: missing config file = pre-feature behaviour",
   "pass": true,
-  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_h16"
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /var/folders/36/tjdph2t9"
  },
  {
   "name": "DST-02 host config: the file the hook reads is writable by the tool that maintains it",
@@ -965,7 +965,7 @@
  {
   "name": "DST-02 host config: a sibling of the config is NOT released (exact file, not its directory)",
   "pass": true,
-  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_h16"
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /var/folders/36/tjdph2t9"
  },
  {
   "name": "RO: grep for a destructive verb is allowed",
@@ -1055,12 +1055,12 @@
  {
   "name": "WS-1 POSIX: root rejected",
   "pass": true,
-  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_h16"
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /var/folders/36/tjdph2t9"
  },
  {
   "name": "WS-1 POSIX: system dir rejected",
   "pass": true,
-  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_h16"
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /var/folders/36/tjdph2t9"
  },
  {
   "name": "WS-1 POSIX: home shorthand rejected",
@@ -1095,7 +1095,7 @@
  {
   "name": "WS-3 rejected config entry is visible in report.py",
   "pass": true,
-  "detail": "/ WARNING 19），建议优先处理 CRITICAL 项；完整轨迹见审计日志。\n Full log: /tmp/antinel_harness_h16zome9/proj/.psl/audit\n Re-scan: python scan.py\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+  "detail": ": /private/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/antinel_harness_w293u0hm/proj/.psl/audit\n Re-scan: python scan.py\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
  },
  {
   "name": "A12 policy.json edited out of band is reported once",
@@ -1119,13 +1119,13 @@
  },
  {
   "name": "0.16.0 DST-02 released by whitelist.paths (no policy edit per write)",
-  "pass": false,
-  "detail": "rc=2 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_h16"
+  "pass": true,
+  "detail": "rc=0 err="
  },
  {
   "name": "0.16.0 DST-02 whitelist release is recorded (dst02_path_whitelisted)",
-  "pass": false,
-  "detail": "0 records"
+  "pass": true,
+  "detail": "1 records"
  },
  {
   "name": "0.16.0 SEC-06 in static rules_applied (was hook-only despite RULES.md)",
@@ -1150,7 +1150,7 @@
  {
   "name": "0.16.0 ledger exists and row 1 is the self-verdict",
   "pass": true,
-  "detail": "rows=30"
+  "detail": "rows=32"
  },
  {
   "name": "0.16.0 antinel_verify derives current on an intact package",
@@ -1300,7 +1300,7 @@
  {
   "name": "0.18.0 R-21 dry-run is deterministic and side-effect-free (same answer as the intact tree; ledger row count unchanged)",
   "pass": true,
-  "detail": "rows 30->30, answer=would_append=false"
+  "detail": "rows 32->32, answer=would_append=false"
  },
  {
   "name": "0.22.0 C1 pre records file_state_before (hash+size)",
@@ -1370,7 +1370,7 @@
  {
   "name": "0.23.0 A1 first harvest chains usage_delta with token facts",
   "pass": true,
-  "detail": "{'path_tag': 'sha256:d3d5c9e374d0cfd3', 'scope': 'tail_first_sight', 'reset': False, 'byte"
+  "detail": "{'path_tag': 'sha256:2a95b0aabe90676b', 'scope': 'tail_first_sight', 'reset': False, 'byte"
  },
  {
   "name": "0.23.0 privacy: raw transcript path is not in the ledger",
@@ -1430,12 +1430,12 @@
  {
   "name": "0.23.1 domains add applies (agent mode, no prompt)",
   "pass": true,
-  "detail": "变更：domains add example.org\n  影响：该域名的网络请求不再触发 NET 提醒/拦截\n  /tmp/antinel_"
+  "detail": "变更：domains add example.org\n  影响：该域名的网络请求不再触发 NET 提醒/拦截\n  /private/var/"
  },
  {
   "name": "0.23.1 policy_changed chained with invoked_by + digests",
   "pass": true,
-  "detail": "[{'ts': '2026-09-22T15:56:50+00:00', 'type': 'policy_changed', 'tool': '-', 'session': 'an"
+  "detail": "[{'ts': '2026-09-22T16:14:08+00:00', 'type': 'policy_changed', 'tool': '-', 'session': 'an"
  },
  {
   "name": "0.23.1 roots add drive-root rejected (fail-closed)",
@@ -1455,7 +1455,7 @@
  {
   "name": "0.23.1 digest --scope all prints coverage and chains hub rollup",
   "pass": true,
-  "detail": "【一句话】近 1 天：3 个项目/宿主组合，10 次操作、拦截 1 次、token 进出 6,396（事实）；记账口径 generic=tokens。\n  ge"
+  "detail": "【一句话】近 1 天：6 个项目/宿主组合，14 次操作、拦截 3 次、token 进出 6,396（事实）；记账口径 generic=tokens。\n  ge"
  },
  {
   "name": "0.23.1 report --session latest + human summary line",
@@ -1495,6 +1495,6 @@
  {
   "name": "0.26 host-audit zcode reports coverage line",
   "pass": true,
-  "detail": "== 宿主: zcode\n  路径: /home/runner/.zcode/v2/checkpoints 不存在\n（覆盖声明：仅列登记宿主"
+  "detail": "== 宿主: zcode\n  路径: /Users/runner/.zcode/v2/checkpoints 不存在\n（覆盖声明：仅列登记宿"
  }
 ]
