@@ -1,4 +1,6 @@
-# Antinel — 让 Agent 通宵干活，早上看账单
+# AgentState — 让 Agent 通宵干活，早上看账单
+
+> **AgentState**，[Antinel](https://antinel.com) 旗下 Agent 行为审计产品线。全天候可用：白天拦事故，夜晚守通宵。
 
 **你的 AI 编程 Agent 昨晚干了什么？花了多少 token？有没有出格？——Antinel 每天早上给你答案。**
 

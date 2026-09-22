@@ -1,6 +1,6 @@
 {
-  "name": "antinel",
-  "display_name": "Antinel — AI Agent Audit Chain",
+  "name": "agentstate",
+  "display_name": "AgentState (by Antinel) — AI Agent Audit Chain",
   "description": "Local-first audit chain and ledger for AI coding agents: every tool call recorded on a tamper-evident hash chain, dangerous operations intercepted (24 rules / 4 gates), daily ledger (what did it do / what did it cost / what was blocked). Zero cloud, standard library only, third-party verifiable.",
   "version": "0.28.0",
   "author": { "name": "geguang", "email": "geguang@gmail.com" },

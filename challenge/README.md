@@ -42,4 +42,4 @@ python tamper.py
 
 ---
 
-*Antinel —— 你的 Agent 昨晚干了什么、花了多少、拦了什么。本地运行，零上云，逐条可复算。*
+*AgentState（Antinel 旗下行为审计线）—— 你的 Agent 昨晚干了什么、花了多少、拦了什么。本地运行，零上云，逐条可复算。*
