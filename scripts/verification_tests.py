@@ -510,7 +510,8 @@ def main():
     fake_home = WORK / "fake_home"
     (fake_home / ".zcode" / "cli").mkdir(parents=True, exist_ok=True)
     rc, out, err, _ = run("install.py", ["--root", str(gh), "--host", "zcode", "--global", "--skip-scan"],
-                          env={"USERPROFILE": str(fake_home), "ANTINEL_NO_HOME_DETECT": "1"})
+                          env={"USERPROFILE": str(fake_home), "HOME": str(fake_home),
+                               "ANTINEL_NO_HOME_DETECT": "1"})
     ucfg = json.loads((fake_home / ".zcode" / "cli" / "config.json").read_text(encoding="utf-8"))
     uman = json.loads((gh / ".psl" / "manifest.json").read_text(encoding="utf-8"))
     record("A-05/D-06 --global: user-level registration covers every workspace",
