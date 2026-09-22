@@ -98,10 +98,10 @@ _FALLBACK = [
      "exclude_patterns": [r"\.env\.example", r"\.env\.template", r"\.env\.sample"],
      "description": "Agent attempted to read a .env file which may contain API keys and secrets"},
     {"id": "SEC-02", "category": "secrets", "severity": "critical", "apply_to_tools": ["Read", "Bash"],
-     "file_patterns": [r"\.ssh[/\\]", "id_rsa", "id_ed25519", "id_ecdsa", "authorized_keys"],
+     "file_patterns": [r"\.ssh[/\\]id_", r"\.ssh[/\\]authorized_keys", "id_rsa", "id_ed25519", "id_ecdsa", "authorized_keys"],
      "description": "Agent attempted to read SSH private key or authorized_keys file"},
     {"id": "SEC-03", "category": "secrets", "severity": "critical", "apply_to_tools": ["Read", "Bash"],
-     "file_patterns": [r"\.aws[/\\]", r"\.kube[/\\]config", r"credentials\.json", r"\.netrc"],
+     "file_patterns": [r"\.aws[/\\]credentials", r"\.kube[/\\]config", r"credentials\.json", r"\.netrc", "application_default_credentials"],
      "description": "Agent attempted to read cloud provider credentials"},
     {"id": "DST-01", "category": "destructive", "severity": "critical", "apply_to_tools": ["Bash"],
      # A10: kept in sync with rules/default.json DST-01. Previously a fallback

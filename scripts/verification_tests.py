@@ -598,7 +598,17 @@ def main():
     want = "sha256:" + hashlib.sha256(json.dumps({"tool_name": ev["tool_name"], "tool_input": ev["tool_input"]}, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
     record("2.8 content_digest recomputable by third party", bool(last) and last[-1].get("content_digest") == want)
     man = json.loads((zc / ".psl" / "manifest.json").read_text(encoding="utf-8"))
-    record("D-05 manifest scripts_hash covers 11 scripts", len(man.get("scripts_hash", {})) == 11 and all(v.startswith("sha256:") for v in man["scripts_hash"].values()))
+    # D-05 (v0.29): expected scripts are DERIVED from install.py SCRIPT_FILES --
+    # a hardcoded count drifted twice already (11 -> 13 after audit_chain/mcp);
+    # the spec is "manifest covers exactly the install-declared script set".
+    _ins = (PKG / "scripts" / "install.py").read_text(encoding="utf-8")
+    _m = re.search(r"SCRIPT_FILES\s*=\s*\((.*?)\)", _ins, re.S)
+    _expected = sorted(set(re.findall(r'"([\w.-]+\.py)"', _m.group(1)))) if _m else []
+    _got = sorted(man.get("scripts_hash", {}).keys())
+    record("D-05 manifest scripts_hash covers SCRIPT_FILES (%d)" % len(_expected),
+           bool(_expected) and _got == _expected
+           and all(v.startswith("sha256:") for v in man["scripts_hash"].values()),
+           "%d/%d" % (len(_got), len(_expected)))
     run("pre_tool_use.py", cwd=zc, stdin=json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}, "session_id": "t"}))
     man["scripts_hash"]["report.py"] = "sha256:deadbeef"
     (zc / ".psl" / "manifest.json").write_text(json.dumps(man), encoding="utf-8")

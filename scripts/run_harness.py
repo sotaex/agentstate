@@ -51,7 +51,9 @@ def repo_identity():
         url = (out.stdout or "").strip()
         m = re.search(r"[:/]([\w.-]+)/([\w.-]+?)(?:\.git)?$", url)
         if m:
-            return "github.com", m.group(2).lower(), m.group(1).lower()
+            # group(1)=owner, group(2)=repo —— owner 才是命名空间主体（0.29 修复：
+            # 取反了会让 subject 解析成 github.com/antinel 而非 github.com/sotaex）
+            return "github.com", m.group(1).lower(), m.group(2).lower()
     except Exception:
         pass
     try:

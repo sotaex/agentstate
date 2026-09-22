@@ -1,12 +1,17 @@
 {
  "schema": "antinel-namespaces-v1",
  "version": 1,
- "updated_at": "2026-09-21T10:50:56Z",
+ "updated_at": "2026-09-22T08:31:22Z",
  "namespaces": [
   {
    "host": "github.com",
    "owner": "antinel-security",
    "note": "Antinel Security Suite official namespace (self; subject of the self-verdict)"
+  },
+  {
+   "host": "github.com",
+   "owner": "sotaex",
+   "note": "founder GitHub account hosting the public repo sotaex/antinel (appended 2026-09-22)"
   }
  ],
  "_semantics": {
@@ -20,6 +25,6 @@
   "public_key": "ee52814c5af213972a060fbafaf4c4765fb92e2501d7da6ba949cd5adbdb3914",
   "public_key_fingerprint": "sha256:b71e570c30ebcbf7",
   "covers": "canonical JSON (sort_keys, compact) of this document minus the signature block",
-  "value": "aa21c727dcac05f9d06871757509e6c107d0dbe219f00f9215be811bd52c1d221185f28235a7914c54e614979a1462b128f1ddc7cd317f6203be40062c9e620d"
+  "value": "b30dff379e4f954849683233b44d1fe8387dc437525e736c93d471b4f5dadc6bed2854dbd3f487644be01c0603e5ac1fb84feaa0a51fcaf5ba4be1495703ae0e"
  }
 }
