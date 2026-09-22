@@ -3,12 +3,12 @@
  "card_id": "antinel-security-suite",
  "skill": "antinel-security",
  "skill_version": "0.27.0",
- "verdict": "FAIL",
+ "verdict": "PASS",
  "status": {
   "value": "current",
   "derivation": "auto",
   "reason": null,
-  "checkedAt": "2026-09-22T18:49:30+08:00",
+  "checkedAt": "2026-09-22T19:02:12+08:00",
   "note": "re-derive any time: python tools/antinel_verify.py (--manifest for all 24 shipped files)"
  },
  "scope": {
@@ -49,7 +49,7 @@
    "op": "black-box subprocess assertions (stdin JSON in, exit code + stdout/stderr out)"
   },
   "assertions": {
-   "passed": 241,
+   "passed": 243,
    "total": 243
   }
  },
@@ -57,7 +57,7 @@
  "objectOwnership": "self",
  "objectOwnershipBasis": "subject github.com/sotaex is in the signed namespace list",
  "assertions_total": 243,
- "assertions_passed": 241,
+ "assertions_passed": 243,
  "criteria_independence": "Assertions exercise the hook protocol, rule matching, scanner, installer and reporter as black boxes through subprocesses (stdin JSON in, exit code and stdout/stderr out); they were authored from the design specification ANT-SEC-SPEC-001 v1.1, not from the implementation; third-party re-run supported.",
  "environment": {
   "python": "3.11.4",
@@ -87,11 +87,11 @@
   "hub.py": "sha256:2b702a9ea1bc1bf217e285c8a728306d8a781a8350fe1baaa362c38f92e17800"
  },
  "run": {
-  "started_at": "2026-09-22T18:46:42+0800",
-  "duration_ms": 168130,
+  "started_at": "2026-09-22T18:58:46+0800",
+  "duration_ms": 206361,
   "duration_note": "wall-clock of a subprocess fan-out suite; machine- and load-dependent, not comparable across environments",
   "executor": "scripts/run_harness.py",
-  "exit_code": 1,
+  "exit_code": 0,
   "bootstrap": false
  },
  "re_run": "python scripts/run_harness.py",
