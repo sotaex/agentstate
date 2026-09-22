@@ -1167,8 +1167,11 @@ def main():
                                      "content": "x"}, proj)
     record("0.18.0 R-19 whitelisted REAL dir is still released", rc == 0, "rc=%d" % rc)
     pol18.unlink()
-    if jlink.exists() or jlink.is_dir():
-        os.rmdir(str(jlink))            # removes the junction, never the target
+    try:
+        if jlink.is_symlink() or jlink.exists():
+            os.unlink(str(jlink))       # POSIX symlink 要 unlink；Windows junction 同样安全
+    except OSError:
+        pass
 
     # R-18: fail_closed_on_audit_loss is now WIRED (v0.17's text promised it).
     # Default false = fail-open (the A5 test above); policy true = audit loss
