@@ -1,0 +1,19 @@
+{
+  "name": "antinel",
+  "display_name": "Antinel — AI Agent Audit Chain",
+  "description": "Local-first audit chain and ledger for AI coding agents: every tool call recorded on a tamper-evident hash chain, dangerous operations intercepted (24 rules / 4 gates), daily ledger (what did it do / what did it cost / what was blocked). Zero cloud, standard library only, third-party verifiable.",
+  "version": "0.28.0",
+  "author": { "name": "geguang", "email": "geguang@gmail.com" },
+  "license": "MIT",
+  "repository": "https://github.com/geguang/antinel",
+  "compatibility": { "protocol": "2024-11-05", "transports": ["stdio"] },
+  "tools": [
+    { "name": "antinel_digest", "description": "Daily ledger: operations, blocks, token spend per project/host (last N days)" },
+    { "name": "antinel_verify", "description": "Recompute the audit chain: CLEAN or point at the exact tampered record" },
+    { "name": "antinel_host_audit", "description": "Host-level agent integration audit (which hosts are covered, known exfil paths)" },
+    { "name": "antinel_report", "description": "Session report: what this session did and cost, every number labelled measured/estimated/user-reported" }
+  ],
+  "keywords": ["agent-audit", "audit-chain", "ai-security", "local-first", "tamper-evident", "claude-code", "zcode"],
+  "pricing": { "model": "free", "notes": "no key, no rate limit, no network egress" },
+  "stability": { "schema": "AUDIT_SCHEMA v1.2, changes registered append-only", "deprecation": "version discipline: old files never edited, successor noted" }
+}

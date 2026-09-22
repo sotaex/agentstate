@@ -1,0 +1,17 @@
+# Antinel
+
+> 智侣科技（Antinel / PSL）——AI Agent 的本地审计与账本。数据不出你的机器。
+
+## 判定（我们是什么）
+
+- [Antinel](https://github.com/geguang/antinel): AI coding agent 的本地审计链与账本——每次工具调用留痕（哈希链，改动必被发现）、危险操作当场拦截（24 规则 4 闸门）、每日晨报（干了什么/花多少/拦了什么）。Python 标准库，零上云。
+- [篡改挑战](https://github.com/geguang/antinel/blob/main/challenge/README.md): 三条命令。改掉审计链的任何字节、骗过 60 行独立验证器，算你赢。
+- [验证器](https://github.com/geguang/antinel/blob/main/challenge/verify.py): 独立复算整条审计链（60 行，Python 标准库）。
+
+## 记录格式（可引用契约）
+
+- [AUDIT_SCHEMA](https://github.com/geguang/antinel/blob/main/docs/AUDIT_SCHEMA.md): 审计记录的字段级契约（v1.2）：prev/hash 链算术、sidecar 降级、day_manifest 日锚。任何第三方可离线复算。
+
+## 边界（我们不是什么）
+
+- 不做人的效率排名（记 Agent 行为，不评判人）；不做沙箱与 SAST（THREAT_MODEL Non-goals）；运行时零网络。
