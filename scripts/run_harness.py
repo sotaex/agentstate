@@ -140,6 +140,21 @@ def main():
     proc = subprocess.run([sys.executable, str(PKG / "scripts" / "verification_tests.py")],
                           capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
     res = Path(work) / "last_results.json"
+    # CI 调试转储（ANTINEL_DEBUG_CI=1 时）：把套件输出与结构化结果留到仓内
+    # psl/ci_debug/，让无日志权限的第三方也能定位失败。默认关。
+    if os.environ.get("ANTINEL_DEBUG_CI") == "1":
+        try:
+            dbg = PKG / "psl" / "ci_debug"
+            dbg.mkdir(parents=True, exist_ok=True)
+            (dbg / "suite_stdout.txt").write_text(proc.stdout or "", encoding="utf-8")
+            (dbg / "suite_stderr.txt").write_text(proc.stderr or "", encoding="utf-8")
+            if res.is_file():
+                shutil.copyfile(res, dbg / "last_results.json")
+            (dbg / "run_info.txt").write_text(
+                "python=%s platform=%s rc=%d\n" % (sys.version, platform.platform(),
+                                                   proc.returncode), encoding="utf-8")
+        except Exception:
+            pass
     try:
         rows = json.loads(res.read_text(encoding="utf-8"))
         total = len(rows)
