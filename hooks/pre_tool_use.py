@@ -368,11 +368,14 @@ def _norm_prefix(p):
     s = (p or "").replace("\\", "/").strip().lower()
     if s in ("", ".", "..", "/"):
         return ""
-    s2 = s.lstrip("./")
+    was_abs_posix = s.startswith("/")           # POSIX 绝对路径（0.29.1：
+    s2 = s.lstrip("./")                         # 修复 Linux 白名单永不释放）
     if not s2 or s2.endswith(":") or s2.endswith(":/"):
         return ""
     if ".." in s2 or any(ch in s2 for ch in "*?["):
         return ""
+    if was_abs_posix and not s2.startswith("/"):
+        s2 = "/" + s2
     return s2
 
 

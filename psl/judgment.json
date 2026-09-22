@@ -8,7 +8,7 @@
   "value": "current",
   "derivation": "auto",
   "reason": null,
-  "checkedAt": "2026-09-22T23:56:17+08:00",
+  "checkedAt": "2026-09-23T00:10:20+08:00",
   "note": "re-derive any time: python tools/antinel_verify.py (--manifest for all 24 shipped files)"
  },
  "scope": {
@@ -74,7 +74,7 @@
   "rules/economics/claude-code.json": "sha256:e5ce954672baa42ffc220fddde2b691566f4644ec05ba6887c5ccc1c9dae30ba",
   "rules/economics/qoder.json": "sha256:5f51a86cbe0625f44519ce1308e562286c9d3410d0b7284006ac26b068396a3d",
   "rules/economics/generic.json": "sha256:4849374b3d2443dd77329b09d348dec03794863aa8f991d98ea5380a9849b82f",
-  "hooks/pre_tool_use.py": "sha256:9ffae07e8ef2837ff61cba8e847645533d4207ad4eff46650deb2f33ae2374d7",
+  "hooks/pre_tool_use.py": "sha256:92737f2b5905922ac34334ce791de906bd81581b27c3a66b509767283ba3d002",
   "hooks/post_tool_use.py": "sha256:04c870fec90710f1288deb2cfa40e291ccc2328cda45ecf6a67651de23e71231",
   "scripts/scan.py": "sha256:30f7b4cb99935eda3c4cc23d217cde1bd2fe666347b7b3b7618fcb8aea4ed076",
   "scripts/install.py": "sha256:c17d1d0b5193ebc7a22c8de3d266cc124b5aa19ee98149b3f077fb26bce97dcd",
@@ -87,8 +87,8 @@
   "hub.py": "sha256:2b702a9ea1bc1bf217e285c8a728306d8a781a8350fe1baaa362c38f92e17800"
  },
  "run": {
-  "started_at": "2026-09-22T23:52:42+0800",
-  "duration_ms": 215211,
+  "started_at": "2026-09-23T00:07:07+0800",
+  "duration_ms": 193034,
   "duration_note": "wall-clock of a subprocess fan-out suite; machine- and load-dependent, not comparable across environments",
   "executor": "scripts/run_harness.py",
   "exit_code": 0,
