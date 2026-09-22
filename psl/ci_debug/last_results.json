@@ -262,7 +262,7 @@
  {
   "name": "A5 5MB command handled fast (truncated before matching)",
   "pass": true,
-  "detail": "median ms=1465 (runs: 1465, 1459, 1474; load-sensitive; ladder B-021..023 tracks the budget)"
+  "detail": "median ms=1574 (runs: 1574, 1574, 1575; load-sensitive; ladder B-021..023 tracks the budget)"
  },
  {
   "name": "A-08 invalid JSON -> allow",
@@ -337,7 +337,7 @@
  {
   "name": "hook latency median (ms, includes interpreter start)",
   "pass": true,
-  "detail": "median=51 min=50 max=52"
+  "detail": "median=59 min=58 max=59"
  },
  {
   "name": "T3 scan skills (skipped: skills dir not present at D:\\psl\\skills)",
@@ -382,7 +382,7 @@
  {
   "name": "install claude-code: hooks appended, foreign kept",
   "pass": true,
-  "detail": "rc=0 ms=91"
+  "detail": "rc=0 ms=100"
  },
  {
   "name": "D7 .psl/.gitignore auto-written",
@@ -885,7 +885,7 @@
  {
   "name": "C9 nested ReDoS pattern '(a+)+$' rejected, hook not wedged",
   "pass": true,
-  "detail": "136ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
+  "detail": "135ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
  },
  {
   "name": "C9 alternation ReDoS pattern '(a|aa)+$' rejected, hook not wedged",
@@ -895,7 +895,7 @@
  {
   "name": "C9 inner-optional ReDoS pattern '(a?)+$' rejected, hook not wedged",
   "pass": true,
-  "detail": "135ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
+  "detail": "134ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
  },
  {
   "name": "C9 benign custom rule still loads and fires (read-only downgrade to alert)",
@@ -1095,7 +1095,7 @@
  {
   "name": "WS-3 rejected config entry is visible in report.py",
   "pass": true,
-  "detail": "WARNING 19). Address CRITICAL items first.\n Full log: /tmp/antinel_harness_htz02nha/proj/.psl/audit\n Re-scan: python scan.py\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+  "detail": "WARNING 19). Address CRITICAL items first.\n Full log: /tmp/antinel_harness_ug5zhqb9/proj/.psl/audit\n Re-scan: python scan.py\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
  },
  {
   "name": "A12 policy.json edited out of band is reported once",
@@ -1120,7 +1120,7 @@
  {
   "name": "0.16.0 DST-02 released by whitelist.paths (no policy edit per write)",
   "pass": false,
-  "detail": "rc=2 err=[Antinel][配置变更] .psl/policy.json 内容已变化（sha256 41719391e2ed…）\n          白名单/阈值的放行"
+  "detail": "rc=2 err=[Antinel][配置变更] .psl/policy.json 内容已变化（sha256 5c3c1ea1de59…）\n          白名单/阈值的放行"
  },
  {
   "name": "0.16.0 DST-02 whitelist release is recorded (dst02_path_whitelisted)",
@@ -1370,7 +1370,7 @@
  {
   "name": "0.23.0 A1 first harvest chains usage_delta with token facts",
   "pass": true,
-  "detail": "{'path_tag': 'sha256:6a993c843c849d38', 'scope': 'tail_first_sight', 'reset': False, 'byte"
+  "detail": "{'path_tag': 'sha256:8001634dcc9afdb9', 'scope': 'tail_first_sight', 'reset': False, 'byte"
  },
  {
   "name": "0.23.0 privacy: raw transcript path is not in the ledger",
@@ -1435,7 +1435,7 @@
  {
   "name": "0.23.1 policy_changed chained with invoked_by + digests",
   "pass": true,
-  "detail": "[{'ts': '2026-09-22T14:17:30+00:00', 'type': 'policy_changed', 'tool': '-', 'session': 'an"
+  "detail": "[{'ts': '2026-09-22T14:25:02+00:00', 'type': 'policy_changed', 'tool': '-', 'session': 'an"
  },
  {
   "name": "0.23.1 roots add drive-root rejected (fail-closed)",
