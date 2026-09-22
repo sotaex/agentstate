@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/home/runner/work/antinel/antinel/scripts/verification_tests.py", line 1597, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/runner/work/antinel/antinel/scripts/verification_tests.py", line 1171, in main
+    os.rmdir(str(jlink))            # removes the junction, never the target
+    ^^^^^^^^^^^^^^^^^^^^
+NotADirectoryError: [Errno 20] Not a directory: '/tmp/antinel_harness_w74lhs0q/proj/tests/fixtures/jlink'
