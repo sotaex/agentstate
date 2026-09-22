@@ -1,0 +1,24 @@
+{
+ "$schema": "antinel-pricing-v1",
+ "version": "0.27.0",
+ "currency": "USD",
+ "unit": "per_1m_tokens",
+ "updated_at": "2026-09-19",
+ "note": "成本是派生物，不是事实：账本只记 token（usage_delta 记录）。本表由企业按自己的协议价填写；未填 rates 的模型只会出现在 unpriced_models 里，Antinel 永不代估价格。currency 可改为积分体系（如 'credits'），unit 可为 per_token。",
+ "rates": {
+  "_example": {
+   "input": 0.27,
+   "output": 1.1,
+   "cache_read": 0.02,
+   "cache_creation": 0.27
+  }
+ },
+ "_semantics": {
+  "rates.<model>.input": "每 100 万输入 token 的价格（按 currency 计）",
+  "rates.<model>.output": "每 100 万输出 token 的价格",
+  "rates.<model>.cache_read": "每 100 万缓存命中 token 的价格",
+  "rates.<model>.cache_creation": "每 100 万缓存写入 token 的价格（不填按 0 计）",
+  "version": "成本估算结果的 pricing_version 字段回指本表版本，价格变更时必须 bump",
+  "unit": "per_1m_tokens（默认）或 per_token"
+ }
+}

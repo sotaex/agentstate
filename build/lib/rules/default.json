@@ -1,0 +1,734 @@
+{
+  "version": "0.27.0",
+  "description": "Antinel Security Suite default detection rules (24 rules, 4 gates; flat layout: patterns at rule top level)",
+  "gates": {
+    "secrets": "Gate 2 sensitive surface",
+    "network": "Gate 4 behavior (egress)",
+    "destructive": "Gate 4 behavior (destructive/persistence)",
+    "injection": "Gate 1 content safety",
+    "context": "Gate 1/4 context probing",
+    "metadata": "Gate 3 metadata consistency"
+  },
+  "category_order": [
+    "secrets",
+    "destructive",
+    "network",
+    "injection",
+    "context",
+    "metadata"
+  ],
+  "rules": [
+    {
+      "id": "SEC-01",
+      "name": "Sensitive file read (.env)",
+      "category": "secrets",
+      "severity": "critical",
+      "type": "tool_call",
+      "tool_names": [
+        "Read",
+        "Bash"
+      ],
+      "file_patterns": [
+        "\\.env$",
+        "\\.env\\.",
+        "[/\\\\]\\.env$",
+        "^\\.env$"
+      ],
+      "content_patterns": [
+        "\\.env\\b"
+      ],
+      "exclude_patterns": [
+        "\\.env\\.example",
+        "\\.env\\.template",
+        "\\.env\\.sample"
+      ],
+      "apply_to_tools": [
+        "Read",
+        "Bash"
+      ],
+      "description": "Agent attempted to read a .env file which may contain API keys and secrets",
+      "remediation": "Remove .env from agent-readable scope or add to deny list. Use environment variable injection instead.",
+      "description_zh": "读取 .env 文件可能泄露 API 密钥与机密配置",
+      "remediation_zh": "把 .env 移出 Agent 可读范围；确需变量时手动复制具体几行；测试夹具路径可在 policy.json 白名单登记"
+    },
+    {
+      "id": "SEC-02",
+      "name": "SSH key file read",
+      "category": "secrets",
+      "severity": "critical",
+      "type": "tool_call",
+      "tool_names": [
+        "Read",
+        "Bash"
+      ],
+      "file_patterns": [
+        "\\.ssh[/\\\\]id_",
+        "\\.ssh[/\\\\]authorized_keys",
+        "id_rsa",
+        "id_ed25519",
+        "id_ecdsa",
+        "authorized_keys"
+      ],
+      "exclude_patterns": [],
+      "apply_to_tools": [
+        "Read",
+        "Bash"
+      ],
+      "description": "Agent attempted to read SSH private key or authorized_keys file",
+      "remediation": "Keep SSH keys outside agent working scope; use ssh-agent forwarding instead of key files.",
+      "description_zh": "读取 SSH 私钥或 authorized_keys",
+      "remediation_zh": "SSH 密钥不要放进 Agent 工作范围；改用 ssh-agent 转发"
+    },
+    {
+      "id": "SEC-03",
+      "name": "Cloud credential file read",
+      "category": "secrets",
+      "severity": "critical",
+      "type": "tool_call",
+      "tool_names": [
+        "Read",
+        "Bash"
+      ],
+      "file_patterns": [
+        "\\.aws[/\\\\]credentials",
+        "\\.kube[/\\\\]config",
+        "credentials\\.json",
+        "\\.netrc",
+        "application_default_credentials"
+      ],
+      "exclude_patterns": [],
+      "apply_to_tools": [
+        "Read",
+        "Bash"
+      ],
+      "description": "Agent attempted to read cloud provider credentials",
+      "remediation": "Use short-lived tokens via the provider CLI instead of exposing credential files to the agent.",
+      "description_zh": "读取云厂商凭证文件",
+      "remediation_zh": "改用云厂商 CLI 的短期令牌；确需操作时请手动执行"
+    },
+    {
+      "id": "SEC-04",
+      "name": "Wallet/keystore file read",
+      "category": "secrets",
+      "severity": "critical",
+      "type": "tool_call",
+      "tool_names": [
+        "Read",
+        "Bash"
+      ],
+      "file_patterns": [
+        "wallet",
+        "keystore",
+        "metamask",
+        "\\.ethereum"
+      ],
+      "exclude_patterns": [
+        "test_wallet",
+        "mock_wallet"
+      ],
+      "apply_to_tools": [
+        "Read",
+        "Bash"
+      ],
+      "description": "Agent attempted to read cryptocurrency wallet or keystore file",
+      "remediation": "Never let a coding agent touch wallet directories; move keystores to an encrypted vault.",
+      "description_zh": "读取加密货币钱包或密钥库文件",
+      "remediation_zh": "钱包目录永远不要交给编码 Agent；必要时移入加密保管"
+    },
+    {
+      "id": "SEC-05",
+      "name": "Browser data read",
+      "category": "secrets",
+      "severity": "critical",
+      "type": "tool_call",
+      "tool_names": [
+        "Read",
+        "Bash"
+      ],
+      "file_patterns": [
+        "Cookies",
+        "Login\\s+Data",
+        "Local\\s+Storage",
+        "Web\\s+Data"
+      ],
+      "exclude_patterns": [],
+      "apply_to_tools": [
+        "Read",
+        "Bash"
+      ],
+      "description": "Agent attempted to read browser stored data (cookies, passwords, sessions)",
+      "remediation": "Browser profiles contain live sessions; deny all agent access to profile directories.",
+      "description_zh": "读取浏览器数据（Cookie、密码、会话）",
+      "remediation_zh": "浏览器配置目录包含登录态，应完全禁止 Agent 访问"
+    },
+    {
+      "id": "NET-01",
+      "name": "Shell network request",
+      "category": "network",
+      "severity": "warning",
+      "type": "tool_call",
+      "tool_names": [
+        "Bash"
+      ],
+      "command_patterns": [
+        "\\b(curl|wget|fetch)\\b.*https?://",
+        "https?://(?!registry\\.npmjs\\.org|pypi\\.org|github\\.com)",
+        "\\b(scp|sftp|rsync|ssh|nc|ncat)\\b\\s+[^\\n]{0,120}@",
+        "\\b(certutil|bitsadmin)\\b[^\\n]{0,120}(urlcache|transfer|/transfer|/urlcache)",
+        "Invoke-(WebRequest|RestMethod)|Start-BitsTransfer",
+        "\\b(git\\s+push|gh\\s+(release|repo)\\s+create)\\b"
+      ],
+      "exclude_patterns": [
+        "localhost",
+        "127\\.0\\.0\\.1",
+        "registry\\.npmjs\\.org",
+        "pypi\\.org",
+        "files\\.pythonhosted\\.org",
+        "github\\.com",
+        "api\\.github\\.com",
+        "objects\\.githubusercontent\\.com"
+      ],
+      "apply_to_tools": [
+        "Bash"
+      ],
+      "description": "Agent made an external network request via shell command to a non-whitelisted domain",
+      "remediation": "Pin downloads to whitelisted registries (npmjs/pypi/github) or review the destination.",
+      "description_zh": "通过 Shell 向白名单外域名发起网络请求",
+      "remediation_zh": "核对目标域名；常用下载源放行：antinel domains add <域名>（进审计链）"
+    },
+    {
+      "id": "NET-02",
+      "name": "Python network request",
+      "category": "network",
+      "severity": "warning",
+      "type": "tool_call",
+      "tool_names": [
+        "Bash"
+      ],
+      "command_patterns": [
+        "urllib\\.request",
+        "requests\\.(get|post|put|delete)",
+        "httpx\\.",
+        "socket\\.create_connection"
+      ],
+      "exclude_patterns": [],
+      "apply_to_tools": [
+        "Bash"
+      ],
+      "description": "Agent code contains Python network request calls",
+      "remediation": "Review the endpoints used by inline Python network code before allowing egress.",
+      "description_zh": "内联代码包含 Python 网络请求调用",
+      "remediation_zh": "核对请求目标地址后再放行"
+    },
+    {
+      "id": "NET-03",
+      "name": "Non-whitelisted domain connection",
+      "category": "network",
+      "severity": "warning",
+      "type": "tool_call",
+      "tool_names": [
+        "Bash"
+      ],
+      "check": "domain_whitelist",
+      "whitelist_domains": [
+        "registry.npmjs.org",
+        "pypi.org",
+        "files.pythonhosted.org",
+        "github.com",
+        "localhost"
+      ],
+      "exclude_patterns": [
+        "127\\.0\\.0\\.1"
+      ],
+      "apply_to_tools": [
+        "Bash"
+      ],
+      "description": "Agent command references a domain outside the whitelist (v1 compares command-line domains; DNS-level comparison is a v2 kernel-layer capability)",
+      "remediation": "Add the domain to the whitelist only after verifying it is the intended destination.",
+      "description_zh": "命令引用了白名单外的域名",
+      "remediation_zh": "确认域名无害后放行：antinel domains add <域名>（进审计链）"
+    },
+    {
+      "id": "DST-01",
+      "name": "File deletion",
+      "category": "destructive",
+      "severity": "critical",
+      "type": "tool_call",
+      "tool_names": [
+        "Bash"
+      ],
+      "command_patterns": [
+        "\\brm\\b",
+        "\\bdel\\b",
+        "\\brmdir\\b",
+        "\\bunlink\\b",
+        "\\bshutil\\.rmtree\\b",
+        "\\bos\\.remove\\b",
+        "remove-item",
+        "(?:^|[;&|(]\\s*|\\s)rd(?:\\s*[/][A-Za-z]|\\s+[^=\\s])",
+        "\\bdd\\s+if=[^\\n]{0,80}\\bof=/dev/",
+        "\\bmkfs\\b",
+        "\\btruncate\\s+-s\\b",
+        "\\bshred\\s+-[a-z]*u?\\b",
+        "\\bmv\\b[^\\n]{0,120}\\s/dev/null\\b",
+        "(^|[;|&]\\s*):\\s*>\\s*[^\\s]",
+        "\\brmSync\\s*\\(",
+        "\\brm_rf\\b",
+        "\\bFileUtils\\.rm\\b",
+        "\\bunlink\\s+glob\\b",
+        "array_map\\(\\s*[\"']unlink[\"']",
+        "\\bosascript\\b[^\\n]{0,200}\\bdelete\\b",
+        "\\bfind\\b[^\\n]{0,200}\\s-delete\\b"
+      ],
+      "exclude_patterns": [
+        "rm -rf node_modules",
+        "rm -rf \\.git",
+        "rm -rf __pycache__",
+        "rm -rf \\.psl",
+        "remove-item node_modules",
+        "remove-item -recurse.*node_modules",
+        "\\brm\\s+-rf\\s+(dist|build|target|venv|\\.tox|\\.mypy_cache|\\.ruff_cache|\\.pytest_cache|htmlcov|coverage|out|bin|obj)(\\s|$|;)",
+        "\\brm\\s+-rf\\s+\\S*\\.(egg-info|pyc)(\\s|$|;)",
+        "\\brm\\s+-rf\\s+\\.nox\\b",
+        "\\\\bgrep\\\\b",
+        "\\\\bfind\\\\b",
+        "\\\\bcat\\\\b",
+        "\\\\bhead\\\\b",
+        "\\\\btail\\\\b",
+        "\\\\btype\\\\b",
+        "\\\\bselect\\\\-string\\\\b",
+        "\\\\bdef\\\\s+\\\\w*(remove|unlink|delete)\\\\w*\\\\(",
+        "\\\\bos\\\\.remove\\\\b.*\\\\#",
+        "\\\\b#.*\\\\b(unlink|rm|del)\\\\b"
+      ],
+      "apply_to_tools": [
+        "Bash"
+      ],
+      "description": "Agent executed a file or directory deletion command",
+      "remediation": "Confirm the deletion target; prefer moving to trash over rm -rf outside build artifacts.",
+      "description_zh": "执行文件或目录删除命令",
+      "remediation_zh": "确认删除目标无误；构建产物类删除（如 node_modules）已在豁免清单"
+    },
+    {
+      "id": "DST-02",
+      "name": "Write outside project root",
+      "category": "destructive",
+      "severity": "critical",
+      "type": "tool_call",
+      "tool_names": [
+        "Write",
+        "Edit"
+      ],
+      "check": "path_outside_project_root",
+      "exclude_patterns": [],
+      "apply_to_tools": [
+        "Write",
+        "Edit",
+        "Bash"
+      ],
+      "description": "Agent attempted to write to a file outside the project root directory",
+      "remediation": "Allow: run `antinel paths add <prefix>` (audited) or `antinel roots add <dir>`; or keep agent writes inside the project.",
+      "description_zh": "试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件",
+      "remediation_zh": "放行：antinel paths add <目录前缀>（进审计链）；确需更大范围用 antinel roots add <路径>；或把文件写进项目内",
+      "command_patterns": [
+        "\\btar\\b[^\\n]{0,120}-C\\s+/(?:\\s|$)",
+        "\\btar\\b[^\\n]{0,120}\\s-C\\s+/(?:etc|usr|bin|sbin|var|lib|boot|srv|opt|home|root)(?:\\s|$)"
+      ]
+    },
+    {
+      "id": "DST-03",
+      "name": "Shell configuration modification",
+      "category": "destructive",
+      "severity": "critical",
+      "type": "tool_call",
+      "tool_names": [
+        "Write",
+        "Edit",
+        "Bash"
+      ],
+      "command_patterns": [
+        ">>\\s*~[/\\\\]\\.(bashrc|zshrc|profile)",
+        "echo.*>>.*\\.(bashrc|zshrc|profile)"
+      ],
+      "file_patterns": [
+        "\\.bashrc",
+        "\\.zshrc",
+        "\\.profile",
+        "\\.bash_profile"
+      ],
+      "exclude_patterns": [],
+      "apply_to_tools": [
+        "Write",
+        "Edit",
+        "Bash"
+      ],
+      "description": "Agent attempted to modify shell startup configuration (persistence mechanism)",
+      "remediation": "Shell startup files execute on every terminal; never let an agent append to them unreviewed.",
+      "description_zh": "修改 Shell 启动配置（.bashrc 等，属持久化机制）",
+      "remediation_zh": "启动脚本每次开终端都会执行，不要让 Agent 追加内容；确需修改请手动审查后进行"
+    },
+    {
+      "id": "DST-04",
+      "name": "Persistence mechanism",
+      "category": "destructive",
+      "severity": "critical",
+      "type": "tool_call",
+      "tool_names": [
+        "Write",
+        "Edit",
+        "Bash"
+      ],
+      "command_patterns": [
+        "crontab\\s+-[el]",
+        "systemctl\\s+enable",
+        "launchctl\\s+load",
+        "\\bschtasks\\b",
+        "\\breg\\s+add\\b",
+        "(?i)\\bregedit\\b",
+        "(?i)start menu.*startup",
+        "(?i)\\bat\\s+\\d{1,2}:\\d{2}\\s+/\\w+",
+        "\\bpowershell\\b[^\\n]{0,80}\\-(enc|encodedcommand)\\b"
+      ],
+      "file_patterns": [
+        "crontab",
+        "systemd[/\\\\]system",
+        "LaunchAgents",
+        "rc\\.local",
+        "\\.config[/\\\\]autostart",
+        "currentversion[/\\\\]run",
+        "(?i)start menu.*startup",
+        "(?i)system32[/\\\\]tasks\\b",
+        "(?i)launchdaemons\\b",
+        "(?i)etc[/\\\\]cron\\b",
+        "(?i)spool[/\\\\]cron\\b",
+        "(?i)\\.reg\\b",
+        "(?i)currentversion[/\\\\]winlogon"
+      ],
+      "exclude_patterns": [],
+      "apply_to_tools": [
+        "Write",
+        "Edit",
+        "Bash"
+      ],
+      "description": "Agent attempted to establish persistence (cron job, systemd service, startup item, scheduled task, registry Run key)",
+      "remediation": "Persistence entries survive the session and re-execute code; require explicit human approval.",
+      "description_zh": "建立持久化机制（计划任务/系统服务/启动项/注册表 Run 键）",
+      "remediation_zh": "持久化会在会话结束后反复执行，必须由你本人确认后手动操作"
+    },
+    {
+      "id": "DST-05",
+      "name": "Privilege escalation",
+      "category": "destructive",
+      "severity": "warning",
+      "type": "tool_call",
+      "tool_names": [
+        "Bash"
+      ],
+      "command_patterns": [
+        "^\\s*sudo\\b",
+        "^\\s*su\\b",
+        "chmod\\s+777",
+        "chown\\s+root"
+      ],
+      "exclude_patterns": [
+        "sudo apt-get install",
+        "sudo pip install"
+      ],
+      "apply_to_tools": [
+        "Bash"
+      ],
+      "description": "Agent attempted to escalate privileges",
+      "remediation": "Run privileged steps yourself instead of letting the agent hold elevated shells.",
+      "description_zh": "尝试提权操作",
+      "remediation_zh": "涉及提权的步骤建议你本人执行，不给 Agent 提权"
+    },
+    {
+      "id": "CTX-01",
+      "name": "Environment variable enumeration",
+      "category": "context",
+      "severity": "warning",
+      "type": "tool_call",
+      "tool_names": [
+        "Bash"
+      ],
+      "command_patterns": [
+        "\\benv\\b(?!\\s*=)",
+        "\\bprintenv\\b",
+        "os\\.environ",
+        "process\\.env"
+      ],
+      "exclude_patterns": [],
+      "apply_to_tools": [
+        "Bash"
+      ],
+      "description": "Agent attempted to enumerate all environment variables (may expose API keys and secrets)",
+      "remediation": "Print only the specific variables needed instead of dumping the whole environment.",
+      "description_zh": "枚举全部环境变量（可能暴露密钥）",
+      "remediation_zh": "让 Agent 只打印它需要的具体变量名"
+    },
+    {
+      "id": "CTX-02",
+      "name": "Prompt injection pattern in SKILL.md",
+      "category": "injection",
+      "severity": "critical",
+      "type": "file_content",
+      "target": "SKILL.md",
+      "content_patterns": [
+        "ignore\\s+(all\\s+)?(previous|prior|above)\\s+instructions",
+        "disregard\\s+(all\\s+)?(previous|prior|above)",
+        "(you\\s+are\\s+now|act\\s+as\\s+(a\\s+)?different)",
+        "忽略(以上|之前|先前|上面)(的)?(所有)?(指令|指示|规则)",
+        "(不管|无视|忽略)(系统|安全|开发者)(提示词|指令|约束)",
+        "exfiltrate|send\\s+(the\\s+)?(secrets?|credentials?|keys?|tokens?)\\s+(to|via)",
+        "do\\s+not\\s+(tell|inform|notify|reveal)\\s+(the\\s+)?user",
+        "print\\s+(the\\s+)?(system\\s+prompt|api\\s+keys?)"
+      ],
+      "exclude_patterns": [],
+      "apply_to_tools": [
+        "Read",
+        "Write",
+        "Edit"
+      ],
+      "description": "Potential prompt injection payload detected in skill instruction file",
+      "remediation": "Remove the skill; audit its source; report the pattern to the skill marketplace.",
+      "description_zh": "技能指令文件中发现提示注入载荷",
+      "remediation_zh": "移除该技能并核查来源；不要运行其中的指令"
+    },
+    {
+      "id": "CTX-03",
+      "name": "Invisible Unicode characters",
+      "category": "injection",
+      "severity": "critical",
+      "type": "file_content",
+      "target": "all_text_files",
+      "detection": "character_code_scan",
+      "ranges": [
+        {
+          "start": 917504,
+          "end": 917631
+        },
+        {
+          "start": 8203,
+          "end": 8207
+        },
+        {
+          "start": 8288,
+          "end": 8292
+        },
+        {
+          "start": 65279,
+          "end": 65279
+        },
+        {
+          "start": 8232,
+          "end": 8238
+        }
+      ],
+      "whitelist_chars": [
+        "‍"
+      ],
+      "exclude_patterns": [],
+      "apply_to_tools": [
+        "Read",
+        "Write",
+        "Edit",
+        "Bash"
+      ],
+      "description": "Invisible Unicode character detected (tag characters, zero-width, word joiner, BOM in middle of file)",
+      "remediation": "Strip invisible characters; treat any occurrence in instructions as hostile until proven otherwise.",
+      "description_zh": "检出隐形 Unicode 字符（标签字符/零宽字符等）",
+      "remediation_zh": "清除隐形字符；出现在指令文件中默认按恶意处理"
+    },
+    {
+      "id": "CTX-04",
+      "name": "Encoded payload",
+      "category": "injection",
+      "severity": "warning",
+      "type": "file_content",
+      "target": "SKILL.md",
+      "content_patterns": [
+        "[A-Za-z0-9+/=]{200,}",
+        "[0-9a-fA-F]{400,}"
+      ],
+      "exclude_patterns": [],
+      "apply_to_tools": [
+        "Read",
+        "Write",
+        "Edit"
+      ],
+      "description": "Long base64 or hex string detected (potential encoded payload)",
+      "remediation": "Decode and review the payload; legitimate instructions rarely embed long encoded blobs.",
+      "description_zh": "检出超长 base64/hex 编码载荷",
+      "remediation_zh": "先解码审查再决定；正常说明文档极少内嵌长编码"
+    },
+    {
+      "id": "CTX-05",
+      "name": "Skill name mismatch",
+      "category": "metadata",
+      "severity": "warning",
+      "type": "metadata_check",
+      "check": "frontmatter.name == directory_name",
+      "exclude_patterns": [],
+      "apply_to_tools": [
+        "Read"
+      ],
+      "description": "SKILL.md frontmatter name field does not match parent directory name",
+      "remediation": "Rename the directory or fix the frontmatter; mismatches hide a skill's real identity.",
+      "description_zh": "SKILL.md 声明的 name 与目录名不一致",
+      "remediation_zh": "改名保持一致；不一致通常意味着身份伪装或打包疏漏"
+    },
+    {
+      "id": "DST-06",
+      "name": "Remote script piped to interpreter",
+      "category": "destructive",
+      "severity": "critical",
+      "type": "tool_call",
+      "description": "Agent downloaded a remote script and piped it straight into a shell or interpreter",
+      "remediation": "Download and inspect the script first; confirm the source is trusted before executing.",
+      "description_zh": "下载远程脚本并直接交给解释器执行",
+      "remediation_zh": "先落盘查看内容再执行；确认来源可信",
+      "command_patterns": [
+        "(curl|wget)\\b[^\\n|;]{0,200}\\|\\s*(sudo\\s+)?(sh|bash|zsh|dash|python|powershell)",
+        "\\b(irm|iwr)\\b[^\\n|]{0,200}\\|\\s*(iex|invoke-expression)",
+        "\\bbash\\s+<\\s*\\(curl",
+        "\\bcurl\\b[^\\n]{0,200}\\b(-o|\\-\\-output)\\s+[^\\n]{0,80}\\.(sh|ps1)\\b[^\\n]{0,80}[;&|]\\s*(sh|bash|\\.)",
+        "\\bbase64\\b[^\\n]{0,60}(-d|--decode)[^\\n]{0,80}\\|\\s*(sh|bash|python)",
+        "\\|\\s*base64\\s+-d\\b",
+        "(?:\\[char\\]\\d+\\+){2,}"
+      ],
+      "exclude_patterns": [
+        "localhost",
+        "127\\.0\\.0\\.1"
+      ],
+      "apply_to_tools": [
+        "Bash"
+      ]
+    },
+    {
+      "id": "DST-07",
+      "name": "Irreversible git discard",
+      "category": "destructive",
+      "severity": "critical",
+      "type": "tool_call",
+      "description": "Agent ran a git command that irreversibly discards working-tree changes or untracked files",
+      "remediation": "Stash or commit first; only then discard, and prefer dry-run forms.",
+      "description_zh": "丢弃工作区改动的 git 命令（不可逆）",
+      "remediation_zh": "先 git stash 或提交，再执行",
+      "command_patterns": [
+        "\\bgit\\s+reset\\s+--hard\\b",
+        "\\bgit\\s+clean\\s+-[fdxn]*[fdx]",
+        "\\bgit\\s+checkout\\s+--(\\s|$)"
+      ],
+      "exclude_patterns": [
+        "git\\s+clean\\s+-n(\\s|$)"
+      ],
+      "apply_to_tools": [
+        "Bash"
+      ]
+    },
+    {
+      "id": "SEC-06",
+      "severity": "critical",
+      "category": "secrets",
+      "type": "tool_call",
+      "name": "Secret literal in content",
+      "description": "Secret-looking literal (API key, private key, token) appeared in written or edited content",
+      "remediation": "Use environment variables or a secrets manager; never paste plaintext keys into files.",
+      "description_zh": "写入或编辑的内容中出现密钥字面量",
+      "remediation_zh": "改用环境变量或密钥管理服务，不要把明文密钥写进文件",
+      "content_patterns": [
+        "sk-[A-Za-z0-9]{20,}",
+        "-----BEGIN [A-Z ]*PRIVATE KEY-----",
+        "AKIA[0-9A-Z]{16}",
+        "gh[pousr]_[A-Za-z0-9]{30,}",
+        "xox[baprs]-[A-Za-z0-9-]{12,}"
+      ],
+      "exclude_patterns": [
+        "AKIAIOSFODNN7EXAMPLE",
+        "sk-(your|xxx|test|example|placeholder|dummy)"
+      ],
+      "apply_to_tools": [
+        "Write",
+        "Edit",
+        "Read",
+        "Bash"
+      ]
+    },
+    {
+      "id": "DST-08",
+      "name": "Permission/ownership destruction",
+      "category": "destructive",
+      "severity": "critical",
+      "type": "tool_call",
+      "tool_names": [
+        "Bash"
+      ],
+      "command_patterns": [
+        "\\bchmod\\s+000\\b",
+        "\\bchmod\\b[^#\\n]{0,40}\\s-R\\b",
+        "\\bchown\\b[^#\\n]{0,40}\\s-R\\b"
+      ],
+      "exclude_patterns": [],
+      "apply_to_tools": [
+        "Bash"
+      ],
+      "description": "Agent attempted to destroy permissions or ownership recursively (denial of service)",
+      "description_zh": "递归破坏权限或属主，可致服务不可用",
+      "remediation": "Permission/ownership recursion is a sysadmin action; do it yourself after review",
+      "remediation_zh": "递归改权限/属主属于系统管理操作，请人工审查后执行"
+    },
+    {
+      "id": "DST-09",
+      "name": "Alternate data stream write (file path)",
+      "category": "destructive",
+      "severity": "critical",
+      "type": "tool_call",
+      "platforms": [
+        "nt"
+      ],
+      "tool_names": [
+        "Write",
+        "Edit"
+      ],
+      "file_patterns": [
+        "\\.[^\\\\/:\\s]{1,32}:(?!Zone\\.Identifier\\b)"
+      ],
+      "exclude_patterns": [],
+      "apply_to_tools": [
+        "Write",
+        "Edit"
+      ],
+      "description": "Agent attempted to write an NTFS alternate data stream (path:stream) -- invisible to dir/ls and carried along by a plain file copy",
+      "remediation": "Stored in the file's own stream table, an ADS does not show up in normal listings or in the copy that gets reviewed. Write the bytes as a normal file instead.",
+      "description_zh": "写入 NTFS 备用数据流（path:stream）——dir/ls 看不到，随文件复制一起走，是评审盲区",
+      "remediation_zh": "ADS 在常规列表中不可见，且复制文件时随行，等于绕开评审；请改写为普通文件以便审查"
+    },
+    {
+      "id": "DST-10",
+      "name": "Alternate data stream write (command)",
+      "category": "destructive",
+      "severity": "critical",
+      "type": "tool_call",
+      "platforms": [
+        "nt"
+      ],
+      "tool_names": [
+        "Bash"
+      ],
+      "command_patterns": [
+        ">\\s*[^\\s|;&\\\"'<>]*\\.[^\\\\/:\\s]{1,32}:(?!Zone\\.Identifier\\b)",
+        "\\b(?:Set-Content|Add-Content|Clear-Content)\\b[^\\n]{0,160}?-Stream\\b(?![\\s\\\"']*Zone\\.Identifier)",
+        "\\b(?:copy|xcopy|robocopy)\\b[^\\n]{0,120}?\\.[^\\\\/:\\s]{1,32}:(?!Zone\\.Identifier\\b)",
+        "\\bopen\\s*\\([^\\n)]{0,200}\\.[^\\\\/:\\s\\\"']{1,32}:(?!Zone\\.Identifier)[^\\\"'\\n]{0,200}[\\\"']\\s*,\\s*[\\\"'][wa]"
+      ],
+      "exclude_patterns": [],
+      "apply_to_tools": [
+        "Bash"
+      ],
+      "description": "Agent attempted to write an NTFS alternate data stream from a shell (redirect / -Stream / copy / open) -- the command-line half of DST-09",
+      "remediation": "Same channel as DST-09 reached from a shell; the file written this way survives review. Use a normal file.",
+      "description_zh": "从命令行写入 NTFS 备用数据流（重定向 / -Stream / copy / open）——DST-09 的命令通道",
+      "remediation_zh": "与 DST-09 同一通道的命令行写法，产物同样逃过审查；请改用普通文件"
+    }
+  ]
+}

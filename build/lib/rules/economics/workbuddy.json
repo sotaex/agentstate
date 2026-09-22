@@ -1,0 +1,11 @@
+{
+ "host": "workbuddy",
+ "unit": "credits",
+ "unit_label": "积分",
+ "digest_primary": "credits",
+ "buckets": ["base", "gift", "reward"],
+ "bucket_expiry": true,
+ "cycle": "monthly",
+ "balance_source": "guided-manual",
+ "note": "积分制订阅（实证 2026-09-19：标准版 4000 积分/月=基础2000+赠送2000，奖励积分单独过期）。余额来自引导式口报快照；token 是事实底座，换算率由快照间差分学习（observed）。"
+}

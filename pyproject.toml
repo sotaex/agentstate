@@ -7,9 +7,9 @@ name = "antinel"
 version = "0.28.0"
 description = "Local-first audit chain and ledger for AI coding agents: every action recorded, every record verifiable."
 readme = "README.md"
-license = {{file = "LICENSE"}}
+license = {file = "LICENSE"}
 requires-python = ">=3.10"
-authors = [{{name = "geguang"}}]
+authors = [{name = "geguang", email = "geguang@gmail.com"}]
 keywords = ["ai-agents", "audit", "security", "claude-code", "mcp"]
 classifiers = [
   "Programming Language :: Python :: 3",
