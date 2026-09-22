@@ -628,7 +628,15 @@ def main():
     pol.write_text(json.dumps({"global_settings": {"alert_threshold": "warning"},
                                "whitelist": {"domains": ["evil.example.com"], "paths": ["tests/fixtures/"], "commands": ["pip "]}}), encoding="utf-8")
     expect_allow("F-06 whitelist.domains relaxes NET-01/NET-03", *hook("Bash", {"command": "curl https://evil.example.com/x"}, proj)[:3])
-    expect_allow("F-06 whitelist.paths exempts SEC-01 under tests/fixtures", *hook("Read", {"file_path": str(proj / "tests" / "fixtures" / ".env")}, proj)[:3])
+    # M-1 macOS 取证：whitelist 豁免失败的路径三角（file_path/project_root/相对路径）
+    _f06_fp = str(proj / "tests" / "fixtures" / ".env")
+    import os as _os
+    _f06_dbg = "fp=%s real=%s root=%s root_real=%s rel=%s" % (
+        _f06_fp, _os.path.realpath(_f06_fp), str(proj), _os.path.realpath(str(proj)),
+        _os.path.relpath(_f06_fp, str(proj)))
+    rc_f06, out_f06, err_f06, _ = hook("Read", {"file_path": _f06_fp}, proj)
+    record("F-06 whitelist.paths exempts SEC-01 under tests/fixtures",
+           rc_f06 == 0, _f06_dbg + " || " + err_f06[:120])
     expect_block("F-06 whitelist.paths does not exempt other paths", *hook("Read", {"file_path": str(proj / ".env")}, proj)[:3], "SEC-01")
     rc, out, err, _ = run("scan.py", ["--root", str(proj), "--json"])
     sf = [f["file"] for f in json.loads(out)["findings"] if f["rule_id"] == "SEC-01"]
