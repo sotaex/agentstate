@@ -2,12 +2,12 @@
  {
   "name": "SEC-01 Read .env",
   "pass": true,
-  "detail": "rc=2 id=SEC-01 err=Antinel blocked [SEC-01] Agent attempted to read a .env file which may contain A"
+  "detail": "rc=2 id=SEC-01 err=Antinel 拦截 [SEC-01] 读取 .env 文件可能泄露 API 密钥与机密配置 | 命中: .env | 放行/处理: 把 .env 移出 Age"
  },
  {
   "name": "SEC-01 Read nested .env.local",
   "pass": true,
-  "detail": "rc=2 id=SEC-01 err=Antinel blocked [SEC-01] Agent attempted to read a .env file which may contain A"
+  "detail": "rc=2 id=SEC-01 err=Antinel 拦截 [SEC-01] 读取 .env 文件可能泄露 API 密钥与机密配置 | 命中: .env. | 放行/处理: 把 .env 移出 Ag"
  },
  {
   "name": "SEC-01 exclude .env.example",
@@ -17,27 +17,27 @@
  {
   "name": "SEC-01 Bash cat .env",
   "pass": true,
-  "detail": "rc=2 id=SEC-01 err=Antinel blocked [SEC-01] Agent attempted to read a .env file which may contain A"
+  "detail": "rc=2 id=SEC-01 err=Antinel 拦截 [SEC-01] 读取 .env 文件可能泄露 API 密钥与机密配置 | 命中: .env | 放行/处理: 把 .env 移出 Age"
  },
  {
   "name": "SEC-02 Read ~/.ssh/id_rsa",
   "pass": true,
-  "detail": "rc=2 id=SEC-02 err=Antinel blocked [SEC-02] Agent attempted to read SSH private key or authorized_k"
+  "detail": "rc=2 id=SEC-02 err=Antinel 拦截 [SEC-02] 读取 SSH 私钥或 authorized_keys | 命中: .ssh\\id_ | 放行/处理: SSH 密钥不要放"
  },
  {
   "name": "SEC-02 Bash cat id_ed25519",
   "pass": true,
-  "detail": "rc=2 id=SEC-02 err=Antinel blocked [SEC-02] Agent attempted to read SSH private key or authorized_k"
+  "detail": "rc=2 id=SEC-02 err=Antinel 拦截 [SEC-02] 读取 SSH 私钥或 authorized_keys | 命中: .ssh/id_ | 放行/处理: SSH 密钥不要放"
  },
  {
   "name": "SEC-03 Read .aws/credentials",
   "pass": true,
-  "detail": "rc=2 id=SEC-03 err=Antinel blocked [SEC-03] Agent attempted to read cloud provider credentials | ma"
+  "detail": "rc=2 id=SEC-03 err=Antinel 拦截 [SEC-03] 读取云厂商凭证文件 | 命中: .aws\\credentials | 放行/处理: 改用云厂商 CLI 的短期令牌；确需"
  },
  {
   "name": "SEC-04 Read keystore",
   "pass": true,
-  "detail": "rc=2 id=SEC-04 err=Antinel blocked [SEC-04] Agent attempted to read cryptocurrency wallet or keysto"
+  "detail": "rc=2 id=SEC-04 err=Antinel 拦截 [SEC-04] 读取加密货币钱包或密钥库文件 | 命中: keystore | 放行/处理: 钱包目录永远不要交给编码 Agent；必要"
  },
  {
   "name": "SEC-04 exclude test_wallet",
@@ -47,12 +47,12 @@
  {
   "name": "SEC-05 Read Login Data",
   "pass": true,
-  "detail": "rc=2 id=SEC-05 err=Antinel blocked [SEC-05] Agent attempted to read browser stored data (cookies, p"
+  "detail": "rc=2 id=SEC-05 err=Antinel 拦截 [SEC-05] 读取浏览器数据（Cookie、密码、会话） | 命中: Login Data | 放行/处理: 浏览器配置目录包含登录态"
  },
  {
   "name": "DST-01 rm -rf ./old",
   "pass": true,
-  "detail": "rc=2 id=DST-01 err=Antinel blocked [DST-01] Agent executed a file or directory deletion command | m"
+  "detail": "rc=2 id=DST-01 err=Antinel 拦截 [DST-01] 执行文件或目录删除命令 | 命中: rm | 放行/处理: 确认删除目标无误；构建产物类删除（如 node_module"
  },
  {
   "name": "DST-01 exclude rm -rf node_modules",
@@ -67,7 +67,7 @@
  {
   "name": "DST-02 Write outside root",
   "pass": true,
-  "detail": "rc=2 id=DST-02 err=Antinel blocked [DST-02] Agent attempted to write to a file outside the project "
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_4h1"
  },
  {
   "name": "DST-02 Write inside root",
@@ -77,22 +77,22 @@
  {
   "name": "DST-03 Edit ~/.bashrc",
   "pass": true,
-  "detail": "rc=2 id=DST-03 err=Antinel blocked [DST-03] Agent attempted to modify shell startup configuration ("
+  "detail": "rc=2 id=DST-03 err=Antinel 拦截 [DST-03] 修改 Shell 启动配置（.bashrc 等，属持久化机制） | 命中: .bashrc | 放行/处理: 启动脚本每"
  },
  {
   "name": "DST-03 Bash echo >> .zshrc",
   "pass": true,
-  "detail": "rc=2 id=DST-03 err=Antinel blocked [DST-03] Agent attempted to modify shell startup configuration ("
+  "detail": "rc=2 id=DST-03 err=Antinel 拦截 [DST-03] 修改 Shell 启动配置（.bashrc 等，属持久化机制） | 命中: >> ~/.zshrc | 放行/处理: 启"
  },
  {
   "name": "DST-04 crontab -e",
   "pass": true,
-  "detail": "rc=2 id=DST-04 err=Antinel blocked [DST-04] Agent attempted to establish persistence (cron job, sys"
+  "detail": "rc=2 id=DST-04 err=Antinel 拦截 [DST-04] 建立持久化机制（计划任务/系统服务/启动项/注册表 Run 键） | 命中: crontab -e | 放行/处理: 持"
  },
  {
   "name": "A1 DST-01 catches PowerShell Remove-Item",
   "pass": true,
-  "detail": "rc=2 id=DST-01 err=Antinel blocked [DST-01] Agent executed a file or directory deletion command | m"
+  "detail": "rc=2 id=DST-01 err=Antinel 拦截 [DST-01] 执行文件或目录删除命令 | 命中: Remove-Item | 放行/处理: 确认删除目标无误；构建产物类删除（如 no"
  },
  {
   "name": "A1 remove-item node_modules stays exempt",
@@ -102,12 +102,12 @@
  {
   "name": "A2 DST-04 catches schtasks",
   "pass": true,
-  "detail": "rc=2 id=DST-04 err=Antinel blocked [DST-04] Agent attempted to establish persistence (cron job, sys"
+  "detail": "rc=2 id=DST-04 err=Antinel 拦截 [DST-04] 建立持久化机制（计划任务/系统服务/启动项/注册表 Run 键） | 命中: schtasks | 放行/处理: 持久化"
  },
  {
   "name": "A2 DST-04 catches registry Run key",
   "pass": true,
-  "detail": "rc=2 id=DST-04 err=Antinel blocked [DST-04] Agent attempted to establish persistence (cron job, sys"
+  "detail": "rc=2 id=DST-04 err=Antinel 拦截 [DST-04] 建立持久化机制（计划任务/系统服务/启动项/注册表 Run 键） | 命中: reg add | 放行/处理: 持久化会"
  },
  {
   "name": "0.19.0 DST-09 gated off on POSIX (path:stream is a legal filename)",
@@ -132,32 +132,32 @@
  {
   "name": "0.19.0 DST-04 file channel: scheduled-task XML",
   "pass": true,
-  "detail": "rc=2 id=DST-04 err=Antinel blocked [DST-04] Agent attempted to establish persistence (cron job, sys"
+  "detail": "rc=2 id=DST-04 err=Antinel 拦截 [DST-04] 建立持久化机制（计划任务/系统服务/启动项/注册表 Run 键） | 命中: System32/Tasks | 放行/处"
  },
  {
   "name": "0.19.0 DST-04 file channel: launchd daemon",
   "pass": true,
-  "detail": "rc=2 id=DST-04 err=Antinel blocked [DST-04] Agent attempted to establish persistence (cron job, sys"
+  "detail": "rc=2 id=DST-04 err=Antinel 拦截 [DST-04] 建立持久化机制（计划任务/系统服务/启动项/注册表 Run 键） | 命中: LaunchDaemons | 放行/处理"
  },
  {
   "name": "0.19.0 DST-04 file channel: cron.d drop-in",
   "pass": true,
-  "detail": "rc=2 id=DST-04 err=Antinel blocked [DST-04] Agent attempted to establish persistence (cron job, sys"
+  "detail": "rc=2 id=DST-04 err=Antinel 拦截 [DST-04] 建立持久化机制（计划任务/系统服务/启动项/注册表 Run 键） | 命中: etc/cron | 放行/处理: 持久化"
  },
  {
   "name": "0.19.0 DST-04 file channel: cron/at spool",
   "pass": true,
-  "detail": "rc=2 id=DST-04 err=Antinel blocked [DST-04] Agent attempted to establish persistence (cron job, sys"
+  "detail": "rc=2 id=DST-04 err=Antinel 拦截 [DST-04] 建立持久化机制（计划任务/系统服务/启动项/注册表 Run 键） | 命中: spool/cron | 放行/处理: 持"
  },
  {
   "name": "0.19.0 DST-04 file channel: registry import file",
   "pass": true,
-  "detail": "rc=2 id=DST-04 err=Antinel blocked [DST-04] Agent attempted to establish persistence (cron job, sys"
+  "detail": "rc=2 id=DST-04 err=Antinel 拦截 [DST-04] 建立持久化机制（计划任务/系统服务/启动项/注册表 Run 键） | 命中: .reg | 放行/处理: 持久化会在会话"
  },
  {
   "name": "0.19.0 DST-04 file channel: Winlogon key",
   "pass": true,
-  "detail": "rc=2 id=DST-04 err=Antinel blocked [DST-04] Agent attempted to establish persistence (cron job, sys"
+  "detail": "rc=2 id=DST-04 err=Antinel 拦截 [DST-04] 建立持久化机制（计划任务/系统服务/启动项/注册表 Run 键） | 命中: CurrentVersion/Winlog"
  },
  {
   "name": "0.19.0 DST-04 file channel: tasks.py is not a scheduled task (negative control)",
@@ -172,12 +172,12 @@
  {
   "name": "DST-05 warning chmod 777",
   "pass": true,
-  "detail": "rc=0 err=[DST-05] Notice:"
+  "detail": "rc=0 err=[DST-05] 提醒: 尝试提权操作"
  },
  {
   "name": "NET-01 warning curl evil",
   "pass": true,
-  "detail": "rc=0 err=[NET-01] Notice: \n[NET-03] Notice:"
+  "detail": "rc=0 err=[NET-01] 提醒: 通过 Shell 向白名单外域名发起网络请求\n[NET-03] 提醒: 命令引用了白名单外的域名"
  },
  {
   "name": "NET-01 exclude pypi",
@@ -192,12 +192,12 @@
  {
   "name": "NET-02 warning requests.get",
   "pass": true,
-  "detail": "rc=0 err=[NET-02] Notice:"
+  "detail": "rc=0 err=[NET-02] 提醒: 内联代码包含 Python 网络请求调用"
  },
  {
   "name": "NET-03 warning nslookup domain",
   "pass": true,
-  "detail": "rc=0 err=[NET-03] Notice:"
+  "detail": "rc=0 err=[NET-03] 提醒: 命令引用了白名单外的域名"
  },
  {
   "name": "NET-03 whitelisted github",
@@ -212,12 +212,12 @@
  {
   "name": "NET-03 warning scp to internal host",
   "pass": true,
-  "detail": "rc=0 err=[NET-01] Notice: \n[NET-03] Notice:"
+  "detail": "rc=0 err=[NET-01] 提醒: 通过 Shell 向白名单外域名发起网络请求\n[NET-03] 提醒: 命令引用了白名单外的域名"
  },
  {
   "name": "CTX-01 warning printenv",
   "pass": true,
-  "detail": "rc=0 err=[CTX-01] Notice:"
+  "detail": "rc=0 err=[CTX-01] 提醒: 枚举全部环境变量（可能暴露密钥）"
  },
  {
   "name": "CTX-01 no hit on venv",
@@ -227,17 +227,17 @@
  {
   "name": "CTX-02 Read poisoned SKILL.md",
   "pass": true,
-  "detail": "rc=2 id=CTX-02 err=Antinel blocked [CTX-02] Potential prompt injection payload detected in skill in"
+  "detail": "rc=2 id=CTX-02 err=Antinel 拦截 [CTX-02] 技能指令文件中发现提示注入载荷 | 命中: Ignore all previous instructions | 放行/"
  },
  {
   "name": "CTX-02 Write poisoned SKILL.md",
   "pass": true,
-  "detail": "rc=2 id=CTX-02 err=Antinel blocked [CTX-02] Potential prompt injection payload detected in skill in"
+  "detail": "rc=2 id=CTX-02 err=Antinel 拦截 [CTX-02] 技能指令文件中发现提示注入载荷 | 命中: ignore previous instructions | 放行/处理: "
  },
  {
   "name": "CTX-03 Read zero-width SKILL.md",
   "pass": true,
-  "detail": "rc=2 id=CTX-03 err=Antinel blocked [CTX-03] Invisible Unicode character detected (tag characters, z"
+  "detail": "rc=2 id=CTX-03 err=Antinel 拦截 [CTX-03] 检出隐形 Unicode 字符（标签字符/零宽字符等） | 命中: U+200B at offset 29 | 放行/处"
  },
  {
   "name": "CTX-03 BOM+ZWJ whitelisted",
@@ -251,18 +251,18 @@
  },
  {
   "name": "UX: 拦截理由为中文且含处理建议",
-  "pass": false,
-  "detail": "Antinel blocked [SEC-01] Agent attempted to read a .env file which may contain API keys an"
+  "pass": true,
+  "detail": "Antinel 拦截 [SEC-01] 读取 .env 文件可能泄露 API 密钥与机密配置 | 命中: .env | 放行/处理: 把 .env 移出 Agent 可读范围；确需"
  },
  {
   "name": "UX: 同类提醒当天只提示一次（第二次静默记录）",
-  "pass": false,
-  "detail": "e1='[DST-05] Notice: \\n' e2=''"
+  "pass": true,
+  "detail": "e1='[DST-05] 提醒: 尝试提权操作\\n' e2=''"
  },
  {
   "name": "A5 5MB command handled fast (truncated before matching)",
   "pass": true,
-  "detail": "median ms=1804 (runs: 1836, 1767, 1804; load-sensitive; ladder B-021..023 tracks the budget)"
+  "detail": "median ms=1917 (runs: 1917, 1950, 1914; load-sensitive; ladder B-021..023 tracks the budget)"
  },
  {
   "name": "A-08 invalid JSON -> allow",
@@ -287,7 +287,7 @@
  {
   "name": "B-03 custom rule appended",
   "pass": true,
-  "detail": "rc=2 id=CUSTOM-001 err=Antinel blocked [CUSTOM-001] Block access to customer data | matched: customer_d"
+  "detail": "rc=2 id=CUSTOM-001 err=Antinel 拦截 [CUSTOM-001] Block access to customer data | 命中: customer_data/ | 放行/"
  },
  {
   "name": "OUT-01 secret in output -> alert, exit 0",
@@ -337,7 +337,7 @@
  {
   "name": "hook latency median (ms, includes interpreter start)",
   "pass": true,
-  "detail": "median=58 min=58 max=62"
+  "detail": "median=58 min=56 max=60"
  },
  {
   "name": "T3 scan skills (skipped: skills dir not present at D:\\psl\\skills)",
@@ -361,7 +361,7 @@
  },
  {
   "name": "UX: scan 中文结论行",
-  "pass": false,
+  "pass": true,
   "detail": ""
  },
  {
@@ -382,7 +382,7 @@
  {
   "name": "install claude-code: hooks appended, foreign kept",
   "pass": true,
-  "detail": "rc=0 ms=112"
+  "detail": "rc=0 ms=108"
  },
  {
   "name": "D7 .psl/.gitignore auto-written",
@@ -462,7 +462,7 @@
  {
   "name": "report text",
   "pass": true,
-  "detail": " Conclusion: 43 finding(s) found (CRITICAL 28 / WARNING 15). Address CRITICAL items first."
+  "detail": " 结论：发现 43 项问题（CRITICAL 28 / WARNING 15），建议优先处理 CRITICAL 项；完整轨迹见审计日志。"
  },
  {
   "name": "report json score/dedupe",
@@ -805,7 +805,7 @@
  {
   "name": "F-06 whitelist.paths does not exempt other paths",
   "pass": true,
-  "detail": "rc=2 id=SEC-01 err=Antinel blocked [SEC-01] Agent attempted to read a .env file which may contain A"
+  "detail": "rc=2 id=SEC-01 err=Antinel 拦截 [SEC-01] 读取 .env 文件可能泄露 API 密钥与机密配置 | 命中: .env | 放行/处理: 把 .env 移出 Age"
  },
  {
   "name": "F-06 whitelist.paths honoured by scan.py",
@@ -830,12 +830,12 @@
  {
   "name": "A9 MultiEdit content -> CTX-02 block",
   "pass": true,
-  "detail": "Antinel blocked [CTX-02] Potential prompt injection payload "
+  "detail": "Antinel 拦截 [CTX-02] 技能指令文件中发现提示注入载荷 | 命中: ignore all previou"
  },
  {
   "name": "A9 NotebookEdit alias -> CTX-02 block (poisoned cell)",
   "pass": true,
-  "detail": "Antinel blocked [CTX-02] Potential prompt injection payload "
+  "detail": "Antinel 拦截 [CTX-02] 技能指令文件中发现提示注入载荷 | 命中: ignore all previou"
  },
  {
   "name": "F-06 alert_threshold=critical suppresses stderr notice but still logs",
@@ -850,17 +850,17 @@
  {
   "name": "0.16.0 DST-01 rd /s /q blocked",
   "pass": true,
-  "detail": "rc=2 id=DST-01 err=Antinel blocked [DST-01] Agent executed a file or directory deletion command | m"
+  "detail": "rc=2 id=DST-01 err=Antinel 拦截 [DST-01] 执行文件或目录删除命令 | 命中: rd /s | 放行/处理: 确认删除目标无误；构建产物类删除（如 node_mod"
  },
  {
   "name": "0.16.0 DST-01 mid-command rd /s blocked (cmd /c)",
   "pass": true,
-  "detail": "rc=2 id=DST-01 err=Antinel blocked [DST-01] Agent executed a file or directory deletion command | m"
+  "detail": "rc=2 id=DST-01 err=Antinel 拦截 [DST-01] 执行文件或目录删除命令 | 命中:  rd /s | 放行/处理: 确认删除目标无误；构建产物类删除（如 node_mo"
  },
  {
   "name": "0.16.0 DST-01 &&-chained rd blocked",
   "pass": true,
-  "detail": "rc=2 id=DST-01 err=Antinel blocked [DST-01] Agent executed a file or directory deletion command | m"
+  "detail": "rc=2 id=DST-01 err=Antinel 拦截 [DST-01] 执行文件或目录删除命令 | 命中: & rd /s | 放行/处理: 确认删除目标无误；构建产物类删除（如 node_m"
  },
  {
   "name": "0.16.0 DST-01 python 'rd = 3' is not a delete",
@@ -875,7 +875,7 @@
  {
   "name": "0.16.0 DST-01 URL /rd/ segment is not a delete (NET-01 warns, no block)",
   "pass": true,
-  "detail": "[NET-01] Notice: \n[NET-03] Notice:"
+  "detail": "[NET-01] 提醒: 通过 Shell 向白名单外域名发起网络请求\n[NET-03] 提醒: 命令引用了白名单外的域名"
  },
  {
   "name": "C7 over-long custom pattern dropped, hook unaffected",
@@ -885,22 +885,22 @@
  {
   "name": "C9 nested ReDoS pattern '(a+)+$' rejected, hook not wedged",
   "pass": true,
-  "detail": "144ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
+  "detail": "141ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
  },
  {
   "name": "C9 alternation ReDoS pattern '(a|aa)+$' rejected, hook not wedged",
   "pass": true,
-  "detail": "144ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
+  "detail": "139ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
  },
  {
   "name": "C9 inner-optional ReDoS pattern '(a?)+$' rejected, hook not wedged",
   "pass": true,
-  "detail": "163ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
+  "detail": "165ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
  },
  {
   "name": "C9 benign custom rule still loads and fires (read-only downgrade to alert)",
   "pass": true,
-  "detail": "[CUSTOM-OK] Notice:"
+  "detail": "[CUSTOM-OK] 提醒:"
  },
  {
   "name": "C11 KNOWN GAP: files deeper than MAX_DEPTH=15 are not scanned (accepted, see THREAT_MODEL -- not an acceptance criterion)",
@@ -920,7 +920,7 @@
  {
   "name": "workspace_roots: undeclared location still blocked",
   "pass": true,
-  "detail": "rc=2 id=DST-02 err=Antinel blocked [DST-02] Agent attempted to write to a file outside the project "
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_4h1"
  },
  {
   "name": "workspace_roots: drive root rejected",
@@ -950,7 +950,7 @@
  {
   "name": "workspace_roots: missing config file = pre-feature behaviour",
   "pass": true,
-  "detail": "rc=2 id=DST-02 err=Antinel blocked [DST-02] Agent attempted to write to a file outside the project "
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_4h1"
  },
  {
   "name": "DST-02 host config: the file the hook reads is writable by the tool that maintains it",
@@ -965,32 +965,32 @@
  {
   "name": "DST-02 host config: a sibling of the config is NOT released (exact file, not its directory)",
   "pass": true,
-  "detail": "rc=2 id=DST-02 err=Antinel blocked [DST-02] Agent attempted to write to a file outside the project "
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_4h1"
  },
  {
   "name": "RO: grep for a destructive verb is allowed",
   "pass": true,
-  "detail": "rc=0 err=[DST-01] Notice:"
+  "detail": "rc=0 err=[DST-01] 提醒: 执行文件或目录删除命令"
  },
  {
   "name": "RO: grep for a persistence verb is allowed",
   "pass": true,
-  "detail": "rc=0 err=[DST-04] Notice:"
+  "detail": "rc=0 err=[DST-04] 提醒: 建立持久化机制（计划任务/系统服务/启动项/注册表 Run 键）"
  },
  {
   "name": "RO: alternation inside quotes is still read-only",
   "pass": true,
-  "detail": "rc=0 err=[DST-01] Notice:"
+  "detail": "rc=0 err=[DST-01] 提醒: 执行文件或目录删除命令"
  },
  {
   "name": "RO: sed is not downgraded (s///e can reach a shell)",
   "pass": true,
-  "detail": "rc=2 id=DST-01 err=Antinel blocked [DST-01] Agent executed a file or directory deletion command | m"
+  "detail": "rc=2 id=DST-01 err=Antinel 拦截 [DST-01] 执行文件或目录删除命令 | 命中: rm | 放行/处理: 确认删除目标无误；构建产物类删除（如 node_module"
  },
  {
   "name": "RO: awk is not downgraded (system())",
   "pass": true,
-  "detail": "rc=2 id=DST-01 err=Antinel blocked [DST-01] Agent executed a file or directory deletion command | m"
+  "detail": "rc=2 id=DST-01 err=Antinel 拦截 [DST-01] 执行文件或目录删除命令 | 命中: rm | 放行/处理: 确认删除目标无误；构建产物类删除（如 node_module"
  },
  {
   "name": "RO: a compound read-only command is allowed (cd + grep)",
@@ -1010,22 +1010,22 @@
  {
   "name": "RO: pipe into a destructive verb is not downgraded",
   "pass": true,
-  "detail": "rc=2 id=DST-01 err=Antinel blocked [DST-01] Agent executed a file or directory deletion command | m"
+  "detail": "rc=2 id=DST-01 err=Antinel 拦截 [DST-01] 执行文件或目录删除命令 | 命中: rm | 放行/处理: 确认删除目标无误；构建产物类删除（如 node_module"
  },
  {
   "name": "RO: command substitution is not downgraded",
   "pass": true,
-  "detail": "rc=2 id=DST-01 err=Antinel blocked [DST-01] Agent executed a file or directory deletion command | m"
+  "detail": "rc=2 id=DST-01 err=Antinel 拦截 [DST-01] 执行文件或目录删除命令 | 命中: rm | 放行/处理: 确认删除目标无误；构建产物类删除（如 node_module"
  },
  {
   "name": "RO: find -delete is a write, not a mention",
   "pass": true,
-  "detail": "rc=2 id=DST-01 err=Antinel blocked [DST-01] Agent executed a file or directory deletion command | m"
+  "detail": "rc=2 id=DST-01 err=Antinel 拦截 [DST-01] 执行文件或目录删除命令 | 命中: rm | 放行/处理: 确认删除目标无误；构建产物类删除（如 node_module"
  },
  {
   "name": "RO: sed -i is a write, not a mention",
   "pass": true,
-  "detail": "rc=2 id=DST-01 err=Antinel blocked [DST-01] Agent executed a file or directory deletion command | m"
+  "detail": "rc=2 id=DST-01 err=Antinel 拦截 [DST-01] 执行文件或目录删除命令 | 命中: rm | 放行/处理: 确认删除目标无误；构建产物类删除（如 node_module"
  },
  {
   "name": "RO: sudo is never downgraded",
@@ -1035,7 +1035,7 @@
  {
   "name": "RO: PowerShell pipeline into Remove-Item is not downgraded",
   "pass": true,
-  "detail": "rc=2 id=DST-01 err=Antinel blocked [DST-01] Agent executed a file or directory deletion command | m"
+  "detail": "rc=2 id=DST-01 err=Antinel 拦截 [DST-01] 执行文件或目录删除命令 | 命中: Remove-Item | 放行/处理: 确认删除目标无误；构建产物类删除（如 no"
  },
  {
   "name": "RO: Select-String for a destructive verb is allowed",
@@ -1045,7 +1045,7 @@
  {
   "name": "RO: the file family is not downgraded (grep .env)",
   "pass": true,
-  "detail": "rc=2 id=SEC-01 err=Antinel blocked [SEC-01] Agent attempted to read a .env file which may contain A"
+  "detail": "rc=2 id=SEC-01 err=Antinel 拦截 [SEC-01] 读取 .env 文件可能泄露 API 密钥与机密配置 | 命中: .env | 放行/处理: 把 .env 移出 Age"
  },
  {
   "name": "RO: the downgrade is recorded in the audit log, not silently dropped",
@@ -1055,12 +1055,12 @@
  {
   "name": "WS-1 POSIX: root rejected",
   "pass": true,
-  "detail": "rc=2 id=DST-02 err=Antinel blocked [DST-02] Agent attempted to write to a file outside the project "
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_4h1"
  },
  {
   "name": "WS-1 POSIX: system dir rejected",
   "pass": true,
-  "detail": "rc=2 id=DST-02 err=Antinel blocked [DST-02] Agent attempted to write to a file outside the project "
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_4h1"
  },
  {
   "name": "WS-1 POSIX: home shorthand rejected",
@@ -1095,7 +1095,7 @@
  {
   "name": "WS-3 rejected config entry is visible in report.py",
   "pass": true,
-  "detail": "WARNING 19). Address CRITICAL items first.\n Full log: /tmp/antinel_harness_p1opry88/proj/.psl/audit\n Re-scan: python scan.py\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+  "detail": "/ WARNING 19），建议优先处理 CRITICAL 项；完整轨迹见审计日志。\n Full log: /tmp/antinel_harness_4h1rqn7h/proj/.psl/audit\n Re-scan: python scan.py\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
  },
  {
   "name": "A12 policy.json edited out of band is reported once",
@@ -1120,7 +1120,7 @@
  {
   "name": "0.16.0 DST-02 released by whitelist.paths (no policy edit per write)",
   "pass": false,
-  "detail": "rc=2 err=[Antinel][配置变更] .psl/policy.json 内容已变化（sha256 135112bf25f3…）\n          白名单/阈值的放行"
+  "detail": "rc=2 err=[Antinel][配置变更] .psl/policy.json 内容已变化（sha256 498e27c49b2b…）\n          白名单/阈值的放行"
  },
  {
   "name": "0.16.0 DST-02 whitelist release is recorded (dst02_path_whitelisted)",
@@ -1150,7 +1150,7 @@
  {
   "name": "0.16.0 ledger exists and row 1 is the self-verdict",
   "pass": true,
-  "detail": "rows=26"
+  "detail": "rows=28"
  },
  {
   "name": "0.16.0 antinel_verify derives current on an intact package",
@@ -1265,7 +1265,7 @@
  {
   "name": "0.18.0 R-18 audit loss with fail_closed=true -> BLOCK [AUDIT-LOSS]",
   "pass": true,
-  "detail": "rc=2 out={\"decision\": \"block\", \"reason\": \"Antinel blocked [AUDIT-LOSS] audit wr"
+  "detail": "rc=2 out={\"decision\": \"block\", \"reason\": \"Antinel 拦截 [AUDIT-LOSS] 审计记录写入失败且 fai"
  },
  {
   "name": "0.18.0 R-20 intact day: chain OK and tail-OK vs day manifest",
@@ -1300,7 +1300,7 @@
  {
   "name": "0.18.0 R-21 dry-run is deterministic and side-effect-free (same answer as the intact tree; ledger row count unchanged)",
   "pass": true,
-  "detail": "rows 26->26, answer=would_append=false"
+  "detail": "rows 28->28, answer=would_append=false"
  },
  {
   "name": "0.22.0 C1 pre records file_state_before (hash+size)",
@@ -1370,7 +1370,7 @@
  {
   "name": "0.23.0 A1 first harvest chains usage_delta with token facts",
   "pass": true,
-  "detail": "{'path_tag': 'sha256:f76e17bbdf9f0388', 'scope': 'tail_first_sight', 'reset': False, 'byte"
+  "detail": "{'path_tag': 'sha256:26864e43ee57fe4c', 'scope': 'tail_first_sight', 'reset': False, 'byte"
  },
  {
   "name": "0.23.0 privacy: raw transcript path is not in the ledger",
@@ -1435,7 +1435,7 @@
  {
   "name": "0.23.1 policy_changed chained with invoked_by + digests",
   "pass": true,
-  "detail": "[{'ts': '2026-09-22T15:05:30+00:00', 'type': 'policy_changed', 'tool': '-', 'session': 'an"
+  "detail": "[{'ts': '2026-09-22T15:42:58+00:00', 'type': 'policy_changed', 'tool': '-', 'session': 'an"
  },
  {
   "name": "0.23.1 roots add drive-root rejected (fail-closed)",
