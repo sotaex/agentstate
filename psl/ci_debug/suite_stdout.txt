@@ -1,0 +1,97 @@
+== T1 hook protocol (pre_tool_use) ==
+PASS SEC-01 Read .env  -- rc=2 id=SEC-01 err=Antinel blocked [SEC-01] Agent attempted to read a .env file which may contain A
+PASS SEC-01 Read nested .env.local  -- rc=2 id=SEC-01 err=Antinel blocked [SEC-01] Agent attempted to read a .env file which may contain A
+PASS SEC-01 exclude .env.example  -- rc=0 err=
+PASS SEC-01 Bash cat .env  -- rc=2 id=SEC-01 err=Antinel blocked [SEC-01] Agent attempted to read a .env file which may contain A
+PASS SEC-02 Read ~/.ssh/id_rsa  -- rc=2 id=SEC-02 err=Antinel blocked [SEC-02] Agent attempted to read SSH private key or authorized_k
+PASS SEC-02 Bash cat id_ed25519  -- rc=2 id=SEC-02 err=Antinel blocked [SEC-02] Agent attempted to read SSH private key or authorized_k
+PASS SEC-03 Read .aws/credentials  -- rc=2 id=SEC-03 err=Antinel blocked [SEC-03] Agent attempted to read cloud provider credentials | ma
+PASS SEC-04 Read keystore  -- rc=2 id=SEC-04 err=Antinel blocked [SEC-04] Agent attempted to read cryptocurrency wallet or keysto
+PASS SEC-04 exclude test_wallet  -- rc=0 err=
+PASS SEC-05 Read Login Data  -- rc=2 id=SEC-05 err=Antinel blocked [SEC-05] Agent attempted to read browser stored data (cookies, p
+PASS DST-01 rm -rf ./old  -- rc=2 id=DST-01 err=Antinel blocked [DST-01] Agent executed a file or directory deletion command | m
+PASS DST-01 exclude rm -rf node_modules  -- rc=0 err=
+PASS DST-01 before DST-05 (sudo rm)  -- rc=2 id=DST-01 err=[DST-02] 提醒: 命令文本中出现项目根之外的显式绝对路径（已记录；脚本内容不解析，详见 THREAT_MODEL Non-goals）: /var/x
+
+PASS DST-02 Write outside root  -- rc=2 id=DST-02 err=Antinel blocked [DST-02] Agent attempted to write to a file outside the project 
+PASS DST-02 Write inside root  -- rc=0 err=
+PASS DST-03 Edit ~/.bashrc  -- rc=2 id=DST-03 err=Antinel blocked [DST-03] Agent attempted to modify shell startup configuration (
+PASS DST-03 Bash echo >> .zshrc  -- rc=2 id=DST-03 err=Antinel blocked [DST-03] Agent attempted to modify shell startup configuration (
+PASS DST-04 crontab -e  -- rc=2 id=DST-04 err=Antinel blocked [DST-04] Agent attempted to establish persistence (cron job, sys
+PASS A1 DST-01 catches PowerShell Remove-Item  -- rc=2 id=DST-01 err=Antinel blocked [DST-01] Agent executed a file or directory deletion command | m
+PASS A1 remove-item node_modules stays exempt  -- rc=0 err=
+PASS A2 DST-04 catches schtasks  -- rc=2 id=DST-04 err=Antinel blocked [DST-04] Agent attempted to establish persistence (cron job, sys
+PASS A2 DST-04 catches registry Run key  -- rc=2 id=DST-04 err=Antinel blocked [DST-04] Agent attempted to establish persistence (cron job, sys
+PASS 0.19.0 DST-09 gated off on POSIX (path:stream is a legal filename)  -- rc=0 err=
+PASS 0.19.0 DST-10 gated off on POSIX (redirect half)  -- rc=0 err=
+PASS 0.19.0 DST-10 gated off on POSIX (-Stream half)  -- rc=0 err=
+PASS 0.19.0 Zone.Identifier stream stays allowed (never a finding)  -- rc=0 err=
+PASS 0.19.0 DST-04 file channel: scheduled-task XML  -- rc=2 id=DST-04 err=Antinel blocked [DST-04] Agent attempted to establish persistence (cron job, sys
+PASS 0.19.0 DST-04 file channel: launchd daemon  -- rc=2 id=DST-04 err=Antinel blocked [DST-04] Agent attempted to establish persistence (cron job, sys
+PASS 0.19.0 DST-04 file channel: cron.d drop-in  -- rc=2 id=DST-04 err=Antinel blocked [DST-04] Agent attempted to establish persistence (cron job, sys
+PASS 0.19.0 DST-04 file channel: cron/at spool  -- rc=2 id=DST-04 err=Antinel blocked [DST-04] Agent attempted to establish persistence (cron job, sys
+PASS 0.19.0 DST-04 file channel: registry import file  -- rc=2 id=DST-04 err=Antinel blocked [DST-04] Agent attempted to establish persistence (cron job, sys
+PASS 0.19.0 DST-04 file channel: Winlogon key  -- rc=2 id=DST-04 err=Antinel blocked [DST-04] Agent attempted to establish persistence (cron job, sys
+PASS 0.19.0 DST-04 file channel: tasks.py is not a scheduled task (negative control)  -- rc=0 err=
+PASS DST-05 warning sudo apt (exclude)  -- rc=0 err=
+PASS DST-05 warning chmod 777  -- rc=0 err=[DST-05] Notice:
+PASS NET-01 warning curl evil  -- rc=0 err=[NET-01] Notice: 
+[NET-03] Notice:
+PASS NET-01 exclude pypi  -- rc=0 err=
+PASS NET benign pip install  -- rc=0 err=
+PASS NET-02 warning requests.get  -- rc=0 err=[NET-02] Notice:
+PASS NET-03 warning nslookup domain  -- rc=0 err=[NET-03] Notice:
+PASS NET-03 whitelisted github  -- rc=0 err=
+PASS NET-03 filenames are not domains  -- rc=0 err=
+PASS NET-03 warning scp to internal host  -- rc=0 err=[NET-01] Notice: 
+[NET-03] Notice:
+PASS CTX-01 warning printenv  -- rc=0 err=[CTX-01] Notice:
+PASS CTX-01 no hit on venv  -- rc=0 err=
+PASS CTX-02 Read poisoned SKILL.md  -- rc=2 id=CTX-02 err=Antinel blocked [CTX-02] Potential prompt injection payload detected in skill in
+PASS CTX-02 Write poisoned SKILL.md  -- rc=2 id=CTX-02 err=Antinel blocked [CTX-02] Potential prompt injection payload detected in skill in
+PASS CTX-03 Read zero-width SKILL.md  -- rc=2 id=CTX-03 err=Antinel blocked [CTX-03] Invisible Unicode character detected (tag characters, z
+PASS CTX-03 BOM+ZWJ whitelisted  -- rc=0 err=
+PASS Benign PSL SKILL.md read  -- rc=0 err=
+FAIL UX: 拦截理由为中文且含处理建议  -- Antinel blocked [SEC-01] Agent attempted to read a .env file which may contain API keys an
+FAIL UX: 同类提醒当天只提示一次（第二次静默记录）  -- e1='[DST-05] Notice: \n' e2=''
+PASS A5 5MB command handled fast (truncated before matching)  -- median ms=1011 (runs: 1017, 1011, 989; load-sensitive; ladder B-021..023 tracks the budget)
+PASS A-08 invalid JSON -> allow  -- rc=0
+PASS A-08 missing tool_input -> allow  -- rc=0
+PASS B-03 custom disables NET-01 -> NET-03 alert (audit-based)  -- ['NET-03']
+PASS C7 pathological custom pattern rejected loudly (length guard + quantifier screen)  -- [Antinel] CUSTOM RULE REJECTED CUSTOM-BAD: nested-quantifier pattern (ReDoS risk
+PASS B-03 custom rule appended  -- rc=2 id=CUSTOM-001 err=Antinel blocked [CUSTOM-001] Block access to customer data | matched: customer_d
+== T1 post_tool_use ==
+PASS OUT-01 secret in output -> alert, exit 0  -- [OUT-01] 提醒：工具输出包含疑似密钥（AWS access key），已记录审计；请轮换相关凭证
+PASS C-01 canary observed, exit 0
+PASS post normal record
+PASS A7 stats.json pruned to 90 days  -- days=40
+PASS A3 secrets masked before entering audit log
+PASS A8 concurrent appends: 8/8 landed, zero corrupted lines  -- a8=8 lines=123
+PASS post UTF-8 roundtrip (no GBK mojibake)
+PASS F-03 JSONL audit log written  -- files=1 lines=124
+PASS C-01 canary persisted in log
+== T6 hook latency (NFR-03) ==
+PASS hook latency median (ms, includes interpreter start)  -- median=41 min=40 max=42
+== T3 negative: 7 verified PSL skills ==
+PASS T3 scan skills (skipped: skills dir not present at D:\psl\skills)
+== T4 positive: malicious fixture ==
+PASS T4 scan fixture detects ['CTX-02', 'CTX-03', 'CTX-04', 'CTX-05', 'SEC-01', 'SEC-02', 'SEC-06']  -- hit=['CTX-02', 'CTX-03', 'CTX-04', 'CTX-05', 'SEC-01', 'SEC-02', 'SEC-06'] score=0 grade=D (unsafe)
+PASS T4 BOM/ZWJ file not flagged
+PASS scan text render
+FAIL UX: scan 中文结论行
+PASS A6 CTX-05 case-only name/dir difference not flagged (scan)  -- ['evil-helper/SKILL.md']
+PASS C3 depth boundary: deeper-than-15 not scanned, no crash  -- []
+PASS A6 CTX-05 case-only not flagged (hook)
+== T2/T7 install / uninstall ==
+PASS install claude-code: hooks appended, foreign kept  -- rc=0 ms=71
+PASS D7 .psl/.gitignore auto-written
+PASS A4 tampered rules hash -> fallback minimal set + SELF-TAMPERED warning  -- [Antinel] SELF-TAMPERED: rules/default.json differs from the installed
+PASS A4 fallback still blocks SEC-01 (baseline intact)
+PASS install SessionStart banner event registered (3 events)
+PASS SessionStart banner prints additionalContext
+PASS install manifest schema (D-05)  -- sha256:tampered
+PASS install first scan reports .env exposure
+PASS install idempotent (D-04)
+PASS uninstall removes ours, keeps foreign (F-08)
+PASS install zcode host detected (real contract: config.json + enabled + process type)
+PASS ZCode channel: block with empty stdout (strict schema safe)  -- rc=2 out=''
