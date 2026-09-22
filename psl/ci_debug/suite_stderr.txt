@@ -1,8 +1,22 @@
 Traceback (most recent call last):
-  File "/home/runner/work/antinel/antinel/scripts/verification_tests.py", line 1597, in <module>
+  File "/home/runner/work/antinel/antinel/scripts/verification_tests.py", line 1600, in <module>
     sys.exit(main())
              ^^^^^^
-  File "/home/runner/work/antinel/antinel/scripts/verification_tests.py", line 1171, in main
-    os.rmdir(str(jlink))            # removes the junction, never the target
-    ^^^^^^^^^^^^^^^^^^^^
-NotADirectoryError: [Errno 20] Not a directory: '/tmp/antinel_harness_h3cgdakx/proj/tests/fixtures/jlink'
+  File "/home/runner/work/antinel/antinel/scripts/verification_tests.py", line 1487, in main
+    rc, out, err, _ = run("antinel.py", [], cwd=proj, env=hub_env, stdin=b"")
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/antinel/antinel/scripts/verification_tests.py", line 117, in run
+    p = subprocess.run([PY, str(script_path(script)), *argv], cwd=str(cwd) if cwd else None,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/subprocess.py", line 550, in run
+    stdout, stderr = process.communicate(input, timeout=timeout)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/subprocess.py", line 1209, in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/subprocess.py", line 2092, in _communicate
+    self._save_input(input)
+  File "/opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/subprocess.py", line 2172, in _save_input
+    self._input = self._input.encode(self.stdin.encoding,
+                  ^^^^^^^^^^^^^^^^^^
+AttributeError: 'bytes' object has no attribute 'encode'. Did you mean: 'decode'?

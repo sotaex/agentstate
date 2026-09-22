@@ -54,7 +54,7 @@ PASS CTX-03 BOM+ZWJ whitelisted  -- rc=0 err=
 PASS Benign PSL SKILL.md read  -- rc=0 err=
 FAIL UX: 拦截理由为中文且含处理建议  -- Antinel blocked [SEC-01] Agent attempted to read a .env file which may contain API keys an
 FAIL UX: 同类提醒当天只提示一次（第二次静默记录）  -- e1='[DST-05] Notice: \n' e2=''
-PASS A5 5MB command handled fast (truncated before matching)  -- median ms=1372 (runs: 1372, 1375, 1367; load-sensitive; ladder B-021..023 tracks the budget)
+PASS A5 5MB command handled fast (truncated before matching)  -- median ms=1042 (runs: 1042, 1037, 1061; load-sensitive; ladder B-021..023 tracks the budget)
 PASS A-08 invalid JSON -> allow  -- rc=0
 PASS A-08 missing tool_input -> allow  -- rc=0
 PASS B-03 custom disables NET-01 -> NET-03 alert (audit-based)  -- ['NET-03']
@@ -71,7 +71,7 @@ PASS post UTF-8 roundtrip (no GBK mojibake)
 PASS F-03 JSONL audit log written  -- files=1 lines=124
 PASS C-01 canary persisted in log
 == T6 hook latency (NFR-03) ==
-PASS hook latency median (ms, includes interpreter start)  -- median=34 min=34 max=35
+PASS hook latency median (ms, includes interpreter start)  -- median=36 min=35 max=87
 == T3 negative: 7 verified PSL skills ==
 PASS T3 scan skills (skipped: skills dir not present at D:\psl\skills)
 == T4 positive: malicious fixture ==
@@ -83,7 +83,7 @@ PASS A6 CTX-05 case-only name/dir difference not flagged (scan)  -- ['evil-helpe
 PASS C3 depth boundary: deeper-than-15 not scanned, no crash  -- []
 PASS A6 CTX-05 case-only not flagged (hook)
 == T2/T7 install / uninstall ==
-PASS install claude-code: hooks appended, foreign kept  -- rc=0 ms=68
+PASS install claude-code: hooks appended, foreign kept  -- rc=0 ms=69
 PASS D7 .psl/.gitignore auto-written
 PASS A4 tampered rules hash -> fallback minimal set + SELF-TAMPERED warning  -- [Antinel] SELF-TAMPERED: rules/default.json differs from the installed
 PASS A4 fallback still blocks SEC-01 (baseline intact)
@@ -139,9 +139,9 @@ PASS 0.16.0 DST-01 raw-string r'D:\...' is not a delete  -- rc=0 err=
 PASS 0.16.0 DST-01 URL /rd/ segment is not a delete (NET-01 warns, no block)  -- [NET-01] Notice: 
 [NET-03] Notice:
 PASS C7 over-long custom pattern dropped, hook unaffected
-PASS C9 nested ReDoS pattern '(a+)+$' rejected, hook not wedged  -- 83ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes
-PASS C9 alternation ReDoS pattern '(a|aa)+$' rejected, hook not wedged  -- 82ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes
-PASS C9 inner-optional ReDoS pattern '(a?)+$' rejected, hook not wedged  -- 82ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes
+PASS C9 nested ReDoS pattern '(a+)+$' rejected, hook not wedged  -- 76ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes
+PASS C9 alternation ReDoS pattern '(a|aa)+$' rejected, hook not wedged  -- 75ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes
+PASS C9 inner-optional ReDoS pattern '(a?)+$' rejected, hook not wedged  -- 76ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes
 PASS C9 benign custom rule still loads and fires (read-only downgrade to alert)  -- [CUSTOM-OK] Notice:
 PASS C11 KNOWN GAP: files deeper than MAX_DEPTH=15 are not scanned (accepted, see THREAT_MODEL -- not an acceptance criterion)  -- []
 
@@ -195,7 +195,7 @@ PASS WS-1 POSIX: wildcard rejected  -- rc=2 id=DST-02 err=[Antinel][配置错误
 PASS WS-1 POSIX: a real absolute root is honoured  -- rc=0 err=
 PASS WS-3 rejected config entry lands in the audit log  -- 11 records
 PASS WS-3 rejected config entry is visible in report.py  -- WARNING 19). Address CRITICAL items first.
- Full log: /tmp/antinel_harness_h3cgdakx/proj/.psl/audit
+ Full log: /tmp/antinel_harness_pl6ahbrl/proj/.psl/audit
  Re-scan: python scan.py
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -206,16 +206,16 @@ PASS A15 an exclude_patterns allow is mirrored outside the project  -- 1 mirrore
 PASS A15 ANTINEL_HOST_MIRROR=0 writes nothing outside the project  -- mirror dir exists: False
 
 -- 0.16.0 capabilities --
-FAIL 0.16.0 DST-02 released by whitelist.paths (no policy edit per write)  -- rc=2 err=[Antinel][配置变更] .psl/policy.json 内容已变化（sha256 b866ab16bf48…）
+FAIL 0.16.0 DST-02 released by whitelist.paths (no policy edit per write)  -- rc=2 err=[Antinel][配置变更] .psl/policy.json 内容已变化（sha256 88d6d5f586e6…）
           白名单/阈值的放行
 FAIL 0.16.0 DST-02 whitelist release is recorded (dst02_path_whitelisted)  -- 0 records
 PASS 0.16.0 SEC-06 in static rules_applied (was hook-only despite RULES.md)  -- ['SEC-01', 'SEC-02', 'SEC-03', 'SEC-04', 'SEC-05', 'CTX-02', 'CTX-03', 'CTX-04', 'CTX-05', 'SEC-06']
 PASS 0.16.0 scan subject digest reproducible on an unchanged tree  -- sha256:94aece350b95e2ebe0dbfe0be515662eb
 PASS 0.16.0 judgment carries the five hard-precondition fields  -- missing: none
 PASS 0.16.0 judgment status derivable to 'current' on an intact tree  -- status=current platformSpec=True ownership=self
-PASS 0.16.0 ledger exists and row 1 is the self-verdict  -- rows=22
-FAIL 0.16.0 antinel_verify derives current on an intact package  -- 1 of 19 covered files differ (judgment digests (19 files))
-PASS 0.16.0 antinel_verify derives superseded after a covered file changes  -- 2 of 19 covered files differ (judgment digests (19 files))
+PASS 0.16.0 ledger exists and row 1 is the self-verdict  -- rows=24
+PASS 0.16.0 antinel_verify derives current on an intact package  -- all 19 covered files hash to their recorded digests (judgment digests (19 files)
+PASS 0.16.0 antinel_verify derives superseded after a covered file changes  -- 1 of 19 covered files differ (judgment digests (19 files))
 
 -- 0.17.0 capabilities --
 PASS 0.17.0 P-B5 fallback patterns are a subset of rules/default.json per id  -- 11 fallback rules checked
@@ -231,11 +231,65 @@ PASS 0.17.0 P-A5 audit loss says AUDIT_WRITE_FAILED and stays fail-open  -- rc=0
 PASS 0.17.0 P-B7 deprecated rule never fires (NET-01 off -> only NET-03 logged)  -- hits=['NET-03']
 PASS 0.17.0 install --check: exit 1 when not installed  -- rc=1
 PASS 0.17.0 install --check: exit 3 on drift  -- rc=3
-PASS 0.17.0 P-A3 tampering antinel-namespaces.json -> superseded  -- 2 of 19 covered files differ (judgment digests (19 files))
+PASS 0.17.0 P-A3 tampering antinel-namespaces.json -> superseded  -- 1 of 19 covered files differ (judgment digests (19 files))
 PASS 0.17.0 P-B1 --manifest catches a README tamper (16-file gap closed)  -- 7 of 41 covered files differ (manifest (41 files))
-FAIL 0.17.0 P-B1 without --manifest, README tamper is out of scope (documented)
+PASS 0.17.0 P-B1 without --manifest, README tamper is out of scope (documented)
 PASS 0.17.0 P-A3 objectOwnership is derived with a stated basis  -- self | subject github.com/sotaex is in the signed namespace list
 
 -- 0.18.0 capabilities --
 PASS 0.18.0 R-19 junction under whitelisted prefix resolving OUTSIDE is not released  -- rc=2
 PASS 0.18.0 R-19 whitelisted REAL dir is still released  -- rc=0
+PASS 0.18.0 R-18 writable audit + fail_closed=true -> normal allow  -- rc=0
+PASS 0.18.0 R-18 audit loss with fail_closed=true -> BLOCK [AUDIT-LOSS]  -- rc=2 out={"decision": "block", "reason": "Antinel blocked [AUDIT-LOSS] audit wr
+PASS 0.18.0 R-20 intact day: chain OK and tail-OK vs day manifest  -- rc=0 (0=chain+tail both clean)
+PASS 0.18.0 R-20 deleting the LAST record is now DETECTED (chain alone never caught it)  -- ed 771 (records deleted from tail)
+verdict: 0 anomalies
+⇒ rc=0 (clean)
+⇒ tail failures: 1 (escalating rc to 2)
+PASS 0.18.0 R-20 anchor recovers after new records (monotonic size)  -- 2026-09-22.jsonl: 2 OK
+verdict: 0 anomalies
+⇒ rc=0 (clean)
+PASS 0.18.0 R-20 deleting the WHOLE day file is detected (manifest-driven)  -- le MISSING
+verdict: 0 anomalies
+⇒ rc=2 (unexplained anomalies present)
+⇒ tail failures: 1 (escalating rc to 2)
+PASS 0.18.0 R-21 --check-ledger executes (dry-run)  -- would_append=false
+PASS 0.18.0 R-21 pending row detected after a covered file changes  -- would_append=true
+PASS 0.18.0 R-21 dry-run is deterministic and side-effect-free (same answer as the intact tree; ledger row count unchanged)  -- rows 24->24, answer=would_append=false
+
+-- 0.22.0 capabilities --
+PASS 0.22.0 C1 pre records file_state_before (hash+size)  -- {'hash': 'sha256:be9351741a8155d01fd028d158546f1005e73ceeb0bb2d093335f
+PASS 0.22.0 C1 post records file_state_after  -- {'hash': 'sha256:f72c713b7b432dd18949ca10f1be6dbcf493479945653609d1c71
+PASS 0.22.0 C1 pre/post join via shared content_digest
+PASS 0.22.0 C1 create records before=absent
+PASS 0.22.0 C1 >1MB records too_large with size  -- {'hash': 'too_large', 'size': 1048581}
+PASS 0.22.0 B1 exit_code from dict response  -- {'echo b1dict': 3, 'echo b1str': 7, 'echo b1none': None}
+PASS 0.22.0 B1 exit_code from string response
+PASS 0.22.0 B1 absent exit_code stays null (key present)  -- {'echo b1dict': 3, 'echo b1str': 7, 'echo b1none': None}
+PASS 0.22.0 A5 report --session computes DNA (json)  -- {
+ "type": "session_dna",
+ "session": "test-sess-0001",
+ "generated_at
+PASS 0.22.0 A5 --write-dna chains one session_dna record  -- 1 dna, out=【摘要】本会话 3 次操作、拦截 0 次、提醒 0 次、触碰 3 个文件——证据链在账，明细如下。
+
+PASS 0.22.0 verify_chain green over C1/B1/A5 records  -- rc=0 2026-09-22.jsonl: 9 OK
+verdict: 0 anomalies
+⇒ rc=0 (clean)
+PASS 0.22.0 A5 SessionStart roll-up chains the previous session's DNA  -- ['test-sess-0001', 'prev-sess']
+PASS 0.22.0 A5 roll-up is idempotent (done sessions skipped)  -- 2 dna records
+
+-- 0.23.0 capabilities --
+PASS 0.23.0 A1 first harvest chains usage_delta with token facts  -- {'path_tag': 'sha256:ceda253e3ab43fc4', 'scope': 'tail_first_sight', 'reset': False, 'byte
+PASS 0.23.0 privacy: raw transcript path is not in the ledger
+PASS 0.23.0 A1 incremental harvest reads only new bytes  -- 2 records
+PASS 0.23.0 A1 no transcript -> no usage record, hook unaffected  -- 3 -> 3
+PASS 0.23.0 A1 grow is incremental (no reset, only m2 harvested)  -- [('tail_first_sight', 1), ('incremental', 1)]
+PASS 0.23.0 A1 shrink reset is marked and fingerprint-deduped  -- [(False, 0, 1), (False, 0, 1), (True, 1, 1)]
+PASS 0.23.0 A3 DNA aggregates token facts by model  -- {'entries': 2, 'input': 3000, 'output': 150, 'cache_read': 500, 'cache_creation': 0, 'tota
+PASS 0.23.0 A4 cost is derived with pricing version (3500/1M = 0.0035)  -- {'currency': 'USD', 'total': 0.0035, 'by_model': {'test-model-a': 0.0035}, 'pricing_version': 'test-
+PASS 0.23.0 A4 unpriced model reported, never guessed  -- ['test-model-b']
+PASS 0.23.0 verify_chain green over usage_delta records  -- rc=0 2026-09-22.jsonl: 24 OK
+verdict: 0 anomalies
+⇒ rc=0 (clean)
+
+-- 0.23.1 capabilities --
