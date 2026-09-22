@@ -54,7 +54,7 @@ PASS CTX-03 BOM+ZWJ whitelisted  -- rc=0 err=
 PASS Benign PSL SKILL.md read  -- rc=0 err=
 FAIL UX: 拦截理由为中文且含处理建议  -- Antinel blocked [SEC-01] Agent attempted to read a .env file which may contain API keys an
 FAIL UX: 同类提醒当天只提示一次（第二次静默记录）  -- e1='[DST-05] Notice: \n' e2=''
-PASS A5 5MB command handled fast (truncated before matching)  -- median ms=1574 (runs: 1574, 1574, 1575; load-sensitive; ladder B-021..023 tracks the budget)
+PASS A5 5MB command handled fast (truncated before matching)  -- median ms=1804 (runs: 1836, 1767, 1804; load-sensitive; ladder B-021..023 tracks the budget)
 PASS A-08 invalid JSON -> allow  -- rc=0
 PASS A-08 missing tool_input -> allow  -- rc=0
 PASS B-03 custom disables NET-01 -> NET-03 alert (audit-based)  -- ['NET-03']
@@ -71,7 +71,7 @@ PASS post UTF-8 roundtrip (no GBK mojibake)
 PASS F-03 JSONL audit log written  -- files=1 lines=124
 PASS C-01 canary persisted in log
 == T6 hook latency (NFR-03) ==
-PASS hook latency median (ms, includes interpreter start)  -- median=59 min=58 max=59
+PASS hook latency median (ms, includes interpreter start)  -- median=58 min=58 max=62
 == T3 negative: 7 verified PSL skills ==
 PASS T3 scan skills (skipped: skills dir not present at D:\psl\skills)
 == T4 positive: malicious fixture ==
@@ -83,7 +83,7 @@ PASS A6 CTX-05 case-only name/dir difference not flagged (scan)  -- ['evil-helpe
 PASS C3 depth boundary: deeper-than-15 not scanned, no crash  -- []
 PASS A6 CTX-05 case-only not flagged (hook)
 == T2/T7 install / uninstall ==
-PASS install claude-code: hooks appended, foreign kept  -- rc=0 ms=100
+PASS install claude-code: hooks appended, foreign kept  -- rc=0 ms=112
 PASS D7 .psl/.gitignore auto-written
 PASS A4 tampered rules hash -> fallback minimal set + SELF-TAMPERED warning  -- [Antinel] SELF-TAMPERED: rules/default.json differs from the installed
 PASS A4 fallback still blocks SEC-01 (baseline intact)
@@ -139,9 +139,9 @@ PASS 0.16.0 DST-01 raw-string r'D:\...' is not a delete  -- rc=0 err=
 PASS 0.16.0 DST-01 URL /rd/ segment is not a delete (NET-01 warns, no block)  -- [NET-01] Notice: 
 [NET-03] Notice:
 PASS C7 over-long custom pattern dropped, hook unaffected
-PASS C9 nested ReDoS pattern '(a+)+$' rejected, hook not wedged  -- 135ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes
-PASS C9 alternation ReDoS pattern '(a|aa)+$' rejected, hook not wedged  -- 135ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes
-PASS C9 inner-optional ReDoS pattern '(a?)+$' rejected, hook not wedged  -- 134ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes
+PASS C9 nested ReDoS pattern '(a+)+$' rejected, hook not wedged  -- 144ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes
+PASS C9 alternation ReDoS pattern '(a|aa)+$' rejected, hook not wedged  -- 144ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes
+PASS C9 inner-optional ReDoS pattern '(a?)+$' rejected, hook not wedged  -- 163ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes
 PASS C9 benign custom rule still loads and fires (read-only downgrade to alert)  -- [CUSTOM-OK] Notice:
 PASS C11 KNOWN GAP: files deeper than MAX_DEPTH=15 are not scanned (accepted, see THREAT_MODEL -- not an acceptance criterion)  -- []
 
@@ -195,7 +195,7 @@ PASS WS-1 POSIX: wildcard rejected  -- rc=2 id=DST-02 err=[Antinel][配置错误
 PASS WS-1 POSIX: a real absolute root is honoured  -- rc=0 err=
 PASS WS-3 rejected config entry lands in the audit log  -- 11 records
 PASS WS-3 rejected config entry is visible in report.py  -- WARNING 19). Address CRITICAL items first.
- Full log: /tmp/antinel_harness_ug5zhqb9/proj/.psl/audit
+ Full log: /tmp/antinel_harness_p1opry88/proj/.psl/audit
  Re-scan: python scan.py
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -206,7 +206,7 @@ PASS A15 an exclude_patterns allow is mirrored outside the project  -- 1 mirrore
 PASS A15 ANTINEL_HOST_MIRROR=0 writes nothing outside the project  -- mirror dir exists: False
 
 -- 0.16.0 capabilities --
-FAIL 0.16.0 DST-02 released by whitelist.paths (no policy edit per write)  -- rc=2 err=[Antinel][配置变更] .psl/policy.json 内容已变化（sha256 5c3c1ea1de59…）
+FAIL 0.16.0 DST-02 released by whitelist.paths (no policy edit per write)  -- rc=2 err=[Antinel][配置变更] .psl/policy.json 内容已变化（sha256 135112bf25f3…）
           白名单/阈值的放行
 FAIL 0.16.0 DST-02 whitelist release is recorded (dst02_path_whitelisted)  -- 0 records
 PASS 0.16.0 SEC-06 in static rules_applied (was hook-only despite RULES.md)  -- ['SEC-01', 'SEC-02', 'SEC-03', 'SEC-04', 'SEC-05', 'CTX-02', 'CTX-03', 'CTX-04', 'CTX-05', 'SEC-06']
@@ -279,7 +279,7 @@ PASS 0.22.0 A5 SessionStart roll-up chains the previous session's DNA  -- ['test
 PASS 0.22.0 A5 roll-up is idempotent (done sessions skipped)  -- 2 dna records
 
 -- 0.23.0 capabilities --
-PASS 0.23.0 A1 first harvest chains usage_delta with token facts  -- {'path_tag': 'sha256:8001634dcc9afdb9', 'scope': 'tail_first_sight', 'reset': False, 'byte
+PASS 0.23.0 A1 first harvest chains usage_delta with token facts  -- {'path_tag': 'sha256:f76e17bbdf9f0388', 'scope': 'tail_first_sight', 'reset': False, 'byte
 PASS 0.23.0 privacy: raw transcript path is not in the ledger
 PASS 0.23.0 A1 incremental harvest reads only new bytes  -- 2 records
 PASS 0.23.0 A1 no transcript -> no usage record, hook unaffected  -- 3 -> 3
@@ -299,7 +299,7 @@ PASS 0.23.1 routes --markdown same-source as help
 PASS 0.23.1 domains add applies (agent mode, no prompt)  -- 变更：domains add example.org
   影响：该域名的网络请求不再触发 NET 提醒/拦截
   /tmp/antinel_
-PASS 0.23.1 policy_changed chained with invoked_by + digests  -- [{'ts': '2026-09-22T14:25:02+00:00', 'type': 'policy_changed', 'tool': '-', 'session': 'an
+PASS 0.23.1 policy_changed chained with invoked_by + digests  -- [{'ts': '2026-09-22T15:05:30+00:00', 'type': 'policy_changed', 'tool': '-', 'session': 'an
 FAIL 0.23.1 roots add drive-root rejected (fail-closed)  -- 宿主 generic 没有已知的配置目录，roots 不可用
 FAIL 0.23.1 credits snapshot chained (user_reported)  -- 当前宿主（generic）经济画像为 tokens——无积分口径，credits 不可用
 FAIL 0.23.1 credits forecast with 2 snapshots  -- 当前宿主（generic）经济画像为 tokens——无积分口径，credits 不可用
@@ -324,11 +324,11 @@ PASS 0.26 host-audit zcode reports coverage line  -- == 宿主: zcode
   FAILED: UX: 拦截理由为中文且含处理建议 Antinel blocked [SEC-01] Agent attempted to read a .env file which may contain API keys an
   FAILED: UX: 同类提醒当天只提示一次（第二次静默记录） e1='[DST-05] Notice: \n' e2=''
   FAILED: UX: scan 中文结论行 
-  FAILED: 0.16.0 DST-02 released by whitelist.paths (no policy edit per write) rc=2 err=[Antinel][配置变更] .psl/policy.json 内容已变化（sha256 5c3c1ea1de59…）
+  FAILED: 0.16.0 DST-02 released by whitelist.paths (no policy edit per write) rc=2 err=[Antinel][配置变更] .psl/policy.json 内容已变化（sha256 135112bf25f3…）
           白名单/阈值的放行
   FAILED: 0.16.0 DST-02 whitelist release is recorded (dst02_path_whitelisted) 0 records
   FAILED: 0.23.1 roots add drive-root rejected (fail-closed) 宿主 generic 没有已知的配置目录，roots 不可用
   FAILED: 0.23.1 credits snapshot chained (user_reported) 当前宿主（generic）经济画像为 tokens——无积分口径，credits 不可用
   FAILED: 0.23.1 credits forecast with 2 snapshots 当前宿主（generic）经济画像为 tokens——无积分口径，credits 不可用
   FAILED: 0.26 SafeZone registered + tamper-locked locked=False rc=0
-results: /tmp/antinel_harness_ug5zhqb9/last_results.json
+results: /tmp/antinel_harness_p1opry88/last_results.json
