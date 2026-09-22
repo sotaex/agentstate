@@ -46,4 +46,5 @@ jobs:
           git config user.email "antinel-bot@users.noreply.github.com"
           git add psl/ci_debug
           git commit -m "ci-evidence: harness failure on ${{ matrix.os }} py${{ matrix.python }} [skip ci]" || echo "nothing to commit"
-          git push
+          git pull --rebase -q || true
+          git push || (sleep 20 && git pull --rebase -q || true && git push) || true
