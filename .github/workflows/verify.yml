@@ -24,6 +24,7 @@ jobs:
     continue-on-error: ${{ matrix.os == 'macos-latest' }}
     env:
       ANTINEL_DEBUG_CI: "1"
+      ANTINEL_DEBUG_TAG: "${{ matrix.os }}-py${{ matrix.python }}"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

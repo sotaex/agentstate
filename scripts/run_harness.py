@@ -144,7 +144,8 @@ def main():
     # psl/ci_debug/，让无日志权限的第三方也能定位失败。默认关。
     if os.environ.get("ANTINEL_DEBUG_CI") == "1":
         try:
-            dbg = PKG / "psl" / "ci_debug"
+            tag = os.environ.get("ANTINEL_DEBUG_TAG") or "local"
+            dbg = PKG / "psl" / "ci_debug" / tag
             dbg.mkdir(parents=True, exist_ok=True)
             (dbg / "suite_stdout.txt").write_text(proc.stdout or "", encoding="utf-8")
             (dbg / "suite_stderr.txt").write_text(proc.stderr or "", encoding="utf-8")
