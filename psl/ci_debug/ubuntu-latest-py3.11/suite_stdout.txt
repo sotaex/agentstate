@@ -13,7 +13,7 @@ PASS DST-01 rm -rf ./old  -- rc=2 id=DST-01 err=Antinel 拦截 [DST-01] 执行�
 PASS DST-01 exclude rm -rf node_modules  -- rc=0 err=
 PASS DST-01 before DST-05 (sudo rm)  -- rc=2 id=DST-01 err=[DST-02] 提醒: 命令文本中出现项目根之外的显式绝对路径（已记录；脚本内容不解析，详见 THREAT_MODEL Non-goals）: /var/x
 
-PASS DST-02 Write outside root  -- rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_1g3
+PASS DST-02 Write outside root  -- rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_1hk
 PASS DST-02 Write inside root  -- rc=0 err=
 PASS DST-03 Edit ~/.bashrc  -- rc=2 id=DST-03 err=Antinel 拦截 [DST-03] 修改 Shell 启动配置（.bashrc 等，属持久化机制） | 命中: .bashrc | 放行/处理: 启动脚本每
 PASS DST-03 Bash echo >> .zshrc  -- rc=2 id=DST-03 err=Antinel 拦截 [DST-03] 修改 Shell 启动配置（.bashrc 等，属持久化机制） | 命中: >> ~/.zshrc | 放行/处理: 启
@@ -54,7 +54,7 @@ PASS CTX-03 BOM+ZWJ whitelisted  -- rc=0 err=
 PASS Benign PSL SKILL.md read  -- rc=0 err=
 PASS UX: 拦截理由为中文且含处理建议  -- Antinel 拦截 [SEC-01] 读取 .env 文件可能泄露 API 密钥与机密配置 | 命中: .env | 放行/处理: 把 .env 移出 Agent 可读范围；确需
 PASS UX: 同类提醒当天只提示一次（第二次静默记录）  -- e1='[DST-05] 提醒: 尝试提权操作\n' e2=''
-PASS A5 5MB command handled fast (truncated before matching)  -- median ms=1607 (runs: 1599, 1607, 1613; load-sensitive; ladder B-021..023 tracks the budget)
+PASS A5 5MB command handled fast (truncated before matching)  -- median ms=1742 (runs: 1746, 1742, 1742; load-sensitive; ladder B-021..023 tracks the budget)
 PASS A-08 invalid JSON -> allow  -- rc=0
 PASS A-08 missing tool_input -> allow  -- rc=0
 PASS B-03 custom disables NET-01 -> NET-03 alert (audit-based)  -- ['NET-03']
@@ -71,7 +71,7 @@ PASS post UTF-8 roundtrip (no GBK mojibake)
 PASS F-03 JSONL audit log written  -- files=1 lines=124
 PASS C-01 canary persisted in log
 == T6 hook latency (NFR-03) ==
-PASS hook latency median (ms, includes interpreter start)  -- median=44 min=43 max=44
+PASS hook latency median (ms, includes interpreter start)  -- median=40 min=40 max=41
 == T3 negative: 7 verified PSL skills ==
 PASS T3 scan skills (skipped: skills dir not present at D:\psl\skills)
 == T4 positive: malicious fixture ==
@@ -83,7 +83,7 @@ PASS A6 CTX-05 case-only name/dir difference not flagged (scan)  -- ['evil-helpe
 PASS C3 depth boundary: deeper-than-15 not scanned, no crash  -- []
 PASS A6 CTX-05 case-only not flagged (hook)
 == T2/T7 install / uninstall ==
-PASS install claude-code: hooks appended, foreign kept  -- rc=0 ms=86
+PASS install claude-code: hooks appended, foreign kept  -- rc=0 ms=76
 PASS D7 .psl/.gitignore auto-written
 PASS A4 tampered rules hash -> fallback minimal set + SELF-TAMPERED warning  -- [Antinel] SELF-TAMPERED: rules/default.json differs from the installed
 PASS A4 fallback still blocks SEC-01 (baseline intact)
@@ -119,7 +119,7 @@ PASS 2.8 SELF-TAMPERED names drifted script
 PASS US-02 score basis line in report and scan text
 == F-06 policy semantics (spec C-05, adopted) ==
 PASS F-06 whitelist.domains relaxes NET-01/NET-03  -- rc=0 err=
-PASS F-06 whitelist.paths exempts SEC-01 under tests/fixtures  -- fp=/tmp/antinel_harness_1g3g4it3/proj/tests/fixtures/.env real=/tmp/antinel_harness_1g3g4it3/proj/tests/fixtures/.env root=/tmp/antinel_harness_1g3g4it3/proj ro
+PASS F-06 whitelist.paths exempts SEC-01 under tests/fixtures  -- fp=/tmp/antinel_harness_1hkjv7_b/proj/tests/fixtures/.env real=/tmp/antinel_harness_1hkjv7_b/proj/tests/fixtures/.env root=/tmp/antinel_harness_1hkjv7_b/proj ro
 PASS F-06 whitelist.paths does not exempt other paths  -- rc=2 id=SEC-01 err=Antinel 拦截 [SEC-01] 读取 .env 文件可能泄露 API 密钥与机密配置 | 命中: .env | 放行/处理: 把 .env 移出 Age
 PASS F-06 whitelist.paths honoured by scan.py  -- ['.env', 'config/.env.local']
 PASS F-06 whitelist.commands skips warning rules (pip ... printenv)  -- rc=0 err=
@@ -139,16 +139,16 @@ PASS 0.16.0 DST-01 raw-string r'D:\...' is not a delete  -- rc=0 err=
 PASS 0.16.0 DST-01 URL /rd/ segment is not a delete (NET-01 warns, no block)  -- [NET-01] 提醒: 通过 Shell 向白名单外域名发起网络请求
 [NET-03] 提醒: 命令引用了白名单外的域名
 PASS C7 over-long custom pattern dropped, hook unaffected
-PASS C9 nested ReDoS pattern '(a+)+$' rejected, hook not wedged  -- 111ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes
-PASS C9 alternation ReDoS pattern '(a|aa)+$' rejected, hook not wedged  -- 112ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes
-PASS C9 inner-optional ReDoS pattern '(a?)+$' rejected, hook not wedged  -- 111ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes
+PASS C9 nested ReDoS pattern '(a+)+$' rejected, hook not wedged  -- 98ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes
+PASS C9 alternation ReDoS pattern '(a|aa)+$' rejected, hook not wedged  -- 98ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes
+PASS C9 inner-optional ReDoS pattern '(a?)+$' rejected, hook not wedged  -- 98ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes
 PASS C9 benign custom rule still loads and fires (read-only downgrade to alert)  -- [CUSTOM-OK] 提醒:
 PASS C11 KNOWN GAP: files deeper than MAX_DEPTH=15 are not scanned (accepted, see THREAT_MODEL -- not an acceptance criterion)  -- []
 
 -- workspace_roots (host-level trust boundary) --
 PASS workspace_roots: a declared workspace is writable  -- rc=0 err=
 PASS workspace_roots: the allow is recorded, not silent  -- 1 workspace_root_allow records
-PASS workspace_roots: undeclared location still blocked  -- rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_1g3
+PASS workspace_roots: undeclared location still blocked  -- rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_1hk
 PASS workspace_roots: drive root rejected  -- rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'/'
           拒绝类型：根
 PASS workspace_roots: '..' rejected  -- rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'..'
@@ -157,12 +157,12 @@ PASS workspace_roots: relative path rejected  -- rc=2 id=DST-02 err=[Antinel][�
           拒绝类型
 PASS workspace_roots: '..' segment rejected  -- rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'/tmp/antinel_harnes
 PASS workspace_roots: wildcard rejected  -- rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'/tmp/antinel_harnes
-PASS workspace_roots: missing config file = pre-feature behaviour  -- rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_1g3
+PASS workspace_roots: missing config file = pre-feature behaviour  -- rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_1hk
 
 -- host config self-maintenance (0.19.2) --
 PASS DST-02 host config: the file the hook reads is writable by the tool that maintains it  -- rc=0 err=
 PASS DST-02 host config: that release is recorded, never silent  -- 1 dst02_host_config_self_maintenance records
-PASS DST-02 host config: a sibling of the config is NOT released (exact file, not its directory)  -- rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_1g3
+PASS DST-02 host config: a sibling of the config is NOT released (exact file, not its directory)  -- rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_1hk
 
 -- read-only command context (downgrade, not a hole) --
 PASS RO: grep for a destructive verb is allowed  -- rc=0 err=[DST-01] 提醒: 执行文件或目录删除命令
@@ -182,8 +182,8 @@ PASS RO: PowerShell pipeline into Remove-Item is not downgraded  -- rc=2 id=DST-
 PASS RO: Select-String for a destructive verb is allowed  -- rc=0 err=
 PASS RO: the file family is not downgraded (grep .env)  -- rc=2 id=SEC-01 err=Antinel 拦截 [SEC-01] 读取 .env 文件可能泄露 API 密钥与机密配置 | 命中: .env | 放行/处理: 把 .env 移出 Age
 PASS RO: the downgrade is recorded in the audit log, not silently dropped  -- 7 downgraded records
-PASS WS-1 POSIX: root rejected  -- rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_1g3
-PASS WS-1 POSIX: system dir rejected  -- rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_1g3
+PASS WS-1 POSIX: root rejected  -- rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_1hk
+PASS WS-1 POSIX: system dir rejected  -- rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_1hk
 PASS WS-1 POSIX: home shorthand rejected  -- rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'~'
           拒绝类型：根
 PASS WS-1 POSIX: unexpanded ~ rejected  -- rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'~/work'
@@ -195,7 +195,7 @@ PASS WS-1 POSIX: wildcard rejected  -- rc=2 id=DST-02 err=[Antinel][配置错误
 PASS WS-1 POSIX: a real absolute root is honoured  -- rc=0 err=
 PASS WS-3 rejected config entry lands in the audit log  -- 11 records
 PASS WS-3 rejected config entry is visible in report.py  -- / WARNING 19），建议优先处理 CRITICAL 项；完整轨迹见审计日志。
- Full log: /tmp/antinel_harness_1g3g4it3/proj/.psl/audit
+ Full log: /tmp/antinel_harness_1hkjv7_b/proj/.psl/audit
  Re-scan: python scan.py
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -213,8 +213,8 @@ PASS 0.16.0 scan subject digest reproducible on an unchanged tree  -- sha256:94a
 PASS 0.16.0 judgment carries the five hard-precondition fields  -- missing: none
 PASS 0.16.0 judgment status derivable to 'current' on an intact tree  -- status=current platformSpec=True ownership=self
 PASS 0.16.0 ledger exists and row 1 is the self-verdict  -- rows=32
-FAIL 0.16.0 antinel_verify derives current on an intact package  -- 1 of 19 covered files differ (judgment digests (19 files))
-PASS 0.16.0 antinel_verify derives superseded after a covered file changes  -- 2 of 19 covered files differ (judgment digests (19 files))
+FAIL 0.16.0 antinel_verify derives current on an intact package  -- 2 of 19 covered files differ (judgment digests (19 files))
+PASS 0.16.0 antinel_verify derives superseded after a covered file changes  -- 3 of 19 covered files differ (judgment digests (19 files))
 
 -- 0.17.0 capabilities --
 PASS 0.17.0 P-B5 fallback patterns are a subset of rules/default.json per id  -- 11 fallback rules checked
@@ -278,7 +278,7 @@ PASS 0.22.0 A5 SessionStart roll-up chains the previous session's DNA  -- ['test
 PASS 0.22.0 A5 roll-up is idempotent (done sessions skipped)  -- 2 dna records
 
 -- 0.23.0 capabilities --
-PASS 0.23.0 A1 first harvest chains usage_delta with token facts  -- {'path_tag': 'sha256:1ab350100610eb3e', 'scope': 'tail_first_sight', 'reset': False, 'byte
+PASS 0.23.0 A1 first harvest chains usage_delta with token facts  -- {'path_tag': 'sha256:7c8f2afe68a00af1', 'scope': 'tail_first_sight', 'reset': False, 'byte
 PASS 0.23.0 privacy: raw transcript path is not in the ledger
 PASS 0.23.0 A1 incremental harvest reads only new bytes  -- 2 records
 PASS 0.23.0 A1 no transcript -> no usage record, hook unaffected  -- 3 -> 3
@@ -298,7 +298,7 @@ PASS 0.23.1 routes --markdown same-source as help
 PASS 0.23.1 domains add applies (agent mode, no prompt)  -- 变更：domains add example.org
   影响：该域名的网络请求不再触发 NET 提醒/拦截
   /tmp/antinel_
-PASS 0.23.1 policy_changed chained with invoked_by + digests  -- [{'ts': '2026-09-22T21:38:10+00:00', 'type': 'policy_changed', 'tool': '-', 'session': 'an
+PASS 0.23.1 policy_changed chained with invoked_by + digests  -- [{'ts': '2026-09-22T23:33:57+00:00', 'type': 'policy_changed', 'tool': '-', 'session': 'an
 PASS 0.23.1 roots add drive-root rejected (fail-closed)  -- skipped: no host installed
 PASS 0.23.1 credits snapshot chained (user_reported)  -- skipped: no host installed
 PASS 0.23.1 credits forecast with 2 snapshots  -- skipped: no host installed
@@ -320,6 +320,6 @@ PASS 0.26 host-audit zcode reports coverage line  -- == 宿主: zcode
 （覆盖声明：仅列登记宿主
 
 == SUMMARY: 247/249 passed ==
-  FAILED: 0.16.0 antinel_verify derives current on an intact package 1 of 19 covered files differ (judgment digests (19 files))
+  FAILED: 0.16.0 antinel_verify derives current on an intact package 2 of 19 covered files differ (judgment digests (19 files))
   FAILED: 0.17.0 P-B1 without --manifest, README tamper is out of scope (documented) 
-results: /tmp/antinel_harness_1g3g4it3/last_results.json
+results: /tmp/antinel_harness_1hkjv7_b/last_results.json

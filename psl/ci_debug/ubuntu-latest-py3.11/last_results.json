@@ -67,7 +67,7 @@
  {
   "name": "DST-02 Write outside root",
   "pass": true,
-  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_1g3"
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_1hk"
  },
  {
   "name": "DST-02 Write inside root",
@@ -262,7 +262,7 @@
  {
   "name": "A5 5MB command handled fast (truncated before matching)",
   "pass": true,
-  "detail": "median ms=1607 (runs: 1599, 1607, 1613; load-sensitive; ladder B-021..023 tracks the budget)"
+  "detail": "median ms=1742 (runs: 1746, 1742, 1742; load-sensitive; ladder B-021..023 tracks the budget)"
  },
  {
   "name": "A-08 invalid JSON -> allow",
@@ -337,7 +337,7 @@
  {
   "name": "hook latency median (ms, includes interpreter start)",
   "pass": true,
-  "detail": "median=44 min=43 max=44"
+  "detail": "median=40 min=40 max=41"
  },
  {
   "name": "T3 scan skills (skipped: skills dir not present at D:\\psl\\skills)",
@@ -382,7 +382,7 @@
  {
   "name": "install claude-code: hooks appended, foreign kept",
   "pass": true,
-  "detail": "rc=0 ms=86"
+  "detail": "rc=0 ms=76"
  },
  {
   "name": "D7 .psl/.gitignore auto-written",
@@ -800,7 +800,7 @@
  {
   "name": "F-06 whitelist.paths exempts SEC-01 under tests/fixtures",
   "pass": true,
-  "detail": "fp=/tmp/antinel_harness_1g3g4it3/proj/tests/fixtures/.env real=/tmp/antinel_harness_1g3g4it3/proj/tests/fixtures/.env root=/tmp/antinel_harness_1g3g4it3/proj root_real=/tmp/antinel_harness_1g3g4it3/proj rel=tests/fixtures/.env || "
+  "detail": "fp=/tmp/antinel_harness_1hkjv7_b/proj/tests/fixtures/.env real=/tmp/antinel_harness_1hkjv7_b/proj/tests/fixtures/.env root=/tmp/antinel_harness_1hkjv7_b/proj root_real=/tmp/antinel_harness_1hkjv7_b/proj rel=tests/fixtures/.env || "
  },
  {
   "name": "F-06 whitelist.paths does not exempt other paths",
@@ -885,17 +885,17 @@
  {
   "name": "C9 nested ReDoS pattern '(a+)+$' rejected, hook not wedged",
   "pass": true,
-  "detail": "111ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
+  "detail": "98ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
  },
  {
   "name": "C9 alternation ReDoS pattern '(a|aa)+$' rejected, hook not wedged",
   "pass": true,
-  "detail": "112ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
+  "detail": "98ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
  },
  {
   "name": "C9 inner-optional ReDoS pattern '(a?)+$' rejected, hook not wedged",
   "pass": true,
-  "detail": "111ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
+  "detail": "98ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
  },
  {
   "name": "C9 benign custom rule still loads and fires (read-only downgrade to alert)",
@@ -920,7 +920,7 @@
  {
   "name": "workspace_roots: undeclared location still blocked",
   "pass": true,
-  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_1g3"
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_1hk"
  },
  {
   "name": "workspace_roots: drive root rejected",
@@ -950,7 +950,7 @@
  {
   "name": "workspace_roots: missing config file = pre-feature behaviour",
   "pass": true,
-  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_1g3"
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_1hk"
  },
  {
   "name": "DST-02 host config: the file the hook reads is writable by the tool that maintains it",
@@ -965,7 +965,7 @@
  {
   "name": "DST-02 host config: a sibling of the config is NOT released (exact file, not its directory)",
   "pass": true,
-  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_1g3"
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_1hk"
  },
  {
   "name": "RO: grep for a destructive verb is allowed",
@@ -1055,12 +1055,12 @@
  {
   "name": "WS-1 POSIX: root rejected",
   "pass": true,
-  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_1g3"
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_1hk"
  },
  {
   "name": "WS-1 POSIX: system dir rejected",
   "pass": true,
-  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_1g3"
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_1hk"
  },
  {
   "name": "WS-1 POSIX: home shorthand rejected",
@@ -1095,7 +1095,7 @@
  {
   "name": "WS-3 rejected config entry is visible in report.py",
   "pass": true,
-  "detail": "/ WARNING 19），建议优先处理 CRITICAL 项；完整轨迹见审计日志。\n Full log: /tmp/antinel_harness_1g3g4it3/proj/.psl/audit\n Re-scan: python scan.py\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+  "detail": "/ WARNING 19），建议优先处理 CRITICAL 项；完整轨迹见审计日志。\n Full log: /tmp/antinel_harness_1hkjv7_b/proj/.psl/audit\n Re-scan: python scan.py\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
  },
  {
   "name": "A12 policy.json edited out of band is reported once",
@@ -1155,12 +1155,12 @@
  {
   "name": "0.16.0 antinel_verify derives current on an intact package",
   "pass": false,
-  "detail": "1 of 19 covered files differ (judgment digests (19 files))"
+  "detail": "2 of 19 covered files differ (judgment digests (19 files))"
  },
  {
   "name": "0.16.0 antinel_verify derives superseded after a covered file changes",
   "pass": true,
-  "detail": "2 of 19 covered files differ (judgment digests (19 files))"
+  "detail": "3 of 19 covered files differ (judgment digests (19 files))"
  },
  {
   "name": "0.17.0 P-B5 fallback patterns are a subset of rules/default.json per id",
@@ -1370,7 +1370,7 @@
  {
   "name": "0.23.0 A1 first harvest chains usage_delta with token facts",
   "pass": true,
-  "detail": "{'path_tag': 'sha256:1ab350100610eb3e', 'scope': 'tail_first_sight', 'reset': False, 'byte"
+  "detail": "{'path_tag': 'sha256:7c8f2afe68a00af1', 'scope': 'tail_first_sight', 'reset': False, 'byte"
  },
  {
   "name": "0.23.0 privacy: raw transcript path is not in the ledger",
@@ -1435,7 +1435,7 @@
  {
   "name": "0.23.1 policy_changed chained with invoked_by + digests",
   "pass": true,
-  "detail": "[{'ts': '2026-09-22T21:38:10+00:00', 'type': 'policy_changed', 'tool': '-', 'session': 'an"
+  "detail": "[{'ts': '2026-09-22T23:33:57+00:00', 'type': 'policy_changed', 'tool': '-', 'session': 'an"
  },
  {
   "name": "0.23.1 roots add drive-root rejected (fail-closed)",
