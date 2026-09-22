@@ -112,6 +112,7 @@ def record_missing(names, why):
 def run(script, argv=(), cwd=None, stdin=None, env=None):
     t0 = time.perf_counter()
     full_env = dict(os.environ)
+    full_env["ANTINEL_LANG"] = "zh"     # L1: CI 无中文 locale——套件断言钉死中文输出
     if env:
         full_env.update(env)
     p = subprocess.run([PY, str(script_path(script)), *argv], cwd=str(cwd) if cwd else None,
