@@ -54,7 +54,7 @@ PASS CTX-03 BOM+ZWJ whitelisted  -- rc=0 err=
 PASS Benign PSL SKILL.md read  -- rc=0 err=
 FAIL UX: 拦截理由为中文且含处理建议  -- Antinel blocked [SEC-01] Agent attempted to read a .env file which may contain API keys an
 FAIL UX: 同类提醒当天只提示一次（第二次静默记录）  -- e1='[DST-05] Notice: \n' e2=''
-PASS A5 5MB command handled fast (truncated before matching)  -- median ms=1011 (runs: 1017, 1011, 989; load-sensitive; ladder B-021..023 tracks the budget)
+PASS A5 5MB command handled fast (truncated before matching)  -- median ms=1494 (runs: 1498, 1494, 1486; load-sensitive; ladder B-021..023 tracks the budget)
 PASS A-08 invalid JSON -> allow  -- rc=0
 PASS A-08 missing tool_input -> allow  -- rc=0
 PASS B-03 custom disables NET-01 -> NET-03 alert (audit-based)  -- ['NET-03']
@@ -71,7 +71,7 @@ PASS post UTF-8 roundtrip (no GBK mojibake)
 PASS F-03 JSONL audit log written  -- files=1 lines=124
 PASS C-01 canary persisted in log
 == T6 hook latency (NFR-03) ==
-PASS hook latency median (ms, includes interpreter start)  -- median=41 min=40 max=42
+PASS hook latency median (ms, includes interpreter start)  -- median=48 min=46 max=49
 == T3 negative: 7 verified PSL skills ==
 PASS T3 scan skills (skipped: skills dir not present at D:\psl\skills)
 == T4 positive: malicious fixture ==
@@ -83,7 +83,7 @@ PASS A6 CTX-05 case-only name/dir difference not flagged (scan)  -- ['evil-helpe
 PASS C3 depth boundary: deeper-than-15 not scanned, no crash  -- []
 PASS A6 CTX-05 case-only not flagged (hook)
 == T2/T7 install / uninstall ==
-PASS install claude-code: hooks appended, foreign kept  -- rc=0 ms=71
+PASS install claude-code: hooks appended, foreign kept  -- rc=0 ms=97
 PASS D7 .psl/.gitignore auto-written
 PASS A4 tampered rules hash -> fallback minimal set + SELF-TAMPERED warning  -- [Antinel] SELF-TAMPERED: rules/default.json differs from the installed
 PASS A4 fallback still blocks SEC-01 (baseline intact)
@@ -95,3 +95,145 @@ PASS install idempotent (D-04)
 PASS uninstall removes ours, keeps foreign (F-08)
 PASS install zcode host detected (real contract: config.json + enabled + process type)
 PASS ZCode channel: block with empty stdout (strict schema safe)  -- rc=2 out=''
+PASS A-05/D-06 --global: user-level registration covers every workspace  -- rc=0
+PASS F-08 uninstall cleans zcode config.json (enabled bool not misread as event list)  -- rc=0
+PASS install generic -> scan-only degrade  -- [1/6] host: generic
+PASS install --strict generic -> exit 1 (A-10)  -- rc=1
+== T2 report ==
+PASS report text  --  Conclusion: 43 finding(s) found (CRITICAL 28 / WARNING 15). Address CRITICAL items first.
+PASS report json score/dedupe  -- score=0 crit=28 warn=15
+PASS report html single-file (C-03)
+PASS report no data -> exit 1 (A-10)
+PASS report --archive gzips >30d (B-05)
+PASS report SELF-TAMPERED warning (2.8)
+== T2 third batch: CSV/SARIF, period, policy retention, script tamper, digest, basis ==
+PASS US-05 csv export  -- rows=43
+PASS US-05 sarif 2.1.0 export  -- results=43
+PASS F-04 period filter (--days 1 ok, --since future -> exit 1)
+PASS C6 --days 1 excludes yesterday-ts record in today's file
+PASS C6 --days 2 includes it
+PASS F-03 retention from policy.json (365 keeps, policy=1 archives 3-day-old)
+PASS 2.8 content_digest recomputable by third party
+PASS D-05 manifest scripts_hash covers SCRIPT_FILES (12)  -- 12/12
+PASS 2.8 SELF-TAMPERED names drifted script
+PASS US-02 score basis line in report and scan text
+== F-06 policy semantics (spec C-05, adopted) ==
+PASS F-06 whitelist.domains relaxes NET-01/NET-03  -- rc=0 err=
+PASS F-06 whitelist.paths exempts SEC-01 under tests/fixtures  -- rc=0 err=
+PASS F-06 whitelist.paths does not exempt other paths  -- rc=2 id=SEC-01 err=Antinel blocked [SEC-01] Agent attempted to read a .env file which may contain A
+PASS F-06 whitelist.paths honoured by scan.py  -- ['.env', 'config/.env.local']
+PASS F-06 whitelist.commands skips warning rules (pip ... printenv)  -- rc=0 err=
+PASS F-06 whitelist.commands never relaxes critical (pip ... rm -rf)  -- rc=2 id=DST-01 err=[DST-02] 提醒: 命令文本中出现项目根之外的显式绝对路径（已记录；脚本内容不解析，详见 THREAT_MODEL Non-goals）: /tmp/x
+
+PASS A9 MultiEdit alias -> DST-03 block  -- [Antinel][配置变更] .psl/policy.json 内容已变化（sha256 bddc2ec8cfb8…）
+PASS A9 MultiEdit content -> CTX-02 block  -- Antinel blocked [CTX-02] Potential prompt injection payload 
+PASS A9 NotebookEdit alias -> CTX-02 block (poisoned cell)  -- Antinel blocked [CTX-02] Potential prompt injection payload 
+PASS F-06 alert_threshold=critical suppresses stderr notice but still logs
+PASS F-06 auto_archive=true archives on plain report run
+== 0.16.0 DST-01 rd: command-position + argument-context ==
+PASS 0.16.0 DST-01 rd /s /q blocked  -- rc=2 id=DST-01 err=Antinel blocked [DST-01] Agent executed a file or directory deletion command | m
+PASS 0.16.0 DST-01 mid-command rd /s blocked (cmd /c)  -- rc=2 id=DST-01 err=Antinel blocked [DST-01] Agent executed a file or directory deletion command | m
+PASS 0.16.0 DST-01 &&-chained rd blocked  -- rc=2 id=DST-01 err=Antinel blocked [DST-01] Agent executed a file or directory deletion command | m
+PASS 0.16.0 DST-01 python 'rd = 3' is not a delete  -- rc=0 err=
+PASS 0.16.0 DST-01 raw-string r'D:\...' is not a delete  -- rc=0 err=
+PASS 0.16.0 DST-01 URL /rd/ segment is not a delete (NET-01 warns, no block)  -- [NET-01] Notice: 
+[NET-03] Notice:
+PASS C7 over-long custom pattern dropped, hook unaffected
+PASS C9 nested ReDoS pattern '(a+)+$' rejected, hook not wedged  -- 115ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes
+PASS C9 alternation ReDoS pattern '(a|aa)+$' rejected, hook not wedged  -- 116ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes
+PASS C9 inner-optional ReDoS pattern '(a?)+$' rejected, hook not wedged  -- 113ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes
+PASS C9 benign custom rule still loads and fires (read-only downgrade to alert)  -- [CUSTOM-OK] Notice:
+PASS C11 KNOWN GAP: files deeper than MAX_DEPTH=15 are not scanned (accepted, see THREAT_MODEL -- not an acceptance criterion)  -- []
+
+-- workspace_roots (host-level trust boundary) --
+PASS workspace_roots: a declared workspace is writable  -- rc=0 err=
+PASS workspace_roots: the allow is recorded, not silent  -- 1 workspace_root_allow records
+PASS workspace_roots: undeclared location still blocked  -- rc=2 id=DST-02 err=Antinel blocked [DST-02] Agent attempted to write to a file outside the project 
+PASS workspace_roots: drive root rejected  -- rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'/'
+          拒绝类型：根
+PASS workspace_roots: '..' rejected  -- rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'..'
+          拒绝类型：
+PASS workspace_roots: relative path rejected  -- rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'poc'
+          拒绝类型
+PASS workspace_roots: '..' segment rejected  -- rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'/tmp/antinel_harnes
+PASS workspace_roots: wildcard rejected  -- rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'/tmp/antinel_harnes
+PASS workspace_roots: missing config file = pre-feature behaviour  -- rc=2 id=DST-02 err=Antinel blocked [DST-02] Agent attempted to write to a file outside the project 
+
+-- host config self-maintenance (0.19.2) --
+PASS DST-02 host config: the file the hook reads is writable by the tool that maintains it  -- rc=0 err=
+PASS DST-02 host config: that release is recorded, never silent  -- 1 dst02_host_config_self_maintenance records
+PASS DST-02 host config: a sibling of the config is NOT released (exact file, not its directory)  -- rc=2 id=DST-02 err=Antinel blocked [DST-02] Agent attempted to write to a file outside the project 
+
+-- read-only command context (downgrade, not a hole) --
+PASS RO: grep for a destructive verb is allowed  -- rc=0 err=[DST-01] Notice:
+PASS RO: grep for a persistence verb is allowed  -- rc=0 err=[DST-04] Notice:
+PASS RO: alternation inside quotes is still read-only  -- rc=0 err=[DST-01] Notice:
+PASS RO: sed is not downgraded (s///e can reach a shell)  -- rc=2 id=DST-01 err=Antinel blocked [DST-01] Agent executed a file or directory deletion command | m
+PASS RO: awk is not downgraded (system())  -- rc=2 id=DST-01 err=Antinel blocked [DST-01] Agent executed a file or directory deletion command | m
+PASS RO: a compound read-only command is allowed (cd + grep)  -- rc=0 err=
+PASS RO: find without a write flag is read-only  -- rc=0 err=
+PASS RO: chained execution is not downgraded (;)  -- rc=2 id=DST-01 err=[DST-02] 提醒: 命令文本中出现项目根之外的显式绝对路径（已记录；脚本内容不解析，详见 THREAT_MODEL Non-goals）: /tmp/ol
+PASS RO: pipe into a destructive verb is not downgraded  -- rc=2 id=DST-01 err=Antinel blocked [DST-01] Agent executed a file or directory deletion command | m
+PASS RO: command substitution is not downgraded  -- rc=2 id=DST-01 err=Antinel blocked [DST-01] Agent executed a file or directory deletion command | m
+PASS RO: find -delete is a write, not a mention  -- rc=2 id=DST-01 err=Antinel blocked [DST-01] Agent executed a file or directory deletion command | m
+PASS RO: sed -i is a write, not a mention  -- rc=2 id=DST-01 err=Antinel blocked [DST-01] Agent executed a file or directory deletion command | m
+PASS RO: sudo is never downgraded  -- rc=2 id=DST-01 err=[DST-02] 提醒: 命令文本中出现项目根之外的显式绝对路径（已记录；脚本内容不解析，详见 THREAT_MODEL Non-goals）: /var/lo
+PASS RO: PowerShell pipeline into Remove-Item is not downgraded  -- rc=2 id=DST-01 err=Antinel blocked [DST-01] Agent executed a file or directory deletion command | m
+PASS RO: Select-String for a destructive verb is allowed  -- rc=0 err=
+PASS RO: the file family is not downgraded (grep .env)  -- rc=2 id=SEC-01 err=Antinel blocked [SEC-01] Agent attempted to read a .env file which may contain A
+PASS RO: the downgrade is recorded in the audit log, not silently dropped  -- 7 downgraded records
+PASS WS-1 POSIX: root rejected  -- rc=2 id=DST-02 err=Antinel blocked [DST-02] Agent attempted to write to a file outside the project 
+PASS WS-1 POSIX: system dir rejected  -- rc=2 id=DST-02 err=Antinel blocked [DST-02] Agent attempted to write to a file outside the project 
+PASS WS-1 POSIX: home shorthand rejected  -- rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'~'
+          拒绝类型：根
+PASS WS-1 POSIX: unexpanded ~ rejected  -- rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'~/work'
+          拒
+PASS WS-1 POSIX: '..' segment rejected  -- rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'/a/../../b'
+       
+PASS WS-1 POSIX: wildcard rejected  -- rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'/a/*'
+          拒绝类
+PASS WS-1 POSIX: a real absolute root is honoured  -- rc=0 err=
+PASS WS-3 rejected config entry lands in the audit log  -- 11 records
+PASS WS-3 rejected config entry is visible in report.py  -- WARNING 19). Address CRITICAL items first.
+ Full log: /tmp/antinel_harness_tqqbxj4o/proj/.psl/audit
+ Re-scan: python scan.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PASS A12 policy.json edited out of band is reported once  -- [Antinel][配置变更] .psl/policy.json 内容已变化（sha256 5443e9aacdb0…）
+          白名单/阈值的放行
+PASS A12 the same policy change is not repeated on every call
+PASS A15 an exclude_patterns allow is mirrored outside the project  -- 1 mirrored records
+PASS A15 ANTINEL_HOST_MIRROR=0 writes nothing outside the project  -- mirror dir exists: False
+
+-- 0.16.0 capabilities --
+FAIL 0.16.0 DST-02 released by whitelist.paths (no policy edit per write)  -- rc=2 err=[Antinel][配置变更] .psl/policy.json 内容已变化（sha256 7ca905bd48c2…）
+          白名单/阈值的放行
+FAIL 0.16.0 DST-02 whitelist release is recorded (dst02_path_whitelisted)  -- 0 records
+PASS 0.16.0 SEC-06 in static rules_applied (was hook-only despite RULES.md)  -- ['SEC-01', 'SEC-02', 'SEC-03', 'SEC-04', 'SEC-05', 'CTX-02', 'CTX-03', 'CTX-04', 'CTX-05', 'SEC-06']
+PASS 0.16.0 scan subject digest reproducible on an unchanged tree  -- sha256:94aece350b95e2ebe0dbfe0be515662eb
+PASS 0.16.0 judgment carries the five hard-precondition fields  -- missing: none
+PASS 0.16.0 judgment status derivable to 'current' on an intact tree  -- status=current platformSpec=True ownership=self
+PASS 0.16.0 ledger exists and row 1 is the self-verdict  -- rows=16
+FAIL 0.16.0 antinel_verify derives current on an intact package  -- 1 of 19 covered files differ (judgment digests (19 files))
+PASS 0.16.0 antinel_verify derives superseded after a covered file changes  -- 2 of 19 covered files differ (judgment digests (19 files))
+
+-- 0.17.0 capabilities --
+PASS 0.17.0 P-B5 fallback patterns are a subset of rules/default.json per id  -- 11 fallback rules checked
+PASS 0.17.0 P-C1 every shipped rule declares apply_to_tools (no silent all-tools)  -- []
+PASS 0.17.0 P-A4 Bash out-of-root absolute path is recorded (alert, not block)  -- rc=0 events=1
+PASS 0.17.0 P-A4 relative in-root path produces no suspect event  -- rc=0 events=0
+PASS 0.17.0 P-A4 URL path segments are not suspect events (:// scheme guard)  -- rc=0 events=0
+PASS 0.17.0 P-A5 hook_alive heartbeat present in the day's log  -- 1 hook_alive records
+PASS 0.18.0 P-B8 stats.json retired (bump_stats removed, no new writes)  -- stats.json no longer maintained since 0.18.0
+PASS 0.17.0 P-A5 SessionStart leaves a session_start heartbeat  -- rc=0 out={"additionalContext": "Antinel Security 
+PASS 0.17.0 P-A5 baseline write is verified (no AUDIT_WRITE_FAILED)
+PASS 0.17.0 P-A5 audit loss says AUDIT_WRITE_FAILED and stays fail-open  -- rc=0 err=[Antinel] AUDIT_WRITE_FAILED: this event's audit record coul
+PASS 0.17.0 P-B7 deprecated rule never fires (NET-01 off -> only NET-03 logged)  -- hits=['NET-03']
+PASS 0.17.0 install --check: exit 1 when not installed  -- rc=1
+PASS 0.17.0 install --check: exit 3 on drift  -- rc=3
+PASS 0.17.0 P-A3 tampering antinel-namespaces.json -> superseded  -- 2 of 19 covered files differ (judgment digests (19 files))
+PASS 0.17.0 P-B1 --manifest catches a README tamper (16-file gap closed)  -- 7 of 41 covered files differ (manifest (41 files))
+FAIL 0.17.0 P-B1 without --manifest, README tamper is out of scope (documented)
+PASS 0.17.0 P-A3 objectOwnership is derived with a stated basis  -- self | subject github.com/sotaex is in the signed namespace list
+
+-- 0.18.0 capabilities --
