@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Antinel Security Suite v0.21.0 - static scan engine (F-01 environment scan).
+"""Antinel Security Suite v0.27.0 - static scan engine (F-01 environment scan).
 
 Single-pass, multi-rule: one os.walk() over the tree, every file is checked
 against every applicable STATIC rule (spec part 3). Static rules: SEC-01..05

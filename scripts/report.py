@@ -46,7 +46,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 PKG_DIR = Path(__file__).resolve().parent
-TOOL_VERSION = "0.21.0"
+TOOL_VERSION = "0.27.0"
 RETENTION_DAYS_DEFAULT = 30
 SCRIPT_FILES = ("pre_tool_use.py", "post_tool_use.py", "scan.py", "install.py", "report.py")
 
@@ -491,6 +491,125 @@ def archive_logs(audit_dir, retention_days=RETENTION_DAYS_DEFAULT):
 
 
 # ------------------------------------------------------------------ main ----
+def _import_session_dna():
+    """session_dna lives at the package root; report.py may run from the source
+    tree (same dir) or an installed layout (<pkg>/scripts). Try the parent dir
+    first, then the plain path."""
+    try:
+        parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if parent not in sys.path:
+            sys.path.insert(0, parent)
+        import session_dna
+        return session_dna
+    except Exception:
+        try:
+            import session_dna
+            return session_dna
+        except Exception:
+            return None
+
+
+def _session_dna_main(args, root, log_path):
+    """--session handler: compute (and optionally chain-write) one session's
+    DNA. Independent of the normal report path so a session query never needs
+    manifest/scan artifacts."""
+    sd = _import_session_dna()
+    if sd is None:
+        sys.stderr.write("session_dna module not found next to report.py\n")
+        return 2
+    audit_dir = log_path if log_path.is_dir() else log_path.parent
+    session_q = args.session
+    if session_q == "latest":
+        sd0 = sd
+        latest = sd0.find_latest_session(audit_dir)
+        if not latest:
+            sys.stderr.write("审计里还没有真实会话（心跳与 CLI 不算）\n")
+            return 1
+        session_q = latest
+    # 0.23.0 (A3/A4): pricing lookup -- project rules first, then the package's
+    # own rules/. Missing table => facts-only DNA (no cost_estimate block).
+    pricing = None
+    for cand in (root / ".psl" / "rules" / "pricing.json",
+                 Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) / "rules" / "pricing.json",
+                 Path(__file__).resolve().parent / "rules" / "pricing.json"):
+        try:
+            p = json.load(open(cand, encoding="utf-8"))
+            if isinstance(p, dict) and isinstance(p.get("rates"), dict):
+                pricing = p
+                break
+        except Exception:
+            continue
+    dna = sd.compute(audit_dir, session_q,
+                     max_bytes=None, max_files=None, generated_by="report.py",
+                     pricing=pricing)
+    if dna is None:
+        sys.stderr.write("no audit records for session %s under %s\n" % (session_q, audit_dir))
+        return 1
+    wrote = False
+    if args.write_dna:
+        wrote = sd.append_chained(audit_dir, dna)
+        if not wrote:
+            sys.stderr.write("AUDIT_WRITE_FAILED: session_dna could not be chained; "
+                             "not written unchained\n")
+            return 1
+    if args.format == "json":
+        payload = dict(dna)
+        if args.write_dna:
+            payload["dna_written"] = bool(wrote)
+        body = json.dumps(payload, ensure_ascii=False, indent=1)
+    else:
+        _u = dna.get("usage") or {}
+        _tok = sum((v.get("total") or 0) for v in (_u.get("by_model") or {}).values())
+        lines = [
+            "【摘要】本会话 %s 次操作、拦截 %s 次、提醒 %s 次、触碰 %s 个文件%s——证据链在账，明细如下。"
+            % (dna["actions"]["total"], dna["blocks"]["total"], dna["warnings"]["total"],
+               dna["files"]["touched_unique"],
+               ("、token 进出 %s" % format(_tok, ",")) if _tok else ""),
+            "Session DNA: %s" % dna["session"],
+            "  generated_by: %s   at: %s" % (dna["generated_by"], dna["generated_at"]),
+            "  coverage: %s record(s) across %s day file(s)%s"
+            % (dna["coverage"]["records"], len(dna["coverage"]["days"]),
+               "  [TRUNCATED at byte budget]" if dna["coverage"]["truncated"] else ""),
+            "  span: %s .. %s" % (dna["span"]["first"], dna["span"]["last"]),
+            "  actions: %s   by_tool: %s" % (dna["actions"]["total"], dna["actions"]["by_tool"]),
+            "  blocks: %s   by_rule: %s" % (dna["blocks"]["total"], dna["blocks"]["by_rule"]),
+            "  warnings: %s" % dna["warnings"]["total"],
+            "  files touched (unique): %s   top: %s"
+            % (dna["files"]["touched_unique"],
+               ", ".join("%s x%s" % (f["path"], f["count"]) for f in dna["files"]["top"]) or "-"),
+            "  durations: %s pair(s), median %s ms, p95 %s ms"
+            % (dna["durations"]["pairs"], dna["durations"]["median_ms"], dna["durations"]["p95_ms"]),
+            "  exits: %s observed, %s nonzero" % (dna["exits"]["observed"], dna["exits"]["nonzero"]),
+        ]
+        u = dna.get("usage") or {}
+        if u.get("entries"):
+            lines.append("  usage: %s harvest entry(ies)" % u["entries"])
+            for m, v in sorted((u.get("by_model") or {}).items()):
+                lines.append("    %s: %s turn(s), in=%s out=%s cache_read=%s total=%s"
+                             % (m, v.get("entries"), v.get("input"), v.get("output"),
+                                v.get("cache_read"), v.get("total")))
+            ce = u.get("cost_estimate")
+            if ce:
+                lines.append("  cost ESTIMATE (%s, pricing %s): %s %s"
+                             % (ce.get("currency"), ce.get("pricing_version"),
+                                ce.get("total"), "  unpriced: %s" % ",".join(ce.get("unpriced_models") or [])
+                                if ce.get("unpriced_models") else ""))
+                for m, c in sorted((ce.get("by_model") or {}).items()):
+                    lines.append("    %s: %s" % (m, c))
+            else:
+                lines.append("  cost: no usable pricing table (rates empty) -- tokens are facts, "
+                             "fill rules/pricing.json to derive cost")
+        if args.write_dna:
+            lines.append("  dna_written: %s (chained)" % ("true" if wrote else "false"))
+        body = "\n".join(lines)
+    if args.out:
+        Path(args.out).write_text(body, encoding="utf-8")
+        print("session DNA written: %s" % args.out)
+    else:
+        print(body)
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Antinel behaviour report")
     ap.add_argument("--root", default=os.getcwd(), help="project root (default: cwd)")
@@ -502,6 +621,11 @@ def main(argv=None):
     ap.add_argument("--no-scan", action="store_true", help="do not merge .psl/scan_last.json")
     ap.add_argument("--archive", action="store_true", help="apply retention policy (B-05)")
     ap.add_argument("--retention-days", type=int, help="override .psl/policy.json log_retention_days")
+    # 0.22.0 (A5, 三问三答 v1.0): per-session DNA. Facts only -- every field is
+    # an aggregation of records already in the audit chain.
+    ap.add_argument("--session", help="session DNA: aggregate one session's audit records")
+    ap.add_argument("--write-dna", action="store_true",
+                    help="with --session: append the DNA to the audit chain (chained)")
     args = ap.parse_args(argv)
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -510,6 +634,10 @@ def main(argv=None):
 
     root = Path(args.root).resolve()
     log_path = Path(args.log) if args.log else root / ".psl" / "audit"
+
+    if args.session:
+        return _session_dna_main(args, root, log_path)
+
     since = None
     if args.since:
         try:

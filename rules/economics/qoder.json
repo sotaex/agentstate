@@ -1,0 +1,11 @@
+{
+ "host": "qoder",
+ "unit": "tokens",
+ "unit_label": "tokens",
+ "digest_primary": "tokens",
+ "buckets": [],
+ "bucket_expiry": false,
+ "cycle": null,
+ "balance_source": "none",
+ "note": "待探测：Qoder 计费口径未实测，暂按 token 事实呈现。"
+}

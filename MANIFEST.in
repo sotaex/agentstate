@@ -1,0 +1,8 @@
+include README.md LICENSE pyproject.toml
+recursive-include rules *.json
+recursive-include hooks *.py
+recursive-include scripts *.py
+recursive-include tools *.py
+recursive-include challenge *.py *.md
+recursive-include demo *.py *.txt
+recursive-include docs *.md

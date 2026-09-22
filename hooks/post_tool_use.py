@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Antinel Security Suite v0.21.0 - PostToolUse hook (Claude Code / ZCode compatible).
+"""Antinel Security Suite v0.27.0 - PostToolUse hook (Claude Code / ZCode compatible).
 
 Input (stdin, one JSON line): {session_id, transcript_path, tool_name,
 tool_input, tool_response}. PostToolUse cannot block an action that already
@@ -19,6 +19,22 @@ Python 3.10+, stdlib only, no network.
     no lock (50.3% data loss measured on 09-16), and report.py never read it.
     A counter nobody reads that also computes wrong numbers serves only to
     provide a second, conflicting source of truth.
+
+0.22.0 changes (三问三答 v1.0, A5/B1/C1):
+  - C1: file_state_after for structured writes (Write/Edit) -- sha256+size of
+    the target AFTER the tool ran; joins to pre_tool_use's file_state_before
+    via the shared content_digest. Hashes only, never content.
+  - B1: exit_code extracted from tool_response when the host exposes one.
+    Facts only: unknown stays null -- absent evidence is not invented.
+    (Durations are derived by report.py from pre/post ts pairs.)
+
+0.23.0 changes (三问三答 v1.0, A1/A2 -- the cost ledger):
+  - transcript_reader.py (adapter layer, package root) harvests token FACTS
+    (model / input / output / cache_read / total) from the host transcript
+    incrementally (byte offset state in .psl/state/). Each harvest with new
+    entries appends a chained `usage_delta` record. Cost is NEVER written
+    here -- tokens are facts, cost is derived (report/session DNA only).
+    The transcript path is stored as a sha256 tag in the ledger, never raw.
 """
 import hashlib
 import json
@@ -42,6 +58,59 @@ OUTPUT_SENSITIVE_PATTERNS = [
 ]
 
 CANARY_RE = re.compile(r"\bCANARY-[A-Za-z0-9_\-]+-[0-9a-f]{8}\b")
+
+# ------------------------------------------------------ 0.22.0 (B1/C1) helpers --
+# Canonical write-tool names: the host sends raw names (MultiEdit, NotebookEdit);
+# pre_tool_use aliases them (TOOL_ALIASES) before its records carry "tool". The
+# content_digest is computed over the RAW tool_input on both sides either way,
+# so the pre/post join key is unaffected by aliasing.
+_TOOL_CANON = {"MultiEdit": "Edit", "ApplyPatch": "Edit", "NotebookEdit": "Write"}
+WRITE_TOOLS = ("Write", "Edit")
+FILE_STATE_MAX_BYTES = 1_000_000         # same cap and recipe as pre_tool_use
+_EXIT_CODE_KEYS = ("exit_code", "exitCode", "returncode", "returnCode", "code")
+
+
+def file_state_snapshot(path):
+    """C1 after-state. Same deterministic outcomes as pre_tool_use:
+      {"hash": "sha256:...", "size": n} | {"hash": "absent"}
+      | {"hash": "too_large", "size": n} | {"hash": "unreadable"}
+    """
+    try:
+        if not path or not os.path.isfile(path):
+            return {"hash": "absent"}
+        size = os.path.getsize(path)
+        if size > FILE_STATE_MAX_BYTES:
+            return {"hash": "too_large", "size": size}
+        with open(path, "rb") as f:
+            return {"hash": "sha256:" + hashlib.sha256(f.read()).hexdigest(), "size": size}
+    except Exception:
+        return {"hash": "unreadable"}
+
+
+def extract_exit_code(tool_response):
+    """B1: best-effort numeric exit code from the tool response. Dict shapes are
+    probed on known keys (top level, then result/output wrappers); string
+    responses get one bounded regex. Returns None when the host exposes
+    nothing -- the record keeps the null rather than guessing."""
+    tr = tool_response
+    if isinstance(tr, dict):
+        for k in _EXIT_CODE_KEYS:
+            v = tr.get(k)
+            if isinstance(v, int) and not isinstance(v, bool):
+                return v
+        for wrap in ("result", "output"):
+            inner = tr.get(wrap)
+            if isinstance(inner, dict):
+                for k in _EXIT_CODE_KEYS:
+                    v = inner.get(k)
+                    if isinstance(v, int) and not isinstance(v, bool):
+                        return v
+    elif isinstance(tr, str):
+        m = re.search(r"(?:exit\s*code|exited with(?: code)?|returncode)\s*[:=]?\s*(\d{1,4})",
+                      tr, re.I)
+        if m:
+            return int(m.group(1))
+    return None
 
 
 def response_text(tool_response):
@@ -104,97 +173,144 @@ def audit_dir():
     return os.path.join(os.getcwd(), ".psl", "audit")
 
 
+
+def _ac():
+    """C-1: audit_chain.py 是锁与链追加的唯一实现（包根）；钩子可能从
+    <pkg>/hooks/ 运行，ImportError 时把包根补进 sys.path。"""
+    global _AUDIT_CHAIN
+    if _AUDIT_CHAIN is None:
+        try:
+            import audit_chain as _m
+        except ImportError:
+            parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            if parent not in sys.path:
+                sys.path.insert(0, parent)
+            import audit_chain as _m
+        _AUDIT_CHAIN = _m
+    return _AUDIT_CHAIN
+
+
+_AUDIT_CHAIN = None
+
+
 def _chain_fields(fn, rec):
-    """0.20.0 (P0-1): chained write — lock-acquire → lock-read prev → chain →
-    append → release. Same pattern as pre_tool_use._append_chained(). This
-    replaces the old code that read prev OUTSIDE the lock (racing with
-    PreToolUse writes to the same file → same-parent forks in the audit log,
-    audit finding E-06)."""
-    lock = fn + ".lock"
-    got_lock = False
-    for _ in range(200):                                 # ~1s window (matches pre side)
-        try:
-            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.close(fd)
-            got_lock = True
-            break
-        except FileExistsError:
-            try:
-                if time.time() - os.path.getmtime(lock) > 5:
-                    os.remove(lock)                      # stale lock: steal it
-            except OSError:
-                pass
-            time.sleep(0.005)
-    try:
-        # read prev INSIDE the lock (this is the fix — the old code read before locking)
-        prev = ""
-        try:
-            with open(fn, "r", encoding="utf-8", errors="replace") as f:
-                for l in f:
-                    l = l.strip()
-                    if not l:
-                        continue
-                    try:
-                        h = json.loads(l).get("hash")
-                        if h:
-                            prev = h
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-        rec = dict(rec)
-        if not got_lock:
-            rec["chain"] = "unlocked"                    # downgrade marker
-        rec["prev"] = prev[-16:]
-        canon = json.dumps({k: v for k, v in rec.items() if k != "hash"},
-                           sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-        rec["hash"] = hashlib.sha256((prev + canon).encode("utf-8")).hexdigest()
-        line = json.dumps(rec, ensure_ascii=False) + "\n"
-        with open(fn, "a", encoding="utf-8") as f:
-            f.write(line)
-        # 0.18.0 day anchor (same as pre_tool_use)
-        _touch_day_manifest(fn)
-    finally:
-        try:
-            os.remove(lock)
-        except OSError:
-            pass
+    """0.20.0 (P0-1) → C-1 (v0.28)：实现收拢至 audit_chain（sidecar 策略）。"""
+    _rec, got = _ac().append_chained(fn, rec, on_timeout="sidecar")
+    if got:
+        _ac().touch_day_manifest(fn)
 
 
 def _touch_day_manifest(fn):
-    """0.18.0 (R-20): day anchor — same as pre_tool_use._touch_day_manifest."""
-    try:
-        size = os.path.getsize(fn)
-        with open(fn, "rb") as f:
-            f.seek(max(0, size - 4096))
-            tail = f.read().decode("utf-8", errors="replace").rstrip("\r\n")
-        last_line = tail.rsplit("\n", 1)[-1] if "\n" in tail else tail
-        last_hash = json.loads(last_line).get("hash", "") if last_line else ""
-        mpath = os.path.join(os.path.dirname(fn), "day_manifest.json")
-        day = os.path.basename(fn)
-        try:
-            man = json.load(open(mpath, encoding="utf-8"))
-            if not isinstance(man, dict):
-                man = {}
-        except Exception:
-            man = {}
-        prev = man.get(day) or {}
-        if size >= int(prev.get("size", 0)):
-            man[day] = {"size": size, "last_hash": last_hash,
-                        "updated_at": datetime.now().isoformat(timespec="seconds")}
-            tmp = mpath + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(man, f, ensure_ascii=False, indent=1)
-            os.replace(tmp, mpath)
-    except Exception:
-        pass
-
-
+    """R-20 日锚（链外副本，检出尾部删除）。"""
+    _ac().touch_day_manifest(fn)
 def append_jsonl(record):
     d = audit_dir()
     os.makedirs(d, exist_ok=True)
     fn = os.path.join(d, datetime.now().strftime("%Y-%m-%d") + ".jsonl")
     _chain_fields(fn, record)
+
+
+# ------------------------------------------------- 0.23.0 (A1/A2) usage chain --
+def _import_transcript_reader():
+    """transcript_reader.py sits at the package root; this hook may run from
+    the source tree (same dir) or an installed layout (<pkg>/hooks)."""
+    try:
+        parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if parent not in sys.path:
+            sys.path.insert(0, parent)
+        import transcript_reader
+        return transcript_reader
+    except Exception:
+        try:
+            import transcript_reader
+            return transcript_reader
+        except Exception:
+            return None
+
+
+def record_usage_delta(event, session_id):
+    """Harvest new token facts from the transcript and append one chained
+    `usage_delta` record. Every failure mode is silent (fail-open, A-08):
+    a billing side-channel must never break or distort the security hook."""
+    try:
+        tp = event.get("transcript_path") or ""
+        if not tp:
+            return
+        # 定稿方案 v1.1 控制感：消耗采集总开关（global_settings.usage_collect=false 关）
+        try:
+            _pp = os.path.join(os.getcwd(), ".psl", "policy.json")
+            with open(_pp, encoding="utf-8") as _f:
+                _gs = (json.load(_f).get("global_settings") or {})
+            if _gs.get("usage_collect") is False:
+                return
+        except Exception:
+            pass
+        tr = _import_transcript_reader()
+        if tr is None:
+            return
+        state_dir = os.path.join(os.getcwd(), ".psl", "state")
+        entries, meta = tr.harvest_delta(tp, state_dir)
+        if not entries:
+            return
+        rec = {
+            "ts": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
+            "type": "usage_delta",
+            "tool": "-",
+            "session": session_id,
+            "host": "",
+            "source": {"path_tag": (meta or {}).get("path_tag"),
+                       "scope": (meta or {}).get("scope"),
+                       "reset": bool((meta or {}).get("reset")),
+                       "bytes_read": (meta or {}).get("bytes_read", 0),
+                       "deduped": (meta or {}).get("deduped", 0),
+                       "usage_source": "transcript"},
+            "entries": entries,
+        }
+        append_jsonl(rec)
+        _accumulate_budget_state(session_id, entries)
+    except Exception:
+        pass
+
+
+def _accumulate_budget_state(session_id, entries):
+    """v0.27.0 (BUDGET-01 数据底座): 会话/项目日 两档 token 累计，供
+    PreToolUse 预算执法读取。best-effort：预算执法基于已记录的事实，
+    状态缺失时 PreToolUse fail-open（不执法也不谎报）。"""
+    try:
+        import re as _re
+        state_dir = os.path.join(os.getcwd(), ".psl", "state")
+        os.makedirs(state_dir, exist_ok=True)
+        p = os.path.join(state_dir, "session_usage.json")
+        try:
+            st = json.load(open(p, encoding="utf-8"))
+        except Exception:
+            st = {}
+        day = datetime.now().strftime("%Y-%m-%d")
+        din = sum(e.get("input_tokens") or 0 for e in entries)
+        dout = sum(e.get("output_tokens") or 0 for e in entries)
+        s = st.setdefault("sessions", {}).setdefault(session_id or "?", {})
+        s["in"] = s.get("in", 0) + din
+        s["out"] = s.get("out", 0) + dout
+        s["updated_at"] = datetime.now().isoformat(timespec="seconds")
+        d = st.setdefault("daily", {}).setdefault(day, {})
+        d["in"] = d.get("in", 0) + din
+        d["out"] = d.get("out", 0) + dout
+        d["updated_at"] = s["updated_at"]
+        # 防膨胀：只留最近 20 个会话与 7 个日键
+        ss = st["sessions"]
+        if len(ss) > 20:
+            for k in sorted(ss, key=lambda k: ss[k].get("updated_at", ""))[:-20]:
+                ss.pop(k, None)
+        dd = st["daily"]
+        if len(dd) > 7:
+            for k in sorted(dd)[:-7]:
+                dd.pop(k, None)
+        tmp = p + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(st, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, p)
+    except Exception:
+        pass
 
 
 # 0.20.0: bump_stats() removed entirely — see module docstring.
@@ -246,6 +362,15 @@ def main():
         "canaries_observed": canaries,
     }
 
+    # 0.22.0 (B1/C1): exit code when the host exposes one; after-state for
+    # structured writes. Joined to the pre record via the shared content_digest.
+    record["exit_code"] = extract_exit_code(event.get("tool_response"))
+    _canon = _TOOL_CANON.get(tool_name, tool_name)
+    if _canon in WRITE_TOOLS:
+        _fp = tool_input.get("file_path") or tool_input.get("path") or ""
+        if _fp:
+            record["file_state_after"] = file_state_snapshot(_fp)
+
     ok = True
     try:
         append_jsonl(record)
@@ -253,6 +378,10 @@ def main():
         # with no lock (50.3% data loss measured) and zero consumers.
     except Exception:
         ok = False
+
+    # 0.23.0 (A1/A2): token facts from the transcript into the chain, after the
+    # security record -- the security ledger must never wait on the billing one.
+    record_usage_delta(event, session_id)
 
     if sensitive:
         try:

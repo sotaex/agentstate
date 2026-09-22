@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Antinel Security Suite v0.19.2 - self installer (F-07) and uninstaller (F-08).
+"""Antinel Security Suite v0.27.0 - self installer (F-07) and uninstaller (F-08).
 
 Steps (spec part 4):
   1. detect host type            (A-04 algorithm + C-02 refinements)
@@ -43,9 +43,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 PKG_DIR = Path(__file__).resolve().parent
-SKILL_VERSION = "0.21.0"
+SKILL_VERSION = "0.27.0"
 PSL_SPEC = "psl-vs-0.1"
-SCRIPT_FILES = ("pre_tool_use.py", "post_tool_use.py", "scan.py", "install.py", "report.py")
+SCRIPT_FILES = ("pre_tool_use.py", "post_tool_use.py", "session_dna.py",
+                "audit_chain.py",
+                "transcript_reader.py", "antinel.py", "hub.py", "host_shield.py",
+                "strings.py", "scan.py", "install.py", "report.py")
 
 # 0.16.0 (P1-7): agent-managed directories that legitimately live OUTSIDE any
 # project root. When one of these exists at first install, the policy template
@@ -414,6 +417,33 @@ def install(root, host_override=None, redetect=False, skip_scan=False, strict=Fa
         if err.strip():
             print(err.strip())
     print("[6/6] manifest: %s" % manifest_path)
+    # v0.23.1 (定稿方案 v1.2): 个人中枢自动登记——安装即入册，联邦 digest 才有分母。
+    # 不入册：generic（扫描-only）；系统临时目录下的项目（测试/一次性）——确定性判据，
+    # 不依赖 TTY 检测（后台 shell 的 stdin 可能仍是 console）。
+    # Best-effort：中枢登记失败不影响安装结果。
+    import tempfile as _tempfile
+    _root_s = str(root)
+    _in_temp = _root_s.lower().startswith(_tempfile.gettempdir().lower())
+    if host != "generic" and not _in_temp:
+        try:
+            parent = str(Path(__file__).resolve().parent.parent)
+            if parent not in sys.path:
+                sys.path.insert(0, parent)
+            import hub as _hub
+            _hub.register(_root_s, host, registered_by="installer")
+            print("      hub: registered in ~/.antinel/registry.json")
+        except Exception as _e:
+            print("      hub: register skipped (%s)" % _e)
+        try:  # 0.24.0: PATH 垫片（不碰注册表；把 ~/.antinel 加入 PATH 即可用 antinel）
+            shim_dir = os.path.join(os.path.expanduser("~"), ".antinel")
+            os.makedirs(shim_dir, exist_ok=True)
+            shim = os.path.join(shim_dir, "antinel.cmd")
+            with open(shim, "w", encoding="ascii", newline="\r\n") as f:
+                f.write('@echo off\r\n"%s" -I -S "%s" %%*\r\n'
+                        % (sys.executable, _locate("antinel.py")))
+            print("      shim: %s（把该目录加入 PATH 后任意终端可用 antinel）" % shim)
+        except Exception as _e:
+            print("      shim: skipped (%s)" % _e)
     return 0
 
 

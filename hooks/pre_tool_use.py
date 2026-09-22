@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Antinel Security Suite v0.21.0 - PreToolUse hook (Claude Code / ZCode compatible).
+"""Antinel Security Suite v0.27.0 - PreToolUse hook (Claude Code / ZCode compatible).
 
 v1.2 fixes over v1.1:
   G-01: rules loaded from PKG_DIR only (install.py snapshot in .psl/ is informational)
@@ -215,6 +215,21 @@ def redos_risky(pat):
 
 
 def load_rules():
+    rules = None
+    for _retry in range(3):
+        try:
+            with open(RULES_PATH, "r", encoding="utf-8") as f:
+                rules = list(json.load(f).get("rules", []))
+            break
+        except (FileNotFoundError, json.JSONDecodeError, PermissionError):
+            if _retry < 2:
+                import time
+                time.sleep(0.1)
+    if rules is not None:
+        return _load_rules_integrity(rules)
+    return _load_rules_fallback()
+
+def _load_rules_integrity(rules):
     try:
         with open(RULES_PATH, "r", encoding="utf-8") as f:
             rules = list(json.load(f).get("rules", []))
@@ -417,7 +432,7 @@ def load_policy():
             gs = pol.get("global_settings") or {}
             thr = str(gs.get("alert_threshold", "warning")).lower()
             _agent_paths = [q for q in (_norm_prefix(x) for x in (
-                d.get("agent_paths") or wl.get("agent_paths") or [])
+                pol.get("agent_paths") or wl.get("agent_paths") or [])
                 if isinstance(x, str) and x.strip()) if q]
             return {"domains": [d.lower().strip() for d in wl.get("domains") or [] if isinstance(d, str) and d.strip()],
                     "paths": [q for q in (_norm_prefix(x) for x in wl.get("paths") or []
@@ -430,7 +445,9 @@ def load_policy():
                     # a guardrail must not take the host down over its own log
                     # dir); when True, an audit write failure BLOCKS the call.
                     "fail_closed_on_audit_loss":
-                        str((gs.get("fail_closed_on_audit_loss", False))).lower() == "true"}
+                        str((gs.get("fail_closed_on_audit_loss", False))).lower() == "true",
+                    # 0.24.0 (BUDGET-01): 预算键随 global_settings 原样透传
+                    "settings": gs}
         except Exception:
             return dict(EMPTY_POLICY)
     return dict(EMPTY_POLICY)
@@ -506,6 +523,34 @@ def path_whitelisted(file_path, project_root, prefixes):
         pass
     released = any(c.startswith(np) for c in cands for np in norm_prefixes if np)
     if released:
+        # 0.22.0 (R-19, reopened when the load_policy NameError fix brought the
+        # whitelist back to life): lexical release stays primary, but a junction
+        # that LEXICALLY matches a whitelisted prefix while its REAL target sits
+        # outside every whitelisted prefix is a bypass, not a release. realpath
+        # here can only ever NARROW a lexical release, never widen it, so the
+        # 0.20.0 failure mode (8.3 short-name temp dirs breaking a realpath
+        # PRIMARY) cannot recur: we still return True on any lexical or
+        # realpath-form prefix match, and veto only when the file exists under
+        # a concrete realpath matching NEITHER form. The DST-02 boundary check
+        # already resolves realpath for the same path, so no new sandbox
+        # promise is being made. A veto simply falls through to the normal
+        # DST-02 block, which is audited like any other block -- recorded,
+        # never silent.
+        rp = _safe_realpath(file_path)
+        if rp and rp.replace("\\", "/").lower() != file_path.replace("\\", "/").lower():
+            rp_n = rp.replace("\\", "/").lower().rstrip("/") + "/"
+            for x in prefixes:
+                np = _norm_prefix(x)
+                if np and rp_n.startswith(np):
+                    return True
+                cand = x if re.match(r"^[A-Za-z]:", x) or x.startswith("/") or x.startswith("\\") \
+                    else os.path.join(project_root, x.replace("/", os.sep))
+                rp_prefix = _safe_realpath(cand)
+                if rp_prefix:
+                    rp_prefix_n = rp_prefix.replace("\\", "/").lower().rstrip("/") + "/"
+                    if rp_prefix_n and rp_n.startswith(rp_prefix_n):
+                        return True
+            return False                      # veto: real target outside the whitelist
         return True
 
     # Secondary: realpath cross-check (advisory, not blocking)
@@ -1545,129 +1590,63 @@ def _chain_with(rec, prev):
     return rec
 
 
-def _chain_fields(fn, rec):
-    """0.19.1 (TN-09) **本函数不再是推荐的写入路径** —— 它在锁外读末条 hash。
 
-    两个并发的钩子进程会读到同一个 prev，各追加一条 prev 相同的记录 ⇒
-    链分叉（两条记录共用同一个父亲）。写入请用 _append_chained()。
-    本函数保留给只读场景（体检 / 校验脚本）。"""
-    return _chain_with(rec, _last_hash(fn))
+def _ac():
+    """C-1: audit_chain.py 是锁与链追加的唯一实现（包根）；钩子可能从
+    <pkg>/hooks/ 运行，ImportError 时把包根补进 sys.path。"""
+    global _AUDIT_CHAIN
+    if _AUDIT_CHAIN is None:
+        try:
+            import audit_chain as _m
+        except ImportError:
+            parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            if parent not in sys.path:
+                sys.path.insert(0, parent)
+            import audit_chain as _m
+        _AUDIT_CHAIN = _m
+    return _AUDIT_CHAIN
+
+
+_AUDIT_CHAIN = None
+
+
+def _chain_fields(fn, rec):
+    """0.19.1 (TN-09) 历史只读路径（锁外读末条 hash），写入用 _append_chained()。
+    C-1 (v0.28)：实现收拢至 audit_chain，本文件只留薄委托。"""
+    ac = _ac()
+    return ac.chain_with(rec, ac.last_hash(fn))
 
 
 def _acquire_lock(fn):
-    """返回锁路径；拿不到则返回 None。
-
-    A8: cross-process append serialised with a lockfile.
-    0.19.1：重试窗口由 ~100ms 提到 ~1s。理由——链的正确性依赖「拿到锁」，
-    而放弃锁的代价已经从「可能重复一行」升级为「链分叉」，后者会让
-    **篡改与并发在链上长得一样**（见 _append_chained 的说明）。
-    仍然不无限等待：一把卡死的锁不能拖垮宿主。"""
-    lock = fn + ".lock"
-    for _ in range(200):
-        try:
-            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.close(fd)
-            return lock
-        except FileExistsError:
-            try:
-                if time.time() - os.path.getmtime(lock) > 5:
-                    os.remove(lock)                     # stale lock: steal it
-            except OSError:
-                pass
-            time.sleep(0.005)
-    return None
+    return _ac().acquire_lock(fn)
 
 
 def _release_lock(lock):
-    if lock:
-        try:
-            os.remove(lock)
-        except OSError:
-            pass
+    _ac().release_lock(lock)
 
 
 def _append_chained(fn, rec):
-    """0.19.1 (TN-09)：**读末条 hash 与追加必须在同一把锁内**。返回已上链的记录。
-
-    旧写法是 `_chain_fields(fn, rec)`（锁外读 prev）→ `_append_locked(fn, line)`
-    （锁内只做 append）。两个并发进程可以同时读到同一个 prev，各写一条
-    prev 相同的记录。实测（2026-09-14 项目日志，431 条）：13 处链断裂，
-    **13/13 全是「相邻两条共用同一 prev」**这个竞态的唯一指纹；
-    同批 430/431 条的 hash 能用上一 / 上两条的 hash 复算 ⇒ 内容没被编辑，
-    错的只是「谁是你爹」。
-
-    为什么这条要算 P1：链的用途是「篡改可被检出」。而并发分叉与篡改在链上
-    **长得一样** ⇒ 被破坏的不是完整性，是**可判定性**——攻击者可以辩称
-    「这只是并发」。一条分不出这两者的证据链，其证据价值是打折的。
-
-    拿不到锁时仍然写（丢一条审计记录比拖垮宿主更糟），但打上
-    `chain: "unlocked"` 这个可 grep 的降级标记，让体检脚本把它单列，
-    不与真篡改混为一谈。"""
-    lock = _acquire_lock(fn)
-    got = lock is not None
-    try:
-        rec = _chain_with(rec, _last_hash(fn))
-        if not got:
-            rec["chain"] = "unlocked"
-        with open(fn, "a", encoding="utf-8") as f:
-            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-    finally:
-        _release_lock(lock)
-    return rec
+    """TN-09 + C-2/C-3：锁内读 prev → 锁内追加；锁预算耗尽改投 sidecar
+    （chain:"unlocked"）。完整配方与叙事见 audit_chain.append_chained。"""
+    return _ac().append_chained(fn, rec, on_timeout="sidecar")[0]
 
 
 def _append_locked(fn, line):
-    """A8：锁内追加一行**已序列化**文本。仅用于非链式写入（宿主镜像）。
-
-    0.19.1：项目日志改用 _append_chained()。镜像沿用项目侧已算好的
-    prev/hash —— 镜像必须是**逐字节副本**，否则它就无法用来检出项目侧
-    被编辑，所以它必须在锁内写，但不需要也不可以重算链。"""
-    lock = _acquire_lock(fn)
-    try:
-        with open(fn, "a", encoding="utf-8") as f:
-            f.write(line)
-    finally:
-        _release_lock(lock)
+    """A8 宿主镜像：锁内平文追加已序列化文本，不重算链（逐字节副本）。"""
+    _ac().append_locked(fn, line)
 
 
 def _touch_day_manifest(fn):
-    """0.18.0 (R-20, audit HP-06): cheap tail anchor.
-
-    The prev-hash chain detects EDITS but not tail deletions: delete the last N
-    records of a day and the remaining chain is self-consistent -- undetectable.
-    This side file stores each day's byte size and last-line hash OUTSIDE the
-    chain, so a truncated or deleted day no longer verifies (verify_chain --tail).
-    It lives in the same directory, so it raises the tamper bar (two files must
-    be forged instead of one); it does not eliminate it -- THREAT_MODEL says so
-    in exactly those words."""
-    try:
-        size = os.path.getsize(fn)
-        with open(fn, "rb") as f:
-            f.seek(max(0, size - 4096))
-            tail = f.read().decode("utf-8", errors="replace").rstrip("\r\n")
-        last_line = tail.rsplit("\n", 1)[-1] if "\n" in tail else tail
-        last_hash = json.loads(last_line).get("hash", "") if last_line else ""
-        mpath = os.path.join(os.path.dirname(fn), "day_manifest.json")
-        day = os.path.basename(fn)
-        try:
-            with open(mpath, "r", encoding="utf-8") as f:
-                man = json.load(f)
-            if not isinstance(man, dict):
-                man = {}
-        except Exception:
-            man = {}
-        prev = man.get(day) or {}
-        if size >= int(prev.get("size", 0)):        # monotonic; never move back
-            man[day] = {"size": size, "last_hash": last_hash,
-                        "updated_at": datetime.now().isoformat(timespec="seconds")}
-            tmp = mpath + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(man, f, ensure_ascii=False, indent=1)
-            os.replace(tmp, mpath)
-    except Exception:
-        pass                                        # best-effort anchor
+    """R-20 日锚（链外副本，检出尾部删除）。"""
+    _ac().touch_day_manifest(fn)
 
 
+def _last_hash(fn):
+    return _ac().last_hash(fn)
+
+
+def _chain_with(rec, prev):
+    return _ac().chain_with(rec, prev)
 def log_event(rec, mirror=False):
     """Append one audit record. Returns True when the project-local write was
     VERIFIED (read back and re-parsed), False otherwise.
@@ -1687,14 +1666,21 @@ def log_event(rec, mirror=False):
         # 0.19.1 (TN-09)：读 prev 与 append 必须在同一把锁内 —— 见 _append_chained。
         rec = _append_chained(fn, rec)
         line = json.dumps(rec, ensure_ascii=False) + "\n"
-        with open(fn, "rb") as f:                        # write-then-read-back
-            f.seek(max(0, os.path.getsize(fn) - len(line.encode("utf-8")) - 8))
-            # newline-agnostic: _append_locked writes TEXT mode, so Windows
-            # stores \r\n -- compare on normalized tails (first build of this
-            # check compared \n against \r\n and flagged every write).
-            tail = f.read().decode("utf-8", errors="replace").replace("\r\n", "\n").rstrip("\n")
-        ok = bool(tail) and tail.rsplit("\n", 1)[-1] == line.rstrip("\n") \
-            and isinstance(json.loads(tail.rsplit("\n", 1)[-1]), dict)
+        # 0.28.0 (C-4): verify by PRESENCE among the last lines, not by "still
+        # the last line" -- a concurrent append right after ours used to read
+        # as a false loss. Windows text mode stores \r\n; compare normalized.
+        with open(fn, "rb") as f:
+            f.seek(max(0, os.path.getsize(fn) - 262144))
+            tail = f.read().decode("utf-8", errors="replace").replace("\r\n", "\n")
+        mine = line.rstrip("\n")
+        ok = False
+        for recent in [l for l in tail.split("\n") if l.strip()][-8:]:
+            if recent == mine:
+                try:
+                    ok = isinstance(json.loads(recent), dict)
+                except Exception:
+                    ok = False
+                break
         if ok:
             _touch_day_manifest(fn)
     except Exception:
@@ -1905,7 +1891,7 @@ def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=Non
                 if r is not None and check_outside_root(file_path, project_root):
                     ws_allow_log.append(r)
         if hit is None and check == "domain_whitelist":
-            bad = check_domains(command, _field(rule, "whitelist_domains", []) or [])
+            bad = check_domains((command + " " + url).strip(), _field(rule, "whitelist_domains", []) or [])
             if bad:
                 hit = (", ".join(bad), "domain_whitelist")
         # 5. invisible Unicode (CTX-03): command / path / content / file text
@@ -1954,6 +1940,121 @@ def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=Non
 
 
 # ------------------------------------------------------------------- main -----
+# ------------------------------------------------------------- file state (C1) --
+# 0.22.0 (三问三答 v1.0, C1): evidence of what a write target looked like BEFORE
+# a structured write tool runs. post_tool_use.py snapshots AFTER; the two records
+# join on the shared content_digest (same recipe both sides, spec 2.8). Hashes
+# and sizes only -- never content, never diffs.
+WRITE_TOOLS = ("Write", "Edit")          # canonical names, post TOOL_ALIASES
+FILE_STATE_MAX_BYTES = 1_000_000         # over this: record size, not a hash
+
+
+def file_state_snapshot(path):
+    """Deterministic outcomes:
+      {"hash": "sha256:...", "size": n}  hashed (<= FILE_STATE_MAX_BYTES)
+      {"hash": "absent"}                 target does not exist (a create)
+      {"hash": "too_large", "size": n}   over cap -- size recorded, bytes not hashed
+      {"hash": "unreadable"}             exists but could not be read (lock/ACL)
+    """
+    try:
+        if not path or not os.path.isfile(path):
+            return {"hash": "absent"}
+        size = os.path.getsize(path)
+        if size > FILE_STATE_MAX_BYTES:
+            return {"hash": "too_large", "size": size}
+        with open(path, "rb") as f:
+            return {"hash": "sha256:" + hashlib.sha256(f.read()).hexdigest(), "size": size}
+    except Exception:
+        return {"hash": "unreadable"}
+
+
+# ------------------------------------------------------------ BUDGET-01 ----
+def _budget_hit(tool_name, session_id, policy):
+    """0.24.0 (三问三答第三步: 成本即策略). 预算执法基于 post 钩子维护的
+    token 累计事实（.psl/state/session_usage.json）；状态缺失即不执法
+    （fail-open，绝不谎报）。三档 50/80/100，各会话各档只提醒一次；
+    budget_block=true 且 100% 档时升级为拦截，且只拦写通道
+    （Write/Edit/Bash）——只读放行，让 Agent 保留看清现状并收尾的能力。"""
+    gs = policy.get("settings") or {}
+    sb = gs.get("budget_tokens_per_session")
+    db = gs.get("budget_tokens_per_day")
+    if not sb and not db:
+        return None
+    try:
+        st = json.load(open(os.path.join(os.getcwd(), ".psl", "state",
+                                         "session_usage.json"), encoding="utf-8"))
+    except Exception:
+        return None
+    day = datetime.now().strftime("%Y-%m-%d")
+    s = st.get("sessions", {}).get(session_id or "?") or {}
+    d = st.get("daily", {}).get(day) or {}
+    best = None
+    for name, used, budget in (("session", s, sb), ("day", d, db)):
+        if not budget:
+            continue
+        used_n = (used.get("in", 0) if isinstance(used, dict) else 0) + \
+                 (used.get("out", 0) if isinstance(used, dict) else 0)
+        p = used_n / float(budget) * 100.0
+        tier = 100 if p >= 100 else 80 if p >= 80 else 50 if p >= 50 else 0
+        if tier and (best is None or tier > best[0]):
+            best = (tier, name, used_n, int(budget), p)
+    if best is None:
+        return None
+    tier, name, used_n, budget, p = best
+    block_mode = str(gs.get("budget_block", "false")).lower() == "true"
+    write_channel = tool_name in WRITE_TOOLS or tool_name == "Bash"
+    snippet = "%s tokens %d/%d (%.0f%%)" % (name, used_n, budget, p)
+    base_hit = {"rule_id": "BUDGET-01", "match_kind": "budget",
+                "match_snippet": snippet, "snippet": snippet}
+    if block_mode and tier >= 100 and write_channel:
+        return dict(base_hit, severity="critical", action="block",
+                    description="Session/day token budget exceeded (%s)" % snippet,
+                    description_zh="会话/日 token 预算已超限（%s）" % snippet,
+                    remediation="Raise it: antinel settings set budget_tokens_per_%s <N>, or wait for reset"
+                                % name,
+                    remediation_zh="调整预算：antinel settings set budget_tokens_per_%s <N>；"
+                                   "或等待周期重置" % name)
+    if not notice_gate("BUDGET-01", "%s|%s|%d" % (session_id, name, tier)):
+        lang = _lang()
+        if lang == "zh":
+            msg = ("[BUDGET-01] 提醒: %s token 预算已用 %.0f%%（%d/%d）"
+                   "——调整：antinel settings set budget_tokens_per_%s <N>\n"
+                   % (name, p, used_n, budget, name))
+        else:
+            msg = ("[BUDGET-01] notice: %s token budget at %.0f%% (%d/%d)"
+                   " -- adjust: antinel settings set budget_tokens_per_%s <N>\n"
+                   % (name, p, used_n, budget, name))
+        try:
+            sys.stderr.write(msg)
+        except Exception:
+            pass
+        return dict(base_hit, severity="warning", action="alert",
+                    description="token budget at %.0f%%" % p,
+                    description_zh="token 预算已用 %.0f%%" % p)
+    return None                                        # 同档已提醒过：静默放行
+
+
+# -------------------------------------------------- 0.26.0 实时通知主人 ----
+def notify_owner(title, body):
+    """对抗分析 v1.0 裁定：留痕重要，让主人第一时间知道更重要。
+    Windows 气泡通知（fire-and-forget，不阻塞钩子、失败静默）。"""
+    try:
+        import subprocess
+        t = title.replace("'", "''")
+        b = body.replace("'", "''")
+        ps = ("Add-Type -AssemblyName System.Windows.Forms;"
+              "Add-Type -AssemblyName System.Drawing;"
+              "$n=New-Object System.Windows.Forms.NotifyIcon;"
+              "$n.Icon=[System.Drawing.SystemIcons]::Warning;$n.Visible=$true;"
+              "$n.ShowBalloonTip(15000,'%s','%s','Warning');"
+              "Start-Sleep -Seconds 8;$n.Dispose()" % (t, b))
+        subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden",
+                          "-Command", ps],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+
 def main():
     try:  # utf-8 in/out determinism (host decoders expect utf-8)
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -1973,6 +2074,12 @@ def main():
     raw_tool = event.get("tool_name", "") or ""
     tool_name = TOOL_ALIASES.get(raw_tool, raw_tool)        # A9
     tool_input = event.get("tool_input") or {}
+    # extract() coerces values to str, but a bare-string container used to
+    # crash it (HOOK_ERROR fail-open); normalize the container itself too.
+    if isinstance(tool_input, str):
+        tool_input = {"command": tool_input}
+    elif not isinstance(tool_input, dict):
+        tool_input = {"command": str(tool_input)}
     session_id = event.get("session_id", "") or ""
     project_root = find_project_root()
     workspace_roots, ws_source, ws_rejected = load_workspace_roots()
@@ -1994,6 +2101,18 @@ def main():
                         path_wl_log=path_wl_log, bash_path_log=bash_path_log,
                         host_cfg_log=host_cfg_log)
     hits.sort(key=lambda h: SEV_RANK.get(h["severity"], 9))       # stable: keeps category order
+    # 0.24.0 (BUDGET-01): 预算档位命中与规则命中同构（rules_hit 记录、report 可见）
+    _bh = _budget_hit(tool_name, session_id, policy)
+    if _bh:
+        hits.append(_bh)
+        hits.sort(key=lambda h: SEV_RANK.get(h["severity"], 9))
+    # 0.26.0 (对抗分析 v1.0): net_mode=block —— 网络外传从"提醒"升级为"拦截"。
+    # 仅在策略显式 block 时升级 NET 命中；默认 warn 保持不变（分寸：不静默加严）。
+    if str((policy.get("settings") or {}).get("net_mode", "warn")).lower() == "block":
+        for h in hits:
+            if h.get("action") == "alert" and str(h.get("rule_id") or "").startswith("NET"):
+                h["severity"] = "critical"
+                h["action"] = "block"
     blocking = [h for h in hits if h["action"] == "block"]
     decision = "block" if blocking else ("alert" if hits else "allow")
 
@@ -2007,6 +2126,11 @@ def main():
                       "file_path": mask_secrets(fpath),
                       "content_len": len(content)},
             "content_digest": content_digest(tool_name, tool_input)}
+    # 0.22.0 (C1): before-state of a structured write target. Recorded even when
+    # the call ends up blocked -- "a write was attempted against this state" is
+    # itself evidence. Joined to the after-state via the shared content_digest.
+    if tool_name in WRITE_TOOLS and fpath:
+        base["file_state_before"] = file_state_snapshot(fpath)
     # Constraint 3: an allow caused by workspace_roots is recorded, never silent.
     for r in ws_allow_log:
         log_event({"ts": ts, "type": "workspace_root_allow", "tool": raw_tool, "session": session_id,
@@ -2141,6 +2265,12 @@ def main():
         lang = _lang()
         desc = _pick(top, "description", lang)
         rem = _pick(top, "remediation", lang)
+        # 0.26.0: 实时通知主人——对手采取行动的第一时间，主人要能知道并手工介入
+        if str((policy.get("settings") or {}).get("notify_owner", "true")).lower() != "false":
+            what = desc or top.get("description") or "危险操作"
+            detail = str(top.get("match_snippet", ""))[:80]
+            notify_owner("Antinel 已拦下危险操作",
+                         "%s%s。已留痕，详情见 antinel report --session latest" % (what, ("｜" + detail) if detail else ""))
         if lang == "zh":
             reason = "Antinel 拦截 [%s] %s | 命中: %s | 放行/处理: %s | 重试无效（策略拦截）" % (
                 top["rule_id"], desc, top["match_snippet"], rem)

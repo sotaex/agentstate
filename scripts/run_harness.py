@@ -20,9 +20,15 @@ OUT = PKG / "psl" / "judgment.json"
 LEDGER = PKG / "psl" / "verdict-ledger.jsonl"
 MANIFEST = PKG / "psl" / "manifest.json"
 COVERED = ["antinel-namespaces.json",
-           "rules/default.json", "hooks/pre_tool_use.py", "hooks/post_tool_use.py",
+           "rules/default.json", "rules/pricing.json",
+           "rules/economics/workbuddy.json", "rules/economics/zcode.json",
+           "rules/economics/claude-code.json", "rules/economics/qoder.json",
+           "rules/economics/generic.json",
+           "hooks/pre_tool_use.py", "hooks/post_tool_use.py",
            "scripts/scan.py", "scripts/install.py", "scripts/report.py",
-           "scripts/verification_tests.py"]
+           "scripts/verification_tests.py", "session_dna.py", "transcript_reader.py",
+           "audit_chain.py",
+           "antinel.py", "hub.py"]
 
 def sha(p):
     return "sha256:" + hashlib.sha256(Path(p).read_bytes()).hexdigest()
@@ -153,7 +159,7 @@ def main():
         "spec": "psl-vs-0.1",
         "card_id": "antinel-security-suite",
         "skill": "antinel-security",
-        "skill_version": "0.21.0",
+        "skill_version": "0.27.0",
         "verdict": ("PASS (bootstrap)" if bootstrap and verdict == "PASS" else verdict),
         # V7: status is a status BIT, appended info; this file itself is never
         # edited after publication. A third party derives current/superseded

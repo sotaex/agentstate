@@ -1,0 +1,26 @@
+name: daily-chain
+on:
+  schedule:
+    - cron: "18 1 * * *"   # 每天一次（UTC）——链的「每日编号」
+  workflow_dispatch:
+jobs:
+  chain:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: generate today's chain (real hooks, sandbox)
+        run: python challenge/generate_challenge.py
+      - name: verify (must be CLEAN)
+        run: python challenge/verify.py
+      - name: commit the day's chain
+        run: |
+          git config user.name "antinel-bot"
+          git config user.email "antinel-bot@users.noreply.github.com"
+          git add challenge/chain
+          git commit -m "chain: ${{ github.run_id }} daily verified chain" || echo "nothing new"
+          git push

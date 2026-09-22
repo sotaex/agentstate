@@ -1,0 +1,7 @@
+{
+ "generated_at": "2026-09-22T12:48:23",
+ "records": 14,
+ "blocked_events": 3,
+ "generator": "real pre_tool_use.py events in a disposable sandbox",
+ "how_to_regen": "python generate_challenge.py"
+}

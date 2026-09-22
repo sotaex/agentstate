@@ -1,4 +1,4 @@
-# Antinel detection rules (generated from rules/default.json v0.21.0 - do not edit by hand)
+# Antinel detection rules (generated from rules/default.json v0.27.0 - do not edit by hand)
 
 Category order = match priority: secrets > destructive > network > injection > context > metadata.
 Severity to action: critical = block, warning = alert (logged, allowed). All hits are collected; highest severity decides.
@@ -26,7 +26,8 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - 说明: 读取 SSH 私钥或 authorized_keys
 - 处理建议: SSH 密钥不要放进 Agent 工作范围；改用 ssh-agent 转发
 - file_patterns:
-    - `\.ssh[/\\]`
+    - `\.ssh[/\\]id_`
+    - `\.ssh[/\\]authorized_keys`
     - `id_rsa`
     - `id_ed25519`
     - `id_ecdsa`
@@ -40,7 +41,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - 说明: 读取云厂商凭证文件
 - 处理建议: 改用云厂商 CLI 的短期令牌；确需操作时请手动执行
 - file_patterns:
-    - `\.aws[/\\]`
+    - `\.aws[/\\]credentials`
     - `\.kube[/\\]config`
     - `credentials\.json`
     - `\.netrc`
@@ -79,11 +80,15 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - purpose: Surfaces shell egress to non-whitelisted domains (first-generation C2 / exfil channel)
 - description: Agent made an external network request via shell command to a non-whitelisted domain
 - 说明: 通过 Shell 向白名单外域名发起网络请求
-- 处理建议: 核对目标域名是否预期；常用下载源可在 policy.json 的 whitelist.domains 登记
+- 处理建议: 核对目标域名；常用下载源放行：antinel domains add <域名>（进审计链）
 - command_patterns:
     - `\b(curl|wget|fetch)\b.*https?://`
     - `https?://(?!registry\.npmjs\.org|pypi\.org|github\.com)`
-- exclude_patterns: `localhost`, `127\.0\.0\.1`, `registry\.npmjs\.org`, `pypi\.org`
+    - `\b(scp|sftp|rsync|ssh|nc|ncat)\b\s+[^\n]{0,120}@`
+    - `\b(certutil|bitsadmin)\b[^\n]{0,120}(urlcache|transfer|/transfer|/urlcache)`
+    - `Invoke-(WebRequest|RestMethod)|Start-BitsTransfer`
+    - `\b(git\s+push|gh\s+(release|repo)\s+create)\b`
+- exclude_patterns: `localhost`, `127\.0\.0\.1`, `registry\.npmjs\.org`, `pypi\.org`, `files\.pythonhosted\.org`, `github\.com`, `api\.github\.com`, `objects\.githubusercontent\.com`
 - remediation: Pin downloads to whitelisted registries (npmjs/pypi/github) or review the destination.
 
 ## NET-02  Python network request
@@ -104,7 +109,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - purpose: Surfaces non-whitelisted domains named in commands (DNS-level comparison is v2)
 - description: Agent command references a domain outside the whitelist (v1 compares command-line domains; DNS-level comparison is a v2 kernel-layer capability)
 - 说明: 命令引用了白名单外的域名
-- 处理建议: 确认域名无害后，写入 policy.json 的 whitelist.domains 即不再提醒
+- 处理建议: 确认域名无害后放行：antinel domains add <域名>（进审计链）
 - check: domain_whitelist
 - whitelist_domains: registry.npmjs.org, pypi.org, files.pythonhosted.org, github.com, localhost
 - exclude_patterns: `127\.0\.0\.1`
@@ -138,7 +143,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
     - `array_map\(\s*["']unlink["']`
     - `\bosascript\b[^\n]{0,200}\bdelete\b`
     - `\bfind\b[^\n]{0,200}\s-delete\b`
-- exclude_patterns: `rm -rf node_modules`, `rm -rf \.git`, `rm -rf __pycache__`, `rm -rf \.psl`, `remove-item node_modules`, `remove-item -recurse.*node_modules`, `\brm\s+-rf\s+(dist|build|target|venv|\.tox|\.mypy_cache|\.ruff_cache|\.pytest_cache|htmlcov|coverage|out|bin|obj)(\s|$|;)`, `\brm\s+-rf\s+\S*\.(egg-info|pyc)(\s|$|;)`, `\brm\s+-rf\s+\.nox\b`
+- exclude_patterns: `rm -rf node_modules`, `rm -rf \.git`, `rm -rf __pycache__`, `rm -rf \.psl`, `remove-item node_modules`, `remove-item -recurse.*node_modules`, `\brm\s+-rf\s+(dist|build|target|venv|\.tox|\.mypy_cache|\.ruff_cache|\.pytest_cache|htmlcov|coverage|out|bin|obj)(\s|$|;)`, `\brm\s+-rf\s+\S*\.(egg-info|pyc)(\s|$|;)`, `\brm\s+-rf\s+\.nox\b`, `\\bgrep\\b`, `\\bfind\\b`, `\\bcat\\b`, `\\bhead\\b`, `\\btail\\b`, `\\btype\\b`, `\\bselect\\-string\\b`, `\\bdef\\s+\\w*(remove|unlink|delete)\\w*\\(`, `\\bos\\.remove\\b.*\\#`, `\\b#.*\\b(unlink|rm|del)\\b`
 - remediation: Confirm the deletion target; prefer moving to trash over rm -rf outside build artifacts.
 
 ## DST-02  Write outside project root
@@ -146,12 +151,12 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - purpose: Blocks writes outside the project root (the workspace is the trust boundary)
 - description: Agent attempted to write to a file outside the project root directory
 - 说明: 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件
-- 处理建议: 让 Agent 把文件写进项目内；确需写外部路径时请手动执行
+- 处理建议: 放行：antinel paths add <目录前缀>（进审计链）；确需更大范围用 antinel roots add <路径>；或把文件写进项目内
 - command_patterns:
     - `\btar\b[^\n]{0,120}-C\s+/(?:\s|$)`
     - `\btar\b[^\n]{0,120}\s-C\s+/(?:etc|usr|bin|sbin|var|lib|boot|srv|opt|home|root)(?:\s|$)`
 - check: path_outside_project_root
-- remediation: Keep agent writes inside the project; grant explicit exceptions per path if needed.
+- remediation: Allow: run `antinel paths add <prefix>` (audited) or `antinel roots add <dir>`; or keep agent writes inside the project.
 
 ## DST-03  Shell configuration modification
 - category: destructive | severity: critical | dynamic (hook only) | tools: Write, Edit, Bash

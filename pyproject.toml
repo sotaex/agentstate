@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "antinel"
+version = "0.28.0"
+description = "Local-first audit chain and ledger for AI coding agents: every action recorded, every record verifiable."
+readme = "README.md"
+license = {{file = "LICENSE"}}
+requires-python = ">=3.10"
+authors = [{{name = "geguang"}}]
+keywords = ["ai-agents", "audit", "security", "claude-code", "mcp"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Topic :: Security",
+  "Topic :: Software Development :: Quality Assurance",
+]
+
+[project.scripts]
+antinel = "antinel:main"
+
+[tool.setuptools]
+py-modules = ["antinel", "audit_chain", "session_dna", "strings",
+              "transcript_reader", "host_shield", "hub", "antinel_mcp"]
+packages = ["hooks", "scripts", "tools", "rules", "psl"]
+
+[tool.setuptools.package-data]
+rules = ["*.json"]
+psl = ["*.json", "*.md"]
+hooks = ["*.py"]
