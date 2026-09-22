@@ -1,0 +1,1500 @@
+[
+ {
+  "name": "SEC-01 Read .env",
+  "pass": true,
+  "detail": "rc=2 id=SEC-01 err=Antinel 拦截 [SEC-01] 读取 .env 文件可能泄露 API 密钥与机密配置 | 命中: .env | 放行/处理: 把 .env 移出 Age"
+ },
+ {
+  "name": "SEC-01 Read nested .env.local",
+  "pass": true,
+  "detail": "rc=2 id=SEC-01 err=Antinel 拦截 [SEC-01] 读取 .env 文件可能泄露 API 密钥与机密配置 | 命中: .env. | 放行/处理: 把 .env 移出 Ag"
+ },
+ {
+  "name": "SEC-01 exclude .env.example",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "SEC-01 Bash cat .env",
+  "pass": true,
+  "detail": "rc=2 id=SEC-01 err=Antinel 拦截 [SEC-01] 读取 .env 文件可能泄露 API 密钥与机密配置 | 命中: .env | 放行/处理: 把 .env 移出 Age"
+ },
+ {
+  "name": "SEC-02 Read ~/.ssh/id_rsa",
+  "pass": true,
+  "detail": "rc=2 id=SEC-02 err=Antinel 拦截 [SEC-02] 读取 SSH 私钥或 authorized_keys | 命中: .ssh\\id_ | 放行/处理: SSH 密钥不要放"
+ },
+ {
+  "name": "SEC-02 Bash cat id_ed25519",
+  "pass": true,
+  "detail": "rc=2 id=SEC-02 err=Antinel 拦截 [SEC-02] 读取 SSH 私钥或 authorized_keys | 命中: .ssh/id_ | 放行/处理: SSH 密钥不要放"
+ },
+ {
+  "name": "SEC-03 Read .aws/credentials",
+  "pass": true,
+  "detail": "rc=2 id=SEC-03 err=Antinel 拦截 [SEC-03] 读取云厂商凭证文件 | 命中: .aws\\credentials | 放行/处理: 改用云厂商 CLI 的短期令牌；确需"
+ },
+ {
+  "name": "SEC-04 Read keystore",
+  "pass": true,
+  "detail": "rc=2 id=SEC-04 err=Antinel 拦截 [SEC-04] 读取加密货币钱包或密钥库文件 | 命中: keystore | 放行/处理: 钱包目录永远不要交给编码 Agent；必要"
+ },
+ {
+  "name": "SEC-04 exclude test_wallet",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "SEC-05 Read Login Data",
+  "pass": true,
+  "detail": "rc=2 id=SEC-05 err=Antinel 拦截 [SEC-05] 读取浏览器数据（Cookie、密码、会话） | 命中: Login Data | 放行/处理: 浏览器配置目录包含登录态"
+ },
+ {
+  "name": "DST-01 rm -rf ./old",
+  "pass": true,
+  "detail": "rc=2 id=DST-01 err=Antinel 拦截 [DST-01] 执行文件或目录删除命令 | 命中: rm | 放行/处理: 确认删除目标无误；构建产物类删除（如 node_module"
+ },
+ {
+  "name": "DST-01 exclude rm -rf node_modules",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "DST-01 before DST-05 (sudo rm)",
+  "pass": true,
+  "detail": "rc=2 id=DST-01 err=[DST-02] 提醒: 命令文本中出现项目根之外的显式绝对路径（已记录；脚本内容不解析，详见 THREAT_MODEL Non-goals）: /var/x\n"
+ },
+ {
+  "name": "DST-02 Write outside root",
+  "pass": true,
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_9g1"
+ },
+ {
+  "name": "DST-02 Write inside root",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "DST-03 Edit ~/.bashrc",
+  "pass": true,
+  "detail": "rc=2 id=DST-03 err=Antinel 拦截 [DST-03] 修改 Shell 启动配置（.bashrc 等，属持久化机制） | 命中: .bashrc | 放行/处理: 启动脚本每"
+ },
+ {
+  "name": "DST-03 Bash echo >> .zshrc",
+  "pass": true,
+  "detail": "rc=2 id=DST-03 err=Antinel 拦截 [DST-03] 修改 Shell 启动配置（.bashrc 等，属持久化机制） | 命中: >> ~/.zshrc | 放行/处理: 启"
+ },
+ {
+  "name": "DST-04 crontab -e",
+  "pass": true,
+  "detail": "rc=2 id=DST-04 err=Antinel 拦截 [DST-04] 建立持久化机制（计划任务/系统服务/启动项/注册表 Run 键） | 命中: crontab -e | 放行/处理: 持"
+ },
+ {
+  "name": "A1 DST-01 catches PowerShell Remove-Item",
+  "pass": true,
+  "detail": "rc=2 id=DST-01 err=Antinel 拦截 [DST-01] 执行文件或目录删除命令 | 命中: Remove-Item | 放行/处理: 确认删除目标无误；构建产物类删除（如 no"
+ },
+ {
+  "name": "A1 remove-item node_modules stays exempt",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "A2 DST-04 catches schtasks",
+  "pass": true,
+  "detail": "rc=2 id=DST-04 err=Antinel 拦截 [DST-04] 建立持久化机制（计划任务/系统服务/启动项/注册表 Run 键） | 命中: schtasks | 放行/处理: 持久化"
+ },
+ {
+  "name": "A2 DST-04 catches registry Run key",
+  "pass": true,
+  "detail": "rc=2 id=DST-04 err=Antinel 拦截 [DST-04] 建立持久化机制（计划任务/系统服务/启动项/注册表 Run 键） | 命中: reg add | 放行/处理: 持久化会"
+ },
+ {
+  "name": "0.19.0 DST-09 gated off on POSIX (path:stream is a legal filename)",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "0.19.0 DST-10 gated off on POSIX (redirect half)",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "0.19.0 DST-10 gated off on POSIX (-Stream half)",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "0.19.0 Zone.Identifier stream stays allowed (never a finding)",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "0.19.0 DST-04 file channel: scheduled-task XML",
+  "pass": true,
+  "detail": "rc=2 id=DST-04 err=Antinel 拦截 [DST-04] 建立持久化机制（计划任务/系统服务/启动项/注册表 Run 键） | 命中: System32/Tasks | 放行/处"
+ },
+ {
+  "name": "0.19.0 DST-04 file channel: launchd daemon",
+  "pass": true,
+  "detail": "rc=2 id=DST-04 err=Antinel 拦截 [DST-04] 建立持久化机制（计划任务/系统服务/启动项/注册表 Run 键） | 命中: LaunchDaemons | 放行/处理"
+ },
+ {
+  "name": "0.19.0 DST-04 file channel: cron.d drop-in",
+  "pass": true,
+  "detail": "rc=2 id=DST-04 err=Antinel 拦截 [DST-04] 建立持久化机制（计划任务/系统服务/启动项/注册表 Run 键） | 命中: etc/cron | 放行/处理: 持久化"
+ },
+ {
+  "name": "0.19.0 DST-04 file channel: cron/at spool",
+  "pass": true,
+  "detail": "rc=2 id=DST-04 err=Antinel 拦截 [DST-04] 建立持久化机制（计划任务/系统服务/启动项/注册表 Run 键） | 命中: spool/cron | 放行/处理: 持"
+ },
+ {
+  "name": "0.19.0 DST-04 file channel: registry import file",
+  "pass": true,
+  "detail": "rc=2 id=DST-04 err=Antinel 拦截 [DST-04] 建立持久化机制（计划任务/系统服务/启动项/注册表 Run 键） | 命中: .reg | 放行/处理: 持久化会在会话"
+ },
+ {
+  "name": "0.19.0 DST-04 file channel: Winlogon key",
+  "pass": true,
+  "detail": "rc=2 id=DST-04 err=Antinel 拦截 [DST-04] 建立持久化机制（计划任务/系统服务/启动项/注册表 Run 键） | 命中: CurrentVersion/Winlog"
+ },
+ {
+  "name": "0.19.0 DST-04 file channel: tasks.py is not a scheduled task (negative control)",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "DST-05 warning sudo apt (exclude)",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "DST-05 warning chmod 777",
+  "pass": true,
+  "detail": "rc=0 err=[DST-05] 提醒: 尝试提权操作"
+ },
+ {
+  "name": "NET-01 warning curl evil",
+  "pass": true,
+  "detail": "rc=0 err=[NET-01] 提醒: 通过 Shell 向白名单外域名发起网络请求\n[NET-03] 提醒: 命令引用了白名单外的域名"
+ },
+ {
+  "name": "NET-01 exclude pypi",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "NET benign pip install",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "NET-02 warning requests.get",
+  "pass": true,
+  "detail": "rc=0 err=[NET-02] 提醒: 内联代码包含 Python 网络请求调用"
+ },
+ {
+  "name": "NET-03 warning nslookup domain",
+  "pass": true,
+  "detail": "rc=0 err=[NET-03] 提醒: 命令引用了白名单外的域名"
+ },
+ {
+  "name": "NET-03 whitelisted github",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "NET-03 filenames are not domains",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "NET-03 warning scp to internal host",
+  "pass": true,
+  "detail": "rc=0 err=[NET-01] 提醒: 通过 Shell 向白名单外域名发起网络请求\n[NET-03] 提醒: 命令引用了白名单外的域名"
+ },
+ {
+  "name": "CTX-01 warning printenv",
+  "pass": true,
+  "detail": "rc=0 err=[CTX-01] 提醒: 枚举全部环境变量（可能暴露密钥）"
+ },
+ {
+  "name": "CTX-01 no hit on venv",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "CTX-02 Read poisoned SKILL.md",
+  "pass": true,
+  "detail": "rc=2 id=CTX-02 err=Antinel 拦截 [CTX-02] 技能指令文件中发现提示注入载荷 | 命中: Ignore all previous instructions | 放行/"
+ },
+ {
+  "name": "CTX-02 Write poisoned SKILL.md",
+  "pass": true,
+  "detail": "rc=2 id=CTX-02 err=Antinel 拦截 [CTX-02] 技能指令文件中发现提示注入载荷 | 命中: ignore previous instructions | 放行/处理: "
+ },
+ {
+  "name": "CTX-03 Read zero-width SKILL.md",
+  "pass": true,
+  "detail": "rc=2 id=CTX-03 err=Antinel 拦截 [CTX-03] 检出隐形 Unicode 字符（标签字符/零宽字符等） | 命中: U+200B at offset 29 | 放行/处"
+ },
+ {
+  "name": "CTX-03 BOM+ZWJ whitelisted",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "Benign PSL SKILL.md read",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "UX: 拦截理由为中文且含处理建议",
+  "pass": true,
+  "detail": "Antinel 拦截 [SEC-01] 读取 .env 文件可能泄露 API 密钥与机密配置 | 命中: .env | 放行/处理: 把 .env 移出 Agent 可读范围；确需"
+ },
+ {
+  "name": "UX: 同类提醒当天只提示一次（第二次静默记录）",
+  "pass": true,
+  "detail": "e1='[DST-05] 提醒: 尝试提权操作\\n' e2=''"
+ },
+ {
+  "name": "A5 5MB command handled fast (truncated before matching)",
+  "pass": true,
+  "detail": "median ms=949 (runs: 949, 972, 933; load-sensitive; ladder B-021..023 tracks the budget)"
+ },
+ {
+  "name": "A-08 invalid JSON -> allow",
+  "pass": true,
+  "detail": "rc=0"
+ },
+ {
+  "name": "A-08 missing tool_input -> allow",
+  "pass": true,
+  "detail": "rc=0"
+ },
+ {
+  "name": "B-03 custom disables NET-01 -> NET-03 alert (audit-based)",
+  "pass": true,
+  "detail": "['NET-03']"
+ },
+ {
+  "name": "C7 pathological custom pattern rejected loudly (length guard + quantifier screen)",
+  "pass": true,
+  "detail": "[Antinel] CUSTOM RULE REJECTED CUSTOM-BAD: nested-quantifier pattern (ReDoS risk"
+ },
+ {
+  "name": "B-03 custom rule appended",
+  "pass": true,
+  "detail": "rc=2 id=CUSTOM-001 err=Antinel 拦截 [CUSTOM-001] Block access to customer data | 命中: customer_data/ | 放行/"
+ },
+ {
+  "name": "OUT-01 secret in output -> alert, exit 0",
+  "pass": true,
+  "detail": "[OUT-01] 提醒：工具输出包含疑似密钥（AWS access key），已记录审计；请轮换相关凭证"
+ },
+ {
+  "name": "C-01 canary observed, exit 0",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "post normal record",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "A7 stats.json pruned to 90 days",
+  "pass": true,
+  "detail": "days=40"
+ },
+ {
+  "name": "A3 secrets masked before entering audit log",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "A8 concurrent appends: 8/8 landed, zero corrupted lines",
+  "pass": true,
+  "detail": "a8=8 lines=123"
+ },
+ {
+  "name": "post UTF-8 roundtrip (no GBK mojibake)",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "F-03 JSONL audit log written",
+  "pass": true,
+  "detail": "files=1 lines=124"
+ },
+ {
+  "name": "C-01 canary persisted in log",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "hook latency median (ms, includes interpreter start)",
+  "pass": true,
+  "detail": "median=38 min=37 max=39"
+ },
+ {
+  "name": "T3 scan skills (skipped: skills dir not present at D:\\psl\\skills)",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "T4 scan fixture detects ['CTX-02', 'CTX-03', 'CTX-04', 'CTX-05', 'SEC-01', 'SEC-02', 'SEC-06']",
+  "pass": true,
+  "detail": "hit=['CTX-02', 'CTX-03', 'CTX-04', 'CTX-05', 'SEC-01', 'SEC-02', 'SEC-06'] score=0 grade=D (unsafe)"
+ },
+ {
+  "name": "T4 BOM/ZWJ file not flagged",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "scan text render",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "UX: scan 中文结论行",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "A6 CTX-05 case-only name/dir difference not flagged (scan)",
+  "pass": true,
+  "detail": "['evil-helper/SKILL.md']"
+ },
+ {
+  "name": "C3 depth boundary: deeper-than-15 not scanned, no crash",
+  "pass": true,
+  "detail": "[]"
+ },
+ {
+  "name": "A6 CTX-05 case-only not flagged (hook)",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "install claude-code: hooks appended, foreign kept",
+  "pass": true,
+  "detail": "rc=0 ms=65"
+ },
+ {
+  "name": "D7 .psl/.gitignore auto-written",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "A4 tampered rules hash -> fallback minimal set + SELF-TAMPERED warning",
+  "pass": true,
+  "detail": "[Antinel] SELF-TAMPERED: rules/default.json differs from the installed"
+ },
+ {
+  "name": "A4 fallback still blocks SEC-01 (baseline intact)",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "install SessionStart banner event registered (3 events)",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "SessionStart banner prints additionalContext",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "install manifest schema (D-05)",
+  "pass": true,
+  "detail": "sha256:tampered"
+ },
+ {
+  "name": "install first scan reports .env exposure",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "install idempotent (D-04)",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "uninstall removes ours, keeps foreign (F-08)",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "install zcode host detected (real contract: config.json + enabled + process type)",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "ZCode channel: block with empty stdout (strict schema safe)",
+  "pass": true,
+  "detail": "rc=2 out=''"
+ },
+ {
+  "name": "A-05/D-06 --global: user-level registration covers every workspace",
+  "pass": true,
+  "detail": "rc=0"
+ },
+ {
+  "name": "F-08 uninstall cleans zcode config.json (enabled bool not misread as event list)",
+  "pass": true,
+  "detail": "rc=0"
+ },
+ {
+  "name": "install generic -> scan-only degrade",
+  "pass": true,
+  "detail": "[1/6] host: generic"
+ },
+ {
+  "name": "install --strict generic -> exit 1 (A-10)",
+  "pass": true,
+  "detail": "rc=1"
+ },
+ {
+  "name": "report text",
+  "pass": true,
+  "detail": " 结论：发现 43 项问题（CRITICAL 28 / WARNING 15），建议优先处理 CRITICAL 项；完整轨迹见审计日志。"
+ },
+ {
+  "name": "report json score/dedupe",
+  "pass": true,
+  "detail": "score=0 crit=28 warn=15"
+ },
+ {
+  "name": "report html single-file (C-03)",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "report no data -> exit 1 (A-10)",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "report --archive gzips >30d (B-05)",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "report SELF-TAMPERED warning (2.8)",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "US-05 csv export",
+  "pass": true,
+  "detail": "rows=43"
+ },
+ {
+  "name": "US-05 sarif 2.1.0 export",
+  "pass": [
+   {
+    "id": "SEC-01",
+    "shortDescription": {
+     "text": "Agent attempted to read a .env file which may contain API keys and secrets"
+    },
+    "help": {
+     "text": "Remove .env from agent-readable scope or add to deny list. Use environment variable injection instead."
+    },
+    "defaultConfiguration": {
+     "level": "error"
+    }
+   },
+   {
+    "id": "SEC-02",
+    "shortDescription": {
+     "text": "Agent attempted to read SSH private key or authorized_keys file"
+    },
+    "help": {
+     "text": "Keep SSH keys outside agent working scope; use ssh-agent forwarding instead of key files."
+    },
+    "defaultConfiguration": {
+     "level": "error"
+    }
+   },
+   {
+    "id": "SEC-03",
+    "shortDescription": {
+     "text": "Agent attempted to read cloud provider credentials"
+    },
+    "help": {
+     "text": "Use short-lived tokens via the provider CLI instead of exposing credential files to the agent."
+    },
+    "defaultConfiguration": {
+     "level": "error"
+    }
+   },
+   {
+    "id": "SEC-04",
+    "shortDescription": {
+     "text": "Agent attempted to read cryptocurrency wallet or keystore file"
+    },
+    "help": {
+     "text": "Never let a coding agent touch wallet directories; move keystores to an encrypted vault."
+    },
+    "defaultConfiguration": {
+     "level": "error"
+    }
+   },
+   {
+    "id": "SEC-05",
+    "shortDescription": {
+     "text": "Agent attempted to read browser stored data (cookies, passwords, sessions)"
+    },
+    "help": {
+     "text": "Browser profiles contain live sessions; deny all agent access to profile directories."
+    },
+    "defaultConfiguration": {
+     "level": "error"
+    }
+   },
+   {
+    "id": "DST-01",
+    "shortDescription": {
+     "text": "Agent executed a file or directory deletion command"
+    },
+    "help": {
+     "text": "Confirm the deletion target; prefer moving to trash over rm -rf outside build artifacts."
+    },
+    "defaultConfiguration": {
+     "level": "error"
+    }
+   },
+   {
+    "id": "DST-02",
+    "shortDescription": {
+     "text": "Agent attempted to write to a file outside the project root directory"
+    },
+    "help": {
+     "text": "Allow: run `antinel paths add <prefix>` (audited) or `antinel roots add <dir>`; or keep agent writes inside the project."
+    },
+    "defaultConfiguration": {
+     "level": "error"
+    }
+   },
+   {
+    "id": "DST-03",
+    "shortDescription": {
+     "text": "Agent attempted to modify shell startup configuration (persistence mechanism)"
+    },
+    "help": {
+     "text": "Shell startup files execute on every terminal; never let an agent append to them unreviewed."
+    },
+    "defaultConfiguration": {
+     "level": "error"
+    }
+   },
+   {
+    "id": "DST-06",
+    "shortDescription": {
+     "text": "Agent downloaded a remote script and piped it straight into a shell or interpreter"
+    },
+    "help": {
+     "text": "Download and inspect the script first; confirm the source is trusted before executing."
+    },
+    "defaultConfiguration": {
+     "level": "error"
+    }
+   },
+   {
+    "id": "DST-04",
+    "shortDescription": {
+     "text": "Agent attempted to establish persistence (cron job, systemd service, startup item, scheduled task, registry Run key)"
+    },
+    "help": {
+     "text": "Persistence entries survive the session and re-execute code; require explicit human approval."
+    },
+    "defaultConfiguration": {
+     "level": "error"
+    }
+   },
+   {
+    "id": "CTX-02",
+    "shortDescription": {
+     "text": "Potential prompt injection payload detected in skill instruction file"
+    },
+    "help": {
+     "text": "Remove the skill; audit its source; report the pattern to the skill marketplace."
+    },
+    "defaultConfiguration": {
+     "level": "error"
+    }
+   },
+   {
+    "id": "CTX-03",
+    "shortDescription": {
+     "text": "Invisible Unicode character detected (tag characters, zero-width, word joiner, BOM in middle of file)"
+    },
+    "help": {
+     "text": "Strip invisible characters; treat any occurrence in instructions as hostile until proven otherwise."
+    },
+    "defaultConfiguration": {
+     "level": "error"
+    }
+   },
+   {
+    "id": "CUSTOM-001",
+    "shortDescription": {
+     "text": "CUSTOM-001"
+    },
+    "help": {
+     "text": ""
+    },
+    "defaultConfiguration": {
+     "level": "error"
+    }
+   },
+   {
+    "id": "CTX-01",
+    "shortDescription": {
+     "text": "Agent attempted to enumerate all environment variables (may expose API keys and secrets)"
+    },
+    "help": {
+     "text": "Print only the specific variables needed instead of dumping the whole environment."
+    },
+    "defaultConfiguration": {
+     "level": "warning"
+    }
+   },
+   {
+    "id": "DST-05",
+    "shortDescription": {
+     "text": "Agent attempted to escalate privileges"
+    },
+    "help": {
+     "text": "Run privileged steps yourself instead of letting the agent hold elevated shells."
+    },
+    "defaultConfiguration": {
+     "level": "warning"
+    }
+   },
+   {
+    "id": "NET-01",
+    "shortDescription": {
+     "text": "Agent made an external network request via shell command to a non-whitelisted domain"
+    },
+    "help": {
+     "text": "Pin downloads to whitelisted registries (npmjs/pypi/github) or review the destination."
+    },
+    "defaultConfiguration": {
+     "level": "warning"
+    }
+   },
+   {
+    "id": "NET-03",
+    "shortDescription": {
+     "text": "Agent command references a domain outside the whitelist (v1 compares command-line domains; DNS-level comparison is a v2 kernel-layer capability)"
+    },
+    "help": {
+     "text": "Add the domain to the whitelist only after verifying it is the intended destination."
+    },
+    "defaultConfiguration": {
+     "level": "warning"
+    }
+   },
+   {
+    "id": "NET-02",
+    "shortDescription": {
+     "text": "Agent code contains Python network request calls"
+    },
+    "help": {
+     "text": "Review the endpoints used by inline Python network code before allowing egress."
+    },
+    "defaultConfiguration": {
+     "level": "warning"
+    }
+   },
+   {
+    "id": "CTX-04",
+    "shortDescription": {
+     "text": "Long base64 or hex string detected (potential encoded payload)"
+    },
+    "help": {
+     "text": "Decode and review the payload; legitimate instructions rarely embed long encoded blobs."
+    },
+    "defaultConfiguration": {
+     "level": "warning"
+    }
+   },
+   {
+    "id": "CTX-05",
+    "shortDescription": {
+     "text": "SKILL.md frontmatter name field does not match parent directory name"
+    },
+    "help": {
+     "text": "Rename the directory or fix the frontmatter; mismatches hide a skill's real identity."
+    },
+    "defaultConfiguration": {
+     "level": "warning"
+    }
+   },
+   {
+    "id": "OUT-01",
+    "shortDescription": {
+     "text": "tool output contains secret-like content"
+    },
+    "help": {
+     "text": ""
+    },
+    "defaultConfiguration": {
+     "level": "warning"
+    }
+   }
+  ],
+  "detail": "results=43"
+ },
+ {
+  "name": "F-04 period filter (--days 1 ok, --since future -> exit 1)",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "C6 --days 1 excludes yesterday-ts record in today's file",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "C6 --days 2 includes it",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "F-03 retention from policy.json (365 keeps, policy=1 archives 3-day-old)",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "2.8 content_digest recomputable by third party",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "D-05 manifest scripts_hash covers SCRIPT_FILES (12)",
+  "pass": true,
+  "detail": "12/12"
+ },
+ {
+  "name": "2.8 SELF-TAMPERED names drifted script",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "US-02 score basis line in report and scan text",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "F-06 whitelist.domains relaxes NET-01/NET-03",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "F-06 whitelist.paths exempts SEC-01 under tests/fixtures",
+  "pass": true,
+  "detail": "fp=/tmp/antinel_harness_9g1t6sse/proj/tests/fixtures/.env real=/tmp/antinel_harness_9g1t6sse/proj/tests/fixtures/.env root=/tmp/antinel_harness_9g1t6sse/proj root_real=/tmp/antinel_harness_9g1t6sse/proj rel=tests/fixtures/.env || "
+ },
+ {
+  "name": "F-06 whitelist.paths does not exempt other paths",
+  "pass": true,
+  "detail": "rc=2 id=SEC-01 err=Antinel 拦截 [SEC-01] 读取 .env 文件可能泄露 API 密钥与机密配置 | 命中: .env | 放行/处理: 把 .env 移出 Age"
+ },
+ {
+  "name": "F-06 whitelist.paths honoured by scan.py",
+  "pass": true,
+  "detail": "['.env', 'config/.env.local']"
+ },
+ {
+  "name": "F-06 whitelist.commands skips warning rules (pip ... printenv)",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "F-06 whitelist.commands never relaxes critical (pip ... rm -rf)",
+  "pass": true,
+  "detail": "rc=2 id=DST-01 err=[DST-02] 提醒: 命令文本中出现项目根之外的显式绝对路径（已记录；脚本内容不解析，详见 THREAT_MODEL Non-goals）: /tmp/x\n"
+ },
+ {
+  "name": "A9 MultiEdit alias -> DST-03 block",
+  "pass": true,
+  "detail": "[Antinel][配置变更] .psl/policy.json 内容已变化（sha256 bddc2ec8cfb8…）"
+ },
+ {
+  "name": "A9 MultiEdit content -> CTX-02 block",
+  "pass": true,
+  "detail": "Antinel 拦截 [CTX-02] 技能指令文件中发现提示注入载荷 | 命中: ignore all previou"
+ },
+ {
+  "name": "A9 NotebookEdit alias -> CTX-02 block (poisoned cell)",
+  "pass": true,
+  "detail": "Antinel 拦截 [CTX-02] 技能指令文件中发现提示注入载荷 | 命中: ignore all previou"
+ },
+ {
+  "name": "F-06 alert_threshold=critical suppresses stderr notice but still logs",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "F-06 auto_archive=true archives on plain report run",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "0.16.0 DST-01 rd /s /q blocked",
+  "pass": true,
+  "detail": "rc=2 id=DST-01 err=Antinel 拦截 [DST-01] 执行文件或目录删除命令 | 命中: rd /s | 放行/处理: 确认删除目标无误；构建产物类删除（如 node_mod"
+ },
+ {
+  "name": "0.16.0 DST-01 mid-command rd /s blocked (cmd /c)",
+  "pass": true,
+  "detail": "rc=2 id=DST-01 err=Antinel 拦截 [DST-01] 执行文件或目录删除命令 | 命中:  rd /s | 放行/处理: 确认删除目标无误；构建产物类删除（如 node_mo"
+ },
+ {
+  "name": "0.16.0 DST-01 &&-chained rd blocked",
+  "pass": true,
+  "detail": "rc=2 id=DST-01 err=Antinel 拦截 [DST-01] 执行文件或目录删除命令 | 命中: & rd /s | 放行/处理: 确认删除目标无误；构建产物类删除（如 node_m"
+ },
+ {
+  "name": "0.16.0 DST-01 python 'rd = 3' is not a delete",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "0.16.0 DST-01 raw-string r'D:\\...' is not a delete",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "0.16.0 DST-01 URL /rd/ segment is not a delete (NET-01 warns, no block)",
+  "pass": true,
+  "detail": "[NET-01] 提醒: 通过 Shell 向白名单外域名发起网络请求\n[NET-03] 提醒: 命令引用了白名单外的域名"
+ },
+ {
+  "name": "C7 over-long custom pattern dropped, hook unaffected",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "C9 nested ReDoS pattern '(a+)+$' rejected, hook not wedged",
+  "pass": true,
+  "detail": "86ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
+ },
+ {
+  "name": "C9 alternation ReDoS pattern '(a|aa)+$' rejected, hook not wedged",
+  "pass": true,
+  "detail": "86ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
+ },
+ {
+  "name": "C9 inner-optional ReDoS pattern '(a?)+$' rejected, hook not wedged",
+  "pass": true,
+  "detail": "87ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
+ },
+ {
+  "name": "C9 benign custom rule still loads and fires (read-only downgrade to alert)",
+  "pass": true,
+  "detail": "[CUSTOM-OK] 提醒:"
+ },
+ {
+  "name": "C11 KNOWN GAP: files deeper than MAX_DEPTH=15 are not scanned (accepted, see THREAT_MODEL -- not an acceptance criterion)",
+  "pass": true,
+  "detail": "[]"
+ },
+ {
+  "name": "workspace_roots: a declared workspace is writable",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "workspace_roots: the allow is recorded, not silent",
+  "pass": true,
+  "detail": "1 workspace_root_allow records"
+ },
+ {
+  "name": "workspace_roots: undeclared location still blocked",
+  "pass": true,
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_9g1"
+ },
+ {
+  "name": "workspace_roots: drive root rejected",
+  "pass": true,
+  "detail": "rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'/'\n          拒绝类型：根"
+ },
+ {
+  "name": "workspace_roots: '..' rejected",
+  "pass": true,
+  "detail": "rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'..'\n          拒绝类型："
+ },
+ {
+  "name": "workspace_roots: relative path rejected",
+  "pass": true,
+  "detail": "rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'poc'\n          拒绝类型"
+ },
+ {
+  "name": "workspace_roots: '..' segment rejected",
+  "pass": true,
+  "detail": "rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'/tmp/antinel_harnes"
+ },
+ {
+  "name": "workspace_roots: wildcard rejected",
+  "pass": true,
+  "detail": "rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'/tmp/antinel_harnes"
+ },
+ {
+  "name": "workspace_roots: missing config file = pre-feature behaviour",
+  "pass": true,
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_9g1"
+ },
+ {
+  "name": "DST-02 host config: the file the hook reads is writable by the tool that maintains it",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "DST-02 host config: that release is recorded, never silent",
+  "pass": true,
+  "detail": "1 dst02_host_config_self_maintenance records"
+ },
+ {
+  "name": "DST-02 host config: a sibling of the config is NOT released (exact file, not its directory)",
+  "pass": true,
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_9g1"
+ },
+ {
+  "name": "RO: grep for a destructive verb is allowed",
+  "pass": true,
+  "detail": "rc=0 err=[DST-01] 提醒: 执行文件或目录删除命令"
+ },
+ {
+  "name": "RO: grep for a persistence verb is allowed",
+  "pass": true,
+  "detail": "rc=0 err=[DST-04] 提醒: 建立持久化机制（计划任务/系统服务/启动项/注册表 Run 键）"
+ },
+ {
+  "name": "RO: alternation inside quotes is still read-only",
+  "pass": true,
+  "detail": "rc=0 err=[DST-01] 提醒: 执行文件或目录删除命令"
+ },
+ {
+  "name": "RO: sed is not downgraded (s///e can reach a shell)",
+  "pass": true,
+  "detail": "rc=2 id=DST-01 err=Antinel 拦截 [DST-01] 执行文件或目录删除命令 | 命中: rm | 放行/处理: 确认删除目标无误；构建产物类删除（如 node_module"
+ },
+ {
+  "name": "RO: awk is not downgraded (system())",
+  "pass": true,
+  "detail": "rc=2 id=DST-01 err=Antinel 拦截 [DST-01] 执行文件或目录删除命令 | 命中: rm | 放行/处理: 确认删除目标无误；构建产物类删除（如 node_module"
+ },
+ {
+  "name": "RO: a compound read-only command is allowed (cd + grep)",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "RO: find without a write flag is read-only",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "RO: chained execution is not downgraded (;)",
+  "pass": true,
+  "detail": "rc=2 id=DST-01 err=[DST-02] 提醒: 命令文本中出现项目根之外的显式绝对路径（已记录；脚本内容不解析，详见 THREAT_MODEL Non-goals）: /tmp/ol"
+ },
+ {
+  "name": "RO: pipe into a destructive verb is not downgraded",
+  "pass": true,
+  "detail": "rc=2 id=DST-01 err=Antinel 拦截 [DST-01] 执行文件或目录删除命令 | 命中: rm | 放行/处理: 确认删除目标无误；构建产物类删除（如 node_module"
+ },
+ {
+  "name": "RO: command substitution is not downgraded",
+  "pass": true,
+  "detail": "rc=2 id=DST-01 err=Antinel 拦截 [DST-01] 执行文件或目录删除命令 | 命中: rm | 放行/处理: 确认删除目标无误；构建产物类删除（如 node_module"
+ },
+ {
+  "name": "RO: find -delete is a write, not a mention",
+  "pass": true,
+  "detail": "rc=2 id=DST-01 err=Antinel 拦截 [DST-01] 执行文件或目录删除命令 | 命中: rm | 放行/处理: 确认删除目标无误；构建产物类删除（如 node_module"
+ },
+ {
+  "name": "RO: sed -i is a write, not a mention",
+  "pass": true,
+  "detail": "rc=2 id=DST-01 err=Antinel 拦截 [DST-01] 执行文件或目录删除命令 | 命中: rm | 放行/处理: 确认删除目标无误；构建产物类删除（如 node_module"
+ },
+ {
+  "name": "RO: sudo is never downgraded",
+  "pass": true,
+  "detail": "rc=2 id=DST-01 err=[DST-02] 提醒: 命令文本中出现项目根之外的显式绝对路径（已记录；脚本内容不解析，详见 THREAT_MODEL Non-goals）: /var/lo"
+ },
+ {
+  "name": "RO: PowerShell pipeline into Remove-Item is not downgraded",
+  "pass": true,
+  "detail": "rc=2 id=DST-01 err=Antinel 拦截 [DST-01] 执行文件或目录删除命令 | 命中: Remove-Item | 放行/处理: 确认删除目标无误；构建产物类删除（如 no"
+ },
+ {
+  "name": "RO: Select-String for a destructive verb is allowed",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "RO: the file family is not downgraded (grep .env)",
+  "pass": true,
+  "detail": "rc=2 id=SEC-01 err=Antinel 拦截 [SEC-01] 读取 .env 文件可能泄露 API 密钥与机密配置 | 命中: .env | 放行/处理: 把 .env 移出 Age"
+ },
+ {
+  "name": "RO: the downgrade is recorded in the audit log, not silently dropped",
+  "pass": true,
+  "detail": "7 downgraded records"
+ },
+ {
+  "name": "WS-1 POSIX: root rejected",
+  "pass": true,
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_9g1"
+ },
+ {
+  "name": "WS-1 POSIX: system dir rejected",
+  "pass": true,
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /tmp/antinel_harness_9g1"
+ },
+ {
+  "name": "WS-1 POSIX: home shorthand rejected",
+  "pass": true,
+  "detail": "rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'~'\n          拒绝类型：根"
+ },
+ {
+  "name": "WS-1 POSIX: unexpanded ~ rejected",
+  "pass": true,
+  "detail": "rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'~/work'\n          拒"
+ },
+ {
+  "name": "WS-1 POSIX: '..' segment rejected",
+  "pass": true,
+  "detail": "rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'/a/../../b'\n       "
+ },
+ {
+  "name": "WS-1 POSIX: wildcard rejected",
+  "pass": true,
+  "detail": "rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'/a/*'\n          拒绝类"
+ },
+ {
+  "name": "WS-1 POSIX: a real absolute root is honoured",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "WS-3 rejected config entry lands in the audit log",
+  "pass": true,
+  "detail": "11 records"
+ },
+ {
+  "name": "WS-3 rejected config entry is visible in report.py",
+  "pass": true,
+  "detail": "/ WARNING 19），建议优先处理 CRITICAL 项；完整轨迹见审计日志。\n Full log: /tmp/antinel_harness_9g1t6sse/proj/.psl/audit\n Re-scan: python scan.py\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+ },
+ {
+  "name": "A12 policy.json edited out of band is reported once",
+  "pass": true,
+  "detail": "[Antinel][配置变更] .psl/policy.json 内容已变化（sha256 5443e9aacdb0…）\n          白名单/阈值的放行"
+ },
+ {
+  "name": "A12 the same policy change is not repeated on every call",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "A15 an exclude_patterns allow is mirrored outside the project",
+  "pass": true,
+  "detail": "1 mirrored records"
+ },
+ {
+  "name": "A15 ANTINEL_HOST_MIRROR=0 writes nothing outside the project",
+  "pass": true,
+  "detail": "mirror dir exists: False"
+ },
+ {
+  "name": "0.16.0 DST-02 released by whitelist.paths (no policy edit per write)",
+  "pass": true,
+  "detail": "rc=0 err="
+ },
+ {
+  "name": "0.16.0 DST-02 whitelist release is recorded (dst02_path_whitelisted)",
+  "pass": true,
+  "detail": "1 records"
+ },
+ {
+  "name": "0.16.0 SEC-06 in static rules_applied (was hook-only despite RULES.md)",
+  "pass": true,
+  "detail": "['SEC-01', 'SEC-02', 'SEC-03', 'SEC-04', 'SEC-05', 'CTX-02', 'CTX-03', 'CTX-04', 'CTX-05', 'SEC-06']"
+ },
+ {
+  "name": "0.16.0 scan subject digest reproducible on an unchanged tree",
+  "pass": true,
+  "detail": "sha256:94aece350b95e2ebe0dbfe0be515662eb"
+ },
+ {
+  "name": "0.16.0 judgment carries the five hard-precondition fields",
+  "pass": true,
+  "detail": "missing: none"
+ },
+ {
+  "name": "0.16.0 judgment status derivable to 'current' on an intact tree",
+  "pass": true,
+  "detail": "status=current platformSpec=True ownership=self"
+ },
+ {
+  "name": "0.16.0 ledger exists and row 1 is the self-verdict",
+  "pass": true,
+  "detail": "rows=32"
+ },
+ {
+  "name": "0.16.0 antinel_verify derives current on an intact package",
+  "pass": false,
+  "detail": "1 of 19 covered files differ (judgment digests (19 files))"
+ },
+ {
+  "name": "0.16.0 antinel_verify derives superseded after a covered file changes",
+  "pass": true,
+  "detail": "2 of 19 covered files differ (judgment digests (19 files))"
+ },
+ {
+  "name": "0.17.0 P-B5 fallback patterns are a subset of rules/default.json per id",
+  "pass": true,
+  "detail": "11 fallback rules checked"
+ },
+ {
+  "name": "0.17.0 P-C1 every shipped rule declares apply_to_tools (no silent all-tools)",
+  "pass": true,
+  "detail": "[]"
+ },
+ {
+  "name": "0.17.0 P-A4 Bash out-of-root absolute path is recorded (alert, not block)",
+  "pass": true,
+  "detail": "rc=0 events=1"
+ },
+ {
+  "name": "0.17.0 P-A4 relative in-root path produces no suspect event",
+  "pass": true,
+  "detail": "rc=0 events=0"
+ },
+ {
+  "name": "0.17.0 P-A4 URL path segments are not suspect events (:// scheme guard)",
+  "pass": true,
+  "detail": "rc=0 events=0"
+ },
+ {
+  "name": "0.17.0 P-A5 hook_alive heartbeat present in the day's log",
+  "pass": true,
+  "detail": "1 hook_alive records"
+ },
+ {
+  "name": "0.18.0 P-B8 stats.json retired (bump_stats removed, no new writes)",
+  "pass": true,
+  "detail": "stats.json no longer maintained since 0.18.0"
+ },
+ {
+  "name": "0.17.0 P-A5 SessionStart leaves a session_start heartbeat",
+  "pass": true,
+  "detail": "rc=0 out={\"additionalContext\": \"Antinel Security "
+ },
+ {
+  "name": "0.17.0 P-A5 baseline write is verified (no AUDIT_WRITE_FAILED)",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "0.17.0 P-A5 audit loss says AUDIT_WRITE_FAILED and stays fail-open",
+  "pass": true,
+  "detail": "rc=0 err=[Antinel] AUDIT_WRITE_FAILED: this event's audit record coul"
+ },
+ {
+  "name": "0.17.0 P-B7 deprecated rule never fires (NET-01 off -> only NET-03 logged)",
+  "pass": true,
+  "detail": "hits=['NET-03']"
+ },
+ {
+  "name": "0.17.0 install --check: exit 1 when not installed",
+  "pass": true,
+  "detail": "rc=1"
+ },
+ {
+  "name": "0.17.0 install --check: exit 3 on drift",
+  "pass": true,
+  "detail": "rc=3"
+ },
+ {
+  "name": "0.17.0 P-A3 tampering antinel-namespaces.json -> superseded",
+  "pass": true,
+  "detail": "2 of 19 covered files differ (judgment digests (19 files))"
+ },
+ {
+  "name": "0.17.0 P-B1 --manifest catches a README tamper (16-file gap closed)",
+  "pass": true,
+  "detail": "7 of 41 covered files differ (manifest (41 files))"
+ },
+ {
+  "name": "0.17.0 P-B1 without --manifest, README tamper is out of scope (documented)",
+  "pass": false,
+  "detail": ""
+ },
+ {
+  "name": "0.17.0 P-A3 objectOwnership is derived with a stated basis",
+  "pass": true,
+  "detail": "self | subject github.com/sotaex is in the signed namespace list"
+ },
+ {
+  "name": "0.18.0 R-19 junction under whitelisted prefix resolving OUTSIDE is not released",
+  "pass": true,
+  "detail": "rc=2"
+ },
+ {
+  "name": "0.18.0 R-19 whitelisted REAL dir is still released",
+  "pass": true,
+  "detail": "rc=0"
+ },
+ {
+  "name": "0.18.0 R-18 writable audit + fail_closed=true -> normal allow",
+  "pass": true,
+  "detail": "rc=0"
+ },
+ {
+  "name": "0.18.0 R-18 audit loss with fail_closed=true -> BLOCK [AUDIT-LOSS]",
+  "pass": true,
+  "detail": "rc=2 out={\"decision\": \"block\", \"reason\": \"Antinel 拦截 [AUDIT-LOSS] 审计记录写入失败且 fai"
+ },
+ {
+  "name": "0.18.0 R-20 intact day: chain OK and tail-OK vs day manifest",
+  "pass": true,
+  "detail": "rc=0 (0=chain+tail both clean)"
+ },
+ {
+  "name": "0.18.0 R-20 deleting the LAST record is now DETECTED (chain alone never caught it)",
+  "pass": true,
+  "detail": "ed 771 (records deleted from tail)\nverdict: 0 anomalies\n⇒ rc=0 (clean)\n⇒ tail failures: 1 (escalating rc to 2)"
+ },
+ {
+  "name": "0.18.0 R-20 anchor recovers after new records (monotonic size)",
+  "pass": true,
+  "detail": "2026-09-22.jsonl: 2 OK\nverdict: 0 anomalies\n⇒ rc=0 (clean)"
+ },
+ {
+  "name": "0.18.0 R-20 deleting the WHOLE day file is detected (manifest-driven)",
+  "pass": true,
+  "detail": "le MISSING\nverdict: 0 anomalies\n⇒ rc=2 (unexplained anomalies present)\n⇒ tail failures: 1 (escalating rc to 2)"
+ },
+ {
+  "name": "0.18.0 R-21 --check-ledger executes (dry-run)",
+  "pass": true,
+  "detail": "would_append=true"
+ },
+ {
+  "name": "0.18.0 R-21 pending row detected after a covered file changes",
+  "pass": true,
+  "detail": "would_append=true"
+ },
+ {
+  "name": "0.18.0 R-21 dry-run is deterministic and side-effect-free (same answer as the intact tree; ledger row count unchanged)",
+  "pass": true,
+  "detail": "rows 32->32, answer=would_append=true"
+ },
+ {
+  "name": "0.22.0 C1 pre records file_state_before (hash+size)",
+  "pass": true,
+  "detail": "{'hash': 'sha256:be9351741a8155d01fd028d158546f1005e73ceeb0bb2d093335f"
+ },
+ {
+  "name": "0.22.0 C1 post records file_state_after",
+  "pass": true,
+  "detail": "{'hash': 'sha256:f72c713b7b432dd18949ca10f1be6dbcf493479945653609d1c71"
+ },
+ {
+  "name": "0.22.0 C1 pre/post join via shared content_digest",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "0.22.0 C1 create records before=absent",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "0.22.0 C1 >1MB records too_large with size",
+  "pass": true,
+  "detail": "{'hash': 'too_large', 'size': 1048581}"
+ },
+ {
+  "name": "0.22.0 B1 exit_code from dict response",
+  "pass": true,
+  "detail": "{'echo b1dict': 3, 'echo b1str': 7, 'echo b1none': None}"
+ },
+ {
+  "name": "0.22.0 B1 exit_code from string response",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "0.22.0 B1 absent exit_code stays null (key present)",
+  "pass": true,
+  "detail": "{'echo b1dict': 3, 'echo b1str': 7, 'echo b1none': None}"
+ },
+ {
+  "name": "0.22.0 A5 report --session computes DNA (json)",
+  "pass": true,
+  "detail": "{\n \"type\": \"session_dna\",\n \"session\": \"test-sess-0001\",\n \"generated_at"
+ },
+ {
+  "name": "0.22.0 A5 --write-dna chains one session_dna record",
+  "pass": true,
+  "detail": "1 dna, out=【摘要】本会话 3 次操作、拦截 0 次、提醒 0 次、触碰 3 个文件——证据链在账，明细如下。\n"
+ },
+ {
+  "name": "0.22.0 verify_chain green over C1/B1/A5 records",
+  "pass": true,
+  "detail": "rc=0 2026-09-22.jsonl: 9 OK\nverdict: 0 anomalies\n⇒ rc=0 (clean)"
+ },
+ {
+  "name": "0.22.0 A5 SessionStart roll-up chains the previous session's DNA",
+  "pass": true,
+  "detail": "['test-sess-0001', 'prev-sess']"
+ },
+ {
+  "name": "0.22.0 A5 roll-up is idempotent (done sessions skipped)",
+  "pass": true,
+  "detail": "2 dna records"
+ },
+ {
+  "name": "0.23.0 A1 first harvest chains usage_delta with token facts",
+  "pass": true,
+  "detail": "{'path_tag': 'sha256:740d8c4b51cae1a4', 'scope': 'tail_first_sight', 'reset': False, 'byte"
+ },
+ {
+  "name": "0.23.0 privacy: raw transcript path is not in the ledger",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "0.23.0 A1 incremental harvest reads only new bytes",
+  "pass": true,
+  "detail": "2 records"
+ },
+ {
+  "name": "0.23.0 A1 no transcript -> no usage record, hook unaffected",
+  "pass": true,
+  "detail": "3 -> 3"
+ },
+ {
+  "name": "0.23.0 A1 grow is incremental (no reset, only m2 harvested)",
+  "pass": true,
+  "detail": "[('tail_first_sight', 1), ('incremental', 1)]"
+ },
+ {
+  "name": "0.23.0 A1 shrink reset is marked and fingerprint-deduped",
+  "pass": true,
+  "detail": "[(False, 0, 1), (False, 0, 1), (True, 1, 1)]"
+ },
+ {
+  "name": "0.23.0 A3 DNA aggregates token facts by model",
+  "pass": true,
+  "detail": "{'entries': 2, 'input': 3000, 'output': 150, 'cache_read': 500, 'cache_creation': 0, 'tota"
+ },
+ {
+  "name": "0.23.0 A4 cost is derived with pricing version (3500/1M = 0.0035)",
+  "pass": true,
+  "detail": "{'currency': 'USD', 'total': 0.0035, 'by_model': {'test-model-a': 0.0035}, 'pricing_version': 'test-"
+ },
+ {
+  "name": "0.23.0 A4 unpriced model reported, never guessed",
+  "pass": true,
+  "detail": "['test-model-b']"
+ },
+ {
+  "name": "0.23.0 verify_chain green over usage_delta records",
+  "pass": true,
+  "detail": "rc=0 2026-09-22.jsonl: 24 OK\nverdict: 0 anomalies\n⇒ rc=0 (clean)"
+ },
+ {
+  "name": "0.23.1 help shows host line, dialogue routes, commands",
+  "pass": true,
+  "detail": "Antinel Security Suite v0.27.0 ｜ 宿主: generic（记账口径: tokens）\n── 你可以对 Age"
+ },
+ {
+  "name": "0.23.1 routes --markdown same-source as help",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "name": "0.23.1 domains add applies (agent mode, no prompt)",
+  "pass": true,
+  "detail": "变更：domains add example.org\n  影响：该域名的网络请求不再触发 NET 提醒/拦截\n  /tmp/antinel_"
+ },
+ {
+  "name": "0.23.1 policy_changed chained with invoked_by + digests",
+  "pass": true,
+  "detail": "[{'ts': '2026-09-22T22:53:19+00:00', 'type': 'policy_changed', 'tool': '-', 'session': 'an"
+ },
+ {
+  "name": "0.23.1 roots add drive-root rejected (fail-closed)",
+  "pass": true,
+  "detail": "skipped: no host installed"
+ },
+ {
+  "name": "0.23.1 credits snapshot chained (user_reported)",
+  "pass": true,
+  "detail": "skipped: no host installed"
+ },
+ {
+  "name": "0.23.1 credits forecast with 2 snapshots",
+  "pass": true,
+  "detail": "skipped: no host installed"
+ },
+ {
+  "name": "0.23.1 digest --scope all prints coverage and chains hub rollup",
+  "pass": true,
+  "detail": "【一句话】近 1 天：3 个项目/宿主组合，10 次操作、拦截 1 次、token 进出 6,396（事实）；记账口径 generic=tokens。\n  ge"
+ },
+ {
+  "name": "0.23.1 report --session latest + human summary line",
+  "pass": true,
+  "detail": "【摘要】本会话 1 次操作、拦截 0 次、提醒 0 次、触碰 0 个文件——证据链在账，明细如下。\nSession DNA: latest-sess-231\n  generated"
+ },
+ {
+  "name": "0.23.1 antinel verify exits 0 on intact chain",
+  "pass": true,
+  "detail": "rc=0"
+ },
+ {
+  "name": "0.26 net_mode=block escalates NET-01 to critical block",
+  "pass": true,
+  "detail": "rc=2 id=NET-01"
+ },
+ {
+  "name": "0.26 whitelisted pypi allowed in block mode",
+  "pass": true,
+  "detail": "rc=0"
+ },
+ {
+  "name": "0.26 git push external blocked",
+  "pass": true,
+  "detail": "rc=2 id=NET-01"
+ },
+ {
+  "name": "0.26 default net_mode=warn stays allow",
+  "pass": true,
+  "detail": "rc=0"
+ },
+ {
+  "name": "0.26 SafeZone lock is a Windows (NTFS ACL) mechanism",
+  "pass": true,
+  "detail": "platform-gated: ACL deny is Windows-only"
+ },
+ {
+  "name": "0.26 host-audit zcode reports coverage line",
+  "pass": true,
+  "detail": "== 宿主: zcode\n  路径: /home/runner/.zcode/v2/checkpoints 不存在\n（覆盖声明：仅列登记宿主"
+ }
+]
