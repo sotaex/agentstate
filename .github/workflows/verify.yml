@@ -33,6 +33,7 @@ jobs:
       # 双跑：run1 在树变化后刷新 psl/judgment.json（否则「可导性」断言
       # 对照上一棵树的旧判定必然失败一次）；run2 在新判定上做真验证。
       - name: verification harness run 1 (refresh judgment)
+        continue-on-error: true   # run1 对旧判定的差量断言允许失败，run2 才是验证
         run: python scripts/run_harness.py
       - name: verification harness run 2 (verify on fresh judgment)
         run: python scripts/run_harness.py
