@@ -30,7 +30,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - name: run verification harness (full suite, stdlib only, no network)
+      # 双跑：run1 在树变化后刷新 psl/judgment.json（否则「可导性」断言
+      # 对照上一棵树的旧判定必然失败一次）；run2 在新判定上做真验证。
+      - name: verification harness run 1 (refresh judgment)
+        run: python scripts/run_harness.py
+      - name: verification harness run 2 (verify on fresh judgment)
         run: python scripts/run_harness.py
       - name: upload judgment record
         if: always()
