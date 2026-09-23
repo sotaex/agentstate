@@ -31,10 +31,10 @@
 
 完整转录：[demo/demo_transcript.txt](demo/demo_transcript.txt)；自己跑：`python demo/sneaky_agent_demo.py`。
 
-## 篡改挑战：改得动算你赢
+## 篡改挑战：改一个字节就被指出来
 
 [challenge/](challenge/README.md) 里有一条**真实钩子生成的审计链**（14 条记录，含 3 起拦截）。
-三条命令，改掉任何记录里的任何字符，骗过 60 行的独立验证器——算你赢：
+三条命令，改掉任何记录里的任何字符，看它当场指出改的是哪一条：
 
 ```bash
 python challenge/verify.py    # → CLEAN（链完好）
@@ -42,8 +42,8 @@ python challenge/tamper.py    # 改一个字符
 python challenge/verify.py    # → TAMPERED（当场指出改的是哪一条）
 ```
 
-CI 每天用真实钩子生成并验证一条新链（`.github/workflows/daily-chain.yml`）——
-**提交历史本身就是「每天都在运行」的连续编号证明。**
+CI 每天用真实钩子生成并验证一条新链（`.github/workflows/daily-chain.yml`），**自 2026-09-23 起**。
+**提交历史就是公开的连续编号。**
 
 ## 安装（60 秒首条记录）
 

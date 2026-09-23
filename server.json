@@ -6,7 +6,7 @@
   "version": "0.28.0",
   "author": { "name": "geguang", "email": "geguang@gmail.com" },
   "license": "MIT",
-  "websiteUrl": "https://github.com/sotaex/agentstate",
+  "websiteUrl": "https://antinel.com/agentstate/",
   "repository": { "source": "github", "url": "https://github.com/sotaex/agentstate" },
   "compatibility": { "protocol": "2024-11-05", "transports": ["stdio"] },
   "tools": [
