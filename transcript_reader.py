@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Antinel Security Suite v0.27.0 - transcript usage reader (三问三答 v1.0, A1/A2).
+"""AgentState v0.28.0 - transcript usage reader (三问三答 v1.0, A1/A2).
 
 Harvests per-turn token FACTS from the host's transcript JSONL into the audit
 chain. This module is the ONLY place that knows the host's transcript format

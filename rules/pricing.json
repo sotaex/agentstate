@@ -1,6 +1,6 @@
 {
  "$schema": "antinel-pricing-v1",
- "version": "0.27.0",
+ "version": "0.28.0",
  "currency": "USD",
  "unit": "per_1m_tokens",
  "updated_at": "2026-09-19",

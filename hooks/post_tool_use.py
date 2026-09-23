@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Antinel Security Suite v0.27.0 - PostToolUse hook (Claude Code / ZCode compatible).
+"""AgentState v0.28.0 - PostToolUse hook (Claude Code / ZCode compatible).
 
 Input (stdin, one JSON line): {session_id, transcript_path, tool_name,
 tool_input, tool_response}. PostToolUse cannot block an action that already

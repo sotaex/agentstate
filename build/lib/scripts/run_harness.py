@@ -11,7 +11,7 @@ it FAILS instead of quietly scoring 1 lower); and the ledger idempotency key
 includes the assertion count, so a changed denominator can never be swallowed
 by the "no change" guard again.
 """
-import hashlib, json, os, platform, re, subprocess, sys, tempfile, time
+import hashlib, json, os, platform, re, shutil, subprocess, sys, tempfile, time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -51,7 +51,9 @@ def repo_identity():
         url = (out.stdout or "").strip()
         m = re.search(r"[:/]([\w.-]+)/([\w.-]+?)(?:\.git)?$", url)
         if m:
-            return "github.com", m.group(2).lower(), m.group(1).lower()
+            # group(1)=owner, group(2)=repo —— owner 才是命名空间主体（0.29 修复：
+            # 取反了会让 subject 解析成 github.com/antinel 而非 github.com/sotaex）
+            return "github.com", m.group(1).lower(), m.group(2).lower()
     except Exception:
         pass
     try:
@@ -138,6 +140,22 @@ def main():
     proc = subprocess.run([sys.executable, str(PKG / "scripts" / "verification_tests.py")],
                           capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
     res = Path(work) / "last_results.json"
+    # CI 调试转储（ANTINEL_DEBUG_CI=1 时）：把套件输出与结构化结果留到仓内
+    # psl/ci_debug/，让无日志权限的第三方也能定位失败。默认关。
+    if os.environ.get("ANTINEL_DEBUG_CI") == "1":
+        try:
+            tag = os.environ.get("ANTINEL_DEBUG_TAG") or "local"
+            dbg = PKG / "psl" / "ci_debug" / tag
+            dbg.mkdir(parents=True, exist_ok=True)
+            (dbg / "suite_stdout.txt").write_text(proc.stdout or "", encoding="utf-8")
+            (dbg / "suite_stderr.txt").write_text(proc.stderr or "", encoding="utf-8")
+            if res.is_file():
+                shutil.copyfile(res, dbg / "last_results.json")
+            (dbg / "run_info.txt").write_text(
+                "python=%s platform=%s rc=%d\n" % (sys.version, platform.platform(),
+                                                   proc.returncode), encoding="utf-8")
+        except Exception:
+            pass
     try:
         rows = json.loads(res.read_text(encoding="utf-8"))
         total = len(rows)

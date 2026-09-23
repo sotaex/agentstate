@@ -146,7 +146,7 @@ def main():
     if _banner_quiet():
         return 0
     n = _rule_count()
-    msg = ("Antinel Security Suite 正在守护此项目：" + str(n) + " 条规则 · 4 道闸门 · "
+    msg = ("AgentState 正在守护此项目：" + str(n) + " 条规则 · 4 道闸门 · "
            "危险操作将被拦截并留痕（审计 .psl/audit）。"
            "用户问「干了什么/有没有胡搞/花了多少/积分/预算/白名单」时，"
            "不要猜——读 AGENTS.md 的 Antinel 段并按路由执行对应 antinel 命令；"

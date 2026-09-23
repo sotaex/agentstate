@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Antinel Security Suite v0.27.0 - antinel 单入口（定稿方案 v1.1/v1.2）.
+"""AgentState v0.28.0 - antinel 单入口（定稿方案 v1.1/v1.2）.
 
 用户面只有这一个名字：配置、账本、报告、校验、中枢，全部在 `antinel` 下。
 无参数 = help 清单（命令 + "你可以对 Agent 说的话"，与 skill 路由件由同一份
@@ -32,7 +32,7 @@ if _HERE not in sys.path:
 
 from strings import detect_lang, get_string
 
-VERSION = "0.27.0"
+VERSION = "0.28.0"
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
@@ -816,7 +816,7 @@ def cmd_hub(args):
 
 
 # ------------------------------------------------------------ help ----
-HELP_HOSTLINE = "Antinel Security Suite v%s ｜ 宿主: %s（记账口径: %s）"
+HELP_HOSTLINE = "AgentState v%s ｜ 宿主: %s（记账口径: %s）"
 
 
 def cmd_help(_args=None):

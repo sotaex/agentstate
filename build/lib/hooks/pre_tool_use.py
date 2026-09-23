@@ -98,10 +98,10 @@ _FALLBACK = [
      "exclude_patterns": [r"\.env\.example", r"\.env\.template", r"\.env\.sample"],
      "description": "Agent attempted to read a .env file which may contain API keys and secrets"},
     {"id": "SEC-02", "category": "secrets", "severity": "critical", "apply_to_tools": ["Read", "Bash"],
-     "file_patterns": [r"\.ssh[/\\]", "id_rsa", "id_ed25519", "id_ecdsa", "authorized_keys"],
+     "file_patterns": [r"\.ssh[/\\]id_", r"\.ssh[/\\]authorized_keys", "id_rsa", "id_ed25519", "id_ecdsa", "authorized_keys"],
      "description": "Agent attempted to read SSH private key or authorized_keys file"},
     {"id": "SEC-03", "category": "secrets", "severity": "critical", "apply_to_tools": ["Read", "Bash"],
-     "file_patterns": [r"\.aws[/\\]", r"\.kube[/\\]config", r"credentials\.json", r"\.netrc"],
+     "file_patterns": [r"\.aws[/\\]credentials", r"\.kube[/\\]config", r"credentials\.json", r"\.netrc", "application_default_credentials"],
      "description": "Agent attempted to read cloud provider credentials"},
     {"id": "DST-01", "category": "destructive", "severity": "critical", "apply_to_tools": ["Bash"],
      # A10: kept in sync with rules/default.json DST-01. Previously a fallback
@@ -368,11 +368,14 @@ def _norm_prefix(p):
     s = (p or "").replace("\\", "/").strip().lower()
     if s in ("", ".", "..", "/"):
         return ""
-    s2 = s.lstrip("./")
+    was_abs_posix = s.startswith("/")           # POSIX 绝对路径（0.29.1：
+    s2 = s.lstrip("./")                         # 修复 Linux 白名单永不释放）
     if not s2 or s2.endswith(":") or s2.endswith(":/"):
         return ""
     if ".." in s2 or any(ch in s2 for ch in "*?["):
         return ""
+    if was_abs_posix and not s2.startswith("/"):
+        s2 = "/" + s2
     return s2
 
 

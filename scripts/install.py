@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Antinel Security Suite v0.27.0 - self installer (F-07) and uninstaller (F-08).
+"""AgentState v0.28.0 - self installer (F-07) and uninstaller (F-08).
 
 Steps (spec part 4):
   1. detect host type            (A-04 algorithm + C-02 refinements)
@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 PKG_DIR = Path(__file__).resolve().parent
-SKILL_VERSION = "0.27.0"
+SKILL_VERSION = "0.28.0"
 PSL_SPEC = "psl-vs-0.1"
 SCRIPT_FILES = ("pre_tool_use.py", "post_tool_use.py", "session_dna.py",
                 "audit_chain.py",
@@ -509,7 +509,7 @@ def uninstall(root, purge=False):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Antinel Security Suite installer")
+    ap = argparse.ArgumentParser(description="AgentState installer")
     ap.add_argument("--root", default=os.getcwd(), help="project root (default: cwd)")
     ap.add_argument("--host", choices=["claude-code", "zcode", "qoder", "generic"],
                     help="force host type (TEST ONLY; refused when it contradicts detected markers unless --force)")

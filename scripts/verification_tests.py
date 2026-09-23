@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Antinel Security Suite v1.1 self-test harness (T1/T3/T4/T2/T6/T7 subset).
+"""AgentState v0.28.0 self-test harness (T1/T3/T4/T2/T6/T7 subset).
 
 Runs the real scripts as subprocesses exactly like a host would.
 Usage: py run_tests.py
@@ -542,7 +542,7 @@ def main():
            and all(f["count"] >= 1 for f in rep["findings"]), "score=%d crit=%d warn=%d" % (rep["score"], rep["summary"]["critical"], rep["summary"]["warning"]))
     rc, out, err, _ = run("report.py", ["--root", str(proj), "--format", "html", "--out", str(WORK / "r.html")])
     h = (WORK / "r.html").read_text(encoding="utf-8")
-    record("report html single-file (C-03)", rc == 0 and "<script" not in h and "#dc3545" in h and "Antinel Security Suite" in h)
+    record("report html single-file (C-03)", rc == 0 and "<script" not in h and "#dc3545" in h and "AgentState" in h)
     rc, out, err, _ = run("report.py", ["--root", str(gen)])
     record("report no data -> exit 1 (A-10)", rc == 1)
     old = proj / ".psl" / "audit" / "2026-01-01.jsonl"

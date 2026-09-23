@@ -39,7 +39,9 @@ Description-Content-Type: text/markdown
 License-File: LICENSE
 Dynamic: license-file
 
-# Antinel — 让 Agent 通宵干活，早上看账单
+# AgentState — 让 Agent 通宵干活，早上看账单
+
+> **AgentState**，[Antinel](https://antinel.com) 旗下 Agent 行为审计产品线。全天候可用：白天拦事故，夜晚守通宵。
 
 **你的 AI 编程 Agent 昨晚干了什么？花了多少 token？有没有出格？——Antinel 每天早上给你答案。**
 
@@ -70,10 +72,10 @@ Dynamic: license-file
 
 完整转录：[demo/demo_transcript.txt](demo/demo_transcript.txt)；自己跑：`python demo/sneaky_agent_demo.py`。
 
-## 篡改挑战：改得动算你赢
+## 篡改挑战：改一个字节就被指出来
 
 [challenge/](challenge/README.md) 里有一条**真实钩子生成的审计链**（14 条记录，含 3 起拦截）。
-三条命令，改掉任何记录里的任何字符，骗过 60 行的独立验证器——算你赢：
+三条命令，改掉任何记录里的任何字符，看它当场指出改的是哪一条：
 
 ```bash
 python challenge/verify.py    # → CLEAN（链完好）
@@ -81,13 +83,13 @@ python challenge/tamper.py    # 改一个字符
 python challenge/verify.py    # → TAMPERED（当场指出改的是哪一条）
 ```
 
-CI 每天用真实钩子生成并验证一条新链（`.github/workflows/daily-chain.yml`）——
-**提交历史本身就是「每天都在运行」的连续编号证明。**
+CI 每天用真实钩子生成并验证一条新链（`.github/workflows/daily-chain.yml`），**自 2026-09-23 起**。
+**提交历史就是公开的连续编号。**
 
 ## 安装（60 秒首条记录）
 
 ```bash
-pipx install git+https://github.com/geguang/antinel.git
+pipx install git+https://github.com/sotaex/agentstate.git
 antinel install        # 交互式接入宿主（Claude Code / ZCode / Qoder / WorkBuddy / Codex）
 antinel digest         # 第一份账本
 ```
@@ -113,6 +115,8 @@ python scripts/install.py --check   # 已安装实例与包一致性（版本+�
 退出码约定：`antinel_verify` 0＝current / 1＝superseded / 2＝无法校验；
 `install.py --check` 0＝一致 / 1＝未安装 / 3＝有漂移。
 任何第三方复跑出不同结论，即取代随包判定记录（追加式，原记录不删不改）。
+
+命名空间清单公钥指纹（pinned，防伪依据）：`sha256:b71e570c30ebcbf7`
 
 ## 它防什么
 

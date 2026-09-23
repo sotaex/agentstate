@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Antinel Security Suite v0.27.0 - PreToolUse hook (Claude Code / ZCode compatible).
+"""AgentState v0.28.0 - PreToolUse hook (Claude Code / ZCode compatible).
 
 v1.2 fixes over v1.1:
   G-01: rules loaded from PKG_DIR only (install.py snapshot in .psl/ is informational)

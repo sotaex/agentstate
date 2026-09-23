@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Antinel Security Suite v0.27.0 - session DNA (三问三答 v1.0, A5).
+"""AgentState v0.28.0 - session DNA (三问三答 v1.0, A5).
 
 One chained record per session that summarizes the session's audit trail:
 action counts, blocks by rule, touched files, pre/post duration pairs, and

@@ -16,6 +16,7 @@ antinel.egg-info/dependency_links.txt
 antinel.egg-info/entry_points.txt
 antinel.egg-info/top_level.txt
 challenge/README.md
+challenge/attack.py
 challenge/generate_challenge.py
 challenge/tamper.py
 challenge/verify.py
@@ -23,9 +24,11 @@ demo/demo_transcript.txt
 demo/sneaky_agent_demo.py
 docs/A6收入边界声明.md
 docs/AUDIT_SCHEMA.md
+docs/BRAND.md
 hooks/post_tool_use.py
 hooks/pre_tool_use.py
 hooks/session_start_banner.py
+psl/judgment.json
 psl/manifest.json
 rules/default.json
 rules/pricing.json

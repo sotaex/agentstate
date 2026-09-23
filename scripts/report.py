@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Antinel Security Suite v1.1 - report generator (F-04 behaviour report, F-05 score).
+"""AgentState v0.28.0 - report generator (F-04 behaviour report, F-05 score).
 
 Sources:
   .psl/audit/*.jsonl      hook events written by pre_tool_use.py / post_tool_use.py
@@ -46,7 +46,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 PKG_DIR = Path(__file__).resolve().parent
-TOOL_VERSION = "0.27.0"
+TOOL_VERSION = "0.28.0"
 RETENTION_DAYS_DEFAULT = 30
 SCRIPT_FILES = ("pre_tool_use.py", "post_tool_use.py", "scan.py", "install.py", "report.py")
 
@@ -63,7 +63,7 @@ MAX_AUDIT_BYTES = 100 * 1024 * 1024
 SEVERITY_WEIGHT = {"critical": 20, "warning": 5, "info": 0}
 BAR = "\u2501" * 34
 COLORS = {"critical": "#dc3545", "warning": "#ffc107", "ok": "#28a745", "neutral": "#6c757d"}
-FOOTER = ("本报告由 Antinel Security Suite 生成。验证方式：安装 psl-watch 技能后运行 "
+FOOTER = ("本报告由 AgentState 生成。验证方式：安装 psl-watch 技能后运行 "
           "python scripts/scan.py。")
 
 
@@ -387,7 +387,7 @@ def render_sarif(rep):
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
         "runs": [{
-            "tool": {"driver": {"name": "Antinel Security Suite", "version": TOOL_VERSION,
+            "tool": {"driver": {"name": "AgentState", "version": TOOL_VERSION,
                                 "informationUri": "https://github.com/antinel/security-suite",
                                 "rules": list(rules.values())}},
             "results": results,
