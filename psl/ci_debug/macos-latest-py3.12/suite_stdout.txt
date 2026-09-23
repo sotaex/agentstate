@@ -54,7 +54,7 @@ PASS CTX-03 BOM+ZWJ whitelisted  -- rc=0 err=
 PASS Benign PSL SKILL.md read  -- rc=0 err=
 PASS UX: 拦截理由为中文且含处理建议  -- Antinel 拦截 [SEC-01] 读取 .env 文件可能泄露 API 密钥与机密配置 | 命中: .env | 放行/处理: 把 .env 移出 Agent 可读范围；确需
 PASS UX: 同类提醒当天只提示一次（第二次静默记录）  -- e1='[DST-05] 提醒: 尝试提权操作\n' e2=''
-PASS A5 5MB command handled fast (truncated before matching)  -- median ms=2669 (runs: 2842, 2669, 2636; load-sensitive; ladder B-021..023 tracks the budget)
+PASS A5 5MB command handled fast (truncated before matching)  -- median ms=3554 (runs: 3274, 3772, 3554; load-sensitive; ladder B-021..023 tracks the budget)
 PASS A-08 invalid JSON -> allow  -- rc=0
 PASS A-08 missing tool_input -> allow  -- rc=0
 PASS B-03 custom disables NET-01 -> NET-03 alert (audit-based)  -- ['NET-03']
@@ -71,7 +71,7 @@ PASS post UTF-8 roundtrip (no GBK mojibake)
 PASS F-03 JSONL audit log written  -- files=1 lines=124
 PASS C-01 canary persisted in log
 == T6 hook latency (NFR-03) ==
-PASS hook latency median (ms, includes interpreter start)  -- median=41 min=41 max=49
+PASS hook latency median (ms, includes interpreter start)  -- median=56 min=49 max=66
 == T3 negative: 7 verified PSL skills ==
 PASS T3 scan skills (skipped: skills dir not present at D:\psl\skills)
 == T4 positive: malicious fixture ==
@@ -83,7 +83,7 @@ PASS A6 CTX-05 case-only name/dir difference not flagged (scan)  -- ['evil-helpe
 PASS C3 depth boundary: deeper-than-15 not scanned, no crash  -- []
 PASS A6 CTX-05 case-only not flagged (hook)
 == T2/T7 install / uninstall ==
-PASS install claude-code: hooks appended, foreign kept  -- rc=0 ms=92
+PASS install claude-code: hooks appended, foreign kept  -- rc=0 ms=130
 PASS D7 .psl/.gitignore auto-written
 PASS A4 tampered rules hash -> fallback minimal set + SELF-TAMPERED warning  -- [Antinel] SELF-TAMPERED: rules/default.json differs from the installed
 PASS A4 fallback still blocks SEC-01 (baseline intact)
@@ -119,7 +119,7 @@ PASS 2.8 SELF-TAMPERED names drifted script
 PASS US-02 score basis line in report and scan text
 == F-06 policy semantics (spec C-05, adopted) ==
 PASS F-06 whitelist.domains relaxes NET-01/NET-03  -- rc=0 err=
-FAIL F-06 whitelist.paths exempts SEC-01 under tests/fixtures  -- rc=2 err=Antinel 拦截 [SEC-01] 读取 .env 文件可能泄露 API 密钥与机密配置 | 命中: .env | 放行/处理: 把 .env 移出 Age
+FAIL F-06 whitelist.paths exempts SEC-01 under tests/fixtures  -- fp=/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/antinel_harness_c7fs61ly/proj/tests/fixtures/.env real=/private/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000g
 PASS F-06 whitelist.paths does not exempt other paths  -- rc=2 id=SEC-01 err=Antinel 拦截 [SEC-01] 读取 .env 文件可能泄露 API 密钥与机密配置 | 命中: .env | 放行/处理: 把 .env 移出 Age
 PASS F-06 whitelist.paths honoured by scan.py  -- ['.env', 'config/.env.local']
 PASS F-06 whitelist.commands skips warning rules (pip ... printenv)  -- rc=0 err=
@@ -139,9 +139,9 @@ PASS 0.16.0 DST-01 raw-string r'D:\...' is not a delete  -- rc=0 err=
 PASS 0.16.0 DST-01 URL /rd/ segment is not a delete (NET-01 warns, no block)  -- [NET-01] 提醒: 通过 Shell 向白名单外域名发起网络请求
 [NET-03] 提醒: 命令引用了白名单外的域名
 PASS C7 over-long custom pattern dropped, hook unaffected
-PASS C9 nested ReDoS pattern '(a+)+$' rejected, hook not wedged  -- 96ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes
-PASS C9 alternation ReDoS pattern '(a|aa)+$' rejected, hook not wedged  -- 96ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes
-PASS C9 inner-optional ReDoS pattern '(a?)+$' rejected, hook not wedged  -- 96ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes
+PASS C9 nested ReDoS pattern '(a+)+$' rejected, hook not wedged  -- 162ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes
+PASS C9 alternation ReDoS pattern '(a|aa)+$' rejected, hook not wedged  -- 198ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes
+PASS C9 inner-optional ReDoS pattern '(a?)+$' rejected, hook not wedged  -- 130ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes
 PASS C9 benign custom rule still loads and fires (read-only downgrade to alert)  -- [CUSTOM-OK] 提醒:
 PASS C11 KNOWN GAP: files deeper than MAX_DEPTH=15 are not scanned (accepted, see THREAT_MODEL -- not an acceptance criterion)  -- []
 
@@ -194,7 +194,7 @@ PASS WS-1 POSIX: wildcard rejected  -- rc=2 id=DST-02 err=[Antinel][配置错误
           拒绝类
 PASS WS-1 POSIX: a real absolute root is honoured  -- rc=0 err=
 PASS WS-3 rejected config entry lands in the audit log  -- 11 records
-PASS WS-3 rejected config entry is visible in report.py  -- : /private/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/antinel_harness_vs68k0zw/proj/.psl/audit
+PASS WS-3 rejected config entry is visible in report.py  -- : /private/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/antinel_harness_c7fs61ly/proj/.psl/audit
  Re-scan: python scan.py
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -211,7 +211,7 @@ PASS 0.16.0 SEC-06 in static rules_applied (was hook-only despite RULES.md)  -- 
 PASS 0.16.0 scan subject digest reproducible on an unchanged tree  -- sha256:94aece350b95e2ebe0dbfe0be515662eb
 PASS 0.16.0 judgment carries the five hard-precondition fields  -- missing: none
 PASS 0.16.0 judgment status derivable to 'current' on an intact tree  -- status=current platformSpec=True ownership=self
-PASS 0.16.0 ledger exists and row 1 is the self-verdict  -- rows=32
+PASS 0.16.0 ledger exists and row 1 is the self-verdict  -- rows=33
 PASS 0.16.0 antinel_verify derives current on an intact package  -- all 19 covered files hash to their recorded digests (judgment digests (19 files)
 PASS 0.16.0 antinel_verify derives superseded after a covered file changes  -- 1 of 19 covered files differ (judgment digests (19 files))
 
@@ -244,7 +244,7 @@ PASS 0.18.0 R-20 deleting the LAST record is now DETECTED (chain alone never cau
 verdict: 0 anomalies
 ⇒ rc=0 (clean)
 ⇒ tail failures: 1 (escalating rc to 2)
-PASS 0.18.0 R-20 anchor recovers after new records (monotonic size)  -- 2026-09-22.jsonl: 2 OK
+PASS 0.18.0 R-20 anchor recovers after new records (monotonic size)  -- 2026-09-23.jsonl: 2 OK
 verdict: 0 anomalies
 ⇒ rc=0 (clean)
 PASS 0.18.0 R-20 deleting the WHOLE day file is detected (manifest-driven)  -- le MISSING
@@ -253,7 +253,7 @@ verdict: 0 anomalies
 ⇒ tail failures: 1 (escalating rc to 2)
 PASS 0.18.0 R-21 --check-ledger executes (dry-run)  -- would_append=false
 PASS 0.18.0 R-21 pending row detected after a covered file changes  -- would_append=true
-PASS 0.18.0 R-21 dry-run is deterministic and side-effect-free (same answer as the intact tree; ledger row count unchanged)  -- rows 32->32, answer=would_append=false
+PASS 0.18.0 R-21 dry-run is deterministic and side-effect-free (same answer as the intact tree; ledger row count unchanged)  -- rows 33->33, answer=would_append=false
 
 -- 0.22.0 capabilities --
 PASS 0.22.0 C1 pre records file_state_before (hash+size)  -- {'hash': 'sha256:be9351741a8155d01fd028d158546f1005e73ceeb0bb2d093335f
@@ -270,14 +270,14 @@ PASS 0.22.0 A5 report --session computes DNA (json)  -- {
  "generated_at
 PASS 0.22.0 A5 --write-dna chains one session_dna record  -- 1 dna, out=【摘要】本会话 3 次操作、拦截 0 次、提醒 0 次、触碰 3 个文件——证据链在账，明细如下。
 
-PASS 0.22.0 verify_chain green over C1/B1/A5 records  -- rc=0 2026-09-22.jsonl: 9 OK
+PASS 0.22.0 verify_chain green over C1/B1/A5 records  -- rc=0 2026-09-23.jsonl: 9 OK
 verdict: 0 anomalies
 ⇒ rc=0 (clean)
 PASS 0.22.0 A5 SessionStart roll-up chains the previous session's DNA  -- ['test-sess-0001', 'prev-sess']
 PASS 0.22.0 A5 roll-up is idempotent (done sessions skipped)  -- 2 dna records
 
 -- 0.23.0 capabilities --
-PASS 0.23.0 A1 first harvest chains usage_delta with token facts  -- {'path_tag': 'sha256:307eca5e8bc9349d', 'scope': 'tail_first_sight', 'reset': False, 'byte
+PASS 0.23.0 A1 first harvest chains usage_delta with token facts  -- {'path_tag': 'sha256:de177ccba726a78d', 'scope': 'tail_first_sight', 'reset': False, 'byte
 PASS 0.23.0 privacy: raw transcript path is not in the ledger
 PASS 0.23.0 A1 incremental harvest reads only new bytes  -- 2 records
 PASS 0.23.0 A1 no transcript -> no usage record, hook unaffected  -- 3 -> 3
@@ -286,7 +286,7 @@ PASS 0.23.0 A1 shrink reset is marked and fingerprint-deduped  -- [(False, 0, 1)
 PASS 0.23.0 A3 DNA aggregates token facts by model  -- {'entries': 2, 'input': 3000, 'output': 150, 'cache_read': 500, 'cache_creation': 0, 'tota
 PASS 0.23.0 A4 cost is derived with pricing version (3500/1M = 0.0035)  -- {'currency': 'USD', 'total': 0.0035, 'by_model': {'test-model-a': 0.0035}, 'pricing_version': 'test-
 PASS 0.23.0 A4 unpriced model reported, never guessed  -- ['test-model-b']
-PASS 0.23.0 verify_chain green over usage_delta records  -- rc=0 2026-09-22.jsonl: 24 OK
+PASS 0.23.0 verify_chain green over usage_delta records  -- rc=0 2026-09-23.jsonl: 24 OK
 verdict: 0 anomalies
 ⇒ rc=0 (clean)
 
@@ -297,7 +297,7 @@ PASS 0.23.1 routes --markdown same-source as help
 PASS 0.23.1 domains add applies (agent mode, no prompt)  -- 变更：domains add example.org
   影响：该域名的网络请求不再触发 NET 提醒/拦截
   /private/var/
-PASS 0.23.1 policy_changed chained with invoked_by + digests  -- [{'ts': '2026-09-22T21:21:11+00:00', 'type': 'policy_changed', 'tool': '-', 'session': 'an
+PASS 0.23.1 policy_changed chained with invoked_by + digests  -- [{'ts': '2026-09-23T14:49:29+00:00', 'type': 'policy_changed', 'tool': '-', 'session': 'an
 PASS 0.23.1 roots add drive-root rejected (fail-closed)  -- skipped: no host installed
 PASS 0.23.1 credits snapshot chained (user_reported)  -- skipped: no host installed
 PASS 0.23.1 credits forecast with 2 snapshots  -- skipped: no host installed
@@ -319,5 +319,5 @@ PASS 0.26 host-audit zcode reports coverage line  -- == 宿主: zcode
 （覆盖声明：仅列登记宿
 
 == SUMMARY: 248/249 passed ==
-  FAILED: F-06 whitelist.paths exempts SEC-01 under tests/fixtures rc=2 err=Antinel 拦截 [SEC-01] 读取 .env 文件可能泄露 API 密钥与机密配置 | 命中: .env | 放行/处理: 把 .env 移出 Age
-results: /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/antinel_harness_vs68k0zw/last_results.json
+  FAILED: F-06 whitelist.paths exempts SEC-01 under tests/fixtures fp=/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/antinel_harness_c7fs61ly/proj/tests/fixtures/.env real=/private/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/antinel_harness_c7fs61ly/proj/tests/fixtures/.env root=/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/antinel_harness_c7fs61ly/proj root_real=/private/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/antinel_harness_c7fs61ly/proj rel=tests/fixtures/.env || Antinel 拦截 [SEC-01] 读取 .env 文件可能泄露 API 密钥与机密配置 | 命中: .env | 放行/处理: 把 .env 移出 Agent 可读范围；确需变量时手动复制具体几行；测试夹具路径可在 policy.js
+results: /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/antinel_harness_c7fs61ly/last_results.json
