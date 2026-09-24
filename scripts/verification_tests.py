@@ -1601,6 +1601,31 @@ def main():
                "platform-gated: ACL deny is Windows-only")
     (z26 / "t26.txt").unlink(missing_ok=True)
 
+    # ---- F-09／F-10：门闸自检的两处缺口（见《Antinel 门闸自检两处缺口取证（2026-09-24）》）----
+    # F-09: task_installed() 必须是【三态】。查询失败要返回 None（"查不出来"），
+    #       不得返回 True —— 那会把"门闸裸奔"告警永久抑制掉（fail-open 落在【自检】路径上）。
+    _f09 = ("import sys,types;sys.path.insert(0,r'%s');import host_shield as hs;"
+            "hs.subprocess=types.SimpleNamespace(run=lambda *a,**k:"
+            "(_ for _ in ()).throw(OSError('policy-blocked')));"
+            "print(repr(hs.task_installed()))" % str(PKG))
+    _p09 = subprocess.run([PY, "-c", _f09], capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=60)
+    record("F-09 host-shield 自检查不出来时不谎报已安装（三态：None != True）",
+           _p09.stdout.strip() == "None", (_p09.stdout + _p09.stderr).strip()[:90])
+
+    # F-10: 会写进链的事件类型必须全部登记在随包 schema 里（§4 自称"枚举"）。
+    #       静态对照：扫装运 .py 里的 host_shield_* 字面量 vs docs/AUDIT_SCHEMA.md。
+    _emitted = set()
+    for _py in sorted(PKG.rglob("*.py")):
+        if "build" in _py.parts or "__pycache__" in _py.parts:
+            continue
+        _emitted |= set(re.findall(r'"(host_shield_[a-z_]+)"',
+                                   _py.read_text(encoding="utf-8", errors="replace")))
+    _schema = (PKG / "docs" / "AUDIT_SCHEMA.md").read_text(encoding="utf-8", errors="replace")
+    _unreg = sorted(t for t in _emitted if t not in _schema)
+    record("F-10 门闸事件类型全部登记于 AUDIT_SCHEMA.md（%d 类）" % len(_emitted),
+           bool(_emitted) and not _unreg, "未登记: %s" % (_unreg or "无"))
+
     rc, out, err, _ = run("antinel.py", ["host-audit", "--host", "zcode"], cwd=proj,
                           env=hub_env, stdin="")
     record("0.26 host-audit zcode reports coverage line",

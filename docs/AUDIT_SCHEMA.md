@@ -1,9 +1,10 @@
-# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.2（随 v0.28.0）
+# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.3（随 v0.28.0）
 
 > 本文是 `.psl/audit/` 下每一条记录的**字段级契约**，供第三方独立复核。
 > 原则：**记录里只有事实与指纹，没有内容、没有评分**。任何字段语义变更必须 bump 本文档版本并在变更说明中登记。
 > v1.1（0.23.0）：新增 `usage_delta` 记录类型（token 事实）；`session_dna` 新增 `usage` 块（聚合与**派生**成本估算）。
 > v1.2（0.28.0）：**降级记录迁移至 sidecar**——`chain:"unlocked"` 的记录不再写入主链，改写 `audit/sidecar/<日>.<pid>.jsonl`（单写者文件）；主链从此只含按锁定协议成链的记录。依据：《v0.28 条款·链并发语义 v2》C-2/C-3（葛广 2026-09-21 确认）；动机：Gauntlet 实证 unlocked 直写主链与持锁写相撞会产生与篡改同形的分叉。
+> v1.3（0.28.0）：**补登记门闸事件族**（`host_shield_*` 共 6 类，见 §4 门闸类）。此前代码已写入**同一条链**而本文未登记 —— §4 自称"枚举"，缺登记即契约不成立。依据：《Antinel 门闸自检两处缺口取证（fail-open ＋ 未登记事件）（2026-09-24）》F2。
 
 ## 1. 存放位置
 
@@ -83,6 +84,23 @@
 | type | 来源 | 说明 |
 |---|---|---|
 | `hook_error` | pre | 钩子内部异常（fail-open，宿主不受影响） |
+
+### 门闸类（host-shield，v1.3 补登记）
+
+> 由 `host_shield.py` 哨兵与 `antinel.py host-shield enable/disable` 写入**与上表同一条链**。
+> ★ 门闸**默认关闭**（须 `antinel host-shield enable` 才布防）；未布防时链中不出现本族记录。
+> 本族 `session` 固定为 `"host-shield"`、`tool` 固定为 `"-"`、`host` 固定为 `"generic"`（见 §3 公共字段）。
+
+| type | 来源 | 关键字段 | 说明 |
+|---|---|---|---|
+| `host_shield_zone_locked` | 哨兵 | `decision="deny"`, `reason`(含路径) | 安全区（zone）已上锁：区内防篡改；出网另由 `net_mode` 把闸 |
+| `host_shield_breach` | 哨兵 | `decision="deny"` | **门闸异常**三种：① 计划任务缺失（哨兵不会随登录自启，`#6`）② 发现未拦的外传落盘点并补锁 ③ 发现符号链接（绕过载体） |
+| `host_shield_task_unknown` | 哨兵 | `decision="alert"` | **v1.3 新增**：无法确认计划任务状态（`schtasks` 不可用／被策略拦截／超时）。★ 与 `breach` **分开记** —— **"查不出来"不是"查到了是坏的"**；此前该情形被 fail-open 吞成"已安装"，导致 `breach` 永不触发 |
+| `host_shield_window_closed` | 哨兵 | `decision`, `reason` | 放行窗到期关闭 |
+| `host_shield_heartbeat` | 哨兵 | `decision="allow"`, `watched`(登记路径数) | 哨兵心跳（门闸在岗），每 `HEARTBEAT_SECONDS` 一次 |
+| `host_shield_changed` | `antinel.py` | `decision="allow"`, `severity="warning"`, `field`, `change`, `invoked_by` | 门闸被 enable／disable；`change` 为 `"false → true"` 形式 |
+
+**本族不记什么**（与 §6 同源）：不读密文内容（红线 A3）；不记被拦文件的字节；`reason` 中的路径为脱敏后原文。
 
 ## 5. `session_dna` 字段表（0.22.0）
 

@@ -174,11 +174,18 @@ def scan_once(root, state, audit_dir):
     if now - state.get("last_task_check", 0) >= 300:   # #6: 任务哨卫（5 分钟一查）
         state["last_task_check"] = now
         save_state(state)
-        if not task_installed():
+        # 2026-09-24 修复：三态判断 —— "查不出来"与"查到了是坏的"是两件事，不许合并。
+        # touched 只在【确认缺失】时置 True：未知只留证据，不制造后续动作。
+        _ti = task_installed()
+        if _ti is False:
             record(audit_dir, "host_shield_breach", decision="deny",
                    severity="warning", reason="计划任务 AntinelHostShield 缺失"
                    "——哨兵不会随登录自启（#6）")
             touched = True
+        elif _ti is None:
+            record(audit_dir, "host_shield_task_unknown", decision="alert",
+                   severity="warning", reason="无法确认计划任务状态（schtasks 不可用或被策略拦截）"
+                   "——门闸是否随登录自启，本机查不出来（#6）")
     now = time.time()
     for reg in load_watch_registry(root):
         for w in reg.get("watch", []):
@@ -234,12 +241,23 @@ def scan_once(root, state, audit_dir):
 
 
 def task_installed():
-    """#6: 计划任务存在性（enabled 时缺失=门闸裸奔告警）。"""
+    """#6: 计划任务存在性（enabled 时缺失=门闸裸奔告警）。
+
+    ★ 三态，不许压成两态（2026-09-24 修复）：
+      True  = 查到了，任务在
+      False = 查到了，任务不在   -> 调用方记 host_shield_breach（门闸裸奔）
+      None  = 查不出来（schtasks 缺失／被策略拦截／超时）-> 调用方记 host_shield_task_unknown
+
+    旧版把异常吞成 True（注释写"查询失败不误报"），后果是：**查不出来时断言"已安装"，
+    于是上面那条 breach 告警永不触发** —— 等于把唯一能发现"门闸没在跑"的机制关掉，
+    而且不告诉你关掉了。fail-open 落在【拦截】路径上尚可辩；落在【自检】路径上不可接受。
+    （实测触发：宿主 Program Blacklist 直接拦下 schtasks.exe。）
+    """
     try:
         return subprocess.run(["schtasks", "/Query", "/TN", "AntinelHostShield"],
                               capture_output=True, timeout=20).returncode == 0
     except Exception:
-        return True                          # 查询失败不误报
+        return None                          # 查不出来 ≠ 已安装：把"未知"如实上抛
 
 
 def run_sentinel(root):

@@ -14,7 +14,7 @@ compatibility: Requires Python 3.10+; standard library only; no network access; 
 metadata:
   psl-verified: "true"
   psl-verified-spec: "psl-vs-0.1"
-  psl-verified-at: "2026-09-24T06:55:37+08:00"
+  psl-verified-at: "2026-09-24T07:46:48+08:00"
   psl-verified-evidence: "live PreToolUse block of a real .env read in ZCode (SEC-01) plus a full-assertion judgment run (count: psl/judgment.json assertions_total)"
   psl-verifier: "scripts/run_harness.py"
   antinel-product: "security-audit"
