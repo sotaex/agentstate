@@ -1,0 +1,231 @@
+== Antinel 本机 AI 工具落盘点扫描（只读）
+扫描根：~ ／ %APPDATA% ／ %LOCALAPPDATA%
+生成时刻：2026-09-25T12:16:24+08:00
+判据：**工具自己写下的外传自认**（不看目录名——目录名启发式误报率约 85%）
+
+【T1 已取证（已布门闸，deny）】 1 个
+  .zcode                 C:\Users\大马\.zcode
+      体量 378.0 MB ／ 310 文件 ／ 最后改动 2026-09-19 09:56
+      路径存在：True
+      证据：键 lastCompressedSize  @  C:\Users\大马\.zcode\v2\checkpoints\399e0917c0f9\state.json  [exists=True]
+      证据：键 lastCompressedSize  @  C:\Users\大马\.zcode\v2\checkpoints\7852f48e0bad\state.json  [exists=True]
+      证据：键 lastCompressedSize  @  C:\Users\大马\.zcode\v2\checkpoints\8581648a6b7b\state.json  [exists=True]
+
+【T2 本机实证（只报不拦，默认）】 2 个
+  .workbuddy-ai          C:\Users\大马\.workbuddy-ai
+      体量 147.7 MB ／ 3001 文件 ／ 最后改动 2026-09-25 12:12  (扫描截断)
+      路径存在：True
+      证据：键 文件名后缀 .reported  @  C:\Users\大马\.workbuddy-ai\pending-telemetry\install-260202593.json.reported  [exists=True]
+      证据：键 文件名后缀 .reported  @  C:\Users\大马\.workbuddy-ai\pending-telemetry\install-314563453.json.reported  [exists=True]
+  autoclaw               C:\Users\大马\AppData\Roaming\autoclaw
+      体量 28.8 MB ／ 35 文件 ／ 最后改动 2026-09-25 12:16
+      路径存在：True
+      证据：键 lastSyncedAt  @  C:\Users\大马\AppData\Roaming\autoclaw\im\local-agent-sync-state.json  [exists=True]
+
+【T3 未取证（未发现证据 ≠ 没有外传）】 48 个
+  .agents                C:\Users\大马\.agents
+      体量 0.0 MB ／ 5 文件 ／ 最后改动 2026-09-20 16:25
+      路径存在：True
+      证据：（本次取证未发现）
+  .claude                C:\Users\大马\.claude
+      体量 0.0 MB ／ 7 文件 ／ 最后改动 2026-09-20 16:25
+      路径存在：True
+      证据：（本次取证未发现）
+  .codebuddy             C:\Users\大马\.codebuddy
+      体量 0.0 MB ／ 1 文件 ／ 最后改动 2026-09-10 14:31
+      路径存在：True
+      证据：（本次取证未发现）
+  .codex                 C:\Users\大马\.codex
+      体量 0.0 MB ／ 1 文件 ／ 最后改动 2026-09-20 14:44
+      路径存在：True
+      证据：（本次取证未发现）
+  .copilot               C:\Users\大马\.copilot
+      体量 0.0 MB ／ 2 文件 ／ 最后改动 2026-09-22 12:59
+      路径存在：True
+      证据：（本次取证未发现）
+  .cursor                C:\Users\大马\.cursor
+      体量 0.1 MB ／ 53 文件 ／ 最后改动 2026-09-20 15:03
+      路径存在：True
+      证据：（本次取证未发现）
+  .gemini                C:\Users\大马\.gemini
+      体量 0.1 MB ／ 7 文件 ／ 最后改动 2025-07-26 13:02
+      路径存在：True
+      证据：（本次取证未发现）
+  .kimi-webbridge        C:\Users\大马\.kimi-webbridge
+      体量 19.7 MB ／ 7 文件 ／ 最后改动 2026-09-25 06:21
+      路径存在：True
+      证据：（本次取证未发现）
+  .kimi-work             C:\Users\大马\.kimi-work
+      体量 12.9 MB ／ 3 文件 ／ 最后改动 2026-06-17 12:08
+      路径存在：True
+      证据：（本次取证未发现）
+  .lingma                C:\Users\大马\.lingma
+      体量 0.0 MB ／ 1 文件 ／ 最后改动 2026-08-12 06:41
+      路径存在：True
+      证据：（本次取证未发现）
+  .mimocode              C:\Users\大马\.mimocode
+      体量 128.9 MB ／ 4 文件 ／ 最后改动 2026-09-22 19:36
+      路径存在：True
+      证据：（本次取证未发现）
+  .openclaw-autoclaw     C:\Users\大马\.openclaw-autoclaw
+      体量 57.4 MB ／ 3001 文件 ／ 最后改动 2026-09-25 11:20  (扫描截断)
+      路径存在：True
+      证据：（本次取证未发现）
+  .qoder                 C:\Users\大马\.qoder
+      体量 3.2 MB ／ 89 文件 ／ 最后改动 2026-09-20 06:23
+      路径存在：True
+      证据：（本次取证未发现）
+  .qoder-cn              C:\Users\大马\.qoder-cn
+      体量 3.1 MB ／ 96 文件 ／ 最后改动 2026-09-19 09:56
+      路径存在：True
+      证据：（本次取证未发现）
+  .qwen-agent            C:\Users\大马\.qwen-agent
+      体量 0.0 MB ／ 1 文件 ／ 最后改动 2026-09-24 08:55
+      路径存在：True
+      证据：（本次取证未发现）
+  .trae                  C:\Users\大马\.trae
+      体量 2.2 MB ／ 398 文件 ／ 最后改动 2026-09-20 08:56
+      路径存在：True
+      证据：（本次取证未发现）
+  .trae-cn               C:\Users\大马\.trae-cn
+      体量 0.4 MB ／ 120 文件 ／ 最后改动 2026-09-20 07:04
+      路径存在：True
+      证据：（本次取证未发现）
+  .workbuddy             C:\Users\大马\.workbuddy
+      体量 246.4 MB ／ 3001 文件 ／ 最后改动 2026-09-24 05:11  (扫描截断)
+      路径存在：True
+      证据：（本次取证未发现）
+  .workbuddy-key-fallback C:\Users\大马\.workbuddy-key-fallback
+      体量 0.0 MB ／ 2 文件 ／ 最后改动 2026-08-29 14:34
+      路径存在：True
+      证据：（本次取证未发现）
+  @clawkeeper            C:\Users\大马\AppData\Roaming\@clawkeeper
+      体量 0.2 MB ／ 11 文件 ／ 最后改动 2026-04-23 05:40
+      路径存在：True
+      证据：（本次取证未发现）
+  @genie                 C:\Users\大马\AppData\Roaming\@genie
+      体量 0.0 MB ／ 0 文件 ／ 最后改动 2026-08-29 14:07
+      路径存在：True
+      证据：（本次取证未发现）
+  AutoClaw               C:\Users\大马\AppData\Local\AutoClaw
+      体量 0.0 MB ／ 2 文件 ／ 最后改动 2026-09-22 09:55
+      路径存在：True
+      证据：（本次取证未发现）
+  CodeBuddyExtension     C:\Users\大马\AppData\Local\CodeBuddyExtension
+      体量 0.0 MB ／ 2 文件 ／ 最后改动 2026-08-29 14:07
+      路径存在：True
+      证据：（本次取证未发现）
+  com.tencent.yuanbao    C:\Users\大马\AppData\Local\com.tencent.yuanbao
+      体量 0.0 MB ／ 0 文件 ／ 最后改动 2026-04-20 08:11
+      路径存在：True
+      证据：（本次取证未发现）
+  copilot                C:\Users\大马\AppData\Local\copilot
+      体量 0.0 MB ／ 2 文件 ／ 最后改动 2026-09-22 12:59
+      路径存在：True
+      证据：（本次取证未发现）
+  Cursor                 C:\Users\大马\AppData\Roaming\Cursor
+      体量 4.2 MB ／ 32 文件 ／ 最后改动 2026-09-20 15:07
+      路径存在：True
+      证据：（本次取证未发现）
+  Doubao                 C:\Users\大马\AppData\Local\Doubao
+      体量 41.0 MB ／ 132 文件 ／ 最后改动 2024-10-02 03:56
+      路径存在：True
+      证据：（本次取证未发现）
+  ichat                  C:\Users\大马\AppData\Roaming\ichat
+      体量 4.4 MB ／ 29 文件 ／ 最后改动 2026-06-25 04:59
+      路径存在：True
+      证据：（本次取证未发现）
+  kimi-desktop           C:\Users\大马\AppData\Roaming\kimi-desktop
+      体量 112.3 MB ／ 3001 文件 ／ 最后改动 2026-09-23 19:56  (扫描截断)
+      路径存在：True
+      证据：（本次取证未发现）
+  KimiAppCache           C:\Users\大马\AppData\Local\KimiAppCache
+      体量 5.9 MB ／ 13 文件 ／ 最后改动 2026-03-21 17:21
+      路径存在：True
+      证据：（本次取证未发现）
+  Lingma                 C:\Users\大马\AppData\Roaming\Lingma
+      体量 216.5 MB ／ 3001 文件 ／ 最后改动 2026-08-12 06:45  (扫描截断)
+      路径存在：True
+      证据：（本次取证未发现）
+  Qianwen                C:\Users\大马\Qianwen
+      体量 0.0 MB ／ 2 文件 ／ 最后改动 2026-09-17 04:24
+      路径存在：True
+      证据：（本次取证未发现）
+  Qianwen                C:\Users\大马\AppData\Roaming\Qianwen
+      体量 334.9 MB ／ 29 文件 ／ 最后改动 2026-08-25 09:12
+      路径存在：True
+      证据：（本次取证未发现）
+  Qianwen                C:\Users\大马\AppData\Local\Qianwen
+      体量 394.6 MB ／ 3001 文件 ／ 最后改动 2026-07-31 15:15  (扫描截断)
+      路径存在：True
+      证据：（本次取证未发现）
+  Qoder                  C:\Users\大马\AppData\Roaming\Qoder
+      体量 101.6 MB ／ 347 文件 ／ 最后改动 2026-09-20 10:24
+      路径存在：True
+      证据：（本次取证未发现）
+  QoderCN                C:\Users\大马\AppData\Roaming\QoderCN
+      体量 386.3 MB ／ 237 文件 ／ 最后改动 2026-09-20 10:22
+      路径存在：True
+      证据：（本次取证未发现）
+  Tabbit                 C:\Users\大马\AppData\Local\Tabbit
+      体量 896.3 MB ／ 1355 文件 ／ 最后改动 2026-09-22 14:26
+      路径存在：True
+      证据：（本次取证未发现）
+  Trae                   C:\Users\大马\AppData\Roaming\Trae
+      体量 5979.5 MB ／ 3001 文件 ／ 最后改动 2026-09-20 08:58  (扫描截断)
+      路径存在：True
+      证据：（本次取证未发现）
+  Trae CN                C:\Users\大马\AppData\Roaming\Trae CN
+      体量 228.1 MB ／ 1641 文件 ／ 最后改动 2026-09-20 08:55
+      路径存在：True
+      证据：（本次取证未发现）
+  TRAE SOLO              C:\Users\大马\AppData\Roaming\TRAE SOLO
+      体量 584.4 MB ／ 692 文件 ／ 最后改动 2026-05-13 16:28
+      路径存在：True
+      证据：（本次取证未发现）
+  WorkBuddy              C:\Users\大马\WorkBuddy
+      体量 2.7 MB ／ 92 文件 ／ 最后改动 2026-09-23 08:49
+      路径存在：True
+      证据：（本次取证未发现）
+  WorkBuddy              C:\Users\大马\AppData\Roaming\WorkBuddy
+      体量 0.0 MB ／ 0 文件 ／ 最后改动 2026-08-31 23:34
+      路径存在：True
+      证据：（本次取证未发现）
+  WorkBuddy              C:\Users\大马\AppData\Local\WorkBuddy
+      体量 0.0 MB ／ 0 文件 ／ 最后改动 2026-08-29 14:07
+      路径存在：True
+      证据：（本次取证未发现）
+  WorkBuddy AI           C:\Users\大马\WorkBuddy AI
+      体量 0.0 MB ／ 0 文件 ／ 最后改动 2026-09-24 18:08
+      路径存在：True
+      证据：（本次取证未发现）
+  WorkBuddy AI           C:\Users\大马\AppData\Roaming\WorkBuddy AI
+      体量 0.0 MB ／ 0 文件 ／ 最后改动 2026-09-20 16:41
+      路径存在：True
+      证据：（本次取证未发现）
+  Xiaomi MiMo            C:\Users\大马\AppData\Roaming\Xiaomi MiMo
+      体量 657.8 MB ／ 3001 文件 ／ 最后改动 2026-09-24 08:24  (扫描截断)
+      路径存在：True
+      证据：（本次取证未发现）
+  XiaomiMiMoProjects     C:\Users\大马\XiaomiMiMoProjects
+      体量 0.0 MB ／ 0 文件 ／ 最后改动 2026-09-22 19:35
+      路径存在：True
+      证据：（本次取证未发现）
+  ZCode                  C:\Users\大马\AppData\Roaming\ZCode
+      体量 0.9 MB ／ 15 文件 ／ 最后改动 2026-09-25 01:05
+      路径存在：True
+      证据：（本次取证未发现）
+
+【T4 已排除（崩溃转储／更新包／浏览器内置／非 AI）】 5 个
+  @genieworkbuddy-desktop-updater ← 排除原因：-updater
+  @zcodedesktop-updater  ← 排除原因：-updater
+  autoclaw-updater       ← 排除原因：-updater
+  kimi-desktop-updater   ← 排除原因：-updater
+  xiaomi-mimo-desktop-updater ← 排除原因：-updater
+
+汇总：发现 56 个 AI 工具数据根 ＝ T1 1 ＋ T2 2 ＋ T3 48 ＋ T4 5
+
+⚠ 覆盖声明：
+  · 本扫描为【本次取证】。未发现证据 ≠ 没有外传 —— 只代表这一遍没查出来。
+  · 门闸只对 T1 生效（避免误报）。T2/T3 是否布防见《全工具覆盖设计 v1.0》§6 待拍板。
+  · 门闸拦的是【文件落盘】这一步；工具若直接内存发包（不经落盘），只能记账、拦不住。

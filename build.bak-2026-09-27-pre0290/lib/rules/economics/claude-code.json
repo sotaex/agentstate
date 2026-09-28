@@ -1,0 +1,11 @@
+{
+ "host": "claude-code",
+ "unit": "USD",
+ "unit_label": "USD",
+ "digest_primary": "cost_reference",
+ "buckets": [],
+ "bucket_expiry": false,
+ "cycle": null,
+ "balance_source": "none",
+ "note": "API 计费或订阅；牌价参照即主参照。口径未逐项实测。"
+}

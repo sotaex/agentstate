@@ -1,0 +1,12 @@
+{
+ "host": "copilot",
+ "vendor": "GitHub",
+ "roots": [
+  "~/.copilot",
+  "%LOCALAPPDATA%/copilot"
+ ],
+ "tier": "T3",
+ "evidence": [],
+ "note": "本机取证（2026-09-25）：未发现外传自认。★ 未发现 ≠ 没有 —— 只代表本次取证没查出来。",
+ "watch": []
+}

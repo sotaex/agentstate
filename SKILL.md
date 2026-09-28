@@ -10,25 +10,18 @@ description: >
   MCP server permission audit: planned for Phase 1.5.
   中文触发词：安全检查, 环境审计, 安全扫描, 是否安全.
 license: MIT
-compatibility: Requires Python 3.10+; standard library only; no network access; no third-party packages. Hooks verified on Claude Code and ZCode (identical protocol); workbuddy verified by real traffic (0.33.1, host_confidence=high); Qoder/TRAE profiles declared but unverified -- Qoder's flag rests on pre-0.33.1 records whose host label is itself unverified, so it is flagged for re-probe.
+compatibility: Requires Python 3.10+; standard library only; no network access; no third-party packages. Hooks verified on Claude Code and ZCode (identical protocol); Qoder/TRAE profiles declared but unverified.
 metadata:
   psl-verified: "false"
   psl-verified-spec: "psl-vs-0.1"
-  psl-verified-at: "2026-09-28"
-  psl-verified-evidence: "RE-RECORDED 2026-09-28 13:10 (0.33.1): all 21 covered files hash to their recorded digests in psl/judgment.json (antinel_verify derives 'current'); suite 309/313 assertions passed. NOT verified = verdict FAIL, 4 assertions fail: A4 (tampered rules hash -> fallback minimal set + SELF-TAMPERED; pre-existing, ordering-induced inside the suite); F-13/F-14/F-17 (host-shield sentinel: cannot spawn in a sandbox, schtasks.exe blocked by program blacklist -- re-run on a real host). REPRODUCIBILITY: the count no longer varies with machine load -- the A5 (30s) and C9 (15s) wall-clock gates plus a 6s SessionStart-banner hang-ceiling were removed on 2026-09-28 (a wall-clock ceiling measures the machine, not the hook). Host attribution: 0.33.1 records carry host_confidence; records written before 0.33.1 have NO attribution evidence and their host field must not be cited as fact."
+  psl-verified-at: ""
+  psl-verified-evidence: "NOT VERIFIED for this build: judgment verdict is 'FAIL', not PASS"
   psl-verifier: "scripts/run_harness.py"
   antinel-product: "security-audit"
   antinel-tier: "free"
   antinel-version: "0.33.2"
   psl-token-interception: "false"
 ---
-
-# AgentState (by Antinel) — AI Agent Audit Chain
-
-> 展示名 **AgentState**｜厂牌 **by Antinel**｜本文件的 `name:`（技能标识符）与包名**不动**。
-> 与 `server.json` 的 `title` 逐字一致。
-> ⚠️ 已知不一致（属显式待办，不是遗漏）：**运行期消息仍写作「Antinel 拦截 …」**，
-> 统一它需要改多个受覆盖文件、并牵动多条依赖该字串的断言 ⇒ 单独一次做（见交接件 §八）。
 
 ## 安全审计流程
 

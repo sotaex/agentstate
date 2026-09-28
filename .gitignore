@@ -2,14 +2,3 @@ __pycache__/
 *.pyc
 .psl/
 *.log
-
-# —— 构建产物与备份（2026-09-28 立地基时扩写）——
-*.bak-*
-build/
-build.bak-*/
-antinel.egg-info/
-antinel-0.*/
-dist/
-_scanout.txt
-demo/sandbox_keep/proj/f1chk/
-psl/ci_debug/night*/

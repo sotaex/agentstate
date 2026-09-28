@@ -1,0 +1,11 @@
+{
+ "host": "zcode",
+ "unit": "tokens",
+ "unit_label": "tokens",
+ "digest_primary": "tokens",
+ "buckets": [],
+ "bucket_expiry": false,
+ "cycle": null,
+ "balance_source": "none",
+ "note": "实测（2026-09-19）：ZCode 走供应商 Coding Plan 订阅（BigModel/Z.ai，anthropic kind），本地配置无余额/配额字段。主视图=token 事实；额度口径若平台日后提供本地缓存或 API，再以引导式快照扩展（与 WorkBuddy 同机制）。"
+}

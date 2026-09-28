@@ -24,8 +24,141 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-SRC = Path(__file__).resolve().parent
-HARNESS_SRC = Path(r"D:\psl\poc\_antinel_selftest\run_tests.py")
+# ---------------------------------------------------------------- 布局表（唯一真源）
+#
+# ★★★ 2026-09-28：为什么需要一张表，而不是"多试几个路径"
+#
+#   症状：本文件被从源仓 r1v3「归位」到产物仓的 `scripts/` 之后，
+#         跑起来在第 165 行直接 `FileNotFoundError: ...\scripts\rules\default.json`。
+#
+#   真因（比"路径写错"更深）：**两个仓的布局不一样，而构建器只认其中一种。**
+#         r1v3（源仓）        ：**平铺** —— install.py / pre_tool_use.py /
+#                               AUDIT_SCHEMA.md / make_namespaces.py 全在仓根。
+#         antinel-security    ：**分类** —— 分别在 scripts/ / hooks/ / docs/，
+#                               而 make_namespaces.py 一度整个不在树里。
+#         上一轮我只验了 `build_package.py` 的 sha256 与源仓相同，
+#         **没验它能不能跑** ⇒ "文件归位了"被当成"构建链还能跑"。
+#         这是「套件全绿 ≠ 功能没丢」的又一个活标本。
+#
+#   ★ 为什么不是"兼容两种布局"（那是补丁，不是解药）：
+#     两个布局只要同时存在，就会继续分叉。真正的解药是**只留一种布局**，
+#     并把"哪种布局长什么样"**显式写下来**——写成这张表。
+#     ⇒ 以后改目录结构 = 改这张表；表里每一项**当场自检**，
+#       少一个文件就立刻失败并点名，而不是让某个 `if p.is_file()` 静默跳过。
+#
+#   ★ 表的形状：`逻辑名 -> 相对仓根的真实路径`。
+#     逻辑名就是构建器里用的名字（保持与旧调用点一致，降低改动面）。
+_LAYOUT = {
+    # ---- 包根模块（随包发在根）----
+    "session_dna.py":            "session_dna.py",
+    "transcript_reader.py":      "transcript_reader.py",
+    "audit_chain.py":            "audit_chain.py",
+    "antinel.py":                "antinel.py",
+    "antinel_mcp.py":            "antinel_mcp.py",
+    "hub.py":                    "hub.py",
+    "host_shield.py":            "host_shield.py",
+    "strings.py":                "strings.py",
+    "egress.py":                 "egress.py",
+    # ---- scripts/ ----
+    "install.py":                "scripts/install.py",
+    "scan.py":                   "scripts/scan.py",
+    "report.py":                 "scripts/report.py",
+    # ---- hooks/ ----
+    "pre_tool_use.py":           "hooks/pre_tool_use.py",
+    "post_tool_use.py":          "hooks/post_tool_use.py",
+    "session_start_banner.py":   "hooks/session_start_banner.py",
+    # ---- docs/ ----
+    "AUDIT_SCHEMA.md":           "docs/AUDIT_SCHEMA.md",
+    # ---- rules/ ----
+    "default.json":              "rules/default.json",
+    "pricing.json":              "rules/pricing.json",
+    # ---- tools/ ----
+    "antinel_verify.py":         "tools/antinel_verify.py",
+    "verify_namespaces.py":      "tools/verify_namespaces.py",
+    "verify_chain.py":           "tools/verify_chain.py",
+}
+
+# 必须存在 = 缺了就**不许构建**。其余（pricing/namespaces 生成器等）允许缺，
+# 但缺了要**打印出来**，不许静默（「没查到」必须与「没发现」分开）。
+_LAYOUT_REQUIRED = (
+    "antinel.py", "pre_tool_use.py", "post_tool_use.py", "install.py",
+    "scan.py", "report.py", "default.json", "AUDIT_SCHEMA.md",
+)
+
+
+def _find_src_root():
+    """定位"源码根"——**用内容探测，不猜层级**。
+
+    判据：一个目录同时含 `rules/default.json` 与 `antinel.py` 就是根。
+    这两个文件缺任何一个，构建器都跑不下去，所以它们是最强的可用信号。
+    不数 up 几层：层级会随布局变，内容不会。
+    """
+    here = Path(__file__).resolve().parent
+    for cand in (here, here.parent, here.parent.parent):
+        if (cand / "rules" / "default.json").is_file() and (cand / "antinel.py").is_file():
+            return cand
+    return here      # 兜底：让报错发生在真正需要文件的地方（下方会显式点名）
+
+
+SRC = _find_src_root()
+
+
+def srcfile(rel):
+    """把**逻辑名或相对路径**解析成 SRC 下的真实路径（经布局表）。
+
+    ★ 一律走这里，不要直接 `SRC / "xxx"`。
+      `SRC / "install.py"` 在产物仓是错的（它在 scripts/），而错法很隐蔽：
+      某个 `if p.is_file()` 会静默跳过，构建"成功"但**少文件**——
+      正是 A1 那 29 个文件当初丢失的同一个病。
+
+    ★ 名字叫 srcfile 而不是 src：`build()` 作用域里已经有一个局部 `src`
+      （`src = final / rel`），同名会让 Python 把本函数当局部变量引用，
+      抛 `UnboundLocalError`。**改名的理由写在这里，免得后人改回去。**
+    """
+    real = _LAYOUT.get(rel, rel)
+    return SRC / real
+
+
+def _verify_layout():
+    """构建前自检布局表：必填项一个都不能少；可选项缺了要**打印**。"""
+    missing_req, missing_opt = [], []
+    for logical in _LAYOUT:
+        p = srcfile(logical)
+        if p.is_file() or p.is_dir():
+            continue
+        (missing_req if logical in _LAYOUT_REQUIRED else missing_opt).append(
+            "%s -> %s" % (logical, _LAYOUT[logical]))
+    if missing_req:
+        raise SystemExit(
+            "★ 构建前布局自检失败：以下**必填**文件不在树里 ——\n  "
+            + "\n  ".join(missing_req)
+            + "\n\n  仓根：%s\n" % SRC
+            + "  改目录结构时必须同步改 build_package.py 顶部的 _LAYOUT 表。\n"
+              "  （这条自检的存在理由：上一轮『归位』后构建器静默崩在别处，\n"
+              "    把『位置错』伪装成了『文件缺失』。）")
+    if missing_opt:
+        print("布局自检：以下**可选**件缺失（构建将继续，但你不该不知情）——")
+        for m in missing_opt:
+            print("   · %s" % m)
+    print("布局自检：%d 个逻辑名全部解析成功（必填 %d、可选 %d）"
+          % (len(_LAYOUT), len(_LAYOUT_REQUIRED), len(_LAYOUT) - len(_LAYOUT_REQUIRED)))
+
+
+if not (SRC / "rules" / "default.json").is_file():
+    raise SystemExit(
+        "★ 构建器找不到源码根：在 %s 及其上两级里都没有 rules/default.json。\n"
+        "  build_package.py 必须在「仓根」或「仓根/scripts」下运行。"
+        % Path(__file__).resolve().parent)
+
+# ★★ HARNESS_SRC：产物仓里套件就在 scripts/verification_tests.py（**已入库、受 git 管**）。
+#   原写法硬编码源仓绝对路径 ⇒ 在产物仓跑会**用源仓的测试文件覆盖产物仓的被审对象**，
+#   而 verification_tests.py 本身是 manifest 67 项之一 ⇒ 覆盖后 manifest 立刻不符。
+#   这不是"兼容性"，是正确性：产物仓构建必须用**产物仓自己的**套件。
+#   （2026-09-28：r1v3 的 _antinel_selftest/run_tests.py 仍保留作历史留档，
+#    但**不再**是构建输入——它的存在只会制造"两个套件谁说了算"的歧义。）
+HARNESS_SRC = SRC / "scripts" / "verification_tests.py"
+if not HARNESS_SRC.is_file():
+    raise SystemExit("★ 构建器找不到套件：%s\n  （产物仓构建必须用本仓的套件）" % HARNESS_SRC)
 NAME = "antinel-security"
 VERSION = "0.33.2"
 # P-A3: the namespace this build declares itself under. derive_object_ownership()
@@ -171,6 +304,26 @@ RULES_N = len(json.loads((SRC / "rules" / "default.json").read_text(encoding="ut
 # 最刺眼的是 THREAT_MODEL 自己就写着 "a stale range silently understates
 # what is enforced" —— 它警告了这个失效模式，然后自己犯了。
 # 修法：闸门归属由 category 派生（＋ 极少数显式例外），区间串由实际编号压缩生成。
+# ★★ 2026-09-28 重要澄清（先把话说清楚，再改代码）：
+#
+#   闸门（Gate 1..4）**只是文档叙事**，不是账本口径、不是判定逻辑。
+#   实测证据（三条，全部当场量出）：
+#     · `%(gate1..4)s` 只出现在**文档模板**里（README 的威胁表、THREAT_MODEL、
+#       SKILL.md 的 `--help` 正文），没有任何代码用它做分派；
+#     · 钩子里 grep 不到任何 "gate 1..4" 的判定分支；审计事件只带 `rule_id`
+#       （如 `DST-01`），**不带闸门号**；
+#     · `rules/default.json` 顶层那个 `gates` 字段**零消费点** —— 全仓没有一行代码
+#       读它。按本项目既定纪律：**没有消费点的字段不是登记表，是注释。**
+#   ⇒ 所以这里**不需要**"闸门真源"。需要的是两件小事：
+#       ① 文档表格能生成（新类别不能缺）；
+#       ② 规则表出现新类别时**构建必须当场失败**，而不是像我上一轮那样
+#          "文件归位了却没验能不能跑"，让构建器静默崩在模块级。
+#
+#   ★ 另一条实测结论：`category` 粒度**不足以**表达闸门归属 ——
+#     `supply_chain` 这 5 条横跨闸门 1/2/3（MCP-02 工具描述投毒→1、
+#     MCP-04 明文密钥→2、MCP-01/03 配置与出联→3），规则表自己也只写了
+#     "Gate 2/3"（作者当时也说不清）。因为闸门只是叙事，**多归属是诚实的表达**，
+#     强行压成一个数才是撒谎。故本表的值允许是 tuple。
 _GATE_OF_CATEGORY = {
     "injection": 1,     # 闸门1 内容安全：技能投毒
     "secrets": 2,       # 闸门2 敏感面：读密钥/隐私
@@ -178,6 +331,9 @@ _GATE_OF_CATEGORY = {
     "network": 3,       # 闸门3 元数据与出联：域名、隧道
     "context": 4,       # 闸门4 行为：环境枚举
     "destructive": 4,   # 闸门4 行为：删除/越界写/持久化
+    # 0.31 新增两类（2026-09-28 补齐 —— 此前缺失，导致构建器在模块级直接崩）
+    "supply_chain": (1, 2, 3),   # MCP 供应链：投毒(1)/密钥(2)/配置与出联(3)
+    "canary": 2,                 # 金丝雀：与 SEC-01..11 同属敏感面（README 已如此呈现）
 }
 # 显式例外：NET-01/02 是"命令里发了网络请求"（属闸门4 行为），
 # NET-03/04 才是"出联策略"（域名白名单、隐蔽信道，属闸门3）。两者 category 都是
@@ -207,7 +363,15 @@ def _compress_ids(ids):
 
 
 def _gate_ranges():
-    """{闸口号: 'SEC-01..10, ...'}。★ 任何规则都必须能算出闸门，否则**构建失败**。"""
+    """{闸口号: 'SEC-01..10, ...'}。★ 任何规则都必须能算出闸门，否则**构建失败**。
+
+    ★ 2026-09-28：支持一个类别映射到**多个**闸门（见 _GATE_OF_CATEGORY 上方说明）。
+      此前只支持单值 ⇒ `supply_chain` 这类横跨闸门的类别只能二选一（等于撒谎），
+      而"不知道写哪个"的后果是**构建在模块级直接崩** —— 上一轮我归位构建器后
+      从未真正跑过它，所以这个崩溃一直没被发现。两条都要修：
+        ① 多归属：值可以是 int 或 tuple；
+        ② 同步守卫（下方）：规则表出现新 category 时**当场红**，不许静默。
+    """
     rules = json.loads((SRC / "rules" / "default.json").read_text(encoding="utf-8"))["rules"]
     by_gate, unknown = {}, []
     for r in rules:
@@ -216,16 +380,54 @@ def _gate_ranges():
         if not gate:
             unknown.append("%s(category=%s)" % (rid, r.get("category")))
             continue
-        by_gate.setdefault(gate, []).append(rid)
+        gates = gate if isinstance(gate, (tuple, list)) else (gate,)
+        for g in gates:
+            by_gate.setdefault(int(g), []).append(rid)
     if unknown:
         # 不写死数字是对的，但"不知道该写什么"必须报错 —— 静默漏掉就是下一个假数字。
         raise SystemExit(
             "[build] 以下规则分不到闸门：%s\n"
             "        ⇒ 把它的 category 加进 _GATE_OF_CATEGORY，或在 _GATE_OVERRIDE 点名。"
             % ", ".join(unknown))
-    return dict((g, _compress_ids(sorted(v))) for g, v in by_gate.items())
+    return dict((g, _compress_ids(sorted(set(v)))) for g, v in by_gate.items())
 
 
+def _gate_table_sync_guard():
+    """★★★ 同步守卫：规则表里出现的**每个** category，都必须在闸门表里有位置。
+
+    ★ 为什么必须有它（这不是"再加一道保险"，是补一个**已经造成损失的缺口**）：
+      0.31 往 `rules/default.json` 加了 `supply_chain` / `canary` 两个新 category，
+      但 `build_package.py` 的闸门表没跟着加。后果：构建器**在模块级 load 时
+      就 SystemExit**（`GATE_RANGES = _gate_ranges()` 是顶层语句）。
+      而上一轮我把构建器"归位"到产物仓时**只验了 sha256 相同，没验它能不能跑**
+      ⇒ 这个崩溃潜伏了整整一轮，直到今天 D-10（重打包）才暴露。
+      ⇒ 判据：**构建器引用的每一份外部数据，都必须有一条守卫断言"它对得上"。**
+      规则表加类别是常态动作，这条守卫让"忘了同步"从**静默崩溃**变成**当场点名**。
+
+    与 _gate_ranges() 的区别：那个只检查"每条规则算得出闸门"（结果；
+    如果 category 缺失会连带触发）；这个检查"规则表的**类别集合** ⊆ 闸门表的键集"，
+    报错信息更直接地指向"你漏了一个新类别"，而不是"某条规则算不出闸门"。
+    """
+    data = json.loads((SRC / "rules" / "default.json").read_text(encoding="utf-8"))
+    cats = sorted({(r.get("category") or "") for r in data.get("rules", [])})
+    missing = [c for c in cats if c and c not in _GATE_OF_CATEGORY]
+    if missing:
+        raise SystemExit(
+            "[build] 闸门表与规则表不同步：规则表新增了类别 %s，但 "
+            "_GATE_OF_CATEGORY 里没有它。\n"
+            "        ⇒ 把它加进 _GATE_OF_CATEGORY（值可为 int 或 tuple），"
+            "否则文档里的闸门区间串会漏掉这些规则。\n"
+            "        规则表路径：rules/default.json" % ", ".join(missing))
+    # 反向：闸门表里有、规则表里已无对应规则的类别 —— 只是**提示**，不算错
+    # （保留历史类别是合理的，删掉类别才需要人确认）。但必须打印，不许静默。
+    unused = [c for c in sorted(_GATE_OF_CATEGORY) if c not in cats]
+    if unused:
+        print("[build] 提示：闸门表里的这些类别在规则表里已无对应规则（保留无害）：%s"
+              % ", ".join(unused))
+    return len(cats)
+
+
+_GATE_TABLE_SYNCED = _gate_table_sync_guard()
 GATE_RANGES = _gate_ranges()
 
 
@@ -1442,6 +1644,10 @@ def _assert_package_data_covered(pkg, manifest_lines):
 
 
 def build(out_root, verify=False):
+    # ★★ 2026-09-28：**构建前先验布局表**。位置选在 build() 最前，理由与 A1 守卫相同：
+    #   失败的代价必须是"什么都没动"。"布局错"是最容易被静默跳过的错
+    #   （每个 `if p.is_file()` 都会安静地少拷一个文件），所以它必须在任何写盘之前红。
+    _verify_layout()
     # 2026-09-24 (G7): assemble into a STAGE directory and MERGE the result into
     # the published package. The old code did shutil.rmtree(pkg) and rebuilt from
     # nothing. That had two defects, both measured on a dry run:
@@ -1473,10 +1679,12 @@ def build(out_root, verify=False):
     _clear(pkg)
     for sub in ("scripts", "hooks", "rules", "references", "psl"):
         (pkg / sub).mkdir(parents=True)
+    # ★ 2026-09-28：一律走 `srcfile(逻辑名)`（经布局表），不再 `SRC / f`。
+    #   旧写法把"源仓平铺布局"焊死在这里：`SRC / "install.py"` 在产物仓是错的。
     for f in ("install.py", "scan.py", "report.py"):
-        shutil.copy2(SRC / f, pkg / "scripts" / f)
+        shutil.copy2(srcfile(f), pkg / "scripts" / f)
     for f in ("pre_tool_use.py", "post_tool_use.py"):
-        shutil.copy2(SRC / f, pkg / "hooks" / f)
+        shutil.copy2(srcfile(f), pkg / "hooks" / f)
     # 0.22.0 (A5): shared session-DNA module at the package root -- hooks/ and
     # scripts/ both reach it via their parent dir.
     for root_mod in ("session_dna.py", "transcript_reader.py", "audit_chain.py",
@@ -1486,7 +1694,7 @@ def build(out_root, verify=False):
         # so a rebuild deleted it while pyproject kept declaring it. Same class
         # of gap as the REPO_EXTRAS one: the builder did not know what the
         # package actually consists of.
-        m = SRC / root_mod
+        m = srcfile(root_mod)
         if m.is_file():
             shutil.copy2(m, pkg / root_mod)
     econ_src = SRC / "rules" / "economics"           # 0.23.1: 按宿主经济画像
@@ -1501,32 +1709,38 @@ def build(out_root, verify=False):
         for f in hosts_src.iterdir():
             if f.is_file():
                 shutil.copy2(f, pkg / "rules" / "hosts" / f.name)
-    banner_src = SRC / "hooks" / "session_start_banner.py"
+    banner_src = srcfile("session_start_banner.py")
     if banner_src.is_file():
         shutil.copy2(banner_src, pkg / "hooks" / "session_start_banner.py")
     # 0.22.0: audit record schema, shipped for third-party verification
-    schema_src = SRC / "AUDIT_SCHEMA.md"
+    schema_src = srcfile("AUDIT_SCHEMA.md")
     if schema_src.is_file():
         (pkg / "docs").mkdir(exist_ok=True)
         shutil.copy2(schema_src, pkg / "docs" / "AUDIT_SCHEMA.md")
     # 0.23.1: skill 路由件——与 antinel help 同源（ROUTES），构建期生成，永不手写
     try:
-        out = subprocess.run([sys.executable, str(SRC / "antinel.py"), "routes", "--markdown"],
+        out = subprocess.run([sys.executable, str(srcfile("antinel.py")), "routes", "--markdown"],
                              capture_output=True, text=True, timeout=30)
         if out.returncode == 0 and out.stdout.strip():
             (pkg / "references").mkdir(exist_ok=True)
             (pkg / "references" / "AGENT_SKILL.md").write_text(out.stdout, encoding="utf-8", newline="\n")
     except Exception as e:
         print("WARN: AGENT_SKILL.md not generated: %s" % e)
-    shutil.copy2(SRC / "rules" / "default.json", pkg / "rules" / "default.json")
-    pricing_src = SRC / "rules" / "pricing.json"          # 0.23.0: cost table (schema only)
+    shutil.copy2(srcfile("default.json"), pkg / "rules" / "default.json")
+    pricing_src = srcfile("pricing.json")          # 0.23.0: cost table (schema only)
     if pricing_src.is_file():
         shutil.copy2(pricing_src, pkg / "rules" / "pricing.json")
     shutil.copy2(HARNESS_SRC, pkg / "scripts" / "verification_tests.py")
+    # ★ 2026-09-28：A6 是**文档仓的签署件**，跨仓依赖是有意为之。
+    #   但原来它缺了只静默跳过 ⇒ 「没带 A6」与「A6 本来就该在这」在输出里长得一样。
+    #   现在：缺了要**明确说没带**，并给出它本该在哪。
     a6 = Path(r"D:\2026\PSL\A6收入边界声明v1.0.md")
     if a6.is_file():
         (pkg / "docs").mkdir(exist_ok=True)
         shutil.copy2(a6, pkg / "docs" / "A6收入边界声明.md")
+    else:
+        print("★ 注意：A6 收入边界声明**未随包**（源件不在 %s）—— 它是文档仓的签署件，" % a6)
+        print("  本次构建**没有把它带进包里**。这不是错误，但你应当知道包里没有它。")
     (pkg / "LICENSE").write_text(LICENSE_MD, encoding="utf-8", newline="\n")
     (pkg / ".gitignore").write_text("__pycache__/\n*.pyc\n.psl/\n*.log\n", encoding="utf-8", newline="\n")
     # byte-exact clones are a digest-security property: no end-of-line conversion,
@@ -1536,14 +1750,10 @@ def build(out_root, verify=False):
     # A-8: named status-derivation tool + the L10 chain verifier + the namespace
     # verification aid, all shipped in tools/
     (pkg / "tools").mkdir(exist_ok=True)
-    for tool_src, tool_dst in (("antinel_verify.py", "antinel_verify.py"),
-                               ("verify_namespaces.py", "verify_namespaces.py")):
-        s = SRC / tool_src
+    for tool_dst in ("antinel_verify.py", "verify_namespaces.py", "verify_chain.py"):
+        s = srcfile(tool_dst)
         if s.is_file():
             shutil.copy2(s, pkg / "tools" / tool_dst)
-    vc = SRC / "tools" / "verify_chain.py"
-    if vc.is_file():
-        shutil.copy2(vc, pkg / "tools" / "verify_chain.py")
     # A-5: signed namespace list (ed25519; private key stays in r1v3/keys, never shipped)
     # 2026-09-24 (G7): only when ABSENT FROM THE PUBLISHED PACKAGE -- `final`, not
     # `pkg`. make_namespaces.py stamps `updated_at` with datetime.now(), and
@@ -1560,11 +1770,25 @@ def build(out_root, verify=False):
     # question is never "is it in my scratch dir", it is "does the published
     # package already have one". Fourth instance of the same defect class.
     if not (final / "antinel-namespaces.json").is_file():
-        try:
-            subprocess.run([sys.executable, str(SRC / "make_namespaces.py"), "--out", str(pkg)],
-                           check=True, capture_output=True, text=True)
-        except Exception as e:
-            print("WARN: namespaces list not generated: %s" % e)
+        # ★★ 2026-09-28：`make_namespaces.py` **不属于产物仓**，它是**需要私钥的外部签发工具**。
+        #   签名私钥 `keys/antinel_namespaces_ed25519.pem` 只存在于源仓 r1v3；产物仓的
+        #   `.gitignore` 并不排除 `keys/` ⇒ 一旦把它拷进产物仓，一次 `git add -A`
+        #   就可能把私钥提交上去。**"私钥绝不进已发布树"是硬纪律，不能靠记得。**
+        #   所以：工具留在 r1v3，构建器**按需从那里调**；产物仓只收**产物**
+        #   （`antinel-namespaces.json`，已在树里、受 git 管）。
+        #   它缺失时**必须显式报**，不许像原来那样只打一行 WARN 就过去
+        #   ——「没生成」与「不需要生成」在输出里必须长得不一样。
+        ns_tool = Path(r"D:\psl\poc\r1v3\make_namespaces.py")
+        if not ns_tool.is_file():
+            print("★ 注意：命名空间清单既不在产物仓，生成器也不在 %s —— 本次**未重新签发**清单。"
+                  % ns_tool)
+            print("  这不是错误（清单已签发且内容未变），但你必须知道它**没被重新生成**。")
+        else:
+            try:
+                subprocess.run([sys.executable, str(ns_tool), "--out", str(pkg)],
+                               check=True, capture_output=True, text=True)
+            except Exception as e:
+                print("WARN: namespaces list not generated: %s" % e)
     wf = (pkg / ".github" / "workflows")
     wf.mkdir(parents=True, exist_ok=True)
     # 2026-09-24 (G7): verify.yml is REPO-OWNED. The builder used to regenerate it

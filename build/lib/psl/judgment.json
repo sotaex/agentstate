@@ -1,0 +1,105 @@
+{
+ "spec": "psl-vs-0.1",
+ "card_id": "antinel-security-suite",
+ "skill": "antinel-security",
+ "skill_version": "0.33.0",
+ "verdict": "FAIL",
+ "status": {
+  "value": "current",
+  "derivation": "auto",
+  "reason": null,
+  "checkedAt": "2026-09-28T04:30:31+08:00",
+  "note": "re-derive any time: python tools/antinel_verify.py (--manifest for all 24 shipped files)"
+ },
+ "scope": {
+  "covered": [
+   "antinel-namespaces.json",
+   "rules/default.json",
+   "rules/pricing.json",
+   "rules/typosquat_top.json",
+   "rules/economics/workbuddy.json",
+   "rules/economics/zcode.json",
+   "rules/economics/claude-code.json",
+   "rules/economics/qoder.json",
+   "rules/economics/generic.json",
+   "hooks/pre_tool_use.py",
+   "hooks/post_tool_use.py",
+   "scripts/scan.py",
+   "scripts/install.py",
+   "scripts/report.py",
+   "scripts/verification_tests.py",
+   "session_dna.py",
+   "transcript_reader.py",
+   "audit_chain.py",
+   "antinel.py",
+   "hub.py",
+   "tools/enforce_probe.py"
+  ],
+  "notCovered": [
+   "runtime behaviour of the monitored host",
+   "files outside the 21 digests above",
+   "the security posture of your machine or environment",
+   "dynamic tool traffic (that is the hooks' job, not this record's)",
+   "the 体检 behaviour corpus is not shipped with the package; that reading is not reproducible from this package alone"
+  ]
+ },
+ "discrimination": {
+  "instrument": {
+   "name": "scripts/verification_tests.py",
+   "object": "this package (the 21 digested files)",
+   "runner": "scripts/run_harness.py",
+   "op": "black-box subprocess assertions (stdin JSON in, exit code + stdout/stderr out)"
+  },
+  "assertions": {
+   "passed": 299,
+   "total": 310
+  }
+ },
+ "platformSpec": true,
+ "objectOwnership": "self",
+ "objectOwnershipBasis": "subject github.com/sotaex is in the signed namespace list",
+ "assertions_total": 310,
+ "assertions_passed": 299,
+ "criteria_independence": "Assertions exercise the hook protocol, rule matching, scanner, installer and reporter as black boxes through subprocesses (stdin JSON in, exit code and stdout/stderr out); they were authored from the design specification ANT-SEC-SPEC-001 v1.1, not from the implementation; third-party re-run supported.",
+ "environment": {
+  "python": "3.13.14",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "stdlib_only": true,
+  "network": "none"
+ },
+ "digests": {
+  "antinel-namespaces.json": "sha256:2db67f32a5b803560f458c4589bd4bb4678cc17bc16625f6b6b3ad20f9b202d2",
+  "rules/default.json": "sha256:37c8c417972e60d2a204560a11f773bc616a36e9199e45f1d6d993466f2de36f",
+  "rules/pricing.json": "sha256:e299e7afa07a97128ce00c13706379c79368c747cd4303c488f1c53c5339e253",
+  "rules/typosquat_top.json": "sha256:0c699af6ba05d7675055be29b8c1e379714d9fbf44c4369a1717cade424190ad",
+  "rules/economics/workbuddy.json": "sha256:7d570a0d8cb09f803695a4af147269620acdd5da5f403e2534a0c418c202c6a6",
+  "rules/economics/zcode.json": "sha256:3754b15faba8cdf13427ee2a3a8f4291cbd8fae505b54f8e6572f09c1ed182bd",
+  "rules/economics/claude-code.json": "sha256:e5ce954672baa42ffc220fddde2b691566f4644ec05ba6887c5ccc1c9dae30ba",
+  "rules/economics/qoder.json": "sha256:5f51a86cbe0625f44519ce1308e562286c9d3410d0b7284006ac26b068396a3d",
+  "rules/economics/generic.json": "sha256:4849374b3d2443dd77329b09d348dec03794863aa8f991d98ea5380a9849b82f",
+  "hooks/pre_tool_use.py": "sha256:7efef78f2b606c5dbd977ec3c9670561404ecbc778ed7e2feacb0340df6c715c",
+  "hooks/post_tool_use.py": "sha256:09efce048cc44be8b0232703e3d2fee97f92acc6419e71b0f09f5d03c193e456",
+  "scripts/scan.py": "sha256:851eae8a722cb49e0c68b7dc46b78d3e041cacaee39ce549faf1b98aa1407108",
+  "scripts/install.py": "sha256:96b760183c19c98134f57918c74a3063516c37c0f4c733c7af6eb57bda26ff7c",
+  "scripts/report.py": "sha256:8dc8cf1fc7f4ea67312f356f5d655deed37ff32af4fefa548453ffde33e7c6e3",
+  "scripts/verification_tests.py": "sha256:1278115b37f7bf4a48389ab492bf1a67b907859bfc7529be726079ef180a418e",
+  "session_dna.py": "sha256:80a0e8a33e953c3fdb67e2213d4500d66df449325b531fa688ca99b5a3fc54b4",
+  "transcript_reader.py": "sha256:43c1cd4a4afeaf20d23c6583c9e438a12070f4c2433b554be0292a9cf28ae152",
+  "audit_chain.py": "sha256:455d845c17bba87e4f5a929db728a989808c99950de7be99bf0d21c6062b0921",
+  "antinel.py": "sha256:f9cccdd74439bf67ca5dcc12b7979126c480cddbf167a469b069f0d0694f8e45",
+  "hub.py": "sha256:bf2c01a73b7847c26bf887592093ddb11e5cd0a4183529e14f12afa31907dfbd",
+  "tools/enforce_probe.py": "sha256:fa99191ad571a1d044e7aa537e78c03e0f902836b9e0a8265e23bc846f5b386f"
+ },
+ "run": {
+  "started_at": "2026-09-28T04:17:24+0800",
+  "duration_ms": 786855,
+  "duration_note": "wall-clock of a subprocess fan-out suite; machine- and load-dependent, not comparable across environments",
+  "executor": "scripts/run_harness.py",
+  "exit_code": 1,
+  "bootstrap": false
+ },
+ "re_run": "python scripts/run_harness.py",
+ "verify": "python tools/antinel_verify.py",
+ "anchor": null,
+ "note": "v0.1 judgment: single-machine execution by the packaging agent; verification is not a security audit of the user environment. Any failed third-party re-run supersedes this record."
+}

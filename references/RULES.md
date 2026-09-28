@@ -1,4 +1,4 @@
-# Antinel detection rules (generated from rules/default.json v0.29.0 - do not edit by hand)
+# Antinel detection rules (generated from rules/default.json v0.33.2 - do not edit by hand)
 
 Category order = match priority: secrets > destructive > network > injection > context > metadata.
 Severity to action: critical = block, warning = alert (logged, allowed). All hits are collected; highest severity decides.
@@ -239,10 +239,10 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
     - `process\.env`
 - remediation: Print only the specific variables needed instead of dumping the whole environment.
 
-## CTX-02  Prompt injection pattern in SKILL.md
+## CTX-02  Prompt injection pattern in instruction file
 - category: injection | severity: critical | static + dynamic | tools: Read, Write, Edit
 - purpose: Blocks prompt injection in skill instructions (the skill-poisoning payload core)
-- description: Potential prompt injection payload detected in skill instruction file
+- description: Potential prompt injection payload in an instruction file (SKILL.md/AGENTS.md/CLAUDE.md/.cursorrules; non-SKILL.md needs 2 generic or 1 specific hit)
 - 说明: 技能指令文件中发现提示注入载荷
 - 处理建议: 移除该技能并核查来源；不要运行其中的指令
 - content_patterns:
@@ -422,7 +422,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - category: secrets | severity: critical | static + dynamic | tools: Read, Bash
 - purpose: unknown (generator table missing an entry)
 - description: Agent read an instant-messaging or mail client's local store (full message history)
-- 说明: 读取 IM/邮件客户端本机库（等于全部往来记录）
+- 说明: 读取 IM/邮件客户端的本地库（等于全部往来记录）
 - 处理建议: 这是用户私人通信；应完全禁止 Agent 访问
 - command_patterns:
     - `(?i)(WeChat Files|xwechat_files|Tencent[\\/]WeChat)[^\n]{0,200}\.db`
@@ -485,6 +485,100 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
     - `(?i)\bping\b[^\n]{0,60}\s-[lp]\s+(?:[0-9A-Fa-f]{16,}|\d{4,})`
     - `(?i)\b(ngrok(-free)?\.(io|app)|trycloudflare\.com|serveo\.net|localtunnel\.me|localhost\.run|pinggy\.(io|link)|bore\.pub|lhr\.life|tunnel\.to)\b`
 - remediation: Tunnels bypass ordinary egress checks; confirm the destination before allowing.
+
+## MCP-01  Write to MCP config file
+- category: supply_chain | severity: warning | dynamic (hook only) | tools: Write, Edit, Bash
+- purpose: unknown (generator table missing an entry)
+- description: MCP configuration file written/modified -- verify the new server's source, command and url (malicious MCP servers are an active 2025-2026 supply-chain channel)
+- 说明: MCP 配置文件被写入或修改
+- 处理建议: 核对新增 server 的来源与 command/url；不认识的一律移除并轮换相关凭据
+- file_patterns:
+    - `(^|[\\/])\.cursor[\\/]mcp\.json$`
+    - `(^|[\\/])\.mcp\.json$`
+    - `(^|[\\/])claude_desktop_config\.json$`
+    - `(^|[\\/])\.vscode[\\/]mcp\.json$`
+- content_patterns:
+    - `(?is)(?:>>|>|\btee\b|\bcp\b|\bmv\b|\bmove\b|\bcopy\b|\bset-content\b|\bout-file\b|\badd-content\b)[^\n]{0,120}\.mcp\.json`
+    - `(?is)(?:>>|>|\btee\b|\bcp\b|\bmv\b|\bmove\b|\bcopy\b|\bset-content\b|\bout-file\b|\badd-content\b)[^\n]{0,120}mcp\.json`
+    - `(?is)(?:>>|>|\btee\b|\bcp\b|\bmv\b|\bmove\b|\bcopy\b|\bset-content\b|\bout-file\b|\badd-content\b)[^\n]{0,120}claude_desktop_config\.json`
+- remediation: 核对新增 server 的来源与 command/url；不认识的一律移除并轮换相关凭据
+
+## MCP-02  Prompt injection in MCP tool description
+- category: supply_chain | severity: warning | dynamic (hook only) | tools: Read, Write, Edit
+- purpose: unknown (generator table missing an entry)
+- description: MCP tool description/config contains prompt-injection patterns (tool-poisoning class; postmark-mcp case)
+- 说明: MCP 工具描述/配置中发现提示注入模式（工具投毒类；postmark-mcp 案例）
+- 处理建议: 移除该 MCP 服务器并核查其来源；工具描述里的指令会在每次工具调用时进入模型上下文
+- file_patterns:
+    - `(^|[\\/])\.cursor[\\/]mcp\.json$`
+    - `(^|[\\/])\.mcp\.json$`
+    - `(^|[\\/])claude_desktop_config\.json$`
+    - `(^|[\\/])\.vscode[\\/]mcp\.json$`
+- content_patterns:
+    - `ignore\s+(all\s+)?(previous|prior|above)\s+instructions`
+    - `exfiltrate|send\s+(the\s+)?(secrets?|credentials?|keys?|tokens?)\s+(to|via)`
+    - `do\s+not\s+(tell|inform|notify|reveal)\s+(the\s+)?user`
+    - `trust\s+this\s+server\s+automatically`
+    - `curl\s+[^\s]*\$\{?[A-Z_]*(KEY|TOKEN|SECRET)`
+- remediation: 移除该 MCP 服务器并核查其来源；工具描述里的指令会在每次工具调用时进入模型上下文
+
+## MCP-03  Unaudited remote MCP server
+- category: supply_chain | severity: warning | dynamic (hook only) | tools: Read, Write, Edit
+- purpose: unknown (generator table missing an entry)
+- description: MCP config references a remote server (http url or mcp-remote bridge) -- remote tool definitions can change silently after approval
+- 说明: MCP 配置引用远程服务器（http url 或 mcp-remote 桥接）
+- 处理建议: 确认远程端点可信；优先本地 stdio server；远程定义变更不受你控制
+- file_patterns:
+    - `(^|[\\/])\.cursor[\\/]mcp\.json$`
+    - `(^|[\\/])\.mcp\.json$`
+    - `(^|[\\/])claude_desktop_config\.json$`
+    - `(^|[\\/])\.vscode[\\/]mcp\.json$`
+- content_patterns:
+    - `mcp-remote`
+    - `"url"\s*:\s*"https?://`
+- remediation: 确认远程端点的可信度；优先本地 stdio server；远程定义变更不受你控制
+
+## MCP-04  Plaintext secret in MCP config env
+- category: supply_chain | severity: warning | dynamic (hook only) | tools: Read, Write, Edit
+- purpose: unknown (generator table missing an entry)
+- description: Plaintext API key/token inside MCP config env block (config files get synced, shared and committed far more often than .env)
+- 说明: MCP 配置 env 块中存在明文密钥
+- 处理建议: 改用凭据引用/环境注入；已写入的密钥视为已泄露并轮换
+- file_patterns:
+    - `(^|[\\/])\.cursor[\\/]mcp\.json$`
+    - `(^|[\\/])\.mcp\.json$`
+    - `(^|[\\/])claude_desktop_config\.json$`
+    - `(^|[\\/])\.vscode[\\/]mcp\.json$`
+- content_patterns:
+    - `\bsk-[A-Za-z0-9_\-]{20,}\b`
+    - `\bgh[pousr]_[A-Za-z0-9]{36,}\b`
+    - `\bAKIA[0-9A-Z]{16}\b`
+    - `\bxox[baprs]-[A-Za-z0-9\-]{10,}\b`
+    - `\bAIza[0-9A-Za-z_\-]{35}\b`
+    - `-----BEGIN [A-Z ]*PRIVATE KEY-----`
+- remediation: 改用凭据引用/环境注入；已写入的密钥视为已泄露并轮换
+
+## SEC-11  Canary file read
+- category: canary | severity: warning | dynamic (hook only) | tools: Read, Bash
+- purpose: unknown (generator table missing an entry)
+- description: Agent read a canary file -- if its marker (CANARY-*) appears in any external channel, that proves exfiltration of project content
+- 说明: Agent 读取了金丝雀文件
+- 处理建议: 记录并观察：金丝雀被读取本身不是泄露，标记出现在外部通道才是证据（report 的 canaries 统计）
+- file_patterns:
+    - `(^|[\\/])\.canary[\\/]CANARY-`
+- content_patterns:
+    - `\.canary[\\/]CANARY-`
+- remediation: 记录并观察：金丝雀被读取本身不是泄露，标记出现在外部通道才是证据（report 的 canaries 统计）
+
+## SLOP-01  Typosquatted package name in install command
+- category: supply_chain | severity: warning | dynamic (hook only) | tools: Bash
+- purpose: unknown (generator table missing an entry)
+- description: Install command references a package name suspiciously close to a popular package (typosquatting / slopsquatting class). Determined by the hook's built-in reference set (rules/typosquat_top.json, static, dated) -- new packages published after the set date are not judged.
+- 说明: 安装命令中的包名与热门包高度相近（撞名/slopsquatting 类）
+- 处理建议: 核对包名拼写与官方文档；确认后再安装；已安装的立即移除并轮换凭据
+- command_patterns:
+    - `(?i)\b(pip|pip3|npm)\s+install\b`
+- remediation: 核对包名拼写与官方文档；确认后再安装；已安装的立即移除并轮换凭据
 
 ## Policy file (.psl/policy.json, spec C-05)
 

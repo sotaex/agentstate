@@ -1,0 +1,2913 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""AgentState v0.30.0 - antinel 单入口（定稿方案 v1.1/v1.2）.
+
+用户面只有这一个名字：配置、账本、报告、校验、中枢，全部在 `antinel` 下。
+无参数 = help 清单（命令 + "你可以对 Agent 说的话"，与 skill 路由件由同一份
+ROUTES 数据源生成，永不失同步）。
+
+写命令的统一七步（缺一不可，见《用户体验定稿方案》§二）：
+  校验前置 → diff 预览 → 影响声明 → 同意（TTY=y/N 记 user；非TTY=宿主批准流，
+  记 agent）→ 原子应用 → policy_changed 进链 → 回显 + 撤销提示。
+
+经济画像按宿主加载（rules/economics/<host>.json）：credits 子命令只在
+unit=credits 的宿主出现；digest 主视图随画像。不同单位永不加和。
+
+stdlib only；本工具本身允许网络（它是 CLI，不是钩子），但 pricing update
+在牌价源实测选定（v0.24）前不联网。Python 3.10+。
+"""
+import argparse
+import glob
+import hashlib
+import io
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timedelta, date
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+
+from strings import detect_lang, get_string
+
+VERSION = "0.33.1"
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+
+# ---------------------------------------------------------------- ROUTES ----
+# 单一数据源：help 清单与 skill 路由件都从这里生成（定稿方案 §六 纪律）。
+# ★ 0.29.0 (F-4)：第三列由「账本/报告/安全」改为 **「审核/防范/账本」**。
+#   旧分类按**功能类型**分，用户想问"我电脑有没有中招"得自己在"报告"里翻。
+#   现在按**用户要办的事**分：审核＝已经发生了什么；防范＝正在发生时拦不拦。
+ROUTES = [
+    ("查一查我的电脑 / 我有没有中招（要一个能点的页面）",
+     "antinel ui（在你自己电脑的浏览器里点一下就查；结果不会离开你的电脑）", "审核"),
+    ("这个会话花了多少", "antinel report --session latest", "账本"),
+    ("今天/昨天干了什么，拦了什么", "antinel digest [--days N] [--scope all]", "审核"),
+    ("今天这个AI工具有没有胡搞/乱来/出格", "antinel digest --days 1 ＋ antinel host-audit", "审核"),
+    ("这台电脑上的 AI 工具在往哪发数据 / 谁在后台发", "antinel egress", "审核"),
+    ("这台电脑装了哪些 AI 工具 / 哪个在偷数据",
+     "antinel host-scan（你电脑上的全部工具 ＋ 分级 ＋ 证据 ＋ 裁决状态）", "审核"),
+    ("帮我放个源码金丝雀 / 埋个外传检测标记", "antinel canary plant（读取会提醒；标记出现在输出即外传证据，report 可见）", "防范"),
+    ("今日日报 / 日报 / 昨天干了什么", "antinel digest --days 1（工作区=项目根）", "审核"),
+    ("确认放行某个落点 / 不放行就拦住它", "antinel host-shield decide <路径> allow_always｜deny（放行须本人在终端）", "防范"),
+    ("把 D:\\xxx 加进项目路径/白名单", "antinel roots add D:\\xxx ｜ antinel paths add <前缀>", "防范"),
+    ("xxx 域名放行（装包老报警）", "antinel domains add xxx", "防范"),
+    ("预算快超了提醒我 / 给会话设个预算", "antinel settings set budget_tokens_per_session <N>", "账本"),
+    ("记一下积分余额", "antinel credits snapshot <余额> [--reward N@到期日] [--cycle 到期日]", "账本"),
+    ("积分还够不够 / 什么时候烧完", "antinel credits forecast", "账本"),
+    ("订阅和API直付哪个划算（对账）", "antinel credits reconcile", "账本"),
+    ("阻止Agent外传 / 开安全区", "antinel settings set net_mode block ＋ antinel zone add <目录>", "防范"),
+    ("证据链有没有被动过", "antinel verify", "账本"),
+    ("跨工具汇总（多个AI工具一起看）", "antinel digest --scope all", "审核"),
+]
+
+SETTINGS_KEYS = {
+    "alert_threshold": "warning|critical（低于阈值的提醒静默，记录与拦截不变）",
+    "fail_closed_on_audit_loss": "true|false（审计写入失败时是否拦截）",
+    "session_banner": "true|false（会话横幅开关）",
+    "usage_collect": "true|false（消耗采集总开关——记录越多，越要能一键关）",
+    "log_retention_days": "天数（审计归档保留期）",
+    "auto_archive": "true|false（report 时自动归档过期审计）",
+    "budget_tokens_per_session": "会话 token 预算（50/80/100% 三档提醒；默认只提醒）",
+    "budget_tokens_per_day": "项目日 token 预算（跨会话累计，同三档）",
+    "budget_block": "true|false（默认 false；true 时 100% 档拦截写通道，只读放行）",
+    # 0.29.0（G-4）：默认值从"隐藏默认"改为"显式告知"。
+    # ★ 为什么不把默认改成 block：改了会误伤正常装包/拉依赖（一次 pip install 就是
+    #   一串非白名单域名），用户第一次用就被拦，产品直接不可用。分寸是"不静默加严"，
+    #   但同样不能"静默宽松"—— 所以把默认值**写进 help 与 settings list**，让人知道。
+    "net_mode": "warn|block（**默认 warn：只提醒不拦**；要拦请 set 成 block）——"
+                "block：未白名单域名的网络命令升级为拦截（对抗分析 v1.0）",
+    "notify_owner": "true|false（拦截时实时气泡通知主人，默认 true）",
+}
+
+# ---------------------------------------------------------------- basics ----
+def detect_host():
+    forced = os.environ.get("ANTINEL_FORCE_HOST")
+    if forced:
+        return forced                       # 显式指定优先（多宿主共存时 Agent 自报）
+    home = os.path.expanduser("~")
+    for tag, d in (("workbuddy", ".workbuddy"), ("zcode", ".zcode"),
+                   ("qoder", ".qoder"), ("claude-code", ".claude")):
+        if os.path.isdir(os.path.join(home, d)):
+            return tag
+    return "generic"
+
+
+def load_economics(host):
+    p = os.path.join(_HERE, "rules", "economics", "%s.json" % host)
+    try:
+        with open(p, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"host": host, "unit": "tokens", "unit_label": "tokens",
+                "digest_primary": "tokens", "note": "画像缺失，兜底 tokens"}
+
+
+def find_project_root(start=None):
+    d = os.path.abspath(start or os.getcwd())
+    while True:
+        if os.path.isdir(os.path.join(d, ".psl")):
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            return None
+        d = parent
+
+
+def _audit_dir(root):
+    return os.path.join(root, ".psl", "audit")
+
+
+def _session_dna():
+    import session_dna
+    return session_dna
+
+
+def _chain_record(audit_dir, rec):
+    sd = _session_dna()
+    if not sd.append_chained(audit_dir, rec):
+        sys.stderr.write("警告：policy_changed 未能进链（记录不落无链账本）\n")
+        return False
+    return True
+
+
+def _is_tty():
+    try:
+        return sys.stdin.isatty()
+    except Exception:
+        return False
+
+
+def _confirm(question):
+    if not _is_tty():
+        return True                     # 非交互 = Agent 代办：同意由宿主批准流承担
+    try:
+        ans = input("%s [y/N] " % question).strip().lower()
+    except Exception:
+        return False
+    return ans in ("y", "yes")
+
+
+def _invoked_by():
+    return "user" if _is_tty() else "agent"
+
+
+def _die(msg, rc=2):
+    sys.stderr.write(msg.rstrip() + "\n")
+    sys.exit(rc)
+
+
+def _load_json(path):
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _save_json_atomic(path, data):
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8", newline="") as f:
+        json.dump(data, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, path)
+
+
+# ------------------------------------------------------------ validation ----
+def validate_root(p):
+    """workspace_roots 条目：绝对路径、非盘根、无通配、无中段 ..。"""
+    s = (p or "").strip().strip('"')
+    if not s:
+        return None, "路径为空"
+    if any(ch in s for ch in "*?["):
+        return None, "不允许通配符（%s）" % s
+    parts = [x for x in s.replace("\\", "/").split("/") if x not in ("", ".")]
+    if ".." in parts:
+        return None, "不允许 ..（%s）" % s
+    if not (len(s) >= 2 and s[1] == ":") and not s.startswith("/"):
+        return None, "需要绝对路径（如 D:\\xxx），收到：%s" % s
+    norm = s.replace("\\", "/").rstrip("/")
+    if len(norm) <= 3 and norm[1:2] == ":":
+        return None, "盘根不放行（%s）——根路径等于关闭边界" % s
+    return norm, None
+
+
+def validate_prefix(p):
+    """whitelist.paths 条目：同 _norm_prefix 口径——拒绝根样/通配/中段 ..。"""
+    s = (p or "").replace("\\", "/").strip().lower()
+    if s in ("", ".", "..", "/"):
+        return None, "该条目会匹配所有路径（%r）" % p
+    s2 = s.lstrip("./")
+    if not s2 or s2.endswith(":") or s2.endswith(":/"):
+        return None, "盘根样条目不放行（%r）" % p
+    if ".." in s2 or any(ch in s2 for ch in "*?["):
+        return None, "不允许 .. 或通配符（%r）" % p
+    return s2, None
+
+
+def validate_domain(d):
+    s = (d or "").strip().lower().rstrip("/")
+    if not s or "/" in s or "://" in s or " " in s:
+        return None, "只要域名本身（如 pypi.org），收到：%r" % d
+    return s, None
+
+
+def validate_command_prefix(c):
+    s = (c or "").strip()
+    if not s:
+        return None, "命令前缀为空"
+    return s, None
+
+
+# ------------------------------------------------- seven-step write flow ----
+# 0.28.3（E2）：sensitive=True 的写命令在非 TTY（=Agent 代跑）执行后强制气泡告知
+# 主人——宿主批准流是同意，气泡补上"实时可见"，链上 policy_changed 补上"事后可证"。
+def seven_step(label, target_file, loader, mutator, impact, undo_hint,
+               field, root, sensitive=False):
+    """统一的写命令七步。mutator(data) 就地修改并返回变更摘要字符串；
+    返回 None 表示无变化（不写盘、不留痕）。"""
+    old_raw = b""
+    if os.path.isfile(target_file):
+        old_raw = open(target_file, "rb").read()
+    try:
+        data = loader()
+    except Exception as e:
+        _die("配置文件不可读（%s）：%s" % (target_file, e))
+    summary = mutator(data)
+    if summary is None:
+        print("无变化（%s 已是期望状态）" % label)
+        return
+    new_raw = json.dumps(data, ensure_ascii=False, indent=1).encode("utf-8")
+    print("变更：%s" % label)
+    print("  影响：%s" % impact)
+    old_h = hashlib.sha256(old_raw).hexdigest()[:12]
+    new_h = hashlib.sha256(new_raw).hexdigest()[:12]
+    print("  %s  %s… → %s…" % (target_file, old_h, new_h))
+    if not _confirm("应用前确认？"):
+        print("已取消（未写盘）")
+        return
+    _save_json_atomic(target_file, data)
+    rec = {"ts": datetime.now().astimezone().isoformat(timespec="seconds"),
+           "type": "policy_changed", "tool": "-", "session": "antinel-cli",
+           "host": detect_host(), "decision": "allow", "severity": "warning",
+           "field": field, "change": summary,
+           "old_sha256": "sha256:" + old_h, "new_sha256": "sha256:" + new_h,
+           "invoked_by": _invoked_by(),
+           "reason": impact}
+    _chain_record(_audit_dir(root), rec)
+    print("✓ 已应用并进审计链（policy_changed）")
+    print("  撤销：%s" % undo_hint)
+    if sensitive and not _is_tty():
+        try:
+            import host_shield as hs0
+            hs0.notify("Antinel 配置已由 Agent 变更",
+                       ("%s｜%s" % (label, impact))[:150])
+        except Exception:
+            pass
+
+
+# ------------------------------------------------------------ roots ----
+def host_config_path(host):
+    home = os.path.expanduser("~")
+    d = {"workbuddy": ".workbuddy", "zcode": ".zcode", "qoder": ".qoder",
+         "claude-code": ".claude"}.get(host)
+    if not d:
+        _die("宿主 %s 没有已知的配置目录，roots 不可用" % host)
+    return os.path.join(home, d, "antinel.json")
+
+
+def cmd_roots(args):
+    host = detect_host()
+    cfg = host_config_path(host)
+    if not os.path.isfile(cfg):
+        _die("宿主配置不存在：%s（先在该宿主下安装 Antinel）" % cfg)
+    if args.sub == "list":
+        for r in (_load_json(cfg).get("workspace_roots") or []):
+            print(" ", r)
+        return
+    if args.sub == "add":
+        norm, err = validate_root(args.path)
+        if err:
+            _die("校验失败：%s\n  示例：antinel roots add D:\\work\\proj" % err)
+        def mut(data):
+            wr = data.setdefault("workspace_roots", [])
+            if any(x.replace("\\", "/").rstrip("/").lower() == norm.lower()
+                   for x in wr):
+                return None
+            wr.append(norm.replace("/", "\\"))
+            return "workspace_roots + %s" % norm
+        seven_step("roots add %s" % norm, cfg,
+                   lambda: _load_json(cfg), mut,
+                   "信任边界扩大：该目录内的写入将不再被 DST-02 拦截",
+                   "antinel roots remove %s" % norm, "workspace_roots",
+                   find_project_root() or os.getcwd(), sensitive=(args.sub == "add"))
+    elif args.sub == "remove":
+        norm, err = validate_root(args.path)
+        if err:
+            _die("校验失败：%s" % err)
+        def mut(data):
+            wr = data.get("workspace_roots") or []
+            keep = [x for x in wr if x.replace("\\", "/").rstrip("/").lower() != norm.lower()]
+            if len(keep) == len(wr):
+                return None
+            data["workspace_roots"] = keep
+            return "workspace_roots - %s" % norm
+        seven_step("roots remove %s" % norm, cfg,
+                   lambda: _load_json(cfg), mut,
+                   "信任边界收紧：该目录内的项目外写入将重新被拦截",
+                   "antinel roots add %s" % norm, "workspace_roots",
+                   find_project_root() or os.getcwd())
+
+
+# --------------------------------------- paths / domains / commands ----
+def _policy_loader(pol_path):
+    """首次配置引导：项目还没有 policy.json 时，从最小骨架开始（用户全程
+    不需要手工创建/编辑 JSON）。"""
+    def loader():
+        if os.path.isfile(pol_path):
+            return _load_json(pol_path)
+        return {"$schema": "antinel-policy-v1", "version": "1.0",
+                "global_settings": {},
+                "whitelist": {"domains": [], "paths": [], "commands": []}}
+    return loader
+
+
+def _wl(kind, sub, args):
+    root = find_project_root()
+    if root is None:
+        _die("未找到项目（向上没有 .psl 目录）——在项目内运行，或先安装")
+    pol_path = os.path.join(root, ".psl", "policy.json")
+    key = {"paths": "paths", "domains": "domains", "commands": "commands"}[kind]
+    vfn = {"paths": validate_prefix, "domains": validate_domain,
+           "commands": validate_command_prefix}[kind]
+    undo = {"paths": "antinel paths remove", "domains": "antinel domains remove",
+            "commands": "antinel commands remove"}[kind]
+    if sub == "list":
+        try:
+            wl = (_load_json(pol_path).get("whitelist") or {}).get(key) or []
+        except Exception:
+            wl = []
+        for x in wl:
+            print(" ", x)
+        if not wl:
+            print("（空）")
+        return
+    val, err = vfn(args.value)
+    if err:
+        _die("校验失败：%s\n  示例：%s %s <值>" % (err, kind, sub))
+
+    def mut(data):
+        wl = data.setdefault("whitelist", {}).setdefault(key, [])
+        if sub == "add":
+            if val in wl:
+                return None
+            wl.append(val)
+            return "whitelist.%s + %s" % (key, val)
+        keep = [x for x in wl if x != val]
+        if len(keep) == len(wl):
+            return None
+        data["whitelist"][key] = keep
+        return "whitelist.%s - %s" % (key, val)
+
+    impact = {"paths": "该前缀下的写入将不再被 DST-02 拦截（每次放行都留审计痕）",
+              "domains": "该域名的网络请求不再触发 NET 提醒/拦截",
+              "commands": "该前缀命令不再触发 warning 级提醒（critical 规则不受影响）"}[kind]
+    seven_step("%s %s %s" % (kind, sub, val), pol_path,
+               _policy_loader(pol_path), mut, impact,
+               "%s %s" % (undo, val), "whitelist.%s" % key, root, sensitive=(sub == "add"))
+
+
+# ------------------------------------------------------------ settings ----
+def cmd_settings(args):
+    root = find_project_root()
+    if root is None:
+        _die("未找到项目（向上没有 .psl 目录）")
+    pol_path = os.path.join(root, ".psl", "policy.json")
+    if args.sub == "list":
+        data = _load_json(pol_path) if os.path.isfile(pol_path) else {}
+        gs = data.get("global_settings") or {}
+        for k, desc in SETTINGS_KEYS.items():
+            print("  %-26s = %-10s # %s" % (k, gs.get(k, "<默认>"), desc))
+        return
+    if args.sub == "get":
+        data = _load_json(pol_path) if os.path.isfile(pol_path) else {}
+        print((data.get("global_settings") or {}).get(args.key, "<默认>"))
+        return
+    key = args.key
+    if key not in SETTINGS_KEYS:
+        _die("未知设置键：%s\n可用：%s" % (key, ", ".join(SETTINGS_KEYS)))
+    val = args.value.strip()
+    if key in ("fail_closed_on_audit_loss", "session_banner", "usage_collect", "auto_archive"):
+        if val.lower() not in ("true", "false"):
+            _die("%s 取 true|false" % key)
+        val = val.lower()
+    if key == "alert_threshold" and val.lower() not in ("warning", "critical"):
+        _die("alert_threshold 取 warning|critical")
+    if key == "log_retention_days":
+        try:
+            val = int(val)
+        except Exception:
+            _die("log_retention_days 取整数")
+
+    def mut(data):
+        gs = data.setdefault("global_settings", {})
+        old = gs.get(key)
+        if str(old).lower() == str(val).lower():
+            return None
+        gs[key] = val
+        return "global_settings.%s: %s → %s" % (key, old, val)
+
+    seven_step("settings set %s=%s" % (key, val), pol_path,
+               _policy_loader(pol_path), mut,
+               SETTINGS_KEYS[key], "antinel settings set %s <旧值>" % key,
+               "global_settings." + key, root,
+               sensitive=(key in ("net_mode", "fail_closed_on_audit_loss", "alert_threshold")))
+
+
+# ------------------------------------------------------------ credits ----
+def _snapshots(audit_dir):
+    sd = _session_dna()
+    out = []
+    for _d, rec in sd._rows(sd._iter_day_files(audit_dir), float("inf"), [False]):
+        if rec.get("type") == "credits_snapshot":
+            out.append(rec)
+    out.sort(key=lambda r: r.get("ts") or "")
+    return out
+
+
+def _tokens_between(audit_dir, ts0, ts1):
+    sd = _session_dna()
+    total = 0
+    for _d, rec in sd._rows(sd._iter_day_files(audit_dir), float("inf"), [False]):
+        if rec.get("type") != "usage_delta":
+            continue
+        for e in (rec.get("entries") or []):
+            t = str(e.get("ts") or "")
+            if not t:
+                continue
+            # transcript ts 可能是 epoch 毫秒或 ISO——两种都兼容到可比较的序
+            try:
+                key = t if not t.isdigit() else datetime.fromtimestamp(
+                    int(t) / 1000).isoformat(timespec="seconds")
+            except Exception:
+                key = t
+            if ts0 < key < ts1:
+                total += (e.get("input_tokens") or 0) + (e.get("output_tokens") or 0)
+    return total
+
+
+def cmd_credits(args, prof):
+    root = find_project_root()
+    if root is None:
+        _die("未找到项目")
+    if prof.get("unit") != "credits":
+        _die("当前宿主（%s）经济画像为 %s——无积分口径，credits 不可用"
+             % (prof.get("host"), prof.get("unit")))
+    audit = _audit_dir(root)
+    if args.sub == "plan":
+        uep = os.path.join(os.path.expanduser("~"), ".antinel", "user_economics.json")
+        os.makedirs(os.path.dirname(uep), exist_ok=True)
+        try:
+            yuan, credits = float(args.yuan), float(args.credits)
+        except Exception:
+            _die("用法：antinel credits plan <月费元> <每月积分>，例：antinel credits plan 99 4000")
+        data = {"plan_yuan_per_month": yuan, "plan_credits_per_month": credits,
+                "yuan_per_credit": round(yuan / credits, 6),
+                "updated_at": datetime.now().isoformat(timespec="seconds")}
+        _save_json_atomic(uep, data)
+        print("✓ 套餐口径已存（你报的）：%.2f 元 / %s 积分 = %.4f 元/积分"
+              % (yuan, format(int(credits), ","), data["yuan_per_credit"]))
+        return
+    if args.sub == "reconcile":
+        snaps = _snapshots(audit)
+        if len(snaps) < 2:
+            _die("对账需要 ≥2 次快照")
+        a, b = snaps[-2], snaps[-1]
+        cdelta = float(b["balance"]) - float(a["balance"])
+        toks = _tokens_between(audit, a.get("ts", ""), b.get("ts", ""))
+        observed = (-cdelta / toks * 1000.0) if (toks > 0 and abs(cdelta) > 0) else None
+        print("【observed】", end="")
+        if observed is not None:
+            print("%.4f 积分/千token（快照差分，%d tokens / Δ%s 积分）" % (observed, toks, cdelta))
+        else:
+            print("不可得（两次快照间无 token 记录或无差额）")
+        uep = os.path.join(os.path.expanduser("~"), ".antinel", "user_economics.json")
+        ppc = None
+        try:
+            ue = _load_json(uep)
+            ppc = ue.get("yuan_per_credit")
+            print("【套餐】%.4f 元/积分（你报：%.2f 元 / %s 积分）"
+                  % (ppc, ue["plan_yuan_per_month"], format(int(ue["plan_credits_per_month"]), ",")))
+            if observed is not None:
+                print("  → %.4f 积分/千token ≈ %.5f 元/千token（派生）" % (observed, observed * ppc))
+        except Exception:
+            print("【套餐】未登记——antinel credits plan <月费元> <每月积分>")
+        cache_p = os.path.join(root, ".psl", "state", "pricing_cache.json")
+        try:
+            cache = _load_json(cache_p)
+            print("【牌价参照】来源 %s @ %s（对公开价，非你的账单）"
+                  % (cache.get("source"), str(cache.get("fetched_at"))[:16]))
+        except Exception:
+            print("【牌价参照】无缓存——antinel pricing update 拉取（可选参考位）")
+        print("  差异来源：缓存计价／模型组合变化／时间窗；不同口径永不加和。")
+        return
+    if args.sub == "snapshot":
+        try:
+            balance = float(args.balance)
+        except Exception:
+            _die("余额需为数字，收到：%r" % args.balance)
+
+        def bucket(name):
+            v = getattr(args, name, None)
+            if not v:
+                return None
+            if "@" in v:
+                n, exp = v.split("@", 1)
+                return {"value": float(n), "expires": exp}
+            return {"value": float(v)}
+
+        rec = {"ts": datetime.now().astimezone().isoformat(timespec="seconds"),
+               "type": "credits_snapshot", "tool": "-", "session": "antinel-cli",
+               "host": detect_host(), "decision": "allow", "severity": "none",
+               "balance": balance, "user_reported": True,
+               "buckets": {k: bucket(k) for k in ("base", "gift", "reward")
+                           if bucket(k)},
+               "cycle_end": args.cycle,
+               "reason": "用户口报积分余额（引导式快照）"}
+        _chain_record(audit, rec)
+        print("✓ 快照已进链：余额 %s（你报于 %s）" % (balance, rec["ts"][:16]))
+        snaps = _snapshots(audit)
+        if len(snaps) < 2:
+            print("  再记一次余额，就能学出你的燃烧速度并做周期预测")
+        return
+    snaps = _snapshots(audit)
+    if args.sub == "list":
+        if not snaps:
+            print("（还没有快照——antinel credits snapshot <余额>）")
+        for s in snaps:
+            print(" ", s["ts"][:16], "余额", s.get("balance"),
+                  ("周期至 %s" % s.get("cycle_end")) if s.get("cycle_end") else "")
+        return
+    # forecast
+    if len(snaps) < 2:
+        _die("预测需要 ≥2 次快照（现在 %d 次）——明天再记一次余额即可" % len(snaps))
+    a, b = snaps[-2], snaps[-1]
+    cdelta = float(b["balance"]) - float(a["balance"])
+    toks = _tokens_between(audit, a.get("ts", ""), b.get("ts", ""))
+    rate = None
+    if toks > 0 and abs(cdelta) > 0:
+        rate = -cdelta / toks * 1000.0
+    print("【一句话】余额 %s 积分（你报于 %s）%s。"
+          % (b["balance"], b["ts"][:16],
+             ("，观察速度 ≈%.4f 积分/千token（估）" % rate) if rate is not None
+             else "，速度未知（两次快照间无 token 记录）"))
+    lines = []
+    if b.get("cycle_end"):
+        try:
+            days_left = (date.fromisoformat(b["cycle_end"]) - date.today()).days
+            lines.append("周期至 %s（剩 %d 天）" % (b["cycle_end"], days_left))
+            if rate is not None:
+                recent = _tokens_between(audit, b.get("ts", ""),
+                                         datetime.now().astimezone().isoformat(timespec="seconds"))
+                lines.append("自上次快照已耗 %d tokens（估）——按此速度请明天再快照一次以细化预测" % recent)
+            rb = (b.get("buckets") or {}).get("reward") or {}
+            if rb.get("expires"):
+                lines.append("⚠ 奖励积分 %s 将于 %s 过期（平台通常先扣先过期的桶）"
+                             % (rb.get("value"), rb.get("expires")))
+        except Exception:
+            lines.append("周期日期无法解析：%s" % b.get("cycle_end"))
+    else:
+        lines.append("未登记周期——antinel credits snapshot <余额> --cycle 2026-09-30")
+    print("\n".join(lines))
+
+
+# ------------------------------------------------------------ digest ----
+def _agg_audit(audit_dir, days):
+    sd = _session_dna()
+    from datetime import timedelta
+    since = (datetime.now() - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+    acts = blocks = warns = 0
+    by_rule = {}
+    toks = 0
+    gaps = probe_ok = probe_fail = 0
+    fail_open = 0
+    host_changes = 0
+    untrusted_host = low_conf_host = 0        # 0.33.1 (P4-1)
+    pre_ts = {}
+    post_ts = {}
+    probe_last = None
+    for day, rec in sd._rows(sd._iter_day_files(audit_dir), float("inf"), [False]):
+        if day[:10] < since:
+            continue
+        t = rec.get("type")
+        # 0.33.1 (P4-1)：宿主归因可信度可见化。
+        # 旧记录（0.33.0 及更早）没有 host_confidence 字段 ⇒ 其宿主标签**不可信**
+        # （实测：本项目的 WorkBuddy 流量被标成 qoder）。链不可变，所以不改链、
+        # 改读法：把"这段时间的宿主标签不可信"做成报告里的一个显式数字，
+        # 而不是让读者以为每个 host 字段都是事实。
+        if t in ("pre_tool_use", "post_tool_use"):
+            _hc = rec.get("host_confidence")
+            if _hc is None:
+                untrusted_host += 1
+            elif _hc == "low":
+                low_conf_host += 1
+        if t == "pre_tool_use":
+            acts += 1
+            if rec.get("decision") == "block":
+                blocks += 1
+                for rid in (rec.get("rules_hit") or []):
+                    by_rule[rid] = by_rule.get(rid, 0) + 1
+            elif rec.get("decision") == "alert":
+                warns += 1
+        elif t == "usage_delta":
+            for e in (rec.get("entries") or []):
+                toks += (e.get("input_tokens") or 0) + (e.get("output_tokens") or 0)
+        # 0.30.0 (E-3): enforcement facts join the same daily aggregation --
+        # the morning report must be able to say "the gate is not signaling".
+        elif t == "enforcement_gap":
+            gaps += 1
+        elif t == "enforcement_probe":
+            if rec.get("ok") is True:
+                probe_ok += 1
+            elif rec.get("ok") is False:
+                probe_fail += 1
+            _ts = rec.get("ts") or ""
+            if probe_last is None or _ts > probe_last:
+                probe_last = _ts
+        # 0.32.0 (F5): fail-open visibility -- every hook_error is a call the
+        # hook could not judge (allowed by the host, A-08). "持续安心" requires
+        # this number to be visible in the morning report, not buried in stderr.
+        elif t == "hook_error":
+            fail_open += 1
+        # 0.32.2 (A1): 宿主版本变化——W2 对冲的可见性。
+        elif t == "host_changed":
+            host_changes += 1
+        elif t == "pre_tool_use":
+            _dg = rec.get("content_digest")
+            if _dg:
+                pre_ts[_dg] = rec.get("ts")
+        elif t == "post_tool_use":
+            _dg = rec.get("content_digest")
+            if _dg:
+                post_ts[_dg] = rec.get("ts")
+    return {"actions": acts, "blocks": blocks, "warnings": warns,
+            "by_rule": by_rule, "tokens": toks,
+            "gaps": gaps, "probe_ok": probe_ok, "probe_fail": probe_fail,
+            "fail_open": fail_open, "host_changes": host_changes,
+            "untrusted_host": untrusted_host, "low_conf_host": low_conf_host,
+            "pre_ts": pre_ts, "post_ts": post_ts,
+            "probe_last": probe_last}
+
+
+def cmd_canary(args):
+    """0.31.0 (F3)：源码金丝雀。plant = 在 <root>/.canary/ 放一个含
+    CANARY-<slug>-<8hex> 标记的蜜饵文件并上链 canary_planted；list = 列出
+    现存金丝雀与链上登记。观察半边（输出中出现标记）由 post_tool_use 的
+    既有 canaries_observed 机制接管——本命令只负责"放"与"登记"。"""
+    root = find_project_root()
+    if root is None:
+        _die("未找到项目（金丝雀挂在项目上）")
+    sub = getattr(args, "sub", "")
+    cdir = os.path.join(root, ".canary")
+    ad = os.path.join(root, ".psl", "audit")
+    slug = re.sub(r"[^\w-]", "-", os.path.basename(root)).strip("-")[:24] or "proj"
+    host = detect_host()
+
+    def _chain(rec):
+        try:
+            import audit_chain as _acm
+        except ImportError:
+            _die("audit_chain 不可用（包不完整）")
+        os.makedirs(ad, exist_ok=True)
+        fn = os.path.join(ad, datetime.now().strftime("%Y-%m-%d") + ".jsonl")
+        _acm.append_chained(fn, rec)
+        _acm.touch_day_manifest(fn)
+        mad = os.path.join(os.path.expanduser(
+            os.environ.get("WORKBUDDY_CONFIG_DIR") or "~/.workbuddy"), "antinel-audit")
+        try:
+            os.makedirs(mad, exist_ok=True)
+            mfn = os.path.join(mad, datetime.now().strftime("%Y-%m-%d") + ".jsonl")
+            _acm.append_locked(mfn, json.dumps(rec, ensure_ascii=False) + "\n")
+            _acm.touch_day_manifest(mfn)
+        except Exception:
+            pass
+
+    if sub == "plant":
+        marker = None
+        if os.path.isdir(cdir):
+            for fn in sorted(os.listdir(cdir)):
+                if fn.startswith("CANARY-%s-" % slug):
+                    marker = fn
+                    break
+        note = "already" if marker else "planted"
+        if not marker:
+            import secrets as _secrets
+            marker = "CANARY-%s-%s" % (slug, _secrets.token_hex(4))
+            os.makedirs(cdir, exist_ok=True)
+            cpath = os.path.join(cdir, marker)
+            with open(cpath, "w", encoding="utf-8") as f:
+                f.write("%s\nAntinel canary：本文件是蜜饵。若这个标记出现在任何工具输出或外部通道，"
+                        "说明项目内容被读取后带了出去（antinel report 的 canaries 统计可见）。\nplanted: %s\n"
+                        % (marker, datetime.now().isoformat(timespec="seconds")))
+        _chain({"ts": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "type": "canary_planted", "tool": "-", "session": "antinel-cli",
+                "host": host, "marker": marker,
+                "path": os.path.join(".canary", marker), "note": note,
+                "decision": "allow", "severity": "none",
+                "reason": "canary %s（读取 → SEC-11 提醒；标记出现在输出 → report canaries 统计）"
+                          % ("已存在，复用" if note == "already" else "已布置")})
+        print("✓ 金丝雀在岗：%s（读取 → SEC-11 提醒；标记出现在输出即外传证据）"
+              % os.path.join(".canary", marker))
+        return
+    if sub == "list":
+        planted = []
+        if os.path.isdir(cdir):
+            planted = [fn for fn in sorted(os.listdir(cdir))
+                       if fn.startswith("CANARY-%s-" % slug)]
+        seen = []
+        try:
+            for day in sorted(os.listdir(ad)):
+                if not day.endswith(".jsonl"):
+                    continue
+                for ln in io.open(os.path.join(ad, day), encoding="utf-8", errors="replace"):
+                    if '"canary_planted"' in ln:
+                        try:
+                            r = json.loads(ln)
+                            seen.append((r.get("ts", "")[:16], r.get("marker"), r.get("note")))
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+        print("【金丝雀】在岗 %d 个：%s" % (len(planted), ", ".join(planted) or "（无）"))
+        for ts, marker, note in seen[-8:]:
+            print("  %s  %s（%s）" % (ts, marker, note))
+        print("  读取 → SEC-11 提醒；标记出现在工具输出 → report 的 canaries 统计。")
+        return
+    _die("未知子命令")
+
+
+def cmd_digest(args):
+    prof = load_economics(detect_host())
+    days = args.days or 1
+    scope = args.scope or "project"
+    primary = prof.get("digest_primary") or "tokens"
+    root = find_project_root()
+    if root is None and scope == "project":
+        _die("未找到项目")
+    projects = []
+    if scope == "all":
+        import hub as hubmod
+        reg = hubmod.load_registry()
+        projects = [(p["root"], h, p) for p in reg["projects"] for h in p.get("hosts") or ["?"]]
+        if not projects:
+            _die("登记表为空——antinel hub register <项目路径>")
+    else:
+        projects = [(root, detect_host(), {"root": root})]
+
+    per = []
+    total = {"actions": 0, "blocks": 0, "warnings": 0, "tokens": 0,
+             "gaps": 0, "probe_ok": 0, "probe_fail": 0, "fail_open": 0,
+             "host_changes": 0, "untrusted_host": 0, "low_conf_host": 0}
+    heads = {}
+    for proot, host, _meta in projects:
+        ad = _audit_dir(proot)
+        if not os.path.isdir(ad):
+            continue
+        a = _agg_audit(ad, days)
+        a.update({"root": proot, "host": host})
+        per.append(a)
+        for k in total:
+            total[k] += a[k]
+        try:
+            man = _load_json(os.path.join(ad, "day_manifest.json"))
+            today = datetime.now().strftime("%Y-%m-%d.jsonl")
+            if today in man:
+                heads[proot] = man[today].get("last_hash", "")
+        except Exception:
+            pass
+
+    unit = prof.get("unit_label") or prof.get("unit") or "tokens"
+    econ = ""
+    if primary == "credits" and days == 1:
+        econ = "；积分消耗请看 credits forecast（快照驱动）"
+        # v0.24: 有观察换算率时直接给估算积分（派生，标估）
+        try:
+            _ad = _audit_dir(root)
+            snaps0 = _snapshots(_ad)
+            if len(snaps0) >= 2:
+                a0, b0 = snaps0[-2], snaps0[-1]
+                cd0 = float(b0["balance"]) - float(a0["balance"])
+                tk0 = _tokens_between(_ad, a0.get("ts", ""), b0.get("ts", ""))
+                if tk0 > 0 and abs(cd0) > 0:
+                    rate0 = -cd0 / tk0 * 1000.0
+                    est = total["tokens"] / 1000.0 * rate0
+                    econ = "；估算消耗 ≈%s 积分（估，据观察换算率 %.4f/千tok）" % (format(round(est, 1), ","), rate0)
+        except Exception:
+            pass
+    print("【一句话】近 %d 天：%d 个项目/宿主组合，%d 次操作、拦截 %d 次、"
+          "token 进出 %s（事实）；记账口径 %s=%s%s。"
+          % (days, len(per), total["actions"], total["blocks"],
+             format(total["tokens"], ","), detect_host(), unit, econ))
+    for a in sorted(per, key=lambda x: -x["actions"]):
+        print("  %-9s %s" % (a["host"], a["root"]))
+        print("    操作 %d｜拦截 %d %s｜提醒 %d｜tokens %s"
+              % (a["actions"], a["blocks"],
+                 ("（%s）" % ",".join("%s×%d" % kv for kv in sorted(a["by_rule"].items()))) if a["by_rule"] else "",
+                 a["warnings"], format(a["tokens"], ",")))
+    # 0.30.0 (E-3): 执法状态进晨报——"闸门还在不在"必须能大声说出来。
+    if total.get("gaps") or total.get("probe_fail"):
+        print("【执法】⚠ 缺口 %d 次（被拦的调用仍被执行）｜探针失败 %d/%d —— 拦截信号可能未生效，"
+              "运行 python tools/enforce_probe.py 复检，并核对宿主钩子协议"
+              % (total.get("gaps", 0), total.get("probe_fail", 0),
+                 total.get("probe_ok", 0) + total.get("probe_fail", 0)))
+    elif total.get("probe_ok"):
+        print("【执法】自检探针 %d/%d 通过；缺口 0（被拦的调用没有再执行）"
+              % (total.get("probe_ok", 0), total.get("probe_ok", 0)))
+    # 0.32.0 (F5): fail-open 可见性——每次钩子异常都是一次"没判就放"。
+    if total.get("fail_open"):
+        print("【护栏】⚠ fail-open %d 次（钩子异常放行，A-08）——闸门当时不在岗，详见 report" % total.get("fail_open", 0))
+    if total.get("host_changes"):
+        print("【宿主】⚠ 版本变化 %d 次——钩子协议可能漂移，请重跑 probe_host.py 与 enforce_probe.py"
+              % total.get("host_changes", 0))
+    # 0.33.0 (B5): 钩子延迟可见性——pre/post 配对的时长中位数。
+    _durs = []
+    for a in per:
+        _pre = a.get("pre_ts") or {}
+        _post = a.get("post_ts") or {}
+        for dg in _post:
+            if dg in _pre:
+                try:
+                    d = (datetime.fromisoformat(_post[dg])
+                         - datetime.fromisoformat(_pre[dg])).total_seconds() * 1000
+                    if 0 <= d < 60000:
+                        _durs.append(d)
+                except Exception:
+                    pass
+    if _durs:
+        _durs.sort()
+        print("【延迟】钩子耗时中位数 %.0f ms（%d 对 pre/post 配对）" % (_durs[len(_durs) // 2], len(_durs)))
+    # 0.32.2 (A4): 探针陈旧/从未运行——拦截自证停摆必须可见。
+    try:
+        _pol = {}
+        if root:
+            _pol = json.load(open(os.path.join(str(root), ".psl", "policy.json"),
+                                  encoding="utf-8"))
+        _iv = float((_pol.get("global_settings") or {}).get("probe_interval_hours", 24) or 24)
+        _last = None
+        for a in per:
+            if a.get("probe_last"):
+                _last = a["probe_last"] if _last is None else max(_last, a["probe_last"])
+        _stale = True
+        if _last:
+            _stale = (datetime.now().astimezone()
+                      - datetime.fromisoformat(_last)).total_seconds() > _iv * 3600 * 2
+        if _stale and root:
+            print("【执法】⚠ 自检探针陈旧/从未运行（last: %s）——拦截自证停摆，"
+                  "运行 python tools/enforce_probe.py" % (_last or "never"))
+    except Exception:
+        pass
+    # 0.33.1 (P4-1)：不可信日期段显式化——分母是"这段时间内的工具调用记录数"。
+    if total["untrusted_host"] or total["low_conf_host"]:
+        print("【宿主标签】⚠ %d 条记录的宿主标签不可信（旧格式，无归因证据）；"
+              "%d 条为低可信（仅目录标记）——这两个 host 字段不能当事实引用。"
+              % (total["untrusted_host"], total["low_conf_host"]))
+    else:
+        print("【宿主标签】全部记录带归因证据（host_confidence 字段齐备）")
+    print("【覆盖】%d 个登记项目 / %d 个宿主；未接入工具不在此列（分母显式）"
+          % (len({p for p, _h, _m in projects}), len({h for _p, h, _m in projects})))
+
+    if scope == "all":
+        rec = {"ts": datetime.now().astimezone().isoformat(timespec="seconds"),
+               "type": "digest_rollup", "tool": "-", "session": "antinel-cli",
+               "host": detect_host(), "decision": "allow", "severity": "none",
+               "days": days, "total": total,
+               "per_project": [{k: v for k, v in a.items() if k != "by_rule"} for a in per],
+               "coverage": {"projects": len({p for p, _h, _m in projects}),
+                            "hosts": len({h for _p, h, _m in projects})},
+               "chain_heads": heads,
+               "derived": True,
+               "reason": "跨项目聚合快照（派生物；各项目链仍是唯一事实源）"}
+        import hub as hubmod
+        _session_dna().append_chained(hubmod.rollup_dir(), rec)
+        print("（汇总快照已进中枢链：~/.antinel/rollup/）")
+
+
+# ------------------------------------------------- verify / report / hub ----
+def cmd_morning(args):
+    """0.29.0：一屏晨报——昨晚（今日）动作/拦截/提醒/tokens + 昨日对比 + 最重一条。
+    单遍扫描账本；生成耗时上屏（承诺 ≤1s）。只聚合事实，不评分、不排名。"""
+    import time as _t
+    from datetime import timedelta
+    t0 = _t.time()
+    root = find_project_root()
+    if root is None:
+        _die("未找到项目根（请在项目内运行晨报；跨项目见 digest --scope all）")
+    ad = _audit_dir(root)
+    if not os.path.isdir(ad):
+        _die("本项目还没有账本（.psl/audit 不存在）——先接入宿主跑一次 Agent 会话")
+    sd = _session_dna()
+    today = datetime.now().strftime("%Y-%m-%d")
+    yest = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    cur = {"a": 0, "b": 0, "w": 0, "t": 0, "by": {}}
+    prev = {"a": 0, "b": 0, "w": 0, "t": 0}
+    worst = None                                # (sev_rank, rec)
+    sev_rank = {"critical": 0, "warning": 1}
+    for day, rec in sd._rows(sd._iter_day_files(ad), float("inf"), [False]):
+        d = day[:10]
+        if d == today:
+            t = rec.get("type")
+            if t == "pre_tool_use":
+                cur["a"] += 1
+                if rec.get("decision") == "block":
+                    cur["b"] += 1
+                    for rid in (rec.get("rules_hit") or []):
+                        cur["by"][rid] = cur["by"].get(rid, 0) + 1
+                    sr = sev_rank.get(rec.get("severity"), 9)
+                    if worst is None or sr < worst[0]:
+                        worst = (sr, rec)
+                elif rec.get("decision") == "alert":
+                    cur["w"] += 1
+            elif t == "usage_delta":
+                for e in (rec.get("entries") or []):
+                    cur["t"] += (e.get("input_tokens") or 0) + (e.get("output_tokens") or 0)
+        elif d == yest:
+            t = rec.get("type")
+            if t == "pre_tool_use":
+                prev["a"] += 1
+                if rec.get("decision") == "block":
+                    prev["b"] += 1
+                elif rec.get("decision") == "alert":
+                    prev["w"] += 1
+            elif t == "usage_delta":
+                for e in (rec.get("entries") or []):
+                    prev["t"] += (e.get("input_tokens") or 0) + (e.get("output_tokens") or 0)
+
+    def _diff(now, before):
+        if now == 0 and before == 0:
+            return "—"
+        if before == 0:
+            return "新增 " + format(now, ",")
+        d = now - before
+        return "持平" if d == 0 else "%+d" % d
+
+    wk = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][datetime.now().weekday()]
+    print("───────── Antinel 晨报 · %s（%s）─────────" % (today, wk))
+    print("  动作 %s ｜拦截 %s ｜提醒 %s ｜tokens %s"
+          % (format(cur["a"], ","), cur["b"], cur["w"], format(cur["t"], ",")))
+    if cur["by"]:
+        print("  拦截构成：" + " · ".join("%s×%d" % kv for kv in sorted(cur["by"].items())))
+    if worst:
+        wrec = worst[1]
+        rid = ",".join(wrec.get("rules_hit") or ["-"])
+        inp = wrec.get("input") or {}
+        detail = (wrec.get("match_snippet")
+                  or inp.get("command") or inp.get("file_path") or "")[:56]
+        print("  最重一条：[%s] %s（已拦下）" % (rid, detail))
+    print("  对比昨日：动作 %s ｜拦截 %s ｜tokens %s"
+          % (_diff(cur["a"], prev["a"]), _diff(cur["b"], prev["b"]),
+             _diff(cur["t"], prev["t"])))
+    unit = (load_economics(detect_host()).get("unit_label") or "tokens")
+    print("  覆盖：本项目 / 宿主 %s（未接入工具不在此列）；记账口径 %s"
+          % (detect_host(), unit))
+    # 0.28.1（哨兵存活性 v1）：门闸布防时把哨兵在岗状态说出口——dead-man 的消费端。
+    # 此前心跳断档没有任何主动呈现，哨兵死了 5 天无人知晓（2026-09-24 死因取证）。
+    try:
+        import host_shield as _hs
+        _st = _hs.load_state()
+        if _st.get("enabled"):
+            if _hs.sentinel_alive(_st):
+                print("  门闸哨兵：在岗（pid %s）" % _st.get("sentinel_pid"))
+            else:
+                _age, _ = _hs.heartbeat_age()
+                print("  ⚠ 门闸哨兵：不在岗%s——下次 Agent 活动自动复活；手动：antinel host-shield enable"
+                      % ("" if _age is None else "，最后心跳 %.0f 分钟前" % (_age / 60.0)))
+    except Exception:
+        pass
+    print("  生成 %.2fs · 数据源=本地审计链（逐条可复算）" % (_t.time() - t0))
+
+
+
+def _sibling(name):
+    """包内寻址：源码树（同级）与安装布局（scripts/hooks/tools 子目录）都成立。"""
+    for d in (_HERE, os.path.join(_HERE, "scripts"), os.path.join(_HERE, "hooks"),
+              os.path.join(_HERE, "tools")):
+        p = os.path.join(d, name)
+        if os.path.isfile(p):
+            return p
+    return os.path.join(_HERE, name)
+
+
+def cmd_verify(args):
+    root = find_project_root()
+    if root is None:
+        _die("未找到项目")
+    cands = (_sibling(os.path.join("tools", "verify_chain.py")),
+             os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                          "tools", "verify_chain.py"))
+    for cand in cands:
+        if os.path.isfile(cand):
+            sys.exit(subprocess.call([sys.executable, cand, _audit_dir(root)]))
+    _die("verify_chain.py 不存在")
+
+
+def _sibling_dir(sub):
+    return os.path.join(_HERE, sub)
+
+
+def cmd_report(args):
+    root = find_project_root()
+    if root is None:
+        _die("未找到项目")
+    argv = [sys.executable, _sibling("report.py"),
+            "--root", root, "--session", args.session]
+    if getattr(args, "write", False):
+        argv.append("--write")
+    if args.write:
+        argv.append("--write-dna")
+    rc = subprocess.call(argv)
+    sys.exit(rc)
+
+
+def cmd_hub(args):
+    import hub as hubmod
+    if args.sub == "register":
+        if not os.path.isdir(os.path.join(args.path, ".psl")):
+            _die("该目录没有 .psl（未安装 Antinel？）：%s" % args.path)
+        hubmod.register(args.path, args.host or detect_host(),
+                        registered_by=_invoked_by())
+        print("✓ 已登记：", os.path.abspath(args.path))
+    elif args.sub == "unregister":
+        n = hubmod.unregister(args.path)
+        print("移除 %d 条" % n)
+    elif args.sub == "tools":
+        hubmod.set_tools_declared(args.tools)
+        print("✓ 在用工具清单：", ", ".join(hubmod.load_registry()["tools_declared"]))
+    else:
+        reg = hubmod.load_registry()
+        for p in reg["projects"]:
+            print(" ", p["root"], "（%s）" % ",".join(p["hosts"]))
+        if reg.get("tools_declared"):
+            declared = set(reg["tools_declared"])
+            covered = {h for p in reg["projects"] for h in p.get("hosts") or []}
+            miss = sorted(declared - covered)
+            if miss:
+                print("  未接入：", ", ".join(miss))
+
+
+# ------------------------------------------------------------ help ----
+HELP_HOSTLINE = "AgentState v%s ｜ 宿主: %s（记账口径: %s）"
+
+
+def cmd_help(_args=None):
+    host = detect_host()
+    prof = load_economics(host)
+    _unit = prof.get("unit", "?")
+    print(HELP_HOSTLINE % (VERSION, host, _unit))
+    # 0.29.0（C-5/D3）：credits 子命令只在 unit=credits 的宿主存在（见本文件抬头 §经济画像）。
+    # 此前 help 无条件把三条 `antinel credits …` 印出来，而 zcode/qoder/generic 的 unit 是
+    # tokens、claude-code 是 USD ⇒ 印出来的命令一跑就 _die（cmd_credits 会拒绝）。
+    # help 是"本宿主"的交互面，按画像过滤；判据取"命令是否以 antinel credits 开头"，
+    # 这样 `antinel report --session latest` 这类跨单位命令仍保留。
+    # ★ cmd_routes **不过滤**：那是宿主无关的路由契约，会被烘进随包 references/AGENT_SKILL.md，
+    #   在那里藏掉 credits 反而会让 workbuddy 宿主的 Agent 不知道有这条命令。
+    _routes = [r for r in ROUTES
+               if _unit == "credits" or not r[1].strip().startswith("antinel credits")]
+    print("── 你可以对 Agent 说 ───────────────────────")
+    for u, _c, _cat in _routes:
+        print("  「%s」" % u)
+    print("── 命令（Agent 替你跑，也可以自己跑）─────────")
+    for cat in ("审核", "防范", "账本"):
+        rows = [(u, c) for (u, c, k) in _routes if k == cat]
+        if rows:
+            print("  ◇ %s" % cat)
+            for _u, c in rows:
+                print("    %s" % c)
+    print("    antinel settings list ｜ hub list ｜ routes --markdown")
+    print("── 提示 ───────────────────────────────────")
+    print("  拦截消息里给出的命令可直接执行；所有配置变更均进审计链。")
+    print("  多宿主共存机器：Agent 自报宿主（antinel --host zcode …），口径即随宿主。")
+    print("  分寸：记录 Agent 的行为与消耗；不做人的效率排名。")
+    # 0.29.0（G-4）：网络外传的默认档位**显式说出来**。
+    # 实测：hooks/pre_tool_use.py 里 `.get("net_mode","warn")` —— 默认只提醒不拦；
+    # 且两个真实 .psl/policy.json 里都**没有**这个键 ⇒ 生效的就是隐藏默认。
+    # 不说出来，用户会以为"网络外传已被拦"，那是自我安慰；说出来，选择权才在人手里。
+    # ★ 读不到就**如实说读不到**，不假装是 warn（假方案比没方案更坏）。
+    _nm, _nm_note = None, ""
+    _root = find_project_root()
+    if _root is None:
+        _nm_note = "未找到项目 .psl，按内置默认"
+    else:
+        try:
+            _gs = (_load_json(os.path.join(_root, ".psl", "policy.json")) or {}).get(
+                "global_settings") or {}
+            if "net_mode" in _gs:
+                _nm, _nm_note = str(_gs["net_mode"]).lower(), "策略文件已显式设置"
+            else:
+                _nm_note = "策略文件未设置该键，按内置默认"
+        except Exception as _e:
+            _nm_note = "策略文件读取失败（%s），按内置默认" % type(_e).__name__
+    if _nm is None:
+        _nm = "warn"
+    print("  ⚠ 网络外传当前档位：net_mode=%s  [%s]" % (_nm, _nm_note))
+    if _nm != "block":
+        print("     ★ 即：未白名单域名的网络命令**只提醒、不拦截**。"
+              "要拦：antinel settings set net_mode block")
+    else:
+        print("     ★ 未白名单域名的网络命令会被**拦下**。")
+
+
+def cmd_routes(args):
+    if args.markdown:
+        print("<!-- 由 `antinel routes --markdown` 生成；与 help 同源（ROUTES） -->")
+        print("当用户表达下列意图时，运行对应命令（命令幂等；配置变更自动进审计链）。")
+        print()
+        print("**★ 语义匹配，不是词表匹配**：下面的用户话语只是**示例**，不是触发条件。")
+        print("用户用任何说法表达同类意图——「胡搞/乱来/越界/偷传/不乖/瞎动」或未来任何新说法——")
+        print("都应执行对应命令：**语义对上就执行，不要等词对上**。")
+        print()
+        for u, c, _cat in ROUTES:
+            print("- 「%s」→ `%s`" % (u, c.replace("\\", "\\\\")))
+        print("- 「antinel / 帮助 / 你能做什么」→ `antinel`（help 清单）")
+        print("- 多宿主共存的机器上，Agent 应自报所在宿主：`antinel --host zcode …`"
+              "（workbuddy|zcode|qoder|claude-code），否则记账口径按这台电脑探测显示。")
+        return
+    for u, c, _cat in ROUTES:
+        print("%s\t%s" % (u, c))
+
+
+# ------------------------------------------------------------ main ----
+# ------------------------------------------------------ host-shield/audit ----
+def cmd_zone(args):
+    """0.26.0 安全区：目录进保险库——防篡改（deny 写）+ 出网被闸（net_mode=block）。
+    数据经用户同意放入，之后区内不可变；出口在 NET block。"""
+    root = find_project_root()
+    if root is None:
+        _die("未找到项目")
+    pol_path = os.path.join(root, ".psl", "policy.json")
+    if args.sub == "list":
+        try:
+            for z in (_load_json(pol_path).get("zones") or []):
+                print(" ", z)
+        except Exception:
+            pass
+        return
+    norm, err = validate_root(args.dir)
+    if err:
+        _die("校验失败：%s\n  示例：antinel zone add D:\\archive\\重要资料" % err)
+    if not os.path.isfile(pol_path):
+        _die("项目策略不存在（先执行任一 antinel 写命令自动创建）")
+
+    def mut(data):
+        zs = data.setdefault("zones", [])
+        if norm.replace("/", "\\") in [z.replace("/", "\\") for z in zs]:
+            return None
+        zs.append(norm)
+        return "zones + %s" % norm
+
+    seven_step("zone add %s" % norm, pol_path, _policy_loader(pol_path), mut,
+               "安全区生效：该目录对 Agent/宿主进程 只读（防篡改），配合 net_mode=block 出网被闸",
+               "antinel zone remove %s" % norm, "zones", root)
+    # 同步进哨兵状态（哨兵只认 host_shield.json 的 zones）
+    try:
+        import host_shield as hs
+        st = hs.load_state()
+        st.setdefault("zones", []).append(norm)
+        hs.save_state(st)
+        print("✓ 哨兵已纳入执法（防篡改锁即时生效）")
+    except Exception:
+        print("（哨兵未运行；防篡改锁将在哨兵启动时生效）")
+
+
+def _startup_folder_cmd():
+    """启动文件夹里的自启 shim 路径（schtasks 被宿主 Program Blacklist 拦时的回退位）。"""
+    appdata = os.environ.get("APPDATA") or os.path.join(
+        os.path.expanduser("~"), "AppData", "Roaming")
+    return os.path.join(appdata, "Microsoft", "Windows", "Start Menu",
+                        "Programs", "Startup", "antinel-shield.cmd")
+
+
+# ★ 单一真源（2026-09-26 B3）：护盾"开着"时**到底拦不拦**。
+#   实测矛盾：`enable` 打印"登记路径的外传落点默认拒绝"，而 `status` 打印
+#   "未裁决落点默认只报不拦" —— 同一次操作，前后自相矛盾。
+#   H-1（0.29.0）已认定旧文案不再成立，但当时只改了 status。
+#   危害是实质的：用户开完护盾会以为**已经在拦**，其实一条都没拦
+#   （"记录 ≠ 实际"的对外版本）。⇒ 两处共用这一句，不许各写一份。
+SHIELD_STATE_ON = "开着（未裁决落点默认只报不拦；要拦须 decide deny）"
+
+
+def cmd_host_shield(args):
+    import host_shield as hs
+    st = hs.load_state()
+    if args.sub == "status":
+        # 0.29.0 (H-1)：原文案写"宿主外传路径**默认拒绝**"——这句话在 H-1 之后已经不成立
+        # （未裁决 ⇒ 只报不拦），留着就是「记录 ≠ 实际」，会让人以为拦着其实没拦。
+        print("护盾：", SHIELD_STATE_ON if st.get("enabled")
+              else "关着（默认。开启：antinel host-shield enable）")
+        # 0.28.1：哨兵存活性 + 心跳断档——"配置开着"不等于"哨兵在岗"，把两者分开说
+        alive = hs.sentinel_alive(st)
+        age, _last = hs.heartbeat_age()
+        if st.get("enabled"):
+            if alive:
+                print("  哨兵进程：在岗（pid %s，自 %s）"
+                      % (st.get("sentinel_pid"), str(st.get("sentinel_started_at"))[:16]))
+            else:
+                print("  ⚠ 哨兵进程：不在岗——每次 Agent 活动会自动尝试复活（paramedic）；"
+                      "手动：antinel host-shield enable")
+            print("  最后心跳：%s" % ("%.0f 分钟前（应 ≤10 分钟）" % (age / 60.0)
+                                      if age is not None else "无记录——哨兵从未成功留痕或刚布防"))
+            print("  自启方式：%s" % (st.get("autostart") or "<未登记（旧版布防）>"))
+        for k, v in (st.get("workspaces") or {}).items():
+            print("  %s → %s" % (k, v))
+        for k, v in (st.get("windows") or {}).items():
+            print("  [放行窗] %s 至 %s" % (k, datetime.fromtimestamp(v)))
+        # 0.29.0 (H-4)：**列出当前真正锁着的目录**。这是用户此前完全没有的出口。
+        _root = os.path.dirname(_sibling("antinel.py"))
+        try:
+            _locks = hs.list_locks(_root)
+        except Exception as _e:
+            _locks = []
+            print("  ⚠ 已上锁目录列举失败：%s" % _e)
+        if _locks:
+            print("  ⚠ 当前 %d 个目录处于上锁状态（host-shield unlock <路径> 解除）：" % len(_locks))
+            for _l in _locks:
+                print("     · %s  [gate=%s / 来源=%s]" % (_l.get("path"), _l.get("gate"),
+                                                          _l.get("source")))
+        # 0.29.0 (H-2)：待裁决队列的**呈现端**。此前只有记录端（审计链里躺着），
+        # 用户从不看 ⇒ "报告必须要用户确认"这条要求落空一半。
+        _pend = [r for r in hs.load_pending() if (r.get("status") or "unjudged") == "unjudged"]
+        if _pend:
+            print("  ⚠ %d 个落点待你裁决（host-shield queue 看全部）：" % len(_pend))
+            for r in _pend[:5]:
+                print("     · %s  [%s] %s" % (r.get("path"), r.get("gate"),
+                                              (r.get("why") or "")[:48]))
+            print("     裁决：antinel host-shield decide \"<路径>\" allow_always｜deny")
+        return
+    if args.sub == "locks":
+        _root = os.path.dirname(_sibling("antinel.py"))
+        _locks = hs.list_locks(_root)
+        if not _locks:
+            print("当前没有处于上锁状态的目录。")
+            return
+        print("当前上锁 %d 个目录：" % len(_locks))
+        for _l in _locks:
+            print("  %s\n     gate=%s 来源=%s\n     解锁：antinel host-shield unlock \"%s\""
+                  % (_l.get("path"), _l.get("gate"), _l.get("source"), _l.get("path")))
+        return
+    if args.sub == "unlock":
+        # 0.28.3（E1 自签字堵死）同一条纪律：解锁＝放行，必须人本人在终端跑。
+        if not _is_tty():
+            _die("unlock 是放行决定，必须在交互终端由你本人执行（防 Agent 自签字）")
+        import host_shield as _hu
+        _tgt = os.path.abspath(args.path)
+        if not os.path.isdir(_tgt):
+            _die("目录不存在：%s" % _tgt)
+        _before = _hu.is_denied(_tgt)
+        _hu.acl_allow(_tgt)                     # ★ 必须走 acl_allow（/reset），
+        _after = _hu.is_denied(_tgt)            #   另写的 /remove:d 实测不解（见 host_shield 注释）
+        _st = _hu.load_state()
+        _st.setdefault("workspaces", {})[_tgt.lower()] = "allow_always"
+        _hu.save_state(_st)
+        _hu.record(None, "host_shield_changed", decision="allow", severity="warning",
+                   field="workspace:" + _tgt, change="unlock", invoked_by=_invoked_by(),
+                   reason="用户解锁：%s（解锁前 is_denied=%s，解锁后 %s）"
+                          % (_tgt, _before, _after))
+        print("✓ %s" % ("已解锁" if not _after else
+                        "【解锁未生效】——ACL 未能恢复，仍为上锁状态，须人工排查：%s" % _tgt))
+        return
+    if args.sub == "queue":
+        _pend = hs.load_pending()
+        if not _pend:
+            print("待裁决队列为空（门闸未发现需要你表态的落点）。")
+            return
+        print("待裁决 %d 个落点：" % len(_pend))
+        for r in _pend:
+            print("  %s\n     gate=%s 来源=%s 状态=%s\n     理由：%s\n     首见 %s / 末见 %s"
+                  % (r.get("path"), r.get("gate"), r.get("source"),
+                     r.get("status") or "unjudged", r.get("why"),
+                     r.get("first_seen"), r.get("last_seen")))
+        print("\n裁决：antinel host-shield decide \"<路径>\" allow_always｜deny"
+              "（放行须本人在终端）")
+        return
+    if args.sub == "enable":
+        st["enabled"] = True
+        hs.save_state(st)
+        # 0.31.0 (F4): 布防时登记钩子注册（settings 文件 + 哈希）——哨兵从此
+        # 有基线可查："闸门被拔线"从无声变成 breach 子类⑤（见 host_shield.scan_once）。
+        try:
+            _reg_file = None
+            try:
+                _mf = json.load(open(os.path.join(os.getcwd(), ".psl", "manifest.json"),
+                                     encoding="utf-8"))
+                _reg_file = _mf.get("settings_file") or None
+            except Exception:
+                _reg_file = None
+            if _reg_file and os.path.isfile(_reg_file):
+                import hashlib as _h
+                _txt = open(_reg_file, "rb").read()
+                st["hook_registration"] = {
+                    "settings_file": _reg_file,
+                    "sha256": _h.sha256(_txt).hexdigest()}
+            else:
+                st["hook_registration"] = {"settings_file": None, "sha256": None}
+            hs.save_state(st)
+        except Exception:
+            pass
+        shim = os.path.join(os.path.expanduser("~"), ".antinel", "antinel-shield.cmd")
+        os.makedirs(os.path.dirname(shim), exist_ok=True)
+        # 0.28.1：编码必须容纳用户名里的非 ASCII 字符（本机 ~ = C:\Users\大马\...）。
+        # 旧版 encoding="ascii" 在这台机器上必抛 UnicodeEncodeError——enable 在
+        # save_state 之后、schtasks 之前死掉，留下 enabled=true 而什么都没做
+        # （这正是 09-19 那次"开了护盾却没有 shim、没有哨兵"的死因之一）。
+        # cmd 按 ANSI 代码页解析批处理（zh-CN = GBK/936），mbcs 恰好正确。
+        with open(shim, "w", encoding="mbcs", newline="\r\n") as f:
+            f.write('@echo off\r\n"%s" -I -S "%s" sentinel "%s"\r\n'
+                    % (sys.executable, _sibling("host_shield.py"),
+                       os.path.dirname(_sibling("antinel.py"))))
+        # 0.28.1（死因 RC2）：schtasks /Create 的返回码必须查，失败要换道，不许假成功。
+        # 0.28.3（B4i）：schtasks 走 System32 绝对路径（防应用目录/PATH 投毒）。
+        # ★ 2026-09-26（A2）：**"返回码" ≠ "能启动"**。本机实测：schtasks.exe 被程序
+        #   黑名单禁止启动时，subprocess.run 在 CreateProcess 阶段就抛 PermissionError，
+        #   异常直接穿透到顶层 —— 而 `save_state(enabled=True)` 与写 shim 都在它**之前**，
+        #   于是留下"状态说开着、实际没有哨兵、没有自启"（＝ 09-19 那个死因换了触发条件）。
+        #   ⇒ 除了查 rc，还必须接住"根本起不来"。
+        autostart = "schtasks"
+        try:
+            r1 = subprocess.run([hs._SCHTASKS, "/Create", "/TN", "AntinelHostShield",
+                                 "/TR", '"%s"' % shim, "/SC", "ONLOGON", "/F"],
+                                capture_output=True, timeout=30)
+            _rc1 = r1.returncode
+        except (OSError, subprocess.SubprocessError) as _e:
+            _rc1 = -1
+            print("  ⚠ 计划任务工具无法启动（%s）——改走启动文件夹" % type(_e).__name__)
+        if _rc1 != 0:
+            try:
+                shutil.copyfile(shim, _startup_folder_cmd())
+                autostart = "startup-folder"
+            except OSError:
+                autostart = "none"
+        # 0.28.1（死因 RC3）：哨兵由 spawn_sentinel 拉起——脱离会话/作业对象，
+        # 会话结束不再连带被杀；失败也如实上报（不再无条件宣布成功）。
+        # 幂等：哨兵已在岗则不重复拉起（重复拉起会立刻被唯一性守卫退出，
+        # 却把 state 的 pid 改写成这个短命进程，造成记账抖动）。
+        if hs.sentinel_alive(st):
+            ok, pid, mode = True, st.get("sentinel_pid"), "already-running"
+        else:
+            ok, pid, mode = hs.spawn_sentinel(os.path.dirname(_sibling("antinel.py")))
+        st = hs.load_state()
+        st["autostart"] = autostart
+        hs.save_state(st)
+        hs.record(None, "host_shield_changed", decision="allow", severity="warning",
+                  field="enabled", change="false → true", armed=True,
+                  autostart=autostart, spawn=("ok" if ok else "failed"),
+                  invoked_by=_invoked_by(),
+                  reason="宿主审计门闸已布防（自启=%s；哨兵=%s）"
+                         % (autostart, ("pid %s %s" % (pid, mode)) if ok else "拉起失败，paramedic 兜底"))
+        print("✓ 护盾已布防：%s" % SHIELD_STATE_ON)
+        if autostart == "schtasks":
+            print("  自启：计划任务 AntinelHostShield（登录触发）")
+        elif autostart == "startup-folder":
+            print("  自启：启动文件夹（计划任务命令被这台电脑上的策略拦截，已回退）")
+        else:
+            print("  ⚠ 自启未能注册（schtasks 与启动文件夹都失败）——"
+                  "兜底：每次 Agent 活动时钩子会自动复活哨兵（paramedic）")
+        if ok:
+            print("  哨兵：已在岗（pid %s，%s）" % (pid, mode))
+        else:
+            print("  ⚠ 哨兵本次未能拉起——下次 Agent 活动时 paramedic 会自动重试；"
+                  "antinel host-shield status 查看在岗状态")
+        print("  代价：被拦工作区的 ZCode 检查点回滚不可用。撤销：antinel host-shield disable")
+        return
+    if args.sub == "disable":
+        st["enabled"] = False
+        # 0.28.1：撤防同时停掉在岗哨兵（旧版留着空转）——先查存活再清 pid
+        _alive_pid = st.get("sentinel_pid") if hs.sentinel_alive(st) else None
+        st["sentinel_pid"] = None
+        hs.save_state(st)
+        # 0.28.3（B4i）：schtasks/taskkill 绝对路径
+        # ★ 2026-09-26（A2）：**撤防必须走完**。原代码裸调 schtasks，本机实测直接抛
+        #   PermissionError ⇒ 后面"杀哨兵、还原 ACL、写留痕"三步**一步都没执行**，
+        #   而 state 已经写了 enabled=false —— 机器上留下"已撤防"的假象。
+        #   （审计链 2026-09-26T08:26:03 那条"disable 在写本条留痕之前中断"就是这次。）
+        _auto_removed = True
+        try:
+            subprocess.run([hs._SCHTASKS, "/Delete", "/TN", "AntinelHostShield", "/F"],
+                           capture_output=True, timeout=30)
+        except (OSError, subprocess.SubprocessError) as _e:
+            _auto_removed = False
+            print("  ⚠ 计划任务未能删除（%s）——继续撤防其余部分" % type(_e).__name__)
+        try:
+            os.remove(_startup_folder_cmd())
+        except OSError:
+            pass
+        if _alive_pid:
+            try:
+                subprocess.run([hs._TASKKILL, "/F", "/PID", str(_alive_pid)],
+                               capture_output=True, timeout=30)
+            except (OSError, subprocess.SubprocessError) as _e:
+                print("  ⚠ 哨兵进程未能结束（%s）——下次登录可能仍被拉起，请手工检查"
+                      % type(_e).__name__)
+        for reg in hs.load_watch_registry(os.path.dirname(_sibling("antinel.py"))):
+            for w in reg.get("watch", []):
+                base = hs.expand(w.get("path", ""))
+                if not os.path.isdir(base):
+                    continue
+                for dirpath, dirnames, _f in os.walk(base):
+                    for dn in dirnames:
+                        if hs.is_denied(os.path.join(dirpath, dn)):
+                            hs.acl_allow(os.path.join(dirpath, dn))
+        hs.record(None, "host_shield_changed", decision="allow", severity="warning",
+                  field="enabled", change="true → false", armed=False, invoked_by=_invoked_by(),
+                  reason="宿主审计门闸已撤防（ACL 已还原%s）"
+                         % ("" if _auto_removed else "；★ 自启项删除失败，下次登录可能仍被拉起"))
+        print("✓ 护盾已撤防，ACL 已还原")
+        if not _auto_removed:
+            print("  ⚠ 但**自启项未能删除**——下次登录可能仍会拉起哨兵。请手工检查："
+                  "计划任务 AntinelHostShield ／ %s" % _startup_folder_cmd())
+        return
+    if args.sub == "decide":
+        ws = os.path.abspath(args.workspace).lower()
+        dec = args.decision
+        if dec not in ("allow_once", "allow_always", "deny"):
+            _die("决定取 allow_once|allow_always|deny")
+        # 0.28.3（E1 自签字堵死）：放行类决定必须人本人在终端跑——Agent 非 TTY
+        # 调用一律拒绝。deny 是收紧方向，不拦。
+        if dec in ("allow_once", "allow_always") and not _is_tty():
+            _die("allow_once/allow_always 是放行决定，必须在交互终端由你本人执行"
+                 "（防 Agent 自签字）。deny 可以由 Agent 代跑。")
+        import host_shield as hs2
+        import time as _t
+        resolved = None
+        for reg in hs2.load_watch_registry(os.path.dirname(_sibling("antinel.py"))):
+            for w in reg.get("watch", []):
+                base = hs2.expand(w.get("path", ""))
+                if not os.path.isdir(base):
+                    continue
+                for dirpath, dirnames, _f in os.walk(base):
+                    for dn in dirnames:
+                        full = os.path.join(dirpath, dn)
+                        if ws in full.lower() or full.lower() in ws:
+                            resolved = full
+        # 0.29.0 (F-3)：**host-scan 登记的落点同样可被裁决**。
+        # 此前只在 rules/hosts/*.json 的 watch 表里找 ⇒ host-scan 判 T2（本机实证、
+        # 但没登记 watch）的落点**根本裁决不到** ⇒ 只能"只报不拦"。现在两边都能裁决。
+        if not resolved:
+            for fd in hs2.load_findings():
+                fp = os.path.abspath(hs2.expand(fd.get("path", "")))
+                if not fp or not os.path.isdir(fp):
+                    continue
+                if fp.lower() in ws or ws in fp.lower():
+                    resolved = fp
+                    break
+        if not resolved:
+            _die("未找到匹配的外传落盘点（antinel host-scan 查看你电脑上的落点）")
+        st = hs2.load_state()
+        st.setdefault("workspaces", {})[resolved.lower()] = (
+            "allow_always" if dec == "allow_always" else "deny")
+        if dec == "allow_once":
+            st.setdefault("windows", {})[resolved.lower()] = _t.time() + 120
+        hs2.save_state(st)
+        hs2.record(None, "host_shield_changed", decision="allow" if dec.startswith("allow") else "deny",
+                   severity="warning", field="workspace:" + resolved,
+                   change=dec, invoked_by=_invoked_by(),
+                   reason="用户决定：%s" % dec)
+        print("✓ 已记录决定：%s → %s" % (resolved, dec))
+        return
+
+
+def cmd_host_audit(args):
+    import host_shield as hs
+    root = os.path.dirname(_sibling("antinel.py"))
+    if not os.path.isdir(os.path.join(root, "rules", "hosts")):
+        root = os.path.dirname(root)            # pkg 布局：从 hooks/ 上浮到包根
+    regs = hs.load_watch_registry(root)
+    if getattr(args, "host", None):
+        regs = [r for r in regs if r.get("host") == args.host]
+    if not regs:
+        _die("登记表为空（rules/hosts/）")
+    # 0.28.4：登记表已扩到本机全部 AI 工具（24 个），但**只有已取证的才布门闸**。
+    # 本表只列【已布门闸】的宿主；其余在 `host-scan` 里分级列出 —— 避免"列了一堆
+    # 却什么都没拦"的假安全感（那正是「查不出来 ≠ 查出来是好的」）。
+    armed = [r for r in regs if r.get("watch")]
+    if not armed:
+        _die("登记表里没有任何【已布门闸】的宿主（watch 全为空）")
+    for reg in armed:
+        print("== 宿主:", reg.get("host"))
+        for w in reg.get("watch", []):
+            base = hs.expand(w.get("path", ""))
+            print("  路径:", base, "存在" if os.path.isdir(base) else "不存在")
+            if not os.path.isdir(base):
+                continue
+            # 0.29.0：此处原有一行死代码（`sum(...) if False else None`），从不被使用，
+            # 且会在每次调用时构造生成器 —— 已删。
+            size = 0
+            for dp, _dn, fs in os.walk(base):
+                for x in fs:
+                    try:
+                        size += os.path.getsize(os.path.join(dp, x))
+                    except OSError:
+                        pass
+            print("  体量: %.1f MB" % (size / 1048576))
+            for ws in sorted(os.listdir(base)):
+                wd = os.path.join(base, ws)
+                if not os.path.isdir(wd):
+                    continue
+                accepted = pending_n = 0
+                git_n = sens_n = entries = 0
+                ws_path = ""
+                for f2 in glob.glob(wd + r"\**\*.json", recursive=True):
+                    try:
+                        s = io.open(f2, encoding="utf-8", errors="replace").read()
+                    except Exception:
+                        continue
+                    if "lastAccepted" in s:
+                        accepted += 1
+                    if "workspacePath" in s:
+                        # 0.28.4：原实现按固定偏移 `i+17` 切片，但 json.dump 写的是
+                        # `"workspacePath": "..."`（冒号后带空格）⇒ 值其实从 i+18 起，
+                        # 于是**一直解析成空串**，工作区路径恒显示 "?"（静默、无报错）。
+                        # 改用正则，两种分隔写法都对。
+                        m = re.search(r'"workspacePath"\s*:\s*"((?:[^"\\]|\\.)*)"', s)
+                        if m:
+                            try:      # 反转义：json 里是 "D:\\psl\\poc"
+                                ws_path = json.loads('"%s"' % m.group(1))
+                            except Exception:
+                                ws_path = m.group(1)
+                    try:
+                        d = json.loads(s)
+                    except Exception:
+                        continue
+                    items = d if isinstance(d, list) else d.get("files") or []
+                    for it in items:
+                        p = it if isinstance(it, str) else (it.get("path") or "")
+                        if not p:
+                            continue
+                        entries += 1
+                        if ".git" in p.lower():
+                            git_n += 1
+                        if p.lower().endswith((".pem", ".key", ".p12", ".pfx", ".asc", ".kdbx")):
+                            sens_n += 1
+                for f2 in glob.glob(wd + r"\**\pending\*", recursive=True):
+                    pending_n += 1
+                line = "  工作区 %s: %s | 条目 %d | .git %d | 敏感 %d | pending %d" % (
+                    ws[:12], (ws_path or "?")[:46], entries, git_n, sens_n, pending_n)
+                if accepted:
+                    line += " | ⚠ 已上传接受"
+                print(line)
+                if sens_n:
+                    print("    ⚠ 敏感扩展命中——核对凭据轮换")
+    print("（覆盖声明：登记表共 %d 个宿主，其中【已布门闸】%d 个（即上表）。）"
+          % (len(regs), len(armed)))
+    print("  ⚠ 未被列出的工具 ≠ 安全：'本次取证未发现外传证据' 只说明【没查出来】，"
+          "不代表【没有外传】。")
+    # ★ 0.29.0.r1：这里原本写「本机所有 AI 工具」。「本机」是**开发团队视角**的词，
+    #   用户读到的是"那台机器"，不是"我的电脑"（创始人点名过这个错位）。
+    #   ⇒ 改产品，不改网页：网页贴的是**逐字真实输出**，为了过检查器去改贴出来的字，
+    #     就等于重新制造 P0-2（页面 ≠ 产品）。
+    print("  全量清单（你电脑上的所有 AI 工具 ＋ 分级 ＋ 证据）：antinel host-scan）")
+
+
+# ------------------------------------------------------------ host-scan ----
+# 0.28.4（C3）：本机 AI 工具「外传落盘点」发现（只读）。
+# 设计：《Antinel 全工具覆盖设计 v1.0》§4「证据驱动的三级判定」。
+# ★ 为什么不靠目录名：本机实测（2026-09-25），纯目录名启发式命中 24 个"疑似外传暂存区"，
+#   逐个人工取证后 23 个是误报（Crashpad/reports、*-updater/pending、Chrome 内置、
+#   技能包名里含 upload/report…）—— 误报率约 85%。
+#   所以本命令的判据是【工具自己写下的外传自认】，不是【目录叫什么】。
+
+# ★ 2026-09-26：厂商词表搬到 `egress.py`（`VENDOR_KW`）作为**唯一真源**，这里改为导入。
+#   理由（仓库自己的纪律「共用同一实现，禁重写判据」）：复制一份必然漂移 ——
+#   本仓已为「两处同一判据」付过四次学费（放行判据≠留痕判据、allow_always 不解锁、
+#   文档区间腐烂、ROUTES 落后于实现）；不共用就是第五次。
+#   ★ 不给退路：`egress.py` 缺失会立刻 ImportError，不是静默降级 ——
+#     「缺东西就让功能悄悄消失」正是我们要防的病。构建链有检查项保证它被打包。
+from egress import VENDOR_KW as _SCAN_VENDOR_KW
+
+# 排除表：命中即 T4，不进正文。★ 必须显式维护 —— 无排除表的启发式 ＝ 会误报的检查器。
+# ★ 0.29.0（G-9）：**移除崩溃类条目**（原为 crashpad / \crash\ / /crash/ / crashinfo / sentry）。
+#   移除理由不是"它们会误报"，而是它们**让表说谎**：把崩溃上报写进"已排除"，
+#   读表的人会以为崩溃目录已经被处理过了 —— 而实际上 `.dmp`（整进程内存镜像）
+#   在 0.28.4 里**任何地方都不出现**。现在崩溃类由 `_crash_dump_obs` +
+#   `_RESIDUE_SUBDIRS` 的观察项接管，**有名字、有体积、有进程名**。
+#   判据：把"没查"写成"已排除"，就是自我安慰。
+_SCAN_EXCLUDE_PAT = (
+    "-updater", "updater\\", "updater/",
+    "node_modules", "\\.git\\", "/.git/",
+    "user data", "wechat", "qqlive", "wemeet", "sogouime", "weixin",
+)
+
+# 「外传自认」证据：工具自己写下的、证明它把东西发出去过的字段/后缀。
+_SCAN_EVIDENCE_KW = (
+    "lastAccepted", "lastUploaded", "uploadedAt", "syncedAt", "pushedAt",
+    "manifestHash", "encryptedSize", "lastCompressedSize",
+)
+_SCAN_EVIDENCE_SUFFIX = (".reported", ".sent", ".uploaded")
+
+# 目录遍历优先级提示：名字里带这些词的先走（见 _scan_evidence 注释 2）。
+_SCAN_HINT = ("pending", "upload", "outbox", "staging", "sync", "report",
+              "telemetry", "queue", "checkpoint", "snapshot", "manifest",
+              "residue", "spool", "batch")
+
+_SCAN_SKIP_DIRS = {
+    "node_modules", ".git", "__pycache__", "Cache", "GPUCache", "Code Cache",
+    "Crashpad", "DawnGraphiteCache", "DawnWebGPUCache", "CachedData",
+    "CachedExtensionVSIXs", "CachedProfilesData", "CachedConfigurations",
+    "IndexedDB", "Local Storage", "Session Storage", "blob_storage",
+    "Service Worker", "Partitions", "File System", "Network", "binaries",
+    "extensions", "builtin", "languagepacks", "resources", "app", "Apps",
+    ".cache", "cache", "Cache_Data", "CodeCache", "Crash-Log", "Diagnostics",
+    "image-cache", "image_cache", "node_compile_cache", "logs",
+    "artifacts", "sessions", "transcript", "transcripts",
+    "conversation-history", "shell-snapshots", "file-history",
+}
+
+
+def _scan_roots():
+    home = os.path.expanduser("~")
+    return [("home", home),
+            ("appdata", os.environ.get("APPDATA")
+             or os.path.join(home, "AppData", "Roaming")),
+            ("local", os.environ.get("LOCALAPPDATA")
+             or os.path.join(home, "AppData", "Local"))]
+
+
+def _reg_roots(regs):
+    """24 张登记表的 `roots` → [(宿主, 登记原文, 本机绝对路径)]。
+
+    ★ 0.29.0.r1（P0-3／P0-4 的根因）：`roots` 这张表此前**只被装载、从无消费点** ——
+      全仓唯一碰它的地方是 `host_shield.load_watch_registry` 里 `d.get("roots") or []`，
+      装进一个 dict 就没人再读。
+      ⇒ 一张「登记了却没有任何消费点」的表不是登记表，是注释。
+      ⇒ 后果实测：登记落点 43 个，其中 3 个（~/.claude.json、~/.vscode、%APPDATA%/Code）
+        host-scan **永远扫不到，且输出里一字不提**（把「没查」渲染成「没发现」）。
+      现在登记表是 host-scan 的**硬发现来源**：登记过的一定扫，扫不到的一定报出来。
+    """
+    out = []
+    for host, r in (regs or {}).items():
+        for rp in (r.get("roots") or []):
+            out.append((host, rp, _obs_expand(rp)))
+    return out
+
+
+def _scan_excluded(p):
+    s = p.lower()
+    return next((x for x in _SCAN_EXCLUDE_PAT if x in s), None)
+
+
+def _scan_is_ai(name):
+    n = name.lower().lstrip(".")
+    return next((k for k in _SCAN_VENDOR_KW if k in n), None)
+
+
+def _scan_find_key(o, depth=0):
+    """递归找 JSON 里含「外传自认」的**键名**（兼容保留：只回第一个键名）。
+
+    ★ 判据是【键名】不是【文本出现】：zcode 的 `state.json` 里有键
+      `lastAcceptedManifestHash`（＝工具自认已上传的清单哈希），这才是状态；
+      而某个任务文件正文里提到 "lastAccepted" 只是**内容**，不算证据。
+      （首版按文本搜，T2 因此误收了 `.workbuddy-ai/tasks/<uuid>/25.json`。）
+    ★ 0.29.2 起，真取数一律走 `_scan_collect()`（它返回**完整证据链**）；本函数
+      只保留给旧调用点，语义不变 —— 判据不许二次实现。
+    """
+    hits = _scan_collect(o)
+    return hits[0]["key"] if hits else None
+
+
+# ------------------------------------------------------------ 法庭级取证 ----
+# ★★ 为什么要有这一层（创始人 2026-09-27 指令）：
+#   「尽可能把细节参数都加上，所有用户可能关心的细节参数，都要，特别是可能作为法庭证据。」
+#   改前的病：`_scan_find_key()` **一发现键名就 return**，把值、时间、上下文全丢了 ——
+#   用户看到「上次打包后的体积」五个字，既不知道**什么时候**打的、打了**多大**、
+#   **哪些目录**、**上传了没有**。而这些东西**本来就在文件里**（实测 zcode 的
+#   `lastCompressedSize` 里就带着 workspaceSizeBytes / encryptedSizeBytes /
+#   manifestHash / recordedAt 四项）。
+#   ⇒ 取证的目标从「证明它写过这个词」升级为**「把这份记录完整取下来」**。
+
+# ★★★ 0.29.2：上下文键从"宽词表"改为「**只在命中的父级链内**取」。
+#
+# 改前的病（本机实测踩到，2026-09-27）：原先的宽词表含 `url` / `path` / `host` /
+# `hash` / `at` 这类**极常见的键名**，于是把一堆**与偷数据毫无关系**的文件全捞了进来：
+#   · `known_marketplaces.json` 的 `marketplaces[0].source.url`（插件市场地址）
+#   · `v2/config.json` 的 `provider.*.options.baseURL`（模型 API 地址）
+#   · ★ `credentials.json` 的 `web-remote-control:external-relay:pass_hash`（**凭证！**）
+#     —— 这条最严重：把用户的敏感字段当"证据"展示在结果页上，是**制造新的泄露**。
+#
+# ⇒ 收紧成两条硬规则：
+#   ① 上下文**只在同一个父对象内**取（即：某个 dict 里出现了命中键，才把该 dict 的
+#      兄弟键一并取走）。这样 `lastCompressedSize.recordedAt` 能取到，
+#      而无关文件里的 `url` 永远取不到 —— 因为它们**没有**任何兄弟是命中键。
+#   ② 再加一层**敏感键黑名单**（credential / token / key / secret / password /
+#      pass_hash / cookie / auth）：**无论在哪，一律不取、不显示**。
+#      ★ 宁可证据少一条，也不把用户的凭证搬上屏幕。
+_SCAN_CONTEXT_KW = (
+    "workspacepath", "workspacekey", "manifestpath", "manifesthash",
+    "sizebytes", "files", "recordedat", "uploadedat", "acceptedat",
+    "pushedat", "syncedat", "failurecount", "failcount", "retry",
+    "attempt", "status", "state", "endpoint", "region",
+)
+# 敏感键黑名单：命中即**永不采集**（不是"采集后隐藏"——根本不读进来）。
+_SCAN_SECRET_KW = (
+    "credential", "token", "secret", "password", "pass_hash", "passhash",
+    "private", "apikey", "api_key", "auth", "cookie", "session_key",
+    "refresh", "bearer", "signature", "salt", "nonce",
+)
+# 明确是"体积/大小"的键（用于把数字翻译成人话）
+_SIZE_HINT = ("size", "bytes")
+# 明确是"时间"的键
+_TIME_HINT = ("recordedat", "timestamp", "time", "uploadedat", "pushedat",
+              "syncedat", "acceptedat", "at", "date")
+
+
+def _as_epoch_ms(v):
+    """把各种形状的时间值统一成 **epoch 毫秒**；认不出就返回 None（不许猜）。
+
+    认三型（实测遇到的）：
+      · 13 位整数 = epoch 毫秒（zcode `recordedAt` 实测 1788827124448）
+      · 10 位整数 = epoch 秒
+      · ISO 字符串 / 可被 fromisoformat 解析的字符串
+    ★ 为什么必须"认不出就 None"：把非时间数字当时间是**伪造证据**，
+      比不显示严重得多 —— 这是要能上法庭的东西。
+    """
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        n = int(v)
+        if 10 ** 12 <= n < 10 ** 14:            # 2001-09 ~ 5138 年，毫秒
+            return n
+        if 10 ** 9 <= n < 10 ** 11:             # 秒
+            return n * 1000
+        return None
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return None
+        try:                                    # ISO 8601（含 +08:00 / Z）
+            from datetime import datetime as _dt
+            return int(_dt.fromisoformat(s.replace("Z", "+00:00")).timestamp() * 1000)
+        except Exception:
+            return None
+    return None
+
+
+def _fmt_ts(ms):
+    """epoch 毫秒 → 可读本地时间；同时给原始值（法庭要对原文）。"""
+    if ms is None:
+        return None
+    try:
+        return datetime.fromtimestamp(ms / 1000).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return None
+
+
+def _fmt_bytes(n):
+    """字节 → 人话（老板看得懂）。"""
+    try:
+        n = float(n)
+    except Exception:
+        return None
+    for unit, div in (("GB", 1024 ** 3), ("MB", 1024 ** 2), ("KB", 1024)):
+        if n >= div:
+            return "%.1f %s" % (n / div, unit)
+    return "%d 字节" % int(n)
+
+
+def _scan_collect(o, max_depth=6, max_items=200):
+    """**完整取数**：把 JSON 里所有与「外传自认」有关的字段连值带上下文取下来。
+
+    返回 list[dict]，每项 = 一条可引用的证据，字段：
+      key      键名（原文）
+      kpath    键路径（如 `lastCompressedSize.recordedAt`）—— 法庭要能定位
+      value    原始值（字符串/数字；布尔与空值原样）
+      kind     'mark'（命中自认键名）| 'context'（构成证据链的上下文键）
+      is_size  值是否表示体积
+      ts_ms    若是时间，统一成 epoch 毫秒；否则 None
+      ts_text  可读时间
+    ★ 判据：**只翻译，不判定**。这里不回答"是不是它在偷"，只负责"取全"。
+    """
+    out, seen = [], set()
+
+    def _secret(kl):
+        return any(s in kl for s in _SCAN_SECRET_KW)
+
+    def _take(ks, v, kp, kind):
+        sig = (kp, repr(v)[:80])
+        if sig in seen:
+            return
+        seen.add(sig)
+        ts = _as_epoch_ms(v)
+        kl = ks.lower()
+        out.append({
+            "key": ks, "kpath": kp, "value": v, "kind": kind,
+            "is_size": any(h in kl for h in _SIZE_HINT) and ts is None,
+            "ts_ms": ts, "ts_text": _fmt_ts(ts),
+        })
+
+    def walk(node, path, depth):
+        if depth > max_depth or len(out) >= max_items:
+            return
+        if isinstance(node, dict):
+            # ① 先在本层找出所有"命中键"（只有一个 dict 里真出现了自认键，
+            #    才把它的兄弟键当上下文取走 —— 见 _SCAN_CONTEXT_KW 的注释①）
+            marks = [str(k) for k in node
+                     if any(kw.lower() in str(k).lower() for kw in _SCAN_EVIDENCE_KW)]
+            for k, v in node.items():
+                ks = str(k)
+                kl = ks.lower()
+                kp = ("%s.%s" % (path, ks)) if path else ks
+                if _secret(kl):
+                    walk(v, kp, depth + 1)      # ★ 敏感键：不取，但继续往下走（子树里可能有正常证据）
+                    continue
+                is_mark = ks in marks
+                is_ctx = bool(marks) and any(kw in kl for kw in _SCAN_CONTEXT_KW)
+                if (is_mark or is_ctx) and not isinstance(v, (dict, list)):
+                    _take(ks, v, kp, "mark" if is_mark else "context")
+                walk(v, kp, depth + 1)
+        elif isinstance(node, list):
+            for i, v in enumerate(node[:50]):
+                walk(v, "%s[%d]" % (path, i), depth + 1)
+
+    walk(o, "", 0)
+    # 命中键名（mark）排前面 —— 用户最该先看到的是"自认"本身。
+    out.sort(key=lambda r: (0 if r["kind"] == "mark" else 1))
+    return out
+
+
+def _scan_file_hit(p):
+    """单个文件的「外传自认」判据 —— **目录遍历与文件型落点共用这一份**。
+
+    ★ 0.29.0.r1（P0-4）：登记表里有**文件型落点**（实测 `~/.claude.json` 就是个文件，
+      不是目录）。之前 `_scan_evidence` 只吃目录（内部 os.walk + `isdir` 挡掉文件），
+      于是这类落点**从来没被扫过，而输出不提这件事** —— 把「没查」渲染成了「没发现」。
+    ★ 判据不许二次实现（本仓纪律，已为「两处同一判据」付过四次学费）：
+      抽成一份共用；否则「扫目录」与「扫单文件」迟早得出两种结论。
+    """
+    low = os.path.basename(p).lower()
+    if low.endswith(_SCAN_EVIDENCE_SUFFIX):
+        return "文件名后缀 %s" % os.path.splitext(low)[1]
+    if not low.endswith(".json"):
+        return None
+    try:
+        if os.path.getsize(p) > 16384:
+            return None
+        d = json.load(io.open(p, encoding="utf-8", errors="replace"))
+    except Exception:
+        return None
+    k = _scan_find_key(d)
+    return ("键名 " + k) if k else None
+
+
+def _scan_file_evidence(p):
+    """单文件 → **完整证据包**（0.29.2 新增）。
+
+    返回 dict（未命中返回 None）：
+      {file, size, mtime_ms, mtime_text, hit, items:[...]}
+      · file/size/mtime —— 证据所在文件本身的属性（法庭要"证据出自哪个文件、
+        多大、什么时候最后改的"）
+      · items —— `_scan_collect()` 取下的字段清单（键名/键路径/值/时间）
+
+    ★ 为什么另开一个函数而不改 `_scan_file_hit`：后者的返回值是**既有契约**
+      （`"键名 X"` 这种字符串，被 T 分级、`classify()`、`_ev_human()` 一路消费）。
+      动它会波及判定链路 —— 而判据不许二次实现、也不许被顺手改语义。
+      ⇒ 取证升级走**新增通道**，原判定一字不动（见 `cmd_host_scan` 里两路并用）。
+    """
+    hit = _scan_file_hit(p)
+    if not hit:
+        return None
+    items = []
+    if p.lower().endswith(".json"):
+        try:
+            d = json.load(io.open(p, encoding="utf-8", errors="replace"))
+            items = _scan_collect(d)
+        except Exception:
+            items = []
+    try:
+        st = os.stat(p)
+        mtime_ms, size = int(st.st_mtime * 1000), st.st_size
+    except OSError:
+        mtime_ms, size = None, 0
+    return {"file": p, "size": size, "mtime_ms": mtime_ms,
+            "mtime_text": _fmt_ts(mtime_ms), "hit": hit, "items": items}
+
+
+def _scan_evidence(root, max_files=2000, max_depth=3, with_detail=False):
+    """在数据根内搜「工具自己写下的外传自认」。只读；限深限大，防拖死。
+
+    ★ 三条降噪判据（本机实测踩出来的，2026-09-25）：
+      1) 字段类证据必须落在【JSON 键名】上，不是文本出现（见 _scan_find_key）。
+      2) 只认【小文件】(≤16KB)。状态文件都很小（zcode 的 state.json 仅 563 B），
+         而会话产物／日志动辄几十 KB —— 首版没加这条，T1 的证据全指向
+         `.zcode/cli/artifacts/sess_*/call_*.json`（假证据）。
+      3) 目录遍历按「疑似落盘点名」优先 —— 否则 `.workbuddy-ai`（18 万文件）这类根
+         会在预算耗尽前根本走不到顶层的 `pending-telemetry`（首版 T2 因此漏报为 0）。
+
+    ★ 0.29.0.r1：`root` 也可以是一个**文件**（见 `_scan_file_hit` 的注释）。
+    """
+    ev, n, trunc, det = [], 0, False, []
+    if os.path.isfile(root):
+        _h = _scan_file_hit(root)
+        if not _h:
+            return ([], False, []) if with_detail else ([], False)
+        if with_detail:
+            _d = _scan_file_evidence(root)
+            return [(root, _h)], False, ([_d] if _d else [])
+        return ([(root, _h)], False)
+    base_n = root.rstrip(os.sep).count(os.sep)
+    for dp, dn, fs in os.walk(root):
+        dn[:] = [d for d in dn if d not in _SCAN_SKIP_DIRS]
+        dn.sort(key=lambda d: (0 if any(h in d.lower() for h in _SCAN_HINT) else 1,
+                               d.lower()))
+        if dp.count(os.sep) - base_n >= max_depth:
+            dn[:] = []
+        for f in fs:
+            n += 1
+            if n > max_files:
+                return (ev, True, det) if with_detail else (ev, True)
+            _fp = os.path.join(dp, f)
+            hit = _scan_file_hit(_fp)
+            if hit:
+                ev.append((_fp, hit))
+                if with_detail:
+                    _d = _scan_file_evidence(_fp)
+                    if _d:
+                        det.append(_d)
+    return (ev, trunc, det) if with_detail else (ev, trunc)
+
+
+def _scan_size(p, cap=3000, deep=False):
+    """0.33.1：撞上限后继续只数不读——n 变成真实总数，不再留截断断言。
+    deep=True 时 cap 放大到 500K。返回 (体积, 总数, 是否截断)；
+    体积 = 前 min(总数, cap) 个文件的大小之和；截断 = 总数 > cap。"""
+    if deep:
+        cap = 500000
+    if os.path.isfile(p):
+        try:
+            return os.path.getsize(p), 1, False
+        except OSError:
+            return 0, 0, False
+    tot = n = 0
+    for dp, dn, fs in os.walk(p):
+        dn[:] = [d for d in dn if d not in _SCAN_SKIP_DIRS]
+        for x in fs:
+            n += 1
+            if n <= cap:
+                try:
+                    tot += os.path.getsize(os.path.join(dp, x))
+                except OSError:
+                    pass
+    return tot, n, n > cap
+
+
+def _obs_expand(p):
+    return os.path.expandvars(os.path.expanduser(p.replace("/", os.sep)))
+
+
+def _obs_dedupe(rows):
+    """观察项去重（按 realpath 小写）。
+
+    ★ 实测踩出来的：`_SYNC_DIR_ROOTS` 里 `~/OneDrive` 与 `%USERPROFILE%/OneDrive`
+      展开成**同一个路径** ⇒ 报告里出现两行一模一样的 OneDrive。
+      「报告了却重复报」和「报告了却指不到实体」一样，都是假报告。
+    """
+    out, seen = [], set()
+    for r in rows:
+        k = os.path.realpath(r[0]).lower()
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(r)
+    return out
+
+
+def _obs_dir(p, cap=2000):
+    """观察项：目录存在则返回 (路径, 条目数, 总字节, 是否截断)；不存在返回 None。
+
+    ★ 只调用 os.walk / os.path.getsize —— **不 open 任何文件**。
+    """
+    q = _obs_expand(p)
+    if not os.path.isdir(q):
+        return None
+    n = tot = 0
+    try:
+        for dp, dn, fs in os.walk(q):
+            dn[:] = [d for d in dn if d not in _SCAN_SKIP_DIRS]
+            for x in fs:
+                try:
+                    tot += os.path.getsize(os.path.join(dp, x))
+                except OSError:
+                    pass
+                n += 1
+                if n > cap:
+                    return (q, n, tot, True)
+    except OSError:
+        pass
+    return (q, n, tot, False)
+
+
+def _crash_dump_obs(dirs=()):
+    """G-10：崩溃转储元数据。
+
+    ★ 为什么单列：`.dmp` 是**整进程内存镜像**。崩溃的若是 Electron 系 AI 工具
+      （Cursor/Code/豆包/Kimi…），镜像里就带着当时的工作区内容、token、密钥。
+      本机实测 `%LOCALAPPDATA%\\CrashDumps` 有 10 个 .dmp、5.0–7.9 MB。
+    ★ 只读【目录项 / 文件名 / 大小】，**绝不读 .dmp 内容**。
+    ★ `dirs` 由 `_residue_obs` 找到的"崩溃上报目录"传入 —— 于是"崩溃目录"
+      与"里面有几个内存镜像"是同一份事实的两个视角，不会各说各话。
+    """
+    cands = ["%LOCALAPPDATA%/CrashDumps"] + list(dirs or ())
+    out = []
+    seen = set()
+    for d in cands:
+        q = _obs_expand(d)
+        if not os.path.isdir(q) or q.lower() in seen:
+            continue
+        seen.add(q.lower())
+        n = tot = 0
+        procs = []
+        try:
+            for x in sorted(os.listdir(q)):
+                fp = os.path.join(q, x)
+                if not os.path.isfile(fp) or not x.lower().endswith(".dmp"):
+                    continue
+                n += 1
+                try:
+                    tot += os.path.getsize(fp)
+                except OSError:
+                    pass
+                pn = x.split(".")[0]
+                if pn and pn not in procs:
+                    procs.append(pn)
+        except OSError:
+            continue
+        if n:
+            out.append((q, n, tot, procs[:6]))
+    return out
+
+
+def _share_target_obs():
+    """G-12：Windows「分享」面板注册的分享目标。
+
+    ★ 这是一条**影子通道**：用户点一下分享，内容就出去了 ——
+      **全程不经 Agent 工具**，钩子层原理上看不见。
+      本机实测已注册 `KimiShareTarget_m564vt17ty7ce`（09-22）。
+    """
+    q = _obs_expand("%LOCALAPPDATA%/Packages")
+    out = []
+    if os.path.isdir(q):
+        try:
+            for x in sorted(os.listdir(q)):
+                lx = x.lower()
+                if "sharetarget" in lx or "share_target" in lx or "sharetargetapp" in lx:
+                    out.append(x)
+        except OSError:
+            pass
+    return out
+
+
+def _cross_device_obs():
+    """G-12：Windows 跨设备平台（就近共享 / 跨设备剪贴板 / Phone Link 的底座）。"""
+    return _obs_dir("%LOCALAPPDATA%/ConnectedDevicesPlatform", cap=500)
+
+
+def _print_spool_obs():
+    """G-13：打印后台（在途文档全文）。空 = 正常。"""
+    sysroot = os.environ.get("SystemRoot") or "C:\\Windows"
+    return _obs_dir(os.path.join(sysroot, "System32", "spool", "PRINTERS"), cap=500)
+
+
+def _ime_obs():
+    """G-11：输入法数据。"""
+    out = []
+    for d in _IME_DIRS:
+        r = _obs_dir(d, cap=800)
+        if r:
+            out.append(r)
+    return _obs_dedupe(out)
+
+
+def _im_obs():
+    """G-7：IM / 邮件本机库。★ 只报存在与体积。"""
+    out = []
+    for d in _IM_DIRS:
+        r = _obs_dir(d, cap=1500)
+        if r:
+            out.append(r)
+    return _obs_dedupe(out)
+
+
+def _sync_dir_obs():
+    """G-8 取证：本机存在哪些云盘同步目录（写进去 = 会被客户端自动上传）。"""
+    out = []
+    for d in _SYNC_DIR_ROOTS:
+        r = _obs_dir(d, cap=300)
+        if r:
+            out.append(r)
+    return _obs_dedupe(out)
+
+
+def _index_obs(roots):
+    """G-6：AI 数据根下的索引 / 向量类目录（先取证，不预设它一定外传）。"""
+    out = []
+    for root in roots:
+        for sub in _INDEX_SUBDIRS:
+            r = _obs_dir(os.path.join(root, sub), cap=800)
+            if r:
+                out.append(r)
+    return _obs_dedupe(out)
+
+
+def _residue_obs(roots):
+    """G-9：被跳过的"偷数据相关"类目录 —— 现在看得到（只看元数据）。"""
+    out = []
+    seen = set()
+    for root in roots:
+        for sub, label in _RESIDUE_SUBDIRS:
+            r = _obs_dir(os.path.join(root, *sub.split("/")), cap=1500)
+            if not r or r[0].lower() in seen:
+                continue
+            seen.add(r[0].lower())
+            out.append((r[0], label, r[1], r[2], r[3]))
+    return out
+
+
+def cmd_egress(args):
+    """外传账本：记录并呈现「谁在往哪发」，只标"值得看"，不下结论。"""
+    import egress as eg
+    print(eg.run(
+        all_proc=bool(getattr(args, 'all', False)),
+        do_resolve=not bool(getattr(args, 'no_resolve', False)),
+        as_json=bool(getattr(args, 'json', False)),
+        days=(getattr(args, 'days', None) or eg.LEDGER_DAYS)))
+
+
+def cmd_ui(args):
+    """本地体检页：在你**自己电脑的浏览器**里点一下，就把这台电脑查一遍（只读）。
+
+    ★ 为什么必须做成本地网页：静态站跑在别人的服务器上，浏览器沙箱不让它读你的硬盘。
+      一个网页如果点一下就报"你的电脑很干净"、而你本机没运行任何程序 —— 那它在撒谎，
+      而**把「没查」渲染成「清白」**正是本项目最反对的事（比不做还危险）。
+      ⇒ 网站只负责说服与给入口；真正去查的是你电脑上的这个程序；结果页开在本机浏览器里。
+    ★ 判据与译文**一律从本文件传进去**（VERDICTS ／ _ev_human），展示层不许自己再翻一遍。
+    ★ 只读：跑的是 `host-scan --json`，**不带 --arm ／ --survey** ⇒ 不登记、不布防、不上锁。
+    """
+    import ui_server
+    return ui_server.serve(
+        verdicts=VERDICTS, ev_human=_ev_human, antinel_dir=_HERE,
+        port=int(getattr(args, "port", 0) or ui_server.DEFAULT_PORT),
+        open_browser=not bool(getattr(args, "no_open", False)))
+
+
+
+# ------------------------------------------- 0.29.0.r1 六档语义（对外分档）--------
+# ★ 为什么产品里要放这一层：`host-scan` 此前只吐 T1/T2/T3/T4 内部编号 ＋ 英文键名
+#   （`lastCompressedSize`）—— 用户拿到三样看不懂的东西，没有一个回答"所以呢？"
+#   （创始人原话：「至少我看现在的 结果文件看不懂」）。分档＝把取证输出翻译成人话。
+# ★ 唯一实现：判据与译文的真源在本文件；`ux_verdict.py` 等展示层一律 import 这里的
+#   `classify` / `EVIDENCE_MEANING` / `VERDICTS`，**不许自己再翻一遍**（本仓纪律：
+#   判据不许二次实现，否则两份实现迟早对不上）。
+# ★ 措辞纪律：**一个字都不许多说**。我们的能力是「读工具自己写下的字段」，
+#   所以每档都带「自认」二字 —— 写成「我们抓到它在发」就是宣称未实现的东西。
+
+# 证据语义表：键名/后缀 → (档位, 人话)。★ 这是**翻译**不是判定：键名字面就是它的语义。
+EVIDENCE_MEANING = {
+    "lastCompressedSize": ("PACK", "上次**打包**后的体积"),
+    "encryptedSize": ("PACK", "**加密**后的体积"),
+    "manifestHash": ("PACK", "打包**清单**的哈希"),
+    "lastAccepted": ("SENT", "上次**被服务端接受**"),
+    "lastUploaded": ("SENT", "上次**上传**"),
+    "uploadedAt": ("SENT", "**上传**时间"),
+    "pushedAt": ("SENT", "**推送**时间"),
+    "syncedAt": ("SYNC", "上次**同步**时间"),
+    ".reported": ("SENT", "标记为**已上报**"),
+    ".sent": ("SENT", "标记为**已发送**"),
+    ".uploaded": ("SENT", "标记为**已上传**"),
+}
+
+# 六档。★ 用户要三档（偷了/没有/有嫌疑），我们给六档 —— 因为三档里有两条我们没资格下：
+#   「偷了」＝我们只读到它自己写的字，没抓到发送动作；「没有」＝没发现 ≠ 没有。
+#   ⚫ BLIND（没查到）单列：它是**盲区**不是结论，与 ⚪ 合并即把盲区伪装成清白。
+VERDICTS = {
+    "PACK":  {"key": "PACK",  "icon": "🔴", "title": "自认打包过", "order": 0,
+              "short": "工具自己在文件里写下了「上次打包后的体积 / 清单哈希」"},
+    "SENT":  {"key": "SENT",  "icon": "🟠", "title": "自认往外发过", "order": 1,
+              "short": "工具自己写下了「已上传 / 已被服务端接受 / 已推送」这类字样"},
+    "SYNC":  {"key": "SYNC",  "icon": "🟡", "title": "自认在同步", "order": 2,
+              "short": "工具自己写下了「上次同步时间」；同步 ≠ 上传整份项目"},
+    "CLEAN": {"key": "CLEAN", "icon": "⚪", "title": "查过，没发现记录", "order": 3,
+              "short": "扫过了，这次没找到它自己写下的外传记录 —— **不等于它没有**"},
+    "BLIND": {"key": "BLIND", "icon": "⚫", "title": "没查到（扫描器走不到）", "order": 4,
+              "short": "登记了、你电脑上也确实有，但扫描器**没走到** —— 这一项我们没查"},
+    "NA":    {"key": "NA",    "icon": "·",  "title": "不适用", "order": 5,
+              "short": "更新包 / 非 AI 工具本体"},
+}
+
+# 同时命中多档时取最高档（PACK > SENT > SYNC），不重复计数。
+_VERDICT_PRIORITY = ("PACK", "SENT", "SYNC")
+
+
+def classify(ev, excl=None, tier=None):
+    """证据列表 → 六档之一。
+
+    ★ 必须**两边都小写**再比：证据键名是驼峰（`lastSyncedAt`），词表里写的是
+      `syncedAt` —— 大小写敏感匹配会把 `autoclaw` 的 `lastSyncedAt`
+      **漏判成"没发现"**（本机实测踩到）。
+    """
+    if excl or tier == "T4":
+        return "NA"
+    kinds = []
+    for _fp, kw in (ev or []):
+        low = str(kw).lower()
+        for name, (kind, _human) in EVIDENCE_MEANING.items():
+            if name.lower() in low:
+                kinds.append(kind)
+                break
+    for k in _VERDICT_PRIORITY:
+        if k in kinds:
+            return k
+    return "CLEAN"
+
+
+def _ev_human(kw):
+    """证据原文 → 人话译文；查不到就原样返回（**不许编**）。"""
+    low = str(kw).lower()
+    return next((h for n, (_k, h) in EVIDENCE_MEANING.items() if n.lower() in low), kw)
+
+
+def cmd_host_scan(args):
+    import host_shield as hs
+    root = os.path.dirname(_sibling("antinel.py"))
+    if not os.path.isdir(os.path.join(root, "rules", "hosts")):
+        root = os.path.dirname(root)
+    regs = {r.get("host"): r for r in hs.load_watch_registry(root)}
+    t1_hosts = {h for h, r in regs.items() if r.get("watch")}
+
+    rows, seen = [], set()
+    for label, base in _scan_roots():
+        if not base or not os.path.isdir(base):
+            continue
+        try:
+            names = sorted(os.listdir(base))
+        except OSError:
+            continue
+        for name in names:
+            p = os.path.join(base, name)
+            if not os.path.isdir(p) or os.path.islink(p):
+                continue
+            kw = _scan_is_ai(name)
+            if not kw:
+                continue
+            key = os.path.realpath(p).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            ex = _scan_excluded(p)
+            if ex:
+                rows.append({"name": name, "path": p, "kw": kw, "tier": "T4",
+                             "excl": ex, "ev": [], "size": 0, "files": 0,
+                             "trunc": False, "src": "目录名", "mt": ""})
+                continue
+            size, nf, trunc_s = _scan_size(p, deep=deep)
+            ev, trunc_e, detail = _scan_evidence(p, with_detail=True)
+            tier = "T1" if (ev and name.lower().lstrip(".") in t1_hosts) else (
+                "T2" if ev else "T3")
+            rows.append({"name": name, "path": p, "kw": kw, "tier": tier,
+                         "excl": None, "ev": ev, "size": size, "files": nf,
+                         "trunc": trunc_s or trunc_e, "src": "目录名",
+                         "detail": detail,
+                         "mt": datetime.fromtimestamp(
+                             os.path.getmtime(p)).strftime("%Y-%m-%d %H:%M")})
+
+    # ---- 0.29.0.r1（P0-3／P0-4）：登记表 roots 作为**硬发现来源** ------------------
+    # ★ 上面那一轮只按"第一层目录名命中厂商词"认工具 ⇒ 三重结构性盲区：
+    #     ① 只列目录（`isdir` 挡掉文件型落点）② 目录名必须命中 48 个词
+    #     ③ 只列第一层、不递归。
+    #   实测后果：登记的 43 个落点里 3 个永远扫不到，而输出一字不提。
+    #   ⇒ 这里把登记表补齐：**登记过的一定扫，扫不到的一定报出来**。
+    _reg_total, _reg_present, _reg_absent, _reg_added = 0, 0, [], []
+    _reg_present_keys = []
+    for _host, _raw, _q in _reg_roots(regs):
+        _reg_total += 1
+        if not os.path.exists(_q):
+            _reg_absent.append((_host, _raw))
+            continue
+        _reg_present += 1
+        _key = os.path.realpath(_q).lower()
+        _reg_present_keys.append((_host, _raw, _key))
+        if _key in seen:          # 目录名那一轮已经扫到了 —— 登记与实况对齐，不重复
+            continue
+        seen.add(_key)
+        _ex = _scan_excluded(_q)
+        _name = os.path.basename(_q.rstrip(os.sep)) or _q
+        if _ex:
+            rows.append({"name": _name, "path": _q, "kw": _host, "tier": "T4",
+                         "excl": _ex, "ev": [], "size": 0, "files": 0,
+                         "trunc": False, "src": "登记", "mt": ""})
+            _reg_added.append((_host, _raw))
+            continue
+        _size, _nf, _ts = _scan_size(_q, deep=deep)
+        _ev, _te, _detail = _scan_evidence(_q, with_detail=True)
+        _tier = "T1" if (_ev and _host in t1_hosts) else ("T2" if _ev else "T3")
+        try:
+            _mt = datetime.fromtimestamp(os.path.getmtime(_q)).strftime("%Y-%m-%d %H:%M")
+        except OSError:
+            _mt = ""
+        rows.append({"name": _name, "path": _q, "kw": _host, "tier": _tier,
+                     "excl": None, "ev": _ev, "size": _size, "files": _nf,
+                     "trunc": _ts or _te, "src": "登记", "mt": _mt,
+                     "detail": _detail})
+        _reg_added.append((_host, _raw))
+
+    order = {"T1": 0, "T2": 1, "T3": 2, "T4": 3}
+    rows.sort(key=lambda r: (order[r["tier"]], r["name"].lower()))
+    cnt = {"T1": 0, "T2": 0, "T3": 0, "T4": 0}
+    for r in rows:
+        cnt[r["tier"]] = cnt.get(r["tier"], 0) + 1
+
+    # ---- 0.29.0 (F-1)：把"有证据"的落点登记进本机 findings，供门闸裁决 ----------
+    # ★ 只登记 ev 非空的行（T1/T2）。T3（未取证）不登记 —— 没有证据却送进监管，
+    #   就是把"没查出来"当成"查到了"，与把崩溃目录写进排除表是同一个病。
+    _arm = bool(getattr(args, "arm", False))
+    _ev_rows = [{"path": r["path"], "name": r["name"], "vendor": r["kw"],
+                 "tier": r["tier"], "evidence": sorted({k for _fp, k in r["ev"]})[:6],
+                 "size": r["size"],
+                 "scanned_at": datetime.now().astimezone().isoformat(timespec="seconds")}
+                for r in rows if r["ev"]]
+    if _arm:
+        try:
+            hs.save_findings(_ev_rows)
+        except Exception as _e:
+            print("（登记 findings 失败：%r —— 本轮发现不会进监管）" % (_e,))
+    # ---- 0.29.0 (F-7)：取证档案 —— 让"没查过"和"查过没发现"不再同形 ----
+    if _arm or getattr(args, "survey", False):
+        _hosts = [{"vendor": r["kw"], "name": r["name"], "path": r["path"],
+                   "tier": r["tier"],
+                   "survey": ("T4" if r["tier"] == "T4" else
+                              "measured" if r["ev"] else "clean"),
+                   "evidence": sorted({k for _fp, k in r["ev"]})[:6],
+                   "excluded_by": r.get("excl"), "size": r["size"]}
+                  for r in rows]
+        _doc = {"scanned_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "machine_host": detect_host(), "roots": [b for _l, b in _scan_roots()],
+                "counts": {"measured": sum(1 for h in _hosts if h["survey"] == "measured"),
+                           "clean": sum(1 for h in _hosts if h["survey"] == "clean"),
+                           "excluded": sum(1 for h in _hosts if h["survey"] == "T4")},
+                "hosts": _hosts}
+        try:
+            hs.save_survey(_doc)
+            print("取证档案：%s（已取证 %d ／ 扫过未发现 %d ／ 已排除 %d）"
+                  % (hs.survey_path(), _doc["counts"]["measured"],
+                     _doc["counts"]["clean"], _doc["counts"]["excluded"]))
+        except Exception as _e:
+            print("（写取证档案失败：%r）" % (_e,))
+    _st = hs.load_state()
+    _verdict = {k.lower(): v for k, v in (_st.get("workspaces") or {}).items()}
+    _win = {k.lower(): v for k, v in (_st.get("windows") or {}).items()}
+
+    print("== Antinel 你电脑上的 AI 工具落盘点扫描（只读）")
+    print("扫描根：~ ／ %APPDATA% ／ %LOCALAPPDATA%")
+    print("生成时刻：%s" % datetime.now().astimezone().isoformat(timespec="seconds"))
+    print("判据：**工具自己写下的外传自认**（不看目录名——目录名启发式误报率约 85%）")
+    print()
+    LAB = {"T1": "T1 已取证（已布门闸，deny）",
+           "T2": "T2 你电脑上实测到（已进监管：未裁决＝拦）",
+           "T3": "T3 未取证（未发现证据 ≠ 没有外传）",
+           "T4": "T4 已排除（更新包／浏览器内置／非 AI —— ★ 崩溃类已移出本表，改由观察项接管）"}
+    for t in ("T1", "T2", "T3", "T4"):
+        rs = [r for r in rows if r["tier"] == t]
+        if not rs:
+            continue
+        print("【%s】 %d 个" % (LAB[t], len(rs)))
+        for r in rs:
+            if t == "T4":
+                continue
+            print("  %-22s %s" % (r["name"], r["path"]))
+            print("      体量 %.1f MB ／ %d 文件 ／ 最后改动 %s%s"
+                  % (r["size"] / 1048576, r["files"], r["mt"],
+                     "  (扫描截断)" if r["trunc"] else ""))
+            print("      路径存在：%s" % os.path.isdir(r["path"]))
+            for fp, kw in r["ev"][:3]:
+                # 0.29.0.r1：英文键名（`lastCompressedSize`）不是人话 —— 并排给出译文。
+                # ★ 译文来自 `EVIDENCE_MEANING`（唯一真源），这里只做**展示**，不重判。
+                print("      证据：%s（原文 %s）  @  %s  [exists=%s]"
+                      % (_ev_human(kw).replace("**", ""), kw, fp,
+                          os.path.isfile(fp)))
+            if not r["ev"]:
+                print("      证据：（本次取证未发现）")
+                continue
+            # ★ 0.29.0 (F-1)：裁决状态 —— "未裁决"就是要拦，必须让人看见并给出出口
+            _k = r["path"].lower()
+            if _k in _verdict:
+                _v = _verdict[_k]
+                print("      裁决：%s" % ("已确认放行（不拦）" if _v == "allow_always"
+                                       else "已裁决拦截"))
+            elif _win.get(_k):
+                print("      裁决：窗口放行 至 %s"
+                      % datetime.fromtimestamp(_win[_k]).strftime("%H:%M:%S"))
+            else:
+                print("      裁决：**未裁决**")
+                if _arm:
+                    print("      ⇒ 已登记 findings，门闸将拦（不放行）")
+                else:
+                    print("      ⇒ 本次只读、**未登记**；加 --arm 才交门闸监管")
+                print("      放行：antinel host-shield decide \"%s\" allow_always" % r["path"])
+        if t == "T4":
+            for r in rs:
+                print("  %-22s ← 排除原因：%s" % (r["name"], r["excl"]))
+        print()
+    print("汇总：发现 %d 个 AI 工具数据根 ＝ T1 %d ＋ T2 %d ＋ T3 %d ＋ T4 %d"
+          % (len(rows), cnt["T1"], cnt["T2"], cnt["T3"], cnt["T4"]))
+    print()
+    if cnt["T1"] + cnt["T2"]:
+        print("★ 你电脑上有实证的落点 %d 个（T1 %d ＋ T2 %d）。本次为**只读**扫描，未登记、不会拦。"
+              % (cnt["T1"] + cnt["T2"], cnt["T1"], cnt["T2"]))
+        print("  要交给门闸（未裁决＝拦）：antinel host-scan --arm")
+        print("  逐个确认放行：antinel host-shield decide \"<路径>\" allow_always")
+    print()
+
+    # ---- 0.29.0.r1（§5.4）：结果分六档 —— 把 T1/T2/T3/T4 与英文键名翻译成人能读的结论 ----
+    _vc = {}
+    for _r in rows:
+        _r["verdict"] = classify(_r["ev"], _r.get("excl"), _r["tier"])
+        _vc[_r["verdict"]] = _vc.get(_r["verdict"], 0) + 1
+    print("── 结果分六档（人话版）──────────────────────────────")
+    for _k in ("PACK", "SENT", "SYNC", "CLEAN", "NA", "BLIND"):
+        _v = VERDICTS[_k]
+        if _k == "BLIND":
+            continue          # 盲区单独在下面「覆盖对账」里报，不混进结论档
+        print("  %s %-14s %3d 个   %s"
+              % (_v["icon"], _v["title"], _vc.get(_k, 0),
+                 _v["short"].replace("**", "")))
+    print()
+
+    # ---- 0.29.0.r1（P0-4）：登记表覆盖对账 —— 漏了必须说出来 ------------------------
+    print("── 登记表覆盖对账（漏了就说，不许静默）──────────────")
+    # ★ 「已扫」不是照抄 `已加入 rows` 的次数 —— 那是恒等式，等于自欺。
+    #   这里拿 rows 反查一遍：登记落点里，有几个**真的出现在本次结果里**。
+    _scanned_keys = {os.path.realpath(_r["path"]).lower() for _r in rows}
+    _reg_scanned = sum(1 for _h, _raw, _k in _reg_present_keys
+                       if _k in _scanned_keys)
+    _reg_unscanned = _reg_present - _reg_scanned
+    print("  登记表 %d 张 ／ 登记落点 %d 个" % (len(regs), _reg_total))
+    # ★★ 这条不是"探测器"，是**回归守卫**：登记过的一定扫 ⇒ 修好后恒为 0。
+    #   它存在的意义是：谁把登记表这条路径又拆了（roots 变回死数据、落点被过滤掉），
+    #   这里立刻不再是无声的 0 —— 下面第一条就是让它**有对象可查**。
+    if regs and _reg_total == 0:
+        print("  ★★ 告警：登记表有 %d 张，却读出 0 个落点 —— "
+              "`roots` 又变回【死数据】了（P0-3 复发）。" % len(regs))
+        print("     查 `host_shield.load_watch_registry()` 是否仍在装载 `roots`。")
+    print("  你电脑上有 %d ／ 已扫 %d ／ ★ 未扫 %d"
+          % (_reg_present, _reg_scanned, _reg_unscanned))
+    if _reg_unscanned:
+        print("  ★★ 未扫的登记落点（这一项我们**没查**，请当空白读）：")
+        for _h, _raw, _k in _reg_present_keys:
+            if _k not in _scanned_keys:
+                print("      ⚫ %-14s %s" % (_h, _raw))
+    if _reg_added:
+        print("  本次由【登记表】补齐（目录名认不出的）%d 个：" % len(_reg_added))
+        for _h, _raw in _reg_added:
+            print("      · %-14s %s" % (_h, _raw))
+    if _reg_absent:
+        print("  登记了但你电脑上没有的落点 %d 个（不是盲区，是没装）：" % len(_reg_absent))
+        for _h, _raw in _reg_absent:
+            print("      · %-14s %s" % (_h, _raw))
+    print("  ⚠ 上面只覆盖【已登记的 %d 个工具】＋【目录名命中 %d 个厂商词的目录】；"
+          % (len(regs), len(_SCAN_VENDOR_KW)))
+    print("    两者之外的落点，本命令**没有看** —— 不是「看了没发现」。")
+    print()
+
+    # ---- 0.29.0 观察项（G-6/G-7/G-9/G-10/G-11/G-12/G-13）---------------------
+    # ★ 只报元数据（存在／条目数／体积／进程名），**不读内容、不判定是否外传**。
+    #   判据：观察项陈述事实；把"有 10 个内存镜像"说成"被偷了"就是自我安慰的反面
+    #   —— 那是吓人，同样是不可信的检查器。
+    obs_roots = [r["path"] for r in rows]
+    residue = _residue_obs(obs_roots)
+    crash_dirs = [p for (p, lbl, _n, _t, _tr) in residue if "崩溃上报" in lbl]
+    dumps = _crash_dump_obs(crash_dirs)
+    crash_res = [r for r in residue if "崩溃上报" in r[1]]
+    other_res = [r for r in residue if "崩溃上报" not in r[1]]
+    ime = _ime_obs()
+    im = _im_obs()
+    sync = _sync_dir_obs()
+    shares = _share_target_obs()
+    cross = _cross_device_obs()
+    spool = _print_spool_obs()
+    index = _index_obs(obs_roots)
+
+    def _m(b):
+        return b / 1048576.0
+
+    print("── 观察项（只报元数据，不读内容，不判定是否外传）────")
+    if dumps:
+        tot_n = sum(d[1] for d in dumps)
+        tot_b = sum(d[2] for d in dumps)
+        print("  [崩溃转储] %d 个 .dmp，共 %.1f MB" % (tot_n, _m(tot_b)))
+        print("       ★ .dmp 是**整进程内存镜像**：崩溃当时的工作区内容/密钥/token 都在里面。")
+        for (q, n, b, procs) in dumps:
+            print("       %s" % q)
+            print("           %d 个 ／ %.1f MB ／ 进程：%s" % (n, _m(b), ", ".join(procs)))
+    else:
+        print("  [崩溃转储] 0 个 .dmp")
+    if crash_res:
+        print("  [崩溃上报目录] %d 处（Crashpad 会自动把这里的内容传给厂商）" % len(crash_res))
+        for (q, _lbl, n, b, tr) in crash_res[:8]:
+            print("       %s  条目 %d ／ %.1f MB%s" % (q, n, _m(b), "（截断）" if tr else ""))
+    else:
+        print("  [崩溃上报目录] 0 处")
+    if other_res:
+        print("  [会话/历史/日志/诊断类] %d 处（**旧版整类跳过、看不见**；现在只报体量）"
+              % len(other_res))
+        for (q, lbl, n, b, tr) in other_res[:10]:
+            print("       %-14s %s  条目 %d ／ %.1f MB%s"
+                  % (lbl, q, n, _m(b), "（截断）" if tr else ""))
+    else:
+        print("  [会话/历史/日志/诊断类] 0 处")
+    if index:
+        print("  [索引/向量类] %d 处（先取证：**不预设**它一定外传）" % len(index))
+        for (q, n, b, tr) in index[:8]:
+            print("       %s  条目 %d ／ %.1f MB%s" % (q, n, _m(b), "（截断）" if tr else ""))
+    else:
+        print("  [索引/向量类] 0 处")
+    if ime:
+        print("  [输入法数据] %d 处（词库＝用户打过什么字）" % len(ime))
+        for (q, n, b, tr) in ime[:6]:
+            print("       %s  条目 %d ／ %.1f MB" % (q, n, _m(b)))
+    else:
+        print("  [输入法数据] 0 处")
+    if im:
+        print("  [IM/邮件的本地库] %d 处（全部往来记录；只报存在与体积）" % len(im))
+        for (q, n, b, tr) in im[:8]:
+            print("       %s  条目 %d ／ %.1f MB%s" % (q, n, _m(b), "（截断）" if tr else ""))
+    else:
+        print("  [IM/邮件的本地库] 0 处")
+    if sync:
+        print("  [云盘同步目录] %d 处 —— **写进去＝客户端自动上传**（DST-11 已盯）" % len(sync))
+        for (q, n, b, tr) in sync[:8]:
+            print("       %s  条目 %d ／ %.1f MB" % (q, n, _m(b)))
+    else:
+        print("  [云盘同步目录] 0 处")
+    if shares:
+        print("  [系统分享目标] %d 个 —— **影子通道**：点一下分享内容就出去，"
+              "全程不经 Agent 工具、钩子看不见" % len(shares))
+        for s in shares[:8]:
+            print("       %s" % s)
+    else:
+        print("  [系统分享目标] 0 个")
+    if cross:
+        print("  [跨设备平台] %s  条目 %d ／ %.1f MB（就近共享/跨设备剪贴板的底座）"
+              % (cross[0], cross[1], _m(cross[2])))
+    else:
+        print("  [跨设备平台] 不存在")
+    if spool:
+        print("  [打印后台] 条目 %d ／ %.1f MB%s"
+              % (spool[1], _m(spool[2]), "" if spool[1] else "（空 = 正常）"))
+    else:
+        print("  [打印后台] 不存在")
+    print()
+
+    print("⚠ 覆盖声明：")
+    print("  · 本扫描为【本次取证】。未发现证据 ≠ 没有外传 —— 只代表这一遍没查出来。")
+    print("  · 门闸只对 T1 生效（避免误报）。T2/T3 是否布防见《全工具覆盖设计 v1.0》§6 待拍板。")
+    print("  · 门闸拦的是【文件落盘】这一步；工具若直接内存发包（不经落盘），只能记账、拦不住。")
+    print("  · 观察项**不读文件内容**：它告诉你「这里有什么、有多大」，"
+          "不替你下「这是外传」的结论。")
+    print("  · 登记落点 %d 个：已扫 %d ／ ★ 未扫 %d（见上方「登记表覆盖对账」）。"
+          % (_reg_total, _reg_scanned, _reg_unscanned))
+    if getattr(args, "json", False):
+        print()
+        print(json.dumps({"generated_at": datetime.now().astimezone().isoformat(
+            timespec="seconds"), "tools": rows,
+            # ★ 0.29.2：把 detail 单独抽出来，避免与既有的 `ev` 契约混淆。
+            #   `ev` 仍是判定链路的输入（不可动）；`detail` 是给展示层的**完整证据包**。
+            "details": {_r["path"]: (_r.get("detail") or []) for _r in rows},
+            "coverage": {"registered_hosts": len(regs),
+                         "registered_roots": _reg_total,
+                         "present": _reg_present, "scanned": _reg_scanned,
+                         "unscanned": _reg_unscanned,
+                         "added_by_registry": len(_reg_added),
+                         "absent": len(_reg_absent)},
+            "counts_by_verdict": _vc,
+            "verdicts": VERDICTS,
+            "observations": {
+                "crash_dumps": [{"path": q, "count": n, "bytes": b, "processes": p}
+                                for (q, n, b, p) in dumps],
+                "crash_report_dirs": [{"path": q, "label": l, "entries": n, "bytes": b,
+                                       "truncated": t} for (q, l, n, b, t) in crash_res],
+                "residue_dirs": [{"path": q, "label": l, "entries": n, "bytes": b,
+                                  "truncated": t} for (q, l, n, b, t) in other_res],
+                "index_dirs": [{"path": q, "entries": n, "bytes": b} for (q, n, b, _t) in index],
+                "ime_dirs": [{"path": q, "entries": n, "bytes": b} for (q, n, b, _t) in ime],
+                "im_stores": [{"path": q, "entries": n, "bytes": b} for (q, n, b, _t) in im],
+                "sync_dirs": [{"path": q, "entries": n, "bytes": b} for (q, n, b, _t) in sync],
+                "share_targets": shares,
+                "cross_device": ({"path": cross[0], "entries": cross[1], "bytes": cross[2]}
+                                 if cross else None),
+                "print_spool": ({"path": spool[0], "entries": spool[1], "bytes": spool[2]}
+                                if spool else None)},
+        }, ensure_ascii=False, indent=1))
+
+
+# 0.29.0（D-5）：删掉 _host_python()。它原先用来给 host-shield 的 .cmd shim 选解释器，
+# 但那个调用点早已改成 sys.executable（见 host-shield enable 段），此后全仓再无引用 —— 死代码。
+# 它硬编码了作者机路径 r"C:/Users/大马/.workbuddy/.../3.13.12/python.exe"，把作者的 Windows
+# 用户名与一个会过期的版本号带进了要发 PyPI 的包（PII ＋ 可移植性），且那条路径只对作者机成立。
+# 留档（供将来真要"用宿主自己的解释器"时参考）：候选顺序是宿主 binaries 目录 → ~/.zcode → sys.executable。
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="antinel", add_help=False,
+                                 description="Antinel 单入口（无参数=帮助清单）")
+    # 多宿主共存：目录探测会误报（装了谁就报谁）——Agent/用户可显式指定所在宿主
+    ap.add_argument("--host", dest="force_host",
+                    help="显式指定宿主（workbuddy|zcode|qoder|claude-code|generic），"
+                         "多宿主共存时 Agent 应自报所在宿主")
+    sub = ap.add_subparsers(dest="cmd")
+
+    p = sub.add_parser("roots"); ps = p.add_subparsers(dest="sub", required=True)
+    for name in ("add", "remove"):
+        q = ps.add_parser(name); q.add_argument("path")
+    ps.add_parser("list")
+
+    for kind in ("paths", "domains", "commands"):
+        p = sub.add_parser(kind); ps = p.add_subparsers(dest="sub", required=True)
+        for name in ("add", "remove"):
+            q = ps.add_parser(name); q.add_argument("value")
+        ps.add_parser("list")
+
+    p = sub.add_parser("settings"); ps = p.add_subparsers(dest="sub", required=True)
+    ps.add_parser("list")
+    q = ps.add_parser("get"); q.add_argument("key")
+    q = ps.add_parser("set"); q.add_argument("key"); q.add_argument("value")
+
+    p = sub.add_parser("credits"); ps = p.add_subparsers(dest="sub", required=True)
+    q = ps.add_parser("snapshot"); q.add_argument("balance")
+    q.add_argument("--base"); q.add_argument("--gift"); q.add_argument("--reward")
+    q.add_argument("--cycle")
+    ps.add_parser("list"); ps.add_parser("forecast")
+    q = ps.add_parser("plan"); q.add_argument("yuan"); q.add_argument("credits")
+    ps.add_parser("reconcile")
+
+    p = sub.add_parser("pricing"); ps = p.add_subparsers(dest="sub", required=True)
+    ps.add_parser("show")
+    q = ps.add_parser("set"); q.add_argument("model"); q.add_argument("field"); q.add_argument("price")
+    q = ps.add_parser("update"); q.add_argument("--model", action="append")
+
+    p = sub.add_parser("digest"); p.add_argument("--days", type=int)
+    p.add_argument("--scope", choices=["project", "all"])
+    sub.add_parser("morning")
+
+    # 0.31.0 (F3)：源码金丝雀——"查查是否被偷数据"的最直接证据器。
+    p = sub.add_parser("canary"); ps = p.add_subparsers(dest="sub", required=True)
+    q = ps.add_parser("plant"); q.add_argument("--name")
+    ps.add_parser("list")
+
+    p = sub.add_parser("verify")
+    p = sub.add_parser("report"); p.add_argument("--session", default="latest")
+    p.add_argument("--write", action="store_true")
+
+    p = sub.add_parser("hub"); ps = p.add_subparsers(dest="sub", required=True)
+    q = ps.add_parser("register"); q.add_argument("path"); q.add_argument("--host")
+    q = ps.add_parser("unregister"); q.add_argument("path")
+    q = ps.add_parser("tools"); q.add_argument("tools", nargs="+")
+    ps.add_parser("list")
+
+    p = sub.add_parser("routes"); p.add_argument("--markdown", action="store_true")
+    sub.add_parser("help")
+    p = sub.add_parser("host-shield")
+    ps = p.add_subparsers(dest="sub", required=True)
+    ps.add_parser("status"); ps.add_parser("enable"); ps.add_parser("disable")
+    q = ps.add_parser("decide"); q.add_argument("workspace"); q.add_argument("decision")
+    ps.add_parser("list")
+    # 0.29.0 (H-4)：**已上锁目录必须有出口**。此前用户跑 status 时因 workspaces == {}
+    # 而什么都不显示 ⇒ 4 把锁挂在机器上本人毫不知情（2026-09-26 实测）。
+    ps.add_parser("locks")
+    q = ps.add_parser("unlock"); q.add_argument("path")
+    # 0.29.0 (H-2)：待裁决队列的呈现端（此前只有记录端，报告写了没人看）。
+    ps.add_parser("queue")
+    # 0.29.1：本地体检页 —— 网站点不到你的硬盘，真正去查的必须是你电脑上的程序。
+    import ui_server
+    p = sub.add_parser("ui")
+    p.add_argument("--port", type=int, default=ui_server.DEFAULT_PORT,
+                   help="本地端口（默认 %d，被占则顺延）" % ui_server.DEFAULT_PORT)
+    p.add_argument("--no-open", action="store_true",
+                   help="不自动打开浏览器，只打印地址")
+    p = sub.add_parser("host-audit")
+    p.add_argument("--host"); p.add_argument("--probe", action="store_true")
+    p = sub.add_parser("host-scan")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--deep", action="store_true",
+                   help="真正查完：文件数放到 50 万、不截断（默认 3000）")
+    p = sub.add_parser("egress")
+    p.add_argument("--all", action="store_true")
+    p.add_argument("--no-resolve", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--days", type=int)
+    # 0.29.0 (F-6)：**默认只读，--arm 才登记并进监管**。
+    # ★ 为什么必须分开：本命令的标题就写着"（只读）"。若默认既写 findings 又让门闸
+    #   对未裁决落点上锁，那"只读"就是假的 —— 扫一遍 = 开始拦，用户还没看报告。
+    #   副作用用**显式动作**控制，而不是靠命令不跑。
+    #   默认：只看不动（可放心跑）。--arm：登记 findings、门闸开始监管。
+    p.add_argument("--arm", action="store_true",
+                   help="登记发现并交门闸监管（未裁决＝拦）。默认只读不写")
+    # 0.29.0 (F-7)：**写本机取证档案**。--arm 隐含 --survey（布防必先留档）。
+    p.add_argument("--survey", action="store_true",
+                   help="把你电脑上的取证状态写入档案（含'扫过但没找到证据'的工具），不改随包表、不进监管")
+    p = sub.add_parser("zone"); ps = p.add_subparsers(dest="sub", required=True)
+    q = ps.add_parser("add"); q.add_argument("dir")
+    q = ps.add_parser("remove"); q.add_argument("dir")
+    ps.add_parser("list")
+
+    args = ap.parse_args(argv)
+    if getattr(args, "force_host"):
+        os.environ["ANTINEL_FORCE_HOST"] = args.force_host   # detect_host 优先读它
+    if args.cmd is None or args.cmd == "help":
+        cmd_help()
+        return 0
+
+    prof = load_economics(detect_host())
+    if args.cmd == "roots":
+        cmd_roots(args)
+    elif args.cmd in ("paths", "domains", "commands"):
+        _wl(args.cmd, args.sub, args)
+    elif args.cmd == "settings":
+        cmd_settings(args)
+    elif args.cmd == "credits":
+        cmd_credits(args, prof)
+    elif args.cmd == "morning":
+        cmd_morning(args)
+    elif args.cmd == "pricing":
+        root = find_project_root()
+        pp = os.path.join(root or os.getcwd(), ".psl", "rules", "pricing.json")
+        cache_p = os.path.join(root or os.getcwd(), ".psl", "state", "pricing_cache.json")
+        if args.sub == "show":
+            try:
+                d = _load_json(pp)
+                print("协议价覆盖位（版本 %s，币种 %s）" % (d.get("version"), d.get("currency")))
+                for m, r in (d.get("rates") or {}).items():
+                    if not str(m).startswith("_"):
+                        print("  [协议]", m, r)
+            except Exception:
+                print("（无协议价覆盖文件）")
+            try:
+                c = _load_json(cache_p)
+                print("牌价参照缓存（来源 %s @ %s）" % (c.get("source"), str(c.get("fetched_at"))[:16]))
+                for m, r in (c.get("rates") or {}).items():
+                    print("  [参照]", m, "in=%.3f out=%.3f cache=%.3f USD/1M" % (
+                        r.get("input", 0), r.get("output", 0), r.get("cache_read", 0)))
+                if c.get("unmatched"):
+                    print("  未匹配：", ", ".join(c["unmatched"]))
+            except Exception:
+                print("（无牌价缓存——antinel pricing update 拉取）")
+        elif args.sub == "set":
+            d = _load_json(pp) if os.path.isfile(pp) else {
+                "version": "custom-1", "currency": "USD", "unit": "per_1m_tokens",
+                "rates": {}}
+            d.setdefault("rates", {}).setdefault(args.model, {})[args.field] = float(args.price)
+            _save_json_atomic(pp, d)
+            print("✓ 已写入（协议价覆盖位）：", args.model, args.field, args.price)
+        else:
+            targets = set(args.model or [])
+            try:
+                sd0 = _session_dna()
+                for _d, rec in sd0._rows(sd0._iter_day_files(_audit_dir(root)), float("inf"), [False]):
+                    if rec.get("type") == "usage_delta":
+                        for e in (rec.get("entries") or []):
+                            if e.get("model"):
+                                targets.add(e["model"])
+            except Exception:
+                pass
+            if not targets:
+                _die("账本里还没有模型记录；用 --model 指定，例：antinel pricing update --model deepseek-v4.1-flash")
+            import urllib.request
+            sources = [
+                ("litellm", ("https://raw.githubusercontent.com/BerriAI/litellm/main/"
+                             "model_prices_and_context_window.json")),
+                ("openrouter", "https://openrouter.ai/api/v1/models"),
+            ]
+            table, used_src = None, None
+            for src_name, url in sources:
+                for attempt in (1, 2):
+                    try:
+                        print("拉取 %s（第 %d 次）…" % (src_name, attempt))
+                        req = urllib.request.Request(
+                            url, headers={"User-Agent": "antinel/%s" % VERSION})
+                        with urllib.request.urlopen(req, timeout=45) as r:
+                            table = json.loads(r.read())
+                        used_src = src_name
+                        break
+                    except Exception as e:
+                        table = None
+                        print("  拉取失败：%s" % type(e).__name__)
+                if table is not None:
+                    break
+            if table is None:
+                _die("牌价拉取失败（网络）——缓存未变；稍后重试 antinel pricing update")
+
+            def _rate_from_litellm(e):
+                if not e or e.get("input_cost_per_token") is None:
+                    return None
+                return {"input": round((e.get("input_cost_per_token") or 0) * 1e6, 4),
+                        "output": round((e.get("output_cost_per_token") or 0) * 1e6, 4),
+                        "cache_read": round((e.get("cache_read_input_token_cost") or 0) * 1e6, 4)}
+
+            def _rate_from_openrouter(e):
+                pr = (e or {}).get("pricing") or {}
+                try:
+                    return {"input": round(float(pr.get("prompt", 0)) * 1e6, 4),
+                            "output": round(float(pr.get("completion", 0)) * 1e6, 4),
+                            "cache_read": round(float(pr.get("input_cache_read", 0) or 0) * 1e6, 4)}
+                except Exception:
+                    return None
+
+            rates, unmatched = {}, []
+            if used_src == "litellm":
+                for t in sorted(targets):
+                    tl = t.lower()
+                    hit = next((k for k in table
+                                if k.lower() == tl or k.lower().endswith("/" + tl)), None)
+                    hit = hit or next((k for k in table if tl in k.lower()), None)
+                    r = _rate_from_litellm(table.get(hit) if hit else None)
+                    if r and hit:
+                        rates[t] = dict(r, match=hit)
+                    else:
+                        unmatched.append(t)
+            else:  # openrouter: data[].id
+                models = table.get("data") or []
+                for t in sorted(targets):
+                    tl = t.lower()
+                    e = next((m for m in models
+                              if str(m.get("id", "")).lower().endswith("/" + tl)
+                              or str(m.get("id", "")).lower() == tl), None)
+                    e = e or next((m for m in models if tl in str(m.get("id", "")).lower()), None)
+                    r = _rate_from_openrouter(e) if e else None
+                    if r and e:
+                        rates[t] = dict(r, match=e.get("id"))
+                    else:
+                        unmatched.append(t)
+            cache = {"source": used_src, "source_url": url,
+                     "fetched_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                     "currency": "USD", "unit": "per_1m_tokens",
+                     "rates": rates, "unmatched": unmatched}
+            p = cache_p
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            _save_json_atomic(p, cache)
+            print("✓ 牌价缓存已写（参照位）：", p)
+            for m, r in rates.items():
+                print("  %-24s in=%.3f out=%.3f cache=%.3f USD/1M（匹配 %s）"
+                      % (m, r["input"], r["output"], r["cache_read"], r["match"]))
+            if unmatched:
+                print("  未匹配（如实列出，不估价）：", ", ".join(unmatched))
+    elif args.cmd == "digest":
+        cmd_digest(args)
+    elif args.cmd == "verify":
+        cmd_verify(args)
+    elif args.cmd == "report":
+        cmd_report(args)
+    elif args.cmd == "hub":
+        cmd_hub(args)
+    elif args.cmd == "routes":
+        cmd_routes(args)
+    elif args.cmd == "host-shield":
+        cmd_host_shield(args)
+    elif args.cmd == "host-audit":
+        cmd_host_audit(args)
+    elif args.cmd == "host-scan":
+        cmd_host_scan(args)
+    elif args.cmd == "egress":
+        cmd_egress(args)
+    elif args.cmd == "canary":
+        cmd_canary(args)
+    elif args.cmd == "ui":
+        return cmd_ui(args)
+    elif args.cmd == "zone":
+        cmd_zone(args)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+    # ★ 2026-09-26（A2）：**任何未捕获异常都不许把 traceback 直接甩给用户**。
+    #   实测：`host-shield enable` 在计划任务工具被策略禁止启动时抛 PermissionError，
+    #   用户看到 30 行英文调用栈 —— 首页刚建立起来的信任，在"装哨兵"这一步被冲掉。
+    #   处置：一行人话 ＋ 一行原始错误 ＋ **完整栈落盘**（可复算，不藏）。
+    #   只接住"意外"：SystemExit（_die 的正常退出）与 Ctrl-C 原样放行。
+    try:
+        sys.exit(main())
+    except SystemExit:
+        raise
+    except KeyboardInterrupt:
+        sys.exit(130)
+    except Exception as _e:
+        import traceback as _tb
+        _p = os.path.join(os.path.expanduser("~"), ".antinel", "last-error.txt")
+        try:
+            os.makedirs(os.path.dirname(_p), exist_ok=True)
+            with open(_p, "w", encoding="utf-8", newline="\n") as _f:
+                _f.write("".join(_tb.format_exception(type(_e), _e, _e.__traceback__)))
+        except OSError:
+            _p = "(无法写入)"
+        print("✗ 这一步失败了：%s: %s" % (type(_e).__name__, _e), file=sys.stderr)
+        print("  完整错误栈已写入：%s" % _p, file=sys.stderr)
+        print("  → 其余功能不受影响；若这是「装哨兵」失败，把上面第一行原文发给我们即可。",
+              file=sys.stderr)
+        sys.exit(3)

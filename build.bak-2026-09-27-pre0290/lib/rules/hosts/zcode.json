@@ -1,0 +1,12 @@
+{
+ "host": "zcode",
+ "lock_dirs": ["pending"],
+ "watch": [
+  {
+   "path": "~/.zcode/v2/checkpoints",
+   "kind": "snapshot-pending",
+   "gate_default": "deny",
+   "evidence": "ferstar 博客《扒一扒 ZCode 静默上传全量 Git 历史》+ 本机取证 2026-09-19（4 工作区全部 lastAccepted）"
+  }
+ ]
+}
