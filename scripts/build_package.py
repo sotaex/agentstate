@@ -587,268 +587,35 @@ All hits of one event are collected; the highest severity decides.
 - Qoder / TRAE field layouts are declared profiles, not verified.
 """
 
-RUN_HARNESS = '''#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""Re-run the verification suite against THIS package and record psl/judgment.json (psl-vs-0.1).
-Usage: python scripts/run_harness.py            third parties: any failed re-run supersedes the shipped record
-       python scripts/run_harness.py --bootstrap   build-time run: NO ledger write, verdict marked bootstrap
+# ---------------------------------------------------------------- RUN_HARNESS
+#
+# ★★ 2026-09-28：这里**原来内嵌了一份 14.7 KB 的 run_harness.py 全文模板**。
+#    它是一份**陈旧副本** —— 落后产物仓的真源 5 处改进（atexit 临时目录清理、
+#    `__partial__` 半截数上报、ANTINEL_RESULTS 显式指定、typosquat_top 与
+#    enforce_probe 的 COVERED 条目）。构建一跑，**产物仓的改进被静默覆盖**。
+#
+#    ⇒ 修法是**消灭副本**，不是"记得同步"：
+#       只保留一份真源 = `scripts/run_harness.py`，构建器**读它**。
+#       物理上不可能再分叉。
+#
+#   ★ 顺带：产物版已经用 `_pkg_version()` **动态读** antinel.py 的 VERSION，
+#     比旧模板的 `"__VERSION__"` 字符串替换更好（构建期替换会把版本号钉死在
+#     生成物里，而动态读永远是当前值）。所以此处**不做任何替换**，原样搬运。
+#
+#   ★ 判据（可复跑）：构建后 `scripts/run_harness.py` 的 sha256 必须与
+#     构建前**逐字相同**。若不同 ⇒ 说明有人在"生成物"上做手改，改错了地方。
+RUN_HARNESS_SRC = "scripts/run_harness.py"
 
-0.17.0 (P-A1, audit N2/N3): the assertion count now comes from the suite's
-STRUCTURED results file (last_results.json), not from grepping human-readable
-stdout; the record's presence is a REQUIRED input in pkg layout (a run without
-it FAILS instead of quietly scoring 1 lower); and the ledger idempotency key
-includes the assertion count, so a changed denominator can never be swallowed
-by the "no change" guard again.
-"""
-import hashlib, json, os, platform, re, shutil, subprocess, sys, tempfile, time
-from datetime import datetime, timezone
-from pathlib import Path
 
-PKG = Path(__file__).resolve().parent.parent      # run_harness lives in <pkg>/scripts/
-OUT = PKG / "psl" / "judgment.json"
-LEDGER = PKG / "psl" / "verdict-ledger.jsonl"
-MANIFEST = PKG / "psl" / "manifest.json"
-COVERED = ["antinel-namespaces.json",
-           "rules/default.json", "rules/pricing.json",
-           "rules/economics/workbuddy.json", "rules/economics/zcode.json",
-           "rules/economics/claude-code.json", "rules/economics/qoder.json",
-           "rules/economics/generic.json",
-           "hooks/pre_tool_use.py", "hooks/post_tool_use.py",
-           "scripts/scan.py", "scripts/install.py", "scripts/report.py",
-           "scripts/verification_tests.py", "session_dna.py", "transcript_reader.py",
-           "audit_chain.py",
-           "antinel.py", "hub.py"]
-
-def sha(p):
-    return "sha256:" + hashlib.sha256(Path(p).read_bytes()).hexdigest()
-
-def pinned_fingerprint():
-    """The namespace-list key fingerprint pinned in README.md (single source)."""
-    try:
-        txt = (PKG / "README.md").read_text(encoding="utf-8")
-        m = re.search(r"sha256:[0-9a-f]{16}", txt)
-        return m.group(0) if m else None
-    except Exception:
-        return None
-
-def repo_identity():
-    """(host, owner) this build declares itself as: git remote first, then the
-    namespace the builder wrote into psl/manifest.json, else None."""
-    try:
-        out = subprocess.run(["git", "remote", "get-url", "origin"], cwd=str(PKG),
-                             capture_output=True, text=True, timeout=5)
-        url = (out.stdout or "").strip()
-        m = re.search(r"[:/]([\\w.-]+)/([\\w.-]+?)(?:\\.git)?$", url)
-        if m:
-            # group(1)=owner, group(2)=repo —— owner 才是命名空间主体（0.29 修复：
-            # 取反了会让 subject 解析成 github.com/antinel 而非 github.com/sotaex）
-            return "github.com", m.group(1).lower(), m.group(2).lower()
-    except Exception:
-        pass
-    try:
-        ns = (json.loads(MANIFEST.read_text(encoding="utf-8")) or {}).get("namespace") or {}
-        if ns.get("host") and ns.get("owner"):
-            return ns["host"], ns["owner"], ns["owner"]
-    except Exception:
-        pass
-    return None
-
-def derive_object_ownership():
-    """V12 derivation. fail-closed: the default is `unattributed`; `self` is
-    returned only on a positive match against a signed list whose key
-    fingerprint equals the value pinned in README.md."""
-    try:
-        doc = json.loads((PKG / "antinel-namespaces.json").read_text(encoding="utf-8"))
-    except Exception as e:
-        return "unattributed", "namespaces list unreadable (%s)" % type(e).__name__
-    sig = doc.get("signature") or {}
-    if not (sig.get("value") and sig.get("public_key_fingerprint")):
-        return "unattributed", "namespaces list carries no signature block"
-    pinned = pinned_fingerprint()
-    if not pinned or pinned != sig["public_key_fingerprint"]:
-        return "unattributed", "list fingerprint %s does not match README-pinned %s" % (
-            sig.get("public_key_fingerprint"), pinned)
-    ident = repo_identity()
-    if not ident:
-        return "unattributed", "subject identity is not resolvable (no git remote, no manifest.namespace)"
-    host, owner, _disp = ident
-    for e in doc.get("namespaces") or []:
-        if e.get("host") == host and str(e.get("owner", "")).lower() == owner:
-            return "self", "subject %s/%s is in the signed namespace list" % (host, owner)
-    return "third-party", "subject %s/%s is NOT in the signed namespace list" % (host, owner)
-
-def should_append(prev_row, new_row):
-    """0.18.0 (R-21/HP-14): the ledger-append decision, EXTRACTED so it can be
-    exercised by tests without writing anything (scripts/run_harness.py
-    --check-ledger). The idempotency key includes the assertion count, so a
-    changed denominator always lands a new row."""
-    return not (prev_row
-                and prev_row.get("subject_digest") == new_row.get("subject_digest")
-                and prev_row.get("verdict") == new_row.get("verdict")
-                and prev_row.get("assertions") == new_row.get("assertions"))
-
-def main():
-    bootstrap = "--bootstrap" in sys.argv
-    check_ledger = "--check-ledger" in sys.argv
-    if check_ledger:
-        # R-21 (HP-14): dry-run the ledger-append decision AGAINST THE CURRENT
-        # TREE, using the existing judgment record's verdict/assertions -- no
-        # suite run, no writes. Answers "would an official run right now land a
-        # new ledger row?" in under a second, so tests can exercise idempotency.
-        prev = None
-        if LEDGER.is_file():
-            for line in LEDGER.read_text(encoding="utf-8").splitlines():
-                if line.strip():
-                    try: prev = json.loads(line)
-                    except Exception: pass
-        try:
-            old = json.loads(OUT.read_text(encoding="utf-8"))
-            verdict = old.get("verdict", "FAIL")
-            total = int(old.get("assertions_total", 0))
-            passed = int(old.get("assertions_passed", 0))
-        except Exception:
-            print("would_append=unknown (no judgment record -- bootstrap first)")
-            return 0
-        digests = {rel: sha(PKG / rel) for rel in COVERED}
-        ownership, _basis = derive_object_ownership()
-        subject = "sha256:" + hashlib.sha256(
-            "\\n".join(digests[k] for k in COVERED).encode()).hexdigest()
-        row = {"subject_digest": subject, "verdict": verdict,
-               "assertions": "%d/%d" % (passed, total)}
-        print("would_append=%s" % str(should_append(prev, row)).lower())
-        return 0
-    env = dict(os.environ); env["ANTINEL_PKG"] = str(PKG)
-    # P-A1: the layout is DECLARED here. pkg = the record is required (absent
-    # record FAILS the suite); bootstrap = build-time run before the record
-    # exists -- the judgment block contributes 0 assertions and the ledger is
-    # never written.
-    env["ANTINEL_LAYOUT"] = "bootstrap" if bootstrap else "pkg"
-    work = tempfile.mkdtemp(prefix="antinel_harness_")  # per-run: no stale results file
-    env["ANTINEL_WORK"] = work
-    t0 = time.time(); started = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-    proc = subprocess.run([sys.executable, str(PKG / "scripts" / "verification_tests.py")],
-                          capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
-    res = Path(work) / "last_results.json"
-    # CI 调试转储（ANTINEL_DEBUG_CI=1 时）：把套件输出与结构化结果留到仓内
-    # psl/ci_debug/，让无日志权限的第三方也能定位失败。默认关。
-    if os.environ.get("ANTINEL_DEBUG_CI") == "1":
-        try:
-            tag = os.environ.get("ANTINEL_DEBUG_TAG") or "local"
-            dbg = PKG / "psl" / "ci_debug" / tag
-            dbg.mkdir(parents=True, exist_ok=True)
-            (dbg / "suite_stdout.txt").write_text(proc.stdout or "", encoding="utf-8")
-            (dbg / "suite_stderr.txt").write_text(proc.stderr or "", encoding="utf-8")
-            if res.is_file():
-                shutil.copyfile(res, dbg / "last_results.json")
-            (dbg / "run_info.txt").write_text(
-                "python=%s platform=%s rc=%d\\n" % (sys.version, platform.platform(),
-                                                   proc.returncode), encoding="utf-8")
-        except Exception:
-            pass
-    try:
-        rows = json.loads(res.read_text(encoding="utf-8"))
-        total = len(rows)
-        passed = sum(1 for r in rows if r.get("pass"))
-    except Exception as e:
-        print("harness: cannot read structured results %s (%s) -- refusing to report a count" % (res, e))
-        tail = (proc.stderr or "")[-1500:]
-        out_tail = (proc.stdout or "")[-800:]
-        if tail:
-            print("--- suite stderr tail ---\\n" + tail)
-        if out_tail:
-            print("--- suite stdout tail ---\\n" + out_tail)
-        return 2
-    verdict = "PASS" if proc.returncode == 0 and total and passed == total else "FAIL"
-    ownership, ownership_basis = derive_object_ownership()
-    digests = {rel: sha(PKG / rel) for rel in COVERED}
-    now = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
-    rec = {
-        "spec": "psl-vs-0.1",
-        "card_id": "antinel-security-suite",
-        "skill": "antinel-security",
-        "skill_version": "__VERSION__",
-        "verdict": ("PASS (bootstrap)" if bootstrap and verdict == "PASS" else verdict),
-        # V7: status is a status BIT, appended info; this file itself is never
-        # edited after publication. A third party derives current/superseded
-        # with tools/antinel_verify.py; checkedAt is when WE last derived it.
-        "status": {"value": "current", "derivation": "auto", "reason": None,
-                   "checkedAt": now,
-                   "note": "re-derive any time: python tools/antinel_verify.py (--manifest for all 24 shipped files)"},
-        # V8: scope -- what this verdict covers and, just as loudly, what it does not.
-        "scope": {"covered": COVERED,
-                  "notCovered": ["runtime behaviour of the monitored host",
-                                 "files outside the " + str(len(COVERED)) + " digests above",
-                                 "the security posture of your machine or environment",
-                                 "dynamic tool traffic (that is the hooks\\' job, not this record\\'s)",
-                                 "the " + "\\u4f53\\u68c0" " behaviour corpus is not shipped with the package; "
-                                 "that reading is not reproducible from this package alone"]},
-        # V1: the gauge behind the number. assertions N/N without a named
-        # instrument is exactly the drift shape this field exists to prevent.
-        "discrimination": {"instrument": {"name": "scripts/verification_tests.py",
-                                          "object": "this package (the " + str(len(COVERED)) + " digested files)",
-                                          "runner": "scripts/run_harness.py",
-                                          "op": "black-box subprocess assertions (stdin JSON in, exit code + stdout/stderr out)"},
-                           "assertions": {"passed": passed, "total": total}},
-        # V5: true == verified on THIS platform only. Honest until CI proves more.
-        "platformSpec": True,
-        # V12: DERIVED (0.17.0, P-A3), no longer a constant: fail-closed
-        # unattributed unless the signed list + pinned fingerprint + subject
-        # identity all check out. Basis kept beside the value.
-        "objectOwnership": ownership,
-        "objectOwnershipBasis": ownership_basis,
-        "assertions_total": total,
-        "assertions_passed": passed,
-        "criteria_independence": "Assertions exercise the hook protocol, rule matching, scanner, installer and reporter as black boxes through subprocesses (stdin JSON in, exit code and stdout/stderr out); they were authored from the design specification ANT-SEC-SPEC-001 v1.1, not from the implementation; third-party re-run supported.",
-        "environment": {"python": platform.python_version(), "platform": platform.platform(),
-                        "stdlib_only": True, "network": "none"},
-        "digests": digests,
-        "run": {"started_at": started, "duration_ms": int((time.time() - t0) * 1000),
-                "duration_note": "wall-clock of a subprocess fan-out suite; machine- and load-dependent, not comparable across environments",
-                "executor": "scripts/run_harness.py", "exit_code": proc.returncode,
-                "bootstrap": bootstrap},
-        "re_run": "python scripts/run_harness.py",
-        "verify": "python tools/antinel_verify.py",
-        "anchor": None,
-        "note": "v0.1 judgment: single-machine execution by the packaging agent; verification is not a security audit of the user environment. Any failed third-party re-run supersedes this record.",
-    }
-    # V6 ledger (minimal form): append-only, idempotent. P-A1: the idempotency
-    # key includes the assertion count, so a changed denominator always lands a
-    # new row instead of being swallowed. Bootstrap runs NEVER write the ledger.
-    subject = "sha256:" + hashlib.sha256(
-        "\\n".join(digests[k] for k in COVERED).encode()).hexdigest()
-    row = {"recorded_at": now, "row_kind": "self-verdict", "card_id": rec["card_id"],
-           "skill_version": rec["skill_version"], "verdict": rec["verdict"],
-           "subject_digest": subject, "status": "current",
-           "objectOwnership": ownership,
-           "instrument": rec["discrimination"]["instrument"]["name"],
-           "assertions": "%d/%d" % (passed, total),
-           "re_run": rec["re_run"], "verify": rec["verify"], "anchor": None}
-    prev = None
-    if LEDGER.is_file():
-        for line in LEDGER.read_text(encoding="utf-8").splitlines():
-            if line.strip():
-                try: prev = json.loads(line)
-                except Exception: pass
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    # G7-5b (2026-09-24): 行尾必须是【构建器的选择】，不是【宿主平台的默认值】。
-    # 原先未指定 newline ⇒ Windows 写 CRLF、Linux 写 LF ⇒ 同一份源产出不同字节
-    # （实测：随包 psl/judgment.json 里有 100 个 CRLF）。本文件不入 manifest、
-    # 不入 judgment.digests，改行尾零下游影响，纯确定性收益。
-    OUT.write_text(json.dumps(rec, ensure_ascii=False, indent=1), encoding="utf-8", newline="\\n")
-    if bootstrap:
-        print("harness: bootstrap run -- ledger untouched")
-    elif should_append(prev, row):
-        # G7-5b: 同上，显式 LF。★ 台账是 append-only：此处只改【未来行】的写法，
-        # 已有行一字不动（不重写历史）。因此下一次追加会出现一行显式的 CRLF→LF 过渡，
-        # 那是【选择】的结果，不是平台的偶然结果。
-        with LEDGER.open("a", encoding="utf-8", newline="\\n") as f:
-            f.write(json.dumps(row, ensure_ascii=False) + "\\n")
-    print("verdict=%s assertions=%d/%d -> %s" % (rec["verdict"], passed, total, OUT))
-    return 0 if verdict == "PASS" else 1
-
-if __name__ == "__main__":
-    sys.exit(main())
-'''
+def _read_run_harness():
+    """读 run_harness 真源。★ 禁止回退到内嵌模板 —— 那正是本缺陷的成因。"""
+    p = srcfile(RUN_HARNESS_SRC)
+    if not p.is_file():
+        raise SystemExit(
+            "★ 构建器找不到 %s（run_harness 的唯一真源）。\n"
+            "  它**不该**由构建器生成 —— 它有独立的演进历史（见 git log）。\n"
+            "  请在仓里恢复该文件后再构建。" % p)
+    return p.read_text(encoding="utf-8")
 
 
 def rules_md(rules_path):
@@ -1643,6 +1410,41 @@ def _assert_package_data_covered(pkg, manifest_lines):
     return True
 
 
+def _reconcile_src(mutated):
+    """★★★ 构建后对账守卫（2026-09-28 新增，防「构建器改仓源」事故复发）。
+
+    事故原型：build_package.py 曾把一份**内嵌的 run_harness 模板**写进产物，
+    而模板是仓里 run_harness.py 的**陈旧副本** —— 于是每次构建都在**用旧副本
+    覆盖仓源**，静默丢掉仓里后来做的 5 处改进。发现它靠的是人肉 diff，
+    不是机器。这是「同一事实两处副本」缺陷类的第 4 次发作。
+
+    ⇒ 本守卫把「构建器不得改动仓源」变成**每次构建都会自动跑**的判据：
+      `mutated` 是 build() 在写盘前登记的 (相对路径, 构建前 sha256) 列表；
+      只要构建结束时某个仓源文件的哈希变了，立刻红，并点名是哪个文件。
+
+    为什么**必须**在 `build()` 的**每条 return 路径**上都调用：
+      守卫只挂在正常出口 ⇒ 异常路径上的静默破坏永远不被发现。
+    """
+    bad = []
+    for rel, before in mutated:
+        p = srcfile(rel)
+        if not p.is_file():
+            bad.append("%s（构建后**消失了**）" % rel)
+            continue
+        after = sha256(p)
+        if after != before:
+            bad.append("%s\n      构建前 %s\n      构建后 %s" % (rel, before, after))
+    if bad:
+        raise SystemExit(
+            "★ 对账守卫 FAIL：构建**改动了仓源文件**（构建器只许读、不许写）：\n  - "
+            + "\n  - ".join(bad)
+            + "\n（成因：有『生成物』在覆盖仓源 —— 典型是内嵌模板覆盖了真源。"
+              "修法是**消灭副本**（读仓源，别内嵌），不是把模板改新。"
+              "因为模板一旦内嵌，它迟早会落后于真源，而**落后是静默的**。）")
+    print("reconcile: %d 个仓源文件经构建后逐字未变" % len(mutated))
+    return True
+
+
 def build(out_root, verify=False):
     # ★★ 2026-09-28：**构建前先验布局表**。位置选在 build() 最前，理由与 A1 守卫相同：
     #   失败的代价必须是"什么都没动"。"布局错"是最容易被静默跳过的错
@@ -1746,7 +1548,20 @@ def build(out_root, verify=False):
     # byte-exact clones are a digest-security property: no end-of-line conversion,
     # ever (autocrlf smudge broke judgment digests in the v0.17 round).
     (pkg / ".gitattributes").write_text("* -text\n", encoding="utf-8", newline="\n")
-    (pkg / "scripts" / "run_harness.py").write_text(RUN_HARNESS.replace("__VERSION__", VERSION), encoding="utf-8", newline="\n")
+    # ★★ 2026-09-28：这里**原来是"从内嵌模板生成 run_harness.py"**。
+    #   现在改为**不生成**：run_harness.py 是仓里的正常文件、有独立演进历史、
+    #   且已用 `_pkg_version()` 动态读版本。构建器**不该碰它**。
+    #   ⇒ 只做两件事：① 断言它在（缺了就没有判定记录的生成器）；② 记下哈希，
+    #     供构建后的对账守卫比对（"构建不该改动它"）。
+    _rh_src = srcfile(RUN_HARNESS_SRC)
+    if not _rh_src.is_file():
+        raise SystemExit("★ 构建器找不到 %s —— 没有它就没有 psl/judgment.json" % _rh_src)
+    _RUN_HARNESS_HASH_BEFORE = sha256(_rh_src)
+    # 对账守卫的**基线**：构建器在构建过程中**允许自己改**的文件只有 stage/pkg
+    # 里的东西。仓源文件是`输入`，构建器**一个字都不该动**。
+    # 这里只登记要盯的少数几个"曾经被构建器覆盖过"的仓源文件 —— 它们正是
+    # 「同一事实两处副本」事故的常客（run_harness 模板被内嵌副本覆盖过一次）。
+    _SRC_WATCH = ((RUN_HARNESS_SRC, _RUN_HARNESS_HASH_BEFORE),)
     # A-8: named status-derivation tool + the L10 chain verifier + the namespace
     # verification aid, all shipped in tools/
     (pkg / "tools").mkdir(exist_ok=True)
@@ -2071,7 +1886,9 @@ def build(out_root, verify=False):
               "fresh tree (the record is an input to the run that writes it)" % rc1)
         rc = subprocess.call([PY_HARNESS, str(pkg / "scripts" / "run_harness.py")])
         print("harness(final, shipped record) exit:", rc)
+        _reconcile_src(_SRC_WATCH)
         return rc
+    _reconcile_src(_SRC_WATCH)
     return 0
 
 

@@ -2,7 +2,7 @@
  "name": "antinel-security",
  "version": "0.33.2",
  "psl_spec": "psl-vs-0.1",
- "built_at": "2026-09-28T14:11:10Z",
+ "built_at": "2026-09-28T14:26:53Z",
  "built_from": "D:\\psl\\poc\\antinel-security",
  "spec_document": "ANT-SEC-SPEC-001-FULL-R v1.1-R",
  "namespace": {
@@ -78,7 +78,6 @@
   "rules/pricing.json": "sha256:e299e7afa07a97128ce00c13706379c79368c747cd4303c488f1c53c5339e253",
   "scripts/install.py": "sha256:96b760183c19c98134f57918c74a3063516c37c0f4c733c7af6eb57bda26ff7c",
   "scripts/report.py": "sha256:8dc8cf1fc7f4ea67312f356f5d655deed37ff32af4fefa548453ffde33e7c6e3",
-  "scripts/run_harness.py": "sha256:e2124ebed80525e172bedced8eecba770f005fae32ca7e1a6b59161ba2b34b2b",
   "scripts/scan.py": "sha256:851eae8a722cb49e0c68b7dc46b78d3e041cacaee39ce549faf1b98aa1407108",
   "scripts/verification_tests.py": "sha256:c1991a66b9a9076f72d6d614dbd3c852df3e51ee2fb9af7f0bed73585ac9b9aa",
   "session_dna.py": "sha256:80a0e8a33e953c3fdb67e2213d4500d66df449325b531fa688ca99b5a3fc54b4",

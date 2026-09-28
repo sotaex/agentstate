@@ -317,6 +317,64 @@ def j_fallback_has_no_dst10(m):
     return True, "兜底集 %d 条、无 DST-10（与事实一致）" % n
 
 
+def j_builder_mechanisms_present():
+    """★★★ 2026-09-28：守住**构建器里那三件新机制**，防止下次编辑把它们删掉。
+
+    为什么必须由闸门守：
+      这三件机制防的都是「同一事实两处副本」缺陷类 —— 它们**被删掉时不报错**，
+      只会在很久以后以"产物丢文件/版本分叉"的形式暴露（build_package.py
+      曾把内嵌模板覆盖仓源、闸门表曾漏掉 2 个新 category 而模块级崩溃）。
+      ⇒ 『能防住的机制』本身必须是**可红的判据**，不能只是代码里的一段善意。
+
+    判据（行为级：import 构建器，直接问它）：
+      ① `_LAYOUT` 存在且项数 >= 21，且必填项都在表里；
+      ② `_verify_layout()` 真跑得通（不是死代码）；
+      ③ `_gate_table_sync_guard()` 的返回值 == 规则表实际 category 数；
+      ④ `_reconcile_src` 存在且可调用（构建后对账守卫已接线）。
+    """
+    bp_dir = PKG / "scripts"
+    if not (bp_dir / "build_package.py").is_file():
+        return None          # 产物仓无构建器 ⇒ 不可判（不是通过）
+    if str(bp_dir) not in sys.path:
+        sys.path.insert(0, str(bp_dir))
+    try:
+        import build_package as bp
+        import importlib
+        importlib.reload(bp)
+    except Exception as e:
+        return False, "构建器 import 失败：%s: %s" % (type(e).__name__, e)
+
+    layout = getattr(bp, "_LAYOUT", None)
+    if not layout:
+        return False, "① 布局表 _LAYOUT 不见了 —— 『路径分叉』的闸门已失效"
+    n = len(layout)
+    if n < 21:
+        return False, "① 布局表只剩 %d 项（基线 21）—— 有人删了条目" % n
+    for r in getattr(bp, "_LAYOUT_REQUIRED", ()):
+        if r not in layout:
+            return False, "① 布局表缺必填逻辑名 %s" % r
+
+    try:
+        bp._verify_layout()
+    except SystemExit as e:
+        return False, "② 布局自检自己红了：%s" % e
+    except Exception as e:
+        return False, "② 布局自检抛异常：%s: %s" % (type(e).__name__, e)
+
+    data = json.loads(RULES.read_text(encoding="utf-8")).get("rules", [])
+    cats = len({(r.get("category") or "") for r in data if r.get("category")})
+    synced = getattr(bp, "_GATE_TABLE_SYNCED", None)
+    if synced is None:
+        return False, "③ 闸门表同步守卫 _GATE_TABLE_SYNCED 不见了 —— 『类别分叉』的闸门已失效"
+    if int(synced) != cats:
+        return False, "③ 闸门表同步数 %s ≠ 规则表类别数 %d（构建器读到的是旧表？）" % (synced, cats)
+
+    if not callable(getattr(bp, "_reconcile_src", None)):
+        return False, "④ 构建后对账守卫 _reconcile_src 不见了 —— 『构建器改仓源』无人拦"
+    return True, ("布局表 %d 项 · 布局自检通过 · 闸门表同步 %d 类 · 对账守卫在位"
+                  % (n, cats))
+
+
 def j_running_on_real_table(m):
     """★★ 闸门自身的守卫：确认当前加载的是**包内真表**，不是降级兜底集。
 
@@ -389,6 +447,14 @@ def selfcheck():
          None,                       # ★ 见下方 SPOT 剔除专项处理
          None,
          "D-6"),
+        # ★★ D-11 负控（2026-09-28）：把**对账守卫**从构建器里删掉 ⇒ 判据 ④ 必须红。
+        #   为什么选"删函数"而不是"改坏它"：这三件机制的失效方式是**静默消失**
+        #   （被后来的编辑顺手删掉、没报错），所以"它还在不在"就是最该锁的判据。
+        ("D-11 缺陷：构建器里的对账守卫被删掉",
+         "scripts/build_package.py",
+         "_reconcile_src(_SRC_WATCH)",
+         "_reconcile_src_removed(_SRC_WATCH)",
+         "D-11"),
     ]
 
     ok_all = True
@@ -451,7 +517,7 @@ def selfcheck():
         tmp = Path(tempfile.mkdtemp(prefix="antinel_negctl_"))
         dst = tmp / "pkg"
         dst.mkdir(parents=True, exist_ok=True)
-        for sub in ("hooks", "rules", "ci"):
+        for sub in ("hooks", "rules", "ci", "scripts"):
             shutil.copytree(str(PKG / sub), str(dst / sub),
                             ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.bak-*"))
         # 钩子 import 的同级模块（antinel.py 等）也要带上，否则 exec_module 会炸
@@ -530,6 +596,7 @@ def main():
             ("—   DST-01 真表 21 条未损坏（对照）", lambda: j_dst01_still_works(m)),
             ("—   兜底集事实未变（17 条、无 DST-10）", lambda: j_fallback_has_no_dst10(m)),
             ("D-6 十处版本号一致（原 A5，此前无守卫）", j_version_consistent),
+            ("D-11 构建器三件机制在位（布局表/同步守卫/对账）", j_builder_mechanisms_present),
         ]
 
         for cid, fn in checks:

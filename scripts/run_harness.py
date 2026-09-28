@@ -11,16 +11,28 @@ it FAILS instead of quietly scoring 1 lower); and the ledger idempotency key
 includes the assertion count, so a changed denominator can never be swallowed
 by the "no change" guard again.
 """
-import hashlib, json, os, platform, re, shutil, subprocess, sys, tempfile, time
+import atexit, hashlib, json, os, platform, re, shutil, subprocess, sys, tempfile, time
 from datetime import datetime, timezone
 from pathlib import Path
 
 PKG = Path(__file__).resolve().parent.parent      # run_harness lives in <pkg>/scripts/
+
+
+def _pkg_version():
+    """0.33.1：从 antinel.py 读唯一版本源（不 import，避免执行主模块）。"""
+    try:
+        src = (PKG / "antinel.py").read_text(encoding="utf-8", errors="replace")
+        m = re.search(r'^VERSION\s*=\s*"([^"]+)"', src, re.M)
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
+    return "0.0.0"
 OUT = PKG / "psl" / "judgment.json"
 LEDGER = PKG / "psl" / "verdict-ledger.jsonl"
 MANIFEST = PKG / "psl" / "manifest.json"
 COVERED = ["antinel-namespaces.json",
-           "rules/default.json", "rules/pricing.json",
+           "rules/default.json", "rules/pricing.json", "rules/typosquat_top.json",
            "rules/economics/workbuddy.json", "rules/economics/zcode.json",
            "rules/economics/claude-code.json", "rules/economics/qoder.json",
            "rules/economics/generic.json",
@@ -28,7 +40,7 @@ COVERED = ["antinel-namespaces.json",
            "scripts/scan.py", "scripts/install.py", "scripts/report.py",
            "scripts/verification_tests.py", "session_dna.py", "transcript_reader.py",
            "audit_chain.py",
-           "antinel.py", "hub.py"]
+           "antinel.py", "hub.py", "tools/enforce_probe.py"]
 
 def sha(p):
     return "sha256:" + hashlib.sha256(Path(p).read_bytes()).hexdigest()
@@ -135,7 +147,17 @@ def main():
     # never written.
     env["ANTINEL_LAYOUT"] = "bootstrap" if bootstrap else "pkg"
     work = tempfile.mkdtemp(prefix="antinel_harness_")  # per-run: no stale results file
+    # ★ 2026-09-28 收口修订：上面这句的注释只兑现了"不读旧结果"，**没兑现"不留新目录"**
+    #   —— mkdtemp 建的目录从不删除，实测已积 200+ 个 / 46 MB（`antinel_harness_*`）。
+    #   用 atexit 而非 try/finally：本函数有多条 return（2 处 early return + 正常返回），
+    #   还有可能抛异常的路径；atexit 覆盖**全部**退出路径，且不必给大段代码重新缩进。
+    #   仍是 per-run 唯一目录（并发两次运行不会互相覆盖结果）。
+    atexit.register(shutil.rmtree, work, True)
     env["ANTINEL_WORK"] = work
+    # 0.33.1 (P3-1): 结果文件显式指定。此前只靠约定（套件写进 WORK），一旦套件
+    # 中途抛异常就没有结果文件，harness 只能打印 "refusing to report a count"，
+    # 于是"310 条断言"变成一个谁也复现不出来的口头数字。
+    env["ANTINEL_RESULTS"] = os.path.join(work, "last_results.json")
     t0 = time.time(); started = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     proc = subprocess.run([sys.executable, str(PKG / "scripts" / "verification_tests.py")],
                           capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
@@ -158,6 +180,12 @@ def main():
             pass
     try:
         rows = json.loads(res.read_text(encoding="utf-8"))
+        partial = [r for r in rows if r.get("name") == "__partial__"]
+        if partial:
+            # 套件没跑完：数字仍然报，但必须说清楚这是半截的数。
+            print("harness: SUITE ABORTED before completion -- %d assertions recorded, "
+                  "reporting them as a PARTIAL count" % (len(rows) - len(partial)))
+        rows = [r for r in rows if r.get("name") != "__partial__"]
         total = len(rows)
         passed = sum(1 for r in rows if r.get("pass"))
     except Exception as e:
@@ -177,7 +205,10 @@ def main():
         "spec": "psl-vs-0.1",
         "card_id": "antinel-security-suite",
         "skill": "antinel-security",
-        "skill_version": "0.33.2",
+        # 0.33.1：这里写死 "0.33.0" 是**第 4 处**漏网的版本承载件（前 3 处已由
+        # bump 脚本 + INV-3 抓出修掉）。它写进 judgment.json，于是重录后的记录
+        # 仍然自称 0.33.0。改为统一取 antinel.VERSION。
+        "skill_version": _pkg_version(),
         "verdict": ("PASS (bootstrap)" if bootstrap and verdict == "PASS" else verdict),
         # V7: status is a status BIT, appended info; this file itself is never
         # edited after publication. A third party derives current/superseded
