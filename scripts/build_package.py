@@ -27,7 +27,7 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parent
 HARNESS_SRC = Path(r"D:\psl\poc\_antinel_selftest\run_tests.py")
 NAME = "antinel-security"
-VERSION = "0.29.0"
+VERSION = "0.33.2"
 # P-A3: the namespace this build declares itself under. derive_object_ownership()
 # reads git remote first, then THIS field; fail-closed unattributed when neither
 # resolves. Kept beside the hashes so a third party can see what was declared.

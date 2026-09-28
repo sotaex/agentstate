@@ -264,6 +264,43 @@ def j_a2_load_compare_same_source():
         shutil.rmtree(str(tmp), ignore_errors=True)
 
 
+def j_version_consistent():
+    """缺陷 D-6 / 原 A5：**十处**版本承载件必须逐字相同。
+
+    ★ MEMORY 点名的「无守卫」项：「发布前必手扫版本号 —— **无守卫**」。
+      手扫 = 靠人记得 = 迟早漏。实测落后：
+        `_ANTINEL_VERSION` = 0.32.2（落后 2 版，且**进审计链**）
+        `build_package.VERSION` = 0.29.0（落后 4 版）
+
+    ★ 判据复用：直接跑 `ci/version_check.py`（**同一个量具**，不二次实现）。
+
+    ★★ 为什么从「七处」变「十处」（2026-09-28 实测）：
+      初版 `version_check.py` 只列了 7 处，**漏了 `rules/default.json` 与
+      `docs/AUDIT_SCHEMA.md`** —— 是另一条独立路径（`antinel_verify.py --invariants`
+      的 INV-3）抓出来的。两个检查器各自维护清单 ⇒ 必然分叉。
+      修法：`version_check.py` 现在自带**判据 4「本清单 ⊇ INV-3 清单」**，
+      分叉本身就会红。教训：**同一个事实有两个检查器 = 必须有一条判据管它们一致。**
+    """
+    import subprocess
+    r = subprocess.run([sys.executable, str(PKG / "ci" / "version_check.py")],
+                       capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", timeout=60)
+    if r.returncode == 0:
+        n = len(re.findall(r"^\s+\S.*?\s+0\.\d+\.\d+\s*$", r.stdout or "", re.M))
+        return True, "%d 处版本号一致" % n
+    # 从守卫输出里挑出「不属于多数派」的那几行，直接点名
+    rows = re.findall(r"^\s+(.+?)\s+(0\.\d+\.\d+)\s*$", r.stdout or "", re.M)
+    from collections import Counter
+    cnt = Counter(v for _, v in rows)
+    major = cnt.most_common(1)[0][0] if cnt else "?"
+    odd = ["%s=%s" % (l.strip(), v) for l, v in rows if v != major]
+    if not odd:
+        # 不是"值不一致"，而是"清单分叉"或"抽不到值" —— 原样带出来
+        tail = [l for l in (r.stdout or "").splitlines() if l.strip().startswith("-")]
+        return False, "；".join(t.strip("- ").strip() for t in tail[:3]) or "版本守卫 FAIL"
+    return False, "多数派 %s，落后者：%s" % (major, "；".join(odd[:4]))
+
+
 def j_fallback_has_no_dst10(m):
     """兜底集的事实：_FALLBACK 只有 17 条且无 DST-10。
     ★ 这本身不是缺陷，但**降级时必须能看见**（否则把盲区当清白）。"""
@@ -342,13 +379,69 @@ def selfcheck():
          '"id": "DST-10"',
          '"id": "DST-99"',
          "SELF 闸门运行在真表上"),
+        ("D-6 回退：版本号写歪一处",
+         "pyproject.toml",
+         None,                       # ★ None = 运行时读当前版本（见下）
+         "0.99.9",
+         "D-6"),
+        ("D-6 分叉：版本守卫清单漏掉一处承载件",
+         "ci/version_check.py",
+         None,                       # ★ 见下方 SPOT 剔除专项处理
+         None,
+         "D-6"),
     ]
 
     ok_all = True
     for label, rel, old, new, expect_red in INJECTIONS:
         src = (PKG / rel).read_text(encoding="utf-8", errors="replace")
+        # ★★ 2026-09-28 实测教训：D-6 的注入串原先**硬编码** `version = "0.33.1"`。
+        #   升到 0.33.2 之后它立刻失配 ⇒ 负控 SKIP ⇒ 「没变红」被误读成「判据没问题」。
+        #   修法：注入点由**当前磁盘值**算出（读 antinel.py 的 VERSION 当真源），
+        #   升版不再需要同步改负控。凡"跟着版本走的注入串"，一律不许写死。
+        if old is None and new is not None:
+            cur = re.search(r'^VERSION\s*=\s*"([^"]+)"',
+                            (PKG / "antinel.py").read_text(encoding="utf-8", errors="replace"),
+                            re.M)
+            if not cur:
+                print("  [SKIP] %-40s 取不到当前版本号，无法构造注入" % label)
+                ok_all = False
+                continue
+            old = 'version = "%s"' % cur.group(1)
+        # ★★ 「清单分叉」专项：把 SPOTS 里的一整项（标签行 + 正则行）剔掉，
+        #   断言 version_check.py 的判据 4 会因此变红。
+        #   这一条本身也是踩坑产物：初版判据 4 **是假守卫** —— 我用全文件字符串匹配
+        #   注入，误中了 `INV3_HARD_PATHS` 里的同名项，SPOTS 其实没被改，
+        #   负控"通过"是假的。现在改为**按 SPOTS 区间精确剔行 + 断言条数减一**。
+        if new is None and rel == "ci/version_check.py":
+            # ★★ 「清单分叉」专项（先判，避免与下面的动态版本号分支冲突）
+            lines = src.splitlines(True)
+            try:
+                st = next(i for i, l in enumerate(lines) if l.startswith("SPOTS = ["))
+                en = next(i for i in range(st, len(lines)) if lines[i].rstrip() == "]")
+            except StopIteration:
+                print("  [SKIP] %-40s 找不到 SPOTS 段" % label)
+                ok_all = False
+                continue
+            hit = None
+            for i in range(st, en):
+                s = lines[i].lstrip()
+                if s.startswith('("') and "rules/default.json" in lines[i] and i + 1 < en:
+                    if "r'" in lines[i + 1] or 'r"' in lines[i + 1]:
+                        hit = i
+                        break
+            if hit is None:
+                print("  [SKIP] %-40s SPOTS 段内找不到 rules/default.json 项" % label)
+                ok_all = False
+                continue
+            mutated = "".join(lines[:hit] + lines[hit + 2:])
+            n_after = len(re.findall(r'^\s*\("', mutated, re.M)) - 1  # 减去无关的元组
+            if n_after == len(re.findall(r'^\s*\("', src, re.M)) - 1:
+                print("  [SKIP] %-40s ★ 注入未生效（SPOTS 条数没变）" % label)
+                ok_all = False
+                continue
+            src = mutated
         # ★ 先验注入点存在（否则"没变红"是假象）
-        if old not in src:
+        elif old is not None and old not in src:
             print("  [SKIP] %-40s 注入点未找到（源码已变，需更新负控）" % label)
             ok_all = False
             continue
@@ -365,7 +458,11 @@ def selfcheck():
         for py in PKG.glob("*.py"):
             shutil.copy2(str(py), str(dst / py.name))
         mut = (dst / rel)
-        mut.write_text(src.replace(old, new, 1), encoding="utf-8", newline="\n")
+        if new is None:
+            # 分叉专项：src 已是剔行后的内容，不再做字符串替换
+            mut.write_text(src, encoding="utf-8", newline="\n")
+        else:
+            mut.write_text(src.replace(old, new, 1), encoding="utf-8", newline="\n")
 
         # 用**改过的**包跑闸门
         r = subprocess.run(
@@ -432,6 +529,7 @@ def main():
             ("D-3 纯文本提及仍放行（无假阳性）", lambda: j_mention_not_regressed(m)),
             ("—   DST-01 真表 21 条未损坏（对照）", lambda: j_dst01_still_works(m)),
             ("—   兜底集事实未变（17 条、无 DST-10）", lambda: j_fallback_has_no_dst10(m)),
+            ("D-6 十处版本号一致（原 A5，此前无守卫）", j_version_consistent),
         ]
 
         for cid, fn in checks:
