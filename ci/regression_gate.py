@@ -375,6 +375,49 @@ def j_builder_mechanisms_present():
                   % (n, cats))
 
 
+def j_build_harness_order():
+    """★★★ 2026-09-29（D-17）：守住**构建里那条顺序**——「验产物」＋「家务最后做」。
+
+    为什么必须由闸门守（这不是风格问题，是实测过的真 bug）：
+      `build()` 里原先把 `_cleanup_stage(pkg)` 排在 `--verify` 之前，
+      而 `--verify` 跑的 harness **正是 `pkg / "scripts" / "run_harness.py"`**
+      ⇒ **先清暂存、再跑暂存里的脚本** ⇒ 必然 `can't open file`。
+      实测输出：`rc=2, No such file or directory:
+      antinel-security-stage\\scripts\\run_harness.py`。
+
+    ★ 它为什么能**静默存活这么久**：本机删除配额被平台守卫拦死时 `_clear` **失败**，
+      stage 反而**保持完整** ⇒ harness 侥幸跑通。也就是说，
+      **「环境坏了」一直在掩盖「顺序错了」** —— 这是最危险的一种绿。
+
+    判据（两条，都读**源码文本的相对位置**，因为 bug 的本质就是顺序）：
+      ① harness 必须指向 `final`（产物），不能再是 `pkg`（stage）；
+      ② `_cleanup_final_stages(...)` 的调用位置必须在 harness 调用**之后**。
+    """
+    bp = PKG / "scripts" / "build_package.py"
+    if not bp.is_file():
+        return None                     # 产物仓无构建器 ⇒ 不可判（不是通过）
+    src = bp.read_text(encoding="utf-8", errors="replace")
+
+    # ① harness 不许再指向 stage（pkg）
+    if 'str(pkg / "scripts" / "run_harness.py")' in src:
+        return False, ("① harness 仍跑在 **stage**（`pkg / scripts / run_harness.py`）——"
+                       "要验的是产物 `final`；跑中转站会在清暂存后必然失败")
+    if 'final / "scripts" / "run_harness.py"' not in src:
+        return False, "① 找不到指向产物 `final` 的 harness 调用 —— 该项无法判定，视同失效"
+
+    # ② 清暂存必须在 harness 之后
+    i_cleanup = src.rfind("_cleanup_final_stages(")
+    i_harness = src.rfind('_harness_py')
+    if i_cleanup == -1:
+        return False, "② 找不到 `_cleanup_final_stages(...)` —— 收尾清理已失效"
+    if i_harness != -1 and i_cleanup < i_harness:
+        return False, ("② 「家务最后做」被破坏：`_cleanup_final_stages` 出现在 harness **之前**"
+                       "（%d < %d）—— 先清后跑 = 构建必然在 --verify 上失败"
+                       % (i_cleanup, i_harness))
+    return True, ("harness 跑在产物 `final` · 收尾清理在 harness 之后"
+                  "（cleanup@%d > harness@%d）" % (i_cleanup, i_harness))
+
+
 def j_running_on_real_table(m):
     """★★ 闸门自身的守卫：确认当前加载的是**包内真表**，不是降级兜底集。
 
@@ -397,6 +440,34 @@ def j_running_on_real_table(m):
 
 
 # ---------------------------------------------------------------- 负控
+def _aside_dir(path):
+    """零删除地让开一个临时目录（改名成 `<name>.away-<pid>-<ms>`）。
+
+    ★★ 2026-09-29（D-15 推广）判据：**删不掉的东西不要删，改名让开即可**。
+    本机平台层 safe-delete 守卫**硬杀进程**（不抛异常）⇒ `shutil.rmtree`
+    接不住、也没法 `try/except`。改名的代价是留垃圾，但**跑得完**远胜过**跑一半消失**。
+    """
+    import os as _os
+    import time as _t
+    p = Path(str(path))
+    try:
+        if not (p.exists() or p.is_symlink()):
+            return True
+    except OSError:
+        return False
+    _tag = "%d-%d" % (_os.getpid(), int(_t.time() * 1000) % 1000000)
+    for i in range(50):
+        away = p.parent / ("%s.away-%s-%d" % (p.name, _tag, i))
+        try:
+            if away.exists():
+                continue
+            _os.rename(str(p), str(away))
+            return True
+        except OSError:
+            continue
+    return False
+
+
 def selfcheck():
     """★★ 负控：把每个缺陷**注入回去**，断言闸门必须变红。**先红后绿。**
 
@@ -455,6 +526,14 @@ def selfcheck():
          "_reconcile_src(_SRC_WATCH)",
          "_reconcile_src_removed(_SRC_WATCH)",
          "D-11"),
+        # ★★ D-17 负控（2026-09-29）：把 harness 指回 **stage** ⇒ 判据 ① 必须红。
+        #   bug 的本质是**顺序/对象错配**（先清暂存、再跑暂存里的脚本），
+        #   所以负控就注入"跑回中转站"这一件事。
+        ("D-17 缺陷：harness 被指回 stage（pkg）",
+         "scripts/build_package.py",
+         '_harness_py = str(final / "scripts" / "run_harness.py")',
+         '_harness_py = str(pkg / "scripts" / "run_harness.py")   # NEGCTL',
+         "D-17"),
     ]
 
     ok_all = True
@@ -553,7 +632,12 @@ def selfcheck():
             ok_all = False
             print("         ★ 闸门变红了，但不是预期的判据（期望含 %r）" % expect_red)
 
-        shutil.rmtree(str(tmp), ignore_errors=True)
+        # ★★ 2026-09-29（D-15 推广）：**负控的临时目录也不许删**。
+        #   实测教训：本机平台层 safe-delete 守卫按会话累计、阈值 50、不重置，
+        #   一旦触顶，`shutil.rmtree` 会让**整个负控进程被硬杀**（SIGTERM，
+        #   不抛 Python 异常）⇒ 表现为"负控只跑了几条就消失"，
+        #   极易被误读成"没变红=判据没问题"。修法同 D-15：**改名让开**。
+        _aside_dir(tmp)
 
     print()
     if ok_all:
@@ -597,6 +681,7 @@ def main():
             ("—   兜底集事实未变（17 条、无 DST-10）", lambda: j_fallback_has_no_dst10(m)),
             ("D-6 十处版本号一致（原 A5，此前无守卫）", j_version_consistent),
             ("D-11 构建器三件机制在位（布局表/同步守卫/对账）", j_builder_mechanisms_present),
+            ("D-17 构建顺序：验产物 final ＋ 家务最后做", j_build_harness_order),
         ]
 
         for cid, fn in checks:

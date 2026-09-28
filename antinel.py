@@ -1379,11 +1379,23 @@ def cmd_host_shield(args):
         print("  代价：被拦工作区的 ZCode 检查点回滚不可用。撤销：antinel host-shield disable")
         return
     if args.sub == "disable":
-        st["enabled"] = False
+        # ★★ 2026-09-29（D-18 修）：**先干活，最后宣告**。
+        #
+        # 原顺序（bug，实测）：`st["enabled"]=False` 写在**最前**，然后才去删自启项。
+        #   本机实测：宿主 safe-delete 会在 `os.remove(启动文件夹 shim)` 处
+        #   **硬杀进程**（`SAFE_DELETE_BULK_CONFIRM_REQUIRED` 是平台层杀的，
+        #   Python 的 `except OSError` **接不住**）⇒ `disable` rc=1 当场中断。
+        #   结果：state 已写 enabled=false，而自启 shim **还在启动文件夹里**
+        #   ⇒ 下次登录仍会拉起哨兵，可 `status` 读 state 说"关着"
+        #   ⇒ **机器状态与账本不一致，且没有任何安置**。
+        #
+        # 判据：**状态位是"结果"、不是"意图"**。清理会被外部杀掉，
+        #   所以"宣告已撤防"必须排在清理**之后**：要么真撤干净了才写 false，
+        #   要么半途被杀时 state 仍是 true（status 会如实说"开着"，并列出不在岗的哨兵）。
+        # ★ 与 0.28.1 的原意图不矛盾：那条要的是"撤防不能一步都不走"，
+        #   本条要的是"不能把没走完说成走完了" —— 两者靠"先干活后宣告"同时满足。
         # 0.28.1：撤防同时停掉在岗哨兵（旧版留着空转）——先查存活再清 pid
         _alive_pid = st.get("sentinel_pid") if hs.sentinel_alive(st) else None
-        st["sentinel_pid"] = None
-        hs.save_state(st)
         # 0.28.3（B4i）：schtasks/taskkill 绝对路径
         # ★ 2026-09-26（A2）：**撤防必须走完**。原代码裸调 schtasks，本机实测直接抛
         #   PermissionError ⇒ 后面"杀哨兵、还原 ACL、写留痕"三步**一步都没执行**，
@@ -1398,8 +1410,25 @@ def cmd_host_shield(args):
             print("  ⚠ 计划任务未能删除（%s）——继续撤防其余部分" % type(_e).__name__)
         try:
             os.remove(_startup_folder_cmd())
-        except OSError:
-            pass
+        except OSError as _e:
+            # ★★ 2026-09-29（D-18 修）：**不许静默吞**。
+            #
+            # 原来这里是 `except OSError: pass` —— 而 `_auto_removed` 只反映 schtasks
+            # 那一路。于是「schtasks 成功 + 启动文件夹删除失败」这一格会：
+            #   · `_auto_removed` 仍为 True ⇒ 不打印任何警告；
+            #   · 但启动文件夹里的 shim **还在** ⇒ 下次登录仍会拉起哨兵，
+            #     而 `host-shield status` 读的正是这个自启位 ⇒ 用户看到"护盾：开着"。
+            # 实测（隔离 HOME，schtasks 被 Program Blacklist 拦）：
+            #   `disable` 之后 `status` 仍报「护盾：开着」。
+            #
+            # 判据：**自启位有两个来源（schtasks ／ 启动文件夹），
+            #   "撤销成功"必须同时覆盖两者** —— 只报其中一个，就是把
+            #   "同一事实两处副本"重新引进来（本仓反复踩过的那一类）。
+            # ⇒ 删失败必须并入同一个标志，让上面那段统一报告。
+            if os.path.exists(_startup_folder_cmd()):
+                _auto_removed = False
+                print("  ⚠ 启动文件夹自启项未能删除（%s）——下次登录可能仍会拉起哨兵"
+                      % type(_e).__name__)
         if _alive_pid:
             try:
                 subprocess.run([hs._TASKKILL, "/F", "/PID", str(_alive_pid)],
@@ -1420,6 +1449,12 @@ def cmd_host_shield(args):
                   field="enabled", change="true → false", armed=False, invoked_by=_invoked_by(),
                   reason="宿主审计门闸已撤防（ACL 已还原%s）"
                          % ("" if _auto_removed else "；★ 自启项删除失败，下次登录可能仍被拉起"))
+        # ★ 2026-09-29（D-18）：**状态位最后写** —— 前面每一步都可能被外部杀掉
+        #   （宿主硬杀不抛 Python 异常，`except` 接不住）。写在最后才能保证：
+        #   "state 说已撤防" ⇔ "真的撤完了"。半途被杀时 state 仍是 true ⇒ status 如实说"开着"。
+        st["enabled"] = False
+        st["sentinel_pid"] = None
+        hs.save_state(st)
         print("✓ 护盾已撤防，ACL 已还原")
         if not _auto_removed:
             print("  ⚠ 但**自启项未能删除**——下次登录可能仍会拉起哨兵。请手工检查："

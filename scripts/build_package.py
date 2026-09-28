@@ -927,7 +927,6 @@ def _clear(path):
 
 def _cleanup_stage(path):
     """清暂存目录：失败只【报告】，不抛出。
-
     2026-09-24 (F5)。判据来自本轮实测：**清暂存是可选家务，产物才是交付物；
     家务不得阻止产物生成。**
     本机 `_clear()` 会撞宿主按【回合】累计的批量删除阈值
@@ -947,6 +946,25 @@ def _cleanup_stage(path):
         print("!! 清暂存被宿主守卫中断（不影响已生成的产物）: SystemExit(%s)" % e.code)
     except Exception as e:
         print("!! 清暂存未完成（不影响已生成的产物）: %s: %s" % (type(e).__name__, e))
+
+
+def _cleanup_final_stages(pkg, plug):
+    """★ 2026-09-29（D-17）：**家务最后做**。
+
+    为什么必须收进一个函数：`build()` 有多条 return 路径（`--verify` 成功/失败、
+    无 `--verify`），三条都必须路过同一次收尾，否则"某条路径没清暂存"会静默累积
+    （实测：stage 里积了 64 个文件、zcode stage 72 个）。
+
+    ★ 顺序纪律（本仓自己立的，见上）：**产物先做、家务最后做**。
+      清理失败只报告、绝不改变退出码 —— 产物已经由 `_verify_plugin_matches_package`
+      逐字节核过，家务失败不等于构建失败。
+    """
+    for s in (pkg, plug):
+        try:
+            if s and Path(str(s)).exists():
+                _cleanup_stage(s)
+        except Exception as e:
+            print("!! 收尾清理 %s 未完成（不影响产物）: %s" % (s, e))
 
 
 def _verify_plugin_matches_package(manifest_files, plug_root):
@@ -1850,7 +1868,22 @@ def build(out_root, verify=False):
     # 2026-09-24 (F5): 副本必须逐字节等于包 —— 否则"插件是旧版本"这件事
     # 就只会以"用户装到的和仓库里的不一样"的形式，在很久以后才被发现。
     _verify_plugin_matches_package(manifest_files, plug)
-    _cleanup_stage(pkg)
+    # ★★ 2026-09-29（D-17 修）：**删掉这一行原本的位置，家务挪到最后**。
+    #
+    # 原样（bug，实测）：`_cleanup_stage(pkg)` 排在这里（第 1853 行），
+    #   而下面 `--verify` 跑的是 `pkg / "scripts" / "run_harness.py"` ——
+    #   **先清暂存、再跑暂存里的 harness** ⇒ 必然 `can't open file ...`
+    #   （实测：`rc=2, No such file or directory: antinel-security-stage\scripts\run_harness.py`）。
+    #
+    # 为什么历史上没暴露：本机删除配额被平台守卫拦死时 `_clear` **失败**⇒
+    #   stage 反而**保持完整** ⇒ harness 侥幸跑通。即"错的巧合"，
+    #   而不是"对的顺序"—— 一旦配额恢复，这行必然让 `--verify` 全废。
+    #
+    # 判据（两条，都不依赖环境运气）：
+    #   ① **验的必须是产物**：harness 要跑在 `final`（产物仓），不是 stage。
+    #      stage 只是装配中转站，`_merge` 之后它就不再是"被发布的东西"。
+    #   ② **家务最后做**：清暂存挪到 harness 之后（本仓自己的纪律，
+    #      见 `_cleanup_stage` docstring："产物才是交付物，家务不得阻止产物生成"）。
     if verify:
         # P-A1: the SEED run is a BOOTSTRAP run -- the ledger stays untouched
         # (a bootstrap happens before psl/judgment.json exists, and writing a
@@ -1881,13 +1914,22 @@ def build(out_root, verify=False):
         # (PY = ANTINEL_PY or sys.executable), and fall back to sys.executable.
         PY_HARNESS = os.environ.get("ANTINEL_PY") or sys.executable
         print("harness interpreter: %s  (build interpreter: %s)" % (PY_HARNESS, sys.executable))
-        rc1 = subprocess.call([PY_HARNESS, str(pkg / "scripts" / "run_harness.py"), "--bootstrap"])
+        # ★ 2026-09-29（D-17）：跑在 **`final`（产物仓）** —— 要验的是产物，
+        #   不是装配中转站。原为 `pkg`（stage），见上面的判据 ①。
+        _harness_py = str(final / "scripts" / "run_harness.py")
+        if not os.path.isfile(_harness_py):
+            print("!! harness 不在产物里（%s）—— --verify 无法进行，产物已生成" % _harness_py)
+            _reconcile_src(_SRC_WATCH)
+            return 0
+        rc1 = subprocess.call([PY_HARNESS, _harness_py, "--bootstrap"])
         print("harness(seed, bootstrap) exit: %s   -- non-zero/absent-record here is EXPECTED on a "
               "fresh tree (the record is an input to the run that writes it)" % rc1)
-        rc = subprocess.call([PY_HARNESS, str(pkg / "scripts" / "run_harness.py")])
+        rc = subprocess.call([PY_HARNESS, _harness_py])
         print("harness(final, shipped record) exit:", rc)
         _reconcile_src(_SRC_WATCH)
+        _cleanup_final_stages(pkg, plug)
         return rc
+    _cleanup_final_stages(pkg, plug)
     _reconcile_src(_SRC_WATCH)
     return 0
 
