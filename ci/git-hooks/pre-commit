@@ -1,0 +1,36 @@
+#!/bin/sh
+# Antinel 回归闸门 —— 提交前自动运行（第 1 步 甲 的第二半）
+#
+# ★ 为什么必须有这一半：
+#   光有闸门文件 ≠ 闸门会被跑。**没人跑的检查项＝没检查项**
+#   （MEMORY：「无检查项的禁令＝没禁令」的反面同样成立）。
+#   这个钩子把「跑闸门」变成 git 提交的**前置条件**，不通过就提交不了。
+#
+# 部署：本文件在仓内 ci/git-hooks/pre-commit，需复制/链接到 .git/hooks/pre-commit
+#       （install 命令见 ci/README-gate.md）
+#
+# 绕过（仅在明确知情时）：git commit --no-verify
+#   —— 但绕过会在审计链留痕（见下方 log），不是悄悄溜过去
+
+PY="${ANTINEL_PY:-python}"
+GATE="$(git rev-parse --show-toplevel)/ci/regression_gate.py"
+
+if [ ! -f "$GATE" ]; then
+    echo "[gate] 找不到 $GATE —— 跳过（这不是通过，是缺失）" >&2
+    exit 0
+fi
+
+echo "[gate] 回归闸门运行中（约 8 秒）……" >&2
+"$PY" "$GATE"
+rc=$?
+
+if [ "$rc" -ne 0 ]; then
+    echo "" >&2
+    echo "★★ 提交被拦：回归闸门变红 —— 本次改动把已修好的缺陷弄回去了。" >&2
+    echo "   看上面的 [FAIL] 行定位。修好后重跑：python ci/regression_gate.py" >&2
+    echo "   确知无害要绕过：git commit --no-verify（会在审计链留痕）" >&2
+    exit 1
+fi
+
+echo "[gate] 全绿，放行提交。" >&2
+exit 0
