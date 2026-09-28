@@ -53,10 +53,62 @@ def _banner_quiet():
     return False
 
 
-def _current_session_id():
-    """SessionStart stdin carries {session_id, ...}; best-effort read."""
+def _read_stdin_bounded(budget=0.4):
+    """**有界**读 stdin，返回 bytes；读不到就是 b''。
+
+    ★ 2026-09-26 实测（同一份脚本，三组对照）：
+        · `banner.py < /dev/null`   → 立刻返回（0.0 s）
+        · `sleep 25 | banner.py`    → **挂住不返回**（`timeout 20` 杀掉，rc=124）
+        · 在终端里直接跑             → 挂住等 Ctrl-D
+      成因：`sys.stdin.buffer.read()` 是**阻塞到 EOF** 的，不是"读一次就回来"。
+      后果不是"拿不到 session_id"，而是**把会话卡住**；更严重的是
+      `scripts/verification_tests.py` 会**继承** stdin ⇒ **整份验证套件挂死**，
+      连一条 FAIL 都留不下（实测：120 s 后抛 TimeoutExpired，judgment.json 根本没生成）。
+
+      ★ 做法：把 fd 0 设成非阻塞再轮询，**不起线程**。
+        第一版用"守护线程 + join(0.4)"，确实不挂了，但线程还阻塞在
+        `sys.stdin.buffer.read()` 上，解释器退出时撞 `_enter_buffered_busy`
+        —— **进程段错误退出（rc=139）**，比挂住更糟（实测）。
+        非阻塞轮询不碰 `_io.BufferedReader` 的锁，退出干净。
+      ★ `/dev/null` 这类**不是管道**的 stdin：`set_blocking` 会失败（WinError 87），
+        此时退回普通 read —— 它们本来就会立刻 EOF，不会挂。
+    """
+    import time as _t
     try:
-        raw = sys.stdin.buffer.read().decode("utf-8", errors="replace")
+        try:
+            os.set_blocking(0, False)
+        except Exception:
+            try:
+                return sys.stdin.buffer.read()
+            except Exception:
+                return b""
+        t0 = _t.monotonic()
+        chunks = []
+        while _t.monotonic() - t0 < budget:
+            try:
+                b = os.read(0, 65536)
+            except BlockingIOError:
+                _t.sleep(0.01)
+                continue
+            except OSError:
+                break
+            if not b:
+                break
+            chunks.append(b)
+        return b"".join(chunks)
+    except Exception:
+        return b""
+
+
+def _current_session_id():
+    """SessionStart stdin carries {session_id, ...}; best-effort, **有界**读取。"""
+    try:
+        if sys.stdin is None or sys.stdin.isatty():
+            return ""
+    except Exception:
+        return ""
+    try:
+        raw = _read_stdin_bounded().decode("utf-8", errors="replace")
         return (json.loads(raw).get("session_id") or "")
     except Exception:
         return ""

@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""AgentState v0.28.0 - static scan engine (F-01 environment scan).
+"""AgentState v0.29.0 - static scan engine (F-01 environment scan).
 
 Single-pass, multi-rule: one os.walk() over the tree, every file is checked
-against every applicable STATIC rule (spec part 3). Static rules: SEC-01..05
-(sensitive-file exposure, by path), SEC-06 (secret literals in content --
-reclassified static in 0.16.0: content_patterns run against text files during
-the scan, so the health-check can find a live key, matching what RULES.md has
-always claimed) and CTX-02..05 (skill content / metadata). Dynamic rules
-(NET-*, DST-*, CTX-01) need runtime evidence and live in the hooks only.
+against every applicable STATIC rule (spec part 3). Which rules count as
+static is decided by CompiledRule.is_static() -- NOT by any list written here:
+file_content / metadata_check rules are static, so is a secrets rule carrying
+file_patterns (sensitive-file exposure, by path), and so is a content-only rule
+such as the secret-literal rule (0.16.0: content_patterns run against text
+files during the scan, so the health-check can find a live key, matching what
+RULES.md has always claimed). Dynamic rules -- the ones that match on command
+text and need runtime evidence -- live in the hooks only.
+★ 0.29.0：本注释**不再写任何规则编号**。编号会变、注释不会 —— 手写在注释里的
+  编号就是下一个假数字（前车之鉴：规则数 24→25 时全站 15 处硬编码同时变假，
+  且无报错）。要权威清单请跑 `scan.py` 看 static 规则列表，或读 rules/default.json。
 
 root_dir priority (spec A-06): --root > git rev-parse --show-toplevel > cwd.
 Traversal policy (spec A-07): depth <= 15, files > 2 MB read only the first
@@ -45,7 +50,7 @@ DEFAULT_RULES = _locate("rules", "default.json")
 EXCLUDED_DIRS = {"node_modules", ".git", "venv", ".venv", "__pycache__", ".tox",
                  "dist", "build", "vendor", "third_party"}
 EXCLUDED_REL_PATHS = {".psl/audit"}
-TEXT_SUFFIXES = {".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".py", ".js",
+TEXT_SUFFIXES = {".md", ".mdc", ".txt", ".json", ".yaml", ".yml", ".toml", ".py", ".js",
                  ".ts", ".sh", ".bash", ".zsh"}
 MAX_DEPTH = 15
 MAX_FILE_BYTES = 2 * 1024 * 1024
@@ -160,10 +165,26 @@ def resolve_root(explicit):
 def is_text_candidate(name):
     if name == "SKILL.md" or name.startswith(".env"):
         return True
+    if name in _INSTRUCTION_BASENAMES:   # 0.31.0 (F1): e.g. .cursorrules (no ext)
+        return True
     suffix = os.path.splitext(name)[1].lower()
     if suffix in TEXT_SUFFIXES:
         return True
     return suffix == ""              # no extension but readable (A-07)
+
+
+# 0.31.0 (F1): the instruction surface. Keep in sync with hooks/pre_tool_use.py
+# (parity asserted in verification_tests E1-8).
+_INSTRUCTION_BASENAMES = ("AGENTS.md", "AGENTS.local.md", "CLAUDE.md",
+                          "CLAUDE.local.md", ".cursorrules", "copilot-instructions.md")
+_INSTRUCTION_DIR_MARKERS = (".cursor/rules",)
+
+
+def _is_instruction_file(fn, rel):
+    if fn in _INSTRUCTION_BASENAMES:
+        return True
+    norm = rel.replace("\\", "/")
+    return any(m + "/" in norm for m in _INSTRUCTION_DIR_MARKERS) and fn.endswith(".mdc")
 
 
 def read_text_capped(path):
@@ -298,15 +319,46 @@ def scan_directory(root, rules, quick=False, path_whitelist=None):
 
             for rule in static:
                 if rule.category == "secrets" and not (rule.content_patterns and not rule.file_patterns):
-                    # SEC-01..05 are path-matched above; only a pure-content
-                    # secrets rule (SEC-06) takes the content path below.
+                    # 0.29.0：注释里不再写编号。凡"带 file_patterns 的 secrets 规则"
+                    # 都已在上一段按路径匹配过（哪几条由 rules/default.json 决定），
+                    # 这里只放**纯内容匹配**的 secrets 规则走下面的内容通道。
                     continue
                 if rule.category == "secrets" and any(rel_l.startswith(p) for p in path_whitelist):
-                    continue                              # F-06 whitelist.paths covers SEC-06 findings too
+                    continue                              # F-06 whitelist.paths 对内容型命中同样生效
                 if rule.type == "file_content":
+                    # 0.31.0 (F1): target semantics -- instruction_files matches
+                    # SKILL.md + the instruction set; all_text_files stays the
+                    # superset. Compound criterion mirrors pre_tool_use._basic_hit
+                    # (non-SKILL.md instruction files need 2 generic or 1 specific
+                    # hit); set parity is asserted in verification_tests E1-8.
+                    _spec = ("SKILL.md" if fn == "SKILL.md"
+                             else "instruction_file" if _is_instruction_file(fn, rel)
+                             else "all_text_files")
+                    # 0.31.0 (F2): a file_content rule carrying file_patterns only
+                    # inspects files whose path matches them (MCP-02/03/04 target
+                    # MCP config files; the guard keeps their patterns from
+                    # content-scanning every text file in the tree).
+                    if rule.file_patterns and not any(rx.search(rel) or rx.search(fn)
+                                                      for rx in rule.file_patterns):
+                        continue
                     if rule.target == "SKILL.md" and fn != "SKILL.md":
                         continue
+                    if rule.target == "instruction_files" and _spec not in ("SKILL.md", "instruction_file"):
+                        continue
                     if rule.excluded(rel, fn):
+                        continue
+                    if rule.raw.get("compound_nonprimary") and _spec == "instruction_file":
+                        _sf = int(rule.raw.get("specific_from") or 0)
+                        _hit_idx = [k for k, rx in enumerate(rule.content_patterns)
+                                    if rx.search(text)]
+                        _spec_hits = [k for k in _hit_idx if k >= _sf]
+                        _gen_hits = [k for k in _hit_idx if k < _sf]
+                        if _spec_hits:
+                            _m = rule.content_patterns[_spec_hits[0]].search(text)
+                            add(rule, rel, line_of(text, _m.start()), _m.group(0)[:60])
+                        elif len(_gen_hits) >= 2:
+                            _m = rule.content_patterns[_gen_hits[0]].search(text)
+                            add(rule, rel, line_of(text, _m.start()), _m.group(0)[:60])
                         continue
                     if rule.detection == "character_code_scan":
                         if quick and len(text) > QUICK_MAX_CHARSCAN:
@@ -436,6 +488,47 @@ def render_text(result):
     return "\n".join(lines)
 
 
+def scan_mcp_configs(root, rules):
+    """0.31.0 (F2): scan MCP configuration files for tool-description injection
+    (MCP-02), unaudited remote servers (MCP-03) and plaintext secrets in env
+    blocks (MCP-04). Text-level on purpose: the patterns work on raw JSON (and
+    even on JSON5-with-comments), so a parse failure can never silently skip a
+    config. Candidates: .cursor/mcp.json, .mcp.json, claude_desktop_config.json,
+    .vscode/mcp.json. Returns findings in the same shape as scan_directory."""
+    out = []
+    cands = [".cursor/mcp.json", ".mcp.json", "claude_desktop_config.json", ".vscode/mcp.json"]
+    compiled = {r.id: r for r in (CompiledRule(x) for x in rules) if r.id in ("MCP-02", "MCP-03", "MCP-04")}
+    if not compiled:
+        return out
+    for rel in cands:
+        path = os.path.join(str(root), rel.replace("/", os.sep))
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "rb") as f:
+                raw = f.read(512 * 1024)
+            if b"\x00" in raw[:1024]:
+                continue
+            text = raw.decode("utf-8", errors="replace")
+        except Exception:
+            continue
+        relf = rel.replace("/", os.sep)
+        for rid in ("MCP-02", "MCP-03", "MCP-04"):
+            rule = compiled[rid]
+            for rx in rule.content_patterns:
+                for m in rx.finditer(text):
+                    out.append({
+                        "rule_id": rule.id, "severity": rule.severity, "category": rule.category,
+                        "file": relf, "line": line_of(text, m.start()),
+                        "target": "%s:%d" % (relf, line_of(text, m.start())),
+                        "match": (m.group(0) or "")[:120],
+                        "description": rule.description, "remediation": rule.remediation,
+                        "kind": "mcp_config",
+                    })
+                    break            # one finding per (file, rule) is enough
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Antinel static security scan")
     ap.add_argument("--root", help="project root (default: git toplevel or cwd)")
@@ -463,6 +556,20 @@ def main(argv=None):
 
     findings, stats, applied, subject_digest = scan_directory(
         root, rules, quick=args.quick, path_whitelist=load_path_whitelist(root))
+    # 0.31.0 (F2): MCP config files get a dedicated pass (text-level; see
+    # scan_mcp_configs) -- the walk-based file_content scan would miss files
+    # whose only trigger is their ROLE (mcp config), not their extension.
+    # Dedupe on (rule_id, file, line): the walk may already have content-scanned
+    # a config file it walked past, and the dedicated pass must not double-count.
+    _seen_keys = set()
+    _merged = []
+    for f in list(findings) + scan_mcp_configs(root, rules):
+        k = (f.get("rule_id"), str(f.get("file", "")).replace("\\", "/"), f.get("line"))
+        if k in _seen_keys:
+            continue
+        _seen_keys.add(k)
+        _merged.append(f)
+    findings = _merged
     order = {"info": 0, "warning": 1, "critical": 2}
     findings = [f for f in findings if order[f["severity"]] >= order[args.min_severity]]
     score, grade, breakdown = calculate_score(findings)

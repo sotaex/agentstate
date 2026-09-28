@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "antinel"
-version = "0.28.0"
+version = "0.33.1"
 description = "Local-first audit chain and ledger for AI coding agents: every action recorded, every record verifiable."
 readme = "README.md"
 license = {file = "LICENSE"}
@@ -21,8 +21,11 @@ classifiers = [
 antinel = "antinel:main"
 
 [tool.setuptools]
+# ★ 0.29.1：ui_server 必须在此登记 —— 漏了它，wheel 里就没有本地体检页，
+#   用户跑 `antinel ui` 会 ModuleNotFoundError。这是"缺文件残包"的老病。
 py-modules = ["antinel", "audit_chain", "session_dna", "strings",
-              "transcript_reader", "host_shield", "hub", "antinel_mcp"]
+              "transcript_reader", "host_shield", "hub", "antinel_mcp", "egress",
+              "ui_server"]
 packages = ["hooks", "scripts", "tools", "rules", "psl"]
 
 [tool.setuptools.package-data]

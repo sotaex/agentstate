@@ -1,6 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""AgentState v0.28.0 - PreToolUse hook (Claude Code / ZCode compatible).
+"""AgentState v0.32.2 - PreToolUse hook (Claude Code / ZCode compatible).
+
+v0.30.0 changes (E-3 closure -- the deny-signal single point of failure):
+  E3-a: deny is now signaled on THREE additive channels at once -- the
+        documented contract JSON (hookSpecificOutput.permissionDecision="deny"),
+        the legacy stdout JSON ({"decision":"block"}), and exit 2 + stderr.
+        Previously the block rested on exit 2 alone; a host that stopped
+        honoring it would silently degrade every block into an allow.
+        Policy escape hatch: global_settings.deny_stdout = dual (default) /
+        legacy / quiet.
+  E3-b: ANTINEL_PROBE=1 -- tools/enforce_probe.py runs this hook against a
+        synthetic must-block event and verifies the signal channels. In probe
+        mode the hook is side-effect-free: no audit writes, no owner
+        notification, and the policy whitelist is bypassed (the probe tests
+        the ENGINE's deny path, not the user's release configuration).
+  E3-c: hook_alive and pre_tool_use_summary records now carry
+        antinel_version, host_version (when the host sends one) and the deny
+        contract in force -- the ledger itself shows which deny contract
+        was armed.
 
 v1.2 fixes over v1.1:
   G-01: rules loaded from PKG_DIR only (install.py snapshot in .psl/ is informational)
@@ -16,7 +34,7 @@ v1.2 fixes over v1.1:
 
 Protocol (spec A-01 / D-01): one JSON event on stdin
     {"session_id", "transcript_path", "tool_name", "tool_input"}
-Block: stdout {"decision":"block","reason":...} + stderr reason + exit 2 (dual channel).
+Block: stdout {"decision":"block","reason":...,"hookSpecificOutput":{...permissionDecision:"deny"}} + stderr reason + exit 2 (three additive channels; 0.30.0 E-3).
 Warning: stderr notice, exit 0. Any internal failure: exit 0 (fail open, A-08).
 
 tool_input mapping: Bash -> command; Read -> file_path; Write -> file_path + content;
@@ -29,10 +47,15 @@ import os
 import re
 import sys
 import time
+import time as _time_mod
 from datetime import datetime, timezone
+
+_T0 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段起点（性能插桩）
 
 # ---------------------------------------------------------------- constants --
 PKG_DIR = os.path.dirname(os.path.abspath(__file__))
+_ANTINEL_VERSION = "0.32.2"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
+_T1 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段终点（性能插桩）
 
 
 def _locate(*rel):
@@ -54,6 +77,9 @@ MAX_CONTENT = 1024 * 1024               # legacy name, kept for callers; no long
 SCAN_CHUNK = 64 * 1024
 SCAN_OVERLAP = 4 * 1024
 SCAN_LIMIT = 4 * 1024 * 1024            # head+tail budget; 见下方实测（原 2MB）
+# 0.33.1 (P3-4): 钩子"慢到超时"的留痕阈值。宿主超时 10s(zcode)/15s(claude)，
+# 超时=allow（A-08）。取 8s 留 2s 余量，超线即写 hook_slow 事件。
+SLOW_BUDGET_MS = 8000
 PREFILTER_MIN = 64 * 1024               # below this the regex is already cheap; skip prefiltering
 # Differential-testing switch: with ANTINEL_NO_PREFILTER=1 every pattern runs its regex
 # on every text. The two modes must return identical verdicts on every input -- that
@@ -86,24 +112,34 @@ SEV_RANK = {"critical": 0, "warning": 1, "info": 2}
 CAT_ORDER = {"secrets": 0, "destructive": 1, "network": 2, "injection": 3, "context": 4, "metadata": 5}
 TOOL_ALIASES = {"MultiEdit": "Edit", "ApplyPatch": "Edit", "NotebookEdit": "Write",
                 "Task": "Agent"}          # A9: rules apply to the canonical tool name
-TEXT_EXTS = (".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".py", ".js", ".ts", ".sh", ".bash", ".zsh")
+TEXT_EXTS = (".md", ".mdc", ".txt", ".json", ".yaml", ".yml", ".toml", ".py", ".js", ".ts", ".sh", ".bash", ".zsh")
+# 0.31.0 (F1): the instruction surface -- files an agent reads AS INSTRUCTIONS.
+# CTX-02/04 target "instruction_files" = SKILL.md + this set. Keep in sync with
+# scripts/scan.py (parity is asserted in verification_tests, E1-8).
+INSTRUCTION_BASENAMES = ("AGENTS.md", "AGENTS.local.md", "CLAUDE.md",
+                         "CLAUDE.local.md", ".cursorrules", "copilot-instructions.md")
+INSTRUCTION_DIR_MARKERS = (".cursor/rules",)   # + basename endswith .mdc
 
 # G-03: embedded fallback, used only when the rules file is unreadable (flat layout).
 _FALLBACK = [
-    {"id": "SEC-01", "category": "secrets", "severity": "critical", "apply_to_tools": ["Read", "Bash"],
+    {"id": "SEC-01",
+     "description_zh": "读取 .env 文件可能泄露 API 密钥与机密配置", "remediation_zh": "把 .env 移出 Agent 可读范围；确需变量时手动复制具体几行；测试夹具路径可在 policy.json 白名单登记", "category": "secrets", "severity": "critical", "apply_to_tools": ["Read", "Bash"],
      # 0.17.0 (P-B5): excludes kept literally identical to rules/default.json
      # (three separate strings, not a merged alternation) so the suite's
      # fallback-subset assertion can compare them mechanically.
      "file_patterns": [r"\.env$", r"\.env\."],
      "exclude_patterns": [r"\.env\.example", r"\.env\.template", r"\.env\.sample"],
      "description": "Agent attempted to read a .env file which may contain API keys and secrets"},
-    {"id": "SEC-02", "category": "secrets", "severity": "critical", "apply_to_tools": ["Read", "Bash"],
+    {"id": "SEC-02",
+     "description_zh": "读取 SSH 私钥或 authorized_keys", "remediation_zh": "SSH 密钥不要放进 Agent 工作范围；改用 ssh-agent 转发", "category": "secrets", "severity": "critical", "apply_to_tools": ["Read", "Bash"],
      "file_patterns": [r"\.ssh[/\\]id_", r"\.ssh[/\\]authorized_keys", "id_rsa", "id_ed25519", "id_ecdsa", "authorized_keys"],
      "description": "Agent attempted to read SSH private key or authorized_keys file"},
-    {"id": "SEC-03", "category": "secrets", "severity": "critical", "apply_to_tools": ["Read", "Bash"],
+    {"id": "SEC-03",
+     "description_zh": "读取云厂商凭证文件", "remediation_zh": "改用云厂商 CLI 的短期令牌；确需操作时请手动执行", "category": "secrets", "severity": "critical", "apply_to_tools": ["Read", "Bash"],
      "file_patterns": [r"\.aws[/\\]credentials", r"\.kube[/\\]config", r"credentials\.json", r"\.netrc", "application_default_credentials"],
      "description": "Agent attempted to read cloud provider credentials"},
-    {"id": "DST-01", "category": "destructive", "severity": "critical", "apply_to_tools": ["Bash"],
+    {"id": "DST-01",
+     "description_zh": "执行文件或目录删除命令", "remediation_zh": "确认删除目标无误；构建产物类删除（如 node_modules）已在豁免清单", "category": "destructive", "severity": "critical", "apply_to_tools": ["Bash"],
      # A10: kept in sync with rules/default.json DST-01. Previously a fallback
      # (triggered by a corrupt/missing rules file) silently reverted Windows
      # coverage to the pre-A1 state -- Remove-Item and rd/s /q were not matched.
@@ -127,13 +163,22 @@ _FALLBACK = [
                           r"\brm\s+-rf\s+\S*\.(egg-info|pyc)(\s|$|;)",
                           r"\brm\s+-rf\s+\.nox\b"],
      "description": "Agent executed a file or directory deletion command"},
-    {"id": "DST-02", "category": "destructive", "severity": "critical", "apply_to_tools": ["Write", "Edit"],
+    # ★ 0.29.0：本行由 `antinel_verify.py --invariants` 的 INV-1 抓出 ——
+    #   兜底表此处原为 ["Write","Edit"]，而 rules/default.json 的 DST-02 是
+    #   ["Write","Edit","Bash"] ⇒ **Bash 通道的"写项目外"在降级模式下静默失守**。
+    #   与 NET-01 是**同一个缺陷类**：兜底表比主表窄，且没有任何东西会红。
+    #   手工比对只发现了 NET-01；是守卫把这一条也抓了出来。
+    {"id": "DST-02",
+     "description_zh": "试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件", "remediation_zh": "放行：antinel paths add <目录前缀>（进审计链）；确需更大范围用 antinel roots add <路径>；或把文件写进项目内", "category": "destructive", "severity": "critical",
+     "apply_to_tools": ["Write", "Edit", "Bash"],
      "check": "path_outside_project_root",
      "description": "Agent attempted to write to a file outside the project root directory"},
-    {"id": "DST-03", "category": "destructive", "severity": "critical", "apply_to_tools": ["Write", "Edit", "Bash"],
+    {"id": "DST-03",
+     "description_zh": "修改 Shell 启动配置（.bashrc 等，属持久化机制）", "remediation_zh": "启动脚本每次开终端都会执行，不要让 Agent 追加内容；确需修改请手动审查后进行", "category": "destructive", "severity": "critical", "apply_to_tools": ["Write", "Edit", "Bash"],
      "file_patterns": [r"\.bashrc", r"\.zshrc", r"\.profile", r"\.bash_profile"],
      "description": "Agent attempted to modify shell startup configuration (persistence mechanism)"},
-    {"id": "DST-04", "category": "destructive", "severity": "critical", "apply_to_tools": ["Write", "Edit", "Bash"],
+    {"id": "DST-04",
+     "description_zh": "建立持久化机制（计划任务/系统服务/启动项/注册表 Run 键）", "remediation_zh": "持久化会在会话结束后反复执行，必须由你本人确认后手动操作", "category": "destructive", "severity": "critical", "apply_to_tools": ["Write", "Edit", "Bash"],
      "file_patterns": ["crontab", r"systemd[/\\]system", "LaunchAgents"],
      # A10: synced with rules/default.json DST-04 (schtasks / reg add were missing,
      # so a fallback undid A2). A16: Windows startup folder, regedit and the legacy
@@ -144,22 +189,111 @@ _FALLBACK = [
                           r"(?i)\bregedit\b", r"(?i)start menu.*startup",
                           r"(?i)\bat\s+\d{1,2}:\d{2}\s+/\w+"],
      "description": "Agent attempted to establish persistence (cron job, systemd service, startup item)"},
-    {"id": "NET-01", "category": "network", "severity": "warning", "apply_to_tools": ["Bash"],
-     "command_patterns": [r"\b(curl|wget|fetch)\b.*https?://"],
-     "exclude_patterns": ["localhost", r"127\.0\.0\.1", r"registry\.npmjs\.org", r"pypi\.org"],
+    # 0.29.0（G-1）：**兜底表与主规则表逐字段对齐**。
+    # 缺陷原貌：rules/default.json 的 NET-01 早已是 ["Bash","WebFetch","WebSearch","MCP"]
+    # （0.28.3 红队 EX-08/09/10 修的），但这份内置兜底表**只有 ["Bash"]**
+    # ⇒ 一旦规则文件不可读/被判定篡改，网络外传检测就**静默退化**成"只认 Bash"，
+    #    WebFetch/WebSearch/MCP 三条宿主自带外传通道当场失守，且**没有任何报错**。
+    # 这正是本项目铁律「查不出来 ≠ 查出来是好的」的代码版：降级是静默的。
+    # 现在两条纪律同时上：
+    #   · 本表与 rules/default.json 的同 id 条目 **apply_to_tools 必须完全相等**；
+    #   · command_patterns 必须是主表的**子集**（兜底可以更窄，但不得凭空多出模式）。
+    # 两者由 `antinel_verify.py --invariants` 断言（无检查项的禁令 ＝ 没有禁令）。
+    {"id": "NET-01",
+     "description_zh": "通过 Shell 向白名单外域名发起网络请求", "remediation_zh": "核对目标域名；常用下载源放行：antinel domains add <域名>（进审计链）", "category": "network", "severity": "warning",
+     "apply_to_tools": ["Bash", "WebFetch", "WebSearch", "MCP"],
+     "command_patterns": [r"\b(curl|wget|fetch)\b.*https?://",
+                          r"https?://(?!registry\.npmjs\.org|pypi\.org|github\.com)",
+                          r"\b(scp|sftp|rsync|ssh|nc|ncat)\b\s+[^\n]{0,120}@",
+                          r"\b(certutil|bitsadmin)\b[^\n]{0,120}(urlcache|transfer|/transfer|/urlcache)",
+                          r"Invoke-(WebRequest|RestMethod)|Start-BitsTransfer",
+                          r"\bgit\s+push\b[^\n]*?(?:https?://|ssh://|[\w.-]+@[\w.-]+:)",
+                          r"\bgh\s+(release|repo)\s+create\b"],
+     "exclude_patterns": ["localhost", r"127\.0\.0\.1", r"registry\.npmjs\.org", r"pypi\.org",
+                          r"files\.pythonhosted\.org", r"github\.com", r"api\.github\.com",
+                          r"objects\.githubusercontent\.com"],
      "description": "Agent made an external network request via shell command to a non-whitelisted domain"},
-    {"id": "CTX-01", "category": "context", "severity": "warning", "apply_to_tools": ["Bash"],
+    {"id": "CTX-01",
+     "description_zh": "枚举全部环境变量（可能暴露密钥）", "remediation_zh": "让 Agent 只打印它需要的具体变量名", "category": "context", "severity": "warning", "apply_to_tools": ["Bash"],
      "command_patterns": [r"\benv\b(?!\s*=)", r"\bprintenv\b", r"os\.environ", r"process\.env"],
      "description": "Agent attempted to enumerate all environment variables (may expose API keys and secrets)"},
-    {"id": "CTX-02", "category": "injection", "severity": "critical", "type": "file_content", "target": "SKILL.md",
+    {"id": "CTX-02",
+     "description_zh": "技能指令文件中发现提示注入载荷", "remediation_zh": "移除该技能并核查来源；不要运行其中的指令", "category": "injection", "severity": "critical", "type": "file_content", "target": "SKILL.md",
      "apply_to_tools": ["Read", "Write", "Edit"],
      "content_patterns": [r"ignore\s+(all\s+)?(previous|prior|above)\s+instructions",
                           r"忽略(以上|之前|先前|上面)(的)?(所有)?(指令|指示|规则)"],
      "description": "Potential prompt injection payload detected in skill instruction file"},
-    {"id": "CTX-03", "category": "injection", "severity": "critical", "type": "file_content",
+    {"id": "CTX-03",
+     "description_zh": "检出隐形 Unicode 字符（标签字符/零宽字符等）", "remediation_zh": "清除隐形字符；出现在指令文件中默认按恶意处理", "category": "injection", "severity": "critical", "type": "file_content",
      "target": "all_text_files", "detection": "character_code_scan",
      "apply_to_tools": ["Read", "Write", "Edit", "Bash"],
      "description": "Invisible Unicode character detected (tag characters, zero-width, word joiner, BOM in middle of file)"},
+    # -------- 0.29.0：新增 6 条规则同步进兜底表（G-2/G-3/G-5/G-7/G-8/G-11）-------
+    # 理由同 NET-01：兜底表是"规则文件没了之后你还有什么"。这 6 条防的都是
+    # **一步就能做到的外传**（一条命令读剪贴板/截屏/打包 IM 库），恰恰是最不该
+    # 在降级时丢掉的。apply_to_tools 与主表逐字段相等，patterns 为主表子集。
+    {"id": "SEC-07",
+     "description_zh": "读取系统剪贴板（可能含用户刚复制的口令/令牌/隐私文本）", "remediation_zh": "不要让 Agent 读剪贴板；需要某个值请用户自己粘贴", "category": "secrets", "severity": "critical",
+     "apply_to_tools": ["Bash"],
+     "command_patterns": [r"(?i)\bget-clipboard\b", r"(?i)\bpbpaste\b",
+                          r"(?i)\bxclip\b[^\n]{0,40}\s-o\b", r"(?i)\bxsel\b[^\n]{0,40}\s-o\b",
+                          r"(?i)\bwl-paste\b", r"(?i)\bpyperclip\b[^\n]{0,40}\.paste\b",
+                          r"(?i)win32clipboard[^\n]{0,80}GetClipboardData",
+                          r"(?i)clipboard_get\s*\(",
+                          r"(?i)\[System\.Windows\.Forms\.Clipboard\]::(GetText|GetData|GetImage|ContainsText)",
+                          r"(?i)\[Windows\.ApplicationData\]::Current\.GetClipboardContent"],
+     "description": "Agent read the system clipboard, which may hold passwords, tokens or private text the user copied"},
+    {"id": "SEC-08",
+     "description_zh": "截屏/录屏（屏幕上有什么就会被带走什么）", "remediation_zh": "Agent 几乎不需要截屏；确需截屏请人工操作", "category": "secrets", "severity": "warning",
+     "apply_to_tools": ["Bash"],
+     "command_patterns": [r"(?i)\bscreencapture\b", r"(?i)\bgnome-screenshot\b", r"(?i)\bscrot\b",
+                          r"(?i)\bimport\s+-window\b", r"(?i)\bxwd\b",
+                          r"(?i)\bnircmd\b[^\n]{0,60}savescreenshot",
+                          r"(?i)ffmpeg[^\n]{0,140}(-f\s+gdigrab|-f\s+avfoundation|-f\s+x11grab)",
+                          r"(?i)CopyFromScreen", r"(?i)ImageGrab\.grab",
+                          r"(?i)pyautogui\.screenshot",
+                          r"(?i)\bGet-CimInstance\b[^\n]{0,80}Win32_VideoController"],
+     "description": "Agent captured the screen (screenshot/record), which can carry whatever is displayed"},
+    {"id": "SEC-09",
+     "description_zh": "读取 IM/邮件客户端的本地库（等于全部往来记录）", "remediation_zh": "这是用户私人通信；应完全禁止 Agent 访问", "category": "secrets", "severity": "critical",
+     "apply_to_tools": ["Read", "Bash"],
+     "file_patterns": [r"(?i)WeChat Files", r"(?i)xwechat_files", r"(?i)Tencent[\\/]WeChat\b",
+                       r"(?i)com\.tencent\.xinWeChat",
+                       r"(?i)[\\/]Msg[\\/][^\\/]{0,40}\.db",
+                       r"(?i)[\\/]DingTalk[\\/][^\\/]{0,40}\.db",
+                       r"(?i)[\\/]nt_qq\b",
+                       r"(?i)\.ost$", r"(?i)\.pst$", r"(?i)Lark[\\/][^\\/]{0,40}\.db",
+                       r"(?i)\bDingTalk\b"],
+     "command_patterns": [r"(?i)(WeChat Files|xwechat_files|Tencent[\\/]WeChat)[^\n]{0,200}\.db",
+                          r"(?i)\b(nt_msg|media_msg|message_\d+|MediaMSG\d*|nt_qq)\w*\.db\b",
+                          r"(?i)(copy|xcopy|robocopy|tar|zip|7z)[^\n]{0,200}\.(ost|pst)\b",
+                          r"(?i)sqlite3?[^\n]{0,200}(nt_msg|media_msg|message_\d+|nt_qq)"],
+     "description": "Agent read an instant-messaging or mail client's local store (full message history)"},
+    {"id": "SEC-10",
+     "description_zh": "读取输入法用户词库/上屏记录（等于用户打过什么字）", "remediation_zh": "输入历史属隐私；不要让 Agent 读取输入法词库", "category": "secrets", "severity": "warning",
+     "apply_to_tools": ["Read", "Bash"],
+     "file_patterns": [r"(?i)[\\/]SogouPY\b", r"(?i)[\\/]SogouInput\b", r"(?i)[\\/]WeChatInput\b",
+                       r"(?i)[\\/]BaiduPinyin\b", r"(?i)[\\/]QQPinyin\b", r"(?i)[\\/]Rime\b",
+                       r"(?i)\.scel$"],
+     "command_patterns": [r"(?i)(copy|xcopy|robocopy|tar|zip|7z)[^\n]{0,200}(SogouPY|SogouInput|BaiduPinyin|QQPinyin|userdict)",
+                          r"(?i)(SogouPY|SogouInput|BaiduPinyin|QQPinyin)[^\n]{0,200}\.(dat|bin|db)\b"],
+     "description": "Agent read the input-method user dictionary, which records what the user has typed"},
+    {"id": "DST-11",
+     "description_zh": "写进云盘同步目录 —— 同步客户端会自动把它传上云", "remediation_zh": "确需放行：antinel paths add <目录前缀>（进审计链）；否则写进项目内", "category": "destructive", "severity": "critical",
+     "check": "path_in_cloud_sync_dir",
+     "apply_to_tools": ["Write", "Edit", "Bash"],
+     "description": "Agent wrote into a cloud-drive sync folder: the sync client will upload the file automatically"},
+    {"id": "NET-04",
+     "description_zh": "建立隧道/隐蔽信道（反向隧道、代理、DNS/ICMP 载波）——绕过常规出网检查", "remediation_zh": "隧道会绕过常规出网检查；放行前先确认目标", "category": "network", "severity": "warning",
+     "apply_to_tools": ["Bash", "WebFetch", "WebSearch", "MCP"],
+     "command_patterns": [r"(?i)\b(ngrok|frpc|frps|v2ray|xray|sing-box|trojan|hysteria|clash|shadowsocks|ss-local)\b",
+                          r"(?i)\b(icmpsh|ptunnel|iodine|dnscat2?|hans|chisel|socat|stunnel|obfs4)\b",
+                          r"(?i)\bnc(at)?\b[^\n]{0,60}\s-[a-z]*e\b",
+                          r"(?i)\bssh\b[^\n]{0,80}\s-[RLD]\s",
+                          r"(?i)\bping\b[^\n]{0,60}\s-[lp]\s+(?:[0-9A-Fa-f]{16,}|\d{4,})",
+                          r"(?i)\b(ngrok(-free)?\.(io|app)|trycloudflare\.com|serveo\.net|localtunnel\.me|"
+                          r"localhost\.run|pinggy\.(io|link)|bore\.pub|lhr\.life|tunnel\.to)\b"],
+     "description": "Agent opened a tunnel / covert channel (reverse tunnel, proxy, DNS-ICMP carrier) to move data out"},
 ]
 
 _DOMAIN_RE = re.compile(r"\b((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,})\b", re.I)
@@ -227,56 +361,90 @@ def load_rules():
                 time.sleep(0.1)
     if rules is not None:
         return _load_rules_integrity(rules)
-    return _load_rules_fallback()
+    # 0.29.0（A-1）：这里原本调用 _load_rules_fallback()，而该函数**从未定义** ⇒ 规则文件
+    # 读不出来时不是走兜底，而是 NameError → fail-open 静默放行、链上一条记录都没有。
+    # 修法不需要新写逻辑：_load_rules_integrity 一进来就会重读同一个文件（见下），读不到
+    # 必然抛异常，于是自然落进它**已经写好**的 except 分支（stderr 警告 ＋
+    # rules_unreadable_fallback ＋ 用内置兜底集）——一行接通即可，零新增逻辑。
+    return _load_rules_integrity(None)
 
 def _load_rules_integrity(rules):
+    # ★★★ 0.33.2 (A2，2026-09-28)：**加载与完整性比对必须指向同一个文件**。
+    #
+    # 原实现：加载读 `RULES_PATH`（包内 `rules/default.json`），却拿
+    #         `manifest["rules_hash"]` 比对 —— 而 install.py 记的 `rules_file` 是
+    #         `<root>/.psl/rules/default.json`（**另一个文件**）。
+    # 实测后果（套件 A4 的 FAIL 真因）：
+    #   沙箱里只 install 了（有 `<root>/.psl/rules/…`）、没有包内 `rules/` ⇒ 加载读不到
+    #   包内文件 ⇒ 与 manifest 的 hash 必然不符 ⇒ **无条件判 SELF-TAMPERED**。
+    #   真实用户场景下两者内容恰好一致，所以这个错位**平时查不出来** ——
+    #   判据指向 A、被测对象是 B，正是"能查 ≠ 查了"那条铁律的又一次现身。
+    #
+    # 修法：先找 manifest，按其 `rules_file` 解析出**该装的规则文件**；加载与哈希
+    #       比对都用这一个路径。找不到 manifest 或 rules_file 时，退回 `RULES_PATH`
+    #       （保持"未安装时也能跑"的既有行为）。
+    _rules_path = RULES_PATH
+    _manifest = None
+    for base in (os.getcwd(), os.path.dirname(os.getcwd())):
+        mp = os.path.join(base, ".psl", "manifest.json")
+        if os.path.isfile(mp):
+            try:
+                with open(mp, encoding="utf-8") as f:
+                    _manifest = json.load(f) or {}
+            except Exception:
+                _manifest = None
+            if _manifest is not None:
+                _rf = _manifest.get("rules_file")
+                if _rf:
+                    _cand = _rf if os.path.isabs(_rf) else os.path.join(base, _rf)
+                    if os.path.isfile(_cand):
+                        _rules_path = _cand        # ← 加载与比对同源
+                break
     try:
-        with open(RULES_PATH, "r", encoding="utf-8") as f:
+        with open(_rules_path, "r", encoding="utf-8") as f:
             rules = list(json.load(f).get("rules", []))
         # A4: runtime integrity check against the manifest recorded at install.
         # A mismatch means the monitored party may have edited the rules -> do NOT
         # trust them; fall back to the embedded minimal set and say so loudly.
-        for base in (os.getcwd(), os.path.dirname(os.getcwd())):
-            mp = os.path.join(base, ".psl", "manifest.json")
-            if os.path.isfile(mp):
+        if _manifest is not None:
+            rh = _manifest.get("rules_hash")
+            if rh:
                 try:
-                    with open(mp, encoding="utf-8") as f:
-                        rh = (json.load(f) or {}).get("rules_hash")
-                    if rh:
-                        with open(RULES_PATH, "rb") as f:
-                            live = "sha256:" + hashlib.sha256(f.read()).hexdigest()
-                        if live != rh:
-                            try:
-                                sys.stderr.write("[Antinel] SELF-TAMPERED: rules/default.json differs from the "
-                                                 "installed manifest hash; falling back to the embedded minimal "
-                                                 "set. Re-run install.py if this update is intentional.\n")
-                            except Exception:
-                                pass
-                            # A16 (2026-09-10): stderr 是唯一出口时，宿主一吞掉，
-                            # 防护就从 18 条静默降到 11 条且事后查不到——对一个卖
-                            # "证据链"的产品这是最不该出现的失败模式。补一条审计
-                            # 记录并镜像到宿主级（ANTINEL_HOST_MIRROR=0 可关，
-                            # 回归套件默认关，不污染 home）。
-                            try:
-                                log_event({"ts": datetime.now().isoformat(timespec="seconds"),
-                                           "type": "rules_integrity_fallback", "tool": "-",
-                                           "session": "-", "rule_id": "A4",
-                                           "decision": "config_fallback", "severity": "critical",
-                                           "action": "alert",
-                                           "reason": "rules/default.json differs from manifest rules_hash; "
-                                                     "fell back to the embedded minimal set",
-                                           "expected": rh, "live": live,
-                                           "rules_loaded": len(_FALLBACK)}, mirror=True)
-                            except Exception:
-                                pass
-                            return [dict(r) for r in _FALLBACK]
+                    with open(_rules_path, "rb") as f:
+                        live = "sha256:" + hashlib.sha256(f.read()).hexdigest()
                 except Exception:
-                    pass
-                break
+                    live = None
+                if live is not None and live != rh:
+                    try:
+                        sys.stderr.write("[Antinel] SELF-TAMPERED: %s differs from the "
+                                         "installed manifest hash; falling back to the embedded minimal "
+                                         "set. Re-run install.py if this update is intentional.\n"
+                                         % os.path.basename(_rules_path))
+                    except Exception:
+                        pass
+                    # A16 (2026-09-10): stderr 是唯一出口时，宿主一吞掉，
+                    # 防护就从 18 条静默降到 11 条且事后查不到——对一个卖
+                    # "证据链"的产品这是最不该出现的失败模式。补一条审计
+                    # 记录并镜像到宿主级（ANTINEL_HOST_MIRROR=0 可关，
+                    # 回归套件默认关，不污染 home）。
+                    try:
+                        log_event({"ts": datetime.now().isoformat(timespec="seconds"),
+                                   "type": "rules_integrity_fallback", "tool": "-",
+                                   "session": "-", "rule_id": "A4",
+                                   "decision": "config_fallback", "severity": "critical",
+                                   "action": "alert",
+                                   "reason": "rules file differs from manifest rules_hash; "
+                                             "fell back to the embedded minimal set",
+                                   "rules_file": _rules_path,
+                                   "expected": rh, "live": live,
+                                   "rules_loaded": len(_FALLBACK)}, mirror=True)
+                    except Exception:
+                        pass
+                    return [dict(r) for r in _FALLBACK]
     except Exception as e:
         # 0.16.0 (P0-7): the two fallback paths used to be indistinguishable in
         # the audit log -- "rules tampered" (A4 mismatch above) and "rules
-        # unreadable" (here) both degraded to 11 rules with at most one stderr
+        # unreadable" (here) both degraded to the embedded minimal set with at most one stderr
         # line, and this path did not even get that. They are now separate,
         # fielded events: rules_integrity_fallback vs rules_unreadable_fallback.
         rules = [dict(r) for r in _FALLBACK]
@@ -354,6 +522,9 @@ def _load_rules_integrity(rules):
 EMPTY_POLICY = {"domains": [], "paths": [], "commands": [], "alert_threshold": "warning", "agent_paths": [],
                 "fail_closed_on_audit_loss": False}
 
+# 0.33.1: 本次调用的策略快照，供 _deny_payload 读 settings.deny_stdout_hosts。
+_POLICY = {}
+
 
 def _norm_prefix(p):
     """A12: normalise a whitelist path prefix. Root-like inputs (".", "..", "/",
@@ -368,7 +539,7 @@ def _norm_prefix(p):
     s = (p or "").replace("\\", "/").strip().lower()
     if s in ("", ".", "..", "/"):
         return ""
-    was_abs_posix = s.startswith("/")           # POSIX 绝对路径（0.29.1：
+    was_abs_posix = s.startswith("/")           # POSIX 绝对路径（0.28.0：
     s2 = s.lstrip("./")                         # 修复 Linux 白名单永不释放）
     if not s2 or s2.endswith(":") or s2.endswith(":/"):
         return ""
@@ -616,6 +787,49 @@ _WRITE_FLAGS_BY_CMD = {
     "find": ("-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprintf", "-fls"),
     "sed": ("-i", "--in-place"),
 }
+# 0.33.2 (D-3): 解释器首词 —— 它们不是"只读动词"，但 `-c/-e` 里的字符串字面量是数据。
+# 判据仍以「引号外残留代码」为准（见 _strip_interpreter_code_literals），
+# 所以这里放宽的是**数据位置**，不是**执行位置**。
+_INTERPRETERS = frozenset("python python3 python3.13 python3.12 python3.11 py node nodejs perl ruby php bash sh zsh pwsh powershell".split())
+# ★ 判据不二次实现：删除类模式从 DST-01 的**同一真源**取。
+#   `_rules` / `_FALLBACK_RULES` 的 DST-01 条目在模块加载后即可用；
+#   取不到时退回空集 —— 空集只会让 `readonly_command_context` 更保守（返回 False），
+#   方向安全，且 NOT_HARDCODED 检查项会盯住这个引用。
+def _dst_command_patterns():
+    """DST-01 的 command_patterns，取自规则表本身（唯一真源）。
+
+    优先用磁盘规则表（load_rules 的结果），失败时退回内嵌兜底表 `_FALLBACK`。
+    两条路都取不到时返回空集 —— 空集只让调用方更保守（见 readonly_command_context），
+    方向安全。
+    """
+    out = []
+    try:
+        for r in load_rules():
+            if r.get("id") == "DST-01":
+                out.extend(_patterns(r, "command_patterns"))
+                if out:
+                    return out
+    except Exception:
+        pass
+    try:
+        for r in _FALLBACK:
+            if r.get("id") == "DST-01":
+                out.extend(_patterns(r, "command_patterns"))
+                if out:
+                    return out
+    except Exception:
+        pass
+    return []
+
+
+_DST_PATS_CACHE = []
+
+
+def _dst_command_pats():
+    """惰性求值 + 缓存：模块加载时规则可能还没就绪。"""
+    if not _DST_PATS_CACHE:
+        _DST_PATS_CACHE.extend(_dst_command_patterns())
+    return _DST_PATS_CACHE
 # Only true fd plumbing (2>&1, &>file). A bare `>` is an output redirect and must
 # survive the substitution: `grep -n rm f > out.txt` writes, so it is not read-only.
 _FD_REDIRECT_RE = re.compile(r"\d*>&\d*|&>")                # 2>&1, &>file: not a chain
@@ -689,13 +903,135 @@ def _first_token(cmd):
     return tok.lower()
 
 
+# 0.33.2 (D-3): 解释器的 `-c`/`-e` 参数里，**引号内的字符串字面量是数据，不是代码**。
+#
+# 实测假阳性（2026-09-28，负控 F1-F4）：判据只看首词，而 `python` 不在
+# _READONLY_CMDS 里 ⇒ 下面四条「删除字样只出现在字符串里」的命令全被 BLOCK：
+#     python -c "print('rm -rf /')"
+#     python -c "x='shutil.rmtree'; print(x)"
+#     python -c "print(re.escape('rm'))"
+#     python -c "print('os.remove')"
+# 这是我们自家纪律说的「会误报的检查器用两次就没人信」——而它误报的正是
+# 「我在写一条关于删除的文档/命令」这种**最该被允许**的场景。
+#
+# 修法是缩小"数据"的范围，不是放松"执行"的判定：把 `-c` 参数里**最外层引号内**
+# 的字符串替换成占位符后再看剩余文本。字符串里的删除字样消失，而**留在引号外**
+# 的仍然是代码，照旧会命中 —— 所以下面两条真删除仍然 BLOCK：
+#     python -c "import shutil; shutil.rmtree('/tmp/x')"   -> shutil.rmtree( 在引号外
+#     python -c "import os; os.system('rm -rf /tmp/x')"     -> os.system( 在引号外
+# 已知边界：嵌套引号（如 print("a'b")）只剥最外层，剥不干净时退回原判定
+# （即仍可能拦），方向安全——宁可多拦，不可漏放。
+_INTERP_C_ARG_RE = re.compile(
+    r"(?:^|\s)(?:-c|-e)\s+([\"'])(.*)\1\s*$", re.DOTALL
+)
+
+
+def _strip_interpreter_code_literals(seg):
+    """把解释器 -c/-e 参数里的**字符串常量**换成空串，但**不**放过任何"把字符串当命令跑"的调用。
+
+    ★ 关键区分（2026-09-28 负控 T7/T8 实测）：
+        python -c "print('rm -rf /')"                    -> 数据，应放行
+        python -c "import os; os.system('rm -rf /tmp')"  -> 执行，必须拦
+        python -c "import subprocess; subprocess.run(['rm','-rf','/tmp'])" -> 执行，必须拦
+    三者都是"引号里出现 rm"，**所以"在不在引号里"根本不是判据**。它们真正的区别是
+    字符串**是否被送进执行通道**。
+
+    做法：用 ast 解析 -c 的源码。若字符串常量只出现在非执行位置 -> 返回"已净化"的
+    残留（供 readonly_command_context 判定为提及）；一旦发现字符串被喂给执行类调用
+    （os.system / subprocess / eval / exec / os.popen / 任何 .run/.call 等），
+    直接返回原段 —— 让原判定继续拦。
+    """
+    r = _interp_mention_residue(seg)
+    return seg if r is None else r
+
+
+def _interp_mention_residue(seg):
+    """真源判据：这条解释器段还能不能判"提及"。
+
+    返回：
+      · 已净化的残留字符串 —— **可以判"提及"**（python 系列 + 解析成功 + 全纯消费调用）
+      · None               —— **判不了**（非解释器 / 非 python 系列 / 无 -c 参数 /
+                              解析失败 / 出现执行通道 / 出现未知调用）
+
+    ★ 单一来源：`_strip_interpreter_code_literals`（返回段）与
+      `readonly_command_context`（判提及）都调这里，避免两份判据分叉。
+    """
+    tok = _first_token(seg)
+    if tok not in _INTERPRETERS:
+        return None
+    m = _INTERP_C_ARG_RE.search(seg)
+    if not m:
+        return None
+    code = m.group(2)
+
+    # 只有 Python 系列能用 ast 判；其它解释器（node/perl/bash/powershell）保守处理：
+    # 返回 None ⇒ 调用方不判"提及"⇒ 维持原有拦截能力（方向安全）。
+    if not tok.startswith(("python", "py")):
+        return None
+
+    try:
+        import ast                       # 局部导入：只在解释器分支才付代价，
+    except Exception:                    # 不影响钩子冷启动（每次工具调用都跑）
+        return None
+
+    try:
+        tree = ast.parse(code)
+    except Exception:
+        return None                    # 解析不了 ⇒ 保守，不放过
+
+    # 见到这些名字，直接认定"字符串可能被执行" ⇒ 不净化
+    exec_names = {"system", "popen", "run", "call", "check_call", "check_output",
+                  "Popen", "eval", "exec", "execfile", "spawn", "spawnSync",
+                  "execSync", "execFile", "execFileSync", "compile", "loads"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            f = node.func
+            name = getattr(f, "attr", None) or getattr(f, "id", None)
+            if name in exec_names:
+                return None            # 有执行通道 ⇒ 不净化，继续拦
+
+    # ★★ 2026-09-28 负控发现的交互风险（必须写下来，否则下一个人会踩）：
+    #    `python -c "from shutil import rmtree; rmtree('/x')"` —— `rmtree` 作为**裸函数名**
+    #    出现，而 DST-01 的模式是 `\bshutil\.rmtree\b`（要求带前缀）⇒ hit=False ⇒ 本条
+    #    本来就漏（**既有漏洞，非 D-3 引入**，已用对照实验证实）。
+    #    但 D-3 会把 ro 从 False 变 True ⇒ **一旦将来把 `\brmtree\b` 补进模式表，
+    #    本条会因 ro=True 而被降级放行** —— 修复一个漏洞却打开另一个。
+    #
+    # 因此这里的纪律是**白名单而非黑名单**：只有当每一个调用都是"已知纯消费"时才敢
+    # 认定是纯数据；出现任何**未知调用**一律返回 None（保守），让模式表继续说了算。
+    # 白名单必须窄 —— 只放行"把参数字符串当**输出**用"的函数。
+    _BENIGN_CALLS = {"print", "format", "join", "split", "strip", "lower", "upper",
+                     "escape", "dumps", "loads", "len", "repr", "str", "list", "dict",
+                     "set", "tuple", "sorted", "enumerate", "range", "get", "keys",
+                     "values", "items", "endswith", "startswith", "replace", "encode",
+                     "decode", "add", "append", "extend", "update"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            f = node.func
+            name = getattr(f, "attr", None) or getattr(f, "id", None)
+            if name not in _BENIGN_CALLS:
+                return None            # 未知调用 ⇒ 保守，不净化
+
+    # 全部是已知纯消费调用 ⇒ 把字符串常量清空后再看残留
+    try:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                node.value = ""
+        return ast.unparse(tree)
+    except Exception:
+        return None
+
+
 def readonly_command_context(command):
     """True when a dangerous word in this command is a mention, not an execution.
 
     Every segment must be a read-only verb: `cd src && grep -n x f` is no more
     dangerous than `grep -n x f`, and blocking the first form is exactly how a hook
     gets uninstalled. Conversely `grep x | xargs rm` fails here, because xargs is not
-    a read-only verb -- so a chain is only accepted when ALL of it is read-only."""
+    a read-only verb -- so a chain is only accepted when ALL of it is read-only.
+
+    0.33.2 (D-3): 解释器段先剥掉 `-c` 参数里的字符串字面量再看首词——`python` 本身
+    不在 _READONLY_CMDS 里，导致 `python -c "print('rm -rf')"` 被误拦（见上）。"""
     if not command or len(command) >= SCAN_LIMIT:
         return False
     segs, danger = _scan_command(command)
@@ -703,6 +1039,34 @@ def readonly_command_context(command):
         return False
     for seg in segs:
         tok = _first_token(seg)
+        if tok in _INTERPRETERS:
+            # ★★★ 0.33.2 (D-3a，2026-09-28 实测修正)：解释器分支**先问"能不能判"，
+            # 再问"是不是提及"**。只有 python 系列可以判"提及"。
+            #
+            # 原实现拿 `_dst_command_pats()`（**只含 DST-01 模式**）去回答"危险词还在不在"，
+            # 而这个问题**需要覆盖全部规则的 command_patterns**。实测反例：
+            #     powershell -c "Set-Content -Path .\data.txt -Stream evil -Value x"
+            #   · 真正命中的是 **DST-10**（`Set-Content … -Stream`）
+            #   · 但 DST-01 模式在残留里命中 0 ⇒ 被误判为"只读提及" ⇒ 上层把 DST-10 的
+            #     block 降级成 alert（`and ro_cmd` 那一句）⇒ 套件 FAIL
+            # ⇒ **窄判据被用来裁决宽问题**。这是"判据不许二次实现"的镜像错误。
+            #
+            # 修法：判据的适用面**收缩到我们有把握解析的那种解释器**。
+            #   · python 系列：`_strip_interpreter_code_literals` 用 ast 真解析过，能区分
+            #     "字符串常量"与"送进执行通道"，可以谨慎认可"提及"。
+            #   · 其余（powershell/pwsh/node/bash/perl/ruby/php/sh/zsh）：
+            #     我们**不解析**它们的语法，任何"提及"判断都是猜的 ⇒ 一律 return False
+            #     （不放过），与 `_strip_interpreter_code_literals` 里"非 python 保守"
+            #     的取向一致。**方向安全**：宁可多拦，不可少拦。
+            #
+            # 判据用 `_interp_mention_residue(seg)`：可判且已净化 ⇒ 返回 residue 字符串；
+            # 不可判（非 python / 解析失败 / 走执行通道）⇒ 返回 None。
+            residue = _interp_mention_residue(seg)
+            if residue is None:
+                return False               # 判不了 ⇒ 不放过
+            if not any(_search(p, residue) for p in _dst_command_pats()):
+                return True
+            return False
         if tok not in _READONLY_CMDS:
             return False
         for flag in _WRITE_FLAGS_BY_CMD.get(tok, ()):
@@ -962,8 +1326,16 @@ def _disabled(rule):
 
 
 def _applies(rule, tool):
+    """0.28.3（A7/A8）：MCP 工具名不可枚举（mcp__<server>__<tool>），以伪工具名
+    "MCP" 在 apply_to_tools 里声明纳管——宿主自带 WebFetch/WebSearch 直接点名。"""
     tools = rule.get("apply_to_tools") or []
-    return (not tools) or (tool in tools)
+    if not tools:
+        return True
+    if tool in tools:
+        return True
+    if tool.startswith("mcp__") and "MCP" in tools:
+        return True
+    return False
 
 
 # 0.19.0 (ADS round): RULE-LEVEL PLATFORM GATE.
@@ -1403,7 +1775,7 @@ HOST_ADAPTERS = {
                     "url": (("WebFetch",), "url", "query"),
                     "pattern": (("Glob", "Grep"), "pattern")},
     "zcode":       {"verified": True},                      # identical to claude-code
-    "qoder":       {"verified": False},                     # falls back to claude-code
+    "qoder":       {"verified": True},                       # 0.33.0 真机实证：enforce_probe rc=2
     "trae":        {"verified": False,
                     "command": ("Bash", "command", "cmd"),  # alias candidate, unverified
                     "file_path": (("Read", "Write", "Edit"), "file_path", "path", "file")},
@@ -1411,21 +1783,66 @@ HOST_ADAPTERS = {
 }
 
 
-def detect_host_tag():
-    """Cheap host tag for adapter selection; project markers beat env vars."""
+_HOST_DETECT_CACHE = {"mod": None, "tried": False}
+
+
+def _load_host_detect():
+    """0.33.1 (A-1): 归因逻辑的唯一来源。
+
+    为什么不能写 `import _host_detect`：钩子以 `python -I -S` 启动，而 -I 隐含
+    -P（脚本目录不入 sys.path），裸 import 在真机上必然 ImportError。所以按绝对
+    路径显式加载。加载失败时返回 None，由调用方走兜底并在证据里留痕——
+    绝不让"模块没加载到"退化成静默的旧行为。
+    """
+    if _HOST_DETECT_CACHE["tried"]:
+        return _HOST_DETECT_CACHE["mod"]
+    _HOST_DETECT_CACHE["tried"] = True
+    try:
+        import importlib.util
+        _p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_host_detect.py")
+        _spec = importlib.util.spec_from_file_location("_host_detect", _p)
+        _m = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_m)
+        _HOST_DETECT_CACHE["mod"] = _m
+    except Exception:
+        _HOST_DETECT_CACHE["mod"] = None
+    return _HOST_DETECT_CACHE["mod"]
+
+
+def detect_host_tag_full():
+    """返回 (tag, evidence)。
+
+    evidence 落进记录的 host_evidence 字段：归因不再是"信不信由你"，而是可复核
+    （source / key / markers_seen / confidence 全在）。
+    """
+    _m = _load_host_detect()
+    if _m is not None:
+        try:
+            return _m.detect()
+        except Exception:
+            pass
+    # 兜底：模块加载失败 → 退回 0.33.0 旧逻辑，但标 source=fallback。
+    # 宁可要一条"我降级了"的可见记录，也不要一次静默的失败。
+    for env_key, tag in (("CLAUDE_CODE", "claude-code"), ("ZCODE_SESSION", "zcode"),
+                         ("QODER", "qoder"), ("QODER_CN", "qoder"),
+                         ("TRAE", "trae"), ("TRAE_CN", "trae")):
+        if os.environ.get(env_key):
+            return tag, {"source": "fallback", "key": env_key, "confidence": "low",
+                         "detector": "inline@0.33.0"}
     cwd = os.getcwd()
-    for d, tag in ((".claude", "claude-code"), (".zcode", "zcode"), (".qoder", "qoder"), (".trae", "trae")):
+    for d, tag in ((".claude", "claude-code"), (".zcode", "zcode"),
+                   (".qoder", "qoder"), (".qoder-cn", "qoder"),
+                   (".trae", "trae"), (".trae-cn", "trae")):
         if os.path.isdir(os.path.join(cwd, d)):
-            return tag
-    if os.environ.get("CLAUDE_CODE"):
-        return "claude-code"
-    if os.environ.get("ZCODE_SESSION"):
-        return "zcode"
-    if os.environ.get("QODER"):
-        return "qoder"
-    if os.environ.get("TRAE"):
-        return "trae"
-    return "generic"
+            return tag, {"source": "fallback", "key": d, "confidence": "low",
+                         "detector": "inline@0.33.0"}
+    return "generic", {"source": "fallback", "key": None, "confidence": "none",
+                       "detector": "inline@0.33.0"}
+
+
+def detect_host_tag():
+    """只要标签的薄封装 —— 保持 0.33.0 的签名（tools/enforce_probe.py 依赖它）。"""
+    return detect_host_tag_full()[0]
 
 
 def extract(tool_name, ti, host_tag="generic"):
@@ -1493,14 +1910,31 @@ def extract(tool_name, ti, host_tag="generic"):
     return cmd, fpath, content, url
 
 
+def _is_instruction_file(file_path):
+    """0.31.0 (F1): basename in the instruction set, or a .cursor/rules/*.mdc rule file."""
+    base = os.path.basename(file_path)
+    if base in INSTRUCTION_BASENAMES:
+        return True
+    norm = file_path.replace("\\", "/")
+    return any(m + "/" in norm for m in INSTRUCTION_DIR_MARKERS) and base.endswith(".mdc")
+
+
 def file_text_targets(tool_name, file_path, content):
     """[(target_spec, text)] whose content file_content rules inspect.
-    Read: text is loaded from disk (capped, binary skipped). Write/Edit: event content."""
+    Read: text is loaded from disk (capped, binary skipped). Write/Edit: event content.
+    0.31.0 (F1): three-level spec -- SKILL.md > instruction_file > all_text_files.
+    all_text_files rules still match instruction files (superset, unchanged)."""
     if not file_path:
         return []
     base = os.path.basename(file_path)
-    spec = "SKILL.md" if base == "SKILL.md" else (
-        "all_text_files" if base.lower().endswith(TEXT_EXTS) or base.startswith(".env") else None)
+    if base == "SKILL.md":
+        spec = "SKILL.md"
+    elif _is_instruction_file(file_path):
+        spec = "instruction_file"
+    elif base.lower().endswith(TEXT_EXTS) or base.startswith(".env"):
+        spec = "all_text_files"
+    else:
+        spec = None
     if spec is None:
         return []
     if tool_name == "Read":
@@ -1755,13 +2189,76 @@ def notice_gate(rule_id, snippet):
         return False
 
 
-def emit_block(rule_id, reason, json_stdout=True):
-    """Dual channel for hosts that parse stdout JSON (Claude Code, A-01). For ZCode
-    the stdout schema is strict (unknown keys invalidate the result), so we emit
-    NOTHING on stdout and rely on the exit-2 + stderr channel only."""
-    if json_stdout:
+# 0.33.1：走"双通道 stdout"的宿主名单。
+# 原实现是硬编码 `("claude-code", "generic")` —— 一张写死在代码里的名单，任何
+# 新识别出来的宿主都会落进 else 分支，于是 **deny 的第三条通道（hookSpecificOutput）
+# 被静默丢掉**。归因修好后 workbuddy 第一次被正确识别，立刻踩中：真机上拦截只剩
+# exit 2 + stderr 两条通道。
+# 判据：多给一个 key 最坏是被宿主忽略；少给一条通道则是拦截失效。二者不对称，
+# 所以未知宿主默认给，只对**已证实严格校验 schema** 的宿主（zcode）保持静默。
+DUAL_STDOUT_HOSTS = ("claude-code", "generic", "workbuddy", "codebuddy")
+# workbuddy 进名单的依据（实测，非推理）：WorkBuddy 会读钩子的 stdout JSON ——
+# session_start_banner.py 的 additionalContext 在真机上确实送达。
+
+
+def _dual_stdout_hosts():
+    """策略可覆盖（global_settings.deny_stdout_hosts），不覆盖时用默认名单。"""
+    try:
+        cfg = ((_POLICY or {}).get("settings") or {}).get("deny_stdout_hosts")
+        if isinstance(cfg, list) and cfg:
+            return tuple(str(x) for x in cfg)
+    except Exception:
+        pass
+    return DUAL_STDOUT_HOSTS
+
+
+def _deny_payload(reason, host_tag, deny_mode):
+    """0.30.0 (E-3): build the stdout payload for a deny, per host and policy.
+    Returns None when this host must stay stdout-quiet (ZCode: strict schema,
+    unknown keys invalidate the result) or the policy forced quiet mode.
+    deny_mode (policy global_settings.deny_stdout): dual (default) = documented
+    contract + legacy keys together; legacy = legacy key only; quiet = no stdout."""
+    if host_tag not in _dual_stdout_hosts():
+        return None
+    if deny_mode == "quiet":
+        return None
+    payload = {"decision": "block", "reason": reason}          # legacy shape (A-01)
+    if deny_mode == "dual":
+        payload["hookSpecificOutput"] = {                      # documented contract
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason}
+    return payload
+
+
+def _timing_emit(timing):
+    """0.32.2 (B1): 分段耗时（仅在 ANTINEL_TIMING=1 时输出到 stderr）。
+    分段：imports（模块导入）/ rules（规则+策略加载）/ match（命中判定）/
+    audit（审计链写+读回+日锚）/ other（其余：stdin 读、解析、通知等）。"""
+    if os.environ.get("ANTINEL_TIMING") != "1" or not timing:
+        return
+    try:
+        sys.stderr.write("ANTINEL_TIMING total=%d imports=%d rules=%d match=%d audit=%d other=%d\n"
+                         % (timing.get("total", 0), timing.get("imports", 0),
+                            timing.get("rules", 0), timing.get("match", 0),
+                            timing.get("audit", 0), timing.get("other", 0)))
+    except Exception:
+        pass
+
+
+def emit_block(rule_id, reason, host_tag="generic", deny_mode="dual", timing=None):
+    """0.30.0 (E-3): deny on THREE additive channels at once -- documented JSON
+    contract (hookSpecificOutput.permissionDecision="deny"), legacy stdout JSON
+    ({"decision":"block"}), and exit 2 + stderr. A host that reads any ONE of
+    them still denies, so the silent-degradation risk (a host dropping exit-2
+    support) is closed on the signaling side and detected on the enforcement
+    side (post_tool_use enforcement_gap). ZCode keeps the stdout-quiet channel
+    (strict schema) and stays on exit 2 + stderr until probed otherwise."""
+    _timing_emit(timing)
+    payload = _deny_payload(reason, host_tag, deny_mode)
+    if payload:
         try:
-            print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
+            print(json.dumps(payload, ensure_ascii=False))
         except Exception:
             pass
     try:
@@ -1772,9 +2269,152 @@ def emit_block(rule_id, reason, json_stdout=True):
 
 
 # ------------------------------------------------- G-06: multi-hit collection --
+# ------------------------------------- 0.29.0 (G-8): cloud-sync directories ----
+# 威胁：把文件写进云盘同步目录，**同步客户端会替你把文件传上云** —— 这一步
+# 不经钩子、不经命令行、不需要任何网络命令，常规出网检测（NET-01/02）看不见。
+#
+# ★ 为什么必须有这条规则，而不是靠 DST-02：DST-02 拦的是"写项目外"。用户把
+#   `whitelist.paths` 一开（放行某个前缀），DST-02 就被释放了，写进云盘目录也
+#   照样放行、且只有一条笼统的 allow 记录。DST-11 把"写进云盘"这件事**单独命名**，
+#   于是无论路径是否在白名单里，这个动作都有名字、有理由。
+#
+# ★ 为什么必须带"项目外"这个条件：把项目放在 OneDrive 是极常见的配置。
+#   只看目录名会把**全部正常写入**都判成外传 —— 那正是铁律
+#   「一个会误报的检查器，用两次就没人信了」。所以判据是
+#   **在同步目录内 且 在项目根之外**。
+_SYNC_DIR_MARKERS = (
+    (r"[\\/]OneDrive([\\/]|$)", "OneDrive"),
+    # ★ 必须 `\s+-\s+`（带空格）：实测 `OneDrive-ish` 被 `\s*-\s*` 误判成
+    #   "OneDrive - 组织" 目录。真实目录名是 `OneDrive - Contoso`（两侧有空格）。
+    (r"[\\/]OneDrive\s+-\s+[^\\/]+([\\/]|$)", "OneDrive(工作/学校)"),
+    (r"[\\/]Dropbox([\\/]|$)", "Dropbox"),
+    (r"[\\/]Dropbox\s*\([^)]*\)([\\/]|$)", "Dropbox"),
+    (r"[\\/]Google\s*Drive([\\/]|$)", "Google Drive"),
+    (r"[\\/]GoogleDrive([\\/]|$)", "Google Drive"),
+    (r"[\\/]My\s*Drive([\\/]|$)", "Google Drive"),
+    (r"[\\/]iCloud\s*Drive([\\/]|$)", "iCloud Drive"),
+    (r"[\\/]iCloudDrive([\\/]|$)", "iCloud Drive"),
+    (r"[\\/]BaiduNetdisk([\\/]|$)", "百度网盘"),
+    (r"[\\/]BaiduYunGuanjia([\\/]|$)", "百度网盘"),
+    (r"[\\/]百度网盘([\\/]|$)", "百度网盘"),
+    (r"[\\/]Nutstore([\\/]|$)", "坚果云"),
+    (r"[\\/]坚果云([\\/]|$)", "坚果云"),
+    (r"[\\/]Weiyun([\\/]|$)", "腾讯微云"),
+    (r"[\\/]微云([\\/]|$)", "腾讯微云"),
+    (r"[\\/]AliyunDrive([\\/]|$)", "阿里云盘"),
+    (r"[\\/]aDrive([\\/]|$)", "阿里云盘"),
+    (r"[\\/]阿里云盘([\\/]|$)", "阿里云盘"),
+    (r"[\\/]天翼云盘([\\/]|$)", "天翼云盘"),
+    (r"[\\/]CloudDisk([\\/]|$)", "天翼云盘"),
+    (r"[\\/]亿方云([\\/]|$)", "亿方云"),
+    (r"[\\/]和彩云([\\/]|$)", "和彩云"),
+    (r"[\\/]115网盘([\\/]|$)", "115网盘"),
+    (r"[\\/]MEGAsync([\\/]|$)", "MEGA"),
+    (r"[\\/]pCloudDrive([\\/]|$)", "pCloud"),
+    (r"[\\/]Box\s*Sync([\\/]|$)", "Box"),
+    (r"[\\/]Syncthing([\\/]|$)", "Syncthing"),
+    (r"[\\/]Nextcloud([\\/]|$)", "Nextcloud"),
+    (r"[\\/]ownCloud([\\/]|$)", "ownCloud"),
+    (r"[\\/]Seafile([\\/]|$)", "Seafile"),
+    (r"[\\/]Resilio\s*Sync([\\/]|$)", "Resilio Sync"),
+)
+_SYNC_DIR_RE = None
+
+
+def cloud_sync_dir_of(path):
+    """命中的云盘同步目录名（如 'OneDrive'）；未命中返回 None。
+
+    只做**字符串匹配**，不碰文件系统 —— 目录可能还没建（同步客户端会自己建），
+    也可能因为权限读不到；而"Agent 打算往那儿写"这件事在命令文本里就已经成立。
+    """
+    global _SYNC_DIR_RE
+    if not path:
+        return None
+    if _SYNC_DIR_RE is None:
+        _SYNC_DIR_RE = [(re.compile(p, re.I), lbl) for p, lbl in _SYNC_DIR_MARKERS]
+    s = str(path)
+    for rx, lbl in _SYNC_DIR_RE:
+        if rx.search(s):
+            return lbl
+    return None
+
+
+def _basic_hit(rule, command, file_path, content, url, bash_extra, file_targets,
+               rtype, detection):
+    """0.29.0 (E-1)：command / file / content 三通道命中判定 —— **本仓唯一实现**。
+
+    ★ 为什么必须抽出来：放行留痕（sec_wl_log）与主命中判定问的是同一个问题
+    ——"这条规则本来会不会命中"。E-1 之前两处各写一遍，留痕只查 file_patterns、
+    主判定查三通道 ⇒ 不同源 ⇒ SEC-09/10（靠 command_patterns 命中）与
+    SEC-01（靠 content_patterns 命中）被路径白名单放行却**零留痕**，静默后门没堵死。
+    **重复实现必然漂移**，故抽成唯一实现，两边共用。
+    """
+    r = _first_hit(_patterns(rule, "command_patterns"),
+                   command_variants(command) + [url])
+    if r:
+        return (r[1], "command")
+    r = _first_hit(_patterns(rule, "file_patterns"), [file_path] + bash_extra)
+    if r:
+        return (r[1], "path")
+    if detection is None:
+        pats = _patterns(rule, "content_patterns")
+        if rtype == "file_content":
+            # 0.31.0 (F2): a file_content rule carrying file_patterns only
+            # inspects files whose path matches them (MCP-02/03/04 target MCP
+            # config files; without this guard every text file on disk would be
+            # content-scanned for their patterns).
+            _fp_pats = _patterns(rule, "file_patterns")
+            if _fp_pats and not (file_path and _first_hit(_fp_pats, [file_path])):
+                return None
+            target = rule.get("target")
+            # 0.31.0 (F1): target semantics -- "instruction_files" matches SKILL.md
+            # plus the instruction set; "all_text_files" stays a superset of
+            # everything (CTX-03 keeps covering instruction files).
+            compound = bool(rule.get("compound_nonprimary"))
+            sf = int(rule.get("specific_from") or 0)
+            for spec, text in file_targets:
+                spec_ok = (target is None or target == spec or target == "all_text_files"
+                           or (target == "instruction_files"
+                               and spec in ("SKILL.md", "instruction_file")))
+                if not spec_ok:
+                    continue
+                # 0.31.0 (F1): compound criterion for NON-SKILL.md instruction
+                # files -- a lone GENERIC pattern ("ignore previous instructions"
+                # quoted in a doc) is the classic false positive; require 2
+                # distinct generic hits OR 1 specific hit (exfiltration /
+                # do-not-tell / print-system-prompt). SKILL.md keeps the old
+                # single-hit behavior. Falling below the threshold is NOT a
+                # release: nothing is written to released[].
+                if compound and spec == "instruction_file":
+                    hit_idx = [k for k, p in enumerate(pats)
+                               if _first_hit([p], [text])]
+                    spec_hits = [k for k in hit_idx if k >= sf]
+                    gen_hits = [k for k in hit_idx if k < sf]
+                    if spec_hits:
+                        r = _first_hit([pats[spec_hits[0]]], [text])
+                        if r:
+                            return (r[1], "file_content",
+                                    {"spec": spec, "spc": len(spec_hits), "gen": len(gen_hits)})
+                    if len(gen_hits) >= 2:
+                        r = _first_hit([pats[gen_hits[0]]], [text])
+                        if r:
+                            return (r[1], "file_content",
+                                    {"spec": spec, "spc": 0, "gen": len(gen_hits)})
+                    continue
+                r = _first_hit(pats, [text])
+                if r:
+                    return (r[1], "file_content", {"spec": spec})
+        else:
+            r = _first_hit(pats, [content, url] + bash_extra)
+            if r:
+                return (r[1], "content")
+    return None
+
+
 def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=None,
                  workspace_roots=(), ws_allow_log=None, excluded_log=None,
-                 path_wl_log=None, bash_path_log=None, host_cfg_log=None):
+                 path_wl_log=None, bash_path_log=None, host_cfg_log=None,
+                 sync_wl_log=None, sec_wl_log=None):
     """Run every enabled, applicable rule against the event; return ALL hits.
 
     Match families (all fields read from the rule top level, G-12):
@@ -1783,6 +2423,7 @@ def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=Non
       content_patterns  -> tool_call rules: content, command, url
                            file_content rules (CTX-02/04): text of target files
       check             -> path_outside_project_root (DST-02) | domain_whitelist (NET-03)
+                           | path_in_cloud_sync_dir (DST-11, 0.29.0 G-8)
       detection         -> character_code_scan (CTX-03): command, path, content, file text
       type metadata_check (CTX-05): SKILL.md frontmatter name vs directory name
     Policy (F-06, spec C-05): whitelist.paths skips SECRETS rules for matching paths
@@ -1812,7 +2453,31 @@ def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=Non
         if (_disabled(rule) or not _platform_applies(rule)
                 or not _applies(rule, tool_name)):
             continue
-        if path_wl and rule.get("category") == "secrets":
+        rtype = rule.get("type") or "tool_call"
+        detection = rule.get("detection") or ("character_code_scan" if rtype == "invisible_unicode" else None)
+        if path_wl and rule.get("category") == "secrets" and rule.get("file_patterns"):
+            # 0.29.0 (D-2)：**路径白名单只开"靠路径判断"的那扇门**。
+            # 旧写法是 `category == "secrets"` 一刀切 ⇒ 读剪贴板(SEC-07)、截屏(SEC-08)、
+            # 内容里的密钥字面量(SEC-06) 这三条**与路径毫无关系**的规则，只因同一次调用
+            # 顺带带了一个白名单内的 file_path 就被一并放行 —— 实测 `pbpaste` 因此静默通过。
+            # 通行证不该是万能卡：它只能开它真正对应的那扇门。
+            # 0.29.0 (D-1)：放行**必须留痕**。此处是全仓最后一个静默放行通道 ——
+            # 同文件另五处释放路径（DST-02 / DST-11 / exclude_patterns / workspace_roots /
+            # host_cfg）各有专门事件类型并镜像到宿主级，只有这一处什么都不写，
+            # 于是账本把它记成了"压根没命中"（rules_hit=[], severity="none"）。
+            # ★ 不是新增规矩：ci/drift_audit.py 的 A5 早就判"放行成功 且 留痕"，长期红。
+            if sec_wl_log is not None:
+                # ★ 只记"这次调用**本来真的会命中**"的那条，不记"所有被跳过的规则"。
+                # 若图省事把整批 secrets 规则都记上，账本会说"放行了 7 条"，
+                # 而实际只有 1 条命中 —— 那就是用一个假数字换另一个假数字，
+                # 与本次要修的毛病（账本不诚实）是同一回事。
+                # ★★ 0.29.0 (E-1)：判据必须与主判定**同源**（同一 `_basic_hit`）。
+                # 旧写法只查 file_patterns ⇒ SEC-09/10（靠 command_patterns 命中）、
+                # SEC-01（靠 content_patterns 命中）被放行却**零留痕** ⇒ 静默后门没堵死。
+                # 这是「改了一半」第四次复发；根治办法是不重写判据，而是共用它。
+                if _basic_hit(rule, command, file_path, content, url, bash_extra,
+                              file_targets, rtype, detection):
+                    sec_wl_log.append(rule.get("id", "?"))
             continue
         if cmd_wl and (rule.get("severity") or "warning").lower() != "critical":
             continue
@@ -1826,37 +2491,12 @@ def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=Non
                 excluded_log.append(rule.get("id", "?"))
             continue
 
-        rtype = rule.get("type") or "tool_call"
-        detection = rule.get("detection") or ("character_code_scan" if rtype == "invisible_unicode" else None)
         check = _field(rule, "check")
-        hit = None          # (snippet, kind)
-
-        # 1. command family
-        r = _first_hit(_patterns(rule, "command_patterns"),
-                       command_variants(command) + [url])
-        if r:
-            hit = (r[1], "command")
-        # 2. file family
-        if hit is None:
-            r = _first_hit(_patterns(rule, "file_patterns"), [file_path] + bash_extra)
-            if r:
-                hit = (r[1], "path")
-        # 3. content family
-        if hit is None and detection is None:
-            pats = _patterns(rule, "content_patterns")
-            if rtype == "file_content":
-                target = rule.get("target")
-                for spec, text in file_targets:
-                    if target not in (None, spec, "all_text_files"):
-                        continue
-                    r = _first_hit(pats, [text])
-                    if r:
-                        hit = (r[1], "file_content")
-                        break
-            else:
-                r = _first_hit(pats, [content, url] + bash_extra)
-                if r:
-                    hit = (r[1], "content")
+        # 1–3. command / file / content 三通道 —— 与放行留痕共用 `_basic_hit`（0.29.0 E-1）。
+        #     此前此处是三通道的完整实现、留痕处是只查 file_patterns 的半份实现，
+        #     两者漂移 ⇒ 放行不留痕。现在唯一实现在 `_basic_hit`，两边不可能再分叉。
+        hit = _basic_hit(rule, command, file_path, content, url, bash_extra,
+                         file_targets, rtype, detection)
         # 4. special checks
         agent_ap = any(file_path and file_path.replace("\\", "/").lower().rstrip("/").startswith(
             ap.rstrip("/")) for ap in policy.get("agent_paths", []))
@@ -1897,6 +2537,27 @@ def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=Non
             bad = check_domains((command + " " + url).strip(), _field(rule, "whitelist_domains", []) or [])
             if bad:
                 hit = (", ".join(bad), "domain_whitelist")
+        # 4b. 0.29.0 (G-8, DST-11): 写进云盘同步目录（且项目外）。
+        #     三个条件同时成立才算：①路径命中已知同步目录名 ②在项目根之外
+        #     ③未被 whitelist.paths 显式放行（放行也留痕，不静默）。
+        #     Bash 通道没有 file_path，用 _bash_absolute_paths 从命令文本里取显式绝对路径
+        #     —— 与 DST-02 的 Bash 分支同一套提取，避免"Bash 走空"。
+        if hit is None and check == "path_in_cloud_sync_dir":
+            _cands = [file_path] if file_path else []
+            if tool_name == "Bash" and command:
+                _cands += [c for c in _bash_absolute_paths(command) if c not in _cands]
+            for _c in _cands:
+                _sync = cloud_sync_dir_of(_c)
+                if not _sync:
+                    continue
+                if not check_outside_root(_c, project_root, workspace_roots):
+                    continue        # 项目内（含项目本身放在云盘里）→ 不管
+                if path_whitelisted(_c, project_root, policy.get("paths")):
+                    if sync_wl_log is not None:
+                        sync_wl_log.append(_c)
+                    continue        # 用户显式放行 → 记录，不拦
+                hit = (_sync, "path_in_cloud_sync_dir")
+                break
         # 5. invisible Unicode (CTX-03): command / path / content / file text
         if hit is None and detection == "character_code_scan":
             ranges = [(int(x["start"]), int(x["end"])) for x in rule.get("ranges", [])] or None
@@ -1938,6 +2599,19 @@ def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=Non
             entry["action"] = "alert"
             entry["downgraded_from"] = "block"
             entry["downgrade_reason"] = "read-only command context"
+        # 0.32.2 (C1): instruction_block_mode=specific-only —— 非 SKILL.md 指令文件上
+        # "双泛化命中"的 block 降级为 alert（误报税减半），SPECIFIC 命中仍 block。
+        # 降级必须留痕（downgraded_from），与 readonly 降级同一呈现纪律。
+        _meta = hit[2] if len(hit) > 2 else {}
+        if (action == "block" and rule.get("compound_nonprimary")
+                and _meta.get("spec") == "instruction_file" and _meta.get("spc", 0) == 0
+                and str((policy.get("settings") or {}).get(
+                    "instruction_block_mode", "specific-only")).lower() == "specific-only"):
+            entry["action"] = "alert"
+            entry["severity"] = "warning"
+            entry["downgraded_from"] = "block"
+            entry["downgrade_reason"] = ("instruction_block_mode=specific-only "
+                                         "(generic-only hit on a non-SKILL.md instruction file)")
         hits.append(entry)
     return hits
 
@@ -2038,6 +2712,94 @@ def _budget_hit(tool_name, session_id, policy):
 
 
 # -------------------------------------------------- 0.26.0 实时通知主人 ----
+# 0.28.3（B4i）：外部命令绝对路径——Windows 程序搜索顺序里应用目录先于 System32，
+# 裸 "powershell" 可被 PATH/应用目录投毒劫持。
+_PS_EXE = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+                       "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+
+
+def _slop_hit(tool_name, command, policy):
+    """0.32.0 (F6): typosquatting / slopsquatting detection for install commands.
+
+    依据 _budget_hit 的同构模式：返回带规则字段的 hit dict（走既有 hits 流 →
+    审计/报告零改造），不命中返回 None。判定三档：① 名字（PEP503 归一化后在
+    常见包参考集内 → 不命中（热门包，allow 不留痕）；② 不在参考集但与某个热门名
+    SequenceMatcher ratio ≥ 0.85 或仅大小写/连字符差异 → SLOP-01 alert；
+    ③ 完全生僻名 → 不命中。诚实边界（THREAT_MODEL Non-goals）：参考集是随包
+    静态快照（rules/typosquat_top.json，带版本与日期），**日期之后新发布的包
+    不在判据内**；"全新包恶意与否"本地无从判定，本规则只防"撞名牌"。
+    alert 不拦：安装是合法动作，看见了再由人决定（同 MCP-01 分寸）。"""
+    if tool_name != "Bash" or not command:
+        return None
+    m = re.search(r"(?i)\b(pip3?|uv\s+pip|npm|pnpm|yarn|bun)\s+(?:install|add|i)\s+(.{1,300})$", command)
+    if not m:
+        return None
+    tool_p, spec = (m.group(1), m.group(2))
+    registry = "npm" if re.search(r"(?i)npm|pnpm|yarn|bun", tool_p) else "pypi"
+    try:
+        with open(_locate("rules", "typosquat_top.json"), encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return None                                    # 参考集缺失/坏 → 不执法（fail-open）
+    names_raw = data.get(registry) or []
+    if not names_raw:
+        return None
+    import difflib
+
+    def _norm(n):
+        return re.sub(r"[-_.]+", "-", n).lower()
+
+    def _lev(a, b, cap=3):
+        """编辑距离（≤cap 即可判定，超过早停）。stdlib DP，名单规模内成本可忽略。"""
+        if abs(len(a) - len(b)) > cap:
+            return cap + 1
+        prev = list(range(len(b) + 1))
+        for i, ca in enumerate(a, 1):
+            cur = [i]
+            for j, cb in enumerate(b, 1):
+                cur.append(min(prev[j] + 1, cur[j - 1] + 1,
+                               prev[j - 1] + (ca != cb)))
+            if min(cur) > cap:
+                return cap + 1
+            prev = cur
+        return prev[-1]
+
+    known = {_norm(n): n for n in names_raw}
+    spec = re.sub(r"(?i)\b(==|>=|<=|~=?|@)\s*[\w.\-]+", "", spec)   # 去版本说明
+    suspects = []
+    for tok in spec.split():
+        tok = tok.strip("\"'`,;")
+        if not tok or tok.startswith("-") or "/" in tok or tok.startswith("."):
+            continue                               # 选项/本地路径不算包名
+        name = tok.split("@")[0].split("==")[0].strip()
+        if not name or "@" in tok and not name:
+            continue
+        nn = _norm(name)
+        if nn in known:
+            continue                               # 热门包本身：allow 不留痕
+        best = None
+        for kn in known:
+            d = _lev(nn, kn, cap=2)
+            r = difflib.SequenceMatcher(None, nn, kn).ratio()
+            if best is None or (d, -r) < (best[0], -best[1]):
+                best = (d, r, known[kn])
+        if best and (best[0] <= 2 or best[1] >= 0.85):
+            suspects.append("%s (≈ %s, 距离 %d)" % (name, best[2], best[0]))
+    if not suspects:
+        return None
+    return {"rule_id": "SLOP-01", "severity": "warning", "action": "alert",
+            "match_kind": "command", "match_snippet": ", ".join(suspects)[:120],
+            "description": "Install command references a package name suspiciously close to a "
+                           "popular package (typosquatting/slopsquatting class; reference set "
+                           "%s, dated %s -- later packages are not judged)"
+                           % (data.get("version"), data.get("updated")),
+            "remediation": "核对包名拼写与官方文档；确认后再安装；已安装的立即移除并轮换凭据",
+            "description_zh": "安装命令中的包名与热门包高度相近（撞名/slopsquatting 类；参考集 "
+                              "%s，日期 %s——其后新包不在判据内）"
+                              % (data.get("version"), data.get("updated")),
+            "remediation_zh": "核对包名拼写与官方文档；确认后再安装；已安装的立即移除并轮换凭据"}
+
+
 def notify_owner(title, body):
     """对抗分析 v1.0 裁定：留痕重要，让主人第一时间知道更重要。
     Windows 气泡通知（fire-and-forget，不阻塞钩子、失败静默）。"""
@@ -2051,7 +2813,7 @@ def notify_owner(title, body):
               "$n.Icon=[System.Drawing.SystemIcons]::Warning;$n.Visible=$true;"
               "$n.ShowBalloonTip(15000,'%s','%s','Warning');"
               "Start-Sleep -Seconds 8;$n.Dispose()" % (t, b))
-        subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden",
+        subprocess.Popen([_PS_EXE, "-NoProfile", "-WindowStyle", "Hidden",
                           "-Command", ps],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:
@@ -2059,17 +2821,79 @@ def notify_owner(title, body):
 
 
 def main():
+    t_main = time.perf_counter()                 # 0.32.2 (B1): 主体段起点
     try:  # utf-8 in/out determinism (host decoders expect utf-8)
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
     raw = sys.stdin.buffer.read().decode("utf-8", errors="replace")
+    # 0.33.0 (B3/D4): 常驻判定薄客户端。performance_mode=resident 且 judge
+    # 存活时，把整个决策管线委托给常驻服务（预载规则+预编译正则），
+    # 本进程只做信号转发（stdout/stderr/exit code）。三层 fail-open：
+    # ① judge.json 不存在/pid 死 → 直跑 ② 连接失败/超时 → 直跑
+    # ③ 服务返回错误 → 放行（A-08）。
+    perf_mode = None
+    try:
+        _pp = os.path.join(os.getcwd(), ".psl", "policy.json")
+        _pol0 = json.load(open(_pp, encoding="utf-8"))
+        perf_mode = str((_pol0.get("global_settings") or {}).get(
+            "performance_mode", "hook")).lower()
+    except Exception:
+        pass
+    if perf_mode == "resident":
+        try:
+            import socket as _sock
+            from pathlib import Path as _P
+            _hub = _P(os.path.expanduser(os.environ.get(
+                "ANTINEL_HUB_DIR") or "~/.antinel"))
+            _jj = _hub / "judge.json"
+            _jd = json.loads(_jj.read_text(encoding="utf-8"))
+            os.kill(_jd.get("pid", 0), 0)               # 哨兵存活探测
+            _ts = _jd.get("started", "")
+            _age = time.time() - time.mktime(time.strptime(_ts[:19], "%Y-%m-%dT%H:%M:%S"))
+            if _age > 60:
+                raise ValueError("judge stale")
+            _s = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
+            _s.settimeout(2.0)
+            _s.connect(("127.0.0.1", _jd["port"]))
+            _req = json.dumps({"token": _jd["token"], "cwd": os.getcwd(),
+                               "event_json": raw}, ensure_ascii=False)
+            _s.sendall(_req.encode("utf-8") + b"\n")
+            _resp_data = b""
+            while b"\n" not in _resp_data:
+                _chunk = _s.recv(65536)
+                if not _chunk:
+                    break
+                _resp_data += _chunk
+            _s.close()
+            _resp = json.loads(_resp_data.decode("utf-8", errors="replace"))
+            sys.stdout.write(_resp.get("stdout", ""))
+            sys.stderr.write(_resp.get("stderr", ""))
+            sys.exit(_resp.get("exit_code", 0))
+        except Exception:
+            pass                                    # ③ fail-open：直跑
     try:
         event = json.loads(raw)
     except Exception:
+        # 0.29.0（A-2）：A-08 决定"解析失败就放行"（没有事件就没法判规则），这一条不变。
+        # 变的是**留痕**：原先只打一行 INVALID_INPUT，链上一条记录都没有 ⇒ 一段坏 JSON
+        # 就能让整道哨兵静默失效，而账本看起来完全正常——对一个卖"证据链"的产品，这是
+        # 最不该出现的失败模式（定位句：「能拦的拦下，拦不住的记账」）。
+        # 这里照抄 __main__ 里"钩子自己崩了"的现成写法（stderr HOOK_ERROR ＋ hook_error）。
+        # hook_error 已登记在随包 AUDIT_SCHEMA.md，故契约文件不用动。
         try:
             sys.stderr.write("INVALID_INPUT\n")
+            sys.stderr.write("HOOK_ERROR (allow)\n")
+        except Exception:
+            pass
+        try:
+            log_event({"ts": datetime.now().isoformat(timespec="seconds"),
+                       "type": "hook_error", "tool": "-", "session": "-", "host": "-",
+                       "decision": "allow", "severity": "critical", "action": "alert",
+                       "reason": "stdin was not parseable JSON, so no rule could be applied; "
+                                 "action was allowed by the host (fail-open, A-08) and this "
+                                 "record is the only trace"})
         except Exception:
             pass
         sys.exit(0)                                     # A-08: allow on parse failure
@@ -2086,29 +2910,42 @@ def main():
     session_id = event.get("session_id", "") or ""
     project_root = find_project_root()
     workspace_roots, ws_source, ws_rejected = load_workspace_roots()
-    host_tag = detect_host_tag()
+    host_tag, host_evidence = detect_host_tag_full()
 
     cmd, fpath, content, url = extract(raw_tool, tool_input, host_tag)
     texts = {"command": cmd, "file_path": fpath, "content": content, "url": url}
     file_targets = file_text_targets(tool_name, fpath, content)
 
     policy = load_policy()
+    global _POLICY            # 0.33.1: deny_stdout_hosts 需要读策略
+    _POLICY = policy or {}
     ws_allow_log = []
     excluded_log = []
     path_wl_log = []
     bash_path_log = []
     host_cfg_log = []
-    hits = collect_hits(apply_policy(load_rules(), policy), tool_name, texts, project_root,
+    sync_wl_log = []
+    sec_wl_log = []
+    effective_rules = apply_policy(load_rules(), policy)
+    t_rules_done = time.perf_counter()           # 0.32.2 (B1)
+    hits = collect_hits(effective_rules, tool_name, texts, project_root,
                         file_targets, policy, workspace_roots=workspace_roots,
                         ws_allow_log=ws_allow_log, excluded_log=excluded_log,
                         path_wl_log=path_wl_log, bash_path_log=bash_path_log,
-                        host_cfg_log=host_cfg_log)
+                        host_cfg_log=host_cfg_log, sync_wl_log=sync_wl_log,
+                        sec_wl_log=sec_wl_log)
     hits.sort(key=lambda h: SEV_RANK.get(h["severity"], 9))       # stable: keeps category order
     # 0.24.0 (BUDGET-01): 预算档位命中与规则命中同构（rules_hit 记录、report 可见）
     _bh = _budget_hit(tool_name, session_id, policy)
     if _bh:
         hits.append(_bh)
         hits.sort(key=lambda h: SEV_RANK.get(h["severity"], 9))
+    # 0.32.0 (F6): slopsquatting——安装命令里的"撞名牌"包名（同构特判，S1-1..3）
+    _sh = _slop_hit(tool_name, cmd, policy)
+    if _sh:
+        hits.append(_sh)
+        hits.sort(key=lambda h: SEV_RANK.get(h["severity"], 9))
+    t_match_done = time.perf_counter()           # 0.32.2 (B1)
     # 0.26.0 (对抗分析 v1.0): net_mode=block —— 网络外传从"提醒"升级为"拦截"。
     # 仅在策略显式 block 时升级 NET 命中；默认 warn 保持不变（分寸：不静默加严）。
     if str((policy.get("settings") or {}).get("net_mode", "warn")).lower() == "block":
@@ -2118,6 +2955,67 @@ def main():
                 h["action"] = "block"
     blocking = [h for h in hits if h["action"] == "block"]
     decision = "block" if blocking else ("alert" if hits else "allow")
+    # 0.30.0 (E-3): which stdout deny contract is armed. dual (default) =
+    # documented hookSpecificOutput + legacy decision key together; legacy =
+    # the pre-0.30 shape; quiet = no stdout (exit 2 + stderr only). Escape
+    # hatch for a host that chokes on the contract key.
+    deny_mode = str((policy.get("settings") or {}).get("deny_stdout", "dual")).lower()
+    if deny_mode not in ("dual", "legacy", "quiet"):
+        deny_mode = "dual"
+    # -------------------------------------------------- 0.30.0 (E-3): probe mode --
+    # tools/enforce_probe.py runs THIS hook with a synthetic event that must be
+    # blocked, then verifies the signal channels end to end. In probe mode the
+    # hook is side-effect-free: no audit writes (the wrapper chains ONE truthful
+    # enforcement_probe record), no owner notification -- and the policy
+    # whitelist is bypassed, because the probe tests the ENGINE's deny path,
+    # not the user's release configuration (release paths are covered by the
+    # verification suite). Failure of any step here is fail-open on purpose:
+    # the probe must never become a second way to break the host.
+    if os.environ.get("ANTINEL_PROBE") == "1":
+        # 0.33.1 (P4-2)：探针使用必须留痕。
+        # ANTINEL_PROBE=1 让这次调用跳过主链写入 —— 这是已登记的边界：能设这个
+        # env 的人，同样能改 .psl/，与攻击者同权，**防不住**。防不住就让它可检测：
+        # 探针每跑一次往 sidecar 写一条 probe_used。主链语义不变（探针依然不污染
+        # 主链），但"谁在什么时候用过探针"从此有据可查。
+        try:
+            _sd = os.path.join(os.getcwd(), ".psl", "audit", "sidecar")
+            os.makedirs(_sd, exist_ok=True)
+            _sp = os.path.join(_sd, datetime.now().strftime("%Y-%m-%d") + ".probe.jsonl")
+            with open(_sp, "a", encoding="utf-8") as _f:
+                _f.write(json.dumps(
+                    {"ts": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
+                     "type": "probe_used", "tool": raw_tool, "session": session_id,
+                     "host": host_tag, "decision": "allow", "severity": "info",
+                     "reason": "ANTINEL_PROBE=1: this call skipped main-chain audit; "
+                               "this sidecar record is the only trace"},
+                    ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+        _probe_policy = {k: v for k, v in policy.items() if k != "whitelist"}
+        hits = collect_hits(effective_rules, tool_name, texts, project_root,
+                            file_targets, _probe_policy,
+                            workspace_roots=workspace_roots)
+        hits.sort(key=lambda h: SEV_RANK.get(h["severity"], 9))
+        blocking = [h for h in hits if h["action"] == "block"]
+        decision = "block" if blocking else ("alert" if hits else "allow")
+        try:
+            sys.stderr.write("ANTINEL_PROBE decision=%s\n" % decision)
+        except Exception:
+            pass
+        if decision == "block":
+            top = blocking[0]
+            lang = _lang()
+            desc = _pick(top, "description", lang)
+            rem = _pick(top, "remediation", lang)
+            if lang == "zh":
+                reason = ("Antinel 拦截 [%s] %s | 命中: %s | 放行/处理: %s | 自检探针（E-3）"
+                          % (top["rule_id"], desc, top["match_snippet"], rem))
+            else:
+                reason = ("Antinel blocked [%s] %s | matched: %s | enforcement self-probe (E-3)"
+                          % (top["rule_id"], top.get("description") or "policy violation",
+                             top["match_snippet"]))
+            emit_block(top["rule_id"], reason, host_tag, deny_mode)
+        sys.exit(0)
 
     ts = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
     base = {"ts": ts, "type": "pre_tool_use", "tool": raw_tool, "session": session_id, "host": host_tag,
@@ -2129,6 +3027,30 @@ def main():
                       "file_path": mask_secrets(fpath),
                       "content_len": len(content)},
             "content_digest": content_digest(tool_name, tool_input)}
+    # 0.33.1 (A-1 / P4-1)：归因证据与可信度落链。
+    # 旧记录没有这两个字段 ⇒ 读侧（report/digest）据此把 09-10..09-27 判为
+    # "宿主标签不可信"日期段。链本身一字不改——不可变的链不因读法变化而改。
+    base["host_evidence"] = host_evidence
+    base["host_confidence"] = (host_evidence or {}).get("confidence", "none")
+    if host_tag == "generic":
+        # 自动取证：什么都没命中时，把可见线索写成一条独立事件。
+        # 这样 TRAE / Qoder 国际版这类"需要真机证据"的宿主，只要被任何人跑一次，
+        # 证据就自动落到链上 —— 不必再埋探针、不必等创始人重启。
+        try:
+            log_event({"ts": ts, "type": "host_tag_uncertain", "tool": raw_tool,
+                       "session": session_id, "host": host_tag, "decision": "allow",
+                       "severity": "info", "action": "allow",
+                       "reason": "no host env key or directory marker matched; "
+                                 "host attribution for this record is UNVERIFIED",
+                       "host_evidence": host_evidence}, mirror=False)
+        except Exception:
+            pass
+    # 0.29.0 (D-1)：**放行 ≠ 没命中**。旧账本把"命中了但被白名单放行"写成
+    # {rules_hit: [], severity: "none"}，与"压根没匹配任何规则"**逐字段相同** ⇒
+    # 事后复盘无从区分（判据④同型：「被放行」被伪装成「没命中」）。
+    # 这里把被放行的规则 id 显式写进主记录，账本本身从此诚实 —— 不必拿两个本子对账。
+    if sec_wl_log:
+        base["released"] = sorted(set(sec_wl_log))
     # 0.22.0 (C1): before-state of a structured write target. Recorded even when
     # the call ends up blocked -- "a write was attempted against this state" is
     # itself evidence. Joined to the after-state via the shared content_digest.
@@ -2170,6 +3092,41 @@ def main():
                              "(the tool that maintains the config must be able to reach it); "
                              "this allows the trust boundary itself to be edited",
                    "input": {"file_path": mask_secrets(hc)}}, mirror=True)
+    # 0.29.0 (G-8, DST-11): a write into a cloud-sync directory released by
+    # whitelist.paths. Same obligation as every other release in this file:
+    # widening the trust boundary must be visible after the fact. Separate event
+    # type (not dst02_path_whitelisted) so a report can tell "released a write
+    # into a sync folder" apart from "released a write outside the project".
+    # ★ 契约纪律：本事件类型已登记在随包 AUDIT_SCHEMA.md（没登记 ≠ 不存在）。
+    for sc in sync_wl_log:
+        log_event({"ts": ts, "type": "dst11_syncdir_released", "tool": raw_tool,
+                   "session": session_id, "host": host_tag, "rule_id": "DST-11",
+                   "decision": "allow", "severity": "critical", "action": "allow",
+                   "reason": "write into a cloud-sync directory was released by "
+                             "policy whitelist.paths -- the sync client will still "
+                             "upload it; recorded so the release is never silent",
+                   "input": {"file_path": mask_secrets(sc)}}, mirror=True)
+    # 0.29.0 (D-1)：**补上全仓最后一个静默放行通道**。
+    # whitelist.paths 放行了 secrets 规则（读 .env / SSH 私钥 / 云凭证 / 微信库 …），
+    # 此前什么都不写 ⇒ 账本上它和"没命中"一模一样。现在单独命名（不并入
+    # dst02_path_whitelisted），因为"放行一次读敏感文件"与"放行一次写项目外"
+    # 是两件不同的事。severity 取自被放行规则的实际等级，不禁写死为 critical。
+    # ★ 契约纪律：本事件类型已登记在随包 AUDIT_SCHEMA.md（没登记 ≠ 不存在）。
+    # ★ 0.29.0 (E-1)：severity **取自被放行规则的实际等级**（不再写死 warning）。
+    # 写死会让"放行了一次 critical 规则"在账本上降级成 warning ⇒ 事后复盘低估。
+    # 用生效规则集反查（id 唯一），取不到时才回落到 warning —— 宁可回落，也不静默。
+    _sev_by_id = {r.get("id"): (r.get("severity") or "warning")
+                  for r in effective_rules if r.get("id")}
+    for rid in sorted(set(sec_wl_log)):
+        log_event({"ts": ts, "type": "sec_path_whitelisted", "tool": raw_tool,
+                   "session": session_id, "host": host_tag, "rule_id": rid,
+                   "decision": "allow", "severity": _sev_by_id.get(rid, "warning"),
+                   "action": "allow",
+                   "reason": "matched a secrets rule but released by policy "
+                             "whitelist.paths; recorded so the release is never "
+                             "silent and never looks like 'nothing matched'",
+                   "input": {"file_path": mask_secrets(fpath),
+                             "command": mask_secrets(cmd)[:200]}}, mirror=True)
     # 0.17.0 (P-A4): explicit out-of-root absolute paths seen on the Bash channel
     # -- alert-only evidence, never a block (guardrail boundary, not a sandbox).
     # 0.20.1: dedup — same path, same day → one stderr + one audit event.
@@ -2203,6 +3160,9 @@ def main():
         if not os.path.isfile(_today_log):
             log_event({"ts": ts, "type": "hook_alive", "tool": raw_tool, "session": session_id,
                        "host": host_tag, "decision": "allow", "severity": "none",
+                       "antinel_version": _ANTINEL_VERSION,
+                       "host_version": (event.get("version") or None),
+                       "deny_mode": deny_mode,
                        "reason": "first hook invocation of the day"}, mirror=True)
     except Exception:
         pass
@@ -2238,6 +3198,8 @@ def main():
                              mirror=(h["action"] == "block")):
                 audit_fail_n += 1
         if not log_event({"ts": ts, "type": "pre_tool_use_summary", "tool": tool_name, "session": session_id,
+                          "antinel_version": _ANTINEL_VERSION,
+                          "host_version": (event.get("version") or None),
                           "total_hits": len(hits), "decision": decision,
                           "hits": [{"rule_id": h["rule_id"], "severity": h["severity"],
                                     "match_kind": h["match_kind"], "snippet": h["match_snippet"]} for h in hits]}):
@@ -2245,6 +3207,38 @@ def main():
     else:
         if not log_event(dict(base, rules_hit=[], severity="none", action="allow", decision="allow")):
             audit_fail_n += 1
+    # 0.33.1 (P3-4): 钩子超时是"静默放行"的入口，必须留痕。
+    # 宿主给钩子的超时是 10s（zcode）/ 15s（claude）；一旦跑超，宿主按超时处理，
+    # 而超时=allow（A-08）。也就是说：**慢到超时，等于这张牌没打出去，而且没人知道**。
+    # 实测（本机，5MB 输入）端到端 median 19,473ms —— 已越过两条超时线。
+    # 所以：超过 SLOW_BUDGET_MS 就写一条 hook_slow，把"我太慢了"变成可查事实，
+    # 而不是让用户以为"没报警就是没命中"。
+    try:
+        _elapsed_ms = int((time.perf_counter() - _T0) * 1000)
+        if _elapsed_ms >= SLOW_BUDGET_MS:
+            log_event({"ts": ts, "type": "hook_slow", "tool": raw_tool, "session": session_id,
+                       "host": host_tag, "decision": "allow", "severity": "warning",
+                       "action": "alert",
+                       "reason": "hook took %d ms (>= budget %d ms); hosts kill the hook at "
+                                 "10-15s and a timeout is treated as ALLOW, so this verdict "
+                                 "may never have reached the host"
+                                 % (_elapsed_ms, SLOW_BUDGET_MS),
+                       "elapsed_ms": _elapsed_ms,
+                       "input_sizes": {"command": len(cmd or ""), "content": len(content or ""),
+                                       "file_path": len(fpath or ""), "url": len(url or "")}},
+                      mirror=False)
+    except Exception:
+        pass
+    t_audit_done = time.perf_counter()           # 0.32.2 (B1)
+    timing = {"total": int((time.perf_counter() - _T0) * 1000),
+              "imports": int((_T1 - _T0) * 1000),
+              "rules": int((t_rules_done - t_main) * 1000),
+              "match": int((t_match_done - t_rules_done) * 1000),
+              "audit": int((t_audit_done - t_match_done) * 1000),
+              "other": max(0, int((t_audit_done - t_main) * 1000)
+                           - int((t_rules_done - t_main) * 1000)
+                           - int((t_match_done - t_rules_done) * 1000)
+                           - int((t_audit_done - t_match_done) * 1000))}
 
     # 0.18.0 (R-18, audit HP-11): the switch the v0.17 stderr text promised is
     # now wired. Default stays fail-open (a guardrail must not take the host
@@ -2261,7 +3255,7 @@ def main():
             reason = ("Antinel blocked [AUDIT-LOSS] audit write failed with fail_closed_on_audit_loss=true | "
                       "failed records: %d | to allow: fix .psl/audit writability and retry, "
                       "or set the policy key to false" % audit_fail_n)
-        emit_block("AUDIT-LOSS", reason, json_stdout=host_tag in ("claude-code", "generic"))
+        emit_block("AUDIT-LOSS", reason, host_tag, deny_mode, timing=timing)
 
     if decision == "block":
         top = blocking[0]
@@ -2281,7 +3275,7 @@ def main():
             reason = "Antinel blocked [%s] %s | matched: %s | to allow: %s (retry is futile)" % (
                 top["rule_id"], top.get("description") or "policy violation",
                 top["match_snippet"], rem)
-        emit_block(top["rule_id"], reason, json_stdout=host_tag in ("claude-code", "generic"))
+        emit_block(top["rule_id"], reason, host_tag, deny_mode, timing=timing)
 
     threshold = SEV_RANK.get(policy.get("alert_threshold", "warning"), 1)
     for h in hits:                                      # warning-level: notify, allow (B-04)
@@ -2296,6 +3290,7 @@ def main():
             sys.stderr.write("[%s] %s: %s\n" % (h["rule_id"], tag, msg))
         except Exception:
             pass
+    _timing_emit(timing)
     sys.exit(0)
 
 

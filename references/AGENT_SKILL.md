@@ -5,10 +5,13 @@
 用户用任何说法表达同类意图——「胡搞/乱来/越界/偷传/不乖/瞎动」或未来任何新说法——
 都应执行对应命令：**语义对上就执行，不要等词对上**。
 
-- 「这个会话花了多少 / 烧了多少积分」→ `antinel report --session latest ＋ antinel credits forecast`
+- 「这个会话花了多少」→ `antinel report --session latest`
 - 「今天/昨天干了什么，拦了什么」→ `antinel digest [--days N] [--scope all]`
 - 「今天这个AI工具有没有胡搞/乱来/出格」→ `antinel digest --days 1 ＋ antinel host-audit`
+- 「这台电脑上的 AI 工具在往哪发数据 / 谁在后台发」→ `antinel egress`
+- 「这台电脑装了哪些 AI 工具 / 哪个在偷数据」→ `antinel host-scan（本机全部工具 ＋ 分级 ＋ 证据 ＋ 裁决状态）`
 - 「今日日报 / 日报 / 昨天干了什么」→ `antinel digest --days 1（工作区=项目根）`
+- 「确认放行某个落点 / 不放行就拦住它」→ `antinel host-shield decide <路径> allow_always｜deny（放行须本人在终端）`
 - 「把 D:\xxx 加进项目路径/白名单」→ `antinel roots add D:\\xxx ｜ antinel paths add <前缀>`
 - 「xxx 域名放行（装包老报警）」→ `antinel domains add xxx`
 - 「预算快超了提醒我 / 给会话设个预算」→ `antinel settings set budget_tokens_per_session <N>`

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""AgentState v0.28.0 - report generator (F-04 behaviour report, F-05 score).
+"""AgentState v0.29.0 - report generator (F-04 behaviour report, F-05 score).
 
 Sources:
   .psl/audit/*.jsonl      hook events written by pre_tool_use.py / post_tool_use.py
@@ -46,7 +46,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 PKG_DIR = Path(__file__).resolve().parent
-TOOL_VERSION = "0.28.0"
+TOOL_VERSION = "0.33.1"
 RETENTION_DAYS_DEFAULT = 30
 SCRIPT_FILES = ("pre_tool_use.py", "post_tool_use.py", "scan.py", "install.py", "report.py")
 
@@ -178,6 +178,11 @@ def build_report(events, scan, manifest, host_label="", root=None):
            # because it is a boundary change, not an ordinary allow: the report
            # must show that the trust boundary was edited, and by what.
            "dst02_host_config_self_maintenance": 0,
+           # 0.29.0 (D-1): the last silent release in the codebase is now counted.
+           # A whitelist-released secrets read used to leave NO record at all, so
+           # the report could not distinguish "released" from "nothing matched".
+           # Counting it here is the whole point of D-1: the number must be visible.
+           "sec_path_whitelisted": 0,
            # 0.18.0 (HP-47): hook health events become visible too -- a hook
            # that crashed mid-call used to appear ONLY in the raw JSONL.
            "hook_error": 0, "session_start": 0, "hook_alive": 0}
@@ -243,6 +248,26 @@ def build_report(events, scan, manifest, host_label="", root=None):
     score = max(0, min(100, score))
     grade = ("secure" if score >= 90 else "needs attention" if score >= 70
              else "at risk" if score >= 50 else "unsafe")
+    # 0.30.0 (E-3): enforcement status -- is the deny signal still honored?
+    # Facts only, straight from the chain: synthetic probe results
+    # (enforcement_probe), real-traffic gaps (enforcement_gap = a call the
+    # guardrail blocked was executed anyway), and the days the hook proved
+    # alive (hook_alive). The morning report must be able to say "the gate is
+    # dead" instead of silently shipping a ledger-only product.
+    probes = [e for e in events if e.get("type") == "enforcement_probe"]
+    gaps = [e for e in events if e.get("type") == "enforcement_gap"]
+    enforcement = {
+        "probe_last": ({k: probes[-1].get(k) for k in
+                        ("ts", "ok", "host", "exit_code", "stdout_channel", "deny_mode")}
+                       if probes else None),
+        "probe_ok": sum(1 for e in probes if e.get("ok") is True),
+        "probe_fail": sum(1 for e in probes if e.get("ok") is False),
+        "gaps": len(gaps),
+        "last_gap": ({k: gaps[-1].get(k) for k in ("ts", "content_digest", "rule_ids")}
+                     if gaps else None),
+        "alive_days": len({(e.get("ts") or "")[:10] for e in events
+                           if e.get("type") == "hook_alive"}),
+    }
     return {
         "schema": "antinel-report-v1",
         "tool_version": TOOL_VERSION,
@@ -261,6 +286,21 @@ def build_report(events, scan, manifest, host_label="", root=None):
                         "dedupe_key": "(rule_id, target)"},
         "self_tamper": self_tamper_check(manifest),
         "config_health": {k: v for k, v in cfg.items()},
+        "enforcement": enforcement,
+        # 0.33.1 (P4-1)：宿主标签可信度。0.33.1 之前的记录没有 host_confidence
+        # 字段 ⇒ 归因无证据（实测：本项目 WorkBuddy 流量被标成 qoder）。链不可变，
+        # 所以不改链，改读法：把这个比例印在报告里，让 host 字段不再被当事实引用。
+        "host_trust": {
+            "records": len([e for e in events if e.get("type") in ("pre_tool_use", "post_tool_use")]),
+            "unverified": sum(1 for e in events if e.get("type") in ("pre_tool_use", "post_tool_use")
+                              and e.get("host_confidence") is None),
+            "low": sum(1 for e in events if e.get("type") in ("pre_tool_use", "post_tool_use")
+                       and e.get("host_confidence") == "low"),
+            "high": sum(1 for e in events if e.get("type") in ("pre_tool_use", "post_tool_use")
+                        and e.get("host_confidence") == "high"),
+            "note": "unverified = written before 0.33.1 (no attribution evidence recorded); "
+                    "their host field must NOT be cited as fact",
+        },
         "scan_included": bool(scan),
     }
 
@@ -328,6 +368,46 @@ def render_text(rep, log_label):
     # was allowed by the HOST (fail-open) with no verdict recorded at all.
     L.append("  hook health: crash=%d | session_start=%d | hook_alive=%d" % (
         ch.get("hook_error", 0), ch.get("session_start", 0), ch.get("hook_alive", 0)))
+    # 0.33.1 (P4-1)：宿主标签可信度（读侧标注，不改链）
+    ht = rep.get("host_trust") or {}
+    if ht.get("records"):
+        L.append("  host attribution: %d/%d records UNVERIFIED (pre-0.33.1, no evidence), "
+                 "%d low (dir marker only), %d high (env evidence)"
+                 % (ht.get("unverified", 0), ht.get("records", 0),
+                    ht.get("low", 0), ht.get("high", 0)))
+        if ht.get("unverified"):
+            L.append("    \u2192 the host field of those records must not be cited as fact")
+    # 0.33.1 (P4-4)：边界必须写在产物里，不能只在威胁模型里。
+    L.append("  BOUNDARY: rules match tool-call text only; a delete/egress written into a "
+             ".py/.sh and then executed is NOT intercepted. This is a guardrail, not an "
+             "isolation layer -- use a container or sandbox for that.")
+    # 0.30.0 (E-3): enforcement status -- the gate must be able to say "I am
+    # dead" out loud. gaps>0 means a blocked call executed anyway (deny not
+    # honored by the host); probe_fail>0 means the signaling channels failed
+    # their own synthetic test. Either one turns the "闸门" into a ledger-only
+    # product -- that must never be silent.
+    en = rep.get("enforcement") or {}
+    pl = en.get("probe_last")
+    if pl:
+        L.append("  enforcement probe: %s | last %s | ok %d / fail %d (this window)" % (
+            "OK" if en.get("probe_fail", 0) == 0 else "FAIL",
+            (pl.get("ts") or "")[:16].replace("T", " "),
+            en.get("probe_ok", 0), en.get("probe_fail", 0)))
+    else:
+        L.append("  enforcement probe: no probe in this window (first probe runs within 24h of install; manual: python tools/enforce_probe.py)")
+    if en.get("gaps"):
+        lg = en.get("last_gap") or {}
+        L.append("  ⚠ ENFORCEMENT GAP: %d blocked call(s) executed anyway (deny not honored) | last %s rules=%s"
+                 % (en.get("gaps", 0), (lg.get("ts") or "")[:16].replace("T", " "),
+                    ",".join(lg.get("rule_ids") or [])))
+    L.append("  gate alive days (hook_alive): %d" % en.get("alive_days", 0))
+    # 0.29.0 (D-1): a whitelist-released secrets read. Printed on its own line and
+    # NOT folded into the findings above, because it is the one number a reviewer
+    # must not miss: above, `rules_hit` counts what was caught; this counts what
+    # was caught and then let through. Same event, opposite meaning.
+    _sw = ch.get("sec_path_whitelisted", 0)
+    L.append("  whitelist-released secrets reads (caught, then let through): %d%s" % (
+        _sw, "   <-- review these: they are NOT in the findings above" if _sw else ""))
     sb = rep.get("score_basis", {})
     L += ["", BAR, " Security Score: %d/100 (%s)" % (rep["score"], rep["grade"]),
           " Score basis: 100 - 20 x %d critical - 5 x %d warning = %d (clamped to %d); dedupe on (rule, target)" % (

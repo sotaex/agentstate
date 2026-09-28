@@ -1,13 +1,15 @@
 {
-  "version": "0.28.0",
-  "description": "Antinel Security Suite default detection rules (24 rules, 4 gates; flat layout: patterns at rule top level)",
+  "version": "0.33.1",
+  "description": "Antinel Security Suite default detection rules (37 rules, 4 gates + canary/supply-chain families; flat layout: patterns at rule top level)",
   "gates": {
     "secrets": "Gate 2 sensitive surface",
     "network": "Gate 4 behavior (egress)",
     "destructive": "Gate 4 behavior (destructive/persistence)",
     "injection": "Gate 1 content safety",
     "context": "Gate 1/4 context probing",
-    "metadata": "Gate 3 metadata consistency"
+    "metadata": "Gate 3 metadata consistency",
+    "supply_chain": "Gate 2/3 MCP supply chain (0.31)",
+    "canary": "Gate 2 canary evidence (0.31)"
   },
   "category_order": [
     "secrets",
@@ -176,7 +178,8 @@
         "\\b(scp|sftp|rsync|ssh|nc|ncat)\\b\\s+[^\\n]{0,120}@",
         "\\b(certutil|bitsadmin)\\b[^\\n]{0,120}(urlcache|transfer|/transfer|/urlcache)",
         "Invoke-(WebRequest|RestMethod)|Start-BitsTransfer",
-        "\\b(git\\s+push|gh\\s+(release|repo)\\s+create)\\b"
+        "\\bgit\\s+push\\b[^\\n]*?(?:https?://|ssh://|[\\w.-]+@[\\w.-]+:)",
+        "\\bgh\\s+(release|repo)\\s+create\\b"
       ],
       "exclude_patterns": [
         "localhost",
@@ -189,7 +192,10 @@
         "objects\\.githubusercontent\\.com"
       ],
       "apply_to_tools": [
-        "Bash"
+        "Bash",
+        "WebFetch",
+        "WebSearch",
+        "MCP"
       ],
       "description": "Agent made an external network request via shell command to a non-whitelisted domain",
       "remediation": "Pin downloads to whitelisted registries (npmjs/pypi/github) or review the destination.",
@@ -209,11 +215,19 @@
         "urllib\\.request",
         "requests\\.(get|post|put|delete)",
         "httpx\\.",
-        "socket\\.create_connection"
+        "socket\\.create_connection",
+        "\\bsocket\\.socket\\s*\\(",
+        "\\bhttp\\.client\\b",
+        "\\bsmtplib\\.SMTP\\b",
+        "\\bftplib\\.FTP\\b",
+        "require\\(['\"]https?['\"]\\)"
       ],
       "exclude_patterns": [],
       "apply_to_tools": [
-        "Bash"
+        "Bash",
+        "WebFetch",
+        "WebSearch",
+        "MCP"
       ],
       "description": "Agent code contains Python network request calls",
       "remediation": "Review the endpoints used by inline Python network code before allowing egress.",
@@ -241,7 +255,10 @@
         "127\\.0\\.0\\.1"
       ],
       "apply_to_tools": [
-        "Bash"
+        "Bash",
+        "WebFetch",
+        "WebSearch",
+        "MCP"
       ],
       "description": "Agent command references a domain outside the whitelist (v1 compares command-line domains; DNS-level comparison is a v2 kernel-layer capability)",
       "remediation": "Add the domain to the whitelist only after verifying it is the intended destination.",
@@ -468,11 +485,13 @@
     },
     {
       "id": "CTX-02",
-      "name": "Prompt injection pattern in SKILL.md",
+      "name": "Prompt injection pattern in instruction file",
       "category": "injection",
       "severity": "critical",
       "type": "file_content",
-      "target": "SKILL.md",
+      "target": "instruction_files",
+      "compound_nonprimary": true,
+      "specific_from": 5,
       "content_patterns": [
         "ignore\\s+(all\\s+)?(previous|prior|above)\\s+instructions",
         "disregard\\s+(all\\s+)?(previous|prior|above)",
@@ -489,7 +508,7 @@
         "Write",
         "Edit"
       ],
-      "description": "Potential prompt injection payload detected in skill instruction file",
+      "description": "Potential prompt injection payload in an instruction file (SKILL.md/AGENTS.md/CLAUDE.md/.cursorrules; non-SKILL.md needs 2 generic or 1 specific hit)",
       "remediation": "Remove the skill; audit its source; report the pattern to the skill marketplace.",
       "description_zh": "技能指令文件中发现提示注入载荷",
       "remediation_zh": "移除该技能并核查来源；不要运行其中的指令"
@@ -545,7 +564,7 @@
       "category": "injection",
       "severity": "warning",
       "type": "file_content",
-      "target": "SKILL.md",
+      "target": "instruction_files",
       "content_patterns": [
         "[A-Za-z0-9+/=]{200,}",
         "[0-9a-fA-F]{400,}"
@@ -729,6 +748,378 @@
       "remediation": "Same channel as DST-09 reached from a shell; the file written this way survives review. Use a normal file.",
       "description_zh": "从命令行写入 NTFS 备用数据流（重定向 / -Stream / copy / open）——DST-09 的命令通道",
       "remediation_zh": "与 DST-09 同一通道的命令行写法，产物同样逃过审查；请改用普通文件"
+    },
+    {
+      "id": "CTX-07",
+      "name": "Inline base64-decode exec",
+      "category": "injection",
+      "severity": "critical",
+      "type": "tool_call",
+      "apply_to_tools": [
+        "Bash"
+      ],
+      "content_patterns": [
+        "\\bexec\\s*\\(\\s*(?:__import__\\(['\\\"]base64['\\\"]\\)\\.)?base64\\.b64decode\\(",
+        "\\beval\\s*\\(\\s*(?:__import__\\(['\\\"]base64['\\\"]\\)\\.)?base64\\.b64decode\\(",
+        "(?:exec|eval)\\s*\\([^;\\n]{0,120}b64decode\\s*\\("
+      ],
+      "exclude_patterns": [],
+      "description": "Inline base64-decode-then-exec/eval in a shell command (classic obfuscated payload carrier)",
+      "description_zh": "命令行内联 base64 解码后 exec/eval 执行（经典混淆载荷载体）",
+      "remediation": "Decode and inspect the payload first; never let inline decoded code run directly.",
+      "remediation_zh": "先解码审查内容；不要让解码后的代码直接执行"
+    },
+    {
+      "id": "SEC-07",
+      "name": "Clipboard read",
+      "category": "secrets",
+      "severity": "critical",
+      "type": "tool_call",
+      "tool_names": [
+        "Bash"
+      ],
+      "command_patterns": [
+        "(?i)\\bget-clipboard\\b",
+        "(?i)\\bpbpaste\\b",
+        "(?i)\\bxclip\\b[^\\n]{0,40}\\s-o\\b",
+        "(?i)\\bxsel\\b[^\\n]{0,40}\\s-o\\b",
+        "(?i)\\bwl-paste\\b",
+        "(?i)\\bpyperclip\\b[^\\n]{0,40}\\.paste\\b",
+        "(?i)win32clipboard[^\\n]{0,80}GetClipboardData",
+        "(?i)clipboard_get\\s*\\(",
+        "(?i)\\[System\\.Windows\\.Forms\\.Clipboard\\]::(GetText|GetData|GetImage|ContainsText)",
+        "(?i)\\[Windows\\.ApplicationData\\]::Current\\.GetClipboardContent"
+      ],
+      "exclude_patterns": [],
+      "apply_to_tools": [
+        "Bash"
+      ],
+      "description": "Agent read the system clipboard, which may hold passwords, tokens or private text the user copied",
+      "remediation": "Do not read the clipboard from an agent command; ask the user to paste the value instead.",
+      "description_zh": "读取系统剪贴板（可能含用户刚复制的口令/令牌/隐私文本）",
+      "remediation_zh": "不要让 Agent 读剪贴板；需要某个值请用户自己粘贴",
+      "note": "0.29.0 G-2：剪贴板此前 0 覆盖（实测 grep clipboard = 0 命中）。"
+    },
+    {
+      "id": "SEC-08",
+      "name": "Screen capture",
+      "category": "secrets",
+      "severity": "warning",
+      "type": "tool_call",
+      "tool_names": [
+        "Bash"
+      ],
+      "command_patterns": [
+        "(?i)\\bscreencapture\\b",
+        "(?i)\\bgnome-screenshot\\b",
+        "(?i)\\bscrot\\b",
+        "(?i)\\bimport\\s+-window\\b",
+        "(?i)\\bxwd\\b",
+        "(?i)\\bnircmd\\b[^\\n]{0,60}savescreenshot",
+        "(?i)ffmpeg[^\\n]{0,140}(-f\\s+gdigrab|-f\\s+avfoundation|-f\\s+x11grab)",
+        "(?i)CopyFromScreen",
+        "(?i)ImageGrab\\.grab",
+        "(?i)pyautogui\\.screenshot",
+        "(?i)\\bGet-CimInstance\\b[^\\n]{0,80}Win32_VideoController"
+      ],
+      "exclude_patterns": [],
+      "apply_to_tools": [
+        "Bash"
+      ],
+      "description": "Agent captured the screen (screenshot/record), which can carry whatever is displayed",
+      "remediation": "Screen capture from an agent is almost never needed; if it is, do it manually.",
+      "description_zh": "截屏/录屏（屏幕上有什么就会被带走什么）",
+      "remediation_zh": "Agent 几乎不需要截屏；确需截屏请人工操作",
+      "note": "0.29.0 G-3：截屏此前 0 覆盖。severity=warning —— 文档截图等正当用途存在，只提醒不拦。"
+    },
+    {
+      "id": "SEC-09",
+      "name": "IM/mail local store read",
+      "category": "secrets",
+      "severity": "critical",
+      "type": "tool_call",
+      "tool_names": [
+        "Read",
+        "Bash"
+      ],
+      "file_patterns": [
+        "(?i)WeChat Files",
+        "(?i)xwechat_files",
+        "(?i)Tencent[\\\\/]WeChat\\b",
+        "(?i)com\\.tencent\\.xinWeChat",
+        "(?i)[\\\\/]Msg[\\\\/][^\\\\/]{0,40}\\.db",
+        "(?i)[\\\\/]DingTalk[\\\\/][^\\\\/]{0,40}\\.db",
+        "(?i)[\\\\/]nt_qq\\b",
+        "(?i)\\.ost$",
+        "(?i)\\.pst$",
+        "(?i)Lark[\\\\/][^\\\\/]{0,40}\\.db",
+        "(?i)\\bDingTalk\\b"
+      ],
+      "command_patterns": [
+        "(?i)(WeChat Files|xwechat_files|Tencent[\\\\/]WeChat)[^\\n]{0,200}\\.db",
+        "(?i)\\b(nt_msg|media_msg|message_\\d+|MediaMSG\\d*|nt_qq)\\w*\\.db\\b",
+        "(?i)(copy|xcopy|robocopy|tar|zip|7z)[^\\n]{0,200}\\.(ost|pst)\\b",
+        "(?i)sqlite3?[^\\n]{0,200}(nt_msg|media_msg|message_\\d+|nt_qq)"
+      ],
+      "exclude_patterns": [],
+      "apply_to_tools": [
+        "Read",
+        "Bash"
+      ],
+      "description": "Agent read an instant-messaging or mail client's local store (full message history)",
+      "remediation": "These stores are the user's private correspondence; deny agent access entirely.",
+      "description_zh": "读取 IM/邮件客户端的本地库（等于全部往来记录）",
+      "remediation_zh": "这是用户私人通信；应完全禁止 Agent 访问",
+      "note": "0.29.0 G-7：此前 0 覆盖，且 _SCAN_EXCLUDE_PAT 反而把 wechat/weixin 排除。 ★0.29.0 收紧：裸 MSG\\d*\\.db 等改为要求路径分隔符前缀，避免命中项目里恰好同名的文件。 ★0.29.0 二次收紧：删除所有裸 DB 名（nt_msg/media_msg/MSG\\d* 等），改为 IM 产品目录锚定 —— 判据是「在 IM 客户端目录里」，不是「名字像 IM 的文件」；实测裸名会命中项目里恰好叫 MSG.db 的文件。"
+    },
+    {
+      "id": "SEC-10",
+      "name": "Input-method user dictionary read",
+      "category": "secrets",
+      "severity": "warning",
+      "type": "tool_call",
+      "tool_names": [
+        "Read",
+        "Bash"
+      ],
+      "file_patterns": [
+        "(?i)[\\\\/]SogouPY\\b",
+        "(?i)[\\\\/]SogouInput\\b",
+        "(?i)[\\\\/]WeChatInput\\b",
+        "(?i)[\\\\/]BaiduPinyin\\b",
+        "(?i)[\\\\/]QQPinyin\\b",
+        "(?i)[\\\\/]Rime\\b",
+        "(?i)\\.scel$"
+      ],
+      "command_patterns": [
+        "(?i)(copy|xcopy|robocopy|tar|zip|7z)[^\\n]{0,200}(SogouPY|SogouInput|BaiduPinyin|QQPinyin|userdict)",
+        "(?i)(SogouPY|SogouInput|BaiduPinyin|QQPinyin)[^\\n]{0,200}\\.(dat|bin|db)\\b"
+      ],
+      "exclude_patterns": [],
+      "apply_to_tools": [
+        "Read",
+        "Bash"
+      ],
+      "description": "Agent read the input-method user dictionary, which records what the user has typed",
+      "remediation": "Typing history is private; do not let an agent read IME dictionaries.",
+      "description_zh": "读取输入法用户词库/上屏记录（等于用户打过什么字）",
+      "remediation_zh": "输入历史属隐私；不要让 Agent 读取输入法词库",
+      "note": "0.29.0 G-11：此前 0 覆盖（本机实测 SogouPY 存在且仍在写）。 ★0.29.0 收紧：删除 `\\buserdict\\b`/`\\bUserDict\\b` —— UserDict 是 Python 标准库类名，读代码会误报。"
+    },
+    {
+      "id": "DST-11",
+      "name": "Write into cloud-sync directory",
+      "category": "destructive",
+      "severity": "critical",
+      "type": "tool_call",
+      "tool_names": [
+        "Write",
+        "Edit"
+      ],
+      "check": "path_in_cloud_sync_dir",
+      "exclude_patterns": [],
+      "apply_to_tools": [
+        "Write",
+        "Edit",
+        "Bash"
+      ],
+      "description": "Agent wrote into a cloud-drive sync folder: the sync client will upload the file automatically",
+      "remediation": "Allow deliberately with `antinel paths add <prefix>` (audited), or write inside the project.",
+      "description_zh": "写进云盘同步目录 —— 同步客户端会自动把它传上云",
+      "remediation_zh": "确需放行：antinel paths add <目录前缀>（进审计链）；否则写进项目内",
+      "note": "0.29.0 G-8：新增 check `path_in_cloud_sync_dir`（在同步目录内 **且** 在项目外）。★ 为什么必须带'项目外'：项目本身放在 OneDrive 是常见配置，只看目录名会把全部正常写入都拦掉 —— 那正是「会误报的检查器用两次就没人信了」。"
+    },
+    {
+      "id": "NET-04",
+      "name": "Tunnel / covert channel",
+      "category": "network",
+      "severity": "warning",
+      "type": "tool_call",
+      "tool_names": [
+        "Bash"
+      ],
+      "command_patterns": [
+        "(?i)\\b(ngrok|frpc|frps|v2ray|xray|sing-box|trojan|hysteria|clash|shadowsocks|ss-local)\\b",
+        "(?i)\\b(icmpsh|ptunnel|iodine|dnscat2?|hans|chisel|socat|stunnel|obfs4)\\b",
+        "(?i)\\bnc(at)?\\b[^\\n]{0,60}\\s-[a-z]*e\\b",
+        "(?i)\\bssh\\b[^\\n]{0,80}\\s-[RLD]\\s",
+        "(?i)\\bping\\b[^\\n]{0,60}\\s-[lp]\\s+(?:[0-9A-Fa-f]{16,}|\\d{4,})",
+        "(?i)\\b(ngrok(-free)?\\.(io|app)|trycloudflare\\.com|serveo\\.net|localtunnel\\.me|localhost\\.run|pinggy\\.(io|link)|bore\\.pub|lhr\\.life|tunnel\\.to)\\b"
+      ],
+      "exclude_patterns": [],
+      "apply_to_tools": [
+        "Bash",
+        "WebFetch",
+        "WebSearch",
+        "MCP"
+      ],
+      "description": "Agent opened a tunnel / covert channel (reverse tunnel, proxy, DNS-ICMP carrier) to move data out",
+      "remediation": "Tunnels bypass ordinary egress checks; confirm the destination before allowing.",
+      "description_zh": "建立隧道/隐蔽信道（反向隧道、代理、DNS/ICMP 载波）——绕过常规出网检查",
+      "remediation_zh": "隧道会绕过常规出网检查；放行前先确认目标",
+      "note": "0.29.0 G-5：单开一条规则，**不并入 NET-01** —— NET-01 的 exclude 含 `localhost`，而 `ngrok http localhost:3000` 正是最经典的隧道形态，并进去等于没拦。"
+    },
+    {
+      "id": "MCP-01",
+      "name": "Write to MCP config file",
+      "category": "supply_chain",
+      "severity": "warning",
+      "type": "tool_call",
+      "file_patterns": [
+        "(^|[\\\\/])\\.cursor[\\\\/]mcp\\.json$",
+        "(^|[\\\\/])\\.mcp\\.json$",
+        "(^|[\\\\/])claude_desktop_config\\.json$",
+        "(^|[\\\\/])\\.vscode[\\\\/]mcp\\.json$"
+      ],
+      "content_patterns": [
+        "(?is)(?:>>|>|\\btee\\b|\\bcp\\b|\\bmv\\b|\\bmove\\b|\\bcopy\\b|\\bset-content\\b|\\bout-file\\b|\\badd-content\\b)[^\\n]{0,120}\\.mcp\\.json",
+        "(?is)(?:>>|>|\\btee\\b|\\bcp\\b|\\bmv\\b|\\bmove\\b|\\bcopy\\b|\\bset-content\\b|\\bout-file\\b|\\badd-content\\b)[^\\n]{0,120}mcp\\.json",
+        "(?is)(?:>>|>|\\btee\\b|\\bcp\\b|\\bmv\\b|\\bmove\\b|\\bcopy\\b|\\bset-content\\b|\\bout-file\\b|\\badd-content\\b)[^\\n]{0,120}claude_desktop_config\\.json"
+      ],
+      "exclude_patterns": [],
+      "apply_to_tools": [
+        "Write",
+        "Edit",
+        "Bash"
+      ],
+      "description": "MCP configuration file written/modified -- verify the new server's source, command and url (malicious MCP servers are an active 2025-2026 supply-chain channel)",
+      "remediation": "核对新增 server 的来源与 command/url；不认识的一律移除并轮换相关凭据",
+      "description_zh": "MCP 配置文件被写入或修改",
+      "remediation_zh": "核对新增 server 的来源与 command/url；不认识的一律移除并轮换相关凭据",
+      "note": "0.32.1：content_patterns 收紧为 Bash **写形态**（重定向/tee/cp/mv + 配置文件名）——旧版 `cat .mcp.json`（纯读取）也会命中，属于误报；读取可见性由 MCP-02（Read 通道）承担。"
+    },
+    {
+      "id": "MCP-02",
+      "name": "Prompt injection in MCP tool description",
+      "category": "supply_chain",
+      "severity": "warning",
+      "type": "file_content",
+      "target": "mcp_config",
+      "file_patterns": [
+        "(^|[\\\\/])\\.cursor[\\\\/]mcp\\.json$",
+        "(^|[\\\\/])\\.mcp\\.json$",
+        "(^|[\\\\/])claude_desktop_config\\.json$",
+        "(^|[\\\\/])\\.vscode[\\\\/]mcp\\.json$"
+      ],
+      "content_patterns": [
+        "ignore\\s+(all\\s+)?(previous|prior|above)\\s+instructions",
+        "exfiltrate|send\\s+(the\\s+)?(secrets?|credentials?|keys?|tokens?)\\s+(to|via)",
+        "do\\s+not\\s+(tell|inform|notify|reveal)\\s+(the\\s+)?user",
+        "trust\\s+this\\s+server\\s+automatically",
+        "curl\\s+[^\\s]*\\$\\{?[A-Z_]*(KEY|TOKEN|SECRET)"
+      ],
+      "exclude_patterns": [],
+      "apply_to_tools": [
+        "Read",
+        "Write",
+        "Edit"
+      ],
+      "description": "MCP tool description/config contains prompt-injection patterns (tool-poisoning class; postmark-mcp case)",
+      "remediation": "移除该 MCP 服务器并核查其来源；工具描述里的指令会在每次工具调用时进入模型上下文",
+      "description_zh": "MCP 工具描述/配置中发现提示注入模式（工具投毒类；postmark-mcp 案例）",
+      "remediation_zh": "移除该 MCP 服务器并核查其来源；工具描述里的指令会在每次工具调用时进入模型上下文"
+    },
+    {
+      "id": "MCP-03",
+      "name": "Unaudited remote MCP server",
+      "category": "supply_chain",
+      "severity": "warning",
+      "type": "file_content",
+      "target": "mcp_config",
+      "file_patterns": [
+        "(^|[\\\\/])\\.cursor[\\\\/]mcp\\.json$",
+        "(^|[\\\\/])\\.mcp\\.json$",
+        "(^|[\\\\/])claude_desktop_config\\.json$",
+        "(^|[\\\\/])\\.vscode[\\\\/]mcp\\.json$"
+      ],
+      "content_patterns": [
+        "mcp-remote",
+        "\"url\"\\s*:\\s*\"https?://"
+      ],
+      "exclude_patterns": [],
+      "apply_to_tools": [
+        "Read",
+        "Write",
+        "Edit"
+      ],
+      "description": "MCP config references a remote server (http url or mcp-remote bridge) -- remote tool definitions can change silently after approval",
+      "remediation": "确认远程端点的可信度；优先本地 stdio server；远程定义变更不受你控制",
+      "description_zh": "MCP 配置引用远程服务器（http url 或 mcp-remote 桥接）",
+      "remediation_zh": "确认远程端点可信；优先本地 stdio server；远程定义变更不受你控制"
+    },
+    {
+      "id": "MCP-04",
+      "name": "Plaintext secret in MCP config env",
+      "category": "supply_chain",
+      "severity": "warning",
+      "type": "file_content",
+      "target": "mcp_config",
+      "file_patterns": [
+        "(^|[\\\\/])\\.cursor[\\\\/]mcp\\.json$",
+        "(^|[\\\\/])\\.mcp\\.json$",
+        "(^|[\\\\/])claude_desktop_config\\.json$",
+        "(^|[\\\\/])\\.vscode[\\\\/]mcp\\.json$"
+      ],
+      "content_patterns": [
+        "\\bsk-[A-Za-z0-9_\\-]{20,}\\b",
+        "\\bgh[pousr]_[A-Za-z0-9]{36,}\\b",
+        "\\bAKIA[0-9A-Z]{16}\\b",
+        "\\bxox[baprs]-[A-Za-z0-9\\-]{10,}\\b",
+        "\\bAIza[0-9A-Za-z_\\-]{35}\\b",
+        "-----BEGIN [A-Z ]*PRIVATE KEY-----"
+      ],
+      "exclude_patterns": [],
+      "apply_to_tools": [
+        "Read",
+        "Write",
+        "Edit"
+      ],
+      "description": "Plaintext API key/token inside MCP config env block (config files get synced, shared and committed far more often than .env)",
+      "remediation": "改用凭据引用/环境注入；已写入的密钥视为已泄露并轮换",
+      "description_zh": "MCP 配置 env 块中存在明文密钥",
+      "remediation_zh": "改用凭据引用/环境注入；已写入的密钥视为已泄露并轮换"
+    },
+    {
+      "id": "SEC-11",
+      "name": "Canary file read",
+      "category": "canary",
+      "severity": "warning",
+      "type": "tool_call",
+      "file_patterns": [
+        "(^|[\\\\/])\\.canary[\\\\/]CANARY-"
+      ],
+      "exclude_patterns": [],
+      "apply_to_tools": [
+        "Read",
+        "Bash"
+      ],
+      "description": "Agent read a canary file -- if its marker (CANARY-*) appears in any external channel, that proves exfiltration of project content",
+      "remediation": "记录并观察：金丝雀被读取本身不是泄露，标记出现在外部通道才是证据（report 的 canaries 统计）",
+      "description_zh": "Agent 读取了金丝雀文件",
+      "remediation_zh": "记录并观察：金丝雀被读取本身不是泄露，标记出现在外部通道才是证据（report 的 canaries 统计）",
+      "note": "0.31.0 F3：**故意只 alert 不拦** —— 拦下就观察不到外传链路；输出中出现 CANARY 标记由 post_tool_use 的 canaries_observed 既有机制接管。",
+      "content_patterns": [
+        "\\.canary[\\\\/]CANARY-"
+      ]
+    },
+    {
+      "id": "SLOP-01",
+      "name": "Typosquatted package name in install command",
+      "category": "supply_chain",
+      "severity": "warning",
+      "type": "tool_call",
+      "enabled": false,
+      "command_patterns": [
+        "(?i)\\b(pip|pip3|npm)\\s+install\\b"
+      ],
+      "apply_to_tools": [
+        "Bash"
+      ],
+      "description": "Install command references a package name suspiciously close to a popular package (typosquatting / slopsquatting class). Determined by the hook's built-in reference set (rules/typosquat_top.json, static, dated) -- new packages published after the set date are not judged.",
+      "remediation": "核对包名拼写与官方文档；确认后再安装；已安装的立即移除并轮换凭据",
+      "description_zh": "安装命令中的包名与热门包高度相近（撞名/slopsquatting 类）",
+      "remediation_zh": "核对包名拼写与官方文档；确认后再安装；已安装的立即移除并轮换凭据",
+      "note": "0.32.0 (F6)：enabled=false —— 本条目只承载描述/文档；判定由钩子内置参考集特判（_slop_hit，同 _budget_hit 先例），避免静态正则误报全部正常安装。"
     }
   ]
 }

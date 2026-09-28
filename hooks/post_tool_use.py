@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""AgentState v0.28.0 - PostToolUse hook (Claude Code / ZCode compatible).
+"""AgentState v0.30.0 - PostToolUse hook (Claude Code / ZCode compatible).
 
 Input (stdin, one JSON line): {session_id, transcript_path, tool_name,
 tool_input, tool_response}. PostToolUse cannot block an action that already
@@ -10,6 +10,12 @@ Responsibilities (spec table 2-3):
   1. append the execution record to .psl/audit/YYYY-MM-DD.jsonl (chained)
   2. inspect tool_response for leaked secrets (keys, tokens, private keys)
   3. observe canary markers CANARY-<skill>-<8hex> (spec C-01, gate g3 evidence)
+  4. 0.30.0 (E-3): enforcement-gap detection -- if a pre record with the SAME
+     content_digest carries decision=block, then the host executed a call the
+     guardrail blocked, i.e. the deny signal (exit 2 / stdout contract) was NOT
+     honored; chained as `enforcement_gap` (AUDIT_SCHEMA v1.7). This is the
+     real-traffic half of the E-3 closure; the synthetic half is the daily
+     enforcement self-probe (tools/enforce_probe.py), scheduled from here.
 
 Exit codes (spec A-10): 0 = recorded; 1 = record failed (host unaffected).
 Python 3.10+, stdlib only, no network.
@@ -40,9 +46,10 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 MAX_RESPONSE_CHARS = 200_000          # inspect at most this much output text
 
@@ -318,6 +325,186 @@ def _accumulate_budget_state(session_id, entries):
 # naturally; report.py never read it anyway).
 
 
+# ------------------------------------------------- 0.30.0 (E-3) enforcement --
+def _audit_tail_lines(path, max_bytes=262144):
+    """Last max_bytes of one audit day file, as text lines. Missing file -> []."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(max(0, os.path.getsize(path) - max_bytes))
+            return f.read().decode("utf-8", errors="replace").replace("\r\n", "\n").splitlines()
+    except Exception:
+        return []
+
+
+def _enforcement_gap_check(digest):
+    """0.30.0 (E-3): the real-traffic enforcement check.
+
+    pre_tool_use wrote decision=block for this content_digest, yet THIS
+    post_tool_use record exists -- i.e. the tool actually ran. Both can only be
+    true if the host did not honor the deny signal (exit 2 / stdout contract):
+    exactly the E-3 silent failure, now given a name, a chained record and a
+    morning-report line. Joins on the shared content_digest (spec 2.8); matches
+    the LATEST pre record for the digest inside a 1h window (an old block must
+    not haunt an unrelated later allow). Every failure is silent (fail-open,
+    A-08): this detector must never break the host."""
+    if not digest:
+        return
+    try:
+        d = audit_dir()
+        today = datetime.now().strftime("%Y-%m-%d") + ".jsonl"
+        yst = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d") + ".jsonl"
+        cands = []
+        for fn in (os.path.join(d, yst), os.path.join(d, today)):
+            for ln in _audit_tail_lines(fn):
+                if digest not in ln or '"type": "pre_tool_use"' not in ln:
+                    continue                       # cheap filter before json.loads
+                try:
+                    r = json.loads(ln)
+                except Exception:
+                    continue
+                if r.get("content_digest") == digest and r.get("type") == "pre_tool_use":
+                    cands.append(r)
+        if not cands:
+            return
+        pre = cands[-1]                            # latest matching pre record
+        if pre.get("decision") != "block":
+            return
+        try:
+            t0 = datetime.fromisoformat(pre.get("ts"))
+            if t0.tzinfo is None:
+                # 0.32.1：旧记录/手写记录可能无时区——按本地时区补齐，而不是让
+                # aware-naive 相减的 TypeError 被 except 吞掉、1 小时窗口静默失效。
+                t0 = t0.astimezone()
+            if (datetime.now().astimezone() - t0).total_seconds() > 3600:
+                return
+        except Exception:
+            pass
+        rid = pre.get("rules_hit") or [h.get("rule_id") for h in (pre.get("hits") or [])]
+        append_jsonl({"ts": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
+                      "type": "enforcement_gap", "tool": pre.get("tool", ""),
+                      "session": pre.get("session", ""), "host": pre.get("host", ""),
+                      "content_digest": digest,
+                      "rule_ids": [x for x in rid if x], "blocked_at": pre.get("ts"),
+                      "decision": "alert", "severity": "critical", "action": "alert",
+                      "reason": "the host executed a tool call that the guardrail blocked "
+                                "on this content_digest -- the deny signal was not honored "
+                                "(THREAT_MODEL E-3); active self-probe: tools/enforce_probe.py"})
+        try:
+            sys.stderr.write("[Antinel][E-3] ENFORCEMENT_GAP: a blocked tool call executed "
+                             "anyway (deny not honored by the host); chained as "
+                             "enforcement_gap\n")
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
+def _maybe_enforce_probe(event):
+    """0.30.0 (E-3): once per interval (default 24h; policy
+    global_settings.probe_interval_hours, 0 disables) spawn tools/enforce_probe.py
+    DETACHED. The probe runs the pre-hook against a synthetic must-block event
+    and chains an enforcement_probe record -- proving the signaling channels
+    end to end. PostToolUse is the natural scheduler: it cannot block anything,
+    and Agent activity is exactly when the gate should be proven alive. The
+    due-stamp is written BEFORE spawning so parallel posts don't double-spawn;
+    every failure is silent (fail-open, A-08)."""
+    try:
+        if os.environ.get("ANTINEL_PROBE") == "1":
+            return
+        pdir = os.path.join(os.getcwd(), ".psl")
+        pol = {}
+        try:
+            pol = json.load(open(os.path.join(pdir, "policy.json"), encoding="utf-8"))
+        except Exception:
+            pass
+        hours = float((pol.get("global_settings") or {}).get("probe_interval_hours", 24))
+        if hours <= 0:
+            return
+        st_p = os.path.join(pdir, "state", "enforce_probe.json")
+        try:
+            st = json.load(open(st_p, encoding="utf-8"))
+        except Exception:
+            st = {}
+        last = st.get("last_run")
+        if last:
+            try:
+                if (datetime.now() - datetime.fromisoformat(last)).total_seconds() < hours * 3600.0:
+                    return
+            except Exception:
+                pass
+        os.makedirs(os.path.dirname(st_p), exist_ok=True)
+        st["last_run"] = datetime.now().isoformat(timespec="seconds")
+        tmp = st_p + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(st, f, ensure_ascii=False)
+        os.replace(tmp, st_p)
+        root = os.getcwd()
+        pkg = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        script = os.path.join(pkg, "tools", "enforce_probe.py")
+        if not os.path.isfile(script):
+            return
+        kw = dict(cwd=root, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                  stderr=subprocess.DEVNULL)
+        if os.name == "nt":
+            kw["creationflags"] = 0x00000008 | 0x00000200   # DETACHED_PROCESS | NEW_PROCESS_GROUP
+        else:
+            kw["start_new_session"] = True
+        subprocess.Popen([sys.executable, script, "--root", root], **kw)
+    except Exception:
+        pass
+
+
+def _host_seen_update(event):
+    """0.32.2 (A1): 宿主版本事实入 state——版本变化即上链 host_changed（W2 对冲：
+    宿主升级是钩子协议漂移的头号来源，E-3 即实例）。宿主未带 version 时只更新
+    last_seen（缺失不造假）。每次 post 都读一个小 JSON；仅版本变化时写盘与上链。"""
+    try:
+        ver = event.get("version") or None
+        pdir = os.path.join(os.getcwd(), ".psl")
+        st_p = os.path.join(pdir, "state", "host_seen.json")
+        try:
+            st = json.load(open(st_p, encoding="utf-8"))
+        except Exception:
+            st = {}
+        now_ts = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+        prev = st.get("last_version")
+        if ver and prev and ver != prev:
+            append_jsonl({"ts": now_ts, "type": "host_changed", "tool": "-",
+                          "session": "", "host": "generic", "decision": "alert",
+                          "severity": "warning", "from_version": prev, "to_version": ver,
+                          "reason": "宿主版本变化——钩子协议可能漂移（E-3 类风险），"
+                                    "建议重跑 probe_host.py 与 enforce_probe.py"})
+        if ver:
+            st["last_version"] = ver
+            st["last_seen"] = now_ts
+            os.makedirs(os.path.dirname(st_p), exist_ok=True)
+            tmp = st_p + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(st, f, ensure_ascii=False)
+            os.replace(tmp, st_p)
+    except Exception:
+        pass
+
+
+def _shield_paramedic():
+    """0.28.1 (S1): 宿主审计门闸哨兵的保活。布防中且哨兵进程不在 → 拉起（host_shield.
+    ensure_alive 内部带节流与留痕：host_shield_revived / host_shield_spawn_failed）。
+    未布防时只花一次 json 读；任何异常吞掉（fail-open，A-08）——这是审计钩子，
+    不是门闸本体，绝不因保活失败影响宿主。"""
+    try:
+        if os.name != "nt":
+            return
+        parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if parent not in sys.path:
+            sys.path.insert(0, parent)
+        import host_shield as _hs
+        if not _hs.load_state().get("enabled"):
+            return
+        _hs.ensure_alive(parent, cause="hook-paramedic")
+    except Exception:
+        pass
+
+
 def main():
     try:  # utf-8 out determinism (host decoders expect utf-8)
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -342,6 +529,27 @@ def main():
     sensitive = find_sensitive(text)
     canaries = sorted(set(CANARY_RE.findall(text)))
 
+    # 0.30.0 (E-3): the digest doubles as the pre<->post join key (spec 2.8) and
+    # as the enforcement-gap trigger -- computed once, used twice.
+    dgst = content_digest(tool_name, tool_input)
+
+    # 0.33.1 (A-1): 归因改为调用唯一来源 hooks/_host_detect.py。
+    # 此前 post 侧有一份自己的副本：目录优先、env 只有 4 个键（无 CN 变体）——
+    # 与 pre 侧口径不同，同一个调用会得出两个宿主标签。副本已删除。
+    # 加载器本身与 pre 侧重复（10 行），但会漂移的是判定逻辑，那份只有一份。
+    _host_tag, _host_evidence = "generic", {"source": "fallback", "key": None,
+                                            "confidence": "none",
+                                            "detector": "post-inline@0.33.1"}
+    try:
+        import importlib.util as _ilu
+        _p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_host_detect.py")
+        _spec = _ilu.spec_from_file_location("_host_detect", _p)
+        _m = _ilu.module_from_spec(_spec)
+        _spec.loader.exec_module(_m)
+        _host_tag, _host_evidence = _m.detect()
+    except Exception:
+        pass
+
     record = {
         "ts": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
         "type": "post_tool_use",
@@ -351,8 +559,10 @@ def main():
             "file_path": tool_input.get("file_path") or tool_input.get("path") or "",
         },
         "session": session_id,
-        "host": "",
-        "content_digest": content_digest(tool_name, tool_input),
+        "host": _host_tag,
+        "host_evidence": _host_evidence,
+        "host_confidence": (_host_evidence or {}).get("confidence", "none"),
+        "content_digest": dgst,
         "response_digest": "sha256:" + hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest(),
         "response_chars": len(text),
         "rules_hit": ["OUT-01"] if sensitive else [],
@@ -371,6 +581,11 @@ def main():
         if _fp:
             record["file_state_after"] = file_state_snapshot(_fp)
 
+    # 0.30.0 (E-3): gap check runs BEFORE our own post record is appended, so
+    # the enforcement_gap record lands earlier in the day file than the post
+    # record that proves the execution.
+    _enforcement_gap_check(dgst)
+
     ok = True
     try:
         append_jsonl(record)
@@ -382,6 +597,17 @@ def main():
     # 0.23.0 (A1/A2): token facts from the transcript into the chain, after the
     # security record -- the security ledger must never wait on the billing one.
     record_usage_delta(event, session_id)
+
+    # 0.28.1 (S1): 门闸 paramedic——哨兵死亡由 Agent 活动本身兜底复活（fail-open、
+    # 节流、在岗时 <1ms）。风险窗口（Agent 在跑）与钩子触发窗口天然重合，
+    # 这是比任何 OS 自启都更贴身的保活；OS 自启（schtasks/启动文件夹）仍并行存在。
+    _shield_paramedic()
+
+    # 0.32.2 (A1): 宿主版本变化检测（W2 对冲）。
+    _host_seen_update(event)
+
+    # 0.30.0 (E-3): daily enforcement self-probe when due (detached, fail-open).
+    _maybe_enforce_probe(event)
 
     if sensitive:
         try:

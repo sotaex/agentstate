@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""AgentState v0.28.0 - self installer (F-07) and uninstaller (F-08).
+"""AgentState v0.30.0 - self installer (F-07) and uninstaller (F-08).
 
 Steps (spec part 4):
   1. detect host type            (A-04 algorithm + C-02 refinements)
@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 PKG_DIR = Path(__file__).resolve().parent
-SKILL_VERSION = "0.28.0"
+SKILL_VERSION = "0.33.1"
 PSL_SPEC = "psl-vs-0.1"
 SCRIPT_FILES = ("pre_tool_use.py", "post_tool_use.py", "session_dna.py",
                 "audit_chain.py",
@@ -75,7 +75,25 @@ POLICY_TEMPLATE = {
     "$schema": "antinel-policy-v1",
     "version": "1.0",
     "global_settings": {"alert_threshold": "warning", "log_retention_days": 30,
-                        "auto_archive": False, "desktop_notify": False},
+                        "auto_archive": False, "desktop_notify": False,
+                        # 0.30.0 (E-3): deny signaling contract + self-probe cadence.
+                        # deny_stdout: dual = documented hookSpecificOutput contract AND
+                        # legacy {"decision":"block"} on stdout (claude-code/generic only;
+                        # ZCode stays stdout-quiet by strict schema); legacy = pre-0.30
+                        # shape; quiet = no stdout (exit 2 + stderr only).
+                        "deny_stdout": "dual",
+                        # enforcement self-probe cadence in hours (0 disables); the probe
+                        # runs tools/enforce_probe.py detached from post_tool_use and
+                        # chains an enforcement_probe record.
+                        "probe_interval_hours": 24,
+                        # 0.32.2 (C1): 误报税控制——非 SKILL.md 指令文件上，
+                        # "双泛化命中"的 CTX-02 降级为 alert（SPECIFIC 仍 block）。
+                        # full = 恢复全部 block（误报风险自担）。
+                        "instruction_block_mode": "specific-only",
+                        # 0.33.0 (B3/D4): performance_mode = "hook"（默认，每次调用
+                        # 冷启动 Python）或 "resident"（常驻判定服务，~20ms/次）。
+                        # resident 需运行 tools/judge_service.py（opt-in，默认关）。
+                        "performance_mode": "hook"},
     "whitelist": {"domains": [], "paths": [], "commands": []},
     "_semantics": {
         "whitelist.domains": "relaxes NETWORK rules only (NET-01/02 excludes, NET-03 whitelist)",
@@ -499,6 +517,37 @@ def uninstall(root, purge=False):
         _, settings_path = detect_host(root)
     removed = unregister_hooks(settings_path)
     print("hooks removed: %d (%s)" % (removed, settings_path))
+    # 0.31.0 (F4)：自我移除必须在删除动作之前留痕——卸载是用户权利，不因留痕
+    # 失败而拒绝（fail-open）；purge 会删掉项目副本，宿主级镜像保证证据仍在。
+    # 这是"闸门被拔线必须大声说"的另一半：E-3 管信号失效，这里管钩子被整体拔掉。
+    try:
+        try:
+            import audit_chain as _acm
+        except ImportError:
+            sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+            import audit_chain as _acm
+        _rec = {"ts": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
+                "type": "antinel_uninstall", "tool": "-", "session": "antinel-cli",
+                "host": detect_host(root)[0] if isinstance(detect_host(root), tuple) else str(detect_host(root)),
+                "decision": "alert", "severity": "critical", "action": "alert",
+                "removed_hooks": removed, "purge": bool(purge),
+                "settings_file": str(settings_path),
+                "reason": "guardrail self-removal requested -- recorded BEFORE removal; "
+                          "purge deletes the project copy, the host-level mirror keeps "
+                          "the evidence"}
+        _ad = root / ".psl" / "audit"
+        if _ad.is_dir():
+            _fn = _ad / (datetime.now().strftime("%Y-%m-%d") + ".jsonl")
+            _acm.append_chained(str(_fn), _rec)
+            _acm.touch_day_manifest(str(_fn))
+        _mad = Path(os.path.expanduser(os.environ.get("WORKBUDDY_CONFIG_DIR")
+                                       or "~/.workbuddy")) / "antinel-audit"
+        _mad.mkdir(parents=True, exist_ok=True)
+        _mfn = _mad / (datetime.now().strftime("%Y-%m-%d") + ".jsonl")
+        _acm.append_locked(str(_mfn), json.dumps(_rec, ensure_ascii=False) + "\n")
+        _acm.touch_day_manifest(str(_mfn))
+    except Exception as e:
+        print("[Antinel] 卸载留痕失败（继续卸载；不影响本操作）：%r" % (e,))
     if purge and (root / ".psl").is_dir():
         shutil.rmtree(root / ".psl")
         print(".psl/ removed (purge)")

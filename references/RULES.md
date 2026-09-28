@@ -1,4 +1,4 @@
-# Antinel detection rules (generated from rules/default.json v0.28.0 - do not edit by hand)
+# Antinel detection rules (generated from rules/default.json v0.29.0 - do not edit by hand)
 
 Category order = match priority: secrets > destructive > network > injection > context > metadata.
 Severity to action: critical = block, warning = alert (logged, allowed). All hits are collected; highest severity decides.
@@ -76,7 +76,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - remediation: Browser profiles contain live sessions; deny all agent access to profile directories.
 
 ## NET-01  Shell network request
-- category: network | severity: warning | dynamic (hook only) | tools: Bash
+- category: network | severity: warning | dynamic (hook only) | tools: Bash, WebFetch, WebSearch, MCP
 - purpose: Surfaces shell egress to non-whitelisted domains (first-generation C2 / exfil channel)
 - description: Agent made an external network request via shell command to a non-whitelisted domain
 - 说明: 通过 Shell 向白名单外域名发起网络请求
@@ -87,12 +87,13 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
     - `\b(scp|sftp|rsync|ssh|nc|ncat)\b\s+[^\n]{0,120}@`
     - `\b(certutil|bitsadmin)\b[^\n]{0,120}(urlcache|transfer|/transfer|/urlcache)`
     - `Invoke-(WebRequest|RestMethod)|Start-BitsTransfer`
-    - `\b(git\s+push|gh\s+(release|repo)\s+create)\b`
+    - `\bgit\s+push\b[^\n]*?(?:https?://|ssh://|[\w.-]+@[\w.-]+:)`
+    - `\bgh\s+(release|repo)\s+create\b`
 - exclude_patterns: `localhost`, `127\.0\.0\.1`, `registry\.npmjs\.org`, `pypi\.org`, `files\.pythonhosted\.org`, `github\.com`, `api\.github\.com`, `objects\.githubusercontent\.com`
 - remediation: Pin downloads to whitelisted registries (npmjs/pypi/github) or review the destination.
 
 ## NET-02  Python network request
-- category: network | severity: warning | dynamic (hook only) | tools: Bash
+- category: network | severity: warning | dynamic (hook only) | tools: Bash, WebFetch, WebSearch, MCP
 - purpose: Surfaces inline-code network calls (the same egress hidden inside python -c)
 - description: Agent code contains Python network request calls
 - 说明: 内联代码包含 Python 网络请求调用
@@ -102,10 +103,15 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
     - `requests\.(get|post|put|delete)`
     - `httpx\.`
     - `socket\.create_connection`
+    - `\bsocket\.socket\s*\(`
+    - `\bhttp\.client\b`
+    - `\bsmtplib\.SMTP\b`
+    - `\bftplib\.FTP\b`
+    - `require\(['"]https?['"]\)`
 - remediation: Review the endpoints used by inline Python network code before allowing egress.
 
 ## NET-03  Non-whitelisted domain connection
-- category: network | severity: warning | dynamic (hook only) | tools: Bash
+- category: network | severity: warning | dynamic (hook only) | tools: Bash, WebFetch, WebSearch, MCP
 - purpose: Surfaces non-whitelisted domains named in commands (DNS-level comparison is v2)
 - description: Agent command references a domain outside the whitelist (v1 compares command-line domains; DNS-level comparison is a v2 kernel-layer capability)
 - 说明: 命令引用了白名单外的域名
@@ -360,6 +366,125 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
     - `\bopen\s*\([^\n)]{0,200}\.[^\\/:\s\"']{1,32}:(?!Zone\.Identifier)[^\"'\n]{0,200}[\"']\s*,\s*[\"'][wa]`
 - platforms: nt (rule is skipped on other hosts; it stays in the loaded set so rule counts are platform-invariant)
 - remediation: Same channel as DST-09 reached from a shell; the file written this way survives review. Use a normal file.
+
+## CTX-07  Inline base64-decode exec
+- category: injection | severity: critical | static + dynamic | tools: Bash
+- purpose: unknown (generator table missing an entry)
+- description: Inline base64-decode-then-exec/eval in a shell command (classic obfuscated payload carrier)
+- 说明: 命令行内联 base64 解码后 exec/eval 执行（经典混淆载荷载体）
+- 处理建议: 先解码审查内容；不要让解码后的代码直接执行
+- content_patterns:
+    - `\bexec\s*\(\s*(?:__import__\(['\"]base64['\"]\)\.)?base64\.b64decode\(`
+    - `\beval\s*\(\s*(?:__import__\(['\"]base64['\"]\)\.)?base64\.b64decode\(`
+    - `(?:exec|eval)\s*\([^;\n]{0,120}b64decode\s*\(`
+- remediation: Decode and inspect the payload first; never let inline decoded code run directly.
+
+## SEC-07  Clipboard read
+- category: secrets | severity: critical | static + dynamic | tools: Bash
+- purpose: unknown (generator table missing an entry)
+- description: Agent read the system clipboard, which may hold passwords, tokens or private text the user copied
+- 说明: 读取系统剪贴板（可能含用户刚复制的口令/令牌/隐私文本）
+- 处理建议: 不要让 Agent 读剪贴板；需要某个值请用户自己粘贴
+- command_patterns:
+    - `(?i)\bget-clipboard\b`
+    - `(?i)\bpbpaste\b`
+    - `(?i)\bxclip\b[^\n]{0,40}\s-o\b`
+    - `(?i)\bxsel\b[^\n]{0,40}\s-o\b`
+    - `(?i)\bwl-paste\b`
+    - `(?i)\bpyperclip\b[^\n]{0,40}\.paste\b`
+    - `(?i)win32clipboard[^\n]{0,80}GetClipboardData`
+    - `(?i)clipboard_get\s*\(`
+    - `(?i)\[System\.Windows\.Forms\.Clipboard\]::(GetText|GetData|GetImage|ContainsText)`
+    - `(?i)\[Windows\.ApplicationData\]::Current\.GetClipboardContent`
+- remediation: Do not read the clipboard from an agent command; ask the user to paste the value instead.
+
+## SEC-08  Screen capture
+- category: secrets | severity: warning | static + dynamic | tools: Bash
+- purpose: unknown (generator table missing an entry)
+- description: Agent captured the screen (screenshot/record), which can carry whatever is displayed
+- 说明: 截屏/录屏（屏幕上有什么就会被带走什么）
+- 处理建议: Agent 几乎不需要截屏；确需截屏请人工操作
+- command_patterns:
+    - `(?i)\bscreencapture\b`
+    - `(?i)\bgnome-screenshot\b`
+    - `(?i)\bscrot\b`
+    - `(?i)\bimport\s+-window\b`
+    - `(?i)\bxwd\b`
+    - `(?i)\bnircmd\b[^\n]{0,60}savescreenshot`
+    - `(?i)ffmpeg[^\n]{0,140}(-f\s+gdigrab|-f\s+avfoundation|-f\s+x11grab)`
+    - `(?i)CopyFromScreen`
+    - `(?i)ImageGrab\.grab`
+    - `(?i)pyautogui\.screenshot`
+    - `(?i)\bGet-CimInstance\b[^\n]{0,80}Win32_VideoController`
+- remediation: Screen capture from an agent is almost never needed; if it is, do it manually.
+
+## SEC-09  IM/mail local store read
+- category: secrets | severity: critical | static + dynamic | tools: Read, Bash
+- purpose: unknown (generator table missing an entry)
+- description: Agent read an instant-messaging or mail client's local store (full message history)
+- 说明: 读取 IM/邮件客户端本机库（等于全部往来记录）
+- 处理建议: 这是用户私人通信；应完全禁止 Agent 访问
+- command_patterns:
+    - `(?i)(WeChat Files|xwechat_files|Tencent[\\/]WeChat)[^\n]{0,200}\.db`
+    - `(?i)\b(nt_msg|media_msg|message_\d+|MediaMSG\d*|nt_qq)\w*\.db\b`
+    - `(?i)(copy|xcopy|robocopy|tar|zip|7z)[^\n]{0,200}\.(ost|pst)\b`
+    - `(?i)sqlite3?[^\n]{0,200}(nt_msg|media_msg|message_\d+|nt_qq)`
+- file_patterns:
+    - `(?i)WeChat Files`
+    - `(?i)xwechat_files`
+    - `(?i)Tencent[\\/]WeChat\b`
+    - `(?i)com\.tencent\.xinWeChat`
+    - `(?i)[\\/]Msg[\\/][^\\/]{0,40}\.db`
+    - `(?i)[\\/]DingTalk[\\/][^\\/]{0,40}\.db`
+    - `(?i)[\\/]nt_qq\b`
+    - `(?i)\.ost$`
+    - `(?i)\.pst$`
+    - `(?i)Lark[\\/][^\\/]{0,40}\.db`
+    - `(?i)\bDingTalk\b`
+- remediation: These stores are the user's private correspondence; deny agent access entirely.
+
+## SEC-10  Input-method user dictionary read
+- category: secrets | severity: warning | static + dynamic | tools: Read, Bash
+- purpose: unknown (generator table missing an entry)
+- description: Agent read the input-method user dictionary, which records what the user has typed
+- 说明: 读取输入法用户词库/上屏记录（等于用户打过什么字）
+- 处理建议: 输入历史属隐私；不要让 Agent 读取输入法词库
+- command_patterns:
+    - `(?i)(copy|xcopy|robocopy|tar|zip|7z)[^\n]{0,200}(SogouPY|SogouInput|BaiduPinyin|QQPinyin|userdict)`
+    - `(?i)(SogouPY|SogouInput|BaiduPinyin|QQPinyin)[^\n]{0,200}\.(dat|bin|db)\b`
+- file_patterns:
+    - `(?i)[\\/]SogouPY\b`
+    - `(?i)[\\/]SogouInput\b`
+    - `(?i)[\\/]WeChatInput\b`
+    - `(?i)[\\/]BaiduPinyin\b`
+    - `(?i)[\\/]QQPinyin\b`
+    - `(?i)[\\/]Rime\b`
+    - `(?i)\.scel$`
+- remediation: Typing history is private; do not let an agent read IME dictionaries.
+
+## DST-11  Write into cloud-sync directory
+- category: destructive | severity: critical | dynamic (hook only) | tools: Write, Edit, Bash
+- purpose: unknown (generator table missing an entry)
+- description: Agent wrote into a cloud-drive sync folder: the sync client will upload the file automatically
+- 说明: 写进云盘同步目录 —— 同步客户端会自动把它传上云
+- 处理建议: 确需放行：antinel paths add <目录前缀>（进审计链）；否则写进项目内
+- check: path_in_cloud_sync_dir
+- remediation: Allow deliberately with `antinel paths add <prefix>` (audited), or write inside the project.
+
+## NET-04  Tunnel / covert channel
+- category: network | severity: warning | dynamic (hook only) | tools: Bash, WebFetch, WebSearch, MCP
+- purpose: unknown (generator table missing an entry)
+- description: Agent opened a tunnel / covert channel (reverse tunnel, proxy, DNS-ICMP carrier) to move data out
+- 说明: 建立隧道/隐蔽信道（反向隧道、代理、DNS/ICMP 载波）——绕过常规出网检查
+- 处理建议: 隧道会绕过常规出网检查；放行前先确认目标
+- command_patterns:
+    - `(?i)\b(ngrok|frpc|frps|v2ray|xray|sing-box|trojan|hysteria|clash|shadowsocks|ss-local)\b`
+    - `(?i)\b(icmpsh|ptunnel|iodine|dnscat2?|hans|chisel|socat|stunnel|obfs4)\b`
+    - `(?i)\bnc(at)?\b[^\n]{0,60}\s-[a-z]*e\b`
+    - `(?i)\bssh\b[^\n]{0,80}\s-[RLD]\s`
+    - `(?i)\bping\b[^\n]{0,60}\s-[lp]\s+(?:[0-9A-Fa-f]{16,}|\d{4,})`
+    - `(?i)\b(ngrok(-free)?\.(io|app)|trycloudflare\.com|serveo\.net|localtunnel\.me|localhost\.run|pinggy\.(io|link)|bore\.pub|lhr\.life|tunnel\.to)\b`
+- remediation: Tunnels bypass ordinary egress checks; confirm the destination before allowing.
 
 ## Policy file (.psl/policy.json, spec C-05)
 
