@@ -35,6 +35,45 @@ PY = sys.executable
 
 results = []
 
+
+def hermetic_pkg_root():
+    """★★★ 2026-09-28（D-12 修）：返回一个**没有 `.psl/` 的包根副本**。
+
+    为什么必须有它（实测根因，不是猜的）：
+      `host_shield._shield_audit_dir(pkg_root)` 的口径是
+        「包根有 `.psl` → 用**该包的**审计目录；否则 → 个人中枢 rollup」。
+      这是**刻意的产品行为**（你问某个包，就该看那个包的账）。
+      但开发机上 `PKG`（产物仓本体）**装过 Antinel，因此带着 `.psl/`**，
+      于是所有"把 PKG 当 pkg_root 传进去、想走中枢沙箱"的用例，
+      都静默读到**宿主真实审计目录**，`ANTINEL_HUB_DIR` 形同虚设：
+        - F-14 `heartbeat_age(PKG)` 读到的不是沙箱里 2 小时前那条，
+          而是真实账本里最新一条 ⇒ `AGE_MIN 0` ⇒ 假红。
+        - F-13/F-17 同因（`ensure_alive(PKG)`）。
+      实测对照（同一份代码，唯一变量是包根有没有 `.psl`）：
+        有 `.psl` → `heartbeat_age` 返回真实账本 ts、audit dir=<pkg>/.psl/audit
+        无 `.psl` → 返回沙箱 7202s（≈120 分钟）、audit dir=<hub>/rollup  ✅
+
+    ⇒ 这是**套件不封闭**（test hermeticity）缺陷，不是产品缺陷。
+      修法：需要走中枢的用例，传这个副本当 pkg_root —— 副本只含包根层面的
+      `*.py` 模块（host_shield/audit_chain/strings/antinel… 的导入依赖），
+      **绝不含 `.psl/`**，因此 `_shield_audit_dir` 必然落到 ANTINEL_HUB_DIR。
+      副本放在 WORK 下，随套件沙箱一起走，不碰真实仓。
+    """
+    dst = WORK / "hermetic-pkg"
+    if not dst.is_dir():
+        dst.mkdir(parents=True, exist_ok=True)
+        for py in sorted(PKG.glob("*.py")):
+            try:
+                shutil.copy2(str(py), str(dst / py.name))
+            except OSError:
+                pass
+    # ★ 防御：若调用者已提前建过且带了 .psl（或被人手动放了），必须点出来 ——
+    #   否则"我以为我隔离了"会再次变成一个假绿。
+    assert not (dst / ".psl").exists(), (
+        "★ hermetic_pkg_root() 的副本里出现了 .psl —— 隔离已失效，"
+        "F-13/F-14/F-17 会静默读到宿主真实账本")
+    return dst
+
 #: 墙钟**预算**（毫秒）：只用于打印 ⚠，**不进分母**（0.33.1 改）。
 #:
 #: ★ 依据是本仓自己立过的纪律，不是我新加的标准 —— `hooks/pre_tool_use.py:1002`：
@@ -65,6 +104,30 @@ def script_path(name):
         if p.is_file():
             return p
     return PKG / name
+
+
+def fallback_rule_ids():
+    """从钩子源码里读出 `_FALLBACK` 兜底集的规则 id 集合。
+
+    ★ 为什么**必须从源码读**而不是 import 钩子：钩子的 `_FALLBACK` 是模块级常量，
+      但本套件的 A4 用例把篡改后的 manifest 交给**子进程**里的钩子跑；
+      父进程只能用「源码里写了什么」当作兜底集的真源。
+    ★ 为什么不复制一份 id 清单写死在用例里：那正是「同一事实两处副本」——
+      兜底集改了、用例不知道，判据就变成假守卫（本条 A4 就是这么坏的）。
+    """
+    src = script_path("pre_tool_use.py").read_text(encoding="utf-8", errors="replace")
+    m = re.search(r"^_FALLBACK = \[(.*?)^\]", src, re.S | re.M)
+    if not m:
+        return set()
+    return set(re.findall(r'"id":\s*"([^"]+)"', m.group(1)))
+
+
+def full_rule_ids():
+    """读真表 rules/default.json 的规则 id 集合（真表缺失→返回空集）。"""
+    p = PKG / "rules" / "default.json"
+    if not p.is_file():
+        return set()
+    return {r.get("id") for r in json.loads(p.read_text(encoding="utf-8")).get("rules", [])}
 
 
 def record(name, ok, detail=""):
@@ -519,11 +582,41 @@ def main():
     man["rules_hash"] = "sha256:tampered"
     (cc / ".psl" / "manifest.json").write_text(json.dumps(man), encoding="utf-8")
     rc4, out4, err4, _ = hook("Bash", {"command": "python -c \"import requests; requests.get('http://x.example.com')\""}, cc)
+    # ★★ 2026-09-28（D-13 修）：这条断言此前写死 `"[NET-01]" not in err4`，**已失效**。
+    #   实测根因（不是猜的）：NET-01 的 `command_patterns` 在 0.26 前后被**有意加宽**
+    #   —— 从原来的 1 条 `\b(curl|wget|fetch)\b.*https?://` 扩到 7 条，其中第 2 条
+    #   `r"https?://(?!registry\.npmjs\.org|pypi\.org|github\.com)"` 会命中本用例命令里的
+    #   `http://x.example.com`。**兜底集里的 NET-01 与真表逐字相同**，所以无论走真表
+    #   还是兜底，NET-01 都会命中 ⇒ 该子句**永远不可能再为真**。
+    #   证据：A4 在 09-12..09-24 连续 12 天全绿，09-26 14:43 起连红 30 次（与
+    #   「网络面/出口账本」那批改动的落地时间吻合）；git 首版 efa93aa 的 NET-01
+    #   只有 curl/wget/fetch 一条 pattern。
+    #
+    #   ⇒ 修法：**保留原意**（"我们确实退到了最小集"）但换一个**仍然有判别力**的判据。
+    #     判别子必须是「**只在真表、不在兜底**」的规则 —— 实测真表 37 条、兜底 17 条，
+    #     差集 20 条（CTX-04/05/07、DST-05..10、MCP-01..04、NET-02/03、SEC-04..06/11、SLOP-01）。
+    #     选 NET-02：它与本用例命令同域（network），却在兜底里缺失 ——
+    #     若 NET-02 出现，说明**退到了兜底集这一步没生效**（这才是本条要抓的缺陷）。
+    #     ★ 不改成"删掉 NET-01 那条就算了"：那会把判据**改松**，正是 MEMORY 明令禁止的
+    #       「不许为让守卫变绿而改松判据」。
+    _fb_ids = fallback_rule_ids()
+    _full_ids = full_rule_ids()
+    _fallback_only_gone = sorted((_full_ids - _fb_ids) & {"NET-02", "NET-03"})
     record("A4 tampered rules hash -> fallback minimal set + SELF-TAMPERED warning",
-           rc4 == 0 and "SELF-TAMPERED" in err4 and "NET-02" not in err4 and "[NET-01]" not in err4, err4[:70])
+           rc4 == 0 and "SELF-TAMPERED" in err4
+           and not any(rid in err4 for rid in _fallback_only_gone),
+           err4[:70])
     rc4, out4, err4, _ = hook("Read", {"file_path": str(cc / ".env")}, cc)
     rid = block_id(out4, err4)
     record("A4 fallback still blocks SEC-01 (baseline intact)", rc4 == 2 and rid == "SEC-01")
+    # ★★ 2026-09-28（D-13 配套自守卫）：上一条 A4 的判别子 `NET-02` 必须**真的**
+    #   是「只在真表、不在兜底」。若哪天有人把 NET-02 加进兜底集，那条断言就会
+    #   悄悄退化成"永远为真"的假守卫 —— 而**它不会自己变红**。
+    #   这条自守卫就是为此存在：判别子失效时**当场**红，而不是等到有人肉眼看出来。
+    #   （本例：A4 曾因同类原因静默红了 30 次、12 天没人发现。）
+    record("A4 判据自守卫：判别子 NET-02/03 只在真表、不在兜底（防断言悄悄失效）",
+           bool(_fallback_only_gone) and not (_fb_ids & {"NET-02", "NET-03"}),
+           "判别子=%s 兜底集=%d条 真表=%d条" % (_fallback_only_gone, len(_fb_ids), len(_full_ids)))
     run("install.py", ["--root", str(cc), "--skip-scan"])
     record("install SessionStart banner event registered (3 events)",
            man["hooks_registered"] == ["PreToolUse", "PostToolUse", "SessionStart"])
@@ -1833,7 +1926,8 @@ def main():
             {"enabled": True, "workspaces": {}, "sentinel_pid": 999999999,
              "last_revive_attempt": 0}, ensure_ascii=False), encoding="utf-8")
         _f13 = ("import sys;sys.path.insert(0,r'%s');import host_shield as hs;"
-                "print(hs.ensure_alive(r'%s',cause='F-13'))" % (str(PKG), str(PKG)))
+                "print(hs.ensure_alive(r'%s',cause='F-13'))"
+                % (str(PKG), str(hermetic_pkg_root())))
         _env13 = dict(os.environ)
         _env13["ANTINEL_HUB_DIR"] = str(_f13_hub)
         _p13 = subprocess.run([PY, "-I", "-S", "-c", _f13], capture_output=True, text=True,
@@ -1864,7 +1958,8 @@ def main():
          "host": "generic", "decision": "allow", "severity": "none", "reason": "F-14"},
         ensure_ascii=False) + "\n", encoding="utf-8")
     _f14 = ("import sys;sys.path.insert(0,r'%s');import host_shield as hs;"
-            "a,_=hs.heartbeat_age(r'%s');print('AGE_MIN',int(a//60))" % (str(PKG), str(PKG)))
+            "a,_=hs.heartbeat_age(r'%s');print('AGE_MIN',int(a//60))"
+            % (str(PKG), str(hermetic_pkg_root())))
     _env14 = dict(os.environ)
     _env14["ANTINEL_HUB_DIR"] = str(_f14_hub)
     _p14 = subprocess.run([PY, "-I", "-S", "-c", _f14], capture_output=True, text=True,
@@ -1935,7 +2030,7 @@ def main():
                 "time.sleep(3);hs._STALE_AFTER=1.0;"
                 "r=hs.ensure_alive(r'%s',cause='F-17');"
                 "print('R',r,'newpid',hs.load_state().get('sentinel_pid'))"
-                % (str(PKG), str(PKG), str(PKG)))
+                % (str(PKG), str(PKG), str(hermetic_pkg_root())))
         _p17 = subprocess.run([PY, "-I", "-S", "-c", _f17], capture_output=True, text=True,
                               encoding="utf-8", errors="replace", timeout=90, env=_env17)
         _m17 = re.search(r"R (\S+) newpid (\d+)", _p17.stdout or "")
