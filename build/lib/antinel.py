@@ -34,7 +34,7 @@ if _HERE not in sys.path:
 
 from strings import detect_lang, get_string
 
-VERSION = "0.33.1"
+VERSION = "0.33.2"
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
@@ -1379,11 +1379,23 @@ def cmd_host_shield(args):
         print("  代价：被拦工作区的 ZCode 检查点回滚不可用。撤销：antinel host-shield disable")
         return
     if args.sub == "disable":
-        st["enabled"] = False
+        # ★★ 2026-09-29（D-18 修）：**先干活，最后宣告**。
+        #
+        # 原顺序（bug，实测）：`st["enabled"]=False` 写在**最前**，然后才去删自启项。
+        #   本机实测：宿主 safe-delete 会在 `os.remove(启动文件夹 shim)` 处
+        #   **硬杀进程**（`SAFE_DELETE_BULK_CONFIRM_REQUIRED` 是平台层杀的，
+        #   Python 的 `except OSError` **接不住**）⇒ `disable` rc=1 当场中断。
+        #   结果：state 已写 enabled=false，而自启 shim **还在启动文件夹里**
+        #   ⇒ 下次登录仍会拉起哨兵，可 `status` 读 state 说"关着"
+        #   ⇒ **机器状态与账本不一致，且没有任何安置**。
+        #
+        # 判据：**状态位是"结果"、不是"意图"**。清理会被外部杀掉，
+        #   所以"宣告已撤防"必须排在清理**之后**：要么真撤干净了才写 false，
+        #   要么半途被杀时 state 仍是 true（status 会如实说"开着"，并列出不在岗的哨兵）。
+        # ★ 与 0.28.1 的原意图不矛盾：那条要的是"撤防不能一步都不走"，
+        #   本条要的是"不能把没走完说成走完了" —— 两者靠"先干活后宣告"同时满足。
         # 0.28.1：撤防同时停掉在岗哨兵（旧版留着空转）——先查存活再清 pid
         _alive_pid = st.get("sentinel_pid") if hs.sentinel_alive(st) else None
-        st["sentinel_pid"] = None
-        hs.save_state(st)
         # 0.28.3（B4i）：schtasks/taskkill 绝对路径
         # ★ 2026-09-26（A2）：**撤防必须走完**。原代码裸调 schtasks，本机实测直接抛
         #   PermissionError ⇒ 后面"杀哨兵、还原 ACL、写留痕"三步**一步都没执行**，
@@ -1398,8 +1410,25 @@ def cmd_host_shield(args):
             print("  ⚠ 计划任务未能删除（%s）——继续撤防其余部分" % type(_e).__name__)
         try:
             os.remove(_startup_folder_cmd())
-        except OSError:
-            pass
+        except OSError as _e:
+            # ★★ 2026-09-29（D-18 修）：**不许静默吞**。
+            #
+            # 原来这里是 `except OSError: pass` —— 而 `_auto_removed` 只反映 schtasks
+            # 那一路。于是「schtasks 成功 + 启动文件夹删除失败」这一格会：
+            #   · `_auto_removed` 仍为 True ⇒ 不打印任何警告；
+            #   · 但启动文件夹里的 shim **还在** ⇒ 下次登录仍会拉起哨兵，
+            #     而 `host-shield status` 读的正是这个自启位 ⇒ 用户看到"护盾：开着"。
+            # 实测（隔离 HOME，schtasks 被 Program Blacklist 拦）：
+            #   `disable` 之后 `status` 仍报「护盾：开着」。
+            #
+            # 判据：**自启位有两个来源（schtasks ／ 启动文件夹），
+            #   "撤销成功"必须同时覆盖两者** —— 只报其中一个，就是把
+            #   "同一事实两处副本"重新引进来（本仓反复踩过的那一类）。
+            # ⇒ 删失败必须并入同一个标志，让上面那段统一报告。
+            if os.path.exists(_startup_folder_cmd()):
+                _auto_removed = False
+                print("  ⚠ 启动文件夹自启项未能删除（%s）——下次登录可能仍会拉起哨兵"
+                      % type(_e).__name__)
         if _alive_pid:
             try:
                 subprocess.run([hs._TASKKILL, "/F", "/PID", str(_alive_pid)],
@@ -1420,6 +1449,12 @@ def cmd_host_shield(args):
                   field="enabled", change="true → false", armed=False, invoked_by=_invoked_by(),
                   reason="宿主审计门闸已撤防（ACL 已还原%s）"
                          % ("" if _auto_removed else "；★ 自启项删除失败，下次登录可能仍被拉起"))
+        # ★ 2026-09-29（D-18）：**状态位最后写** —— 前面每一步都可能被外部杀掉
+        #   （宿主硬杀不抛 Python 异常，`except` 接不住）。写在最后才能保证：
+        #   "state 说已撤防" ⇔ "真的撤完了"。半途被杀时 state 仍是 true ⇒ status 如实说"开着"。
+        st["enabled"] = False
+        st["sentinel_pid"] = None
+        hs.save_state(st)
         print("✓ 护盾已撤防，ACL 已还原")
         if not _auto_removed:
             print("  ⚠ 但**自启项未能删除**——下次登录可能仍会拉起哨兵。请手工检查："
@@ -1620,6 +1655,80 @@ _SCAN_SKIP_DIRS = {
     "artifacts", "sessions", "transcript", "transcripts",
     "conversation-history", "shell-snapshots", "file-history",
 }
+
+# ---- G-6／G-8／G-9 观察项配置 ------------------------------------------------
+# ★ 0.33.1（夜间补齐）：这三个常量此前**从未定义**，却已被 2100／2111／2123 引用，
+#   于是 `antinel host-scan` 的整个"观察项家族"自 0.29.0 引入起一跑就崩，
+#   且 `verification_tests.py` 里 0 覆盖 ⇒ 死了 5 个版本没人发现。
+#
+# ★★ 内容不是"挑"出来的，是**量**出来的（判据三条）：
+#   1) 名字一律取**本机实测存在**的：`_night_20260928\probe_residue_measured.py`
+#      遍历 56 个 AI 数据根（home／APPDATA／LOCALAPPDATA）后列出的真实子目录名。
+#   2) 语义猜测已被实测**否决**：`Crash-Log`／`Diagnostics`／`transcript`／`transcripts`／
+#      `conversation-history` 本机**全不存在**；而真实存在、确实在装数据却被漏掉的有一整类
+#      —— `Local Storage`(10 个工具)／`Network`(10)／`blob_storage`(10)／
+#      `Session Storage`(9)／`IndexedDB`(4)／`Service Worker`(3)／`File System`(1)。
+#      ⇒ 照猜测填，INV-2 会变绿（"配对通过"）而 Chromium 那一整类无人盯 ——
+#      那正是 INV-2 要防的"报告说通过、实际看不见"。**所以宁可先量再填。**
+#   3) 标签措辞是唯一自由项。硬约束：**至少一条含"崩溃上报"** —— 2489 行用
+#      `"崩溃上报" in lbl` 把崩溃目录筛给 G-10（`_crash_dump_obs`），改措辞会切断它。
+_RESIDUE_SUBDIRS = (
+    ("Crashpad",        "崩溃上报目录"),
+    ("logs",            "日志目录"),
+    ("sessions",        "会话历史"),
+    ("shell-snapshots", "会话历史"),
+    ("file-history",    "会话历史"),
+    ("IndexedDB",       "站点数据（会话可能在此）"),
+    ("Local Storage",   "站点数据（会话可能在此）"),
+    ("Session Storage", "站点数据（会话可能在此）"),
+    ("Service Worker",  "站点数据（会话可能在此）"),
+    ("blob_storage",    "站点数据（会话可能在此）"),
+    ("Network",         "网络缓存（响应体可能在此）"),
+    ("File System",     "文件系统沙箱"),
+)
+# INV-2（tools/antinel_verify.py）要求：`_SCAN_SKIP_DIRS` 里每一条"数据类跳过"
+# 都要有一个观察项当着。这张配对表就是它读取的对象。
+_RESIDUE_GUARD_PAIRS = tuple((k, k) for k, _lbl in _RESIDUE_SUBDIRS)
+
+# G-8：云盘同步根（写进去＝客户端自动上传）。
+# ★ 只列**本机实测存在**的 OneDrive。两条写法都要留：`~/OneDrive` 与
+#   `%USERPROFILE%/OneDrive` 展开成**同一个路径**是**故意的** —— 去重由 `_obs_dedupe`
+#   负责（其注释记录了这个实测），不要为了"消重"删掉其中一条。
+# ★ 未启用的通用候选（本机未证实，需要时再开，**别默认打开**）：
+#   "~/Dropbox" · "~/iCloudDrive" · "~/Google Drive"
+#   判据：目录名是**事实断言**，列错不会报错、只会"以为在盯其实盯不到"。
+_SYNC_DIR_ROOTS = (
+    "~/OneDrive", "%USERPROFILE%/OneDrive",
+)
+
+# G-6：索引／向量类目录。
+# ★ **故意留空**（0.33.1 夜间）：本机 56 个 AI 数据根里，`index`／`indexes`／
+#   `vector(s)`／`embeddings`／`vectorstore`／`vectordb`／`faiss`／`lancedb`／`chroma`
+#   **0 命中** ⇒ 我们对"这类目录到底叫什么"**没有实证**。
+# ★ 留空的代价是这段不产出；但**填错的代价更大**：会把"未配置"渲染成"0 处"，
+#   即把"没查"写成"没发现"。所以留空 + 报告端显式打「本段未配置」（见 2529 行）。
+_INDEX_SUBDIRS = ()
+
+# G-11：输入法数据（词库＝用户打过什么字）。同样只列**本机实测存在**的
+# （`_night_20260928\probe_ime_im.py`）。⚠ 已知脆弱点：部分客户端把版本号写进目录名
+# （如钉钉的 `DingTalk_108`）⇒ 客户端升级后这类条目会静默失效，`_obs_dir` 返回 None、
+# 报告端不显示。这是**已知债**，记录在交接件；彻底修法需要给 `_obs_dir` 加通配支持。
+_IME_DIRS = (
+    "%APPDATA%/SogouPy",                 # 搜狗拼音用户词库
+    "%APPDATA%/Microsoft/InputMethod",   # 微软拼音
+    "%APPDATA%/Tencent/SogouIme",        # 腾讯版搜狗输入法
+    "%APPDATA%/Tencent/qimei",
+)
+
+# G-7：IM / 邮件本机库。只报存在与体积。同样以本机实测为准。
+_IM_DIRS = (
+    "%APPDATA%/Tencent/xwechat",     # 微信（新版数据根；本机实测 4528 个文件）
+    "%APPDATA%/Tencent/WeChat",      # 微信（旧版路径）
+    "%APPDATA%/Tencent/WeChatApp",
+    "%LOCALAPPDATA%/DingTalk_108",   # 钉钉（⚠ 名字含版本号，见上）
+    "%LOCALAPPDATA%/Feishu",         # 飞书
+)
+
 
 
 def _scan_roots():
@@ -2105,7 +2214,14 @@ def _sync_dir_obs():
 
 
 def _index_obs(roots):
-    """G-6：AI 数据根下的索引 / 向量类目录（先取证，不预设它一定外传）。"""
+    """G-6：AI 数据根下的索引 / 向量类目录（先取证，不预设它一定外传）。
+
+    ★ 0.33.1：`_INDEX_SUBDIRS` 目前**故意为空**（本机 0 实证）⇒ 返回 `None`，
+      与"查过、为空"（返回 `[]`）严格区分。报告端据此打「本段未配置」而不是「0 处」。
+      判据：把"没查"渲染成"没发现"，正是这条观察项要防的病。
+    """
+    if not _INDEX_SUBDIRS:
+        return None
     out = []
     for root in roots:
         for sub in _INDEX_SUBDIRS:
@@ -2239,6 +2355,12 @@ def cmd_host_scan(args):
         root = os.path.dirname(root)
     regs = {r.get("host"): r for r in hs.load_watch_registry(root)}
     t1_hosts = {h for h, r in regs.items() if r.get("watch")}
+    # ★ 0.33.1（夜间修订）：`host-scan` 子命令本来就注册了 `--deep`（见 add_argument：
+    #   "文件数放到 50 万、不截断（默认 3000）"），与 `_scan_size(p, cap=3000, deep=False)`
+    #   的语义逐字对应 —— 但本函数从未把它取出来，于是 2268/2306 两处 `deep=deep`
+    #   直接 NameError，整条命令从 0.29.0 起一跑就崩。
+    #   取法用 getattr 兜底：别的调用方（如 ui_server）可能传不带 deep 的命名空间。
+    deep = bool(getattr(args, "deep", False))
 
     rows, seen = [], set()
     for label, base in _scan_roots():
@@ -2472,6 +2594,12 @@ def cmd_host_scan(args):
     print("  ⚠ 上面只覆盖【已登记的 %d 个工具】＋【目录名命中 %d 个厂商词的目录】；"
           % (len(regs), len(_SCAN_VENDOR_KW)))
     print("    两者之外的落点，本命令**没有看** —— 不是「看了没发现」。")
+    # ★ 0.33.1（2026-09-28）：**布防数**。此前 `host-audit` 会打「登记表共 24 个宿主，
+    #   其中【已布门闸】1 个」，而本命令没有 ⇒ 用户只看到「这条说 24、那条说 1」，
+    #   拼不出全貌，于是"登记了 24 个"很容易被读成"24 个都被盯住"。
+    #   这里给出同源数字；**完整的那句声明在末尾「⚠ 覆盖声明」块**（读者停在那里）。
+    print("  ⚠ 登记 %d 个宿主，其中【已布门闸】%d 个；其余 %d 个没有门闸。"
+          % (len(regs), len(t1_hosts), len(regs) - len(t1_hosts)))
     print()
 
     # ---- 0.29.0 观察项（G-6/G-7/G-9/G-10/G-11/G-12/G-13）---------------------
@@ -2520,7 +2648,10 @@ def cmd_host_scan(args):
                   % (lbl, q, n, _m(b), "（截断）" if tr else ""))
     else:
         print("  [会话/历史/日志/诊断类] 0 处")
-    if index:
+    if index is None:
+        print("  [索引/向量类] **本段未配置** —— `_INDEX_SUBDIRS` 为空（本机 0 实证，"
+              "见其注释）⇒ 这里**没有查**，不是「查过、0 处」。")
+    elif index:
         print("  [索引/向量类] %d 处（先取证：**不预设**它一定外传）" % len(index))
         for (q, n, b, tr) in index[:8]:
             print("       %s  条目 %d ／ %.1f MB%s" % (q, n, _m(b), "（截断）" if tr else ""))
@@ -2571,6 +2702,15 @@ def cmd_host_scan(args):
           "不替你下「这是外传」的结论。")
     print("  · 登记落点 %d 个：已扫 %d ／ ★ 未扫 %d（见上方「登记表覆盖对账」）。"
           % (_reg_total, _reg_scanned, _reg_unscanned))
+    # ★ 0.33.1（2026-09-28）：**布防数**放在读者真正会读到的地方（末尾这一块）。
+    #   中部「登记表覆盖对账」段里另有一行同源数字，两处**故意重复** ——
+    #   原因是读者会停在末尾这块看"声明"，中部那块是给逐项核对的人看的。
+    #   本行措辞与 host-audit:1559 的覆盖声明**同族**（都用「登记表共 N 个宿主，
+    #   其中【已布门闸】M 个」），这样用户在两页看到的是同一句话。
+    print("  · 登记表共 %d 个宿主，其中【已布门闸】%d 个（即 T1）；"
+          % (len(regs), len(t1_hosts)))
+    print("    其余 %d 个**没有门闸** —— 本命令能看到它们，但拦不住它们的落盘。"
+          % (len(regs) - len(t1_hosts)))
     if getattr(args, "json", False):
         print()
         print(json.dumps({"generated_at": datetime.now().astimezone().isoformat(
@@ -2579,6 +2719,10 @@ def cmd_host_scan(args):
             #   `ev` 仍是判定链路的输入（不可动）；`detail` 是给展示层的**完整证据包**。
             "details": {_r["path"]: (_r.get("detail") or []) for _r in rows},
             "coverage": {"registered_hosts": len(regs),
+                         # ★ 0.33.1：把"登记了"与"真在盯"分开报。只报 registered_hosts
+                         #   会让展示层把"24 个都登记了"渲染成"24 个都被守住了"。
+                         "armed_hosts": len(t1_hosts),
+                         "unarmed_hosts": len(regs) - len(t1_hosts),
                          "registered_roots": _reg_total,
                          "present": _reg_present, "scanned": _reg_scanned,
                          "unscanned": _reg_unscanned,

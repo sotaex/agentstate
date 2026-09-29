@@ -59,6 +59,7 @@ _LAYOUT = {
     "host_shield.py":            "host_shield.py",
     "strings.py":                "strings.py",
     "egress.py":                 "egress.py",
+    "ui_server.py":              "ui_server.py",   # 0.33.2: D-20（原三处漏登记，见下）
     # ---- scripts/ ----
     "install.py":                "scripts/install.py",
     "scan.py":                   "scripts/scan.py",
@@ -199,7 +200,8 @@ antinel = "antinel:main"
 
 [tool.setuptools]
 py-modules = ["antinel", "audit_chain", "session_dna", "strings",
-              "transcript_reader", "host_shield", "hub", "antinel_mcp", "egress"]
+              "transcript_reader", "host_shield", "hub", "antinel_mcp", "egress",
+              "ui_server"]
 packages = ["hooks", "scripts", "tools", "rules", "psl"]
 
 [tool.setuptools.package-data]
@@ -1463,6 +1465,51 @@ def _reconcile_src(mutated):
     return True
 
 
+def _pymodules_guard(pkg_dir):
+    """★ 包组成守卫（**双向**）：返回问题列表（空 = 通过）。
+
+    为什么要有这条（都是实测事故，不是理论）：
+      · 正向 —— `antinel_mcp.py` 当年在 pyproject 里声明、却从没被复制 ⇒ 装完 ImportError；
+      · 反向 —— `ui_server.py`（D-20）三处都没登记，靠"仓根本来就有"侥幸进包，
+        而 `antinel.py` 顶层 `import ui_server` ⇒ **干净树打 wheel 就丢**，
+        用户装完**所有命令**都 import 就炸。旧 wheel 能跑只因陈旧 `build/` 带进去（**假绿**）。
+
+    ★ 判据直接盯"装完能不能 import"，不依赖任何陈旧目录。
+    ★ 提成独立函数（而不是留在 build() 里）：这样回归闸门能**行为级**调它、
+      并用一个"被 import 但没声明"的 fixture 做**内建负控** —— 判据不许二次实现。
+    """
+    import re
+    pkg = Path(pkg_dir)
+    problems = []
+    _pp = (pkg / "pyproject.toml").read_text(encoding="utf-8")
+    _m = re.search(r"py-modules\s*=\s*\[([^\]]*)\]", _pp)
+    _declared = set(re.findall(r'"([^"]+)"', _m.group(1))) if _m else set()
+    _present = {p.stem for p in pkg.glob("*.py") if p.is_file()}
+
+    _miss = sorted(_declared - _present)
+    if _miss:
+        problems.append(
+            "pyproject 声明了模块、但包目录里没有对应 .py：%s"
+            "（＝ 用户 pip 装完 import 就炸。把该模块加进 root_mod 复制清单。）" % _miss)
+
+    _imported = set()
+    for _p in pkg.rglob("*.py"):
+        try:
+            _txt = _p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for _mm in re.finditer(r"^\s*(?:import|from)\s+([A-Za-z_][A-Za-z0-9_]*)",
+                               _txt, re.M):
+            _imported.add(_mm.group(1))
+    _undeclared = sorted((_present & _imported) - _declared)
+    if _undeclared:
+        problems.append(
+            "包根模块被 import、却没在 pyproject 的 py-modules 里声明：%s"
+            "（＝ 干净环境打 wheel 会漏掉它，用户装完**所有命令**都可能 import 就炸。"
+            " 实测事故：ui_server.py。）" % _undeclared)
+    return problems
+
+
 def build(out_root, verify=False):
     # ★★ 2026-09-28：**构建前先验布局表**。位置选在 build() 最前，理由与 A1 守卫相同：
     #   失败的代价必须是"什么都没动"。"布局错"是最容易被静默跳过的错
@@ -1507,8 +1554,15 @@ def build(out_root, verify=False):
         shutil.copy2(srcfile(f), pkg / "hooks" / f)
     # 0.22.0 (A5): shared session-DNA module at the package root -- hooks/ and
     # scripts/ both reach it via their parent dir.
+    # ★★ 2026-09-29（D-20）：`ui_server.py` 补进复制清单 —— 它此前**三处都没登记**
+    #   （py-modules / 本清单 / _LAYOUT），却因为"仓根本来就有这个文件"而**侥幸随包**。
+    #   实测：**干净树**（无陈旧 `build/`）打 wheel ⇒ 只装 py-modules 声明的 9 个，
+    #   `ui_server.py` **不在包里** ⇒ `antinel.py` 顶层 `import ui_server`（2828 行，
+    #   建 parser 时执行）**每次都炸** ⇒ **所有命令全废**（实测 `ModuleNotFoundError`）。
+    #   旧的 `dist/*.whl` 之所以能跑，只是因为陈旧 `build/` 把它带了进去 —— **假绿**。
     for root_mod in ("session_dna.py", "transcript_reader.py", "audit_chain.py",
-                     "antinel.py", "antinel_mcp.py", "hub.py", "host_shield.py", "strings.py", "egress.py"):  # 0.26: +i18n; 0.28: +audit_chain
+                     "antinel.py", "antinel_mcp.py", "hub.py", "host_shield.py", "strings.py", "egress.py",
+                     "ui_server.py"):  # 0.26: +i18n; 0.28: +audit_chain; 0.33.2: +ui_server
         # 2026-09-24 (G7): antinel_mcp.py was declared in pyproject.toml's
         # py-modules and shipped in the repo, but this list never copied it --
         # so a rebuild deleted it while pyproject kept declaring it. Same class
@@ -1562,7 +1616,15 @@ def build(out_root, verify=False):
         print("★ 注意：A6 收入边界声明**未随包**（源件不在 %s）—— 它是文档仓的签署件，" % a6)
         print("  本次构建**没有把它带进包里**。这不是错误，但你应当知道包里没有它。")
     (pkg / "LICENSE").write_text(LICENSE_MD, encoding="utf-8", newline="\n")
-    (pkg / ".gitignore").write_text("__pycache__/\n*.pyc\n.psl/\n*.log\n", encoding="utf-8", newline="\n")
+    # ★★ 2026-09-29（D-21）：把 setuptools 构建垃圾（build/ / antinel.egg-info/ / dist/）
+    #   写进**构建器自己的模板**。此前 898791a 手工往仓里 .gitignore 补过这三行，
+    #   但本行每次构建都会**整文件覆盖** .gitignore ⇒ 手工修改被**静默回退**
+    #   （实测：构建后 `git diff .gitignore` 显示那三行又被删掉）。
+    #   这正是「构建器拥有的文件，手工改迟早被覆盖」——修法是把意图写进模板。
+    (pkg / ".gitignore").write_text(
+        "__pycache__/\n*.pyc\n.psl/\n*.log\n"
+        "build/\nantinel.egg-info/\ndist/\n"
+        "*.away-*\n", encoding="utf-8", newline="\n")
     # byte-exact clones are a digest-security property: no end-of-line conversion,
     # ever (autocrlf smudge broke judgment digests in the v0.17 round).
     (pkg / ".gitattributes").write_text("* -text\n", encoding="utf-8", newline="\n")
@@ -1817,17 +1879,27 @@ def build(out_root, verify=False):
     #       少一处就是"装完没有这个模块"。
     #   ⇒ 判据直接盯"装包后能不能 import"：py-modules 里每个模块，包目录里必须有 .py。
     #     差集非空 ⇒ **构建失败**（"不知道包由什么组成"必须报错，不能静默漏）。
+    #
+    # ★★ 2026-09-29（D-20）：上面那条**只有单向**，于是漏掉了 ui_server 事故。
+    #   它查的是「**声明了但没装**」（`_declared - _present`），
+    #   而真实事故是反过来的：「**装了、也被 import，但没声明**」。
+    #   实测：`ui_server.py` 三处都没登记（py-modules/root_mod/_LAYOUT），
+    #   靠"仓根本来就有"侥幸进包；**干净树打 wheel 就丢**，而 `antinel.py`
+    #   顶层 `import ui_server` ⇒ 所有命令全废。旧 wheel 能跑只因陈旧 `build/` 带进去。
+    #   ⇒ 补第二条**反向**判据：包根每个 .py，只要被任何随包 .py 以
+    #     `import X` / `from X import` 引用，就必须在 py-modules 里声明。
+    #     这条判据直接对应"装完 import 会不会炸"，不依赖任何陈旧目录。
+    #   ★★ 2026-09-29（D-20）：判据已提成 `_pymodules_guard(pkg_dir)`（模块级函数），
+    #     这样回归闸门能**行为级**调它 + 用 fixture 做内建负控（判据不许二次实现）。
+    #     这里只负责"红了就停"，并把问题逐条打印出来（不静默）。
     try:
-        import re          # 局部导入：顶层没有 re，否则守卫自己 NameError
-        _pp = (final / "pyproject.toml").read_text(encoding="utf-8")
-        _m = re.search(r"py-modules\s*=\s*\[([^\]]*)\]", _pp)
-        _declared = set(re.findall(r'"([^"]+)"', _m.group(1))) if _m else set()
-        _present = {p.stem for p in final.glob("*.py") if p.is_file()}
-        _miss = sorted(_declared - _present)
-        if _miss:
+        _probs = _pymodules_guard(final)
+        if _probs:
             raise SystemExit(
-                "★ pyproject 声明了模块、但包目录里没有对应 .py：%s\n"
-                "  （＝ 用户 pip 装完 import 就炸。把该模块加进 root_mod 复制清单。）" % _miss)
+                "★ 包组成守卫失败（装完可能 import 就炸）：\n  - "
+                + "\n  - ".join(_probs)
+                + "\n（成因：包由哪些模块组成，pyproject 的 py-modules 与复制清单必须一致；"
+                  "D-20 实测事故：ui_server.py 三处没登记，靠陈旧 build/ 侥幸进包。）")
     except SystemExit:
         raise
     except Exception as _e:

@@ -54,7 +54,7 @@ _T0 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段起点（性能
 
 # ---------------------------------------------------------------- constants --
 PKG_DIR = os.path.dirname(os.path.abspath(__file__))
-_ANTINEL_VERSION = "0.32.2"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
+_ANTINEL_VERSION = "0.33.2"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
 _T1 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段终点（性能插桩）
 
 
@@ -369,49 +369,78 @@ def load_rules():
     return _load_rules_integrity(None)
 
 def _load_rules_integrity(rules):
+    # ★★★ 0.33.2 (A2，2026-09-28)：**加载与完整性比对必须指向同一个文件**。
+    #
+    # 原实现：加载读 `RULES_PATH`（包内 `rules/default.json`），却拿
+    #         `manifest["rules_hash"]` 比对 —— 而 install.py 记的 `rules_file` 是
+    #         `<root>/.psl/rules/default.json`（**另一个文件**）。
+    # 实测后果（套件 A4 的 FAIL 真因）：
+    #   沙箱里只 install 了（有 `<root>/.psl/rules/…`）、没有包内 `rules/` ⇒ 加载读不到
+    #   包内文件 ⇒ 与 manifest 的 hash 必然不符 ⇒ **无条件判 SELF-TAMPERED**。
+    #   真实用户场景下两者内容恰好一致，所以这个错位**平时查不出来** ——
+    #   判据指向 A、被测对象是 B，正是"能查 ≠ 查了"那条铁律的又一次现身。
+    #
+    # 修法：先找 manifest，按其 `rules_file` 解析出**该装的规则文件**；加载与哈希
+    #       比对都用这一个路径。找不到 manifest 或 rules_file 时，退回 `RULES_PATH`
+    #       （保持"未安装时也能跑"的既有行为）。
+    _rules_path = RULES_PATH
+    _manifest = None
+    for base in (os.getcwd(), os.path.dirname(os.getcwd())):
+        mp = os.path.join(base, ".psl", "manifest.json")
+        if os.path.isfile(mp):
+            try:
+                with open(mp, encoding="utf-8") as f:
+                    _manifest = json.load(f) or {}
+            except Exception:
+                _manifest = None
+            if _manifest is not None:
+                _rf = _manifest.get("rules_file")
+                if _rf:
+                    _cand = _rf if os.path.isabs(_rf) else os.path.join(base, _rf)
+                    if os.path.isfile(_cand):
+                        _rules_path = _cand        # ← 加载与比对同源
+                break
     try:
-        with open(RULES_PATH, "r", encoding="utf-8") as f:
+        with open(_rules_path, "r", encoding="utf-8") as f:
             rules = list(json.load(f).get("rules", []))
         # A4: runtime integrity check against the manifest recorded at install.
         # A mismatch means the monitored party may have edited the rules -> do NOT
         # trust them; fall back to the embedded minimal set and say so loudly.
-        for base in (os.getcwd(), os.path.dirname(os.getcwd())):
-            mp = os.path.join(base, ".psl", "manifest.json")
-            if os.path.isfile(mp):
+        if _manifest is not None:
+            rh = _manifest.get("rules_hash")
+            if rh:
                 try:
-                    with open(mp, encoding="utf-8") as f:
-                        rh = (json.load(f) or {}).get("rules_hash")
-                    if rh:
-                        with open(RULES_PATH, "rb") as f:
-                            live = "sha256:" + hashlib.sha256(f.read()).hexdigest()
-                        if live != rh:
-                            try:
-                                sys.stderr.write("[Antinel] SELF-TAMPERED: rules/default.json differs from the "
-                                                 "installed manifest hash; falling back to the embedded minimal "
-                                                 "set. Re-run install.py if this update is intentional.\n")
-                            except Exception:
-                                pass
-                            # A16 (2026-09-10): stderr 是唯一出口时，宿主一吞掉，
-                            # 防护就从 18 条静默降到 11 条且事后查不到——对一个卖
-                            # "证据链"的产品这是最不该出现的失败模式。补一条审计
-                            # 记录并镜像到宿主级（ANTINEL_HOST_MIRROR=0 可关，
-                            # 回归套件默认关，不污染 home）。
-                            try:
-                                log_event({"ts": datetime.now().isoformat(timespec="seconds"),
-                                           "type": "rules_integrity_fallback", "tool": "-",
-                                           "session": "-", "rule_id": "A4",
-                                           "decision": "config_fallback", "severity": "critical",
-                                           "action": "alert",
-                                           "reason": "rules/default.json differs from manifest rules_hash; "
-                                                     "fell back to the embedded minimal set",
-                                           "expected": rh, "live": live,
-                                           "rules_loaded": len(_FALLBACK)}, mirror=True)
-                            except Exception:
-                                pass
-                            return [dict(r) for r in _FALLBACK]
+                    with open(_rules_path, "rb") as f:
+                        live = "sha256:" + hashlib.sha256(f.read()).hexdigest()
                 except Exception:
-                    pass
-                break
+                    live = None
+                if live is not None and live != rh:
+                    try:
+                        sys.stderr.write("[Antinel] SELF-TAMPERED: %s differs from the "
+                                         "installed manifest hash; falling back to the embedded minimal "
+                                         "set. Re-run install.py if this update is intentional.\n"
+                                         % os.path.basename(_rules_path))
+                    except Exception:
+                        pass
+                    # A16 (2026-09-10): stderr 是唯一出口时，宿主一吞掉，
+                    # 防护就从 18 条静默降到 11 条且事后查不到——对一个卖
+                    # "证据链"的产品这是最不该出现的失败模式。补一条审计
+                    # 记录并镜像到宿主级（ANTINEL_HOST_MIRROR=0 可关，
+                    # 回归套件默认关，不污染 home）。
+                    try:
+                        log_event({"ts": datetime.now().isoformat(timespec="seconds"),
+                                   "type": "rules_integrity_fallback", "tool": "-",
+                                   "session": "-", "rule_id": "A4",
+                                   "decision": "config_fallback", "severity": "critical",
+                                   "action": "alert",
+                                   "reason": "rules file differs from manifest rules_hash; "
+                                             "fell back to the embedded minimal set",
+                                   "rules_file": _rules_path,
+                                   "expected": rh, "live": live,
+                                   "rules_loaded": len(_FALLBACK)}, mirror=True)
+                    except Exception:
+                        pass
+                    return [dict(r) for r in _FALLBACK]
     except Exception as e:
         # 0.16.0 (P0-7): the two fallback paths used to be indistinguishable in
         # the audit log -- "rules tampered" (A4 mismatch above) and "rules
@@ -758,6 +787,49 @@ _WRITE_FLAGS_BY_CMD = {
     "find": ("-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprintf", "-fls"),
     "sed": ("-i", "--in-place"),
 }
+# 0.33.2 (D-3): 解释器首词 —— 它们不是"只读动词"，但 `-c/-e` 里的字符串字面量是数据。
+# 判据仍以「引号外残留代码」为准（见 _strip_interpreter_code_literals），
+# 所以这里放宽的是**数据位置**，不是**执行位置**。
+_INTERPRETERS = frozenset("python python3 python3.13 python3.12 python3.11 py node nodejs perl ruby php bash sh zsh pwsh powershell".split())
+# ★ 判据不二次实现：删除类模式从 DST-01 的**同一真源**取。
+#   `_rules` / `_FALLBACK_RULES` 的 DST-01 条目在模块加载后即可用；
+#   取不到时退回空集 —— 空集只会让 `readonly_command_context` 更保守（返回 False），
+#   方向安全，且 NOT_HARDCODED 检查项会盯住这个引用。
+def _dst_command_patterns():
+    """DST-01 的 command_patterns，取自规则表本身（唯一真源）。
+
+    优先用磁盘规则表（load_rules 的结果），失败时退回内嵌兜底表 `_FALLBACK`。
+    两条路都取不到时返回空集 —— 空集只让调用方更保守（见 readonly_command_context），
+    方向安全。
+    """
+    out = []
+    try:
+        for r in load_rules():
+            if r.get("id") == "DST-01":
+                out.extend(_patterns(r, "command_patterns"))
+                if out:
+                    return out
+    except Exception:
+        pass
+    try:
+        for r in _FALLBACK:
+            if r.get("id") == "DST-01":
+                out.extend(_patterns(r, "command_patterns"))
+                if out:
+                    return out
+    except Exception:
+        pass
+    return []
+
+
+_DST_PATS_CACHE = []
+
+
+def _dst_command_pats():
+    """惰性求值 + 缓存：模块加载时规则可能还没就绪。"""
+    if not _DST_PATS_CACHE:
+        _DST_PATS_CACHE.extend(_dst_command_patterns())
+    return _DST_PATS_CACHE
 # Only true fd plumbing (2>&1, &>file). A bare `>` is an output redirect and must
 # survive the substitution: `grep -n rm f > out.txt` writes, so it is not read-only.
 _FD_REDIRECT_RE = re.compile(r"\d*>&\d*|&>")                # 2>&1, &>file: not a chain
@@ -831,13 +903,135 @@ def _first_token(cmd):
     return tok.lower()
 
 
+# 0.33.2 (D-3): 解释器的 `-c`/`-e` 参数里，**引号内的字符串字面量是数据，不是代码**。
+#
+# 实测假阳性（2026-09-28，负控 F1-F4）：判据只看首词，而 `python` 不在
+# _READONLY_CMDS 里 ⇒ 下面四条「删除字样只出现在字符串里」的命令全被 BLOCK：
+#     python -c "print('rm -rf /')"
+#     python -c "x='shutil.rmtree'; print(x)"
+#     python -c "print(re.escape('rm'))"
+#     python -c "print('os.remove')"
+# 这是我们自家纪律说的「会误报的检查器用两次就没人信」——而它误报的正是
+# 「我在写一条关于删除的文档/命令」这种**最该被允许**的场景。
+#
+# 修法是缩小"数据"的范围，不是放松"执行"的判定：把 `-c` 参数里**最外层引号内**
+# 的字符串替换成占位符后再看剩余文本。字符串里的删除字样消失，而**留在引号外**
+# 的仍然是代码，照旧会命中 —— 所以下面两条真删除仍然 BLOCK：
+#     python -c "import shutil; shutil.rmtree('/tmp/x')"   -> shutil.rmtree( 在引号外
+#     python -c "import os; os.system('rm -rf /tmp/x')"     -> os.system( 在引号外
+# 已知边界：嵌套引号（如 print("a'b")）只剥最外层，剥不干净时退回原判定
+# （即仍可能拦），方向安全——宁可多拦，不可漏放。
+_INTERP_C_ARG_RE = re.compile(
+    r"(?:^|\s)(?:-c|-e)\s+([\"'])(.*)\1\s*$", re.DOTALL
+)
+
+
+def _strip_interpreter_code_literals(seg):
+    """把解释器 -c/-e 参数里的**字符串常量**换成空串，但**不**放过任何"把字符串当命令跑"的调用。
+
+    ★ 关键区分（2026-09-28 负控 T7/T8 实测）：
+        python -c "print('rm -rf /')"                    -> 数据，应放行
+        python -c "import os; os.system('rm -rf /tmp')"  -> 执行，必须拦
+        python -c "import subprocess; subprocess.run(['rm','-rf','/tmp'])" -> 执行，必须拦
+    三者都是"引号里出现 rm"，**所以"在不在引号里"根本不是判据**。它们真正的区别是
+    字符串**是否被送进执行通道**。
+
+    做法：用 ast 解析 -c 的源码。若字符串常量只出现在非执行位置 -> 返回"已净化"的
+    残留（供 readonly_command_context 判定为提及）；一旦发现字符串被喂给执行类调用
+    （os.system / subprocess / eval / exec / os.popen / 任何 .run/.call 等），
+    直接返回原段 —— 让原判定继续拦。
+    """
+    r = _interp_mention_residue(seg)
+    return seg if r is None else r
+
+
+def _interp_mention_residue(seg):
+    """真源判据：这条解释器段还能不能判"提及"。
+
+    返回：
+      · 已净化的残留字符串 —— **可以判"提及"**（python 系列 + 解析成功 + 全纯消费调用）
+      · None               —— **判不了**（非解释器 / 非 python 系列 / 无 -c 参数 /
+                              解析失败 / 出现执行通道 / 出现未知调用）
+
+    ★ 单一来源：`_strip_interpreter_code_literals`（返回段）与
+      `readonly_command_context`（判提及）都调这里，避免两份判据分叉。
+    """
+    tok = _first_token(seg)
+    if tok not in _INTERPRETERS:
+        return None
+    m = _INTERP_C_ARG_RE.search(seg)
+    if not m:
+        return None
+    code = m.group(2)
+
+    # 只有 Python 系列能用 ast 判；其它解释器（node/perl/bash/powershell）保守处理：
+    # 返回 None ⇒ 调用方不判"提及"⇒ 维持原有拦截能力（方向安全）。
+    if not tok.startswith(("python", "py")):
+        return None
+
+    try:
+        import ast                       # 局部导入：只在解释器分支才付代价，
+    except Exception:                    # 不影响钩子冷启动（每次工具调用都跑）
+        return None
+
+    try:
+        tree = ast.parse(code)
+    except Exception:
+        return None                    # 解析不了 ⇒ 保守，不放过
+
+    # 见到这些名字，直接认定"字符串可能被执行" ⇒ 不净化
+    exec_names = {"system", "popen", "run", "call", "check_call", "check_output",
+                  "Popen", "eval", "exec", "execfile", "spawn", "spawnSync",
+                  "execSync", "execFile", "execFileSync", "compile", "loads"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            f = node.func
+            name = getattr(f, "attr", None) or getattr(f, "id", None)
+            if name in exec_names:
+                return None            # 有执行通道 ⇒ 不净化，继续拦
+
+    # ★★ 2026-09-28 负控发现的交互风险（必须写下来，否则下一个人会踩）：
+    #    `python -c "from shutil import rmtree; rmtree('/x')"` —— `rmtree` 作为**裸函数名**
+    #    出现，而 DST-01 的模式是 `\bshutil\.rmtree\b`（要求带前缀）⇒ hit=False ⇒ 本条
+    #    本来就漏（**既有漏洞，非 D-3 引入**，已用对照实验证实）。
+    #    但 D-3 会把 ro 从 False 变 True ⇒ **一旦将来把 `\brmtree\b` 补进模式表，
+    #    本条会因 ro=True 而被降级放行** —— 修复一个漏洞却打开另一个。
+    #
+    # 因此这里的纪律是**白名单而非黑名单**：只有当每一个调用都是"已知纯消费"时才敢
+    # 认定是纯数据；出现任何**未知调用**一律返回 None（保守），让模式表继续说了算。
+    # 白名单必须窄 —— 只放行"把参数字符串当**输出**用"的函数。
+    _BENIGN_CALLS = {"print", "format", "join", "split", "strip", "lower", "upper",
+                     "escape", "dumps", "loads", "len", "repr", "str", "list", "dict",
+                     "set", "tuple", "sorted", "enumerate", "range", "get", "keys",
+                     "values", "items", "endswith", "startswith", "replace", "encode",
+                     "decode", "add", "append", "extend", "update"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            f = node.func
+            name = getattr(f, "attr", None) or getattr(f, "id", None)
+            if name not in _BENIGN_CALLS:
+                return None            # 未知调用 ⇒ 保守，不净化
+
+    # 全部是已知纯消费调用 ⇒ 把字符串常量清空后再看残留
+    try:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                node.value = ""
+        return ast.unparse(tree)
+    except Exception:
+        return None
+
+
 def readonly_command_context(command):
     """True when a dangerous word in this command is a mention, not an execution.
 
     Every segment must be a read-only verb: `cd src && grep -n x f` is no more
     dangerous than `grep -n x f`, and blocking the first form is exactly how a hook
     gets uninstalled. Conversely `grep x | xargs rm` fails here, because xargs is not
-    a read-only verb -- so a chain is only accepted when ALL of it is read-only."""
+    a read-only verb -- so a chain is only accepted when ALL of it is read-only.
+
+    0.33.2 (D-3): 解释器段先剥掉 `-c` 参数里的字符串字面量再看首词——`python` 本身
+    不在 _READONLY_CMDS 里，导致 `python -c "print('rm -rf')"` 被误拦（见上）。"""
     if not command or len(command) >= SCAN_LIMIT:
         return False
     segs, danger = _scan_command(command)
@@ -845,6 +1039,34 @@ def readonly_command_context(command):
         return False
     for seg in segs:
         tok = _first_token(seg)
+        if tok in _INTERPRETERS:
+            # ★★★ 0.33.2 (D-3a，2026-09-28 实测修正)：解释器分支**先问"能不能判"，
+            # 再问"是不是提及"**。只有 python 系列可以判"提及"。
+            #
+            # 原实现拿 `_dst_command_pats()`（**只含 DST-01 模式**）去回答"危险词还在不在"，
+            # 而这个问题**需要覆盖全部规则的 command_patterns**。实测反例：
+            #     powershell -c "Set-Content -Path .\data.txt -Stream evil -Value x"
+            #   · 真正命中的是 **DST-10**（`Set-Content … -Stream`）
+            #   · 但 DST-01 模式在残留里命中 0 ⇒ 被误判为"只读提及" ⇒ 上层把 DST-10 的
+            #     block 降级成 alert（`and ro_cmd` 那一句）⇒ 套件 FAIL
+            # ⇒ **窄判据被用来裁决宽问题**。这是"判据不许二次实现"的镜像错误。
+            #
+            # 修法：判据的适用面**收缩到我们有把握解析的那种解释器**。
+            #   · python 系列：`_strip_interpreter_code_literals` 用 ast 真解析过，能区分
+            #     "字符串常量"与"送进执行通道"，可以谨慎认可"提及"。
+            #   · 其余（powershell/pwsh/node/bash/perl/ruby/php/sh/zsh）：
+            #     我们**不解析**它们的语法，任何"提及"判断都是猜的 ⇒ 一律 return False
+            #     （不放过），与 `_strip_interpreter_code_literals` 里"非 python 保守"
+            #     的取向一致。**方向安全**：宁可多拦，不可少拦。
+            #
+            # 判据用 `_interp_mention_residue(seg)`：可判且已净化 ⇒ 返回 residue 字符串；
+            # 不可判（非 python / 解析失败 / 走执行通道）⇒ 返回 None。
+            residue = _interp_mention_residue(seg)
+            if residue is None:
+                return False               # 判不了 ⇒ 不放过
+            if not any(_search(p, residue) for p in _dst_command_pats()):
+                return True
+            return False
         if tok not in _READONLY_CMDS:
             return False
         for flag in _WRITE_FLAGS_BY_CMD.get(tok, ()):

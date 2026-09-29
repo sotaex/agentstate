@@ -69,6 +69,7 @@ rules/hosts/vscode.json
 rules/hosts/workbuddy.json
 rules/hosts/yuanbao.json
 rules/hosts/zcode.json
+scripts/build_package.py
 scripts/install.py
 scripts/report.py
 scripts/run_harness.py
@@ -81,4 +82,5 @@ tools/host_matrix.py
 tools/judge_service.py
 tools/probe_host.py
 tools/verify_chain.py
+tools/verify_event_types.py
 tools/verify_namespaces.py

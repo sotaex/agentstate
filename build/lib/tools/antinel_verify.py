@@ -85,25 +85,130 @@ _VERSION_HARD = (
 _VERSION_INFO = (("scripts/run_harness.py", r'(\d+\.\d+\.\d+)'),)
 
 
+def _assign_node(tree, name):
+    """在模块顶层找 `NAME = <expr>` 这个赋值节点（找不到返回 None）。"""
+    for node in getattr(tree, "body", []):
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name) and t.id == name:
+                    return node.value
+    return None
+
+
+def _project_tuple(expr, consts):
+    """受限求值 `tuple(<elt> for <vars> in NAME)` —— **只认这一个形状**。
+
+    ★ 为什么需要它：`antinel.py` 里 `_RESIDUE_GUARD_PAIRS` 写成
+      `tuple((k, k) for k, _lbl in _RESIDUE_SUBDIRS)`，刻意让配对表**由观察项
+      名单推导**（单一真源，不手抄第二份）。这是**正确的语义**，但它的
+      AST 是 `ast.Call`，`ast.literal_eval` 会直接抛错 ⇒ 旧版 `_ast_literal`
+      返回 None ⇒ INV-2 误报成「无法解析」。
+
+    ★ 为什么不是「干脆执行它」：本校验器的**设计前提是不执行被测代码**
+      （见 `_ast_literal` docstring）。所以这里只做**形状受限**的静态求值：
+        1) 外层必须是 `tuple(GENEXPR)`；
+        2) GENEXPR 必须恰好是「一个 for、零个 if」的简单推导；
+        3) 被迭代的 NAME 必须在同一文件里已能解析为**字面量序列**（consts）；
+        4) `<elt>` 只允许由**循环变量 + 字面量**构造的 tuple/list/常量，
+           **不允许**任何 Call / Attribute / Subscript / 比较等 —— 一旦出现
+           就返回 None（宁可判「无法解析」，也不去"执行"未知代码）。
+
+    ★ 代价（已知、且故意）：这只覆盖**这一种**推导形状。将来若有人把配对表
+      改写成 `dict(...)`、`set(...)`、带 `if` 的推导、或调用函数，本函数会
+      重新返回 None、INV-2 会变红。**那是正确行为** —— 红的意思是「量具读不懂
+      这个新形状了」，它会逼着人来这里扩展白名单，而不是静默地"以为查过了"。
+    """
+    if not isinstance(expr, ast.Call):
+        return None
+    if not (isinstance(expr.func, ast.Name) and expr.func.id == "tuple"):
+        return None
+    if len(expr.args) != 1 or expr.keywords:
+        return None
+    gen = expr.args[0]
+    if not isinstance(gen, ast.GeneratorExp):
+        return None
+    if len(gen.generators) != 1:
+        return None
+    g = gen.generators[0]
+    if g.ifs or g.is_async:
+        return None
+    src = consts.get(g.iter.id) if isinstance(g.iter, ast.Name) else None
+    if not isinstance(src, (list, tuple)):
+        return None
+    # 循环变量名（仅支持纯 Name 或一层 Tuple 解包）
+    if isinstance(g.target, ast.Name):
+        var_names = [g.target.id]
+    elif isinstance(g.target, ast.Tuple):
+        if not all(isinstance(e, ast.Name) for e in g.target.elts):
+            return None
+        var_names = [e.id for e in g.target.elts]
+    else:
+        return None
+
+    def _safe_eval(node, env):
+        """只允许：常量、循环变量、由二者搭出的 tuple/list。其余一律失败。"""
+        if isinstance(node, ast.Constant):
+            return node.value
+        if isinstance(node, ast.Name):
+            if node.id in env:
+                return env[node.id]
+            raise ValueError("名字不在环境里：%s" % node.id)
+        if isinstance(node, ast.Tuple):
+            return tuple(_safe_eval(e, env) for e in node.elts)
+        if isinstance(node, ast.List):
+            return [_safe_eval(e, env) for e in node.elts]
+        raise ValueError("不支持的表达式：%s" % type(node).__name__)
+
+    out = []
+    for row in src:
+        vals = list(row) if isinstance(row, (list, tuple)) else [row]
+        if len(vals) < len(var_names):
+            return None
+        try:
+            out.append(_safe_eval(gen.elt, dict(zip(var_names, vals))))
+        except Exception:
+            # ★ 关键：形状不认识时**返回 None**（＝"无法解析"），
+            #   绝不把异常抛给调用方。校验器崩掉和校验器判红是两回事 ——
+            #   崩掉会连 INV-2 之外的东西一起带走，而且看起来像"工具坏了"
+            #   而不是"这里有东西要人看"。（这条是负控 4 实测出来的。）
+            return None
+    return tuple(out)
+
+
 def _ast_literal(path, name):
     """从 .py 里取出一个**字面量赋值**（`NAME = [...]`），不执行该文件。
 
     ★ 为什么不用 import：钩子文件 import 时会跑模块级代码。校验器应该是
       **纯只读**的，不应该为了读一个常量而执行被测代码。
+
+    ★ 0.33.1 夜间修订：除纯字面量外，另接受**形状受限的推导式**
+      （`tuple((k, k) for k, _lbl in OTHER)`），见 `_project_tuple`。
+      动机：`_RESIDUE_GUARD_PAIRS` 刻意由 `_RESIDUE_SUBDIRS` 推导以避免
+      手抄第二份真源，是**正确的语义**，此前却把 INV-2 打红（量具读不懂，
+      不是产品出错）。
     """
     try:
         tree = ast.parse(Path(path).read_text(encoding="utf-8"))
     except Exception:
         return None
-    for node in getattr(tree, "body", []):
-        if isinstance(node, ast.Assign):
-            for t in node.targets:
-                if isinstance(t, ast.Name) and t.id == name:
+    node = _assign_node(tree, name)
+    if node is None:
+        return None
+    try:
+        return ast.literal_eval(node)
+    except Exception:
+        pass
+    # 退一步：收集同文件里**所有**可解析的顶层字面量，供推导式引用。
+    consts = {}
+    for n in getattr(tree, "body", []):
+        if isinstance(n, ast.Assign):
+            for t in n.targets:
+                if isinstance(t, ast.Name):
                     try:
-                        return ast.literal_eval(node.value)
+                        consts[t.id] = ast.literal_eval(n.value)
                     except Exception:
-                        return None
-    return None
+                        pass
+    return _project_tuple(node, consts)
 
 
 def _find(*rels):

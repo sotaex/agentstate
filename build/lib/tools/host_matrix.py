@@ -119,8 +119,8 @@ def build_matrix():
         "> Source of truth: `hooks/pre_tool_use.py` HOST_ADAPTERS + `rules/hosts/*.json` + "
         "`.psl/probe/*.json` + 审计链（host_confidence=high 的记录数）。",
         "",
-        "| Host | Adapter verified | Watch registry | Probe evidence | Chain evidence (0.33.1+) |",
-        "|---|---|---|---|---|",
+        "| Host | 执法能力（适配器）| 在岗证据（真实流量）| Watch registry | Probe evidence | Chain evidence (0.33.1+) |",
+        "|---|---|---|---|---|---|",
     ]
     for h in all_hosts:
         verified = adapters.get(h)
@@ -131,7 +131,14 @@ def build_matrix():
         p_str = "%d file(s)" % len(pr) if pr else "—"
         c = chain.get(h, 0)
         c_str = ("%d rec, last %s" % (c, chain_last.get(h, "?"))) if c else "—"
-        lines.append("| %s | %s | %s | %s | %s |" % (h, v_str, reg_str, p_str, c_str))
+        # 0.33.1：把两件**不同**的事分成两栏，别用一个 ✅ 盖住两件事。
+        #   执法能力 = 钩子被调用时能不能发出三通道 deny（合成输入即可验，`.psl/probe/`）
+        #   在岗证据 = 这个宿主**真的会**调用钩子（只能靠真实流量的 host_confidence）
+        # 判据：合成探针证明得了前者、证明不了后者；混在一栏就是拿弱证据冒充强证据。
+        acting = v_str
+        on_duty = "✅ %d rec" % c if c else "— 未验证"
+        lines.append("| %s | %s | %s | %s | %s | %s |"
+                     % (h, acting, on_duty, reg_str, p_str, c_str))
     lines += ["", "Total: %d hosts" % len(all_hosts)]
     # 0.33.1：verified 标记本身也要可复核。
     # 实测：qoder 的 ✅ 依据 2 条 enforcement_probe 记录，而那 2 条的宿主标签是
@@ -141,11 +148,13 @@ def build_matrix():
     suspect = [h for h in all_hosts
                if adapters.get(h) is True and not chain.get(h)]
     if suspect:
-        lines += ["", "## ⚠ verified 标记待复核", "",
-                  "以下宿主标着 ✅，但**没有任何 0.33.1 之后的高可信链上证据**：", ""]
+        lines += ["", "## ⚠ 「执法能力 ✅、在岗证据缺」的宿主", "",
+                  "下面这些宿主**钩子好用**（合成探针能验），但**没有任何 0.33.1 之后的"
+                  "高可信链上记录**证明它真的在调用钩子：", ""]
         for h in suspect:
-            lines.append("- **%s**：verified 依据的记录写于 0.33.1 之前（无归因证据），"
-                         "宿主字段不可信。重跑 `tools/enforce_probe.py` 后才可继续当作已验证。" % h)
+            lines.append("- **%s**：在岗证据 0 条。执法能力可随时用 "
+                         "`python tools/enforce_probe.py --host %s` 复核（合成输入，不需要真流量）；"
+                         "**在岗证据只能等真流量**，在此之前不得当作「已验证在岗」使用。" % (h, h))
     return "\n".join(lines)
 
 

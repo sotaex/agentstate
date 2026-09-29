@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: antinel
-Version: 0.33.1
+Version: 0.33.2
 Summary: Local-first audit chain and ledger for AI coding agents: every action recorded, every record verifiable.
 Author-email: geguang <geguang@gmail.com>
 License: MIT License
@@ -34,7 +34,10 @@ Description-Content-Type: text/markdown
 License-File: LICENSE
 Dynamic: license-file
 
-# Antinel Security Suite
+# AgentState (by Antinel) — AI Agent Audit Chain
+
+> 展示名：**AgentState**｜厂牌／署名：**by Antinel**｜包名与技能标识符：`antinel` / `antinel-security`（**不动**）。
+> 与 `server.json` 的 `title` 逐字一致——这个名字不是新起的，是把已经有的事实对齐到其余文案。
 
 **让每一个 AI 编程工具的用户，在 30 秒内知道自己的 AI 编程环境安不安全——并且持续监控、持续安心。**
 
@@ -60,7 +63,7 @@ python scripts/install.py --check # 校验已安装实例与包是否一致（�
 | 闸门 Gate | 威胁 Threat | 规则 Rules |
 |---|---|---|
 | 内容安全 | 技能投毒：提示注入、隐形字符、编码载荷 | CTX-02..04, CTX-07 |
-| 敏感面 | Agent 读取 .env / SSH 私钥 / 云凭证 / 钱包 / 浏览器数据；内容中的密钥字面量 | SEC-01..10 |
+| 敏感面 | Agent 读取 .env / SSH 私钥 / 云凭证 / 钱包 / 浏览器数据；内容中的密钥字面量；输入法词库；投放到外部的金丝雀文件（canary） | SEC-01..11 |
 | 元数据与出联 | 技能身份伪装；白名单外域名；隧道与隐蔽信道 | CTX-05, NET-03..04 |
 | 行为异常 | 删除、越界写入、备用数据流写入（Windows）、启动项篡改、持久化、提权、环境枚举 | CTX-01, DST-01..11, NET-01..02 |
 

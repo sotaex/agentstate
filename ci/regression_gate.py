@@ -418,6 +418,58 @@ def j_build_harness_order():
                   "（cleanup@%d > harness@%d）" % (i_cleanup, i_harness))
 
 
+def j_pymodules_guard():
+    """★★★ 2026-09-29（D-20）：守住**包组成双向守卫**——干净 wheel 不许漏模块。
+
+    为什么必须由闸门守：这条缺陷的失效方式是**静默漏文件** —— 干净树打 wheel 少一个
+    包根模块，构建**不报错**，只有用户 `pip install` 后**所有命令** import 就炸才发现。
+    实测事故：`ui_server.py` 三处没登记（py-modules/root_mod/_LAYOUT），旧 wheel 能跑
+    只因陈旧 `build/` 把它带了进去（**假绿**）。
+
+    判据（行为级 + 内建负控）：
+      ① 构建器里 `_pymodules_guard` 存在且可调用；
+      ② 在**真树**上调它，返回空（真树没有"被 import 却没声明"的模块）；
+      ③ **内建负控**：造 fixture（`foo_mod.py` 被 `bar_mod.py` import、却只声明 `bar_mod`），
+         守卫必须报出 `foo_mod` —— 不报 ⇒ 它是假守卫。
+    """
+    bp_dir = PKG / "scripts"
+    if not (bp_dir / "build_package.py").is_file():
+        return None                     # 产物仓无构建器 ⇒ 不可判（不是通过）
+    if str(bp_dir) not in sys.path:
+        sys.path.insert(0, str(bp_dir))
+    try:
+        import build_package as bp
+        import importlib
+        importlib.reload(bp)
+    except Exception as e:
+        return False, "构建器 import 失败：%s: %s" % (type(e).__name__, e)
+
+    fn = getattr(bp, "_pymodules_guard", None)
+    if not callable(fn):
+        return False, ("① 包组成守卫 _pymodules_guard 不见了 —— "
+                       "D-20（干净 wheel 漏模块 ⇒ 装完 import 就炸）无人拦")
+
+    probs = fn(PKG)
+    if probs:
+        return False, "② 真树上有包组成问题：%s" % " | ".join(probs)
+
+    # ③ 内建负控：fixture 里 foo_mod 被 import 却没声明，守卫必须报出来
+    import tempfile
+    tmp = Path(tempfile.mkdtemp(prefix="antinel_pymod_"))
+    (tmp / "foo_mod.py").write_text("X = 1\n", encoding="utf-8", newline="\n")
+    (tmp / "bar_mod.py").write_text("import foo_mod\n", encoding="utf-8", newline="\n")
+    (tmp / "pyproject.toml").write_text(
+        '[tool.setuptools]\npy-modules = ["bar_mod"]\n', encoding="utf-8", newline="\n")
+    try:
+        neg = fn(tmp)
+    finally:
+        _aside_dir(tmp)
+    if not any("foo_mod" in p for p in neg):
+        return False, ("③ ★负控未生效：fixture 里 foo_mod 被 import 却没声明，"
+                       "守卫却只报 %r —— 它是假守卫" % neg)
+    return True, "守卫在位 · 真树无问题 · 内建负控会红（foo_mod 被抓）"
+
+
 def j_running_on_real_table(m):
     """★★ 闸门自身的守卫：确认当前加载的是**包内真表**，不是降级兜底集。
 
@@ -534,6 +586,14 @@ def selfcheck():
          '_harness_py = str(final / "scripts" / "run_harness.py")',
          '_harness_py = str(pkg / "scripts" / "run_harness.py")   # NEGCTL',
          "D-17"),
+        # ★★ D-20 负控（2026-09-29）：把**包组成守卫**从构建器里删掉 ⇒ 判据 ① 必须红。
+        #   该缺陷的失效方式是"守卫被后来的编辑顺手删掉、**不报错**"，
+        #   所以"它还在不在"就是最该锁的判据（同 D-11 的立场）。
+        ("D-20 缺陷：包组成守卫被删掉",
+         "scripts/build_package.py",
+         "def _pymodules_guard(pkg_dir):",
+         "def _pymodules_guard_removed(pkg_dir):",
+         "D-20"),
     ]
 
     ok_all = True
@@ -602,6 +662,11 @@ def selfcheck():
         # 钩子 import 的同级模块（antinel.py 等）也要带上，否则 exec_module 会炸
         for py in PKG.glob("*.py"):
             shutil.copy2(str(py), str(dst / py.name))
+        # ★★ 2026-09-29：把 pyproject.toml 也带上 —— 否则 D-6（版本一致性）在 fixture 里
+        #   因"文件不存在"**级联变红**，淹没真正被注入的那条判据（会让读者误以为 D-6 坏了）。
+        #   这正是「会误报的检查器用两次就没人信」要避免的噪声。
+        if (PKG / "pyproject.toml").is_file():
+            shutil.copy2(str(PKG / "pyproject.toml"), str(dst / "pyproject.toml"))
         mut = (dst / rel)
         if new is None:
             # 分叉专项：src 已是剔行后的内容，不再做字符串替换
@@ -617,9 +682,12 @@ def selfcheck():
             env={**os.environ, "ANTINEL_PKG": str(dst)})
         out = (r.stdout or "") + (r.stderr or "")
         turned_red = (r.returncode != 0)
-        hit_expected = expect_red.split()[0] in out
-        # 在输出里找那条 FAIL
+        # ★★ 2026-09-29 收紧（自证伪）：原先只查"期望串出现在输出里"——但 cid **无论 PASS/FAIL
+        #   都会打印**，再叠加 D-6 在 fixture 里的级联红（缺 pyproject.toml）⇒
+        #   **判据其实没红，也会被记成 RED(好)**（假通过）。改为：期望的 cid 必须
+        #   **出现在 [FAIL] 行里**。
         reds = re.findall(r"\[FAIL\]\s+(\S+(?:\s+\S+)*?)\s{2,}", out)
+        hit_expected = any(expect_red.split()[0] in x for x in reds)
         got = ("RED(好)" if turned_red else "★GREEN(坏)")
         detail = ""
         if turned_red:
@@ -682,6 +750,7 @@ def main():
             ("D-6 十处版本号一致（原 A5，此前无守卫）", j_version_consistent),
             ("D-11 构建器三件机制在位（布局表/同步守卫/对账）", j_builder_mechanisms_present),
             ("D-17 构建顺序：验产物 final ＋ 家务最后做", j_build_harness_order),
+            ("D-20 包组成双向守卫（干净 wheel 不漏模块）", j_pymodules_guard),
         ]
 
         for cid, fn in checks:

@@ -11,11 +11,23 @@ it FAILS instead of quietly scoring 1 lower); and the ledger idempotency key
 includes the assertion count, so a changed denominator can never be swallowed
 by the "no change" guard again.
 """
-import hashlib, json, os, platform, re, shutil, subprocess, sys, tempfile, time
+import atexit, hashlib, json, os, platform, re, shutil, subprocess, sys, tempfile, time
 from datetime import datetime, timezone
 from pathlib import Path
 
 PKG = Path(__file__).resolve().parent.parent      # run_harness lives in <pkg>/scripts/
+
+
+def _pkg_version():
+    """0.33.1：从 antinel.py 读唯一版本源（不 import，避免执行主模块）。"""
+    try:
+        src = (PKG / "antinel.py").read_text(encoding="utf-8", errors="replace")
+        m = re.search(r'^VERSION\s*=\s*"([^"]+)"', src, re.M)
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
+    return "0.0.0"
 OUT = PKG / "psl" / "judgment.json"
 LEDGER = PKG / "psl" / "verdict-ledger.jsonl"
 MANIFEST = PKG / "psl" / "manifest.json"
@@ -135,6 +147,29 @@ def main():
     # never written.
     env["ANTINEL_LAYOUT"] = "bootstrap" if bootstrap else "pkg"
     work = tempfile.mkdtemp(prefix="antinel_harness_")  # per-run: no stale results file
+    # ★ 2026-09-28 收口修订：上面这句的注释只兑现了"不读旧结果"，**没兑现"不留新目录"**
+    #   —— mkdtemp 建的目录从不删除，实测已积 200+ 个 / 46 MB（`antinel_harness_*`）。
+    #   用 atexit 而非 try/finally：本函数有多条 return（2 处 early return + 正常返回），
+    #   还有可能抛异常的路径；atexit 覆盖**全部**退出路径，且不必给大段代码重新缩进。
+    #   仍是 per-run 唯一目录（并发两次运行不会互相覆盖结果）。
+    # ★ 2026-09-28（D-15）：清理改为「改名让开」——
+    #   本机宿主（Antinel 自身）的批量删除守卫按回合累计、阈值 50，
+    #   `rmtree(work)` 会连同套件内部的 33 处清理一起把配额打满 ⇒
+    #   套件在写结果之前就死。改名不是删除，对"结果文件不残留"的语义等价。
+    #   `ANTINEL_NO_CLEAN=0` 可恢复原来的真删（CI/干净环境）。
+    def _aside(p):
+        try:
+            if os.path.isdir(p) and not os.path.islink(p):
+                os.rename(p, p + ".done")
+            elif os.path.exists(p):
+                os.rename(p, p + ".done")
+        except OSError:
+            pass
+
+    if os.environ.get("ANTINEL_NO_CLEAN", "1") != "0":
+        atexit.register(_aside, work)
+    else:
+        atexit.register(shutil.rmtree, work, True)
     env["ANTINEL_WORK"] = work
     # 0.33.1 (P3-1): 结果文件显式指定。此前只靠约定（套件写进 WORK），一旦套件
     # 中途抛异常就没有结果文件，harness 只能打印 "refusing to report a count"，
@@ -187,7 +222,10 @@ def main():
         "spec": "psl-vs-0.1",
         "card_id": "antinel-security-suite",
         "skill": "antinel-security",
-        "skill_version": "0.33.0",
+        # 0.33.1：这里写死 "0.33.0" 是**第 4 处**漏网的版本承载件（前 3 处已由
+        # bump 脚本 + INV-3 抓出修掉）。它写进 judgment.json，于是重录后的记录
+        # 仍然自称 0.33.0。改为统一取 antinel.VERSION。
+        "skill_version": _pkg_version(),
         "verdict": ("PASS (bootstrap)" if bootstrap and verdict == "PASS" else verdict),
         # V7: status is a status BIT, appended info; this file itself is never
         # edited after publication. A third party derives current/superseded

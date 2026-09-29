@@ -22,7 +22,8 @@ antinel = "antinel:main"
 
 [tool.setuptools]
 py-modules = ["antinel", "audit_chain", "session_dna", "strings",
-              "transcript_reader", "host_shield", "hub", "antinel_mcp", "egress"]
+              "transcript_reader", "host_shield", "hub", "antinel_mcp", "egress",
+              "ui_server"]
 packages = ["hooks", "scripts", "tools", "rules", "psl"]
 
 [tool.setuptools.package-data]
