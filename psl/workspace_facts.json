@@ -1,0 +1,38 @@
+{
+  "_why": "★★★ 2026-09-29（D-23）：「东西在哪儿 / 它是不是 git 仓」这类**环境事实**此前只存在于散文与对话里，没有机器可读真源 ⇒ 每次都要重新推理 ⇒ **必然漂移**（本轮已反复发生：忘了产物仓是不是 git、忘了站点构建器不在任何 git 仓里）。本文件就是这些事实的**唯一真源**：它不是给人读的说明，是给判据读的数据。改它之前先想清楚：改错一条，`ci/regression_gate.py` 的 `j_workspace_facts` 立刻红。",
+  "_rule": "三条：① 真源机器可读（本文件）；② 违反就红（j_workspace_facts）；③ 旧件退役（我的记忆不再作数，一切以本文件为准）。",
+  "_measured_at": "2026-09-29",
+
+  "repos": {
+    "product": {
+      "path": "D:\\psl\\poc\\antinel-security",
+      "git": true,
+      "role": "唯一开工处 · 主仓 · 分类布局",
+      "must_have": ["pyproject.toml", "antinel.py", "psl/manifest.json"]
+    },
+    "archive": {
+      "path": "D:\\psl\\poc\\r1v3",
+      "git": false,
+      "role": "只读归档 · 平铺布局 · 不许回灌",
+      "must_have": ["ARCHIVED.md"]
+    }
+  },
+
+  "site": {
+    "builders_dir": "D:\\2026\\PSL",
+    "builders_git": false,
+    "builders_marker": "_site_build_all.py",
+    "output_dir": "D:\\2026\\PSL\\_antinel_site",
+    "deploy_dir": "D:\\2026\\PSL\\_deploy",
+    "focus_allow": ["check", "fix", "progress", "agentstate/limits"],
+    "_note": "★ 站点构建器**不在任何 git 仓里**（D:\\2026\\PSL 非 git）—— 这是事实，不是缺陷；但它意味着改站点没有版本历史，要改就改构建器源码，别改 _antinel_site 里的生成物（下次构建会被覆盖）。"
+  },
+
+  "release": {
+    "version": "0.33.2",
+    "version_files": ["pyproject.toml", "server.json", "psl/manifest.json"],
+    "dist_dir": "D:\\psl\\poc\\antinel-security\\dist",
+    "artifacts": ["antinel-0.33.2-py3-none-any.whl", "antinel-0.33.2.tar.gz"],
+    "_note": "★ dist 里**只允许** artifacts 这两个发布件。旧版本包与 .BAD-* 一律改名让开（零删除）—— 否则人手上传时会在一堆 antinel-0.29.x / 0.33.0 / 0.33.1 / .BAD- 里选错文件。选错＝把坏包传上 PyPI 且**不可撤回**（PyPI 只能 yank，版本号永久占用）。"
+  }
+}

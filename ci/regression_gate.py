@@ -543,6 +543,118 @@ def j_single_source_of_truth():
                   % (prod_v, "、".join(notes)))
 
 
+def _is_git_dir(p):
+    """实测某目录是不是 git 工作树（不是"我记得它是"）。"""
+    import subprocess as _sp
+    try:
+        r = _sp.run(["git", "-C", str(p), "rev-parse", "--is-inside-work-tree"],
+                           capture_output=True, text=True, timeout=30)
+    except Exception:
+        return None                       # git 不可用 ⇒ 不可判，不冒充"不是"
+    return r.returncode == 0 and (r.stdout or "").strip() == "true"
+
+
+def j_workspace_facts():
+    """★★★ 2026-09-29（D-23）：**「东西在哪儿／它是不是 git 仓」必须会红**，不能靠记忆。
+
+    本轮真实事故（本判据存在的理由）——创始人原话：
+      「有些是你的漂移，例如代码仓在哪儿，git仓是否存在，**你老是忘记**。」
+    这不是记性问题：这些事实此前**只存在于散文和对话里**，没有机器可读真源
+    ⇒ 每次都要重新推理一遍 ⇒ **必然漂移**。D-22 只管了"以谁为准"，没管"东西在哪儿"。
+
+    ★★ 根治（与 D-22 同一套三条，缺一即等于没禁令）：
+      ① **真源机器可读** —— `psl/workspace_facts.json`（数据，不是说明文）；
+      ② **违反就红** —— 本判据；
+      ③ **旧件退役** —— 我的记忆不再作数；要开工先读真源（见 `_env_facts.py`）。
+
+    ★ 判据刻意写成**对 fixture 免疫**：只校验"声明的路径是否真的存在、git 状态是否
+      与声明一致"，**不**把声明路径与 `PKG` 比（负控在临时副本里跑，一比就假红）。
+      "PKG 就是主仓"这条由 D-22 的 `built_from` 独立守住，不重复。
+
+    判据：
+      ① 每个仓：路径存在、`git` 声明与**实测**一致、`must_have` 齐全；
+      ② 站点构建器目录存在、含 marker、`builders_git` 与实测一致；
+      ③ `release.version` 与 pyproject **实测值**一致；
+      ④ dist 里**只许有本版两件**（旧包／`.BAD-*` 会让人手上传选错 ——
+         PyPI 只能 yank、版本号永久占用 ⇒ 选错＝不可逆）。
+    """
+    f = PKG / "psl" / "workspace_facts.json"
+    if not f.is_file():
+        return None                       # 没有真源 ⇒ 不可判（不是通过）
+    try:
+        facts = json.loads(f.read_text(encoding="utf-8"))
+    except Exception as e:
+        return False, "真源 psl/workspace_facts.json 解析失败：%s" % e
+
+    probs = []
+    for name, spec in (facts.get("repos") or {}).items():
+        p = Path(spec.get("path") or "")
+        if not p.is_dir():
+            probs.append("repos.%s 路径不存在：%r" % (name, spec.get("path")))
+            continue
+        g = _is_git_dir(p)
+        if g is None:
+            probs.append("repos.%s 判不出是否 git 仓" % name)
+        elif bool(g) != bool(spec.get("git")):
+            probs.append("repos.%s 声明 git=%s、实测 %s（环境事实漂移）"
+                         % (name, spec.get("git"), g))
+        for need in (spec.get("must_have") or []):
+            if not (p / need).exists():
+                probs.append("repos.%s 缺 %s" % (name, need))
+
+    site = facts.get("site") or {}
+    bd = Path(site.get("builders_dir") or "")
+    if not bd.is_dir():
+        probs.append("site.builders_dir 不存在：%r" % site.get("builders_dir"))
+    else:
+        mk = site.get("builders_marker")
+        if mk and not (bd / mk).is_file():
+            probs.append("site.builders_dir 里没有 %s（构建器不在这）" % mk)
+        g = _is_git_dir(bd)
+        if g is not None and bool(g) != bool(site.get("builders_git")):
+            probs.append("site.builders_git 声明 %s、实测 %s"
+                         % (site.get("builders_git"), g))
+    for key in ("output_dir", "deploy_dir"):
+        d = site.get(key)
+        if d and not Path(d).is_dir():
+            probs.append("site.%s 不存在：%r" % (key, d))
+
+    rel = facts.get("release") or {}
+    want = rel.get("version")
+    if want:
+        pp = PKG / "pyproject.toml"
+        if pp.is_file():
+            m = re.search(r'^version\s*=\s*"([^"]+)"',
+                          pp.read_text(encoding="utf-8", errors="replace"), re.M)
+            if not m:
+                probs.append("pyproject.toml 取不到 version")
+            elif m.group(1) != want:
+                probs.append("release.version 声明 %s、pyproject 实测 %s"
+                             % (want, m.group(1)))
+
+    dd = Path(rel.get("dist_dir") or "")
+    if rel.get("dist_dir") and dd.is_dir():
+        arts = set(rel.get("artifacts") or [])
+        missing = [a for a in sorted(arts) if not (dd / a).is_file()]
+        if missing:
+            probs.append("dist 缺本版发布件：%s" % missing)
+        stray = []
+        for q in dd.iterdir():
+            n = q.name
+            if n.startswith(".") or ".away" in n or n in arts:
+                continue
+            if n.endswith((".whl", ".tar.gz")):
+                stray.append(n)
+        if stray:
+            probs.append("dist 里混着非本版发布件 %s —— 人手上传会选错（PyPI 不可撤回）；"
+                         "改名让开（.away-<时间戳>），不要删" % stray[:4])
+
+    if probs:
+        return False, "；".join(probs[:4])
+    return True, ("环境事实与真源一致：%d 个仓 / 站点构建器 / 本版 %s / dist 只有 2 件"
+                  % (len(facts.get("repos") or {}), want or "?"))
+
+
 def j_running_on_real_table(m):
     """★★ 闸门自身的守卫：确认当前加载的是**包内真表**，不是降级兜底集。
 
@@ -676,6 +788,11 @@ def selfcheck():
         ("D-22 缺陷：built_from 被指回归档仓 r1v3",
          "psl/manifest.json",
          None, None, "D-22"),
+        # ★★ D-23 负控（2026-09-29）：把产物仓的 `git` 声明写反 ⇒ 判据 ① 必须红。
+        #   模拟的正是"环境事实漂移"这一种失效：真源里写的东西与磁盘不符。
+        ("D-23 缺陷：workspace_facts 里产物仓 git 声明写反",
+         "psl/workspace_facts.json",
+         '"git": true', '"git": false', "D-23"),
     ]
 
     ok_all = True
@@ -870,6 +987,8 @@ def main():
             ("D-17 构建顺序：验产物 final ＋ 家务最后做", j_build_harness_order),
             ("D-20 包组成双向守卫（干净 wheel 不漏模块）", j_pymodules_guard),
             ("D-22 单一真源：产物仓为主 / 归档仓只许落后", j_single_source_of_truth),
+            ("D-23 环境事实不漂移（仓在哪儿／是否 git／dist 只有本版）",
+             j_workspace_facts),
         ]
 
         for cid, fn in checks:
