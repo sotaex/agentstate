@@ -470,6 +470,79 @@ def j_pymodules_guard():
     return True, "守卫在位 · 真树无问题 · 内建负控会红（foo_mod 被抓）"
 
 
+#: 已归档、只读、**不再是开工处**的源仓（2026-09-29 裁定：产物仓是唯一主仓）
+_ARCHIVED_REPOS = (r"D:\psl\poc\r1v3",)
+
+
+def _vtuple(v):
+    """版本号转可比较元组。解析不出就返回 (0,) —— 绝不冒充"能比较"。"""
+    try:
+        return tuple(int(x) for x in str(v).split("."))
+    except Exception:
+        return (0,)
+
+
+def j_single_source_of_truth():
+    """★★★ 2026-09-29（D-22）：**「改哪个仓」必须是会红的判据**，不能只是一句文档。
+
+    本轮真实事故（这是本判据存在的理由）：
+      旧交接文档仍写「改 r1v3 再同步到产物仓」，而**裁定早在 `a38fec1` 就反过来了**
+      （产物仓＝唯一开工处，r1v3 归档）。文档没退役 ⇒ 后来者（含 LLM）照旧文提问
+      「是承认产物仓为主仓，还是回灌 r1v3？」——**问出一个不该问的问题**；
+      一旦真回灌：退版（0.33.2→0.29.2）＋ 强加平铺布局（`_LAYOUT` 22 项按分类写死）
+      ＋ r1v3 **非 git 不可逆**。三笔都是硬损失。
+
+    ★★ 根治机制（**可复制到任何「以谁为准」的场景**），三条缺一不可：
+      ① **真源机器可读** —— `psl/manifest.json` 的 `built_from`（不是散文、不是记忆）；
+      ② **违反就红** —— 本判据（「**无检查项的禁令＝没禁令**」）；
+      ③ **旧件必须退役并指向新真源** —— 见 `D:\\2026\\PSL\\真源与退役索引.md`。
+         只写进文档、不写进判据 ＝ 把禁令交给"读的人记得"，迟早出事。
+
+    判据：
+      ① 产物仓自身版本号可取；
+      ② `built_from` 必须指向**本产物仓**；
+      ③ 每个归档仓：必须有 `ARCHIVED.md`（身份被**声明**），且 VERSION **严格落后**
+         —— 回灌会让它 **>= 产物仓** ⇒ 立刻红。
+    """
+    vsrc = PKG / "antinel.py"
+    if not vsrc.is_file():
+        return None
+    m = re.search(r'^VERSION\s*=\s*"([^"]+)"',
+                  vsrc.read_text(encoding="utf-8", errors="replace"), re.M)
+    if not m:
+        return False, "① 取不到产物仓 VERSION —— 无法判断谁在前"
+    prod_v = m.group(1)
+
+    mf = PKG / "psl" / "manifest.json"
+    if not mf.is_file():
+        return None                      # 产物仓不带发布清单 ⇒ 不可判（不是通过）
+    bf = (json.loads(mf.read_text(encoding="utf-8")).get("built_from") or "").rstrip("\\/")
+    if bf.lower() != str(PKG).lower():
+        return False, ("② built_from=%r 不指向本产物仓 %r —— "
+                       "「产物仓为主仓」的裁定被改回去了" % (bf, str(PKG)))
+
+    notes = []
+    for ap in _ARCHIVED_REPOS:
+        p = Path(ap)
+        if not p.is_dir():
+            return None                  # 归档仓不在本机 ⇒ 不可判（盲区，不冒充通过）
+        if not (p / "ARCHIVED.md").is_file():
+            return False, ("③ 归档仓 %s 缺 ARCHIVED.md —— 它「已归档、只读」的身份没人声明，"
+                           "会被当成现行源仓（**正是本轮提问跑偏的根因**）" % ap)
+        av = re.search(r'^VERSION\s*=\s*"([^"]+)"',
+                       (p / "antinel.py").read_text(encoding="utf-8", errors="replace"), re.M)
+        if not av:
+            return False, "③ 归档仓 %s 取不到 VERSION" % ap
+        av = av.group(1)
+        if _vtuple(av) >= _vtuple(prod_v):
+            return False, ("③ ★回灌警报：归档仓 %s 的 VERSION=%s 已不落后于产物仓 %s —— "
+                           "归档仓只许落后（已归档、只读）。回灌＝退版＋强加布局＋不可逆"
+                           % (ap, av, prod_v))
+        notes.append("%s=%s" % (p.name, av))
+    return True, ("产物仓为主仓（built_from 指向本仓，%s）；归档仓仍落后：%s"
+                  % (prod_v, "、".join(notes)))
+
+
 def j_running_on_real_table(m):
     """★★ 闸门自身的守卫：确认当前加载的是**包内真表**，不是降级兜底集。
 
@@ -573,10 +646,14 @@ def selfcheck():
         # ★★ D-11 负控（2026-09-28）：把**对账守卫**从构建器里删掉 ⇒ 判据 ④ 必须红。
         #   为什么选"删函数"而不是"改坏它"：这三件机制的失效方式是**静默消失**
         #   （被后来的编辑顺手删掉、没报错），所以"它还在不在"就是最该锁的判据。
-        ("D-11 缺陷：构建器里的对账守卫被删掉",
+        # ★★ 2026-09-29 修正（自证伪）：原注入改的是 `_reconcile_src` 的**调用点**，
+        #   而判据 ④ 查的是 `getattr(bp,"_reconcile_src")` —— **函数定义还在，判据照样绿**。
+        #   此前它"通过"是假象：那时 fixture 缺文件 ⇒ 构建器 import 失败 ⇒ D-11 **因别的原因**红。
+        #   把 fixture 补全之后，这个假负控立刻暴露。⇒ 改为注入"**定义**被删"。
+        ("D-11 缺陷：构建器里的对账守卫被删掉（删定义）",
          "scripts/build_package.py",
-         "_reconcile_src(_SRC_WATCH)",
-         "_reconcile_src_removed(_SRC_WATCH)",
+         "def _reconcile_src(",
+         "def _reconcile_src_removed(",
          "D-11"),
         # ★★ D-17 负控（2026-09-29）：把 harness 指回 **stage** ⇒ 判据 ① 必须红。
         #   bug 的本质是**顺序/对象错配**（先清暂存、再跑暂存里的脚本），
@@ -594,6 +671,11 @@ def selfcheck():
          "def _pymodules_guard(pkg_dir):",
          "def _pymodules_guard_removed(pkg_dir):",
          "D-20"),
+        # ★★ D-22 负控（2026-09-29）：把 `built_from` 指回归档仓 ⇒ 判据 ② 必须红。
+        #   这是"有人把主仓改回 r1v3"这一动作的**直接模拟**（注入值运行时算，不写死）。
+        ("D-22 缺陷：built_from 被指回归档仓 r1v3",
+         "psl/manifest.json",
+         None, None, "D-22"),
     ]
 
     ok_all = True
@@ -612,6 +694,21 @@ def selfcheck():
                 ok_all = False
                 continue
             old = 'version = "%s"' % cur.group(1)
+        # ★★ D-22 专项：把 built_from 的**值**换成一个归档仓路径。
+        #   值在运行时从磁盘真值算出来（同 D-6 的教训：凡跟着环境走的注入串不许写死）。
+        if new is None and rel == "psl/manifest.json":
+            _mbf = re.search(r'"built_from"\s*:\s*"([^"]+)"', src)
+            if not _mbf or not _mbf.group(1):
+                print("  [SKIP] %-40s manifest 里取不到 built_from" % label)
+                ok_all = False
+                continue
+            _cur = _mbf.group(1)
+            _tgt = str(_ARCHIVED_REPOS[0]).replace("\\", "\\\\")   # JSON 里的转义形态
+            if _cur == _tgt:
+                print("  [SKIP] %-40s built_from 已经指向归档仓了" % label)
+                ok_all = False
+                continue
+            src = src.replace(_cur, _tgt, 1)
         # ★★ 「清单分叉」专项：把 SPOTS 里的一整项（标签行 + 正则行）剔掉，
         #   断言 version_check.py 的判据 4 会因此变红。
         #   这一条本身也是踩坑产物：初版判据 4 **是假守卫** —— 我用全文件字符串匹配
@@ -656,7 +753,10 @@ def selfcheck():
         tmp = Path(tempfile.mkdtemp(prefix="antinel_negctl_"))
         dst = tmp / "pkg"
         dst.mkdir(parents=True, exist_ok=True)
-        for sub in ("hooks", "rules", "ci", "scripts"):
+        # ★★ 2026-09-29：补 `psl/` 与 `docs/`（D-22 要读 psl/manifest.json；
+        #   D-6 的版本承载件里有 psl/manifest.json 与 docs/AUDIT_SCHEMA.md）。
+        #   fixture 缺这些文件会让判据因"文件不存在"而假红 —— 那不是缺陷，是盲区。
+        for sub in ("hooks", "rules", "ci", "scripts", "psl", "docs", "tools"):
             shutil.copytree(str(PKG / sub), str(dst / sub),
                             ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.bak-*"))
         # 钩子 import 的同级模块（antinel.py 等）也要带上，否则 exec_module 会炸
@@ -665,8 +765,26 @@ def selfcheck():
         # ★★ 2026-09-29：把 pyproject.toml 也带上 —— 否则 D-6（版本一致性）在 fixture 里
         #   因"文件不存在"**级联变红**，淹没真正被注入的那条判据（会让读者误以为 D-6 坏了）。
         #   这正是「会误报的检查器用两次就没人信」要避免的噪声。
-        if (PKG / "pyproject.toml").is_file():
-            shutil.copy2(str(PKG / "pyproject.toml"), str(dst / "pyproject.toml"))
+        for extra in ("pyproject.toml", "server.json", "SKILL.md", "MANIFEST.in"):
+            if (PKG / extra).is_file():
+                shutil.copy2(str(PKG / extra), str(dst / extra))
+        # ★★ 2026-09-29：fixture 也要**封闭**（同 D-6 的教训）—— 把 psl/manifest.json 的
+        #   built_from 改写成 fixture 自己的路径。否则 D-22 每次都因"它指向真仓、
+        #   而 PKG 是临时目录"而**假红**，跟 D-6 一样是噪声、且会掩盖真正的判定。
+        _fmf = dst / "psl" / "manifest.json"
+        if _fmf.is_file():
+            try:
+                _t = _fmf.read_text(encoding="utf-8")
+                # ★★ 必须用 lambda：re.sub 的**替换串**会解释反斜杠
+                #   （`\\\\` → `\\` → 单反斜杠）⇒ 写出的 JSON 非法（`Invalid \escape`）
+                #   ⇒ D-22 在任何 fixture 里都会因解析失败而假红 ⇒ **负控变假**。
+                _t2 = re.sub(r'"built_from"\s*:\s*"[^"]*"',
+                             lambda _m: '"built_from": "%s"'
+                             % str(dst).replace("\\", "\\\\"), _t)
+                if _t2 != _t:
+                    _fmf.write_text(_t2, encoding="utf-8", newline="\n")
+            except Exception:
+                pass
         mut = (dst / rel)
         if new is None:
             # 分叉专项：src 已是剔行后的内容，不再做字符串替换
@@ -751,6 +869,7 @@ def main():
             ("D-11 构建器三件机制在位（布局表/同步守卫/对账）", j_builder_mechanisms_present),
             ("D-17 构建顺序：验产物 final ＋ 家务最后做", j_build_harness_order),
             ("D-20 包组成双向守卫（干净 wheel 不漏模块）", j_pymodules_guard),
+            ("D-22 单一真源：产物仓为主 / 归档仓只许落后", j_single_source_of_truth),
         ]
 
         for cid, fn in checks:
