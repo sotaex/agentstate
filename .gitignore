@@ -2,3 +2,8 @@ __pycache__/
 *.pyc
 .psl/
 *.log
+
+# setuptools 构建垃圾（不应入库；历史上误跟踪，待创始人决定是否 git rm --cached）
+build/
+antinel.egg-info/
+dist/
