@@ -8,7 +8,7 @@
   "value": "current",
   "derivation": "auto",
   "reason": null,
-  "checkedAt": "2026-10-03T17:56:03+08:00",
+  "checkedAt": "2026-10-03T18:02:39+08:00",
   "note": "re-derive any time: python tools/antinel_verify.py (--manifest for all 24 shipped files); which assertions failed: discrimination.failed[]"
  },
  "scope": {
@@ -93,8 +93,8 @@
   "tools/enforce_probe.py": "sha256:fa99191ad571a1d044e7aa537e78c03e0f902836b9e0a8265e23bc846f5b386f"
  },
  "run": {
-  "started_at": "2026-10-03T17:51:28+0800",
-  "duration_ms": 275106,
+  "started_at": "2026-10-03T17:58:15+0800",
+  "duration_ms": 264308,
   "duration_note": "wall-clock of a subprocess fan-out suite; machine- and load-dependent, not comparable across environments",
   "executor": "scripts/run_harness.py",
   "exit_code": 1,

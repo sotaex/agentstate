@@ -2164,8 +2164,15 @@ def main():
     _f17_hub = WORK / "hub" / "f17"
     _f17_hub.mkdir(parents=True, exist_ok=True)
     if os.name == "nt":
+        # ★ 这里必须写 Python 的 `True` 而不是 JSON 的 `true`。
+        #   2026-10-03 实测踩过：改写本段时把它写成了 `true` ⇒ NameError
+        #   ⇒ 套件跑到 F-17（序号 #258）就崩，且崩在**子进程之外**——
+        #   `last_results.json` 里没有 __partial__ 标记，只有 stderr 一行
+        #   `NameError: name 'true' is not defined`，不点开 stderr 根本看不到。
+        #   ⇒ 这也是上面「record() 加序号 ＋ harness 转发 stderr 尾部」那两处的价值：
+        #   没有它们，这次要靠二分法插桩才能定位。
         (_f17_hub / "host_shield.json").write_text(json.dumps(
-            {"enabled": true}, ensure_ascii=False), encoding="utf-8")
+            {"enabled": True}, ensure_ascii=False), encoding="utf-8")
         _env17 = dict(os.environ)
         _env17["ANTINEL_HUB_DIR"] = str(_f17_hub)
         # 走 append_chained 写一条**时间戳在 3 小时前**的心跳（宽限期 30min ⇒ 必陈旧）

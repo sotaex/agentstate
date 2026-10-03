@@ -79,7 +79,7 @@
     "scripts/install.py": "sha256:96b760183c19c98134f57918c74a3063516c37c0f4c733c7af6eb57bda26ff7c",
     "scripts/report.py": "sha256:8dc8cf1fc7f4ea67312f356f5d655deed37ff32af4fefa548453ffde33e7c6e3",
     "scripts/scan.py": "sha256:851eae8a722cb49e0c68b7dc46b78d3e041cacaee39ce549faf1b98aa1407108",
-    "scripts/verification_tests.py": "sha256:f1122223ad12e817a6af6223161800eeeeaaa1f039fff9828c881c2b07115069",
+    "scripts/verification_tests.py": "sha256:50c123ab3c67cbe5c78d8f85bdb3a555424d93bac567cb20d24741e7e8a2ff9d",
     "session_dna.py": "sha256:80a0e8a33e953c3fdb67e2213d4500d66df449325b531fa688ca99b5a3fc54b4",
     "strings.py": "sha256:2f65c8848b1e2f7f87d049c1985f6a33d2a812075f9b71a6df7d1487f0180144",
     "tools/HOST_PROBE.md": "sha256:ca030d35a275ab181b9f7051c89d3df89fc626cf76c4e19716d36ba7aaea540b",
