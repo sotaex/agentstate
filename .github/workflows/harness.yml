@@ -12,7 +12,39 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - name: Run verification suite (310 assertions, zero-network, stdlib-only)
+      # ★ 0.34.0：断言总数**不写死**在此处。分母由套件自己得出
+      #   （run_harness 从 last_results.json 数），因此套件增减断言时本文件
+      #   不会变成一个说谎的数字 —— 此前这里写死 "310 assertions"，
+      #   而真实分母已是 315，写死＝每次增删断言都留下一处陈旧数字。
+      - name: Run verification suite (assertion count is derived, not pinned here)
         run: python scripts/run_harness.py
       - name: Run invariants (INV-1..INV-6)
         run: python tools/antinel_verify.py --invariants
+
+  # ★ 0.34.0：把三个此前**没有任何 workflow 引用**的守卫接进来。
+  #   它们已存在、已跑得通，只是没人调用 ⇒ 等于没有守卫
+  #   （本项目铁律：「无检查项的禁令＝没禁令」「假守卫比没守卫更坏」）。
+  #   三个都很快，因此放在快速档，与套件并行无关、互不阻塞。
+  guards:
+    name: guards (version / regression / drift)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # D-6：十处版本承载件必须逐字相同。--expect 从 antinel.py 的 VERSION 常量
+      # 派生，所以升版时这个检查**自己会知道**该期望什么，不需人记得改
+      # （此前 D-6 只在本地手工跑，CI 里没有任何 workflow 引用它）。
+      - name: D-6 version carriers agree
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path antinel.py -Pattern '^VERSION\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          Write-Host "expect version = $v"
+          python ci/version_check.py --expect $v
+      # L7 回归闸门：把已修好的缺陷固化成判据（< 5 秒，供每次改动后立刻跑）
+      - name: L7 regression gate
+        run: python ci/regression_gate.py
+      # 漂移审计：需求文件 → 盘上行为，逐条机械化验证
+      - name: Drift audit (requirements vs on-disk behaviour)
+        run: python ci/drift_audit.py

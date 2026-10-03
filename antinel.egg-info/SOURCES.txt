@@ -34,6 +34,7 @@ hooks/pre_tool_use.py
 hooks/session_start_banner.py
 psl/judgment.json
 psl/manifest.json
+psl/workspace_facts.json
 references/AGENT_SKILL.md
 references/RULES.md
 references/THREAT_MODEL.md

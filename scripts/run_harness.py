@@ -205,6 +205,15 @@ def main():
         rows = [r for r in rows if r.get("name") != "__partial__"]
         total = len(rows)
         passed = sum(1 for r in rows if r.get("pass"))
+        # ★ 0.34.0：把**失败的断言逐条落进judgment**。
+        #   此前 `discrimination.assertions` 只有 {passed, total} 两个整数 ——
+        #   「312/315」这个数字**不说是哪 3 条**，于是每次要定位都得重跑一遍
+        #   12.5 分钟的套件（实测：本次为定位 F-17 重跑了一次）。
+        #   判据：明细来自套件自己落的 `last_results.json`（P3-1 已有），
+        #   **不重新执行任何断言**，只是把同一份结果换个形状存进judgment。
+        failed = [{"name": r.get("name"), "detail": (r.get("detail") or "")[:300]}
+                  for r in rows if not r.get("pass")]
+        partial_flag = bool(partial)
     except Exception as e:
         print("harness: cannot read structured results %s (%s) -- refusing to report a count" % (res, e))
         tail = (proc.stderr or "")[-1500:]
@@ -232,7 +241,7 @@ def main():
         # with tools/antinel_verify.py; checkedAt is when WE last derived it.
         "status": {"value": "current", "derivation": "auto", "reason": None,
                    "checkedAt": now,
-                   "note": "re-derive any time: python tools/antinel_verify.py (--manifest for all 24 shipped files)"},
+                   "note": "re-derive any time: python tools/antinel_verify.py (--manifest for all 24 shipped files); which assertions failed: discrimination.failed[]"},
         # V8: scope -- what this verdict covers and, just as loudly, what it does not.
         "scope": {"covered": COVERED,
                   "notCovered": ["runtime behaviour of the monitored host",
@@ -247,7 +256,13 @@ def main():
                                           "object": "this package (the " + str(len(COVERED)) + " digested files)",
                                           "runner": "scripts/run_harness.py",
                                           "op": "black-box subprocess assertions (stdin JSON in, exit code + stdout/stderr out)"},
-                           "assertions": {"passed": passed, "total": total}},
+                           "assertions": {"passed": passed, "total": total},
+                           # ★ 0.34.0：逐条失败明细（0 条 = 全过）。
+                           #   为什么要落盘：**"312/315" 不说是哪 3 条**，
+                           #   定位成本 = 一次 12.5 分钟的重跑（本次实测）。
+                           #   与 total/passed 同源同一次运行，不是二次执行。
+                           "failed": failed,
+                           "partial": partial_flag},
         # V5: true == verified on THIS platform only. Honest until CI proves more.
         "platformSpec": True,
         # V12: DERIVED (0.17.0, P-A3), no longer a constant: fail-closed

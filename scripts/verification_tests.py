@@ -24,6 +24,28 @@ elif (HERE.parent / "hooks").is_dir() and (HERE.parent / "rules").is_dir():
     PKG = HERE.parent                       # running as <package>/scripts/verification_tests.py
 else:
     PKG = Path(r"D:\psl\poc\r1v3")          # flat PoC layout
+
+# ★★ 2026-10-03 补一条**早失败**守卫（实测踩出来的真问题，不是预防性想象）：
+#   上面那条 `else: PKG = D:\psl\poc\r1v3` 是"flat PoC 布局"的遗留回退。
+#   实测：本文件一旦被**改名或复制**到别处（例如我为了定位 F-17 生成
+#   `_suite_probe.py` 放在仓根），`HERE.parent` 就不再同时含 hooks/ 与 rules/
+#   ⇒ 静默回退到 r1v3 ⇒ 而**归档仓 r1v3 里没有 scripts/install.py**
+#   ⇒ 套件跑到用 install.py 的那条用例时 `FileNotFoundError` 崩掉，
+#   而 `last_results.json` 里**没有 __partial__ 标记** ⇒ 看上去像"跑完了少几条"，
+#   实际上是被杀在第 257 条。
+#   ⇒ 守卫：PKG 必须**同时**具备下面三样，否则**开工即报错并说清该指向哪里**。
+#   ★ 这与本项目「查不出来 ≠ 查出来是好的」「假守卫比没守卫更坏」同源：
+#     静默回退到错误路径，比直接拒绝执行危险得多 —— 前者让你以为跑过了。
+for _req, _why in (("hooks", "钩子"), ("rules", "规则表"),
+                   ("scripts", "脚本目录（含 install.py，套件多处要跑它）")):
+    if not (PKG / _req).is_dir():
+        raise SystemExit(
+            "★ 套件无法开工：包根 %s 缺少 %r 目录（%s）。\n"
+            "  PKG 由 __file__ 推出；若你把本文件改名/复制过，__file__ 已变 ⇒ 静默回退。\n"
+            "  正解：设环境变量 ANTINEL_PKG 指向真正的包根，例如\n"
+            "       ANTINEL_PKG=D:\\psl\\poc\\antinel-security python scripts/verification_tests.py\n"
+            "  （不要靠改这里的默认值 —— 那正是本次要消除的那个静默回退。）"
+            % (PKG, _req, _why))
 SKILLS = Path(os.environ.get("ANTINEL_SKILLS_DIR") or r"D:\psl\skills")
 #: ★★ 2026-09-29（D-15c）：**唯一 WORK**。
 #:
@@ -2115,33 +2137,92 @@ def main():
            _p16.stdout.strip() == "F16 True False",
            (_p16.stdout + _p16.stderr).strip()[:90])
 
-    # F-17 心跳陈旧判死（B2）：pid 活着但心跳超 _STALE_AFTER → 杀掉重拉。
+    # F-17 心跳判死（B2）：pid 活着但**没有心跳**（挂起/僵死/从未 armed）→ 杀掉重拉。
+    #
+    # ★ 0.34.0 改这条断言的**构造方式**（不是改判据）：
+    #   原构造 = "起哨兵 → sleep 3 → 把 _STALE_AFTER 压到 1.0 → 期望 stale-revived"。
+    #   它在改判据之前就有一个**测不到目标**的结构问题：
+    #     · 哨兵**首拍**要等 HEARTBEAT_SECONDS(600s)，sleep 3s 内**一条心跳都不会有**
+    #       ⇒ `heartbeat_age()` 恒为 None；
+    #     · 而"没有心跳"这条分支在 0.34.0 之前恰好 return "alive"
+    #       ⇒ 原构造永远测不到"心跳超阈值"这个它想测的东西。
+    #   ⇒ 它实测测到的是"首拍未到"，被当成了"心跳陈旧"。**测具与被测物错位。**
+    #
+    #   新构造直接命中 0.34.0 修的那条分支：**制造一条真实的陈旧心跳**
+    #   （backdate 审计记录里的心跳时间戳到宽限期之外），
+    #   于是判据面对的是"心跳真的陈旧"，而不是"心跳还不存在"。
+    #   ★ 这也顺带让本条断言**真的在测 B2**——B2 要解决的就是
+    #     "pid 活着 ≠ 在干活"，而"心跳陈旧"才是它成立的那个情形。
     _f17_hub = WORK / "hub" / "f17"
     _f17_hub.mkdir(parents=True, exist_ok=True)
     if os.name == "nt":
         (_f17_hub / "host_shield.json").write_text(json.dumps(
-            {"enabled": True}, ensure_ascii=False), encoding="utf-8")
+            {"enabled": true}, ensure_ascii=False), encoding="utf-8")
         _env17 = dict(os.environ)
         _env17["ANTINEL_HUB_DIR"] = str(_f17_hub)
-        _f17 = ("import sys,time;sys.path.insert(0,r'%s');import host_shield as hs;"
-                "ok,pid,mode=hs.spawn_sentinel(r'%s');print('SPAWN',ok,pid);"
-                "time.sleep(3);hs._STALE_AFTER=1.0;"
-                "r=hs.ensure_alive(r'%s',cause='F-17');"
-                "print('R',r,'newpid',hs.load_state().get('sentinel_pid'))"
-                % (str(PKG), str(PKG), str(hermetic_pkg_root())))
+        # 走 append_chained 写一条**时间戳在 3 小时前**的心跳（宽限期 30min ⇒ 必陈旧）
+        # ★ 为什么这么构造（四条都是实测踩出来的，不是设计时就想到的）：
+        #   ① 不用 host_shield.record()：它把 ts 硬写成 now()（host_shield.py:526），
+        #      造不出"陈旧"心跳——而"心跳陈旧"正是本条要测的东西。
+        #      改用 audit_chain.append_chained 直写，与哨兵真实写法同构。
+        #   ② ts 必须给 **ISO 字符串**（(now-3h).isoformat()）：
+        #      heartbeat_age 用 datetime.fromisoformat() 解析（host_shield.py:967），
+        #      给 epoch 数值会 TypeError ⇒ 落进 except ⇒ 返回 (None, ts)
+        #      ⇒ age=None ⇒ 又落回"查不到心跳"那条分支，**仍然测不到陈旧**。
+        #   ③ 目录可能还不存在（哨兵没打过心跳时 rollup/ 未建）⇒ 先 makedirs，
+        #      否则 append_chained 里的 O_EXCL 建锁文件会 FileNotFoundError。
+        #   ④ 拼串一律用**拼接 + 单参数 print + 显式 \n**：
+        #      % 会与段内 strftime('%Y-%m-%d') 打架（须 %%Y，两层转义易漏）；
+        #      .format() 会与段内 dict 字面量 {'ts':…} 的花括号打架 ⇒ KeyError；
+        #      if 块不显式换行会 SyntaxError。三种都实测踩过。
+        _f17 = (
+            "import sys,time,os,glob,datetime;\n"
+            "sys.path.insert(0,r'" + str(PKG) + "');\n"
+            "import host_shield as hs;\n"
+            "import audit_chain as ac;\n"
+            "ok,pid,mode=hs.spawn_sentinel(r'" + str(PKG) + "');\n"
+            "print('SPAWN ' + str(ok) + ' ' + str(pid) + ' ' + str(mode));\n"
+            "r0='spawn-failed';np0=0;\n"
+            "if ok:\n"
+            "    ad=hs._shield_audit_dir(r'" + str(hermetic_pkg_root()) + "');\n"
+            "    os.makedirs(ad,exist_ok=True);\n"
+            "    fn=os.path.join(ad,datetime.datetime.now().strftime('%Y-%m-%d') + '.jsonl');\n"
+            "    g=[x for x in glob.glob(os.path.join(ad,'*.jsonl')) if os.path.getsize(x)>0];\n"
+            "    fn=g[0] if g else fn;\n"
+            "    rec={'ts':(datetime.datetime.now()-datetime.timedelta(hours=3))"
+            ".astimezone().isoformat(timespec='seconds'),\n"
+            "    'type':'host_shield_heartbeat','tool':'-',\n"
+            "    'session':'host-shield','host':'generic','decision':'allow',\n"
+            "    'severity':'none','reason':'F-17 stale fixture'};\n"
+            "    ac.append_chained(fn,rec);\n"
+            "    print('AGE ' + str(hs.heartbeat_age(ad)[0]));\n"
+            "    r0=hs.ensure_alive(r'" + str(hermetic_pkg_root()) + "',cause='F-17');\n"
+            "    np0=hs.load_state().get('sentinel_pid');\n"
+            "print('R ' + str(r0) + ' newpid ' + str(np0));\n"
+        )
         _p17 = subprocess.run([PY, "-I", "-S", "-c", _f17], capture_output=True, text=True,
                               encoding="utf-8", errors="replace", timeout=90, env=_env17)
         _m17 = re.search(r"R (\S+) newpid (\d+)", _p17.stdout or "")
+        _m17_age = re.search(r"AGE (\S+)", _p17.stdout or "")
         _f17_new = int(_m17.group(2)) if _m17 else 0
-        _f17_ok = (_m17 is not None and _m17.group(1) == "stale-revived" and _f17_new > 0)
+        # 新 pid 必须**与旧 pid 不同**才算"真的重启了"；只判 >0 会把
+        # "没换进程但报了 stale-revived" 也算过（那是一条假绿）。
+        _m17_old = re.search(r"SPAWN \S+ (\d+)", _p17.stdout or "")
+        _f17_old = int(_m17_old.group(1)) if _m17_old else 0
+        _f17_ok = (_m17 is not None and _m17.group(1) == "stale-revived"
+                   and _f17_new > 0 and _f17_new != _f17_old)
         if _f17_new:
             subprocess.run(["taskkill", "/F", "/PID", str(_f17_new)],
                            capture_output=True, timeout=30)
+        if _f17_old and _f17_old != _f17_new:
+            subprocess.run(["taskkill", "/F", "/PID", str(_f17_old)],
+                           capture_output=True, timeout=30)
         _discard(_f17_hub / "host_shield.json")
-        record("F-17 心跳陈旧判死：挂起/僵死（pid 活着）也会被强制重启（B2）",
-               _f17_ok, (_p17.stdout + _p17.stderr).strip()[:110])
+        record("F-17 心跳判死：无心跳/心跳陈旧的哨兵会被强制重启（B2）",
+               _f17_ok, "oldpid=%s age=%s -> %s" % (_f17_old, _m17_age.group(1) if _m17_age else "?",
+                                                     (_p17.stdout + _p17.stderr).strip()[:80]))
     else:
-        record("F-17 心跳陈旧判死：挂起/僵死（pid 活着）也会被强制重启（B2）", True,
+        record("F-17 心跳判死：无心跳/心跳陈旧的哨兵会被强制重启（B2）", True,
                "platform-gated: 进程挂起/强杀是 Windows 机制")
 
     # F-18 外部命令绝对路径（B4i/C4）：三处装运件不得再裸调 icacls/schtasks/taskkill/powershell。

@@ -161,7 +161,7 @@ HARNESS_SRC = SRC / "scripts" / "verification_tests.py"
 if not HARNESS_SRC.is_file():
     raise SystemExit("★ 构建器找不到套件：%s\n  （产物仓构建必须用本仓的套件）" % HARNESS_SRC)
 NAME = "antinel-security"
-VERSION = "0.33.2"
+VERSION = "0.34.0"
 # P-A3: the namespace this build declares itself under. derive_object_ownership()
 # reads git remote first, then THIS field; fail-closed unattributed when neither
 # resolves. Kept beside the hashes so a third party can see what was declared.
@@ -188,12 +188,37 @@ readme = "README.md"
 license = {file = "LICENSE"}
 requires-python = ">=3.10"
 authors = [{name = "geguang", email = "geguang@gmail.com"}]
-keywords = ["ai-agents", "audit", "security", "claude-code", "mcp"]
+keywords = ["ai-agents", "audit", "security", "claude-code", "mcp", "agent-safety",
+            "supply-chain", "local-first", "privacy"]
 classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Information Technology",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: Microsoft :: Windows",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3 :: Only",
   "Topic :: Security",
   "Topic :: Software Development :: Quality Assurance",
+  "Topic :: System :: Monitoring",
 ]
+
+# 0.34.0: previously there was not a single URL. The PyPI page showed a package
+# name and one line of description, with no way to reach the source -- the worst
+# gap in the trust stack for a tool whose whole claim is "verifiable by a third
+# party". This template is the real source of truth (pyproject.toml is generated
+# here), so the URLs have to live in this string, not in the generated file.
+[project.urls]
+Homepage = "https://antinel.com"
+Repository = "https://github.com/sotaex/agentstate"
+Source = "https://github.com/sotaex/agentstate"
+Issues = "https://github.com/sotaex/agentstate/issues"
+Changelog = "https://github.com/sotaex/agentstate/blob/main/docs/AUDIT_SCHEMA.md"
 
 [project.scripts]
 antinel = "antinel:main"
@@ -1624,7 +1649,19 @@ def build(out_root, verify=False):
     (pkg / ".gitignore").write_text(
         "__pycache__/\n*.pyc\n.psl/\n*.log\n"
         "build/\nantinel.egg-info/\ndist/\n"
-        "*.away-*\n", encoding="utf-8", newline="\n")
+        "*.away-*\n"
+        # ★ 2026-10-03 补四行（同上：写进模板才是修法）：
+        #   *.bak-*        —— 0.34.0 清垃圾时实测到 16 个 `*.bak-*` 里有 11 个在子目录，
+        #                     且其中 ci/drift_audit.py.bak-* 已被 git 跟踪
+        #                     ⇒ 不 ignore 的话，每次构建后 git status 都脏。
+        #   _tools_034/    —— 本轮三件可复用工具（版本迁移/manifest 重签/垃圾清理），
+        #                     目录名以 _ 开头，与构建产物无关。
+        #   _probe_*.py 等 —— 定位 F-17 时的一次性探针（含硬编码路径 + 调试 print），
+        #                     属过程证据，不该被人当正式工具跑。
+        "*.bak-*\n_tools_034/\n"
+        "_probe_*.py\n_patch_*.py\n_bump_version.py\n"
+        "_resign_manifest.py\n_cleanup_junk.py\n_suite_probe.py\n",
+        encoding="utf-8", newline="\n")
     # byte-exact clones are a digest-security property: no end-of-line conversion,
     # ever (autocrlf smudge broke judgment digests in the v0.17 round).
     (pkg / ".gitattributes").write_text("* -text\n", encoding="utf-8", newline="\n")

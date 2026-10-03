@@ -57,6 +57,11 @@ def load_hook(isolate=False):
     try:
         spec.loader.exec_module(m)
     except SystemExit:
+        # ★ 2026-09-30 判读：**中风险，暂不改行为** —— 钩子模块被 import 时
+        #   若自行 `sys.exit`（CLI 模块的常见写法），我们拿到的是**半初始化**的模块；
+        #   但后续取属性会 AttributeError 并在别处**崩出来**（退出码非 0），
+        #   即失败**仍然可见**，只是报错位置偏了。
+        #   ⇒ 本次只记录原因；若要根治，应在 return 前断言模块已初始化。
         pass
     return m
 
@@ -576,7 +581,11 @@ def j_workspace_facts():
       ② 站点构建器目录存在、含 marker、`builders_git` 与实测一致；
       ③ `release.version` 与 pyproject **实测值**一致；
       ④ dist 里**只许有本版两件**（旧包／`.BAD-*` 会让人手上传选错 ——
-         PyPI 只能 yank、版本号永久占用 ⇒ 选错＝不可逆）。
+         PyPI 只能 yank、版本号永久占用 ⇒ 选错＝不可逆）；
+      ⑤ `release.pypi`（**发布版本唯一真源**，2026-09-30 加）：版本串已登记、
+         wheel 存在且文件名含该版本、`host_audit_fixture` 存在 ——
+         站点与三条判据一律从这里读，**不许各自写死版本号**
+         （此前 new_user_cmd_journey 写死 0.28.0、cmp_check_out 写死 0.33.2 ⇒ 站上混搭无人发现）。
     """
     f = PKG / "psl" / "workspace_facts.json"
     if not f.is_file():
@@ -649,10 +658,41 @@ def j_workspace_facts():
             probs.append("dist 里混着非本版发布件 %s —— 人手上传会选错（PyPI 不可撤回）；"
                          "改名让开（.away-<时间戳>），不要删" % stray[:4])
 
+    py = rel.get("pypi") or {}
+    pv = py.get("published_version")
+    tv = py.get("target_version")
+    # ★ 2026-10-03 判据更新（D-23）：`published_version` 与 `target_version` 拆成两栏后，
+    #   **本地产物该跟 target 比，不是跟 published 比**。
+    #   为什么要拆：此前 `published_version` 同时承担"PyPI 上的事实"与"打算发什么"两个职责，
+    #   于是本地包一旦是新的就会与"事实"矛盾（实测：本地 0.34.0 vs PyPI 0.28.0 ⇒ 恒红）。
+    #   ⇒ 拆栏后本判据的正确形状是：
+    #     · wheel 文件名含 **target_version**（这是"本次要发的那版"）；
+    #     · **published_version 只与 PyPI 实查一致**，不由本地产物推导（它是事实，不是愿望）。
+    if not tv:
+        probs.append("release.pypi.target_version 未登记 —— 本次待发版本没有真源，"
+                     "「dist 里是哪一版」这类判据会各自写死")
+    if not pv:
+        probs.append("release.pypi.published_version 未登记 —— 版本类判据（命令面／实测输出）"
+                     "没有真源，不许各自写死")
+    else:
+        wh = Path(py.get("wheel") or "")
+        if not wh.is_file():
+            probs.append("release.pypi.wheel 不存在：%r" % py.get("wheel"))
+        elif tv and tv not in wh.name:
+            probs.append("release.pypi.wheel 文件名 %s 与 target_version %s 不一致"
+                         % (wh.name, tv))
+        elif not tv and pv not in wh.name:
+            probs.append("release.pypi.wheel 文件名 %s 与 published_version %s 不一致"
+                         % (wh.name, pv))
+    fx = Path(py.get("host_audit_fixture") or "")
+    if not fx.is_file():
+        probs.append("release.pypi.host_audit_fixture 不存在：%r"
+                     % py.get("host_audit_fixture"))
+
     if probs:
         return False, "；".join(probs[:4])
-    return True, ("环境事实与真源一致：%d 个仓 / 站点构建器 / 本版 %s / dist 只有 2 件"
-                  % (len(facts.get("repos") or {}), want or "?"))
+    return True, ("环境事实与真源一致：%d 个仓 / 站点构建器 / 本版 %s / dist 只有 2 件 / "
+                  "发布版 %s" % (len(facts.get("repos") or {}), want or "?", pv or "?"))
 
 
 def j_running_on_real_table(m):
@@ -900,8 +940,15 @@ def selfcheck():
                              % str(dst).replace("\\", "\\\\"), _t)
                 if _t2 != _t:
                     _fmf.write_text(_t2, encoding="utf-8", newline="\n")
-            except Exception:
-                pass
+            except Exception as _e:
+                # ★★ 2026-09-30：此处原为 `pass`（**静默**）。
+                #   危害：fixture 没封闭好 ⇒ 判据会在 fixture 里**因别的原因**红
+                #   ⇒ 负控"变红了"于是看起来通过 —— 这正是 D-11／D-22 两个**假负控**的形状。
+                #   ⇒ 准备失败必须**中止这条负控**（不做，也不许算它绿）。
+                print("  [SKIP] %-40s fixture 封闭失败（%s: %s）⇒ 本条负控不做"
+                      % (label, type(_e).__name__, _e))
+                ok_all = False
+                continue
         mut = (dst / rel)
         if new is None:
             # 分叉专项：src 已是剔行后的内容，不再做字符串替换

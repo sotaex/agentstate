@@ -118,8 +118,12 @@ def hook(script, tool, ti, sid="d"):
     out = {}
     try:
         out = json.loads(_so.decode("utf-8", "replace").strip().splitlines()[-1])
-    except Exception:
-        pass
+    except Exception as _e2:
+        # ★ 2026-09-30：此处原为 `pass`（**静默**）。
+        #   危害：`out` 变成 `{}` 后，调用方若判「某键**不存在**」就会得到 True
+        #   ⇒ **假绿**：把"没解析出来"读成"没发现"（铁律②「报出来≠出事了」的反面）。
+        #   ⇒ 解析失败必须**留痕**：塞进 err，让读输出的人看得见这次没测到。
+        _se = _se + ("\n[JSON-PARSE-FAILED] %s: %s" % (type(_e2).__name__, _e2)).encode()
     _err = _se.decode("utf-8", "replace")
     _hook_env_dead(_rc, _err)               # ★ 立旗：环境坏了 ⇒ 后面的派生项按"受阻"归因
     return _rc, out, _err
@@ -655,6 +659,7 @@ except Exception as e:
     print("EXC %s %s" % (type(e).__name__, e))
 print("LOCKED=%d" % (1 if hs.is_denied(pend) else 0))
 ev = []
+_badlines = 0
 fn2 = os.path.join(audit, time.strftime("%Y-%m-%d") + ".jsonl")
 if os.path.isfile(fn2):
     for line in open(fn2, encoding="utf-8"):
@@ -662,8 +667,12 @@ if os.path.isfile(fn2):
             try:
                 ev.append(json.loads(line).get("type"))
             except Exception:
-                pass
+                # ★ 2026-09-30：原为 `pass`（**静默丢行**）⇒ 坏行被悄悄丢掉，
+                #   事件数会**少报**而没人知道（"查不出来≠查出来是好的"）。
+                #   ⇒ 计数并打印：坏行数是可见的，读者才知道这份 EVENTS 是全的还是缺的。
+                _badlines += 1
 print("EVENTS=%s" % ",".join(ev))
+print("EVENTS_BAD_LINES=%d" % _badlines)
 ''')
 
 
@@ -723,6 +732,9 @@ def _acl_audit_usable():
             try:
                 lvl = int(line.split("S-1-16-", 1)[1].split()[0])
             except (ValueError, IndexError):
+                # ★ 2026-09-30 判读：**无害** —— 解析失败后 `lvl` 保持 None，
+                #   紧接着的 `if lvl is None` 会**显式返回失败并说明原因**。
+                #   失败是可见的，不会被读成"通过"。保留 pass（一行坏输出不该让整段崩）。
                 pass
             break
     if lvl is None:
@@ -828,6 +840,9 @@ try:
     _eg_src = io.open(os.path.join(PKG, "egress.py"), encoding="utf-8").read()
     _an_src = io.open(os.path.join(PKG, "antinel.py"), encoding="utf-8").read()
 except OSError:
+    # ★ 2026-09-30 判读：**无害** —— 读不到 ⇒ 两个源串是空 ⇒ 下面的
+    #   「谁定义 / 谁导入」两条断言都是 False ⇒ **判据会红**（文件缺失是看得见的失败），
+    #   不会静默变绿。保留 pass（缺文件不该让整份审计崩掉）。
     pass
 
 _eg_defines = bool(re.search(r"^VENDOR_KW\s*=", _eg_src, re.M))

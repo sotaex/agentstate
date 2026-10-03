@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: antinel
-Version: 0.33.2
+Version: 0.34.0
 Summary: Local-first audit chain and ledger for AI coding agents: every action recorded, every record verifiable.
 Author-email: geguang <geguang@gmail.com>
 License: MIT License
@@ -25,10 +25,27 @@ License: MIT License
         OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
         SOFTWARE.
         
-Keywords: ai-agents,audit,security,claude-code,mcp
+Project-URL: Homepage, https://antinel.com
+Project-URL: Repository, https://github.com/sotaex/agentstate
+Project-URL: Source, https://github.com/sotaex/agentstate
+Project-URL: Issues, https://github.com/sotaex/agentstate/issues
+Project-URL: Changelog, https://github.com/sotaex/agentstate/blob/main/docs/AUDIT_SCHEMA.md
+Keywords: ai-agents,audit,security,claude-code,mcp,agent-safety,supply-chain,local-first,privacy
+Classifier: Development Status :: 4 - Beta
+Classifier: Environment :: Console
+Classifier: Intended Audience :: Developers
+Classifier: Intended Audience :: Information Technology
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: Microsoft :: Windows
 Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Programming Language :: Python :: 3 :: Only
 Classifier: Topic :: Security
 Classifier: Topic :: Software Development :: Quality Assurance
+Classifier: Topic :: System :: Monitoring
 Requires-Python: >=3.10
 Description-Content-Type: text/markdown
 License-File: LICENSE

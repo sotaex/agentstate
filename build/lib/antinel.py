@@ -848,6 +848,15 @@ def cmd_digest(args):
         _durs.sort()
         print("【延迟】钩子耗时中位数 %.0f ms（%d 对 pre/post 配对）" % (_durs[len(_durs) // 2], len(_durs)))
     # 0.32.2 (A4): 探针陈旧/从未运行——拦截自证停摆必须可见。
+    # ★★ 2026-09-30 修（假警）：此前用**展示窗口内**的 probe_last 判陈旧，
+    #   而默认窗口 days=1 ⇒ since＝今天；陈旧阈值却是 2×probe_interval_hours＝48h。
+    #   **窗口(≤24h) < 阈值(48h) ⇒ 判据结构性不可满足**：探针昨天跑过、今天还没跑，
+    #   上午的晨报就必报「陈旧/从未运行（last: never）」——这是**假警**，
+    #   而且把「本窗口内没有」说成了「从未运行」（`没查到` ≠ `没发现`）。
+    #   实测对照（同机器同账本同秒）：--days 3 →「探针 3/3 通过」；--days 1 →「last: never」。
+    #   修法两条：①陈旧判定与展示窗口**解耦**（回看窗口 ≥ 陈旧阈值）；
+    #            ②措辞区分「本窗口内没有」与「从未运行」。
+    #   ★ 真源仍是**账本本身**（复用 _agg_audit，不二次实现、不引入第二份副本）。
     try:
         _pol = {}
         if root:
@@ -858,13 +867,29 @@ def cmd_digest(args):
         for a in per:
             if a.get("probe_last"):
                 _last = a["probe_last"] if _last is None else max(_last, a["probe_last"])
+        # 窗口内没有 ⇒ 按"与窗口无关的回看"再算一次（回看 ≥ 陈旧阈值 ⇒ 判据可满足）
+        if _last is None and root:
+            try:
+                _look = max(int(days), int(_iv / 24.0 * 2) + 1)
+                _last = _agg_audit(_audit_dir(str(root)), _look).get("probe_last")
+            except Exception:
+                _last = None
         _stale = True
         if _last:
-            _stale = (datetime.now().astimezone()
-                      - datetime.fromisoformat(_last)).total_seconds() > _iv * 3600 * 2
+            _dt = datetime.fromisoformat(_last)
+            if _dt.tzinfo is None:                 # 状态文件里写的是本地时间（naive）
+                _dt = _dt.astimezone()
+            _stale = (datetime.now().astimezone() - _dt).total_seconds() > _iv * 3600 * 2
         if _stale and root:
-            print("【执法】⚠ 自检探针陈旧/从未运行（last: %s）——拦截自证停摆，"
-                  "运行 python tools/enforce_probe.py" % (_last or "never"))
+            if _last:
+                print("【执法】⚠ 自检探针陈旧（最近一次 %s，已超过 %d 小时）——拦截自证停摆，"
+                      "运行 python tools/enforce_probe.py" % (_last, int(_iv * 2)))
+            else:
+                print("【执法】⚠ 自检探针从未运行——拦截自证停摆，"
+                      "运行 python tools/enforce_probe.py")
+        elif _last and not total.get("probe_ok"):
+            # 窗口内已经报过「探针 N/N 通过」时不再重复；只在"窗口内没有、但也没陈旧"时报一句。
+            print("【执法】自检探针最近一次 %s（不在本次展示窗口内，未陈旧）" % _last)
     except Exception:
         pass
     # 0.33.1 (P4-1)：不可信日期段显式化——分母是"这段时间内的工具调用记录数"。
