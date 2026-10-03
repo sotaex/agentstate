@@ -594,6 +594,9 @@ def _agg_audit(audit_dir, days):
     fail_open = 0
     host_changes = 0
     untrusted_host = low_conf_host = 0        # 0.33.1 (P4-1)
+    canary_leak = 0                           # 0.34.0 (E2)：蜜饵标记出现在工具输出里
+    sens_out = 0                              # 0.34.0 (E2)：输出命中敏感模式
+    canary_marks = {}                         # marker -> 首次 ts
     pre_ts = {}
     post_ts = {}
     probe_last = None
@@ -651,11 +654,29 @@ def _agg_audit(audit_dir, days):
             _dg = rec.get("content_digest")
             if _dg:
                 post_ts[_dg] = rec.get("ts")
+            # ★★ 0.34.0（E2）：**数据外发**进日常视图。
+            #   为什么加：canary 是本产品唯一能给出"内容真的出去了"的**主动证据**
+            #   （SEC-11 埋的蜜饵标记一旦出现在工具输出里 ⇒ 读过 ＋ 带出去过）。
+            #   而它此前**只**在 `report` 的 canaries 统计里，`digest`/`morning`
+            #   这两个用户最常看的视图**完全没有这个数字** ——
+            #   也就是"最该被看到的风险"在"最常被看到的界面"上缺席。
+            #   口径（与 report.py 一致，不二次实现判据）：
+            #     · canaries_observed 非空 ⇒ 蜜饵标记出现在输出里 ⇒ 强证据
+            #     · sensitive_output 非空  ⇒ 输出里命中了敏感模式
+            for _c in (rec.get("canaries_observed") or []):
+                canary_leak += 1
+                _mk = _c if isinstance(_c, str) else (_c.get("marker") or "")
+                if _mk and _mk not in canary_marks:
+                    canary_marks[_mk] = rec.get("ts")
+            for _s in (rec.get("sensitive_output") or []):
+                sens_out += 1
     return {"actions": acts, "blocks": blocks, "warnings": warns,
             "by_rule": by_rule, "tokens": toks,
             "gaps": gaps, "probe_ok": probe_ok, "probe_fail": probe_fail,
             "fail_open": fail_open, "host_changes": host_changes,
             "untrusted_host": untrusted_host, "low_conf_host": low_conf_host,
+            "canary_leak": canary_leak, "canary_marks": canary_marks,
+            "sensitive_output": sens_out,
             "pre_ts": pre_ts, "post_ts": post_ts,
             "probe_last": probe_last}
 
@@ -768,8 +789,16 @@ def cmd_digest(args):
     per = []
     total = {"actions": 0, "blocks": 0, "warnings": 0, "tokens": 0,
              "gaps": 0, "probe_ok": 0, "probe_fail": 0, "fail_open": 0,
-             "host_changes": 0, "untrusted_host": 0, "low_conf_host": 0}
+             "host_changes": 0, "untrusted_host": 0, "low_conf_host": 0,
+             # ★ 0.34.0（E2）：与 _agg_audit 的返回键**一一对应**。
+             #   漏一个就会在这一行 KeyError —— `for k in total: total[k] += a[k]`
+             #   是按 total 的键去 a 里取值，两边必须同集合。
+             "canary_leak": 0, "sensitive_output": 0}
+    # ★ 0.34.0（E2）：canary_marks 是 **dict**（marker→首次 ts），
+    #   不能进 `for k in total: total[k] += a[k]` 那个加法循环（dict += dict 会炸），
+    #   所以它不进 total，单独维护并在合并时 update。
     heads = {}
+    total_marks = {}                          # ★ 0.34.0 (E2)
     for proot, host, _meta in projects:
         ad = _audit_dir(proot)
         if not os.path.isdir(ad):
@@ -779,6 +808,10 @@ def cmd_digest(args):
         per.append(a)
         for k in total:
             total[k] += a[k]
+        # ★ 0.34.0（E2）：marker→首次 ts 跨项目合并（dict 单独 update，不进上面的加法）
+        for _mk, _ts in (a.get("canary_marks") or {}).items():
+            if _mk not in total_marks or (total_marks[_mk] and _ts < total_marks[_mk]):
+                total_marks[_mk] = _ts
         try:
             man = _load_json(os.path.join(ad, "day_manifest.json"))
             today = datetime.now().strftime("%Y-%m-%d.jsonl")
@@ -809,6 +842,26 @@ def cmd_digest(args):
           "token 进出 %s（事实）；记账口径 %s=%s%s。"
           % (days, len(per), total["actions"], total["blocks"],
              format(total["tokens"], ","), detect_host(), unit, econ))
+    # ★★ 0.34.0（E2）：**「数据有没有出去」提到首屏**。
+    #   为什么放在【一句话】之后、其它段之前：用户装这个工具，问的第一个问题是
+    #   "我的东西有没有被传出去"，而这个答案此前**只**在 `report` 里 ——
+    #   `digest`/`morning` 这两个最常被看的视图**没有它**。
+    #   口径诚实（与 report.py /canary plant 同一套判据，不二次实现）：
+    #     · 有 canary 命中 ⇒ 蜜饵标记出现在工具输出里 ⇒ 强证据（有东西被带出去过）
+    #     · 无命中     ⇒ **只说明"没见到"，不是"没有"** —— 会偷的工具不写记录
+    _ck = total.get("canary_leak", 0)
+    _so = total.get("sensitive_output", 0)
+    if _ck:
+        _first = min([v for v in total_marks.values() if v] or [""])
+        print("【数据外发】🔴 检出 %d 次蜜饵标记出现在工具输出里"
+              "（内容被读 ＋ 带出项目外）%s"
+              % (_ck, ("；首次 %s" % _first[:19]) if _first else ""))
+        print("            用 python -m antinel report --days %d 看是哪条工具、哪个文件" % days)
+    elif _so:
+        print("【数据外发】🟠 未见蜜饵命中，但 %d 次输出命中敏感模式 —— 查 python -m antinel report" % _so)
+    else:
+        print("【数据外发】未见蜜饵命中（只说明**没见到**，不等于没有——"
+              "会偷的工具不会写记录）。要更强的证据：python -m antinel canary plant")
     for a in sorted(per, key=lambda x: -x["actions"]):
         print("  %-9s %s" % (a["host"], a["root"]))
         print("    操作 %d｜拦截 %d %s｜提醒 %d｜tokens %s"
@@ -898,7 +951,7 @@ def cmd_digest(args):
               "%d 条为低可信（仅目录标记）——这两个 host 字段不能当事实引用。"
               % (total["untrusted_host"], total["low_conf_host"]))
     else:
-        print("【宿主标签】全部记录带归因证据（host_confidence 字段齐备）")
+        print("【宿主标签】全部记录带归因证据（每条都记了它是怎么认出来的）")
     print("【覆盖】%d 个登记项目 / %d 个宿主；未接入工具不在此列（分母显式）"
           % (len({p for p, _h, _m in projects}), len({h for _p, h, _m in projects})))
 
@@ -1625,6 +1678,19 @@ def cmd_host_audit(args):
     #   ⇒ 改产品，不改网页：网页贴的是**逐字真实输出**，为了过检查器去改贴出来的字，
     #     就等于重新制造 P0-2（页面 ≠ 产品）。
     print("  全量清单（你电脑上的所有 AI 工具 ＋ 分级 ＋ 证据）：antinel host-scan）")
+    # ★ 0.34.0（E4）：给「没查到」配一个**能做的下一步**。
+    #   改之前的实况：这条命令以"没查出来 ≠ 没有"收尾——**诚实，但把用户放在原地**。
+    #   读到这里的人心里是"那我下一步该干什么"，而原文没回答。
+    #   ⇒ 补两句，且**不给虚假承诺**（不暗示 host-scan 能查出外传）。
+    #   ★ 措辞纪律：只说"能列清单"和"能埋蜜饵"，不承诺任何检测能力。
+    print("")
+    print("  你能接着做的两件事：")
+    print("    1) 看清你机器上到底装了哪些 AI 工具、哪些还没被纳管：")
+    print("         python -m antinel host-scan        # 只读，扫全盘约 1–2 分钟")
+    print("    2) 想知道『有没有东西真的被带出去过』，用蜜饵换主动证据：")
+    print("         python -m antinel canary plant     # 放一个标记文件，")
+    print("         然后正常使用 AI 工具；标记出现在输出里就会被记下")
+    print("    （两者都只读你的机器，不联网、不上传。）")
 
 
 # ------------------------------------------------------------ host-scan ----

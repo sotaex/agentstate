@@ -472,7 +472,21 @@ def check_installed(root):
     root = Path(root).resolve()
     manifest_path = root / ".psl" / "manifest.json"
     if not manifest_path.is_file():
-        print("not installed here: %s" % manifest_path)
+        # ★ 0.34.0（E3）：原来只印一句 `not installed here: <路径>` ——
+        #   实测输出是**纯英文**、**没有下一步**、**没有"要不要装"**。
+        #   而这是企业最有价值的一条入口（先体检、零风险、看了再决定装不装），
+        #   把"我有没有装"这个最关键的问题回答成一句谜语，等于把入口堵死。
+        #   ⇒ 改成：中文结论 ＋ **实际发生了什么** ＋ **下一步给什么**。
+        print("这台机器上还没有安装 Antinel。")
+        print("  查的是：%s" % manifest_path)
+        print("  原因：这个路径下没有 .psl/manifest.json —— 装过的话一定有（卸载会清掉它）。")
+        print("")
+        print("下一步，二选一：")
+        print("  · 想先看它能查到什么（不装任何东西）：")
+        print("      python -m pip install --user antinel   然后")
+        print("      python -m antinel host-audit")
+        print("  · 想直接装上（含钩子，开始记账）：")
+        print("      python scripts/install.py --root .")
         return 1
     try:
         old = json.loads(manifest_path.read_text(encoding="utf-8"))
