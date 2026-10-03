@@ -236,7 +236,15 @@ def full_rule_ids():
 
 def record(name, ok, detail=""):
     results.append((name, ok, detail))
-    print(("PASS " if ok else "FAIL ") + name + ("" if not detail else "  -- " + str(detail)[:160]))
+    # ★ 2026-10-03：在每条前面加**序号**。
+    #   为什么：套件在第 257 条被外部杀掉时，`last_results.json` 只留下 249 条、
+    #   judgment 报 257，两者对不上 ⇒ **无法判断"崩在哪一条"**，
+    #   只能靠二分法反复插桩重跑（实测为此花了两轮 13 分钟）。
+    #   加了序号后，`tail` 一眼就能看到断点位置：`#257` 之后没有输出。
+    #   ★ 代价为零：print 到 stdout，不进任何判据、不改分母。
+    print(("[#%03d] " % (len(results),))
+          + ("PASS " if ok else "FAIL ") + name
+          + ("" if not detail else "  -- " + str(detail)[:160]))
 
 
 # 2026-09-13 (TN-06) -- 分母不变式 / denominator invariance.
