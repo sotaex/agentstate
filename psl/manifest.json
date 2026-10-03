@@ -77,7 +77,7 @@
     "rules/hosts/zcode.json": "sha256:b6be75e0e16189afe4e15bd196b14f1820ff97b7eaeadd9907ab0beb558efe51",
     "rules/pricing.json": "sha256:e299e7afa07a97128ce00c13706379c79368c747cd4303c488f1c53c5339e253",
     "scripts/install.py": "sha256:b60affdd6da6c67a5e9bea33ac85116a7c89176594e029980d38b9b6c556803a",
-    "scripts/report.py": "sha256:8dc8cf1fc7f4ea67312f356f5d655deed37ff32af4fefa548453ffde33e7c6e3",
+    "scripts/report.py": "sha256:a8d294e1a0ffe083d08fcbeb16a7a4e4cdbbefed7a84b9ea1e325e9c0230680d",
     "scripts/scan.py": "sha256:851eae8a722cb49e0c68b7dc46b78d3e041cacaee39ce549faf1b98aa1407108",
     "scripts/verification_tests.py": "sha256:50c123ab3c67cbe5c78d8f85bdb3a555424d93bac567cb20d24741e7e8a2ff9d",
     "session_dna.py": "sha256:80a0e8a33e953c3fdb67e2213d4500d66df449325b531fa688ca99b5a3fc54b4",
