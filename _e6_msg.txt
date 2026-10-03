@@ -1,0 +1,35 @@
+E6: verify 之后把"你可以自己复算"摆出来 —— 能力最强、叙述为零的那一项
+
+## 为什么先补这条
+
+《AUD-Antinel 体验深度审核》实测出的一条死结：
+`challenge/` 公开挑战件（attack.py / tamper.py / tamper-lab.html / 每日公开链
+／五级复算器）是本产品**唯一能满足企业采购理由**
+（「给我一份能独立复算的证据」）的能力 ——
+★ 而 8 份用户文档里**一个字都没提**。
+
+⇒ **能力最强、叙述为零。** 一句话的"你可以自己验"是最低成本的补救。
+
+## 实测（本机真跑，不是照文档抄）
+
+    $ python challenge/verify.py
+      记录 14 条 | 完好 14 | 异常 0
+      verdict: CLEAN — 链完好，未被改动          rc=0
+
+⇒ 这是**独立于本包另一份实现**的复算器（`challenge/verify.py` 不 import
+`audit_chain.py`），它能跑通 ＝ "第三方可复算"这件事**当场成立**，不是承诺。
+
+`antinel verify` 在链干净时（rc==0）追加四条入口，每条都逐一核实存在：
+
+1. `challenge/verify.py` —— 独立复算器（不依赖本包）
+2. `challenge/tamper.py` —— 改一条 → 复算 → 报 tamper
+3. `challenge/tamper-lab.html` —— 浏览器里手动试（15.8 KB，零安装）
+4. `github.com/sotaex/agentstate/tree/main/challenge/chain` —— 每日公开锚点
+
+并附上复算规则：hash = sha256(上一条的 hash ＋ 本条的规范化 JSON)。
+
+## 纪律
+
+- ★ 只在 `rc == 0`（干净）时打印 —— **链有问题时不给"你可以自己复算"的引导，
+  先修链**。反过来写就变成"不管链烂不烂都教你怎么验"，那是错的。
+- 四个入口逐一核实存在，不写"应该有"。

@@ -1087,7 +1087,33 @@ def cmd_verify(args):
                           "tools", "verify_chain.py"))
     for cand in cands:
         if os.path.isfile(cand):
-            sys.exit(subprocess.call([sys.executable, cand, _audit_dir(root)]))
+            rc = subprocess.call([sys.executable, cand, _audit_dir(root)])
+            # ★ 0.34.0（E6）：验完之后**把"如何独立复算"摆出来**。
+            #   为什么加：复核报告实测到的一条死结 ——
+            #     `challenge/` 公开挑战件（attack.py / tamper.py / tamper-lab.html
+            #     ／每日公开链 ／五级复算器）是本产品**唯一能满足企业采购理由**
+            #     （"给我一份能独立复算的证据"）的能力，
+            #     ★ 而 8 份用户文档里**一个字都没提**。
+            #   ⇒ **能力最强、叙述为零。** 一句话的"你可以自己验"是最低成本的补救。
+            if rc == 0:
+                print("")
+                print("─" * 60)
+                print(" 这条链**你可以自己复算**，不需要相信我们：")
+                print("   1) 换一个工具算（不依赖本包，独立实现）：")
+                print("        python %s"
+                      % _sibling(os.path.join("challenge", "verify.py")))
+                print("   2) 亲眼看它怎么被改坏（改一条 → 复算 → 报 tamper）：")
+                print("        python %s    # 攻击演示"
+                      % _sibling(os.path.join("challenge", "tamper.py")))
+                print("   3) 浏览器里手动试（不用装任何东西）：")
+                print("        仓库 challenge/tamper-lab.html")
+                print("   4) 看**别人**的链每天被验一次（公开锚点，可交叉核对）：")
+                print("        https://github.com/sotaex/agentstate/tree/main/challenge/chain")
+                print("")
+                print("   ★ 复算规则：hash = sha256(上一条的 hash ＋ 本条的规范化 JSON)")
+                print("     改一个字节就能被指出；删掉中间任何一条，链就接不上。")
+                print("─" * 60)
+            sys.exit(rc)
     _die("verify_chain.py 不存在")
 
 
