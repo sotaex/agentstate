@@ -202,6 +202,23 @@ def main():
             # 套件没跑完：数字仍然报，但必须说清楚这是半截的数。
             print("harness: SUITE ABORTED before completion -- %d assertions recorded, "
                   "reporting them as a PARTIAL count" % (len(rows) - len(partial)))
+            # ★★ 2026-10-03：ABORT 时**转发套件 stdout 的尾部**。
+            #   为什么：套件被外部杀掉时，judgment 只说"257 条"，`last_results.json`
+            #   只留下跑完的那些 —— **"崩在哪一条"完全不可见**，定位只能靠二分法
+            #   插桩重跑（实测为此烧过两轮 13 分钟）。
+            #   `record()` 现在会给每行加 `[#NNN]` 序号（verification_tests.py），
+            #   所以尾部最后一条的序号**就是断点位置**。
+            #   ★ 只在 ABORT 时转发：正常跑完时那 300+ 行是噪音。
+            _tail = (proc.stdout or "").strip().splitlines()[-12:]
+            if _tail:
+                print("--- suite stdout tail（最后 12 行；末行序号＝断点）---")
+                for _l in _tail:
+                    print("  " + _l)
+            _err = (proc.stderr or "").strip().splitlines()[-6:]
+            if _err:
+                print("--- suite stderr tail ---")
+                for _l in _err:
+                    print("  " + _l)
         rows = [r for r in rows if r.get("name") != "__partial__"]
         total = len(rows)
         passed = sum(1 for r in rows if r.get("pass"))

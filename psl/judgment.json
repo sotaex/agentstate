@@ -8,7 +8,7 @@
   "value": "current",
   "derivation": "auto",
   "reason": null,
-  "checkedAt": "2026-10-03T17:47:38+08:00",
+  "checkedAt": "2026-10-03T17:56:03+08:00",
   "note": "re-derive any time: python tools/antinel_verify.py (--manifest for all 24 shipped files); which assertions failed: discrimination.failed[]"
  },
  "scope": {
@@ -51,26 +51,17 @@
    "op": "black-box subprocess assertions (stdin JSON in, exit code + stdout/stderr out)"
   },
   "assertions": {
-   "passed": 255,
+   "passed": 257,
    "total": 257
   },
-  "failed": [
-   {
-    "name": "0.16.0 antinel_verify derives current on an intact package",
-    "detail": "1 of 21 covered files differ (judgment digests (21 files))"
-   },
-   {
-    "name": "0.17.0 P-B1 without --manifest, README tamper is out of scope (documented)",
-    "detail": ""
-   }
-  ],
+  "failed": [],
   "partial": true
  },
  "platformSpec": true,
  "objectOwnership": "self",
  "objectOwnershipBasis": "subject github.com/sotaex is in the signed namespace list",
  "assertions_total": 257,
- "assertions_passed": 255,
+ "assertions_passed": 257,
  "criteria_independence": "Assertions exercise the hook protocol, rule matching, scanner, installer and reporter as black boxes through subprocesses (stdin JSON in, exit code and stdout/stderr out); they were authored from the design specification ANT-SEC-SPEC-001 v1.1, not from the implementation; third-party re-run supported.",
  "environment": {
   "python": "3.13.14",
@@ -102,8 +93,8 @@
   "tools/enforce_probe.py": "sha256:fa99191ad571a1d044e7aa537e78c03e0f902836b9e0a8265e23bc846f5b386f"
  },
  "run": {
-  "started_at": "2026-10-03T17:42:05+0800",
-  "duration_ms": 333198,
+  "started_at": "2026-10-03T17:51:28+0800",
+  "duration_ms": 275106,
   "duration_note": "wall-clock of a subprocess fan-out suite; machine- and load-dependent, not comparable across environments",
   "executor": "scripts/run_harness.py",
   "exit_code": 1,
