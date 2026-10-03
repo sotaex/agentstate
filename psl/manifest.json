@@ -24,7 +24,7 @@
   "files": {
     ".gitattributes": "sha256:705fd4d6451a31d36b3df7de96f83f30ac976c9b4a6d1e51671d8e2f33e2d0da",
     ".github/workflows/verify.yml": "sha256:ef6ce2c936a639576c4389dbdf28ace50a6e31a8908a694ee1fdbd12a581fc24",
-    ".gitignore": "sha256:34620e54351e786176bc49e99177eac150903b78e8fe39d869dc5cee6097de58",
+    ".gitignore": "sha256:7145e8c5ce46de90c58b4f9674ff765274f27982e9e06fb3aa9ad41968d75c9f",
     "LICENSE": "sha256:daf815707d3efcea917980e270edc57152da8ac3a7a3418e5c1d8982ccad79c7",
     "MANIFEST.in": "sha256:59ffdcf3cd27612a522310a653a210d2f803b00494c19972f040b4cd061522b8",
     "README.md": "sha256:73ff05de10dca5ab61a43364288f3875d29ee0fe8c790254a8ca433c3ec3b5c2",
@@ -76,7 +76,7 @@
     "rules/hosts/yuanbao.json": "sha256:7cb36382184bc9d66f5f50633313380ac0666800350e73ab782de6d11f03855d",
     "rules/hosts/zcode.json": "sha256:b6be75e0e16189afe4e15bd196b14f1820ff97b7eaeadd9907ab0beb558efe51",
     "rules/pricing.json": "sha256:e299e7afa07a97128ce00c13706379c79368c747cd4303c488f1c53c5339e253",
-    "scripts/install.py": "sha256:b60affdd6da6c67a5e9bea33ac85116a7c89176594e029980d38b9b6c556803a",
+    "scripts/install.py": "sha256:7cbb99f97f2b2d5a60489d03e9c1953c6d5a0340ca3bfd8718df3471b6270f65",
     "scripts/report.py": "sha256:a8d294e1a0ffe083d08fcbeb16a7a4e4cdbbefed7a84b9ea1e325e9c0230680d",
     "scripts/scan.py": "sha256:851eae8a722cb49e0c68b7dc46b78d3e041cacaee39ce549faf1b98aa1407108",
     "scripts/verification_tests.py": "sha256:50c123ab3c67cbe5c78d8f85bdb3a555424d93bac567cb20d24741e7e8a2ff9d",

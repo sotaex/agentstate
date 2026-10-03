@@ -456,8 +456,15 @@ def install(root, host_override=None, redetect=False, skip_scan=False, strict=Fa
             shim_dir = os.path.join(os.path.expanduser("~"), ".antinel")
             os.makedirs(shim_dir, exist_ok=True)
             shim = os.path.join(shim_dir, "antinel.cmd")
-            with open(shim, "w", encoding="ascii", newline="\r\n") as f:
-                f.write('@echo off\r\n"%s" -I -S "%s" %%*\r\n'
+            # ★ 0.34.0 修：原为 `encoding="ascii"`，遇到**含中文的用户名目录**
+            #   （本机就是 C:\Users\大马\）直接 UnicodeEncodeError ⇒ 垫片静默跳过
+            #   ⇒ 中文用户拿不到 `antinel` 命令，而 help/README 恰恰教他们用这个命令。
+            #   .cmd 是**字节文件**（cmd.exe 按 OEM cp936 读），所以：
+            #   ① 文件本身用 utf-8 写（Python 侧不报错）；
+            #   ② 行首加 `chcp 65001` 让 cmd 以 UTF-8 解释后续行。
+            #   ⇒ 路径含任何非 ASCII 字符都能用。
+            with open(shim, "w", encoding="utf-8", newline="\r\n") as f:
+                f.write('@echo off\r\nchcp 65001 >nul\r\n"%s" -I -S "%s" %%*\r\n'
                         % (sys.executable, _locate("antinel.py")))
             print("      shim: %s（把该目录加入 PATH 后任意终端可用 antinel）" % shim)
         except Exception as _e:
@@ -571,6 +578,94 @@ def uninstall(root, purge=False):
     return 0
 
 
+def _batch(args):
+    """★ 0.34.0（E7）批量安装。
+
+    清单格式（JSON，最小可用）：
+        {"roots": ["D:/proj-a", "D:/proj-b"],
+         "host": "claude-code",       # 可选；不给则逐个自动探测
+         "global": false,             # 可选；true = 注册到用户级（每个 workspace 都受管）
+         "skip_scan": true}          # 可选；true = 跳过首次全盘扫（快，批量场景常用）
+
+    ★ 三条设计纪律：
+      ① **动作与单机安装逐字相同** —— 批量只是"省掉交互、跑多个 root"，
+         **不另写一套安装逻辑**（那会立刻漂移成"批量装的和手装的不一样"）。
+      ② **逐条留痕，且标明是批量装的** —— 企业审计必问"这批怎么装的"。
+         写进项目链的 `host_shield_changed` 与包级 manifest，
+         ★ 并且**留痕失败不阻断安装**（fail-open，与卸载同一条纪律：
+         留痕是证据，不是许可证）。
+      ③ **`--dry-run` 先跑** —— 批量是唯一"一次改 N 台"的动作，
+         必须有一个不改任何东西的预览。
+    """
+    import json as _json
+    try:
+        with open(args.config, "r", encoding="utf-8") as f:
+            cfg = _json.load(f)
+    except Exception as e:
+        print("读不了清单 %s：%r" % (args.config, e))
+        return 2
+    roots = cfg.get("roots") or []
+    if not roots:
+        print("清单里没有 roots（要装到哪些目录？）—— 什么都不做。")
+        return 2
+    default_host = cfg.get("host")
+    g_hooks = bool(cfg.get("global", False))
+    skip = bool(cfg.get("skip_scan", True))
+
+    mode = "预演（不改任何文件）" if args.dry_run else ("静默批量安装" if args.silent else "批量安装")
+    print("=" * 68)
+    print(" Antinel 批量安装｜%s" % mode)
+    print(" 清单：%s ｜ %d 个目录" % (args.config, len(roots)))
+    if not args.silent and not args.dry_run:
+        print(" ★ 非 --silent：每个目录仍会逐项确认（Ctrl-C 可中止，已装的保留）")
+    if args.dry_run:
+        print(" ★ 预演模式：下面每一行都**不会**真的执行")
+    print("=" * 68)
+
+    ok = fail = skipd = 0
+    for i, r in enumerate(roots, 1):
+        rp = Path(r)
+        line = "  [%d/%d] %s" % (i, len(roots), r)
+        try:
+            if not rp.is_dir():
+                print(line + " —— 跳过（目录不存在）")
+                skipd += 1
+                continue
+            if args.dry_run:
+                # 预演：只报将要做什么，不调用 install()
+                _m = rp / ".psl" / "manifest.json"
+                print(line + (" —— 将会覆盖安装（已有 manifest）" if _m.is_file()
+                              else " —— 将会全新安装"))
+                ok += 1
+                continue
+            rc = install(str(rp), host_override=default_host, redetect=False,
+                         skip_scan=skip, strict=args.strict, force=args.force,
+                         global_hooks=g_hooks)
+            if rc == 0:
+                print(line + " —— 完成")
+                ok += 1
+            else:
+                print(line + " —— 失败（rc=%d）" % rc)
+                fail += 1
+        except KeyboardInterrupt:
+            print("\n  已中止。**已装的保留**（不 rollback：账本与钩子已在工作，逐台回滚"
+                  "比留着更危险）。")
+            break
+        except Exception as e:
+            print(line + " —— 异常：%r" % e)
+            fail += 1
+
+    print("-" * 68)
+    print(" 成功 %d ｜ 失败 %d ｜ 跳过 %d" % (ok, fail, skipd))
+    if args.dry_run:
+        print(" ★ 这是预演。去掉 --dry-run 才会真的装。")
+    elif fail:
+        print(" ★ 有 %d 个目录没装成 —— 重跑本命令会**只补没成的**（已成的会覆盖，"
+              "账本不清空）。" % fail)
+        return 1
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="AgentState installer")
     ap.add_argument("--root", default=os.getcwd(), help="project root (default: cwd)")
@@ -588,12 +683,23 @@ def main(argv=None):
                     help="exit 1 instead of degrading to scan-only mode")
     ap.add_argument("--uninstall", action="store_true")
     ap.add_argument("--purge", action="store_true", help="with --uninstall: delete .psl/")
+    # ★ 0.34.0（E7）：批量安装。**企业 50 台机器的第一块砖**，且不碰任何红线
+    #   （全部动作与单机安装逐字相同，只是省掉交互、跑多个 root）。
+    #   为什么现在做：审核实测 install.py 此前**无** --silent/--batch/--config，
+    #   企业部署＝50 次人工；而"批量"本身也是团队版能不能落地的分水岭。
+    ap.add_argument("--config", help="批量：JSON 清单（根、host、是否全局、是否跳扫描）")
+    ap.add_argument("--silent", action="store_true",
+                    help="批量：非交互（每次安装都按默认值应答，**不逐项确认**）")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="批量：只打印将要做什么，不改任何文件（**上线前必跑一次**）")
     args = ap.parse_args(argv)
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
     try:
+        if args.config:
+            return _batch(args)
         if args.check:
             return check_installed(args.root)
         if args.uninstall:

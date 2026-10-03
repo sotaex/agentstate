@@ -1660,7 +1660,11 @@ def build(out_root, verify=False):
         #                     属过程证据，不该被人当正式工具跑。
         "*.bak-*\n_tools_034/\n"
         "_probe_*.py\n_patch_*.py\n_bump_version.py\n"
-        "_resign_manifest.py\n_cleanup_junk.py\n_suite_probe.py\n",
+        "_resign_manifest.py\n_cleanup_junk.py\n_suite_probe.py\n"
+        # ★ 2026-10-03：安装副作用目录。装到本仓时会在仓内生成 .qoder/ 或
+        #   .zcode/（钩子注册）。它们**是被安装的产物**，入库等于把本机钩子配置
+        #   和解释器路径塞进公共仓库 —— 本轮实测批量装完 git status 就脏了。
+        ".qoder/\n.zcode/\n",
         encoding="utf-8", newline="\n")
     # byte-exact clones are a digest-security property: no end-of-line conversion,
     # ever (autocrlf smudge broke judgment digests in the v0.17 round).

@@ -1,0 +1,9 @@
+{
+  "_readme": "Antinel 批量安装清单示例。roots 填要装到的目录；host 不填则逐个自动探测；global=true 表示注册到用户级（每个 workspace 都受管）；skip_scan=true 跳过首次全盘扫（批量常用）。★ 先跑 --dry-run。",
+  "roots": [
+    "D:/psl/poc/antinel-security",
+    "D:/2026/PSL"
+  ],
+  "global": false,
+  "skip_scan": true
+}
