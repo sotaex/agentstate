@@ -30,7 +30,7 @@
     "README.md": "sha256:73ff05de10dca5ab61a43364288f3875d29ee0fe8c790254a8ca433c3ec3b5c2",
     "SKILL.md": "sha256:4b0ca3a2541d4723e45c51d1f60cbac1f1df32671ad11880e768563f5ec8ac1c",
     "antinel-namespaces.json": "sha256:2db67f32a5b803560f458c4589bd4bb4678cc17bc16625f6b6b3ad20f9b202d2",
-    "antinel.py": "sha256:8bdea0f4f2eadae478693aeb8ff21625120a66d657c90feb9e628c3b1c3185f4",
+    "antinel.py": "sha256:138b50a5bb555ab5f4ddb38a7c19af80f557641f43bcd69b743f8682afacab17",
     "antinel_mcp.py": "sha256:00c772f7a191d6850a488dfc3cc8c280b46681519ad0cbf116d534077cfcacc4",
     "audit_chain.py": "sha256:455d845c17bba87e4f5a929db728a989808c99950de7be99bf0d21c6062b0921",
     "ci/run_verifications.sh": "sha256:108121773825cc1dcf34d560d69c289467a3d596210d6ec6345e4bb1501b049c",

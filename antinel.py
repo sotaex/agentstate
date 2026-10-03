@@ -44,6 +44,8 @@ if _HERE not in sys.path:
 #   旧分类按**功能类型**分，用户想问"我电脑有没有中招"得自己在"报告"里翻。
 #   现在按**用户要办的事**分：审核＝已经发生了什么；防范＝正在发生时拦不拦。
 ROUTES = [
+    ("给我一页能交差的纸 / 我要给领导或客户交代这件事",
+     "antinel brief（决策层一页纸：有没有外发、比上期、该做什么）", "审核"),
     ("查一查我的电脑 / 我有没有中招（要一个能点的页面）",
      "antinel ui（在你自己电脑的浏览器里点一下就查；结果不会离开你的电脑）", "审核"),
     ("这个会话花了多少", "antinel report --session latest", "账本"),
@@ -1091,6 +1093,185 @@ def cmd_verify(args):
 
 def _sibling_dir(sub):
     return os.path.join(_HERE, sub)
+
+
+def cmd_brief(args):
+    """★ 0.34.0（E1）**决策层一页纸**。
+
+    为什么要有这条命令（实测出来的缺口，不是设想的）：
+      `antinel report` 的 19 行正文里，有 8 行是给**安全工程师**看的
+      （config health / hook health / host attribution / enforcement probe /
+       gate alive days / rules fallback / trust-boundary edits /
+       whitelist-released secrets reads）。这些是真价值。
+      ★ 但**决策层要的三个数字一个都没有**：
+         ① 我的 AI 工具有没有把数据传出去？
+         ② 这期比上期是升了还是降了？
+         ③ 我现在该做什么、谁来做？
+      一个 CTO 看到 `host attribution: 0/3 records UNVERIFIED` 不会有任何动作。
+
+    ⇒ 所以**不是**把 report 做"更强"，而是**按人分层**。
+      本命令给决策层：`report` 继续给工程师（默认行为不变，向后兼容）。
+
+    ★ 口径纪律（与 report.py / digest 同一套判据，**不二次实现**）：
+      · 外发结论只认 canary（内容被读 ＋ 带出去过）与 sensitive_output；
+        两者都没命中时**明说"没见到 ≠ 没有"**。
+      · 所有数字都带分母或有"未覆盖"说明，异单位永不加和。
+      · 本命令**只读**，不写任何文件、不改任何状态。
+    """
+    days = getattr(args, "days", None) or 7
+    root = find_project_root()
+    if root is None:
+        _die("未找到项目（在项目根目录运行，或用 --scope all 看已登记的全部项目）")
+    ad = _audit_dir(root)
+    if not os.path.isdir(ad):
+        _die("这个项目还没有账本 —— 先装一次：python scripts/install.py --root .")
+
+    now = _agg_audit(ad, days)                     # 本期
+
+    # ★ 上期单独算（见 `_period_delta`），**不用"本期减上期"**：
+    #   减法在计数上会出负数，在异单位（积分/token）上会直接失真 ——
+    #   那正是本项目反复记为「异单位永不加和」的那类错。
+
+    print("=" * 68)
+    print(" Antinel 决策层一页纸｜%s" % datetime.now().strftime("%Y-%m-%d %H:%M"))
+    print(" 口径：近 %d 天 ｜ 项目：%s" % (days, root))
+    print("=" * 68)
+
+    # ── ① 有没有把数据传出去 ────────────────────────────────────────
+    print("")
+    print("【一】数据有没有被 AI 工具带出去")
+    if now.get("canary_leak"):
+        print("  🔴 **有确凿证据**：%d 次蜜饵标记出现在工具输出里" % now["canary_leak"])
+        print("        （内容被读过 ＋ 带出项目外。命令：antinel report --days %d 看是哪条工具）" % days)
+    elif now.get("sensitive_output"):
+        print("  🟠 未见蜜饵命中，但 %d 次输出命中敏感模式 —— 需要看一眼" % now["sensitive_output"])
+        print("        （命令：antinel report --days %d）" % days)
+    else:
+        print("  ⚪ **这一期没见到外传证据**")
+        print("        ★ 请读作『没查到』，**不是**『没有』——会偷的工具不会写记录。")
+        print("        想换更强的证据：antinel canary plant（埋标记，"
+              "标记出现在输出里才会被记下）")
+    _zero = now.get("untrusted_host", 0) + now.get("low_conf_host", 0)
+    if _zero:
+        print("        ⚠ 另有 %d 条记录的**宿主标签不可信**（旧格式，无归因证据）"
+              % _zero)
+        print("          —— 这部分连『哪个工具做的』都说不准，antinel report 会单列。")
+
+    # ── ② 比上期升了还是降了 ────────────────────────────────────────
+    print("")
+    print("【二】和上一期比")
+    _d = _period_delta(ad, days)
+    if _d is None:
+        print("  （上一期没有可比数据 —— 本机是新装的，或账本还没攒够 %d 天）" % (days * 2))
+    else:
+        print("  拦截次数   %d → %d  %s" % (_d["blocks"], now["blocks"], _arrow(now["blocks"], _d["blocks"])))
+        print("  操作次数   %d → %d  %s" % (_d["actions"], now["actions"], _arrow(now["actions"], _d["actions"])))
+        if now.get("canary_leak") or _d.get("canary_leak"):
+            print("  外传证据   %d → %d  %s" % (_d.get("canary_leak", 0), now.get("canary_leak", 0),
+                                                _arrow(now.get("canary_leak", 0), _d.get("canary_leak", 0))))
+        if now.get("fail_open") or _d.get("fail_open"):
+            print("  ⚠ 放行次数 %d → %d  %s（钩子异常放行＝当时闸门不在岗）"
+                  % (_d.get("fail_open", 0), now.get("fail_open", 0),
+                     _arrow(now.get("fail_open", 0), _d.get("fail_open", 0))))
+        print("  ★ 「操作变多」本身不是坏事（用得多）；**要盯的是拦截与放行**。")
+
+    # ── ③ 我现在该做什么 ────────────────────────────────────────────
+    print("")
+    print("【三】你现在要做的")
+    import host_shield as hs
+    try:
+        pend = hs.load_pending()
+    except Exception:
+        pend = []
+    todo = []
+    if pend:
+        todo.append(("🔴 %d 个落点等你表态（不表态就一直拦着）" % len(pend),
+                     'antinel host-shield queue   # 看清单\n'
+                     '        antinel host-shield decide "<路径>" allow_always｜deny'))
+    if now.get("fail_open"):
+        todo.append(("⚠ %d 次钩子异常导致放行 —— 闸门当时不在岗"
+                     % now["fail_open"],
+                     "python tools/enforce_probe.py   # 复检拦截信号是否真的生效"))
+    if now.get("gaps"):
+        todo.append(("🔴 %d 次「已判拦截但仍被执行」—— 宿主没尊重 deny 信号"
+                     % now["gaps"],
+                     "看 report 的【执法】段 ＋ 核对宿主钩子协议"))
+    if now.get("untrusted_host"):
+        todo.append(("⚠ %d 条记录的宿主标签不可信 —— 归因证据缺失"
+                     % now["untrusted_host"],
+                     "换宿主或宿主大版本更新后跑一次：python tools/probe_host.py"))
+    if not now.get("canary_leak") and not now.get("sensitive_output"):
+        todo.append(("○ 想把『没见到』变成『有证据』",
+                     "antinel canary plant   # 埋蜜饵，之后正常使用 AI 工具"))
+    if not todo:
+        print("  ✓ 这一期没有需要你动手的事。")
+    for i, (what, how) in enumerate(todo, 1):
+        print("  %d) %s" % (i, what))
+        print("     %s" % how)
+
+    # ── 覆盖声明（永远在最后，分母显式）────────────────────────────────
+    print("")
+    print("-" * 68)
+    print(" 覆盖：1 个项目 ｜ 本页只看【汇总计数】，逐条明细在 "
+          "`antinel report --days %d`" % days)
+    print(" 边界：规则只匹配工具调用文本，不解析脚本内容 —— 写进 .py/.sh 再执行不会被拦。")
+    print("       护栏不是隔离层。antinel verify 可独立复算本机账本。")
+    print("=" * 68)
+    return 0
+
+
+def _arrow(cur, prev):
+    """涨跌标记。**只标方向不标好坏**——拦截变多是正常的。"""
+    if cur == prev:
+        return "（持平）"
+    d = cur - prev
+    return "（%s%d）" % ("↑" if d > 0 else "↓", abs(d))
+
+
+def _period_delta(audit_dir, days):
+    """上期（再往前的 days 天）的聚合计数。
+
+    ★ 为什么不去 `_agg_audit` 里加一个 since 参数（那才是干净做法）：
+      本函数是 0.34.0 的临时实现，**宁可多写一行也不改被审计的判据** ——
+      `_agg_audit` 同时被 digest / morning 用着，改它的签名会牵动两个已发布命令。
+      TODO: 若这条命令活下来，把 since 参数做进 `_agg_audit`，本函数退化为调用它。
+    """
+    try:
+        from datetime import timedelta
+        # 取"days+1 .. days*2"这一段：先扫全量，再按 ts 的日期分段。
+        cur_lo = (datetime.now() - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+        hi = (datetime.now() - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+        lo = (datetime.now() - timedelta(days=days * 2 - 1)).strftime("%Y-%m-%d")
+        acts = blocks = warns = toks = fail_open = gaps = canary = 0
+        untrusted = 0
+        sd = _session_dna()
+        for day, rec in sd._rows(sd._iter_day_files(audit_dir), float("inf"), [False]):
+            d10 = day[:10]
+            if d10 > hi or d10 < lo:
+                continue
+            t = rec.get("type")
+            if t in ("pre_tool_use", "post_tool_use") and rec.get("host_confidence") is None:
+                untrusted += 1
+            if t == "pre_tool_use":
+                acts += 1
+                if rec.get("decision") == "block":
+                    blocks += 1
+                elif rec.get("decision") == "alert":
+                    warns += 1
+            elif t == "usage_delta":
+                for e in (rec.get("entries") or []):
+                    toks += (e.get("input_tokens") or 0) + (e.get("output_tokens") or 0)
+            elif t == "hook_error":
+                fail_open += 1
+            elif t == "enforcement_gap":
+                gaps += 1
+            elif t == "post_tool_use":
+                canary += len(rec.get("canaries_observed") or [])
+        return {"actions": acts, "blocks": blocks, "warnings": warns,
+                "tokens": toks, "fail_open": fail_open, "gaps": gaps,
+                "canary_leak": canary, "untrusted_host": untrusted}
+    except Exception:
+        return None
 
 
 def cmd_report(args):
@@ -2901,6 +3082,9 @@ def main(argv=None):
     p = sub.add_parser("report"); p.add_argument("--session", default="latest")
     p.add_argument("--write", action="store_true")
 
+    # ★ 0.34.0（E1）：决策层一页纸。默认不带参数就能跑（days 默认 7）。
+    p = sub.add_parser("brief"); p.add_argument("--days", type=int, default=7)
+
     p = sub.add_parser("hub"); ps = p.add_subparsers(dest="sub", required=True)
     q = ps.add_parser("register"); q.add_argument("path"); q.add_argument("--host")
     q = ps.add_parser("unregister"); q.add_argument("path")
@@ -3099,6 +3283,8 @@ def main(argv=None):
         cmd_verify(args)
     elif args.cmd == "report":
         cmd_report(args)
+    elif args.cmd == "brief":                     # ★ 0.34.0 (E1)
+        sys.exit(cmd_brief(args) or 0)
     elif args.cmd == "hub":
         cmd_hub(args)
     elif args.cmd == "routes":
