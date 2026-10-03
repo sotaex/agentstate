@@ -3,12 +3,12 @@
  "card_id": "antinel-security-suite",
  "skill": "antinel-security",
  "skill_version": "0.34.0",
- "verdict": "FAIL",
+ "verdict": "PASS",
  "status": {
   "value": "current",
   "derivation": "auto",
   "reason": null,
-  "checkedAt": "2026-10-03T18:02:39+08:00",
+  "checkedAt": "2026-10-03T18:19:54+08:00",
   "note": "re-derive any time: python tools/antinel_verify.py (--manifest for all 24 shipped files); which assertions failed: discrimination.failed[]"
  },
  "scope": {
@@ -51,17 +51,17 @@
    "op": "black-box subprocess assertions (stdin JSON in, exit code + stdout/stderr out)"
   },
   "assertions": {
-   "passed": 257,
-   "total": 257
+   "passed": 315,
+   "total": 315
   },
   "failed": [],
-  "partial": true
+  "partial": false
  },
  "platformSpec": true,
  "objectOwnership": "self",
  "objectOwnershipBasis": "subject github.com/sotaex is in the signed namespace list",
- "assertions_total": 257,
- "assertions_passed": 257,
+ "assertions_total": 315,
+ "assertions_passed": 315,
  "criteria_independence": "Assertions exercise the hook protocol, rule matching, scanner, installer and reporter as black boxes through subprocesses (stdin JSON in, exit code and stdout/stderr out); they were authored from the design specification ANT-SEC-SPEC-001 v1.1, not from the implementation; third-party re-run supported.",
  "environment": {
   "python": "3.13.14",
@@ -84,7 +84,7 @@
   "scripts/scan.py": "sha256:851eae8a722cb49e0c68b7dc46b78d3e041cacaee39ce549faf1b98aa1407108",
   "scripts/install.py": "sha256:96b760183c19c98134f57918c74a3063516c37c0f4c733c7af6eb57bda26ff7c",
   "scripts/report.py": "sha256:8dc8cf1fc7f4ea67312f356f5d655deed37ff32af4fefa548453ffde33e7c6e3",
-  "scripts/verification_tests.py": "sha256:f1122223ad12e817a6af6223161800eeeeaaa1f039fff9828c881c2b07115069",
+  "scripts/verification_tests.py": "sha256:50c123ab3c67cbe5c78d8f85bdb3a555424d93bac567cb20d24741e7e8a2ff9d",
   "session_dna.py": "sha256:80a0e8a33e953c3fdb67e2213d4500d66df449325b531fa688ca99b5a3fc54b4",
   "transcript_reader.py": "sha256:43c1cd4a4afeaf20d23c6583c9e438a12070f4c2433b554be0292a9cf28ae152",
   "audit_chain.py": "sha256:455d845c17bba87e4f5a929db728a989808c99950de7be99bf0d21c6062b0921",
@@ -93,11 +93,11 @@
   "tools/enforce_probe.py": "sha256:fa99191ad571a1d044e7aa537e78c03e0f902836b9e0a8265e23bc846f5b386f"
  },
  "run": {
-  "started_at": "2026-10-03T17:58:15+0800",
-  "duration_ms": 264308,
+  "started_at": "2026-10-03T18:11:53+0800",
+  "duration_ms": 481139,
   "duration_note": "wall-clock of a subprocess fan-out suite; machine- and load-dependent, not comparable across environments",
   "executor": "scripts/run_harness.py",
-  "exit_code": 1,
+  "exit_code": 0,
   "bootstrap": false
  },
  "re_run": "python scripts/run_harness.py",

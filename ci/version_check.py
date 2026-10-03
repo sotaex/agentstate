@@ -106,6 +106,44 @@ def extract():
     return out
 
 
+def _psl_verified_fails():
+    """判据 5：SKILL.md 的 psl-verified* 字段必须与 psl/judgment.json 一致。
+
+    ★ 为什么要它（2026-10-03 实测）：0.34.0 判定首次转绿后，SKILL.md 仍写着
+        psl-verified: "false"
+        psl-verified-evidence: "NOT VERIFIED for this build: ... verdict is 'FAIL'"
+      —— 写的时候它**是真的**，但判定一变它就**过期**，而**没有任何检查会红**。
+      一个自证卡上的字段长期说反话，比没有这个字段更坏（读者会当真）。
+
+    ⇒ 本判据只做**一致性**检查，不代替 judgment：
+      · judgment 说 PASS ⇒ SKILL.md 应为 verified:"true" 且 verified-at 非空；
+      · judgment 说 FAIL ⇒ SKILL.md 应为 false。
+      不一致 ⇒ FAIL，并**指名**该改哪一边。
+    """
+    out = []
+    sk = PKG / "SKILL.md"
+    jp = PKG / "psl" / "judgment.json"
+    if not sk.is_file() or not jp.is_file():
+        return ["判据 5 需 SKILL.md 与 psl/judgment.json 同时存在"]
+    try:
+        j = json.loads(jp.read_text(encoding="utf-8"))
+    except Exception as e:
+        return ["psl/judgment.json 解析失败：%r" % e]
+    want = "true" if j.get("verdict") == "PASS" else "false"
+    txt = sk.read_text(encoding="utf-8")
+    m = re.search(r'^\s*psl-verified:\s*"([^"]*)"', txt, re.M)
+    if not m:
+        return ["SKILL.md 里读不到 psl-verified 字段"]
+    if m.group(1) != want:
+        out.append("SKILL.md psl-verified=%r 与 judgment verdict=%r 不一致（应为 %r）"
+                   % (m.group(1), j.get("verdict"), want))
+    if want == "true":
+        ma = re.search(r'^\s*psl-verified-at:\s*"([^"]*)"', txt, re.M)
+        if not ma or not ma.group(1).strip():
+            out.append('verdict=PASS 但 psl-verified-at 为空 —— "什么时候验的"不能留白')
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--expect", help="期望版本（不给则用 psl/manifest.json 的 version）")
@@ -146,6 +184,19 @@ def main():
     gap = _inv3_superset_fails()
     if gap:
         fails.append("本清单漏了 INV-3 承载件：%s（两个检查器已分叉）" % ", ".join(gap))
+    # 判据 5（2026-10-03 新增）：SKILL.md 的 psl-verified 必须与 judgment 一致。
+    #   防的是「自证卡上的字段随判定过期而无人发现」——与判据 4 同一类病。
+    fails.extend(_psl_verified_fails())
+    # 判据 5（2026-10-03 新增）：SKILL.md 的 psl-verified 四字段必须与 judgment **一致**。
+    #   为什么需要：0.34.0 判定首次转绿后，SKILL.md 仍写着
+    #   `psl-verified: "false"` ＋ `"NOT VERIFIED ... verdict is 'FAIL'"`。
+    #   ★ 那**不是撒谎**（写的时候确实是 FAIL），但它会**随判定变化而过期**，
+    #     而**没有任何检查会变红** —— 于是一个自证卡上的字段可以长期说反话。
+    #   ⇒ 本判据把「SKILL.md 怎么说」与「judgment 实际是什么」绑在一起：
+    #     两者不一致就红。这与判据 4 防的是同一类病（两个检查器分叉）。
+    pv = _psl_verified_fails()
+    if pv:
+        fails.extend(pv)
 
     print()
     if not fails:
