@@ -23,6 +23,12 @@ TOOLS = [
          "required": []}},
     {"name": "antinel_report", "description": "查看最近会话的详细报告",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "antinel_brief",
+     "description": "决策层一页纸：数据有没有被 AI 工具带出去、比上期升还是降、"
+                    "现在该做什么。★ 企业场景问 Agent 的第一句就该用这个",
+     "inputSchema": {"type": "object", "properties": {
+         "days": {"type": "integer", "description": "统计天数（默认 7）"}},
+         "required": []}},
 ]
 
 def _run(args, cwd=None, timeout=60):
@@ -52,6 +58,16 @@ def exec_tool(name, args):
         return out or err
     elif name == "antinel_report":
         rc, out, err = _run([sys.executable, ANTINEL, "report", "--session", "latest"], root)
+        return out or err
+    elif name == "antinel_brief":
+        # ★ 0.34.0（E1/E5）：决策层一页纸。
+        #   为什么企业 Agent 需要它：前四个工具给的都是**工程口径**（日报／链校验／
+        #   单宿主中招报告／会话详情），而企业里最常问 Agent 的是
+        #   「有没有出事、要不要紧、我该做什么」—— 这三个问题的答案在 brief 里。
+        #   ⇒ 有了它，一个企业 Agent 才能**自己**回答"这台机器安全吗"，
+        #     而不是把一堆术语原样甩给人。
+        days = str((args or {}).get("days", 7))
+        rc, out, err = _run([sys.executable, ANTINEL, "brief", "--days", days], root)
         return out or err
     return "Unknown tool: " + name
 
