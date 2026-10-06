@@ -1,4 +1,4 @@
-# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.9（随 v0.34.0）
+# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.9（随 v0.35.1）
 
 > v1.9（0.33.1）：新增「归因与边界类」三条 —— `host_tag_uncertain`（归因自动取证）、
 > `hook_slow`（慢到超时的留痕）、`probe_used`（探针使用留痕，落 sidecar）。

@@ -119,8 +119,22 @@ def acquire_lock(fn):
                         os.remove(lock)             # holder is really gone; a
                         tlog("steal", age_s=round(age, 1),
                              pid=(c or {}).get("pid"))   # live holder keeps it.
-            except OSError:
+            except Exception:
+                # ★ 0.34.1 修：原为 `except OSError`。宿主删除守卫会抛出**非 OSError**
+                #   的异常（实测 `SAFE_DELETE_BULK_CONFIRM_REQUIRED`）⇒ 穿透 ⇒ 抢锁
+                #   路径当场崩。抢锁失败本来就该退化成"拿不到锁"（下面继续重试），
+                #   不该崩 —— 放宽到 Exception 与下方 release_lock 同一纪律。
                 pass
+            time.sleep(delay)
+            delay = min(delay * 1.25, 0.025)
+        except Exception:
+            # ★ 0.34.1 修（与 release_lock 同一纪律）：抢锁**失败必须退化成"拿不到锁"**，
+            #   不许把"一次追加"变成调用方崩溃。
+            #   实测（本机宿主删除守卫）：`os.open(lock, O_EXCL)` 抛的是**非
+            #   FileExistsError/PermissionError** ⇒ 穿透上面的窄 except ⇒
+            #   `append_chained` 整个抛出去 ⇒ 钩子 rc=1（记录没写成）。
+            #   放宽后的语义：**继续重试**；100 次用尽 ⇒ 返回 None ⇒
+            #   `append_chained` 落 sidecar（记录不丢，只是标 `chain:"unlocked"`）。
             time.sleep(delay)
             delay = min(delay * 1.25, 0.025)
     tlog("acq_timeout", waited_ms=round((time.time() - t0) * 1000))
@@ -128,14 +142,27 @@ def acquire_lock(fn):
 
 
 def release_lock(lock):
-    """C-2: 只释放仍属于我们的锁——token 不匹配（被偷过）就不动。"""
+    """C-2: 只释放仍属于我们的锁——token 不匹配（被偷过）就不动。
+
+    ★ 0.34.1 修：**释放锁是 best-effort，绝不许把"已经写成功的追加"变成崩溃。**
+      本函数在 `append_chained` 的 `finally:` 里被调用 ⇒ 它抛出的异常会掩盖
+      「记录已落盘」这个既成事实，并让调用方整个进程非零退出。
+      实测（本机宿主删除守卫）：`os.remove(lock)` 抛的是**非 OSError**，
+      穿透原来的 `except OSError` ⇒ 钩子 rc=1、canary rc=1，而记录其实已经写好
+      （半截成功＝最坏形状：外部看到"失败"，账本里却已经有了）。
+      放宽到 `except Exception` 后的语义：**锁没删掉只是退化**——30s 死锁回收
+      （acquire_lock）会接手，已落盘的记录不受影响。
+    """
     if not lock:
         return
-    c = read_lock(lock)
+    try:
+        c = read_lock(lock)
+    except Exception:
+        return
     if c and c.get("token") == LOCK_TOKEN:
         try:
             os.remove(lock)
-        except OSError:
+        except Exception:
             tlog("remove_err")
     else:
         tlog("release_skip")                        # 锁已易主：留给它的主人

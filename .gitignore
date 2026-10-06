@@ -14,9 +14,5 @@ _bump_version.py
 _resign_manifest.py
 _cleanup_junk.py
 _suite_probe.py
-# ★ 2026-10-03：安装副作用 —— 装到本仓时会在仓内生成 .qoder/settings.json
-#   （钩子注册）。它**是被安装的产物**，不是源码，**不入库**。
-#   否则：① 提交它等于把本机钩子配置塞进公共仓库；
-#        ② 别人 clone 下来就带着一个指向你机器的解释器路径。
 .qoder/
 .zcode/

@@ -1,5 +1,5 @@
 include README.md LICENSE pyproject.toml
-recursive-include tools *.md
+recursive-include tools *.md *.ps1
 recursive-include rules *.json
 recursive-include docs *
 recursive-include references *

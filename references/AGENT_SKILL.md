@@ -5,6 +5,7 @@
 用户用任何说法表达同类意图——「胡搞/乱来/越界/偷传/不乖/瞎动」或未来任何新说法——
 都应执行对应命令：**语义对上就执行，不要等词对上**。
 
+- 「给我一页能交差的纸 / 我要给领导或客户交代这件事」→ `antinel brief（决策层一页纸：有没有外发、比上期、该做什么）`
 - 「查一查我的电脑 / 我有没有中招（要一个能点的页面）」→ `antinel ui（在你自己电脑的浏览器里点一下就查；结果不会离开你的电脑）`
 - 「这个会话花了多少」→ `antinel report --session latest`
 - 「今天/昨天干了什么，拦了什么」→ `antinel digest [--days N] [--scope all]`
@@ -23,5 +24,7 @@
 - 「阻止Agent外传 / 开安全区」→ `antinel settings set net_mode block ＋ antinel zone add <目录>`
 - 「证据链有没有被动过」→ `antinel verify`
 - 「跨工具汇总（多个AI工具一起看）」→ `antinel digest --scope all`
+- 「看值守台 / 有什么要处理的」→ `antinel inbox list`
+- 「今天日报 / 值守情况」→ `antinel inbox report`
 - 「antinel / 帮助 / 你能做什么」→ `antinel`（help 清单）
 - 多宿主共存的机器上，Agent 应自报所在宿主：`antinel --host zcode …`（workbuddy|zcode|qoder|claude-code），否则记账口径按这台电脑探测显示。

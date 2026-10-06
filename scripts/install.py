@@ -573,8 +573,28 @@ def uninstall(root, purge=False):
         shutil.rmtree(root / ".psl")
         print(".psl/ removed (purge)")
     elif manifest_path.is_file():
-        manifest_path.unlink()
-        print("manifest removed; audit logs kept in .psl/audit (use --purge to delete)")
+        # ★ 0.34.1 修：**卸载不该因为"一次删不掉"就报失败。**
+        #   到这一行时，钩子已摘除、卸载留痕已写 —— 用户要的事已经做完了。
+        #   实测（本机宿主删除守卫）：裸 `unlink()` 抛**非 OSError** ⇒ 穿透 ⇒
+        #   整个卸载 rc=1，而用户看到的是"卸载失败"—— 实际是**半截成功**
+        #   （钩子摘干净了，只是清单没删掉），这是最坏的形状：外部信号与实际状态不符。
+        #   修法：先真删；失败就**改名让开**（本项目既有的零删除模式）；再失败才如实说。
+        _gone = False
+        try:
+            manifest_path.unlink()
+            _gone = True
+        except Exception:
+            try:
+                os.rename(str(manifest_path),
+                          str(manifest_path) + ".removed-%d" % os.getpid())
+                _gone = True
+            except Exception:
+                pass
+        if _gone:
+            print("manifest removed; audit logs kept in .psl/audit (use --purge to delete)")
+        else:
+            print("[Antinel] 清单没能删掉（%s）—— 钩子已摘除、留痕已写，"
+                  "残留该文件不影响卸载。" % manifest_path)
     return 0
 
 

@@ -810,9 +810,32 @@ class _ChainTail(object):
         return recs, saw_changed, reset
 
 
+def _sentinel_uptime(st):
+    """哨兵已活多久（秒）——读它自己登记的 `sentinel_started_at`；读不到返 None。
+
+    ★ 0.34.0 新增（F-17 配套）：判「心跳缺失」时需要第二个独立来源。
+      心跳（audit 目录里的记录）与启动时刻（state 文件）**是两处副本**，
+      单看一处就会出现「两处都查不到 ⇒ 不知道是真没有还是查不到」的盲区。
+      这里刻意只用**墙钟**（`sentinel_started_at` 是 ISO 字符串），不用 monotonic——
+      它跨进程，只能读墙钟；墙钟被回拨时本函数会返回负数，调用方按 <= 宽限期处理。
+    """
+    raw = st.get("sentinel_started_at")
+    if not raw:
+        return None
+    try:
+        t = datetime.fromisoformat(str(raw))
+    except (TypeError, ValueError):
+        return None
+    if t.tzinfo is None:                      # 2026-09-30：naive/aware 混比会 TypeError
+        t = t.astimezone()
+    return time.time() - t.timestamp()
+
+
 def ensure_alive(pkg_root, cause="manual"):
     """paramedic：布防中且哨兵不在/僵死 → 拉起并留痕；拉不起也留痕（不再沉默）。
     armed 以链为准（B4b 系）。心跳陈旧（B2 挂起/僵死）→ 杀掉重拉。
+    ★ 0.34.0（F-17）：心跳「查不到」不再等价于「还活着」——改看进程启动时刻定宽限，
+      见函数体内注释。
     返回 "disabled"|"throttled"|"alive"|"stale-revived"|"revived"|"spawn-failed"|"error"。"""
     try:
         st = load_state()
@@ -834,13 +857,51 @@ def ensure_alive(pkg_root, cause="manual"):
                 age = heartbeat_age(audit_dir)[0]
             except Exception:
                 age = None
-            if age is None or age <= _STALE_AFTER:
+            # ★★ 0.34.0 修 F-17（fail-open → 有条件 fail-closed）。
+            # 原判据：`if age is None or age <= _STALE_AFTER: return "alive"`。
+            # 问题：**`age is None`（查不到心跳）与「心跳新鲜」被当成同一件事** ⇒
+            #   哨兵一次都没打过心跳（首拍未到 / 审计目录被轮转清空 / 从未 armed）时，
+            #   ensure_alive 永远返回 "alive" ⇒ **哨兵僵死、永不重启**，而调用方
+            #   （host-shield status / morning / digest）读到的是"在岗"。
+            #   这是 B2 这条判据自己的**反面**：它本意是"pid 活着不等于在干活"，
+            #   却在"查不到"这一支上又退回了"pid 活着就算在干活"。
+            # 修法（三条，缺一不可）：
+            #   ① age 有值：按原口径与 _STALE_AFTER 比（不变）。
+            #   ② age 为 None：改看**进程自己报的启动时刻** `sentinel_started_at`。
+            #      距启动未满 _STALE_AFTER ⇒ 判"首拍未到"，返回 alive（**不误杀**，
+            #      否则每次冷启动都会杀掉刚起来的哨兵）。
+            #      距启动已超 _STALE_AFTER ⇒ 心跳**本该早就有了** ⇒ 判陈旧，走下面的
+            #      杀掉重拉（**不再把盲区读成清白**——与站点 /check/ 页
+            #      「⚪是结论、⚫是盲区，两者混在一起你会把盲区读成清白」同一条纪律）。
+            #   ③ 启动时刻也读不到（state 被改/损坏）⇒ 保守返回 alive 并留痕，
+            #      **不在无据时杀进程**（宁可少杀不可误杀：杀错的是用户的活进程）。
+            started_age = _sentinel_uptime(st)
+            if age is None:
+                if started_age is not None and started_age <= _STALE_AFTER:
+                    return "alive"                      # 首拍未到（armed 才打首拍）
+                if started_age is None:
+                    record(audit_dir, "host_shield_breach", decision="deny",
+                           severity="warning",
+                           reason="哨兵 pid=%s 活着但心跳与启动时刻均不可读——"
+                                  "无法判定在岗，保守不杀（宁可漏杀不可误杀）；"
+                                  "请人工检查" % old_pid)
+                    return "alive"
+                # 落到这里：进程活得比 _STALE_AFTER 久，却一条心跳都没有 → 判僵死
+            elif age <= _STALE_AFTER:
                 return "alive"
             img = _pid_image(old_pid) if old_pid else None
+            # ★ 0.34.0（F-17）：`age` 可能是 None（心跳一条都没有）。
+            #   下面三处文案都要用它换算分钟数 —— 直接 `age / 60.0` 会 TypeError，
+            #   而 ensure_alive 末尾的 `except Exception: return "error"` 会把它
+            #   **静默吞成一个 "error"**（实测：判死其实已经执行了、pid 也换了，
+            #   调用方却只看到 "error" ⇒ 又一次「盲区被读成结论」）。
+            #   ⇒ 判死文案必须能表达"从来没有心跳"这件事，而不是假装有一个年龄。
+            age_txt = ("从未有过心跳" if age is None
+                       else "%.0f 分钟前" % (age / 60.0))
             if img and not img.lower().endswith(("python.exe", "pythonw.exe")):
                 record(audit_dir, "host_shield_breach", decision="deny", severity="critical",
-                       reason="哨兵心跳陈旧（%.0f 分钟前）且旧进程镜像异常（%s），"
-                              "拒绝自动重启——须人工检查 pid=%s" % (age / 60.0, img, old_pid))
+                       reason="哨兵无心跳（%s）且旧进程镜像异常（%s），"
+                              "拒绝自动重启——须人工检查 pid=%s" % (age_txt, img, old_pid))
                 return "stale-revived"
             if old_pid:
                 subprocess.run([_TASKKILL, "/F", "/PID", str(old_pid)],
@@ -849,12 +910,13 @@ def ensure_alive(pkg_root, cause="manual"):
             ok, pid, mode = spawn_sentinel(pkg_root)
             if ok:
                 record(audit_dir, "host_shield_revived", decision="allow", severity="critical",
-                       reason="哨兵心跳陈旧（%.0f 分钟前，疑似挂起/僵死），已强制重启"
-                              "（旧 pid=%s，mode=%s）" % (age / 60.0, old_pid, mode),
+                       reason="哨兵无心跳（%s，疑似挂起/僵死），已强制重启"
+                              "（旧 pid=%s，mode=%s）" % (age_txt, old_pid, mode),
                        pid=pid, cause=cause, spawn_mode=mode)
                 return "stale-revived"
             record(audit_dir, "host_shield_spawn_failed", decision="deny", severity="critical",
-                   reason="哨兵心跳陈旧且重启失败（旧 pid=%s，cause=%s）——门闸无人值守" % (old_pid, cause),
+                   reason="哨兵无心跳（%s）且重启失败（旧 pid=%s，cause=%s）——门闸无人值守"
+                          % (age_txt, old_pid, cause),
                    cause=cause)
             return "spawn-failed"
         st["last_revive_attempt"] = now

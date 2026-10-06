@@ -77,6 +77,10 @@ _LAYOUT = {
     "antinel_verify.py":         "tools/antinel_verify.py",
     "verify_namespaces.py":      "tools/verify_namespaces.py",
     "verify_chain.py":           "tools/verify_chain.py",
+    # ★ 0.35.0：值守台托盘渲染脚本。`inbox_tray.script_path()` 找的是
+    #   `<包目录>/tools/tray.ps1` —— 不登记进布局表，`srcfile("tray.ps1")`
+    #   会去找仓根的 tray.ps1（不存在）⇒ 静默少拷一个文件（A1 同款病）。
+    "tray.ps1":                  "tools/tray.ps1",
 }
 
 # 必须存在 = 缺了就**不许构建**。其余（pricing/namespaces 生成器等）允许缺，
@@ -161,7 +165,7 @@ HARNESS_SRC = SRC / "scripts" / "verification_tests.py"
 if not HARNESS_SRC.is_file():
     raise SystemExit("★ 构建器找不到套件：%s\n  （产物仓构建必须用本仓的套件）" % HARNESS_SRC)
 NAME = "antinel-security"
-VERSION = "0.34.0"
+VERSION = "0.35.1"
 # P-A3: the namespace this build declares itself under. derive_object_ownership()
 # reads git remote first, then THIS field; fail-closed unattributed when neither
 # resolves. Kept beside the hashes so a third party can see what was declared.
@@ -226,13 +230,24 @@ antinel = "antinel:main"
 [tool.setuptools]
 py-modules = ["antinel", "audit_chain", "session_dna", "strings",
               "transcript_reader", "host_shield", "hub", "antinel_mcp", "egress",
-              "ui_server"]
-packages = ["hooks", "scripts", "tools", "rules", "psl"]
+              "ui_server",
+              # ★ 0.35.0 值守台：13 个新模块（与 build() 里的 root_mod 复制清单逐字一致）
+              "inbox_model", "inbox_store", "inbox_report", "inbox_server",
+              "inbox_tray", "inbox_notify", "inbox_emphasis", "inbox_fallback",
+              "inbox_daemon", "inbox_config", "inbox_cli",
+              "ledger", "heartbeat"]
+packages = ["hooks", "scripts", "tools", "rules", "psl", "assets"]
 
 [tool.setuptools.package-data]
 rules = ["*.json"]
 psl = ["*.json", "*.md"]
 hooks = ["*.py"]
+# ★ 0.35.0 值守台静态资源。实测（_p9_wheeltest 构建中间产物
+#   `build/bdist.*/wheel/assets/`）：**这三条 glob 本身就够**，11 个文件全进 wheel。
+#   `_manifest_for` **不会**再为 assets 生成 `recursive-include` —— 它只补
+#   package-data 覆盖不到的文件（如 `rules/hosts/*.json`）。非 package 目录
+#   （docs/ references/）只进 sdist，wheel 里 0 个（实测）。
+assets = ["icons/*.ico", "logo/*.mp4", "logo/*.svg"]
 """
 
 # 2026-09-24 (G7): files that live in the package repo but are NOT produced by
@@ -1587,7 +1602,14 @@ def build(out_root, verify=False):
     #   旧的 `dist/*.whl` 之所以能跑，只是因为陈旧 `build/` 把它带了进去 —— **假绿**。
     for root_mod in ("session_dna.py", "transcript_reader.py", "audit_chain.py",
                      "antinel.py", "antinel_mcp.py", "hub.py", "host_shield.py", "strings.py", "egress.py",
-                     "ui_server.py"):  # 0.26: +i18n; 0.28: +audit_chain; 0.33.2: +ui_server
+                     "ui_server.py",  # 0.26: +i18n; 0.28: +audit_chain; 0.33.2: +ui_server
+                     # ★ 0.35.0：值守台 13 个模块。**必须与 PYPROJECT 的 py-modules 逐字一致**：
+                     #   这里少一个 ⇒ 干净树打 wheel 缺文件、用户 import 就炸；
+                     #   那里少一个 ⇒ 同样。构建末尾的 `_check_*` 守卫会同时盯住两边。
+                     "inbox_model.py", "inbox_store.py", "inbox_report.py", "inbox_server.py",
+                     "inbox_tray.py", "inbox_notify.py", "inbox_emphasis.py", "inbox_fallback.py",
+                     "inbox_daemon.py", "inbox_config.py", "inbox_cli.py",
+                     "ledger.py", "heartbeat.py"):
         # 2026-09-24 (G7): antinel_mcp.py was declared in pyproject.toml's
         # py-modules and shipped in the repo, but this list never copied it --
         # so a rebuild deleted it while pyproject kept declaring it. Same class
@@ -1596,6 +1618,28 @@ def build(out_root, verify=False):
         m = srcfile(root_mod)
         if m.is_file():
             shutil.copy2(m, pkg / root_mod)
+    # ★ 0.35.0：值守台静态资源（五态 MP4 ＋ 五态 .ico ＋ logo.svg）。
+    #   页面按 `<模块目录>/assets/...` 取（`inbox_server.ASSETS_DIR`），
+    #   托盘按 `<模块目录>/assets/icons/...` 取（`inbox_tray.icon_path`）。
+    #   ⇒ 它必须与模块**同级**落进 site-packages。实测（_p9_wheeltest）：**声明为 package
+    #     的目录**里的文件才进 wheel —— assets 靠 package-data 的 3 条 glob 全进（11/11），
+    #     `rules/hosts/*.json` 靠 `recursive-include rules *.json` 进（24 个），
+    #     而 `docs/` 不是 package ⇒ wheel 里 0 个。
+    #   所以 assets 已登记进 PYPROJECT 的 packages ＋ package-data，并在 _LAYOUT 之外单独复制。
+    assets_src = SRC / "assets"
+    if assets_src.is_dir():
+        _n_assets = 0
+        for _f in assets_src.rglob("*"):
+            if _f.is_file():
+                _dst = pkg / "assets" / _f.relative_to(assets_src)
+                _dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(_f, _dst)
+                _n_assets += 1
+        print("assets copied: %d file(s) -> %s" % (_n_assets, pkg / "assets"))
+    else:
+        # 「没查到」必须与「没发现」长得不一样：资源缺失不是构建错误，
+        # 但必须**说出来**，否则页面静默无图标，没人知道为什么。
+        print("   [notice] 源码树没有 assets/ —— 值守台页面/托盘将没有图标与 LOGO（非错误）")
     econ_src = SRC / "rules" / "economics"           # 0.23.1: 按宿主经济画像
     if econ_src.is_dir():
         (pkg / "rules" / "economics").mkdir(exist_ok=True)
@@ -1686,7 +1730,8 @@ def build(out_root, verify=False):
     # A-8: named status-derivation tool + the L10 chain verifier + the namespace
     # verification aid, all shipped in tools/
     (pkg / "tools").mkdir(exist_ok=True)
-    for tool_dst in ("antinel_verify.py", "verify_namespaces.py", "verify_chain.py"):
+    for tool_dst in ("antinel_verify.py", "verify_namespaces.py", "verify_chain.py",
+                     "tray.ps1"):   # ★ 0.35.0：值守台托盘脚本（经 _LAYOUT → tools/tray.ps1）
         s = srcfile(tool_dst)
         if s.is_file():
             shutil.copy2(s, pkg / "tools" / tool_dst)

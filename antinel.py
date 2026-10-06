@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""antinel v0.34.0 - antinel 单入口（定稿方案 v1.1/v1.2）.
+"""antinel v0.34.1 - antinel 单入口（定稿方案 v1.1/v1.2）.
 
 用户面只有这一个名字：配置、账本、报告、校验、中枢，全部在 `antinel` 下。
 无参数 = help 清单（命令 + "你可以对 Agent 说的话"，与 skill 路由件由同一份
@@ -34,7 +34,7 @@ if _HERE not in sys.path:
 
 from strings import detect_lang, get_string
 
-VERSION = "0.34.0"
+VERSION = "0.35.1"
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
@@ -66,6 +66,10 @@ ROUTES = [
     ("阻止Agent外传 / 开安全区", "antinel settings set net_mode block ＋ antinel zone add <目录>", "防范"),
     ("证据链有没有被动过", "antinel verify", "账本"),
     ("跨工具汇总（多个AI工具一起看）", "antinel digest --scope all", "审核"),
+    # ★ 0.35.0：值守台 —— 把 15 秒就消失的气泡，变成能翻、能点、能归档的台账。
+    #   分类＝审核（"已经发生了什么"），与 digest/ui 同栏。
+    ("看值守台 / 有什么要处理的", "antinel inbox list", "审核"),
+    ("今天日报 / 值守情况", "antinel inbox report", "审核"),
 ]
 
 SETTINGS_KEYS = {
@@ -3130,6 +3134,13 @@ def main(argv=None):
     q = ps.add_parser("unlock"); q.add_argument("path")
     # 0.29.0 (H-2)：待裁决队列的呈现端（此前只有记录端，报告写了没人看）。
     ps.add_parser("queue")
+    # ★ 0.35.0：值守台 —— 自包含 CLI（收件箱 / 日报 / 托盘 / 守护进程 / 心跳配置）。
+    #   `REMAINDER` 把 `antinel inbox` 之后的全部参数**原样**交给 inbox_cli 自己的
+    #   argparse；这样将来给 inbox 加子命令**不必再动 antinel.py**
+    #   —— 集成面永远只有这 6 行，`inbox_cli` 可整体摘除而不影响别处。
+    p = sub.add_parser("inbox")
+    p.add_argument("rest", nargs=argparse.REMAINDER)
+
     # 0.29.1：本地体检页 —— 网站点不到你的硬盘，真正去查的必须是你电脑上的程序。
     import ui_server
     p = sub.add_parser("ui")
@@ -3317,6 +3328,9 @@ def main(argv=None):
         cmd_routes(args)
     elif args.cmd == "host-shield":
         cmd_host_shield(args)
+    elif args.cmd == "inbox":                     # ★ 0.35.0：值守台（自包含 CLI）
+        import inbox_cli
+        return inbox_cli.main(args.rest)
     elif args.cmd == "host-audit":
         cmd_host_audit(args)
     elif args.cmd == "host-scan":

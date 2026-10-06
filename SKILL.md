@@ -12,19 +12,14 @@ description: >
 license: MIT
 compatibility: Requires Python 3.10+; standard library only; no network access; no third-party packages. Hooks verified on Claude Code and ZCode (identical protocol); Qoder/TRAE profiles declared but unverified.
 metadata:
-  # ★ 0.34.0（2026-10-03T18:19:54+08:00）：判定首次转绿，字段随之同步。
-  #   此前长期是 "false" ＋ "NOT VERIFIED ... verdict is 'FAIL'"——
-  #   那是**如实**写的（verdict 确实 FAIL），但它会随判定变化而过期。
-  #   ⇒ 规矩：**judgment 每次重跑后都要回头核这四个字段**，否则
-  #   「记录 ≠ 实际」这条会第一次出现在**产品自己的自证卡上**。
-  psl-verified: "true"
+  psl-verified: "false"
   psl-verified-spec: "psl-vs-0.1"
-  psl-verified-at: "2026-10-03T18:19:54+08:00"
-  psl-verified-evidence: "verdict PASS, 315/315 assertions, 0 failed, partial=false; re-derive: python scripts/run_harness.py"
+  psl-verified-at: ""
+  psl-verified-evidence: "NOT VERIFIED for this build: judgment verdict is 'FAIL', not PASS"
   psl-verifier: "scripts/run_harness.py"
   antinel-product: "security-audit"
   antinel-tier: "free"
-  antinel-version: "0.34.0"
+  antinel-version: "0.35.1"
   psl-token-interception: "false"
 ---
 

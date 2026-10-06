@@ -1,5 +1,5 @@
 {
-  "version": "0.33.2",
+  "version": "0.35.1",
   "description": "Antinel Security Suite default detection rules (37 rules, 4 gates + canary/supply-chain families; flat layout: patterns at rule top level)",
   "gates": {
     "secrets": "Gate 2 sensitive surface",
@@ -983,7 +983,7 @@
         "Bash"
       ],
       "description": "MCP configuration file written/modified -- verify the new server's source, command and url (malicious MCP servers are an active 2025-2026 supply-chain channel)",
-      "remediation": "核对新增 server 的来源与 command/url；不认识的一律移除并轮换相关凭据",
+      "remediation": "Verify the new server's source, command and url; remove any you do not recognize and rotate the related credentials.",
       "description_zh": "MCP 配置文件被写入或修改",
       "remediation_zh": "核对新增 server 的来源与 command/url；不认识的一律移除并轮换相关凭据",
       "note": "0.32.1：content_patterns 收紧为 Bash **写形态**（重定向/tee/cp/mv + 配置文件名）——旧版 `cat .mcp.json`（纯读取）也会命中，属于误报；读取可见性由 MCP-02（Read 通道）承担。"
@@ -1015,7 +1015,7 @@
         "Edit"
       ],
       "description": "MCP tool description/config contains prompt-injection patterns (tool-poisoning class; postmark-mcp case)",
-      "remediation": "移除该 MCP 服务器并核查其来源；工具描述里的指令会在每次工具调用时进入模型上下文",
+      "remediation": "Remove that MCP server and check where it came from; instructions in a tool description enter the model context on every tool call.",
       "description_zh": "MCP 工具描述/配置中发现提示注入模式（工具投毒类；postmark-mcp 案例）",
       "remediation_zh": "移除该 MCP 服务器并核查其来源；工具描述里的指令会在每次工具调用时进入模型上下文"
     },
@@ -1043,7 +1043,7 @@
         "Edit"
       ],
       "description": "MCP config references a remote server (http url or mcp-remote bridge) -- remote tool definitions can change silently after approval",
-      "remediation": "确认远程端点的可信度；优先本地 stdio server；远程定义变更不受你控制",
+      "remediation": "Confirm the remote endpoint is trustworthy; prefer a local stdio server -- remote tool definitions can change without your control.",
       "description_zh": "MCP 配置引用远程服务器（http url 或 mcp-remote 桥接）",
       "remediation_zh": "确认远程端点可信；优先本地 stdio server；远程定义变更不受你控制"
     },
@@ -1075,7 +1075,7 @@
         "Edit"
       ],
       "description": "Plaintext API key/token inside MCP config env block (config files get synced, shared and committed far more often than .env)",
-      "remediation": "改用凭据引用/环境注入；已写入的密钥视为已泄露并轮换",
+      "remediation": "Use credential references or environment injection instead; treat any key already written as leaked and rotate it.",
       "description_zh": "MCP 配置 env 块中存在明文密钥",
       "remediation_zh": "改用凭据引用/环境注入；已写入的密钥视为已泄露并轮换"
     },
@@ -1094,7 +1094,7 @@
         "Bash"
       ],
       "description": "Agent read a canary file -- if its marker (CANARY-*) appears in any external channel, that proves exfiltration of project content",
-      "remediation": "记录并观察：金丝雀被读取本身不是泄露，标记出现在外部通道才是证据（report 的 canaries 统计）",
+      "remediation": "Record and observe: reading a canary is not itself a leak -- the marker appearing in an external channel is the evidence (see the canaries count in `report`).",
       "description_zh": "Agent 读取了金丝雀文件",
       "remediation_zh": "记录并观察：金丝雀被读取本身不是泄露，标记出现在外部通道才是证据（report 的 canaries 统计）",
       "note": "0.31.0 F3：**故意只 alert 不拦** —— 拦下就观察不到外传链路；输出中出现 CANARY 标记由 post_tool_use 的 canaries_observed 既有机制接管。",
@@ -1116,7 +1116,7 @@
         "Bash"
       ],
       "description": "Install command references a package name suspiciously close to a popular package (typosquatting / slopsquatting class). Determined by the hook's built-in reference set (rules/typosquat_top.json, static, dated) -- new packages published after the set date are not judged.",
-      "remediation": "核对包名拼写与官方文档；确认后再安装；已安装的立即移除并轮换凭据",
+      "remediation": "Check the package name against the official docs; install only after confirming; remove anything already installed and rotate credentials.",
       "description_zh": "安装命令中的包名与热门包高度相近（撞名/slopsquatting 类）",
       "remediation_zh": "核对包名拼写与官方文档；确认后再安装；已安装的立即移除并轮换凭据",
       "note": "0.32.0 (F6)：enabled=false —— 本条目只承载描述/文档；判定由钩子内置参考集特判（_slop_hit，同 _budget_hit 先例），避免静态正则误报全部正常安装。"

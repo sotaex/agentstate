@@ -706,6 +706,17 @@ def main(argv=None):
     ap.add_argument("--session", help="session DNA: aggregate one session's audit records")
     ap.add_argument("--write-dna", action="store_true",
                     help="with --session: append the DNA to the audit chain (chained)")
+    # ★ 0.34.0 (E5)：按人分层。
+    #   动机（实测）：本报告 19 行正文里有 8 行是给**安全工程师**看的
+    #   （config health / hook health / host attribution / enforcement probe /
+    #    gate alive days / rules fallback / trust-boundary edits /
+    #    whitelist-released secrets reads）—— 这些是真价值，**一行都不删**。
+    #   ★ 但**决策层要的三个数字一个都没有**（有没有外发／比上期／该做什么）。
+    #   ⇒ `--audience exec` 走 `antinel brief`（同一份账本，同一套判据），
+    #     默认 `engineer` = 本文件原有行为，**一字不变**（向后兼容）。
+    ap.add_argument("--audience", default="engineer",
+                    choices=["engineer", "exec"],
+                    help="engineer=完整技术报告（默认）；exec=决策层一页纸（转 antinel brief）")
     args = ap.parse_args(argv)
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -714,6 +725,20 @@ def main(argv=None):
 
     root = Path(args.root).resolve()
     log_path = Path(args.log) if args.log else root / ".psl" / "audit"
+
+    # ★ 0.34.0 (E5)：`--audience exec` 派发到 `antinel brief`。
+    #   ★ 派发而不是复制实现：`brief` 在 antinel.py 里，本文件不 import 它
+    #     （它 import 本文件，复过来会成环）⇒ 用同目录的 antinel.py 跑一次子进程。
+    #   ⇒ 判据只有**一处**（`antinel._agg_audit`），两层视图口径天然一致。
+    if args.audience == "exec":
+        import subprocess as _sp, sys as _sys
+        # ★ antinel.py 在**包根**，不在 scripts/（本文件在 scripts/）——
+        #   随包布局与源仓布局都是 `../antinel.py`。
+        _here = Path(__file__).resolve().parent
+        _argv = [_sys.executable, str(_here.parent / "antinel.py"), "brief"]
+        if args.days:
+            _argv += ["--days", str(args.days)]
+        return _sp.call(_argv)
 
     if args.session:
         return _session_dna_main(args, root, log_path)

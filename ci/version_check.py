@@ -16,11 +16,13 @@
   与 `docs/AUDIT_SCHEMA.md`；是 `antinel_verify.py --invariants` 的 INV-3 抓出来的。
   ⇒ 现在加判据 4：**本清单必须是 INV-3 清单的超集**，否则本检查器自己就是假守卫。
 
-★ 判据设计（四条，都要能红）
+★ 判据设计（六条，都要能红）
   1. 逐处抽取值，**全部相同**才通过；列出每处的实际值供定位
   2. 抽不到值 ⇒ **FAIL**（不是 SKIP）—— 「查不出来 ≠ 查出来是好的」
   3. 与 `--expect` 一致（发布前用）
   4. 本清单 ⊇ `antinel_verify.py::_VERSION_HARD`（防两个检查器分叉）
+  5. SKILL.md 的 psl-verified* 必须与 psl/judgment.json 的 verdict 一致（防「自证卡过期」）
+  6. server.json 的 stability.schema 必须与 docs/AUDIT_SCHEMA.md 抬头一致（防「对外清单声明旧模式」）
 
 用法：
     python ci/version_check.py
@@ -144,6 +146,54 @@ def _psl_verified_fails():
     return out
 
 
+def _stability_schema_fails():
+    """判据 6：server.json 的 stability.schema 必须与 docs/AUDIT_SCHEMA.md 抬头一致。
+
+    ★ 为什么要它（2026-10-05 实测）：`server.json` 的 `stability.schema` 停在
+        "AUDIT_SCHEMA v1.2, changes registered append-only"
+      —— 那是 **v0.28.0 时代的快照**（同 commit `fa716ed` 里 AUDIT_SCHEMA.md 抬头
+      正是 v1.2），此后文档升到 v1.9，而这个字段**没有任何检查项读它**
+      （全仓 grep `stability` 命中 0 个 .py）。
+      ⇒ 一个对外发布的 MCP 清单，在向注册表声明一个 7 版之前的模式版本，无人发现。
+
+    ★ 与判据 5 同一类病：**声明会随真源演进而过期，而没有东西会红。**
+      真源是**文档抬头**（人维护、有版本纪律），不是本文件里再抄一份 ——
+      判据不许二次实现，只做「读真源、比被检对象」。
+    """
+    out = []
+    doc = PKG / "docs" / "AUDIT_SCHEMA.md"
+    if not doc.is_file():
+        doc = PKG / "AUDIT_SCHEMA.md"           # 源仓布局回退（与 SPOTS 同法）
+    if not doc.is_file():
+        return ["判据 6 找不到 AUDIT_SCHEMA.md（真源缺失 ⇒ 假守卫，不许静默通过）"]
+    try:
+        dt = doc.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        return ["判据 6 读 AUDIT_SCHEMA.md 失败：%r" % e]
+    md = re.search(r'审计记录模式\s*v(\d+\.\d+)', dt)
+    if not md:
+        return ["判据 6 从 AUDIT_SCHEMA.md 抬头抽不到模式版本（格式变了 ⇒ 检查器会瞎）"]
+    want = md.group(1)
+
+    sj = PKG / "server.json"
+    if not sj.is_file():
+        return ["判据 6 找不到 server.json（被检对象缺失 ⇒ 假守卫）"]
+    try:
+        st = json.loads(sj.read_text(encoding="utf-8")).get("stability") or {}
+    except Exception as e:
+        return ["判据 6 解析 server.json 失败：%r" % e]
+    schema = str(st.get("schema") or "")
+    ms = re.search(r'AUDIT_SCHEMA\s*v(\d+\.\d+)', schema)
+    if not ms:
+        return ["判据 6 server.json 的 stability.schema 抽不到版本：%r" % schema]
+    got = ms.group(1)
+    if got != want:
+        out.append("server.json stability.schema 声明 AUDIT_SCHEMA v%s，而 docs/AUDIT_SCHEMA.md "
+                   "抬头是 v%s ⇒ 对外清单在声明一个过期的模式版本（改 server.json，别改文档）"
+                   % (got, want))
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--expect", help="期望版本（不给则用 psl/manifest.json 的 version）")
@@ -184,9 +234,6 @@ def main():
     gap = _inv3_superset_fails()
     if gap:
         fails.append("本清单漏了 INV-3 承载件：%s（两个检查器已分叉）" % ", ".join(gap))
-    # 判据 5（2026-10-03 新增）：SKILL.md 的 psl-verified 必须与 judgment 一致。
-    #   防的是「自证卡上的字段随判定过期而无人发现」——与判据 4 同一类病。
-    fails.extend(_psl_verified_fails())
     # 判据 5（2026-10-03 新增）：SKILL.md 的 psl-verified 四字段必须与 judgment **一致**。
     #   为什么需要：0.34.0 判定首次转绿后，SKILL.md 仍写着
     #   `psl-verified: "false"` ＋ `"NOT VERIFIED ... verdict is 'FAIL'"`。
@@ -197,6 +244,9 @@ def main():
     pv = _psl_verified_fails()
     if pv:
         fails.extend(pv)
+    # 判据 6（2026-10-05 新增）：server.json 的 stability.schema 必须与 AUDIT_SCHEMA.md 抬头一致。
+    #   防的是「对外清单声明一个过期的模式版本而无人发现」——与判据 5 同一类病。
+    fails.extend(_stability_schema_fails())
 
     print()
     if not fails:

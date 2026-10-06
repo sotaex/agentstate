@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""AgentState v0.30.0 - antinel 单入口（定稿方案 v1.1/v1.2）.
+"""antinel v0.34.1 - antinel 单入口（定稿方案 v1.1/v1.2）.
 
 用户面只有这一个名字：配置、账本、报告、校验、中枢，全部在 `antinel` 下。
 无参数 = help 清单（命令 + "你可以对 Agent 说的话"，与 skill 路由件由同一份
@@ -34,7 +34,7 @@ if _HERE not in sys.path:
 
 from strings import detect_lang, get_string
 
-VERSION = "0.33.2"
+VERSION = "0.35.1"
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
@@ -44,6 +44,8 @@ if _HERE not in sys.path:
 #   旧分类按**功能类型**分，用户想问"我电脑有没有中招"得自己在"报告"里翻。
 #   现在按**用户要办的事**分：审核＝已经发生了什么；防范＝正在发生时拦不拦。
 ROUTES = [
+    ("给我一页能交差的纸 / 我要给领导或客户交代这件事",
+     "antinel brief（决策层一页纸：有没有外发、比上期、该做什么）", "审核"),
     ("查一查我的电脑 / 我有没有中招（要一个能点的页面）",
      "antinel ui（在你自己电脑的浏览器里点一下就查；结果不会离开你的电脑）", "审核"),
     ("这个会话花了多少", "antinel report --session latest", "账本"),
@@ -64,6 +66,10 @@ ROUTES = [
     ("阻止Agent外传 / 开安全区", "antinel settings set net_mode block ＋ antinel zone add <目录>", "防范"),
     ("证据链有没有被动过", "antinel verify", "账本"),
     ("跨工具汇总（多个AI工具一起看）", "antinel digest --scope all", "审核"),
+    # ★ 0.35.0：值守台 —— 把 15 秒就消失的气泡，变成能翻、能点、能归档的台账。
+    #   分类＝审核（"已经发生了什么"），与 digest/ui 同栏。
+    ("看值守台 / 有什么要处理的", "antinel inbox list", "审核"),
+    ("今天日报 / 值守情况", "antinel inbox report", "审核"),
 ]
 
 SETTINGS_KEYS = {
@@ -594,6 +600,9 @@ def _agg_audit(audit_dir, days):
     fail_open = 0
     host_changes = 0
     untrusted_host = low_conf_host = 0        # 0.33.1 (P4-1)
+    canary_leak = 0                           # 0.34.0 (E2)：蜜饵标记出现在工具输出里
+    sens_out = 0                              # 0.34.0 (E2)：输出命中敏感模式
+    canary_marks = {}                         # marker -> 首次 ts
     pre_ts = {}
     post_ts = {}
     probe_last = None
@@ -651,11 +660,29 @@ def _agg_audit(audit_dir, days):
             _dg = rec.get("content_digest")
             if _dg:
                 post_ts[_dg] = rec.get("ts")
+            # ★★ 0.34.0（E2）：**数据外发**进日常视图。
+            #   为什么加：canary 是本产品唯一能给出"内容真的出去了"的**主动证据**
+            #   （SEC-11 埋的蜜饵标记一旦出现在工具输出里 ⇒ 读过 ＋ 带出去过）。
+            #   而它此前**只**在 `report` 的 canaries 统计里，`digest`/`morning`
+            #   这两个用户最常看的视图**完全没有这个数字** ——
+            #   也就是"最该被看到的风险"在"最常被看到的界面"上缺席。
+            #   口径（与 report.py 一致，不二次实现判据）：
+            #     · canaries_observed 非空 ⇒ 蜜饵标记出现在输出里 ⇒ 强证据
+            #     · sensitive_output 非空  ⇒ 输出里命中了敏感模式
+            for _c in (rec.get("canaries_observed") or []):
+                canary_leak += 1
+                _mk = _c if isinstance(_c, str) else (_c.get("marker") or "")
+                if _mk and _mk not in canary_marks:
+                    canary_marks[_mk] = rec.get("ts")
+            for _s in (rec.get("sensitive_output") or []):
+                sens_out += 1
     return {"actions": acts, "blocks": blocks, "warnings": warns,
             "by_rule": by_rule, "tokens": toks,
             "gaps": gaps, "probe_ok": probe_ok, "probe_fail": probe_fail,
             "fail_open": fail_open, "host_changes": host_changes,
             "untrusted_host": untrusted_host, "low_conf_host": low_conf_host,
+            "canary_leak": canary_leak, "canary_marks": canary_marks,
+            "sensitive_output": sens_out,
             "pre_ts": pre_ts, "post_ts": post_ts,
             "probe_last": probe_last}
 
@@ -768,8 +795,16 @@ def cmd_digest(args):
     per = []
     total = {"actions": 0, "blocks": 0, "warnings": 0, "tokens": 0,
              "gaps": 0, "probe_ok": 0, "probe_fail": 0, "fail_open": 0,
-             "host_changes": 0, "untrusted_host": 0, "low_conf_host": 0}
+             "host_changes": 0, "untrusted_host": 0, "low_conf_host": 0,
+             # ★ 0.34.0（E2）：与 _agg_audit 的返回键**一一对应**。
+             #   漏一个就会在这一行 KeyError —— `for k in total: total[k] += a[k]`
+             #   是按 total 的键去 a 里取值，两边必须同集合。
+             "canary_leak": 0, "sensitive_output": 0}
+    # ★ 0.34.0（E2）：canary_marks 是 **dict**（marker→首次 ts），
+    #   不能进 `for k in total: total[k] += a[k]` 那个加法循环（dict += dict 会炸），
+    #   所以它不进 total，单独维护并在合并时 update。
     heads = {}
+    total_marks = {}                          # ★ 0.34.0 (E2)
     for proot, host, _meta in projects:
         ad = _audit_dir(proot)
         if not os.path.isdir(ad):
@@ -779,6 +814,10 @@ def cmd_digest(args):
         per.append(a)
         for k in total:
             total[k] += a[k]
+        # ★ 0.34.0（E2）：marker→首次 ts 跨项目合并（dict 单独 update，不进上面的加法）
+        for _mk, _ts in (a.get("canary_marks") or {}).items():
+            if _mk not in total_marks or (total_marks[_mk] and _ts < total_marks[_mk]):
+                total_marks[_mk] = _ts
         try:
             man = _load_json(os.path.join(ad, "day_manifest.json"))
             today = datetime.now().strftime("%Y-%m-%d.jsonl")
@@ -809,6 +848,26 @@ def cmd_digest(args):
           "token 进出 %s（事实）；记账口径 %s=%s%s。"
           % (days, len(per), total["actions"], total["blocks"],
              format(total["tokens"], ","), detect_host(), unit, econ))
+    # ★★ 0.34.0（E2）：**「数据有没有出去」提到首屏**。
+    #   为什么放在【一句话】之后、其它段之前：用户装这个工具，问的第一个问题是
+    #   "我的东西有没有被传出去"，而这个答案此前**只**在 `report` 里 ——
+    #   `digest`/`morning` 这两个最常被看的视图**没有它**。
+    #   口径诚实（与 report.py /canary plant 同一套判据，不二次实现）：
+    #     · 有 canary 命中 ⇒ 蜜饵标记出现在工具输出里 ⇒ 强证据（有东西被带出去过）
+    #     · 无命中     ⇒ **只说明"没见到"，不是"没有"** —— 会偷的工具不写记录
+    _ck = total.get("canary_leak", 0)
+    _so = total.get("sensitive_output", 0)
+    if _ck:
+        _first = min([v for v in total_marks.values() if v] or [""])
+        print("【数据外发】🔴 检出 %d 次蜜饵标记出现在工具输出里"
+              "（内容被读 ＋ 带出项目外）%s"
+              % (_ck, ("；首次 %s" % _first[:19]) if _first else ""))
+        print("            用 python -m antinel report --days %d 看是哪条工具、哪个文件" % days)
+    elif _so:
+        print("【数据外发】🟠 未见蜜饵命中，但 %d 次输出命中敏感模式 —— 查 python -m antinel report" % _so)
+    else:
+        print("【数据外发】未见蜜饵命中（只说明**没见到**，不等于没有——"
+              "会偷的工具不会写记录）。要更强的证据：python -m antinel canary plant")
     for a in sorted(per, key=lambda x: -x["actions"]):
         print("  %-9s %s" % (a["host"], a["root"]))
         print("    操作 %d｜拦截 %d %s｜提醒 %d｜tokens %s"
@@ -898,7 +957,7 @@ def cmd_digest(args):
               "%d 条为低可信（仅目录标记）——这两个 host 字段不能当事实引用。"
               % (total["untrusted_host"], total["low_conf_host"]))
     else:
-        print("【宿主标签】全部记录带归因证据（host_confidence 字段齐备）")
+        print("【宿主标签】全部记录带归因证据（每条都记了它是怎么认出来的）")
     print("【覆盖】%d 个登记项目 / %d 个宿主；未接入工具不在此列（分母显式）"
           % (len({p for p, _h, _m in projects}), len({h for _p, h, _m in projects})))
 
@@ -1032,12 +1091,217 @@ def cmd_verify(args):
                           "tools", "verify_chain.py"))
     for cand in cands:
         if os.path.isfile(cand):
-            sys.exit(subprocess.call([sys.executable, cand, _audit_dir(root)]))
+            rc = subprocess.call([sys.executable, cand, _audit_dir(root)])
+            # ★ 0.34.0（E6）：验完之后**把"如何独立复算"摆出来**。
+            #   为什么加：复核报告实测到的一条死结 ——
+            #     `challenge/` 公开挑战件（attack.py / tamper.py / tamper-lab.html
+            #     ／每日公开链 ／五级复算器）是本产品**唯一能满足企业采购理由**
+            #     （"给我一份能独立复算的证据"）的能力，
+            #     ★ 而 8 份用户文档里**一个字都没提**。
+            #   ⇒ **能力最强、叙述为零。** 一句话的"你可以自己验"是最低成本的补救。
+            if rc == 0:
+                print("")
+                print("─" * 60)
+                print(" 这条链**你可以自己复算**，不需要相信我们：")
+                print("   1) 换一个工具算（不依赖本包，独立实现）：")
+                print("        python %s"
+                      % _sibling(os.path.join("challenge", "verify.py")))
+                print("   2) 亲眼看它怎么被改坏（改一条 → 复算 → 报 tamper）：")
+                print("        python %s    # 攻击演示"
+                      % _sibling(os.path.join("challenge", "tamper.py")))
+                print("   3) 浏览器里手动试（不用装任何东西）：")
+                print("        仓库 challenge/tamper-lab.html")
+                print("   4) 看**别人**的链每天被验一次（公开锚点，可交叉核对）：")
+                print("        https://github.com/sotaex/agentstate/tree/main/challenge/chain")
+                print("")
+                print("   ★ 复算规则：hash = sha256(上一条的 hash ＋ 本条的规范化 JSON)")
+                print("     改一个字节就能被指出；删掉中间任何一条，链就接不上。")
+                print("─" * 60)
+            sys.exit(rc)
     _die("verify_chain.py 不存在")
 
 
 def _sibling_dir(sub):
     return os.path.join(_HERE, sub)
+
+
+def cmd_brief(args):
+    """★ 0.34.0（E1）**决策层一页纸**。
+
+    为什么要有这条命令（实测出来的缺口，不是设想的）：
+      `antinel report` 的 19 行正文里，有 8 行是给**安全工程师**看的
+      （config health / hook health / host attribution / enforcement probe /
+       gate alive days / rules fallback / trust-boundary edits /
+       whitelist-released secrets reads）。这些是真价值。
+      ★ 但**决策层要的三个数字一个都没有**：
+         ① 我的 AI 工具有没有把数据传出去？
+         ② 这期比上期是升了还是降了？
+         ③ 我现在该做什么、谁来做？
+      一个 CTO 看到 `host attribution: 0/3 records UNVERIFIED` 不会有任何动作。
+
+    ⇒ 所以**不是**把 report 做"更强"，而是**按人分层**。
+      本命令给决策层：`report` 继续给工程师（默认行为不变，向后兼容）。
+
+    ★ 口径纪律（与 report.py / digest 同一套判据，**不二次实现**）：
+      · 外发结论只认 canary（内容被读 ＋ 带出去过）与 sensitive_output；
+        两者都没命中时**明说"没见到 ≠ 没有"**。
+      · 所有数字都带分母或有"未覆盖"说明，异单位永不加和。
+      · 本命令**只读**，不写任何文件、不改任何状态。
+    """
+    days = getattr(args, "days", None) or 7
+    root = find_project_root()
+    if root is None:
+        _die("未找到项目（在项目根目录运行，或用 --scope all 看已登记的全部项目）")
+    ad = _audit_dir(root)
+    if not os.path.isdir(ad):
+        _die("这个项目还没有账本 —— 先装一次：python scripts/install.py --root .")
+
+    now = _agg_audit(ad, days)                     # 本期
+
+    # ★ 上期单独算（见 `_period_delta`），**不用"本期减上期"**：
+    #   减法在计数上会出负数，在异单位（积分/token）上会直接失真 ——
+    #   那正是本项目反复记为「异单位永不加和」的那类错。
+
+    print("=" * 68)
+    print(" Antinel 决策层一页纸｜%s" % datetime.now().strftime("%Y-%m-%d %H:%M"))
+    print(" 口径：近 %d 天 ｜ 项目：%s" % (days, root))
+    print("=" * 68)
+
+    # ── ① 有没有把数据传出去 ────────────────────────────────────────
+    print("")
+    print("【一】数据有没有被 AI 工具带出去")
+    if now.get("canary_leak"):
+        print("  🔴 **有确凿证据**：%d 次蜜饵标记出现在工具输出里" % now["canary_leak"])
+        print("        （内容被读过 ＋ 带出项目外。命令：antinel report --days %d 看是哪条工具）" % days)
+    elif now.get("sensitive_output"):
+        print("  🟠 未见蜜饵命中，但 %d 次输出命中敏感模式 —— 需要看一眼" % now["sensitive_output"])
+        print("        （命令：antinel report --days %d）" % days)
+    else:
+        print("  ⚪ **这一期没见到外传证据**")
+        print("        ★ 请读作『没查到』，**不是**『没有』——会偷的工具不会写记录。")
+        print("        想换更强的证据：antinel canary plant（埋标记，"
+              "标记出现在输出里才会被记下）")
+    _zero = now.get("untrusted_host", 0) + now.get("low_conf_host", 0)
+    if _zero:
+        print("        ⚠ 另有 %d 条记录的**宿主标签不可信**（旧格式，无归因证据）"
+              % _zero)
+        print("          —— 这部分连『哪个工具做的』都说不准，antinel report 会单列。")
+
+    # ── ② 比上期升了还是降了 ────────────────────────────────────────
+    print("")
+    print("【二】和上一期比")
+    _d = _period_delta(ad, days)
+    if _d is None:
+        print("  （上一期没有可比数据 —— 本机是新装的，或账本还没攒够 %d 天）" % (days * 2))
+    else:
+        print("  拦截次数   %d → %d  %s" % (_d["blocks"], now["blocks"], _arrow(now["blocks"], _d["blocks"])))
+        print("  操作次数   %d → %d  %s" % (_d["actions"], now["actions"], _arrow(now["actions"], _d["actions"])))
+        if now.get("canary_leak") or _d.get("canary_leak"):
+            print("  外传证据   %d → %d  %s" % (_d.get("canary_leak", 0), now.get("canary_leak", 0),
+                                                _arrow(now.get("canary_leak", 0), _d.get("canary_leak", 0))))
+        if now.get("fail_open") or _d.get("fail_open"):
+            print("  ⚠ 放行次数 %d → %d  %s（钩子异常放行＝当时闸门不在岗）"
+                  % (_d.get("fail_open", 0), now.get("fail_open", 0),
+                     _arrow(now.get("fail_open", 0), _d.get("fail_open", 0))))
+        print("  ★ 「操作变多」本身不是坏事（用得多）；**要盯的是拦截与放行**。")
+
+    # ── ③ 我现在该做什么 ────────────────────────────────────────────
+    print("")
+    print("【三】你现在要做的")
+    import host_shield as hs
+    try:
+        pend = hs.load_pending()
+    except Exception:
+        pend = []
+    todo = []
+    if pend:
+        todo.append(("🔴 %d 个落点等你表态（不表态就一直拦着）" % len(pend),
+                     'antinel host-shield queue   # 看清单\n'
+                     '        antinel host-shield decide "<路径>" allow_always｜deny'))
+    if now.get("fail_open"):
+        todo.append(("⚠ %d 次钩子异常导致放行 —— 闸门当时不在岗"
+                     % now["fail_open"],
+                     "python tools/enforce_probe.py   # 复检拦截信号是否真的生效"))
+    if now.get("gaps"):
+        todo.append(("🔴 %d 次「已判拦截但仍被执行」—— 宿主没尊重 deny 信号"
+                     % now["gaps"],
+                     "看 report 的【执法】段 ＋ 核对宿主钩子协议"))
+    if now.get("untrusted_host"):
+        todo.append(("⚠ %d 条记录的宿主标签不可信 —— 归因证据缺失"
+                     % now["untrusted_host"],
+                     "换宿主或宿主大版本更新后跑一次：python tools/probe_host.py"))
+    if not now.get("canary_leak") and not now.get("sensitive_output"):
+        todo.append(("○ 想把『没见到』变成『有证据』",
+                     "antinel canary plant   # 埋蜜饵，之后正常使用 AI 工具"))
+    if not todo:
+        print("  ✓ 这一期没有需要你动手的事。")
+    for i, (what, how) in enumerate(todo, 1):
+        print("  %d) %s" % (i, what))
+        print("     %s" % how)
+
+    # ── 覆盖声明（永远在最后，分母显式）────────────────────────────────
+    print("")
+    print("-" * 68)
+    print(" 覆盖：1 个项目 ｜ 本页只看【汇总计数】，逐条明细在 "
+          "`antinel report --days %d`" % days)
+    print(" 边界：规则只匹配工具调用文本，不解析脚本内容 —— 写进 .py/.sh 再执行不会被拦。")
+    print("       护栏不是隔离层。antinel verify 可独立复算本机账本。")
+    print("=" * 68)
+    return 0
+
+
+def _arrow(cur, prev):
+    """涨跌标记。**只标方向不标好坏**——拦截变多是正常的。"""
+    if cur == prev:
+        return "（持平）"
+    d = cur - prev
+    return "（%s%d）" % ("↑" if d > 0 else "↓", abs(d))
+
+
+def _period_delta(audit_dir, days):
+    """上期（再往前的 days 天）的聚合计数。
+
+    ★ 为什么不去 `_agg_audit` 里加一个 since 参数（那才是干净做法）：
+      本函数是 0.34.0 的临时实现，**宁可多写一行也不改被审计的判据** ——
+      `_agg_audit` 同时被 digest / morning 用着，改它的签名会牵动两个已发布命令。
+      TODO: 若这条命令活下来，把 since 参数做进 `_agg_audit`，本函数退化为调用它。
+    """
+    try:
+        from datetime import timedelta
+        # 取"days+1 .. days*2"这一段：先扫全量，再按 ts 的日期分段。
+        cur_lo = (datetime.now() - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+        hi = (datetime.now() - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+        lo = (datetime.now() - timedelta(days=days * 2 - 1)).strftime("%Y-%m-%d")
+        acts = blocks = warns = toks = fail_open = gaps = canary = 0
+        untrusted = 0
+        sd = _session_dna()
+        for day, rec in sd._rows(sd._iter_day_files(audit_dir), float("inf"), [False]):
+            d10 = day[:10]
+            if d10 > hi or d10 < lo:
+                continue
+            t = rec.get("type")
+            if t in ("pre_tool_use", "post_tool_use") and rec.get("host_confidence") is None:
+                untrusted += 1
+            if t == "pre_tool_use":
+                acts += 1
+                if rec.get("decision") == "block":
+                    blocks += 1
+                elif rec.get("decision") == "alert":
+                    warns += 1
+            elif t == "usage_delta":
+                for e in (rec.get("entries") or []):
+                    toks += (e.get("input_tokens") or 0) + (e.get("output_tokens") or 0)
+            elif t == "hook_error":
+                fail_open += 1
+            elif t == "enforcement_gap":
+                gaps += 1
+            elif t == "post_tool_use":
+                canary += len(rec.get("canaries_observed") or [])
+        return {"actions": acts, "blocks": blocks, "warnings": warns,
+                "tokens": toks, "fail_open": fail_open, "gaps": gaps,
+                "canary_leak": canary, "untrusted_host": untrusted}
+    except Exception:
+        return None
 
 
 def cmd_report(args):
@@ -1625,6 +1889,19 @@ def cmd_host_audit(args):
     #   ⇒ 改产品，不改网页：网页贴的是**逐字真实输出**，为了过检查器去改贴出来的字，
     #     就等于重新制造 P0-2（页面 ≠ 产品）。
     print("  全量清单（你电脑上的所有 AI 工具 ＋ 分级 ＋ 证据）：antinel host-scan）")
+    # ★ 0.34.0（E4）：给「没查到」配一个**能做的下一步**。
+    #   改之前的实况：这条命令以"没查出来 ≠ 没有"收尾——**诚实，但把用户放在原地**。
+    #   读到这里的人心里是"那我下一步该干什么"，而原文没回答。
+    #   ⇒ 补两句，且**不给虚假承诺**（不暗示 host-scan 能查出外传）。
+    #   ★ 措辞纪律：只说"能列清单"和"能埋蜜饵"，不承诺任何检测能力。
+    print("")
+    print("  你能接着做的两件事：")
+    print("    1) 看清你机器上到底装了哪些 AI 工具、哪些还没被纳管：")
+    print("         python -m antinel host-scan        # 只读，扫全盘约 1–2 分钟")
+    print("    2) 想知道『有没有东西真的被带出去过』，用蜜饵换主动证据：")
+    print("         python -m antinel canary plant     # 放一个标记文件，")
+    print("         然后正常使用 AI 工具；标记出现在输出里就会被记下")
+    print("    （两者都只读你的机器，不联网、不上传。）")
 
 
 # ------------------------------------------------------------ host-scan ----
@@ -2786,6 +3063,11 @@ def main(argv=None):
     ap.add_argument("--host", dest="force_host",
                     help="显式指定宿主（workbuddy|zcode|qoder|claude-code|generic），"
                          "多宿主共存时 Agent 应自报所在宿主")
+    # ★ 0.34.0：补 --version。此前 VERSION 常量在 :37 却没有出口，
+    #   包管理器／CI／用户无法查询已安装版本（实测 `antinel --version` 报
+    #   "unrecognized arguments"）—— 对一个声明了 [project.scripts] 入口的 CLI 是硬伤。
+    #   走 argparse 正规出口（不是自己 if argv 拦），这样 `--help` 里也能看见。
+    ap.add_argument("-V", "--version", action="version", version="antinel %s" % VERSION)
     sub = ap.add_subparsers(dest="cmd")
 
     p = sub.add_parser("roots"); ps = p.add_subparsers(dest="sub", required=True)
@@ -2830,6 +3112,9 @@ def main(argv=None):
     p = sub.add_parser("report"); p.add_argument("--session", default="latest")
     p.add_argument("--write", action="store_true")
 
+    # ★ 0.34.0（E1）：决策层一页纸。默认不带参数就能跑（days 默认 7）。
+    p = sub.add_parser("brief"); p.add_argument("--days", type=int, default=7)
+
     p = sub.add_parser("hub"); ps = p.add_subparsers(dest="sub", required=True)
     q = ps.add_parser("register"); q.add_argument("path"); q.add_argument("--host")
     q = ps.add_parser("unregister"); q.add_argument("path")
@@ -2849,6 +3134,13 @@ def main(argv=None):
     q = ps.add_parser("unlock"); q.add_argument("path")
     # 0.29.0 (H-2)：待裁决队列的呈现端（此前只有记录端，报告写了没人看）。
     ps.add_parser("queue")
+    # ★ 0.35.0：值守台 —— 自包含 CLI（收件箱 / 日报 / 托盘 / 守护进程 / 心跳配置）。
+    #   `REMAINDER` 把 `antinel inbox` 之后的全部参数**原样**交给 inbox_cli 自己的
+    #   argparse；这样将来给 inbox 加子命令**不必再动 antinel.py**
+    #   —— 集成面永远只有这 6 行，`inbox_cli` 可整体摘除而不影响别处。
+    p = sub.add_parser("inbox")
+    p.add_argument("rest", nargs=argparse.REMAINDER)
+
     # 0.29.1：本地体检页 —— 网站点不到你的硬盘，真正去查的必须是你电脑上的程序。
     import ui_server
     p = sub.add_parser("ui")
@@ -3028,12 +3320,17 @@ def main(argv=None):
         cmd_verify(args)
     elif args.cmd == "report":
         cmd_report(args)
+    elif args.cmd == "brief":                     # ★ 0.34.0 (E1)
+        sys.exit(cmd_brief(args) or 0)
     elif args.cmd == "hub":
         cmd_hub(args)
     elif args.cmd == "routes":
         cmd_routes(args)
     elif args.cmd == "host-shield":
         cmd_host_shield(args)
+    elif args.cmd == "inbox":                     # ★ 0.35.0：值守台（自包含 CLI）
+        import inbox_cli
+        return inbox_cli.main(args.rest)
     elif args.cmd == "host-audit":
         cmd_host_audit(args)
     elif args.cmd == "host-scan":

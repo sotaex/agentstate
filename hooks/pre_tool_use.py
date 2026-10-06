@@ -54,7 +54,7 @@ _T0 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段起点（性能
 
 # ---------------------------------------------------------------- constants --
 PKG_DIR = os.path.dirname(os.path.abspath(__file__))
-_ANTINEL_VERSION = "0.34.0"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
+_ANTINEL_VERSION = "0.35.1"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
 _T1 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段终点（性能插桩）
 
 
@@ -1148,12 +1148,20 @@ def _lang():
 
 
 def _pick(rule, field, lang):
-    """Select rule text: top-level {field}_{lang} first, then English, then zh."""
-    for l in (lang, "en", "zh"):
+    """Select rule text: {field}_{lang} first, then the bare field (English), then {field}_zh.
+
+    ★ 0.34.1 修：旧实现是 `for l in (lang, "en", "zh")` 再回退裸字段。
+      rules/default.json 里**只有裸字段（英文）与 `_zh`**，没有 `_en` ——
+      于是 lang="en" 时循环里 `_zh` 先命中，**英文用户拿到中文文案**。
+      这正是「先查 `_zh` 再查英文」的顺序错，与 docstring 写明的
+      「then English, then zh」相反。现在按 docstring 修正：
+      先 `_{lang}`，再裸字段（英文），最后才是 `_zh`。
+    """
+    for l in (lang, "en"):
         v = rule.get(f"{field}_{l}")
         if v:
             return v
-    return rule.get(field, "")
+    return rule.get(field, "") or rule.get(f"{field}_zh", "")
 
 # -------------------------------------------------------------------- helpers --
 
@@ -2793,7 +2801,7 @@ def _slop_hit(tool_name, command, policy):
                            "popular package (typosquatting/slopsquatting class; reference set "
                            "%s, dated %s -- later packages are not judged)"
                            % (data.get("version"), data.get("updated")),
-            "remediation": "核对包名拼写与官方文档；确认后再安装；已安装的立即移除并轮换凭据",
+            "remediation": "Check the package name against the official docs; install only after confirming; remove anything already installed and rotate credentials.",
             "description_zh": "安装命令中的包名与热门包高度相近（撞名/slopsquatting 类；参考集 "
                               "%s，日期 %s——其后新包不在判据内）"
                               % (data.get("version"), data.get("updated")),

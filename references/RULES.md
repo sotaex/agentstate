@@ -1,4 +1,4 @@
-# Antinel detection rules (generated from rules/default.json v0.34.0 - do not edit by hand)
+# Antinel detection rules (generated from rules/default.json v0.35.1 - do not edit by hand)
 
 Category order = match priority: secrets > destructive > network > injection > context > metadata.
 Severity to action: critical = block, warning = alert (logged, allowed). All hits are collected; highest severity decides.
@@ -501,7 +501,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
     - `(?is)(?:>>|>|\btee\b|\bcp\b|\bmv\b|\bmove\b|\bcopy\b|\bset-content\b|\bout-file\b|\badd-content\b)[^\n]{0,120}\.mcp\.json`
     - `(?is)(?:>>|>|\btee\b|\bcp\b|\bmv\b|\bmove\b|\bcopy\b|\bset-content\b|\bout-file\b|\badd-content\b)[^\n]{0,120}mcp\.json`
     - `(?is)(?:>>|>|\btee\b|\bcp\b|\bmv\b|\bmove\b|\bcopy\b|\bset-content\b|\bout-file\b|\badd-content\b)[^\n]{0,120}claude_desktop_config\.json`
-- remediation: 核对新增 server 的来源与 command/url；不认识的一律移除并轮换相关凭据
+- remediation: Verify the new server's source, command and url; remove any you do not recognize and rotate the related credentials.
 
 ## MCP-02  Prompt injection in MCP tool description
 - category: supply_chain | severity: warning | dynamic (hook only) | tools: Read, Write, Edit
@@ -520,7 +520,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
     - `do\s+not\s+(tell|inform|notify|reveal)\s+(the\s+)?user`
     - `trust\s+this\s+server\s+automatically`
     - `curl\s+[^\s]*\$\{?[A-Z_]*(KEY|TOKEN|SECRET)`
-- remediation: 移除该 MCP 服务器并核查其来源；工具描述里的指令会在每次工具调用时进入模型上下文
+- remediation: Remove that MCP server and check where it came from; instructions in a tool description enter the model context on every tool call.
 
 ## MCP-03  Unaudited remote MCP server
 - category: supply_chain | severity: warning | dynamic (hook only) | tools: Read, Write, Edit
@@ -536,7 +536,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - content_patterns:
     - `mcp-remote`
     - `"url"\s*:\s*"https?://`
-- remediation: 确认远程端点的可信度；优先本地 stdio server；远程定义变更不受你控制
+- remediation: Confirm the remote endpoint is trustworthy; prefer a local stdio server -- remote tool definitions can change without your control.
 
 ## MCP-04  Plaintext secret in MCP config env
 - category: supply_chain | severity: warning | dynamic (hook only) | tools: Read, Write, Edit
@@ -556,7 +556,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
     - `\bxox[baprs]-[A-Za-z0-9\-]{10,}\b`
     - `\bAIza[0-9A-Za-z_\-]{35}\b`
     - `-----BEGIN [A-Z ]*PRIVATE KEY-----`
-- remediation: 改用凭据引用/环境注入；已写入的密钥视为已泄露并轮换
+- remediation: Use credential references or environment injection instead; treat any key already written as leaked and rotate it.
 
 ## SEC-11  Canary file read
 - category: canary | severity: warning | dynamic (hook only) | tools: Read, Bash
@@ -568,7 +568,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
     - `(^|[\\/])\.canary[\\/]CANARY-`
 - content_patterns:
     - `\.canary[\\/]CANARY-`
-- remediation: 记录并观察：金丝雀被读取本身不是泄露，标记出现在外部通道才是证据（report 的 canaries 统计）
+- remediation: Record and observe: reading a canary is not itself a leak -- the marker appearing in an external channel is the evidence (see the canaries count in `report`).
 
 ## SLOP-01  Typosquatted package name in install command
 - category: supply_chain | severity: warning | dynamic (hook only) | tools: Bash
@@ -578,7 +578,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - 处理建议: 核对包名拼写与官方文档；确认后再安装；已安装的立即移除并轮换凭据
 - command_patterns:
     - `(?i)\b(pip|pip3|npm)\s+install\b`
-- remediation: 核对包名拼写与官方文档；确认后再安装；已安装的立即移除并轮换凭据
+- remediation: Check the package name against the official docs; install only after confirming; remove anything already installed and rotate credentials.
 
 ## Policy file (.psl/policy.json, spec C-05)
 
