@@ -23,7 +23,7 @@
 
     同族七次，前六次都没上升为机制。本文件把它变成机器检查。
 
-★★★ 三条判据（都是**可机械执行**的不变式，不是纪律口号）：
+★★★ 六条判据（都是**可机械执行**的不变式，不是纪律口号）：
 
     JDG-01  状态路径一致性
             **测试重置的状态路径，必须等于产品实际读取的状态路径。**
@@ -41,6 +41,23 @@
     JDG-03  清单归属分账（流程陈旧的机械化）
             **清单摘要与实物不符，必须能归属**：与 git HEAD 一致 ⇒
             合法 WIP 未刷新（流程陈旧）；两者都不一致 ⇒ 真漂移，必须红。
+
+    JDG-04  契约自包含（0.36.9）
+            **判据引用的每个本地 .py 都必须已入库。**
+
+    JDG-05  构建器拥有的文件不许手工改（0.36.9）
+            **仓内 .gitignore 必须与构建器 GITIGNORE_TEMPLATE 逐字节相同。**
+
+    JDG-06  产件自洽（0.37.0）
+            **dist/ 里最新的 wheel 必须：只含一个 dist-info 目录、目录版本
+            == 当前包版本、RECORD 与包内条目逐条对得上。**
+            来历（0.37.0 实测，靠眼看抓到，故上升为机制）：本机打包走
+            keep_temp=True 的仓外驱动（宿主批量删除守卫的限制），
+            staging 树跨版本复用 ⇒ 升版后旧版 `antinel-<old>.dist-info/`
+            残留在 staging 里，新 wheel 一次带上两套 dist-info
+            （0.37.0 实测 129 条目，其中 5 个是 0.36.9 的）。
+            修法当时是「改名让开 + 重建」，但那是一次性的；
+            本判据让这个形状从此在闸门层就暴露。
 
 ★ 三条纪律（与 0366 及全仓惯例一致）：
   · 每条判据都配**负控**：把对象改坏，判据必须报红——否则它只是会执行的代码。
@@ -61,6 +78,7 @@ import ast
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -822,6 +840,178 @@ def n_gitignore_drift_is_red():
         return "不一致" in str(e)
     finally:
         bp.GITIGNORE_TEMPLATE = real
+
+
+# ═══════════════════ JDG-06 产件自洽：wheel 单 dist-info ＋ RECORD 对得上 ═══════════════════
+#
+# ★ 0.37.0 新增。来历是**本轮自己踩到的**（不是设计构想）：
+#   本机打包走仓外驱动（keep_temp=True，绕开宿主批量删除守卫）。该属性让
+#   setuptools 收尾不删 staging 树 —— 于是**跨版本复用时**，上一版的
+#   `antinel-0.36.9.dist-info/` 还留在 staging 里，而新版 dist-info 目录名
+#   带版本号、名字不同 ⇒ copy2 覆盖不到它 ⇒ 新 wheel 一次带上两套 dist-info
+#   （0.37.0 首建实测 129 条目，5 个是 0.36.9 的；0.36.9 的 wheel 干净，
+#   只因那次构建前 build/ 被改名让开过 —— 也就是说这个坑**每次升版都在，
+#   只是之前每次都被顺手避开**）。
+#   ⇒ 与 JDG-04/05 同型：「注释记住了、手照旧」＝没有机制。本条就是那个机制。
+#
+#   机械判据（三条，缺一不可）：
+#     ① dist/ 里**最新的** wheel 只含一个 .dist-info 目录；
+#     ② 该目录的版本 == 当前包版本（antinel.py 的 VERSION）；
+#     ③ RECORD 行数与包内条目数相等，且 RECORD 指向的每个条目都在包内。
+#   dist/ 无 wheel（新克隆/未打包）⇒ 返回说明文字，不阻断 ——
+#     但会**明写**「无可检对象」，不与「检过了且通过」混在一种措辞里。
+
+def _dist_wheels():
+    """dist/ 下未改名让开的 wheel（.away-* 是历史产件，不检）。"""
+    d = os.path.join(ROOT, "dist")
+    out = []
+    try:
+        for n in sorted(os.listdir(d)):
+            if n.startswith("antinel-") and n.endswith(".whl") and ".away-" not in n:
+                out.append(os.path.join(d, n))
+    except OSError:
+        pass
+    return out
+
+
+def _pkg_version():
+    try:
+        src = io.open(os.path.join(ROOT, "antinel.py"), encoding="utf-8").read()
+        m = re.search(r'^VERSION\s*=\s*"([^"]+)"', src, re.M)
+        return m.group(1) if m else None
+    except OSError:
+        return None
+
+
+def _wheel_defect(path, want_version):
+    """返回 None（通过）或红项文案。`want_version` 为 None 时跳过版本比对。"""
+    import zipfile
+    try:
+        z = zipfile.ZipFile(path)
+    except Exception as e:                                    # noqa: BLE001
+        return "打不开：%r" % (e,)
+    names = z.namelist()
+    di = sorted({n.split("/")[0] for n in names if ".dist-info" in n.split("/")[0]})
+    if len(di) != 1:
+        return ("wheel 里有 %d 个 .dist-info 目录：%s —— keep_temp staging "
+                "跨版本复用的残留形态（旧版 dist-info 没被清掉）"
+                % (len(di), "、".join(di)))
+    if want_version and ("-" + want_version + ".dist-info") not in ("-" + di[0]):
+        return "dist-info 目录 %s 与当前包版本 %s 不符" % (di[0], want_version)
+    rec_name = di[0] + "/RECORD"
+    if rec_name not in names:
+        return "%s 不在包内" % rec_name
+    try:
+        rec = z.read(rec_name).decode("utf-8", "replace")
+    except Exception as e:                                    # noqa: BLE001
+        return "RECORD 读不出：%r" % (e,)
+    lines = [l for l in rec.splitlines() if l.strip()]
+    listed = [l.split(",")[0] for l in lines]
+    missing = [n for n in listed if n not in names]
+    if missing:
+        return "RECORD 指向 %d 个不在包内的条目：%s" % (
+            len(missing), "、".join(missing[:3]))
+    if len(listed) != len(names):
+        return "RECORD 只登记 %d 条，包内实际 %d 条（有条目没进清单）" % (
+            len(listed), len(names))
+    return None
+
+
+def jdg06_body(wheel=None):
+    """检 dist/ 里最新的 wheel；`wheel` 参数只给负控用（合成包）。"""
+    if wheel is not None:
+        why = _wheel_defect(wheel, None)
+        if why:
+            raise AssertionError(why)
+        return "合成 wheel 通过"
+    ws = _dist_wheels()
+    if not ws:
+        return "dist/ 里没有待检 wheel（未打包或新克隆）—— **无可检对象**，本条不阻断"
+    # 最新＝版本号最大（.away-* 已排除）；旧版产件被改名让开前也按同一判据检
+    def _key(p):
+        m = re.search(r"antinel-(\d+)\.(\d+)\.(\d+)-py3", os.path.basename(p))
+        return tuple(int(x) for x in m.groups()) if m else (0, 0, 0)
+    newest = max(ws, key=_key)
+    want = _pkg_version()
+    why = _wheel_defect(newest, want)
+    if why:
+        raise AssertionError("%s：%s" % (os.path.basename(newest), why))
+    others = [os.path.basename(p) for p in ws if p != newest]
+    return ("最新 wheel %s：单 dist-info（%s）且 RECORD 逐条对得上%s"
+            % (os.path.basename(newest), want or "?",
+               ("；dist/ 内另有旧产件：%s" % "、".join(others)) if others else ""))
+
+
+@check("JDG-06 产件自洽：wheel 单 dist-info ＋ 版本对 ＋ RECORD 对得上",
+       "n_wheel_pollution_is_red")
+def jdg06():
+    return jdg06_body()
+
+
+def _mk_synthetic_wheel(double_distinfo=True, record_missing=False):
+    """负控专用：在临时目录造一个最小 wheel。"""
+    import zipfile
+    tmp = tempfile.mkdtemp(prefix="jdg06_")
+    p = os.path.join(tmp, "antinel-9.9.9-py3-none-any.whl")
+    with zipfile.ZipFile(p, "w") as z:
+        if double_distinfo:
+            for di in ("antinel-9.9.8.dist-info", "antinel-9.9.9.dist-info"):
+                z.writestr(di + "/METADATA", "Metadata-Version: 2.1\n")
+                z.writestr(di + "/WHEEL", "Wheel-Version: 1.0\n")
+            z.writestr("antinel-9.9.9.dist-info/RECORD", "")
+            z.writestr("antinel.py", "# stub\n")
+        else:
+            z.writestr("antinel-9.9.9.dist-info/METADATA", "Metadata-Version: 2.1\n")
+            z.writestr("antinel-9.9.9.dist-info/WHEEL", "Wheel-Version: 1.0\n")
+            if record_missing:
+                # RECORD 指向一个不在包内的条目
+                z.writestr("antinel-9.9.9.dist-info/RECORD",
+                           "antinel.py,,\nhost_shield.py,,\n")
+            else:
+                z.writestr("antinel-9.9.9.dist-info/RECORD",
+                           "antinel-9.9.9.dist-info/METADATA,,\n"
+                           "antinel-9.9.9.dist-info/WHEEL,,\n"
+                           "antinel-9.9.9.dist-info/RECORD,,\n"
+                           "antinel.py,,\n")
+            z.writestr("antinel.py", "# stub\n")
+    return tmp, p
+
+
+def n_wheel_pollution_is_red():
+    """负控（两个形状，一条负控）：合成 wheel 带病 ⇒ 判据必须红。
+
+    形状一：两套 dist-info（0.37.0 实测踩到的 polling 形态）；
+    形状二：单 dist-info 但 RECORD 指向不在包内的条目（构建被截断的形态）。
+    ★ 为什么两条并成一条负控：RESULTS 的记账范式是一条判据一个负控名；
+      硬拆成两条判据会让 jdg06_body() 白跑一遍。并题后**回报具体失塌形状**，
+      不许只回 False —— 否则「红的是哪一半」靠猜。
+    """
+    tmp1, p1 = _mk_synthetic_wheel(double_distinfo=True)
+    try:
+        try:
+            jdg06_body(wheel=p1)
+            return "双 dist-info 形态没有红 —— 判据对产件污染是瞎的"
+        except AssertionError:
+            pass
+        tmp2, p2 = _mk_synthetic_wheel(double_distinfo=False,
+                                       record_missing=True)
+        try:
+            try:
+                jdg06_body(wheel=p2)
+                return "RECORD 失洽形态没有红 —— 判据对截断构建是瞎的"
+            except AssertionError:
+                pass
+        finally:
+            try:
+                os.replace(tmp2, tmp2 + ".away-negctl")     # 零删除
+            except OSError:
+                pass
+        return True
+    finally:
+        try:
+            os.replace(tmp1, tmp1 + ".away-negctl")         # 零删除
+        except OSError:
+            pass
 
 
 # ═══════════════════ main（与 0366 记账范式一致） ═══════════════════

@@ -83,6 +83,12 @@ SUITES = [
     ("0364", "ci/inbox_guards_0364.py", "fast"),
     ("0366", "ci/inbox_guards_0366.py", "fast"),
     ("JDG", "ci/jdg_guards_0368.py", "fast"),
+    # ★ 0.37.0：PCM（问题数单调收敛闸门）。为什么进 SUITES 而不是只登记：
+    #   它回答的是整条收敛管道**唯一还没回答的问题**——「问题总量有没有在变小、
+    #   变小是真变小还是账面变小」（JDG/0366 回答的是「这次多了什么、红是真是假」）。
+    #   它是 fast 档：只读 judgment.json 与 .psl/gate/pcm_ledger.json 两份 JSON，
+    #   不起子进程、不写产品文件（负控全在内存态，不需要 negctl 单列档）。
+    ("PCM", "ci/pcm_gate_0370.py", "fast"),
     ("selfcheck", "ci/_p_delivery_selfcheck.py", "fast"),
     ("version", "ci/version_check.py", "fast"),
     ("regression", "ci/regression_gate.py", "slow"),
@@ -578,8 +584,11 @@ def _orphaned_guard_files():
         # ★ 0.36.8：模式从 inbox_guards_ 扩到 inbox_guards_｜jdg_guards_——
         #   原模式只认 inbox_guards_*，JDG 族写成 jdg_guards_* 后
         #   「写了没登记」会从后门漏掉（这正是本检查存在的全部理由）。
+        # ★ 0.37.0：再扩到 pcm_gate_ —— PCM 族与 JDG 族同构（版本后缀命名），
+        #   漏登记的后果同样是一条都不跑而闸门照样全绿。
         on_disk = {f for f in os.listdir(os.path.join(PKG, "ci"))
-                   if (f.startswith("inbox_guards_") or f.startswith("jdg_guards_"))
+                   if (f.startswith("inbox_guards_") or f.startswith("jdg_guards_")
+                       or f.startswith("pcm_gate_"))
                    and f.endswith(".py")}
     except OSError:
         return ["读不到 ci/ 目录"]

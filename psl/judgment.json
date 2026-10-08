@@ -2,13 +2,13 @@
  "spec": "psl-vs-0.1",
  "card_id": "antinel-security-suite",
  "skill": "antinel-security",
- "skill_version": "0.36.9",
+ "skill_version": "0.37.0",
  "verdict": "FAIL",
  "status": {
   "value": "current",
   "derivation": "auto",
   "reason": null,
-  "checkedAt": "2026-10-08T20:04:38+08:00",
+  "checkedAt": "2026-10-08T21:37:33+08:00",
   "note": "re-derive any time: python tools/antinel_verify.py (--manifest for all 24 shipped files); which assertions failed: discrimination.failed[]"
  },
  "scope": {
@@ -56,14 +56,6 @@
   },
   "failed": [
    {
-    "name": "0.16.0 antinel_verify derives current on an intact package",
-    "detail": "3 of 21 covered files differ (judgment digests (21 files))"
-   },
-   {
-    "name": "0.17.0 P-B1 without --manifest, README tamper is out of scope (documented)",
-    "detail": ""
-   },
-   {
     "name": "0.26 SafeZone registered + tamper-locked",
     "detail": "locked=False rc=0"
    },
@@ -72,8 +64,16 @@
     "detail": "True"
    },
    {
+    "name": "F-13 paramedic 复活死亡哨兵并留痕（死因 RC5 回归）",
+    "detail": "out='spawn-failed' pid=999999999"
+   },
+   {
     "name": "F-15 门闸高危事件实时推送＋同类 30 分钟节流（0.28.2 报警 v1）",
     "detail": "THROTTLE False True"
+   },
+   {
+    "name": "F-17 心跳判死：无心跳/心跳陈旧的哨兵会被强制重启（B2）",
+    "detail": "oldpid=0 age=? -> SPAWN False 0 self-check-failed: hooks/pre_tool_use.py �� manifest �������澯��·�ļ"
    }
   ],
   "by_kind": {
@@ -92,20 +92,10 @@
    "counts": {
     "product": 1,
     "instrument": 2,
-    "environment": 0,
-    "process-stale": 2
+    "environment": 1,
+    "process-stale": 1
    },
    "per_failure": [
-    {
-     "name": "0.16.0 antinel_verify derives current on an intact package",
-     "kind": "process-stale",
-     "basis": "digests 定格于上一版 harness 写入态，此间的合法编辑未刷新记录 ⇒ 自书失真；本次 harness 重写即以新 digest 修复。"
-    },
-    {
-     "name": "0.17.0 P-B1 without --manifest, README tamper is out of scope (documented)",
-     "kind": "process-stale",
-     "basis": "连带项：antinel_verify 对任何 digest 不符一律 rc=1，断言 rc2==0 必红；根因同上（记录陈旧），非 README 真被改。"
-    },
     {
      "name": "0.26 SafeZone registered + tamper-locked",
      "kind": "product",
@@ -117,24 +107,30 @@
      "basis": "负控衰减：注入 OSError 欲使 subprocess.run 抛错，但 0.35.3 起 task_installed() 文件系统事实优先（os.path.isfile(shim) 早退 return True）⇒ 注入永远到不了被测分支；本机 shim 存在 ⇒ 产品行为反而更安全。"
     },
     {
+     "name": "F-13 paramedic 复活死亡哨兵并留痕（死因 RC5 回归）",
+     "kind": "environment",
+     "basis": "pid=999999999 是负控自造的假 pid，spawn-failed 属 spawn 环境问题；该条在10-08 重跑中未复现（失败集合成员漂移的实例）。"
+    },
+    {
      "name": "F-15 门闸高危事件实时推送＋同类 30 分钟节流（0.28.2 报警 v1）",
      "kind": "instrument",
      "basis": "桩吞效应：断言先 hs._notify=lambda: None 打桩，再期望 notify_sent 被第一次 record 置位 —— 桩替换掉了被测效应本身 ⇒ t1 恒 0。"
+    },
+    {
+     "name": "F-17 心跳判死：无心跳/心跳陈旧的哨兵会被强制重启（B2）",
+     "kind": "process-stale",
+     "basis": "沙箱内 self-check-failed: host_shield.py 与 manifest 不符 ⇒ 与 antinel_verify 那条同根（清单与实物未同步），非心跳逻辑缺陷。"
     }
    ],
    "stale_entries": [
     "UX: 同类提醒当天只提示一次（第二次静默记录）",
     "0.16.0 DST-01 URL /rd/ segment is not a delete (NET-01 warns, no block)",
-    "F-13 paramedic 复活死亡哨兵并留痕（死因 RC5 回归）",
-    "F-17 心跳判死：无心跳/心跳陈旧的哨兵会被强制重启（B2）"
+    "0.16.0 antinel_verify derives current on an intact package",
+    "0.17.0 P-B1 without --manifest, README tamper is out of scope (documented)"
    ],
    "stale_digests_at_run_time": {
-    "count": 3,
-    "files": [
-     "antinel.py",
-     "hooks/pre_tool_use.py",
-     "rules/default.json"
-    ]
+    "count": 0,
+    "files": []
    },
    "invariant": "sum(counts.values()) == len(failed) == 5"
   },
@@ -154,7 +150,7 @@
  },
  "digests": {
   "antinel-namespaces.json": "sha256:2db67f32a5b803560f458c4589bd4bb4678cc17bc16625f6b6b3ad20f9b202d2",
-  "rules/default.json": "sha256:09bb1e091b39e39a84c795f2aedcb46144a30c7f22a0a804c5de408f09202d9a",
+  "rules/default.json": "sha256:13ce7130477c0f40a48f9424bd9c867b3da2e3f689fa3862b0516155b6ab112b",
   "rules/pricing.json": "sha256:e299e7afa07a97128ce00c13706379c79368c747cd4303c488f1c53c5339e253",
   "rules/typosquat_top.json": "sha256:0c699af6ba05d7675055be29b8c1e379714d9fbf44c4369a1717cade424190ad",
   "rules/economics/workbuddy.json": "sha256:7d570a0d8cb09f803695a4af147269620acdd5da5f403e2534a0c418c202c6a6",
@@ -162,7 +158,7 @@
   "rules/economics/claude-code.json": "sha256:e5ce954672baa42ffc220fddde2b691566f4644ec05ba6887c5ccc1c9dae30ba",
   "rules/economics/qoder.json": "sha256:5f51a86cbe0625f44519ce1308e562286c9d3410d0b7284006ac26b068396a3d",
   "rules/economics/generic.json": "sha256:4849374b3d2443dd77329b09d348dec03794863aa8f991d98ea5380a9849b82f",
-  "hooks/pre_tool_use.py": "sha256:4e1cea88d8d0173cb87959717ba05a952e559931495736b991fd151295709bd0",
+  "hooks/pre_tool_use.py": "sha256:da543802ba4c62362d1d3edf1244b76b8e644afe19c12be783fce18fb1354df2",
   "hooks/post_tool_use.py": "sha256:021a194e1af1240dc7292bf80f35a7e23328deb04c019c696b0478b989411d26",
   "scripts/scan.py": "sha256:851eae8a722cb49e0c68b7dc46b78d3e041cacaee39ce549faf1b98aa1407108",
   "scripts/install.py": "sha256:66b20b17f4318edf157bab495d122108e807b22cefe8d095a6d7826eb8c24925",
@@ -171,13 +167,13 @@
   "session_dna.py": "sha256:80a0e8a33e953c3fdb67e2213d4500d66df449325b531fa688ca99b5a3fc54b4",
   "transcript_reader.py": "sha256:43c1cd4a4afeaf20d23c6583c9e438a12070f4c2433b554be0292a9cf28ae152",
   "audit_chain.py": "sha256:c8ac6f1d5ca1ae4b08dd63286695c48aedd32b9420adc83a6ebd839bf67753e6",
-  "antinel.py": "sha256:49969d7066ca78776b1e54e5345293603a97e0d543003ff8c438e8ee9cdf395f",
+  "antinel.py": "sha256:22543a373b4df19be18a16a4149e9860898ef4989a1e612a2a025999378942ae",
   "hub.py": "sha256:bf2c01a73b7847c26bf887592093ddb11e5cd0a4183529e14f12afa31907dfbd",
   "tools/enforce_probe.py": "sha256:d8a1e3d948a7aa65cede1c780fabd0800ad717bbd5011fd73db512a0eea13173"
  },
  "run": {
-  "started_at": "2026-10-08T19:39:59+0800",
-  "duration_ms": 1479142,
+  "started_at": "2026-10-08T21:25:37+0800",
+  "duration_ms": 716149,
   "duration_note": "wall-clock of a subprocess fan-out suite; machine- and load-dependent, not comparable across environments",
   "executor": "scripts/run_harness.py",
   "exit_code": 1,

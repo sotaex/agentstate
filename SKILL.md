@@ -19,7 +19,7 @@ metadata:
   psl-verifier: "scripts/run_harness.py"
   antinel-product: "security-audit"
   antinel-tier: "free"
-  antinel-version: "0.36.9"
+  antinel-version: "0.37.0"
   psl-token-interception: "false"
 ---
 
