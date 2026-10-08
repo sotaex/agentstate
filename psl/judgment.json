@@ -2,13 +2,13 @@
  "spec": "psl-vs-0.1",
  "card_id": "antinel-security-suite",
  "skill": "antinel-security",
- "skill_version": "0.36.8",
+ "skill_version": "0.36.9",
  "verdict": "FAIL",
  "status": {
   "value": "current",
   "derivation": "auto",
   "reason": null,
-  "checkedAt": "2026-10-08T18:09:23+08:00",
+  "checkedAt": "2026-10-08T20:04:38+08:00",
   "note": "re-derive any time: python tools/antinel_verify.py (--manifest for all 24 shipped files); which assertions failed: discrimination.failed[]"
  },
  "scope": {
@@ -57,7 +57,7 @@
   "failed": [
    {
     "name": "0.16.0 antinel_verify derives current on an intact package",
-    "detail": "4 of 21 covered files differ (judgment digests (21 files))"
+    "detail": "3 of 21 covered files differ (judgment digests (21 files))"
    },
    {
     "name": "0.17.0 P-B1 without --manifest, README tamper is out of scope (documented)",
@@ -129,12 +129,11 @@
     "F-17 心跳判死：无心跳/心跳陈旧的哨兵会被强制重启（B2）"
    ],
    "stale_digests_at_run_time": {
-    "count": 4,
+    "count": 3,
     "files": [
      "antinel.py",
      "hooks/pre_tool_use.py",
-     "rules/default.json",
-     "scripts/verification_tests.py"
+     "rules/default.json"
     ]
    },
    "invariant": "sum(counts.values()) == len(failed) == 5"
@@ -155,7 +154,7 @@
  },
  "digests": {
   "antinel-namespaces.json": "sha256:2db67f32a5b803560f458c4589bd4bb4678cc17bc16625f6b6b3ad20f9b202d2",
-  "rules/default.json": "sha256:949b9a42bfefd45a279c17af234d658a690e57484e805c37ce0698942d7c66eb",
+  "rules/default.json": "sha256:09bb1e091b39e39a84c795f2aedcb46144a30c7f22a0a804c5de408f09202d9a",
   "rules/pricing.json": "sha256:e299e7afa07a97128ce00c13706379c79368c747cd4303c488f1c53c5339e253",
   "rules/typosquat_top.json": "sha256:0c699af6ba05d7675055be29b8c1e379714d9fbf44c4369a1717cade424190ad",
   "rules/economics/workbuddy.json": "sha256:7d570a0d8cb09f803695a4af147269620acdd5da5f403e2534a0c418c202c6a6",
@@ -163,7 +162,7 @@
   "rules/economics/claude-code.json": "sha256:e5ce954672baa42ffc220fddde2b691566f4644ec05ba6887c5ccc1c9dae30ba",
   "rules/economics/qoder.json": "sha256:5f51a86cbe0625f44519ce1308e562286c9d3410d0b7284006ac26b068396a3d",
   "rules/economics/generic.json": "sha256:4849374b3d2443dd77329b09d348dec03794863aa8f991d98ea5380a9849b82f",
-  "hooks/pre_tool_use.py": "sha256:9ac5add90d05607d9dde18affe5e88aaf4fd8c321ad1d02733609d44c0334c9c",
+  "hooks/pre_tool_use.py": "sha256:4e1cea88d8d0173cb87959717ba05a952e559931495736b991fd151295709bd0",
   "hooks/post_tool_use.py": "sha256:021a194e1af1240dc7292bf80f35a7e23328deb04c019c696b0478b989411d26",
   "scripts/scan.py": "sha256:851eae8a722cb49e0c68b7dc46b78d3e041cacaee39ce549faf1b98aa1407108",
   "scripts/install.py": "sha256:66b20b17f4318edf157bab495d122108e807b22cefe8d095a6d7826eb8c24925",
@@ -172,13 +171,13 @@
   "session_dna.py": "sha256:80a0e8a33e953c3fdb67e2213d4500d66df449325b531fa688ca99b5a3fc54b4",
   "transcript_reader.py": "sha256:43c1cd4a4afeaf20d23c6583c9e438a12070f4c2433b554be0292a9cf28ae152",
   "audit_chain.py": "sha256:c8ac6f1d5ca1ae4b08dd63286695c48aedd32b9420adc83a6ebd839bf67753e6",
-  "antinel.py": "sha256:e29f1bdac56ba871464ede848789fb6a24bd8e1f1c66f25a93f8d493ce211672",
+  "antinel.py": "sha256:49969d7066ca78776b1e54e5345293603a97e0d543003ff8c438e8ee9cdf395f",
   "hub.py": "sha256:bf2c01a73b7847c26bf887592093ddb11e5cd0a4183529e14f12afa31907dfbd",
   "tools/enforce_probe.py": "sha256:d8a1e3d948a7aa65cede1c780fabd0800ad717bbd5011fd73db512a0eea13173"
  },
  "run": {
-  "started_at": "2026-10-08T17:48:38+0800",
-  "duration_ms": 1245026,
+  "started_at": "2026-10-08T19:39:59+0800",
+  "duration_ms": 1479142,
   "duration_note": "wall-clock of a subprocess fan-out suite; machine- and load-dependent, not comparable across environments",
   "executor": "scripts/run_harness.py",
   "exit_code": 1,

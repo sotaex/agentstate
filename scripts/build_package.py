@@ -174,7 +174,7 @@ HARNESS_SRC = SRC / "scripts" / "verification_tests.py"
 if not HARNESS_SRC.is_file():
     raise SystemExit("★ 构建器找不到套件：%s\n  （产物仓构建必须用本仓的套件）" % HARNESS_SRC)
 NAME = "antinel-security"
-VERSION = "0.36.8"
+VERSION = "0.36.9"
 # P-A3: the namespace this build declares itself under. derive_object_ownership()
 # reads git remote first, then THIS field; fail-closed unattributed when neither
 # resolves. Kept beside the hashes so a third party can see what was declared.
@@ -328,6 +328,49 @@ RULE_PURPOSE = {
     "CTX-04": "Alerts on long encoded blobs in skills (the payload behind base64/hex laundering)",
     "CTX-05": "Detects SKILL.md identity mismatch (name spoofing / packaging slip)",
 }
+
+#: ★★ 2026-10-08（0.36.9）：`.gitignore` 由**本模板整文件生成**，仓里那份是它的
+#:   投影。 why：2026-09-29 把 setuptools 垃圾三行写进模板（此前 898791a 手工补的
+#:   三行被本模板**静默回退**，`git diff .gitignore` 实测可见）；2026-10-08 又把
+#:   `*.trash*`／`_p_*`／`_t_*` 三条卫生规则手工补进仓里那份 ⇒ 同一坑**第二次**
+#:   踩中（本次构建后规则消失，git status 立刻多出 92 个未跟踪探针）。
+#:   ★ 教训只写在注释里不够——两次都是注释记住了、手还是照旧。所以除写进模板外，
+#:     另加 JDG-05：**仓内 .gitignore 必须与本模板逐字节相同**，不同即红
+#:     （「构建器拥有的文件，手工改迟早被覆盖」从此由机器兜底，不靠自觉）。
+GITIGNORE_TEMPLATE = (
+    "__pycache__/\n*.pyc\n.psl/\n*.log\n"
+    "build/\nantinel.egg-info/\ndist/\n"
+    "*.away-*\n"
+    # ★ 2026-10-03 补四行（同上：写进模板才是修法）：
+    #   *.bak-*        —— 0.34.0 清垃圾时实测到 16 个 `*.bak-*` 里有 11 个在子目录，
+    #                     且其中 ci/drift_audit.py.bak-* 已被 git 跟踪
+    #                     ⇒ 不 ignore 的话，每次构建后 git status 都脏。
+    #   _tools_034/    —— 本轮三件可复用工具（版本迁移/manifest 重签/垃圾清理），
+    #                     目录名以 _ 开头，与构建产物无关。
+    #   _probe_*.py 等 —— 定位 F-17 时的一次性探针（含硬编码路径 + 调试 print），
+    #                     属过程证据，不该被人当正式工具跑。
+    "*.bak-*\n_tools_034/\n"
+    "_probe_*.py\n_patch_*.py\n_bump_version.py\n"
+    "_resign_manifest.py\n_cleanup_junk.py\n_suite_probe.py\n"
+    # ★ 2026-10-03：安装副作用目录。装到本仓时会在仓内生成 .qoder/ 或
+    #   .zcode/（钩子注册）。它们**是被安装的产物**，入库等于把本机钩子配置
+    #   和解释器路径塞进公共仓库 —— 本轮实测批量装完 git status 就脏了。
+    ".qoder/\n.zcode/\n"
+    # ★★ 2026-10-08（0.36.8 提交卫生，0.36.9 收进模板）：
+    #   *.trash* —— 宿主守卫在 copy2 覆盖仓内文件时把旧内容 quarantine 成的
+    #               `<name>.g0364.trash`；仓内「改名让开」也留下 `*.away-*`。
+    #               两者永不入库（构建器侧另有 NEVER_SHIP_PATTERNS 双保险）。
+    #   _p_* / _t_* —— 本机探针与临时工作件。**闸门契约件**（_p_bubble_negctl.py
+    #               等负控 + _p_badge_probe.py + _p_p11_negctl_mutation.py）由
+    #               `git add -f` 先于规则入库 ⇒ git 跟踪优先于 ignore，契约不受影响。
+    #               ★ 0.36.9 实测教训：本可以早两天加这条规则，但 0.36.8 我把规则
+    #               手工补进**仓里那份**（模板没改）⇒ 一次构建后规则蒸发、92 个
+    #               探针重新污染 status。**改了仓里那份不改模板 ＝ 没改。**
+    "*.trash*\n_p_*\n_t_*\n"
+    #: _uxtest/ —— verification_tests 的导出工作区（export.*/health.*）。
+    #:   0.36.8 同样只补进仓里那份而没进模板，本次写回时被抹掉过一次 ⇒ 现收进模板。
+    "_uxtest/\n"
+)
 
 LICENSE_MD = """MIT License
 
@@ -1915,26 +1958,10 @@ def build(out_root, verify=False):
     #   但本行每次构建都会**整文件覆盖** .gitignore ⇒ 手工修改被**静默回退**
     #   （实测：构建后 `git diff .gitignore` 显示那三行又被删掉）。
     #   这正是「构建器拥有的文件，手工改迟早被覆盖」——修法是把意图写进模板。
+    #   ★★ 2026-10-08（0.36.9）：模板已提为模块级 `GITIGNORE_TEMPLATE`
+    #      （上方有完整沿革），并由 JDG-05 逐字节比对兜底。
     (pkg / ".gitignore").write_text(
-        "__pycache__/\n*.pyc\n.psl/\n*.log\n"
-        "build/\nantinel.egg-info/\ndist/\n"
-        "*.away-*\n"
-        # ★ 2026-10-03 补四行（同上：写进模板才是修法）：
-        #   *.bak-*        —— 0.34.0 清垃圾时实测到 16 个 `*.bak-*` 里有 11 个在子目录，
-        #                     且其中 ci/drift_audit.py.bak-* 已被 git 跟踪
-        #                     ⇒ 不 ignore 的话，每次构建后 git status 都脏。
-        #   _tools_034/    —— 本轮三件可复用工具（版本迁移/manifest 重签/垃圾清理），
-        #                     目录名以 _ 开头，与构建产物无关。
-        #   _probe_*.py 等 —— 定位 F-17 时的一次性探针（含硬编码路径 + 调试 print），
-        #                     属过程证据，不该被人当正式工具跑。
-        "*.bak-*\n_tools_034/\n"
-        "_probe_*.py\n_patch_*.py\n_bump_version.py\n"
-        "_resign_manifest.py\n_cleanup_junk.py\n_suite_probe.py\n"
-        # ★ 2026-10-03：安装副作用目录。装到本仓时会在仓内生成 .qoder/ 或
-        #   .zcode/（钩子注册）。它们**是被安装的产物**，入库等于把本机钩子配置
-        #   和解释器路径塞进公共仓库 —— 本轮实测批量装完 git status 就脏了。
-        ".qoder/\n.zcode/\n",
-        encoding="utf-8", newline="\n")
+        GITIGNORE_TEMPLATE, encoding="utf-8", newline="\n")
     # byte-exact clones are a digest-security property: no end-of-line conversion,
     # ever (autocrlf smudge broke judgment digests in the v0.17 round).
     (pkg / ".gitattributes").write_text("* -text\n", encoding="utf-8", newline="\n")

@@ -659,6 +659,171 @@ def n_bogus_digest_is_drift():
         return "漂移" in str(e)
 
 
+# ═══════════════ JDG-04 契约自包含：判据引用的本地 .py 必须已入库 ═══════════════
+#
+# ★ 0.36.9 新增，而且是**本版实测抓到**的，不是设计构想：
+#   0.36.8 把 10 套判据登记成统一契约，但 0360 套引用的 `_p_badge_probe.py`
+#   从未入库；更早的 `ci/inbox_guards.py` 引用的 `_p_p11_negctl_mutation.py`
+#   也从未入库。⇒ 本机全绿，**新克隆必红**（判据契约在新机器上不成立）。
+#   0.36.8 的新克隆实验当场抓到：0360 报「缺 _p_badge_probe.py」。
+#
+#   ★ 为什么这是制度性漏洞而不是偶然：`.gitignore` 的 `_p_*` 把未入库探针
+#     从 `git status` 里藏起来 ⇒ 缺口从「可见」变「隐藏」。0.36.8 为了收干净
+#     工作区加的那条规则，反而让这类空洞不再出现在状态列表里 —— 修一处、
+#     blind 一处，正是「判据腐化」的同族手法。
+#
+#   机械判据（不许靠人眼）：枚举 `ci/` 下每一份判据源码里出现的**仓库内
+#   相对 .py 路径**（AST 抽字符串常量，不猜、不吃注释），逐个问 git「在库里
+#   吗」。有一个不在就红，并把「谁引用了它」逐个点名。
+#   ⇒「新增模块/判据时漏带依赖」从此进不了提交：闸门先红。
+#
+#   这正是「新增模块最大限度的避免引入新问题」的机制形态：**新东西不算被
+#   接纳，直到它声明的每一份依赖都在版本控制里**。
+
+def _string_constants(path):
+    """AST 抽取源码里的字符串常量（比正则可靠：不被注释/文档字符串骗）。"""
+    try:
+        tree = ast.parse(io.open(path, encoding="utf-8").read())
+    except SyntaxError:
+        return []
+    return [n.value for n in ast.walk(tree)
+            if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+
+
+def _local_py_refs():
+    """{引用: {引用它的判据}} —— 只收**盘上存在**的仓库内相对 .py 路径。
+
+    ★ 两个限定，都是为了让判据不假红（假红比漏红更坏：它训练人绕过闸门）：
+
+      ① 只收**盘上存在**的：判据里也会出现 "setup.py"、"sitecustomize.py"
+         这类**不属于本仓**的名字（示例、文档、第三方模块名）。
+      ② 跳过 `build/` 镜像：`.gitignore` 第 5 行本就忽略 `build/`，其中 26 个
+         .py 是 0.28 时代的历史 force-add、24 个新模块没跟上 ⇒ 这是「构建
+         镜像该不该入库」的另一笔账（见交付说明的遗留项），不是判据契约洞。
+         若把它算进契约，判据会为一个**设计上就该不存在于 git** 的目录天天红。
+    """
+    refs = {}
+    ci_dir = os.path.join(ROOT, "ci")
+    for name in sorted(os.listdir(ci_dir)):
+        if not name.endswith(".py"):
+            continue
+        for s in _string_constants(os.path.join(ci_dir, name)):
+            if not s.endswith(".py"):
+                continue
+            if s.startswith(("/", "\\")) or (len(s) > 1 and s[1] == ":"):
+                continue                      # 绝对路径：安装态，不入库
+            if s.startswith("build/") or s.startswith("build\\"):
+                continue                      # 构建镜像：见 docstring ②
+            if not os.path.isfile(os.path.join(ROOT, s)):
+                continue                      # 不属于本仓的名字
+            refs.setdefault(s, set()).add(name)
+    return refs
+
+
+def jdg04_body():
+    refs = _local_py_refs()
+    if not refs:
+        raise AssertionError("一条引用都没抽到——AST 抽取坏了（量具自失效）")
+    untracked, unknown = [], []
+    for rel, users in sorted(refs.items()):
+        t = _git_tracked(rel)
+        if t is None:
+            unknown.append(rel)
+        elif t is False:
+            untracked.append((rel, sorted(users)))
+    if untracked or unknown:
+        parts = ["未入库 %s（被 %s 引用）" % (r, "/".join(u)) for r, u in untracked]
+        parts += ["入库状态取不到 %s" % r for r in unknown]
+        raise AssertionError("；".join(parts))
+    return "判据引用的 %d 个本地 .py 全部在库" % len(refs)
+
+
+@check("JDG-04 契约自包含：判据引用的每个本地 .py 都已入库", "n_contract_hole_is_red")
+def jdg04():
+    return jdg04_body()
+
+
+def n_contract_hole_is_red():
+    """负控：把**一个**已入库引用伪装成未入库 ⇒ 判据必须报红并点名它。"""
+    refs = _local_py_refs()
+    tracked = [r for r in refs if _git_tracked(r)]
+    if not tracked:
+        return False
+    victim = sorted(tracked)[0]
+    real = globals()["_git_tracked"]
+
+    def fake(rel):
+        return False if rel == victim else real(rel)
+
+    globals()["_git_tracked"] = fake
+    try:
+        jdg04_body()
+        return False
+    except AssertionError as e:
+        return victim in str(e) and "未入库" in str(e)
+    finally:
+        globals()["_git_tracked"] = real
+
+
+# ═══════════════ JDG-05 构建器拥有的文件不许手工改（.gitignore == 模板） ═══════════════
+#
+# ★ 0.36.9 新增，同样是**本版实测抓到**的，同一个坑第二次踩：
+#   构建器每次都**整文件覆盖** `.gitignore` ⇒ 手工补进去的规则会在下一次构建后
+#   **静默蒸发**。2026-09-29 踩过第一次（898791a 的三行被回退，修法写进注释）；
+#   2026-10-08 又把 `*.trash*`／`_p_*`／`_t_*` 手工补进**仓里那份**而没改模板
+#   ⇒ 一次构建后规则消失，`git status` 瞬间多出 92 个未跟踪探针（实测）。
+#   ★★ 两次都是「注释记住了、手照旧」——**注释不是机制**。本判据就是那个机制。
+#
+#   机械判据：把构建器的 `GITIGNORE_TEMPLATE` 提成模块级常量，逐字节比对仓内
+#   `.gitignore`；不一致就红，并点名「只有模板有／只有仓里有」各几行。
+#   ⇒「构建器拥有的文件被手工改」从此在闸门层就暴露，而不是等构建后静默回退。
+
+def jdg05_body():
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    try:
+        import build_package as bp
+    except Exception as e:                                # noqa: BLE001
+        raise AssertionError("导不进构建器（%r）—— 无法比对模板" % (e,))
+    tpl = getattr(bp, "GITIGNORE_TEMPLATE", None)
+    if not isinstance(tpl, str) or not tpl.strip():
+        raise AssertionError("构建器没有 GITIGNORE_TEMPLATE 常量 —— 模板没被提出来，"
+                             "本判据无从比对（量具自失效）")
+    disk_p = os.path.join(ROOT, ".gitignore")
+    if not os.path.isfile(disk_p):
+        raise AssertionError(".gitignore 不在仓根")
+    disk = io.open(disk_p, encoding="utf-8", newline="").read()
+    if disk != tpl:
+        t, d = tpl.splitlines(), disk.splitlines()
+        only_tpl = [x for x in t if x not in d]
+        only_disk = [x for x in d if x not in t]
+        raise AssertionError(
+            "仓内 .gitignore 与构建器模板不一致（模板 %d 行／仓内 %d 行）—— "
+            "手工改的规则会被下次构建静默回退。只有模板有: %s；只有仓里有: %s"
+            % (len(t), len(d), only_tpl[:4] or "无", only_disk[:4] or "无"))
+    return "仓内 .gitignore 与模板逐字节相同（%d 行）" % len(tpl.splitlines())
+
+
+@check("JDG-05 构建器拥有的文件不许手工改（.gitignore == 模板）", "n_gitignore_drift_is_red")
+def jdg05():
+    return jdg05_body()
+
+
+def n_gitignore_drift_is_red():
+    """负控：往模板里塞一行仓内没有的规则 ⇒ 判据必须报红并点名方向。"""
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import build_package as bp
+    real = bp.GITIGNORE_TEMPLATE
+    canary = "# jdg05-canary"
+    try:
+        bp.GITIGNORE_TEMPLATE = real + canary + "\n"
+        jdg05_body()
+        return False
+    except AssertionError as e:
+        return "不一致" in str(e)
+    finally:
+        bp.GITIGNORE_TEMPLATE = real
+
+
 # ═══════════════════ main（与 0366 记账范式一致） ═══════════════════
 
 def main():

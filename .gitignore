@@ -16,17 +16,7 @@ _cleanup_junk.py
 _suite_probe.py
 .qoder/
 .zcode/
-
-# ---- 2026-10-08（0.36.8 提交卫生）-----------------------------------------
-# 宿主守卫的隔离产物：构建器 copy2 覆盖仓内文件时，守卫把旧内容 quarantine
-# 成 `<name>.g0364.trash`（一夜 6 个）。仓内「改名让开」策略同样留下
-# `*.away-*`。两者都永不入库（构建器侧另有 NEVER_SHIP_PATTERNS 双保险）。
 *.trash*
-# 本机探针与临时工作件（_p_=探针／_t_=测试日志）。注意：闸门契约件
-# （_p_bubble_negctl.py 等 4 个负控 + ci/version_check_negctl.py）在此规则
-# 落地前已入库 ⇒ git 跟踪优先于 ignore，契约不受影响；此后新建的 _p_/_t_
-# 工作件不再污染 status。
 _p_*
 _t_*
-# UX 测试导出工作区（export.*/health.*，verification_tests 的运行产物）
 _uxtest/

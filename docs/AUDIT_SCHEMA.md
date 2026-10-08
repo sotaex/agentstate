@@ -1,4 +1,4 @@
-# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.10（随 v0.36.8）
+# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.10（随 v0.36.9）
 
 > v1.10（0.35.3）：新增**公共可选字段 `recovered`**（布尔）——"这条记录描述的事
 > **已经自己愈合、没有留下后果**"。首用点：`host_shield_tamper` 的

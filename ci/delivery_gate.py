@@ -116,6 +116,15 @@ REQUIRED_EXTRA = [
     #   收敛机制唯一没伸到的一寸 ⇒ 它不许被静默删掉。
     #   ⇒ 存在性守这里；真跑由打包序列显式执行（`python scripts/run_harness.py`）。
     "scripts/run_harness.py",
+    # ★ 0.36.9：两条**判据引用的探针**补登记（0.36.8 实测抓到的契约空洞）。
+    #   `ci/inbox_guards_0360.py` 引用 `_p_badge_probe.py`、旧版
+    #   `ci/inbox_guards.py` 引用 `_p_p11_negctl_mutation.py`，两个都
+    #   从未入库 ⇒ 本机全绿、新克隆必红（判据契约在新机器上不成立）。
+    #   为什么必须登记在这里：`.gitignore` 的 `_p_*` 会把未入库探针从
+    #   `git status` 藏起来 ⇒ 缺口从「可见」变「隐藏」，比不忽略更危险。
+    #   真正堵死它的是 JDG-04（契约自包含：判据引用的本地文件必须已入库）。
+    "_p_badge_probe.py",
+    "_p_p11_negctl_mutation.py",
 ]
 
 #: 必须存在的判据文件。少任何一个 ⇒ 报红（不许静默少跑）。
