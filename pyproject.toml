@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "antinel"
-version = "0.35.1"
+version = "0.36.8"
 description = "Local-first audit chain and ledger for AI coding agents: every action recorded, every record verifiable."
 readme = "README.md"
 license = {file = "LICENSE"}
@@ -53,8 +53,13 @@ py-modules = ["antinel", "audit_chain", "session_dna", "strings",
               "inbox_model", "inbox_store", "inbox_report", "inbox_server",
               "inbox_tray", "inbox_notify", "inbox_emphasis", "inbox_fallback",
               "inbox_daemon", "inbox_config", "inbox_cli",
-              "ledger", "heartbeat"]
-packages = ["hooks", "scripts", "tools", "rules", "psl", "assets"]
+              "ledger", "heartbeat",
+              # ★ 0.35.3 术语表（与仓库 pyproject.toml 逐字一致）
+              "glossary",
+              # ★ 0.36.0 窗口几何 + 失守归因（两个新模块，
+              #   与 build() 里的 root_mod 复制清单逐字一致）
+              "inbox_window", "remediation"]
+packages = ["hooks", "scripts", "tools", "rules", "psl", "assets", "challenge"]
 
 [tool.setuptools.package-data]
 rules = ["*.json"]
@@ -66,3 +71,14 @@ hooks = ["*.py"]
 #   package-data 覆盖不到的文件（如 `rules/hosts/*.json`）。非 package 目录
 #   （docs/ references/）只进 sdist，wheel 里 0 个（实测）。
 assets = ["icons/*.ico", "logo/*.mp4", "logo/*.svg"]
+# ★ 0.35.2：`challenge/` 公开挑战件 —— **必须进 wheel**。
+#   为什么：`antinel verify` 在链干净时会告诉用户"你可以自己复算"，并给出
+#   `<包目录>/challenge/verify.py` 这条命令。而此前 `challenge/` **只进 sdist**
+#   （靠 `MANIFEST.in` 的 `recursive-include challenge *.py *.md`），
+#   ⇒ pip 装（wheel 路径）的用户照着敲会得到 `Errno 2 No such file or directory`。
+#   实测（2026-10-06 真实用户验收）：wheel 顶层只有 dist-info/assets/hooks/psl/
+#   rules/scripts/tools，含 `challenge` 的成员 **0 个**。
+#   撞铁律：「**页面上不许教跑不通的命令**」。
+#   `.py` 由 build_py 随包（见 `_assert_package_data_covered` 的实测注释），
+#   下面三条 glob 覆盖非 .py 的那些（README.md / tamper-lab.html / chain/*）。
+challenge = ["*.md", "*.html", "chain/*.jsonl", "chain/*.json"]

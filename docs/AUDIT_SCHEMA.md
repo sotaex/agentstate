@@ -1,5 +1,14 @@
-# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.9（随 v0.35.1）
+# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.10（随 v0.36.8）
 
+> v1.10（0.35.3）：新增**公共可选字段 `recovered`**（布尔）——"这条记录描述的事
+> **已经自己愈合、没有留下后果**"。首用点：`host_shield_tamper` 的
+> workspaces/zones/windows 回写恢复类。★ 为什么要它：这类记录此前**只能靠读
+> `reason` 文案里的"已回写恢复"四个字**来区分"真出事了"和"防线自己扛住了"，
+> 而按文案判档正是本仓明令禁止的形状（文案会改，判据会静默失效）。
+> 同时补登记 `policy_changed` 的 `field` 取值域（`zones` / `workspaces` /
+> `windows` / `roots` / `paths` / `domains` / 预算项 …）—— 门闸的**链背书判定**
+> 按它取字段，取值域属于契约的一部分。
+>
 > v1.9（0.33.1）：新增「归因与边界类」三条 —— `host_tag_uncertain`（归因自动取证）、
 > `hook_slow`（慢到超时的留痕）、`probe_used`（探针使用留痕，落 sidecar）。
 
@@ -54,6 +63,7 @@
 | `input.file_path` | pre/post | 目标路径（脱敏后原文保留） |
 | `input.content_len` | pre | 内容长度（只记长度，不记内容） |
 | `content_digest` | pre/post | `sha256(canonical_json({tool_name, tool_input}))` — **pre↔post 配对键**（两侧同配方，spec 2.8） |
+| `recovered` | 可选（v1.10 起） | **布尔**。`true` ＝ 本条描述的事**已经自动愈合、没有留下后果**（例：`host_shield_tamper` 的 state 回写恢复类——防线把被改的配置回滚回去了，用户配置与执法状态均未受损）。★ **是结构化字段，不是文案**：消费者（值守台分档、日报）必须读它，**不许解析 `reason` 里的"已回写恢复"**。字段缺省 ⇒ 语义＝"未知"（按"有后果"处理，方向收紧） |
 
 ## 4. 记录类型枚举
 
@@ -98,7 +108,7 @@
 |---|---|---|---|
 | `rules_integrity_fallback` | pre | `expected`, `live`, `rules_loaded` | `rules/default.json` 与 manifest 的 `rules_hash` 不符 ⇒ 判定为篡改，**退回内置兜底规则集**并大声记账（A4）。`expected`/`live` 是两侧哈希，供复核 |
 | `rules_unreadable_fallback` | pre | `error`, `rules_loaded` | 规则文件**读不出来**（缺失/坏 JSON/无权限）⇒ 退回内置兜底集。与上一条**分开命名**：`tampered` 与 `unreadable` 是两种不同的失败，不能合并成一条 |
-| `policy_changed` | antinel CLI | `change` | `.psl/policy.json` 被 CLI 改写（白名单/阈值/档位）。每一次都记，因为**放行范围因此改变** |
+| `policy_changed` | antinel CLI | `change`, `field`, `old_sha256`, `new_sha256`, `invoked_by` | `.psl/policy.json` 被 CLI 改写（白名单/阈值/档位）。每一次都记，因为**放行范围因此改变**。**v1.10 补登记 `field` 取值域**：`zones` / `workspaces` / `windows` / `roots` / `paths` / `domains` / 预算与限额项 …。★ 门闸的**链背书判定**按 `field` 取字段（`host_shield._backing_field()`）——`field=zones` 的记录才替 `host_shield.json` 的 `zones` 变化背书。**改这个取值域＝改门闸的判据**，必须同步改 `_BACKING_TYPES` 的守卫 |
 | `credits_snapshot` | antinel CLI | 余额快照 | 用户登记的积分余额事实（`antinel credits snapshot`）。**是事实记录，不是估算** |
 | `digest_rollup` | antinel CLI | 汇总 | 日报/汇总层生成的滚存记录 |
 
@@ -148,7 +158,7 @@
 | `host_shield_changed` | `antinel.py` | `decision="allow"`, `severity="warning"`, `field`, `change`, `invoked_by`, `autostart`, `spawn`, `armed` | 门闸被 enable／disable；`change` 为 `"false → true"` 形式。**v1.4 增补**：`autostart` ∈ schtasks / startup-folder / none（自启注册的真实结局，不假成功）；`spawn` ∈ ok / failed（哨兵本次是否真的拉起来了）。**v1.5 增补**：`armed` 布尔＝翻转后的权威值——哨兵对 enabled 的执法以链上本字段为准（B4b 系"无声开关"的闭合） |
 | `host_shield_revived` | 哨兵/paramedic | `decision="allow"`, `pid`, `cause`, `spawn_mode` | **v1.4 新增**：哨兵死亡后被重新拉起（钩子 paramedic 或 CLI）。复活记录本身就是"此前有断档"的证据 |
 | `host_shield_spawn_failed` | 哨兵/paramedic | `decision="deny"`, `severity="critical"`, `cause` | **v1.4 新增**：哨兵死亡且拉起失败——门闸无人值守的显式记录（此前该状态只存在于沉默里） |
-| `host_shield_tamper` | 哨兵 | `decision="deny"`, `severity="critical"`, `field`, `reason` | **v1.5 新增**：本地配置与权威依据不符——state 文件 `enabled` 与链不一致（B4b/b2/c/d）；workspaces/zones/windows 无链背书被改并已回写恢复；启动自检发现运行代码/登记表与 manifest 不符（B4e/f）。执法按链/按已知值继续，绝不因文件被改而静默停摆 |
+| `host_shield_tamper` | 哨兵 | `decision="deny"`, `severity="critical"`, `field`, `reason`, `recovered` | **v1.5 新增**：本地配置与权威依据不符——state 文件 `enabled` 与链不一致（B4b/b2/c/d）；workspaces/zones/windows 无链背书被改并已回写恢复；启动自检发现运行代码/登记表与 manifest 不符（B4e/f）。执法按链/按已知值继续，绝不因文件被改而静默停摆。**v1.10**：`field="state"` 的回写恢复类**必须带 `recovered=true`**（防线已自愈、无后果）；`reason` 增补"哪个字段从什么变成什么"（`host_shield._fp_diff_txt()`）——旧文案只说"workspaces/zones/windows 被修改"，**不说改了哪个**，事后无法定位真因（2026-10-06 就是靠翻全链邻居才认出真因） |
 | `host_shield_lock_held` | 哨兵 | `decision="deny"`, `severity="none"`, `reason`(含路径) | **v1.6a 补登记**：门闸**持锁中**的周期性状态留痕（每 `LOCK_HELD_EVERY` 一次，`lock_held_at` 去重）。★ 与 `breach` **分开**：锁**在**是正常态，不该只在"出事"时才出现在账本上 —— 旧机制下 `if is_denied(...)` 为真就**整支跳过**，于是"锁挂了两个月、账本一字不提"（09-25/26 审计只剩心跳、零 breach） |
 | `host_shield_contested` | 哨兵 | `decision="deny"`, `severity="critical"`, `reason`(含路径与补锁次数) | **v1.6a 补登记**：同一落点在 `CONTEST_WINDOW` 内被补锁 ≥ `CONTEST_TIMES` 次 —— 上锁**未稳定生效**或**有进程在对抗门闸**，须人工介入。★ 与 `breach` 的分工：`breach` 是"发现未拦的落点"（第 1 次，且明说"不等于有进程在对抗"），本类是"补锁反复不生效"（第 N 次） |
 

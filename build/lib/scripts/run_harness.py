@@ -45,6 +45,105 @@ COVERED = ["antinel-namespaces.json",
 def sha(p):
     return "sha256:" + hashlib.sha256(Path(p).read_bytes()).hexdigest()
 
+# ═══════════════ 失败四分类账（0-b，2026-10-08 落账）═══════════════
+# 为什么：verdict=FAIL 把四类不同性质的失败压成一个数字 ——「产品坏了」
+# 「量具过期」「环境/时序」「记录没刷新」。读者无法区分，于是这个 FAIL
+# 要么被全信（冤），要么被全疑（更冤）。2026-10-08 实测：发布账本 7–9 条
+# 失败里，0 条已证实为产品逻辑缺陷。
+#
+# 分类纪律（四条，缺一不可）：
+#   ① 只有机器可判的才机器判 —— 目前机器只出一个事实：上一版账本登记的
+#      digests 与当前文件的偏差（写盘前实测，随账本留痕）。
+#   ② 其余**默认 product**（fail-closed 方向）：证不出别的类，就记产品类。
+#      宁可多认产品缺陷，不可少认 —— 少认等于替自己减刑。
+#      推论：没做隔离实验的悬置项（如 0.26 SafeZone）**不给过的类** ——
+#      默认项会逼着把实验做掉，而不是把话圆过去。
+#   ③ 判为别的类必须带 **basis**：能回指到具体文件/行或实测结论，
+#      basis 随账本发布 ⇒ 第三方能审分类，不只是审数字。
+#   ④ 登记表自己会腐烂（断言改名后条目失效）⇒ 每次运行机器核对：
+#      登记了但本轮没失败的条目进 stale_entries —— 表格腐烂本身留痕。
+_BY_KIND_TAXONOMY = {
+    "product": "产品缺陷：代码行为不符合声言（默认类，fail-closed）",
+    "instrument": "判据腐化：断言/负控/夹具随产品演进失效，产品并无该错",
+    "environment": "环境/时序：依赖机器状态（ACL/进程/spawn/时钟），非产品逻辑",
+    "process-stale": "流程陈旧：记录（digests 等）未随合法编辑刷新，非代码缺陷",
+}
+
+# 登记表：断言名 → (类, basis)。只收有实测依据的；没有依据的一概不登记
+# （落默认 product 类）。条目会腐烂 ⇒ stale_entries 机器核对（见下）。
+_BY_KIND_OVERRIDES = {
+    "UX: 同类提醒当天只提示一次（第二次静默记录）": ("instrument",
+        "套件 539-541 行重置 proj/.psl/notify_state.json，而 0.35.3 起产品读 "
+        "~/.antinel/notify_state.json ⇒ 重置指向死路径；且 522 行 chmod 777 script.sh "
+        "与 UX 断言命中同一键 DST-05|chmod 777（键=规则+片段，不含文件名）⇒ 同轮内"
+        "键已被消费。0.36.8 已修（重置改为 Path(os.environ[ANTINEL_HUB_DIR])/"
+        "notify_state.json）并原样复现实测转绿。"),
+    "0.16.0 DST-01 URL /rd/ segment is not a delete (NET-01 warns, no block)": ("instrument",
+        "断言期望 err 含 NET-01，实际命中的是后增的白名单域规则 [NET-03]；被测"
+        "代码并未重新触发放行 —— 断言口径与规则演进脱节。"),
+    "0.16.0 antinel_verify derives current on an intact package": ("process-stale",
+        "digests 定格于上一版 harness 写入态，此间的合法编辑未刷新记录 ⇒ 自书失真；"
+        "本次 harness 重写即以新 digest 修复。"),
+    "0.17.0 P-B1 without --manifest, README tamper is out of scope (documented)": ("process-stale",
+        "连带项：antinel_verify 对任何 digest 不符一律 rc=1，断言 rc2==0 必红；"
+        "根因同上（记录陈旧），非 README 真被改。"),
+    "F-09 host-shield 自检查不出来时不谎报已安装（三态：None != True）": ("instrument",
+        "负控衰减：注入 OSError 欲使 subprocess.run 抛错，但 0.35.3 起 task_installed() "
+        "文件系统事实优先（os.path.isfile(shim) 早退 return True）⇒ 注入永远到不了"
+        "被测分支；本机 shim 存在 ⇒ 产品行为反而更安全。"),
+    "F-13 paramedic 复活死亡哨兵并留痕（死因 RC5 回归）": ("environment",
+        "pid=999999999 是负控自造的假 pid，spawn-failed 属 spawn 环境问题；该条在"
+        "10-08 重跑中未复现（失败集合成员漂移的实例）。"),
+    "F-15 门闸高危事件实时推送＋同类 30 分钟节流（0.28.2 报警 v1）": ("instrument",
+        "桩吞效应：断言先 hs._notify=lambda: None 打桩，再期望 notify_sent 被第一次 "
+        "record 置位 —— 桩替换掉了被测效应本身 ⇒ t1 恒 0。"),
+    "F-17 心跳判死：无心跳/心跳陈旧的哨兵会被强制重启（B2）": ("process-stale",
+        "沙箱内 self-check-failed: host_shield.py 与 manifest 不符 ⇒ 与 "
+        "antinel_verify 那条同根（清单与实物未同步），非心跳逻辑缺陷。"),
+    # 0.26 SafeZone registered + tamper-locked：**故意不登记** —— NTFS ACL
+    # deny 在沙箱 WORK 下未生效只是环境嫌疑，隔离实验从未跑过 ⇒ 证不出
+    # product 之外的类 ⇒ 按纪律②落默认 product 类，逼着把实验做掉，
+    # 而不是把话圆过去。
+}
+
+
+def classify_failures(failed, stale_digests):
+    """0-b：失败四分类账。返回可直接写进 judgment 的 dict。
+
+    stale_digests 是机器事实（写盘前实测的旧账本偏差清单）；每条失败的类
+    与 basis 由上方纪律产生；表格自身的腐烂由 stale_entries 记账。
+    """
+    counts = {k: 0 for k in _BY_KIND_TAXONOMY}
+    per, stale_entries = [], []
+    names = [f.get("name") for f in failed]
+    for f in failed:
+        name = f.get("name") or ""
+        if name in _BY_KIND_OVERRIDES:
+            kind, basis = _BY_KIND_OVERRIDES[name]
+        else:
+            kind, basis = "product", ("未登记 ⇒ 按 fail-closed 纪律默认 product 类"
+                                      "（不是结论，是尚未证出别的类）")
+        counts[kind] += 1
+        per.append({"name": name, "kind": kind, "basis": basis})
+    for name in _BY_KIND_OVERRIDES:
+        if name not in names:
+            stale_entries.append(name)
+    return {
+        "taxonomy": _BY_KIND_TAXONOMY,
+        "method": {
+            "default": "fail-closed：证不出别的类就记 product 类",
+            "machine_derived": "仅『记录陈旧』事实（stale_digests_at_run_time，写盘前实测）",
+            "overrides": "_BY_KIND_OVERRIDES（scripts/run_harness.py 内），每条带 basis，随账本发布供第三方审计",
+            "stale_check": "登记了但本轮未失败的条目进 stale_entries —— 表格腐烂本身留痕",
+        },
+        "counts": counts,
+        "per_failure": per,
+        "stale_entries": stale_entries,
+        "stale_digests_at_run_time": {"count": len(stale_digests),
+                                      "files": sorted(stale_digests)},
+        "invariant": "sum(counts.values()) == len(failed) == %d" % len(failed),
+    }
+
 def pinned_fingerprint():
     """The namespace-list key fingerprint pinned in README.md (single source)."""
     try:
@@ -243,6 +342,20 @@ def main():
     verdict = "PASS" if proc.returncode == 0 and total and passed == total else "FAIL"
     ownership, ownership_basis = derive_object_ownership()
     digests = {rel: sha(PKG / rel) for rel in COVERED}
+    # 0-b：写盘**之前**实测「上一版账本登记的 digests 与当前文件的偏差」。
+    #   为什么必须在写盘前：新账本的 digests 按定义全对，写盘后这个事实
+    #   就消失了 —— 而它正是「流程陈旧」类的机器证据。
+    stale_digests = []
+    try:
+        _old = json.loads(OUT.read_text(encoding="utf-8"))
+        for _rel, _want in (_old.get("digests") or {}).items():
+            try:
+                if sha(PKG / _rel) != _want:
+                    stale_digests.append(_rel)
+            except Exception:                              # noqa: BLE001
+                stale_digests.append(_rel)      # 读不到 ⇒ 也属失配
+    except Exception:                                      # noqa: BLE001
+        pass                                # 无旧记录（bootstrap）⇒ 空
     now = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
     rec = {
         "spec": "psl-vs-0.1",
@@ -279,6 +392,12 @@ def main():
                            #   定位成本 = 一次 12.5 分钟的重跑（本次实测）。
                            #   与 total/passed 同源同一次运行，不是二次执行。
                            "failed": failed,
+                           # ★ 0-b：失败四分类账（product / instrument /
+                           #   environment / process-stale）。机器只测「记录
+                           #   陈旧」事实（写盘前实测旧账本偏差）；其余默认
+                           #   product 类（fail-closed），例外必须带 basis
+                           #   登记在 _BY_KIND_OVERRIDES 并随账本供审计。
+                           "by_kind": classify_failures(failed, stale_digests),
                            "partial": partial_flag},
         # V5: true == verified on THIS platform only. Honest until CI proves more.
         "platformSpec": True,

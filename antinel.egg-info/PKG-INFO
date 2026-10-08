@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: antinel
-Version: 0.35.1
+Version: 0.36.8
 Summary: Local-first audit chain and ledger for AI coding agents: every action recorded, every record verifiable.
 Author-email: geguang <geguang@gmail.com>
 License: MIT License

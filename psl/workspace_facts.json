@@ -1,61 +1,62 @@
 {
-  "_why": "★★★ 2026-09-29（D-23）：「东西在哪儿 / 它是不是 git 仓」这类**环境事实**此前只存在于散文与对话里，没有机器可读真源 ⇒ 每次都要重新推理 ⇒ **必然漂移**（本轮已反复发生：忘了产物仓是不是 git、忘了站点构建器不在任何 git 仓里）。本文件就是这些事实的**唯一真源**：它不是给人读的说明，是给判据读的数据。改它之前先想清楚：改错一条，`ci/regression_gate.py` 的 `j_workspace_facts` 立刻红。",
-  "_rule": "三条：① 真源机器可读（本文件）；② 违反就红（j_workspace_facts）；③ 旧件退役（我的记忆不再作数，一切以本文件为准）。",
-  "_measured_at": "2026-10-06",
-  "repos": {
-    "product": {
-      "path": "D:\\psl\\poc\\antinel-security",
-      "git": true,
-      "role": "唯一开工处 · 主仓 · 分类布局",
-      "must_have": [
-        "pyproject.toml",
-        "antinel.py",
-        "psl/manifest.json"
-      ]
-    },
-    "archive": {
-      "path": "D:\\psl\\poc\\r1v3",
-      "git": false,
-      "role": "只读归档 · 平铺布局 · 不许回灌",
-      "must_have": [
-        "ARCHIVED.md"
-      ]
-    }
+ "_why": "★★★ 2026-09-29（D-23）：「东西在哪儿 / 它是不是 git 仓」这类**环境事实**此前只存在于散文与对话里，没有机器可读真源 ⇒ 每次都要重新推理 ⇒ **必然漂移**（本轮已反复发生：忘了产物仓是不是 git、忘了站点构建器不在任何 git 仓里）。本文件就是这些事实的**唯一真源**：它不是给人读的说明，是给判据读的数据。改它之前先想清楚：改错一条，`ci/regression_gate.py` 的 `j_workspace_facts` 立刻红。",
+ "_rule": "三条：① 真源机器可读（本文件）；② 违反就红（j_workspace_facts）；③ 旧件退役（我的记忆不再作数，一切以本文件为准）。",
+ "_measured_at": "2026-10-06",
+ "repos": {
+  "product": {
+   "path": "D:\\psl\\poc\\antinel-security",
+   "git": true,
+   "role": "唯一开工处 · 主仓 · 分类布局",
+   "must_have": [
+    "pyproject.toml",
+    "antinel.py",
+    "psl/manifest.json"
+   ]
   },
-  "site": {
-    "builders_dir": "D:\\2026\\PSL",
-    "builders_git": false,
-    "builders_marker": "_site_build_all.py",
-    "output_dir": "D:\\2026\\PSL\\_antinel_site",
-    "deploy_dir": "D:\\2026\\PSL\\_deploy",
-    "focus_allow": [
-      "check",
-      "fix",
-      "progress",
-      "agentstate/limits"
-    ],
-    "_note": "★ 站点构建器**不在任何 git 仓里**（D:\\2026\\PSL 非 git）—— 这是事实，不是缺陷；但它意味着改站点没有版本历史，要改就改构建器源码，别改 _antinel_site 里的生成物（下次构建会被覆盖）。"
-  },
-  "release": {
-    "version": "0.35.1",
-    "version_files": [
-      "pyproject.toml",
-      "server.json",
-      "psl/manifest.json"
-    ],
-    "dist_dir": "D:\\psl\\poc\\antinel-security\\dist",
-    "artifacts": [
-      "antinel-0.35.1-py3-none-any.whl",
-      "antinel-0.35.1.tar.gz"
-    ],
-    "pypi": {
-      "published_version": "0.34.1",
-      "wheel": "D:\\psl\\poc\\antinel-security\\dist\\\\antinel-0.35.1-py3-none-any.whl",
-      "host_audit_fixture": "D:\\2026\\PSL\\_strict_test\\ux_0332.txt",
-      "_note": "★★ 2026-10-03 修订（据《Antinel（C14）版本登记不符·发现备忘 v1.0》§3 建议 1）：此前本文件把「已定稿、待上传的**目标态**」与「PyPI 上**事实**」**混在一个字段**里（published_version 写 0.33.2，而实查 PyPI 是 0.28.0）⇒ 任何「用户能装到的版本」类判据读到 0.33.2，用户实际装到 0.28.0。现在**两栏分开**：published_version＝PyPI 事实（只能由实查改写）；target_version＝本次待发版。★ 规则：published_version **只能用 pypi.org/pypi/antinel/json 的实查结果改写**，不得由「打算发什么」推导 —— 否则又回到「登记值跑在事实前面」。 ★★ 2026-10-05 实查更新：0.34.1 已于 2026-10-05T10:46:17Z 上传 PyPI 成功（实查 pypi.org/pypi/antinel/json：info.version=0.34.1，版本集 [0.28.0, 0.34.1]，两件 sha 与本地 dist 一致）；published_version 由 0.28.0 改为 0.34.1，published_at 同步。",
-      "target_version": "0.35.1",
-      "published_at": "2026-10-05T10:46:17Z"
-    },
-    "_note": "★ dist 里**只允许** artifacts 这两个发布件。旧版本包与 .BAD-* 一律改名让开（零删除）—— 否则人手上传时会在一堆 antinel-0.29.x / 0.33.x / .BAD- 里选错文件。选错＝把坏包传上 PyPI 且**不可撤回**（PyPI 只能 yank，版本号永久占用）。 ★★ 2026-10-05：0.34.0 → 0.34.1 重切 —— `v0.34.0` tag 之后的 7 个提交（E1–E7 / 第 5 个 MCP 工具 antinel_brief / 批量安装 / report --audience）落在 dist 产件**之后**，旧产件缺这些内容（`_strict_test/wheel_source_sync.py` 实测红）。按版本纪律（新内容＝新版本号）重切为 0.34.1；0.34.0 从未发布到 PyPI，故版本号不冲突。 ★★★ 2026-10-06：0.34.1 → 0.35.0（升 minor）——值守台 13 个模块 ＋ 11 个 assets ＋ `tools/tray.ps1` **首次随 wheel 发布**，并新增 `antinel inbox` 子命令（list/report/serve/daemon/tray）。理由套 0.34.0 那条判据：**新增 entry point 与运行时能力 ⇒ patch 位装不下**（patch 只承诺『修错、不改行为』）。 ★★★ 2026-10-06 补记：0.35.0 **在提交 / 打 tag / 上传 PyPI 之前**并入一处修错重切（heartbeat.py 的出站 UA 自报家门——修复 Cloudflare 浏览器签名封禁 1010 导致心跳必然 403；详见《心跳端点·部署实录 v1.0》）。判据：当时**不存在任何已发布或已 tag 的 0.35.0**，产件从未离开本机；一旦打 tag 或上传，后续任何源码改动即须走 0.35.1。 ★★★★ 2026-10-06 二次补记：0.35.0 → 0.35.1 —— 并入「守护进程每日一次心跳」（inbox_daemon 新增第⑥步 ＋ 5 条判据 ＋ 1 条 CLI 可观测性）。为什么不沿用 0.35.0 重切：0.35.0 的 wheel/sdist **字节与 sha256 已被写进本文件 artifacts 及《交接包 v1.1》**，同版本号换字节即「同名不同证据」，正面撞『证据不可篡改』这条不变式 ⇒ 版本号必须前进。为什么是 patch 而不是 minor：该能力**默认关**，未开启者的运行时行为逐字不变（判据 P10 心跳关=零请求零落盘 实测覆盖）⇒ 依 0.34.0→0.34.1 那条判据（新增*默认生效*的运行时能力才要升 minor），默认关的能力 patch 位装得下。0.35.0 与 0.35.1 均**从未打 tag、从未上传 PyPI**。"
+  "archive": {
+   "path": "D:\\psl\\poc\\r1v3",
+   "git": false,
+   "role": "只读归档 · 平铺布局 · 不许回灌",
+   "must_have": [
+    "ARCHIVED.md"
+   ]
   }
+ },
+ "site": {
+  "builders_dir": "D:\\2026\\PSL",
+  "builders_git": false,
+  "builders_marker": "_site_build_all.py",
+  "output_dir": "D:\\2026\\PSL\\_antinel_site",
+  "deploy_dir": "D:\\2026\\PSL\\_deploy",
+  "focus_allow": [
+   "check",
+   "fix",
+   "progress",
+   "agentstate/limits"
+  ],
+  "_note": "★ 站点构建器**不在任何 git 仓里**（D:\\2026\\PSL 非 git）—— 这是事实，不是缺陷；但它意味着改站点没有版本历史，要改就改构建器源码，别改 _antinel_site 里的生成物（下次构建会被覆盖）。"
+ },
+ "release": {
+  "version": "0.36.8",
+  "version_files": [
+   "pyproject.toml",
+   "server.json",
+   "psl/manifest.json"
+  ],
+  "dist_dir": "D:\\psl\\poc\\antinel-security\\dist",
+  "artifacts": [
+   "antinel-0.36.8-py3-none-any.whl",
+   "antinel-0.36.8.tar.gz"
+  ],
+  "pypi": {
+   "published_version": "0.34.1",
+   "wheel": "D:/psl/poc/antinel-security/dist/antinel-0.36.8-py3-none-any.whl",
+   "host_audit_fixture": "D:\\2026\\PSL\\_strict_test\\ux_0332.txt",
+   "_note": "★★ 2026-10-03 修订（据《Antinel（C14）版本登记不符·发现备忘 v1.0》§3 建议 1）：此前本文件把「已定稿、待上传的**目标态**」与「PyPI 上**事实**」**混在一个字段**里（published_version 写 0.33.2，而实查 PyPI 是 0.28.0）⇒ 任何「用户能装到的版本」类判据读到 0.33.2，用户实际装到 0.28.0。现在**两栏分开**：published_version＝PyPI 事实（只能由实查改写）；target_version＝本次待发版。★ 规则：published_version **只能用 pypi.org/pypi/antinel/json 的实查结果改写**，不得由「打算发什么」推导 —— 否则又回到「登记值跑在事实前面」。 ★★ 2026-10-05 实查更新：0.34.1 已于 2026-10-05T10:46:17Z 上传 PyPI 成功（实查 pypi.org/pypi/antinel/json：info.version=0.34.1，版本集 [0.28.0, 0.34.1]，两件 sha 与本地 dist 一致）；published_version 由 0.28.0 改为 0.34.1，published_at 同步。",
+   "target_version": "0.36.8",
+   "published_at": "2026-10-05T10:46:17Z"
+  },
+  "_note_repo": "★ dist 里**只允许** artifacts 这两个发布件。旧版本包与 .BAD-* 一律改名让开（零删除）—— 否则人手上传时会在一堆 antinel-0.29.x / 0.33.x / .BAD- 里选错文件。选错＝把坏包传上 PyPI 且**不可撤回**（PyPI 只能 yank，版本号永久占用）。 ★★ 2026-10-05：0.34.0 → 0.34.1 重切 —— `v0.34.0` tag 之后的 7 个提交（E1–E7 / 第 5 个 MCP 工具 antinel_brief / 批量安装 / report --audience）落在 dist 产件**之后**，旧产件缺这些内容（`_strict_test/wheel_source_sync.py` 实测红）。按版本纪律（新内容＝新版本号）重切为 0.34.1；0.34.0 从未发布到 PyPI，故版本号不冲突。 ★★★ 2026-10-06：0.34.1 → 0.35.0（升 minor）——值守台 13 个模块 ＋ 11 个 assets ＋ `tools/tray.ps1` **首次随 wheel 发布**，并新增 `antinel inbox` 子命令（list/report/serve/daemon/tray）。理由套 0.34.0 那条判据：**新增 entry point 与运行时能力 ⇒ patch 位装不下**（patch 只承诺『修错、不改行为』）。 ★★★ 2026-10-06 补记：0.35.0 **在提交 / 打 tag / 上传 PyPI 之前**并入一处修错重切（heartbeat.py 的出站 UA 自报家门——修复 Cloudflare 浏览器签名封禁 1010 导致心跳必然 403；详见《心跳端点·部署实录 v1.0》）。判据：当时**不存在任何已发布或已 tag 的 0.35.0**，产件从未离开本机；一旦打 tag 或上传，后续任何源码改动即须走 0.35.1。 ★★★★ 2026-10-06 二次补记：0.35.0 → 0.35.1 —— 并入「守护进程每日一次心跳」（inbox_daemon 新增第⑥步 ＋ 5 条判据 ＋ 1 条 CLI 可观测性）。为什么不沿用 0.35.0 重切：0.35.0 的 wheel/sdist **字节与 sha256 已被写进本文件 artifacts 及《交接包 v1.1》**，同版本号换字节即「同名不同证据」，正面撞『证据不可篡改』这条不变式 ⇒ 版本号必须前进。为什么是 patch 而不是 minor：该能力**默认关**，未开启者的运行时行为逐字不变（判据 P10 心跳关=零请求零落盘 实测覆盖）⇒ 依 0.34.0→0.34.1 那条判据（新增*默认生效*的运行时能力才要升 minor），默认关的能力 patch 位装得下。0.35.0 与 0.35.1 均**从未打 tag、从未上传 PyPI**。",
+  "_note": "★ 2026-10-07（0.36.5 收口）：release.version / artifacts / target_version 由 0.35.1 更新到 0.36.4 —— D-23 判据实测变红（登记 0.35.1 vs pyproject 实测 0.36.4），根因是 0.36.0–0.36.4 四轮改动**从未重新打包**，登记与产物一起停在 0.35.x。 ★ published_version=0.34.1 是 **PyPI 上的事实**（实查 pypi.org），本轮**未动**它 —— 事实位只能由实查改写，不能由「打算发什么」推导。 ★★ 2026-10-08（0.36.8 收口）：release.version / target_version / pypi.wheel 由 0.36.5 更新到 0.36.8 —— D-23 再次实测变红（登记 0.36.5 vs pyproject 实测 0.36.8），同一族复发：合法编辑（0.36.7 冒泡根治 + JDG 判据族）后未重新打包，登记停在产物态。★ 同轮实测并修复一处**自举探测器盲区**（build_package.py）：原判据只比 manifest 版本号，而升版脚本会把 manifest 的 version 一起刷平 ⇒ 版本永不落后；实际失配在**文件哈希**（121 项中 8 项漂移）⇒ 自举未声明、哈希级联红项（0363 R06 / 0364 D2）无一被豁免、打包被自己的判据拦死。判据已扩为「版本落后 **或** 任一覆盖文件哈希失配」，豁免侧未动。"
+ }
 }

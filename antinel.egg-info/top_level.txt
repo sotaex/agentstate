@@ -2,7 +2,9 @@ antinel
 antinel_mcp
 assets
 audit_chain
+challenge
 egress
+glossary
 heartbeat
 hooks
 host_shield
@@ -18,8 +20,10 @@ inbox_report
 inbox_server
 inbox_store
 inbox_tray
+inbox_window
 ledger
 psl
+remediation
 rules
 scripts
 session_dna

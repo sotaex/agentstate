@@ -375,9 +375,37 @@ side = os.path.join(mainf, "sidecar")
 check("B2 主链无 unlocked 记录（v1.2：降级落 sidecar）",
       all(r.get("chain") != "unlocked" for r in cl), "")
 check("B3 day_manifest 日锚存在且单调", os.path.isfile(os.path.join(mainf, "day_manifest.json")), "")
-check("B4 第三方验证器在包内（challenge/verify.py + tools/antinel_verify.py）",
-      os.path.isfile(os.path.join(PKG, "challenge", "verify.py")) and
-      os.path.isfile(os.path.join(PKG, "tools", "antinel_verify.py")), "")
+# B4 第三方验证器**必须进出件**（不是"源码树里有"）。
+#   ★ 2026-10-06 真实用户验收实测的缺陷：这条判据原来只查 `PKG`（**源码树**），
+#     于是**仓里永远绿**；而 `challenge/` 当时**根本没进 wheel**（只进 sdist），
+#     用户在 pip 装到的布局里跑 `verify` 教的那条命令，得到的是
+#     `Errno 2 No such file or directory`。
+#     ⇒ 「查源码树」不是「查出件」—— 没对象的检查项＝假守卫。
+#   现在：源码树 **＋ 每个构建出来的 wheel** 都查。
+#   （更一般的守卫见 `ci/verify_promises_guard.py`：它读产品自己的
+#    `antinel._VERIFY_RECOMPUTE` 登记表，不写死路径。）
+def _b4_missing_items():
+    import glob as _glob
+    import zipfile as _zip
+    miss = []
+    for rel in ("challenge/verify.py", "tools/antinel_verify.py"):
+        if not os.path.isfile(os.path.join(PKG, *rel.split("/"))):
+            miss.append("源码树缺 " + rel)
+    for w in sorted(_glob.glob(os.path.join(PKG, "dist", "*.whl"))):
+        base = os.path.basename(w)
+        try:
+            names = set(_zip.ZipFile(w).namelist())
+        except Exception as e:                                  # noqa: BLE001
+            miss.append("%s 打不开：%r" % (base, e))
+            continue
+        for rel in ("challenge/verify.py", "tools/antinel_verify.py"):
+            if rel not in names:
+                miss.append("%s 里没有 %s" % (base, rel))
+    return miss
+
+
+_b4 = _b4_missing_items()
+check("B4 第三方验证器在**出件**里（源码树 ＋ 每个 wheel）", not _b4, "; ".join(_b4))
 
 # B5 追加式：链文件只以 "a" 打开（无覆写路径）
 src_post = open(HOOK_POST, encoding="utf-8").read()

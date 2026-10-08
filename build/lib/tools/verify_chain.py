@@ -182,6 +182,7 @@ def main():
     tail_fail = 0
     unexplained = 0
     explained = 0
+    total_records = 0            # ★ 0.35.2：本链一共多少条**可验**记录
     rc = 0
 
     if json_mode:
@@ -191,6 +192,7 @@ def main():
         day = os.path.basename(fp)
         is_current = (day == current_day)
         by_class, details, prechain, total = verify_file_v2(fp)
+        total_records += total
         tok, tmsg = verify_tail(fp)
 
         for label, count in by_class.items():
@@ -238,8 +240,31 @@ def main():
             tail_fail += 1
             unexplained += 1
 
+    # ★ 0.35.2：**空链不许报 clean**。
+    #   为什么（2026-10-06 真实用户验收实测）：`antinel verify` 只验**当前目录**
+    #   向上找到的那条链，而 `antinel inbox report` 验的是 registry 里**所有**登记
+    #   项目根的链。同一个目录下前者 0 条、后者 42065 条 —— 而旧版照样打出
+    #   `verdict: 0 anomalies` ＋ `rc=0 (clean)`，把「这里没有东西可查」
+    #   说成了「一切正常」。撞铁律：**「没查到」必须与「没发现」长得不一样**。
+    #   ⇒ 0 条记录 ⇒ rc=4，且**明确说这不是 clean**。
+    #   （`tail_fail` 优先：整天文件被删是真的失守，不能被"空链"盖过去。）
+    if total_records == 0 and not tail_fail:
+        if json_mode:
+            report["by_class"] = dict(total_by_class)
+            report["records"] = 0
+            report["unexplained_count"] = unexplained
+            report["explained_count"] = explained
+            report["tail_failures"] = tail_fail
+            report["rc"] = 4
+            print(json.dumps(report, ensure_ascii=False, indent=1, default=dict))
+            return 4
+        print("verdict: NO RECORDS —— 这条链里 0 条记录，**没有可验的东西**（这不是 clean）")
+        print("⇒ rc=4 (nothing to verify：查不到 ≠ 查出来是好的)")
+        return 4
+
     if json_mode:
         report["by_class"] = dict(total_by_class)
+        report["records"] = total_records
         report["unexplained_count"] = unexplained
         report["explained_count"] = explained
         report["tail_failures"] = tail_fail
@@ -258,7 +283,9 @@ def main():
             summary_parts.append("%d %s" % (total_by_class[lbl], lbl))
     if not summary_parts:
         summary_parts.append("0 anomalies")
-    print("verdict: %s" % " / ".join(summary_parts))
+    # ★ 0.35.2：把**这条链里有多少条记录**一起打出来 ——
+    #   否则读者无法分辨「我验了一条 42065 条的链」和「我验了一条空链」。
+    print("verdict: %s   （本链 %d 条记录）" % (" / ".join(summary_parts), total_records))
 
     if unexplained > 0:
         rc = 2

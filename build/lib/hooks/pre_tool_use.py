@@ -54,7 +54,7 @@ _T0 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段起点（性能
 
 # ---------------------------------------------------------------- constants --
 PKG_DIR = os.path.dirname(os.path.abspath(__file__))
-_ANTINEL_VERSION = "0.35.1"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
+_ANTINEL_VERSION = "0.36.8"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
 _T1 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段终点（性能插桩）
 
 
@@ -2169,27 +2169,54 @@ def _host_audit_dir():
     return os.path.join(base, "antinel-audit")
 
 
+def notice_state_path():
+    """气泡降噪状态文件的位置 —— **唯一口径**。
+
+    ★★ 0.35.3 修（创始人 2026-10-07 实测「右下角冒泡又出现了」）：
+      原来这里写的是 `os.getcwd()/.psl/notify_state.json`。
+      **`cwd` 随宿主而变**：钩子由哪个工具、在哪个目录拉起，就落在哪个目录。
+      实测本机同一时刻散落着**4 份** `notify_state.json`：
+        `D:\\psl\\poc\\.psl\\`（09-18）、`…\\antinel-security\\.psl\\`（10-03）、
+        `…\\_evade_work\\.psl\\`（09-10）、`…\\_p9_wheeltest\\repo\\.psl\\`（10-03）
+      ⇒ 同一个告警在另一个 cwd 下**又会被当成没通知过**，于是重新弹。
+      降噪被摊薄成 N 份，而用户只看到一条没完没了的气泡。
+      ★ 这与本仓已修过的 `heartbeat_age(包根 vs 审计目录)` 是**同一类错**：
+        **同一个状态按"当前目录"存，必然分裂**。
+      ⇒ 改存**个人中枢**（`~/.antinel`）—— 一台机器一份，全局唯一。
+        `ANTINEL_HUB_DIR` 可覆盖（测试隔离用）。
+    """
+    hub = os.environ.get("ANTINEL_HUB_DIR")
+    base = os.path.expanduser(hub) if hub else os.path.join(
+        os.path.expanduser("~"), ".antinel")
+    return os.path.join(base, "notify_state.json")
+
+
 def notice_gate(rule_id, snippet):
     """UX: identical alert (rule + snippet) notifies once per day; repeats are
-    silently logged. State lives in .psl/notify_state.json (today's keys only)."""
+    silently logged. State lives in the **个人中枢**（一台机器一份，见
+    `notice_state_path`）—— 原来按 cwd 存，会分裂成多份，降噪等于失效。"""
     today = datetime.now().strftime("%Y-%m-%d")
     key = rule_id + "|" + re.sub(r"\s+", " ", snippet)[:60]
     try:
-        p = os.path.join(os.getcwd(), ".psl", "notify_state.json")
+        p = notice_state_path()
         st = {}
         if os.path.isfile(p):
             try:
                 st = json.load(open(p, encoding="utf-8"))
             except Exception:
                 st = {}
+        if not isinstance(st, dict):
+            st = {}
         st = {k: v for k, v in st.items() if v == today}
         sup = st.get(key) == today
         if not sup:
             st[key] = today
             try:
                 os.makedirs(os.path.dirname(p), exist_ok=True)
-                with open(p, "w", encoding="utf-8") as f:
+                tmp = p + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
                     json.dump(st, f, ensure_ascii=False)
+                os.replace(tmp, p)          # 原子换：并发钩子不会互相覆盖
             except Exception:
                 pass
         return sup
@@ -2724,6 +2751,10 @@ def _budget_hit(tool_name, session_id, policy):
 # 裸 "powershell" 可被 PATH/应用目录投毒劫持。
 _PS_EXE = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
                        "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+# ★★ 0.35.3（创始人报障：窗口不停弹出又马上关掉）：钩子由宿主拉起，未必带控制台
+#   ⇒ 起 PowerShell 若不显式 `CREATE_NO_WINDOW`，会为子进程新建控制台 = 黑窗一闪。
+#   `-WindowStyle Hidden` 挡不住（控制台宿主窗口在建进程时就已创建）。
+_CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 
 def _slop_hit(tool_name, command, policy):
@@ -2810,7 +2841,36 @@ def _slop_hit(tool_name, command, policy):
 
 def notify_owner(title, body):
     """对抗分析 v1.0 裁定：留痕重要，让主人第一时间知道更重要。
-    Windows 气泡通知（fire-and-forget，不阻塞钩子、失败静默）。"""
+    Windows 气泡通知（fire-and-forget，不阻塞钩子、失败静默）。
+
+    ★★ 0.36.7：本通道接入「窗口可见 ⇒ 不重复通知」判据（与 host_shield
+       ._notify_throttled 同一条）。修之前的缺口：该判据只长在哨兵/值守台
+       事件通道，拦截气泡走本函数——**另一条通道、另一套去重** ⇒ 实测复现
+       「值守台窗口开着、正显示这条急事 ＋ 右下角又弹一个泡」（2026-10-08
+       创始人实测：两次越权写入拦截，窗口可见状态下各触发一次气泡）。
+       ⇒ 判据不二次实现：import host_shield，问 console_is_visible()——
+         True（此刻有窗口正在看）⇒ 不弹，把「已用窗口通知」记进状态；
+         False（明确没有）／None（判不出）⇒ 照弹，方向与 _notify_throttled
+         一致：宁可多弹一次，不可把真急事藏起来。
+    """
+    try:
+        try:
+            import host_shield as _hs
+        except ImportError:
+            _parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            if _parent not in sys.path:
+                sys.path.insert(0, _parent)
+            import host_shield as _hs
+        if _hs.console_is_visible() is True:
+            try:
+                _st = _hs.load_state()
+                _st.setdefault("notify_shown_in_window", {})["block|owner"] = time.time()
+                _hs.save_state(_st)
+            except Exception:
+                pass                        # 记账失败不影响「不弹」的结论
+            return
+    except Exception:
+        pass                                # 判不出 ⇒ 照弹（见 docstring）
     try:
         import subprocess
         t = title.replace("'", "''")
@@ -2823,7 +2883,8 @@ def notify_owner(title, body):
               "Start-Sleep -Seconds 8;$n.Dispose()" % (t, b))
         subprocess.Popen([_PS_EXE, "-NoProfile", "-WindowStyle", "Hidden",
                           "-Command", ps],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         creationflags=_CREATE_NO_WINDOW)
     except Exception:
         pass
 
@@ -3271,11 +3332,19 @@ def main():
         desc = _pick(top, "description", lang)
         rem = _pick(top, "remediation", lang)
         # 0.26.0: 实时通知主人——对手采取行动的第一时间，主人要能知道并手工介入
+        # ★★ 0.35.3（创始人 2026-10-06「**不停地有弹窗**」＋「尽可能少让人处理」）：
+        #   拦截**本来就是 Antinel 干完的活** —— 同一条规则 + 同一段命中，
+        #   **一天只敲一次门**；其余只留痕（值守台台账里翻得到）。
+        #   否则一条常用规则反复拦 ⇒ 气泡刷屏 ⇒ 人开始无视气泡
+        #   （"会误报的检查器用两次就没人信"）。
         if str((policy.get("settings") or {}).get("notify_owner", "true")).lower() != "false":
-            what = desc or top.get("description") or "危险操作"
-            detail = str(top.get("match_snippet", ""))[:80]
-            notify_owner("Antinel 已拦下危险操作",
-                         "%s%s。已留痕，详情见 antinel report --session latest" % (what, ("｜" + detail) if detail else ""))
+            if not notice_gate("block|" + str(top.get("rule_id") or "?"),
+                               str(top.get("match_snippet") or "")):
+                what = desc or top.get("description") or "危险操作"
+                detail = str(top.get("match_snippet", ""))[:80]
+                notify_owner("Antinel 已拦下危险操作",
+                             "%s%s。已留痕，详情见 antinel report --session latest"
+                             % (what, ("｜" + detail) if detail else ""))
         if lang == "zh":
             reason = "Antinel 拦截 [%s] %s | 命中: %s | 放行/处理: %s | 重试无效（策略拦截）" % (
                 top["rule_id"], desc, top["match_snippet"], rem)

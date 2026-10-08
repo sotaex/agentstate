@@ -85,7 +85,8 @@ def _run_host_scan(antinel_dir):
     cmd = [sys.executable, "-m", "antinel", "host-scan", "--json"]
     p = subprocess.run(cmd, cwd=antinel_dir, env=env, capture_output=True,
                        text=True, encoding="utf-8", errors="replace",
-                       timeout=SCAN_TIMEOUT)
+                       timeout=SCAN_TIMEOUT,
+                       creationflags=0x08000000 if os.name == "nt" else 0)
     if p.returncode != 0:
         raise RuntimeError("host-scan 退出码 %d：%s"
                            % (p.returncode, (p.stderr or "").strip()[:400]))

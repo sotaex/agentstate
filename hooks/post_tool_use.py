@@ -443,13 +443,15 @@ def _maybe_enforce_probe(event):
         script = os.path.join(pkg, "tools", "enforce_probe.py")
         if not os.path.isfile(script):
             return
-        kw = dict(cwd=root, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                  stderr=subprocess.DEVNULL)
-        if os.name == "nt":
-            kw["creationflags"] = 0x00000008 | 0x00000200   # DETACHED_PROCESS | NEW_PROCESS_GROUP
-        else:
-            kw["start_new_session"] = True
-        subprocess.Popen([sys.executable, script, "--root", root], **kw)
+        # ★ 0.35.3：`creationflags` 显式写在调用里（不再塞进 `**kw`）——
+        #   一是可 grep、二是静态守卫能看见（守卫按「起控制台程序必须带
+        #   CREATE_NO_WINDOW/DETACHED_PROCESS」扫全部 subprocess 调用）。
+        _flags = (0x00000008 | 0x00000200) if os.name == "nt" else 0
+        _extra = {} if os.name == "nt" else {"start_new_session": True}
+        subprocess.Popen([sys.executable, script, "--root", root],
+                         cwd=root, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         creationflags=_flags, **_extra)
     except Exception:
         pass
 
@@ -489,8 +491,18 @@ def _host_seen_update(event):
 def _shield_paramedic():
     """0.28.1 (S1): 宿主审计门闸哨兵的保活。布防中且哨兵进程不在 → 拉起（host_shield.
     ensure_alive 内部带节流与留痕：host_shield_revived / host_shield_spawn_failed）。
-    未布防时只花一次 json 读；任何异常吞掉（fail-open，A-08）——这是审计钩子，
-    不是门闸本体，绝不因保活失败影响宿主。"""
+    任何异常吞掉（fail-open，A-08）——这是审计钩子，不是门闸本体，绝不因保活失败影响宿主。
+
+    ★★ 0.35.3 修（真缺陷 —— 这就是界面「永远失守」的根因）：
+      旧版门控读的是 **`state["enabled"]`**，而本仓的裁决只有一处：
+      **「armed 的权威是链」**（`host_shield.armed_state()`）。
+      当 state 文件与链不一致（链说"布防中"、state 写着 False）时，
+      保活**永远不会被触发** ⇒ 哨兵死了没人拉 ⇒ 界面永远红。
+      **挡住保活的，恰恰是保活本身要修的那个不一致** —— 本仓「同一事实两处副本」
+      第 5 次复发（前 4 次见 `.workbuddy-ai/skills/cross-card-object-check/`）。
+      ⇒ 改用与 `guard_posture` / `ensure_alive` **同一个权威**：`armed_state()`。
+      ★ 代价实测：`armed_state` ≈ 1.1ms（包链 173K），post_tool_use 本就不是热路径。
+    """
     try:
         if os.name != "nt":
             return
@@ -498,7 +510,9 @@ def _shield_paramedic():
         if parent not in sys.path:
             sys.path.insert(0, parent)
         import host_shield as _hs
-        if not _hs.load_state().get("enabled"):
+        st = _hs.load_state()
+        # ★ 权威只有一处：链优先；链上无据才回退 state 文件（与 guard_posture 同口径）。
+        if not _hs.armed_state(_hs._shield_audit_dir(parent), st):
             return
         _hs.ensure_alive(parent, cause="hook-paramedic")
     except Exception:

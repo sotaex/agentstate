@@ -33,7 +33,10 @@ TOOLS = [
 
 def _run(args, cwd=None, timeout=60):
     try:
-        p = subprocess.run(args, cwd=cwd, capture_output=True, timeout=timeout)
+        # ★ 0.35.3：MCP 服务器由宿主以**无控制台**方式拉起 ⇒ 起 python 子进程若不显式
+        #   `CREATE_NO_WINDOW`，Windows 会新建控制台 = 黑窗一闪（每次 MCP 调用一次）。
+        p = subprocess.run(args, cwd=cwd, capture_output=True, timeout=timeout,
+                           creationflags=0x08000000 if os.name == "nt" else 0)
         return p.returncode, p.stdout.decode("utf-8", "replace"), p.stderr.decode("utf-8", "replace")
     except Exception as e:
         return -1, "", str(e)
@@ -87,7 +90,7 @@ def main():
             resp = {"jsonrpc": "2.0", "id": rid, "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "antinel", "version": "0.35.1"}}}
+                "serverInfo": {"name": "antinel", "version": "0.36.8"}}}
         elif method == "tools/list":
             resp = {"jsonrpc": "2.0", "id": rid, "result": {"tools": TOOLS}}
         elif method == "tools/call":

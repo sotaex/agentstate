@@ -2,13 +2,13 @@
  "spec": "psl-vs-0.1",
  "card_id": "antinel-security-suite",
  "skill": "antinel-security",
- "skill_version": "0.35.0",
+ "skill_version": "0.36.8",
  "verdict": "FAIL",
  "status": {
   "value": "current",
   "derivation": "auto",
   "reason": null,
-  "checkedAt": "2026-10-06T01:55:50+08:00",
+  "checkedAt": "2026-10-08T18:09:23+08:00",
   "note": "re-derive any time: python tools/antinel_verify.py (--manifest for all 24 shipped files); which assertions failed: discrimination.failed[]"
  },
  "scope": {
@@ -51,22 +51,101 @@
    "op": "black-box subprocess assertions (stdin JSON in, exit code + stdout/stderr out)"
   },
   "assertions": {
-   "passed": 314,
+   "passed": 310,
    "total": 315
   },
   "failed": [
    {
-    "name": "F-10 门闸事件类型全部登记于 AUDIT_SCHEMA.md（13 类）",
-    "detail": "未登记: ['host_shield_brand_new_kind', 'host_shield_nonexistent']"
+    "name": "0.16.0 antinel_verify derives current on an intact package",
+    "detail": "4 of 21 covered files differ (judgment digests (21 files))"
+   },
+   {
+    "name": "0.17.0 P-B1 without --manifest, README tamper is out of scope (documented)",
+    "detail": ""
+   },
+   {
+    "name": "0.26 SafeZone registered + tamper-locked",
+    "detail": "locked=False rc=0"
+   },
+   {
+    "name": "F-09 host-shield 自检查不出来时不谎报已安装（三态：None != True）",
+    "detail": "True"
+   },
+   {
+    "name": "F-15 门闸高危事件实时推送＋同类 30 分钟节流（0.28.2 报警 v1）",
+    "detail": "THROTTLE False True"
    }
   ],
+  "by_kind": {
+   "taxonomy": {
+    "product": "产品缺陷：代码行为不符合声言（默认类，fail-closed）",
+    "instrument": "判据腐化：断言/负控/夹具随产品演进失效，产品并无该错",
+    "environment": "环境/时序：依赖机器状态（ACL/进程/spawn/时钟），非产品逻辑",
+    "process-stale": "流程陈旧：记录（digests 等）未随合法编辑刷新，非代码缺陷"
+   },
+   "method": {
+    "default": "fail-closed：证不出别的类就记 product 类",
+    "machine_derived": "仅『记录陈旧』事实（stale_digests_at_run_time，写盘前实测）",
+    "overrides": "_BY_KIND_OVERRIDES（scripts/run_harness.py 内），每条带 basis，随账本发布供第三方审计",
+    "stale_check": "登记了但本轮未失败的条目进 stale_entries —— 表格腐烂本身留痕"
+   },
+   "counts": {
+    "product": 1,
+    "instrument": 2,
+    "environment": 0,
+    "process-stale": 2
+   },
+   "per_failure": [
+    {
+     "name": "0.16.0 antinel_verify derives current on an intact package",
+     "kind": "process-stale",
+     "basis": "digests 定格于上一版 harness 写入态，此间的合法编辑未刷新记录 ⇒ 自书失真；本次 harness 重写即以新 digest 修复。"
+    },
+    {
+     "name": "0.17.0 P-B1 without --manifest, README tamper is out of scope (documented)",
+     "kind": "process-stale",
+     "basis": "连带项：antinel_verify 对任何 digest 不符一律 rc=1，断言 rc2==0 必红；根因同上（记录陈旧），非 README 真被改。"
+    },
+    {
+     "name": "0.26 SafeZone registered + tamper-locked",
+     "kind": "product",
+     "basis": "未登记 ⇒ 按 fail-closed 纪律默认 product 类（不是结论，是尚未证出别的类）"
+    },
+    {
+     "name": "F-09 host-shield 自检查不出来时不谎报已安装（三态：None != True）",
+     "kind": "instrument",
+     "basis": "负控衰减：注入 OSError 欲使 subprocess.run 抛错，但 0.35.3 起 task_installed() 文件系统事实优先（os.path.isfile(shim) 早退 return True）⇒ 注入永远到不了被测分支；本机 shim 存在 ⇒ 产品行为反而更安全。"
+    },
+    {
+     "name": "F-15 门闸高危事件实时推送＋同类 30 分钟节流（0.28.2 报警 v1）",
+     "kind": "instrument",
+     "basis": "桩吞效应：断言先 hs._notify=lambda: None 打桩，再期望 notify_sent 被第一次 record 置位 —— 桩替换掉了被测效应本身 ⇒ t1 恒 0。"
+    }
+   ],
+   "stale_entries": [
+    "UX: 同类提醒当天只提示一次（第二次静默记录）",
+    "0.16.0 DST-01 URL /rd/ segment is not a delete (NET-01 warns, no block)",
+    "F-13 paramedic 复活死亡哨兵并留痕（死因 RC5 回归）",
+    "F-17 心跳判死：无心跳/心跳陈旧的哨兵会被强制重启（B2）"
+   ],
+   "stale_digests_at_run_time": {
+    "count": 4,
+    "files": [
+     "antinel.py",
+     "hooks/pre_tool_use.py",
+     "rules/default.json",
+     "scripts/verification_tests.py"
+    ]
+   },
+   "invariant": "sum(counts.values()) == len(failed) == 5"
+  },
   "partial": false
  },
  "platformSpec": true,
  "objectOwnership": "self",
  "objectOwnershipBasis": "subject github.com/sotaex is in the signed namespace list",
  "assertions_total": 315,
- "assertions_passed": 314,
+ "assertions_passed": 310,
  "criteria_independence": "Assertions exercise the hook protocol, rule matching, scanner, installer and reporter as black boxes through subprocesses (stdin JSON in, exit code and stdout/stderr out); they were authored from the design specification ANT-SEC-SPEC-001 v1.1, not from the implementation; third-party re-run supported.",
  "environment": {
   "python": "3.13.14",
@@ -76,7 +155,7 @@
  },
  "digests": {
   "antinel-namespaces.json": "sha256:2db67f32a5b803560f458c4589bd4bb4678cc17bc16625f6b6b3ad20f9b202d2",
-  "rules/default.json": "sha256:5a351f22cab2f7b4898f19bf9ae5edb955f507d8f946405e74c49b5b1733e9b8",
+  "rules/default.json": "sha256:949b9a42bfefd45a279c17af234d658a690e57484e805c37ce0698942d7c66eb",
   "rules/pricing.json": "sha256:e299e7afa07a97128ce00c13706379c79368c747cd4303c488f1c53c5339e253",
   "rules/typosquat_top.json": "sha256:0c699af6ba05d7675055be29b8c1e379714d9fbf44c4369a1717cade424190ad",
   "rules/economics/workbuddy.json": "sha256:7d570a0d8cb09f803695a4af147269620acdd5da5f403e2534a0c418c202c6a6",
@@ -84,22 +163,22 @@
   "rules/economics/claude-code.json": "sha256:e5ce954672baa42ffc220fddde2b691566f4644ec05ba6887c5ccc1c9dae30ba",
   "rules/economics/qoder.json": "sha256:5f51a86cbe0625f44519ce1308e562286c9d3410d0b7284006ac26b068396a3d",
   "rules/economics/generic.json": "sha256:4849374b3d2443dd77329b09d348dec03794863aa8f991d98ea5380a9849b82f",
-  "hooks/pre_tool_use.py": "sha256:1fdf58872b1c0fc0bb79235ee5b61ae31798ec16d5ea9256edf89136e5b47f3f",
-  "hooks/post_tool_use.py": "sha256:09efce048cc44be8b0232703e3d2fee97f92acc6419e71b0f09f5d03c193e456",
+  "hooks/pre_tool_use.py": "sha256:9ac5add90d05607d9dde18affe5e88aaf4fd8c321ad1d02733609d44c0334c9c",
+  "hooks/post_tool_use.py": "sha256:021a194e1af1240dc7292bf80f35a7e23328deb04c019c696b0478b989411d26",
   "scripts/scan.py": "sha256:851eae8a722cb49e0c68b7dc46b78d3e041cacaee39ce549faf1b98aa1407108",
   "scripts/install.py": "sha256:66b20b17f4318edf157bab495d122108e807b22cefe8d095a6d7826eb8c24925",
   "scripts/report.py": "sha256:a8d294e1a0ffe083d08fcbeb16a7a4e4cdbbefed7a84b9ea1e325e9c0230680d",
-  "scripts/verification_tests.py": "sha256:50c123ab3c67cbe5c78d8f85bdb3a555424d93bac567cb20d24741e7e8a2ff9d",
+  "scripts/verification_tests.py": "sha256:6deee3768e35f195ff629a5fdcd7712c17ca42ddeb43ec0a1b1ac765f6f25459",
   "session_dna.py": "sha256:80a0e8a33e953c3fdb67e2213d4500d66df449325b531fa688ca99b5a3fc54b4",
   "transcript_reader.py": "sha256:43c1cd4a4afeaf20d23c6583c9e438a12070f4c2433b554be0292a9cf28ae152",
   "audit_chain.py": "sha256:c8ac6f1d5ca1ae4b08dd63286695c48aedd32b9420adc83a6ebd839bf67753e6",
-  "antinel.py": "sha256:77c7c2acaf9f03bf13391c8c1209e715987c766506ec01014e4b770605204022",
+  "antinel.py": "sha256:e29f1bdac56ba871464ede848789fb6a24bd8e1f1c66f25a93f8d493ce211672",
   "hub.py": "sha256:bf2c01a73b7847c26bf887592093ddb11e5cd0a4183529e14f12afa31907dfbd",
-  "tools/enforce_probe.py": "sha256:fa99191ad571a1d044e7aa537e78c03e0f902836b9e0a8265e23bc846f5b386f"
+  "tools/enforce_probe.py": "sha256:d8a1e3d948a7aa65cede1c780fabd0800ad717bbd5011fd73db512a0eea13173"
  },
  "run": {
-  "started_at": "2026-10-06T01:40:42+0800",
-  "duration_ms": 908929,
+  "started_at": "2026-10-08T17:48:38+0800",
+  "duration_ms": 1245026,
   "duration_note": "wall-clock of a subprocess fan-out suite; machine- and load-dependent, not comparable across environments",
   "executor": "scripts/run_harness.py",
   "exit_code": 1,

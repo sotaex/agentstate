@@ -96,12 +96,31 @@ def _chain_probe_record(root, rec):
 def _notify_owner_failure(root, detail):
     """Probe failure is one of the few events worth waking the owner for:
     'the gate is not signaling' must not live only in a log file. Reuses the
-    pre-hook notifier (single implementation); failures stay silent."""
+    pre-hook notifier (single implementation); failures stay silent.
+
+    ★★ 0.35.3 修（创始人 2026-10-07 实测「右下角冒泡又出现了」）：
+      本函数原来**无条件弹一次**，完全不走 `notice_gate` 降噪。
+      而哨兵每轮都会跑探针 ⇒ 一旦门临时不符（比如改了
+      `host_shield.py` 而 manifest 还没刷新），就**每轮弹一次**，
+      弹到人开始无视为止 —— 与 0.35.3 已经治过的那条
+      「一条常用规则反复拦 ⇒ 气泡刷屏」是**同一个病**，
+      只是换了个调用点。
+      ⇒ 现在也过 `notice_gate`：**同一条探针失败一天只敲一次门**，
+        其次只留痕（值守台台账里翻得到）。
+        探针失败是 Antinel 自己没修好，**更不该拿气泡去轰炸用户**。
+    """
     try:
         hooks_dir = os.path.join(_pkg_root(), "hooks")
         if hooks_dir not in sys.path:
             sys.path.insert(0, hooks_dir)
         import pre_tool_use as _pre
+        gate = getattr(_pre, "notice_gate", None)
+        if gate is not None:
+            # key 固定用 probe + 失败原因片段 ⇒ 同因一天一次；
+            # 换了原因就算新事，值得再敲一次。
+            if gate("ENFORCEMENT-PROBE|FAIL",
+                    ("%s|%s" % (os.path.basename(root), detail))[:60]):
+                return                      # 今天已经敲过 ⇒ 静默
         _pre.notify_owner("Antinel 自检失败：拦截信号未生效",
                           "enforcement_probe FAIL @ %s | %s | 护栏可能已退化为纯记录模式，"
                           "请重跑 probe_host.py 并核对宿主钩子协议" % (os.path.basename(root), detail))
@@ -175,7 +194,8 @@ def main():
             p = subprocess.run([sys.executable, pre], cwd=root,
                                input=json.dumps(ev, ensure_ascii=False),
                                capture_output=True, text=True, encoding="utf-8",
-                               errors="replace", timeout=30, env=env)
+                               errors="replace", timeout=30, env=env,
+                               creationflags=0x08000000 if os.name == "nt" else 0)
             rc, out, err = p.returncode, p.stdout or "", p.stderr or ""
         except Exception as e:
             rc, out, err = -1, "", "probe subprocess error: %r" % (e,)

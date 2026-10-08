@@ -641,12 +641,43 @@ def j_workspace_facts():
                 probs.append("release.version 声明 %s、pyproject 实测 %s"
                              % (want, m.group(1)))
 
+    # ★ 0.36.5：打包在途标志。**必须在函数级取一次**（不能只在 dist 块里定义）——
+    #   下面 pypi.wheel 那处也会读它；若定义在 dist 块内，而 dist 块因
+    #   `dist_dir` 未登记而整块跳过 ⇒ 后面读到的是**未定义名** ⇒ 判据自己崩。
+    #   —— 判据自身出错却因「有输出」而被当成「检查发现问题」，是本轮反复踩的同型。
+    _in_flight = bool(os.environ.get("ANTINEL_BUILD_IN_FLIGHT"))
+
     dd = Path(rel.get("dist_dir") or "")
     if rel.get("dist_dir") and dd.is_dir():
         arts = set(rel.get("artifacts") or [])
         missing = [a for a in sorted(arts) if not (dd / a).is_file()]
-        if missing:
-            probs.append("dist 缺本版发布件：%s" % missing)
+        # ★★★ 0.36.5 修一处**流程死锁**（实测踩到，不是假想）：
+        #   本判据的**意图**是「dist 里必须有本版发布件，且不许混旧包」
+        #   —— 防的是人手上传 PyPI 时选错文件（选错＝不可逆，PyPI 只能 yank）。
+        #   但 0.36.5 把统一交付闸门接进打包入口后，出现死锁：
+        #     要打包 → 必过闸门 → 闸门含本判据 → 本判据要求 dist 里已有本版包
+        #                → 而那个包正是打包的产物 ⇒ **打包永远做不出来**。
+        #   ⇒ 判据的**意图一个字不动**，修的是「它把流程中间态当成了缺陷」：
+        #     「打包在途」是流程的正常态，不是失守。
+        #
+        #   ★ 豁免必须**显式声明**（环境变量），不许靠"dist 空"自动推断：
+        #     自动推断会让"我把 dist 清空了"这种真实缺陷被当成在途而放过去
+        #     —— 那就等于给"清空 dist"发了一张免检通行证。
+        #   ★ 且豁免时**只豁免"缺件"**，不豁免"混旧包"（stray）：
+        #     后者正是本判据要防的最危险一项，任何时候都不许放行。
+        #   ★★ 豁免必须**显式声明**（环境变量），不许靠"dist 空"自动推断：
+        #     自动推断会让"我把 dist 清空了"这种真实缺陷被当成在途而放过去
+        #     —— 那就等于给"清空 dist"发了一张免检通行证。
+        #   ★ 且豁免时**只豁免"缺件"**，不豁免"混旧包"（stray）：
+        #     后者正是本判据要防的最危险一项，任何时候都不许放行。
+        if missing and _in_flight:
+            print("       （D-23：检测到 ANTINEL_BUILD_IN_FLIGHT=1 —— 本次是打包在途，"
+                  "dist 缺本版件属流程中间态，不判红；混旧包仍照判）")
+        elif missing:
+            probs.append("dist 缺本版发布件：%s%s"
+                         % (missing,
+                            "  ← 提示：若本次是打包在途，设 ANTINEL_BUILD_IN_FLIGHT=1"
+                            "（构建器已自动设）；若不是，说明发布件被清掉了" if missing else ""))
         stray = []
         for q in dd.iterdir():
             n = q.name
@@ -676,8 +707,17 @@ def j_workspace_facts():
                      "没有真源，不许各自写死")
     else:
         wh = Path(py.get("wheel") or "")
+        # ★ 0.36.5：与上面 dist 缺件**同一个在途豁免**。
+        #   `release.pypi.wheel` 指向的正是本次构建要产出的那个包 ——
+        #   打包之前它必然不存在。⇒ 「文件不存在」在打包在途时是流程中间态。
+        #   ⚠️ **只豁免"不存在"**；文件名与版本号对不对**照判** ——
+        #     那才是"登记与产物分家"，与在途无关。
         if not wh.is_file():
-            probs.append("release.pypi.wheel 不存在：%r" % py.get("wheel"))
+            if _in_flight:
+                print("       （D-23：打包在途，pypi.wheel 尚未产出，不判红；"
+                      "文件名/版本一致性仍照判）")
+            else:
+                probs.append("release.pypi.wheel 不存在：%r" % py.get("wheel"))
         elif tv and tv not in wh.name:
             probs.append("release.pypi.wheel 文件名 %s 与 target_version %s 不一致"
                          % (wh.name, tv))

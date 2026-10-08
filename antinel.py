@@ -34,7 +34,7 @@ if _HERE not in sys.path:
 
 from strings import detect_lang, get_string
 
-VERSION = "0.35.1"
+VERSION = "0.36.8"
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
@@ -232,7 +232,12 @@ def validate_command_prefix(c):
 def seven_step(label, target_file, loader, mutator, impact, undo_hint,
                field, root, sensitive=False):
     """统一的写命令七步。mutator(data) 就地修改并返回变更摘要字符串；
-    返回 None 表示无变化（不写盘、不留痕）。"""
+    返回 None 表示无变化（不写盘、不留痕）。
+
+    ★ 0.35.3：返回**结局**而不是 None —— `"written"` / `"nochange"` / `"cancelled"`。
+      调用方（如 `zone add`）要据此决定"要不要把这次变更同步进哨兵状态"：
+      **用户点了"取消"却照样改了状态**，是比不改更坏的结果。
+    """
     old_raw = b""
     if os.path.isfile(target_file):
         old_raw = open(target_file, "rb").read()
@@ -243,7 +248,7 @@ def seven_step(label, target_file, loader, mutator, impact, undo_hint,
     summary = mutator(data)
     if summary is None:
         print("无变化（%s 已是期望状态）" % label)
-        return
+        return "nochange"
     new_raw = json.dumps(data, ensure_ascii=False, indent=1).encode("utf-8")
     print("变更：%s" % label)
     print("  影响：%s" % impact)
@@ -252,7 +257,7 @@ def seven_step(label, target_file, loader, mutator, impact, undo_hint,
     print("  %s  %s… → %s…" % (target_file, old_h, new_h))
     if not _confirm("应用前确认？"):
         print("已取消（未写盘）")
-        return
+        return "cancelled"
     _save_json_atomic(target_file, data)
     rec = {"ts": datetime.now().astimezone().isoformat(timespec="seconds"),
            "type": "policy_changed", "tool": "-", "session": "antinel-cli",
@@ -271,6 +276,7 @@ def seven_step(label, target_file, loader, mutator, impact, undo_hint,
                        ("%s｜%s" % (label, impact))[:150])
         except Exception:
             pass
+    return "written"
 
 
 # ------------------------------------------------------------ roots ----
@@ -1063,7 +1069,7 @@ def cmd_morning(args):
             if _hs.sentinel_alive(_st):
                 print("  门闸哨兵：在岗（pid %s）" % _st.get("sentinel_pid"))
             else:
-                _age, _ = _hs.heartbeat_age()
+                _age, _ = _hs.sentinel_heartbeat_age()
                 print("  ⚠ 门闸哨兵：不在岗%s——下次 Agent 活动自动复活；手动：antinel host-shield enable"
                       % ("" if _age is None else "，最后心跳 %.0f 分钟前" % (_age / 60.0)))
     except Exception:
@@ -1082,16 +1088,113 @@ def _sibling(name):
     return os.path.join(_HERE, name)
 
 
+# ★ 0.35.2：verify 之后要摆出来的「你可以自己复算」入口 —— **单一真源**。
+#   为什么要有这张表（2026-10-06 真实用户验收实测的缺陷）：
+#     `verify` 在链干净时打印 `python <site-packages>/challenge/verify.py`，
+#     ★ 而 `challenge/` **根本没进 wheel**（只进了 sdist）⇒ pip 装到的用户
+#     照着敲，得到 `Errno 2 No such file or directory`。
+#     撞本项目自订规矩：「**页面上不许教跑不通的命令**」。
+#   ⇒ 两条修法同时上：
+#     ① 让 `challenge/` 真进 wheel（`scripts/build_package.py`）——承诺要兑现；
+#     ② 打印前**逐条检查存在**，不在就退回**真的**在线入口（下面 link 字段）——
+#        这样即便哪天打包又回归，也**不可能**再打印出一条跑不通的命令。
+#   ★ 这张表是打印逻辑与守卫（`ci/verify_promises_guard.py`）**共同的**数据源，
+#     不各抄一份 —— 「判据不许二次实现」。
+_GH = "https://github.com/sotaex/agentstate/blob/main/"
+_VERIFY_RECOMPUTE = (
+    ("challenge/verify.py",
+     "换一个工具算（不依赖本包，独立实现）",
+     _GH + "challenge/verify.py"),
+    ("challenge/tamper.py",
+     "亲眼看它怎么被改坏（改一条 → 复算 → 报 tamper）",
+     _GH + "challenge/tamper.py"),
+    ("challenge/tamper-lab.html",
+     "浏览器里手动试（不用装任何东西）",
+     _GH + "challenge/tamper-lab.html"),
+)
+# 纯在线入口（本地没有对应文件，天然不会"跑不通"）。
+_VERIFY_LINKS = (
+    ("看**别人**的链每天被验一次（公开锚点，可交叉核对）",
+     "https://github.com/sotaex/agentstate/tree/main/challenge/chain"),
+)
+
+
+def _chain_record_count(adir):
+    """这条链里有多少条**带 hash 的记录**（与 tools/verify_chain.py 同口径）。
+
+    为什么要它：`verify` 报 `0 anomalies / rc=0 (clean)` 时，一条**空链**与一条
+    **真干净的链**长得一模一样 —— 而含义天差地别。★ 规矩：
+    「**『没查到』必须与『没发现』长得不一样**」。
+    """
+    import json as _json
+    n = 0
+    try:
+        names = os.listdir(adir)
+    except OSError:
+        return 0
+    for fn in names:
+        if not fn.endswith(".jsonl"):
+            continue
+        try:
+            with open(os.path.join(adir, fn), encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        if "hash" in _json.loads(line):
+                            n += 1
+                    except Exception:                             # noqa: BLE001
+                        continue
+        except OSError:
+            continue
+    return n
+
+
 def cmd_verify(args):
+    # ★ 0.35.2 修复（2026-10-07）：本函数下方用到 `hs._CREATE_NO_WINDOW`，
+    #   但此前 `hs` 只在别的函数里 import ⇒ verify 一跑就 NameError 崩掉，
+    #   判定根本没执行（2026-10-07 日报自动化实测，rc=3）。
+    import host_shield as hs
     root = find_project_root()
     if root is None:
         _die("未找到项目")
+    adir = _audit_dir(root)
+    n_rec = _chain_record_count(adir)
+    # ★ 0.35.2：**先说出我验的是哪条链、有多少条记录**。
+    #   为什么（2026-10-06 真实用户验收实测）：同一个目录下 `inbox report` 读的是
+    #   registry 里**所有**登记项目根的链（20 文件 / 42065 条），而 `verify` 只读
+    #   **当前目录**向上找到的那条链（1 文件 / 0 条）—— 却照样报 `0 anomalies / clean`。
+    #   一条空链于是长得和一条真干净的链一模一样 ⇒ **假绿**。
+    print("验证目标：%s" % adir)
+    print("记录条数：%d" % n_rec)
     cands = (_sibling(os.path.join("tools", "verify_chain.py")),
              os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                           "tools", "verify_chain.py"))
     for cand in cands:
         if os.path.isfile(cand):
-            rc = subprocess.call([sys.executable, cand, _audit_dir(root)])
+            # ★ 0.35.3 修复（2026-10-08 日报自动化实测）：CREATE_NO_WINDOW 在
+            #   MSYS/bash 管道环境下会吞掉子进程 stdout（rc 码照传、明细全丢），
+            #   ⇒ verify 表面只剩两行头信息、判异明细不可见。
+            #   修法＝capture 后由父进程回放：防闪窗 flag 保留，输出任何宿主都可见。
+            _v = subprocess.run([sys.executable, cand, adir],
+                                capture_output=True, text=True,
+                                encoding="utf-8", errors="replace",
+                                creationflags=hs._CREATE_NO_WINDOW)
+            rc = _v.returncode
+            sys.stdout.write(_v.stdout or "")
+            sys.stderr.write(_v.stderr or "")
+            if n_rec == 0:
+                # ★ 空链不许报"干净"。这与 verify_chain 的 rc=4 是**两处独立的**保险：
+                #   即便哪天 verify_chain 的判定被改回去，这里也照样说实话。
+                print("")
+                print("─" * 60)
+                print(" ⚠ 这条链里 **0 条记录** —— 这不是「没问题」，是「这里没有东西可查」。")
+                print("   · `verify` 只验**当前目录**向上找到的那条链；")
+                print("   · `antinel inbox report` 验的是**登记过的所有项目**的链。")
+                print("   若你在别的目录跑过 antinel，请在**那个目录**下再跑一次 verify。")
+                print("─" * 60)
+                sys.exit(rc if rc else 4)
             # ★ 0.34.0（E6）：验完之后**把"如何独立复算"摆出来**。
             #   为什么加：复核报告实测到的一条死结 ——
             #     `challenge/` 公开挑战件（attack.py / tamper.py / tamper-lab.html
@@ -1103,16 +1206,20 @@ def cmd_verify(args):
                 print("")
                 print("─" * 60)
                 print(" 这条链**你可以自己复算**，不需要相信我们：")
-                print("   1) 换一个工具算（不依赖本包，独立实现）：")
-                print("        python %s"
-                      % _sibling(os.path.join("challenge", "verify.py")))
-                print("   2) 亲眼看它怎么被改坏（改一条 → 复算 → 报 tamper）：")
-                print("        python %s    # 攻击演示"
-                      % _sibling(os.path.join("challenge", "tamper.py")))
-                print("   3) 浏览器里手动试（不用装任何东西）：")
-                print("        仓库 challenge/tamper-lab.html")
-                print("   4) 看**别人**的链每天被验一次（公开锚点，可交叉核对）：")
-                print("        https://github.com/sotaex/agentstate/tree/main/challenge/chain")
+                for i, (rel, desc, link) in enumerate(_VERIFY_RECOMPUTE, 1):
+                    local = _sibling(rel)
+                    print("   %d) %s：" % (i, desc))
+                    # ★ 0.35.2：**存在才打印本地命令**，否则退回真的在线入口。
+                    #   这条 isfile 就是「不许教跑不通的命令」的**执行点**。
+                    if os.path.isfile(local):
+                        print("        python %s" % local)
+                    else:
+                        print("        （本机这份没随包，用在线版）")
+                        print("        %s" % link)
+                n = len(_VERIFY_RECOMPUTE)
+                for j, (desc, url) in enumerate(_VERIFY_LINKS, n + 1):
+                    print("   %d) %s：" % (j, desc))
+                    print("        %s" % url)
                 print("")
                 print("   ★ 复算规则：hash = sha256(上一条的 hash ＋ 本条的规范化 JSON)")
                 print("     改一个字节就能被指出；删掉中间任何一条，链就接不上。")
@@ -1305,6 +1412,9 @@ def _period_delta(audit_dir, days):
 
 
 def cmd_report(args):
+    # ★ 0.35.2 修复（2026-10-07）：同 cmd_verify——函数内用到 `hs._CREATE_NO_WINDOW`
+    #   但缺局部 import ⇒ report 一跑就 NameError。
+    import host_shield as hs
     root = find_project_root()
     if root is None:
         _die("未找到项目")
@@ -1314,8 +1424,14 @@ def cmd_report(args):
         argv.append("--write")
     if args.write:
         argv.append("--write-dna")
-    rc = subprocess.call(argv)
-    sys.exit(rc)
+    # ★ 0.35.3 修复（2026-10-08）：同 cmd_verify——CREATE_NO_WINDOW 在 bash 管道下
+    #   吞子进程 stdout ⇒ report 明细不可见。capture 后回放。
+    _r = subprocess.run(argv, capture_output=True, text=True,
+                        encoding="utf-8", errors="replace",
+                        creationflags=hs._CREATE_NO_WINDOW)
+    sys.stdout.write(_r.stdout or "")
+    sys.stderr.write(_r.stderr or "")
+    sys.exit(_r.returncode)
 
 
 def cmd_hub(args):
@@ -1427,9 +1543,89 @@ def cmd_routes(args):
 
 # ------------------------------------------------------------ main ----
 # ------------------------------------------------------ host-shield/audit ----
+def _shield_chain_dir():
+    """门闸哨兵**真正在读**的那条链的目录（＝包根下的 `.psl/audit`，没有则个人中枢）。
+
+    ★★ 为什么必须有这个函数（0.35.3，盘上证据）：
+      门闸相关的记录此前**散在三个地方** ——
+        · 哨兵自己写的（心跳/篡改/breach）→ `<包根>/.psl/audit/`
+        · CLI 写的（unlock/decide）→ `~/.antinel/rollup/`
+        · 策略改写（`policy_changed`）→ `<项目根>/.psl/audit/`
+      而哨兵的链背书判定**只读自己那一条** ⇒ 另外两条里的"授权记录"它**一条也看不见**
+      ⇒ 每一次改哨兵状态都会被判成"无链背书被修改"并回滚。
+      修法：**改哨兵状态的地方，就在哨兵自己那条链上留一条授权记录**。
+    """
+    import host_shield as _hs
+    return _hs._shield_audit_dir(os.path.dirname(_sibling("antinel.py")))
+
+
+def _sync_zone_state(norm, adding=True):
+    """把 zone 变更同步进哨兵状态（**幂等**），并在哨兵自己的链上留一条授权记录。
+
+    ★★ 修的是什么（0.35.3，两条真缺陷）：
+      ① 旧版 `st.setdefault("zones", []).append(norm)` —— **无条件追加**：
+         重复执行 `zone add` 造重复项；而且**每一次都改 state 指纹** ⇒
+         哨兵判一次"无链背书被修改" ⇒ `save_state(last_good)` **把用户刚设的安全区回滚**。
+         （盘上证据：全链 12 条 `host_shield_tamper` + `field="state"`，全部紧跟
+          「哨兵被重新拉起」、全部带"已回写恢复"＝防线自己扛住了却记成失守。）
+      ② 这一改**没有任何哨兵能看见的链记录** ⇒ 无论幂等与否都会被判篡改。
+         `seven_step` 写的 `policy_changed` 落在**项目链**，而哨兵读的是**包链** ——
+         两处副本，哨兵永远看不到。
+      ⇒ 现在：改了才写、幂等、并且**把授权记录写到哨兵自己那条链上**。
+
+    ★ 不弹气泡（`notify=False`）：创始人 2026-10-06 明确说右下冒泡有问题；
+      安全区变更由值守台收件箱呈现，不再走弹窗。
+    返回 True 表示哨兵状态**真的变了**。
+    """
+    try:
+        import host_shield as hs
+    except Exception as e:                                   # noqa: BLE001
+        print("（哨兵未运行；防篡改锁将在哨兵启动时生效）")
+        return False
+    try:
+        st = hs.load_state()
+        zs = list(st.get("zones") or [])
+        key = norm.replace("/", "\\").lower()
+        keys = [str(z).replace("/", "\\").lower() for z in zs]
+        if adding and key in keys:
+            print("· 哨兵状态里已有该目录（未重复写入）")
+            return False
+        if (not adding) and key not in keys:
+            print("· 哨兵状态里没有该目录（无需移除）")
+            return False
+        if adding:
+            zs.append(norm)
+        else:
+            zs = [z for z, k in zip(zs, keys) if k != key]
+        st["zones"] = zs
+        hs.save_state(st)
+        # ★ 授权记录：写在**哨兵自己那条链**上（`_ChainTail` 与 `chain_backing_fields`
+        #   都从那儿读）—— 先改状态、后留痕，哨兵下一拍就能看到背书。
+        hs.record(_shield_chain_dir(), "host_shield_changed", decision="allow",
+                  severity="warning", field="zones",
+                  change="zones %s %s" % ("+" if adding else "-", norm),
+                  invoked_by=_invoked_by(),
+                  reason=("安全区%s：%s（哨兵执法状态已同步）"
+                          % ("生效" if adding else "解除", norm)),
+                  notify=False)
+        print("✓ 哨兵已纳入执法（防篡改锁即时生效）" if adding
+              else "✓ 哨兵已解除该安全区")
+        return True
+    except Exception as e:                                   # noqa: BLE001
+        print("（哨兵状态同步失败：%r）" % (e,))
+        return False
+
+
 def cmd_zone(args):
     """0.26.0 安全区：目录进保险库——防篡改（deny 写）+ 出网被闸（net_mode=block）。
-    数据经用户同意放入，之后区内不可变；出口在 NET block。"""
+    数据经用户同意放入，之后区内不可变；出口在 NET block。
+
+    ★★ 0.35.3 修（第三条真缺陷，读码发现）：**`zone remove` 从来就是 `zone add` 的副本**。
+      子命令解析器里明明有 `remove`，函数体却只有 `list` 分支，其余一律走 add 的 mut
+      ⇒ `zone add` 打印的撤销提示「antinel zone remove <路径>」**照着跑等于再加一次**
+      （或 no-op）—— 用户按提示撤销，**撤不掉**，而且看不出哪里不对。
+      ⇒ 现在 add / remove 各走各的。
+    """
     root = find_project_root()
     if root is None:
         _die("未找到项目")
@@ -1447,25 +1643,34 @@ def cmd_zone(args):
     if not os.path.isfile(pol_path):
         _die("项目策略不存在（先执行任一 antinel 写命令自动创建）")
 
+    adding = (args.sub == "add")
+    key = norm.replace("/", "\\").lower()
+
     def mut(data):
         zs = data.setdefault("zones", [])
-        if norm.replace("/", "\\") in [z.replace("/", "\\") for z in zs]:
+        keys = [z.replace("/", "\\").lower() for z in zs]
+        if adding:
+            if key in keys:
+                return None
+            zs.append(norm)
+            return "zones + %s" % norm
+        keep = [z for z, k in zip(zs, keys) if k != key]
+        if len(keep) == len(zs):
             return None
-        zs.append(norm)
-        return "zones + %s" % norm
+        data["zones"] = keep
+        return "zones - %s" % norm
 
-    seven_step("zone add %s" % norm, pol_path, _policy_loader(pol_path), mut,
-               "安全区生效：该目录对 Agent/宿主进程 只读（防篡改），配合 net_mode=block 出网被闸",
-               "antinel zone remove %s" % norm, "zones", root)
-    # 同步进哨兵状态（哨兵只认 host_shield.json 的 zones）
-    try:
-        import host_shield as hs
-        st = hs.load_state()
-        st.setdefault("zones", []).append(norm)
-        hs.save_state(st)
-        print("✓ 哨兵已纳入执法（防篡改锁即时生效）")
-    except Exception:
-        print("（哨兵未运行；防篡改锁将在哨兵启动时生效）")
+    label = "zone %s %s" % ("add" if adding else "remove", norm)
+    impact = ("安全区生效：该目录对 Agent/宿主进程 只读（防篡改），"
+              "配合 net_mode=block 出网被闸" if adding else
+              "安全区解除：该目录恢复可写（出网闸由 net_mode 单独决定）")
+    undo = ("antinel zone remove %s" % norm if adding
+            else "antinel zone add %s" % norm)
+    outcome = seven_step(label, pol_path, _policy_loader(pol_path), mut, impact,
+                         undo, "zones", root)
+    if outcome == "cancelled":
+        return                       # ★ 用户没点头 ⇒ 哨兵状态一个字节都不动
+    _sync_zone_state(norm, adding=adding)
 
 
 def _startup_folder_cmd():
@@ -1495,7 +1700,9 @@ def cmd_host_shield(args):
               else "关着（默认。开启：antinel host-shield enable）")
         # 0.28.1：哨兵存活性 + 心跳断档——"配置开着"不等于"哨兵在岗"，把两者分开说
         alive = hs.sentinel_alive(st)
-        age, _last = hs.heartbeat_age()
+        # ★ 0.35.3 修（真缺陷）：无参 `heartbeat_age()` 走**中枢 rollup**，
+        #   而哨兵（包根带 .psl）写的是**包审计** ⇒ 把活哨兵报成"断档 693 分钟"。
+        age, _last = hs.sentinel_heartbeat_age()
         if st.get("enabled"):
             if alive:
                 print("  哨兵进程：在岗（pid %s，自 %s）"
@@ -1592,11 +1799,20 @@ def cmd_host_shield(args):
             except Exception:
                 _reg_file = None
             if _reg_file and os.path.isfile(_reg_file):
-                import hashlib as _h
-                _txt = open(_reg_file, "rb").read()
+                # ★★ 0.35.3 修（**真缺陷**，本机实测 2026-10-06）：
+                #   旧版存的是**裸 hexdigest**，而哨兵比对用的是 `_file_sha256()`
+                #   —— 那个返回 **`sha256:<hex>`**。两者**永不相等** ⇒ 哨兵每 5 分钟
+                #   记一条 `hook_registration_changed`（"钩子注册文件被改"）
+                #   ⇒ 一天 288 条 ＋ 每 30 分钟一次弹窗，**永远不停**；
+                #   而文件其实一字未动（实测 mtime 停在 10-03）。
+                #   ⇒ 修法＝**消灭副本**：写与比用**同一个函数**（`_file_sha256`）。
+                #   ★ 为什么测试没抓到：`scripts/verification_tests.py` 的 U1-2
+                #     自己造 state 时写的是 `'sha256:'+hexdigest()`（带前缀，对的），
+                #     而产品 `enable` 写的是裸 hex —— **测试覆盖的是"我以为的写入"，
+                #     不是"产品真的写出来的"**（与 0.35.2 那个 403 是同一形状）。
                 st["hook_registration"] = {
                     "settings_file": _reg_file,
-                    "sha256": _h.sha256(_txt).hexdigest()}
+                    "sha256": hs._file_sha256(_reg_file)}
             else:
                 st["hook_registration"] = {"settings_file": None, "sha256": None}
             hs.save_state(st)
@@ -1624,7 +1840,8 @@ def cmd_host_shield(args):
         try:
             r1 = subprocess.run([hs._SCHTASKS, "/Create", "/TN", "AntinelHostShield",
                                  "/TR", '"%s"' % shim, "/SC", "ONLOGON", "/F"],
-                                capture_output=True, timeout=30)
+                                capture_output=True, timeout=30,
+                                creationflags=hs._CREATE_NO_WINDOW)
             _rc1 = r1.returncode
         except (OSError, subprocess.SubprocessError) as _e:
             _rc1 = -1
@@ -1693,7 +1910,8 @@ def cmd_host_shield(args):
         _auto_removed = True
         try:
             subprocess.run([hs._SCHTASKS, "/Delete", "/TN", "AntinelHostShield", "/F"],
-                           capture_output=True, timeout=30)
+                           capture_output=True, timeout=30,
+                           creationflags=hs._CREATE_NO_WINDOW)
         except (OSError, subprocess.SubprocessError) as _e:
             _auto_removed = False
             print("  ⚠ 计划任务未能删除（%s）——继续撤防其余部分" % type(_e).__name__)
@@ -1721,7 +1939,8 @@ def cmd_host_shield(args):
         if _alive_pid:
             try:
                 subprocess.run([hs._TASKKILL, "/F", "/PID", str(_alive_pid)],
-                               capture_output=True, timeout=30)
+                               capture_output=True, timeout=30,
+                               creationflags=hs._CREATE_NO_WINDOW)
             except (OSError, subprocess.SubprocessError) as _e:
                 print("  ⚠ 哨兵进程未能结束（%s）——下次登录可能仍被拉起，请手工检查"
                       % type(_e).__name__)

@@ -84,13 +84,21 @@ def project_record(rec, kinds):
 
     if t in kinds:
         lvl = M.level_of(t)                     # 未登记 ⇒ UnknownKind（响亮失败）
+        _topic = str(rec.get("subkind") or "")
         return M.Alert(
             id=M.alert_id(ts, t, str(rec.get("reason") or "")),
             ts=ts, level=lvl, kind=t,
-            title=M.TITLE_OF_KIND.get(t, t),
+            # ★ 0.35.3：先按**事由**取更准的标题，没有则回落 kind 标题。
+            title=(M.TITLE_OF_TOPIC.get(_topic) or M.TITLE_OF_KIND.get(t, t)),
             detail=str(rec.get("reason") or ""),
             severity=str(rec.get("severity") or ""),
             chain_ref=str(rec.get("hash") or ""),
+            # ★ 0.35.3：链记录的**结构化**字段（AUDIT_SCHEMA v1.10）。
+            #   页面据此判"有没有后果"，**不解析 reason 文案**。
+            recovered=bool(rec.get("recovered")),
+            # ★ 0.35.3：`subkind` → `topic`，用于把"同一件事反复发生"归并。
+            #   例：登录自启缺失 → subkind=autostart_missing（14 条 = 1 件事）。
+            topic=_topic,
         )
 
     if t == "pre_tool_use" and rec.get("decision") == "block":
@@ -105,6 +113,8 @@ def project_record(rec, kinds):
             detail=detail, rule_id=rule, snippet=snip,
             severity=str(rec.get("severity") or ""),
             chain_ref=str(rec.get("hash") or ""),
+            # ★ 同一规则反复拦 ⇒ 归并成一件事（"规则 DST-01 拦了 6 次"）。
+            topic=rule,
         )
     return None
 
@@ -261,61 +271,102 @@ def set_state(item_id, dst, note="", actor="owner", now=None, level=None, root=N
     return ent
 
 
-def mark_all_read(now=None, root=None):
-    """★ "全部已读"：把**未读**都置为已读。
-
-    ★★ 它**不减少未处理数** —— 未读+已读都算未处理。这是刻意的：
-      否则这个按钮就成了"把没处理的事藏起来"的手段（假守卫）。
-    """
-    st = load_state(root)
-    t = now or _now()
-    n = 0
-    for it in load_items(root=root):
-        if it.state == "unread":
-            ent = st.get(it.id) or {}
-            ent["state"] = "read"
-            ent["actor"] = ent.get("actor") or "owner"
-            ent["read_at"] = ent.get("read_at") or t
-            st[it.id] = ent
-            n += 1
-    if n:
-        save_state(st, root)
-    return n
+# ★★ 0.35.3：`mark_all_read()`（批量「全部已读」）**已整体下线**。
+#   创始人 2026-10-06 拍板：「1 取消吧」。页面按钮、服务端动作、托盘菜单、
+#   守护进程分支、CLI 子命令**一并取消** —— 只留一处「点开即已读」
+#   （见 inbox_server._READ_JS）。**半取消＝没取消**：留着托盘菜单里的
+#   「Mark all read」，用户点了却和页面说法不一致，比不取消更糟。
 
 
 # ------------------------------------------------------------ 组装 ----
+#: 文件指纹 -> 该文件投影出的 Alert 列表。
+#  ★★ 为什么这样缓存是**严格正确**的（不是"同一事实两处副本"）：
+#    `project_record(rec, kinds)` 只依赖**这一条记录本身**与 kinds，
+#    **不依赖其它文件、不依赖状态文件**（状态是后面才叠加的）。
+#    ⇒ 同一个 (path, mtime_ns, size, kinds) 必然产出同一个列表。
+#    审计链是 **append-only** ⇒ 任一文件被追加，mtime_ns/size 必变 ⇒ 该文件自动失效。
+#    ⇒ **不存在"静默落后"**：改了内容就必然重算。
+#  ★ 只缓存**投影出的 Alert**（本机 43149 行 → 212 条），
+#    **不缓存原始记录**（36.8 MB JSON 全缓存会吃掉几百 MB 内存）。
+#  ★★ 为什么必须要有它（0.35.2 实测，创始人 2026-10-06「点开像卡死」）：
+#    本机 20 个链文件 / 43149 行 / 36.8 MB；每次开页面都**全量**重投影 ≈ 3.6s，
+#    日报再逐条复算整条链 ≈ 5–10s ⇒ 四个视图实测 **5–18 秒**。
+#    有了它，一次刷新只重算**当天那个正在追加的文件**，其余 19 个直接命中。
+_PROJ_CACHE = {}
+_PROJ_CACHE_MAX = 64          # 只留最近 64 个指纹，防无界增长
+
+
+def _project_file(path, kinds_key, kinds):
+    """读**一个**链文件 → 投影成 Alert 列表（按文件指纹缓存）。
+
+    ★ 缓存键含 `mtime_ns` 与 `size`：文件被追加 ⇒ 键变 ⇒ 必然重算。
+    ★ 读不到文件（`OSError`）⇒ **不缓存**，直接返回空列表（下次仍会重试）。
+    """
+    try:
+        stt = os.stat(path)
+        fp = (os.path.normpath(path), stt.st_mtime_ns, stt.st_size, kinds_key)
+    except OSError:
+        return []
+    hit = _PROJ_CACHE.get(fp)
+    if hit is not None:
+        return hit
+    recs, _bad = read_records([path])
+    out = [a for a in (project_record(r, kinds) for r in recs) if a is not None]
+    if len(_PROJ_CACHE) >= _PROJ_CACHE_MAX:
+        _PROJ_CACHE.pop(next(iter(_PROJ_CACHE)), None)   # 丢最早的那个
+    _PROJ_CACHE[fp] = out
+    return out
+
+
 def load_items(chain_files=None, root=None, kinds=None):
-    """投影链 → 叠加状态 → Item 列表（按时间倒序）。"""
+    """投影链 → 叠加状态 → Item 列表（按时间倒序）。
+
+    ★ 0.35.2：改为**逐文件**走 `_project_file()`（带文件指纹缓存）。
+      语义与旧版**完全一致**（同一顺序遍历、同一个 id 先去重者胜），
+      只是**没变的文件不再重算**。
+    """
     kinds = kinds if kinds is not None else alert_kinds()
     files = discover_chain_files(root=root) if chain_files is None else chain_files
-    recs, _bad = read_records(files)
+    kinds_key = tuple(sorted(kinds))
 
     st = load_state(root)
     seen, out = set(), []
-    for r in recs:
-        a = project_record(r, kinds)
-        if a is None or a.id in seen:
-            continue
-        seen.add(a.id)
-        e = st.get(a.id) or {}
-        state = e.get("state") or "unread"
-        if state not in M.STATES:
-            state = "unread"                    # 状态文件被改坏 ⇒ 退回未读（宁可多提醒）
-        out.append(M.Item(alert=a, state=state,
-                          read_at=e.get("read_at") or "",
-                          closed_at=e.get("closed_at") or "",
-                          note=e.get("note") or "",
-                          actor=e.get("actor") or "owner"))
+    for path in files:
+        for a in _project_file(path, kinds_key, kinds):
+            if a.id in seen:
+                continue
+            seen.add(a.id)
+            e = st.get(a.id) or {}
+            state = e.get("state") or "unread"
+            if state not in M.STATES:
+                state = "unread"                    # 状态文件被改坏 ⇒ 退回未读（宁可多提醒）
+            out.append(M.Item(alert=a, state=state,
+                              read_at=e.get("read_at") or "",
+                              closed_at=e.get("closed_at") or "",
+                              note=e.get("note") or "",
+                              actor=e.get("actor") or "owner"))
     out.sort(key=lambda it: (it.ts, it.id), reverse=True)
     return out
 
 
 # ------------------------------------------------------------ 导出 ----
-def export_items(fmt="json", root=None, chain_files=None):
-    """导出收件箱（含状态）。★ 导出的是**看法+状态**；事实请用 `antinel verify` 核链。"""
+def export_items(fmt="json", root=None, chain_files=None, scope=None):
+    """导出收件箱（含状态）。★ 导出的是**看法+状态**；事实请用 `antinel verify` 核链。
+
+    ★★ 0.35.3：`scope`（口径说明）**只在 JSON 里做进结构内部**，成为
+      `_export_scope` 字段；**不传 `scope` 时输出仍是原来的顶层数组**，
+      旧调用方不受影响。
+
+      为什么 JSON 不走"第一行前缀"：加了前缀的 `--format json`
+      **根本不是合法 JSON**（实测 `json.loads` 直接 JSONDecodeError）——
+      那比"没说口径"更糟。口径该在结构里，不该挡在结构前面。
+    """
     items = load_items(root=root, chain_files=chain_files)
     rows = [it.to_dict() for it in items]
     if fmt == "json":
+        if scope:
+            return json.dumps({"_export_scope": scope, "count": len(rows),
+                               "items": rows}, ensure_ascii=False, indent=1)
         return json.dumps(rows, ensure_ascii=False, indent=1)
     if fmt == "csv":
         cols = ["id", "ts", "level", "kind", "state", "title", "detail",

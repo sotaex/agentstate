@@ -48,3 +48,38 @@ jobs:
       # 漂移审计：需求文件 → 盘上行为，逐条机械化验证
       - name: Drift audit (requirements vs on-disk behaviour)
         run: python ci/drift_audit.py
+
+  # ★★ 0.36.5：统一交付闸门接进 CI（第三个强制执行点，也是**云端唯一**那一处）。
+  #   为什么单开一个 job 而不是并进上面的 guards：
+  #     · guards 里的三项是**各自**被 workflow 点名调用的 —— 这次我数了一遍，
+  #       发现**113 条值守台判据 ＋ 7 条交付自检，一条都没被点过名**。
+  #       也就是说：本轮之前，值守台的任何缺陷在 GitHub Actions 上
+  #       **根本不存在被检查的可能**（不是"没发现"，是"没跑"）。
+  #     · 统一入口的意义正是**消灭"要记得逐个点名"这件事**：
+  #       以后新增判据只需登记进 `ci/delivery_gate.py::SUITES`，
+  #       本 job 自动覆盖 —— 不再依赖"谁记得在 yml 里加一行"。
+  #   失败语义与本地一致：变红 / 崩或缺失 / 零输出，三种都不许当通过。
+  delivery-gate:
+    name: delivery gate (all registered guard suites)
+    runs-on: windows-latest        # 值守台判据用 ctypes 调 Win32，Linux 跑不了
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Unified delivery gate (registered suites + self-check)
+        run: python ci/delivery_gate.py --json
+      # ★ 负控也进 CI：验证"闸门本身是闸门"。
+      #   不会红的闸门是装饰 —— 而"闸门被改坏后 CI 仍然绿"这件事，
+      #   只有把负控也跑起来才抓得到。
+      - name: Delivery gate self-check (must go RED when a guard is broken)
+        run: python ci/delivery_gate.py --selfcheck
+      # ★★ 小泡泡根治措施的负控（0.36.5 新增，进 CI 的理由）：
+      #   F1–F4/G2 是"右下角又冒小泡泡"那个遗留的根治措施。
+      #   它们各自的负控在本地跑过 8/8 全红，但**"本地跑过"不是"每次都会跑"**
+      #   —— 这正是本轮最初那个缺口的镜像（判据存在但零调用方）。
+      #   ⇒ 放 CI 而不是放打包前闸门：负控会**临时改坏产品文件再还原**，
+      #     若随打包跑，进程被杀就会把变异后的代码打进包里。
+      #   ⇒ 这是"该跑的时候跑、该查的时候查"的分工，不是漏接。
+      - name: Bubble-suppression negative controls (F1-F4/G2 must go RED)
+        run: python _p_bubble_negctl.py

@@ -33,6 +33,13 @@ import socket
 import subprocess
 import time
 
+# ★★ 0.35.3（创始人报障：窗口不停弹出又马上关掉）：
+#   本模块的 `netstat` / `tasklist` 由**哨兵**每 30 秒各起一次（SAMPLE_EVERY_N_TICKS），
+#   而哨兵自己是 DETACHED_PROCESS（无控制台）⇒ 起控制台程序若不显式
+#   `CREATE_NO_WINDOW`，Windows 会为子进程新建控制台 = 黑窗一闪，30 秒一次，一直闪。
+#   非 Windows 上该参数必须为 0，否则 ValueError。
+_CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
+
 # ★ 厂商词表的唯一真源。`antinel.py` 的 `_SCAN_VENDOR_KW` 从这里导入 ——
 #   复制一份必然漂移（本仓已因"两处同一判据"反复踩坑），所以共用同一份。
 #   目录名／进程名命中即用，全部小写比对、忽略前导点。
@@ -115,7 +122,8 @@ def parse_netstat():
     失败返回 None（区别于"解析成功但为空"）。
     """
     try:
-        r = subprocess.run(["netstat", "-ano"], capture_output=True, timeout=30)
+        r = subprocess.run(["netstat", "-ano"], capture_output=True, timeout=30,
+                           creationflags=_CREATE_NO_WINDOW)
     except Exception:
         return None
     if r.returncode != 0 and not (r.stdout or b""):
@@ -160,7 +168,8 @@ def proc_map():
     """pid → 进程名（`tasklist`）。失败返回空 dict —— 显示时退回 `pid:<n>`，不猜。"""
     try:
         r = subprocess.run(["tasklist", "/FO", "CSV", "/NH"],
-                           capture_output=True, timeout=30)
+                           capture_output=True, timeout=30,
+                           creationflags=_CREATE_NO_WINDOW)
     except Exception:
         return {}
     out = (r.stdout or b"").decode("gbk", "replace")

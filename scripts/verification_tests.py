@@ -74,6 +74,21 @@ os.environ["ANTINEL_SHIELD_MIRROR"] = "0"
 # 0.28.2: 套件运行期间关闭门闸气泡（F-15 在摘除开关的沙箱里单独断言）
 PY = sys.executable
 
+# ★★ 0.35.3（本机实测抓到的闪窗**真凶**，不是推演）：
+#   本文件原有 **39 处 `subprocess.run`（0 处带 creationflags）**，
+#   而它是 `antinel verify` / harness 的执行体 —— 运行一次要起几十个
+#   Python 子进程。父进程无控制台（哨兵/CLI 都是DETACHED）时，
+#   每起一个控制台程序 Windows 就给它开一个控制台窗口 ⇒ **黑窗一闪一闪**。
+#   ★ 为什么静态守卫没抓到：`ci/inbox_guards_0353.py` 的
+#     `_PROD_SPAWN_FILES` 清单**没有登记本文件** ⇒ 扫描范围漏了最大的一批，
+#     而守卫只对自己登记过的文件负责（登记＝责任边界）。
+#     本文件已补进清单（登记＝必须修），两处一起改才闭环。
+#   ★ 实测证据：`_p_flash_runtime_probe.py` 抓到类=CASCADIA_HOSTING_WINDOW_CLASS、
+#     标题=Terminal 的窗口；而 `_p_flash_flag_matrix2.py` 证明
+#     egress 的「相对名 + CREATE_NO_WINDOW」**有效**（对照组弹 3 个
+#     ConsoleWindowClass，现行方案 0 个）⇒ 元凶不在 egress，在本文件。
+_CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
+
 results = []
 
 
@@ -318,7 +333,7 @@ def run(script, argv=(), cwd=None, stdin=None, env=None):
     try:
         p = subprocess.run([PY, str(script_path(script)), *argv], cwd=str(cwd) if cwd else None,
                            input=stdin, capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", timeout=120, env=full_env)
+                           errors="replace", timeout=120, env=full_env, creationflags=_CREATE_NO_WINDOW)
     except subprocess.TimeoutExpired as e:
         # ★ 2026-09-26（实测）：一条挂住的检查项**不许撕掉整份记录**。
         #   现象：`session_start_banner.py` 卡在阻塞读 stdin 上（`sys.stdin.buffer.read()`
@@ -391,7 +406,7 @@ def _acl_rescue_rmtree(path):
     """
     if os.name == "nt":
         subprocess.run(["icacls", path, "/reset", "/T", "/C"],
-                       capture_output=True, timeout=60)
+                       capture_output=True, timeout=60, creationflags=_CREATE_NO_WINDOW)
     _discard(path)
 
 
@@ -522,7 +537,12 @@ def main():
     expect_allow("Benign PSL SKILL.md read", *hook("Read", {"file_path": str(benign_skill)}, proj)[:3])
     rc, out, err, _ = hook("Read", {"file_path": str(proj / ".env")}, proj)
     record("UX: 拦截理由为中文且含处理建议", rc == 2 and "Antinel 拦截" in err and "放行/处理" in err and "SEC-01" in err, err[:90])
-    stf = proj / ".psl" / "notify_state.json"
+    # ★★ 0.36.8：重置路径必须等于产品读取路径（JDG-01 判据的第一用例）。
+    #   原来 reset `proj/.psl/notify_state.json`，而 0.35.3 起 notice_state_path()
+    #   改存个人中枢（ANTINEL_HUB_DIR）⇒ 重置的是一条**不再被读的死路径**，
+    #   同日去重键从未被清 ⇒ 首条提醒被同轮早先的 chmod 命中项吃掉，断言恒红。
+    #   ⇒ 与产品同一口径：从环境变量取（套件第 71 行已把它指进沙箱）。
+    stf = Path(os.environ["ANTINEL_HUB_DIR"]) / "notify_state.json"
     if stf.exists():
         _discard(stf)                                # fresh day: first notice must show
     rc1, o1, e1, _ = hook("Bash", {"command": "chmod 777 ux_a.txt"}, proj)
@@ -596,7 +616,7 @@ def main():
     stf.write_text(json.dumps(old), encoding="utf-8")
     ev0 = json.dumps({"session_id": "a", "transcript_path": "", "tool_name": "Bash",
                       "tool_input": {"command": "ls prune"}}).encode("utf-8")
-    subprocess.run([PY, str(script_path("post_tool_use.py"))], cwd=str(proj), input=ev0, capture_output=True)
+    subprocess.run([PY, str(script_path("post_tool_use.py"))], cwd=str(proj), input=ev0, capture_output=True, creationflags=_CREATE_NO_WINDOW)
     days = len(json.loads(stf.read_text(encoding="utf-8")))
     record("A7 stats.json pruned to 90 days", days <= 90, "days=%d" % days)
     sec = "Bearer sk-proj-AAAAAAAAAAAAAAAAAAAAAA"
@@ -610,7 +630,7 @@ def main():
                           "tool_input": {"command": "echo a8-%d" % i}}).encode("utf-8")
         procs.append((subprocess.Popen([PY, str(script_path("post_tool_use.py"))], cwd=str(proj),
                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                       stderr=subprocess.PIPE), evx))
+                                       stderr=subprocess.PIPE, creationflags=_CREATE_NO_WINDOW), evx))
     for pp, evx in procs:
         pp.communicate(evx)
     todayf = proj / ".psl" / "audit" / (datetime.now().strftime("%Y-%m-%d") + ".jsonl")
@@ -1542,7 +1562,7 @@ def main():
     jlink = proj / "tests" / "fixtures" / "jlink"
     if os.name == "nt":
         subprocess.run(["cmd", "/c", "mklink", "/J", str(jlink), str(jtarget)],
-                       capture_output=True)
+                       capture_output=True, creationflags=_CREATE_NO_WINDOW)
     else:
         try:                                # POSIX: symlink 证明同一条 realpath 语义
             os.symlink(str(jtarget), str(jlink), target_is_directory=True)
@@ -1966,7 +1986,7 @@ def main():
         "st=hs.load_state();st['enabled']=True;st.setdefault('zones',[]).append(r'%s');"
         "hs.scan_once(r'%s',st,r'%s')"
         % (str(PKG), str(z26).replace("\\", "/"), str(proj).replace("\\", "/"), str(proj))],
-        capture_output=True, timeout=60)
+        capture_output=True, timeout=60, creationflags=_CREATE_NO_WINDOW)
     try:
         (z26 / "t26.txt").write_text("x", encoding="utf-8")
         locked26 = False
@@ -1989,22 +2009,42 @@ def main():
             "(_ for _ in ()).throw(OSError('policy-blocked')));"
             "print(repr(hs.task_installed()))" % str(PKG))
     _p09 = subprocess.run([PY, "-c", _f09], capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", timeout=60)
+                          encoding="utf-8", errors="replace", timeout=60, creationflags=_CREATE_NO_WINDOW)
     record("F-09 host-shield 自检查不出来时不谎报已安装（三态：None != True）",
            _p09.stdout.strip() == "None", (_p09.stdout + _p09.stderr).strip()[:90])
 
     # F-10: 会写进链的事件类型必须全部登记在随包 schema 里（§4 自称"枚举"）。
-    #       静态对照：扫装运 .py 里的 host_shield_* 字面量 vs docs/AUDIT_SCHEMA.md。
-    _emitted = set()
-    for _py in sorted(PKG.rglob("*.py")):
-        if "build" in _py.parts or "__pycache__" in _py.parts:
-            continue
-        _emitted |= set(re.findall(r'"(host_shield_[a-z_]+)"',
-                                   _py.read_text(encoding="utf-8", errors="replace")))
-    _schema = (PKG / "docs" / "AUDIT_SCHEMA.md").read_text(encoding="utf-8", errors="replace")
-    _unreg = sorted(t for t in _emitted if t not in _schema)
-    record("F-10 门闸事件类型全部登记于 AUDIT_SCHEMA.md（%d 类）" % len(_emitted),
-           bool(_emitted) and not _unreg, "未登记: %s" % (_unreg or "无"))
+    # ★★ 0.35.2 修（**判据不许二次实现**）：不再自己扫，直接调权威量具
+    #    tools/verify_event_types.py（0.33.1 起自称"事件类型口径的唯一权威量具"）。
+    #    旧写法用裸正则 r'"(host_shield_[a-z_]+)"' 扫**全仓** .py ⇒ 把 ci/ 里的
+    #    **负控夹具**（host_shield_brand_new_kind / host_shield_nonexistent —— 故意编造、
+    #    用来证明"登记检查真的会拒"）当成"会写进链的事件类型"，于是 F-10 **恒红**
+    #    （长期红的守卫＝没守卫，还把注意力从真缺陷上吃掉）。
+    #    权威量具用 AST 只认两种**有据写法**（审计形状 dict 字面量 / record() 第 2 位参），
+    #    夹具天然不入；其 docstring 明写"不做裸子串匹配（后者正是上次误抓的来源）"。
+    #    ★ 对象非空守卫：量具跑不起来／报 0 类 ⇒ 判红（"没对象"≠"全登记"）。
+    _vet = PKG / "tools" / "verify_event_types.py"
+    if not _vet.is_file():
+        record("F-10 门闸事件类型全部登记于 AUDIT_SCHEMA.md", False,
+               "权威量具缺失: %s（没对象的检查项＝假守卫）" % _vet)
+    else:
+        _pv = subprocess.run([PY, str(_vet), "--json"], capture_output=True, text=True,
+                             encoding="utf-8", errors="replace", timeout=180, cwd=str(PKG), creationflags=_CREATE_NO_WINDOW)
+        try:
+            _jv = json.loads(_pv.stdout)
+        except Exception:                                    # noqa: BLE001
+            _jv = None
+        if not isinstance(_jv, dict) or "code_total" not in _jv:
+            record("F-10 门闸事件类型全部登记于 AUDIT_SCHEMA.md", False,
+                   "权威量具跑不出 JSON（rc=%s）：%s"
+                   % (_pv.returncode, (_pv.stdout + _pv.stderr).strip()[:120]))
+        else:
+            _tot = int(_jv.get("code_total") or 0)
+            _unreg = list(_jv.get("unregistered") or [])
+            record("F-10 门闸事件类型全部登记于 AUDIT_SCHEMA.md（代码 %d 类 ＝ 权威量具）" % _tot,
+                   _tot > 0 and not _unreg and _pv.returncode == 0,
+                   "未登记: %s%s" % (_unreg or "无",
+                                   "" if _tot > 0 else "；★对象为空——量具没扫到任何类型"))
 
     rc, out, err, _ = run("antinel.py", ["host-audit", "--host", "zcode"], cwd=proj,
                           env=hub_env, stdin="")
@@ -2022,7 +2062,7 @@ def main():
             "print('REC',m.record(r'%s','host_shield_heartbeat',reason='F-11'))"
             % (PKG / "host_shield.py", _f11_dir))
     _p11 = subprocess.run([PY, "-I", "-S", "-c", _f11], capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", timeout=60)
+                          encoding="utf-8", errors="replace", timeout=60, creationflags=_CREATE_NO_WINDOW)
     _f11_ok = _p11.stdout.strip() == "REC True" and any(
         _f11_dir.rglob("*.jsonl"))
     if _f11_ok:  # 记录必须在链上（带 hash）
@@ -2059,14 +2099,14 @@ def main():
         _env13 = dict(os.environ)
         _env13["ANTINEL_HUB_DIR"] = str(_f13_hub)
         _p13 = subprocess.run([PY, "-I", "-S", "-c", _f13], capture_output=True, text=True,
-                              encoding="utf-8", errors="replace", timeout=60, env=_env13)
+                              encoding="utf-8", errors="replace", timeout=60, env=_env13, creationflags=_CREATE_NO_WINDOW)
         _st13 = json.loads((_f13_hub / "host_shield.json").read_text(encoding="utf-8"))
         _revived = _p13.stdout.strip() == "revived"
         _alive = bool(_st13.get("sentinel_pid")) and _st13["sentinel_pid"] != 999999999
         # 清理：杀掉测试拉起的哨兵（breakaway 会脱离作业对象，必须显式杀）
         if _alive:
             subprocess.run(["taskkill", "/F", "/PID", str(_st13["sentinel_pid"])],
-                           capture_output=True, timeout=30)
+                           capture_output=True, timeout=30, creationflags=_CREATE_NO_WINDOW)
         _discard(_f13_hub / "host_shield.json")
         record("F-13 paramedic 复活死亡哨兵并留痕（死因 RC5 回归）",
                _revived and _alive,
@@ -2091,7 +2131,7 @@ def main():
     _env14 = dict(os.environ)
     _env14["ANTINEL_HUB_DIR"] = str(_f14_hub)
     _p14 = subprocess.run([PY, "-I", "-S", "-c", _f14], capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", timeout=60, env=_env14)
+                          encoding="utf-8", errors="replace", timeout=60, env=_env14, creationflags=_CREATE_NO_WINDOW)
     _f14_age_ok = _p14.stdout.strip().startswith("AGE_MIN 1")  # ~120 分钟，容差取 1xx
     record("F-14 心跳断档可测（heartbeat_age ≥60 分钟）且晨报带门闸在岗行",
            _f14_age_ok and "门闸哨兵" in _ant_src,
@@ -2117,7 +2157,7 @@ def main():
         _env15["ANTINEL_HUB_DIR"] = str(_f15_hub)
         _env15.pop("ANTINEL_SHIELD_NOTIFY", None)   # 默认开启；真弹已被桩掉
         _p15 = subprocess.run([PY, "-I", "-S", "-c", _f15], capture_output=True, text=True,
-                              encoding="utf-8", errors="replace", timeout=60, env=_env15)
+                              encoding="utf-8", errors="replace", timeout=60, env=_env15, creationflags=_CREATE_NO_WINDOW)
         record("F-15 门闸高危事件实时推送＋同类 30 分钟节流（0.28.2 报警 v1）",
                _p15.stdout.strip() == "THROTTLE True True",
                (_p15.stdout + _p15.stderr).strip()[:90])
@@ -2140,7 +2180,7 @@ def main():
     _env16 = dict(os.environ)
     _env16["ANTINEL_HUB_DIR"] = str(_f16_hub)
     _p16 = subprocess.run([PY, "-I", "-S", "-c", _f16], capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", timeout=60, env=_env16)
+                          encoding="utf-8", errors="replace", timeout=60, env=_env16, creationflags=_CREATE_NO_WINDOW)
     record("F-16 状态进链链为准：无据回退文件(True)，链 changed(False) 后文件不算数",
            _p16.stdout.strip() == "F16 True False",
            (_p16.stdout + _p16.stderr).strip()[:90])
@@ -2216,7 +2256,7 @@ def main():
             "print('R ' + str(r0) + ' newpid ' + str(np0));\n"
         )
         _p17 = subprocess.run([PY, "-I", "-S", "-c", _f17], capture_output=True, text=True,
-                              encoding="utf-8", errors="replace", timeout=90, env=_env17)
+                              encoding="utf-8", errors="replace", timeout=90, env=_env17, creationflags=_CREATE_NO_WINDOW)
         _m17 = re.search(r"R (\S+) newpid (\d+)", _p17.stdout or "")
         _m17_age = re.search(r"AGE (\S+)", _p17.stdout or "")
         _f17_new = int(_m17.group(2)) if _m17 else 0
@@ -2228,10 +2268,10 @@ def main():
                    and _f17_new > 0 and _f17_new != _f17_old)
         if _f17_new:
             subprocess.run(["taskkill", "/F", "/PID", str(_f17_new)],
-                           capture_output=True, timeout=30)
+                           capture_output=True, timeout=30, creationflags=_CREATE_NO_WINDOW)
         if _f17_old and _f17_old != _f17_new:
             subprocess.run(["taskkill", "/F", "/PID", str(_f17_old)],
-                           capture_output=True, timeout=30)
+                           capture_output=True, timeout=30, creationflags=_CREATE_NO_WINDOW)
         _discard(_f17_hub / "host_shield.json")
         record("F-17 心跳判死：无心跳/心跳陈旧的哨兵会被强制重启（B2）",
                _f17_ok, "oldpid=%s age=%s -> %s" % (_f17_old, _m17_age.group(1) if _m17_age else "?",
@@ -2271,7 +2311,7 @@ def main():
     _env19 = dict(os.environ)
     _env19["ANTINEL_HUB_DIR"] = str(_f19_hub)
     _p19 = subprocess.run([PY, "-I", "-S", "-c", _f19], capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", timeout=60, env=_env19)
+                          encoding="utf-8", errors="replace", timeout=60, env=_env19, creationflags=_CREATE_NO_WINDOW)
     record("F-19 拉锯解除节流：窗内第 5 条 breach 起 critical+强制弹窗（B6）",
            _p19.stdout.strip() == "SEV warning critical",
            (_p19.stdout + _p19.stderr).strip()[:110])
@@ -2295,7 +2335,7 @@ def main():
     _env21["ANTINEL_HUB_DIR"] = str(_f21_hub)
     _env21.pop("ANTINEL_SHIELD_MIRROR", None)     # 镜像默认开；套件顶层关，这里单独验
     _p21 = subprocess.run([PY, "-I", "-S", "-c", _f21], capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", timeout=60, env=_env21)
+                          encoding="utf-8", errors="replace", timeout=60, env=_env21, creationflags=_CREATE_NO_WINDOW)
     record("F-21 门闸事件同步外置镜像+日锚（C1 单副本闭合）",
            _p21.stdout.strip() == "MIRROR True 1",
            (_p21.stdout + _p21.stderr).strip()[:110])
@@ -2364,7 +2404,7 @@ def main():
     _pr = subprocess.run([PY, str(PKG / "tools" / "enforce_probe.py"), "--root", str(_e3)],
                          capture_output=True, text=True, encoding="utf-8",
                          errors="replace", timeout=120,
-                         env=dict(os.environ, ANTINEL_HOST_MIRROR="0"))
+                         env=dict(os.environ, ANTINEL_HOST_MIRROR="0"), creationflags=_CREATE_NO_WINDOW)
     _dayj = _e3 / ".psl" / "audit" / (time.strftime("%Y-%m-%d") + ".jsonl")
     _probe_ok = False
     try:
@@ -2469,11 +2509,11 @@ def main():
     _scan = subprocess.run([PY, str(PKG / "scripts" / "scan.py"), "--root", str(_f1), "--json",
                             "--skip-hidden-off"], capture_output=True, text=True,
                            encoding="utf-8", errors="replace", timeout=120,
-                           env=dict(os.environ, ANTINEL_HOST_MIRROR="0")) \
+                           env=dict(os.environ, ANTINEL_HOST_MIRROR="0"), creationflags=_CREATE_NO_WINDOW) \
         if False else subprocess.run([PY, str(PKG / "scripts" / "scan.py"), "--root", str(_f1), "--json"],
                                      capture_output=True, text=True, encoding="utf-8",
                                      errors="replace", timeout=180,
-                                     env=dict(os.environ, ANTINEL_HOST_MIRROR="0"))
+                                     env=dict(os.environ, ANTINEL_HOST_MIRROR="0"), creationflags=_CREATE_NO_WINDOW)
     _sf = []
     try:
         _sf = json.loads(_scan.stdout).get("findings", [])
@@ -2516,7 +2556,7 @@ def main():
     _mcpscan = subprocess.run([PY, str(PKG / "scripts" / "scan.py"), "--root", str(_f1), "--json"],
                               capture_output=True, text=True, encoding="utf-8",
                               errors="replace", timeout=180,
-                              env=dict(os.environ, ANTINEL_HOST_MIRROR="0"))
+                              env=dict(os.environ, ANTINEL_HOST_MIRROR="0"), creationflags=_CREATE_NO_WINDOW)
     _mf = []
     try:
         _mf = json.loads(_mcpscan.stdout).get("findings", [])
@@ -2538,7 +2578,7 @@ def main():
     _mcpscan2 = subprocess.run([PY, str(PKG / "scripts" / "scan.py"), "--root", str(_f1), "--json"],
                                capture_output=True, text=True, encoding="utf-8",
                                errors="replace", timeout=180,
-                               env=dict(os.environ, ANTINEL_HOST_MIRROR="0"))
+                               env=dict(os.environ, ANTINEL_HOST_MIRROR="0"), creationflags=_CREATE_NO_WINDOW)
     _mf2 = []
     try:
         _mf2 = json.loads(_mcpscan2.stdout).get("findings", [])
@@ -2557,7 +2597,7 @@ def main():
     _pl = subprocess.run([PY, str(PKG / "antinel.py"), "canary", "plant"], cwd=str(_c1),
                          capture_output=True, text=True, encoding="utf-8",
                          errors="replace", timeout=120,
-                         env=dict(os.environ, ANTINEL_HOST_MIRROR="0"))
+                         env=dict(os.environ, ANTINEL_HOST_MIRROR="0"), creationflags=_CREATE_NO_WINDOW)
     _cdir = _c1 / ".canary"
     _markers = sorted(p.name for p in _cdir.iterdir()) if _cdir.is_dir() else []
     _dayj = _c1 / ".psl" / "audit" / (time.strftime("%Y-%m-%d") + ".jsonl")
@@ -2576,7 +2616,7 @@ def main():
     _pl2 = subprocess.run([PY, str(PKG / "antinel.py"), "canary", "plant"], cwd=str(_c1),
                           capture_output=True, text=True, encoding="utf-8",
                           errors="replace", timeout=120,
-                          env=dict(os.environ, ANTINEL_HOST_MIRROR="0"))
+                          env=dict(os.environ, ANTINEL_HOST_MIRROR="0"), creationflags=_CREATE_NO_WINDOW)
     _markers2 = sorted(p.name for p in _cdir.iterdir()) if _cdir.is_dir() else []
     record("C1-4 plant 幂等：同项目复用同一 marker", _markers2 == _markers and len(_markers2) == 1,
            "markers=%s" % _markers2)
@@ -2595,7 +2635,7 @@ def main():
                           "--uninstall"], capture_output=True, text=True, encoding="utf-8",
                          errors="replace", timeout=120,
                          env=dict(os.environ, ANTINEL_HOST_MIRROR="0",
-                                  WORKBUDDY_CONFIG_DIR=str(_u1wb)))
+                                  WORKBUDDY_CONFIG_DIR=str(_u1wb)), creationflags=_CREATE_NO_WINDOW)
     _mirror = _u1wb / "antinel-audit" / (time.strftime("%Y-%m-%d") + ".jsonl")
     _uninstall_logged = _mirror.is_file() and '"antinel_uninstall"' in _mirror.read_text(
         encoding="utf-8", errors="replace")
@@ -2613,7 +2653,7 @@ def main():
         "open(r'%s','w',encoding='utf-8').write(json.dumps(st))"
         % (str(PKG), str(_hook_reg), str(_hstate)))
     _hr = subprocess.run([PY, "-I", "-S", "-c", _reg_setup], capture_output=True,
-                         text=True, encoding="utf-8", errors="replace", timeout=60)
+                         text=True, encoding="utf-8", errors="replace", timeout=60, creationflags=_CREATE_NO_WINDOW)
     _breach_run = subprocess.run(
         [PY, "-I", "-S", "-c",
          ("import sys,json;sys.path.insert(0,r'%s');import host_shield as hs;"
@@ -2622,7 +2662,7 @@ def main():
           "print('BREACH_SCAN_DONE')" % (str(PKG), str(_hstate), str(_u1),
                                          str(_u1 / ".psl" / "audit")))],
         capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
-        env=dict(os.environ, ANTINEL_HOST_MIRROR="0", WORKBUDDY_CONFIG_DIR=str(_u1wb)))
+        env=dict(os.environ, ANTINEL_HOST_MIRROR="0", WORKBUDDY_CONFIG_DIR=str(_u1wb)), creationflags=_CREATE_NO_WINDOW)
     _breach_text = (_u1 / ".psl" / "audit" / (time.strftime("%Y-%m-%d") + ".jsonl")).read_text(
         encoding="utf-8", errors="replace") if (_u1 / ".psl" / "audit" / (time.strftime("%Y-%m-%d") + ".jsonl")).is_file() else ""
     record("U1-2 哨兵注册校验：settings 与布防哈希不符 → breach（hook_registration_changed）",
@@ -2635,7 +2675,7 @@ def main():
         "open(r'%s','w',encoding='utf-8').write(json.dumps(st))"
         % (str(PKG), str(_hook_reg), str(_hook_reg), str(_hstate)))
     _hr2 = subprocess.run([PY, "-I", "-S", "-c", _reg_ok], capture_output=True,
-                          text=True, encoding="utf-8", errors="replace", timeout=60)
+                          text=True, encoding="utf-8", errors="replace", timeout=60, creationflags=_CREATE_NO_WINDOW)
     _cnt_before = _breach_text.count('"hook_registration_')
     _breach_run2 = subprocess.run(
         [PY, "-I", "-S", "-c",
@@ -2644,7 +2684,7 @@ def main():
           "hs.scan_once(r'%s', st, r'%s');print('DONE2')"
           % (str(PKG), str(_hstate), str(_u1), str(_u1 / ".psl" / "audit")))],
         capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
-        env=dict(os.environ, ANTINEL_HOST_MIRROR="0", WORKBUDDY_CONFIG_DIR=str(_u1wb)))
+        env=dict(os.environ, ANTINEL_HOST_MIRROR="0", WORKBUDDY_CONFIG_DIR=str(_u1wb)), creationflags=_CREATE_NO_WINDOW)
     _after_text = (_u1 / ".psl" / "audit" / (time.strftime("%Y-%m-%d") + ".jsonl")).read_text(
         encoding="utf-8", errors="replace") if (_u1 / ".psl" / "audit" / (time.strftime("%Y-%m-%d") + ".jsonl")).is_file() else ""
     _cnt_after = _after_text.count('"hook_registration_')
@@ -2668,7 +2708,7 @@ def main():
     _d5 = subprocess.run([PY, str(PKG / "antinel.py"), "--host", "zcode", "digest", "--days", "1"],
                          cwd=str(_f5), capture_output=True, text=True, encoding="utf-8",
                          errors="replace", timeout=120,
-                         env=dict(os.environ, ANTINEL_HOST_MIRROR="0"))
+                         env=dict(os.environ, ANTINEL_HOST_MIRROR="0"), creationflags=_CREATE_NO_WINDOW)
     record("F5T-1 digest：hook_error(fail-open) 计数可见（【护栏】行）",
            _d5.returncode == 0 and "fail-open 1" in _d5.stdout,
            "rc=%d out=%s" % (_d5.returncode, _d5.stdout.strip()[:120]))
@@ -2676,7 +2716,7 @@ def main():
     _d5b = subprocess.run([PY, str(PKG / "antinel.py"), "--host", "zcode", "digest", "--days", "1"],
                           cwd=str(_f5), capture_output=True, text=True, encoding="utf-8",
                           errors="replace", timeout=120,
-                          env=dict(os.environ, ANTINEL_HOST_MIRROR="0"))
+                          env=dict(os.environ, ANTINEL_HOST_MIRROR="0"), creationflags=_CREATE_NO_WINDOW)
     record("F5T-2 无 fail-open → 不打印该行（不制造噪音）",
            _d5b.returncode == 0 and "fail-open" not in _d5b.stdout,
            "rc=%d out=%s" % (_d5b.returncode, _d5b.stdout.strip()[:120]))
@@ -2766,7 +2806,7 @@ def main():
     _pr3 = subprocess.run([PY, str(PKG / "tools" / "enforce_probe.py"), "--root", str(_e3)],
                           capture_output=True, text=True, encoding="utf-8",
                           errors="replace", timeout=120,
-                          env=dict(os.environ, ANTINEL_HOST_MIRROR="0"))
+                          env=dict(os.environ, ANTINEL_HOST_MIRROR="0"), creationflags=_CREATE_NO_WINDOW)
     _pre_after = _dayj_e3.read_text(encoding="utf-8", errors="replace").count(
         '"type": "pre_tool_use"') if _dayj_e3.exists() else _pre_before
     _probe_cnt_after = _dayj_e3.read_text(encoding="utf-8", errors="replace").count(
@@ -2787,7 +2827,7 @@ def main():
                                               "tool_response": "ok"}),
                             capture_output=True, text=True, encoding="utf-8",
                             errors="replace", timeout=60,
-                            env=dict(os.environ, ANTINEL_HOST_MIRROR="0"))
+                            env=dict(os.environ, ANTINEL_HOST_MIRROR="0"), creationflags=_CREATE_NO_WINDOW)
     _run1 = json.loads(_st_e3.read_text(encoding="utf-8")).get("last_run") if _st_e3.exists() else None
     _post2 = subprocess.run([PY, str(PKG / "hooks" / "post_tool_use.py")], cwd=str(_e3),
                             input=json.dumps({"session_id": "sched", "transcript_path": "",
@@ -2796,7 +2836,7 @@ def main():
                                               "tool_response": "ok"}),
                             capture_output=True, text=True, encoding="utf-8",
                             errors="replace", timeout=60,
-                            env=dict(os.environ, ANTINEL_HOST_MIRROR="0"))
+                            env=dict(os.environ, ANTINEL_HOST_MIRROR="0"), creationflags=_CREATE_NO_WINDOW)
     _run2 = json.loads(_st_e3.read_text(encoding="utf-8")).get("last_run") if _st_e3.exists() else None
     record("X7 探针调度 due-once：首次 post 触发登记，interval 内不重排",
            _st_e3.exists() and _run1 == _run2 and _run1 is not None,
@@ -2856,7 +2896,7 @@ def main():
                           "--uninstall", "--purge"], capture_output=True, text=True,
                          encoding="utf-8", errors="replace", timeout=120,
                          env=dict(os.environ, ANTINEL_HOST_MIRROR="0",
-                                  WORKBUDDY_CONFIG_DIR=str(_u2wb)))
+                                  WORKBUDDY_CONFIG_DIR=str(_u2wb)), creationflags=_CREATE_NO_WINDOW)
     _u2mirror = _u2wb / "antinel-audit" / (time.strftime("%Y-%m-%d") + ".jsonl")
     _u2mirror_ok = _u2mirror.is_file() and '"antinel_uninstall"' in _u2mirror.read_text(
         encoding="utf-8", errors="replace")
@@ -2877,7 +2917,7 @@ def main():
                            "--uninstall"], capture_output=True, text=True,
                           encoding="utf-8", errors="replace", timeout=120,
                           env=dict(os.environ, ANTINEL_HOST_MIRROR="0",
-                                   WORKBUDDY_CONFIG_DIR=str(_u3wb)))
+                                   WORKBUDDY_CONFIG_DIR=str(_u3wb)), creationflags=_CREATE_NO_WINDOW)
     _u3mirror = _u3wb / "antinel-audit" / (time.strftime("%Y-%m-%d") + ".jsonl")
     _u3_evidence = _u3mirror.is_file() and '"antinel_uninstall"' in _u3mirror.read_text(
         encoding="utf-8", errors="replace")
@@ -2917,7 +2957,7 @@ def main():
     _d5c = subprocess.run([PY, str(PKG / "antinel.py"), "--host", "zcode", "digest", "--days", "1"],
                           cwd=str(_f5), capture_output=True, text=True, encoding="utf-8",
                           errors="replace", timeout=120,
-                          env=dict(os.environ, ANTINEL_HOST_MIRROR="0"))
+                          env=dict(os.environ, ANTINEL_HOST_MIRROR="0"), creationflags=_CREATE_NO_WINDOW)
     record("X14 digest 窗口语义：3 天前的 fail-open 不进 --days 1",
            _d5c.returncode == 0 and "fail-open 1" not in _d5c.stdout,
            "rc=%d out=%s" % (_d5c.returncode, _d5c.stdout.strip()[:100]))

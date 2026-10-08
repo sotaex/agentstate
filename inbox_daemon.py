@@ -7,7 +7,7 @@
     ② 找**新**告警（`seen.json` 记已见 id）→ 通知层（Toast）+ 强调层（仅 R0）+ 兜底层
     ③ 刷**托盘**状态（五态 + 未处理数）
     ④ 记**当日账本**（追加写，同日取末行）
-    ⑤ 消费**托盘动作**（open / read_all / quit）
+    ⑤ 消费**托盘动作**（open / quit；0.35.3 起取消 read_all）
     ⑥ **匿名计数心跳**（默认关；开着时每个本地日最多 `HB_MAX_TRIES` 次尝试）
 
 ★ 热路径纪律：钩子里只写链；**所有渲染、通知、聚合都在这里做** ——
@@ -50,6 +50,45 @@ def hb_mark_path(root=None):
     return os.path.join(CFG.console_dir(root), "hb_mark.json")
 
 
+def record_day(items=None, today=None, root=None):
+    """记当日账本 —— **唯一实现**（守护进程 `tick()` 与值守台都调它，不二次实现）。
+
+    ★★ 为什么提出来（真缺陷，创始人 2026-10-07「账本这栏数据永远都是零」）：
+      旧版这段逻辑**只**在 `Daemon.tick()` 里，而 `Daemon` 只能靠
+      `antinel inbox daemon` 手动起 —— 全仓**没有任何自动启动点**
+      ⇒ 账本文件从不落盘 ⇒ 页面四个数**恒为 0**（`~/.antinel/ledger/daily.jsonl`
+      本机实测不存在）。值守台（`inbox_server.serve`）才是用户真正会打开的东西，
+      所以让它**在打开期间**也记这一行。
+    ★ 幂等：当日数字与已记的一致 ⇒ **不重复追加**（否则每轮一行，文件涨成垃圾）。
+      「追加即更正」仍成立：数字一变就追加一行，`ledger.load_days` 取末行。
+    """
+    items = S.load_items(root=root) if items is None else items
+    today = today or time.strftime("%Y-%m-%d")
+    day_items = [it for it in items if str(it.ts)[:10] == today]
+    # 「已处理」按**关闭日期**记，不把所有历史关闭项每天重复算一遍。
+    # 这里记的是此刻仍处于已处理/已忽略状态、且本地关闭日期为 today 的事项数，
+    # 不是完整的点击操作流水（状态文件只保存当前看法，不保留每次迁移历史）。
+    acked_today = [i for i in items
+                   if i.state in M.CLOSED_STATES and str(i.closed_at or "")[:10] == today]
+    entry = {
+        "date": today,
+        "blocked": sum(1 for i in day_items if i.level == "L2"),
+        "noticed": sum(1 for i in day_items if i.level == "L1"),
+        "breached": sum(1 for i in day_items if i.level == "R0"),
+        "acked": len(acked_today),
+    }
+    prev = L.load_days(root).get(today) or {}
+    # 没有可核对事件时，不造一条全 0 日账；但若今天此前已有快照，必须允许
+    # 追加全零更正（例如事项后来被重开），不能把旧数字永久留在日账上。
+    has_count = any(entry[k] for k in ("blocked", "noticed", "breached", "acked"))
+    if not has_count and not prev:
+        return entry
+    if prev and all(prev.get(k) == v for k, v in entry.items()):
+        return entry                            # 数字没变 ⇒ 不重复追加
+    L.append_day(entry, root=root)
+    return entry
+
+
 def _load_seen(root=None):
     try:
         with open(seen_path(root), encoding="utf-8") as f:
@@ -86,10 +125,52 @@ def _save_hb_mark(d, root=None):
     os.replace(tmp, p)
 
 
+def open_console_now(root=None, opener=None, console_url=None):
+    """把「打开值守台」这件事**真的做掉**。返回 "app"/"browser"/"none"/"error: …"。
+
+    ★★ 为什么是模块级函数而不是 `Daemon` 的方法（0.35.2）：
+      托盘自己也要消费动作（见 `inbox_tray._consume_loop`），
+      而**动作语义只许有一处实现** —— 抽成函数给两边共用，不是各写一份。
+    """
+    try:
+        url = console_url
+        if not url:
+            import inbox_server as SV
+            url, _started = SV.ensure_background(root=root)
+        if opener is not None:
+            return opener(url)
+        import inbox_server as SV2
+        return SV2.open_console(url)
+    except Exception as e:                      # noqa: BLE001
+        return "error: %s" % e
+
+
+def handle_actions(root=None, opener=None, console_url=None):
+    """消费**托盘动作**（`open`；`quit` 由托盘自己处理）。返回本轮结果 dict。
+
+    ★★ 为什么需要它（0.35.2 真缺陷）：托盘菜单写出的动作**只有守护进程会消费**
+      ⇒ 只启动托盘（`antinel inbox tray`）时，点菜单**什么都不会发生**。
+      现在托盘自己也会跑这个消费者 ⇒ 单起托盘也能用。
+    ★ 消费是**原子**的（`inbox_tray.poll_actions` 用 `os.rename` 整文件改名）
+      ⇒ 即使守护进程与托盘同时在跑，一个动作也只会被一边取走，**不会双开**。
+    ★ 不删任何文件。
+    ★ 0.35.3：`read_all` 分支**已取消**（创始人 2026-10-06「1 取消吧」）。
+      已读改由「点开即已读」产生；托盘菜单里也不再提供该项。
+    """
+    res = {"actions": [], "open_console": False, "open_result": ""}
+    for act in TR.poll_actions(root=root):
+        res["actions"].append(act)
+        if act == "open":
+            res["open_console"] = True
+            res["open_result"] = open_console_now(root=root, opener=opener,
+                                                  console_url=console_url)
+    return res
+
+
 class Daemon:
     def __init__(self, root=None, backend=None, sound=None, overlay=None,
                  sender=None, poster=None, clock=None, cfg=None, today=None,
-                 hb_poster=None):
+                 hb_poster=None, opener=None, console_url=None):
         self.root = root
         self.backend = backend
         self.sound = sound
@@ -101,6 +182,24 @@ class Daemon:
         # `today` / `hb_poster` 只为可测性注入：判据要能改日期验跨零点、换掉发信器
         self.today = today or (lambda: time.strftime("%Y-%m-%d"))
         self.hb_poster = hb_poster
+        # ★ 0.35.2：「打开值守台」的两个注入点 —— 只为可测性，
+        #   判据要能在**不起任何进程/不绑端口**的前提下验这条链。
+        #   `console_url` 给定 ⇒ 跳过起服务（测试）；`opener(url)` 换掉真开窗口。
+        self.opener = opener
+        self.console_url = console_url
+
+    def _open_console(self):
+        """★ 0.35.2：把托盘的 `open` 动作**真的**接上。
+
+        旧版只写 `out["open_console"] = True`，而**全仓没有任何消费点** ⇒
+        点托盘「Open console」/左键点图标什么都不会发生（创始人 2026-10-06 实测）。
+        判据：登记了字段就必须有消费点 —— 本方法就是那个消费点。
+        返回 "app"/"browser"/"none"（如实回报走了哪条路）。
+
+        ★ 实现委托给模块级 `open_console_now()` —— 托盘侧复用同一份，**不二次实现**。
+        """
+        return open_console_now(root=self.root, opener=self.opener,
+                                console_url=self.console_url)
 
     # ---------------------------------------------------------------- #
     def _heartbeat_once(self, cfg, today):
@@ -136,7 +235,12 @@ class Daemon:
                 return {"sent": False, "ok": False, "skipped": True,
                         "why": "距上次尝试不足 %ds" % HB_RETRY_GAP}
         tries = (int(mark.get("tries") or 0) + 1) if mark.get("date") == today else 1
-        ok, why = HB.send_once(root=self.root, poster=self.hb_poster, cfg=cfg)
+        # ★ 日期唯一真源是 Daemon.today（生产取本地日，判据可注入跨日）。
+        #   不传 payload 时 heartbeat.build() 自己读墙钟，午夜/测试注入时会与
+        #   限流标记日期不一致；仍由 heartbeat.build 构造，不在 daemon 二次拼包。
+        payload = HB.build(root=self.root, day=today)
+        ok, why = HB.send_once(root=self.root, poster=self.hb_poster,
+                               payload=payload, cfg=cfg)
         _save_hb_mark({"date": today, "ok": bool(ok), "why": str(why),
                        "tries": tries, "last_ts": self.clock()}, root=self.root)
         return {"sent": True, "ok": bool(ok), "why": str(why), "tries": tries}
@@ -188,27 +292,20 @@ class Daemon:
         except Exception as e:                  # noqa: BLE001
             out["errors"].append("tray: %s" % e)
 
-        # ④ 记当日账本
+        # ④ 记当日账本（唯一实现见模块级 `record_day`）
         try:
-            day_items = [it for it in items if str(it.ts)[:10] == today]
-            L.append_day({
-                "date": today,
-                "blocked": len([i for i in day_items if i.level == "L2"]),
-                "noticed": len([i for i in day_items if i.level == "L1"]),
-                "breached": len([i for i in day_items if i.level == "R0"]),
-                "acked": len([i for i in items if i.state in M.CLOSED_STATES]),
-            }, root=self.root)
+            record_day(items=items, today=today, root=self.root)
         except Exception as e:                  # noqa: BLE001
             out["errors"].append("ledger: %s" % e)
 
         # ⑤ 消费托盘动作
         try:
-            for act in TR.poll_actions(root=self.root):
-                out["actions"].append(act)
-                if act == "read_all":
-                    S.mark_all_read(root=self.root)
-                elif act == "open":
-                    out["open_console"] = True
+            res = handle_actions(root=self.root, opener=self.opener,
+                                 console_url=self.console_url)
+            out["actions"] = res["actions"]
+            if res["open_console"]:
+                out["open_console"] = True
+                out["open_result"] = res["open_result"]   # ★ 0.35.2：真的去开
         except Exception as e:                  # noqa: BLE001
             out["errors"].append("tray-action: %s" % e)
 

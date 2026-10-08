@@ -33,6 +33,11 @@ def _fmt_state(s):
             "ignored": "已忽略"}.get(s, s)
 
 
+def _fmt_level(level):
+    return {"R0": "失守（R0）", "L2": "已拦截（L2）", "L1": "注意（L1）",
+            "Ls": "额度提示（Ls）", "L0": "值守正常（L0）"}.get(level, level)
+
+
 def _filter_items(items, state="open", level=None):
     if state == "all":
         rows = list(items)
@@ -52,15 +57,19 @@ def cmd_list(a):
     if a.json:
         print(json.dumps([i.to_dict() for i in rows], ensure_ascii=False, indent=1))
         return 0
-    print("状态：%s ｜ 未处理 %d ｜ 未读 %d ｜ 已读 %d ｜ 已处理 %d ｜ 已忽略 %d"
-          % (M.console_state(items), M.unhandled_count(items),
-             M.counts_by_state(items)["unread"], M.counts_by_state(items)["read"],
-             M.counts_by_state(items)["done"], M.counts_by_state(items)["ignored"]))
+    counts = M.counts_by_state(items)
+    open_groups = M.count_groups([i for i in items
+                                  if M.bucket_of(i) == M.BUCKET_ACTION])
+    print("当前载入 %d 条（不是永久全历史）｜最近24小时需你处理 %d 件事"
+          % (len(items), open_groups))
+    print("未处理 %d 条（未读 %d / 已读 %d）｜已处理 %d｜已忽略 %d"
+          % (M.unhandled_count(items), counts["unread"], counts["read"],
+             counts["done"], counts["ignored"]))
     if not rows:
-        print("（这里没有需要你处理的事。）")
+        print("（这个筛选范围里没有记录。）")
         return 0
     for i in rows:
-        print("  [%s] %-4s %s  %s" % (i.id, i.level, _fmt_state(i.state), i.title))
+        print("  [%s] %-12s %s  %s" % (i.id, _fmt_level(i.level), _fmt_state(i.state), i.title))
         meta = " · ".join(x for x in (i.detail, ("规则 " + i.rule_id) if i.rule_id else "",
                                       i.ts) if x)
         if meta:
@@ -85,7 +94,7 @@ def cmd_show(a):
         print(json.dumps(it.to_dict(), ensure_ascii=False, indent=1))
         return 0
     print("告警 %s" % it.id)
-    print("  级别：%s ｜ 状态：%s" % (it.level, _fmt_state(it.state)))
+    print("  级别：%s ｜ 状态：%s" % (_fmt_level(it.level), _fmt_state(it.state)))
     print("  标题：%s" % it.title)
     if it.detail:
         print("  原因：%s" % it.detail)
@@ -124,20 +133,46 @@ def cmd_ignore(a):
     return _set(a, "ignored")
 
 
-def cmd_read_all(a):
-    n = S.mark_all_read()
-    print("已把 %d 条未读标为已读。**未处理数不变**（已读 ≠ 已处理）。" % n)
-    return 0
-
-
 def cmd_export(a):
-    txt = S.export_items(fmt=a.format)
+    """导出。**必须先把口径说清楚**（交接件 §5 待审：导出与页面口径一致）。
+
+    ★ 0.35.3 修：旧版一声不吭导出**全部已载入记录**（实测本机 227 条），
+      而页面首屏说的是「要处理 4 件事」。用户拿到 CSV 会以为 227 条都是待办
+      —— 数字没错，**口径没说** ⇒ 与项目已复发三次的"分母不明"同型。
+      ⇒ 导出前**必须**打印分母与时间范围。
+
+    ★★ 0.35.3 再修（本轮实测抓到的真缺陷）：上一版把口径当**第一行前缀**
+      塞进所有格式 ⇒ `--format json` 的输出**根本不是合法 JSON**
+      （实测 `json.loads` 直接 JSONDecodeError）。
+      这比"没说口径"更糟：机器读不了，人也不好复制。
+      ⇒ JSON 口径**放进结构内部**（`_export_scope` 字段），前缀只留给
+        人类读的 csv/md；`--out` 落盘时 JSON 文件是**纯 JSON**。
+    """
+    items = S.load_items()
+    scope = ("当前已载入的全部 %d 条记录（含已处理与已忽略）；"
+             "不等于待办件数；不做时间窗口筛选，也不是永久全历史。" % len(items))
+    fmt = a.format
+    if fmt == "json":
+        # 口径进结构，不进前缀 ⇒ 文件始终是合法 JSON
+        txt = S.export_items(fmt="json", scope=scope)
+    else:
+        txt = S.export_items(fmt=fmt)
+    note = "口径：%s" % scope
     if a.out:
         with open(a.out, "w", encoding="utf-8", newline="\n") as f:
             f.write(txt)
-        print("已导出到 %s" % a.out)
+        if fmt == "json":
+            # 机器可读文件不加前缀；口径已在 _export_scope 字段里
+            print("已导出到 %s（JSON；口径写在 _export_scope 字段里）" % a.out)
+        else:
+            print("%s" % note)
+            print("已导出到 %s" % a.out)
     else:
-        print(txt)
+        if fmt == "json":
+            print(txt)          # 不加前缀，直接输出合法 JSON
+        else:
+            print(note)
+            print(txt)
     return 0
 
 
@@ -155,6 +190,21 @@ def cmd_report(a):
 def cmd_serve(a):
     import inbox_server
     inbox_server.serve(port=a.port, open_browser=a.open)
+    return 0
+
+
+def cmd_open(a):
+    """★ 0.35.2：**打开值守台**的唯一入口（托盘气泡、外部调用都走这里）。
+
+    ★ 本进程**就是**值守台：`serve()` 会一直跑（`serve_forever`）。
+      为什么不能只用 `ensure_background()` —— 它把服务放在**后台线程**里，
+      命令一返回、进程一退，服务就没了（开出来的窗口**立刻失联**）。
+    ★ 不自己拼 URL、不自己起服务：都委托 `inbox_server`，**不二次实现**。
+    ★ 首选端口被占 ⇒ `serve()` 自动换临时端口（Windows 上光靠 `OSError`
+      发现不了端口被占，见 `inbox_server._port_busy`）。
+    """
+    import inbox_server as SV
+    SV.serve(port=SV.DEFAULT_PORT, open_browser=True)
     return 0
 
 
@@ -247,10 +297,16 @@ def cmd_heartbeat(a):
 
 def cmd_ledger(a):
     if a.sub == "show":
+        import inbox_daemon as DM
+        DM.record_day(items=S.load_items())
         s = L.summary()
-        print("连续值守 %d 天 ｜ 累计拦截 %d ｜ 已处理 %d ｜ 账本天数 %d"
-              % (s["streak_days"], s["blocked"], s["acked"], s["days"]))
-        print("这份账本只在本机（~/.antinel/ledger/），可导出，不可转让。")
+        if not s["days"]:
+            print("账本尚无可核对记录；这表示还没有可统计的事件，不是确认累计为零。")
+        else:
+            print("连续有记录 %d 天 ｜ 拦截 %d ｜ 注意 %d ｜ 防护缺口 %d ｜ 已处理/已忽略 %d ｜ 有记录的天数 %d"
+                  % (s["streak_days"], s["blocked"], s["noticed"], s["breached"],
+                     s["acked"], s["days"]))
+        print("只统计本机审计记录；不代表全天在线，也不是 AI 工具积分余额。")
         return 0
     if a.sub == "export":
         txt = L.export()
@@ -268,13 +324,17 @@ def build_parser():
     ap = argparse.ArgumentParser(prog="antinel inbox", description="值守台")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    p = sub.add_parser("list"); p.add_argument("--state", default="open",
-                                               choices=["open", "unread", "read", "done",
-                                                        "ignored", "all"])
-    p.add_argument("--level"); p.add_argument("--json", action="store_true")
+    p = sub.add_parser("list", help="列出收件箱记录（默认列出所有未关闭记录，不等于待办件数）")
+    p.add_argument("--state", default="open",
+                   choices=["open", "unread", "read", "done", "ignored", "all"],
+                   help="记录状态筛选：open=未读+已读（默认），all=所有当前载入记录")
+    p.add_argument("--level", help="按级别筛选：R0=失守，L2=已拦截，L1=注意，Ls=额度提示")
+    p.add_argument("--json", action="store_true", help="输出机器可读 JSON")
     p.set_defaults(fn=cmd_list)
 
-    p = sub.add_parser("show"); p.add_argument("id"); p.add_argument("--json", action="store_true")
+    p = sub.add_parser("show", help="查看一条告警的原因与证据")
+    p.add_argument("id", help="告警编号")
+    p.add_argument("--json", action="store_true", help="输出机器可读 JSON")
     p.set_defaults(fn=cmd_show)
 
     p = sub.add_parser("read"); p.add_argument("id"); p.set_defaults(fn=cmd_read)
@@ -282,18 +342,27 @@ def build_parser():
     p.set_defaults(fn=cmd_ack)
     p = sub.add_parser("ignore"); p.add_argument("id"); p.add_argument("--note", default="")
     p.set_defaults(fn=cmd_ignore)
-    sub.add_parser("read-all").set_defaults(fn=cmd_read_all)
+    # ★ 0.35.3：`read-all` 子命令**已取消**（创始人 2026-10-06「1 取消吧」）。
+    #   已读改由「点开即已读」（值守台页面）产生，不再有批量入口。
 
-    p = sub.add_parser("export"); p.add_argument("--format", default="json",
-                                                 choices=["json", "csv", "md"])
-    p.add_argument("--out"); p.set_defaults(fn=cmd_export)
+    p = sub.add_parser(
+        "export",
+        help="导出当前已载入的全部记录（含已处理与已忽略，不等于待办件数）")
+    p.add_argument("--format", default="json", choices=["json", "csv", "md"],
+                   help="导出格式")
+    p.add_argument("--out", help="写入指定文件；省略则输出到终端")
+    p.set_defaults(fn=cmd_export)
 
-    p = sub.add_parser("report"); p.add_argument("--date")
-    p.add_argument("--format", default="text", choices=["text", "md", "json"])
+    p = sub.add_parser("report", help="按某个本地自然日生成日报（不是最近24小时报告）")
+    p.add_argument("--date", help="本地日期 YYYY-MM-DD；省略时为今天")
+    p.add_argument("--format", default="text", choices=["text", "md", "json"],
+                   help="输出格式：text（默认）、md 或 json；输出到终端")
     p.set_defaults(fn=cmd_report)
 
     p = sub.add_parser("serve"); p.add_argument("--port", type=int, default=8790)
     p.add_argument("--open", action="store_true"); p.set_defaults(fn=cmd_serve)
+    # ★ 0.35.2：「打开值守台」的稳定入口（气泡点击 / 托盘 / 外部调用都用它）
+    sub.add_parser("open").set_defaults(fn=cmd_open)
     sub.add_parser("tray").set_defaults(fn=cmd_tray)
     p = sub.add_parser("daemon"); p.add_argument("--interval", type=float, default=2.0)
     p.set_defaults(fn=cmd_daemon)
@@ -309,9 +378,11 @@ def build_parser():
         ps.add_parser(name)
     p.set_defaults(fn=cmd_heartbeat)
 
-    p = sub.add_parser("ledger"); ps = p.add_subparsers(dest="sub", required=True)
-    ps.add_parser("show")
-    q = ps.add_parser("export"); q.add_argument("--out")
+    p = sub.add_parser("ledger", help="查看或导出本机事件账本（非 AI 工具积分余额）")
+    ps = p.add_subparsers(dest="sub", required=True)
+    ps.add_parser("show", help="刷新并查看本机可核对事件汇总")
+    q = ps.add_parser("export", help="导出已记账的逐日摘要")
+    q.add_argument("--out", help="将导出内容写入指定文件；省略则输出到终端")
     p.set_defaults(fn=cmd_ledger)
     return ap
 

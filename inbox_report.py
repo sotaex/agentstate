@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import date, datetime
 
 import inbox_model as M
@@ -27,6 +28,73 @@ def _day_of_ts(ts):
     if len(s) >= 10 and s[4] == "-" and s[7] == "-":
         return s[:10]
     return None
+
+
+#: 文件指纹 -> 该文件链校验计数。
+#  ★★ 为什么可以缓存（**严格正确**，不是"副本改新"）：
+#    `chain_health` 对每个文件都是**独立**的 —— `prev` 在**每个文件开头重置**，
+#    `chain_with()` 只看这一条记录与它的前驱 ⇒ 结果只依赖**该文件自己的内容**。
+#    ⇒ 同一 (path, mtime_ns, size) 必然得到同一组计数。
+#    链是 append-only ⇒ 追加即 mtime_ns/size 变 ⇒ 该文件缓存自动失效。
+#  ★ 不缓存跨文件聚合结果 —— 那是"整个链"的函数，聚合本身很便宜（几十次加法）。
+#  ★ 实测：本机 20 文件 / 43149 行，逐条复算 ≈ 5–10s；缓存后一次刷新只重算当天那个。
+_CHAIN_CACHE = {}
+_CHAIN_CACHE_MAX = 64
+
+
+def chain_status_label(status):
+    """内部状态码 → 用户可读状态；JSON 数据仍保留稳定机器值。"""
+    return {"ok": "完整", "broken": "发现问题", "unknown": "未能核验"}.get(
+        str(status), "未能核验")
+
+
+def _chain_check_file(path, ac):
+    """校验**一个**链文件，返回计数 dict（按文件指纹缓存）。"""
+    try:
+        stt = os.stat(path)
+        fp = (os.path.normpath(path), stt.st_mtime_ns, stt.st_size)
+    except OSError:
+        return {"records": 0, "broken": 0, "bad": 1, "unchained": 0, "first_bad": ""}
+    hit = _CHAIN_CACHE.get(fp)
+    if hit is not None:
+        return hit
+    records = broken = badjson = unchained = 0
+    first_bad = ""
+    try:
+        f = open(path, encoding="utf-8", errors="replace")
+    except OSError:
+        return {"records": 0, "broken": 0, "bad": 1, "unchained": 0, "first_bad": ""}
+    with f:
+        prev = ""
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:                   # noqa: BLE001
+                badjson += 1
+                continue
+            if not isinstance(rec, dict):
+                badjson += 1
+                continue
+            h = rec.get("hash")
+            if not h:
+                unchained += 1                  # ★ 未链接记录，不是断链
+                continue
+            records += 1
+            rc = ac.chain_with(rec, prev)       # ← 产品原语
+            if rc["hash"] != h or rc["prev"] != rec.get("prev"):
+                broken += 1
+                if not first_bad:
+                    first_bad = "%s@%s" % (path, rec.get("ts"))
+            prev = h
+    out = {"records": records, "broken": broken, "bad": badjson,
+           "unchained": unchained, "first_bad": first_bad}
+    if len(_CHAIN_CACHE) >= _CHAIN_CACHE_MAX:
+        _CHAIN_CACHE.pop(next(iter(_CHAIN_CACHE)), None)
+    _CHAIN_CACHE[fp] = out
+    return out
 
 
 def chain_health(chain_files):
@@ -55,37 +123,14 @@ def chain_health(chain_files):
     files = records = broken = badjson = unchained = 0
     first_bad = ""
     for p in chain_files:
+        r = _chain_check_file(p, ac)
         files += 1
-        prev = ""
-        try:
-            f = open(p, encoding="utf-8", errors="replace")
-        except OSError:
-            badjson += 1
-            continue
-        with f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except Exception:               # noqa: BLE001
-                    badjson += 1
-                    continue
-                if not isinstance(rec, dict):
-                    badjson += 1
-                    continue
-                h = rec.get("hash")
-                if not h:
-                    unchained += 1              # ★ 未链接记录，不是断链
-                    continue
-                records += 1
-                rc = ac.chain_with(rec, prev)   # ← 产品原语
-                if rc["hash"] != h or rc["prev"] != rec.get("prev"):
-                    broken += 1
-                    if not first_bad:
-                        first_bad = "%s@%s" % (p, rec.get("ts"))
-                prev = h
+        records += r["records"]
+        broken += r["broken"]
+        badjson += r["bad"]
+        unchained += r["unchained"]
+        if not first_bad and r["first_bad"]:
+            first_bad = r["first_bad"]
 
     if records == 0:
         status = "unknown"                      # 一条可校验的都没有 ⇒ 没查成
@@ -119,18 +164,27 @@ def daily_report(day=None, root=None, chain_files=None, items=None,
     rule_rows = sorted(({"rule_id": k, "count": v} for k, v in rules.items()),
                        key=lambda r: (-r["count"], r["rule_id"]))
 
-    carried = [it for it in items if it.state in M.OPEN_STATES
-               and (_day_of_ts(it.ts) or "") < day]
+    # ---- 窗口（默认 24 小时）内的数字：顶部条与"每个数字可点钻取"共用 ----
+    hours = M.WINDOW_HOURS
+    win = [it for it in items if M.within_hours(it.ts, hours=hours)]
+    win_levels = M.window_levels(items, hours=hours)
 
-    hourly = {}
-    for it in today:
-        h = str(it.ts)[11:13]
-        if not h.isdigit():
-            continue
-        cur = hourly.get(h)
-        if cur is None or M.PRIORITY.get(it.level, 0) > M.PRIORITY.get(cur, 0):
-            hourly[h] = it.level
-    hourly_rows = [{"hour": h + ":00", "level": hourly[h]} for h in sorted(hourly)]
+    # ★ 每个数字都带**钻取键**（页面据此生成链接，判定不写在页面里）
+    drill = [
+        {"key": "L2", "label": "拦截", "count": win_levels["L2"], "filt": "lv:L2"},
+        {"key": "L1", "label": "注意", "count": win_levels["L1"], "filt": "lv:L1"},
+        {"key": "R0", "label": "失守", "count": win_levels["R0"], "filt": "lv:R0"},
+    ]
+    if win_levels["Ls"]:
+        drill.append({"key": "Ls", "label": "额度", "count": win_levels["Ls"],
+                      "filt": "lv:Ls"})
+
+    try:
+        import host_shield as _hs
+        posture = _hs.guard_posture(os.path.dirname(os.path.abspath(__file__)))
+    except Exception as e:                      # noqa: BLE001
+        posture = {"state": "unknown", "label": "查不到", "why": "读不到门闸状态：%r" % (e,),
+                   "evidence": {}, "can_fix": False, "fix": None, "fix_hint": ""}
 
     return {
         "day": day,
@@ -142,13 +196,23 @@ def daily_report(day=None, root=None, chain_files=None, items=None,
         "budget": levels["Ls"],
         "total_today": len(today),
         "states": M.counts_by_state(items),
-        "unhandled_total": M.unhandled_count(items),
         "console_state": M.console_state(items),
-        "carried_over": [{"id": it.id, "level": it.level, "title": it.title,
-                          "ts": it.ts, "state": it.state} for it in carried[:50]],
-        "carried_over_count": len(carried),
+        # ---- 0.35.3 新增：窗口口径（创始人拍板"24 小时"）----
+        "window_hours": hours,
+        "window_levels": win_levels,
+        "window_total": len(win),
+        "buckets": M.counts_by_bucket(items),
+        # ★ 0.35.3：「要处理」显示**件事数**（按事由归并），不是记录条数 ——
+        #   创始人 2026-10-06「37 条太多，很多不该列进来」。
+        "action_groups": M.count_groups(
+            [it for it in items if M.bucket_of(it) == M.BUCKET_ACTION]),
+        "drill": drill,
+        "posture": posture,
+        # ★ 哨兵被反复拉起的次数（本机实测 24h 内 6 次）——
+        #   它**不是后果**（已恢复），所以不进"要处理"；但"门闸一直在死"必须看得见，
+        #   否则就是"报告了不等于没事"的反面：**没事不等于没事**。
+        "revived_window": sum(1 for it in win if it.kind == "host_shield_revived"),
         "rules": rule_rows,
-        "hourly": hourly_rows,
         "chain": chain_health(files) if chain is None else chain,
         "ledger": L.summary(root=root, today=day) if led is None else led,
     }
@@ -161,25 +225,28 @@ def render_text(rep):
         "值守台日报 · %s" % rep["day"],
         "=" * 34,
         "拦截 %d ｜ 注意 %d ｜ 失守 %d ｜ 额度 %d" % (L_["L2"], L_["L1"], L_["R0"], L_["Ls"]),
-        "未处理合计 %d（未读 %d / 已读 %d）" % (
-            rep["unhandled_total"], rep["states"]["unread"], rep["states"]["read"]),
+        "最近 %d 小时：拦截 %d ｜ 注意 %d ｜ 失守 %d（门闸哨兵被拉起 %d 次）" % (
+            rep.get("window_hours", 24), rep.get("window_levels", {}).get("L2", 0),
+            rep.get("window_levels", {}).get("L1", 0), rep.get("window_levels", {}).get("R0", 0),
+            rep.get("revived_window", 0)),
+        "要处理 %d 件事（共 %d 条）｜ 看一眼 %d ｜ 归档 %d" % (
+            rep.get("action_groups", rep.get("buckets", {}).get("action", 0)),
+            rep.get("buckets", {}).get("action", 0),
+            rep.get("buckets", {}).get("info", 0),
+            rep.get("buckets", {}).get("archive", 0)),
         "已处理 %d ｜ 已忽略 %d" % (rep["states"]["done"], rep["states"]["ignored"]),
         "",
-        "链完整性：%s（%d 文件 / %d 条 / 断 %d）%s" % (
-            rep["chain"]["status"], rep["chain"]["files"], rep["chain"]["records"],
-            rep["chain"]["broken"], rep["chain"]["reason"] or ""),
-        "值守时长：%s 小时" % round((rep["ledger"].get("watch_seconds") or 0) / 3600.0, 1),
+        "链校验：%s（检查 %d 个文件、%d 条链记录；断链 %d、坏行 %d、未链接 %d 条）%s" % (
+            chain_status_label(rep["chain"]["status"]), rep["chain"]["files"],
+            rep["chain"]["records"], rep["chain"]["broken"],
+            rep["chain"].get("bad_lines", 0), rep["chain"].get("unchained", 0),
+            rep["chain"]["reason"] or ""),
     ]
     if rep["rules"]:
         lines.append("")
         lines.append("规则命中排行：")
         for r in rep["rules"][:8]:
             lines.append("  %-10s %d" % (r["rule_id"], r["count"]))
-    if rep["carried_over_count"]:
-        lines.append("")
-        lines.append("遗留未处理（%d 条，含更早）：" % rep["carried_over_count"])
-        for c in rep["carried_over"][:8]:
-            lines.append("  [%s] %s · %s" % (c["level"], c["title"], c["ts"]))
     return "\n".join(lines)
 
 
@@ -189,20 +256,22 @@ def render_markdown(rep):
            "| 级别 | 今日 |", "|---|---|",
            "| R0 失守 | %d |" % L_["R0"], "| L2 拦截 | %d |" % L_["L2"],
            "| L1 注意 | %d |" % L_["L1"], "| Ls 额度 | %d |" % L_["Ls"], "",
-           "- 未处理合计 **%d**（未读 %d / 已读 %d）" % (
-               rep["unhandled_total"], rep["states"]["unread"], rep["states"]["read"]),
+           "- 最近 **%d** 小时：拦截 %d ｜ 注意 %d ｜ 失守 %d（哨兵被拉起 %d 次）" % (
+               rep.get("window_hours", 24), rep.get("window_levels", {}).get("L2", 0),
+               rep.get("window_levels", {}).get("L1", 0),
+               rep.get("window_levels", {}).get("R0", 0), rep.get("revived_window", 0)),
+           "- 要处理 **%d 件事**（%d 条记录）｜ 看一眼 %d 条 ｜ 归档 %d 条" % (
+               rep.get("action_groups", 0),
+               rep.get("buckets", {}).get("action", 0),
+               rep.get("buckets", {}).get("info", 0),
+               rep.get("buckets", {}).get("archive", 0)),
            "- 已处理 %d ｜ 已忽略 %d" % (rep["states"]["done"], rep["states"]["ignored"]),
-           "- 链完整性：**%s**（%d 文件 / %d 条 / 断 %d）" % (
-               rep["chain"]["status"], rep["chain"]["files"],
-               rep["chain"]["records"], rep["chain"]["broken"]), ""]
+           "- 链校验：**%s**（检查 %d 个文件、%d 条链记录；断链 %d、坏行 %d、未链接 %d 条）" % (
+               chain_status_label(rep["chain"]["status"]), rep["chain"]["files"],
+               rep["chain"]["records"], rep["chain"]["broken"],
+               rep["chain"].get("bad_lines", 0), rep["chain"].get("unchained", 0)), ""]
     if rep["rules"]:
         out += ["## 规则命中排行", "", "| 规则 | 次数 |", "|---|---|"]
         out += ["| %s | %d |" % (r["rule_id"], r["count"]) for r in rep["rules"][:10]]
-        out.append("")
-    if rep["carried_over_count"]:
-        out += ["## 遗留未处理（%d 条）" % rep["carried_over_count"], "",
-                "| 级别 | 标题 | 时间 |", "|---|---|---|"]
-        out += ["| %s | %s | %s |" % (c["level"], c["title"], c["ts"])
-                for c in rep["carried_over"][:20]]
         out.append("")
     return "\n".join(out)
