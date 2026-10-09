@@ -1,5 +1,5 @@
 {
-  "version": "0.37.0",
+  "version": "0.42.1",
   "description": "Antinel Security Suite default detection rules (37 rules, 4 gates + canary/supply-chain families; flat layout: patterns at rule top level)",
   "gates": {
     "secrets": "Gate 2 sensitive surface",

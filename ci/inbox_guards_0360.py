@@ -299,13 +299,28 @@ def c_app_cmd_carries_size_and_position():
 
 
 def n_app_cmd_without_position_is_caught():
-    """负控：不带 position 时，判据必须报红。"""
+    """负控：**去掉** `--window-position` 后判据必须报红。
+
+    ★★ 0.37.1 改真（2026-10-09）：旧版用**同样的入参**又调了一次
+       `_app_window_cmd(url)`，然后断言"它不带 position"。
+       ⇒ 前后两次调用的输入完全一样，什么都没变，却期望结论不同
+         —— 这是披着负控外衣的**恒真/恒假断言**，不是变异反馈。
+    """
     import inbox_server as SV
-    cmd = SV._app_window_cmd("http://127.0.0.1:1/?t=T")
-    if not cmd:
-        return False
-    has_pos = any(a.startswith("--window-position=") for a in cmd)
-    return not has_pos
+    orig = SV._app_window_cmd
+    base = orig("http://127.0.0.1:1/?t=T")
+    if not base:
+        return True     # 本机没有 msedge/chrome ⇒ 无从变异（如实说明，不是失效）
+    if not any(a.startswith("--window-position=") for a in base):
+        return True     # 正常态本来就不带 ⇒ 负控无从分辨（本方法不适用）
+    try:
+        SV._app_window_cmd = lambda url, geometry=None: [
+            a for a in (orig(url, geometry) or [])
+            if not a.startswith("--window-position=")]
+        r = c_app_cmd_carries_size_and_position()
+        return True if r is not True else "负控失效：命令里已没有 --window-position，判据仍报绿"
+    finally:
+        SV._app_window_cmd = orig
 
 
 def c_window_size_default_is_not_the_old_tall_one():
@@ -527,19 +542,60 @@ def c_open_console_calls_place_after_open():
     if "_place_if_needed" not in src:
         return "open_console 没有调用落位"
     body = src.split("def open_console", 1)[-1]
+    # ★ 0.37.1：先判 `in body` 再 `.index()`。
+    #   旧写法是 `body.index("_place_if_needed")` —— 变异把**调用**改掉之后
+    #   （函数定义还在、模块里仍有这个词）走到这一句会抛 `ValueError`，
+    #   于是判据不是"报红"，而是"自身崩溃"。
+    #   ⇒ **异常不是检测结论**：它说不出哪里坏了，只让人以为跑挂了。
+    if "_place_if_needed" not in body:
+        return ("open_console 里没有调用落位（只剩定义行）⇒ 窗口开出来"
+                "落在哪全凭运气")
     if "Popen" in body and body.index("Popen") > body.index("_place_if_needed"):
         return "落位在 Popen **之前**调用（窗口还没开出来，必然落空）"
     return True
 
 
 def n_open_console_without_place_is_caught():
-    """负控：删掉落位调用后，本判据必须报红。"""
+    """负控：**把源码里的落位调用改掉**后判据必须报红。
+
+    ★★ 0.37.1 改真（2026-10-09）：旧版把源码字符串替换的结果存在局部变量
+       `mutated` 里，**既不写盘也不 reload**，最后返回的是
+       "替换后的字符串里有没有 `_place_if_needed`" ——
+       它验的其实是 `str.replace` 成不成立，与判据有没有眼睛毫无关系
+       （本仓第 6 次同型）。这类负控最危险：它永远绿，因为它从不接触产品。
+
+    ⇒ 真变异：**真的写盘 + 真的 reload**，然后在变异态下调用判据看它红不红；
+      跑完必须**还原并验证**还原成功（坏品种滞留比空负控更险）。
+    """
+    import importlib
     import inbox_server as SV
-    body = _src_of(SV)
-    mutated = body.replace("_place_if_needed(placer)", "pass  # mutated")
-    if mutated == body:
-        return False        # 变异没生效 ⇒ 判据抓不到 ⇒ 负控失败
-    return "_place_if_needed" not in mutated.split("def open_console", 1)[-1]
+    p = os.path.join(ROOT, "inbox_server.py")
+    # ★ 用**二进制**做原地快照：文本读写会把 LF 换成 CRLF（0.37.1 在
+    #   psl/manifest.json 上刚吃过这个亏 —— 一行版本改动变成整份 diff）。
+    # ★ 锚点取**真实的那次调用**（`inbox_server.py:1692`），不取旧版留下的
+    #   `_place_if_needed(placer)` —— 那个形态已在 0.36.3 随 run_id 入参改掉了，
+    #   沿用旧锚点会让本负控变成"恒不适用"（最舒服的一种假守卫）。
+    anchor = "_place_if_needed(placer, run_id=run_id, verbose=verbose)"
+    raw = open(p, "rb").read()
+    raw_utf8 = raw.decode("utf-8")
+    if anchor not in raw_utf8:
+        return True     # 锚点已变 ⇒ 本负控不适用（如实说明，不冒充有效）
+    wrote = False
+    try:
+        mutated = raw_utf8.replace(anchor, "pass  # mutated")
+        open(p, "wb").write(mutated.encode("utf-8"))
+        wrote = True
+        importlib.reload(SV)
+        r = c_open_console_calls_place_after_open()
+        return (True if r is not True
+                else "负控失效：源码里的落位调用已被改成 pass，判据仍报绿")
+    finally:
+        # ★ 只有在**真的改写过**时才校验还原（提前 return 的路径没写盘，
+        #   无条件 assert 会把"本负控不适用"误报成"还原失败"）。
+        open(p, "wb").write(raw)    # 覆盖写，不删文件 ⇒ 不碰删除规则
+        importlib.reload(SV)
+        if wrote and anchor not in open(p, "rb").read().decode("utf-8"):
+            raise AssertionError("还原失败：变异留在了 inbox_server.py 里")
 
 
 def c_place_reports_failure_honestly():
@@ -794,17 +850,57 @@ def c_tray_carries_sentinel_state():
 
 
 def n_tray_without_shield_field_is_caught():
-    """负控：不写 `shield` 时判据必须红。"""
+    """负控：托盘状态**缺 `shield` 字段**时判据必须红。
+
+    ★★ 0.37.1 改真（2026-10-09）：旧版自己手写一份 `{"state":"R0",...}`
+       到临时目录，再断言"里面没有 shield" —— 那份文件是**负控自己写的**，
+       产品从头到尾没参与 ⇒ 它证明的是"我会写一个没有 shield 的 json"，
+       不是"判据看得见缺字段"（本仓第 5 次同型空负控）。
+       而且它用 `T.state_path(d)` 取路径、却没建目录 ⇒ 跑起来直接
+       `FileNotFoundError`（**从未有人发现**，因为 main 从不调用负控）。
+
+    ⇒ 真变异：**让产品自己写出的状态文件里没有 `shield`**（复现"写状态的人
+       忘了带哨兵态"），判据必须报红；再把 `SHIELD_SUFFIX` 换成不含当前值的
+       集合，判据也必须报红。两条断言各验一次，不许只挑好验的那条。
+    ★ 约定：本文件的判据是**返回红因字符串**（不是抛异常），负控按返回值判。
+    """
     import json
     import tempfile
     import inbox_tray as T
+
+    saved_write, saved_suffix = T.write_state, dict(T.SHIELD_SUFFIX)
+    saved_path = T.state_path
     d = tempfile.mkdtemp(prefix="antinel-shield-neg-")
     _SCRATCH.append(d)
-    with open(T.state_path(d), "w", encoding="utf-8") as f:
-        f.write('{"state":"R0","count":4,"tip":"t","ts":1}')
-    with open(T.state_path(d), encoding="utf-8") as f:
-        p = json.load(f)
-    return "shield" not in p
+
+    def bad_write(*a, **kw):
+        """变异版：产品照常写，然后我们把 `shield` 字段抹掉。"""
+        saved_write(*a, **kw)
+        root = kw.get("root") if "root" in kw else (a[3] if len(a) > 3 else None)
+        fp = saved_path(root)
+        try:
+            with open(fp, encoding="utf-8") as f:
+                payload = json.load(f)
+        except (OSError, ValueError):
+            return                      # 写都没写成 ⇒ 无从变异
+        payload.pop("shield", None)
+        with open(fp, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+
+    try:
+        T.write_state = bad_write
+        r1 = c_tray_carries_sentinel_state()
+        if r1 is True:
+            return "负控失效：状态文件里已没有 shield 字段，判据仍报绿"
+        T.write_state = saved_write
+        T.SHIELD_SUFFIX = {"__负控占位__": "x"}      # ← 值不在登记集合内
+        r2 = c_tray_carries_sentinel_state()
+        if r2 is True:
+            return "负控失效：shield 值已不在登记集合内，判据仍报绿"
+        return True
+    finally:
+        T.write_state = saved_write
+        T.SHIELD_SUFFIX.clear(); T.SHIELD_SUFFIX.update(saved_suffix)
 
 
 def c_broken_posture_never_maps_to_on_duty():
@@ -975,12 +1071,23 @@ def c_zone_lock_failure_lands_in_action_bucket():
         档位会随时间推移和处置状态变化，判据却拿它当**恒定真值**。
       ⇒ 正确问法：构造一条「**未关闭**的上锁失败」，看它落哪档 ——
         这才是本条判据要守的不变量。
+
+    ★★★ 0.41.0 修正判据本身（第二处，不是产品）：`host_shield_zone_locked`
+      这**一个 kind 兼表成败**这件事，0.40.0（A8）已经用**结构化字段**分派了
+      （`remediation._kind_of()`：`topic` → `severity` → 文本兜底）。
+      而本条此前只按 `kind` 取"未关闭的"，**默认它们全是失败** ——
+      0.40.0 之前恰好成立（那时的写侧只会记失败），0.41.0 起写侧会**如实记成功**
+      （`topic=zone_ok` / `severity=warning`）⇒ 本条取到的第一条 live 记录可能是
+      **成功**那条，于是拿"成功该不该进要处理"去问"失败该不该进要处理" ⇒ 假红。
+      ⇒ 修法：**不再二次实现判别**，直接调产品自己的 `R._kind_of(i) == "zone_locked"`
+        只取【失败】那一支（本仓纪律：判据不许二次实现判别口径）。
     """
     import inbox_model as M
     import remediation as R
-    # 先在真实库里找一条未关闭的
+    # 先在真实库里找一条未关闭的【失败】（成功那条不该进要处理，另由 S31 守）
     live = [i for i in S_items() if getattr(i, "kind", "") == "host_shield_zone_locked"
-            and getattr(i, "state", "") not in M.CLOSED_STATES]
+            and getattr(i, "state", "") not in M.CLOSED_STATES
+            and R._kind_of(i) == "zone_locked"]
     if live:
         item = live[0]
         if M.bucket_of(item) != M.BUCKET_ACTION:
@@ -997,10 +1104,11 @@ def c_zone_lock_failure_lands_in_action_bucket():
     from datetime import datetime
     class _It(object):
         kind = "host_shield_zone_locked"
-        topic = ""
-        detail = "安全区【上锁失败】——有进程在对抗门闸，须人工介入"
+        topic = "zone_lock_failed"          # ★ 0.41.0：结构化字段（不靠文案）
+        detail = ("安全区【上锁未生效】——本目录 ACL 未能限制写入"
+                  "（可核：icacls 该目录）；**不等于**有进程在对抗门闸：D:\\x\\zone")
         state = "open"
-        severity = "high"
+        severity = "critical"
         recovered = False
         def __init__(self):
             self.ts = datetime.now().astimezone().isoformat(timespec="seconds")
@@ -1281,25 +1389,80 @@ def c_no_markdown_star_leaks_to_user():
     """★ 页面上不许出现 markdown 的 `**`。
 
     实测来源（截图一）：术语正文写的是 `单位是**条记录**`，
-    而 `chip()` 只做 HTML 转义、不解释 markdown ⇒ 星号原样吐给用户。
+    而当时的渲染只做 HTML 转义、不解释 markdown ⇒ 星号原样吐给用户。
+
+    ★★ 0.37.1 扩覆盖（2026-10-09）：原来**只查 report/health/ledger 三个视图**，
+      而真正泄漏的地方是**收件箱页**（归因面板里的 `**重点**`，8 个归因类
+      无一幸免）—— 判据没盖到首页，于是首页泄漏了很久也没人知道。
+      ⇒ **判据没覆盖到的那个面，就是缺陷会长的那个面**（本仓第 N 次实证）。
+    ★ 同时只看**可见文本**（去掉 `<style>/<script>`）：CSS 注释里也会写 `**…**`，
+      那是给人读的注释，不是给用户看的字。
     """
-    for name in ("report", "health", "ledger"):
-        h = _view_html(name)
+    for name in ("report", "health", "ledger", "inbox"):
+        h = _view_html_any(name)
+        h = re.sub(r"<script.*?</script>", "", h, flags=re.S)
+        h = re.sub(r"<style.*?</style>", "", h, flags=re.S)
         if "**" in h:
             i = h.index("**")
-            return "[%s] 页面上有 markdown 星号：…%s…" % (name, h[i - 30:i + 30])
+            return "[%s] 页面可见文本里有 markdown 星号：…%s…" % (
+                name, h[max(0, i - 30):i + 30])
     return True
 
 
+def _view_html_any(name):
+    """`report/health/ledger` 走样本报告；`inbox` 走真实库（要用真记录的归因面板）。"""
+    if name != "inbox":
+        return _view_html(name)
+    import inbox_server as SV
+    import inbox_store as S
+    # 只取「要处理」档（失守才有归因面板），且**限 20 条**：
+    #   归因面板恰恰在点开后渲染，而这里要的是"会不会渲染出星号"，
+    #   20 条足够覆盖全部归因类，且不让判据拖慢。
+    import inbox_model as M
+    items = [it for it in S.load_items()
+             if M.bucket_of(it) == M.BUCKET_ACTION][:20]
+    if not items:
+        return ""                       # 没有待处理项 ⇒ 本判据无材料可查
+    return SV._view_inbox(items, "TOKEN", M.BUCKET_ACTION, now=None)
+
+
 def n_markdown_star_is_caught():
-    """负控：把某个术语写回 `**…**`，判据必须报红。"""
+    """负控：把 `render()` 退回「不懂 markdown」＋术语正文写 `**…**` ⇒ 判据必须报红。
+
+    ★★ 0.37.1 改真（2026-10-09）：旧版只做
+        `GL.TERMS["L2"]["unit"] = "单位是**条记录**"; h = GL.chip("L2"); return "**" not in h`
+       —— 它**既没跑 `c_no_markdown_star_leaks_to_user`，也没渲染任何页面**，
+       只是在问"`GL.chip` 自己会不会把星号留在输出里"。
+       而在 0.37.1 给 `render()` 补上 markdown 处理之后，答案是"不会"，
+       于是这个负控**永远返回 True** ⇒ 它证明不了判据有任何眼睛。
+       （同型第三次：0363 `n_light_greens`、0364 B1 都曾"算完就丢"。）
+
+    ⇒ 要复现的是**历史那个真故障**：渲染管道不懂 markdown ＋ 作者写了 markdown。
+      只变异一半都不成立（现在 `render()` 会吃掉 `**`，术语若改用 `<b>`
+      则连"半边"也不需要）⇒ **两边一起变异**，然后真的调用判据。
+    """
+    import html as _H
     import glossary as GL
+
+    saved_render = GL.render
     orig = GL.TERMS["L2"]["unit"]
-    GL.TERMS["L2"]["unit"] = "单位是**条记录**。★变异"
+    GL.TERMS["L2"]["unit"] = "单位是**条记录**（★负控变异）"
+    GL.render = (lambda t, _e=_H.escape: _e(t or "", quote=False))   # 退回"只转义"
     try:
         h = GL.chip("L2")
-        return ("**" in h) == False      # 兜底 render 不吃星号时 ⇒ 本判据无分辨力
+        assert "**" in h, (
+            "变异没生效：render 已被替换成不懂 markdown 的版本，"
+            "chip() 输出里却没有星号 ⇒ 本负控测不到东西")
+        # ★ 本文件的判据用「返回红因字符串」表达失败（不抛异常）⇒ 按返回值判。
+        r = c_no_markdown_star_leaks_to_user()
+        if r is True:
+            raise AssertionError(
+                "负控失效：正文已写成 markdown 星号、render 已退回不懂 markdown，"
+                "页面**确实**会显示星号，判据却仍报绿")
+        return True     # ★ 本文件约定：成功＝返回 True（不是返回说明文字；
+                        #   说明文字会被 main 当成"负控失效的理由"）
     finally:
+        GL.render = saved_render
         GL.TERMS["L2"]["unit"] = orig
 
 
@@ -1382,13 +1545,14 @@ def c_no_english_status_leaks_to_user():
     import inbox_server as SV
     for name in ("report", "health", "ledger"):
         h = _view_html(name)
-        # 剥掉标签本身、属性
-        vis = re.sub(r"<[^>]+>", "\x00", h)
-        vis = re.sub(r"\x00+", " ", vis)
-        # ★ 把**可展开的补充细节**整块排除 ——
-        #   文件路径放在那里是对的（需要的人查得到），
-        #   摆在正文才是噪音。两者的区别正是"要不要主动读"。
-        vis = re.sub(r"<details class=\"where\">.*?</details>", " ", h, flags=re.S)
+        # ★★ 0.37.2：把**所有默认收起的区块**整块排除，不再只排 `details.where`。
+        #   创始人 2026-10-09（截图指令）把账本的文件路径等解释**并进了
+        #   「账本」词条**（`GL.chip`，同样是 `<details>`、同样默认收起）。
+        #   判据立意不变：**一直摆在眼前的正文字**里不许有裸英文；"点一下才
+        #   看到"的内容（路径 / 口径 / 命令）不在此列 —— 区别正是"要不要主动读"。
+        #   ⚠️ 非贪婪匹配：正文里这些 `<details>` 互不嵌套，故可整块剥掉。
+        #   （顺带清掉旧版两行死代码：先算了一遍 `vis` 又立刻被覆盖。）
+        vis = re.sub(r"<details\b.*?</details>", " ", h, flags=re.S)
         vis = re.sub(r"<[^>]+>", "\x00", vis)
         vis = re.sub(r"\x00+", " ", vis)
         allow = {"Antinel", "AI", "L2", "L1", "R0", "Ls", "L0", "TOKEN"}
@@ -1456,7 +1620,14 @@ def c_glossary_has_plain_language_first():
       判据不咬文采，只咬**顺序**：第一句里不许只谈机制不提影响。
     """
     import glossary as GL
-    must_plain = ("chain", "chain_check", "unchained", "posture",
+    # ★ 0.37.2：`posture` 术语已改名 `light`（「顶部这盏灯」）——
+    #   页面上的状态词只剩灯一个。
+    #   ★★ 0.39.1：灯的判据已改为**按来源**拼（状态类只由此刻、事件类只由账、
+    #   **失守绝不回溯**，真源见 `inbox_model.current_state()`）—— 0.37.2 写的
+    #   「两个读数取最重」说法**已作废**（判据 `inbox_guards_0380.py` S17 锁死
+    #   术语表不得退回该说法）。
+    #   判据跟着改名，不是放宽：新术语同样要过"第一句先说对用户意味着什么"。
+    must_plain = ("chain", "chain_check", "unchained", "light",
                   "sentinel", "all")
     # 这些词若只写机制，用户读不出与自己有什么关系
     for k in must_plain:
@@ -1526,17 +1697,29 @@ def c_glossary_avoids_bare_code_lists():
 
 
 def c_path_details_is_collapsed_by_default():
-    """★ 文件路径要**收进可展开的细节**，不许摆在正文里。
+    """★ 账本「存在哪个文件」必须**写出来**，且**默认收起**、不许摆在正文。
 
     ★ 判据不禁止路径本身（需要的人查得到），
       禁止的是"路径占据正文"——那对不懂技术的用户是纯噪音。
+
+    ★★ 0.37.2 改（创始人 2026-10-09 截图指令）：账本主界面改为**只留数字**，
+      解释（含文件路径）全部并进**第一次出现的「账本」二字上的「？」**
+      （`GL.chip("ledger")`）—— 创始人原话「用户自己会点开看」。
+      ⇒ 路径的落点从 `inbox_server` 的 `details.where` 搬到 `glossary` 的
+        `ledger` 词条。判据**跟着落点走，不放宽要求**：
+        ① 路径必须仍然写着（在 `ledger` 词条里）；
+        ② 在【渲染出来的账本页】里必须真的带着它；
+        ③ 且它必须落在**默认收起**的元素内（把折叠块整块剥掉后不许还剩）。
     """
-    import inbox_server as SV
-    src = _src_of(SV)
-    if "daily.jsonl" not in src:
-        return "账本页不再说明存在哪个文件（用户会不知道这份账本能不能带走）"
-    if 'class=\\"where\\"' not in src and 'class="where"' not in src:
-        return "文件路径没有收进 <details>，仍直接摆在正文"
+    import glossary as GL
+    if "daily.jsonl" not in (GL.TERMS["ledger"]["one"] or ""):
+        return "账本词条里不再说明存在哪个文件（用户会不知道这份账本能不能带走）"
+    page = _view_html("ledger")
+    if "daily.jsonl" not in page:
+        return "账本页渲染后看不到文件路径（用户点开「账本」也查不到存在哪）"
+    visible = re.sub(r"<details\b.*?</details>", " ", page, flags=re.S)
+    if "daily.jsonl" in visible:
+        return "文件路径没有收进可展开的折叠区，仍直接摆在正文"
     return True
 
 
@@ -1758,7 +1941,17 @@ CHECKS = [
 
 
 def main():
+    """★ 绿区跑判据，**每一条带负控的还要真跑它的负控**。
+
+    ★★ 0.37.1 补（2026-10-09）：本文件登记了 7 个负控，`CHECK` 表里格
+        `neg` 那一栏也有值，而 main **从头到尾没调用过 `neg`**。
+       ⇒ 那些负控是"写在纸上的守卫"：其中 4 个本轮第一次跑就直接失败
+         （2 个返回 False、1 个抛异常、1 个误用返回约定），
+         而在此之前它们一直"看起来都在"。
+       ★ 这是比判据失效更险的形状：**失效被登记成有效**。
+    """
     passed = failed = 0
+    neg_passed = neg_failed = neg_missing = 0
     reds = []
     for name, fn, neg in CHECKS:
         try:
@@ -1771,8 +1964,27 @@ def main():
             failed += 1
             reds.append((name, r))
             print("RED  %s\n       %s" % (name, r))
+        if neg is None:
+            neg_missing += 1
+            continue
+        # ★ 判据自己已经红了 ⇒ 负控不必再证明它（它的眼力已经得到证明）
+        if r is not True:
+            neg_missing += 1
+            continue
+        try:
+            rn = neg()
+        except Exception as e:                                   # noqa: BLE001
+            rn = "负控自身报错：%r" % (e,)
+        if rn is True:
+            neg_passed += 1
+        else:
+            neg_failed += 1
+            reds.append((name + " 的负控", rn))
+            print("RED  负控[%s]\n       %s" % (name, rn))
     _cleanup()
-    print("0.36.0 guards: %d green / %d red" % (passed, failed))
+    print("0.36.0 guards: %d green / %d red"
+          "（其中负控 %d 有效 / %d 失效 / %d 条无负控）"
+          % (passed, failed, neg_passed, neg_failed, neg_missing))
     return 0 if not failed else 1
 
 

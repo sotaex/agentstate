@@ -26,10 +26,15 @@ from __future__ import annotations
 import html
 import json
 import os
+import re
 import secrets
 import subprocess
 import sys
 import threading
+
+#: markdown 加粗标记（**…**）。页面不解释 markdown ⇒ 必须在渲染前剥掉，
+#: 否则审计链里任何旧版本写下的 `**` 都会原样露给用户（0.42.0 实测）。
+_MD_STARS = re.compile(r"\*\*")
 import time
 import webbrowser
 from datetime import date
@@ -57,7 +62,8 @@ _MIME = {".mp4": "video/mp4", ".svg": "image/svg+xml", ".ico": "image/x-icon",
          ".png": "image/png"}
 
 LEVEL_VAR = {"R0": "--r0", "L2": "--l2", "L1": "--l1", "Ls": "--ls", "L0": "--l0"}
-LEVEL_NAME = {"R0": "失守", "L2": "拦截", "L1": "注意", "Ls": "预算", "L0": "值守"}
+#: 态短名（**派生**，不写第二份；真源＝`inbox_model.STATE_LABEL`，见 0372 S08）。
+LEVEL_NAME = {k: M.state_short(k) for k in ("R0", "L2", "L1", "Ls", "L0")}
 
 CSS = """
 :root{--bg:#fff;--panel:#f6f8fa;--fg:#14212b;--muted:#465866;--line:#d6dee4;
@@ -152,7 +158,7 @@ details.where code{font-family:var(--mono);font-size:11.5px;word-break:break-all
 .row{display:flex;gap:12px;padding:11px 15px;border-bottom:1px solid var(--line);font-size:13px}
 .row:last-child{border-bottom:0}
 .row .k{flex:none;width:150px;color:var(--muted)}
-.ok{color:var(--l0);font-weight:700}.warn{color:var(--l1);font-weight:700}.bad{color:var(--r0);font-weight:700}.neutral{color:var(--muted);font-weight:700}
+.ok{color:var(--l0);font-weight:700}.warn{color:var(--l1);font-weight:700}.bad{color:var(--r0);font-weight:700}.neutral{color:var(--muted);font-weight:700}.dev{color:var(--brand);font-weight:700}
 .empty{text-align:center;padding:40px;color:var(--muted)}
 .note{font-size:12px;color:var(--muted)}
 .unread-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--brand);margin-right:6px;vertical-align:middle}
@@ -331,6 +337,29 @@ def _esc(s):
     return html.escape("" if s is None else str(s), quote=True)
 
 
+def _vis(s):
+    """★ 0.42.0：**用户可见文本**的出口 —— 先去 markdown 星号，再 HTML 转义。
+
+    ★★ 为什么必须有这一层（2026-10-09 实测，我自己的回归）：
+
+      0.41.0 我把 `zone_locked` 的失败文案写成
+      「…（可核：icacls 该目录）；**不等于**有进程在对抗门闸」—— 用了 markdown
+      加粗。而这里的渲染**只做 HTML 转义、不解释 markdown** ⇒ 那对 `**`
+      原样吐给用户，页面上就是一对裸星号。`0360 W01`（页面无 markdown 星号）
+      当场抓住。
+
+      ★ 只改**写侧文案**不够：审计链是 append-only 的，用户机器上躺着
+        **各个旧版本写下的记录**。清掉本地那 1 条，只治了本机；
+        换个用户、换条旧记录，星号照样露。
+      ⇒ 正解是**读侧免疫**：不管记录是哪一版写的，渲染时都不露星号。
+        这才是"修得彻底、不复发"—— 与 0.41.0 修 `is_denied()` 同一条思路
+        （换 oracle，而不是把某一次的结果改对）。
+
+    ★ 口径：`**X**` → `X`（删掉成对的加粗标记，语义不变）。
+    """
+    return _esc(_MD_STARS.sub("", "" if s is None else str(s)))
+
+
 def _allowed_host(host, port):
     h = str(host or "")
     return h in ("127.0.0.1:%d" % port, "localhost:%d" % port,
@@ -349,7 +378,7 @@ def posture_now():
         return hs.guard_posture(_pkg_root())
     except Exception as e:                          # noqa: BLE001
         return {"state": "unknown", "label": "查不到",
-                "why": "读不到门闸状态：%r" % (e,), "evidence": {},
+                "why": "读不到哨兵状态：%r" % (e,), "evidence": {},
                 "can_fix": False, "fix": None, "fix_hint": ""}
 
 
@@ -378,74 +407,65 @@ def _head(title, token):
             % (_esc(title), mark, _esc(token), CSS))
 
 
-def _tabs(view, token, counts):
-    def a(v, label, n=None):
+def _tabs(view, token):
+    """选项卡。★ 0.37.1：**不再挂数字徽章** —— 首页实测「同一件事的 4 件」
+
+    在 tabs 徽章、顶部条后缀、筛选条、说明行里出现了 5 次（创始人 2026-10-08
+    点名）。数字现在只属于内容区：收件箱页在筛选条，其他页在顶部条后缀。
+    选项卡只负责「去哪儿」。
+    """
+    def a(v, label):
         cls = " class=\"on\"" if v == view else ""
-        badge = " <b>%d</b>" % n if n else ""
-        return "<a href=\"/?v=%s&t=%s\"%s>%s%s</a>" % (v, _esc(token), cls, label, badge)
-    return ("<nav class=\"tabs\">" + a("inbox", "收件箱", counts.get("action", 0))
+        return "<a href=\"/?v=%s&t=%s\"%s>%s</a>" % (v, _esc(token), cls, label)
+    return ("<nav class=\"tabs\">" + a("inbox", "收件箱")
             + a("report", "日报") + a("health", "运行状态") + a("ledger", "账本")
             + "</nav>")
 
 
-def _bar(items, token, posture=None, now=None):
-    """顶部条。★★ 灯＝**当前态势**（现探），不是历史攒的（创始人 2026-10-06 拍板）。
+def _bar(items, token, posture=None, now=None, view="inbox"):
+    """顶部条。★★ 灯＝**六态之一**（2026-10-08 换代，创始人拍板）。
 
-    旧版把**所有未处理项**的最高级当灯色 ⇒ 8 天前一条已自愈的记录让今天永远红。
-    创始人原话：「用户看到的都是失守状态，但又不是真正的事实，很快就没人用了，
-    因为太假。」⇒ 现在：
-      · 红 = 防线**此刻**确实不在岗（`host_shield.guard_posture()` 现探）
-      · 未启用 = 灰（默认态，不是故障）
-      · 值守中 = 绿；24 小时内有未处理的事 = 橙
-      · 失守时**就地给一个「马上修复」按钮**（创始人第四条：应该有地方马上解决）
-    右侧那排数字是**最近 24 小时**的（创始人第二条：窗口默认 24 小时）。
+    旧实现（0.36.0–0.36.4）把「姿态 × 24h 历史」两轴**派生**出了 8 个灯态
+    （失守/中断·无损失/存疑/研发中/值守中·需你处理/值守中/未启用/查不到）。
+    创始人定性：「那 8 态是之前的 AI 主观臆想的，要去掉；六态就应该是
+    LOGO 五态加上开发态」。⇒ 现在灯态只有 `inbox_model.LIGHT_STATES` 六个：
+    R0 失守 / L2 拦截 / L1 注意 / Ls 预算 / L0 值守中 / dev 研发中，
+    判读顺序：防线没生效或不可信 ⇒ R0；24h 未处理事件 ⇒ 取最高级；
+    缺口（缺岗无损失/探不到）⇒ L1；未启用 ⇒ L0 灰；研发无事件 ⇒ dev。
+
+    ★★ 数字**只出现一次**（0.37.1 去重 —— 创始人实测「同一件事的 4 件
+      在首页出现了 5 次」）：
+      · 收件箱页：件数只在**筛选条**（「要处理 N」），本行不重复；
+      · 日报/运行状态/账本页：件数只在本行后缀（「N 件，点开查看」），
+        一键落到「要处理」清单（创始人 2026-10-06 第四条：看到「有事」
+        必须能落到具体内容）；选项卡上**不再挂数字徽章**。
+    ★ 状态词只出现一次：旧版把灯态标签与姿态标签**各写一遍**
+      （`<b>存疑</b>` ＋ 药丸「存疑」），同一个词两种叫法还可能不一致。
     """
     p = posture or posture_now()
-    lg, _why = M.light(p.get("state"), items, now=now)
-    state_title = _esc(M.LIGHT_LABEL[lg])
-    state_reason = _esc(p.get("why") or "")
-    if lg == M.LIGHT_ATTENTION:
+    # ★★ 0.37.2：灯的说明走 `M.light_explain()`（唯一实现）——
+    #   它把「此刻」与「24 小时账」**两个维度写在同一句话里**。
+    #   旧版只吐 `light()` 的 why（"24 小时内有未处理事项（最高 R0）"），
+    #   于是本机实测出现"此刻哨兵在岗、心跳 0 分钟前，灯却是红的失守"——
+    #   用户点进去才发现此刻是好的，等于灯骗了一次。
+    ex = M.light_explain(p, items, now=now, granary=M.granary_now())
+    st = ex["state"]
+    label = _esc(ex["label"])
+    state_reason = _esc(ex["reason"])
+    suffix = ""
+    # 「有事」要能落到具体内容：**非收件箱页**给钻取后缀（收件箱页由筛选条承担）。
+    # ★★ 这是**契约**不是装饰（创始人 2026-10-06 第四条：看到「有事」必须能
+    #   落到具体内容），P12 判据按它验收。日报页曾试过去掉它以省掉一个重复数字，
+    #   P12 立刻报红 ⇒ 记下这个次序：**契约先于精简**。
+    #   （日报页因此会有两处"要处理件数"：这里是导航，卡上是数字。）
+    if view != "inbox":
         action_items = [it for it in items
                         if M.bucket_of(it, now=now) == M.BUCKET_ACTION]
         action_groups = M.count_groups(action_items)
-        # ★ 用户看到「有事」必须能落到具体内容：同一判据 `bucket_of` 的件事数，
-        #   并直接钻入「要处理」列表；否则不显示这类提示。
-        state_title = ("<a href=\"/?v=inbox&amp;f=action&amp;t=%s\" "
-                       "style=\"color:inherit;text-decoration:none\">%s（%d 件，点开查看）</a>"
-                       % (_esc(token), _esc(M.LIGHT_LABEL[lg]), action_groups))
-        state_reason = _esc(_why)
-    wc = M.window_levels(items, now=now)
-    # ★★ 0.35.3（创始人第四条 · 奥卡姆剃刀，本轮实测）：
-    #   顶部原来只报「失守 69」这样的**记录条数**。实测本机 R0 共 80 条，
-    #   但只有 **8 种不同原因**，其中最大一支 37 次（同一个钩子哈希不匹配被
-    #   反复记录）⇒ 按事由归并只有 **4 件事**。
-    #   用户看到 69 会以为"有 69 个问题待办"，实际只需要处理 4 件。
-    #   ⇒ 三个数字**各自带上自己的事由件数**，口径写明；点进去仍是全部明细。
-    #   这是 F40 的正面处理：不是把一个数藏起来，而是把**两个分母都摆出来**。
-    _win = [it for it in items
-            if M.within_hours(it.ts, M.WINDOW_HOURS, now)]
-
-    def _grp(level):
-        sel = [it for it in _win if it.level == level]
-        return len(sel), M.count_groups(sel)
-    n_l2, g_l2 = _grp("L2")
-    n_l1, g_l1 = _grp("L1")
-    n_r0, g_r0 = _grp("R0")
-
-    def _pill(label, level, n, g):
-        # 记录数 == 事由件数 时不重复写"=N 件事"，避免无意义的赘述
-        same = (n == g)
-        return ("<a href=\"/?v=inbox&f=win:%d:lv:%s&t=%s\">%s <b>%d</b>%s</a>"
-                % (M.WINDOW_HOURS, level, _esc(token), label, n,
-                   "" if same else "（%d 件事）" % g))
-
-    nums = ("<span class=\"pill\">最近 %d 小时：%s · %s · %s"
-            "<span class=\"unit\" title=\"括号里是按事由归并后的件数；"
-            "点进去看的是全部明细记录\">（条数／括号内为件事数）</span></span>"
-            % (M.WINDOW_HOURS,
-               _pill("拦截", "L2", n_l2, g_l2),
-               _pill("注意", "L1", n_l1, g_l1),
-               _pill("失守", "R0", n_r0, g_r0)))
+        if action_groups:
+            suffix = ("<a href=\"/?v=inbox&amp;f=action&amp;t=%s\" "
+                      "style=\"color:inherit;text-decoration:none\">（%d 件，点开查看）</a>"
+                      % (_esc(token), action_groups))
     fix = ""
     if p.get("can_fix"):
         fix = ("<form method=\"post\" action=\"/action\" style=\"margin:0\">"
@@ -453,34 +473,59 @@ def _bar(items, token, posture=None, now=None):
                "<input type=hidden name=op value=\"fix\">"
                "<button class=\"fixbtn\">%s</button></form>"
                % (_esc(token), _esc(p.get("fix_hint") or "马上修复")))
-    elif p.get("state") in ("down", "warn") and (p.get("fix_hint") or ""):
-        # ★ 0.35.3（创始人第四条：「如果当前确实是失守状态，应该有地方可以马上解决」）：
-        #   失守时**必须给得出下一步** —— 能就地修就给按钮；不能就地修，
+    elif p.get("state") in ("down", "warn", "interrupted") and (p.get("fix_hint") or ""):
+        # ★ 失守/认不出/缺岗时必须**给得出下一步** —— 能就地修就给按钮；不能就地修，
         #   就把"去哪儿做"明确写在页面上。**绝不留一个点了没反应的按钮**。
         fix = ("<span class=\"fixnote\"><b>怎么解决：</b>%s</span>"
                % _esc(p.get("fix_hint")))
-    # ★★ 0.35.3：**把"失守的损失"逐条摆出来**（创始人 2026-10-06：
+    # ★★ 把"失守的损失"逐条摆出来（创始人 2026-10-06：
     #   「如果真失守不会带来明显不利后果，那就跟假失守没啥区别」）。
-    #   `_outage_consequences()` 产出的清单必须**有消费点**，否则就是本仓点名的
-    #   「登记了却不会被查」的假守卫。说不出损失 ⇒ 根本不进这一档（在 host_shield
-    #   里已降为「中断·无损失」）。
     cons = p.get("consequences") or []
     if cons:
         lis = "".join("<li>%s</li>" % _esc(c.get("text") if isinstance(c, dict) else c)
                       for c in cons)
         fix = ("<span class=\"cons\"><b>失守的损失（%d 条）：</b><ul>%s</ul></span>"
                % (len(cons), lis)) + fix
+    # ★ 0.35.3：三个数字**各自带上自己的事由件数**，口径写明；点进去仍是全部明细。
+    #   记录数/件事数成对同源（`window_levels` ＋ `window_level_groups`，
+    #   0.37.1 起不再手抄一遍分组逻辑）。
+    wl = M.window_levels(items, now=now)
+    wg = M.window_level_groups(items, now=now)
+
+    def _pill(label, level):
+        n, g = wl.get(level, 0), wg.get(level, 0)
+        same = (n == g)
+        # ★ 0.37.2：括号**每一页都显示**（旧版收件箱页不显示 —— 于是同一排
+        #   数字在收件箱页和其他页**长得不一样**：首页「失守 104」、
+        #   日报页「失守 104（4 件事）」。跨页不一致本身就是违和感）。
+        #   它防的是「104 条记录被当成 104 件事」（P14 判据的实测依据：
+        #   R0 有 80 条、只有 8 种原因）；件数与「要处理 N」是**两个不同的量**
+        #   （前者＝该级别的事由件数，后者＝需要你动手的件数），
+        #   只是本机此刻恰好同值 —— 量不同就不算重复，不许为了省数字把口径藏掉。
+        show_groups = not same
+        # ★ 口径说明放 title（不放正文）：旧版在药丸行尾挂了一句
+        #   「（条数／括号内为件事数）」—— 工程腔，且每次打开都占一行。
+        return ("<a title=\"最近 %d 小时的记录数；括号里是按事由归并后的件数，"
+                "点进去看全部明细\" href=\"/?v=inbox&f=win:%d:lv:%s&t=%s\">%s <b>%d</b>%s</a>"
+                % (M.WINDOW_HOURS, M.WINDOW_HOURS, level, _esc(token), label, n,
+                   "" if not show_groups else "（%d 件事）" % g))
+
+    # ★ 0.37.2：顺序改为**由重到轻**（失守 → 拦截 → 注意）。
+    #   旧版是「拦截 · 注意 · 失守」—— 最重的排在最后，读起来像"越读越轻"，
+    #   与页面其余处（收件箱归并列表、日报卡片）按级别倒序排的规矩相反。
+    nums = ("<span class=\"pill\">最近 %d 小时：%s · %s · %s</span>"
+            % (M.WINDOW_HOURS,
+               _pill("失守", "R0"), _pill("拦截", "L2"), _pill("注意", "L1")))
     return (
         "<header class=\"bar\">"
         "<div class=\"logo\"><video autoplay loop muted playsinline "
         "src=\"/assets/%s.mp4?t=%s\"></video></div>"
-        "<div class=\"state\"><b>%s</b><br><span>%s</span></div>"
-        "<span class=\"pill\"><span class=\"dot\" style=\"background:var(%s)\"></span>%s</span>"
+        "<div class=\"state\"><span class=\"dot\" style=\"background:var(%s)\"></span>"
+        "<b>%s</b>%s<br><span>%s</span></div>"
         "%s%s<div class=\"spacer\"></div>"
         "<div class=\"who\">本机 · 127.0.0.1<br>数据不出门</div></header>"
-        % (_esc(M.LIGHT_LOGO[lg]), _esc(token), state_title,
-           state_reason, M.LIGHT_VAR[lg], _esc(p.get("label") or ""),
-           nums, fix))
+        % (_esc(M.STATE_LOGO[st]), _esc(token), M.STATE_VAR[st],
+           label, suffix, state_reason, nums, fix))
 
 
 def _form(token, op, iid="", note="", label="", cls="", ids=""):
@@ -526,8 +571,8 @@ def _item_html(it, token):
             "<div class=\"det\"><p class=\"m\">%s</p>%s"
             "<div class=\"act\">%s</div></div></details>"
             % (_esc(it.level.lower()), _esc(it.state), _esc(it.id), _esc(token),
-               _esc(it.level.lower()), _esc(it.level), dot, _esc(it.title),
-               _esc(str(it.ts)[5:16]), _esc(meta), _rem_html(it, token), acts))
+               _esc(it.level.lower()), _esc(it.level), dot, _vis(it.title),
+               _esc(str(it.ts)[5:16]), _vis(meta), _rem_html(it, token), acts))
 
 
 # --------------------------------------------------------------------------
@@ -558,6 +603,14 @@ def _rem_html(it, token):
                           "cmd": "", "hint": "那里有此刻的实测态势。"}],
              "cost": "归因失败 ⇒ 你只能看到「失守」，拿不到「为什么」。"}
 
+    # ★★ 0.37.1：归因文案走 `GL.render()`（**不是** `_esc`）——
+    #   归因作者习惯写 markdown 的 `**重点**`，而 `_esc` 只是转义，
+    #   星号会原样出现在屏幕上（2026-10-09 实测：首页每一条失守的"为什么"
+    #   里都带着 `**`，8 个归因类无一幸免）。`GL.render()` 既吃 markdown
+    #   又只放行 `<b>/<code>`，且仍会转义用户输入 ⇒ 两头都安全。
+    def _tx(s):
+        return GL.render(str(s or ""))
+
     badge = ('<span class="bclass">修不了根因 · 请选一条路</span>'
              if a.get("b_class") else "")
     txt = ("<span class=\"why\">这一条是靠记录文案认出来的</span>"
@@ -565,10 +618,10 @@ def _rem_html(it, token):
 
     segs = [
         '<div class="seg root"><h4>① 根因是什么</h4><p>%s</p>%s</div>'
-        % (_esc(a.get("cause") or ""), txt),
+        % (_tx(a.get("cause")), txt),
         '<div class="seg sev"><h4>② 现在有多严重</h4><p>%s</p>'
         '<p class="note">%s</p></div>'
-        % (_esc(a.get("severity") or ""), _esc(a.get("severity_note") or "")),
+        % (_tx(a.get("severity")), _tx(a.get("severity_note"))),
     ]
 
     # ③ 能做什么 —— **按「可执行性」排序**，命令型排最前
@@ -580,17 +633,17 @@ def _rem_html(it, token):
         cmd = act.get("cmd") or ""
         cmd_html = ('<code class="cmd">%s</code>' % _esc(cmd)) if cmd else ""
         why = act.get("hint") or ""
-        why_html = ('<div class="why">%s</div>' % _esc(why)) if why else ""
+        why_html = ('<div class="why">%s</div>' % _tx(why)) if why else ""
         items_html.append(
             "<li><b>%s</b>%s%s"
             '<div class="pick">%s</div></li>'
-            % (_esc(act.get("label") or op), cmd_html, why_html,
+            % (_tx(act.get("label") or op), cmd_html, why_html,
                _rem_pick_buttons(it, token, op, cls, act)))
     segs.append('<div class="seg act"><h4>③ 你现在能做什么</h4><ol>%s</ol></div>'
                 % "".join(items_html))
 
     segs.append('<div class="seg cost"><h4>④ 如果什么都不做</h4><p>%s</p></div>'
-                % _esc(a.get("cost") or ""))
+                % _tx(a.get("cost")))
 
     # ★ badge 放在**body 第一段**（不是 summary 里）——
     #   `_rem_panel_only()`给归并行复用时只取 body，badge 放summary 会被丢掉。
@@ -600,7 +653,7 @@ def _rem_html(it, token):
             "为什么 &amp; 怎么办</span>"
             "<span class=\"t\">%s</span></summary>"
             "<div class=\"body\">%s%s</div></details>"
-            % (_esc(a.get("title") or ""), head, "".join(segs)))
+            % (_tx(a.get("title")), head, "".join(segs)))
 
 
 #: 三类动作 → 按钮文案。★ B 类三选一必须**都在**页面上（创始人拍板）。
@@ -609,7 +662,10 @@ _PICK = {
     "retry": ("重新拉起哨兵", "go"),
     "rearm": ("按正规入口重新布防", "go"),
     "drop": ("承认打不赢，移出监管", "drop"),
-    "accept": ("就这样，我不处理", "risk"),
+    # ★ 0.37.2：「就这样，我不处理」⇒「我不处理，我担着」——
+    #   上面那条选项标题已经是「就这样放着，我自己盯着」，按钮再写"就这样"
+    #   ⇒ 同一行两个"就这样"；且"我担着"点出这是**签字担责**（红按钮的本意）。
+    "accept": ("我不处理，我担着", "risk"),
     "info": ("知道了", ""),
 }
 
@@ -688,8 +744,8 @@ def _group_html(g, token, bucket=None):
             "<div class=\"det\"><p class=\"m\">%s</p>%s"
             "<div class=\"act\">%s</div></div></details>"
             % (_esc(lv), _esc(ids), _esc(token), _esc(lv), _esc(g["level"]),
-               _esc(g["title"]), n, _esc(str(g["last_ts"])[5:16]),
-               _esc(meta), rem, acts))
+               _vis(g["title"]), n, _esc(str(g["last_ts"])[5:16]),
+               _vis(meta), rem, acts))
 
 
 def _rem_panel_only(it, token):
@@ -723,21 +779,37 @@ def _view_inbox(items, token, filt, now=None):
     b = M.counts_by_bucket(items, now=now)
     n_all = len(items)
 
-    def f(v, label, n):
+    def f(v, label, n, tip):
+        # ★ 0.37.2：四个数字**单位不同**（要处理＝件事，其余＝条记录），
+        #   并排摆在一起却不说明，读者会拿 4 与 44、293 直接比大小 ——
+        #   那是异质单位做比较（本项目 F54）。视觉上不加字（加了更啰嗦），
+        #   改为**每个 tab 各带一句口径**（悬停可见），单位就摆在数字旁边。
         cls = " class=\"on\"" if v == filt else ""
-        return ("<a href=\"/?v=inbox&f=%s&t=%s\"%s>%s <b>%d</b></a>"
-                % (v, _esc(token), cls, _esc(label), n))
+        return ("<a href=\"/?v=inbox&f=%s&t=%s\"%s title=\"%s\">%s <b>%d</b></a>"
+                % (v, _esc(token), cls, _esc(tip), _esc(label), n))
 
     head = ("<div class=\"filters\">"
-            + f(M.BUCKET_ACTION, "要处理", n_act)
-            + f(M.BUCKET_INFO, "看一眼", b[M.BUCKET_INFO])
-            + f(M.BUCKET_ARCHIVE, "归档", b[M.BUCKET_ARCHIVE])
-            + f("all", "全部记录", n_all) + "</div>"
+            + f(M.BUCKET_ACTION, "要处理", n_act,
+                "单位：件事（同一事由的多条记录合成一件）")
+            + f(M.BUCKET_INFO, "看一眼", b[M.BUCKET_INFO],
+                "单位：条记录（不做归并，一条算一条）")
+            + f(M.BUCKET_ARCHIVE, "归档", b[M.BUCKET_ARCHIVE],
+                "单位：条记录（不做归并，一条算一条）")
+            + f("all", "全部记录", n_all,
+                "单位：条记录（这次读到的全部条目）") + "</div>"
             # ★ 0.35.3：页面上出现的**每个重要词都可点开看定义**。
             #   档位本身是链接（塞不进 details），级别徽章也没有落点 ⇒ 统一给
             #   **一个**折叠入口，而不是把定义平铺在页面上等人读完。
-            + GL.line(GL.BUCKET_KEYS + ("R0", "L2", "L1", "Ls", "L0",
-                                        "shield", "sentinel"),
+            # ★ 0.37.2：`light`（顶部这盏灯）放在**第一位** —— 它是页面上
+            #   最需要先被读懂的那个词，只有在这里露面，用户才点得到。
+            #   ★ 0.39.1：它的定义已按**来源分工**重写（状态只看此刻、事件只看账、
+            #   **失守不回溯**）—— 判据 `ci/inbox_guards_0380.py` S17 钉死术语表，
+            #   不得退回旧的"两个读数取最重"说法。
+            # ★ 0.37.2：词表里**不再并列 `shield`** —— 护盾降为哨兵手里的工具，
+            #   对用户的解释统一收在 `sentinel` 一条里（创始人 2026-10-09：
+            #   「哨兵一个概念足矣」）。两个词条并排＝把工具说成了另一个角色。
+            + GL.line(("light",) + GL.BUCKET_KEYS
+                      + ("R0", "L2", "L1", "Ls", "granary", "L0", "sentinel"),
                       "页面上的词都是什么意思（点开看）"))
     rows = M.filter_items(items, filt, now=now)
     if not rows:
@@ -758,18 +830,23 @@ def _view_inbox(items, token, filt, now=None):
                 parts.append(_item_html(by_id[g["ids"][0]], token))
             else:
                 parts.append(_group_html(g, token, bucket=M.BUCKET_ACTION))
-        return (head
-                + ("<div class=\"note\" style=\"margin:0 0 10px\">"
-                   "要处理：<b>%d 件事</b>（共 %d 条记录，同一事由已归并；"
-                   "每行都带原因，点开可一次处置或钻到单条）。"
-                   "</div>" % (len(groups), len(rows)))
-                + "".join(parts))
+        # ★ 0.37.1 去重：归并说明**不重复数字**（件数已在筛选条、24h 各级
+        #   口径已在顶部条那排药丸各显示一次），这里只说"怎么读这些行"。
+        # ★ 0.37.2 精简（创始人 2026-10-09「解释放注释里，点问号看」）：
+        #   原句 36 字，把"每行都带原因""钻到单条"也写上了 —— 那是解释，
+        #   不是读法。主界面只留**一句怎么读**，其余归词条。
+        note = ("<div class=\"note\" style=\"margin:0 0 10px\">"
+                "同一事由已合成一行；点开可整组处置。</div>")
+        return head + note + "".join(parts)
     if filt in (M.BUCKET_INFO, M.BUCKET_ARCHIVE):
         groups = M.group_by_kind(rows)
         return (head
+                # ★ 0.37.2 去重：「共 N 条」的 N 与筛选条上同一个 tab 的数字
+                #   **逐字相同**（两者都是 `filter_items` 的条数）⇒ 同一屏
+                #   出现两遍。筛选条是导航（随身可见），这里只留"怎么读这些行"。
                 + ("<div class=\"note\" style=\"margin:0 0 10px\">"
-                   "%s：共 <b>%d</b> 条，按类型归并（点一类看单条）。"
-                   "</div>" % (_esc(M.filter_label(filt)), len(rows)))
+                   "%s：按类型归并，点一类看单条。"
+                   "</div>" % _esc(M.filter_label(filt)))
                 + "".join(_group_html(g, token, bucket=filt) for g in groups))
     if filt not in ("action", "all"):
         head += ("<div class=\"note\" style=\"margin:0 0 10px\">"
@@ -778,8 +855,13 @@ def _view_inbox(items, token, filt, now=None):
     return head + "".join(_item_html(i, token) for i in rows)
 
 
-def _view_report(rep, token):
-    """日报。★ 每个数字都可点钻取（创始人第四条意见："我却无法看到具体情况"）。"""
+def _view_report(rep, token, items=None):
+    """日报。★ 每个数字都可点钻取（创始人第四条意见："我却无法看到具体情况"）。
+
+    ★ 0.37.1：`items` 由调用方传入（`daily_report` 本身不带），供「现在」行
+      走与首页**同一套**六态灯态算法（`M.light`）—— 否则日报与首页会各算
+      各的，同一时刻显示两个状态词。
+    """
     Lv = rep["levels"]
     W = rep.get("window_levels") or {}
     hrs = rep.get("window_hours", 24)
@@ -801,51 +883,56 @@ def _view_report(rep, token):
                 "</div>"
                 % (GL.chip(k), var, _esc(scoped_filter), _esc(token), n))
 
+    # ★ 0.37.2：顺序改**由重到轻**（失守 → 拦截 → 注意 → 要处理）。
+    #   旧版是「拦截 · 注意 · 失守 · 要处理」—— 最重的排在第三位，
+    #   与顶部条药丸、收件箱归并列表的"重在前"不一致。
     m = ("<div class=\"metrics\">"
+         + metric("R0", W.get("R0", 0), "--r0", "lv:R0")
          + metric("L2", W.get("L2", 0), "--l2", "lv:L2")
          + metric("L1", W.get("L1", 0), "--l1", "lv:L1")
-         + metric("R0", W.get("R0", 0), "--r0", "lv:R0")
          + "<div class=\"metric\"><div class=\"k\">%s</div><div class=\"v\">"
            "<a href=\"/?v=inbox&f=action&t=%s\">%d</a></div></div></div>"
          % (GL.chip("action"), _esc(token), rep.get("action_groups", 0)))
 
-    p = rep.get("posture") or {}
-    _cons = p.get("consequences") or []
-    _cons_txt = ("；".join(str((c or {}).get("text") if isinstance(c, dict) else c)
-                           for c in _cons)) if _cons else "（无）"
-    _pcls = ("bad" if p.get("state") == "down" else
-             ("warn" if p.get("state") in ("unknown", "warn", "interrupted") else
-              ("neutral" if p.get("state") == "off" else "ok")))
+    # ★★ 0.37.2：**删掉「现在的防线状态」整张卡**。
+    #   理由不是"它没用"，而是它**与顶部条重复且会打架**：
+    #   顶部条已给出状态词（六态，且把"此刻"这一维与"24h 账"那一维
+    #   **分句**写在同一条副标题里），日报页这张卡再给一个状态词 ⇒ 同屏两个状态词
+    #   （实测：顶部「失守」＋卡内「值守中」），用户不知道信哪个 ——
+    #   这正是创始人点名的"违和感"。
+    #   ⇒ 状态词只留顶部那一处；日报页只放**日报自己的数**。
     _revived = rep.get("revived_window", 0)
-    _revived_link = ("<a href=\"/?v=inbox&f=win:%d:kind:host_shield_revived&t=%s\">%d 次（查看记录）</a>"
+    # ★ 措辞与运行状态页统一（旧版日报写「10 次（查看记录）」、
+    #   运行状态写「10 次（点数字看每一次）」—— 同一件事两种说法）。
+    _revived_link = ("<a href=\"/?v=inbox&f=win:%d:kind:host_shield_revived&t=%s\">"
+                     "%d 次</a>（点开看每一次）"
                      % (hrs, _esc(token), _revived))
     _day = _esc(rep["day"])
-    _today_levels = ("<a href=\"/?v=inbox&f=day:%s:lv:L2&t=%s\">拦截 %d</a> ｜ "
-                     "<a href=\"/?v=inbox&f=day:%s:lv:L1&t=%s\">注意 %d</a> ｜ "
-                     "<a href=\"/?v=inbox&f=day:%s:lv:R0&t=%s\">失守 %d</a>"
-                     % (_day, _esc(token), Lv["L2"], _day, _esc(token), Lv["L1"],
-                        _day, _esc(token), Lv["R0"]))
-    pr = ("<div class=\"card\"><h2>%s</h2><div class=\"rows\">"
-          "<div class=\"row\"><span class=\"k\">现在</span><span class=\"%s\">%s</span></div>"
-          "<div class=\"row\"><span class=\"k\">说明</span><span>%s</span></div>"
-          "<div class=\"row\"><span class=\"k\">%s</span><span>%s</span></div>"
-          "<div class=\"row\"><span class=\"k\">最近 %d 小时%s</span><span>%s"
-          "（每次＝门闸中断过一小段）</span></div>"
+    _today_levels = ("<a href=\"/?v=inbox&f=day:%s:lv:R0&t=%s\">失守 %d</a> ｜ "
+                     "<a href=\"/?v=inbox&f=day:%s:lv:L2&t=%s\">拦截 %d</a> ｜ "
+                     "<a href=\"/?v=inbox&f=day:%s:lv:L1&t=%s\">注意 %d</a>"
+                     % (_day, _esc(token), Lv["R0"], _day, _esc(token), Lv["L2"],
+                        _day, _esc(token), Lv["L1"]))
+    pr = ("<div class=\"card\"><div class=\"rows\">"
+          "<div class=\"row\"><span class=\"k\">最近 %d 小时%s</span><span>%s</span></div>"
           "<div class=\"row\"><span class=\"k\">%s 当日合计</span><span>%s</span></div>"
           "</div></div>"
-          % (GL.chip("posture"), _pcls, _esc(p.get("label") or "查不到"),
-             _esc(p.get("why") or ""), GL.chip("R0"), _esc(_cons_txt), hrs,
-             GL.chip("sentinel", "哨兵被拉起"), _revived_link, _day, _today_levels))
+          % (hrs, GL.chip("sentinel", "哨兵被拉起过"), _revived_link,
+             _day, _today_levels))
 
     rules = ""
     if rep["rules"]:
         mx = max(r["count"] for r in rep["rules"]) or 1
+        # ★ 0.37.2：**不画条形图** —— 实测本机 3 条规则各命中 1 次，
+        #   `int(6*1/1)=6` ⇒ 三条都是满格 ██████，"1 次"被画成"最多"。
+        #   条形图在小样本上**系统性说谎**（分母＝样本最大值，不是绝对量），
+        #   而它旁边明明就写着数字 ⇒ 图与数打架。数字已经排序，图是多余的。
         rows = "".join(
             "<div class=\"row\"><span class=\"k\">"
             "<a href=\"/?v=inbox&f=day:%s:rule:%s&t=%s\">%s</a></span>"
-            "<span>%s %d</span></div>"
+            "<span>%d</span></div>"
             % (_esc(rep["day"]), _esc(r["rule_id"]), _esc(token), _esc(r["rule_id"]),
-               "█" * max(1, int(6 * r["count"] / mx)), r["count"])
+               r["count"])
             for r in rep["rules"][:10])
         rules = ("<div class=\"card\"><h2>规则命中排行"
                  "<span class=\"note\">（点规则名看具体是哪几条）</span></h2>"
@@ -856,27 +943,36 @@ def _view_report(rep, token):
     if ch["status"] == "broken" and not ch.get("first_bad"):
         ch = dict(ch)
         ch["first_bad"] = "存在无法读取的链记录；当前未能定位具体文件/行"
+    # ★ 0.37.2：词条不再传 `text=`（旧版传「记录有没有被改过」，而术语本名是
+    #   「有没有被改过」⇒ 展开后正文开头又补一遍本名，读成
+    #   「记录有没有被改过 有没有被改过：」，同一个意思叠两层）。
+    # ★「被改过的地方 / 坏行 0 / 0」⇒ 拆成两行（旧版把一个标签对两个数）。
     chain = ("<div class=\"card\"><h2>%s（本日报能读取到的链文件）</h2><div class=\"rows\">"
              "<div class=\"row\"><span class=\"k\">校验结果</span><span class=\"%s\">%s</span></div>"
              "<div class=\"row\"><span class=\"k\">检查了几个文件 / 多少条记录</span><span>%d / %d</span></div>"
-             "<div class=\"row\"><span class=\"k\">%s / 坏行</span><span>%d / %d</span></div>"
+             "<div class=\"row\"><span class=\"k\">%s 被改过几处</span><span>%d</span></div>"
+             "<div class=\"row\"><span class=\"k\">坏了几行</span><span>%d</span></div>"
              "<div class=\"row\"><span class=\"k\">%s</span><span>%d（本来就不参与比对）</span></div>%s%s</div></div>"
              % (GL.chip("chain_check"), cls, _esc(R.chain_status_label(ch["status"])),
                 ch["files"], ch["records"],
-                GL.chip("chain", "被改过的地方"), ch["broken"], ch.get("bad_lines", 0),
+                GL.chip("chain"), ch["broken"], ch.get("bad_lines", 0),
                 GL.chip("unchained"), ch.get("unchained", 0),
                 ("<div class=\"row\"><span class=\"k\">第一个问题出在哪</span><span>%s</span></div>"
                  % _esc(ch["first_bad"])) if ch.get("first_bad") else "",
                 ("<div class=\"row\"><span class=\"k\">说明</span><span>%s</span></div>"
                  % _esc(ch["reason"])) if ch.get("reason") else ""))
     # ★ 0.36.1：时间范围只在**小节标题**里说一次（原来四张卡片各写一遍）。
-    return ("<h2>今日值守 · %s</h2>"
-            "<p class=\"note\">下面四个数字都只统计<b>最近 %d 小时</b>，"
-            "点数字可以看具体是哪几条。</p>%s%s%s%s"
-            % (_esc(rep["day"]), hrs, m, pr, rules, chain))
+    # ★ 0.37.1：页面名与 `<title>`/选项卡统一取 `PAGE_TITLES`（唯一真源）——
+    #   旧版这里写「今日值守 · 日期」，而浏览器标签与选项卡都写「日报」，
+    #   同一页三个名字（创始人问的"违和感"之一）。
+    # ★ 0.37.2 精简：原句还带"点数字可以看是哪几条" —— 数字本身已可点（下划线），
+    #   再写一遍就是**重复用户的动作**（同 W08 判据的立意）。只留窗口口径。
+    return ("<h2>%s · %s</h2>"
+            "<p class=\"note\">四个数都只数<b>最近 %d 小时</b>。</p>%s%s%s%s"
+            % (PAGE_TITLES["report"], _esc(rep["day"]), hrs, m, pr, rules, chain))
 
 
-def _view_health(rep, token):
+def _view_health(rep, token, items=None):
     """★ 0.36.1 文字修订：这一页原先把**已生成的 HTML 整段转义**，
     于是术语词条的 `<details>` 在用户屏幕上显示成一串标签文本
     （创始人 2026-10-07 截图一）。根因是白名单判定写成
@@ -885,26 +981,33 @@ def _view_health(rep, token):
     ★ 教训：**「以标签开头」判不出「是不是我们生成的 HTML」** ——
       生成方与消费方隔了字符串拼接，白名单就必然漏。
       改成显式的 `trusted=True` 标记（我们自己产出的才放行）。
+
+    ★★ 0.37.2：本页**不再输出状态词** —— 旧版第一行是「此刻这一次：
+      值守中」，而顶部条同一时刻写「失守」⇒ 同屏两个相反的状态词、
+      没有任何说明（创始人点名的"违和感"）。现在状态词全站只在顶部条
+      一处，本页只放顶部条没有的证据（哨兵活力 / 记录有没有被改过 /
+      钩子 / 边界）。
     """
     ch = rep["chain"]
     cls = {"ok": "ok", "broken": "bad", "unknown": "warn"}.get(ch["status"], "warn")
-    p = rep.get("posture") or {}
-    pcls = {"guarding": "ok", "down": "bad",
-            "off": "neutral", "unknown": "warn", "warn": "warn",
-            "interrupted": "warn"}.get(p.get("state"), "warn")
     _hrs = rep.get("window_hours", 24)
     _revived_count = rep.get("revived_window", 0)
     _revived_value = ("<a href=\"/?v=inbox&f=win:%d:kind:host_shield_revived&t=%s\">"
-                      "%d 次</a>（点数字看每一次）"
+                      "%d 次</a>（点开看每一次）"
                       % (_hrs, _esc(token), _revived_count))
+    # ★★ 0.37.2：**删掉本页第一行「此刻这一次」**（旧版 `GL.chip("posture",
+    #   "此刻这一次")` + 值「值守中 —— 哨兵在岗…」）。
+    #   顶部条已给出同一个状态词，并且 0.37.2 起把「此刻」与「24h 账」
+    #   写在**同一句话**里（比本页这一行更全）。这里再给一次 ⇒
+    #   同屏两个状态词、两种说法 —— 实测日报页正是这个形状，
+    #   是创始人点名"违和感"的头号来源。
+    #   ⇒ 状态词全站只有**顶部条**一处；本页只放顶部条没有的证据。
     # (标签, 值, 颜色样式, 值是否可信 HTML)
     # ★ 标签一律 trusted=True：`GL.chip()` 是我们自己生成的 HTML。
     rows = [
-        (GL.chip("posture"), "%s —— %s" % (p.get("label") or "查不到",
-                                          p.get("why") or ""), pcls, False),
         (GL.chip("sentinel", "最近 %d 小时被拉起过" % _hrs),
          _revived_value, "warn" if _revived_count else "ok", True),
-        (GL.chip("chain_check", "记录有没有被改过"),
+        (GL.chip("chain_check"),
          "%s（检查了 %d 个文件、%d 条记录，被改 %d）"
          # ★ 0.36.1：原先直接输出 `ch["status"]`，那是英文变量
          #   （ok / broken / unknown）—— 页面上冒出英文变量词。
@@ -919,12 +1022,13 @@ def _view_health(rep, token):
                    "<span class=\"%s\">%s</span></div>"
                    % (k, css, value if trusted_v else _esc(value))
                    for k, value, css, trusted_v in rows)
-    return ("<h2>值守是否真的在跑</h2><div class=\"rows\">%s</div>"
-            "<p class=\"note\">「全绿」本身反而要当心：它分不清「真的没问题」"
-            "和「检查本身没在跑」。所以这一页同时给两样东西 —— "
-            "<b>活力证据</b>（判据自己有没有真的抓过）和<b>标本覆盖</b>"
-            "（该抓的地方抓全了没有）。</p>"
-            % body)
+    # ★ 0.37.1：页面名统一（同 `_view_report`）；日期补齐 ——
+    #   日报页有日期、运行状态页没有，同一套页面两个样。
+    # ★ 底部提示由 3 行长句压成一句：原来一段带破折号的自我辩护，
+    #   读起来像旁白，不像产品说的话。
+    return ("<h2>%s · %s</h2><div class=\"rows\">%s</div>"
+            "<p class=\"note\">全绿不等于安全：也可能是检查压根没跑。</p>"
+            % (PAGE_TITLES["health"], _esc(rep.get("day") or ""), body))
 
 
 def _view_ledger(rep, token):
@@ -946,41 +1050,25 @@ def _view_ledger(rep, token):
             GL.chip("ledger_breached"), str(values[3]),
             GL.chip("ledger_acked"), str(values[4]),
             GL.chip("days"), str(values[5])))
-    state_note = ("账本尚无可核对记录；这表示还没有可统计的事件，不是确认累计为零。"
-                  if not has_data else
-                  "只统计本地审计链中的可核对事件；记录天数从本账本首次有事件起算。")
-    # ★ 0.35.3：定义**只有一份**（`glossary`），页面不再自己抄一遍 —— 抄两份必漂。
-    # ★ 规格 §5.6 明确要求两件此前缺失的东西：
-    #   ①「这份账本在哪里」＋ 可导出/可迁移（一个文件，将来可认领合并）；
-    #   ② 底部一个**禁用态**的「认领到账号（未启用）」—— 给将来留位，但现在不能点。
-    #   缺了它，创始人看到的只是"一个只读数字页"，不知道这份账本能不能带走。
-    return ("<h2>本机事件账本</h2>%s"
-            "<p class=\"note\">%s</p>%s"
-            # ★ 0.36.1：文件路径**收进可展开的细节**里。
-            #   原先直接把 `~/.antinel/ledger/daily.jsonl` 摆在正文 ——
-            #   对不懂技术的用户是纯噪音（"这跟我有什么关系"），
-            #   而它其实只需要回答"存不存在、能不能带走"。
-            #   路径本身对需要的人是重要的，所以保留在 `<details>` 里备查。
-            "<div class=\"card\"><p class=\"note\">账本只存在<b>你这台电脑上</b>，"
-            "不上传、不联网。它不是 AI 工具的积分余额，"
-            "不可转让、不可兑换、不与拉人头挂钩、不承诺任何收益。</p>"
-            "<p class=\"note\">这份账本在<b>这里</b>：上面每个数字都由本机的记录逐日算出，"
-            "不带任何联网成分。它是<b>一个文件</b>，可以整体导出带走 —— "
-            "将来若上线账号，可用它「认领合并」，而不是从零开始。"
-            "（导出的也只是这份本地摘要，不是记录文件本身。）"
-            "</p>"
-            "<details class=\"where\"><summary>账本存在哪个文件里？（一般不用管）</summary>"
-            "<div class=\"tdef\">你电脑上：<code>~/.antinel/ledger/daily.jsonl</code><br>"
-            "换句话说，它在你自己的用户目录下，Antinel 只往这里写。"
-            "这个文件可以自己打开看，也可以整个复制走。</div></details>"
-            "</div>"
+    # ★★ 0.37.2（创始人 2026-10-09 截图）：账本页**只留数字 ＋ 一处「？」**。
+    #   页面上原先堆了三段解释（"这份账本在这台电脑上…"整卡、
+    #   "账本存在哪个文件里"折叠块、"认领到账号"下的说明段）—— 创始人原话：
+    #   「这些全是解释，不要放在账本主界面上……只需要第一次出现的『账本』
+    #     二字上标准问号，跟那些数字一样，用户自己会点开看。」
+    #   ⇒ 落法：标题里的「账本」直接放一个 `GL.chip("ledger")` —— 与六个
+    #     数字标签**同一个交互、同一个「？」**；解释全部并进那个词条。
+    #   ★ 唯一保留的一段：**没有数据**时的告警 —— 它不是解释，是
+    #     「不许把'没查'渲染成'没问题'」的护栏（判据 0353 据此验收）。
+    #   ★ 规格 §5.6 的两件仍在：①「这份账本在哪里＋可导出/可迁移」搬进
+    #     `ledger` 词条（页面 HTML 里仍含这两句，判据语义不变）；
+    #     ② 底部**禁用态**「认领到账号（未启用）」按钮保留。
+    warn = ("<p class=\"note\">账本尚无可核对记录；这表示还没有可统计的事件，"
+            "不是确认累计为零。</p>" if not has_data else "")
+    return ("<h2>%s · 本地摘要</h2>%s%s"
             "<div class=\"card\"><button class=\"btn\" disabled "
-            "title=\"将来上线账号后才可用，现在没有这个能力\">认领到账号（未启用）</button>"
-            "<p class=\"note\">现在不能点，也点不出错。将来上线账号后，"
-            "这里会把上面这份本地账本合并进你的账号；在此之前它只属于这台电脑。"
-            "</p></div>"
-            % (m, _esc(state_note),
-               GL.line(("ledger",), "「账本」到底记的是什么（点开看）")))
+            "title=\"将来上线账号后才可用，现在没有这个能力\">"
+            "认领到账号（未启用）</button></div>"
+            % (GL.chip("ledger"), m, warn))
 
 
 #: ★ 0.36.5 **页面名的唯一真源**（从 `render_page` 体内提为模块级）。
@@ -1021,19 +1109,16 @@ def render_page(view="inbox", filt=None, root=None, token="", items=None, rep=No
     if view in ("report", "health", "ledger"):
         rep = (R.daily_report(root=root, items=items) if rep is None else rep)
         if view == "report":
-            body = _view_report(rep, token)
+            body = _view_report(rep, token, items)
         elif view == "health":
-            body = _view_health(rep, token)
+            body = _view_health(rep, token, items)
         else:
             body = _view_ledger(rep, token)
     else:
         body = _view_inbox(items, token, filt, now=now)
-    tab_counts = M.counts_by_bucket(items, now=now)
-    tab_counts[M.BUCKET_ACTION] = M.count_groups(
-        [it for it in items if M.bucket_of(it, now=now) == M.BUCKET_ACTION])
     return (_head(title, token)
-            + _bar(items, token, posture=posture, now=now)
-            + _tabs(view, token, tab_counts)
+            + _bar(items, token, posture=posture, now=now, view=view)
+            + _tabs(view, token)
             + "<main>" + body + "</main>" + _FLIP_JS + _READ_JS + "</body></html>")
 
 
@@ -1167,12 +1252,25 @@ def _make_handler(token, root):
                     #   不点完就显示"已修复"，那是本项目最恨的假绿形状。
                     import host_shield as _hs
                     _ok, _msg = _hs.guard_fix(_pkg_root())
-                    _p = _hs.guard_posture()
+                    # ★★ 0.37.1 修（0.35.3 同型漏改的**第四个**调用点）：
+                    #   复测原来调 `_hs.guard_posture()` **不传包根** ⇒
+                    #   `pkg_root=None` ⇒ 读**中枢 rollup 链**而不是本包审计链
+                    #   （0.35.3 实测同一时刻相差 27202 秒 vs 160 秒）⇒
+                    #   修好了也可能显示一个过时的「失守」，用户以为没修好。
+                    #   ★ 标签一并改六态：姿态 label 里有「存疑」这个已被
+                    #     创始人禁用的词（2026-10-07「计划外状态，不允许」）。
+                    _p = _hs.guard_posture(_pkg_root())
+                    # ★★ 0.39.0：与灯**同一份**口径（`current_state`）。
+                    #   旧版这里调 `M.light(state, [])` —— 空账让它**恰好**
+                    #   等价于此刻态，但"灯走 current_state、复测走 light"
+                    #   是两个入口，迟早漂移。统一到唯一真源。
+                    _pst = M.current_state(_p.get("state"))
+                    _plabel = M.state_label(_pst, _p.get("state"))
                     _again = _hs.self_check()
                     if _ok:
                         print("[console] guard_fix -> 成功: %s" % _msg)
                         _note = "%s｜修完复测：%s（自检%s）" % (
-                            _msg, _p.get("label") or "?",
+                            _msg, _plabel,
                             "通过" if _again[0] else "不通过：" + "; ".join(_again[1]))
                     else:
                         # ★ 修不了**就把修不了的原因给回去**，不许只说"失败"
@@ -1180,7 +1278,7 @@ def _make_handler(token, root):
                         # ★ 0.36.1：`<b>` 不是 `**` —— 页面是 HTML，
                         #   markdown 星号会原样显示给用户（创始人截图一）。
                         _note = "<b>没修好</b>：%s｜此刻仍是：%s" % (
-                            _msg, _p.get("label") or "?")
+                            _msg, _plabel)
                 elif op in ("remediation_drop", "remediation_ack"):
                     # ★ 0.36.0：B 类失守的处置**记录**。
                     #   ⚠️ **不执行任何降损动作** —— "移出监管名单"＝擅自放弃保护，

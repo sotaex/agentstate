@@ -1,4 +1,46 @@
-# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.10（随 v0.37.0）
+# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.13（随 v0.42.1）
+
+> v1.13（0.42.0）：**`hook_slow` 补上消费侧**（P5-1）—— **不改**字段名、**不改**
+> 取值域、**不改** append-only 契约，只补一条**读者契约**：
+> `hook_slow`（§4 归因与边界类，v1.9 登记）的写入侧一直忠实（超过
+> `SLOW_BUDGET_MS` 记一条，带 `elapsed_ms`/`tool`/`session`），但**消费侧为零**：
+> `scripts/report.py` 里唯一可能看见它的 `elif action == "alert"` **不分 type**，
+> 89 条真实信号（真实工作区链实测，最差 `elapsed_ms`=2,476,295 ≈ 41 分钟）
+> 被一个匿名通用计数吸收 ⇒ 读报告的人分不清"有个钩子跑了 41 分钟"与"弹了一次气泡"。
+> 本版起它进 `config_health`（`hook_slow` 计数 ＋ `hook_slow_max_ms` 最差值），
+> 文本与 HTML 报告各单独一行。判据 S35–S37（含三条负控）常驻防复发。
+> **纪律**：这与 0.29.0 D-1（`sec_path_whitelisted`）、0.18.0 HP-47（`hook_error`）
+> 是同一条——**"记了"不等于"看得见"**；新登记事件类型必须同时回答"谁来读它"。
+
+> v1.12（0.42.0）：**提权盲区根因修复** —— **不改**字段名、**不改**取值域、**不改**
+> append-only 契约；只**更正两处语义描述**并加一条强制：
+> · `host_shield_zone_locked` **兼表成败**：`subkind=zone_ok`（已上锁）/
+>   `zone_lock_failed`（本次未能限制写入）。其「未生效」分支的 `reason`
+>   **不得断言**「有进程在对抗门闸」—— 本机实测该断言的真因是**提权令牌**下
+>   写探针失真（`acl_deny` 有意保留的 `Administrators:(OI)(CI)(F)` 对本进程生效），
+>   与"有人对抗"是两回事。判据 S34/N-S34 常驻防复发。
+> · `host_shield.is_denied()` **提权感知**：写探针说"能写"且本进程提权时，
+>   改读 **ACL**（`acl_read_deny()`）判定"锁有没有上"——写探针在提权令牌下
+>   **不是有效 oracle**。判据 S33/N-S33 常驻防复发。
+> · 三份提权判据（`host_shield.process_elevation` / `verification_tests._process_elevation`
+>   / `drift_audit._acl_audit_usable`）必须**同规则**（whoami / `S-1-16-` / `0x3000`），
+>   判据 S32 常驻（**只改一边就报红**）。
+>
+> v1.11（0.40.0）：**"四行失守"的根因修复**带来的字段变更，全部是**加字段/加取值**，
+> 不改已有字段语义（append-only 契约不变）：
+> · 新增记录类型 **`host_shield_dev_drift`** ——「研发迭代中：代码与登记表不符」。
+>   它与 `host_shield_tamper`（出厂包被改）是**两种事件**：前者研发期必然发生、
+>   发版即消失，级别 L1（不弹泡、不进「要处理」）；后者 R0。**不能互相顶替。**
+> · `host_shield_tamper` 的 `subkind` 取值域确立为 **`code_drift`**（代码/登记表与
+>   manifest 不符）与 **`state_drift`**（安全状态字段运行期漂移、哨兵已回写恢复）；
+>   旧值 `self_check` 是 `code_drift` 的**同义旧名**，读侧必须归一（链不可改）。
+> · 自愈类记录（`field ∈ {enabled, state}` 且哨兵已回写恢复）**必须**带
+>   `recovered=true`（v1.10 定义的语义，此处收窄成强制）。
+> · `host_shield_zone_locked` 的 `subkind` 取值域确立为 **`zone_ok`**（上锁成功）
+>   与 **`zone_lock_failed`**（上锁失败）；该类型**兼表成败**，读侧必须按记录分档
+>   （成功≠失守），不得按类型一刀切。
+> · `host_shield_spawn_failed` 的所有记录点**统一**带 `subkind="spawn_failed"`
+>   （此前一个记录点写、一个不写 ⇒ 同一件事被归并成两行）。
 
 > v1.10（0.35.3）：新增**公共可选字段 `recovered`**（布尔）——"这条记录描述的事
 > **已经自己愈合、没有留下后果**"。首用点：`host_shield_tamper` 的
@@ -150,7 +192,7 @@
 
 | type | 来源 | 关键字段 | 说明 |
 |---|---|---|---|
-| `host_shield_zone_locked` | 哨兵 | `decision="deny"`, `reason`(含路径) | 安全区（zone）已上锁：区内防篡改；出网另由 `net_mode` 把闸 |
+| `host_shield_zone_locked` | 哨兵 | `decision="deny"`, `subkind`(`zone_ok`/`zone_lock_failed`), `severity`(`warning`/`critical`), `reason`(含路径) | 安全区（zone）ACL 上锁的**结果**（该类型**兼表成败**，读侧必须按 `subkind` 分档）：`zone_ok`=已上锁（区内防篡改；出网另由 `net_mode` 把闸）；`zone_lock_failed`=本次**未能限制写入**（★ **不等于**"有进程在对抗门闸"——提权令牌下写探针失真曾是它的成因，0.42.0 起 `is_denied()` 提权感知、改读 ACL） |
 | `host_shield_breach` | 哨兵 | `decision="deny"` | **门闸异常**四种：① 自启缺失（计划任务与启动文件夹均无，`#6`）② 发现未拦的外传落盘点并补锁（补锁失败时 severity=critical）③ 发现符号链接（绕过载体）④ 心跳陈旧（疑似挂起/僵死）且旧进程镜像异常，拒绝自动重启 |
 | `host_shield_task_unknown` | 哨兵 | `decision="alert"` | **v1.3 新增**：无法确认计划任务状态（`schtasks` 不可用／被策略拦截／超时）。★ 与 `breach` **分开记** —— **"查不出来"不是"查到了是坏的"**；此前该情形被 fail-open 吞成"已安装"，导致 `breach` 永不触发 |
 | `host_shield_window_closed` | 哨兵 | `decision`, `reason` | 放行窗到期关闭 |
@@ -159,6 +201,7 @@
 | `host_shield_revived` | 哨兵/paramedic | `decision="allow"`, `pid`, `cause`, `spawn_mode` | **v1.4 新增**：哨兵死亡后被重新拉起（钩子 paramedic 或 CLI）。复活记录本身就是"此前有断档"的证据 |
 | `host_shield_spawn_failed` | 哨兵/paramedic | `decision="deny"`, `severity="critical"`, `cause` | **v1.4 新增**：哨兵死亡且拉起失败——门闸无人值守的显式记录（此前该状态只存在于沉默里） |
 | `host_shield_tamper` | 哨兵 | `decision="deny"`, `severity="critical"`, `field`, `reason`, `recovered` | **v1.5 新增**：本地配置与权威依据不符——state 文件 `enabled` 与链不一致（B4b/b2/c/d）；workspaces/zones/windows 无链背书被改并已回写恢复；启动自检发现运行代码/登记表与 manifest 不符（B4e/f）。执法按链/按已知值继续，绝不因文件被改而静默停摆。**v1.10**：`field="state"` 的回写恢复类**必须带 `recovered=true`**（防线已自愈、无后果）；`reason` 增补"哪个字段从什么变成什么"（`host_shield._fp_diff_txt()`）——旧文案只说"workspaces/zones/windows 被修改"，**不说改了哪个**，事后无法定位真因（2026-10-06 就是靠翻全链邻居才认出真因） |
+| `host_shield_dev_drift` | 哨兵 | `decision="deny"`, `severity="warning"`, `field="self-check"`, `subkind="code_drift"` | **v1.11 新增**：启动自检不符，但**判定为研发态**（登记表`psl/manifest.json`停在发版那一刻，而工作树比它新）⇒ 这是**范畴事实，不是防线失守**。★ 为什么必须与 `host_shield_tamper` **分开记**：类型错了，读者层再修也修不回来 —— 旧口径把这情形判成 R0「失守」，而**那个判断本身就是错的**（创始人 2026-10-09 点名的「没有失守却显示失守」）。值守台按 **L1（注意）** 呈现、**不进**「要处理」、**不弹气泡**（不在 `host_shield._ALERT_KINDS` 里）。★ 报红条件（负控，判据 S25）：一旦**已出厂**（登记版本 ≥ 代码版本，或不是源码检出）⇒ 仍记 `host_shield_tamper` critical ⇒ R0。★ 登记纪律：新增链类型必须**同时**进本文 §4 —— 只写抬头说明会被 `tools/verify_event_types.py` 判"未登记"（0.40.0 实际踩过：F-10 因此变红） |
 | `host_shield_lock_held` | 哨兵 | `decision="deny"`, `severity="none"`, `reason`(含路径) | **v1.6a 补登记**：门闸**持锁中**的周期性状态留痕（每 `LOCK_HELD_EVERY` 一次，`lock_held_at` 去重）。★ 与 `breach` **分开**：锁**在**是正常态，不该只在"出事"时才出现在账本上 —— 旧机制下 `if is_denied(...)` 为真就**整支跳过**，于是"锁挂了两个月、账本一字不提"（09-25/26 审计只剩心跳、零 breach） |
 | `host_shield_contested` | 哨兵 | `decision="deny"`, `severity="critical"`, `reason`(含路径与补锁次数) | **v1.6a 补登记**：同一落点在 `CONTEST_WINDOW` 内被补锁 ≥ `CONTEST_TIMES` 次 —— 上锁**未稳定生效**或**有进程在对抗门闸**，须人工介入。★ 与 `breach` 的分工：`breach` 是"发现未拦的落点"（第 1 次，且明说"不等于有进程在对抗"），本类是"补锁反复不生效"（第 N 次） |
 

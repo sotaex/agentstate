@@ -6,6 +6,7 @@ antinel_mcp.py
 audit_chain.py
 egress.py
 glossary.py
+granary.py
 heartbeat.py
 host_shield.py
 hub.py
@@ -22,6 +23,7 @@ inbox_store.py
 inbox_tray.py
 inbox_window.py
 ledger.py
+machine_id.py
 pyproject.toml
 remediation.py
 session_dna.py
@@ -119,10 +121,12 @@ rules/hosts/zcode.json
 scripts/build_package.py
 scripts/cleanup_staging_once.py
 scripts/install.py
+scripts/release.py
 scripts/report.py
 scripts/run_harness.py
 scripts/scan.py
 scripts/verification_tests.py
+scripts/verify_release.py
 tools/HOST_PROBE.md
 tools/antinel_verify.py
 tools/enforce_probe.py

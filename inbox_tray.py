@@ -47,7 +47,7 @@ def action_path(root=None):
 SHIELD_ONPOSTURE = "on"        # 哨兵在岗且自检通过
 SHIELD_UNPOSTURE = "unposted"  # 哨兵不在岗／心跳陈旧／自检不符
 SHIELD_UNKNOWN = "unknown"     # 探不到（盲区）——≠"没事"
-SHIELD_OFF = "off"             # 护盾未启用（默认全关是产品第一原则）
+SHIELD_OFF = "off"             # 未启用：哨兵默认没在值守（产品第一原则：默认全关）
 
 #: 哨兵态 → 图标后缀。与 `assets/icons/` 下的 `{事件态}{后缀}.ico` 对应。
 SHIELD_SUFFIX = {
@@ -58,11 +58,15 @@ SHIELD_SUFFIX = {
 }
 
 #: 哨兵态 → tooltip 前缀（★ 一眼能读，不要求用户查表）
+#: ★ 0.37.3：`off` 的 tip 从「护盾未启用」改成「哨兵未启用」——「哨兵」是页面上
+#:   **唯一**的守护角色（创始人 2026-10-09：「不要制造并列的护盾加哨兵两个概念，
+#:   哨兵一个概念足矣，护盾是哨兵手里的一个工具」）。托盘提示直接把「护盾」
+#:   摆在"未启用"的主语位置，正是那个并列角色的残留。
 SHIELD_TIP = {
     SHIELD_ONPOSTURE: "哨兵在岗",
     SHIELD_UNPOSTURE: "哨兵不在岗",
     SHIELD_UNKNOWN: "哨兵状态探不到",
-    SHIELD_OFF: "护盾未启用",
+    SHIELD_OFF: "哨兵未启用",
 }
 
 #: 哨兵态配色（与 `mk_icons.py` 同源；形状也区分，不只靠颜色）
@@ -84,7 +88,11 @@ def shield_state(posture=None):
     if posture is None:
         try:
             import host_shield as HS
-            posture = HS.guard_posture()
+            # ★★ 0.37.1 修（0.35.3 同型漏改的调用点）：不传包根 ⇒ 读中枢
+            #   rollup 链而非本包审计链（0.35.3 实测相差 27202s vs 160s）
+            #   ⇒ 托盘图标/tip 会显示一个**过时**的哨兵态。
+            posture = HS.guard_posture(
+                os.path.dirname(os.path.abspath(__file__)))
         except Exception:                                   # noqa: BLE001
             # 探不到就是探不到 —— **不许因为探不到就画成"在岗"**
             return SHIELD_UNKNOWN
@@ -224,9 +232,11 @@ def sync_from_items(items, root=None, tip=None, posture=None):
     n = M.count_groups(act)
     sh = shield_state(posture)
     if tip is None:
-        ev = {"L0": "一切正常", "L1": "注意 · 有可疑动作",
-              "L2": "有已拦下的操作", "Ls": "额度提示",
-              "R0": "有过失守"}.get(st, "")
+        ev = {M.STATE_L0: "一切正常",
+              M.STATE_L1: "%s · 有可疑动作" % M.state_short("L1"),
+              M.STATE_L2: "有已拦下的操作",
+              M.STATE_Ls: M.state_short("Ls"),
+              M.STATE_R0: "有过%s" % M.state_short("R0")}.get(st, "")
         #★ 哨兵不在岗 ⇒ **只说这一件**，不把事件等级混进来当"当前状态"。
         if sh == SHIELD_UNPOSTURE:
             tip = SHIELD_TIP[sh] + " · " + (ev or "有事")

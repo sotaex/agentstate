@@ -2,13 +2,13 @@
  "spec": "psl-vs-0.1",
  "card_id": "antinel-security-suite",
  "skill": "antinel-security",
- "skill_version": "0.37.0",
- "verdict": "FAIL",
+ "skill_version": "0.42.1",
+ "verdict": "PASS",
  "status": {
   "value": "current",
   "derivation": "auto",
   "reason": null,
-  "checkedAt": "2026-10-08T21:37:33+08:00",
+  "checkedAt": "2026-10-10T03:54:01+08:00",
   "note": "re-derive any time: python tools/antinel_verify.py (--manifest for all 24 shipped files); which assertions failed: discrimination.failed[]"
  },
  "scope": {
@@ -51,31 +51,10 @@
    "op": "black-box subprocess assertions (stdin JSON in, exit code + stdout/stderr out)"
   },
   "assertions": {
-   "passed": 310,
+   "passed": 315,
    "total": 315
   },
-  "failed": [
-   {
-    "name": "0.26 SafeZone registered + tamper-locked",
-    "detail": "locked=False rc=0"
-   },
-   {
-    "name": "F-09 host-shield 自检查不出来时不谎报已安装（三态：None != True）",
-    "detail": "True"
-   },
-   {
-    "name": "F-13 paramedic 复活死亡哨兵并留痕（死因 RC5 回归）",
-    "detail": "out='spawn-failed' pid=999999999"
-   },
-   {
-    "name": "F-15 门闸高危事件实时推送＋同类 30 分钟节流（0.28.2 报警 v1）",
-    "detail": "THROTTLE False True"
-   },
-   {
-    "name": "F-17 心跳判死：无心跳/心跳陈旧的哨兵会被强制重启（B2）",
-    "detail": "oldpid=0 age=? -> SPAWN False 0 self-check-failed: hooks/pre_tool_use.py �� manifest �������澯��·�ļ"
-   }
-  ],
+  "failed": [],
   "by_kind": {
    "taxonomy": {
     "product": "产品缺陷：代码行为不符合声言（默认类，fail-closed）",
@@ -90,49 +69,28 @@
     "stale_check": "登记了但本轮未失败的条目进 stale_entries —— 表格腐烂本身留痕"
    },
    "counts": {
-    "product": 1,
-    "instrument": 2,
-    "environment": 1,
-    "process-stale": 1
+    "product": 0,
+    "instrument": 0,
+    "environment": 0,
+    "process-stale": 0
    },
-   "per_failure": [
-    {
-     "name": "0.26 SafeZone registered + tamper-locked",
-     "kind": "product",
-     "basis": "未登记 ⇒ 按 fail-closed 纪律默认 product 类（不是结论，是尚未证出别的类）"
-    },
-    {
-     "name": "F-09 host-shield 自检查不出来时不谎报已安装（三态：None != True）",
-     "kind": "instrument",
-     "basis": "负控衰减：注入 OSError 欲使 subprocess.run 抛错，但 0.35.3 起 task_installed() 文件系统事实优先（os.path.isfile(shim) 早退 return True）⇒ 注入永远到不了被测分支；本机 shim 存在 ⇒ 产品行为反而更安全。"
-    },
-    {
-     "name": "F-13 paramedic 复活死亡哨兵并留痕（死因 RC5 回归）",
-     "kind": "environment",
-     "basis": "pid=999999999 是负控自造的假 pid，spawn-failed 属 spawn 环境问题；该条在10-08 重跑中未复现（失败集合成员漂移的实例）。"
-    },
-    {
-     "name": "F-15 门闸高危事件实时推送＋同类 30 分钟节流（0.28.2 报警 v1）",
-     "kind": "instrument",
-     "basis": "桩吞效应：断言先 hs._notify=lambda: None 打桩，再期望 notify_sent 被第一次 record 置位 —— 桩替换掉了被测效应本身 ⇒ t1 恒 0。"
-    },
-    {
-     "name": "F-17 心跳判死：无心跳/心跳陈旧的哨兵会被强制重启（B2）",
-     "kind": "process-stale",
-     "basis": "沙箱内 self-check-failed: host_shield.py 与 manifest 不符 ⇒ 与 antinel_verify 那条同根（清单与实物未同步），非心跳逻辑缺陷。"
-    }
-   ],
+   "per_failure": [],
    "stale_entries": [
     "UX: 同类提醒当天只提示一次（第二次静默记录）",
     "0.16.0 DST-01 URL /rd/ segment is not a delete (NET-01 warns, no block)",
     "0.16.0 antinel_verify derives current on an intact package",
-    "0.17.0 P-B1 without --manifest, README tamper is out of scope (documented)"
+    "0.17.0 P-B1 without --manifest, README tamper is out of scope (documented)",
+    "F-09 host-shield 自检查不出来时不谎报已安装（三态：None != True）",
+    "F-13 paramedic 复活死亡哨兵并留痕（死因 RC5 回归）",
+    "F-15 门闸高危事件实时推送＋同类 30 分钟节流（0.28.2 报警 v1）",
+    "F-17 心跳判死：无心跳/心跳陈旧的哨兵会被强制重启（B2）",
+    "0.26 SafeZone registered + tamper-locked"
    ],
    "stale_digests_at_run_time": {
     "count": 0,
     "files": []
    },
-   "invariant": "sum(counts.values()) == len(failed) == 5"
+   "invariant": "sum(counts.values()) == len(failed) == 0"
   },
   "partial": false
  },
@@ -140,7 +98,7 @@
  "objectOwnership": "self",
  "objectOwnershipBasis": "subject github.com/sotaex is in the signed namespace list",
  "assertions_total": 315,
- "assertions_passed": 310,
+ "assertions_passed": 315,
  "criteria_independence": "Assertions exercise the hook protocol, rule matching, scanner, installer and reporter as black boxes through subprocesses (stdin JSON in, exit code and stdout/stderr out); they were authored from the design specification ANT-SEC-SPEC-001 v1.1, not from the implementation; third-party re-run supported.",
  "environment": {
   "python": "3.13.14",
@@ -150,7 +108,7 @@
  },
  "digests": {
   "antinel-namespaces.json": "sha256:2db67f32a5b803560f458c4589bd4bb4678cc17bc16625f6b6b3ad20f9b202d2",
-  "rules/default.json": "sha256:13ce7130477c0f40a48f9424bd9c867b3da2e3f689fa3862b0516155b6ab112b",
+  "rules/default.json": "sha256:030bcec189a2233326f318c93b76b522a6e15e0aac9a611da39f0219a7b3bc16",
   "rules/pricing.json": "sha256:e299e7afa07a97128ce00c13706379c79368c747cd4303c488f1c53c5339e253",
   "rules/typosquat_top.json": "sha256:0c699af6ba05d7675055be29b8c1e379714d9fbf44c4369a1717cade424190ad",
   "rules/economics/workbuddy.json": "sha256:7d570a0d8cb09f803695a4af147269620acdd5da5f403e2534a0c418c202c6a6",
@@ -158,25 +116,25 @@
   "rules/economics/claude-code.json": "sha256:e5ce954672baa42ffc220fddde2b691566f4644ec05ba6887c5ccc1c9dae30ba",
   "rules/economics/qoder.json": "sha256:5f51a86cbe0625f44519ce1308e562286c9d3410d0b7284006ac26b068396a3d",
   "rules/economics/generic.json": "sha256:4849374b3d2443dd77329b09d348dec03794863aa8f991d98ea5380a9849b82f",
-  "hooks/pre_tool_use.py": "sha256:da543802ba4c62362d1d3edf1244b76b8e644afe19c12be783fce18fb1354df2",
+  "hooks/pre_tool_use.py": "sha256:f0bb7685dc72490a830d64f5a06747d6e737953c31ab5e79c7b229789e6d12c9",
   "hooks/post_tool_use.py": "sha256:021a194e1af1240dc7292bf80f35a7e23328deb04c019c696b0478b989411d26",
   "scripts/scan.py": "sha256:851eae8a722cb49e0c68b7dc46b78d3e041cacaee39ce549faf1b98aa1407108",
   "scripts/install.py": "sha256:66b20b17f4318edf157bab495d122108e807b22cefe8d095a6d7826eb8c24925",
-  "scripts/report.py": "sha256:a8d294e1a0ffe083d08fcbeb16a7a4e4cdbbefed7a84b9ea1e325e9c0230680d",
-  "scripts/verification_tests.py": "sha256:6deee3768e35f195ff629a5fdcd7712c17ca42ddeb43ec0a1b1ac765f6f25459",
+  "scripts/report.py": "sha256:17a223a32041c677126e509603a50db8b1e7fbc7515075345d630ec9d45d130a",
+  "scripts/verification_tests.py": "sha256:d03e2f2c538505f325ea3e6afa74a3eecd5e7998c2b022d98aa5f3f76b481043",
   "session_dna.py": "sha256:80a0e8a33e953c3fdb67e2213d4500d66df449325b531fa688ca99b5a3fc54b4",
   "transcript_reader.py": "sha256:43c1cd4a4afeaf20d23c6583c9e438a12070f4c2433b554be0292a9cf28ae152",
   "audit_chain.py": "sha256:c8ac6f1d5ca1ae4b08dd63286695c48aedd32b9420adc83a6ebd839bf67753e6",
-  "antinel.py": "sha256:22543a373b4df19be18a16a4149e9860898ef4989a1e612a2a025999378942ae",
+  "antinel.py": "sha256:452bdb48e272f4d28469209789b122256f55cf6f354a6ddee57465206dcd8af7",
   "hub.py": "sha256:bf2c01a73b7847c26bf887592093ddb11e5cd0a4183529e14f12afa31907dfbd",
   "tools/enforce_probe.py": "sha256:d8a1e3d948a7aa65cede1c780fabd0800ad717bbd5011fd73db512a0eea13173"
  },
  "run": {
-  "started_at": "2026-10-08T21:25:37+0800",
-  "duration_ms": 716149,
+  "started_at": "2026-10-10T03:35:06+0800",
+  "duration_ms": 1135583,
   "duration_note": "wall-clock of a subprocess fan-out suite; machine- and load-dependent, not comparable across environments",
   "executor": "scripts/run_harness.py",
-  "exit_code": 1,
+  "exit_code": 0,
   "bootstrap": false
  },
  "re_run": "python scripts/run_harness.py",

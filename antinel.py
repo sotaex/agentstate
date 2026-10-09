@@ -34,7 +34,7 @@ if _HERE not in sys.path:
 
 from strings import detect_lang, get_string
 
-VERSION = "0.37.0"
+VERSION = "0.42.1"
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
@@ -63,6 +63,10 @@ ROUTES = [
     ("记一下积分余额", "antinel credits snapshot <余额> [--reward N@到期日] [--cycle 到期日]", "账本"),
     ("积分还够不够 / 什么时候烧完", "antinel credits forecast", "账本"),
     ("订阅和API直付哪个划算（对账）", "antinel credits reconcile", "账本"),
+    # ★ 0.38.0：哨兵的口粮 —— 与上面三条 `antinel credits` **是两本账**：
+    #   credits 记的是**宿主 AI 工具烧的积分**；粮是**哨兵站岗的口粮**。
+    #   两本账分开命名、分开显示（混了会污染两边口径，见 `granary.py` 头部）。
+    ("看一下我的粮 / 哨兵还能站多久", "antinel 粮（余额 / 明细 / 规则）", "账本"),
     ("阻止Agent外传 / 开安全区", "antinel settings set net_mode block ＋ antinel zone add <目录>", "防范"),
     ("证据链有没有被动过", "antinel verify", "账本"),
     ("跨工具汇总（多个AI工具一起看）", "antinel digest --scope all", "审核"),
@@ -983,6 +987,49 @@ def cmd_digest(args):
         print("（汇总快照已进中枢链：~/.antinel/rollup/）")
 
 
+# ------------------------------------------------------------ 粮 ----
+# ★ 0.38.0：粮（哨兵的口粮）。**与 `credits` 是两本账** —— 见 `granary.py` 头部。
+#   判据 `ci/guard_granary.py` 会验：本条命令能用，且与 credits 不混。
+def cmd_granary(args, prof):                       # noqa: ARG001 (prof 仅保签名一致)
+    """`antinel 粮 [余额|明细|规则]`。真源在 `granary`；本函数只排版，不自己算账。"""
+    import granary as G
+    sub = getattr(args, "sub", None) or "余额"
+    if sub == "规则":
+        r = G.rules()
+        print("粮的获得（单位：粮）")
+        for grp, rows in r["grant"].items():
+            print("  ◇ %s" % grp)
+            for name, amt, freq in rows:
+                print("    %-14s %+4d   %s" % (name, amt, freq))
+        print("粮的消耗（哨兵在岗时慢慢走）")
+        for name, amt, note in r["spend"]:
+            print("    %-8s %-12s %s" % (name, amt, note))
+        print("缺粮阈值：余额低于 %d 粮（约一周口粮）时亮「缺粮」。" % r["low_threshold"])
+        print("充值：%s" % ("已开放" if r["recharge"].get("enabled")
+                            else "尚未开放（开放注册后提供充值渠道）"))
+        return
+    if sub == "明细":
+        rows = G.recent(getattr(args, "n", 20) or 20)
+        if not rows:
+            print("（还没有粮的流水 —— 哨兵开始站岗后才有消耗）")
+            return
+        print("%-20s %-14s %6s  %s" % ("时间", "事由", "增减", "机器"))
+        for e in rows:
+            sign = e["amount"] if e["kind"] == "grant" else -e["amount"]
+            print("%-20s %-14s %+6d  %s" % (e.get("ts", "")[:19], e.get("reason", ""),
+                                            sign, e.get("machine") or ""))
+        return
+    s = G.summary()
+    if not s["has_ledger"]:
+        print("还没有粮账：哨兵还没开始站岗（没在消耗，也就不缺粮）。")
+        return
+    print("粮：%d（还够 %s 天，档位 %s）" % (s["balance"], s["days_left"], s["tier"]))
+    print("缺粮阈值：%d 粮；流水 %d 笔。" % (s["threshold"], s["entries"]))
+    if s["state"] == "low":
+        print("★ 缺粮灯亮：%s" % s["why"])
+    print("（这是哨兵的口粮，不是宿主 AI 工具的积分 —— 后者看 `antinel credits`。）")
+
+
 # ------------------------------------------------- verify / report / hub ----
 def cmd_morning(args):
     """0.29.0：一屏晨报——昨晚（今日）动作/拦截/提醒/tokens + 昨日对比 + 最重一条。
@@ -1556,6 +1603,17 @@ def _shield_chain_dir():
       修法：**改哨兵状态的地方，就在哨兵自己那条链上留一条授权记录**。
     """
     import host_shield as _hs
+    # ★★★ 0.40.0（A4，堵源①）：**沙箱里跑的命令，授权也必须落在沙箱里**。
+    #   设了 `ANTINEL_HUB_DIR`（测试/套件沙箱）时，旧实现的硬绑定会返回
+    #   "包根下的 `.psl/audit`" —— 也就是**真项目的链**。于是
+    #   `antinel zone add <临时目录>` 的授权记录被写进真链 ⇒ 真哨兵读到这条"背书"、
+    #   把早已改名的临时目录纳入执法、去加锁 ⇒ 锁不上 ⇒ 每跑一次测试刷一批
+    #   R0「安全区加锁失败」（盘上实测 93 条，路径全部是
+    #   `C:\Temp\...\antinel_harness_*` / `antinel_verify_work`，**0 条真实目录**）。
+    #   ⇒ 跟随中枢：沙箱下与哨兵在沙箱里的 rollup 同处一地。
+    #   ★ 生产不受影响：未设 `ANTINEL_HUB_DIR` 时展开结果与旧写法**逐字相同**。
+    if os.environ.get("ANTINEL_HUB_DIR"):
+        return _hs._hub_rollup_dir()
     return _hs._shield_audit_dir(os.path.dirname(_sibling("antinel.py")))
 
 
@@ -1962,7 +2020,11 @@ def cmd_host_shield(args):
         #   "state 说已撤防" ⇔ "真的撤完了"。半途被杀时 state 仍是 true ⇒ status 如实说"开着"。
         st["enabled"] = False
         st["sentinel_pid"] = None
-        hs.save_state(st)
+        # ★ 0.40.0：**显式声明这是有链背书的撤防** —— 上面那条
+        #   `record(None, "host_shield_changed", field="enabled", armed=False, …)`
+        #   就是背书（写在哨兵链上）。`save_state` 的默认闸会**挡住无背书的撤防**，
+        #   所以合法撤防必须在这里显式放行，否则 `disable` 会静默失效。
+        hs.save_state(st, allow_disarm=True)
         print("✓ 护盾已撤防，ACL 已还原")
         if not _auto_removed:
             print("  ⚠ 但**自启项未能删除**——下次登录可能仍会拉起哨兵。请手工检查："
@@ -3313,6 +3375,14 @@ def main(argv=None):
     q = ps.add_parser("plan"); q.add_argument("yuan"); q.add_argument("credits")
     ps.add_parser("reconcile")
 
+    # ★ 0.38.0：粮（哨兵的口粮）。**与 `credits` 分开命名、分开显示** ——
+    #   两本账（credits 记宿主工具烧的积分；粮是哨兵站岗的口粮），混了会污染口径。
+    p = sub.add_parser("粮", aliases=["granary"])
+    ps = p.add_subparsers(dest="sub")
+    ps.add_parser("余额")
+    q = ps.add_parser("明细"); q.add_argument("--n", type=int, default=20)
+    ps.add_parser("规则")
+
     p = sub.add_parser("pricing"); ps = p.add_subparsers(dest="sub", required=True)
     ps.add_parser("show")
     q = ps.add_parser("set"); q.add_argument("model"); q.add_argument("field"); q.add_argument("price")
@@ -3409,6 +3479,8 @@ def main(argv=None):
         cmd_settings(args)
     elif args.cmd == "credits":
         cmd_credits(args, prof)
+    elif args.cmd in ("粮", "granary"):
+        cmd_granary(args, prof)
     elif args.cmd == "morning":
         cmd_morning(args)
     elif args.cmd == "pricing":

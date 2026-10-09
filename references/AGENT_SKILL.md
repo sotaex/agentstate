@@ -21,6 +21,7 @@
 - 「记一下积分余额」→ `antinel credits snapshot <余额> [--reward N@到期日] [--cycle 到期日]`
 - 「积分还够不够 / 什么时候烧完」→ `antinel credits forecast`
 - 「订阅和API直付哪个划算（对账）」→ `antinel credits reconcile`
+- 「看一下我的粮 / 哨兵还能站多久」→ `antinel 粮（余额 / 明细 / 规则）`
 - 「阻止Agent外传 / 开安全区」→ `antinel settings set net_mode block ＋ antinel zone add <目录>`
 - 「证据链有没有被动过」→ `antinel verify`
 - 「跨工具汇总（多个AI工具一起看）」→ `antinel digest --scope all`

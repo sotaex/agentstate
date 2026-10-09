@@ -171,19 +171,19 @@ def daily_report(day=None, root=None, chain_files=None, items=None,
 
     # ★ 每个数字都带**钻取键**（页面据此生成链接，判定不写在页面里）
     drill = [
-        {"key": "L2", "label": "拦截", "count": win_levels["L2"], "filt": "lv:L2"},
-        {"key": "L1", "label": "注意", "count": win_levels["L1"], "filt": "lv:L1"},
-        {"key": "R0", "label": "失守", "count": win_levels["R0"], "filt": "lv:R0"},
+        {"key": "L2", "label": M.state_short("L2"), "count": win_levels["L2"], "filt": "lv:L2"},
+        {"key": "L1", "label": M.state_short("L1"), "count": win_levels["L1"], "filt": "lv:L1"},
+        {"key": "R0", "label": M.state_short("R0"), "count": win_levels["R0"], "filt": "lv:R0"},
     ]
     if win_levels["Ls"]:
-        drill.append({"key": "Ls", "label": "额度", "count": win_levels["Ls"],
+        drill.append({"key": "Ls", "label": M.state_short("Ls"), "count": win_levels["Ls"],
                       "filt": "lv:Ls"})
 
     try:
         import host_shield as _hs
         posture = _hs.guard_posture(os.path.dirname(os.path.abspath(__file__)))
     except Exception as e:                      # noqa: BLE001
-        posture = {"state": "unknown", "label": "查不到", "why": "读不到门闸状态：%r" % (e,),
+        posture = {"state": "unknown", "label": "查不到", "why": "读不到哨兵状态：%r" % (e,),
                    "evidence": {}, "can_fix": False, "fix": None, "fix_hint": ""}
 
     return {
@@ -224,8 +224,10 @@ def render_text(rep):
     lines = [
         "值守台日报 · %s" % rep["day"],
         "=" * 34,
-        "拦截 %d ｜ 注意 %d ｜ 失守 %d ｜ 额度 %d" % (L_["L2"], L_["L1"], L_["R0"], L_["Ls"]),
-        "最近 %d 小时：拦截 %d ｜ 注意 %d ｜ 失守 %d（门闸哨兵被拉起 %d 次）" % (
+        "%s %d ｜ %s %d ｜ %s %d ｜ %s %d" % (
+            M.state_short("L2"), L_["L2"], M.state_short("L1"), L_["L1"],
+            M.state_short("R0"), L_["R0"], M.state_short("Ls"), L_["Ls"]),
+        "最近 %d 小时：拦截 %d ｜ 注意 %d ｜ 失守 %d（哨兵被拉起 %d 次）" % (
             rep.get("window_hours", 24), rep.get("window_levels", {}).get("L2", 0),
             rep.get("window_levels", {}).get("L1", 0), rep.get("window_levels", {}).get("R0", 0),
             rep.get("revived_window", 0)),
@@ -254,8 +256,10 @@ def render_markdown(rep):
     L_ = rep["levels"]
     out = ["# 值守台日报 · %s" % rep["day"], "",
            "| 级别 | 今日 |", "|---|---|",
-           "| R0 失守 | %d |" % L_["R0"], "| L2 拦截 | %d |" % L_["L2"],
-           "| L1 注意 | %d |" % L_["L1"], "| Ls 额度 | %d |" % L_["Ls"], "",
+           "| R0 %s | %d |" % (M.state_short("R0"), L_["R0"]),
+           "| L2 %s | %d |" % (M.state_short("L2"), L_["L2"]),
+           "| L1 %s | %d |" % (M.state_short("L1"), L_["L1"]),
+           "| Ls %s | %d |" % (M.state_short("Ls"), L_["Ls"]), "",
            "- 最近 **%d** 小时：拦截 %d ｜ 注意 %d ｜ 失守 %d（哨兵被拉起 %d 次）" % (
                rep.get("window_hours", 24), rep.get("window_levels", {}).get("L2", 0),
                rep.get("window_levels", {}).get("L1", 0),

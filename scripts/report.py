@@ -185,11 +185,31 @@ def build_report(events, scan, manifest, host_label="", root=None):
            "sec_path_whitelisted": 0,
            # 0.18.0 (HP-47): hook health events become visible too -- a hook
            # that crashed mid-call used to appear ONLY in the raw JSONL.
-           "hook_error": 0, "session_start": 0, "hook_alive": 0}
+           "hook_error": 0, "session_start": 0, "hook_alive": 0,
+           # 0.42.0 (P5-1): hook_slow was the LAST silent release of this
+           # family -- AUDIT_SCHEMA §4 registers it and states its reason for
+           # existing ("慢到超时＝这张牌没打出去且无人知晓"), the hook writes it
+           # faithfully (89 records, worst 2,476,295 ms ~ 41 min, on the real
+           # workspace chain), yet NOTHING consumed it: the only line that
+           # could see it (`elif action == "alert"`) is type-blind, so all 89
+           # were absorbed by one anonymous counter and no reader could tell
+           # "a hook ran 41 minutes" from "an alert fired". Counting it here
+           # is the whole point: a timeout is treated as ALLOW by the host,
+           # so the verdict may never have reached the host at all.
+           "hook_slow": 0, "hook_slow_max_ms": 0}
     for ev in events:
         typ = ev.get("type", "")
         if typ in cfg:
             cfg[typ] += 1
+        # 0.42.0 (P5-1): the count alone understates it -- 89 records with a
+        # worst case of 41 minutes is a different fact from 89 records that
+        # each took 8.1 s. Keep the worst so the line can show both.
+        if typ == "hook_slow":
+            try:
+                cfg["hook_slow_max_ms"] = max(cfg["hook_slow_max_ms"],
+                                              int(ev.get("elapsed_ms") or 0))
+            except (TypeError, ValueError):
+                pass
         tool = ev.get("tool") or "unknown"
         if typ == "pre_tool_use":
             stats["pre"] += 1
@@ -368,6 +388,16 @@ def render_text(rep, log_label):
     # was allowed by the HOST (fail-open) with no verdict recorded at all.
     L.append("  hook health: crash=%d | session_start=%d | hook_alive=%d" % (
         ch.get("hook_error", 0), ch.get("session_start", 0), ch.get("hook_alive", 0)))
+    # 0.42.0 (P5-1): hook_slow -- a hook that ran past SLOW_BUDGET_MS. The host
+    # kills hooks at 10-15 s and a timeout is treated as ALLOW, so each of
+    # these is a call whose verdict may never have been delivered. Printed on
+    # its own line for the same reason as sec_path_whitelisted above: it is a
+    # number a reviewer must not miss, and folding it into `alerts` (which is
+    # what happened for 89 records) hides exactly that.
+    _hs_n = ch.get("hook_slow", 0)
+    L.append("  hook slow (>= budget; host timeout = ALLOW): %d | worst %d ms%s" % (
+        _hs_n, ch.get("hook_slow_max_ms", 0),
+        "   <-- these verdicts may never have reached the host" if _hs_n else ""))
     # 0.33.1 (P4-1)：宿主标签可信度（读侧标注，不改链）
     ht = rep.get("host_trust") or {}
     if ht.get("records"):
@@ -497,6 +527,15 @@ def render_html(rep, log_label):
     score_color = COLORS["ok"] if rep["score"] >= 90 else (
         COLORS["warning"] if rep["score"] >= 70 else COLORS["critical"])
     tamper = ("<p class='tamper'>%s</p>" % e(rep["self_tamper"])) if rep.get("self_tamper") else ""
+    # 0.42.0 (P5-1): hook_slow gets the same treatment as the text report --
+    # its own line, because a host timeout is an ALLOW and these verdicts may
+    # never have been delivered.
+    _ch = rep.get("config_health") or {}
+    _hs_n = _ch.get("hook_slow", 0)
+    hookslow = ("<p>hook slow (>= budget; host timeout = ALLOW): %d | worst %d ms"
+                "%s</p>" % (_hs_n, _ch.get("hook_slow_max_ms", 0),
+                            " &mdash; these verdicts may never have reached the host"
+                            if _hs_n else ""))
     return """<!doctype html><html><head><meta charset="utf-8">
 <title>Antinel Security Audit Report</title>
 <style>
@@ -520,6 +559,7 @@ th{background:#f8f9fa}
 %(rows)s</table>
 <h2>Operations</h2>
 <p>post-tool records: %(post)d | pre-checks: %(pre)d | blocked: %(blocked)d | alerts: %(alerted)d</p>
+%(hookslow)s
 %(bars)s
 <div class="footer">%(footer)s</div>
 </body></html>""" % {
@@ -530,6 +570,7 @@ th{background:#f8f9fa}
         "crit": rep["summary"].get("critical", 0), "warn": rep["summary"].get("warning", 0),
         "rows": "\n".join(rows) or "<tr><td colspan='6'>No findings</td></tr>",
         "post": st["post"], "pre": st["pre"], "blocked": st["blocked"], "alerted": st["alerted"],
+        "hookslow": hookslow,
         "bars": "\n".join(bars), "footer": e(FOOTER),
     }
 

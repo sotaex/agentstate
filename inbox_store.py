@@ -70,6 +70,37 @@ def alert_kinds():
 
 
 # ---------------------------------------------------------- 投影 ----
+#: 链记录 `field` → 归并用的 `topic`（**0.40.0 向后兼容**，见 `project_record`）。
+#: ★ 与生产侧 A5 的映射**逐字一致**（不许出现第二套口径）：
+#:   `self-check` / `registry` ⇒ `code_drift`（代码/登记表与清单不符 —— 同一件事）
+#:   `enabled` / `state`       ⇒ `state_drift`（安全状态字段漂移 —— 另一件事）
+_TOPIC_OF_FIELD = {
+    "self-check": "code_drift",
+    "registry": "code_drift",
+    "enabled": "state_drift",
+    "state": "state_drift",
+}
+
+#: ★★ 0.40.0 第二层兼容：**旧 `subkind` 名 → 现行 `topic`**（已核实的同义改名）。
+#:
+#: 为什么需要它（本仓实测，2026-10-09 全类型报告审计）：
+#:   生产侧在 A5 里把自检不符的 `subkind` 从 `self_check` 改成了 `code_drift`
+#:   —— 但**链是 append-only**，改写不了历史记录 ⇒ 归并键 `(kind, topic, level)`
+#:   把**同一件事**拆成两行：`host_shield_tamper/self_check`（47 条，10-07..10-09）
+#:   与 `host_shield_tamper/code_drift`（17 条，10-09）。用户看到两条
+#:   「失守：防护文件被改动」，其实是**一件**（都是「哨兵启动自检不符」）。
+#:
+#: ★★ 为什么敢合（证据链，不是感觉）：
+#:   `remediation._kind_of()` **本来就把这两个值归成同一类**
+#:   （`if t in ("self_check", "code_drift"): return "self_check"`）。
+#:   ⇒ 也就是说，**产品内部两层口径本来就不一致**：归因层说"一件事"，
+#:     归并层说"两件事"。本表让归并层**对齐**归因层 —— 而不是新造第三套口径。
+#:   ★ 只映射**已核实的旧名**（键是穷举的），不做前缀/模糊匹配。
+_TOPIC_ALIAS = {
+    "self_check": "code_drift",     # A5 之前的名字；归因层已视为同类
+}
+
+
 def project_record(rec, kinds):
     """把一条链记录投影成 Alert；不是告警 ⇒ 返回 None。
 
@@ -85,7 +116,31 @@ def project_record(rec, kinds):
     if t in kinds:
         lvl = M.level_of(t)                     # 未登记 ⇒ UnknownKind（响亮失败）
         _topic = str(rec.get("subkind") or "")
-        return M.Alert(
+        # ★★ 0.40.0 向后兼容：`subkind` 缺失时按**结构化字段 `field`** 补出 topic。
+        #   为什么需要它：0.40.0（A5）之前的生产者只写 `field`、不写 `subkind`
+        #   ⇒ 历史记录 topic 为空 ⇒ 归并键把**不同病因压成一行**
+        #   （实测 58 条：`enabled`/`state` 与 `self-check`/`registry` 混在一条里，
+        #    用户看到"防护文件被改动 ×58"，其实是两件事）。
+        #   ★ 读的是**记录里的结构化字段**（`field`），不是 `reason` 文案 ——
+        #     文案会改，按文案判档会静默失效（本仓第 4 次同名纪律）。
+        #   ★ 映射与 A5 的生产侧**逐字一致**（`self-check`/`registry` → code_drift；
+        #     `enabled`/`state` → state_drift），不另立第二套口径。
+        #   ★ 只在 `subkind` 为空时补 ⇒ **新记录一律自带 subkind，这条永不覆盖新口径**。
+        #   ★★ 它**只补分组/标题，不推断结局**：`field=enabled` 只说明"改的是哪个
+        #     字段"，**不**说明"已经恢复了" ⇒ 这里**不许**据此补 `recovered`
+        #     （字段缺失＝"不知道"，方向收紧 —— 见 `inbox_model.NO_CONSEQUENCE_KINDS`）。
+        #   ⚠️ **必须收窄到 `host_shield_tamper`**：`field` 不是 tamper 独有的
+        #      （实测 `host_shield_changed` 同样带 `field="enabled"`）——
+        #      不加这道门，一条 L1「注意：防护设置被改动」会被套上 tamper 的
+        #      标题「**失守**：防护文件被改动」⇒ **方向相反**的标签
+        #      （本探针当场抓到 65 条，见 `_p_report_audit.py` Q3）。
+        if not _topic and t == "host_shield_tamper":
+            _topic = _TOPIC_OF_FIELD.get(str(rec.get("field") or ""), "")
+        # ★★ 0.40.0 第二层兼容：旧 `subkind` 名对齐现行 `topic`（见上方 `_TOPIC_ALIAS`）。
+        #   与上面那层**方向相反**：上一层补"本来就没写 topic"的，
+        #   这一层改"写了旧名字"的 —— 两层都是**只在投影期归一**，链不动。
+        _topic = _TOPIC_ALIAS.get(_topic, _topic)
+        _a = M.Alert(
             id=M.alert_id(ts, t, str(rec.get("reason") or "")),
             ts=ts, level=lvl, kind=t,
             # ★ 0.35.3：先按**事由**取更准的标题，没有则回落 kind 标题。
@@ -99,6 +154,32 @@ def project_record(rec, kinds):
             # ★ 0.35.3：`subkind` → `topic`，用于把"同一件事反复发生"归并。
             #   例：登录自启缺失 → subkind=autostart_missing（14 条 = 1 件事）。
             topic=_topic,
+        )
+        # ★★ 0.40.0（A8）：`host_shield_zone_locked` **兼表成败** ⇒ 级别/标题必须
+        #   **按记录**改档，否则一条"上锁成功"会顶着 kind 的 R0 与
+        #   「失守：安全区加锁失败」标题出现（实测本机 2 条 = 把成功报成失守）。
+        #   ★ 判据复用 `M._zone_lock_failed`（**唯一实现**，它又复用
+        #     `remediation._kind_of`），不另立第二套口径。
+        if t == "host_shield_zone_locked" and not M._zone_lock_failed(_a):
+            _a.level = "L1"
+            _a.title = M.TITLE_OF_TOPIC.get("zone_ok") or "注意：安全区已上锁（区内防篡改）"
+        return _a
+
+    # ★★ 0.40.0：研发态自检不符 —— **故意不进 `_ALERT_KINDS`**（⇒ 不弹气泡：
+    #   研发期每次改码都弹一次泡，正是创始人说的"泡泡又冒了"）；
+    #   但要**进收件箱**（知情即可）：级别由 `LEVEL_OF_KIND` 给 L1「注意」。
+    if t == "host_shield_dev_drift":
+        return M.Alert(
+            id=M.alert_id(ts, t, str(rec.get("reason") or "")),
+            ts=ts, level=M.level_of(t), kind=t,
+            # ★ 标题只取 `TITLE_OF_KIND`：`TITLE_OF_TOPIC["code_drift"]` 那条是给
+            #   **R0 的 tamper** 用的（写着"失守"），这里不能借（免得 L1 挂"失守"标题）。
+            title=M.TITLE_OF_KIND.get(t, t),
+            detail=str(rec.get("reason") or ""),
+            severity=str(rec.get("severity") or ""),
+            chain_ref=str(rec.get("hash") or ""),
+            recovered=False,
+            topic=str(rec.get("subkind") or ""),
         )
 
     if t == "pre_tool_use" and rec.get("decision") == "block":

@@ -396,54 +396,76 @@ def n_posture_unknown_not_guarding():
 
 
 def c_light_posture_first():
-    """★★ 灯＝当前态势优先：**失守**时不管历史多干净都是红；**未启用**是灰不是红。"""
+    """★★ 灯＝当前态势优先（0.37.1 六态口径）：**失守**时不管历史多干净都是红；
+    未启用是 L0 灰不是红；探不到是 L1 黄（盲区）不是绿。"""
     items = [G.item("L2", "done")]
     down = M.light("down", items)
     off = M.light("off", items)
     unknown = M.light("unknown", items)
-    return (down[0] == M.LIGHT_DOWN and off[0] == M.LIGHT_OFF
-            and unknown[0] == M.LIGHT_UNKNOWN
-            and M.LIGHT_LOGO[off[0]] == "L0")
+    return (down[0] == M.STATE_R0 and off[0] == M.STATE_L0
+            and unknown[0] == M.STATE_L1
+            and M.STATE_LOGO[off[0]] == "L0")
 
 
 def n_light_posture_first():
-    """负控：值守中 + 24 小时内有未处理的有后果项 ⇒ **必须**橙（不许一路绿）。"""
+    """负控（0.37.1 改）：值守中 + 24h 内有未处理事件 ⇒ **必须**是该事件的级
+    （L2 未处理 ⇒ L2），不许一路绿。"""
     items = [G.item("L2", "unread")]
     lg, _why = M.light("guarding", items)
-    return lg == M.LIGHT_ATTENTION
+    return lg == M.STATE_L2
 
 
 def c_light_only_owner_actions():
-    """「值守中·需你处理」只由真正要用户动手的事项触发。"""
+    """0.37.1 六态口径：灯取 24h **未处理**事件的最高级；已处理的不画灯；
+    自动拦下的（L2）画 L2 —— LOGO 五态的原生读法（黄一点＝重一点）。"""
     action = [G.item("R0", "unread", 1)]
     blocked = [M.Item(M.Alert.build(_iso(1), "tool_call_blocked", reason="denied"))]
-    return (M.light("guarding", action)[0] == M.LIGHT_ATTENTION
-            and M.light("guarding", blocked)[0] == M.LIGHT_OK)
+    closed = [G.item("R0", "done", 1)]
+    return (M.light("guarding", action)[0] == M.STATE_R0
+            and M.light("guarding", blocked)[0] == M.STATE_L2
+            and M.light("guarding", closed)[0] == M.STATE_L0)
 
 
 def n_light_only_owner_actions():
-    """负控：若把自动拦截误从已处理名单移除，上一条必须变红。"""
-    old = M.AUTO_HANDLED_KINDS
-    M.AUTO_HANDLED_KINDS = frozenset(set(old) - {"tool_call_blocked"})
+    """负控：把**已处理**的当未处理算（变异 `OPEN_STATES`）⇒ 上一条必须变红。
+
+    ★ 机制说明：旧负控靠 `AUTO_HANDLED_KINDS` 变异（灯只数要动手的事），
+      0.37.1 起灯按**未处理事件级**走，那个变异点已不在判据路径上；
+      换成直接变异「什么算未处理」—— 它正是新判据的第一依赖。
+    """
+    old = M.OPEN_STATES
+    M.OPEN_STATES = M.CLOSED_STATES          # 变异：已处理 ⇒ 未处理
     try:
         return not c_light_only_owner_actions()
     finally:
-        M.AUTO_HANDLED_KINDS = old
+        M.OPEN_STATES = old
 
 
 def c_attention_label_drills_to_action_list():
-    """状态文案不能只说「有事」：点状态必须直达具体待处理列表。"""
-    html = SV._bar([G.item("R0", "unread", 1)], "test-token",
-                   posture={"state": "guarding", "label": "值守中", "why": "在岗"})
-    return ("值守中·需你处理" in html and "f=action" in html
-            and "点开查看" in html)
+    """状态文案不能只说「有事」：必须能一键直达具体待处理列表。
+
+    ★ 0.37.1 搬家（去重）：钻取入口随视图走 —— 收件箱页在**筛选条**
+      （「要处理 N」，就在列表上方），其他页在**顶部条后缀**
+      （「（N 件，点开查看）」）。同一个数字每页只出现一次
+      （创始人 2026-10-08：「同一件事的 4 件出现了 5 次」）。
+    """
+    h_inbox = SV.render_page(view="inbox", root=G.new_hub(), token="T",
+                             items=[G.item("R0", "unread", 1)])
+    h_report = SV._bar([G.item("R0", "unread", 1)], "T",
+                       posture={"state": "guarding", "label": "值守中", "why": "在岗"},
+                       view="report")
+    return ("f=action" in h_inbox and "要处理" in h_inbox
+            and "（1 件，点开查看）" in h_report and "f=action" in h_report)
 
 
 def n_attention_label_drills_to_action_list():
-    """负控：没有待处理事项时，不得出现空的「需你处理」链接。"""
-    html = SV._bar([G.item("R0", "done", 1)], "test-token",
-                   posture={"state": "guarding", "label": "值守中", "why": "在岗"})
-    return "f=action" not in html and "值守中·需你处理" not in html
+    """负控：没有待处理事项时，任何视图都不许出现「点开查看」钻取后缀。"""
+    h_inbox = SV.render_page(view="inbox", root=G.new_hub(), token="T",
+                             items=[G.item("R0", "done", 1)])
+    h_report = SV._bar([G.item("R0", "done", 1)], "T",
+                       posture={"state": "guarding", "label": "值守中", "why": "在岗"},
+                       view="report")
+    return "点开查看" not in h_inbox and "点开查看" not in h_report
 
 
 # ===================================================== 四、三档 / 归档 ======
@@ -538,7 +560,7 @@ def c_page_fix_button_only_when_down():
     h1 = SV.render_page(view="inbox", root=G.new_hub(), token="t", posture=down,
                         items=[G.item("L2", "unread")])
     h2 = SV.render_page(view="inbox", root=G.new_hub(), token="t", posture=ok,
-                        items=[G.item("L2", "unread")])
+                        items=[G.item("L2", "done")])
     return ("马上修复" in h1 and 'name=op value="fix"' in h1
             and "马上修复" not in h2 and "值守中" in h2)
 
@@ -1256,7 +1278,11 @@ def c_selfcheck_fail_is_warn_not_down():
                 results.append("%s：落到计划外档位 %r" % (note, p["state"]))
                 continue
             # ③ 每一档的完整性质都必须保留（不许因为换了档就放松别的）
-            if p["label"] not in ("存疑", "研发中"):
+            # ★ 0.37.3：标签跟六态对齐 —— `warn` 的标签由「存疑」改成「失守」
+            #   （`light()` 对 warn 走 fail-closed 判 R0；姿态标签必须与灯色
+            #   同一套词，否则同一时刻两个叫法）。见
+            #   `host_shield.POSTURE_LABEL_ALLOWED`。
+            if p["label"] not in ("失守", "研发中"):
                 results.append("%s：标签不对 %r" % (note, p["label"]))
             if p["can_fix"] is not False or p["fix"] is not None:
                 results.append("%s：给了修复动作（自检不符不该给）" % note)
@@ -1295,23 +1321,29 @@ def n_selfcheck_fail_is_warn_not_down():
         HS.sentinel_alive, HS.heartbeat_age, HS.self_check = s_alive, s_hb, s_sc
 
 
-def c_light_warn_and_interrupted_are_yellow():
-    """★ 存疑 / 中断 都必须是**黄**，且两者标签**各自说清**（不许落进绿或红）。"""
+def c_light_warn_is_down_and_interrupted_is_l1():
+    """★★ 0.37.1 换代判据：「**存疑**态已取消」（创始人 2026-10-07 定性
+    「计划外状态，不允许」；2026-10-08 再确认六态＝LOGO 五态＋开发态）。
+    · 出厂码与登记不符（非研发）⇒ **fail-closed 按 R0 失守**（红）：
+      「认不出守门的是不是原来那道门」时不 waffle，按它在裸奔算。
+    · 缺岗但无监管对象 ⇒ **L1 注意**（黄：可证明没损失，不冒称失守）。
+    · warn 不许落进 dev 蓝（研发豁免只属于"版本落差"，见 is_dev_build）。
+    """
     w, _ = M.light("warn", [])
     i, _ = M.light("interrupted", [])
-    return (w == M.LIGHT_WARN and M.LIGHT_VAR[w] == "--l1"
-            and i == M.LIGHT_INTERRUPTED and M.LIGHT_VAR[i] == "--l1"
-            and M.LIGHT_LABEL[w] != M.LIGHT_LABEL[i])
+    return (w == M.STATE_R0 and M.STATE_LABEL[w] == "失守"
+            and i == M.STATE_L1 and M.STATE_LABEL[i] == "注意"
+            and M.STATE_VAR[i] == "--l1" and w != M.STATE_DEV)
 
 
-def n_light_warn_and_interrupted_are_yellow():
-    """负控：存疑 / 中断 **都不许是绿** —— 历史再干净也不行。
+def n_light_warn_is_down_and_interrupted_is_l1():
+    """负控：两者都不许是**绿** —— 历史再干净也不行。
 
     ★ 空历史下若漏到"历史分支"就会变绿 ⇒ 这条负控证明走的是**态势分支**。
     """
     for st in ("warn", "interrupted"):
         lg, _ = M.light(st, [])
-        if lg in (M.LIGHT_OK, M.LIGHT_DOWN):
+        if lg == M.STATE_L0:
             return False
     return True
 
@@ -1333,7 +1365,7 @@ def c_consequences_has_consumer():
 
 def n_consequences_has_consumer():
     """负控：**没有后果**（中断）⇒ 页面上不许出现"失守的损失"那一块（否则是常驻噪音）。"""
-    intr = {"state": "interrupted", "label": "中断·无损失", "why": "此刻没有监管对象",
+    intr = {"state": "interrupted", "label": "中断", "why": "此刻没有监管对象",
             "can_fix": True, "fix": "revive", "fix_hint": "马上修复（重新拉起哨兵）",
             "consequences": []}
     h = SV.render_page(view="inbox", root=G.new_hub(), token="t", posture=intr,
@@ -2387,7 +2419,10 @@ def c_header_numbers_state_both_denominators():
         # 条数 != 件事数 时**必须**显示括号，否则两个口径混成一个数
         if want_n != want_g and not g:
             return False
-    return "条数／括号内为件事数" in html
+    # ★ 0.37.1：口径说明从正文那句工程腔「（条数／括号内为件事数）」改为
+    #   每个数字链接上的 title 悬浮解释（-founder 去重：正文不重复口径）。
+    return ("记录数；括号里是按事由归并后的件数" in html
+            and html.count('title="最近 %d 小时' % M.WINDOW_HOURS) >= 3)
 
 
 def n_header_numbers_dont_hide_records():
@@ -2643,7 +2678,7 @@ CHECKS_0353 = [
     ("P12 探不到=盲区不是值守", c_posture_unknown_not_guarding,
      n_posture_unknown_not_guarding),
     ("P12 灯以当前态势优先", c_light_posture_first, n_light_posture_first),
-    ("P12 灯只对你要动手的事变橙", c_light_only_owner_actions,
+    ("P12 灯按未处理事件的级", c_light_only_owner_actions,
      n_light_only_owner_actions),
     ("P12 有事状态可点开看明细", c_attention_label_drills_to_action_list,
      n_attention_label_drills_to_action_list),
@@ -2690,10 +2725,12 @@ CHECKS_0353 = [
      n_outage_sees_supervised_landing),
     ("P12 落点读不出按有损失算", c_consequence_blindspot_counts_as_loss,
      n_consequence_blindspot_counts_as_loss),
-    ("P12 自检不符是存疑不是失守", c_selfcheck_fail_is_warn_not_down,
+    # ★ 0.37.3：标签里的「存疑」已取消（六态换代）⇒ 换成描述**判定内容**的说法：
+    #   它守的是"姿态层判 warn、不判 down"（灯色层由下一条 P12 管）。
+    ("P12 自检不符判 warn 不判 down（姿态层）", c_selfcheck_fail_is_warn_not_down,
      n_selfcheck_fail_is_warn_not_down),
-    ("P12 存疑与中断都是黄灯", c_light_warn_and_interrupted_are_yellow,
-     n_light_warn_and_interrupted_are_yellow),
+    ("P12 认不出按失守、缺岗无损失按注意", c_light_warn_is_down_and_interrupted_is_l1,
+     n_light_warn_is_down_and_interrupted_is_l1),
     ("P12 失守损失在页面上看得见", c_consequences_has_consumer,
      n_consequences_has_consumer),
     # ---- 八、告警降噪（0.35.3，创始人报障「右下一直冒泡」）----

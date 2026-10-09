@@ -98,21 +98,83 @@ def state_path():
     return os.path.join(d, "host_shield.json")
 
 
-def load_state():
+def load_state_strict():
+    """读安全状态文件 —— **读不到就是读不到**（返回 None）。
+
+    ★★★ 0.40.0 新增（「四行失守」源②的根，2026-10-09）：
+      旧 `load_state()` 在**读失败**（文件被写坏 / 读到半截 / JSON 错 / 被删）时
+      返回 `{"enabled": False, ...}` —— 把「读不到」伪装成「读到了一份**已撤防**的」。
+      任何「读整份 → 改一个字段 → 整份写回」的调用方，于是把这**编造的默认值**
+      写回真状态 ⇒ 哨兵下一拍发现 `enabled` 与链权威不一致 ⇒ 记一条 R0 tamper
+      「已回写恢复」。（盘上实测：33 条 `field=enabled` ＋ 15 条 `field=state`
+      就是这么来的；写手是 AI 会话触发的钩子，见 `hooks/pre_tool_use.py`。）
+      ⇒ 拆成两份：本函数**只报事实**；`load_state()` 保留旧的"回退默认"口径
+        （兼容既有 80+ 处只读调用点）。
+      ★ 判据 `ci/inbox_guards_0400.py` 的 S20/S21 钉死两侧（含负控）。
+    """
     try:
         with open(state_path(), encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        # B4c/B4d（文件被改坏/删）返回 disabled 默认——但 armed 的权威在链上
-        # （见 chain_armed_scan/armed_state），文件缺失不再等于整体解除。
-        return {"enabled": False, "workspaces": {}}
+            d = json.load(f)
+        return d if isinstance(d, dict) else None
+    except FileNotFoundError:
+        return None
+    except Exception:                                            # noqa: BLE001
+        return None
 
 
-def save_state(st):
+def load_state():
+    """读安全状态；**读不到时回退到"未布防"默认**（旧口径，勿改）。
+
+    ★ 诚实登记：这个默认值本身正是「读不到 ≠ 已撤防」的**反面** ——
+      所以凡是**要写回**的调用方，一律改用 `load_state_strict()` ＋
+      `update_state_fields()`（见下）；不要再拿本函数的返回值去 `save_state()`。
+    """
+    st = load_state_strict()
+    return st if st is not None else {"enabled": False, "workspaces": {}}
+
+
+def save_state(st, *, allow_disarm=False):
+    """写安全状态文件（整份覆盖，`os.replace` 原子落盘）。
+
+    ★ `allow_disarm`（0.40.0）：要把布防位由**真改假**时，调用方必须显式声明
+      "这是有链背书的合法撤防"（例：`antinel host-shield disable` —— 它**先写链
+      记录**再写状态）。默认 False ⇒ **无背书的撤防一律不落盘**（保持原值）。
+      为什么：源②的后果之一就是钩子把一份"已撤防"的默认值写回真状态；
+      这道闸让"我不想撤防、却手滑写了 false"也撤不掉。
+    """
+    if not allow_disarm:
+        prev = load_state_strict()
+        if prev is not None and prev.get("enabled") and not st.get("enabled"):
+            st = dict(st)
+            st["enabled"] = True
     tmp = state_path() + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(st, f, ensure_ascii=False, indent=1)
     os.replace(tmp, state_path())
+
+
+def update_state_fields(*, allow_disarm=False, **fields):
+    """按字段更新安全状态（**唯一读-改-写入口**）。返回"是否真的写了"。
+
+    ★★★ 0.40.0（源②的结构性止血）：所有「读整份 → 改一个字段 → 整份写回」
+      的调用方（钩子的气泡记账、`ensure_alive` 的 `last_revive_attempt`、
+      `spawn_sentinel` 的 `sentinel_pid`）**一律走这里**。规则：
+
+        · 文件**存在但读不到**（坏 / 半截）⇒ **拒写**、返回 False —— 这正是源②；
+        · 文件**不存在**（全新机器）⇒ 只写"要写的那些字段"，**绝不用默认值覆盖**
+          （enabled 缺省＝未布防，与"这台机器还没有状态文件"这一事实一致）。
+
+      ★ 判据 S21：把状态文件写成非 JSON ⇒ 本函数必须返回 False 且文件字节不变。
+    """
+    prev = load_state_strict()
+    if prev is None:
+        if os.path.exists(state_path()):
+            return False                    # 存在但读不到 ⇒ 拒写（源②的正面修复）
+        prev = {}                           # 不存在 ⇒ 新建（不编造安全字段）
+    merged = dict(prev)
+    merged.update(fields)
+    save_state(merged, allow_disarm=allow_disarm)
+    return True
 
 
 def findings_path():
@@ -225,6 +287,96 @@ def _user_sid():
                        os.environ.get("USERNAME", ""))
 
 
+# ------------------------------------------------ 提权探测（0.41.0）----
+# ★★ 为什么需要它（本机实测 2026-10-09）：
+#   `is_denied()` 原本只用**写探针**判定"是否被拒写"。而 `acl_deny()` **有意**保留
+#   `BUILTIN\Administrators:(OI)(CI)(F)`（管理员/系统破窗能力）＋ 当前用户
+#   `(RD,X,WDAC)`。当**本进程自己**以提权令牌运行时，它属于 Administrators ⇒
+#   那条 `(F)` 先生效 ⇒ 写探针**必然成功** ⇒ `is_denied()` 恒 False。
+#   后果不是"锁没上"，而是**量具失真**：`scan_once()` 把"已上锁"读成"上锁失败"，
+#   还写下一句**不成立的指控**「有进程在对抗门闸」。
+# ★ 判据用**进程完整性级别**（`whoami /groups` 里的 `S-1-16-*`，≥0x3000=High/System），
+#   **不许**用"`acl_deny` 成不成功"—— 那会把「锁真被废了」误判成「环境受阻」，
+#   从而**掩盖真缺陷**（那正是这条判据要防的事）。
+# ★ 与 `scripts/verification_tests.py::_process_elevation`、
+#   `ci/drift_audit.py::_acl_audit_usable` **同源**（同一 whoami/S-1-16-/0x3000 规则）；
+#   三者防漂移由 `ci/inbox_guards_0400.py` 的 S32（结构判据）挡。
+_ACL_WRITE_TOKENS = frozenset({"W", "F", "M"})   # 数据写/完全控制/修改 —— 任一即"可写"
+_WHOAMI = os.path.join(_SYS32, "whoami.exe")
+_ELEVATION_CACHE = None
+
+
+def _decode_console(b):
+    """控制台输出解码：icacls/whoami 在中文 Windows 上是 GBK，不是 UTF-8。"""
+    for enc in ("utf-8", "gbk", "mbcs", "latin-1"):
+        try:
+            return b.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return b.decode("latin-1", "replace")
+
+
+def process_elevation():
+    """本进程是否处于**提权上下文**。返回 `(elevated, why)`。
+
+    `elevated`：True=提权；False=受限令牌**或查不出来**（查不出级别时按受限处理，
+    fail-closed：**不**相信 ACL 读取，宁可继续按"能写"处理，也不伪造"已上锁"）。
+    """
+    global _ELEVATION_CACHE
+    if _ELEVATION_CACHE is not None:
+        return _ELEVATION_CACHE
+    res = (False, "非 Windows：ACL 判据不适用")
+    if os.name == "nt":
+        try:
+            r = subprocess.run([_WHOAMI, "/groups"], capture_output=True, timeout=30,
+                               creationflags=_CREATE_NO_WINDOW)
+            out = _decode_console((r.stdout or b"") + (r.stderr or b""))
+            m = re.search(r"S-1-16-(\d+)", out)
+            if m is None:
+                res = (False, "whoami 输出无 S-1-16-* ⇒ 查不出完整性级别，ACL 读取不可信")
+            else:
+                lvl = int(m.group(1))
+                if lvl >= 0x3000:                       # 0x3000=High, 0x4000=System
+                    res = (True, "进程处于提权上下文（Mandatory Level S-1-16-%d ≥ 0x3000）" % lvl)
+                else:
+                    res = (False, "进程为受限令牌（Mandatory Level S-1-16-%d < 0x3000）" % lvl)
+        except Exception as e:                                       # noqa: BLE001
+            res = (False, "whoami 不可用（%s）⇒ 查不出完整性级别" % type(e).__name__)
+    _ELEVATION_CACHE = res
+    return res
+
+
+def acl_read_deny(path):
+    """读 ACL 判「当前用户是否**没有数据写权限**」。True=已拒写 / False=仍可写 / None=读不出来。
+
+    ★ 这是**提权下唯一有效的 oracle**：它读的是"锁有没有上"的直接证据（ACE），
+      而**与**"本进程能不能写"无关 —— 后者在提权令牌下恒为"能写"。
+    ★ 取当前用户**自己那条显式 ACE** 的权限串：`(RD,X,WDAC)` 里没有任何
+      `W/F/M` token ⇒ 拒写；同名多条 ACE 取并集（任一条可写即成可写）。
+    ★ 名字对不上（icacls 没列出该用户）⇒ 返回 None（**不许猜**）。
+    """
+    if os.name != "nt":
+        return None
+    try:
+        r = subprocess.run([_ICACLS, path], capture_output=True, timeout=20,
+                           creationflags=_CREATE_NO_WINDOW)
+        if r.returncode != 0:
+            return None
+        txt = _decode_console(r.stdout or b"")
+    except Exception:                                                # noqa: BLE001
+        return None
+    user = _user_sid()
+    found, writable = False, False
+    for m in re.finditer(re.escape(user) + r":((?:\([^)]*\))+)", txt):
+        found = True
+        toks = {t.strip().upper() for t in re.split(r"[(),\s]+", m.group(1)) if t.strip()}
+        if toks & _ACL_WRITE_TOKENS:
+            writable = True
+    if not found:
+        return None
+    return not writable
+
+
 def acl_deny(path):
     """拒绝写：移除继承，显式授 SYSTEM/Admins 完全控制 + 当前用户只读+改权限。
     Windows ACL 偶发瞬时失败（实测）→ 内部重试并用 is_denied 验证，返回是否锁住。
@@ -264,8 +416,8 @@ def acl_allow(path):
                    capture_output=True, timeout=20, creationflags=_CREATE_NO_WINDOW)
 
 
-def is_denied(path):
-    """探测：哨兵尝试在其中建临时文件——成功=未拦；PermissionError=已拦。"""
+def _write_probe_denied(path):
+    """原始写探针（0.41.0 起从 `is_denied` 拆出）——**非提权**进程下的正确 oracle。"""
     probe = os.path.join(path, ".shield_probe")
     try:
         with open(probe, "w") as f:
@@ -281,6 +433,28 @@ def is_denied(path):
             os.remove(probe)
         except OSError:
             pass
+
+
+def is_denied(path):
+    """探测：本目录是否**已被拒写**（哨兵/门闸的"锁有没有上"判据）。
+
+    ★★ 0.41.0（**根因修复**，本机实测 2026-10-09）：旧版**只用写探针**。写探针在
+      **非提权**进程下是对的，也仍是最直接的证据（所以**先跑**）。但 `acl_deny` 有意
+      保留 `Administrators:(OI)(CI)(F)`，而**提权令牌属于 Administrators** ⇒ 写探针
+      **必然成功** ⇒ 旧版把"已上锁"读成"没上锁"，`scan_once()` 遂发出**不成立的指控**
+      「有进程在对抗门闸」。
+      ⇒ 写探针说"能写"时**再问一句"我是不是提权"**：是 ⇒ 改看 `acl_read_deny()`
+        （锁有没有上的**直接证据**，与"本进程能不能写"无关）。
+    ★ **非提权路径行为与旧版逐字一致**（只把写探针拆成 `_write_probe_denied`）。
+    ★ fail-closed：ACL 读不出来（None）⇒ **不**声称已上锁，返回 False。
+    """
+    if _write_probe_denied(path):
+        return True
+    if process_elevation()[0] is True:
+        r = acl_read_deny(path)
+        if r is not None:
+            return bool(r)
+    return False
 
 
 # --------------------------------------- H 批次：闸门合理化（0.29.0）----
@@ -589,7 +763,9 @@ def _notify_icon_and_tip():
       不在这里重新判断"什么算失守"。
     """
     try:
-        st = guard_posture()
+        # ★ 0.37.1 修（0.35.3 同型漏改的调用点）：传包根 —— 不传则读中枢
+        #   rollup 链，与本包审计链可能不一致（实测相差 27000+ 秒）。
+        st = guard_posture(_pkg_root())
         s = st.get("state") if isinstance(st, dict) else None
     except Exception:                                          # noqa: BLE001
         s = None
@@ -690,6 +866,115 @@ def notify(title, body):
     _notify(title, body)
 
 
+# ══════════════ 通知账（展示层，独立于安全状态文件）══════════════
+# ★★★ 0.40.0（「四行失守」源②的另一半，2026-10-09）：
+#   气泡节流记账（"已弹过" / "已在值守台窗口里显示过"）是**展示层**的事，过去却写在
+#   **安全状态文件** `host_shield.json` 里，而且每次都是「读整份 → 改一个键 → 整份写回」。
+#   两条后果：
+#     ① 读失败时把默认值写回 ⇒ **编造"已撤防"** ⇒ 哨兵记一条 R0 假失守（source ②）；
+#     ② 与哨兵的 `save_state` 争用**同一个文件**（全程无锁）⇒ 撞车概率随会话数上升。
+#   ⇒ 移到中枢级展示账 `<hub>/notify_state.json`，**带文件锁**，**唯一写入口**。
+#   ★ 与 `hooks/pre_tool_use.py::notice_gate` **共用同一份文件**（同一口径：
+#     `<hub>/notify_state.json`，`ANTINEL_HUB_DIR` 可覆盖）—— 但键各带命名空间前缀，
+#     互不覆盖：`notice_gate` 用 `rule|snippet`；本模块用 `shown|*` 与 `sent|*`。
+#   ★ 失败方向：拿不到锁 / 读写异常 ⇒ **放弃这一次记账**（少记一次最多多弹一个泡，
+#     绝不许变成"写坏了安全状态"或"卡住钩子"）。
+_LEDGER_SHOWN = "shown|"        # 已在值守台窗口里显示过
+_LEDGER_SENT = "sent|"          # 已弹过气泡
+
+
+def notify_ledger_path():
+    """气泡降噪账的位置（**唯一口径**，与 `pre_tool_use.notice_state_path()` 同一份）。"""
+    return os.path.join(_hub_dir(), "notify_state.json")
+
+
+def ledger_read():
+    """读整份通知账（读不到 ⇒ 空 dict；**不抛**）。"""
+    try:
+        with open(notify_ledger_path(), encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:                                            # noqa: BLE001
+        return {}
+
+
+def ledger_get(key, default=None):
+    return ledger_read().get(key, default)
+
+
+def ledger_rmw(mutator):
+    """带锁的整份读-改-写（**通知账的唯一写入口**）。返回是否写成。
+
+    `mutator(d)` 就地修改并返回 d（返回假值则用原 d）。
+
+    ★ 锁复用 `audit_chain.acquire_lock`（**唯一实现**，不另写一套）。
+    ★ `hooks/pre_tool_use.py::notice_gate` 也走这一个入口（`|` 分隔的键不是合法
+      标识符，所以不能靠 `**kwargs`，必须传 mutator）。
+    """
+    lock = None
+    try:
+        _ensure_pkg_on_path()
+        import audit_chain
+    except Exception:                                            # noqa: BLE001
+        audit_chain = None
+    p = notify_ledger_path()
+    try:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        if audit_chain is not None:
+            lock = audit_chain.acquire_lock(p)
+        d = ledger_read()
+        d = mutator(d) or d
+        tmp = p + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, p)
+        return True
+    except Exception:                                            # noqa: BLE001
+        return False
+    finally:
+        if lock and audit_chain is not None:
+            try:
+                audit_chain.release_lock(lock)
+            except Exception:                                    # noqa: BLE001
+                pass
+
+
+def ledger_set(key, value):
+    """带锁的单键写（`ledger_rmw` 的薄封装）。"""
+    def _mut(d):
+        d[key] = value
+        return d
+    return ledger_rmw(_mut)
+
+
+def mark_notify_shown(kind):
+    """记「这件事已经在值守台窗口里显示过」。**只写展示账，绝不碰安全状态。**"""
+    return ledger_set(_LEDGER_SHOWN + str(kind), time.time())
+
+
+def mark_notify_sent(kind):
+    """记「这件事的气泡已经弹过」。**只写展示账，绝不碰安全状态。**"""
+    return ledger_set(_LEDGER_SENT + str(kind), time.time())
+
+
+def notify_sent_age(kind):
+    """上次弹泡距今多少秒；**没记过 ⇒ None**（`None` 由调用方按"该弹"处理）。"""
+    try:
+        v = ledger_read().get(_LEDGER_SENT + str(kind))
+        return None if v is None else time.time() - float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def notify_shown_age(kind):
+    """上次「已在窗口里显示」距今多少秒；没记过 ⇒ None。"""
+    try:
+        v = ledger_read().get(_LEDGER_SHOWN + str(kind))
+        return None if v is None else time.time() - float(v)
+    except (TypeError, ValueError):
+        return None
+
+
 def _notify_throttled(kind, body, force=False):
     """★ 0.36.5：降噪闸新增**「值守台此刻可见」**这一维 —— 根治右下角小泡泡。
 
@@ -708,6 +993,13 @@ def _notify_throttled(kind, body, force=False):
 
     ★ `force=True`（用户主动要求"马上告诉我"）**不豁免**：
       那是用户显式要的，不属于"重复通知"。
+
+    ★★★ 0.40.0：记账**移出安全状态文件**，改走中枢级「通知账」
+      （`<hub>/notify_state.json`，带锁、唯一写入口 —— 见本文件
+      `notify_ledger_path()` 上方那段）。修的是它过去那句
+      「读整份安全状态 → 改一个键 → 整份写回」：读失败时会把默认值
+      （`enabled=False`）写回真状态，凭空编造一次"已撤防"。
+      ⇒ **展示层的账，不许写在安全状态里。**
     """
     try:
         if force:
@@ -715,25 +1007,13 @@ def _notify_throttled(kind, body, force=False):
             return
         # ★ 窗口已可见 ⇒ 同一件事已用更完整的方式呈现 ⇒ 不再弹泡
         if console_is_visible():
-            # 留痕：不是"没通知"，是"已用窗口通知过了"。链上照样记。
-            try:
-                st = load_state()
-                st.setdefault("notify_shown_in_window", {})[kind] = time.time()
-                save_state(st)
-            except Exception:                                  # noqa: BLE001
-                pass
+            # 留痕：不是"没通知"，是"已用窗口通知过了"。进通知账，不进安全状态。
+            mark_notify_shown(kind)
             return
-        st = load_state()
-        sent = st.setdefault("notify_sent", {})
-        try:
-            last = float(sent.get(kind) or 0)
-        except (TypeError, ValueError):
-            last = 0.0
-        now = time.time()
-        if now - last < _NOTIFY_MIN_INTERVAL:
+        age = notify_sent_age(kind)
+        if age is not None and age < _NOTIFY_MIN_INTERVAL:
             return
-        sent[kind] = now
-        save_state(st)
+        mark_notify_sent(kind)
         _notify("Antinel 门闸", body, *_click_args())
     except Exception:
         pass
@@ -819,6 +1099,12 @@ def record(audit_dir, kind, **kw):
             if str(kw.get("severity", "warning")).lower() == "warning":
                 kw["severity"] = "critical"
     rec.update(kw)
+    # ★★ 0.40.0（A4 第二道）：凡是**能当"链背书"**的记录（`_BACKING_TYPES`），
+    #   一律自动盖**归属章** `scope` —— 在这一处盖章，所有写侧（CLI 的 unlock/
+    #   decide/enable/disable、zone 同步、放行窗到期、策略改写）**不用各自记得加**。
+    #   消费侧见 `_backing_fields_of()`：scope 不匹配的记录**不采纳**。
+    if kind in _BACKING_TYPES and not rec.get("scope"):
+        rec["scope"] = auth_scope()
     ok = _chain(audit_dir, rec)
     # 0.28.2/0.28.3：高危事件实时弹窗；host_shield_changed/tamper 入列（E1）；
     # force=True（拉锯判定/补锁失败）不节流。
@@ -861,6 +1147,26 @@ def _pkg_root():
     return os.path.dirname(os.path.abspath(__file__))
 
 
+def auth_scope():
+    """授权记录的**归属标识**：这条背书是写给**哪个哨兵**的。
+
+    ★★ 0.40.0（A4 的防御纵深，2026-10-09）：源①的根是「测试的授权写进了真链」
+      （`antinel zone add <临时目录>` 的授权落到真项目链 ⇒ 真哨兵去锁一个早已消失的
+      目录 ⇒ 93 条 R0「安全区加锁失败」）。**修根**是让 `antinel._shield_chain_dir()`
+      跟随中枢；本函数是**第二道**：授权记录带一个"归属"指纹（中枢目录 ＋ 包根），
+      哨兵**只采纳写给自己的那条** ⇒ 将来若又冒出一条新的泄漏路径，也不会被误采纳。
+
+    ★ 只在记录**带 `scope`** 时校验；旧记录（无 scope）照旧采纳 —— 链 append-only，
+      历史记录补不回来。方向：**新记录收紧，旧记录向后兼容**（不会因此误报）。
+    """
+    try:
+        raw = "%s|%s" % (os.path.normcase(os.path.abspath(_hub_dir())),
+                         os.path.normcase(os.path.abspath(_pkg_root())))
+        return "h:" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
+    except Exception:                                            # noqa: BLE001
+        return ""
+
+
 def _manifest_hash(rel):
     """psl/manifest.json 的 files[rel]（"sha256:..."）。缺失/不可读 → None（无法校验≠校验失败）。"""
     mp = os.path.join(_pkg_root(), "psl", "manifest.json")
@@ -877,6 +1183,66 @@ def _file_sha256(path):
             return "sha256:" + hashlib.sha256(f.read()).hexdigest()
     except OSError:
         return None
+
+
+# ═══════════════════ 版本承载件的哈希归一化（0.39.2・唯一真源）═══════════════════════
+#
+# ★★★ 为什么需要（待拍板② 的落地，交接件 §6）：
+#   `hooks/pre_tool_use.py` 同时是两样东西 ——
+#     · `ci/version_check.py::SPOTS` 的**版本承载件**之一（`_ANTINEL_VERSION = "…"`）；
+#     · `_GUARDED_CHAIN_FILES` 里**永不豁免**的「告警链路文件」。
+#   ⇒ 发版必须改它的版本行 ⇒ 它的哈希必然对不上 manifest ⇒ 自检报
+#     「与 manifest 不符（告警链路文件可能被改）」⇒ 命中 `DEV_NEVER_EXEMPT_MARKS`
+#     ⇒ `is_dev_build()` = False ⇒ `guard_posture()` 判 `warn` ⇒ 灯 **R0 失守**。
+#   ⇒ 即：**我方合法的发版动作，会被自己的界面报成"防线失守"**（假失守）。
+#
+# ★★★ 修法（创始人提案 A）：算哈希前，只把该行**引号内的值**替换成占位符；
+#   **行内注释、行号、其余字节全保留**。⇒ 改版本值 ⇒ 哈希不变；改该行**任何其它
+#   字符**（含行尾注释）或改**别的任何一行** ⇒ 哈希照变。保护面**没有变松**。
+#   ★ 为什么不整行替换：那会把行尾注释一起吞掉，白送一处盲区。
+#   ★ 为什么版本值可以从哈希里摘掉：它**已被 `ci/version_check.py`（10 处逐字一致）
+#     与 `tools/antinel_verify.py::_VERSION_HARD`（INV-3）独立守卫**，且不参与任何
+#     判定逻辑 ⇒ 摘掉不产生监控盲区（残留风险见本段末）。
+#
+# ★★★ 唯一真源纪律（交接件 §6.5）：**所有**算这个文件哈希的地方都必须用下面这对
+#   函数，禁止各自实现 —— 只改一侧 ⇒ 哈希**恒失配**，比不改更糟。
+#   消费方：本文件 `self_check()`、`scripts/build_package.py`（写 + 自举漂移探测）、
+#   `scripts/run_harness.py`（judgment digests）、`tools/antinel_verify.py`（两模式）。
+#   `ci/inbox_guards_0380.py` 的 S19 同时钉住"行为同法"与"结构上只有一个实现"。
+#
+# ★ 残留风险（如实记，不许说成"不产生任何盲区"）：归一化后，**该文件的版本值**这一处
+#   的运行时篡改不再被 `self_check()` 发现，只剩构建期 `version_check` / INV-3 会抓。
+#   版本值行为中性 ⇒ 影响有限，但**监控口径确实变小了一格**。
+VERSION_BEARING_CHAIN_FILES = ("hooks/pre_tool_use.py",)
+
+#: 只匹配**赋值行的引号值**：分组①=前缀（含左引号），分组②=右引号。
+_VERSION_VALUE_RE = re.compile(
+    rb'(?m)(^[ \t]*_ANTINEL_VERSION[ \t]*=[ \t]*")[^"\r\n]*(")')
+
+
+def norm_version_bytes(data):
+    """把 `_ANTINEL_VERSION = "…"` 的**引号内值**换成占位符（其余字节全保留）。
+
+    ★ 入参/返回都是 bytes —— 哈希一律按**原始字节**算，不吃换行/编码的亏。
+    ★ 幂等：对已归一化的字节再调用，结果不变。
+    """
+    return _VERSION_VALUE_RE.sub(rb"\1<NORMALIZED>\2", data)
+
+
+def file_digest(path, rel=None):
+    """**统一哈希口径**：`rel` 命中 `VERSION_BEARING_CHAIN_FILES` ⇒ 版本行归一化后算。
+
+    ★ 所有"拿盘上文件的哈希去和 psl/manifest.json 比"的地方都必须走这里
+      （见上方"唯一真源纪律"）。读不到 ⇒ None（无法校验 ≠ 校验失败）。
+    """
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError:
+        return None
+    if rel in VERSION_BEARING_CHAIN_FILES:
+        data = norm_version_bytes(data)
+    return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
 def _sha_hex(v):
@@ -1046,6 +1412,27 @@ def _dev_exempt_problems(problems):
     return ok, never
 
 
+# ★★ B1 撤回留档（2026-10-09，实测推翻，**勿重新加回**）：
+#   B1 曾在此处引入 `_is_source_checkout()` / `_protected_files()` /
+#   `_newest_protected_mtime()` / `_manifest_built_at()` / `_ts_txt()` 五个函数，
+#   想让"源码检出（有 `.git`）＋ 工作树比清单新"成为研发态的**第二个信号**，
+#   用来救"改了码却没改版本号"那一支（源③：`spawn_sentinel` 硬拦 ⇒ `spawn_failed`）。
+#
+#   **撤回理由＝前提事实不成立**（不是判据不许这么写）：
+#     实测本机**没有 pip 安装的 antinel**（两个解释器环境都查过，为空），
+#     跑哨兵的那份代码**就是源码检出**（`_pkg_root()` ＝ 仓库根，带 `.git`）
+#     ⇒ `_is_source_checkout()` **恒为 True** ⇒ 那条信号**永远成立**
+#     ⇒ "已出厂"这个概念直接作废。
+#     后果不是"更宽松"，而是**把真篡改装成蓝灯**：AI 改 `host_shield.py`
+#     （哨兵自己的代码）命中同一支 ⇒ 判"研发中" ⇒ R0 降 L1
+#     —— 正是本仓要抓的那件事，被自己的判据放过。
+#     附：`.git` 也**不是**防伪信号（生产包里 `git init` 一样为真）。
+#   命中它的判据（真红，非腐化）：`ci/inbox_guards_0363.py` R06 / R07 负控 / R13
+#     —— 三条都在说同一件事：**已出厂 ＋ 自检不符 ⇒ 必须 warn/拦，不许判研发态**。
+#   ⇒ 研发态**只认「版本落差」这一个可复算信号**；改码期的正确做法是
+#     **重建清单或升版本**（构建链本来就要做这一步）。
+
+
 def is_dev_build():
     """★ 是不是**研发态**（代码比登记的新 ⇒ 这一版还没出厂）。
 
@@ -1066,6 +1453,12 @@ def is_dev_build():
       · 登记版本 >= 代码版本 ⇒ **不是**研发态 ⇒ 自检不符按真篡改报
       · 版本取不到（manifest 缺失 / 解析失败）⇒ **不是**研发态
         （取不到就当"不是"，方向是往严的一边偏，不是往松的一边）
+      · ★★★ 0.40.0：**版本落差是唯一来源，没有第二条**。
+        曾经试过第二条（`_is_source_checkout()` ＋ mtime：源码检出 ＋ 工作树比
+        清单新 ⇒ 研发态），**已实测推翻并撤回**（见上方「B1 撤回留档」）：
+        本机没有 pip 安装，跑哨兵的就是源码检出 ⇒ 那条信号恒真 ⇒ "已出厂"作废
+        ⇒ 真篡改被读成"研发中"。**不许再引入任何环境性信号**（`.git`／mtime／
+        路径形状）—— 它们在本部署上恒真，而且都可伪造，等于把这一支放开。
 
     ★★★ 0.36.4：研发态**必须自动收敛**（创始人 2026-10-07
       「研发中可能只是初始状态，过很短的时间，还是要变成值守中」）——
@@ -1103,6 +1496,17 @@ def is_dev_build():
             return False, ("取不到版本对照（登记 %r／代码 %r）"
                            " ⇒ 不按研发态处理" % (inst, code))
         if inst == code:
+            # ★★★ 0.40.0：**版本相等 ⇒ 已出厂**。这一支**不许再放宽**。
+            #   ★ B1 撤回（2026-10-09，实测推翻）：B1 原想在这里追加
+            #     「源码检出（有 `.git`）＋ 工作树比清单新」当研发态，用来救
+            #     "改了码却没改版本号"（源③）。撤回理由是**前提事实不成立**：
+            #       本机**没有 pip 安装的 antinel**（两个解释器环境都实测为空），
+            #       跑哨兵的那份代码**就是源码检出** ⇒ `_is_source_checkout()`
+            #       **恒为 True** ⇒ 那条信号永远成立 ⇒ "已出厂"直接作废。
+            #     后果不是"更宽松"，是**把真篡改装成蓝灯**（AI 改 host_shield.py
+            #     也走这一支）⇒ R0 降 L1。详见本文件上方「B1 撤回留档」。
+            #   ⇒ 判据：**版本落差是研发态的唯一起源**。
+            #     改码期的正确做法是**重建清单或升版本**，不是放宽这一支。
             return False, "登记版本与代码版本一致（%s）⇒ 已出厂，不算研发态" % code
         newer = _ver_lt(inst, code)
         if newer is None:
@@ -1205,9 +1609,12 @@ def self_check():
         if mh and lv and mh != lv:
             problems.append("%s 与 manifest 不符（登记表可能被毒化）" % rel)
     # ★ 告警链路上的关键文件（改它们 = 改"门怎么响"）
+    # ★★ 0.39.2：比对走 `file_digest(…, rel)`（**统一口径**）——
+    #   版本承载件（`hooks/pre_tool_use.py`）先归一化再算哈希，其余文件照旧按原始字节。
+    #   ★ 必须与 `scripts/build_package.py` 写 manifest 时**同法**；只改一侧 ⇒ 恒失配。
     for rel in _GUARDED_CHAIN_FILES:
         mh = _manifest_hash(rel)
-        lv = _file_sha256(os.path.join(root, rel.replace("/", os.sep)))
+        lv = file_digest(os.path.join(root, rel.replace("/", os.sep)), rel)
         if mh and lv and mh != lv:
             problems.append("%s 与 manifest 不符（告警链路文件可能被改）" % rel)
     return (not problems), problems
@@ -1317,9 +1724,10 @@ def spawn_sentinel(pkg_root, python_exe=None):
         # 进程在、心跳断了 ⇒ 它已经不算在岗。清掉登记并结束它，
         # 否则它会一直占着 pid，也让新哨兵起不来。
         _kill_stale(st.get("sentinel_pid"))
-        st = load_state()
-        st["sentinel_pid"] = None
-        save_state(st)
+        # ★ 0.40.0：改走**按字段更新**（读不到就一个字都不写）——
+        #   旧写法 `st = load_state(); st[...] = None; save_state(st)` 在
+        #   状态文件读坏时会**把默认值整份写回**（源②）。
+        update_state_fields(sentinel_pid=None)
     ok_self, problems = self_check()
     if not ok_self:
         # ★★★ 0.36.3：**研发态不拦住哨兵启动**（实测发现的连带缺陷）。
@@ -1349,10 +1757,10 @@ def spawn_sentinel(pkg_root, python_exe=None):
             p = subprocess.Popen(argv, creationflags=flags,
                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                  stderr=subprocess.DEVNULL, close_fds=True)
-            st = load_state()
-            st["sentinel_pid"] = p.pid
-            st["sentinel_started_at"] = datetime.now().isoformat(timespec="seconds")
-            save_state(st)
+            # ★ 0.40.0：只写这两个字段（读不到就一个字都不写）
+            update_state_fields(
+                sentinel_pid=p.pid,
+                sentinel_started_at=datetime.now().isoformat(timespec="seconds"))
             return True, p.pid, mode
         except (OSError, ValueError):
             continue                              # breakaway 被策略禁止 → 降级重试
@@ -1515,7 +1923,12 @@ def _backing_fields_of(recs, window=_BACKING_WINDOW, now=None):
     """
     out = set()
     now = time.time() if now is None else now
+    _mine = auth_scope()
     for rec in recs or ():
+        # ★ 0.40.0（A4 第二道）：不是写给**这个**哨兵的授权 ⇒ 不采纳。
+        #   只在记录带 scope 时校验（旧记录无 scope ⇒ 照旧采纳，见 auth_scope()）。
+        if _mine and rec.get("scope") and rec["scope"] != _mine:
+            continue
         fld = _backing_field(rec)
         if not fld or fld in out:
             continue
@@ -1802,8 +2215,8 @@ def ensure_alive(pkg_root, cause="manual"):
                           % (age_txt, old_pid, cause),
                    cause=cause)
             return "spawn-failed"
-        st["last_revive_attempt"] = now
-        save_state(st)
+        # ★ 0.40.0：按字段更新（旧写法在 state 读坏时会把默认值整份写回）
+        update_state_fields(last_revive_attempt=now)
         ok, pid, mode = spawn_sentinel(pkg_root)
         if ok:
             record(audit_dir, "host_shield_revived", decision="allow", severity="warning",
@@ -1811,6 +2224,7 @@ def ensure_alive(pkg_root, cause="manual"):
                    pid=pid, cause=cause, spawn_mode=mode)
             return "revived"
         record(audit_dir, "host_shield_spawn_failed", decision="deny", severity="critical",
+               subkind="spawn_failed",
                reason="哨兵死亡（旧 pid=%s）且拉起失败（cause=%s，mode=%s）——门闸无人值守"
                       % (old_pid, cause, mode), cause=cause)
         return "spawn-failed"
@@ -1856,10 +2270,35 @@ POSTURE_ALL = frozenset((
 #   ⇒ **失守必须说得出损失**。缺岗但无监管对象时，只配叫「中断」——
 #     它仍然黄灯、仍然给「马上修复」，但**不许**冒充"防线失守"。
 #     红/黄的分界＝`_outage_consequences()` 是否为空（可复算，不是感觉）。
+#: ★★ 姿态 → 人话标签。**词表与六态对齐**（创始人 2026-10-09：
+#:   「哨兵状态是 LOGO 五态加上开发态一共六态，这个要从机制上钉死，
+#:     不要再杜撰其他什么态」）。
+#:
+#:   ⇒ 允许出现的词**只有**：六态标签（失守/拦截/注意/缺粮/值守中/研发中）
+#:     ＋ L0 的灰变体「未启用」＋ 一个**创始人自己定名**的姿态词「中断」
+#:     （2026-10-06 原话：「缺岗但无监管对象 ⇒ 只配叫『中断』」）。
+#:   ⇒ 历史遗留的 `warn → "存疑"` / `unknown → "查不到"` / `interrupted →
+#:     "中断·无损失"` 三个词**已删**：前两个是 8 态灯时代 AI 自己长出来的
+#:     派生态词（创始人定性「主观臆想，要去掉」），第三个是把两件事挤进一个
+#:     标签。它们都属"杜撰的态"。
+#:   ★ 判据 `ci/inbox_guards_0372.py` S04 守这条：值必须落在允许集内，
+#:     多一个词就报红 —— **词表漂移从此是红灯，不是靠人记得**。
+#:   ★ 注意 `warn` 的标签是「失守」而不是「注意」：`light()` 对 `warn`
+#:     走 fail-closed 判 R0（认不出守门的代码就按裸奔算，见 `_posture_direct`），
+#:     姿态标签必须与灯色**同一套词**，否则同一时刻会出现两种叫法。
 POSTURE_LABEL = {POSTURE_OFF: "未启用", POSTURE_GUARDING: "值守中",
-                 POSTURE_DOWN: "失守", POSTURE_INTERRUPTED: "中断·无损失",
-                 POSTURE_WARN: "存疑", POSTURE_DEV: "研发中",
-                 POSTURE_UNKNOWN: "查不到"}
+                 POSTURE_DOWN: "失守", POSTURE_INTERRUPTED: "中断",
+                 POSTURE_WARN: "失守", POSTURE_DEV: "研发中",
+                 POSTURE_UNKNOWN: "注意"}
+
+#: ★★ 姿态标签的**封闭词表**（判据 S04 的真源，只此一处）。
+#:   改这里＝改产品词汇；判据会跟着它，但**新增词必须在同一轮里说清来路**，
+#:   否则就是又一次"AI 自己长出来的态"。
+POSTURE_LABEL_ALLOWED = frozenset((
+    "失守", "拦截", "注意", "缺粮", "值守中", "研发中",   # 六态标签
+    "未启用",                                            # L0 灰变体
+    "中断",                                              # 创始人定名（缺岗无损失）
+))
 
 
 #: ④ 号后果的扫描上限：受监管落点多到离谱时**不许**把页面拖死（超限只报数不列全）。
@@ -1958,13 +2397,19 @@ def guard_posture(pkg_root=None):
       ① `armed`（链权威）为假 ⇒ **未启用**。这不是"失守" —— 默认全关是产品第一
          原则，把"没开"渲染成"坏了"会把红灯变成噪音。
       ② armed 且哨兵进程在岗、心跳新鲜、自检通过 ⇒ **值守中**。
-      ③ armed 且哨兵在岗、心跳新鲜，但**自检不符** ⇒ **存疑（黄）**。
-         "我认不出守门的是不是出厂那份" ≠ "此刻没在守"（查不出来 ≠ 查出来是坏的）。
+      ③ armed 且哨兵在岗、心跳新鲜，但**自检不符**（且非研发态）⇒ **失守（红）**。
+         ★ 分档轴是**这条姿态有没有下一条"正面成立"的断言**：
+           `warn` 下的是「跑的这份守门代码 ≠ 登记的那份 ⇒ 防线**不可信**」——
+           这是一条**已证实、且指向防线失败**的断言 ⇒ fail-closed，记 **R0**。
+           （对照 ⑤ 的 `unknown`：探针抛错 ⇒ **什么都没断言** ⇒ 只配 L1，不许冒充 R0。）
+         ★ 别再退回 8 态灯时代那个"认不出就是黄"的旧说法：它与
+           `POSTURE_LABEL[POSTURE_WARN]="失守"` 打架（实现改了、说明没改＝假来源）。
+           ★ 判据 `ci/inbox_guards_0380.py` 的 **S18** 钉住"docstring＝实现"。
       ④ armed 但哨兵不在岗 / 心跳断档超 `_STALE_AFTER` ⇒ 按后果分两档：
          · 有可指认的后果（`_outage_consequences` 非空）⇒ **失守（红）**
          · 无任何监管对象 ⇒ **中断·无损失（黄）**（★ 说不出损失的失守＝假失守）
-      ⑤ 任一探针抛错 ⇒ **查不到**（绝不返回"值守中"——把盲区读成清白是本仓
-         明令禁止的形状）。
+      ⑤ 任一探针抛错 ⇒ **注意（L1，盲区）** —— 绝不打绿（"探不到" ≠ "没问题"），
+         但也**不许**冒充 R0：它**没有**下任何"防线失败"的正面断言。
     """
     try:
         st = load_state()
@@ -1972,7 +2417,11 @@ def guard_posture(pkg_root=None):
         armed = armed_state(audit_dir, st)
         if not armed:
             return {"state": POSTURE_OFF, "label": POSTURE_LABEL[POSTURE_OFF],
-                    "why": "护盾默认关闭。开启后才会拦、才会记账。",
+                    # ★ 0.37.3：主语改「哨兵」（页面上**唯一**的守护角色；护盾是
+                    #   它手里的工具，不是另一个可以"关着"的东西）。措辞与
+                    #   `inbox_model.base_state("off")` 逐字一致 —— 同一时刻两处
+                    #   说同一件事，不能两种说法。
+                    "why": "哨兵默认没在值守。开启后才会拦、才会记账。",
                     "evidence": {"armed": False}, "can_fix": False, "fix": None,
                     # ★ 0.35.3：**不给按钮**。开启要装一个开机自启任务（要管理员权限），
                     #   值守台点一下**做不到** —— 给个点了没用的按钮，就是"假按钮"
@@ -2085,11 +2534,18 @@ def guard_posture(pkg_root=None):
         # ★★ 缺岗：**先量后果，再决定它是红（失守）还是黄（中断·无损失）**。
         #   红必须说得出损失；说不出 ⇒ 不许冒充"防线失守"（创始人 2026-10-06）。
         cons = _outage_consequences(st, pkg_root)
+        # ★ 0.37.3：这两句**会被渲染到页面顶部条**（`light_explain()` 把
+        #   `guard_posture()["why"]` 当"此刻"那一维的原话直接用）⇒ 属人类面。
+        #   旧文案写「护盾开着…门闸此刻没人守」—— 一句话里出现了**三个名字**
+        #   指同一件事（护盾/门闸/哨兵），正是创始人点名的违和感。
+        #   ⇒ 人类面只留「哨兵」；「防护」作中性名词描述开着这件事。
+        #   `门闸` 仍是**记录层**的历史写法（链记录原文不改写），但它不该
+        #   出现在这两句返回给页面的文案里。
         if not alive:
-            why = "护盾开着，但哨兵进程不在岗——门闸此刻没人守。"
+            why = "防护开着，但哨兵进程不在岗——此刻没人值守。"
         else:
-            why = ("护盾开着，哨兵进程在，但心跳断档 %s（应 ≤10 分钟）——疑似挂起/僵死。"
-                   % (("%.0f 分钟" % (age / 60.0)) if age is not None else "（查不到心跳）"))
+            why = ("防护开着，哨兵进程在，但心跳断档 %s（应 ≤10 分钟）——疑似挂起/僵死。"
+                   % (("%.0f 分钟" % (age / 60.0)) if age is not None else "（读不到心跳）"))
         if _code_untrusted:
             why += " 另外，这份守门的代码我也认不出是不是出厂那份。"
         if not cons:
@@ -2097,7 +2553,7 @@ def guard_posture(pkg_root=None):
             #   仍然黄灯、仍然给「马上修复」——**不隐藏**，只是不冒称"失守"。
             return {"state": POSTURE_INTERRUPTED,
                     "label": POSTURE_LABEL[POSTURE_INTERRUPTED],
-                    "why": why + " 不过此刻门闸**没有监管对象**"
+                    "why": why + " 不过此刻哨兵**没有监管对象**"
                                  "（无放行窗、无安全区、无受监管工作区、无受监管落点），"
                                  "所以这段时间没有放过任何东西。",
                     "evidence": ev, "consequences": [], "can_fix": True,
@@ -2108,9 +2564,9 @@ def guard_posture(pkg_root=None):
                 "fix_hint": "马上修复（重新拉起哨兵）"}
     except Exception as e:                                   # noqa: BLE001
         return {"state": POSTURE_UNKNOWN, "label": POSTURE_LABEL[POSTURE_UNKNOWN],
-                "why": "探不到门闸状态：%r" % (e,), "evidence": {},
+                "why": "探不到哨兵状态：%r" % (e,), "evidence": {},
                 "consequences": None, "can_fix": False, "fix": None,
-                "fix_hint": "这是**盲区**，不等于「没问题」"}
+                "fix_hint": "这是「盲区」，不等于「没问题」"}
 
 
 def guard_fix(pkg_root=None, action=None):
@@ -2127,7 +2583,7 @@ def guard_fix(pkg_root=None, action=None):
                 p2 = guard_posture(pkg_root)
                 return (p2["state"] == POSTURE_GUARDING,
                         "已重新拉起哨兵（%s）——%s" % (r, p2["why"]))
-            return False, "没拉起来（%s）——门闸仍无人值守，请看运行状态页" % (r,)
+            return False, "没拉起来（%s）——此刻仍无人值守，请看运行状态页" % (r,)
         if action == "enable":
             return False, ("开启值守要写 ACL 与自启项，请在终端由你本人执行："
                            "antinel host-shield enable")
@@ -2280,10 +2736,32 @@ def scan_once(root, state, audit_dir, regs=None):
         zpath = expand(z)
         if os.path.isdir(zpath) and not is_denied(zpath):
             _ok = acl_deny(zpath)
+            # ★★ 0.40.0：成功/失败必须写进**结构化字段** `subkind`。
+            #   为什么（实测缺陷）：`host_shield_zone_locked` 这一个 kind **兼表成败**，
+            #   而它的级别与标题是按 kind 定的（R0 /「失守：安全区加锁失败」）⇒
+            #   **一条"上锁成功"会被渲染成 R0 失守 + 要你处理**。
+            #   实测本机 2 条 `安全区已上锁` 记录正是这样（`inbox_model._zone_lock_failed`
+            #   声称"按记录判成败"，但 `remediation._kind_of` 对这两种记录返回同一个值
+            #   ⇒ 那个机制一直是**空转的**）。
+            #   ⇒ 写 side 把区分**结构化**；读 side（`remediation._kind_of`）按它分派，
+            #     历史记录没有这个字段时才退回 `severity`（也是结构化字段）。
+            # ★★ 0.41.0：**文案不许冤枉人**。旧文案写「有进程在对抗门闸」——
+            #   实测真因是 `is_denied()` 的写探针在**提权令牌**下量不到 deny
+            #   （见本文件 `process_elevation` / `acl_read_deny` 的注释），
+            #   与「有人在对抗」是两回事。此处对齐 H-7 在补锁路径上的既有措辞：
+            #   只陈述事实（ACL 未能限制写入），**不**做不成立的归因。
+            #   ★ 0.42.0：文案里的 markdown 加粗（`**不等于**`）被 `0360 W01`
+            #     「页面无 markdown 星号」抓到 —— 值守台把 `**` 当字面文本显示，
+            #     用户会看到一对裸星号。这是 **0.41.0 修 S34 时我自己引入的回归**，
+            #     直到 0.42.0 才被 W01 抓住（"修好 A 却弄坏 B"的又一实例）。
+            #     改成引号限定，**不弱化语义**：「不等于」三个字必须留着（S34 守着它）。
             record(audit_dir, "host_shield_zone_locked", decision="deny",
                    severity="warning" if _ok else "critical",
+                   subkind="zone_ok" if _ok else "zone_lock_failed",
                    reason=("安全区已上锁（区内防篡改；出网由 net_mode 把闸）：%s" if _ok
-                           else "安全区【上锁失败】——有进程在对抗门闸，须人工介入：%s") % zpath)
+                           else "安全区【上锁未生效】——本目录 ACL 未能限制写入"
+                                "（可核：icacls 该目录）；注意：「不等于」有进程在对抗门闸：%s")
+                          % zpath)
             touched = True
     now = time.time()
     if now - state.get("last_task_check", 0) >= 300:   # #6: 任务哨卫（5 分钟一查）
@@ -2526,17 +3004,37 @@ def run_sentinel(root):
     if _old and _old != os.getpid() and pid_alive(_old):
         return
     # 启动自检（B4e/f）：不符大声说，照常执法（进程内代码仍是装运版）
+    # ★★★ 0.40.0（B2）：**先问"这是不是研发态"，再决定它是什么类型的事件**。
+    #   研发期自检**必然**不符（登记停在发版那一刻），那是**范畴事实**，不是防线失守。
+    #   记 `host_shield_dev_drift`（**另一种类型**，不是 severity 更低的 tamper）——
+    #   因为"防线失守"这个判断本身就是**错的**；类型错了，读者层再修也修不回来。
+    #      · `host_shield_dev_drift` ⇒ 值守台 L1（注意）＋ 不进"要处理"；**不弹气泡**
+    #        （它不在 `_ALERT_KINDS` 里 —— 研发噪声不该敲门）。
+    #      · 已出厂（登记版本 ≥ 代码版本、或不是源码检出）⇒ 照旧 `host_shield_tamper`
+    #        critical ⇒ **R0**（负控；判据 S25）。
+    #   ★ 自检本身一个字不改（照旧跑、照旧报）—— 只是**分类正确**了。
     ok_self, problems = self_check()
     if not ok_self:
-        record(audit_dir, "host_shield_tamper", decision="deny", severity="critical",
-               field="self-check", subkind="self_check",
-               reason="哨兵启动自检不符：" + "；".join(problems))
+        _is_dev, _dev_why = is_dev_build()
+        if _is_dev:
+            record(audit_dir, "host_shield_dev_drift", decision="deny", severity="warning",
+                   field="self-check", subkind="code_drift",
+                   reason="研发态：代码与登记表不符（改动未重建清单）——"
+                          "这一版还没发出去，不是防线失守；哨兵照常在岗。"
+                          + "；".join(problems))
+        else:
+            record(audit_dir, "host_shield_tamper", decision="deny", severity="critical",
+                   field="self-check", subkind="code_drift",
+                   reason="哨兵启动自检不符：" + "；".join(problems))
     # armed 权威（B4b 系）：链有据→链；无据→state 文件（残差见模块头）
     chain_armed = chain_armed_scan(audit_dir)
     armed = bool(state.get("enabled")) if chain_armed is None else chain_armed
     if chain_armed is not None and chain_armed != bool(state.get("enabled")):
+        # ★★ 0.40.0（A3）：这条的下半句就是"以链为准"——紧接着的
+        #   `state["enabled"] = armed` 已经把它**修好了** ⇒ 必须带 `recovered=True`
+        #   （结构化"已自愈、无后果"），否则它冒充 R0 失守（源②的假失守之一）。
         record(audit_dir, "host_shield_tamper", decision="deny", severity="critical",
-               field="enabled",
+               field="enabled", subkind="state_drift", recovered=True,
                reason="state 文件 enabled=%s 与审计链最近状态（%s）不一致——以链为准。"
                       "如非本人操作请检查；需变更请走 antinel host-shield enable/disable"
                       % (state.get("enabled"), "armed" if chain_armed else "disarmed"))
@@ -2547,7 +3045,9 @@ def run_sentinel(root):
     tail = _ChainTail(audit_dir)
     state["sentinel_pid"] = os.getpid()
     state["sentinel_started_at"] = datetime.now().isoformat(timespec="seconds")
-    save_state(state)
+    # ★ 0.40.0：哨兵**是布防位的执法权威**（它手里的 armed 取自链权威）
+    #   ⇒ 显式声明 allow_disarm —— 否则"链说撤防、哨兵照着写 false"会被那道闸挡下。
+    save_state(state, allow_disarm=True)
     # B4f（0.28.3）：登记表运行期防毒——启动缓存基线，之后每 5 拍校验一次：
     # 文件变了先问 manifest（自检）：相符=合法更新→采纳；不符=被毒→tamper+按缓存执法。
     regs = load_watch_registry(root)
@@ -2576,11 +3076,18 @@ def run_sentinel(root):
             #     【实测缺口】首版只在启动时比对一次，运行期翻转静默无痕（drill v2）。
             if bool(state.get("enabled")) != armed:
                 state["enabled"] = armed
-                save_state(state)
+                save_state(state, allow_disarm=True)     # ★ 哨兵＝执法权威（见上）
                 if time.time() - _DIVERGE_LAST[0] > 1800:
                     _DIVERGE_LAST[0] = time.time()
                     record(audit_dir, "host_shield_tamper", decision="deny",
                            severity="critical", field="enabled",
+                           subkind="state_drift",
+                           # ★★ 0.40.0（A3）：这条**已经自动愈合**（本函数刚把
+                           #   enabled 回写成链权威）⇒ 必须带**结构化标记**
+                           #   `recovered=True`，让值守台按字段降档到"看一眼"。
+                           #   过去缺这个标记 ⇒ 33 条自愈事件冒充 R0 失守
+                           #   （全链 30 天只有 3 条打对了标记）。
+                           recovered=True,
                            reason="state 文件 enabled 在运行期被改为 %s，与链权威（%s）不一致"
                                   "——已回写恢复。如非本人操作请检查；变更请走 "
                                   "antinel host-shield enable/disable"
@@ -2599,8 +3106,8 @@ def run_sentinel(root):
                 if _tamper:
                     record(audit_dir, "host_shield_tamper", decision="deny",
                            severity="critical", field="state", reason=_tamper,
-                           recovered=True)
-                    save_state(state)
+                           subkind="state_drift", recovered=True)
+                    save_state(state, allow_disarm=True)   # ★ 哨兵＝执法权威
             else:
                 fp, last_good, grace = fp2, json.loads(json.dumps(state)), 0
             # 3) 心跳（armed 才打；monotonic 计时）
@@ -2621,7 +3128,7 @@ def run_sentinel(root):
                     elif time.time() - _REG_TAMPER_LAST[0] > 1800:
                         _REG_TAMPER_LAST[0] = time.time()
                         record(audit_dir, "host_shield_tamper", decision="deny",
-                               severity="critical", field="registry",
+                               severity="critical", field="registry", subkind="code_drift",
                                reason="登记表与 manifest 不符（疑似运行期投毒）——按启动缓存执法："
                                       + "；".join(prob_regs)[:120])
             scan_once(root, state, audit_dir, regs=regs)

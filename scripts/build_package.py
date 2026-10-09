@@ -116,6 +116,22 @@ def _find_src_root():
 
 SRC = _find_src_root()
 
+# ★★★ 0.39.2：版本行归一化 —— **唯一真源在 host_shield.py**，这里 import 它。
+#   为什么必须 import 而不是在本构建器里再写一份正则：算 `hooks/pre_tool_use.py`
+#   哈希的地方（本构建器写 manifest / `host_shield.self_check()` / `run_harness`
+#   的 judgment digests / `tools/antinel_verify.py`）**必须同法**；
+#   只改一侧 ⇒ 该文件哈希**恒失配**，比不改更糟（交接件 §6.5 / §6.7）。
+#   ⇒ 本文件**不定义**归一化，只消费；判据 `ci/inbox_guards_0380.py` S19 钉这条。
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+try:
+    import host_shield as _hs
+except Exception as _hs_e:                                     # noqa: BLE001
+    raise SystemExit(
+        "★ 构建器拿不到版本行归一化函数（host_shield）：%r\n"
+        "  hooks/pre_tool_use.py 是版本承载件之一 —— 两侧必须同法归一化，\n"
+        "  只改一侧会让它的哈希恒失配（比不改更糟）。" % (_hs_e,))
+
 
 def srcfile(rel):
     """把**逻辑名或相对路径**解析成 SRC 下的真实路径（经布局表）。
@@ -174,7 +190,7 @@ HARNESS_SRC = SRC / "scripts" / "verification_tests.py"
 if not HARNESS_SRC.is_file():
     raise SystemExit("★ 构建器找不到套件：%s\n  （产物仓构建必须用本仓的套件）" % HARNESS_SRC)
 NAME = "antinel-security"
-VERSION = "0.37.0"
+VERSION = "0.42.1"
 # P-A3: the namespace this build declares itself under. derive_object_ownership()
 # reads git remote first, then THIS field; fail-closed unattributed when neither
 # resolves. Kept beside the hashes so a third party can see what was declared.
@@ -249,7 +265,10 @@ py-modules = ["antinel", "audit_chain", "session_dna", "strings",
               "glossary",
               # ★ 0.36.0 窗口几何 + 失守归因（两个新模块，
               #   与 build() 里的 root_mod 复制清单逐字一致）
-              "inbox_window", "remediation"]
+              "inbox_window", "remediation",
+              # ★ 0.38.0 粮（哨兵口粮）＋ 机器唯一码（两个新模块，
+              #   与 build() 里的 root_mod 复制清单逐字一致）
+              "granary", "machine_id"]
 packages = ["hooks", "scripts", "tools", "rules", "psl", "assets", "challenge"]
 
 [tool.setuptools.package-data]
@@ -837,6 +856,19 @@ def sha256(p):
     return "sha256:" + hashlib.sha256(Path(p).read_bytes()).hexdigest()
 
 
+def _manifest_hash_of(rel, path):
+    """**写进 psl/manifest.json 的文件哈希**（唯一口径）。
+
+    ★★ 0.39.2：`rel` 命中 `host_shield.VERSION_BEARING_CHAIN_FILES` ⇒ 先把
+      `_ANTINEL_VERSION` 的**引号内值**归一化掉再算（版本行不进完整性哈希）。
+      归一化函数**只此一处定义**（host_shield），本文件只 import 它 —— 见 `SRC` 段注释。
+    """
+    if rel in getattr(_hs, "VERSION_BEARING_CHAIN_FILES", ()):
+        data = Path(path).read_bytes()
+        return "sha256:" + hashlib.sha256(_hs.norm_version_bytes(data)).hexdigest()
+    return sha256(path)
+
+
 
 README_MD = """# Antinel Security Suite
 
@@ -1134,7 +1166,7 @@ def _verify_plugin_matches_package(manifest_files, plug_root):
         f = dest / rel
         if not f.is_file():
             missing.append(rel)
-        elif want is not None and sha256(f) != want:
+        elif want is not None and _manifest_hash_of(rel, f) != want:
             drift.append(rel)
     if missing or drift:
         raise SystemExit("plugin self-check FAILED: %d missing %s | %d drifted %s"
@@ -1316,7 +1348,10 @@ def _verification_evidence(pkg, final):
         for base in (pkg, final):
             f = Path(base) / rel
             if f.is_file():
-                got = sha256(f)
+                # ★★ 0.39.2：judgment 的 digests 由 `scripts/run_harness.py` 的
+                #   `sha()` 产出（版本承载件已归归一化）⇒ 这里必须**同法**，
+                #   否则 `hooks/pre_tool_use.py` 会被判成"digest 不符"（假缺陷）。
+                got = _manifest_hash_of(rel, f)
                 break
         if got is None:
             bad.append("%s: missing" % rel)
@@ -1589,6 +1624,71 @@ def _assert_package_data_covered(pkg, manifest_lines):
     return True
 
 
+def _refresh_skill_selfcert(pkg, final, harness_rc):
+    """★★★ 0.42.0：把 SKILL.md 自证卡的刷新点从**装配时**移到**harness 之后**。
+
+    ★ 为什么必须移（2026-10-09 本班实测的结构性死锁）：
+
+      装配时调 `_verification_evidence()` 必然返回 `ok=False` —— 因为那份判定记录
+      是**上一次运行**的输入，描述的是**上一次的字节**；而本次刚改过受覆盖文件
+      （0.42.0 改了 `scripts/report.py`，它在 COVERED 里）⇒ digests 必然不符
+      ⇒ 自证卡被写成 `psl-verified: "false"` ＋ `at: ""`。
+
+      然后 `_merge(pkg, final)` 把这个 false **覆盖回源码仓**（final 就是仓本身），
+      而 `_reconcile_src` 的看守清单只有 `run_harness.py` 一个文件 ⇒ **无人发现**。
+
+      接着 harness 跑两次、ship 第二次记录 —— 此时记录**确实描述本次字节**了，
+      但自证卡已经写完，**没有回头刷新** ⇒ 发布物与仓库都停在 false。
+
+      ⇒ 闸门的 version/regression 两条读仓库 SKILL.md ⇒ 红 ⇒ 构建被拦
+        ⇒ harness 不跑 ⇒ 记录不刷新 ⇒ **死锁**。
+
+      这与 README.md 那次（2026-09-24 G7「REPO-OWNED，不是 builder output」）
+      是**同一条病**：同一事实两处副本，构建器用生成物覆盖仓源。
+      README 的解法是"构建器不写"；SKILL.md 不能照抄 —— 它的自证卡**必须**随
+      每次验证更新，不写就是手工活（＝又一件"包装成待办"）。
+
+      ⇒ 本函数的解法：**只重写自证卡那 4 行，正文一字不动**；
+        且只在 harness 成功（rc==0）时才敢写 true —— 失败就保持 false，说真话。
+
+    ★ 位置纪律：必须在 harness **之后**、`_reconcile_src` **之前**。
+    """
+    if harness_rc != 0:
+        print("!! SKILL.md 自证卡不刷新：harness rc=%d（记录不可信，保持 false 说真话）" % harness_rc)
+        return False
+    ok, at, detail = _verification_evidence(pkg, final)
+    new_verified = "true" if ok else "false"
+    new_at = at if ok else ""
+    new_ev = (("live PreToolUse block of a real .env read in ZCode (SEC-01) plus a full-assertion "
+               "judgment run; digest check %s" % detail) if ok
+              else ("NOT VERIFIED for this build: %s" % detail))
+    changed = []
+    for base in (pkg, final):
+        f = Path(base) / "SKILL.md"
+        if not f.is_file():
+            continue
+        txt = f.read_text(encoding="utf-8")
+        out = []
+        for line in txt.split("\n"):
+            s = line.strip()
+            if s.startswith("psl-verified:") and not s.startswith("psl-verified-"):
+                out.append('  psl-verified: "%s"' % new_verified)
+            elif s.startswith("psl-verified-at:"):
+                out.append('  psl-verified-at: "%s"' % new_at)
+            elif s.startswith("psl-verified-evidence:"):
+                out.append('  psl-verified-evidence: "%s"' % new_ev)
+            else:
+                out.append(line)
+        new_txt = "\n".join(out)
+        if new_txt != txt:
+            f.write_text(new_txt, encoding="utf-8", newline="\n")
+            changed.append(str(f))
+    print("SKILL.md 自证卡刷新：verified=%s at=%s（%s）→ %s"
+          % (new_verified, new_at or "（空）", detail[:80],
+             "、".join(changed) if changed else "两处本就一致，无需写"))
+    return ok
+
+
 def _reconcile_src(mutated):
     """★★★ 构建后对账守卫（2026-09-28 新增，防「构建器改仓源」事故复发）。
 
@@ -1739,7 +1839,10 @@ def _delivery_gate(out_root, full=True):
     for _rel, _want in _mf_files.items():
         _fp = os.path.join(_root, _rel)
         try:
-            if sha256(_fp) != str(_want):
+            # ★★ 0.39.2：与本构建器写 manifest 时**同法**（版本承载件先归一化）——
+            #   否则 `hooks/pre_tool_use.py` 会**恒被判为漂移** ⇒ 每次都声明自举，
+            #   真漂移被这声"常亮"淹没（豁免机制失去区分度）。
+            if _manifest_hash_of(_rel, _fp) != str(_want):
                 _mf_drift.append(_rel)
         except Exception:                                      # noqa: BLE001
             _mf_drift.append(_rel)                  # 读不到 ⇒ 失配
@@ -1784,7 +1887,95 @@ _TOOL_FALLBACK = ("antinel_verify.py", "verify_namespaces.py",
                   "verify_chain.py", "tray.ps1")
 
 
+def _ver_tuple(v):
+    """'0.42.0' → (0, 42, 0)；解析不了 ⇒ None（调用方按"不是发布件"处理）。"""
+    try:
+        parts = str(v).strip().split(".")
+        if len(parts) != 3 or not all(p.isdigit() for p in parts):
+            return None
+        return tuple(int(p) for p in parts)
+    except Exception:                                          # noqa: BLE001
+        return None
+
+
+def _archive_stale_dist(dist_dir, version, archive_root):
+    """把 `dist/` 里**非本版**的发布件挪去归档区（**零删除**），返回挪走清单。
+
+    ★★ 为什么必须有这个函数（2026-10-09 实测复发，第三次同族）：
+      「旧版发布件让开」这件事此前是**手工**的：0.40.0 出包后我 `mv` 走了 0.39.2
+      的两件，0.41.0 出包后又 `mv` 走了 0.40.0 的两件 —— 每次都靠"我记得"。
+      0.42.0 这一轮我就忘了：dist 里躺着 0.41.0 的两件 ⇒ 闸门 D-23/JDG-06
+      同时判红（"dist 里混着非本版发布件"）⇒ **一整轮 4 分钟闸门白跑**。
+      ⇒ 根因不是"我粗心"，是**这个动作没有任何机制保证它发生**。
+        按本项目反复验证过的结论（"靠人记得就等于没有"），正确解法是让
+        **构建器自己**在跑闸门之前把旧版件挪走，并逐条打印。
+
+    ★ 三条设计约束（都是安全侧，不是方便侧）：
+      ① **只挪更旧的**：`artifact_ver < VERSION` 才挪。相等的留在原处
+         （重复构建同一版本时不该把自己的产物挪走）。
+      ② **遇到更新的 ⇒ 硬失败**：`artifact_ver > VERSION` 说明这棵树落后于
+         已经构建过的东西（检出了旧分支／回退了版本号）—— 此时若"顺手挪走"，
+         就会把一版更新的包静默降级成本版 ⇒ SystemExit，一个字节都不动。
+      ③ **零删除、全留痕**：一律 `mv` 进 `_archive_dist/stale_<时间戳>/`，
+         并打印每一个被挪走的文件名（与仓内既有 `*.away-*` 惯例同族）。
+
+    ★ 不碰的：`.tmp-*`（构建器自己的暂存）、`*.away-*` / `*.REJECTED*` /
+      `*.old`（已是让开态的件）、任何不匹配 `antinel-<x.y.z>-...` 的文件。
+    """
+    import re as _re
+    import shutil as _shutil
+    import time as _time
+    d = Path(dist_dir)
+    if not d.is_dir():
+        return []
+    arch = Path(archive_root) / ("stale_%s" % _time.strftime("%Y%m%d-%H%M%S"))
+    cur = _ver_tuple(version)
+    moved, newer = [], []
+    for p in sorted(d.iterdir()):
+        if not p.is_file():
+            continue
+        name = p.name
+        if name.startswith(".tmp-") or ".away-" in name or ".REJECTED" in name \
+                or name.endswith(".old"):
+            continue
+        # ★ 两种发布件形态都要认：wheel 是 `antinel-0.41.0-py3-none-any.whl`
+        #   （连字符），sdist 是 `antinel-0.41.0.tar.gz`（**点号**）——
+        #   第一版正则只写 `-`，结果 sdist 一件都匹配不上（本套件 S38 实测抓到）。
+        m = _re.match(r"^antinel-(\d+\.\d+\.\d+)(?:-|\.)", name)
+        if not m:
+            continue
+        av = _ver_tuple(m.group(1))
+        if av is None or cur is None:
+            continue
+        if av == cur:
+            continue
+        if av > cur:
+            newer.append(name)
+            continue
+        arch.mkdir(parents=True, exist_ok=True)
+        _shutil.move(str(p), str(arch / name))
+        moved.append(name)
+    if newer:
+        raise SystemExit(
+            "★ dist/ 里有**比源码还新**的发布件：%s（源码版本 %s）\n"
+            "  这说明当前检出落后于已经构建过的版本（检出了旧分支／回退了版本号）。\n"
+            "  若继续打包，等于把一版**更新**的包静默降级 —— 已中止，**一个字节都没动**。\n"
+            "  修法：确认要发布的版本号；若确实要发旧版，请先显式处理这些文件。" % (newer, version))
+    if moved:
+        print("[dist] 把 %d 件非本版发布件挪去 %s（零删除）：%s"
+              % (len(moved), arch, ", ".join(moved)))
+    return moved
+
+
 def build(out_root, verify=False):
+    # ★★ 0.42.0：**先把 dist/ 里的非本版发布件挪走**，再跑闸门。
+    #   位置必须在 `_delivery_gate()` **之前**：D-23/JDG-06 判的就是"dist 里混旧包"，
+    #   而它们只在闸门里跑 —— 挪晚了就等于让闸门先红一轮。
+    #   ★ 这条是 2026-10-09 实测复发的根因修复：此前"旧件让开"是手工动作
+    #     （0.40.0、0.41.0 两轮都是我 `mv` 的），没有任何机制保证下次还记得
+    #     ⇒ 0.42.0 忘了 ⇒ 白跑一轮 4 分钟闸门。机制见 `_archive_stale_dist`。
+    _archive_stale_dist(Path(out_root) / NAME / "dist", VERSION,
+                        Path(out_root) / NAME / "_archive_dist")
     # ★★ 0.36.5：统一交付闸门（第二个强制执行点）—— 位置在**最前**，
     #   早于 `_verify_layout()`：两者的失败代价都必须是「什么都没动」。
     #   逃生口用环境变量而不是命令行开关，避免「开关手滑」与「刻意的例外」长得一样。
@@ -1858,7 +2049,9 @@ def build(out_root, verify=False):
                      #   （构建末尾的 `_check_*` 守卫会同时盯住两边是否一致。）
                      "glossary.py",
                      # ★ 0.36.0：窗口几何（唯一几何实现）+ 失守归因引擎
-                     "inbox_window.py", "remediation.py"):
+                     "inbox_window.py", "remediation.py",
+                     # ★ 0.38.0：粮（哨兵口粮，0.38.0 新增真源）＋ 机器唯一码
+                     "granary.py", "machine_id.py"):
         # 2026-09-24 (G7): antinel_mcp.py was declared in pyproject.toml's
         # py-modules and shipped in the repo, but this list never copied it --
         # so a rebuild deleted it while pyproject kept declaring it. Same class
@@ -2160,11 +2353,16 @@ def build(out_root, verify=False):
     # package, would sweep in .git, build/, *.egg-info, demo/, challenge/ -- i.e.
     # everything the stage design exists to keep out.
     REPO_SHIPPED = ("README.md", ".github/workflows/verify.yml", "antinel-namespaces.json")
-    manifest_files = {str(p.relative_to(pkg)).replace("\\", "/"): sha256(p) for p in files}
+    # ★★ 0.39.2：哈希一律走 `_manifest_hash_of` —— 版本承载件先归一化再算，
+    #   与 `host_shield.self_check()` **同法**（唯一真源在 host_shield）。
+    manifest_files = {}
+    for p in files:
+        _rel = str(p.relative_to(pkg)).replace("\\", "/")
+        manifest_files[_rel] = _manifest_hash_of(_rel, p)
     for rel in REPO_SHIPPED:
         src = final / rel
         if src.is_file():
-            manifest_files[rel] = sha256(src)
+            manifest_files[rel] = _manifest_hash_of(rel, src)
         else:
             print("!! repo-shipped file ABSENT from the published package: %s" % rel)
     manifest_files = dict(sorted(manifest_files.items()))
@@ -2369,6 +2567,11 @@ def build(out_root, verify=False):
               "fresh tree (the record is an input to the run that writes it)" % rc1)
         rc = subprocess.call([PY_HARNESS, _harness_py])
         print("harness(final, shipped record) exit:", rc)
+        # ★★★ 0.42.0：自证卡的刷新点在**这里**，不在装配时。
+        #   装配时那份记录描述的是上一次的字节 ⇒ 必然 false；只有跑完这一次，
+        #   shipped 记录才真的描述本次字节 ⇒ 这时写 true 才不是谎话。
+        #   （死锁成因与 README.md G7 同型，详见 `_refresh_skill_selfcert` 的 docstring。）
+        _refresh_skill_selfcert(pkg, final, rc)
         _reconcile_src(_SRC_WATCH)
         _cleanup_final_stages(pkg, plug)
         return rc

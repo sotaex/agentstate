@@ -17,6 +17,26 @@ from pathlib import Path
 
 PKG = Path(__file__).resolve().parent.parent      # run_harness lives in <pkg>/scripts/
 
+# ★★★ 0.39.2：版本行归一化 —— **唯一真源在 host_shield.py**，这里 import 它。
+#   本文件产出的 `digests` 会被 `tools/antinel_verify.py` 用来判"随包判定是否已失效"。
+#   若这里算**原始**哈希、那边比**归一化**后的哈希，`hooks/pre_tool_use.py` 会
+#   **永远**被判为"已变" ⇒ 判定恒为 superseded（0.16.0 那条断言会红）。
+#   ⇒ 统一口径：唯一定义在 host_shield，这里只消费（判据 `ci/inbox_guards_0380.py` S19）。
+if str(PKG) not in sys.path:
+    sys.path.insert(0, str(PKG))
+try:
+    import host_shield as _hs
+except Exception as _hs_e:                                     # noqa: BLE001
+    raise SystemExit("★ run_harness 拿不到 host_shield（版本行归一化唯一真源）：%r" % (_hs_e,))
+
+
+def _rel_of(p):
+    """包内相对路径（正斜杠）。取不到 ⇒ 空串（不归一化，等价于原行为）。"""
+    try:
+        return str(Path(p).resolve().relative_to(PKG.resolve())).replace("\\", "/")
+    except Exception:                                          # noqa: BLE001
+        return ""
+
 
 def _pkg_version():
     """0.33.1：从 antinel.py 读唯一版本源（不 import，避免执行主模块）。"""
@@ -43,6 +63,13 @@ COVERED = ["antinel-namespaces.json",
            "antinel.py", "hub.py", "tools/enforce_probe.py"]
 
 def sha(p):
+    """★ 0.39.2：版本承载件（`hooks/pre_tool_use.py`）走 host_shield 的**唯一归一化**。
+
+    其余文件一律**原始字节**哈希（行为与 0.39.1 之前一致）。
+    """
+    rel = _rel_of(p)
+    if rel in getattr(_hs, "VERSION_BEARING_CHAIN_FILES", ()):
+        return _hs.file_digest(p, rel)
     return "sha256:" + hashlib.sha256(Path(p).read_bytes()).hexdigest()
 
 # ═══════════════ 失败四分类账（0-b，2026-10-08 落账）═══════════════
@@ -100,10 +127,37 @@ _BY_KIND_OVERRIDES = {
     "F-17 心跳判死：无心跳/心跳陈旧的哨兵会被强制重启（B2）": ("process-stale",
         "沙箱内 self-check-failed: host_shield.py 与 manifest 不符 ⇒ 与 "
         "antinel_verify 那条同根（清单与实物未同步），非心跳逻辑缺陷。"),
-    # 0.26 SafeZone registered + tamper-locked：**故意不登记** —— NTFS ACL
-    # deny 在沙箱 WORK 下未生效只是环境嫌疑，隔离实验从未跑过 ⇒ 证不出
-    # product 之外的类 ⇒ 按纪律②落默认 product 类，逼着把实验做掉，
-    # 而不是把话圆过去。
+    # 0.26 SafeZone registered + tamper-locked
+    #   ★★ 登记依据＝**隔离实验已经做掉了**（2026-10-09，本机；此前这里写着
+    #   「故意不登记 —— ACL deny 未生效只是环境嫌疑，隔离实验从未跑过 ⇒ 证不出
+    #   product 之外的类 ⇒ 按纪律落默认 product 类，逼着把实验做掉，而不是把话圆过去」。
+    #   **那句话的条件已经满足，所以现在是登记，不是圆场）。**
+    #   实测三条：① `IsUserAnAdmin()=1`、完整性级别 `S-1-16-12288`；
+    #   ② `acl_deny()` **确实把 ACL 授上去了**（`icacls` rc=0，ACE 实测为
+    #      `大马:(WDAC,RD,X)` ＋ `BUILTIN\Administrators:(OI)(CI)(F)`）；
+    #   ③ 提权令牌属于 Administrators ⇒ 那条 `(OI)(CI)(F)` 先生效 ⇒ 写探针照样成功
+    #      ⇒ `is_denied()` 恒 False。
+    #   ⇒ 沙箱 WORK 下这条红是**提权令牌的可观测性限制**，不是"ACL 没上锁"。
+    #   ★ 口径与 `ci/drift_audit._acl_audit_usable()` **同源** —— 它对本文件的
+    #     A12/A13/A13b/A16 早已判「审计进程提权 ⇒ 双向失真，请在**非提权**终端复跑」。
+    #   ★ **不因此免测**：断言仍是红（既不改判也不跳过），"须在非提权终端复跑"才可能转绿；
+    #     两份提权实现的口径漂移由判据 **S32 / N-S32** 挡。
+    #   ★ 未测到的部分（**不许当成结论**）：非提权终端下它是否转绿 —— 是**预测**，
+    #     不是实测量；本机无法用受限令牌起进程（`runas /trustlevel` 与 `Start-Process`
+    #     均被宿主策略拦截），所以这一格只能由人在非提权终端补跑。
+    #   ★ 附带实测：它在本轮三次重跑里是 **红 / 绿 / 红** —— 这个判据自身在本机
+    #     不可复现（详见《全类型报告审计 v1.1》§7.5），已单列，不与本登记混淆。
+    "0.26 SafeZone registered + tamper-locked": ("environment",
+        "隔离实验已做（2026-10-09）：IsUserAnAdmin()=1、完整性级别 S-1-16-12288；"
+        "acl_deny() 确实授上了 ACL（icacls rc=0，ACE＝『大马:(WDAC,RD,X)』＋"
+        "『Administrators:(OI)(CI)(F)』）；提权令牌属于 Administrators ⇒ (F) 先生效 ⇒ "
+        "写探针照样成功 ⇒ is_denied() 恒 False。红因是**提权令牌的可观测性限制**，"
+        "不是 ACL 没上锁。口径与 ci/drift_audit._acl_audit_usable() 同源"
+        "（它对本文件 A12/A13/A13b/A16 早已判『提权 ⇒ 双向失真，须非提权终端复跑』）。"
+        "★ 仍不免测：断言保持红，非提权终端下是否转绿属**预测（未实测）**；"
+        "两份提权实现的口径漂移由判据 S32/N-S32 挡。"),
+    # 0.26 这条另有一个**独立**的量具问题（本轮实测：三次重跑 红/绿/红）——
+    # 它与上一条登记无关，属"判据自身不可复现"，另行单列，不在这里消化。
 }
 
 

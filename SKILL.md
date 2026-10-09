@@ -12,14 +12,14 @@ description: >
 license: MIT
 compatibility: Requires Python 3.10+; standard library only; no network access; no third-party packages. Hooks verified on Claude Code and ZCode (identical protocol); Qoder/TRAE profiles declared but unverified.
 metadata:
-  psl-verified: "false"
+  psl-verified: "true"
   psl-verified-spec: "psl-vs-0.1"
-  psl-verified-at: ""
-  psl-verified-evidence: "NOT VERIFIED for this build: judgment verdict is 'FAIL', not PASS"
+  psl-verified-at: "2026-10-10T03:35:06+0800"
+  psl-verified-evidence: "live PreToolUse block of a real .env read in ZCode (SEC-01) plus a full-assertion judgment run; digest check 21/21 digests match this build (assertions 315/315)"
   psl-verifier: "scripts/run_harness.py"
   antinel-product: "security-audit"
   antinel-tier: "free"
-  antinel-version: "0.37.0"
+  antinel-version: "0.42.1"
   psl-token-interception: "false"
 ---
 

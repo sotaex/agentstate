@@ -233,11 +233,13 @@ def m4_unknown_state_type():
             raise AssertionError("light(%r) 抛了 %r（应一律兜底为未知态）"
                                  % (bad, type(e).__name__))
         else:
-            assert light != M.LIGHT_OK, (
+            # ★ 0.37.1 改名：LIGHT_OK ⇒ STATE_L0（六态口径换代）。
+            #   集合外一律 L1 盲区，绝不是 L0 绿。
+            assert light != M.STATE_L0, (
                 "light(%r) 打成了绿灯 —— 未登记状态必须报未知，"
                 "绝不报绿（本项目老纪律：查不出来 ≠ 查出来是好的）" % (bad,))
     # 合法姿态必须仍报绿/对应色
-    assert M.light(HS.POSTURE_GUARDING, [])[0] == M.LIGHT_OK
+    assert M.light(HS.POSTURE_GUARDING, [])[0] == M.STATE_L0
     return "6 个非法状态全部兜底为未知，无一报绿"
 
 

@@ -34,8 +34,8 @@ def _fmt_state(s):
 
 
 def _fmt_level(level):
-    return {"R0": "失守（R0）", "L2": "已拦截（L2）", "L1": "注意（L1）",
-            "Ls": "额度提示（Ls）", "L0": "值守正常（L0）"}.get(level, level)
+    # 派生（不写第二份）；未知键原样返回。
+    return ("%s（%s）" % (M.state_short(level), level)) if level in M.STATE_LABEL else level
 
 
 def _filter_items(items, state="open", level=None):
@@ -328,7 +328,7 @@ def build_parser():
     p.add_argument("--state", default="open",
                    choices=["open", "unread", "read", "done", "ignored", "all"],
                    help="记录状态筛选：open=未读+已读（默认），all=所有当前载入记录")
-    p.add_argument("--level", help="按级别筛选：R0=失守，L2=已拦截，L1=注意，Ls=额度提示")
+    p.add_argument("--level", help="按级别筛选：R0=失守，L2=拦截，L1=注意，Ls=预算")
     p.add_argument("--json", action="store_true", help="输出机器可读 JSON")
     p.set_defaults(fn=cmd_list)
 

@@ -117,77 +117,84 @@ def a1():
     import inbox_model as M
     assert HS.POSTURE_DEV in HS.POSTURE_ALL, "dev 不在姿态封闭集合里"
     assert HS.POSTURE_LABEL.get(HS.POSTURE_DEV), "dev 没有标签"
-    for tbl, nm in ((M.LIGHT_LABEL, "LIGHT_LABEL"), (M.LIGHT_LOGO, "LIGHT_LOGO"),
-                    (M.LIGHT_VAR, "LIGHT_VAR")):
-        assert M.LIGHT_DEV in tbl, "dev 灯态缺 %s 映射（会渲染成盲区）" % nm
+    # ★★ 0.37.1 改名：灯态三张表 LIGHT_LABEL/LIGHT_LOGO/LIGHT_VAR ⇒
+    #   STATE_LABEL/STATE_LOGO/STATE_VAR（与「六态＝常量前缀 STATE_」统一；
+    #   旧名是 0.36.x 八灯态遗产，创始人已定性「主观臆想，去掉」）。
+    #   另：`LIGHT_OK`（绿）⇒ `STATE_L0`，`LIGHT_DEV` ⇒ `STATE_DEV`。
+    for tbl, nm in ((M.STATE_LABEL, "STATE_LABEL"), (M.STATE_LOGO, "STATE_LOGO"),
+                    (M.STATE_VAR, "STATE_VAR")):
+        assert M.STATE_DEV in tbl, "dev 灯态缺 %s 映射（会渲染成盲区）" % nm
     # dev 必须是**非绿**灯：研发中不是"一切正常"
     lg, _ = M.light(HS.POSTURE_DEV, [])
-    assert lg != M.LIGHT_OK, "dev 打成了绿灯（研发中不等于没问题）"
+    assert lg != M.STATE_L0, "dev 打成了绿灯（研发中不等于没问题）"
     return "dev 在集合内、三张映射表齐全、不打绿"
 
 
 # ================================================== 组 B：dev 不掩盖真实状况
-#: 取出 `light()` 里 dev 那个 `if` 分支的**函数体源码**。
-#:
-#: ★★★ 为什么必须用 AST 而不是 `src.find('posture_state == "dev"')`：
+#: ★★★ 为什么本组一律用 AST 而不是 `src.find(...)`（0.36.4 判据自身的 bug）：
 #:   我在解释这个 bug 的**注释里**写了 `if posture_state == "dev": ...`，
 #:   `find` 命中的**第一处就是那行注释** ⇒ 切出来的"分支"是注释区，
-#:   里面当然找不到 `BUCKET_ACTION` ⇒ 判据假红。
-#:   ★ 这是本轮**第三次**同型错误（B3/C4 各一次，这次是 B1）：
-#:     「用 `find` 在源码里找自己刚写进注释的字符串」——
-#:     写注释时引用的代码，恰好成了找它的锚点。
-#:   ⇒ 一条纪律（本轮付出三次代价才买到）：
+#:   判据因此假红。⇒ 一条纪律（付出三次代价才买到）：
 #:     **判据定位代码节点一律走 AST；`find` 只可用于查纯说明性文字。**
 #:     注释不参与 AST，天然免疫这类自指。
-def _dev_light_branch_src():
-    import inbox_model as M
-    src = inspect.getsource(M.light)
-    tree = ast.parse(textwrap.dedent(src))
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.If):
-            continue
-        # 找 `if posture_state == "dev"`（比较方向两种都认）
-        t = node.test
-        hit = False
-        if (isinstance(t, ast.Compare) and len(t.ops) == 1
-                and isinstance(t.ops[0], ast.Eq)
-                and isinstance(t.left, ast.Name)
-                and t.left.id == "posture_state"
-                and len(t.comparators) == 1
-                and isinstance(t.comparators[0], ast.Constant)
-                and t.comparators[0].value == "dev"):
-            hit = True
-        if hit:
-            body = "\n".join(ast.get_source_segment(src, s) or ""
-                             for s in node.body)
-            return body
-    raise AssertionError("light() 里找不到 `if posture_state == \"dev\"` 分支")
+#:   ★ 0.37.1 又抓到同型一次：F3 的 `"guard_posture()" in src` 命中的是
+#:     docstring 里的解释句，真正的调用节点一个没查 —— 已改 AST。
 
 
 @check("B1 dev 态下 light() 仍会算 24 小时后果账（不提前 return）")
 def b1():
-    seg = _dev_light_branch_src()
-    first_calc = seg.find("BUCKET_ACTION")
-    assert first_calc >= 0, (
-        "dev 分支内没有动作项计算 ⇒ 它没看 24 小时后果账"
-        "（实测原版 light('dev', R0 急事) 直接返回 dev）")
-    # ★★ 0.36.4 加固（由变异检验 Q21 实测暴露的漏洞）：
-    #   只查"字样在不在"能被**改形不改行为**的变异绕过 ——
-    #   在 dev 分支最前面插 `return LIGHT_DEV, ...`（后果账变死代码），
-    #   `BUCKET_ACTION` 字样**仍在后面** ⇒ 弱判据照样绿。
-    #   （实测：Q21 变异后是 **B2 报的**，B1 放过了。）
-    #   ⇒ 补顺序判据：第一次 return 之前必须已算出动作项。
-    #     提前 return 就会切在计算之前 ⇒ 堵住"死代码"这条退路。
-    first_ret = seg.find("return")
-    assert first_ret < 0 or first_ret > first_calc, (
-        "dev 分支在算出动作项**之前**就 return 了（return@%d < 计算@%d）"
-        "⇒ 后果账是死代码，研发态仍会吞掉真实告警"
-        % (first_ret, first_calc))
-    return "dev 分支先算账再返回（无提前 return）"
+    """★★ 0.37.1 改写（六态口径换代后，旧写法整体作废）。
+
+    旧写法查「dev 分支里有没有 `BUCKET_ACTION` 字样」——新版 `light()` 里
+    dev **不再有独立早分支**：24h 后果账是所有姿态共用的 ② 段，dev 分支被
+    挪到 ⑤（事件判读之后）。字面量判据在新结构下必然假红。
+
+    ⇒ 新判据两件事，都对准「dev 不吞真实告警」这一条意图：
+       ① **行为**：dev + R0 未处理事件 ⇒ 灯态取事件级 R0，且 why 带研发注记
+          （研发身份只能写进 why，不另占灯态、更不许把事件级压下去）；
+       ② **结构**（AST 行号）：dev 分支必须排在 ② 事件判读之后 ——
+          防的正是 0.36.4 那个真漏洞「把 dev 分支提到前面、后果账成死代码」。
+          ★ 与 0.36.4 的顺序判据同思路（第一次 return 之前必须已算账），
+            只是锚点从「分支内」换成「分支与事件段的相对行号」。
+    """
+    import inbox_model as M
+
+    def mk(kind, age_h):
+        ts = (datetime.now() - timedelta(hours=age_h)).isoformat(timespec="seconds")
+        return M.Item(alert=M.Alert.build(ts=ts, kind=kind, topic="g0364"))
+
+    # ① 行为：dev 吞不掉真实告警（R0 事件 ⇒ R0 灯）
+    lg, why = M.light("dev", [mk("host_shield_tamper", 0.5)])
+    assert lg == M.STATE_R0, (
+        "dev + R0 未处理事件 ⇒ 拿到 %s（应为 R0）；研发态把真实故障吃掉了" % lg)
+    assert "研发迭代" in why, (
+        "dev 有未处理事件时 why 没有研发注记（研发身份应写进 why）：%r" % why)
+    lg2, _ = M.light("dev", [])
+    assert lg2 == M.STATE_DEV, "dev + 无未处理事件应显示研发档位，实际 %s" % lg2
+    # ★★ 0.37.1 二改（2026-10-09）：下面的**结构断言整体撤掉**，只留行为。
+    #   为什么撤：为了让「此刻」与「24h 历史账」各有一个入口（修日报页
+    #   「自称当场查一次、实际混着历史账」的 bug），③④⑤ 三个分支被抽到
+    #   `base_state()` —— 于是 `light()` 里**没有 dev 分支**了，
+    #   AST 判据立刻变成「找不到锚点」的**假红**（红的是"代码搬家"，
+    #   不是"产品坏了"）。
+    #   ⇒ 本仓同类教训已是第 N 次：**源码形状会重构，用户可见的行为不会**。
+    #     分支顺序这条约束本身仍然成立，改由 **B4 的变异负控**实测兜底
+    #     （它真的把 dev 提前 return 写进源码，再看 B1/B2 红不红）。
+    #   ⇒ 判据优先测行为；测结构时，先问一句「这段代码下个月还在不在」。
+    return "dev+急事⇒R0 且 why 带研发注记；dev+无事⇒研发蓝（顺序由 B4 变异兜底）"
 
 
-@check("B2 行为验证：dev + R0 急事 ⇒ 橙灯（与 guarding 同级）")
+@check("B2 行为验证：dev + R0 急事 ⇒ 与 guarding 同色（失守压过研发身份）")
 def b2():
+    """★★ 0.37.1 改写：期望灯色从「橙（LIGHT_ATTENTION）」改为 **R0**。
+
+    ★ 为什么改期望而不是改产品：灯态口径统一为 **LOGO 六态**后，
+      `host_shield_tamper`/`host_shield_breach` 的事件级就是 R0
+      （0.37.1 `LEVEL_OF_KIND`：链/文件被动过、门闸有缺口 ⇒ 失守级）。
+      0.36.4 旧五色梯度里它们是最高的未处理档「橙」，新口径下同名同级。
+      ⇒ 「dev 与 guarding 对同一批急事同色」这条核心断言**不变**，
+        且现在 dev+急事 与 down 当前态势也同色（R0），方向一致。
+    """
     import inbox_model as M
 
     def mk(kind, age_h):
@@ -197,14 +204,13 @@ def b2():
     urgent = [mk("host_shield_tamper", 0.5), mk("host_shield_breach", 1.0)]
     lg_dev, _ = M.light("dev", urgent)
     lg_guard, _ = M.light("guarding", urgent)
-    assert lg_dev == M.LIGHT_ATTENTION, (
-        "dev + 两件 R0 急事 ⇒ 拿到 %s（应为橙灯 attention）；"
-        "研发态把真实故障吃掉了" % lg_dev)
+    assert lg_dev == M.STATE_R0, (
+        "dev + 两件 R0 急事 ⇒ 拿到 %s（应为 R0）；研发态把真实故障吃掉了" % lg_dev)
     assert lg_dev == lg_guard, "dev 与 guarding 对同一批急事的灯色不一致"
     # 无急事时 dev 仍保留自己的档位（不冒充 guarding 的绿）
     lg_clean, _ = M.light("dev", [])
-    assert lg_clean == M.LIGHT_DEV, "无急事时 dev 应显示自己的档位，实际 %s" % lg_clean
-    return "dev+急事⇒橙；dev+无事⇒蓝"
+    assert lg_clean == M.STATE_DEV, "无急事时 dev 应显示自己的档位，实际 %s" % lg_clean
+    return "dev+R0急事⇒R0（与guarding同色）；dev+无事⇒研发蓝"
 
 
 @check("B3 dev 分支不再返回硬编码的空 consequences")
@@ -220,17 +226,38 @@ def b3():
     return "dev 后果由 _outage_consequences 实测得出"
 
 
-@check("B4 负控：把 dev 改回提前 return，判据必须报红")
+@check("B4 负控：把 dev 分支提到 ② 事件判读之前，判据必须报红")
 def b4():
+    """★★ 0.37.1 改写：变异手法随产品结构一起换代。
+
+    旧变异「把 dev 分支**原地**改成提前 return」在新结构下是**空变异**——
+    dev 分支现在排在第 ⑤ 位（事件判读之后），原地提前 return 照样先被 ②
+    截住，`light('dev', 急事)` 仍返回 R0 ⇒ 负控测不到东西还会误报
+    「负控失效」。0.36.4 由 Q21 实测抓过同型「负控空转」。
+
+    ⇒ 新变异复现历史真漏洞的**语义**：把 dev 分支**搬**到 ①（down 判读）
+      之前、改成提前 return —— `light('dev', R0 急事)` 因此返回 dev 蓝，
+      B1/B2 的行为断言会红。搬完还要验**还原有效**（还原失败会让整个仓库
+      带着坏代码继续跑，比负控空转更险）。
+    """
     import inbox_model as M
     p = os.path.join(ROOT, "inbox_model.py")
     _snapshot(p)
     src = open(p, encoding="utf-8").read()
+    # ① 摘掉现行 dev 分支（⑤ 位）连同其后到下一个同级 if 之间的注释
     i = src.find('    if posture_state == "dev":')
     assert i > 0, "定位 dev 分支失败"
     j = src.find("\n    if posture_state ==", i + 10)
     assert j > i, "定位 dev 分支末尾失败"
-    bad = src[:i] + '    if posture_state == "dev":\n        return LIGHT_DEV, "坏行为"\n' + src[j:]
+    assert "STATE_DEV" in src[i:j], "dev 分支内容不符合预期（可能已漂移）"
+    src_wo = src[:i] + src[j:]
+    # ② 把提前 return 版 dev 分支插到 ① down 判读之前（函数体最前段）
+    k = src_wo.find('    if posture_state == "down":')
+    assert k > 0, "定位 ① down 判读失败"
+    bad = (src_wo[:k]
+           + '    if posture_state == "dev":\n'
+             '        return STATE_DEV, "坏行为：提前 return 吞掉真实告警"\n'
+           + src_wo[k:])
     with open(p, "w", encoding="utf-8") as f:
         f.write(bad)
     importlib.reload(M)
@@ -242,11 +269,32 @@ def b4():
 
     urgent = [mk("host_shield_tamper", 0.5)]
     lg, _ = M.light("dev", urgent)
-    assert lg == M.LIGHT_DEV, (
-        "负控失效：dev 分支已改回提前 return，判据仍报绿（lg=%s）" % lg)
+    assert lg == M.STATE_DEV, (
+        "负控失效：dev 分支已提前 return，判据仍报绿（lg=%s）" % lg)
+
+    # ★★ 0.37.1 补上「负控的另一半」（2026-10-09）：
+    #   上面只证明「产品变坏了」，**没证明判据看得见** ——
+    #   一个瞎判据配上一段坏代码，同样会得到这个绿。
+    #   ⇒ 现在真的在**变异态**下跑 B1/B2，要求它们抛 AssertionError。
+    #   （本轮第三次同型：0363 `n_light_greens`、0360 `n_markdown_star_is_caught`
+    #     都曾"算完就丢、不写盘不 reload"；若不验这一半，它们会一直绿着。）
+    for nm, fn in (("B1", b1), ("B2", b2)):
+        try:
+            got = fn()
+        except AssertionError:
+            continue                    # 判据看见了 ⇒ 这才是有效的负控
+        raise AssertionError(
+            "负控失效：dev 已提前 return（会吞掉真实告警），%s 却仍报绿：%r"
+            % (nm, got))
+
     _restore_all()
     importlib.reload(M)
-    return "负控有效：行为改坏后判据报红"
+    # 还原后必须回到 R0 —— 否则仓库正带着变异代码在跑（负控把自己变成缺陷）
+    lg2, _ = M.light("dev", urgent)
+    assert lg2 == M.STATE_R0, (
+        "还原后 light('dev', R0 急事) 应为 R0，实际 %s ⇒ 还原链路坏了" % lg2)
+    b1(); b2()                          # 还原后两条判据也必须复绿
+    return "负控有效：dev 提前 return 后 B1/B2 **实测**报红；还原已验且复绿"
 
 
 @check("B5 dev 分支不给假按钮（fix 只有 revive 一个合法值）")
@@ -574,9 +622,11 @@ def f1_notify_gated_on_console_visibility():
     assert "console_is_visible()" in src2, (
         "_notify_throttled 没有调 console_is_visible() ⇒ 「窗口已可见就不弹」"
         "这条根治措施**根本没接上**（这是本轮最初那个缺口：纪律有、执行点没接）")
-    assert "notify_shown_in_window" in src2, (
-        "命中「窗口已可见」时必须**留痕**（记成 notify_shown_in_window）—— "
-        "否则「没弹」与「该弹但漏了」在链上长得一样，没法复盘")
+    assert "mark_notify_shown(" in src2, (
+        "命中「窗口已可见」时必须**留痕**（走 host_shield.mark_notify_shown ⇒ 中枢通知账）"
+        "—— 否则「没弹」与「该弹但漏了」在链上长得一样，没法复盘。"
+        "★ 0.40.0：留痕**不再写安全状态文件**（那次读-改-写在读失败时会把默认值"
+        "`enabled=False` 写回真状态 ⇒ 编造一次『已撤防』 ⇒ 假 R0 失守）")
 
     # ★★★ 0.36.5 第三版：**行为**验证（前两版都只查源码字符串 ⇒ 负控打出来是假守卫）。
     #   实测：负控把 `return bool(WIN.find_console_windows())` 改成 `return False`，
@@ -592,7 +642,7 @@ def f1_notify_gated_on_console_visibility():
     calls = []
     o_cv = HS.console_is_visible
     o_notify = HS._notify
-    o_load, o_save = HS.load_state, HS.save_state
+    o_mark = HS.mark_notify_shown
     o_fcw = None
     ohub = _os.environ.get("ANTINEL_HUB_DIR")
     tmp = _tf.mkdtemp()
@@ -628,15 +678,11 @@ def f1_notify_gated_on_console_visibility():
         _IW.is_window_on_screen = _fake_iws
         HS._notify = lambda *a, **k: sent.append((a, k))
         _os.environ["ANTINEL_HUB_DIR"] = tmp
-        seen = {}
-
-        def _spy_load():
-            st = {"notify_sent": {}}
-            seen["st"] = st
-            return st
-
-        HS.load_state = _spy_load
-        HS.save_state = lambda st: None
+        shown = []
+        # ★★ 0.40.0：留痕改走 `mark_notify_shown`（中枢通知账）。这里同时验两件：
+        #   ① 它**被调到**（行为接线）；② 账文件里**真的多了一个键**
+        #      （不是"调了个空实现"）—— 后者读的是隔离沙箱里的账，不碰真实账本。
+        HS.mark_notify_shown = lambda kind: (shown.append(kind), o_mark(kind))[0]
         # 真跑：可见性由**被测对象自己**从假枚举里得出，不许我替它编
         got_vis = HS.console_is_visible()
         assert got_vis is True, (
@@ -649,14 +695,17 @@ def f1_notify_gated_on_console_visibility():
         assert not sent, (
             "窗口可见时**仍然弹了**（实测已发出 %d 次）⇒ 根治措施没生效"
             % len(sent))
-        assert seen["st"].get("notify_shown_in_window"), (
-            "『没弹』没有留痕 ⇒ 「不该弹」与「该弹但漏了」在链上无法区分")
+        assert shown == ["F1_probe_kind"], (
+            "『没弹』没有留痕 ⇒ 「不该弹」与「该弹但漏了」在链上无法区分"
+            "（实测 mark_notify_shown 调用序列 = %r）" % (shown,))
+        assert HS.ledger_get(HS._LEDGER_SHOWN + "F1_probe_kind") is not None, (
+            "留痕只调了函数、账文件里没有这个键 ⇒ 记账是空实现（假机制）")
     finally:
         _IW.find_console_windows = o_fcw
         _IW.is_window_on_screen = o_iws
         HS.console_is_visible = o_cv
         HS._notify = o_notify
-        HS.load_state, HS.save_state = o_load, o_save
+        HS.mark_notify_shown = o_mark
         if ohub is None:
             _os.environ.pop("ANTINEL_HUB_DIR", None)
         else:
@@ -735,10 +784,38 @@ def f3_icon_follows_posture():
         "BalloonTipIcon 名非法：%r" % (tip,))
 
     # 值守中 ⇒ 必须是中性图标
+    # ★★★ 0.37.1 修判据自身的两个漏洞（都是「没测到被测对象却报得言之凿凿」家族）：
+    #   漏洞一（自指）：旧断言 `"guard_posture()" in src` —— 命中的是
+    #     **docstring 里解释机制的那句话**（「直接用 guard_posture() 的返回值」），
+    #     真正的调用早已改成 `guard_posture(_pkg_root())`。⇒ 与 B1 注释自指同型，
+    #     改用 AST 只认**调用节点**，注释/docstring 天然免疫。
+    #   漏洞二（补丁签名）：产品侧 0.37.1 给调用加了包根参数（0.35.3 同型漏改
+    #     的收尾），而本判据的猴子补丁是**零参 lambda** ⇒ TypeError 被产品侧
+    #     except 吞掉 ⇒ 三种坏姿态全拿到 Information ⇒ 断言红，但红的是
+    #     「补丁签名不兼容」，不是「图标不随姿态」。⇒ 补丁一律留 root 形参。
+    #   ★★ 漏洞二的第二形态（我自己踩的，比第一形态更隐蔽）：第一版修成
+    #     `lambda st=bad, root=None:` —— **看着兼容了，实则空转**：调用是
+    #     `guard_posture(_pkg_root())` 单位置实参 ⇒ 包根字符串绑进 `st`、
+    #     `root` 保持 None ⇒ 假返回 `{"state": "D:\\psl\\...", ...}` 是**字符串**
+    #     ⇒ `st.get("state")` 因 isinstance 非 dict 拿到 None ⇒ 三种坏姿态
+    #     照样全 Information，红项一字不差 —— **量具的错第三次记成产品的错**。
+    #     ⇒ 铁律：补丁的**第一个形参必须叫 root**（位置实参先绑它），
+    #       注入值一律走关键字默认参；写完必须**单独验证一次补丁生效**
+    #       （本段下方「补丁自检」就是为此而加，不是装饰）。
     src = inspect.getsource(HS._notify_icon_and_tip)
-    assert "guard_posture()" in src, (
-        "_notify_icon_and_tip 没有问 guard_posture() ⇒ 图标与真实状态无关，"
+    tree = ast.parse(textwrap.dedent(src))
+    calls = [n for n in ast.walk(tree)
+             if isinstance(n, ast.Call)
+             and ((isinstance(n.func, ast.Name) and n.func.id == "guard_posture")
+                  or (isinstance(n.func, ast.Attribute)
+                      and n.func.attr == "guard_posture"))]
+    assert calls, (
+        "_notify_icon_and_tip 没有调用 guard_posture ⇒ 图标与真实状态无关，"
         "于是又变成「无论有没有事都 alarming」")
+    for c in calls:
+        assert c.args, (
+            "guard_posture(...) 调用没传包根（0.35.3 同型漏改：不传则读中枢"
+            " rollup 链，与本包审计链可能不一致，实测相差 27000+ 秒）")
     # 逐姿态实测：只有坏姿态才给 Warning。
     # ★★★ 0.36.5 第二版修判据自身的错（第一版是**假红**，实测抓出来的）：
     #   原写法 `for bad in (...): HS._notify_icon_and_tip()` 里，`bad` 这个变量
@@ -751,24 +828,33 @@ def f3_icon_follows_posture():
     #     免得下一任又只能看到结论、看不到依据。
     saved = HS.guard_posture
     try:
+        # 补丁自检：先证明「注入真的进了产品侧」，再逐姿态断言 ——
+        # 没有这一段，上面漏洞二第二形态那种空转补丁会再次一字不差地红。
+        HS.guard_posture = lambda root=None, st="down": {"state": st, "label": "注入"}
+        _probe_got, _probe_tip = HS._notify_icon_and_tip()
+        assert _probe_got == "Warning" and _probe_tip == "Warning", (
+            "补丁自检失败：注入 state='down' 后拿到 %r/%r（期望 Warning/Warning）"
+            " ⇒ 补丁没生效（形参槽位错／产品侧没调它），后面的逐姿态断言全是空转"
+            % (_probe_got, _probe_tip))
         for bad in ("down", "interrupted", "warn"):
-            HS.guard_posture = lambda st=bad: {"state": st, "label": "注入"}
+            HS.guard_posture = lambda root=None, st=bad: {"state": st, "label": "注入"}
             got, tip_bad = HS._notify_icon_and_tip()
             assert got == "Warning" and tip_bad == "Warning", (
                 "坏姿态 %s 实测拿到 %r/%r（期望 Warning/Warning）"
                 % (bad, got, tip_bad))
         # 正常姿态必须给 Information（关键那条：这就是"不撒谎"的定义）
         for good in ("guarding", "off", "dev", "unknown"):
-            HS.guard_posture = lambda st=good: {"state": st, "label": "注入"}
+            HS.guard_posture = lambda root=None, st=good: {"state": st, "label": "注入"}
             got, tip_good = HS._notify_icon_and_tip()
             assert got == "Information" and tip_good == "Information", (
                 "非故障姿态 %s 实测拿到 %r/%r ⇒ 正常状态被渲染成警告，"
                 "用户每次看到都以为出事了" % (good, got, tip_good))
         # ★ 判不出（无 state 键／抛异常）也必须偏中性 —— 与 F2 同一方向：
         #   漏报由窗口与链上记录兜底，误报会让用户对真告警脱敏。
-        for what, fake in (("无 state 键", lambda: {"label": "x"}),
+        #   ★ 两个 fake 的第一个形参同样必须叫 root（见上方漏洞二第二形态）。
+        for what, fake in (("无 state 键", lambda root=None: {"label": "x"}),
                            ("guard_posture 抛异常",
-                            lambda: (_ for _ in ()).throw(RuntimeError("x")))):
+                            lambda root=None: (_ for _ in ()).throw(RuntimeError("x")))):
             HS.guard_posture = fake
             got, tip_u = HS._notify_icon_and_tip()
             assert got == "Information" and tip_u == "Information", (

@@ -61,8 +61,18 @@ class NoteRequired(InboxError):
 
 
 # ------------------------------------------------------------- 级别映射 ----
-# 优先级：R0 > L2 > L1 > Ls > L0（对齐 LOGO 五态）
-PRIORITY = {"R0": 5, "L2": 4, "L1": 3, "Ls": 2, "L0": 1}
+# ★★★ 这把尺量的是「**领地离终结有多近**」，不是「事件有多严重」。
+#   依据就是品牌动效语法 v1.2 自己的两处原文：
+#     · §一.3「绿→浅黄→明黄→橙都是『领地有事、越来越急』；红色是另一回事——哨兵没了」
+#     · §三 扫描周期 12 → 8 → 5.5 → 3.5 → **停摆**：这条单调刻度本身就是
+#       「离停下还有多远」——越近越快，到站即停。
+#   ⇒ 据此排序：L0 值守中 < L1 注意 < L2 拦截 < **Ls 缺粮** < R0 失守。
+#   ⚠️ 0.37.3 修正：旧值 `{R0:5, L2:4, L1:3, Ls:2, L0:1}` 把 Ls 压在 L1 之下 ——
+#      那是按「安全事件等级」量，与品牌**方向相反**，也与橙色动效
+#      「3.5s/圈 · 波撑到最大 · 即使缩成小图标波浪也在喊」自相矛盾：
+#      同一份设计用了两把尺。**橙=领地即将停摆，比一次已被拦下的入侵更接近终结。**
+#   ⚠️ 新信号上梯先问「它离终结有多近」，**不要**问「它多严重」。
+PRIORITY = {"R0": 5, "Ls": 4, "L2": 3, "L1": 2, "L0": 1}
 
 # ★ 唯一真源。真源依据：host_shield.py 的 _ALERT_KINDS（6 个）＋ credits 的额度事件。
 #   出现未登记的 kind ⇒ level_of() 抛错（不许悄悄按默认值走）。
@@ -72,6 +82,12 @@ LEVEL_OF_KIND = {
     "host_shield_spawn_failed": "R0",     # 看门狗起不来
     "host_shield_zone_locked": "R0",      # 补锁失败类
     "host_shield_breach": "R0",           # 门闸有缺口：不是「已拦截」，而是有东西没被挡住
+    # ★★ 0.40.0：研发态的自检不符 —— **它不是失守**。
+    #   研发期"代码与登记表不符"是**范畴事实**（这一版还没发出去），把它当 R0
+    #   正是创始人点名的"没有失守却显示失守"。⇒ 归 **L1「注意」**：知情即可。
+    #   它**不在** `host_shield._ALERT_KINDS` 里 ⇒ 不弹气泡（研发噪声不该敲门）；
+    #   投影由 `inbox_store.project_record` 专门一支负责。
+    "host_shield_dev_drift": "L1",
     # L2 拦截：实际被阻止的危险操作
     # L1 注意：状态变化 / 放行
     "host_shield_revived": "L1",
@@ -88,18 +104,24 @@ LEVEL_OF_KIND = {
 # ★ 消费点：收件箱列表、托盘提示、通知标题 —— 不是"登记了没人查"的字段。
 TITLE_OF_KIND = {
     "host_shield_tamper": "失守：防护文件被改动",
-    "host_shield_spawn_failed": "失守：看门狗没能启动",
+    # ★ 0.37.1：标题里的「看门狗」改成「哨兵」—— 词表、托盘图标、归因文案
+    #   都叫它「哨兵」，只有这两个标题还在说「看门狗」。
+    #   后果不是"不好听"：同一条失守的**标题**写「看门狗没能启动」、
+    #   紧挨着的**原因**却写「哨兵启动自检不符」⇒ 用户读到两个名字指同一个东西，
+    #   只好停下判断它俩是不是一回事（创始人说的"违和感"）。
+    "host_shield_spawn_failed": "失守：哨兵没能启动",
     "host_shield_zone_locked": "失守：安全区加锁失败",
     # ★ 0.35.3 修（创始人 2026-10-06「要处理 37 条」复盘时发现）：
     #   旧标题是「**已拦截**：越界动作被挡下」—— 但 `host_shield_breach` 描述的
     #   根本不是"拦住了"，而是"**有东西没被挡住**"（自启缺失 / 落点没人巡检 /
     #   钩子被拔）。把"缺口"说成"已拦截"，是**方向反了**的标签 ——
     #   创始人最恨的形状（用户照着标签做判断，会得出相反结论）。
-    "host_shield_breach": "失守：门闸有缺口（有东西没被挡住）",
+    "host_shield_breach": "失守：防护有缺口（有东西没被挡住）",
     "host_shield_revived": "注意：防护已恢复",
     "host_shield_changed": "注意：防护设置被改动",
-    "credits_low": "额度提示：积分余额偏低",
-    "tool_call_blocked": "已拦截：危险操作被挡下",
+    "host_shield_dev_drift": "注意：研发迭代中（代码与登记表不符）",
+    "credits_low": "缺粮：积分余额偏低",
+    "tool_call_blocked": "拦截：危险操作被挡下",
 }
 
 #: ★ 0.35.3：按**事由**（链记录 `subkind`）给更准的标题；没有则回落到 `TITLE_OF_KIND`。
@@ -108,8 +130,19 @@ TITLE_OF_KIND = {
 #:   但用户该做的事完全不同（前者装自启，后者做裁决）。
 TITLE_OF_TOPIC = {
     "autostart_missing": "失守：开机不会自动防护（要你装一次自启）",
-    "spawn_failed": "失守：看门狗没能启动",
+    "spawn_failed": "失守：哨兵没能启动",
+    # ★★ 0.40.0（A5）：按**病因**分，不再按"哪个字段"分 ——
+    #   `self_check` / `registry` 都是「代码/登记表与 manifest 不符」⇒ **一件事**（code_drift）；
+    #   `enabled` / `state` 都是「安全状态字段在运行期漂移、哨兵已回写恢复」⇒ **另一件事**（state_drift）。
+    #   改前：前者被拆成两行、后者三因挤一行（归并键 `(kind, topic, level)`，后三者 topic 为空）。
+    #   ★ 旧 `self_check` 词条**保留**：链 append-only，历史记录（实测 47 条）仍是那个 subkind。
+    "code_drift": "失守：防护文件被改动（代码与登记表不符）",
+    "state_drift": "失守：防护文件被改动（状态被改，已自动恢复）",
     "self_check": "失守：防护文件被改动（要你核对/重装）",
+    # ★★ 0.40.0（A8）：`zone_locked` 兼表成败 —— **成功**那条不能借用 kind 标题
+    #   （kind 标题写着"失守：安全区加锁失败"），否则一条成功被读成失守。
+    "zone_ok": "注意：安全区已上锁（区内防篡改）",
+    "zone_lock_failed": "失守：安全区加锁失败",
 }
 
 # 忽略时必须写备注的级别（最高级："防线失效"不能一句话就抹掉）。
@@ -151,11 +184,15 @@ WINDOW_HOURS = 24
 #   ★ 结构化判定（kind），**不读 `reason` 文案** —— 文案会改，按文案判档的
 #     判据会静默失效（本仓第 4 次同一形状）。
 AUTO_HANDLED_KINDS = frozenset({
-    "tool_call_blocked",        # 已拦截：危险操作被挡下 —— Antinel 已经干完了
+    "tool_call_blocked",        # 拦截：危险操作被挡下 —— Antinel 已经干完了
     "host_shield_revived",      # 防护已恢复（自愈记录）
     "host_shield_changed",      # 防护设置被改动（改了设置，没放跑什么）
     "host_shield_zone_locked",  # ★ 见下方注释：成功=自动处理／失败=要你决策
     "host_shield_lock_held",    # 门闸持锁中（周期性状态留痕）
+    # ★★ 0.40.0：研发迭代中的"代码与登记表不符"—— 哨兵照常在岗、发版即消失
+    #   （收敛靠事实追平，不靠时间）⇒ **你知情即可，不进"要处理"**。
+    #   它与"出厂包被改"（`host_shield_tamper`，仍是 R0）是**两种事件**，不是同一件的两档。
+    "host_shield_dev_drift",
 })
 
 # ★★★ 0.36.0 真缺陷修复（创始人 2026-10-07「不能无法改进，只能看」）：
@@ -229,6 +266,10 @@ def has_consequence(item):
     """这条记录**有没有带来后果**（见上面 NO_CONSEQUENCE_KINDS 的说明）。"""
     if getattr(item, "recovered", False):
         return False
+    # ★★ 0.40.0：`zone_locked` 兼表成败 ⇒ 后果也要**按记录**判（与 `needs_owner` 同源）。
+    #   上锁成功＝Antinel 干完了（没有后果）；上锁失败＝有后果。
+    if item.kind == "host_shield_zone_locked":
+        return _zone_lock_failed(item)
     return item.kind not in NO_CONSEQUENCE_KINDS
 
 
@@ -492,6 +533,22 @@ def window_levels(items, hours=WINDOW_HOURS, now=None):
     return d
 
 
+def window_level_groups(items, hours=WINDOW_HOURS, now=None):
+    """窗口内每个级别各几**件事**（按事由归并后）—— 顶部条那排数字用。
+
+    ★ 唯一实现（0.37.1 新增）：顶部条原来**手抄**了一遍分组逻辑
+      （`_win` + `_grp`），与 `window_levels` 声明「唯一实现」自相矛盾 ——
+      两边一旦漂移，顶部条与日报的 24h 数字就会打架，而**没有任何判据
+      看得见**（因为判据也只验证了其中一个口径）。现在成对提供：
+      记录数走 `window_levels`，件事数走这里，同一个 `within_hours` 口径。
+    """
+    keys = {"R0": set(), "L2": set(), "L1": set(), "Ls": set()}
+    for it in items:
+        if it.level in keys and within_hours(it.ts, hours, now):
+            keys[it.level].add(group_key(it))
+    return {k: len(v) for k, v in keys.items()}
+
+
 
 def counts_by_level(items, only_open=True):
     """每个级别各有几条（日报排行用）。"""
@@ -522,7 +579,7 @@ def filter_label(filt, hours=WINDOW_HOURS):
         return FILTER_LABEL[filt]
     if filt.startswith("lv:"):
         lv = filt[3:]
-        return {"R0": "失守", "L2": "拦截", "L1": "注意", "Ls": "额度"}.get(lv, lv)
+        return state_short(lv)
     if filt.startswith("kind:"):
         return TITLE_OF_KIND.get(filt[5:], filt[5:])
     if filt.startswith("rule:"):
@@ -672,30 +729,75 @@ def known_filter(filt):
 
 
 # --------------------------------------------------------------- 顶部灯（唯一实现）----
-# ★★ 创始人 2026-10-06 拍板：「是否失守，应该是**当前的状态**；
-#   如果当前确实是失守状态，应该有地方可以马上解决问题」。
-#   ⇒ 灯色由**现探**的态势决定（`host_shield.guard_posture()`），
-#     历史账只用来把"值守中"细分成"值守中 / 值守中但有未处理的事"。
-LIGHT_DOWN = "down"             # 红：当前确实失守（缺岗 **且**有可指认的后果）
-LIGHT_INTERRUPTED = "interrupted"  # 黄：缺岗，但此刻没有监管对象 ⇒ 无损失（★ 0.35.3）
-LIGHT_WARN = "warn"             # 黄：在守，但守门的那份代码认不出（可信性存疑，★ 0.35.3）
-LIGHT_DEV = "dev"               # 蓝：研发迭代中，这一版还没发出去（★ 0.36.3，非故障）
-LIGHT_ATTENTION = "attention"   # 橙：值守中，但 24 小时内有未处理的有后果项
-LIGHT_OK = "ok"                 # 绿：值守中，24 小时内干净
-LIGHT_OFF = "off"               # 灰：未启用（默认态，不是故障）
-LIGHT_UNKNOWN = "unknown"       # 黄：查不到（盲区，≠ 没问题）
+# ★★★ 2026-10-08 换代（创始人拍板）：灯态从「8 个派生灯态」收回
+#   **LOGO 五态 + 开发态** 六态封闭集合。
+#
+#   ★ 历史（为什么换）：0.36.0–0.36.4 期间，灯态由「姿态 × 24h 历史」两轴
+#     派生出了 8 个灯（失守/中断/存疑/研发中/值守中·需你处理/值守中/未启用/
+#     查不到）—— 这是 AI 自己长出来的派生层，不是产品词汇。创始人定性：
+#     「那 8 态是之前的 AI 主观臆想的，要去掉」。
+#   ★ 产品词汇在品牌侧早有定义（`Antinel品牌动效报警语法v1.2` §三
+#     五态定义总表；`assets/logo/*.mp4`、`assets/icons/*.ico` 全部按它备料）：
+#       L0 值守  allow 放行          光束绿
+#       L1 注意  alert 提示          警戒浅黄
+#       L2 拦截  block 拦截          警戒明黄
+#       Ls 预算  credits 阈值告警    警戒橙
+#       R0 失守  fail-open/断链/逃逸 讣告红（停摆）
+#     ＋ 开发态（0.36.3 落地）：研发迭代专用。**复用 L1 动图资源**，不新增资产。
+#
+#   ★ 「存疑」态取消（创始人 2026-10-07 原话：「值守台出现计划外状态『存疑』，
+#     不允许」）：出厂代码与登记不符（且不是研发态）⇒ **fail-closed 按 R0 失守**，
+#     文案说清是「守门代码认不出」—— 不 waffle、也不谎报损失。
+STATE_R0 = "R0"          # 红·讣告：防线没生效（缺岗有损失／fail-open／断链／出厂码不符）
+STATE_L2 = "L2"          # 明黄：有操作被拦下（未处理）
+STATE_L1 = "L1"          # 浅黄：知情即可的提示（含缺岗无损失、探不到＝盲区）
+STATE_Ls = "Ls"          # 橙：额度/预算阈值告警
+STATE_L0 = "L0"          # 绿：值守中（一切正常）；灰变体＝未启用（默认全关，不是故障）
+STATE_DEV = "dev"        # 蓝：研发迭代中（在守，代码比登记的新）
 
-#: ★★ 合法**姿态**的封闭集合（0.36.3）—— 真源在 `host_shield.POSTURE_ALL`，
-#:   这里**转发**而不是手抄一份。
-#:
-#: ★★ 为什么必须转发而不是各写一份（**这一版我先抄错了，实测当场抓出来**）：
-#:   我第一版把 `LIGHT_OK`（"值守中"这个**灯**）写进了这个集合 ⇒ 集合里
-#:   **没有 `guarding`**（那是**姿态**）⇒ `light("guarding")` 被兜底拦成黄灯
-#:   「查不到」，正常状态被误判。实测才发现。
-#:   ⇒ 抄第二份的代价不是"多写一行"，而是**两份清单必然漂移**：
-#:     一边加了状态、另一边没加 ⇒ 正常态被判成盲区（或更糟：异常态被判成绿）。
-#:   ⇒ 现在：**姿态集合只有一处定义**（`host_shield.POSTURE_ALL`），
-#:     本模块只 import。这样新增姿态时**只有一处要改**，漂移无从发生。
+#: ★★ 合法**灯态**的封闭集合（六态）。集合外一律 L1 盲区，**绝不打绿**。
+#: ★ 命名警告：**不能叫 `STATES`** —— 那个名字自本模块建立起就是
+#:   「条目状态」（unread/read/done/ignored，`inbox_store` 的状态机在用）。
+#:   0.37.1 我第一版就把六态集合命名成 `STATES`，**把它覆盖了** ⇒
+#:   实测 `can_transition("unread","done")` 抛「未知状态 unread」
+#:   ⇒ 页面上所有「知道了/忽略」按钮静默失效（0353 P12 当场抓到）。
+#:   ⇒ 教训与 JDG-05 同型：**新增模块级常量必须先查占用**。
+LIGHT_STATES = (STATE_R0, STATE_L2, STATE_L1, STATE_Ls, STATE_L0, STATE_DEV)
+
+STATE_LABEL = {STATE_R0: "失守", STATE_L2: "拦截", STATE_L1: "注意",
+               STATE_Ls: "缺粮", STATE_L0: "值守中", STATE_DEV: "研发中"}
+
+#: ★★★ 六态短名的**唯一真源**就是上面这张 `STATE_LABEL`。
+#:   取名一律走 `state_short()`；术语表 / CLI / 日报 / 筛选条 / 托盘 / 事件标题前缀
+#:   **全部派生**。任何模块**不得**再写第二份 `{"R0": "…", …}` —— 判据
+#:   `inbox_guards_0372.py` S08 会全仓扫描第二份声明并报红。
+#:   ★ 为什么是"扫第二份"而不是"多写几条断言"：漂移的**入口**是"又抄了一份"，
+#:     把入口堵死，比在每个出口巡逻更省事、也更难绕过。
+def state_short(key):
+    """态的对外短名（**唯一入口**）。未知键原样返回，不抛错。"""
+    return STATE_LABEL.get(key, key)
+
+
+#: 光梯次序的**人话**写法（术语表/文案用），由 `PRIORITY` **算出来**，不手写 ——
+#: 手写必然与 `PRIORITY` 漂移（0.37.3 前术语表写的次序正好与代码相反，就是这么来的）。
+PRIORITY_ORDER_TEXT = " > ".join(
+    state_short(k) for k, _ in sorted(PRIORITY.items(), key=lambda kv: -kv[1]))
+
+#: 灯态 → LOGO 资源名（assets/logo/*.mp4 与 icons/*.ico）
+#: ★ 开发态复用 L1 动图（0.36.3 决定：不为一种状态多做一套动图）；
+#:   未启用复用 L0 动图、由调用方把颜色压灰（`STATE_VAR`）。
+STATE_LOGO = {STATE_R0: "R0", STATE_L2: "L2", STATE_L1: "L1",
+              STATE_Ls: "Ls", STATE_L0: "L0", STATE_DEV: "L1"}
+
+#: 灯态 → 强调色 CSS 变量（与 `inbox_server.LEVEL_VAR` 同一套色；
+#:   dev 用品牌蓝而不是 L1 浅黄 —— 否则「研发中」和「注意」长得一样）。
+STATE_VAR = {STATE_R0: "--r0", STATE_L2: "--l2", STATE_L1: "--l1",
+             STATE_Ls: "--ls", STATE_L0: "--l0", STATE_DEV: "--brand"}
+
+
+#: ★★ 合法**姿态**的封闭集合 —— 真源在 `host_shield.POSTURE_ALL`，
+#:   这里**转发**而不是手抄一份（两份清单必然漂移：一边加了状态另一边没加
+#:   ⇒ 正常态被判成盲区，或更糟：异常态被判成绿）。
 try:
     from host_shield import POSTURE_ALL as _POSTURE_ALL
 except Exception:                                        # noqa: BLE001
@@ -703,114 +805,345 @@ except Exception:                                        # noqa: BLE001
     _POSTURE_ALL = frozenset(("down", "interrupted", "warn", "dev",
                               "unknown", "off", "guarding"))
 
-LIGHT_LABEL = {LIGHT_DOWN: "失守", LIGHT_INTERRUPTED: "中断·无损失",
-               LIGHT_WARN: "存疑", LIGHT_DEV: "研发中",
-               LIGHT_ATTENTION: "值守中·需你处理",
-               LIGHT_OK: "值守中", LIGHT_OFF: "未启用", LIGHT_UNKNOWN: "查不到"}
 
-#: 灯 → LOGO 资源名（assets/logo/*.mp4 与 icons/*.ico）
-#: ★ 研发态用 L1（黄）而不是新增资源：**不为一种状态多做一套动图**，
-#:   且研发态与"存疑"在"这不是红灯"这件事上同族 ⇒ 复用同一资源不引入歧义。
-LIGHT_LOGO = {LIGHT_DOWN: "R0", LIGHT_INTERRUPTED: "Ls", LIGHT_WARN: "Ls",
-              LIGHT_DEV: "L1",
-              LIGHT_ATTENTION: "L2", LIGHT_OK: "L0",
-              LIGHT_OFF: "L0", LIGHT_UNKNOWN: "Ls"}
-#: 灯 → 强调色 CSS 变量
-LIGHT_VAR = {LIGHT_DOWN: "--r0", LIGHT_INTERRUPTED: "--l1", LIGHT_WARN: "--l1",
-             LIGHT_DEV: "--l1",
-             LIGHT_ATTENTION: "--l2", LIGHT_OK: "--l0",
-             LIGHT_OFF: "--muted", LIGHT_UNKNOWN: "--l1"}
+def state_label(state, posture_state=None):
+    """灯态的人话标签。★ L0 有一个**灰变体**：未启用时显示「未启用」。
+
+    为什么不是第七个态：未启用与值守中同属 L0（放行/正常），差别只在
+    「有没有在守」—— 用标签区分足矣，再造一个灯态就是 8 态复辟。
+    """
+    if state == STATE_L0 and posture_state == "off":
+        return "未启用"
+    return STATE_LABEL.get(state, STATE_LABEL[STATE_L1])
 
 
-def light(posture_state, items, now=None, hours=WINDOW_HOURS):
-    """顶部灯的**唯一算法**。返回 `(light, why)`。
+# ------------------------------------------------------- 粮（口粮）----
+#: 只有这几种姿态下"缺粮"才说得通 —— 哨兵**在岗**才有消耗。
+#: `off`（没启用）/`interrupted`（缺岗）/`unknown`（探不到）时根本没在吃粮，
+#: 报"缺粮"是编；`down`/`warn` 已在 ① 返回 R0，走不到这里。
+_GRANARY_ON_DUTY = ("guarding", "dev")
 
-    ★ 优先级：当前态势 > 24 小时历史。
-      · 当前失守 ⇒ 红（**不管历史多干净** —— 防线此刻真的不在岗，且有损失）
-      · 当前中断 ⇒ 黄（缺岗但无监管对象 ⇒ 可证明没损失；**不冒称"失守"**）
-      · 当前存疑 ⇒ 黄（在守，但守门的代码认不出 ⇒ 不敢打绿）
-      · 当前查不到 ⇒ 黄（盲区）
-      · 当前未启用 ⇒ 灰（默认态。**不是故障**，把"没开"渲染成"坏了"是噪音）
-      · 当前值守中 ⇒ 看 24 小时内有没有未处理的有后果项：有 ⇒ 橙，无 ⇒ 绿
 
-    ★★ 0.35.3 为什么拆出「中断」和「存疑」（创始人 2026-10-06）：
-      「如果现在的『真失守』跟假失守没啥区别，不会带来明显不利后果，
-        那就跟假失守没啥区别。」⇒ 红灯必须**说得出损失**。说不出损失的缺岗、
-      以及"认不出守门代码"（在守，只是身份存疑），都只配黄灯。
+def granary_now(root=None):
+    """粮的**实时读数**（真源在 `granary`）。本函数只做容错转发，读不到返回 None。
+
+    ★ 为什么要有它：页面不该直接依赖 `granary` —— 少一个模块挂掉就整页挂掉。
+      这里做成"取不到就当没有粮账"，页面照常渲染（降级，不假绿也不崩）。
+    """
+    try:
+        import granary as G
+        return G.state(root)
+    except Exception:                                  # noqa: BLE001
+        return None
+
+
+def _granary_level(granary, posture_state):
+    """粮的当前缺口 ⇒ `"Ls"`，否则 `None`。"""
+    if not granary or posture_state not in _GRANARY_ON_DUTY:
+        return None
+    return "Ls" if granary.get("state") == "low" else None
+
+
+def _granary_why(granary):
+    return (granary or {}).get("why") or "粮快见底了"
+
+
+def light(posture_state, items, now=None, hours=WINDOW_HOURS, granary=None):
+    """「此刻 ＋ 24h 账」的**合并读**。返回 `(state, why)`（六态之一）。
+
+    ★★★ 0.39.0 身份更正（**重要：别再拿它当"灯"**）：
+      创始人 2026-10-09 裁定「一定要让值守台反应当前的准确状态，没有失守
+      却显示失守，就是错误的」⇒ **灯改用 `current_state()`**（只看此刻）。
+      本函数**保留原语义**（此刻 × 账，取最高级）—— 它答的是"合起来最该提
+      哪一档"，**不是**"现在怎么样"。**页面渲染不得直接调它**：目录里
+      `ci/inbox_guards_0380.py` 的 S12 会扫源码钉死这一点。
+
+    ★ 0.38.0：新增 `granary`（可选）—— 粮的读数（`granary.state()` 的返回值）。
+      **不传 ⇒ 与 0.37.x 逐字同行为**（既有判据与调用点因此不受影响）。
+      传了且余额低于阈值、且哨兵在岗 ⇒ 与 24h 事件**同台比级**（`PRIORITY`
+      已把 Ls 排在 L2 之上：「离终结更近」）。
+
+    ★★ 判读顺序（**当前态势 > 24h 未处理事件／缺粮 > 当前缺口 > 身份态**）：
+
+      ① 防线没生效或不可信（缺岗且有可指认后果 `down`；出厂码与登记不符
+         `warn` 且非研发态）⇒ **R0 失守**（红）。warn 走 fail-closed：
+         「认不出守门的是不是原来那道门」时，按它在裸奔算 ——  waffle
+         一个「存疑」黄灯正是被创始人禁掉的形状。
+      ② 24h 内有未处理事件 ⇒ **取最高级**（R0/L2/L1/Ls）—— LOGO 五态
+         的原生读法（「黄一点＝重一点」的梯度就是事件级差）。
+      ③ 没有未处理事件时的当前缺口：缺岗但无损失 `interrupted`、探针抛错
+         `unknown` ⇒ **L1 注意**（黄：盲区/缺口，不等于没问题，也≠失守）。
+      ④ 未启用 `off` ⇒ **L0 值守**（灰变体：默认全关是产品第一原则，
+         把「没开」渲染成「坏了」是噪音）。
+      ⑤ 研发态 `dev` ⇒ **dev 研发中**（蓝）。★ dev **不预占灯色**：有未处理
+         事件时按事件级显示（走 ②），研发身份写进 why —— 这正是 0.36.4
+         「研发中只是状态之一，哨兵发现状况了该出现的状态还是要出现」。
+      ⑥ 集合外（不认识的姿态/None/不可哈希）⇒ **L1 注意**（盲区）——
+         绝不打绿：状态机出错时界面替你安静地说「一切正常」是本仓
+         明令禁止的最坏形状（0.36.3 实测 `light("banana")` 曾 → 绿）。
+    """
+    # ① 防线没生效/不可信 ⇒ R0（当前态势优先于一切历史）
+    direct = _posture_direct(posture_state)
+    if direct is not None:
+        return direct
+    # ⑥ 集合外一律盲区（放在 ①② 之后：真实测到的坏态势优先于输入异常）
+    if not isinstance(posture_state, str) or posture_state not in _POSTURE_ALL:
+        return STATE_L1, ("收到一个不认识的防线状态（%r）——这是盲区，"
+                          "不等于没问题" % (posture_state,))
+    # ② 24h 未处理事件 ＋ 粮的当前缺口 ⇒ 取最高级
+    #   ★★ 这一步必须在 ③④⑤（含 dev）**之前**：否则研发态会提前返回，
+    #      把真实告警吞掉 —— 0.36.4 纪律「研发中不掩盖真实状况」。
+    #   ★ 0.38.0：粮的缺口与事件**同台比级**（`PRIORITY` 说了算），不另立一套次序。
+    open_items = _window_open(items, hours, now)
+    lv_ev = (max((it.level for it in open_items), key=lambda x: PRIORITY[x])
+             if open_items else None)
+    gl = _granary_level(granary, posture_state)
+    if lv_ev is not None or gl is not None:
+        if gl is not None and (lv_ev is None or PRIORITY[gl] > PRIORITY[lv_ev]):
+            lv, why = gl, _granary_why(granary)
+        else:
+            lv = lv_ev
+            why = "%d 小时内有未处理事项（最高 %s）" % (hours, lv_ev)
+        dev_note = ("；同时这一版还在研发迭代中，代码与登记不一致是改出来的"
+                    if posture_state == "dev" else "")
+        # ★ why 里**不放件数**（0.37.1 去重）：件数是"要处理多少件事"，
+        #   它由页面其他表面各按各的口径各显示一次（收件箱页＝筛选条，
+        #   其他页＝顶部条后缀）—— 状态说明只说"有没有、最高哪级"。
+        return lv, why + dev_note
+    # ③④⑤ ＋ guarding：此刻态势自身给出的档位（历史账已在 ② 判完）
+    return base_state(posture_state)
+
+
+def _window_open(items, hours=WINDOW_HOURS, now=None):
+    """窗口内**未处理**（未读＋已读）的记录（★ 灯的唯一取数口径）。
+
+    ★ 0.37.2 抽出来：`light()` 与 `light_explain()` 必须数**同一批记录** ——
+      否则会出现"灯按 9 件报红、页面原因行却说 4 件"的同一屏数字打架。
+    """
+    return [it for it in items
+            if it.state in OPEN_STATES and within_hours(it.ts, hours, now)]
+
+
+def _posture_direct(posture_state):
+    """★ 只看**此刻**就能定档的两种态势：`down` / `warn` ⇒ R0。
+
+    ★ 0.37.2 抽出来（fix）：`base_state()` 原先**没有** down/warn 两个分支
+      （它们在 `light()` 里），于是 `posture_light()` 遇到 `down` 会落到
+      函数末尾的兜底 ⇒ 返回 L1「收到一个没登记的防线状态（'down'）」。
+      **实测形状**：日报/运行状态的「现在的防线状态」在真正失守时显示
+      「注意」—— 把最严重的态势读成了最轻的那档。
+      ⇒ 抽成一份，`light()` 与 `base_state()` 共用，不会再漏。
     """
     if posture_state == "down":
-        return LIGHT_DOWN, "防线此刻确实不在岗，而且有东西没人管"
-    if posture_state == "interrupted":
-        return LIGHT_INTERRUPTED, "门闸缺岗，但此刻没有监管对象——可证明没损失"
+        return STATE_R0, "防线此刻确实不在岗，而且有东西没人管"
     if posture_state == "warn":
-        return LIGHT_WARN, "哨兵在岗，但守门的这份代码我认不出是不是出厂那份"
-    # ★★★ 0.36.4 修（创始人 2026-10-07 第一条要求，本机实测证实）：
-    #   「研发中只是状态之一，如哨兵发现状况了，该出现的状态，还是要出现。」
-    #
-    #   **改之前**这里是一行 `if posture_state == "dev": return LIGHT_DEV, ...`
-    #   —— 它在函数最前面**直接 return**，把 24 小时后果账**整段跳过**。
-    #   实测（`_p_dev_mask_probe.py`）：
-    #     `light("guarding", 三件 R0 急事)` → `attention`（橙，该报警）
-    #     `light("dev",      同样三件 R0)` → `dev`      （蓝，**静默**）
-    #   ⇒ 哨兵报了 R0，界面只显示"正在研发迭代"。
-    #   ⇒ 这是**最坏的形状**：研发态不是"多一个状态"，是**一个能吞掉红灯的状态**。
-    #     研发期恰恰是告警最需要被看见的时候（正在改的东西最容易改坏），
-    #     而这个状态恰好在那段时间把告警静音了。
-    #
-    #   **改之后**：dev **不预占灯色**，和 `guarding` 一样往下走后果账 ——
-    #   有需要用户亲自处理的事就显示橙（并说明研发态这一层），
-    #   没事才显示蓝。**优先级让位给真实状况，身份标注不吞掉后果。**
-    #   与 `warn` 的差别：warn 是"认不出"（不确定该不该信）⇒ 黄；
-    #   dev 是"确知是迭代产物"（确定只是没发版）⇒ 不加不确定性。
-    if posture_state == "dev":
-        _action = [it for it in items
-                   if bucket_of(it, now=now, hours=hours) == BUCKET_ACTION]
-        if not _action:
-            return LIGHT_DEV, ("正在研发迭代：这一版还没发出去，代码与登记不一致是"
-                               "改出来的（这不改变哨兵仍在正常放哨）")
-        _n = count_groups(_action)
-        _lv = max((it.level for it in _action), key=lambda x: PRIORITY[x])
-        return LIGHT_ATTENTION, (
-            "哨兵在岗，%d 小时内有 %d 件事需要你亲自处理（最高 %s）；"
-            "同时这一版还在研发迭代中，代码与登记不一致是改出来的。"
-            % (hours, _n, _lv))
+        # 出厂码不符且非研发（dev 已在 host_shield 侧分流）⇒ fail-closed。
+        return STATE_R0, ("哨兵进程在岗，但守门的这份代码跟出厂登记的那份对不上"
+                          "（可能被改动过，也可能这次没装好）——认不出它守的是不是"
+                          "原来那道门，先按失守算")
+    return None
+
+
+def base_state(posture_state):
+    """★ 只看**此刻这一次的态势**（不含任何历史事件账）。返回 `(state, why)`。
+
+    ★★ 为什么要有第二个入口（2026-10-09，创始人第 1 问「后台数据跟前沿的
+      对接是否正确」引出的真 bug）：
+      日报/运行状态页有一行叫「现在的防线状态」，释义写的是
+      「不计数；是**当场查一次**的结果」，而它显示的值取自 `light()` ——
+      那是「此刻态势 × 24h 历史账」的**混合判读**。
+      ⇒ 页面上出现了"自称 A、实际 B"的一行：明明写着「当场查一次」，
+        原因却写「24 小时内有未处理事项（最高 R0）」。
+      ⇒ 拆开：`light()` 答"整体该报什么"，`base_state()` 答"此刻查到了什么"。
+        两者共用同一套 MAP，不写第二份映射，不会漂移。
+
+    ★ 0.37.2 fix：`down` / `warn` 原先**不在这里**（只在 `light()` 里），
+      于是 `posture_light()` 拿到 `down` 会落到末尾兜底 ⇒ 报 L1「没登记的
+      防线状态」—— **真正失守被读成最轻的一档**。现在走 `_posture_direct()`
+      共用一份（详见那里的注释）。
+
+    ★ `guarding` 仍走**显式分支**：不许靠"穿透 if 链落到函数末尾"拿正常结果
+      —— 0.36.3 实测教训：穿透＝把正确性交给运气（兜底一改，绿就变黄）。
+    """
+    direct = _posture_direct(posture_state)
+    if direct is not None:
+        return direct
+    if posture_state == "interrupted":
+        # ★ 0.37.2：`哨兵` 是页面上**唯一**的守护角色（创始人 2026-10-09：
+        #   「不要制造并列的护盾加哨兵两个概念，哨兵一个概念足矣，
+        #     护盾是哨兵手里的一个工具」）。缺岗说的是**没人盯着** ⇒
+        #   主语只能是哨兵。记录原文里另有「门闸」一词（历史写法，记录不改写）；
+        #   界面文案一律用「哨兵」，防护状态类用中性名词「防护」，
+        #   护盾只在 `sentinel` 词条里作为**工具**出现一次。
+        return STATE_L1, ("哨兵缺岗，但此刻没有监管对象——可证明没损失；"
+                          "仍建议尽快拉起来")
     if posture_state == "unknown":
-        return LIGHT_UNKNOWN, "探不到防线状态——这是盲区，不等于没问题"
+        return STATE_L1, "探不到哨兵状态——这是盲区，不等于没问题"
     if posture_state == "off":
-        return LIGHT_OFF, "护盾默认关闭。开启后才会拦、才会记账。"
+        return STATE_L0, "哨兵默认没在值守。开启后才会拦、才会记账。"
+    if posture_state == "dev":
+        return STATE_DEV, ("正在研发迭代：这一版还没发出去，代码与登记不一致是"
+                           "改出来的（哨兵仍在正常放哨；它发现状况时该报的一样会报）")
     if posture_state == "guarding":
-        # ★★★ 0.36.3 新增这一支 —— 它**以前根本不存在**。
-        #   `guard_posture()` 在一切正常时返回的**就是 `guarding`**（实测，
-        #   `inbox_server.py:404` 直接把 `p["state"]` 喂给 `light()`），
-        #   而改造前 `light()` 的 `if` 链里**没有 `guarding` 分支** ⇒
-        #   它一路穿到函数末尾，靠"落到 else 段"**意外**拿到 LIGHT_OK。
-        #   ⇒ 也就是说：**"值守中"这个最正常的结果，一直是靠一个 bug 支撑的**。
-        #     平时看不出来，因为兜底恰好给了它绿灯。
-        #   ⇒ 0.36.3 加了"集合外一律黄灯"之后，这个 bug 立刻暴露成
-        #     **正常状态被判成"查不到"**（实测复现）。
-        #   ⇒ 现在显式写出来：值守中 ⇒ 往下看 24 小时账（下面几行）。
-        pass                                 # 正常路径，继续往下算历史账
-    # ★★★ 0.36.3（创始人「状态都是计划内的」，实测抓到）：
-    #   下面这段是**兜底**，改造前**根本不存在** —— 未知姿态会穿过上面
-    #   全部 `if` 落到函数末尾，被当成"值守中"⇒ **打绿**。
-    #   实测：`light("banana")` / `light(None)` / `light("")` 全都 → `ok`。
-    #   ⇒ 新增状态忘了改这里，界面就**安静地显示一切正常**。
-    #   ⇒ 现在：集合外一律黄灯「查不到」，并**说清收到的是什么** ——
-    #     「查不到」和「没问题」必须长得不一样（0.28.3 起的老纪律）。
-    #
-    #   ★★ 判据写成 `isinstance(..., str)` **再**查集合，而不是直接 `not in`：
-    #     `not in frozenset` 会对 `list`/`dict` 抛 `TypeError: unhashable type`
-    #     （实测踩到）。而抛异常的坏处比返回黄灯更重：**整个灯算不出来**，
-    #     页面直接崩给你看 —— 那正是"查不出来"最该避免的表现形式。
-    #     ⇒ 不可哈希的输入也走同一条兜底，不许把异常泄给调用方。
-    if not isinstance(posture_state, str) or posture_state not in _POSTURE_ALL:
-        return LIGHT_UNKNOWN, ("收到一个不认识的防线状态（%r）——这是盲区，"
-                               "不等于没问题" % (posture_state,))
-    action_items = [it for it in items
-                    if bucket_of(it, now=now, hours=hours) == BUCKET_ACTION]
-    if not action_items:
-        return LIGHT_OK, "哨兵在岗，%d 小时内没有需要你亲自处理的事" % hours
-    n = count_groups(action_items)
-    lv = max((it.level for it in action_items), key=lambda x: PRIORITY[x])
-    return LIGHT_ATTENTION, ("哨兵在岗，%d 小时内有 %d 件事需要你亲自处理（最高 %s）"
-                             % (hours, n, lv))
+        return STATE_L0, "哨兵在岗，此刻没查出缺口"
+    # 理论上不可达（上面已穷尽 POSTURE_ALL，`light()` 里集合外已被拦成 L1）。
+    # 保留是**故意的**：万一 POSTURE_ALL 扩容而这里忘了加分支，它打**黄**
+    # （盲区）而不是绿 —— 新增状态忘记接线时必须**看得见**。
+    return STATE_L1, ("收到一个没登记的防线状态（%r）——这是盲区，"
+                      "不等于没问题" % (posture_state,))
+
+
+def current_state(posture_state, granary=None, items=None, now=None,
+                  hours=WINDOW_HOURS):
+    """★★ 「灯态」的**唯一真源**（2026-10-09 创始人裁定 ＋ 逐态复审，0.39.0）。
+
+    ★★★ 六态的**来源分工**（这是本函数存在的全部理由，判据 `ci/inbox_guards_0380.py` 钉死）：
+
+      | 态 | 性质 | 唯一来源 | 为什么 |
+      |----|------|----------|--------|
+      | R0 失守 | **状态**（有时态） | **只由此刻** | 「现在失守」才叫失守；「昨天失守过、已恢复」≠ 现在失守 |
+      | L2 拦截 | **事件**（天然过去时） | **只由账** | 不存在"此刻正在拦截"——拦下就是拦下了 |
+      | L1 注意 | 兼有 | 此刻（缺岗无损失／探不到）＋账 | 盲区与提示都是"别慌，但要知道" |
+      | Ls 缺粮 | **状态**（余额） | **只由此刻** | 余额是当下事实 |
+      | L0 值守中 | 状态 | 只由此刻 | — |
+      | dev 研发中 | 状态 | 只由此刻 | — |
+
+      ⇒ **铁律：R0 绝不由账给。** 其余事件级（L2/L1）绝不由"姿态"编。
+
+    ★★★ 为什么必须有它（真问题，本机实测，不是设计偏好）：
+      旧实现里页面那盏灯取 `light()` —— 那是**两个维度的合并读**（此刻 × 24h 账）。
+      本机实测：哨兵在岗、心跳 4 分钟前、自检通过，而 24 小时里躺着未处理的
+      **失守记录** ⇒ 灯显示**失守（红）**，创始人点进去才发现**此刻好好的**。
+      创始人裁定：「**一定要让值守台反应当前的准确状态，没有失守却显示失守，
+      就是错误的**，请修正，并且要从机制上修正，防范再犯。」
+
+    ★★ 更正：第一版把它写成"**纯**此刻"（完全不看账）—— **那是错的**，
+      它让 `L2 拦截` **永远亮不起来**（六态里少一个可达态）。实测见
+      `_p_state_reach` 探针：`guarding ＋ 一条 tool_call_blocked` ⇒ 灯 L0（旧版
+      纯此刻）而 `light()` 给 L2。⇒ 修法不是"再把账整个放回来"，而是
+      **按范畴分开**：状态用此刻、事件用账、**失守永不回溯**。
+
+    ★ 与 `light()` 的分工（**不许混用**）：
+      · `current_state()` ⇒ **灯**用它（本函数）；
+      · `light()`         ⇒ 答"此刻＋账合起来最该提哪一档"（含历史 R0）⇒
+                             只用于诊断/账，**页面渲染不得直接调它**。
+    """
+    lv, _ = base_state(posture_state)
+    # ---- 事件级：只取 L2/L1；**历史 R0 一律不抬灯** ----
+    if items:
+        ev = [it.level for it in _window_open(items, hours, now)
+              if it.level in (STATE_L2, STATE_L1)]
+        if ev:
+            top = max(ev, key=lambda x: PRIORITY.get(x, 0))
+            if PRIORITY.get(top, 0) > PRIORITY.get(lv, 0):
+                lv = top
+    # ---- 粮：此刻的余额缺口 ----
+    gl = _granary_level(granary, posture_state)
+    if gl is not None and PRIORITY.get(gl, 0) > PRIORITY.get(lv, 0):
+        lv = gl
+    return lv
+
+
+def posture_light(posture, hours=WINDOW_HOURS):
+    """给「现在的防线状态」用的**实时读数** —— 答"此刻查到了什么"。
+
+    返回 `(state, label, why)`。`why` 取守门模块**当场**给出的原因原文
+    （`guard_posture()["why"]`），不是事件账推出来的；这就让页面上
+    「当场查一次」这行字名副其实。
+    """
+    p = posture or {}
+    st, fallback = base_state(p.get("state"))
+    why = (p.get("why") or "").strip() or fallback
+    return st, state_label(st, p.get("state")), why
+
+
+def light_explain(posture, items, now=None, hours=WINDOW_HOURS, granary=None):
+    """★★ 顶部灯的**完整说明**（0.37.2 新增，★ 唯一实现）。
+
+    ★ 0.38.0：新增 `granary`（可选）—— 粮的读数。**不传 ⇒ 与 0.37.x 逐字同行为**。
+      传了且余额低、哨兵在岗 ⇒ 这盏灯可能是「缺粮（Ls）」给的，
+      原因句因此改说粮，而不是"此刻是好的"（否则灯说缺粮、句子说没事，自相矛盾）。
+
+    ★★★ 0.39.0 决议（**取向已反转**，2026-10-09 创始人二次裁定）：
+      0.37.2 的折中是"状态词仍取合并读（可能显示失守），另用事实句解释另一维"。
+      创始人实测后**否掉了它**：「**一定要让值守台反应当前的准确状态，没有失守
+      却显示失守，就是错误的**，请修正，并且要从机制上修正，防范再犯。」
+      ⇒ 现在 `state` / `label` 取 **`current_state()`**（只看此刻），
+        历史账改由 `ledger_bad` / `reason` 表达。
+      ⇒ "两个状态词会困惑"的顾虑**仍然成立**，所以并**没有**引入第二个状态词：
+        账这一维用**非状态的事实句**说（"另外，24 小时里还有没处理的事"），
+        件数照旧只归筛选条 / 钻取后缀（数字只出现一次）。
+
+    ★★ 为什么要有它（创始人 2026-10-09 实测点名的真问题）：
+      `light()` 把**两个不同的维度**合成了一个数 ——
+        · 维度一「此刻」：哨兵在不在岗、心跳多旧、自检过不过；
+        · 维度二「24 小时账」：这段历史里有没有**还没处理**的记录。
+      本机实测：此刻哨兵在岗、心跳 0 分钟前、自检通过；而 24 小时里躺着
+      未处理的失守记录 ⇒ 灯显示「失守」（红）。用户看到红，点进去才发现
+      **此刻好好的** —— 一个词回答了两个问题，等于两个都没答清。
+
+    ★★ 为什么不拆成两个状态读数（文档 §2.3 方案乙）：
+      同屏出现两个状态词（「失守」＋「值守中」）时，用户不知道该信哪个 ——
+      而这个形状**不用假设**：日报页已经是顶部条「失守」＋页面内「值守中」，
+      实测正是困惑的来源。⇒ 状态词仍然只有一个，**另一个维度改用
+      非状态的事实句表达**（"此刻是好的（哨兵在岗…）"），并明说灯的色
+      是哪一维给的。
+
+    返回 dict：
+      `state`      六态之一
+      `label`      人话状态词
+      `now_text`   「此刻」这一维的事实句（取守门模块**当场**给出的原话）
+      `now_bad`    此刻这一维本身是不是就该报警
+      `ledger_bad` 24 小时账这一维是不是有未处理项
+      `reason`     拼好的一句话原因（页面直接用，不再自己拼）
+    """
+    p = posture or {}
+    # ★★★ 0.39.0（创始人裁定「没有失守却显示失守，就是错误的」）：
+    #   灯＝`current_state()`，**不再**取 `light()` 的「此刻 × 24h 账」合并读。
+    #   ★ 注意它**不是**"纯此刻"：**状态类**（R0/Ls/L0/dev）只由此刻给，
+    #     **事件类**（L2/L1）只由账给 —— 尤其**历史 R0 一律不抬灯**
+    #     （来源分工表见 `current_state()` 的 docstring）。
+    #     第一版写成"纯此刻"会把 `L2 拦截` 变成**不可达态**（实测抓到的回归）。
+    #   完整账（含历史 R0）由下面的 `ledger_bad` / `reason` 与页面上的
+    #   「要处理 N」承担 —— 账照样摆出来，只是不再冒充"此刻"。
+    st = current_state(p.get("state"), granary, items, now, hours)
+    label = state_label(st, p.get("state"))
+
+    # ---- 维度一：此刻（走 base_state 的**同一份**映射 + 当场原话）----
+    bst, fallback = base_state(p.get("state"))
+    now_text = (p.get("why") or "").strip() or fallback
+    # L0（含未启用）与 dev 都算"此刻这一维是干净的"；其余（R0/L1/Ls/盲区）都要说
+    # ★ 0.38.0：粮低也算"此刻不干净"（余额是**当下的事实**，不是历史账）。
+    gran_bad = _granary_level(granary, p.get("state")) is not None
+    now_bad = bst not in (STATE_L0, STATE_DEV) or gran_bad
+
+    # ---- 维度二：24 小时账（与灯同一批记录，绝不各数各的）----
+    ledger_bad = bool(_window_open(items, hours, now))
+
+    # ---- 拼一句话：始终先说此刻，再说账 ----
+    # ★ 不放件数：`light()` 的 why 里放件数是 0.37.1 就删掉的重复源，
+    #   件数归筛选条/顶部钻取/药丸各管一处；这一句只答"为什么是这个色"。
+    # ★ 0.37.2 fix：守门模块给的 `why` **自带句号**（如"…这次没装好。"）——
+    #   直接往后接"；另外…"会拼出「。；」这种双层句读（本机实测见账本页
+    #   顶部条）。⇒ 只在**把 `now_text` 嵌进更长的句子**时去掉它的尾部句读；
+    #   单独成句的那条分支照旧保留原文（它是一个完整句子）。
+    _nt = now_text.rstrip("。；;.")
+    if gran_bad:
+        # 此刻这一维不干净的原因就是粮 —— 照实说粮，不许再说"此刻是好的"。
+        _gt = _granary_why(granary).rstrip("。；;.")
+        reason = ("此刻：%s；另外，24 小时里还有没处理的事。" % _gt if ledger_bad
+                  else "此刻：%s" % _gt)
+    elif now_bad and ledger_bad:
+        reason = "此刻：%s；另外，24 小时里还有没处理的事。" % _nt
+    elif now_bad:
+        reason = "此刻：%s" % now_text
+    elif ledger_bad:
+        # ★★ 0.39.0：灯现在**就是**"此刻"（`current_state`）⇒ 旧文案
+        #   「灯这样报，是因为 24 小时里有没处理的事」**已不成立** ——
+        #   此刻好 ⇒ 灯是绿的，根本没有"被账报红"这回事。改成"另外…"，
+        #   如实把它说成**另一件事**，而不是灯色的来源。
+        reason = "此刻是好的（%s）；另外，24 小时里还有没处理的事。" % _nt
+    else:
+        reason = "%s；24 小时里也没有等你处理的事。" % _nt
+    return {"state": st, "label": label, "now_text": now_text,
+            "now_bad": now_bad, "ledger_bad": ledger_bad, "reason": reason}

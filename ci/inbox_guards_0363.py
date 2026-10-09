@@ -30,6 +30,30 @@ if ROOT not in sys.path:
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
+#: ★ 0.37.1 补：本文件的负控此前**只在内存里算变异字符串**，从没写盘 ——
+#:   空转的负控比没有负控更坏（它给"已被守护"发勋章，见 0364 B4 同型修法）。
+#:   这里补上与 0364 同形的快照/还原机制（还原用 rename，避开 Antinel 自己
+#:   的 DST-01 删除拦截）。
+_BACKUP = []          # [(path, backup)]
+
+
+def _snapshot(path):
+    """备份一个文件（还原用 rename，避开 Antinel 自己的 DST-01 删除拦截）。"""
+    import shutil
+    bk = path + ".g0363.bk"
+    shutil.copy2(path, bk)
+    _BACKUP.append((path, bk))
+    return bk
+
+
+def _restore_all():
+    for path, bk in reversed(_BACKUP):
+        if os.path.exists(bk):
+            if os.path.exists(path):
+                os.replace(path, path + ".g0363.trash")
+            os.replace(bk, path)
+    _BACKUP.clear()
+
 
 def _func_seg(src, name):
     """★ 取某个函数的**真代码**（docstring 剥掉）。
@@ -121,34 +145,59 @@ def c_light_never_greens_on_unknown_posture():
         except Exception as e:                              # noqa: BLE001
             bad.append("%r → 抛异常 %s" % (st, type(e).__name__))
             continue
-        if got == M.LIGHT_OK:
+        if got == M.STATE_L0:
             bad.append("%r → 打绿（%s）" % (st, why))
-        elif got != M.LIGHT_UNKNOWN:
-            bad.append("%r → %s（应当是「查不到」）" % (st, got))
+        elif got != M.STATE_L1:
+            bad.append("%r → %s（应当是「注意/盲区」）" % (st, got))
     if bad:
-        return "计划外姿态没落到黄灯「查不到」：%s" % "；".join(bad[:4])
+        return "计划外姿态没落到黄灯「注意」：%s" % "；".join(bad[:4])
     return True
 
 
 def n_light_greens_on_unknown_is_caught():
-    """负控：删掉兜底（回到"穿过 if 落到末尾打绿"）⇒ 上一条必须报红。
+    """负控：让未登记姿态**真的打绿** ⇒ 上一条必须报红。
 
-    ★ 负控必须**真去改**再真去跑，否则它验的是"我写了个返回 True 的函数"。
+    ★★ 0.37.1 修（本负控此前**空转**，实测三代都"生效"）：
+       旧版只**在内存里**拼出 `mutated` 字符串，从没写盘、没 reload ——
+       `M.light("banana")` 跑的是**未变异**的模块 ⇒ 它"生效"的原因是
+       产品本来就不打绿，不是变异被抓到。与 0364 B4 同型：
+       **量具的空转比没有负控更坏**（它给"已被守护"发勋章）。
+       另：旧版的结构锚点 `LIGHT_UNKNOWN` 在六态换代后已不存在 ⇒
+       走"跳过变异"分支直接返回 True，连空转都省了。
+    ⇒ 现在：真写盘 → 真 reload → 复现历史缺陷形状（未登记姿态打绿）→
+       还原 → 还原后再验一遍回到黄灯（还原链路坏掉比负控失效更险）。
     """
+    import importlib
     import inbox_model as M
-    src = _code_only(_src_of(M))
-    cut = src.split("if not isinstance(posture_state, str)")[0]
-    if "LIGHT_UNKNOWN" not in cut.split("if posture_state ==")[-1]:
-        return True          # 结构已变（兜底写法不同），跳过变异
-    # 变异：把兜底条件改成永假 ⇒ 未知姿态就会一路落到末尾的历史账分支
-    mutated = src.replace(
-        "if not isinstance(posture_state, str) or posture_state not in _POSTURE_ALL:",
-        "if False:", 1)
-    if mutated == src:
-        return True          # 锚点已变，本负控不适用（非失效）
-    # 变异后 `guarding` 之外的东西会走到 `action_items` → 空 items → LIGHT_OK
-    got = M.light("banana", [], now=None)[0]
-    return got != M.LIGHT_OK
+    p = os.path.join(ROOT, "inbox_model.py")
+    _snapshot(p)
+    try:
+        src = open(p, encoding="utf-8").read()
+        # ① 关掉 ⑥（集合外一律盲区）
+        anchor = ("if not isinstance(posture_state, str) or posture_state not in _POSTURE_ALL:")
+        assert anchor in src, "定位 ⑥ 集合外判读失败（锚点漂移，负控需更新）"
+        mutated = src.replace(anchor, "if False:", 1)
+        # ② 把函数末尾的防御性黄灯也改成打绿 —— 复现 0.36.2 那个真缺陷的形状
+        #    （当年没有兜底，未知姿态一路穿到末尾拿到绿灯）
+        tail = ('    return STATE_L1, ("收到一个没登记的防线状态（%r）——这是盲区，"\n'
+                '                      "不等于没问题" % (posture_state,))')
+        assert tail in mutated, "定位防御性黄灯失败（锚点漂移，负控需更新）"
+        mutated = mutated.replace(
+            tail, '    return STATE_L0, "坏：未登记姿态打绿（历史缺陷复现）"', 1)
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(mutated)
+        importlib.reload(M)
+        got, _ = M.light("banana", [], now=None)
+        assert got == M.STATE_L0, (
+            "负控失效：变异后 light('banana') = %r（应为 STATE_L0，"
+            "即复现历史缺陷）" % (got,))
+        return True
+    finally:
+        _restore_all()
+        importlib.reload(M)
+        got2, _ = M.light("banana", [], now=None)
+        assert got2 == M.STATE_L1, (
+            "还原后 light('banana') 应为黄灯，实际 %r ⇒ 还原链路坏了" % (got2,))
 
 
 def c_posture_set_is_closed_and_single_sourced():
@@ -194,16 +243,18 @@ def c_every_posture_maps_to_a_label_and_visual():
 
     ★ 注意查的是**姿态集合** `host_shield.POSTURE_ALL`，不是灯集合 ——
       姿态是输入、灯是输出，**每个姿态都要能落到一个灯**。
+    ★★ 0.37.1：灯集合从 8 个派生灯态收回 **LIGHT_STATES 六态**
+      （LOGO 五态＋开发态）—— 登记表也随之换成 `STATE_LABEL` 等。
     """
     import host_shield as H
     import inbox_model as M
     for p in sorted(H.POSTURE_ALL):
         lg, _ = M.light(p, [], now=None)
-        if lg not in M.LIGHT_LABEL:
+        if lg not in M.LIGHT_STATES or lg not in M.STATE_LABEL:
             return "姿态 %r 落到了未登记的灯 %r" % (p, lg)
-        if lg not in M.LIGHT_LOGO or lg not in M.LIGHT_VAR:
+        if lg not in M.STATE_LOGO or lg not in M.STATE_VAR:
             return "灯 %r 缺 LOGO/颜色映射" % lg
-    if M.light("dev", [], now=None)[0] != M.LIGHT_DEV:
+    if M.light("dev", [], now=None)[0] != M.STATE_DEV:
         return "研发态没有落到研发灯"
     return True
 
@@ -227,19 +278,24 @@ def c_guarding_is_explicit_branch():
         return ('light() 没有显式的 guarding 分支 —— '
                 '"值守中"靠穿透 if 链偶然拿到，属"靠 bug 支撑的正确结果"')
     got = M.light("guarding", [], now=None)[0]
-    if got != M.LIGHT_OK:
-        return "guarding 打成了 %r（应当是 ok）" % got
+    if got != M.STATE_L0:
+        return "guarding 打成了 %r（应当是 L0 值守中）" % got
     return True
 
 
 def n_guarding_without_branch_is_caught():
-    """负控：删掉 `guarding` 分支 ⇒ 上一条必须报红。"""
+    """负控：把 `guarding` 分支从源码里删掉 ⇒ 判据必须报红。
+
+    ★ 0.37.1 修：旧版负控两条返回值路径都是 True（变异没打上也算过）——
+      **空转负控**（判据腐化族）。现在：变异没打上 ⇒ 红
+      （说明判据的源码模式已与产品脱钩）；打上了 ⇒ 验分支确实消失。
+    """
     import re as _re
-    src = _code_only(_src_of(M := __import__("inbox_model")))
-    mutated = _re.sub(r'if\s+posture_state\s*==\s*"guarding".*?pass',
-                      '# MUTANT', src, count=1, flags=_re.S)
+    src = _code_only(_src_of(__import__("inbox_model")))
+    mutated = _re.sub(r'if\s+posture_state\s*==\s*"guarding"',
+                      '# MUTANT', src, count=1)
     if mutated == src:
-        return True
+        return False
     return 'if posture_state == "guarding"' not in mutated
 
 

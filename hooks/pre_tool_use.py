@@ -54,7 +54,7 @@ _T0 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段起点（性能
 
 # ---------------------------------------------------------------- constants --
 PKG_DIR = os.path.dirname(os.path.abspath(__file__))
-_ANTINEL_VERSION = "0.37.0"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
+_ANTINEL_VERSION = "0.42.1"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
 _T1 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段终点（性能插桩）
 
 
@@ -2189,39 +2189,66 @@ def notice_state_path():
     base = os.path.expanduser(hub) if hub else os.path.join(
         os.path.expanduser("~"), ".antinel")
     return os.path.join(base, "notify_state.json")
+    # ★ 0.40.0：**唯一真源**是 `host_shield.notify_ledger_path()`（同一份文件，
+    #   同一口径）。这里保留本地算法是为了在 host_shield 不可导入时仍能工作；
+    #   两者**必须算出同一个路径** —— 由 `ci/inbox_guards_0400.py` 的 S23 钉死。
+
+
+def _hs_module():
+    """取 `host_shield` 模块（带"把包根塞进 sys.path"的兜底）。拿不到 ⇒ None。
+
+    ★ 归口：本文件里所有对 host_shield 的 import 都走这里（**消灭副本**）——
+      过去 `notify_owner` 自己内联了一份同样的兜底 import。
+    """
+    try:
+        import host_shield as _hs
+        return _hs
+    except Exception:                                            # noqa: BLE001
+        pass
+    try:
+        parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if parent not in sys.path:
+            sys.path.insert(0, parent)
+        import host_shield as _hs
+        return _hs
+    except Exception:                                            # noqa: BLE001
+        return None
 
 
 def notice_gate(rule_id, snippet):
     """UX: identical alert (rule + snippet) notifies once per day; repeats are
     silently logged. State lives in the **个人中枢**（一台机器一份，见
-    `notice_state_path`）—— 原来按 cwd 存，会分裂成多份，降噪等于失效。"""
+    `notice_state_path`）—— 原来按 cwd 存，会分裂成多份，降噪等于失效。
+
+    ★★ 0.40.0：写入改走 **host_shield.ledger_rmw**（通知账的**唯一写入口**，
+    带文件锁）。两个理由：
+      ① 本条与气泡节流（`shown|*` / `sent|*`）**共用同一份文件** —— 各自写一份
+         读-改-写会互相覆盖（并发钩子）；
+      ② 旧实现里的"每日清理"是 `{k: v for k, v in st.items() if v == today}`，
+         它会**连气泡节流的数值型键一起删掉**（时间戳 ≠ 日期字符串）——
+         现在只在 `ledger_rmw` 的 mutator 里清"值是日期"的旧键。
+    """
     today = datetime.now().strftime("%Y-%m-%d")
     key = rule_id + "|" + re.sub(r"\s+", " ", snippet)[:60]
+    _hs = _hs_module()
+    if _hs is None:
+        return False                        # 拿不到记账模块 ⇒ 按"没抑制过"（宁可多提示）
+    seen = {"sup": False}
+
+    def _mut(d):
+        # 只清"值是日期字符串"的过期键；数值型（shown|/sent|）一律保留
+        for k in [k for k, v in d.items() if isinstance(v, str) and v != today]:
+            d.pop(k, None)
+        seen["sup"] = (d.get(key) == today)
+        d[key] = today
+        return d
+
     try:
-        p = notice_state_path()
-        st = {}
-        if os.path.isfile(p):
-            try:
-                st = json.load(open(p, encoding="utf-8"))
-            except Exception:
-                st = {}
-        if not isinstance(st, dict):
-            st = {}
-        st = {k: v for k, v in st.items() if v == today}
-        sup = st.get(key) == today
-        if not sup:
-            st[key] = today
-            try:
-                os.makedirs(os.path.dirname(p), exist_ok=True)
-                tmp = p + ".tmp"
-                with open(tmp, "w", encoding="utf-8") as f:
-                    json.dump(st, f, ensure_ascii=False)
-                os.replace(tmp, p)          # 原子换：并发钩子不会互相覆盖
-            except Exception:
-                pass
-        return sup
-    except Exception:
+        if not _hs.ledger_rmw(_mut):
+            return False
+    except Exception:                                            # noqa: BLE001
         return False
+    return seen["sup"]
 
 
 # 0.33.1：走"双通道 stdout"的宿主名单。
@@ -2849,23 +2876,26 @@ def notify_owner(title, body):
        「值守台窗口开着、正显示这条急事 ＋ 右下角又弹一个泡」（2026-10-08
        创始人实测：两次越权写入拦截，窗口可见状态下各触发一次气泡）。
        ⇒ 判据不二次实现：import host_shield，问 console_is_visible()——
-         True（此刻有窗口正在看）⇒ 不弹，把「已用窗口通知」记进状态；
+         True（此刻有窗口正在看）⇒ 不弹，把「已用窗口通知」记进**中枢通知账**
+         （`<hub>/notify_state.json`，0.40.0 起；**不再写安全状态文件**）；
          False（明确没有）／None（判不出）⇒ 照弹，方向与 _notify_throttled
          一致：宁可多弹一次，不可把真急事藏起来。
     """
     try:
-        try:
-            import host_shield as _hs
-        except ImportError:
-            _parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            if _parent not in sys.path:
-                sys.path.insert(0, _parent)
-            import host_shield as _hs
+        _hs = _hs_module()                  # ★ 统一走 _hs_module()（消灭内联副本）
+        if _hs is None:
+            raise ImportError("host_shield 拿不到")
         if _hs.console_is_visible() is True:
             try:
-                _st = _hs.load_state()
-                _st.setdefault("notify_shown_in_window", {})["block|owner"] = time.time()
-                _hs.save_state(_st)
+                # ★★★ 0.40.0：记账走**中枢级通知账**（展示层唯一写入口），
+                #   **不再写安全状态文件** —— 过去这里是一次
+                #   「读整份 host_shield.json → 改一个键 → 整份写回」；而
+                #   `host_shield.load_state()` 读失败时返回默认值
+                #   （`{"enabled": False, …}`）⇒ 钩子把它**整份写回真状态**
+                #   ⇒ 哨兵下一拍发现 enabled 与链权威不一致 ⇒ 记一条 R0 假失守
+                #   「已回写恢复」。**写手就是本函数**（AI 每次工具调用都跑这里）。
+                #   ⇒ 展示层的账，不许写在安全状态里。
+                _hs.mark_notify_shown("block|owner")
             except Exception:
                 pass                        # 记账失败不影响「不弹」的结论
             return

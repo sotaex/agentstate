@@ -50,6 +50,32 @@ def _resolve_pkg():
 PKG = _resolve_pkg()
 DEFAULT = PKG / "psl" / "judgment.json"
 
+
+def _load_version_normalizer():
+    """**版本行归一化的唯一真源在 `host_shield.py`**；本工具只消费，不自己实现。
+
+    ★★ 0.39.2（为什么必须有）：`hooks/pre_tool_use.py` 同时是**版本承载件**与
+      **永不豁免的告警链路文件** ⇒ 发版改它的版本行 ⇒ 哈希必然对不上 manifest。
+      若不归一化，本工具会把一个**合法发版**判成"随包文件已变" ⇒ 判定恒 superseded
+      ⇒ 0.16.0 那条"intact package ⇒ current"的断言永远红（假缺陷）。
+      ⇒ 口径必须与 `host_shield.self_check()` / `build_package.py` / `run_harness.py`
+        **完全同法**（交接件 §6.5：只改一侧 ⇒ 哈希恒失配，比不改更糟）。
+      ★ 这里**不写第二份正则** —— 唯一实现是 `host_shield.norm_version_bytes`。
+        判据 `ci/inbox_guards_0380.py` S19 钉住"只有一个实现"这条结构纪律。
+
+    返回 `(norm_bytes|None, bearing_tuple, note)`；host_shield 不可用 ⇒ note 非空
+    （**显式记账，不静默降级**）。
+    """
+    try:
+        if str(PKG) not in sys.path:
+            sys.path.insert(0, str(PKG))
+        import host_shield as _H
+        return (_H.norm_version_bytes,
+                tuple(getattr(_H, "VERSION_BEARING_CHAIN_FILES", ())), "")
+    except Exception as e:                                     # noqa: BLE001
+        return (None, (), "★ 拿不到 host_shield（%r）⇒ 版本承载件按**原始字节**比对；"
+                          "包内若含版本承载件，结果可能假阳性（superseded）" % (e,))
+
 # =============================================================== 0.29.0 不变量 ====
 # ★ 为什么要有这个模式（本项目的铁律）：
 #     「无检查项的禁令 ＝ 没有禁令」。
@@ -580,13 +606,18 @@ def main(argv=None):
         print(json.dumps({"status": "error", "reason": "no digests to verify (%s)" % scope}))
         return 2
     changed, missing, checked = [], [], 0
+    # ★★ 0.39.2：版本承载件的哈希口径必须与 host_shield（唯一真源）同法，见上方函数。
+    _norm, _bearing, _note = _load_version_normalizer()
     for rel, want in sorted(digests.items()):
         f = base / rel
         checked += 1
         if not f.is_file():
             missing.append(rel)
             continue
-        got = "sha256:" + hashlib.sha256(f.read_bytes()).hexdigest()
+        _data = f.read_bytes()
+        if _norm is not None and rel in _bearing:
+            _data = _norm(_data)
+        got = "sha256:" + hashlib.sha256(_data).hexdigest()
         if got != want:
             changed.append({"file": rel, "recorded": want[:23], "live": got[:23]})
     if changed:
@@ -601,6 +632,7 @@ def main(argv=None):
     out = {"status": status, "reason": reason, "checked": checked,
            "mode": "manifest" if a.manifest else "judgment",
            "changed": changed, "missing": missing,
+           "hash_note": _note,
            "record_verdict": rec.get("verdict"),
            "rule": "any failed verification supersedes the record (append-only; "
                    "this tool never edits the credential)"}

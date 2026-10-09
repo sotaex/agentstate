@@ -410,6 +410,51 @@ def _acl_rescue_rmtree(path):
     _discard(path)
 
 
+def _process_elevation():
+    """本进程是否处于**提权上下文**（Mandatory Level）。返回 `(elevated: bool, why: str)`。
+
+    ★★ 为什么判据必须知道这件事（0.40.0，本机实测）：
+      门闸靠 NTFS ACL 拒写 —— `host_shield.acl_deny()` 授
+      `BUILTIN\\Administrators:(OI)(CI)(F)` ＋ 当前用户 `(WDAC,RD,X)`。
+      **提权令牌属于 Administrators ⇒ 那条 F 先生效 ⇒ `is_denied()` 的写探针恒 False。**
+      此时"上锁失败"是**量具失真**，不是产品缺陷。
+      实测（2026-10-09，本机）：`IsUserAnAdmin()=1` 时
+      `acl_deny()` 明明把 ACL 授上去了（`icacls` rc=0、ACE 可见），
+      `is_denied()` 仍返回 False，`scan_once()` 于是记下
+      `zone_lock_failed / critical /「有进程在对抗门闸」` —— **一句不成立的指控**。
+
+    ★ 判据用**进程完整性级别**，不用"`acl_deny` 有没有成功"：后者会把
+      「锁真被废了」误判成「环境受阻」，从而**掩盖真缺陷**（那正是本判据要防的事）。
+      查不出级别 ⇒ 按**不可用**处理（不许猜）。
+    ★ 口径与 `ci/drift_audit._acl_audit_usable()` **同源**；`ci/` 不随包分发 ⇒
+      不能 import，只能镜像。防漂移靠 `ci/inbox_guards_0400.py` 的 S32（两侧同答）。
+    """
+    if os.name != "nt":
+        return False, "非 Windows：ACL 判据不适用"
+    try:
+        r = subprocess.run(["whoami", "/groups"], capture_output=True, timeout=30,
+                           creationflags=_CREATE_NO_WINDOW)
+        out = ((r.stdout or b"").decode("gbk", "replace")
+               + (r.stderr or b"").decode("gbk", "replace"))
+    except Exception as e:                                       # noqa: BLE001
+        return False, "whoami 不可用（%s）⇒ 查不出完整性级别，ACL 判据不可信" % type(e).__name__
+    lvl = None
+    for line in out.splitlines():
+        if "S-1-16-" in line:
+            try:
+                lvl = int(line.split("S-1-16-", 1)[1].split()[0])
+            except (ValueError, IndexError):
+                pass
+            break
+    if lvl is None:
+        return False, "whoami 输出无 S-1-16-* ⇒ 查不出完整性级别，ACL 判据不可信"
+    if lvl >= 0x3000:                       # 0x3000=High, 0x4000=System
+        return True, ("进程处于提权上下文（Mandatory Level S-1-16-%d ≥ 0x3000）："
+                      "acl_deny 授出的 Administrators:(OI)(CI)(F) 对本进程生效，"
+                      "is_denied() 恒 False ⇒ **上锁结果是量具失真，不是产品缺陷**" % lvl)
+    return False, "完整性级别 S-1-16-%d（非提权），ACL 判据可用" % lvl
+
+
 def main():
     # ★ 2026-09-28（D-15）：原来这里是 `shutil.rmtree(WORK)` —— 它会一次性删掉
     #   WORK 下**全部**残留（实测积了 31+ 个目录、几百个条目），
@@ -1981,21 +2026,50 @@ def main():
     rc, out, err, _ = run("antinel.py", ["zone", "add", str(z26)], cwd=proj,
                           env=hub_env, stdin="")
     pol26z = json.loads(pol26.read_text(encoding="utf-8")) if pol26.is_file() else {}
+    # ★★ 0.41.0（**根因修复**）：oracle 换成**产品的 `is_denied()`**（提权感知：
+    #   写探针说"能写"且本进程提权时改读 ACL —— 见 `host_shield.process_elevation`
+    #   / `acl_read_deny`）。
+    #   旧写法用**本测试自己的写探针**（`(z26/'t26.txt').write_text`）：提权终端下它
+    #   **恒成功**（`Administrators:(OI)(CI)(F)` 先生效）⇒ 断言恒红；而且**时红时绿**
+    #   （取决于同套件早前断言留下的 ACL 残留）——「一个时红时绿的量具比恒红的更坏」。
+    #   ★ 独立对照仍在：同一子进程里**同时**打印 `is_denied` 与 `acl_read_deny`，
+    #     两者矛盾（一个说锁了一个说没锁）⇒ 判红 —— 挡"`is_denied` 改坏了却自证清白"。
     p26 = subprocess.run([PY, "-c",
         "import sys;sys.path.insert(0,r'%s');import host_shield as hs;"
         "st=hs.load_state();st['enabled']=True;st.setdefault('zones',[]).append(r'%s');"
-        "hs.scan_once(r'%s',st,r'%s')"
-        % (str(PKG), str(z26).replace("\\", "/"), str(proj).replace("\\", "/"), str(proj))],
+        "pre=hs.is_denied(r'%s');"
+        "hs.scan_once(r'%s',st,r'%s');"
+        "print('L26', pre, hs.is_denied(r'%s'), hs.acl_read_deny(r'%s'))"
+        % (str(PKG), str(z26).replace("\\", "/"), str(z26).replace("\\", "/"),
+           str(proj).replace("\\", "/"), str(proj), str(z26).replace("\\", "/"),
+           str(z26).replace("\\", "/"))],
         capture_output=True, timeout=60, creationflags=_CREATE_NO_WINDOW)
+    _o26 = (p26.stdout or b"").decode("gbk", "replace")
+    _m26 = re.search(r"L26\s+(True|False)\s+(True|False)\s+(True|False|None)", _o26)
+    _pre26 = (_m26.group(1) == "True") if _m26 else None
+    locked26 = (_m26.group(2) == "True") if _m26 else None
+    _acl26 = None if (not _m26 or _m26.group(3) == "None") else (_m26.group(3) == "True")
     try:
+        # 诊断用（**不**参与判定）：提权令牌下这个探针恒成功，正是本次要根除的失真源。
         (z26 / "t26.txt").write_text("x", encoding="utf-8")
-        locked26 = False
-    except PermissionError:
-        locked26 = True
+        _probe26 = False
+    except (PermissionError, OSError):
+        _probe26 = True
     if os.name == "nt":
-        record("0.26 SafeZone registered + tamper-locked",
-               rc == 0 and any("zone_vault" in str(z) for z in (pol26z.get("zones") or []))
-               and locked26 is True, "locked=%s rc=%d" % (locked26, rc))
+        _z26_reg = any("zone_vault" in str(z) for z in (pol26z.get("zones") or []))
+        _elev, _elev_why = _process_elevation()
+        _d26 = ("zones登记=%s rc=%d 扫描前=%s 扫描后is_denied=%s acl读=%s 写探针=%s 提权=%s"
+                % (_z26_reg, rc, _pre26, locked26, _acl26, _probe26, _elev))
+        _ok26 = rc == 0 and _z26_reg and locked26 is True
+        if _ok26 and _acl26 is False:
+            _ok26 = False
+            _d26 += "；★ 两个 oracle 互相矛盾（is_denied=真、acl 读=假）⇒ 判红"
+        if not _ok26:
+            _d26 += "；★ " + (
+                "提权令牌下写探针无效，本判据已改读 ACL ⇒ 若仍为假则是**真缺陷**（安全区没锁住）"
+                if _elev else
+                "本进程非提权 ⇒ 两个 oracle 都有效，本条按**真缺陷**看待（安全区没锁住）")
+        record("0.26 SafeZone registered + tamper-locked", _ok26, _d26[:400])
     else:
         record("0.26 SafeZone lock is a Windows (NTFS ACL) mechanism", True,
                "platform-gated: ACL deny is Windows-only")
@@ -2004,14 +2078,41 @@ def main():
     # ---- F-09／F-10：门闸自检的两处缺口（见《Antinel 门闸自检两处缺口取证（2026-09-24）》）----
     # F-09: task_installed() 必须是【三态】。查询失败要返回 None（"查不出来"），
     #       不得返回 True —— 那会把"门闸裸奔"告警永久抑制掉（fail-open 落在【自检】路径上）。
-    _f09 = ("import sys,types;sys.path.insert(0,r'%s');import host_shield as hs;"
+    #
+    # ★★ 0.37.1 修「判具衰减」（本机实测拿到 True ⇒ 误报产品"谎报"）：
+    #   0.35.3 把 `task_installed()` 改成**文件系统事实优先** —— 启动项在就
+    #   直接返回 True，**根本不走 `hs.subprocess`**。而本判具只把
+    #   `hs.subprocess` 换成抛错替身 ⇒ 注入**没触及被测路径**，
+    #   拿到的 True 是**真事实**（启动项确实在），却被记成"谎报"。
+    #   ⇒ 判具的注入必须覆盖**两条**路径：
+    #       ① APPDATA 指向空目录（启动项不在）② subprocess 抛错（schtasks 查不了）
+    #     只剩 None 是正确答法。
+    #   ★ 同时加**正向对照**：不注入时不许返回 None ——
+    #     否则"注入没生效"与"产品是对的"无法区分 ⇒ 判具没有分辨力，
+    #     改完题目就绿，等于把红项擦掉了。
+    _f09 = ("import sys,types,os,tempfile;os.environ['APPDATA']=tempfile.mkdtemp();"
+            "sys.path.insert(0,r'%s');import host_shield as hs;"
             "hs.subprocess=types.SimpleNamespace(run=lambda *a,**k:"
             "(_ for _ in ()).throw(OSError('policy-blocked')));"
             "print(repr(hs.task_installed()))" % str(PKG))
+    _f09_base = ("import sys;sys.path.insert(0,r'%s');import host_shield as hs;"
+                 "print(repr(hs.task_installed()))" % str(PKG))
     _p09 = subprocess.run([PY, "-c", _f09], capture_output=True, text=True,
                           encoding="utf-8", errors="replace", timeout=60, creationflags=_CREATE_NO_WINDOW)
+    _p09b = subprocess.run([PY, "-c", _f09_base], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=60, creationflags=_CREATE_NO_WINDOW)
+    _got09 = _p09.stdout.strip()
+    _got09b = _p09b.stdout.strip()
+    _ok09 = (_got09 == "None" and _got09b != "None")
     record("F-09 host-shield 自检查不出来时不谎报已安装（三态：None != True）",
-           _p09.stdout.strip() == "None", (_p09.stdout + _p09.stderr).strip()[:90])
+           _ok09,
+           "注入(启动项不在+schtasks抛错)=%s；对照(不注入)=%s｜%s"
+           % (_got09 or "?", _got09b or "?",
+              "两条路径都堵住才返回 None ✅"
+              if _ok09 else
+              ("注入没生效（对照也是 None）⇒ 本判具此刻无分辨力"
+               if _got09b == "None" else
+               "查不出来却返回了 %s ⇒ 把「没查」说成「没问题」" % (_got09 or "?",))))
 
     # F-10: 会写进链的事件类型必须全部登记在随包 schema 里（§4 自称"枚举"）。
     # ★★ 0.35.2 修（**判据不许二次实现**）：不再自己扫，直接调权威量具
@@ -2138,8 +2239,31 @@ def main():
            (_p14.stdout + _p14.stderr).strip()[:90])
 
     # F-15: 门闸执法后实时推送 + 同类节流（0.28.2 报警 v1；定稿方案 v1.2 职责 3）。
-    #       沙箱里把 _notify 桩掉（不真弹），断言节流账本的确定性：
-    #       第一次 alert-kind record 记 notify_sent，第二次在窗口内不得刷新。
+    #       沙箱里把 _notify 桩掉（不真弹），断言节流账本的确定性。
+    #
+    # ★★ 0.40.0 修订（**判据本身必须改，逐条给证据** —— 这不是"把测试调绿"）：
+    #   ① 记账**搬家了**：0.40.0 把气泡记账从**安全状态文件**搬去中枢通知账
+    #      （`<hub>/notify_state.json`，带锁、唯一写入口）。搬家的理由见
+    #      `host_shield._notify_throttled` 的 docstring：旧写法是「读整份安全状态 →
+    #      改一个键 → 整份写回」，读失败时会把默认值（`enabled=False`）写回真状态、
+    #      **凭空编造一次"已撤防"**。
+    #      旧判据探的是 `load_state()['notify_sent']` —— 那是**搬走之前的位置**
+    #      ⇒ 0.40.0 之后**恒红**。红的不是节流，是探针指错了地方。
+    #      （机械证据：`_LEDGER_SENT = "sent|"`；产品自己的访问器是
+    #        `hs.notify_sent_age()` / `hs.notify_shown_age()`。）
+    #   ② 旧判据另有一个**与记账搬家无关**的不确定源：`_notify_throttled` 在
+    #      `console_is_visible()==True` 时**本就不弹泡**（0.36.5 设计：「同一件事不许
+    #      用两种方式同时通知用户」）⇒ 断言"第一次必须发过泡"在**开着值守台**的机器上
+    #      **必然假红**（本机实测 `console_is_visible()` 返回 True）。
+    #   ③ ⇒ 新判据做两件事：**把环境变量钉成显式输入**（`console_is_visible` 的
+    #      两个分支各断言一次），并**改用产品自己的访问器**，不再探内部文件结构。
+    #   ④ 判据自身也要先量一次（否则会写出**永远假红**的量具）：比较对象必须是
+    #      **账里记下的那个时间戳**，不是 `notify_sent_age()` —— 后者是**已经过去多久**，
+    #      它随时间自然增长，拿它判"有没有被刷新"必然假红（本轮实测：
+    #      `a1=0.266 → a2=0.519`，看着像被刷新，其实是同一个时间戳）。
+    #   ★ 它**仍然会红**（负控四条，任一成立即红）：节流窗口归零 ⇒ 第 2 次会重写时间戳
+    #      （`s2 != s1`）；窗口可见却不记账 ⇒ `shown` 为空；记账搬回安全状态 ⇒ `s1 is None`；
+    #      `_notify_throttled` 被摘成空实现 ⇒ `s1 is None`。
     if os.name == "nt":
         _f15_hub = WORK / "hub" / "f15"
         _f15_hub.mkdir(parents=True, exist_ok=True)
@@ -2147,20 +2271,27 @@ def main():
             {"enabled": True}, ensure_ascii=False), encoding="utf-8")
         _f15 = ("import sys;sys.path.insert(0,r'%s');import host_shield as hs;"
                 "hs._notify=lambda *a, **k: None;"
+                "K='sent|host_shield_breach';W='shown|host_shield_breach';"
+                # 分支一：钉住"窗口不可见" ⇒ 必须走"气泡 ＋ 同类 30 分钟不重复"
+                "hs.console_is_visible=lambda: False;"
                 "hs.record(r'%s','host_shield_breach',reason='F-15a');"
-                "t1=hs.load_state().get('notify_sent',{}).get('host_shield_breach',0);"
+                "s1=hs.ledger_get(K);"
                 "hs.record(r'%s','host_shield_breach',reason='F-15b');"
-                "t2=hs.load_state().get('notify_sent',{}).get('host_shield_breach',0);"
-                "print('THROTTLE', t1 > 0, t2 == t1)"
-                % (str(PKG), str(_f15_hub), str(_f15_hub)))
+                "s2=hs.ledger_get(K);"
+                # 分支二：钉住"窗口可见" ⇒ 不再叠气泡：sent 原封不动，但要记 shown
+                "hs.console_is_visible=lambda: True;"
+                "hs.record(r'%s','host_shield_breach',reason='F-15c');"
+                "s3=hs.ledger_get(K);w=hs.ledger_get(W);"
+                "print('THROTTLE', s1 is not None, s2 == s1, s3 == s1, w is not None)"
+                % (str(PKG), str(_f15_hub), str(_f15_hub), str(_f15_hub)))
         _env15 = dict(os.environ)
         _env15["ANTINEL_HUB_DIR"] = str(_f15_hub)
         _env15.pop("ANTINEL_SHIELD_NOTIFY", None)   # 默认开启；真弹已被桩掉
         _p15 = subprocess.run([PY, "-I", "-S", "-c", _f15], capture_output=True, text=True,
                               encoding="utf-8", errors="replace", timeout=60, env=_env15, creationflags=_CREATE_NO_WINDOW)
         record("F-15 门闸高危事件实时推送＋同类 30 分钟节流（0.28.2 报警 v1）",
-               _p15.stdout.strip() == "THROTTLE True True",
-               (_p15.stdout + _p15.stderr).strip()[:90])
+               _p15.stdout.strip() == "THROTTLE True True True True",
+               (_p15.stdout + _p15.stderr).strip()[:110])
     else:
         record("F-15 门闸高危事件实时推送＋同类 30 分钟节流（0.28.2 报警 v1）", True,
                "platform-gated: 气泡通知是 Windows 机制")

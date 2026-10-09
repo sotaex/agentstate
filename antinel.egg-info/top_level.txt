@@ -5,6 +5,7 @@ audit_chain
 challenge
 egress
 glossary
+granary
 heartbeat
 hooks
 host_shield
@@ -22,6 +23,7 @@ inbox_store
 inbox_tray
 inbox_window
 ledger
+machine_id
 psl
 remediation
 rules
