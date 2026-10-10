@@ -1,4 +1,4 @@
-# Antinel detection rules (generated from rules/default.json v0.47.0 - do not edit by hand)
+# Antinel detection rules (generated from rules/default.json v0.48.0 - do not edit by hand)
 
 Category order = match priority: secrets > destructive > network > injection > context > metadata.
 Severity to action: critical = block, warning = alert (logged, allowed). All hits are collected; highest severity decides.

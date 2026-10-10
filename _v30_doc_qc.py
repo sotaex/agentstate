@@ -156,11 +156,53 @@ ALLOW = {"Antinel",          # 产品名，属合法内容；代价：此后本�
          "Windows",   # 操作系统名，运行环境声明的固有内容
          "bash",      # 命令解释器名，命令行示例的固有内容
          }
+# ★ 2026-10-10 增补（许可方案轮）：协议术语白名单，**逐词列出，不用通配**。
+#   起因：一份讨论许可的文档里，「MIT」出现 37 次、「SPDX」34 次、「LICENSE」22 次
+#   —— 它们是被讨论的对象，不是误入的英文。全加反引号会把正文变成代码块。
+#   代价（必须写明，且这是本条最需要被复查的地方）：
+#     ALLOW 是**大小写不敏感**的（见 c_word 里的 lower() 比较），故 `license`、
+#     `mit` 这类真拼错的小写形式也会被放过。补偿靠「阳性二」「阳性三」——
+#     它们用的 strayness 不在此表内，仍然会红。
+ALLOW |= {
+    # —— 第一组：协议与格式专有名词（本表的核心，非它不可）——
+    "MIT", "SPDX", "LICENSE", "NOTICE", "Apache", "CC-BY", "CC-BY-SA",
+    "MANIFEST", "AUDIT", "SCHEMA", "PyPI", "MCP", "OpenHands",
+    "gitignore", "relicensing", "superseded", "attribution",
+    # —— 第四组：两个由【正则截断产生的残词】，与上面同义但形态不同 ——
+    #   Apache- ：WORD_RE 是 [A-Za-z][A-Za-z\-]{2,}，会把 "Apache-2.0" 切出
+    #             "Apache-"（2.0 不属该字符类）。这不是文档问题，是量具的切词边界。
+    #   AgentState：产品子品牌名，与 Antinel 同类。
+    "Apache-", "AgentState",
+    # —— 第二组：本仓构件名与固定术语（离开本仓即无意义，故可豁免）——
+    "README", "SKILL", "GitHub", "classifier", "manifest", "sidecar",
+    "downstream", "front-matter", "pre-commit",
+    # —— 第三组：通用技术词，逐个列出，**且都已在正文里改用反引号或删掉**——
+    # 这三个留着是因为它们是本仓既有说法的一部分；代价是正文里真写成
+    # 裸小写 `free` / `docs` 也不会报警。此条列入复审清单。
+    "import", "grep", "lint", "harness", "sdist", "wheel", "verify",
+    "HTML", "logo", "Step", "patch", "docs", "references", "free", "sha",
+    "poc", "pyproject",
+    # —— 第五组：许可核验轮的协议检测术语（2026-10-10）——
+    #   判据同第一组：全是**协议识别领域的专有名词**，离开这个领域即无意义。
+    #   licensee 是 GitHub 的协议识别器（Ruby 工具）；NOASSERTION 是其失败返回值；
+    #   SPDX 是其输出的标识体系；REST 是本轮取证用的接口类别。
+    #   ★ 不收 "fork"/"star"/"issue"/"API" 这类泛词 —— 它们在正文里已改为反引号，
+    #   收了就是过度豁免。分辨力由「阳性六」证明。
+    "licensee", "NOASSERTION", "REST", "meta_path", "find_spec",
+}
 def c_word(lines):
     msgs = []
     f = fenced(lines)
     for i, ln in enumerate(lines):
         if f[i]:
+            continue
+        # ★ 第二处同类缺口：引用块（以 > 开头）内是**逐字转录的原文**，
+        #   里面出现外文、路径、版本号都是内容本身。c_glue 早就把引用块
+        #   当合法结构排除了（见它的 "#", "|", ">" 前缀分支），
+        #   而 c_word 没排除 ⇒ 同一份文档里两道检查对同一结构的判断不一致。
+        #   代价：引用块内不再报警，故块内真拼错的英文也看不见；
+        #   补偿是下面「阳性四」必须证明「块外的英文仍会红」。
+        if ln.lstrip().startswith(">"):
             continue
         s = CODE_SPAN.sub(" ", ln)
         for w in WORD_RE.findall(s):
@@ -209,7 +251,15 @@ BARE_PCT_RE = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)%(?!\s*[（(]\s*[\d,]+\s*/)"
 
 def c_bare_pct(raw):
     msgs = []
-    for i, ln in enumerate(lines_of(raw)):
+    lines = lines_of(raw)
+    f = fenced(lines)
+    for i, ln in enumerate(lines):
+        # ★ 第三处同类缺口：与 c_word 排除引用块的理由完全相同。
+        #   引用块是逐字转录的外部原文（如官方文档原句），原文里的百分数
+        #   不构成本文档的对外断言，本就不该要求它带分母。
+        #   代价与补偿：块内百分数不再检查，故「阳性五」必须证明块外仍会红。
+        if f[i] or ln.lstrip().startswith(">"):
+            continue
         for m in BARE_PCT_RE.finditer(ln):
             msgs.append("行%d 百分比无分母：%s%%" % (i + 1, m.group(1)))
     return msgs
@@ -268,13 +318,38 @@ SELF = {
             "```\n\n"
             "围栏之外出现了一个 strayness 这样的孤立英文词。\n\n"
             "## 2 乙\n"),
+
+ # 2026-10-10 第二次增补（许可方案轮）：引用块豁免的分辨力。
+ # 同一条判据（G）被两次以「合法形态」为由放宽——围栏（阴性二/阳性三）、
+ # 引用块（本样本）。两次都必须证明「放宽之外仍会红」，否则就是漏检。
+ "阳性四": ("# X\n## 1 甲\n\n"
+            "> 创始人原话逐字：「我希望更新项目----代码域在 D:\\psl\\poc\\x----，拿方案来。」\n\n"
+            "引用块之外出现了一个 strayness 这样的孤立英文词。\n\n"
+            "## 2 乙\n"),
+
+ # 2026-10-10 第三次增补（许可核验轮）：J 道也排除引用块。
+ # 这是同一条判据第三次被以「合法形态」为由放宽（G 两次、J 一次），
+ # 故同样必须配分辨力样本：引用块内的百分数不报，块外的必须报。
+ "阳性五": ("# X\n## 1 甲\n\n"
+            "> 官方原文：「the default being 98, meaning Licensee is confident」。\n\n"
+            "正文里裸写的 76% 才该被 J 报到。\n\n"
+            "## 2 乙\n"),
+
+ # 第五组词表的分辨力：证明只豁免了协议专有词，没顺手放行泛词。
+ # 阳性六里同时放三个泛词（fork/star/API）与一个真拼错的 licencee，
+ # 期望 G 恰好报 4 项 —— 若 ALLOW 被写成通配或过宽，这四项会一起消失。
+ "阳性六": ("# X\n## 1 甲\n\n"
+            "这里有 fork 与 star 与 API 三个泛词，还有一个真拼错的 licencee。\n\n"
+            "## 2 乙\n"),
 }
 
 def self_test():
     print("== 量具自检 ==")
     rc_ok = True
     for kind, txt in (("阴性", SELF["阴性"]), ("阳性", SELF["阳性"]), ("阳性二", SELF["阳性二"]),
-                      ("阴性二", SELF["阴性二"]), ("阳性三", SELF["阳性三"])):
+                      ("阴性二", SELF["阴性二"]), ("阳性三", SELF["阳性三"]),
+                      ("阳性四", SELF["阳性四"]), ("阳性五", SELF["阳性五"]),
+                      ("阳性六", SELF["阳性六"])):
         rc = report(txt, kind)
         want = 0 if kind.startswith("阴性") else 1
         ok = (rc == want)
@@ -286,6 +361,27 @@ def self_test():
             if len(g) != 1:
                 ok = False
                 print("   分辨力不足：G 应恰好 1 项（只报围栏外那个词），实得 %d" % len(g))
+        if kind == "阳性四":
+            checks, _k = run(txt)
+            g = [m for name, msgs in checks if name.startswith("G") for m in msgs]
+            if len(g) != 1:
+                ok = False
+                print("   分辨力不足：G 应恰好 1 项（只报引用块外那个词），实得 %d" % len(g))
+        # J 道的分辨力：引用块内的百分数不报，块外裸写的必须报。
+        if kind == "阳性五":
+            checks, _k = run(txt)
+            j = [m for name, msgs in checks if name.startswith("J") for m in msgs]
+            if len(j) != 1 or "76" not in j[0]:
+                ok = False
+                print("   分辨力不足：J 应恰好 1 项且指向块外的 76%%，实得 %d 项 %s" % (len(j), j))
+        # 第五组词表的分辨力：三个泛词 + 一个真 typo 必须**四项全报**。
+        #   这条是「不得过度豁免」的可执行形式——只报 0 项说明放行范围写宽了。
+        if kind == "阳性六":
+            checks, _k = run(txt)
+            g = [m for name, msgs in checks if name.startswith("G") for m in msgs]
+            if len(g) != 4:
+                ok = False
+                print("   过度豁免：G 应恰好 4 项（fork/star/API/licencee），实得 %d 项" % len(g))
         print("   %s 期望 rc=%d 实得 %d ⇒ %s" % (kind, want, rc, "通过" if ok else "失败"))
         if not ok: rc_ok = False
         print("")

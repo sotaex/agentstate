@@ -1235,6 +1235,13 @@ def _tamper_channel_light(items, lv, hours=WINDOW_HOURS, now=None):
     if not items:
         return lv
     chans = {tamper_channel_of(it.kind) for it in _window_open(items, hours, now)}
+    # ★★ 0.47.0（并发/边界压测 B4 撞出来的缺口）：**疑似投毒在场 ⇒ 不抬 dev 灯**。
+    #   `dev`（研发中）不是一盏中性的灯，它是一句**解释**："这是你自己在改代码，
+    #   别紧张"。当投毒通道也有记录时给出这个解释，等于替用户下了结论 ——
+    #   把"有人动了我的防护文件"读成了"我在改代码"，正是分通道要根治的那个病
+    #   （方案 v3.0 §5 步二）。⇒ 保守方向：投毒在场时，dev 那盏解释灯不亮。
+    if "poison" in chans:
+        return lv
     if "dev" in chans and lv in (STATE_L0, STATE_DEV):
         return STATE_DEV
     return lv

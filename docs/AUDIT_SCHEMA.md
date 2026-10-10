@@ -1,6 +1,6 @@
-# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.18（随 v0.47.0）
+# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.18（随 v0.48.0）
 
-> v1.18（0.47.0）：**提醒预算族新增 2 类** —— `notice_budget_merged`、
+> v1.18（0.47.0 登记、0.48.0 随版）：**提醒预算族新增 2 类** —— `notice_budget_merged`、
 > `notice_budget_window_closed`（见下文「提醒预算类」）。**不改**已有字段名、
 > **不改**已有取值域、**不改** append-only 契约，只**新增两个记录类型**。
 > ★ 为什么必须新开一族：这两条是**限额类机制自己的留痕** —— 合并若只写

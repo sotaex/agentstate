@@ -30,6 +30,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import types
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -576,6 +577,169 @@ def s97():
     if not r2 or r2["reason"] != "dedup":
         return ("既有「同片段一天一次」去重被预算顶替：第二次 reason=%r（应 dedup）"
                 % (r2 and r2["reason"]))
+    return True
+
+
+# ══════════════ S98 · 并发下绝不静默丢弃（★ 压测撞出来的真洞）══════════════
+#: ★ 为什么必须有这一条（0.47.0 并发压测实测，不是推演）：
+#:   8 个真进程 × 25 次同一规则 ⇒ 收盘 `total` 只有 **192–195**（应 200），
+#:   每次丢 5–8 条，且**没有任何痕迹**。
+#:   根因在 `host_shield.ledger_rmw`：`audit_chain.acquire_lock()` 在重试预算
+#:   耗尽时返回 **None**（契约明写"预算耗尽返回 None"），而旧实现**没判断** ⇒
+#:   拿不到锁也照样读-改-写 ⇒ 多个写者无锁整份覆盖 ⇒ 别人的记账被静默吃掉。
+#:   这正是 0.45.0 要根治的那个形状 ——「静默丢失」，只是换了个发生地。
+#: ★ 修法方向：拿不到锁 ⇒ **一个字都不写**，返回 False ⇒ 调用方按"没抑制过"
+#:   处理（宁可多提示一次）。方向是**更吵**，不是**更静**。
+_CONC_WORKER = '''
+import os, sys, json
+sys.path.insert(0, %r)
+import host_shield as HS
+HS.notify_ledger_path = lambda: %r
+n = int(sys.argv[1]); tag = sys.argv[2]; out = sys.argv[3]
+missed = 0
+for i in range(n):
+    if HS.notice_budget_gate("R-CONC", "%%s-%%d" %% (tag, i)) is None:
+        missed += 1
+with open(out, "w", encoding="utf-8") as f:
+    json.dump({"missed": missed}, f)
+'''
+
+
+@check("S98 ★ 并发守恒：真进程并发下 进账 + 明说没进账 == 请求总数（绝不静默丢弃）")
+def s98():
+    import subprocess
+    d = tempfile.mkdtemp(prefix="g0470_conc_")
+    led = os.path.join(d, "notify_state.json")
+    worker = os.path.join(d, "_w.py")
+    with io.open(worker, "w", encoding="utf-8") as f:
+        f.write(_CONC_WORKER % (ROOT, led))
+    total_req = 8 * 20
+    outs = [os.path.join(d, "m%d.json" % i) for i in range(8)]
+    procs = [subprocess.Popen([sys.executable, worker, "20", "p%d" % i, outs[i]],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+             for i in range(8)]
+    for p in procs:
+        p.communicate(timeout=240)
+    missed = 0
+    for o in outs:
+        if os.path.isfile(o):
+            missed += int(json.loads(io.open(o, encoding="utf-8").read())["missed"])
+    m = _hs()
+    m.notify_ledger_path = lambda _l=led: _l
+    r = m.notice_budget_gate("R-CONC", "closer",
+                             now=time.time() + float(m.NOTICE_BUDGET_WINDOW) + 10)
+    closed = (r or {}).get("closed")
+    if not closed:
+        raise AssertionError("并发后没拿到收盘数据 ⇒ 无法核对守恒")
+    t = int(closed["total"])
+    if t + missed != total_req:
+        raise AssertionError(
+            "total(%d) + 记账失败(%d) = %d ≠ %d ⇒ 有 %d 次请求既没进账也没被告知"
+            "（静默丢弃）" % (t, missed, t + missed, total_req, total_req - t - missed))
+    if int(closed["used"]) > int(m.NOTICE_BUDGET_MAX):
+        raise AssertionError("并发下出声 %s 次 > 配额 %s ⇒ 并发把配额冲破了"
+                             % (closed["used"], m.NOTICE_BUDGET_MAX))
+
+
+@check("N-S98 负控：恢复「拿不到锁也照样写」⇒ 并发重新静默丢计数 ⇒ 必须红")
+def n_s98():
+    src = _src(_HS_REL)
+    anchor = ("            if not lock:\n                return False")
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    mut = _load(src.replace(anchor, "            pass"), "hs0470_ns98")
+    import subprocess
+    d = tempfile.mkdtemp(prefix="g0470_conc_mut_")
+    led = os.path.join(d, "notify_state.json")
+    # ★ 把**变异后的源码**落盘成 `hs_mut.py`，让子进程 import 它 ——
+    #   内存里的变异模块传不进子进程，只能落盘（落临时目录，不碰产品文件）。
+    with io.open(os.path.join(d, "hs_mut.py"), "w", encoding="utf-8") as f:
+        f.write(src.replace(anchor, "            pass"))
+    w2 = os.path.join(d, "_w2.py")
+    with io.open(w2, "w", encoding="utf-8") as f:
+        f.write(_CONC_WORKER.replace("import host_shield as HS",
+                                     "import hs_mut as HS")
+                % (ROOT, led))
+    outs = [os.path.join(d, "n%d.json" % i) for i in range(8)]
+    procs = [subprocess.Popen([sys.executable, w2, "20", "p%d" % i, outs[i]],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              cwd=d)
+             for i in range(8)]
+    for p in procs:
+        p.communicate(timeout=240)
+    missed = 0
+    for o in outs:
+        if os.path.isfile(o):
+            missed += int(json.loads(io.open(o, encoding="utf-8").read())["missed"])
+    m2 = _load(src.replace(anchor, "            pass"), "hs0470_ns98_read")
+    m2.notify_ledger_path = lambda _l=led: _l
+    r = m2.notice_budget_gate("R-CONC", "closer",
+                              now=time.time() + float(m2.NOTICE_BUDGET_WINDOW) + 10)
+    closed = (r or {}).get("closed") or {}
+    t = int(closed.get("total") or 0)
+    if t + missed == 160:
+        return ("负控失效：恢复「无锁照写」后守恒仍成立（total=%d, missed=%d）⇒ "
+                "变异没起作用或并发这次没撞上（重跑一次；若恒绿则该分支没被依赖）"
+                % (t, missed))
+    return True
+
+
+# ══════════════ S99 · 疑似投毒在场 ⇒ 不许抬 dev 灯 ══════════════
+@check("S99 ★ 疑似投毒在场 ⇒ 不抬 dev 灯（不许把「有人动了我的文件」解释成「我在改代码」）")
+def s99():
+    import inbox_model as M
+    import inbox_store as S
+    import host_shield as HS
+    kinds = set(HS._ALERT_KINDS)
+
+    def it(kind, recovered=False, topic=""):
+        a = S.project_record({"ts": _NOW, "type": kind, "reason": "p",
+                              "recovered": recovered, "subkind": topic,
+                              "severity": "critical"}, kinds)
+        return M.Item(alert=a, state="unread")
+
+    # ① 自研迭代 ＋ 疑似投毒（未自愈）⇒ 不是 dev
+    lv = M.current_state("guarding", None,
+                         [it("host_shield_dev_drift", topic="code_drift"),
+                          it("host_shield_tamper", recovered=False)])
+    if lv == M.STATE_DEV:
+        return "投毒（未自愈）在场仍抬 dev 灯 ⇒ 把投毒读成了自己改代码"
+    # ② 自研迭代 ＋ 疑似投毒（已自愈）⇒ 也不是 dev
+    lv2 = M.current_state("guarding", None,
+                          [it("host_shield_dev_drift", topic="code_drift"),
+                           it("host_shield_tamper", recovered=True)])
+    if lv2 == M.STATE_DEV:
+        return "投毒（已自愈）在场仍抬 dev 灯（得到 %s）" % lv2
+    # ③ ★ 反向：只有自研迭代时**必须**还是 dev（不许这道门把正常分支也关掉）
+    lv3 = M.current_state("guarding", None,
+                          [it("host_shield_dev_drift", topic="code_drift")])
+    if lv3 != M.STATE_DEV:
+        return "只有自研迭代时反而丢了 dev 灯（得到 %s）⇒ 门开反了" % lv3
+    return True
+
+
+@check("N-S99 负控：摘掉 poison 在场这道门 ⇒ 投毒在场仍抬 dev ⇒ 必须红")
+def n_s99():
+    src = _src(_MODEL_REL)
+    anchor = '    if "poison" in chans:\n        return lv'
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    mut = _load(src.replace(anchor, "    pass"), "im0470_ns99")
+    import inbox_store as S0
+    import host_shield as HS0
+    kinds = set(HS0._ALERT_KINDS)
+
+    def it(kind, recovered=False, topic=""):
+        a = S0.project_record({"ts": _NOW, "type": kind, "reason": "p",
+                               "recovered": recovered, "subkind": topic,
+                               "severity": "critical"}, kinds)
+        return mut.Item(alert=a, state="unread")
+
+    lv = mut.current_state("guarding", None,
+                           [it("host_shield_dev_drift", topic="code_drift"),
+                            it("host_shield_tamper", recovered=False)])
+    if lv != mut.STATE_DEV:
+        return "负控失效：摘掉这道门后仍不抬 dev（得到 %s）⇒ 该门没在承重" % lv
     return True
 
 

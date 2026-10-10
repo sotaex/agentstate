@@ -1075,6 +1075,18 @@ def ledger_rmw(mutator):
         os.makedirs(os.path.dirname(p), exist_ok=True)
         if audit_chain is not None:
             lock = audit_chain.acquire_lock(p)
+            # ★★ 0.47.0（并发压测撞出来的真洞）：**拿不到锁就一个字都不写**。
+            #   旧实现是"拿不到锁也照样读-改-写" —— `acquire_lock` 在重试预算
+            #   耗尽时返回 **None**，而这里没判断 ⇒ 多个写者同时无锁整份覆盖
+            #   ⇒ 别人的记账被**静默吃掉**（实测：8 进程 × 25 次 ⇒ 只记到 192–195 条，
+            #   丢 5–8 条，且**没有任何痕迹**）。
+            #   ★ 为什么必须"不写"而不是"照写"：这正是 0.45.0 要根治的那个形状
+            #     ——「静默丢失」。写不进去 ⇒ 返回 False ⇒ 调用方按"没抑制过"
+            #     处理（宁可多提示一次），方向是**更吵**，不是**更静**。
+            #   ★ 与 `_replace_with_retry` 的分工：那道守的是"替换被打断"，
+            #     这道守的是"压根没资格写"—— 两道都要在。
+            if not lock:
+                return False
         d = ledger_read()
         d = mutator(d) or d
         tmp = p + ".tmp"
