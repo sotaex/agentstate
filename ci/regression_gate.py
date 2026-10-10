@@ -785,6 +785,78 @@ def j_workspace_facts():
                   "发布版 %s" % (len(facts.get("repos") or {}), want or "?", pv or "?"))
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# D-24（0.43.x 卫生）：构建产物不得出现在 git 索引里
+# ══════════════════════════════════════════════════════════════════════════
+
+_BUILD_INDEX_DIRS = ("build", "antinel.egg-info")
+
+
+def _index_build_artifacts(root):
+    """返回 `root` 的 git 索引里 `build/`、`antinel.egg-info/` 下的文件清单。
+
+    · 非 git 工作树（如负控 fixture，无 `.git`）⇒ 返回 `None`（不可判，非通过）。
+    · `git ls-files` 失败 ⇒ **抛异常**（由调用方转红，不静默吞掉）。
+    """
+    import subprocess
+    if not (Path(root) / ".git").exists():
+        return None
+    r = subprocess.run(["git", "-C", str(root), "ls-files", "--", *_BUILD_INDEX_DIRS],
+                       capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", timeout=30)
+    if r.returncode != 0:
+        raise RuntimeError("git ls-files rc=%d：%s"
+                           % (r.returncode, (r.stderr or "").strip()[:200]))
+    return [l for l in (r.stdout or "").splitlines() if l.strip()]
+
+
+def j_no_build_artifacts_in_index():
+    """D-24：构建产物不得出现在 git 索引里（0.43.x 仓库卫生的**常驻断言**）。
+
+    ★★ 缺陷本体（交接文件 §2/§7.7 实测）：本仓曾有 **61 个** `build/` 产物被追踪，
+      而 `.gitignore` **第 5 行**就是 `build/` —— 这不是"忘了加忽略"，而是
+      **忽略规则对已进入索引的文件无效**：它们在进忽略规则之前（或被 `git add -f`）
+      就已入库。**只清一次是打扫，加一条断言才是机制** —— 打扫完不加断言，
+      下次一次强制添加就全回来了。
+
+    ★ 四件套：
+      · 正判据：索引里 `build/`、`antinel.egg-info/` 文件数为 0（锁的正是上面那个缺陷）。
+      · 反向对照：把构建产物重新 `git add -f` ⇒ 本条必须红（**内建负控**实跑，见下）。
+      · 连带对照：**只** `git rm -r --cached`，工作树文件保留（零删除纪律 §10.4）。
+      · 可观测：明细打印索引里的构建产物条数与样例路径。
+    """
+    try:
+        tracked = _index_build_artifacts(PKG)
+    except Exception as e:
+        return False, "git ls-files 执行失败：%s: %s" % (type(e).__name__, e)
+    if tracked is None:
+        # 非 git 工作树（负控 fixture 无 .git）—— 不可判，明确报 SKIP（不是通过）
+        return None
+
+    # ③ 内建负控（§6 四件套之「反向对照」）：造一个「build/ 已被追踪」的临时 git 仓，
+    #    探测必须报出 ≥1 个 —— 否则这条探测是**假守卫**（D-11/D-22 两个假负控的形状）。
+    import subprocess
+    import tempfile
+    neg = tempfile.mkdtemp(prefix="antinel_idxneg_")
+    try:
+        subprocess.run(["git", "-C", neg, "init", "-q"], capture_output=True)
+        os.makedirs(os.path.join(neg, "build"), exist_ok=True)
+        with open(os.path.join(neg, "build", "x.py"), "w", encoding="utf-8") as fh:
+            fh.write("x=1\n")
+        subprocess.run(["git", "-C", neg, "add", "-f", "build/x.py"], capture_output=True)
+        if not _index_build_artifacts(neg):
+            return False, ("内建负控未生效：`build/` 已被追踪的临时仓里探测不到构建产物"
+                           "（假守卫）")
+    finally:
+        _aside_dir(neg)      # 零删除：改名让开（safe-delete 守卫会硬杀 rmtree）
+
+    if tracked:
+        return False, ("索引里仍有 %d 个构建产物（如 %s）—— 忽略规则对已追踪文件无效；"
+                       "用 `git rm -r --cached` 移除（工作树文件保留）"
+                       % (len(tracked), ", ".join(tracked[:3])))
+    return True, "索引里 0 个构建产物（build/、antinel.egg-info/）"
+
+
 def j_running_on_real_table(m):
     """★★ 闸门自身的守卫：确认当前加载的是**包内真表**，不是降级兜底集。
 
@@ -1126,6 +1198,8 @@ def main():
             ("D-22 单一真源：产物仓为主 / 归档仓只许落后", j_single_source_of_truth),
             ("D-23 环境事实不漂移（仓在哪儿／是否 git／dist 只有本版）",
              j_workspace_facts),
+            ("D-24 构建产物不得进索引（忽略对已追踪文件无效）",
+             j_no_build_artifacts_in_index),
         ]
 
         for cid, fn in checks:
