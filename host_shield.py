@@ -141,16 +141,56 @@ def save_state(st, *, allow_disarm=False):
       记录**再写状态）。默认 False ⇒ **无背书的撤防一律不落盘**（保持原值）。
       为什么：源②的后果之一就是钩子把一份"已撤防"的默认值写回真状态；
       这道闸让"我不想撤防、却手滑写了 false"也撤不掉。
+
+    ★★ 0.43.1：两件事加在这里（**唯一写入口**上做，才不会再漏一处）：
+      ① **清掉已迁移走的展示层字段**（`_LEGACY_STATE_KEYS`）—— 0.40.0 把气泡记账
+         迁去了通知账，但盘上旧文件里仍躺着一个 `notify_shown_in_window`
+         ⇒ 同一件事两处口径（本仓最忌的形状）。写回时清掉，防它继续漂。
+      ② **记一次写入时间序列**（`_note_state_write`）—— 交接件 §7.2 明确要求
+         用"读状态文件的修改时间序列"把"拒写"与"覆盖"两个候选分开；这条日志就是它。
     """
     if not allow_disarm:
         prev = load_state_strict()
         if prev is not None and prev.get("enabled") and not st.get("enabled"):
             st = dict(st)
             st["enabled"] = True
+    _dropped = [k for k in _LEGACY_STATE_KEYS if k in st]
+    if _dropped:
+        st = dict(st)
+        for k in _dropped:
+            st.pop(k, None)
     tmp = state_path() + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(st, f, ensure_ascii=False, indent=1)
     os.replace(tmp, state_path())
+    _note_state_write(st, dropped=_dropped)
+
+
+#: ★ 0.43.1：**展示层字段不得留在安全状态里**。0.40.0 已把气泡记账迁去通知账
+#: （`<hub>/notify_state.json`），但盘上旧状态文件里仍躺着一个
+#: `notify_shown_in_window`（实测 2026-10-10）⇒ 两套口径并存。写回时清掉。
+_LEGACY_STATE_KEYS = ("notify_shown_in_window",)
+
+
+def _note_state_write(st, dropped=None):
+    """把每次状态写入记进 `<hub>/state_writes.jsonl`（**时间序列**，供连机观测）。
+
+    ★ 为什么（交接件 §7.2）：状态写入失效的**两个候选**（拒写 / 覆盖）本轮没能分开，
+      需要"读状态文件的修改时间序列"。这条日志就是那个序列：谁、何时、写了哪些字段、
+      enabled 在不在。**只追加、只诊断**，写失败静默（绝不因诊断拖垮状态写入）。
+    """
+    try:
+        rec = {"ts": datetime.now().astimezone().isoformat(timespec="seconds"),
+               "pid": os.getpid(),
+               "keys": sorted(k for k in st.keys() if k != "workspaces"),
+               "has_enabled": "enabled" in st, "enabled": st.get("enabled")}
+        if dropped:
+            rec["dropped"] = list(dropped)
+        with open(os.path.join(_hub_dir(), "state_writes.jsonl"), "a",
+                  encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:                                            # noqa: BLE001
+        pass
 
 
 def update_state_fields(*, allow_disarm=False, **fields):
@@ -169,12 +209,37 @@ def update_state_fields(*, allow_disarm=False, **fields):
     prev = load_state_strict()
     if prev is None:
         if os.path.exists(state_path()):
+            # ★★ 0.43.1：**拒写必须出声**（交接件纪律 10.12 / §5.6）。
+            #   这道保护（读不到就拒写）在生效时，会让**依赖写成功的节流与记账
+            #   静默失效** —— 症状就是"哨兵被反复拉起"（实测当天 19 次）。
+            #   过去这里只有一句 `return False`，而三处调用点**全部忽略返回值**
+            #   ⇒ 保护在起作用，却没有任何人能看见（"失效不可见"）。
+            #   ⇒ 现在：拒写进链留痕（`notify=False`，它是诊断不是"要你动手"）。
+            _state_write_refused("文件存在但读不到（坏/半截）", fields)
             return False                    # 存在但读不到 ⇒ 拒写（源②的正面修复）
         prev = {}                           # 不存在 ⇒ 新建（不编造安全字段）
     merged = dict(prev)
     merged.update(fields)
     save_state(merged, allow_disarm=allow_disarm)
     return True
+
+
+def _state_write_refused(why, fields):
+    """按字段更新被拒写 ⇒ **进链留痕**（不弹泡：它是诊断，不是"需要你动手"）。
+
+    ★ 为什么必须出声（交接件 §5.6「保护自报」）：一个保护静默生效，会让另一个
+      保护（节流 / 记账）**悄悄失效**，而盘面看起来跟正常一样。把"拒写"变成链上
+      一条可查记录，下次就不用从 46.9% 的短间隔数据里反推根因。
+    """
+    try:
+        os.makedirs(_hub_rollup_dir(), exist_ok=True)
+        record(None, "host_shield_state_write_refused", decision="deny",
+               severity="warning", notify=False,
+               fields=sorted(fields.keys()),
+               reason="按字段更新被拒写（%s）——本次字段变更未落盘：%s"
+                      % (why, ", ".join(sorted(fields.keys()))))
+    except Exception:                                            # noqa: BLE001
+        pass
 
 
 def findings_path():
@@ -975,7 +1040,7 @@ def notify_shown_age(kind):
         return None
 
 
-def _notify_throttled(kind, body, force=False):
+def _notify_throttled(kind, body, force=False, title="Antinel 门闸"):
     """★ 0.36.5：降噪闸新增**「值守台此刻可见」**这一维 —— 根治右下角小泡泡。
 
     ★★★ 为什么这一维是关键（这是「泡泡又冒出来」的根治点，不是又一个补丁）：
@@ -1000,21 +1065,29 @@ def _notify_throttled(kind, body, force=False):
       「读整份安全状态 → 改一个键 → 整份写回」：读失败时会把默认值
       （`enabled=False`）写回真状态，凭空编造一次"已撤防"。
       ⇒ **展示层的账，不许写在安全状态里。**
+
+    ★★★ 0.43.1：本函数升级为**气泡的唯一发射口**（此前散在三处，各自漂移）：
+      ① 唯一的 PowerShell 发射点（`_notify` 只被这里调到）；
+      ② 唯一的去重口径（窗口可见 ⇒ 不弹；同类 `_NOTIFY_MIN_INTERVAL` 秒内 ⇒ 不弹）；
+      ③ **可观测**：每次"本该弹却被压掉"都记进通知账（`suppressed|`），
+         于是这个保护能回答「我今天生效了吗」—— 交接件四件套的第④件。
     """
     try:
         if force:
-            _notify("Antinel 门闸", body, *_click_args())
+            _notify(title, body, *_click_args())
             return
         # ★ 窗口已可见 ⇒ 同一件事已用更完整的方式呈现 ⇒ 不再弹泡
         if console_is_visible():
             # 留痕：不是"没通知"，是"已用窗口通知过了"。进通知账，不进安全状态。
             mark_notify_shown(kind)
+            note_bubble_suppressed(kind, "值守台窗口可见，已用窗口通知")
             return
         age = notify_sent_age(kind)
         if age is not None and age < _NOTIFY_MIN_INTERVAL:
+            note_bubble_suppressed(kind, "同类 %d 秒内已弹过" % _NOTIFY_MIN_INTERVAL)
             return
         mark_notify_sent(kind)
-        _notify("Antinel 门闸", body, *_click_args())
+        _notify(title, body, *_click_args())
     except Exception:
         pass
 
@@ -1023,6 +1096,124 @@ def _click_args():
     """点气泡要执行什么（`(argv, cwd)`；拿不到 ⇒ 空元组 ⇒ 气泡仍显示、只是不可点）。"""
     c = _console_open_cmd()
     return c if c else ()
+
+
+# ══════════════════ 气泡决策 · 唯一真源（0.43.1）══════════════════
+# ★★★ 为什么要有这一组函数（2026-10-10 实测「右下冒泡」复发，非推演）：
+#
+#   当天 11:11:47 实测一条 `host_shield_tamper`（`field=enabled`、`subkind=state_drift`、
+#   **`recovered=true`**）—— 它描述的事**已经自愈**（哨兵已按链权威回写恢复），
+#   值守台早就按 `recovered` 把它降到 L1（`inbox_model.level_of_record`）。
+#   可**气泡通道**仍按类型一刀切地敲门（`kind in _ALERT_KINDS and not _silent`）。
+#   而同一时刻 `guard_posture()` 是 **guarding（值守中）** ——
+#   也就是说：**通知在说「失守」，事实是「值守中」。通知与事实相反。**
+#
+#   这正是 0.36.5 定为「冒泡泡」根因的那条（「它在撒谎，且撒谎是默认行为」），
+#   只是这次复发在**另一条判定路径**上（判定名单 vs 记录字段）。
+#   ⇒ 修法不是再给名单加一条例外（那正是本仓复发七次的形状：名单永续增长），
+#     而是把「该不该弹」收成**唯一一个函数**，判据取自**事实**：
+#       类型是否在告警集合（事实）＋ 是否已自愈（结构化字段 recovered）
+#       ＋ severity（事实）＋ 是否当事人已知情（invoked_by 有值）
+#     —— 而不是"名字在不在某张名单里"。
+_BUBBLE_SUPPRESSED = "suppressed|"      # 本该弹却被压掉：kind|why 的计数
+
+
+def note_bubble_suppressed(kind, why):
+    """记一次「本该弹气泡、但被压掉」——**可观测**（交接件四件套第④件）。
+
+    ★ 保护不能只在被绕过时留下痕迹，它必须能证明自己活着。
+      压泡是"少打扰"的好事，但**压了多少、为什么压**必须可查，
+      否则将来没人分得清"没弹是因为不该弹"还是"弹的机制坏了"。
+    ★ 只写通知账（展示层），**绝不碰安全状态**（0.40.0 的纪律）。
+    """
+    key = "%s%s|%s" % (_BUBBLE_SUPPRESSED, str(kind), str(why)[:40])
+
+    def _mut(d):
+        d[key] = int(d.get(key) or 0) + 1
+        return d
+    return ledger_rmw(_mut)
+
+
+def bubble_self_report():
+    """气泡保护的自报（可查询）：弹了几条、压了几条、各为什么、值守台在不在岗。
+
+    ★ 回答「这个保护今天生效了吗」—— 答不出来的保护不许上线（交接件 §6）。
+    """
+    d = ledger_read()
+    return {
+        "sent": {k[len(_LEDGER_SENT):]: v for k, v in d.items() if k.startswith(_LEDGER_SENT)},
+        "shown": {k[len(_LEDGER_SHOWN):]: v for k, v in d.items() if k.startswith(_LEDGER_SHOWN)},
+        "suppressed": {k[len(_BUBBLE_SUPPRESSED):]: v
+                       for k, v in d.items() if k.startswith(_BUBBLE_SUPPRESSED)},
+        "console": console_channel_status(),
+    }
+
+
+def console_channel_status():
+    """值守台通道**在岗吗** —— 气泡只是「值守台不在岗」时的兜底，必须能说清。
+
+    ★ 为什么（0.43.1 实测）：值守台的正当通道是 `inbox_notify` 的 Windows Toast
+      （落操作中心、错过还能回头看），它由 `inbox_daemon` 发；而 `inbox_daemon`
+      **全仓没有自动启动点**（其模块自述）。⇒ 值守台不在岗时，气泡是唯一通道。
+      "气泡在弹"到底是"有急事"还是"值守台没起"，必须能从一处看出来。
+    """
+    st = {"visible": console_is_visible(), "windows": None}
+    try:
+        import inbox_window as WIN
+        st["windows"] = len(WIN.find_console_windows())
+    except Exception:                                            # noqa: BLE001
+        pass
+    return st
+
+
+def bubble_decision(kind, rec, force=False):
+    """这条记录该不该弹气泡 —— **唯一真源**。返回 `(should: bool, why: str)`。
+
+    判据全部取自**事实**（类型 / 结构化字段 / severity / 是否当事人已知情），
+    不取自"名字在不在名单里"。五条规则，缺一不可：
+
+      ① 不在告警集合 ⇒ 不弹（心跳、执法留痕、usage_delta 等常规记录）；
+      ② **已自愈（`recovered is True`）⇒ 不弹** —— 它**没有后果**，值守台仍收。
+         这是 0.43.1 修的那条：过去自愈事件照样敲门，通知与事实相反；
+      ③ `host_shield_revived` ⇒ 不弹（Antinel 自己已经处理掉了，"能自己解决的不敲门"）；
+      ④ 非 critical 的 `host_shield_zone_locked` ⇒ 不弹（常规执法）；
+      ⑤ 当事人已知情的变更（`host_shield_changed` 且 `invoked_by` 有值）⇒ 不弹。
+      `force=True`（拉锯判定 / 用户显式要求）⇒ 一律弹，不受上述约束。
+    """
+    if force:
+        return True, "拉锯判定/用户显式要求"
+    if kind not in _ALERT_KINDS:
+        return False, "类型不在告警集合"
+    if rec.get("recovered") is True:
+        return False, "已自愈（recovered=true，无后果；值守台仍收）"
+    if kind == "host_shield_revived":
+        return False, "自愈（已自动重启，能自己解决的不敲门）"
+    sev = str(rec.get("severity") or "").lower()
+    if kind == "host_shield_zone_locked" and sev != "critical":
+        return False, "常规执法（非 critical）"
+    if kind == "host_shield_changed" and rec.get("invoked_by"):
+        return False, "明说的变更（当事人已知情）"
+    return True, "需要你动手"
+
+
+def notify_owner(title, body, kind="block|owner", force=False):
+    """**气泡的唯一发射口**（0.43.1）—— 钩子与 CLI 一律委托到这里。
+
+    ★★★ 为什么必须收成一个口（2026-10-10 实测的复发）：
+      此前有三条**互不相干**的发射路径：
+        · `host_shield._notify`（哨兵/paramedic 事件）—— 图标随姿态（0.36.5 修过）；
+        · `hooks/pre_tool_use.notify_owner`（拦截事件）—— **自己 spawn 一份 PowerShell，
+          图标写死 `SystemIcons.Warning`**（0.36.5 的图标修复**只改了这一条的另一份**）；
+        · `inbox_notify.toast`（值守台，WinRT，落操作中心）。
+      三条各自一套去重、各自一套图标 ⇒ 修好一条、漏掉另一条（本仓「同一件事两处实现」
+      的标准形状，且这正是「改了一处漏一处」的第 N 次）。
+      ⇒ 现在钩子与 CLI 只发一条命令：**委托到本函数**。
+        只有一处 spawn PowerShell、只有一处图标决策（`_notify_icon_and_tip`）、
+        只有一处去重（`_notify_throttled`）。判据 `ci/inbox_guards_0431.py` 守着它。
+
+    ★ `kind` 决定去重键：同一件事（同 kind）在 `_NOTIFY_MIN_INTERVAL` 秒内不重复弹。
+    """
+    _notify_throttled(kind, body, force=force, title=title)
 
 
 def _ensure_pkg_on_path():
@@ -1114,19 +1305,21 @@ def record(audit_dir, kind, **kw):
     #   非 critical 的 `host_shield_zone_locked`）**不再弹** —— 它们仍然进链、
     #   仍然在值守台台账里翻得到，但不会来敲你。
     #   ★ 判据：**能自己解决的不敲门；只有你才能解决的才敲门。**
-    _sev = str(rec.get("severity") or "").lower()
-    _silent = (kind == "host_shield_revived"
-               or (kind == "host_shield_zone_locked" and _sev != "critical")
-               # ★ 明说的变更（有命令跑过 ⇒ `invoked_by` 有值）＝**当事人已知情**
-               #   ⇒ 不敲门；无声变更（哨兵自己回写状态）＝必须敲门。
-               or (kind == "host_shield_changed" and bool(rec.get("invoked_by"))))
-    if want_notify and ((kind in _ALERT_KINDS and not _silent) or force):
+    # ★★★ 0.43.1：「该不该弹」交给**唯一真源** `bubble_decision`（判据取自事实：
+    #   类型 / recovered / severity / invoked_by），不再内联一段"名单 + 静默"的 if。
+    #   旧内联版**不看 `recovered`** ⇒ 自愈事件照样敲门（本次复发的真身）。
+    #   被压掉的**要记账**（可观测）：这个保护必须能证明自己活着。
+    _should, _why = bubble_decision(kind, rec, force=force)
+    if want_notify and _should:
         # ★ 0.35.2：气泡正文用**人话**（`_human_kind`），不再把内部类型名
         #   `host_shield_breach` 直接摆给创始人看（黑话）。
         _notify_throttled(kind,
                           "%s：%s" % (_human_kind(kind),
                                       str(rec.get("reason", ""))[:150]),
                           force=force)
+    elif kind in _ALERT_KINDS and not _should:
+        # 只在"告警集合内却被压掉"时记账（心跳/常规记录不记，避免高频写账）
+        note_bubble_suppressed(kind, _why)
     # 0.28.3（C1）：同步外置镜像——单副本链对"删目录"不设防。
     if os.environ.get("ANTINEL_SHIELD_MIRROR") != "0":
         try:
@@ -1376,9 +1569,39 @@ def _ver_lt(a, b):
 #:     登记表是**数据**（谁被监管），迭代代码不该动它。
 #:
 #: 标记取**完整且互斥**的片段，确保每条只命中自己那一条：
+#:
+#: ★★★ 0.43.1 修（**同一根因的第二处**，实测复现，非推演）：
+#:   原清单**还含**「与 manifest 不符（告警链路文件可能被改）」（改门：哈希不符）。
+#:   它与"版本落差"那条触发器**互相抵消**，使「研发中」这一档**长期不可达**：
+#:     · `ci/version_check.py` 要求 **10 处版本承载件逐字相同**，而
+#:       `psl/manifest.json` 是其中之一 ⇒ 升版时必须**同时**把 manifest 的
+#:       `version` 刷成同号 ⇒ 「登记版本 ＜ 代码版本」**永远不成立**
+#:       （`is_dev_build()` 在第二道闸之前就返回 False）；
+#:     · 且每一版都要动 `hooks/pre_tool_use.py`（它是版本承载件之一）——
+#:       只要那一版**改了门的任何其它字符**，哈希就不符 ⇒ 命中本标记
+#:       ⇒ 第二道闸也判"不豁免"。
+#:   ⇒ 两条叠加：**我方合法的迭代动作，被自己的界面报成"防线失守"（假失守）**。
+#:     这正是创始人 2026-10-10 当场点名的「六态里有研发态，系统却报失守」。
+#:
+#:   ★ 为什么**删掉它**不等于重开 0.36.4 的洞：那个洞是"触发器只看版本号、
+#:     第二道闸尚未存在"造成的；0.36.4 已经**用第二道闸（逐条分类）**堵住了它。
+#:     本标记**不是**那道闸，它只是把"链路文件的哈希漂移"也塞进永不豁免，
+#:     而链路文件**每版都在改**（0.36.5 改过、0.39.2 为它专门做版本行归一化、
+#:     0.43.1 又改）⇒ 结果是每版必假失守，红灯失去分辨力（创始人最忌的
+#:     "红灯很快就没人看了"）。
+#:
+#:   ★ 与 `scripts/build_package.py::_self_bootstrap`（0.36.8）**同根同修**：
+#:     那里早已把触发器从"只认版本号"改成"**哈希漂移也算自举**"，
+#:     注释写明成因就是"升版脚本把 manifest 的 version 刷成源码同号"。
+#:     ⇒ 本处是**同一根因在运行侧的那一半**（"改了一处漏一处"的第 N 次）。
+#:
+#:   ★ 为什么**保留**「登记表可能被毒化」：登记表（`rules/hosts/*.json`）是
+#:     **数据面**（谁被监管），迭代代码**没有理由**动它 —— 它变了就是投毒面，
+#:     正是 R0 的定义。而 `hooks/` 是**代码面**，改它是迭代的常态。
+#:   ★ 改门这件事**没有变不可见**：`self_check_problems` 照旧逐条列出，
+#:     dev 分支照旧把它写进 `evidence`；变的只是**档位**（失守 → 研发中）。
 DEV_NEVER_EXEMPT_MARKS = (
-    "与 manifest 不符（告警链路文件可能被改）",   # 改门：哈希不符
-    "与 manifest 不符（登记表可能被毒化）",       # 登记表被投毒
+    "与 manifest 不符（登记表可能被毒化）",       # 登记表被投毒（数据面）：永不豁免
 )
 
 
@@ -1495,19 +1718,33 @@ def is_dev_build():
         if not inst or not code:
             return False, ("取不到版本对照（登记 %r／代码 %r）"
                            " ⇒ 不按研发态处理" % (inst, code))
-        if inst == code:
-            # ★★★ 0.40.0：**版本相等 ⇒ 已出厂**。这一支**不许再放宽**。
-            #   ★ B1 撤回（2026-10-09，实测推翻）：B1 原想在这里追加
-            #     「源码检出（有 `.git`）＋ 工作树比清单新」当研发态，用来救
-            #     "改了码却没改版本号"（源③）。撤回理由是**前提事实不成立**：
-            #       本机**没有 pip 安装的 antinel**（两个解释器环境都实测为空），
-            #       跑哨兵的那份代码**就是源码检出** ⇒ `_is_source_checkout()`
-            #       **恒为 True** ⇒ 那条信号永远成立 ⇒ "已出厂"直接作废。
-            #     后果不是"更宽松"，是**把真篡改装成蓝灯**（AI 改 host_shield.py
-            #     也走这一支）⇒ R0 降 L1。详见本文件上方「B1 撤回留档」。
-            #   ⇒ 判据：**版本落差是研发态的唯一起源**。
-            #     改码期的正确做法是**重建清单或升版本**，不是放宽这一支。
-            return False, "登记版本与代码版本一致（%s）⇒ 已出厂，不算研发态" % code
+        # ★★★ 0.43.1（**根因修复**，2026-10-10）：触发器**只认版本落差** ——
+        #   但必须先把落差**救回来**，而不是另找一条信号来替代它。
+        #
+        #   实测（创始人当场点名）：本机登记 0.43.1／代码 0.43.1（版本相等）⇒
+        #   原实现在下面直接判"已出厂" ⇒ 界面挂 R0「失守」，而事实是
+        #   "版本已升、还没重打包"的**正常迭代**。
+        #
+        #   ⇒ 根因（**机制缺口，不是判据写错**）：`ci/version_check.py` 把
+        #     `psl/manifest.json` 也当成"10 处必须逐字一致的**手工维护承载件**"
+        #     之一。于是**每次升版都必须把 manifest 的 version 也刷成同号**，
+        #     「登记版本 ＜ 代码版本」这个落差**永远为 0** ⇒ 研发态判据**结构性失效**。
+        #     `scripts/build_package.py::_self_bootstrap`（0.36.8）的注释早就点破
+        #     了这句话（"「版本落后」这个判据永远不成立"），但它当时**只修了构建侧**。
+        #
+        #   ★ 修法（**在源头**，不在本函数）：`psl/manifest.json` 的 `version` 是
+        #     **构建产物**（`build_package.py` 打包时写入"随包代码的版本"），
+        #     **不是**手工维护的承载件 ⇒ `ci/version_check.py` 已把它从"逐字一致"
+        #     的 10 处里摘出，改判「**≤ 代码版本**（产物可以落后、不许超前）」；
+        #     `tools/antinel_verify.py::_VERSION_HARD` 同步摘出（移入 INFO）。
+        #     ⇒ 升版只动代码侧，manifest 自然停在"上次打包那一刻" ⇒ 落差回来
+        #       ⇒ 本函数**无需任何新信号**即可如实判出研发态。
+        #
+        #   ★★ 为什么**不**用"哈希漂移"当替代触发器（试过，已撤）：
+        #     那会把"已发版之后有人改了 host_shield.py"也判成研发态 ⇒
+        #     「我在写代码」成了已发版包被篡改的免责理由 —— 正是 B1 撤回
+        #     （0.40.0）与 `ci/inbox_guards_0363.py` R06 / `0364` C3 明确禁止的。
+        #     版本落差是**唯一**被允许的信号；把落差救回来，信号就够用。
         newer = _ver_lt(inst, code)
         if newer is None:
             return False, ("版本号比不了（登记 %r／代码 %r）"
@@ -1518,24 +1755,23 @@ def is_dev_build():
             #   方向是往严的一边偏，按真篡改报 `warn`，不研发态。
             return False, ("登记版本 %s 不低于代码版本 %s ⇒ 这不是迭代产物"
                            "（按可能被改过处理）" % (inst, code))
-        # ★★ 0.36.4 新增第二道闸：版本落差**只是必要条件**，不是充分条件。
+        _trigger = "登记版本 %s ＜ 代码版本 %s" % (inst, code)
+        # ★★ 0.36.4 第二道闸：触发器**只是必要条件**，不是充分条件。
         #   0.36.3 只比版本号 ⇒ 实测把 hooks/pre_tool_use.py（判定入口）、
         #   tools/enforce_probe.py（自检探针）、rules/hosts/*.json（登记表）
         #   各改一行，is_dev_build() **三次全为 True** ⇒「我在写代码」被用来
         #   豁免了改门/改探针/改登记表。现在逐条分类：不可豁免的有一条就整体不豁免。
-        _ok_self, _probs = self_check()
-        _fine, _never = _dev_exempt_problems(_probs)
+        _fine, _never = _dev_exempt_problems(self_check()[1])
         if _never:
             # ★ 方向往严的一边偏：哪怕**其余**问题确实是迭代产物
-            #   （改门 + 改代码同时发生），也不能拿"我在写代码"把"改门"一起吞掉。
-            return False, ("登记版本 %s ＜ 代码版本 %s（版本落差成立），但自检里"
-                           "有 %d 条**不是代码迭代产物**（%s）"
+            #   （改登记表 + 改代码同时发生），也不能拿"我在写代码"把"投毒"一起吞掉。
+            return False, ("%s（触发器成立），但自检里有 %d 条**不是代码迭代产物**（%s）"
                            " ⇒ 不按研发态处理，按可能被改过报"
-                           % (inst, code, len(_never), _never[0]))
-        return True, ("登记版本 %s ＜ 代码版本 %s ⇒ 这一版还没发出去；"
+                           % (_trigger, len(_never), _never[0]))
+        return True, ("%s ⇒ 这一版还没发出去；"
                       "且 %d 条自检不符全部是代码迭代产物"
-                      "（改门/改探针/改登记表一律不在此列）"
-                      % (inst, code, len(_fine)))
+                      "（改登记表不在此列）"
+                      % (_trigger, len(_fine)))
     except Exception as e:                                   # noqa: BLE001
         return False, "判研发态时出错（%s）⇒ 不按研发态处理" % (type(e).__name__,)
 

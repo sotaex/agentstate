@@ -98,17 +98,28 @@ _NON_EVENT_TYPE_KEYS = ("file_content", "process")
 # INV-3：版本承载件。HARD = 必须与主版本一致；INFO = 只报告不判定。
 # ★ 正则必须**精确指向"声明的版本"**。实测教训：`references/THREAT_MODEL.md` 里
 #   正文提到 `v0.28.3`，用"第一个 vX.Y.Z"会把它当成声明版本 ⇒ 假命中、假报警。
+# ★★★ 0.43.1（2026-10-10）：`psl/manifest.json` 从 HARD **移到 INFO**。
+#   理由（根因修复，与 `ci/version_check.py` 同根同修）：它是**构建产物** ——
+#   `build_package.py` 打包时写入"随包代码的版本"，语义上**允许落后于源码**
+#   （迭代期：版本已升、还没重打包）。把它当"必须与主版本逐字一致的手工承载件"
+#   会**逼着每次升版把它的 version 也刷成同号** ⇒ `is_dev_build()` 的版本落差
+#   永远为 0 ⇒ 研发态结构性失效、界面假失守。
+#   ⇒ HARD 侧只剩**手工维护的 7 处**；manifest 落后由 `ci/version_check.py`
+#     判据 7 单独守「≤ 代码版本、不许超前」。
 _VERSION_HARD = (
     ("antinel.py",                  r'^VERSION\s*=\s*"([^"]+)"'),
     ("antinel_mcp.py",              r'"version"\s*:\s*"([^"]+)"'),
     ("rules/default.json",          r'"version"\s*:\s*"([^"]+)"'),
     ("pyproject.toml",              r'^version\s*=\s*"([^"]+)"'),
     ("server.json",                 r'"version"\s*:\s*"([^"]+)"'),
-    ("psl/manifest.json",           r'"version"\s*:\s*"([^"]+)"'),
     ("docs/AUDIT_SCHEMA.md",        r'随\s*v(\d+\.\d+\.\d+)'),
     ("build_package.py",            r'^VERSION\s*=\s*"([^"]+)"'),
 )
-_VERSION_INFO = (("scripts/run_harness.py", r'(\d+\.\d+\.\d+)'),)
+_VERSION_INFO = (
+    ("scripts/run_harness.py", r'(\d+\.\d+\.\d+)'),
+    # ★ 0.43.1：构建产物 —— 允许落后于源码，只报告不判定（判据在 version_check 判据 7）。
+    ("psl/manifest.json", r'"version"\s*:\s*"([^"]+)"'),
+)
 
 
 def _assign_node(tree, name):

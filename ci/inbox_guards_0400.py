@@ -369,9 +369,16 @@ def s23():
                 " ⇒ 源②的写手回来了（钩子 load→改→整份写回会抹掉 enabled/zones）"
                 % (hits[:4],))
     # 正向：气泡节流必须走**展示账**（否则降噪记账无处可去）
-    if not any(_call_name(n) == "mark_notify_shown"
+    #   ★★ 0.43.1：**记账点搬家了** —— 钩子不再自己记账，而是把发射**委托**给
+    #     唯一发射口 `host_shield.notify_owner`（→ `_notify_throttled`，记账在那里）。
+    #     判据必须跟着搬到**真身**上；留在钩子上就是"量具指错了对象"
+    #     （同 JDG-02B 负控搬家那一体：改了一处、判据没跟着搬）。
+    if not any(_call_name(n) == "notify_owner"
                for n in ast.walk(ast.parse(src)) if isinstance(n, ast.Call)):
-        return "钩子里没有 `mark_notify_shown(` ⇒ 降噪记账被删了（节流会失效）"
+        return "钩子没有委托 `notify_owner(` ⇒ 它又在自己发射气泡（第二套通道回来了）"
+    if "mark_notify_shown" not in _src("host_shield.py"):
+        return ("唯一发射口（host_shield）里没有 `mark_notify_shown(`"
+                " ⇒ 降噪记账被删了（节流会失效）")
     # 行为级：`mark_notify_shown` 绝不能经由 `save_state` 落盘
     import host_shield as H
     tmp = tempfile.mkdtemp(prefix="g0400_s23_")
@@ -396,6 +403,13 @@ def n_s23():
     mutated = src + "\n\n\ndef _g0400_probe():\n    _hs.save_state({})\n"
     if not _hook_state_write_calls(mutated):
         return "负控失效：加回 save_state 后仍未被抓到"
+    # ★ 0.43.1 第二半：把"委托"抽掉（钩子又自己发射气泡）⇒ 判据必须报红
+    _no_deleg = src.replace("notify_owner(", "_x_notify_owner(")
+    if _no_deleg == src:
+        return "负控无效：找不到 notify_owner 委托锚点（判据与源码已失配）"
+    if any(_call_name(n) == "notify_owner"
+           for n in ast.walk(ast.parse(_no_deleg)) if isinstance(n, ast.Call)):
+        return "负控失效：抽掉委托后仍被判成有委托 —— S23 第二半是假绿"
     return True
 
 
@@ -652,12 +666,16 @@ def s27():
 @check("N-S27 负控：把「源码检出」信号加回去 ⇒ S27 必须报红")
 def n_s27():
     src = _src("host_shield.py")
-    mutated = src.replace("        if inst == code:\n",
-                          "        if inst == code:\n"
-                          "            if os.path.isdir(os.path.join(_pkg_root(), '.git')):\n"
-                          "                return True, 'x'\n", 1)
+    # ★ 0.43.1：锚点从 `if inst == code:` 改为版本比较那一行 ——
+    #   0.43.1 的根因修复把"版本相等"的整支收进 `_ver_lt` 的统一分支里
+    #   （不再有独立的 `if inst == code:`），判据锚点必须跟着搬家
+    #   （本仓纪律：**判据要跟着实现搬家**，否则负控静默失效成假绿）。
+    mutated = src.replace("        newer = _ver_lt(inst, code)\n",
+                          "        newer = _ver_lt(inst, code)\n"
+                          "        if os.path.isdir(os.path.join(_pkg_root(), '.git')):\n"
+                          "            return True, 'x'\n", 1)
     if mutated == src:
-        return "负控失效：找不到 `if inst == code:` 锚点（判据需更新）"
+        return "负控失效：找不到版本比较锚点（判据需更新）"
     probs = _dev_signal_problems(mutated)
     if not probs:
         return "负控失效：加回 `.git` 信号后仍被判绿"

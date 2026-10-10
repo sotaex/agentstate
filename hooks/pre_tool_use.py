@@ -54,7 +54,7 @@ _T0 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段起点（性能
 
 # ---------------------------------------------------------------- constants --
 PKG_DIR = os.path.dirname(os.path.abspath(__file__))
-_ANTINEL_VERSION = "0.42.1"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
+_ANTINEL_VERSION = "0.43.1"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
 _T1 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段终点（性能插桩）
 
 
@@ -2866,57 +2866,32 @@ def _slop_hit(tool_name, command, policy):
             "remediation_zh": "核对包名拼写与官方文档；确认后再安装；已安装的立即移除并轮换凭据"}
 
 
-def notify_owner(title, body):
-    """对抗分析 v1.0 裁定：留痕重要，让主人第一时间知道更重要。
-    Windows 气泡通知（fire-and-forget，不阻塞钩子、失败静默）。
+def notify_owner(title, body, kind="block|owner"):
+    """拦截时通知主人（气泡）—— **委托给唯一发射口** `host_shield.notify_owner`。
 
-    ★★ 0.36.7：本通道接入「窗口可见 ⇒ 不重复通知」判据（与 host_shield
-       ._notify_throttled 同一条）。修之前的缺口：该判据只长在哨兵/值守台
-       事件通道，拦截气泡走本函数——**另一条通道、另一套去重** ⇒ 实测复现
-       「值守台窗口开着、正显示这条急事 ＋ 右下角又弹一个泡」（2026-10-08
-       创始人实测：两次越权写入拦截，窗口可见状态下各触发一次气泡）。
-       ⇒ 判据不二次实现：import host_shield，问 console_is_visible()——
-         True（此刻有窗口正在看）⇒ 不弹，把「已用窗口通知」记进**中枢通知账**
-         （`<hub>/notify_state.json`，0.40.0 起；**不再写安全状态文件**）；
-         False（明确没有）／None（判不出）⇒ 照弹，方向与 _notify_throttled
-         一致：宁可多弹一次，不可把真急事藏起来。
+    ★★★ 0.43.1（2026-10-10 实测复发，非推演）：本函数此前**自己 spawn 一份
+      PowerShell**，图标**写死** `SystemIcons.Warning`；而 0.36.5 的图标修复
+      （通知图标随姿态取，不再一律黄色警告）**只改到了 `host_shield._notify` 那一份**
+      —— 判据 `ci/inbox_guards_0364.py::F4` 也只 `inspect.getsource(HS._notify)`。
+      ⇒ 后果：**拦截气泡永远是黄色警告三角**，与"正常拦截 / 真出事"无关。
+        这正是 0.36.5 定为「冒泡泡」根因②的那条（"它在撒谎，且撒谎是默认行为"），
+        在**钩子这条副本**上原封不动地活着 —— 「修好一处、漏掉另一处」的标准形状。
+
+      ⇒ 现在本函数不再有第二份实现：只发一条命令，交给唯一发射口。
+        图标 / 去重 / 「窗口可见即不弹」三件事**全部只有一处**。
+
+    ★ 行为变化（诚实登记）：去重口径由"每 rule+snippet 每天一次"（`notice_gate`，
+      仍在 main 里管 stderr）之外，**再加**一道"同 kind 30 分钟内不重复弹泡"
+      （唯一发射口的 `_NOTIFY_MIN_INTERVAL`）。⇒ 气泡只会更少，不会更多。
+    ★ 判据 `ci/inbox_guards_0431.py` 守着"钩子里不许再有 ShowBalloonTip"。
     """
     try:
         _hs = _hs_module()                  # ★ 统一走 _hs_module()（消灭内联副本）
         if _hs is None:
-            raise ImportError("host_shield 拿不到")
-        if _hs.console_is_visible() is True:
-            try:
-                # ★★★ 0.40.0：记账走**中枢级通知账**（展示层唯一写入口），
-                #   **不再写安全状态文件** —— 过去这里是一次
-                #   「读整份 host_shield.json → 改一个键 → 整份写回」；而
-                #   `host_shield.load_state()` 读失败时返回默认值
-                #   （`{"enabled": False, …}`）⇒ 钩子把它**整份写回真状态**
-                #   ⇒ 哨兵下一拍发现 enabled 与链权威不一致 ⇒ 记一条 R0 假失守
-                #   「已回写恢复」。**写手就是本函数**（AI 每次工具调用都跑这里）。
-                #   ⇒ 展示层的账，不许写在安全状态里。
-                _hs.mark_notify_shown("block|owner")
-            except Exception:
-                pass                        # 记账失败不影响「不弹」的结论
-            return
+            return                          # 拿不到模块 ⇒ 不弹（钩子绝不因此崩）
+        _hs.notify_owner(title, body, kind=kind)
     except Exception:
-        pass                                # 判不出 ⇒ 照弹（见 docstring）
-    try:
-        import subprocess
-        t = title.replace("'", "''")
-        b = body.replace("'", "''")
-        ps = ("Add-Type -AssemblyName System.Windows.Forms;"
-              "Add-Type -AssemblyName System.Drawing;"
-              "$n=New-Object System.Windows.Forms.NotifyIcon;"
-              "$n.Icon=[System.Drawing.SystemIcons]::Warning;$n.Visible=$true;"
-              "$n.ShowBalloonTip(15000,'%s','%s','Warning');"
-              "Start-Sleep -Seconds 8;$n.Dispose()" % (t, b))
-        subprocess.Popen([_PS_EXE, "-NoProfile", "-WindowStyle", "Hidden",
-                          "-Command", ps],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         creationflags=_CREATE_NO_WINDOW)
-    except Exception:
-        pass
+        pass                                # 通知失败静默：留痕已在链上，气泡只是门铃
 
 
 def main():
@@ -3374,7 +3349,8 @@ def main():
                 detail = str(top.get("match_snippet", ""))[:80]
                 notify_owner("Antinel 已拦下危险操作",
                              "%s%s。已留痕，详情见 antinel report --session latest"
-                             % (what, ("｜" + detail) if detail else ""))
+                             % (what, ("｜" + detail) if detail else ""),
+                             kind="block|" + str(top.get("rule_id") or "?"))
         if lang == "zh":
             reason = "Antinel 拦截 [%s] %s | 命中: %s | 放行/处理: %s | 重试无效（策略拦截）" % (
                 top["rule_id"], desc, top["match_snippet"], rem)

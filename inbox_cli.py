@@ -69,8 +69,12 @@ def cmd_list(a):
         print("（这个筛选范围里没有记录。）")
         return 0
     for i in rows:
-        print("  [%s] %-12s %s  %s" % (i.id, _fmt_level(i.level), _fmt_state(i.state), i.title))
-        meta = " · ".join(x for x in (i.detail, ("规则 " + i.rule_id) if i.rule_id else "",
+        # ★ 0.43.0：命令行的**用户可见文本**也要过 `M.visible_text`（去 markdown 星号）
+        #   —— 0.42.0 只做了网页两条路径，CLI 这条漏了（实测 `**不等于**` 照样露出）。
+        print("  [%s] %-12s %s  %s" % (i.id, _fmt_level(i.level), _fmt_state(i.state),
+                                       M.visible_text(i.title)))
+        meta = " · ".join(x for x in (M.visible_text(i.detail),
+                                      ("规则 " + i.rule_id) if i.rule_id else "",
                                       i.ts) if x)
         if meta:
             print("        %s" % meta)
@@ -95,11 +99,11 @@ def cmd_show(a):
         return 0
     print("告警 %s" % it.id)
     print("  级别：%s ｜ 状态：%s" % (_fmt_level(it.level), _fmt_state(it.state)))
-    print("  标题：%s" % it.title)
+    print("  标题：%s" % M.visible_text(it.title))
     if it.detail:
-        print("  原因：%s" % it.detail)
+        print("  原因：%s" % M.visible_text(it.detail))
     if it.rule_id:
-        print("  规则：%s ｜ 命中：%s" % (it.rule_id, it.snippet))
+        print("  规则：%s ｜ 命中：%s" % (it.rule_id, M.visible_text(it.snippet)))
     print("  时间：%s" % it.ts)
     if it.chain_ref:
         print("  链上位置：%s（可用 `antinel verify` 核）" % it.chain_ref)

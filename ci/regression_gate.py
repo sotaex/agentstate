@@ -269,8 +269,35 @@ def j_a2_load_compare_same_source():
         shutil.rmtree(str(tmp), ignore_errors=True)
 
 
+def _vc_pass_count(out):
+    """从 version_check 的 PASS 输出里**数值回读**条数，并数出清单实际行数。
+
+    返回 `(declared, listed)`；`declared=None` 表示读不到汇总行。
+
+    ★★ 为什么不能用「按行形状数」的旧写法（2026-10-10 修，本班实测）：
+
+      旧写法 `len(re.findall(r"^\\s+\\S.*?\\s+0\\.\\d+\\.\\d+\\s*$", out, re.M))`
+      数出来是 **10**，而实际承载件只有 **9** 处 —— 因为它**误匹配了汇总行**：
+      `★ PASS：9 处版本号全部为 0.43.1` 前面那行是空行，`^\\s+` 吃掉了前导 `\\n`，
+      再把 `★` 当 `\\S` ⇒ 汇总行也算成一处承载件。
+      于是判据**显示**「10 处版本号一致」，与它自己的 docstring「九处」**自相矛盾**，
+      而 PASS/FAIL 又是对的 —— 属于最难发现的一类：**结论对、口径假**。
+
+      修法遵循 v1.18 判据①：计数一律**数值回读**（读量具自报的那个数），
+      不靠"数长得像的行"。`declared` 取自 version_check 自己打印的
+      `★ PASS：%d 处版本号`（它数的是 `len(rows)`，即真实承载件数）；
+      `listed` 只作**交叉核对**（清单行数与自报数必须一致），
+      正则用 `^  \\S`（**恰好两个空格**的清单缩进），不会误中顶格的汇总行。
+    """
+    m = re.search(r"★\s*PASS：\s*(\d+)\s*处版本号", out or "")
+    declared = int(m.group(1)) if m else None
+    listed = len(re.findall(r"^  \S.*?\s+0\.\d+\.\d+\s*$", out or "", re.M))
+    return declared, listed
+
+
 def j_version_consistent():
-    """缺陷 D-6 / 原 A5：**十处**版本承载件必须逐字相同。
+    """缺陷 D-6 / 原 A5：**九处**手工维护的版本承载件必须逐字相同；
+    `psl/manifest.json` 的 `version` **单独判**（≤ 代码版本）。
 
     ★ MEMORY 点名的「无守卫」项：「发布前必手扫版本号 —— **无守卫**」。
       手扫 = 靠人记得 = 迟早漏。实测落后：
@@ -285,14 +312,37 @@ def j_version_consistent():
       的 INV-3）抓出来的。两个检查器各自维护清单 ⇒ 必然分叉。
       修法：`version_check.py` 现在自带**判据 4「本清单 ⊇ INV-3 清单」**，
       分叉本身就会红。教训：**同一个事实有两个检查器 = 必须有一条判据管它们一致。**
+
+    ★★★ 为什么又从「十处」变「九处」（0.43.1，2026-10-10，根因修复）：
+      `psl/manifest.json` 的 `version` 是**构建产物**（`build_package.py` 打包时
+      写入"随包代码的版本"），语义上**允许落后**（迭代期：版本已升、还没重打包）。
+      把它塞进"逐字一致"⇒ 每次升版被迫把它也刷成同号 ⇒ `is_dev_build()` 的
+      版本落差永远为 0 ⇒ **研发态结构性失效、界面假失守**（创始人当场点名）。
+      ⇒ 摘出「逐字一致」集（`version_check.py` 判据 7 + INV-3 INFO 侧单独守
+        「≤ 代码版本、不许超前」）。**保护面没有变松**：落后是被期待的中间态，
+        超前照旧红，且打包时会被刷成当前版本。
+      ⇒ 本条（D-6）判的是**九处手工承载件**，与判据 7 各管一半。
     """
     import subprocess
     r = subprocess.run([sys.executable, str(PKG / "ci" / "version_check.py")],
                        capture_output=True, text=True, encoding="utf-8",
                        errors="replace", timeout=60)
     if r.returncode == 0:
-        n = len(re.findall(r"^\s+\S.*?\s+0\.\d+\.\d+\s*$", r.stdout or "", re.M))
-        return True, "%d 处版本号一致" % n
+        out = r.stdout or ""
+        declared, listed = _vc_pass_count(out)
+        if declared is None:
+            return False, ("version_check 报绿却读不到「★ PASS：N 处版本号」汇总行"
+                           " —— 量具口径变了，本条会瞎（不许静默通过）")
+        # ③ 内建负控（§6 四件套之「反向对照」）：喂一个「自报 10 处、清单只列 2 行」
+        #    的合成输出，交叉核对必须能区分出不一致 —— 否则这条核对是假守卫。
+        _d, _l = _vc_pass_count("  a  0.1.0\n  b  0.1.0\n★ PASS：10 处版本号全部为 0.1.0\n")
+        if _d == _l:
+            return False, "内建负控未生效：合成输出的自报条数与清单行数不一致却未被区分"
+        # 显示口径纳入自检（§7.8）：自报条数必须等于清单实际列出的行数
+        if listed != declared:
+            return False, ("version_check 自报 %d 处，清单却列出 %d 行"
+                           " —— 量具显示口径与事实不符" % (declared, listed))
+        return True, "%d 处版本号一致" % declared
     # 从守卫输出里挑出「不属于多数派」的那几行，直接点名
     rows = re.findall(r"^\s+(.+?)\s+(0\.\d+\.\d+)\s*$", r.stdout or "", re.M)
     from collections import Counter
@@ -1069,7 +1119,7 @@ def main():
             ("D-3 纯文本提及仍放行（无假阳性）", lambda: j_mention_not_regressed(m)),
             ("—   DST-01 真表 21 条未损坏（对照）", lambda: j_dst01_still_works(m)),
             ("—   兜底集事实未变（17 条、无 DST-10）", lambda: j_fallback_has_no_dst10(m)),
-            ("D-6 十处版本号一致（原 A5，此前无守卫）", j_version_consistent),
+            ("D-6 九处版本号一致（原 A5，此前无守卫）", j_version_consistent),
             ("D-11 构建器三件机制在位（布局表/同步守卫/对账）", j_builder_mechanisms_present),
             ("D-17 构建顺序：验产物 final ＋ 家务最后做", j_build_harness_order),
             ("D-20 包组成双向守卫（干净 wheel 不漏模块）", j_pymodules_guard),

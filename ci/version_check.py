@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""版本号一致性守卫 —— 十处版本承载件必须逐字相同。
+"""版本号一致性守卫 —— **九处手工维护的版本承载件**必须逐字相同；
+`psl/manifest.json` 的 `version` **单独判**（产物可落后、不许超前）。
 
 ★★★ 为什么需要它（MEMORY 里点名的「无守卫」）
   「**发布前必手扫版本号**（pyproject / VERSION / server.json / antinel_mcp /
@@ -10,19 +11,35 @@
   两者都不是"注释里的历史标注"，是**活的声明**。
 
 ★★ 两个真源必须一致（这条本身也要能红）
-  产品侧真源 = `tools/antinel_verify.py` 的 `_VERSION_HARD`（INV-3 不变量，8 处）
+  产品侧真源 = `tools/antinel_verify.py` 的 `_VERSION_HARD`（INV-3 不变量）
   本文件清单是它的**超集**（多 `hooks/pre_tool_use.py`、`scripts/build_package.py`、
    `SKILL.md`）。**清单分叉过一次**：初版只列 7 处，漏了 `rules/default.json`
   与 `docs/AUDIT_SCHEMA.md`；是 `antinel_verify.py --invariants` 的 INV-3 抓出来的。
   ⇒ 现在加判据 4：**本清单必须是 INV-3 清单的超集**，否则本检查器自己就是假守卫。
 
-★ 判据设计（六条，都要能红）
-  1. 逐处抽取值，**全部相同**才通过；列出每处的实际值供定位
+★★★ 0.43.1：为什么把 `psl/manifest.json` 从「逐字一致」里**摘出来**（根因修复）
+  实测（创始人 2026-10-10 当场点名）：界面挂 R0「失守」，而事实是正常迭代。
+  根因**不在** `is_dev_build()`，在**这里**：
+    · `psl/manifest.json` 的 `version` 是**构建产物**（`build_package.py` 打包时
+      写入"随包代码的版本"），它的**语义**就是"上次打包那一刻的版本" ⇒ 迭代期
+      **本该落后于代码版本**；
+    · 而它被当成"手工维护的承载件"塞进"10 处逐字一致"⇒ 每次升版都被迫把它也
+      刷成同号 ⇒ `is_dev_build()` 赖以成立的**版本落差永远为 0** ⇒ 研发态
+      **结构性失效** ⇒ 自检一有漂移就掉进 `warn`（失守）。
+  ⇒ 修法：把它**摘出**「逐字一致」集，改判「**≤ 代码版本**」（产物可以落后于
+    源码，但**绝不许超前**——超前就是被毒化/伪造，必须红）。
+  ⇒ 摘出后**保护面没有变松**：它的"落后"是**被期待的中间态**，而它的"超前"
+    照旧会红；且打包时 `build_package.py` 会把它刷成当前版本（`self_check()`
+    的哈希基线也随之刷新）。
+
+★ 判据设计（七条，都要能红）
+  1. 九处承载件逐处抽取值，**全部相同**才通过；列出每处的实际值供定位
   2. 抽不到值 ⇒ **FAIL**（不是 SKIP）—— 「查不出来 ≠ 查出来是好的」
   3. 与 `--expect` 一致（发布前用）
   4. 本清单 ⊇ `antinel_verify.py::_VERSION_HARD`（防两个检查器分叉）
   5. SKILL.md 的 psl-verified* 必须与 psl/judgment.json 的 verdict 一致（防「自证卡过期」）
   6. server.json 的 stability.schema 必须与 docs/AUDIT_SCHEMA.md 抬头一致（防「对外清单声明旧模式」）
+  7. （0.43.1 新增）`psl/manifest.json` 的 `version` ≤ 代码版本（产物可落后、不许超前）
 
 用法：
     python ci/version_check.py
@@ -40,6 +57,8 @@ PKG = Path(os.environ.get("ANTINEL_PKG") or Path(__file__).resolve().parent.pare
 # (显示名, 相对路径, 正则, 分组号)
 # ★ 只在**唯一且必填**的声明处抽取 —— 不要抽注释里的历史标注
 # ★★ 本清单必须 ⊇ tools/antinel_verify.py 的 _VERSION_HARD（判据 4 强制）
+# ★★★ 0.43.1：`psl/manifest.json` **已从此清单摘出**（见文件头「★★★ 0.43.1」）——
+#   它是构建产物、语义上允许落后，改由判据 7 单独判「≤ 代码版本」。
 SPOTS = [
     ("pyproject.toml",
      r'^version\s*=\s*"([^"]+)"', 1),
@@ -53,8 +72,6 @@ SPOTS = [
      r'^_ANTINEL_VERSION\s*=\s*"([^"]+)"', 1),
     ("scripts/build_package.py  VERSION",
      r'^VERSION\s*=\s*"([^"]+)"', 1),
-    ("psl/manifest.json  version",
-     r'"version"\s*:\s*"([^"]+)"', 1),
     ("rules/default.json  version",
      r'"version"\s*:\s*"([^"]+)"', 1),
     ("docs/AUDIT_SCHEMA.md  标题",
@@ -65,9 +82,11 @@ SPOTS = [
 
 # INV-3 的 HARD 清单（产品侧真源）——用于判据 4 的"超集"检查。
 # 只登记**相对路径**，不复制正则（正则的维护点是 antinel_verify.py）。
+# ★★★ 0.43.1：`psl/manifest.json` 已从 INV-3 的 HARD 移到 INFO（见 antinel_verify.py），
+#   故此处同步移除 —— 否则判据 4 会要求本清单重新收录一个**已不该逐字一致**的项。
 INV3_HARD_PATHS = {
     "antinel.py", "antinel_mcp.py", "rules/default.json", "pyproject.toml",
-    "server.json", "psl/manifest.json", "docs/AUDIT_SCHEMA.md",
+    "server.json", "docs/AUDIT_SCHEMA.md",
     "build_package.py",
 }
 
@@ -194,6 +213,57 @@ def _stability_schema_fails():
     return out
 
 
+def _manifest_lag_fails():
+    """判据 7（0.43.1 新增）：`psl/manifest.json` 的 `version` **≤ 代码版本**。
+
+    ★ 为什么需要（**根因修复的配套守卫**，2026-10-10）：
+      本判据与「把 manifest 从逐字一致里摘出」是**同一件事的两半** ——
+      摘出（放开"落后"）必须配一条判据钉住"**只许落后、不许超前**"，
+      否则就是**单方面放松**（正是本仓最忌的"改了一处漏一处"）。
+      · 落后（`manifest < code`）= **被期待的中间态**（版本已升、还没重打包）
+        ⇒ 研发态 `is_dev_build()` 赖以成立 ⇒ 判 **PASS**；
+      · 相等 = 已打包/已出厂 ⇒ 判 **PASS**；
+      · 超前（`manifest > code`）= 产物声明了一个**还没写出来的版本**
+        ⇒ 只可能是被毒化/伪造 ⇒ 判 **FAIL**（方向往严的一边偏）。
+
+    ★ 与判据 1 的分工：判据 1 管"九处手工承载件彼此一致"，本判据管"产物与代码
+      的关系"。两者都不许二次实现对方的逻辑 —— 版本比较**复用**
+      `host_shield._ver_lt`（唯一真源），不在这里另写一套。
+    """
+    out = []
+    mp = PKG / "psl" / "manifest.json"
+    if not mp.is_file():
+        return ["判据 7 找不到 psl/manifest.json（产物缺失 ⇒ 假守卫，不许静默通过）"]
+    try:
+        mfv = json.loads(mp.read_text(encoding="utf-8")).get("version")
+    except Exception as e:                                      # noqa: BLE001
+        return ["判据 7 解析 psl/manifest.json 失败：%r" % e]
+    if not mfv:
+        return ["判据 7 从 psl/manifest.json 抽不到 version（格式变了 ⇒ 检查器会瞎）"]
+    # 代码版本真源：antinel.py 的 VERSION（与 SPOTS 同法抽取，不另立真源）
+    ap = PKG / "antinel.py"
+    if not ap.is_file():
+        return ["判据 7 找不到 antinel.py（代码版本真源缺失）"]
+    m = re.search(r'^VERSION\s*=\s*"([^"]+)"', ap.read_text(encoding="utf-8"), re.M)
+    if not m:
+        return ["判据 7 从 antinel.py 抽不到 VERSION"]
+    code = m.group(1)
+    try:
+        sys.path.insert(0, str(PKG))
+        import host_shield as _HS
+        lt = _HS._ver_lt(code, mfv)          # code < mfv ⇔ manifest 超前
+    except Exception as e:                                      # noqa: BLE001
+        return ["判据 7 无法比较版本（%s vs %s，%s）⇒ 往严偏，判 FAIL"
+                % (mfv, code, type(e).__name__)]
+    if lt is None:
+        return ["判据 7 版本号比不了（%s vs %s）⇒ 往严偏，判 FAIL" % (mfv, code)]
+    if lt:
+        out.append("psl/manifest.json 的 version=%s **超前**代码版本 %s "
+                   "⇒ 产物声明了一个还没写出来的版本（只可能是被毒化/伪造）"
+                   "（产物只许落后或相等，不许超前）" % (mfv, code))
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--expect", help="期望版本（不给则用 psl/manifest.json 的 version）")
@@ -202,7 +272,8 @@ def main():
 
     rows = extract()
     print("=" * 78)
-    print("版本号一致性守卫 —— %d 处承载件必须逐字相同" % len(SPOTS))
+    print("版本号一致性守卫 —— %d 处承载件必须逐字相同；"
+          "psl/manifest.json 单独判（≤ 代码版本）" % len(SPOTS))
     print("包路径：%s" % PKG)
     print("=" * 78)
 
@@ -247,6 +318,9 @@ def main():
     # 判据 6（2026-10-05 新增）：server.json 的 stability.schema 必须与 AUDIT_SCHEMA.md 抬头一致。
     #   防的是「对外清单声明一个过期的模式版本而无人发现」——与判据 5 同一类病。
     fails.extend(_stability_schema_fails())
+    # 判据 7（0.43.1 新增）：psl/manifest.json 的 version ≤ 代码版本。
+    #   与「把 manifest 从逐字一致里摘出」配套 —— 只许落后、不许超前。
+    fails.extend(_manifest_lag_fails())
 
     print()
     if not fails:

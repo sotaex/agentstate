@@ -140,6 +140,7 @@ def project_record(rec, kinds):
         #   与上面那层**方向相反**：上一层补"本来就没写 topic"的，
         #   这一层改"写了旧名字"的 —— 两层都是**只在投影期归一**，链不动。
         _topic = _TOPIC_ALIAS.get(_topic, _topic)
+        _recovered = bool(rec.get("recovered"))
         _a = M.Alert(
             id=M.alert_id(ts, t, str(rec.get("reason") or "")),
             ts=ts, level=lvl, kind=t,
@@ -150,19 +151,25 @@ def project_record(rec, kinds):
             chain_ref=str(rec.get("hash") or ""),
             # ★ 0.35.3：链记录的**结构化**字段（AUDIT_SCHEMA v1.10）。
             #   页面据此判"有没有后果"，**不解析 reason 文案**。
-            recovered=bool(rec.get("recovered")),
+            recovered=_recovered,
             # ★ 0.35.3：`subkind` → `topic`，用于把"同一件事反复发生"归并。
             #   例：登录自启缺失 → subkind=autostart_missing（14 条 = 1 件事）。
             topic=_topic,
         )
-        # ★★ 0.40.0（A8）：`host_shield_zone_locked` **兼表成败** ⇒ 级别/标题必须
-        #   **按记录**改档，否则一条"上锁成功"会顶着 kind 的 R0 与
-        #   「失守：安全区加锁失败」标题出现（实测本机 2 条 = 把成功报成失守）。
-        #   ★ 判据复用 `M._zone_lock_failed`（**唯一实现**，它又复用
-        #     `remediation._kind_of`），不另立第二套口径。
-        if t == "host_shield_zone_locked" and not M._zone_lock_failed(_a):
-            _a.level = "L1"
-            _a.title = M.TITLE_OF_TOPIC.get("zone_ok") or "注意：安全区已上锁（区内防篡改）"
+        # ★★ 0.43.0：**所有"按记录改档"只在这里、只走这两个函数** ——
+        #   · A8（0.40.0）：`host_shield_zone_locked` 兼表成败 ⇒ 成功不是失守
+        #     （实测本机 2 条被报成失守）；
+        #   · A3（0.43.0）：`recovered=True` 的自愈记录 ⇒ 不顶 R0
+        #     （实测 24h 内 17 条顶着 R0，见 `_p_r0_audit3.py`）。
+        #   ★ 为什么收进 `M.level_of_record`：此前 A8 是**在投影层手写一段 `if`**
+        #     —— 那就是第二套口径（本仓「同一事实两处实现」的标准形状）；
+        #     现在 zone 的成败判据仍复用 `M._zone_lock_failed`（它又复用
+        #     `remediation._kind_of`），但**改档动作**只有一处。
+        _a.level = M.level_of_record(
+            t, recovered=_recovered,
+            zone_failed=(M._zone_lock_failed(_a)
+                         if t == "host_shield_zone_locked" else None))
+        _a.title = M.title_of_record(t, _a.level, _topic)
         return _a
 
     # ★★ 0.40.0：研发态自检不符 —— **故意不进 `_ALERT_KINDS`**（⇒ 不弹气泡：
@@ -171,7 +178,7 @@ def project_record(rec, kinds):
     if t == "host_shield_dev_drift":
         return M.Alert(
             id=M.alert_id(ts, t, str(rec.get("reason") or "")),
-            ts=ts, level=M.level_of(t), kind=t,
+            ts=ts, level=M.level_of_record(t), kind=t,
             # ★ 标题只取 `TITLE_OF_KIND`：`TITLE_OF_TOPIC["code_drift"]` 那条是给
             #   **R0 的 tamper** 用的（写着"失守"），这里不能借（免得 L1 挂"失守"标题）。
             title=M.TITLE_OF_KIND.get(t, t),

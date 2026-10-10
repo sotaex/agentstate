@@ -307,6 +307,13 @@ def _call_graph(paths):
             # ★ 自审：docstring 也算常量 ⇒ `console_is_visible` 的说明文字里
             #   提到 `ShowBalloonTip` 就被误判成「真身发射者」。
             #   ⇒ 先收集本函数（含嵌套函数）的所有 docstring 节点，扫常量时跳过。
+            #   ★★ 0.43.1 修（量具自身的假红，非产品缺陷）：只登记 `Expr`
+            #      **不够** —— `ast.walk` 走到的是它的 `Constant` 子节点，
+            #      两个 id 都得登记，否则 docstring 照样被当成"真身发射者"
+            #      （实测：`console_is_visible` 的说明文字里提到 ShowBalloonTip
+            #      ⇒ 被判 direct ⇒ 传染给 `console_channel_status` /
+            #      `bubble_self_report` ⇒ JDG-02 假红）。
+            #      这正是本仓纪律「量具的错不能记成产品的错」的又一实例。
             docs = set()
             for f in ast.walk(n):
                 if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) \
@@ -314,6 +321,7 @@ def _call_graph(paths):
                         and isinstance(f.body[0].value, ast.Constant) \
                         and isinstance(f.body[0].value.value, str):
                     docs.add(id(f.body[0]))
+                    docs.add(id(f.body[0].value))
             for c in ast.walk(n):
                 if id(c) in docs:
                     continue
@@ -580,9 +588,14 @@ def n_dead_gate_bypass():
 
     ★ 这正是结构检查抓不到、行为检查必须抓住的形态：
       调用还在（结构绿），行为已死。第一版只有结构半边，本负控当场抓出漏报。
+    ★★ 0.43.1：锚点从**钩子**改到**唯一发射口**（`host_shield._notify_throttled`）。
+      钩子的 `notify_owner` 已收编为**委托**（不再自己判可见性）—— 闸只剩一处。
+      负控必须打在闸的**真身**上；打在别处就是"量具指错了对象"
+      （旧锚点 `if _hs.console_is_visible() is True:` 已随收编消失，负控当场崩，
+       这正是"改了一处漏一处"的又一体：**负控也要跟着搬家**）。
     """
-    _patch(HOOK, '        if _hs.console_is_visible() is True:',
-           '        if False and _hs.console_is_visible() is True:')
+    _patch(SHIELD, '        if console_is_visible():',
+           '        if False and console_is_visible():')
     try:
         jdg02b_body()
         return False

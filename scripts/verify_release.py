@@ -46,6 +46,43 @@ def _fail(msg):
     return False
 
 
+def _py_with(module):
+    """找一个能 `import <module>` 的解释器（找不到就退回 sys.executable）。
+
+    ★★ 为什么要探测，而不是直接用 sys.executable（2026-10-10 修，本班踩到的）：
+
+      [C] `twine check` 原先写死 `sys.executable -m twine`。但 twine 属于
+      **打包工具链**，只装在出包环境里（本机 `~/.workbuddy/binaries/python/
+      envs/default`，setuptools 84 + twine 7.0.0）；而本脚本被
+      `scripts/release.py` 用**当前解释器**拉起 —— 实测 managed 3.13.12
+      **有 pip、没 twine** ⇒ [C] 直接 `No module named twine` 报红、
+      [A]/[B] 全过也白搭（0.43.1 这轮发布验收卡死在这里）。
+
+      `release.py` 的 step 2 早就为同一类原因探测过"带 setuptools>=68 的解释器"
+      （`_pick_release_py`）—— **同一种假设（工具链在 sys.executable 里）漏在了 step 3**，
+      正是"改了一处漏一处"。这里把假设**去掉**：谁有 twine 就用谁，别再假设。
+
+    候选顺序与 `release.py::_pick_release_py` 对齐（env 优先 → 托管环境惯例 →
+    sys.executable 兜底）；一个都没有时退回 sys.executable，让 [C] 照常报红
+    （报错信息不变，不吞掉失败）。
+    """
+    cands = []
+    for var in ("ANTINEL_RELEASE_PY", "ANTINEL_PY"):
+        if os.environ.get(var):
+            cands.append(os.environ[var])
+    cands.append(os.path.join(os.path.expanduser("~"), ".workbuddy", "binaries",
+                              "python", "envs", "default", "Scripts", "python.exe"))
+    cands.append(sys.executable)
+    for py in cands:
+        if not py or not os.path.isfile(py):
+            continue
+        probe = subprocess.run([py, "-c", "import %s" % module],
+                               capture_output=True)
+        if probe.returncode == 0:
+            return py
+    return sys.executable
+
+
 def check_dist_layout(dist, version):
     """A：dist 里正好两件本版发布件。"""
     print("[A] dist 布局（正好两件、都是本版）")
@@ -118,7 +155,9 @@ def check_wheel(dist, version):
 def check_twine(dist, version):
     """C：twine check 两件。"""
     print("[C] twine check")
-    py = sys.executable
+    py = _py_with("twine")
+    if py != sys.executable:
+        print("   twine 解释器：%s（当前解释器无 twine，已自动探测）" % py)
     files = [os.path.join(dist, "antinel-%s-py3-none-any.whl" % version),
              os.path.join(dist, "antinel-%s.tar.gz" % version)]
     r = subprocess.run([py, "-m", "twine", "check"] + files,

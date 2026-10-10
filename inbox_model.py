@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import asdict, dataclass
 from datetime import datetime
 
@@ -341,6 +342,80 @@ def level_of(kind):
             "未登记的告警类型 %r —— 请先在 inbox_model.LEVEL_OF_KIND 里登记它；"
             "否则该事件会被静默降级。" % (kind,)
         ) from None
+
+
+#: ★★ 0.43.0（A3 收口）：**自愈事件不得再顶 R0**。
+#:   链记录带 `recovered=True` ＝「防线自己扛住了、没留后果」（AUDIT_SCHEMA v1.10）。
+#:   而 `LEVEL_OF_KIND` 是**按类型一刀切**，答不了"这一条**实际**有没有后果"
+#:   ⇒ 实测 24h 内 17 条自愈记录仍被定成 R0，页面于是长出自相矛盾的标题
+#:   「**失守**：防护文件被改动（状态被改，**已自动恢复**）」
+#:   （取证见 `_p_r0_audit3.py`：recovered=true 却 severity=critical）。
+#:   ★ 为什么不直接改 `LEVEL_OF_KIND`：那张表回答的是「这类事件**通常**多严重」，
+#:     降级必须发生在**记录级**，否则一条真失守会被一起降掉（本仓最恨的"一刀切"）。
+DEMOTE_RECOVERED_FROM = ("R0",)
+DEMOTE_RECOVERED_TO = "L1"
+
+#: 降档后的标题（★ 方向必须同向：降到 L1 就**不许**再挂「失守」二字）。
+TITLE_WHEN_DEMOTED = {
+    "host_shield_tamper": "注意：防护设置被改、已自动恢复",
+}
+
+
+def level_of_record(kind, *, recovered=False, zone_failed=None):
+    """★★ 记录级定档（**唯一实现**：收件箱／页面／日报／托盘全部走这里）。
+
+    ★ 为什么必须有它：`level_of(kind)` 只能答「这类事件**通常**多严重」，
+      答不了「**这一条**有没有后果」。两类记录必须**按记录**判：
+        · `recovered=True`（自愈，0.43.0）⇒ 降档；
+        · `host_shield_zone_locked` 兼表成败（A8，0.40.0）⇒ 成功不是失守。
+      ⇒ 两者都收进本函数，**不许**在投影层各写一段 `if`（那是两套会漂移的口径，
+        本仓「同一事实两处实现」第 N 次复发的标准形状）。
+    """
+    lvl = level_of(kind)          # 未登记 ⇒ UnknownKind（响亮失败，不许静默降级）
+    if kind == "host_shield_zone_locked":
+        # A8：上锁**成功**不是失守（实测 2 条被报成失守）。
+        return lvl if zone_failed else DEMOTE_RECOVERED_TO
+    if recovered and lvl in DEMOTE_RECOVERED_FROM:
+        return DEMOTE_RECOVERED_TO
+    return lvl
+
+
+def title_of_record(kind, level, topic=""):
+    """标题与级别**同向**（★ 唯一实现）。`level` 由 `level_of_record` 给出。
+
+    ★ 为什么标题也要走这里：`TITLE_OF_TOPIC["state_drift"]` 写着「失守：…」。
+      自愈记录降档到 L1 之后若还借它，就会产出「L1 · 失守」这种自我矛盾的
+      标签 —— 与 `host_shield_breach` 旧标题「**已拦截**：越界动作被挡下」
+      同型（把"没被挡住"说成"拦住了"），是本仓反复出现的**方向反了**型缺陷。
+    """
+    base = TITLE_OF_TOPIC.get(topic) or TITLE_OF_KIND.get(kind, kind)
+    if level == level_of(kind):
+        return base                                  # 没改档 ⇒ 原标题
+    if kind == "host_shield_zone_locked":
+        # A8：成功 ⇒ 换成"已上锁"标题（借 R0 那条会把成功读成失守）。
+        return TITLE_OF_TOPIC.get("zone_ok") or "注意：安全区已上锁（区内防篡改）"
+    # ★ 兜底（不许静默留着「失守」二字）：没登记专用文案 ⇒ 把方向改过来。
+    return TITLE_WHEN_DEMOTED.get(kind) or (
+        "注意：" + base[len("失守："):] if base.startswith("失守：") else base)
+
+
+#: ★★ 0.43.0：**用户可见文本**的去 markdown 化（**唯一实现**）。
+#:   为什么必须有：审计链 append-only ⇒ 机器上躺着各旧版本写下的记录，
+#:   其中混着 markdown 加粗（实测 `zone_locked` 文案里的 `**不等于**`）。
+#:   0.42.0 只在**网页**两条渲染路径做了免疫（`inbox_server._vis`），
+#:   **命令行**那条路漏了 ⇒ `inbox_cli.py list` 照样吐裸星号（2026-10-10 实测）。
+#:   ⇒ 收进这里，网页与命令行共用一份（不许各写一份 —— 那是第二套口径）。
+_MD_STARS = re.compile(r"\*+")
+
+
+def visible_text(s):
+    """**用户可见文本**的出口：去掉 markdown 星号（★ 唯一实现，纯文本版）。
+
+    ★ 只改写侧文案不够（旧记录改不了）⇒ 读侧免疫，与 0.41.0 修 `is_denied()`
+      同一条思路（换 oracle，而不是把某一次的结果改对）。
+    ★ 口径：`**X**` → `X`（删掉加粗标记，语义不变）。
+    """
+    return _MD_STARS.sub("", "" if s is None else str(s))
 
 
 def alert_id(ts, kind, reason):

@@ -184,7 +184,13 @@ def main():
         return rc
 
     _step("3/3", "发布验收（布局 / wheel 自洽 / twine / 端到端安装）")
-    cmd = [sys.executable, os.path.join(ROOT, "scripts", "verify_release.py"),
+    # ★ 用 step 2 已选定的工具链解释器 `py`，不用 sys.executable：
+    #   验收里的 twine / pip 都属于**打包工具链**，只在出包环境里齐备；
+    #   用当前解释器（本机 managed 3.13.12 **有 pip、没 twine**）会把 [C] 卡成
+    #   `No module named twine`，[A]/[B] 全过也白搭（0.43.1 本轮实测）。
+    #   解释器只选一次、两步共用 —— 别让 step 3 再退回一个没工具链的解释器。
+    #   （verify_release 自身也带 twine 探测兜底，独立运行同样稳。）
+    cmd = [py, os.path.join(ROOT, "scripts", "verify_release.py"),
            "--dist", dist, "--version", version]
     if args.skip_install:
         cmd.append("--skip-install")

@@ -30,6 +30,7 @@ import os
 import shutil
 import sys
 import textwrap
+import time
 from datetime import datetime, timedelta
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -55,11 +56,35 @@ def _snapshot(path):
 
 
 def _restore_all():
+    """★ 0.43.1：还原加**重试 ＋ 退路**。
+
+    实测（2026-10-10）：本函数曾因 `PermissionError(13, '另一个程序正在使用此文件')`
+    崩掉 —— 根因是 `os.replace` 需要**删除权限**，而哨兵/值守台此刻正读着
+    `psl/manifest.json`（并发读方挡住 rename）⇒ **变异留在盘上**：
+    `psl/manifest.json` 被留在"已追平"态 ⇒ 研发态的版本落差被抹平 ⇒ 界面假失守。
+    ⇒ 两条：① rename 重试 5 次；② 仍失败则退到 `shutil.copy2`（就地覆盖只需
+      写权限，比 rename 更能穿透并发读）。
+    ★ 判据污染产品文件，比判据报红更坏 —— 还原路径必须比变异路径更硬。
+    """
     for path, bk in reversed(_BACKUP):
-        if os.path.exists(bk):
-            if os.path.exists(path):
-                os.replace(path, path + ".g0364.trash")
-            os.replace(bk, path)
+        if not os.path.exists(bk):
+            continue
+        done = False
+        for _ in range(5):
+            try:
+                if os.path.exists(path):
+                    os.replace(path, path + ".g0364.trash")
+                os.replace(bk, path)
+                done = True
+                break
+            except PermissionError:
+                time.sleep(0.3)
+        if not done:
+            try:
+                shutil.copy2(bk, path)          # 退路：就地覆盖（只需写权限）
+                os.replace(bk, bk + ".done")
+            except PermissionError:
+                pass
     _BACKUP.clear()
 
 
@@ -329,15 +354,35 @@ def c2():
     import host_shield as HS
     mp = os.path.join(ROOT, "psl", "manifest.json")
     _snapshot(mp)
-    before, _ = HS.is_dev_build()
-    m = json.load(open(mp, encoding="utf-8"))
-    m["version"] = HS._code_version()
-    with open(mp, "w", encoding="utf-8") as f:
-        json.dump(m, f, ensure_ascii=False, indent=1)
-    importlib.reload(HS)
-    after, why = HS.is_dev_build()
-    _restore_all()
-    importlib.reload(HS)
+    try:
+        before, _ = HS.is_dev_build()
+        m = json.load(open(mp, encoding="utf-8"))
+        m["version"] = HS._code_version()
+        # ★★ 0.43.1：写盘加**短重试** ＋ 整段 try/finally。
+        #   实测（2026-10-10）：本判据曾因 `PermissionError(13, '另一个程序正在使用
+        #   此文件')` 在写盘处崩掉，而**还原写在崩溃点之后** ⇒ 真 `psl/manifest.json`
+        #   被留在"已追平"的变异态 ⇒ **研发态赖以成立的版本落差被本判据自己抹平**
+        #   （界面随即假失守，且后续判据/构建全读到被污染的清单）。
+        #   ⇒ 判据污染产品文件，比判据报红更坏。两条一起做：
+        #     ① 写盘容忍读方的瞬时占用（重试 5 次 × 0.3s）；
+        #     ② 无论成败**必还原**（finally）—— 崩溃也不许把变异留在盘上。
+        _last = None
+        for _ in range(5):
+            try:
+                with open(mp, "w", encoding="utf-8") as f:
+                    json.dump(m, f, ensure_ascii=False, indent=1)
+                _last = None
+                break
+            except PermissionError as _e:
+                _last = _e
+                time.sleep(0.3)
+        if _last is not None:
+            raise _last
+        importlib.reload(HS)
+        after, why = HS.is_dev_build()
+    finally:
+        _restore_all()
+        importlib.reload(HS)
     assert not after, (
         "登记版本已追平代码版本，dev 却仍成立（%s）⇒ 研发态是永久态，收敛失败" % why)
     return ("本机当前 dev=%s；追平后 dev=False" % before)

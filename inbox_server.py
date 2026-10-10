@@ -357,7 +357,9 @@ def _vis(s):
 
     ★ 口径：`**X**` → `X`（删掉成对的加粗标记，语义不变）。
     """
-    return _esc(_MD_STARS.sub("", "" if s is None else str(s)))
+    # ★ 0.43.0：去星号的**唯一实现**移到 `inbox_model.visible_text`
+    #   —— 命令行那条路要共用它（此前只有网页免疫，CLI 照样吐裸星号）。
+    return _esc(M.visible_text(s))
 
 
 def _allowed_host(host, port):
