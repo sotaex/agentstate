@@ -133,16 +133,24 @@ def icon_path(state, root=None):
     return icon_file(state, None, root)
 
 
-def write_state(state, count=0, tip="", root=None, shield=None):
+def write_state(state, count=0, tip="", root=None, shield=None, total=None):
     """写托盘状态（原子替换）。返回写下的 dict。
 
     ★ 0.36.0：多写一个 `shield` 字段（哨兵态）。**不写它**的话图标只剩
       "最近有没有告警"这一个维度，看不出哨兵此刻在不在岗（见 SHIELD_SUFFIX 注释）。
+
+    ★ 0.47.0（方案 v3.0 §5 步三）：多写一个 `total` ＝ **分母**。
+      托盘角标一直是"一个光秃秃的分子"（实测曾长期显示 `count=181`，
+      而按现行口径真值只有 4）—— 只看那个数，用户无法判断它是多是少。
+      分母一并写进 `tray.json`，并进 `tip`（图标上只放得下分子，分母放提示里）。
     """
     if shield is None:
         shield = shield_state()
     payload = {"state": state if state in ("L0", "L1", "L2", "Ls", "R0") else "L0",
-               "count": int(count), "tip": str(tip)[:120],
+               "count": int(count), "tip": str(tip)[:200],
+               # ★ 分母：这条数来自多少条记录。取不到 ⇒ `None`（**不编 0**，
+               #   "不知道分母" ≠ "分母是 0"，后者会让一个真告警看起来是百分之百）。
+               "total": None if total is None else int(total),
                "shield": shield if shield in SHIELD_SUFFIX else SHIELD_UNKNOWN,
                "ts": time.time()}
     p = state_path(root)
@@ -247,9 +255,15 @@ def sync_from_items(items, root=None, tip=None, posture=None):
             tip = SHIELD_TIP[sh] + (" · " + ev if ev else "")
         else:
             tip = (ev or "值守中") + " · " + SHIELD_TIP[sh]
+    # ★★ 0.47.0（方案 §5 步三）：这条 tip 是分子 ⇒ **必带窗口与分母**。
+    #   分母＝本次载入的全部记录条数（`items`），窗口＝`M.WINDOW_HOURS`。
+    #   ★ 图标上只放得下分子，分母与窗口写进提示（悬停可见）与 `tray.json`。
+    if tip is not None and " / " not in str(tip):
+        tip = "%s / %d（最近 %d 小时）" % (str(tip), len(items or []),
+                                      M.WINDOW_HOURS)
     # ★ 状态气泡不是详情页；只写「有事/等你」会让用户点不到具体事项。
     #   托盘图标可显示件数，具体事由在主界面「要处理」里查看。
-    return write_state(st, n, tip, root=root, shield=sh)
+    return write_state(st, n, tip, root=root, shield=sh, total=len(items or []))
 
 
 def push_action(action, root=None):

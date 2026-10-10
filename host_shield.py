@@ -1254,6 +1254,139 @@ def console_channel_status():
     return st
 
 
+# ══════════════ 提醒预算（0.47.0，方案 v3.0 §5 步一）══════════════
+# ★★★ 为什么要有它（数据实测，不是设计偏好；方案 v3.0 §5 原文）：
+#   提醒与拦截之比 **16,797 比 2,403**（约七比一）；单条规则在提醒中独占
+#   **73.5%（12,350 / 16,797）**。
+#   ⇒ 疲劳是**结构性**的：不是"规则太多"，而是**同一条规则能无限次敲同一扇门**。
+#   治理对象因此是**配额**，不是规则增减。
+#
+# ★★ 为什么是"给预算"而不是"把那条规则放宽"（方案 §7.5 原文）：
+#   「疲劳持续，于是有人会想到『把那条规则放宽』——**那正是旧病复发的入口**：
+#    一放宽，误拦与漏判一起回来。」
+#   ⇒ 本机制**只动呈现与配额，不动判定**（`notice_gate` 之外一句判定都没改）。
+#
+# ★★★ 三条硬纪律（缺任何一条就是"静默丢弃"，`ci/inbox_guards_0470.py` 会红）：
+#   ① **超预算 ⇒ 合并成一条汇总**，汇总里**带原始条数**（口径不失真）；
+#   ② **窗口结束 ⇒ 补记**最终总条数；
+#   ③ **绝不静默丢弃** —— 被合并的每一条都要能在一个地方被数出来。
+#
+# ★ 入口唯一性（交接件 §5.2 维一）：账本**只走** `ledger_rmw`（既有锁），
+#   **不另写第二份锁**、不另开一个账本文件。
+# ★ 数据版本（交接件 §5.9 维八）：读到旧账本/缺字段 ⇒ **显式**走默认并记 `v`，
+#   不许"读不到就当空当新窗口"（那会让一个跑了很久的预算凭空归零）。
+NOTICE_BUDGET_WINDOW = 3600.0      # 滚动窗口（秒）：一小时内同一条规则最多敲几次门
+NOTICE_BUDGET_MAX = 3              # 单条规则一个窗口内的提醒配额
+_BUDGET_NS = "budget|"             # 预算账的键前缀（与 shown|/sent|/suppressed| 互不覆盖）
+
+
+def notice_budget_gate(rule_id, snippet, now=None, quota=None, window=None):
+    """单条规则滚动窗口提醒预算 —— **唯一实现**。返回 dict；记账失败 ⇒ `None`。
+
+    ★ `None` 的方向是**故意**的：拿不到账本时按"没抑制过"处理（宁可多提示），
+      与 `notice_gate` 原有 `_hs is None` 的失败方向一致 —— 保护失效时**更吵**，
+      不更静（"变松不可怕，变松且不出声才可怕"，交接件 §5.5 维四）。
+
+    返回 dict 的字段（**原始条数一律在场**，这是"不静默丢弃"的可验真处）：
+      `speak`        这一条出不出声
+      `reason`       `"fresh"` / `"dedup"` / `"over_budget"`
+      `total`        本窗口内这条规则**被请求提醒的总次数**（原始条数）
+      `used`         本窗口内实际出声次数
+      `dup`          因"同一片段今天已说过"被抑制的次数
+      `merged`       因超预算被抑制的次数（`total == used + dup + merged`）
+      `first_over`   本次**刚刚跨过配额** ⇒ 该发一条"进入合并"的告知
+      `closed`       上一窗口的收盘数据（dict）⇒ 该补记；没有则 `None`
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    rid = str(rule_id or "?")
+    q = int(NOTICE_BUDGET_MAX if quota is None else quota)
+    win = float(NOTICE_BUDGET_WINDOW if window is None else window)
+    t = time.time() if now is None else float(now)
+    dkey = rid + "|" + re.sub(r"\s+", " ", str(snippet or ""))[:60]
+    bkey = _BUDGET_NS + rid
+    out = {"speak": False, "reason": "?", "total": 0, "used": 0, "dup": 0,
+           "merged": 0, "quota": q, "window_start": t, "window_seconds": win,
+           "first_over": False, "closed": None, "rule_id": rid}
+
+    def _mut(d):
+        # ① 只清"值是日期字符串"的过期去重键 —— 数值/字典型一律保留（与既有逻辑同口径）
+        for k in [k for k, v in d.items() if isinstance(v, str) and v != today]:
+            d.pop(k, None)
+        b = d.get(bkey)
+        # ② 维八：旧账本 / 缺字段 ⇒ **显式**默认并留 `v` 版本号，不许"读不到就当空"
+        if not isinstance(b, dict):
+            b = {"v": 1, "ws": t, "total": 0, "used": 0, "dup": 0, "merged": 0,
+                 "announced": False, "fired": 0, "last": 0.0}
+        else:
+            b = dict(b)
+        # ③ 滚动窗口：过期 ⇒ 先收盘（交给调用方补记），再开新窗
+        if t - float(b.get("ws") or 0) > win:
+            out["closed"] = {"rule_id": rid, "total": int(b.get("total") or 0),
+                             "used": int(b.get("used") or 0),
+                             "dup": int(b.get("dup") or 0),
+                             "merged": int(b.get("merged") or 0),
+                             "window_start": float(b.get("ws") or 0),
+                             "window_seconds": win}
+            b = {"v": 1, "ws": t, "total": 0, "used": 0, "dup": 0, "merged": 0,
+                 "announced": False,
+                 # ★ 生效次数与最近生效时刻**跨窗口累计**（自报要答"我今天生效了吗"）
+                 "fired": int(b.get("fired") or 0),
+                 "last": float(b.get("last") or 0.0)}
+        # ④ 原始条数：**每一次"这条本该提醒"都进账**（口径不失真）
+        b["total"] = int(b.get("total") or 0) + 1
+        if d.get(dkey) == today:
+            b["dup"] = int(b.get("dup") or 0) + 1
+            out["reason"] = "dedup"
+        elif int(b.get("used") or 0) < q:
+            b["used"] = int(b.get("used") or 0) + 1
+            d[dkey] = today
+            out["speak"] = True
+            out["reason"] = "fresh"
+        else:
+            b["merged"] = int(b.get("merged") or 0) + 1
+            out["reason"] = "over_budget"
+            if not b.get("announced"):
+                b["announced"] = True
+                b["fired"] = int(b.get("fired") or 0) + 1
+                b["last"] = t
+                out["first_over"] = True
+        d[bkey] = b
+        out["total"], out["used"] = b["total"], b["used"]
+        out["dup"], out["merged"] = b["dup"], b["merged"]
+        out["window_start"] = b["ws"]
+        return d
+
+    if not ledger_rmw(_mut):
+        return None
+    return out
+
+
+def notice_budget_self_report():
+    """预算保护的自报（可查询）：哪条规则压了多少、合并生效过几次、最近一次什么时候。
+
+    ★ 交接件 §5.6 维五：**凡限额类机制必须内建「我今天生效了吗」的自报**
+      （生效次数 ＋ 最近一次生效时刻）。答不出来的保护不许上线。
+    ★ 与 `bubble_self_report()` 同族：那只答气泡，这只答提醒预算。
+    """
+    d = ledger_read()
+    rows = {}
+    for k, v in d.items():
+        if not k.startswith(_BUDGET_NS) or not isinstance(v, dict):
+            continue
+        rows[k[len(_BUDGET_NS):]] = {
+            "window_start": v.get("ws"),
+            "window_seconds": NOTICE_BUDGET_WINDOW,
+            "total": int(v.get("total") or 0),     # 原始条数
+            "used": int(v.get("used") or 0),       # 出声条数
+            "dup": int(v.get("dup") or 0),         # 同片段重复
+            "merged": int(v.get("merged") or 0),   # 被合并（未逐条出声）
+            "fired": int(v.get("fired") or 0),     # ★ 生效次数
+            "last": float(v.get("last") or 0.0),   # ★ 最近一次生效时刻
+        }
+    return {"quota": NOTICE_BUDGET_MAX, "window_seconds": NOTICE_BUDGET_WINDOW,
+            "rules": rows}
+
+
 def bubble_decision(kind, rec, force=False):
     """这条记录该不该弹气泡 —— **唯一真源**。返回 `(should: bool, why: str)`。
 

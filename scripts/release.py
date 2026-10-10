@@ -89,7 +89,45 @@ def _pick_release_py(explicit):
     return None
 
 
-def build_artifacts(py, dist):
+def _sweep_stale_distinfo(tree, version):
+    """把暂存树里**非本版**的 `*.dist-info` / `*.egg-info` **移出树外**（零删除）。
+
+    ★ 为什么"移出"而不是"改名"：树内改名后 `wheel pack` 会把它一起打进 wheel
+      （0.47.0 实测，JDG-06 判红）。判据按"目录名含 `.dist-info`"认，改名骗不过它。
+    ★ 为什么零删除：本仓全程零删除纪律；旧件搬到 `build/_away-<ts>/` 让开即可，
+      它是**构建产物目录**（不在 git 索引里，D-24 已判），搬走不损失任何东西。
+
+    返回被搬走的名字列表（空表＝树本来就是干净的）。
+    """
+    import shutil
+    import time as _t
+
+    if not os.path.isdir(tree):
+        return []
+    keep = "antinel-%s.dist-info" % version
+    away_root = os.path.join(os.path.dirname(os.path.dirname(tree)),
+                             "_away-" + _t.strftime("%Y%m%d-%H%M%S"))
+    moved = []
+    for name in sorted(os.listdir(tree)):
+        if not (name.endswith(".dist-info") or name.endswith(".egg-info")
+                or ".dist-info." in name or ".egg-info." in name):
+            continue
+        if name == keep:
+            continue
+        src = os.path.join(tree, name)
+        if not os.path.isdir(src):
+            continue
+        os.makedirs(away_root, exist_ok=True)
+        shutil.move(src, os.path.join(away_root, name))
+        moved.append(name)
+    if moved:
+        print("   [扫残留] 暂存树里的非本版 dist-info/egg-info 已移出树外：%s"
+              % "、".join(moved))
+        print("            （移到 %s；零删除）" % away_root)
+    return moved
+
+
+def build_artifacts(py, dist, version):
     """步骤 2：wheel 与 sdist **分别**出，并带回救。
 
     ★★ 为什么必须带回救（2026-10-09 两种形态都实测过）：
@@ -110,6 +148,21 @@ def build_artifacts(py, dist):
     """
     os.makedirs(dist, exist_ok=True)
     rescued = []
+
+    # ---- ★★ 0.47.0：出包**之前**先扫掉暂存树里的"上一版 dist-info" ----
+    #   为什么必须扫（**第三次复发**，前两次都只治了产物本身）：
+    #     M11 双 dist-info → 0.42.0 加了"救回" → 0.47.0 出包时又撞：
+    #     `build/bdist.win-amd64/wheel/` 里躺着 **0.46.0 的 dist-info**（上一版遗留），
+    #     本版 install 后新增 0.47.0 的 ⇒ 一棵树两个 dist-info ⇒
+    #       · setuptools 后端报 `Multiple .dist-info directories found`；
+    #       · 下面那道 **wheel 救回**（`wheel pack` 整棵树）**同样**被它卡死
+    #         ⇒ 救回形同没建（0.42.0 那句"机制建了一半和没建一样"，本轮亲自应验）。
+    #   ★★ 关键细节（本轮踩到才知）：必须**移出暂存树**，不能在**树内改名**。
+    #     我第一次就是树内改名成 `*.away-<ts>`，结果 `wheel pack` 把改名后的目录
+    #     **一起打进 wheel**，JDG-06 照样判红（"wheel 里有 2 个 .dist-info 目录"）。
+    #     ⇒ 判据是按"目录名含 .dist-info"认的，改名骗不过它 —— 这正说明判据有效。
+    sweep = _sweep_stale_distinfo(os.path.join(ROOT, "build", "bdist.win-amd64",
+                                               "wheel"), version)
 
     # ---- wheel ----
     rc_w = _run([py, "-m", "build", "--no-isolation", "--wheel", "--outdir", dist], cwd=ROOT)
@@ -179,7 +232,7 @@ def main():
               "用 --py 指定，或设 ANTINEL_RELEASE_PY。")
         return 2
     print("   出包解释器：%s" % py)
-    rc = build_artifacts(py, dist)
+    rc = build_artifacts(py, dist, version)
     if rc != 0:
         return rc
 

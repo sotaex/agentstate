@@ -380,6 +380,26 @@ def level_of_record(kind, *, recovered=False, zone_failed=None):
     return lvl
 
 
+#: ★ 0.47.0：`TITLE_OF_TOPIC` 里**写着「失守」**的那些条目，只准挂给列出的 kind。
+#:   ★ 判据不读文案猜方向 —— 用**显式归属表**（`host_shield_zone_locked` 的
+#:     `zone_lock_failed` 也是同一类：它是"失守"，且只属于 zone_locked）。
+#:   ★ 未登记的事由标题（不带"失守"的那些，如 `zone_ok`）对所有 kind 开放。
+_TOPIC_TITLE_OWNERS = {
+    "code_drift": ("host_shield_tamper",),
+    "state_drift": ("host_shield_tamper",),
+    "self_check": ("host_shield_tamper",),
+    "zone_lock_failed": ("host_shield_zone_locked",),
+    "autostart_missing": ("host_shield_breach",),
+    "spawn_failed": ("host_shield_breach", "host_shield_spawn_failed"),
+}
+
+
+def _topic_title_allowed(kind, topic):
+    """这个事由标题能不能挂给这个 kind（0.47.0，见 `_TOPIC_TITLE_OWNERS`）。"""
+    owners = _TOPIC_TITLE_OWNERS.get(topic)
+    return True if owners is None else kind in owners
+
+
 def title_of_record(kind, level, topic=""):
     """标题与级别**同向**（★ 唯一实现）。`level` 由 `level_of_record` 给出。
 
@@ -388,7 +408,18 @@ def title_of_record(kind, level, topic=""):
       标签 —— 与 `host_shield_breach` 旧标题「**已拦截**：越界动作被挡下」
       同型（把"没被挡住"说成"拦住了"），是本仓反复出现的**方向反了**型缺陷。
     """
-    base = TITLE_OF_TOPIC.get(topic) or TITLE_OF_KIND.get(kind, kind)
+    base = TITLE_OF_KIND.get(kind, kind)
+    tt = TITLE_OF_TOPIC.get(topic)
+    # ★★ 0.47.0（方案 v3.0 §5 步二）：**「失守」类事由标题只许挂给 tamper**。
+    #   实测（`_p_0470_probe1.py`）：`title_of_record("host_shield_dev_drift", "L1",
+    #   "code_drift")` 会借到 `TITLE_OF_TOPIC["code_drift"]` ＝
+    #   「**失守**：防护文件被改动（代码与登记表不符）」—— 而 `dev_drift` 是
+    #   **自研迭代**，与"失守"方向相反（本仓"方向反了"型缺陷第 N 次）。
+    #   真运行时它走 `inbox_store.project_record` 的专门分支（只用 `TITLE_OF_KIND`）
+    #   ⇒ 今天不发病；但只要 `kinds` 一放宽、或任何新投影路径调到这里，就立刻错挂。
+    #   ⇒ 在**唯一实现**这里加门，而不是让每个调用点各自记得（后者必然漂移）。
+    if tt and _topic_title_allowed(kind, topic):
+        base = tt
     if level == level_of(kind):
         return base                                  # 没改档 ⇒ 原标题
     if kind == "host_shield_zone_locked":
@@ -780,6 +811,41 @@ def count_groups(items):
     return len({group_key(it) for it in items})
 
 
+# ────────────────────────────────────────────────────────────────────────
+# ★★ 0.47.0（方案 v3.0 §5 步三）：**界面不许出现无分母的告警数**。
+#   方案原文：「凡显示告警，必同时给出**窗口与分母**」。
+#
+# ★ 为什么（数据口径，不是排版偏好）：「要处理 37 条」里的 37 是**分子**，
+#   它的分母（这次一共读了多少条）没说 ⇒ 读者无从判断 37 是多还是少，
+#   只能靠恐慌。这与方案 §5「真信号被稀释成二十分之一」**同源**：
+#   **没了分母，比例信息整个丢失** —— 于是"稀释"这件事在界面上永远看不见，
+#   而它恰恰是第三处病的名字。
+#
+# ★ 唯一实现：页面上每一处告警数都走 `count_text()`，不许各写一段 `%d 件`
+#   （各写一段＝第二套口径，本仓「同一事实两处实现」的标准形状）。
+def count_text(n, total, hours=WINDOW_HOURS, unit="件"):
+    """告警数的**唯一显示格式**：分子 / 分母 ＋ 窗口（★ 唯一实现）。
+
+    ★ `total`（分母）**不许为 None** —— 那就成了"无分母的告警数"，
+      判据 `ci/inbox_guards_0470.py` 的 S 会把它抓出来。取不到分母时不显示该数，
+      不要显示一个光秃秃的分子。
+    """
+    if total is None:
+        return "%d %s / 分母未知" % (int(n or 0), unit)
+    return "%d %s / %d（最近 %d 小时）" % (int(n or 0), unit, int(total), int(hours))
+
+
+def window_note(total, hours=WINDOW_HOURS):
+    """一排数字的**窗口与分母说明**（★ 唯一实现）：一行把口径说清，不必每个数字重复。
+
+    ★ 用在哪：筛选条那类"一排数字同一个分母"的地方 —— 一行说明覆盖整排，
+      既满足"必带窗口与分母"，又不把每个 tab 撑成三行（创始人 UX 纪律：
+      「尽可能少让人处理」，不是"尽可能多让人读字"）。
+    """
+    return "最近 %d 小时 · 以上数字的分母均为本次载入的 %d 条记录" % (
+        int(hours), int(total))
+
+
 def known_filter(filt):
     """筛选条取值是不是合法的（页面收到非法值 ⇒ 退回默认，不静默当成"全部"）。"""
     if filt in ("action", "info", "archive", "all"):
@@ -1106,16 +1172,71 @@ def current_state(posture_state, granary=None, items=None, now=None,
     lv, _ = base_state(posture_state)
     # ---- 事件级：只取 L2/L1；**历史 R0 一律不抬灯** ----
     if items:
-        ev = [it.level for it in _window_open(items, hours, now)
-              if it.level in (STATE_L2, STATE_L1)]
+        win = _window_open(items, hours, now)
+        # ★ 0.47.0：**自研迭代通道不参与 L1 抬灯** —— 它有自己的灯（`dev`）。
+        #   否则 `dev_drift`（L1）会先把自己抬成 L1，分通道分支就永远够不着。
+        ev = [it.level for it in win
+              if it.level in (STATE_L2, STATE_L1)
+              and tamper_channel_of(it.kind) != "dev"]
         if ev:
             top = max(ev, key=lambda x: PRIORITY.get(x, 0))
             if PRIORITY.get(top, 0) > PRIORITY.get(lv, 0):
                 lv = top
+    # ---- ★★ 0.47.0（方案 v3.0 §5 步二）：篡改**分通道**，两条不共用一盏灯 ----
+    lv = _tamper_channel_light(items, lv, hours, now)
     # ---- 粮：此刻的余额缺口 ----
     gl = _granary_level(granary, posture_state)
     if gl is not None and PRIORITY.get(gl, 0) > PRIORITY.get(lv, 0):
         lv = gl
+    return lv
+
+
+# ────────────────────────────────────────────────────────────────────────
+#: ★★ 0.47.0（方案 v3.0 §5 步二）：**篡改类的两条通道**（唯一真源）。
+#:   方案原文：「篡改类分通道（自研迭代导致 ／ 疑似投毒导致）走不同类型与
+#:   不同级别，**界面上不共用一盏灯**」。
+#:
+#:   数据（方案 §5）：篡改类里疑似真投毒只占 **7.5%（12 / 160）**，其余百分之
+#:   九十二点五都是自家迭代与布防位不一致 ⇒ 「篡改」这一个词把两件事记成了
+#:   同一种东西，真信号被稀释成二十分之一。
+#:
+#: ★ 0.40.0 已把**类型与级别**分好（`host_shield_dev_drift`=L1 自研迭代 ／
+#:   `host_shield_tamper`=R0 疑似投毒）。**0.47.0 补的是界面这一半**：
+#:   实测（`_p_0470_probe1.py`，0.46.0）——
+#:     · 自研迭代 `dev_drift`      ⇒ 灯 **L1 注意**
+#:     · 疑似投毒 `tamper` 已自愈  ⇒ 灯 **L1 注意**   ★ 与上面**同一盏灯**
+#:     · 普通状态变更 `changed`    ⇒ 灯 **L1 注意**   ★ 也是同一盏
+#:   ⇒ 三条完全不同的事挤在一盏浅黄灯下，用户分不出「我自己在改代码」和
+#:     「有人动了我的防护文件」。这正是方案点名的病。
+#:
+#: ★ 修法：给「自研迭代」这条通道一盏**它自己的灯** —— 六态里的 `dev`（研发中，蓝）。
+#:   · 不新增第七个态（`dev` 本来就在六态封闭集里，0.36.3 落地）；
+#:   · **不许压过真实告警**：只在灯此刻是 L0 / dev 时才抬 dev，
+#:     已有 L1/L2/R0/Ls 时**不动**（0.36.4 纪律「研发中不掩盖真实状况」的反向也成立）。
+#:   · `tamper` 那一侧**一个字都不改**（R0 仍不由账给 —— 0.39.0 创始人裁定，
+#:     「昨天失守过、已恢复 ≠ 现在失守」，必须保留）。
+TAMPER_CHANNEL_KINDS = {
+    "host_shield_tamper": "poison",       # 疑似投毒（防护文件被动过）
+    "host_shield_dev_drift": "dev",       # 自研迭代（代码与登记表不符）
+}
+
+
+def tamper_channel_of(kind):
+    """这条记录属于篡改类的哪一条通道（★ 唯一实现）。不在篡改类 ⇒ `None`。"""
+    return TAMPER_CHANNEL_KINDS.get(kind)
+
+
+def _tamper_channel_light(items, lv, hours=WINDOW_HOURS, now=None):
+    """篡改分通道的抬灯（**只**在 `current_state()` 里被调用一次）。
+
+    ★ 为什么单独抽出来：`current_state()` 是灯的唯一真源，但"两条通道不共用一盏灯"
+      是一条**独立可验**的规矩，抽出来才能给它配单独的负控。
+    """
+    if not items:
+        return lv
+    chans = {tamper_channel_of(it.kind) for it in _window_open(items, hours, now)}
+    if "dev" in chans and lv in (STATE_L0, STATE_DEV):
+        return STATE_DEV
     return lv
 
 

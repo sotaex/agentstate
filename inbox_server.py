@@ -465,9 +465,13 @@ def _bar(items, token, posture=None, now=None, view="inbox"):
                         if M.bucket_of(it, now=now) == M.BUCKET_ACTION]
         action_groups = M.count_groups(action_items)
         if action_groups:
+            # ★★ 0.47.0（方案 v3.0 §5 步三）：**告警数必带窗口与分母**。
+            #   旧写法是一个光秃秃的「（%d 件，点开查看）」—— 只有分子。
+            #   分母＝本次载入的全部记录条数；格式走 `M.count_text`（唯一实现）。
             suffix = ("<a href=\"/?v=inbox&amp;f=action&amp;t=%s\" "
-                      "style=\"color:inherit;text-decoration:none\">（%d 件，点开查看）</a>"
-                      % (_esc(token), action_groups))
+                      "style=\"color:inherit;text-decoration:none\">（%s，点开查看）</a>"
+                      % (_esc(token),
+                         _esc(M.count_text(action_groups, len(items)))))
     fix = ""
     if p.get("can_fix"):
         fix = ("<form method=\"post\" action=\"/action\" style=\"margin:0\">"
@@ -486,7 +490,12 @@ def _bar(items, token, posture=None, now=None, view="inbox"):
     if cons:
         lis = "".join("<li>%s</li>" % _esc(c.get("text") if isinstance(c, dict) else c)
                       for c in cons)
-        fix = ("<span class=\"cons\"><b>失守的损失（%d 条）：</b><ul>%s</ul></span>"
+        # ★ 0.47.0：这一处是**后果清单**（此刻实况），**不是告警计数** ——
+        #   分母对它没有意义（它没有"来自哪个总量"这回事）。
+        #   按方案 §5 步三的口径，给它标注**范围**（此刻）并说明它不是计数，
+        #   判据对它有显式豁免（写明理由），不许被当成"无分母的告警数"蒙混过去。
+        fix = ("<span class=\"cons\"><b>失守的损失：以下 %d 项（此刻实况，"
+               "非计数）：</b><ul>%s</ul></span>"
                % (len(cons), lis)) + fix
     # ★ 0.35.3：三个数字**各自带上自己的事由件数**，口径写明；点进去仍是全部明细。
     #   记录数/件事数成对同源（`window_levels` ＋ `window_level_groups`，
@@ -699,8 +708,12 @@ def _rem_pick_buttons(it, token, op, cls, act):
     return form("remediation_ack")
 
 
-def _group_html(g, token, bucket=None):
+def _group_html(g, token, bucket=None, total=None):
     """一类/一事归并成一行。
+
+    ★ 0.47.0：`total` ＝ 这一档的**记录总条数**（分母）。归并行上的「×N」是
+      "这一事由发生了几次"，它是**分子** ⇒ 必带分母（方案 §5 步三）。
+      取不到分母时传 `None` —— 判据会把它抓出来，所以调用方**必须**给。
 
     ★ 0.35.3 修正（**真回退**，被 P3 XSS 与 P12 按钮两条判据当场抓出来）：
       旧版归并行**只渲染标题** ⇒ 一旦「要处理」档也归并，
@@ -741,12 +754,15 @@ def _group_html(g, token, bucket=None):
             "<summary>"
             "<span class=\"badge %s\">%s</span>"
             "<span class=\"t\">%s</span>"
-            "<span class=\"pill sm\">×%d</span>"
+            "<span class=\"pill sm\">%s</span>"
             "<span class=\"when\">%s</span></summary>"
             "<div class=\"det\"><p class=\"m\">%s</p>%s"
             "<div class=\"act\">%s</div></div></details>"
             % (_esc(lv), _esc(ids), _esc(token), _esc(lv), _esc(g["level"]),
-               _vis(g["title"]), n, _esc(str(g["last_ts"])[5:16]),
+               _vis(g["title"]),
+               # ★ 0.47.0：×N 是分子 ⇒ 带上分母（该档总条数）。
+               _esc("×%d / %d 条" % (n, int(total or 0))),
+               _esc(str(g["last_ts"])[5:16]),
                _vis(meta), rem, acts))
 
 
@@ -799,6 +815,10 @@ def _view_inbox(items, token, filt, now=None):
                 "单位：条记录（不做归并，一条算一条）")
             + f("all", "全部记录", n_all,
                 "单位：条记录（这次读到的全部条目）") + "</div>"
+            # ★★ 0.47.0（方案 v3.0 §5 步三）：一排数字**共用一行**窗口与分母说明 ——
+            #   四个 tab 的分母是同一个（`n_all`），一行说清，不必把每个 tab 撑成三行。
+            + ("<div class=\"note\" style=\"margin:0 0 8px\">%s</div>"
+               % _esc(M.window_note(n_all)))
             # ★ 0.35.3：页面上出现的**每个重要词都可点开看定义**。
             #   档位本身是链接（塞不进 details），级别徽章也没有落点 ⇒ 统一给
             #   **一个**折叠入口，而不是把定义平铺在页面上等人读完。
@@ -831,7 +851,8 @@ def _view_inbox(items, token, filt, now=None):
             if g["count"] == 1 and g["ids"] and g["ids"][0] in by_id:
                 parts.append(_item_html(by_id[g["ids"][0]], token))
             else:
-                parts.append(_group_html(g, token, bucket=M.BUCKET_ACTION))
+                parts.append(_group_html(g, token, bucket=M.BUCKET_ACTION,
+                                         total=len(rows)))
         # ★ 0.37.1 去重：归并说明**不重复数字**（件数已在筛选条、24h 各级
         #   口径已在顶部条那排药丸各显示一次），这里只说"怎么读这些行"。
         # ★ 0.37.2 精简（创始人 2026-10-09「解释放注释里，点问号看」）：
@@ -849,11 +870,15 @@ def _view_inbox(items, token, filt, now=None):
                 + ("<div class=\"note\" style=\"margin:0 0 10px\">"
                    "%s：按类型归并，点一类看单条。"
                    "</div>" % _esc(M.filter_label(filt)))
-                + "".join(_group_html(g, token, bucket=filt) for g in groups))
+                + "".join(_group_html(g, token, bucket=filt, total=len(rows))
+                          for g in groups))
     if filt not in ("action", "all"):
         head += ("<div class=\"note\" style=\"margin:0 0 10px\">"
-                 "筛选：<b>%s</b> · 共 %d 条（<a href=\"/?v=inbox&f=all&t=%s\">返回已载入记录</a>）"
-                 "</div>" % (_esc(M.filter_label(filt)), len(rows), _esc(token)))
+                 # ★ 0.47.0：筛选结果是分子 ⇒ 分母＝本次载入的全部条数。
+                 "筛选：<b>%s</b> · %d / %d 条（<a href=\"/?v=inbox&f=all&t=%s\">"
+                 "返回已载入记录</a>）"
+                 "</div>" % (_esc(M.filter_label(filt)), len(rows), n_all,
+                             _esc(token)))
     return head + "".join(_item_html(i, token) for i in rows)
 
 
@@ -879,22 +904,32 @@ def _view_report(rep, token, items=None):
             还要再写一句「点数字看是哪几条」是**重复用户的动作**。
         """
         scoped_filter = "win:%d:%s" % (hrs, filt)
+        # ★ 0.47.0（方案 §5 步三）：这个数是分子 ⇒ 同行带分母（窗口内总记录数）。
         return ("<div class=\"metric\"><div class=\"k\">%s</div>"
                 "<div class=\"v\" style=\"color:var(%s)\">"
-                "<a href=\"/?v=inbox&f=%s&t=%s\">%d</a></div>"
+                "<a href=\"/?v=inbox&f=%s&t=%s\">%d</a>"
+                "<span class=\"den\"> / %d</span></div>"
                 "</div>"
-                % (GL.chip(k), var, _esc(scoped_filter), _esc(token), n))
+                % (GL.chip(k), var, _esc(scoped_filter), _esc(token), n, _win_total))
+
+    #: ★ 0.47.0：这一排四个数字**共用一行**窗口与分母说明（同 `M.window_note` 的口径）。
+    _win_total = sum(int(W.get(k, 0) or 0) for k in ("R0", "L2", "L1"))
+    _win_note = ("<div class=\"note\" style=\"margin:0 0 8px\">%s</div>"
+                 % _esc("最近 %d 小时 · 以下数字的分母均为窗口内的 %d 条记录"
+                        % (hrs, _win_total)))
 
     # ★ 0.37.2：顺序改**由重到轻**（失守 → 拦截 → 注意 → 要处理）。
     #   旧版是「拦截 · 注意 · 失守 · 要处理」—— 最重的排在第三位，
     #   与顶部条药丸、收件箱归并列表的"重在前"不一致。
-    m = ("<div class=\"metrics\">"
+    m = (_win_note + "<div class=\"metrics\">"
          + metric("R0", W.get("R0", 0), "--r0", "lv:R0")
          + metric("L2", W.get("L2", 0), "--l2", "lv:L2")
          + metric("L1", W.get("L1", 0), "--l1", "lv:L1")
          + "<div class=\"metric\"><div class=\"k\">%s</div><div class=\"v\">"
-           "<a href=\"/?v=inbox&f=action&t=%s\">%d</a></div></div></div>"
-         % (GL.chip("action"), _esc(token), rep.get("action_groups", 0)))
+           "<a href=\"/?v=inbox&f=action&t=%s\">%d</a>"
+           "<span class=\"den\"> / %d</span></div></div></div>"
+         % (GL.chip("action"), _esc(token), rep.get("action_groups", 0),
+            _win_total))
 
     # ★★ 0.37.2：**删掉「现在的防线状态」整张卡**。
     #   理由不是"它没用"，而是它**与顶部条重复且会打架**：
@@ -906,15 +941,19 @@ def _view_report(rep, token, items=None):
     _revived = rep.get("revived_window", 0)
     # ★ 措辞与运行状态页统一（旧版日报写「10 次（查看记录）」、
     #   运行状态写「10 次（点数字看每一次）」—— 同一件事两种说法）。
+    # ★ 0.47.0：拉起次数是分子 ⇒ 分母＝窗口内总记录数。
     _revived_link = ("<a href=\"/?v=inbox&f=win:%d:kind:host_shield_revived&t=%s\">"
-                     "%d 次</a>（点开看每一次）"
-                     % (hrs, _esc(token), _revived))
+                     "%d 次</a> / %d（点开看每一次）"
+                     % (hrs, _esc(token), _revived, _win_total))
     _day = _esc(rep["day"])
+    # ★ 0.47.0：当日三档各是分子 ⇒ 分母＝当日全部记录条数（当日 ＝ 24 小时窗口）。
+    _day_total = sum(int(Lv.get(k, 0) or 0) for k in ("R0", "L2", "L1"))
     _today_levels = ("<a href=\"/?v=inbox&f=day:%s:lv:R0&t=%s\">失守 %d</a> ｜ "
                      "<a href=\"/?v=inbox&f=day:%s:lv:L2&t=%s\">拦截 %d</a> ｜ "
                      "<a href=\"/?v=inbox&f=day:%s:lv:L1&t=%s\">注意 %d</a>"
+                     " ｜ 分母 %d"
                      % (_day, _esc(token), Lv["R0"], _day, _esc(token), Lv["L2"],
-                        _day, _esc(token), Lv["L1"]))
+                        _day, _esc(token), Lv["L1"], _day_total))
     pr = ("<div class=\"card\"><div class=\"rows\">"
           "<div class=\"row\"><span class=\"k\">最近 %d 小时%s</span><span>%s</span></div>"
           "<div class=\"row\"><span class=\"k\">%s 当日合计</span><span>%s</span></div>"
@@ -929,12 +968,15 @@ def _view_report(rep, token, items=None):
         #   `int(6*1/1)=6` ⇒ 三条都是满格 ██████，"1 次"被画成"最多"。
         #   条形图在小样本上**系统性说谎**（分母＝样本最大值，不是绝对量），
         #   而它旁边明明就写着数字 ⇒ 图与数打架。数字已经排序，图是多余的。
+        # ★ 0.47.0：命中次数是分子 ⇒ 分母＝当日**全部**规则的命中总数，
+        #   窗口＝当日（24 小时）。格式走 `M.count_text`（唯一实现）。
+        _day_total = sum(int(r["count"]) for r in rep["rules"])
         rows = "".join(
             "<div class=\"row\"><span class=\"k\">"
             "<a href=\"/?v=inbox&f=day:%s:rule:%s&t=%s\">%s</a></span>"
-            "<span>%d</span></div>"
+            "<span>%s</span></div>"
             % (_esc(rep["day"]), _esc(r["rule_id"]), _esc(token), _esc(r["rule_id"]),
-               r["count"])
+               _esc(M.count_text(r["count"], _day_total, hours=24, unit="次")))
             for r in rep["rules"][:10])
         rules = ("<div class=\"card\"><h2>规则命中排行"
                  "<span class=\"note\">（点规则名看具体是哪几条）</span></h2>"
@@ -994,9 +1036,12 @@ def _view_health(rep, token, items=None):
     cls = {"ok": "ok", "broken": "bad", "unknown": "warn"}.get(ch["status"], "warn")
     _hrs = rep.get("window_hours", 24)
     _revived_count = rep.get("revived_window", 0)
+    # ★ 0.47.0：拉起次数是分子 ⇒ 分母＝窗口内总记录数（与日报页同一口径）。
+    _win_total_h = sum(int((rep.get("window_levels") or {}).get(k, 0) or 0)
+                       for k in ("R0", "L2", "L1"))
     _revived_value = ("<a href=\"/?v=inbox&f=win:%d:kind:host_shield_revived&t=%s\">"
-                      "%d 次</a>（点开看每一次）"
-                      % (_hrs, _esc(token), _revived_count))
+                      "%d 次</a> / %d（点开看每一次）"
+                      % (_hrs, _esc(token), _revived_count, _win_total_h))
     # ★★ 0.37.2：**删掉本页第一行「此刻这一次」**（旧版 `GL.chip("posture",
     #   "此刻这一次")` + 值「值守中 —— 哨兵在岗…」）。
     #   顶部条已给出同一个状态词，并且 0.37.2 起把「此刻」与「24h 账」

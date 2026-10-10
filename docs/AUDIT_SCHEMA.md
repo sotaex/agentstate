@@ -1,5 +1,14 @@
-# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.17（随 v0.46.0）
+# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.18（随 v0.47.0）
 
+> v1.18（0.47.0）：**提醒预算族新增 2 类** —— `notice_budget_merged`、
+> `notice_budget_window_closed`（见下文「提醒预算类」）。**不改**已有字段名、
+> **不改**已有取值域、**不改** append-only 契约，只**新增两个记录类型**。
+> ★ 为什么必须新开一族：这两条是**限额类机制自己的留痕** —— 合并若只写
+> `stderr`，在证据层面与「静默丢弃」**没有区别**（交接件 §2.1 ① 关键纪律）。
+> 有了它们，"没被逐条说出来的那些条"才有唯一去处，守恒式
+> `total == used + dup + merged` 才可被机械核对（`ci/inbox_guards_0470.py` 常驻）。
+> 登记方式＝`tools/verify_event_types.py` 扫代码写出的 type。
+>
 > v1.17（0.46.0）：**释放留痕族新增 1 类** —— `command_deletion_permission`
 > （见 §4 释放留痕类）。**不改**已有字段名、**不改**已有取值域、**不改** append-only
 > 契约，只**新增一个记录类型**。语义：删除许可（VCT）两票裁决的**每一次**结论，
@@ -226,6 +235,20 @@
 | `host_tag_uncertain` | pre | `host_evidence{source,key,markers_seen,cwd,confidence}`, `decision="allow"`, `severity="info"` | 宿主归因**什么都没命中**（env 键与目录标记全落空）时写入。★ 这是**自动取证**：TRAE / Qoder 国际版之类"需要真机证据"的宿主，只要被任何人跑一次，线索就自动落到链上 —— 不必再埋探针、不必等创始人重启 |
 | `hook_slow` | pre | `elapsed_ms`, `input_sizes`, `severity="warning"` | 钩子耗时 ≥ `SLOW_BUDGET_MS`（默认 8000）时写入。★ 宿主给钩子的超时是 10s(zcode)/15s(claude)，**超时=allow** ⇒ 慢到超时等于这张牌没打出去且无人知晓。实测（本机，5MB 输入）median 19,473ms 已越过两条线 |
 | `probe_used` | pre | `tool`, `session`, `host`, `reason` | `ANTINEL_PROBE=1` 时写入，**落 sidecar 而非主链**。`audit/sidecar/<日>.probe.jsonl`。★ 探针仍会跳过主链写入（语义不变），但"谁在什么时候用过探针"从此有据可查 —— 防不住，就让它可检测 |
+
+### 提醒预算类（0.47.0，v1.18 新增）
+
+> 0.47.0 新增的两类都服务于同一条纪律：**合并不是丢弃，补记不能只靠记忆**。
+> 方案 v3.0 §5 步一（根治第三处告警疲劳）：给**单条规则**设滚动窗口提醒配额。
+> 超预算的后续提醒**不再逐条出声**，但**条数照记**；窗口结束时**补记**最终总数。
+> ★ 这两条记录就是"没被逐条说出来的那些条"**唯一的去处** ——
+>   没有它们，"合并"在证据层面与"静默丢弃"没有区别（交接件 §2.1 ① 关键纪律：
+>   合并与补记动作必须留痕，不许只有 `stderr`）。
+
+| type | 来源 | 关键字段 | 说明 |
+|---|---|---|---|
+| `notice_budget_merged` | 钩子 `notice_gate` | `rule_id`, `total`, `used`, `merged`, `quota`, `window_seconds`, `decision="allow"`, `severity="info"` | 某条规则**在本窗口内首次跨过配额**时写一条（每窗口每规则**最多一条**，不是每条提醒一条 —— 否则降噪机制自己把账本灌满）。语义："接下来不再逐条出声，改为合并"。★ 只记"进入合并态"这一次，不记后续每一次 |
+| `notice_budget_window_closed` | 钩子 `notice_gate` | `rule_id`, `total`, `used`, `dup`, `merged`, `window_seconds`, `decision="allow"`, `severity="info"` | 滚动窗口**结束时**的补记：`total` ＝ 本窗口该规则被请求提醒的**原始总条数**（＝ `used + dup + merged`）。★ 这是"原始条数不丢"的**可验真处** —— 三个分项之和必须等于 `total`，判据 `ci/inbox_guards_0470.py` 常驻核对 |
 
 ### 门闸类（host-shield，v1.3 补登记；v1.4 增补）
 

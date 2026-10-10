@@ -281,7 +281,13 @@ def _index_page(token):
 
 
 # ---- 六档：定义与译文全部来自产品（VERDICTS / ev_human），这里只排版 ----
-def _tiles(vc, verdicts, blind_n):
+def _tiles(vc, verdicts, blind_n, total=None):
+    """六档计数块。
+
+    ★ 0.47.0（方案 v3.0 §5 步三）：每一档的数是**分子** ⇒ 同行带分母
+      （分母＝这次一共查了几个落点）。`total=None` ⇒ 分母未知，显示为
+      `/ ?` —— **不许**给一个光秃秃的分子假装它自己就是全部。
+    """
     order = sorted(verdicts.values(), key=lambda v: v.get("order", 9))
     parts = []
     for v in order:
@@ -290,9 +296,10 @@ def _tiles(vc, verdicts, blind_n):
         col = {"PACK": "#b3261e", "SENT": "#a15c00", "SYNC": "#7a5d00",
                "CLEAN": "#4b5563", "BLIND": "#111827", "NA": "#6b7280"}.get(k, "#374151")
         parts.append(
-            '<div class="tile"><div class="n" style="color:%s">%s %d</div>'
+            '<div class="tile"><div class="n" style="color:%s">%s %d / %s</div>'
             '<div class="t">%s %s</div><div class="d">%s</div></div>'
-            % (col, v["icon"], n, v["icon"], html.escape(v["title"]),
+            % (col, v["icon"], n, (html.escape(str(total)) if total is not None else "?"),
+               v["icon"], html.escape(v["title"]),
                _md_bold(v["short"])))
     return '<div class="tiles">%s</div>' % "".join(parts)
 
@@ -473,6 +480,8 @@ def _egress_html(eg):
                      "（采样失败 %s 次）—— 这一项是<b>没查到</b>，请当空白读。</p>"
                      % int(eg.get("sample_failed") or 0))
     else:
+        # ★ 0.47.0：这是**此刻**的实况读数（窗口＝此刻），不是"一段时间里的告警数"
+        #   ⇒ 把范围写清（"此刻"），读者就不会拿它跟 24 小时口径的数比大小。
         parts.append("<p>此刻正在往外连的连接 <b>%d</b> 条。"
                      "账本已记录 <b>%s</b> 天%s。</p>"
                      % (len(snap.get("conns") or []),
@@ -481,8 +490,10 @@ def _egress_html(eg):
     if findings:
         lis = "".join("<li>%s</li>" % _md_bold(f.get("label") or f.get("kind") or str(f))
                       for f in findings[:12])
-        parts.append("<p><b>值得看一眼的 %d 条</b>（只标记，<b>不下结论</b>）：</p><ul>%s</ul>"
-                     % (len(findings), lis))
+        # ★ 0.47.0：总数是分母、列出数是分子 ⇒ 两个都给，读者才知道看的是不是全部。
+        parts.append("<p><b>值得看一眼的 %d 条</b>（下面列出前 %d 条；"
+                     "只标记，<b>不下结论</b>）：</p><ul>%s</ul>"
+                     % (len(findings), min(12, len(findings)), lis))
     else:
         parts.append("<p class='muted'>账本里没有需要特别标记的连接。"
                      "注意：这只是<b>没记到值得看的</b>，不等于<q>没有外传</q>。</p>")
@@ -503,24 +514,26 @@ def _result_html(res, verdicts, ev_human):
     head = []
     # ★★★ 最高纪律：「没查到」必须与「没发现」长得不一样，且首屏就报。
     if blind_n:
+        # ★ 0.47.0：分子（没查到几个）＋ 分母（一共查了几个）⇒ 读者才知道"没查到"占多大。
         head.append(
-            "<div class='blind'><b>⚫ 有 %d 个地方我们没查到。</b><br>"
+            "<div class='blind'><b>⚫ 有 %d 个地方我们没查到（共 %d 个落点）。</b><br>"
             "它们登记过、你电脑上也确实存在，但这次扫描没走到 —— "
-            "<b>请把它们当空白读，不要当成「没问题」。</b></div>" % blind_n)
+            "<b>请把它们当空白读，不要当成「没问题」。</b></div>"
+            % (blind_n, len(tools)))
     else:
         head.append("<div class='warn'>登记过的落点这次<b>全部走到了</b>"
                     "（没查到 0 个）。</div>")
 
     n_ev = int(vc.get("PACK", 0)) + int(vc.get("SENT", 0)) + int(vc.get("SYNC", 0))
     if n_ev:
-        head.append("<div class='warn'><b>有 %d 个工具在自己的文件里写下了"
-                    "「打包／上传／推送／同步」这类字样。</b><br>"
+        head.append("<div class='warn'><b>有 %d 个工具（共 %d 个落点）在自己的文件里"
+                    "写下了「打包／上传／推送／同步」这类字样。</b><br>"
                     "那是<b>它自己承认</b>的，不是我们抓到它在发 —— "
-                    "我们的能力只到「读它写下的字」。</div>" % n_ev)
+                    "我们的能力只到「读它写下的字」。</div>" % (n_ev, len(tools)))
 
     body = [
         "<h2>总共查了 %d 个落点</h2>" % len(tools),
-        _tiles(vc, verdicts, blind_n),
+        _tiles(vc, verdicts, blind_n, total=len(tools)),
         "<p class='muted small'>六档是这么分的：🔴 自认打包过 ＞ 🟠 自认往外发过 ＞ "
         "🟡 自认在同步 ＞ ⚪ 查过、没发现记录 ＞ ⚫ 没查到 ＞ · 不适用。</p>",
         "<h2>逐个看</h2>",

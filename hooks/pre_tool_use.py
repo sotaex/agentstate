@@ -54,7 +54,7 @@ _T0 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段起点（性能
 
 # ---------------------------------------------------------------- constants --
 PKG_DIR = os.path.dirname(os.path.abspath(__file__))
-_ANTINEL_VERSION = "0.46.0"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
+_ANTINEL_VERSION = "0.47.0"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
 _T1 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段终点（性能插桩）
 
 
@@ -2557,28 +2557,95 @@ def notice_gate(rule_id, snippet):
       ② 旧实现里的"每日清理"是 `{k: v for k, v in st.items() if v == today}`，
          它会**连气泡节流的数值型键一起删掉**（时间戳 ≠ 日期字符串）——
          现在只在 `ledger_rmw` 的 mutator 里清"值是日期"的旧键。
+
+    ★★★ 0.47.0：**在此之上叠一层「单条规则滚动窗口提醒预算」**
+    （方案 v3.0 §5 步一，根治第三处告警疲劳）。
+      数据（方案 §5）：提醒与拦截 **16,797 : 2,403**（约七比一），单条规则独占
+      提醒的 **73.5%（12,350 / 16,797）** ⇒ 疲劳是**结构性**的，治理对象是**配额**。
+      ⇒ 去重（同一片段一天一次）**之上**再给**单条规则**一个滚动窗口配额：
+         超预算的后续提醒**不逐条出声**，但**条数照记**（`total`），
+         窗口结束时**补记一条汇总**；原始条数**绝不丢弃**。
+      ★ 判定**一字未动**：预算只决定"出不出声"，不决定"拦不拦"。
+      ★ 账本仍走 `ledger_rmw`（交接件 §5.2 维一：不许另写第二份锁）。
+      ★ 记账失败 ⇒ 返回 False（按"没抑制过"处理）—— 保护失效时**更吵**，不更静。
     """
-    today = datetime.now().strftime("%Y-%m-%d")
-    key = rule_id + "|" + re.sub(r"\s+", " ", snippet)[:60]
     _hs = _hs_module()
     if _hs is None:
         return False                        # 拿不到记账模块 ⇒ 按"没抑制过"（宁可多提示）
-    seen = {"sup": False}
-
-    def _mut(d):
-        # 只清"值是日期字符串"的过期键；数值型（shown|/sent|）一律保留
-        for k in [k for k, v in d.items() if isinstance(v, str) and v != today]:
-            d.pop(k, None)
-        seen["sup"] = (d.get(key) == today)
-        d[key] = today
-        return d
-
     try:
-        if not _hs.ledger_rmw(_mut):
-            return False
+        res = _hs.notice_budget_gate(rule_id, snippet)
     except Exception:                                            # noqa: BLE001
         return False
-    return seen["sup"]
+    if not res:
+        return False                        # 账本写不进去 ⇒ 同上，宁可多提示
+    # ★ 合并与补记**必须留痕**（交接件 §2.1 ① 关键纪律）：不许只有 stderr。
+    _notice_budget_trace(res)
+    return not res["speak"]
+
+
+def _notice_budget_trace(res):
+    """预算的两个动作**写链 ＋ 出声**（★ 唯一实现；链与界面各一份，互为对照）。
+
+    ★★ 为什么必须写链：只往 `stderr` 打一行的合并，**关掉终端就消失了** ——
+      那与"静默丢弃"在证据层面没有区别（链是本项目唯一可验真的地方）。
+    ★ 为什么不弹气泡：预算是"少打扰"的机制，**它自己不该再敲门** ——
+      只走 stderr（宿主可见）与链（可回看），不进气泡通道。
+    """
+    rid = str(res.get("rule_id") or "?")
+    try:
+        if res.get("closed"):
+            c = res["closed"]
+            log_event({"ts": datetime.now().isoformat(timespec="seconds"),
+                       "type": "notice_budget_window_closed", "tool": "-",
+                       "session": "-", "host": "-", "decision": "allow",
+                       "severity": "info", "action": "alert",
+                       "rule_id": rid,
+                       "total": int(c.get("total") or 0),
+                       "used": int(c.get("used") or 0),
+                       "dup": int(c.get("dup") or 0),
+                       "merged": int(c.get("merged") or 0),
+                       "window_seconds": int(c.get("window_seconds") or 0),
+                       "reason": "窗口结束补记：规则 %s 本窗口共 %d 条提醒，出声 %d 条、"
+                                 "重复 %d 条、合并 %d 条（原始条数不丢）"
+                                 % (rid, int(c.get("total") or 0),
+                                    int(c.get("used") or 0), int(c.get("dup") or 0),
+                                    int(c.get("merged") or 0))},
+                      mirror=False)
+            try:
+                sys.stderr.write(
+                    "[Antinel·提醒合并] 规则 %s：最近 %d 秒内共 %d 条同类提醒，"
+                    "出声 %d 条、合并 %d 条（原始条数已全部留痕，未丢弃）。\n"
+                    % (rid, int(c.get("window_seconds") or 0), int(c.get("total") or 0),
+                       int(c.get("used") or 0), int(c.get("merged") or 0)))
+            except Exception:                                        # noqa: BLE001
+                pass
+        if res.get("first_over"):
+            log_event({"ts": datetime.now().isoformat(timespec="seconds"),
+                       "type": "notice_budget_merged", "tool": "-",
+                       "session": "-", "host": "-", "decision": "allow",
+                       "severity": "info", "action": "alert",
+                       "rule_id": rid,
+                       "total": int(res.get("total") or 0),
+                       "used": int(res.get("used") or 0),
+                       "merged": int(res.get("merged") or 0),
+                       "quota": int(res.get("quota") or 0),
+                       "window_seconds": int(res.get("window_seconds") or 0),
+                       "reason": "规则 %s 本窗口提醒已达上限 %d 条，后续不再逐条出声，"
+                                 "改为合并；窗口结束时给一次汇总（原始条数不丢）"
+                                 % (rid, int(res.get("quota") or 0))},
+                      mirror=False)
+            try:
+                sys.stderr.write(
+                    "[Antinel·提醒合并] 规则 %s：本窗口已提醒 %d 条（上限 %d），"
+                    "后续同类提醒合并，%d 秒后给一次汇总（原始条数照记）。\n"
+                    % (rid, int(res.get("used") or 0), int(res.get("quota") or 0),
+                       int(res.get("window_seconds") or 0)))
+            except Exception:                                        # noqa: BLE001
+                pass
+    except Exception:                                                # noqa: BLE001
+        pass
+
+
 
 
 # 0.33.1：走"双通道 stdout"的宿主名单。

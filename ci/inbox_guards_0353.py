@@ -454,8 +454,13 @@ def c_attention_label_drills_to_action_list():
     h_report = SV._bar([G.item("R0", "unread", 1)], "T",
                        posture={"state": "guarding", "label": "值守中", "why": "在岗"},
                        view="report")
+    # ★ 0.47.0：后缀里的件数改走 `M.count_text`（**必带窗口与分母**），
+    #   本判据因此**不再比对旧的字面**「（1 件，点开查看）」——
+    #   断言打在**行为**（有 f=action 钻取、且带上件数）上，不打字面（维三）。
+    #   ★ 不是放宽：分母也一并核对（必须等于这一次载入的全部条数 ＝ 1）。
     return ("f=action" in h_inbox and "要处理" in h_inbox
-            and "（1 件，点开查看）" in h_report and "f=action" in h_report)
+            and "f=action" in h_report and "点开查看" in h_report
+            and M.count_text(1, 1) in h_report)
 
 
 def n_attention_label_drills_to_action_list():
@@ -2355,9 +2360,16 @@ def c_report_drill_counts_match_headline():
         page = SV.render_page(view="inbox", filt="win:24:lv:%s" % lvl,
                               root=hub, token="T", items=items)
         txt = _page_text(page)
-        m = re.search(r"共\s*(\d+)\s*条", txt)
-        if not m or int(m.group(1)) != int(n):
+        # ★ 0.47.0：钻取页的条数改走 `M.count_text` 的「分子 / 分母」形式
+        #   （`N / M 条`）。★ 本判据因此**多核一项**：分母必须等于本次载入的
+        #   全部条数 —— F40 那条守卫被**加强**了，不是放松。
+        m = re.search(r"(\d+)\s*/\s*(\d+)\s*条", txt)
+        if not m:
+            return False                  # 页面上读不到「分子 / 分母」⇒ 无从核对
+        if int(m.group(1)) != int(n):
             return False                  # 钻取页条数 ≠ 日报数字 ⇒ 不同口径
+        if int(m.group(2)) != len(items):
+            return False                  # 分母 ≠ 本次载入条数 ⇒ 又一个分母
     return True
 
 
