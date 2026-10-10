@@ -1,5 +1,16 @@
-# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.16（随 v0.45.0）
+# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.17（随 v0.46.0）
 
+> v1.17（0.46.0）：**释放留痕族新增 1 类** —— `command_deletion_permission`
+> （见 §4 释放留痕类）。**不改**已有字段名、**不改**已有取值域、**不改** append-only
+> 契约，只**新增一个记录类型**。语义：删除许可（VCT）两票裁决的**每一次**结论，
+> 用 `subkind` 把四条路结构化（`vct_allow` / `vct_deny` / `fallback_allow` /
+> `exit_乙`·`exit_丙`）。
+> ★ 为什么必须新增而不是复用 `exclude_patterns_allow`（交接件 §7.4 + 方案 §3.5）：
+> ① 两者是**不同判据**放的行（"用户声明＋可再生事实" vs "名字在兜底名单里"），
+> 合并就分不清是哪条路生效；② 设计明写「四个退出口不许静默」——旧实现里
+> 出口乙/丙 **一条记录都不写**，事后无从知道它走了哪条路（"静默是复发的温床"）。
+> 登记方式＝`tools/verify_event_types.py` 扫代码写出的 type。
+>
 > v1.16（0.45.0）：**门闸族给 1 类记录加字段** —— `host_shield_state_write_refused`
 > 增补 `subkind`（取值域 `refused` / `optimistic_lock_lost`），把"没保住"的**两种成因**
 > 结构化（与 `host_shield_zone_locked` 的 zone_ok/zone_lock_failed 同一手法：写 side 分派）。
@@ -165,6 +176,7 @@
 |---|---|---|
 | `workspace_root_allow` | pre | 因 `workspace_roots` 而放行的本应拦截项（记 `matched_root`、`config_source`） |
 | `exclude_patterns_allow` | pre | 因规则 `exclude_patterns` 放行的 critical 命中（宿主级镜像） |
+| `command_deletion_permission` | pre | **0.46.0 (v1.17)**：删除许可（VCT）两票裁决的**每一次**结论（宿主级镜像）。关键字段：`subkind`（取值域见下）、`exit`（退出口 `甲`/`乙`/`丙`/`丁`，非退出口为空串）、`vote1`（第一票 `ignored`/`protected`/`outside`/`unavailable`）、`vote2`（第二票 `regenerable`/`not_regenerable`）、`targets[]`（命令里取到的**字面**目标）、`reason`（"为什么走到这里"）。★ `subkind` 取值域：`vct_allow`（两票都同意⇒放行）/ `vct_deny`（有明确结论且否决⇒拦）/ `fallback_allow`（取不到信号⇒兜底名单接住并放行）/ `exit_乙`·`exit_丙`（取不到信号且兜底名单**也没接住**⇒按默认拦）。★ 为什么必须独立命名（不并入 `exclude_patterns_allow`）：两者是**不同判据**放的行——混在一处，读者分不清这次是"两票裁决"生效还是"名单兜底"生效，而这正是本仓最忌的形状（"分不清是哪条路生效"）。★ 为什么四个退出口都要写：设计 §3.5 明写「不许静默——任何一条静默分支，将来都会被当成正常路径」 |
 | `dst02_path_whitelisted` | pre | 因 `whitelist.paths` 放行的 DST-02 |
 | `dst02_host_config_self_maintenance` | pre | Antinel 自身宿主级配置的自我维护写入 |
 | `dst02_bash_path_suspect` | pre | Bash 命令文本中出现根外绝对路径（**提醒不拦截**） |

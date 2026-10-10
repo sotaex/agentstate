@@ -1,4 +1,4 @@
-# Antinel Security Suite - Threat Model (v0.45.0)
+# Antinel Security Suite - Threat Model (v0.46.0)
 
 ## What we protect against
 An AI coding agent running inside an IDE host (Claude Code, ZCode, ...) executes tools on the

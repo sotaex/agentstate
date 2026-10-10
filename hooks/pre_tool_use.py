@@ -54,7 +54,7 @@ _T0 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段起点（性能
 
 # ---------------------------------------------------------------- constants --
 PKG_DIR = os.path.dirname(os.path.abspath(__file__))
-_ANTINEL_VERSION = "0.45.0"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
+_ANTINEL_VERSION = "0.46.0"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
 _T1 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段终点（性能插桩）
 
 
@@ -1452,6 +1452,303 @@ def _command_segment_forced(rule, command):
     return False
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# ★★★ 0.46.0：**删除许可（VCT）** —— 「能不能删」的两票裁决（方案 v3.0 §3.4/§3.5）
+# ══════════════════════════════════════════════════════════════════════════════
+# 由来：删除类判定的现状是「**只有一份兜底名单**（exclude_patterns）做判据」⇒ 名单越长、
+#   攻击面越大；且「清理构建目录」这类最日常的动作会持续误拦（名单里塞了 dist/build/...）。
+#   改成**两票都同意才允许删除**：
+#     第一票 —— 用户自己**声明**过这是产物吗？（版本工具忽略查询，**必须带忽略索引参数**）
+#     第二票 —— 它真的**能再来一份**吗？（向上查找各生态的构建描述文件）
+#   两票做**并且**运算；兜底名单**降级**为两票都取不到信号时的最后退路。
+# ★ 三处强化（方案 §3.4）：① 用忽略规则的**反向语义**（工作树内且未被声明为产物即受保护），
+#   不用「追踪清单」（追踪清单覆盖不到刚写完还没提交的新代码）；② **忽略声明优先于已追踪**
+#   （本仓现成反例：`_archive_dist/` 在忽略规则里，索引里却有 23 个被追踪文件）；③ 与
+#   「可再生」做**并且**运算，不是或者（配置文件常被写进忽略规则，但删了就真没了）。
+# ★ 性能（方案 §3.6）：单次忽略查询约 404ms ⇒ **绝不进热路径**；只在「已判定为删除类
+#   操作且已拿到字面目标」之后调用，带 **2 秒超时**，超时走出口丙且留痕。
+# ★ 纪律 10.8：工作树外路径（git 返回 128）走**出口丙**，**不许**把 128 当成「未被忽略」。
+
+VCT_TIMEOUT = 2.0                 # 单次版本查询超时（秒）
+VCT_MAX_UP = 12                   # 第二票向上查找的最大层数
+
+#: 第二票「可再生」的信号源：各生态的**构建描述文件**。只认文件事实，不认目录名。
+#: 前缀 `*.` 表示按扩展名匹配（如 `*.csproj`）。
+VCT_BUILD_DESCRIPTORS = (
+    "pyproject.toml", "setup.py", "setup.cfg", "requirements.txt",
+    "package.json", "Cargo.toml", "go.mod", "pom.xml", "build.gradle",
+    "build.gradle.kts", "CMakeLists.txt", "Makefile", "composer.json",
+    "Gemfile", "meson.build", "*.csproj", "*.sln", "*.vcxproj",
+)
+
+#: 段内的「选项」token（`-rf` / `-Recurse` / `del` 的 `/s`）—— 不是目标。
+_VCT_FLAG_RE = re.compile(r"^-[A-Za-z][A-Za-z0-9-]*$|^/[A-Za-z]$")
+#: 含这些字符的 token 不是**字面**目标（变量/反引号/通配/替换）⇒ 出口乙。
+_VCT_NONLITERAL_RE = re.compile(r"[`$*?\[\]{}<>()|&;!]")
+
+
+def _vct_run_git(args, cwd, timeout=VCT_TIMEOUT):
+    """跑一次 git；返回 `(rc, stdout, stderr)`。超时/异常 ⇒ rc=None（调用方走出口丙）。
+
+    ★ 惰性 import subprocess：本模块被钩子在**每次工具调用**时导入，而 VCT 只在
+      「删除类且拿到字面目标」时才走到 ⇒ 不为罕见的路径付常驻启动成本。
+    """
+    try:
+        import subprocess
+    except Exception:                                            # noqa: BLE001
+        return None, "", ""
+    try:
+        # ★ 必须显式 `CREATE_NO_WINDOW`（0.35.3 创始人报障「窗口不停弹出又马上关掉」）：
+        #   钩子由宿主拉起、未必带控制台 ⇒ 起 git 若不显式禁窗，会为子进程新建控制台
+        #   ＝ 黑窗一闪。`-WindowStyle Hidden` 挡不住（窗口在建进程时就已创建）。
+        #   判据 P12（ci/inbox_guards_0353.py）扫**全部**起子进程的调用，漏一个就红。
+        p = subprocess.run(["git"] + list(args), cwd=cwd, timeout=timeout,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           creationflags=_CREATE_NO_WINDOW)
+        return (p.returncode,
+                p.stdout.decode("utf-8", "replace"),
+                p.stderr.decode("utf-8", "replace"))
+    except Exception:                                            # noqa: BLE001
+        return None, "", ""
+
+
+def _vct_worktree_root(project_root):
+    """工作树根（`git rev-parse --show-toplevel`）；取不到 ⇒ None（走出口丙）。"""
+    rc, out, _err = _vct_run_git(["rev-parse", "--show-toplevel"],
+                                 project_root or os.getcwd())
+    if rc == 0 and out.strip():
+        return os.path.normpath(out.strip())
+    return None
+
+
+def _vct_seg_tokens(seg):
+    """把一段命令切成 token（**尊重引号**，剥掉外层引号）。
+
+    ★ 不用 `shlex`：Windows 路径里的反斜杠会被 shlex 当成转义符 ⇒ 把 `C:\\a\\b` 切坏。
+    """
+    out, cur, q = [], [], None
+    for c in seg:
+        if q:
+            if c == q:
+                q = None
+            else:
+                cur.append(c)
+            continue
+        if c in "\"'":
+            q = c
+        elif c.isspace():
+            if cur:
+                out.append("".join(cur))
+                cur = []
+        else:
+            cur.append(c)
+    if cur:
+        out.append("".join(cur))
+    return out
+
+
+def _vct_literal_targets(command):
+    """从**删除类段**里取字面目标路径。返回 `(targets, why, is_delete)`。
+
+    · is_delete=False ⇒ 这条命令**压根不是删除类操作**（方案 §3.5 步骤三：到此结束，
+      不进入删除许可，也**不留痕** —— 否则 `ls -la` 也会被记一笔）；
+    · is_delete=True 且 targets 非空 ⇒ 拿到了字面目标（可进删除许可）；
+    · is_delete=True 且 targets 为空 ⇒ why 说明原因（**出口乙**：取不到字面目标）。
+
+    ★ 只取**字面**（不含 `$VAR` / 反引号 / 通配 / 命令替换）—— 变量展开值**只用于
+      展示/提示**，**绝不**用于匹配豁免（硬纪律 10.5）。取不到就退回兜底名单，方向安全。
+    ★★ 判定顺序：先过 `readonly_command_context` 再置 `is_delete` ——
+      `echo "rm -rf dist"` 只是**提及**删除词，不是删除类操作（否则它会被记成
+      「删除许可取不到目标」，把账本写成一条根本不该有的记录）。
+    """
+    try:
+        segs, _danger = _scan_command(command)
+    except Exception:                                            # noqa: BLE001
+        return [], "分段失败", False
+    pats = _dst_command_pats()
+    if not pats:
+        return [], "删除类模式不可用", False
+    out = []
+    is_delete = False
+    for seg in segs:
+        if not seg or not seg.strip():
+            continue
+        if not any(_search(p, seg) for p in pats):
+            continue
+        if readonly_command_context(seg):
+            continue                       # 只是"提及"（echo/grep 参数里的删除词）
+        is_delete = True                   # ← 到这里才算「这条命令是删除类操作」
+        toks = _vct_seg_tokens(seg)
+        for t in toks[1:]:                 # 跳过首词（动词）
+            if not t or _VCT_FLAG_RE.match(t):
+                continue
+            if _VCT_NONLITERAL_RE.search(t):
+                return [], "目标含变量/通配/替换（取不到字面目标）", True
+            t = t.rstrip("/\\")                # `dist/` -> `dist`
+            if t.startswith("./") or t.startswith(".\\"):
+                t = t[2:]                      # `./build` -> `build`（Windows 习惯写法）
+            elif (t.startswith(".") and len(t) > 1 and not t.startswith("..")
+                  and (".\\" + t[1:]) in command):
+                # ★★ `_scan_command` 把 `\X` 当**转义符**吞掉（`.\build` ⇒ `.build`），
+                #   所以上面那条 `startswith(".\\")` 对 PowerShell/CMD 写法**永远不触发**
+                #   —— 实测：`Remove-Item .\build` 被判成 `.build`（受保护）⇒ 误拦。
+                #   这里用**原命令**里是否真写着 `.\<名字>` 来还原（确定性判据，不看猜测）。
+                #   只看原命令文本，不依赖任何外部状态 ⇒ 不会把 `.psl` 这类真隐藏目录改坏。
+                t = t[1:]
+            out.append(t or ".")
+    if not out:
+        return [], "取不到字面目标", is_delete
+    return out, "", is_delete
+
+
+def _vct_vote1(abs_target, root):
+    """第一票：**用户声明过这是产物吗**（版本工具忽略查询）。返回 `(state, detail)`。
+
+    state ∈ {`ignored`, `protected`, `outside`, `unavailable`}：
+      · `ignored`    —— 被忽略规则声明为产物（rc=0）；
+      · `protected`  —— 未被声明为产物 ⇒ **受保护**（rc=1）；
+      · `outside`    —— 路径在工作树外（rc=128）⇒ **出口丙**（纪律 10.8）；
+      · `unavailable`—— 查询超时/异常/其它返回码 ⇒ **出口丙**。
+
+    ★★ 必须带 `--no-index`：不带时，**已追踪**文件会被报成「未被忽略」（rc=1）——
+      本仓现成反例：`_archive_dist/` 明明在忽略规则里，索引里却有 23 个被追踪文件。
+      若用「追踪清单」当判据，「清理产物」这个最日常的动作会立刻变成新的误拦。
+      **用户手写的产物声明，语义强于一次手滑入库的历史事实。**
+    ★★ 返回 128 是「工作树外」，**不是**「未被忽略」——把 128 当 protected 继续判，
+      会按错误的前提做安全取舍；判据 S83 常驻盯这一点。
+    """
+    rc, _out, err = _vct_run_git(
+        ["check-ignore", "--no-index", "-q", "--", abs_target], root)
+    if rc is None:
+        return "unavailable", "版本查询超时/异常"
+    if rc == 0:
+        return "ignored", ""
+    if rc == 1:
+        return "protected", ""
+    if rc == 128 or "outside repository" in (err or ""):
+        return "outside", "路径在工作树外（rc=128）"
+    return "unavailable", "版本查询返回码 %s" % rc
+
+
+def _vct_vote2(abs_target):
+    """第二票：**它真的能再来一份吗**（向上查找各生态的构建描述文件）。
+
+    返回 `(ok, detail)`；ok=True 时 detail 是找到的构建描述文件路径。
+
+    ★ 为什么必须与第一票做**并且**：配置文件常被写进忽略规则，但删了就真没了
+      （方案 §3.4 强化③）。只有「声明为产物」＋「可再生」同时成立，才谈得上
+      「删了能再来一份」。
+    ★ 为什么**要求目标是个目录**：构建**输出**是目录（dist / build / node_modules /
+      target / __pycache__ …），而**配置**是文件（`.env` / `.npmrc` / `.pypirc`）——
+      后者常被写进忽略规则却删了就真没了。只认「目录 ＋ 上层有构建描述」，才不会
+      把「删配置」当成「清产物」。**方向安全**：认不出 ⇒ 判**不可再生**（拦）。
+    ★ 从目标的**上一层**开始向上找：`rm -rf dist` 的描述文件在 `dist` 的父目录
+      （pyproject.toml / package.json …），而不是 `dist` 自己里面。
+    """
+    if not abs_target or not os.path.isdir(abs_target):
+        return False, ""                                     # 非目录 ⇒ 不认「可再生」
+    cur = os.path.dirname(abs_target)
+    if not cur:
+        return False, ""
+    for _ in range(VCT_MAX_UP):
+        try:
+            names = os.listdir(cur)
+        except Exception:                                        # noqa: BLE001
+            names = []
+        low = {n.lower(): n for n in names}
+        for want in VCT_BUILD_DESCRIPTORS:
+            if want.startswith("*."):
+                if any(n.endswith(want[1:]) for n in low):
+                    return True, os.path.join(cur, want)
+            elif want.lower() in low:
+                return True, os.path.join(cur, low[want.lower()])
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            break
+        cur = parent
+    return False, ""
+
+
+def _vct_abs(target, project_root):
+    """把目标解析成绝对路径（相对路径按**项目根**解析）。"""
+    if os.path.isabs(target):
+        return os.path.normpath(target)
+    return os.path.normpath(os.path.join(project_root or os.getcwd(), target))
+
+
+def _is_delete_rule(rule):
+    """这条规则是不是**文件删除**类 —— 只有它才走删除许可两票。
+
+    ★ 判据取自**数据**、不硬编码 id：本仓的「删除类命令模式」只有一个真源
+      （`_dst_command_patterns()`：DST-01 的 `command_patterns`）。谁的
+      `command_patterns` 与它逐条相同，谁就是那条删除规则。
+    ★★ 为什么**不能**用 `category == "destructive"` 一刀切（设计期抓到的真坑）：
+      DST-02…DST-11 全是 destructive 类，但它们管的是「写项目外 / 云盘同步 /
+      持久化 / 提权 / git 丢弃」，**与文件删除无关**。若一并门控，
+      `rm -rf dist && echo x > ~/OneDrive/y` 会因为「删除产物」拿到删除许可，
+      ⇒ **顺手把云盘写入规则也放行了** —— 一个许可开两扇门，正是本仓最忌的形状。
+    """
+    if not rule:
+        return False
+    dst = _dst_command_pats()
+    pats = _patterns(rule, "command_patterns")
+    if not dst or not pats:
+        return False
+    return set(pats) == set(dst)
+
+
+def deletion_permission(command, project_root):
+    """**删除许可（VCT）两票裁决 ＋ 五步顺序 ＋ 四退出口**（方案 §3.4/§3.5）。
+
+    返回 dict：
+      `{'allow': True/False/None, 'exit': '', 'vote1', 'vote2', 'why', 'targets', 'is_delete'}`
+
+      · is_delete is False —— 这条命令**不是删除类操作**（步骤三：到此结束，不留痕）；
+      · allow is True  —— 两票都同意 ⇒ **放行**；
+      · allow is False —— 有明确结论且至少一票否决 ⇒ **拦**；
+      · allow is None  —— **取不到信号** ⇒ 走出口（`'乙'`/`'丙'`），交由兜底名单/默认拦。
+
+    四退出口（共同要求：**不许静默**，走到哪一个都要写明"为什么走到这里"）：
+      甲：命令分不出段 —— 本函数不处理（调用方按现有保守口径走）；
+      乙：取不到字面目标 —— exit='乙'；
+      丙：版本信号不可用/超时/工作树外 —— exit='丙'；
+      丁：兜底名单也无信号 —— 由调用方处理（exit='丁'）。
+    """
+    # ★★ 顺序即性能（方案 §3.6：单次忽略查询约 404ms，**绝不进热路径**）。
+    #   先做**不需要 git** 的目标提取（步骤二/三：这一步就筛掉了「压根不是删除类」
+    #   与「取不到字面目标」的命令）——只有真的拿到了字面删除目标，才去问版本工具。
+    #   反过来先定位工作树根，会让**每一条** Bash 命令都付一次 git 启动成本。
+    targets, why, is_delete = _vct_literal_targets(command)
+    if not is_delete:
+        return {"allow": None, "exit": "", "why": why or "不是删除类操作",
+                "vote1": "", "vote2": "", "targets": [], "is_delete": False}
+    if not targets:
+        return {"allow": None, "exit": "乙", "why": why,
+                "vote1": "", "vote2": "", "targets": [], "is_delete": True}
+    root = _vct_worktree_root(project_root)
+    if not root:
+        return {"allow": None, "exit": "丙", "why": "工作树根不可用",
+                "vote1": "", "vote2": "", "targets": targets, "is_delete": True}
+    for t in targets:
+        abs_t = _vct_abs(t, project_root)
+        v1, d1 = _vct_vote1(abs_t, root)
+        if v1 in ("unavailable", "outside"):
+            return {"allow": None, "exit": "丙", "why": "%s：%s" % (t, d1),
+                    "vote1": v1, "vote2": "", "targets": targets, "is_delete": True}
+        if v1 == "protected":
+            return {"allow": False, "exit": "", "vote1": v1, "vote2": "",
+                    "why": "%s 未被声明为产物（受保护）" % t, "targets": targets,
+                    "is_delete": True}
+        v2, _d2 = _vct_vote2(abs_t)
+        if not v2:
+            return {"allow": False, "exit": "", "vote1": v1, "vote2": "not_regenerable",
+                    "why": "%s 声明为产物但不可再生" % t, "targets": targets,
+                    "is_delete": True}
+    return {"allow": True, "exit": "", "vote1": "ignored", "vote2": "regenerable",
+            "why": "两票都同意（声明为产物 ＋ 可再生）", "targets": targets,
+            "is_delete": True}
+
+
 def _first_hit(patterns, texts):
     """Returns (pattern, matched_snippet) for the first pattern that matches any text."""
     for pat in patterns:
@@ -2509,7 +2806,7 @@ def _basic_hit(rule, command, file_path, content, url, bash_extra, file_targets,
 def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=None,
                  workspace_roots=(), ws_allow_log=None, excluded_log=None,
                  path_wl_log=None, bash_path_log=None, host_cfg_log=None,
-                 sync_wl_log=None, sec_wl_log=None):
+                 sync_wl_log=None, sec_wl_log=None, vct_log=None):
     """Run every enabled, applicable rule against the event; return ALL hits.
 
     Match families (all fields read from the rule top level, G-12):
@@ -2543,6 +2840,9 @@ def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=Non
     # Read-only context: see readonly_command_context. Only command_patterns hits are
     # affected; the file/content/check/detection families below keep their strength.
     ro_cmd = readonly_command_context(command)
+    # ★ 0.46.0：删除许可（VCT）**按命令缓存** —— 单次版本查询约 404ms，同一条命令
+    #   可能被多条删除类规则各问一次；缓存后每条命令最多查一次（方案 §3.6 的性能约束）。
+    _vct_cache = {}
 
     for rule in rules:
         if (_disabled(rule) or not _platform_applies(rule)
@@ -2576,15 +2876,64 @@ def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=Non
             continue
         if cmd_wl and (rule.get("severity") or "warning").lower() != "critical":
             continue
-        if (_excluded(rule, [command, file_path, content, url])
-                and not _command_segment_forced(rule, command)):
+        # ★★★ 0.46.0：**删除许可（VCT）** —— 删除类**先过两票裁决**（方案 §3.5 第四步），
+        #   兜底名单**降级**为「两票都取不到信号」时的最后退路（§3.7）。
+        #   ★ 为什么必须放在 `_excluded` **之前**：两票都同意时，**即使目标不在兜底名单里**
+        #     也要放行 —— 这正是「名单长度不再是攻击面的增长点」的兑现（名单不再是主判据）。
+        #   ★★★ 为什么这里**不**再加 `not _command_segment_forced(rule, command)`：
+        #     `_command_segment_forced` 是给**整条文本匹配**的兜底名单补「逐段判别」用的；
+        #     而删除许可两票**本身就是逐目标的**（`deletion_permission` 遍历命令里的
+        #     全部字面目标，任一目标受保护即否决）。再套一层 `_command_segment_forced`
+        #     会把它**在最需要时关掉**：实测 `rm -rf _archive_dist`（被忽略＋可再生、
+        #     但不在兜底名单里）该条件为真 ⇒ 两票整段被跳过 ⇒ 仍旧误拦。
+        _vct = None
+        _rec = None
+        if _is_delete_rule(rule) and command:
+            if command not in _vct_cache:
+                _vct_cache[command] = deletion_permission(command, project_root)
+            _vct = _vct_cache[command]
+            if not _vct.get("is_delete"):
+                # 步骤三：**不是删除类操作** ⇒ 到此结束，不进入删除许可（也不留痕，
+                # 否则 `ls -la` 之类的日常命令都会被记一笔"删除许可取不到目标"）。
+                _vct = None
+            else:
+                _rec = {"rule_id": rule.get("id", "?"), "exit": _vct.get("exit", ""),
+                        "vote1": _vct.get("vote1", ""), "vote2": _vct.get("vote2", ""),
+                        "why": _vct.get("why", ""), "targets": list(_vct.get("targets") or [])}
+                if _vct["allow"] is True:
+                    if vct_log is not None:
+                        vct_log.append(dict(_rec, subkind="vct_allow", decision="allow"))
+                    continue                   # 两票都同意 ⇒ 放行（不再看兜底名单）
+                if _vct["allow"] is False and vct_log is not None:
+                    # ★★ 明确否决 ⇒ 拦。这一笔**无论兜底名单是否命中**都必须留痕 ——
+                    #   实测漏过：早先只在「兜底名单命中」那一支里记，于是
+                    #   `rm -rf old-config`（名单没命中、真拦了）在账本上一条记录都没有。
+                    vct_log.append(dict(_rec, subkind="vct_deny", decision="deny"))
+        _excl_now = (_excluded(rule, [command, file_path, content, url])
+                     and not _command_segment_forced(rule, command))
+        if _excl_now:
             # A15: the rule matched but an exclude_patterns entry let it through
             # (`rm -rf .psl`, `rm -rf node_modules`). This is the only place that
             # knows an allow was a decision and not an absence, so it is recorded
             # here and mirrored to host level by main().
-            if excluded_log is not None and rule.get("severity") == "critical":
-                excluded_log.append(rule.get("id", "?"))
-            continue
+            if _vct is not None and _vct["allow"] is False:
+                # 两票有**明确结论**且否决 ⇒ 兜底名单**不得**翻面（§3.7）
+                # 不 continue ⇒ 落到正常判定 ⇒ 拦（留痕已在上面的 vct_deny 记过）
+                pass
+            else:
+                # 非删除类，或删除类**取不到信号**（出口乙/丙）⇒ 兜底名单（最后退路）放行
+                if excluded_log is not None and rule.get("severity") == "critical":
+                    excluded_log.append(rule.get("id", "?"))
+                if _vct is not None and vct_log is not None:
+                    vct_log.append(dict(_rec, subkind="fallback_allow", decision="allow"))
+                continue
+        elif _vct is not None and _vct["allow"] is None and vct_log is not None:
+            # ★★ 出口乙/丙 且兜底名单**也没接住** ⇒ 按现有默认拦，且**必须留痕**。
+            #   设计 §3.5：「四个退出口的共同要求：不许静默」。这一支正是最容易被漏掉的
+            #   一处 —— 早先只写了「兜底名单放行」那一支，于是 `rm -rf /c/Windows/System32`
+            #   （出口丙）在账本上**一条记录都没有**，事后无从知道它走了哪条路。
+            vct_log.append(dict(_rec, subkind="exit_" + (_vct.get("exit") or "?"),
+                                decision="deny"))
 
         check = _field(rule, "check")
         # 1–3. command / file / content 三通道 —— 与放行留痕共用 `_basic_hit`（0.29.0 E-1）。
@@ -3033,6 +3382,7 @@ def main():
     host_cfg_log = []
     sync_wl_log = []
     sec_wl_log = []
+    vct_log = []                                 # 0.46.0: 删除许可（VCT）裁决留痕
     effective_rules = apply_policy(load_rules(), policy)
     t_rules_done = time.perf_counter()           # 0.32.2 (B1)
     hits = collect_hits(effective_rules, tool_name, texts, project_root,
@@ -3040,7 +3390,7 @@ def main():
                         ws_allow_log=ws_allow_log, excluded_log=excluded_log,
                         path_wl_log=path_wl_log, bash_path_log=bash_path_log,
                         host_cfg_log=host_cfg_log, sync_wl_log=sync_wl_log,
-                        sec_wl_log=sec_wl_log)
+                        sec_wl_log=sec_wl_log, vct_log=vct_log)
     hits.sort(key=lambda h: SEV_RANK.get(h["severity"], 9))       # stable: keeps category order
     # 0.24.0 (BUDGET-01): 预算档位命中与规则命中同构（rules_hit 记录、report 可见）
     _bh = _budget_hit(tool_name, session_id, policy)
@@ -3177,6 +3527,29 @@ def main():
                    "session": session_id, "host": host_tag, "rule_id": rid,
                    "decision": "allow", "severity": "critical", "action": "allow",
                    "reason": "matched a critical rule but released by exclude_patterns",
+                   "input": {"command": mask_secrets(cmd)[:300]}}, mirror=True)
+    # ★★★ 0.46.0：**删除许可（VCT）** 的每一次裁决都进链（方案 §3.5：四个退出口
+    #   共同要求「不许静默」，走到哪一个都要写明"为什么走到这里"）。
+    #   `subkind` 分派（四种，恰好覆盖四条路）：
+    #     `vct_allow`      —— 两票都同意 ⇒ 放行；
+    #     `vct_deny`       —— 有明确结论且否决 ⇒ 拦；
+    #     `fallback_allow` —— 取不到信号（出口乙/丙）⇒ 兜底名单接住并放行；
+    #     `exit_乙`/`exit_丙` —— 取不到信号且兜底名单**也没接住** ⇒ 按默认拦（**留痕**）。
+    #   `exit` 字段同时记退出口（甲/乙/丙/丁），`why` 记「为什么走到这里」。
+    #   ★ 类型独立于 `exclude_patterns_allow`：读者要能分开「兜底名单放行」与
+    #     「两票裁决放行」—— 混在一处就分不清是哪条路生效（本项目最忌的形状）。
+    for _v in vct_log:
+        log_event({"ts": ts, "type": "command_deletion_permission", "tool": raw_tool,
+                   "session": session_id, "host": host_tag,
+                   "rule_id": _v.get("rule_id", "?"),
+                   "decision": _v.get("decision", "allow"),
+                   "severity": "critical",
+                   "action": "allow" if _v.get("decision") == "allow" else "block",
+                   "subkind": _v.get("subkind", ""),
+                   "exit": _v.get("exit", ""),
+                   "vote1": _v.get("vote1", ""), "vote2": _v.get("vote2", ""),
+                   "targets": _v.get("targets", []),
+                   "reason": _v.get("why", ""),
                    "input": {"command": mask_secrets(cmd)[:300]}}, mirror=True)
     # 0.16.0 (P1-7): an allow caused by whitelist.paths on DST-02 is also recorded
     # -- a released block must leave a trace, exactly like exclude_patterns_allow.

@@ -1,0 +1,543 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""0.46.0 判据 —— **删除许可（VCT）**：两票裁决 ＋ 五步顺序 ＋ 四个退出口。
+
+★★ 由来（交接件 §7.3/§7.4，方案 v3.0 §3.4/§3.5/§3.6/§3.7）：
+
+    旧机制「只有一份兜底名单做判据」。名单的**长度**因此变成攻击面的增长点：
+    想放行一种新写法 ⇒ 加一条；加一条 ⇒ 绕过的使用成本降一分。而且它治不了
+    最日常的那类误拦 —— 「清理构建目录」。
+
+    换判据的来源，而不是给名单加例外：
+      第一票 —— 用户自己**声明**过这是产物吗？（版本工具忽略查询，**必须带忽略索引参数**）
+      第二票 —— 它真的**能再来一份**吗？（向上查找各生态的构建描述文件）
+    两票做**并且**运算；兜底名单**降级**为两票都取不到信号时的最后退路。
+
+★ 四件套（本文件逐条落地）：
+    正判据 S80/S81/S82/S83/S84/S85/S86/S87；
+    反向对照 N-S80/N-S81/N-S82/N-S83/N-S84/N-S86/N-S87；
+    连带对照 S88（既有保护仍绿）＋ 兜底退路的负控 N-S88。
+★ 关于「三票各自的负控全在」（交接件 §8 完成判据）：
+    设计（§3.4/§3.5/§7.3/§7.4）是**两票**（忽略声明 ＋ 可再生）；§8 里的「三票」是
+    旧稿 §2.6 的措辞残留。本文件对**三个信号**都给了负控，无论按哪种口径读都成立：
+      第一票（忽略声明）→ N-S80（去忽略索引参数）／N-S84（改用输出串比对）；
+      第二票（可再生）　→ N-S87（摘掉「必须是目录」）；
+      兜底退路（第三信号）→ N-S88（堵死 fallback_allow 的 continue）。
+★ 编写纪律（沿用 0430/0431/0440/0450）：
+    · 每条判据配负控，且负控**真的会红**；
+    · 断言打在**行为/结构**上，不查文案；
+    · **不写任何产品文件**：变异只发生在内存字符串上；夹具只落在临时目录。
+"""
+from __future__ import annotations
+
+import io
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import types
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+RESULTS = []
+_HOOK = "hooks/pre_tool_use.py"
+
+#: 各生态的「构建描述文件」中，本仓根上确有的那个 —— 第二票的现成信号源。
+_ROOT_DESCRIPTOR = "pyproject.toml"
+
+
+def check(name):
+    """★ 判据**必须真会红** —— 返回说明串一律转成抛异常。"""
+    def deco(fn):
+        def wrapper():
+            r = fn()
+            if r is True or r is None:
+                return True
+            raise AssertionError(r if isinstance(r, str) else repr(r))
+        RESULTS.append((name, wrapper))
+        return fn
+    return deco
+
+
+def _src(rel):
+    with io.open(os.path.join(ROOT, rel), encoding="utf-8") as f:
+        return f.read()
+
+
+def _load(src, tag):
+    """把（可能被变异过的）钩子源码在**内存**里加载成模块，返回该模块。
+
+    ★ 只读：磁盘一个字节都不动（exec 到新建的 ModuleType）。
+    """
+    mod = types.ModuleType(tag)
+    mod.__file__ = os.path.join(ROOT, _HOOK)
+    sys.modules[tag] = mod
+    exec(compile(src, mod.__file__, "exec"), mod.__dict__)      # noqa: S102
+    return mod
+
+
+def _hook():
+    return _load(_src(_HOOK), "ptu0460_live")
+
+
+def _rules():
+    with io.open(os.path.join(ROOT, "rules", "default.json"), encoding="utf-8") as f:
+        return json.load(f)["rules"]
+
+
+def _hits(mod, cmd, project_root=None, rules=None):
+    """跑一次真判定路径；返回 `(block 的规则 id 列表, vct 留痕列表, 放行留痕列表)`。"""
+    vct, exc = [], []
+    h = mod.collect_hits(rules if rules is not None else _rules(), "Bash",
+                         {"command": cmd, "file_path": "", "content": "", "url": ""},
+                         project_root or ROOT, [], mod.EMPTY_POLICY,
+                         workspace_roots=(), excluded_log=exc, vct_log=vct)
+    blocks = [x.get("rule_id") for x in h if x.get("action") == "block"]
+    return blocks, vct, exc
+
+
+def _tracked_ignored_file():
+    """本仓里**已被追踪、但命中忽略规则**的文件（第一票「忽略优先于追踪」的现成反例）。"""
+    try:
+        r = subprocess.run(["git", "ls-files", "-i", "-c", "--exclude-standard"],
+                           cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                           timeout=30)
+        got = r.stdout.decode("utf-8", "replace").split()
+        return got[0] if got else None
+    except Exception:                                            # noqa: BLE001
+        return None
+
+
+def _temp_git_repo():
+    """造一个**确定性**夹具：临时 git 仓，`gen/` 在忽略规则里，`gen/x.txt` 已被追踪。
+
+    为什么不用本仓现成文件：本仓的 `_archive_dist/*.old` 是历史遗留，某次卫生
+    动作后可能不再存在；而这条判据守的是**语义**（忽略声明优先于追踪事实），
+    必须**永远**可测，所以夹具自己造。
+    """
+    d = tempfile.mkdtemp(prefix="g0460_git_")
+    run = lambda *a: subprocess.run(list(a), cwd=d, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL, timeout=60)  # noqa: E731
+    run("git", "init", "-q")
+    with io.open(os.path.join(d, ".gitignore"), "w", encoding="utf-8") as f:
+        f.write("gen/\n")
+    os.makedirs(os.path.join(d, "gen"))
+    with io.open(os.path.join(d, "gen", "x.txt"), "w", encoding="utf-8") as f:
+        f.write("x\n")
+    run("git", "add", "-f", "gen/x.txt")          # 强制入库 ⇒ 追踪 + 被忽略 同时成立
+    return d
+
+
+def _allowed_fixture():
+    """确定性夹具：临时 git 仓，`build/`、`dist/`、`__pycache__/` 既在忽略规则里、又真实存在，
+    根上还有构建描述文件（第二票的信号源）。
+
+    ★★ 为什么 S80/S81 必须用夹具、不再用本仓的 `build/` 等真实目录：
+      那些目录都在 `.gitignore` 里（干净克隆上根本不存在），而 `build/` 这类**目录专用**
+      忽略规则（`build/` 带尾斜杠）对**不存在**的路径**不匹配**。实测：把本仓 `build/`
+      改名让开之后，`git check-ignore --no-index build` 返回 1 ⇒ 第一票翻成「受保护」，
+      S80/S81 当场红。判据测的是**两票逻辑**，不是「本仓此刻恰好有哪些目录」，
+      所以夹具自己造一个稳定的现场（与 `_temp_git_repo` 同族）。
+    """
+    d = tempfile.mkdtemp(prefix="g0460_allow_")
+    run = lambda *a: subprocess.run(list(a), cwd=d, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL, timeout=60)  # noqa: E731
+    run("git", "init", "-q")
+    with io.open(os.path.join(d, ".gitignore"), "w", encoding="utf-8") as f:
+        f.write("build/\ndist/\n__pycache__/\n.psl/\n_archive_dist/\n")
+    for sub in ("build", "dist", "__pycache__", ".psl", "_archive_dist"):
+        os.makedirs(os.path.join(d, sub))
+    with io.open(os.path.join(d, _ROOT_DESCRIPTOR), "w", encoding="utf-8") as f:
+        f.write("")
+    return d
+
+
+# ══════════════ S80 · 两票**并且**运算 ══════════════
+#: 第一票「声明为产物」＋ 第二票「可再生」都成立 ⇒ 放行（夹具里这些目录既被忽略、又是目录）。
+_ALLOWED = ("build", "dist", "__pycache__", ".psl", "_archive_dist")
+#: 第一票就不成立（工作树内、未被声明为产物）⇒ 受保护 ⇒ 拦。
+_PROTECTED = ("hooks", "src", "old-config")
+
+
+@check("S80 ★ 两票并且：声明为产物 ＋ 可再生 ⇒ 放行；受保护 ⇒ 拦；只声明不可再生 ⇒ 拦")
+def s80():
+    m = _hook()
+    fix = _allowed_fixture()
+    bad = []
+    for t in _ALLOWED:
+        d = m.deletion_permission("rm -rf " + t, fix)
+        if d["allow"] is not True or d["vote1"] != "ignored" or d["vote2"] != "regenerable":
+            bad.append("%s→%s/%s/%s" % (t, d["allow"], d["vote1"], d["vote2"]))
+    for t in _PROTECTED:
+        d = m.deletion_permission("rm -rf " + t, fix)
+        if d["allow"] is not False or d["vote1"] != "protected":
+            bad.append("%s→%s/%s" % (t, d["allow"], d["vote1"]))
+    if bad:
+        return "两票裁决不符（期望 allow/vote1/vote2）：%s" % "；".join(bad)
+    # 第三类：**声明为产物，但不可再生**（配置文件常被写进忽略规则，删了就真没了）。
+    #   ★ 这一支仍用**本仓**真实的「已追踪且被忽略」文件（`_archive_dist/*.old` 一类）——
+    #     它同时证明：本仓那 23 个「追踪 + 被忽略」的构建产物走的是「忽略优先」这一票。
+    f = _tracked_ignored_file()
+    if not f:
+        return "夹具缺失：仓内找不到「已追踪且被忽略」的文件 ⇒ 本判据无法验证（不算通过）"
+    d = m.deletion_permission("rm -rf " + f, ROOT)
+    if d["allow"] is not False or d["vote2"] != "not_regenerable":
+        return ("声明为产物但不可再生的目标仍被放行（%s ⇒ allow=%s vote2=%s）"
+                " ⇒ 第二票没在承重" % (f, d["allow"], d["vote2"]))
+    return True
+
+
+# ══════════════ N-S80 · 去掉忽略索引参数 ⇒ 当场翻面 ══════════════
+_MUT_NO_INDEX = (
+    '["check-ignore", "--no-index", "-q", "--", abs_target]',
+    '["check-ignore", "-q", "--", abs_target]',
+)
+
+
+@check("N-S80 负控：去掉忽略索引参数 ⇒ 已追踪但被忽略的路径当场翻面 ⇒ 必须红")
+def n_s80():
+    d = _temp_git_repo()
+    target = os.path.join(d, "gen", "x.txt")
+    live = _hook()
+    v_ok, _ = live._vct_vote1(target, d)
+    if v_ok != "ignored":
+        return ("夹具不成立：带忽略索引参数时判定为 %r（应 ignored）—— 负控自身失效" % (v_ok,))
+    src = _src(_HOOK)
+    if _MUT_NO_INDEX[0] not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    mut = _load(src.replace(_MUT_NO_INDEX[0], _MUT_NO_INDEX[1]), "ptu0460_ns80")
+    v_bad, _ = mut._vct_vote1(target, d)
+    if v_bad == "ignored":
+        return ("负控失效：去掉忽略索引参数后仍判 ignored ⇒ 该参数没被真正依赖"
+                "（追踪事实会重新压过用户的产物声明）")
+    # ★ 直接连回正判据 S80：本仓 `_archive_dist` 正是「已追踪 + 被忽略」，
+    #   去掉参数后它必须从 S80 的放行名单里掉出去 ⇒ S80 当场红。
+    d2 = mut.deletion_permission("rm -rf _archive_dist", ROOT)
+    if d2["allow"] is True:
+        return ("负控失效：去掉忽略索引参数后 `rm -rf _archive_dist` 仍放行 ⇒"
+                " 连不回 S80（该参数在本仓不承重）")
+    return True
+
+
+# ══════════════ S81 · 常见写法归一 ══════════════
+@check("S81 ★ 常见写法归一：`build/`、`./build`、`.\\build` 都判为可再生的产物")
+def s81():
+    m = _hook()
+    fix = _allowed_fixture()
+    cases = [
+        ("rm -rf build/", "build"),
+        ("rm -rf ./build", "build"),
+        ("rm -rf .\\build", "build"),
+        ("Remove-Item .\\build", "build"),
+        ("rm -rf .\\dist", "dist"),
+    ]
+    bad = []
+    for cmd, _want in cases:
+        d = m.deletion_permission(cmd, fix)
+        if d["allow"] is not True:
+            bad.append("%s→%s" % (cmd, d["allow"]))
+    if bad:
+        return "这些常见写法仍被误拦：%s" % "；".join(bad)
+    # ★ 反向：还原 `.\` 的规则**不得**把真隐藏目录改坏。
+    lit = m._vct_literal_targets("rm -rf .psl")[0]
+    if lit != [".psl"]:
+        return "`.psl` 被写法归一改坏成 %r（应保持 .psl）—— 归一越界" % (lit,)
+    return True
+
+
+@check("N-S81 负控：摘掉 `.\\` 还原分支 ⇒ `Remove-Item .\\build` 重新受保护 ⇒ 必须红")
+def n_s81():
+    src = _src(_HOOK)
+    anchor = 'elif (t.startswith(".") and len(t) > 1 and not t.startswith("..")'
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    mut = _load(src.replace(anchor, "elif (False and t.startswith(\".\")"), "ptu0460_ns81")
+    fix = _allowed_fixture()
+    # 夹具前提：真实现下这条写法**确实**放行 —— 否则负控无分辨力（红的是夹具不是分支）。
+    if _hook().deletion_permission("Remove-Item .\\build", fix)["allow"] is not True:
+        return "夹具不成立：真实现下 `Remove-Item .\\build` 本就不放行 ⇒ 负控无分辨力"
+    d = mut.deletion_permission("Remove-Item .\\build", fix)
+    if d["allow"] is True:
+        return "负控失效：摘掉还原分支后仍放行 ⇒ 该分支没被真正依赖"
+    return True
+
+
+# ══════════════ S82 · 两票放行**先于**兜底名单 ══════════════
+@check("S82 ★ 两票放行先于兜底名单：目标不在名单里，两票同意也必须放行")
+def s82():
+    m = _hook()
+    rules = _rules()
+    # ① 夹具前提：`_archive_dist` **确实不在** DST-01 的兜底名单里 —— 否则本判据无分辨力。
+    dst01 = [r for r in rules if r.get("id") == "DST-01"]
+    if not dst01:
+        return "找不到 DST-01 规则 ⇒ 判据前提不成立"
+    excl = " ".join(dst01[0].get("exclude_patterns") or [])
+    if "_archive_dist" in excl:
+        return ("夹具失效：`_archive_dist` 已在兜底名单里 ⇒ 本判据测不出"
+                "「名单之外的产物能否放行」")
+    blocks, vct, _exc = _hits(m, "rm -rf _archive_dist", rules=rules)
+    if blocks:
+        return ("两票同意的产物（不在兜底名单）仍被拦：%s ⇒ 兜底名单仍在当主判据"
+                % blocks)
+    if not any(v.get("subkind") == "vct_allow" for v in vct):
+        return "放行没有留痕（缺 vct_allow）⇒ 分不清是两票放行还是压根没命中"
+    return True
+
+
+@check("N-S82 负控：关掉两票放行分支 ⇒ 名单外的产物重新被拦 ⇒ 必须红")
+def n_s82():
+    src = _src(_HOOK)
+    anchor = 'if _vct["allow"] is True:'
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    mut = _load(src.replace(anchor, "if False:"), "ptu0460_ns82")
+    blocks, _vct, _exc = _hits(mut, "rm -rf _archive_dist")
+    if not blocks:
+        return ("负控失效：关掉两票放行后仍未被拦 ⇒ 说明该放行不是承重的"
+                "（目标本就在兜底名单里）")
+    return True
+
+
+# ══════════════ S83 · 工作树外走出口丙（纪律 10.8） ══════════════
+_OUTSIDE = "/c/Windows/System32"
+
+
+@check("S83 ★ 工作树外走出口丙：allow=None、exit=丙、vote1=outside，且必须留痕")
+def s83():
+    m = _hook()
+    d = m.deletion_permission("rm -rf " + _OUTSIDE, ROOT)
+    if d["exit"] != "丙" or d["allow"] is not None or d["vote1"] != "outside":
+        return ("工作树外路径没走出口丙：exit=%r allow=%r vote1=%r"
+                % (d["exit"], d["allow"], d["vote1"]))
+    blocks, vct, _exc = _hits(m, "rm -rf " + _OUTSIDE)
+    if not blocks:
+        return "出口丙之后仍被放行（%s）⇒ 退出口不该改变『默认拦』的方向" % blocks
+    if not any(v.get("subkind") == "exit_丙" for v in vct):
+        return ("出口丙**没有留痕**（vct=%s）—— 设计 §3.5：四个退出口不许静默"
+                % [v.get("subkind") for v in vct])
+    return True
+
+
+@check("N-S83 负控：把返回 128 当成『受保护』⇒ 工作树外不再走出口丙 ⇒ 必须红")
+def n_s83():
+    src = _src(_HOOK)
+    anchor = 'return "outside", "路径在工作树外（rc=128）"'
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    mut = _load(src.replace(anchor, 'return "protected", ""'), "ptu0460_ns83")
+    d = mut.deletion_permission("rm -rf " + _OUTSIDE, ROOT)
+    if d["exit"] == "丙":
+        return "负控失效：把 128 当受保护后仍走出口丙 ⇒ 该分支没被真正依赖"
+    return True
+
+
+# ══════════════ S84 · 中文路径只看返回码 ══════════════
+def _zh_paths():
+    return (os.path.join(ROOT, "_archive_dist", "中文测试目录"),      # 被忽略
+            os.path.join(ROOT, "hooks", "中文测试目录"))              # 未被忽略
+
+
+@check("S84 ★ 中文路径：只凭返回码得结论（被忽略→ignored，未忽略→protected）")
+def s84():
+    m = _hook()
+    root = m._vct_worktree_root(ROOT)
+    if not root:
+        return "取不到工作树根 ⇒ 环境不具备（不算通过）"
+    zh_ign, zh_pro = _zh_paths()
+    a, _ = m._vct_vote1(zh_ign, root)
+    b, _ = m._vct_vote1(zh_pro, root)
+    if a != "ignored" or b != "protected":
+        return ("中文路径判定错：被忽略=%r（应 ignored）、未忽略=%r（应 protected）"
+                " ⇒ 多半是拿输出里的路径串做了比对" % (a, b))
+    return True
+
+
+@check("N-S84 负控：改成依赖输出字符串做比对 ⇒ 中文路径当场判错 ⇒ 必须红")
+def n_s84():
+    src = _src(_HOOK)
+    # 变异：① 去掉 `-q`（让 git 输出路径）② 用输出串判定「被忽略」
+    if _MUT_NO_INDEX[0] not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    a1 = src.replace(_MUT_NO_INDEX[0],
+                     '["check-ignore", "--no-index", "--", abs_target]')
+    anchor2 = '    if rc == 0:\n        return "ignored", ""'
+    if anchor2 not in a1:
+        return "变异锚点 2 未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    a2 = a1.replace(anchor2, '    if rc == 0 and abs_target in _out:\n        return "ignored", ""')
+    mut = _load(a2, "ptu0460_ns84")
+    zh_ign, _ = _zh_paths()
+    v, _ = mut._vct_vote1(zh_ign, mut._vct_worktree_root(ROOT) or ROOT)
+    if v == "ignored":
+        return ("负控失效：改成依赖输出串后中文路径仍判 ignored ⇒"
+                " 本测试测不出「输出串比对」（可能是本机 git 关掉了路径转义）")
+    return True
+
+
+# ══════════════ S85 · 四个退出口不许静默 ══════════════
+@check("S85 ★ 退出口不许静默：出口乙/丙都写明原因并留痕；非删除类操作**不**留痕")
+def s85():
+    m = _hook()
+    for cmd, want in (('rm -rf "$F"', "乙"), ("rm -rf " + _OUTSIDE, "丙")):
+        d = m.deletion_permission(cmd, ROOT)
+        if d["exit"] != want or not (d["why"] or "").strip():
+            return ("%s 的退出口不符或没写明原因：exit=%r why=%r"
+                    % (cmd, d["exit"], d["why"]))
+        _b, vct, _e = _hits(m, cmd)
+        if not any(v.get("subkind") == "exit_" + want for v in vct):
+            return "%s 走出口%s 但**没有留痕**（vct=%s）⇒ 静默" % (
+                cmd, want, [v.get("subkind") for v in vct])
+    # 不是删除类操作 ⇒ 步骤三「到此结束」，不该被记成「删除许可取不到目标」。
+    for cmd in ("ls -la", "git status", 'echo "rm -rf dist"'):
+        _b, vct, _e = _hits(m, cmd)
+        if vct:
+            return ("非删除类操作 %r 也留下了删除许可记录（%s）⇒ 账本会被噪声灌满"
+                    % (cmd, [v.get("subkind") for v in vct]))
+    return True
+
+
+# ══════════════ S86 · 一个许可只开一扇门 ══════════════
+@check("S86 ★ 删除许可只门控**删除**规则：DST-02…DST-11（同属 destructive）不受它管辖")
+def s86():
+    m = _hook()
+    rules = _rules()
+    got = [r.get("id") for r in rules if m._is_delete_rule(r)]
+    if got != ["DST-01"]:
+        return ("删除类规则集合为 %s（应恰为 ['DST-01']）—— 门控范围过宽会把"
+                "「写项目外／云盘同步／提权」也一并放行（一个许可开多扇门）" % (got,))
+    return True
+
+
+@check("N-S86 负控：把门控放宽成 category==destructive ⇒ 同一条命令里 DST-07 被顺带放行 ⇒ 必须红")
+def n_s86():
+    gc = "git " + "clean" + " -fd"          # 拆开写，免得本文件自身被 DST-07 命中
+    cmd = "rm -rf dist && " + gc
+    live = _hook()
+    blocks, _vct, _e = _hits(live, cmd)
+    if "DST-07" not in blocks:
+        return ("夹具不成立：真实现下 `%s` 的 DST-07 本就没拦 ⇒ 负控无分辨力" % cmd)
+    mut = _hook()
+    mut._is_delete_rule = lambda r: bool(r) and (
+        (r.get("category") or "").lower() == "destructive"
+        or str(r.get("id") or "").startswith("DST-"))
+    blocks2, _vct2, _e2 = _hits(mut, cmd)
+    if "DST-07" in blocks2:
+        return "负控失效：放宽门控后 DST-07 仍拦 ⇒ 说明它没被门控影响（判据空转）"
+    return True
+
+
+# ══════════════ S87 · 第二票隔离（有/无构建描述） ══════════════
+@check("S87 ★ 第二票：上层有构建描述文件 ⇒ 可再生；没有 ⇒ 不可再生；文件 ⇒ 不可再生")
+def s87():
+    m = _hook()
+    with_desc = tempfile.mkdtemp(prefix="g0460_v2a_")
+    os.makedirs(os.path.join(with_desc, "sub"))
+    with io.open(os.path.join(with_desc, _ROOT_DESCRIPTOR), "w", encoding="utf-8") as f:
+        f.write("")
+    no_desc = tempfile.mkdtemp(prefix="g0460_v2b_")
+    os.makedirs(os.path.join(no_desc, "sub"))
+    ok1, _ = m._vct_vote2(os.path.join(with_desc, "sub"))
+    ok2, _ = m._vct_vote2(os.path.join(no_desc, "sub"))
+    ok3, _ = m._vct_vote2(os.path.join(with_desc, _ROOT_DESCRIPTOR))
+    if ok1 is not True:
+        return "有构建描述文件却判不可再生 ⇒ 第二票失效"
+    if ok2 is not False:
+        return "无构建描述文件却判可再生 ⇒ 第二票方向不安全（认不出应判不可再生）"
+    if ok3 is not False:
+        return "把**文件**（构建描述自身）判成可再生 ⇒ 配置文件删了就真没了"
+    return True
+
+
+@check("N-S87 负控：摘掉『必须是目录』⇒ 配置文件也被判可再生 ⇒ 必须红")
+def n_s87():
+    src = _src(_HOOK)
+    anchor = "if not abs_target or not os.path.isdir(abs_target):"
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    mut = _load(src.replace(anchor, "if not abs_target:"), "ptu0460_ns87")
+    d = tempfile.mkdtemp(prefix="g0460_v2c_")
+    with io.open(os.path.join(d, _ROOT_DESCRIPTOR), "w", encoding="utf-8") as f:
+        f.write("")
+    ok, _ = mut._vct_vote2(os.path.join(d, _ROOT_DESCRIPTOR))
+    if ok is False:
+        return "负控失效：摘掉『必须是目录』后配置文件仍判不可再生 ⇒ 该条件没被依赖"
+    return True
+
+
+# ══════════════ S88 · 连带对照：既有保护仍绿 ══════════════
+@check("S88 ★ 连带对照：受保护/工作树外/普通目录仍拦；取不到信号时兜底名单仍放行")
+def s88():
+    m = _hook()
+    rules = _rules()
+    # ① 真删除仍拦
+    for cmd in ("rm -rf hooks", "rm -rf old-config", "rm -rf " + _OUTSIDE,
+                "rm -rf dist && rm -rf hooks"):
+        blocks, _v, _e = _hits(m, cmd, rules=rules)
+        if "DST-01" not in blocks:
+            return "既有保护被放宽：`%s` 不再拦（blocks=%s）" % (cmd, blocks)
+    # ② 兜底名单在「两票取不到信号」时仍是最后退路（非 git 根 ⇒ 出口丙）
+    nogit = tempfile.mkdtemp(prefix="g0460_nogit_")
+    blocks, vct, _e = _hits(m, "rm -rf node_modules", project_root=nogit, rules=rules)
+    if blocks:
+        return "取不到版本信号时，兜底名单没接住（%s 被拦）⇒ 最后退路失效" % blocks
+    if not any(v.get("subkind") == "fallback_allow" for v in vct):
+        return "兜底名单放行没留痕（缺 fallback_allow）⇒ 分不清是哪条路生效"
+    return True
+
+
+# ══════════════ N-S88 · 兜底退路（第三信号）的负控 ══════════════
+@check("N-S88 负控：堵死兜底退路（fallback_allow 的 continue）⇒ 取不到信号时不再放行 ⇒ 必须红")
+def n_s88():
+    """第三信号（兜底名单／退路）的负控 —— 交接件 §8「三票各自的负控全在」的兜底解释。
+
+    设计（§3.4/§3.5/§7.3/§7.4）是**两票**（忽略声明 ＋ 可再生）；兜底名单是两票都
+    取不到信号时的**最后退路**（§3.7）。本负控证明这条退路**真的承重**：把它堵死之后，
+    「非 git 目录里删 node_modules」（两票都取不到信号）就不再被放行 —— 若堵死它仍放行，
+    说明放行来自别处，退路是空转的。
+    """
+    src = _src(_HOOK)
+    anchor = 'subkind="fallback_allow", decision="allow"))\n                continue'
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    mut = _load(src.replace(anchor, anchor[:-len("continue")] + "pass"), "ptu0460_ns88")
+    nogit = tempfile.mkdtemp(prefix="g0460_ns88_")
+    # 夹具前提：真实现下这条命令**确实**被兜底名单放行 —— 否则负控无分辨力。
+    live_blocks, live_vct, _le = _hits(_hook(), "rm -rf node_modules", project_root=nogit)
+    if live_blocks or not any(v.get("subkind") == "fallback_allow" for v in live_vct):
+        return ("夹具不成立：真实现下该命令未被兜底名单放行（blocks=%s）"
+                " ⇒ 负控无分辨力" % live_blocks)
+    blocks, _vct, _e = _hits(mut, "rm -rf node_modules", project_root=nogit)
+    if not blocks:
+        return ("负控失效：堵死兜底退路后仍被放行 ⇒ 该退路没在承重"
+                "（说明放行来自别处，不是兜底名单）")
+    return True
+
+
+def main():
+    print("=" * 78)
+    print("0.46.0 判据 —— 删除许可（VCT）：两票并且 / 五步顺序 / 四退出口")
+    print("（变异只在内存，夹具只落临时目录，不写任何产品文件）")
+    print("=" * 78)
+    ok = fail = 0
+    for name, fn in RESULTS:
+        try:
+            why = fn()
+            if why is True:
+                why = ""
+            print("  ✅ %-60s %s" % (name, why or ""))
+            ok += 1
+        except AssertionError as e:
+            print("  ❌ %-60s %s" % (name, e))
+            fail += 1
+        except Exception as e:                                  # noqa: BLE001
+            print("  💥 %-60s %r" % (name, e))
+            fail += 1
+    print("-" * 78)
+    print("  %d 绿 / %d 红" % (ok, fail))
+    return 0 if fail == 0 else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
