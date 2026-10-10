@@ -54,7 +54,7 @@ _T0 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段起点（性能
 
 # ---------------------------------------------------------------- constants --
 PKG_DIR = os.path.dirname(os.path.abspath(__file__))
-_ANTINEL_VERSION = "0.43.1"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
+_ANTINEL_VERSION = "0.44.0"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
 _T1 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段终点（性能插桩）
 
 
@@ -887,13 +887,32 @@ def _scan_command(cmd):
     return [x for x in segs if x.strip()], danger
 
 
+# ★★★ 0.44.0（结构化修复 · 改动 1）：前缀剥离正则的尾部由「必须有空白」扩展为
+#   「空白**或到行尾**」，并做**引号感知**（值允许：双引号串 ｜ 单引号串 ｜ 无空白串）。
+#
+#   旧写法 `^[A-Za-z_][A-Za-z0-9_]*=\S*\s+` 有两个毛病（2026-10-10 实测，方案 v2.0 §2.2）：
+#     ① 当整段**只是一个赋值、后面没有别的命令**时（如 `F="x.md"`），尾部没有空白
+#        ⇒ 匹配失败 ⇒ 首词被取成 `f="x.md"` ⇒ 不在只读动词表 ⇒ **整条命令被否决**。
+#        实测：一条「赋值 ＋ grep」的命令因此从「提醒」被误降为「拦截」（当天被拦的那条）。
+#     ② `\S*` 遇值里带空格（`F="my file.txt"`）就断在空格处，把 `file.txt"` 当成命令词
+#        ⇒ 同样误拦。所以必须**引号感知**。
+#   新写法把「值」限定为三种形态之一，尾部对齐到「空白或行尾」。
+#   ★ 方向安全：值写不进去时退回"不剥离"（首词仍非只读动词）⇒ 宁可多拦，不可漏放。
+_ASSIGN_HEAD_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_ASSIGN_PREFIX_RE = re.compile(
+    r'^[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|\'[^\']*\'|\S*)(?:\s+|$)')
+
+
 def _first_token(cmd):
     s = cmd.strip()
     while True:                                             # strip FOO=bar prefixes
-        m = re.match(r"^[A-Za-z_][A-Za-z0-9_]*=\S*\s+", s)
+        m = _ASSIGN_PREFIX_RE.match(s)
         if not m:
             break
-        s = s[m.end():]
+        rest = s[m.end():].lstrip()
+        if rest == s:                                        # 防零宽匹配死循环（理论不可达）
+            break
+        s = rest
     if not s:
         return ""
     tok = s.split(None, 1)[0].strip("\"'")
@@ -1038,6 +1057,20 @@ def readonly_command_context(command):
     if danger or not segs:
         return False
     for seg in segs:
+        # ★★★ 0.44.0（结构化修复 · 改动 2）：**纯赋值段**（剥完前缀后没有剩余命令）
+        #   没有执行意图 ⇒ 视为中性，跳过该段，不参与否决。
+        #
+        #   为什么这才叫根治：不是给名单加一条例外，而是**换掉判据的来源** ——
+        #   从「这段文本像不像只读」换成「这一段的结构是什么」。不这么做，每遇到一种
+        #   新写法就要加一条例外，名单永续增长。
+        #
+        #   ★ 一处行为变化（方案 §3.3 已提前声明）：`VAR=x; rm -rf dist` 这类写法会从
+        #     「拦」变成「走豁免放行」——这是**消除不一致**（规则本就写明该目标在豁免内，
+        #     之前只是被那句赋值连带否掉了），且放行照常记 `exclude_patterns_allow`，留痕不失。
+        #   ★ 硬纪律：赋值建起来的变量表**只许用于展示/提示/目标提取，不许用于匹配豁免
+        #     名单**。所以 `F="dist"; rm -rf "$F"` 仍然拦（删除段的动词不是只读动词）。
+        if _ASSIGN_HEAD_RE.match((seg or "").strip()) and _first_token(seg) == "":
+            continue
         tok = _first_token(seg)
         if tok in _INTERPRETERS:
             # ★★★ 0.33.2 (D-3a，2026-09-28 实测修正)：解释器分支**先问"能不能判"，
