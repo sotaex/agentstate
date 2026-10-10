@@ -20,8 +20,6 @@ _suite_probe.py
 _p_*
 _t_*
 _uxtest/
-
-# 0.43.x 卫生（Step C）：构建暂存目录 / 旧产物归档 / 代理工作区 —— 一律不入库
 antinel-*/
 _archive_dist/
 .workbuddy-ai/

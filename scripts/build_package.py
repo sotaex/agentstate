@@ -389,6 +389,15 @@ GITIGNORE_TEMPLATE = (
     #: _uxtest/ —— verification_tests 的导出工作区（export.*/health.*）。
     #:   0.36.8 同样只补进仓里那份而没进模板，本次写回时被抹掉过一次 ⇒ 现收进模板。
     "_uxtest/\n"
+    # ★★ 2026-10-10（0.43.x Step C 卫生）：与 `build/`、`dist/` 同族的**构建暂存/归档**
+    #   目录，外加代理工作区：
+    #     antinel-*/     —— `python -m build` 解出的 sdist 暂存树（`antinel-<ver>/`）。
+    #     _archive_dist/ —— `_archive_stale_dist` 把旧发布件挪进的归档目录（S38/S39）。
+    #     .workbuddy-ai/ —— 代理（AI）工作区（含本地记忆）。
+    #   实测（Step C）：这三个目录此前未忽略，`git status` 长期挂着一串未跟踪项；
+    #   一次 `git add -A` 就会把它们误入库。**写进模板才是修法**（见上方两次
+    #   "只改仓里那份、没改模板 ⇒ 下次构建静默回退"的教训；JDG-05 逐字节兜底）。
+    "antinel-*/\n_archive_dist/\n.workbuddy-ai/\n"
 )
 
 LICENSE_MD = """MIT License
