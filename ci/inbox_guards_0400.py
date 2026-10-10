@@ -258,12 +258,16 @@ def n_s21():
     tmp = tempfile.mkdtemp(prefix="g0400_n21_")
     o_sp = H.state_path
     H.state_path = lambda: os.path.join(tmp, "host_shield.json")
-    o_ls = H.load_state_strict
     try:
         with io.open(H.state_path(), "w", encoding="utf-8") as f:
             f.write("{ 坏")
-        # 变异：读不到时**不**拒写，而是拿默认值往下走（复现源②的形状）
-        H.load_state_strict = lambda: None
+        # 变异：**骗过「存在但读不到 ⇒ 拒写」那道门** —— 谎报"文件不存在"，
+        #   让代码走"新建"分支（复现源②的形状）。
+        # ★ 0.45.0：不再连 `load_state_strict` 一起 mock —— 甲层给
+        #   `update_state_fields` 加了**乐观锁**（写后要读回核对版本号），
+        #   把读函数恒返回 None 会让"写后核对"永远失败 ⇒ 无论拒写分支在不在
+        #   都返回 False ⇒ 负控分辨不出"拒写分支"的作用（负控自身失效）。
+        #   只谎报存在性即可：真读函数会把坏文件读成 None，写入后能读回 ⇒ 核对通过。
         prev_exists = os.path.exists
 
         def _fake_exists(p):
@@ -277,7 +281,6 @@ def n_s21():
             return "负控失效：骗过存在性检查后仍拒写"
         return True
     finally:
-        H.load_state_strict = o_ls
         H.state_path = o_sp
 
 

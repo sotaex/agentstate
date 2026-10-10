@@ -1,7 +1,7 @@
 {
  "_why": "★★★ 2026-09-29（D-23）：「东西在哪儿 / 它是不是 git 仓」这类**环境事实**此前只存在于散文与对话里，没有机器可读真源 ⇒ 每次都要重新推理 ⇒ **必然漂移**（本轮已反复发生：忘了产物仓是不是 git、忘了站点构建器不在任何 git 仓里）。本文件就是这些事实的**唯一真源**：它不是给人读的说明，是给判据读的数据。改它之前先想清楚：改错一条，`ci/regression_gate.py` 的 `j_workspace_facts` 立刻红。",
  "_rule": "三条：① 真源机器可读（本文件）；② 违反就红（j_workspace_facts）；③ 旧件退役（我的记忆不再作数，一切以本文件为准）。",
- "_measured_at": "2026-10-09",
+ "_measured_at": "2026-10-10",
  "repos": {
   "product": {
    "path": "D:\\psl\\poc\\antinel-security",
@@ -37,7 +37,7 @@
   "_note": "★ 站点构建器**不在任何 git 仓里**（D:\\2026\\PSL 非 git）—— 这是事实，不是缺陷；但它意味着改站点没有版本历史，要改就改构建器源码，别改 _antinel_site 里的生成物（下次构建会被覆盖）。"
  },
   "release": {
-  "version": "0.44.0",
+  "version": "0.45.0",
   "version_files": [
    "pyproject.toml",
    "server.json"
@@ -45,15 +45,15 @@
   "_version_files_note": "★★ 0.43.1（2026-10-10）：`psl/manifest.json` **已从本清单摘出** —— 它是**构建产物**（由 build_package.py 在打包时写入），语义上允许落后于源码，**不再**是『逐字一致』的版本承载件（见 ci/version_check.py 判据 7）。此处只列**手工维护**的两处。",
   "dist_dir": "D:\\psl\\poc\\antinel-security\\dist",
   "artifacts": [
-   "antinel-0.44.0-py3-none-any.whl",
-   "antinel-0.44.0.tar.gz"
+   "antinel-0.45.0-py3-none-any.whl",
+   "antinel-0.45.0.tar.gz"
   ],
   "pypi": {
    "published_version": "0.34.1",
-   "wheel": "D:/psl/poc/antinel-security/dist/antinel-0.44.0-py3-none-any.whl",
+   "wheel": "D:/psl/poc/antinel-security/dist/antinel-0.45.0-py3-none-any.whl",
    "host_audit_fixture": "D:\\2026\\PSL\\_strict_test\\ux_0332.txt",
    "_note": "★★ 2026-10-03 修订（据《Antinel（C14）版本登记不符·发现备忘 v1.0》§3 建议 1）：此前本文件把「已定稿、待上传的**目标态**」与「PyPI 上**事实**」**混在一个字段**里（published_version 写 0.33.2，而实查 PyPI 是 0.28.0）⇒ 任何「用户能装到的版本」类判据读到 0.33.2，用户实际装到 0.28.0。现在**两栏分开**：published_version＝PyPI 事实（只能由实查改写）；target_version＝本次待发版。★ 规则：published_version **只能用 pypi.org/pypi/antinel/json 的实查结果改写**，不得由「打算发什么」推导 —— 否则又回到「登记值跑在事实前面」。 ★★ 2026-10-05 实查更新：0.34.1 已于 2026-10-05T10:46:17Z 上传 PyPI 成功（实查 pypi.org/pypi/antinel/json：info.version=0.34.1，版本集 [0.28.0, 0.34.1]，两件 sha 与本地 dist 一致）；published_version 由 0.28.0 改为 0.34.1，published_at 同步。",
-   "target_version": "0.44.0",
+   "target_version": "0.45.0",
    "published_at": "2026-10-05T10:46:17Z"
   },
   "_note_0431": "0.43.0 -> 0.43.1（patch：修错、不改运行时对外行为档位）。两件事，同一根：① **冒泡根治**（创始人 2026-10-10「旧病复发……要从机制上彻底解决」）—— 全仓曾有**三条互不协调的发射路径**（钩子内联 PowerShell / 值守台 / 哨兵），同一条 `recovered=true` 的自愈记录会在『值守中』时弹窗 ⇒ 通知与事实相反。收口为**单一发射漏斗**（host_shield.notify_owner → _notify_throttled）＋**单一决策源**（bubble_decision）＋**可见性闸**（console_is_visible），钩子改为委托。② **研发态结构性失效**（创始人同日「目前状态是失守，这是不对的……是不是机制上有欠缺」）—— 根因是 `ci/version_check.py` 把**构建产物** `psl/manifest.json` 当成『10 处逐字一致』的手工承载件 ⇒ 每次升版被迫刷平 ⇒ `is_dev_build()` 的版本落差**永远为 0** ⇒ 研发态判不出、自检一漂移就假失守。修法：把它**摘出**逐字一致集（判据 7：≤ 代码版本、不许超前）＋ `tools/antinel_verify.py` INV-3 侧同步移入 INFO；`is_dev_build()` 恢复『只认版本落差』（**不用**哈希漂移——那会让『已发版后改 host_shield.py』也判研发态，违反 B1 撤回与 0363 R06 / 0364 C3）。为什么是 **patch 不是 minor**：本轮改的是**判据/机制口径与告警通道**，`host_shield` 的**判定档位**（六态与 R0/L1 定义）一字未改（冒泡收口改的是『谁发、什么时候发』，不是『发什么档』）。published_version=0.34.1 **仍未动**（该位只能由 PyPI 实查改写）。",
@@ -65,6 +65,7 @@
   "_note_0420": "0.41.0 -> 0.42.0（minor，报告内容变化＝运行时行为变化）。三件事：① P5-1 hook_slow 补消费侧——它自 v1.9 起就登记在 AUDIT_SCHEMA §4、写入侧忠实（89 条、最差 elapsed_ms 2,476,295 ≈ 41 分钟，实测于 D:/2026/PSL/.psl/audit/），但 report.py 唯一可能看见它的 `elif action == \"alert\"` 不分 type ⇒ 89 条被匿名计数吸收；本版进 config_health（计数＋最差值）并在文本/HTML 各单独一行，与 0.29.0 D-1（sec_path_whitelisted）/0.18.0 HP-47（hook_error）同一条纪律：「记了不等于看得见」。② 新增判据套件 ci/inbox_guards_0420.py（S35/S36/S37 ＋ N-S35/N-S36/N-S37，负控全走内存变异）并登记进 delivery_gate SUITES。③ AUDIT_SCHEMA 升 v1.13（只加读者契约，不改字段与取值域）。published_version=0.34.1 仍未动（该位只能由 PyPI 实查改写）。",
   "_note_0421": "0.42.0 -> 0.42.1（patch：发布验收量具两个假红，产物零问题）。scripts/verify_release.py 第一次真跑就抓到它自己两个洞：① [B] 的 sdist 陈旧判据用子串三段式，把 tar 顶层目录项本身（antinel-0.42.0，无尾斜杠）误判成非本版成员 ⇒ 干净产物被中止（[C]/[D] 都没跑到）；已改结构判据（顶层路径分量恰为 antinel-<version>），tarfile 逐名取证 159 成员全在本版目录下、零旧版成员。② [D] 安装态探针没接 SystemExit —— antinel.main(['--version']) 打完成本走 SystemExit(0)，进程在 process_elevation() 之前就退 ⇒ E2E-OK 永远打不出来；文档里 0.41.0 那次「通过」是手工探针，脚本化 D 步一次都没跑完过（零覆盖的路径必然是坏的）。已重写探针（接 SystemExit ＋ 核对版本 ＋ 验提权探测），并对源码树真跑。新增判据 S48/N-S48（sdist 判据必须结构化）＋ S49/N-S49（探针必须真跑通；负控＝摘 try/except 与喂错版本，两个变异都必须红）于 ci/guard_release_entry.py（10 条全绿）。0.42.0 两件产物用修好的检查器复验 [A][B][C][D] 全过（RECORD 128==128、twine 双 PASSED、E2E-OK 0.42.0 True）⇒ 缺陷全在量具、不在产物。published_version=0.34.1 仍未动（该位只能由 PyPI 实查改写）。",
  "_note_0430": "0.42.1 -> 0.43.0（minor：报告分档变化＝运行时行为变化）。修的是「自愈事件仍顶 R0」：链上实测 24h 内 17 条 recovered=true 却 severity=critical（定档按类型一刀切 LEVEL_OF_KIND[tamper]=R0，不看 recovered），页面于是产出「失守：防护文件被改动（状态被改，已自动恢复）」这种自相矛盾的标题，而分桶又把它们判进 info ⇒ 同一条记录档位说失守、分桶说不用管。修法不是改文案，而是**定档下沉到记录级**：新增 inbox_model.level_of_record（唯一实现）＋ title_of_record（标题必须与级别同向，降档后不许留「失守」二字，未登记专用文案时方向兜底改写），并把 0.40.0 的 A8（zone 上锁成败）从投影层手写的一段 if **收编**进同一函数（消掉第二套口径）。实测：24h 窗口 R0 104 → 79，17 条自愈降到 L1。同一轮补掉 S47 的漏网：0.42.0 的 _vis 只治了网页两条渲染路径，**命令行**（inbox_cli list）照样吐裸星号（实测 **不等于**）；去星号收进 inbox_model.visible_text（唯一实现），CLI 与网页共用。新增判据 S50/N-S50、S51/N-S51、S52/N-S52 于 ci/inbox_guards_0430.py（6 条全绿，负控全部内存变异且真会红）。AUDIT_SCHEMA v1.13 -> v1.14：recovered 由「可选语义」收窄为「消费侧必须据此降档」的强制约定。",
-  "_note_0440": "0.43.1 -> 0.44.0（minor：运行时**判定行为**变化）。落地交接文件 §8 **第 1 步「结构化修复」**：修的是『一句赋值前缀把整条命令连坐成「非只读」』。根因（实测，非推演）：`hooks/pre_tool_use.py` 的 `readonly_command_context()` 逐段判定时，把 `FOO=bar` 这类**纯赋值段**当成『未知命令』⇒ 该段非只读 ⇒ 整条命令连坐非只读 ⇒ 该放行的删除被误拦（实测：`VAR=x; rm -rf dist` 与 `FOO=bar; rm -rf dist` 均被拦，而 `rm -rf dist` 单独跑走豁免放行）。修法（**只改判定、不动豁免名单**）：① 前缀剥离正则由『必须有尾随空白』扩展为**引号感知**（`_ASSIGN_PREFIX_RE`：允许 `FOO=\"a b\"` / `FOO='a b'` 整段吃掉），并加 `rest==s` 终止护栏；② `readonly_command_context()` 遇到**剥完前缀没有剩余命令**的段（纯赋值）直接跳过，不判非只读。为什么是 **minor 不是 patch**：`readonly_command_context()` 的**返回结果**变了（原本判非只读的写法现在判只读）⇒ 拦/放行结论改变 ⇒ 属运行时行为变化，patch 位装不下（依 0.34.0 / 0.41.0 那两条判据）。★ **放行照旧留痕**：豁免放行走**既有的**「豁免放行」记录类型，**不新增**记录类型、**不改**字段与取值域 ⇒ AUDIT_SCHEMA 模式号仍为 **v1.15**（抬头「随」代码版本前移）。★ **硬纪律未被绕过**（交接件 10.5）：赋值建起的变量表**只用于展示/目标提取**，**不用于匹配豁免名单** ⇒ 『赋值成构建目录再删它』这类写法**仍然拦**（负控 N8 常驻）。★ 判据：新增 `ci/inbox_guards_0440.py`（S70 5 正例 / N-S70 N-S70b 反向对照 / S71 8 负例 / S72 结构锚点；**5 绿 0 红**）并登记进 `ci/delivery_gate.py` SUITES（23 套）。published_version=0.34.1 **仍未动**（该位只能由 PyPI 实查改写）。"
+  "_note_0440": "0.43.1 -> 0.44.0（minor：运行时**判定行为**变化）。落地交接文件 §8 **第 1 步「结构化修复」**：修的是『一句赋值前缀把整条命令连坐成「非只读」』。根因（实测，非推演）：`hooks/pre_tool_use.py` 的 `readonly_command_context()` 逐段判定时，把 `FOO=bar` 这类**纯赋值段**当成『未知命令』⇒ 该段非只读 ⇒ 整条命令连坐非只读 ⇒ 该放行的删除被误拦（实测：`VAR=x; rm -rf dist` 与 `FOO=bar; rm -rf dist` 均被拦，而 `rm -rf dist` 单独跑走豁免放行）。修法（**只改判定、不动豁免名单**）：① 前缀剥离正则由『必须有尾随空白』扩展为**引号感知**（`_ASSIGN_PREFIX_RE`：允许 `FOO=\"a b\"` / `FOO='a b'` 整段吃掉），并加 `rest==s` 终止护栏；② `readonly_command_context()` 遇到**剥完前缀没有剩余命令**的段（纯赋值）直接跳过，不判非只读。为什么是 **minor 不是 patch**：`readonly_command_context()` 的**返回结果**变了（原本判非只读的写法现在判只读）⇒ 拦/放行结论改变 ⇒ 属运行时行为变化，patch 位装不下（依 0.34.0 / 0.41.0 那两条判据）。★ **放行照旧留痕**：豁免放行走**既有的**「豁免放行」记录类型，**不新增**记录类型、**不改**字段与取值域 ⇒ AUDIT_SCHEMA 模式号仍为 **v1.15**（抬头「随」代码版本前移）。★ **硬纪律未被绕过**（交接件 10.5）：赋值建起的变量表**只用于展示/目标提取**，**不用于匹配豁免名单** ⇒ 『赋值成构建目录再删它』这类写法**仍然拦**（负控 N8 常驻）。★ 判据：新增 `ci/inbox_guards_0440.py`（S70 5 正例 / N-S70 N-S70b 反向对照 / S71 8 负例 / S72 结构锚点；**5 绿 0 红**）并登记进 `ci/delivery_gate.py` SUITES（23 套）。published_version=0.34.1 **仍未动**（该位只能由 PyPI 实查改写）。",
+  "_note_0450": "0.44.0 -> 0.45.0（minor：运行时**判定行为**变化 —— 并发下的『谁赢 / 判不判在岗 / 读不读得到』结论改变）。落地交接文件 §8 **第 2+3 步「甲加乙＋丙」**（方案 v3.0 §4.3）：根治**第二处节流失效**（状态写入）。★ 由来（实测非推演）：节流失效的两个候选 ——『拒写』与『被覆盖』—— 主因**不是**多进程同秒抢（同秒簇仅 1.2%（2/160）），而是**秒到分钟级错开的覆盖或静默拒写**（5–60 秒档占 23.4%（34/145））⇒ 只加锁不对症，必须先把**整份写回**收编进唯一入口。三件事：① **甲**：哨兵状态维护路径**整份写回处数 0**（`scan_once`/`_lock_pending_tree` 里 6 处 `save_state(state)` 全改 `update_state_fields(...)`）、**忽略返回值处数 0**（`_consume_state_write` 收口）、状态文件引入**版本号乐观锁**（`_rev`：写前读、写后核对，不符⇒重试一次⇒仍不符⇒出声）。② **乙**：用**审计链既有锁**（`audit_chain.acquire_lock`，入参任意路径）把『检查（节流）＋记账（last_revive_attempt）＋拉起』合成一个临界区。③ **丙**：哨兵**在岗名片**（pid ＋ 启动时刻**双因子**判活；陈旧名片改名让开；写走临时文件＋原子替换＋读回比对）。★ 同轮实测**新增一处并发缺陷并修掉**（本轮负控 N-S78b 就是它的证词）：Windows 上 `os.replace` 在**目标被读者打开**时**瞬时失败**（共享冲突 `PermissionError`，实测并发读下 200 次替换**失败 169 次**）⇒「临时文件＋原子替换」若**不带重试**会**打死写者**（保住了读者、丢了写者，正是 0.45.0 要根治的『静默丢失』形状）⇒ 新增 `_replace_with_retry`（**唯一入口**，5 处原子写全走它）＋读者侧 `read_sentinel_card` **对称重试**（只对『打不开』重试；打开了但内容坏⇒**立刻 None、绝不重试**，否则会把真半截掩盖成最终读到完整、负控失效）。★ 为什么是 **minor 不是 patch**：`update_state_fields()` 的**写盘结果**变了（原本整份写回会覆盖、现在拒写/乐观锁会拦住并出声），哨兵**判不判在岗**的结论变了（进程号复用现在判不在岗）⇒ 属运行时行为变化，patch 位装不下（依 0.34.0 / 0.41.0 / 0.44.0 那三条判据）。★ AUDIT_SCHEMA 升 **v1.16**：`host_shield_state_write_refused` 增补 `subkind`（取值域 `refused` / `optimistic_lock_lost`），**不新增**记录类型、**不改**已有字段名与取值域。★ 判据：新增 `ci/inbox_guards_0450.py`（S73 整份写回=0 / S74 忽略返回值=0 / S75 真进程互斥恰一赢家 / S76 没保住必须出声 / S77 进程号复用⇒判不在岗 / S78 并发读读不到半截 ＋ N-S73/N-S74/N-S75/N-S77/N-S78/N-S78b；**13 绿 0 红**）并登记进 `ci/delivery_gate.py` SUITES（24 套）。published_version=0.34.1 **仍未动**（该位只能由 PyPI 实查改写）。"
  }
 }

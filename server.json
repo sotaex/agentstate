@@ -3,7 +3,7 @@
   "name": "io.github.sotaex/agentstate",
   "title": "AgentState (by Antinel) — AI Agent Audit Chain",
   "description": "Local-first audit chain and ledger for AI coding agents: every tool call recorded on a tamper-evident hash chain, dangerous operations intercepted (37 rules / 4 gates), daily ledger (what did it do / what did it cost / what was blocked). Zero cloud, standard library only, third-party verifiable.",
-  "version": "0.44.0",
+  "version": "0.45.0",
   "author": {
     "name": "geguang",
     "email": "geguang@gmail.com"
@@ -56,7 +56,7 @@
     "notes": "no key, no rate limit, no network egress"
   },
   "stability": {
-    "schema": "AUDIT_SCHEMA v1.15, changes registered append-only",
+    "schema": "AUDIT_SCHEMA v1.16, changes registered append-only",
     "deprecation": "version discipline: old files never edited, successor noted"
   }
 }

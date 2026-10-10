@@ -133,6 +133,32 @@ def load_state():
     return st if st is not None else {"enabled": False, "workspaces": {}}
 
 
+def _replace_with_retry(tmp, dst, *, tries=400, delay=0.005):
+    """★ 0.45.0（丙层 · 并发读健壮性）：**带重试的原子替换**（唯一入口）。
+
+    为什么必须带重试（实测非推演，2026-10-10）：Windows 上 `os.replace(tmp, dst)`
+    在**目标文件正被读者打开**时会**瞬时**失败（共享冲突 `PermissionError`，
+    WinError 5）—— 本仓并发读压测里 200 次替换**失败 169 次**。若不带重试，
+    「临时文件 + 原子替换」这套保护读者的手法**反而会打死写者**：写者抛异常退出、
+    这一拍的状态更新整份丢失（正是 0.45.0 要根治的"被覆盖/静默丢失"形状之一）。
+    ⇒ 只对**瞬时共享冲突**重试；其余错误照旧抛出（不掩盖真问题）。
+    """
+    last = None
+    for _ in range(int(tries)):
+        try:
+            os.replace(tmp, dst)
+            return True
+        except OSError as e:                                     # noqa: PERF203
+            if isinstance(e, PermissionError) or getattr(e, "winerror", None) in (5, 32):
+                last = e
+                time.sleep(delay)
+                continue
+            raise
+    if last is not None:
+        raise last
+    raise OSError("replace retry exhausted: %s -> %s" % (tmp, dst))
+
+
 def save_state(st, *, allow_disarm=False):
     """写安全状态文件（整份覆盖，`os.replace` 原子落盘）。
 
@@ -159,10 +185,14 @@ def save_state(st, *, allow_disarm=False):
         st = dict(st)
         for k in _dropped:
             st.pop(k, None)
+    # ★ 0.45.0：乐观锁版本号由**唯一写入口**统一递增（读盘上当前值 +1）。
+    #   放在这里而不是各调用方 —— 才不会漏一处（交接件纪律：唯一入口上做）。
+    st = dict(st)
+    st[STATE_REV_KEY] = _state_rev(load_state_strict()) + 1
     tmp = state_path() + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(st, f, ensure_ascii=False, indent=1)
-    os.replace(tmp, state_path())
+    _replace_with_retry(tmp, state_path())                       # 0.45.0：带重试，读者挡不住写者
     _note_state_write(st, dropped=_dropped)
 
 
@@ -170,6 +200,23 @@ def save_state(st, *, allow_disarm=False):
 #: （`<hub>/notify_state.json`），但盘上旧状态文件里仍躺着一个
 #: `notify_shown_in_window`（实测 2026-10-10）⇒ 两套口径并存。写回时清掉。
 _LEGACY_STATE_KEYS = ("notify_shown_in_window",)
+
+#: ★★★ 0.45.0（甲层 · 乐观锁）：状态文件的**版本号字段**（单调递增）。
+#:   为什么（交接件 §4.1/§4.3）：节流失效的两个候选里，「被覆盖」这一支此前**完全
+#:   不可见** —— 哨兵启动时读一次 state 到内存，之后整份写回会把别处刚写的值覆盖
+#:   回去，而盘面看不出任何异常。给状态文件一个版本号，写前读、写后核对：版本号不符
+#:   ⇒ 有人在我们读之后落过盘 ⇒ 这次更新**被覆盖** ⇒ 重试一次，仍不符就出声。
+#:   ★ 为什么不放进 `_state_fp`：指纹只盖安全敏感字段（workspaces/zones/windows），
+#:     `_rev` 是运行元数据、每写必变；放进去会让防篡改守卫每拍都误判"变了"。
+STATE_REV_KEY = "_rev"
+
+
+def _state_rev(st):
+    """读状态文件的版本号（缺失/坏值 ⇒ 0，向后兼容旧文件）。"""
+    try:
+        return int((st or {}).get(STATE_REV_KEY) or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _note_state_write(st, dropped=None):
@@ -205,38 +252,79 @@ def update_state_fields(*, allow_disarm=False, **fields):
           （enabled 缺省＝未布防，与"这台机器还没有状态文件"这一事实一致）。
 
       ★ 判据 S21：把状态文件写成非 JSON ⇒ 本函数必须返回 False 且文件字节不变。
+
+    ★★★ 0.45.0（甲层 · 乐观锁）：写前读一次版本号、写完再读一次核对 ——
+      一致 ⇒ 我们是最后写者（返回 True）；不一致 ⇒ 被并发写者**覆盖** ⇒ **重试一次**；
+      仍不一致 ⇒ 出声（`_state_write_refused`，subkind=`optimistic_lock_lost`）并返回
+      False。这把「被覆盖」从**静默**变成**可查**（交接件 §4.1 候选二的对手）。
+      ★ 乐观锁与真锁（乙层）不互斥：乐观锁是"事后发现被覆盖"，真锁是"根本不并发"。
     """
-    prev = load_state_strict()
-    if prev is None:
-        if os.path.exists(state_path()):
-            # ★★ 0.43.1：**拒写必须出声**（交接件纪律 10.12 / §5.6）。
-            #   这道保护（读不到就拒写）在生效时，会让**依赖写成功的节流与记账
-            #   静默失效** —— 症状就是"哨兵被反复拉起"（实测当天 19 次）。
-            #   过去这里只有一句 `return False`，而三处调用点**全部忽略返回值**
-            #   ⇒ 保护在起作用，却没有任何人能看见（"失效不可见"）。
-            #   ⇒ 现在：拒写进链留痕（`notify=False`，它是诊断不是"要你动手"）。
-            _state_write_refused("文件存在但读不到（坏/半截）", fields)
-            return False                    # 存在但读不到 ⇒ 拒写（源②的正面修复）
-        prev = {}                           # 不存在 ⇒ 新建（不编造安全字段）
-    merged = dict(prev)
-    merged.update(fields)
-    save_state(merged, allow_disarm=allow_disarm)
-    return True
+    for _attempt in (0, 1):
+        prev = load_state_strict()
+        if prev is None:
+            if os.path.exists(state_path()):
+                # ★★ 0.43.1：**拒写必须出声**（交接件纪律 10.12 / §5.6）。
+                #   这道保护（读不到就拒写）在生效时，会让**依赖写成功的节流与记账
+                #   静默失效** —— 症状就是"哨兵被反复拉起"（实测当天 19 次）。
+                #   过去这里只有一句 `return False`，而三处调用点**全部忽略返回值**
+                #   ⇒ 保护在起作用，却没有任何人能看见（"失效不可见"）。
+                #   ⇒ 现在：拒写进链留痕（`notify=False`，它是诊断不是"要你动手"）。
+                _state_write_refused("文件存在但读不到（坏/半截）", fields)
+                return False                    # 存在但读不到 ⇒ 拒写（源②的正面修复）
+            prev = {}                           # 不存在 ⇒ 新建（不编造安全字段）
+        want_rev = _state_rev(prev) + 1
+        merged = dict(prev)
+        merged.update(fields)
+        save_state(merged, allow_disarm=allow_disarm)
+        # ★ 0.45.0：写后核对版本号 —— 与写前算出的期望值不符 ⇒ 有人在我们读之后落过盘
+        back = load_state_strict()
+        if back is not None and _state_rev(back) == want_rev:
+            return True
+    _state_write_refused("乐观锁：写后版本号不符（疑似被并发覆盖）", fields,
+                         subkind="optimistic_lock_lost")
+    return False
 
 
-def _state_write_refused(why, fields):
-    """按字段更新被拒写 ⇒ **进链留痕**（不弹泡：它是诊断，不是"需要你动手"）。
+#: ★ 0.45.0（甲层）：按字段写"没落盘"的**进程内**读数（保护自报，交接件 §5.6）。
+#:   留痕本身由 `_state_write_refused` 进链完成；这里只给调用方一个"我这次写没写进去"
+#:   的读数，避免返回值被静默丢弃。有界（只留最近 32 条），不会无限增长。
+_STATE_WRITE_MISSES = []
+
+
+def _consume_state_write(ok, what):
+    """消费 `update_state_fields` 的返回值：False ⇒ 记一条进程内读数（不写盘、不打印）。
+
+    ★ 为什么（交接件 §4.3 甲层）："按字段更新入口的返回值不再允许被忽略"。
+      留痕（进链）已由 `_state_write_refused` 完成；本函数保证**每一个调用点都消费
+      返回值**，而不是 `update_state_fields(...)` 一扔了事（那正是"静默"的形状）。
+      ★ 不打印：本模块被钩子导入，stdout 可能被宿主消费 ⇒ 打印会污染协议输出。
+    """
+    if not ok:
+        try:
+            _STATE_WRITE_MISSES.append((what, round(time.time(), 3)))
+            del _STATE_WRITE_MISSES[:-32]
+        except Exception:                                        # noqa: BLE001
+            pass
+    return ok
+
+
+def _state_write_refused(why, fields, subkind="refused"):
+    """按字段更新**没保住** ⇒ **进链留痕**（不弹泡：它是诊断，不是"需要你动手"）。
 
     ★ 为什么必须出声（交接件 §5.6「保护自报」）：一个保护静默生效，会让另一个
-      保护（节流 / 记账）**悄悄失效**，而盘面看起来跟正常一样。把"拒写"变成链上
+      保护（节流 / 记账）**悄悄失效**，而盘面看起来跟正常一样。把"没写进去"变成链上
       一条可查记录，下次就不用从 46.9% 的短间隔数据里反推根因。
+    ★ 0.45.0（甲层）：`subkind` 区分两种"没保住" —— `refused`（读不到 ⇒ 主动拒写）
+      与 `optimistic_lock_lost`（写后版本号不符 ⇒ 被并发覆盖）。同一记录类型两种成因，
+      读者按 subkind 分派（与 `host_shield_zone_locked` 的 zone_ok/zone_lock_failed
+      同一手法：**写 side 把区分结构化**）。
     """
     try:
         os.makedirs(_hub_rollup_dir(), exist_ok=True)
         record(None, "host_shield_state_write_refused", decision="deny",
                severity="warning", notify=False,
-               fields=sorted(fields.keys()),
-               reason="按字段更新被拒写（%s）——本次字段变更未落盘：%s"
+               fields=sorted(fields.keys()), subkind=subkind,
+               reason="按字段更新未生效（%s）——本次字段变更未落盘：%s"
                       % (why, ", ".join(sorted(fields.keys()))))
     except Exception:                                            # noqa: BLE001
         pass
@@ -288,7 +376,7 @@ def save_survey(doc):
     tmp = p + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(doc, f, ensure_ascii=False, indent=1)
-    os.replace(tmp, p)
+    _replace_with_retry(tmp, p)
 
 
 def save_findings(rows):
@@ -297,7 +385,7 @@ def save_findings(rows):
     tmp = p + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(rows, f, ensure_ascii=False, indent=1)
-    os.replace(tmp, p)
+    _replace_with_retry(tmp, p)
 
 
 def load_watch_registry(root):
@@ -992,7 +1080,7 @@ def ledger_rmw(mutator):
         tmp = p + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(d, f, ensure_ascii=False, indent=1)
-        os.replace(tmp, p)
+        _replace_with_retry(tmp, p)                              # 0.45.0：带重试
         return True
     except Exception:                                            # noqa: BLE001
         return False
@@ -1934,6 +2022,215 @@ def _kill_stale(pid):
         return False
 
 
+# ═══════════════ 哨兵在岗名片（租约）· 0.45.0 丙层 ═══════════════
+# ★★★ 为什么要有它（交接件 §4.3 丙层）：
+#   共享状态文件里的 `sentinel_pid` 是**一份副本** —— 它可能被伪造、也可能陈旧
+#   （进程号被复用：旧哨兵已死，pid 被别的进程占用 ⇒ 光看 pid 会误判"在岗"）。
+#   在岗名片把"我在岗"这件事**落在哨兵自己的进程身上**：
+#     · 路径带**自己的进程号 + 启动时刻** ⇒ 各哨兵不共享文件 ⇒ 不需要保护；
+#     · 判死**同时比对启动时刻** ⇒ 防进程号复用；
+#     · 写走**临时文件 + 原子替换 + 读回比对** ⇒ 并发读永远读不到半截内容。
+#   ★ 与"唯一写入口"同一精神：名片是**哨兵自证在岗**的凭据，不是别人替它写的。
+SENTINEL_CARD_SUBDIR = "sentinel_cards"
+#: 名片"陈旧"阈值：进程已死且名片写于这么久之前 ⇒ 视为可清理的残留。
+SENTINEL_CARD_STALE_AFTER = 3600.0
+#: 进程号复用判据的容差（秒）：名片记的启动时刻与进程**实际**创建时刻相差超过它 ⇒ 判复用。
+SENTINEL_CARD_START_TOL = 5.0
+
+
+def sentinel_card_dir():
+    """在岗名片目录（位于中枢目录下，随 hub 走）。"""
+    return os.path.join(_hub_dir(), SENTINEL_CARD_SUBDIR)
+
+
+def _card_path(pid, started_at):
+    """名片路径：**进程号 + 启动时刻**（双因子）。启动时刻里的非数字字符剔除。"""
+    stamp = re.sub(r"[^0-9]", "", str(started_at or ""))[:20] or "0"
+    return os.path.join(sentinel_card_dir(), "sentinel-%s-%s.json" % (int(pid), stamp))
+
+
+def _parse_iso_epoch(s):
+    """把 ISO 时刻串转 epoch 秒；解析不了 ⇒ None（不猜）。"""
+    try:
+        return datetime.fromisoformat(str(s)).timestamp()
+    except Exception:                                            # noqa: BLE001
+        return None
+
+
+def write_sentinel_card(pid=None, started_at=None):
+    """哨兵自写在岗名片（**临时文件 + 原子替换 + 读回比对**）。返回是否落盘。
+
+    ★ 读回比对保**写者**（交接件 §4.3 丙层）：原子替换保**读者**永远读不到半截，
+      读回比对保**写者**知道自己这次真的写进去了（缺一不可）。
+    """
+    try:
+        pid = int(pid if pid is not None else os.getpid())
+    except (TypeError, ValueError):
+        return False
+    started_at = started_at or datetime.now().isoformat(timespec="seconds")
+    try:
+        os.makedirs(sentinel_card_dir(), exist_ok=True)
+    except OSError:
+        return False
+    rec = {"pid": pid, "started_at": started_at,
+           "written_at": datetime.now().astimezone().isoformat(timespec="seconds")}
+    p = _card_path(pid, started_at)
+    tmp = p + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(rec, f, ensure_ascii=False, indent=1)
+        _replace_with_retry(tmp, p)              # 原子替换(带重试)：读者要么旧要么新，不见半截
+        with open(p, encoding="utf-8") as f:     # 读回比对：确认落盘的就是我们要写的
+            back = json.load(f)
+        return (back.get("pid") == pid and back.get("started_at") == started_at)
+    except Exception:                                            # noqa: BLE001
+        return False
+
+
+def read_sentinel_card(path):
+    """读一张名片；半截/坏/不存在 ⇒ None（调用方按"不在岗"处理，方向收紧）。
+
+    ★ 0.45.0（丙层 · 与写者对称）：对**瞬时共享冲突**做有限重试 —— Windows 上写者
+      正在原子替换时，读者会**短暂打不开**（实测并发读压测里 720 次成功读里夹着
+      22 次瞬时打不开）。若读者不重试，这 22 次会各返回一个 None，而 None = "不在岗"
+      ⇒ 凭空多拉一个哨兵（正是 0.45.0 要消掉的"并发制造的假信号"）。
+      对称原则：**写者带重试，读者也得带**，否则保护是单边的。
+    ★ 只对**打不开**重试；**打开了但内容坏（半截）⇒ 立刻 None、绝不重试** ——
+      否则重试会把"真半截"掩盖成"最终读到完整"，本轮的负控 N-S78 就失去分辨力。
+    """
+    for _ in range(40):
+        try:
+            with open(path, encoding="utf-8") as f:
+                d = json.load(f)
+            return d if isinstance(d, dict) else None
+        except FileNotFoundError:
+            return None
+        except OSError as e:                                     # 打不开（含共享冲突）⇒ 短暂重试
+            if isinstance(e, PermissionError) or getattr(e, "winerror", None) in (5, 32):
+                time.sleep(0.005)
+                continue
+            return None
+        except Exception:                                        # noqa: BLE001
+            return None                                          # 打开了但内容坏 ⇒ 不重试
+    return None
+
+
+def find_sentinel_cards(pid=None):
+    """列出名片路径（可按进程号过滤）。坏目录 ⇒ 空表。"""
+    out = []
+    try:
+        names = sorted(os.listdir(sentinel_card_dir()))
+    except OSError:
+        return out
+    for n in names:
+        if not n.endswith(".json"):
+            continue
+        p = os.path.join(sentinel_card_dir(), n)
+        if pid is not None:
+            c = read_sentinel_card(p)
+            try:
+                if int((c or {}).get("pid")) != int(pid):
+                    continue
+            except (TypeError, ValueError):
+                continue
+        out.append(p)
+    return out
+
+
+def _pid_start_epoch(pid):
+    """进程的**实际创建时刻**（epoch 秒）；查不到 ⇒ None。用于防进程号复用。"""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        k = ctypes.windll.kernel32
+        h = k.OpenProcess(0x1000, 0, int(pid))      # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return None
+        try:
+            c, e, kt, u = (wintypes.FILETIME(), wintypes.FILETIME(),
+                           wintypes.FILETIME(), wintypes.FILETIME())
+            if not k.GetProcessTimes(h, ctypes.byref(c), ctypes.byref(e),
+                                     ctypes.byref(kt), ctypes.byref(u)):
+                return None
+            ticks = (c.dwHighDateTime << 32) | c.dwLowDateTime   # 100ns since 1601
+            return ticks / 1e7 - 11644473600.0                   # → epoch
+        finally:
+            k.CloseHandle(h)
+    except Exception:                                            # noqa: BLE001
+        return None
+
+
+def sentinel_on_duty(state=None):
+    """★ 0.45.0（丙层）：**判哨兵是否在岗**（按名片，同时比对进程号与启动时刻）。
+
+    返回 `(on_duty: bool, why: str)`。判据（缺一不可）：
+      ① 名片存在且可读（半截/坏 ⇒ 不在岗，方向收紧）；
+      ② 名片里的 pid **进程活着**；
+      ③ 进程的**实际创建时刻**与名片记的启动时刻一致（**防进程号复用**）——
+         差得远 ⇒ 这是别的进程占了这个号，旧哨兵其实已死 ⇒ **判不在岗**。
+    ★ 为什么必须比启动时刻：进程号是对进程的**描述**，不是进程本身；只看 pid
+      会把"pid 被复用"读成"哨兵还在岗"（交接件 §4.3 丙层 / §4.4）。
+    """
+    st = state if state is not None else load_state()
+    try:
+        pid = int(st.get("sentinel_pid"))
+    except (TypeError, ValueError):
+        return False, "no-pid"
+    if pid <= 0:
+        return False, "no-pid"
+    card = None
+    for p in find_sentinel_cards(pid=pid):
+        card = read_sentinel_card(p)
+        if card:
+            break
+    if not card:
+        return False, "no-card"
+    if not pid_alive(pid):
+        return False, "pid-dead"
+    real = _pid_start_epoch(pid)
+    rec = _parse_iso_epoch(card.get("started_at"))
+    if real is None or rec is None:
+        return True, "alive(start-time-unknown)"     # 取不到 ⇒ 不否证（宁可少杀）
+    if abs(real - rec) > SENTINEL_CARD_START_TOL:
+        return False, "pid-reused"                   # 进程号被复用 ⇒ 旧哨兵其实已死
+    return True, "on-duty"
+
+
+def scan_stale_sentinel_cards(now=None):
+    """把**已死且陈旧**的在岗名片**改名让开**（零删除纪律）。返回清理条数。
+
+    ★ 为什么要扫（交接件 §4.3 丙层）：名片不清理会**无限累积**。判"可清理"须
+      同时满足：进程已死 **且** 名片写于 `SENTINEL_CARD_STALE_AFTER` 之前
+      （刚死的哨兵名片可能还要被读一次，别急着挪）。
+    """
+    now = time.time() if now is None else now
+    moved = 0
+    for p in find_sentinel_cards():
+        card = read_sentinel_card(p)
+        if not card:
+            continue                                  # 读不到 ⇒ 不动它（可能是别人正在写）
+        try:
+            pid = int(card.get("pid"))
+        except (TypeError, ValueError):
+            pid = None
+        if pid and pid_alive(pid):
+            continue                                  # 进程还活着 ⇒ 不动
+        written = _parse_iso_epoch(card.get("written_at"))
+        if written is None:
+            try:
+                written = os.path.getmtime(p)
+            except OSError:
+                continue
+        if now - written < SENTINEL_CARD_STALE_AFTER:
+            continue                                  # 还不够陈旧 ⇒ 留着
+        try:
+            os.rename(p, p + ".away-" + time.strftime("%Y%m%d-%H%M%S"))
+            moved += 1
+        except OSError:
+            pass
+    return moved
+
+
 def spawn_sentinel(pkg_root, python_exe=None):
     """拉起哨兵：优先脱离当前作业对象/会话（breakaway）——宿主会话结束不再连带杀。
     幂等：已有**活着的**哨兵直接返回。自检不过（B4e/f：脚本/登记表被改）→ 拒绝拉起
@@ -1963,7 +2260,8 @@ def spawn_sentinel(pkg_root, python_exe=None):
         # ★ 0.40.0：改走**按字段更新**（读不到就一个字都不写）——
         #   旧写法 `st = load_state(); st[...] = None; save_state(st)` 在
         #   状态文件读坏时会**把默认值整份写回**（源②）。
-        update_state_fields(sentinel_pid=None)
+        # ★ 0.45.0：返回值**不许忽略**（`_consume_state_write`；拒写已进链留痕）。
+        _consume_state_write(update_state_fields(sentinel_pid=None), "clear-stale-pid")
     ok_self, problems = self_check()
     if not ok_self:
         # ★★★ 0.36.3：**研发态不拦住哨兵启动**（实测发现的连带缺陷）。
@@ -1994,9 +2292,11 @@ def spawn_sentinel(pkg_root, python_exe=None):
                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                  stderr=subprocess.DEVNULL, close_fds=True)
             # ★ 0.40.0：只写这两个字段（读不到就一个字都不写）
-            update_state_fields(
+            # ★ 0.45.0：返回值**不许忽略**（`_consume_state_write`；拒写已进链留痕）。
+            _consume_state_write(update_state_fields(
                 sentinel_pid=p.pid,
-                sentinel_started_at=datetime.now().isoformat(timespec="seconds"))
+                sentinel_started_at=datetime.now().isoformat(timespec="seconds")),
+                "spawn-register")
             return True, p.pid, mode
         except (OSError, ValueError):
             continue                              # breakaway 被策略禁止 → 降级重试
@@ -2353,12 +2653,55 @@ def _sentinel_uptime(st):
     return time.time() - t.timestamp()
 
 
+def _acquire_revive_lock():
+    """★ 0.45.0（乙层）：给「检查+记账+拉起」加临界区 —— 用**审计链既有锁**。
+
+    ★ 为什么复用而不另写（交接件 §4.3 乙层 / §4.4）：仓库里已有一套成熟锁协议
+      （`audit_chain.acquire_lock`，**入参是任意路径**，自带独占创建、身份牌、
+      30 秒死锁回收、存活探测、令牌匹配释放）。为今天才写的新组件重拟一套可靠性
+      语义，收益为负 —— 不另写新锁，就不必重拟语义。
+    ★ 拿不到 ⇒ None（**退化，不阻断**）—— 与链追加同一纪律：宁可少锁，
+      不可把"拉起哨兵"这件事变成崩溃或拒绝服务。
+    """
+    try:
+        import audit_chain
+        return audit_chain.acquire_lock(state_path())
+    except Exception:                                            # noqa: BLE001
+        return None
+
+
+def _release_revive_lock(lock):
+    """释放复苏临界区锁（令牌匹配才释放，best-effort，绝不抛）。"""
+    if not lock:
+        return
+    try:
+        import audit_chain
+        audit_chain.release_lock(lock)
+    except Exception:                                            # noqa: BLE001
+        pass
+
+
 def ensure_alive(pkg_root, cause="manual"):
     """paramedic：布防中且哨兵不在/僵死 → 拉起并留痕；拉不起也留痕（不再沉默）。
     armed 以链为准（B4b 系）。心跳陈旧（B2 挂起/僵死）→ 杀掉重拉。
     ★ 0.34.0（F-17）：心跳「查不到」不再等价于「还活着」——改看进程启动时刻定宽限，
       见函数体内注释。
+
+    ★★★ 0.45.0（乙层）：**把「检查（节流）＋ 记账（`last_revive_attempt`）＋ 拉起」
+      合成一个临界区**（交接件 §4.3 乙层）。为什么：节流失效的主因是"秒到分钟级
+      错开的覆盖或静默拒写"（§4.2）—— 钩子 / 值守台 / 计划任务三个 paramedic
+      会各自读到"该拉起了" ⇒ 双双拉起。锁把「检查完了还没记账就去拉起」这条
+      路径直接关掉。**语义一字未改**（原函数体原样搬进 `_ensure_alive_locked`）。
     返回 "disabled"|"throttled"|"alive"|"stale-revived"|"revived"|"spawn-failed"|"error"。"""
+    _lock = _acquire_revive_lock()
+    try:
+        return _ensure_alive_locked(pkg_root, cause)
+    finally:
+        _release_revive_lock(_lock)
+
+
+def _ensure_alive_locked(pkg_root, cause="manual"):
+    """`ensure_alive` 的**临界区函数体**（语义与原 `ensure_alive` 一字不改）。"""
     try:
         st = load_state()
         audit_dir = _shield_audit_dir(pkg_root)
@@ -2373,7 +2716,19 @@ def ensure_alive(pkg_root, cause="manual"):
         if now - last_try < REVIVE_MIN_INTERVAL:
             return "throttled"
         old_pid = st.get("sentinel_pid")
-        if sentinel_alive(st):
+        _alive = sentinel_alive(st)
+        if _alive:
+            # ★ 0.45.0（丙层）：**在岗名片否证优先** —— 进程号被复用（旧哨兵已死、
+            #   pid 被别的进程占用）时光看 pid 会误判"在岗"。只在名片**明确否证**
+            #   （why=pid-reused）时改判；名片缺失 / 取不到启动时刻 ⇒ 沿用原判
+            #   （不给无名片的老版本哨兵造成误杀 —— 方向：宁可少杀不可误杀）。
+            _on_duty, _why = sentinel_on_duty(st)
+            if _why == "pid-reused":
+                record(audit_dir, "host_shield_breach", decision="deny", severity="warning",
+                       reason="哨兵 pid=%s 的进程号已被复用（在岗名片记的启动时刻与"
+                              "进程实际创建时刻不符）——旧哨兵已死，判不在岗并重启" % old_pid)
+                _alive = False
+        if _alive:
             # B2：pid 活着 ≠ 在干活。心跳陈旧 = 挂起/僵死 → 杀掉重拉。
             # ★★ 0.35.3 修（真缺陷，创始人报障「右下又在冒泡」）：
             #   旧代码写 `heartbeat_age(audit_dir)` —— 而 `heartbeat_age` 的入参是
@@ -2452,7 +2807,10 @@ def ensure_alive(pkg_root, cause="manual"):
                    cause=cause)
             return "spawn-failed"
         # ★ 0.40.0：按字段更新（旧写法在 state 读坏时会把默认值整份写回）
-        update_state_fields(last_revive_attempt=now)
+        # ★ 0.45.0：返回值**不许忽略** —— 这条记账若没落盘，节流就会失效
+        #   （哨兵被反复拉起）；拒写/被覆盖已由 `_state_write_refused` 进链留痕。
+        _consume_state_write(update_state_fields(last_revive_attempt=now),
+                             "revive-throttle-account")
         ok, pid, mode = spawn_sentinel(pkg_root)
         if ok:
             record(audit_dir, "host_shield_revived", decision="allow", severity="warning",
@@ -3001,10 +3359,24 @@ def scan_once(root, state, audit_dir, regs=None):
             touched = True
     now = time.time()
     if now - state.get("last_task_check", 0) >= 300:   # #6: 任务哨卫（5 分钟一查）
+        # ★★★ 0.45.0（甲层）：整份写回 → **按字段更新**（交接件 §4.3 甲层）。
+        #   为什么必须换：整份写回会拿哨兵启动时读到的旧值覆盖别处（钩子/CLI）刚写的
+        #   值 —— 这就是"拿着一份旧蓝图把图纸抽屉塞回去"（§4.2）。这里只写本块真正
+        #   改过的字段：`last_task_check` ＋ `_task_watchdog` 可能改的三个去重字段。
+        #   ★ 返回值**不许忽略**（§4.3）：False ⇒ 本次更新没落盘（拒写/被覆盖），
+        #     拒写已由 `_state_write_refused` 进链留痕；这里把它计入本拍账。
+        _keys = ("last_task_check", "_task_installed_last",
+                 "_task_missing_announced_at", "_task_unknown_announced_at")
+        _before = {k: state.get(k) for k in _keys}
         state["last_task_check"] = now
         if _task_watchdog(state, audit_dir, now):
             touched = True
-        save_state(state)
+        _chg = {k: state.get(k) for k in _keys if state.get(k) != _before[k]}
+        if _chg and not update_state_fields(**_chg):
+            touched = True
+        # ★ 0.45.0（丙层）：5 分钟一次 —— 清理**已死且陈旧**的在岗名片（零删除）。
+        if scan_stale_sentinel_cards(now):
+            touched = True
         # 0.31.0 (F4): hook-registration watchdog —— 哨兵只能为"仍然注册着的
         # 闸门"作保。布防时登记 settings 文件与其哈希（antinel.py host-shield
         # enable 写入 state["hook_registration"]）；此处核对：文件消失 /
@@ -3076,7 +3448,9 @@ def _lock_pending_tree(base, lock_dirs, state, audit_dir, now,
                 key = target.lower()
                 if key not in rep:         # 去重：同一路径只告警一次
                     rep.append(key)
-                    save_state(state)
+                    # ★ 0.45.0（甲层）：按字段写（只写 symlink_reported）＋ 返回值不许忽略
+                    if not update_state_fields(symlink_reported=rep):
+                        touched = True
                     record(audit_dir, "host_shield_breach",
                            decision="deny", severity="warning",
                            reason="发现符号链接（绕过载体），不予放行：%s" % target)
@@ -3109,7 +3483,9 @@ def _lock_pending_tree(base, lock_dirs, state, audit_dir, now,
                            reason="放行窗到期，%s 已重新上锁" % target)
                     touched = True
                 state.setdefault("windows", {}).pop(key, None)
-                save_state(state)
+                # ★ 0.45.0（甲层）：按字段写（只写 windows）＋ 返回值不许忽略
+                if not update_state_fields(windows=state.get("windows") or {}):
+                    touched = True
                 continue
             # 只锁登记声明的落盘目录（如 pending）；工作区级目录永不上锁
             if os.path.basename(target).lower() not in lock_dirs:
@@ -3119,7 +3495,9 @@ def _lock_pending_tree(base, lock_dirs, state, audit_dir, now,
             if key not in _baseline:
                 try:
                     _baseline[key] = os.path.getmtime(target)
-                    save_state(state)
+                    # ★ 0.45.0（甲层）：按字段写（只写 lock_mtime_baseline）＋ 返回值不许忽略
+                    if not update_state_fields(lock_mtime_baseline=_baseline):
+                        touched = True
                 except OSError:
                     pass
             # ★ H-4 自保护：Antinel 自身 / 当前宿主的数据根**不上锁**（除非用户显式 deny）。
@@ -3144,7 +3522,9 @@ def _lock_pending_tree(base, lock_dirs, state, audit_dir, now,
                 _held = state.setdefault("lock_held_at", {})
                 if now - (_held.get(key) or 0) >= LOCK_HELD_EVERY:
                     _held[key] = now
-                    save_state(state)
+                    # ★ 0.45.0（甲层）：按字段写（只写 lock_held_at）＋ 返回值不许忽略
+                    if not update_state_fields(lock_held_at=_held):
+                        touched = True
                     record(audit_dir, "host_shield_lock_held", decision="deny",
                            severity="none",
                            reason="门闸持锁中（周期性状态留痕；旧机制此处空白）：%s" % target)
@@ -3159,7 +3539,9 @@ def _lock_pending_tree(base, lock_dirs, state, audit_dir, now,
                 _cnt, _first = 0, now
             _cnt += 1
             _att[key] = (_cnt, _first)
-            save_state(state)
+            # ★ 0.45.0（甲层）：按字段写（只写 lock_attempts）＋ 返回值不许忽略
+            if not update_state_fields(lock_attempts=_att):
+                touched = True
             if _cnt == 1:
                 # ★ H-7：补锁失败的诊断必须说对。旧文案写"有进程在对抗门闸"——
                 #   实测真因是 OWNER RIGHTS 类 ACE 让锁**没生效**，不是有人对抗。
@@ -3283,7 +3665,17 @@ def run_sentinel(root):
     state["sentinel_started_at"] = datetime.now().isoformat(timespec="seconds")
     # ★ 0.40.0：哨兵**是布防位的执法权威**（它手里的 armed 取自链权威）
     #   ⇒ 显式声明 allow_disarm —— 否则"链说撤防、哨兵照着写 false"会被那道闸挡下。
-    save_state(state, allow_disarm=True)
+    # ★ 0.45.0（甲层）：整份写回 → **按字段更新**（只写登记的这三个字段），
+    #   否则会拿启动时读到的旧值覆盖别处刚写的值（§4.2）。返回值不许忽略。
+    if not update_state_fields(sentinel_pid=state["sentinel_pid"],
+                               sentinel_started_at=state["sentinel_started_at"],
+                               enabled=armed, allow_disarm=True):
+        print("!! 哨兵登记（sentinel_pid/enabled）未落盘 —— 见链上 state_write_refused",
+              flush=True)
+    # ★ 0.45.0（丙层）：自写**在岗名片**（租约）—— 路径带自己的 pid + 启动时刻，
+    #   不与他人共享 ⇒ 不需要保护；判死时靠"启动时刻"防进程号复用。
+    if not write_sentinel_card(state["sentinel_pid"], state["sentinel_started_at"]):
+        print("!! 在岗名片未落盘（临时文件+原子替换+读回比对失败）——见上", flush=True)
     # B4f（0.28.3）：登记表运行期防毒——启动缓存基线，之后每 5 拍校验一次：
     # 文件变了先问 manifest（自检）：相符=合法更新→采纳；不符=被毒→tamper+按缓存执法。
     regs = load_watch_registry(root)
@@ -3312,7 +3704,10 @@ def run_sentinel(root):
             #     【实测缺口】首版只在启动时比对一次，运行期翻转静默无痕（drill v2）。
             if bool(state.get("enabled")) != armed:
                 state["enabled"] = armed
-                save_state(state, allow_disarm=True)     # ★ 哨兵＝执法权威（见上）
+                # ★ 0.45.0（甲层）：按字段写（只写 enabled）＋ 返回值不许忽略
+                if not update_state_fields(enabled=armed, allow_disarm=True):
+                    print("!! enabled 回写未落盘（拒写/被覆盖）——见链上 state_write_refused",
+                          flush=True)
                 if time.time() - _DIVERGE_LAST[0] > 1800:
                     _DIVERGE_LAST[0] = time.time()
                     record(audit_dir, "host_shield_tamper", decision="deny",
@@ -3343,7 +3738,15 @@ def run_sentinel(root):
                     record(audit_dir, "host_shield_tamper", decision="deny",
                            severity="critical", field="state", reason=_tamper,
                            subkind="state_drift", recovered=True)
-                    save_state(state, allow_disarm=True)   # ★ 哨兵＝执法权威
+                    # ★ 0.45.0（甲层）：按字段写（只回写被修复的安全字段）＋ 返回值不许忽略。
+                    #   旧写法整份写回 last_good ⇒ 会把别处刚写的运行字段一起覆盖回旧值。
+                    if not update_state_fields(
+                            workspaces=state.get("workspaces") or {},
+                            zones=state.get("zones") or [],
+                            windows=state.get("windows") or {},
+                            enabled=armed, allow_disarm=True):
+                        print("!! state 回写恢复未落盘 —— 见链上 state_write_refused",
+                              flush=True)
             else:
                 fp, last_good, grace = fp2, json.loads(json.dumps(state)), 0
             # 3) 心跳（armed 才打；monotonic 计时）
@@ -3353,6 +3756,10 @@ def run_sentinel(root):
                        severity="none", reason="哨兵心跳（门闸在岗）",
                        watched=len(load_watch_registry(root)))
                 last_beat = now_m
+                # ★ 0.45.0（丙层）：随心跳**续租在岗名片**（低频写；临时文件+原子替换）。
+                #   不打印失败：心跳本身已进链，名片是自证凭据，续租失败不阻断执法。
+                write_sentinel_card(state.get("sentinel_pid") or os.getpid(),
+                                    state.get("sentinel_started_at"))
             # B4f：登记表防毒（每 5 拍一查，文件哈希对 manifest）
             poll_n += 1
             if poll_n % 5 == 0:
