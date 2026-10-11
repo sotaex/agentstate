@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """清理上次构建遗留的暂存目录（构建产物类，非用户数据）。
 
 背景：build 0036.8b 的收尾清暂存被宿主 safe-delete 守卫中断

@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
+
 # 回归闸门（L7）使用说明
 
 > **一句话**：每次改完代码、提交前，跑 `python ci/regression_gate.py`。

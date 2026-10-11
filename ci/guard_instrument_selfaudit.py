@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """0.42.0 meta 判据 —— **量具先量自己：判据不许用文本匹配代替结构匹配**。
 
 ★★ 为什么必须有这条（2026-10-09 本班**五次**踩同一个坑，每次都是我写判据时犯的）：

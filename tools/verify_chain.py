@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """Antinel audit chain verifier — 0.20.0 five-level classifier.
 
 Classifies every anomaly as one of:

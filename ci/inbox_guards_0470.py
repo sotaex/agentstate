@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """0.47.0 判据 —— **告警预算 ＋ 篡改分通道 ＋ 界面必带分母**（方案 v3.0 §5 三步）。
 
 ★★ 由来（方案 v3.0 §5，数据实测，不是设计偏好）：

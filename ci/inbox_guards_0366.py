@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """0.36.6 判据 —— **收敛机制本身**的三层固化（本轮踩出来的教训，编成机器检查）。
 
 ★ 这份文件与前面所有判据的区别（这就是它存在的理由）：

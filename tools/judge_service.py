@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """AgentState v0.33.0 - Resident Judge Service (D4 approved, B3).
 
 Pre-loads pre_tool_use module (rules, compiled patterns, all logic) once.

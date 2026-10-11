@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """0.45.0 判据 —— **第二处根治：状态写入**（甲单一入口收编 ＋ 乙接线既有锁 ＋ 丙名片租约）。
 
 ★★ 由来（交接件 §4.1/§4.2，实测非推演）：

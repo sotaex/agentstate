@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: MIT
 """Host-protocol probe (U-47 evidence collector).
 
 Register this as the PreToolUse hook of an UNVERIFIED host (Qoder / TRAE), trigger ONE

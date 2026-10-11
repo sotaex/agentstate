@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: MIT
+
 """Antinel 审计链 · 独立验证器（公开挑战件）
 零依赖（Python 3 标准库）。任何人可用它离线复算整条链。
 

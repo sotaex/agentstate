@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """构建期：把五态**颜色+形状**画成 5 个 `.ico`（托盘用）。
 
 ★ 为什么不用 MP4 抽帧：本机**没有 ffmpeg**，运行期也不想引入解码依赖。

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """发布入口 —— 把 0.42.0 之前**四条手工命令**固化为一条（0.42.0 新增）。
 
 ★★ 为什么必须有这个入口（2026-10-09 本班三次复发逼出来的）：

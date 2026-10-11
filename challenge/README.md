@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: MIT -->
+
 # 篡改挑战 · Try to fool the auditor
 
 > **这是一条真实的 AgentState 审计链：14 条记录，其中 3 条是当场拦截的危险操作。**

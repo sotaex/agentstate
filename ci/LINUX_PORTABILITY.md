@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
+
 
 
 ## M-1 · macOS 独有：F-06 whitelist.paths 豁免失效（待查，已 continue-on-error）

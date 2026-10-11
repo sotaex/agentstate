@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """发布验收 —— `python -m build` **之后**的那道机械检查（0.42.0 新增）。
 
 ★★ 为什么必须有这个脚本（2026-10-09 两件事逼出来的）：

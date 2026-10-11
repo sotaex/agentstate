@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """_host_detect.py -- 宿主归因的唯一来源（0.33.1）
 
 为什么要有这个文件

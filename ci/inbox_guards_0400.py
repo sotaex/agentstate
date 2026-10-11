@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """0.40.0 判据 —— 「四行失守」的根因修复（A 组 5 条 ＋ B 组 1 条）＋ **B1 撤回的防复发**。
 
 ★★ 这一份判据的由来（创始人 2026-10-09）：

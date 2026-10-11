@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """值守台 · 数据模型与状态聚合（唯一真源）。
 
 ★ 本模块只做**纯逻辑**：不读盘、不联网、不 import 产品其它模块。

@@ -1,4 +1,5 @@
 ---
+# SPDX-License-Identifier: CC-BY-SA-4.0
 name: antinel-security
 description: >
   Scans your AI coding environment for security risks: exposed secrets,
@@ -9,17 +10,17 @@ description: >
   skill poisoning, prompt injection, agent monitoring, 密钥泄露, Agent 行为监控.
   MCP server permission audit: planned for Phase 1.5.
   中文触发词：安全检查, 环境审计, 安全扫描, 是否安全.
-license: MIT
+license: Apache-2.0
 compatibility: Requires Python 3.10+; standard library only; no network access; no third-party packages. Hooks verified on Claude Code and ZCode (identical protocol); Qoder/TRAE profiles declared but unverified.
 metadata:
   psl-verified: "true"
   psl-verified-spec: "psl-vs-0.1"
-  psl-verified-at: "2026-10-11T05:57:05+0800"
+  psl-verified-at: "2026-10-11T12:29:21+0800"
   psl-verified-evidence: "live PreToolUse block of a real .env read in ZCode (SEC-01) plus a full-assertion judgment run; digest check 21/21 digests match this build (assertions 315/315)"
   psl-verifier: "scripts/run_harness.py"
   antinel-product: "security-audit"
   antinel-tier: "free"
-  antinel-version: "0.48.0"
+  antinel-version: "0.48.1"
   psl-token-interception: "false"
 ---
 

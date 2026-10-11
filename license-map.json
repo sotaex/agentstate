@@ -1,0 +1,49 @@
+{
+  "$schema": "antinel-license-map-v1",
+  "license": "Apache-2.0",
+  "version": "0.48.1",
+  "updated": "2026-10-11",
+  "strategy": "Antinel许可策略v1.1（2026-10-10）",
+  "note": "归属做成数据：闸门（ci/inbox_guards_0481.py）按本表判，不许靠猜 import。改本表＝改许可，须经拍板并过闸门。",
+  "defaults": {
+    "py": "Apache-2.0",
+    "md": "CC-BY-SA-4.0",
+    "json": "Apache-2.0",
+    "html": "Apache-2.0"
+  },
+  "overrides": {
+    "antinel_mcp.py": "MIT",
+    "transcript_reader.py": "MIT",
+    "tools/probe_host.py": "MIT",
+    "strings.py": "MIT",
+    "challenge/": "MIT",
+    "rules/": "CC-BY-4.0",
+    "demo/": "Apache-2.0",
+    "docs/A6收入边界声明.md": "CC-BY-4.0",
+    "docs/AUDIT_SCHEMA.md": "CC-BY-SA-4.0"
+  },
+  "spdx_exempt": [
+    "rules/",
+    "license-map.json",
+    "demo/"
+  ],
+  "spdx_exempt_reason": {
+    "rules/": "rules_hash 是整文件 sha256、零归一化，JSON 内加任何键都会触发 SELF-TAMPERED 降级（核验报告 v1.0 §2.2 实测）；归属仅由本表与 README 分层表声明",
+    "license-map.json": "本表自身即归属真源",
+    "demo/": "演示夹具，内容可能被验证套件按字节比对，不嵌头部"
+  },
+  "mit_pieces": [
+    "antinel_mcp.py",
+    "transcript_reader.py",
+    "tools/probe_host.py",
+    "strings.py",
+    "challenge/"
+  ],
+  "glossary_deviation": "glossary.py 在策略 v1.1 §3.1 列为 MIT；核验报告 v1.0 §1.4 乙案（已拍板）改判 Apache-2.0：它顶层硬依赖 inbox_model（Apache 侧状态真源），MIT 自足性不成立；自抄态名会撞 0372 S08（全仓扫第二份声明）。",
+  "tier_meaning": {
+    "Apache-2.0": "越被抄越强：产品主体与机器可读件（专利授权 + NOTICE 归属通道）",
+    "MIT": "越被抄越强的引流小件：会被顺手拿走的自足小件，义务是负资产",
+    "CC-BY-4.0": "供他人整篇转载的声明与规则集（A6 是用来追责自己的文件）",
+    "CC-BY-SA-4.0": "规范与文档：防碎裂优先于防抄"
+  }
+}

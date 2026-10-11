@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
+
 # Antinel · 三处根治的最优方案 v3.0（2026-10-10）
 
 > **交办来源（创始人原话，逐字）**

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """antinel verify-namespaces (P-A3, 0.17.0) - namespace-list verification aid.
 
 Python's standard library has NO ed25519, and this package promises stdlib-only.

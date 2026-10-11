@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: MIT
+
 """Antinel MCP Server v0.1 - stdio JSON-RPC (MCP protocol)
 暴露 Antinel 的核心查询能力给宿主 Agent。
 协议：MCP 2.0 (stdio, newline-delimited JSON-RPC)
@@ -90,7 +92,7 @@ def main():
             resp = {"jsonrpc": "2.0", "id": rid, "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "antinel", "version": "0.48.0"}}}
+                "serverInfo": {"name": "antinel", "version": "0.48.1"}}}
         elif method == "tools/list":
             resp = {"jsonrpc": "2.0", "id": rid, "result": {"tools": TOOLS}}
         elif method == "tools/call":

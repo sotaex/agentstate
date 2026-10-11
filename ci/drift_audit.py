@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 r"""Antinel 漂移审计 v1.0：需求文件 → 盘上行为，逐条机械化验证。
 需求源：RULES.md / THREAT_MODEL.md v0.27 / AUDIT_SCHEMA v1.2 / SKILL.md / A6 / 三问三答 / UX定稿 / 宿主审计说明书 v1.2
 审计对象：部署包（默认 D:\psl\poc\antinel-security，可用 ANTINEL_PKG 覆盖）（与真实行为，非文档对照文档）

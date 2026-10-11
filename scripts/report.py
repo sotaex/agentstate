@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """AgentState v0.29.0 - report generator (F-04 behaviour report, F-05 score).
 
 Sources:

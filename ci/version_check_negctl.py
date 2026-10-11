@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """判据 6（server.json stability.schema vs AUDIT_SCHEMA.md 抬头）的负控。
 
 守「守卫先红后绿」：证明 `_stability_schema_fails()` 在漂移时**真会红**，

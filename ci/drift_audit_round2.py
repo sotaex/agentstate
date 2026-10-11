@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """漂移审计 round2：修正 4 处审计脚本误差 + 诊断 D1/D3"""
 import io, sys, os, json, re, subprocess, tempfile, shutil, hashlib, glob
 

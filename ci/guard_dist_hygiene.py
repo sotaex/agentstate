@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """dist 卫生判据 —— 「旧版发布件让开」从手工动作变成构建器自己的机制。
 
 ★★ 这一份判据的由来（2026-10-09 实测复发，**第三次同族**）：

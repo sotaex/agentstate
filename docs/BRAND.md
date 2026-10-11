@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
+
 # Antinel 品牌架构 v1.0（2026-09-23 定稿）
 
 **Antinel** = 母品牌（公司/信任伞）。

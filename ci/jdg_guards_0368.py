@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """0.36.8 判据 —— **判据腐化检测**（JDG 族：守「发现错误的机制」自己）。
 
 ★ 这份文件与前面所有判据的区别（这就是它存在的理由）：

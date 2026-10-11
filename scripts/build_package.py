@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """Assemble the publishable skill package from the flat PoC layout (spec 2.2 / table 10-1).
 
 Output: <out>/antinel-security/
@@ -190,7 +192,7 @@ HARNESS_SRC = SRC / "scripts" / "verification_tests.py"
 if not HARNESS_SRC.is_file():
     raise SystemExit("★ 构建器找不到套件：%s\n  （产物仓构建必须用本仓的套件）" % HARNESS_SRC)
 NAME = "antinel-security"
-VERSION = "0.48.0"
+VERSION = "0.48.1"
 # P-A3: the namespace this build declares itself under. derive_object_ownership()
 # reads git remote first, then THIS field; fail-closed unattributed when neither
 # resolves. Kept beside the hashes so a third party can see what was declared.
@@ -224,6 +226,7 @@ classifiers = [
   "Environment :: Console",
   "Intended Audience :: Developers",
   "Intended Audience :: Information Technology",
+  "License :: OSI Approved :: Apache Software License",
   "License :: OSI Approved :: MIT License",
   "Operating System :: Microsoft :: Windows",
   "Programming Language :: Python :: 3",
@@ -291,7 +294,7 @@ assets = ["icons/*.ico", "logo/*.mp4", "logo/*.svg"]
 #   撞铁律：「**页面上不许教跑不通的命令**」。
 #   `.py` 由 build_py 随包（见 `_assert_package_data_covered` 的实测注释），
 #   下面三条 glob 覆盖非 .py 的那些（README.md / tamper-lab.html / chain/*）。
-challenge = ["*.md", "*.html", "chain/*.jsonl", "chain/*.json"]
+challenge = ["*.md", "*.html", "chain/*.jsonl", "chain/*.json", "LICENSE"]
 """
 
 # 2026-09-24 (G7): files that live in the package repo but are NOT produced by
@@ -400,7 +403,218 @@ GITIGNORE_TEMPLATE = (
     "antinel-*/\n_archive_dist/\n.workbuddy-ai/\n"
 )
 
-LICENSE_MD = """MIT License
+# ★★ 2026-10-11（0.48.1，策略 v1.1 落地）：主许可 MIT → Apache-2.0。
+#   官方全文自 apache.org 原件嵌入（md5 3b83ef96387f14655fc854ddc3c6bd57，含附录），
+#   不做任何附加——G7-3 的教训（附加段把相似度压到阈值之下）由
+#   ci/inbox_guards_0481.py L2 常驻把守。A6 只经 NOTICE 指针进入。
+#   四层归属的唯一数据真源 = license-map.json。
+LICENSE_MD = """
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
+
+   APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+   Copyright [yyyy] [name of copyright owner]
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+"""
+
+# MIT 层文本：策略 v1.1 §三 的引流小件（challenge/ 目录 LICENSE 与文件头同源）。
+# glossary.py 已按核验报告 v1.0 §1.4 乙案移出 MIT（顶层硬依赖 inbox_model）。
+MIT_MD = """MIT License
 
 Copyright (c) 2026 Zhilv Technology (Antinel / PSL)
 
@@ -421,6 +635,17 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+"""
+
+# NOTICE：Apache-2.0 §4(d) 的归属通知载体。首行 = MIT 豁免（策略 §五.5）。
+NOTICE_MD = """MIT 豁免：本 NOTICE 只对以 Apache-2.0 发布的部分生效；凡文件头 SPDX 标识为
+MIT 的组件（antinel_mcp.py、transcript_reader.py、tools/probe_host.py、strings.py、
+challenge/ 目录）不适用本 NOTICE，仅受其随附的 MIT 许可与文件头 SPDX 标识约束。
+
+Copyright 2026 Zhilv Technology (Antinel / PSL)
+
+A6 收入边界声明（对项目自身的政策约束，不构成对本许可所授予权利的限制）
+见 docs/A6收入边界声明.md（CC-BY-4.0）。
 """
 
 # G7-3 (2026-09-24): 原先本模板末尾挂着 4 行中文（`---` + 「收入与中立性边界」）。
@@ -587,7 +812,7 @@ description: >
   skill poisoning, prompt injection, agent monitoring, 密钥泄露, Agent 行为监控.
   MCP server permission audit: planned for Phase 1.5.
   中文触发词：安全检查, 环境审计, 安全扫描, 是否安全.
-license: MIT
+license: Apache-2.0
 compatibility: Requires Python 3.10+; standard library only; no network access; no third-party packages. Hooks verified on Claude Code and ZCode (identical protocol); Qoder/TRAE profiles declared but unverified.
 metadata:
   psl-verified: "%(verified)s"
@@ -995,7 +1220,17 @@ python scripts/install.py --root <项目根>   # 不一致时重跑安装，自�
 
 ## 许可 / License
 
-MIT（见 LICENSE 文件）。收入与中立性边界见 docs/A6收入边界声明.md。
+本包采用分层许可。逐文件真源见 `license-map.json`；机器可读标识见各文件头
+`SPDX-License-Identifier`。
+
+| 层 | 覆盖 | 许可 |
+|---|---|---|
+| 产品代码（默认） | 除下述外的全部源码与 CI 件 | Apache-2.0（见 LICENSE；义务与归属提示见 NOTICE） |
+| 引流小件 | `antinel_mcp.py`、`transcript_reader.py`、`tools/probe_host.py`、`strings.py`、`challenge/` | MIT（见 challenge/LICENSE 与各文件头） |
+| 声明与规则集 | `docs/A6收入边界声明.md`、`rules/*.json` | CC-BY-4.0 |
+| 规范与文档 | README、docs/ 下规范与说明 | CC-BY-SA-4.0 |
+
+收入与中立性边界见 docs/A6收入边界声明.md（CC-BY-4.0）：不收通过费、不出售排名、关联方无豁免。
 """
 
 # ---------- ZCode plugin wrapper (D6/A-05: plugin hooks auto-enable the runner) ----------
@@ -1004,7 +1239,7 @@ PLUGIN_JSON = {
     "version": VERSION,
     "description": ("Security audit and live behavior protection for AI coding agents: %d rules, 4 gates, local-only." % RULES_N),
     "author": {"name": "Zhilv Technology (Antinel / PSL)"},
-    "license": "MIT",
+    "license": "Apache-2.0",
     "skills": "skills",
 }
 
@@ -1247,7 +1482,7 @@ def build_plugin(skill_pkg, out_root):
     (plug / ".zcode-plugin" / "plugin.json").write_text(json.dumps(PLUGIN_JSON, ensure_ascii=False, indent=2),
                                                         encoding="utf-8")
     npm = {"name": "@antinel/security-zcode-plugin", "version": VERSION, "private": True,
-           "license": "MIT", "description": PLUGIN_JSON["description"]}
+           "license": "(Apache-2.0 AND MIT)", "description": PLUGIN_JSON["description"]}
     (plug / "package.json").write_text(json.dumps(npm, ensure_ascii=False, indent=2), encoding="utf-8")
     _sync(plug, final, label="plugin ")
     # 2026-09-24 (F5): 清暂存不得取消 return。原先 _clear(plug) 排在 return 之前，
@@ -2136,7 +2371,12 @@ def build(out_root, verify=False):
                              capture_output=True, text=True, timeout=30)
         if out.returncode == 0 and out.stdout.strip():
             (pkg / "references").mkdir(exist_ok=True)
-            (pkg / "references" / "AGENT_SKILL.md").write_text(out.stdout, encoding="utf-8", newline="\n")
+            # 0.48.1：生成物不带源（subprocess 输出没有 SPDX 头）——不加头则每次
+            #   组装都把 _license_apply 写进实例的头冲掉（0481 L1 实测红 7 处的教训：
+            #   「修了实例、没修源头」的镜像）。md 件头 = HTML 注释形态，落第 1 行。
+            (pkg / "references" / "AGENT_SKILL.md").write_text(
+                "<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->\n" + out.stdout,
+                encoding="utf-8", newline="\n")
     except Exception as e:
         print("WARN: AGENT_SKILL.md not generated: %s" % e)
     shutil.copy2(srcfile("default.json"), pkg / "rules" / "default.json")
@@ -2150,11 +2390,17 @@ def build(out_root, verify=False):
     a6 = Path(r"D:\2026\PSL\A6收入边界声明v1.0.md")
     if a6.is_file():
         (pkg / "docs").mkdir(exist_ok=True)
-        shutil.copy2(a6, pkg / "docs" / "A6收入边界声明.md")
+        # 0.48.1：签署源件保持纯净（不带 SPDX 头），归属头由构建器在复制时加上——
+        #   直接 copy2 会在每次组装时冲掉实例上的头（0481 L1 实测红）。
+        (pkg / "docs" / "A6收入边界声明.md").write_text(
+            "<!-- SPDX-License-Identifier: CC-BY-4.0 -->\n"
+            + a6.read_text(encoding="utf-8").replace("\r\n", "\n"),
+            encoding="utf-8", newline="\n")
     else:
         print("★ 注意：A6 收入边界声明**未随包**（源件不在 %s）—— 它是文档仓的签署件，" % a6)
         print("  本次构建**没有把它带进包里**。这不是错误，但你应当知道包里没有它。")
     (pkg / "LICENSE").write_text(LICENSE_MD, encoding="utf-8", newline="\n")
+    (pkg / "NOTICE").write_text(NOTICE_MD, encoding="utf-8", newline="\n")
     # ★★ 2026-09-29（D-21）：把 setuptools 构建垃圾（build/ / antinel.egg-info/ / dist/）
     #   写进**构建器自己的模板**。此前 898791a 手工往仓里 .gitignore 补过这三行，
     #   但本行每次构建都会**整文件覆盖** .gitignore ⇒ 手工修改被**静默回退**
@@ -2268,8 +2514,18 @@ def build(out_root, verify=False):
     tools.mkdir(exist_ok=True)
     probe_src = Path(r"D:\psl\poc\r1v3\probe_host.py")
     if probe_src.is_file():
-        shutil.copy2(probe_src, tools / "probe_host.py")
-    (tools / "HOST_PROBE.md").write_text(HOST_PROBE_MD, encoding="utf-8", newline="\n")
+        # 0.48.1：r1v3 源仓的 py 件不带 SPDX 头（MIT 归属声明由本仓构建器落），
+        #   直接 copy2 每次组装都会冲掉实例上的头（0481 L1 实测红）。
+        #   头插在 shebang / coding 声明之后（与 _license_apply_0481.insert_header 同规则）。
+        _pl = probe_src.read_text(encoding="utf-8").replace("\r\n", "\n").split("\n")
+        _pi = 1 if _pl and _pl[0].startswith("#!") else 0
+        if _pi < len(_pl) and _pl[_pi].startswith("#") and "coding" in _pl[_pi]:
+            _pi += 1
+        _pl.insert(_pi, "# SPDX-License-Identifier: MIT")
+        (tools / "probe_host.py").write_text("\n".join(_pl), encoding="utf-8", newline="\n")
+    (tools / "HOST_PROBE.md").write_text(
+        "<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->\n" + HOST_PROBE_MD,
+        encoding="utf-8", newline="\n")
     (pkg / "ci" / "run_verifications.sh").write_text(POSIX_RUNNER, encoding="utf-8", newline="\n")
     # F5-c (2026-09-24): 这里不再取"现在几点"。见 _verification_evidence()：
     # 只有那份判定记录**确实描述本次要发的字节**时，才敢写 psl-verified: "true"。
@@ -2279,13 +2535,24 @@ def build(out_root, verify=False):
     _vev = (("live PreToolUse block of a real .env read in ZCode (SEC-01) plus a full-assertion "
              "judgment run; digest check %s" % _vdetail) if _vok
             else ("NOT VERIFIED for this build: %s" % _vdetail))
-    (pkg / "SKILL.md").write_text(
-        SKILL_MD % dict(_TPL_CTX(),
-                        verified="true" if _vok else "false",
-                        verified_at=_vat if _vok else "",
-                        verified_evidence=_vev,
-                        verifier="scripts/run_harness.py"), encoding="utf-8", newline="\n")
-    (pkg / "references" / "RULES.md").write_text(rules_md(pkg / "rules" / "default.json"), encoding="utf-8", newline="\n")
+    _skill_txt = SKILL_MD % dict(_TPL_CTX(),
+                                 verified="true" if _vok else "false",
+                                 verified_at=_vat if _vok else "",
+                                 verified_evidence=_vev,
+                                 verifier="scripts/run_harness.py")
+    # 0.48.1：SKILL.md 的 SPDX 头放 **front matter 内第 2 行**（YAML 注释形态）。
+    #   放文件最前会破坏 front matter（必须以 --- 开头）；放 front matter 之后
+    #   会超出闸门的六行窗。归属同时登记在 license-map.json（spdx_exempt 例外豁免
+    #   不适用于本件——本件是真带头，豁免表只收真正带不了头的）。
+    _sl = _skill_txt.split("\n")
+    if _sl and _sl[0].strip() == "---" and not any(
+            "SPDX-License-Identifier:" in ln for ln in _sl[:6]):
+        _sl.insert(1, "# SPDX-License-Identifier: CC-BY-SA-4.0")
+        _skill_txt = "\n".join(_sl)
+    (pkg / "SKILL.md").write_text(_skill_txt, encoding="utf-8", newline="\n")
+    (pkg / "references" / "RULES.md").write_text(
+        "<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->\n" + rules_md(pkg / "rules" / "default.json"),
+        encoding="utf-8", newline="\n")
     # 2026-09-24 (G7): README.md is REPO-OWNED, not a builder output. The builder
     # regenerating it from README_MD silently reverted 116 lines of hand-maintained
     # landing-page copy (the G4-era rewrite) back to the old technical template --
@@ -2301,7 +2568,9 @@ def build(out_root, verify=False):
     # the repo README a second time -- measured, not theorised.
     if not (final / "README.md").is_file():
         (pkg / "README.md").write_text(README_MD % _TPL_CTX(), encoding="utf-8", newline="\n")
-    (pkg / "references" / "THREAT_MODEL.md").write_text(THREAT_MODEL_MD % _TPL_CTX(), encoding="utf-8", newline="\n")
+    (pkg / "references" / "THREAT_MODEL.md").write_text(
+        "<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->\n" + THREAT_MODEL_MD % _TPL_CTX(),
+        encoding="utf-8", newline="\n")
     # ---- A1（2026-09-26）：MANIFEST.in 由构建器产出 ----------------------------------
     # ★ 位置是承重的：**必须等暂存包装配完毕**再生成。第一版把这段放在装配中段
     #   （`.gitattributes` 之后），当时 `tools/` 还不存在、`psl/` 还是空的 ⇒

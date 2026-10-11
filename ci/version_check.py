@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """版本号一致性守卫 —— **九处手工维护的版本承载件**必须逐字相同；
 `psl/manifest.json` 的 `version` **单独判**（产物可落后、不许超前）。
 

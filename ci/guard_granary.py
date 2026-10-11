@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """0.38.0 判据 —— 粮（哨兵的口粮）的**三条铁律 ＋ 账本边界**。
 
 ★★ 为什么要有它（创始人 2026-10-09 那三句「一定要机制上解决」的同一条纪律）：

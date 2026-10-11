@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """AgentState v0.30.0 - enforcement self-probe (E-3 closure, signaling half).
 
 Why this exists (THREAT_MODEL E-3): the guardrail's deny signal rested on

@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """AgentState v0.28.3 self-test harness (T1/T3/T4/T2/T6/T7 subset).
 
 Runs the real scripts as subprocesses exactly like a host would.

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """负控实测：把 0.36.4 那次错误修法（删 `ACT_INFO`）重放一遍，
 看 E 组判据会不会报红。
 

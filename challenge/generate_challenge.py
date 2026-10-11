@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: MIT
+
 """Antinel 篡改挑战 · 资产生成器
 在一次性沙箱里用真实钩子生成一条审计链（含拦截事件），连同日锚导出为公开挑战件。
 用法：python generate_challenge.py   （产物落在本目录 chain/ 下）

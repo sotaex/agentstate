@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: MIT
+
 """挑战方的作弊尝试：在链文件中部把一条记录里的一个字符改掉（同长度，不破坏 JSON），
 然后跑独立验证器——看篡改能否不被发现。（ spoiler：不能。）
 用法：python tamper.py [chain目录]

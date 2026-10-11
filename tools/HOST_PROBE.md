@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # Host protocol probe (U-47 / D6)
 
 When a host (Qoder, TRAE, a new Claude Code / ZCode release, ...) changes its hook

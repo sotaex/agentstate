@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """把 GitHub 仓库的**可搜索元数据**落成一份可复核的清单。
 
 ★ 为什么需要这个文件（2026-10-03 实测）：

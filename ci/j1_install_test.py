@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """J1：干净 venv 60 秒安装自测
 pip install <包路径> → antinel --host zcode 可用 → 沙箱出第一条审计记录
 计时并输出每步耗时。退出码 0 = 全部通过。

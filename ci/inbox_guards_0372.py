@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """0.37.3 判据 —— **六态封闭** ＋ **已敲定的词表不再漂移**。
 
 ★★ 这一份判据是创始人 2026-10-09 那三句「一定要机制上解决」的直接产物：

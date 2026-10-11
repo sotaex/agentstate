@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """0.46.0 判据 —— **删除许可（VCT）**：两票裁决 ＋ 五步顺序 ＋ 四个退出口。
 
 ★★ 由来（交接件 §7.3/§7.4，方案 v3.0 §3.4/§3.5/§3.6/§3.7）：

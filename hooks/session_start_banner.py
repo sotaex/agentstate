@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """SessionStart hook: one-line protection banner, once per session.
 
 additionalContext is injected into the conversation, so the AGENT knows

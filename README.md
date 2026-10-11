@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
+
 # AgentState (by Antinel) — AI Agent Audit Chain
 
 > 展示名：**AgentState**｜厂牌／署名：**by Antinel**｜包名与技能标识符：`antinel` / `antinel-security`（**不动**）。
@@ -119,4 +121,13 @@ python scripts/install.py --root <项目根>   # 不一致时重跑安装，自�
 
 ## 许可 / License
 
-MIT（见 LICENSE 文件）。收入与中立性边界见 docs/A6收入边界声明.md。
+本仓采用分层许可（策略 v1.1）。逐文件真源见 `license-map.json`；机器可读标识见各文件头 `SPDX-License-Identifier`。
+
+| 层 | 覆盖 | 许可 |
+|---|---|---|
+| 产品代码（默认） | 除下述外的全部源码与 CI 件 | Apache-2.0（见 LICENSE；义务与归属提示见 NOTICE） |
+| 引流小件 | `antinel_mcp.py`、`transcript_reader.py`、`tools/probe_host.py`、`strings.py`、`challenge/` | MIT（见 challenge/LICENSE 与各文件头） |
+| 声明与规则集 | `docs/A6收入边界声明.md`、`rules/*.json` | CC-BY-4.0 |
+| 规范与文档 | README、docs/ 下规范与说明 | CC-BY-SA-4.0 |
+
+收入与中立性边界见 docs/A6收入边界声明.md（CC-BY-4.0）：不收通过费、不出售排名、关联方无豁免。

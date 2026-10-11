@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """0.36.4 判据 —— 研发态的**定义**、**不掩盖**、**自动收敛** ＋ 自检探针盲区。
 
 创始人 2026-10-07 三条要求，逐条对应本文件的三个组：

@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """值守台 · 总守卫套件（P1–P8）。**每条判据配负控；不许只有 happy path。**
 
 ★ 纪律（本仓铁律）：

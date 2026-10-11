@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """粮 · 哨兵的口粮（**纯本地，零外传**）。
 
 ★★ 三个"账本"必须分清 —— 混了会污染两边口径（本仓已在 `ledger.py` 头部警告过一次）::

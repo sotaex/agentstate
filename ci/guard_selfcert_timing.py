@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """0.42.0 判据 —— **自证卡的刷新点必须在 harness 之后**（S43–S44 ＋ 两条负控）。
 
 ★★ 这条判据为什么必须存在（2026-10-09 本班一道结构性死锁）：

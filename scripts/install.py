@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """AgentState v0.30.0 - self installer (F-07) and uninstaller (F-08).
 
 Steps (spec part 4):

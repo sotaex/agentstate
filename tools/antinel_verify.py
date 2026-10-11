@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """antinel verify (A-8, v1.40 §8.7) - status derivation for a judgment record.
 
 Compares the CURRENT bytes of every file covered by a judgment's `digests`

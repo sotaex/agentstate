@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """值守台 · 配置（**默认全关，用户显式开**）。
 
 ★ 安全默认值（不许改）：

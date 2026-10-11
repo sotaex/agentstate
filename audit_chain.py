@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """audit_chain — Antinel 审计链追加的唯一实现（v0.28.0，条款 C-1）。
 
 同一配方此前存在三份拷贝（pre_tool_use / post_tool_use / session_dna），行为已

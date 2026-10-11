@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """F-17 修复验证：证明「心跳缺失」不再被当成「还活着」。
 
 ★ 为什么不用现成套件那条 F-17：

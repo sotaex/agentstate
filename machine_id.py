@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """Antinel · 机器唯一码（machine identity）
 
 ★ 定位（创始人 2026-10-09 交办）：

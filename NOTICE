@@ -1,0 +1,8 @@
+MIT 豁免：本 NOTICE 只对以 Apache-2.0 发布的部分生效；凡文件头 SPDX 标识为
+MIT 的组件（antinel_mcp.py、transcript_reader.py、tools/probe_host.py、strings.py、
+challenge/ 目录）不适用本 NOTICE，仅受其随附的 MIT 许可与文件头 SPDX 标识约束。
+
+Copyright 2026 Zhilv Technology (Antinel / PSL)
+
+A6 收入边界声明（对项目自身的政策约束，不构成对本许可所授予权利的限制）
+见 docs/A6收入边界声明.md（CC-BY-4.0）。

@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """A5 终版：白名单路径在项目外 → DST-02 释放 + 留痕"""
 import io, sys, os, json, subprocess, tempfile, shutil, hashlib
 from datetime import datetime

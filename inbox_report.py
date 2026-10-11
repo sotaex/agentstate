@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """值守台 · 日报（**从链与账本算**）。
 
 ★ 判据不许二次实现：日报的每个数字都必须来自 `inbox_store` / `ledger` / `inbox_model`

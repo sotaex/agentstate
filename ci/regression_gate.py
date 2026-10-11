@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """回归闸门（L7）：把已修好的缺陷固化成判据，防止悄悄回退。
 
 ★ 为什么需要这个文件（而不是再跑一遍套件）

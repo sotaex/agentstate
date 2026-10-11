@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: MIT
+
 """Antinel i18n — 集中管理所有用户面字符串。
 
 第一原则：Agent 面的输出保持英文（Agent 天然多语，读完翻译给用户）。

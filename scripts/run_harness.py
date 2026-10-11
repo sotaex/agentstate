@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """Re-run the verification suite against THIS package and record psl/judgment.json (psl-vs-0.1).
 Usage: python scripts/run_harness.py            third parties: any failed re-run supersedes the shipped record
        python scripts/run_harness.py --bootstrap   build-time run: NO ledger write, verdict marked bootstrap

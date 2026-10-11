@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """AgentState v0.30.0 - host shield (定稿方案 v1.2: 宿主审计门闸+哨兵).
 
 第一原则：默认全部关闭。enable 前本模块不做任何事（无 ACL、无进程、无计划任务）。

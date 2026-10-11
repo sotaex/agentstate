@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """值守台 · 收件箱存储（读链 ＋ 一份可变状态）。
 
 ★★ 架构关键（详细设计 §2.7）::

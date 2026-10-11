@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """值守台 · 守护进程：把五层串起来跑。
 
 一轮 `tick()` 干这些事（顺序固定）：

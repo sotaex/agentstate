@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """事件类型口径的**唯一权威量具**（0.33.1）。
 
 ★ 为什么需要它：同一个数被三处手写，于是三个数对不上 ——

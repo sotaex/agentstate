@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """值守台 · 本地账本（**纯本地，零外传**）。
 
 ★ 与现有 `antinel credits` **不是一回事**，必须分开命名、分开显示

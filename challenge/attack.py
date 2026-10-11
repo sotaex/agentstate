@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: MIT
+
 """AgentState 篡改挑战 · 交互式攻击台
 零门槛：菜单选择攻击方式，自动审判。改得动算你赢。
 用法：python attack.py

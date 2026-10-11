@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """v3.0 方案件的交付前质检：结构四检 + 引用闭合 + 百分比自洽 + 异常字符 + 粘连。
 
 用法：

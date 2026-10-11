@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """出件级守卫：`antinel verify` 承诺的每一条本地命令，在**用户装到的布局**里都必须存在。
 
 ★★ 为什么要有它（2026-10-06 真实用户验收实测的缺陷）

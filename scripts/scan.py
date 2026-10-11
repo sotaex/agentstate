@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """AgentState v0.29.0 - static scan engine (F-01 environment scan).
 
 Single-pass, multi-rule: one os.walk() over the tree, every file is checked

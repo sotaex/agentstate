@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "antinel"
-version = "0.48.0"
+version = "0.48.1"
 description = "Local-first audit chain and ledger for AI coding agents: every action recorded, every record verifiable."
 readme = "README.md"
 license = {file = "LICENSE"}
@@ -17,6 +17,7 @@ classifiers = [
   "Environment :: Console",
   "Intended Audience :: Developers",
   "Intended Audience :: Information Technology",
+  "License :: OSI Approved :: Apache Software License",
   "License :: OSI Approved :: MIT License",
   "Operating System :: Microsoft :: Windows",
   "Programming Language :: Python :: 3",
@@ -84,4 +85,4 @@ assets = ["icons/*.ico", "logo/*.mp4", "logo/*.svg"]
 #   撞铁律：「**页面上不许教跑不通的命令**」。
 #   `.py` 由 build_py 随包（见 `_assert_package_data_covered` 的实测注释），
 #   下面三条 glob 覆盖非 .py 的那些（README.md / tamper-lab.html / chain/*）。
-challenge = ["*.md", "*.html", "chain/*.jsonl", "chain/*.json"]
+challenge = ["*.md", "*.html", "chain/*.jsonl", "chain/*.json", "LICENSE"]

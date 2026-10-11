@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
+
 # Antinel · 三处根治 交接文件 v1.0（2026-10-10）
 
 > **这份文件是给接手者的，不是给旁观者的。**

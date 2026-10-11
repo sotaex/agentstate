@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """值守台 · 命令行（自包含）。
 
 ★ 为什么自包含：本模块**不依赖 `antinel.py` 的内部结构**，

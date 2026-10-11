@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """antinel v0.34.1 - antinel 单入口（定稿方案 v1.1/v1.2）.
 
 用户面只有这一个名字：配置、账本、报告、校验、中枢，全部在 `antinel` 下。
@@ -34,7 +36,7 @@ if _HERE not in sys.path:
 
 from strings import detect_lang, get_string
 
-VERSION = "0.48.0"
+VERSION = "0.48.1"
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 

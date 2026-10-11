@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: MIT
+
 """AgentState v0.29.0 - transcript usage reader (三问三答 v1.0, A1/A2).
 
 Harvests per-turn token FACTS from the host's transcript JSONL into the audit

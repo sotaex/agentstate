@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 <!-- 由 `antinel routes --markdown` 生成；与 help 同源（ROUTES） -->
 当用户表达下列意图时，运行对应命令（命令幂等；配置变更自动进审计链）。
 

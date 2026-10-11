@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """AgentState v0.30.0 - PostToolUse hook (Claude Code / ZCode compatible).
 
 Input (stdin, one JSON line): {session_id, transcript_path, tool_name,

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """0.33.0 (A2): Host verification matrix generator.
 
 Scans three sources and emits docs/HOST_MATRIX.md:

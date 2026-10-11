@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """★ 0.36.0 判据：窗口几何 ·托盘哨兵态 · 失守归因。
 
 ★ 本文件独立于 `inbox_guards_0353.py`，避免把上一轮已绿的判据搅在一起；

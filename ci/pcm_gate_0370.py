@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """0.37.0 判据 —— **问题数单调收敛闸门（PCM：Problem-count Convergence Monitor）**。
 
 ★★★ 这份文件存在的理由（创始人 2026-10-08 原话，一字不改地记在这里）：

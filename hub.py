@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """AgentState v0.29.0 - Personal Hub (定稿方案 v1.2: 跨工具汇总).
 
 Host-neutral per-user aggregation index at ~/.antinel/:

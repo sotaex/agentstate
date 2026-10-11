@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """0.42.0 判据 —— **发布入口不许退化成"建了没人用"**（S40–S42 ＋ S48/S49，各带负控）。
 
 ★★ 这条判据为什么必须存在（2026-10-09 本班三次复发）：

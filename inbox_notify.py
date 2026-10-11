@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """值守台 · 通知层（第 1 层）：Toast 替掉"15 秒就没了"的气泡。
 
 ★ 要解决的原问题：**告警会消失、会被漏掉**。

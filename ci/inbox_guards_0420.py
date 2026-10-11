@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """0.42.0 判据 —— `hook_slow` 从「记了却没人看」变成「报告里看得见」（P5-1）。
 
 ★★ 这一份判据的由来（《全类型报告审计》收尾时剩下的最后一项）：

@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """值守台 · 托盘（第 2 层）：常驻、不占地方、一眼读状态。
 
 ★ 为什么是 PowerShell 而不是 pystray（创始人让我分析后定）：

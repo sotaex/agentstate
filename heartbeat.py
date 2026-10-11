@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """值守台 · 匿名计数心跳（第 8 阶段 · 方案 B）。**默认关。**
 
 ★★ 三条不许松的纪律：

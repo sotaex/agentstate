@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+
 """外传账本（egress ledger）—— 记录「谁在往哪发」，不记录内容，不判定好坏。
 
 ★ 为什么要有这一层（2026-09-26 深度评估的结论，不要凭直觉改）：
