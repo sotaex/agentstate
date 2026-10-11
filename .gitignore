@@ -11,6 +11,7 @@ _tools_034/
 _probe_*.py
 _patch_*.py
 _bump_version.py
+_version_bump_*.py
 _resign_manifest.py
 _cleanup_junk.py
 _suite_probe.py
@@ -20,6 +21,8 @@ _suite_probe.py
 _p_*
 _t_*
 _uxtest/
+_uxtest2/
+_ux_fix_*.py
 antinel-*/
 _archive_dist/
 .workbuddy-ai/

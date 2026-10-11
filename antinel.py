@@ -36,7 +36,7 @@ if _HERE not in sys.path:
 
 from strings import detect_lang, get_string
 
-VERSION = "0.48.1"
+VERSION = "0.48.3"
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
@@ -889,7 +889,7 @@ def cmd_digest(args):
     # 0.30.0 (E-3): 执法状态进晨报——"闸门还在不在"必须能大声说出来。
     if total.get("gaps") or total.get("probe_fail"):
         print("【执法】⚠ 缺口 %d 次（被拦的调用仍被执行）｜探针失败 %d/%d —— 拦截信号可能未生效，"
-              "运行 python tools/enforce_probe.py 复检，并核对宿主钩子协议"
+              "运行 python -m tools.enforce_probe 复检，并核对宿主钩子协议"
               % (total.get("gaps", 0), total.get("probe_fail", 0),
                  total.get("probe_ok", 0) + total.get("probe_fail", 0)))
     elif total.get("probe_ok"):
@@ -954,10 +954,10 @@ def cmd_digest(args):
         if _stale and root:
             if _last:
                 print("【执法】⚠ 自检探针陈旧（最近一次 %s，已超过 %d 小时）——拦截自证停摆，"
-                      "运行 python tools/enforce_probe.py" % (_last, int(_iv * 2)))
+                      "运行 python -m tools.enforce_probe" % (_last, int(_iv * 2)))
             else:
                 print("【执法】⚠ 自检探针从未运行——拦截自证停摆，"
-                      "运行 python tools/enforce_probe.py")
+                      "运行 python -m tools.enforce_probe")
         elif _last and not total.get("probe_ok"):
             # 窗口内已经报过「探针 N/N 通过」时不再重复；只在"窗口内没有、但也没陈旧"时报一句。
             print("【执法】自检探针最近一次 %s（不在本次展示窗口内，未陈旧）" % _last)
@@ -1310,7 +1310,7 @@ def cmd_brief(args):
         _die("未找到项目（在项目根目录运行，或用 --scope all 看已登记的全部项目）")
     ad = _audit_dir(root)
     if not os.path.isdir(ad):
-        _die("这个项目还没有账本 —— 先装一次：python scripts/install.py --root .")
+        _die("这个项目还没有账本 —— 先装一次：python -m scripts.install --root .")
 
     now = _agg_audit(ad, days)                     # 本期
 
@@ -1377,7 +1377,7 @@ def cmd_brief(args):
     if now.get("fail_open"):
         todo.append(("⚠ %d 次钩子异常导致放行 —— 闸门当时不在岗"
                      % now["fail_open"],
-                     "python tools/enforce_probe.py   # 复检拦截信号是否真的生效"))
+                     "python -m tools.enforce_probe   # 复检拦截信号是否真的生效"))
     if now.get("gaps"):
         todo.append(("🔴 %d 次「已判拦截但仍被执行」—— 宿主没尊重 deny 信号"
                      % now["gaps"],
@@ -1385,7 +1385,7 @@ def cmd_brief(args):
     if now.get("untrusted_host"):
         todo.append(("⚠ %d 条记录的宿主标签不可信 —— 归因证据缺失"
                      % now["untrusted_host"],
-                     "换宿主或宿主大版本更新后跑一次：python tools/probe_host.py"))
+                     "换宿主或宿主大版本更新后跑一次：python -m tools.probe_host"))
     if not now.get("canary_leak") and not now.get("sensitive_output"):
         todo.append(("○ 想把『没见到』变成『有证据』",
                      "antinel canary plant   # 埋蜜饵，之后正常使用 AI 工具"))
@@ -3342,6 +3342,15 @@ def cmd_host_scan(args):
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="antinel", add_help=False,
                                  description="Antinel 单入口（无参数=帮助清单）")
+    # ★ 0.48.2（J2 用户旅程模拟实测）：补顶层 -h/--help 出口。
+    #   此前顶层 add_help=False 且没有补出口 ⇒ 用户第一直觉命令
+    #   `antinel -h` 与 `antinel --help` 双双报 "unrecognized arguments"，
+    #   帮助只藏在 `antinel help` 子命令里（实测证据见 _uxtest2/ 的 M3 幕）。
+    #   为什么不是直接 add_help=True：本工具「无参数即帮助清单」是既有契约，
+    #   argparse 自动帮助会把子命令清单以另一种版式再印一遍 ⇒ 两个版本不一致。
+    #   故显式补出口，复用同一个 cmd_help()（单一真源）。
+    ap.add_argument("-h", "--help", action="store_true", dest="show_help",
+                    help="显示帮助（等同 `antinel help`）")
     # 多宿主共存：目录探测会误报（装了谁就报谁）——Agent/用户可显式指定所在宿主
     ap.add_argument("--host", dest="force_host",
                     help="显式指定宿主（workbuddy|zcode|qoder|claude-code|generic），"
@@ -3468,7 +3477,7 @@ def main(argv=None):
     args = ap.parse_args(argv)
     if getattr(args, "force_host"):
         os.environ["ANTINEL_FORCE_HOST"] = args.force_host   # detect_host 优先读它
-    if args.cmd is None or args.cmd == "help":
+    if getattr(args, "show_help", False) or args.cmd is None or args.cmd == "help":
         cmd_help()
         return 0
 

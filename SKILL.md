@@ -15,12 +15,12 @@ compatibility: Requires Python 3.10+; standard library only; no network access; 
 metadata:
   psl-verified: "true"
   psl-verified-spec: "psl-vs-0.1"
-  psl-verified-at: "2026-10-11T12:29:21+0800"
+  psl-verified-at: "2026-10-11T22:36:24+0800"
   psl-verified-evidence: "live PreToolUse block of a real .env read in ZCode (SEC-01) plus a full-assertion judgment run; digest check 21/21 digests match this build (assertions 315/315)"
   psl-verifier: "scripts/run_harness.py"
   antinel-product: "security-audit"
   antinel-tier: "free"
-  antinel-version: "0.48.1"
+  antinel-version: "0.48.3"
   psl-token-interception: "false"
 ---
 
@@ -31,7 +31,7 @@ metadata:
 ### 步骤1：安装Hooks（如果尚未安装）
 检查当前项目目录下是否存在 .psl/manifest.json。
 - 如果存在，跳到步骤3。
-- 如果不存在，运行：python scripts/install.py
+- 如果不存在，运行：python -m scripts.install
 
 ### 步骤2：确认安装
 检查 .psl/manifest.json 是否已创建。
@@ -39,7 +39,7 @@ metadata:
 - 如果创建失败，告知用户具体的错误信息。
 
 ### 步骤3：运行安全扫描
-运行 python scripts/scan.py
+运行 python -m scripts.scan
 - 退出码 0：扫描成功，读取输出的JSON报告。
 - 退出码非0：读取stderr中的错误信息，告知用户。
 
@@ -47,7 +47,7 @@ metadata:
 将扫描结果格式化为用户友好的报告。
 按严重度排序：CRITICAL > WARNING > INFO。
 每个发现包含：规则ID、文件路径、描述、修复建议。
-行为报告（含扣分明细）：python scripts/report.py；按周：--days 7；导出：--format csv|sarif|html|json。
+行为报告（含扣分明细）：python -m scripts.report；按周：--days 7；导出：--format csv|sarif|html|json。
 
 ### 注意事项
 - 你不需要理解每条安全规则的技术细节。

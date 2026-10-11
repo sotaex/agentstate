@@ -16,11 +16,11 @@ The record itself is never modified: `status` here is DERIVED, not written
 this against a clone of the repo - no trust in us required.
 
 Usage:
-  python tools/antinel_verify.py                    # verify <pkg>/psl/judgment.json digests
-  python tools/antinel_verify.py path/to/judgment.json
-  python tools/antinel_verify.py --manifest         # verify ALL files in psl/manifest.json (0.17.0, P-B1)
-  python tools/antinel_verify.py --invariants       # 0.29.0: 结构性不变量（不是哈希，是"规矩还在不在"）
-  python tools/antinel_verify.py --json
+  python -m tools.antinel_verify                    # verify <pkg>/psl/judgment.json digests
+  python -m tools.antinel_verify path/to/judgment.json
+  python -m tools.antinel_verify --manifest         # verify ALL files in psl/manifest.json (0.17.0, P-B1)
+  python -m tools.antinel_verify --invariants       # 0.29.0: 结构性不变量（不是哈希，是"规矩还在不在"）
+  python -m tools.antinel_verify --json
 
 Exit codes: 0 = current, 1 = superseded/unreadable, 2 = cannot verify.
 Python 3.10+, stdlib only, no network.

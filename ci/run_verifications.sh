@@ -3,4 +3,4 @@
 # Usage: sh ci/run_verifications.sh
 set -e
 cd "$(dirname "$0")/.."
-python3 scripts/run_harness.py
+python -m scripts.run_harness

@@ -5,4 +5,4 @@ challenge/ 目录）不适用本 NOTICE，仅受其随附的 MIT 许可与文件
 Copyright 2026 Zhilv Technology (Antinel / PSL)
 
 A6 收入边界声明（对项目自身的政策约束，不构成对本许可所授予权利的限制）
-见 docs/A6收入边界声明.md（CC-BY-4.0）。
+见源码仓 docs/A6收入边界声明.md（CC-BY-4.0；该件随源码分发包 sdist 分发，不随 wheel）。

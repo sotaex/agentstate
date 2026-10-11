@@ -192,7 +192,7 @@ HARNESS_SRC = SRC / "scripts" / "verification_tests.py"
 if not HARNESS_SRC.is_file():
     raise SystemExit("★ 构建器找不到套件：%s\n  （产物仓构建必须用本仓的套件）" % HARNESS_SRC)
 NAME = "antinel-security"
-VERSION = "0.48.1"
+VERSION = "0.48.3"
 # P-A3: the namespace this build declares itself under. derive_object_ownership()
 # reads git remote first, then THIS field; fail-closed unattributed when neither
 # resolves. Kept beside the hashes so a third party can see what was declared.
@@ -372,7 +372,7 @@ GITIGNORE_TEMPLATE = (
     #   _probe_*.py 等 —— 定位 F-17 时的一次性探针（含硬编码路径 + 调试 print），
     #                     属过程证据，不该被人当正式工具跑。
     "*.bak-*\n_tools_034/\n"
-    "_probe_*.py\n_patch_*.py\n_bump_version.py\n"
+    "_probe_*.py\n_patch_*.py\n_bump_version.py\n_version_bump_*.py\n"
     "_resign_manifest.py\n_cleanup_junk.py\n_suite_probe.py\n"
     # ★ 2026-10-03：安装副作用目录。装到本仓时会在仓内生成 .qoder/ 或
     #   .zcode/（钩子注册）。它们**是被安装的产物**，入库等于把本机钩子配置
@@ -392,6 +392,13 @@ GITIGNORE_TEMPLATE = (
     #: _uxtest/ —— verification_tests 的导出工作区（export.*/health.*）。
     #:   0.36.8 同样只补进仓里那份而没进模板，本次写回时被抹掉过一次 ⇒ 现收进模板。
     "_uxtest/\n"
+    #: 0.48.2：`_uxtest2/` —— `ci/j2_pypi_e2e.py` 用户旅程模拟的证据区（venv 建在系统
+    #:   临时目录，这里只落 JSON/txt 证据）。与 `_uxtest/` 同族，永不入库。
+    #:   `_ux_fix_*.py` —— 一次性迁移脚本（本轮：命令形态 `-m` 化 / A6 指针批改），
+    #:   与 `_patch_*.py` 同族：过程证据，不该被当正式工具跑。
+    #:   ★ 为什么必须写进模板：0.36.8 / 0.43.x 两次实测过「只改仓里那份、没改模板
+    #:     ⇒ 下次构建静默回退」；JDG-05 逐字节兜底，改模板才是修法。
+    "_uxtest2/\n_ux_fix_*.py\n"
     # ★★ 2026-10-10（0.43.x Step C 卫生）：与 `build/`、`dist/` 同族的**构建暂存/归档**
     #   目录，外加代理工作区：
     #     antinel-*/     —— `python -m build` 解出的 sdist 暂存树（`antinel-<ver>/`）。
@@ -645,7 +652,7 @@ challenge/ 目录）不适用本 NOTICE，仅受其随附的 MIT 许可与文件
 Copyright 2026 Zhilv Technology (Antinel / PSL)
 
 A6 收入边界声明（对项目自身的政策约束，不构成对本许可所授予权利的限制）
-见 docs/A6收入边界声明.md（CC-BY-4.0）。
+见源码仓 docs/A6收入边界声明.md（CC-BY-4.0；该件随源码分发包 sdist 分发，不随 wheel）。
 """
 
 # G7-3 (2026-09-24): 原先本模板末尾挂着 4 行中文（`---` + 「收入与中立性边界」）。
@@ -833,7 +840,7 @@ metadata:
 ### 步骤1：安装Hooks（如果尚未安装）
 检查当前项目目录下是否存在 .psl/manifest.json。
 - 如果存在，跳到步骤3。
-- 如果不存在，运行：python scripts/install.py
+- 如果不存在，运行：python -m scripts.install
 
 ### 步骤2：确认安装
 检查 .psl/manifest.json 是否已创建。
@@ -841,7 +848,7 @@ metadata:
 - 如果创建失败，告知用户具体的错误信息。
 
 ### 步骤3：运行安全扫描
-运行 python scripts/scan.py
+运行 python -m scripts.scan
 - 退出码 0：扫描成功，读取输出的JSON报告。
 - 退出码非0：读取stderr中的错误信息，告知用户。
 
@@ -849,7 +856,7 @@ metadata:
 将扫描结果格式化为用户友好的报告。
 按严重度排序：CRITICAL > WARNING > INFO。
 每个发现包含：规则ID、文件路径、描述、修复建议。
-行为报告（含扣分明细）：python scripts/report.py；按周：--days 7；导出：--format csv|sarif|html|json。
+行为报告（含扣分明细）：python -m scripts.report；按周：--days 7；导出：--format csv|sarif|html|json。
 
 ### 注意事项
 - 你不需要理解每条安全规则的技术细节。
@@ -1051,7 +1058,7 @@ jobs:
         with:
           python-version: $[DB_OPEN] matrix.python [DB_CLOSE]
       - name: run verification harness (full suite, stdlib only, no network)
-        run: python scripts/run_harness.py
+        run: python -m scripts.run_harness
       - name: upload judgment record
         if: always()
         uses: actions/upload-artifact@v4
@@ -1065,7 +1072,7 @@ POSIX_RUNNER = """#!/bin/sh
 # Usage: sh ci/run_verifications.sh
 set -e
 cd "$(dirname "$0")/.."
-python3 scripts/run_harness.py
+python -m scripts.run_harness
 """
 
 
@@ -1113,12 +1120,14 @@ One command. %(rules)d rules. 4 gates. Local-only, zero network, standard librar
 ## 别信我们，自己验 / Don't trust us - verify (30 秒)
 
 ```bash
-python scripts/run_harness.py     # 复跑全部断言，得到你自己的 verdict（写入 psl/judgment.json）
-python tools/antinel_verify.py    # 校验随包判定是否已失效（digest 比对，推导 current/superseded）
-python tools/antinel_verify.py --manifest   # 校验全部随包文件（以 psl/manifest.json 为准）
-python tools/verify_namespaces.py # 命名空间清单验签辅助（输出 canonical 摘要 + openssl 验签命令）
-python scripts/install.py --check # 校验已安装实例与包是否一致（版本 + 哈希）
+python -m scripts.run_harness     # 复跑全部断言，得到你自己的 verdict（写入 psl/judgment.json）
+python -m tools.antinel_verify    # 校验随包判定是否已失效（digest 比对，推导 current/superseded）
+python -m tools.antinel_verify --manifest   # 校验全部随包文件（以 psl/manifest.json 为准）
+python -m tools.verify_namespaces # 命名空间清单验签辅助（输出 canonical 摘要 + openssl 验签命令）
+python -m scripts.install --check # 校验已安装实例与包是否一致（版本 + 哈希）
 ```
+
+> 为什么写 `python -m`：这些脚本随包安装在 `site-packages` 内。相对项目根的 `scripts/x.py` 那种写法在装完之后跑不通 —— 0.48.2 用户旅程模拟实测：README 里该类命令**全部不可达**（撞「页面不许教跑不通的命令」）。
 
 退出码约定：`antinel_verify` 0＝current / 1＝superseded / 2＝无法校验；
 `install.py --check` 0＝一致 / 1＝未安装 / 3＝有漂移。
@@ -1151,8 +1160,8 @@ python scripts/install.py --check # 校验已安装实例与包是否一致（�
 **其他宿主（Claude Code 等）/ 手动方式**
 
 ```
-python scripts/install.py --root <项目根>          # 项目级
-python scripts/install.py --root <项目根> --global  # 用户级，所有项目
+python -m scripts.install --root <项目根>          # 项目级
+python -m scripts.install --root <项目根> --global  # 用户级，所有项目
 ```
 
 安装后重启宿主一次（钩子在宿主启动时加载）。
@@ -1160,8 +1169,8 @@ python scripts/install.py --root <项目根> --global  # 用户级，所有项�
 ## 升级 / Upgrade（0.16.0 起）
 
 ```
-python scripts/install.py --check   # 先比对：已装版本/规则哈希/脚本哈希 vs 包（无任何改动）
-python scripts/install.py --root <项目根>   # 不一致时重跑安装，自动刷新快照与哈希
+python -m scripts.install --check   # 先比对：已装版本/规则哈希/脚本哈希 vs 包（无任何改动）
+python -m scripts.install --root <项目根>   # 不一致时重跑安装，自动刷新快照与哈希
 ```
 
 升级包后不重跑安装，钩子会**降级到内置 11 条回退规则集**并留下 `rules_integrity_fallback`
@@ -1170,14 +1179,14 @@ python scripts/install.py --root <项目根>   # 不一致时重跑安装，自�
 ## 使用 / Usage
 
 - 对 Agent 说：**"帮我检查环境安全"** —— Agent 读取 SKILL.md 自动完成安装、扫描、报告
-- 或手动：`python scripts/scan.py --root <项目根>` ／ `python scripts/report.py --days 7`
+- 或手动：`python -m scripts.scan --root <项目根>` ／ `python -m scripts.report --days 7`
 - 导出：`--format csv|sarif|html|json` ／ 归档：`--archive`
-- 卸载（零残留）：`python scripts/install.py --uninstall`
+- 卸载（零残留）：`python -m scripts.install --uninstall`
 
 ## 信任 / Trust (don't trust us - verify)
 
 - 判定记录 `psl/judgment.json`：断言总数见 `assertions_total` 字段；任何第三方可用
-  `python scripts/run_harness.py` 复跑；复跑失败即取代随包记录
+  `python -m scripts.run_harness` 复跑；复跑失败即取代随包记录
 - 判定自带**状态位与作用域**：`status`（current/superseded，用 `tools/antinel_verify.py`
   随时推导）、`scope`（覆盖 8 个摘要文件，不覆盖什么也写明）、`platformSpec`（单平台诚实
   标注）、`objectOwnership`（**真推导**：签名清单＋README 钉定指纹＋git remote /
@@ -1196,7 +1205,7 @@ python scripts/install.py --root <项目根>   # 不一致时重跑安装，自�
   清单缺失或验签失败时对象归属一律落 `unattributed`（fail-closed）
 - 规则全部开源：`rules/default.json`（24 条，双语说明）；每条审计记录含 content_digest，判据可重算
 - 运行时零网络；仅标准库；无第三方依赖；无驻留进程
-- 收入边界声明见 docs/A6收入边界声明.md：不收通过费、不出售排名、关联方无豁免
+- 收入边界声明见源码仓 `docs/A6收入边界声明.md`（该件随 sdist 分发，不随 wheel）：不收通过费、不出售排名、关联方无豁免
 - 中立性靠机制：开源规则 + 可重算判定 + 阴性结果照发 + 免费离线可验
 
 ## 已知边界 / Known limits（诚实声明）
@@ -1230,7 +1239,7 @@ python scripts/install.py --root <项目根>   # 不一致时重跑安装，自�
 | 声明与规则集 | `docs/A6收入边界声明.md`、`rules/*.json` | CC-BY-4.0 |
 | 规范与文档 | README、docs/ 下规范与说明 | CC-BY-SA-4.0 |
 
-收入与中立性边界见 docs/A6收入边界声明.md（CC-BY-4.0）：不收通过费、不出售排名、关联方无豁免。
+收入与中立性边界见源码仓 `docs/A6收入边界声明.md`（CC-BY-4.0；随 sdist 分发）：不收通过费、不出售排名、关联方无豁免。
 """
 
 # ---------- ZCode plugin wrapper (D6/A-05: plugin hooks auto-enable the runner) ----------
@@ -1645,6 +1654,94 @@ def _declared_from_pyproject():
             except (ValueError, SyntaxError):
                 pass
     return tuple(pkgs), pd
+
+
+def _declared_modules_from_pyproject():
+    """从 PYPROJECT 模板里读 `py-modules`（随包发在仓根的模块）。**同源，不另抄一份。**
+
+    ★ 必须先剥 `#` 注释：`py-modules` 的列表字面量里逐条写着中文说明（"与 build() 里的
+      root_mod 复制清单逐字一致"），带注释的文本 `ast.literal_eval` 会直接抛错。
+    """
+    import ast
+    import re as _re
+    m = _re.search(r"py-modules\s*=\s*(\[.*?\])", PYPROJECT, _re.S)
+    if not m:
+        return ()
+    try:
+        return tuple(ast.literal_eval(_re.sub(r"#[^\n]*", "", m.group(1))))
+    except (ValueError, SyntaxError):
+        return ()
+
+
+#: `psl/manifest.json` 覆盖面里**按名**排除的三个随包 psl 产物。
+#: 作用域与 `NEVER_SHIP` 不同（那条管打包覆盖面，这条管清单覆盖面），故意分开。
+#: 0.48.3：从 build() 的局部量提为模块级 —— `_wheel_payload()` 也要用同一份。
+MANIFEST_EXCLUDE_NAMES = ("manifest.json", "judgment.json", "verdict-ledger.jsonl")
+
+
+def _wheel_payload(root, manifest_lines):
+    """列出 `root` 下**真会进 wheel** 的文件（posix 相对路径，已排序）。
+
+    ★★ 0.48.3：这是 `psl/manifest.json` 的**唯一正确作用域**。为什么必须存在：
+      清单是在**安装态**被消费的（`antinel_verify --manifest`、`host_shield.self_check()`），
+      而安装态就是 wheel 解开的树。此前清单从**暂存包** `pkg` 生成、wheel 却从**仓根**
+      构建 ⇒ 两份主体分家，实测**双向**错配：
+        · **多覆盖** 15 个只进 sdist / 只留仓里的文件（`docs/`、`references/`、`ci/`、
+          `.gitattributes`、`README.md`、`LICENSE`、`NOTICE`、`SKILL.md`、`MANIFEST.in`、
+          `.github/workflows/verify.yml` …）⇒ 纯净安装下 `--manifest` 报
+          `[SUPERSEDED] 15 of 124 covered files are missing`；
+        · **少覆盖** 13 个**确实随 wheel 发**的文件（`scripts/run_harness.py`、
+          `scripts/build_package.py`、`scripts/release.py`、`psl/judgment.json`、
+          `psl/workspace_facts.json`、`rules/typosquat_top.json`、`hooks/_host_detect.py`、
+          `tools/host_matrix.py` …）⇒ **保护名单里有一批文件从未被保护**
+          （本仓 0.36.4 修过同一个病的另一半）。
+      判据**镜像 `pyproject.toml` 的真实声明，不是推断**：
+        · 根级：只有 `py-modules` 里的 `.py`；
+        · `packages` 内：`.py`（`build_py` 永远随包）＋ package-data glob
+          （**glob 语义，`*` 不跨 `/`**）＋ MANIFEST.in 的 `recursive-include`
+          （`include_package_data` 默认 True ⇒ **包内**非 `.py` 文件受它影响；
+          实测 `tools/HOST_PROBE.md`、`tools/tray.ps1` 确实进了 wheel）；
+        · 其余（非 package 目录、根级非 `.py`）一律只进 sdist。
+      这条判据由 `scripts/verify_release.py` 的「清单 vs 实测 wheel namelist」对账守着
+      —— 写错**不会静默**（本项目第 ① 条硬判据：假守卫比没有守卫更坏）。
+    """
+    import fnmatch
+    pkgs, pd = _declared_from_pyproject()
+    mods = _declared_modules_from_pyproject()
+    rec = [(ln.split()[1], ln.split()[2:]) for ln in manifest_lines
+           if ln.startswith("recursive-include ") and len(ln.split()) >= 3]
+    out = []
+    for p in sorted(root.rglob("*")):
+        if not p.is_file() or "__pycache__" in p.parts:
+            continue
+        rel = p.relative_to(root).as_posix()
+        if any(rel.startswith(x) for x in NEVER_SHIP):
+            continue
+        if p.name in MANIFEST_EXCLUDE_NAMES:
+            continue
+        if _is_junk(rel):
+            continue
+        if "/" not in rel:
+            # 根级：只有 `py-modules` 声明的 `.py` 随 wheel；其余（README/LICENSE/
+            # NOTICE/SKILL/MANIFEST.in/pyproject.toml/server.json/点文件）只进 sdist。
+            if rel.endswith(".py") and rel[:-3] in mods:
+                out.append(rel)
+            continue
+        top = rel.split("/")[0]
+        if top not in pkgs:
+            continue                                  # 非 package 目录 ⇒ 只进 sdist
+        if rel.endswith(".py"):
+            out.append(rel)                           # build_py 永远随包
+            continue
+        inner = rel[len(top) + 1:]
+        if any(_glob_match(inner, pat) for pat in pd.get(top, ())):
+            out.append(rel)
+            continue
+        if any(rel.startswith(d2 + "/")
+               and any(fnmatch.fnmatch(p.name, pat) for pat in pats)
+               for d2, pats in rec):
+            out.append(rel)
+    return sorted(out)
 
 
 # 打包时**永不随包**的路径。这是**政策**，不是登记表 ——
@@ -2116,7 +2213,7 @@ def _delivery_gate(out_root, full=True):
             "\n★ 打包被闸门拦下（exit=%s）。**没有产出任何包。**\n"
             "  先分辨红项类型再动手：变红=检出缺陷／崩或缺失=盲区／零输出=没真跑。\n"
             "  闸门全绿后重跑本构建命令。确需强行打包：\n"
-            "    ANTINEL_SKIP_GATE=1 python scripts/build_package.py --out <目录>\n"
+            "    ANTINEL_SKIP_GATE=1 python -m scripts.build_package --out <目录>\n"
             "  —— 该环境变量会打进构建日志留痕，不是悄悄溜过去。" % rc)
     print("闸门通过，继续打包。\n")
 
@@ -2476,7 +2573,20 @@ def build(out_root, verify=False):
     # that mistake is exactly how README.md got reverted a second time. The
     # question is never "is it in my scratch dir", it is "does the published
     # package already have one". Fourth instance of the same defect class.
-    if not (final / "antinel-namespaces.json").is_file():
+    # ★★ 0.48.3：清单的**落点**从仓根改到 `psl/`。为什么必须改：
+    #   它此前放在仓根 ⇒ setuptools 的 wheel 规则里**没有任何一条覆盖它**
+    #   （`py-modules` 只收 `.py`；仓根不是 package，MANIFEST.in 的 `include`
+    #   只喂 sdist）⇒ 实测 wheel/sdist **都不含**它。后果是三处同源崩塌：
+    #     · 随包 judgment 的 21 条 digest 里有它 ⇒ `python -m tools.antinel_verify`
+    #       在**纯净安装**上报 `[SUPERSEDED] 1 of 21 ... missing`（README 第一行
+    #       「别信我们，自己验」当场喊狼来了）；
+    #     · 随包 manifest 里有它 ⇒ `--manifest` 同样报 superseded；
+    #     · `tools/verify_namespaces.py`（**随 wheel 发**）按
+    #       `<包根>/psl/antinel-namespaces.json` 找它 ⇒ 装完即 `No such file`。
+    #   放进 `psl/` 后由既有 package-data `psl = ["*.json","*.md"]` 天然随包，
+    #   与同族的 `manifest.json` / `judgment.json` 同居一处。
+    #   签名覆盖的是**规范 JSON 内容**（不含路径）⇒ 搬家不动签名有效性。
+    if not (final / "psl" / "antinel-namespaces.json").is_file():
         # ★★ 2026-09-28：`make_namespaces.py` **不属于产物仓**，它是**需要私钥的外部签发工具**。
         #   签名私钥 `keys/antinel_namespaces_ed25519.pem` 只存在于源仓 r1v3；产物仓的
         #   `.gitignore` 并不排除 `keys/` ⇒ 一旦把它拷进产物仓，一次 `git add -A`
@@ -2492,7 +2602,7 @@ def build(out_root, verify=False):
             print("  这不是错误（清单已签发且内容未变），但你必须知道它**没被重新生成**。")
         else:
             try:
-                subprocess.run([sys.executable, str(ns_tool), "--out", str(pkg)],
+                subprocess.run([sys.executable, str(ns_tool), "--out", str(pkg / "psl")],
                                check=True, capture_output=True, text=True)
             except Exception as e:
                 print("WARN: namespaces list not generated: %s" % e)
@@ -2611,38 +2721,59 @@ def build(out_root, verify=False):
     # exclusion list, so the first consumer re-run (which APPENDS a ledger row)
     # would report superseded. The ledger is an append-only artifact that is
     # supposed to grow; keep it out, on purpose, with a reason written down.
-    MANIFEST_EXCLUDE = ("manifest.json", "judgment.json", "verdict-ledger.jsonl")
+    # ★★ 0.48.3：清单的**主体**从「暂存包内容」换成「**真会进 wheel 的那批文件**」。
+    #   为什么必须换：清单是在**安装态**被消费的（`antinel_verify --manifest`、
+    #   `host_shield.self_check()`），而安装态就是 wheel 解开的树；可 wheel 是
+    #   setuptools 从**仓根**按 pyproject 声明构建的，暂存包只是构建器的中间物。
+    #   实测（0.48.2 的 wheel 124 项 vs 清单 124 项，数目相同、集合不同）**双向**错配：
+    #     · 多覆盖 15 项（`docs/` `references/` `ci/` 点文件 README/LICENSE/NOTICE/
+    #       SKILL/MANIFEST.in/verify.yml …）⇒ 纯净安装下 `--manifest` 报
+    #       `[SUPERSEDED] 15 of 124 covered files are missing`，README 第 17 行
+    #       「别信我们，自己验」当场喊狼来了；
+    #     · 少覆盖 13 项（`scripts/run_harness.py`、`scripts/build_package.py`、
+    #       `psl/judgment.json`、`psl/workspace_facts.json`、`rules/typosquat_top.json`、
+    #       `hooks/_host_detect.py`、`tools/host_matrix.py` …）⇒ **保护名单里有一批
+    #       文件从未被保护**（0.36.4 修过同一个病的另一半）。
+    #   新口径＝`_wheel_payload()`：镜像 pyproject 声明 ＋ setuptools 的
+    #   `include_package_data` 行为；规则取**仓根那份 `MANIFEST.in`**（那正是
+    #   setuptools 应用的那份，本函数上方刚写完它）。判据已与 0.48.2 的实测
+    #   wheel namelist **逐项对过账**：除两条按设计排除（清单自身、judgment.json）
+    #   外完全一致。
+    #   `REPO_SHIPPED` 随之退役：README.md / verify.yml 都**不进 wheel**，
+    #   把它们钉进清单正是上面"多覆盖"的来源。
+    MANIFEST_EXCLUDE = MANIFEST_EXCLUDE_NAMES
     # ★ 2026-10-08（trash 族）：垃圾政策排除也要管**清单覆盖面**，不能只管规则。
     #   实测（0.36.8）：规则侧没写 `*.trash` 之前，rglob 仍把宿主守卫的
     #   `.g0364.trash` 连同 sha256 钉进 psl/manifest.json ⇒ 幽灵条目
     #   （下一轮文件被清走 ⇒ 哈希失配 ⇒ 自举豁免）。两个作用域故意分开：
     #   MANIFEST_EXCLUDE 管 psl/ 三产物，NEVER_SHIP_PATTERNS 管垃圾族，
     #   哪一边漏了另一边都会把垃圾放进交付物。
-    files = sorted(p for p in pkg.rglob("*")
-                   if p.is_file() and p.name not in MANIFEST_EXCLUDE
-                   and not _is_junk(p.relative_to(pkg).as_posix()))
-    # 2026-09-24 (G7): the manifest must cover everything SHIPPED, not just
-    # everything this builder WRITES. Three shipped files are repo-owned and are
-    # therefore no longer produced into the stage (see the guards above), so a
-    # stage-only rglob silently under-covered the manifest by exactly those three
-    # -- measured: 42 -> 39 files, after which `tools/antinel_verify.py --manifest`
-    # would compare a 39-entry manifest against a 42-file tree.
-    # They are named EXPLICITLY on purpose: the alternative, globbing the published
-    # package, would sweep in .git, build/, *.egg-info, demo/, challenge/ -- i.e.
-    # everything the stage design exists to keep out.
-    REPO_SHIPPED = ("README.md", ".github/workflows/verify.yml", "antinel-namespaces.json")
+    _wheel_rules = []
+    try:
+        _wheel_rules = [ln.strip() for ln in
+                        (final / "MANIFEST.in").read_text(encoding="utf-8").splitlines()
+                        if ln.strip()]
+    except OSError as e:                                       # noqa: BLE001
+        print("!! 读不到 %s/MANIFEST.in（%s）—— 清单口径退化为「暂存包内容」，"
+              "会与 wheel 分家（`verify_release.py` 的对账判据会把它判红）" % (final, e))
+    if _wheel_rules:
+        _rels = _wheel_payload(final, _wheel_rules)
+    else:
+        _rels = sorted(str(p.relative_to(pkg)).replace("\\", "/")
+                       for p in pkg.rglob("*")
+                       if p.is_file() and p.name not in MANIFEST_EXCLUDE
+                       and not _is_junk(p.relative_to(pkg).as_posix()))
     # ★★ 0.39.2：哈希一律走 `_manifest_hash_of` —— 版本承载件先归一化再算，
     #   与 `host_shield.self_check()` **同法**（唯一真源在 host_shield）。
     manifest_files = {}
-    for p in files:
-        _rel = str(p.relative_to(pkg)).replace("\\", "/")
-        manifest_files[_rel] = _manifest_hash_of(_rel, p)
-    for rel in REPO_SHIPPED:
-        src = final / rel
-        if src.is_file():
-            manifest_files[rel] = _manifest_hash_of(rel, src)
-        else:
-            print("!! repo-shipped file ABSENT from the published package: %s" % rel)
+    for _rel in _rels:
+        src = final / _rel
+        if not src.is_file():
+            src = pkg / _rel                    # 兜底：只在暂存包里的构建期生成物
+        if not src.is_file():
+            print("!! 清单主体在树上找不到：%s" % _rel)
+            continue
+        manifest_files[_rel] = _manifest_hash_of(_rel, src)
     manifest_files = dict(sorted(manifest_files.items()))
     manifest = {
         "name": NAME, "version": VERSION, "psl_spec": "psl-vs-0.1",

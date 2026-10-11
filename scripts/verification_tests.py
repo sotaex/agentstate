@@ -45,7 +45,7 @@ for _req, _why in (("hooks", "钩子"), ("rules", "规则表"),
             "★ 套件无法开工：包根 %s 缺少 %r 目录（%s）。\n"
             "  PKG 由 __file__ 推出；若你把本文件改名/复制过，__file__ 已变 ⇒ 静默回退。\n"
             "  正解：设环境变量 ANTINEL_PKG 指向真正的包根，例如\n"
-            "       ANTINEL_PKG=D:\\psl\\poc\\antinel-security python scripts/verification_tests.py\n"
+            "       ANTINEL_PKG=D:\\psl\\poc\\antinel-security python -m scripts.verification_tests\n"
             "  （不要靠改这里的默认值 —— 那正是本次要消除的那个静默回退。）"
             % (PKG, _req, _why))
 SKILLS = Path(os.environ.get("ANTINEL_SKILLS_DIR") or r"D:\psl\skills")
@@ -297,12 +297,16 @@ REC_J_BLOCK = (
  REC_J_CURRENT, REC_J_SUPERSEDED) = REC_J_BLOCK
 REC_T_BLOCK = (
     "0.17.0 P-A3 tampering antinel-namespaces.json -> superseded",
-    "0.17.0 P-B1 --manifest catches a README tamper (16-file gap closed)",
-    "0.17.0 P-B1 without --manifest, README tamper is out of scope (documented)",
+    "0.17.0 P-B1 --manifest catches a tamper of a shipped file outside the digest set",
+    "0.17.0 P-B1 without --manifest, a shipped file outside the digest set is out of scope (documented)",
     "0.17.0 P-A3 objectOwnership is derived with a stated basis",
 )
-(REC_T_NS, REC_T_README_MANIFEST,
- REC_T_README_SCOPE, REC_T_OWNERSHIP) = REC_T_BLOCK
+# ★ 0.48.3：这两个槽位原名带 "README tamper"。改名不是修辞 —— 篡改目标已从
+#   README.md（仓根/sdist-only、**不随 wheel**、因此**不是**清单成员）换成
+#   「真随包且在 digest 集之外」的文件。名字不改就会变成一条**说了假话的断言**
+#   （探针打在 A 上，名字说 B），本仓对「假守卫」的纪律与「没有守卫」同等。
+(REC_T_NS, REC_T_GAP_MANIFEST,
+ REC_T_GAP_SCOPE, REC_T_OWNERSHIP) = REC_T_BLOCK
 REC_L_BLOCK = (
     "0.18.0 R-21 --check-ledger executes (dry-run)",
     "0.18.0 R-21 pending row detected after a covered file changes",
@@ -1390,6 +1394,10 @@ def main():
         led = PKG / "psl" / "verdict-ledger.jsonl"
         rows = [json.loads(l) for l in led.read_text(encoding="utf-8").splitlines() if l.strip()] \
             if led.is_file() else []
+        # ★ 0.48.2：这里的期望值**必须**是历史形态 `python scripts/run_harness.py`。
+        #   row 1 是 0.16.0 时代的自证行，台账**只增不删不改** ⇒ 它的 re_run 永远
+        #   是当年那串；harness 侧改写成 `python -m …`（0.48.2 用户旅程修复）**不影响**本行。
+        #   别把它「顺手」改成 -m 形态 —— 那会让本判据对着不可变历史判红（实测踩过）。
         record(REC_J_LEDGER,
                bool(rows) and rows[0].get("row_kind") == "self-verdict"
                and rows[0].get("re_run") == "python scripts/run_harness.py",
@@ -1556,11 +1564,19 @@ def main():
     record("0.17.0 install --check: exit 3 on drift", rc == 3, "rc=%d" % rc)
     _discard(proj / ".psl" / "manifest.json")
 
-    # P-A3 + P-B1 (pkg layout): tampering the namespace list or ANY shipped file
+    # P-A3 + P-B1 (pkg layout): tampering the namespace list or ANY *shipped* file
     # must surface on the verify tools.
+    #
+    # ★★ 0.48.3：P-B1 的篡改目标从 README.md 换成 **真随包、且在 digest 集之外** 的文件。
+    #   为什么必须换：0.48.3 把随包 manifest 的主体**纠正为 wheel 载荷**（= 安装态集合），
+    #   而 README.md 是仓根/sdist-only 件 —— **不随 wheel**，所以它**不是**清单成员，
+    #   篡改它本就**不该**被检出。旧断言「--manifest 必检出 README 篡改」是建立在
+    #   旧清单**错列 README**（纯净安装下反而报 15/124 missing）之上的。
+    #   换成真随包件后，P-B1 的原意才重新成立：这条文件**既在清单里、又不在 COVERED 里**
+    #   ⇒ 裸 --json 漏掉它（缺口），--manifest 兜住它（缺口关闭）。
     jpath = PKG / "psl" / "judgment.json"
     if jpath.is_file():
-        nsp = PKG / "antinel-namespaces.json"
+        nsp = PKG / "psl" / "antinel-namespaces.json"
         nsp_bak = nsp.read_bytes()
         try:
             nsp.write_bytes(nsp_bak + b"\n# tamper probe\n")
@@ -1570,19 +1586,27 @@ def main():
                    rc == 1 and vj.get("status") == "superseded", str(vj.get("reason"))[:80])
         finally:
             nsp.write_bytes(nsp_bak)
-        rdm = PKG / "README.md"
-        rdm_bak = rdm.read_bytes()
-        try:
-            rdm.write_bytes(rdm_bak + b"\n<!-- tamper probe -->\n")
-            rc, out, err, _ = run("antinel_verify.py", ["--manifest", "--json"])
-            vj = json.loads(out) if out.strip() else {}
-            record(REC_T_README_MANIFEST,
-                   rc == 1 and vj.get("status") == "superseded", str(vj.get("reason"))[:80])
-            rc2, out2, err2, _ = run("antinel_verify.py", ["--json"])
-            record(REC_T_README_SCOPE,
-                   rc2 == 0, "")
-        finally:
-            rdm.write_bytes(rdm_bak)
+        # P-B1 的「缺口件」：真随包（在 manifest 里）、但**不在** 21 条 digest 集里。
+        #   选 hook 链上的随包代码，因为它正是「随包但没被 digest 集覆盖」的敏感类。
+        gap = PKG / "hooks" / "_host_detect.py"
+        if not gap.is_file():
+            # 不抛异常（抛了会 ABORT 整个套件、分母塌掉）：照记两条 FAIL，说清原因。
+            record(REC_T_GAP_SCOPE, False, "缺口件 %s 不存在（清单/仓不一致）" % gap.name)
+            record(REC_T_GAP_MANIFEST, False, "缺口件 %s 不存在（清单/仓不一致）" % gap.name)
+        else:
+            gap_bak = gap.read_bytes()
+            try:
+                gap.write_bytes(gap_bak + b"\n# tamper probe (P-B1 gap file)\n")
+                # ① 裸 --json：digest 集不含它 ⇒ 检不出（这就是「缺口」本身）
+                rc2, out2, err2, _ = run("antinel_verify.py", ["--json"])
+                record(REC_T_GAP_SCOPE, rc2 == 0, "")
+                # ② --manifest：清单含它 ⇒ 必须报 superseded（缺口被兜住）
+                rc, out, err, _ = run("antinel_verify.py", ["--manifest", "--json"])
+                vj = json.loads(out) if out.strip() else {}
+                record(REC_T_GAP_MANIFEST,
+                       rc == 1 and vj.get("status") == "superseded", str(vj.get("reason"))[:80])
+            finally:
+                gap.write_bytes(gap_bak)
         j = json.loads(jpath.read_text(encoding="utf-8"))
         record(REC_T_OWNERSHIP,
                j.get("objectOwnership") == "self" and isinstance(j.get("objectOwnershipBasis"), str),

@@ -27,7 +27,7 @@ loop. Together the two halves close E-3.
 
 Scheduling: post_tool_use spawns this script detached once per
 global_settings.probe_interval_hours (default 24; 0 disables). Manual run:
-    python tools/enforce_probe.py [--root <project>]
+    python -m tools.enforce_probe [--root <project>]
 Exit: 0 = probe passed (or skipped for a benign reason); 1 = probe FAILED
 (the gate is not signaling -- morning report and the owner are told).
 

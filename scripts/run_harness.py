@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """Re-run the verification suite against THIS package and record psl/judgment.json (psl-vs-0.1).
-Usage: python scripts/run_harness.py            third parties: any failed re-run supersedes the shipped record
-       python scripts/run_harness.py --bootstrap   build-time run: NO ledger write, verdict marked bootstrap
+Usage: python -m scripts.run_harness            third parties: any failed re-run supersedes the shipped record
+       python -m scripts.run_harness --bootstrap   build-time run: NO ledger write, verdict marked bootstrap
 
 0.17.0 (P-A1, audit N2/N3): the assertion count now comes from the suite's
 STRUCTURED results file (last_results.json), not from grepping human-readable
@@ -53,7 +53,7 @@ def _pkg_version():
 OUT = PKG / "psl" / "judgment.json"
 LEDGER = PKG / "psl" / "verdict-ledger.jsonl"
 MANIFEST = PKG / "psl" / "manifest.json"
-COVERED = ["antinel-namespaces.json",
+COVERED = ["psl/antinel-namespaces.json",
            "rules/default.json", "rules/pricing.json", "rules/typosquat_top.json",
            "rules/economics/workbuddy.json", "rules/economics/zcode.json",
            "rules/economics/claude-code.json", "rules/economics/qoder.json",
@@ -113,9 +113,10 @@ _BY_KIND_OVERRIDES = {
     "0.16.0 antinel_verify derives current on an intact package": ("process-stale",
         "digests 定格于上一版 harness 写入态，此间的合法编辑未刷新记录 ⇒ 自书失真；"
         "本次 harness 重写即以新 digest 修复。"),
-    "0.17.0 P-B1 without --manifest, README tamper is out of scope (documented)": ("process-stale",
-        "连带项：antinel_verify 对任何 digest 不符一律 rc=1，断言 rc2==0 必红；"
-        "根因同上（记录陈旧），非 README 真被改。"),
+    "0.17.0 P-B1 without --manifest, a shipped file outside the digest set is out of scope (documented)": ("process-stale",
+        "连带项：antinel_verify 对任何 digest 不符一律 rc=1，断言 rc==0 必红；"
+        "根因是**记录陈旧**（随包 digests 未随合法编辑刷新），而非被篡改的那个"
+        "随包件本身真进了 digest 集。"),
     "F-09 host-shield 自检查不出来时不谎报已安装（三态：None != True）": ("instrument",
         "负控衰减：注入 OSError 欲使 subprocess.run 抛错，但 0.35.3 起 task_installed() "
         "文件系统事实优先（os.path.isfile(shim) 早退 return True）⇒ 注入永远到不了"
@@ -236,7 +237,7 @@ def derive_object_ownership():
     returned only on a positive match against a signed list whose key
     fingerprint equals the value pinned in README.md."""
     try:
-        doc = json.loads((PKG / "antinel-namespaces.json").read_text(encoding="utf-8"))
+        doc = json.loads((PKG / "psl" / "antinel-namespaces.json").read_text(encoding="utf-8"))
     except Exception as e:
         return "unattributed", "namespaces list unreadable (%s)" % type(e).__name__
     sig = doc.get("signature") or {}
@@ -427,7 +428,7 @@ def main():
         # with tools/antinel_verify.py; checkedAt is when WE last derived it.
         "status": {"value": "current", "derivation": "auto", "reason": None,
                    "checkedAt": now,
-                   "note": "re-derive any time: python tools/antinel_verify.py (--manifest for all 24 shipped files); which assertions failed: discrimination.failed[]"},
+                   "note": "re-derive any time: python -m tools.antinel_verify (--manifest for all 24 shipped files); which assertions failed: discrimination.failed[]"},
         # V8: scope -- what this verdict covers and, just as loudly, what it does not.
         "scope": {"covered": COVERED,
                   "notCovered": ["runtime behaviour of the monitored host",
@@ -472,8 +473,8 @@ def main():
                 "duration_note": "wall-clock of a subprocess fan-out suite; machine- and load-dependent, not comparable across environments",
                 "executor": "scripts/run_harness.py", "exit_code": proc.returncode,
                 "bootstrap": bootstrap},
-        "re_run": "python scripts/run_harness.py",
-        "verify": "python tools/antinel_verify.py",
+        "re_run": "python -m scripts.run_harness",
+        "verify": "python -m tools.antinel_verify",
         "anchor": None,
         "note": "v0.1 judgment: single-machine execution by the packaging agent; verification is not a security audit of the user environment. Any failed third-party re-run supersedes this record.",
     }

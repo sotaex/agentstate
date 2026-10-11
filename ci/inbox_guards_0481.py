@@ -43,7 +43,11 @@ if ROOT not in sys.path:
 RESULTS = []
 
 _WALK_EXCLUDE = {".git", ".workbuddy", "__pycache__", "build", "dist", "node_modules",
-                 ".github", ".psl", ".vscode", ".idea"}
+                 ".github", ".psl", ".vscode", ".idea",
+                 # ★ 0.48.2：模拟/验证的证据区（内含第三方 venv 与临时文件）不属于
+                 #   本仓归属范围 —— 不排除会让 L1 扫到 700+ 个第三方文件而假红
+                 #   （实测：`_uxtest/pypi_sim_0481/venv/...`）。与 .gitignore 同口径。
+                 "_uxtest", "_uxtest2"}
 _WALK_EXCLUDE_PREFIX = ("antinel-0.", "_backup.away-", "antinel_mcp.away")
 SPDX_RE = re.compile(r"SPDX-License-Identifier:\s*([A-Za-z0-9\-.]+)")
 

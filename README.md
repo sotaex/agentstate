@@ -12,15 +12,17 @@ One command. 37 rules. 4 gates. Local-only, zero network, standard library only.
 ## 别信我们，自己验 / Don't trust us - verify (30 秒)
 
 ```bash
-python scripts/run_harness.py     # 复跑全部断言，得到你自己的 verdict（写入 psl/judgment.json）
-python tools/antinel_verify.py    # 校验随包判定是否已失效（digest 比对，推导 current/superseded）
-python tools/antinel_verify.py --manifest   # 校验全部随包文件（以 psl/manifest.json 为准）
-python tools/verify_namespaces.py # 命名空间清单验签辅助（输出 canonical 摘要 + openssl 验签命令）
-python scripts/install.py --check # 校验已安装实例与包是否一致（版本 + 哈希）
+python -m scripts.run_harness     # 复跑全部断言，得到你自己的 verdict（写入 psl/judgment.json）
+python -m tools.antinel_verify    # 校验随包判定是否已失效（digest 比对，推导 current/superseded）
+python -m tools.antinel_verify --manifest   # 校验全部随包文件（以 psl/manifest.json 为准）
+python -m tools.verify_namespaces # 命名空间清单验签辅助（输出 canonical 摘要 + openssl 验签命令）
+python -m scripts.install --check # 校验已安装实例与包是否一致（版本 + 哈希）
 ```
 
+> 为什么写 `python -m`：这些脚本随包安装在 `site-packages` 内。相对项目根的 `scripts/x.py` 那种写法在装完之后跑不通 —— 0.48.2 用户旅程模拟实测：README 里该类命令**全部不可达**（撞「页面不许教跑不通的命令」）。
+
 退出码约定：`antinel_verify` 0＝current / 1＝superseded / 2＝无法校验；
-`install.py --check` 0＝一致 / 1＝未安装 / 3＝有漂移。
+`python -m scripts.install --check` 0＝一致 / 1＝未安装 / 3＝有漂移。
 
 任何第三方复跑出不同结论，即取代随包判定记录（追加式，原记录不删不改）。
 
@@ -50,8 +52,8 @@ python scripts/install.py --check # 校验已安装实例与包是否一致（�
 **其他宿主（Claude Code 等）/ 手动方式**
 
 ```
-python scripts/install.py --root <项目根>          # 项目级
-python scripts/install.py --root <项目根> --global  # 用户级，所有项目
+python -m scripts.install --root <项目根>          # 项目级
+python -m scripts.install --root <项目根> --global  # 用户级，所有项目
 ```
 
 安装后重启宿主一次（钩子在宿主启动时加载）。
@@ -59,25 +61,25 @@ python scripts/install.py --root <项目根> --global  # 用户级，所有项�
 ## 升级 / Upgrade（0.16.0 起）
 
 ```
-python scripts/install.py --check   # 先比对：已装版本/规则哈希/脚本哈希 vs 包（无任何改动）
-python scripts/install.py --root <项目根>   # 不一致时重跑安装，自动刷新快照与哈希
+python -m scripts.install --check   # 先比对：已装版本/规则哈希/脚本哈希 vs 包（无任何改动）
+python -m scripts.install --root <项目根>   # 不一致时重跑安装，自动刷新快照与哈希
 ```
 
 升级包后不重跑安装，钩子会**降级到内置 11 条回退规则集**并留下 `rules_integrity_fallback`
-审计事件——请升级后必跑一次 `install.py`（或先 `--check` 看差异）。
+审计事件——请升级后必跑一次 `python -m scripts.install`（或先 `--check` 看差异）。
 
 ## 使用 / Usage
 
 - 对 Agent 说：**"帮我检查环境安全"** —— Agent 读取 SKILL.md 自动完成安装、扫描、报告
-- 或手动：`python scripts/scan.py --root <项目根>` ／ `python scripts/report.py --days 7`
+- 或手动：`python -m scripts.scan --root <项目根>` ／ `python -m scripts.report --days 7`
 - 导出：`--format csv|sarif|html|json` ／ 归档：`--archive`
-- 卸载（零残留）：`python scripts/install.py --uninstall`
+- 卸载（零残留）：`python -m scripts.install --uninstall`
 
 ## 信任 / Trust (don't trust us - verify)
 
 - 判定记录 `psl/judgment.json`：断言总数见 `assertions_total` 字段；任何第三方可用
-  `python scripts/run_harness.py` 复跑；复跑失败即取代随包记录
-- 判定自带**状态位与作用域**：`status`（current/superseded，用 `tools/antinel_verify.py`
+  `python -m scripts.run_harness` 复跑；复跑失败即取代随包记录
+- 判定自带**状态位与作用域**：`status`（current/superseded，用 `python -m tools.antinel_verify`
   随时推导）、`scope`（覆盖 8 个摘要文件，不覆盖什么也写明）、`platformSpec`（单平台诚实
   标注）、`objectOwnership`（**真推导**：签名清单＋README 钉定指纹＋git remote /
   `manifest.namespace` 身份，fail-closed `unattributed`——0.17 前是常量，0.17 起为机制）
@@ -95,9 +97,9 @@ python scripts/install.py --root <项目根>   # 不一致时重跑安装，自�
   清单缺失或验签失败时对象归属一律落 `unattributed`（fail-closed）
 - 规则全部开源：`rules/default.json`（24 条，双语说明）；每条审计记录含 content_digest，判据可重算
 - 运行时零网络；仅标准库；无第三方依赖；无驻留进程
-- **拦截自检（0.30.0，E-3 关闭）**：`python tools/enforce_probe.py` —— 合成一个必拦事件跑真钩子，断言全部下发通道（stdout 契约 + legacy + exit 2）并上链 `enforcement_probe`；宿主若把"已拦截"的调用真的执行了，post 侧上链 `enforcement_gap`。晨报新增执法状态行（探针通过率 / 执法缺口 / 护栏在线天数）——**闸门死了必须大声说出来**，而不是让账本为假象背书
+- **拦截自检（0.30.0，E-3 关闭）**：`python -m tools.enforce_probe` —— 合成一个必拦事件跑真钩子，断言全部下发通道（stdout 契约 + legacy + exit 2）并上链 `enforcement_probe`；宿主若把"已拦截"的调用真的执行了，post 侧上链 `enforcement_gap`。晨报新增执法状态行（探针通过率 / 执法缺口 / 护栏在线天数）——**闸门死了必须大声说出来**，而不是让账本为假象背书
 - **指令面 + MCP + 金丝雀 + 撞名（0.31/0.32）**：CTX-02/04 扩展到 AGENTS.md/CLAUDE.md/.cursorrules/copilot-instructions.md（非 SKILL.md 需复合命中，压误报）；MCP-01..04 护住 MCP 配置（写配置/描述注入/远程 server/env 明文密钥）；`antinel canary plant` 布源码金丝雀（读→提醒、标记出现在输出→外传实证）；SLOP-01 对安装命令做撞名检测（参考集 rules/typosquat_top.json，静态有时效，报告中显性标注）
-- 收入边界声明见 docs/A6收入边界声明.md：不收通过费、不出售排名、关联方无豁免
+- 收入边界声明见源码仓 `docs/A6收入边界声明.md`（该件随 sdist 分发，**不随 wheel**）：不收通过费、不出售排名、关联方无豁免
 - 中立性靠机制：开源规则 + 可重算判定 + 阴性结果照发 + 免费离线可验
 
 ## 已知边界 / Known limits（诚实声明）
@@ -110,7 +112,7 @@ python scripts/install.py --root <项目根>   # 不一致时重跑安装，自�
 - `rd`（Windows 删除命令）按"命令位置＋参数语境"匹配：`rd /s /q X` 拦截；Python 代码里的 `rd = 3`、raw 字符串 `r'D:\...'` 放行（0.16.0 修复了旧版对后两者的 critical 误报）
 - 行为语料（含负例）不随包分发；该读数无法仅凭本包复现（见 `psl/judgment.json` 的 `scope.notCovered`）
 - Qoder/TRAE 的字段布局为声明式适配（未实测）
-- 换宿主或宿主大版本更新后，用 tools/probe_host.py 做一次协议探针并把结果发给我们
+- 换宿主或宿主大版本更新后，用 `python -m tools.probe_host` 做一次协议探针并把结果发给我们
 - 本套件输出审计日志与安全评估，不是检验检测报告；不能替代内核级防护（那是安信智芯 Link/Tank 的事）
 
 ## 计分 / Score
@@ -130,4 +132,4 @@ python scripts/install.py --root <项目根>   # 不一致时重跑安装，自�
 | 声明与规则集 | `docs/A6收入边界声明.md`、`rules/*.json` | CC-BY-4.0 |
 | 规范与文档 | README、docs/ 下规范与说明 | CC-BY-SA-4.0 |
 
-收入与中立性边界见 docs/A6收入边界声明.md（CC-BY-4.0）：不收通过费、不出售排名、关联方无豁免。
+收入与中立性边界见源码仓 `docs/A6收入边界声明.md`（CC-BY-4.0；随 sdist 分发）：不收通过费、不出售排名、关联方无豁免。

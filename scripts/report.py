@@ -66,7 +66,7 @@ SEVERITY_WEIGHT = {"critical": 20, "warning": 5, "info": 0}
 BAR = "\u2501" * 34
 COLORS = {"critical": "#dc3545", "warning": "#ffc107", "ok": "#28a745", "neutral": "#6c757d"}
 FOOTER = ("本报告由 AgentState 生成。验证方式：安装 psl-watch 技能后运行 "
-          "python scripts/scan.py。")
+          "python -m scripts.scan。")
 
 
 # --------------------------------------------------------------- loading ----
@@ -426,7 +426,7 @@ def render_text(rep, log_label):
             (pl.get("ts") or "")[:16].replace("T", " "),
             en.get("probe_ok", 0), en.get("probe_fail", 0)))
     else:
-        L.append("  enforcement probe: no probe in this window (first probe runs within 24h of install; manual: python tools/enforce_probe.py)")
+        L.append("  enforcement probe: no probe in this window (first probe runs within 24h of install; manual: python -m tools.enforce_probe)")
     if en.get("gaps"):
         lg = en.get("last_gap") or {}
         L.append("  ⚠ ENFORCEMENT GAP: %d blocked call(s) executed anyway (deny not honored) | last %s rules=%s"

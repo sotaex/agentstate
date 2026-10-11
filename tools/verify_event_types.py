@@ -17,9 +17,9 @@
      - schema 有、代码没写    ⇒ 陈旧登记或由别处产生（信息，不判失败）
 
 用法：
-    python tools/verify_event_types.py            # 人类可读
-    python tools/verify_event_types.py --json     # 机器可读
-    python tools/verify_event_types.py --count    # 只打印权威总数（给文案用）
+    python -m tools.verify_event_types            # 人类可读
+    python -m tools.verify_event_types --json     # 机器可读
+    python -m tools.verify_event_types --count    # 只打印权威总数（给文案用）
 """
 import ast
 import io

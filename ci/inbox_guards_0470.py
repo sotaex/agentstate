@@ -649,41 +649,48 @@ def n_s98():
     anchor = ("            if not lock:\n                return False")
     if anchor not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
-    mut = _load(src.replace(anchor, "            pass"), "hs0470_ns98")
     import subprocess
-    d = tempfile.mkdtemp(prefix="g0470_conc_mut_")
-    led = os.path.join(d, "notify_state.json")
-    # ★ 把**变异后的源码**落盘成 `hs_mut.py`，让子进程 import 它 ——
-    #   内存里的变异模块传不进子进程，只能落盘（落临时目录，不碰产品文件）。
-    with io.open(os.path.join(d, "hs_mut.py"), "w", encoding="utf-8") as f:
-        f.write(src.replace(anchor, "            pass"))
-    w2 = os.path.join(d, "_w2.py")
-    with io.open(w2, "w", encoding="utf-8") as f:
-        f.write(_CONC_WORKER.replace("import host_shield as HS",
-                                     "import hs_mut as HS")
-                % (ROOT, led))
-    outs = [os.path.join(d, "n%d.json" % i) for i in range(8)]
-    procs = [subprocess.Popen([sys.executable, w2, "20", "p%d" % i, outs[i]],
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                              cwd=d)
-             for i in range(8)]
-    for p in procs:
-        p.communicate(timeout=240)
-    missed = 0
-    for o in outs:
-        if os.path.isfile(o):
-            missed += int(json.loads(io.open(o, encoding="utf-8").read())["missed"])
-    m2 = _load(src.replace(anchor, "            pass"), "hs0470_ns98_read")
-    m2.notify_ledger_path = lambda _l=led: _l
-    r = m2.notice_budget_gate("R-CONC", "closer",
-                              now=time.time() + float(m2.NOTICE_BUDGET_WINDOW) + 10)
-    closed = (r or {}).get("closed") or {}
-    t = int(closed.get("total") or 0)
-    if t + missed == 160:
-        return ("负控失效：恢复「无锁照写」后守恒仍成立（total=%d, missed=%d）⇒ "
-                "变异没起作用或并发这次没撞上（重跑一次；若恒绿则该分支没被依赖）"
-                % (t, missed))
-    return True
+    mut_src = src.replace(anchor, "            pass")
+    # ★★ 0.48.2：并发负控**本质是概率性的** —— 8×20 次无锁读改写若进程恰好没撞上，
+    #   守恒仍成立 ⇒ 负控假红（实测：0.48.2 发布闸门里撞过一次）。
+    #   本仓铁律「一个时红时绿的量具比恒红的更坏」⇒ 加**有界重试**：
+    #   任一轮撞出守恒破坏即判绿；K 轮全没撞出才判红（并说明是「没撞上」，不是「变异无效」）。
+    K = 4
+    last = (0, 0)
+    for _attempt in range(K):
+        d = tempfile.mkdtemp(prefix="g0470_conc_mut_")
+        led = os.path.join(d, "notify_state.json")
+        # ★ 把**变异后的源码**落盘成 `hs_mut.py`，让子进程 import 它 ——
+        #   内存里的变异模块传不进子进程，只能落盘（落临时目录，不碰产品文件）。
+        with io.open(os.path.join(d, "hs_mut.py"), "w", encoding="utf-8") as f:
+            f.write(mut_src)
+        w2 = os.path.join(d, "_w2.py")
+        with io.open(w2, "w", encoding="utf-8") as f:
+            f.write(_CONC_WORKER.replace("import host_shield as HS",
+                                         "import hs_mut as HS")
+                    % (ROOT, led))
+        outs = [os.path.join(d, "n%d.json" % i) for i in range(8)]
+        procs = [subprocess.Popen([sys.executable, w2, "20", "p%d" % i, outs[i]],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  cwd=d)
+                 for i in range(8)]
+        for p in procs:
+            p.communicate(timeout=240)
+        missed = 0
+        for o in outs:
+            if os.path.isfile(o):
+                missed += int(json.loads(io.open(o, encoding="utf-8").read())["missed"])
+        m2 = _load(mut_src, "hs0470_ns98_read")
+        m2.notify_ledger_path = lambda _l=led: _l
+        r = m2.notice_budget_gate("R-CONC", "closer",
+                                  now=time.time() + float(m2.NOTICE_BUDGET_WINDOW) + 10)
+        closed = (r or {}).get("closed") or {}
+        t = int(closed.get("total") or 0)
+        last = (t, missed)
+        if t + missed != 160:
+            return True                      # 撞出守恒破坏 ⇒ 负控有效
+    return ("负控失效：恢复「无锁照写」后 %d 轮并发守恒均成立（末轮 total=%d, missed=%d）"
+            "⇒ 变异没起作用或并发一次都没撞上" % (K, last[0], last[1]))
 
 
 # ══════════════ S99 · 疑似投毒在场 ⇒ 不许抬 dev 灯 ══════════════

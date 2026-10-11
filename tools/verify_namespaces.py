@@ -28,13 +28,35 @@ import sys
 from pathlib import Path
 
 PKG = Path(__file__).resolve().parent.parent
-LIST = PKG / "antinel-namespaces.json"
+LIST = PKG / "psl" / "antinel-namespaces.json"
 README = PKG / "README.md"
 
 
 def canonical(doc):
     payload = {k: v for k, v in doc.items() if k != "signature"}
     return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _pinned_fingerprint():
+    """README 里钉死的公钥指纹 —— **源码仓与安装态都取得到**。
+
+    ★★ 0.48.3：`README.md` 是**仓拥有件**，按设计**不随 wheel**（根级非 `.py`）。
+      第一版只读 `PKG/README.md` ⇒ `pip install` 的用户跑这条命令必然得到
+      `[MISMATCH] ... (README pinned: None)`（实测 rc=1）—— 而 README 第 18 行
+      **正教着这条命令**（撞本仓铁律：页面上不许教跑不通的命令）。
+      安装态的等价物是 `*.dist-info/METADATA`：它就是 README 作为
+      `long_description` 的原文（实测含 `sha256:b71e570c30ebcbf7`）。
+      两处是**同一个事实**（指纹钉在 README），这里只是把**读取路径**补齐。
+    """
+    cands = [README] + sorted(PKG.glob("antinel-*.dist-info/METADATA"))
+    for p in cands:
+        try:
+            m = re.search(r"sha256:[0-9a-f]{16}", Path(p).read_text(encoding="utf-8"))
+            if m:
+                return m.group(0)
+        except Exception:                                      # noqa: BLE001
+            continue
+    return None
 
 
 def main(argv=None):
@@ -55,12 +77,7 @@ def main(argv=None):
     sig = doc.get("signature") or {}
     canon = canonical(doc).encode("utf-8")
     canon_sha = "sha256:" + hashlib.sha256(canon).hexdigest()
-    pinned = None
-    try:
-        m = re.search(r"sha256:[0-9a-f]{16}", README.read_text(encoding="utf-8"))
-        pinned = m.group(0) if m else None
-    except Exception:
-        pass
+    pinned = _pinned_fingerprint()
     fp_ok = bool(sig.get("public_key_fingerprint")) and sig.get("public_key_fingerprint") == pinned
     out = {
         "status": "ok" if fp_ok else "fingerprint-mismatch",

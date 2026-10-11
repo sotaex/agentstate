@@ -26,12 +26,13 @@
     临时目录用 `tempfile.mkdtemp()`，退出时不删（留证据），路径打印出来。
 
   用法：
-      python scripts/verify_release.py --dist dist --version 0.42.0
-      python scripts/verify_release.py --dist dist --version 0.42.0 --skip-install
+      python -m scripts.verify_release --dist dist --version 0.42.0
+      python -m scripts.verify_release --dist dist --version 0.42.0 --skip-install
 """
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -220,8 +221,50 @@ def check_install(dist, version):
     return True
 
 
+def check_manifest_vs_wheel(dist, version):
+    """E：随包清单必须**正好**覆盖 wheel 载荷（0.48.3 新增的防复发判据）。
+
+    ★★ 为什么必须有这条：`psl/manifest.json` 是在**安装态**被消费的
+      （`antinel_verify --manifest`、`host_shield.self_check()`），而安装态
+      **就是** wheel 解开的树。0.48.2 实测两份主体**双向**错配：
+        · 多覆盖 15 个只进 sdist 的件（`docs/` `references/` `ci/` README/LICENSE/
+          NOTICE/SKILL/MANIFEST.in/verify.yml …）⇒ 纯净安装下 `--manifest` 报
+          `[SUPERSEDED] 15 of 124 covered files are missing`（README 第 17 行
+          「别信我们，自己验」当场喊狼来了）；
+        · 少覆盖 13 个**确实随 wheel 发**的件（`scripts/run_harness.py`、
+          `psl/judgment.json`、`rules/typosquat_top.json` …）⇒ 保护名单里有一批
+          文件**从未被保护**。
+      ⚠️ 两侧数目恰好都是 124 —— **只看数量看不出这个病**，所以判据按**集合**判。
+
+      「按设计排除」只有两个：清单自身与 `psl/judgment.json`（两者都随 wheel 发，
+      但按定义不进清单覆盖面 —— 清单不能覆盖它自己）。除此之外任何差集都是缺陷。
+    """
+    print("[E] 随包清单 vs wheel 载荷（集合对账）")
+    whl = os.path.join(dist, "antinel-%s-py3-none-any.whl" % version)
+    z = zipfile.ZipFile(whl)
+    payload = set(n for n in z.namelist()
+                  if not n.endswith("/") and ".dist-info" not in n.split("/")[0])
+    try:
+        man = json.loads(z.read("psl/manifest.json").decode("utf-8"))
+    except Exception as e:                                     # noqa: BLE001
+        return _fail("wheel 内读不到 psl/manifest.json：%s" % e)
+    listed = set(man.get("files") or {})
+    by_design = {"psl/manifest.json", "psl/judgment.json"}
+    extra = sorted(listed - payload)
+    unlisted = sorted(payload - listed - by_design)
+    if extra:
+        return _fail("清单覆盖了 %d 个**不随 wheel 分发**的文件"
+                     "（纯净安装下 `--manifest` 会报 superseded）：%r" % (len(extra), extra[:5]))
+    if unlisted:
+        return _fail("wheel 里有 %d 个文件**未被清单覆盖**（不受保护）：%r"
+                     % (len(unlisted), unlisted[:5]))
+    print("  ✅ 清单 %d 项 == wheel 载荷 %d 项 − 按设计排除 %d 项"
+          % (len(listed), len(payload), len(by_design)))
+    return True
+
+
 def main():
-    ap = argparse.ArgumentParser(description="发布验收：dist 布局 / wheel 自洽 / twine / 真装一次")
+    ap = argparse.ArgumentParser(description="发布验收：dist 布局 / wheel 自洽 / twine / 真装一次 / 清单对账")
     ap.add_argument("--dist", default=os.path.join(ROOT, "dist"))
     ap.add_argument("--version", required=True)
     ap.add_argument("--skip-install", action="store_true",
@@ -230,7 +273,8 @@ def main():
     print("=" * 74)
     print("发布验收 —— dist=%s  version=%s" % (args.dist, args.version))
     print("=" * 74)
-    steps = [("A", check_dist_layout), ("B", check_wheel), ("C", check_twine)]
+    steps = [("A", check_dist_layout), ("B", check_wheel), ("C", check_twine),
+             ("E", check_manifest_vs_wheel)]
     if not args.skip_install:
         steps.append(("D", check_install))
     else:

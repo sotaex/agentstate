@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
+
 # Antinel·许可落地执行报告 v1.0（2026-10-11）
 
 **状态**：✅ 全链收口。0.48.0 → 0.48.1（patch），提交 `7e4bb5a`，verify_release [A][B][C][D] 全过。

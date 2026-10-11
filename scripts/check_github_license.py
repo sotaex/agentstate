@@ -3,8 +3,8 @@
 """M-C（核验报告 v1.0 §5）：远端与本地协议一致性对账 —— 推送后运行。
 
 用法：
-    python scripts/check_github_license.py            # 查 GitHub 识别结果
-    python scripts/check_github_license.py --remote   # 连远端 LICENSE 内容一起对
+    python -m scripts.check_github_license            # 查 GitHub 识别结果
+    python -m scripts.check_github_license --remote   # 连远端 LICENSE 内容一起对
 
 判据（全部来自本轮实测）：
     ① API license.spdx_id == "Apache-2.0"（修复前实测是 NOASSERTION/Other）

@@ -495,7 +495,7 @@ def check_installed(root):
         print("      python -m pip install --user antinel   然后")
         print("      python -m antinel host-audit")
         print("  · 想直接装上（含钩子，开始记账）：")
-        print("      python scripts/install.py --root .")
+        print("      python -m scripts.install --root .")
         return 1
     try:
         old = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -519,7 +519,7 @@ def check_installed(root):
         print("DRIFT detected (%d):" % len(problems))
         for p in problems:
             print("  - %s" % p)
-        print("fix: python scripts/install.py --root %s" % root)
+        print("fix: python -m scripts.install --root %s" % root)
         return 3
     print("in sync: version %s, rules_hash matches, %d script hashes match"
           % (old_ver, len(old.get("scripts_hash") or {})))
