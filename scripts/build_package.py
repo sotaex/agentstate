@@ -192,7 +192,7 @@ HARNESS_SRC = SRC / "scripts" / "verification_tests.py"
 if not HARNESS_SRC.is_file():
     raise SystemExit("★ 构建器找不到套件：%s\n  （产物仓构建必须用本仓的套件）" % HARNESS_SRC)
 NAME = "antinel-security"
-VERSION = "0.48.3"
+VERSION = "0.48.4"
 # P-A3: the namespace this build declares itself under. derive_object_ownership()
 # reads git remote first, then THIS field; fail-closed unattributed when neither
 # resolves. Kept beside the hashes so a third party can see what was declared.
@@ -229,6 +229,11 @@ classifiers = [
   "License :: OSI Approved :: Apache Software License",
   "License :: OSI Approved :: MIT License",
   "Operating System :: Microsoft :: Windows",
+  # ★ 0.48.4：wheel 是 py3-none-any（纯 Python、无平台相关产物），只声明 Windows
+  #   是**低报**——PyPI 的筛选与 `pip` 的平台匹配会据此把 POSIX 用户挡在候选之外，
+  #   而 README「已知边界」早已写明 macOS/Linux 由 CI 矩阵持续验证。
+  "Operating System :: POSIX",
+  "Operating System :: MacOS :: MacOS X",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
@@ -833,37 +838,87 @@ metadata:
   psl-token-interception: "false"
 ---
 
+## 安装（只需要一次）
+
+```
+pip install antinel
+```
+
+包名是 **`antinel`**（不是 `antinel-security` —— 那是技能名）。零依赖、纯标准库、运行时不联网。
+
+不确定装没装、或想看当前状态，跑一条就够：
+
+```
+antinel agent --json
+```
+
+> 如果报「命令找不到」（`--user` 安装时 `Scripts` 常不在 PATH），
+> 把 `antinel` 换成 `python -m antinel` —— 后面所有命令都这么换即可。
+
+它返回一个 JSON：`installed`（钩子装没装）、`host_detected`（识别出的宿主）、
+`next_steps`（下一步敲什么）、`skill_md`（本文件的路径）、退出码契约。
+**不要靠猜，先跑这一条。**
+
 ## 安全审计流程
 
-当用户要求安全检查时，按以下步骤执行：
+### 步骤0：确认已安装
 
-### 步骤1：安装Hooks（如果尚未安装）
-检查当前项目目录下是否存在 .psl/manifest.json。
-- 如果存在，跳到步骤3。
-- 如果不存在，运行：python -m scripts.install
+- 目标项目里没有 `.psl/manifest.json` ⇒ 说明还没装。
+- 装：`antinel install`（等价 `python -m scripts.install`，两条都对）。
+- 装完**必须重启宿主一次**——钩子在宿主启动时加载，不重启不生效。
 
-### 步骤2：确认安装
-检查 .psl/manifest.json 是否已创建。
-- 如果创建成功，继续步骤3。
-- 如果创建失败，告知用户具体的错误信息。
+### 步骤1：跑扫描
 
-### 步骤3：运行安全扫描
-运行 python -m scripts.scan
-- 退出码 0：扫描成功，读取输出的JSON报告。
-- 退出码非0：读取stderr中的错误信息，告知用户。
+```
+python -m scripts.scan --root .
+```
 
-### 步骤4：生成并展示报告
-将扫描结果格式化为用户友好的报告。
-按严重度排序：CRITICAL > WARNING > INFO。
-每个发现包含：规则ID、文件路径、描述、修复建议。
-行为报告（含扣分明细）：python -m scripts.report；按周：--days 7；导出：--format csv|sarif|html|json。
+- 退出码 0 = 扫描完成。**有发现也是 0**（发现数量看报告，不看退出码）。
+- 想要机器可读：`python -m scripts.scan --json`。
 
-### 注意事项
+⚠ 命令要写成**模块形态**（上面那样带 `-m`）。把模块当文件路径敲的那种写法，
+装完之后跑不通——那些文件在 `site-packages` 里，不在你的项目根下。
+（反例长什么样这里不写全，免得被当成"教过的命令"抄走。）
+
+### 步骤2：读报告
+
+```
+python -m scripts.report --days 7
+```
+
+按严重度排序：CRITICAL > WARNING > INFO。每条发现含：规则 ID、文件路径、描述、修复建议。
+导出：`--format csv|sarif|html|json`。
+
+### 步骤3：讲给用户听
+
+- 有发现：按严重度排序转述，**每条都带上修复建议**（报告里就有，不要自己编）。
+- 没发现：直接说"未发现异常"，并附上扫描了多少文件（报告里有分母）。
+- **不要**因为退出码非 0 就说失败——先读 stderr 里的原文。
+
+## 常用命令（都能在装完之后直接跑）
+
+| 你要什么 | 命令 |
+|---|---|
+| 当前状态、下一步 | `antinel agent --json` |
+| 装 / 查 / 卸钩子 | `antinel install` ／ `--check` ／ `--uninstall` |
+| 打印本手册 | `antinel skill`（`--path` 只给路径，省 token） |
+| 决策层一页纸 | `antinel brief` |
+| 近 N 天干了什么 | `antinel digest --days N` |
+| 静态扫描（机器可读） | `python -m scripts.scan --json` |
+| 证据链有没有被动过 | `antinel verify` |
+| 行为报告 | `python -m scripts.report --days 7` |
+
+## 注意事项
+
 - 你不需要理解每条安全规则的技术细节。
 - 你只需要正确运行脚本并转述结果。
 - 不要修改检测规则或审计日志。
-- 如果扫描结果为空，告知用户"未发现异常"。
-- 自定义白名单与阈值在 .psl/policy.json（安装时生成模板，语义见 references/RULES.md 末尾）。
+- 自定义白名单与阈值在 `.psl/policy.json`（安装时生成模板）。
+- 运行时零网络、无第三方依赖、无驻留进程。
+- 它只匹配工具调用文本与文件内容，**不解析脚本语义**——把删除或外发写进一个
+  `.py`/`.sh` 再执行，闸门不会拦。这是护栏，不是隔离层。
+- 已验证可拦截的宿主：Claude Code / ZCode / Qoder。其余宿主装完是**审计与扫描模式**，
+  `antinel install` 会明说这一点——那不是装失败。
 """
 
 THREAT_MODEL_MD = """# Antinel Security Suite - Threat Model (v%(version)s)
@@ -1997,6 +2052,20 @@ def _refresh_skill_selfcert(pkg, final, harness_rc):
     if harness_rc != 0:
         print("!! SKILL.md 自证卡不刷新：harness rc=%d（记录不可信，保持 false 说真话）" % harness_rc)
         return False
+    # ★ 0.48.4：先让 `psl/SKILL.md` 与根 `SKILL.md` **同源**，再一起刷自证卡。
+    #   为什么放在这里而不是组装阶段：wheel 里 SKILL.md 是随 `psl/` 包走的，
+    #   而根 SKILL.md 是**模板渲染出来的**、写成 pkg 的时间远晚于组装中期。
+    #   第一版把复制放在组装段、取源是**源码树**那份 ⇒ 复制到的是上一轮的旧版
+    #   （实测：psl/SKILL.md 2704 B vs SKILL.md 4697 B），插件自检当场判
+    #   `drifted ['psl/SKILL.md']`。⇒ 复制源必须是**刚刚生成的这一份**。
+    for base in (pkg, final):
+        _s = Path(base) / "SKILL.md"
+        if not _s.is_file():
+            continue
+        _d2 = Path(base) / "psl" / "SKILL.md"
+        _d2.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(_s, _d2)
+
     ok, at, detail = _verification_evidence(pkg, final)
     new_verified = "true" if ok else "false"
     new_at = at if ok else ""
@@ -2004,30 +2073,91 @@ def _refresh_skill_selfcert(pkg, final, harness_rc):
                "judgment run; digest check %s" % detail) if ok
               else ("NOT VERIFIED for this build: %s" % detail))
     changed = []
+    # ★ 0.48.4：`psl/SKILL.md` 也要一起刷。
+    #   为什么：wheel 里 SKILL.md 是随 `psl/` 包走的（顶层非 .py 文件没有可靠的
+    #   随包机制，而 psl 的 package-data 已声明 `*.md`）。组装阶段复制过去的那份
+    #   **早于**自证卡刷新 ⇒ 若不同步，Agent 从包里读到的自证卡就是陈旧的
+    #   （说"本包未验证"，而它其实刚刚验证过）——在立信誉的地方说反话。
     for base in (pkg, final):
-        f = Path(base) / "SKILL.md"
-        if not f.is_file():
-            continue
-        txt = f.read_text(encoding="utf-8")
-        out = []
-        for line in txt.split("\n"):
-            s = line.strip()
-            if s.startswith("psl-verified:") and not s.startswith("psl-verified-"):
-                out.append('  psl-verified: "%s"' % new_verified)
-            elif s.startswith("psl-verified-at:"):
-                out.append('  psl-verified-at: "%s"' % new_at)
-            elif s.startswith("psl-verified-evidence:"):
-                out.append('  psl-verified-evidence: "%s"' % new_ev)
-            else:
-                out.append(line)
-        new_txt = "\n".join(out)
-        if new_txt != txt:
-            f.write_text(new_txt, encoding="utf-8", newline="\n")
-            changed.append(str(f))
+        for rel in ("SKILL.md", os.path.join("psl", "SKILL.md")):
+            f = Path(base) / rel
+            if not f.is_file():
+                continue
+            _rewrite_one(f, new_verified, new_at, new_ev, changed)
     print("SKILL.md 自证卡刷新：verified=%s at=%s（%s）→ %s"
           % (new_verified, new_at or "（空）", detail[:80],
              "、".join(changed) if changed else "两处本就一致，无需写"))
+    # ★ 0.48.4（J6m）：刷新改写了字节 ⇒ 清单里那条哈希当场过期，必须重钉。
+    #   顺序是结构性的：psl/manifest.json 在 build() 的装配段生成（约 2887 行），
+    #   而本函数跑在 harness 之后 ⇒ 必然晚于清单 ⇒ 不重钉就差一个刷新。
+    if changed:
+        _rehash_manifest_for_skill(pkg, final)
     return ok
+
+
+def _rewrite_one(f, new_verified, new_at, new_ev, changed):
+    """把一份 SKILL.md 的自证三行改写为目标值（供 `_sync_skill_selfcert` 复用）。"""
+    txt = f.read_text(encoding="utf-8")
+    out = []
+    for line in txt.split("\n"):
+        s = line.strip()
+        if s.startswith("psl-verified:") and not s.startswith("psl-verified-"):
+            out.append('  psl-verified: "%s"' % new_verified)
+        elif s.startswith("psl-verified-at:"):
+            out.append('  psl-verified-at: "%s"' % new_at)
+        elif s.startswith("psl-verified-evidence:"):
+            out.append('  psl-verified-evidence: "%s"' % new_ev)
+        else:
+            out.append(line)
+    new_txt = "\n".join(out)
+    if new_txt != txt:
+        f.write_text(new_txt, encoding="utf-8", newline="\n")
+        changed.append(str(f))
+
+
+def _rehash_manifest_for_skill(pkg, final):
+    """自证卡刷新之后，把 `psl/manifest.json` 里 SKILL.md 的哈希重钉一遍。
+
+    ★ 为什么必须重钉（2026-10-12 端到端 J6m 实测判红）：
+
+      装完 wheel 的 Agent 跑 `python -m tools.antinel_verify --manifest`，
+      得到 `[SUPERSEDED] 1 of 124 covered files differ  changed: psl/SKILL.md`。
+      真相不是"包被动过"，只是我们自己刚改写了自证卡的时间戳 —— 但这条命令
+      的语义是**证据有没有被动过**，在立信誉的地方自曝不一致，等于自毁。
+
+    ★ 为什么这里可以只改清单、不改判定记录（judgment）：
+      judgment 的覆盖集是那 21 个受保护文件，**不含** `psl/manifest.json`
+      也不含 `psl/SKILL.md`（已核对）⇒ 重钉不触碰 21/21 的口径，无自举循环。
+    """
+    rels = ("psl/SKILL.md", "SKILL.md")
+    for base in (pkg, final):
+        mj = Path(base) / "psl" / "manifest.json"
+        if not mj.is_file():
+            continue
+        try:
+            man = json.loads(mj.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:                      # noqa: BLE001
+            print("!! 清单读不出，跳过重钉：%s（%s）" % (mj, e))
+            continue
+        files = man.get("files")
+        if not isinstance(files, dict):
+            continue
+        touched = []
+        for rel in rels:
+            if rel not in files:
+                continue
+            src = Path(base) / rel
+            if not src.is_file():
+                continue
+            new = _manifest_hash_of(rel, src)
+            if files[rel] != new:
+                files[rel] = new
+                touched.append(rel)
+        if touched:
+            man["files"] = dict(sorted(files.items()))
+            mj.write_text(json.dumps(man, ensure_ascii=False, indent=1),
+                          encoding="utf-8", newline="\n")
+            print("   清单哈希重钉（%s）：%s" % (Path(base).name, "、".join(touched)))
 
 
 def _reconcile_src(mutated):
@@ -2401,6 +2531,21 @@ def build(out_root, verify=False):
         m = srcfile(root_mod)
         if m.is_file():
             shutil.copy2(m, pkg / root_mod)
+    # ★ 0.48.4：**SKILL.md 必须随 wheel 走**。
+    #   为什么：现在装包的多半是 Agent（"帮我装个安全审计"）。它 pip 装完，
+    #   手里只有一个 `antinel` 命令；SKILL.md 是唯一一份"机器可读的操作手册"，
+    #   而 0.48.3 及以前的 wheel **完全没有它**（实测 133 成员、SKILL.md 0 命中）
+    #   ⇒ Agent 只能靠猜，或去读给人看的 60 行 --help。
+    #   落在 `psl/`：顶层非 `.py` 文件没有可靠的随包机制，而 psl 是 package 且
+    #   package-data 已声明 `*.md`（与 antinel.py 的 `_skill_md_path()` 第 3 条对应）。
+    _skill_src = SRC / "SKILL.md"
+    if _skill_src.is_file():
+        (pkg / "psl").mkdir(parents=True, exist_ok=True)
+        shutil.copy2(_skill_src, pkg / "psl" / "SKILL.md")
+        print("SKILL.md copied -> %s" % (pkg / "psl" / "SKILL.md"))
+    else:
+        print("   [notice] 源码树没有 SKILL.md —— Agent 装完将拿不到随包操作手册（非错误）")
+
     # ★ 0.35.0：值守台静态资源（五态 MP4 ＋ 五态 .ico ＋ logo.svg）。
     #   页面按 `<模块目录>/assets/...` 取（`inbox_server.ASSETS_DIR`），
     #   托盘按 `<模块目录>/assets/icons/...` 取（`inbox_tray.icon_path`）。

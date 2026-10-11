@@ -51,8 +51,27 @@ _HOOK_REL = "hooks/pre_tool_use.py"
 _HS_REL = "host_shield.py"
 _MODEL_REL = "inbox_model.py"
 
-#: 构造 Item 用的固定时点（落在 24 小时窗口内，判据因此可重复）
-_NOW = "2026-10-10T23:30:00+08:00"
+def _iso_now():
+    """当前时刻的 ISO 串（+08:00），供构造 Item 的 ts 用。
+
+    ★★ 0.48.4：这里原先写死 `_NOW = "2026-10-10T23:30:00+08:00"`，注释说
+    「落在 24 小时窗口内，判据因此可重复」——**它只在写完的当天成立**。
+    产品侧 `_window_open(items, hours=24)` 只收窗口内的记录，于是这个固定
+    时点会**随真实时间推进而滑出窗口**：2026-10-11 23:30 之后，本套判据里
+    所有 Item 一律被当成"超过 24 小时"，`chans` 恒为空集 ⇒
+    S93/N-S93/N-S93b/S95/S99/N-S99 **六条同时转红**（实测 2026-10-11 23:43）。
+
+    这是**量具的时间炸弹，不是产品缺陷**：产品行为自始至终正确，是判据的
+    夹具过期了。按本仓铁律「一个时红时绿的量具比恒红的更坏」，修法是让夹具
+    每次运行都取"当下"，而不是再钉一个新的固定日期（那只会把炸弹往后拨）。
+    """
+    import datetime as _dt
+    return (_dt.datetime.now(_dt.timezone(_dt.timedelta(hours=8)))
+            .replace(microsecond=0).isoformat())
+
+
+#: 构造 Item 用的时点 —— **每次运行取当下**（理由见 `_iso_now` 的注释）
+_NOW = _iso_now()
 
 
 def check(name):

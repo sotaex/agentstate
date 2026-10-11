@@ -9,6 +9,14 @@
 
 One command. 37 rules. 4 gates. Local-only, zero network, standard library only.
 
+```
+pip install antinel
+```
+
+> **包名是 `antinel`**（`antinel-security` 是技能名，pip 上装不到）。零依赖、纯标准库、运行时不联网。
+
+**如果你是 Agent**：装完跑一条 `antinel agent --json`，就能拿到「钩子装没装 / 这是什么宿主 / 下一步敲什么 / 退出码契约」——不用读这份 README，也不用猜。随包操作手册：`antinel skill`。
+
 ## 别信我们，自己验 / Don't trust us - verify (30 秒)
 
 ```bash
@@ -74,6 +82,17 @@ python -m scripts.install --root <项目根>   # 不一致时重跑安装，自�
 - 或手动：`python -m scripts.scan --root <项目根>` ／ `python -m scripts.report --days 7`
 - 导出：`--format csv|sarif|html|json` ／ 归档：`--archive`
 - 卸载（零残留）：`python -m scripts.install --uninstall`
+
+### 给 Agent 的三条命令
+
+| 你要什么 | 命令 |
+|---|---|
+| 当前状态、下一步（`--json` 机器可读） | `antinel agent [--json]` |
+| 装 / 比对 / 卸钩子（等价 `python -m scripts.install`） | `antinel install` ／ `--check` ／ `--uninstall` |
+| 打印随包操作手册（`--path` 只给路径，省 token） | `antinel skill [--path]` |
+
+`antinel install --check` 的退出码：`0`＝一致 / `1`＝未安装 / `3`＝有漂移。
+`python -m scripts.scan` 的退出码：`0`＝扫描完成（**有发现也是 0**，发现数看报告或 `--json`）。
 
 ## 信任 / Trust (don't trust us - verify)
 

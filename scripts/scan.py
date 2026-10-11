@@ -38,6 +38,38 @@ from pathlib import Path
 PKG_DIR = Path(__file__).resolve().parent
 
 
+def _os_locale():
+    """OS locale 名（形如 zh_CN）。自包含：不依赖调用方的模块级 import。
+
+    为什么不直接用 locale.getlocale() 或环境变量（本机实测 2026-10-11）：
+      getdefaultlocale()      -> ('zh_CN', 'cp936')                  正确
+      getlocale(LC_CTYPE)     -> ('Chinese (Simplified)_China','936') 切不出 zh
+      LC_ALL / LANG           -> C.UTF-8 / en_US.UTF-8               会把中文机判成英文
+    ⇒ 3.15 之前继续用 getdefaultlocale（压掉警告即可），3.15 之后走 ctypes 查 UI 语言。"""
+    import locale as _loc, sys as _sys, os as _os
+    _gdl = getattr(_loc, "getdefaultlocale", None)
+    if _gdl is not None:
+        try:
+            import warnings as _w
+            with _w.catch_warnings():
+                _w.simplefilter("ignore", DeprecationWarning)
+                return _gdl()[0] or ""
+        except Exception:
+            pass
+    if _sys.platform == "win32":
+        try:
+            import ctypes as _ct
+            _m = {2052: "zh_CN", 1028: "zh_TW", 1041: "ja_JP", 1042: "ko_KR"}
+            return _m.get(_ct.windll.kernel32.GetUserDefaultUILanguage() & 0xFFFF, "en_US")
+        except Exception:
+            pass
+    for _k in ("LC_ALL", "LC_CTYPE", "LANG"):
+        _v = _os.environ.get(_k)
+        if _v and _v not in ("C", "C.UTF-8", "POSIX"):
+            return _v
+    return ""
+
+
 def _locate(*rel):
     """Flat PoC layout (rules/ next to scan.py) or skill package (scan.py in scripts/, rules in ../rules)."""
     for base in (PKG_DIR, PKG_DIR.parent):
@@ -51,7 +83,17 @@ DEFAULT_RULES = _locate("rules", "default.json")
 
 EXCLUDED_DIRS = {"node_modules", ".git", "venv", ".venv", "__pycache__", ".tox",
                  "dist", "build", "vendor", "third_party"}
-EXCLUDED_REL_PATHS = {".psl/audit"}
+# ★ 0.48.4：**首印象归零**。此前只排除了 `.psl/audit`，而 install 会把规则快照
+#   写进 `.psl/rules/default.json`——那份快照里带 SEC-06 的**示例密钥字面量**
+#   （AKIAIOSFODNN7EXAMPLE，规则的测试夹具，不是真密钥）。于是：
+#     全新空目录 → pip 装完 → 第一次扫描 → 🔴 CRITICAL 1 条，Score 80/100 B
+#   而那条 CRITICAL 是**Antinel 自己写进去的**（实测 2026-10-11，100% 复现）。
+#   用户第一眼看到的"你的环境有严重问题"，问题来自我们。
+#   处置：Antinel 自己写的状态件一律不进扫描面（审计链另有 verify 负责完整性）。
+EXCLUDED_REL_PATHS = {".psl/audit", ".psl/rules", ".psl/state"}
+# 文件级（目录过滤管不到 .psl/ 根下散落的那几个）
+EXCLUDED_FILE_RELS = {".psl/manifest.json", ".psl/scan_last.json",
+                      ".psl/hooks.json", ".psl/policy.json"}
 TEXT_SUFFIXES = {".md", ".mdc", ".txt", ".json", ".yaml", ".yml", ".toml", ".py", ".js",
                  ".ts", ".sh", ".bash", ".zsh"}
 MAX_DEPTH = 15
@@ -277,6 +319,14 @@ def scan_directory(root, rules, quick=False, path_whitelist=None):
             stats["files_seen"] += 1
             if quick and stats["files_seen"] > QUICK_MAX_FILES:
                 break
+            # ★ 0.48.4：Antinel 自己写的状态件不进扫描面（目录级的 .psl/rules 与
+            #   .psl/audit 已在上面被 dirnames 过滤；这里是散落在 .psl/ 根的文件）。
+            #   理由见 EXCLUDED_REL_PATHS 处注释：它们的"密钥"是规则测试夹具，
+            #   扫出来就是自己给自己报 CRITICAL。
+            _rl = (os.path.relpath(os.path.join(dirpath, fn), root_str)
+                   .replace("\\", "/"))
+            if _rl in EXCLUDED_FILE_RELS:
+                continue
             full = os.path.join(dirpath, fn)
             rel = os.path.relpath(full, root_str).replace("\\", "/")
             if os.path.islink(full):
@@ -430,7 +480,7 @@ def _lang():
         return v
     try:
         import locale
-        loc = (locale.getdefaultlocale()[0] or "").lower()
+        loc = _os_locale().lower()
         return "zh" if loc.startswith("zh") else "en"
     except Exception:
         return "en"

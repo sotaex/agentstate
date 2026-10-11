@@ -254,6 +254,51 @@ def main():
             _has = any(n.endswith("docs/A6收入边界声明.md") for n in _tf.getnames())
         rec("J5a6s", _has, "A6 声明随 sdist（%s）：%s" % (os.path.basename(_sd[-1]), "在" if _has else "缺失"))
 
+    # ---- ★ 0.48.4 · M8 **Agent 旅程**（这一幕是 v1.1 新增的：装包的人里
+    #      Agent 占大多数，而它失败一次就不会再推荐你）
+    #      判据取「Agent 装完 pip 包后，手里只有 `antinel` 一个词」这个真实约束：
+    #      四条都必须能从这个词出发走到，不许要求它先知道 `python -m scripts.x`。
+    print("\n-- M8 Agent 旅程 --")
+    rc, out, err, dt = run([ant, "agent", "--json"], timeout=60)
+    dump("m8_agent_json.txt", out + "\n---stderr---\n" + err)
+    _d = None
+    if rc == 0 and out.strip():
+        try:
+            _d = json.loads(out)
+        except Exception:
+            _d = None
+    rec("J8a", rc == 0 and isinstance(_d, dict),
+        "antinel agent --json -> rc=%d 可解析=%s（%.1fs）" % (rc, _d is not None, dt))
+    rec("J8b", bool(_d) and set(("installed", "next_steps", "host_detected",
+                                 "package_version", "skill_md")) <= set(_d),
+        "agent --json 字段齐（installed/next_steps/host_detected/package_version/skill_md）：%s"
+        % ("齐" if _d else "缺"))
+    # 版本号不许自相矛盾：agent 报的包版本必须与 `antinel -V` 一致
+    rc_v, out_v, _e, _t = run([ant, "-V"], timeout=60)
+    _vv = (out_v or "").strip()
+    rec("J8c", bool(_d) and rc_v == 0 and _d.get("package_version") in _vv,
+        "包版本一致：agent=%r vs -V=%r" % (_d.get("package_version") if _d else None, _vv[:40]))
+
+    rc, out, err, dt = run([ant, "skill", "--path"], timeout=60)
+    _sk = (out or err).strip()
+    dump("m8_skill_path.txt", out + err)
+    rec("J8d", rc == 0 and bool(_sk) and os.path.isfile(_sk),
+        "antinel skill --path -> rc=%d 路径存在=%s：%r" % (rc, os.path.isfile(_sk), _sk[-60:]))
+    # ★ 反向对照的味道：SKILL.md 必须**随 wheel**，不是只在源码树里有
+    rec("J8e", bool(_sk) and os.path.abspath(_sk).startswith(os.path.abspath(sp)),
+        "SKILL.md 落在**包内**（不是源码树）：%s" % ("是" if _sk and os.path.abspath(_sk).startswith(os.path.abspath(sp)) else "否"))
+
+    rc, out, err, dt = run([ant, "install", "--check"], timeout=120)
+    dump("m8_install_check.txt", out + "\n---stderr---\n" + err)
+    # 约定：0=一致 / 1=未安装 / 3=漂移。新项目里 1 是正确答案。
+    rec("J8f", rc in (0, 1, 3), "antinel install --check -> rc=%d（约定 0/1/3）%r"
+        % (rc, (out or err).strip()[:70]))
+    # 帮助里必须给 Agent 一个路口（否则它读完 60 行中文还是不知道下一步）
+    rc, out, err, dt = run([ant, "--help"], timeout=60)
+    rec("J8g", rc == 0 and "agent --json" in out and "pip install antinel" in out,
+        "--help 含 Agent 路口与包名澄清：%s"
+        % ("是" if (rc == 0 and "agent --json" in out and "pip install antinel" in out) else "否"))
+
     # ---- M7 升级与卸载
     print("\n-- M7 卸载与残留 --")
     rc, out, err, dt = run([py, "-m", "pip", "uninstall", "-y", "antinel"], timeout=180)

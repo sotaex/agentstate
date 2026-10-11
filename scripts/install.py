@@ -46,6 +46,59 @@ from pathlib import Path
 
 PKG_DIR = Path(__file__).resolve().parent
 SKILL_VERSION = "0.33.1"
+
+
+def _os_locale():
+    """OS locale 名（形如 zh_CN）。自包含：不依赖调用方的模块级 import。
+
+    为什么不直接用 locale.getlocale() 或环境变量（本机实测 2026-10-11）：
+      getdefaultlocale()      -> ('zh_CN', 'cp936')                  正确
+      getlocale(LC_CTYPE)     -> ('Chinese (Simplified)_China','936') 切不出 zh
+      LC_ALL / LANG           -> C.UTF-8 / en_US.UTF-8               会把中文机判成英文
+    ⇒ 3.15 之前继续用 getdefaultlocale（压掉警告即可），3.15 之后走 ctypes 查 UI 语言。"""
+    import locale as _loc, sys as _sys, os as _os
+    _gdl = getattr(_loc, "getdefaultlocale", None)
+    if _gdl is not None:
+        try:
+            import warnings as _w
+            with _w.catch_warnings():
+                _w.simplefilter("ignore", DeprecationWarning)
+                return _gdl()[0] or ""
+        except Exception:
+            pass
+    if _sys.platform == "win32":
+        try:
+            import ctypes as _ct
+            _m = {2052: "zh_CN", 1028: "zh_TW", 1041: "ja_JP", 1042: "ko_KR"}
+            return _m.get(_ct.windll.kernel32.GetUserDefaultUILanguage() & 0xFFFF, "en_US")
+        except Exception:
+            pass
+    for _k in ("LC_ALL", "LC_CTYPE", "LANG"):
+        _v = _os.environ.get(_k)
+        if _v and _v not in ("C", "C.UTF-8", "POSIX"):
+            return _v
+    return ""
+
+
+def _package_version():
+    """包版本（0.48.x），与 SKILL_VERSION（钩子协议版本 0.33.1）是两个不同的数。
+
+    ★ 0.48.4：这两个数在界面上长期混用——`--check` 印 SKILL_VERSION，而
+      `antinel -V` 印包版本，用户看到两个数打架却无从判断哪个是"装了什么"。
+      现在各报各的名字；取值优先用安装元数据（真实来源），失败再退回源码常量。"""
+    try:
+        from importlib.metadata import version as _v
+        return _v("antinel")
+    except Exception:
+        pass
+    try:
+        for line in (_locate("antinel.py")).read_text(encoding="utf-8",
+                                                      errors="replace").splitlines():
+            if line.startswith("VERSION = "):
+                return line.split('"')[1]
+    except Exception:
+        pass
+    return "unknown"
 PSL_SPEC = "psl-vs-0.1"
 SCRIPT_FILES = ("pre_tool_use.py", "post_tool_use.py", "session_dna.py",
                 "audit_chain.py",
@@ -140,28 +193,117 @@ def _settings_has_hooks(path):
         return False
 
 
+def _cfg_name(dirname):
+    return "config.json" if dirname == ".zcode" else "settings.json"
+
+
+def _host_detector():
+    """取宿主归因的唯一来源 `hooks/_host_detect`；取不到返回 None（不抛）。
+
+    ★ 0.48.4：install.py 既会被 `python -m scripts.install` 调用，也会被
+    `python install.py` **当脚本直接跑**（harness 就是这个形态，实测
+    88/315 崩在这里）。后一种形态下 `sys.path[0]` 是 `scripts/` 目录，
+    顶层 `hooks` 包**不在路径上** ⇒ `from hooks import _host_detect` 静默失败
+    ⇒ 宿主归因整条链路退化为 None。⇒ 显式把**包根**加进 sys.path。
+    """
+    try:
+        _root = str(Path(__file__).resolve().parent.parent)
+        if _root not in sys.path:
+            sys.path.insert(0, _root)
+        from hooks import _host_detect
+        return _host_detect
+    except Exception:
+        return None
+
+
 def detect_host(root):
-    """Returns (host, settings_path). Priority (A-04): project markers >
-    home markers > environment variables > generic. Among several markers at
-    the same level the most recently modified settings.json wins (C-02)."""
+    """Returns (host, settings_path).
+
+    ★ 0.48.4（Agent 零摩擦 · 宿主归因裂缝）：**修的是一处静默失效**。
+      改之前，install.py 自带一份只认 claude-code / zcode / qoder 的检测，且
+      **home 目录标记优先于环境变量**。实测后果（2026-10-11，wheel 安装态）：
+      在 WorkBuddy 里让 Agent 装钩子——本机 home 下有 `.qoder` 目录——于是
+      **装进了「项目/.qoder/settings.json」并一路打印成功**，而 WorkBuddy 不读
+      那个文件 ⇒ 钩子静默不生效。同一时刻 `antinel` CLI 的 detect_host() 却
+      认得 workbuddy：**两份实现，对同一台机器给出两个结论**。
+
+      现在的判定顺序（强证据在前）：
+        (0) 项目里**已有带 hooks 的 settings.json** ⇒ 沿用，不重复造目录。
+            这条保护所有既有安装：升级不会把已生效的钩子搬走。
+        (1) **项目目录内的宿主标记**（顺序取自 `hooks/_host_detect._DIR_MARKERS`，
+            唯一来源，不另抄一份）。install 装的是"这个项目"，所以项目里的
+            `.zcode` / `.claude` 是最直接的证据 —— **排在 env 之前**，理由见
+            步骤 (1) 处的注释（实测：`_host_detect` 的 env 优先会被宿主进程的
+            环境变量带偏，把"我在 WorkBuddy 里跑命令"读成"这个目录属于 WorkBuddy"）。
+        (2) 项目里没有标记 ⇒ 再看 env（`_host_detect.detect()`，认得
+            CODEBUDDY_CONFIG_DIR / WORKBUDDY_HOST 等键）。
+        (3) 只对**本版已验证钩子协议**的三家（claude-code / zcode / qoder）
+            写钩子配置；workbuddy / trae 等落 generic，由调用方**明说**没接入，
+            而不是静默装在宿主不读的地方。
+        (4) 环境变量兜底（CLAUDE_CODE / ZCODE_SESSION）。
+        (5) home 标记兜底 —— 排到最后：它只是"这台机器装过某工具"，
+            不构成"这个目录属于它"的证据，还会在共用机器上误判。
+    """
     root = Path(root)
-    bases = [root] if os.environ.get("ANTINEL_NO_HOME_DETECT") else [root, Path.home()]
-    for base in bases:
-        found = []
-        for host, d in HOST_DIRS:
-            p = base / d / ("config.json" if d == ".zcode" else "settings.json")
-            if p.is_file():
-                found.append((p.stat().st_mtime, _settings_has_hooks(p), host, p))
-            elif base == root and (base / d).is_dir():
-                found.append((0.0, False, host, p))
-        if found:
-            found.sort(key=lambda t: (t[1], t[0]), reverse=True)     # hooks key, then mtime
-            _, _, host, p = found[0]
-            return host, (root / p.parent.name / ("config.json" if p.parent.name == ".zcode" else "settings.json")) if base != root else p
+
+    # (0) 既有安装：已装过钩子的配置文件说了算
+    for host, d in HOST_DIRS:
+        p = root / d / _cfg_name(d)
+        try:
+            if p.is_file() and _settings_has_hooks(p):
+                return host, p
+        except Exception:
+            continue
+
+    # (1) **项目目录内的宿主标记**。
+    #     为什么在 install 场景里它排在 env 之前（与 `hooks/_host_detect.py` 的
+    #     "env 优先"**刻意不同**）：_host_detect 判的是"这一**次调用**来自哪个宿主"，
+    #     而 install 判的是"把钩子装进**哪个项目**"。环境变量是**宿主进程**设的——
+    #     在本会话里跑的任何命令（含测试）都带着 `CODEBUDDY_CONFIG_DIR`，于是
+    #     "当前进程在 WorkBuddy 里"被误当成"这个目录属于 WorkBuddy"。
+    #     实测（0.48.4 首跑 harness，88/315 崩）：临时项目 `zc_proj/` 里明明有
+    #     `.zcode`，却被 env 判成 workbuddy ⇒ 不写 `.zcode/config.json`
+    #     ⇒ 后续断言 FileNotFoundError。**目录标记在这里才是直接证据。**
+    tag = None
+    _hd = _host_detector()
+    if _hd is not None:
+        for d, t in _hd._DIR_MARKERS:
+            if (root / d).is_dir():
+                tag = t
+                break
+
+    # (2) 目录没命中 ⇒ 再看 env（认得 workbuddy / codebuddy / trae 的键）
+    if tag is None and _hd is not None:
+        try:
+            tag, _ev = _hd.detect(str(root))
+        except Exception:
+            tag = None
+
+    # (3) 已验证协议的三家：写进它们自己的配置目录
+    if tag in ("claude-code", "zcode", "qoder"):
+        d = dict(HOST_DIRS)[tag]
+        return tag, root / d / _cfg_name(d)
+    if tag in ("trae", "workbuddy", "codebuddy"):
+        # TRAE 的布局是声明式适配、未实测；WorkBuddy 本版没有实测过的钩子协议
+        # （README「已知边界」已有登记）。不猜目录：落 generic，由 install() 明说。
+        return "generic", root / ".psl" / "hooks.json"
+    if tag not in (None, "generic"):
+        return "generic", root / ".psl" / "hooks.json"
+
+    # (4) 环境变量兜底
     if os.environ.get("CLAUDE_CODE"):
         return "claude-code", root / ".claude" / "settings.json"
     if os.environ.get("ZCODE_SESSION"):
         return "zcode", root / ".zcode" / "config.json"
+
+    # (4) home 标记兜底 —— **只在完全没有任何归因线索时**才用。
+    #     若已经知道是 workbuddy（步骤 1 命中），就不许再拿 home 下的 .qoder
+    #     去猜：那正是 0.48.3 及以前"装成功但钩子不生效"的那条路径。
+    if tag is None:
+        home = Path.home()
+        for host, d in HOST_DIRS:
+            if (home / d).is_dir():
+                return host, root / d / _cfg_name(d)
     return "generic", root / ".psl" / "hooks.json"
 
 
@@ -364,7 +506,7 @@ def _lang():
         return v
     try:
         import locale
-        loc = (locale.getdefaultlocale()[0] or "").lower()
+        loc = _os_locale().lower()
         return "zh" if loc.startswith("zh") else "en"
     except Exception:
         return "en"
@@ -422,6 +564,13 @@ def install(root, host_override=None, redetect=False, skip_scan=False, strict=Fa
     registered = register_hooks(settings_path, host)
     if host == "generic":
         print("[3/6] hooks: written to PSL manifest only (scan-only mode, no host hook support)")
+        # ★ 0.48.4：不许静默。改之前，WorkBuddy 里的安装会一路打印"成功"，
+        #   而钩子其实落在宿主不读的目录里——Agent 与用户都拿不到"没生效"这个事实。
+        #   现在把「检测到了什么 / 没接上 / 还能用什么 / 怎么接」一次说清。
+        print("      ⚠ 这个宿主还没有我们实测过的钩子协议 ⇒ 本次只装了**审计与扫描**，")
+        print("        Agent 的动作**不会**被实时拦截（不是装失败，是这一宿主尚未接入）。")
+        print("        仍然可用：antinel brief ／ antinel digest ／ python -m scripts.scan")
+        print("        已验证可拦截的宿主：claude-code / zcode / qoder（--host 可显式指定）")
         registered = []
     else:
         print("[3/6] hooks: %s registered (append mode)" % ", ".join(registered))
@@ -521,8 +670,13 @@ def check_installed(root):
             print("  - %s" % p)
         print("fix: python -m scripts.install --root %s" % root)
         return 3
-    print("in sync: version %s, rules_hash matches, %d script hashes match"
-          % (old_ver, len(old.get("scripts_hash") or {})))
+    # ★ 0.48.4：把「哪个版本」说清楚。旧文案只印 `version 0.33.1`，而
+    #   `antinel -V` 印的是 `0.48.3` ⇒ 用户/Agent 看到两个数打架，且无从判断
+    #   哪个才是"装了什么"。0.33.1 是**钩子协议版本**（只在协议变化时 bump），
+    #   0.48.3 是**包版本**；两者本来就不同步，但界面上必须各报各的名字。
+    _pkg = _package_version()
+    print("in sync: 钩子协议版本 %s ／ 包版本 %s；rules_hash 一致，%d 个脚本哈希一致"
+          % (old_ver, _pkg, len(old.get("scripts_hash") or {})))
     return 0
 
 

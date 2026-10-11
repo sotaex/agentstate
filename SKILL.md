@@ -15,43 +15,93 @@ compatibility: Requires Python 3.10+; standard library only; no network access; 
 metadata:
   psl-verified: "true"
   psl-verified-spec: "psl-vs-0.1"
-  psl-verified-at: "2026-10-11T22:36:24+0800"
+  psl-verified-at: "2026-10-12T05:40:33+0800"
   psl-verified-evidence: "live PreToolUse block of a real .env read in ZCode (SEC-01) plus a full-assertion judgment run; digest check 21/21 digests match this build (assertions 315/315)"
   psl-verifier: "scripts/run_harness.py"
   antinel-product: "security-audit"
   antinel-tier: "free"
-  antinel-version: "0.48.3"
+  antinel-version: "0.48.4"
   psl-token-interception: "false"
 ---
 
+## 安装（只需要一次）
+
+```
+pip install antinel
+```
+
+包名是 **`antinel`**（不是 `antinel-security` —— 那是技能名）。零依赖、纯标准库、运行时不联网。
+
+不确定装没装、或想看当前状态，跑一条就够：
+
+```
+antinel agent --json
+```
+
+> 如果报「命令找不到」（`--user` 安装时 `Scripts` 常不在 PATH），
+> 把 `antinel` 换成 `python -m antinel` —— 后面所有命令都这么换即可。
+
+它返回一个 JSON：`installed`（钩子装没装）、`host_detected`（识别出的宿主）、
+`next_steps`（下一步敲什么）、`skill_md`（本文件的路径）、退出码契约。
+**不要靠猜，先跑这一条。**
+
 ## 安全审计流程
 
-当用户要求安全检查时，按以下步骤执行：
+### 步骤0：确认已安装
 
-### 步骤1：安装Hooks（如果尚未安装）
-检查当前项目目录下是否存在 .psl/manifest.json。
-- 如果存在，跳到步骤3。
-- 如果不存在，运行：python -m scripts.install
+- 目标项目里没有 `.psl/manifest.json` ⇒ 说明还没装。
+- 装：`antinel install`（等价 `python -m scripts.install`，两条都对）。
+- 装完**必须重启宿主一次**——钩子在宿主启动时加载，不重启不生效。
 
-### 步骤2：确认安装
-检查 .psl/manifest.json 是否已创建。
-- 如果创建成功，继续步骤3。
-- 如果创建失败，告知用户具体的错误信息。
+### 步骤1：跑扫描
 
-### 步骤3：运行安全扫描
-运行 python -m scripts.scan
-- 退出码 0：扫描成功，读取输出的JSON报告。
-- 退出码非0：读取stderr中的错误信息，告知用户。
+```
+python -m scripts.scan --root .
+```
 
-### 步骤4：生成并展示报告
-将扫描结果格式化为用户友好的报告。
-按严重度排序：CRITICAL > WARNING > INFO。
-每个发现包含：规则ID、文件路径、描述、修复建议。
-行为报告（含扣分明细）：python -m scripts.report；按周：--days 7；导出：--format csv|sarif|html|json。
+- 退出码 0 = 扫描完成。**有发现也是 0**（发现数量看报告，不看退出码）。
+- 想要机器可读：`python -m scripts.scan --json`。
 
-### 注意事项
+⚠ 命令要写成**模块形态**（上面那样带 `-m`）。把模块当文件路径敲的那种写法，
+装完之后跑不通——那些文件在 `site-packages` 里，不在你的项目根下。
+（反例长什么样这里不写全，免得被当成"教过的命令"抄走。）
+
+### 步骤2：读报告
+
+```
+python -m scripts.report --days 7
+```
+
+按严重度排序：CRITICAL > WARNING > INFO。每条发现含：规则 ID、文件路径、描述、修复建议。
+导出：`--format csv|sarif|html|json`。
+
+### 步骤3：讲给用户听
+
+- 有发现：按严重度排序转述，**每条都带上修复建议**（报告里就有，不要自己编）。
+- 没发现：直接说"未发现异常"，并附上扫描了多少文件（报告里有分母）。
+- **不要**因为退出码非 0 就说失败——先读 stderr 里的原文。
+
+## 常用命令（都能在装完之后直接跑）
+
+| 你要什么 | 命令 |
+|---|---|
+| 当前状态、下一步 | `antinel agent --json` |
+| 装 / 查 / 卸钩子 | `antinel install` ／ `--check` ／ `--uninstall` |
+| 打印本手册 | `antinel skill`（`--path` 只给路径，省 token） |
+| 决策层一页纸 | `antinel brief` |
+| 近 N 天干了什么 | `antinel digest --days N` |
+| 静态扫描（机器可读） | `python -m scripts.scan --json` |
+| 证据链有没有被动过 | `antinel verify` |
+| 行为报告 | `python -m scripts.report --days 7` |
+
+## 注意事项
+
 - 你不需要理解每条安全规则的技术细节。
 - 你只需要正确运行脚本并转述结果。
 - 不要修改检测规则或审计日志。
-- 如果扫描结果为空，告知用户"未发现异常"。
-- 自定义白名单与阈值在 .psl/policy.json（安装时生成模板，语义见 references/RULES.md 末尾）。
+- 自定义白名单与阈值在 `.psl/policy.json`（安装时生成模板）。
+- 运行时零网络、无第三方依赖、无驻留进程。
+- 它只匹配工具调用文本与文件内容，**不解析脚本语义**——把删除或外发写进一个
+  `.py`/`.sh` 再执行，闸门不会拦。这是护栏，不是隔离层。
+- 已验证可拦截的宿主：Claude Code / ZCode / Qoder。其余宿主装完是**审计与扫描模式**，
+  `antinel install` 会明说这一点——那不是装失败。

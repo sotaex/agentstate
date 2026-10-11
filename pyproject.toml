@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "antinel"
-version = "0.48.3"
+version = "0.48.4"
 description = "Local-first audit chain and ledger for AI coding agents: every action recorded, every record verifiable."
 readme = "README.md"
 license = {file = "LICENSE"}
@@ -20,6 +20,11 @@ classifiers = [
   "License :: OSI Approved :: Apache Software License",
   "License :: OSI Approved :: MIT License",
   "Operating System :: Microsoft :: Windows",
+  # ★ 0.48.4：wheel 是 py3-none-any（纯 Python、无平台相关产物），只声明 Windows
+  #   是**低报**——PyPI 的筛选与 `pip` 的平台匹配会据此把 POSIX 用户挡在候选之外，
+  #   而 README「已知边界」早已写明 macOS/Linux 由 CI 矩阵持续验证。
+  "Operating System :: POSIX",
+  "Operating System :: MacOS :: MacOS X",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",

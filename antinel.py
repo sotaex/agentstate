@@ -36,7 +36,7 @@ if _HERE not in sys.path:
 
 from strings import detect_lang, get_string
 
-VERSION = "0.48.3"
+VERSION = "0.48.4"
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
@@ -1538,6 +1538,13 @@ def cmd_help(_args=None):
             for _u, c in rows:
                 print("    %s" % c)
     print("    antinel settings list ｜ hub list ｜ routes --markdown")
+    # ★ 0.48.4：给 Agent 的极简路口。上面 60 行是**给人看的**（"你可以对 Agent 说"
+    #   那一段对 Agent 本身毫无意义——它不需要被教用户会怎么说）。Agent 只需要三行。
+    print("── 如果你是 Agent ─────────────────────────")
+    print("  antinel agent --json    一个 JSON 拿到：装没装、什么宿主、下一步敲什么")
+    print("  antinel install         装钩子（等价 python -m scripts.install）")
+    print("  antinel skill           随包操作手册（--path 只给路径，省 token）")
+    print("  包名是 antinel（pip install antinel）—— 不是 antinel-security")
     print("── 提示 ───────────────────────────────────")
     print("  拦截消息里给出的命令可直接执行；所有配置变更均进审计链。")
     print("  多宿主共存机器：Agent 自报宿主（antinel --host zcode …），口径即随宿主。")
@@ -3339,6 +3346,171 @@ def cmd_host_scan(args):
 # 它硬编码了作者机路径 r"C:/Users/大马/.workbuddy/.../3.13.12/python.exe"，把作者的 Windows
 # 用户名与一个会过期的版本号带进了要发 PyPI 的包（PII ＋ 可移植性），且那条路径只对作者机成立。
 # 留档（供将来真要"用宿主自己的解释器"时参考）：候选顺序是宿主 binaries 目录 → ~/.zcode → sys.executable。
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# ★ 0.48.4 · Agent 零摩擦入口（install / skill / agent）
+#
+# 为什么必须做（2026-10-11 夜，wheel 安装态实测）：
+#   装完 pip 包后，Agent 手里只有一个 `antinel` 命令。而它的 --help 是**给人看的**
+#   60 行营销文案：既没有「装钩子」这一步，也没有机器可读出口，SKILL.md 又**不在
+#   wheel 里**（实测 wheel 133 成员，SKILL.md 0 命中）⇒ Agent 装完不知道下一步。
+#   「下载者多半是 Agent」这个前提一旦成立，这个缺口就是第一摩擦点。
+#
+#   判据：装完 pip 包后，Agent 只需 `antinel agent --json` 一条命令就能拿到
+#   「我是什么环境 / 装没装 / 下一步敲什么 / 结果在哪」的全部答案。
+# ─────────────────────────────────────────────────────────────────────────
+
+def _skill_md_path():
+    """随包 SKILL.md 的绝对路径。找不到返回 None（不抛）。"""
+    here = os.path.dirname(os.path.abspath(__file__))
+    # 顺序说明：源码树里 antinel.py 与 SKILL.md 同级（第 1 条命中）；wheel 安装态
+    # 下 SKILL.md 随 `psl/` 包走（顶层非 .py 文件没有可靠的随包机制，而 psl 的
+    # package-data 已声明 `*.md`），故第 3 条覆盖 pip 装完的形态。
+    for p in (os.path.join(here, "SKILL.md"),
+              os.path.join(here, "agent", "SKILL.md"),
+              os.path.join(here, "psl", "SKILL.md"),
+              os.path.join(os.path.dirname(here), "SKILL.md")):
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def cmd_install(args):
+    """`antinel install` —— 装钩子。等价于 python -m scripts.install。
+
+    为什么要在 CLI 里再给一个入口：Agent 装完 pip 包后记得的只有 `antinel`
+    这一个词。让它再猜出 `python -m scripts.install` 这一串，是纯摩擦。"""
+    argv = []
+    if getattr(args, "root", None):
+        argv += ["--root", args.root]
+    if getattr(args, "host", None):
+        argv += ["--host", args.host]
+    if getattr(args, "global_hooks", False):
+        argv.append("--global")
+    if getattr(args, "check", False):
+        argv.append("--check")
+    if getattr(args, "uninstall", False):
+        argv.append("--uninstall")
+    if getattr(args, "purge", False):
+        argv.append("--purge")
+    if getattr(args, "skip_scan", False):
+        argv.append("--skip-scan")
+    try:
+        from scripts import install as _inst
+        return _inst.main(argv)
+    except Exception as _e:                      # 委派失败不许甩栈给人
+        print("✗ antinel install 这一步失败了：%s: %s" % (type(_e).__name__, _e),
+              file=sys.stderr)
+        print("  等价命令（可自己跑）：python -m scripts.install " + " ".join(argv),
+              file=sys.stderr)
+        return 1
+
+
+def cmd_skill(args):
+    """`antinel skill` —— 把随包的操作手册交给 Agent。
+
+    --path：只打路径（省 token，Agent 自己读文件）
+    默认：打全文（Agent 在拿不到文件路径时也有一份）"""
+    p = _skill_md_path()
+    if not p:
+        print("（本安装里没有随包 SKILL.md；源码仓根目录有 SKILL.md）")
+        return 2
+    if getattr(args, "path_only", False):
+        print(p)
+        return 0
+    try:
+        with open(p, encoding="utf-8") as f:
+            sys.stdout.write(f.read())
+        return 0
+    except Exception as _e:
+        print("✗ 读 SKILL.md 失败：%s: %s" % (type(_e).__name__, _e), file=sys.stderr)
+        return 1
+
+
+def _agent_state_json():
+    """Agent 真正需要的那几件事：装没装、什么宿主、下一步敲什么。"""
+    root = None
+    try:
+        root = find_project_root()
+    except Exception:
+        root = None
+    if not root:
+        root = os.getcwd()
+    manifest_p = os.path.join(root, ".psl", "manifest.json")
+    installed = os.path.isfile(manifest_p)
+    m = {}
+    if installed:
+        try:
+            with open(manifest_p, encoding="utf-8") as f:
+                m = json.load(f)
+        except Exception:
+            m = {}
+    try:
+        host = detect_host()
+    except Exception:
+        host = "unknown"
+    skill = _skill_md_path()
+    steps = []
+    if not installed:
+        steps.append({"do": "antinel install",
+                      "why": "把钩子装进当前项目，之后 Agent 的每个动作才进审计链"})
+        steps.append({"do": "antinel agent --json",
+                      "why": "装完再看一次，确认 installed=true"})
+    else:
+        steps.append({"do": "antinel brief", "why": "决策层一页纸：有没有外发、该做什么"})
+        steps.append({"do": "antinel digest --days 1", "why": "近一天干了什么、拦了什么"})
+        steps.append({"do": "python -m scripts.scan --json", "why": "静态扫描，机器可读"})
+        steps.append({"do": "antinel verify", "why": "审计链有没有被动过"})
+    return {
+        "product": "AgentState (by Antinel)",
+        "pypi_package": "antinel",
+        "install_command": "pip install antinel",
+        "package_version": VERSION,
+        "python": "%d.%d.%d" % sys.version_info[:3],
+        "platform": sys.platform,
+        "project_root": root,
+        "installed": installed,
+        # ★ 键名必须说清它是什么。manifest 里那一份是**钩子协议版本**（0.33.1，
+        #   只在协议变化时 bump），与包版本（0.48.x）是两个不同的数。写成
+        #   `manifest_version` 会让 Agent 看到两个数打架却无从判断哪个是
+        #   "装了什么"—— 正是本次要消掉的那一类混淆。
+        "hook_protocol_version": m.get("version") or m.get("skill_version"),
+        "host_detected": host,
+        "audit_dir": os.path.join(root, ".psl", "audit"),
+        "skill_md": skill,
+        "next_steps": steps,
+        "exit_code_contract": {
+            "antinel install --check": "0=一致 / 1=未安装 / 3=有漂移",
+            "python -m tools.antinel_verify": "0=current / 1=superseded / 2=无法校验",
+            "python -m scripts.scan": "0=扫描完成（有发现也是 0；看 JSON 里的 findings）",
+        },
+        "notes": [
+            "运行时不联网；只用标准库；无第三方依赖",
+            "扫描只匹配工具调用文本与文件内容，不解析脚本语义；不是隔离层",
+            "装/改配置后需重启宿主一次，钩子在宿主启动时加载",
+        ],
+    }
+
+
+def cmd_agent(args):
+    """`antinel agent [--json]` —— 机器可读的「我现在该干什么」。"""
+    d = _agent_state_json()
+    if getattr(args, "json", False):
+        print(json.dumps(d, ensure_ascii=False, indent=1))
+        return 0
+    print("AgentState %s ｜ 宿主 %s ｜ 项目根 %s"
+          % (d["package_version"], d["host_detected"], d["project_root"]))
+    print("已装钩子：%s" % ("是" if d["installed"] else "否 —— 先跑 antinel install"))
+    print("下一步：")
+    for s in d["next_steps"]:
+        print("  · %s  —— %s" % (s["do"], s["why"]))
+    if d["skill_md"]:
+        print("随包操作手册：%s（antinel skill 可直接打印）" % d["skill_md"])
+    print("机器可读：antinel agent --json")
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="antinel", add_help=False,
                                  description="Antinel 单入口（无参数=帮助清单）")
@@ -3423,6 +3595,19 @@ def main(argv=None):
 
     p = sub.add_parser("routes"); p.add_argument("--markdown", action="store_true")
     sub.add_parser("help")
+    # ★ 0.48.4 · Agent 零摩擦三件套（见 cmd_install/cmd_skill/cmd_agent 的实测注释）
+    p = sub.add_parser("install", help="装/查/卸钩子（等价 python -m scripts.install）")
+    p.add_argument("--root", default=None, help="项目根（默认当前目录）")
+    p.add_argument("--host", choices=["claude-code", "zcode", "qoder", "generic"], default=None)
+    p.add_argument("--global", dest="global_hooks", action="store_true")
+    p.add_argument("--check", action="store_true", help="只比对不改动（0=一致/1=未安装/3=漂移）")
+    p.add_argument("--uninstall", action="store_true")
+    p.add_argument("--purge", action="store_true")
+    p.add_argument("--skip-scan", action="store_true")
+    p = sub.add_parser("skill", help="打印随包 SKILL.md（给 Agent 的操作手册）")
+    p.add_argument("--path", dest="path_only", action="store_true", help="只打印路径，省 token")
+    p = sub.add_parser("agent", help="机器可读的「我现在该干什么」")
+    p.add_argument("--json", action="store_true")
     p = sub.add_parser("host-shield")
     ps = p.add_subparsers(dest="sub", required=True)
     ps.add_parser("status"); ps.add_parser("enable"); ps.add_parser("disable")
@@ -3645,6 +3830,12 @@ def main(argv=None):
         return cmd_ui(args)
     elif args.cmd == "zone":
         cmd_zone(args)
+    elif args.cmd == "install":                  # ★ 0.48.4
+        return cmd_install(args)
+    elif args.cmd == "skill":
+        return cmd_skill(args)
+    elif args.cmd == "agent":
+        return cmd_agent(args)
     return 0
 
 

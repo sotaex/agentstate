@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
-# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.18（随 v0.48.3）
+# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.18（随 v0.48.4）
 
 > v1.18（0.47.0 登记、0.48.0 随版）：**提醒预算族新增 2 类** —— `notice_budget_merged`、
 > `notice_budget_window_closed`（见下文「提醒预算类」）。**不改**已有字段名、

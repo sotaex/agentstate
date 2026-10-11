@@ -53,6 +53,38 @@ RETENTION_DAYS_DEFAULT = 30
 SCRIPT_FILES = ("pre_tool_use.py", "post_tool_use.py", "scan.py", "install.py", "report.py")
 
 
+def _os_locale():
+    """OS locale 名（形如 zh_CN）。自包含：不依赖调用方的模块级 import。
+
+    为什么不直接用 locale.getlocale() 或环境变量（本机实测 2026-10-11）：
+      getdefaultlocale()      -> ('zh_CN', 'cp936')                  正确
+      getlocale(LC_CTYPE)     -> ('Chinese (Simplified)_China','936') 切不出 zh
+      LC_ALL / LANG           -> C.UTF-8 / en_US.UTF-8               会把中文机判成英文
+    ⇒ 3.15 之前继续用 getdefaultlocale（压掉警告即可），3.15 之后走 ctypes 查 UI 语言。"""
+    import locale as _loc, sys as _sys, os as _os
+    _gdl = getattr(_loc, "getdefaultlocale", None)
+    if _gdl is not None:
+        try:
+            import warnings as _w
+            with _w.catch_warnings():
+                _w.simplefilter("ignore", DeprecationWarning)
+                return _gdl()[0] or ""
+        except Exception:
+            pass
+    if _sys.platform == "win32":
+        try:
+            import ctypes as _ct
+            _m = {2052: "zh_CN", 1028: "zh_TW", 1041: "ja_JP", 1042: "ko_KR"}
+            return _m.get(_ct.windll.kernel32.GetUserDefaultUILanguage() & 0xFFFF, "en_US")
+        except Exception:
+            pass
+    for _k in ("LC_ALL", "LC_CTYPE", "LANG"):
+        _v = _os.environ.get(_k)
+        if _v and _v not in ("C", "C.UTF-8", "POSIX"):
+            return _v
+    return ""
+
+
 def _locate(*rel):
     """Flat PoC layout or skill package layout (report.py in scripts/, hooks in ../hooks, rules in ../rules)."""
     for base in (PKG_DIR, PKG_DIR.parent):
@@ -335,7 +367,7 @@ def _lang():
         return v
     try:
         import locale
-        loc = (locale.getdefaultlocale()[0] or "").lower()
+        loc = _os_locale().lower()
         return "zh" if loc.startswith("zh") else "en"
     except Exception:
         return "en"
@@ -458,7 +490,10 @@ def render_text(rep, log_label):
                 nfind, rep["summary"].get("critical", 0), rep["summary"].get("warning", 0)))
         else:
             L.append(" Conclusion: no risky behaviour observed, environment is safe.")
-    L += [" Full log: %s" % log_label, " Re-scan: python scan.py", BAR]
+    # ★ 0.48.4：`python scan.py` 在**安装态**下跑不通（scan.py 在 site-packages 里，
+    #   不在项目根）——正面撞「页面上不许教跑不通的命令」。改为安装态可用的写法。
+    L += [" Full log: %s" % log_label,
+          " Re-scan: python -m scripts.scan --root .", BAR]
     return "\n".join(L)
 
 

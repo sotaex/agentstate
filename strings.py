@@ -34,6 +34,38 @@ _LOCALE_MAP = {
 }
 
 
+def _os_locale():
+    """OS locale 名（形如 zh_CN）。自包含：不依赖调用方的模块级 import。
+
+    为什么不直接用 locale.getlocale() 或环境变量（本机实测 2026-10-11）：
+      getdefaultlocale()      -> ('zh_CN', 'cp936')                  正确
+      getlocale(LC_CTYPE)     -> ('Chinese (Simplified)_China','936') 切不出 zh
+      LC_ALL / LANG           -> C.UTF-8 / en_US.UTF-8               会把中文机判成英文
+    ⇒ 3.15 之前继续用 getdefaultlocale（压掉警告即可），3.15 之后走 ctypes 查 UI 语言。"""
+    import locale as _loc, sys as _sys, os as _os
+    _gdl = getattr(_loc, "getdefaultlocale", None)
+    if _gdl is not None:
+        try:
+            import warnings as _w
+            with _w.catch_warnings():
+                _w.simplefilter("ignore", DeprecationWarning)
+                return _gdl()[0] or ""
+        except Exception:
+            pass
+    if _sys.platform == "win32":
+        try:
+            import ctypes as _ct
+            _m = {2052: "zh_CN", 1028: "zh_TW", 1041: "ja_JP", 1042: "ko_KR"}
+            return _m.get(_ct.windll.kernel32.GetUserDefaultUILanguage() & 0xFFFF, "en_US")
+        except Exception:
+            pass
+    for _k in ("LC_ALL", "LC_CTYPE", "LANG"):
+        _v = _os.environ.get(_k)
+        if _v and _v not in ("C", "C.UTF-8", "POSIX"):
+            return _v
+    return ""
+
+
 def detect_lang():
     """按优先级：1) 环境变量覆盖  2) OS locale  3) 英文兜底"""
     forced = os.environ.get("ANTINEL_LANG")
@@ -41,7 +73,7 @@ def detect_lang():
         return forced
     try:
         import locale as _lc
-        loc = _lc.getdefaultlocale()[0] or ""
+        loc = _os_locale()
         prefix = loc.split("_")[0].lower()
         if prefix in SUPPORTED:
             return prefix
