@@ -118,7 +118,11 @@ def main():
 
     exp_ver = None
     if dist:
-        m = re.search(r"antinel-([0-9.]+)-py3", os.path.basename(dist))
+        # ★ 0.48.4：正则必须同时认两件产物。PyPI 上 wheel 与 sdist 都会发，
+        #   而 sdist 路径此前**测不到**：文件名叫 `antinel-0.48.4.tar.gz`，
+        #   只认 `-py3` 的正则解析出 None ⇒ J2「antinel -V」当场假红
+        #   （实测输出 `antinel 0.48.4` 明明是对的，判据说"期望含 None"）。
+        m = re.search(r"antinel-([0-9.]+)(?:-py3|\.tar\.gz)", os.path.basename(dist))
         exp_ver = m.group(1) if m else None
     elif mode == "pypi":
         # 轨道 B：期望版本＝本次待发版（workspace_facts.target_version）
