@@ -248,7 +248,9 @@ details.rem[open]>summary .t{color:var(--r0)}
 button[disabled]{opacity:.55;cursor:not-allowed;border-style:dashed !important;
   border-color:var(--line) !important;color:var(--muted) !important}
 /* 顶部口径说明：它必须**小而弱** —— 它的作用是消歧，不是抢注意力。 */
-.pill .unit{opacity:.6;font-size:11px;margin-left:4px}
+/* ★ 0.48.5（交接件 §5.4 丙1）：`.unit` 原先只给 `.pill` 准备、零使用；
+   筛选条的单位可见化复用它（件/条小字紧跟数字），一处定义两处受益。 */
+.pill .unit,.filters .unit{opacity:.6;font-size:11px;margin-left:4px}
 .sect{margin:22px 0 10px;font-size:13px;color:var(--muted);font-weight:700}
 .hint{background:var(--panel);border:1px solid var(--line);border-radius:10px;
   padding:14px 16px;margin-bottom:14px;font-size:13px}
@@ -799,28 +801,35 @@ def _view_inbox(items, token, filt, now=None):
     b = M.counts_by_bucket(items, now=now)
     n_all = len(items)
 
-    def f(v, label, n, tip):
+    def f(v, label, n, tip, unit):
         # ★ 0.37.2：四个数字**单位不同**（要处理＝件事，其余＝条记录），
         #   并排摆在一起却不说明，读者会拿 4 与 44、293 直接比大小 ——
-        #   那是异质单位做比较（本项目 F54）。视觉上不加字（加了更啰嗦），
-        #   改为**每个 tab 各带一句口径**（悬停可见），单位就摆在数字旁边。
+        #   那是异质单位做比较（本项目 F54）。当时把单位只放 hover title。
+        # ★★ 0.48.5（交接件 §5.4 丙1）：单位**可见化** —— hover 里的字
+        #   鼠标不在上面就看不见，而并排比较恰恰发生在看见的那一刻。
+        #   现在单位紧跟数字（`.unit` 小字弱化，不抢数字），口径归「？」词条。
+        #   ★ 注意：这不是算错，是**单位异质被并排**（F54 同型，判据 U-08 守）。
         cls = " class=\"on\"" if v == filt else ""
-        return ("<a href=\"/?v=inbox&f=%s&t=%s\"%s title=\"%s\">%s <b>%d</b></a>"
-                % (v, _esc(token), cls, _esc(tip), _esc(label), n))
+        return ("<a href=\"/?v=inbox&f=%s&t=%s\"%s title=\"%s\">%s <b>%d</b>"
+                "<span class=\"unit\">%s</span></a>"
+                % (v, _esc(token), cls, _esc(tip), _esc(label), n, _esc(unit)))
 
     head = ("<div class=\"filters\">"
             + f(M.BUCKET_ACTION, "要处理", n_act,
-                "单位：件事（同一事由的多条记录合成一件）")
+                "单位：件事（同一事由的多条记录合成一件）", "件")
             + f(M.BUCKET_INFO, "看一眼", b[M.BUCKET_INFO],
-                "单位：条记录（不做归并，一条算一条）")
+                "单位：条记录（不做归并，一条算一条）", "条")
             + f(M.BUCKET_ARCHIVE, "归档", b[M.BUCKET_ARCHIVE],
-                "单位：条记录（不做归并，一条算一条）")
+                "单位：条记录（不做归并，一条算一条）", "条")
             + f("all", "全部记录", n_all,
-                "单位：条记录（这次读到的全部条目）") + "</div>"
-            # ★★ 0.47.0（方案 v3.0 §5 步三）：一排数字**共用一行**窗口与分母说明 ——
-            #   四个 tab 的分母是同一个（`n_all`），一行说清，不必把每个 tab 撑成三行。
+                "单位：条记录（这次读到的全部条目）", "条") + "</div>"
+            # ★★ 0.48.5（交接件 §5.3 甲2 / §5.4 甲4）：一排数字的口径说明走
+            #   `M.reading_note()`（唯一实现）—— 旧句承诺「分母均为 N 条」，
+            #   对四个 tab 至少三个是假的（要处理按件事归并、归档无时间上限），
+            #   「最近 24 小时」也不随页面停留滚动。删谎，不删口径本身：
+            #   分母与单位下沉到每 tab 可见单位 ＋「？」词条口径行（U-03/U-08 守）。
             + ("<div class=\"note\" style=\"margin:0 0 8px\">%s</div>"
-               % _esc(M.window_note(n_all)))
+               % _esc(M.reading_note()))
             # ★ 0.35.3：页面上出现的**每个重要词都可点开看定义**。
             #   档位本身是链接（塞不进 details），级别徽章也没有落点 ⇒ 统一给
             #   **一个**折叠入口，而不是把定义平铺在页面上等人读完。
@@ -914,11 +923,15 @@ def _view_report(rep, token, items=None):
                 "</div>"
                 % (GL.chip(k), var, _esc(scoped_filter), _esc(token), n, _win_total))
 
-    #: ★ 0.47.0：这一排四个数字**共用一行**窗口与分母说明（同 `M.window_note` 的口径）。
+    #: ★ 0.48.5（交接件 §5.4 甲4）：这一排四个数字的口径说明走
+    #   `M.reading_note()` —— 与收件箱筛选条**同一个唯一实现**（旧版这里另写
+    #   一句内联说明，两处同源破裂；那句还带着「分母均为」的假承诺 ——
+    #   四个数的分母其实是窗口内三档之和，不是「本次载入的全部记录」）。
+    #: ★ 0.47.0 步三的分母仍在：`_win_total` ＝ 窗口内三档记录之和，
+    #   继续供四个 metric 的 `/ N` 与拉起次数行使用（判据 U-97 连带守）。
     _win_total = sum(int(W.get(k, 0) or 0) for k in ("R0", "L2", "L1"))
     _win_note = ("<div class=\"note\" style=\"margin:0 0 8px\">%s</div>"
-                 % _esc("最近 %d 小时 · 以下数字的分母均为窗口内的 %d 条记录"
-                        % (hrs, _win_total)))
+                 % _esc(M.reading_note()))
 
     # ★ 0.37.2：顺序改**由重到轻**（失守 → 拦截 → 注意 → 要处理）。
     #   旧版是「拦截 · 注意 · 失守 · 要处理」—— 最重的排在第三位，
@@ -953,7 +966,10 @@ def _view_report(rep, token, items=None):
     _today_levels = ("<a href=\"/?v=inbox&f=day:%s:lv:R0&t=%s\">失守 %d</a> ｜ "
                      "<a href=\"/?v=inbox&f=day:%s:lv:L2&t=%s\">拦截 %d</a> ｜ "
                      "<a href=\"/?v=inbox&f=day:%s:lv:L1&t=%s\">注意 %d</a>"
-                     " ｜ 分母 %d"
+                     # ★ 0.48.5（交接件 §5.4 丙2）：「分母 N」改成直述「共 N 条」——
+                     #   「分母」是术语词条里的词（口径行才是它的定义处），
+                     #   正文里裸它是把术语当时尚词；意思一点没少。
+                     " ｜ 共 %d 条"
                      % (_day, _esc(token), Lv["R0"], _day, _esc(token), Lv["L2"],
                         _day, _esc(token), Lv["L1"], _day_total))
     pr = ("<div class=\"card\"><div class=\"rows\">"

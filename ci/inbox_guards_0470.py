@@ -474,10 +474,14 @@ def s95():
         return "顶部条仍是裸分子"
 
     # ② 收件箱筛选条上方的口径行
+    #   ★★ 0.48.5（交接件 v1.1 §5.3/§5.4）：口径行改走 `M.reading_note()`
+    #      （旧 `window_note` 承诺「分母均为 N 条」—— 对四个 tab 至少三个是假的，
+    #      且「最近 24 小时」不随页面停留滚动）。分母纪律并未放松：它下沉到
+    #      每 tab 可见单位、hover 口径与「？」词条，本套件 ①③ 仍守 count_text。
     page = SV.render_page(view="inbox", root=tempfile.mkdtemp(prefix="g0470_s95_"),
                           token="T", items=items)
-    if M.window_note(total) not in page:
-        return "收件箱页缺「窗口＋分母」口径行（应有 %r）" % M.window_note(total)
+    if M.reading_note() not in page:
+        return "收件箱页缺口径行（应有 %r）" % M.reading_note()
 
     # ③ 托盘：`total`（分母）必须落盘，tip 必须带窗口与分母
     root = tempfile.mkdtemp(prefix="g0470_s95t_")
