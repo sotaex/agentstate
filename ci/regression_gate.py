@@ -358,6 +358,100 @@ def j_version_consistent():
     return False, "多数派 %s，落后者：%s" % (major, "；".join(odd[:4]))
 
 
+def j_manifest_no_dead_entries():
+    """★★ D-25（2026-10-12）：manifest 里不许有「指向不存在文件」的死条目。
+
+    **这不是偶然缺陷，是结构性复发**（所以必须由闸门守，不能靠人记得）：
+      `challenge/chain/` 是远端 bot **每日滚动**的活数据目录（文件按日期命名，
+      每天替换成一个新日期文件）；而 `psl/manifest.json` 是**发布时快照**
+      （`built_at` 固定）。链每滚动一次，manifest 立刻出现一条死条目
+      ⇒ `ci/inbox_guards_0483.py` 的 S2 红（清单 ⊆ 随包集被破）
+        ＋ `antinel_verify --manifest` 报 missing。
+
+    2026-10-12 实测（本轮 merge 并入远端 21 条后）：链从
+    `2026-09-23.jsonl` 滚到 `2026-10-11.jsonl`（merge 时 git 识别为 rename），
+    而 manifest 仍写旧名 ⇒ 0483 从 12 绿掉到 11 绿／1 红。
+    ⇒ 我上一轮判"delivery_gate 29 个套件零引用 merge 改动的路径"**是错的**：
+      0483 是**通过读 manifest 间接**引用链文件的，grep 抓不到间接引用。
+
+    ★ 判据打在**行为**上（文件存在性），不打字面/行号（维三）。
+    ★ **不加版本豁免**：0483 S2 的自举豁免只对"wheel 载荷"成立（打包中途
+      必然落后），不对"磁盘存在性"成立 —— commit 时树必须自洽。
+      加豁免等于把死条目放过去，正是要防的那件事。
+    ★ 追平工具：`_tools_034/_resign_manifest.py --roll`（结构化对齐 + 重签）。
+    """
+    man = PKG / "psl" / "manifest.json"
+    if not man.is_file():
+        return None, "缺 psl/manifest.json"
+    try:
+        files = json.loads(man.read_text(encoding="utf-8")).get("files") or {}
+    except Exception as e:                                  # noqa: BLE001
+        return False, "manifest 读不出：%s: %s" % (type(e).__name__, e)
+    if not files:
+        return False, "manifest 里没有 files 字典"
+    dead = sorted(rel for rel in files if not (PKG / rel).is_file())
+    if dead:
+        return False, "%d 个死条目（清单有、磁盘无）：%s" % (len(dead), "、".join(dead[:3]))
+    return True, "%d 条全部有对应文件" % len(files)
+
+
+def j_posture_why_no_frozen_numbers():
+    """★★ D-26（2026-10-12）：`guard_posture()["why"]` 不许含**冻结读数**。
+
+    要防的复发（创始人 2026-10-12 第 3 条，原话「如果时间不会随时间走，
+    就是错的，这句话要不不写」）：
+      在岗分支的 why 原写「哨兵在岗，最后心跳 N 分钟前」。
+      值守台页面**零自动刷新**（无 meta refresh / setInterval / location.reload，
+      全文件实测）⇒「N 分钟前」是**渲染那一刻冻结的值**，页面开一小时
+      它永远写同一个数。**这是一个会说谎的数字**（F55 同族：页面显示一个
+      它维持不住的承诺）。已删；读数仍留在 `evidence.heartbeat_age`。
+
+    ★ 禁词取「最后心跳」与「分钟前」两个**形状**，不是禁"心跳"两个字：
+      缺岗分支的「心跳断档 N 分钟」**不删** —— 那是事件态，"断了多久"是
+      判断该不该手动拉起的决策信息，且不会自己好转。禁"分钟前"（而非"分钟"）
+      正好不误伤它。
+    ★ 与 0360 的 `c_user_text_has_no_process_ids`（禁 pid）**职责分明**：
+      那条禁实现细节，这条禁会说谎的读数。两条并存，互不替代。
+    ★ 源码级为主（覆盖全部 7 个分支，不依赖运行态走到哪条）；
+      运行态作补充（像 0360 那样 try，探不到不算缺陷）。
+    """
+    BANNED = ("最后心跳", "分钟前")
+    src_p = PKG / "host_shield.py"
+    if not src_p.is_file():
+        return None, "缺 host_shield.py"
+    src = src_p.read_text(encoding="utf-8", errors="replace")
+
+    # ---- 源码级：guard_posture 函数体内每个 "why" 赋值行 ----
+    m = re.search(r"^def guard_posture\(.*?(?=^def |\Z)", src, re.S | re.M)
+    if not m:
+        return False, "找不到 guard_posture 定义（被改名/删了？）"
+    body = m.group(0)
+    bad = []
+    for w in re.finditer(r'"why"\s*:\s*([^\n]*(?:\n\s+[^\n]*)*?)(?=,|\n\s*"evidence")', body):
+        seg = w.group(1)
+        for b in BANNED:
+            if b in seg:
+                bad.append("%s in %r" % (b, seg.strip()[:60]))
+    if bad:
+        return False, "why 里出现冻结读数：%s" % "；".join(bad[:3])
+
+    # ---- 运行态补充：探真实返回值（探不到不算缺陷，源码级已给结论）----
+    try:
+        import importlib.util as _ilu
+        _sp = _ilu.spec_from_file_location("_hs_d26", str(src_p))
+        _hm = _ilu.module_from_spec(_sp)
+        _sp.loader.exec_module(_hm)
+        _p = _hm.guard_posture(str(PKG))
+        _why = str(_p.get("why") or "")
+        for b in BANNED:
+            if b in _why:
+                return False, "运行态 why 含 %s：%r" % (b, _why)
+    except Exception:                                       # noqa: BLE001
+        pass
+    return True, "why 无冻结读数（源码 %d 个 why 赋值 + 运行态均已检）" % len(
+        re.findall(r'"why"\s*:', body))
+
+
 def j_fallback_has_no_dst10(m):
     """兜底集的事实：_FALLBACK 只有 17 条且无 DST-10。
     ★ 这本身不是缺陷，但**降级时必须能看见**（否则把盲区当清白）。"""
@@ -997,6 +1091,26 @@ def selfcheck():
         ("D-23 缺陷：workspace_facts 里产物仓 git 声明写反",
          "psl/workspace_facts.json",
          '"git": true', '"git": false', "D-23"),
+        # ★★ D-25 负控（2026-10-12）：往 manifest 里塞一个**死条目**。
+        #   模拟的正是复发形态：远端 bot 每日滚动 `challenge/chain/`（文件按日期
+        #   替换），而 manifest 是发布时快照 ⇒ 链一滚，快照立刻指向不存在的文件。
+        #   ⇒ 0483 S2 红 + `--manifest` 报 missing。本轮 merge 后实测复现过。
+        #   注入值用"保证不存在"的名字（双下划线 + 不随包扩展名），不碰任何真条目。
+        ("D-25 缺陷：manifest 里塞一个死条目（链滚动 ⇒ 快照落后的复发）",
+         "psl/manifest.json",
+         ' "files": {',
+         ' "files": {\n  "__negctl_dead_entry__.txt": "sha256:' + "0" * 64 + '",',
+         "D-25"),
+        # ★★ D-26 负控（2026-10-12）：把「最后心跳 N 分钟前」加回 why。
+        #   模拟的正是 0.49.0 删掉的那个复发：页面零自动刷新 ⇒ "N 分钟前"是
+        #   **渲染时冻结的值**，开一小时不换数 —— 会说谎的数字（F55 同族）。
+        #   注入串按**改后磁盘真值**取（"哨兵在岗"），不用旧文案 —— 否则负控
+        #   自己 SKIP，而 SKIP 会被误读成"判据没问题"（本文件已有两次此教训）。
+        ("D-26 缺陷：把「最后心跳 N 分钟前」加回 why（冻结读数复发）",
+         "host_shield.py",
+         '"why": "哨兵在岗",',
+         '"why": "哨兵在岗，最后心跳 %.0f 分钟前" % 6,',
+         "D-26"),
     ]
 
     ok_all = True
@@ -1089,6 +1203,32 @@ def selfcheck():
         for extra in ("pyproject.toml", "server.json", "SKILL.md", "MANIFEST.in"):
             if (PKG / extra).is_file():
                 shutil.copy2(str(PKG / extra), str(dst / extra))
+        # ★★ D-25 需要 manifest 覆盖的**全部**文件都在 fixture 里（2026-10-12 实测必修）：
+        #   不加这一段，D-25 在**每一条**负控里都连带假红 —— manifest 有 124 条，
+        #   而 fixture 只复制 7 个目录 ＋ 根目录 *.py ⇒ `assets/`、`challenge/`
+        #   下的条目在 fixture 里全部"不存在"。假红不是缺陷、是**盲区**，
+        #   而它把每条负控的输出污染成"D-25 | D-25"，读者再也分不清哪条
+        #   才是真正被注入的那一条（"会误报的检查器用两次就没人信"）。
+        #   manifest 合计仅 ~3.2 MB，全复制可接受（13 次注入 ≈ 42 MB 峰值）。
+        #   ★ 此刻 fixture 里的 manifest 还是**原始**的（注入的写入在后面的
+        #     `mut.write_text`），所以补复制的正是原始 124 条；注入的死条目
+        #     文件在 PKG 里也不存在 ⇒ 不会被复制 ⇒ 负控照样能检出它。
+        _fmf0 = dst / "psl" / "manifest.json"
+        if _fmf0.is_file():
+            try:
+                _ents = json.loads(_fmf0.read_text(encoding="utf-8")).get("files") or {}
+                for _rel in _ents:
+                    _s, _d = PKG / _rel, dst / _rel
+                    if _s.is_file() and not _d.exists():
+                        _d.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(str(_s), str(_d))
+            except Exception as _e:                           # noqa: BLE001
+                # 与 fixture 封闭失败同一条纪律：准备失败必须**中止本条负控**，
+                # 不许"做，也不许算它绿"（静默通过＝假负控）。
+                print("  [SKIP] %-40s fixture 补复制 manifest 条目失败（%s: %s）⇒ 本条负控不做"
+                      % (label, type(_e).__name__, _e))
+                ok_all = False
+                continue
         # ★★ 2026-09-29：fixture 也要**封闭**（同 D-6 的教训）—— 把 psl/manifest.json 的
         #   built_from 改写成 fixture 自己的路径。否则 D-22 每次都因"它指向真仓、
         #   而 PKG 是临时目录"而**假红**，跟 D-6 一样是噪声、且会掩盖真正的判定。
@@ -1118,7 +1258,26 @@ def selfcheck():
             # 分叉专项：src 已是剔行后的内容，不再做字符串替换
             mut.write_text(src, encoding="utf-8", newline="\n")
         else:
-            mut.write_text(src.replace(old, new, 1), encoding="utf-8", newline="\n")
+            _payload = src.replace(old, new, 1)
+            # ★★ 2026-10-12 修（既有缺陷，由 D-25 负控的连带红暴露）：
+            #   `src` 是从 **PKG 真仓**读的原文，**没有经过上面的 built_from 封闭**
+            #   ⇒ 这里 write_text 会把封闭好的 fixture manifest **覆盖回真仓路径**
+            #   ⇒ D-22 在**每一条改 manifest 的负控**里都假红（built_from 不指向
+            #   fixture）。此前它不显眼，是因为负控只查"期望那条红了没"，不看连带。
+            #   ★ 修法：写入前对 payload 补一次封闭。**无条件**——走到本分支的
+            #     manifest 注入只有 D-25 一条（D-22 的注入是 `new is None`，
+            #     走上面那个分支，且它**故意**要把 built_from 改成归档仓路径，
+            #     不能被封闭覆盖）。
+            #   ★ 第一版写成"先比对 built_from 是否等于 str(PKG) 再封闭"——**没生效**：
+            #     JSON 里是转义形态 `D:\\psl\\...`（双反斜杠），而 `str(PKG)` 是
+            #     单反斜杠 ⇒ 永远不匹配 ⇒ 等于没修。改用"直接替换整个值"，
+            #     与上面 fixture 封闭那段同一个正则（那段一直是生效的）。
+            if rel == "psl/manifest.json":
+                _payload = re.sub(
+                    r'"built_from"\s*:\s*"[^"]*"',
+                    lambda _m: '"built_from": "%s"'
+                    % str(dst).replace("\\", "\\\\"), _payload)
+            mut.write_text(_payload, encoding="utf-8", newline="\n")
 
         # 用**改过的**包跑闸门
         r = subprocess.run(
@@ -1145,6 +1304,14 @@ def selfcheck():
         elif not hit_expected:
             ok_all = False
             print("         ★ 闸门变红了，但不是预期的判据（期望含 %r）" % expect_red)
+        else:
+            # ★ 连带红必须**看得见**：docstring 承诺"恰好那条判据变红"，但同源判据
+            #   （如 D-6 版本注入会连带 D-23，两者都读版本）会合理连带 ⇒ 不判失败，
+            #   但必须出声。看不见的污染比污染本身更坏——它让"RED(好)"失去信息量。
+            _extra = [x.strip()[:38] for x in reds if expect_red.split()[0] not in x]
+            if _extra:
+                print("         △ 连带变红 %d 条（非本次注入对象，需人确认是否同源）：%s"
+                      % (len(_extra), " | ".join(_extra[:3])))
 
         # ★★ 2026-09-29（D-15 推广）：**负控的临时目录也不许删**。
         #   实测教训：本机平台层 safe-delete 守卫按会话累计、阈值 50、不重置，
@@ -1202,6 +1369,10 @@ def main():
              j_workspace_facts),
             ("D-24 构建产物不得进索引（忽略对已追踪文件无效）",
              j_no_build_artifacts_in_index),
+            ("D-25 manifest 无死条目（链每日滚动 ⇒ 快照必落后，防复发）",
+             j_manifest_no_dead_entries),
+            ("D-26 态势说明无冻结读数（心跳/分钟前：会说谎的数字）",
+             j_posture_why_no_frozen_numbers),
         ]
 
         for cid, fn in checks:
