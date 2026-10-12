@@ -80,10 +80,14 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.6 var(--sans)}
 a{color:var(--brand)}
 button{font:inherit;cursor:pointer}
 .bar{display:flex;align-items:center;gap:16px;padding:12px 20px;border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap}
-.logo{width:46px;height:46px;border-radius:12px;overflow:hidden;background:#0a1a12;flex:none}
+.logo{width:48px;height:48px;border-radius:12px;overflow:hidden;background:#0a1a12;flex:none}
 .logo video,.logo img{width:100%;height:100%;display:block;object-fit:cover}
-.state b{font-size:17px}
-.state span{font-size:12px;color:var(--muted)}
+/* ★ 0.48.5（交接件 §5.4 戊4）：状态词 16px 粗体（色随态，行内 style 走
+   `M.STATE_VAR` —— 与 `.dot` 同一个真源）；解释句 13px 常规色 `var(--fg)`。
+   旧形状是「词 17px  inherited 黑／解释 12px 灰」—— 信息量大的那句
+   （为什么是这个态）被压成次要，权重倒挂；判据 U-15 锁旧声明不许回来。 */
+.state b{font-size:16px;font-weight:700}
+.state span{font-size:13px;color:var(--fg)}
 .pill{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid var(--line)}
 .dot{width:8px;height:8px;border-radius:50%}
 .spacer{flex:1}
@@ -552,14 +556,20 @@ def _bar(items, token, posture=None, now=None, view="inbox"):
                _pill("注意", "L1") + GL.chip("L1", mk=True)))
     return (
         "<header class=\"bar\">"
-        "<div class=\"logo\"><video autoplay loop muted playsinline "
-        "src=\"/assets/%s.mp4?t=%s\"></video></div>"
+        # ★★ 0.48.5（交接件 §5.4 戊1）：头部图标改用 `logo.svg`（矢量，48px
+        #   任意尺寸不发虚）—— 旧版 state 专属 mp4 在 768×768 → 46×46 的
+        #   缩放下发虚（607 KB 换一个模糊角标）；mp4 留给托盘（16×16 合理）。
+        #   状态不再靠图标区分：状态由灯（`.dot` ＋ 状态词随态色）独占。
+        "<div class=\"logo\"><img alt=\"Antinel\" src=\"/assets/logo.svg?t=%s\"></div>"
         # ★ 0.48.5（交接件 §5.6 乙1）：顶部灯的「？」芯片跟在 `<b>` 后
         #   （灯不是链接，芯片可以直接挨着；全站共 8 个落点，U-04 逐个数）。
+        # ★ 0.48.5（交接件 §5.4 戊4）：状态词 16px 粗体、**色随态**
+        #   （与 `.dot` 同一个 `M.STATE_VAR` —— 单一真源）；解释句降为
+        #   13px 常规色（信息量大的那句占主导，见 U-15）。
         "<div class=\"state\"><span class=\"dot\" style=\"background:var(%s)\"></span>"
-        "<b>%s</b>%s%s<br><span>%s</span></div>"
+        "<b style=\"color:var(%s)\">%s</b>%s%s<br><span>%s</span></div>"
         "%s%s<div class=\"spacer\"></div></header>"
-        % (_esc(M.STATE_LOGO[st]), _esc(token), M.STATE_VAR[st],
+        % (_esc(token), M.STATE_VAR[st], M.STATE_VAR[st],
            label, GL.chip("light", mk=True), suffix, state_reason, nums, fix))
 
 

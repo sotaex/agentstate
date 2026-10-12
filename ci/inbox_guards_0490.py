@@ -10,8 +10,8 @@
 
      批次 1（甲2/甲3/甲4 ＋ 丙1/丙2）→ U-01 / U-03 / U-08（已落地，commit 049fc7c）
      批次 2（丁2/丁3/丁4/丁5）        → U-10 / U-11 / U-05（已落地，commit 9337bc4）
-     批次 3（乙1~乙4）                → U-04 / U-06（本 commit）
-     批次 4（戊1/戊2/戊4 ＋ 戊3 重排）→ U-13 / U-15
+     批次 3（乙1~乙4）                → U-04 / U-06（已落地，commit 264c67b）
+     批次 4（戊1/戊2/戊4 ＋ 戊3 重排）→ U-13 / U-15（本 commit）
      批次 5（W-01 ＋ W-02 边界项）    → 单独 commit（认窗白名单）
 
    编号与 19 条**稳定映射**：U-02/U-07/U-09/U-12/U-14 是并入项与视觉项
@@ -725,10 +725,118 @@ def n_u06():
     return True
 
 
+# ════════════════════════════ U-13 · 戊1（头部 logo.svg）＋ 戊2 机械部分 ══
+@check("U-13 ★ 戊1：头部用 logo.svg、零 mp4；svg 内部哨点已去（戊2 机械部分）")
+def u13():
+    """戊1：768×768 → 46×46 的 mp4 缩放下发虚（607 KB 换一个模糊角标）
+    ⇒ 头部改用矢量 `logo.svg`；mp4 留给托盘（16×16 合理，不动），
+    favicon.ico 不变（U-13 只查头部，不碰托盘与 favicon）。
+
+    戊2 的机械部分并在这里断言（视觉部分走截图验收，§5.8）：
+    svg 内部那颗橙色哨点已去 —— 它与顶部条 `.dot` 是两套「点」语言，
+    状态由 `.dot` 独占（单一真源）。
+    """
+    page = _page("inbox")
+    head = re.search(r'<header class="bar">.*?</header>', page, re.S)
+    if not head:
+        return "抽不到 <header class=\"bar\">"
+    h = head.group(0)
+    if "/assets/logo.svg" not in h:
+        return "头部没用 logo.svg（戊1）"
+    if ".mp4" in h:
+        return "头部仍引用 mp4（戊1：mp4 留给托盘，favicon.ico 不变）"
+    if "<img" not in h:
+        return "头部图标不是 <img>（戊1 要的是矢量位）"
+    # 戊2 机械部分：svg 里不再有 circle（状态点只由 CSS .dot 出）
+    svg = _src("assets/logo/logo.svg")
+    if "<circle" in svg:
+        return "logo.svg 内部哨点还在（戊2：两套点语言，状态归 .dot 独占）"
+    return True
+
+
+@check("N-U13 负控：头部换回 mp4 ⇒ U-13 必须红")
+def n_u13():
+    """反向对照（维二）：把 img 换回 state 专属 mp4（戊1 前的形状）。"""
+    src = _src(_SERVER_REL)
+    a_img = ('        "<div class=\\"logo\\"><img alt=\\"Antinel\\" '
+             'src=\\"/assets/logo.svg?t=%s\\"></div>"')
+    a_args = "        % (_esc(token), M.STATE_VAR[st], M.STATE_VAR[st],"
+    if a_img not in src or a_args not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    mut = _load(src.replace(
+        a_img,
+        '        "<div class=\\"logo\\"><video autoplay loop muted playsinline "\n'
+        '        "src=\\"/assets/%s.mp4?t=%s\\"></video></div>"').replace(
+        a_args,
+        "        % (_esc(M.STATE_LOGO[st]), _esc(token), M.STATE_VAR[st],"
+        " M.STATE_VAR[st],"),
+        "is0490_nu13", _SERVER_REL)
+    page = mut.render_page(view="inbox", filt=M.BUCKET_ACTION,
+                           root=tempfile.mkdtemp(prefix="g0490_nu13_"),
+                           token="T", items=_items(), posture=_POSTURE)
+    head = re.search(r'<header class="bar">.*?</header>', page, re.S)
+    if not head or ".mp4" not in head.group(0):
+        return "负控失效：换回 mp4 后头部仍无 mp4（注入没生效）"
+    live = re.search(r'<header class="bar">.*?</header>', _page("inbox"), re.S)
+    if ".mp4" in live.group(0):
+        return "夹具不成立：真实现本身头部就带 mp4 ⇒ 负控无分辨力"
+    return True
+
+
+# ════════════════════════════ U-15 · 戊4（词/解释权重倒挂）══════════════
+@check("U-15 ★ 戊4：状态词 16px 随态色、解释 13px 常规色（旧声明不在）")
+def u15():
+    """戊4：旧形状「词 17px 粗体（继承黑）／解释 12px 灰」—— 信息量大的
+    那句（为什么是这个态）被压成次要，权重倒挂。新形状：词 16px 粗体
+    **色随态**（与 `.dot` 同一个 `M.STATE_VAR`）、解释 13px 常规色。
+
+    形状判据（登记为例外，§5.8）：锁**旧 CSS 声明不在源码** ＋ 新声明在位
+    ＋ 渲染页 `<b>` 真带随态色内联（三条合起来才叫改完，不是只剩删除）。
+    """
+    src = _src(_SERVER_REL)
+    if ".state span{font-size:12px;color:var(--muted)}" in src:
+        return "旧 CSS 声明还在（戊4：解释句 12px 灰 —— 权重倒挂复发）"
+    if ".state b{font-size:16px" not in src:
+        return "缺 `.state b{font-size:16px`（状态词 16px）"
+    if ".state span{font-size:13px;color:var(--fg)}" not in src:
+        return "缺 `.state span{font-size:13px;color:var(--fg)}`（解释 13px 常规色）"
+    # 渲染面：<b> 真带随态色（行内 var 出自 M.STATE_VAR，不是写死的色值）
+    page = _page("inbox")
+    if not re.search(r'<b style="color:var\(--[a-z0-9]+\)">', page):
+        return "渲染页的状态词 <b> 没带随态色内联（权重倒挂只改了一半）"
+    # 连带：深色模式偏好仍在（--fg 两套主题都定义，解释句不会在深色下不可读）
+    if "prefers-color-scheme" not in src:
+        return "深色模式偏好块不见了（戊4 连带：--fg 的可读性没人守）"
+    return True
+
+
+@check("N-U15 负控：旧声明加回 ⇒ U-15 必须红")
+def n_u15():
+    """反向对照（维二）：把戊4 点名的那条旧声明原样加回 CSS。"""
+    src = _src(_SERVER_REL)
+    anchor = ".state span{font-size:13px;color:var(--fg)}"
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    mut = _load(src.replace(anchor,
+                            ".state span{font-size:12px;color:var(--muted)}"),
+                "is0490_nu15", _SERVER_REL)
+    page = mut.render_page(view="inbox", filt=M.BUCKET_ACTION,
+                           root=tempfile.mkdtemp(prefix="g0490_nu15_"),
+                           token="T", items=_items(), posture=_POSTURE)
+    # CSS 在渲染产物里 ⇒ 旧声明回潮必须能在渲染页观察到
+    if ".state span{font-size:12px;color:var(--muted)}" not in page:
+        return "负控失效：加回旧声明后渲染页观察不到（注入没生效）"
+    live = _page("inbox")
+    if ".state span{font-size:12px;color:var(--muted)}" in live:
+        return "夹具不成立：真实现本身就还带旧声明 ⇒ 负控无分辨力"
+    return True
+
+
 def main():
     print("=" * 78)
     print("0.48.5 值守台细节修订判据（交接件 v1.1 §5.7）—— 批次 1：U-01/U-03/U-08")
-    print("（变异只在内存，账本与链只落临时目录，不写任何产品文件）")
+    print("（变异只在内存，账本与链只落临时目录，不写任何产品文件；"
+          "戊2/戊3 视觉项无判据，走 §6.1 截图验收 —— U-13 只含戊2 机械部分）")
     print("=" * 78)
     ok = fail = 0
     for name, fn in RESULTS:
