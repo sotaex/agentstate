@@ -456,10 +456,17 @@ def c_posture_returns_dev_not_warn():
     """
     import host_shield as H
     oi, oc, osc = H._installed_version, H._code_version, H.self_check
+    oal, ohb, oup = H.sentinel_alive, H.sentinel_heartbeat_age, H._sentinel_uptime
     try:
         H._installed_version = lambda: "0.1.0"
         H._code_version = lambda: "0.9.0"
         H.self_check = lambda: (False, ["host_shield.py 与 manifest 不符"])
+        # ★★ 0.48.5：在岗/心跳探针**注入**后再判 —— 原来裸跑真实机器状态，
+        #   哨兵进程被会话回收后本判据恒红（红灯与产品无关，是判据在看机器天气）。
+        #   注入口径与 `0372._posture_cases` 一致：只换被探值，不换分支逻辑。
+        H.sentinel_alive = lambda *a, **k: True
+        H.sentinel_heartbeat_age = lambda *a, **k: (30.0, None)
+        H._sentinel_uptime = lambda *a, **k: 3600.0
         g = H.guard_posture()
         if g["state"] != H.POSTURE_DEV:
             return "自检不符＋代码更新时姿态是 %r（应为 dev）" % g["state"]
@@ -471,6 +478,8 @@ def c_posture_returns_dev_not_warn():
             return "研发态把自检问题吞掉了（必须如实带出 evidence）"
     finally:
         H._installed_version, H._code_version, H.self_check = oi, oc, osc
+        H.sentinel_alive, H.sentinel_heartbeat_age = oal, ohb
+        H._sentinel_uptime = oup
     return True
 
 
@@ -482,10 +491,15 @@ def n_posture_warn_when_really_tampered():
     """
     import host_shield as H
     oi, oc, osc = H._installed_version, H._code_version, H.self_check
+    oal, ohb, oup = H.sentinel_alive, H.sentinel_heartbeat_age, H._sentinel_uptime
     try:
         H._installed_version = lambda: "0.5.0"
         H._code_version = lambda: "0.5.0"          # 已出厂
         H.self_check = lambda: (False, ["被改过"])
+        # ★★ 0.48.5：同 R07 —— 在岗/心跳注入后再判（warn 分支以 alive and fresh 为前提）
+        H.sentinel_alive = lambda *a, **k: True
+        H.sentinel_heartbeat_age = lambda *a, **k: (30.0, None)
+        H._sentinel_uptime = lambda *a, **k: 3600.0
         g = H.guard_posture()
         if g["state"] == H.POSTURE_DEV:
             return "已出厂还被判成研发态 ⇒ 真篡改会被放过"
@@ -493,6 +507,8 @@ def n_posture_warn_when_really_tampered():
             return "已出厂＋自检不符的姿态是 %r（应为 warn）" % g["state"]
     finally:
         H._installed_version, H._code_version, H.self_check = oi, oc, osc
+        H.sentinel_alive, H.sentinel_heartbeat_age = oal, ohb
+        H._sentinel_uptime = oup
     return True
 
 

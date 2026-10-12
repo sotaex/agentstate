@@ -3134,7 +3134,7 @@ def guard_posture(pkg_root=None):
 
     字段：`state` / `label` / `why` / `evidence` / `can_fix` / `fix` / `fix_hint`。
 
-    ★ 判定规则（五条，缺一不可）：
+    ★ 判定规则（六条，缺一不可）：
       ① `armed`（链权威）为假 ⇒ **未启用**。这不是"失守" —— 默认全关是产品第一
          原则，把"没开"渲染成"坏了"会把红灯变成噪音。
       ② armed 且哨兵进程在岗、心跳新鲜、自检通过 ⇒ **值守中**。
@@ -3151,6 +3151,9 @@ def guard_posture(pkg_root=None):
          · 无任何监管对象 ⇒ **中断·无损失（黄）**（★ 说不出损失的失守＝假失守）
       ⑤ 任一探针抛错 ⇒ **注意（L1，盲区）** —— 绝不打绿（"探不到" ≠ "没问题"），
          但也**不许**冒充 R0：它**没有**下任何"防线失败"的正面断言。
+      ⑥ armed 且哨兵进程在岗、但**读不到心跳链**（age is None 且非 fresh）
+         ⇒ **注意（L1，盲区）**（0.48.5 A1）——"读不到"是探知失败，不是
+         "防线失败"的断言；与 ⑤ 同级，给 revive 但不点红。
     """
     try:
         st = load_state()
@@ -3183,6 +3186,10 @@ def guard_posture(pkg_root=None):
         #   只是漏了 `guard_posture` 这个调用点 —— 修法仍是同一条纪律：
         #   **消灭副本**，报心跳一律走 `sentinel_heartbeat_age()`。
         age, last_ts = sentinel_heartbeat_age()
+        # ★ 0.48.5（A1）：心跳链的**来源**进 evidence（维五可观测 / 维八显式分支）——
+        #   读不到心跳时必须说得出来自哪里（registered / legacy_pkg / legacy_hub），
+        #   否则"为什么读不到"永远查不清。
+        _hb_dir, _hb_src = _sentinel_heartbeat_chain()
         uptime = _sentinel_uptime(st)
         ok_self, problems = self_check()
         fresh = ((age is not None and age <= _STALE_AFTER)
@@ -3190,6 +3197,8 @@ def guard_posture(pkg_root=None):
         ev = {"armed": True, "sentinel_alive": alive,
               "heartbeat_age": (round(age, 1) if age is not None else None),
               "heartbeat_ts": last_ts,
+              "heartbeat_source": _hb_src,
+              "heartbeat_dir": _hb_dir,
               "sentinel_uptime": (round(uptime, 1) if uptime is not None else None),
               "sentinel_pid": st.get("sentinel_pid"),
               "self_check_ok": ok_self,
@@ -3282,6 +3291,25 @@ def guard_posture(pkg_root=None):
                     "why": "哨兵在岗",
                     "evidence": ev, "consequences": [], "can_fix": False,
                     "fix": None, "fix_hint": ""}
+        # ★★ 0.48.5（A1）：**读不到心跳链 ≠ 心跳断档** —— 单独一档，绝不渲染成红。
+        #   进程在岗（alive），但注册/legacy 心跳链里**一条记录都读不到**
+        #   （age is None），且启动时刻也超出陈旧判死窗（not fresh）。
+        #   这是**探知盲区**：什么都没证明 —— 既没证明防线失败，也没证明它还在
+        #   写。渲染成"失守（红）"就是**假失守**（0.35.3/0.40.0 修过的那类红灯
+        #   噪音的同型复发：本机 worktree 实测，哨兵好好的，页面长期挂
+        #   「心跳断档」并把灯打红，点「马上修复」还撞 already-running 幂等）。
+        #   ⇒ 落 POSTURE_UNKNOWN（L1·盲区，与探针抛错那条同级）；
+        #     why 里明说"是注意、不是失守"；给 revive 按钮（重拉即重新注册链路），
+        #     但**不下任何"防线失败"的断言**。对照：age 是**真实的老数字**
+        #     （读到了、但陈旧）仍走下面缺岗分支按后果分红/黄 —— 那一档有据。
+        if alive and age is None and not fresh:
+            return {"state": POSTURE_UNKNOWN, "label": POSTURE_LABEL[POSTURE_UNKNOWN],
+                    "why": "哨兵进程在岗，但读不到它写的心跳链——此刻只是「注意」"
+                           "（盲区），不是「失守」：它可能还在正常值守，也可能已经"
+                           "悄悄停写，这里区分不出来。",
+                    "evidence": ev, "consequences": None,
+                    "can_fix": True, "fix": "revive",
+                    "fix_hint": "马上修复（重新拉起哨兵，让它重新登记心跳链）"}
         # ★★ 缺岗：**先量后果，再决定它是红（失守）还是黄（中断·无损失）**。
         #   红必须说得出损失；说不出 ⇒ 不许冒充"防线失守"（创始人 2026-10-06）。
         cons = _outage_consequences(st, pkg_root)
@@ -3399,30 +3427,59 @@ def heartbeat_age(pkg_root=None):
     return _heartbeat_age_in(_shield_audit_dir(pkg_root))
 
 
-def sentinel_audit_dir():
-    """哨兵**实际写入**的那条链的目录（唯一口径）。
+def _sentinel_heartbeat_chain():
+    """哨兵心跳链的 **(目录, 来源)** —— 心跳目录解析的**唯一实现**（0.48.5 A1）。
 
-    ★★ 为什么需要它（**真缺陷**，本机实测 2026-10-06）：
-      哨兵由 `spawn_sentinel(_pkg_root())` 拉起，`run_sentinel(root)` 写的是
-      `_shield_audit_dir(root)`。本包根带 `.psl` ⇒ 写**包审计**
-      （实测 22:05 还在写心跳）。
-      而 `antinel host-shield status` 调的是 `heartbeat_age()`（**无参**）
-      ⇒ `_shield_audit_dir(None)` ⇒ **中枢 rollup**（停 09-29）
-      ⇒ 把 21:05 起活着、心跳正常的哨兵报成「最后心跳 693 分钟前」。
-      这与 0.35.3 修过的那条是**同一类错**（把"包根/审计目录"搞混 ⇒ 读老心跳 ⇒
-      误判僵死 ⇒ 重拉 ⇒ 冒泡），只是换了个调用点。
-      ⇒ 修法同一条纪律：**消灭副本** —— 报心跳的地方一律用这个目录。
+    ★★ 为什么需要"自注册"（**真缺陷**，本机 worktree 实测 2026-10-13）：
+      `sentinel_audit_dir()` 旧实现是 `_shield_audit_dir(_pkg_root())` —— 按
+      **读者**的包根猜哨兵写哪。哨兵在 A 仓（带 `.psl` ⇒ 写包审计）、读者
+      （值守台/CLI）跑在 B 目录（无 `.psl` ⇒ 读中枢 rollup）时，两边指向
+      **不同的链**：读到几小时/几天前的老记录 ⇒ `guard_posture` 判"心跳断档"
+      ⇒ **假失守**（进程明明活着，页面挂红，点「马上修复」还撞 already-running
+      幂 etc. 点了没反应）。这与 0.35.3 修过两次的"包根/审计目录二义性"
+      是**同一型第三次复发**——每次都是"按调用方现场猜生产者位置"。
+      ⇒ 修法同那条纪律：**让生产者自己说**。哨兵启动时把 `audit_dir`
+        注册进 state（`update_state_fields` 唯一写入口），读者优先认注册值；
+        认不到才走显式 legacy 两分支，且在 evidence 里标 `heartbeat_source`
+        （能回答"我今天生效了吗"，维五/维八）。
+
+    ★ 来源三值（`heartbeat_source`，evidence 可观测）：
+      `registered` —— state 有 `sentinel_audit_dir`（0.48.5 起的哨兵）。
+                     这是**事实**（哨兵进程自报的写入位置），优先。
+      `legacy_pkg` —— 老哨兵没注册；读者包根带 `.psl` ⇒ 包审计（显式分支）。
+      `legacy_hub` —— 老哨兵没注册；读者包根无 `.psl` ⇒ 中枢 rollup（显式分支）。
+      legacy 两分支**不许合并成一个"猜"**：读不到时必须说得出来自哪里。
     """
-    return _shield_audit_dir(_pkg_root())
+    st = load_state()
+    d = st.get("sentinel_audit_dir")
+    if isinstance(d, str) and d.strip():
+        return os.path.abspath(d), "registered"
+    root = _pkg_root()
+    if os.path.isdir(os.path.join(root, ".psl")):
+        return _shield_audit_dir(root), "legacy_pkg"
+    return _hub_rollup_dir(), "legacy_hub"
+
+
+def sentinel_audit_dir():
+    """哨兵**实际写入**的那条链的目录（唯一口径）。兼容旧调用点。
+
+    ★★ 0.35.3 修（真缺陷）：`antinel host-shield status` 走无参
+      `heartbeat_age()` ⇒ 中枢 rollup（停 09-29）⇒ 把活着的哨兵报成
+      「最后心跳 693 分钟前」。修法：报心跳一律用注册目录（见
+      `_sentinel_heartbeat_chain`）。
+    """
+    return _sentinel_heartbeat_chain()[0]
 
 
 def sentinel_heartbeat_age():
     """哨兵心跳年龄 `(age_seconds|None, last_ts|None)` —— **唯一口径**。
 
-    在 `sentinel_audit_dir()`（哨兵真正写的那条链）上算。
+    在哨兵**自注册**的心跳链目录上算（`_sentinel_heartbeat_chain()`）。
     ★ 报心跳一律用它，**不许**再用无参 `heartbeat_age()`（那会走中枢 rollup）。
+    ★ 0.48.5（A1）：目录解析收敛到 `_sentinel_heartbeat_chain()` 一处 ——
+      本函数不再自己猜目录，"读者包根 vs 哨兵包根"的二义性就此消灭。
     """
-    return _heartbeat_age_in(sentinel_audit_dir())
+    return _heartbeat_age_in(_sentinel_heartbeat_chain()[0])
 
 
 # ------------------------------------------------------- 哨兵主循环 ----
@@ -3756,6 +3813,25 @@ def task_installed():
     return False                             # schtasks 能查、说没有，启动项也没有
 
 
+def _register_sentinel_start(pid, started_at, audit_dir, armed):
+    """哨兵启动登记（state 的**唯一写入口**，0.48.5 A1）。
+
+    登记四个字段：`sentinel_pid` / `sentinel_started_at` /
+    **`sentinel_audit_dir`**（心跳链目录，新增）/ `enabled`（布防位）。
+    ★ 为什么自注册 `sentinel_audit_dir`：读者（值守台/CLI）从此不再按
+      **读者包根**猜哨兵写哪条链（猜错 ⇒ 读老心跳 ⇒ 假失守，A1）。
+      哨兵是心跳的**生产者**，链的位置只有它说得准 —— 自注册即事实来源。
+    ★ 为什么单独成函数：`run_sentinel` 是死循环、判据跑不起来；抽出来后
+      启动登记成为**可测的行为**（判据 S19 直接验它登记了什么）。
+    ★ 仍走 `update_state_fields`（乐观锁 + 读不到拒写留痕），本函数不自己开
+      第二个写入口；返回值原样透出（False ⇒ 调用方必须出声）。
+    """
+    return update_state_fields(sentinel_pid=pid,
+                               sentinel_started_at=started_at,
+                               sentinel_audit_dir=audit_dir,
+                               enabled=armed, allow_disarm=True)
+
+
 def run_sentinel(root):
     """哨兵主循环（由计划任务/antinel host-shield enable/spawn_sentinel 启动）。
 
@@ -3824,11 +3900,16 @@ def run_sentinel(root):
     #   ⇒ 显式声明 allow_disarm —— 否则"链说撤防、哨兵照着写 false"会被那道闸挡下。
     # ★ 0.45.0（甲层）：整份写回 → **按字段更新**（只写登记的这三个字段），
     #   否则会拿启动时读到的旧值覆盖别处刚写的值（§4.2）。返回值不许忽略。
-    if not update_state_fields(sentinel_pid=state["sentinel_pid"],
-                               sentinel_started_at=state["sentinel_started_at"],
-                               enabled=armed, allow_disarm=True):
-        print("!! 哨兵登记（sentinel_pid/enabled）未落盘 —— 见链上 state_write_refused",
-              flush=True)
+    # ★ 0.48.5（A1）：启动登记收敛到 `_register_sentinel_start()` —— state 的
+    #   **唯一写入口**（与 `update_state_fields` 的纪律一致：登记字段只此一处），
+    #   并新增 `sentinel_audit_dir`：哨兵**自注册**它写心跳的那条链的目录。
+    #   读者（值守台/CLI）优先认这个注册值，不再按读者包根猜（A1 假失守的根因：
+    #   猜错链 ⇒ 读老心跳 ⇒ 判"心跳断档" ⇒ 渲染成红，而哨兵明明活着）。
+    if not _register_sentinel_start(state["sentinel_pid"],
+                                    state["sentinel_started_at"],
+                                    audit_dir, armed):
+        print("!! 哨兵登记（sentinel_pid/sentinel_audit_dir/enabled）未落盘 "
+              "—— 见链上 state_write_refused", flush=True)
     # ★ 0.45.0（丙层）：自写**在岗名片**（租约）—— 路径带自己的 pid + 启动时刻，
     #   不与他人共享 ⇒ 不需要保护；判死时靠"启动时刻"防进程号复用。
     if not write_sentinel_card(state["sentinel_pid"], state["sentinel_started_at"]):

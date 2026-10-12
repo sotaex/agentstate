@@ -132,14 +132,17 @@ def _pkg_root():
 
 
 def _posture_cases():
-    """★ 用**真 `guard_posture()`** 造出全部七个姿态（每个带它自己的 `why`）。
+    """★ 用**真 `guard_posture()`** 造出全部八个姿态（每个带它自己的 `why`）。
 
-    ★★ 为什么必须"真跑"而不是自己编七个 dict（这是本判据的关键）：
+    ★★ 为什么必须"真跑"而不是自己编八个 dict（这是本判据的关键）：
       被禁的词恰好藏在 `guard_posture()` 的**返回文案**里，而那些文案只有在
       对应分支被走到时才生成（例：「防护开着，但哨兵进程不在岗」只在缺岗时）。
       自己编 dict ⇒ 判据永远看不到真实分支的文案 ⇒ 又一次"对不存在的缺陷做检查"。
     ★ 只替换**被探值**（在不在岗/心跳/自检/后果），不替换分支逻辑本身。
     ★ 全部在内存里做，结束无条件还原；不碰盘。
+    ★ `blind`（0.48.5 A1）：进程在岗但**读不到心跳链** ⇒ 必须落 unknown
+      （盲区），不许滑进缺岗分支的 interrupted/down。想造这个现场，注入
+      `hb=(None, None) + up=None`（age 读不到、启动时刻也超出判死窗）。
     """
     import host_shield as HS
     names = ("armed_state", "sentinel_alive", "sentinel_heartbeat_age",
@@ -155,6 +158,9 @@ def _posture_cases():
         ("interrupted", dict(alive=False, cons=[])),
         ("down",        dict(alive=False, cons=[{"text": "（判据注入的损失示例）"}])),
         ("unknown",     dict(load_raises=True)),
+        # blind 的**期望姿态**是 unknown，但现场与上面那条不同（那条是探针抛错）：
+        # 这里进程在岗、只是读不到心跳链 —— 0.48.5 A1 修的就是"把它误渲成红"。
+        ("blind",       dict(alive=True, hb=(None, None), up=None, want="unknown")),
     ]
     out = []
     try:
@@ -177,10 +183,11 @@ def _posture_cases():
                 HS.load_state = saved["load_state"]
             p = HS.guard_posture(_pkg_root())
             got = p.get("state")
-            if got != name:
+            want = st.get("want", name)
+            if got != want:
                 raise AssertionError(
                     "造不出姿态 %r（拿到 %r）—— 判据的注入点与产品脱钩了，"
-                    "必须同步，否则本判据是在验一个不存在的场景" % (name, got))
+                    "必须同步，否则本判据是在验一个不存在的场景" % (want, got))
             out.append((name, p))
     finally:
         for k, v in saved.items():
@@ -359,7 +366,7 @@ def _scan_banned(chrome_texts):
     return hits
 
 
-@check("S03 用户可见正文里没有杜撰的状态词/角色词（七姿态 × 四栏目）")
+@check("S03 用户可见正文里没有杜撰的状态词/角色词（八姿态 × 四栏目）")
 def s03():
     hits = []
     for name, p in _posture_cases():
@@ -368,7 +375,7 @@ def s03():
         hits += ["[姿态 %s] %s" % (name, x) for x in h]
     if hits:
         return _raise("；".join(hits[:5]))
-    return "七种姿态 × 四个栏目，正文均无 %s" % ("、".join(sorted(BANNED_IN_CHROME)))
+    return "八种姿态 × 四个栏目，正文均无 %s" % ("、".join(sorted(BANNED_IN_CHROME)))
 
 
 @check("N-S03 负控：把一个禁用语塞进姿态文案 ⇒ S03 必须抓到")
@@ -767,6 +774,192 @@ def n_s09():
     except AssertionError as e:
         return _raise("还原 LEVEL_NAME 后 S09 仍判红 ⇒ 还原链路坏了：%s" % e)
     return "Ls 压最低 / 派生面掉队，两种变异都被抓到；还原后回绿"
+
+
+# ══════════════ S19 哨兵自注册心跳链；读不到心跳 ≠ 失守（0.48.5 A1） ══════════════
+#: 盯的已修缺陷：值守台遗留问题清单 2026-10-13 **A1 假失守** ——
+#:   心跳读取按**读者**包根猜哨兵写哪条链（`_shield_audit_dir(_pkg_root())`），
+#:   哨兵进程与读者不在同一个包根时读到**另一条链**（中枢 rollup 的老记录）
+#:   ⇒ `guard_posture` 判"心跳断档" ⇒ 渲染成红、还给「马上修复」按钮
+#:   （点了撞 already-running 幂等，没有任何反应）。本机 worktree 实测复发。
+#:   修法（产品侧，host_shield.py）：
+#:     ① 哨兵启动经 `_register_sentinel_start()` 自注册 `sentinel_audit_dir`
+#:        （state 唯一写入口，字段一起登记）；
+#:     ② 心跳目录解析收敛到 `_sentinel_heartbeat_chain()` 一个实现：
+#:        注册值优先，legacy 走显式两分支并标 `heartbeat_source`；
+#:     ③ `guard_posture` 新增分层：在岗但读不到心跳链 ⇒ POSTURE_UNKNOWN
+#:        （L1 盲区，给 revive 但不点红）；age 是**真实的老数字**仍走缺岗分支。
+def _registration_ok(fields, audit_dir):
+    """启动登记判据（S19 与 N-S19 共用同一段判断，避免正负两套口径）。"""
+    if fields.get("sentinel_audit_dir") != audit_dir:
+        return ("登记缺 sentinel_audit_dir=%r（拿到 %r）—— 哨兵没自注册心跳链，"
+                "读者只能按包根猜 ⇒ A1 复发" % (audit_dir, fields.get("sentinel_audit_dir")))
+    need = ("sentinel_pid", "sentinel_started_at", "sentinel_audit_dir", "enabled")
+    miss = [k for k in need if k not in fields]
+    if miss:
+        return "登记缺字段 %r" % (miss,)
+    if fields.get("_allow_disarm") is not True:
+        return "登记没显式 allow_disarm —— 链说撤防时这一笔登记写不进去"
+    return True
+
+
+@check("S19 哨兵自注册心跳链 + 读不到链路落盲区（A1：读不到 ≠ 失守）")
+def s19():
+    import inspect
+    import json as _json
+    import os as _os
+    import shutil as _shutil
+    import tempfile
+    from datetime import datetime as _dt
+    import host_shield as HS
+
+    # ── ① 启动登记：走唯一写入口，且四个字段（含 sentinel_audit_dir）齐 ──
+    if "_register_sentinel_start" not in inspect.getsource(HS.run_sentinel):
+        return _raise("run_sentinel 没走 _register_sentinel_start —— "
+                      "启动登记出现了第二个写入口（维一：同一语义一个写入口）")
+    seen = {}
+    _orig_usf = HS.update_state_fields
+
+    def _cap(*, allow_disarm=False, **fields):
+        seen.update(fields)
+        seen["_allow_disarm"] = allow_disarm
+        return True
+    HS.update_state_fields = _cap
+    try:
+        ok = HS._register_sentinel_start(4242, "2026-10-13T12:00:00+08:00",
+                                         r"D:\.psl\audit", True)
+    finally:
+        HS.update_state_fields = _orig_usf
+    r = _registration_ok(seen, r"D:\.psl\audit")
+    if r is not True:
+        return _raise(r)
+    if ok is not True:
+        return _raise("_register_sentinel_start 返回了 %r（拒写没透出）" % (ok,))
+
+    # ── ② 心跳目录解析：注册值优先（真跑：造一条刚写的链） ──
+    tmp = tempfile.mkdtemp(prefix="antinel-s19-")
+    try:
+        with open(_os.path.join(tmp, "chain.jsonl"), "w", encoding="utf-8") as f:
+            f.write(_json.dumps({"type": "host_shield_heartbeat", "decision": "allow",
+                                 "ts": _dt.now().astimezone().isoformat()},
+                                ensure_ascii=False) + "\n")
+        _orig_ls = HS.load_state
+        try:
+            HS.load_state = lambda: {"sentinel_audit_dir": tmp}
+            age, ts = HS.sentinel_heartbeat_age()
+            d, src = HS._sentinel_heartbeat_chain()
+        finally:
+            HS.load_state = _orig_ls
+        if src != "registered":
+            return _raise("state 里有注册目录，来源却标成 %r —— 注册值没被优先" % (src,))
+        if age is None or age > 120:
+            return _raise("注册目录里躺着刚写的心跳，age=%r —— 哨兵没读自己注册的链"
+                          % (age,))
+        if not ts:
+            return _raise("last_ts 是空的 —— 读到了记录却取不到时间戳")
+        # legacy 显式分支：无注册字段 ⇒ 必须退回"读者包根"口径并标出来源
+        try:
+            HS.load_state = lambda: {}
+            d2, src2 = HS._sentinel_heartbeat_chain()
+        finally:
+            HS.load_state = _orig_ls
+        if src2 not in ("legacy_pkg", "legacy_hub"):
+            return _raise("无注册字段时来源标成 %r（三值之外）—— 维八：读不到旧版本"
+                          "必须出声，禁止当空" % (src2,))
+        want = HS._shield_audit_dir(HS._pkg_root())
+        if _os.path.realpath(d2) != _os.path.realpath(want):
+            return _raise("legacy 分支目录 %r ≠ %r" % (d2, want))
+    finally:
+        _shutil.rmtree(tmp, ignore_errors=True)
+
+    # ── ③ guard_posture 分层：在岗但读不到 ⇒ unknown（盲区），不是 down ──
+    names = ("armed_state", "sentinel_alive", "sentinel_heartbeat_age",
+             "_sentinel_uptime", "self_check", "_outage_consequences",
+             "is_dev_build")
+    saved = {k: getattr(HS, k) for k in names}
+    try:
+        HS.armed_state = lambda *a, **k: True
+        HS.sentinel_alive = lambda *a, **k: True
+        HS.sentinel_heartbeat_age = lambda *a, **k: (None, None)
+        HS._sentinel_uptime = lambda *a, **k: None
+        HS.self_check = lambda *a, **k: (True, [])
+        HS._outage_consequences = lambda *a, **k: []
+        HS.is_dev_build = lambda *a, **k: (False, "")
+        p = HS.guard_posture()
+    finally:
+        for k, v in saved.items():
+            setattr(HS, k, v)
+    if p.get("state") != HS.POSTURE_UNKNOWN:
+        return _raise("在岗但读不到心跳链，姿态是 %r（应为 unknown）—— "
+                      "A1 假失守没修住" % (p.get("state"),))
+    if p.get("fix") != "revive" or p.get("can_fix") is not True:
+        return _raise("盲区档没给 revive：fix=%r can_fix=%r" %
+                      (p.get("fix"), p.get("can_fix")))
+    if "心跳链" not in p.get("why", ""):
+        return _raise("盲区档文案没点明「心跳链」—— 读者无法自救")
+    ev = p.get("evidence") or {}
+    if ev.get("heartbeat_source") not in ("registered", "legacy_pkg", "legacy_hub"):
+        return _raise("evidence 里没有 heartbeat_source（三值之一）—— 维五：读不到"
+                      "心跳时必须说得出来自哪里")
+    hits = _scan_banned(_chrome_of(p))
+    if hits:
+        return _raise("盲区档新文案带禁用词：%s" % "；".join(hits[:3]))
+    return ("登记四字段齐（含 sentinel_audit_dir）；注册目录优先读到真实心跳；"
+            "在岗读不到 ⇒ unknown+revive，不点红")
+
+
+@check("N-S19 负控：抹自注册字段 / 陈旧链冒充盲区 / 不在岗冒充盲区 ⇒ S19 必须抓到")
+def n_s19():
+    import host_shield as HS
+    iso = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    # ① 产品退化：登记时不带 sentinel_audit_dir ⇒ 登记判据必须红
+    seen = {}
+    _orig_usf = HS.update_state_fields
+
+    def _strip(*, allow_disarm=False, **fields):
+        fields.pop("sentinel_audit_dir", None)               # ← MUTANT
+        seen.update(fields)
+        return True
+    HS.update_state_fields = _strip
+    try:
+        HS._register_sentinel_start(1, "2026-10-13T00:00:00+08:00",
+                                    r"D:\x\.psl\audit", True)
+    finally:
+        HS.update_state_fields = _orig_usf
+    if _registration_ok(seen, r"D:\x\.psl\audit") is True:
+        return _raise("抹掉 sentinel_audit_dir 登记仍判通过 ⇒ 判据没真看这个字段")
+
+    # ② 偷换现场：age 是"真实的老数字"（读到了、陈旧）⇒ 缺岗分支，不是盲区
+    names = ("armed_state", "sentinel_alive", "sentinel_heartbeat_age",
+             "_sentinel_uptime", "self_check", "_outage_consequences",
+             "is_dev_build")
+    saved = {k: getattr(HS, k) for k in names}
+    try:
+        HS.armed_state = lambda *a, **k: True
+        HS.sentinel_alive = lambda *a, **k: True
+        HS.sentinel_heartbeat_age = lambda *a, **k: (99999.0, iso)   # ← MUTANT
+        HS._sentinel_uptime = lambda *a, **k: None
+        HS.self_check = lambda *a, **k: (True, [])
+        HS._outage_consequences = lambda *a, **k: []
+        HS.is_dev_build = lambda *a, **k: (False, "")
+        p = HS.guard_posture()
+        if p["state"] == HS.POSTURE_UNKNOWN:
+            return _raise("读到的是陈旧老链也判成盲区 ⇒ '读不到'与'读到了但旧'"
+                          "被混成一档")
+        if p["state"] != HS.POSTURE_INTERRUPTED:
+            return _raise("在岗+陈旧链+无后果，预期中断（黄），拿到 %r" % (p["state"],))
+        # ③ 进程不在岗 + 读不到 ⇒ 缺岗分支，不是盲区分支
+        HS.sentinel_alive = lambda *a, **k: False                    # ← MUTANT
+        p2 = HS.guard_posture()
+        if p2["state"] == HS.POSTURE_UNKNOWN:
+            return _raise("进程不在岗也判成盲区 ⇒ 分层条件没钉在'在岗且读不到'上")
+        if "不在岗" not in (p2.get("why") or ""):
+            return _raise("缺岗文案里没有「不在岗」⇒ 现场走错了分支")
+    finally:
+        for k, v in saved.items():
+            setattr(HS, k, v)
+    return ("三种变异都被抓到：抹注册字段（登记判据红）/ 陈旧链（不冒充盲区）/ "
+            "不在岗（不冒充盲区）")
 
 
 # ══════════════════════════════════ 运行 ═══════════════════════════════════
