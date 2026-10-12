@@ -14,6 +14,7 @@
      批次 4（戊1/戊2/戊4 ＋ 戊3 重排）→ U-13 / U-15（已落地，commit 461b4ef）
      批次 5（W-01 ＋ W-02 边界项）    → W-01 / W-02（本 commit —— 认窗白名单
                                         单独提交，可单独回滚；G-05 锚点未动）
+     批次 6（W-03 · 遗留问题 A2）     → W-03（托盘与 Web 状态词同源）
 
    编号与 19 条**稳定映射**：U-02/U-07/U-09/U-12/U-14 是并入项与视觉项
    预留的空档，不是漏写（§5.7 表头原话）。红不了的（视觉排布）登记为
@@ -983,6 +984,118 @@ def n_w02():
     live_body = _page("inbox").split("<body>", 1)[-1]
     if re.search(r"#[0-9a-f]{6}", live_body):
         return "夹具不成立：真实现正文本身就带 #hex6 ⇒ 负控无分辨力"
+    return True
+
+
+# ══════════ W-03 · A2（托盘与 Web 状态词同源，遗留问题清单 2026-10-13）══════════
+#: ★★ 盯的已修缺陷：**A2 两套口径** —— 同一枢纽、同一时刻，托盘 tip 走旧合并读
+#:   （24h 账里的历史 R0 抬灯，实测「有过失守 · 哨兵在岗」），Web 头部自 0.39.0
+#:   走 `current_state()`（历史 R0 一律不抬灯，实测「拦截」）—— §6.2.4
+#:   「两个界面不许各说各话」实测不过。
+#:   修法（产品侧 inbox_tray.py）：`sync_from_items` 的事件态/状态词改取
+#:   `M.light_explain()`（页面同一次调用的唯一实现），`label` 逐字进 tray.json。
+
+
+def _w03_assert():
+    """W-03 正判据的纯判断（正/负控共用）。返回 None＝过，否则说明串。
+
+    两个现场（都注入 guarding 姿态，专盯 A2 那一对矛盾）：
+      ① 账内 R0 × 2 条（同因一件） ⇒ 页面「值守中」（0.39.0：历史 R0 不抬灯），
+         旧合并读会给「失守」—— A2 实测的就是这一对；
+      ② 账内 L2 一条（已拦下）     ⇒ 页面「拦截」（事件级 L2 照常抬灯）——
+         防"同源"被做反成"谁都不抬灯"（负向也要同源）。
+    """
+    import inbox_tray as TR
+    posture = _POSTURE                   # guarding：哨兵在岗
+    cases = [
+        ("账内 R0", [_mk("R0", "unread", 1, 1.0), _mk("R0", "unread", 2, 2.0)],
+         "值守中", "失守", 1, 2, "L0"),
+        ("账内 L2", [_mk("L2", "unread", 4, 1.0, kind="tool_call_blocked")],
+         "拦截", None, 0, 1, "L2"),
+    ]
+    for name, items, want_word, banned, want_count, want_total, want_st in cases:
+        hub = tempfile.mkdtemp(prefix="g0490_w03_")
+        # ① 页面侧：标题状态词＝页面**自己**算出来的（render_page 内部同一调用）
+        page = _page("inbox", items=items, rep=_REP)
+        tm = re.search(r"<title>([^<]+)</title>", page)
+        if not tm:
+            return "%s：页面没有 <title>（判据扫的锚点没了）" % name
+        pm = re.match(r"^(.+) · 值守台#[0-9a-f]{6}$", tm.group(1))
+        if not pm:
+            return "%s：标题形态不对：%r" % (name, tm.group(1))
+        page_word = pm.group(1)
+        # ② 夹具自检（把 0.39.0 铁律钉进来：R0 绝不由账给）
+        if page_word != want_word:
+            return ("%s：页面状态词应 %r，实得 %r —— current_state 口径变了"
+                    % (name, want_word, page_word))
+        if banned is not None and page_word == banned:
+            return "%s：页面把历史 R0 抬成了 %r（假失守复发）" % (name, banned)
+        # ③ 托盘侧：同夹具、同姿态
+        payload = TR.sync_from_items(items, root=hub, posture=posture)
+        if payload.get("label") != page_word:
+            return ("%s：托盘 label %r ≠ 页面状态词 %r —— 两套口径复发（A2）"
+                    % (name, payload.get("label"), page_word))
+        if not (payload.get("tip") or "").startswith(page_word):
+            return ("%s：托盘 tip 开头不是页面那个状态词：%r"
+                    % (name, payload.get("tip") or ""))
+        # ④ 连带：件数/分母/哨兵态/图标态不受本批影响
+        if (payload.get("count") != want_count
+                or payload.get("total") != want_total):
+            return ("%s：件数/分母口径被带坏：count=%r total=%r（应 %d / %d）"
+                    % (name, payload.get("count"), payload.get("total"),
+                       want_count, want_total))
+        if payload.get("shield") != TR.SHIELD_ONPOSTURE:
+            return "%s：guarding 的哨兵态不是 on：%r" % (name, payload.get("shield"))
+        if payload.get("state") != want_st:
+            return "%s：图标态应为 %r，实得 %r" % (name, want_st,
+                                                payload.get("state"))
+    return None
+
+
+@check("W-03 ★ A2：托盘状态词与 Web 标题/头部逐字同源（同一 light_explain）")
+def w03():
+    r = _w03_assert()
+    if r is not None:
+        return r
+    return True
+
+
+@check("N-W03 负控：托盘改回旧合并读（历史 R0 抬灯）⇒ W-03 必须红")
+def n_w03():
+    """反向对照（维二）：把托盘的状态词源换回 0.48.5 前的旧合并读。
+
+    变异体＝A2 缺陷本身（console_state 抬历史 R0 ⇒ label「失守」）——
+    不是随便改坏：必须让**那个真缺陷**重新现形，再被 W-03 抓到。
+    还原后必须回绿（还原链路坏掉比负控失效更险）。
+    """
+    import inbox_tray as TR
+    import inbox_model as M
+
+    class _OldM:                        # ← MUTANT：旧合并读口径
+        def __init__(self, real):
+            self._real = real
+
+        def __getattr__(self, k):
+            return getattr(self._real, k)
+
+        def light_explain(self, posture, items, **kw):
+            st = self._real.console_state(items)        # ← MUTANT
+            return {"state": st, "label": self._real.state_label(st),
+                    "now_text": "", "reason": "",
+                    "ledger_bad": True, "now_bad": True}
+    saved = TR.M
+    TR.M = _OldM(M)
+    try:
+        r = _w03_assert()
+        if r is None:
+            return "托盘改回旧合并读，W-03 仍判通过 ⇒ 判据没在看同源性"
+        if "账内 R0" not in r:
+            return ("负控咬错了地方：红的应是「账内 R0」现场（A2 那一对），"
+                    "实得 %r" % r[:60])
+    finally:
+        TR.M = saved
+    if _w03_assert() is not None:
+        return "还原 TR.M 后 W-03 仍红 ⇒ 还原链路坏了"
     return True
 
 

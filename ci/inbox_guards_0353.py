@@ -469,15 +469,48 @@ def c_attention_label_drills_to_action_list():
 
 
 def n_attention_label_drills_to_action_list():
-    """负控：没有待处理事项时，任何视图都不许出现 f=action 钻取后缀。"""
+    """负控：没有待处理事项时，**顶部条**不许出现 f=action 钻取后缀。
+
+    ★ 0.48.5（A2 轮连带修）：旧断言 `"f=action" not in h_inbox` 是**陈旧**
+    的——收件箱页的**筛选条**本来就恒有 `f=action` 标签页（"要处理 N"），
+    那不是钻取后缀。本条现在的口径与 0.37.1 定的分工一致：钻取＝顶部条
+    后缀（非收件箱视图）；收件箱视图的钻取就是筛选条本身。
+    ⇒ 断言改为：先用**深度平衡**剥离器剥掉整个 `<div class="filters">`
+      （内部嵌 `<details>` 与 `<div class="tdef">`，只删首尾标签会留下
+      词条正文——0360 W06 同款教训），再断言剩下的页面里没有 f=action。
+    """
     h_inbox = SV.render_page(view="inbox", root=G.new_hub(), token="T",
                              items=[G.item("R0", "done", 1)])
     h_report = SV._bar([G.item("R0", "done", 1)], "T",
                        posture={"state": "guarding", "label": "值守中", "why": "在岗"},
                        view="report")
-    # ★ 0.48.5：改锁**行为**（钻取链接不出现）而不是旧文案串 —— 文案会随
-    #   规格演化（乙2 删过「点开查看」），行为契约不会。
-    return "f=action" not in h_inbox and "f=action" not in h_report
+    body = _strip_filters(h_inbox)
+    return "f=action" not in body and "f=action" not in h_report
+
+
+def _strip_filters(html_text):
+    """深度平衡剥掉整个 `<div class="filters">` 块（筛选条/词条芯片）。
+
+    ★ 只删首尾标签不够：块内嵌 `<details><div class="tdef">`（嵌套 div），
+      非贪婪到第一个 `</div>` 会把词条正文留在原地。
+    """
+    start = html_text.find('<div class="filters">')
+    if start < 0:
+        return html_text
+    depth, i, n = 0, start, len(html_text)
+    while i < n:
+        m = re.compile(r"<div\b|</div>").search(html_text, i)
+        if not m:
+            break
+        if m.group(0).startswith("</"):
+            depth -= 1
+            i = m.end()
+            if depth == 0:
+                return html_text[:start] + html_text[i:]
+        else:
+            depth += 1
+            i = m.end()
+    return html_text[:start]
 
 
 # ===================================================== 四、三档 / 归档 ======
@@ -2254,11 +2287,15 @@ def n_tray_refresh_is_not_a_noop():
     import inbox_model as M
     hub = _tmpdir()
     day, items = _ledger_test_items()
+    posture = {"state": "guarding", "why": "哨兵在岗"}   # ★ 0.48.5 A2：显式注入
     TR.write_state("L0", 0, "旧", root=hub)
-    TR.refresh_state(root=hub, items=items)
+    TR.refresh_state(root=hub, items=items, posture=posture)
     d = TR.read_state(root=hub)
     want = M.count_groups([i for i in items if M.bucket_of(i) == M.BUCKET_ACTION])
-    return d.get("count") == want and d.get("state") == M.console_state(items)
+    # ★ 0.48.5（A2）：期望值从 console_state（旧合并读）改为 light_explain
+    #   （灯态唯一真源）—— 账里的历史 R0 不抬灯，口径与页面一致。
+    want_st = M.light_explain(posture, items, granary=M.granary_now())["state"]
+    return d.get("count") == want and d.get("state") == want_st
 
 
 # ============================================ 十二、导出口径（交接 §5）====

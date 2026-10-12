@@ -655,13 +655,17 @@ def c_server_empty_state_renders():
       ① 顶部灯改由**当前态势**决定（`guard_posture()` 现探），不再"空就 L0"；
       ② 「一切正常」正是本仓铁律反对的**过度断言**（"查不出来"不许说成"没问题"）。
       ⇒ 改为卡**结构**（F6：判据卡结构不卡词面）：
-        200 ＋ 空态提示块 `class="hint"` ＋ 顶部仍有 logo `<video>` ＋ **零**逐条记录。
+        200 ＋ 空态提示块 `class="hint"` ＋ 顶部仍有 logo ＋ **零**逐条记录。
+    ★★ 0.48.5（A2 轮连带修）：头部 logo 在批次 4（戊1）从 `<video>`（mp4）
+      换成矢量 `logo.svg`，旧断言 `<video` 从此**恒假**——而 `inbox_guards.py`
+      不在交付闸门 SUITES 里（只有 0353/0360 等分身在），所以这个不同步
+      一直没被闸门看见。改为卡"头部有 logo 资产"这一**行为**：svg 引用在。
     """
     hub = new_hub()
     srv = Server(hub)
     try:
         s, _, body = req(srv.port, "/?v=inbox", token=srv.token)
-        return (s == 200 and 'class="hint"' in body and "<video" in body
+        return (s == 200 and 'class="hint"' in body and "logo.svg" in body
                 and 'class="item' not in body)
     finally:
         srv.stop()
@@ -826,9 +830,16 @@ def n_tray_action_consumed():
 def c_tray_sync_from_items():
     hub = new_hub()
     put_chain(hub, [breach()])
-    TR.sync_from_items(S.load_items(root=hub), root=hub)
+    # ★★ 0.48.5（A2）：姿态**显式注入**（不传就是现探这台机器 —— 判据看机器
+    #   天气，0363 R07 的教训）。期望值同时按 0.39.0 口径改写：灯走
+    #   `current_state()` ⇒ **账里的历史 R0 一律不抬灯**（创始人裁定「没有
+    #   失守却显示失守，就是错误的」）⇒ 哨兵在岗时姿态 **L0**；那条失守记录
+    #   照旧进「要处理」（count=1），不藏。
+    TR.sync_from_items(S.load_items(root=hub), root=hub,
+                       posture={"state": "guarding", "why": "哨兵在岗"})
     st = TR.read_state(root=hub)
-    return (st["state"] == "R0" and st["count"] == 1
+    return (st["state"] == "L0" and st["count"] == 1
+            and st.get("label") == "值守中"
             and "等你" not in st["tip"] and "件事" not in st["tip"])
 
 
@@ -836,7 +847,8 @@ def n_tray_sync_from_items():
     hub = new_hub()
     put_chain(hub, [{"ts": "2026-10-05T09:00:00+08:00",
                      "type": "host_shield_heartbeat", "hash": "h"}])
-    TR.sync_from_items(S.load_items(root=hub), root=hub)
+    TR.sync_from_items(S.load_items(root=hub), root=hub,
+                       posture={"state": "guarding", "why": "哨兵在岗"})
     st = TR.read_state(root=hub)
     return st["state"] == "L0" and st["count"] == 0
 

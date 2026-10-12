@@ -80,6 +80,26 @@ SHIELD_COLOR = {
 }
 
 
+def probe_posture(root=None):
+    """现探哨兵姿态（**托盘侧唯一探针**，0.48.5 A2 抽出）。
+
+    ★ 为什么单独成函数：`shield_state()` 与 `sync_from_items()` 都要"此刻的
+      姿态"——各探一次就是两次 guard_posture（两次盘上读链），且语义上
+      "托盘这一刻看到的状态"只能有一个。抽出来共用一处。
+    ★ 探不到 ⇒ 返回 None（调用方按盲区处理）—— **不许**因为探不到就编一个。
+    """
+    try:
+        import host_shield as HS
+        # ★★ 0.37.1 修（0.35.3 同型漏改的调用点）：不传包根 ⇒ 读中枢
+        #   rollup 链而非本包审计链（0.35.3 实测相差 27202s vs 160s）
+        #   ⇒ 托盘图标/tip 会显示一个**过时**的哨兵态。
+        return HS.guard_posture(
+            root or os.path.dirname(os.path.abspath(__file__)))
+    except Exception:                                   # noqa: BLE001
+        # 探不到就是探不到 —— **不许因为探不到就画成"在岗"**
+        return None
+
+
 def shield_state(posture=None):
     """`guard_posture()` 的档位 → 托盘的哨兵态（**只做映射，不判定**）。
 
@@ -88,17 +108,8 @@ def shield_state(posture=None):
       这里**不重算**任何一项 —— 重算就是第二套口径，必然漂移。
     """
     if posture is None:
-        try:
-            import host_shield as HS
-            # ★★ 0.37.1 修（0.35.3 同型漏改的调用点）：不传包根 ⇒ 读中枢
-            #   rollup 链而非本包审计链（0.35.3 实测相差 27202s vs 160s）
-            #   ⇒ 托盘图标/tip 会显示一个**过时**的哨兵态。
-            posture = HS.guard_posture(
-                os.path.dirname(os.path.abspath(__file__)))
-        except Exception:                                   # noqa: BLE001
-            # 探不到就是探不到 —— **不许因为探不到就画成"在岗"**
-            return SHIELD_UNKNOWN
-    st = (posture or {}).get("state")
+        posture = probe_posture()
+    st = ((posture or {}).get("state") if posture else None)
     return {
         "guarding": SHIELD_ONPOSTURE,
         # ★ 0.36.3 新增：研发态**是在岗的**（自检不符只说明"代码比登记的新"，
@@ -135,7 +146,8 @@ def icon_path(state, root=None):
     return icon_file(state, None, root)
 
 
-def write_state(state, count=0, tip="", root=None, shield=None, total=None):
+def write_state(state, count=0, tip="", root=None, shield=None, total=None,
+                label=None):
     """写托盘状态（原子替换）。返回写下的 dict。
 
     ★ 0.36.0：多写一个 `shield` 字段（哨兵态）。**不写它**的话图标只剩
@@ -145,11 +157,22 @@ def write_state(state, count=0, tip="", root=None, shield=None, total=None):
       托盘角标一直是"一个光秃秃的分子"（实测曾长期显示 `count=181`，
       而按现行口径真值只有 4）—— 只看那个数，用户无法判断它是多是少。
       分母一并写进 `tray.json`，并进 `tip`（图标上只放得下分子，分母放提示里）。
+
+    ★★ 0.48.5（A2）：多写一个 `label` ＝ **状态词本身**（`M.light_explain()`
+      的 `label`，与 Web 标题/顶部条同一个词）。此前托盘 tip 的事件词是
+      `sync_from_items` 自己拼的第二份口径（旧合并读：历史 R0 抬灯），与
+      页面自 0.39.0 起的 `current_state()`（历史 R0 一律不抬灯）各说各话。
+      写进 `tray.json` 才能被**判据**逐字比对（W-03）。
+      `label` 缺省 ⇒ 从 `state` 现算（`M.state_label`），不写空。
     """
     if shield is None:
         shield = shield_state()
+    if label is None:
+        label = M.state_label(state if state in ("L0", "L1", "L2", "Ls", "R0")
+                              else "L0")
     payload = {"state": state if state in ("L0", "L1", "L2", "Ls", "R0") else "L0",
                "count": int(count), "tip": str(tip)[:200],
+               "label": str(label),
                # ★ 分母：这条数来自多少条记录。取不到 ⇒ `None`（**不编 0**，
                #   "不知道分母" ≠ "分母是 0"，后者会让一个真告警看起来是百分之百）。
                "total": None if total is None else int(total),
@@ -236,27 +259,31 @@ def sync_from_items(items, root=None, tip=None, posture=None):
       ⇒ 现在 tip 前缀一律由 `SHIELD_TIP[shield]` 给，
         且**哨兵不在岗时事件态不再压过它**（R0 只说明"有过失守"，
         不说明"此刻没人守"；后者才是用户要立刻知道的）。
+
+    ★★ 0.48.5（A2，遗留问题清单）：状态词与原因句**与 Web 头部同源**。
+      旧实现的事件态走 `M.console_state()`（旧合并读：24h 账里的历史 R0
+      会抬灯），而页面自 0.39.0 起走 `M.current_state()`（创始人裁定：
+      「没有失守却显示失守，就是错误的」—— R0 绝不由账给）⇒ 本机实测
+      同一时刻托盘 `R0`「有过失守 · 哨兵在岗」 vs 页面「拦截」。
+      修法同本仓铁律：**消灭副本** —— 一律取 `M.light_explain()`
+      （灯态唯一真源 `current_state()` ＋ 页面原因句的唯一实现）：
+        · `state`（图标用）＝ `ex["state"]`；
+        · `label`（状态词）＝ `ex["label"]`，**逐字**进 `tray.json` 与 tip；
+        · 粮的读数与页面同根（都调无参 `granary_now()`）—— 连根都不一样
+          就会再漂出一套口径（Ls 只在一边亮）。
+      `shield`（哨兵态图标维度）与件数/分母口径不变。
     """
-    st = M.console_state(items)
+    if posture is None:
+        posture = probe_posture()
+    ex = M.light_explain(posture, items, granary=M.granary_now())
+    st = ex["state"]
     act = [it for it in items if M.bucket_of(it) == M.BUCKET_ACTION]
     n = M.count_groups(act)
-    sh = shield_state(posture)
+    sh = shield_state(posture if posture is not None else {})
     if tip is None:
-        ev = {M.STATE_L0: "一切正常",
-              M.STATE_L1: "%s · 有可疑动作" % M.state_short("L1"),
-              M.STATE_L2: "有已拦下的操作",
-              M.STATE_Ls: M.state_short("Ls"),
-              M.STATE_R0: "有过%s" % M.state_short("R0")}.get(st, "")
-        #★ 哨兵不在岗 ⇒ **只说这一件**，不把事件等级混进来当"当前状态"。
-        if sh == SHIELD_UNPOSTURE:
-            tip = SHIELD_TIP[sh] + " · " + (ev or "有事")
-        elif sh == SHIELD_OFF:
-            tip = SHIELD_TIP[sh]
-        elif sh == SHIELD_UNKNOWN:
-            # ★ 盲区就是盲区，不说"没事"
-            tip = SHIELD_TIP[sh] + (" · " + ev if ev else "")
-        else:
-            tip = (ev or "值守中") + " · " + SHIELD_TIP[sh]
+        # ★ 状态词与**页面顶部条/标题同一个词**（`ex["label"]`，W-03 逐字断言）。
+        #   哨兵态只作第二段：图标维度的话（在岗/不在岗/盲区/未启用）。
+        tip = "%s · %s" % (ex["label"], SHIELD_TIP[sh])
     # ★★ 0.47.0（方案 §5 步三）：这条 tip 是分子 ⇒ **必带窗口与分母**。
     #   分母＝本次载入的全部记录条数（`items`），窗口＝`M.WINDOW_HOURS`。
     #   ★ 图标上只放得下分子，分母与窗口写进提示（悬停可见）与 `tray.json`。
@@ -265,7 +292,8 @@ def sync_from_items(items, root=None, tip=None, posture=None):
                                       M.WINDOW_HOURS)
     # ★ 状态气泡不是详情页；只写「有事/等你」会让用户点不到具体事项。
     #   托盘图标可显示件数，具体事由在主界面「要处理」里查看。
-    return write_state(st, n, tip, root=root, shield=sh, total=len(items or []))
+    return write_state(st, n, tip, root=root, shield=sh, total=len(items or []),
+                       label=ex["label"])
 
 
 def push_action(action, root=None):
@@ -362,17 +390,20 @@ def consume_loop(root=None, stop=None, interval=1.0, refresh_every=5.0):
         time.sleep(interval)
 
 
-def refresh_state(root=None, items=None):
+def refresh_state(root=None, items=None, posture=None):
     """按当前收件箱现状**重算一次**托盘状态（幂等，可反复调）。
 
     ★★ 0.35.3 修（真缺陷，本轮实测抓到，不是读代码猜的）：
       `antinel inbox tray` 原来**只起图标、不刷状态** ⇒
-      ① 没有 `tray.json` 时，托盘一上来就是陈旧态（"停止更新"），而人根本没停；
+      ① 没有 `tray.json` 时，托盘一上来就是陈旧态（"停止更新")，而人根本没停；
       ② 已有旧文件时，会把**上一次由谁写的旧口径**一直显示下去。
       实测本机：`tray.json` 里是 `count=181`（那是 0.35.3 之前的
       "全部历史未处理"口径），而按现行口径真值只有 **4** ——
       托盘显示的件数比实际该你处理的事多 45 倍，且**永远不自己纠正**。
       ⇒ 起托盘前必须先算一次；不算就等于让用户看一个假数字。
+    ★ 0.48.5（A2）：`posture` 可注入（None ⇒ `probe_posture()` 现探）。
+      不注入时探的是**这台机器此刻的真实姿态** —— 判据若要可复现，必须显式
+      传夹具（0363 R07 的教训：判据不许看机器天气）。
     """
     try:
         if items is None:
@@ -380,7 +411,7 @@ def refresh_state(root=None, items=None):
             items = S.load_items(root=root)
     except Exception:                             # noqa: BLE001
         items = []
-    return sync_from_items(items, root=root)
+    return sync_from_items(items, root=root, posture=posture)
 
 
 def run(root=None, block=True, consume=True):
