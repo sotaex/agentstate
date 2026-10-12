@@ -8,8 +8,8 @@
    （正判据／反向对照／连带对照／可观测）。本文件是它们的**判据落点**
    （与 0360/0372/0380/0470 同型），**按批次生长**：
 
-     批次 1（甲2/甲3/甲4 ＋ 丙1/丙2）→ U-01 / U-03 / U-08（本 commit）
-     批次 2（丁2/丁3/丁4/丁5）        → U-10 / U-11 / U-05
+     批次 1（甲2/甲3/甲4 ＋ 丙1/丙2）→ U-01 / U-03 / U-08（已落地，commit 049fc7c）
+     批次 2（丁2/丁3/丁4/丁5）        → U-10 / U-11 / U-05（本 commit）
      批次 3（乙1~乙4）                → U-04 / U-06
      批次 4（戊1/戊2/戊4 ＋ 戊3 重排）→ U-13 / U-15
      批次 5（W-01 ＋ W-02 边界项）    → 单独 commit（认窗白名单）
@@ -462,6 +462,145 @@ def u97():
         unk = GL.unknown(_page(view))
         if unk:
             return "%s 页有未登记术语：%r" % (view, unk)
+    return True
+
+
+# ════════════════════════════ U-10 · 丁2/丁3（who 块删、口号变证据）═════
+@check("U-10 ★ 丁2/丁3：who 块零出现（四页）；运行状态页有回环证据行")
+def u10():
+    """丁2：「本机 · 127.0.0.1」零信息量（回环地址每台机器一样）；
+    丁3：「数据不出门」是定位宣言混进状态栏 —— 口号不是证据。
+
+    v1.1 定性：删除，且**不是一删了之** —— 它承诺的事实搬进运行状态页作
+    证据（「监听地址：仅本机回环——服务不接受外部连接」），而那句证据由
+    `_check_bind` 的硬校验背书（非回环直接抛错）。判据同时断言三件事：
+    删干净、证据在、后盾真（行为级，不只查文案）。
+    """
+    for view in _VIEWS:
+        page = _page(view)
+        for bad in ("本机 · 127.0.0.1", "数据不出门"):
+            if bad in page:
+                return "%s 页仍含 %r（丁2/丁3：零信息量块没删干净）" % (view, bad)
+    health = _page("health")
+    for want in ("仅本机回环", "服务不接受外部连接"):
+        if want not in health:
+            return "运行状态页缺回环证据 %r（口号删了，证据没补上）" % want
+    # 后盾（行为级）：非回环地址不许起服务 —— 证据行这句话有人兑底
+    try:
+        SV._check_bind("0.0.0.0")
+        return "_check_bind 放行了 0.0.0.0 ⇒「仅本机回环」这句证据是空的"
+    except Exception:                                         # noqa: BLE001
+        pass
+    return True
+
+
+@check("N-U10 负控：who 块加回顶部条 ⇒ U-10 必须红")
+def n_u10():
+    """反向对照（维二）：把删掉的 who 块原样加回 _bar 的返回串。"""
+    src = _src(_SERVER_REL)
+    anchor = '        "%s%s<div class=\\"spacer\\"></div></header>"'
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    mut = _load(src.replace(
+        anchor,
+        '        "%s%s<div class=\\"spacer\\"></div>"\n'
+        '        "<div class=\\"who\\">本机 · 127.0.0.1<br>数据不出门</div></header>"'),
+        "is0490_nu10", _SERVER_REL)
+    page = mut.render_page(view="inbox", filt=M.BUCKET_ACTION,
+                           root=tempfile.mkdtemp(prefix="g0490_nu10_"),
+                           token="T", items=_items(), posture=_POSTURE)
+    if "本机 · 127.0.0.1" not in page:
+        return "负控失效：who 块加回后页面仍不含它（注入没生效）"
+    live = _page("inbox", filt=M.BUCKET_ACTION)
+    if "本机 · 127.0.0.1" in live:
+        return "夹具不成立：真实现本身还带 who 块 ⇒ 负控无分辨力"
+    return True
+
+
+# ════════════════════════════ U-11 · 丁4（title 收缩到 ≤20 字）════════
+@check("U-11 ★ 丁4：收件箱页全部 title 属性 ≤ 20 字（工程说明归词条）")
+def u11():
+    """丁4：药丸 title 塞 40+ 字工程说明（「括号里是按事由归并后的件数，
+    点进去看全部明细」）—— hover 是消歧用的，不是说明书。
+    判据锁**全部** title 属性（不只是药丸那一处）：锁一处就会在别处复发。
+    解释移交「？」词条（U-04，批次 3）后信息不丢失。
+
+    ★ 计数口径：`len()` 原文长度，**空格也算** —— 文档目标串「最近 24 小时
+      的记录数（自本次载入起算）」脚本点数 21 字，超自己的 ≤20 限，
+      同义收作「自载入起算」（19 字）才落地。数字必须脚本点数，不许心算。
+    """
+    page = _page("inbox")
+    titles = re.findall(r'title="([^"]*)"', page)
+    if not titles:
+        return "一个 title 都没抽到 —— 正则坏了（量具自失效）"
+    for t in titles:
+        if len(t) > 20:
+            return "title 超 20 字（%d 字）：%r" % (len(t), t)
+    return True
+
+
+@check("N-U11 负控：40 字工程串加回药丸 title ⇒ U-11 必须红")
+def n_u11():
+    """反向对照（维二）：把丁4 描述的那个 40+ 字工程 title 原样加回。"""
+    src = _src(_SERVER_REL)
+    anchor = ('        return ("<a title=\\"最近 %d 小时的记录数（自载入起算）\\" "')
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    mut = _load(src.replace(
+        anchor,
+        '        return ("<a title=\\"最近 %d 小时的记录数；括号里是按事由归并后的件数，'
+        '点进去看全部明细\\" "'),
+        "is0490_nu11", _SERVER_REL)
+    page = mut.render_page(view="inbox", filt=M.BUCKET_ACTION,
+                           root=tempfile.mkdtemp(prefix="g0490_nu11_"),
+                           token="T", items=_items(), posture=_POSTURE)
+    if not any(len(t) > 20 for t in re.findall(r'title="([^"]*)"', page)):
+        return "负控失效：加回 40 字串后全部 title 仍 ≤20（注入没生效）"
+    live_titles = re.findall(r'title="([^"]*)"', _page("inbox"))
+    if any(len(t) > 20 for t in live_titles):
+        return "夹具不成立：真实现本身就有 >20 字的 title ⇒ 负控无分辨力"
+    return True
+
+
+# ════════════════════════════ U-05 · 丁5（删替用户描述动作的句子）══════
+@check("U-05 ★ 丁5：渲染页零「点开看每一次」「点规则名看具体是哪几条」")
+def u05():
+    """丁5：「（点开看每一次）」类句子**替用户描述他即将做的动作** ——
+    链接的可点性由下划线承担（CSS 已有），写出来是重复用户的动作
+    （W08 判据立意，0.37.2 删过同型句，本次 rules/revived 两族复发）。
+    ★ 本批只守丁5 点名的两族三处；批次 3（乙2）把断言集扩展到另外三处
+      ＋ 能力句改写（「可整组一次性处置」）—— 同一条判据按批次生长。
+    """
+    for view in ("report", "health", "inbox"):
+        page = _page(view)
+        for bad in ("点开看每一次", "点规则名看具体是哪几条"):
+            if bad in page:
+                return "%s 页仍含 %r（替用户描述他的动作）" % (view, bad)
+    return True
+
+
+@check("N-U05 负控：「（点开看每一次）」加回 ⇒ U-05 必须红")
+def n_u05():
+    """反向对照（维二）：把丁5 删掉的句子原样加回日报页调用点。"""
+    src = _src(_SERVER_REL)
+    anchor = ('                     "%d 次</a> / %d"\n'
+              '                     % (hrs, _esc(token), _revived, _win_total))')
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    mut = _load(src.replace(
+        anchor,
+        '                     "%d 次</a> / %d（点开看每一次）"\n'
+        '                     % (hrs, _esc(token), _revived, _win_total))'),
+        "is0490_nu05", _SERVER_REL)
+    page = mut.render_page(view="report",
+                           root=tempfile.mkdtemp(prefix="g0490_nu05_"),
+                           token="T", items=_items(), rep=_REP,
+                           posture=_POSTURE)
+    if "点开看每一次" not in page:
+        return "负控失效：加回后渲染页仍不含（注入没生效）"
+    live = _page("report")
+    if "点开看每一次" in live or "点规则名看具体是哪几条" in live:
+        return "夹具不成立：真实现本身还带旧句 ⇒ 负控无分辨力"
     return True
 
 

@@ -87,7 +87,11 @@ button{font:inherit;cursor:pointer}
 .pill{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid var(--line)}
 .dot{width:8px;height:8px;border-radius:50%}
 .spacer{flex:1}
-.who{font-size:12px;color:var(--muted);text-align:right}
+/* ★ 0.48.5（交接件 §5.4 丁2/丁3）：顶部条右侧那个零信息量块连同类规则一起删
+   （回环地址每台机器一样；另一半是口号不是证据）。证据搬到运行状态页的
+   「监听地址」行，由 `_check_bind` 硬校验背书 —— 判据 U-10 同时断言
+   删干净、证据在、后盾真。本注释刻意不复述被删的两串字面：判据扫的正是
+   渲染产物，在这里写例子会自己踩自己（D-30 同款教训）。 */
 .tabs{display:flex;gap:4px;padding:10px 20px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .tabs a{padding:9px 14px;color:var(--muted);font-weight:600;text-decoration:none;border-bottom:2px solid transparent}
 .tabs a.on{color:var(--brand);border-bottom-color:var(--brand)}
@@ -518,10 +522,13 @@ def _bar(items, token, posture=None, now=None, view="inbox"):
         #   （前者＝该级别的事由件数，后者＝需要你动手的件数），
         #   只是本机此刻恰好同值 —— 量不同就不算重复，不许为了省数字把口径藏掉。
         show_groups = not same
-        # ★ 口径说明放 title（不放正文）：旧版在药丸行尾挂了一句
-        #   「（条数／括号内为件事数）」—— 工程腔，且每次打开都占一行。
-        return ("<a title=\"最近 %d 小时的记录数；括号里是按事由归并后的件数，"
-                "点进去看全部明细\" href=\"/?v=inbox&f=win:%d:lv:%s&t=%s\">%s <b>%d</b>%s</a>"
+        # ★ 0.48.5（交接件 §5.4 丁4）：title 从 40+ 字工程说明收缩到一句人话
+        #   （判据 U-11 锁 title ≤ 20 字，**含空格脚本点数** —— 文档目标串
+        #   「最近 24 小时的记录数（自本次载入起算）」实测 21 字超限，同义
+        #   收作「自载入起算」19 字）。「按事由归并后的件数」的解释归「？」
+        #   词条的口径行；旧 title 后半句还是替用户描述他的动作（W08 立意）。
+        return ("<a title=\"最近 %d 小时的记录数（自载入起算）\" "
+                "href=\"/?v=inbox&f=win:%d:lv:%s&t=%s\">%s <b>%d</b>%s</a>"
                 % (M.WINDOW_HOURS, M.WINDOW_HOURS, level, _esc(token), label, n,
                    "" if not show_groups else "（%d 件事）" % g))
 
@@ -537,8 +544,7 @@ def _bar(items, token, posture=None, now=None, view="inbox"):
         "src=\"/assets/%s.mp4?t=%s\"></video></div>"
         "<div class=\"state\"><span class=\"dot\" style=\"background:var(%s)\"></span>"
         "<b>%s</b>%s<br><span>%s</span></div>"
-        "%s%s<div class=\"spacer\"></div>"
-        "<div class=\"who\">本机 · 127.0.0.1<br>数据不出门</div></header>"
+        "%s%s<div class=\"spacer\"></div></header>"
         % (_esc(M.STATE_LOGO[st]), _esc(token), M.STATE_VAR[st],
            label, suffix, state_reason, nums, fix))
 
@@ -958,7 +964,7 @@ def _view_report(rep, token, items=None):
     #   运行状态写「10 次（点数字看每一次）」—— 同一件事两种说法）。
     # ★ 0.47.0：拉起次数是分子 ⇒ 分母＝窗口内总记录数。
     _revived_link = ("<a href=\"/?v=inbox&f=win:%d:kind:host_shield_revived&t=%s\">"
-                     "%d 次</a> / %d（点开看每一次）"
+                     "%d 次</a> / %d"
                      % (hrs, _esc(token), _revived, _win_total))
     _day = _esc(rep["day"])
     # ★ 0.47.0：当日三档各是分子 ⇒ 分母＝当日全部记录条数（当日 ＝ 24 小时窗口）。
@@ -997,8 +1003,7 @@ def _view_report(rep, token, items=None):
                _esc(M.count_text(r["count"], _day_total, hours=24, unit="次")))
             for r in rep["rules"][:10])
         rules = ("<div class=\"card\"><h2>规则命中排行"
-                 "<span class=\"note\">（点规则名看具体是哪几条）</span></h2>"
-                 "<div class=\"rows\">%s</div></div>" % rows)
+                 "</h2><div class=\"rows\">%s</div></div>" % rows)
 
     ch = rep["chain"]
     cls = {"ok": "ok", "broken": "bad", "unknown": "warn"}.get(ch["status"], "warn")
@@ -1058,7 +1063,7 @@ def _view_health(rep, token, items=None):
     _win_total_h = sum(int((rep.get("window_levels") or {}).get(k, 0) or 0)
                        for k in ("R0", "L2", "L1"))
     _revived_value = ("<a href=\"/?v=inbox&f=win:%d:kind:host_shield_revived&t=%s\">"
-                      "%d 次</a> / %d（点开看每一次）"
+                      "%d 次</a> / %d"
                       % (_hrs, _esc(token), _revived_count, _win_total_h))
     # ★★ 0.37.2：**删掉本页第一行「此刻这一次」**（旧版 `GL.chip("posture",
     #   "此刻这一次")` + 值「值守中 —— 哨兵在岗…」）。
@@ -1072,6 +1077,10 @@ def _view_health(rep, token, items=None):
     rows = [
         (GL.chip("sentinel", "最近 %d 小时被拉起过" % _hrs),
          _revived_value, "warn" if _revived_count else "ok", True),
+        # ★ 0.48.5（交接件 §5.4 丁2/丁3）：who 块从顶部条删除后，把它承诺的
+        #   事实搬来本页作**证据**（口号变证据）—— 这句由 `_check_bind` 的
+        #   硬校验背书：非回环地址 make_server 直接抛错，不是嘴上说回环。
+        ("监听地址", "仅本机回环——服务不接受外部连接", "ok", False),
         (GL.chip("chain_check"),
          "%s（检查了 %d 个文件、%d 条记录，被改 %d）"
          # ★ 0.36.1：原先直接输出 `ch["status"]`，那是英文变量

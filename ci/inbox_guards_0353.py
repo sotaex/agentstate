@@ -2433,10 +2433,17 @@ def c_header_numbers_state_both_denominators():
         # 条数 != 件事数 时**必须**显示括号，否则两个口径混成一个数
         if want_n != want_g and not g:
             return False
-    # ★ 0.37.1：口径说明从正文那句工程腔「（条数／括号内为件事数）」改为
-    #   每个数字链接上的 title 悬浮解释（-founder 去重：正文不重复口径）。
-    return ("记录数；括号里是按事由归并后的件数" in html
-            and html.count('title="最近 %d 小时' % M.WINDOW_HOURS) >= 3)
+    # ★ 0.48.5（交接件 §5.4 丁4）：原断言锁的是 43 字工程说明串
+    #   「记录数；括号里是按事由归并后的件数」—— 正是丁4 点名要删的那句
+    #   （title 是消歧位，不是说明书；解释移交「？」词条，U-04 批次 3 落地）。
+    #   追随规格更新，**不是放松**：两个分母仍由可见的「N（G 件事）」括号
+    #   摆着（上面 pairs 已逐个数过）；这里改锁 title 仍是那个口径说明位 ——
+    #   点明「记录数」与窗口、且 ≤20 字，工程腔不许回来（0490 U-11 同限）。
+    pill_titles = [t for t in re.findall(r'title="([^"]*)"', html)
+                   if "记录数" in t]
+    return (len(pill_titles) >= 3
+            and all("最近 %d 小时" % M.WINDOW_HOURS in t and len(t) <= 20
+                    for t in pill_titles))
 
 
 def n_header_numbers_dont_hide_records():
