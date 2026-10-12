@@ -330,7 +330,7 @@ def scan_doc_commands(sp):
     """扫描 README / 帮助正文里**教用户敲**的命令，判断在安装态是否可达。
 
     ★★ 0.48.3：必须同时认**两种形态**。第一版只认旧的裸路径形态
-      `python scripts/x.py`；0.48.2 把 README 全部改成 `python -m scripts.x`
+      （「python ＋ scripts/ 相对路径」）；0.48.2 把 README 全部改成 `python -m scripts.x`
       之后，它匹配到 **0 条** ⇒ J4d 变成**空过的绿灯**（"共 0 条，不可达 0 条"）。
       空过的守卫比没有守卫更坏（本项目第 ① 条硬判据）⇒ 现在：
         · 两种形态都扫；

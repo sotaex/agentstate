@@ -21,9 +21,9 @@
      绝不报 PASS（把盲区渲染成清白，比不做还危险）。
 
 用法：
-    python scripts/regression_gate.py            # 跑闸门
-    python scripts/regression_gate.py --selfcheck # 跑负控（注入缺陷，必须变红）
-    python scripts/regression_gate.py --json      # 机器可读
+    python ci/regression_gate.py            # 跑闸门
+    python ci/regression_gate.py --selfcheck # 跑负控（注入缺陷，必须变红）
+    python ci/regression_gate.py --json      # 机器可读
 """
 import argparse
 import importlib.util
@@ -450,6 +450,292 @@ def j_posture_why_no_frozen_numbers():
         pass
     return True, "why 无冻结读数（源码 %d 个 why 赋值 + 运行态均已检）" % len(
         re.findall(r'"why"\s*:', body))
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# D-27 ~ D-31 / G-05（2026-10-12 值守台交接件 §4.5，剩余工作 R1–R6）
+#   六条判据补上「登记簿从不会响的表格变成闸门一环」缺的那几环：
+#     D-27 量具口径一致性（T-03）  D-28 fixture 覆盖（T-03）
+#     D-29 docstring 工具参数（T-04） D-30 docstring 路径（T-06）
+#     G-05 认窗白名单（T-05）       D-31 登记簿一致性（元层自接闸门）
+# ══════════════════════════════════════════════════════════════════════════
+
+def _load_module_file(rel, tag):
+    """按**文件路径**加载一个模块（不进 sys.path）。失败/不存在 ⇒ None。
+
+    ★ 为什么不 `import`：本闸门要在**负控 fixture** 里跑（ANTINEL_PKG 指向
+      临时副本）。`import` 按 sys.path 找到的是**真仓**模块 —— 判据验的就不是
+      fixture 里的代码了（量具测错对象，本项目已犯过两次的同型错）。
+    ★ `exec_module` 遇 SystemExit 照走（CLI 型模块加载时的半初始化情形，
+      与 `load_hook()` 同一处置）。
+    """
+    import importlib.util as _ilu
+    p = PKG / rel
+    if not p.is_file():
+        return None
+    spec = _ilu.spec_from_file_location(tag, str(p))
+    mod = _ilu.module_from_spec(spec)
+    sys.modules[tag] = mod
+    try:
+        spec.loader.exec_module(mod)
+    except SystemExit:
+        pass
+    return mod
+
+
+def _docstring_corpus():
+    """`ci/*.py` ＋ `_tools_034/*.py` 的 docstring 清单：[(相对路径, [文本...])]。
+
+    ★ 为什么只扫 docstring（D-29/D-30 的语料，两个判据共用）：
+      注释与代码字符串里**大量故意**引用坏形状 —— 守卫文件描述「被禁的旧形态」、
+      登记簿描述已修缺陷的原貌、工具注释讲「我曾照着 __file__ 找错过目录」。
+      那些是**在说不存在的东西**，不是**承诺**；T-06/T-04 判的是
+      「照着文档做必错」。扫描范围 = 真源 docstring（ast 取，不扫行号/字面）。
+    ★ 解析失败 ⇒ 抛异常（调用方转红）—— 不许静默跳过整个文件（跳过＝盲区）。
+    """
+    import ast as _ast
+    out = []
+    for base, sub in ((PKG / "ci", "ci"), (PKG / "_tools_034", "_tools_034")):
+        if not base.is_dir():
+            continue
+        for p in sorted(base.glob("*.py")):
+            src = p.read_text(encoding="utf-8", errors="replace")
+            docs = []
+            for node in _ast.walk(_ast.parse(src)):
+                if isinstance(node, (_ast.Module, _ast.FunctionDef,
+                                     _ast.AsyncFunctionDef, _ast.ClassDef)):
+                    d = _ast.get_docstring(node, clean=False)
+                    if d:
+                        docs.append(d)
+            out.append(("%s/%s" % (sub, p.name), docs))
+    return out
+
+
+def j_resign_caliber_matches_builder():
+    """★★ D-27（2026-10-12）：重签工具的哈希口径必须与构建器登记值一致（T-03）。
+
+    要防的复发（本轮一次**真实破坏**逼出来的，不是推演）：
+      `_tools_034/_resign_manifest.py` 曾用**裸 sha256**，而构建器对
+      `host_shield.VERSION_BEARING_CHAIN_FILES`（实测唯一成员
+      `hooks/pre_tool_use.py`）是**先归一化版本行再算**。两个口径不一致的
+      后果是**双向的**：假红（没变的文件判成需重签）＋ **破坏**（照错值写回
+      让 `--manifest` 由绿变红）。工具侧已改 import host_shield 拿归一化口径
+      （54 行）并加了写回前自检；本条把「口径一致」固化成判据。
+
+    ★ 判据打在**行为**上（工具算出的值 == manifest 登记值），不比对源码长相（维三）。
+    ★ 判据不许二次实现：exec 工具自己的 `sha256(rel)` 函数体，不在这里重写口径。
+    """
+    import hashlib as _hashlib
+    tool_rel = "_tools_034/_resign_manifest.py"
+    src_p = PKG / tool_rel
+    if not src_p.is_file():
+        return None, "缺 %s" % tool_rel
+    src = src_p.read_text(encoding="utf-8", errors="replace")
+    m = re.search(r"^def sha256\(rel\):.*?(?=^def |\Z)", src, re.S | re.M)
+    if not m:
+        return False, "%s 里找不到 sha256(rel) 定义（被改名/删了？）" % tool_rel
+    hs = _load_module_file("host_shield.py", "_hs_d27")
+    if hs is None:
+        return None, "缺 host_shield.py"
+    ns = {"os": os, "hashlib": _hashlib, "ROOT": str(PKG), "_hs_hash": hs}
+    try:
+        exec(compile(m.group(0), tool_rel + ":sha256", "exec"), ns)
+        tool_sha = ns["sha256"]
+    except Exception as e:                                  # noqa: BLE001
+        return False, "加载工具 sha256 失败：%s: %s" % (type(e).__name__, e)
+
+    bearing = list(getattr(hs, "VERSION_BEARING_CHAIN_FILES", ()) or ())
+    if not bearing:
+        return False, "host_shield.VERSION_BEARING_CHAIN_FILES 为空（口径特殊件清单没了）"
+    man = PKG / "psl" / "manifest.json"
+    if not man.is_file():
+        return None, "缺 psl/manifest.json"
+    try:
+        files = json.loads(man.read_text(encoding="utf-8")).get("files") or {}
+    except Exception as e:                                  # noqa: BLE001
+        return False, "manifest 读不出：%s: %s" % (type(e).__name__, e)
+    bad = []
+    for rel in bearing:
+        if rel not in files:
+            bad.append("%s 不在 manifest 里" % rel)
+            continue
+        if not (PKG / rel).is_file():
+            bad.append("%s 在磁盘上不存在" % rel)
+            continue
+        try:
+            got = tool_sha(rel)
+        except Exception as e:                              # noqa: BLE001
+            bad.append("%s 工具侧算失败：%s" % (rel, e))
+            continue
+        if got != files[rel]:
+            bad.append("%s：工具算 %s… ≠ manifest 登记 %s…（口径分叉）"
+                       % (rel, got[:22], files[rel][:22]))
+    if bad:
+        return False, "；".join(bad[:3])
+    return True, "重签工具口径与 manifest 登记一致（%d 个口径特殊件）" % len(bearing)
+
+
+def j_negctl_fixture_covers_manifest():
+    """★★ D-28（2026-10-12）：负控 fixture 必须覆盖 manifest 全部条目（T-03）。
+
+    要防的复发（本轮实测，X-004）：负控 fixture 原来只复制 7 个目录，
+    manifest 里 `assets/`、`challenge/` 条目在 fixture 里全部「不存在」
+    ⇒ D-25 在**每一条**负控里连带假红，输出污染成「D-25 | D-25」，
+    读者分不清哪条才是真正被注入的 —— **假红不是缺陷、是盲区**，
+    而它让负控失去分辨力（「会误报的检查器用两次就没人信」）。
+
+    ★ 与 D-25 的关系：D-25 查**真仓**的 manifest↔磁盘；本条查 **fixture**
+      的 manifest↔fixture 磁盘。fixture 与真仓同源（`_build_negctl_fixture`
+      是唯一真源，本判据直接调它，不另写一遍构建逻辑 —— 判据不许二次实现）
+      ⇒ 本条绿，才证明 D-25 在 fixture 上的绿是真的绿。
+    ★ fixture 建不起来（返回 None）⇒ **按红处理**，不许静默通过
+      （静默通过＝假负控，正是本条要防的形状）。
+    """
+    dst = _build_negctl_fixture("D-28")
+    try:
+        if dst is None:
+            return False, ("fixture 构建失败（_build_negctl_fixture 返回 None）"
+                           "—— 不可判即红，不许静默通过")
+        man = dst / "psl" / "manifest.json"
+        if not man.is_file():
+            return False, "fixture 里没有 psl/manifest.json（fixture 结构变了）"
+        try:
+            files = json.loads(man.read_text(encoding="utf-8")).get("files") or {}
+        except Exception as e:                              # noqa: BLE001
+            return False, "fixture manifest 读不出：%s: %s" % (type(e).__name__, e)
+        missing = sorted(rel for rel in files if not (dst / rel).is_file())
+        if missing:
+            return False, ("fixture 缺 %d 个 manifest 条目覆盖的文件（如 %s）"
+                           "—— D-25 会在负控里因此连带假红"
+                           % (len(missing), "、".join(missing[:3])))
+        return True, "fixture 覆盖 manifest 全部 %d 条" % len(files)
+    finally:
+        # 零删除纪律：fixture 不删，改名让开（safe-delete 守卫会硬杀 rmtree）
+        if dst is not None:
+            _aside_dir(dst.parent)
+
+
+def j_docstring_tool_flags_exist():
+    """★★ D-29（2026-10-12）：docstring 承诺的工具 flag 必须真实可跑（T-04）。
+
+    要防的复发（X-005）：D-25 的 docstring 承诺追平工具
+    `_resign_manifest.py --roll`，但该参数当时并不存在 ⇒ 判据红了，
+    照着文档给的修法跑不通 —— **红而无出路**（知道错了也改不了）。
+
+    ★ 语料 = `ci/*.py` ＋ `_tools_034/*.py` 的 docstring（`_docstring_corpus`）。
+    ★ 断言什么：① 被引用的工具文件存在；② 每个 flag 出现在该文件的
+      `add_argument("--flag"` 里。两条都是**事实**（文件在不在、参数声明在不在），
+      不是字面像不像（维一/维三）。
+    """
+    pat = re.compile(r"(_tools_\d+/[\w.-]+\.py)((?:\s+--?[\w-]+)+)")
+    bad = []
+    n_hits = 0
+    for rel, docs in _docstring_corpus():
+        for doc in docs:
+            for m in pat.finditer(doc):
+                n_hits += 1
+                tool_rel = m.group(1)
+                flags = m.group(2).split()
+                tool_p = PKG / tool_rel
+                if not tool_p.is_file():
+                    bad.append("%s 的 docstring 引用 %s，文件不存在" % (rel, tool_rel))
+                    continue
+                tsrc = tool_p.read_text(encoding="utf-8", errors="replace")
+                declared = set(re.findall(r'add_argument\(\s*"--([^"]+)"', tsrc))
+                miss = [f for f in flags if f.lstrip("-") not in declared]
+                if miss:
+                    bad.append("%s 的 docstring 承诺 %s %s，工具没声明这些参数"
+                               % (rel, tool_rel, " ".join(miss)))
+    if bad:
+        return False, "；".join(bad[:3])
+    return True, "%d 处工具引用（文件＋flag）全部真实可跑" % n_hits
+
+
+def j_docstring_paths_exist():
+    """★★ D-30（2026-10-12）：docstring 承诺的仓内路径必须存在（T-06）。
+
+    要防的复发（X-006）：本文件自己的 docstring 曾把入口路径写成 scripts/ 前缀，
+    而文件实际在 `ci/` 下 —— 照着 docstring 跑必报找不到文件。
+    **文档与代码不同锚 ⇒ 下一个人从头错到尾。**
+    （此处刻意不引用那个错路径的字面 —— 判据语料正是 docstring，
+     写例子会被自己扫到；这条纪律本身也是维三的一课。）
+
+    ★ 语料同 D-29（docstring，不扫注释/代码字符串 —— 那里大量故意引用坏形状）。
+    ★ 断言打在**存在性**上（相对 PKG），不打字面（维三）。
+    ★ 注册前已自扫修光（0482/j2 两处描述旧形态的措辞改写法，见提交信息）。
+    """
+    pat = re.compile(r"(?:ci|scripts|tools|hooks|_tools_\d+)/[\w./-]+\.(?:py|json|md|ps1|yml)")
+    bad = []
+    n = 0
+    for rel, docs in _docstring_corpus():
+        for doc in docs:
+            for m in pat.finditer(doc):
+                n += 1
+                p = m.group(0)
+                if not (PKG / p).exists():
+                    bad.append("%s 的 docstring 引用 %s，仓里不存在" % (rel, p))
+    if bad:
+        return False, "；".join(bad[:3])
+    return True, "%d 处仓内路径引用全部存在" % n
+
+
+def j_page_titles_guard():
+    """★★ G-05（2026-10-12）：认窗白名单守卫必须在位（T-05 边界误伤）。
+
+    背景（X-007，0.36.5 实测）：认窗判据曾用宽泛匹配（标题前缀）认
+    「本次运行的窗口」，误把用户自己的记事本当成值守台窗口处理。
+    0.36.5 起 `_mark_at_tail()` 的前缀白名单专守这件事，其真身在
+    `ci/inbox_guards_0360.py` 的 `c_window_suffix_matches_every_page()`，
+    但 `defect_types.gate_ids_from_registry()` 只读 `regression_gate.py`
+    ⇒ 它被误报「不在注册表」（红而无出路的变体）。本条按推荐方案 (a)
+    用**薄判据**把它接进注册表，与现有 16 条同构。
+
+    ★ ①② 两条都过才绿：
+      ① 0360 的专守函数必须通过（页面清单逐条实跑认窗）；
+      ② T-05 本质断言：0.36.5 实测过的用户窗口形状
+         `is_console_title("请给我一个 · 值守台#a8276c", "a8276c")` 必须为 False。
+    ★ 连带：0360 全量（52 条）、收旧窗、`find_console_windows` 两级匹配
+      在交付闸门里照跑；W-01 批次改 `_mark_at_tail` 时本条继续守。
+    """
+    g0360 = _load_module_file("ci/inbox_guards_0360.py", "g0360_wrapper")
+    if g0360 is None:
+        return False, "ci/inbox_guards_0360.py 加载失败（认窗守卫真身读不到）"
+    fn = getattr(g0360, "c_window_suffix_matches_every_page", None)
+    if fn is None:
+        return False, ("0360 里没有 c_window_suffix_matches_every_page"
+                       "（被改名/删了？——那正是 T-05 复发入口）")
+    r = fn()
+    if r is not True:
+        return False, "0360 认窗专守未过：%s" % (r if isinstance(r, str) else repr(r))
+    win = _load_module_file("inbox_window.py", "inbox_window_g05")
+    if win is None:
+        return False, "inbox_window.py 加载失败"
+    if win.is_console_title("请给我一个 · 值守台#a8276c", "a8276c"):
+        return False, ("用户窗口形状「请给我一个 · 值守台#a8276c」被误认成本次运行窗口"
+                       "（T-05 复发：宽泛匹配认对象）")
+    return True, "认窗白名单在位（0360 专守过 ＋ 用户形状拒认）"
+
+
+def j_defect_registry_consistent():
+    """★★ D-31（2026-10-12）：缺陷类型登记簿自身必须一致（元层接成闸门一环）。
+
+    这是「登记簿不是一张不会响的表格」的落地：调
+    `defect_types.check_consistency(gate_ids_from_registry())`，
+    `ok` 才绿。**注册之时它必然红**（当前 T-03/04/05/06 的判据都没注册）——
+    它由红转绿的瞬间就是 R1–R7 完工的证明，不是失败。
+
+    ★ 判据不许二次实现：判据逻辑全在 `defect_types.check_consistency`，
+      本条只做「加载 ＋ 调用 ＋ 转红」。
+    """
+    dt = _load_module_file("ci/defect_types.py", "defect_types_d31")
+    if dt is None:
+        return False, "ci/defect_types.py 加载失败"
+    ids = dt.gate_ids_from_registry()
+    ok, problems = dt.check_consistency(ids)
+    if not ok:
+        return False, "登记簿 %d 处不一致：%s" % (len(problems), "；".join(problems[:3]))
+    return True, "登记簿一致（%d 类 / %d 实例，注册表口径）" % (
+        len(dt.TYPES), len(dt.INSTANCES))
 
 
 def j_fallback_has_no_dst10(m):
@@ -1003,6 +1289,94 @@ def _aside_dir(path):
     return False
 
 
+def _build_negctl_fixture(label=""):
+    """构建负控 fixture（`selfcheck()` 与判据 D-28 共用的**唯一真源**）。
+
+    ★★ 为什么提成模块级函数（2026-10-12）：
+      原先整段内联在 `selfcheck()` 里。D-28「fixture 必须覆盖 manifest
+      全部条目」要验的正是这段代码的行为 —— 若在判据里**另写一遍**
+      fixture 构建，就是二次实现：判据绿了不代表真仓的 fixture 绿
+      （判据纪律①：判据不许二次实现）。
+      ⇒ 提取出来，两边调同一个函数，判据验的就是**真仓会用的** fixture。
+
+    返回 fixture 的 `pkg/` 路径；准备失败 ⇒ None（调用方必须中止该条负控，
+    不许"做，也不许算它绿"——静默通过＝假负控）。
+    """
+    import shutil
+    import tempfile
+    # ★ 只复制闸门真正需要的骨架（全仓 copytree 870 文件 × 4 次 = 会超时）。
+    #   hooks/ ＋ rules/ ＋ ci/ 就是全部依赖：闸门 import 钩子、读规则表、自己。
+    tmp = Path(tempfile.mkdtemp(prefix="antinel_negctl_"))
+    dst = tmp / "pkg"
+    dst.mkdir(parents=True, exist_ok=True)
+    # ★★ 2026-09-29：补 `psl/` 与 `docs/`（D-22 要读 psl/manifest.json；
+    #   D-6 的版本承载件里有 psl/manifest.json 与 docs/AUDIT_SCHEMA.md）。
+    #   fixture 缺这些文件会让判据因"文件不存在"而假红 —— 那不是缺陷，是盲区。
+    # ★★ 2026-10-12：补 `_tools_034/`（仅 40K）—— D-27 要 import 里面的
+    #   重签工具验口径；没有它，D-27 在 fixture 里只能 SKIP ⇒ 它的负控是假的。
+    for sub in ("hooks", "rules", "ci", "scripts", "psl", "docs", "tools", "_tools_034"):
+        shutil.copytree(str(PKG / sub), str(dst / sub),
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.bak-*"))
+    # 钩子 import 的同级模块（antinel.py 等）也要带上，否则 exec_module 会炸
+    for py in PKG.glob("*.py"):
+        shutil.copy2(str(py), str(dst / py.name))
+    # ★★ 2026-09-29：把 pyproject.toml 也带上 —— 否则 D-6（版本一致性）在 fixture 里
+    #   因"文件不存在"**级联变红**，淹没真正被注入的那条判据（会让读者误以为 D-6 坏了）。
+    #   这正是「会误报的检查器用两次就没人信」要避免的噪声。
+    for extra in ("pyproject.toml", "server.json", "SKILL.md", "MANIFEST.in"):
+        if (PKG / extra).is_file():
+            shutil.copy2(str(PKG / extra), str(dst / extra))
+    # ★★ D-25 需要 manifest 覆盖的**全部**文件都在 fixture 里（2026-10-12 实测必修）：
+    #   不加这一段，D-25 在**每一条**负控里都连带假红 —— manifest 有 124 条，
+    #   而 fixture 只复制 7 个目录 ＋ 根目录 *.py ⇒ `assets/`、`challenge/`
+    #   下的条目在 fixture 里全部"不存在"。假红不是缺陷、是**盲区**，
+    #   而它把每条负控的输出污染成"D-25 | D-25"，读者再也分不清哪条
+    #   才是真正被注入的那一条（"会误报的检查器用两次就没人信"）。
+    #   manifest 合计仅 ~3.2 MB，全复制可接受（13 次注入 ≈ 42 MB 峰值）。
+    #   ★ 此刻 fixture 里的 manifest 还是**原始**的（注入的写入在后面的
+    #     `mut.write_text`），所以补复制的正是原始 124 条；注入的死条目
+    #     文件在 PKG 里也不存在 ⇒ 不会被复制 ⇒ 负控照样能检出它。
+    _fmf0 = dst / "psl" / "manifest.json"
+    if _fmf0.is_file():
+        try:
+            _ents = json.loads(_fmf0.read_text(encoding="utf-8")).get("files") or {}
+            for _rel in _ents:
+                _s, _d = PKG / _rel, dst / _rel
+                if _s.is_file() and not _d.exists():
+                    _d.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(str(_s), str(_d))
+        except Exception as _e:                           # noqa: BLE001
+            # 与 fixture 封闭失败同一条纪律：准备失败必须**中止本条负控**，
+            # 不许"做，也不许算它绿"（静默通过＝假负控）。
+            print("  [SKIP] %-40s fixture 补复制 manifest 条目失败（%s: %s）⇒ 本条负控不做"
+                  % (label, type(_e).__name__, _e))
+            return None
+    # ★★ 2026-09-29：fixture 也要**封闭**（同 D-6 的教训）—— 把 psl/manifest.json 的
+    #   built_from 改写成 fixture 自己的路径。否则 D-22 每次都因"它指向真仓、
+    #   而 PKG 是临时目录"而**假红**，跟 D-6 一样是噪声、且会掩盖真正的判定。
+    _fmf = dst / "psl" / "manifest.json"
+    if _fmf.is_file():
+        try:
+            _t = _fmf.read_text(encoding="utf-8")
+            # ★★ 必须用 lambda：re.sub 的**替换串**会解释反斜杠
+            #   （`\\\\` → `\\` → 单反斜杠）⇒ 写出的 JSON 非法（`Invalid \escape`）
+            #   ⇒ D-22 在任何 fixture 里都会因解析失败而假红 ⇒ **负控变假**。
+            _t2 = re.sub(r'"built_from"\s*:\s*"[^"]*"',
+                         lambda _m: '"built_from": "%s"'
+                         % str(dst).replace("\\", "\\\\"), _t)
+            if _t2 != _t:
+                _fmf.write_text(_t2, encoding="utf-8", newline="\n")
+        except Exception as _e:
+            # ★★ 2026-09-30：此处原为 `pass`（**静默**）。
+            #   危害：fixture 没封闭好 ⇒ 判据会在 fixture 里**因别的原因**红
+            #   ⇒ 负控"变红了"于是看起来通过 —— 这正是 D-11／D-22 两个**假负控**的形状。
+            #   ⇒ 准备失败必须**中止这条负控**（不做，也不许算它绿）。
+            print("  [SKIP] %-40s fixture 封闭失败（%s: %s）⇒ 本条负控不做"
+                  % (label, type(_e).__name__, _e))
+            return None
+
+    return dst
+
 def selfcheck():
     """★★ 负控：把每个缺陷**注入回去**，断言闸门必须变红。**先红后绿。**
 
@@ -1111,6 +1485,56 @@ def selfcheck():
          '"why": "哨兵在岗",',
          '"why": "哨兵在岗，最后心跳 %.0f 分钟前" % 6,',
          "D-26"),
+        # ★★ D-27 负控（2026-10-12）：把重签工具改回**裸 sha256** 口径。
+        #   模拟的正是本轮那次真实破坏：口径分叉 ⇒ 假红（没变判成需重签）
+        #   ＋ 照错值写回让 --manifest 由绿变红。旧串逐字取自磁盘（71 行）。
+        ("D-27 缺陷：重签工具改回裸 sha256 口径（量具假红/写回破坏）",
+         "_tools_034/_resign_manifest.py",
+         'hashlib.sha256(_hs_hash.norm_version_bytes(data)).hexdigest()',
+         'hashlib.sha256(data).hexdigest()',
+         "D-27"),
+        # ★★ D-28 负控（2026-10-12）：让 fixture 补复制**跳过 assets/**。
+        #   模拟 X-004 原貌（fixture 缺 manifest 覆盖 ⇒ D-25 每条负控连带假红）。
+        #   ⚠️ 已知连带：fixture 真的缺件时，fixture 里的 D-25 也会红（同源连带，
+        #   机器会打 △）—— 那正是本条与 D-25 看同一性质的两个方向，不是噪声。
+        ("D-28 缺陷：fixture 补复制跳过 assets/（覆盖不全复发）",
+         "ci/regression_gate.py",
+         '            for _rel in _ents:',
+         '            for _rel in [x for x in _ents if not x.startswith("assets/")]:',
+         "D-28"),
+        # ★★ D-29 负控（2026-10-12）：往 docstring 里加一条**不存在的参数**承诺。
+        #   模拟 X-005 原貌（承诺 --roll 时该参数不存在 ⇒ 红而无出路）。
+        #   注入点选本文件自己的模块 docstring（语料内，且旧串是一句真话）。
+        ("D-29 缺陷：docstring 承诺一个工具不存在的参数（红而无出路）",
+         "ci/regression_gate.py",
+         '    python ci/regression_gate.py --json      # 机器可读',
+         '    python ci/regression_gate.py --json      # 机器可读\n'
+         '    NEGCTL-D29: python _tools_034/_resign_manifest.py --nonexistent-flag',
+         "D-29"),
+        # ★★ D-30 负控（2026-10-12）：把 docstring 里一处**正确路径写坏**。
+        #   X-006 原貌（scripts/ vs ci/）。注入点取 defect_types 模块 docstring
+        #   里对回归闸门的那句真话（语料内）。
+        ("D-30 缺陷：docstring 把回归闸门路径写坏（文档与代码不同锚）",
+         "ci/defect_types.py",
+         '回归闸门（`ci/regression_gate.py`）',
+         '回归闸门（`scripts/regression_gate.py`）',
+         "D-30"),
+        # ★★ G-05 负控（2026-10-12）：把认窗白名单那一跳改成**放行**。
+        #   模拟 0.36.5 原貌（宽泛匹配认对象 ⇒ 误关/误移用户窗口）。
+        #   ② 会抓到「用户形状被误认」。W-01 批次改 _mark_at_tail 时
+        #   **必须保留这两行**（只改 names 的算法），否则本负控失效。
+        ("G-05 缺陷：认窗白名单那一跳改成放行（用户窗口被误认）",
+         "inbox_window.py",
+         '    if page not in names:\n        return False',
+         '    if page not in names:\n        pass',
+         "G-05"),
+        # ★★ D-31 负控（2026-10-12）：往类型表里塞一个**幻想判据 ID**。
+        #   模拟「有病无药被掩盖」：不注册就红，才是登记簿接成闸门一环。
+        ("D-31 缺陷：类型表塞一个幻想判据 ID（登记簿一致性被破坏）",
+         "ci/defect_types.py",
+         '"guards": ["D-26"],',
+         '"guards": ["D-26", "D-99"],',
+         "D-31"),
     ]
 
     ok_all = True
@@ -1185,74 +1609,11 @@ def selfcheck():
 
         # ★ 只复制闸门真正需要的骨架（全仓 copytree 870 文件 × 4 次 = 会超时）。
         #   hooks/ ＋ rules/ ＋ ci/ 就是全部依赖：闸门 import 钩子、读规则表、自己。
-        tmp = Path(tempfile.mkdtemp(prefix="antinel_negctl_"))
-        dst = tmp / "pkg"
-        dst.mkdir(parents=True, exist_ok=True)
-        # ★★ 2026-09-29：补 `psl/` 与 `docs/`（D-22 要读 psl/manifest.json；
-        #   D-6 的版本承载件里有 psl/manifest.json 与 docs/AUDIT_SCHEMA.md）。
-        #   fixture 缺这些文件会让判据因"文件不存在"而假红 —— 那不是缺陷，是盲区。
-        for sub in ("hooks", "rules", "ci", "scripts", "psl", "docs", "tools"):
-            shutil.copytree(str(PKG / sub), str(dst / sub),
-                            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.bak-*"))
-        # 钩子 import 的同级模块（antinel.py 等）也要带上，否则 exec_module 会炸
-        for py in PKG.glob("*.py"):
-            shutil.copy2(str(py), str(dst / py.name))
-        # ★★ 2026-09-29：把 pyproject.toml 也带上 —— 否则 D-6（版本一致性）在 fixture 里
-        #   因"文件不存在"**级联变红**，淹没真正被注入的那条判据（会让读者误以为 D-6 坏了）。
-        #   这正是「会误报的检查器用两次就没人信」要避免的噪声。
-        for extra in ("pyproject.toml", "server.json", "SKILL.md", "MANIFEST.in"):
-            if (PKG / extra).is_file():
-                shutil.copy2(str(PKG / extra), str(dst / extra))
-        # ★★ D-25 需要 manifest 覆盖的**全部**文件都在 fixture 里（2026-10-12 实测必修）：
-        #   不加这一段，D-25 在**每一条**负控里都连带假红 —— manifest 有 124 条，
-        #   而 fixture 只复制 7 个目录 ＋ 根目录 *.py ⇒ `assets/`、`challenge/`
-        #   下的条目在 fixture 里全部"不存在"。假红不是缺陷、是**盲区**，
-        #   而它把每条负控的输出污染成"D-25 | D-25"，读者再也分不清哪条
-        #   才是真正被注入的那一条（"会误报的检查器用两次就没人信"）。
-        #   manifest 合计仅 ~3.2 MB，全复制可接受（13 次注入 ≈ 42 MB 峰值）。
-        #   ★ 此刻 fixture 里的 manifest 还是**原始**的（注入的写入在后面的
-        #     `mut.write_text`），所以补复制的正是原始 124 条；注入的死条目
-        #     文件在 PKG 里也不存在 ⇒ 不会被复制 ⇒ 负控照样能检出它。
-        _fmf0 = dst / "psl" / "manifest.json"
-        if _fmf0.is_file():
-            try:
-                _ents = json.loads(_fmf0.read_text(encoding="utf-8")).get("files") or {}
-                for _rel in _ents:
-                    _s, _d = PKG / _rel, dst / _rel
-                    if _s.is_file() and not _d.exists():
-                        _d.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(str(_s), str(_d))
-            except Exception as _e:                           # noqa: BLE001
-                # 与 fixture 封闭失败同一条纪律：准备失败必须**中止本条负控**，
-                # 不许"做，也不许算它绿"（静默通过＝假负控）。
-                print("  [SKIP] %-40s fixture 补复制 manifest 条目失败（%s: %s）⇒ 本条负控不做"
-                      % (label, type(_e).__name__, _e))
-                ok_all = False
-                continue
-        # ★★ 2026-09-29：fixture 也要**封闭**（同 D-6 的教训）—— 把 psl/manifest.json 的
-        #   built_from 改写成 fixture 自己的路径。否则 D-22 每次都因"它指向真仓、
-        #   而 PKG 是临时目录"而**假红**，跟 D-6 一样是噪声、且会掩盖真正的判定。
-        _fmf = dst / "psl" / "manifest.json"
-        if _fmf.is_file():
-            try:
-                _t = _fmf.read_text(encoding="utf-8")
-                # ★★ 必须用 lambda：re.sub 的**替换串**会解释反斜杠
-                #   （`\\\\` → `\\` → 单反斜杠）⇒ 写出的 JSON 非法（`Invalid \escape`）
-                #   ⇒ D-22 在任何 fixture 里都会因解析失败而假红 ⇒ **负控变假**。
-                _t2 = re.sub(r'"built_from"\s*:\s*"[^"]*"',
-                             lambda _m: '"built_from": "%s"'
-                             % str(dst).replace("\\", "\\\\"), _t)
-                if _t2 != _t:
-                    _fmf.write_text(_t2, encoding="utf-8", newline="\n")
-            except Exception as _e:
-                # ★★ 2026-09-30：此处原为 `pass`（**静默**）。
-                #   危害：fixture 没封闭好 ⇒ 判据会在 fixture 里**因别的原因**红
-                #   ⇒ 负控"变红了"于是看起来通过 —— 这正是 D-11／D-22 两个**假负控**的形状。
-                #   ⇒ 准备失败必须**中止这条负控**（不做，也不许算它绿）。
-                print("  [SKIP] %-40s fixture 封闭失败（%s: %s）⇒ 本条负控不做"
-                      % (label, type(_e).__name__, _e))
-                ok_all = False
-                continue
+        # ★★ 2026-10-12：提取为模块级 `_build_negctl_fixture()`（D-28 与真仓同源）。
+        dst = _build_negctl_fixture(label)
+        if dst is None:
+            ok_all = False
+            continue
         mut = (dst / rel)
         if new is None:
             # 分叉专项：src 已是剔行后的内容，不再做字符串替换
@@ -1318,7 +1679,7 @@ def selfcheck():
         #   一旦触顶，`shutil.rmtree` 会让**整个负控进程被硬杀**（SIGTERM，
         #   不抛 Python 异常）⇒ 表现为"负控只跑了几条就消失"，
         #   极易被误读成"没变红=判据没问题"。修法同 D-15：**改名让开**。
-        _aside_dir(tmp)
+        _aside_dir(dst.parent)
 
     print()
     if ok_all:
@@ -1373,6 +1734,20 @@ def main():
              j_manifest_no_dead_entries),
             ("D-26 态势说明无冻结读数（心跳/分钟前：会说谎的数字）",
              j_posture_why_no_frozen_numbers),
+            # ── 2026-10-12 值守台交接件 §4.5（R1–R6）：元层机制补环 ──
+            ("D-27 重签工具口径与构建器登记一致（量具假红/写回破坏，T-03）",
+             j_resign_caliber_matches_builder),
+            ("D-28 负控 fixture 覆盖 manifest 全部条目（防 D-25 负控假红，T-03）",
+             j_negctl_fixture_covers_manifest),
+            ("D-29 docstring 承诺的工具参数真实可跑（红而无出路，T-04）",
+             j_docstring_tool_flags_exist),
+            ("D-30 docstring 承诺的仓内路径存在（文档与代码同锚，T-06）",
+             j_docstring_paths_exist),
+            ("G-05 认窗白名单守卫在位（用户窗口绝不被误认，T-05）",
+             j_page_titles_guard),
+            # ★ D-31 放最后：它红的正是上面几条没做完；R7 对齐后由红转绿 ＝ 完工证明
+            ("D-31 缺陷类型登记簿自身一致（不会响的表格接成闸门一环）",
+             j_defect_registry_consistent),
         ]
 
         for cid, fn in checks:

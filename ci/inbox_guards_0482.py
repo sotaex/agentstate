@@ -8,7 +8,7 @@
 
     ① 顶层 `-h/--help` 无出口：antinel.py 顶层 `argparse(add_help=False)` 却忘了补
        help 出口 ⇒ 用户第一直觉命令 `antinel -h` / `--help` 报 `unrecognized arguments`。
-    ② 随包脚本命令安装后不可达：README/SKILL/NOTICE 里写成 `python scripts/x.py` 形，
+    ② 随包脚本命令安装后不可达：README/SKILL/NOTICE 里写成「python ＋ scripts/ 相对路径」形，
        而这些脚本随包落在 `site-packages`（不在 CWD）⇒ 逐条实测 `reachable:false`。
     ③ A6 收入边界声明对 wheel 用户不可达：docs/ 不进 wheel，指针却未说清。
 
