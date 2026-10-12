@@ -11,8 +11,9 @@
      批次 1（甲2/甲3/甲4 ＋ 丙1/丙2）→ U-01 / U-03 / U-08（已落地，commit 049fc7c）
      批次 2（丁2/丁3/丁4/丁5）        → U-10 / U-11 / U-05（已落地，commit 9337bc4）
      批次 3（乙1~乙4）                → U-04 / U-06（已落地，commit 264c67b）
-     批次 4（戊1/戊2/戊4 ＋ 戊3 重排）→ U-13 / U-15（本 commit）
-     批次 5（W-01 ＋ W-02 边界项）    → 单独 commit（认窗白名单）
+     批次 4（戊1/戊2/戊4 ＋ 戊3 重排）→ U-13 / U-15（已落地，commit 461b4ef）
+     批次 5（W-01 ＋ W-02 边界项）    → W-01 / W-02（本 commit —— 认窗白名单
+                                        单独提交，可单独回滚；G-05 锚点未动）
 
    编号与 19 条**稳定映射**：U-02/U-07/U-09/U-12/U-14 是并入项与视觉项
    预留的空档，不是漏写（§5.7 表头原话）。红不了的（视觉排布）登记为
@@ -53,6 +54,7 @@ RESULTS = []
 
 _SERVER_REL = "inbox_server.py"
 _MODEL_REL = "inbox_model.py"
+_WINDOW_REL = "inbox_window.py"
 
 
 def check(name):
@@ -832,9 +834,163 @@ def n_u15():
     return True
 
 
+# ══════════ W-01 / W-02 · 丁1 + 状态词标题（§5.5 边界项，单独 commit）══════════
+#: ★★ 这一批动的是 `inbox_window._mark_at_tail()` 的认窗白名单 ——
+#:   0.36.5 硬化过的「不许误关/误移用户窗口」边界（T-05 / G-05）。
+#:   ⇒ 单独 commit；负控实测见过红；连回检查盯着 G-05 注入锚点两行。
+
+
+def _state_words():
+    """标题状态词的封闭词表 —— 唯一真源 `host_shield.POSTURE_LABEL_ALLOWED`。
+
+    ★ 不写死、不抄第二份：判据与被判对象必须同一个源（S04 同型纪律）。
+    """
+    import host_shield as _HS
+    return set(_HS.POSTURE_LABEL_ALLOWED)
+
+
+@check("W-01 ★ 状态词标题：四条认窗断言 ＋ 标题形态 ＋ 词表覆盖")
+def w01():
+    """§5.5 定稿落地：标题恒用状态词（`<状态词> · 值守台#<hash>`）。
+
+    ① 四条 `is_console_title` 断言（逐字取自交接件 §5.5「四条负控」）：
+       状态词 True / 用户形状 False / 挂程序 False / 页面名 True；
+    ② 渲染四页：`<title>` ＝ 状态词 · 值守台#<6hex>，且与头部 `<b>` **同词**
+       （标题与头部不许两种说法）；
+    ③ 覆盖：`STATE_LABEL` ∪ ｢未启用｣ ⊆ 认窗白名单 —— 漏一个词，
+       那个态的窗口就认不出、落位失效（§5.5 原话警告）。
+    """
+    import inbox_window as WIN
+    four = (
+        ("拦截 · 值守台#abc123", "abc123", True,
+         "状态词标题认不出（W-01 前提不成立）"),
+        ("请给我一个 · 值守台#a8276c", "a8276c", False,
+         "用户窗口形状被误认（0.36.5 实测形状，绝不许放行）"),
+        ("记事本 - 拦截 · 值守台#abc123", "abc123", False,
+         "挂了别的程序的标题被误认"),
+        ("收件箱 · 值守台#abc123", "abc123", True,
+         "页面名标题认不出（四页导航保底失效）"),
+    )
+    for t, rid, want, why in four:
+        got = WIN.is_console_title(t, rid)
+        if got is not want:
+            return "%s（期望 %s，实得 %s）" % (why, want, got)
+    # ② 渲染面：标题形态 + 标题与头部同词（四页逐页验）
+    words = _state_words()
+    for view in ("inbox", "report", "health", "ledger"):
+        page = _page(view)
+        m = re.search(r"<title>([^<]+)</title>", page)
+        if not m:
+            return "%s 页没有 <title>（判据扫的锚点没了）" % view
+        tm = re.match(r"^(.+) · 值守台#[0-9a-f]{6}$", m.group(1))
+        if not tm:
+            return ("%s 页标题形态不对：%r（应为「状态词 · 值守台#<6hex>」）"
+                    % (view, m.group(1)))
+        word = tm.group(1)
+        if word not in words:
+            return ("%s 页标题状态词 %r 不在 POSTURE_LABEL_ALLOWED 封闭词表里"
+                    "—— 那个态的窗口认不出" % (view, word))
+        bm = re.search(r'<b style="color:var\(--[a-z0-9]+\)">([^<]+)</b>', page)
+        if not bm or bm.group(1) != word:
+            return ("%s 页标题状态词与头部不是同一个（标题 %r / 头部 %r）"
+                    % (view, word, bm.group(1) if bm else None))
+    # ③ 覆盖：头部可达的每个状态词，认窗白名单都必须接纳
+    reachable = set(M.STATE_LABEL.values()) | {"未启用"}
+    if not reachable <= words:
+        return ("有状态词不在认窗白名单里：%s —— 那个态的窗口认不出、落位失效"
+                % sorted(reachable - words))
+    # 连带：PAGE_TITLES 四键没被本批动过（0360 硬锁的对象）
+    if set(SV.PAGE_TITLES.keys()) != {"inbox", "report", "health", "ledger"}:
+        return "PAGE_TITLES 键变了（W-01 不许动它）: %s" % sorted(SV.PAGE_TITLES)
+    return True
+
+
+@check("N-W01 负控：认窗白名单缩回「仅页面名」⇒ W-01 必须红")
+def n_w01():
+    """反向对照（维二）：把 §5.5 点名的那一跳改回 0.48.5 前的形状。
+
+    注入点逐字取自磁盘（`names = … | set(_HS.POSTURE_LABEL_ALLOWED)`），
+    缩成 `names = set(_SV.PAGE_TITLES.values())`。期望：**只有** ① 的
+    状态词断言翻面（用户形状/挂程序/页面名三条不受影响 —— 白名单只少一维，
+    不是整层拆掉，那由回归闸门 G-05 专守）。
+    """
+    src = _src(_WINDOW_REL)
+    a_union = ("        names = set(_SV.PAGE_TITLES.values())"
+               " | set(_HS.POSTURE_LABEL_ALLOWED)")
+    a_only = "        names = set(_SV.PAGE_TITLES.values())"
+    if a_union not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    # 连回：G-05 注入锚点两行必须仍在（regression_gate 的 G-05 负控指着它们）
+    if "    if page not in names:\n        return False" not in src:
+        return ("G-05 注入锚点两行不在了 —— regression_gate 的 G-05 负控"
+                "会失配，「不许误关用户窗口」的保护悄悄失效")
+    mut = _load(src.replace(a_union, a_only), "is0490_nw01", _WINDOW_REL)
+    if mut.is_console_title("拦截 · 值守台#abc123", "abc123") is not False:
+        return "负控失效：缩回仅页面名后状态词标题仍被认出（注入没生效）"
+    if mut.is_console_title("收件箱 · 值守台#abc123", "abc123") is not True:
+        return "负控失效：缩回仅页面名后页面名标题反而认不出（变异改错了地方）"
+    # 连回正判据：真实现下状态词必须认得出（否则负控无分辨力）
+    import inbox_window as WIN
+    if WIN.is_console_title("拦截 · 值守台#abc123", "abc123") is not True:
+        return "夹具不成立：真实现本身状态词标题就认不出 ⇒ 负控无分辨力"
+    return True
+
+
+@check("W-02 ★ 丁1：正文（除 <title>）零 #hex6 —— hash 只在标题尾")
+def w02():
+    """丁1 的判据化落点：渲染四页，body 里不许出现 `#<6 位小写 hex>`。
+
+    ★ 扫描范围只取 `<body>` 之后 —— `<head>` 里的 CSS 有色值（如
+      `#0a1a12`），扫全会冤判（交接件「先确认无冤判」的落地）。
+    ★ `<title>` 整段先剥掉：hash 合法地只住在那（认窗必需，不能删）。
+    """
+    for view in ("inbox", "report", "health", "ledger"):
+        page = _page(view)
+        if "<body>" not in page:
+            return "%s 页没有 <body> 起始标记（判据扫的范围没了）" % view
+        body = page.split("<body>", 1)[-1]
+        m = re.search(r"#[0-9a-f]{6}", body)
+        if m:
+            return ("%s 页正文出现 %s —— 丁1：hash 只在标题尾，"
+                    "正文置回 run_id 是回潮" % (view, m.group(0)))
+    return True
+
+
+@check("N-W02 负控：正文置回 run_id ⇒ W-02 必须红")
+def n_w02():
+    """反向对照（维二）：丁1 原貌 ＝ hash 在正文可见。
+
+    注入点逐字取自磁盘 `_head()`：把 mark（`#<run_id>`，**真实哈希**）
+    再加进 body 起始 —— 与「run_id 回潮正文」同一条路径、同一个变量，
+    不是另编一个假串。
+    """
+    src = _src(_SERVER_REL)
+    a_body = ('            "<style>%s</style></head><body>"\n'
+              '            % (_esc(title), mark, _esc(token), CSS))')
+    if a_body not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    mut = _load(src.replace(
+        a_body,
+        '            "<style>%s</style></head><body><span>%s</span>"\n'
+        '            % (_esc(title), mark, _esc(token), CSS, mark))'),
+        "is0490_nw02", _SERVER_REL)
+    page = mut.render_page(view="inbox", filt=M.BUCKET_ACTION,
+                           root=tempfile.mkdtemp(prefix="g0490_nw02_"),
+                           token="T", items=_items(), posture=_POSTURE)
+    body = page.split("<body>", 1)[-1]
+    if not re.search(r"#[0-9a-f]{6}", body):
+        return "负控失效：正文置回 run_id 后渲染页观察不到（注入没生效）"
+    live_body = _page("inbox").split("<body>", 1)[-1]
+    if re.search(r"#[0-9a-f]{6}", live_body):
+        return "夹具不成立：真实现正文本身就带 #hex6 ⇒ 负控无分辨力"
+    return True
+
+
 def main():
     print("=" * 78)
-    print("0.48.5 值守台细节修订判据（交接件 v1.1 §5.7）—— 批次 1：U-01/U-03/U-08")
+    print("0.48.5 值守台细节修订判据（交接件 v1.1 §5.7）—— "
+          "批1 U-01/U-03/U-08 · 批2 U-10/U-11/U-05 · 批3 U-04/U-06 · "
+          "批4 U-13/U-15 · 批5 W-01/W-02（认窗白名单，单独 commit）")
     print("（变异只在内存，账本与链只落临时目录，不写任何产品文件；"
           "戊2/戊3 视觉项无判据，走 §6.1 截图验收 —— U-13 只含戊2 机械部分）")
     print("=" * 78)

@@ -536,6 +536,10 @@ def is_console_title(actual, run_id=None):
 def _mark_at_tail(title):
     """整串是否形如「**页面名** · 值守台」或「**页面名** · 值守台#<hex 身份>」。
 
+    ★ 0.48.5（交接件 §5.5 W-01）：前缀也可以是**状态词**（失守/拦截/注意/
+      缺粮/值守中/研发中/未启用/中断 —— 标题自该版起恒用状态词，见
+      `inbox_server.render_page`）。整串形态不变，只是白名单放宽一维。
+
     ★★ 0.36.5 修正一次**收窄过头**（实测自己抓出来的）：
       第一版我用 `fullmatch` 认「**固定前缀** + 标记」，前缀从
       `CONSOLE_WINDOW_TITLE`（＝"收件箱 · 值守台"）推导 ⇒ 等于**只认"收件箱"这一页**。
@@ -555,9 +559,9 @@ def _mark_at_tail(title):
         值守台是 `--app=` 窗口，标题由页面名决定；Edge/记事本的标题
         永远以自己的名字结尾。
       ⇒ 那就用**真实判据**来挡它，不靠"猜用户会怎么起标题"：
-        页面前缀必须是**已知页面名之一**（唯一真源在 `inbox_server` 的映射里），
-        且不得含 Windows 窗口标题里表示"另一个窗口"的分隔符
-        （` - `、` – `、` — `）。
+        前缀必须是**已知页面名或状态词之一**（真源在 `inbox_server` 的映射
+        与 `host_shield.POSTURE_LABEL_ALLOWED` 里），且不得含 Windows 窗口
+        标题里表示"另一个窗口"的分隔符（` - `、` – `、` — `）。
       ★ 这条思路的来源：**判据不该假设标题长什么样，只该认可它产生的那个程序**
         —— 与「窗口枚举复用唯一实现」「判据不许二次实现」同源。
     """
@@ -568,22 +572,34 @@ def _mark_at_tail(title):
     if not m:
         return False
     page = title[:m.start()]
-    # ② 前面必须是**页面名**，不得含"另一个窗口"的标题分隔符
+    # ② 前面必须是**认得的前缀**（页面名或状态词），不得含"另一个窗口"的标题分隔符
     if not page or any(sep in page for sep in _WINDOW_TITLE_SEPS):
         return False
-    # ③ 页面名必须**不含路径/可执行扩展名**等程序特征（记事本.exe 之类）
+    # ③ 前缀必须**不含路径/可执行扩展名**等程序特征（记事本.exe 之类）
     if re.search(r"[\w.-]+\.(?:exe|py|bat|cmd|ps1)$", page, re.I):
         return False
     # ④ ★★ 0.36.5 真缺口（本轮实测当场抓到，不是推演）：
-    #   「页面名」这三个字，上面 ②③ 只查了**形状**（有没有分隔符/扩展名），
-    #   **根本没查它是不是我们自己那四个页面之一** ⇒ 用户窗口标题里
+    #   「前缀」这三个字，上面 ②③ 只查了**形状**（有没有分隔符/扩展名），
+    #   **根本没查它是不是我们自己认得的那几种之一** ⇒ 用户窗口标题里
     #   恰好含 ` · 值守台#a8276c` 时会被误认（实测 `请给我一个 · 值守台#a8276c`
     #   宽泛模式返回 True）⇒ 宽泛模式是用来**关窗**的 ⇒ 会关掉用户自己的窗口。
     #   ⇒ 补上白名单这一层，注释里承诺的判据才真正落地。
-    #   页面名清单**不写死在这里**，import `inbox_server.PAGE_TITLES`（唯一真源）。
+    #   清单**不写死在这里**，import 两个唯一真源：
+    #     · `inbox_server.PAGE_TITLES`（四个页面名）
+    #     · `host_shield.POSTURE_LABEL_ALLOWED`（8 个状态词，S04 真源）
     try:
         import inbox_server as _SV
-        names = set(_SV.PAGE_TITLES.values())
+        import host_shield as _HS
+        # ★★ 0.48.5（交接件 §5.5 W-01）：白名单＝**页面名 ∪ 状态词**。
+        #   标题自 0.48.5 起恒用状态词（render_page 传 `M.light_explain()`
+        #   的 label）⇒ 前缀不再只是页面名；页面名仍保留：旧窗口/别的入口
+        #   可能还带它，且 0360 P15 逐页「认得出」继续有效。
+        #   ⚠️ 必须保持「一个 names 集合」而不是 `page in names or
+        #      page in state_names` —— 回归闸门 G-05 负控的注入锚点**逐字**
+        #      锁着下面 `if page not in names:` + `return False` 两行；
+        #      改了写法 ＝ G-05 负控失配，那层「不许误关用户窗口」的保护
+        #      会悄悄失效（交接件 §5.5 连带栏原话）。
+        names = set(_SV.PAGE_TITLES.values()) | set(_HS.POSTURE_LABEL_ALLOWED)
     except Exception:                                          # noqa: BLE001
         # ★ 拿不到真源 ⇒ 判不出 ⇒ 走**严**的一边：不认。
         #   与 `console_is_visible()` 的取向相反是有意的——

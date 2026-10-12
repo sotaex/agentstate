@@ -440,7 +440,7 @@ def _tabs(view, token):
             + "</nav>")
 
 
-def _bar(items, token, posture=None, now=None, view="inbox"):
+def _bar(items, token, posture=None, now=None, view="inbox", ex=None):
     """顶部条。★★ 灯＝**六态之一**（2026-10-08 换代，创始人拍板）。
 
     旧实现（0.36.0–0.36.4）把「姿态 × 24h 历史」两轴**派生**出了 8 个灯态
@@ -467,7 +467,10 @@ def _bar(items, token, posture=None, now=None, view="inbox"):
     #   旧版只吐 `light()` 的 why（"24 小时内有未处理事项（最高 R0）"），
     #   于是本机实测出现"此刻哨兵在岗、心跳 0 分钟前，灯却是红的失守"——
     #   用户点进去才发现此刻是好的，等于灯骗了一次。
-    ex = M.light_explain(p, items, now=now, granary=M.granary_now())
+    # ★ 0.48.5（交接件 §5.5 W-01）：`ex` 由 `render_page` 传入 —— 标题要用
+    #   **同一个**状态词，两次 `light_explain()` 可能读到不同时刻的姿态
+    #   ⇒ 标题与头部说两个词。不传 ⇒ 自己算（老调用方行为不变）。
+    ex = ex or M.light_explain(p, items, now=now, granary=M.granary_now())
     st = ex["state"]
     label = _esc(ex["label"])
     state_reason = _esc(ex["reason"])
@@ -1219,7 +1222,18 @@ def render_page(view="inbox", filt=None, root=None, token="", items=None, rep=No
     #   自己看到的是筛选结果，其实是一整条历史）。
     if not filt or not M.known_filter(filt):
         filt = M.BUCKET_ACTION
-    title = PAGE_TITLES.get(view, PAGE_TITLES["inbox"])
+    # ★★ 0.48.5（交接件 §5.5 W-01）：标题**恒用状态词**，与顶部条同一个词
+    #   （`M.light_explain()` 是唯一实现 —— 标题与头部不许两种说法）。
+    #   创始人原话：「标题该显示的是状态——那是 Alt-Tab / 任务栏里唯一
+    #   不用开窗就能看到的一行，用户要的是『拦截/值守中/失守』，不是
+    #   『收件箱』、更不是 #96a621」。页面名归选项卡 + h2（乙3 已补，
+    #   零损失）；hash 只留在标题尾（认窗必需，正文零 hash 由 W-02 锁）。
+    #   状态词取值必然落在 `host_shield.POSTURE_LABEL_ALLOWED` 内
+    #   （`STATE_LABEL` ∪ ｢未启用｣ 是它的子集 —— W-01 判据逐词断言）
+    #   ⇒ 窗口在任何可达灯态下都认得出、落位不失效。
+    p = posture or posture_now()
+    ex = M.light_explain(p, items, now=now, granary=M.granary_now())
+    title = ex["label"]
     if view in ("report", "health", "ledger"):
         rep = (R.daily_report(root=root, items=items) if rep is None else rep)
         if view == "report":
@@ -1231,7 +1245,7 @@ def render_page(view="inbox", filt=None, root=None, token="", items=None, rep=No
     else:
         body = _view_inbox(items, token, filt, now=now)
     return (_head(title, token)
-            + _bar(items, token, posture=posture, now=now, view=view)
+            + _bar(items, token, posture=p, now=now, view=view, ex=ex)
             + _tabs(view, token)
             + "<main>" + body + "</main>" + _FLIP_JS + _READ_JS + "</body></html>")
 
