@@ -130,6 +130,10 @@ h2{font-size:15px;margin:0 0 12px}
   width:14px;height:14px;line-height:14px;text-align:center;border-radius:50%;
   background:var(--line);color:var(--muted);font-size:10px;font-weight:700}
 .term[open]>summary::after{content:"？";background:var(--brand);color:#fff}
+/* ★ 0.48.5（交接件 §5.6 乙1）：裸「？」芯片（mk）—— summary 自带一个「？」，
+   ::after 徽章再补一个就成「？？」⇒ mk 形态把 ::after 整个关掉
+   （content:none ＋ display:none 双保险：只留 content 会渲染一个空圆圈）。 */
+.term.mk>summary::after{content:none;display:none}
 .tdef{position:absolute;z-index:60;top:calc(100% + 6px);left:0;
   width:max-content;max-width:min(560px,calc(100vw - 32px));min-width:260px;
   margin:0;padding:12px 14px;font-size:12.5px;line-height:1.75;color:var(--fg);
@@ -446,7 +450,8 @@ def _bar(items, token, posture=None, now=None, view="inbox"):
     ★★ 数字**只出现一次**（0.37.1 去重 —— 创始人实测「同一件事的 4 件
       在首页出现了 5 次」）：
       · 收件箱页：件数只在**筛选条**（「要处理 N」），本行不重复；
-      · 日报/运行状态/账本页：件数只在本行后缀（「N 件，点开查看」），
+      · 日报/运行状态/账本页：件数只在本行后缀（`M.count_text` 的
+        「N 件 / 分母（最近 24 小时）」—— 0.48.5 删掉了其中的动作描述词），
         一键落到「要处理」清单（创始人 2026-10-06 第四条：看到「有事」
         必须能落到具体内容）；选项卡上**不再挂数字徽章**。
     ★ 状态词只出现一次：旧版把灯态标签与姿态标签**各写一遍**
@@ -476,8 +481,11 @@ def _bar(items, token, posture=None, now=None, view="inbox"):
             # ★★ 0.47.0（方案 v3.0 §5 步三）：**告警数必带窗口与分母**。
             #   旧写法是一个光秃秃的「（%d 件，点开查看）」—— 只有分子。
             #   分母＝本次载入的全部记录条数；格式走 `M.count_text`（唯一实现）。
+            # ★ 0.48.5（交接件 §5.6 乙2）：「，点开查看」删 —— 后缀是链接，
+            #   可点性由下划线/样式承担，写出来是**替用户描述他即将做的动作**
+            #   （W08 立意）；钻取本身不删（P12 契约先于精简）。
             suffix = ("<a href=\"/?v=inbox&amp;f=action&amp;t=%s\" "
-                      "style=\"color:inherit;text-decoration:none\">（%s，点开查看）</a>"
+                      "style=\"color:inherit;text-decoration:none\">（%s）</a>"
                       % (_esc(token),
                          _esc(M.count_text(action_groups, len(items)))))
     fix = ""
@@ -535,18 +543,24 @@ def _bar(items, token, posture=None, now=None, view="inbox"):
     # ★ 0.37.2：顺序改为**由重到轻**（失守 → 拦截 → 注意）。
     #   旧版是「拦截 · 注意 · 失守」—— 最重的排在最后，读起来像"越读越轻"，
     #   与页面其余处（收件箱归并列表、日报卡片）按级别倒序排的规矩相反。
+    # ★ 0.48.5（交接件 §5.6 乙1）：每个药丸后跟一个**裸「？」芯片**
+    #   （兄弟节点，不塞进 `<a>` —— 链接里嵌 interactive 是坏味道）。
     nums = ("<span class=\"pill\">最近 %d 小时：%s · %s · %s</span>"
             % (M.WINDOW_HOURS,
-               _pill("失守", "R0"), _pill("拦截", "L2"), _pill("注意", "L1")))
+               _pill("失守", "R0") + GL.chip("R0", mk=True),
+               _pill("拦截", "L2") + GL.chip("L2", mk=True),
+               _pill("注意", "L1") + GL.chip("L1", mk=True)))
     return (
         "<header class=\"bar\">"
         "<div class=\"logo\"><video autoplay loop muted playsinline "
         "src=\"/assets/%s.mp4?t=%s\"></video></div>"
+        # ★ 0.48.5（交接件 §5.6 乙1）：顶部灯的「？」芯片跟在 `<b>` 后
+        #   （灯不是链接，芯片可以直接挨着；全站共 8 个落点，U-04 逐个数）。
         "<div class=\"state\"><span class=\"dot\" style=\"background:var(%s)\"></span>"
-        "<b>%s</b>%s<br><span>%s</span></div>"
+        "<b>%s</b>%s%s<br><span>%s</span></div>"
         "%s%s<div class=\"spacer\"></div></header>"
         % (_esc(M.STATE_LOGO[st]), _esc(token), M.STATE_VAR[st],
-           label, suffix, state_reason, nums, fix))
+           label, GL.chip("light", mk=True), suffix, state_reason, nums, fix))
 
 
 def _form(token, op, iid="", note="", label="", cls="", ids=""):
@@ -820,15 +834,26 @@ def _view_inbox(items, token, filt, now=None):
                 "<span class=\"unit\">%s</span></a>"
                 % (v, _esc(token), cls, _esc(tip), _esc(label), n, _esc(unit)))
 
-    head = ("<div class=\"filters\">"
+    # ★★ 0.48.5（交接件 §5.6 乙3）：补 `<h2>` —— 收件箱页此前无页面名，
+    #   而其余三页都有（同一页三个身份：title/选项卡/无 h2 —— 乙4 的组成
+    #   部分之一）。文案取 `PAGE_TITLES`（唯一真源，0360 硬锁四键不动）。
+    # ★★ 0.48.5（§5.6 乙1）：四个筛选标签后各跟一个**裸「？」芯片** ——
+    #   标签本身是链接（塞不进 details），芯片作**兄弟节点**紧随其后，
+    #   不嵌套（`<a>` 内嵌 interactive 内容是坏味道）。
+    head = ('<h2>%s</h2>' % PAGE_TITLES["inbox"]
+            + "<div class=\"filters\">"
             + f(M.BUCKET_ACTION, "要处理", n_act,
                 "单位：件事（同一事由的多条记录合成一件）", "件")
+            + GL.chip(M.BUCKET_ACTION, mk=True)
             + f(M.BUCKET_INFO, "看一眼", b[M.BUCKET_INFO],
                 "单位：条记录（不做归并，一条算一条）", "条")
+            + GL.chip(M.BUCKET_INFO, mk=True)
             + f(M.BUCKET_ARCHIVE, "归档", b[M.BUCKET_ARCHIVE],
                 "单位：条记录（不做归并，一条算一条）", "条")
+            + GL.chip(M.BUCKET_ARCHIVE, mk=True)
             + f("all", "全部记录", n_all,
-                "单位：条记录（这次读到的全部条目）", "条") + "</div>"
+                "单位：条记录（这次读到的全部条目）", "条")
+            + GL.chip("all", mk=True) + "</div>"
             # ★★ 0.48.5（交接件 §5.3 甲2 / §5.4 甲4）：一排数字的口径说明走
             #   `M.reading_note()`（唯一实现）—— 旧句承诺「分母均为 N 条」，
             #   对四个 tab 至少三个是假的（要处理按件事归并、归档无时间上限），
@@ -875,8 +900,11 @@ def _view_inbox(items, token, filt, now=None):
         # ★ 0.37.2 精简（创始人 2026-10-09「解释放注释里，点问号看」）：
         #   原句 36 字，把"每行都带原因""钻到单条"也写上了 —— 那是解释，
         #   不是读法。主界面只留**一句怎么读**，其余归词条。
+        # ★ 0.48.5（交接件 §5.6 乙2）：原句「同一事由已合成一行；点开可整组
+        #   处置。」的后半是**替用户描述他的动作**（W08），但前半传达的是
+        #   **能力**（整组处置）⇒ 保留能力、只删「点开」，改写为能力表述。
         note = ("<div class=\"note\" style=\"margin:0 0 10px\">"
-                "同一事由已合成一行；点开可整组处置。</div>")
+                "同一事由已合成一行，可整组一次性处置。</div>")
         return head + note + "".join(parts)
     if filt in (M.BUCKET_INFO, M.BUCKET_ARCHIVE):
         groups = M.group_by_kind(rows)
@@ -884,8 +912,10 @@ def _view_inbox(items, token, filt, now=None):
                 # ★ 0.37.2 去重：「共 N 条」的 N 与筛选条上同一个 tab 的数字
                 #   **逐字相同**（两者都是 `filter_items` 的条数）⇒ 同一屏
                 #   出现两遍。筛选条是导航（随身可见），这里只留"怎么读这些行"。
+                # ★ 0.48.5（交接件 §5.6 乙2）：「，点一类看单条」删 ——
+                #   替用户描述他即将做的动作；链接本身可点（P12 钻取不删）。
                 + ("<div class=\"note\" style=\"margin:0 0 10px\">"
-                   "%s：按类型归并，点一类看单条。"
+                   "%s：按类型归并。"
                    "</div>" % _esc(M.filter_label(filt)))
                 + "".join(_group_html(g, token, bucket=filt, total=len(rows))
                           for g in groups))

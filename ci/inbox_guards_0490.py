@@ -9,8 +9,8 @@
    （与 0360/0372/0380/0470 同型），**按批次生长**：
 
      批次 1（甲2/甲3/甲4 ＋ 丙1/丙2）→ U-01 / U-03 / U-08（已落地，commit 049fc7c）
-     批次 2（丁2/丁3/丁4/丁5）        → U-10 / U-11 / U-05（本 commit）
-     批次 3（乙1~乙4）                → U-04 / U-06
+     批次 2（丁2/丁3/丁4/丁5）        → U-10 / U-11 / U-05（已落地，commit 9337bc4）
+     批次 3（乙1~乙4）                → U-04 / U-06（本 commit）
      批次 4（戊1/戊2/戊4 ＋ 戊3 重排）→ U-13 / U-15
      批次 5（W-01 ＋ W-02 边界项）    → 单独 commit（认窗白名单）
 
@@ -151,11 +151,14 @@ def _page(view, filt=None, mod=SV, items=None, rep=None):
                            posture=_POSTURE)
 
 
-#: 术语浮层（`<details class=term|gloss>` … `</details>`）。
+#: 术语浮层（`<details class=term|gloss>` … `</details>`，含乙1 的 `term mk`）。
 #: 为什么能非贪婪：`glossary.render()` 只放行 b/code 两个内联标签
 #: （见该函数 docstring），块内不会嵌套第二个 details。
-_TERM_BLOCK = re.compile(r'<details class="(?:term|gloss)"[^>]*>.*?</details>',
-                         re.S)
+#: ★ 0.48.5 乙1 起 class 值有 `term mk` 形态（裸「？」芯片）—— 判据只认
+#:   精确 `class="term"` 会漏剥整族芯片（首跑实测：U-03 因此误红，
+#:   芯片展开体口径行里的「分母」漏出了剥离层）。
+_TERM_BLOCK = re.compile(
+    r'<details class="[^"]*\b(?:term|gloss)\b[^"]*"[^>]*>.*?</details>', re.S)
 
 
 def _body_without_terms(html):
@@ -163,20 +166,26 @@ def _body_without_terms(html):
     return _TERM_BLOCK.sub("", html or "")
 
 
-_FILTERS = re.compile(r'<div class="filters">(.*?)</div>', re.S)
-
-
 def _tabs(page):
-    """筛选条四个 tab 的 [(值, 可见文本, title 属性)] —— 可见文本＝剥标签后。"""
-    m = _FILTERS.search(page)
-    if not m:
-        return []
+    """筛选条四个 tab 的 [(值, 可见文本, title 属性)] —— 可见文本＝剥标签后。
+
+    ★ 0.48.5 乙1 起不能再用 `<div class="filters">…</div>` 圈定范围：
+      芯片（`details.tdef`）里带 `</div>`，非贪婪匹配会被它截断
+      （首跑实测：tab 数从 4 掉成 1）。⇒ 改按**行为特征**找 tab：
+      四个筛选标签就是页面上 title 以「单位：」开头的那几个链接
+      （芯片是 details 不是链接，天然不在候选里）。
+    """
     out = []
-    for attrs, inner in re.findall(r"<a ([^>]*)>(.*?)</a>", m.group(1)):
-        tip = re.search(r'title="([^"]*)"', attrs)
-        out.append((re.search(r'[?&]f=([^&"]+)', attrs).group(1),
+    for attrs, inner in re.findall(r"<a ([^>]*)>(.*?)</a>", page, re.S):
+        tip = re.search(r'title="(单位：[^"]*)"', attrs)
+        if not tip:
+            continue
+        f = re.search(r'[?&]f=([^&"]+)', attrs)
+        if not f:
+            continue
+        out.append((f.group(1),
                     re.sub(r"<[^>]+>", "", inner),
-                    tip.group(1) if tip else ""))
+                    tip.group(1)))
     return out
 
 
@@ -383,9 +392,15 @@ def u08():
     vis_all = "".join(v for _f, v, _t in tabs)
     if "件" not in vis_all or "条" not in vis_all:
         return "可见文本里缺「件」或「条」（单位还只住在 hover title 里）"
+    # hover 口径行保留（丙1 是「可见化」不是「搬走」—— 每个 tab 的 title
+    # 仍带它的单位说明；_tabs 只收 title 以「单位：」开头的链接，这条断言
+    # 因此按 tab 核具体词：要处理说「件事」，其余说「条记录」）。
+    want_tip = {M.BUCKET_ACTION: "件事", M.BUCKET_INFO: "条记录",
+                M.BUCKET_ARCHIVE: "条记录", "all": "条记录"}
     for v, vis, tip in tabs:
-        if "单位" not in tip:
-            return "tab=%s 的 hover 口径行丢了（丙1：hover 保留，不是搬走）" % v
+        if want_tip[v] not in tip:
+            return "tab=%s 的 hover 口径行缺 %r（丙1：hover 保留，不是搬走）" % (
+                v, want_tip[v])
     # ① 数出来的事由件数必须真的 ≠ 记录条数（夹具要能暴露单位混谈）
     items = _items()
     n_act = M.count_groups(M.filter_items(items, M.BUCKET_ACTION))
@@ -562,18 +577,26 @@ def n_u11():
     return True
 
 
+#: §5.6 乙2 定稿的六串全集（U-05 的断言集；批次 2 先落两族，批次 3 补齐）
+_U05_OLD = ("点开查看", "点开看每一次", "点规则名看具体是哪几条",
+            "点开可整组处置", "点进去看全部明细", "点一类看单条")
+
+
 # ════════════════════════════ U-05 · 丁5（删替用户描述动作的句子）══════
 @check("U-05 ★ 丁5：渲染页零「点开看每一次」「点规则名看具体是哪几条」")
 def u05():
     """丁5：「（点开看每一次）」类句子**替用户描述他即将做的动作** ——
     链接的可点性由下划线承担（CSS 已有），写出来是重复用户的动作
     （W08 判据立意，0.37.2 删过同型句，本次 rules/revived 两族复发）。
-    ★ 本批只守丁5 点名的两族三处；批次 3（乙2）把断言集扩展到另外三处
-      ＋ 能力句改写（「可整组一次性处置」）—— 同一条判据按批次生长。
+    ★ 断言集＝§5.6 乙2 定稿的**六串全集**（丁5 批次先落两族，乙2 批次 3
+      补齐）：点开查看 / 点开看每一次 / 点规则名看具体是哪几条 /
+      点开可整组处置 / 点进去看全部明细 / 点一类看单条。
+      其中「点开可整组处置」已按能力句改写为「可整组一次性处置」——
+      能力保留（整组处置），动作描述词删（W08）。
     """
     for view in ("report", "health", "inbox"):
         page = _page(view)
-        for bad in ("点开看每一次", "点规则名看具体是哪几条"):
+        for bad in _U05_OLD:
             if bad in page:
                 return "%s 页仍含 %r（替用户描述他的动作）" % (view, bad)
     return True
@@ -601,6 +624,104 @@ def n_u05():
     live = _page("report")
     if "点开看每一次" in live or "点规则名看具体是哪几条" in live:
         return "夹具不成立：真实现本身还带旧句 ⇒ 负控无分辨力"
+    return True
+
+
+# ════════════════════════════ U-04 · 乙1（铺「？」芯片，8 个落点）════════
+@check("U-04 ★ 乙1：8 个裸「？」芯片落位（筛选条4 + 药丸3 + 顶部灯1）")
+def u04():
+    """乙1：日报页每个重要词都可点开看定义，收件箱页却一个「？」都没有
+    （实测 term 芯片数 0）—— 同一个词两个页面两种待遇。
+
+    形态（§5.6 定稿）：芯片作**兄弟节点**紧贴链接之后，**不嵌套**
+    （`<a>` 内嵌 interactive 内容是坏味道）；summary 只有一个「？」
+    （`.term.mk` 关掉 ::after 徽章防「？？」）；词本名进展开体首行。
+    词条清单 8 个：筛选条 action/info/archive/all（4）＋ 药丸 R0/L2/L1（3）
+    ＋ 顶部灯 light（1）。词条文字一律不动（0380 S17 钉死，只加落点）。
+    """
+    page = _page("inbox")
+    chips = re.findall(r'<details class="term mk" data-t="([^"]+)"', page)
+    want = {"action", "info", "archive", "all", "R0", "L2", "L1", "light"}
+    if set(chips) != want:
+        return "mk 芯片集合 ≠ 8 词条：实到 %r" % (sorted(set(chips)),)
+    if len(chips) != 8:
+        return "mk 芯片数 = %d，应为 8（有重复落点）" % len(chips)
+    # ① summary 只能是「？」一个（「？？」＝ CSS 没关干净）
+    if not re.search(r'<summary>？</summary>', page):
+        return "mk 芯片的 summary 不是单个「？」（防止「？？」失败）"
+    # ② 芯片不许被塞进链接里（兄弟节点，不是嵌套）
+    for m in re.finditer(r"<a [^>]*>(.*?)</a>", page, re.S):
+        if "<details" in m.group(1):
+            return "芯片嵌套在 <a> 里（链接内嵌 interactive 是坏味道）"
+    # ③ 展开体首行带词本名（复用 head 机制，不另写一套）
+    for key in want:
+        if ('data-t="%s"><summary>？</summary><div class="tdef"><b>' % key) \
+                not in page:
+            return "芯片 %s 的展开体首行缺词本名（head 机制没接上）" % key
+    # ④ 未登记术语零命中（rendered 自动覆盖新芯片）
+    if GL.unknown(page):
+        return "页面有未登记术语：%r" % (GL.unknown(page),)
+    return True
+
+
+@check("N-U04 负控：摘掉顶部灯那颗芯片 ⇒ U-04 必须红")
+def n_u04():
+    """反向对照（维二）：8 个落点里摘掉一个 —— 精确集合立刻不满。"""
+    src = _src(_SERVER_REL)
+    anchor = 'label, GL.chip("light", mk=True), suffix,'
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    mut = _load(src.replace(anchor, 'label, "", suffix,'),
+                "is0490_nu04", _SERVER_REL)
+    page = mut.render_page(view="inbox", filt=M.BUCKET_ACTION,
+                           root=tempfile.mkdtemp(prefix="g0490_nu04_"),
+                           token="T", items=_items(), posture=_POSTURE)
+    if "light" in re.findall(r'<details class="term mk" data-t="([^"]+)"',
+                             page):
+        return "负控失效：摘掉 light 芯片后它仍在（注入没生效）"
+    live = re.findall(r'<details class="term mk" data-t="([^"]+)"',
+                      _page("inbox"))
+    if len(live) != 8:
+        return "夹具不成立：真实现本身就不是 8 个芯片 ⇒ 负控无分辨力"
+    return True
+
+
+# ════════════════════════════ U-06 · 乙3（收件箱页补 h2）═══════════════
+@check("U-06 ★ 乙3：收件箱页有 <h2>，文本 == PAGE_TITLES[\"inbox\"]（唯一真源）")
+def u06():
+    """乙3：收件箱页无 `<h2>` 页面名，其余三页都有 —— 同一页三个身份
+    （title「收件箱 · 值守台#hash」/ 选项卡「收件箱」/ 无 h2）。
+    文案取 `PAGE_TITLES`（唯一真源，0360:741 硬锁四键 —— 加了状态词那种
+    字段立刻红，所以这里只许读它，不许另写）。"""
+    page = _page("inbox")
+    heads = re.findall(r"<h2>([^<]*)</h2>", page)
+    if not heads:
+        return "收件箱页没有 <h2>"
+    if heads[0] != SV.PAGE_TITLES["inbox"]:
+        return "h2 文本 %r ≠ PAGE_TITLES[\"inbox\"]=%r（不许另写一份）" % (
+            heads[0], SV.PAGE_TITLES["inbox"])
+    if len(heads) != 1:
+        return "h2 出现 %d 次（页面名只许一处）" % len(heads)
+    return True
+
+
+@check("N-U06 负控：删掉收件箱页 h2 ⇒ U-06 必须红")
+def n_u06():
+    """反向对照（维二）：把刚补的 h2 删回去。"""
+    src = _src(_SERVER_REL)
+    anchor = "    head = ('<h2>%s</h2>' % PAGE_TITLES[\"inbox\"]\n"
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    mut = _load(src.replace(anchor, "    head = (\"\"\n"),
+                "is0490_nu06", _SERVER_REL)
+    page = mut.render_page(view="inbox", filt=M.BUCKET_ACTION,
+                           root=tempfile.mkdtemp(prefix="g0490_nu06_"),
+                           token="T", items=_items(), posture=_POSTURE)
+    if re.findall(r"<h2>([^<]*)</h2>", page):
+        return "负控失效：删掉 h2 后页面仍有 h2（注入没生效）"
+    live = re.findall(r"<h2>([^<]*)</h2>", _page("inbox"))
+    if not live or live[0] != SV.PAGE_TITLES["inbox"]:
+        return "夹具不成立：真实现本身就没有合规 h2 ⇒ 负控无分辨力"
     return True
 
 

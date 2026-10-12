@@ -460,19 +460,24 @@ def c_attention_label_drills_to_action_list():
     #   本判据因此**不再比对旧的字面**「（1 件，点开查看）」——
     #   断言打在**行为**（有 f=action 钻取、且带上件数）上，不打字面（维三）。
     #   ★ 不是放宽：分母也一并核对（必须等于这一次载入的全部条数 ＝ 1）。
+    # ★ 0.48.5（交接件 §5.6 乙2）：连「点开查看」四个字也删了 —— 替用户
+    #   描述他即将做的动作（W08 立意）。钻取后缀现在是 `（N 件 / 分母…）`，
+    #   本判据追随规格只锁行为（f=action 钻取在、件数带分母），不再锁字面。
     return ("f=action" in h_inbox and "要处理" in h_inbox
-            and "f=action" in h_report and "点开查看" in h_report
+            and "f=action" in h_report
             and M.count_text(1, 1) in h_report)
 
 
 def n_attention_label_drills_to_action_list():
-    """负控：没有待处理事项时，任何视图都不许出现「点开查看」钻取后缀。"""
+    """负控：没有待处理事项时，任何视图都不许出现 f=action 钻取后缀。"""
     h_inbox = SV.render_page(view="inbox", root=G.new_hub(), token="T",
                              items=[G.item("R0", "done", 1)])
     h_report = SV._bar([G.item("R0", "done", 1)], "T",
                        posture={"state": "guarding", "label": "值守中", "why": "在岗"},
                        view="report")
-    return "点开查看" not in h_inbox and "点开查看" not in h_report
+    # ★ 0.48.5：改锁**行为**（钻取链接不出现）而不是旧文案串 —— 文案会随
+    #   规格演化（乙2 删过「点开查看」），行为契约不会。
+    return "f=action" not in h_inbox and "f=action" not in h_report
 
 
 # ===================================================== 四、三档 / 归档 ======

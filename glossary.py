@@ -338,7 +338,7 @@ def render(text):
     return s
 
 
-def chip(key, text=None):
+def chip(key, text=None, mk=False):
     """一个**可点开**的小词条。未登记 ⇒ 抛 `UnknownTerm`（绝不静默）。
 
     ★ 0.37.1：释义里**不再重复一遍词条名** —— 旧实现是
@@ -346,20 +346,33 @@ def chip(key, text=None):
       点开后同一个词上下各写一遍（纯文本导出、无障碍朗读时会表现为
       「拦截（L2） 拦截（L2）：」，创始人截图三）。
       ⇒ 词已经写在 summary 上，释义直接从正文开始。
+
+    ★★ 0.48.5（交接件 §5.6 乙1）：`mk=True` ＝ **裸「？」芯片** ——
+       给「本身是链接、塞不进 details」的词用（筛选条标签、药丸、顶部灯）：
+       芯片作**兄弟节点**紧贴链接之后，**不嵌套**（`<a>` 内嵌 interactive
+       内容是坏味道）。summary 只放一个「？」—— CSS `::after` 的徽章由
+       `.term.mk>summary::after{content:none}` 关掉（否则「？？」）；
+       词本名进展开体首行（复用上面的 `head` 机制，不另写一套）。
     """
     t = _def(key)
-    label = text or t["w"]
-    # ★ 只有当「显示出来的字」与词条本名不同时才补本名：
-    #   例：summary 写「最近 24 小时被拉起过」，展开后正文得知道说的谁
-    #   （哨兵） —— 否则去掉重复标题的同时把主语也去掉了。
-    head = "" if label == t["w"] else "<b>%s</b>：" % _H.escape(t["w"])
-    return ("<details class=\"term\" data-t=\"%s\"><summary>%s</summary>"
+    if mk:
+        label = "？" if text is None else text
+        head = "<b>%s</b>：" % _H.escape(t["w"])     # 本名进展开体首行
+        cls = "term mk"
+    else:
+        label = text or t["w"]
+        # ★ 只有当「显示出来的字」与词条本名不同时才补本名：
+        #   例：summary 写「最近 24 小时被拉起过」，展开后正文得知道说的谁
+        #   （哨兵） —— 否则去掉重复标题的同时把主语也去掉了。
+        head = "" if label == t["w"] else "<b>%s</b>：" % _H.escape(t["w"])
+        cls = "term"
+    return ("<details class=\"%s\" data-t=\"%s\"><summary>%s</summary>"
             "<div class=\"tdef\">%s%s"
             "<div class=\"tr\"><span class=\"tl\">包含</span>%s</div>"
             "<div class=\"tr\"><span class=\"tl\">不含</span>%s</div>"
             "<div class=\"tr\"><span class=\"tl\">口径</span>%s</div>"
             "</div></details>"
-            % (_H.escape(key, quote=True), _H.escape(label),
+            % (cls, _H.escape(key, quote=True), _H.escape(label),
                head, render(t["one"]),
                render(t["inc"]), render(t["exc"]), render(t["unit"])))
 
