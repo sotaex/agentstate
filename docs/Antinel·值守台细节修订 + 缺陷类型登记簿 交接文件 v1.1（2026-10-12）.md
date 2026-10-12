@@ -73,7 +73,9 @@
 | **值守台 19 条** | ❌ 代码一行未动（除甲1） | `inbox_server.py` / `inbox_model.py` / `glossary.py` 等；逐条方案 ⇒ §5 |
 | push 到远端 | ❌ 未做（`ahead 59`） | 等值守台定稿后一次推一次 CI；前置清单 ⇒ §6.4 |
 
-**当前 git**：`HEAD = 1d04f53`；工作树有 **2 处未提交**：`M ci/regression_gate.py`、`?? ci/defect_types.py`。
+**当前 git**（本件撰写时）：`HEAD = 1d04f53`；工作树有 **2 处未提交**：`M ci/regression_gate.py`、`?? ci/defect_types.py`。
+⚠️ 本件提交后 `HEAD` 会再进一位（`ahead 60`）——**这是「文档写自己的提交」的必然时差，
+v1.0 正是栽在这一条上（C1）。实况一律以 `git log --oneline -1` 为准，不许沿用文档里的数。**
 **版本**：`pyproject.toml` = `0.48.4`（已发 PyPI，不可覆盖）。
 
 ---
