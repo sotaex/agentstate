@@ -262,7 +262,7 @@
  {
   "name": "A5 5MB command handled fast (truncated before matching)",
   "pass": true,
-  "detail": "median ms=2669 (runs: 2842, 2669, 2636; load-sensitive; ladder B-021..023 tracks the budget)"
+  "detail": "median ms=3554 (runs: 3274, 3772, 3554; load-sensitive; ladder B-021..023 tracks the budget)"
  },
  {
   "name": "A-08 invalid JSON -> allow",
@@ -337,7 +337,7 @@
  {
   "name": "hook latency median (ms, includes interpreter start)",
   "pass": true,
-  "detail": "median=41 min=41 max=49"
+  "detail": "median=56 min=49 max=66"
  },
  {
   "name": "T3 scan skills (skipped: skills dir not present at D:\\psl\\skills)",
@@ -382,7 +382,7 @@
  {
   "name": "install claude-code: hooks appended, foreign kept",
   "pass": true,
-  "detail": "rc=0 ms=92"
+  "detail": "rc=0 ms=130"
  },
  {
   "name": "D7 .psl/.gitignore auto-written",
@@ -800,7 +800,7 @@
  {
   "name": "F-06 whitelist.paths exempts SEC-01 under tests/fixtures",
   "pass": false,
-  "detail": "rc=2 err=Antinel 拦截 [SEC-01] 读取 .env 文件可能泄露 API 密钥与机密配置 | 命中: .env | 放行/处理: 把 .env 移出 Age"
+  "detail": "fp=/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/antinel_harness_c7fs61ly/proj/tests/fixtures/.env real=/private/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/antinel_harness_c7fs61ly/proj/tests/fixtures/.env root=/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/antinel_harness_c7fs61ly/proj root_real=/private/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/antinel_harness_c7fs61ly/proj rel=tests/fixtures/.env || Antinel 拦截 [SEC-01] 读取 .env 文件可能泄露 API 密钥与机密配置 | 命中: .env | 放行/处理: 把 .env 移出 Agent 可读范围；确需变量时手动复制具体几行；测试夹具路径可在 policy.js"
  },
  {
   "name": "F-06 whitelist.paths does not exempt other paths",
@@ -885,17 +885,17 @@
  {
   "name": "C9 nested ReDoS pattern '(a+)+$' rejected, hook not wedged",
   "pass": true,
-  "detail": "96ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
+  "detail": "162ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
  },
  {
   "name": "C9 alternation ReDoS pattern '(a|aa)+$' rejected, hook not wedged",
   "pass": true,
-  "detail": "96ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
+  "detail": "198ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
  },
  {
   "name": "C9 inner-optional ReDoS pattern '(a?)+$' rejected, hook not wedged",
   "pass": true,
-  "detail": "96ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
+  "detail": "130ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
  },
  {
   "name": "C9 benign custom rule still loads and fires (read-only downgrade to alert)",
@@ -1095,7 +1095,7 @@
  {
   "name": "WS-3 rejected config entry is visible in report.py",
   "pass": true,
-  "detail": ": /private/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/antinel_harness_vs68k0zw/proj/.psl/audit\n Re-scan: python scan.py\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+  "detail": ": /private/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/antinel_harness_c7fs61ly/proj/.psl/audit\n Re-scan: python scan.py\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
  },
  {
   "name": "A12 policy.json edited out of band is reported once",
@@ -1150,7 +1150,7 @@
  {
   "name": "0.16.0 ledger exists and row 1 is the self-verdict",
   "pass": true,
-  "detail": "rows=32"
+  "detail": "rows=33"
  },
  {
   "name": "0.16.0 antinel_verify derives current on an intact package",
@@ -1280,7 +1280,7 @@
  {
   "name": "0.18.0 R-20 anchor recovers after new records (monotonic size)",
   "pass": true,
-  "detail": "2026-09-22.jsonl: 2 OK\nverdict: 0 anomalies\n⇒ rc=0 (clean)"
+  "detail": "2026-09-23.jsonl: 2 OK\nverdict: 0 anomalies\n⇒ rc=0 (clean)"
  },
  {
   "name": "0.18.0 R-20 deleting the WHOLE day file is detected (manifest-driven)",
@@ -1300,7 +1300,7 @@
  {
   "name": "0.18.0 R-21 dry-run is deterministic and side-effect-free (same answer as the intact tree; ledger row count unchanged)",
   "pass": true,
-  "detail": "rows 32->32, answer=would_append=false"
+  "detail": "rows 33->33, answer=would_append=false"
  },
  {
   "name": "0.22.0 C1 pre records file_state_before (hash+size)",
@@ -1355,7 +1355,7 @@
  {
   "name": "0.22.0 verify_chain green over C1/B1/A5 records",
   "pass": true,
-  "detail": "rc=0 2026-09-22.jsonl: 9 OK\nverdict: 0 anomalies\n⇒ rc=0 (clean)"
+  "detail": "rc=0 2026-09-23.jsonl: 9 OK\nverdict: 0 anomalies\n⇒ rc=0 (clean)"
  },
  {
   "name": "0.22.0 A5 SessionStart roll-up chains the previous session's DNA",
@@ -1370,7 +1370,7 @@
  {
   "name": "0.23.0 A1 first harvest chains usage_delta with token facts",
   "pass": true,
-  "detail": "{'path_tag': 'sha256:307eca5e8bc9349d', 'scope': 'tail_first_sight', 'reset': False, 'byte"
+  "detail": "{'path_tag': 'sha256:de177ccba726a78d', 'scope': 'tail_first_sight', 'reset': False, 'byte"
  },
  {
   "name": "0.23.0 privacy: raw transcript path is not in the ledger",
@@ -1415,7 +1415,7 @@
  {
   "name": "0.23.0 verify_chain green over usage_delta records",
   "pass": true,
-  "detail": "rc=0 2026-09-22.jsonl: 24 OK\nverdict: 0 anomalies\n⇒ rc=0 (clean)"
+  "detail": "rc=0 2026-09-23.jsonl: 24 OK\nverdict: 0 anomalies\n⇒ rc=0 (clean)"
  },
  {
   "name": "0.23.1 help shows host line, dialogue routes, commands",
@@ -1435,7 +1435,7 @@
  {
   "name": "0.23.1 policy_changed chained with invoked_by + digests",
   "pass": true,
-  "detail": "[{'ts': '2026-09-22T21:21:11+00:00', 'type': 'policy_changed', 'tool': '-', 'session': 'an"
+  "detail": "[{'ts': '2026-09-23T14:49:29+00:00', 'type': 'policy_changed', 'tool': '-', 'session': 'an"
  },
  {
   "name": "0.23.1 roots add drive-root rejected (fail-closed)",
