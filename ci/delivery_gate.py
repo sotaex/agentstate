@@ -800,6 +800,52 @@ def red_names_touched_modules(red_text, touched_stems):
 #:   免得下一轮又有人（包括我自己）顺手加个扫描器，
 #:   然后得到一堆误报还以为自己加了防护。
 
+def _changed_files():
+    """本次**被改动的所有文件**（任意类型；git 可用时以 git 为准）。
+
+    ★★ 为什么必须与 `_touch_files()` 拆成两层（2026-10-13 实测，血的教训）：
+      `_touch_files()` 只认**产品源码**（`.py` ＋ 闸门自身文件）。而 `--hook`
+      用「**探不到改动 ⇒ 回退全量**」做兜底 —— 于是**纯文档改动**（改
+      `docs/*.md`）会被判成"探不到改动" ⇒ 回退全量 30 套（实测 **22 min**）
+      ⇒ 前台 `git commit` 跑钩子**超时被 SIGTERM**，提交不了 ⇒ 人只好
+      `git commit --no-verify`。而「**会被绕过的钩子等于没有钩子**」正是
+      快道（0.48.5）存在的全部理由 —— 这个回退分支把它又拆了。
+
+      ⇒ 口径拆两层：
+        · **探测层**（本函数）认**一切**改动 —— 只用来回答"要不要回退全量"；
+        · **影响面层**（`_touch_files`）只认产品源码 —— 用来回答"跑哪几套"。
+      纯文档改动 ⇒ 探测层非空、影响面层为空 ⇒ **影响面 0 套，只跑主闸门快档**，
+      绝不回退全量。判据 D-35 锁这条（`_select_suites` 是纯函数，它直接调）。
+    """
+    try:
+        r = subprocess.run(["git", "status", "--porcelain"],
+                           capture_output=True, text=True, cwd=PKG, timeout=30)
+        if r.returncode == 0:
+            got = set()
+            for line in (r.stdout or "").splitlines():
+                if len(line) < 4:
+                    continue
+                p = line[3:].strip()
+                if " -> " in p:                     # 重命名：取新名
+                    p = p.split(" -> ", 1)[1]
+                got.add(os.path.normpath(p.strip('"')))
+            return got
+    except Exception:                                          # noqa: BLE001
+        pass
+    import time as _t
+    now = _t.time()
+    out = set()
+    for fn in os.listdir(PKG):
+        p = os.path.join(PKG, fn)
+        if os.path.isfile(p) and fn.endswith(".py"):
+            try:
+                if now - os.path.getmtime(p) < 1800:
+                    out.add(os.path.normpath(fn))
+            except OSError:
+                pass
+    return out
+
+
 def _touch_files():
     """本次改动碰过的**产品**文件（git 可用时取 diff，否则退回 mtime 近 30 分钟）。
 
@@ -825,43 +871,88 @@ def _touch_files():
          "git 可用但工作区干净"时会掉进 mtime 启发式 ⇒ 把
          "刚提交过的文件"当成"本次改动" ⇒ 影响面凭空变大。
 
-    ★ 局限（明写，不假装覆盖）：git 不可用（无仓库/首次克隆）时退回 mtime 口径，
-      那时 `.pyc` 已由上面的正则排除，但仍可能含「跑闸门时顺带改写的文件」。
+    ★★ 与 `_changed_files()` 的分工（2026-10-13）：
+      探测层认**一切**改动（回答"要不要回退全量"），本函数只认**产品源码**
+      （回答"跑哪几套"）。纯文档改动 ⇒ `_changed_files()` 非空、本函数为空
+      ⇒ 影响面 0 套、只跑主闸门快档，**不回退全量**。判据 D-35 锁这条。
     """
-    try:
-        r = subprocess.run(["git", "status", "--porcelain"],
-                           capture_output=True, text=True, cwd=PKG, timeout=30)
-        if r.returncode == 0:
-            got = set()
-            for line in (r.stdout or "").splitlines():
-                if len(line) < 4:
-                    continue
-                p = line[3:].strip()
-                if " -> " in p:                     # 重命名：取新名
-                    p = p.split(" -> ", 1)[1]
-                got.add(os.path.normpath(p.strip('"')))
-            return {p for p in got
-                    if (not _TOUCH_EXCLUDE.search(p.replace("\\", "/"))
-                        and p.endswith(".py"))
-                    # ★★ 闸门**自身**的文件不受"只认 .py"限制：
-                    #   `ci/git-hooks/pre-commit` 是 shell 脚本，实测被这条过滤掉过
-                    #   ⇒ 改钩子不会触发 selfcheck（而"闸门自身文件"里恰恰只有它
-                    #     不是 .py）。2026-10-13 由 `--hook` 实测发现。
-                    or p.replace("\\", "/") in _GATE_SELF_FILES}
-    except Exception:                                          # noqa: BLE001
-        pass
+    return {p for p in _changed_files()
+            if (not _TOUCH_EXCLUDE.search(p.replace("\\", "/"))
+                and p.endswith(".py"))
+            # ★★ 闸门**自身**的文件不受"只认 .py"限制：
+            #   `ci/git-hooks/pre-commit` 是 shell 脚本，实测被这条过滤掉过
+            #   ⇒ 改钩子不会触发 selfcheck（而"闸门自身文件"里恰恰只有它
+            #     不是 .py）。2026-10-13 由 `--hook` 实测发现。
+            or p.replace("\\", "/") in _GATE_SELF_FILES}
+
+
+def _select_suites(changed, touched, hook):
+    """纯函数：由「改动集」决定跑哪几套。返回 `(suites, mode, notes)`。
+
+    ★★ 为什么抽成**纯函数**（判据不许二次实现）：
+      判据 D-35 要正面守「纯文档改动不许回退全量」—— 它必须**调真逻辑**，
+      不许在判据里再写一份"应该跑几套"的推理（那就是 T-09 同一事实两套口径）。
+      ⇒ 逻辑留在这里，`__main__` 与判据共用。
+
+    `mode` ∈ `{"all", "affected"}`：`all`＝回退全量（**唯一允许的触发条件是
+    "探测层一个改动都没有"**）；`affected`＝按影响面跑。
+    """
+    if not changed:
+        return list(SUITES), "all", [
+            "  ⚠️  探不到**任何**改动（git 无变更且无近 30 分钟修改的 .py）"
+            "⇒ **回退全量**（宁多跑，不漏跑）"]
+    if not touched:
+        # 有改动，但没有产品源码（纯文档/资产）⇒ 影响面 0 套，只跑主闸门。
+        return [s for s in SUITES if s[0] == "regression"], "affected", [
+            "  ◇ 改动 %d 个文件，但**无产品源码**（纯文档/资产）⇒ 影响面 0 套，"
+            "只跑主闸门快档；全量留给打包前/CI" % len(changed)]
+    hit, note = impacted_suites(touched)
+    hit.add("regression")               # 主闸门永远跑（它是"已修缺陷"的总账）
+    suites = [s for s in SUITES if s[0] in hit]
+    skipped = [s[0] for s in SUITES if s[0] not in hit]
+    notes = ["  ◇ 改动 %d 个文件 ⇒ 在影响面内 %d 套 / 不在影响面 %d 套"
+             % (len(touched), len(suites), len(skipped))]
+    notes += ["      · %s" % ln for ln in note[:12]]
+    if skipped:
+        notes.append("      ⏭ 不在影响面：%s" % "、".join(skipped))
+    if hook:
+        # ★ 闸门**自身**的文件被改 ⇒ `selfcheck` 必须跑，且**不参与预算**
+        #   （预算把它挤掉＝"闸门自己改了却没人复验闸门"）。
+        must = {"regression"}
+        if {os.path.normpath(p).replace("\\", "/")
+                for p in touched} & _GATE_SELF_FILES:
+            must.add("selfcheck")
+        suites = _apply_budget(suites, must=must)
+    return suites, "affected", notes
+
+
+def _env_warn():
+    """★★ M-A 第二半（2026-10-13）：**全量开跑前的环境预检**。
+
+    为什么必须有：S80/S81/S84 一类判据依赖 git 子进程，而 `VCT_TIMEOUT = 2.0s`；
+    机器 I/O 慢（杀软实时扫描 / TEMP 残留）时 git 会撞超时 ⇒ 判据报「夹具失效」。
+    旧流程要等**全量 22 分钟跑完**才看到那条红 —— 那时人已经在怀疑产品了。
+    ⇒ 开跑前先量一次 git 延迟：超预算就**出声**（**不阻断**，只预警），
+      把"22 分钟后才发现机器测不了"变成"开跑前就知道"。
+
+    ★ 不阻断的理由：预警是**提示**，不是判据 —— 判据的事归判据（D-32/D-35 那一族）。
+      把"机器慢"做成阻断条件，等于让环境替产品做决定（那正是 T-08 的反面）。
+    """
     import time as _t
-    now = _t.time()
-    out = set()
-    for fn in os.listdir(PKG):
-        p = os.path.join(PKG, fn)
-        if os.path.isfile(p) and fn.endswith(".py"):
-            try:
-                if now - os.path.getmtime(p) < 1800:
-                    out.add(os.path.normpath(fn))
-            except OSError:
-                pass
-    return out
+    try:
+        t0 = _t.time()
+        subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=PKG,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       timeout=30)
+        dt = _t.time() - t0
+    except Exception:                                          # noqa: BLE001
+        print("  ⚠️  环境预检：git 子进程起不来 —— 依赖 git 的判据（0460 S80/S81/S84）"
+              "会报「夹具失效」（那不是产品缺陷）。")
+        return
+    if dt > 1.0:
+        print("  ⚠️  环境预检：git 子进程 **%.2fs**（正常 ~0.1s，判据超时线 2.0s）"
+              "—— 本机 I/O 偏慢，依赖 git 的判据**可能假红**（报「夹具失效」"
+              "而非产品缺陷）。若出现，先修环境（杀软实时扫描 / TEMP）再重跑。" % dt)
 
 #:
 #: ★★ 这不是假想，是 0.36.5 实测到的：0353 在缺仓外原件时
@@ -1132,29 +1223,21 @@ def main():
         #   这与交接件 §3.3 附加要求二「闸门要快到没有理由跳过」正面冲突：
         #   **慢到 19 分钟的闸门，全量跑就退化成靠自觉**。现在把它变成可执行的模式。
         #   ★ 口径：**探不到改动 ⇒ 回退全量**（宁多跑，绝不漏跑）。
-        _touched = _touch_files()
-        if not _touched:
-            print("  ⚠️  --affected：探不到本次改动（git 无变更且无近 30 分钟修改的 .py）"
-                  "⇒ **回退全量**（宁多跑，不漏跑）")
-        else:
-            _hit, _note = impacted_suites(_touched)
-            _hit.add("regression")          # 主闸门永远跑（它是"已修缺陷"的总账）
-            _skipped = [s[0] for s in SUITES if s[0] not in _hit]
-            suites = [s for s in SUITES if s[0] in _hit]
-            print("  ◇ 改动 %d 个文件 ⇒ 在影响面内 %d 套 / 不在影响面 %d 套"
-                  % (len(_touched), len(suites), len(_skipped)))
-            for _ln in _note[:12]:
-                print("      · %s" % _ln)
-            if _skipped:
-                print("      ⏭ 不在影响面：%s" % "、".join(_skipped))
-            if a.hook:
-                # ★ 闸门**自身**的文件被改 ⇒ `selfcheck` 必须跑，且**不参与预算**
-                #   （预算把它挤掉＝"闸门自己改了却没人复验闸门"）。
-                _must = {"regression"}
-                if {os.path.normpath(p).replace("\\", "/")
-                        for p in _touched} & _GATE_SELF_FILES:
-                    _must.add("selfcheck")
-                suites = _apply_budget(suites, must=_must)
+        # ★★ 0.48.6（2026-10-13）：探测层/影响面层**拆开**（见 `_changed_files`）。
+        #   原口径「探不到**产品**改动 ⇒ 回退全量」有个致命副作用：**纯文档改动**
+        #   也被算成"探不到" ⇒ 回退全量 22 min ⇒ 钩子超时 ⇒ 人用 `--no-verify`
+        #   绕过（= 把 0.48.5 刚接好的"一处入口"又拆了）。
+        #   ⇒ 现在「回退全量」的唯一合法触发条件是**探测层一个改动都没有**；
+        #     纯文档改动 ⇒ 影响面 0 套、只跑主闸门快档。逻辑在纯函数
+        #     `_select_suites` 里，判据 D-35 直接调它（判据不许二次实现）。
+        suites, _mode, _notes = _select_suites(_changed_files(), _touch_files(),
+                                               a.hook)
+        for _ln in _notes:
+            print(_ln)
+
+    # ★★ M-A：全量开跑前先做**环境预检**（只预警、不阻断）—— 见 `_env_warn`。
+    if not a.hook:
+        _env_warn()
 
     for key, rel, tier in suites:
         if a.quick and tier == "slow" and not (a.hook and key == "regression"):

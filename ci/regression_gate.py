@@ -1495,6 +1495,60 @@ def j_fastlane_not_silent():
                   % ("、".join(sorted(dropped)), len(ids)))
 
 
+def j_docs_only_no_full_fallback():
+    """★★ D-35（2026-10-13）：**纯文档改动不许回退全量**（钩子层 T-10）。
+
+    要防的复发（X-016，2026-10-13 实测）：
+      `_touch_files()` 只认**产品源码**（`.py` ＋ 闸门自身文件），而 `--hook`
+      用「**探不到改动 ⇒ 回退全量**」做兜底 ⇒ **纯文档改动**（`docs/*.md`）
+      被当成"探不到" ⇒ 回退全量 30 套（实测 **22 min**）⇒ 前台 `git commit`
+      跑钩子**超时被 SIGTERM**，提交不了 ⇒ 人只好 `git commit --no-verify`。
+      而「**会被绕过的钩子等于没有钩子**」正是快道（0.48.5）存在的全部理由
+      —— 这个回退分支把刚接好的"一处入口"又拆了。
+      ★ 与 D-34 同族（都是"快道自己的降级路径"），但 D-34 守的是"少跑要说"，
+        本条守的是"**不该回退全量的，一次都不许回退**"。
+
+    ★ 断言三条（全是**行为**；判据不许二次实现 ⇒ 直接调交付闸门的 `_select_suites`）：
+      ① **纯文档**（探测层非空、影响面层为空）⇒ 跑且**只**跑主闸门，
+         **绝不**是全集 —— 这是本判据存在的全部理由。
+      ② **真无改动**（探测层也空）⇒ 才允许回退全量（"宁多跑不漏跑"的兜底仍在）。
+      ③ **产品改动** ⇒ 走影响面（含主闸门），且不是全集（否则影响面名存实亡）。
+    """
+    dg = _load_delivery_gate("delivery_gate_d35")
+    if dg is None:
+        return False, "ci/delivery_gate.py 加载失败（不可判即红）"
+    if not hasattr(dg, "_select_suites") or not hasattr(dg, "_changed_files"):
+        return False, ("交付闸门没有 `_select_suites` / `_changed_files`"
+                       "（探测层/影响面层的拆分被删了？）")
+    total = len(dg.SUITES)
+
+    # ① 纯文档 ⇒ 只跑主闸门（不是全集）
+    s1, _m1, _ = dg._select_suites({"docs/x.md"}, set(), hook=False)
+    k1 = [s[0] for s in s1]
+    if k1 != ["regression"]:
+        return False, ("纯文档改动应**只跑主闸门**，实际跑了 %d 套：%s"
+                       " —— 回退全量会让钩子超时 ⇒ 人被逼去 --no-verify"
+                       % (len(k1), "、".join(k1)))
+
+    # ② 真无改动 ⇒ 才允许回退全量
+    s2, m2, _ = dg._select_suites(set(), set(), hook=False)
+    if m2 != "all" or len(s2) != total:
+        return False, ("探测层一个改动都没有时应回退全量（%d 套），实际 %s/%d 套"
+                       "（宁多跑不漏跑的兜底被删了）" % (total, m2, len(s2)))
+
+    # ③ 产品改动 ⇒ 影响面（含主闸门），且不是全集
+    s3, _m3, _ = dg._select_suites({"inbox_server.py"}, {"inbox_server.py"},
+                                   hook=False)
+    k3 = {s[0] for s in s3}
+    if "regression" not in k3:
+        return False, "产品改动时主闸门没在名单里（已修缺陷总账必须永远跑）"
+    if len(s3) >= total:
+        return False, ("产品改动却点了 %d 套（= 全集）⇒ 影响面名存实亡" % len(s3))
+    return True, ("纯文档 ⇒ 只跑主闸门（%d 套）／真无改动 ⇒ 回退全量（%d 套）／"
+                  "产品改动 ⇒ 影响面 %d 套（含主闸门）"
+                  % (len(k1), len(s2), len(s3)))
+
+
 # ---------------------------------------------------------------- 负控
 def _aside_dir(path):
     """零删除地让开一个临时目录（改名成 `<name>.away-<pid>-<ms>`）。
@@ -1813,6 +1867,17 @@ def selfcheck():
          '    if over:\n        print("      ⏭ **预算外**',
          '    if over and False:   # NEGCTL\n        print("      ⏭ **预算外**',
          "D-34"),
+        # ★★ D-35 负控（2026-10-13）：把「探测层为空」与「影响面层为空」**重新
+        #   折叠**（＝ X-016 原貌）—— 纯文档改动于是被判成"没改动" ⇒ 回退全量。
+        #   ★ 注入点＝`_select_suites` 的**第一处**判据 `if not changed:`；
+        #     换成 `if not touched:` 后，docs-only（changed 非空、touched 空）
+        #     直接落进"回退全量"分支 —— 这正是当年的形状。
+        ("D-35 缺陷：把「无产品改动」折叠成「无改动」⇒ 纯文档回退全量",
+         "ci/delivery_gate.py",
+         '    if not changed:\n        return list(SUITES), "all", [',
+         '    if not touched:   # NEGCTL 折叠探测层/影响面层\n'
+         '        return list(SUITES), "all", [',
+         "D-35"),
     ]
 
     ok_all = True
@@ -2029,6 +2094,8 @@ def _checks(m):
          j_hook_same_anchor),
         ("D-34 快道/快档不许静默少跑（跳过必须逐条列明，T-10）",
          j_fastlane_not_silent),
+        ("D-35 纯文档改动不许回退全量（钩子层不许被逼到 --no-verify，T-10）",
+         j_docs_only_no_full_fallback),
         # ★ D-31 放最后：它红的正是上面几条没做完；R7 对齐后由红转绿 ＝ 完工证明
         ("D-31 缺陷类型登记簿自身一致（不会响的表格接成闸门一环）",
          j_defect_registry_consistent),

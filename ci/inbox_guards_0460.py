@@ -157,6 +157,56 @@ def _allowed_fixture():
     return d
 
 
+# ══════════════ C1／M-A · 夹具**自证成立**（量具层 T-08）══════════════
+#: 两票**都取不到信号**（不是"投了反对票"）。
+def _no_signal(d):
+    """`True` ⇔ 这是「**取不到信号**」，不是「**裁决错误**」。
+
+    ★★ 2026-10-13 实测（X-017，全量闸门首跑 29 绿 / 1 红）：
+      判据依赖 git 子进程（`check-ignore` / `rev-parse`），而 `VCT_TIMEOUT = 2.0s`
+      —— 机器高负载时 git 实测 **1.70s**，就在超时边缘；再忙一点就撞超时。
+      **旧版把这种「取不到信号」与「裁决错误」混为一谈**（都报"两票裁决不符"）
+      ⇒ 判据把**机器天气**说成了**产品缺陷**。
+      ⇒ 这正是 **T-08「查不到就下结论」复发在「量具层」**（产品层早已由
+        D-32/S19/W-05 守着）。判据自己也得守同一条纪律。
+
+    ★ 实测有**两种**取不到信号的形状（都在高负载下撞到过，都要认）：
+      · `vote1 == "" and vote2 == ""` —— `git rev-parse` 取不到工作树根（出口丙，
+        首次 flake 的形状 `build→None//`）；
+      · `vote1 == "unavailable"`      —— `git check-ignore` 超时/异常（出口丙，
+        并发压测时抓到的形状 `build→None/unavailable/`）。
+      两者都是「**取不到**」；`protected` / `not_regenerable` / `outside` 是
+      「取到了但值如此」，**不算**取不到。
+    """
+    return (d.get("vote2", "") == ""
+            and d.get("vote1", "") in ("", "unavailable"))
+
+
+def _fixture_live(m, fix, tries=2):
+    """前置断言（C1 两步法的**第一步**）：夹具必须**自证成立**。
+
+    拿一个已知良性的目标（夹具里的 `build`：既被忽略、又是目录）试一次，
+    确认两票**真返回了信号**。取不到 ⇒ 返回 `(False, 说明)`，调用方必须报
+    **「夹具失效」**，与「裁决错误」分开 —— 前者是量具/环境问题，后者才是产品缺陷。
+
+    ★ 为什么要 retry：高负载是**瞬时**的。一次取不到就判失效太脆；
+      重试仍取不到，才说明"这台机器此刻测不了"，那时报夹具失效才是诚实的
+      （本仓纪律：**测不出的情况绝不报 PASS**，但也绝不把"测不出"说成"测出坏了"）。
+    """
+    last = None
+    for _ in range(tries):
+        d = m.deletion_permission("rm -rf build", fix)
+        if not _no_signal(d):
+            if d.get("vote1") != "ignored":
+                return False, ("control probe 的 vote1=%r（期望 'ignored'）"
+                               "—— 夹具的忽略声明没生效" % (d.get("vote1"),))
+            return True, None
+        last = d
+    return False, ("control probe 连续 %d 次**取不到任何信号**（vote1/vote2 都空，"
+                   "allow=%r）—— 多半是机器负载让 git 子进程撞了 `VCT_TIMEOUT`"
+                   % (tries, (last or {}).get("allow")))
+
+
 # ══════════════ S80 · 两票**并且**运算 ══════════════
 #: 第一票「声明为产物」＋ 第二票「可再生」都成立 ⇒ 放行（夹具里这些目录既被忽略、又是目录）。
 _ALLOWED = ("build", "dist", "__pycache__", ".psl", "_archive_dist")
@@ -166,17 +216,38 @@ _PROTECTED = ("hooks", "src", "old-config")
 
 @check("S80 ★ 两票并且：声明为产物 ＋ 可再生 ⇒ 放行；受保护 ⇒ 拦；只声明不可再生 ⇒ 拦")
 def s80():
-    m = _hook()
+    return _s80_impl(_hook())
+
+
+def _s80_impl(m):
+    """S80 的实现（★ 提成函数：负控 N-S80b 要拿**变异后的** hook 直接调它，
+    才能证明「取不到信号」真的与「裁决错误」分开了 —— 判据不许二次实现）。"""
     fix = _allowed_fixture()
-    bad = []
+    # ★★ C1／M-A 第一步：夹具**自证成立**（取不到信号 ⇒ 夹具失效，不冒充产品红）。
+    live, why = _fixture_live(m, fix)
+    if not live:
+        return ("夹具失效：%s ⇒ 本判据**测不出**，不算通过"
+                "（量具/环境问题，不是产品缺陷）" % why)
+    bad, blind = [], []
     for t in _ALLOWED:
         d = m.deletion_permission("rm -rf " + t, fix)
+        if _no_signal(d):
+            blind.append(t)
+            continue
         if d["allow"] is not True or d["vote1"] != "ignored" or d["vote2"] != "regenerable":
             bad.append("%s→%s/%s/%s" % (t, d["allow"], d["vote1"], d["vote2"]))
     for t in _PROTECTED:
         d = m.deletion_permission("rm -rf " + t, fix)
+        if _no_signal(d):
+            blind.append(t)
+            continue
         if d["allow"] is not False or d["vote1"] != "protected":
             bad.append("%s→%s/%s" % (t, d["allow"], d["vote1"]))
+    if blind:
+        return ("夹具失效：目标 %s **取不到信号**（机器天气，不是产品缺陷）"
+                " ⇒ 本判据测不出，不算通过%s"
+                % ("、".join(blind),
+                   ("；另有裁决不符：%s" % "；".join(bad)) if bad else ""))
     if bad:
         return "两票裁决不符（期望 allow/vote1/vote2）：%s" % "；".join(bad)
     # 第三类：**声明为产物，但不可再生**（配置文件常被写进忽略规则，删了就真没了）。
@@ -224,11 +295,52 @@ def n_s80():
     return True
 
 
+@check("N-S80b 负控：让 git 一律取不到信号 ⇒ S80 必须报「夹具失效」而非「裁决不符」")
+def n_s80b():
+    """反向对照（维二）：模拟 X-017 现场 —— 机器高负载 ⇒ git 子进程全失败。
+
+    ★ 证明「**取不到信号**」与「**裁决错误**」**真的分开了**：
+      旧版两者都报"两票裁决不符"，把**机器天气**说成**产品缺陷**（T-08 复发在量具层）。
+    ★ 注入：在 `_vct_run_git` 的**函数体首行**插入 `return None, "", ""`
+      —— 等价于"每个 git 调用都超时/失败"，正是 `VCT_TIMEOUT` 撞线时的形状。
+    """
+    src = _src(_HOOK)
+    anchor = "def _vct_run_git(args, cwd, timeout=VCT_TIMEOUT):"
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    mut = _load(src.replace(
+        anchor,
+        anchor + '\n    return None, "", ""      # NEGCTL 模拟 git 一律失败\n'),
+        "ptu0460_ns80b")
+    fix = _allowed_fixture()
+    # ① 前置断言本身必须判"夹具失效"
+    live, _why = _fixture_live(mut, fix)
+    if live:
+        return "负控失效：git 全失败时 `_fixture_live` 仍判夹具成立 ⇒ 前置断言是假的"
+    # ② 正判据在同一条现场上必须报「夹具失效」，且**不许**报「两票裁决不符」
+    got = _s80_impl(mut)
+    if got is True:
+        return "负控失效：git 全失败时 S80 仍报通过（取不到信号被当成了绿）"
+    msg = got if isinstance(got, str) else repr(got)
+    if "夹具失效" not in msg:
+        return ("负控失效：S80 没报「夹具失效」（%r）—— 取不到信号仍被当成裁决"
+                % msg[:120])
+    if "两票裁决不符" in msg:
+        return ("负控失效：S80 把「取不到信号」报成了「两票裁决不符」（%r）"
+                " —— 机器天气仍被说成产品缺陷" % msg[:120])
+    return True
+
+
 # ══════════════ S81 · 常见写法归一 ══════════════
 @check("S81 ★ 常见写法归一：`build/`、`./build`、`.\\build` 都判为可再生的产物")
 def s81():
     m = _hook()
     fix = _allowed_fixture()
+    # ★★ C1／M-A：夹具**自证成立**（取不到信号 ⇒ 夹具失效，不冒充产品红）。
+    live, why = _fixture_live(m, fix)
+    if not live:
+        return ("夹具失效：%s ⇒ 本判据**测不出**，不算通过"
+                "（量具/环境问题，不是产品缺陷）" % why)
     cases = [
         ("rm -rf build/", "build"),
         ("rm -rf ./build", "build"),
@@ -236,11 +348,17 @@ def s81():
         ("Remove-Item .\\build", "build"),
         ("rm -rf .\\dist", "dist"),
     ]
-    bad = []
+    bad, blind = [], []
     for cmd, _want in cases:
         d = m.deletion_permission(cmd, fix)
+        if _no_signal(d):
+            blind.append(cmd)
+            continue
         if d["allow"] is not True:
             bad.append("%s→%s" % (cmd, d["allow"]))
+    if blind:
+        return ("夹具失效：%s **取不到信号**（机器天气，不是产品缺陷）"
+                " ⇒ 本判据测不出，不算通过" % "、".join(blind))
     if bad:
         return "这些常见写法仍被误拦：%s" % "；".join(bad)
     # ★ 反向：还原 `.\` 的规则**不得**把真隐藏目录改坏。
