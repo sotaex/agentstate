@@ -355,6 +355,27 @@ def _check_bind(addr):
         raise ValueError("本地页只允许监听回环地址，拒绝绑定 %r" % (addr,))
 
 
+#: ★★ 0.48.6（遗留问题 B3）：口令的 **cookie 名**。
+#:   首字节带 `?t=` 的那次响应下发一个 httpOnly cookie，此后站内**所有**
+#:   导航与子资源都靠它 —— URL 里不再出现口令（浏览器历史 / Referer /
+#:   地址栏 / 截图 都干净）。旧 URL（`/?t=…`）**继续可用**（维八：不破旧账）。
+_COOKIE = "antinel_t"
+
+
+def _cookie_token(cookie_header):
+    """从 `Cookie:` 头里取口令。
+
+    ★ 取不到 ⇒ 返回 `""`（空串），**不是 `None`** —— 调用方只关心"有没有"，
+      与 `_guard` 里 `q.get("t") or …` 的短路链天然对齐。
+    ★ 只做**取值**，不做比对：口令比对永远只有 `_guard` 一处（维一 · 入口唯一）。
+    """
+    for part in (cookie_header or "").split(";"):
+        k, _, v = part.strip().partition("=")
+        if k == _COOKIE:
+            return v
+    return ""
+
+
 def _esc(s):
     return html.escape("" if s is None else str(s), quote=True)
 
@@ -426,9 +447,9 @@ def _head(title, token):
     mark = ("#" + rid) if rid else ""
     return ("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
             "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-            "<title>%s · 值守台%s</title><link rel=\"icon\" href=\"/assets/favicon.ico?t=%s\">"
+            "<title>%s · 值守台%s</title><link rel=\"icon\" href=\"/assets/favicon.ico\">"
             "<style>%s</style></head><body>"
-            % (_esc(title), mark, _esc(token), CSS))
+            % (_esc(title), mark, CSS))
 
 
 def _tabs(view, token):
@@ -437,10 +458,12 @@ def _tabs(view, token):
     在 tabs 徽章、顶部条后缀、筛选条、说明行里出现了 5 次（创始人 2026-10-08
     点名）。数字现在只属于内容区：收件箱页在筛选条，其他页在顶部条后缀。
     选项卡只负责「去哪儿」。
+    ★ 0.48.6（B3）：链接**不再挂口令** —— 靠首字节下发的那枚 httpOnly cookie
+      （见 `_COOKIE`）。页签是"导航"，它的 URL 会进浏览器历史。
     """
     def a(v, label):
         cls = " class=\"on\"" if v == view else ""
-        return "<a href=\"/?v=%s&t=%s\"%s>%s</a>" % (v, _esc(token), cls, label)
+        return "<a href=\"/?v=%s\"%s>%s</a>" % (v, cls, label)
     return ("<nav class=\"tabs\">" + a("inbox", "收件箱")
             + a("report", "日报") + a("health", "运行状态") + a("ledger", "账本")
             + "</nav>")
@@ -497,10 +520,9 @@ def _bar(items, token, posture=None, now=None, view="inbox", ex=None):
             # ★ 0.48.5（交接件 §5.6 乙2）：「，点开查看」删 —— 后缀是链接，
             #   可点性由下划线/样式承担，写出来是**替用户描述他即将做的动作**
             #   （W08 立意）；钻取本身不删（P12 契约先于精简）。
-            suffix = ("<a href=\"/?v=inbox&amp;f=action&amp;t=%s\" "
+            suffix = ("<a href=\"/?v=inbox&amp;f=action\" "
                       "style=\"color:inherit;text-decoration:none\">（%s）</a>"
-                      % (_esc(token),
-                         _esc(M.count_text(action_groups, len(items)))))
+                      % (_esc(M.count_text(action_groups, len(items))),))
     fix = ""
     if p.get("can_fix"):
         fix = ("<form method=\"post\" action=\"/action\" style=\"margin:0\">"
@@ -549,8 +571,8 @@ def _bar(items, token, posture=None, now=None, view="inbox", ex=None):
         #   收作「自载入起算」19 字）。「按事由归并后的件数」的解释归「？」
         #   词条的口径行；旧 title 后半句还是替用户描述他的动作（W08 立意）。
         return ("<a title=\"最近 %d 小时的记录数（自载入起算）\" "
-                "href=\"/?v=inbox&f=win:%d:lv:%s&t=%s\">%s <b>%d</b>%s</a>"
-                % (M.WINDOW_HOURS, M.WINDOW_HOURS, level, _esc(token), label, n,
+                "href=\"/?v=inbox&f=win:%d:lv:%s\">%s <b>%d</b>%s</a>"
+                % (M.WINDOW_HOURS, M.WINDOW_HOURS, level, label, n,
                    "" if not show_groups else "（%d 件事）" % g))
 
     # ★ 0.37.2：顺序改为**由重到轻**（失守 → 拦截 → 注意）。
@@ -569,7 +591,7 @@ def _bar(items, token, posture=None, now=None, view="inbox", ex=None):
         #   任意尺寸不发虚）—— 旧版 state 专属 mp4 在 768×768 → 46×46 的
         #   缩放下发虚（607 KB 换一个模糊角标）；mp4 留给托盘（16×16 合理）。
         #   状态不再靠图标区分：状态由灯（`.dot` ＋ 状态词随态色）独占。
-        "<div class=\"logo\"><img alt=\"Antinel\" src=\"/assets/logo.svg?t=%s\"></div>"
+        "<div class=\"logo\"><img alt=\"Antinel\" src=\"/assets/logo.svg\"></div>"
         # ★ 0.48.5（交接件 §5.6 乙1）：顶部灯的「？」芯片跟在 `<b>` 后
         #   （灯不是链接，芯片可以直接挨着；全站共 8 个落点，U-04 逐个数）。
         # ★ 0.48.5（交接件 §5.4 戊4）：状态词 16px 粗体、**色随态**
@@ -578,7 +600,7 @@ def _bar(items, token, posture=None, now=None, view="inbox", ex=None):
         "<div class=\"state\"><span class=\"dot\" style=\"background:var(%s)\"></span>"
         "<b style=\"color:var(%s)\">%s</b>%s%s<br><span>%s</span></div>"
         "%s%s<div class=\"spacer\"></div></header>"
-        % (_esc(token), M.STATE_VAR[st], M.STATE_VAR[st],
+        % (M.STATE_VAR[st], M.STATE_VAR[st],
            label, GL.chip("light", mk=True), suffix, state_reason, nums, fix))
 
 
@@ -768,8 +790,8 @@ def _group_html(g, token, bucket=None, total=None):
     lv = str(g["level"]).lower()
     n = int(g.get("count") or 0)
     ids = ",".join(str(x) for x in (g.get("ids") or []))
-    drill = ("<a class=\"btn\" href=\"/?v=inbox&f=kind:%s&t=%s\">看这 %d 条</a>"
-             % (_esc(g["kind"]), _esc(token), n))
+    drill = ("<a class=\"btn\" href=\"/?v=inbox&f=kind:%s\">看这 %d 条</a>"
+             % (_esc(g["kind"]), n))
     if bucket == M.BUCKET_ACTION:
         # ★ 同一事由 ⇒ 一件事：给「一次性处置」，用户不必点开 13 次。
         acts = (_form(token, "done_all", label="知道了（全部 %d 条）" % n, ids=ids)
@@ -849,9 +871,9 @@ def _view_inbox(items, token, filt, now=None):
         #   现在单位紧跟数字（`.unit` 小字弱化，不抢数字），口径归「？」词条。
         #   ★ 注意：这不是算错，是**单位异质被并排**（F54 同型，判据 U-08 守）。
         cls = " class=\"on\"" if v == filt else ""
-        return ("<a href=\"/?v=inbox&f=%s&t=%s\"%s title=\"%s\">%s <b>%d</b>"
+        return ("<a href=\"/?v=inbox&f=%s\"%s title=\"%s\">%s <b>%d</b>"
                 "<span class=\"unit\">%s</span></a>"
-                % (v, _esc(token), cls, _esc(tip), _esc(label), n, _esc(unit)))
+                % (v, cls, _esc(tip), _esc(label), n, _esc(unit)))
 
     # ★★ 0.48.5（交接件 §5.6 乙3）：补 `<h2>` —— 收件箱页此前无页面名，
     #   而其余三页都有（同一页三个身份：title/选项卡/无 h2 —— 乙4 的组成
@@ -941,10 +963,9 @@ def _view_inbox(items, token, filt, now=None):
     if filt not in ("action", "all"):
         head += ("<div class=\"note\" style=\"margin:0 0 10px\">"
                  # ★ 0.47.0：筛选结果是分子 ⇒ 分母＝本次载入的全部条数。
-                 "筛选：<b>%s</b> · %d / %d 条（<a href=\"/?v=inbox&f=all&t=%s\">"
+                 "筛选：<b>%s</b> · %d / %d 条（<a href=\"/?v=inbox&f=all\">"
                  "返回已载入记录</a>）"
-                 "</div>" % (_esc(M.filter_label(filt)), len(rows), n_all,
-                             _esc(token)))
+                 "</div>" % (_esc(M.filter_label(filt)), len(rows), n_all))
     return head + "".join(_item_html(i, token) for i in rows)
 
 
@@ -973,10 +994,10 @@ def _view_report(rep, token, items=None):
         # ★ 0.47.0（方案 §5 步三）：这个数是分子 ⇒ 同行带分母（窗口内总记录数）。
         return ("<div class=\"metric\"><div class=\"k\">%s</div>"
                 "<div class=\"v\" style=\"color:var(%s)\">"
-                "<a href=\"/?v=inbox&f=%s&t=%s\">%d</a>"
+                "<a href=\"/?v=inbox&f=%s\">%d</a>"
                 "<span class=\"den\"> / %d</span></div>"
                 "</div>"
-                % (GL.chip(k), var, _esc(scoped_filter), _esc(token), n, _win_total))
+                % (GL.chip(k), var, _esc(scoped_filter), n, _win_total))
 
     #: ★ 0.48.5（交接件 §5.4 甲4）：这一排四个数字的口径说明走
     #   `M.reading_note()` —— 与收件箱筛选条**同一个唯一实现**（旧版这里另写
@@ -996,9 +1017,9 @@ def _view_report(rep, token, items=None):
          + metric("L2", W.get("L2", 0), "--l2", "lv:L2")
          + metric("L1", W.get("L1", 0), "--l1", "lv:L1")
          + "<div class=\"metric\"><div class=\"k\">%s</div><div class=\"v\">"
-           "<a href=\"/?v=inbox&f=action&t=%s\">%d</a>"
+           "<a href=\"/?v=inbox&f=action\">%d</a>"
            "<span class=\"den\"> / %d</span></div></div></div>"
-         % (GL.chip("action"), _esc(token), rep.get("action_groups", 0),
+         % (GL.chip("action"), rep.get("action_groups", 0),
             _win_total))
 
     # ★★ 0.37.2：**删掉「现在的防线状态」整张卡**。
@@ -1012,21 +1033,21 @@ def _view_report(rep, token, items=None):
     # ★ 措辞与运行状态页统一（旧版日报写「10 次（查看记录）」、
     #   运行状态写「10 次（点数字看每一次）」—— 同一件事两种说法）。
     # ★ 0.47.0：拉起次数是分子 ⇒ 分母＝窗口内总记录数。
-    _revived_link = ("<a href=\"/?v=inbox&f=win:%d:kind:host_shield_revived&t=%s\">"
+    _revived_link = ("<a href=\"/?v=inbox&f=win:%d:kind:host_shield_revived\">"
                      "%d 次</a> / %d"
-                     % (hrs, _esc(token), _revived, _win_total))
+                     % (hrs, _revived, _win_total))
     _day = _esc(rep["day"])
     # ★ 0.47.0：当日三档各是分子 ⇒ 分母＝当日全部记录条数（当日 ＝ 24 小时窗口）。
     _day_total = sum(int(Lv.get(k, 0) or 0) for k in ("R0", "L2", "L1"))
-    _today_levels = ("<a href=\"/?v=inbox&f=day:%s:lv:R0&t=%s\">失守 %d</a> ｜ "
-                     "<a href=\"/?v=inbox&f=day:%s:lv:L2&t=%s\">拦截 %d</a> ｜ "
-                     "<a href=\"/?v=inbox&f=day:%s:lv:L1&t=%s\">注意 %d</a>"
+    _today_levels = ("<a href=\"/?v=inbox&f=day:%s:lv:R0\">失守 %d</a> ｜ "
+                     "<a href=\"/?v=inbox&f=day:%s:lv:L2\">拦截 %d</a> ｜ "
+                     "<a href=\"/?v=inbox&f=day:%s:lv:L1\">注意 %d</a>"
                      # ★ 0.48.5（交接件 §5.4 丙2）：「分母 N」改成直述「共 N 条」——
                      #   「分母」是术语词条里的词（口径行才是它的定义处），
                      #   正文里裸它是把术语当时尚词；意思一点没少。
                      " ｜ 共 %d 条"
-                     % (_day, _esc(token), Lv["R0"], _day, _esc(token), Lv["L2"],
-                        _day, _esc(token), Lv["L1"], _day_total))
+                     % (_day, Lv["R0"], _day, Lv["L2"],
+                        _day, Lv["L1"], _day_total))
     pr = ("<div class=\"card\"><div class=\"rows\">"
           "<div class=\"row\"><span class=\"k\">最近 %d 小时%s</span><span>%s</span></div>"
           "<div class=\"row\"><span class=\"k\">%s 当日合计</span><span>%s</span></div>"
@@ -1046,9 +1067,9 @@ def _view_report(rep, token, items=None):
         _day_total = sum(int(r["count"]) for r in rep["rules"])
         rows = "".join(
             "<div class=\"row\"><span class=\"k\">"
-            "<a href=\"/?v=inbox&f=day:%s:rule:%s&t=%s\">%s</a></span>"
+            "<a href=\"/?v=inbox&f=day:%s:rule:%s\">%s</a></span>"
             "<span>%s</span></div>"
-            % (_esc(rep["day"]), _esc(r["rule_id"]), _esc(token), _esc(r["rule_id"]),
+            % (_esc(rep["day"]), _esc(r["rule_id"]), _esc(r["rule_id"]),
                _esc(M.count_text(r["count"], _day_total, hours=24, unit="次")))
             for r in rep["rules"][:10])
         rules = ("<div class=\"card\"><h2>规则命中排行"
@@ -1111,9 +1132,9 @@ def _view_health(rep, token, items=None):
     # ★ 0.47.0：拉起次数是分子 ⇒ 分母＝窗口内总记录数（与日报页同一口径）。
     _win_total_h = sum(int((rep.get("window_levels") or {}).get(k, 0) or 0)
                        for k in ("R0", "L2", "L1"))
-    _revived_value = ("<a href=\"/?v=inbox&f=win:%d:kind:host_shield_revived&t=%s\">"
+    _revived_value = ("<a href=\"/?v=inbox&f=win:%d:kind:host_shield_revived\">"
                       "%d 次</a> / %d"
-                      % (_hrs, _esc(token), _revived_count, _win_total_h))
+                      % (_hrs, _revived_count, _win_total_h))
     # ★★ 0.37.2：**删掉本页第一行「此刻这一次」**（旧版 `GL.chip("posture",
     #   "此刻这一次")` + 值「值守中 —— 哨兵在岗…」）。
     #   顶部条已给出同一个状态词，并且 0.37.2 起把「此刻」与「24h 账」
@@ -1281,6 +1302,12 @@ def _make_handler(token, root):
                      "<h3>%s</h3>"
                      "<p>如果你是从值守台页面点过来的，说明这个按钮的请求没带上访问口令 ——"
                      "那是程序缺陷，请把它报出来。</p>"
+                     # ★ 0.48.6（B3）：口令改由一枚 HttpOnly cookie 在站内携带
+                     #   （URL 里不再有），于是"浏览器禁用了 Cookie"也会走到这里
+                     #   —— 得让用户知道该去开什么，而不是干看着 403。
+                     "<p>另一种可能：你的浏览器<b>禁用了 Cookie</b>。本页的口令靠一枚"
+                     " HttpOnly cookie 在站内携带；禁用后页面能打开，"
+                     "但点任何链接/按钮都会被拒。请在浏览器设置里允许本站使用 Cookie。</p>"
                      "<p><a href=\"javascript:history.back()\">← 返回上一页</a></p>" % _esc(msg))
             return self._send(403, "text/html; charset=utf-8", html_.encode("utf-8"))
 
@@ -1298,8 +1325,15 @@ def _make_handler(token, root):
             if not _allowed_host(self.headers.get("Host"), port):
                 self._deny("Host 不被允许")
                 return False
+            # ★ 0.48.6（B3）：口令来源按**优先级**排 —— query `?t=`（首字节那次）
+            #   → 请求头（测试/CLI 用）→ **cookie**（此后所有站内导航与子资源）。
+            #   比对仍然只有下面那一处（维一 · 入口唯一）。
+            self._set_token_cookie = False
             q = parse_qs(urlparse(self.path).query)
-            got = (q.get("t") or [""])[0] or (self.headers.get("X-Antinel-Token") or "")
+            q_tok = (q.get("t") or [""])[0]
+            got = (q_tok
+                   or (self.headers.get("X-Antinel-Token") or "")
+                   or _cookie_token(self.headers.get("Cookie")))
             # ★ 0.35.2：**口令也可能在 POST body 里**。
             #   页面上的每个按钮都是
             #     `<form method=post action="/action"><input type=hidden name=t …>`
@@ -1317,6 +1351,12 @@ def _make_handler(token, root):
             if not secrets.compare_digest(str(got), str(token)):
                 self._deny("缺少或错误的访问口令")
                 return False
+            # ★★ 0.48.6（B3）：只要"这次请求**自己**带了口令"（query `?t=` 或 POST body）
+            #   就续上 cookie。此后页面里的链接/子资源**都不再带口令**（见 `_COOKIE`），
+            #   靠这枚 cookie 即可。★ 来自 cookie / 请求头的不重复下发（没有新信息，
+            #   白占响应头）；★ 走不到这里说明口令错/缺，那已由上面的 `_deny` 拦下。
+            if q_tok or (body_form and (body_form.get("t") or [""])[0]):
+                self._set_token_cookie = True
             return True
 
         def _send(self, code, ctype, body, extra=None):
@@ -1325,6 +1365,14 @@ def _make_handler(token, root):
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
+            # ★ 0.48.6（B3）：首字节那次下发口令 cookie。
+            #   `HttpOnly` ⇒ 页面脚本读不到（XSS 偷不走）；
+            #   `SameSite=Strict` ⇒ 跨站请求不带（CSRF 打不进来）；
+            #   `Path=/` ⇒ 站内所有路径都带（含 /assets 与 /api）。
+            if getattr(self, "_set_token_cookie", False):
+                self.send_header("Set-Cookie",
+                                 "%s=%s; HttpOnly; SameSite=Strict; Path=/"
+                                 % (_COOKIE, token))
             for k, v in (extra or {}).items():
                 self.send_header(k, v)
             self.end_headers()
@@ -1471,7 +1519,7 @@ def _make_handler(token, root):
                 return self._send(409, "text/plain; charset=utf-8",
                                   ("操作被拒：%s" % e).encode("utf-8"))
             return self._send(303, "text/plain; charset=utf-8", b"",
-                              extra={"Location": "/?t=%s" % token})
+                              extra={"Location": "/?v=inbox"})
 
         def _json(self, obj):
             body = json.dumps(obj, ensure_ascii=False).encode("utf-8")

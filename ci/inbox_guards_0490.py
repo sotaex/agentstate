@@ -17,6 +17,7 @@
      批次 6（W-03 · 遗留问题 A2）     → W-03（托盘与 Web 状态词同源）
      批次 7（W-04 · 遗留问题 B1）     → W-04（值守台常驻：同端口/口令自恢复）
      批次 8（W-05 · 遗留问题 B2）     → W-05（端口漂移不再静默：出声＋落盘＋托盘带端口）
+     批次 9（W-06 · 遗留问题 B3）     → W-06（口令不进 URL：HttpOnly cookie ＋ 链接零 t=）
 
    编号与 19 条**稳定映射**：U-02/U-07/U-09/U-12/U-14 是并入项与视觉项
    预留的空档，不是漏写（§5.7 表头原话）。红不了的（视觉排布）登记为
@@ -418,13 +419,14 @@ def u08():
 def n_u08():
     """反向对照（维二）：把单位 span 从筛选条删掉 —— 正是丙1 描述的旧形状。"""
     src = _src(_SERVER_REL)
+    # ★ 0.48.6（B3）：锚点同步 —— 筛选标签链接不再挂 `&t=%s`，参数表少收 `_esc(token)`。
     anchor = ('                "<span class=\\"unit\\">%s</span></a>"\n'
-              '                % (v, _esc(token), cls, _esc(tip), _esc(label), n, _esc(unit)))')
+              '                % (v, cls, _esc(tip), _esc(label), n, _esc(unit)))')
     if anchor not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
     mut = _load(src.replace(anchor,
                             '                "</a>"\n'
-                            '                % (v, _esc(token), cls, _esc(tip), _esc(label), n))'),
+                            '                % (v, cls, _esc(tip), _esc(label), n))'),
                 "is0490_nu08", _SERVER_REL)
     page = mut.render_page(view="inbox", filt=M.BUCKET_ACTION,
                            root=tempfile.mkdtemp(prefix="g0490_nu08_"),
@@ -611,14 +613,15 @@ def u05():
 def n_u05():
     """反向对照（维二）：把丁5 删掉的句子原样加回日报页调用点。"""
     src = _src(_SERVER_REL)
+    # ★ 0.48.6（B3）：锚点同步 —— 拉起次数链接不再挂 `&t=%s`，参数表少收 `_esc(token)`。
     anchor = ('                     "%d 次</a> / %d"\n'
-              '                     % (hrs, _esc(token), _revived, _win_total))')
+              '                     % (hrs, _revived, _win_total))')
     if anchor not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
     mut = _load(src.replace(
         anchor,
         '                     "%d 次</a> / %d（点开看每一次）"\n'
-        '                     % (hrs, _esc(token), _revived, _win_total))'),
+        '                     % (hrs, _revived, _win_total))'),
         "is0490_nu05", _SERVER_REL)
     page = mut.render_page(view="report",
                            root=tempfile.mkdtemp(prefix="g0490_nu05_"),
@@ -763,9 +766,13 @@ def u13():
 def n_u13():
     """反向对照（维二）：把 img 换回 state 专属 mp4（戊1 前的形状）。"""
     src = _src(_SERVER_REL)
+    # ★ 0.48.6（B3）：锚点同步 —— 头部 img 的 `src` 不再挂 `?t=%s`（口令走
+    #   HttpOnly cookie），`_bar` 的参数表也不再收 `_esc(token)`。变异本身不变
+    #   （仍是"把 img 换回 state 专属 mp4"，且 mp4 那条仍带 `?t=%s` —— 于是
+    #   参数表要多收两个，与下面的替换严格配对）。
     a_img = ('        "<div class=\\"logo\\"><img alt=\\"Antinel\\" '
-             'src=\\"/assets/logo.svg?t=%s\\"></div>"')
-    a_args = "        % (_esc(token), M.STATE_VAR[st], M.STATE_VAR[st],"
+             'src=\\"/assets/logo.svg\\"></div>"')
+    a_args = "        % (M.STATE_VAR[st], M.STATE_VAR[st],"
     if a_img not in src or a_args not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
     mut = _load(src.replace(
@@ -968,14 +975,16 @@ def n_w02():
     不是另编一个假串。
     """
     src = _src(_SERVER_REL)
+    # ★ 0.48.6（B3）：锚点同步 —— `_head` 的 favicon 不再挂 `?t=%s`，
+    #   于是参数表少收一个 `_esc(token)`（变异体也同步少收一个）。
     a_body = ('            "<style>%s</style></head><body>"\n'
-              '            % (_esc(title), mark, _esc(token), CSS))')
+              '            % (_esc(title), mark, CSS))')
     if a_body not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
     mut = _load(src.replace(
         a_body,
         '            "<style>%s</style></head><body><span>%s</span>"\n'
-        '            % (_esc(title), mark, _esc(token), CSS, mark))'),
+        '            % (_esc(title), mark, CSS, mark))'),
         "is0490_nw02", _SERVER_REL)
     page = mut.render_page(view="inbox", filt=M.BUCKET_ACTION,
                            root=tempfile.mkdtemp(prefix="g0490_nw02_"),
@@ -1469,12 +1478,157 @@ def n_w05():
     return True
 
 
+# ════════════════════ W-06 · 遗留问题 B3（口令不进 URL）════════════════
+#: ★★ 盯的已修缺陷：**B3 口令在 URL query 里** —— 主 URL `/?t=<口令>`、每个页签
+#:   链接 `/?v=…&t=<口令>`、favicon/logo 的 `?t=<口令>`。口令因此进了浏览器历史、
+#:   Referer、地址栏与截图；点一次按钮（303 重定向）还会把它写回地址栏。
+#:   修法（产品侧 inbox_server.py）：首字节带 `?t=` 的那次下发一枚
+#:   `HttpOnly; SameSite=Strict; Path=/` 的 cookie，此后**所有**站内导航与
+#:   子资源都靠它；页面上**不再有任何带口令的 URL**。旧 URL `/?t=…` 继续可用
+#:   （维八：不破旧账 —— 书签/`url.json` 里的老链接照常打开）。
+
+
+def _w06_http(port, path, headers=None):
+    """发一个**真** HTTP 请求，返回 `(status, headers_lower, body_text)`。"""
+    import http.client
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    try:
+        c.request("GET", path, headers=headers or {})
+        r = c.getresponse()
+        return (r.status, {k.lower(): v for k, v in r.getheaders()},
+                r.read().decode("utf-8", "replace"))
+    finally:
+        c.close()
+
+
+def _w06_assert():
+    """W-06 正判据（正/负控共用）。返回 `None`＝过，否则说明串。
+
+    四个现场：
+      ① **渲染页里零「带口令的 URL」**：四个视图的 `href`/`src` 都不含 `t=`
+         （表单 hidden `t` 与 JS 的 `data-token` 是 **POST body**，不算 URL，
+         不在范围内 —— B3 的题面就是"口令在 URL query 里"）；
+      ② **旧 URL 继续可用**（维八）：`/?t=<口令>` 仍返回 200；
+      ③ **cookie 能过守卫**：用 ② 拿到的 cookie（不带 `?t=`／不带请求头／
+         不带 body）请求别的页 ⇒ 200；
+      ④ **首次下发的是 `HttpOnly; SameSite=Strict; Path=/`**；且**不带任何
+         凭证**的请求被拒且**出声**（不是干看着）。
+    """
+    import inbox_server as SV
+    # ① 四个视图：链接里零口令（★ 用**当前** `sys.modules` 里的那份 —— 负控要靠它）
+    bad = []
+    for v in _VIEWS:
+        h = _page(v, mod=SV)
+        for m in re.finditer(r'(?:href|src)="([^"]*)"', h):
+            if re.search(r"[?&]t=", m.group(1)):
+                bad.append("%s: %s" % (v, m.group(1)[:60]))
+    if bad:
+        return "渲染页里仍有带口令的 URL：%s" % "; ".join(bad[:3])
+    # ②③④ 真起服务走一遍
+    tok = "w06-tok"
+    httpd, port = _w04_serve_inline(tok)
+    try:
+        st, hd, _b = _w06_http(port, "/?t=%s" % tok)
+        if st != 200:
+            return "旧 URL（`/?t=…`）不再可用：HTTP %d（维八：不破旧账）" % st
+        sc = hd.get("set-cookie") or ""
+        if not sc:
+            return "首字节没下发 Set-Cookie —— 链接里摘掉口令后就没有凭证了"
+        low = sc.replace(" ", "").lower()
+        if "httponly" not in low:
+            return "Set-Cookie 缺 HttpOnly（脚本读得到 ⇒ XSS 可偷）：%r" % sc
+        if "samesite=strict" not in low:
+            return "Set-Cookie 缺 SameSite=Strict（跨站请求会带上 ⇒ CSRF）：%r" % sc
+        if "path=/" not in low:
+            return "Set-Cookie 缺 Path=/（站内子路径收不到）：%r" % sc
+        ck = sc.split(";")[0].strip()
+        st2, _h2, b2 = _w06_http(port, "/?v=report", headers={"Cookie": ck})
+        if st2 != 200:
+            return "带 cookie 请求其它页没通过：HTTP %d（cookie 没被认）" % st2
+        if '<header class="bar">' not in b2:
+            return "带 cookie 拿到的不是值守台页面"
+        st3, _h3, b3 = _w06_http(port, "/?v=report")
+        if st3 != 403:
+            return "不带任何凭证的请求没被拒：HTTP %d" % st3
+        if "口令" not in b3:
+            return "被拒页面没说清原因（应点明口令/凭证）"
+    finally:
+        httpd.shutdown()
+    return None
+
+
+@check("W-06 ★ B3：口令不进 URL —— 链接零 t= / cookie 能过 / 首次下发 HttpOnly")
+def w06():
+    r = _w06_assert()
+    if r is not None:
+        return r
+    return True
+
+
+@check("N-W06 负控：链接放回 t= / 不认 cookie / 去掉 HttpOnly ⇒ W-06 必须红")
+def n_w06():
+    """反向对照（维二）：三个变异体＝B3 要修的那三个形状，逐个必须被 W-06 抓到。
+
+    ① 把 `&t=` 放回页签链接（＝B3 缺陷本身：口令跟着 URL 走）；
+    ② `_guard` 不认 cookie（只剩 query/请求头/body ⇒ 链接摘了口令就进不去）；
+    ③ 下发的 cookie 去掉 `HttpOnly`（脚本读得到 ⇒ XSS 可偷）。
+    """
+    src = _src(_SERVER_REL)
+    # ① 页签链接放回 `&t=`
+    a_keep = '        return "<a href=\\"/?v=%s\\"%s>%s</a>" % (v, cls, label)'
+    a_mut = ('        return "<a href=\\"/?v=%s&t=%s\\"%s>%s</a>"'
+             ' % (v, _esc(token), cls, label)')
+    if a_keep not in src:
+        return "变异锚点未找到（_tabs 已变）—— 负控自身失效，不算通过"
+    mut = _load(src.replace(a_keep, a_mut), "is0490_nw06a", _SERVER_REL)
+    saved = _mod_patch("inbox_server", mut)
+    try:
+        r = _w06_assert()
+        if r is None:
+            return "链接放回 `&t=`，W-06 仍判通过 ⇒ 判据没在看「URL 里有没有口令」"
+        if "带口令的 URL" not in r:
+            return "负控咬错了地方：红的应是「链接里带口令」，实得 %r" % r[:60]
+    finally:
+        saved()
+    # ② 不认 cookie（`_guard` 只剩 query/请求头/body 三个来源）
+    b_keep = '_cookie_token(self.headers.get("Cookie"))'
+    b_mut = '""'
+    if b_keep not in src:
+        return "变异锚点未找到（_guard 已变）—— 负控自身失效，不算通过"
+    mut2 = _load(src.replace(b_keep, b_mut), "is0490_nw06b", _SERVER_REL)
+    saved2 = _mod_patch("inbox_server", mut2)
+    try:
+        r = _w06_assert()
+        if r is None:
+            return "不认 cookie，W-06 仍判通过 ⇒ 判据没在真发一个 cookie 请求"
+        if "cookie" not in r:
+            return "负控咬错了地方：红的应是「cookie 没被认」，实得 %r" % r[:60]
+    finally:
+        saved2()
+    # ③ 去掉 HttpOnly
+    c_keep = '"%s=%s; HttpOnly; SameSite=Strict; Path=/"'
+    c_mut = '"%s=%s; SameSite=Strict; Path=/"'
+    if c_keep not in src:
+        return "变异锚点未找到（_send 的 Set-Cookie 已变）—— 负控自身失效，不算通过"
+    mut3 = _load(src.replace(c_keep, c_mut), "is0490_nw06c", _SERVER_REL)
+    saved3 = _mod_patch("inbox_server", mut3)
+    try:
+        r = _w06_assert()
+        if r is None:
+            return "去掉 HttpOnly，W-06 仍判通过 ⇒ 判据没在看 Set-Cookie 的属性"
+        if "HttpOnly" not in r:
+            return "负控咬错了地方：红的应是「缺 HttpOnly」，实得 %r" % r[:60]
+    finally:
+        saved3()
+    return True
+
+
 def main():
     print("=" * 78)
     print("0.48.5 值守台细节修订判据（交接件 v1.1 §5.7）—— "
           "批1 U-01/U-03/U-08 · 批2 U-10/U-11/U-05 · 批3 U-04/U-06 · "
           "批4 U-13/U-15 · 批5 W-01/W-02（认窗白名单，单独 commit）· "
-          "批6 W-03（A2）· 批7 W-04（B1）· 批8 W-05（B2）")
+          "批6 W-03（A2）· 批7 W-04（B1）· 批8 W-05（B2）· 批9 W-06（B3）")
     print("（变异只在内存，账本与链只落临时目录，不写任何产品文件；"
           "戊2/戊3 视觉项无判据，走 §6.1 截图验收 —— U-13 只含戊2 机械部分）")
     print("=" * 78)

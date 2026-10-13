@@ -2396,7 +2396,11 @@ def c_report_drill_counts_match_headline():
     report = SV.render_page(view="report", root=hub, token="T", items=items)
     # ★ 链接里的 `&` 在 HTML 属性中是**原样**的，不是 `&amp;`（本判据第一版
     #   写成 `&amp;` ⇒ 一个匹配都抓不到 ⇒ 恒红。量具自己踩的坑，记在这里。）
-    drills = re.findall(r'href="/\?v=inbox&f=win:24:lv:(L2|L1|R0)&t=T">(\d+)</a>',
+    # ★★ 0.48.6（B3）：链接里**不再挂 `&t=T`** —— 口令改由 HttpOnly cookie 在
+    #   站内携带（见 `inbox_server._COOKIE`），URL 里不出现口令。正则同步去掉
+    #   那段；**这不是放松**：本判据要测的是"钻取页的数字与日报数字同源"，
+    #   与"口令挂在哪"无关（口令挂 URL 是 B3 要修的缺陷）。
+    drills = re.findall(r'href="/\?v=inbox&f=win:24:lv:(L2|L1|R0)">(\d+)</a>',
                         report)
     if not drills:
         return False                      # 日报上一个窗口钻取都没有 ⇒ 守卫无从测
@@ -2458,8 +2462,9 @@ def c_header_numbers_state_both_denominators():
     day, items = _ledger_test_items()
     html = SV.render_page(view="report", root=hub, token="T", items=items)
     # 三个数字链接：括号内必须是按事由归并后的件数
+    # ★ 0.48.6（B3）：链接里不再挂 `&t=T`（口令走 HttpOnly cookie）—— 同步去掉。
     pairs = re.findall(
-        r'f=win:%d:lv:(L2|L1|R0)&t=T">(?:拦截|注意|失守) <b>(\d+)</b>(?:（(\d+) 件事）)?'
+        r'f=win:%d:lv:(L2|L1|R0)">(?:拦截|注意|失守) <b>(\d+)</b>(?:（(\d+) 件事）)?'
         % M.WINDOW_HOURS, html)
     if len(pairs) != 3:
         return False                      # 三个数字没都带钻取链接
