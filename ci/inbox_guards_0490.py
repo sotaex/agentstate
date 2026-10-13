@@ -18,6 +18,10 @@
      批次 7（W-04 · 遗留问题 B1）     → W-04（值守台常驻：同端口/口令自恢复）
      批次 8（W-05 · 遗留问题 B2）     → W-05（端口漂移不再静默：出声＋落盘＋托盘带端口）
      批次 9（W-06 · 遗留问题 B3）     → W-06（口令不进 URL：HttpOnly cookie ＋ 链接零 t=）
+     批次 10（C1 · 负控模板化）        → C-01（渲染型负控走 `_mut_render` 两步法）
+     批次 11（C2 · 判据扫渲染产物）    → 统一口径 `ci/page_caliber.py`（本批**不含新判据**：
+                                        它是「编写纪律」的机制化，由元判据 **S48**
+                                        在 `ci/guard_instrument_selfaudit.py` 里守）
 
    编号与 19 条**稳定映射**：U-02/U-07/U-09/U-12/U-14 是并入项与视觉项
    预留的空档，不是漏写（§5.7 表头原话）。红不了的（视觉排布）登记为
@@ -53,6 +57,7 @@ os.environ.pop("ANTINEL_AUDIT_DIRS", None)
 import inbox_model as M                                          # noqa: E402
 import inbox_server as SV                                        # noqa: E402
 import glossary as GL                                            # noqa: E402
+import page_caliber as PC                                        # noqa: E402
 
 RESULTS = []
 
@@ -189,19 +194,12 @@ def _page(view, filt=None, mod=SV, items=None, rep=None):
                            posture=_POSTURE)
 
 
-#: 术语浮层（`<details class=term|gloss>` … `</details>`，含乙1 的 `term mk`）。
-#: 为什么能非贪婪：`glossary.render()` 只放行 b/code 两个内联标签
-#: （见该函数 docstring），块内不会嵌套第二个 details。
-#: ★ 0.48.5 乙1 起 class 值有 `term mk` 形态（裸「？」芯片）—— 判据只认
-#:   精确 `class="term"` 会漏剥整族芯片（首跑实测：U-03 因此误红，
-#:   芯片展开体口径行里的「分母」漏出了剥离层）。
-_TERM_BLOCK = re.compile(
-    r'<details class="[^"]*\b(?:term|gloss)\b[^"]*"[^>]*>.*?</details>', re.S)
-
-
-def _body_without_terms(html):
-    """剥掉术语浮层后的**正文**（丙2 的口径：「分母」只许留在词条口径行里）。"""
-    return _TERM_BLOCK.sub("", html or "")
+#: ★★ C2（2026-10-13）：剥除口径**不再在这里各写一份** —— 统一走
+#:   `ci/page_caliber.py`（`body` / `body_without_terms` / `chrome` / `raw`），
+#:   由元判据 S48 守（`ci/guard_instrument_selfaudit.py`）。
+#:   由来：本文件原先自带的剥除只剥术语浮层，**不剥 `<style>`** ——
+#:   U-10 因此被 CSS 注释里的「本机 · 127.0.0.1」**误红**（正文里早删干净了）。
+#:   一句话：**判据扫渲染产物时必须显式选层**，不许拿整页原文当正文。
 
 
 def _tabs(page):
@@ -228,14 +226,28 @@ def _tabs(page):
 
 
 def _note_calls(src):
-    """数**真实调用点**（不是注释里的字面）。
+    """数**真实调用点**（不是注释里的字面）—— 走 **AST**，不走文本正则。
 
-    ★ 判据先自证：`M.reading_note()` 这八个字在注释里也会出现（解释改动的
-      来龙去脉本来就要写清）—— 数源码文本会把注释算成调用点（首跑实测：
-      2 次调用 ＋ 2 处注释 ＝ 4）。⇒ 只数调用语法：`M.reading_note()` 后面
-      紧跟 ASCII 右括号（`_esc(...)` 的收尾），注释里是全角「）」，天然区分。
+    ★★ C2（2026-10-13）机制修正：原先写
+      `len(re.findall(r"M\\.reading_note\\(\\)\\)", src))` —— 那是**就地打补丁**
+      （把正则收窄到「紧跟 ASCII 右括号」才勉强把注释排除掉）。文本层永远
+      追不上注释的写法（换行、空格、全角括号都会让它翻面）。
+      现在**逐字取自磁盘 ＋ AST 抽取**：`M.reading_note()` 是一个
+      `ast.Call(func=Attribute(value=Name('M'), attr='reading_note'))`，
+      注释在 AST 里根本不存在 ⇒ 结构事实取代文本巧合（维三）。
+    ★ 由元判据 S48② 守（`ci/guard_instrument_selfaudit.py`）：判据不许用
+      `len(re.findall(<调用语法>))` 数调用点。
     """
-    return len(re.findall(r"M\.reading_note\(\)\)", src or ""))
+    import ast as _ast
+    n = 0
+    for node in _ast.walk(_ast.parse(src or "")):
+        if not isinstance(node, _ast.Call):
+            continue
+        f = node.func
+        if (isinstance(f, _ast.Attribute) and f.attr == "reading_note"
+                and isinstance(f.value, _ast.Name) and f.value.id == "M"):
+            n += 1
+    return n
 
 
 # ════════════════════════════ U-01 · 甲2（＋甲3 并入）════════════════
@@ -261,19 +273,20 @@ def u01():
     if hasattr(M, "window_note"):
         return "inbox_model 里 window_note 仍在（旧措辞的实现没删，会被复用）"
     # ② 渲染面：四页 + 各 tab 都不含旧承诺；note 页含新措辞
+    # ★ C2：一律经 `PC.body(...)`（剥 `<style>`/HTML 注释）—— 中文文案只许来自正文层。
     for view in _VIEWS:
         page = _page(view)
         for bad in ("分钟前", "分母均为"):
-            if bad in page:
+            if bad in PC.body(page):
                 return "%s 页仍含 %r（承诺维持不住的口径／冻结读数）" % (view, bad)
     for tab in _TABS:
         page = _page("inbox", filt=tab)
-        if "不随页面停留刷新" not in page:
+        if "不随页面停留刷新" not in PC.body(page):
             return "收件箱 tab=%s 缺新措辞「不随页面停留刷新」" % tab
-        if M.reading_note() not in page:
+        if M.reading_note() not in PC.body(page):
             return "收件箱 tab=%s 的口径行 ≠ M.reading_note()（唯一实现漂移）" % tab
     page = _page("report")
-    if "不随页面停留刷新" not in page:
+    if "不随页面停留刷新" not in PC.body(page):
         return "日报页缺新措辞（第二处调用点没接上）"
     return True
 
@@ -305,13 +318,13 @@ def n_u01():
                            token="T", items=_items(), posture=_POSTURE)
     if _why:
         return _why
-    if "不随页面停留刷新" in page:
+    if "不随页面停留刷新" in PC.body(page):
         return "负控失效：调用点改回旧串后新措辞仍在（%r）" % page[:80]
-    if "分母均为" not in page:
+    if "分母均为" not in PC.body(page):
         return "负控失效：旧串没渲染出来（注入没生效）"
     # ③ 连回正判据：真实现下必须含新措辞、且不含旧串
     live = _page("inbox", filt=M.BUCKET_ACTION)
-    if "不随页面停留刷新" not in live or "分母均为" in live:
+    if "不随页面停留刷新" not in PC.body(live) or "分母均为" in PC.body(live):
         return "夹具不成立：真实现本身就不满足 U-01 ⇒ 负控无分辨力"
     return True
 
@@ -343,11 +356,11 @@ def u03():
         return "日报页仍有内联口径说明（第二处实现，维一破裂）"
     note = M.reading_note()
     rep_page = _page("report")
-    if note not in rep_page:
+    if note not in PC.body(rep_page):
         return "日报页口径行 ≠ M.reading_note()（两处不同源）"
     # ② 正文零「分母」（剥术语浮层后；定义处不许被禁）
     for view in _VIEWS:
-        body = _body_without_terms(_page(view))
+        body = PC.body_without_terms(_page(view))
         if "分母" in body:
             return "%s 页正文仍出现「分母」（丙2：只许留在术语词条口径行）" % view
     # ③ 每 tab 带可见单位（件/条）—— 丙1 的甲4 侧面
@@ -387,13 +400,13 @@ def n_u03a():
                            posture=_POSTURE)
     if _why:
         return _why
-    if M.reading_note() in page and "分母均为" not in _body_without_terms(page):
+    if M.reading_note() in PC.body(page) and "分母均为" not in PC.body_without_terms(page):
         return "负控失效：改回旧串后日报页仍同源且无「分母」"
-    if "分母" not in _body_without_terms(page):
+    if "分母" not in PC.body_without_terms(page):
         return "负控失效：旧内联串没渲染出来（注入没生效）"
     # 连回正判据：真实现下日报页必须同源且正文无「分母」
     live = _page("report")
-    if M.reading_note() not in live or "分母" in _body_without_terms(live):
+    if M.reading_note() not in PC.body(live) or "分母" in PC.body_without_terms(live):
         return "夹具不成立：真实现本身就不满足 U-03 ⇒ 负控无分辨力"
     return True
 
@@ -413,7 +426,7 @@ def n_u03b():
                            posture=_POSTURE)
     if _why:
         return _why
-    if "分母" not in _body_without_terms(page):
+    if "分母" not in PC.body_without_terms(page):
         return "负控失效：写回「分母」后正文仍零出现（注入没生效）"
     return True
 
@@ -541,11 +554,13 @@ def u10():
     for view in _VIEWS:
         page = _page(view)
         for bad in ("本机 · 127.0.0.1", "数据不出门"):
-            if bad in page:
+            # ★ C2：经 `PC.body(...)` —— 剥掉 `<style>` 后，CSS 注释里复述过的
+            #   同一串不再冒充正文（U-10 曾因此**误红**，见交接件 §C2）。
+            if bad in PC.body(page):
                 return "%s 页仍含 %r（丁2/丁3：零信息量块没删干净）" % (view, bad)
     health = _page("health")
     for want in ("仅本机回环", "服务不接受外部连接"):
-        if want not in health:
+        if want not in PC.body(health):
             return "运行状态页缺回环证据 %r（口号删了，证据没补上）" % want
     # 后盾（行为级）：非回环地址不许起服务 —— 证据行这句话有人兑底
     try:
@@ -573,10 +588,10 @@ def n_u10():
                            token="T", items=_items(), posture=_POSTURE)
     if _why:
         return _why
-    if "本机 · 127.0.0.1" not in page:
+    if "本机 · 127.0.0.1" not in PC.body(page):
         return "负控失效：who 块加回后页面仍不含它（注入没生效）"
     live = _page("inbox", filt=M.BUCKET_ACTION)
-    if "本机 · 127.0.0.1" in live:
+    if "本机 · 127.0.0.1" in PC.body(live):
         return "夹具不成立：真实现本身还带 who 块 ⇒ 负控无分辨力"
     return True
 
@@ -648,7 +663,7 @@ def u05():
     for view in ("report", "health", "inbox"):
         page = _page(view)
         for bad in _U05_OLD:
-            if bad in page:
+            if bad in PC.body(page):
                 return "%s 页仍含 %r（替用户描述他的动作）" % (view, bad)
     return True
 
@@ -673,10 +688,10 @@ def n_u05():
                            posture=_POSTURE)
     if _why:
         return _why
-    if "点开看每一次" not in page:
+    if "点开看每一次" not in PC.body(page):
         return "负控失效：加回后渲染页仍不含（注入没生效）"
     live = _page("report")
-    if "点开看每一次" in live or "点规则名看具体是哪几条" in live:
+    if "点开看每一次" in PC.body(live) or "点规则名看具体是哪几条" in PC.body(live):
         return "夹具不成立：真实现本身还带旧句 ⇒ 负控无分辨力"
     return True
 
@@ -890,10 +905,11 @@ def n_u15():
     if _why:
         return _why
     # CSS 在渲染产物里 ⇒ 旧声明回潮必须能在渲染页观察到
-    if ".state span{font-size:12px;color:var(--muted)}" not in page:
+    # ★ C2：这是**样式层**断言 ⇒ 显式 `PC.chrome(...)`（只取 `<style>` 内容）。
+    if ".state span{font-size:12px;color:var(--muted)}" not in PC.chrome(page):
         return "负控失效：加回旧声明后渲染页观察不到（注入没生效）"
     live = _page("inbox")
-    if ".state span{font-size:12px;color:var(--muted)}" in live:
+    if ".state span{font-size:12px;color:var(--muted)}" in PC.chrome(live):
         return "夹具不成立：真实现本身就还带旧声明 ⇒ 负控无分辨力"
     return True
 
@@ -1010,7 +1026,9 @@ def w02():
     """
     for view in ("inbox", "report", "health", "ledger"):
         page = _page(view)
-        if "<body>" not in page:
+        # ★ C2：这是**结构断言**（`<body>` 是纯 ASCII 标记，不会出现在中文注释里）
+        #   ⇒ 显式 `PC.raw(...)` 声明「我确实要看整页」。
+        if "<body>" not in PC.raw(page):
             return "%s 页没有 <body> 起始标记（判据扫的范围没了）" % view
         body = page.split("<body>", 1)[-1]
         m = re.search(r"#[0-9a-f]{6}", body)
@@ -1940,7 +1958,8 @@ def main():
           "批1 U-01/U-03/U-08 · 批2 U-10/U-11/U-05 · 批3 U-04/U-06 · "
           "批4 U-13/U-15 · 批5 W-01/W-02（认窗白名单，单独 commit）· "
           "批6 W-03（A2）· 批7 W-04（B1）· 批8 W-05（B2）· 批9 W-06（B3）· "
-          "批10 C1（负控模板化：渲染型负控走 _mut_render 两步法）")
+          "批10 C1（负控模板化：渲染型负控走 _mut_render 两步法）· "
+          "批11 C2（扫渲染产物统一走 page_caliber，由元判据 S48 守）")
     print("（变异只在内存，账本与链只落临时目录，不写任何产品文件；"
           "戊2/戊3 视觉项无判据，走 §6.1 截图验收 —— U-13 只含戊2 机械部分）")
     print("=" * 78)

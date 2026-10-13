@@ -37,6 +37,15 @@
   ★ 为什么是"扫自己人"而不是靠review：本班五次全是**当场觉得那么写很自然**。
     自然的错要靠机械检查抓，不靠自觉。
   ★ 位置纪律：只读 ci/ 下的判据源，**不跑**它们（跑是 delivery_gate 的事）。
+
+  ★★ 0.48.6 追加 R4（第四处同型的病：**把「非正文层」当正文**，C2 遗留问题）：
+     R4：判据扫渲染产物做**文案断言**时，必须**显式选层**（`ci/page_caliber.py`），
+         不许拿整页原文当正文；数源码里的**调用点**必须 AST。
+         由来：U-10 断言「本机 · 127.0.0.1」零出现，正文里早删干净了，
+         `<style>` 的 CSS 注释里却复述过一遍 ⇒ **误红**；U-03 的「分母」从术语
+         浮层的词条口径行漏出剥离层 ⇒ **误红**；U-01 数调用点把注释里的
+         `M.reading_note()` 也算上（2 调用 ＋ 2 注释 ＝ 4）⇒ 判据自己瞎了还不知道。
+         ⇒ 判据 **S48**（＋负控 N-S48）。
 """
 from __future__ import annotations
 
@@ -411,6 +420,296 @@ def n_s47():
     return True
 
 
+# ══════════ S48 · 判据扫渲染产物必须**显式选层**（C2 遗留问题）══════════════
+#   同族第四面（S45 = `ast.dump` 子串、S46 = `ast.walk` 取首、S47 = 并发赌运气）：
+#   **把「非正文层」当正文**。两类实测：
+#     ① 渲染产物面 —— U-10 断言「本机 · 127.0.0.1」零出现，正文早删干净了，
+#        可 `<style>` 的 CSS 注释里复述过一遍 ⇒ **误红**；U-03 的「分母」从
+#        术语浮层的词条口径行漏出剥离层 ⇒ **误红**。
+#     ② 源码面 —— U-01 数 `M.reading_note()` 的调用点，把**注释里**的同一串
+#        也算上（2 次调用 ＋ 2 处注释 ＝ 4）⇒ 判据自己瞎了还不知道。
+#   ⇒ ① 渲染产物上的**文案断言**（左操作数可能含中文）必须经显式口径
+#        `page_caliber.body(...)` / `page_caliber.body_without_terms(...)`；
+#        裸变量、`raw()`、`chrome()` 一律报红（中文文案只能来自正文层）。
+#     ② 数源码里的**调用点**必须用 AST —— 不许 `len(re.findall(<调用语法>))`。
+#   ★ 为什么不把「纯 ASCII 结构断言」也逼着改：`data-id=`、`f=action`、`<body>`
+#     这类标记**不会**出现在中文注释/词条浮层里，不是本缺陷的现场；一刀切
+#     只会制造 40 处无谓改动（把机制做成噪音，下一个人就会绕开它）。
+
+def _caliber_contract():
+    """从 `ci/page_caliber.py` **逐字**取层名（不在本文件重写一份口径 —— 维一）。
+
+    ★ 为什么读磁盘而不 import：本套件只读源码、不执行（位置纪律）；
+      且套件起法不保证 `sys.path[0]` 是 `ci/`。
+    """
+    p = os.path.join(CI, "page_caliber.py")
+    if not os.path.isfile(p):
+        return None
+    tree = ast.parse(io.open(p, encoding="utf-8").read())
+    out = {}
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and isinstance(node.value, ast.Tuple)):
+            nm = node.targets[0].id
+            if nm in ("LAYERS", "TEXT_LAYERS"):
+                out[nm] = tuple(e.value for e in node.value.elts
+                                if isinstance(e, ast.Constant))
+    if "LAYERS" not in out or "TEXT_LAYERS" not in out:
+        return None
+    return out
+
+
+def _caliber_bindings(tree):
+    """本文件怎么引 `page_caliber` 的：`(模块别名集, 直导函数名集)`。"""
+    aliases, names = set(), set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                if a.name == "page_caliber":
+                    aliases.add(a.asname or "page_caliber")
+        elif isinstance(node, ast.ImportFrom) and node.module == "page_caliber":
+            for a in node.names:
+                names.add(a.asname or a.name)
+    return aliases, names
+
+
+def _caliber_call_layer(node, aliases, names, layers):
+    """节点是显式口径调用 ⇒ 返回层名，否则 None。"""
+    if not isinstance(node, ast.Call):
+        return None
+    f = node.func
+    if (isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name)
+            and f.value.id in aliases and f.attr in layers):
+        return f.attr
+    if isinstance(f, ast.Name) and f.id in names and f.id in layers:
+        return f.id
+    return None
+
+
+def _tgt_names(target):
+    for n in ast.walk(target):
+        if isinstance(n, ast.Name):
+            yield n.id
+
+
+def _render_producers(call):
+    """这个调用产出的东西是不是**渲染产物**（HTML 页/条）。"""
+    name = getattr(call.func, "attr", None) or getattr(call.func, "id", None)
+    if not name:
+        return False
+    return "render" in name or name.endswith("_page")
+
+
+def _render_vars(fn):
+    """函数内「渲染产物变量」名集合（赋自渲染调用，含 `page, _why = ...` 元组形）。"""
+    out = set()
+    for node in ast.walk(fn):
+        if (isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)
+                and _render_producers(node.value)):
+            for t in node.targets:
+                out.update(_tgt_names(t))
+    return out
+
+
+def _cjk_bound_names(scope):
+    """**作用域内**「绑定到含中文常量」的名字（赋值 ＋ for 迭代元组）。
+
+    ★ 为什么按整个文件跑一遍再取用：模块级常量（如 `_U05_OLD = ("点开看每一次",…)`）
+      也是文案断言的来源 —— 只扫函数体会漏掉「`for bad in _U05_OLD: if bad in page`」
+      这种形态（实测：0490 的 U-05 正是这样写的）。
+    """
+    out = set()
+    for node in ast.walk(scope):
+        if isinstance(node, ast.Assign):
+            val = node.value
+        elif isinstance(node, (ast.For, ast.comprehension)):
+            val = node.iter
+        else:
+            continue
+        has = any(isinstance(n, ast.Constant) and isinstance(n.value, str)
+                  and any("\u4e00" <= ch <= "\u9fff" for ch in n.value)
+                  for n in ast.walk(val))
+        if not has:
+            continue
+        tgt = node.target if isinstance(node, (ast.For, ast.comprehension)) \
+            else ast.Tuple(elts=list(node.targets), ctx=ast.Store())
+        out.update(_tgt_names(tgt))
+    return out
+
+
+def _left_maybe_cjk(left, cjk_names):
+    if isinstance(left, ast.Constant) and isinstance(left.value, str):
+        return any("\u4e00" <= ch <= "\u9fff" for ch in left.value)
+    if isinstance(left, ast.Name):
+        return left.id in cjk_names
+    return any(isinstance(n, ast.Constant) and isinstance(n.value, str)
+               and any("\u4e00" <= ch <= "\u9fff" for ch in n.value)
+               for n in ast.walk(left))
+
+
+def _s48a_violations(tree, aliases, names, text_layers):
+    """① 文案断言打在**裸渲染产物**上（未经正文口径）。
+
+    ★ 中文名集合按**整个文件**取（模块级常量也算），见 `_cjk_bound_names`。
+    ★★ 不只是「裸变量」违规 —— `page_caliber.raw(page)` / `.chrome(page)` 同样违规：
+      中文文案只可能来自**正文层**，声明「我要看整页」等于把 CSS 注释又放回来。
+      （不把这条写死，S48 就是**纸糊的**：换 `raw(...)` 一行就绕过去了。）
+    """
+    all_layers = set(text_layers) | {"raw", "chrome"}
+    out = []
+    file_cjk = _cjk_bound_names(tree)
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        raw_vars = _render_vars(fn)
+        if not raw_vars:
+            continue
+        cjk = file_cjk | _cjk_bound_names(fn)
+        for cmp_ in ast.walk(fn):
+            if not isinstance(cmp_, ast.Compare):
+                continue
+            for op, c in zip(cmp_.ops, cmp_.comparators):
+                if not isinstance(op, (ast.In, ast.NotIn)):
+                    continue
+                if not _left_maybe_cjk(cmp_.left, cjk):
+                    continue
+                # 右操作数：裸渲染变量 ⇒ 违规
+                if isinstance(c, ast.Name) and c.id in raw_vars:
+                    out.append((fn.name, cmp_.lineno, c.id))
+                    continue
+                # 右操作数：显式口径调用 —— 只有**正文层**才放行
+                layer = _caliber_call_layer(c, aliases, names, all_layers)
+                if layer is not None and layer not in text_layers:
+                    out.append((fn.name, cmp_.lineno,
+                                "page_caliber.%s(...)" % layer))
+    return out
+
+
+#: 「带调用语法的正则」：标识符（可带点）紧跟转义左括号，如 `reading_note\(`
+_CALL_PAT = re.compile(r"[A-Za-z_][A-Za-z0-9_.]*\\\(")
+
+
+def _s48b_violations(tree):
+    """② 用文本正则数源码里的**调用点**（注释会被一并算上）。"""
+    out = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name) and node.func.id == "len"
+                and len(node.args) == 1 and isinstance(node.args[0], ast.Call)):
+            continue
+        inner = node.args[0]
+        fname = getattr(inner.func, "attr", None) or getattr(inner.func, "id", None)
+        if fname not in ("findall", "finditer"):
+            continue
+        pats = [a for a in inner.args
+                if isinstance(a, ast.Constant) and isinstance(a.value, str)]
+        if any(_CALL_PAT.search(p.value) for p in pats):
+            out.append((node.lineno, (pats[0].value[:40] if pats else "")))
+    return out
+
+
+@check("S48 判据扫渲染产物必须显式选层；数调用点必须用 AST（C2）")
+def s48():
+    """C2（2026-10-13）：**非正文层不许当正文**。
+
+    ★ 两条一起守（同一病、两个面，见段首注释）：
+      ① 渲染产物上的**文案断言**（左操作数可能含中文）必须经
+         `page_caliber.body(...)` / `page_caliber.body_without_terms(...)`；
+      ② 数源码里的调用点必须 AST，不许 `len(re.findall(<调用语法>))`。
+    ★ 反空转：`ci/page_caliber.py` 必须存在、且**至少一个判据文件真的在用它**
+      —— 装置建了不落地 = 下次照样赌注释（S47 同款纪律）。
+    ★ 口径本身不在这里重写：层名逐字取自 `page_caliber.py`（维一）。
+    """
+    contract = _caliber_contract()
+    if contract is None:
+        return ("缺 `ci/page_caliber.py`（或它没声明 LAYERS/TEXT_LAYERS）—— "
+                "统一口径装置不在位，渲染页断言又会各写一份剥法（C2 复发）")
+    layers, text_layers = contract["LAYERS"], contract["TEXT_LAYERS"]
+    bad, users = [], 0
+    for path in _judge_files():
+        try:
+            src = io.open(path, encoding="utf-8").read()
+            tree = ast.parse(src)
+        except Exception:                             # noqa: BLE001
+            continue
+        rel = os.path.relpath(path, ROOT).replace("\\", "/")
+        aliases, names = _caliber_bindings(tree)
+        if aliases or names:
+            users += 1
+        for fname, ln, var in _s48a_violations(tree, aliases, names, text_layers):
+            bad.append("%s:%d `%s` 里的文案断言打在**裸渲染变量** `%s` 上"
+                       "（须 `page_caliber.body(...)`）" % (rel, ln, fname, var))
+        for ln, pat in _s48b_violations(tree):
+            bad.append("%s:%d 用文本正则数调用点（pattern=%r）—— 注释会被算上，"
+                       "须改用 AST" % (rel, ln, pat))
+    if bad:
+        uniq = sorted(set(bad))
+        return ("；".join(uniq[:6])
+                + ("（共 %d 处）" % len(uniq) if len(uniq) > 6 else ""))
+    if users == 0:
+        return ("统一口径装置 `ci/page_caliber.py` 没有任何判据在用 ⇒ "
+                "机制建了没落地（渲染页断言照样会各剥各的）")
+    return True
+
+
+@check("N-S48 负控：裸渲染文案断言 / 文本正则数调用点 ⇒ S48 必须各报红")
+def n_s48():
+    """反向对照（维二）：两种违规各造一片段，S48 的检测逻辑必须抓到；
+    并反向确认**纯 ASCII 结构断言**与**数行数**不被误判（不误伤合法写法）。
+    """
+    contract = _caliber_contract()
+    if contract is None:
+        return "夹具不成立：`ci/page_caliber.py` 不在位，负控无分辨力"
+    tl = contract["TEXT_LAYERS"]
+    # ① 裸渲染文案断言（该红）
+    bad_a = (
+        "import page_caliber as PC\n"
+        "def probe():\n"
+        "    page = SV.render_page(view='inbox')\n"
+        "    for bad in ('\\u5206\\u6bcd',):\n"
+        "        if bad in page:\n"
+        "            return False\n"
+        "    return True\n")
+    t_a = ast.parse(bad_a)
+    al, nm = _caliber_bindings(t_a)
+    if not _s48a_violations(t_a, al, nm, tl):
+        return "负控失效：裸渲染文案断言没被检出（S48① 的检测逻辑是假的）"
+    # ①' 反向对照：走了正文口径 ⇒ 不许判违规
+    good_a = bad_a.replace("if bad in page:", "if bad in PC.body(page):")
+    if _s48a_violations(ast.parse(good_a), al, nm, tl):
+        return "负控有问题：走了 `page_caliber.body(...)` 仍被判违规 ⇒ 会误伤正确写法"
+    # ①'' **堵纸糊的后门**：把裸变量换成 `PC.raw(...)` 仍是违规
+    #     （中文文案只能来自正文层；声明"看整页"等于把 CSS 注释又放回来）
+    cheat_a = bad_a.replace("if bad in page:", "if bad in PC.raw(page):")
+    if not _s48a_violations(ast.parse(cheat_a), al, nm, tl):
+        return ("负控失效：把裸变量换成 `page_caliber.raw(...)` 就绕过了 S48①"
+                "⇒ 判据是纸糊的（一行替换即可逃逸）")
+    # ①'' 反向对照：**纯 ASCII 结构断言**（左操作数不含中文）不许判违规
+    good_ascii = (
+        "def probe():\n"
+        "    page = SV.render_page(view='inbox')\n"
+        "    return 'data-id=' in page and 'f=action' in page\n")
+    if _s48a_violations(ast.parse(good_ascii), set(), set(), tl):
+        return ("负控有问题：纯 ASCII 结构断言被误判成「文案断言」"
+                "⇒ 会误伤 40 处合法写法（机制变噪音）")
+    # ② 文本正则数调用点（该红）
+    bad_b = (
+        "import re\n"
+        "def probe(src):\n"
+        "    return len(re.findall('reading_note\\\\(', src))\n")
+    if not _s48b_violations(ast.parse(bad_b)):
+        return "负控失效：文本正则数调用点没被检出（S48② 的检测逻辑是假的）"
+    # ②' 反向对照：数**行数**（不是调用点）不许判违规
+    good_b = (
+        "import re\n"
+        "def probe(src):\n"
+        "    return len(re.findall('^\\\\s*\\\\(', src, re.M))\n")
+    if _s48b_violations(ast.parse(good_b)):
+        return "负控有问题：数行数（`^\\s*\\(`）被误判成「数调用点」⇒ 会误伤合法写法"
+    return True
+
+
 def main():
     print("=" * 74)
     print("0.42.0 meta 判据 —— 量具先量自己：判据不许用文本匹配代替结构匹配")
@@ -423,7 +722,6 @@ def main():
     print("-" * 74)
     print("  通过 %d / 失败 %d" % (len(PASSED), len(FAILED)))
     return 1 if FAILED else 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

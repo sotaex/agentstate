@@ -19,6 +19,7 @@ import time
 from datetime import datetime, timedelta
 
 import inbox_guards as G                      # 复用脚手架（new_hub / put_chain / req / Server）
+import page_caliber as PC                     # C2：渲染产物的统一剥除口径
 import inbox_model as M
 import inbox_server as SV
 import inbox_store as S
@@ -463,7 +464,7 @@ def c_attention_label_drills_to_action_list():
     # ★ 0.48.5（交接件 §5.6 乙2）：连「点开查看」四个字也删了 —— 替用户
     #   描述他即将做的动作（W08 立意）。钻取后缀现在是 `（N 件 / 分母…）`，
     #   本判据追随规格只锁行为（f=action 钻取在、件数带分母），不再锁字面。
-    return ("f=action" in h_inbox and "要处理" in h_inbox
+    return ("f=action" in h_inbox and "要处理" in PC.body(h_inbox)
             and "f=action" in h_report
             and M.count_text(1, 1) in h_report)
 
@@ -582,8 +583,8 @@ def c_page_has_no_read_button():
     """
     html = SV.render_page(view="inbox", filt="action", root=G.new_hub(), token="t",
                           items=[G.item("L2", "unread")])
-    return ("标为已读" not in html and "全部已读" not in html
-            and "知道了" in html and "忽略" in html)
+    return ("标为已读" not in PC.body(html) and "全部已读" not in PC.body(html)
+            and "知道了" in PC.body(html) and "忽略" in PC.body(html))
 
 
 def n_page_has_no_read_button():
@@ -606,8 +607,8 @@ def c_page_fix_button_only_when_down():
                         items=[G.item("L2", "unread")])
     h2 = SV.render_page(view="inbox", root=G.new_hub(), token="t", posture=ok,
                         items=[G.item("L2", "done")])
-    return ("马上修复" in h1 and 'name=op value="fix"' in h1
-            and "马上修复" not in h2 and "值守中" in h2)
+    return ("马上修复" in PC.body(h1) and 'name=op value="fix"' in h1
+            and "马上修复" not in PC.body(h2) and "值守中" in PC.body(h2))
 
 
 def n_page_fix_button_only_when_down():
@@ -617,7 +618,7 @@ def n_page_fix_button_only_when_down():
             "can_fix": False, "fix": None, "fix_hint": "需要重装（就地修不了）"}
     h = SV.render_page(view="inbox", root=G.new_hub(), token="t", posture=down,
                        items=[G.item("L2", "unread")])
-    return "马上修复" not in h and "失守" in h
+    return "马上修复" not in PC.body(h) and "失守" in PC.body(h)
 
 
 def c_page_down_without_fix_shows_howto():
@@ -633,8 +634,8 @@ def c_page_down_without_fix_shows_howto():
             "fix_hint": "就地修不了：请重新安装当前版本（重装会自动重新登记）。"}
     h = SV.render_page(view="inbox", root=G.new_hub(), token="t", posture=down,
                        items=[G.item("L2", "unread")])
-    return ('class="fixnote"' in h and down["fix_hint"] in h
-            and "马上修复" not in h and "失守" in h)
+    return ('class="fixnote"' in h and down["fix_hint"] in PC.body(h)
+            and "马上修复" not in PC.body(h) and "失守" in PC.body(h))
 
 
 def n_page_down_without_fix_shows_howto():
@@ -643,7 +644,7 @@ def n_page_down_without_fix_shows_howto():
           "fix": None, "fix_hint": ""}
     h = SV.render_page(view="inbox", root=G.new_hub(), token="t", posture=ok,
                        items=[G.item("L2", "unread")])
-    return 'class="fixnote"' not in h and "马上修复" not in h
+    return 'class="fixnote"' not in h and "马上修复" not in PC.body(h)
 
 
 def c_posture_off_has_no_fake_button():
@@ -699,7 +700,8 @@ def c_page_grouped_buckets():
                        posture={"state": "guarding", "label": "值守中", "why": "",
                                 "can_fix": False, "fix": None, "fix_hint": ""},
                        items=items)
-    return "按类型归并" in h and "×2" in h and "看这 2 条" in h
+    return ("按类型归并" in PC.body(h) and "×2" in h
+            and "看这 2 条" in PC.body(h))
 
 
 def n_page_grouped_buckets():
@@ -749,9 +751,9 @@ def c_page_action_grouped_not_hidden():
                                 "can_fix": False, "fix": None, "fix_hint": ""},
                        items=items)
     return (h.count('class="item grp') == 1 and "×3" in h
-            and "哨兵进程不在岗" in h             # ① 原因
+            and "哨兵进程不在岗" in PC.body(h)    # ① 原因
             and 'value="done_all"' in h           # ② 批量动作
-            and "看这 3 条" in h)                 # ③ 钻取
+            and "看这 3 条" in PC.body(h))        # ③ 钻取
 
 
 def n_page_action_grouped_not_hidden():
@@ -828,7 +830,7 @@ def c_report_drill_links():
                        items=[G.item("L2", "unread")])
     return ("f=win:24:lv:R0" in h and "f=win:24:lv:L2" in h
             and "f=day:2026-10-06:rule:DST-01" in h and "f=action" in h
-            and "今天逐小时" not in h and "f=today:" not in h
+            and "今天逐小时" not in PC.body(h) and "f=today:" not in h
             and not M.known_filter("today:09"))
 
 
@@ -1405,7 +1407,8 @@ def c_consequences_has_consumer():
                               "text": "有 1 个安全区，此刻没人给它们上锁：D:\\secret"}]}
     h = SV.render_page(view="inbox", root=G.new_hub(), token="t", posture=down,
                        items=[G.item("L2", "unread")])
-    return ('class="cons"' in h and "D:\\secret" in h and "失守的损失" in h)
+    return ('class="cons"' in h and "D:\\secret" in h
+            and "失守的损失" in PC.body(h))
 
 
 def n_consequences_has_consumer():
@@ -1992,8 +1995,8 @@ def c_ledger_page_populates_from_chain_snapshot():
             and len(lines) == len(lines_after_repeat) == 1
             and len(lines_after_correction) == len(lines_after_same_correction) == 2
             and all(corrected.get(k) == 0 for k in ("blocked", "noticed", "breached", "acked"))
-            and "账本尚无可核对记录" not in page
-            and "拦截危险操作" in page and "防护缺口" in page)
+            and "账本尚无可核对记录" not in PC.body(page)
+            and "拦截危险操作" in PC.body(page) and "防护缺口" in PC.body(page))
 
 
 def n_ledger_page_populates_from_chain_snapshot():
@@ -2003,7 +2006,7 @@ def n_ledger_page_populates_from_chain_snapshot():
     page = SV.render_page(view="ledger", root=hub, token="t", items=items,
                           record_ledger=False)
     return (not os.path.exists(L.daily_path(hub))
-            and "账本尚无可核对记录" in page
+            and "账本尚无可核对记录" in PC.body(page)
             and not L.load_days(hub))
 
 
@@ -2129,7 +2132,7 @@ def c_ledger_page_has_claim_slot_and_location():
     day, items = _ledger_test_items()
     page = SV.render_page(view="ledger", root=hub, token="t", items=items,
                           record_ledger=True)
-    if "这份账本在" not in page or "可以整体导出带走" not in page:
+    if "这份账本在" not in PC.body(page) or "可以整体导出带走" not in PC.body(page):
         return False
     m = re.search(r'<button[^>]*\bdisabled\b[^>]*>([^<]*)</button>', page)
     return bool(m) and "认领到账号" in m.group(1)
