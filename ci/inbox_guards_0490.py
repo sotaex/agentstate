@@ -94,6 +94,38 @@ def _load(src, tag, rel):
     return mod
 
 
+def _mut_render(src_mutated, tag, rel, **kw):
+    """C1 两步法 · **第一步**：变异模块必须「**能 import ＋ 最小渲染不抛**」。
+
+    返回 `(page, None)`；任一步抛异常 ⇒ `(None, 说明串)`，调用方**必须**
+    `if _why: return _why` —— 那是**量具故障**（变异写坏了源码／少给了参数），
+    **不是产品问题**，也**不算通过**。
+
+    ★★ 要防的复发（C1 交接件 §C1，本轮实测）：
+      N-U13 首跑 💥 —— 把头部 mp4 形态加回时 `args` 少给一个 `M.STATE_VAR[st]`，
+      变异渲染抛 `TypeError: not enough arguments for format string`。
+      负控的职责是「证明**正判据**会红」，结果它**自己先崩了** ⇒
+      **量具故障伪装成了产品问题**（而人得读 traceback 才分辨得出）。
+      ⇒ 模板化成两步：① 这一步（能 import ＋ 最小渲染不抛）；
+        ② 行为断言（变异可观测 ＋ 真实现不带该形状）。两步都绿，负控才算有效。
+
+    ★ 判据纪律：**判据不许二次实现** —— 这里只做"跑一次 ＋ 把异常分类成说明串"，
+      不重写任何渲染逻辑。
+    """
+    try:
+        mut = _load(src_mutated, tag, rel)
+    except Exception as e:                                          # noqa: BLE001
+        return None, ("负控自身失效：变异模块**加载就抛** %s: %s —— "
+                      "量具故障（变异把源码写坏了），不是产品问题，不算通过"
+                      % (type(e).__name__, e))
+    try:
+        return mut.render_page(**kw), None
+    except Exception as e:                                          # noqa: BLE001
+        return None, ("负控自身失效：变异模块**渲染抛** %s: %s —— "
+                      "量具故障（多半是变异少给了参数），不是产品问题，不算通过"
+                      % (type(e).__name__, e))
+
+
 def _ago(hours=1.0):
     """相对现在的 ISO 时点 —— **不许写死日期**（0470 0.48.4 时间炸弹教训）。"""
     return (datetime.now().astimezone() - timedelta(hours=hours)).replace(
@@ -262,15 +294,17 @@ def n_u01():
               '               % _esc(M.reading_note()))')
     if anchor not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
-    mut = _load(src.replace(
+    page, _why = _mut_render(src.replace(
         anchor,
         '            + ("<div class=\\"note\\" style=\\"margin:0 0 8px\\">%s</div>"\n'
         '               % _esc("最近 %d 小时 · 以上数字的分母均为本次载入的 %d 条记录"\n'
         '                      % (M.WINDOW_HOURS, n_all)))'),
-        "is0490_nu01", _SERVER_REL)
-    page = mut.render_page(view="inbox", filt=M.BUCKET_ACTION,
+        "is0490_nu01", _SERVER_REL,
+                             view="inbox", filt=M.BUCKET_ACTION,
                            root=tempfile.mkdtemp(prefix="g0490_nu01_"),
                            token="T", items=_items(), posture=_POSTURE)
+    if _why:
+        return _why
     if "不随页面停留刷新" in page:
         return "负控失效：调用点改回旧串后新措辞仍在（%r）" % page[:80]
     if "分母均为" not in page:
@@ -340,17 +374,19 @@ def n_u03a():
     src = _src(_SERVER_REL)
     if _NOTE_CALL_REPORT not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
-    mut = _load(src.replace(_NOTE_CALL_REPORT,
+    page, _why = _mut_render(src.replace(_NOTE_CALL_REPORT,
                             '    _win_note = ("<div class=\\"note\\" style=\\"margin:0 0 8px\\">'
                             '%s</div>"\n'
                             '                 % _esc("最近 %d 小时 · 以下数字的分母均为窗口内的 '
                             '%d 条记录"\n'
                             '                        % (hrs, _win_total)))'),
-                "is0490_nu03a", _SERVER_REL)
-    page = mut.render_page(view="report",
+                "is0490_nu03a", _SERVER_REL,
+                             view="report",
                            root=tempfile.mkdtemp(prefix="g0490_nu03a_"),
                            token="T", items=_items(), rep=_REP,
                            posture=_POSTURE)
+    if _why:
+        return _why
     if M.reading_note() in page and "分母均为" not in _body_without_terms(page):
         return "负控失效：改回旧串后日报页仍同源且无「分母」"
     if "分母" not in _body_without_terms(page):
@@ -369,12 +405,14 @@ def n_u03b():
     anchor = '" ｜ 共 %d 条"'
     if anchor not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
-    mut = _load(src.replace(anchor, '" ｜ 分母 %d"'),
-                "is0490_nu03b", _SERVER_REL)
-    page = mut.render_page(view="report",
+    page, _why = _mut_render(src.replace(anchor, '" ｜ 分母 %d"'),
+                "is0490_nu03b", _SERVER_REL,
+                             view="report",
                            root=tempfile.mkdtemp(prefix="g0490_nu03b_"),
                            token="T", items=_items(), rep=_REP,
                            posture=_POSTURE)
+    if _why:
+        return _why
     if "分母" not in _body_without_terms(page):
         return "负控失效：写回「分母」后正文仍零出现（注入没生效）"
     return True
@@ -424,13 +462,15 @@ def n_u08():
               '                % (v, cls, _esc(tip), _esc(label), n, _esc(unit)))')
     if anchor not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
-    mut = _load(src.replace(anchor,
+    page, _why = _mut_render(src.replace(anchor,
                             '                "</a>"\n'
                             '                % (v, cls, _esc(tip), _esc(label), n))'),
-                "is0490_nu08", _SERVER_REL)
-    page = mut.render_page(view="inbox", filt=M.BUCKET_ACTION,
+                "is0490_nu08", _SERVER_REL,
+                             view="inbox", filt=M.BUCKET_ACTION,
                            root=tempfile.mkdtemp(prefix="g0490_nu08_"),
                            token="T", items=_items(), posture=_POSTURE)
+    if _why:
+        return _why
     vis = "".join(v for _f, v, _t in _tabs(page))
     if "件" in vis or "条" in vis:
         return "负控失效：删掉单位 span 后可见文本仍带单位"
@@ -523,14 +563,16 @@ def n_u10():
     anchor = '        "%s%s<div class=\\"spacer\\"></div></header>"'
     if anchor not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
-    mut = _load(src.replace(
+    page, _why = _mut_render(src.replace(
         anchor,
         '        "%s%s<div class=\\"spacer\\"></div>"\n'
         '        "<div class=\\"who\\">本机 · 127.0.0.1<br>数据不出门</div></header>"'),
-        "is0490_nu10", _SERVER_REL)
-    page = mut.render_page(view="inbox", filt=M.BUCKET_ACTION,
+        "is0490_nu10", _SERVER_REL,
+                             view="inbox", filt=M.BUCKET_ACTION,
                            root=tempfile.mkdtemp(prefix="g0490_nu10_"),
                            token="T", items=_items(), posture=_POSTURE)
+    if _why:
+        return _why
     if "本机 · 127.0.0.1" not in page:
         return "负控失效：who 块加回后页面仍不含它（注入没生效）"
     live = _page("inbox", filt=M.BUCKET_ACTION)
@@ -568,14 +610,16 @@ def n_u11():
     anchor = ('        return ("<a title=\\"最近 %d 小时的记录数（自载入起算）\\" "')
     if anchor not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
-    mut = _load(src.replace(
+    page, _why = _mut_render(src.replace(
         anchor,
         '        return ("<a title=\\"最近 %d 小时的记录数；括号里是按事由归并后的件数，'
         '点进去看全部明细\\" "'),
-        "is0490_nu11", _SERVER_REL)
-    page = mut.render_page(view="inbox", filt=M.BUCKET_ACTION,
+        "is0490_nu11", _SERVER_REL,
+                             view="inbox", filt=M.BUCKET_ACTION,
                            root=tempfile.mkdtemp(prefix="g0490_nu11_"),
                            token="T", items=_items(), posture=_POSTURE)
+    if _why:
+        return _why
     if not any(len(t) > 20 for t in re.findall(r'title="([^"]*)"', page)):
         return "负控失效：加回 40 字串后全部 title 仍 ≤20（注入没生效）"
     live_titles = re.findall(r'title="([^"]*)"', _page("inbox"))
@@ -618,15 +662,17 @@ def n_u05():
               '                     % (hrs, _revived, _win_total))')
     if anchor not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
-    mut = _load(src.replace(
+    page, _why = _mut_render(src.replace(
         anchor,
         '                     "%d 次</a> / %d（点开看每一次）"\n'
         '                     % (hrs, _revived, _win_total))'),
-        "is0490_nu05", _SERVER_REL)
-    page = mut.render_page(view="report",
+        "is0490_nu05", _SERVER_REL,
+                             view="report",
                            root=tempfile.mkdtemp(prefix="g0490_nu05_"),
                            token="T", items=_items(), rep=_REP,
                            posture=_POSTURE)
+    if _why:
+        return _why
     if "点开看每一次" not in page:
         return "负控失效：加回后渲染页仍不含（注入没生效）"
     live = _page("report")
@@ -679,11 +725,13 @@ def n_u04():
     anchor = 'label, GL.chip("light", mk=True), suffix,'
     if anchor not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
-    mut = _load(src.replace(anchor, 'label, "", suffix,'),
-                "is0490_nu04", _SERVER_REL)
-    page = mut.render_page(view="inbox", filt=M.BUCKET_ACTION,
+    page, _why = _mut_render(src.replace(anchor, 'label, "", suffix,'),
+                "is0490_nu04", _SERVER_REL,
+                             view="inbox", filt=M.BUCKET_ACTION,
                            root=tempfile.mkdtemp(prefix="g0490_nu04_"),
                            token="T", items=_items(), posture=_POSTURE)
+    if _why:
+        return _why
     if "light" in re.findall(r'<details class="term mk" data-t="([^"]+)"',
                              page):
         return "负控失效：摘掉 light 芯片后它仍在（注入没生效）"
@@ -720,11 +768,13 @@ def n_u06():
     anchor = "    head = ('<h2>%s</h2>' % PAGE_TITLES[\"inbox\"]\n"
     if anchor not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
-    mut = _load(src.replace(anchor, "    head = (\"\"\n"),
-                "is0490_nu06", _SERVER_REL)
-    page = mut.render_page(view="inbox", filt=M.BUCKET_ACTION,
+    page, _why = _mut_render(src.replace(anchor, "    head = (\"\"\n"),
+                "is0490_nu06", _SERVER_REL,
+                             view="inbox", filt=M.BUCKET_ACTION,
                            root=tempfile.mkdtemp(prefix="g0490_nu06_"),
                            token="T", items=_items(), posture=_POSTURE)
+    if _why:
+        return _why
     if re.findall(r"<h2>([^<]*)</h2>", page):
         return "负控失效：删掉 h2 后页面仍有 h2（注入没生效）"
     live = re.findall(r"<h2>([^<]*)</h2>", _page("inbox"))
@@ -775,17 +825,19 @@ def n_u13():
     a_args = "        % (M.STATE_VAR[st], M.STATE_VAR[st],"
     if a_img not in src or a_args not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
-    mut = _load(src.replace(
+    page, _why = _mut_render(src.replace(
         a_img,
         '        "<div class=\\"logo\\"><video autoplay loop muted playsinline "\n'
         '        "src=\\"/assets/%s.mp4?t=%s\\"></video></div>"').replace(
         a_args,
         "        % (_esc(M.STATE_LOGO[st]), _esc(token), M.STATE_VAR[st],"
         " M.STATE_VAR[st],"),
-        "is0490_nu13", _SERVER_REL)
-    page = mut.render_page(view="inbox", filt=M.BUCKET_ACTION,
+        "is0490_nu13", _SERVER_REL,
+                             view="inbox", filt=M.BUCKET_ACTION,
                            root=tempfile.mkdtemp(prefix="g0490_nu13_"),
                            token="T", items=_items(), posture=_POSTURE)
+    if _why:
+        return _why
     head = re.search(r'<header class="bar">.*?</header>', page, re.S)
     if not head or ".mp4" not in head.group(0):
         return "负控失效：换回 mp4 后头部仍无 mp4（注入没生效）"
@@ -829,12 +881,14 @@ def n_u15():
     anchor = ".state span{font-size:13px;color:var(--fg)}"
     if anchor not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
-    mut = _load(src.replace(anchor,
+    page, _why = _mut_render(src.replace(anchor,
                             ".state span{font-size:12px;color:var(--muted)}"),
-                "is0490_nu15", _SERVER_REL)
-    page = mut.render_page(view="inbox", filt=M.BUCKET_ACTION,
+                "is0490_nu15", _SERVER_REL,
+                             view="inbox", filt=M.BUCKET_ACTION,
                            root=tempfile.mkdtemp(prefix="g0490_nu15_"),
                            token="T", items=_items(), posture=_POSTURE)
+    if _why:
+        return _why
     # CSS 在渲染产物里 ⇒ 旧声明回潮必须能在渲染页观察到
     if ".state span{font-size:12px;color:var(--muted)}" not in page:
         return "负控失效：加回旧声明后渲染页观察不到（注入没生效）"
@@ -981,14 +1035,16 @@ def n_w02():
               '            % (_esc(title), mark, CSS))')
     if a_body not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
-    mut = _load(src.replace(
+    page, _why = _mut_render(src.replace(
         a_body,
         '            "<style>%s</style></head><body><span>%s</span>"\n'
         '            % (_esc(title), mark, CSS, mark))'),
-        "is0490_nw02", _SERVER_REL)
-    page = mut.render_page(view="inbox", filt=M.BUCKET_ACTION,
+        "is0490_nw02", _SERVER_REL,
+                             view="inbox", filt=M.BUCKET_ACTION,
                            root=tempfile.mkdtemp(prefix="g0490_nw02_"),
                            token="T", items=_items(), posture=_POSTURE)
+    if _why:
+        return _why
     body = page.split("<body>", 1)[-1]
     if not re.search(r"#[0-9a-f]{6}", body):
         return "负控失效：正文置回 run_id 后渲染页观察不到（注入没生效）"
@@ -1623,12 +1679,92 @@ def n_w06():
     return True
 
 
+# ══════════════ C1 · 负控模板化（守「量具的量具」）══════════════
+def _c1_scan(text):
+    """扫出**负控块里裸渲染变异模块**的地方。返回违规负控名列表。
+
+    ★ 为什么扫源码文本：这是**元判据**（守量具的量具），与 D-31（守登记簿）、
+      D-27/D-28（守量具）同族。
+    ★★ 为什么用 `ast` 而不是正则（2026-10-13 实测踩到）：
+      正则会**把字符串字面量里**的 `mut.render_page(` 也当成真调用 ——
+      N-C-01 的变异文本里正有这一句，于是 C-01 **把自己人咬了**（首跑 2 红）。
+      `ast` 只看**真的 Call 节点**，字符串里的文本不算。
+    ★ 只扫 `@check("N-…")` 装饰的函数 —— 正判据里的 `_page(...)` 是**真实现**渲染，
+      本来就该直调；`_mut_render` 自己的函数体不带 `@check`，天然不在扫描范围。
+    """
+    import ast as _ast
+    tree = _ast.parse(text)
+    offenders = []
+    for node in tree.body:
+        if not isinstance(node, _ast.FunctionDef):
+            continue
+        name = None
+        for dec in node.decorator_list:
+            if (isinstance(dec, _ast.Call) and isinstance(dec.func, _ast.Name)
+                    and dec.func.id == "check" and dec.args
+                    and isinstance(dec.args[0], _ast.Constant)):
+                name = dec.args[0].value
+        if not isinstance(name, str) or not name.startswith("N-"):
+            continue
+        for sub in _ast.walk(node):
+            if (isinstance(sub, _ast.Call)
+                    and isinstance(sub.func, _ast.Attribute)
+                    and sub.func.attr == "render_page"):
+                offenders.append(name.split()[0])
+                break
+    return offenders
+
+
+@check("C-01 ★ 负控模板化：渲染型负控必须走 _mut_render（两步法第一步）")
+def c1_01():
+    """★★ C1（2026-10-13）：负控的变异渲染必须经 `_mut_render`。
+
+    要防的复发（C1 交接件 §C1）：负控把**自己的**故障（变异写坏参数 ⇒ 渲染抛
+    `TypeError`）报成了**产品红** —— 量具故障伪装成产品问题，人得读 traceback
+    才分辨得出。两步法第一步「能 import ＋ 最小渲染不抛」不过 ⇒ 明确判
+    「负控自身失效，不算通过」。
+
+    ★ 断言（**结构**，不查文案）：本文件里**任何**负控块都不许出现裸的
+      `mut.render_page(`／`mut2.render_page(` —— 必须全部经 `_mut_render`。
+    """
+    me = io.open(os.path.abspath(__file__), encoding="utf-8").read()
+    if "_mut_render(" not in me:
+        return "找不到 `_mut_render` —— C1 的两步模板被删了（负控又会把量具故障当产品红）"
+    bad = _c1_scan(me)
+    if bad:
+        return ("这些负控仍**直接**渲染变异模块（未经 _mut_render 的前置断言）：%s"
+                % "、".join(bad))
+    return True
+
+
+@check("N-C-01 负控：把一处 _mut_render 换回裸 mut.render_page ⇒ C-01 必须红")
+def n_c1_01():
+    """反向对照（维二）：把一条负控的 `_mut_render(...)` 换回**裸渲染** ⇒
+    元判据必须抓到。★ 证明 `_c1_scan` 真的会响（不是永远绿的装饰）。
+
+    ★ 注入：把**第一处** `page, _why = _mut_render(` 换回 `page = mut.render_page(`
+      —— 正是 C1 之前那 12 处的原貌（`_why` 那行仍在，但本判据只扫文本，不影响）。
+    """
+    me = io.open(os.path.abspath(__file__), encoding="utf-8").read()
+    anchor = "    page, _why = _mut_render("
+    if anchor not in me:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    mut_src = me.replace(anchor, "    page = mut.render_page(", 1)
+    if _c1_scan(me):
+        return "夹具不成立：真源本身就有裸渲染 ⇒ 负控无分辨力"
+    if not _c1_scan(mut_src):
+        return ("负控失效：换回裸渲染后 `_c1_scan` 仍报无违规 ⇒ 元判据是装饰"
+                "（C1 的守护没人真守）")
+    return True
+
+
 def main():
     print("=" * 78)
     print("0.48.5 值守台细节修订判据（交接件 v1.1 §5.7）—— "
           "批1 U-01/U-03/U-08 · 批2 U-10/U-11/U-05 · 批3 U-04/U-06 · "
           "批4 U-13/U-15 · 批5 W-01/W-02（认窗白名单，单独 commit）· "
-          "批6 W-03（A2）· 批7 W-04（B1）· 批8 W-05（B2）· 批9 W-06（B3）")
+          "批6 W-03（A2）· 批7 W-04（B1）· 批8 W-05（B2）· 批9 W-06（B3）· "
+          "批10 C1（负控模板化：渲染型负控走 _mut_render 两步法）")
     print("（变异只在内存，账本与链只落临时目录，不写任何产品文件；"
           "戊2/戊3 视觉项无判据，走 §6.1 截图验收 —— U-13 只含戊2 机械部分）")
     print("=" * 78)

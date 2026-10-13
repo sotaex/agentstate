@@ -27,6 +27,13 @@
      R1：`ast.dump(...)` 的结果被拿去做子串匹配（`in dump` / `not in dump`）
      R2：用 `ast.walk(...)` 取"第一个"匹配项（顺序不可靠）
 
+  ★★ 0.48.5 追加 R3（第三处同型的病，也是"量具先量自己"的第三个面）：
+     R3：**并发夹具不许赌运气** —— 判据里"一次起 N 个真进程抢同一样东西"
+         （`Popen` 落在循环/推导式内）却没走**会合栅栏**（`ci/race_amp.py`）。
+         由来是 0470 `N-S98` 与 0450 `N-S75` 在同一周里**各假红一次**
+         （实测撞上率 ≈ 83%，即六轮里必有一轮"没撞上"）——
+         本仓铁律「一个时红时绿的量具比恒红的更坏」。
+
   ★ 为什么是"扫自己人"而不是靠review：本班五次全是**当场觉得那么写很自然**。
     自然的错要靠机械检查抓，不靠自觉。
   ★ 位置纪律：只读 ci/ 下的判据源，**不跑**它们（跑是 delivery_gate 的事）。
@@ -278,6 +285,129 @@ def n_s46():
                     legal_hit = True
     if legal_hit:
         return "负控有问题：`for ... walk` + `命中即 return` 被误判成违规（会误伤合法写法）"
+    return True
+
+
+# ══════════ S47 · 并发夹具不许赌运气（N 路齐冲必须走会合栅栏） ══════════════
+#: "一次起 N 个进程"的语法形态：`Popen` 出现在**循环/推导式**里
+_BURST_NODES = (ast.For, ast.While, ast.ListComp, ast.SetComp, ast.DictComp,
+                ast.GeneratorExp)
+
+
+def _burst_lines(node):
+    """函数体里 `Popen` 调用**落在循环/推导式内**的那些行号（= N 路齐冲）。"""
+    out = set()
+    for sub in ast.walk(node):
+        if isinstance(sub, _BURST_NODES):
+            for c in ast.walk(sub):
+                if (isinstance(c, ast.Call)
+                        and getattr(c.func, "attr", None) == "Popen"):
+                    out.add(c.lineno)
+    return out
+
+
+def _uses_race_amp(node):
+    """函数体里有没有**真调用**会合栅栏（`race_amp.<fn>(...)`）。
+
+    ★ 只认**调用**，不认 `import race_amp` —— 否则"导进来摆着不用"也能过。
+    """
+    for sub in ast.walk(node):
+        if (isinstance(sub, ast.Call)
+                and isinstance(sub.func, ast.Attribute)
+                and isinstance(sub.func.value, ast.Name)
+                and sub.func.value.id == "race_amp"):
+            return True
+    return False
+
+
+def _race_burst_violations(tree):
+    """返回 `[(函数名, 行号, [齐冲行号])]` —— 起 N 个真进程却没走会合栅栏的函数。"""
+    out = []
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        bursts = _burst_lines(fn)
+        if not bursts or _uses_race_amp(fn):
+            continue
+        out.append((fn.name, fn.lineno, sorted(bursts)))
+    return out
+
+
+@check("S47 判据里「一次起 N 个真进程」必须走会合栅栏（race_amp）")
+def s47():
+    """R3：函数体里 `Popen` 调用落在**循环/推导式**内（= 一次起 N 个进程抢同一样
+    东西）⇒ 该函数必须**真调用** `race_amp`（`ci/race_amp.py` 的会合栅栏）。
+
+    ★ 为什么必须禁（实测，不是推演）：N 路齐冲若不先会合，就**全凭调度运气** ——
+      `Popen` 返回得很快，但解释器启动有先后（本机实测每个 ≈100–200ms，机器一忙
+      更久）；窗口只有几十毫秒时，"同时冲"会退化成"排队冲"，于是"本该撞车"的
+      那一轮一次都没撞上。实测代价：
+        · 0470 `N-S98`：本机复跑 6 轮 **5 撞 / 1 不撞**（撞上率 ≈ 83%）；
+          全量交付闸门里假红过一次，报「4 轮并发守恒均成立（total=160, missed=0）」。
+        · 0450 `N-S75`：打包闸门里假红过一次（0450 12 绿 / 1 红），
+          随后连跑 3 次又全绿 —— 典型**时红时绿**。
+      本仓铁律「**一个时红时绿的量具比恒红的更坏**」⇒ 这类夹具必须走会合栅栏。
+      ★ 注意"等一个 go 文件"**不算**会合栅栏：迟到的进程看见 go 已存在就直接冲，
+        等于没等（这正是 N-S75 假红的原因）。会合等的是**兄弟进程本身**。
+
+    ★ 本判据只管"N 路齐冲"这一形态；**固定几个进程 ＋ 握手**（如 0450 的
+      `_run_rw` 读者/写者）不算违规 —— 那种写法的重叠由"读者持续循环"保证，
+      且自带 `seen > 0` 的假绿闸。
+    """
+    bad = []
+    users = 0
+    for path in _judge_files():
+        try:
+            src = io.open(path, encoding="utf-8").read()
+            tree = ast.parse(src)
+        except Exception:                             # noqa: BLE001
+            continue
+        rel = os.path.relpath(path, ROOT).replace("\\", "/")
+        if "race_amp" in src:
+            users += 1
+        for name, ln, bursts in _race_burst_violations(tree):
+            bad.append("%s:%d `%s`（齐冲行 %s）" % (rel, ln, name, bursts[:3]))
+    if bad:
+        uniq = sorted(set(bad))
+        return ("；".join(uniq[:6])
+                + ("（共 %d 处）" % len(uniq) if len(uniq) > 6 else ""))
+    # ★ 反空转：装置建了必须**真的在用**（"机制是否落地"是可查的，不是自报）
+    if users == 0:
+        return ("会合栅栏装置 `ci/race_amp.py` 没有任何判据在用 ⇒ "
+                "机制建了没落地（下次并发负控照样赌运气）")
+    return True
+
+
+@check("N-S47 负控：造一个「列表推导里 Popen 齐冲」的片段 ⇒ S47 必须报红")
+def n_s47():
+    snippet = (
+        "import subprocess\n"
+        "def race():\n"
+        "    procs = [subprocess.Popen(['x']) for _ in range(4)]\n"
+        "    for p in procs:\n"
+        "        p.wait()\n")
+    if not _race_burst_violations(ast.parse(snippet)):
+        return "负控失效：构造的违规片段没被检出（S47 的检测逻辑是假的）"
+    # ★ 反向对照：固定两个进程（读者/写者握手，如 0450 `_run_rw`）**不许**被误判
+    pair = (
+        "import subprocess\n"
+        "def rw():\n"
+        "    a = subprocess.Popen(['r'])\n"
+        "    b = subprocess.Popen(['w'])\n"
+        "    a.wait()\n"
+        "    b.wait()\n")
+    if _race_burst_violations(ast.parse(pair)):
+        return ("负控有问题：固定两个进程（读者/写者握手）被误判成「N 路齐冲」"
+                "⇒ 会误伤合法写法")
+    # ★ 反向对照：走了会合栅栏的 N 路齐冲写法**不许**被判违规
+    good = (
+        "import subprocess\n"
+        "import race_amp\n"
+        "def race():\n"
+        "    body = 'import subprocess\\n'\n"
+        "    rcs, d = race_amp.run_race(body, 4)\n")
+    if _race_burst_violations(ast.parse(good)):
+        return "负控有问题：走了会合栅栏的写法仍被判违规 ⇒ 会误伤正确写法"
     return True
 
 

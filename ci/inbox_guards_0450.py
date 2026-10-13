@@ -189,12 +189,22 @@ def n_s74():
 
 
 # ══════════════ 甲 · S75 真进程并发：互斥成立（只有一个赢家） ══════════════
+#: ★★ 0.48.5：起跑栅栏改走 `ci/race_amp.py` 的**会合栅栏**。
+#:   旧版是"等一个 go 文件"（`_RACE_CHILD` 里 `while not os.path.exists(go)`）——
+#:   它治不了**启动错峰**：`Popen` 返回得很快，但 N 个解释器启动有先后
+#:   （本机实测每个 ≈100–200ms，机器一忙更久），**迟到的进程看见 go 已存在就
+#:   直接冲**，等于没等 ⇒ "同时冲"退化成"排队冲"，50ms 的窗口就撞不上了。
+#:   实测代价：打包闸门里 N-S75 假红过一次（0450 12 绿 / 1 红），随后连跑 3 次
+#:   又是 13 绿 / 0 红 —— **时红时绿**，本仓铁律「一个时红时绿的量具比恒红的更坏」。
+#:   会合栅栏等的是**兄弟进程本身**（全部到齐才放行），错峰因此被消掉。
 _RACE_CHILD = r'''
-import os, sys, time
-mode, lockbase, counter, root, go = (sys.argv[1], sys.argv[2], sys.argv[3],
-                                     sys.argv[4], sys.argv[5])
-sys.path.insert(0, root)
+import os
+import sys
+import time
+sys.path.insert(0, sys.argv[4])          # 仓根：import 产品自己的锁实现
 import audit_chain
+mode, lockbase, counter = sys.argv[1], sys.argv[2], sys.argv[3]
+
 
 def bump():
     try:
@@ -206,8 +216,6 @@ def bump():
     with open(counter, "w", encoding="utf-8") as f:
         f.write(str(n + 1))
 
-while not os.path.exists(go):        # 起跑栅栏：保证 N 个进程**真的同时**冲
-    time.sleep(0.002)
 
 if mode == "lock":
     lk = audit_chain.acquire_lock(lockbase)
@@ -222,27 +230,26 @@ else:
 
 
 def _run_race(mode, nproc=6):
-    """起 nproc 个**真进程**（带起跑栅栏）抢临界区；返回最终计数。
+    """起 nproc 个**真进程**（带**会合栅栏**）抢临界区；返回最终计数。
 
     互斥成立 ⇒ 计数恰为 nproc；无互斥 ⇒ 丢失更新 ⇒ 计数 < nproc。
+    ★ 会合失败（worker 超时未到齐 / 非正常退出）⇒ **抛异常**，调用方按
+      「夹具失效」处理 —— **绝不**把"没会合上"读成"没撞上"或"通过了"。
     """
+    import race_amp
     d = tempfile.mkdtemp(prefix="g0450_race_")
-    child = os.path.join(d, "child.py")
-    with io.open(child, "w", encoding="utf-8") as f:
-        f.write(_RACE_CHILD)
     lockbase = os.path.join(d, "crit")
     counter = os.path.join(d, "counter")
-    go = os.path.join(d, "go")
     with io.open(counter, "w", encoding="utf-8") as f:
         f.write("0")
-    procs = [subprocess.Popen([sys.executable, child, mode, lockbase, counter, ROOT, go],
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-             for _ in range(nproc)]
-    time.sleep(0.5)                                  # 等所有子进程进入起跑栅栏
-    with io.open(go, "w", encoding="utf-8") as f:    # 放行
-        f.write("go")
-    for p in procs:
-        p.wait(timeout=60)
+    rcs, d = race_amp.run_race(_RACE_CHILD, nproc,
+                               argv=[mode, lockbase, counter, ROOT],
+                               workdir=d, timeout=120)
+    if race_amp.join_failed(rcs):
+        raise AssertionError("会合失败（有 worker 超时未到齐）⇒ **夹具失效**：rcs=%r"
+                             % (rcs,))
+    if not race_amp.joined_ok(rcs):
+        raise AssertionError("抢锁子进程非正常退出：rcs=%r ⇒ 夹具失效" % (rcs,))
     with io.open(counter, encoding="utf-8") as f:
         return int((f.read().strip() or "0"))
 
@@ -260,14 +267,10 @@ def s75():
 @check("N-S75 负控：不起锁（直接进临界区）⇒ 计数必小于 N（证明本测试能测出无互斥）")
 def n_s75():
     n = 6
-    # ★★ 0.48.4：与 0470 的 N-S98 **同一类** —— 并发负控**本质是概率性的**。
-    #   6 个无锁进程抢临界区，若这一轮调度恰好没重叠，计数仍是 6 ⇒ 负控假红。
-    #   实测：0.48.4 打包闸门里撞出一次（0450 12 绿 / 1 红），随后连跑 3 次
-    #   又是 13 绿 / 0 红 —— **时红时绿**。本仓铁律「一个时红时绿的量具比恒红的
-    #   更坏」⇒ 加**有界重试**（照 0.48.2 给 N-S98 加的同一套）：
-    #     任一轮撞出竞态即判绿（证明这道锁在承重）；
-    #     K 轮全没撞上才判红，且要说明是「这几次没撞上」，不是「变异无效」。
-    K = 4
+    # ★★ 0.48.5：改走**会合栅栏**后，这一轮**每轮都真的同时冲**（不再靠调度运气）。
+    #   保留有界重试只作**机器天气**的兜底（正常情况下第 1 轮即撞出）；
+    #   K 轮全没撞上才判红，且要说明是「这几次没撞上」，不是「变异无效」。
+    K = 3
     last = n
     for _attempt in range(K):
         got = _run_race("nolock", n)

@@ -615,42 +615,101 @@ def s97():
 #:   这正是 0.45.0 要根治的那个形状 ——「静默丢失」，只是换了个发生地。
 #: ★ 修法方向：拿不到锁 ⇒ **一个字都不写**，返回 False ⇒ 调用方按"没抑制过"
 #:   处理（宁可多提示一次）。方向是**更吵**，不是**更静**。
-_CONC_WORKER = '''
-import os, sys, json
-sys.path.insert(0, %r)
-import host_shield as HS
-HS.notify_ledger_path = lambda: %r
-n = int(sys.argv[1]); tag = sys.argv[2]; out = sys.argv[3]
+#: 并发 worker 的**公共身体**（正控与负控共用）——
+#: ★ 栅栏**不在这里写**：由 `ci/race_amp.run_race()` 注入头部执行会合。
+#:   `mod` = 子进程要 import 的产品模块名（负控把变异源码落盘成 `hs_mut.py` 后用 `hs_mut`）。
+_CONC_TAIL = '''
+import %(mod)s as HS
+HS.notify_ledger_path = lambda: os.path.join(os.getcwd(), "notify_state.json")
 missed = 0
-for i in range(n):
-    if HS.notice_budget_gate("R-CONC", "%%s-%%d" %% (tag, i)) is None:
+for i in range(%(iters)d):
+    if HS.notice_budget_gate("R-CONC", "%%s-%%d" %% (os.environ.get("RZ_WHO"), i)) is None:
         missed += 1
-with open(out, "w", encoding="utf-8") as f:
+with open(os.path.join(os.getcwd(), "m-%%s.json" %% os.environ.get("RZ_WHO")),
+          "w", encoding="utf-8") as f:
     json.dump({"missed": missed}, f)
 '''
+
+#: ★ 前置条件强制化（只强制**前置条件**，不强制结论）：
+#:   N-S98 的变异**只在"锁取不到"时才现形**，而"锁取不到"是争用的结果
+#:   ⇒ 旧版把"变异是否现形"交给了调度运气（实测撞上率 ≈ 83%，全量闸门里假红过）。
+#:   这里把前置条件**直接摆好**：`acquire_lock` 恒返回 None（= 重试预算永远耗尽）。
+_NOLOCK_PATCH = '''
+import audit_chain
+audit_chain.acquire_lock = lambda p, *a, **k: None
+audit_chain.release_lock = lambda lk=None: None
+'''
+
+#: 并发规模。★ 0.48.5：有了会合栅栏 ⇒ 每轮都**真的同时冲**，
+#: 不再需要"靠多轮碰运气"，也不需要一个跑 20–70 秒的大负载。
+_NS98_PROCS = 8
+_NS98_ITERS = 20          # 正控（s98）用：沿用 0.47.0 的 8×20 = 160
+_NS98_MUT_ITERS = 6       # 负控（n_s98）用：另有 20ms 窗口放大，6 次足够丢干净
+
+
+def _conc_body(mod, iters, force_nolock=False):
+    head = ("import json\nimport os\nimport sys\n"
+            "sys.path.insert(0, %r)\n" % ROOT)
+    if force_nolock:
+        head += _NOLOCK_PATCH
+    return head + _CONC_TAIL % {"mod": mod, "iters": iters}
+
+
+def _sum_missed(workdir):
+    """把各 worker 落盘的 `m-*.json` 里的"明说没进账"次数加总。"""
+    n = 0
+    try:
+        names = os.listdir(workdir)
+    except OSError:
+        return 0
+    for fn in names:
+        if fn.startswith("m-") and fn.endswith(".json"):
+            try:
+                with io.open(os.path.join(workdir, fn), encoding="utf-8") as f:
+                    n += int(json.load(f).get("missed") or 0)
+            except Exception:                                    # noqa: BLE001
+                pass
+    return n
+
+
+def _ledger_total(workdir):
+    """直接读账本里 `budget|R-CONC` 的**原始条数**（没写过 ⇒ 0）。
+
+    ★ 为什么不用 s98 那套"收盘数据"：负控的**对照臂**（修复在场）按定义
+      **一条都不写**，账本里压根没有这条记录，收盘数据自然拿不到 ——
+      而那正是对照臂该有的样子（"拿不到锁 ⇒ 一个字都不写"）。
+    """
+    try:
+        with io.open(os.path.join(workdir, "notify_state.json"),
+                     encoding="utf-8") as f:
+            d = json.load(f)
+    except Exception:                                            # noqa: BLE001
+        return 0
+    b = (d or {}).get("budget|R-CONC")
+    return int((b or {}).get("total") or 0)
 
 
 @check("S98 ★ 并发守恒：真进程并发下 进账 + 明说没进账 == 请求总数（绝不静默丢弃）")
 def s98():
-    import subprocess
+    """★★ 0.48.5：起进程改走 `ci/race_amp.py` 的**会合栅栏**（N 个进程全部到齐才一起冲）。
+
+    旧版用 `Popen` 一把起 8 个再各跑各的 —— 进程启动错峰（每个 ≈100–200ms）
+    会把"同时冲"变成"排队冲"，争用强度随机器负载漂移。会合栅栏把这一步变确定。
+    **判定口径一个字没改**（守恒式与配额式都不变）。
+    """
+    import race_amp
     d = tempfile.mkdtemp(prefix="g0470_conc_")
-    led = os.path.join(d, "notify_state.json")
-    worker = os.path.join(d, "_w.py")
-    with io.open(worker, "w", encoding="utf-8") as f:
-        f.write(_CONC_WORKER % (ROOT, led))
-    total_req = 8 * 20
-    outs = [os.path.join(d, "m%d.json" % i) for i in range(8)]
-    procs = [subprocess.Popen([sys.executable, worker, "20", "p%d" % i, outs[i]],
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-             for i in range(8)]
-    for p in procs:
-        p.communicate(timeout=240)
-    missed = 0
-    for o in outs:
-        if os.path.isfile(o):
-            missed += int(json.loads(io.open(o, encoding="utf-8").read())["missed"])
+    body = _conc_body("host_shield", _NS98_ITERS)
+    rcs, d = race_amp.run_race(body, _NS98_PROCS, workdir=d, timeout=300)
+    if race_amp.join_failed(rcs):
+        raise AssertionError("会合失败（有 worker 超时未到齐）⇒ **夹具失效**，"
+                             "本轮不算通过也不判红：rcs=%r" % (rcs,))
+    if not race_amp.joined_ok(rcs):
+        raise AssertionError("并发 worker 非正常退出：rcs=%r ⇒ 夹具失效" % (rcs,))
+    total_req = _NS98_PROCS * _NS98_ITERS
+    missed = _sum_missed(d)
     m = _hs()
-    m.notify_ledger_path = lambda _l=led: _l
+    m.notify_ledger_path = lambda _l=os.path.join(d, "notify_state.json"): _l
     r = m.notice_budget_gate("R-CONC", "closer",
                              now=time.time() + float(m.NOTICE_BUDGET_WINDOW) + 10)
     closed = (r or {}).get("closed")
@@ -668,52 +727,77 @@ def s98():
 
 @check("N-S98 负控：恢复「拿不到锁也照样写」⇒ 并发重新静默丢计数 ⇒ 必须红")
 def n_s98():
+    """★★ 0.48.5 重做：**两臂对照 ＋ 会合栅栏 ＋ 前置条件强制化**（装置见 `ci/race_amp.py`）。
+
+    ★ 旧版为什么必须换（实测，不是推演）：
+      旧版把"撞不撞得上"交给运气 —— 8 进程 × 20 次无锁读改写，**只**在
+      `acquire_lock` 重试预算真的耗尽时才现形，而预算是争用的结果。
+      本机复跑 6 轮 **5 撞 / 1 不撞**；全量交付闸门里就报过
+        「4 轮并发守恒均成立（末轮 total=160, missed=0）」。
+      本仓铁律「一个时红时绿的量具比恒红的更坏」⇒ 不许再赌。
+
+    ★ 现在的做法（三件事，缺一不可）：
+      ① **会合栅栏**：8 个进程全部到齐才一起冲（消掉启动错峰）；
+      ② **前置条件强制化**：把 `audit_chain.acquire_lock` 打成恒返回 `None`
+         —— 缺陷**只在锁取不到时才现形**，那就把"锁取不到"直接摆好；
+         另把读写窗口人为拉宽 20ms（**只放大窗口，不改判定语义**）；
+      ③ **两臂对照**：同一套夹具跑两遍，**只差"修复在不在"** ——
+         · 对照臂（修复在场）⇒ 必须 `total==0 且 missed==N`（一个字都不写，
+           且每一次都**明说**没记上账）；守恒成立；
+         · 变异臂（摘掉修复）⇒ 必须**破坏守恒**。
+         对照臂是②的**许可证**：没有它，放大窗口就成了自证其罪
+         （"破坏也许是夹具自己造成的"）。
+    """
     src = _src(_HS_REL)
-    anchor = ("            if not lock:\n                return False")
-    if anchor not in src:
+    fix = "            if not lock:\n                return False"
+    amp = "        d = ledger_read()"
+    if fix not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
-    import subprocess
-    mut_src = src.replace(anchor, "            pass")
-    # ★★ 0.48.2：并发负控**本质是概率性的** —— 8×20 次无锁读改写若进程恰好没撞上，
-    #   守恒仍成立 ⇒ 负控假红（实测：0.48.2 发布闸门里撞过一次）。
-    #   本仓铁律「一个时红时绿的量具比恒红的更坏」⇒ 加**有界重试**：
-    #   任一轮撞出守恒破坏即判绿；K 轮全没撞出才判红（并说明是「没撞上」，不是「变异无效」）。
-    K = 4
-    last = (0, 0)
-    for _attempt in range(K):
-        d = tempfile.mkdtemp(prefix="g0470_conc_mut_")
-        led = os.path.join(d, "notify_state.json")
-        # ★ 把**变异后的源码**落盘成 `hs_mut.py`，让子进程 import 它 ——
-        #   内存里的变异模块传不进子进程，只能落盘（落临时目录，不碰产品文件）。
-        with io.open(os.path.join(d, "hs_mut.py"), "w", encoding="utf-8") as f:
-            f.write(mut_src)
-        w2 = os.path.join(d, "_w2.py")
-        with io.open(w2, "w", encoding="utf-8") as f:
-            f.write(_CONC_WORKER.replace("import host_shield as HS",
-                                         "import hs_mut as HS")
-                    % (ROOT, led))
-        outs = [os.path.join(d, "n%d.json" % i) for i in range(8)]
-        procs = [subprocess.Popen([sys.executable, w2, "20", "p%d" % i, outs[i]],
-                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                  cwd=d)
-                 for i in range(8)]
-        for p in procs:
-            p.communicate(timeout=240)
-        missed = 0
-        for o in outs:
-            if os.path.isfile(o):
-                missed += int(json.loads(io.open(o, encoding="utf-8").read())["missed"])
-        m2 = _load(mut_src, "hs0470_ns98_read")
-        m2.notify_ledger_path = lambda _l=led: _l
-        r = m2.notice_budget_gate("R-CONC", "closer",
-                                  now=time.time() + float(m2.NOTICE_BUDGET_WINDOW) + 10)
-        closed = (r or {}).get("closed") or {}
-        t = int(closed.get("total") or 0)
-        last = (t, missed)
-        if t + missed != 160:
-            return True                      # 撞出守恒破坏 ⇒ 负控有效
-    return ("负控失效：恢复「无锁照写」后 %d 轮并发守恒均成立（末轮 total=%d, missed=%d）"
-            "⇒ 变异没起作用或并发一次都没撞上" % (K, last[0], last[1]))
+    if src.count(amp) != 1:
+        return ("窗口放大锚点 `d = ledger_read()` 出现 %d 次（应恰 1 次）"
+                "—— 负控自身失效，不算通过" % src.count(amp))
+    amp_src = src.replace(amp, amp + "\n        time.sleep(0.02)")
+    mut_src = amp_src.replace(fix, "            pass")
+    n_req = _NS98_PROCS * _NS98_MUT_ITERS
+
+    # ── 对照臂：**修复在场**（同一套夹具：会合 ＋ 强制无锁 ＋ 20ms 窗口）──
+    ctl = _race_arm(amp_src, "hs0470_ns98_ctl", "hs_ctl")
+    if ctl is None:
+        return "负控自身失效：对照臂没跑起来（夹具故障），不算通过"
+    t_c, m_c = ctl
+    if t_c != 0 or m_c != n_req:
+        return ("对照臂（**修复在场**）就不守恒：total=%d（应 0）、missed=%d（应 %d）"
+                " ⇒ 破坏是夹具自己造成的，本负控不成立"
+                % (t_c, m_c, n_req))
+
+    # ── 变异臂：**摘掉修复**（其余一切与对照臂逐字相同）──
+    mut = _race_arm(mut_src, "hs0470_ns98_mut", "hs_mut")
+    if mut is None:
+        return "负控自身失效：变异臂没跑起来（夹具故障），不算通过"
+    t_m, m_m = mut
+    if t_m + m_m != n_req:
+        return True                        # 撞出守恒破坏 ⇒ 负控有效
+    return ("负控失效：摘掉修复后仍守恒（total=%d, missed=%d, 应合 %d）"
+            " ⇒ 夹具没测出这个修复" % (t_m, m_m, n_req))
+
+
+def _race_arm(src, tag, modname):
+    """跑一臂（会合栅栏 ＋ 强制无锁 ＋ 20ms 窗口），返回 `(total, missed)`。
+
+    跑不起来（会合超时 / worker 非正常退出）⇒ `None` —— 调用方必须报
+    「夹具失效」，**绝不**把"没跑起来"读成"没撞上"或"通过了"。
+    """
+    import race_amp
+    d = tempfile.mkdtemp(prefix="g0470_ns98_%s_" % tag)
+    # ★ 变异源码落盘成模块文件，让子进程 import 它 ——
+    #   内存里的变异模块传不进子进程（落临时目录，不碰产品文件）。
+    with io.open(os.path.join(d, modname + ".py"), "w", encoding="utf-8") as f:
+        f.write(src)
+    body = _conc_body(modname, _NS98_MUT_ITERS, force_nolock=True)
+    rcs, d = race_amp.run_race(body, _NS98_PROCS, workdir=d, timeout=300)
+    if race_amp.join_failed(rcs) or not race_amp.joined_ok(rcs):
+        return None
+    return (_ledger_total(d), _sum_missed(d))
 
 
 # ══════════════ S99 · 疑似投毒在场 ⇒ 不许抬 dev 灯 ══════════════
