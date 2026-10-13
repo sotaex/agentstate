@@ -962,6 +962,91 @@ def n_s19():
             "不在岗（不冒充盲区）")
 
 
+# ══════════════ S20 · C6（CLI 命令的真身分支必须真跑过）══════════════════
+def _s20_run(cli_mod):
+    """把 `cli_mod.cmd_daemon` 在「**已有守护进程在跑**」这条真身分支上真跑一次。
+
+    返回 `(rc, out, err)`；`err` 非空 ⇒ 这条路崩了（正是 C6 的病象）。
+    ★ `daemon_alive` 用猴子补丁打成"在跑"（假 pid 424242，不碰任何真进程）；
+      跑完**必须还原**（坏品种滞留比空判据更险）。
+    ★ 为什么必须真跑而不是看源码：C6 的病根就是"这条分支从来没被执行过" ——
+      静态看代码完全正常（`os.getpid()` 写得没问题，问题在于**模块没 import os**）。
+    """
+    import argparse
+    import contextlib
+    import io as _io
+    import inbox_daemon as DM
+    orig = DM.daemon_alive
+    DM.daemon_alive = lambda: (True, 424242)                 # ← MUTANT（只补在这一句上）
+    buf, err, rc = _io.StringIO(), "", None
+    try:
+        with contextlib.redirect_stdout(buf):
+            rc = cli_mod.cmd_daemon(argparse.Namespace(supervise=True,
+                                                       interval=15, root=None))
+    except Exception as e:                                    # noqa: BLE001
+        err = "%s: %s" % (type(e).__name__, e)
+    finally:
+        DM.daemon_alive = orig                                # 坏品种滞留比空判据更险
+    return rc, buf.getvalue(), err
+
+
+@check("S20 ★ C6：daemon 已在跑这条真身分支真跑过 —— 说人话、返回 0、不抛")
+def s20():
+    """★★ C6（2026-10-13，重启值守台时当场撞到）：`inbox_cli.cmd_daemon` 的
+    「已有守护进程在跑 ⇒ 不重复启动」分支**从来没被真跑过一次** ——
+    它用了 `os.getpid()`，而 `inbox_cli.py` **从未 `import os`** ⇒
+    用户第二次起 daemon（日常操作：想知道"起了没有"）得到的不是那句人话，
+    而是一个 `NameError` traceback。与 0.35.2 `inbox_server` 用了
+    `subprocess.Popen` 却没 import subprocess **同型**：缺陷长在
+    **没有任何判据走过的真身分支**上（判据都只走了"没有 daemon 在跑"那条）。
+    ⇒ 本条**真调**这条分支：不抛、说人话、返回 0，三件事缺一即红。
+    """
+    import inbox_cli as CLI
+    rc, out, err = _s20_run(CLI)
+    if err:
+        return _raise("「已有守护进程在跑」这条分支崩了：%s —— 用户第二次起 daemon "
+                      "得到的不是那句人话（C6 复发）" % err)
+    if rc != 0:
+        return _raise("该分支返回 %r（应 0：说清楚「没重复启动」就是正常结束）" % (rc,))
+    if "已经在跑" not in out:
+        return _raise("该分支什么都没说（out=%r）—— 没做也不说，T-10 静默" % (out[:80],))
+    return "真身分支通过：说人话 + 返回 0（%s）" % out.strip()[:40]
+
+
+@check("N-S20 负控：把 import os 拿掉（C6 原貌）⇒ S20 必须抓到")
+def n_s20():
+    """反向对照（维二）：**撤销修复即变红** —— 在**内存里**造一个拿掉
+    `import os` 的 `inbox_cli`（不写盘，本文件纪律），同一条分支必须崩。
+    ★ 另验还原链：真身在变异后必须仍然通过（补丁没把尺子本身弄坏）。
+    """
+    import io
+    import types
+    p = os.path.join(ROOT, "inbox_cli.py")
+    with io.open(p, encoding="utf-8") as f:
+        src = f.read()
+    anchor = "import os\nimport sys"
+    if anchor not in src:
+        return _raise("变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过")
+    mut = types.ModuleType("inbox_cli_ns20")
+    mut.__file__ = p
+    sys.modules["inbox_cli_ns20"] = mut
+    exec(compile(src.replace(anchor, "import sys", 1), p, "exec"),   # noqa: S102
+         mut.__dict__)
+    try:
+        rc, out, err = _s20_run(mut)
+    finally:
+        sys.modules.pop("inbox_cli_ns20", None)
+    if not err:
+        return _raise("负控失效：拿掉 import os 后该分支仍不抛 ⇒ S20 是装饰")
+    if "NameError" not in err:
+        return _raise("负控失效：崩是崩了，但不是预期的 NameError（%r）" % (err,))
+    import inbox_cli as CLI
+    rc2, _out2, err2 = _s20_run(CLI)
+    if err2:
+        return _raise("还原后真身仍崩（%s）⇒ 补丁没修对，或尺子被弄坏了" % (err2,))
+    return "变异后必崩（%s），真身仍通过" % err
+
+
 # ══════════════════════════════════ 运行 ═══════════════════════════════════
 def _raise(msg):
     """把"说明性失败"统一抛成 AssertionError（main 里照常报红＋打明细）。"""

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 import inbox_config as CFG
@@ -273,6 +274,12 @@ def cmd_daemon(a):
     sup = bool(getattr(a, "supervise", False))
     # ★ 0.48.5（B1）：先看有没有**别的**守护进程在跑 —— 只为把话说清楚；
     #   真正的单例判定在 `run_daemon()` 里（唯一实现，启动脚本自觉不算数）。
+    # ★★ 2026-10-13（C6）修：这个分支**从来没被真跑过一次** —— 它用了
+    #   `os.getpid()`，而本模块此前**从未 `import os`** ⇒ 用户第二次起
+    #   daemon 得到的不是下面那句人话，而是一个 NameError traceback。
+    #   （与 0.35.2 `inbox_server` 用 `subprocess.Popen` 却没 import
+    #   subprocess 同型：缺陷长在**没有任何判据走过的真身分支**上。
+    #   判据 0372 S20 现在真调这条分支。）
     alive, pid = DM.daemon_alive()
     if alive and pid != os.getpid():
         print("值守台守护进程**已经在跑**了（pid %s）—— 本次不重复启动。" % pid)
