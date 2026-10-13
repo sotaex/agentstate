@@ -52,6 +52,12 @@ import ledger as L
 DEFAULT_PORT = 8790
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 
+#: Windows：起子进程时**不新建控制台**。★ 0353 P12 专守这条 —— 哨兵/值守台
+#: 是 `DETACHED_PROCESS` 拉起的（**没有控制台**），它们再起控制台程序
+#: （netstat/tasklist/powershell…）时若不显式给这个标志，Windows 会**新建一个
+#: 控制台** ⇒ 用户看到黑窗一闪。`host_shield`/`egress` 同款常量，不在本文件另立口径。
+_CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
+
 # 允许对外提供的静态文件名（白名单 —— 杜绝路径穿越）
 ASSET_WHITELIST = {
     "L0.mp4": "logo/L0.mp4", "L1.mp4": "logo/L1.mp4", "L2.mp4": "logo/L2.mp4",
@@ -1510,18 +1516,99 @@ def _port_busy(port, host="127.0.0.1", timeout=0.35):
         s.close()
 
 
+def _port_owner(port):
+    """端口上**正在听的那个进程号**。查不到 ⇒ `None`（**不编**）。
+
+    ★★ 为什么需要它（0.48.5 B2，遗留问题清单）：
+      `_bind_first_free` 在首选端口被占时静默换临时端口 —— 用户手输
+      `127.0.0.1:8790` 打不开，也无从得知**是谁占了**。"被占"必须出声，
+      出声就得点得出占用方；这个函数是那件事的**唯一实现**（不在别处再查一遍）。
+    ★ 只查本机、**不联网**：Windows 走 `netstat -ano`，POSIX 走 `lsof`。
+      ★ 不按地址过滤：`0.0.0.0:8790` 与 `127.0.0.1:8790` 都算（`_port_busy`
+        本来就是 connect 到回环，能连上就是有人听）。
+    """
+    if not port:
+        return None
+    try:
+        if os.name == "nt":
+            # ★ 必须按**字节**收、再自己解码：中文 Windows 的 `netstat` 输出是
+            #   GBK（实测 `text=True` 按 UTF-8 解 ⇒ `UnicodeDecodeError` 抛在
+            #   subprocess 的读取线程里 ⇒ 整个查询悄悄失败、`owner` 恒 None）。
+            #   我们只取 ASCII 的数字列，`errors="replace"` 足够且不会崩。
+            raw = subprocess.run(["netstat", "-ano", "-p", "tcp"],
+                                 capture_output=True, timeout=5,
+                                 creationflags=_CREATE_NO_WINDOW).stdout
+            out = raw.decode("gbk", "replace")
+            # 形如： TCP    127.0.0.1:8790    0.0.0.0:0    LISTENING    12345
+            #   ★ 状态列在中文 Windows 上仍是英文（LISTENING），据此定位。
+            for line in out.splitlines():
+                parts = line.split()
+                if len(parts) < 5 or "LISTENING" not in line.upper():
+                    continue
+                if parts[1].endswith(":%d" % int(port)):
+                    return int(parts[-1])
+        else:
+            for cmd in (["lsof", "-nP", "-iTCP:%d" % int(port), "-sTCP:LISTEN", "-t"],
+                        ["ss", "-ltnpH", "sport = :%d" % int(port)]):
+                try:
+                    out = subprocess.run(cmd, capture_output=True,
+                                         timeout=5,
+                                         creationflags=_CREATE_NO_WINDOW
+                                         ).stdout.decode("utf-8", "replace")
+                except OSError:
+                    continue
+                m = re.search(r"pid=(\d+)", out) or re.match(r"\s*(\d+)", out)
+                if m:
+                    return int(m.group(1))
+    except Exception:                                   # noqa: BLE001
+        return None
+    return None
+
+
 def _bind_first_free(port, root, token=None):
-    """按「首选端口 → 临时端口」的顺序绑一个能用的。返回 `(httpd, token, real_port)`。
+    """按「首选端口 → 临时端口」的顺序绑一个能用的。
+
+    返回 `(httpd, token, real_port, drift)`。
 
     ★ 0.48.5（B1）：`token` 可传入 —— 重启时**复用记录里的口令**，
       URL 才可能"不变"（口令每次重生成，URL 必变）。
+    ★★ 0.48.5（B2）：多返回一个 `drift` —— **"换了端口"这件事本身**。
+      `None` ＝ 没换；换了则是 `{"want": 首选端口, "got": 实际端口,
+      "owner": 占用方 pid|None}`。**不许静默**：用户手输首选端口打不开时，
+      总得有个地方说得出"它跑到哪去了、谁占了原来的"。
+      ★ 它只**报事实**，不出声也不落盘 —— 出声由 `_serve_setup()` 做，
+        落盘由 `write_console_record(want_port=…)` 做（各自唯一入口）。
     """
+    drift = None
+    want = int(port) if port else 0
+    busy = bool(want) and _port_busy(port)
+    if busy:
+        drift = {"want": want, "got": None, "owner": _port_owner(port)}
     try:
-        httpd, token = make_server(port=(0 if _port_busy(port) else port),
+        httpd, token = make_server(port=(0 if busy else port),
                                    root=root, token=token)
     except OSError:
+        # ★ 预探测漏掉、bind 才抛（0.35.2 记过 Windows 的 SO_REUSEADDR 陷阱）：
+        #   退临时端口同样算漂移，一样要报出来。
         httpd, token = make_server(port=0, root=root, token=token)
-    return httpd, token, httpd.server_address[1]
+        if drift is None and want:
+            drift = {"want": want, "got": None, "owner": _port_owner(port)}
+    real_port = httpd.server_address[1]
+    if drift is not None:
+        drift["got"] = int(real_port)
+    return httpd, token, real_port, drift
+
+
+def console_drift_note(drift):
+    """端口漂移的**人话**（唯一实现：`_serve_setup()` 与判据都看它）。
+
+    例：`默认端口 8790 被 PID 12345 占用，已改用 51234 —— 实际地址见下`
+    """
+    if not drift:
+        return ""
+    want, got, owner = drift.get("want"), drift.get("got"), drift.get("owner")
+    who = ("被 PID %d 占用" % owner) if owner else "已被别的程序占用（占用方进程号没查到）"
+    return "默认端口 %s %s，已改用 %s —— 实际地址见下" % (want, who, got)
 
 
 def make_server(port=DEFAULT_PORT, root=None, token=None, bind="127.0.0.1"):
@@ -1872,7 +1959,7 @@ def open_console(url, opener=None, placer=None, token=None, verbose=True):
             else:
                 subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                  stderr=subprocess.DEVNULL,
-                                 creationflags=0x08000000 if os.name == "nt" else 0)
+                                 creationflags=_CREATE_NO_WINDOW)
             # ── 步骤 4：开窗之后落位。参数是"请求"，这一步才是"事实" ──
             #   落位自己起守护线程（窗口刚起还没成型，不能同步等），
             #   失败只打到 stderr —— 不影响"窗口开出来了"这个返回值。
@@ -1907,7 +1994,10 @@ def ensure_background(port=DEFAULT_PORT, root=None):
     """
     if _BG["httpd"] is not None and _BG["url"]:
         return _BG["url"], False
-    httpd, token, real_port = _bind_first_free(port, root)
+    # ★ 0.48.5（B2）：`_bind_first_free` 现多返回一个 drift —— 这条路（进程内后台）
+    #   的"明说"就是**返回的 url**（它已带实际端口）；stderr 那句留给 `serve()`
+    #   （手动/一键入口那条路，终端看得见）。这里不重复出声，免得守护进程 tick 刷屏。
+    httpd, token, real_port, _drift = _bind_first_free(port, root)
     url = "http://127.0.0.1:%d/?t=%s" % (real_port, token)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     _BG["httpd"], _BG["url"] = httpd, url
@@ -1949,14 +2039,22 @@ def console_record_path(root=None):
     return os.path.join(_C.console_dir(root), "url.json")
 
 
-def write_console_record(port, token, pid=None, root=None, started_at=None):
-    """把"值守台开在哪"落盘（临时文件 + 原子替换）。返回写下的 dict。"""
+def write_console_record(port, token, pid=None, root=None, started_at=None,
+                         want_port=None):
+    """把"值守台开在哪"落盘（临时文件 + 原子替换）。返回写下的 dict。
+
+    ★ 0.48.5（B2）：`want_port` ＝ 这次**想要**的端口。它与 `port` 不同
+      ⇒ 说明发生了漂移 —— 留一份在盘上（stderr 那句随终端一起消失，落盘不会）。
+      ★ 相同（或没给）⇒ **不写** `want_port` 字段（记录不掺冗余，读到没有即没漂移）。
+    """
     p = console_record_path(root)
     os.makedirs(os.path.dirname(p), exist_ok=True)
     rec = {"port": int(port), "token": str(token),
            "pid": int(pid if pid is not None else os.getpid()),
            "url": "http://127.0.0.1:%d/?t=%s" % (int(port), token),
            "started_at": started_at or time.strftime("%Y-%m-%dT%H:%M:%S")}
+    if want_port is not None and int(want_port) != int(port):
+        rec["want_port"] = int(want_port)
     tmp = p + ".tmp"
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         json.dump(rec, f, ensure_ascii=False, indent=1, sort_keys=True)
@@ -2017,7 +2115,7 @@ def spawn_console(port, token, root=None):
     """按给定端口/口令**另起一个进程**跑值守台（分离、无窗）。返回 `Popen`。"""
     flags = 0
     if os.name == "nt":
-        flags = 0x00000008 | 0x08000000      # DETACHED_PROCESS | CREATE_NO_WINDOW
+        flags = 0x00000008 | _CREATE_NO_WINDOW   # DETACHED_PROCESS | CREATE_NO_WINDOW
     return subprocess.Popen(_console_spawn_cmd(port, token, root),
                             stdin=subprocess.DEVNULL,
                             stdout=subprocess.DEVNULL,
@@ -2048,23 +2146,44 @@ def ensure_console(port=DEFAULT_PORT, root=None, spawner=None, wait_sec=8.0):
     return (rec2 or rec), True
 
 
+def _serve_setup(port, root, token=None, record=True):
+    """`serve()` 的**非阻塞前半段**：绑端口 → 被占就出声 → 落盘。
+
+    返回 `(httpd, token, real_port, drift)`。
+
+    ★★ 为什么抽出来（0.48.5 B2）：`serve()` 的后半段是 `serve_forever()`（**阻塞**），
+      判据没法在里头验「端口被占时有没有出声」。前半段无阻塞、可测 ——
+      于是"明说"这件事有了**行为判据**，而不是只靠源码字面。
+    """
+    httpd, token, real_port, drift = _bind_first_free(port, root, token=token)
+    if drift:
+        # ★★ 0.48.5（B2）：被占时**出声**（原来静默换端口 ⇒ 用户手输 8790
+        #   打不开、也不知道它跑到哪去了）。话由 `console_drift_note()` 唯一实现。
+        print("!! " + console_drift_note(drift), file=sys.stderr)
+    if record:
+        try:
+            write_console_record(real_port, token, pid=os.getpid(), root=root,
+                                 want_port=(drift or {}).get("want"))
+        except Exception as e:                          # noqa: BLE001
+            # ★ 落盘失败**出声**：它失败 ⇒ 守护进程判不出活、也就不会重拉
+            #   （"保护在起作用却没人看得见"是本仓点名禁止的形状）。
+            print("!! 值守台落盘记录没写成（%r）—— 守护进程将无法判活/重拉" % (e,),
+                  file=sys.stderr)
+    return httpd, token, real_port, drift
+
+
 def serve(port=DEFAULT_PORT, root=None, open_browser=False, token=None, record=True):
     """前台起服务（Ctrl+C 停）。★ 首选端口被占 ⇒ 自动换临时端口（Windows 上
     光靠 `OSError` 发现不了，见 `_port_busy`）。
 
     ★ 0.48.5（B1）：`token` 可传入（重拉时沿用旧口令，URL 不变）；
       `record=True` 把"开在哪"落盘（`url.json`）—— 守护进程靠它判活与重拉。
+    ★ 0.48.5（B2）：被占时**不再静默** —— `_serve_setup()` 会把"换了端口"
+      说到 stderr，并把 `want_port` 一并落盘。
     """
-    httpd, token, real_port = _bind_first_free(port, root, token=token)
+    httpd, token, real_port, _drift = _serve_setup(port, root, token=token,
+                                                   record=record)
     url = "http://127.0.0.1:%d/?t=%s" % (real_port, token)
-    if record:
-        try:
-            write_console_record(real_port, token, pid=os.getpid(), root=root)
-        except Exception as e:                          # noqa: BLE001
-            # ★ 落盘失败**出声**：它失败 ⇒ 守护进程判不出活、也就不会重拉
-            #   （"保护在起作用却没人看得见"是本仓点名禁止的形状）。
-            print("!! 值守台落盘记录没写成（%r）—— 守护进程将无法判活/重拉" % (e,),
-                  file=sys.stderr)
     print("值守台已开在：%s" % url)
     print("（只监听本机；关掉这个窗口就停）")
     if open_browser:

@@ -100,6 +100,26 @@ def probe_posture(root=None):
         return None
 
 
+def console_port(root=None):
+    """值守台此刻开在哪个端口（读 `url.json`，**唯一真源**）。没有 ⇒ `None`。
+
+    ★★ 为什么需要（0.48.5 B2，遗留问题清单）：首选端口被占时值守台会漂到
+      临时端口 —— 用户手输 `127.0.0.1:8790` 打不开。托盘提示里带上**实际
+      端口**，才知道该点哪个。
+    ★ 惰性 import（`probe_posture` 同款）：避免托盘 ↔ 服务在模块加载期成环。
+    ★ 没有记录（从没起过）⇒ 返回 `None` —— **不编**一个端口。
+    """
+    try:
+        import inbox_server as SV
+        rec = SV.read_console_record(root)
+    except Exception:                                   # noqa: BLE001
+        return None
+    try:
+        return int((rec or {}).get("port")) or None
+    except (TypeError, ValueError):
+        return None
+
+
 def shield_state(posture=None):
     """`guard_posture()` 的档位 → 托盘的哨兵态（**只做映射，不判定**）。
 
@@ -290,6 +310,13 @@ def sync_from_items(items, root=None, tip=None, posture=None):
     if tip is not None and " / " not in str(tip):
         tip = "%s / %d（最近 %d 小时）" % (str(tip), len(items or []),
                                       M.WINDOW_HOURS)
+    # ★★ 0.48.5（B2）：带上**实际端口** —— 默认端口被占时值守台会漂到临时
+    #   端口，用户手输 8790 打不开；提示里给出真地址，才知道该点哪个。
+    #   没有落盘记录（没起过）⇒ 不编一个端口。
+    if tip is not None:
+        _port = console_port(root)
+        if _port:
+            tip = "%s · 端口 %d" % (tip, _port)
     # ★ 状态气泡不是详情页；只写「有事/等你」会让用户点不到具体事项。
     #   托盘图标可显示件数，具体事由在主界面「要处理」里查看。
     return write_state(st, n, tip, root=root, shield=sh, total=len(items or []),

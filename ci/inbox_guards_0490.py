@@ -15,6 +15,8 @@
      批次 5（W-01 ＋ W-02 边界项）    → W-01 / W-02（本 commit —— 认窗白名单
                                         单独提交，可单独回滚；G-05 锚点未动）
      批次 6（W-03 · 遗留问题 A2）     → W-03（托盘与 Web 状态词同源）
+     批次 7（W-04 · 遗留问题 B1）     → W-04（值守台常驻：同端口/口令自恢复）
+     批次 8（W-05 · 遗留问题 B2）     → W-05（端口漂移不再静默：出声＋落盘＋托盘带端口）
 
    编号与 19 条**稳定映射**：U-02/U-07/U-09/U-12/U-14 是并入项与视觉项
    预留的空档，不是漏写（§5.7 表头原话）。红不了的（视觉排布）登记为
@@ -1297,25 +1299,182 @@ def n_w04():
     return True
 
 
-def _sv_patch(mod):
-    """把 `mod`（内存里加载的 inbox_server 变异体）临时顶到 `inbox_server` 名下。
+def _mod_patch(name, mod):
+    """把 `mod`（内存里加载的变异体）临时顶到 `name` 名下。返回还原函数。
 
-    返回还原函数。★ 为什么必须这样：`_w04_ensure_ok()` 里 `import inbox_server`
-    拿的是**真身**；要验的是**变异后的这份源码**，所以得让真名指向变异体
-    （`sys.modules` 换掉），结束再换回来（regression_gate D-27 同款纪律）。
+    ★ 为什么必须这样：判据里 `import <name>` 拿的是**真身**；要验的是
+      **变异后的那份源码**，所以得让真名指向变异体（`sys.modules` 换掉），
+      结束再换回来（regression_gate D-27 同款纪律）。
     """
-    import inbox_server as real
-    sys.modules["inbox_server"] = mod
+    real = sys.modules.get(name)
+    sys.modules[name] = mod
+
     def _restore():
-        sys.modules["inbox_server"] = real
+        if real is not None:
+            sys.modules[name] = real
+        else:
+            sys.modules.pop(name, None)
     return _restore
+
+
+def _sv_patch(mod):
+    """把 `mod`（内存里加载的 inbox_server 变异体）临时顶到 `inbox_server` 名下。"""
+    return _mod_patch("inbox_server", mod)
+
+
+# ══════════ W-05 · B2（端口漂移不再静默：出声 + 落盘 + 托盘带实际端口）══════════
+#: ★★ 盯的已修缺陷：**B2 端口漂移静默换端口** —— `_bind_first_free(8790)` 在被占时
+#:   静默改用系统临时端口，用户手输 `127.0.0.1:8790` 打不开、也无从得知实际端口
+#:   （本轮 before/after 对比时同时开过 5 个实例，全靠读 url 文件）。
+#:   修法（产品侧）：① `_bind_first_free()` 多返回 `drift`（want/got/owner）；
+#:   ② `_serve_setup()` 把漂移**说到 stderr**（话由 `console_drift_note()` 唯一实现）
+#:      ＋ 把 `want_port` 落进 `url.json`（stderr 随终端消失，落盘不会）；
+#:   ③ 托盘提示带**实际端口**（读同一份落盘，唯一真源）；没有记录 ⇒ **不编**。
+#:   ★ 占用方 pid 由 `_port_owner()` 查（Windows `netstat -ano` / POSIX `lsof`）。
+#:     判据用**本进程**占端口 ⇒ 占用方 pid 必＝本进程，可强断言（不依赖机器天气）。
+
+
+def _w05_assert():
+    """W-05 正判据（正/负控共用）。返回 None＝过，否则说明串。
+
+    三个现场：
+      ① `_bind_first_free` 在首选端口被占时**报出漂移**（want/got/owner 三值齐）；
+      ② `_serve_setup()` 把这件事**说到 stderr**，那句话点名两个端口与占用方 pid，
+         并把 `want_port` 落进 `url.json`；
+      ③ 托盘提示带**实际端口**（从 `url.json` 读，唯一真源）；没有记录 ⇒ 不编。
+    """
+    import contextlib
+    import inbox_server as SV
+    import inbox_tray as TR
+    hub = tempfile.mkdtemp(prefix="g0490_w05_")
+    holder, held = _w04_serve_inline("tok-holder")      # 本进程占住 held
+    try:
+        # ① 漂移必须被**报出来**（不是静默换掉）
+        httpd, _tok, got, drift = SV._bind_first_free(held, hub)
+        try:
+            if got == held:
+                return "首选端口被占，却仍绑在同一个端口上（漂移没发生）"
+            if not drift:
+                return "换了端口却**没报漂移** —— 静默换端口（B2 那个缺陷本身）"
+            if drift.get("want") != held or drift.get("got") != got:
+                return "漂移记录端口不对：%r（应 want=%r got=%r）" % (drift, held, got)
+            if drift.get("owner") != os.getpid():
+                return ("漂移没点出占用方进程号：owner=%r（应 %d —— 端口是本进程占的）"
+                        % (drift.get("owner"), os.getpid()))
+        finally:
+            httpd.server_close()
+        # ② 出声（stderr）＋ 落盘（url.json 带 want_port）
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            h2, _t2, got2, drift2 = SV._serve_setup(held, hub, token="T2")
+        try:
+            if not drift2:
+                return "`_serve_setup` 没把漂移传出来（判据拿不到观测点）"
+            msg = buf.getvalue()
+            for need in (str(held), str(got2), str(os.getpid())):
+                if need not in msg:
+                    return ("端口被占时 stderr 那句话没说全（缺 %r）：%r"
+                            % (need, msg))
+            rec = SV.read_console_record(hub)
+            if (rec or {}).get("port") != got2:
+                return "落盘记录里的端口不是实际端口：%r" % (rec,)
+            if (rec or {}).get("want_port") != held:
+                return ("落盘记录没留下「想要哪个端口」（want_port=%r）—— "
+                        "漂移在盘上没痕迹" % ((rec or {}).get("want_port"),))
+        finally:
+            h2.server_close()
+        # ③ 托盘提示带实际端口（读同一份落盘）
+        SV.write_console_record(8799, "tok-tip", pid=os.getpid(), root=hub)
+        payload = TR.sync_from_items([_mk("R0", "unread", 1, 1.0)], root=hub,
+                                     posture=_POSTURE)
+        if "8799" not in (payload.get("tip") or ""):
+            return "托盘提示没带实际端口：%r" % (payload.get("tip") or "")
+        # 没有落盘记录 ⇒ **不编**一个端口
+        hub2 = tempfile.mkdtemp(prefix="g0490_w05b_")
+        payload2 = TR.sync_from_items([_mk("R0", "unread", 1, 1.0)], root=hub2,
+                                      posture=_POSTURE)
+        if "端口" in (payload2.get("tip") or ""):
+            return "没有落盘记录却编了一个端口：%r" % (payload2.get("tip") or "")
+    finally:
+        holder.shutdown()
+    return None
+
+
+@check("W-05 ★ B2：端口被占不再静默 —— 报漂移 / stderr 出声 / 落盘 / 托盘带端口")
+def w05():
+    r = _w05_assert()
+    if r is not None:
+        return r
+    return True
+
+
+@check("N-W05 负控：静默漂移 / 不说占用方 / 托盘不带端口 ⇒ W-05 必须红")
+def n_w05():
+    """反向对照（维二）：三个变异体＝B2 的三个真缺陷形状，逐个必须被 W-05 抓到。
+
+    ① `_bind_first_free` 换了端口却**不报 drift**（＝B2 缺陷本身：静默换端口）；
+    ② `console_drift_note()` 说「被占用」但**不点占用方 pid**（说了等于没说）；
+    ③ 托盘提示**不带实际端口**（用户手输 8790 打不开，还是不知道点哪）。
+    """
+    src = _src(_SERVER_REL)
+    # ① 静默漂移：把 drift 一律抹成 None
+    a_keep = ('    if drift is not None:\n        drift["got"] = int(real_port)\n'
+              '    return httpd, token, real_port, drift')
+    a_mut = '    return httpd, token, real_port, None          # ← MUTANT（静默换端口）'
+    if a_keep not in src:
+        return "变异锚点未找到（_bind_first_free 已变）—— 负控自身失效，不算通过"
+    mut = _load(src.replace(a_keep, a_mut), "is0490_nw05a", _SERVER_REL)
+    saved = _mod_patch("inbox_server", mut)
+    try:
+        r = _w05_assert()
+        if r is None:
+            return "换了端口却不报 drift，W-05 仍判通过 ⇒ 判据没在看「漂移有没有被报出来」"
+        if "没报漂移" not in r:
+            return "负控咬错了地方：红的应是「漂移没被报出来」，实得 %r" % r[:60]
+    finally:
+        saved()
+    # ② 出声但不点占用方 pid
+    b_keep = ('    who = ("被 PID %d 占用" % owner) if owner else '
+              '"已被别的程序占用（占用方进程号没查到）"')
+    b_mut = '    who = "已被占用"          # ← MUTANT（不说占用方 pid）'
+    if b_keep not in src:
+        return "变异锚点未找到（console_drift_note 已变）—— 负控自身失效，不算通过"
+    mut2 = _load(src.replace(b_keep, b_mut), "is0490_nw05b", _SERVER_REL)
+    saved2 = _mod_patch("inbox_server", mut2)
+    try:
+        r = _w05_assert()
+        if r is None:
+            return "漂移出声不点占用方 pid，W-05 仍判通过 ⇒ 判据没在看那句话说了什么"
+        if "没说全" not in r:
+            return "负控咬错了地方：红的应是「stderr 那句没说全」，实得 %r" % r[:60]
+    finally:
+        saved2()
+    # ③ 托盘提示不带实际端口
+    tsrc = _src("inbox_tray.py")
+    c_keep = ('    if tip is not None:\n        _port = console_port(root)\n'
+              '        if _port:\n            tip = "%s · 端口 %d" % (tip, _port)')
+    c_mut = '    pass          # ← MUTANT（托盘提示不带实际端口）'
+    if c_keep not in tsrc:
+        return "变异锚点未找到（sync_from_items 已变）—— 负控自身失效，不算通过"
+    tmut = _load(tsrc.replace(c_keep, c_mut), "is0490_nw05c", "inbox_tray.py")
+    saved3 = _mod_patch("inbox_tray", tmut)
+    try:
+        r = _w05_assert()
+        if r is None:
+            return "托盘提示不带实际端口，W-05 仍判通过 ⇒ 判据没在看托盘提示"
+        if "托盘提示没带实际端口" not in r:
+            return "负控咬错了地方：红的应是「托盘提示没带端口」，实得 %r" % r[:60]
+    finally:
+        saved3()
+    return True
 
 
 def main():
     print("=" * 78)
     print("0.48.5 值守台细节修订判据（交接件 v1.1 §5.7）—— "
           "批1 U-01/U-03/U-08 · 批2 U-10/U-11/U-05 · 批3 U-04/U-06 · "
-          "批4 U-13/U-15 · 批5 W-01/W-02（认窗白名单，单独 commit）")
+          "批4 U-13/U-15 · 批5 W-01/W-02（认窗白名单，单独 commit）· "
+          "批6 W-03（A2）· 批7 W-04（B1）· 批8 W-05（B2）")
     print("（变异只在内存，账本与链只落临时目录，不写任何产品文件；"
           "戊2/戊3 视觉项无判据，走 §6.1 截图验收 —— U-13 只含戊2 机械部分）")
     print("=" * 78)
