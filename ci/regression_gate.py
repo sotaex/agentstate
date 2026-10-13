@@ -1260,6 +1260,241 @@ def j_running_on_real_table(m):
     return True, "真表 %d 条，含 DST-10（未被降级）" % n_live
 
 
+# ================================================================ 闸门自身（D-32/33/34）
+# ★★ 这三条是 2026-10-13 效率升级那一轮**抓到的真缺陷**的固化。它们的共同点：
+#   缺陷**不在产品里，在"检查系统自己"里** —— 而检查系统坏了不会自己报错，
+#   只会让所有结论变得不可信（闸门说自己绿，其实没跑/跑错/被偷锁）。
+#   ⇒ 与 D-27/D-28（量具自身有缺陷）、D-31（登记簿自身一致）同一族。
+
+def _load_delivery_gate(tag):
+    """加载交付闸门模块（D-32/D-34 共用）。判据不许二次实现 ⇒ 直接调它的真函数。"""
+    return _load_module_file("ci/delivery_gate.py", tag)
+
+
+def j_three_state_discipline():
+    """★★ D-32（2026-10-13）：**查不到 ≠ 没有** —— 三态纪律（T-08）。
+
+    要防的复发（X-009，2026-10-13 实测，本轮抓到的最严重一处）：
+      `ci/delivery_gate.py` 的 `_pid_alive` 第一版写成
+      `except Exception: return False` —— 把「**查不了**」折叠成了「**不在**」。
+      而它**必然**查不了：以 `python ci/delivery_gate.py` 启动时 `sys.path[0]`
+      是 `ci/` 而不是仓根，`import audit_chain` 抛 `ModuleNotFoundError`。
+      后果不是"报个错"，而是：**判活恒为"死" ⇒ 活锁被判成陈旧锁 ⇒ 被偷**。
+      产品模块 `audit_chain.pid_alive` 自己的纪律写着「查询失败/异常按存活
+      （宁可 sidecar，不可误偷活锁 —— Run B 教训）」—— 那一版**正好反着做**。
+      ★ 它在 Windows 上侥幸没造成并发，是因为占用方句柄没关、`os.replace`
+        撞了共享冲突；**POSIX 上 `os.replace` 对打开中的文件是合法的** ⇒ 真会偷。
+
+    ★ 断言三条，全是**行为**（不看源码字样）：
+      ① **量具自检**（维七）：`_pid_alive(本进程)` 必须 `True`；
+         `_pid_alive(不可能存在的 pid)` 必须 `False`。
+      ② **查不了必须与不在可区分**：把 `audit_chain` 从 `sys.modules` 摘掉
+         （`= None` ⇒ `import` 抛 ImportError，正是当年那条路径）⇒ 必须返回
+         `None`，**不许**返回 `False`。
+      ③ **拿不准时锁必须按占用处理**：往锁文件里写一个**活 pid**（本进程）
+         ⇒ `_acquire_lock()` 必须拒绝、消息里点出那个 pid、且**锁文件原封不动**
+         （没被改名让开 ⇒ 没被偷）。
+    ★ 判据不许二次实现：直接调 `delivery_gate` 的真函数。
+    ★ 沙箱纪律：把 `_LOCK` 指到临时目录，绝不碰真仓的 `run.lock`
+      —— 否则判据自己会把**正在跑的闸门**的锁让开，那就成了"判据制造并发"。
+    """
+    dg = _load_delivery_gate("delivery_gate_d32")
+    if dg is None:
+        return False, "ci/delivery_gate.py 加载失败（不可判即红）"
+    me = os.getpid()
+
+    # ① 量具自检
+    got_me = dg._pid_alive(me)
+    if got_me is not True:
+        return False, ("量具自检失败：_pid_alive(本进程 %d)=%r，期望 True"
+                       "（判活自己都测不准，后面两条结论不算数）" % (me, got_me))
+    got_dead = dg._pid_alive(999999)
+    if got_dead is not False:
+        return False, "量具自检失败：_pid_alive(999999)=%r，期望 False" % (got_dead,)
+
+    # ② 查不了 ≠ 不在（摘掉 audit_chain ＝ 模拟 import 失败）
+    _had = "audit_chain" in sys.modules
+    _old = sys.modules.get("audit_chain")
+    sys.modules["audit_chain"] = None
+    try:
+        got_blind = dg._pid_alive(me)
+    finally:
+        if _had:
+            sys.modules["audit_chain"] = _old
+        else:
+            sys.modules.pop("audit_chain", None)
+    if got_blind is not None:
+        return False, ("查不了被折叠成了结论：摘掉 audit_chain 后 _pid_alive 返回 %r"
+                       "（必须 None＝查不了；返回 False＝当成了「不在」⇒ 活锁可被偷）"
+                       % (got_blind,))
+
+    # ③ 拿不准时锁必须按占用处理（活锁不许被偷）
+    import tempfile
+    tmp = tempfile.mkdtemp(prefix="d32_lock_")
+    _keep_lock = dg._LOCK
+    dg._LOCK = os.path.join(tmp, "run.lock")
+    try:
+        with open(dg._LOCK, "w", encoding="utf-8") as f:
+            f.write(str(me))
+        fd, why = dg._acquire_lock()
+        if fd is not None:
+            dg._release_lock(fd)
+            return False, ("锁文件里写的是**活 pid %d**，_acquire_lock 却把锁给了出来"
+                           " ⇒ 活锁被偷（两个闸门会并发互写基线与日志）" % me)
+        if str(me) not in (why or ""):
+            return False, "拒绝是对的，但消息没点出占用方 pid（%r）" % (why or "")
+        if not os.path.exists(dg._LOCK):
+            return False, "锁文件被让开了 —— 活锁不许被改名让开（%r）" % (why or "")
+    finally:
+        dg._LOCK = _keep_lock
+        _aside_dir(tmp)
+    return True, "三态齐备：查不了→None ／ 拿不准按占用 ／ 活锁原封不动（pid %d）" % me
+
+
+def j_hook_same_anchor():
+    """★★ D-33（2026-10-13）：提交钩子必须与仓内真源**同锚**（T-09）。
+
+    要防的复发（X-012，2026-10-13 实测）：
+      `.git/hooks/pre-commit` 是 09-28 拷的（跑 `ci/regression_gate.py`，只 22 条），
+      而仓内源 `ci/git-hooks/pre-commit` 在 10-07 的 `aa3eeff` 已升级为
+      `ci/delivery_gate.py --quick` —— **部署件 6 天没跟源，且没有任何判据守它**。
+      后果：那个"一处入口"的强制点**实际是断的**，
+      28 套快档判据在这 6 天里**一次都没在提交时跑过**。
+      ⇒ 这正是 T-09「同一事实两套口径」：**"钩子该跑什么"有两份答案**，
+        而生效的那份没人看（README 声明源是真源，实践里没人校验）。
+
+    ★ 断言三条：
+      ① 源里承诺的闸门**路径**存在（照着钩子跑不许报"找不到文件"）；
+      ② 源里承诺的**参数**是该闸门真实支持的（argparse 里真有）；
+      ③ 部署件**存在** ⇒ 必须与源**逐字一致**，不一致即红并给出修法；
+         **不存在** ⇒ 不算红（新克隆本该手动装一次），但**必须出现在输出里**
+         —— 不许把"没装钩子"渲染成"已装且一致"。
+    ★ 为什么③能被负控：`_build_negctl_fixture` 会把部署件一并复制进 fixture，
+      所以 fixture 里"源 ＝ 部署件"成立；注入改坏源 ⇒ 立刻漂移 ⇒ 红。
+    """
+    src_rel, dep_rel = "ci/git-hooks/pre-commit", ".git/hooks/pre-commit"
+    src_p = PKG / src_rel
+    if not src_p.is_file():
+        return False, "仓内钩子源不存在：%s（删掉源＝让这条判据变空）" % src_rel
+    src = src_p.read_text(encoding="utf-8", errors="replace")
+
+    # ① 承诺的闸门路径存在
+    miss = sorted({m.group(1) for m in re.finditer(r"\$ROOT/([\w./-]+\.py)", src)
+                   if not (PKG / m.group(1)).is_file()})
+    if miss:
+        return False, ("钩子承诺的闸门路径不存在：%s ⇒ 照着钩子跑必报找不到文件"
+                       % "、".join(miss))
+
+    # ② 承诺的参数真实存在
+    flags = sorted({m.group(1) for m in re.finditer(r'\$GATE"?\s+(--[\w-]+)', src)})
+    gate_rel = "ci/delivery_gate.py"
+    gate_p = PKG / gate_rel
+    if not gate_p.is_file():
+        return False, "找不到钩子要跑的闸门：%s" % gate_rel
+    gate_src = gate_p.read_text(encoding="utf-8", errors="replace")
+    bad = [f for f in flags if ('add_argument("%s"' % f) not in gate_src]
+    if bad:
+        return False, ("钩子承诺的参数在 %s 里不存在：%s（红而无出路，T-04/T-09）"
+                       % (gate_rel, "、".join(bad)))
+
+    # ③ 部署件与源逐字一致
+    dep_p = PKG / dep_rel
+    if not dep_p.is_file():
+        return True, ("部署件不存在（%s）—— 新克隆的正常状态，但**提交钩子此刻不生效**："
+                      "装它 `cp %s %s`" % (dep_rel, src_rel, dep_rel))
+    dep = dep_p.read_text(encoding="utf-8", errors="replace")
+    if dep != src:
+        return False, ("部署件与仓内源**不一致**（%s ≠ %s）：钩子该跑什么是两份答案，"
+                       "而生效的那份没人看（2026-10-13 实测漂了 6 天，"
+                       "28 套快档判据一次没跑）。修法：`cp %s %s`"
+                       % (dep_rel, src_rel, src_rel, dep_rel))
+    return True, "钩子源与部署件逐字一致（%d 字节）；承诺的路径/参数均真实" % len(src)
+
+
+def j_fastlane_not_silent():
+    """★★ D-34（2026-10-13）：快道/快档**不许静默少跑**（T-10）。
+
+    要防的复发（X-014，2026-10-13 实测）：
+      交付闸门实测 **1161s ≈ 19.3 分钟**、主闸门 **68s**（文档写 13.2s），
+      于是"全量跑"退化成靠自觉 —— 交接件 §3.3 附加要求二早就写了
+      「闸门要快到没有理由跳过」，但**药方没人吃**。
+      而一旦引入"快道"，新风险立刻变成**快道悄悄少跑**：
+      少跑的那几条没人知道 ⇒ 与"没有闸门"等价。
+      ⇒ 口径：**快道可以少跑，但必须明说自己少跑了什么**。
+
+    ★ 断言四条（前三条是**行为**，第四条是**机制在位**，同 D-11 的立场）：
+      ① `_apply_budget` 把装不下的套件**逐条**打印出来（含历史秒数），
+         不许只给一个数字。做法：喂一张"全部超预算"的假耗时表，
+         断言返回集之外的**每一个套件名都出现在输出里**。
+      ② `_apply_budget` **永远保留主闸门**（它是"已修缺陷的总账"，快道存在的理由）。
+      ③ `_apply_budget` 对"没有历史耗时"的套件**按跑处理**
+         （宁可超预算，不许因为"不知道它多慢"就跳）。
+      ④ 主闸门快档：`--quick` 声明跳过的判据 ID **每条都真的存在且唯一**
+         （否则这份声明是空转：改了 ID 就静默不跳/跳错），
+         且全量（不带 `--quick`）仍全跑 —— 由"跳过只在 `a.quick` 下发生"保证。
+    """
+    import contextlib
+    import io as _io
+
+    dg = _load_delivery_gate("delivery_gate_d34")
+    if dg is None:
+        return False, "ci/delivery_gate.py 加载失败（不可判即红）"
+    if not hasattr(dg, "_apply_budget"):
+        return False, "交付闸门没有快道预算函数 `_apply_budget`（快道入口被删？）"
+
+    fake = [("0360", "ci/inbox_guards_0360.py", "fast"),
+            ("0470", "ci/inbox_guards_0470.py", "fast"),
+            ("regression", "ci/regression_gate.py", "slow")]
+    _keep = dg._load_durations
+    dg._load_durations = lambda: {"0360": 999.0, "0470": 999.0, "regression": 999.0}
+    buf = _io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            took = dg._apply_budget(fake)
+    finally:
+        dg._load_durations = _keep
+    out = buf.getvalue()
+
+    took_keys = {s[0] for s in took}
+    if "regression" not in took_keys:
+        return False, "快道把主闸门也预算掉了 —— 主闸门必须永远跑（它是已修缺陷总账）"
+    dropped = [s[0] for s in fake if s[0] not in took_keys]
+    silent = [k for k in dropped if k not in out]
+    if silent:
+        return False, ("快道**静默**少跑：%s 既没跑、也没出现在输出里"
+                       "（少跑的必须逐条列出来，否则与没有闸门等价）" % "、".join(silent))
+    if not dropped:
+        return False, ("预算 999s 却什么都没跳过 ⇒ 这条判据**没咬到东西**"
+                       "（夹具失效，负控会是假的）")
+
+    # ③ 没有历史耗时 ⇒ 按跑处理
+    dg._load_durations = lambda: {}
+    try:
+        with contextlib.redirect_stdout(buf):
+            took2 = dg._apply_budget(fake)
+    finally:
+        dg._load_durations = _keep
+    if {s[0] for s in took2} != {s[0] for s in fake}:
+        return False, ("没有历史耗时却被跳过 ⇒ 快道在「不知道它多慢」时就跳了"
+                       "（必须按跑处理：宁可超预算，不许瞎跳）")
+
+    # ④ 主闸门快档：声明的跳过 ID 必须真的存在且唯一
+    ids = globals().get("_QUICK_SKIP_IDS") or []
+    if not ids:
+        return False, "主闸门没有声明 `_QUICK_SKIP_IDS`（快档跳过清单）"
+    m = load_hook()
+    all_cids = [cid for cid, _fn in _checks(m)]
+    for sid in sorted(ids):
+        hitn = [c for c in all_cids if c.split()[0] == sid]
+        if len(hitn) != 1:
+            return False, ("快档声明跳过 %r，但判据清单里匹配到 %d 条（必须恰好 1 条）"
+                           " —— 这份声明是空转的（改了 ID 就静默不跳或跳错）"
+                           % (sid, len(hitn)))
+    return True, ("快道不静默：预算外逐条列明（%s）／主闸门永在／无耗时按跑；"
+                  "快档声明的 %d 条跳过 ID 均存在且唯一"
+                  % ("、".join(sorted(dropped)), len(ids)))
+
+
 # ---------------------------------------------------------------- 负控
 def _aside_dir(path):
     """零删除地让开一个临时目录（改名成 `<name>.away-<pid>-<ms>`）。
@@ -1326,6 +1561,17 @@ def _build_negctl_fixture(label=""):
     for extra in ("pyproject.toml", "server.json", "SKILL.md", "MANIFEST.in"):
         if (PKG / extra).is_file():
             shutil.copy2(str(PKG / extra), str(dst / extra))
+    # ★★ 2026-10-13（D-33 需要）：把**已部署的钩子**也带进 fixture。
+    #   为什么：D-33 比的是「仓内源 vs 部署件」。fixture 里没有 `.git/`，
+    #   于是 D-33 在每条负控里都会报"部署件不存在"—— 那不是缺陷、是**盲区**，
+    #   而且会让 D-33 的负控变成假的（改了源也看不出漂移）。
+    #   带上它之后，fixture 里"源 ＝ 部署件"成立，注入改坏源 ⇒ 立刻漂移 ⇒ 真能红。
+    #   ★ 只碰 fixture 自己的 `.git/hooks/`，不动真仓（真仓的钩子由 D-33 正面守）。
+    _dep_hook = PKG / ".git" / "hooks" / "pre-commit"
+    if _dep_hook.is_file():
+        _d = dst / ".git" / "hooks"
+        _d.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(_dep_hook), str(_d / "pre-commit"))
     # ★★ D-25 需要 manifest 覆盖的**全部**文件都在 fixture 里（2026-10-12 实测必修）：
     #   不加这一段，D-25 在**每一条**负控里都连带假红 —— manifest 有 124 条，
     #   而 fixture 只复制 7 个目录 ＋ 根目录 *.py ⇒ `assets/`、`challenge/`
@@ -1535,6 +1781,38 @@ def selfcheck():
          '"guards": ["D-26"],',
          '"guards": ["D-26", "D-99"],',
          "D-31"),
+        # ★★ D-32 负控（2026-10-13）：把「查不了」折叠成「不在」。
+        #   模拟 X-009 原貌（`except: return False` ⇒ 判活恒为死 ⇒ 活锁可被偷）。
+        #   ★ 注入点取 `_pid_alive` 里**第一处** `return None`（＝ import 失败分支）
+        #     —— 那一处正是当年真正踩到的路径（`sys.path` 没仓根）。
+        #     两处 `return None` 文本相同，`replace(old, new, 1)` 命中的是第一处。
+        ("D-32 缺陷：判活把「查不了」折叠成「不在」（活锁可被偷）",
+         "ci/delivery_gate.py",
+         '        return None                                     # 查不了 ≠ 不在',
+         '        return False                                    # NEGCTL 查不了当不在',
+         "D-32"),
+        # ★★ D-32 负控之二（2026-10-13）：把「锁的持有者是谁」整段短路成"陈旧"。
+        #   模拟"拿不准就当陈旧锁让开" —— 即偷活锁的另一条路径。
+        ("D-32 缺陷：拿不准就当陈旧锁让开（偷活锁）",
+         "ci/delivery_gate.py",
+         '            alive = _pid_alive(old) if old else None',
+         '            alive = False   # NEGCTL',
+         "D-32"),
+        # ★★ D-33 负控（2026-10-13）：把钩子承诺的参数改成一个**不存在**的。
+        #   模拟 X-012 那一族（钩子该跑什么是两份答案 ⇒ 部署件与源各说各话）。
+        #   ★ fixture 会把部署件一并复制 ⇒ 改源立刻造成"源 ≠ 部署件"，两条断言都会红。
+        ("D-33 缺陷：钩子承诺一个不存在的参数（部署件与源分叉）",
+         "ci/git-hooks/pre-commit",
+         '"$PY" "$GATE" --hook',
+         '"$PY" "$GATE" --nonexistent-flag',
+         "D-33"),
+        # ★★ D-34 负控（2026-10-13）：让快道**静默**少跑（预算外的不打印）。
+        #   模拟 X-014 那一族（快道悄悄少跑 ⇒ 与"没有闸门"等价）。
+        ("D-34 缺陷：快道预算外不打印（静默少跑）",
+         "ci/delivery_gate.py",
+         '    if over:\n        print("      ⏭ **预算外**',
+         '    if over and False:   # NEGCTL\n        print("      ⏭ **预算外**',
+         "D-34"),
     ]
 
     ok_all = True
@@ -1690,9 +1968,78 @@ def selfcheck():
 
 
 # ---------------------------------------------------------------- 主流程
+#: `--quick` 跳过的判据 ID（2026-10-13 新增，**声明式**，不是静默）。
+#: ★ 为什么允许跳过：实测 22 条共 **66s**，其中 3 条占 **51s**
+#:   （A2 21.7s／D-28 16.5s／D-20 13.3s）—— 它们都是**真跑打包/安装管线**
+#:   （真 install、真建 fixture、真打 wheel），属于"打包前"该做的事。
+#:   交接件 §4.5 R2 早就写好了药方「超 30 秒就挪进慢道」——**药方没人吃**，
+#:   于是提交钩子实测 68s，而**慢到会被跳过的钩子等于没有钩子**。
+#: ★★ 但"快档"必须**明说自己跳了什么**：跳过的判据逐条打印，
+#:   且全量（不带 --quick）**永远全跑**。这一条由 D-34 守着。
+_QUICK_SKIP_IDS = {"A2", "D-28", "D-20"}
+
+
+def _quick_skip(cid):
+    """这条判据在快档里跳不跳。★ 单独成函数：D-34 要验"声明的 ID 真的存在且唯一"。"""
+    return cid.split()[0] in _QUICK_SKIP_IDS
+
+
+def _checks(m):
+    """判据清单（**唯一真源**）。返回 `[(判据 ID 串, 可调用)]`。
+
+    ★ 提成函数（2026-10-13）：原先内联在 `main()` 里，于是 D-34
+      「快档声明跳过的 ID 真的存在且唯一」只能靠"跑一次闸门看输出"来验
+      —— 太慢也太脆。提取后判据直接调它拿清单（判据不许二次实现）。
+    """
+    return [
+        ("A1  DST-10 的 block 不被降级为 alert", lambda: j_dst10_stream(m)),
+        ("A1  判据单一真源（两函数不分叉）", lambda: j_judgement_source_single(m)),
+        ("A2  加载与比对同源（行为级：篡改必报）", j_a2_load_compare_same_source),
+        ("D-3 纯文本提及仍放行（无假阳性）", lambda: j_mention_not_regressed(m)),
+        ("—   DST-01 真表 21 条未损坏（对照）", lambda: j_dst01_still_works(m)),
+        ("—   兜底集事实未变（17 条、无 DST-10）", lambda: j_fallback_has_no_dst10(m)),
+        ("D-6 九处版本号一致（原 A5，此前无守卫）", j_version_consistent),
+        ("D-11 构建器三件机制在位（布局表/同步守卫/对账）", j_builder_mechanisms_present),
+        ("D-17 构建顺序：验产物 final ＋ 家务最后做", j_build_harness_order),
+        ("D-20 包组成双向守卫（干净 wheel 不漏模块）", j_pymodules_guard),
+        ("D-22 单一真源：产物仓为主 / 归档仓只许落后", j_single_source_of_truth),
+        ("D-23 环境事实不漂移（仓在哪儿／是否 git／dist 只有本版）",
+         j_workspace_facts),
+        ("D-24 构建产物不得进索引（忽略对已追踪文件无效）",
+         j_no_build_artifacts_in_index),
+        ("D-25 manifest 无死条目（链每日滚动 ⇒ 快照必落后，防复发）",
+         j_manifest_no_dead_entries),
+        ("D-26 态势说明无冻结读数（心跳/分钟前：会说谎的数字）",
+         j_posture_why_no_frozen_numbers),
+        # ── 2026-10-12 值守台交接件 §4.5（R1–R6）：元层机制补环 ──
+        ("D-27 重签工具口径与构建器登记一致（量具假红/写回破坏，T-03）",
+         j_resign_caliber_matches_builder),
+        ("D-28 负控 fixture 覆盖 manifest 全部条目（防 D-25 负控假红，T-03）",
+         j_negctl_fixture_covers_manifest),
+        ("D-29 docstring 承诺的工具参数真实可跑（红而无出路，T-04）",
+         j_docstring_tool_flags_exist),
+        ("D-30 docstring 承诺的仓内路径存在（文档与代码同锚，T-06）",
+         j_docstring_paths_exist),
+        ("G-05 认窗白名单守卫在位（用户窗口绝不被误认，T-05）",
+         j_page_titles_guard),
+        # ── 2026-10-13 效率升级：闸门自身的三条（缺陷不在产品里，在检查系统自己里）──
+        ("D-32 查不到 ≠ 没有（判活三态 ＋ 活锁不许被偷，T-08）",
+         j_three_state_discipline),
+        ("D-33 提交钩子与仓内真源同锚（部署漂移 6 天，T-09）",
+         j_hook_same_anchor),
+        ("D-34 快道/快档不许静默少跑（跳过必须逐条列明，T-10）",
+         j_fastlane_not_silent),
+        # ★ D-31 放最后：它红的正是上面几条没做完；R7 对齐后由红转绿 ＝ 完工证明
+        ("D-31 缺陷类型登记簿自身一致（不会响的表格接成闸门一环）",
+         j_defect_registry_consistent),
+    ]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--selfcheck", action="store_true", help="跑负控")
+    ap.add_argument("--quick", action="store_true",
+                    help="快档：跳过真跑打包/安装管线的 3 条判据（逐条打印，全量必跑）")
     ap.add_argument("--json", action="store_true", help="机器可读输出")
     a = ap.parse_args()
 
@@ -1714,43 +2061,16 @@ def main():
         pre = j_running_on_real_table(m)
         rec("SELF 闸门运行在真表上（非降级兜底集）", pre[0], pre[1])
 
-        checks = [
-            ("A1  DST-10 的 block 不被降级为 alert", lambda: j_dst10_stream(m)),
-            ("A1  判据单一真源（两函数不分叉）", lambda: j_judgement_source_single(m)),
-            ("A2  加载与比对同源（行为级：篡改必报）", j_a2_load_compare_same_source),
-            ("D-3 纯文本提及仍放行（无假阳性）", lambda: j_mention_not_regressed(m)),
-            ("—   DST-01 真表 21 条未损坏（对照）", lambda: j_dst01_still_works(m)),
-            ("—   兜底集事实未变（17 条、无 DST-10）", lambda: j_fallback_has_no_dst10(m)),
-            ("D-6 九处版本号一致（原 A5，此前无守卫）", j_version_consistent),
-            ("D-11 构建器三件机制在位（布局表/同步守卫/对账）", j_builder_mechanisms_present),
-            ("D-17 构建顺序：验产物 final ＋ 家务最后做", j_build_harness_order),
-            ("D-20 包组成双向守卫（干净 wheel 不漏模块）", j_pymodules_guard),
-            ("D-22 单一真源：产物仓为主 / 归档仓只许落后", j_single_source_of_truth),
-            ("D-23 环境事实不漂移（仓在哪儿／是否 git／dist 只有本版）",
-             j_workspace_facts),
-            ("D-24 构建产物不得进索引（忽略对已追踪文件无效）",
-             j_no_build_artifacts_in_index),
-            ("D-25 manifest 无死条目（链每日滚动 ⇒ 快照必落后，防复发）",
-             j_manifest_no_dead_entries),
-            ("D-26 态势说明无冻结读数（心跳/分钟前：会说谎的数字）",
-             j_posture_why_no_frozen_numbers),
-            # ── 2026-10-12 值守台交接件 §4.5（R1–R6）：元层机制补环 ──
-            ("D-27 重签工具口径与构建器登记一致（量具假红/写回破坏，T-03）",
-             j_resign_caliber_matches_builder),
-            ("D-28 负控 fixture 覆盖 manifest 全部条目（防 D-25 负控假红，T-03）",
-             j_negctl_fixture_covers_manifest),
-            ("D-29 docstring 承诺的工具参数真实可跑（红而无出路，T-04）",
-             j_docstring_tool_flags_exist),
-            ("D-30 docstring 承诺的仓内路径存在（文档与代码同锚，T-06）",
-             j_docstring_paths_exist),
-            ("G-05 认窗白名单守卫在位（用户窗口绝不被误认，T-05）",
-             j_page_titles_guard),
-            # ★ D-31 放最后：它红的正是上面几条没做完；R7 对齐后由红转绿 ＝ 完工证明
-            ("D-31 缺陷类型登记簿自身一致（不会响的表格接成闸门一环）",
-             j_defect_registry_consistent),
-        ]
-
-        for cid, fn in checks:
+        # ★ 清单已提取为模块级 `_checks(m)`（唯一真源，D-34 也调它）。
+        _n_quick_skip = 0
+        for cid, fn in _checks(m):
+            if a.quick and _quick_skip(cid):
+                # ★★ 快档必须**明说自己跳了什么**（不许静默少跑）——
+                #   跳过的判据逐条打印，且全量（不带 --quick）永远全跑。
+                print("  [SKIP] %-46s --quick 快档跳过（真跑打包/安装管线，全量必跑）"
+                      % cid)
+                _n_quick_skip += 1
+                continue
             try:
                 r = fn()
             except Exception as e:
@@ -1766,9 +2086,14 @@ def main():
     n_fail = sum(1 for r in RESULTS if not r["ok"] and not r["skipped"])
     n_skip = sum(1 for r in RESULTS if r["skipped"])
     print("-" * 74)
-    print("共 %d 条判据：PASS %d / FAIL %d / SKIP %d" % (len(RESULTS), n_pass, n_fail, n_skip))
-    if n_fail == 0 and n_skip == 0:
+    print("共 %d 条判据：PASS %d / FAIL %d / SKIP %d%s"
+          % (len(RESULTS), n_pass, n_fail, n_skip,
+             ("　★快档另有 %d 条**未跑**" % _n_quick_skip) if _n_quick_skip else ""))
+    if n_fail == 0 and n_skip == 0 and not _n_quick_skip:
         print("★ 回归闸门全绿：已修好的缺陷没有回退")
+    elif n_fail == 0 and _n_quick_skip:
+        print("▲ 快档：%d 条未跑（上面逐条列明）—— **这不是全量凭证**，"
+              "全量请跑 `python ci/regression_gate.py`（不带 --quick）" % _n_quick_skip)
     elif n_fail == 0:
         print("▲ 有 %d 条不可判（SKIP）—— 这不是通过，是盲区，需人工确认" % n_skip)
     else:

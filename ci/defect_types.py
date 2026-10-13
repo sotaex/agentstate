@@ -127,6 +127,36 @@ TYPES = {
                        "（改动前后各跑一次判据），不许只凭 grep；"
                        "本类无法机械守护 —— 没有人能在写代码时预知哪种间接引用会漏"),
     },
+    # ── 2026-10-13 效率升级那一轮归纳出来的三型（创始人拍板补登记）──
+    "T-08": {
+        "name": "查不到就下结论",
+        "definition": ("一次查询/读取**失败或读不到**，被折叠成"
+                       "「事实是空的／否定的」，并据此下结论或据此动作"),
+        "guards": ["D-32", "S19", "W-05"],
+        "blind": False,
+        "discipline": ("凡「查询型」调用（进程在不在／端口谁占着／心跳链读到没）"
+                       "一律三态：真值 ／ 真否 ／ **查不到**；"
+                       "查不到必须出声或落盲区，**绝不折叠成否定**"),
+    },
+    "T-09": {
+        "name": "同一事实两套口径",
+        "definition": ("同一个事实有两份各自演化的实现（两份文案、两份清单、"
+                       "源件与部署件、两份读数），且**没有任何判据**守着它们一致"),
+        "guards": ["D-22", "D-33", "W-03"],
+        "blind": False,
+        "discipline": ("同一事实只许一个写入口／一个真源；"
+                       "凡「源件 vs 派生件」（部署件、托盘文案、缓存快照）"
+                       "必须有判据断言逐字一致"),
+    },
+    "T-10": {
+        "name": "静默降级",
+        "definition": ("降级／跳过／失败**发生了**，但没有任何输出说明它发生了 —— "
+                       "账面看起来与「全部跑过」一样"),
+        "guards": ["D-34"],
+        "blind": False,
+        "discipline": ("凡「少做了一部分」（快道跳过、锁拿不到、查不了、fixture 缺件）"
+                       "必须**逐条打印**；只给一个数字不算出声"),
+    },
 }
 
 # =====================================================================
@@ -231,6 +261,90 @@ INSTANCES = [
         "note": "本类申报为守不住（blind）；修法是流程纪律：下「无人引用」结论前"
                 "必须跑对照实验。保持 open —— 它没有被机械守护，下次还可能漏",
     },
+    # ── 2026-10-13：A1／A2／B2 ＋ 效率升级那一轮归纳出的实例 ──
+    {
+        "id": "X-009",
+        "type": "T-08",
+        "what": "delivery_gate._pid_alive 把「查不了」折叠成「不在」："
+                "import audit_chain 因 sys.path 没有仓根而必然失败 ⇒ 判活恒为「死」"
+                "⇒ 活锁被判成陈旧锁（Windows 上侥幸没偷成，POSIX 上会真被偷）",
+        "guard": "D-32",
+        "status": "fixed",
+        "date": "2026-10-13",
+        "note": "修法：仓根进 sys.path ＋ 判活改三态（None＝查不了）＋ 拿不准一律按占用；"
+                "D-32 正/负控实测（把变异体跑起来，它真的把活锁偷走了 ⇒ 判据会红）",
+    },
+    {
+        "id": "X-010",
+        "type": "T-08",
+        "what": "B2：默认端口被占时静默换临时端口 —— 用户手输打不开，"
+                "也无从得知实际端口；占用方进程号查不到时连「谁占的」都说不出来",
+        "guard": "W-05",
+        "status": "fixed",
+        "date": "2026-10-13",
+        "note": "真守卫在 ci/inbox_guards_0490.py W-05/N-W05；修法：报 drift"
+                "（want/got/owner）＋ stderr 出声 ＋ 落盘 want_port ＋ 托盘 tip 带端口；"
+                "查不到占用方时必须说「没查到」（不许编一个）",
+    },
+    {
+        "id": "X-011",
+        "type": "T-08",
+        "what": "A1：心跳链目录按**读者**包根猜 ⇒ 哨兵与读者不同包根时读到另一条链，"
+                "guard_posture 判「心跳断档」并渲染成 R0 红 —— 而哨兵进程活着",
+        "guard": "S19",
+        "status": "fixed",
+        "date": "2026-10-13",
+        "note": "真守卫在 ci/inbox_guards_0372.py S19/N-S19（登记簿 2026-10-13 扩口径"
+                "之后才认得出它）；修法：在岗但读不到心跳链 ⇒ POSTURE_UNKNOWN（L1 盲区）",
+    },
+    {
+        "id": "X-012",
+        "type": "T-09",
+        "what": ".git/hooks/pre-commit 是 09-28 拷的（跑 regression_gate，22 条），"
+                "而仓内源 10-07 已升级为 delivery_gate --quick —— 部署件 6 天没跟源，"
+                "28 套快档判据在这 6 天里一次都没在提交时跑过",
+        "guard": "D-33",
+        "status": "fixed",
+        "date": "2026-10-13",
+        "note": "修法：源改快道（--hook）＋ 重新部署 ＋ D-33 正面守"
+                "「部署件与仓内源逐字一致」（负控：改坏源的参数 ⇒ 立刻漂移 ⇒ 红）",
+    },
+    {
+        "id": "X-013",
+        "type": "T-09",
+        "what": "A2：托盘事件态走旧合并读（24h 账里的历史 R0 抬灯），"
+                "页面自 0.39.0 起走 current_state() ⇒ 同一时刻托盘「有过失守」"
+                "vs 页面「拦截」",
+        "guard": "W-03",
+        "status": "fixed",
+        "date": "2026-10-13",
+        "note": "真守卫在 ci/inbox_guards_0490.py W-03/N-W03；"
+                "修法：托盘状态词改走 light_explain（与 Web 逐字同源）",
+    },
+    {
+        "id": "X-014",
+        "type": "T-10",
+        "what": "交付闸门实测 1161s（19.3 分钟）、主闸门 68s ⇒「全量跑」退化成靠自觉；"
+                "而引入快道后新风险是**快道悄悄少跑** —— 少跑的没人知道，"
+                "与「没有闸门」等价",
+        "guard": "D-34",
+        "status": "fixed",
+        "date": "2026-10-13",
+        "note": "修法：--hook 快道把「预算外／影响面外」**逐条列明**（含历史秒数）；"
+                "D-34 行为级断言「装不下的每一个名字都必须出现在输出里」",
+    },
+    {
+        "id": "X-015",
+        "type": "T-10",
+        "what": "运行锁的陈旧让开失败原本 `except OSError: pass`（静默）——"
+                "锁清不掉却不说，下一次仍然拿不到；"
+                "以及 19 分钟的全量闸门因整块缓冲「一个字都看不到」",
+        "guard": "D-34",
+        "status": "fixed",
+        "date": "2026-10-13",
+        "note": "修法：让开失败必须返回带原因与手工修法的消息；"
+                "闸门输出改行缓冲 ＋ 结果一律落 .psl/gate/last_run.json",
+    },
 ]
 
 # =====================================================================
@@ -316,19 +430,76 @@ def check_consistency(gate_ids):
     return (not problems), problems
 
 
-def gate_ids_from_registry():
-    """从回归闸门的注册表提取判据 ID（形如 D-25 / G-05 的前缀）。
+def _suites_files():
+    """交付闸门 `SUITES` 里的判据文件清单（**真会被跑**的那些）。
 
-    ★ 为什么要真提而不是硬编码：硬编码一份 ID 清单，闸门加新判据时
-      登记簿不会知道 ⇒ 类型引用了"将来才存在"的判据也查不出。
+    ★ 为什么用 `ast` 解析而不是 `import`：`import` 会执行模块级代码
+      （且会把 `sys.path` 搅进另一个进程的形态）；`ast.literal_eval` 只读字面量，
+      读的仍是**真源**（`ci/delivery_gate.py` 的 `SUITES`），不是另抄一份清单。
     """
-    path = os.path.join(HERE, "regression_gate.py")
-    if not os.path.isfile(path):
-        return set()
-    src = open(path, encoding="utf-8", errors="replace").read()
-    ids = set(re.findall(r'\("((?:D|G)-\d+)\s', src))
-    # 兼容写法：("D-25 manifest ...", j_xxx) 之外的分行写法
-    ids |= set(re.findall(r'\(\s*"((?:D|G)-\d+)', src))
+    import ast
+    p = os.path.join(HERE, "delivery_gate.py")
+    if not os.path.isfile(p):
+        return []
+    try:
+        with open(p, encoding="utf-8", errors="replace") as f:
+            tree = ast.parse(f.read())
+    except (OSError, SyntaxError):
+        return []
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        for tgt in node.targets:
+            if isinstance(tgt, ast.Name) and tgt.id == "SUITES":
+                try:
+                    return [row[1] for row in ast.literal_eval(node.value)]
+                except Exception:                          # noqa: BLE001
+                    return []
+    return []
+
+
+#: 判据 ID 的三种真实写法：`@check("W-05 …")` / `("D-25 …", fn)` / `( "D-25…`
+_ID_PATS = (
+    re.compile(r'@check\(\s*"([A-Za-z]+-?\d+)'),
+    re.compile(r'\("((?:D|G)-\d+)\s'),
+    re.compile(r'\(\s*"((?:D|G)-\d+)'),
+)
+
+
+def gate_ids_from_registry():
+    """从**真会被跑**的守卫文件里提取判据 ID（登记簿"有人守"的判据口径）。
+
+    ★★ 2026-10-13 口径修正（原来只读 `ci/regression_gate.py`）：
+      原口径下"有人守"**只认主闸门**。可本仓的守卫**分布在 30 套判据里**
+      （0490 的 `W-03`、0372 的 `S19`…），而它们**每次交付闸门都会真跑**。
+      只认主闸门会逼出两种坏结果：
+        ① 一个**真被守住**的类型被判成"没人守"（例如 T-08：A1 由 S19 守着，
+           而 S19 不在主闸门里 ⇒ 登记簿会报"有病无药"）；
+        ② 为了让表格好看，在主闸门里**再写一份同样的判据** ——
+           而"同一事实两套实现"正是本仓 **T-09 本身**（自相矛盾）。
+      ⇒ 口径：**真会被跑的文件** ＝ 主闸门 ＋ 交付闸门 `SUITES` 里的每一套。
+        "真会被跑"由 `delivery_gate.SUITES` 定义（**不另写一份清单**）。
+      ★ 这不放松纪律①（不许幻想 ID）：提取的仍是**磁盘上真实存在**的判据声明，
+        只是把"存在"的范围从"主闸门"扩到"真会跑的全部守卫"。
+    """
+    ids = set()
+    p = os.path.join(HERE, "regression_gate.py")
+    if os.path.isfile(p):
+        with open(p, encoding="utf-8", errors="replace") as f:
+            src = f.read()
+        for pat in _ID_PATS:
+            ids |= set(pat.findall(src))
+    for rel in _suites_files():
+        fp = os.path.join(PKG, rel)
+        if not os.path.isfile(fp):
+            continue
+        try:
+            with open(fp, encoding="utf-8", errors="replace") as f:
+                s = f.read()
+        except OSError:
+            continue
+        for pat in _ID_PATS:
+            ids |= set(pat.findall(s))
     return ids
 
 

@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import atexit
 import hashlib
 import io
 import json
@@ -64,11 +65,30 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 PKG = os.path.dirname(_HERE)
 RESULTS = []
 
+#: ★★ 2026-10-13：把仓根放进 `sys.path`。
+#:   为什么必须有（这不是洁癖，是实测出来的根因）：本文件以
+#:   `python ci/delivery_gate.py` 启动时 `sys.path[0]` 是 **`ci/`** 而不是仓根
+#:   ⇒ `import audit_chain`（判活要用）抛 `ModuleNotFoundError`
+#:   ⇒ 判活**静默**恒为"死" ⇒ 活锁被判成陈旧锁 ⇒ **可被偷**。
+#:   30 套判据早就各自 `sys.path.insert(0, ROOT)`（本仓惯例），只有闸门自己漏了。
+#:   ★ 用 append 不用 insert(0)：仓根里若哪天出现与标准库同名的模块，
+#:     append 保证标准库仍然优先（insert(0) 会让产品文件**顶掉**标准库）。
+if PKG not in sys.path:
+    sys.path.append(PKG)
+
 
 # ────────────────────────────────────────────── 判据清单（唯一真源）
 #: `(键, 相对路径, 分档)`。分档：
-#:   fast = 进程内、秒级（默认与 --quick 都跑）
+#:   fast = 进程内、轻（默认与 --quick 都跑）
 #:   slow = 会起子进程、改文件，或依赖仓外原件（--quick 跳过；打包前必跑）
+#:
+#: ★★ 2026-10-13 修正一处**分档注释在说谎**（T-06 同型，实测）：
+#:   原文写「fast = 进程内、**秒级**」—— 而 fast 档里 0470 实测 **245s**、
+#:   JDG 207s、0360 154s。它们"不起子进程"是真的，"秒级"是假的。
+#:   ⇒ 分档是**结构口径**（起不起子进程、依不依赖仓外原件），**不是耗时口径**；
+#:     耗时另有一本账 `.psl/gate/suite_durations.json`，每次真跑合并写入，
+#:     快道（`--hook`）按它做预算。两件事分开记，
+#:     才不会再出现"名字在说一个数、实测是另一个数"。
 #:
 #: ★ 清单必须与磁盘**实际存在的文件**对齐，且两者不一致时判红 ——
 #:   否则「删掉一个判据文件」就能让闸门变绿。
@@ -327,6 +347,187 @@ _SNAP_DIR = os.path.join(PKG, ".psl", "gate")
 _SNAP = os.path.join(_SNAP_DIR, "baseline.json")
 _SNAP_PREV = os.path.join(_SNAP_DIR, "baseline.prev.json")
 
+#: 运行锁 ＋ 最近一次结果文件（2026-10-13 新增，见 `_acquire_lock` 的由来）。
+_LOCK = os.path.join(_SNAP_DIR, "run.lock")
+_LAST_RUN = os.path.join(_SNAP_DIR, "last_run.json")
+
+#: 每套判据的**历史耗时账**（2026-10-13 新增）。由每次真跑合并写入；
+#: 快道（`--hook`）用它做预算 —— 让"这次能跑多少"由**实测数据**决定，
+#: 而不是由我拍一个阈值。
+#: ★ 局限（明写，不假装覆盖）：它是一份会**陈旧**的快照 —— 某套突然变慢时
+#:   预算会估小。所以它只影响**快道挑哪些**，不影响全量闸门（全量永远全跑）；
+#:   且快道跳过的每一条都会**逐条列出来**（T-10 的反面）。
+_DUR = os.path.join(_SNAP_DIR, "suite_durations.json")
+
+#: 提交钩子的**套件**预算（秒，**不含主闸门** —— 主闸门永远跑）。
+#: 为什么是"预算"而不是"单条阈值"：受影响的套件可能同时含 0470（245s）
+#: 与 0380（4.7s），只卡单条阈值挡不住"很多条 10 秒的"叠起来。
+#: 目标墙钟 ≈ 主闸门快档（实测 ~15s）＋ 本预算 ＝ ~27s。
+_HOOK_BUDGET = 12.0
+
+
+def _load_durations():
+    """读历史耗时账。读不到 ⇒ 空表（**不是**"都很慢"，由 `_apply_budget` 兜）。"""
+    try:
+        with open(_DUR, encoding="utf-8") as f:
+            d = json.load(f)
+        return {k: float(v) for k, v in d.items() if isinstance(v, (int, float))}
+    except Exception:                                   # noqa: BLE001
+        return {}
+
+
+def _merge_durations(prev, results):
+    """把本次**真跑到**的耗时并进账；没跑的保持旧值（不许清零、不许删键）。"""
+    out = dict(prev)
+    for r in results:
+        m = re.search(r"\[([\d.]+)s\]", r.get("detail") or "")
+        if m:
+            out[r["suite"]] = float(m.group(1))
+    return out
+
+
+def _apply_budget(pick, must=("regression",)):
+    """快道预算：按**历史耗时升序**尽量多装，装不下的**逐条列出来**。
+
+    ★ 为什么按升序：同样预算下"跑得多"比"跑得贵"更能挡回归
+      （一条 245s 的端到端套件换成 5 条秒级套件，挡住的缺陷面通常更宽）。
+    ★ `must`（必跑，**不参与预算**）：默认含主闸门 —— 它是"已修缺陷的总账"，
+      快道存在的理由就是它。调用方还会在"闸门自身文件被改"时把 `selfcheck`
+      加进来：那种情况下闸门自检恰恰是**最该跑**的那套，
+      让预算把它挤掉就是"闸门自己改了却没人复验闸门"。
+    ★ 没有历史耗时 ⇒ **按"跑"处理**（宁可超预算，不许因为"不知道它多慢"就跳）。
+    ★★ 跳过的必须**逐条打印含历史秒数**：快道不许"悄悄少跑"，
+      只许"明说自己少跑了什么"。这条由 D-34 守着。
+    """
+    hist = _load_durations()
+    took = [s for s in pick if s[0] in must]
+    rest = [s for s in pick if s[0] not in must]
+    rest.sort(key=lambda s: hist.get(s[0], -1.0))
+    over, spent = [], 0.0
+    for s in rest:
+        d = hist.get(s[0])
+        if d is None:
+            took.append(s)
+            print("      · 无历史耗时 ⇒ 按跑处理：%s" % s[0])
+            continue
+        if spent + d > _HOOK_BUDGET:
+            over.append((s[0], d))
+            continue
+        spent += d
+        took.append(s)
+    print("  ◇ 快道预算 %.0fs（**只算非必跑套件**）：本次跑 %d 套"
+          "（套件历史耗时合计 %.1fs）；必跑：%s"
+          % (_HOOK_BUDGET, len(took), spent, "、".join(sorted(must))))
+    _reg = hist.get("regression")
+    print("      ⏱ 预计墙钟 ≈ 主闸门快档 %s ＋ 套件 %.1fs ＝ %.0fs（历史口径）"
+          % (("%.0fs" % _reg) if _reg else "（无历史）", spent,
+             (spent + (_reg or 0.0))))
+    if over:
+        print("      ⏭ **预算外**（快道没跑，留给打包前/CI 的全量闸门）—— 逐条列明：")
+        for k, d in sorted(over, key=lambda x: -x[1]):
+            print("          %-20s 历史 %7.1fs" % (k, d))
+    return took
+
+
+def _pid_alive(pid):
+    """那个进程号还在不在。**三态**：`True` 在 ／ `False` 确实不在 ／ `None` 查不了。
+
+    ★ 判活口径 import 产品模块（维七：不许二次实现）。
+
+    ★★ 为什么必须是三态（2026-10-13 实测修，本轮抓到的最严重一处）：
+      本函数第一版写成 `except Exception: return False` —— 把「**查不了**」
+      折叠成了「**不在**」。而它恰恰会查不了：`import audit_chain` 在
+      `python ci/delivery_gate.py` 下因 `sys.path` 没有仓根而**必然失败**。
+      后果不是"报个错"，而是：**活锁被判成陈旧锁 ⇒ 让开 ⇒ 被偷**。
+      产品模块 `audit_chain.pid_alive` 自己的纪律写着「查询失败/异常按存活
+      （宁可 sidecar，不可误偷活锁 —— Run B 教训）」—— 我这一版**正好反着做**。
+      ⇒ 查不了 ⇒ `None` ⇒ 调用方**按占用处理**（宁可拒绝并发，绝不偷活锁）。
+    """
+    try:
+        import audit_chain as _AC
+    except Exception:                                   # noqa: BLE001
+        return None                                     # 查不了 ≠ 不在
+    try:
+        return bool(_AC.pid_alive(int(pid)))
+    except Exception:                                   # noqa: BLE001
+        return None                                     # 查不了 ≠ 不在
+
+
+def _read_lock_pid():
+    """读锁文件里的 pid。**空串 ≠ 没有锁**（这是第二个坑，见 `_acquire_lock`）。
+
+    ★ `os.open(O_EXCL)` 与 `os.write(pid)` 之间有一个微秒级窗口，
+      此刻锁文件**存在但为空**。若把空串当成"没锁"，就会去让开一把**活锁**。
+      ⇒ 短暂重读几次；仍为空 ⇒ 返回空串，由调用方按**占用中（pid 未知）**处理。
+    """
+    for _ in range(6):
+        try:
+            with open(_LOCK, encoding="utf-8") as f:
+                s = f.read().strip()
+        except OSError:
+            return ""
+        if s:
+            return s
+        time.sleep(0.05)
+    return ""
+
+
+def _acquire_lock():
+    """拿闸门运行锁。返回 `(fd, None)`；拿不到 ⇒ `(None, 说明串)`。
+
+    ★★ 为什么必须有它（2026-10-13 实测，血的教训）：
+      两个闸门进程同时跑 ⇒ **两个都写 `baseline.json`、都写同一个日志文件**。
+      日志被交错写入，读出来是一行 "0481 RED" ⇒ 我追了 **20 分钟幽灵红**，
+      最后靠基线快照才证明那次其实是 30/30 全绿。
+      这与本仓铁律同型：**同一语义只能有一个写入口** —— 闸门的**输出**也是。
+    ★ 陈旧锁必须能自动让开（崩一次不能把闸门永久锁死）：
+      pid 不在了 ⇒ 把锁**改名让开**（本仓纪律：不删文件）后重试一次。
+    ★★ 判活是**三态**的，且"拿不准"一律按**占用**处理：
+      · `old == ""`（写 pid 的空窗）  ⇒ 占用中（pid 未知）
+      · `_pid_alive(old) is None`（查不了）⇒ 占用中
+      · 只有**明确查实"这个 pid 不在了"**才允许让开。
+      —— 反面（把查不了当不在）在 2026-10-13 真发生过，后果是**活锁可被偷**
+         （详见 `_pid_alive`）。判据 D-32 锁的就是这条。
+    """
+    os.makedirs(_SNAP_DIR, exist_ok=True)
+    for _ in range(2):
+        try:
+            fd = os.open(_LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(os.getpid()).encode("ascii"))
+            return fd, None
+        except FileExistsError:
+            old = _read_lock_pid()
+            alive = _pid_alive(old) if old else None
+            if alive is not False:                      # None＝查不了 ⇒ 按占用
+                who = ("（pid %s）" % old) if old else \
+                      "（占用方进程号还没写进去或查不到）"
+                return None, ("另有一次闸门正在跑%s —— **不许并发**：两个进程会互写"
+                              "基线快照与日志（2026-10-13 实测踩到，追了 20 分钟"
+                              "幽灵红）。等它跑完再来。" % who)
+            try:                                        # 陈旧锁：改名让开，不删
+                os.replace(_LOCK, _LOCK + ".stale")
+            except OSError as e:                        # noqa: BLE001
+                return None, ("锁被判为陈旧（pid %s 已不在），但让开失败：%r"
+                              " —— 锁文件可能仍被占用。确认后手工删掉 %s 再跑"
+                              % (old, e, _LOCK))
+        except OSError as e:                            # noqa: BLE001
+            return None, "拿不到运行锁：%r" % (e,)
+    return None, "锁文件反复拿不到（陈旧锁让开后仍被占）"
+
+
+def _release_lock(fd):
+    """放锁（**改名让开**，不删文件）。"""
+    if fd is None:
+        return
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+    try:
+        os.replace(_LOCK, _LOCK + ".done")
+    except OSError:
+        pass
+
 
 def _gate_fingerprint():
     """闸门自身的指纹：判据清单 ＋ 被跑文件的 mtime/size ＋ **闸门文件自己**。
@@ -489,6 +690,16 @@ def _suite_deps(rel):
 
 _DEP_CACHE = {}
 
+#: 闸门**自身**的文件。改它们必须复验 `selfcheck`（闸门自检套件）——
+#: 见 `impacted_suites` 里那段"0 套"的实测。主闸门由调用方强制加入。
+_GATE_SELF_FILES = {
+    "ci/delivery_gate.py",
+    "ci/regression_gate.py",
+    "ci/defect_types.py",
+    "ci/git-hooks/pre-commit",
+    "ci/_p_delivery_selfcheck.py",
+}
+
 
 def impacted_suites(changed_files):
     """改动文件 → 必须复验的判据集。返回 `(集合, 说明行列表)`。
@@ -501,10 +712,18 @@ def impacted_suites(changed_files):
             _DEP_CACHE[key] = _suite_deps(rel)
     stems = {os.path.splitext(os.path.basename(p))[0] for p in changed_files}
     hit = {k for k, deps in _DEP_CACHE.items() if deps & stems}
+    # ★★ 0.48.5：**闸门自身的文件**不在任何套件的 import 图里。
+    #   实测：改 `ci/delivery_gate.py` ⇒ `impacted_suites` 返回 **0 套**
+    #   ⇒ 快道会认为"这次改动不需要复验任何东西"。
+    #   而"闸门自己改了却没人复验闸门"是最不该有的盲区 ——
+    #   快道存在的理由就是替提交把关，它**自己不验自己**等于把把关权交给自己。
+    #   ⇒ 改这些文件必须复验 `selfcheck`（闸门自检套件）；主闸门由调用方强制加入。
+    if {os.path.normpath(p).replace("\\", "/") for p in changed_files} & _GATE_SELF_FILES:
+        hit.add("selfcheck")
     note = []
     for k in sorted(hit):
         note.append("%s ← 直接 import %s" % (
-            k, "、".join(sorted(_DEP_CACHE[k] & stems))))
+            k, "、".join(sorted(_DEP_CACHE[k] & stems)) or "（闸门自身文件）"))
     if not hit:
         note.append("（没点名到任何判据 ⇒ 改动文件不在任何判据的 import 图里，"
                     "**这不是「不需要复验」，而是判据没覆盖它**）")
@@ -596,17 +815,39 @@ def _touch_files():
         **和"全跑一遍"没区别 ⇒ 名单失去筛选意义（而这是它存在的全部理由）。**
       ⇒ 口径：**只认产品源码**（顶层 .py / ci/ / tools/ / scripts/ 里的 .py）。
 
+    ★★ 0.48.5（2026-10-13）改用 `git status --porcelain`，两个理由：
+      ① `git diff --name-only HEAD` **看不见新文件**（untracked）。
+         而"新加一个判据文件"恰恰是最需要复验的情形之一 ——
+         看不见它 ⇒ 快道会认为"没改动" ⇒ 要么空跑要么回退全量。
+         （`.gitignore` 里的 `_p_*`、`dist/` 等不会出现在 porcelain 里，
+          所以顺带少了那 107 个 `??` 里的噪声。）
+      ② git 可用时**以 git 为准**（返回空集也算准）：原实现在
+         "git 可用但工作区干净"时会掉进 mtime 启发式 ⇒ 把
+         "刚提交过的文件"当成"本次改动" ⇒ 影响面凭空变大。
+
     ★ 局限（明写，不假装覆盖）：git 不可用（无仓库/首次克隆）时退回 mtime 口径，
       那时 `.pyc` 已由上面的正则排除，但仍可能含「跑闸门时顺带改写的文件」。
     """
     try:
-        r = subprocess.run(["git", "diff", "--name-only", "HEAD"],
+        r = subprocess.run(["git", "status", "--porcelain"],
                            capture_output=True, text=True, cwd=PKG, timeout=30)
-        if r.returncode == 0 and r.stdout.strip():
-            got = {os.path.normpath(x) for x in r.stdout.split() if x.strip()}
+        if r.returncode == 0:
+            got = set()
+            for line in (r.stdout or "").splitlines():
+                if len(line) < 4:
+                    continue
+                p = line[3:].strip()
+                if " -> " in p:                     # 重命名：取新名
+                    p = p.split(" -> ", 1)[1]
+                got.add(os.path.normpath(p.strip('"')))
             return {p for p in got
-                    if not _TOUCH_EXCLUDE.search(p.replace("\\", "/"))
-                    and p.endswith(".py")}
+                    if (not _TOUCH_EXCLUDE.search(p.replace("\\", "/"))
+                        and p.endswith(".py"))
+                    # ★★ 闸门**自身**的文件不受"只认 .py"限制：
+                    #   `ci/git-hooks/pre-commit` 是 shell 脚本，实测被这条过滤掉过
+                    #   ⇒ 改钩子不会触发 selfcheck（而"闸门自身文件"里恰恰只有它
+                    #     不是 .py）。2026-10-13 由 `--hook` 实测发现。
+                    or p.replace("\\", "/") in _GATE_SELF_FILES}
     except Exception:                                          # noqa: BLE001
         pass
     import time as _t
@@ -634,8 +875,12 @@ def _looks_like_noop(out):
     return len((out or "").strip()) < _NOOP_MIN_CHARS
 
 
-def _run(rel, timeout=900):
+def _run(rel, timeout=900, extra=None):
     """跑一套判据。返回 `(状态, 明细)`，状态 ∈ PASS / RED / CRASH / MISSING / NOOP。
+
+    ★ `extra`：附加给判据脚本的参数（2026-10-13 新增）。快道用它把
+      **主闸门**切到快档（`regression_gate.py --quick`：跳过 3 条真跑打包/安装
+      管线的判据，逐条打印）。不传 ⇒ 与原来完全一样（全量）。
 
     ★ 为什么要把 CRASH 与 RED 分开（本轮踩过同型）：
       自检器自己的注释里记着一条教训 ——「工具崩了不算判据红，
@@ -650,7 +895,8 @@ def _run(rel, timeout=900):
     env["ANTINEL_PKG"] = PKG          # 让判据认准主仓，不被上级陈旧 manifest 干扰
     t0 = time.time()
     try:
-        r = subprocess.run([sys.executable, p], capture_output=True, text=True,
+        r = subprocess.run([sys.executable, p] + list(extra or []),
+                           capture_output=True, text=True,
                            encoding="utf-8", errors="replace",
                            timeout=timeout, env=env, cwd=PKG)
     except subprocess.TimeoutExpired:
@@ -820,9 +1066,23 @@ def selfcheck():
 
 # ────────────────────────────────────────────── 主流程
 def main():
+    # ★ 0.48.5：输出**行缓冲**。重定向到文件时 Python 默认整块缓冲 ⇒ 跑 19 分钟的
+    #   闸门"一个字都看不到"，只能干等（2026-10-13 实测；我当时改用 `tr` 管道，
+    #   结果缓冲更狠）。**进度可见是"不用干等"的前提**，也是效率的一部分。
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except Exception:                                   # noqa: BLE001
+        pass
     ap = argparse.ArgumentParser()
     ap.add_argument("--quick", action="store_true", help="跳过 slow 档（< 10 秒）")
     ap.add_argument("--only", default="", help="只跑指定键（逗号分隔）")
+    ap.add_argument("--affected", action="store_true",
+                    help="只跑**受影响**的套件（按 import 图从本次改动推出，"
+                         "始终含主闸门 regression）；探不到改动 ⇒ 回退全量")
+    ap.add_argument("--hook", action="store_true",
+                    help="提交钩子快道：受影响套件按历史耗时做预算（跳过什么一律"
+                         "逐条列出）＋ 主闸门；**不写基线快照**。"
+                         "★ 快道不是全量凭证 —— 全量只有 `python ci/delivery_gate.py`")
     ap.add_argument("--json", action="store_true", help="机器可读输出")
     ap.add_argument("--selfcheck", action="store_true", help="负控：判据被改坏时本闸门必须红")
     a = ap.parse_args()
@@ -836,6 +1096,12 @@ def main():
     if not os.path.isdir(PKG):
         print("★ 找不到仓根 %s" % PKG)
         return 2
+
+    _fd, _why_lock = _acquire_lock()
+    if _fd is None:
+        print("★ 闸门未启动：%s" % _why_lock)
+        return 3
+    atexit.register(_release_lock, _fd)
 
     print("=" * 78)
     print("统一交付闸门 —— 一处入口 · %d 套判据 · 红即阻断" % len(SUITES))
@@ -860,12 +1126,45 @@ def main():
     suites = SUITES
     if only:
         suites = [s for s in SUITES if s[0] in only]
+    elif a.affected or a.hook:
+        # ★★ 0.48.5 快道（2026-10-13）：复用**现成**的 import 图（`impacted_suites`）。
+        #   它原来只"打印"受影响范围，于是每次改动要么全量 19 分钟、要么人肉挑——
+        #   这与交接件 §3.3 附加要求二「闸门要快到没有理由跳过」正面冲突：
+        #   **慢到 19 分钟的闸门，全量跑就退化成靠自觉**。现在把它变成可执行的模式。
+        #   ★ 口径：**探不到改动 ⇒ 回退全量**（宁多跑，绝不漏跑）。
+        _touched = _touch_files()
+        if not _touched:
+            print("  ⚠️  --affected：探不到本次改动（git 无变更且无近 30 分钟修改的 .py）"
+                  "⇒ **回退全量**（宁多跑，不漏跑）")
+        else:
+            _hit, _note = impacted_suites(_touched)
+            _hit.add("regression")          # 主闸门永远跑（它是"已修缺陷"的总账）
+            _skipped = [s[0] for s in SUITES if s[0] not in _hit]
+            suites = [s for s in SUITES if s[0] in _hit]
+            print("  ◇ 改动 %d 个文件 ⇒ 在影响面内 %d 套 / 不在影响面 %d 套"
+                  % (len(_touched), len(suites), len(_skipped)))
+            for _ln in _note[:12]:
+                print("      · %s" % _ln)
+            if _skipped:
+                print("      ⏭ 不在影响面：%s" % "、".join(_skipped))
+            if a.hook:
+                # ★ 闸门**自身**的文件被改 ⇒ `selfcheck` 必须跑，且**不参与预算**
+                #   （预算把它挤掉＝"闸门自己改了却没人复验闸门"）。
+                _must = {"regression"}
+                if {os.path.normpath(p).replace("\\", "/")
+                        for p in _touched} & _GATE_SELF_FILES:
+                    _must.add("selfcheck")
+                suites = _apply_budget(suites, must=_must)
 
     for key, rel, tier in suites:
-        if a.quick and tier == "slow":
+        if a.quick and tier == "slow" and not (a.hook and key == "regression"):
             print("  ⏭  %-46s slow 档，--quick 跳过" % key)
             continue
-        st, why = _run(rel)
+        # ★ 快道：主闸门切快档（它内部逐条打印跳过了哪 3 条）。
+        #   为什么主闸门也要快档：实测 22 条 66s，其中 3 条真跑打包/安装管线占 51s
+        #   ⇒ 不减这一刀，钩子必然 >30s，而 >30s 的钩子会被 --no-verify 绕过。
+        _extra = ["--quick"] if (a.hook and key == "regression") else None
+        st, why = _run(rel, extra=_extra)
         icon = {"PASS": "✅", "RED": "❌", "CRASH": "💥",
                 "MISSING": "💥", "NOOP": "⚠️"}[st]
         print("  %s %-46s %s" % (icon, key, why))
@@ -953,18 +1252,32 @@ def main():
         print("  ⬆  %-46s 自举豁免：manifest 由本次打包生成，打包前必然落后" % k)
 
     # ── 机制层①：差分归因（让「多了什么」成为机器算出来的，不必重跑去回忆）──
+    # ★★ 0.48.5：**只有全量跑才写基线快照**。2026-10-13 实测：`--only 0481` 一次
+    #   就把 30 套的基线换成 1 套 ⇒ 下一次全量的"新增红 / 已转绿"（收敛的第一手
+    #   线索）当场失真，**而且没有任何判据会发现**。局部运行同样不参与基线对照。
+    _ran = {r["suite"] for r in RESULTS}
+    _all = {s[0] for s in SUITES}
+    _full = _ran == _all
     _fp = _gate_fingerprint()
-    new_red, fixed, snap_note = _diff_against_baseline(RESULTS, _fp)
-    if new_red:
-        print("-" * 78)
-        print("  ★ 本次**新增**红（相对上次快照）—— 收敛的第一手线索：")
-        for suite, why in new_red:
-            print("      · %-44s %s" % (suite, why))
-        print("    ⇒ 新增红才是要查的对象；一直红着的那条另有原因，不要混在一起查。")
-    if fixed:
-        print("  ✔ 本次已转绿（相对上次快照）：%s" % "、".join(fixed))
-    print("  ⓘ 基线对照：%s" % snap_note)
-    _save_snapshot(RESULTS, _fp)
+    if _full:
+        new_red, fixed, snap_note = _diff_against_baseline(RESULTS, _fp)
+        if new_red:
+            print("-" * 78)
+            print("  ★ 本次**新增**红（相对上次快照）—— 收敛的第一手线索：")
+            for suite, why in new_red:
+                print("      · %-44s %s" % (suite, why))
+            print("    ⇒ 新增红才是要查的对象；一直红着的那条另有原因，不要混在一起查。")
+        if fixed:
+            print("  ✔ 本次已转绿（相对上次快照）：%s" % "、".join(fixed))
+        print("  ⓘ 基线对照：%s" % snap_note)
+        _save_snapshot(RESULTS, _fp)
+    else:
+        print("  ⓘ 本次是**局部运行**（跑了 %d / %d 套）⇒ 不写基线快照、不参与基线对照"
+              " —— 局部结果会把全量基线覆盖成假的（2026-10-13 实测）"
+              % (len(_ran), len(_all)))
+        if a.hook:
+            print("      ★ 快道（提交钩子）**不是全量凭证** —— 它明说自己没跑什么。"
+                  "全量凭证只有 `python ci/delivery_gate.py`（打包前/CI）。")
 
     # ── 机制层②：本次改动的影响面 ──
     _touched = _touch_files()
@@ -1007,6 +1320,32 @@ def main():
         print("  确知要绕过：git commit --no-verify（会在审计链留痕，不是悄悄溜过去）")
     else:
         print("★ 闸门全绿：所有已登记判据均通过（本次实际执行 %d 套）" % n_pass)
+
+    # ★★ 0.48.5：结果**一律落盘**一份机器可读的（不再只在 `--json` 时）。
+    #   为什么：2026-10-13 我是从控制台日志读结论的，撞上并发交错 ＋ 重定向缓冲，
+    #   读到的是一行被写坏的 "0481 RED" ⇒ 追了 20 分钟幽灵红。
+    #   ⇒ 结论必须有一个**不受终端形态影响**的通道。`full` 字段同时说明这次是
+    #     全量还是局部（**局部结果不可当收敛基线用**）。
+    try:
+        with open(_LAST_RUN, "w", encoding="utf-8", newline="\n") as f:
+            json.dump({"ts": time.time(), "full": _full,
+                       "suites_run": sorted(_ran), "suites_total": len(_all),
+                       "pass": n_pass, "red": n_red, "crash": n_crash,
+                       "noop": n_noop, "struct_bad": struct_bad,
+                       "orphans": orphans, "missing": gone,
+                       "results": RESULTS}, f, ensure_ascii=False, indent=1)
+        print("  ⓘ 结果文件：%s" % _LAST_RUN)
+    except Exception as e:                              # noqa: BLE001
+        print("  !! 结果文件没写成（%r）—— 这是「看不见结论」的一个来源" % (e,))
+
+    # ★★ 0.48.5：把本次真跑到的耗时并进**历史耗时账**（快道预算的数据源）。
+    #   没跑到的套件保持旧值 —— 不许清零（清一次快道就会"因为不知道多慢而全跑"）。
+    try:
+        _merged = _merge_durations(_load_durations(), RESULTS)
+        with open(_DUR, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(_merged, f, ensure_ascii=False, indent=1, sort_keys=True)
+    except Exception as e:                              # noqa: BLE001
+        print("  !! 耗时账没写成（%r）—— 快道下次会退化成「不知道多慢就全跑」" % (e,))
 
     if a.json:
         print(json.dumps({"results": RESULTS, "pass": n_pass, "red": n_red,
