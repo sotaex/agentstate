@@ -141,9 +141,20 @@ h2{font-size:15px;margin:0 0 12px}
   background:var(--line);color:var(--muted);font-size:10px;font-weight:700}
 .term[open]>summary::after{content:"？";background:var(--brand);color:#fff}
 /* ★ 0.48.5（交接件 §5.6 乙1）：裸「？」芯片（mk）—— summary 自带一个「？」，
-   ::after 徽章再补一个就成「？？」⇒ mk 形态把 ::after 整个关掉
-   （content:none ＋ display:none 双保险：只留 content 会渲染一个空圆圈）。 */
-.term.mk>summary::after{content:none;display:none}
+   ::after 徽章再补一个就成「？？」⇒ mk 形态**隐藏 summary 自身的字**，
+   徽章照旧渲染 ⇒ 全站「？」**同一种形状**（14×14 圆、10px、写死字号）。
+   ★★ 2026-10-13 修（C5，本轮自己引入的缺陷）：上一版写成
+   `.term.mk>summary::after{content:none;display:none}` —— **把徽章整个关掉**，
+   于是 8 个新落点退化成**裸文字「？」**（无圆圈、字号继承所在容器：
+   药丸 12px／顶部灯 16px 粗体／筛选条 12px），与页内原有的
+   「词名＋小圆徽章」**同屏两种形状**。实测：日报 8+4／运行状态 4+4／
+   账本 7+4 三种页面并存。创始人判定「原先更小又有圆背景的更好」，
+   **且交接件 §5.6 定稿写的本就是"summary 只渲染 CSS 的「？」徽章"**
+   —— 是实现比定稿多做了一步。⇒ 现在改回定稿意图：字隐藏、徽章保留。
+   ★ 为什么用 `font-size:0` 而不是 `color:transparent`：后者只让字看不见，
+   仍占宽度 ⇒ 「？」与徽章之间会多出一个字距空洞。`::after` 自带
+   `width/height/font-size`，不受父级 0 字号影响。 */
+.term.mk>summary{font-size:0;line-height:0;color:transparent;letter-spacing:0}
 .tdef{position:absolute;z-index:60;top:calc(100% + 6px);left:0;
   width:max-content;max-width:min(560px,calc(100vw - 32px));min-width:260px;
   margin:0;padding:12px 14px;font-size:12.5px;line-height:1.75;color:var(--fg);
@@ -1869,6 +1880,102 @@ def _place_if_needed(placer=None, tries=24, interval=0.35, run_id=None,
     th = threading.Thread(target=run, name="inbox-place", daemon=True)
     th.start()
     return True
+
+
+#: 一次性调用方等窗口就位的默认预算（秒）。★ 为什么需要它见 `open_console_settled`。
+DEFAULT_SETTLE_SEC = 12.0
+
+
+def open_console_settled(url, wait_sec=DEFAULT_SETTLE_SEC, token=None, verbose=True):
+    """开独立窗口，**并等它就位**（一次性调用方专用；服务路径仍走 `_place_if_needed`）。
+
+    ★★ 为什么必须有这个函数（C4，2026-10-13 **实测**抓到的真缺陷，不是推演）：
+      `_place_if_needed()` 把落位放在 `daemon=True` 线程里 —— 对**长命**进程
+      （服务自己开窗：`threading.Timer(0.6, open_console)`）没问题；
+      但对**一次性**调用方是致命的：`inbox_cli.py window`（＝`antinel.cmd`
+      一键入口，创始人日常就该用这个）进程 **2 秒就返回** ⇒ daemon 线程
+      随进程一起死，而 Edge 建窗实测要 1–2.5s ⇒ 线程根本轮不到那一刻
+      ⇒ **落位从未执行**。
+      实测现象：窗口出生 676×640（比目标宽 156px），屏幕上一个字都没说。
+      两臂探针（`_p_c4_probe.py`，只差进程寿命）：CLI 臂 `place_all` **0** 次／
+      长命臂 **1** 次。
+      ⇒ 病型＝**T-10 静默降级**：该做的事没做，且没有任何输出说明它没做。
+
+    ★ 为什么这样修（而不是把 `_place_if_needed` 改成非 daemon）：
+      职责分层 —— **谁开窗，谁负责等它就位**。
+      · 服务是长命进程 ⇒ 后台落位线程是对的（不阻塞 `serve_forever`）；
+      · CLI 是一次性进程 ⇒ 它**自己**同步等 + 回读校验，并把结果打到屏上。
+      两边共用同一个 `inbox_window.place_all`（落位的唯一实现，不另写一套）。
+      这样 `open_console()` 的既有契约**一字不改** ⇒ 既有判据
+      （`c_console_app_window` / `c_console_real_branch`，都走注入路径）
+      一行都不用动，不会出现"为了容纳新产品代码而放松旧判据"。
+
+    ★ 返回 dict，**如实**，不谎报（`placed` 只能由**回读**说了算）：
+      `{"opened": "app"/"browser"/"none", "placed": bool, "want": rect|None,
+        "got": [实测矩形...], "why": 人话}`
+    ★ 纪律：**落位失败不关窗**（0.36.4 立的规矩：面板就是主人要看的內容，
+      为"位置不对"杀"內容"＝手段颠倒目的，而且会把"为什么没搬成"的线索
+      连同窗口一起抹掉）。只如实上报，关不关由人决定。
+    """
+    import inbox_window as WIN
+    out = {"opened": "none", "placed": False, "want": None, "got": [], "why": ""}
+    ret = open_console(url, token=token, verbose=verbose)
+    out["opened"] = ret
+    try:
+        geo = WIN.console_geometry()
+    except Exception as e:                                  # noqa: BLE001
+        out["why"] = "取不到目标几何：%s: %s" % (type(e).__name__, e)
+        return out
+    rect = geo.get("rect")
+    out["want"] = list(rect) if rect else None
+    if not rect:
+        out["why"] = geo.get("reason") or "屏幕放不下，未落位"
+        return out
+    if token is None and url:
+        try:
+            from urllib.parse import parse_qs, urlparse
+            token = (parse_qs(urlparse(url).query).get("t") or [None])[0]
+        except Exception:                                   # noqa: BLE001
+            token = None
+    try:
+        run_id = WIN.build_run_id(token)
+        suffix = WIN.console_title_suffix(run_id)
+    except Exception as e:                                  # noqa: BLE001
+        out["why"] = "算不出本次窗口身份：%s: %s" % (type(e).__name__, e)
+        return out
+
+    # ── 等本次运行的窗口出现（严格模式：只认带 #run_id 的，绝不碰用户窗口）──
+    deadline = time.time() + float(wait_sec)
+    hwnds, last = [], "没看到带本次标识（%s）的值守台窗口" % suffix
+    while time.time() < deadline:
+        try:
+            hwnds = WIN.find_console_windows(run_id=run_id)
+        except Exception as e:                              # noqa: BLE001
+            last = "枚举窗口出错（%s）" % type(e).__name__
+            time.sleep(0.2)
+            continue
+        if hwnds:
+            break
+        time.sleep(0.25)
+    if not hwnds:
+        out["why"] = "%s（等了 %.1fs）" % (last, float(wait_sec))
+        return out
+
+    # ── 落位（`place_all` 内部**先回读**：已对齐就一条 SetWindowPos 都不发）──
+    try:
+        ok, why = WIN.place_all(hwnds, rect)
+    except Exception as e:                                  # noqa: BLE001
+        out["why"] = "落位抛异常：%s: %s" % (type(e).__name__, e)
+        return out
+    out["why"] = why
+    # ★ 不信"应该对了"——**再回读一次**独立取证（本仓铁律：查出来是好的才算好）。
+    try:
+        out["got"] = [list(WIN.window_rect_of(h)) for h in hwnds]
+    except Exception as e:                                  # noqa: BLE001
+        out["why"] = "%s；且回读失败：%s" % (why, e)
+        return out
+    out["placed"] = bool(ok) and all(tuple(g) == tuple(rect) for g in out["got"])
+    return out
 
 
 def open_console(url, opener=None, placer=None, token=None, verbose=True):

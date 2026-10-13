@@ -543,7 +543,13 @@ def c_open_console_calls_place_after_open():
     src = _src_of(SV)
     if "_place_if_needed" not in src:
         return "open_console 没有调用落位"
-    body = src.split("def open_console", 1)[-1]
+    # ★ 2026-10-13（C4）：必须按**行边界**取函数段（`_func_seg_of`），
+    #   不许 `split("def open_console")` —— `open_console_settled`
+    #   （C4 新增，定义在 `open_console` **之前**）是它的前缀，
+    #   子串切分会先命中 settled 那个 ⇒ 取到错的函数段 ⇒ **假红**（实测：
+    #   settled 里没有 `_place_if_needed`，P05 当场误报"没有调用落位"）。
+    #   与 0.36.2 `find_console_window`/`find_console_windows` 同族。
+    body = _func_seg_of(src, "open_console")
     # ★ 0.37.1：先判 `in body` 再 `.index()`。
     #   旧写法是 `body.index("_place_if_needed")` —— 变异把**调用**改掉之后
     #   （函数定义还在、模块里仍有这个词）走到这一句会抛 `ValueError`，
@@ -1744,7 +1750,11 @@ def c_close_old_windows_before_open():
     """
     import inbox_server as SV
     code = _code_only(_src_of(SV))
-    seg = code.split("def open_console", 1)[-1].split("\ndef ", 1)[0]
+    # ★ 2026-10-13（C4）：同 P05 —— 按行边界取段，不许子串 split。
+    #   `open_console_settled`（C4 新增，定义在前）是 `open_console` 的前缀，
+    #   `split("def open_console", 1)[-1]` 会落到 settled 上 ⇒ 假红
+    #   （实测：settled 里没有 close_console_windows，P09 当场误报）。
+    seg = _func_seg_of(code, "open_console")
     i_close = seg.find("close_console_windows")
     if i_close < 0:
         return "open_console 里没有收旧窗口这一步"

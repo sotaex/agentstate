@@ -24,8 +24,8 @@
                                词条浮层**保留**（它的 `<summary>` 是可见标签）。
     body_without_terms(html)   正文层再剥术语浮层 —— 用于「正文不得复述
                                词条口径」这类断言（丙2/U-03 的口径）。
-    chrome(html)               样式层 —— 只取 `<style>` 内容；断言
-                               「CSS 里有这条规则」时用它。
+    chrome(html)               样式层 —— 只取 `<style>` 内容，并**剥掉 CSS 注释**
+                               （断言「CSS 里有这条规则」时用它）。
     raw(html)                  原始整页 —— 只有**结构断言**（纯 ASCII 标记，
                                如 `data-id=`、`f=action`、`<body>`）才可以用。
 
@@ -49,6 +49,12 @@ TEXT_LAYERS = ("body", "body_without_terms")
 
 _STYLE_BLOCK = re.compile(r"<style\b[^>]*>.*?</style>", re.S | re.I)
 _HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
+#: CSS 注释（`/* … */`）。**注释不是规则**（2026-10-13 U-16 实测教训）：
+#:   我在 `inbox_server.py` 的 CSS 注释里复述过旧缺陷原文
+#:   （`.term.mk>summary::after{content:none;display:none}`），判据用正则查
+#:   真规则时被**自己写的说明文字**命中 ⇒ 假红。与 S48 同族（把非目标层
+#:   当目标层）：剥除层必须连注释一起剥，否则"复述缺陷"本身就是误红源。
+_CSS_COMMENT = re.compile(r"/\*.*?\*/", re.S)
 
 #: 术语浮层（`<details class=term|gloss>` … `</details>`，含 0.48.5 乙1 的 `term mk`）。
 #: 为什么能非贪婪：`glossary.render()` 只放行 b/code 两个内联标签，块内不嵌套 details。
@@ -74,5 +80,14 @@ def body_without_terms(html):
 
 
 def chrome(html):
-    """样式层：只取 `<style>` 的**内容**（断言「CSS 里有这条规则」时用）。"""
-    return "\n".join(_STYLE_BLOCK.findall(html or ""))
+    """样式层：只取 `<style>` 的内容，并**剥掉 CSS 注释**。
+
+    ★★ 为什么剥注释（2026-10-13 U-16 实测踩到，不是推演）：
+      我在 `inbox_server.py` 的 CSS 注释里复述过 C5 旧缺陷的原文
+      （`.term.mk>summary::after{content:none;display:none}`），
+      写判据时正则第一条就命中它 ⇒ **自己写的说明文字把自己误红**。
+      注释不是规则：断言「CSS 里有/没有这条规则」时，注释必须不在场。
+      （与正文层剥 HTML 注释同一个道理 —— S48 的同族，只是发生在样式层。）
+    """
+    return "\n".join(_CSS_COMMENT.sub("", blk)
+                     for blk in _STYLE_BLOCK.findall(html or ""))

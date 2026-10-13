@@ -22,6 +22,14 @@
      批次 11（C2 · 判据扫渲染产物）    → 统一口径 `ci/page_caliber.py`（本批**不含新判据**：
                                         它是「编写纪律」的机制化，由元判据 **S48**
                                         在 `ci/guard_instrument_selfaudit.py` 里守）
+     批次 12（C5 问号同形 ＋ C4 落位） → **U-16**（问号全站同形：字隐藏、徽章保留）＋
+                                        **W-07**（一次性调用方自己等窗就位，真进程实测）
+
+   ★ 批次 12 两条都是**存量/本轮自查缺陷**，不是 19 条里的新项：
+     · C4：`_place_if_needed` 的 daemon 线程随一次性进程死 ⇒ 落位从未执行
+           且无任何输出（T-10 静默降级；根因提交 `aa3eeff` 0.36.8，非本轮引入）。
+     · C5：0.48.5 乙1（`264c67b`）**本轮自己引入** —— 实现比交接件 §5.6 定稿
+           多做一步（关掉 ::after 徽章），8 个新落点退化成裸文字「？」。
 
    编号与 19 条**稳定映射**：U-02/U-07/U-09/U-12/U-14 是并入项与视觉项
    预留的空档，不是漏写（§5.7 表头原话）。红不了的（视觉排布）登记为
@@ -703,8 +711,10 @@ def u04():
     （实测 term 芯片数 0）—— 同一个词两个页面两种待遇。
 
     形态（§5.6 定稿）：芯片作**兄弟节点**紧贴链接之后，**不嵌套**
-    （`<a>` 内嵌 interactive 内容是坏味道）；summary 只有一个「？」
-    （`.term.mk` 关掉 ::after 徽章防「？？」）；词本名进展开体首行。
+    （`<a>` 内嵌 interactive 内容是坏味道）；summary 只放一个「？」
+    （屏幕上的「？」由 CSS `::after` 徽章渲染，summary 自身的字由
+    `.term.mk>summary{font-size:0}` 藏掉 —— 徽章**不许**关掉去"消重复"，
+    那是 C5 的错法，由 **U-16** 锁）；词本名进展开体首行。
     词条清单 8 个：筛选条 action/info/archive/all（4）＋ 药丸 R0/L2/L1（3）
     ＋ 顶部灯 light（1）。词条文字一律不动（0380 S17 钉死，只加落点）。
     """
@@ -715,9 +725,9 @@ def u04():
         return "mk 芯片集合 ≠ 8 词条：实到 %r" % (sorted(set(chips)),)
     if len(chips) != 8:
         return "mk 芯片数 = %d，应为 8（有重复落点）" % len(chips)
-    # ① summary 只能是「？」一个（「？？」＝ CSS 没关干净）
+    # ① summary 只能是「？」一个（"？？”＝ summary 自身的字没藏干净，见 U-16）
     if not re.search(r'<summary>？</summary>', page):
-        return "mk 芯片的 summary 不是单个「？」（防止「？？」失败）"
+        return "mk 芯片的 summary 不是单个「？」（屏幕上会出现「？？」）"
     # ② 芯片不许被塞进链接里（兄弟节点，不是嵌套）
     for m in re.finditer(r"<a [^>]*>(.*?)</a>", page, re.S):
         if "<details" in m.group(1):
@@ -1952,6 +1962,520 @@ def n_c1_01():
     return True
 
 
+# ══════════════ U-16 · C5（问号全站同形：字隐藏、徽章保留）══════════════
+#: ★★ 盯的已修缺陷：**C5 —— 本轮自己引入**（0.48.5 乙1，commit `264c67b`）：
+#:   铺裸「？」芯片时，实现写成 `.term.mk>summary::after{content:none;display:none}`
+#:   —— **把徽章整个关掉**，比交接件 §5.6 定稿（"summary 只渲染 CSS 的「？」徽章"）
+#:   多做了一步。后果：8 个新落点退化成**裸文字「？」**（无圆圈、字号继承容器：
+#:   药丸 12px／顶部灯 16px 粗体／筛选条 12px），与页内原有「词名＋小圆徽章」
+#:   **同屏两种形状**。实测四页并存：收件箱 0+8／日报 8+4／运行状态 4+4／账本 7+4。
+#:   创始人判定「原先更小又有圆背景的更好」。
+#:   修法（产品侧）：`font-size:0` 藏掉 summary 自身的字（**不占宽度**、不出字距空洞），
+#:   `::after` 徽章照旧（14×14 圆、10px、写死字号）⇒ **全站同一种形状**。
+#:   ★ 两个相邻错法也一并锁（修好一个又搞出另一个，正是本轮在防的事）：
+#:     · 用 `display:none` 藏字 ⇒ `<summary>` 整个消失，芯片**点不开**；
+#:     · 用 `color:transparent` 藏字 ⇒ 字仍占宽度，「？」与徽章之间多个字距空洞。
+_U16_TERM_AFTER = re.compile(r"([^{}]*summary::after)\{([^{}]*)\}")
+_U16_MK_SUM = re.compile(r"(\.term\.mk>summary)\{([^{}]*)\}")
+_U16_BASE_AFTER = re.compile(r"\.term>summary::after\{([^{}]*)\}")
+
+
+def _u16_findings(page):
+    """问号形状契约的**全部**违规点（空 list ＝ 合规）。
+
+    ★ 为什么抽成共用尺子：`u16`（正判据）与 `n_u16`（负控）必须量**同一份**
+      契约 —— 各写一套就会出现"正判据说红、负控说没红"的各说各话，
+      **量具之间不一致比量具不存在更坏**（本仓铁律）。
+    ★ 样式断言一律经 `PC.chrome(...)`（C2 纪律；它已剥 CSS 注释 ——
+      U-16 的说明文字里就复述着 C5 的旧缺陷原文，不剥会被自己人误红）。
+    """
+    css = PC.chrome(page)
+    bad = []
+    # ① 徽章不许被关掉：管 term summary ::after 的规则，content 必须是"？"
+    for sel, body in _U16_TERM_AFTER.findall(css):
+        if "term" not in sel:
+            continue
+        flat = body.replace(" ", "").replace("\n", "")
+        if "content:none" in flat or "display:none" in flat:
+            bad.append("徽章被关掉：%s{%s} ⇒ mk 芯片退化成裸文字「？」"
+                       % (sel.strip(), flat[:60]))
+        elif 'content:"？"' not in flat:
+            bad.append("term 的 ::after 不渲染「？」徽章：%s{%s}"
+                       % (sel.strip(), flat[:60]))
+    # ② mk summary 自身的字必须藏掉（否则屏幕「？？」：自身一个字 ＋ 徽章一个字）
+    mk = _U16_MK_SUM.findall(css)
+    if not mk:
+        bad.append("缺 `.term.mk>summary{...}` —— mk 芯片的自身字没藏 ⇒「？？」")
+    for _sel, body in mk:
+        flat = body.replace(" ", "").replace("\n", "")
+        if "display:none" in flat:
+            bad.append("`.term.mk>summary` 用 display:none 藏字 ⇒ summary 整个消失，"
+                       "芯片点不开了：%s" % flat[:60])
+        elif "font-size:0" not in flat:
+            # 没藏字 ⇒ 屏幕「？？」。**指名到姓**：只换 color:transparent 的话，
+            # 字看不见但仍占宽度，「？」与徽章之间会多出一个字距空洞。
+            if "color:transparent" in flat:
+                bad.append("没藏字：只用 color:transparent ⇒ 字仍占宽度，"
+                           "「？」与徽章之间有字距空洞：%s" % flat[:60])
+            else:
+                bad.append("没藏字（缺 font-size:0）⇒ 屏幕「？？」：%s" % flat[:60])
+    # ③ 基础徽章形态契约：**只准一处定义**，且必须是 14×14 圆 ＋ 10px ＋ 圆背景
+    #    （创始人判定的"更小又有圆背景"）；`.term[open]` 换色那条是**同源**，不算第二处。
+    base = _U16_BASE_AFTER.findall(css)
+    if len(base) != 1:
+        bad.append("基础徽章 `.term>summary::after` 有 %d 处定义（应恰好 1 处）"
+                   % len(base))
+    else:
+        flat = base[0].replace(" ", "").replace("\n", "")
+        for need in ('content:"？"', "width:14px", "height:14px",
+                     "font-size:10px", "border-radius:50%"):
+            if need not in flat:
+                bad.append("基础徽章缺 %s（14×14 圆、10px、圆背景是定稿形态）"
+                           % need)
+    # ④ 渲染面：芯片真的在页面上（否则上面的 CSS 断言是对空气打分）
+    chips = re.findall(r'<details class="term mk"[^>]*><summary>([^<]*)</summary>',
+                       page)
+    if not chips:
+        bad.append("页面上一颗 mk 芯片都没有 ⇒ CSS 契约空转（U-04 的落点丢了）")
+    elif any(c != "？" for c in chips):
+        bad.append("mk 芯片的 summary 不是单个「？」：%r" % (sorted(set(chips)),))
+    return bad
+
+
+@check("U-16 ★ C5：问号全站同形 —— 字隐藏、徽章保留（14×14 圆 / 10px）")
+def u16():
+    """C5（本轮自己引入）：见本节表头。四页全扫 —— 每页都有自己的芯片集，
+    只测一页的话，另外三页的落点退化了也没人知道（实测它本来就是四页并存）。
+    """
+    bad = []
+    for view in _VIEWS:
+        for f in _u16_findings(_page(view)):
+            bad.append("%s 页：%s" % (view, f))
+    if bad:
+        return "问号形状不合规 %d 处：%s" % (len(bad), "；".join(bad[:3]))
+    return True
+
+
+@check("N-U16 负控：关徽章 / 不藏字 / 用 display:none ⇒ U-16 必须各各红")
+def n_u16():
+    """反向对照（维二）：**撤销修复即变红**，三个变体逐一实测。
+
+    ★ 为什么必须三个臂：C5 本体是"关掉徽章"，但同一处契约还有两个相邻错法
+      （字不藏 ⇒「？？」；display:none 藏 ⇒ 点不开）。只测一个臂，
+      另外两个错法就没有尺子量 —— "修好旧问题又搞出新问题"正是这么发生的。
+    ★ 另加**夹具自证**：真实现必须本来就不合规（否则负控无分辨力）。
+    """
+    src = _src(_SERVER_REL)
+    anchor = (".term.mk>summary{font-size:0;line-height:0;"
+              "color:transparent;letter-spacing:0}")
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    kw = dict(view="inbox", filt=M.BUCKET_ACTION,
+              root=tempfile.mkdtemp(prefix="g0490_nu16_"),
+              token="T", items=_items(), posture=_POSTURE)
+    # ① C5 原貌：把徽章关掉（content:none + display:none 原样加回）
+    arms = [
+        ("关掉徽章（C5 原貌）",
+         src.replace(anchor,
+                     ".term.mk>summary::after{content:none;display:none}\n"
+                     + anchor, 1),
+         "徽章被关掉"),
+        # ② 字不藏：去掉 font-size:0（保留其余 ⇒ 只撤掉"藏字"这一味药）
+        ("不藏字（「？？」）",
+         src.replace(anchor,
+                     ".term.mk>summary{line-height:0;color:transparent;"
+                     "letter-spacing:0}", 1),
+         "没藏字"),
+        # ③ 换错药：用 display:none 藏 ⇒ 芯片点不开
+        ("用 display:none 藏字",
+         src.replace(anchor, ".term.mk>summary{display:none}", 1),
+         "display:none"),
+    ]
+    live = _u16_findings(_page("inbox"))
+    if live:
+        return "夹具不成立：真实现本身就不合规（C5 复发或判据写错）：%r" % (live[:2],)
+    for i, (name, mutated, want_sub) in enumerate(arms):
+        if mutated == src:
+            return "负控 %d（%s）注入没生效：变异后源码一字未变" % (i + 1, name)
+        page, _why = _mut_render(mutated, "is0490_nu16_%d" % i, _SERVER_REL, **kw)
+        if _why:
+            return _why
+        got = _u16_findings(page)
+        if not any(want_sub in g for g in got):
+            return ("负控失效：%s 之后尺子仍报合规（应命中 %r，实得 %r）"
+                    % (name, want_sub, got[:3]))
+    return True
+
+
+# ══════════════ W-07 · C4（一次性调用方自己等窗就位，真进程实测）══════════════
+#: ★★ 盯的已修缺陷：**C4（T-10 静默降级）** —— `_place_if_needed()` 把落位放在
+#:   `daemon=True` 线程里。对**长命**进程（服务自己开窗：`threading.Timer(0.6,
+#:   open_console)`）没问题；对**一次性**调用方是致命的：`inbox_cli.py window`
+#:   （＝`antinel.cmd` 一键入口）进程 2 秒就退 ⇒ daemon 线程随进程死，
+#:   而 Edge 建窗实测要 1–2.5s ⇒ **落位从未执行**，且屏幕上什么都不说。
+#:   两臂探针实证（只差进程寿命）：CLI 形状 `place_all` **0** 次／长命 **1** 次。
+#:   根因提交 `aa3eeff`（0.36.8）—— **存量缺陷，非本轮引入**。
+#:   修法（产品侧）：`open_console_settled()` —— 开窗、轮询等它出现、落位、
+#:   回读校验，回一份如实报告；`open_console()` 契约一字不改（服务路径不受影响）。
+
+#: 判据侧的夹具参数（与 `_W07_CHILD` 里的假窗口**逐字对应**；探针会把它们
+#: 回传，判据先核对再断言 —— 漂移就大声报，不许默默对空气打分）。
+_W07_RECT = (100, 100, 520, 640)
+_W07_APPEAR = 2.5
+
+
+_W07_CHILD = r'''#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
+"""W-07 探针：在**一次性进程**里走值守台开窗路径，验"落位真的被执行"。
+
+用法：w07_child.py <ROOT> <MODE> <WAIT_SEC> <URL>
+  MODE=settled  走 `open_console_settled`（C4 修法；`inbox_cli window` 用的就是它）
+  MODE=bare     只调 `open_console` 就退（C4 **原貌**：落位在 daemon 线程里）
+  MODE=never    窗口永不出现 ⇒ 必须如实报"没看到"，不许谎报成功
+stdout 最后一行是 JSON：{"rep":…, "calls":…, "fixture":…}
+
+★★ 为什么必须起**真进程**（而不是在判据自己进程里调）：
+   C4 的病型**只在进程寿命短时发作** —— 落位跑在 daemon 线程里，进程一死
+   线程跟着死。判据自己的进程是长命的，在那里调 `open_console_settled`，
+   daemon 线程不会死 ⇒ **缺陷被掩盖**，量具永远绿（比恒红更坏的那类）。
+   ⇒ 子进程打完报告**立刻 `os._exit`**，与 `antinel inbox window` 同形状。
+★★ 为什么假窗口要**延迟 2.5 秒**才出现（`_p_c4_probe.py` 首版教训：
+   fixtures 不忠实比没有 fixtures 更坏）：第一次轮询就在的话，负控臂
+   （bare）也可能"碰巧"落位 ⇒ 尺子失去分辨力。延迟出现 ⇒ bare 臂在窗口
+   出现之前就退，落位必 0 次，正负两臂才真正只差"有没有等它就位"。
+"""
+import json
+import os
+import sys
+import tempfile
+import time
+import types
+
+ROOT, MODE, WAIT = sys.argv[1], sys.argv[2], float(sys.argv[3])
+URL = sys.argv[4]
+sys.path.insert(0, ROOT)
+os.environ.pop("ANTINEL_AUDIT_DIRS", None)
+os.environ["ANTINEL_HUB_DIR"] = tempfile.mkdtemp(prefix="w07hub_")
+
+RECT = (100, 100, 520, 640)
+APPEAR_AFTER = 2.5
+CALLS = {"find": 0, "place": 0, "rect": 0, "popen": 0,
+         "first_find_empty": None}
+_T0 = [0.0]
+
+
+def console_geometry():
+    return {"ok": True, "rect": RECT, "reason": ""}
+
+
+def console_profile_dir():
+    return None
+
+
+def build_run_id(token):
+    return "w07probe"
+
+
+def console_title_suffix(run_id):
+    return "#w07probe"
+
+
+def close_console_windows():
+    return 0
+
+
+def wait_console_windows_gone():
+    return True, 0
+
+
+def window_size_str(rect):
+    return "%d,%d" % (rect[2], rect[3])
+
+
+def window_position_str(rect):
+    return "%d,%d" % (rect[0], rect[1])
+
+
+def find_console_windows(suffix=None, run_id=None):
+    CALLS["find"] += 1
+    up = time.time() - _T0[0] >= APPEAR_AFTER
+    if CALLS["first_find_empty"] is None:
+        CALLS["first_find_empty"] = not up
+    if MODE == "never":
+        return []
+    return [0x1001] if up else []
+
+
+def place_all(hwnds, rect):
+    CALLS["place"] += 1
+    return True, "已落到 %r" % (rect,)
+
+
+def window_rect_of(h):
+    CALLS["rect"] += 1
+    return RECT
+
+
+_fake = types.ModuleType("inbox_window")
+for _k in ("console_geometry", "console_profile_dir", "build_run_id",
+           "console_title_suffix", "close_console_windows",
+           "wait_console_windows_gone", "window_size_str",
+           "window_position_str", "find_console_windows", "place_all",
+           "window_rect_of"):
+    setattr(_fake, _k, globals()[_k])
+sys.modules["inbox_window"] = _fake
+
+import inbox_server as SV                                  # noqa: E402
+
+
+class _Popen(object):
+    """只记录"真的被请求开窗了"，绝不起真浏览器。"""
+
+    def __init__(self, *a, **k):
+        CALLS["popen"] += 1
+
+
+SV.subprocess = types.SimpleNamespace(
+    Popen=_Popen, DEVNULL=-3, CREATE_NO_WINDOW=0)
+SV.webbrowser = types.SimpleNamespace(open=lambda url: True)
+
+_T0[0] = time.time()
+if MODE == "settled":
+    rep = SV.open_console_settled(URL, wait_sec=WAIT)
+elif MODE == "bare":
+    rep = {"opened": SV.open_console(URL), "placed": False, "want": None,
+           "got": [], "why": "（负控臂：只调 open_console，不等就退 —— C4 原貌）"}
+else:
+    rep = SV.open_console_settled(URL, wait_sec=WAIT)
+sys.stdout.write(json.dumps({"rep": rep, "calls": CALLS,
+                             "fixture": {"rect": list(RECT),
+                                         "appear_after": APPEAR_AFTER}}) + "\n")
+sys.stdout.flush()
+os._exit(0)
+'''
+
+
+def _run_w07_child(mode, wait):
+    """起一个**真进程**跑 W-07 探针。返回 {"rep","calls","fixture","err"}。
+
+    `err` 非空 ⇒ **量具故障**（子进程崩了/没吐 JSON/夹具漂移/预算不够），
+    调用方必须当红上报，**不许**当成"探针说没问题"。
+    """
+    import json
+    import subprocess
+    # ★ never 臂**故意**让窗口不出现，预算小于"出现时刻"正是它的形状；
+    #   其余两臂（要等到窗口）的预算必须宽于 2.5s，否则量表自己把答案截断了。
+    if mode != "never" and wait <= _W07_APPEAR + 0.5:
+        return {"err": "预算 %.1fs 不够（窗口 %.1fs 才出现）—— 判据自己把量表设小了"
+                % (wait, _W07_APPEAR)}
+    d = tempfile.mkdtemp(prefix="g0490_w07_")
+    child = os.path.join(d, "w07_child.py")
+    with io.open(child, "w", encoding="utf-8") as f:
+        f.write(_W07_CHILD)
+    env = dict(os.environ)
+    env["ANTINEL_HUB_DIR"] = d                       # 隔离：子进程别碰真中枢
+    try:
+        r = subprocess.run(
+            [sys.executable, child, ROOT, mode, "%.1f" % wait,
+             "http://127.0.0.1:8790/?t=w07"],
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=120, env=env, cwd=ROOT)
+    except subprocess.TimeoutExpired:
+        return {"err": "探针子进程超时（>120s）—— 量具故障，不算通过也不算红"}
+    if r.returncode != 0:
+        return {"err": "探针子进程 rc=%d：%s"
+                % (r.returncode, (r.stderr or "")[-300:])}
+    try:
+        st = json.loads((r.stdout or "").strip().splitlines()[-1])
+    except Exception as e:                                  # noqa: BLE001
+        return {"err": "探针子进程没吐出 JSON（%s: %s）：%r"
+                % (type(e).__name__, e, (r.stdout or "")[-200:])}
+    if not isinstance(st, dict) or "rep" not in st or "calls" not in st:
+        return {"err": "探针 JSON 形状不对：%r" % (st,)}
+    fix = st.get("fixture") or {}
+    if (tuple(fix.get("rect") or ()) != _W07_RECT
+            or fix.get("appear_after") != _W07_APPEAR):
+        return {"err": "夹具与判据漂移：子进程 fixture=%r，判据期望 rect=%r appear=%r"
+                " —— 先对齐再断言，不许对空气打分" % (fix, _W07_RECT, _W07_APPEAR)}
+    st["err"] = None
+    return st
+
+
+def _w07_settled():
+    """正臂：`open_console_settled` 真去轮询、真落位、真回读（calls 与 rep 互证）。"""
+    st = _run_w07_child("settled", 6.0)
+    if st["err"]:
+        return st["err"]
+    rep, calls = st["rep"], st["calls"]
+    if rep.get("opened") not in ("app", "browser"):
+        return ("开窗这一步就没走通（opened=%r，why=%r）—— 后面的断言都无从谈起"
+                % (rep.get("opened"), rep.get("why")))
+    if rep.get("opened") == "app" and calls.get("popen", 0) < 1:
+        return "声称走了 app 模式，却一次 Popen 都没有（夹具把开窗也吞了？）"
+    if not calls.get("first_find_empty"):
+        return ("夹具不忠实：窗口**第一次轮询就出现** —— 那不是 Edge 的节奏"
+                "（真机实测建窗 1–2.5s）；这样的夹具会把 C4 掩藏起来")
+    if calls.get("find", 0) < 1:
+        return "一次轮询都没有（find=%d）—— 它根本没在等窗口" % calls.get("find", 0)
+    if calls.get("place", 0) < 1:
+        return ("落位一次都没执行（place_all=%d 次）—— C4 复发：一次性调用方"
+                "没等窗就位，daemon 线程随进程死了" % calls.get("place", 0))
+    if calls.get("rect", 0) < 1:
+        return ("没有独立回读（window_rect_of=%d 次）—— placed 就不是回读说了算"
+                % calls.get("rect", 0))
+    if rep.get("placed") is not True:
+        return ("报告说没就位（placed=%r，why=%r）—— 不谎报的原则下这就是红"
+                % (rep.get("placed"), rep.get("why")))
+    if rep.get("want") != list(_W07_RECT):
+        return "want 不是目标矩形：%r（应 %r）" % (rep.get("want"), list(_W07_RECT))
+    if rep.get("got") != [list(_W07_RECT)]:
+        return "回读到的矩形不对：%r（应 %r）" % (rep.get("got"), [list(_W07_RECT)])
+    return True
+
+
+def _w07_never():
+    """负形状臂：窗口永不出现 ⇒ 必须如实报"没看到"，且一次落位都不许发。"""
+    st = _run_w07_child("never", 2.0)
+    if st["err"]:
+        return st["err"]
+    rep, calls = st["rep"], st["calls"]
+    if rep.get("placed") is not False:
+        return ("窗口根本没出现，报告却称已就位（placed=%r）—— 谎报成功比 C4 更坏"
+                % (rep.get("placed"),))
+    if "没看到" not in (rep.get("why") or ""):
+        return ("没就位却没说「没看到」（why=%r）—— 失败再次静默，C4 的另一半"
+                % (rep.get("why"),))
+    if calls.get("place", 0) != 0:
+        return ("窗口不存在却调了落位（place_all=%d 次）—— 它会去搬**别人**的窗口"
+                % calls.get("place", 0))
+    return True
+
+
+def _func_calls(src, func):
+    """函数体内的**调用点名集合**（AST）—— 找不到该函数返回 None。
+
+    ★★ 为什么必须 AST 而不是 `re.search(r"\\bopen_console\\(", seg)`：
+       2026-10-13 实测 —— `cmd_window` 的 **docstring** 里复述着旧实现
+       "旧实现只 `open_console(url)` 就返回"，正则把它当成真调用 ⇒ **自己写的
+       说明文字把自己误红**（与 U-16 踩的 CSS 注释、U-10 踩的 CSS 注释、
+       S48② 立的"数调用点必须 AST"**同一族**：把非代码层当代码层）。
+       本仓铁律：假红比恒红更坏。
+    """
+    import ast
+    tree = ast.parse(src)
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == func:
+            out = []
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Call):
+                    if isinstance(sub.func, ast.Attribute):
+                        out.append(sub.func.attr)
+                    elif isinstance(sub.func, ast.Name):
+                        out.append(sub.func.id)
+            return out
+    return None
+
+
+def _func_literals(src, func):
+    """函数体内的**字面量字符串集合**（AST，跳过 docstring）—— 同上理由。
+
+    用于"它真的把结果打到屏上了吗"这类可观测断言：只看**代码里**的串，
+    注释/docstring 里复述的不算。
+    """
+    import ast
+    tree = ast.parse(src)
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == func:
+            body = node.body
+            if (body and isinstance(body[0], ast.Expr)
+                    and isinstance(body[0].value, ast.Constant)
+                    and isinstance(body[0].value.value, str)):
+                body = body[1:]
+            out = set()
+            for sub in ast.walk(ast.Module(body=body, type_ignores=[])):
+                if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+                    out.add(sub.value)
+            return out
+    return None
+
+
+def _w07_entry():
+    """入口与可观测（维一/维四）：一键入口真改了调用点，且把结果打到屏上。"""
+    src = _src("inbox_cli.py")
+    calls = _func_calls(src, "cmd_window")
+    if calls is None:
+        return "inbox_cli.py 里没有 cmd_window（一键入口的锚点没了）"
+    if "open_console_settled" not in calls:
+        return "cmd_window 没走 open_console_settled —— C4 修法没接上一键入口"
+    if "open_console" in calls:
+        return "cmd_window 还在裸调 open_console（等它就位那一步被绕开了）"
+    lits = _func_literals(src, "cmd_window") or set()
+    if not any("[window] 已就位" in s for s in lits):
+        return ("cmd_window 不打「已就位」 —— 落位结果不可观测（维四："
+                "「今天生效了吗」这个问题答不上来）")
+    if not any("没能就位" in s for s in lits):
+        return ("cmd_window 没有「没能就位」分支 —— 失败会再次静默"
+                "（C4 的另一半）")
+    return True
+
+
+def _w07_linked():
+    """维三连带：这次修法会让哪条保证变松？三条都必须还在（AST 看调用点）。"""
+    src = _src(_SERVER_REL)
+    oc = _func_calls(src, "open_console")
+    if oc is None:
+        return "找不到 open_console 的定义（C4 要修的锚点没了）"
+    if "_place_if_needed" not in oc:
+        return ("连带变松：open_console 不再起后台落位线程 —— 服务自己开窗的长命"
+                "路径被改坏（C4 不能靠删服务路径来「修」）")
+    ocs = _func_calls(src, "open_console_settled")
+    if ocs is None:
+        return "找不到 open_console_settled —— C4 的修法本身没了"
+    if "close_window" in ocs or "close_console_windows" in ocs:
+        return ("连带变松：open_console_settled 里出现关窗调用（0.36.4 立的规矩："
+                "落位失败不关窗 —— 面板就是主人要看的內容）")
+    if "place_all" not in ocs:
+        return "连带变松：open_console_settled 不走 place_all —— 落位的唯一实现被绕过"
+    return True
+
+
+@check("W-07 ★ C4：一次性调用方自己等窗就位（真进程：开窗→轮询→落位→回读）")
+def w07():
+    """C4（T-10 静默降级）：见本节表头。四组合起来才叫修完：
+       ① 真进程里确实轮询到、落位了、回读了（`_w07_settled`）；
+       ② 窗口不出现时如实说"没看到"，且一次落位都不发（`_w07_never`）；
+       ③ 一键入口真改了调用点，并把结果打到屏上（`_w07_entry`）；
+       ④ 服务路径与"不关窗"的旧保证一条都没松（`_w07_linked`）。
+    """
+    for part in (_w07_settled, _w07_never, _w07_entry, _w07_linked):
+        r = part()
+        if r is not True:
+            return r
+    return True
+
+
+@check("N-W07 负控：只调 open_console 不等就退（C4 原貌）⇒ 落位 0 次必红")
+def n_w07():
+    """反向对照（维二）：**撤销修复即变红** —— 在**同一套子进程夹具**下，
+    把 cmd_window 的做法换回 C4 原貌（只 `open_console(url)`，不等就退），
+    落位必须 0 次。★ 这一臂同时是**尺子的分辨力证明**：bare 臂若也能落位，
+    说明夹具把缺陷掩藏了（窗口一上来就在），那上面的正判据就是空转。
+    """
+    st = _run_w07_child("bare", 6.0)
+    if st["err"]:
+        return st["err"]
+    rep, calls = st["rep"], st["calls"]
+    if rep.get("opened") not in ("app", "browser"):
+        return ("夹具不成立：bare 臂连窗都没「开出来」（opened=%r）⇒ 落位 0 次"
+                "是平凡的，负控无分辨力" % (rep.get("opened"),))
+    if calls.get("place", 0) != 0:
+        return ("负控失效：只调 open_console 也落位了 %d 次 —— 要么夹具不忠实"
+                "（窗口一上来就在），要么 C4 已用别的方式修好（那 W-07 的说法要改）"
+                % calls.get("place", 0))
+    return True
+
+
 def main():
     print("=" * 78)
     print("0.48.5 值守台细节修订判据（交接件 v1.1 §5.7）—— "
@@ -1959,7 +2483,8 @@ def main():
           "批4 U-13/U-15 · 批5 W-01/W-02（认窗白名单，单独 commit）· "
           "批6 W-03（A2）· 批7 W-04（B1）· 批8 W-05（B2）· 批9 W-06（B3）· "
           "批10 C1（负控模板化：渲染型负控走 _mut_render 两步法）· "
-          "批11 C2（扫渲染产物统一走 page_caliber，由元判据 S48 守）")
+          "批11 C2（扫渲染产物统一走 page_caliber，由元判据 S48 守）· "
+          "批12 C5/U-16（问号同形）＋ C4/W-07（一次性调用方等窗就位，真进程实测）")
     print("（变异只在内存，账本与链只落临时目录，不写任何产品文件；"
           "戊2/戊3 视觉项无判据，走 §6.1 截图验收 —— U-13 只含戊2 机械部分）")
     print("=" * 78)

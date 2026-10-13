@@ -224,6 +224,16 @@ def cmd_window(a):
       因此它不会因为关掉窗口就把服务带走（B1 的验收要求：窗口关了、服务还在，
       窗口再开、URL 不变）。
     ★ 不二次实现：判活/重拉/开窗全委托 `inbox_server`。
+
+    ★★ 2026-10-13（C4）补**等它就位**并如实报告：
+      旧实现只 `open_console(url)` 就返回 —— 而落位跑在 daemon 线程里，
+      本进程 2 秒后就退出 ⇒ 线程随进程死、Edge 建窗要 1–2.5s
+      ⇒ **落位从未执行**，窗口出生尺寸不对，且屏幕上什么都不说。
+      （两臂探针实证：CLI 形状 `place_all` 0 次 / 长命形状 1 次。）
+      ⇒ 现在改调 `open_console_settled()`：它等窗口出现、落位、**回读校验**，
+        并把"这次到底就位了没有"打到屏上（维四：可观测）。
+      ★ 落位失败**不关窗**、不返回非零 —— 窗口确实开出来了（那正是要的），
+        位置没对由人决定怎么办；但**必须出声**，不许静默。
     """
     import inbox_server as SV
     rec, started = SV.ensure_console(root=getattr(a, "root", None))
@@ -232,7 +242,20 @@ def cmd_window(a):
               file=sys.stderr)
         return 1
     print("值守台%s：%s" % ("已重拉" if started else "已在跑", rec["url"]))
-    SV.open_console(rec["url"])
+    rep = SV.open_console_settled(rec["url"])
+    if rep.get("placed"):
+        w = rep.get("want") or [0, 0, 0, 0]
+        print("[window] 已就位：%dx%d @(%d,%d)（开窗方式：%s）"
+              % (w[2], w[3], w[0], w[1], rep.get("opened")))
+    else:
+        print("[window] ⚠ 窗口开出来了（%s），但**没能就位**：%s"
+              % (rep.get("opened"), rep.get("why")), file=sys.stderr)
+        if rep.get("got"):
+            print("[window]     实测 %s ／ 目标 %s"
+                  % (rep["got"], rep.get("want")), file=sys.stderr)
+        print("[window]     面板**仍在屏幕上，没有被关掉** —— 位置不对由你决定"
+              "（可手动拖，或重跑一次 `antinel inbox window`）。",
+              file=sys.stderr)
     return 0
 
 
