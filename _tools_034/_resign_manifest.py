@@ -178,8 +178,14 @@ if args.dry:
 
 if changed or rolled:
     d["files"] = files
+    # ★★ 2026-10-13：`indent` 必须与**构建器**（`scripts/build_package.py`
+    #   的两处 `json.dumps(manifest, ensure_ascii=False, indent=1)`）**逐字一致**。
+    #   原先这里写 `indent=2` ⇒ 每次重签都把**整份文件**重排一遍
+    #   （实测：改 9 条哈希 ⇒ diff 148 增 148 删），而两个写者格式不同
+    #   本身就是 T-09「同一事实两套口径」。改回 `indent=1` 后 diff 只落在
+    #   真正变的哈希行上。
     with open(MANIFEST, "w", encoding="utf-8", newline="") as f:
-        json.dump(d, f, ensure_ascii=False, indent=2)
+        json.dump(d, f, ensure_ascii=False, indent=1)
         f.write("\n")
     print("\n已写回：重签 %d 条、结构化对齐 %d 条。" % (len(changed), len(rolled)))
 else:

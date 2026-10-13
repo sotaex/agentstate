@@ -76,10 +76,13 @@ TYPES = {
         "name": "活数据追不上死快照",
         "definition": ("一份数据按日/按事件滚动，另一份是发布时快照；"
                        "快照必然逐次落后，且没有人负责追平"),
-        "guards": ["D-25"],
+        "guards": ["D-25", "D-36"],
         "blind": False,
         "discipline": ("滚动目录与快照文件的配对必须有判据守着；"
-                       "修法用 _reconcile_chain_manifest.py 或 _resign_manifest.py --roll"),
+                       "修法用 _reconcile_chain_manifest.py 或 _resign_manifest.py --roll；"
+                       "**「源码 vs 快照哈希」是同一类的另一半**（D-25 只查文件在不在、"
+                       "D-36 查字节还是不是那个）：凡改动被 manifest 钉住的源码，"
+                       "提交前必须重签（`python _tools_034/_resign_manifest.py`）"),
     },
     "T-03": {
         "name": "量具自身有缺陷",
@@ -440,6 +443,33 @@ INSTANCES = [
                 "N-S98 单轮从 20–70s 降到 ≈8s 且 5/5 撞上；N-S75 5/5 撞上。"
                 "元判据 **S47**（在 `guard_instrument_selfaudit.py`）机械禁止"
                 "「N 路齐冲却不走会合栅栏」，并**反空转**（`race_amp` 无人使用即红）。",
+    },
+    {
+        "id": "X-021",
+        "type": "T-02",
+        "what": "A1（`2397451`）改了 `host_shield.py`，而 `psl/manifest.json` 停在 "
+                "`914c5dc` **未重签** ⇒ 源树里的 manifest 是「落后快照」⇒ "
+                "`host_shield.self_check()` 报「host_shield.py 与 manifest 不符」"
+                "⇒ `is_dev_build()` 为 False（登记版本 0.48.4 ≥ 代码 0.48.4）"
+                "⇒ `spawn_sentinel()` **硬拦** ⇒ **哨兵拉不起来**"
+                "（链上实测 135 条 `host_shield_spawn_failed`，最近 2026-10-13T18:44:27）。"
+                "**没有人负责追平**：唯一覆盖 manifest 哈希的 D-27 只查 "
+                "`VERSION_BEARING_CHAIN_FILES` 一件（`hooks/pre_tool_use.py`），"
+                "而 `host_shield.py`／另 3 个告警链路件／`rules/hosts/*.json` 全无判据 "
+                "⇒ 发现它的唯一途径是**用户报障**。**与 X-002 同型**（同一类型的"
+                "哈希面：X-002 是快照指向不存在的文件，本条是快照里的字节已过期）",
+        "guard": "D-36",
+        "status": "fixed",
+        "date": "2026-10-13",
+        "note": "修法两步。① 重签 manifest（9 条哈希，含 host_shield.py "
+                "5ef15c8c… → 1c97b17f…）⇒ `self_check()` → `(True, [])` ⇒ "
+                "`spawn_sentinel()` → `ok=True pid=8460 mode=detached`，"
+                "+25s 仍在岗（on_duty=True，心跳新鲜）。② 机制：主闸门新增正面判据 "
+                "**D-36**（直接调 `host_shield.self_check()`，不二次实现）＋ 反空转 ＋ "
+                "负控（改 host_shield.py 不重签 ⇒ 必红）。"
+                "附带修：`_tools_034/_resign_manifest.py` 写回缩进 `indent=2` → `1`"
+                "（与构建器 `json.dumps(..., indent=1)` 逐字一致）—— 否则每次重签都把"
+                "整份 manifest 重排（实测 148 增 / 148 删），属 T-09「同一事实两套口径」。",
     },
 ]
 

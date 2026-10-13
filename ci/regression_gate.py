@@ -1549,6 +1549,77 @@ def j_docs_only_no_full_fallback():
                   % (len(k1), len(s2), len(s3)))
 
 
+def j_pinned_hashes_match_manifest():
+    """★★ D-36（2026-10-13）：**被自检钉住的源码改了，就必须重签 manifest**（T-02 哈希面）。
+
+    要防的复发（2026-10-13 实测，不是推演 —— 哨兵链上 135 条
+    `host_shield_spawn_failed`，最近一条 18:44:27）：
+      A1（`2397451`）改了 `host_shield.py`，而 `psl/manifest.json` 停在 `914c5dc`
+      **没有重签** ⇒ 源树里的 manifest 是「落后快照」⇒
+      `host_shield.self_check()` 报「host_shield.py 与 manifest 不符」
+      ⇒ `is_dev_build()` 为 False（登记版本 0.48.4 ≥ 代码 0.48.4）
+      ⇒ `spawn_sentinel()` **硬拦**（`return False, 0, "self-check-failed: …"`）
+      ⇒ **哨兵拉不起来**。而**没有任何闸门判据会因此变红** —— 唯一覆盖
+      manifest 哈希的 D-27 只查 `VERSION_BEARING_CHAIN_FILES` 一件
+      （`hooks/pre_tool_use.py`）；`host_shield.py`／另 3 个告警链路件／
+      `rules/hosts/*.json` 全都没有判据。发现它的唯一途径是**用户报障**
+      （「我多次看到冒泡说哨兵拉起失败」）。
+
+    ★ 为什么这是**结构性**的、必须由闸门守：源码每次改动都在"滚动"，而 manifest
+      是发布时快照 —— 只要有人动这几个文件，快照就落后一格。这属于 **T-02
+      （活数据追不上死快照）的哈希面**：D-25 守同族的**存在性面**（死条目），
+      两条并存、互不替代（一条查"文件还在不在"，一条查"字节还是不是那个"）。
+
+    ★ 断言（行为级；判据不许二次实现 ⇒ 直接调 `host_shield.self_check()`）：
+      **真仓的树必须自洽** —— `self_check()` 返回 `(True, [])`。
+      这正是 `spawn_sentinel()` 放行的**必要条件**（不满足必拦）。
+    ★ 反空转：`_GUARDED_CHAIN_FILES` 非空 ＋ `host_shield.py` 在 manifest 里。
+      否则 `(True, [])` 可能是"什么都没比"（＝自检对自己失明的同型）。
+    ★ 红时必须给修法（否则是 T-04「红而无出路」）：
+      `python _tools_034/_resign_manifest.py`（只重算已有条目）；
+      报「没登记进 manifest」⇒ `python scripts/build_package.py`
+      （清单条目的增删是构建器职责，重签工具刻意不越权）。
+    ★ 与 D-27 的分工：D-27 守**量具口径**（工具算的值 == 登记值，防口径分叉）；
+      本条守**事实一致**（磁盘字节 == 登记哈希）。两条读同一张表，判两件事。
+    ★ 已知连带（是同一个根因，不是噪声）：`--selfcheck` 里凡注入到
+      `host_shield.py`（D-26 负控）或 `hooks/pre_tool_use.py`（A1×2／A2 负控）
+      的条目，都会**同时**让本条变红 —— 那些注入确实造成了"改了没重签"。
+    """
+    hs = _load_module_file("host_shield.py", "_hs_d36")
+    if hs is None:
+        return None, "缺 host_shield.py"
+    if not hasattr(hs, "self_check") or not hasattr(hs, "_GUARDED_CHAIN_FILES"):
+        return False, ("host_shield 没有 self_check / _GUARDED_CHAIN_FILES"
+                       "（自检入口被改名/删了？那样哨兵既没人拦也没人放）")
+    guarded = tuple(getattr(hs, "_GUARDED_CHAIN_FILES", ()) or ())
+    if not guarded:
+        return False, ("_GUARDED_CHAIN_FILES 为空（告警链路保护名单被清空 ⇒ 自检"
+                       "形同虚设，本条的绿也不可信）")
+    man = PKG / "psl" / "manifest.json"
+    if not man.is_file():
+        return None, "缺 psl/manifest.json"
+    try:
+        files = json.loads(man.read_text(encoding="utf-8")).get("files") or {}
+    except Exception as e:                                  # noqa: BLE001
+        return False, "manifest 读不出：%s: %s" % (type(e).__name__, e)
+    if "host_shield.py" not in files:
+        return False, ("host_shield.py 不在 manifest 里 —— D-1 自检的锚点没了"
+                       "（修法：python scripts/build_package.py 重生清单）")
+    try:
+        ok, problems = hs.self_check()
+    except Exception as e:                                  # noqa: BLE001
+        return False, "self_check() 抛异常：%s: %s" % (type(e).__name__, e)
+    if not ok:
+        return False, (
+            "真仓自检不通过（%d 条）：%s —— 这会让 `spawn_sentinel()` **硬拦**"
+            "（哨兵拉不起来）。改了被钉住的源码就必须重签 manifest："
+            "`python _tools_034/_resign_manifest.py`；"
+            "若报「没登记进 manifest」则跑 `python scripts/build_package.py`"
+            % (len(problems), "；".join(problems[:3])))
+    return True, ("自检通过：host_shield.py ＋ %d 个告警链路件 ＋ rules/hosts/*.json "
+                  "与 manifest 登记一致（哨兵可拉起）" % len(guarded))
+
+
 # ---------------------------------------------------------------- 负控
 def _aside_dir(path):
     """零删除地让开一个临时目录（改名成 `<name>.away-<pid>-<ms>`）。
@@ -1780,6 +1851,9 @@ def selfcheck():
         #   **渲染时冻结的值**，开一小时不换数 —— 会说谎的数字（F55 同族）。
         #   注入串按**改后磁盘真值**取（"哨兵在岗"），不用旧文案 —— 否则负控
         #   自己 SKIP，而 SKIP 会被误读成"判据没问题"（本文件已有两次此教训）。
+        #   ⚠️ 已知连带（2026-10-13）：本注入改的是 `host_shield.py` 的字节，
+        #     而它被 manifest 钉着 ⇒ **D-36 会一并变红**（"改了没重签"）。
+        #     同一个根因，非噪声；不要为了消掉这行 △ 而放宽 D-36。
         ("D-26 缺陷：把「最后心跳 N 分钟前」加回 why（冻结读数复发）",
          "host_shield.py",
          '"why": "哨兵在岗",',
@@ -1878,6 +1952,19 @@ def selfcheck():
          '    if not touched:   # NEGCTL 折叠探测层/影响面层\n'
          '        return list(SUITES), "all", [',
          "D-35"),
+        # ★★ D-36 负控（2026-10-13）：改了被自检钉住的源码，**不重签 manifest**。
+        #   模拟的正是哨兵拉不起来的原貌（A1 改 host_shield.py ⇒ manifest 停在旧哈希
+        #   ⇒ self_check 不符 ⇒ is_dev_build()=False ⇒ spawn_sentinel 硬拦）。
+        #   注入点取**文件头那一行的编码声明**（`grep -c` 实测唯一）——
+        #   追加在同一行、不新增行 ⇒ 行号零位移，不扰动任何按行号/getsource 取证的判据。
+        #   ⚠️ 已知连带：本条自己红（期望）；另 D-26 负控（改 host_shield.py）与
+        #     A1×2／A2 三条负控（改 hooks/pre_tool_use.py）也会连带让 D-36 红 ——
+        #     那些注入确实造成了"改了没重签"，是同一个根因，机器会打 △。
+        ("D-36 缺陷：改了被自检钉住的源码却不重签 manifest（哨兵拉不起来）",
+         "host_shield.py",
+         "# -*- coding: utf-8 -*-",
+         "# -*- coding: utf-8 -*-  # NEGCTL-D36 改了源码不重签 manifest",
+         "D-36"),
     ]
 
     ok_all = True
@@ -2096,6 +2183,8 @@ def _checks(m):
          j_fastlane_not_silent),
         ("D-35 纯文档改动不许回退全量（钩子层不许被逼到 --no-verify，T-10）",
          j_docs_only_no_full_fallback),
+        ("D-36 自检钉住的源码改了必须重签 manifest（哨兵拉不起来，T-02）",
+         j_pinned_hashes_match_manifest),
         # ★ D-31 放最后：它红的正是上面几条没做完；R7 对齐后由红转绿 ＝ 完工证明
         ("D-31 缺陷类型登记簿自身一致（不会响的表格接成闸门一环）",
          j_defect_registry_consistent),
