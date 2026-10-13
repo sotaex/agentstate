@@ -590,7 +590,19 @@ def j_negctl_fixture_covers_manifest():
       ⇒ 本条绿，才证明 D-25 在 fixture 上的绿是真的绿。
     ★ fixture 建不起来（返回 None）⇒ **按红处理**，不许静默通过
       （静默通过＝假负控，正是本条要防的形状）。
+
+    ★★ 2026-10-13 扩一条（X-022，**X-004 同型复发**）：fixture 还必须是一个
+      **现实可能的形态**。D-33 那次只 `mkdir` 出 `.git/hooks/` ⇒ 留下一个
+      「只含 hooks/ 的 .git」；而 `_index_build_artifacts()` 用
+      `(root/'.git').exists()` 当「这是不是 git 工作树」的代理 ⇒ 代理成立、
+      `git ls-files` 却报 `fatal: not a git repository` ⇒ **D-24 在 26/26 条
+      负控里都连带变红**，△ 那一栏被常量噪声占满、失去分辨力。
+      ⇒ 断言：fixture 若存在 `.git`，它必须是**有效工作树**
+      （`git rev-parse --show-toplevel` 必须等于 fixture 根）。
+      **不写「只要 .git 存在就算畸形态」**：真仓里 `.git` 本来就该在。
+      ★ 修法照 X-004 的先例 —— **修 fixture，不修判据**。
     """
+    import subprocess
     dst = _build_negctl_fixture("D-28")
     try:
         if dst is None:
@@ -608,7 +620,35 @@ def j_negctl_fixture_covers_manifest():
             return False, ("fixture 缺 %d 个 manifest 条目覆盖的文件（如 %s）"
                            "—— D-25 会在负控里因此连带假红"
                            % (len(missing), "、".join(missing[:3])))
-        return True, "fixture 覆盖 manifest 全部 %d 条" % len(files)
+        # ★★ X-022：fixture 的 `.git`（若有）必须是**有效工作树**
+        if (dst / ".git").exists():
+            try:
+                r = subprocess.run(["git", "-C", str(dst), "rev-parse", "--show-toplevel"],
+                                   capture_output=True, text=True, encoding="utf-8",
+                                   errors="replace", timeout=30)
+            except Exception as e:                          # noqa: BLE001
+                return False, "fixture 的 git 查询跑不起来：%s: %s" % (type(e).__name__, e)
+            top = (r.stdout or "").strip()
+            # ★★ 比「是不是同一个目录」必须按**文件系统身份**比，不许比字符串 ——
+            #   本机实测踩到：`%TEMP%` 给的是 **8.3 短名**（`C:\Temp\PGINST~1\…`），
+            #   而 git 回的是**长名**（`C:/Temp/pginstall/…`）⇒ 同一目录、字符串不等
+            #   ⇒ 本条假红（T-09「同一事实两套口径」在路径上的变体）。
+            #   `os.path.samefile` 走 stat（设备号+inode）⇒ 别名一律认得。
+            _same = False
+            if r.returncode == 0 and top:
+                try:
+                    _same = os.path.samefile(top, str(dst))
+                except OSError:
+                    _same = False
+            if not _same:
+                return False, (
+                    "fixture 的 `.git` 是**畸形态**（不是有效工作树：rc=%s top=%r）"
+                    "⇒ 任何按 `.git` 存在性判断的判据（实测 **D-24**）会在**每一条**"
+                    "负控里连带假红（26/26）—— 与 X-004 同型。"
+                    "修法：`_build_negctl_fixture` 里 `git init` 之后再放钩子。"
+                    % (r.returncode, top[:80]))
+        return True, ("fixture 覆盖 manifest 全部 %d 条；`.git` 是有效工作树"
+                      % len(files))
     finally:
         # 零删除纪律：fixture 不删，改名让开（safe-delete 守卫会硬杀 rmtree）
         if dst is not None:
@@ -1694,6 +1734,27 @@ def _build_negctl_fixture(label=""):
     #   ★ 只碰 fixture 自己的 `.git/hooks/`，不动真仓（真仓的钩子由 D-33 正面守）。
     _dep_hook = PKG / ".git" / "hooks" / "pre-commit"
     if _dep_hook.is_file():
+        # ★★ 2026-10-13 补（本轮实测发现）：**先 `git init` 把 fixture 变成真仓**，再放钩子。
+        #   为什么（实测，不是推演）：D-33 那次只 `mkdir` 出 `.git/hooks/`
+        #   ⇒ 留下一个「**只含 hooks/ 的 .git**」—— 现实中不可能存在的形态。
+        #   而 `_index_build_artifacts()` 用 `(root/".git").exists()` 当
+        #   「这是不是 git 工作树」的代理 ⇒ 该代理成立、`git ls-files` 却报
+        #   `fatal: not a git repository` ⇒ **D-24 在 26/26 条负控里都连带变红**
+        #   （对照实验：同一 fixture 加 `git init` 后 D-24 由 FAIL 转 PASS，
+        #     **其余全部判据判定零变化**，闸门 rc 1 → 0）。
+        #   与 D-28 当年修的「fixture 缺件 ⇒ D-25 每条假红」**同型**：
+        #   **假红不是缺陷、是盲区** —— 每条负控都多一行噪声会让 △ 那一栏失去
+        #   分辨力（"会误报的检查器用两次就没人信"）。
+        #   ★ 修的是 **fixture**（让它造出**现实可能**的形态），**不是**放宽 D-24 ——
+        #     D-24 的内建负控（真造一个 tracked `build/x.py` 的临时仓）照旧证明它会红。
+        #   ★ 只写 fixture 自己的 `.git/`（临时目录内），不碰真仓。
+        import subprocess as _sp
+        _init = _sp.run(["git", "-C", str(dst), "init", "-q"], capture_output=True)
+        if _init.returncode != 0:
+            # 「少做了一部分必须出声」（T-10）：没 init 成功就说明下面那个钩子
+            # 会落在伪 `.git` 上 ⇒ D-24 会连带红。出声，别让人去猜。
+            print("  [SKIP] %-40s fixture `git init` 失败（rc=%s）⇒ D-24 会在本条负控里连带红"
+                  % (label, _init.returncode))
         _d = dst / ".git" / "hooks"
         _d.mkdir(parents=True, exist_ok=True)
         shutil.copy2(str(_dep_hook), str(_d / "pre-commit"))
@@ -1875,6 +1936,16 @@ def selfcheck():
          "ci/regression_gate.py",
          '            for _rel in _ents:',
          '            for _rel in [x for x in _ents if not x.startswith("assets/")]:',
+         "D-28"),
+        # ★★ D-28 负控之二（2026-10-13，X-022）：把 fixture 的 `git init` 拿掉
+        #   ⇒ 只剩一个「伪 `.git`」（只含 hooks/）⇒ D-28 的「有效工作树」断言必红。
+        #   模拟的正是 D-33 那次留下的畸形态，以及它造成的 D-24 常量连带红。
+        #   ⚠️ 已知连带：这一改也会让 D-24 在 fixture 里变红（那正是被注入的缺陷本身）。
+        ("D-28 缺陷：fixture 只剩伪 .git（不 git init）⇒ 有效工作树断言必红",
+         "ci/regression_gate.py",
+         '        _init = _sp.run(["git", "-C", str(dst), "init", "-q"], capture_output=True)',
+         '        _init = _sp.run(["git", "-C", str(dst), "status"], capture_output=True)'
+         '  # NEGCTL 伪 .git',
          "D-28"),
         # ★★ D-29 负控（2026-10-12）：往 docstring 里加一条**不存在的参数**承诺。
         #   模拟 X-005 原貌（承诺 --roll 时该参数不存在 ⇒ 红而无出路）。

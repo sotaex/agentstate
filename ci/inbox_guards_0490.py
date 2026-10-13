@@ -1399,6 +1399,67 @@ def _sv_patch(mod):
 #:     判据用**本进程**占端口 ⇒ 占用方 pid 必＝本进程，可强断言（不依赖机器天气）。
 
 
+#: W-05 夹具自证的**重试轮数**（机器天气兜底，不是放宽判据）。
+#:   ★ 上界是有意压低的：`_port_owner` 单次最多等 5s（`timeout=5`），
+#:     3 轮 × 2 次探针 = 最坏 30s 额外耗时，只在**仪表真的不通**时才会走到。
+_W05_TRIES = 3
+#: 「占用方 pid」这一项的**标记串**：**只有它**是可重试的机器天气；
+#:   其余各项（没报漂移／端口记错／托盘不带端口）都是真缺陷，一次即红。
+_W05_OWNER_MARK = "占用方进程号"
+#: 「夹具失效」的识别串：`_w05_assert()` 报夹具故障时用它开头。
+_W05_FIXTURE_DEAD = "夹具失效"
+
+
+def _w05_owner_probe(port, tries=2, gap=0.15):
+    """**夹具自证**（X-019）：`_port_owner()` 这台仪表此刻真的查得到占用方吗。
+
+    返回 `(live, value)`，`live = (value is not None)`。
+
+    ★★ 为什么必须有（2026-10-13 实测撞到，不是推演）：
+      `_port_owner()` 走**外部子进程**（Windows `netstat -ano` / POSIX `lsof`），
+      机器高负载时查询取不到 ⇒ `owner=None` ⇒ 断言 `owner == 本进程` **假红**
+      （实测：「漂移没点出占用方进程号：owner=None（应 26332）」）。
+      **与 X-017 同一类**（T-08 复发在量具层）：量具把「取不到信号」
+      当成了「裁决错误」——**把机器天气说成产品缺陷**。
+    ★ 方向（关键）：**只在始终取不到时**判「仪表失效」；**一旦取到值（哪怕值不对），
+      判定权立刻交回判据** —— 值不对是**真缺陷**，该红。
+    ★ `import` 在函数内做：负控用 `_mod_patch` 换掉 `sys.modules["inbox_server"]`，
+      这里必须拿到**当轮**那个模块（否则探针测的是真身，不是变异体）。
+    """
+    import time
+    import inbox_server as SV
+    n = max(1, int(tries))
+    val = None
+    for i in range(n):
+        try:
+            val = SV._port_owner(port)
+        except Exception:                                  # noqa: BLE001
+            val = None
+        if val is not None:
+            return True, val
+        if i + 1 < n:
+            time.sleep(gap)
+    return False, val
+
+
+def _w05_bind_attempt(SV, held, hub):
+    """① 的**一次**尝试。返回 `(说明串 or None)`；`None` ＝ 这一轮过了。"""
+    httpd, _tok, got, drift = SV._bind_first_free(held, hub)
+    try:
+        if got == held:
+            return "首选端口被占，却仍绑在同一个端口上（漂移没发生）"
+        if not drift:
+            return "换了端口却**没报漂移** —— 静默换端口（B2 那个缺陷本身）"
+        if drift.get("want") != held or drift.get("got") != got:
+            return "漂移记录端口不对：%r（应 want=%r got=%r）" % (drift, held, got)
+        if drift.get("owner") != os.getpid():
+            return ("漂移没点出占用方进程号：owner=%r（应 %d —— 端口是本进程占的）"
+                    % (drift.get("owner"), os.getpid()))
+        return None
+    finally:
+        httpd.server_close()
+
+
 def _w05_assert():
     """W-05 正判据（正/负控共用）。返回 None＝过，否则说明串。
 
@@ -1407,6 +1468,11 @@ def _w05_assert():
       ② `_serve_setup()` 把这件事**说到 stderr**，那句话点名两个端口与占用方 pid，
          并把 `want_port` 落进 `url.json`；
       ③ 托盘提示带**实际端口**（从 `url.json` 读，唯一真源）；没有记录 ⇒ 不编。
+
+    ★★ X-019（2026-10-13）：①② 里凡**依赖「占用方 pid」**的那一项，都改成
+      **条件断言** —— 仪表（`_port_owner` 走外部子进程）取不到 ⇒ 报
+      **「夹具失效」**（`_W05_FIXTURE_DEAD` 开头），**不许**把量具故障说成产品缺陷。
+      非天气项（没报漂移／端口记错／托盘不带端口）照旧一次即红。
     """
     import contextlib
     import inbox_server as SV
@@ -1415,19 +1481,28 @@ def _w05_assert():
     holder, held = _w04_serve_inline("tok-holder")      # 本进程占住 held
     try:
         # ① 漂移必须被**报出来**（不是静默换掉）
-        httpd, _tok, got, drift = SV._bind_first_free(held, hub)
-        try:
-            if got == held:
-                return "首选端口被占，却仍绑在同一个端口上（漂移没发生）"
-            if not drift:
-                return "换了端口却**没报漂移** —— 静默换端口（B2 那个缺陷本身）"
-            if drift.get("want") != held or drift.get("got") != got:
-                return "漂移记录端口不对：%r（应 want=%r got=%r）" % (drift, held, got)
-            if drift.get("owner") != os.getpid():
-                return ("漂移没点出占用方进程号：owner=%r（应 %d —— 端口是本进程占的）"
-                        % (drift.get("owner"), os.getpid()))
-        finally:
-            httpd.server_close()
+        #   ★★ X-019：只有「占用方 pid 取不到」是**可重试的机器天气**；
+        #     红在这一项时**当场**再问一次仪表 —— 仪表此刻通 ⇒ 是真缺陷；
+        #     不通 ⇒ 这一轮算天气，重试。始终不通 ⇒ 报「夹具失效」。
+        why, instrument_live = None, False
+        for _i in range(_W05_TRIES):
+            why = _w05_bind_attempt(SV, held, hub)
+            if why is None:
+                break
+            if _W05_OWNER_MARK not in why:
+                break                       # 真缺陷（非天气项）⇒ 一次即红
+            live, _probe = _w05_owner_probe(held)
+            instrument_live = instrument_live or live
+            if live:
+                break                       # 仪表通、产品却没报 ⇒ **真缺陷**
+        if why is not None:
+            if _W05_OWNER_MARK in why and not instrument_live:
+                return ("%s：`_port_owner(%d)` 连 %d 轮都取不到占用方"
+                        "（Windows `netstat -ano` / POSIX `lsof`，是**外部子进程**，"
+                        "高负载下会取不到）—— **这是量具失效，不是产品缺陷**；"
+                        "本条**测不出**，不许报通过，请重跑。"
+                        % (_W05_FIXTURE_DEAD, held, _W05_TRIES))
+            return why
         # ② 出声（stderr）＋ 落盘（url.json 带 want_port）
         buf = io.StringIO()
         with contextlib.redirect_stderr(buf):
@@ -1438,6 +1513,16 @@ def _w05_assert():
             msg = buf.getvalue()
             for need in (str(held), str(got2), str(os.getpid())):
                 if need not in msg:
+                    # ★★ X-019：三项里**只有「占用方 pid」**可能是**仪表失效**
+                    #   （`console_drift_note` 查不到占用方时会明说「进程号没查到」）。
+                    #   此刻仪表不通 ⇒ 报「夹具失效」，**不许**算产品缺陷。
+                    if need == str(os.getpid()):
+                        live, _p = _w05_owner_probe(held)
+                        if not live:
+                            return ("%s：`_port_owner(%d)` 此刻取不到占用方 ⇒ "
+                                    "stderr 那句话里没有 pid **不能算产品缺陷**"
+                                    "（量具失效，本条测不出，请重跑）"
+                                    % (_W05_FIXTURE_DEAD, held))
                     return ("端口被占时 stderr 那句话没说全（缺 %r）：%r"
                             % (need, msg))
             rec = SV.read_console_record(hub)
@@ -1465,6 +1550,22 @@ def _w05_assert():
     return None
 
 
+def _w05_negctl_guard(r):
+    """负控子块的前置闸：**夹具失效时不许继续判「咬没咬对地方」**（X-019）。
+
+    ★★ 为什么（2026-10-13）：`_w05_assert()` 报「夹具失效」时，N-W05 的职责
+      **不是**继续比 `"没说全" not in r` —— 那会把**量具故障**说成
+      **负控设计错误**（T-08「查不到就下结论」复发在负控层），
+      而且更坏：夹具失效时那几条断言**照样"命中"**，负控于是**假装通过了**。
+      ⇒ 返回非空串 ⇒ 直接当 N-W05 的结论（本条**测不出**，不许报通过）；
+        返回 `None` ⇒ 夹具活着，继续按原逻辑判。
+    """
+    if r is not None and _W05_FIXTURE_DEAD in r:
+        return ("夹具失效（**不是**负控设计问题）：`_port_owner()` 取不到占用方 —— "
+                "本条负控**测不出**，不许报通过；请重跑。")
+    return None
+
+
 @check("W-05 ★ B2：端口被占不再静默 —— 报漂移 / stderr 出声 / 落盘 / 托盘带端口")
 def w05():
     r = _w05_assert()
@@ -1480,6 +1581,9 @@ def n_w05():
     ① `_bind_first_free` 换了端口却**不报 drift**（＝B2 缺陷本身：静默换端口）；
     ② `console_drift_note()` 说「被占用」但**不点占用方 pid**（说了等于没说）；
     ③ 托盘提示**不带实际端口**（用户手输 8790 打不开，还是不知道点哪）。
+
+    ★★ X-019：每个子块先过 `_w05_negctl_guard()` —— 夹具失效（仪表取不到占用方）
+      时**直接判测不出**，不许让"夹具坏了"冒充"负控咬错了地方"（更不许冒充通过）。
     """
     src = _src(_SERVER_REL)
     # ① 静默漂移：把 drift 一律抹成 None
@@ -1492,6 +1596,9 @@ def n_w05():
     saved = _mod_patch("inbox_server", mut)
     try:
         r = _w05_assert()
+        _dead = _w05_negctl_guard(r)
+        if _dead:
+            return _dead
         if r is None:
             return "换了端口却不报 drift，W-05 仍判通过 ⇒ 判据没在看「漂移有没有被报出来」"
         if "没报漂移" not in r:
@@ -1508,6 +1615,9 @@ def n_w05():
     saved2 = _mod_patch("inbox_server", mut2)
     try:
         r = _w05_assert()
+        _dead = _w05_negctl_guard(r)
+        if _dead:
+            return _dead
         if r is None:
             return "漂移出声不点占用方 pid，W-05 仍判通过 ⇒ 判据没在看那句话说了什么"
         if "没说全" not in r:
@@ -1525,12 +1635,78 @@ def n_w05():
     saved3 = _mod_patch("inbox_tray", tmut)
     try:
         r = _w05_assert()
+        _dead = _w05_negctl_guard(r)
+        if _dead:
+            return _dead
         if r is None:
             return "托盘提示不带实际端口，W-05 仍判通过 ⇒ 判据没在看托盘提示"
         if "托盘提示没带实际端口" not in r:
             return "负控咬错了地方：红的应是「托盘提示没带端口」，实得 %r" % r[:60]
     finally:
         saved3()
+    return True
+
+
+@check("N-W05b 夹具自证：仪表恒盲 ⇒ 报「夹具失效」；仪表通而值错 ⇒ 报真缺陷（X-019）")
+def n_w05b():
+    """反向对照（X-019）：**量具故障不许冒充产品缺陷，真缺陷也不许被当成天气放过**。
+
+    三条对照，全是**行为**（不查行号、不看字面）：
+      ① **仪表恒盲**（源变异：`_port_owner` 一律返回 None ＝ 高负载下 netstat/lsof
+         取不到信号的形状）⇒ `_w05_assert()` 必须报**「夹具失效」**，
+         **不许**报「漂移没点出占用方进程号」—— 后者正是 X-019 的缺陷本体
+         （把机器天气说成产品缺陷）。
+      ② **仪表通而值错**（源变异：恒返回一个错 pid）⇒ 必须回到**真缺陷红**
+         （「占用方进程号」），**不许**报「夹具失效」—— 否则条件断言把真缺陷一起放过了。
+      ③ **负控闸** `_w05_negctl_guard()` 三条：夹具失效 ⇒ 拦住（不许继续判"咬错地方"、
+         更不许假装通过）；`None`（夹具正常）⇒ 不拦；**真缺陷串 ⇒ 不拦**。
+
+    ★ 为什么不在这里跑整条 `n_w05()` 去验「夹具失效时负控不许报通过」：
+      `n_w05()` 的变异体是**从磁盘原始源现造**的（自带一份好的 `_port_owner`），
+      所以它这一轮本来就**该**正常通过 —— 拿它来验"夹具失效"是**测错对象**
+      （本仓已犯过两次的同型错）。⇒ 直接验那道闸本身，判的是同一件事。
+    """
+    src = _src(_SERVER_REL)
+    # 锚点：`_port_owner` 的开头三行（`if not port` / `try` / `if os.name == "nt"`）
+    keep = ('    if not port:\n        return None\n    try:\n'
+            '        if os.name == "nt":')
+    if keep not in src:
+        return "变异锚点未找到（_port_owner 已变）—— 负控自身失效，不算通过"
+
+    # ① 仪表恒盲
+    blind = _load(src.replace(keep, "    return None      # ← MUTANT（仪表恒盲）\n" + keep, 1),
+                  "is0490_nw05b_blind", _SERVER_REL)
+    saved = _mod_patch("inbox_server", blind)
+    try:
+        r = _w05_assert()
+    finally:
+        saved()
+    if not isinstance(r, str) or _W05_FIXTURE_DEAD not in r:
+        return ("仪表恒盲时 W-05 没报「夹具失效」，实得 %r —— "
+                "**这正是 X-019**：量具故障被当成产品缺陷"
+                % (r if r is None else r[:70],))
+
+    # ② 仪表通而值错（不是天气）
+    wrong = _load(src.replace(keep, "    return 999999    # ← MUTANT（仪表通但值错）\n" + keep, 1),
+                  "is0490_nw05b_wrong", _SERVER_REL)
+    saved2 = _mod_patch("inbox_server", wrong)
+    try:
+        r2 = _w05_assert()
+    finally:
+        saved2()
+    if not isinstance(r2, str) or _W05_OWNER_MARK not in r2 or _W05_FIXTURE_DEAD in r2:
+        return ("仪表通而值错时 W-05 没报真缺陷（实得 %r）—— "
+                "条件断言把真缺陷一起放过了" % (r2 if r2 is None else r2[:70],))
+
+    # ③ 负控闸三条对照
+    g1 = _w05_negctl_guard("夹具失效：`_port_owner(1234)` 连 3 轮都取不到占用方 —— 请重跑。")
+    if not g1 or _W05_FIXTURE_DEAD not in g1:
+        return ("「夹具失效」的结论喂给负控闸时没被拦住（实得 %r）—— "
+                "负控会在夹具坏掉时继续判「咬错地方」，甚至假装通过" % (str(g1)[:70],))
+    if _w05_negctl_guard(None) is not None:
+        return "负控闸把「夹具正常（结论 None）」也拦住了 ⇒ 正常路径被误伤"
+    if _w05_negctl_guard("漂移没点出占用方进程号：owner=999999（应 123）") is not None:
+        return "负控闸把「真缺陷红」也拦住了 ⇒ 真缺陷会被当成夹具失效放过"
     return True
 
 
