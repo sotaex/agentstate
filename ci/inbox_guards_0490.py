@@ -1099,6 +1099,218 @@ def n_w03():
     return True
 
 
+# ══════════ W-04 · B1（值守台常驻：同端口/口令自恢复，遗留问题清单）══════════
+#: ★★ 盯的已修缺陷：**B1 无常驻入口** —— 值守台服务原来是"会话里拉的前台进程"，
+#:   会话一结束就没了；托盘与守护进程都不负责把它拉回来（窗口开着、点一下全失败）。
+#:   B1 验收：**杀掉服务进程后 60 秒内自行恢复，端口与 URL 不变**。
+#:   修法（产品侧）：`inbox_server` 落盘 `url.json`（端口/口令/pid/url）＋
+#:   `console_status()` 两轴判活 ＋ `ensure_console()` 按记录原样重拉；
+#:   `inbox_daemon.run(supervise=True)` 到点去 ensure；`antinel.cmd` 一键入口。
+#:   ★ 判据全部**不真起常驻进程**：用真 HTTP 服务（临时端口，内存线程）＋
+#:     注入的假 spawner 验决策链 —— 真端到端自恢复在运行态验收里做（维六）。
+
+
+def _w04_serve_inline(token, port=0):
+    """在**内存里**起一个真 HTTP 服务（`port=0` ⇒ 临时端口）。返回 `(httpd, port)`。
+
+    ★ 不落产品文件、不留常驻进程（daemon 线程，判据结束即随进程退）。
+    """
+    import threading
+    import inbox_server as SV
+    httpd, _tok = SV.make_server(port=port, token=token)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return httpd, httpd.server_address[1]
+
+
+def _w04_status_ok():
+    """① `console_status()` 两轴判活：pid 活着 **且** 端口在听。"""
+    import inbox_server as SV
+    hub = tempfile.mkdtemp(prefix="g0490_w04a_")
+    alive, rec, why = SV.console_status(root=hub)
+    if alive:
+        return "没有落盘记录却判成「在跑」"
+    # pid 已死 + 端口没人听
+    SV.write_console_record(8791, "tok-dead", pid=999999, root=hub)
+    alive, _rec, _why = SV.console_status(root=hub)
+    if alive:
+        return "登记进程已死、端口也没人听，仍判成「在跑」"
+    # pid 活着（本进程）但端口没人听 ⇒ 不许判活，且 why 要点明端口
+    SV.write_console_record(8791, "tok-x", pid=os.getpid(), root=hub)
+    alive, _rec, why = SV.console_status(root=hub)
+    if alive:
+        return "端口没人听却判成「在跑」（只看 pid 不看端口）"
+    if "端口" not in (why or ""):
+        return "判死的理由没点明端口：%r" % (why,)
+    # 真起一个服务 ⇒ 判活
+    httpd, port = _w04_serve_inline("tok-live")
+    try:
+        SV.write_console_record(port, "tok-live", pid=os.getpid(), root=hub)
+        alive, _rec, why = SV.console_status(root=hub)
+        if not alive:
+            return "真服务在跑却判成「不在」：%s" % why
+    finally:
+        httpd.shutdown()
+    return None
+
+
+def _w04_ensure_ok():
+    """② `ensure_console()` 重拉时**沿用记录里的端口与口令**（URL 不变）＋ ③ 幂等。"""
+    import inbox_server as SV
+    hub = tempfile.mkdtemp(prefix="g0490_w04b_")
+    # 借一个真空闲端口号（绑完立刻放掉），保证记录里的端口可用且可被占
+    probe, _ = SV.make_server(port=0)
+    free_port = probe.server_address[1]
+    probe.server_close()
+    want_url = "http://127.0.0.1:%d/?t=TOK-KEEP" % free_port
+    SV.write_console_record(free_port, "TOK-KEEP", pid=999999, root=hub)
+    seen = {}
+    started_httpd = []
+
+    def fake_spawn(port, token, root):
+        """假 spawner：按传进来的端口/口令真起一个服务并落盘（模拟子进程的 serve）。"""
+        seen["port"], seen["token"] = port, token
+        httpd, _p = _w04_serve_inline(token, port=port)     # ★ 必须绑**它给的端口**
+        started_httpd.append(httpd)
+        SV.write_console_record(port, token, pid=os.getpid(), root=hub)
+    try:
+        rec, started = SV.ensure_console(root=hub, spawner=fake_spawn, wait_sec=3)
+        if not started:
+            return "记录里进程已死，`ensure_console` 却没去重拉"
+        if seen.get("port") != free_port:
+            return ("重拉用了别的端口：%r（应沿用记录里的 %d）—— 端口一变，"
+                    "用户手上的 URL 就失效" % (seen.get("port"), free_port))
+        if seen.get("token") != "TOK-KEEP":
+            return ("重拉换了新口令：%r（应沿用记录里的）—— 口令一变 URL 必变"
+                    % (seen.get("token"),))
+        if (rec or {}).get("url") != want_url:
+            return "重拉后的 url 与记录不一致：%r（应 %r）" % (
+                (rec or {}).get("url"), want_url)
+        # ③ 幂等：已经在跑 ⇒ 不再 spawn
+        calls = []
+        _rec2, started2 = SV.ensure_console(
+            root=hub, spawner=lambda *a: calls.append(a), wait_sec=1)
+        if started2 or calls:
+            return "服务已在跑，`ensure_console` 又去重拉了一次（幂等破了）"
+    finally:
+        for h in started_httpd:
+            h.shutdown()
+    return None
+
+
+def _w04_daemon_ok():
+    """④ 守护进程监督开关（默认关；开了到点去 ensure）＋ ⑤ 单例 ＋ 一键入口在位。"""
+    import inbox_daemon as DM
+    hub = tempfile.mkdtemp(prefix="g0490_w04c_")
+    calls = []
+    n = DM.Daemon(root=hub).run(max_ticks=1, interval=0, supervise=True,
+                                ensure=lambda *a, **k: calls.append(a),
+                                supervise_every=0)
+    if n != 1 or len(calls) != 1:
+        return ("supervise=True 时守护进程没去确保值守台（tick=%r，ensure 调用 %d 次）"
+                % (n, len(calls)))
+    calls2 = []
+    DM.Daemon(root=hub).run(max_ticks=1, interval=0, supervise=False,
+                            ensure=lambda *a, **k: calls2.append(a))
+    if calls2:
+        return "supervise=False 时仍去 ensure（默认关的语义破了）"
+    # ⑤ 单例：已有**别的**活守护进程 ⇒ 不跑
+    _orig = DM.daemon_alive
+    DM.daemon_alive = lambda *a, **k: (True, 424242)
+    try:
+        ticks, why = DM.run_daemon(root=hub, max_ticks=1, supervise=False)
+    finally:
+        DM.daemon_alive = _orig
+    if ticks != 0 or why != "already-running":
+        return "已有活守护进程仍启动了第二份：%r/%r" % (ticks, why)
+    # 一键入口：`antinel.cmd` 在位，且真的指向两个入口（不是空壳）
+    p = os.path.join(ROOT, "antinel.cmd")
+    if not os.path.exists(p):
+        return "仓根没有 antinel.cmd（一键入口不存在）"
+    txt = io.open(p, encoding="utf-8", errors="replace").read()
+    for need in ("inbox daemon", "inbox window"):
+        if need not in txt:
+            return "antinel.cmd 没调用 `%s`（空壳入口）" % need
+    return None
+
+
+@check("W-04 ★ B1：值守台常驻 —— 两轴判活 / 同端口同口令重拉 / 守护进程监督")
+def w04():
+    for fn in (_w04_status_ok, _w04_ensure_ok, _w04_daemon_ok):
+        r = fn()
+        if r is not None:
+            return r
+    return True
+
+
+@check("N-W04 负控：换新口令 / 只看 pid / 去掉监督 ⇒ W-04 必须红")
+def n_w04():
+    """反向对照（维二）：三个变异体＝B1 的三个真缺陷形状，逐个必须被 W-04 抓到。
+
+    ① `ensure_console` 重拉时**另生成口令**（URL 必变 ⇒ 用户手上的链接失效）；
+    ② `console_status` 只看 pid、不看端口（别的程序占了端口也判"在跑"）；
+    ③ `run_daemon` 去掉单例判定（双击两次就有两份守护进程）。
+    """
+    # ① 换新口令
+    src = _src(_SERVER_REL)
+    a_keep = '    want_token = (rec or {}).get("token") or secrets.token_urlsafe(24)'
+    a_new = "    want_token = secrets.token_urlsafe(24)                # ← MUTANT"
+    if a_keep not in src:
+        return "变异锚点未找到（ensure_console 已变）—— 负控自身失效，不算通过"
+    mut = _load(src.replace(a_keep, a_new), "is0490_nw04a", _SERVER_REL)
+    saved = _sv_patch(mut)
+    try:
+        r = _w04_ensure_ok()
+        if r is None:
+            return "重拉换新口令，W-04 仍判通过 ⇒ 判据没在看「URL 不变」"
+    finally:
+        saved()
+    # ② 只看 pid
+    a_two = "    if alive_pid and listening:\n        return True, rec, \"在跑\""
+    a_one = "    if alive_pid:\n        return True, rec, \"在跑\"          # ← MUTANT"
+    if a_two not in src:
+        return "变异锚点未找到（console_status 已变）—— 负控自身失效，不算通过"
+    mut2 = _load(src.replace(a_two, a_one), "is0490_nw04b", _SERVER_REL)
+    saved2 = _sv_patch(mut2)
+    try:
+        r = _w04_status_ok()
+        if r is None:
+            return "只看 pid 不看端口，W-04 仍判通过 ⇒ 判据没在看端口那一轴"
+    finally:
+        saved2()
+    # ③ 去掉单例判定
+    dsrc = _src("inbox_daemon.py")
+    b_check = '    if alive and pid != os.getpid():\n        return 0, "already-running"'
+    b_gone = "    if False:\n        return 0, \"already-running\"        # ← MUTANT"
+    if b_check not in dsrc:
+        return "变异锚点未找到（run_daemon 已变）—— 负控自身失效，不算通过"
+    dmut = _load(dsrc.replace(b_check, b_gone), "is0490_nw04c", "inbox_daemon.py")
+    import inbox_daemon as DM
+    saved3 = (DM.daemon_alive, DM.run_daemon)
+    DM.daemon_alive, DM.run_daemon = dmut.daemon_alive, dmut.run_daemon
+    try:
+        hub = tempfile.mkdtemp(prefix="g0490_nw04_")
+        ticks, why = DM.run_daemon(root=hub, max_ticks=1, supervise=False)
+        if ticks == 0 and why == "already-running":
+            return "去掉单例判定后仍拦住了第二份 ⇒ 变异没生效"
+    finally:
+        DM.daemon_alive, DM.run_daemon = saved3
+    return True
+
+
+def _sv_patch(mod):
+    """把 `mod`（内存里加载的 inbox_server 变异体）临时顶到 `inbox_server` 名下。
+
+    返回还原函数。★ 为什么必须这样：`_w04_ensure_ok()` 里 `import inbox_server`
+    拿的是**真身**；要验的是**变异后的这份源码**，所以得让真名指向变异体
+    （`sys.modules` 换掉），结束再换回来（regression_gate D-27 同款纪律）。
+    """
+    import inbox_server as real
+    sys.modules["inbox_server"] = mod
+    def _restore():
+        sys.modules["inbox_server"] = real
+    return _restore
+
+
 def main():
     print("=" * 78)
     print("0.48.5 值守台细节修订判据（交接件 v1.1 §5.7）—— "

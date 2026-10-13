@@ -127,6 +127,85 @@ def _save_hb_mark(d, root=None):
     os.replace(tmp, p)
 
 
+def _ensure_console(root=None):
+    """确保值守台服务在跑（B1）。**转发到 `inbox_server` 的唯一实现**。
+
+    ★ 为什么单独包一层：`inbox_server` 在本模块里是**惰性导入**（它 import
+      本模块做账本采样，顶层互相 import 会成环）。这一层只做转发，不重算。
+    """
+    import inbox_server as SV
+    return SV.ensure_console(root=root)
+
+
+# ------------------------------------------------- 守护进程单例（0.48.5 B1）----
+#: ★★ 为什么要它：一键入口（`antinel.cmd`）会"起一次守护进程"，用户多点两次
+#:   就会有两份在跑（两份 tick：双份通知、双份记账、双份重拉值守台）。
+#:   本仓对哨兵已有同款纪律（`run_sentinel`：已有活哨兵 ⇒ 安静退出，避免双跑双锁），
+#:   守护进程照抄同一条 —— **机制在代码里，不靠启动脚本自觉**。
+def daemon_pid_path(root=None):
+    import inbox_config as _C
+    return os.path.join(_C.console_dir(root), "daemon.pid")
+
+
+def _pid_alive(pid):
+    try:
+        import audit_chain as _AC
+        return bool(_AC.pid_alive(int(pid)))
+    except Exception:                                   # noqa: BLE001
+        return False
+
+
+def daemon_alive(root=None):
+    """(alive, pid|None)：中枢里登记的守护进程还在不在。读不到 ⇒ (False, None)。"""
+    try:
+        with open(daemon_pid_path(root), encoding="utf-8") as f:
+            pid = int(f.read().strip())
+    except Exception:                                   # noqa: BLE001
+        return False, None
+    if pid == os.getpid():
+        return True, pid                                # 自己（调用方按需区分）
+    return _pid_alive(pid), pid
+
+
+def write_daemon_pid(root=None, pid=None):
+    """登记守护进程 pid（原子替换）。"""
+    p = daemon_pid_path(root)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    tmp = p + ".tmp"
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        f.write(str(int(pid if pid is not None else os.getpid())))
+    os.replace(tmp, p)
+    return True
+
+
+def run_daemon(root=None, interval=2.0, max_ticks=None, supervise=True,
+               ensure=None, supervise_every=15.0):
+    """**常驻入口**（B1）：单例 + 监督。返回 `(ticks, why)`。
+
+    ★ 单例：已有**别的**活守护进程 ⇒ 不跑（返回 `(0, "already-running")`），
+      不报错、不抢锁 —— 与 `run_sentinel` 同一条纪律。
+    ★ `supervise=True`（默认，CLI 入口用）：顺带监督值守台服务，被杀掉后按
+      原端口/口令重拉（URL 不变）。
+    ★ 退出时清掉自己的 pid 登记（不是自己写的不清 —— 别替别人擦桌子）。
+    """
+    alive, pid = daemon_alive(root)
+    if alive and pid != os.getpid():
+        return 0, "already-running"
+    write_daemon_pid(root)
+    try:
+        n = Daemon(root=root).run(interval=interval, max_ticks=max_ticks,
+                                  supervise=supervise, ensure=ensure,
+                                  supervise_every=supervise_every)
+        return n, "ok"
+    finally:
+        try:
+            with open(daemon_pid_path(root), encoding="utf-8") as f:
+                if int(f.read().strip()) == os.getpid():
+                    os.remove(daemon_pid_path(root))
+        except Exception:                               # noqa: BLE001
+            pass
+
+
 def open_console_now(root=None, opener=None, console_url=None):
     """把「打开值守台」这件事**真的做掉**。返回 "app"/"browser"/"none"/"error: …"。
 
@@ -322,14 +401,34 @@ class Daemon:
         return out
 
     # ---------------------------------------------------------------- #
-    def run(self, interval=2.0, max_ticks=None):
-        """常驻循环。`max_ticks` 只为测试用（None ＝ 一直跑）。"""
+    def run(self, interval=2.0, max_ticks=None, supervise=False,
+            ensure=None, supervise_every=15.0):
+        """常驻循环。`max_ticks` 只为测试用（None ＝ 一直跑）。
+
+        ★★ 0.48.5（B1）：`supervise=True` ⇒ 顺带**监督值守台服务** ——
+          每 `supervise_every` 秒判一次活（pid + 端口两条），死了就按
+          **记录里的原端口/口令**重拉（URL 不变）。B1 验收＝杀掉服务进程后
+          60 秒内自行恢复；默认 15 秒判一次，留足余量。
+        ★ 监督放在 `run()` 而**不是** `tick()`：`tick()` 是"一轮业务"（通知/
+          记账/刷托盘），判据大量直接调它，且它不该带起进程的副作用。
+        ★ 默认 `supervise=False` ⇒ 既有调用方行为**一个字不变**（维四）。
+        ★ `ensure` 可注入（判据用替身验"到点会去确保"，不去真起进程）。
+        """
         n = 0
+        next_sup = 0.0
         while max_ticks is None or n < max_ticks:
             try:
                 self.tick()
             except Exception:                   # noqa: BLE001
                 pass                            # 守护进程不许因为一轮出错就死
+            if supervise:
+                now = time.time()
+                if now >= next_sup:
+                    try:
+                        (ensure or _ensure_console)(root=self.root)
+                    except Exception:           # noqa: BLE001
+                        pass                    # 重拉失败不许把守护进程打死
+                    next_sup = now + float(supervise_every)
             n += 1
             if max_ticks is not None and n >= max_ticks:
                 break

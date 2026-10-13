@@ -195,7 +195,9 @@ def cmd_report(a):
 
 def cmd_serve(a):
     import inbox_server
-    inbox_server.serve(port=a.port, open_browser=a.open)
+    # ★ 0.48.5（B1）：口令/中枢根可传入（守护进程重拉时沿用旧口令 ⇒ URL 不变）
+    inbox_server.serve(port=a.port, root=getattr(a, "root", None),
+                       open_browser=a.open, token=getattr(a, "token", None))
     return 0
 
 
@@ -214,6 +216,26 @@ def cmd_open(a):
     return 0
 
 
+def cmd_window(a):
+    """★ 0.48.5（B1）：**确保服务在跑 + 开独立窗口**（一键入口，`antinel.cmd` 用它）。
+
+    ★ 与 `open` 的分工：`open` 是"这个进程**就是**服务"（前台，关窗即停）；
+      `window` 是"**确保**服务在跑（不在就按原端口/口令重拉），再开窗" ——
+      因此它不会因为关掉窗口就把服务带走（B1 的验收要求：窗口关了、服务还在，
+      窗口再开、URL 不变）。
+    ★ 不二次实现：判活/重拉/开窗全委托 `inbox_server`。
+    """
+    import inbox_server as SV
+    rec, started = SV.ensure_console(root=getattr(a, "root", None))
+    if not rec or not rec.get("url"):
+        print("值守台没起来：拿不到端口/口令记录 —— 看 `antinel inbox serve` 的输出",
+              file=sys.stderr)
+        return 1
+    print("值守台%s：%s" % ("已重拉" if started else "已在跑", rec["url"]))
+    SV.open_console(rec["url"])
+    return 0
+
+
 def cmd_tray(a):
     import inbox_tray
     if not inbox_tray.tray_available():
@@ -224,9 +246,17 @@ def cmd_tray(a):
 
 
 def cmd_daemon(a):
-    import inbox_daemon
-    print("值守台守护进程已启动（每 %.1f 秒一轮）。Ctrl+C 停。" % a.interval)
-    inbox_daemon.Daemon().run(interval=a.interval)
+    import inbox_daemon as DM
+    sup = bool(getattr(a, "supervise", False))
+    # ★ 0.48.5（B1）：先看有没有**别的**守护进程在跑 —— 只为把话说清楚；
+    #   真正的单例判定在 `run_daemon()` 里（唯一实现，启动脚本自觉不算数）。
+    alive, pid = DM.daemon_alive()
+    if alive and pid != os.getpid():
+        print("值守台守护进程**已经在跑**了（pid %s）—— 本次不重复启动。" % pid)
+        return 0
+    print("值守台守护进程已启动（每 %.1f 秒一轮%s）。Ctrl+C 停。"
+          % (a.interval, "；顺带监督值守台服务" if sup else ""))
+    DM.run_daemon(interval=a.interval, supervise=sup)
     return 0
 
 
@@ -366,11 +396,19 @@ def build_parser():
     p.set_defaults(fn=cmd_report)
 
     p = sub.add_parser("serve"); p.add_argument("--port", type=int, default=8790)
+    # ★ 0.48.5（B1）：`--token`（重拉时沿用旧口令 ⇒ URL 不变）、`--root`（隔离中枢）
+    p.add_argument("--token", default=None,
+                   help="复用指定口令（守护进程重拉时用；缺省随机生成）")
+    p.add_argument("--root", default=None, help="中枢根目录（判据/多实例隔离用）")
     p.add_argument("--open", action="store_true"); p.set_defaults(fn=cmd_serve)
     # ★ 0.35.2：「打开值守台」的稳定入口（气泡点击 / 托盘 / 外部调用都用它）
     sub.add_parser("open").set_defaults(fn=cmd_open)
+    # ★ 0.48.5（B1）：「确保服务在跑 + 开独立窗口」—— 一键入口（antinel.cmd 用它）
+    sub.add_parser("window").set_defaults(fn=cmd_window)
     sub.add_parser("tray").set_defaults(fn=cmd_tray)
     p = sub.add_parser("daemon"); p.add_argument("--interval", type=float, default=2.0)
+    p.add_argument("--supervise", action="store_true",
+                   help="顺带监督值守台服务：被杀掉后在 60 秒内按原端口/口令重拉")
     p.set_defaults(fn=cmd_daemon)
 
     p = sub.add_parser("config"); ps = p.add_subparsers(dest="sub", required=True)

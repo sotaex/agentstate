@@ -1510,12 +1510,17 @@ def _port_busy(port, host="127.0.0.1", timeout=0.35):
         s.close()
 
 
-def _bind_first_free(port, root):
-    """按「首选端口 → 临时端口」的顺序绑一个能用的。返回 `(httpd, token, real_port)`。"""
+def _bind_first_free(port, root, token=None):
+    """按「首选端口 → 临时端口」的顺序绑一个能用的。返回 `(httpd, token, real_port)`。
+
+    ★ 0.48.5（B1）：`token` 可传入 —— 重启时**复用记录里的口令**，
+      URL 才可能"不变"（口令每次重生成，URL 必变）。
+    """
     try:
-        httpd, token = make_server(port=(0 if _port_busy(port) else port), root=root)
+        httpd, token = make_server(port=(0 if _port_busy(port) else port),
+                                   root=root, token=token)
     except OSError:
-        httpd, token = make_server(port=0, root=root)
+        httpd, token = make_server(port=0, root=root, token=token)
     return httpd, token, httpd.server_address[1]
 
 
@@ -1922,11 +1927,144 @@ def stop_background():
     return True
 
 
-def serve(port=DEFAULT_PORT, root=None, open_browser=False):
+# --------------------------------------------------- 值守台常驻（0.48.5 B1）----
+#: ★★ 为什么要这一族（遗留问题清单 2026-10-13 B1，实测证据）：
+#:   值守台服务原来是"代理会话里拉的前台进程"—— 会话结束就没了，托盘与守护
+#:   进程**都不负责把它拉回来**。用户看到的是"窗口开着，点一下全是失败"。
+#:   B1 验收：**杀掉服务进程后 60 秒内自行恢复，端口与 URL 不变**。
+#:   三件套：
+#:     ① `url.json` 落盘（端口/口令/pid/启动时刻/url）—— 重拉时**沿用同一个
+#:        端口与口令**，URL 才可能不变（口令若每次重生成，URL 必变）；
+#:     ② `console_status()` 判活 —— pid 活着 **且** 端口在听，两条都要；
+#:     ③ `ensure_console()` 死了就按记录原样重拉（同端口同口令，幂等）。
+#:   ★ 口令落盘是**本机回环**下的便利取舍（文件在用户自己的中枢目录里）；
+#:     0.48.5 B3 会把口令从 URL 里拿掉（httpOnly cookie），届时 URL 只含端口。
+#:   ★ 为什么必须**另起进程**：`ensure_background()` 是在**本进程**里起线程，
+#:     命令一返回/进程一退服务就没了（0.35.2 已记过这条）。
+
+
+def console_record_path(root=None):
+    """值守台"开在哪"的落盘位置（`<中枢>/console/url.json`）。"""
+    import inbox_config as _C
+    return os.path.join(_C.console_dir(root), "url.json")
+
+
+def write_console_record(port, token, pid=None, root=None, started_at=None):
+    """把"值守台开在哪"落盘（临时文件 + 原子替换）。返回写下的 dict。"""
+    p = console_record_path(root)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    rec = {"port": int(port), "token": str(token),
+           "pid": int(pid if pid is not None else os.getpid()),
+           "url": "http://127.0.0.1:%d/?t=%s" % (int(port), token),
+           "started_at": started_at or time.strftime("%Y-%m-%dT%H:%M:%S")}
+    tmp = p + ".tmp"
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        json.dump(rec, f, ensure_ascii=False, indent=1, sort_keys=True)
+    os.replace(tmp, p)
+    return rec
+
+
+def read_console_record(root=None):
+    """读"值守台开在哪"。没有 / 读坏 / 缺端口或缺口令 ⇒ `None`（**不编默认值**）。"""
+    try:
+        with open(console_record_path(root), encoding="utf-8") as f:
+            d = json.load(f)
+    except Exception:                                   # noqa: BLE001
+        return None
+    if not isinstance(d, dict) or not d.get("port") or not d.get("token"):
+        return None
+    return d
+
+
+def console_status(root=None, rec=None):
+    """值守台此刻在不在。返回 `(alive, rec, why)` —— 守护进程与判据共用一处。
+
+    ★ 判活**两条都要**：
+      · 只看 pid ⇒ pid 会被复用（判活看的是"那个进程"，不是"那个号"）；
+      · 只看端口 ⇒ 别的程序占了 8790 也会被当成"值守台在跑"。
+    """
+    rec = read_console_record(root) if rec is None else rec
+    if not rec:
+        return False, None, "还没有值守台的落盘记录（没起过）"
+    pid, port = rec.get("pid"), int(rec.get("port"))
+    alive_pid = False
+    try:
+        import audit_chain as _AC
+        alive_pid = bool(pid) and bool(_AC.pid_alive(int(pid)))
+    except Exception:                                   # noqa: BLE001
+        alive_pid = False
+    listening = _port_busy(port)
+    if alive_pid and listening:
+        return True, rec, "在跑"
+    if not alive_pid and not listening:
+        return False, rec, "进程与端口都不在了"
+    if not alive_pid:
+        return False, rec, "登记的服务进程已不在（端口 %d 另有其在听）" % port
+    return False, rec, "服务进程在，但端口 %d 没人在听" % port
+
+
+def _console_spawn_cmd(port, token, root=None):
+    """重拉值守台要跑的命令（**唯一实现**：守护进程与判据都看它，不各拼一份）。"""
+    entry = os.path.join(os.path.dirname(os.path.abspath(__file__)), "antinel.py")
+    cmd = [sys.executable, entry, "inbox", "serve",
+           "--port", str(int(port)), "--token", str(token)]
+    if root:
+        cmd += ["--root", str(root)]
+    return cmd
+
+
+def spawn_console(port, token, root=None):
+    """按给定端口/口令**另起一个进程**跑值守台（分离、无窗）。返回 `Popen`。"""
+    flags = 0
+    if os.name == "nt":
+        flags = 0x00000008 | 0x08000000      # DETACHED_PROCESS | CREATE_NO_WINDOW
+    return subprocess.Popen(_console_spawn_cmd(port, token, root),
+                            stdin=subprocess.DEVNULL,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            creationflags=flags)
+
+
+def ensure_console(port=DEFAULT_PORT, root=None, spawner=None, wait_sec=8.0):
+    """确保值守台在跑（**幂等**）。返回 `(rec|None, started: bool)`。
+
+    ★ 0.48.5（B1）验收口径：被杀掉后重拉时**端口与口令都沿用记录里的**
+      （URL 不变）；没有记录（从没起过）才用默认端口 + 新口令。
+    ★ `spawner` 可注入：判据用假 spawner 验决策链，不去真起进程。
+    """
+    alive, rec, _why = console_status(root)
+    if alive:
+        return rec, False
+    want_port = int(rec.get("port")) if rec else int(port)
+    want_token = (rec or {}).get("token") or secrets.token_urlsafe(24)
+    (spawner or spawn_console)(want_port, want_token, root)
+    deadline = time.time() + float(wait_sec)
+    while time.time() < deadline:
+        if _port_busy(want_port):
+            break
+        time.sleep(0.2)
+    _alive, rec2, _why2 = console_status(root)
+    # ★ 起没起来都**如实返回**：拿不到记录就返回 None（不编一个"看起来好了"的）
+    return (rec2 or rec), True
+
+
+def serve(port=DEFAULT_PORT, root=None, open_browser=False, token=None, record=True):
     """前台起服务（Ctrl+C 停）。★ 首选端口被占 ⇒ 自动换临时端口（Windows 上
-    光靠 `OSError` 发现不了，见 `_port_busy`）。"""
-    httpd, token, real_port = _bind_first_free(port, root)
+    光靠 `OSError` 发现不了，见 `_port_busy`）。
+
+    ★ 0.48.5（B1）：`token` 可传入（重拉时沿用旧口令，URL 不变）；
+      `record=True` 把"开在哪"落盘（`url.json`）—— 守护进程靠它判活与重拉。
+    """
+    httpd, token, real_port = _bind_first_free(port, root, token=token)
     url = "http://127.0.0.1:%d/?t=%s" % (real_port, token)
+    if record:
+        try:
+            write_console_record(real_port, token, pid=os.getpid(), root=root)
+        except Exception as e:                          # noqa: BLE001
+            # ★ 落盘失败**出声**：它失败 ⇒ 守护进程判不出活、也就不会重拉
+            #   （"保护在起作用却没人看得见"是本仓点名禁止的形状）。
+            print("!! 值守台落盘记录没写成（%r）—— 守护进程将无法判活/重拉" % (e,),
+                  file=sys.stderr)
     print("值守台已开在：%s" % url)
     print("（只监听本机；关掉这个窗口就停）")
     if open_browser:
