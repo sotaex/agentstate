@@ -33,6 +33,17 @@ if [ ! -f "$GATE" ]; then
     exit 0
 fi
 
+# ── before 基线提醒（§6.1 / 遗留问题 C3）：**出声，但不拦截** ──────────────
+#   §6.1 要求「**开工前**先打 tag `pre-<批次>-<日期>`」——没有 before 就没有
+#   「提升」的证据（实测这一轮没打，before 只能靠旧 commit 的 worktree 补渲染，
+#   等价但迟到）。这里在**最早能机械介入的时刻**（第一次产品提交）出声一次。
+#   ★★ 永远不参与 rc（`|| true`）：`git tag` 不区分用途，机器**判不了**
+#      「本批有没有自己的基线」⇒ 判违规会时红时绿（本仓铁律：时红时绿比恒红更坏）。
+#      所以它只提醒；裁决权留给人与 §6.1 的截图清单。见 `ci/baseline_tag.py` 头。
+if [ -f "$ROOT/ci/baseline_tag.py" ]; then
+    "$PY" "$ROOT/ci/baseline_tag.py" --remind || true
+fi
+
 echo "[gate] 统一交付闸门 · 快道运行中（受影响套件 ＋ 主闸门，预算约 30 秒）……" >&2
 "$PY" "$GATE" --hook
 rc=$?

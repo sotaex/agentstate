@@ -1660,6 +1660,109 @@ def j_pinned_hashes_match_manifest():
                   "与 manifest 登记一致（哨兵可拉起）" % len(guarded))
 
 
+def j_baseline_tag_reminder_in_place():
+    """★★ D-37（2026-10-13）：**before 基线提醒必须在位且真接线**（T-10 静默降级）。
+
+    要防的复发（遗留问题 C3 / 交接件 §6.1，实测不是推演）：
+      §6.1 白纸黑字：「**开工前**先打 tag `pre-<批次>-<日期>`（与 merge 前的
+      `pre-merge-20261012` 同型），改动前的 8 帧从该 tag 渲染备查 ——
+      **没有 before 就没有「提升」的证据**」。实测这一轮**没打**：before 只能拿
+      开工前的 commit（`2e4e68f`）的 worktree 补渲染 —— **等价但迟到**；迟到的
+      代价是真的：before 与 after 之间若混进半成品改动，「提升」就证明不了。
+      ⇒ 病型 **T-10 静默降级**：**「少做了 before 基线」这件事没有任何输出说明
+        它发生了**，账面（8 帧截图）看起来与「有 before 对照」一样。
+
+    ★ 修复形态（本判据锁的正是它）：`ci/baseline_tag.py`（**只读出聲**工具，rc 恒 0）
+      ＋ 由提交钩子 `ci/git-hooks/pre-commit` 在**最早能机械介入的时刻**调用 ——
+      每次产品提交都把「你登记开工基线了吗」念一遍，直到你把它登记下来。
+
+    ★ 断言三条（缺一条都不算在位）：
+      ① **工具在位且可用**：`ci/baseline_tag.py` 存在，`--json` 能跑且 rc==0
+         （恒不拦截 —— 报红去拦提交是**过度**：见 ② 与「诚实登记」）。
+      ② **行为契约（唯一真源）**：`is_product_path` 对产品件判 True、对开发侧
+         （`ci/`、`docs/*.md`、`_p_*` 探针）判 False —— 这是「该出声时出声、
+         不该出声时闭嘴」的唯一真源。它若恒 False ⇒ 提醒**永不触发**
+         （工具在位却**静默失效**，正是本条要防的那个 T-10）。
+      ③ **反空转（真接线）**：钩子源里**真的调用**它（`baseline_tag.py" --remind`）
+         —— 工具在位但没人调用 ＝ 死代码（「没人跑的检查项＝没检查项」）。
+    ★ 红时必须给修法（否则是 T-04「红而无出路」）：
+      工具丢了 ⇒ 重建 `ci/baseline_tag.py`；钩子没接线 ⇒ 在
+      `ci/git-hooks/pre-commit` 里加
+      `"$PY" "$ROOT/ci/baseline_tag.py" --remind || true`，
+      再 `cp ci/git-hooks/pre-commit .git/hooks/pre-commit`（部署件同锚，D-33）。
+    ★ 与 D-33／D-34 的分工：D-33 守「钩子部署件与仓内源逐字一致」（T-09 漂移）；
+      D-34 守「快道不许静默少跑」（T-10 的另一面）；本条守「基线提醒这条**机制**
+      在位且真被调用」（T-10 的静默降级面）。三条读同一个钩子文件，判三件事。
+    ★ **诚实登记（本条的已知边界，不许假装它更强）**：本条**只验机制在位**，
+      **不验「本批真的打过基线 tag」** —— `git tag` **不区分用途**，机器**判不了**
+      「本批有没有自己的基线」（`pre-merge-20261012` 是别的批次留的，同样是 HEAD
+      的祖先）。那件事由**人**与 §6.1 截图清单裁决；工具与本判据一律**只出声、
+      不裁决**（对「本批是否已登记基线」报红会**时红时绿** —— 本仓铁律：
+      一个时红时绿的量具比恒红的更坏）。
+    ★ 已知连带：负控注入改 `ci/git-hooks/pre-commit`（摘掉接线）会**同时**让
+      D-33 变红 —— 源改了却没 `cp` 到 `.git/hooks/` 确实是漂移，是同一个根因，
+      机器会打 △。
+    """
+    tool_rel = "ci/baseline_tag.py"
+    tool_p = PKG / tool_rel
+    if not tool_p.is_file():
+        return False, (
+            "%s 不存在 —— before 基线提醒工具丢了（§6.1：没有 before 就没有"
+            "「提升」的证据）。修法：重建该工具（**只读出聲、rc 恒 0、不拦截**）"
+            % tool_rel)
+
+    # ① 工具在位且可用（--json，恒 rc 0）
+    import subprocess as _sp
+    try:
+        r = _sp.run([sys.executable, str(tool_p), "--json", "--root", str(PKG)],
+                    capture_output=True, text=True, encoding="utf-8",
+                    errors="replace", timeout=60)
+    except Exception as e:                                  # noqa: BLE001
+        return False, ("%s --json 跑不起来：%s: %s（工具在位但不可用 ＝ 盲区，"
+                       "不是通过）" % (tool_rel, type(e).__name__, e))
+    if r.returncode != 0:
+        return False, (
+            "%s --json 返回 rc=%d（应为 0 —— 本工具**只出声、不裁决**）。报红去拦"
+            "提交是**过度**：git tag 不区分用途，机器判不了「本批有没有自己的基线」"
+            "⇒ 判违规会时红时绿（时红时绿比恒红更坏）。修法：让 main() 恒 return 0"
+            % (tool_rel, r.returncode))
+
+    # ② 行为契约：分类口径（唯一真源）
+    mod = _load_module_file(tool_rel, "_bl_d37")
+    if mod is None or not hasattr(mod, "is_product_path"):
+        return False, ("%s 里没有 is_product_path（分类口径被删/改名 ⇒ 判据无法验"
+                       "「该出声时出声、不该出声时闭嘴」）" % tool_rel)
+    if not mod.is_product_path("antinel.py"):
+        return False, (
+            "is_product_path('antinel.py') == False —— 产品件被判成非产品 ⇒ 提醒"
+            "**永不触发**（工具在位却静默失效，正是 T-10 静默降级的原貌）。"
+            "修法：修 %s 的分类口径（排除法：只把开发侧目录/产物/探针排除）"
+            % tool_rel)
+    _bad_dev = [p for p in ("ci/regression_gate.py", "docs/x.md", "_p_probe.py")
+                if mod.is_product_path(p)]
+    if _bad_dev:
+        return False, (
+            "is_product_path 把开发侧判成了产品：%s ⇒ 提醒变噪音，人就会绕开它"
+            "（「会误报的检查器用两次就没人信」）。修法：修 %s 的分类口径"
+            % ("、".join(_bad_dev), tool_rel))
+
+    # ③ 反空转：钩子真接线
+    hook_rel = "ci/git-hooks/pre-commit"
+    hook_p = PKG / hook_rel
+    if not hook_p.is_file():
+        return False, ("缺 %s（提醒没人调用 ＝ 死代码：工具在位但从不运行）"
+                       % hook_rel)
+    hook = hook_p.read_text(encoding="utf-8", errors="replace")
+    if "baseline_tag.py" not in hook or "--remind" not in hook:
+        return False, (
+            "钩子没接线 before 基线提醒（%s 里找不到 `baseline_tag.py … --remind`）"
+            "—— 工具在位但**没人调用 ＝ 死代码**（「没人跑的检查项＝没检查项」）。"
+            "修法：加 `\"$PY\" \"$ROOT/ci/baseline_tag.py\" --remind || true`，"
+            "再 `cp ci/git-hooks/pre-commit .git/hooks/pre-commit`（D-33）" % hook_rel)
+    return True, ("before 基线提醒在位：%s（--json rc 0、分类口径正确）＋ %s 真接线"
+                  "（T-10 静默降级面已守）" % (tool_rel, hook_rel))
+
+
 # ---------------------------------------------------------------- 负控
 def _aside_dir(path):
     """零删除地让开一个临时目录（改名成 `<name>.away-<pid>-<ms>`）。
@@ -2036,6 +2139,28 @@ def selfcheck():
          "# -*- coding: utf-8 -*-",
          "# -*- coding: utf-8 -*-  # NEGCTL-D36 改了源码不重签 manifest",
          "D-36"),
+        # ★★ D-37 负控（2026-10-13）· 行为轴：把 `is_product_path` 的分类**废掉**
+        #   （`return False`）—— 工具仍在位、钩子仍接线，但**提醒永不触发**
+        #   ⇒ 这正是 T-10 静默降级的原貌（"看起来在位、实际是死的"）。
+        #   注入点＝`_NON_PRODUCT_DIRS` 那句 `if`（`grep -c` 实测唯一）；
+        #   替换后余下代码不可达但语法合法，**不新增行**（行号零位移）。
+        #   ★ 选"行为轴"而不是"接线轴"做首选负控：静默失效比"没接线"更隐蔽
+        #     （没接线 grep 一眼可见；分类废掉则一切照旧、只是不再出声）。
+        ("D-37 缺陷（行为轴）：分类口径废掉 ⇒ 提醒永不触发（静默降级）",
+         "ci/baseline_tag.py",
+         "    if any(x in _NON_PRODUCT_DIRS for x in parts):\n        return False",
+         "    return False  # NEGCTL-D37 分类失效 ⇒ 提醒永不触发",
+         "D-37"),
+        # ★★ D-37 负控（2026-10-13）· 接线轴：把钩子里的 `baseline_tag.py --remind`
+        #   那一行**摘掉** ⇒ 工具成**死代码**（在位但没人调用）⇒ D-37 ③ 必红。
+        #   ⚠️ 已知连带：本条改的是 `ci/git-hooks/pre-commit`，而 D-33 比的是
+        #     「仓内源 vs 部署件」⇒ D-33 会**同时**红（源改了没 `cp` 到 `.git/hooks/`
+        #     确实是漂移，同一个根因，机器打 △）。不新增行（原地换掉那一行）。
+        ("D-37 缺陷（接线轴）：钩子摘掉提醒调用 ⇒ 工具成死代码",
+         "ci/git-hooks/pre-commit",
+         '    "$PY" "$ROOT/ci/baseline_tag.py" --remind || true',
+         '    : # NEGCTL-D37 基线提醒被摘掉（工具成死代码）',
+         "D-37"),
     ]
 
     ok_all = True
@@ -2256,6 +2381,8 @@ def _checks(m):
          j_docs_only_no_full_fallback),
         ("D-36 自检钉住的源码改了必须重签 manifest（哨兵拉不起来，T-02）",
          j_pinned_hashes_match_manifest),
+        ("D-37 before 基线提醒必须在位且真接线（静默降级，T-10）",
+         j_baseline_tag_reminder_in_place),
         # ★ D-31 放最后：它红的正是上面几条没做完；R7 对齐后由红转绿 ＝ 完工证明
         ("D-31 缺陷类型登记簿自身一致（不会响的表格接成闸门一环）",
          j_defect_registry_consistent),
