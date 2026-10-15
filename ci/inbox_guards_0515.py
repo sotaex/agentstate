@@ -196,7 +196,7 @@ def n_cmd15b():
         raise Skip("SKIP: 非 Windows（cmd.exe 行为不适用）")
     # 修复前的产品形状：UTF-8 中文 REM 注释（探针四实测 CP936 下必误执行）
     zh = ("@echo off\r\n"
-          "REM 值守台原来是会话里拉的前台进程，会话一结束服务就没了\r\n"
+          "REM Antinel 监理原来是会话里拉的前台进程，会话一结束服务就没了\r\n"
           "REM 用户要的是一步就能服务常驻加开独立窗口\r\n"
           "echo G0515-MARKER\r\n").encode("utf-8")
     why = _cmd15b_judge(zh)

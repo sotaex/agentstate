@@ -67,7 +67,7 @@ def c_chain_tail_sees_policy_changed():
       而改 state 的三个入口里有两个写的**不是 host_shield_* 类型** ——
       `antinel zone add` 写 `policy_changed`、放行窗到期写 `host_shield_window_closed`。
       整行被挡掉 ⇒ `saw_changed=False` ⇒ 宽限 2 拍 ⇒ 判篡改 ⇒ **回滚用户刚设的配置**。
-      全链 12 条 `field=state` 的 tamper，全部紧跟一次「哨兵被重新拉起」、全部带"已回写恢复"。
+      全链 12 条 `field=state` 的 tamper，全部紧跟一次「监理被重新拉起」、全部带"已回写恢复"。
 
     ★★ 为什么调**两次**：`_ChainTail` 第一拍必然 `reset=True`（`self.day is None`），
       而 `new_records()` 把 reset 折进 `saw_changed` ⇒ 首拍 `saw` **恒为 True**。
@@ -153,11 +153,11 @@ def n_fp_backed_by_field():
 
 
 def c_fp_window_expiry_backed():
-    """★ 放行窗到期（哨兵**自己**关的窗）不许被判成篡改。
+    """★ 放行窗到期（监理**自己**关的窗）不许被判成篡改。
 
     ★ 为什么：`scan_once` 关窗后 `windows` 少了键 ⇒ 指纹变；链上写的是
       `host_shield_window_closed`（不是 `host_shield_changed`）⇒ 旧版看不见 ⇒ 判篡改。
-      这条路径是**哨兵自己的正常动作**，判它等于让防线咬自己。
+      这条路径是**监理自己的正常动作**，判它等于让防线咬自己。
     """
     import host_shield as HS
     hub = _tmpdir()
@@ -302,7 +302,7 @@ def n_zone_remove_removes():
 
 
 def c_zone_sync_writes_backing():
-    """★ zone 变更的**授权记录必须落在哨兵自己读的那条链上**（否则哨兵看不见背书）。"""
+    """★ zone 变更的**授权记录必须落在监理自己读的那条链上**（否则监理看不见背书）。"""
     import host_shield as HS
     import antinel
     hub = _tmpdir()
@@ -323,7 +323,7 @@ def c_zone_sync_writes_backing():
 
 
 def n_zone_sync_writes_backing():
-    """负控：写到**别处**的链 ⇒ 哨兵读不到（证明"落在哪儿"这件事真的被这条判据管着）。"""
+    """负控：写到**别处**的链 ⇒ 监理读不到（证明"落在哪儿"这件事真的被这条判据管着）。"""
     import host_shield as HS
     other = _chain_dir(_tmpdir())
     _write_rec(other, {"ts": _iso(0), "type": "host_shield_changed", "field": "zones"})
@@ -347,7 +347,7 @@ def c_posture_off_is_not_down():
 
 
 def n_posture_off_is_not_down():
-    """负控：armed 且哨兵不在岗 ⇒ **绝不能是 off**（否则"未启用"可能只是"什么都报 off"）。
+    """负控：armed 且监理不在岗 ⇒ **绝不能是 off**（否则"未启用"可能只是"什么都报 off"）。
 
     ★ 0.35.3 口径变更：缺岗按后果分两档 —— 有后果＝`down`（失守）、
       无监管对象＝`interrupted`（中断）。本机空 state + 空登记表 ⇒ 落在 `interrupted`，
@@ -599,8 +599,8 @@ def n_page_has_no_read_button():
 
 def c_page_fix_button_only_when_down():
     """★★ 创始人第四条：**失守时**页面必须给一个能马上解决的入口；值守中不给。"""
-    down = {"state": "down", "label": "失守", "why": "哨兵不在岗", "can_fix": True,
-            "fix": "revive", "fix_hint": "马上修复（重新拉起哨兵）"}
+    down = {"state": "down", "label": "失守", "why": "监理不在岗", "can_fix": True,
+            "fix": "revive", "fix_hint": "马上修复（重新拉起监理）"}
     ok = {"state": "guarding", "label": "值守中", "why": "在岗", "can_fix": False,
           "fix": None, "fix_hint": ""}
     h1 = SV.render_page(view="inbox", root=G.new_hub(), token="t", posture=down,
@@ -625,7 +625,7 @@ def c_page_down_without_fix_shows_howto():
     """★★ 创始人第四条：「如果当前确实是失守状态，应该有地方可以马上解决」。
 
     ★ 分两种失守，**都必须给得出下一步**：
-      · 能就地修（哨兵不在岗）⇒ 给「马上修复」按钮；
+      · 能就地修（监理不在岗）⇒ 给「马上修复」按钮；
       · 不能就地修（程序文件对不上出厂登记）⇒ 给一块「怎么解决」，写清去哪儿做。
     ★ **绝不留"点了没反应"的按钮** —— 那正是创始人最恨的形状。
     """
@@ -653,7 +653,7 @@ def c_posture_off_has_no_fake_button():
     ★ 为什么（本会话发现的真缺陷）：旧版 OFF 给 `can_fix=True, fix="enable"`
       ⇒ 页面出现「开启值守」按钮，点下去 `guard_fix` 却回"请在终端执行 …"
       ⇒ **点了没反应的按钮**。开启要装开机自启任务（要管理员权限），
-      值守台点一下做不到 ⇒ 那就别给按钮，如实说去哪儿做。
+      Antinel 监理点一下做不到 ⇒ 那就别给按钮，如实说去哪儿做。
     """
     import host_shield as HS
     hub = _tmpdir()
@@ -704,7 +704,9 @@ def c_page_grouped_buckets():
     #   乘号在中文里不是"共"，且与后面的分母连读像算式。判据**跟着产品文案
     #   同步锚点**（与 0490 N-U05 同型）：断言的仍是"归并行给出了计数"，
     #   不是放宽 —— 计数不在了照样红。
-    return ("按类型归并" in PC.body(h) and "2 条（这一档共" in h
+    # ★★ S48：中文断言**必须显式选层**（`body()` 剥 style/注释、留词条浮层）——
+    #   裸 `in h` 会被 <style> 里的说明文字误红（本套 0.50.4 实测被 S48 抓）。
+    return ("按类型归并" in PC.body(h) and "2 条（这一档共" in PC.body(h)
             and "看这 2 条" in PC.body(h))
 
 
@@ -726,7 +728,10 @@ def n_page_grouped_buckets():
                        posture={"state": "guarding", "label": "值守中", "why": "",
                                 "can_fix": False, "fix": None, "fix_hint": ""},
                        items=items)
-    return h.count('class="item ') == 2 and "2 条（这一档共" not in h
+    # ★★ S48：中文断言必须显式选层（负控与正判据同口径 —— 一边选层一边不选，
+    #   等于给负控装了个不同的量具）。
+    return (h.count('class="item ') == 2
+            and "2 条（这一档共" not in PC.body(h))
 
 
 def c_page_action_grouped_not_hidden():
@@ -747,15 +752,18 @@ def c_page_action_grouped_not_hidden():
         it = G.item("L2", "unread", i)
         it.alert.kind = "host_shield_spawn_failed"
         it.alert.title = "失守：看门狗没能启动"
-        it.alert.detail = "哨兵进程不在岗（第 %d 次）" % i
+        it.alert.detail = "监理进程不在岗（第 %d 次）" % i
         it.alert.topic = ""
         items.append(it)
     h = SV.render_page(view="inbox", filt="action", root=G.new_hub(), token="t",
                        posture={"state": "guarding", "label": "值守中", "why": "",
                                 "can_fix": False, "fix": None, "fix_hint": ""},
                        items=items)
-    return (h.count('class="item grp') == 1 and "3 条（这一档共" in h
-            and "哨兵进程不在岗" in PC.body(h)    # ① 原因
+    # ★★ S48：中文断言必须显式选层（`body()`）；纯 ASCII 结构标记
+    #   （class=/value=）不在中文注释里出现，可留裸判（选层口径见
+    #   `ci/page_caliber.py`：触发条件是「左操作数可能含中文」）。
+    return (h.count('class="item grp') == 1 and "3 条（这一档共" in PC.body(h)
+            and "监理进程不在岗" in PC.body(h)    # ① 原因
             and 'value="done_all"' in h           # ② 批量动作
             and "看这 3 条" in PC.body(h))        # ③ 钻取
 
@@ -778,7 +786,9 @@ def n_page_action_grouped_not_hidden():
                        posture={"state": "guarding", "label": "值守中", "why": "",
                                 "can_fix": False, "fix": None, "fix_hint": ""},
                        items=items)
-    return h.count('class="item ') == 3 and "3 条（这一档共" not in h
+    # ★★ S48：中文断言必须显式选层（负控与正判据同口径 —— 一边选层一边不选，
+    #   等于给负控装了个不同的量具）。
+    return h.count('class="item ') == 3 and "3 条（这一档共" not in PC.body(h)
 
 
 def c_server_done_all_marks_group():
@@ -955,7 +965,7 @@ def _no_side_effect_revive():
     ★ 为什么（本轮实测的真缺陷）：`op=fix` 的服务端实现会走
       `guard_fix → ensure_alive → spawn_sentinel`，而 `ensure_alive` 读的
       `_shield_audit_dir(inbox_server 所在目录)` 是**真包**的链（不是沙箱 hub）
-      ⇒ 判据每跑一次就**真的拉起一个哨兵进程**。实测：一次连跑就冒出
+      ⇒ 判据每跑一次就**真的拉起一个监理进程**。实测：一次连跑就冒出
       pid 68212/70916/74796/69264/67300/49396 六个。
       （它此前没暴露，只是因为自检不过 ⇒ `spawn_sentinel` 拒绝拉起。）
       ⇒ 只把**副作用**打桩掉；**接线本身照测**（判据要验的是"入口有没有落点"，
@@ -1022,10 +1032,10 @@ def n_server_fix_endpoint():
 
 
 def c_fix_endpoint_has_no_real_side_effect():
-    """★★ **判据不许有真实副作用**：跑 `op=fix` 那条判据时，一次都不许真的拉起哨兵。
+    """★★ **判据不许有真实副作用**：跑 `op=fix` 那条判据时，一次都不许真的拉起监理。
 
     ★ 为什么（本轮实测的真缺陷，创始人报障「右下又在冒泡」）：
-      判据每跑一次就真的起一个哨兵进程（实测一次连跑冒出 6 个 pid）。而每个哨兵
+      判据每跑一次就真的起一个监理进程（实测一次连跑冒出 6 个 pid）。而每个监理
       起来/被杀都会写 `host_shield_revived` —— 它在 `_ALERT_KINDS` 弹窗名单里
       ⇒ **判据制造了它本该只观察的现象**，创始人看到右下角一直冒泡。
       这比"测试脏"更严重：它让"绿"这个信号本身失真。
@@ -1116,7 +1126,7 @@ def _load_hook(name):
 
 
 def _paramedic_probe(recs):
-    """跑一次 `_shield_paramedic()`，返回它**有没有去拉哨兵**（list of cause）。"""
+    """跑一次 `_shield_paramedic()`，返回它**有没有去拉监理**（list of cause）。"""
     import host_shield as HS
     PT = _load_hook("post_tool_use")
     os.environ["ANTINEL_HUB_DIR"] = _tmpdir()
@@ -1140,7 +1150,7 @@ def c_paramedic_uses_chain_authority():
 
     ★ 为什么（真缺陷，本机实测 2026-10-06）——**这就是界面「永远失守」的根因**：
       旧版 `_shield_paramedic` 门控读 `state["enabled"]`。本机实测：链说"布防中"
-      （armed=True）、state 写着 False ⇒ 保活**永不触发** ⇒ 哨兵死了 2 小时没人拉
+      （armed=True）、state 写着 False ⇒ 保活**永不触发** ⇒ 监理死了 2 小时没人拉
       （期间链上 **1777 条**记录、**564 次** post_tool_use，一次都没把它拉起来）。
       **挡住保活的，恰恰是保活本身要修的那个不一致** —— 本仓「同一事实两处副本」
       第 5 次复发（前 4 次见 `cross-card-object-check` 技能）。
@@ -1428,8 +1438,8 @@ def c_consequences_has_consumer():
     ★ 为什么：`guard_posture` 产出 `consequences` 却**零消费点** —— 正是本仓点名的
       「登记了却不会被查」的假守卫。创始人要的正是"说出损失"。
     """
-    down = {"state": "down", "label": "失守", "why": "哨兵不在岗",
-            "can_fix": True, "fix": "revive", "fix_hint": "马上修复（重新拉起哨兵）",
+    down = {"state": "down", "label": "失守", "why": "监理不在岗",
+            "can_fix": True, "fix": "revive", "fix_hint": "马上修复（重新拉起监理）",
             "consequences": [{"kind": "zone_unlocked",
                               "text": "有 1 个安全区，此刻没人给它们上锁：D:\\secret"}]}
     h = SV.render_page(view="inbox", root=G.new_hub(), token="t", posture=down,
@@ -1441,7 +1451,7 @@ def c_consequences_has_consumer():
 def n_consequences_has_consumer():
     """负控：**没有后果**（中断）⇒ 页面上不许出现"失守的损失"那一块（否则是常驻噪音）。"""
     intr = {"state": "interrupted", "label": "中断", "why": "此刻没有监管对象",
-            "can_fix": True, "fix": "revive", "fix_hint": "马上修复（重新拉起哨兵）",
+            "can_fix": True, "fix": "revive", "fix_hint": "马上修复（重新拉起监理）",
             "consequences": []}
     h = SV.render_page(view="inbox", root=G.new_hub(), token="t", posture=intr,
                        items=[G.item("L2", "unread")])
@@ -1485,7 +1495,7 @@ def c_ensure_alive_reads_its_own_chain():
     ★ 为什么（本轮实测的真缺陷，创始人报障「右下又在冒泡」）：
       `ensure_alive` 里写的是 `heartbeat_age(audit_dir)`，而 `heartbeat_age` 的入参是
       **包根**。传审计目录 ⇒ `_shield_audit_dir(<audit>)` 在 `<audit>/.psl` 找不到东西
-      ⇒ **回退到中枢 rollup** ⇒ 读到几小时前的老心跳 ⇒ 刚起来的哨兵立刻被判
+      ⇒ **回退到中枢 rollup** ⇒ 读到几小时前的老心跳 ⇒ 刚起来的监理立刻被判
       "僵死（574 分钟前）" ⇒ 杀掉重拉 ⇒ 每次重拉都发 `host_shield_revived`
       （在 `_ALERT_KINDS` 弹窗名单里）⇒ **右下角一直冒泡**。
       本机实测（同一时刻）：`heartbeat_age(pkg_root)` = 87 秒（真）；
@@ -1539,12 +1549,12 @@ def _heartbeat_probe(pkg_hb_hours, hub_hb_hours):
 
 
 def c_status_heartbeat_reads_sentinel_chain():
-    """★★ `host-shield status` 报的心跳，必须来自**哨兵真正写入**的那条链。
+    """★★ `host-shield status` 报的心跳，必须来自**监理真正写入**的那条链。
 
     ★ 为什么（真缺陷，本机实测 2026-10-06）：
       `status` 调的是 `heartbeat_age()`（**无参**）⇒ `_shield_audit_dir(None)`
-      ⇒ **中枢 rollup**（实测停 09-29）；而哨兵（包根带 `.psl`）写的是**包审计**
-      （实测 22:05 还在写）⇒ 把活哨兵报成「最后心跳 693 分钟前」。
+      ⇒ **中枢 rollup**（实测停 09-29）；而监理（包根带 `.psl`）写的是**包审计**
+      （实测 22:05 还在写）⇒ 把活监理报成「最后心跳 693 分钟前」。
       这与 0.35.3 修过的那条是**同一类错**（包根/审计目录搞混 ⇒ 读老心跳），
       只是换了个调用点 —— 所以必须单独守。
 
@@ -1789,10 +1799,10 @@ def _hookreg_scan_probe(change_after_register):
 
 
 def c_hook_reg_hash_no_false_alarm():
-    """★★ 登记哈希一致 ⇒ 哨兵**不许**报 `hook_registration_changed`。
+    """★★ 登记哈希一致 ⇒ 监理**不许**报 `hook_registration_changed`。
 
     ★ 真缺陷（**本机实测 2026-10-06**）：`antinel host-shield enable` 存的是
-      **裸 hexdigest**，而哨兵比对用 `_file_sha256()`（返回 **`sha256:<hex>`**）
+      **裸 hexdigest**，而监理比对用 `_file_sha256()`（返回 **`sha256:<hex>`**）
       ⇒ 两者**永不相等** ⇒ **永久假失守**：每 5 分钟一条 breach ＋ 每 30 分钟
       一次弹窗，而文件其实**一字未动**（实测 mtime 停在 10-03）。
       这正是创始人报障「不停地有弹窗」的同类根因。
@@ -1816,7 +1826,7 @@ def c_notify_only_when_owner_needed():
 
     不弹：自愈（`host_shield_revived`）、常规执法（非 critical 的 `zone_locked`）、
           **明说的变更**（有人跑过命令 ⇒ `invoked_by` 有值，当事人已知情）。
-    必弹：真失守（`host_shield_breach`）、无声变更（哨兵自己回写状态）。
+    必弹：真失守（`host_shield_breach`）、无声变更（监理自己回写状态）。
 
     ★ 判据：**能自己解决的不敲门；只有你才能解决的才敲门。**
     """
@@ -2317,7 +2327,7 @@ def n_tray_refresh_is_not_a_noop():
     import inbox_model as M
     hub = _tmpdir()
     day, items = _ledger_test_items()
-    posture = {"state": "guarding", "why": "哨兵在岗"}   # ★ 0.48.5 A2：显式注入
+    posture = {"state": "guarding", "why": "监理在岗"}   # ★ 0.48.5 A2：显式注入
     TR.write_state("L0", 0, "旧", root=hub)
     TR.refresh_state(root=hub, items=items, posture=posture)
     d = TR.read_state(root=hub)
@@ -2554,10 +2564,10 @@ def c_posture_reads_sentinel_heartbeat():
     """★ `guard_posture()` 必须用 `sentinel_heartbeat_age()` 唯一口径。
 
     ★ 本机实测：同一时刻
-        `sentinel_heartbeat_age()` = **190 秒**（哨兵好好地在写心跳）
+        `sentinel_heartbeat_age()` = **190 秒**（监理好好地在写心跳）
         `heartbeat_age(None)`     = **27202 秒**（读到 7 天前的老链）
       页面因此长期显示「心跳断档 452 分钟 · 疑似挂起/僵死」并把灯打红，
-      还给出「马上修复」按钮 —— 而哨兵一直是好的。
+      还给出「马上修复」按钮 —— 而监理一直是好的。
       这与本仓已修过的 `ensure_alive` 是**同一类错**（包根 vs 审计目录搞混），
       只是漏了 `guard_posture` 这个调用点。
     """
@@ -2667,7 +2677,7 @@ def n_notify_gate_is_not_permanently_muted():
 def c_probe_failure_also_passes_gate():
     """★ `enforce_probe` 的失败通知**也必须过降噪闸**（它原来完全不过）。
 
-    ★ 实测依据：哨兵每轮跑探针，而本轮改了 `host_shield.py`、manifest 未刷新那几分钟里
+    ★ 实测依据：监理每轮跑探针，而本轮改了 `host_shield.py`、manifest 未刷新那几分钟里
       探针每轮都失败 ⇒ **每轮弹一次**。
       与已治的「常用规则反复拦」是同一个病，只是换了个调用点。
     """
@@ -2807,7 +2817,7 @@ CHECKS_0353 = [
     ("P12 独立窗口带尺寸", c_window_size_set, n_window_size_set),
     ("P12 全部已读已取消", c_server_read_all_cancelled, n_server_read_all_cancelled),
     ("P12 修复入口有落点", c_server_fix_endpoint, n_server_fix_endpoint),
-    ("P12 判据不起真哨兵", c_fix_endpoint_has_no_real_side_effect,
+    ("P12 判据不起真监理", c_fix_endpoint_has_no_real_side_effect,
      n_fix_endpoint_has_no_real_side_effect),
     ("P12 修不了就如实说", c_guard_fix_honest, n_guard_fix_honest),
     ("P12 顶部与日报同口径", c_report_window_numbers_match_topbar,
@@ -2817,7 +2827,7 @@ CHECKS_0353 = [
      n_paramedic_uses_chain_authority),
     ("P12 保活读自己那条链的心跳", c_ensure_alive_reads_its_own_chain,
      n_ensure_alive_reads_its_own_chain),
-    ("P12 status心跳读哨兵那条链", c_status_heartbeat_reads_sentinel_chain,
+    ("P12 status心跳读监理那条链", c_status_heartbeat_reads_sentinel_chain,
      n_status_heartbeat_reads_sentinel_chain),
     # ---- 七、失守重定义（0.35.3，创始人拍板：说不出损失的失守＝假失守）----
     ("P12 缺岗无损失只叫中断", c_outage_without_consequence_is_interrupted,
@@ -2872,7 +2882,7 @@ CHECKS_0353 = [
     ("P14 顶部数字给两个分母", c_header_numbers_state_both_denominators,
      n_header_numbers_dont_hide_records),
     # ---- 十六、心跳唯一口径 ----
-    ("P15 态势读哨兵那条心跳", c_posture_reads_sentinel_heartbeat,
+    ("P15 态势读监理那条心跳", c_posture_reads_sentinel_heartbeat,
      n_posture_heartbeat_reading_is_not_constant),
     # ---- 十七、气泡降噪不得因 cwd 分裂 ----
     ("P15 降噪状态不分叉", c_notify_gate_is_cwd_independent,

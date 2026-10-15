@@ -558,7 +558,14 @@ def _inside(work, rect):
 #:   而日志还打着"已落到 520x640"（量的是别的窗口）。
 #:   ⇒ 认**稳定后缀**，前半段是什么都行；仍然是精确匹配整串，
 #:     不是子串搜索（子串会误伤标题里恰含这两个字的其它窗口）。
-CONSOLE_WINDOW_TITLE_SUFFIX = " · 值守台"
+# ★★ 0.50.4 命名变更（D2，创始人 2026-10-15 签发《值守台退休与窗口命名裁定》）：
+#   用户可见面的「值守台」全部退休，标题后缀值改为「 · Antinel 监理」
+#   （与白皮书产品名逐字一致，含一个半角空格）。标题形态变为
+#   `<页面名> · Antinel 监理#<run_id>`。**本行是值的唯一定义处** ——
+#   MARK／_TAIL_RE／console_title_suffix／is_console_title 全从它派生，
+#   零机制改动（0360 按常量名断言，名不变）。上面 0.36.x 的注释块是当时的
+#   机制记录，其中的「 · 值守台」字样按「记录原文不改写」保留。
+CONSOLE_WINDOW_TITLE_SUFFIX = " · Antinel 监理"
 #: 完整标题（仅用于文档/展示；**代码请用 `is_console_title`**）。
 CONSOLE_WINDOW_TITLE = "收件箱" + CONSOLE_WINDOW_TITLE_SUFFIX
 

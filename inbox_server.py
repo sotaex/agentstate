@@ -523,7 +523,7 @@ def posture_now():
         return hs.guard_posture(_pkg_root())
     except Exception as e:                          # noqa: BLE001
         return {"state": "unknown", "label": "查不到",
-                "why": "读不到哨兵状态：%r" % (e,), "evidence": {},
+                "why": "读不到监理状态：%r" % (e,), "evidence": {},
                 "can_fix": False, "fix": None, "fix_hint": ""}
 
 
@@ -542,14 +542,20 @@ def _head(title, token):
     try:
         import inbox_window as WIN
         rid = WIN.build_run_id(token)
+        # ★ 0.50.4（B7）：标题后缀**收编为 inbox_window 常量派生** —— 原先这里
+        #   自造 `"%s · 值守台%s"`，与 inbox_window 是**两处实现**（先于改名
+        #   存在的 T-09 隐患；改名会让两处各改各的）。现在走既有派生 API
+        #   `console_title_suffix()`（唯一真源）；import 失败 ⇒ tail 退空
+        #   （不假造标题，也不留第二个会腐烂的兜底串）。
+        tail = WIN.console_title_suffix(rid)
     except Exception:                                       # noqa: BLE001
         rid = ""
-    mark = ("#" + rid) if rid else ""
+        tail = ""
     return ("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
             "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-            "<title>%s · 值守台%s</title><link rel=\"icon\" href=\"/assets/favicon.ico\">"
+            "<title>%s%s</title><link rel=\"icon\" href=\"/assets/favicon.ico\">"
             "<style>%s</style></head><body>"
-            % (_esc(title), mark, CSS))
+            % (_esc(title), tail, CSS))
 
 
 def _tabs(view, token):
@@ -1095,7 +1101,7 @@ btn.addEventListener("click", function(){
       if (j && j.ok){ say("已收缩成漂浮哨标 —— 点它再展开"); }
       else { say("收缩失败：" + ((j && j.why) || "服务端没说原因")); }
     })
-    .catch(function(){ say("请求没发到服务（服务没响应）：值守台没动，哨标也没起"); });
+    .catch(function(){ say("请求没发到服务（服务没响应）：Antinel 监理没动，哨标也没起"); });
 });
 })();
 </script>
@@ -1131,7 +1137,7 @@ def _winfit_apply(dr, db, token):
         hwnds = WIN.find_console_windows(run_id=rid)
         if not hwnds:
             return {"ok": False,
-                    "why": "没找到带本次标识（#%s）的值守台窗口 —— 不出声假装成功" % rid}
+                    "why": "没找到带本次标识（#%s）的 Antinel 监理窗口 —— 不出声假装成功" % rid}
         cur = [WIN.window_rect_of(h) for h in hwnds]
         if any(r is None for r in cur):
             return {"ok": False, "why": "读不到当前窗口矩形"}
@@ -1381,7 +1387,7 @@ def _rem_html(it, token):
 #: 三类动作 → 按钮文案。★ B 类三选一必须**都在**页面上（创始人拍板）。
 _PICK = {
     "fix": ("试一下，看能不能修好", "go"),
-    "retry": ("重新拉起哨兵", "go"),
+    "retry": ("重新拉起监理", "go"),
     "rearm": ("按正规入口重新布防", "go"),
     "drop": ("承认打不赢，移出监管", "drop"),
     # ★ 0.37.2：「就这样，我不处理」⇒「我不处理，我担着」——
@@ -1724,7 +1730,7 @@ def _view_report(rep, token, items=None):
           "<div class=\"row\"><span class=\"k\">最近 %d 小时%s</span><span>%s</span></div>"
           "<div class=\"row\"><span class=\"k\">%s 当日合计</span><span>%s</span></div>"
           "</div></div>"
-          % (hrs, GL.chip("sentinel", "哨兵被拉起过"), _revived_link,
+          % (hrs, GL.chip("sentinel", "监理被拉起过"), _revived_link,
              _day, _today_levels))
 
     rules = ""
@@ -2038,7 +2044,7 @@ def _make_handler(token, root):
                      "<style>body{font:14px/1.7 system-ui,sans-serif;padding:40px;color:#333}"
                      "a{color:#06c}</style>"
                      "<h3>%s</h3>"
-                     "<p>如果你是从值守台页面点过来的，说明这个按钮的请求没带上访问口令 ——"
+                     "<p>如果你是从 Antinel 监理页面点过来的，说明这个按钮的请求没带上访问口令 ——"
                      "那是程序缺陷，请把它报出来。</p>"
                      # ★ 0.48.6（B3）：口令改由一枚 HttpOnly cookie 在站内携带
                      #   （URL 里不再有），于是"浏览器禁用了 Cookie"也会走到这里

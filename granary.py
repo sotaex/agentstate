@@ -289,7 +289,7 @@ def state(root=None):
     """
     if not has_ledger(root):
         return {"state": "off", "balance": 0, "threshold": LOW_THRESHOLD,
-                "days_left": None, "why": "还没记过粮账（哨兵开始站岗后才有消耗）"}
+                "days_left": None, "why": "还没记过粮账（监理开始站岗后才有消耗）"}
     b = balance(root)
     if b < LOW_THRESHOLD:
         return {"state": "low", "balance": b, "threshold": LOW_THRESHOLD,

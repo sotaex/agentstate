@@ -511,7 +511,7 @@ def render(snap, findings, days_with, sentinel_on, sample_failed, ai_only=True,
     #   为什么冷启动期所有「最长」都接近同一个数 —— 那是账本年龄，不是连接年龄。
     _cov = ("实际覆盖 %s" % _fmt_dur(cov_seconds)) if cov_seconds \
         else ("有数据 %d 天" % days_with if days_with else "无历史采样")
-    L.append("   用户空闲：%s ｜ 哨兵：%s ｜ 采样窗口：最近 %d 天（%s）"
+    L.append("   用户空闲：%s ｜ 监理：%s ｜ 采样窗口：最近 %d 天（%s）"
              % (_fmt_dur(idle) if idle is not None else "未知",
                 "在岗（约 30 秒/次）" if sentinel_on else "未运行 ⇒ 无历史采样",
                 LEDGER_DAYS, _cov))

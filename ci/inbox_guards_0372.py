@@ -6,7 +6,7 @@
 
 ★★ 这一份判据是创始人 2026-10-09 那三句「一定要机制上解决」的直接产物：
 
-    「哨兵状态是 LOGO 五态加上开发态一共六态，这个要从机制上钉死，
+    「监理状态是 LOGO 五态加上开发态一共六态，这个要从机制上钉死，
       不要再杜撰其他什么态，一定要机制上解决，机制上解决，机制上解决。
       其他类似地方，敲定的内容，就不要再发生漂移，也是要从机制上解决，
       机制上解决，机制上解决。」
@@ -18,7 +18,7 @@
   ⇒ 本文件把三件事从"注释里的约定"变成"可执行、会报红、有负控的机制"：
     ① 六态是**闭集**：多一个少一个都报红（S01/S02）；
     ② 状态词是**封闭词表**：杜撰的词进不了用户面（S03/S04）；
-    ③ 敲定的分工是**单源**：哨兵唯一角色、护盾只能作为它的工具出现一处、
+    ③ 敲定的分工是**单源**：监理唯一角色、护盾只能作为它的工具出现一处、
        顶部灯的说明只能由 `light_explain()` 拼（S05/S06/S07）；
     ④ 六态**名**与**次序**也单源：名只能在 `inbox_model.py` 定义一份、
        其余模块一律派生（S08）；次序量的是「离终结有多近」（S09）。
@@ -75,8 +75,8 @@ ITEM_STATES = ("unread", "read", "done", "ignored")
 #:   每一项都写明它为什么被禁，避免下一轮有人"觉得这词挺好"又加回来。
 BANNED_IN_CHROME = {
     "存疑": "8 态灯时代 AI 自造的派生态；创始人 2026-10-07「计划外状态，不允许」",
-    "门闸": "记录层的历史写法（链记录原文不改写）；人类面一律用「哨兵」",
-    "护盾": "它是哨兵手里的**工具**，不是并列角色；只许在 `sentinel` 词条里出现",
+    "门闸": "记录层的历史写法（链记录原文不改写）；人类面一律用「监理」",
+    "护盾": "它是监理手里的**工具**，不是并列角色；只许在 `sentinel` 词条里出现",
     "查不到": "8 态灯时代的派生状态词；盲区现在的说法是「注意」",
     "中断·无损失": "把两件事挤进一个标签；姿态词现在是「中断」",
     "需你处理": "8 态灯时代的派生状态词；现在是「要处理」（分档词，不是灯态）",
@@ -136,7 +136,7 @@ def _posture_cases():
 
     ★★ 为什么必须"真跑"而不是自己编八个 dict（这是本判据的关键）：
       被禁的词恰好藏在 `guard_posture()` 的**返回文案**里，而那些文案只有在
-      对应分支被走到时才生成（例：「防护开着，但哨兵进程不在岗」只在缺岗时）。
+      对应分支被走到时才生成（例：「防护开着，但监理进程不在岗」只在缺岗时）。
       自己编 dict ⇒ 判据永远看不到真实分支的文案 ⇒ 又一次"对不存在的缺陷做检查"。
     ★ 只替换**被探值**（在不在岗/心跳/自检/后果），不替换分支逻辑本身。
     ★ 全部在内存里做，结束无条件还原；不碰盘。
@@ -436,15 +436,15 @@ def n_s04():
 
 
 # ══════════════════════════════════ S05 术语单源 ════════════════════════════
-@check("S05 「哨兵」是唯一的守护角色；「护盾」只作为它的工具出现一处")
+@check("S05 「监理」是唯一的守护角色；「护盾」只作为它的工具出现一处")
 def s05():
     import glossary as GL
     if "shield" in GL.TERMS:
         return _raise("术语表里又有并列的 `shield` 词条了 —— 创始人 2026-10-09："
-                      "「不要制造并列的护盾加哨兵两个概念，哨兵一个概念足矣」")
+                      "「不要制造并列的护盾加监理两个概念，监理一个概念足矣」")
     sent = GL.TERMS.get("sentinel")
     if not sent:
-        return _raise("没有 `sentinel` 词条 —— 「哨兵」这个唯一角色没有定义")
+        return _raise("没有 `sentinel` 词条 —— 「监理」这个唯一角色没有定义")
     body = " ".join(str(sent.get(k, "")) for k in ("one", "inc", "exc", "unit"))
     if "护盾" not in body:
         return _raise("`sentinel` 词条里没交代「护盾」是什么 ⇒ 用户读到「护盾」"
@@ -467,7 +467,7 @@ def s05():
                 hits.append("%s 词条含「%s」" % (k, w))
     if hits:
         return _raise("；".join(hits))
-    return "哨兵唯一角色；护盾仅作为其工具在 `sentinel` 词条里出现一次"
+    return "监理唯一角色；护盾仅作为其工具在 `sentinel` 词条里出现一次"
 
 
 @check("N-S05 负控：把并列的 `shield` 词条加回去 ⇒ S05 必须抓到")
@@ -501,7 +501,7 @@ def s06():
     import inbox_server as SV
     orig = M.light_explain
     probe = "判据探针：这句话只可能来自 light_explain（S06）。"
-    posture = {"state": "guarding", "label": "值守中", "why": "哨兵在岗",
+    posture = {"state": "guarding", "label": "值守中", "why": "监理在岗",
                "can_fix": False, "fix": None, "fix_hint": "", "consequences": []}
     try:
         M.light_explain = lambda *a, **k: {
@@ -526,7 +526,7 @@ def n_s06():
     import inbox_server as SV
     orig = M.light_explain
     probe = "判据探针：这句话只可能来自 light_explain（S06）。"
-    posture = {"state": "guarding", "label": "值守中", "why": "哨兵在岗",
+    posture = {"state": "guarding", "label": "值守中", "why": "监理在岗",
                "can_fix": False, "fix": None, "fix_hint": "", "consequences": []}
     try:
         M.light_explain = lambda *a, **k: {
@@ -792,7 +792,7 @@ def n_s09():
 def _registration_ok(fields, audit_dir):
     """启动登记判据（S19 与 N-S19 共用同一段判断，避免正负两套口径）。"""
     if fields.get("sentinel_audit_dir") != audit_dir:
-        return ("登记缺 sentinel_audit_dir=%r（拿到 %r）—— 哨兵没自注册心跳链，"
+        return ("登记缺 sentinel_audit_dir=%r（拿到 %r）—— 监理没自注册心跳链，"
                 "读者只能按包根猜 ⇒ A1 复发" % (audit_dir, fields.get("sentinel_audit_dir")))
     need = ("sentinel_pid", "sentinel_started_at", "sentinel_audit_dir", "enabled")
     miss = [k for k in need if k not in fields]
@@ -803,7 +803,7 @@ def _registration_ok(fields, audit_dir):
     return True
 
 
-@check("S19 哨兵自注册心跳链 + 读不到链路落盲区（A1：读不到 ≠ 失守）")
+@check("S19 监理自注册心跳链 + 读不到链路落盲区（A1：读不到 ≠ 失守）")
 def s19():
     import inspect
     import json as _json
@@ -853,7 +853,7 @@ def s19():
         if src != "registered":
             return _raise("state 里有注册目录，来源却标成 %r —— 注册值没被优先" % (src,))
         if age is None or age > 120:
-            return _raise("注册目录里躺着刚写的心跳，age=%r —— 哨兵没读自己注册的链"
+            return _raise("注册目录里躺着刚写的心跳，age=%r —— 监理没读自己注册的链"
                           % (age,))
         if not ts:
             return _raise("last_ts 是空的 —— 读到了记录却取不到时间戳")
@@ -992,7 +992,7 @@ def _s20_run(cli_mod):
 
 @check("S20 ★ C6：daemon 已在跑这条真身分支真跑过 —— 说人话、返回 0、不抛")
 def s20():
-    """★★ C6（2026-10-13，重启值守台时当场撞到）：`inbox_cli.cmd_daemon` 的
+    """★★ C6（2026-10-13，重启Antinel 监理时当场撞到）：`inbox_cli.cmd_daemon` 的
     「已有守护进程在跑 ⇒ 不重复启动」分支**从来没被真跑过一次** ——
     它用了 `os.getpid()`，而 `inbox_cli.py` **从未 `import os`** ⇒
     用户第二次起 daemon（日常操作：想知道"起了没有"）得到的不是那句人话，

@@ -121,13 +121,13 @@ _BY_KIND_OVERRIDES = {
         "负控衰减：注入 OSError 欲使 subprocess.run 抛错，但 0.35.3 起 task_installed() "
         "文件系统事实优先（os.path.isfile(shim) 早退 return True）⇒ 注入永远到不了"
         "被测分支；本机 shim 存在 ⇒ 产品行为反而更安全。"),
-    "F-13 paramedic 复活死亡哨兵并留痕（死因 RC5 回归）": ("environment",
+    "F-13 paramedic 复活死亡监理并留痕（死因 RC5 回归）": ("environment",
         "pid=999999999 是负控自造的假 pid，spawn-failed 属 spawn 环境问题；该条在"
         "10-08 重跑中未复现（失败集合成员漂移的实例）。"),
     "F-15 门闸高危事件实时推送＋同类 30 分钟节流（0.28.2 报警 v1）": ("instrument",
         "桩吞效应：断言先 hs._notify=lambda: None 打桩，再期望 notify_sent 被第一次 "
         "record 置位 —— 桩替换掉了被测效应本身 ⇒ t1 恒 0。"),
-    "F-17 心跳判死：无心跳/心跳陈旧的哨兵会被强制重启（B2）": ("process-stale",
+    "F-17 心跳判死：无心跳/心跳陈旧的监理会被强制重启（B2）": ("process-stale",
         "沙箱内 self-check-failed: host_shield.py 与 manifest 不符 ⇒ 与 "
         "antinel_verify 那条同根（清单与实物未同步），非心跳逻辑缺陷。"),
     # 0.26 SafeZone registered + tamper-locked

@@ -383,7 +383,7 @@ def m5_red_attribution_finds_touched_modules():
         "无法被单独验证")
     touched = {"inbox_window", "inbox_model"}
     red = ("RED  P15 后缀匹配对每个页面都成立\n"
-           "       非值守台窗口 '请给我一个 · 值守台#486acd' 被误认成值守台"
+           "       非Antinel 监理窗口 '请给我一个 · Antinel 监理#486acd' 被误认成Antinel 监理"
            "（查 inbox_window）")
     named = G.red_names_touched_modules(red, touched)
     assert "inbox_window" in named, (

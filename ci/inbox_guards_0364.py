@@ -8,7 +8,7 @@
 
   ① 「落位失败就关窗，不是彻底的解决办法」   → 已在 0.36.4 前半段完成
      （独立 profile，窗口出生即正确；关窗只保留"收旧窗"一个正当用途）
-  ② 「研发中只是状态之一，如哨兵发现状况了，该出现的状态，还是要出现」
+  ② 「研发中只是状态之一，如监理发现状况了，该出现的状态，还是要出现」
      → 组 B：**dev 不得吞掉真实状况**
   ③ 「要定义清楚研发态」「过很短的时间，还是要变成值守中」
      → 组 C：**dev 自动收敛**（靠事实追平，不靠时间自己好）
@@ -61,7 +61,7 @@ def _restore_all():
     """★ 0.43.1：还原加**重试 ＋ 退路**。
 
     实测（2026-10-10）：本函数曾因 `PermissionError(13, '另一个程序正在使用此文件')`
-    崩掉 —— 根因是 `os.replace` 需要**删除权限**，而哨兵/值守台此刻正读着
+    崩掉 —— 根因是 `os.replace` 需要**删除权限**，而监理/Antinel 监理此刻正读着
     `psl/manifest.json`（并发读方挡住 rename）⇒ **变异留在盘上**：
     `psl/manifest.json` 被留在"已追平"态 ⇒ 研发态的版本落差被抹平 ⇒ 界面假失守。
     ⇒ 两条：① rename 重试 5 次；② 仍失败则退到 `shutil.copy2`（就地覆盖只需
@@ -245,7 +245,7 @@ def b3():
     ret_seg, asg_seg = _dev_branch_parts()
     assert '"consequences": []' not in ret_seg, (
         "dev 分支仍硬编码 consequences=[]（与'量过确实没有'长得一样，"
-        "却不是可复算的事实 ⇒ 会把哨兵发现的状况藏起来）")
+        "却不是可复算的事实 ⇒ 会把监理发现的状况藏起来）")
     assert '"consequences"' in ret_seg, "dev 分支的 return 里没有 consequences 字段"
     assert "_outage_consequences" in asg_seg, (
         "dev 分支没有走 _outage_consequences() ⇒ 后果是写死的，不是量的"
@@ -332,7 +332,7 @@ def b5():
         assert bad not in ret_seg, "dev 分支出现未经实现的 fix 动作 %r（假按钮）" % bad
     # dev 态下哨兵在岗 ⇒ 不该给"重新拉起"
     assert '"fix": "revive"' not in ret_seg, (
-        "dev 分支给了 revive 按钮，但进入本分支的前提是哨兵在岗正常放哨"
+        "dev 分支给了 revive 按钮，但进入本分支的前提是监理在岗正常放哨"
         "（点了等于杀掉健康进程）")
     assert '"can_fix": False' in ret_seg, "dev 分支应显式声明不可一键修复"
     return "dev 不给假动作"
@@ -504,7 +504,7 @@ def d3():
       本条判据原来只查「`_LAYOUT` 里有没有 `enforce_probe.py`」——
       查到了，**报绿**。而真实产物是：
         · `psl/manifest.json` 120 项里**没有** `tools/enforce_probe.py`
-        · 值守台自检因此长期报「在告警链路保护名单里，却没登记进 manifest」
+        · Antinel 监理自检因此长期报「在告警链路保护名单里，却没登记进 manifest」
         · 界面因此长期挂「**存疑**」
       ⇒ 根因：`_LAYOUT` 只被 `_verify_layout()` **校验**，从不被**复制**；
         真正复制 `tools/` 的是 `build()` 里一份**手写元组**，两份清单分叉。
@@ -550,7 +550,7 @@ def d3():
     assert "enforce_probe.py" in derived, (
         "★ 复制清单里没有 enforce_probe.py（当前 %r）\n"
         "  它虽然登记进 _LAYOUT，但**复制清单是手写的第二份** ⇒ 两份清单分叉 ⇒\n"
-        "  它校验通过、却根本不被复制 ⇒ 不进 manifest ⇒ 值守台自检对它永久失明。\n"
+        "  它校验通过、却根本不被复制 ⇒ 不进 manifest ⇒ Antinel 监理自检对它永久失明。\n"
         "  ★ 修法不是补一行：复制清单必须**由 _LAYOUT 生成**（0.36.5 已改）。"
         % sorted(derived))
     # 派生出来的清单必须**确实**从 _LAYOUT 取值（防"派生"被改成又一份手写）
@@ -648,7 +648,7 @@ def f1_notify_gated_on_console_visibility():
     """根因①：降噪闸只按「同类间隔」，**完全不看窗口**。
 
     ⇒ 于是出现这个组合：**同一件事用两种方式同时通知** ——
-      「值守台窗口开着、正显示这条急事」＋「系统又弹一个气泡」。
+      「Antinel 监理窗口开着、正显示这条急事」＋「系统又弹一个气泡」。
       用户被迫二选一：看窗 或 消泡。**这是设计缺口，不是偶发故障。**
 
     判据（两件，缺一不可）：
@@ -659,7 +659,7 @@ def f1_notify_gated_on_console_visibility():
     import host_shield as HS
     assert callable(getattr(HS, "console_is_visible", None)), (
         "host_shield 没有 console_is_visible() ⇒ 降噪闸仍只按时间间隔，"
-        "不知道值守台此刻开着 ⇒ 泡泡与窗口会重复通知同一件事")
+        "不知道Antinel 监理此刻开着 ⇒ 泡泡与窗口会重复通知同一件事")
     src = inspect.getsource(HS.console_is_visible)
     assert "find_console_windows" in src, (
         "console_is_visible() 没有复用 inbox_window.find_console_windows() ⇒ "
@@ -974,7 +974,7 @@ def f5_minimized_window_is_not_visible():
     而那个枚举的"可见"口径是 `IsWindowVisible` ⇒ **最小化的窗口也通过**。
 
     ⇒ 后果链（这才是它严重的地方）：
-      用户把值守台最小化（很常见：看过一眼就收起来）
+      用户把Antinel 监理最小化（很常见：看过一眼就收起来）
       → 降噪闸认为"用户正开着窗口" ⇒ **不弹泡泡**
       → 那条急事就这么被吞了，而用户什么都看不到。
     ★ 与本仓铁律「查不出来≠ 查出来是好的」最坏形态同型：
@@ -1098,7 +1098,7 @@ def n_minimize_counts_as_visible_is_caught():
         if lg is None:
             # 没有真窗口在场时，F5 第一段会跳过 ⇒ 负控**测不到**。
             # 明确说出来，而不是把"测不到"报成"抓不住"。
-            return ("★ 负控**测不到**：此刻屏幕上没有值守台窗口，"
+            return ("★ 负控**测不到**：此刻屏幕上没有Antinel 监理窗口，"
                     "F5 第一段（真窗口分支）被跳过 ⇒ "
                     "不能据此说 F5 是假守卫，也不能说它有效")
         return "负控有效：最小化不再被判成可见（F5 报红：%s）" % lg[:56]

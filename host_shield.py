@@ -36,6 +36,11 @@
   - 全链被删+state 被改时，新哨兵无本地记忆可依，回退 state 文件（镜像存在时可离线发现）。
   - 补锁失败（有进程对抗）只能 critical+连环弹，不能物理阻止。
 """
+
+# ★ 0.50.4：人类面统一改口「监理」（原「哨兵」退役；键名/记录类型一律不动）。
+#   受影响的是本文件全部对用户可见的串：态势 why/fix_hint、ensure_alive 的
+#   reason、启动横幅。注释／docstring／`sentinel_*` 字段名／`host_shield_*`
+#   记录类型（链上历史记录的原文口径）一律不跟改 —— 历史不改写。
 import hashlib
 import json
 import os
@@ -1182,7 +1187,7 @@ def _notify_throttled(kind, body, force=False, title="Antinel 门闸"):
         if console_is_visible():
             # 留痕：不是"没通知"，是"已用窗口通知过了"。进通知账，不进安全状态。
             mark_notify_shown(kind)
-            note_bubble_suppressed(kind, "值守台窗口可见，已用窗口通知")
+            note_bubble_suppressed(kind, "Antinel 监理窗口可见，已用窗口通知")
             return
         age = notify_sent_age(kind)
         if age is not None and age < _NOTIFY_MIN_INTERVAL:
@@ -1420,7 +1425,7 @@ def bubble_decision(kind, rec, force=False):
     if kind not in _ALERT_KINDS:
         return False, "类型不在告警集合"
     if rec.get("recovered") is True:
-        return False, "已自愈（recovered=true，无后果；值守台仍收）"
+        return False, "已自愈（recovered=true，无后果；Antinel 监理仍收）"
     if kind == "host_shield_revived":
         return False, "自愈（已自动重启，能自己解决的不敲门）"
     sev = str(rec.get("severity") or "").lower()
@@ -2425,7 +2430,7 @@ def spawn_sentinel(pkg_root, python_exe=None):
         _is_dev, _dev_why = is_dev_build()
         if not _is_dev:
             return False, 0, "self-check-failed: " + "；".join(problems)[:120]
-        print("[spawn] 研发态：自检不符属迭代产物，仍启动哨兵（%s）" % _dev_why,
+        print("[spawn] 研发态：自检不符属迭代产物，仍启动监理（%s）" % _dev_why,
               file=sys.stderr)
     py = python_exe or sys.executable
     script = os.path.join(_pkg_root(), "host_shield.py")
@@ -2872,8 +2877,8 @@ def _ensure_alive_locked(pkg_root, cause="manual"):
             _on_duty, _why = sentinel_on_duty(st)
             if _why == "pid-reused":
                 record(audit_dir, "host_shield_breach", decision="deny", severity="warning",
-                       reason="哨兵 pid=%s 的进程号已被复用（在岗名片记的启动时刻与"
-                              "进程实际创建时刻不符）——旧哨兵已死，判不在岗并重启" % old_pid)
+                       reason="监理 pid=%s 的进程号已被复用（在岗名片记的启动时刻与"
+                              "进程实际创建时刻不符）——旧监理已死，判不在岗并重启" % old_pid)
                 _alive = False
         if _alive:
             # B2：pid 活着 ≠ 在干活。心跳陈旧 = 挂起/僵死 → 杀掉重拉。
@@ -2914,7 +2919,7 @@ def _ensure_alive_locked(pkg_root, cause="manual"):
                 if started_age is None:
                     record(audit_dir, "host_shield_breach", decision="deny",
                            severity="warning",
-                           reason="哨兵 pid=%s 活着但心跳与启动时刻均不可读——"
+                           reason="监理 pid=%s 活着但心跳与启动时刻均不可读——"
                                   "无法判定在岗，保守不杀（宁可漏杀不可误杀）；"
                                   "请人工检查" % old_pid)
                     return "alive"
@@ -2932,7 +2937,7 @@ def _ensure_alive_locked(pkg_root, cause="manual"):
                        else "%.0f 分钟前" % (age / 60.0))
             if img and not img.lower().endswith(("python.exe", "pythonw.exe")):
                 record(audit_dir, "host_shield_breach", decision="deny", severity="critical",
-                       reason="哨兵无心跳（%s）且旧进程镜像异常（%s），"
+                       reason="监理无心跳（%s）且旧进程镜像异常（%s），"
                               "拒绝自动重启——须人工检查 pid=%s" % (age_txt, img, old_pid))
                 return "stale-revived"
             if old_pid:
@@ -2943,13 +2948,13 @@ def _ensure_alive_locked(pkg_root, cause="manual"):
             ok, pid, mode = spawn_sentinel(pkg_root)
             if ok:
                 record(audit_dir, "host_shield_revived", decision="allow", severity="critical",
-                       reason="哨兵无心跳（%s，疑似挂起/僵死），已强制重启"
+                       reason="监理无心跳（%s，疑似挂起/僵死），已强制重启"
                               "（旧 pid=%s，mode=%s）" % (age_txt, old_pid, mode),
                        pid=pid, cause=cause, spawn_mode=mode)
                 return "stale-revived"
             record(audit_dir, "host_shield_spawn_failed", decision="deny", severity="critical",
                    subkind="spawn_failed",
-                   reason="哨兵无心跳（%s）且重启失败（旧 pid=%s，cause=%s）——门闸无人值守"
+                   reason="监理无心跳（%s）且重启失败（旧 pid=%s，cause=%s）——门闸无人值守"
                           % (age_txt, old_pid, cause),
                    cause=cause)
             return "spawn-failed"
@@ -2961,12 +2966,12 @@ def _ensure_alive_locked(pkg_root, cause="manual"):
         ok, pid, mode = spawn_sentinel(pkg_root)
         if ok:
             record(audit_dir, "host_shield_revived", decision="allow", severity="warning",
-                   reason="哨兵不在（旧 pid=%s），由 %s 重新拉起（mode=%s）" % (old_pid, cause, mode),
+                   reason="监理不在（旧 pid=%s），由 %s 重新拉起（mode=%s）" % (old_pid, cause, mode),
                    pid=pid, cause=cause, spawn_mode=mode)
             return "revived"
         record(audit_dir, "host_shield_spawn_failed", decision="deny", severity="critical",
                subkind="spawn_failed",
-               reason="哨兵死亡（旧 pid=%s）且拉起失败（cause=%s，mode=%s）——门闸无人值守"
+               reason="监理死亡（旧 pid=%s）且拉起失败（cause=%s，mode=%s）——门闸无人值守"
                       % (old_pid, cause, mode), cause=cause)
         return "spawn-failed"
     except Exception:
@@ -3079,7 +3084,7 @@ def _outage_consequences(state, pkg_root=None):
         try:
             if float(exp) < now:
                 cons.append({"kind": "window_open", "text":
-                             "放行窗已到期却没关：%s（本该由哨兵关上，此刻门还开着）" % p})
+                             "放行窗已到期却没关：%s（本该由监理关上，此刻门还开着）" % p})
         except (TypeError, ValueError):
             cons.append({"kind": "window_open", "text":
                          "放行窗记录读不出到期时间：%s（读不出 ⇒ 按最坏算）" % p})
@@ -3119,7 +3124,7 @@ def _outage_consequences(state, pkg_root=None):
         cands, evid = _scan()
         if cands:
             cons.append({"kind": "landing_unwatched", "text":
-                         "有 %d 个受监管落点，此刻没人巡检（哨兵在时会一直盯着它们、"
+                         "有 %d 个受监管落点，此刻没人巡检（监理在时会一直盯着它们、"
                          "有写入就报）%s"
                          % (len(cands), ("；其中 %d 个相对上次记录有变动" % evid) if evid else "")})
     except Exception as e:                                   # noqa: BLE001
@@ -3165,7 +3170,7 @@ def guard_posture(pkg_root=None):
                     #   它手里的工具，不是另一个可以"关着"的东西）。措辞与
                     #   `inbox_model.base_state("off")` 逐字一致 —— 同一时刻两处
                     #   说同一件事，不能两种说法。
-                    "why": "哨兵默认没在值守。开启后才会拦、才会记账。",
+                    "why": "监理默认没在值守。开启后才会拦、才会记账。",
                     "evidence": {"armed": False}, "can_fix": False, "fix": None,
                     # ★ 0.35.3：**不给按钮**。开启要装一个开机自启任务（要管理员权限），
                     #   值守台点一下**做不到** —— 给个点了没用的按钮，就是"假按钮"
@@ -3249,13 +3254,13 @@ def guard_posture(pkg_root=None):
                     return {"state": POSTURE_DEV, "label": POSTURE_LABEL[POSTURE_DEV],
                             "why": "研发迭代中：这一版还没发出去，"
                                    "守门代码与上次登记的不一致是改出来的，不是被改的。"
-                                   "哨兵仍在正常放哨；它发现状况时该报的一样会报。",
+                                   "监理仍在正常放哨；它发现状况时该报的一样会报。",
                             "evidence": ev, "consequences": _cons,
                             "can_fix": False, "fix": None,
                             "fix_hint": ("正在开发中。这一版发出去之后会自动回到"
                                          "「值守中」——不需要你手动做什么。"
                                          if not _cons else
-                                         "正在开发中；下面这些是哨兵实际发现的，"
+                                         "正在开发中；下面这些是监理实际发现的，"
                                          "按它们各自的提示处理即可。"),
                             "dev_why": _dev_why}
                 # ★★ 0.35.3：**在守，但身份存疑 ⇒ 单独一档（黄），不点红灯。**
@@ -3264,7 +3269,7 @@ def guard_posture(pkg_root=None):
                 #   就是创始人说的"跟假失守没区别"—— 红灯很快就没人看了。
                 #   ★ 绝不为了消红灯而放松自检：自检照旧跑、照旧报，只是**换了档位**。
                 return {"state": POSTURE_WARN, "label": POSTURE_LABEL[POSTURE_WARN],
-                        "why": "哨兵在岗，但这份守门的代码我认不出是不是出厂那份"
+                        "why": "监理在岗，但这份守门的代码我认不出是不是出厂那份"
                                "——可能被改动过，也可能是这次没装好。",
                         "evidence": ev, "consequences": [], "can_fix": False,
                         "fix": None,
@@ -3288,7 +3293,7 @@ def guard_posture(pkg_root=None):
                     #     / `heartbeat_ts` 里，要查的人查得到。
                     #   ★ 缺岗分支的「心跳断档 N 分钟」**不删** —— 那是事件态，
                     #     "断了多久"是判断该不该手动拉起的决策信息，且不会自己好转。
-                    "why": "哨兵在岗",
+                    "why": "监理在岗",
                     "evidence": ev, "consequences": [], "can_fix": False,
                     "fix": None, "fix_hint": ""}
         # ★★ 0.48.5（A1）：**读不到心跳链 ≠ 心跳断档** —— 单独一档，绝不渲染成红。
@@ -3304,12 +3309,12 @@ def guard_posture(pkg_root=None):
         #     （读到了、但陈旧）仍走下面缺岗分支按后果分红/黄 —— 那一档有据。
         if alive and age is None and not fresh:
             return {"state": POSTURE_UNKNOWN, "label": POSTURE_LABEL[POSTURE_UNKNOWN],
-                    "why": "哨兵进程在岗，但读不到它写的心跳链——此刻只是「注意」"
+                    "why": "监理进程在岗，但读不到它写的心跳链——此刻只是「注意」"
                            "（盲区），不是「失守」：它可能还在正常值守，也可能已经"
                            "悄悄停写，这里区分不出来。",
                     "evidence": ev, "consequences": None,
                     "can_fix": True, "fix": "revive",
-                    "fix_hint": "马上修复（重新拉起哨兵，让它重新登记心跳链）"}
+                    "fix_hint": "马上修复（重新拉起监理，让它重新登记心跳链）"}
         # ★★ 缺岗：**先量后果，再决定它是红（失守）还是黄（中断·无损失）**。
         #   红必须说得出损失；说不出 ⇒ 不许冒充"防线失守"（创始人 2026-10-06）。
         cons = _outage_consequences(st, pkg_root)
@@ -3321,9 +3326,9 @@ def guard_posture(pkg_root=None):
         #   `门闸` 仍是**记录层**的历史写法（链记录原文不改写），但它不该
         #   出现在这两句返回给页面的文案里。
         if not alive:
-            why = "防护开着，但哨兵进程不在岗——此刻没人值守。"
+            why = "防护开着，但监理进程不在岗——此刻没人值守。"
         else:
-            why = ("防护开着，哨兵进程在，但心跳断档 %s（应 ≤10 分钟）——疑似挂起/僵死。"
+            why = ("防护开着，监理进程在，但心跳断档 %s（应 ≤10 分钟）——疑似挂起/僵死。"
                    % (("%.0f 分钟" % (age / 60.0)) if age is not None else "（读不到心跳）"))
         if _code_untrusted:
             why += " 另外，这份守门的代码我也认不出是不是出厂那份。"
@@ -3332,18 +3337,18 @@ def guard_posture(pkg_root=None):
             #   仍然黄灯、仍然给「马上修复」——**不隐藏**，只是不冒称"失守"。
             return {"state": POSTURE_INTERRUPTED,
                     "label": POSTURE_LABEL[POSTURE_INTERRUPTED],
-                    "why": why + " 不过此刻哨兵**没有监管对象**"
+                    "why": why + " 不过此刻监理**没有监管对象**"
                                  "（无放行窗、无安全区、无受监管工作区、无受监管落点），"
                                  "所以这段时间没有放过任何东西。",
                     "evidence": ev, "consequences": [], "can_fix": True,
-                    "fix": "revive", "fix_hint": "马上修复（重新拉起哨兵）"}
+                    "fix": "revive", "fix_hint": "马上修复（重新拉起监理）"}
         return {"state": POSTURE_DOWN, "label": POSTURE_LABEL[POSTURE_DOWN],
                 "why": why, "evidence": ev, "consequences": cons,
                 "can_fix": True, "fix": "revive",
-                "fix_hint": "马上修复（重新拉起哨兵）"}
+                "fix_hint": "马上修复（重新拉起监理）"}
     except Exception as e:                                   # noqa: BLE001
         return {"state": POSTURE_UNKNOWN, "label": POSTURE_LABEL[POSTURE_UNKNOWN],
-                "why": "探不到哨兵状态：%r" % (e,), "evidence": {},
+                "why": "探不到监理状态：%r" % (e,), "evidence": {},
                 "consequences": None, "can_fix": False, "fix": None,
                 "fix_hint": "这是「盲区」，不等于「没问题」"}
 
@@ -3361,7 +3366,7 @@ def guard_fix(pkg_root=None, action=None):
             if r in ("revived", "stale-revived", "alive"):
                 p2 = guard_posture(pkg_root)
                 return (p2["state"] == POSTURE_GUARDING,
-                        "已重新拉起哨兵（%s）——%s" % (r, p2["why"]))
+                        "已重新拉起监理（%s）——%s" % (r, p2["why"]))
             return False, "没拉起来（%s）——此刻仍无人值守，请看运行状态页" % (r,)
         if action == "enable":
             return False, ("开启值守要写 ACL 与自启项，请在终端由你本人执行："
@@ -3524,7 +3529,7 @@ def _task_watchdog(state, audit_dir, now):
         record(audit_dir, "host_shield_breach", decision="deny",
                severity="warning", subkind="autostart_missing",
                reason="登录自启缺失（计划任务与启动文件夹均无）"
-                      "——哨兵不会随登录自启（#6）")
+                      "——监理不会随登录自启（#6）")
     else:
         record(audit_dir, "host_shield_task_unknown", decision="alert",
                severity="warning", subkind="task_unknown",
@@ -3871,12 +3876,12 @@ def run_sentinel(root):
             record(audit_dir, "host_shield_dev_drift", decision="deny", severity="warning",
                    field="self-check", subkind="code_drift",
                    reason="研发态：代码与登记表不符（改动未重建清单）——"
-                          "这一版还没发出去，不是防线失守；哨兵照常在岗。"
+                          "这一版还没发出去，不是防线失守；监理照常在岗。"
                           + "；".join(problems))
         else:
             record(audit_dir, "host_shield_tamper", decision="deny", severity="critical",
                    field="self-check", subkind="code_drift",
-                   reason="哨兵启动自检不符：" + "；".join(problems))
+                   reason="监理启动自检不符：" + "；".join(problems))
     # armed 权威（B4b 系）：链有据→链；无据→state 文件（残差见模块头）
     chain_armed = chain_armed_scan(audit_dir)
     armed = bool(state.get("enabled")) if chain_armed is None else chain_armed
@@ -3908,7 +3913,7 @@ def run_sentinel(root):
     if not _register_sentinel_start(state["sentinel_pid"],
                                     state["sentinel_started_at"],
                                     audit_dir, armed):
-        print("!! 哨兵登记（sentinel_pid/sentinel_audit_dir/enabled）未落盘 "
+        print("!! 监理登记（sentinel_pid/sentinel_audit_dir/enabled）未落盘 "
               "—— 见链上 state_write_refused", flush=True)
     # ★ 0.45.0（丙层）：自写**在岗名片**（租约）—— 路径带自己的 pid + 启动时刻，
     #   不与他人共享 ⇒ 不需要保护；判死时靠"启动时刻"防进程号复用。
@@ -3921,7 +3926,7 @@ def run_sentinel(root):
     poll_n = 0
     _REG_TAMPER_LAST = [0.0]
     last_beat = 0.0                                 # monotonic（C5：不受系统时钟回拨影响）
-    print("Antinel host-shield 哨兵已启动（宿主审计门闸）", flush=True)
+    print("Antinel host-shield 监理已启动（宿主审计门闸）", flush=True)
     while True:
         try:
             state = load_state()
@@ -3991,7 +3996,7 @@ def run_sentinel(root):
             now_m = time.monotonic()
             if armed and now_m - last_beat >= HEARTBEAT_SECONDS:
                 record(audit_dir, "host_shield_heartbeat", decision="allow",
-                       severity="none", reason="哨兵心跳（门闸在岗）",
+                       severity="none", reason="监理心跳（门闸在岗）",
                        watched=len(load_watch_registry(root)))
                 last_beat = now_m
                 # ★ 0.45.0（丙层）：随心跳**续租在岗名片**（低频写；临时文件+原子替换）。

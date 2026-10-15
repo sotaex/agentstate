@@ -239,10 +239,10 @@ def cmd_window(a):
     import inbox_server as SV
     rec, started = SV.ensure_console(root=getattr(a, "root", None))
     if not rec or not rec.get("url"):
-        print("值守台没起来：拿不到端口/口令记录 —— 看 `antinel inbox serve` 的输出",
+        print("Antinel 监理没起来：拿不到端口/口令记录 —— 看 `antinel inbox serve` 的输出",
               file=sys.stderr)
         return 1
-    print("值守台%s：%s" % ("已重拉" if started else "已在跑", rec["url"]))
+    print("Antinel 监理%s：%s" % ("已重拉" if started else "已在跑", rec["url"]))
     # ★★ 2026-10-14（创始人实测「起得来、活不久」）：**先经 daemon 开**。
     #   CLI 直起时 msedge 挂在 CLI 进程树下；在调用方寿命短于窗口的环境
     #   （agent 沙箱/CI/一次性脚本），调用方退出连带杀死窗口 ⇒「报了已
@@ -293,10 +293,10 @@ def cmd_daemon(a):
     #   判据 0372 S20 现在真调这条分支。）
     alive, pid = DM.daemon_alive()
     if alive and pid != os.getpid():
-        print("值守台守护进程**已经在跑**了（pid %s）—— 本次不重复启动。" % pid)
+        print("Antinel 监理守护进程**已经在跑**了（pid %s）—— 本次不重复启动。" % pid)
         return 0
-    print("值守台守护进程已启动（每 %.1f 秒一轮%s）。Ctrl+C 停。"
-          % (a.interval, "；顺带监督值守台服务" if sup else ""))
+    print("Antinel 监理守护进程已启动（每 %.1f 秒一轮%s）。Ctrl+C 停。"
+          % (a.interval, "；顺带监督 Antinel 监理服务" if sup else ""))
     DM.run_daemon(interval=a.interval, supervise=sup)
     return 0
 
@@ -398,7 +398,7 @@ def cmd_ledger(a):
 
 
 def build_parser():
-    ap = argparse.ArgumentParser(prog="antinel inbox", description="值守台")
+    ap = argparse.ArgumentParser(prog="antinel inbox", description="Antinel 监理")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("list", help="列出收件箱记录（默认列出所有未关闭记录，不等于待办件数）")
@@ -449,7 +449,7 @@ def build_parser():
     sub.add_parser("tray").set_defaults(fn=cmd_tray)
     p = sub.add_parser("daemon"); p.add_argument("--interval", type=float, default=2.0)
     p.add_argument("--supervise", action="store_true",
-                   help="顺带监督值守台服务：被杀掉后在 60 秒内按原端口/口令重拉")
+                   help="顺带监督 Antinel 监理服务：被杀掉后在 60 秒内按原端口/口令重拉")
     p.set_defaults(fn=cmd_daemon)
 
     p = sub.add_parser("config"); ps = p.add_subparsers(dest="sub", required=True)

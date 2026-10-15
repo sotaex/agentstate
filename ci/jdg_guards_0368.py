@@ -179,10 +179,10 @@ def _reset_sites():
 
 
 def _eval_path_expr(expr, ns):
-    """在镜像命名空间里求值路径构造表达式。未知名 ⇒ 独立哨兵目录（不猜）。
+    """在镜像命名空间里求值路径构造表达式。未知名 ⇒ 独立监理目录（不猜）。
 
     ★ 自审：第一版用 `__missing__` 兜底未知名，但 eval 的 locals 是 dict
-      **子类**时不会回落到 globals ⇒ 连 `os`/`Path` 都被吞成哨兵
+      **子类**时不会回落到 globals ⇒ 连 `os`/`Path` 都被吞成监理
       （`WindowsPath has no attribute environ`）。⇒ 先把已知全局名焊进 locals。
     """
     class _S(dict):

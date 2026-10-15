@@ -6,7 +6,7 @@
 
 ★★ 这一份判据是创始人 2026-10-09 第二句「机制上解决」的直接产物：
 
-    「一定要让值守台反应当前的准确状态，没有失守却显示失守，就是错误的，
+    「一定要让Antinel 监理反应当前的准确状态，没有失守却显示失守，就是错误的，
       请修正，并且要从机制上修正，防范再犯。」
 
   ⇒ 修好一处不难，难的是**没人能再改回去**。本文件把这条从"注释里的约定"
@@ -114,7 +114,7 @@ def s10():
     st = M.light_explain({"state": "guarding", "why": "x"}, r0,
                          granary={"state": "low", "why": "粮快见底了"})["state"]
     if st != "Ls":
-        return "哨兵在岗 ＋ 粮低 ⇒ 应亮 Ls，实际 %s" % st
+        return "监理在岗 ＋ 粮低 ⇒ 应亮 Ls，实际 %s" % st
     return True
 
 
@@ -144,8 +144,8 @@ def s11():
     import inbox_model as M
     G = _g()
     r0 = [G._mk_item(state="unread")]
-    none = M.light_explain({"state": "guarding", "why": "哨兵在岗"}, [], granary=None)
-    some = M.light_explain({"state": "guarding", "why": "哨兵在岗"}, r0, granary=None)
+    none = M.light_explain({"state": "guarding", "why": "监理在岗"}, [], granary=None)
+    some = M.light_explain({"state": "guarding", "why": "监理在岗"}, r0, granary=None)
     if none["ledger_bad"] is not False:
         return "无账却 ledger_bad=%r" % (none["ledger_bad"],)
     if some["ledger_bad"] is not True:
@@ -368,7 +368,7 @@ def s16():
     import inbox_model as M
     G = _g()
     r0 = [G._mk_item(kind="host_shield_breach")]
-    st = M.light_explain({"state": "guarding", "why": "哨兵在岗"}, r0,
+    st = M.light_explain({"state": "guarding", "why": "监理在岗"}, r0,
                          granary=None)["state"]
     if st == M.STATE_R0:
         return "历史失守把灯染红了（这正是创始人裁定的那个错）：%s" % st
@@ -414,7 +414,7 @@ def n_s16():
 #: ★ 期望短语／禁语都**写死在这里**（不取自 `glossary` 对象）—— 与本族纪律一致：
 #:   期望若取自被测对象，负控一变异它就跟着变，判据永远绿。
 _GL_MUST = ("失守、缺粮只认此刻", "拦截／注意")   # 必须点明的两处来源分工
-_GL_FORBID = ("两个读数", "不是「此刻哨兵好不好」")  # 旧口径的两处特征措辞
+_GL_FORBID = ("两个读数", "不是「此刻监理好不好」")  # 旧口径的两处特征措辞
 
 
 def _gl_light_plain():
@@ -448,8 +448,8 @@ def n_s17():
         GL.TERMS["light"] = {
             "w": "顶部这盏灯",
             "one": "把此刻和最近 24 小时两个读数合起来，取最重的一档。",
-            "inc": "此刻＝哨兵在不在岗。",
-            "exc": "它答的是「我现在该不该紧张」，不是「此刻哨兵好不好」。",
+            "inc": "此刻＝监理在不在岗。",
+            "exc": "它答的是「我现在该不该紧张」，不是「此刻监理好不好」。",
             "unit": "不计数；取两个读数里最重的一个。",
         }
         r = s17()
@@ -503,7 +503,7 @@ def s18():
 
 @check("N-S18 负控：docstring 退回旧口径（'存疑（黄）'）⇒ S18 必须报红")
 def n_s18():
-    old = ("③ armed 且哨兵在岗、心跳新鲜，但自检不符 ⇒ 存疑（黄）。"
+    old = ("③ armed 且监理在岗、心跳新鲜，但自检不符 ⇒ 存疑（黄）。"
            "'我认不出守门的是不是出厂那份' ≠ '此刻没在守'。")
     if not _doc_rule_fails(old):
         return "负控失效：旧口径 docstring 未被抓出"

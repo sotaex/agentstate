@@ -50,7 +50,7 @@
     连带＝PKG16-b 全部 py-modules 都在 wheel 内（不只焦点五件）；
                   运行时资源加载路径（`inbox_bubble.sound_path()`、
                   `inbox_logo.script_path()`）在 wheel 内可解析；
-                  判据 ID 无跨套件重名且本套件五条都在映射里。
+                  判据 ID 无跨套件重名且本套件六条都在映射里。
     观测＝PKG16-c 发布验收原始日志留存且 [A][B][C][E][D] 标头全过；
                   产物路径/大小/哈希与清单版本/条目数入册。
 
@@ -419,20 +419,72 @@ def c_pkg16b():
     ).replace("\\", "/")
     if rel2 not in wn:
         return "inbox_logo.script_path() 指向 %s，wheel 里没有" % rel2
-    # P0-2 口径延续：本套件五条 ID 必须真在映射里，且跨套件无重名。
+    # P0-2 口径延续：本套件六条 ID 必须真在映射里，且跨套件无重名。
     dups = DT.duplicate_gate_ids()
     if dups:
         return "判据 ID 跨套件重名：%r" % (dups[:3],)
     amap = DT.gate_id_map()
-    for gid in ("PKG16-a", "N-PKG16-a", "N-PKG16-b", "PKG16-b", "PKG16-c"):
+    for gid in ("PKG16-a", "N-PKG16-a", "N-PKG16-b", "PKG16-b", "PKG16-c",
+                "N-PKG16-c"):
         if gid not in amap:
             return "本套件判据 %s 未进 gate_id_map（登记簿与实际不同锚）" % gid
     _note("py-modules %d 个全在 wheel；sound_path→%s；script_path→%s；"
-          "ID 映射五条在位、无重名" % (len(mods), rel, rel2))
+          "ID 映射六条在位、无重名" % (len(mods), rel, rel2))
     return True
 
 
 # ═══════════════════════════════ 可观测 ═══════════════════════════════════
+
+def _log_version(txt):
+    """从发布验收日志的抬头抽 `version=<X>` —— **同一时刻的那个版本**。
+
+    ★★ 2026-10-15（0.50.4 出包实测）：原实现拿**当前** `psl/manifest.json` 的
+      `version` 去比**源码** `VERSION`，判「不一致即红」。这在本仓拓扑下**必然误红**，
+      且与两条既有裁决相冲：
+        · **T-09 变体**：日志记的是「上一版那一刻」的事实（实测那份是 0.50.3 的），
+          而 manifest 是**现在**的读数 ⇒ 跨时刻比对，两个数字本就不该相等。
+        · **违背先例**：`ci/inbox_guards_0483.py::S2-483` 就「manifest version ≠
+          源码版本」这件事已定过性 —— 那是**自举的正常中间态**，该**豁免并打印**，
+          不判红。本判据是 0.50.4 新增件，写的时候不知道 S2-483 与 `0431 S70` 存在。
+        · **违背机制**：`host_shield.py:1926-1947` 明写「发版 ⇒ manifest 的 version
+          更新 ⇒ 与代码版本相等 ⇒ 立即返回已出厂」，且「升版只动代码侧，manifest
+          自然停在**上次打包那一刻** ⇒ 落差回来」⇒ 落差是**设计意图**，不是缺陷。
+      ⇒ 修法＝**只在同一时刻内比对**：manifest 的 version 必须等于**日志自身记录的
+        版本**（日志与 manifest 若非同一时刻，manifest 落后 ⇒ 自举豁免并打印）。
+      ⇒ 另注：`version` 的**唯一产品消费者**是 `host_shield._installed_version()`
+        （算研发态落差）；发布验收 `[E]`（`verify_release.check_manifest_vs_wheel`）
+        只比对 wheel 内 `files{}` **集合**、**完全不读** version ⇒ 本判据不承担
+        「防版本错配」的职责，那由 `ci/version_check.py` 判据 7（≤ 代码版本）守。
+    """
+    m = re.search(r"version=([0-9][0-9A-Za-z.\-]*)", txt or "")
+    return m.group(1) if m else None
+
+
+def _ver_lt(a, b):
+    """`a < b`（版本号）—— **直接 import 产品真源**，不二次实现口径（本仓铁律 8）。"""
+    import host_shield as HS
+    return HS._ver_lt(a, b)
+
+
+def _same_instant_verdict(man_ver, log_ver):
+    """**纯函数（可注入）**：清单版本 vs 验收日志版本的判定。
+
+    返回 `("ok"|"bootstrap"|"ahead", 说明)`。主判据与负控**共用这一把尺子**
+    —— 负控不许另写一套判断逻辑（本仓纪律：负控必须打在同一条尺子上）。
+      · `man == log`  ⇒ ok        （同刻一致）
+      · `man  < log`  ⇒ bootstrap （自举：清单由本次打包重生成，落后属正常；
+                                    与 `inbox_guards_0483.py::S2-483` 同款豁免）
+      · 其余（man ＞ log，或比不了）⇒ ahead（登记了没产出的版本 ⇒ 真缺陷）
+    """
+    if man_ver == log_ver:
+        return "ok", ""
+    lt = _ver_lt(man_ver, log_ver)
+    if lt is True:
+        return "bootstrap", ""
+    return "ahead", ("清单版本 %s **超前**验收日志版本 %s（或版本号比不了）——"
+                     "登记了一个还没产出（或验不过）的版本 ⇒ 这是真缺陷，不是自举"
+                     % (man_ver, log_ver))
+
 
 @check("PKG16-c 观测：发布验收日志五标头留存全过；产物大小/哈希/清单版本入册")
 def c_pkg16c():
@@ -445,18 +497,80 @@ def c_pkg16c():
             return "验收日志缺 %s —— 要么没跑全，要么日志被截断" % marker
     if "❌" in txt or "未通过" in txt:
         return "验收日志里有红项 —— 留存的是失败记录"
+    # ---- 同刻口径：manifest 的 version 只与**日志自己记录的版本**比 ----
+    log_ver = _log_version(txt)
+    if not log_ver:
+        return ("从验收日志抬头抽不到 `version=` —— 日志格式变了，本判据会瞎"
+                "（不许静默通过）")
+    # 日志记录的产物件必须在盘上（同刻事实）；用**日志的版本**而不是源码版本，
+    # 否则日志是 0.50.3 而源码已 0.50.4 时，会去找根本不存在的 0.50.4 件 ⇒ 假红。
     dist = os.path.join(ROOT, "dist")
-    whl = _wheel_path(dist, version)
-    tgz = _sdist_path(dist, version)
-    for p in (whl, tgz):
+    for _n in ("antinel-%s-py3-none-any.whl" % log_ver,
+               "antinel-%s.tar.gz" % log_ver):
+        p = os.path.join(dist, _n)
+        if not os.path.isfile(p):
+            _note("日志记 %s，但 %s 已不在 dist（归档/让开属正常，略过大小核对）"
+                  % (log_ver, _n))
+            continue
         _note("%s  %d bytes  sha256:%s…"
-              % (os.path.basename(p), os.path.getsize(p), _sha16(p)))
+              % (_n, os.path.getsize(p), _sha16(p)))
     man = json.load(io.open(os.path.join(ROOT, "psl", "manifest.json"),
                             encoding="utf-8"))
-    if man.get("version") != version:
-        return "清单版本 %s 与源码 VERSION %s 不一致" % (man.get("version"), version)
+    man_ver = str(man.get("version") or "")
+    verdict, why = _same_instant_verdict(man_ver, log_ver)
+    if verdict == "ahead":
+        return why
+    if verdict == "bootstrap":
+        # ★ 与 `ci/inbox_guards_0483.py::S2-483` **同一先例**：清单由本次打包
+        #   重生成，此刻必然落后 ⇒ 自举豁免，且**跳过必须在日志里看得见**。
+        print("     ↷ 自举豁免：manifest 版本 %s ＜ 验收日志版本 %s"
+              "（清单由本次打包重生成，此刻落后属正常；见 S2-483 同款豁免）"
+              % (man_ver, log_ver))
+        _note("psl/manifest.json %s（落后日志 %s）/ %d entries"
+              % (man_ver, log_ver, len(man.get("files") or {})))
+        return True
+    if man_ver != version:
+        # 同刻既定（manifest == 日志版本）但与源码不同：源码已升到下一版、
+        # 还没重打包 ⇒ **这正是 `0431 S70` 要的研发树落差**，不许在这里反着判。
+        print("     ↷ 研发态落差：manifest/日志 %s ＜ 源码 VERSION %s"
+              "（S70 要求的落差，本判据不反着判）" % (man_ver, version))
     _note("psl/manifest.json %s / %d entries / built_at=%s"
-          % (man.get("version"), len(man.get("files") or {}), man.get("built_at")))
+          % (man_ver, len(man.get("files") or {}), man.get("built_at")))
+    return True
+
+
+@check("N-PKG16-c 负控：清单版本【超前】验收日志版本 ⇒ PKG16-c 必须报红")
+def n_pkg16c():
+    """负控必须**真会红**，且分辨力必须落在**方向**上。
+
+    本判据的新口径是「只在同刻内比对」，负控喂**同一个纯函数** `_same_instant_verdict`
+    （不另造尺子），证明三件事：
+      ① 同刻一致 ⇒ ok（正例不红，否则负控无分辨力）
+      ② manifest **落后**日志 ⇒ bootstrap（自举，不红）
+      ③ manifest **超前**日志 ⇒ ahead（**必红**，报出「真缺陷」）
+    ③ 是本负控的靶心；② 是**反空转** —— 若有人把纯函数改成"凡不等就 ahead"，
+    ② 会当场红 ⇒ 尺子退化成噪音立刻被识别。
+    """
+    # 抽版本的小工具必先自证（它自己也是判据的一部分）
+    if _log_version("==========\n发布验收 —— dist=dist  version=0.50.3\n====") != "0.50.3":
+        return "负控自身失效：`_log_version` 抽不出抬头的 version=0.50.3"
+    if _log_version("没有版本抬头的日志") is not None:
+        return "负控自身失效：无 version= 的文本竟抽出了版本"
+    # ① 正例：同刻一致 ⇒ ok（不许红 —— 否则尺子恒红，负控无分辨力）
+    if _same_instant_verdict("0.50.3", "0.50.3")[0] != "ok":
+        return "负控无分辨力：同刻一致竟不判 ok"
+    # ② 反空转：落后 ⇒ bootstrap（不许红）
+    if _same_instant_verdict("0.50.2", "0.50.3")[0] != "bootstrap":
+        return "负控无效：manifest 落后日志竟没走自举豁免 ⇒ 尺子会被改成凡不等即红"
+    # ③ 靶心：超前 ⇒ ahead 且必须说成「真缺陷」（方向不许反过来）
+    v, why = _same_instant_verdict("0.50.4", "0.50.3")
+    if v != "ahead":
+        return "负控失效：manifest 超前日志竟判 %r（应 ahead）—— 这条尺子是装饰" % (v,)
+    if "真缺陷" not in why:
+        return "负控方向不对：超前分支没报「真缺陷」（报的是 %r）" % (why,)
+    # ④ 比不了（非数字）⇒ 往严偏：ahead（不许静默放行）
+    if _same_instant_verdict("abc", "0.50.3")[0] != "ahead":
+        return "负控失效：版本号比不了竟没往严偏（应 ahead）"
     return True
 
 

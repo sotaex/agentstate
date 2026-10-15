@@ -194,7 +194,7 @@ HARNESS_SRC = SRC / "scripts" / "verification_tests.py"
 if not HARNESS_SRC.is_file():
     raise SystemExit("★ 构建器找不到套件：%s\n  （产物仓构建必须用本仓的套件）" % HARNESS_SRC)
 NAME = "antinel-security"
-VERSION = "0.50.3"
+VERSION = "0.50.4"
 # P-A3: the namespace this build declares itself under. derive_object_ownership()
 # reads git remote first, then THIS field; fail-closed unattributed when neither
 # resolves. Kept beside the hashes so a third party can see what was declared.
@@ -2024,7 +2024,7 @@ def _assert_package_data_covered(pkg, manifest_lines):
     return True
 
 
-def _refresh_skill_selfcert(pkg, final, harness_rc):
+def _refresh_skill_selfcert(pkg, final, harness_rc, plug=None):
     """★★★ 0.42.0：把 SKILL.md 自证卡的刷新点从**装配时**移到**harness 之后**。
 
     ★ 为什么必须移（2026-10-09 本班实测的结构性死锁）：
@@ -2062,11 +2062,20 @@ def _refresh_skill_selfcert(pkg, final, harness_rc):
     #   第一版把复制放在组装段、取源是**源码树**那份 ⇒ 复制到的是上一轮的旧版
     #   （实测：psl/SKILL.md 2704 B vs SKILL.md 4697 B），插件自检当场判
     #   `drifted ['psl/SKILL.md']`。⇒ 复制源必须是**刚刚生成的这一份**。
-    for base in (pkg, final):
-        _s = Path(base) / "SKILL.md"
+    # ★ 2026-10-15（0.50.4 改名批）：**插件副本也要同源一起刷**（plug 参数）。
+    #   为什么：插件构建（build_plugin）排在 harness **之前**，它拷走的
+    #   SKILL.md / psl/SKILL.md 带着装配时的自证卡；harness 之后只刷 pkg/final
+    #   的话，**发给用户的插件**就停在旧卡（"NOT VERIFIED" 或上一轮的 true）——
+    #   在立信誉的地方说反话。0.48.4 防的是 psl/SKILL.md 这一个副本，当年漏了
+    #   插件；插件里的路径多一层 `skills/<NAME>/`。
+    _roots = [Path(pkg), Path(final)]
+    if plug:
+        _roots.append(Path(plug) / "skills" / NAME)
+    for base in _roots:
+        _s = base / "SKILL.md"
         if not _s.is_file():
             continue
-        _d2 = Path(base) / "psl" / "SKILL.md"
+        _d2 = base / "psl" / "SKILL.md"
         _d2.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(_s, _d2)
 
@@ -2082,9 +2091,9 @@ def _refresh_skill_selfcert(pkg, final, harness_rc):
     #   随包机制，而 psl 的 package-data 已声明 `*.md`）。组装阶段复制过去的那份
     #   **早于**自证卡刷新 ⇒ 若不同步，Agent 从包里读到的自证卡就是陈旧的
     #   （说"本包未验证"，而它其实刚刚验证过）——在立信誉的地方说反话。
-    for base in (pkg, final):
+    for base in _roots:
         for rel in ("SKILL.md", os.path.join("psl", "SKILL.md")):
-            f = Path(base) / rel
+            f = base / rel
             if not f.is_file():
                 continue
             _rewrite_one(f, new_verified, new_at, new_ev, changed)
@@ -2095,7 +2104,7 @@ def _refresh_skill_selfcert(pkg, final, harness_rc):
     #   顺序是结构性的：psl/manifest.json 在 build() 的装配段生成（约 2887 行），
     #   而本函数跑在 harness 之后 ⇒ 必然晚于清单 ⇒ 不重钉就差一个刷新。
     if changed:
-        _rehash_manifest_for_skill(pkg, final)
+        _rehash_manifest_for_skill(pkg, final, plug)
     return ok
 
 
@@ -2119,7 +2128,7 @@ def _rewrite_one(f, new_verified, new_at, new_ev, changed):
         changed.append(str(f))
 
 
-def _rehash_manifest_for_skill(pkg, final):
+def _rehash_manifest_for_skill(pkg, final, plug=None):
     """自证卡刷新之后，把 `psl/manifest.json` 里 SKILL.md 的哈希重钉一遍。
 
     ★ 为什么必须重钉（2026-10-12 端到端 J6m 实测判红）：
@@ -2134,8 +2143,11 @@ def _rehash_manifest_for_skill(pkg, final):
       也不含 `psl/SKILL.md`（已核对）⇒ 重钉不触碰 21/21 的口径，无自举循环。
     """
     rels = ("psl/SKILL.md", "SKILL.md")
-    for base in (pkg, final):
-        mj = Path(base) / "psl" / "manifest.json"
+    _roots = [(Path(pkg), "stage"), (Path(final), "package")]
+    if plug:
+        _roots.append((Path(plug) / "skills" / NAME, "plugin"))
+    for base, _lbl in _roots:
+        mj = base / "psl" / "manifest.json"
         if not mj.is_file():
             continue
         try:
@@ -2161,7 +2173,7 @@ def _rehash_manifest_for_skill(pkg, final):
             man["files"] = dict(sorted(files.items()))
             mj.write_text(json.dumps(man, ensure_ascii=False, indent=1),
                           encoding="utf-8", newline="\n")
-            print("   清单哈希重钉（%s）：%s" % (Path(base).name, "、".join(touched)))
+            print("   清单哈希重钉（%s）：%s" % (_lbl, "、".join(touched)))
 
 
 def _reconcile_src(mutated):
@@ -2199,6 +2211,31 @@ def _reconcile_src(mutated):
     return True
 
 
+def _tracked_root_modules(pkg):
+    """包根下**被 git 跟踪**的 .py 模块名集合（＝ 会进包的那些）。
+
+    git 不可用 ⇒ 退化为包根全部 .py（不静默放松：D-20 的内建负控与真树调用兜底）。
+    """
+    pkg = Path(pkg)
+    try:
+        import subprocess
+        r = subprocess.run(["git", "ls-files", "--", "*.py"], cwd=str(pkg),
+                            capture_output=True, text=True, timeout=60)
+        if r.returncode == 0 and r.stdout.strip():
+            out = set()
+            for rel in r.stdout.split():
+                if "/" in rel or "\\" in rel:
+                    continue                      # 只取包根那一层
+                p = pkg / rel
+                if p.is_file():
+                    out.add(p.stem)
+            if out:
+                return out
+    except Exception:                                          # noqa: BLE001
+        pass
+    return {p.stem for p in pkg.glob("*.py") if p.is_file()}
+
+
 def _pymodules_guard(pkg_dir):
     """★ 包组成守卫（**双向**）：返回问题列表（空 = 通过）。
 
@@ -2218,7 +2255,15 @@ def _pymodules_guard(pkg_dir):
     _pp = (pkg / "pyproject.toml").read_text(encoding="utf-8")
     _m = re.search(r"py-modules\s*=\s*\[([^\]]*)\]", _pp)
     _declared = set(re.findall(r'"([^"]+)"', _m.group(1))) if _m else set()
-    _present = {p.stem for p in pkg.glob("*.py") if p.is_file()}
+    # ★★ 0.50.4：`_present` 只算**会进包的那些**（git 跟踪的 .py）。
+    #   为什么必须收窄：仓根有一批 gitignore 的探针（`_p_*.py`，本仓惯例），
+    #   它们**不进 wheel、不进 sdist**；旧口径 `pkg.glob("*.py")` 把它们算进来，
+    #   而某个探针又 import 另一个探针 ⇒ 判据报「包根模块被 import 却没声明」
+    #   （实测 D-20 假红：`_p_q_shot2` / `_p_q_tab…` 一长串）。
+    #   收窄口令：**进包的 ＝ 被 git 跟踪的**（探针从不被跟踪）。
+    #   git 不可用（如出包后的 `out/` 装配区无 .git）⇒ 退化为全部 .py ——
+    #   那边本来就不会有探针（复制清单里没有），不放松真树的守卫。
+    _present = _tracked_root_modules(pkg)
 
     _miss = sorted(_declared - _present)
     if _miss:
@@ -2572,7 +2617,7 @@ def build(out_root, verify=False):
     else:
         # 「没查到」必须与「没发现」长得不一样：资源缺失不是构建错误，
         # 但必须**说出来**，否则页面静默无图标，没人知道为什么。
-        print("   [notice] 源码树没有 assets/ —— 值守台页面/托盘将没有图标与 LOGO（非错误）")
+        print("   [notice] 源码树没有 assets/ —— Antinel 监理页面/托盘将没有图标与 LOGO（非错误）")
     # ★ 0.35.2：`challenge/` 公开挑战件**必须进 wheel**（理由见 PYPROJECT 里
     #   `challenge = [...]` 那段注释：verify 会教用户跑它，而它此前只进 sdist）。
     #   手法与 assets 完全一致：声明为 package ＋ package-data，再逐文件复制进暂存包。
@@ -2915,11 +2960,22 @@ def build(out_root, verify=False):
                        and not _is_junk(p.relative_to(pkg).as_posix()))
     # ★★ 0.39.2：哈希一律走 `_manifest_hash_of` —— 版本承载件先归一化再算，
     #   与 `host_shield.self_check()` **同法**（唯一真源在 host_shield）。
+    # ★★ 2026-10-15（0.50.4 改名批实测判红）：哈希源从「final 优先」翻成
+    #   「**pkg 优先**」。旧口径 `src = final / _rel` 取的是**合并前**的产物仓
+    #   字节；而插件拷贝的是**合并后**的字节（build_plugin 跑在 _merge 之后）。
+    #   凡装配阶段会重写的文件（SKILL.md、psl/SKILL.md —— 自证卡在 harness 之后
+    #   还要再刷一次），合并前后必然不同 ⇒ 清单钉的哈希与插件实收的字节分家
+    #   （实测：`plugin self-check FAILED: 1 drifted ['psl/SKILL.md']`，且它排在
+    #   harness 之前 SystemExit ⇒ 判定记录永不刷新 ⇒ SKILL.md 自证卡恒 false，
+    #   整条链死锁）。这正是本函数族自己的判据禁的病（G7-c：「比对基准必须是
+    #   **本次构建的产物**，不能是磁盘现在的样子」）—— final@pre 就是后者。
+    #   新口径：pkg（暂存的产物字节）优先；final 只兜底「不进暂存的仓根自有件」
+    #   （那些文件装配不碰，final@pre ≡ final@post，两种取法等价）。
     manifest_files = {}
     for _rel in _rels:
-        src = final / _rel
+        src = pkg / _rel
         if not src.is_file():
-            src = pkg / _rel                    # 兜底：只在暂存包里的构建期生成物
+            src = final / _rel                  # 兜底：不进暂存的仓根自有件
         if not src.is_file():
             print("!! 清单主体在树上找不到：%s" % _rel)
             continue
@@ -3130,7 +3186,7 @@ def build(out_root, verify=False):
         #   装配时那份记录描述的是上一次的字节 ⇒ 必然 false；只有跑完这一次，
         #   shipped 记录才真的描述本次字节 ⇒ 这时写 true 才不是谎话。
         #   （死锁成因与 README.md G7 同型，详见 `_refresh_skill_selfcert` 的 docstring。）
-        _refresh_skill_selfcert(pkg, final, rc)
+        _refresh_skill_selfcert(pkg, final, rc, plug)
         _reconcile_src(_SRC_WATCH)
         _cleanup_final_stages(pkg, plug)
         return rc

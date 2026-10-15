@@ -66,7 +66,7 @@ def register_aumid_script():
     return (
         "$ErrorActionPreference='SilentlyContinue';"
         "$dir=Join-Path $env:APPDATA 'Microsoft\\Windows\\Start Menu\\Programs';"
-        "$lnk=Join-Path $dir 'Antinel 值守台.lnk';"
+        "$lnk=Join-Path $dir 'Antinel 监理.lnk';"
         "$ws=New-Object -ComObject WScript.Shell;"
         "$s=$ws.CreateShortcut($lnk);"
         "$s.TargetPath=(Get-Command pythonw.exe -ErrorAction SilentlyContinue).Source;"

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: Apache-2.0
 
-"""★ 0.36.0 判据：窗口几何 ·托盘哨兵态 · 失守归因。
+"""★ 0.36.0 判据：窗口几何 ·托盘监理态 · 失守归因。
 
 ★ 本文件独立于 `inbox_guards_0353.py`，避免把上一轮已绿的判据搅在一起；
   两份会一起被 `ci/inbox_guards.py` 收录。
@@ -479,7 +479,7 @@ def c_place_window_does_not_touch_other_windows():
     seg = code.split("def find_console_windows", 1)[-1].split("\ndef ", 1)[0]
     if "is_console_title" not in seg:
         return ("枚举侧不再按标题过滤（`is_console_title` 消失）"
-                "⇒ 会把所有有标题的窗口都当成值守台窗口移动")
+                "⇒ 会把所有有标题的窗口都当成Antinel 监理窗口移动")
     # 统一判据必须有**真正的匹配动作**。
     # ★ 这里不要求它调 `_matches_title`：身份后缀必须**整串**匹配，
     #   走 `_matches_title` 反而是错的口径（它只做通用后缀 endswith）。
@@ -636,10 +636,10 @@ def c_place_window_title_is_exact_not_substring(src=None):
     """★ 窗口识别用**后缀精确匹配**，不用 `in` 子串（子串会误伤别的窗口）。
 
     ★★ 为什么是「后缀」而不是「完整标题」（0.36.1 真缺陷，本轮实测）：
-      页面标题是 `"%s · 值守台"`，**前半段随当前页面变** ——
+      页面标题是 `"%s · Antinel 监理"`，**前半段随当前页面变** ——
       收件箱 / 运行状态 / 账本 / 日报 各是一个标题。
-      实测落位那一刻窗口标题已是「运行状态 · 值守台」，
-      只认「收件箱 · 值守台」⇒ 找不到窗口、**落位静默失败**，
+      实测落位那一刻窗口标题已是「运行状态 · Antinel 监理」，
+      只认「收件箱 · Antinel 监理」⇒ 找不到窗口、**落位静默失败**，
       而日志还打着「已落到 520x640」（量的是别的窗口）。
 
     ★ 后缀匹配**不是**子串搜索：必须是 `endswith`（整串结尾），
@@ -674,7 +674,7 @@ def c_place_window_title_is_exact_not_substring(src=None):
     #   '收件箱 · 值守台助手'（标记后面还挂字）、'记事本 - 收件箱 · 值守台'（前面挂程序）
     if re.search(r"return\s+CONSOLE_WINDOW_TITLE_MARK\s+in\s+", fn):
         return ("`is_console_title` 宽泛模式退回 `MARK in title`（任意位置子串）"
-                "⇒ 会把『收件箱 · 值守台助手』这类用户窗口当成值守台")
+                "⇒ 会把『收件箱 · Antinel 监理助手』这类用户窗口当成Antinel 监理")
     if "_mark_at_tail" not in fn and "CONSOLE_WINDOW_TITLE_MARK" not in fn:
         return ("`is_console_title` 宽泛模式没有整串匹配动作 ⇒ 它认不出带身份串的"
                 "旧窗口（0.36.2 实测的『收旧窗失效』会复发）")
@@ -710,17 +710,31 @@ def c_window_title_prefix_is_variable():
     """★ 页面标题前半段**确实会变** —— 这是认后缀的**前提**；
     前提若变（标题固定了）而后缀规则仍在，那是一条死规则。
 
-    实测依据：`inbox_server` 的 `<title>%s · 值守台…</title>` 里 `%s`
+    实测依据：`inbox_server` 的 `<title>%s · Antinel 监理…</title>` 里 `%s`
     是当前页面名。
     ★ 0.36.2：标题末尾追加了身份串 `%s`（`#<run_id>`），
-      所以字面量从 `<title>%s · 值守台</title>` 变成
-      `<title>%s · 值守台%s</title>`。判据跟着改，但**判据的意图不变**：
+      所以字面量从 `<title>%s · Antinel 监理</title>` 变成
+      `<title>%s · Antinel 监理%s</title>`。判据跟着改，但**判据的意图不变**：
       仍然是"前半段必须是变量（页面名）"。
+    ★★ 0.50.4（改名批，B7）改写为**行为级**：`_head()` 的后缀已收编为
+      `inbox_window.console_title_suffix()` 派生（原先 inbox_server 自造一份
+      字面量，两处实现）—— 那时的"源码里搜 `<title>%s · …`"会**假红**
+      （字面量搬了家，行为没变），而那正是本仓最恨的"查文案"式判据。
+      ⇒ 改为**真渲染一次**，断言"标题 == 页面名 + 派生后缀"：
+        · 页面名必须是变量（固定标题 ⇒ 红）；
+        · 后缀必须与 `is_console_title` 认的**同一个串**（两处实现漂移 ⇒ 红）。
+      这比原文案检查更强：文案搬家不红，行为退化才红。
     """
     import inbox_server as SV
-    src = _src_of(SV)
-    if not re.search(r"<title>%s\s*·\s*值守台", src):
-        return "页面标题不再带可变前缀（%s）—— 后缀匹配的理由需重新评估"
+    import inbox_window as WIN
+    tok = "0360p13"
+    head = SV._head("inbox", tok)
+    want = "<title>inbox%s</title>" % WIN.console_title_suffix(
+        WIN.build_run_id(tok))
+    if want not in head:
+        got = re.search(r"<title>(.*?)</title>", head)
+        return ("页面标题不再是「页面名 + 派生后缀」—— 认后缀的理由需重新评估"
+                "（实测 %r）" % (got.group(1) if got else None))
     return True
 
 
@@ -784,10 +798,10 @@ def c_window_suffix_matches_every_page():
     # ② 每个页面标题都必须被认出来（**走真实匹配入口 `is_console_title`**）
     import inbox_window as WIN
     for p in pages:
-        if not WIN.is_console_title(p + " · 值守台", None):
+        if not WIN.is_console_title(p + " · Antinel 监理", None):
             return "页面标题 %r 认不出来 ⇒ 用户切到该页后窗口就失联" % p
         # 带身份串的形态也必须认出来（0.36.2 起 run_id 放在标题末尾）
-        if not WIN.is_console_title(p + " · 值守台#486acd", None):
+        if not WIN.is_console_title(p + " · Antinel 监理#486acd", None):
             return ("页面标题 %r 带身份串的形态认不出来 ⇒ 用户切到该页后"
                     "窗口失联" % p)
     # ③ 反向：非值守台窗口绝不能被认出来
@@ -799,25 +813,25 @@ def c_window_suffix_matches_every_page():
     #   ⇒ 这里**不改意图、不删用例**，只把测点换成真源。
     #   ★ 教训与 F3 同源：**测的不是被测对象 ⇒ 红项指向的可能是废代码**。
     #     判据"报红"不等于"产品有问题"—— 必须先确认它在测谁。
-    for bad in ("记事本", "收件箱 · 值守台 - 记事本", "记事本 - 收件箱 · 值守台",
-                "Microsoft Edge", "值守台（副本）", "我的值守台",
-                "值守台备份", "收件箱", "收件箱 · 值守台助手",
-                "收件箱 · 值守台#zzzzzzzz", "收件箱 · 值守台#",
+    for bad in ("记事本", "收件箱 · Antinel 监理 - 记事本", "记事本 - 收件箱 · Antinel 监理",
+                "Microsoft Edge", "Antinel 监理（副本）", "我的Antinel 监理",
+                "Antinel 监理备份", "收件箱", "收件箱 · Antinel 监理助手",
+                "收件箱 · Antinel 监理#zzzzzzzz", "收件箱 · Antinel 监理#",
                 # ★★ 0.36.5 本轮实测当场抓到的真缺口（不是补的想象用例）：
                 #   宽泛模式只查了标记位置/分隔符/扩展名三层**形状**，
                 #   注释里承诺的「页面前缀必须是已知页面名之一」**从没实现**
                 #   ⇒ 用户窗口标题里恰好含 ` · 值守台#486acd` 时被误认
                 #   ⇒ 宽泛模式是用来**关窗**的 ⇒ 会关掉用户自己的窗口。
-                "请给我一个 · 值守台#486acd", "问题：收件箱 · 值守台#486acd 怎么办",
-                "备份 · 值守台#486acd", "收件箱 · 值守台#486acd - 副本"):
+                "请给我一个 · Antinel 监理#486acd", "问题：收件箱 · Antinel 监理#486acd 怎么办",
+                "备份 · Antinel 监理#486acd", "收件箱 · Antinel 监理#486acd - 副本"):
         if WIN.is_console_title(bad, None):
-            return ("非值守台窗口 %r 被误认成值守台（会误关/误移用户窗口）" % bad)
+            return ("非Antinel 监理窗口 %r 被误认成Antinel 监理（会误关/误移用户窗口）" % bad)
     # ④ 严格模式（唯一允许**移动**窗口的判据）必须更严：
     #   它必须只认本次运行的窗口，连**别的 run_id** 都不认。
-    if not WIN.is_console_title("收件箱 · 值守台#486acd", "486acd"):
+    if not WIN.is_console_title("收件箱 · Antinel 监理#486acd", "486acd"):
         return "严格模式认不出本次运行窗口 ⇒ 窗口永远落不了位"
-    for other in ("收件箱 · 值守台", "收件箱 · 值守台#ffff",
-                  "记事本 - 收件箱 · 值守台#486acd"):
+    for other in ("收件箱 · Antinel 监理", "收件箱 · Antinel 监理#ffff",
+                  "记事本 - 收件箱 · Antinel 监理#486acd"):
         if WIN.is_console_title(other, "486acd"):
             return ("严格模式把 %r 当成本次运行窗口 ⇒ 会移动/关闭别人的窗口" % other)
     return True
@@ -869,12 +883,12 @@ def c_place_imports_time_and_threading():
 # ======================================================================
 
 def c_tray_carries_sentinel_state():
-    """`tray.json` 必须带 `shield` 字段（哨兵态）。
+    """`tray.json` 必须带 `shield` 字段（监理态）。
 
     ★ 为什么必须有：五态 `L0/L1/L2/Ls/R0` 只表达"最近有没有告警"，
-      **看不出哨兵此刻在不在岗**。实测出现过：图标显示 27 分钟前的
+      **看不出监理此刻在不在岗**。实测出现过：图标显示 27 分钟前的
       `R0`「失守 · 防线未生效」，而`guard_posture()` 实测 `guarding`、
-      哨兵 pid 83352 好好在岗 ⇒ **图标在说谎**。
+      监理 pid 83352 好好在岗 ⇒ **图标在说谎**。
     """
     import json
     import inbox_tray as T
@@ -902,7 +916,7 @@ def n_tray_without_shield_field_is_caught():
        `FileNotFoundError`（**从未有人发现**，因为 main 从不调用负控）。
 
     ⇒ 真变异：**让产品自己写出的状态文件里没有 `shield`**（复现"写状态的人
-       忘了带哨兵态"），判据必须报红；再把 `SHIELD_SUFFIX` 换成不含当前值的
+       忘了带监理态"），判据必须报红；再把 `SHIELD_SUFFIX` 换成不含当前值的
        集合，判据也必须报红。两条断言各验一次，不许只挑好验的那条。
     ★ 约定：本文件的判据是**返回红因字符串**（不是抛异常），负控按返回值判。
     """
@@ -946,7 +960,7 @@ def n_tray_without_shield_field_is_caught():
 
 
 def c_broken_posture_never_maps_to_on_duty():
-    """★ 哨兵不在岗／探不到 ⇒ **绝不**映射成「在岗」（绿）。
+    """★ 监理不在岗／探不到 ⇒ **绝不**映射成「在岗」（绿）。
 
     ★ 这是本条判据的**核心**：把"探不到"画成"没事"、把"不在岗"画成"在岗"，
       是本仓明令禁止的形状。
@@ -956,11 +970,11 @@ def c_broken_posture_never_maps_to_on_duty():
         fake = {"state": st} if st else {}
         got = T.shield_state(fake)
         if got == T.SHIELD_ONPOSTURE:
-            return "posture=%r 被映射成「哨兵在岗」（绿）" % (st,)
+            return "posture=%r 被映射成「监理在岗」（绿）" % (st,)
     # 未登记的新档位 ⇒ 落到 unknown（盲区），也不许落到「在岗」
     got = T.shield_state({"state": "brand_new_state_from_future"})
     if got == T.SHIELD_ONPOSTURE:
-        return "未登记档位被映射成「哨兵在岗」"
+        return "未登记档位被映射成「监理在岗」"
     return True
 
 
@@ -978,10 +992,10 @@ def c_tray_ps1_reads_shield_field():
 
 
 def c_all_icon_combinations_exist():
-    """五事件态 × 四哨兵态 = 20 个 `.ico` 必须**都在**。
+    """五事件态 × 四监理态 = 20 个 `.ico` 必须**都在**。
 
-    ★ 缺一个 ⇒ 托盘会回落到基础图标，而哨兵态**静默丢失**
-      （这正是本条要防的：回落时不许让"看不出哨兵状态"变成无声无息）。
+    ★ 缺一个 ⇒ 托盘会回落到基础图标，而监理态**静默丢失**
+      （这正是本条要防的：回落时不许让"看不出监理状态"变成无声无息）。
     """
     import inbox_tray as T
     miss = []
@@ -996,7 +1010,7 @@ def c_all_icon_combinations_exist():
 
 
 def c_badge_marks_differ_per_shield_state():
-    """三个哨兵态的角标**必须画得不一样**（能区分），且 `on` 态不画。
+    """三个监理态的角标**必须画得不一样**（能区分），且 `on` 态不画。
 
     ★ 调`_p_badge_probe.py` 的像素级判据 —— 为什么必须到像素：
       `os.path.getsize` 发现不了。第一版角标**一个像素都没画上**
@@ -1417,7 +1431,7 @@ def _view_html(name="report", **over):
            "window_hours": 24, "action_groups": 0,
            "buckets": {"action": 0, "info": 32, "archive": 216},
            "posture": {"state": "guarding", "label": "值守中",
-                       "why": "哨兵在岗", "consequences": []},
+                       "why": "监理在岗", "consequences": []},
            "revived_window": 25, "ledger": {"days": 0}, "rules": [],
            "chain": {"status": "ok", "files": 9, "records": 40101,
                      "broken": 0, "unchained": 0, "bad_lines": 0}}
@@ -1706,7 +1720,7 @@ def c_user_text_has_no_process_ids():
     """★ 页面文案里不许出现进程号（`pid 83352`）。
 
     实测来源（创始人「出现一些类似英文变量的词」）：
-    态势那行原写「哨兵在岗（pid 83352），最后心跳 7 分钟前」。
+    态势那行原写「监理在岗（pid 83352），最后心跳 7 分钟前」。
     ⇒ 进程号是**实现细节**，用户看不懂、也拿它做不了任何事，纯噪音。
       它仍然留在 `evidence` 里 —— 要查的人查得到，只是不该摆在正文。
     """
@@ -1725,8 +1739,8 @@ def c_user_text_has_no_process_ids():
     src = _src_of(hs)
     for m in re.finditer(r'"why"[^\n]*\n?[^\n]*pid', src):
         seg = m.group(0)
-        if "哨兵在岗" in src[max(0, m.start() - 200):m.start()]:
-            return "源码里仍把 pid 拼进「哨兵在岗」的说明"
+        if "监理在岗" in src[max(0, m.start() - 200):m.start()]:
+            return "源码里仍把 pid 拼进「监理在岗」的说明"
     return True
 
 
@@ -1779,7 +1793,7 @@ def c_path_details_is_collapsed_by_default():
 def c_close_old_windows_before_open():
     """★ 开窗**之前**必须先收掉已开着的同名窗口。
 
-    实测真缺陷（本轮）：值守台窗口属于**浏览器进程**，服务重启 /
+    实测真缺陷（本轮）：Antinel 监理窗口属于**浏览器进程**，服务重启 /
     被杀之后窗口**仍留在屏幕上**（本机实测：宿主 python 已 kill，
     1050×1932 的旧窗口还在）。而 `find_console_window` 只返回
     **第一个**同名窗口 ⇒ 落位会挑到旧的那个，把旧窗口挪到右下角、
@@ -1916,7 +1930,7 @@ def c_close_old_windows_uses_injection_point():
     try:
         WIN.find_console_windows = lambda **kw: (
             asked.append(kw.get("suffix")), [101, 202])[1]
-        n = WIN.close_console_windows(suffix=" · 值守台#abc",
+        n = WIN.close_console_windows(suffix=" · Antinel 监理#abc",
                                       closer=lambda h: (closed.append(h), True)[1])
     finally:
         WIN.find_console_windows = orig
@@ -1924,7 +1938,7 @@ def c_close_old_windows_uses_injection_point():
         return "注入替身后关闭计数不对：%r" % (n,)
     if closed != [101, 202]:
         return "关闭动作没有只针对枚举出的句柄：%r" % (closed,)
-    if asked and asked[0] != " · 值守台#abc":
+    if asked and asked[0] != " · Antinel 监理#abc":
         return "枚举侧没收到调用方指定的 suffix：%r" % (asked,)
     return True
 
@@ -1973,12 +1987,12 @@ CHECKS = [
     ("W12 页面不露进程号", c_user_text_has_no_process_ids, None),
     ("W13 术语不用代码速记", c_glossary_avoids_bare_code_lists, None),
     ("W14 文件路径收进折叠区", c_path_details_is_collapsed_by_default, None),
-    ("T01 托盘带哨兵态", c_tray_carries_sentinel_state,
+    ("T01 托盘带监理态", c_tray_carries_sentinel_state,
      n_tray_without_shield_field_is_caught),
     ("T02 坏了绝不画成在岗", c_broken_posture_never_maps_to_on_duty, None),
-    ("T03 tray.ps1 读哨兵态", c_tray_ps1_reads_shield_field, None),
+    ("T03 tray.ps1 读监理态", c_tray_ps1_reads_shield_field, None),
     ("T04 20 个图标组合齐全", c_all_icon_combinations_exist, None),
-    ("T05 三个哨兵态角标可区分", c_badge_marks_differ_per_shield_state, None),
+    ("T05 三个监理态角标可区分", c_badge_marks_differ_per_shield_state, None),
     ("T06 托盘自刷新不靠守护进程", c_tray_refreshes_without_daemon, None),
     ("R01 每类失守都给出动作", c_every_r0_class_gives_an_action, None),
     ("R02 B 类给三选一", c_b_class_offers_three_choices, None),

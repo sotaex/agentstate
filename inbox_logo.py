@@ -310,5 +310,5 @@ def collapse_console(root=None, run_id=None, token=None, closer=None,
         out.update(ok=True, why="哨标已就位，面板窗已关（%d 枚）" % n)
     else:
         out.update(ok=False,
-                   why="哨标已就位，但一枚值守台窗都没关掉（可能已不在桌面上）")
+                   why="哨标已就位，但一枚 Antinel 监理窗都没关掉（可能已不在桌面上）")
     return out

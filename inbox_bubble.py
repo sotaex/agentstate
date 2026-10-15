@@ -218,15 +218,15 @@ op.addEventListener("click", function(){
     if (st === "existing") {
       var s = document.createElement("span");
       s.className = "bub-has";
-      s.textContent = j.ok ? "值守台开着（已切到它）"
-                           : "值守台开着，但没能切到前面：" + (j.why || "请手动找窗口");
+      s.textContent = j.ok ? "Antinel 监理开着（已切到它）"
+                           : "Antinel 监理开着，但没能切到前面：" + (j.why || "请手动找窗口");
       op.replaceWith(s);
       setTimeout(fit, 30);
       return;
     }
     if (st === "app" || st === "browser") {
-      op.textContent = j.ok ? "值守台已打开" :
-        "值守台已打开，定位未完成：" + (j.why || "请手动找窗口");
+      op.textContent = j.ok ? "Antinel 监理已打开" :
+        "Antinel 监理已打开，定位未完成：" + (j.why || "请手动找窗口");
       return;
     }
     op.disabled = false;
@@ -239,9 +239,14 @@ op.addEventListener("click", function(){
 </script>
 """
     # ★ 0.50.3：值守台开着 ⇒ 那个位置不画按钮，改一句状态（见 docstring）。
-    act_open = ("<span class=\"bub-has\">值守台开着（在那边看）</span>"
+    #   ★★ 0.50.4 命名变更注记（D4，创始人 2026-10-15 签发）：「值守台」在用户
+    #      可见面退休 ⇒ 按钮「打开值守台」→「**打开 Antinel 监理**」、状态句
+    #      同步换词；同一份 JS 模板里 CSS/JS **注释**中的旧名是当时的决策记录，
+    #      按「记录原文不改写」保留。新文案长 4 字 ⇒ 气泡三元素不折行已列
+    #      真机复核（0.50.1 案）。
+    act_open = ("<span class=\"bub-has\">Antinel 监理开着（在那边看）</span>"
                 if console_open else
-                "<button class=\"bub-open\" type=\"button\">打开值守台</button>")
+                "<button class=\"bub-open\" type=\"button\">打开 Antinel 监理</button>")
     return (
         "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
@@ -316,7 +321,7 @@ def pop(title, body, level="R0", state=None, root=None, kind=None, force=False,
         except Exception as e:                              # noqa: BLE001
             vis = None
         if vis is True:
-            rep["why"] = "值守台窗口正开着，不重复打扰（面板里能看见）"
+            rep["why"] = "Antinel 监理窗口正开着，不重复打扰（面板里能看见）"
             return rep
         if vis is None and not force:
             rep["why"] = "（探不到面板可见性，按「宁可多弹」继续）"
@@ -334,11 +339,11 @@ def pop(title, body, level="R0", state=None, root=None, kind=None, force=False,
     _ensure = console or SV.ensure_console
     rec, _started = _ensure(port if port is not None else SV.DEFAULT_PORT, root)
     if not rec:
-        rep["why"] = "值守台服务起不来，冒泡没有承载页面（急事仍在收件箱里）"
+        rep["why"] = "Antinel 监理服务起不来，冒泡没有承载页面（急事仍在收件箱里）"
         return rep
     base = rec.get("url") or ""
     if not base:
-        rep["why"] = "值守台记录里没有 URL，冒泡发不出去"
+        rep["why"] = "Antinel 监理记录里没有 URL，冒泡发不出去"
         return rep
 
     # ④ 一次只留一枚：收旧冒泡

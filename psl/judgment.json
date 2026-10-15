@@ -2,13 +2,13 @@
  "spec": "psl-vs-0.1",
  "card_id": "antinel-security-suite",
  "skill": "antinel-security",
- "skill_version": "0.50.3",
+ "skill_version": "0.50.4",
  "verdict": "PASS",
  "status": {
   "value": "current",
   "derivation": "auto",
   "reason": null,
-  "checkedAt": "2026-10-15T06:59:44+08:00",
+  "checkedAt": "2026-10-15T19:33:02+08:00",
   "note": "re-derive any time: python -m tools.antinel_verify (--manifest for all 24 shipped files); which assertions failed: discrimination.failed[]"
  },
  "scope": {
@@ -81,9 +81,9 @@
     "0.16.0 antinel_verify derives current on an intact package",
     "0.17.0 P-B1 without --manifest, a shipped file outside the digest set is out of scope (documented)",
     "F-09 host-shield 自检查不出来时不谎报已安装（三态：None != True）",
-    "F-13 paramedic 复活死亡哨兵并留痕（死因 RC5 回归）",
+    "F-13 paramedic 复活死亡监理并留痕（死因 RC5 回归）",
     "F-15 门闸高危事件实时推送＋同类 30 分钟节流（0.28.2 报警 v1）",
-    "F-17 心跳判死：无心跳/心跳陈旧的哨兵会被强制重启（B2）",
+    "F-17 心跳判死：无心跳/心跳陈旧的监理会被强制重启（B2）",
     "0.26 SafeZone registered + tamper-locked"
    ],
    "stale_digests_at_run_time": {
@@ -108,7 +108,7 @@
  },
  "digests": {
   "psl/antinel-namespaces.json": "sha256:2db67f32a5b803560f458c4589bd4bb4678cc17bc16625f6b6b3ad20f9b202d2",
-  "rules/default.json": "sha256:7b42d95a90daff713986885a825768b9ac86ea5dc493f6e24a7745888fabb395",
+  "rules/default.json": "sha256:41fc83978021f8a1ac14e5310977af59763e028e341880dd4a71a18a39ecda2e",
   "rules/pricing.json": "sha256:e299e7afa07a97128ce00c13706379c79368c747cd4303c488f1c53c5339e253",
   "rules/typosquat_top.json": "sha256:0c699af6ba05d7675055be29b8c1e379714d9fbf44c4369a1717cade424190ad",
   "rules/economics/workbuddy.json": "sha256:7d570a0d8cb09f803695a4af147269620acdd5da5f403e2534a0c418c202c6a6",
@@ -121,17 +121,17 @@
   "scripts/scan.py": "sha256:029e3dd67d0fa7ede2b8d9300df5e52f0e497b781be853117b0bb2cc3fee2cc1",
   "scripts/install.py": "sha256:4c74657029e698e8a3d67d61406ebf3674eee6b167b9a6b7926c8672b3a69f59",
   "scripts/report.py": "sha256:deeedb87775792a0eb3f39592f96dda6d45064f07ca3c40a73eadef1315c5945",
-  "scripts/verification_tests.py": "sha256:19821d553d460a5370d098483349c2951501fb674162fdba7676f7b7f85424e7",
+  "scripts/verification_tests.py": "sha256:cd0372ecc4ddcc02e52e2db10b0acf918ce30f9808f8edda33ef88194cd751e3",
   "session_dna.py": "sha256:ea8bf7f272fa51ae6408e3cc3c7bbecbc0b96938f6ecae2d2ea34ee6f0e5f0a2",
   "transcript_reader.py": "sha256:c0ce99c5bdfb255f170ca744c011ae64ceb9569d1c9dd8efc1a2c096ff89dc1c",
   "audit_chain.py": "sha256:3057de8bd513395f308f0e66f4830c3dc82e7156013042de5d6e2fe3ee614e40",
-  "antinel.py": "sha256:58ec81de99e671e06b02127d0b5887213d54fa267eddba0ad763f1f827734e6b",
+  "antinel.py": "sha256:2c572f68cbb07c574e4a1b4c3b2a630e4d04c887a3175d8a17bfc44eb54319cb",
   "hub.py": "sha256:edcb1b94194e551d5b0023749ae5417e67729b22eb391198fcae74a906668c08",
   "tools/enforce_probe.py": "sha256:4eea43a9f6dd2e819117477830a9677b832ea8f6f7f8c34857e0ae54e7463ac5"
  },
  "run": {
-  "started_at": "2026-10-15T06:55:21+0800",
-  "duration_ms": 262810,
+  "started_at": "2026-10-15T19:26:23+0800",
+  "duration_ms": 399137,
   "duration_note": "wall-clock of a subprocess fan-out suite; machine- and load-dependent, not comparable across environments",
   "executor": "scripts/run_harness.py",
   "exit_code": 0,

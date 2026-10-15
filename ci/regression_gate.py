@@ -400,8 +400,8 @@ def j_posture_why_no_frozen_numbers():
 
     要防的复发（创始人 2026-10-12 第 3 条，原话「如果时间不会随时间走，
     就是错的，这句话要不不写」）：
-      在岗分支的 why 原写「哨兵在岗，最后心跳 N 分钟前」。
-      值守台页面**零自动刷新**（无 meta refresh / setInterval / location.reload，
+      在岗分支的 why 原写「监理在岗，最后心跳 N 分钟前」。
+      Antinel 监理页面**零自动刷新**（无 meta refresh / setInterval / location.reload，
       全文件实测）⇒「N 分钟前」是**渲染那一刻冻结的值**，页面开一小时
       它永远写同一个数。**这是一个会说谎的数字**（F55 同族：页面显示一个
       它维持不住的承诺）。已删；读数仍留在 `evidence.heartbeat_age`。
@@ -727,7 +727,7 @@ def j_page_titles_guard():
     """★★ G-05（2026-10-12）：认窗白名单守卫必须在位（T-05 边界误伤）。
 
     背景（X-007，0.36.5 实测）：认窗判据曾用宽泛匹配（标题前缀）认
-    「本次运行的窗口」，误把用户自己的记事本当成值守台窗口处理。
+    「本次运行的窗口」，误把用户自己的记事本当成Antinel 监理窗口处理。
     0.36.5 起 `_mark_at_tail()` 的前缀白名单专守这件事，其真身在
     `ci/inbox_guards_0360.py` 的 `c_window_suffix_matches_every_page()`，
     但 `defect_types.gate_ids_from_registry()` 只读 `regression_gate.py`
@@ -737,7 +737,7 @@ def j_page_titles_guard():
     ★ ①② 两条都过才绿：
       ① 0360 的专守函数必须通过（页面清单逐条实跑认窗）；
       ② T-05 本质断言：0.36.5 实测过的用户窗口形状
-         `is_console_title("请给我一个 · 值守台#a8276c", "a8276c")` 必须为 False。
+         `is_console_title("请给我一个 · Antinel 监理#a8276c", "a8276c")` 必须为 False。
     ★ 连带：0360 全量（52 条）、收旧窗、`find_console_windows` 两级匹配
       在交付闸门里照跑；W-01 批次改 `_mark_at_tail` 时本条继续守。
     """
@@ -754,8 +754,8 @@ def j_page_titles_guard():
     win = _load_module_file("inbox_window.py", "inbox_window_g05")
     if win is None:
         return False, "inbox_window.py 加载失败"
-    if win.is_console_title("请给我一个 · 值守台#a8276c", "a8276c"):
-        return False, ("用户窗口形状「请给我一个 · 值守台#a8276c」被误认成本次运行窗口"
+    if win.is_console_title("请给我一个 · Antinel 监理#a8276c", "a8276c"):
+        return False, ("用户窗口形状「请给我一个 · Antinel 监理#a8276c」被误认成本次运行窗口"
                        "（T-05 复发：宽泛匹配认对象）")
     return True, "认窗白名单在位（0360 专守过 ＋ 用户形状拒认）"
 
@@ -1596,18 +1596,18 @@ def j_docs_only_no_full_fallback():
 def j_pinned_hashes_match_manifest():
     """★★ D-36（2026-10-13）：**被自检钉住的源码改了，就必须重签 manifest**（T-02 哈希面）。
 
-    要防的复发（2026-10-13 实测，不是推演 —— 哨兵链上 135 条
+    要防的复发（2026-10-13 实测，不是推演 —— 监理链上 135 条
     `host_shield_spawn_failed`，最近一条 18:44:27）：
       A1（`2397451`）改了 `host_shield.py`，而 `psl/manifest.json` 停在 `914c5dc`
       **没有重签** ⇒ 源树里的 manifest 是「落后快照」⇒
       `host_shield.self_check()` 报「host_shield.py 与 manifest 不符」
       ⇒ `is_dev_build()` 为 False（登记版本 0.48.4 ≥ 代码 0.48.4）
       ⇒ `spawn_sentinel()` **硬拦**（`return False, 0, "self-check-failed: …"`）
-      ⇒ **哨兵拉不起来**。而**没有任何闸门判据会因此变红** —— 唯一覆盖
+      ⇒ **监理拉不起来**。而**没有任何闸门判据会因此变红** —— 唯一覆盖
       manifest 哈希的 D-27 只查 `VERSION_BEARING_CHAIN_FILES` 一件
       （`hooks/pre_tool_use.py`）；`host_shield.py`／另 3 个告警链路件／
       `rules/hosts/*.json` 全都没有判据。发现它的唯一途径是**用户报障**
-      （「我多次看到冒泡说哨兵拉起失败」）。
+      （「我多次看到冒泡说监理拉起失败」）。
 
     ★ 为什么这是**结构性**的、必须由闸门守：源码每次改动都在"滚动"，而 manifest
       是发布时快照 —— 只要有人动这几个文件，快照就落后一格。这属于 **T-02
@@ -1634,7 +1634,7 @@ def j_pinned_hashes_match_manifest():
         return None, "缺 host_shield.py"
     if not hasattr(hs, "self_check") or not hasattr(hs, "_GUARDED_CHAIN_FILES"):
         return False, ("host_shield 没有 self_check / _GUARDED_CHAIN_FILES"
-                       "（自检入口被改名/删了？那样哨兵既没人拦也没人放）")
+                       "（自检入口被改名/删了？那样监理既没人拦也没人放）")
     guarded = tuple(getattr(hs, "_GUARDED_CHAIN_FILES", ()) or ())
     if not guarded:
         return False, ("_GUARDED_CHAIN_FILES 为空（告警链路保护名单被清空 ⇒ 自检"
@@ -1656,12 +1656,12 @@ def j_pinned_hashes_match_manifest():
     if not ok:
         return False, (
             "真仓自检不通过（%d 条）：%s —— 这会让 `spawn_sentinel()` **硬拦**"
-            "（哨兵拉不起来）。改了被钉住的源码就必须重签 manifest："
+            "（监理拉不起来）。改了被钉住的源码就必须重签 manifest："
             "`python _tools_034/_resign_manifest.py`；"
             "若报「没登记进 manifest」则跑 `python scripts/build_package.py`"
             % (len(problems), "；".join(problems[:3])))
     return True, ("自检通过：host_shield.py ＋ %d 个告警链路件 ＋ rules/hosts/*.json "
-                  "与 manifest 登记一致（哨兵可拉起）" % len(guarded))
+                  "与 manifest 登记一致（监理可拉起）" % len(guarded))
 
 
 def j_baseline_tag_reminder_in_place():
@@ -2024,8 +2024,8 @@ def selfcheck():
         #     同一个根因，非噪声；不要为了消掉这行 △ 而放宽 D-36。
         ("D-26 缺陷：把「最后心跳 N 分钟前」加回 why（冻结读数复发）",
          "host_shield.py",
-         '"why": "哨兵在岗",',
-         '"why": "哨兵在岗，最后心跳 %.0f 分钟前" % 6,',
+         '"why": "监理在岗",',
+         '"why": "监理在岗，最后心跳 %.0f 分钟前" % 6,',
          "D-26"),
         # ★★ D-27 负控（2026-10-12）：把重签工具改回**裸 sha256** 口径。
         #   模拟的正是本轮那次真实破坏：口径分叉 ⇒ 假红（没变判成需重签）
@@ -2138,7 +2138,7 @@ def selfcheck():
         #   ⚠️ 已知连带：本条自己红（期望）；另 D-26 负控（改 host_shield.py）与
         #     A1×2／A2 三条负控（改 hooks/pre_tool_use.py）也会连带让 D-36 红 ——
         #     那些注入确实造成了"改了没重签"，是同一个根因，机器会打 △。
-        ("D-36 缺陷：改了被自检钉住的源码却不重签 manifest（哨兵拉不起来）",
+        ("D-36 缺陷：改了被自检钉住的源码却不重签 manifest（监理拉不起来）",
          "host_shield.py",
          "# -*- coding: utf-8 -*-",
          "# -*- coding: utf-8 -*-  # NEGCTL-D36 改了源码不重签 manifest",
@@ -2383,7 +2383,7 @@ def _checks(m):
          j_fastlane_not_silent),
         ("D-35 纯文档改动不许回退全量（钩子层不许被逼到 --no-verify，T-10）",
          j_docs_only_no_full_fallback),
-        ("D-36 自检钉住的源码改了必须重签 manifest（哨兵拉不起来，T-02）",
+        ("D-36 自检钉住的源码改了必须重签 manifest（监理拉不起来，T-02）",
          j_pinned_hashes_match_manifest),
         ("D-37 before 基线提醒必须在位且真接线（静默降级，T-10）",
          j_baseline_tag_reminder_in_place),

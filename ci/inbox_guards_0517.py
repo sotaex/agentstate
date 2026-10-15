@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""0517 判据 —— 值守台窗口「活得比调用方久」（daemon 委托开窗路径）。
+"""0517 判据 —— Antinel 监理窗口「活得比调用方久」（daemon 委托开窗路径）。
 
 背景（2026-10-14 创始人实测「起得来、活不久」）：
   `antinel inbox window` 如实报「已就位」，窗口随后消失。四路同机实证：
@@ -365,14 +365,14 @@ def w17d():
             raise Skip("SKIP: 无桌面枚举环境（CI）")
     else:
         if desktops:
-            return "值守台服务（8790）没在听，但本会话有桌面 —— 保服务链路断了"
-        raise Skip("SKIP: 无值守台服务且无桌面（CI 环境）")
+            return "Antinel 监理服务（8790）没在听，但本会话有桌面 —— 保服务链路断了"
+        raise Skip("SKIP: 无Antinel 监理服务且无桌面（CI 环境）")
     return True
 
 
 def main():
     print("=" * 78)
-    print("0517 判据 —— 值守台窗口寿命：daemon 委托开窗（起得来，更要活得久）")
+    print("0517 判据 —— Antinel 监理窗口寿命：daemon 委托开窗（起得来，更要活得久）")
     print("（全部内存注入；负控同一把尺子只换输入；不碰真窗口/真浏览器）")
     print("=" * 78)
     ok = fail = skip = 0

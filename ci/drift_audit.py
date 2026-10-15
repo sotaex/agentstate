@@ -674,8 +674,8 @@ for fn in json.loads(files):
     open(os.path.join(pend, fn), "w").write("x")
 audit = tempfile.mkdtemp(prefix="hsaudit_")
 # ★ 审计探针的两条"不许碰真实状态"，都必须显式声明：
-#   ① save_state 会写 ~/.antinel/host_shield.json，而**哨兵在岗**——探针用的是假 state，
-#      一旦落盘就把哨兵的 sentinel_pid/last_task_check 冲掉（护卫自己被自己人打死）。
+#   ① save_state 会写 ~/.antinel/host_shield.json，而**监理在岗**——探针用的是假 state，
+#      一旦落盘就把监理的 sentinel_pid/last_task_check 冲掉（护卫自己被自己人打死）。
 #   ② note_pending 会写真实待裁决队列，临时目录条目会把用户的队列污染掉。
 #   两者都重定向到临时目录/空实现；判据（is_denied）不依赖它们落盘。
 hs.save_state = lambda st: None

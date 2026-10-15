@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: Apache-2.0
 
-"""0.48.5 值守台细节修订判据（交接件 v1.1 §5.7）—— 编号 U-01…U-15。
+"""0.48.5 Antinel 监理细节修订判据（交接件 v1.1 §5.7）—— 编号 U-01…U-15。
 
 ★★ 由来：交接件 v1.1（2026-10-12）§5.2 的 19 条产品修订，逐条四件套
    （正判据／反向对照／连带对照／可观测）。本文件是它们的**判据落点**
@@ -15,7 +15,7 @@
      批次 5（W-01 ＋ W-02 边界项）    → W-01 / W-02（本 commit —— 认窗白名单
                                         单独提交，可单独回滚；G-05 锚点未动）
      批次 6（W-03 · 遗留问题 A2）     → W-03（托盘与 Web 状态词同源）
-     批次 7（W-04 · 遗留问题 B1）     → W-04（值守台常驻：同端口/口令自恢复）
+     批次 7（W-04 · 遗留问题 B1）     → W-04（Antinel 监理常驻：同端口/口令自恢复）
      批次 8（W-05 · 遗留问题 B2）     → W-05（端口漂移不再静默：出声＋落盘＋托盘带端口）
      批次 9（W-06 · 遗留问题 B3）     → W-06（口令不进 URL：HttpOnly cookie ＋ 链接零 t=）
      批次 10（C1 · 负控模板化）        → C-01（渲染型负控走 `_mut_render` 两步法）
@@ -536,9 +536,9 @@ def u97():
         return "PAGE_TITLES 四键被改动：%r" % (sorted(SV.PAGE_TITLES),)
     # ④ 认窗基线（0360 的真实判定，不在这里二次实现）
     import inbox_window as IW
-    if not IW.is_console_title("收件箱 · 值守台#abc123", "abc123"):
+    if not IW.is_console_title("收件箱 · Antinel 监理#abc123", "abc123"):
         return "页面名标题认不出了（认窗基线被破坏）"
-    if IW.is_console_title("请给我一个 · 值守台#a8276c", "a8276c"):
+    if IW.is_console_title("请给我一个 · Antinel 监理#a8276c", "a8276c"):
         return "用户窗口形状被误认（G-05 红线）"
     # ⑤ 无未登记术语
     for view in _VIEWS:
@@ -854,7 +854,7 @@ def n_u19():
 @check("U-06 ★ 乙3：收件箱页有 <h2>，文本 == PAGE_TITLES[\"inbox\"]（唯一真源）")
 def u06():
     """乙3：收件箱页无 `<h2>` 页面名，其余三页都有 —— 同一页三个身份
-    （title「收件箱 · 值守台#hash」/ 选项卡「收件箱」/ 无 h2）。
+    （title「收件箱 · Antinel 监理#hash」/ 选项卡「收件箱」/ 无 h2）。
     文案取 `PAGE_TITLES`（唯一真源，0360:741 硬锁四键 —— 加了状态词那种
     字段立刻红，所以这里只许读它，不许另写）。"""
     page = _page("inbox")
@@ -1023,24 +1023,24 @@ def _state_words():
 
 @check("W-01 ★ 状态词标题：四条认窗断言 ＋ 标题形态 ＋ 词表覆盖")
 def w01():
-    """§5.5 定稿落地：标题恒用状态词（`<状态词> · 值守台#<hash>`）。
+    """§5.5 定稿落地：标题恒用状态词（`<状态词> · Antinel 监理#<hash>`）。
 
     ① 四条 `is_console_title` 断言（逐字取自交接件 §5.5「四条负控」）：
        状态词 True / 用户形状 False / 挂程序 False / 页面名 True；
-    ② 渲染四页：`<title>` ＝ 状态词 · 值守台#<6hex>，且与头部 `<b>` **同词**
+    ② 渲染四页：`<title>` ＝ 状态词 · Antinel 监理#<6hex>，且与头部 `<b>` **同词**
        （标题与头部不许两种说法）；
     ③ 覆盖：`STATE_LABEL` ∪ ｢未启用｣ ⊆ 认窗白名单 —— 漏一个词，
        那个态的窗口就认不出、落位失效（§5.5 原话警告）。
     """
     import inbox_window as WIN
     four = (
-        ("拦截 · 值守台#abc123", "abc123", True,
+        ("拦截 · Antinel 监理#abc123", "abc123", True,
          "状态词标题认不出（W-01 前提不成立）"),
-        ("请给我一个 · 值守台#a8276c", "a8276c", False,
+        ("请给我一个 · Antinel 监理#a8276c", "a8276c", False,
          "用户窗口形状被误认（0.36.5 实测形状，绝不许放行）"),
-        ("记事本 - 拦截 · 值守台#abc123", "abc123", False,
+        ("记事本 - 拦截 · Antinel 监理#abc123", "abc123", False,
          "挂了别的程序的标题被误认"),
-        ("收件箱 · 值守台#abc123", "abc123", True,
+        ("收件箱 · Antinel 监理#abc123", "abc123", True,
          "页面名标题认不出（四页导航保底失效）"),
     )
     for t, rid, want, why in four:
@@ -1054,9 +1054,9 @@ def w01():
         m = re.search(r"<title>([^<]+)</title>", page)
         if not m:
             return "%s 页没有 <title>（判据扫的锚点没了）" % view
-        tm = re.match(r"^(.+) · 值守台#[0-9a-f]{6}$", m.group(1))
+        tm = re.match(r"^(.+) · Antinel 监理#[0-9a-f]{6}$", m.group(1))
         if not tm:
-            return ("%s 页标题形态不对：%r（应为「状态词 · 值守台#<6hex>」）"
+            return ("%s 页标题形态不对：%r（应为「状态词 · Antinel 监理#<6hex>」）"
                     % (view, m.group(1)))
         word = tm.group(1)
         if word not in words:
@@ -1097,13 +1097,13 @@ def n_w01():
         return ("G-05 注入锚点两行不在了 —— regression_gate 的 G-05 负控"
                 "会失配，「不许误关用户窗口」的保护悄悄失效")
     mut = _load(src.replace(a_union, a_only), "is0490_nw01", _WINDOW_REL)
-    if mut.is_console_title("拦截 · 值守台#abc123", "abc123") is not False:
+    if mut.is_console_title("拦截 · Antinel 监理#abc123", "abc123") is not False:
         return "负控失效：缩回仅页面名后状态词标题仍被认出（注入没生效）"
-    if mut.is_console_title("收件箱 · 值守台#abc123", "abc123") is not True:
+    if mut.is_console_title("收件箱 · Antinel 监理#abc123", "abc123") is not True:
         return "负控失效：缩回仅页面名后页面名标题反而认不出（变异改错了地方）"
     # 连回正判据：真实现下状态词必须认得出（否则负控无分辨力）
     import inbox_window as WIN
-    if WIN.is_console_title("拦截 · 值守台#abc123", "abc123") is not True:
+    if WIN.is_console_title("拦截 · Antinel 监理#abc123", "abc123") is not True:
         return "夹具不成立：真实现本身状态词标题就认不出 ⇒ 负控无分辨力"
     return True
 
@@ -1141,14 +1141,17 @@ def n_w02():
     src = _src(_SERVER_REL)
     # ★ 0.48.6（B3）：锚点同步 —— `_head` 的 favicon 不再挂 `?t=%s`，
     #   于是参数表少收一个 `_esc(token)`（变异体也同步少收一个）。
+    # ★★ 0.50.4（改名批，B7）：`_head` 的后缀收编为
+    #   `WIN.console_title_suffix(rid)` 派生（原先这里自造 `"%s · 值守台%s"`）
+    #   ⇒ 参数表由 `mark` 改为 `tail`，锚点与变异体同步改。
     a_body = ('            "<style>%s</style></head><body>"\n'
-              '            % (_esc(title), mark, CSS))')
+              '            % (_esc(title), tail, CSS))')
     if a_body not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
     page, _why = _mut_render(src.replace(
         a_body,
         '            "<style>%s</style></head><body><span>%s</span>"\n'
-        '            % (_esc(title), mark, CSS, mark))'),
+        '            % (_esc(title), tail, CSS, tail))'),
         "is0490_nw02", _SERVER_REL,
                              view="inbox", filt=M.BUCKET_ACTION,
                            root=tempfile.mkdtemp(prefix="g0490_nw02_"),
@@ -1197,7 +1200,7 @@ def _w03_assert():
         tm = re.search(r"<title>([^<]+)</title>", page)
         if not tm:
             return "%s：页面没有 <title>（判据扫的锚点没了）" % name
-        pm = re.match(r"^(.+) · 值守台#[0-9a-f]{6}$", tm.group(1))
+        pm = re.match(r"^(.+) · Antinel 监理#[0-9a-f]{6}$", tm.group(1))
         if not pm:
             return "%s：标题形态不对：%r" % (name, tm.group(1))
         page_word = pm.group(1)
@@ -1222,7 +1225,7 @@ def _w03_assert():
                     % (name, payload.get("count"), payload.get("total"),
                        want_count, want_total))
         if payload.get("shield") != TR.SHIELD_ONPOSTURE:
-            return "%s：guarding 的哨兵态不是 on：%r" % (name, payload.get("shield"))
+            return "%s：guarding 的监理态不是 on：%r" % (name, payload.get("shield"))
         if payload.get("state") != want_st:
             return "%s：图标态应为 %r，实得 %r" % (name, want_st,
                                                 payload.get("state"))
@@ -1383,7 +1386,7 @@ def _w04_daemon_ok():
                                 ensure=lambda *a, **k: calls.append(a),
                                 supervise_every=0)
     if n != 1 or len(calls) != 1:
-        return ("supervise=True 时守护进程没去确保值守台（tick=%r，ensure 调用 %d 次）"
+        return ("supervise=True 时守护进程没去确保Antinel 监理（tick=%r，ensure 调用 %d 次）"
                 % (n, len(calls)))
     calls2 = []
     DM.Daemon(root=hub).run(max_ticks=1, interval=0, supervise=False,
@@ -1410,7 +1413,7 @@ def _w04_daemon_ok():
     return None
 
 
-@check("W-04 ★ B1：值守台常驻 —— 两轴判活 / 同端口同口令重拉 / 守护进程监督")
+@check("W-04 ★ B1：Antinel 监理常驻 —— 两轴判活 / 同端口同口令重拉 / 守护进程监督")
 def w04():
     for fn in (_w04_status_ok, _w04_ensure_ok, _w04_daemon_ok):
         r = fn()
@@ -1888,7 +1891,7 @@ def _w06_assert():
         if st2 != 200:
             return "带 cookie 请求其它页没通过：HTTP %d（cookie 没被认）" % st2
         if '<header class="bar">' not in b2:
-            return "带 cookie 拿到的不是值守台页面"
+            return "带 cookie 拿到的不是Antinel 监理页面"
         st3, _h3, b3 = _w06_http(port, "/?v=report")
         if st3 != 403:
             return "不带任何凭证的请求没被拒：HTTP %d" % st3
@@ -2209,7 +2212,7 @@ _W07_APPEAR = 2.5
 _W07_CHILD = r'''#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: Apache-2.0
-"""W-07 探针：在**一次性进程**里走值守台开窗路径，验"落位真的被执行"。
+"""W-07 探针：在**一次性进程**里走Antinel 监理开窗路径，验"落位真的被执行"。
 
 用法：w07_child.py <ROOT> <MODE> <WAIT_SEC> <URL>
   MODE=settled  走 `open_console_settled`（C4 修法；`inbox_cli window` 用的就是它）
@@ -2560,7 +2563,7 @@ def n_w07():
 
 def main():
     print("=" * 78)
-    print("0.48.5 值守台细节修订判据（交接件 v1.1 §5.7）—— "
+    print("0.48.5 Antinel 监理细节修订判据（交接件 v1.1 §5.7）—— "
           "批1 U-01/U-03/U-08 · 批2 U-10/U-11/U-05 · 批3 U-04/U-06 · "
           "批4 U-13/U-15 · 批5 W-01/W-02（认窗白名单，单独 commit）· "
           "批6 W-03（A2）· 批7 W-04（B1）· 批8 W-05（B2）· 批9 W-06（B3）· "

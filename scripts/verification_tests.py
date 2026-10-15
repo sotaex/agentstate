@@ -2196,7 +2196,7 @@ def main():
         _f11_file = next(iter(_f11_dir.rglob("*.jsonl")))
         _f11_rec = json.loads(_f11_file.read_text(encoding="utf-8").splitlines()[-1])
         _f11_ok = bool(_f11_rec.get("hash"))
-    record("F-11 -I 隔离模式下哨兵留痕可达（死因 RC4 回归）", _f11_ok,
+    record("F-11 -I 隔离模式下监理留痕可达（死因 RC4 回归）", _f11_ok,
            (_p11.stdout + _p11.stderr).strip()[:90])
 
     # F-12: enable 必须检查 schtasks /Create 的返回码（死因 RC2：rc 被丢弃 + 无条件
@@ -2206,11 +2206,11 @@ def main():
     _f12_re = re.search(r'(?:_SCHTASKS|schtasks),\s*"/Create".{0,300}?returncode',
                         _ant_src, re.S)
     _f12_ok = (_f12_re is not None
-               and "哨兵已启动并注册开机自启" not in _ant_src)
+               and "监理已启动并注册开机自启" not in _ant_src)
     record("F-12 enable 检查 schtasks 返回码，不再无条件假成功（死因 RC2 回归）",
            _f12_ok, "rc-check=%s, false-success-removed=%s" % (
                _f12_re is not None,
-               "哨兵已启动并注册开机自启" not in _ant_src))
+               "监理已启动并注册开机自启" not in _ant_src))
 
     # F-13: paramedic 复活。布防 + pid 已死 → ensure_alive 拉起真实哨兵并留
     #       host_shield_revived（死因 RC5：死亡无人知晓、无法自愈）。Windows-gated。
@@ -2235,12 +2235,12 @@ def main():
             subprocess.run(["taskkill", "/F", "/PID", str(_st13["sentinel_pid"])],
                            capture_output=True, timeout=30, creationflags=_CREATE_NO_WINDOW)
         _discard(_f13_hub / "host_shield.json")
-        record("F-13 paramedic 复活死亡哨兵并留痕（死因 RC5 回归）",
+        record("F-13 paramedic 复活死亡监理并留痕（死因 RC5 回归）",
                _revived and _alive,
                "out=%r pid=%s" % (_p13.stdout.strip()[:20],
                                   _st13.get("sentinel_pid")))
     else:
-        record("F-13 paramedic 复活死亡哨兵并留痕（死因 RC5 回归）", True,
+        record("F-13 paramedic 复活死亡监理并留痕（死因 RC5 回归）", True,
                "platform-gated: spawn/ACL 是 Windows 机制")
 
     # F-14: 心跳断档必须被看见（死因 RC5 消费端）：heartbeat_age 能读出 2h 前的心跳年龄，
@@ -2261,7 +2261,7 @@ def main():
                           encoding="utf-8", errors="replace", timeout=60, env=_env14, creationflags=_CREATE_NO_WINDOW)
     _f14_age_ok = _p14.stdout.strip().startswith("AGE_MIN 1")  # ~120 分钟，容差取 1xx
     record("F-14 心跳断档可测（heartbeat_age ≥60 分钟）且晨报带门闸在岗行",
-           _f14_age_ok and "门闸哨兵" in _ant_src,
+           _f14_age_ok and "监理：在岗" in _ant_src,
            (_p14.stdout + _p14.stderr).strip()[:90])
 
     # F-15: 门闸执法后实时推送 + 同类节流（0.28.2 报警 v1；定稿方案 v1.2 职责 3）。
@@ -2430,11 +2430,11 @@ def main():
             subprocess.run(["taskkill", "/F", "/PID", str(_f17_old)],
                            capture_output=True, timeout=30, creationflags=_CREATE_NO_WINDOW)
         _discard(_f17_hub / "host_shield.json")
-        record("F-17 心跳判死：无心跳/心跳陈旧的哨兵会被强制重启（B2）",
+        record("F-17 心跳判死：无心跳/心跳陈旧的监理会被强制重启（B2）",
                _f17_ok, "oldpid=%s age=%s -> %s" % (_f17_old, _m17_age.group(1) if _m17_age else "?",
                                                      (_p17.stdout + _p17.stderr).strip()[:80]))
     else:
-        record("F-17 心跳判死：无心跳/心跳陈旧的哨兵会被强制重启（B2）", True,
+        record("F-17 心跳判死：无心跳/心跳陈旧的监理会被强制重启（B2）", True,
                "platform-gated: 进程挂起/强杀是 Windows 机制")
 
     # F-18 外部命令绝对路径（B4i/C4）：三处装运件不得再裸调 icacls/schtasks/taskkill/powershell。
@@ -2822,7 +2822,7 @@ def main():
         env=dict(os.environ, ANTINEL_HOST_MIRROR="0", WORKBUDDY_CONFIG_DIR=str(_u1wb)), creationflags=_CREATE_NO_WINDOW)
     _breach_text = (_u1 / ".psl" / "audit" / (time.strftime("%Y-%m-%d") + ".jsonl")).read_text(
         encoding="utf-8", errors="replace") if (_u1 / ".psl" / "audit" / (time.strftime("%Y-%m-%d") + ".jsonl")).is_file() else ""
-    record("U1-2 哨兵注册校验：settings 与布防哈希不符 → breach（hook_registration_changed）",
+    record("U1-2 监理注册校验：settings 与布防哈希不符 → breach（hook_registration_changed）",
            "BREACH_SCAN_DONE" in _breach_run.stdout and '"hook_registration_changed"' in _breach_text,
            "out=%s" % _breach_run.stdout.strip()[:60])
     _reg_ok = (

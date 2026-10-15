@@ -16,9 +16,9 @@
   ② 落位只取**第一个**同名窗口（`find_console_window` 命中即 `return False`）。
      同标题有多个时（旧的残留 + 新开的），"第一个"由枚举顺序决定、不可控
      ⇒ 挪走旧的、新的留在旧位置旧尺寸 ⇒ **正是用户看到的现象**。
-  ③ 落位认窗口只靠"标题含「 · 值守台」"⇒ 可能命中**用户自己的浏览器窗口**
+  ③ 落位认窗口只靠"标题含「 · Antinel 监理」"⇒ 可能命中**用户自己的浏览器窗口**
      （实测本机 Edge 普通窗口标题为
-     「收件箱 · 值守台 和另外 14 个页面 - 个人 - Microsoft Edge」），
+     「收件箱 · Antinel 监理 和另外 14 个页面 - 个人 - Microsoft Edge」），
      而 `SetWindowPos` 命中它的后果是**把用户的浏览器搬走**。
 
 ★ 本文件的判据纪律（沿用 0.36.0，每条都有配套负控 `n_*`）：
@@ -154,7 +154,7 @@ def c_close_console_only_touches_enumerated():
     try:
         WIN.find_console_windows = lambda **kw: (asked.append(kw.get("suffix")),
                                                  [11, 22, 33])[1]
-        n = WIN.close_console_windows(suffix=" · 值守台#zz",
+        n = WIN.close_console_windows(suffix=" · Antinel 监理#zz",
                                       closer=lambda h: (closed.append(h), True)[1])
     finally:
         WIN.find_console_windows = orig
@@ -162,7 +162,7 @@ def c_close_console_only_touches_enumerated():
         return "关闭动作没有逐个作用于枚举出的句柄：%r" % (closed,)
     if n != 3:
         return "关闭计数不对：%r" % (n,)
-    if asked and asked[0] != " · 值守台#zz":
+    if asked and asked[0] != " · Antinel 监理#zz":
         return "枚举侧没收到调用方指定的 suffix：%r" % (asked,)
     return True
 
@@ -439,7 +439,7 @@ def c_console_title_suffix_carries_run_id():
 
     ★★ 这条判据的第一版把方向写反了（我自己踩的）：
       我写「身份后缀必须以稳定后缀结尾」—— 实测 `False`，
-      因为身份串就在**末尾**，` · 值守台#abc123` 不以 ` · 值守台` 结尾。
+      因为身份串就在**末尾**，` · Antinel 监理#abc123` 不以 ` · Antinel 监理` 结尾。
       ★ 写完立刻暴露了一个**真实设计缺陷**（不是判据的错）：
         通用后缀因此**认不出**带身份串的窗口 ⇒
         `close_console_windows` 若按通用后缀匹配就关不掉上一轮的窗口。
@@ -450,7 +450,7 @@ def c_console_title_suffix_carries_run_id():
     """
     import inbox_window as WIN
     s = WIN.console_title_suffix("abc123")
-    if s != " · 值守台#abc123":
+    if s != " · Antinel 监理#abc123":
         return "身份后缀形状不对：%r" % s
     # 身份串在**末尾** ⇒ 通用后缀不是它的后缀（这是设计好的，必须如此）
     if s.endswith(WIN.CONSOLE_WINDOW_TITLE_SUFFIX):
@@ -466,24 +466,24 @@ def c_console_title_suffix_carries_run_id():
 
 
 def c_browser_window_never_matched():
-    """★★★ 绝不把**浏览器普通窗口**当成值守台窗口（本轮真闯过这个祸）。
+    """★★★ 绝不把**浏览器普通窗口**当成Antinel 监理窗口（本轮真闯过这个祸）。
 
     ★★★ 这条判据来自 0.36.2 修过程中的**真实事故**，不是推演：
       我为了让"收旧窗"能认出带身份串的窗口，把宽泛判据写成
-      「标题**中段**含 ` · 值守台`」。实测跑了一次
+      「标题**中段**含 ` · Antinel 监理`」。实测跑了一次
       `close_console_windows()`，**用户那个有 15 个标签的 Edge 窗口
       被关掉了**（枚举复查：两个 Edge 窗口只剩一个）。
       实测真实标题（判据设计的依据）：
-        app 窗口 「收件箱 · 值守台#f356b0」
-        用户窗口 「收件箱 · 值守台 和另外 14 个页面 - 个人 - Microsoft Edge」
+        app 窗口 「收件箱 · Antinel 监理#f356b0」
+        用户窗口 「收件箱 · Antinel 监理 和另外 14 个页面 - 个人 - Microsoft Edge」
       两者窗口类名**相同**（`Chrome_WidgetWin_1`）⇒ 类名区分不了。
     ★ 判据要求：**任何模式**下都不能命中带浏览器品牌后缀的标题。
     """
     import inbox_window as WIN
     user_windows = [
         # ↓ 实测本机真实标题（2026-10-07）
-        "收件箱 · 值守台 和另外 14 个页面 - 个人 - Microsoft Edge",
-        "收件箱 · 值守台 - 个人 - Microsoft Edge",     # 单标签形态
+        "收件箱 · Antinel 监理 和另外 14 个页面 - 个人 - Microsoft Edge",
+        "收件箱 · Antinel 监理 - 个人 - Microsoft Edge",     # 单标签形态
         "新建标签页 - 个人 - Microsoft Edge",
     ]
     for t in user_windows:
@@ -492,8 +492,8 @@ def c_browser_window_never_matched():
         if WIN.is_console_title(t, run_id="any123"):
             return "严格判据命中了用户浏览器窗口：%r" % t
     # 反面：自己的 app 窗口必须仍然被认出来（别把判据修成"永不匹配"）
-    for t in ("收件箱 · 值守台#f356b0", "运行状态 · 值守台#f356b0",
-              "收件箱 · 值守台"):
+    for t in ("收件箱 · Antinel 监理#f356b0", "运行状态 · Antinel 监理#f356b0",
+              "收件箱 · Antinel 监理"):
         if not WIN.is_console_title(t):
             return "自己的 app 窗口认不出来了：%r" % t
     return True
@@ -529,15 +529,22 @@ def n_browser_window_matched_is_caught():
     cand = [i for i, l in enumerate(lines) if l.strip() == "return _mark_at_tail(t)"]
     if len(cand) < 1:
         return False                        # 锚点过时
-    lines[cand[0]] = "        return CONSOLE_WINDOW_TITLE_MARK in t"
+    lines[cand[0]] = "        return CONSOLE_WINDOW_TITLE_SUFFIX in t"
+    # ★★ 0.50.4（改名批）：浏览器排除那道防护的锚点**不许带注释文字** ——
+    #   旧写法把整行 `return False  # ★ 浏览器普通窗口，不许当成…` 写进 replace，
+    #   而改名批只改产品**字符串**不改注释 ⇒ 锚点失配 ⇒ 变异静默失效
+    #   （负控返回 False，看起来像"判据没分辨力"）。⇒ 改为按**语句**锚：
+    #   找 `if any(m in t for m in BROWSER_TITLE_MARKS):` 与紧随的 `return False`，
+    #   两行一起删 —— 与注释写成什么字无关。
+    gi = [i for i, l in enumerate(lines)
+          if l.strip() == "if any(m in t for m in BROWSER_TITLE_MARKS):"]
+    if len(gi) < 1 or not lines[gi[0] + 1].strip().startswith("return False"):
+        return False                        # 锚点过时
+    del lines[gi[0]:gi[0] + 2]
     mutated = "\n".join(lines)
-    mutated = mutated.replace(
-        '    if any(m in t for m in BROWSER_TITLE_MARKS):\n'
-        '        return False                    # ★ 浏览器普通窗口，不许当成值守台\n',
-        "", 1)
     ns = {}
     exec(compile(mutated, "<mut>", "exec"), ns)              # noqa: S102
-    user_win = "收件箱 · 值守台 和另外 14 个页面 - 个人 - Microsoft Edge"
+    user_win = "收件箱 · Antinel 监理 和另外 14 个页面 - 个人 - Microsoft Edge"
     matched = ns["is_console_title"](user_win)
     if matched is not True:
         return False                        # 变异后仍不匹配 ⇒ 判据无分辨力
@@ -611,24 +618,24 @@ def n_wide_default_narrowed_is_caught():
 
 
 def c_two_level_matching_covers_all_forms():
-    """★★ 宽泛判据必须**认得出所有形态**的值守台窗口（关窗才关得掉）。
+    """★★ 宽泛判据必须**认得出所有形态**的Antinel 监理窗口（关窗才关得掉）。
 
     ★ 这条是 0.36.2 真实设计缺陷的正面判据。三种形态都要被宽泛判据认领：
-      「收件箱 · 值守台」            （无标识，最老）
-      「收件箱 · 值守台#abc123」      （带身份 —— **通用后缀 endswith 认不出**）
-      「运行状态 · 值守台#abc123」    （换页）
+      「收件箱 · Antinel 监理」            （无标识，最老）
+      「收件箱 · Antinel 监理#abc123」      （带身份 —— **通用后缀 endswith 认不出**）
+      「运行状态 · Antinel 监理#abc123」    （换页）
     而**严格**判据（给 run_id）必须只认本次这一种。
     """
     import inbox_window as WIN
-    for t in ("收件箱 · 值守台",
-              "收件箱 · 值守台#abc123",
-              "运行状态 · 值守台#abc123"):
+    for t in ("收件箱 · Antinel 监理",
+              "收件箱 · Antinel 监理#abc123",
+              "运行状态 · Antinel 监理#abc123"):
         if not WIN.is_console_title(t):
-            return "宽泛判据认不出这类值守台窗口（关窗会漏）：%r" % t
-    if not WIN.is_console_title("收件箱 · 值守台#abc123", run_id="abc123"):
+            return "宽泛判据认不出这类Antinel 监理窗口（关窗会漏）：%r" % t
+    if not WIN.is_console_title("收件箱 · Antinel 监理#abc123", run_id="abc123"):
         return "严格判据认不出本次窗口"
-    for t in ("收件箱 · 值守台#OLD",
-              "收件箱 · 值守台",
+    for t in ("收件箱 · Antinel 监理#OLD",
+              "收件箱 · Antinel 监理",
               "记事本"):
         if WIN.is_console_title(t, run_id="abc123"):
             return "严格判据认错了对象：%r" % t
@@ -640,22 +647,22 @@ def c_match_title_rejects_other_windows():
 
     ★★ 这条用**本机实测到的真实标题**做反例，不是构造的。
       实测本机 Edge 普通窗口标题：
-        「收件箱 · 值守台 和另外 14 个页面 - 个人 - Microsoft Edge」
-      —— 它**含有**「 · 值守台」。若用通用后缀去 endswith，
+        「收件箱 · Antinel 监理 和另外 14 个页面 - 个人 - Microsoft Edge」
+      —— 它**含有**「 · Antinel 监理」。若用通用后缀去 endswith，
       某些标题形态会命中它 ⇒ `SetWindowPos` 把用户浏览器搬走。
     """
     import inbox_window as WIN
     rid = "abc123"
     s = WIN.console_title_suffix(rid)
     must_match = [
-        "收件箱 · 值守台#abc123",         # 本次运行 · 收件箱
-        "运行状态 · 值守台#abc123",        # 换页后仍应命中
-        "账本 · 值守台#abc123",
+        "收件箱 · Antinel 监理#abc123",         # 本次运行 · 收件箱
+        "运行状态 · Antinel 监理#abc123",        # 换页后仍应命中
+        "账本 · Antinel 监理#abc123",
     ]
     must_not = [
-        "收件箱 · 值守台 和另外 14 个页面 - 个人 - Microsoft Edge",   # 实测：用户普通窗口
-        "收件箱 · 值守台#OLDRUN",         # 上次运行
-        "收件箱 · 值守台",                 # 无身份标识的旧窗口
+        "收件箱 · Antinel 监理 和另外 14 个页面 - 个人 - Microsoft Edge",   # 实测：用户普通窗口
+        "收件箱 · Antinel 监理#OLDRUN",         # 上次运行
+        "收件箱 · Antinel 监理",                 # 无身份标识的旧窗口
         "记事本",                          # 无关窗口
         "",
     ]
@@ -668,13 +675,13 @@ def c_match_title_rejects_other_windows():
     #   一次误认就把用户的记事本搬到屏幕角落并改尺寸
     #   —— 那正是本轮最初那个投诉（「窗口出现在旧位置而且变成了旧尺寸」）。
     must_not_wide = [
-        "收件箱 · 值守台助手",
-        "收件箱 · 值守台 - 记事本",
-        "记事本 - 收件箱 · 值守台",
-        "记事本 - 收件箱 · 值守台#abc123",
+        "收件箱 · Antinel 监理助手",
+        "收件箱 · Antinel 监理 - 记事本",
+        "记事本 - 收件箱 · Antinel 监理",
+        "记事本 - 收件箱 · Antinel 监理#abc123",
         "收件箱 · 值守中",
-        "收件箱 · 值守台#zzzzzzzz",   # 身份串必须是 hex：非本服务生成的串不认
-        "收件箱 · 值守台#",           # 半个身份串
+        "收件箱 · Antinel 监理#zzzzzzzz",   # 身份串必须是 hex：非本服务生成的串不认
+        "收件箱 · Antinel 监理#",           # 半个身份串
     ]
     # ★★ 0.36.5：`_matches_title` 已删除（子串匹配，且注释与实现相反）。
     #   这里改用**真源** `is_console_title(t, run_id)` ——
@@ -691,11 +698,11 @@ def c_match_title_rejects_other_windows():
             return "不该认领的窗口被认领了（＝可能误伤用户窗口）：%r" % t
     for t in must_not_wide:
         if WIN.is_console_title(t, None):
-            return ("宽泛判据（收旧窗用）把用户窗口 %r 认成值守台 ⇒ 会误关它" % t)
+            return ("宽泛判据（收旧窗用）把用户窗口 %r 认成Antinel 监理 ⇒ 会误关它" % t)
     # 宽泛模式**必须**仍然认得出所有形态（正向不能被反向用例挤掉）
-    for t in ("收件箱 · 值守台", "收件箱 · 值守台#abc123", "运行状态 · 值守台#abc123"):
+    for t in ("收件箱 · Antinel 监理", "收件箱 · Antinel 监理#abc123", "运行状态 · Antinel 监理#abc123"):
         if not WIN.is_console_title(t, None):
-            return "宽泛判据认不出这类值守台窗口（关窗会漏）：%r" % t
+            return "宽泛判据认不出这类Antinel 监理窗口（关窗会漏）：%r" % t
     return True
 
 
@@ -703,12 +710,12 @@ def n_wide_mode_substring_is_caught():
     """负控：把宽泛模式退回**纯子串** ⇒ 上一条必须报红。
 
     ★ 这条是 0.36.5 那个真缺陷的**分辨力证明**：
-      实测 `'收件箱 · 值守台助手'` 在子串匹配下被认成值守台
+      实测 `'收件箱 · Antinel 监理助手'` 在子串匹配下被认成Antinel 监理
       ⇒ 而宽泛模式是关窗用的 ⇒ 会误关用户窗口。
       ⇒ 说明"宽泛模式必须整串匹配"**不是过度设计**。
 
     ★ 同时守另一侧：若有人把宽泛模式收窄成"只认固定前缀"，
-      `'运行状态 · 值守台#abc123'` 会认不出 ⇒ 上面的正向用例会报红。
+      `'运行状态 · Antinel 监理#abc123'` 会认不出 ⇒ 上面的正向用例会报红。
       ⇒ 两类错误（过宽误伤 / 过窄漏关）都被覆盖。
     """
     import inbox_window as WIN
@@ -725,7 +732,7 @@ def n_wide_mode_substring_is_caught():
     mutated = "\n".join(lines)
     ns = {}
     exec(compile(mutated, "<mut>", "exec"), ns)              # noqa: S102
-    return ns["is_console_title"]("收件箱 · 值守台助手") is True
+    return ns["is_console_title"]("收件箱 · Antinel 监理助手") is True
 
 
 def n_match_title_generic_suffix_is_caught():
@@ -737,7 +744,7 @@ def n_match_title_generic_suffix_is_caught():
       那正是"误用通用后缀"的等价物（run_id 为空 ⇒ 不带身份串 ⇒ 宽泛认领）。
     """
     import inbox_window as WIN
-    user_win = "收件箱 · 值守台 和另外 14 个页面 - 个人 - Microsoft Edge"
+    user_win = "收件箱 · Antinel 监理 和另外 14 个页面 - 个人 - Microsoft Edge"
     return WIN.is_console_title(user_win, None) is False
 
 
@@ -807,9 +814,9 @@ def c_run_id_not_in_token_position():
     head = SV._head("收件箱", "tok-x")
     title = _html.unescape(
         _html_re.search(r"<title>(.*?)</title>", head, _html_re.S).group(1))
-    m = _html_re.match(r"^.+ · 值守台#\w+$", title)
+    m = _html_re.match(r"^.+ · Antinel 监理#\w+$", title)
     if not m:
-        return "标题形状不是「<页面> · 值守台#<id>」：%r" % title
+        return "标题形状不是「<页面> · Antinel 监理#<id>」：%r" % title
     return True
 
 
@@ -840,7 +847,7 @@ def c_open_console_waits_before_opening():
     """★★ 开窗**之前**必须等旧窗清空 —— 时序不能反。
 
     ★ 为什么这是独立的一条：`WM_CLOSE` 只是投信，浏览器何时销毁窗口
-      不受我们控制。不等 ⇒ 那一刻屏幕上有两个「· 值守台」窗口
+      不受我们控制。不等 ⇒ 那一刻屏幕上有两个「· Antinel 监理」窗口
       ⇒ 后续任何"取第一个"都可能抓到正在退场的旧窗口。
     """
     import inbox_server as SV

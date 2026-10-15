@@ -47,7 +47,21 @@ _WALK_EXCLUDE = {".git", ".workbuddy", "__pycache__", "build", "dist", "node_mod
                  # ★ 0.48.2：模拟/验证的证据区（内含第三方 venv 与临时文件）不属于
                  #   本仓归属范围 —— 不排除会让 L1 扫到 700+ 个第三方文件而假红
                  #   （实测：`_uxtest/pypi_sim_0481/venv/...`）。与 .gitignore 同口径。
-                 "_uxtest", "_uxtest2"}
+                 "_uxtest", "_uxtest2",
+                 # ★★ 0.50.4：打包**装配区** `out/`（`scripts/release.py` 的
+                 #   --out 目标）是仓根工作树的整份副本 —— 扫它等于把每个文
+                 #   件数两遍，且里头的**陈旧 stage 副本**（实测
+                 #   `out/antinel-security-stage.away-20261014-191354/` 整树
+                 #   报 MIT != Apache-2.0，140 处假红）会让 L1 时红时绿。
+                 #   与上面 build/dist 同口径：构建产物不进归属扫描。
+                 "out",
+                 # ★★ 0.50.4：`output/`（文档流水线的 stage 产物 ——
+                 #   critic_report/final_draft 一类，**未入库、非本仓内容**）
+                 #   同理。实测不排除时 L1 每次多报 64 处「缺 SPDX 头」假红。
+                 "output",
+                 # ★ 0.50.4：归档的旧发布件（.whl/.gz/.old 解包副本）同理 ——
+                 #   它们是**历史字节**，不是本仓归属对象。
+                 "_archive_dist"}
 _WALK_EXCLUDE_PREFIX = ("antinel-0.", "_backup.away-", "antinel_mcp.away")
 SPDX_RE = re.compile(r"SPDX-License-Identifier:\s*([A-Za-z0-9\-.]+)")
 

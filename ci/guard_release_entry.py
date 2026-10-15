@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: Apache-2.0
 
-"""0.42.0 判据 —— **发布入口不许退化成"建了没人用"**（S40–S42 ＋ S48-release/S49，各带负控）。
+"""0.42.0 判据 —— **发布入口不许退化成"建了没人用"**（S40–S42 ＋ S48-release/S49/S50-release，各带负控）。
 
 ★★ 这条判据为什么必须存在（2026-10-09 本班三次复发）：
 
@@ -16,6 +16,10 @@
 
   ⇒ 本套件守的是**第③条的兜底本身**：入口必须真的把三步串起来、
     版本号必须从源码读（不给"填错版本"留人手）、出包解释器必须验 setuptools>=68。
+
+  ★ S50-release（2026-10-15，0.50.4 出包实测新增）：**救回必须按版本口径拣件**。
+    见下方该判据 docstring —— 裸 `endswith('.tar.gz')` 会把 `.tmp` 残留的
+    旧版件捞回 dist，与 `_archive_stale_dist` 的版本口径打架（T-09 同族）。
 
   ★ 全部判据走 AST / 内存变异，**不跑真实构建、不出真包、不写产品文件**。
   ★ 与 S38/S39（dist 卫生）分工：那两条守"挪旧件"这一步；本套守"整条发布链"。
@@ -395,9 +399,80 @@ def n_s49():
     return True
 
 
+@check("S50-release sdist 救回必须按版本口径拣件：不许裸 endswith('.tar.gz') 捞回旧版")
+def s50():
+    """★★ 2026-10-15（0.50.4 出包实测）真缺陷的守卫。
+
+    病：`build_artifacts` 的 sdist 救回循环扫 dist 下**所有** `.tmp-*/`，
+      把**任何** `.tar.gz` 捞回，**不校验版本** ⇒ 上一轮残留的
+      `.tmp-*/antinel-<旧版>.tar.gz` 被捞回来 ⇒ dist 混入旧版件 ⇒
+      步骤 3 `verify_release` 判 `[A] dist 布局` 红，白跑一轮 22 分钟。
+
+    本判据（结构，AST）：`build_artifacts` 里
+      ① **不许**出现 `X.endswith(".tar.gz")`（裸后缀 = 没有版本口径）；
+      ② **必须**出现 `"antinel-%s.tar.gz" % version`（期望名由版本构造）。
+    两条缺一即红 —— 只看 ① 会因为"改了写法但没真按版本"漏判。
+    """
+    tree = _tree(_src("scripts/release.py"))
+    fn = _func(tree, "build_artifacts")
+    if fn is None:
+        return "读不到 build_artifacts（发布入口结构变了，本判据会瞎——不许静默通过）"
+    # ① 裸后缀筛选（病态形状）
+    for n in ast.walk(fn):
+        if isinstance(n, ast.Call) and getattr(n.func, "attr", None) == "endswith":
+            vals = [a.value for a in n.args if isinstance(a, ast.Constant)]
+            if ".tar.gz" in vals:
+                return ("build_artifacts 里仍有裸 `endswith('.tar.gz')` 拣件"
+                        "（第 %d 行）—— 没版本口径，会把 .tmp 残留的旧版件捞回 dist"
+                        "（0.50.4 实测形状：dist 混入 antinel-0.50.3.tar.gz ⇒ 布局判红）"
+                        % (n.lineno,))
+    # ② 期望名必须由 version 构造
+    want_ok = False
+    for n in ast.walk(fn):
+        if (isinstance(n, ast.BinOp) and isinstance(n.op, ast.Mod)
+                and isinstance(n.left, ast.Constant)
+                and isinstance(n.left.value, str)
+                and "tar.gz" in n.left.value
+                and isinstance(n.right, ast.Name) and n.right.id == "version"):
+            want_ok = True
+    if not want_ok:
+        return ("build_artifacts 里找不到由 version 构造的期望文件名"
+                "（应为 `'antinel-%s.tar.gz' % version`）—— 救回没有版本口径")
+    return True
+
+
+@check("N-S50-release 负控：把拣件条件换回裸 endswith('.tar.gz') ⇒ S50-release 必须报红")
+def n_s50():
+    src = _src("scripts/release.py")
+    anchor = '                if f != _want:                       # ★ 只认本版件（版本口径）\n'
+    if anchor not in src:
+        return "负控无效：找不到版本口径锚点（产品又改形状了，先同步本判据）"
+    mut = src.replace(anchor, '                if f.endswith(".tar.gz"):\n', 1)
+    if mut == src:
+        return "负控无效：变异没产生任何变化"
+    try:
+        tree = _tree(mut)
+    except SyntaxError as e:                          # noqa: BLE001
+        return "负控无效：变异造成语法错误 %r" % (e,)
+    fn = _func(tree, "build_artifacts")
+    if fn is None:
+        return "负控无效：变异后读不到 build_artifacts"
+    # 用 S50 的同款检测逻辑喂变异源码
+    hit_bare = False
+    for n in ast.walk(fn):
+        if isinstance(n, ast.Call) and getattr(n.func, "attr", None) == "endswith":
+            vals = [a.value for a in n.args if isinstance(a, ast.Constant)]
+            if ".tar.gz" in vals:
+                hit_bare = True
+    if not hit_bare:
+        return "负控失效：换回裸 endswith 后 S50 的检测逻辑没抓到（判据是装饰）"
+    return True
+
+
 def main():
     print("=" * 74)
-    print("0.42.0 判据 —— 发布入口不许退化成「建了没人用」（S40–S42 ＋ S48-release/S49）")
+    print("0.42.0 判据 —— 发布入口不许退化成「建了没人用」"
+          "（S40–S42 ＋ S48-release/S49/S50-release）")
     print("=" * 74)
     for n, r in PASSED:
         print("  ✅ %s" % n)

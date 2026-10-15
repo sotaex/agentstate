@@ -36,7 +36,7 @@ if _HERE not in sys.path:
 
 from strings import detect_lang, get_string
 
-VERSION = "0.50.3"
+VERSION = "0.50.4"
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
@@ -68,13 +68,13 @@ ROUTES = [
     # ★ 0.38.0：哨兵的口粮 —— 与上面三条 `antinel credits` **是两本账**：
     #   credits 记的是**宿主 AI 工具烧的积分**；粮是**哨兵站岗的口粮**。
     #   两本账分开命名、分开显示（混了会污染两边口径，见 `granary.py` 头部）。
-    ("看一下我的粮 / 哨兵还能站多久", "antinel 粮（余额 / 明细 / 规则）", "账本"),
+    ("看一下我的粮 / 监理还能站多久", "antinel 粮（余额 / 明细 / 规则）", "账本"),
     ("阻止Agent外传 / 开安全区", "antinel settings set net_mode block ＋ antinel zone add <目录>", "防范"),
     ("证据链有没有被动过", "antinel verify", "账本"),
     ("跨工具汇总（多个AI工具一起看）", "antinel digest --scope all", "审核"),
     # ★ 0.35.0：值守台 —— 把 15 秒就消失的气泡，变成能翻、能点、能归档的台账。
     #   分类＝审核（"已经发生了什么"），与 digest/ui 同栏。
-    ("看值守台 / 有什么要处理的", "antinel inbox list", "审核"),
+    ("看 Antinel 监理 / 有什么要处理的", "antinel inbox list", "审核"),
     ("今天日报 / 值守情况", "antinel inbox report", "审核"),
 ]
 
@@ -1003,7 +1003,7 @@ def cmd_granary(args, prof):                       # noqa: ARG001 (prof 仅保�
             print("  ◇ %s" % grp)
             for name, amt, freq in rows:
                 print("    %-14s %+4d   %s" % (name, amt, freq))
-        print("粮的消耗（哨兵在岗时慢慢走）")
+        print("粮的消耗（监理在岗时慢慢走）")
         for name, amt, note in r["spend"]:
             print("    %-8s %-12s %s" % (name, amt, note))
         print("缺粮阈值：余额低于 %d 粮（约一周口粮）时亮「缺粮」。" % r["low_threshold"])
@@ -1013,7 +1013,7 @@ def cmd_granary(args, prof):                       # noqa: ARG001 (prof 仅保�
     if sub == "明细":
         rows = G.recent(getattr(args, "n", 20) or 20)
         if not rows:
-            print("（还没有粮的流水 —— 哨兵开始站岗后才有消耗）")
+            print("（还没有粮的流水 —— 监理开始站岗后才有消耗）")
             return
         print("%-20s %-14s %6s  %s" % ("时间", "事由", "增减", "机器"))
         for e in rows:
@@ -1023,13 +1023,13 @@ def cmd_granary(args, prof):                       # noqa: ARG001 (prof 仅保�
         return
     s = G.summary()
     if not s["has_ledger"]:
-        print("还没有粮账：哨兵还没开始站岗（没在消耗，也就不缺粮）。")
+        print("还没有粮账：监理还没开始站岗（没在消耗，也就不缺粮）。")
         return
     print("粮：%d（还够 %s 天，档位 %s）" % (s["balance"], s["days_left"], s["tier"]))
     print("缺粮阈值：%d 粮；流水 %d 笔。" % (s["threshold"], s["entries"]))
     if s["state"] == "low":
         print("★ 缺粮灯亮：%s" % s["why"])
-    print("（这是哨兵的口粮，不是宿主 AI 工具的积分 —— 后者看 `antinel credits`。）")
+    print("（这是监理的口粮，不是宿主 AI 工具的积分 —— 后者看 `antinel credits`。）")
 
 
 # ------------------------------------------------- verify / report / hub ----
@@ -1116,10 +1116,10 @@ def cmd_morning(args):
         _st = _hs.load_state()
         if _st.get("enabled"):
             if _hs.sentinel_alive(_st):
-                print("  门闸哨兵：在岗（pid %s）" % _st.get("sentinel_pid"))
+                print("  监理：在岗（pid %s）" % _st.get("sentinel_pid"))
             else:
                 _age, _ = _hs.sentinel_heartbeat_age()
-                print("  ⚠ 门闸哨兵：不在岗%s——下次 Agent 活动自动复活；手动：antinel host-shield enable"
+                print("  ⚠ 监理：不在岗%s——下次 Agent 活动自动复活；手动：antinel host-shield enable"
                       % ("" if _age is None else "，最后心跳 %.0f 分钟前" % (_age / 60.0)))
     except Exception:
         pass
@@ -1647,7 +1647,7 @@ def _sync_zone_state(norm, adding=True):
     try:
         import host_shield as hs
     except Exception as e:                                   # noqa: BLE001
-        print("（哨兵未运行；防篡改锁将在哨兵启动时生效）")
+        print("（监理未运行；防篡改锁将在监理启动时生效）")
         return False
     try:
         st = hs.load_state()
@@ -1655,10 +1655,10 @@ def _sync_zone_state(norm, adding=True):
         key = norm.replace("/", "\\").lower()
         keys = [str(z).replace("/", "\\").lower() for z in zs]
         if adding and key in keys:
-            print("· 哨兵状态里已有该目录（未重复写入）")
+            print("· 监理状态里已有该目录（未重复写入）")
             return False
         if (not adding) and key not in keys:
-            print("· 哨兵状态里没有该目录（无需移除）")
+            print("· 监理状态里没有该目录（无需移除）")
             return False
         if adding:
             zs.append(norm)
@@ -1672,14 +1672,14 @@ def _sync_zone_state(norm, adding=True):
                   severity="warning", field="zones",
                   change="zones %s %s" % ("+" if adding else "-", norm),
                   invoked_by=_invoked_by(),
-                  reason=("安全区%s：%s（哨兵执法状态已同步）"
+                  reason=("安全区%s：%s（监理执法状态已同步）"
                           % ("生效" if adding else "解除", norm)),
                   notify=False)
-        print("✓ 哨兵已纳入执法（防篡改锁即时生效）" if adding
-              else "✓ 哨兵已解除该安全区")
+        print("✓ 监理已纳入执法（防篡改锁即时生效）" if adding
+              else "✓ 监理已解除该安全区")
         return True
     except Exception as e:                                   # noqa: BLE001
-        print("（哨兵状态同步失败：%r）" % (e,))
+        print("（监理状态同步失败：%r）" % (e,))
         return False
 
 
@@ -1772,13 +1772,13 @@ def cmd_host_shield(args):
         age, _last = hs.sentinel_heartbeat_age()
         if st.get("enabled"):
             if alive:
-                print("  哨兵进程：在岗（pid %s，自 %s）"
+                print("  监理进程：在岗（pid %s，自 %s）"
                       % (st.get("sentinel_pid"), str(st.get("sentinel_started_at"))[:16]))
             else:
-                print("  ⚠ 哨兵进程：不在岗——每次 Agent 活动会自动尝试复活（paramedic）；"
+                print("  ⚠ 监理进程：不在岗——每次 Agent 活动会自动尝试复活（paramedic）；"
                       "手动：antinel host-shield enable")
             print("  最后心跳：%s" % ("%.0f 分钟前（应 ≤10 分钟）" % (age / 60.0)
-                                      if age is not None else "无记录——哨兵从未成功留痕或刚布防"))
+                                      if age is not None else "无记录——监理从未成功留痕或刚布防"))
             print("  自启方式：%s" % (st.get("autostart") or "<未登记（旧版布防）>"))
         for k, v in (st.get("workspaces") or {}).items():
             print("  %s → %s" % (k, v))
@@ -1934,7 +1934,7 @@ def cmd_host_shield(args):
                   field="enabled", change="false → true", armed=True,
                   autostart=autostart, spawn=("ok" if ok else "failed"),
                   invoked_by=_invoked_by(),
-                  reason="宿主审计门闸已布防（自启=%s；哨兵=%s）"
+                  reason="宿主审计门闸已布防（自启=%s；监理=%s）"
                          % (autostart, ("pid %s %s" % (pid, mode)) if ok else "拉起失败，paramedic 兜底"))
         print("✓ 护盾已布防：%s" % SHIELD_STATE_ON)
         if autostart == "schtasks":
@@ -1943,11 +1943,11 @@ def cmd_host_shield(args):
             print("  自启：启动文件夹（计划任务命令被这台电脑上的策略拦截，已回退）")
         else:
             print("  ⚠ 自启未能注册（schtasks 与启动文件夹都失败）——"
-                  "兜底：每次 Agent 活动时钩子会自动复活哨兵（paramedic）")
+                  "兜底：每次 Agent 活动时钩子会自动复活监理（paramedic）")
         if ok:
-            print("  哨兵：已在岗（pid %s，%s）" % (pid, mode))
+            print("  监理：已在岗（pid %s，%s）" % (pid, mode))
         else:
-            print("  ⚠ 哨兵本次未能拉起——下次 Agent 活动时 paramedic 会自动重试；"
+            print("  ⚠ 监理本次未能拉起——下次 Agent 活动时 paramedic 会自动重试；"
                   "antinel host-shield status 查看在岗状态")
         print("  代价：被拦工作区的 ZCode 检查点回滚不可用。撤销：antinel host-shield disable")
         return
@@ -2001,7 +2001,7 @@ def cmd_host_shield(args):
             # ⇒ 删失败必须并入同一个标志，让上面那段统一报告。
             if os.path.exists(_startup_folder_cmd()):
                 _auto_removed = False
-                print("  ⚠ 启动文件夹自启项未能删除（%s）——下次登录可能仍会拉起哨兵"
+                print("  ⚠ 启动文件夹自启项未能删除（%s）——下次登录可能仍会拉起监理"
                       % type(_e).__name__)
         if _alive_pid:
             try:
@@ -2009,7 +2009,7 @@ def cmd_host_shield(args):
                                capture_output=True, timeout=30,
                                creationflags=hs._CREATE_NO_WINDOW)
             except (OSError, subprocess.SubprocessError) as _e:
-                print("  ⚠ 哨兵进程未能结束（%s）——下次登录可能仍被拉起，请手工检查"
+                print("  ⚠ 监理进程未能结束（%s）——下次登录可能仍被拉起，请手工检查"
                       % type(_e).__name__)
         for reg in hs.load_watch_registry(os.path.dirname(_sibling("antinel.py"))):
             for w in reg.get("watch", []):
@@ -2036,7 +2036,7 @@ def cmd_host_shield(args):
         hs.save_state(st, allow_disarm=True)
         print("✓ 护盾已撤防，ACL 已还原")
         if not _auto_removed:
-            print("  ⚠ 但**自启项未能删除**——下次登录可能仍会拉起哨兵。请手工检查："
+            print("  ⚠ 但**自启项未能删除**——下次登录可能仍会拉起监理。请手工检查："
                   "计划任务 AntinelHostShield ／ %s" % _startup_folder_cmd())
         return
     if args.sub == "decide":
@@ -3867,6 +3867,6 @@ if __name__ == "__main__":
             _p = "(无法写入)"
         print("✗ 这一步失败了：%s: %s" % (type(_e).__name__, _e), file=sys.stderr)
         print("  完整错误栈已写入：%s" % _p, file=sys.stderr)
-        print("  → 其余功能不受影响；若这是「装哨兵」失败，把上面第一行原文发给我们即可。",
+        print("  → 其余功能不受影响；若这是「装监理」失败，把上面第一行原文发给我们即可。",
               file=sys.stderr)
         sys.exit(3)

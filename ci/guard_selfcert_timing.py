@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: Apache-2.0
 
-"""0.42.0 判据 —— **自证卡的刷新点必须在 harness 之后**（S43–S44 ＋ 两条负控）。
+"""0.42.0 判据 —— **自证卡的刷新点必须在 harness 之后**（S43–S45 ＋ 三条负控）。
 
 ★★ 这条判据为什么必须存在（2026-10-09 本班一道结构性死锁）：
 
@@ -21,6 +21,14 @@
   ★ 全部判据走 AST / 源码比对，**不跑真实构建、不写产品文件**。
   ★ 与 S38/S39（dist 卫生）、S40–S42（发布入口）分工：那两条守"出包前"，
     本条守"harness 后"—— 四个时辰各有一个守卫，不许有没人看的时段。
+
+  ★ S45-selfcert（2026-10-15，0.50.4 改名批新增）：刷新还必须**覆盖插件副本**。
+    插件构建（build_plugin）排在 harness **之前**，拷走的是装配时的自证卡；
+    若刷新只改 pkg/final，发给用户的插件就停在旧卡（"NOT VERIFIED" 或上一轮
+    true）—— 在立信誉的地方说反话。0.48.4 修过 psl/SKILL.md 这一个副本，
+    当年漏的是插件。判据结构查：build() 里的刷新调用必须传第四个参数（plug）。
+    ★ ID 带 `-selfcert` 后缀的原因：裸 `S45` 与 `guard_instrument_selfaudit.py`
+      的同号判据跨套件重名（`0515 UID15-b` ＋ `regression D-31` 双双判红）。
 """
 from __future__ import annotations
 
@@ -33,6 +41,11 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 REL = "scripts/build_package.py"
+# ★ 0.50.4：刷新调用签名单一真源（第四参 plug ＝ 插件副本也要一起刷，见 S45-selfcert）。
+#   本套件多处引用它（S43 存在性/排序、N-S43 变异/排序、N-S45-selfcert 变异）——
+#   2026-10-15 实测：改产品调用形状时漏改负控侧一处字面量 ⇒ 负控当场失效。
+#   教训同 N-S44 注释那条：判据正反两侧必须同时改，且不许各写一份字面量。
+CALL = "_refresh_skill_selfcert(pkg, final, rc, plug)"
 
 PASSED = []
 FAILED = []
@@ -86,9 +99,9 @@ def s43():
     if _func(tree, "_refresh_skill_selfcert") is None:
         return "找不到 _refresh_skill_selfcert() —— 自证卡刷新函数不存在"
     src = _src()
-    # 调用必须存在
-    if "_refresh_skill_selfcert(pkg, final, rc)" not in src:
-        return "build() 里没有 `_refresh_skill_selfcert(pkg, final, rc)` 这个调用"
+    # 调用必须存在（0.50.4 起带第四参 plug：连插件副本一起刷，见 S45）
+    if CALL not in src:
+        return "build() 里没有 `_refresh_skill_selfcert(pkg, final, rc, plug)` 这个调用"
     # 顺序：harness(final) < 刷新 < reconcile
     ln_harness = None
     ln_refresh = None
@@ -96,7 +109,7 @@ def s43():
     for i, line in enumerate(src.split("\n"), 1):
         if "harness(final, shipped record) exit" in line and ln_harness is None:
             ln_harness = i
-        if ln_refresh is None and "_refresh_skill_selfcert(pkg, final, rc)" in line:
+        if ln_refresh is None and CALL in line:
             ln_refresh = i
         if ln_reconcile is None and ln_harness and "_reconcile_src(_SRC_WATCH)" in line:
             ln_reconcile = i
@@ -113,7 +126,7 @@ def s43():
 @check("N-S43 负控：把刷新调用挪到 _reconcile_src 之后 ⇒ S43 必须报红")
 def n_s43():
     src = _src()
-    call = "        _refresh_skill_selfcert(pkg, final, rc)\n"
+    call = "        " + CALL + "\n"
     rec = "        _reconcile_src(_SRC_WATCH)\n"
     if call not in src or rec not in src:
         return "负控无效：找不到可供变异的调用/对账行"
@@ -126,7 +139,7 @@ def n_s43():
     for i, line in enumerate(mut.split("\n"), 1):
         if "harness(final, shipped record) exit" in line and ln_h is None:
             ln_h = i
-        if ln_r is None and "_refresh_skill_selfcert(pkg, final, rc)" in line:
+        if ln_r is None and CALL in line:
             ln_r = i
         if ln_c is None and ln_h and "_reconcile_src(_SRC_WATCH)" in line:
             ln_c = i
@@ -195,9 +208,60 @@ def n_s44():
     return True
 
 
+# ══════════ S45-selfcert · 刷新必须覆盖插件副本（0.50.4 新增） ═════════════
+# ★★ 2026-10-15（0.50.4）：本判据原写作裸 `S45` —— 与 `guard_instrument_selfaudit.py`
+#   的 `S45`（「不许把 ast.dump 结果做子串匹配」）**跨套件重名**，被 `0515 UID15-b`
+#   与 `regression D-31` 双双判红。判据 ID 的跨套件唯一性由 `defect_types._declared_ids`
+#   只取**首 token** 实现 ⇒ 同名即病（登记簿 guards 只写裸 ID，说不清守它的是哪一套）。
+#   本仓惯例：同号不同批次加**套件后缀**（`S47-selfaudit`／`S48-release`）。
+#   ⇒ 本套件的 S45 一律带 `-selfcert`；正负控同套共用同号是惯例（内部重复不算重名）。
+def _call_nodes(tree, fname, callee):
+    """某个函数体内对 `callee` 的全部调用节点（结构查，不靠文本）。"""
+    f = _func(tree, fname)
+    if f is None:
+        return []
+    return [n for n in ast.walk(f)
+            if isinstance(n, ast.Call) and getattr(n.func, "id", None) == callee]
+
+
+@check("S45-selfcert 自证卡刷新必须连插件副本一起刷（调用传 plug）")
+def s45():
+    tree = _tree()
+    calls = _call_nodes(tree, "build", "_refresh_skill_selfcert")
+    if not calls:
+        return "build() 里找不到 _refresh_skill_selfcert 调用"
+    if len(calls[0].args) != 4:
+        return ("刷新调用只有 %d 个位置参数 —— 第四个参数（plug，插件根）没传 ⇒ "
+                "skills/<NAME>/SKILL.md 与 skills/<NAME>/psl/SKILL.md 不随自证卡"
+                "刷新，发给用户的插件停在装配时的旧卡（0.50.4 实测形状："
+                "在立信誉的地方说反话）" % len(calls[0].args))
+    return True
+
+
+@check("N-S45-selfcert 负控：刷新调用丢掉 plug 参数 ⇒ S45-selfcert 必须报红")
+def n_s45():
+    src = _src()
+    call = "        " + CALL
+    if call not in src:
+        return "负控无效：找不到可供变异的四参调用"
+    mut = src.replace(call, "        _refresh_skill_selfcert(pkg, final, rc)", 1)
+    if mut == src:
+        return "负控无效：变异没产生任何变化"
+    try:
+        tree = ast.parse(mut)
+    except SyntaxError as e:                       # noqa: BLE001
+        return "负控无效：变异造成语法错误 %r" % (e,)
+    calls = _call_nodes(tree, "build", "_refresh_skill_selfcert")
+    if not calls:
+        return "负控失效：变异后找不到调用"
+    if len(calls[0].args) == 4:
+        return "负控失效：丢掉 plug 后 S45-selfcert 仍然绿"
+    return True
+
+
 def main():
     print("=" * 74)
-    print("0.42.0 判据 —— 自证卡刷新点必须在 harness 之后（S43–S44）")
+    print("0.42.0 判据 —— 自证卡刷新点必须在 harness 之后（S43–S45-selfcert）")
     print("=" * 74)
     for n, r in PASSED:
         print("  ✅ %s" % n)

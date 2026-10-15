@@ -229,7 +229,7 @@ def daily_report(day=None, root=None, chain_files=None, items=None,
         import host_shield as _hs
         posture = _hs.guard_posture(os.path.dirname(os.path.abspath(__file__)))
     except Exception as e:                      # noqa: BLE001
-        posture = {"state": "unknown", "label": "查不到", "why": "读不到哨兵状态：%r" % (e,),
+        posture = {"state": "unknown", "label": "查不到", "why": "读不到监理状态：%r" % (e,),
                    "evidence": {}, "can_fix": False, "fix": None, "fix_hint": ""}
 
     return {
@@ -268,12 +268,12 @@ def render_text(rep):
     """纯文本日报（终端/邮件正文用）。"""
     L_ = rep["levels"]
     lines = [
-        "值守台日报 · %s" % rep["day"],
+        "Antinel 监理日报 · %s" % rep["day"],
         "=" * 34,
         "%s %d ｜ %s %d ｜ %s %d ｜ %s %d" % (
             M.state_short("L2"), L_["L2"], M.state_short("L1"), L_["L1"],
             M.state_short("R0"), L_["R0"], M.state_short("Ls"), L_["Ls"]),
-        "最近 %d 小时：拦截 %d ｜ 注意 %d ｜ 失守 %d（哨兵被拉起 %d 次）" % (
+        "最近 %d 小时：拦截 %d ｜ 注意 %d ｜ 失守 %d（监理被拉起 %d 次）" % (
             rep.get("window_hours", 24), rep.get("window_levels", {}).get("L2", 0),
             rep.get("window_levels", {}).get("L1", 0), rep.get("window_levels", {}).get("R0", 0),
             rep.get("revived_window", 0)),
@@ -300,13 +300,13 @@ def render_text(rep):
 
 def render_markdown(rep):
     L_ = rep["levels"]
-    out = ["# 值守台日报 · %s" % rep["day"], "",
+    out = ["# Antinel 监理日报 · %s" % rep["day"], "",
            "| 级别 | 今日 |", "|---|---|",
            "| R0 %s | %d |" % (M.state_short("R0"), L_["R0"]),
            "| L2 %s | %d |" % (M.state_short("L2"), L_["L2"]),
            "| L1 %s | %d |" % (M.state_short("L1"), L_["L1"]),
            "| Ls %s | %d |" % (M.state_short("Ls"), L_["Ls"]), "",
-           "- 最近 **%d** 小时：拦截 %d ｜ 注意 %d ｜ 失守 %d（哨兵被拉起 %d 次）" % (
+           "- 最近 **%d** 小时：拦截 %d ｜ 注意 %d ｜ 失守 %d（监理被拉起 %d 次）" % (
                rep.get("window_hours", 24), rep.get("window_levels", {}).get("L2", 0),
                rep.get("window_levels", {}).get("L1", 0),
                rep.get("window_levels", {}).get("R0", 0), rep.get("revived_window", 0)),

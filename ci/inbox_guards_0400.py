@@ -28,7 +28,7 @@
     S27 ★★ **B1 撤回的防复发**：`is_dev_build()` 的判据**只许用版本落差**，
         **禁止**引入任何环境性信号（`.git` / mtime / 清单 built_at）——
         B1 曾在版本相等时用「源码检出 ＋ 工作树比清单新」判研发态，实测推翻：
-        本机没有 pip 安装，跑哨兵的就是源码检出 ⇒ 那条信号**恒真** ⇒
+        本机没有 pip 安装，跑监理的就是源码检出 ⇒ 那条信号**恒真** ⇒
         "已出厂"作废 ⇒ **真篡改被读成"研发中"（R0→L1）**；
     S28 ★★ **全类型报告方向一致**：`LEVEL_OF_KIND` 里每一个 kind，其用户可见标题
         的**方向**必须与级别一致（说"失守"⇒必须是 R0；R0 必须说"失守"），
@@ -739,7 +739,7 @@ def _tamper_topic(store, kinds, subkind):
     return store.project_record(
         {"ts": "2026-10-09T10:00:00+08:00", "type": "host_shield_tamper",
          "field": "self-check", "subkind": subkind,
-         "reason": "哨兵启动自检不符：host_shield.py 与 manifest 不符"}, kinds)
+         "reason": "监理启动自检不符：host_shield.py 与 manifest 不符"}, kinds)
 
 
 def _topic_alias_problems(store, model, remed):
@@ -800,7 +800,7 @@ def _subkind_consistency_problems(src, kind):
     ★ 为什么这条是"防复发"而不是洁癖：
       `host_shield_spawn_failed` 实测有**两个**记录点，一个写了 `subkind`、
       一个没写 ⇒ 归并键 `(kind, topic, level)` 会把**同一件事**
-      （哨兵没能启动）拆成两行（topic='' 与 topic='spawn_failed'）。
+      （监理没能启动）拆成两行（topic='' 与 topic='spawn_failed'）。
       这与 A5/A6 是**同一类**缺陷（同因拆两行），只是发生在**写 side**。
       只查读 side（投影）查不到它 —— 必须回到**源码的调用点**。"""
     probs = []

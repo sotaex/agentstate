@@ -513,27 +513,27 @@ def n_posture_warn_when_really_tampered():
 
 
 def c_tray_dev_is_not_red():
-    """★ 托盘不能把研发态画成"哨兵不在岗"（红）—— 它明明是在岗的。"""
+    """★ 托盘不能把研发态画成"监理不在岗"（红）—— 它明明是在岗的。"""
     import inbox_tray as T
     got = T.shield_state({"state": "dev"})
     if got == T.SHIELD_UNPOSTURE:
-        return "研发态被画成『哨兵不在岗』（红）—— 谎报缺岗"
+        return "研发态被画成『监理不在岗』（红）—— 谎报缺岗"
     if got == T.SHIELD_ONPOSTURE:
         return "研发态被画成绿色『一切正常』—— 自检不符不该显示绿"
     return True
 
 
 def c_spawn_not_blocked_in_dev_but_blocked_when_shipped():
-    """★★ 研发态**不许拦住哨兵启动**；已出厂**仍必须硬拦**。
+    """★★ 研发态**不许拦住监理启动**；已出厂**仍必须硬拦**。
 
     ★★★ 这条是**主动排查**发现的连带缺陷（用户没提，但会咬人）：
       `spawn_sentinel` 原来在自检不符时无条件
       `return False, "self-check-failed"`。而研发迭代期自检**必然**不符
       （登记版本停在发版那一刻）⇒ 实测：
         `spawn_sentinel()` → `False, "self-check-failed: host_shield.py 与 manifest 不符"`
-      ⇒ 用户点界面上的「马上修复」得到的是"修不了"，而哨兵**根本没被试着起**。
+      ⇒ 用户点界面上的「马上修复」得到的是"修不了"，而监理**根本没被试着起**。
         **研发态最该被支持的时候，功能反而被门禁挡住了。**
-      ⇒ 现在研发态放行（原因照旧逐字打印、哨兵启动时照旧记审计），
+      ⇒ 现在研发态放行（原因照旧逐字打印、监理启动时照旧记审计），
         已出厂仍硬拦 —— 那才是真篡改。
 
     ★★★★ 0.36.5 修本条判据的一个**自身缺陷**（实测，且是可复现的一类）：
@@ -582,7 +582,7 @@ def c_spawn_not_blocked_in_dev_but_blocked_when_shipped():
         ok_dev, _, why_dev = H.spawn_sentinel(pkg_root=root)
         if not ok_dev and str(why_dev).startswith("self-check-failed"):
             return ("研发态被自检门禁挡住了（why=%r）—— 研发期自检必然不符，"
-                    "此时最该能起哨兵" % (why_dev,))
+                    "此时最该能起监理" % (why_dev,))
     finally:
         H._installed_version, H._code_version = oi, oc
         H.self_check = osc
@@ -611,7 +611,7 @@ def n_spawn_dev_blocked_is_caught():
 def n_tray_dev_as_red_is_caught():
     """负控：把 dev 映射成红 ⇒ 上一条必须报红。
 
-    ★ 真做变异：monkeypatch 哨兵映射表不可行（模块内是局部 dict），
+    ★ 真做变异：monkeypatch 监理映射表不可行（模块内是局部 dict），
       所以换一条同样有分辨力的路：**把 dev 从映射里去掉**，
       看 `shield_state` 落到哪个兜底档 —— 若兜底是红，负控成立；
       若是蓝（SHIELD_UNKNOWN），说明 dev 已被显式登记 ⇒ 本负控不适用。
@@ -835,7 +835,7 @@ CHECKS = [
     ("R07 自检不符判 dev 不判 warn", c_posture_returns_dev_not_warn,
      n_posture_warn_when_really_tampered),
     ("R08 托盘研发态不是红", c_tray_dev_is_not_red, n_tray_dev_as_red_is_caught),
-    ("R13 研发态不拦哨兵启动", c_spawn_not_blocked_in_dev_but_blocked_when_shipped,
+    ("R13 研发态不拦监理启动", c_spawn_not_blocked_in_dev_but_blocked_when_shipped,
      n_spawn_dev_blocked_is_caught),
     # ---- ③ 大窗零残留 ----
     ("R09 关窗只关给定句柄", c_close_window_exists_and_only_closes_given_handles,

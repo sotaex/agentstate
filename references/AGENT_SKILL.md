@@ -22,11 +22,11 @@
 - 「记一下积分余额」→ `antinel credits snapshot <余额> [--reward N@到期日] [--cycle 到期日]`
 - 「积分还够不够 / 什么时候烧完」→ `antinel credits forecast`
 - 「订阅和API直付哪个划算（对账）」→ `antinel credits reconcile`
-- 「看一下我的粮 / 哨兵还能站多久」→ `antinel 粮（余额 / 明细 / 规则）`
+- 「看一下我的粮 / 监理还能站多久」→ `antinel 粮（余额 / 明细 / 规则）`
 - 「阻止Agent外传 / 开安全区」→ `antinel settings set net_mode block ＋ antinel zone add <目录>`
 - 「证据链有没有被动过」→ `antinel verify`
 - 「跨工具汇总（多个AI工具一起看）」→ `antinel digest --scope all`
-- 「看值守台 / 有什么要处理的」→ `antinel inbox list`
+- 「看 Antinel 监理 / 有什么要处理的」→ `antinel inbox list`
 - 「今天日报 / 值守情况」→ `antinel inbox report`
 - 「antinel / 帮助 / 你能做什么」→ `antinel`（help 清单）
 - 多宿主共存的机器上，Agent 应自报所在宿主：`antinel --host zcode …`（workbuddy|zcode|qoder|claude-code），否则记账口径按这台电脑探测显示。

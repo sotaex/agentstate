@@ -17,7 +17,7 @@
      由 `ci/inbox_guards.py` 的 `c_daemon_tick_notifies_once`（记 B-01）守；
      **本文件守它的下游**：界面同源、不闪退、声音、节流/ack、可见性闸、
      服务起不来如实、一次一枚。
-  ⑤ FLO-01…FLO-05 漂浮最小态："哨兵很多时候不要碍事，只要在"——收缩成
+  ⑤ FLO-01…FLO-05 漂浮最小态："监理很多时候不要碍事，只要在"——收缩成
      一枚漂浮哨标（点击展开），面板右上角一个钮，展开即退役哨标。
   ⑥ U-18 哨标比例（0.50.2 补）：内联动效 SVG 照搬 demo 的 1024 画布 ⇒
      环只占半宽 0.465，定稿 logo.svg 是 0.844 ⇒ 缩进 48px 方框比定稿小 45%，
@@ -34,9 +34,9 @@
      U-18c 用 Python 常量＋渲染表算"框装得下全部绘制内容"（快、可注入）；
      U-18d 用 **Node 真跑**的坐标算（慢、拿真坐标）——一条抓"常量对不上
      渲染表"，一条抓"状态机自己把坐标画到框外"。
-  ⑧ B-13「打开值守台」已开着就别重开（0.50.3 补）：创始人 2026-10-14
-     「点击打开值守台后，之前的关闭了，打开了新的，但是状态不对了……点完了
-     按钮显示'打开值守台'按钮好像不对吧，值守台打开着呢」。旧链路只有
+  ⑧ B-13「打开Antinel 监理」已开着就别重开（0.50.3 补）：创始人 2026-10-14
+     「点击打开Antinel 监理后，之前的关闭了，打开了新的，但是状态不对了……点完了
+     按钮显示'打开Antinel 监理'按钮好像不对吧，Antinel 监理打开着呢」。旧链路只有
      `open_console_settled()` 一条路（语义是"没有窗、要开一个"）⇒ 面板本来
      就开着时点一下 = 旧窗被关、新窗从头加载（态势读数重新算 ⇒"状态不对了"），
      而按钮上写着"打开" ⇒ **不成立的承诺**。修法：抽成唯一决策点
@@ -557,7 +557,7 @@ def c_b11():
     for sel in (".bub-ok{", ".bub-open{", ".bub-note{"):
         blk = css.split(sel)[1].split("}")[0]
         if "nowrap" not in blk:
-            return ("%s 允许折行 ⇒ 一窄就把「打开值守台」拆成「打开值/守台」"
+            return ("%s 允许折行 ⇒ 一窄就把「打开Antinel 监理」拆成「打开值/守台」"
                     "（创始人截图二）" % sel)
     body = css.split(".bub-body{")[1].split("}")[0]
     if "line-clamp" not in body or "ellipsis" not in page:
@@ -1437,7 +1437,7 @@ def _func_src(src, name):
 
 
 def _ensure_console_record():
-    """给临时中枢塞一条值守台记录（`bubble_open_route` 没有 URL 就直接早退）。"""
+    """给临时中枢塞一条Antinel 监理记录（`bubble_open_route` 没有 URL 就直接早退）。"""
     rec = SV.read_console_record(None)
     if not rec or not rec.get("url"):
         SV.write_console_record(8799, "tok-b13", pid=os.getpid(), root=None)
@@ -1461,10 +1461,10 @@ def _bubble_open_arms_fail(route):
     del seen[:]
     r = route(vis=True, finder=lambda: [11, 22], focuser=_focus, opener=_open)
     if r.get("opened") != "existing":
-        return ("值守台已开着，却返回 opened=%r（应 existing）⇒ 页面会以为"
+        return ("Antinel 监理已开着，却返回 opened=%r（应 existing）⇒ 页面会以为"
                 "「刚打开」" % (r.get("opened"),))
     if seen != ["focus"]:
-        return ("值守台已开着，实际动作序列是 %r（应只有 focus）⇒ 旧窗被关、"
+        return ("Antinel 监理已开着，实际动作序列是 %r（应只有 focus）⇒ 旧窗被关、"
                 "新窗重建（创始人原话「之前的关闭了，打开了新的」）" % (seen,))
     if r.get("ok") is not True:
         return "切到前面成功却没报 ok ⇒ 页面拿不到成功信号，会显示失败"
@@ -1472,7 +1472,7 @@ def _bubble_open_arms_fail(route):
     del seen[:]
     r2 = route(vis=False, finder=lambda: [11], focuser=_focus, opener=_open)
     if seen != ["open"]:
-        return "值守台没开着，实际动作序列是 %r（应只有 open）" % (seen,)
+        return "Antinel 监理没开着，实际动作序列是 %r（应只有 open）" % (seen,)
     if r2.get("opened") not in ("app", "browser"):
         return "开窗成功却返回 opened=%r ⇒ 页面认不出「打开了」" % (r2.get("opened"),)
     # ③ 判不出来（None）⇒ 走开窗：宁可多开一个窗，也不许点了没反应
@@ -1487,7 +1487,7 @@ def _bubble_open_arms_fail(route):
     return None
 
 
-@check("B-13 打开值守台：已开着 ⇒ 只切到前面（不关旧窗不重开）；没开/判不出 ⇒ 才开窗")
+@check("B-13 打开Antinel 监理：已开着 ⇒ 只切到前面（不关旧窗不重开）；没开/判不出 ⇒ 才开窗")
 def c_b13():
     err = _bubble_open_arms_fail(SV.bubble_open_route)
     if err:
@@ -1500,12 +1500,12 @@ def c_b13():
     on = BB.render("t", "b", "R0", "tok-b13", run_id="r", kind="k",
                    console_open=True)
     if BTN not in off:
-        return "值守台没开着时反而没有「打开值守台」按钮 ⇒ 用户没入口"
+        return "Antinel 监理没开着时反而没有「打开Antinel 监理」按钮 ⇒ 用户没入口"
     if BTN in on:
-        return ("值守台已开着，却仍画着「打开值守台」按钮 ⇒ 一个不成立的承诺"
-                "（创始人截图二「值守台打开着呢」）")
+        return ("Antinel 监理已开着，却仍画着「打开Antinel 监理」按钮 ⇒ 一个不成立的承诺"
+                "（创始人截图二「Antinel 监理打开着呢」）")
     if STA not in on:
-        return "值守台已开着，却没换成一句状态 ⇒ 那个位置空着，用户不知道怎么回事"
+        return "Antinel 监理已开着，却没换成一句状态 ⇒ 那个位置空着，用户不知道怎么回事"
     # ★ 缺按钮时 JS 不许整段抛错（旧版直接 `op.addEventListener` ⇒ 连带把
     #   `fit()` 与「知道了」那条链一起打死）
     if "if (op) {" not in off:
@@ -1555,7 +1555,7 @@ def n_b13():
 #: 假桌面：五枚可见窗，其中两枚是**用户窗口** —— 标题里恰好含哨标/冒泡的标记，
 #: 但标记**不在末尾**。这就是实测误伤的形状（`_p_probe_win.py` 的内存替换夹具）。
 _FAKE_WINDOWS = [
-    (1, "收件箱 · 值守台#abc123"),        # 本次值守台
+    (1, "收件箱 · Antinel 监理#abc123"),        # 本次值守台
     (2, "我的 · 哨标 收藏夹"),             # ★ 用户窗口（含标记，不在末尾）
     (3, "Antinel · 哨标#abc123"),          # 本次哨标
     (4, "整理一下 · 冒泡 记录"),           # ★ 用户窗口（含标记，不在末尾）
@@ -1589,7 +1589,7 @@ def c_b12(mod=None):
     finally:
         W.enum_windows = real
     if con != [1]:
-        return "值守台认窗把用户窗口也算进来了：%r（应为 [1]）" % (con,)
+        return "Antinel 监理认窗把用户窗口也算进来了：%r（应为 [1]）" % (con,)
     if logo != [3]:
         return ("哨标认窗把用户窗口也算进来了：%r（应为 [3]）—— 这条路径通向 "
                 "WM_CLOSE，会关掉用户自己的窗口" % (logo,))
@@ -1647,12 +1647,14 @@ def _b02_ok(html):
     #   bubble_ack「确认 ≠ 处理」的立场相反）；
     #   「不自动消失」→「会一直留着，直到你处理完」（讲利益不讲机制）。
     #   判据仍然要求这两句**逐字在场**—— 少一句照样红。
+    # ★★ 0.50.4（改名批，P4）：按钮文案「打开值守台」→「**打开 Antinel 监理**」
+    #   —— 注意**空格**：创始人拍的是带空格的写法，锚点逐字同步（少一框照样红）。
     return ("data-logo=" in html and "requestAnimationFrame" in html
-            and "知道了" in html and "打开值守台" in html
+            and "知道了" in html and "打开 Antinel 监理" in html
             and "会一直留着" in html)
 
 
-@check("B-02 冒泡界面与值守台同源：同一套 CSS＋同一枚动效哨标＋确认/打开钮")
+@check("B-02 冒泡界面与Antinel 监理同源：同一套 CSS＋同一枚动效哨标＋确认/打开钮")
 def c_b02():
     html = BB.render("R0 失守：探针", "正文……", "R0", "tok", "run42",
                      kind="host_shield_revived")
@@ -1661,9 +1663,9 @@ def c_b02():
         miss = [k for k, v in (("动效哨标", "data-logo=" in page),
                                ("rAF 状态机", "requestAnimationFrame" in page),
                                ("确认钮", "知道了" in page),
-                               ("打开钮", "打开值守台" in page),
+                               ("打开钮", "打开 Antinel 监理" in page),
                                ("留存说明", "会一直留着" in page)) if not v]
-        return "冒泡页缺：%s —— 与值守台同源是 founder 点名要的" % "、".join(miss)
+        return "冒泡页缺：%s —— 与Antinel 监理同源是 founder 点名要的" % "、".join(miss)
     if " · 冒泡#run42" not in page:
         return "标题没带 #run_id —— 认窗（关旧冒泡）会失去目标"
     if 'data-kind="host_shield_revived"' not in page:
@@ -1676,7 +1678,7 @@ def c_b02():
     # ★ S48：CSS 是**另一层**（`body()` 会把 `<style>` 剥掉）⇒ 显式走 `chrome()`。
     _css = PC.chrome(html)
     if "var(--r0)" not in _css or "var(--brand)" not in _css:
-        return "没有沿用值守台的 CSS 变量 —— 「同源」只剩口号"
+        return "没有沿用Antinel 监理的 CSS 变量 —— 「同源」只剩口号"
     return True
 
 
@@ -1822,7 +1824,7 @@ def n_b05():
     return True
 
 
-@check("B-06 可见性闸：值守台窗口正开着 ⇒ 不弹（不重复打扰）")
+@check("B-06 可见性闸：Antinel 监理窗口正开着 ⇒ 不弹（不重复打扰）")
 def c_b06():
     import host_shield as HS
     env = _PopEnv()
@@ -1857,7 +1859,7 @@ def c_b06b():
     return True
 
 
-@check("B-07 值守台服务起不来 ⇒ 如实说发不出，opener 一次都不调")
+@check("B-07 Antinel 监理服务起不来 ⇒ 如实说发不出，opener 一次都不调")
 def c_b07():
     env = _PopEnv()
     r = env.pop(console=lambda port, root: (None, False), now=5000000.0)
@@ -1915,7 +1917,7 @@ def _flo01_ok(src):
     if 'FormBorderStyle = "None"' not in src:
         return "没钉死无边框 —— 会有标题栏，哨标不像哨标"
     if "TopMost = $true" not in src:
-        return "没置顶 —— 会被别的窗盖住（哨兵要「一直在」）"
+        return "没置顶 —— 会被别的窗盖住（监理要「一直在」）"
     for edge in ("MinimumSize", "MaximumSize"):
         if ("$form.%s = New-Object System.Drawing.Size($Size, $Size)" % edge
                 not in src):
@@ -1923,7 +1925,7 @@ def _flo01_ok(src):
     if "Test-Path -LiteralPath $Quit" not in src or "Quit-Now" not in src:
         return "没有轮询退役标志自退 —— 退役只能靠强杀"
     if 'Write-Action "open"' not in src:
-        return "点击没写 open 动作 —— 点了哨标展不开值守台"
+        return "点击没写 open 动作 —— 点了哨标展不开Antinel 监理"
     if 'if (Write-Action "open") { Quit-Now }' not in src:
         return "open 动作写失败也会自退 —— 窗口消失但托盘没收到，用户无从重试"
     if "$script:actionWriteFailed = $true" not in src or "$script:actionWriteFailTip" not in src:

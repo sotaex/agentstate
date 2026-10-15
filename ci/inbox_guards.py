@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: Apache-2.0
 
-"""值守台 · 总守卫套件（P1–P8）。**每条判据配负控；不许只有 happy path。**
+"""Antinel 监理 · 总守卫套件（P1–P8）。**每条判据配负控；不许只有 happy path。**
 
 ★ 纪律（本仓铁律）：
   1. **先红后绿**：每条判据都必须能在**缺陷态**下变红；没红过的绿不算绿。
@@ -610,7 +610,7 @@ def c_server_unknown_view_falls_back():
     srv = Server(hub)
     try:
         s, _, body = req(srv.port, "/?v=../../etc&f=%00", token=srv.token)
-        return s == 200 and "值守台" in body
+        return s == 200 and "Antinel 监理" in body
     finally:
         srv.stop()
 
@@ -836,7 +836,7 @@ def c_tray_sync_from_items():
     #   失守却显示失守，就是错误的」）⇒ 哨兵在岗时姿态 **L0**；那条失守记录
     #   照旧进「要处理」（count=1），不藏。
     TR.sync_from_items(S.load_items(root=hub), root=hub,
-                       posture={"state": "guarding", "why": "哨兵在岗"})
+                       posture={"state": "guarding", "why": "监理在岗"})
     st = TR.read_state(root=hub)
     return (st["state"] == "L0" and st["count"] == 1
             and st.get("label") == "值守中"
@@ -848,7 +848,7 @@ def n_tray_sync_from_items():
     put_chain(hub, [{"ts": "2026-10-05T09:00:00+08:00",
                      "type": "host_shield_heartbeat", "hash": "h"}])
     TR.sync_from_items(S.load_items(root=hub), root=hub,
-                       posture={"state": "guarding", "why": "哨兵在岗"})
+                       posture={"state": "guarding", "why": "监理在岗"})
     st = TR.read_state(root=hub)
     return st["state"] == "L0" and st["count"] == 0
 
@@ -1187,7 +1187,7 @@ def c_daemon_ignores_read_all():
 def n_daemon_ignores_read_all():
     """负控：**`open` 动作仍要被消费**（证明不是"什么动作都不认了"）。
 
-    ★ 必须传 `console_url=`：否则 `open_console_now` 会**真的起一个后台值守台**，
+    ★ 必须传 `console_url=`：否则 `open_console_now` 会**真的起一个后台Antinel 监理**，
       把 `inbox_server._BG` 单例留在那儿 ⇒ 后面 `c_console_background_idempotent`
       会看到"已经在跑"而误红（**跨判据污染**，本仓明令禁止的形状）。
     """
@@ -1203,7 +1203,7 @@ def n_daemon_ignores_read_all():
 
 
 def c_daemon_open_action():
-    """★ 0.35.2：托盘「打开值守台」动作必须**有消费点**。
+    """★ 0.35.2：托盘「打开Antinel 监理」动作必须**有消费点**。
 
     旧版只写 `out["open_console"] = True`，而**全仓无人读** ⇒ 点托盘「Open console」
     /左键点图标什么都不会发生（创始人 2026-10-06 实测：只看到右下角小弹窗）。
@@ -1238,7 +1238,7 @@ def n_daemon_open_action():
 
 
 def c_console_background_idempotent():
-    """★ 0.35.2：后台值守台**幂等** —— 起两次只绑一次端口，第二次复用同一 URL。
+    """★ 0.35.2：后台Antinel 监理**幂等** —— 起两次只绑一次端口，第二次复用同一 URL。
 
     用 0 端口让 OS 挑空闲口，跑完关掉；**不碰真实 8790**，也不留进程。
     """
@@ -1264,7 +1264,7 @@ def n_console_background():
 
 
 def c_console_app_window():
-    """★ 0.35.2：值守台要开成**独立窗口**（app 模式）；拿不到 app 浏览器要**诚实降级**。
+    """★ 0.35.2：Antinel 监理要开成**独立窗口**（app 模式）；拿不到 app 浏览器要**诚实降级**。
 
     ★ 卡结构不卡词面：两条路都只问「最终把什么命令交给了 opener」，
       不问本机装的是 Edge 还是 Chrome（那是环境，不是产品行为）。
@@ -1380,7 +1380,7 @@ def n_notify_human_kind():
 
 
 def c_notify_clickable():
-    """★★ 0.35.2：门闸气泡必须**可点**，点开就是值守台。
+    """★★ 0.35.2：门闸气泡必须**可点**，点开就是Antinel 监理。
 
     ★ 为什么（真缺陷）：旧版气泡 8 秒后自己消失、**点了没有任何反应** ——
       创始人 2026-10-06「现在还右下冒泡是有问题的」。
@@ -1506,7 +1506,7 @@ def c_console_port_no_clash():
 
     ★ 为什么（Windows 特有，实测）：`ThreadingHTTPServer` 默认
       `allow_reuse_address=1`，而 Windows 的 `SO_REUSEADDR` **允许两个进程绑同一端口**
-      ⇒ `bind()` 不抛 `OSError` ⇒ 两个值守台抢同一端口、**口令各不相同**
+      ⇒ `bind()` 不抛 `OSError` ⇒ 两个Antinel 监理抢同一端口、**口令各不相同**
       ⇒ 开出来的窗口一半请求 403。⇒ 必须**主动探测**（`_port_busy`）。
     ★ 本判据真占一个端口，验 `_port_busy` 认得出、且新服务换到别处。
     """
@@ -1987,14 +1987,14 @@ def _replay_form(port, action, method, fields):
 
 
 def _no_real_revive():
-    """★★ 判据**不许有真实副作用**：把「重新拉起哨兵」这条链路整体打桩。
+    """★★ 判据**不许有真实副作用**：把「重新拉起监理」这条链路整体打桩。
 
     ★ 为什么必须有它（2026-10-06 实测的真缺陷）：
       `c_forms_replay` 会把页面上**每一个**表单原样重放 —— 其中就包括失守时
       出现的「马上修复」按钮（`op=fix`）。服务端 `inbox_server` 的 fix 处理是
       `host_shield.guard_fix(_pkg_root())`，而 `_pkg_root()` 是**真包根**
       （不是沙箱 hub）⇒ 每重放一次就：
-        ① 真的拉起一个哨兵进程；② 往**真链**写一条 `host_shield_revived`
+        ① 真的拉起一个监理进程；② 往**真链**写一条 `host_shield_revived`
            （该类型在 `_ALERT_KINDS` 弹窗名单里）。
       ⇒ **判据自己制造了创始人报障的「右下一直冒泡」。**
         这比"测试脏"更严重：它让"绿"失真 —— 判据制造了它本该只观察的现象。
@@ -2138,18 +2138,18 @@ def _console_revives_in_real_chain():
 
 
 def c_forms_replay_has_no_real_side_effect():
-    """★★ **判据重放页面按钮时，绝不许有真实副作用**（真起哨兵 / 写真链）。
+    """★★ **判据重放页面按钮时，绝不许有真实副作用**（真起监理 / 写真链）。
 
     ★ 为什么（2026-10-06 实测的真缺陷，创始人报障「右下一直冒泡」）：
       页面上失守时会出现「马上修复」按钮（`op=fix`）。`c_forms_replay` 原样重放
       每个表单 ⇒ 打到服务端 `host_shield.guard_fix(_pkg_root())`，而 `_pkg_root()`
-      是**真包根** ⇒ 真的拉起一个哨兵进程，并往**真链**写一条
+      是**真包根** ⇒ 真的拉起一个监理进程，并往**真链**写一条
       `host_shield_revived`（`cause=console`，在 `_ALERT_KINDS` 弹窗名单里）
       ⇒ **判据自己制造了创始人报障的冒泡。**
       这比"测试脏"更严重：它让"绿"这个信号本身失真。
 
     ★ 量具：**真链上 `revived cause=console` 的条数**，跑前跑后必须不变。
-      （只数这一种，不数心跳/其它 breach —— 哨兵在跑，心跳会干扰计数。）
+      （只数这一种，不数心跳/其它 breach —— 监理在跑，心跳会干扰计数。）
     """
     before = _console_revives_in_real_chain()
     ok = c_forms_replay()
@@ -2254,16 +2254,16 @@ CHECKS = [
     ("P10 强调层只对R0", c_daemon_r0_emphasis_only, n_daemon_r0_emphasis_only),
     ("P10 read_all已取消(不动状态)", c_daemon_ignores_read_all, n_daemon_ignores_read_all),
     # ★ 0.35.2：托盘「打开值守台」必须有消费点（旧版 open_console 无人读＝死动作）
-    ("P10 打开值守台动作（有消费点）", c_daemon_open_action, n_daemon_open_action),
-    ("P10 后台值守台幂等", c_console_background_idempotent, n_console_background),
-    ("P10 值守台开独立窗口(app)", c_console_app_window, n_console_app_window),
+    ("P10 打开Antinel 监理动作（有消费点）", c_daemon_open_action, n_daemon_open_action),
+    ("P10 后台Antinel 监理幂等", c_console_background_idempotent, n_console_background),
+    ("P10 Antinel 监理开独立窗口(app)", c_console_app_window, n_console_app_window),
     # ★★ 0.35.2：以下 6 条各自对应一个**真缺陷**（创始人 2026-10-06 实测）
-    ("P10 值守台真身分支可跑(不靠替身)", c_console_real_branch, n_console_real_branch),
+    ("P10 Antinel 监理真身分支可跑(不靠替身)", c_console_real_branch, n_console_real_branch),
     ("P10 端口被占不撞车", c_console_port_no_clash, n_console_port_no_clash),
     ("P10 托盘自己消费动作", c_tray_self_consume, n_tray_self_consume),
     ("P3 收件箱页不算日报(不白等)", c_render_page_lazy_report, n_render_page_lazy_report),
     ("P4 气泡正文说人话", c_notify_human_kind, n_notify_human_kind),
-    ("P4 气泡可点开值守台", c_notify_clickable, n_notify_clickable),
+    ("P4 气泡可点开Antinel 监理", c_notify_clickable, n_notify_clickable),
     ("P10 坏行不崩不掩盖", c_daemon_survives_bad_lines, n_daemon_survives_bad_lines),
     ("P10 落当日账本", c_daemon_ledger_written, n_daemon_ledger_written),
     ("P10 心跳每日只发一次", c_daemon_heartbeat_daily_once, n_daemon_heartbeat_daily_once),
@@ -2344,7 +2344,7 @@ def main():
         if warns:
             print("不许放行（负控无效）：", "; ".join(warns))
         return 1
-    print("值守台 P1–P12：全绿，且每条负控都能变红。")
+    print("Antinel 监理 P1–P12：全绿，且每条负控都能变红。")
     return 0
 
 

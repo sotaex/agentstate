@@ -122,7 +122,7 @@ def what_got_through(detail=""):
         return ("查不到当前有哪些受监管对象（%s）——因此**不能**说"
                 "「没有放过东西」。" % e, 0)
     if not cons:
-        return ("哨兵此刻没有受监管对象（无放行窗/安全区/受监管工作区/受监管落点），"
+        return ("监理此刻没有受监管对象（无放行窗/安全区/受监管工作区/受监管落点），"
                 "所以这段时间**不可能**放过任何东西。", 0)
     # ★ 0.37.2 fix：旧版这里**以冒号结尾、却不给清单** ——
     #   页面上渲染成「…期间发生的改动 不会被发现 ：」然后什么都没有
@@ -286,7 +286,7 @@ def attribute(item, posture=None, consequences=None):
                         #   按钮上写的就是「承认打不赢，移出监管」，
                         #   标题再写一遍 ⇒ 同一行里同一个意思出现两次。
                         _a(ACT_DROP, "移出监管名单",
-                           hint=("把它从安全区拿掉，哨兵不再为一个它守不住的落点"
+                           hint=("把它从安全区拿掉，监理不再为一个它守不住的落点"
                                  "反复报警。代价：那个目录从此**不受保护**，"
                                  "你得自己保证它不被改。")),
                         _a(ACT_ACCEPT, "就这样放着，我自己盯着",
@@ -303,7 +303,7 @@ def attribute(item, posture=None, consequences=None):
                                 "这一项**本机查不到**（窗口枚举不可靠），"
                                 "给不出命令，需要你自己确认那个目录是什么程序在写。"),
                     ],
-                    cost=("一直报警，但哨兵确实守不住这个落点。"
+                    cost=("一直报警，但监理确实守不住这个落点。"
                           "反复红而无改善 ⇒ 红灯就没人看了，"
                           "等于没有守卫。"))
 
@@ -329,7 +329,7 @@ def attribute(item, posture=None, consequences=None):
                            hint="看它们的修改时间与来源；若不是你自己动的，"
                                 "按「文件被动过」处理。"),
                     ],
-                    cost=("不重签就一直对不上 ⇒ 每次哨兵启动都会重报同一条，"
+                    cost=("不重签就一直对不上 ⇒ 每次监理启动都会重报同一条，"
                           "这条红到最后就没人看了。"))
 
     if k == "tamper_registry":
@@ -356,7 +356,7 @@ def attribute(item, posture=None, consequences=None):
                     cause=("有人改过 `host_shield.json` 里的 `enabled`，"
                            "而链上最后一次记录与之相反。"
                            "两条记录对不上 ⇒ 要么改文件的人没走正规入口，"
-                           "要么有人想绕开哨兵的拦截。"),
+                           "要么有人想绕开监理的拦截。"),
                     severity="**防护可能被关掉了**，而这次改动没走 `host-shield`（链上没有）。",
                     # ★ 0.37.1：旧版这句写死成 `state 写 enabled=False，链上是 armed`
                     #   —— 一旦实际值不同（或链上最后状态不是 armed），
@@ -370,7 +370,7 @@ def attribute(item, posture=None, consequences=None):
                            hint="如果你没改过，那就是有东西在动它——"
                                 "先查这个文件的修改时间与来源。"),
                     ],
-                    cost="状态与链不一致期间，哨兵按哪一份执法是**不确定**的；"
+                    cost="状态与链不一致期间，监理按哪一份执法是**不确定**的；"
                          "不一致一直挂着，自检就一直不通过。")
 
     if k == "tamper":
@@ -416,11 +416,11 @@ def attribute(item, posture=None, consequences=None):
                          "要么一直红，要么被忽略；两种都等于没有守卫。")
 
     if k == "autostart_missing":
-        return dict(b, kind=k, title="登录自启缺失（哨兵不会随开机起来）",
+        return dict(b, kind=k, title="登录自启缺失（监理不会随开机起来）",
                     b_class=False,
                     cause=("计划任务与启动文件夹里**都没有**登记项"
                            "（自启三态判定为「不在」）。"
-                           "所以哨兵只在这次会话里活着——"
+                           "所以监理只在这次会话里活着——"
                            "**一重启就没人在守**。"),
                     severity="**现在这一刻还在守，但下次登录后不会守。**",
                     severity_note="（自启三态：True=在／False=不在／None=查不到；"
@@ -435,16 +435,16 @@ def attribute(item, posture=None, consequences=None):
 
     if k == "spawn_failed":
         reason = _path_from_detail(b["detail"], [r"mode=([^）]*)）"])
-        return dict(b, kind=k, title="哨兵拉起失败（没人值守）", b_class=False,
-                    cause=("哨兵进程死后没能被重新拉起。"
+        return dict(b, kind=k, title="监理拉起失败（没人值守）", b_class=False,
+                    cause=("监理进程死后没能被重新拉起。"
                            + ("失败原因：%s。" % reason if reason else "")
                            + "常见于**运行中的代码与登记的 manifest 不符**——"
                            "也就是跑着的守门代码可能不是登记过的那份。"),
-                    severity="**哨兵不在的这段时间，没人在巡检受监管落点**"
+                    severity="**监理不在的这段时间，没人在巡检受监管落点**"
                              "（外传发现不了）。",
                     severity_note=_posture_note(posture),
                     actions=[
-                        _a(ACT_RETRY, "重新拉起哨兵",
+                        _a(ACT_RETRY, "重新拉起监理",
                            hint="点这个会当场重试并复测；"
                                 "如果还是失败，会告诉你失败原因，不会假绿。"),
                         _a(ACT_REARM, "先让代码与登记一致",
@@ -452,7 +452,7 @@ def attribute(item, posture=None, consequences=None):
                            hint="自检不符时重跑安装/布防，"
                                 "让 manifest 与实际文件对上。"),
                     ],
-                    cost="哨兵不在 ⇒ 这段时间发生的改动不会有告警。")
+                    cost="监理不在 ⇒ 这段时间发生的改动不会有告警。")
 
     # breach_other / unknown —— 不硬编归因，但**必须给得出下一步**
     return dict(b, kind=k, title="防护有缺口（未归类）", b_class=False,
@@ -463,8 +463,8 @@ def attribute(item, posture=None, consequences=None):
                 severity_note=_posture_note(posture),
                 actions=[
                     _a(ACT_FIX, "回运行状态页看现探",
-                       hint="那里有此刻的实测态势（哨兵在不在、心跳多旧、自检过不过）。"),
-                    _a(ACT_RETRY, "先试一次拉起哨兵",
+                       hint="那里有此刻的实测态势（监理在不在、心跳多旧、自检过不过）。"),
+                    _a(ACT_RETRY, "先试一次拉起监理",
                        hint="多数「没人守」都能这样恢复。"),
                 ],
                 cost="归因规则没覆盖 ⇒ 你只能看到「有缺口」，"
@@ -538,7 +538,7 @@ _TITLE = {
     "tamper": "防护状态被改动",
     "hook_registration_changed": "钩子注册被改动",
     "autostart_missing": "登录自启缺失",
-    "spawn_failed": "哨兵拉起失败",
+    "spawn_failed": "监理拉起失败",
     "breach_other": "防护有缺口（未归类）",
     "unknown": "未归类",
 }

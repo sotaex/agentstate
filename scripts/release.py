@@ -184,18 +184,33 @@ def build_artifacts(py, dist, version):
     rc_s = _run([py, "-m", "build", "--no-isolation", "--sdist", "--outdir", dist], cwd=ROOT)
     if rc_s != 0:
         got = False
+        # ★★★ 2026-10-15（0.50.4 出包实测）：**救回必须校验版本** —— 只捞本版件。
+        #   病（真缺陷，本轮当场撞到）：原循环扫 dist 下**所有** `.tmp-*/`，
+        #   把**任何** `.tar.gz` 捞回 dist，**不校验版本号** ⇒ 上一轮残留的
+        #   `.tmp-_8b7mue4/antinel-0.50.3.tar.gz`（宿主删除守卫拦了收尾清理，
+        #   一直躺在 dist 里）被这轮**捞了回来** ⇒ dist 混入旧版件 ⇒
+        #   步骤 3 `verify_release` 判 `[A] dist 布局` 红（"混入旧版件或本版件缺失"）
+        #   ⇒ 白跑一轮 22 分钟构建。
+        #   ★ 这是本仓 T-09（同一事实两处副本）的又一变体：`_archive_stale_dist`
+        #     （build_package 侧）**按版本**归档旧件，而本救回循环**没有版本口径**
+        #     ⇒ 一个挪走、一个捞回，两把尺子打架。修法＝让救回也用**版本口径**。
+        #   ★ 为什么不是"也捞旧件、让后续判据去红"：那会把"混旧包"这个
+        #     D-23/JDG-06 专门要防的最危险一项，变成每次构建的必然产物
+        #     （tmp 残留不清 ⇒ 每轮都把旧版捞回来），机制自相矛盾。
+        _want = "antinel-%s.tar.gz" % version
         for name in sorted(os.listdir(dist)):
             tmpdir = os.path.join(dist, name)
             if not (name.startswith(".tmp-") and os.path.isdir(tmpdir)):
                 continue
             for f in sorted(os.listdir(tmpdir)):
-                if f.endswith(".tar.gz"):
-                    dst = os.path.join(dist, f)
-                    if not os.path.exists(dst):
-                        shutil.move(os.path.join(tmpdir, f), dst)
-                        got = True
-                        print("   [救回 sdist] %s ← %s/%s（宿主守卫拦了收尾删除，tar 本身是好的）"
-                              % (f, name, f))
+                if f != _want:                       # ★ 只认本版件（版本口径）
+                    continue
+                dst = os.path.join(dist, f)
+                if not os.path.exists(dst):
+                    shutil.move(os.path.join(tmpdir, f), dst)
+                    got = True
+                    print("   [救回 sdist] %s ← %s/%s（宿主守卫拦了收尾删除，tar 本身是好的）"
+                          % (f, name, f))
         if got:
             rescued.append("sdist")
             print("   [提示] sdist 后端报了 rc=%d，但已救回 —— 以 dist/ 实际内容为准" % rc_s)

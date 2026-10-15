@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "antinel"
-version = "0.50.3"
+version = "0.50.4"
 description = "Local-first audit chain and ledger for AI coding agents: every action recorded, every record verifiable."
 readme = "README.md"
 license = {file = "LICENSE"}
@@ -60,13 +60,13 @@ py-modules = ["antinel", "audit_chain", "session_dna", "strings",
               "inbox_tray", "inbox_notify", "inbox_emphasis", "inbox_fallback",
               "inbox_daemon", "inbox_config", "inbox_cli",
               "ledger", "heartbeat",
+              # ★ 0.49.0 急事冒泡＋漂浮哨标（服务/窗口机制，无第三方依赖）
+              "inbox_bubble", "inbox_logo",
               # ★ 0.35.3 术语表（与仓库 pyproject.toml 逐字一致）
               "glossary",
               # ★ 0.36.0 窗口几何 + 失守归因（两个新模块，
               #   与 build() 里的 root_mod 复制清单逐字一致）
               "inbox_window", "remediation",
-              # ★ 0.49.0 急事冒泡＋漂浮哨标（页面服务/窗口机制，不另装依赖）
-              "inbox_bubble", "inbox_logo",
               # ★ 0.38.0 粮（哨兵口粮）＋ 机器唯一码（两个新模块，
               #   与 build() 里的 root_mod 复制清单逐字一致）
               "granary", "machine_id"]

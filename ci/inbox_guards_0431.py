@@ -9,16 +9,16 @@
 ★★ 这一份判据的由来（2026-10-10 实测「右下冒泡」复发，非推演）：
 
     当天 11:11:47 一条 `host_shield_tamper`（`field=enabled`、`subkind=state_drift`、
-    **`recovered=true`**）被弹了泡 —— 而它描述的事**已经自愈**（哨兵按链权威回写恢复），
-    值守台早就按 `recovered` 把它降到 L1（`inbox_model.level_of_record`）；
+    **`recovered=true`**）被弹了泡 —— 而它描述的事**已经自愈**（监理按链权威回写恢复），
+    Antinel 监理早就按 `recovered` 把它降到 L1（`inbox_model.level_of_record`）；
     同一时刻 `guard_posture()` 是 **guarding（值守中）**。
     ⇒ **通知在说「失守」，事实是「值守中」。通知与事实相反。**
 
     这不是"偶发"，是三条**互不相干**的发射路径各自演化的必然：
-      · `host_shield._notify`（哨兵事件）—— 图标随姿态（0.36.5 修过）；
+      · `host_shield._notify`（监理事件）—— 图标随姿态（0.36.5 修过）；
       · `hooks/pre_tool_use.notify_owner`（拦截事件）—— 自己 spawn 一份 PowerShell，
         图标**写死 `SystemIcons.Warning`**（0.36.5 的图标修复只改到了另一份）；
-      · `inbox_notify.toast`（值守台，WinRT，落操作中心）。
+      · `inbox_notify.toast`（Antinel 监理，WinRT，落操作中心）。
     ⇒ 「修好一处、漏掉另一处」的标准形状；且**判定名单**（`_ALERT_KINDS`）
       是"按类型一刀切"，**不看 `recovered`**。
 
@@ -114,7 +114,7 @@ def s60():
 @check("N-S60 负控：抽掉 recovered 判断 ⇒ S60 必须报红")
 def n_s60():
     src = _src("host_shield.py")
-    old = '    if rec.get("recovered") is True:\n        return False, "已自愈（recovered=true，无后果；值守台仍收）"\n'
+    old = '    if rec.get("recovered") is True:\n        return False, "已自愈（recovered=true，无后果；Antinel 监理仍收）"\n'
     if old not in src:
         return "负控无效：找不到 recovered 判断锚点（判据与源码已失配）"
     mut = src.replace(old, "", 1)
@@ -223,7 +223,7 @@ def n_s62():
 
 
 # ══════════════════ 维度四／五／六 · 去重口径与运行态 ══════════════════
-@check("S63 ★ 可观测：气泡保护能自报（sent/shown/suppressed ＋ 值守台在岗）")
+@check("S63 ★ 可观测：气泡保护能自报（sent/shown/suppressed ＋ Antinel 监理在岗）")
 def s63():
     import host_shield as HS
     for fn in ("bubble_self_report", "note_bubble_suppressed", "console_channel_status"):
