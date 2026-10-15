@@ -1091,36 +1091,46 @@ def n_state_corrupt_rebuilds():
 
 
 def c_daemon_tick_notifies_once():
-    """一轮 tick：新告警通知一次、托盘刷成 R0 失守、件数=1；第二轮不再重复通知。
+    """一轮 tick：新告警**按级别走各自通道**，且第二轮不再重复。
 
-    ★ 时间戳必须**相对现在**（`_ago`）：托盘态走 `console_state`（24 小时窗口），
-      写死 `2026-10-05` 会让记录第二天掉出窗口 ⇒ 托盘态变 L0 ⇒ 判据**自己腐烂变红**。
+    ★★ 0.49.0 路由换代（创始人 2026-10-14 夜间拍板）：**急事走冒泡、
+       普通事走 toast**。R0（失守）/ L2（拦截进行中）＝「需要人工介入马上
+       处理」⇒ 置顶、不自动消失、带「知道了」确认钮的冒泡小窗；其余级别
+       才落 WinRT toast（操作中心）。**同一个事件只走一条通道** ——
+       两条都响就是告警泛洪（规格《品牌动效报警语法》铁律二）。
+       ⇒ 本判据钉路由：R0 项 ⇒ 冒泡 1 次、toast **0** 次；第二轮都不再响。
     """
     hub = new_hub()
     put_chain(hub, [breach(ts=_ago(1), reason="a")])
+    bub = []
     b = NT.RecordingBackend()
     d = DM.Daemon(root=hub, backend=b, sound=EM.RecordingSound(),
-                  overlay=EM.RecordingOverlay())
+                  overlay=EM.RecordingOverlay(),
+                  bubbler=lambda **kw: bub.append(kw) or {"ok": True, "why": ""})
     r1 = d.tick()
     r2 = d.tick()
     tray = TR.read_state(root=hub)
-    return (len(b.calls) == 1 and len(r1["notified"]) == 1 and len(r2["notified"]) == 0
+    return (len(bub) == 1 and len(b.calls) == 0
+            and len(r1["bubble"]) == 1 and r1["bubble"][0]["ok"] is True
+            and len(r2["bubble"]) == 0
             and tray["state"] == "R0" and tray["count"] == 1)
 
 
 def n_daemon_tick_notifies_once():
-    """负控：链里**新增**一条（另一种 kind）⇒ 必须再通知一次。"""
+    """负控：链里**新增**一条（另一种 kind）⇒ 必须再走一次通道。"""
     hub = new_hub()
     put_chain(hub, [breach(ts=_ago(2), reason="a")])
     b = NT.RecordingBackend()
-    d = DM.Daemon(root=hub, backend=b)
+    bub = []
+    d = DM.Daemon(root=hub, backend=b,
+                  bubbler=lambda **kw: bub.append(kw) or {"ok": True, "why": ""})
     d.tick()
-    n1 = len(b.calls)
+    n1 = len(bub)
     put_chain(hub, [breach(ts=_ago(2), reason="a"),
                     {"ts": _ago(1), "type": "host_shield_tamper",
                      "reason": "t", "hash": "h2"}])
     d.tick()
-    return n1 == 1 and len(b.calls) == 2
+    return n1 == 1 and len(bub) == 2
 
 
 def c_daemon_r0_emphasis_only():

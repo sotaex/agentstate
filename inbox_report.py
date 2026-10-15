@@ -143,6 +143,46 @@ def chain_health(chain_files):
             "first_bad": first_bad, "reason": ""}
 
 
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_RULE_ZH = None          #: `id → description_zh` 缓存（读一次；读不到 ⇒ 空表）
+
+
+def rule_zh_map():
+    """`rules/default.json` 的规则**人话名**（`id → description_zh`，唯一实现）。
+
+    ★★ 为什么新增它（0.50.4 / Q-04，2026-10-15 品质扫描）：日报页「规则命中
+       排行」原先直接把**内部规则号**（`DST-10`）摆给用户 —— 那是工程串，不是
+       人话；而 `rules/default.json` 里**每一条都写了 `description_zh`**
+       （例：DST-10 ＝「从命令行写入 NTFS 备用数据流…」），只差读出来。
+    ★ 兜底纪律（先删谎，不补谎）：读不到 / 解析失败 / 该 id 没有中文描述
+       ⇒ 返回空串，页面**退回显示规则号**，绝不拿 `name`（英文）充数、更不编造。
+    ★ 只读一次并缓存：日报每渲染一次就扫 37 条规则不划算，且规则文件在
+       会话内不变。
+    """
+    global _RULE_ZH
+    if _RULE_ZH is not None:
+        return _RULE_ZH
+    m = {}
+    # 两种布局都能找到（与 `hooks/pre_tool_use.py::_locate` 同思路：
+    # 扁平仓 `rules/` 在旁边，技能包 `rules/` 在上一层）。
+    for base in (_HERE, os.path.dirname(_HERE)):
+        p = os.path.join(base, "rules", "default.json")
+        if not os.path.isfile(p):
+            continue
+        try:
+            with open(p, encoding="utf-8") as f:
+                d = json.load(f)
+            rows = d.get("rules") if isinstance(d, dict) else d
+            for r in rows or []:
+                if isinstance(r, dict) and r.get("id") and r.get("description_zh"):
+                    m[r["id"]] = r["description_zh"]
+        except Exception:                                   # noqa: BLE001
+            m = {}                      # 读坏 ⇒ 当没有，页面退回规则号
+        break
+    _RULE_ZH = m
+    return m
+
+
 def daily_report(day=None, root=None, chain_files=None, items=None,
                  chain=None, led=None):
     """生成某一天的日报。`day` 缺省＝本地今天。
@@ -163,7 +203,11 @@ def daily_report(day=None, root=None, chain_files=None, items=None,
     for it in today:
         if it.rule_id:
             rules[it.rule_id] = rules.get(it.rule_id, 0) + 1
-    rule_rows = sorted(({"rule_id": k, "count": v} for k, v in rules.items()),
+    # ★ 0.50.4（Q-04）：带上规则**人话名**（`description_zh`）；取不到为空串，
+    #   页面据此退回规则号 —— 报告侧只提供数据，显示取舍由页面唯一实现决定。
+    _zh = rule_zh_map()
+    rule_rows = sorted(({"rule_id": k, "count": v, "zh": _zh.get(k, "")}
+                        for k, v in rules.items()),
                        key=lambda r: (-r["count"], r["rule_id"]))
 
     # ---- 窗口（默认 24 小时）内的数字：顶部条与"每个数字可点钻取"共用 ----

@@ -12,7 +12,7 @@
   ⇒ 修好一处不难，难的是**没人能再改回去**。本文件把 A/B 两组改动从"代码里的事实"
     变成"会报红、有负控的机制"：
 
-    S20 A2「读不到」≠「读到了一份撤防的」：`load_state_strict()` 读失败返 `None`；
+    S20-400 A2「读不到」≠「读到了一份撤防的」：`load_state_strict()` 读失败返 `None`；
     S21 A2'「存在但读不到 ⇒ 拒写」：`update_state_fields()` 是**唯一读-改-写入口**，
         坏文件上必须**拒写且字节不变**（源②的正面修复）；
     S22 A4「授权不进别人的账本」：设了 `ANTINEL_HUB_DIR` ⇒ `_shield_chain_dir()`
@@ -156,7 +156,7 @@ def _kwarg(call, key):
     return None
 
 
-# ═════════════════════════════ S20 · A2「读不到」≠「已撤防」════════════════════
+# ═════════════════════════════ S20-400 · A2「读不到」≠「已撤防」════════════════════
 def _load_state_strict_problems(mod, sp):
     """在**指定的状态文件路径**上核 `load_state_strict` 的诚实性。
 
@@ -176,7 +176,7 @@ def _load_state_strict_problems(mod, sp):
     return probs
 
 
-@check("S20 A2「读不到」≠「已撤防」：读失败返 None ＋ 无背书撤防不落盘")
+@check("S20-400 A2「读不到」≠「已撤防」：读失败返 None ＋ 无背书撤防不落盘")
 def s20():
     import host_shield as H
     tmp = tempfile.mkdtemp(prefix="g0400_s20_")
@@ -203,7 +203,7 @@ def s20():
         H.state_path = o_sp
 
 
-@check("N-S20 负控：让 load_state_strict 退回「读不到返默认撤防」⇒ S20 必须报红")
+@check("N-S20-400 负控：让 load_state_strict 退回「读不到返默认撤防」⇒ S20-400 必须报红")
 def n_s20():
     import host_shield as H
     o = H.load_state_strict
@@ -213,7 +213,7 @@ def n_s20():
         probs = _load_state_strict_problems(
             H, lambda: os.path.join(tmp, "host_shield.json"))
         if not probs:
-            return "负控失效：退回旧口径后 S20 仍然绿"
+            return "负控失效：退回旧口径后 S20-400 仍然绿"
         return True
     finally:
         H.load_state_strict = o

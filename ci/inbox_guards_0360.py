@@ -632,7 +632,7 @@ def c_place_reports_failure_honestly():
     return True
 
 
-def c_place_window_title_is_exact_not_substring():
+def c_place_window_title_is_exact_not_substring(src=None):
     """★ 窗口识别用**后缀精确匹配**，不用 `in` 子串（子串会误伤别的窗口）。
 
     ★★ 为什么是「后缀」而不是「完整标题」（0.36.1 真缺陷，本轮实测）：
@@ -644,9 +644,20 @@ def c_place_window_title_is_exact_not_substring():
 
     ★ 后缀匹配**不是**子串搜索：必须是 `endswith`（整串结尾），
       不是 `in`（任意位置出现）。这条守住它。
+
+    ★★ 0.50.2 两处修正（都是**实测**出来的量具故障）：
+      ① **末了一条扫描会误红**：原来查的是裸子串 `"in title"` / `"title in"`，
+         而 `for h, title in enum_windows(...)`（元组解包）经 `ast.unparse`
+         后**正好含 `title in`** ⇒ 判据被一句无关的 for 语句判红，且红的原因
+         还指着「子串匹配」（张冠李戴）。⇒ 改成认**真正的成员测试形态**：
+         `<标记变量> in <标题变量>`。
+         ★ 为什么不能一刀切禁「标题里的子串测试」：`is_console_title` 里
+         `any(m in t for m in BROWSER_TITLE_MARKS)` 是**故意**的（排除浏览器
+         普通窗口），禁掉它等于把防误关的那一层拆了。
+      ② 加 `src` 注入点（默认真源码）—— 负控才能拿**变异源码**跑同一条判据。
     """
     import inbox_window as WIN
-    src = _code_only(_src_of(WIN))
+    src = _code_only(src if src is not None else _src_of(WIN))
     # ★★★ 0.36.5：`_matches_title` 已删除（零生产调用方，且**注释与实现相反**：
     #   文档写「不是 in 子串」、实现正是 `suffix in actual`），
     #   判据改查**真源** `is_console_title`。判据的意图一字未改：
@@ -667,8 +678,31 @@ def c_place_window_title_is_exact_not_substring():
     if "_mark_at_tail" not in fn and "CONSOLE_WINDOW_TITLE_MARK" not in fn:
         return ("`is_console_title` 宽泛模式没有整串匹配动作 ⇒ 它认不出带身份串的"
                 "旧窗口（0.36.2 实测的『收旧窗失效』会复发）")
-    if "in title" in src or "title in" in src:
-        return "出现子串匹配 `in`，会误伤标题含该段的其它窗口"
+    # ★ 只认**真正的成员测试形态** `<标记变量> in <标题变量>`（0.50.2 修正，见 docstring）。
+    if re.search(r"(?:CONSOLE_WINDOW_TITLE_MARK|LOGO_TITLE_MARK|BUBBLE_TITLE_MARK"
+                 r"|\bmark|\bsuffix)\s+in\s+(?:title|t|actual|buf\.value)\b", src):
+        return "出现「窗口标记 in 标题」的子串匹配，会误伤标题含该段的其它窗口"
+    return True
+
+
+def n_place_window_title_substring_is_caught():
+    """负控：把宽泛模式退回 `CONSOLE_WINDOW_TITLE_MARK in t` 子串口径 ⇒ 必须红。
+
+    ★ 0.50.2：本条原先**没有负控**（CHECKS 表里是 `None`）。补上 ——
+      「判据不许没有负控」是本仓纪律；而且这一条恰好证明上面那行精确正则
+      真的抓得住旧形状（不是改完就没人守了）。
+    """
+    import inbox_window as WIN
+    src = _src_of(WIN)
+    if "return _mark_at_tail(t)" not in src:
+        return ("变异锚点未找到（`is_console_title` 里没有 "
+                "`return _mark_at_tail(t)`）—— 负控自身失效，不算通过")
+    mutated = src.replace("return _mark_at_tail(t)",
+                          "return CONSOLE_WINDOW_TITLE_MARK in t", 1)
+    if mutated == src:
+        return "负控自身失效：替换没生效"
+    if c_place_window_title_is_exact_not_substring(src=mutated) is True:
+        return "负控失效：退回子串口径后仍判合格 —— 这条判据是装饰"
     return True
 
 
@@ -1532,10 +1566,17 @@ def c_term_popup_not_squeezed_into_narrow_column():
 
 
 def c_term_popup_has_narrow_screen_rule():
-    """★ 窄面板要有专门规则（面板只有 520px 宽）。"""
+    """★ 窄屏要有专门规则（小工作区上面板会窄，浮层会溢出）。
+
+    ★ 0.49.0 措辞订正（原 docstring 写"面板只有 520px 宽"是**旧设计的
+      事实陈述**，曾被当成"面板就该这么宽"的默证）：0.49.0 起大工作区上
+      面板宽 720（出生即正常版式，见 `inbox_window.MAX_W`），窄布局
+      **只服务真正小的屏幕** —— 这条 @media 规则因此依然必须存在，
+      但它的身份从"主版式的补丁"变成了"小屏降级路径"。
+    """
     import inbox_server as SV
     if "max-width:620px" not in _src_of(SV).replace(" ", ""):
-        return "缺少窄屏 @media 规则（面板宽度 520px，浮层会溢出）"
+        return "缺少窄屏 @media 规则（窄工作区上浮层会溢出）"
     return True
 
 
@@ -1903,7 +1944,8 @@ CHECKS = [
      n_place_window_without_moving_is_caught),
     ("P02 落位回读实测不谎报", c_place_window_checks_result_truthfully, None),
     ("P03 只动标题匹配的窗口", c_place_window_does_not_touch_other_windows, None),
-    ("P04 标题精确相等非子串", c_place_window_title_is_exact_not_substring, None),
+    ("P04 标题精确相等非子串", c_place_window_title_is_exact_not_substring,
+     n_place_window_title_substring_is_caught),
     ("P05 开窗之后才落位", c_open_console_calls_place_after_open,
      n_open_console_without_place_is_caught),
     ("P06 落位失败如实说", c_place_reports_failure_honestly, None),

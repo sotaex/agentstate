@@ -35,15 +35,31 @@
   python ci/defect_types.py --report         # 人读：覆盖现状 + 未闭合清单
   python ci/defect_types.py --gate-ids       # 机器读：从闸门注册表提取判据 ID
   python ci/defect_types.py --check          # 自检：登记簿自身一致性（供判据调用）
+  python ci/defect_types.py --watch          # 看守期看板：在守/期满/期内复发（A3）
 
   新缺陷的标准动作（这就是"机制"二字的意思）：
     1. 归类到某个 T-xx；归不进去 ⇒ 新增类型
     2. 新增类型时**必须同时**决定：配判据，还是申报 blind + 写 discipline
     3. 登记实例（X-xxx），指向守护它的判据
     4. 跑 `--report` 看覆盖变化
+
+★★★★ 判据看守期制（A3，2026-10-15 落地 —— 机制论文档 §5 L1 行 / §8 行动清单 3）
+  X 实例修复完成（status=fixed）即**自动**进入看守期 14 天；
+  期内同类型再登实例 ⇒ 同族复发，`--check` 报红（**红判据不红产品**：
+   recurrence 短于看守期 ＝ 判据固化失败，要修的是判据）；
+  期满无复发 ⇒ 看板列入「可降月度抽样或退役」候选。
+  ★ 为什么是 14 天日期制而不是 3 个版本制：版本计数要遍历 git tag，
+    而本仓 85 个提交未推送、研发态版本漂移（0431 纪律：版本差值是
+    研发态识别信号不是发布标记）⇒「过了几版」机械上不可判定；
+    日期只依赖实例自带 date 字段，纯算术可复算（P2 二值可判定）。
+  ★ 复发判据只对 **2026-10-15（A3 落地日）起登记**的实例生效 ——
+    守卫只能抓它存在之后发生的事；10-12→14 的批次实例是机制落地前的
+    历史工作（同日/次日的同类多条＝一次会话修多缺陷，不是复发），
+    与 A1「现有 29 不追溯」同一条 grandfathering 纪律。
 """
 
 import argparse
+import datetime
 import json
 import os
 import re
@@ -88,13 +104,17 @@ TYPES = {
         "name": "量具自身有缺陷",
         "definition": ("检查工具自己的口径、fixture、自报与真仓不一致，"
                        "导致假红、假绿，或照错值写回破坏数据"),
-        "guards": ["D-27", "D-28", "C-01", "S47", "S48"],
+        "guards": ["D-27", "D-28", "C-01", "S47", "S48", "S70", "UID15"],
         "blind": False,
         "discipline": ("量具改动后先跑「干净状态不误报」，再跑负控；"
                        "量具的哈希/比对口径一律 import 产品模块，不许二次实现；"
                        "**凡依赖并发/时序/机器状态的夹具，必须自证夹具成立**"
                        "（会合栅栏 ＋ 前置条件强制化 ＋ 两臂对照），"
-                       "把「测不出」与「测出来是对的」分开"),
+                       "把「测不出」与「测出来是对的」分开；"
+                       "★ **判据只看「注入的假值」不算守住了** —— 凡断言的对象是"
+                       "「这棵树/这台机**现在**的状态」，必须**直接读真实状态**"
+                       "（S70 就是补这一条：S67/S69 只验注入版本号 ⇒ 真实树落差为 0"
+                       "而全绿 ⇒ 假绿）"),
     },
     "T-04": {
         "name": "红而无出路",
@@ -148,7 +168,7 @@ TYPES = {
         "name": "同一事实两套口径",
         "definition": ("同一个事实有两份各自演化的实现（两份文案、两份清单、"
                        "源件与部署件、两份读数），且**没有任何判据**守着它们一致"),
-        "guards": ["D-22", "D-33", "W-03", "U-16"],
+        "guards": ["D-22", "D-33", "W-03", "U-16", "B-12", "PKG16"],
         "blind": False,
         "discipline": ("同一事实只许一个写入口／一个真源；"
                        "凡「源件 vs 派生件」（部署件、托盘文案、缓存快照）"
@@ -166,6 +186,24 @@ TYPES = {
                        "账面（8 帧截图）看起来与「有 before 对照」一样 ⇒ 由 "
                        "`ci/baseline_tag.py` ＋ 钩子接线在每次产品提交出声提醒"
                        "（只出声、不裁决 —— git tag 不区分用途，判违规会时红时绿）"),
+    },
+    "T-11": {
+        "name": "声明的能力与实现脱节",
+        "definition": ("规格定过、用户要过、或上一版明明有的行为，在实现里"
+                       "被换掉/删掉/从未长出，而账面（页面能开、灯能亮）"
+                       "看起来一切正常 —— 要用截图/实测才发现「死了」"),
+        "guards": ["W-08", "W-09", "UICOPY1", "UIDRILL1", "UIREAD1", "U-17",
+                   "U-18",
+                   "B-02", "B-03", "B-04", "B-05", "B-06", "B-07", "B-08",
+                   "B-13",
+                   "FLO-01", "FLO-02", "FLO-03", "FLO-04", "FLO-05", "FLO-06",
+                   "CMD15", "W17"],
+        "blind": False,
+        "discipline": ("凡「页面/CSS/脚本/窗口」层面的能力，判据必须落在**渲染产物"
+                       "与调用顺序**上（结构断言），不能只落「文件在不在」；"
+                       "规格类（动效/文案）以规格文档为唯一真源逐项锁；"
+                       "依赖外部运行时的（node）**报 SKIP 不许报 PASS**；"
+                       "负控先实测见红才许写进文件"),
     },
 }
 
@@ -651,6 +689,464 @@ INSTANCES = [
                 "从出生起就没被执行过」。⇒ 沉淀：**给 CLI 每条分支配一次真调用**，"
                 "比静态检查「名字有没有定义」更贴病根（静态看不出哪条分支没人走过）。",
     },
+    {
+        "id": "X-028",
+        "type": "T-11",
+        "what": "**窗口默认尺寸（2026-10-14 截图 1/2）**：值守台默认 520×640，"
+                "低于自家 CSS 窄屏断点 620px ⇒ 面板一出生就落进窄降级布局"
+                "（顶行折行压字、药丸内折行压字）。用户手动拉宽才正常 ——"
+                "**要靠用户手动补救的默认值就是错的**。",
+        "guard": "W-08",
+        "status": "fixed",
+        "date": "2026-10-14",
+        "note": "MAX_W 520→720（高于断点 100px 余量＝出生即正常版式），"
+                "WINDOW_SIZE 同源。判据 W-08/N-W08/W-08b：断点从产品 CSS 的"
+                "@media 真读（正则必须带 @media 上下文 —— 首版没带，把"
+                "`main{max-width:1000px}` 当断点 ⇒ 好值被判红、尺子反咬）；"
+                "负控把 MAX_W 退回 520 必须同一把尺子判红；W-08b 连带守"
+                "「上限是上限不是下限」（小工作区仍正确降级）。",
+    },
+    {
+        "id": "X-029",
+        "type": "T-11",
+        "what": "**术语浮层被窗口裁掉（截图 3/4/5）**：问号浮层的右缘/下缘超出"
+                "值守台窗口边界，被窗口裁掉看不见。HTML 画不出自身窗口外 ⇒ "
+                "不是 CSS 能修的，必须让窗口本身让位。",
+        "guard": "W-09",
+        "status": "fixed",
+        "date": "2026-10-14",
+        "note": "JS 量溢出量 ⇒ 报服务端 **平移优先（不改布局）→ 贴边才撑开右/下沿**；"
+                "还原时**用户手动搬过就不搬回**（不与用户抢方向盘）；"
+                "实在露不全 ⇒ `left` 余量如实留下。判据 W-09a…e 全臂含两个负控："
+                "① place 报成功但窗没动（记录型夹具的「撒谎」臂，回读校验必须抓住）"
+                "② 要还原时窗口已不在。",
+    },
+    {
+        "id": "X-030",
+        "type": "T-11",
+        "what": "**图标死了（0.48.5 戊1 `461b4ef` 引入）**：头部动效 mp4 换成"
+                "静态 logo.svg（理由：768²→46² 缩发放虚、607KB）⇒ 用户看到"
+                "「现在的图标好了，但是死了，它不动了」。规格 v1.2 的五态动法"
+                "（色/速/波幅/环呼吸/R0 梯度断裂）在实现替换时被静默丢掉。",
+        "guard": "U-17",
+        "status": "fixed",
+        "date": "2026-10-14",
+        "note": "内联 SVG＋rAF 状态机移植进页面（矢量消解放虚理由；按字节算体积），"
+                "`<noscript>` 退回静态图。判据 U-17a/b/c：规格表逐项锁（负控改"
+                "L1 圈时/R0 塌暗必须红）、页面必须含 data-logo＋rAF＋noscript"
+                "（负控拔脚本必须红）、**Node 真跑状态机 25 秒**量几何量"
+                "（五态速度单调、R0 滑行 20° 后零漂移、波峰 .30/.45/.65、"
+                "环色 R0 转 #4A2626）—— node 缺失报 SKIP，**绝不报 PASS**。",
+    },
+    {
+        "id": "X-031",
+        "type": "T-11",
+        "what": "**冒泡缺席**：需要人工介入马上处理的问题（R0/L2）不再有"
+                "「当时弹出来＋有声音」的冒泡，只剩收件箱里一行记录 —— "
+                "用户原话「以前默认的冒泡，会当时弹出来，还有声音……还是需要用到的」。",
+        "guard": "B-02",
+        "status": "fixed",
+        "date": "2026-10-14",
+        "note": "`inbox_bubble.py` 全链：Edge --app 小窗＋值守台同一套 CSS＋"
+                "同一枚动效哨标＋声音＋「知道了（去处理）」确认钮＋置顶＋"
+                "不自动消失；守护进程路由换代 R0/L2→冒泡、其余→toast"
+                "（一次一枚，由 inbox_guards 的 B-01 守）。判据 B-02…B-08："
+                "界面同源、无自动关闭、声音如实、节流/ack 同一本账、"
+                "可见性闸、服务起不来如实、一次一枚；负控逐条实测见红。",
+    },
+    {
+        "id": "X-032",
+        "type": "T-11",
+        "what": "**漂浮最小态从未长出**：用户要「哨兵很多时候不要碍事，"
+                "只要在」——可收缩成一枚漂浮 LOGO（像输入法漂浮窗），"
+                "点击展开回值守台。收缩入口（面板右上角钮）、展开退役、"
+                "可拖拽、置顶、标志自退，四件事一件都没有。",
+        "guard": "FLO-01",
+        "status": "fixed",
+        "date": "2026-10-14",
+        "note": "`tools/logo.ps1`（WinForms 无边框置顶、五态动法同规格、"
+                "读 tray.json 按态显、点击写 open 并自退、可拖拽、"
+                "轮询 logo.quit 自退）＋ `inbox_logo.py`（退役先于起、"
+                "清标志防「一出生就退」、收缩＝哨标就位才关面板窗）＋"
+                "面板收缩钮＋展开退役钩子。判据 FLO-01…FLO-06：ps1 契约与"
+                "规格表同值（负控改 R0 圈时必须红）、退役三态、"
+                "顺序即安全（负控：哨标起不来不许关面板）、三处接线齐全。",
+    },
+    {
+        "id": "X-033",
+        "type": "T-11",
+        "what": "**冒泡确认的对象键错位、失败还报成功**：冒泡发射端节流用"
+                "`it.kind`，但确认按钮原来没把 kind 发回服务端，服务端默认记成 R0；"
+                "而前端忽略 ack 响应里的 `ok=false`，网络/写盘失败也立即显示"
+                "「已确认」并 `window.close()`，用户看不到失败且同类仍会再冒。",
+        "guard": "B-05",
+        "status": "fixed",
+        "date": "2026-10-14",
+        "note": "冒泡 URL 携带 bk → body data-kind → `bubble_ack` POST kind；"
+                "前端检查 HTTP/JSON ok，不成功就保留窗口、提示重试；确认≠处理，"
+                "不自动关窗，明示「尚未标记处理，处理后请手动关闭」。"
+                "判据 B-02/B-03/B-05 覆盖 kind 传递、确认真回执、业务 kind 与 ack key 对齐。",
+    },
+    {
+        "id": "X-034",
+        "type": "T-11",
+        "what": "**『看这 N 条』钻取范围超过 N**：待办按 (kind + topic + level)"
+                "分组，但原链接只筛 `kind:<kind>`；同 kind 不同事由会一起出现，"
+                "按钮说 2 条，点进去可能是 4 条。",
+        "guard": "UIDRILL1",
+        "status": "fixed",
+        "date": "2026-10-14",
+        "note": "新增唯一筛选文法 `ids:<id,...>`，分组链接精确传本组 ids。"
+                "判据 UIDRILL/N-UIDRILL 用同 kind 两事由、每组 2 条实测链接集合，"
+                "负对照证明旧 kind 筛选会误捞 4 条。",
+    },
+    {
+        "id": "X-035",
+        "type": "T-11",
+        "what": "**空筛选结果说错对象**：`看一眼`/`归档`/`全部` 空结果统一显示"
+                "「当前读取到的记录里，没有要你处理的事」—— 没有匹配结果不等于"
+                "没有待办，空态文案描述的是另一张 tab。",
+        "guard": "UICOPY1",
+        "status": "fixed",
+        "date": "2026-10-14",
+        "note": "空态按 action/info/archive/all/具体 filter 各说当前结果；"
+                "判据 UICOPY/N-UICOPY 对四个 tab 与指定类型钻取逐个渲染验证，"
+                "并用旧共享文案作反向对照。",
+    },
+    {
+        "id": "X-036",
+        "type": "T-11",
+        "what": "**点开即已读会假装成功**：原 JS 发请求前先设 `data-readed=1`，"
+                "任何 HTTP 响应（包括 403/409）都撤未读点；网络失败后也不清标志，"
+                "重开同一条不会再请求。",
+        "guard": "UIREAD1",
+        "status": "fixed",
+        "date": "2026-10-14",
+        "note": "只有服务端写状态成功回 JSON `ok:true` 后才设已读并撤点；"
+                "失败清 pending，可折叠再打开重试。判据 UIREAD/N-UIREAD 锁"
+                "回执顺序、失败重试与服务端 JSON 成功回执。",
+    },
+    {
+        "id": "X-037",
+        "type": "T-11",
+        "what": "**术语翻转 CSS 未命中且溢出极值会炸请求**：`.term.flipx>tdef`"
+                "把 `<tdef>` 当成标签而非 `.tdef` class，JS 加 `flipx` 不会右对齐；"
+                "另外 `int(float('1e309'))` 抛 OverflowError，原 POST 只捕 ValueError。",
+        "guard": "W-09",
+        "status": "fixed",
+        "date": "2026-10-14",
+        "note": "桌面与窄屏规则改成 `.term.flipx>.tdef`（窄屏翻转后 right:0）；"
+                "winfit 对 ValueError/OverflowError 统一回 JSON 坏输入。"
+                "判据 W-09f/g 对选择器实际目标与 1e309，负控撤 class 点/溢出异常分支。",
+    },
+    {
+        "id": "X-038",
+        "type": "T-11",
+        "what": "**非默认 root 的漂浮哨标与宿主中枢失联**：`logo_cmd()` 原来"
+                "把 `tray.json`/动作/退役标志都定位到默认目录；用户以自定义 root"
+                "运行服务时，哨标状态不更新、点击写错文件、退役旗也没人读。",
+        "guard": "FLO-06",
+        "status": "fixed",
+        "date": "2026-10-14",
+        "note": "`logo_cmd(root=...)` 现将 state/action/quit 三条路径绑定同一个 root；"
+                "判据 FLO-06/N-FLO06 用隔离临时根逐项核对，并把三条路径变异回"
+                "默认根验证反向对照。",
+    },
+    {
+        "id": "X-039",
+        "type": "T-11",
+        "what": "**哨标动效版比定稿小 45%**：0.49.0 把静态 `logo.svg` 换成内联"
+                "动效 SVG 时，照搬了 demo 的 `viewBox=\"0 0 1024 1024\"`。demo 里"
+                "SVG 显示 340–620px，内边距不显；同一份 viewBox 搬进 48px 方框后，"
+                "环外缘只占画布半宽的 0.465（定稿 logo.svg 是 0.844）⇒ 图标"
+                "「活了，但看着缩水了」。账面（灯会亮、标会动）看起来一切正常，"
+                "要用截图对照才发现尺寸不对。",
+        "guard": "U-18",
+        "status": "fixed",
+        "date": "2026-10-14",
+        "note": "修法：**只收紧 viewBox**（`inbox_server._logo_viewbox` 按定稿比例"
+                "反算），动法几何（CX/CY/R/环宽/波幅/速度）一个数不动 ⇒ 动效不退化。"
+                "判据 U-18 从定稿 logo.svg **现算**比例再要求渲染产物一致"
+                "（不凭记忆写数），并顺带锁住「开 JS 的内联 SVG」与「关 JS 的"
+                "`<noscript>` 退回图」一样大（渐进增强不跳变）；U-18b 锁"
+                "`_LOGO_JS` 的 CX/CY/R 与 Python 常量逐项一致（防两处各写一份）。"
+                "N-U18/N-U18b 均已实测见红。",
+    },
+    {
+        "id": "X-040",
+        "type": "T-09",
+        "what": "**认窗三处两套口径（清单 B4）**：`is_console_title` 用"
+                "`_mark_at_tail`（标记在**末尾** ＋ 前缀白名单），而"
+                "`find_logo_windows` / `find_bubble_windows` 的宽泛分支用"
+                "`mark in title`（**任意位置子串**）—— 两者的 docstring 还都写着"
+                "「同源同构」。实测（一次性探针，内存替换 `enum_windows`）："
+                "用户窗口「我的 · 哨标 收藏夹」「整理一下 · 冒泡 记录」被认成"
+                "哨标窗/冒泡窗，而这两条路径通向 `WM_CLOSE` ⇒ **会关掉用户自己的"
+                "窗口**（0.36.5 把这一类明令为不可接受的祸，当时只收紧了严格模式，"
+                "宽泛模式这一侧漏了）。",
+        "guard": "B-12",
+        "status": "fixed",
+        "date": "2026-10-14",
+        "note": "修法：新增 `inbox_window._mark_at_tail_any(title, mark)`"
+                "（标记必须在末尾，其后只允许 `#身份`），哨标/冒泡宽泛分支都改用它。"
+                "不复用 `_mark_at_tail` 的原因：它的前缀白名单是值守台页面名/状态词，"
+                "而冒泡前缀是**告警标题**（任意文案），白名单化不成立。"
+                "判据 B-12 用五枚假窗（两枚是用户窗）真跑三处认窗；"
+                "N-B12 把宽泛分支变异回子串口径，拿**变异模块**跑同一条正判据 ⇒"
+                "必须翻面（已实测）。真机复验：改口径后真冒泡窗"
+                "「B4 认窗复验 · 冒泡#bcc836」仍被 `find_bubble_windows()` 认出。",
+    },
+    {
+        "id": "X-041",
+        "type": "T-03",
+        "what": "**负控锚点绑在源码文本形状上 ⇒ 产品每改一次形状，尺子就失效一次**"
+                "（本轮实测 5 处，全是老账）：0490 `N-U10`（锚点"
+                "`\"%s%s<div class=\\\"spacer\\\"></div></header>\"` 在 0.50.0 加了"
+                "收缩钮后成死字符串）、0490 `N-U13`（锚点 `\"<div class=\\\"logo\\\">"
+                "<img …` 在 0.49.0 换内联 SVG 后成死字符串）、0362 `Q06`"
+                "（`src.replace(..., 1)` 命中的是**另一个函数**里的同名字面量 —— "
+                "文件里有两处 `if all(oks):`）、0362 `Q08c`（锚点 "
+                "`if is_console_title(buf.value, run_id):` 在改成列表推导后消失）、"
+                "0360 `P04`（末了一条裸子串扫描 `\"title in\"` 被 "
+                "`for h, title in enum_windows(...)` 的元组解包**误红**，"
+                "红的原因还指着「子串匹配」—— 张冠李戴）。"
+                "另：0353 `P12` 断言 `s == 303`，而 0.36.0 起 `op=fix` 改成"
+                "「当场复测 ＋ 把结论显示在页面上」（回 200 整页）⇒ 判据腐化。",
+        "guard": "C-01",
+        "status": "fixed",
+        "date": "2026-10-14",
+        "note": "修法（统一成一条纪律）：**负控的变异打在行为上，不打在源码形状上** ——"
+                "① 换掉被注入的模块属性（`_bar` 的产出、`_logo_mark` 的产出）而不是"
+                "替换源码字符串；② 给正判据加 `mod=` / `src=` 注入点，负控**拿变异对象"
+                "跑同一条正判据**（原来只证明「变异看得见」，没证明「正判据翻面」）；"
+                "③ 失败时返回**说明串**，不再返回裸 `False`（原来屏上只打一个 `False`，"
+                "分不清「锚点过时」和「变异没翻面」）；④ 按调用形态正则变异"
+                "（`is_console_title\\([^)]*\\)`），参数改名不腐化。"
+                "0353 P12 按新契约重写（断言 200 ＋ text/html ＋ 页面上带如实结论）。"
+                "结果：0490 41绿/0红、0362 32绿/0红、0360 52绿/0红、0353 62绿/0红。",
+    },
+    {
+        "id": "X-042",
+        "type": "T-11",
+        "what": "**修好尺寸又裁掉涟漪**：0.50.2 为治「哨标比定稿小 45%」（X-039）"
+                "把 `viewBox` 收紧到**环**上（半宽 `half=282.074`）。可涟漪的圆心"
+                "在半径 `LOGO_R(215)` 的灯头上、最外半径 `AMBER_R(24)+8+waveR(105)`"
+                "＝137 ⇒ 最外缘 215＋137＝**352 > 282.074**，波被切出一道直边。"
+                "根因是**两条规格互不相容**：定稿 `logo.svg` 规定环占半宽 0.844"
+                "（0.50.2 照它反算了 `half`），而动效规格 v1.2 的波幅 45/70/105"
+                "是在「环只占 0.465」的 demo 画布上标定的 —— 两条各自都对，"
+                "合到一张画布上就装不下。账面（灯亮、标动、尺寸对）全正常，"
+                "创始人截图「冒泡的 LOGO 不完整」才看见。",
+        "guard": "U-18",
+        "status": "fixed",
+        "date": "2026-10-14",
+        "note": "修法：**方框＝定稿 logo 的方形轮廓（环保持 0.844 不动），波幅按可用"
+                "空间归一**（`inbox_server._logo_wave_scale()`＝"
+                "`room / max(spec waveR)`，room＝`half − LOGO_R − (AMBER_R+8) − 2`）；"
+                "归一后只改 `waveR` 一栏，其余字段逐项等于规格 ⇒ 三档波幅的**相对"
+                "梯度**（0/45/70/105 的比值）与「波越大越重」语义不变。新增"
+                "`LOGO_MOTION_RENDER`（＝规格表 × 归一系数）作**渲染用**表，"
+                "`LOGO_MOTION` 仍是**规格表**（U-17a 锁它，不许被归一污染）。"
+                "实测：`half=282.074`、`k=0.314991`、渲染 `waveR`＝"
+                "{L0:0, L1:14.175, L2:22.049, LD:33.074, R0:0}，LD 态波最外缘 280.074"
+                "（余量 2.0）；headless 重渲染确认 Ls 波完整可见。"
+                "判据两条腿：**U-18c**（Python 侧常量＋渲染表算「方框装得下全部"
+                "绘制内容」，并连带锁「渲染表＝规格表×k，只差 waveR」防两处各写一份）、"
+                "**U-18d**（Node 真跑五态 140 帧，拿**真坐标** `math.hypot` 算各元素"
+                "最远距离 ≤ half＋0.5）——一条抓「常量对不上渲染表」、一条抓「状态机"
+                "自己把坐标画到框外」。N-U18c（渲染表退回规格波幅 105）/N-U18d"
+                "（页面状态机换回未归一波幅）**均已实测见红**。0514 结果 70绿/0红/0跳。",
+    },
+    {
+        "id": "X-043",
+        "type": "T-03",
+        "what": "**研发态判据在真实开发树上结构性失效，而所有判据全绿（假绿）** ——"
+                "创始人 2026-10-14 第二次点名同一件事（第一次 2026-10-10，0.43.1）："
+                "「这段词是旧病复发，显然缺乏目前的九维机制吧？……这是开发态，"
+                "如果缺乏机制，也请修到位」。实测本机：`antinel.py VERSION = 0.48.4`"
+                "而 `psl/manifest.json version = 0.48.4` ⇒ **版本落差 = 0** ⇒"
+                "`is_dev_build()` 恒 False ⇒ 开发树上任何一次自检漂移都被渲染成"
+                "**失守 ＋「这份守门的代码我认不出是不是出厂那份」**（两臂实测："
+                "有落差 ⇒ dev/研发中；无落差 ⇒ warn/失守，`why` 与创始人截图逐字相同）。"
+                "**0.43.1 只修了一半**：它修对了根因（把构建产物 manifest 从「逐字一致」"
+                "里摘出，S69 钉住），可 S67/S69 **都只在注入的版本号上跑** ——"
+                "**没有任何判据看这棵树自己** ⇒ 真实树上的落差为 0 这件事"
+                "**没有任何东西会红**，只能靠创始人肉眼看见失守再回来报。",
+        "guard": "S70",
+        "status": "fixed",
+        "date": "2026-10-14",
+        "note": "修法两半（缺一不可）。① **恢复落差**：新增 `ci/bump_version.py`"
+                "（承载件清单**只有一份** —— import `ci/version_check.py` 的 `SPOTS`，"
+                "不另抄正则），把九处承载件升到 0.50.3，`psl/manifest.json` **保持落后**"
+                "（升它＝亲手把落差刷平，工具里显式禁止）。实测：`is_dev_build()`"
+                " → `(True, '登记版本 0.48.4 ＜ 代码版本 0.50.3 …')`，"
+                "`guard_posture()` → `guarding/值守中`（自检通过时不再走 dev/warn 分支）。"
+                "② **补判据 S70**（`ci/inbox_guards_0431.py`，维度十二）：**直接读这棵树**"
+                "（`git status --porcelain` ＋ `git diff <最近tag> HEAD`，两者取或 ——"
+                "只看脏文件会漏掉「已 commit、还没发版」这个最常见的中段）⇒"
+                "研发树上落差必须存在，否则红并**给出路**"
+                "（`python ci/bump_version.py <v> --apply`，一条命令）。"
+                "连带对照：同时断言 `is_dev_build()` 在这棵树上真判得出研发态"
+                "（只查落差存在不够 —— 函数里任何一处早退都会让落差白存在）。"
+                "**N-S70 四臂**：反空转（有落差不许红）／非研发树无落差不许误红／"
+                "研发树＋落差 0 必红且报「结构性失效」／登记超前代码必红。"
+                "**撤销即红实测**：把 `antinel.py` 的 VERSION 临时退回 0.48.4 ⇒"
+                "S70 当场判红（16绿/1红）并指名出路；还原即绿。0431 结果 17绿/0红。"
+                "★ 为什么「研发树」允许用 git 而产品侧不许（S27 红线）：判据在开发仓里跑，"
+                "git 是可靠读数；`is_dev_build()` 是产品运行时代码，本机"
+                "「跑哨兵的就是源码检出」⇒ 环境信号恒真 ⇒ 0.40.0 B1 已撤回。",
+    },
+    {
+        "id": "X-044",
+        "type": "T-11",
+        "what": "**「打开值守台」只有「开一个新窗」这一条路** —— 面板本来就开着时点一下，"
+                "会先把旧窗关掉、再开一个新窗（`open_console_settled()` 的语义是"
+                "「谁开窗谁等它就位」，它是为「没有窗、要开一个」设计的）。"
+                "创始人 2026-10-14 原话：「点击打开值守台后，之前的关闭了，打开了"
+                "新的，但是状态不对了……另外，点完了按钮显示'打开值守台'按钮好像"
+                "不对吧，值守台打开着呢」。**两个侧面**：① 动作 —— 用户要的只是"
+                "「切过去」，得到的却是「窗闪一下、内容从头加载」（新窗的态势读数是"
+                "**重新算**的，所以看起来「状态不对了」）；② 文案 —— 按钮上写着"
+                "「打开」，而它本来就开着 ⇒ 一个**不成立的承诺**（同族：0.49.0 的"
+                "假按钮「fix-posture」）。",
+        "guard": "B-13",
+        "status": "fixed",
+        "date": "2026-10-14",
+        "note": "修法：把「打开值守台」抽成**唯一决策点** "
+                "`inbox_server.bubble_open_route()`，按「用户此刻真的看得见值守台吗」"
+                "（`host_shield.console_is_visible()`，口径＝可见且未最小化）三路分流："
+                "看得见 ⇒ **只切到前面**（新增 `inbox_window.focus_windows()`，"
+                "不关、不开、不重建）；看不见 ⇒ 开窗（老路）；**判不出来 ⇒ 开窗**"
+                "（宁可多开一个窗，不许点了没反应）。文案侧：渲染那一刻已开着 ⇒ "
+                "**不画按钮**，改一句状态「值守台开着（在那边看）」；点完若服务端回"
+                "`opened=\"existing\"` ⇒ 按钮**退场**换「值守台开着（已切到它）」"
+                "（与 B-10 同一形状）。顺带修一个**连带**：`.bub-open` 缺失时旧 JS 直接"
+                "`op.addEventListener` ⇒ 整段脚本抛错，把 `fit()` 与「知道了」那条链"
+                "一起打死 ⇒ 加 null 守卫。判据 **B-13** 打在**行为**上（三条路的"
+                "实际动作序列 ＋ 返回值），**N-B13** 把分流条件反过来、"
+                "**拿变异体跑同一条正判据** ⇒ 必红（已实测）。0514 结果 72绿/0红/0跳。",
+    },
+    {
+        "id": "X-045",
+        "type": "T-11",
+        "what": "**术语问号弹层翻边后仍被裁切（右边换成左边）**：用户 2026-10-14 截图中，"
+                "值守台约 713×600 的可视区里，‘看一眼’后的术语问号位于 x≈252；"
+                "旧弹层宽至 560px。旧 JS 只判右溢出并给 `.flipx` 右对齐，弹层左边界"
+                "因此变成负值——问题不是「翻错边」，而是把锚点当定位坐标，未约束弹层"
+                "完整矩形在视口内。",
+        "guard": "W-09",
+        "status": "fixed",
+        "date": "2026-10-14",
+        "note": "修法：术语浮层改为 `position:fixed` 视口坐标；以 summary 和真实弹层"
+                "`getBoundingClientRect()` 计算 x/y，横向 clamp 到 8px 安全边距；纵向优先下方、"
+                "空间不足试上方、仍不足则限高并在弹层内部滚动。resize 与捕获 scroll 均重算。"
+                "四件套：W-09f 锁视口定位/CSS 自滚动；W-09h Node 真执行定位脚本，覆盖截图同形"
+                "713×600 中部锚点、窄屏、左右边缘、底边、极矮屏以及打开/resize/scroll 后坐标"
+                "全部 direct-read 几何在安全区内；N-W09h 在隔离 DOM 桩中恢复旧绝对定位+flipx"
+                "行为，用同一坐标判据实测左边越界转红。仅到 npm DOM 桩为止；浏览器截图与"
+                "常驻服务重启后验收仍待完成，不能以单测替代真机。",
+    },
+    {
+        "id": "X-046",
+        "type": "T-03",
+        "what": "**判据 ID 跨套件重名 ⇒ set 口径折叠，覆盖检查被冒充（假绿）**："
+                "S70 在 0431（研发态落差）与 0440（赋值/只读命令）各有一份真声明，"
+                "`gate_ids_from_registry()` 把 ID 收进 `set()` 折叠成一个 ⇒"
+                "「有人守」检查会被另一套件的同名判据冒充（0431 的 S70 删光、"
+                "只要 0440 还在就全绿），且折叠后无法定位所属套件。",
+        "guard": "UID15",
+        "status": "fixed",
+        "date": "2026-10-14",
+        "note": "修法：`ci/defect_types.py` 新增 `gate_id_map()`（AST 只数真声明、"
+                "保留全部出现）＋ `duplicate_gate_ids()`（跨套件重名检测，套件内"
+                "正/负控共号不算）＋ `check_consistency()` 新增重名问题类；"
+                "25 组历史重名按「先声明保留裸 ID、后声明加 -<批次> 后缀」解掉"
+                "（S70-440/S19-380/S20-400/S1-483/G1-granary…，不臆测号码）。"
+                "四件套：UID15-a 映射结构＋引用无孤儿；UID15-b 真树 direct-read "
+                "重名为 0；N-UID15-a 合成重名必报到＋折叠假绿实证；旧 set 口径"
+                "原样保留（47 条引用不变红 ＝ 连带对照）。",
+    },
+    {
+        "id": "X-047",
+        "type": "T-11",
+        "what": "**antinel.cmd 一键入口在本机从未跑通（两个叠加根因）**：① 文件 36 行"
+                "全是裸 LF（CRLF=0），cmd.exe 按字节错位切行，把中文注释残片当命令执行；"
+                "② 只归一化 CRLF **不够** —— cmd.exe 按控制台 OEM 代码页（中文系统 "
+                "CP936）读 .cmd，UTF-8 中文注释仍被错位解读误执行（CREATE_NEW_CONSOLE "
+                "复现双击场景实测：zh-comments+CRLF@CP936 ⇒ 误执行）。",
+        "guard": "CMD15",
+        "status": "fixed",
+        "date": "2026-10-14",
+        "note": "修法：antinel.cmd 归一化 CRLF ＋ **全 ASCII**（机器无关的唯一安全"
+                "形态），中文 rationale 移入 `ci/inbox_guards_0515.py` docstring 与 "
+                "`inbox_cli.py`。四件套：CMD15-a 字节级（CRLF/ASCII/双入口）；"
+                "CMD15-b 新控制台真跑 fixture（零误执行＋标记在）；N-CMD15-a 裸 LF "
+                "变体同尺判红；N-CMD15-b 中文注释 fixture 误执行信号必现；CMD15-c "
+                "连带（命令逐字在/仓内 .cmd 全 CRLF/install.py 垫片仍 CRLF/SPDX 头）。"
+                "顺带证伪交接文件一条前提：tools/*.ps1 并非 CRLF（实测 0 CRLF），"
+                "「同目录可对照」不存在。",
+    },
+    {
+        "id": "X-048",
+        "type": "T-09",
+        "what": "**打包缺件：五个未跟踪新件从未进过任何清单，且工作区变体构建"
+                "走 fallback 清单口径 ⇒ manifest 与 wheel 载荷双向错配**："
+                "`inbox_bubble.py`、`inbox_logo.py`、`assets/sounds/alert.wav`、"
+                "`tools/logo.ps1`、`tools/mk_sound.py`（git status 实证五件均未"
+                "跟踪）未登记进 pyproject py-modules/package-data 与 build_package "
+                "的 root_mod/_LAYOUT；旧清单 0.48.4/124 项＝跟踪件全集。更致命的是"
+                "口径：上轮工作区变体用新建 out 目录 ⇒ 装配时 final 不存在 ⇒ "
+                "MANIFEST.in 写不进 final ⇒ 清单生成退化成「暂存包内容」分支 ⇒ "
+                "128 项里混入 14 个只进 sdist 的件、漏掉 15 个真进 wheel 的件"
+                "（tools/host_matrix.py、scripts/run_harness.py…）—— 同步那份"
+                "清单，[E] 会从 5 未覆盖恶化成 15 未覆盖。",
+        "guard": "PKG16",
+        "status": "fixed",
+        "date": "2026-10-14",
+        "note": "修法（两层）：① 四处登记全部到位（py-modules +inbox_bubble/"
+                "inbox_logo；package-data assets +sounds/*.wav；root_mod +两个 "
+                ".py；_LAYOUT/_TOOL_FALLBACK +logo.ps1）；② 口径归位 —— "
+                "sanctioned 流程 final＝仓根本身（release.py 默认 --out 父目录），"
+                "本机 stage 在区外被 DST-02 拦，故以仓根完整副本种子化 out/antinel-"
+                "security 再装配，清单走 `_wheel_payload(final)` 口径 ⇒ 实测 129 项"
+                "与 wheel 载荷 131 项减 2 项按设计排除严格集合相等。连带修：仓根 "
+                "psl/SKILL.md 与根 SKILL.md 分家（根件手改后未再构建，清单哈希算于 "
+                "merge 之前）⇒ 插件自检 drifted，按 merge 既定语义预同步。"
+                "四件套：PKG16-a 真实 wheel+sdist 含五件＋登记在位＋[E] 集合相等；"
+                "N-PKG16-a 夹具移除 py-modules 一条声明真构建 ⇒ 同尺判红且归因纯；"
+                "N-PKG16-b 夹具清单少一条 mk_sound.py ⇒ 产品 [E] 判红并点名；"
+                "PKG16-b 连带（全部 py-modules 在 wheel／sound_path、script_path "
+                "运行时资源路径可解析／ID 无重名）；PKG16-c 观测（验收日志五标头"
+                "留存、产物哈希与清单版本入册）。发布验收 [A][B][C][E][D] 全绿。",
+    },
+
+        {
+        "id": "X-049",
+        "type": "T-11",
+        "what": "**值守台窗口「起得来、活不久」：`inbox window` 如实报「已"
+                "就位」，窗口随后消失**（创始人 2026-10-14 两次实测，我亦"
+                "复现四路）。病根不是起法而是「谁来起」：CLI 直起时 msedge "
+                "挂在 CLI 进程树下，调用方（agent 沙箱/CI/一次性脚本）退出"
+                "连带清理进程树 ⇒ 窗口秒死。同机四路实证：Popen 裸 flags／"
+                "Popen+DETACHED+NEW_GROUP／cmd start 全部跨边界死；**daemon"
+                "（长命 supervise 进程）Popen 的跨边界存活** ⇒ 修法＝"
+                "`cmd_window` 先走 `open_console_via_daemon`（推托盘 open "
+                "动作，daemon 2s tick 消费开窗），失败如实降级直起",
+        "guards": ["W17-a", "W17-b", "W17-b2", "N-W17-a", "N-W17-b",
+                   "W17-c", "W17-d"],
+        "guard": "W17",
+        "status": "fixed",
+        "date": "2026-10-14",
+        "note": ("连带记账（未混入本轮修）：daemon 在自己进程内 "
+                 "ensure_background ⇒ 自听 14305 起第二个服务实例，"
+                 "消费 open 动作时用该实例开窗（run_id 漂移）——"
+                 "「服务多开」是独立缺陷，via_daemon 的等窗已按通用"
+                 "后缀适配，根修待办。另：0517 判据首版用 "
+                 "spec_from_file_location 自命名加载产品模块，patch 打在"
+                 "副本上 ⇒ 判据真起了浏览器真收了窗（安全事故）——已改"
+                 "import_module 拿真模块对象，教训：mock 必须打在产品"
+                 "import 的那个对象上。"),
+    },
 ]
 
 # =====================================================================
@@ -733,6 +1229,27 @@ def check_consistency(gate_ids):
         if st == "open" and not t.get("blind") and g is None:
             problems.append("%s 未闭合（open）且无判据守护 —— 有病无药" % iid)
 
+    # ---- 6. 判据 ID 跨套件重名（P0-2：set 口径折叠 ⇒ 覆盖被冒充）----
+    #   ★ 为什么是**问题**而不是提示：guards 只写裸 ID，重名时「守它的是哪一套」
+    #     在结构上无法回答 —— 0431 的 S70 被删光、只要 0440 的还在，
+    #     「有人守」检查照样全绿（假绿）。F58：冲突不许降级成提示。
+    for gid, suites in duplicate_gate_ids():
+        problems.append("判据 ID 跨套件重名：%s 同时被 %s 声明"
+                        "（set 口径折叠成一个 ⇒ 另一套件的同名判据可冒充覆盖；"
+                        "修法＝后声明的一套改名为 %s-<批次>）"
+                        % (gid, "、".join(suites), gid))
+
+    # ---- 7. 判据看守期：期内同族复发 ⇒ 判据固化失败（A3）----
+    #   ★ 为什么是 problems（红）而不是提示：机制论文档 §5 写明「期内同族复发
+    #     ⇒ 红判据不红产品」—— recurrence 短于看守期就是固化失败的信号，
+    #     降级成提示等于 BT-38（冲突降级为提示）。
+    for a, b in watch_recurrences():
+        problems.append(
+            "看守期内同族复发：%s（%s，%s 起守 %d 天）之后 %s（%s）于 %s 登记 "
+            "—— 复发间隔短于看守期 ⇒ 判据固化失败；红的是判据，不是产品"
+            % (a["id"], a["type"], _watch_of(a)["start"].isoformat(),
+               WATCH_DAYS, b["id"], b["type"], b.get("date")))
+
     return (not problems), problems
 
 
@@ -807,6 +1324,220 @@ def gate_ids_from_registry():
         for pat in _ID_PATS:
             ids |= set(pat.findall(s))
     return ids
+
+
+# ══════════════════════════════════════════════════════════════════════
+# P0-2（2026-10-14）：判据 ID 唯一化 —— suite-qualified 映射 ＋ 重名折叠检测
+#
+# 旧口径（上面 `gate_ids_from_registry()`：文本正则 ＋ `set()`）的两个病，
+# 本轮只读核验抓到（不是推演）：
+#   ① **重名折叠**：S70 在 0431（研发态落差）与 0440（赋值/只读命令）各有
+#      一份**真声明**，`set()` 收成一个 ⇒「有人守」的检查会被**另一个套件的
+#      同名判据**冒充覆盖（0431 的 S70 被删光，只要 0440 的还在就全绿 ＝ 假绿）；
+#      且折叠后**无法定位所属套件**（登记簿说不出守它的是哪一套）。
+#   ② **提及算声明**：文本正则不分层 —— 注释/docstring 里提到 "W-09"/"U-17"
+#      也算「存在」（实测多认 2 个这样的 ID）。
+# 新口径（**AST 只数真声明**，铁律③「数调用点用 AST 不用文本正则」的同一刀）：
+#   · 真声明两种形态：`@check("TOKEN …")` 装饰器（全 token，负控 N-* 也算，
+#     它们同样是真声明，只是永远不该被 TYPES 引用）；
+#   · 注册元组 `("D-28 …", fn)`（沿用旧的 D/G 限制 —— 元组首段可能是版本串，
+#     例："antinel-0.50.3 …" 不是判据 ID）。
+#   · `gate_id_map()`：{ID: [(套件, 文件), ...]}，**保留全部出现**，不进 set；
+#   · `duplicate_gate_ids()`：跨套件重名清单（折叠的作案现场）。
+# ★ 旧函数**原样保留**（连带对照）：47 条登记簿引用在旧口径下全部解析成功，
+#   改口径不许把任何一条现有引用弄成「不在注册表」。
+# ══════════════════════════════════════════════════════════════════════
+
+#: 套件名：4 位批次号（inbox_guards_0440.py → "0440"）；无批次号的用文件名主干
+_SUITE_RE = re.compile(r"(\d{4})")
+
+#: 装饰器首 token（全 token：W-09f / N-W09h / JDG-02B 都整体捕获，不再截断）
+_DECL_ID_RE = re.compile(r"^([A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*)")
+
+#: 注册元组首段（D/G 限制：挡掉 "antinel-0.50.3 …" 这类版本串）
+_TUPLE_ID_RE = re.compile(r"^((?:D|G)-[A-Za-z0-9]+)")
+
+
+def _suite_of(rel):
+    """判据文件 → 套件名（登记簿「哪一套在守」的定位键）。"""
+    base = os.path.basename(rel)
+    m = _SUITE_RE.search(base)
+    if m:
+        return m.group(1)
+    if base == "regression_gate.py":
+        return "gate"
+    return os.path.splitext(base)[0]
+
+
+def _declared_ids(path):
+    """AST 提取**真声明**的判据 ID（不执行模块；注释/docstring 不算声明）。"""
+    import ast
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            tree = ast.parse(f.read())
+    except (OSError, SyntaxError):
+        return set()
+    out = set()
+    for node in ast.walk(tree):
+        # 形态 A：`@check("TOKEN …")`
+        if isinstance(node, ast.FunctionDef):
+            for dec in node.decorator_list:
+                if (isinstance(dec, ast.Call) and dec.args
+                        and isinstance(dec.args[0], ast.Constant)
+                        and isinstance(dec.args[0].value, str)):
+                    m = _DECL_ID_RE.match(dec.args[0].value.strip())
+                    if m:
+                        out.add(m.group(1))
+        # 形态 B：注册元组 `("D-28 …", fn)` / `("G1 …", fn, "G1")`
+        if isinstance(node, ast.Tuple) and node.elts:
+            first = node.elts[0]
+            if (isinstance(first, ast.Constant)
+                    and isinstance(first.value, str)):
+                m = _TUPLE_ID_RE.match(first.value.strip())
+                if m:
+                    out.add(m.group(1))
+    return out
+
+
+def gate_id_map():
+    """{判据 ID: [(套件, 文件), ...]} —— **全部出现**，不进 set（不折叠）。
+
+    与 `gate_ids_from_registry()` 的分工：后者回答「这个 ID 有没有被真声明」
+    （旧口径原样保留，47 条引用靠它不变红）；本函数回答「**哪几套**在声明它」
+    （重名折叠的唯一解毒剂）。
+    """
+    amap = {}
+    for rel in ["ci/regression_gate.py"] + _suites_files():
+        fp = os.path.join(PKG, rel)
+        if not os.path.isfile(fp):
+            continue
+        for gid in sorted(_declared_ids(fp)):
+            amap.setdefault(gid, []).append((_suite_of(rel), rel))
+    return amap
+
+
+def duplicate_gate_ids():
+    """跨套件重名清单 `[(ID, [套件, ...]), ...]` —— 折叠的作案现场。
+
+    套件**内**重复不算重名：正判据与负控共用一个 ID（S73/N-S73）是本仓惯例，
+    它们同属一套、同守一件事。跨套件同名才是病：登记簿的 guards 只写裸 ID，
+    说不清守它的是哪一套。
+    """
+    out = []
+    for gid, occ in sorted(gate_id_map().items()):
+        suites = sorted(set(s for s, _r in occ))
+        if len(suites) > 1:
+            out.append((gid, suites))
+    return out
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 判据看守期制（A3，2026-10-15 落地；依据机制论文档 §5 L1 行 / §8-3）
+# ══════════════════════════════════════════════════════════════════════
+#: 看守期长度（天）。取日期制而非版本制的理由见模块 docstring：
+#:   版本计数在本仓机械上不可判定（85 个未推送提交＋研发态版本漂移）。
+WATCH_DAYS = 14
+
+#: 复发判据的生效起点 ＝ A3 落地日。只逮此日之后登记的实例 ——
+#: 守卫只能抓它存在之后发生的事（grandfathering，与 A1 同构）。
+WATCH_ENFORCE_FROM = datetime.date(2026, 10, 15)
+
+
+def _watch_of(inst):
+    """实例的看守期；缺省规则：status=fixed ⇒ 自 date 起 WATCH_DAYS 天。
+
+    可用实例自带 `watch` 字段覆盖：`{"start": "YYYY-MM-DD", "days": N}`。
+    日期不可解析 ⇒ None（不猜、不静默按今天处理）。
+    """
+    if inst.get("status") != "fixed":
+        return None
+    w = inst.get("watch") or {}
+    start = w.get("start") or inst.get("date")
+    try:
+        days = int(w.get("days") or WATCH_DAYS)
+    except (TypeError, ValueError):
+        days = WATCH_DAYS
+    try:
+        d0 = datetime.date.fromisoformat(str(start))
+    except ValueError:
+        return None
+    return {"start": d0, "days": days,
+            "expiry": d0 + datetime.timedelta(days=days)}
+
+
+def watch_board(today=None):
+    """看守期看板：`[(inst, watch, status)]`，status ∈ {"active", "expired"}。"""
+    today = today or datetime.date.today()
+    out = []
+    for inst in INSTANCES:
+        w = _watch_of(inst)
+        if not w:
+            continue
+        out.append((inst, w, "active" if today < w["expiry"] else "expired"))
+    return out
+
+
+def watch_recurrences(today=None):
+    """看守期内的同族复发清单 `[(watched_inst, recur_inst), ...]`。
+
+    机械判据：同类型 T 的两实例 A（看守期内）与 B，且
+    `B.date > A.watch.start` 且 `B.date >= WATCH_ENFORCE_FROM`。
+    ★ 同一天登记不算复发（一次会话修多缺陷的既有形态）；
+    ★ 早于 A3 落地日的历史实例不逮（grandfathering）。
+    ⇒ 命中即"判据固化失败"：红的是判据，不是产品。
+    """
+    today = today or datetime.date.today()
+    active = [(inst, w) for inst, w, s in watch_board(today) if s == "active"]
+    by_id = {i["id"]: i for i in INSTANCES}
+    hits = []
+    for inst in INSTANCES:
+        try:
+            d_b = datetime.date.fromisoformat(str(inst.get("date", "")))
+        except ValueError:
+            continue
+        if d_b < WATCH_ENFORCE_FROM:
+            continue
+        for a_inst, w in active:
+            if a_inst["id"] == inst["id"]:
+                continue
+            if a_inst.get("type") != inst.get("type"):
+                continue
+            if d_b > w["start"]:
+                hits.append((a_inst, inst))
+    return hits
+
+
+def watch_report(today=None):
+    """人读看守期看板（--watch）。含在守清单、期满候选、期内复发。"""
+    today = today or datetime.date.today()
+    board = watch_board(today)
+    recur = watch_recurrences(today)
+    L = ["判据看守期看板（A3）—— 今天 %s，看守期 %d 天，复发判据生效起点 %s"
+         % (today.isoformat(), WATCH_DAYS, WATCH_ENFORCE_FROM.isoformat())]
+    L.append("=" * 60)
+    act = [(i, w) for i, w, s in board if s == "active"]
+    exp = [(i, w) for i, w, s in board if s == "expired"]
+    L.append("在守 %d 条（期满日 ＝ start + %d 天）：" % (len(act), WATCH_DAYS))
+    for i, w in sorted(act, key=lambda x: x[1]["expiry"]):
+        L.append("   %-7s %-6s %s → %s（剩 %d 天）"
+                 % (i["id"], i["type"], w["start"].isoformat(),
+                    w["expiry"].isoformat(), (w["expiry"] - today).days))
+    L.append("期满 %d 条（无复发 ⇒ 可降月度抽样或退役候选）：" % len(exp))
+    for i, w in sorted(exp, key=lambda x: x[1]["expiry"]):
+        L.append("   %-7s %-6s %s → %s" % (i["id"], i["type"],
+                                        w["start"].isoformat(),
+                                        w["expiry"].isoformat()))
+    L.append("-" * 60)
+    if recur:
+        L.append("★ 看守期内同族复发 %d 组（判据固化失败 —— 红判据不红产品）："
+                 % len(recur))
+        for a, b in recur:
+            L.append("   %s（%s，%s 起守）⇒ %s（%s，%s 登记）同族"
+                     % (a["id"], a["type"], _watch_of(a)["start"].isoformat(),
+                        b["id"], b["type"], b.get("date")))
+    else:
+        L.append("★ 无看守期内同族复发")
+    return "\n".join(L)
 
 
 def coverage(gate_ids=None):
@@ -900,7 +1631,13 @@ def main():
     ap.add_argument("--gate-ids", action="store_true",
                     help="打印从闸门注册表提取的判据 ID")
     ap.add_argument("--json", action="store_true", help="机器可读")
+    ap.add_argument("--watch", action="store_true",
+                    help="看守期看板：在守/期满/期内同族复发（A3）")
     a = ap.parse_args()
+
+    if a.watch:
+        print(watch_report())
+        return 1 if watch_recurrences() else 0
 
     ids = gate_ids_from_registry()
     if a.gate_ids:

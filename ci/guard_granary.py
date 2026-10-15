@@ -9,9 +9,9 @@
   `granary.py` 的注释里，那么下一轮（可能是另一个模型、另一个上下文）
   随手加一个"赠送粮""粮换积分"的入口，**没有任何东西会红**。
   ⇒ 本文件把三条铁律从"注释里的约定"变成"可执行、会报红、有负控的机制"：
-    ① G1 现阶段**不卖**：充值是**声明占位**，没有可用购买路径（含 §D 敞口 4 的
+    ① G1-granary 现阶段**不卖**：充值是**声明占位**，没有可用购买路径（含 §D 敞口 4 的
        流程约束：`RECHARGE.enabled` 一翻就红）；
-    ② G2 **不可转让、不可兑换**：`granary` 公开面里没有这类入口，
+    ② G2-granary **不可转让、不可兑换**：`granary` 公开面里没有这类入口，
        加/减粮的写入口**恰为** `grant` / `spend`；
     ③ G3 **用词黑名单**：对外文本不得出现 返利／返佣／下线／团队／层级；
     ④ G4 **两本账不混**：`antinel 粮`（哨兵口粮）与 `antinel credits`
@@ -71,8 +71,8 @@ def _raise(msg):
     raise AssertionError(msg)
 
 
-# ══════════════════════════════════════ G1 现阶段不卖 ════════════════════
-@check("G1 粮不卖（现阶段）：充值是声明占位，无可用购买路径")
+# ══════════════════════════════════════ G1-granary 现阶段不卖 ════════════════════
+@check("G1-granary 粮不卖（现阶段）：充值是声明占位，无可用购买路径")
 def g1():
     import granary as G
     rc = getattr(G, "RECHARGE", None)
@@ -91,7 +91,7 @@ def g1():
     return "RECHARGE.enabled=False；获得规则 0 个付费项"
 
 
-@check("N-G1 负控：把充值开关打开 ⇒ G1 必须抓到")
+@check("N-G1-granary 负控：把充值开关打开 ⇒ G1-granary 必须抓到")
 def n_g1():
     import granary as G
     orig = dict(G.RECHARGE)
@@ -106,15 +106,15 @@ def n_g1():
         G.RECHARGE.clear()
         G.RECHARGE.update(orig)
     if not caught:
-        return _raise("把 RECHARGE.enabled 改成 True，G1 仍判通过 ⇒ 售卖防线没守住")
+        return _raise("把 RECHARGE.enabled 改成 True，G1-granary 仍判通过 ⇒ 售卖防线没守住")
     try:
         g1()
     except AssertionError as e:
-        return _raise("还原后 G1 仍判红 ⇒ 还原链路坏了：%s" % e)
+        return _raise("还原后 G1-granary 仍判红 ⇒ 还原链路坏了：%s" % e)
     return "充值开关一翻即红；还原后回绿"
 
 
-# ══════════════════════════════ G2 不可转让 / 不可兑换 ═══════════════════
+# ══════════════════════════════ G2-granary 不可转让 / 不可兑换 ═══════════════════
 def _store_entries(mod):
     """`granary` 公开面里名字像"转让/兑换/买卖"的可调用入口。"""
     pub = [n for n, o in vars(mod).items()
@@ -123,7 +123,7 @@ def _store_entries(mod):
                   if any(w in n.lower() for w in STORE_ENTRY_WORDS))
 
 
-@check("G2 粮不可转让、不可兑换（公开面里也没有这类入口）")
+@check("G2-granary 粮不可转让、不可兑换（公开面里也没有这类入口）")
 def g2():
     import granary as G
     bad = _store_entries(G)
@@ -138,7 +138,7 @@ def g2():
     return "无转让/兑换/买卖入口；写入口恰为 grant/spend"
 
 
-@check("N-G2 负控：往 granary 塞一个 transfer 入口 ⇒ G2 必须抓到")
+@check("N-G2-granary 负控：往 granary 塞一个 transfer 入口 ⇒ G2-granary 必须抓到")
 def n_g2():
     import granary as G
     if hasattr(G, "transfer"):
@@ -156,11 +156,11 @@ def n_g2():
     finally:
         del G.transfer
     if not caught:
-        return _raise("塞进 `transfer` 入口，G2 仍判通过 ⇒ 不可转让没守住")
+        return _raise("塞进 `transfer` 入口，G2-granary 仍判通过 ⇒ 不可转让没守住")
     try:
         g2()
     except AssertionError as e:
-        return _raise("还原后 G2 仍判红 ⇒ 还原链路坏了：%s" % e)
+        return _raise("还原后 G2-granary 仍判红 ⇒ 还原链路坏了：%s" % e)
     return "注入 transfer 入口即红；还原后回绿"
 
 

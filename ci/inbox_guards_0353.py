@@ -700,7 +700,11 @@ def c_page_grouped_buckets():
                        posture={"state": "guarding", "label": "值守中", "why": "",
                                 "can_fix": False, "fix": None, "fix_hint": ""},
                        items=items)
-    return ("按类型归并" in PC.body(h) and "×2" in h
+    # ★ 0.50.4（Q-05）：归并计数从「×2」改成「2 条（这一档共 N 条）」——
+    #   乘号在中文里不是"共"，且与后面的分母连读像算式。判据**跟着产品文案
+    #   同步锚点**（与 0490 N-U05 同型）：断言的仍是"归并行给出了计数"，
+    #   不是放宽 —— 计数不在了照样红。
+    return ("按类型归并" in PC.body(h) and "2 条（这一档共" in h
             and "看这 2 条" in PC.body(h))
 
 
@@ -722,7 +726,7 @@ def n_page_grouped_buckets():
                        posture={"state": "guarding", "label": "值守中", "why": "",
                                 "can_fix": False, "fix": None, "fix_hint": ""},
                        items=items)
-    return h.count('class="item ') == 2 and "×2" not in h
+    return h.count('class="item ') == 2 and "2 条（这一档共" not in h
 
 
 def c_page_action_grouped_not_hidden():
@@ -750,7 +754,7 @@ def c_page_action_grouped_not_hidden():
                        posture={"state": "guarding", "label": "值守中", "why": "",
                                 "can_fix": False, "fix": None, "fix_hint": ""},
                        items=items)
-    return (h.count('class="item grp') == 1 and "×3" in h
+    return (h.count('class="item grp') == 1 and "3 条（这一档共" in h
             and "哨兵进程不在岗" in PC.body(h)    # ① 原因
             and 'value="done_all"' in h           # ② 批量动作
             and "看这 3 条" in PC.body(h))        # ③ 钻取
@@ -774,7 +778,7 @@ def n_page_action_grouped_not_hidden():
                        posture={"state": "guarding", "label": "值守中", "why": "",
                                 "can_fix": False, "fix": None, "fix_hint": ""},
                        items=items)
-    return h.count('class="item ') == 3 and "×3" not in h
+    return h.count('class="item ') == 3 and "3 条（这一档共" not in h
 
 
 def c_server_done_all_marks_group():
@@ -967,14 +971,37 @@ def _no_side_effect_revive():
 
 
 def c_server_fix_endpoint():
-    """★ 失守入口在服务端真的有落点（`op=fix` 不许只是页面上的装饰）。"""
+    """★ 失守入口在服务端真的有落点（`op=fix` 不许只是页面上的装饰）。
+
+    ★★ 0.50.2 更新（判据腐化，**实测**抓出来的）：
+      老断言是 `s == 303` —— 那是 0.35.3 的形状。0.36.0 起
+      `op in ("fix", "guard_fix")` 改成**当场复测 ＋ 把结论如实显示在页面上**
+      （`render_page(..., notice=_notice)` ⇒ `_send(200, text/html)`），
+      不再 303 —— 303 会把刚算出来的结论丢掉，用户看不到修没修好。
+      实测：POST `op=fix`（带口令）现回 **200 ＋ 整页收件箱**，
+      页面里带「未能修复：…」/「已执行修复：…」。
+      ⇒ 判据改断言**真落点**：200 ＋ text/html ＋ 页面上带如实结论。
+        成功与失败**都算落点**（静默才算没落点）；这比"某个状态码"
+        更贴它原本要守的东西 —— 状态码是传输细节，落点是行为。
+    """
     hub = G.new_hub()
     srv = G.Server(hub)
     _restore = _no_side_effect_revive()
     try:
-        s, _h, _b = G.req(srv.port, "/action", token=srv.token, method="POST",
-                          body="op=fix", ctype="application/x-www-form-urlencoded")
-        return s == 303
+        s, h, b = G.req(srv.port, "/action", token=srv.token, method="POST",
+                        body="op=fix", ctype="application/x-www-form-urlencoded")
+        if s != 200:
+            return ("`op=fix` 回 %s —— 修完不复测、不把结果给用户看，"
+                    "点了等于没点" % (s,))
+        ctype = (h or {}).get("Content-Type", "")
+        if "text/html" not in ctype:
+            return "`op=fix` 没回页面（Content-Type=%r）⇒ 结论没地方显示" % (
+                ctype,)
+        txt = b.decode("utf-8", "replace") if isinstance(b, bytes) else str(b)
+        if "已执行修复：" not in txt and "未能修复：" not in txt:
+            return ("`op=fix` 的页面上既没有「已执行修复：」也没有「未能修复：」"
+                    "—— 入口没真的跑到修复逻辑，或跑了不说（T-10 静默降级）")
+        return True
     finally:
         _restore()
         srv.stop()
@@ -2467,7 +2494,10 @@ def c_header_numbers_state_both_denominators():
     # 三个数字链接：括号内必须是按事由归并后的件数
     # ★ 0.48.6（B3）：链接里不再挂 `&t=T`（口令走 HttpOnly cookie）—— 同步去掉。
     pairs = re.findall(
-        r'f=win:%d:lv:(L2|L1|R0)">(?:拦截|注意|失守) <b>(\d+)</b>(?:（(\d+) 件事）)?'
+        # ★ 0.50.4（Q-08）：括号补了动词「已归并为」—— 光一个「（3 件事）」
+        #   读者看不出条与件是什么关系。锚点同步，断言强度不变（件数仍须对得上）。
+        r'f=win:%d:lv:(L2|L1|R0)">(?:拦截|注意|失守) <b>(\d+)</b>'
+        r'(?:（已归并为 (\d+) 件事）)?'
         % M.WINDOW_HOURS, html)
     if len(pairs) != 3:
         return False                      # 三个数字没都带钻取链接

@@ -174,3 +174,23 @@ def toast(level, title, body, root=None, backend=None, cfg=None,
 
     ok = backend.toast(title, body, level)
     return bool(ok), "" if ok else getattr(backend, "last_error", "发送失败")
+
+
+# ------------------------------------------------- 节流账本（公开两面）----
+def throttle_state(root=None):
+    """读**整份**节流账本（0.49.0：冒泡也要在同一本账上记「同类静默」）。
+
+    ★ 为什么不第二个文件：门铃节流与冒泡节流是**同一件事**（同类多久内
+      不再响），分两个文件就会出现"toast 记得、冒泡不记得"的漂移。
+    ⇒ 文件仍只有一份（`notify_state.json`），这里只把 「读/写某个键」 的能力
+      公开出来，冒泡侧不自己开文件。
+    """
+    return _load_throttle(root)
+
+
+def throttle_set(key, root=None, now=None):
+    """在节流账本上记一个键（门铃/冒泡共用）。原子替换，不删原文件。"""
+    d = _load_throttle(root)
+    d[str(key)] = float(now if now is not None else time.time())
+    _save_throttle(d, root)
+    return d

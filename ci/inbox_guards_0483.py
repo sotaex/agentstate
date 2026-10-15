@@ -93,21 +93,21 @@ def _ns_location_ok(root_has, psl_has):
     return True
 
 
-@check("S1 命名空间清单落点：仓根无、psl/ 有")
+@check("S1-483 命名空间清单落点：仓根无、psl/ 有")
 def s1():
     return _ns_location_ok(
         os.path.exists(os.path.join(ROOT, "antinel-namespaces.json")),
         os.path.exists(os.path.join(ROOT, "psl", "antinel-namespaces.json")))
 
 
-@check("N-S1 负控：放回仓根（psl/ 也在）必须判红")
+@check("N-S1-483 负控：放回仓根（psl/ 也在）必须判红")
 def n_s1():
     if _ns_location_ok(True, True) is True:
         return "判据失效：仓根有件时仍判绿"
     return True
 
 
-@check("S1b 连带：psl 的 package-data 覆盖 *.json ⇒ 清单真的随 wheel")
+@check("S1b-483 连带：psl 的 package-data 覆盖 *.json ⇒ 清单真的随 wheel")
 def s1b():
     bp = _load_bp()
     _pkgs, pd = bp._declared_from_pyproject()
@@ -116,7 +116,7 @@ def s1b():
     return True
 
 
-@check("S1c 连带：三处读取路径都指向新落点")
+@check("S1c-483 连带：三处读取路径都指向新落点")
 def s1c():
     need = 'PKG / "psl" / "antinel-namespaces.json"'
     bad = [p for p in ("scripts/run_harness.py", "tools/verify_namespaces.py",
@@ -136,7 +136,7 @@ def _subset_violation(listed, payload):
     return sorted(set(listed) - set(payload))
 
 
-@check("S2 随包清单主体 ⊆ 随包集（无「覆盖了不随包文件」）")
+@check("S2-483 随包清单主体 ⊆ 随包集（无「覆盖了不随包文件」）")
 def s2():
     man_p = os.path.join(ROOT, "psl", "manifest.json")
     if not os.path.exists(man_p):
@@ -158,7 +158,7 @@ def s2():
     return True
 
 
-@check("N-S2 负控：往清单里塞一个 sdist-only 路径必须被判红")
+@check("N-S2-483 负控：往清单里塞一个 sdist-only 路径必须被判红")
 def n_s2():
     _bp, payload = _wheel_payload_now()
     if not _subset_violation(["docs/AUDIT_SCHEMA.md", "README.md"], payload):
@@ -188,7 +188,7 @@ def _deps_not_shipped(root, deps=TRUST_DEPS):
     return out
 
 
-@check("S3 「自己验」三条命令的数据依赖都被打包规则覆盖（本条无自举豁免）")
+@check("S3-483 「自己验」三条命令的数据依赖都被打包规则覆盖（本条无自举豁免）")
 def s3():
     bad = _deps_not_shipped(ROOT)
     if bad:
@@ -196,7 +196,7 @@ def s3():
     return True
 
 
-@check("N-S3 负控：把依赖换成一个 sdist-only 路径必须判红")
+@check("N-S3-483 负控：把依赖换成一个 sdist-only 路径必须判红")
 def n_s3():
     if not _deps_not_shipped(ROOT, deps=("docs/AUDIT_SCHEMA.md",)):
         return "判据失效：sdist-only 路径没被检出"
@@ -212,12 +212,12 @@ def _release_registered(src):
     return True
 
 
-@check("S4 发布验收的「清单 vs 实测 wheel」对账判据存在且已注册")
+@check("S4-483 发布验收的「清单 vs 实测 wheel」对账判据存在且已注册")
 def s4():
     return _release_registered(_read(VERIFY_RELEASE))
 
 
-@check("N-S4 负控：抽掉注册行必须判红")
+@check("N-S4-483 负控：抽掉注册行必须判红")
 def n_s4():
     src = re.sub(r'\("E",\s*check_manifest_vs_wheel\)\s*,?', "", _read(VERIFY_RELEASE))
     if _release_registered(src) is True:

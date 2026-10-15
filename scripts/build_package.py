@@ -83,6 +83,8 @@ _LAYOUT = {
     #   `<包目录>/tools/tray.ps1` —— 不登记进布局表，`srcfile("tray.ps1")`
     #   会去找仓根的 tray.ps1（不存在）⇒ 静默少拷一个文件（A1 同款病）。
     "tray.ps1":                  "tools/tray.ps1",
+    # ★ 0.49.0：漂浮哨标 WinForms 窗口脚本（inbox_logo.script_path() 的运行时依赖）。
+    "logo.ps1":                  "tools/logo.ps1",
     # ★★ 0.36.4 补：本机实测抓到 —— `tools/enforce_probe.py` **一直随包发布**
     #   （实测产物 `build/lib/tools/enforce_probe.py` 在），却**从未登记进
     #   `_LAYOUT`**，因此**从未进 `psl/manifest.json`**（实测 manifest 101 项里
@@ -192,7 +194,7 @@ HARNESS_SRC = SRC / "scripts" / "verification_tests.py"
 if not HARNESS_SRC.is_file():
     raise SystemExit("★ 构建器找不到套件：%s\n  （产物仓构建必须用本仓的套件）" % HARNESS_SRC)
 NAME = "antinel-security"
-VERSION = "0.48.4"
+VERSION = "0.50.3"
 # P-A3: the namespace this build declares itself under. derive_object_ownership()
 # reads git remote first, then THIS field; fail-closed unattributed when neither
 # resolves. Kept beside the hashes so a third party can see what was declared.
@@ -269,6 +271,8 @@ py-modules = ["antinel", "audit_chain", "session_dna", "strings",
               "inbox_tray", "inbox_notify", "inbox_emphasis", "inbox_fallback",
               "inbox_daemon", "inbox_config", "inbox_cli",
               "ledger", "heartbeat",
+              # ★ 0.49.0 急事冒泡＋漂浮哨标（服务/窗口机制，无第三方依赖）
+              "inbox_bubble", "inbox_logo",
               # ★ 0.35.3 术语表（与仓库 pyproject.toml 逐字一致）
               "glossary",
               # ★ 0.36.0 窗口几何 + 失守归因（两个新模块，
@@ -288,7 +292,7 @@ hooks = ["*.py"]
 #   `_manifest_for` **不会**再为 assets 生成 `recursive-include` —— 它只补
 #   package-data 覆盖不到的文件（如 `rules/hosts/*.json`）。非 package 目录
 #   （docs/ references/）只进 sdist，wheel 里 0 个（实测）。
-assets = ["icons/*.ico", "logo/*.mp4", "logo/*.svg"]
+assets = ["icons/*.ico", "logo/*.mp4", "logo/*.svg", "sounds/*.wav"]
 # ★ 0.35.2：`challenge/` 公开挑战件 —— **必须进 wheel**。
 #   为什么：`antinel verify` 在链干净时会告诉用户"你可以自己复算"，并给出
 #   `<包目录>/challenge/verify.py` 这条命令。而此前 `challenge/` **只进 sdist**
@@ -2355,7 +2359,7 @@ def _delivery_gate(out_root, full=True):
 #:   **判据自身出错，却因为"有输出"而被当成"检查发现了问题"**。
 #:   —— 判据与被测对象必须看同一个真源，否则两边都在自说自话。
 _TOOL_FALLBACK = ("antinel_verify.py", "verify_namespaces.py",
-                  "verify_chain.py", "tray.ps1")
+                  "verify_chain.py", "tray.ps1", "logo.ps1")
 
 
 def _ver_tuple(v):
@@ -2512,6 +2516,7 @@ def build(out_root, verify=False):
                      "inbox_model.py", "inbox_store.py", "inbox_report.py", "inbox_server.py",
                      "inbox_tray.py", "inbox_notify.py", "inbox_emphasis.py", "inbox_fallback.py",
                      "inbox_daemon.py", "inbox_config.py", "inbox_cli.py",
+                     "inbox_bubble.py", "inbox_logo.py",
                      "ledger.py", "heartbeat.py",
                      # ★ 0.35.3 补记：`glossary.py` 上一轮**只登记进了
                      #   pyproject 的 py-modules，却漏了这份 root_mod 复制清单**

@@ -1,0 +1,6 @@
+{
+  "note": "常驻套件退休/合并登记簿（A2，2026-10-15 建）。口径：29 上限 = SUITES 里 ci/inbox_guards_* 与 ci/guard_* 的登记数；JDG/PCM/selfcheck/version/regression 五条基础设施项不计入。规则：登记数 > 29 即 gate 自红，除非本簿有足够 pending 记录（每条须含 suite/date/reason/replacement 四字段；pending 额度 30 天过期；无替代者不计）。退休完成（套件真从 SUITES 移除）后把 status 改为 done 并填 removed_from_suites_on。",
+  "cap": 29,
+  "grace_days": 30,
+  "retirements": []
+}

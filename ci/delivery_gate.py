@@ -163,9 +163,11 @@ SUITES = [
     # ★ 0.44.0：**第一处根治：命令结构化** —— 误拦的根因不是"缺目标判据"，
     #   而是"一句 shell 变量赋值把整条命令的只读资格连带否掉了"（方案 v2.0 §2.2 对照实验）。
     #   为什么进 SUITES：两处改动都在**判定热路径**上（拦与放的结果会变），必须常驻守：
-    #   S70 赋值+只读不再误拦（5 正例）、N-S70 摘掉中性段处理 ⇒ 正例必红、
+    #   S70-440 赋值+只读不再误拦（5 正例）、N-S70-440 摘掉中性段处理 ⇒ 正例必红、
     #   N-S70b 去掉引号感知 ⇒ 值带空格的正例必红（分辨力样本）、
     #   S71 七类真删除 + 硬纪律（赋值成 dist 再删）仍拦、S72 结构锚在位。
+    #   ★ 2026-10-14 P0-2：S70/N-S70 已改名 S70-440/N-S70-440（与 0431 的 S70 重名，
+    #     set 口径折叠 ⇒ 解名；先声明保留裸 ID、后声明加 -<批次>）。
     #   fast 档：全部负控走**内存变异**（exec 变异后的源码 / 换模块正则），不写产品文件。
     ("0440", "ci/inbox_guards_0440.py", "fast"),
     # ★ 0.45.0：**第二处根治：状态写入**（甲单一入口收编 ＋ 乙接线既有锁 ＋ 丙名片租约）。
@@ -229,6 +231,43 @@ SUITES = [
     #   逐条实测见红；U-97 连带对照守 0.47.0 分母纪律与术语表定义处不松。
     #   fast 档：变异只在内存；夹具只落临时目录，不写任何产品文件。
     ("0490", "ci/inbox_guards_0490.py", "fast"),
+    # ★ 0.49.0：**窗口/图标/冒泡/漂浮四件事的防复发**（2026-10-14 夜，截图实证）。
+    #   为什么进 SUITES：四件全是「静默失真」型回归，且都已在本机复发过一次 ——
+    #   ① W-08 默认宽度 520 低于 CSS 窄屏断点 620 ⇒ 面板一出生就窄布局
+    #      （顶行折行压字；用户手动拉宽才正常 —— 要靠用户手动补救的默认值就是错的）；
+    #   ② W-09 术语浮层被窗口裁掉 ⇒ 平移优先/贴边撑开/还原不抢方向盘/露不全如实；
+    #   ③ U-17 0.48.5 戊1 把动效图标换成静态图 ⇒ "好了但是死了"（规格 v1.2 逐项锁
+    #      ＋ Node 真跑状态机 25 秒量几何量，node 缺失报 SKIP 不假绿）；
+    #   ④ B-02…B-08 冒泡（界面同源/不闪退/声音/节流 ack/可见性闸/起不来如实/
+    #      一次一枚）与 FLO-01…FLO-05 漂浮哨标（ps1 契约同规格/退役先于起/
+    #      顺序即安全/展开即退役）。路由换代本身由 inbox_guards 的 B-01 守。
+    #   fast 档：负控全走内存变异/临时目录；唯一外部依赖是 node，缺则 SKIP。
+    ("0514", "ci/inbox_guards_0514.py", "fast"),
+    # ★ 0.50.4（P0-3/P0-2）：antinel.cmd 一键入口 ＋ 判据 ID 唯一化。
+    #   为什么进 SUITES：`antinel.cmd` 是本机一键入口，**从未跑通过** —
+    #   裸 LF（CRLF=0）＋ UTF-8 中文注释在 CP936 控制台下被 cmd 当命令执行
+    #   （实测两个叠加根因；只修 CRLF 不够，修法＝CRLF＋全 ASCII）。
+    #   P0-2：判据 ID 跨套件重名曾达 25 组，`gate_ids_from_registry()` 的
+    #   `set()` 把同名折叠成一个 ⇒「有人守」会被另一套件冒充（假绿）；
+    #   本套件守新口径（`gate_id_map`/`duplicate_gate_ids`）与解名后的真树。
+    #   fast 档：变异全在内存/临时目录；唯一外部依赖是 cmd.exe（Windows）。
+    ("0515", "ci/inbox_guards_0515.py", "fast"),
+    # ★ 0.50.4（P1-2）：打包缺件四件套 —— 五个未跟踪新件（inbox_bubble/
+    #   inbox_logo/assets/sounds/alert.wav/tools/logo.ps1/tools/mk_sound.py）
+    #   从未进过任何清单，且工作区变体构建曾走「暂存包内容」fallback 口径
+    #   （final 不存在 ⇒ 清单 128 项双向错配：14 件只进 sdist／15 件真进
+    #   wheel 未覆盖 ⇒ 同步它 [E] 更红）。本套件守：四处登记在位 ＋
+    #   真实 wheel/sdist 含焦点五件 ＋ 产品 [E] 集合对账（129==131−2）＋
+    #   两个负控（声明移除一条/清单少一条均实测判红）＋ 运行时资源路径
+    #   可解析。fast 档：夹具全在临时目录；唯一外部依赖是
+    #   setuptools>=68 的解释器（缺则 SKIP，不假绿）。
+    ("0516", "ci/inbox_guards_0516.py", "fast"),
+    # ★ 2026-10-14：**窗口寿命** —— 「起得来、活不久」（inbox window 报已就位、
+    #   窗口秒死）的四件套判据。为什么进 SUITES：病根是「谁来起窗口」——
+    #   CLI 直起时 msedge 挂 CLI 进程树下，调用方退出连带杀窗；daemon
+    #   （长命 supervise）起的窗跨边界存活（同机四路实证）⇒ cmd_window
+    #   必须先委托 daemon。全注入式判据，不起真浏览器。
+    ("0517", "ci/inbox_guards_0517.py", "fast"),
     # ★ 0.42.0：**dist 卫生** —— 「旧版发布件让开」从手工动作变成构建器自己的机制。
     #   为什么进 SUITES：2026-10-09 实测**第三次同族复发** —— 0.40.0/0.41.0 两轮
     #   "把旧版件 mv 去 _archive_dist" 都是我手工做的，0.42.0 忘了 ⇒ dist 里躺着
@@ -364,6 +403,153 @@ _DUR = os.path.join(_SNAP_DIR, "suite_durations.json")
 #: 与 0380（4.7s），只卡单条阈值挡不住"很多条 10 秒的"叠起来。
 #: 目标墙钟 ≈ 主闸门快档（实测 ~15s）＋ 本预算 ＝ ~27s。
 _HOOK_BUDGET = 12.0
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 机制层①（A1）：建机制前置门 —— P1–P5 逐条作答块
+# ══════════════════════════════════════════════════════════════════════
+#: 2026-10-15 落地，依据 `docs/Antinel·机制层可行性与净收益分析 v1.0`
+#: §8 行动清单第 1 条（该文档唯一强烈建议立即做的一条）：
+#:   「把 P1–P5 立成建机制前置门 —— 这本身是一条 L0 机制，从此每个新机制
+#:     提案必须带五判据作答，缺一项不进入设计。」
+#:
+#: 形态选择（为什么落在闸门自身而不是新套件）：
+#:   新套件会消耗 A2 的 29 常驻预算（机制层②），且前置门守的是
+#:   「登记动作」本身 —— 与 `_orphaned_guard_files`（漏登记）、
+#:   `_missing_required`（删判据）同族，都是结构性检查，属闸门自身职责。
+#:
+#: 规则：**新登记**进 SUITES 的套件，文件头必须含 P1–P5 逐条作答块；
+#:   缺块 ⇒ 登记红（结构检查不过 ⇒ 闸门不过）。**现有套件不追溯**。
+#:
+#: 作答块的机械判据（不读语义，只读形状 —— 语义归 A4 的 L2 人判）：
+#:   文件头（前 60 行）内，`P1:`…`P5:` 五行俱全且每行有非空答案。
+#:   为什么要"逐条"：机制论文档 §3 的五判据是**与**关系（五条全满足
+#:   才允许建机制），缺一条的作答块等于没有作答。
+_P1P5_HEADER_LINES = 60
+_P1P5_LINE = re.compile(r"^\s*P([1-5])\s*[:：]\s*\S")
+
+#: 现有套件不追溯清单 ＝ A1 落地时点（2026-10-15）SUITES 已登记的全部键。
+#: ★ 为什么硬编码快照而不是"今天之前注册的都算"：git 时间戳在本仓不可靠
+#:   （85 个未推送提交、研发态版本漂移），而"哪些算现有"必须是**可复核的
+#:   确定集合**。新键一律受检，直到永远。
+_P1P5_GRANDFATHERED = frozenset({
+    "0353", "0360", "0362", "0363", "0364", "0366", "0372", "granary",
+    "0380", "0400", "0420", "0430", "0431", "0440", "0450", "0460",
+    "0470", "0481", "0482", "0483", "0490", "0514", "0515", "0516",
+    "0517", "dist-hygiene", "release-entry", "selfcert-timing",
+    "instrument-selfaudit", "JDG", "PCM", "selfcheck", "version",
+    "regression",
+})
+
+
+def _p1p5_block_ok(text):
+    """套件文件头是否含 P1–P5 逐条作答块（机械判据：形状，不读语义）。"""
+    seen = set()
+    for ln in text.splitlines()[:_P1P5_HEADER_LINES]:
+        m = _P1P5_LINE.match(ln)
+        if m:
+            seen.add(m.group(1))
+    return seen >= {"1", "2", "3", "4", "5"}
+
+
+def suites_missing_p1p5(suites=None, grandfathered=None):
+    """缺 P1–P5 作答块的**新**套件清单（现有套件不追溯）。
+
+    纯函数（suites/grandfathered 可注入）⇒ 负控能拿合成清单跑同一把尺子。
+    """
+    suites = SUITES if suites is None else suites
+    grandfathered = _P1P5_GRANDFATHERED if grandfathered is None else grandfathered
+    bad = []
+    for key, rel, _tier in suites:
+        if key in grandfathered:
+            continue
+        fp = os.path.join(PKG, rel)
+        try:
+            with io.open(fp, encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        except OSError:
+            bad.append((key, rel, "文件读不到"))
+            continue
+        if not _p1p5_block_ok(text):
+            bad.append((key, rel, "文件头缺 P1–P5 逐条作答块"))
+    return bad
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 机制层②（A2）：常驻套件上限 29 ＋ 退休登记簿
+# ══════════════════════════════════════════════════════════════════════
+#: 2026-10-15 落地，依据机制论文档 §6-1 与 §8 行动清单第 2 条：
+#:   「常驻套件上限 ＝ 现有数（29）：新增一套件须先退休或合并一个，
+#:     否则 gate 自红。这把 §4.4 的共享成本变成提出者付得起的价。」
+#:
+#: 口径（F40：分母必须显式）：**29 ＝ SUITES 里 `ci/inbox_guards_*` 与
+#:   `ci/guard_*` 两类文件的登记数**（与机制论文档 §1 的计数方法同一把尺子：
+#:   磁盘 29 件全部登记、零孤儿，本轮实测复核）。JDG/PCM/selfcheck/
+#:   version/regression 五条是基础设施项，不计入 29。
+#:
+#: 退休/合并记录（`ci/suite_retirement.json`）是唯一合法超限途径：
+#:   · 每条须带 套件/日期/原因/替代者 四字段，status=pending 时计额度；
+#:   · pending 额度 30 天过期（防"登了记永不退休"把上限软化成没有）；
+#:   · 超额且额度不足 ⇒ struct_bad ⇒ 闸门红。
+RESIDENT_SUITE_CAP = 29
+_RETIREMENT_LEDGER = os.path.join(_HERE, "suite_retirement.json")
+_RETIREMENT_GRACE_DAYS = 30
+
+
+def resident_suite_count(suites=None):
+    """常驻套件数（29 口径：SUITES 里 inbox_guards_* 与 guard_*）。"""
+    suites = SUITES if suites is None else suites
+    return sum(1 for _k, rel, _t in suites
+               if rel.startswith("ci/inbox_guards_")
+               or rel.startswith("ci/guard_"))
+
+
+def _load_retirement_ledger():
+    """读退休登记簿；读不到/坏 ⇒ 空簿（不是"都退休了"）。"""
+    try:
+        with io.open(_RETIREMENT_LEDGER, encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:                                   # noqa: BLE001
+        return {}
+
+
+def cap_violation(suites=None, ledger=None, today=None):
+    """常驻套件上限检查。返回 `(hard_red, notes)`。
+
+    hard_red=True ⇒ 结构检查不过（闸门红）；notes 供人读。
+    纯函数（三个参数可注入）⇒ 负控能合成超限清单跑同一把尺子。
+    """
+    import datetime
+    suites = SUITES if suites is None else suites
+    ledger = _load_retirement_ledger() if ledger is None else ledger
+    today = today or datetime.date.today()
+    n = resident_suite_count(suites)
+    if n <= RESIDENT_SUITE_CAP:
+        return False, []
+    excess = n - RESIDENT_SUITE_CAP
+    pending = []
+    for rec in ledger.get("retirements", []):
+        if rec.get("status") != "pending":
+            continue
+        try:
+            d = datetime.date.fromisoformat(str(rec.get("date", "")))
+        except ValueError:
+            continue
+        if (today - d).days > _RETIREMENT_GRACE_DAYS:
+            continue                       # 过期额度不计（防软化成没有）
+        if not rec.get("replacement"):
+            continue                       # 无替代者不计（合并须说清并到哪）
+        pending.append(rec)
+    if len(pending) >= excess:
+        return False, [
+            "常驻套件 %d > 上限 %d，但已有 %d 条 pending 退休/合并记录"
+            "（额度 %d ≥ 超限 %d）—— 退休记录是超限的唯一合法途径"
+            % (n, RESIDENT_SUITE_CAP, len(pending), len(pending), excess)]
+    return True, [
+        "常驻套件 %d > 上限 %d，pending 退休/合并记录 %d < 超限 %d"
+        "（须先退休或合并一个；记录写入 ci/suite_retirement.json）"
+        % (n, RESIDENT_SUITE_CAP, len(pending), excess)]
 
 
 def _load_durations():
@@ -1202,6 +1388,8 @@ def main():
     # ── 结构性检查（先跑：它们决定后面该不该跑） ──
     gone = _missing_required()
     orphans = _orphaned_guard_files()
+    p1p5_missing = suites_missing_p1p5()
+    cap_red, cap_notes = cap_violation()
     if gone:
         print("  💥 %-46s %s" % ("判据文件缺失（删判据＝让闸门变绿）",
                               "、".join(gone)))
@@ -1209,9 +1397,20 @@ def main():
         print("  💥 %-46s %d 处" % ("有守卫文件没登记进 SUITES（不会跑）", len(orphans)))
         for o in orphans:
             print("       - %s" % o)
-    if not gone and not orphans:
-        print("  ✅ %-46s %d 套判据齐全，无未登记的守卫文件"
-              % ("判据清单与磁盘一致", len(SUITES)))
+    if p1p5_missing:
+        print("  💥 %-46s %d 处" % ("新套件缺 P1–P5 前置门作答块（A1）",
+                                  len(p1p5_missing)))
+        for key, rel, why in p1p5_missing:
+            print("       - %s（%s）：%s" % (key, rel, why))
+    if cap_red:
+        print("  💥 %-46s %s" % ("常驻套件超上限 29（A2）", cap_notes[0]))
+    elif cap_notes:
+        print("  ⚠  %-46s %s" % ("常驻套件超上限但有退休记录", cap_notes[0]))
+    if not gone and not orphans and not p1p5_missing and not cap_red:
+        print("  ✅ %-46s %d 套判据齐全，无未登记的守卫文件，"
+              "前置门与上限检查通过（常驻 %d/%d）"
+              % ("判据清单与磁盘一致", len(SUITES),
+                 resident_suite_count(), RESIDENT_SUITE_CAP))
 
     only = {x.strip() for x in a.only.split(",") if x.strip()}
     suites = SUITES
@@ -1329,7 +1528,7 @@ def main():
     n_crash = sum(1 for r in RESULTS if r["status"] in ("CRASH", "MISSING"))
     n_noop = sum(1 for r in RESULTS if r["status"] == "NOOP")
     n_pass = sum(1 for r in RESULTS if r["status"] == "PASS")
-    struct_bad = 1 if (gone or orphans) else 0
+    struct_bad = 1 if (gone or orphans or p1p5_missing or cap_red) else 0
 
     for k in _bs_exempt:
         print("  ⬆  %-46s 自举豁免：manifest 由本次打包生成，打包前必然落后" % k)
@@ -1342,6 +1541,12 @@ def main():
     _all = {s[0] for s in SUITES}
     _full = _ran == _all
     _fp = _gate_fingerprint()
+    # ★★ 2026-10-15 修一处**闸门工具自身崩**（盲区，比红更坏）：`new_red`／`fixed`
+    #   原先只在 `_full`（全量跑）时由 `_diff_against_baseline` 赋值 —— 局部跑
+    #   （含提交钩子的影响面跑法）一旦有红，走到下面 `if new_red:` 就是
+    #   UnboundLocalError ⇒ 闸门在“正要说清红项”时崩掉，钩子只剩 traceback。
+    #   实测：WIP 提交钩子局部跑 10 套遇 0517 红 ⇒ 当场崩。修法：先初始化。
+    new_red, fixed = [], []
     if _full:
         new_red, fixed, snap_note = _diff_against_baseline(RESULTS, _fp)
         if new_red:
@@ -1416,6 +1621,8 @@ def main():
                        "pass": n_pass, "red": n_red, "crash": n_crash,
                        "noop": n_noop, "struct_bad": struct_bad,
                        "orphans": orphans, "missing": gone,
+                       "p1p5_missing": [list(x) for x in p1p5_missing],
+                       "cap_red": cap_red, "cap_notes": cap_notes,
                        "results": RESULTS}, f, ensure_ascii=False, indent=1)
         print("  ⓘ 结果文件：%s" % _LAST_RUN)
     except Exception as e:                              # noqa: BLE001

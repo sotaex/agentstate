@@ -29,6 +29,7 @@ import os
 import time
 
 import inbox_config as CFG
+import inbox_bubble as BB
 import inbox_emphasis as EM
 import inbox_fallback as FB
 import inbox_model as M
@@ -219,11 +220,36 @@ def open_console_now(root=None, opener=None, console_url=None):
             import inbox_server as SV
             url, _started = SV.ensure_background(root=root)
         if opener is not None:
-            return opener(url)
+            _ret = opener(url)
+            _okm, _whym = _retire_mark(root)
+            if not _okm:
+                print("[daemon] 漂浮哨标退役没成：%s" % _whym)
+            return _ret
         import inbox_server as SV2
-        return SV2.open_console(url)
+        _ret = SV2.open_console(url)
+        # ★ 0.50.0：值守台展开 ⇒ 漂浮哨标退役（点哨标/点托盘展开都会走到这）。
+        #   退役的唯一实现是 `inbox_logo.retire()`，这里只调用 + 如实转述。
+        #   退役失败不改变"窗已开"的事实 ⇒ 打一行到屏上（不吞），不改返回值。
+        _okm, _whym = _retire_mark(root)
+        if not _okm:
+            print("[daemon] 漂浮哨标退役没成：%s" % _whym)
+        return _ret
     except Exception as e:                      # noqa: BLE001
         return "error: %s" % e
+
+
+def _retire_mark(root=None):
+    """展开值守台后，让漂浮哨标退役。**失败只如实报，不吞、不谎报**。
+
+    ★ 为什么不内联进 `open_console_now`：托盘消费者（`handle_actions`）
+      与本函数都要用，抽出来只有一处实现。
+    """
+    try:
+        import inbox_logo as IL
+        rep = IL.retire(root=root, verbose=False)
+        return rep.get("ok", False), rep.get("why", "")
+    except Exception as e:                      # noqa: BLE001
+        return False, "%s: %s" % (type(e).__name__, e)
 
 
 def handle_actions(root=None, opener=None, console_url=None):
@@ -251,7 +277,7 @@ def handle_actions(root=None, opener=None, console_url=None):
 class Daemon:
     def __init__(self, root=None, backend=None, sound=None, overlay=None,
                  sender=None, poster=None, clock=None, cfg=None, today=None,
-                 hb_poster=None, opener=None, console_url=None):
+                 hb_poster=None, opener=None, console_url=None, bubbler=None):
         self.root = root
         self.backend = backend
         self.sound = sound
@@ -268,6 +294,8 @@ class Daemon:
         #   `console_url` 给定 ⇒ 跳过起服务（测试）；`opener(url)` 换掉真开窗口。
         self.opener = opener
         self.console_url = console_url
+        # ★ 0.49.0：冒泡发射点（可注入 —— 判据不起真浏览器、不响真声音）。
+        self.bubbler = bubbler
 
     def _open_console(self):
         """★ 0.35.2：把托盘的 `open` 动作**真的**接上。
@@ -281,6 +309,18 @@ class Daemon:
         """
         return open_console_now(root=self.root, opener=self.opener,
                                 console_url=self.console_url)
+
+    def _pop_bubble(self, it):
+        """急事 → 冒泡（0.49.0）。发射点经 `bubbler` 注入，判据不碰真桌面。
+
+        ★ 为什么单独一个方法而不是在 tick 里内联：判据要能**只换掉这一条
+          发射点**来验路由（急事进冒泡、普通事进 toast），不必连坐整轮 tick。
+        """
+        import inbox_bubble as BB
+        fn = self.bubbler or BB.pop
+        return fn(title=it.title, body=(it.detail or it.title),
+                  level=it.level, state=it.level, root=self.root,
+                  kind=it.kind, cfg=self.cfg)
 
     # ---------------------------------------------------------------- #
     def _heartbeat_once(self, cfg, today):
@@ -335,19 +375,31 @@ class Daemon:
         out = {"items": len(items), "state": M.console_state(items),
                "unhandled": M.unhandled_count(items), "notified": [],
                "emphasis": [], "fallback": [], "actions": [], "errors": [],
+               "bubble": [],
                "heartbeat": None}
 
         # ② 新告警 → 通知 / 强调 / 兜底
+        #   ★★ 0.49.0（创始人 2026-10-14）：**急事走冒泡、普通事走 toast**。
+        #      `R0`（失守）与 `L2`（拦截进行中）＝「需要人工介入马上处理」
+        #      ⇒ 冒泡窗（置顶、不自动消失、带「知道了」确认钮、与值守台同界面）；
+        #      其余级别仍走 `inbox_notify`（WinRT toast，落操作中心）。
+        #      **同一个事件只走一条通道** —— 两条都响就是告警泛洪。
         seen = _load_seen(self.root)
         fresh = [it for it in items if it.id not in seen]
         fresh.sort(key=lambda it: -M.PRIORITY.get(it.level, 0))
         for it in fresh:
             if notify:
                 try:
-                    ok, why = NT.toast(it.level, it.title, it.detail or it.title,
-                                       root=self.root, backend=self.backend, cfg=cfg,
-                                       now=self.clock(), kind=it.kind)
-                    out["notified"].append({"id": it.id, "ok": ok, "why": why})
+                    if it.level in BB.URGENT_LEVELS:
+                        _rep = self._pop_bubble(it)
+                        out["bubble"].append(
+                            {"id": it.id, "ok": bool(_rep.get("ok")),
+                             "why": _rep.get("why", "")})
+                    else:
+                        ok, why = NT.toast(it.level, it.title, it.detail or it.title,
+                                           root=self.root, backend=self.backend, cfg=cfg,
+                                           now=self.clock(), kind=it.kind)
+                        out["notified"].append({"id": it.id, "ok": ok, "why": why})
                 except Exception as e:          # noqa: BLE001
                     out["errors"].append("notify: %s" % e)
             if M.PRIORITY.get(it.level, 0) >= M.PRIORITY["R0"]:

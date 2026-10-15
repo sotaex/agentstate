@@ -19,8 +19,10 @@
 
   ② **高度取工作区的 1/3（设上限）**，而不是"屏幕高度的 1/3"——
      分母必须是**用户真正能看见并使用的**那块面积。
-     公式：`h = min(640, work_h * 0.33)`；`w = min(520, work_w * 0.34)`。
-     在 3000×1952 上 ⇒ 640×520，正好是工作区高度的 33%。
+     公式：`h = min(640, work_h * 0.33)`；`w = min(720, work_w * 0.34)`。
+     在 3000×1952 上 ⇒ 640×720：高度正好是工作区的 33%（纪律②没动），
+     宽度高于页面 CSS 窄屏断点 620px ⇒ **出生即正常版式**
+     （0.49.0 修，旧上限 520 会让面板一出生就落进窄布局，见 `MAX_W` 注释）。
 
   ③ **屏幕放不下就如实说，不硬挤。** 工作区小于 `MIN_WORK_W × MIN_WORK_H`
      时**不开面板**，只留托盘图标，并说清为什么 —— 硬挤出来的窗口
@@ -51,7 +53,19 @@ import re
 import time
 
 # --- 面板尺寸的**上限**（逻辑像素）。实际值还要被工作区比例再压一道 ---
-MAX_W = 520
+#: ★★ 0.49.0（2026-10-14，创始人截图实证）：520 是一个**坏上限**。
+#:   实测默认窗口 520×640：页面 CSS 的窄屏断点是 `@media (max-width:620px)`
+#:   （`inbox_server.CSS` 两处），520 **低于断点** ⇒ 面板一出生就落进
+#:   "窄面板"降级布局：顶部"最近 24 小时"行在药丸内部折行、数字互相压字
+#:   （创始人原话："这个乱样"），用户必须手动拉宽才恢复正常版式
+#:   （"我拉成这个尺寸，总算正常了"）。
+#:   ⇒ **出生即正常**：上限抬到 720（高于断点 100px 余量），工作区够大时
+#:     面板直接进正常布局，不需要用户先做任何动作。
+#:   ★ 高度纪律不变（0.36.0 创始人「别占屏幕太大面积」）：仍 ≤ 工作区 1/3。
+#:   ★ 小工作区依旧走比例公式（`min(720, work_w*0.34)`）—— 屏幕不够大时
+#:     窄布局是**正确**的降级，不是缺陷；判据 W-08 锁的是"够大的工作区上
+#:     不许出生在窄布局里"。
+MAX_W = 720
 MAX_H = 640
 
 #: 工作区占可用比例（分母＝**工作区**，不是屏幕）
@@ -65,6 +79,28 @@ MARGIN_B = 48
 #: 小到这个程度就不开面板了（面板会盖满整屏、点不到关闭）
 MIN_WORK_W = 480
 MIN_WORK_H = 360
+
+# --- 冒泡窗（0.49.0）："需要人工介入马上处理"的通知窗 -------------------------
+#: ★ 为什么与面板分开两个几何：面板是**工作台**（按工作区比例收缩，
+#:   哨兵不碍事）；冒泡是**通知**（必须一眼看得全，固定小尺寸即可）。
+BUBBLE_W = 384
+#: ★★★ 0.50.1 修（创始人 2026-10-14 截图：「泡泡下沿没露出来」）：
+#:   148 **不够** —— 那是按"内容高度"估的，而 `rect` 是**窗口**矩形，
+#:   里面还装着 Chromium 自己画的那条标题栏（app 模式没有系统标题栏，
+#:   标题栏是画在**客户区里**的，所以 `GetClientRect` 量不出来：
+#:   实测本机窗口 284×276 客户区时，窗口-客户只差 8px —— 那 8px 是边框，
+#:   标题栏那 ~32px **藏在客户区内部**）。
+#:   ⇒ 高度必须＝**内容盒高 ＋ 标题栏**，不能只算内容。内容盒（`inbox_bubble.render`
+#:   的 CSS，逐项可核）：
+#:        padding 14 ＋ head 19 ＋ body(5+3×20+9)=74 ＋ act 27 ＋ padding 12 = 146
+#:   ＋ 标题栏 ~32 ＋ 余量 12 ⇒ **190**。
+#:   ★ 这个数只是"出生就差不多对"的初值：真判据在 `bubblefit`
+#:     （页面量出 `scrollHeight-clientHeight` 上报，服务端按**下沿不动往上长**
+#:     落位并**回读**，见 `inbox_server._bubble_fit`）—— 数错了也能自己纠回来。
+#:   ★ 为什么不再靠 `place_all` 硬撑：落位只保证"窗口在目标矩形上"，
+#:     它**不知道**内容有没有被裁掉（148 时落位回读是**一致**的，
+#:     可下沿照样看不见 —— 这正是"回读一致 ≠ 看得见"）。
+BUBBLE_H = 190
 
 #: 位置选择的锚点。★ "右下"是**约定**不是搜索：右下角是主工作区之外的
 #: 那一块（IDE/终端的视线终点都在左中区域），且紧邻任务栏托盘 ——
@@ -237,6 +273,139 @@ def window_size_str(rect):
     if rect is None:
         return "%d,%d" % (MAX_W, MAX_H)
     return "%d,%d" % (rect[2], rect[3])
+
+
+def bubble_geometry(areas=None):
+    """冒泡窗的一站式几何：能不能开 + 开在哪。
+
+    ★ 与 `console_geometry` 同源同纪律（工作区实算、不写死绝对坐标），
+      但**不收工作区比例**：冒泡是通知，148px 必须一眼看得全。
+    ★ 位置与面板同锚（右下、紧贴任务栏上方）——冒泡与托盘/面板同处一地，
+      认知成本最低（`ANCHOR` 的同一理由）。
+    """
+    work = pick_work_area(areas)
+    w = min(BUBBLE_W, work.w - 2 * MARGIN_R)
+    h = min(BUBBLE_H, work.h - MARGIN_B - MARGIN_R)
+    if w < 200 or h < 80:
+        return {"ok": False,
+                "reason": ("工作区 %d×%d 太小，放不下 %d×%d 的冒泡窗"
+                           % (work.w, work.h, BUBBLE_W, BUBBLE_H)),
+                "rect": None, "work": work}
+    rect = (work.right - MARGIN_R - w, work.bottom - MARGIN_B - h, w, h)
+    if not _inside(work, rect):
+        return {"ok": False,
+                "reason": "按工作区算出来的冒泡位置会越出可用区域，不开冒泡。",
+                "rect": None, "work": work}
+    return {"ok": True, "reason": "", "rect": rect, "work": work}
+
+
+def set_topmost(hwnds, on=True, setter=None):
+    """把给定窗口置顶／取消置顶；返回 `(是否全部成功, 汇总人话)`。
+
+    ★ 为什么冒泡必须置顶（0.49.0）：冒泡＝「需要人工介入马上处理」的通知。
+      被别的窗口压住的冒泡等于没弹 —— 那正是本仓禁止的形状
+      （"看起来发了，其实没被看见"）。面板**不置顶**（它是工作台，
+      不该压在用户正在干活的窗口上）；置顶只属于冒泡这类通知。
+    ★ 只动 Z 序，不动位置和尺寸（`SWP_NOMOVE|SWP_NOSIZE`）。
+    ★ 边界同 `place_all`：只碰调用方传进来的句柄，不枚举、不猜测。
+    """
+    hs = [h for h in (hwnds or []) if h]
+    if not hs:
+        return False, "没有可设置的窗口（可能已被手动关掉了）。"
+    st = setter or _set_topmost_one
+    oks, whys = [], []
+    for h in hs:
+        ok, why = st(h, on)
+        oks.append(ok)
+        whys.append(why)
+    if all(oks):
+        return True, "%d 个窗口已%s置顶。" % (len(hs), " " if on else "取消")
+    bad = [w for o, w in zip(oks, whys) if not o]
+    return False, "%d 个窗口里 %d 个没能%s置顶：%s" % (
+        len(hs), len(bad), "" if on else "取消 ", bad[0])
+
+
+def _set_topmost_one(hwnd, on=True):
+    """单个窗口的 Z 序设置（`SetWindowPos` + `HWND_TOPMOST/-2`）。"""
+    if os_name() != "nt" or not hwnd:
+        return False, "非 Windows 或句柄为空，没法设置置顶。"
+    try:
+        u = ctypes.windll.user32
+        h = w.HWND(hwnd)
+        if not u.IsWindow(h):
+            return False, "窗口已经不在了。"
+        HWND_TOPMOST, HWND_NOTOPMOST = -1, -2
+        # SWP_NOMOVE|SWP_NOSIZE = 0x0002|0x0001：只换 Z 序
+        ok = u.SetWindowPos(h, w.HWND(HWND_TOPMOST if on else HWND_NOTOPMOST),
+                            0, 0, 0, 0, 0x0003)
+        if not ok:
+            return False, "SetWindowPos 置顶失败。"
+        return True, ""
+    except Exception as e:                              # noqa: BLE001
+        return False, "%s: %s" % (type(e).__name__, e)
+
+
+def _focus_one(hwnd):
+    """把单个窗口切到前台（必要时先还原）。"""
+    if os_name() != "nt" or not hwnd:
+        return False, "非 Windows 或句柄为空，没法切到前台。"
+    try:
+        u = ctypes.windll.user32
+        h = w.HWND(hwnd)
+        if not u.IsWindow(h):
+            return False, "窗口已经不在了。"
+        # 最小化的窗口要先还原 —— 否则"切到前台"切的是一个图标。
+        try:
+            if u.IsIconic(h):
+                u.ShowWindow(h, 9)                      # SW_RESTORE
+        except Exception:                                   # noqa: BLE001
+            pass
+        if u.SetForegroundWindow(h):
+            return True, ""
+        # ★ 兜底：`SetForegroundWindow` 在前台进程不是调用方时会被系统**拒绝**
+        #   （Windows 的前台锁规则，实测在 Edge app 窗上常发生）⇒ 用业界标准的
+        #   「先置顶、再取消置顶」把它顶到最前。只动 Z 序，不动位置尺寸，
+        #   而且**立刻取消置顶** ⇒ 不改变面板"不置顶"的既有性质。
+        HWND_TOPMOST, HWND_NOTOPMOST = -1, -2
+        ok = u.SetWindowPos(h, w.HWND(HWND_TOPMOST), 0, 0, 0, 0, 0x0003)
+        u.SetWindowPos(h, w.HWND(HWND_NOTOPMOST), 0, 0, 0, 0, 0x0003)
+        if ok:
+            return True, ""
+        return False, "SetForegroundWindow / SetWindowPos 都没能把它切到前面。"
+    except Exception as e:                              # noqa: BLE001
+        return False, "%s: %s" % (type(e).__name__, e)
+
+
+def focus_windows(hwnds, focusser=None):
+    """把给定窗口**切到前台**；返回 `(是否全部成功, 汇总人话)`。
+
+    ★★ 为什么需要它（创始人 2026-10-14：「点击打开值守台后，之前的关闭了，
+      打开了新的」）：
+      旧链路上「打开值守台」只有一个动作 —— `open_console_settled()`，而它
+      **先收旧窗、再开新窗**（那条路是为「没有窗、要开一个」设计的）。
+      于是**面板本来就开着**的时候点一下，会得到：旧窗被关掉、新窗重新加载
+      —— 用户看到的是"窗闪了一下、内容从头来"，而他想要的只是"**切过去**"。
+      ⇒ 补齐第三种可能：**已经开着 ⇒ 只是切到前面**（不关、不开、不重建）。
+
+    ★ 与 `set_topmost` 的分工（两件事，不许混）：
+      · `set_topmost` 改的是**Z 序归属**（长期置顶）—— 面板**不置顶**
+        （它是工作台，长期压在用户正在干活的窗口上就是碍事）；置顶只属于冒泡。
+      · 本函数是**一次性的"切到前面"** —— 用户接着点别的窗口，它就该让位。
+    ★ 边界同 `place_all`：**只碰调用方传进来的句柄**，不枚举、不猜测。
+    """
+    hs = [h for h in (hwnds or []) if h]
+    if not hs:
+        return False, "没有可切换的窗口（可能已被手动关掉了）。"
+    fn = focusser or _focus_one
+    oks, whys = [], []
+    for h in hs:
+        ok, why = fn(h)
+        oks.append(ok)
+        whys.append(why)
+    if all(oks):
+        return True, "%d 个窗口已切到前面。" % len(hs)
+    bad = [w for o, w in zip(oks, whys) if not o]
+    return False, "%d 个窗口里 %d 个没能切到前面：%s" % (len(hs), len(bad), bad[0])
 
 
 def window_position_str(rect):
@@ -648,6 +817,39 @@ def is_window_on_screen(hwnd):
         return None
 
 
+def enum_windows(visible_only=True):
+    """枚举顶层窗口，返回 `[(hwnd, title), ...]`（**唯一**枚举实现）。
+
+    ★ 为什么抽它出来（0.49.0）：冒泡窗也需要"按标题标记找窗口"，而本仓
+      禁止同一件 Win32 遍历写两份（第二份必然与第一份漂移 —— 本仓
+      「一个事实一个实现」的老纪律）。⇒ 枚举只此一处，
+      `find_console_windows` / `find_bubble_windows` 都只是它的**过滤器**。
+    ★ 取不到 / 非 Windows ⇒ 空列表（调用方如实当"没有"处理）。
+    """
+    if os_name() != "nt":
+        return []
+    try:
+        u = ctypes.windll.user32
+        CB = ctypes.WINFUNCTYPE(w.BOOL, w.HWND, w.LPARAM)
+        out = []
+
+        def cb(hwnd, _l):
+            if visible_only and not u.IsWindowVisible(hwnd):
+                return True
+            n = u.GetWindowTextLengthW(hwnd)
+            if n == 0:
+                return True
+            buf = ctypes.create_unicode_buffer(n + 1)
+            u.GetWindowTextW(hwnd, buf, n + 1)
+            out.append((hwnd, buf.value))
+            return True                         # ★ 不收手：全量收集
+
+        u.EnumWindows(CB(cb), 0)
+        return out
+    except Exception:                                          # noqa: BLE001
+        return []
+
+
 def find_console_windows(suffix=CONSOLE_WINDOW_TITLE_SUFFIX, visible_only=True,
                          lister=None, run_id=None):
     """枚举**全部**匹配的值守台窗口；返回句柄列表（可能为空）。
@@ -686,31 +888,10 @@ def find_console_windows(suffix=CONSOLE_WINDOW_TITLE_SUFFIX, visible_only=True,
     """
     if lister is not None:
         return [h for h in lister(suffix=suffix, visible_only=visible_only) if h]
-    if os_name() != "nt":
-        return []
-    try:
-        u = ctypes.windll.user32
-        CB = ctypes.WINFUNCTYPE(w.BOOL, w.HWND, w.LPARAM)
-        found = []
-
-        def cb(hwnd, _l):
-            if visible_only and not u.IsWindowVisible(hwnd):
-                return True
-            n = u.GetWindowTextLengthW(hwnd)
-            if n == 0:
-                return True
-            buf = ctypes.create_unicode_buffer(n + 1)
-            u.GetWindowTextW(hwnd, buf, n + 1)
-            # ★ 一条路径两个语义：run_id 为空 ⇒ 宽泛（收旧窗），
-            #   给了 ⇒ 严格（只认本次，可移动）。
-            if is_console_title(buf.value, run_id):
-                found.append(hwnd)
-            return True                     # ★ 不收手：全量收集
-
-        u.EnumWindows(CB(cb), 0)
-        return found
-    except Exception:                                       # noqa: BLE001
-        return []
+    # ★ 枚举走唯一的 `enum_windows`（0.49.0 抽出，冒泡窗共用同一份遍历）
+    #   —— 同一件 Win32 遍历只此一处，过滤条件才是各自的语义。
+    return [h for (h, title) in enum_windows(visible_only=visible_only)
+            if is_console_title(title, run_id)]
 
 
 # ★★ 0.36.3 删除（创始人「大窗相关垃圾代码一律不要」）：
@@ -727,6 +908,154 @@ def find_console_windows(suffix=CONSOLE_WINDOW_TITLE_SUFFIX, visible_only=True,
 #     ...（0.36.2 全文见 git 历史；不要再复活它 —— 要全量就调 find_console_windows）
 
 
+#: ★★ 0.49.0：冒泡窗的标题标记 —— **刻意不含「· 值守台」字样**。
+#:   `host_shield.console_is_visible()`（0.36.8 立的降噪闸）按值守台标记判
+#:   「用户此刻是否正看着面板」；冒泡是**通知**、不是面板。若冒泡标题带上
+#:   值守台标记，它一弹出就会被闸当成「用户在看面板」⇒ 后续急事全被咽掉
+#:   —— 漏报比多弹坏得多（0.36.8 原话：宁可多弹不可漏报）。
+#:   ⇒ 冒泡标题形如 `需要你处理 · 冒泡#<run_id>`，与值守台**结构上可分**。
+BUBBLE_TITLE_MARK = " · 冒泡"
+
+#: ★ 0.50.0（创始人 2026-10-14「值守台应该有一个能漂浮的最小态」）：
+#:   漂浮哨标窗的标题标记。为什么与冒泡/值守台**结构上可分**：
+#:   `console_is_visible()`（0.36.8 降噪闸）与 `find_console_windows` 都按
+#:   标题认窗；哨标不叫「值守台」，才不会被当成"用户正看着大面板"。
+#:   同理 `Windows + Aero` 任务栏里它显示成 `Antinel · 哨标`，一眼可知。
+#:   ⚠️ logo.ps1 **不许把 `$form.Text` 改成提示词** —— 标题就是找窗的标记，
+#:      改了 `find_logo_windows` 就瞎了（这个坑在本文件里有注释盯着）。
+LOGO_TITLE_MARK = " · 哨标"
+
+
+def _mark_at_tail_any(title, mark):
+    """整串是否形如「<前缀><mark>」或「<前缀><mark>#<身份>」—— 标记**必须在末尾**。
+
+    ★★ 0.50.2（清单 B4，**实测**抓出来的真缺陷）：`find_logo_windows` /
+      `find_bubble_windows` 的宽泛分支原来写的是 `mark in title`
+      （**任意位置子串**），与 `is_console_title` 的 `_mark_at_tail`
+      （末尾 ＋ 前缀白名单）**不是同一个口径**，而它们的 docstring 却写着
+      "同源同构"。实测误伤（一次性探针 `_p_probe_win.py`，内存替换
+      `enum_windows`，不碰真桌面）：
+
+        '我的 · 哨标 收藏夹'    → 被认成哨标窗   ← 用户窗口
+        '整理一下 · 冒泡 记录'  → 被认成冒泡窗   ← 用户窗口
+
+      而这两条路径都通向 `WM_CLOSE` ⇒ **会关掉用户自己的窗口** ——
+      0.36.5 把这一类明令为"不可接受的祸"，宽泛模式这一侧当时**漏了**
+      （同型教训：严格模式收紧了 ≠ 宽泛模式也跟着收紧）。
+
+    ★ 为什么不直接复用 `_mark_at_tail`：它的第 ④ 层前缀白名单是**值守台
+      页面名/状态词**（收件箱、失守、拦截…）；而冒泡窗的前缀是**告警标题**
+      （任意用户可见文案）—— 白名单化不成立。⇒ 这里只保留"标记在末尾、
+      其后只允许 `#身份`"这一条：对哨标（前缀恒为 `Antinel`）与冒泡
+      （前缀是标题）都成立，且足以排除上面那两类实测误伤。
+    """
+    if not title or not mark:
+        return False
+    return bool(re.search(re.escape(mark) + r"(?:#[0-9A-Za-z]+)?$",
+                          title.strip()))
+
+
+def find_logo_windows(mark=LOGO_TITLE_MARK, visible_only=True, run_id=None):
+    """枚举漂浮哨标窗；`run_id` 给定时只认**本次**那枚（严格后缀匹配）。
+
+    ★ 与 `find_console_windows` / `find_bubble_windows` 同源同构（两级匹配），
+      过滤器同样走唯一的 `enum_windows` —— 不第二份枚举实现。
+    ★★ 0.50.2：宽泛分支从 `mark in title`（任意位置子串）改成
+      `_mark_at_tail_any`（标记在末尾）—— 见该函数的说明（清单 B4）。
+      之前那句"同源同构"是**假的**：`is_console_title` 用末尾匹配，
+      这里用子串匹配 ⇒ 会认领用户窗口并把它关掉。
+    ★ 哨标**同一时刻只该有一枚**：多枚＝界面说谎（用户以为有两个哨兵）。
+      去重职责在 `inbox_logo.collapse_console()`（先退役旧的再起新的），
+      这里只如实报告"桌面上有几枚"。
+    """
+    out = []
+    for (h, title) in enum_windows(visible_only=visible_only):
+        if run_id:
+            if title.endswith(mark + "#" + str(run_id)):
+                out.append(h)
+        elif _mark_at_tail_any(title, mark):
+            out.append(h)
+    return out
+
+
+def find_bubble_windows(mark=BUBBLE_TITLE_MARK, visible_only=True, run_id=None):
+    """枚举冒泡窗；`run_id` 给定时只认**本次**那枚（严格后缀匹配）。
+
+    ★ 与 `find_console_windows` 同源同构（两级匹配），过滤器走唯一的
+      `enum_windows`；冒泡**不设 `lister` 注入点**：它的调用方（冒泡模块）
+      自己按 run_id 收，测试不必在这里造假桌面。
+    ★★ 0.50.2：宽泛分支从 `mark in title`（任意位置子串）改成
+      `_mark_at_tail_any`（标记在末尾）—— 见该函数的说明（清单 B4）。
+      冒泡窗通向 `WM_CLOSE`（一次只留一枚），子串匹配会连用户窗口一起关。
+    """
+    out = []
+    for (h, title) in enum_windows(visible_only=visible_only):
+        if run_id:
+            if title.endswith(mark + "#" + str(run_id)):
+                out.append(h)
+        elif _mark_at_tail_any(title, mark):
+            out.append(h)
+    return out
+
+
+def close_bubble_windows(visible_only=True, closer=None, run_id=None, why=""):
+    """关掉冒泡窗（**发 WM_CLOSE，不强杀**）；返回 `(关掉几个, 人话)`。
+
+    ★ 一次只留一枚冒泡：新的要弹之前，先把旧的收掉 —— 不然屏幕上会叠起
+      一串同类通知，那正是「告警泛洪」（规格《品牌动效报警语法》铁律二）。
+    ★ `closer` 可注入（判据不必碰真实桌面）—— 与 `close_console_windows`
+      同一条纪律：**注入点必须出现在签名里**（0.36.2 的教训）。
+    """
+    if closer is None:
+        def closer(h):                                      # noqa: E731
+            return _post_close(h)
+    hs = find_bubble_windows(visible_only=visible_only, run_id=run_id)
+    n = 0
+    for h in hs:
+        try:
+            if closer(h):
+                n += 1
+        except Exception:                                   # noqa: BLE001
+            continue
+    if not hs:
+        return 0, "没有开着的冒泡窗。"
+    return n, ("关掉了 %d 枚冒泡窗%s" % (n, ("（%s）" % why) if why else "。"))
+
+
+def close_logo_windows(visible_only=True, closer=None, run_id=None, why=""):
+    """关掉漂浮哨标窗（**发 WM_CLOSE，不强杀**）；返回 `(关掉几个, 人话)`。
+
+    ★ 与 `close_bubble_windows` 同构（`closer` 注入点必须出现在签名里 ——
+      0.36.2 的教训）。**只在 `inbox_logo.retire()` 的标志退场超时才用**：
+      正常退役走"哨标自己读标志退出"，这条是兜底，不是主路径。
+    """
+    if closer is None:
+        def closer(h):                                      # noqa: E731
+            return _post_close(h)
+    hs = find_logo_windows(visible_only=visible_only, run_id=run_id)
+    n = 0
+    for h in hs:
+        try:
+            if closer(h):
+                n += 1
+        except Exception:                                   # noqa: BLE001
+            continue
+    if not hs:
+        return 0, "没有开着的漂浮哨标。"
+    return n, ("关掉了 %d 枚漂浮哨标%s" % (n, ("（%s）" % why) if why else "。"))
+
+
+def _post_close(h):
+    """给一个窗口发 `WM_CLOSE`（走正常关闭流程，不强杀进程）。"""
+    if os_name() != "nt" or not h:
+        return False
+    try:
+        return bool(ctypes.windll.user32.PostMessageW(
+            w.HWND(h), 0x0010, 0, 0))                       # WM_CLOSE
+    except Exception:                                       # noqa: BLE001
+        return False
+
+
 def window_rect_of(hwnd):
     """窗口矩形 `(l, t, w, h)`；取不到 ⇒ `None`。"""
     if os_name() != "nt" or not hwnd:
@@ -741,7 +1070,7 @@ def window_rect_of(hwnd):
 
 
 def close_console_windows(suffix=CONSOLE_WINDOW_TITLE_SUFFIX, visible_only=True,
-                          closer=None, run_id=None):
+                          closer=None, run_id=None, finder=None):
     """关掉**已经开着**的值守台窗口；返回关掉几个。
 
     ★★★ 0.36.2 修的真实根因（这一行让上一步**从未生效过**）：
@@ -790,8 +1119,17 @@ def close_console_windows(suffix=CONSOLE_WINDOW_TITLE_SUFFIX, visible_only=True,
             return bool(ctypes.windll.user32.PostMessageW(
                 w.HWND(h), 0x0010, 0, 0))                   # WM_CLOSE
     try:
-        victims = find_console_windows(suffix=suffix, run_id=run_id,
-                                       visible_only=visible_only)
+        if finder is not None:
+            # ★ 0.50.0：`finder` 注入点（与 `closer` 同一条纪律：**注入点必须
+            #   出现在签名里**，0.36.2 的教训）。为什么冒泡/哨标那条链不需要、
+            #   这里需要：`inbox_logo.collapse_console` 的判据要在**假桌面**上
+            #   验"关掉的是本 run 的面板窗"，而枚举走真桌面就无从造假 ⇒ 判据
+            #   只能 SKIP（ fixtures 不忠实比没有更坏）。默认 None ⇒ 行为不变。
+            victims = finder(run_id=run_id, suffix=suffix,
+                             visible_only=visible_only)
+        else:
+            victims = find_console_windows(suffix=suffix, run_id=run_id,
+                                           visible_only=visible_only)
     except Exception:                                       # noqa: BLE001
         return 0
     closed = 0

@@ -41,7 +41,7 @@ import time
 import webbrowser
 from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import inbox_model as M
 import inbox_report as R
@@ -57,6 +57,17 @@ ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 #: （netstat/tasklist/powershell…）时若不显式给这个标志，Windows 会**新建一个
 #: 控制台** ⇒ 用户看到黑窗一闪。`host_shield`/`egress` 同款常量，不在本文件另立口径。
 _CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
+# ★ 2026-10-14（创始人实证「起得来、活不久」）：**app 窗口/冒泡窗的浏览器
+#   必须与调用方进程树分离**。实测（两臂对照，同一台机同一条命令）：
+#     命令内：窗口 t+0、t+5 都在；命令结束、下一个调用：窗口没了。
+#   ⇒ Popen 只带 _CREATE_NO_WINDOW 时，msedge 挂在调用方（CLI／一次性
+#     脚本／CI runner）进程树下 ⇒ 调用方一退出，进程树被连带清理，
+#     窗口秒死 ⇒ `inbox window` 如实报「已就位」，然后窗口消失。
+#   ★ 服务进程（`spawn_console`）一直是 DETACHED，所以服务活得久、
+#     窗口活不久——同一个文件里两种寿命，这就是漏洞的形状。
+#   DETACHED_PROCESS(0x8)｜CREATE_NEW_PROCESS_GROUP(0x200)：窗口与调用方
+#   寿命解耦。与「关窗不停服务」是同一原则的反方向：调用方死，也不关窗。
+_DETACHED_FLAGS = (_CREATE_NO_WINDOW | 0x00000008 | 0x00000200) if os.name == "nt" else 0
 
 # 允许对外提供的静态文件名（白名单 —— 杜绝路径穿越）
 ASSET_WHITELIST = {
@@ -85,9 +96,12 @@ CSS = """
 body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.6 var(--sans)}
 a{color:var(--brand)}
 button{font:inherit;cursor:pointer}
-.bar{display:flex;align-items:center;gap:16px;padding:12px 20px;border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap}
+/* ★ 0.50.4（Q-17/Q-18）：顶部条内边距 12px→9px —— 灯块在四个页签都渲染一
+   遍，内容最少的「运行状态」页上它吃掉 61% 的可见文本量。压它的**留白**
+   而不是删它的内容（灯的口径与词条落点一件不动）。 */
+.bar{display:flex;align-items:center;gap:16px;padding:9px 20px;border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap}
 .logo{width:48px;height:48px;border-radius:12px;overflow:hidden;background:#0a1a12;flex:none}
-.logo video,.logo img{width:100%;height:100%;display:block;object-fit:cover}
+.logo video,.logo img,.logo svg{width:100%;height:100%;display:block;object-fit:cover}
 /* ★ 0.48.5（交接件 §5.4 戊4）：状态词 16px 粗体（色随态，行内 style 走
    `M.STATE_VAR` —— 与 `.dot` 同一个真源）；解释句 13px 常规色 `var(--fg)`。
    旧形状是「词 17px  inherited 黑／解释 12px 灰」—— 信息量大的那句
@@ -96,6 +110,17 @@ button{font:inherit;cursor:pointer}
 .state span{font-size:13px;color:var(--fg)}
 .pill{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid var(--line)}
 .dot{width:8px;height:8px;border-radius:50%}
+/* ★ 0.50.0（创始人「值守台应该有一个能漂浮的最小态……哨兵很多时候不要
+   碍事，只要在，就行了」）：顶部条**右上角**（与系统最小化同一行）的
+   收缩钮。符号＝**动效哨标本体**（与头部左侧同一枚实时 SVG）——
+   点它，值守台就收缩成屏幕上那枚漂浮哨标，所见即所得，不用猜符号。
+   判据 FLO-02 锁：按钮在、用的是 `_logo_mark`（不是静态图）、
+   title 说人话、POST 的是 `op=collapse`。 */
+.collbtn{flex:none;width:40px;height:40px;padding:0;border:1px solid var(--line);
+  border-radius:10px;background:var(--bg);line-height:0}
+.collbtn:hover{border-color:var(--brand)}
+.collbtn svg{width:100%;height:100%;display:block}
+.collst{font-size:12px;color:var(--muted);margin-left:8px;align-self:center}
 .spacer{flex:1}
 /* ★ 0.48.5（交接件 §5.4 丁2/丁3）：顶部条右侧那个零信息量块连同类规则一起删
    （回环地址每台机器一样；另一半是口号不是证据）。证据搬到运行状态页的
@@ -106,7 +131,9 @@ button{font:inherit;cursor:pointer}
 .tabs a{padding:9px 14px;color:var(--muted);font-weight:600;text-decoration:none;border-bottom:2px solid transparent}
 .tabs a.on{color:var(--brand);border-bottom-color:var(--brand)}
 main{max-width:1000px;margin:0 auto;padding:20px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:12px}
+/* ★ 0.50.4（Q-17）：卡片内边距 14px→11px、卡片间距 12px→9px —— 日报页原先
+   必须滚动才看得到「规则命中排行」和「有没有被改过」两张卡。 */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 16px;margin-bottom:9px}
 h2{font-size:15px;margin:0 0 12px}
 .filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
 .filters a{padding:5px 11px;border-radius:999px;border:1px solid var(--line);font-size:12px;font-weight:600;color:var(--muted);text-decoration:none}
@@ -119,7 +146,8 @@ h2{font-size:15px;margin:0 0 12px}
 .badge.r0{background:var(--r0)}.badge.l2{background:var(--l2)}
 .badge.l1{background:var(--l1)}.badge.ls{background:var(--ls)}
 .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:16px}
-.metric{background:var(--panel);border-radius:10px;padding:14px}
+/* ★ 0.50.4（Q-17）：同上，数字卡内边距 14px→11px。 */
+.metric{background:var(--panel);border-radius:10px;padding:11px}
 .metric .k{font-size:12px;color:var(--muted)}
 .metric .v{font-size:26px;font-weight:700}
 .metric a{text-decoration:none}
@@ -131,8 +159,12 @@ h2{font-size:15px;margin:0 0 12px}
      用 `position:absolute` 浮在页面之上，宽度取 `min(560px, 视口-32px)`
      —— 窄面板里也能正常成段阅读。
    ★ 为什么不用 `position:fixed`：会脱离滚动容器，长页面展开时飘在别处。
-   ★ 关闭行为交给原生 `<details>`（点外面不关，但点开别的词条会收起上一个，
-     因为同名 details 在同一父节点下互斥——这也是选原生控件的原因）。 */
+   ★ 关闭行为交给原生 `<details>`（点外面不关；点开别的词条会收起上一个）。
+     ★★ 0.50.4 更正＋补机制：0.36.1 写下这句时**机制并不存在** —— HTML 的
+     同名 details 从未自动互斥，那是把愿望写成了事实（创始人 2026-10-15
+     实测多开叠压）。真机制是 WHATWG `<details name>` **原生互斥手风琴**
+     （Edge 120+，2023-12）：`glossary.chip()` 现给每颗芯片带
+     `name="term"`，由判据 **U-19** 钉住。 */
 .term{position:relative;display:inline-block}
 .term>summary{cursor:pointer;list-style:none}
 .term>summary::-webkit-details-marker{display:none}
@@ -156,13 +188,22 @@ h2{font-size:15px;margin:0 0 12px}
    `width/height/font-size`，不受父级 0 字号影响。 */
 .term.mk>summary{font-size:0;line-height:0;color:transparent;letter-spacing:0}
 .tdef{position:absolute;z-index:60;top:calc(100% + 6px);left:0;
-  width:max-content;max-width:min(560px,calc(100vw - 32px));min-width:260px;
+  width:max-content;max-width:min(560px,calc(100vw - 16px));min-width:min(260px,calc(100vw - 16px));
+  max-height:calc(100vh - 16px);overflow:auto;
   margin:0;padding:12px 14px;font-size:12.5px;line-height:1.75;color:var(--fg);
   background:var(--bg,#fff);border:1px solid var(--line);border-left:3px solid var(--brand);
   border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.16);font-weight:400;
   white-space:normal;text-align:left}
-/* 贴着屏幕右边时改为右对齐，避免浮层被裁掉 */
-.term.flipx>tdef{left:auto;right:0}
+/* ★ 0.50.3 截图复发：浮层只能翻边不能保证完整。统一用视口坐标定位，
+   即使词条贴近视口中部、浮层比左侧余量宽，也不会按锚点右对齐后跑到屏幕外。 */
+.term>.tdef{position:fixed;top:8px;left:8px;right:auto;width:max-content;
+  max-width:min(560px,calc(100vw - 16px));min-width:min(260px,calc(100vw - 16px));
+  max-height:calc(100vh - 16px);overflow:auto}
+/* 表单动作回执：让「马上修复/试一下」的结果就地可见，而不是只落在后台 stdout。 */
+.notice{margin:0 0 12px;padding:10px 12px;border:1px solid var(--line);
+  border-left:4px solid var(--brand);border-radius:8px;background:var(--panel);color:var(--fg)}
+/* 旧 flipx 类保留为兼容标记；定位由 _FLIP_JS 用固定视口坐标统一计算。 */
+.term.flipx>.tdef{left:8px;right:auto}
 /* 三行结构（包含/不含/口径）改成**成对列**，不再挤成一长条 */
 .tr{margin-top:6px;padding-top:6px;border-top:1px dashed var(--line);color:var(--fg)}
 .tr:first-of-type{margin-top:8px}
@@ -181,12 +222,15 @@ details.where>.tdef{position:static;width:auto;min-width:0;max-width:none;
   border-radius:8px;box-shadow:none;color:var(--fg)}
 details.where code{font-family:var(--mono);font-size:11.5px;word-break:break-all}
 @media (max-width:620px){
-  .tdef{max-width:calc(100vw - 24px);min-width:0;font-size:12px;line-height:1.7}
+  .tdef{max-width:calc(100vw - 16px);min-width:min(260px,calc(100vw - 16px));
+    max-height:calc(100vh - 16px);font-size:12px;line-height:1.7}
   .term{width:100%}
-  .term>tdef,.term.flipx>tdef{left:0;right:auto;width:calc(100vw - 40px)}
+  .term>.tdef,.term.flipx>.tdef{left:8px;right:auto;width:max-content}
 }
 .rows{border:1px solid var(--line);border-radius:10px;overflow:hidden}
-.row{display:flex;gap:12px;padding:11px 15px;border-bottom:1px solid var(--line);font-size:13px}
+/* ★ 0.50.4（Q-17）：行高 11px→8px（原先一行约 55px，四张卡就把日报页
+   顶出了首屏；压完日报首屏能同时见到四张数字卡与当日合计）。 */
+.row{display:flex;gap:12px;padding:8px 15px;border-bottom:1px solid var(--line);font-size:13px}
 .row:last-child{border-bottom:0}
 .row .k{flex:none;width:150px;color:var(--muted)}
 .ok{color:var(--l0);font-weight:700}.warn{color:var(--l1);font-weight:700}.bad{color:var(--r0);font-weight:700}.neutral{color:var(--muted);font-weight:700}.dev{color:var(--brand);font-weight:700}
@@ -305,32 +349,53 @@ button[disabled]{opacity:.55;cursor:not-allowed;border-style:dashed !important;
 .trow:last-child{border-bottom:0}
 """
 
-#: ★ 0.36.1：术语浮层的**贴边翻转**（创始人截图三的连带问题）。
-#   浮层默认从词条右边展开；可它在窄面板里往往靠右 ⇒ 会被视口裁掉。
-#   ⇒ 展开时量一下右边缘，超出视口就改成右对齐（加 `.flipx`）。
-#   ★ 为什么不用 JS 测量文字宽度：CSS `max-width` 已经够，
-#     JS 只决定"往哪边开"，这是测量**位置**而非内容，判定稳定。
-#   ★ 零依赖、渐进增强：JS 不执行时只是浮层可能靠右，仍然可读。
+#: ★★ 0.50.3：术语浮层按**视口坐标**完整落位，不是「溢出右边就翻到左边」。
+#:   旧法只看 `r.right` 并给 `.flipx` 加 `right:0`：锚点在视口中部、浮层宽于
+#:   锚点左侧余量时，右对齐会把整个浮层推到视口左边之外（2026-10-14 截图）。
+#:   新法：按视口最大宽高约束内容，再用实际 DOM 几何量 clamp x/y；下方放不下
+#:   先尝试上方，否则夹在视口内并由浮层自身滚动。滚动/缩放时重算。
+#:   唯一定位口径是浏览器实际 `getBoundingClientRect()`，判据不另写一套布局公式。
 _FLIP_JS = """
 <script>
 (function(){
+  var PAD = 8;
+  function clamp(v, lo, hi){ return Math.max(lo, Math.min(v, Math.max(lo, hi))); }
   function fit(d){
     if (!d.classList) return;
     var box = d.querySelector('.tdef');
-    if (!box) return;
-    d.classList.remove('flipx');
+    var anchor = d.querySelector('summary');
+    if (!box || !anchor) return;
+    var root = document.documentElement;
+    var vw = root.clientWidth, vh = root.clientHeight;
+    if (!vw || !vh) return;
+    // fixed 定位以视口为坐标原点；先放到安全点再量真实宽高。
+    box.style.left = PAD + 'px';
+    box.style.top = PAD + 'px';
     var r = box.getBoundingClientRect();
-    if (r.right > document.documentElement.clientWidth - 8) {
-      d.classList.add('flipx');
-    }
+    var a = anchor.getBoundingClientRect();
+    var left = clamp(a.left, PAD, vw - r.width - PAD);
+    var below = a.bottom + 6;
+    var above = a.top - r.height - 6;
+    var top;
+    if (below + r.height <= vh - PAD) top = below;
+    else if (above >= PAD) top = above;
+    else top = clamp(below, PAD, vh - r.height - PAD);
+    box.style.left = left + 'px';
+    box.style.top = top + 'px';
+  }
+  function fitOpen(){
+    document.querySelectorAll('details.term[open]').forEach(fit);
   }
   document.addEventListener('toggle', function(e){
     var d = e.target;
     if (d.classList && d.classList.contains('term') && d.open) fit(d);
   }, true);
-  window.addEventListener('resize', function(){
-    document.querySelectorAll('details.term[open]').forEach(fit);
-  });
+  window.addEventListener('resize', fitOpen);
+  window.addEventListener('scroll', fitOpen, true);
+  if (document.readyState === 'loading')
+    document.addEventListener('DOMContentLoaded', fitOpen);
+  else
+    fitOpen();
 })();
 </script>
 """
@@ -344,16 +409,26 @@ document.addEventListener('toggle', function(e){
   var d = e.target;
   if (!d.classList || !d.classList.contains('item') || !d.open) return;
   if (d.dataset.readed === '1') return;
-  d.dataset.readed = '1';
+    d.dataset.readPending = '1';
   var t = d.dataset.token, id = d.dataset.id, ids = d.dataset.ids;
-  if (!t || (!id && !ids)) return;
+  if (!t || (!id && !ids)) { delete d.dataset.readPending; return; }
   var body = 't=' + encodeURIComponent(t) + '&op=read';
   body += ids ? ('&ids=' + encodeURIComponent(ids))
               : ('&id=' + encodeURIComponent(id));
   fetch('/action', {method:'POST',
-    headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:body})
-    .then(function(){ var x=d.querySelector('.unread-dot'); if(x) x.remove(); })
-    .catch(function(){});
+    headers:{'Content-Type':'application/x-www-form-urlencoded',
+             'X-Antinel-Read':'1'}, body:body})
+    .then(function(r){
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
+    .then(function(j){
+      if (!j || !j.ok) throw new Error('read rejected');
+      d.dataset.readed = '1';
+      delete d.dataset.readPending;
+      var x=d.querySelector('.unread-dot'); if(x) x.remove();
+    })
+    .catch(function(){ delete d.dataset.readPending; });
 }, true);
 </script>
 """
@@ -389,6 +464,20 @@ def _cookie_token(cookie_header):
 
 def _esc(s):
     return html.escape("" if s is None else str(s), quote=True)
+
+
+def _ts_hm(s):
+    """时间戳的**唯一短式**：`MM-DD HH:MM`（★ 0.50.4 / Q-07，唯一实现）。
+
+    ★★ 为什么单立一个函数（2026-10-15 品质扫描实测）：归并行同一个分组里
+       并列出现过两种写法 —— `2026-10-15T00:18`（`str(ts)[:16]`）与
+       `10-15T00:18`（`str(ts)[5:16]`）。前者带年份后者不带，跨年时前者的
+       「今年还是去年」无从判断；且 ISO 的 `T` 分隔符对非技术读者是噪声。
+       ⇒ 全站一律 `MM-DD HH:MM`（年份在页级日期里已给，不重复）。
+    ★ 短于 16 字符的原样返回（不截断出半个时间，也不编造）。
+    """
+    t = "" if s is None else str(s)
+    return t[5:16].replace("T", " ") if len(t) >= 16 else t
 
 
 def _vis(s):
@@ -584,7 +673,10 @@ def _bar(items, token, posture=None, now=None, view="inbox", ex=None):
         return ("<a title=\"最近 %d 小时的记录数（自载入起算）\" "
                 "href=\"/?v=inbox&f=win:%d:lv:%s\">%s <b>%d</b>%s</a>"
                 % (M.WINDOW_HOURS, M.WINDOW_HOURS, level, label, n,
-                   "" if not show_groups else "（%d 件事）" % g))
+                   # ★ 0.50.4（Q-08）：「（3 件事）」补上动词 —— 光一个括号，
+                   #   读者看不出「11 条」与「3 件事」是什么关系（条→件的换算
+                   #   只有词条里写了）。⇒「（已归并为 3 件事）」自解释。
+                   "" if not show_groups else "（已归并为 %d 件事）" % g))
 
     # ★ 0.37.2：顺序改为**由重到轻**（失守 → 拦截 → 注意）。
     #   旧版是「拦截 · 注意 · 失守」—— 最重的排在最后，读起来像"越读越轻"，
@@ -598,11 +690,12 @@ def _bar(items, token, posture=None, now=None, view="inbox", ex=None):
                _pill("注意", "L1") + GL.chip("L1", mk=True)))
     return (
         "<header class=\"bar\">"
-        # ★★ 0.48.5（交接件 §5.4 戊1）：头部图标改用 `logo.svg`（矢量，48px
-        #   任意尺寸不发虚）—— 旧版 state 专属 mp4 在 768×768 → 46×46 的
-        #   缩放下发虚（607 KB 换一个模糊角标）；mp4 留给托盘（16×16 合理）。
-        #   状态不再靠图标区分：状态由灯（`.dot` ＋ 状态词随态色）独占。
-        "<div class=\"logo\"><img alt=\"Antinel\" src=\"/assets/logo.svg\"></div>"
+        # ★★ 0.49.0：图标恢复动效（五态动法，规格《品牌动效报警语法 v1.2》，
+        #   实现基线 motion-demo-v2 的产品化移植；矢量 SVG  ⇒ 48px 不发虚，
+        #   也解决了 0.48.5 戊1 换静态图的理由）。JS 不在时 `<noscript>` 里
+        #   退回静态矢量（认得出是 Antinel，只是不动 —— **不假装能动**）。
+        "<div class=\"logo\">" + _logo_mark(st)
+        + "<noscript><img alt=\"Antinel\" src=\"/assets/logo.svg\"></noscript></div>"
         # ★ 0.48.5（交接件 §5.6 乙1）：顶部灯的「？」芯片跟在 `<b>` 后
         #   （灯不是链接，芯片可以直接挨着；全站共 8 个落点，U-04 逐个数）。
         # ★ 0.48.5（交接件 §5.4 戊4）：状态词 16px 粗体、**色随态**
@@ -610,9 +703,551 @@ def _bar(items, token, posture=None, now=None, view="inbox", ex=None):
         #   13px 常规色（信息量大的那句占主导，见 U-15）。
         "<div class=\"state\"><span class=\"dot\" style=\"background:var(%s)\"></span>"
         "<b style=\"color:var(%s)\">%s</b>%s%s<br><span>%s</span></div>"
-        "%s%s<div class=\"spacer\"></div></header>"
+        "%s%s"
+        # ★★ 0.50.0：右上角收缩钮（漂浮最小态）——**符号用动效哨标本体**
+        #   （`_logo_mark` 同一份渲染），标题写人话。它后面跟一个
+        #   `.collstat` 状态行：请求失败/起不来时**就地如实说**，
+        #   绝不静默（用户点了没反应＝本项目最恨的形状）。
+        #   ⚠️ 收缩钮的 SVG 走 `%s` 占位（**不能**用 `+` 拼进来）：
+        #   `%` 的优先级高于 `+`，`+` 会把字面量组切断 ⇒ `%` 只作用到末尾
+        #   没有占位符的片段 ⇒ "not all arguments converted"（本仓踩过）。
+        "<button class=\"collbtn\" type=\"button\" data-coll=\"1\" "
+        "title=\"收缩成漂浮哨标 · 点它再展开\" aria-label=\"收缩成漂浮哨标\">%s</button>"
+        "<span class=\"collst\" id=\"collst\"></span>"
+        "<div class=\"spacer\"></div></header>"
         % (M.STATE_VAR[st], M.STATE_VAR[st],
-           label, GL.chip("light", mk=True), suffix, state_reason, nums, fix))
+           label, GL.chip("light", mk=True), suffix, state_reason, nums, fix,
+           _logo_mark(st)))
+
+
+#: ★★ 0.49.0（2026-10-14，创始人「现在的图标好了，但是'死了'，让它继续动」）：
+#:   头部图标恢复**动效**。五态动法的唯一规格在 PSL 仓
+#:   《Antinel 品牌动效报警语法 v1.2（2026-09-27）》——「代码即规格」的
+#:   实现基线是 `antinel-motion-demo-v2.html`（SVG＋rAF 状态机），本块是它的
+#:   **产品化移植**（去掉演示按钮/巡演/键盘交互），参数逐项照抄规格表：
+#:     色相梯度 绿→浅黄→明黄→橙（越黄越重）｜扫描周期 12→8→5.5→3.5s（越快越重）
+#:     ｜涟漪波幅 0→45→70→105px（波越大越重）｜R0 停摆波止（讣告＝梯度断裂）
+#:   ★ 为什么不再用 mp4（0.48.5 戊1 的理由直接消解）：那次换静态 logo.svg 的
+#:     依据是「768² 视频缩到 46² 发虚、607KB 换一个模糊角标」——**内联 SVG
+#:     是矢量，48px 下任意清晰，体积按字节算**。两条老纪律都保住了：
+#:       ① 不发虚；② 渐进增强：JS 不执行时退回 `<noscript>` 静态 logo.svg。
+#:   ★ 规格参数**只在这里写一遍**：JS 里的 STYLE 由本字典渲染 ⇒ 判据 U-17
+#:     拿它对着规格表逐项锁（漂移即红），不会出现"页面一套、规格一套"。
+#:   ★ `dev`（研发态）不在五态语法里：哨兵在岗、只是代码比登记的新 ⇒ 按
+#:     最静的 L0 动（**不编一个新的动法**，也不演成失守）。
+LOGO_MOTION = {
+    "L0": {"c": (126, 155, 132), "lap": 12.0, "ringO": 1.0,
+           "amberO": 0.35, "ringRed": 0.0, "waveR": 0, "waveO": 0.0},
+    "L1": {"c": (205, 194, 154), "lap": 8.0, "ringO": 1.0,
+           "amberO": 1.0, "ringRed": 0.0, "waveR": 45, "waveO": 0.30},
+    "L2": {"c": (224, 180, 85), "lap": 5.5, "ringO": 1.0,
+           "amberO": 1.0, "ringRed": 0.0, "waveR": 70, "waveO": 0.45},
+    #: 规格表里的 `L$`（预算态）在灯态里叫 `Ls` —— 动法里沿用规格的 `LD` 键。
+    "LD": {"c": (232, 163, 61), "lap": 3.5, "ringO": 1.0,
+           "amberO": 1.0, "ringRed": 0.0, "waveR": 105, "waveO": 0.65},
+    "R0": {"c": (178, 84, 84), "lap": 0.0, "ringO": 0.45,
+           "amberO": 0.85, "ringRed": 1.0, "waveR": 0, "waveO": 0.0},
+}
+
+#: 环的领地色（常态绿 → R0 暗红），规格 §二 色值总表
+LOGO_RING_GREEN = (91, 130, 101)
+LOGO_RING_DARKRED = (74, 38, 38)
+
+#: 灯态 → 动法键（`dev` → `L0`，见上注）
+LOGO_MODE = {"L0": "L0", "L1": "L1", "L2": "L2", "Ls": "LD", "R0": "R0",
+             "dev": "L0"}
+
+#: 画布几何 —— **唯一真源**：`_logo_mark` 的 viewBox 与 `_LOGO_JS` 里的
+#: `CX/CY/R/W_BEAM` 是同一份规格。判据 U-18 拿 `_LOGO_JS` 源码逐项比对，
+#: 任一处漂移即红（否则"页面一套、规格一套"）。
+LOGO_CANVAS = 1024
+LOGO_CX = 512
+LOGO_CY = 512
+LOGO_R = 215          #: 探针环半径（画布单位）
+LOGO_RING_W = 46      #: 探针环宽（画布单位）
+LOGO_AMBER_R = 24     #: 灯头（哨点）半径（画布单位；`_LOGO_JS` 的 AMBER_R）
+LOGO_WAVE_GAP = 8     #: 涟漪起始半径 = 灯头半径 ＋ 这个缝（`_LOGO_JS` 的 `+8`）
+LOGO_BEAM_LEN = 200   #: 波束长度（`_LOGO_JS` 的 L_BEAM）
+LOGO_BEAM_W = 11      #: 波束宽度（`_LOGO_JS` 的 W_BEAM）
+
+#: ★★ 0.50.2（2026-10-14，创始人截图：「LOGO 是活了，但是旧病复发，变得
+#:   太小了，需要变回最新的尺寸」）：环外缘应占**画布半宽**的比例。
+#:   取值 = 定稿 `assets/logo/logo.svg` 的比例（环 R 23.5 ＋ 半环宽 3.5
+#:   = 27，画布半宽 32 ⇒ 27/32 = 0.84375）—— 这样「JS 开着看到的内联
+#:   SVG」与「JS 关掉退回的 `<noscript>` logo.svg」**一样大**：渐进增强
+#:   不跳变（判据 U-18 同时锁这条等式）。
+#:   ★ 病根（可核）：demo `antinel-motion-demo-v2.html` 把 1024 画布直出，
+#:     那里 SVG 显示 340–620px，内边距不显；同一份 viewBox 搬进 48px 方框
+#:     后，环只占 0.465 —— 比定稿小 45%，看着就是"缩水了"。
+#:   ★ 修法：**只收紧 viewBox**（下面 `_logo_viewbox` 反算），动法几何
+#:     （CX/CY/R/环宽/波幅/速度）一个数不动 ⇒ 动效不退化。
+LOGO_BOX_RATIO = 27.0 / 32.0
+
+#: ★★★ 0.50.3（2026-10-14，创始人截图：「冒泡的 LOGO 不完整」）：
+#:   0.50.2 把 viewBox 收紧到**环**以后，涟漪被方框裁掉了 —— 涟漪的圆心在
+#:   半径 `LOGO_R` 的灯头上，半径最大 `LOGO_AMBER_R + LOGO_WAVE_GAP + waveR`
+#:   ＝ 24＋8＋105 ＝ 137 ⇒ 离画布中心 215＋137 ＝ **352**，而方框半宽只有
+#:   **282.074** ⇒ 波的最外缘被切掉（实测：Ls 态渲染图上涟漪在下沿/左沿
+#:   被切出一道直边）。
+#:   ★ 根因不是"viewBox 收得太紧"，是**两条规格互不相容**：
+#:     · 定稿 `logo.svg` 规定环外缘占方框半宽的 **0.844**（0.50.2 已按此定死）；
+#:     · 动效规格 v1.2 的波幅 45/70/105 是在**环只占 0.465** 的 demo 画布上
+#:       标定的 —— 那时环小、波放得下。
+#:     把环放大到 0.844 之后，留给波的空间只剩 `half − R − (AMBER_R+8)`
+#:     ≈ **35** 个画布单位。
+#:   ★ 取舍（明写，不藏）：**方框＝定稿 logo 的方形轮廓**，它装得下的才算
+#:     logo 的一部分 ⇒ 波幅**按可用空间归一**（`_logo_wave_scale()`），
+#:     环仍是定稿尺寸（创始人第 4 条明确要的"最新尺寸"），波**永不被裁**。
+#:     波幅三档的**相对梯度**（0/45/70/105 的比值）原样保留 ⇒ 「波越大越重」
+#:     这条语义没变，变的只是它在 48px 方框里的绝对尺度。
+LOGO_WAVE_MARGIN = 2.0   #: 波最外缘距方框内缘的余量（画布单位）
+
+
+def _logo_half():
+    """方框半宽（画布单位）—— 环外缘占半宽的比例恰为 `LOGO_BOX_RATIO`。"""
+    return (LOGO_R + LOGO_RING_W / 2.0) / LOGO_BOX_RATIO
+
+
+def _logo_viewbox():
+    """按定稿比例反算 viewBox（正方形、以 CX/CY 为中心）。
+
+    环外缘半径 = `LOGO_R` ＋ `LOGO_RING_W`/2；让它占画布半宽的比例恰为
+    `LOGO_BOX_RATIO`。⇒ 环外缘**正好贴到方框的定稿内边距**上。
+    """
+    half = _logo_half()
+    return "%g %g %g %g" % tuple(
+        round(v, 3) for v in (LOGO_CX - half, LOGO_CY - half, 2 * half, 2 * half))
+
+
+def _logo_wave_scale():
+    """涟漪波幅的**归一系数**（规格值 → 方框内可用的画布单位）。
+
+    ★ 为什么必须有（0.50.3）：见 `LOGO_WAVE_MARGIN` 上面那段 —— 环按定稿放到
+      0.844 之后，波幅 45/70/105 会伸出方框，最外缘被裁成直边（"LOGO 不完整"）。
+      这里把"方框内还剩多少给波"算出来，除以规格里的最大波幅 ⇒ 系数。
+    ★ 单一真源：分子分母全部来自上面的几何常量与 `LOGO_MOTION`（规格表），
+      不另写一份数字。判据 U-18c 拿它反算，负控（把规格值直接塞进渲染表）
+      必须红。
+    """
+    room = (_logo_half() - LOGO_R - (LOGO_AMBER_R + LOGO_WAVE_GAP)
+            - LOGO_WAVE_MARGIN)
+    spec_max = max(float(v["waveR"]) for v in LOGO_MOTION.values())
+    return room / spec_max
+
+
+def _logo_motion_render():
+    """**渲染用**动法表 = 规格表 × 波幅归一系数（派生，不手写第二份）。
+
+    ★ `LOGO_MOTION` 是**规格表**（U-17a 逐项锁它，是"代码即规格"的那一份），
+      本表是它在**这个方框几何**下的渲染投影。两者的差**只有** `waveR` 一栏，
+      且差值由 `_logo_wave_scale()` 算出 —— 判据 U-18c 同时锁这两件事。
+    """
+    k = _logo_wave_scale()
+    out = {}
+    for name, v in LOGO_MOTION.items():
+        w = dict(v)
+        w["waveR"] = round(float(v["waveR"]) * k, 3)
+        out[name] = w
+    return out
+
+
+LOGO_MOTION_RENDER = _logo_motion_render()
+
+
+def _logo_mark(state, label="Antinel"):
+    """动效图标：内联 SVG（骨架）＋ `_LOGO_JS` 状态机点亮。
+
+    ★ 为什么用 `data-p` 而不是 `id`：同一页/同一时刻可能有多个哨标
+      （面板头部、冒泡窗……），`id` 全局唯一会互相踩；`data-p` 在各自的
+      `<svg>` 作用域内查询，天然不串。
+    ★ viewBox 由 `_logo_viewbox()` 反算（0.50.2），**不写死 1024 画布**
+      —— 写死就会在 48px 方框里缩成一半（创始人截图的那条）。
+    """
+    mode = LOGO_MODE.get(state, "L0")
+    return (
+        '<svg class="lgmark" viewBox="%s" data-logo="1" data-mode="%s"'
+        ' role="img" aria-label="%s">'
+        '<g data-p="trail" stroke="#7E9B84" stroke-width="11" stroke-linecap="butt"></g>'
+        '<g data-p="ring" fill="none" stroke="#5B8265" stroke-width="46">'
+        '<path data-p="seg0"></path><path data-p="seg1"></path>'
+        '<path data-p="seg2"></path><path data-p="seg3"></path></g>'
+        '<circle data-p="wave0" fill="none" stroke="#7E9B84" opacity="0"></circle>'
+        '<circle data-p="wave1" fill="none" stroke="#7E9B84" opacity="0"></circle>'
+        '<line data-p="beam" x1="512" y1="512" x2="512" y2="312" stroke="#7E9B84"'
+        ' stroke-width="11" stroke-linecap="butt"></line>'
+        '<circle data-p="amber" r="24" fill="#7E9B84"></circle>'
+        "</svg>" % (_logo_viewbox(), mode, _esc(label)))
+
+
+#: 状态机（`antinel-motion-demo-v2.html` 的产品化移植）。
+#: ★ `__STYLE__`/`__RING_*__` 由服务端从 `LOGO_MOTION_RENDER`（规格表 × 波幅
+#:   归一系数）渲染 —— 规格参数单一真源（U-17 锁规格表、U-18c 锁归一关系）。
+#: ★ 无外部资源、无依赖；`dt` 钳制 0.05s（规格 §四：无头/卡顿时不静默跳变）。
+_LOGO_JS_TMPL = """
+<script>
+(function(){
+"use strict";
+var STYLE=__STYLE__;
+var RING_GREEN=__RING_GREEN__, RING_DARKRED=__RING_DARKRED__;
+var DEG=Math.PI/180, CX=512, CY=512, R=215, W_BEAM=11, L_BEAM=200, AMBER_R=24, A_P=315, GAP=10;
+var TRAIL_N=5, TRAIL_STEP=3, TRAIL_OPA=[.38,.27,.18,.11,.06], TRAIL_FRAC=.42, WAVE_PERIOD=1.4;
+function px(a,r){return [CX+r*Math.sin(a*DEG), CY-r*Math.cos(a*DEG)];}
+function mod(a){return ((a%360)+360)%360;}
+var SEGS=[[GAP/2,90-GAP/2],[90+GAP/2,180-GAP/2],[180+GAP/2,270-GAP/2],[270+GAP/2,360-GAP/2]];
+function arcPath(a0,a1,r){var x0=px(a0,r), x1=px(a1,r);
+  return "M"+x0[0].toFixed(1)+" "+x0[1].toFixed(1)+" A"+r+" "+r+" 0 0 1 "+x1[0].toFixed(1)+" "+x1[1].toFixed(1);}
+function clamp(x,a,b){return Math.max(a,Math.min(b,x));}
+function lerp(a,b,t){return a+(b-a)*t;}
+function mix(a,b,t){return [lerp(a[0],b[0],t),lerp(a[1],b[1],t),lerp(a[2],b[2],t)];}
+function css(c){return "rgb("+Math.round(c[0])+","+Math.round(c[1])+","+Math.round(c[2])+")";}
+function easeOut(t){return 1-Math.pow(1-t,3);}
+function easeInOut(t){return t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;}
+function q(el,n){return el.querySelector('[data-p="'+n+'"]');}
+function boot(svg){
+  var mode=svg.getAttribute("data-mode")||"L0";
+  if(!STYLE[mode]){mode="L0";}
+  var V={theta:A_P-110, beamC:STYLE.L0.c.slice(), ringO:1, amberO:.35, ringRed:0, breath:1};
+  var snap=null, mt=0, last=0, trail=[];
+  for(var i=0;i<TRAIL_N;i++){
+    var l=document.createElementNS("http://www.w3.org/2000/svg","line");
+    l.setAttribute("stroke-width",W_BEAM);
+    q(svg,"trail").appendChild(l);
+    trail.push(l);
+  }
+  for(var s=0;s<4;s++){ q(svg,"seg"+s).setAttribute("d", arcPath(SEGS[s][0],SEGS[s][1],R)); }
+  function update(dt){
+    mt+=dt;
+    var st=STYLE[mode], k=easeOut(clamp(mt/.4,0,1));
+    V.beamC=mix(snap.beamC, st.c, k);
+    V.ringO=lerp(snap.ringO, st.ringO, k);
+    V.amberO=lerp(snap.amberO, st.amberO, k);
+    V.ringRed=lerp(snap.ringRed, st.ringRed, k);
+    V.breath=.94+.06*Math.sin(mt*2*Math.PI/4);
+    if(mode==="L0"){
+      if(mt>0.15){ var w=clamp((mt-0.15)/.35,0,1);
+        V.theta=mod(snap.theta+(mt-0.15)*360/st.lap*lerp(.5,1,easeOut(w))); }
+      else { V.theta=snap.theta; }
+    } else if(st.lap>0){
+      V.theta=mod(snap.theta+mt*360/st.lap);
+    } else {
+      V.theta=mod(snap.theta+20*easeInOut(clamp(mt/.8,0,1)));
+    }
+  }
+  function render(){
+    var showTrail=(mode==="L0");
+    for(var i=0;i<TRAIL_N;i++){
+      var a=mod(V.theta-(i+1)*TRAIL_STEP);
+      var r0=L_BEAM*(1-TRAIL_FRAC), r1=L_BEAM-6;
+      var p0=px(a,r0), p1=px(a,r1), l=trail[i];
+      l.setAttribute("x1",p0[0]); l.setAttribute("y1",p0[1]);
+      l.setAttribute("x2",p1[0]); l.setAttribute("y2",p1[1]);
+      l.setAttribute("opacity", showTrail? String(TRAIL_OPA[i]) : "0");
+    }
+    var tg=q(svg,"trail");
+    tg.setAttribute("stroke", css(V.beamC));
+    tg.setAttribute("stroke-width", String(W_BEAM));
+    var bp=px(V.theta,L_BEAM), beam=q(svg,"beam");
+    beam.setAttribute("x2",bp[0]); beam.setAttribute("y2",bp[1]);
+    beam.setAttribute("stroke", css(V.beamC));
+    var ringC=mix(RING_GREEN, RING_DARKRED, V.ringRed);
+    for(var g=0;g<4;g++){
+      var el=q(svg,"seg"+g);
+      el.setAttribute("stroke", css(ringC));
+      el.setAttribute("opacity", String(clamp(V.ringO*V.breath,0,1)));
+    }
+    var ap=px(V.theta,R), amber=q(svg,"amber");
+    amber.setAttribute("cx",ap[0]); amber.setAttribute("cy",ap[1]);
+    amber.setAttribute("fill", css(V.beamC));
+    amber.setAttribute("opacity", String(V.amberO));
+    var on=(mode==="L1"||mode==="L2"||mode==="LD");
+    for(var wv=0;wv<2;wv++){
+      var wl=q(svg,"wave"+wv);
+      if(!on){ wl.setAttribute("opacity","0"); continue; }
+      var st=STYLE[mode];
+      var ph=((mt+wv*WAVE_PERIOD/2)%WAVE_PERIOD)/WAVE_PERIOD;
+      wl.setAttribute("cx",ap[0]); wl.setAttribute("cy",ap[1]);
+      wl.setAttribute("r", String(AMBER_R+8+ph*st.waveR));
+      wl.setAttribute("stroke", css(V.beamC));
+      wl.setAttribute("stroke-width", String(7-5*ph));
+      wl.setAttribute("opacity", String(st.waveO*(1-ph)*(1-ph)));
+    }
+  }
+  function setMode(m){ mode=m; mt=0; snap=JSON.parse(JSON.stringify(V)); }
+  function loop(now){
+    var dt=last?Math.min(.05,(now-last)/1000):0; last=now;
+    update(dt); render();
+    requestAnimationFrame(loop);
+  }
+  setMode(mode);
+  // ★ 0.50.4（Q-20）：响应系统的「减少动态效果」偏好。
+  //   顶部哨标是常驻动效（扫描周期 3.5-12s ＋ 涟漪 45-105px），晕动敏感用户
+  //   在常驻窗口里没有退路 —— 全仓原先零处 `prefers-reduced-motion`。
+  //   ⇒ 命中时**只画一帧静态**就停：色相与形状照旧（状态照样认得出），
+  //     只是不动。★ 不假装"已经减少了动效"，是真的停掉 rAF 循环。
+  // ★ `typeof window` 必须先判：判据 `ci/inbox_guards_0514.py` U-17c/U-18d
+  //   把这段 JS **抽出来在 Node 里真跑**（验动效规格），那里没有 `window`
+  //   —— 直接取 `window.matchMedia` 会 ReferenceError 判红（本轮实测踩到）。
+  var _reduce = (typeof window !== "undefined") && window.matchMedia
+      && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (_reduce) { update(0); render(); }
+  else { requestAnimationFrame(loop); }
+}
+var list=document.querySelectorAll("svg[data-logo]");
+for(var i=0;i<list.length;i++){ boot(list[i]); }
+})();
+</script>
+"""
+
+_LOGO_JS = (_LOGO_JS_TMPL
+            .replace("__STYLE__", json.dumps(LOGO_MOTION_RENDER, ensure_ascii=False))
+            .replace("__RING_GREEN__", json.dumps(list(LOGO_RING_GREEN)))
+            .replace("__RING_DARKRED__", json.dumps(list(LOGO_RING_DARKRED))))
+
+
+#: ★★ 0.49.0（2026-10-14，创始人截图 3/4/5）：术语浮层**突破窗口边界**。
+#:   实测：浮层（`.tdef`）被值守台窗口的**右缘/下缘**裁掉 ——「注意 1」的
+#:   问号点开，右侧看不见；日报页底部词条，下沿被截。
+#:   ★ 为什么页内修不了：HTML **画不出自己窗口的外面**。0.36.1 的 `.flipx`
+#:     只是"改成从左边展开"，宽浮层照样出界；`max-width:calc(100vw-40px)`
+#:     也只是让浮层不超过视口 —— 视口本身就是那条边界。
+#:   ⇒ 唯一能"扩大可见区域"的是**窗口本身**：JS 量出溢出量 → 报给服务端 →
+#:     服务端把窗口**平移**（不改变布局，露出的正是缺的像素）；贴到工作区
+#:     边平移不动了才**撑开**右/下沿（会 reflow，如实记 grew）。
+#:   ★ 关窗即还原：最后一个术语浮层收起时，窗口搬回原矩形；**若期间用户
+#:     手动搬过窗口，就不搬回**（用户的手动摆放优先，不与用户抢方向盘）。
+#:   ★ 全程如实报告：`left`（仍没露出的余量）> 0 时**不说"已露出"**，
+#:     DOM 上留 `data-escape="partial"` 供判据与用户感知。
+_ESCAPE_JS_TMPL = """
+<script>
+(function(){
+"use strict";
+function terms(){ return document.querySelectorAll("details.term[open]"); }
+function esc(){
+  var open = terms(), need = null;
+  for (var i=0;i<open.length;i++){
+    var b = open[i].querySelector(".tdef"); if (!b) continue;
+    var r = b.getBoundingClientRect();
+    var dr = r.right - document.documentElement.clientWidth;
+    var db = r.bottom - document.documentElement.clientHeight;
+    if (dr > 0 || db > 0){
+      need = {dr: Math.ceil(Math.max(0, dr)), db: Math.ceil(Math.max(0, db))};
+    }
+  }
+  return need;
+}
+function post(op, extra, cb){
+  var body = "op=" + op + "&t=" + encodeURIComponent("__TOKEN__");
+  for (var k in extra){ body += "&" + k + "=" + encodeURIComponent(extra[k]); }
+  fetch("/action", {method:"POST",
+    headers:{"Content-Type":"application/x-www-form-urlencoded"}, body:body})
+    .then(function(r){ return r.json(); })
+    .then(cb)
+    .catch(function(){ /* 请求失败：浮层照常显示（可能被裁），不假装成功 */ });
+}
+document.addEventListener("toggle", function(e){
+  var d = e.target;
+  if (!d.classList || !d.classList.contains("term")) return;
+  if (d.open){
+    var need = esc();
+    if (!need) return;
+    post("winfit", need, function(j){
+      // 撑开过 ⇒ 视口宽高变了 ⇒ 翻转判定（flipx）要重算
+      window.dispatchEvent(new Event("resize"));
+      if (d.setAttribute){
+        d.setAttribute("data-escape",
+          (j && j.ok && !(j.left && (j.left[0] || j.left[1]))) ? "full" : "partial");
+      }
+    });
+  } else if (!terms().length){
+    post("winrestore", {}, function(){});
+  }
+}, true);
+})();
+</script>
+"""
+
+
+def _escape_js(token):
+    """浮层出界逃逸脚本（`__TOKEN__` 由本页口令填充 —— W-06 的纪律：站内自带）。"""
+    return _ESCAPE_JS_TMPL.replace("__TOKEN__", _esc(token))
+
+
+#: ★★ 0.50.0（漂浮最小态）：收缩钮的脚本。为什么不用 `<form>` 直接 POST 303：
+#:   收缩会**关掉这个窗口**（服务端 `close_console_windows`）⇒ 表单跳转的
+#:   响应大概率没人渲染；而我们仍要把"成了/没成、为什么"**就地写给用户看**
+#:   （`#collst`）—— 哪怕窗口随后被关，日志里也有 `[console] collapse`。
+#:   请求失败（服务没响应）⇒ 如实说"没动"，**不假装收缩成功**。
+_COLLAPSE_JS_TMPL = """
+<script>
+(function(){
+"use strict";
+var btn = document.querySelector("[data-coll]");
+if (!btn) return;
+function say(t){ var s = document.getElementById("collst");
+  if (s) { s.textContent = t; } }
+btn.addEventListener("click", function(){
+  say("正在收缩……");
+  var body = "op=collapse&t=" + encodeURIComponent("__TOKEN__");
+  fetch("/action", {method:"POST",
+    headers:{"Content-Type":"application/x-www-form-urlencoded"}, body:body})
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      if (j && j.ok){ say("已收缩成漂浮哨标 —— 点它再展开"); }
+      else { say("收缩失败：" + ((j && j.why) || "服务端没说原因")); }
+    })
+    .catch(function(){ say("请求没发到服务（服务没响应）：值守台没动，哨标也没起"); });
+});
+})();
+</script>
+"""
+
+
+def _collapse_js(token):
+    return _COLLAPSE_JS_TMPL.replace("__TOKEN__", _esc(token))
+
+
+#: 浮层逃逸的当前状态（原矩形/调整后矩形/窗口标识）。**只有一次调整是活的**：
+#: 连续开两个浮层时，第二次先还原再调（不会叠床架屋）。
+_WINFIT_STATE = {"orig": None, "adj": None, "run_id": None}
+_WINFIT_LOCK = threading.Lock()
+
+
+def _winfit_apply(dr, db, token):
+    """把本次值守台窗口平移/撑开，使右/下沿各多露出 `dr`/`db` 像素。
+
+    返回 dict **如实报告**：`ok`（落位并回读一致）、`moved`（平移量）、
+    `grew`（撑开量）、`left`（仍没露出的余量，>0 不许说成"露出了"）、
+    `windows`（动了几个窗口）。窗口中找不到 ⇒ `ok=False` 且说清原因。
+    ★ 平移优先：不改布局（视口宽高不变 ⇒ 浮层相对位置不变，露出的正是缺的）；
+      贴边后才撑开。还露不出来（工作区就到边）⇒ `left` 如实留下余量。
+    ★ 还原条件：当前矩形仍等于我们调整后的矩形（用户没手动搬过）。
+    """
+    import inbox_window as WIN
+    with _WINFIT_LOCK:
+        try:
+            rid = WIN.build_run_id(token)
+        except Exception as e:                              # noqa: BLE001
+            return {"ok": False, "why": "算不出本次窗口标识：%s" % e}
+        hwnds = WIN.find_console_windows(run_id=rid)
+        if not hwnds:
+            return {"ok": False,
+                    "why": "没找到带本次标识（#%s）的值守台窗口 —— 不出声假装成功" % rid}
+        cur = [WIN.window_rect_of(h) for h in hwnds]
+        if any(r is None for r in cur):
+            return {"ok": False, "why": "读不到当前窗口矩形"}
+        work = WIN.pick_work_area(None)
+        base = tuple(cur[0])
+        dr, db = max(0, int(dr)), max(0, int(db))
+        nl, nt, nw, nh = base
+        moved = [0, 0]
+        grew = [0, 0]
+        if dr:
+            room = max(0, base[0] - work.left)
+            step = min(dr, room)
+            nl -= step
+            moved[0], dr = step, dr - step
+        if db:
+            room = max(0, base[1] - work.top)
+            step = min(db, room)
+            nt -= step
+            moved[1], db = step, db - step
+        if dr:
+            step = min(dr, max(0, work.right - (nl + nw)))
+            nw += step
+            grew[0], dr = step, dr - step
+        if db:
+            step = min(db, max(0, work.bottom - (nt + nh)))
+            nh += step
+            grew[1], db = step, db - step
+        new = (nl, nt, nw, nh)
+        ok, why = WIN.place_all(hwnds, new, skip_if_placed=False)
+        got = [tuple(WIN.window_rect_of(h)) for h in hwnds]
+        placed = ok and all(g == new for g in got)
+        if placed:
+            _WINFIT_STATE["orig"] = base
+            _WINFIT_STATE["adj"] = new
+            _WINFIT_STATE["run_id"] = rid
+        return {"ok": bool(placed), "moved": moved, "grew": grew,
+                "left": [dr, db], "windows": len(hwnds),
+                "why": why if not placed else ""}
+
+
+def _winfit_restore(token):
+    """把窗口搬回调整前的矩形。**用户手动搬过就不搬** —— 不与用户抢方向盘。"""
+    import inbox_window as WIN
+    with _WINFIT_LOCK:
+        orig, adj = _WINFIT_STATE.get("orig"), _WINFIT_STATE.get("adj")
+        rid = _WINFIT_STATE.get("run_id")
+        if not orig or not adj:
+            return {"ok": True, "why": "没有待还原的调整"}
+        hwnds = WIN.find_console_windows(run_id=rid or WIN.build_run_id(token))
+        if not hwnds:
+            _WINFIT_STATE.update(orig=None, adj=None, run_id=None)
+            return {"ok": False, "why": "要还原时窗口已经不在了"}
+        cur = WIN.window_rect_of(hwnds[0])
+        if cur is not None and tuple(cur) != tuple(adj):
+            # 用户（或别的东西）把窗口搬走了 ⇒ 尊重那个位置
+            _WINFIT_STATE.update(orig=None, adj=None, run_id=None)
+            return {"ok": False,
+                    "why": "窗口被手动搬动过（当前 %s ≠ 调整后 %s），不强行搬回"
+                           % (tuple(cur), tuple(adj))}
+        ok, why = WIN.place_all(hwnds, orig, skip_if_placed=False)
+        _WINFIT_STATE.update(orig=None, adj=None, run_id=None)
+        return {"ok": bool(ok), "why": "" if ok else why}
+
+
+def _bubble_fit(dh, token):
+    """把冒泡窗**按内容实需**长高（下沿不动，往上长）；返回 dict 如实。
+
+    ★★★ 0.50.1（创始人 2026-10-14 截图「泡泡下沿没露出来」）：
+      为什么需要它 —— 落位（`place_all`）只保证"窗口落在目标矩形上"，
+      它**不知道内容有没有被裁掉**：BUBBLE_H=148 时落位回读是**一致**的，
+      可下沿照样看不见。⇒ "回读一致"不等于"看得见"，缺的正是这条**内容↔窗口**
+      的闭环。
+      做法与 `_winfit_apply` **同一套机制**（页面量、服务端动窗、回读校验、
+      余量如实）：页面量出 `scrollHeight - clientHeight` 报上来，这里只**加高**
+      （绝不缩，避免与用户的拖拽打架），锚点在下沿 ⇒ `top` 上移、`h` 增加。
+
+    ★ 边界（不猜、如实）：
+      · 找不到本次的冒泡窗 ⇒ `ok=False` + 说清（**不假成功**）；
+      · 上方已到工作区上沿 ⇒ 长不了多少就长多少，剩下的记在 `left` 里
+        （**绝不把"没露全"说成"露全了"**）；
+      · 单次最多 `FIT_MAX` 像素 —— 防止页面量错时窗口无限长高。
+    """
+    import inbox_window as WIN
+    FIT_MAX = 240
+    try:
+        dh = int(float(dh))
+    except (ValueError, TypeError, OverflowError):
+        return {"ok": False, "why": "缺高度不是有限数字"}
+    if dh <= 0:
+        return {"ok": True, "grew": 0, "left": 0, "why": "没有要补的高度"}
+    try:
+        rid = WIN.build_run_id(token)
+    except Exception as e:                                  # noqa: BLE001
+        return {"ok": False, "why": "算不出冒泡窗口身份：%s" % e}
+    hs = WIN.find_bubble_windows(run_id=rid)
+    if not hs:
+        return {"ok": False,
+                "why": "没找到带本次标识（#%s）的冒泡窗 —— 不出声假装加高了" % rid}
+    cur = WIN.window_rect_of(hs[0])
+    if cur is None:
+        return {"ok": False, "why": "读不到冒泡窗当前矩形"}
+    l, t, w, h = tuple(cur)
+    work = WIN.pick_work_area(None)
+    room = max(0, t - work.top)                 # 上方还剩多少可以长
+    step = min(int(dh), FIT_MAX, room)
+    left = int(dh) - step
+    if step <= 0:
+        return {"ok": True, "grew": 0, "left": left,
+                "why": "上方已到工作区上沿，加不了高（还缺 %d px）" % left}
+    new = (l, t - step, w, h + step)
+    ok, why = WIN.place_all(hs, new, skip_if_placed=False)
+    got = WIN.window_rect_of(hs[0])
+    placed = bool(ok) and got is not None and tuple(got) == new
+    return {"ok": placed, "grew": step if placed else 0, "left": left,
+            "rect": list(new), "windows": len(hs),
+            "why": "" if placed else (why or "落位回读不一致")}
 
 
 def _form(token, op, iid="", note="", label="", cls="", ids=""):
@@ -659,7 +1294,7 @@ def _item_html(it, token):
             "<div class=\"act\">%s</div></div></details>"
             % (_esc(it.level.lower()), _esc(it.state), _esc(it.id), _esc(token),
                _esc(it.level.lower()), _esc(it.level), dot, _vis(it.title),
-               _esc(str(it.ts)[5:16]), _vis(meta), _rem_html(it, token), acts))
+               _esc(_ts_hm(it.ts)), _vis(meta), _rem_html(it, token), acts))
 
 
 # --------------------------------------------------------------------------
@@ -779,6 +1414,12 @@ def _rem_pick_buttons(it, token, op, cls, act):
         return form("remediation_drop") + _form(
             token, "remediation_ack", it.id, note="我已知代价，先放着",
             label="先不处理，只记一笔", cls="risk")
+    if op == "info":
+        # 归因模块不可用时，文案承诺的下一步必须真有入口。
+        # 「知道了」只记已读；另给一个明确的运行状态页链接，两个动作不混。
+        return (_form(token, "remediation_ack", it.id, note="知道了",
+                      label="知道了")
+                + '<a class="btn" href="/?v=health">打开运行状态页</a>')
     if op == "accept":
         return form("remediation_ack")
     return form("remediation_ack")
@@ -801,8 +1442,9 @@ def _group_html(g, token, bucket=None, total=None):
     lv = str(g["level"]).lower()
     n = int(g.get("count") or 0)
     ids = ",".join(str(x) for x in (g.get("ids") or []))
-    drill = ("<a class=\"btn\" href=\"/?v=inbox&f=kind:%s\">看这 %d 条</a>"
-             % (_esc(g["kind"]), n))
+    drill_q = urlencode({"v": "inbox", "f": "ids:" + ids})
+    drill = ("<a class=\"btn\" href=\"/?%s\">看这 %d 条</a>"
+             % (drill_q, n))
     if bucket == M.BUCKET_ACTION:
         # ★ 同一事由 ⇒ 一件事：给「一次性处置」，用户不必点开 13 次。
         acts = (_form(token, "done_all", label="知道了（全部 %d 条）" % n, ids=ids)
@@ -811,8 +1453,8 @@ def _group_html(g, token, bucket=None, total=None):
         acts = drill
     meta = " ｜ ".join(x for x in (
         (g.get("detail") or "").strip(),
-        "最近 %s" % str(g["last_ts"])[:16],
-        ("最早 %s" % str(g["first_ts"])[:16]) if n > 1 else "",
+        "最近 %s" % _ts_hm(g["last_ts"]),
+        ("最早 %s" % _ts_hm(g["first_ts"])) if n > 1 else "",
     ) if x)
     # ★ 0.36.0：归并行也要有归因面板 —— 「要处理」档走的是这条路，
     #   而用户看到的正是这个档；只有单条有面板的话，归并后的 R0
@@ -837,8 +1479,11 @@ def _group_html(g, token, bucket=None, total=None):
             % (_esc(lv), _esc(ids), _esc(token), _esc(lv), _esc(g["level"]),
                _vis(g["title"]),
                # ★ 0.47.0：×N 是分子 ⇒ 带上分母（该档总条数）。
-               _esc("×%d / %d 条" % (n, int(total or 0))),
-               _esc(str(g["last_ts"])[5:16]),
+               # ★ 0.50.4（Q-05）：`×11 / 13 条` 不再用乘号 —— 中文语境里
+               #   「×11」不是「共 11 条」，与后面的「/ 13 条」连读更像算式。
+               #   ⇒ 直述「11 条（这一档共 13 条）」，分子分母各自带单位。
+               _esc("%d 条（这一档共 %d 条）" % (n, int(total or 0))),
+               _esc(_ts_hm(g["last_ts"])),
                _vis(meta), rem, acts))
 
 
@@ -913,27 +1558,36 @@ def _view_inbox(items, token, filt, now=None):
             #   分母与单位下沉到每 tab 可见单位 ＋「？」词条口径行（U-03/U-08 守）。
             + ("<div class=\"note\" style=\"margin:0 0 8px\">%s</div>"
                % _esc(M.reading_note()))
-            # ★ 0.35.3：页面上出现的**每个重要词都可点开看定义**。
-            #   档位本身是链接（塞不进 details），级别徽章也没有落点 ⇒ 统一给
-            #   **一个**折叠入口，而不是把定义平铺在页面上等人读完。
-            # ★ 0.37.2：`light`（顶部这盏灯）放在**第一位** —— 它是页面上
-            #   最需要先被读懂的那个词，只有在这里露面，用户才点得到。
-            #   ★ 0.39.1：它的定义已按**来源分工**重写（状态只看此刻、事件只看账、
-            #   **失守不回溯**）—— 判据 `ci/inbox_guards_0380.py` S17 钉死术语表，
-            #   不得退回旧的"两个读数取最重"说法。
-            # ★ 0.37.2：词表里**不再并列 `shield`** —— 护盾降为哨兵手里的工具，
-            #   对用户的解释统一收在 `sentinel` 一条里（创始人 2026-10-09：
-            #   「哨兵一个概念足矣」）。两个词条并排＝把工具说成了另一个角色。
-            + GL.line(("light",) + GL.BUCKET_KEYS
-                      + ("R0", "L2", "L1", "Ls", "granary", "L0", "sentinel"),
-                      "页面上的词都是什么意思（点开看）"))
+            # ★★ 0.50.4（Q-25 ＋ Q-11，2026-10-15 品质扫描，创始人点头）：
+            #   原先这里挂了一整块折叠入口「页面上的词都是什么意思（点开看）」，
+            #   **本版删掉**。三条理由，都可复核：
+            #   ① 它列的 14 个词里 `Ls`／`granary`／`L0` 三个**在页面任何位置
+            #      都不出现**（脚本逐 key 查 `GL.chip` 落点：均为 0）—— 给页面上
+            #      没有的东西配定义，等于把说明书摆进界面（与 Q-14 同型）；
+            #   ② 其余 11 个词**各自都有「？」落点**：筛选条 4 ＋ 级别药丸 3 ＋
+            #      顶部灯 1 ＋ 各处 `GL.chip`。同一页两套入口 ⇒ 一屏十几个「？」；
+            #      在安全语境里，用户第一反应是「有十几处有问题」（Q-11 双入口）；
+            #   ③ 创始人原话：「根本没必要写，应直接去掉」。
+            #   ⇒ 删它**不减**任何曾在页面出现过的词的可达性：U-04 数的是
+            #     `class="term mk"` 落点（8 个，未动），这里删的是 `GL.line` 整块。
+            )
     rows = M.filter_items(items, filt, now=now)
     if not rows:
+        if filt == M.BUCKET_ACTION:
+            empty_title = "当前读取到的记录里，没有要你处理的事。"
+        elif filt == M.BUCKET_INFO:
+            empty_title = "当前「看一眼」中没有记录。"
+        elif filt == M.BUCKET_ARCHIVE:
+            empty_title = "当前「归档」中没有记录。"
+        elif filt == "all":
+            empty_title = "本次载入的记录为空。"
+        else:
+            empty_title = "当前筛选「%s」没有匹配记录。" % _esc(M.filter_label(filt))
         return head + (
-            "<div class=\"hint\"><b>当前读取到的记录里，没有要你处理的事。</b>"
+            "<div class=\"hint\"><b>%s</b>"
             "<p class=\"note\">「要处理」只放只有你本人动手才能解决的事。"
             "Antinel 自己已拦下或自愈的事项在「看一眼」。更早的事项只会在其链文件仍被读取时显示在「归档」；"
-            "本页不是永久全历史清单。</p></div>")
+            "本页不是永久全历史清单。</p></div>" % empty_title)
     # ★ 「要处理」按**事由**归并（同因 14 条 = 1 件事）；
     #   "看一眼/归档"按类型归并；只有「全部」和钻取视图才一张一条。
     #   ★ 单条的分组**退回普通条目**：不藏原因、不藏按钮（真回退的修法）。
@@ -1005,8 +1659,12 @@ def _view_report(rep, token, items=None):
         # ★ 0.47.0（方案 §5 步三）：这个数是分子 ⇒ 同行带分母（窗口内总记录数）。
         return ("<div class=\"metric\"><div class=\"k\">%s</div>"
                 "<div class=\"v\" style=\"color:var(%s)\">"
+                # ★ 0.50.4（Q-02）：给分母带上**单位**（条）—— 原先只是一个
+                #   光秃秃的「/ 13」，全页没有任何一处说 13 是什么（它是
+                #   最近 24 小时三档记录之和）。单位可见（U-08 的立意：
+                #   只放 hover title 不算可见）。
                 "<a href=\"/?v=inbox&f=%s\">%d</a>"
-                "<span class=\"den\"> / %d</span></div>"
+                "<span class=\"den\"> / %d 条</span></div>"
                 "</div>"
                 % (GL.chip(k), var, _esc(scoped_filter), n, _win_total))
 
@@ -1044,8 +1702,11 @@ def _view_report(rep, token, items=None):
     # ★ 措辞与运行状态页统一（旧版日报写「10 次（查看记录）」、
     #   运行状态写「10 次（点数字看每一次）」—— 同一件事两种说法）。
     # ★ 0.47.0：拉起次数是分子 ⇒ 分母＝窗口内总记录数。
+    # ★★ 0.50.4（Q-03）：**不再写成「2 次 / 13」**。分子单位是「次」、分母单位是
+    #   「条记录」，两个不同质的量摆成一条斜杠＝做了没有意义的除法（同型：
+    #   「要处理 0 件 / 13 条」）。⇒ 各自带自己的单位、用分号分开，不再相除。
     _revived_link = ("<a href=\"/?v=inbox&f=win:%d:kind:host_shield_revived\">"
-                     "%d 次</a> / %d"
+                     "%d 次</a>；同期记录 %d 条"
                      % (hrs, _revived, _win_total))
     _day = _esc(rep["day"])
     # ★ 0.47.0：当日三档各是分子 ⇒ 分母＝当日全部记录条数（当日 ＝ 24 小时窗口）。
@@ -1075,16 +1736,24 @@ def _view_report(rep, token, items=None):
         #   而它旁边明明就写着数字 ⇒ 图与数打架。数字已经排序，图是多余的。
         # ★ 0.47.0：命中次数是分子 ⇒ 分母＝当日**全部**规则的命中总数，
         #   窗口＝当日（24 小时）。格式走 `M.count_text`（唯一实现）。
-        _day_total = sum(int(r["count"]) for r in rep["rules"])
+        # ★ 0.50.4（Q-10）：总量**上移到卡片标题**（可见单位），行内只留次数 ——
+        #   原先把「1 次 / 1（最近 24 小时）」摆进行里：分母是当日全部规则命中
+        #   总数，与分子同质却看不出来，而「1 / 1」天然被读成占比。窗口口径
+        #   本页页头已声明一次（U-05 不许行内再挂「点开看每一次」那类旧句）。
+        _rule_total = sum(int(r["count"]) for r in rep["rules"])
         rows = "".join(
+            # ★ 0.50.4（Q-04）：显示规则**人话名**（`rules/default.json` 的
+            #   `description_zh`，由 `R.rule_zh_map()` 提供）；取不到 ⇒ 退回
+            #   规则号（不编造、不用英文 `name` 充数）。规则号退到 `title`
+            #   （hover 可见）—— 内部工程串不上主界面，但也不丢可检索性。
             "<div class=\"row\"><span class=\"k\">"
-            "<a href=\"/?v=inbox&f=day:%s:rule:%s\">%s</a></span>"
-            "<span>%s</span></div>"
+            "<a href=\"/?v=inbox&f=day:%s:rule:%s\" title=\"规则号 %s\">%s</a></span>"
+            "<span>命中 %d 次</span></div>"
             % (_esc(rep["day"]), _esc(r["rule_id"]), _esc(r["rule_id"]),
-               _esc(M.count_text(r["count"], _day_total, hours=24, unit="次")))
+               _esc(r.get("zh") or r["rule_id"]), int(r["count"]))
             for r in rep["rules"][:10])
-        rules = ("<div class=\"card\"><h2>规则命中排行"
-                 "</h2><div class=\"rows\">%s</div></div>" % rows)
+        rules = ("<div class=\"card\"><h2>规则命中排行 · 当日共 %d 次"
+                 "</h2><div class=\"rows\">%s</div></div>" % (_rule_total, rows))
 
     ch = rep["chain"]
     cls = {"ok": "ok", "broken": "bad", "unknown": "warn"}.get(ch["status"], "warn")
@@ -1097,7 +1766,11 @@ def _view_report(rep, token, items=None):
     # ★「被改过的地方 / 坏行 0 / 0」⇒ 拆成两行（旧版把一个标签对两个数）。
     chain = ("<div class=\"card\"><h2>%s（本日报能读取到的链文件）</h2><div class=\"rows\">"
              "<div class=\"row\"><span class=\"k\">校验结果</span><span class=\"%s\">%s</span></div>"
-             "<div class=\"row\"><span class=\"k\">检查了几个文件 / 多少条记录</span><span>%d / %d</span></div>"
+             # ★ 0.50.4（Q-06 ＋ Q-09）：这一行原先是「检查了几个文件 / 多少条记录
+             #   ＋ 值 23 / 48078」⇒ 同一行三个斜杠，且分别表示「或」与「与」两种
+             #   关系；两个异质量并排成一条斜杠还被读成比例。⇒ 值写成一句
+             #   「23 个文件、48078 条记录」（与运行状态页的完整句统一）。
+             "<div class=\"row\"><span class=\"k\">检查范围</span><span>%d 个文件、%d 条记录</span></div>"
              "<div class=\"row\"><span class=\"k\">%s 被改过几处</span><span>%d</span></div>"
              "<div class=\"row\"><span class=\"k\">坏了几行</span><span>%d</span></div>"
              "<div class=\"row\"><span class=\"k\">%s</span><span>%d（本来就不参与比对）</span></div>%s%s</div></div>"
@@ -1115,8 +1788,17 @@ def _view_report(rep, token, items=None):
     #   同一页三个名字（创始人问的"违和感"之一）。
     # ★ 0.37.2 精简：原句还带"点数字可以看是哪几条" —— 数字本身已可点（下划线），
     #   再写一遍就是**重复用户的动作**（同 W08 判据的立意）。只留窗口口径。
+    # ★ 0.50.4（Q-02）：页头这句补上「斜杠右边那个数是什么」—— 卡片上那个斜杠
+    #   右边的数是**同一时间窗内的记录条数**（＝失守＋拦截＋注意三档之和）。原先
+    #   全页无一处说明，读者只能把「11 / 13」读成占比。
+    #   ★ 不写「分母」二字：那是术语词，正文裸它会被 U-03 判红（口径行才是
+    #     它的定义处）。
+    #   ★ 也不写「/ N」：那个 N 是**裸英文词**，正文可见文本里出现它会被
+    #     0360 W06 判红（「页面正文露出英文词 'N'」）—— 2026-10-15 实测撞到，
+    #     是 Q-02 自己引入的。
     return ("<h2>%s · %s</h2>"
-            "<p class=\"note\">四个数都只数<b>最近 %d 小时</b>。</p>%s%s%s%s"
+            "<p class=\"note\">四个数都只数<b>最近 %d 小时</b>；"
+            "数字后面「/」右边那个数，是同一时间窗内的记录条数。</p>%s%s%s%s"
             % (PAGE_TITLES["report"], _esc(rep["day"]), hrs, m, pr, rules, chain))
 
 
@@ -1169,7 +1851,10 @@ def _view_health(rep, token, items=None):
          #   ⇒ 一律走 `chain_status_label()` 的中文。
          % (R.chain_status_label(ch["status"]), ch["files"],
             ch["records"], ch["broken"]), cls, False),
-        (GL.chip("hook"), "本页没查这台电脑的实际安装情况", "neutral", False),
+        # ★ 0.50.4（Q-16）：原正文「本页没查这台电脑的实际安装情况」与 `hook`
+        #   词条的 exc「这一页没查你这台电脑的实际安装情况」**是同一句出现两次**
+        #   ⇒ 正文改成讲**结论**（它装在哪个环节），否证交给词条（定义处只讲一次）。
+        (GL.chip("hook"), "工具调用前先过规则；本页不查它装没装", "neutral", False),
         (GL.chip("boundary"), "浏览器里的操作、没接进来的工具，Antinel 管不到",
          "warn", False),
     ]
@@ -1181,17 +1866,49 @@ def _view_health(rep, token, items=None):
     #   日报页有日期、运行状态页没有，同一套页面两个样。
     # ★ 底部提示由 3 行长句压成一句：原来一段带破折号的自我辩护，
     #   读起来像旁白，不像产品说的话。
-    return ("<h2>%s · %s</h2><div class=\"rows\">%s</div>"
+    # ★★ 0.50.4（Q-25 连带）：这一行是 `Ls`／`L0` 两个词条的**落点** ——
+    #   删掉底部总入口后，六态里这两态在页面上再没有落点（判据 P13 要术语表
+    #   100% 有落点），而它们又**不能撤**（0372 S09 拿 `TERMS[k]["w"]` 当六态
+    #   词名的比对真源，撤键 ⇒ KeyError，本轮实测踩到）。⇒ 给一行真实落点，
+    #   两条判据同时守住。
+    #   ★ 次序由 `M.PRIORITY` 派生、词名由 `GL`／`M.state_short` 取 —— **不手写
+    #     第二份次序**（六态次序漂移正是由这条纪律挡住的）。
+    #   ★ 只给缺落点的两态挂「？」：其余三态的落点在顶部药丸，不重复铺问号
+    #     （Q-11：一屏十几个「？」在安全语境里像"十几处有问题"）。
+    _order = sorted(("R0", "Ls", "L2", "L1", "L0"), key=lambda k: -M.PRIORITY[k])
+    _six = ("<p class=\"note\">灯的六态由重到轻："
+            + " · ".join(GL.chip(k) if k in ("Ls", "L0") else M.state_short(k)
+                         for k in _order)
+            + "</p>")
+    return ("<h2>%s · %s</h2><div class=\"rows\">%s</div>%s"
             "<p class=\"note\">全绿不等于安全：也可能是检查压根没跑。</p>"
-            % (PAGE_TITLES["health"], _esc(rep.get("day") or ""), body))
+            % (PAGE_TITLES["health"], _esc(rep.get("day") or ""), body, _six))
 
 
 def _view_ledger(rep, token):
     led = rep["ledger"]
     has_data = bool(led.get("days", 0))
-    values = ([led.get("streak_days", 0), led.get("blocked", 0),
-               led.get("noticed", 0), led.get("breached", 0),
-               led.get("acked", 0), led.get("days", 0)] if has_data else ["—"] * 6)
+    # ★ 0.50.4（Q-01，2026-10-15 品质扫描）：六个大字**只数今天**，累计另起一行。
+    #   为什么必须改：`ledger.summary()` 的 `blocked/noticed/breached/acked`
+    #   是**全部有记录天数的累加**（`for e in days.values()`），而四个「？」词条
+    #   写的是「账本里：**当天**…条数」—— 页面与词条差一个口径，实测同屏
+    #   顶部灯「失守 0」与账本大字「防护缺口 293」相差 293 倍（7 天累计）。
+    #   当天字段 `summary()` 本来就算好了（`tot["today"]`），只是页面没用它。
+    #   ⇒ 大字取 `today`；累计值**不丢**，压成一行小字并写明「累计 N 天」。
+    _td = led.get("today") or {}
+    values = ([led.get("streak_days", 0), int(_td.get("blocked", 0) or 0),
+               int(_td.get("noticed", 0) or 0), int(_td.get("breached", 0) or 0),
+               int(_td.get("acked", 0) or 0), led.get("days", 0)]
+              if has_data else ["—"] * 6)
+    _days = int(led.get("days", 0) or 0)
+    # 累计行：与大字同源（`summary()` 的全期累加），只在大字改口径后仍有信息量
+    # —— 它答的是「这台机器有记录以来被拦过多少次」，大字答的是「今天怎么样」。
+    _sum = ("<p class=\"note\">有记录以来 %d 天累计：拦截 %d ｜ 注意 %d ｜ "
+            "防护缺口 %d ｜ 已处理/已忽略 %d</p>"
+            % (_days, int(led.get("blocked", 0) or 0),
+               int(led.get("noticed", 0) or 0),
+               int(led.get("breached", 0) or 0),
+               int(led.get("acked", 0) or 0)) if has_data else "")
     m = ("<div class=\"metrics\">"
          "<div class=\"metric\"><div class=\"k\">%s</div><div class=\"v\">%s<small> 天</small></div></div>"
          "<div class=\"metric\"><div class=\"k\">%s</div><div class=\"v\">%s</div></div>"
@@ -1219,11 +1936,15 @@ def _view_ledger(rep, token):
     #     ② 底部**禁用态**「认领到账号（未启用）」按钮保留。
     warn = ("<p class=\"note\">账本尚无可核对记录；这表示还没有可统计的事件，"
             "不是确认累计为零。</p>" if not has_data else "")
-    return ("<h2>%s · 本地摘要</h2>%s%s"
+    # ★ 0.50.4：口径说明一行 —— 大字改当天后**必须**写明窗口，否则读者无从
+    #   判断这四个数是今天的还是有史以来的（同族：日报页「只数最近 N 小时」）。
+    _lead = ("<p class=\"note\">下列四个数只数<b>今天</b>（本地自然日）；"
+             "有记录以来的累计见本页末行。</p>" if has_data else "")
+    return ("<h2>%s · 本地摘要</h2>%s%s%s%s"
             "<div class=\"card\"><button class=\"btn\" disabled "
             "title=\"将来上线账号后才可用，现在没有这个能力\">"
             "认领到账号（未启用）</button></div>"
-            % (GL.chip("ledger"), m, warn))
+            % (GL.chip("ledger"), _lead, m, warn, _sum))
 
 
 #: ★ 0.36.5 **页面名的唯一真源**（从 `render_page` 体内提为模块级）。
@@ -1237,7 +1958,7 @@ PAGE_TITLES = {"inbox": "收件箱", "report": "日报", "health": "运行状态
 
 
 def render_page(view="inbox", filt=None, root=None, token="", items=None, rep=None,
-                posture=None, now=None, record_ledger=False):
+                posture=None, now=None, record_ledger=False, notice=""):
     """渲染整页。可注入 items/rep/posture（测试用）。
 
     ★★ 0.35.2 修（真缺陷，创始人 2026-10-06「点开像卡死」）：
@@ -1282,10 +2003,16 @@ def render_page(view="inbox", filt=None, root=None, token="", items=None, rep=No
             body = _view_ledger(rep, token)
     else:
         body = _view_inbox(items, token, filt, now=now)
+    if notice:
+        body = ('<div class="notice" role="status"><b>操作回执：</b>%s</div>'
+                % _esc(str(notice)[:800])) + body
     return (_head(title, token)
             + _bar(items, token, posture=p, now=now, view=view, ex=ex)
             + _tabs(view, token)
-            + "<main>" + body + "</main>" + _FLIP_JS + _READ_JS + "</body></html>")
+            + "<main>" + body + "</main>"
+            + _FLIP_JS + _READ_JS + _LOGO_JS + _escape_js(token)
+            + _collapse_js(token)
+            + "</body></html>")
 
 
 # ------------------------------------------------------------- 服务 ----
@@ -1410,6 +2137,33 @@ def _make_handler(token, root):
             if u.path in ("/", "/index.html"):
                 view = (q.get("v") or ["inbox"])[0]
                 filt = (q.get("f") or [M.BUCKET_ACTION])[0]
+                # ★ 0.49.0：`v=bubble` 是冒泡窗（「需要人工介入马上处理」的
+                #   通知页）—— 与面板同源同 CSS，但**没有 tab、没有收件箱**，
+                #   只有事由＋「知道了/打开值守台」。事由走 query（一次性渲染）。
+                if view == "bubble":
+                    import inbox_bubble as BB
+                    try:
+                        import inbox_window as _W
+                        _rid = _W.build_run_id(token)
+                    except Exception:                       # noqa: BLE001
+                        _rid = ""
+                    # ★ 0.50.3：渲染这一枚冒泡的**那一刻**，值守台是不是已经开着。
+                    #   开着 ⇒ 不再画「打开值守台」按钮（点了它本来就该只是"切过去"，
+                    #   画一个"打开"按钮是在说一件不成立的事）。判不出来 ⇒ 照旧画
+                    #   （宁可多一个按钮，也不让用户点了没反应）。
+                    try:
+                        import host_shield as _hs
+                        _cop = _hs.console_is_visible()
+                    except Exception:                       # noqa: BLE001
+                        _cop = None
+                    page = BB.render((q.get("bt") or ["需要你处理"])[0],
+                                     (q.get("bb") or [""])[0],
+                                     (q.get("bl") or ["R0"])[0],
+                                     token, run_id=_rid,
+                                     kind=(q.get("bk") or ["R0"])[0],
+                                     console_open=(_cop is True))
+                    return self._send(200, "text/html; charset=utf-8",
+                                      page.encode("utf-8"))
                 if view not in ("inbox", "report", "health", "ledger"):
                     view = "inbox"
                 # ★ 非法筛选值 ⇒ 退回默认档（**不静默当成"全部"** —— 那会让用户
@@ -1431,6 +2185,7 @@ def _make_handler(token, root):
             if u.path != "/action":
                 return self._send(404, "text/plain; charset=utf-8", b"no")
             op = (form.get("op") or [""])[0]
+            _notice = ""
             try:
                 if op == "fix":
                     # ★ 0.35.3：失守时就地修好（创始人第四条："应该有地方可以马上解决"）。
@@ -1438,6 +2193,7 @@ def _make_handler(token, root):
                     import host_shield as _hs
                     _ok, _msg = _hs.guard_fix(_pkg_root())
                     print("[console] fix -> %s: %s" % (_ok, _msg))
+                    _notice = ("已执行修复：" if _ok else "未能修复：") + str(_msg)
                 elif op == "guard_fix":
                     # ★ 0.36.0：归因面板的「试一下/ 重新拉起 / 重新布防」。
                     #   复用 `guard_fix`（**唯一实现**），不二次实现修的动作。
@@ -1472,6 +2228,7 @@ def _make_handler(token, root):
                         #   markdown 星号会原样显示给用户（创始人截图一）。
                         _note = "<b>没修好</b>：%s｜此刻仍是：%s" % (
                             _msg, _plabel)
+                    _notice = re.sub(r"<[^>]*>", "", _note)
                 elif op in ("remediation_drop", "remediation_ack"):
                     # ★ 0.36.0：B 类失守的处置**记录**。
                     #   ⚠️ **不执行任何降损动作** —— "移出监管名单"＝擅自放弃保护，
@@ -1508,6 +2265,67 @@ def _make_handler(token, root):
                             S.set_state(iid, "done", root=root, level=lv[iid])
                         except M.InboxError:
                             pass
+                elif op in ("bubble_ack", "bubble_open"):
+                    # ★ 0.49.0：冒泡窗的两个按钮。
+                    #   `bubble_ack` ＝用户说「知道了」—— 只记确认时间
+                    #     （同类 ACK_QUIET 秒内不再冒），**不**代用户把事标成
+                    #     已处理（那会篡夺用户的决定，也把台账改假）。
+                    #   `bubble_open` ＝把完整值守台开出来（复用 C4 那条
+                    #     「谁开窗谁等它就位」的路，不另起一套）。
+                    import inbox_bubble as BB
+                    if op == "bubble_ack":
+                        _kind = (form.get("kind") or [""])[0] or "R0"
+                        _ok, _why = BB.ack(kind=_kind, root=root)
+                        print("[bubble] ack(%s) -> %s %s" % (_kind, _ok, _why))
+                        return self._json({"ok": _ok, "why": _why})
+                    # ★★★ 0.50.3：三条出路全在 `bubble_open_route()` 里（**唯一决策点**，
+                    #   可注入 ⇒ 判据能打在行为上）。这里只做路由与回 JSON。
+                    _rep = bubble_open_route(root=root, token=token)
+                    return self._json(_rep)
+                elif op == "collapse":
+                    # ★ 0.50.0：收缩成漂浮哨标（最小态）。全链只有一处实现
+                    #   （`inbox_logo.collapse_console`）——本段只做路由与如实打印。
+                    #   ★ 顺序安全：哨标没起来 ⇒ **不关面板窗**（用户不至于
+                    #     点一下收缩，值守台没了、哨标也没起）。
+                    #   ★ 关的是**本面板窗**（按 token 派生 run_id 严格匹配），
+                    #     不是枚举批量关。
+                    import inbox_logo as IL
+                    import inbox_window as _W2
+                    _rid = _W2.build_run_id(token)
+                    _rep = IL.collapse_console(root=root, run_id=_rid,
+                                               verbose=False)
+                    print("[console] collapse run=%s -> %s" % (_rid, _rep))
+                    return self._json(_rep)
+                elif op == "bubblefit":
+                    # ★★★ 0.50.1（创始人截图「泡泡下沿没露出来」）：冒泡窗
+                    #   按**内容实需**长高。为什么单开一条路而不是调 BUBBLE_H：
+                    #   常量是"出生差不多对"，而**内容长度是变的**（事由长短、
+                    #   确认后文案变化）⇒ 只有"页面量、服务端动窗、回读校验"
+                    #   这条闭环能保证"看得见"。与 `winfit` 同一套机制。
+                    #   不是表单动作 ⇒ 回 JSON 不回 303。
+                    _dh = (form.get("dh") or ["0"])[0]
+                    _rep = _bubble_fit(_dh, token)
+                    print("[bubble] fit dh=%s -> %s"
+                          % (_dh, {k: _rep.get(k) for k in ("ok", "grew", "left")}))
+                    return self._json(_rep)
+                elif op in ("winfit", "winrestore"):
+                    # ★ 0.49.0：术语浮层突破窗口边界（截图 3/4/5）。
+                    #   JS 量出溢出量送来；这里动**窗口**（平移优先、撑开兜底），
+                    #   回读校验后如实报告。不是表单动作 ⇒ 回 JSON 不回 303。
+                    if op == "winfit":
+                        _dr = (form.get("dr") or ["0"])[0]
+                        _db = (form.get("db") or ["0"])[0]
+                        try:
+                            _dr, _db = int(float(_dr)), int(float(_db))
+                        except (ValueError, OverflowError):
+                            return self._json({"ok": False, "why": "溢出量不是有限数字"})
+                        _rep = _winfit_apply(_dr, _db, token)
+                    else:
+                        _rep = _winfit_restore(token)
+                    print("[console] %s dr/db -> %s"
+                          % (op, {k: _rep.get(k) for k in ("ok", "moved", "grew",
+                                                          "left", "windows")}))
+                    return self._json(_rep)
                 else:
                     iid = (form.get("id") or [""])[0]
                     ids = [x for x in (form.get("ids") or [""])[0].split(",") if x]
@@ -1526,9 +2344,20 @@ def _make_handler(token, root):
                                 pass
                     else:
                         S.set_state(iid, op, note=note, root=root)
+                if op in ("fix", "guard_fix"):
+                    _page = render_page(view="inbox", filt=M.BUCKET_ACTION,
+                                        root=root, token=token,
+                                        items=S.load_items(root=root),
+                                        notice=_notice)
+                    return self._send(200, "text/html; charset=utf-8",
+                                      _page.encode("utf-8"))
             except M.InboxError as e:
                 return self._send(409, "text/plain; charset=utf-8",
                                   ("操作被拒：%s" % e).encode("utf-8"))
+            if op == "read":
+                # 点开即已读由页面 fetch 调用；回 JSON 让页面只在**写入成功**后
+                # 撤掉未读点。303 后再 GET 会因 cookie 禁用造成「实际已写、UI 误报」。
+                return self._json({"ok": True})
             return self._send(303, "text/plain; charset=utf-8", b"",
                               extra={"Location": "/?v=inbox"})
 
@@ -1683,7 +2512,10 @@ def make_server(port=DEFAULT_PORT, root=None, token=None, bind="127.0.0.1"):
 #: ★ 0.36.0 起这**不再是实际尺寸** —— 实际尺寸按工作区实算（见 `inbox_window`）。
 #:   这个常量只在"探不到屏幕尺寸"时兜底，且不再是 `1024,720`：
 #:   那个尺寸实测开出来是 1050×1932，占满整屏高度（见下）。
-WINDOW_SIZE = "520,640"
+#: ★★ 0.49.0：兜底值也要**高于 CSS 窄屏断点 620px**（与 `inbox_window.MAX_W`
+#:   同源）—— 探不到屏幕时给 520 宽，等于让面板在最不该凑合的时候凑合
+#:   （创始人 2026-10-14 截图：520 宽 ⇒ 顶行折行压字，"乱样"）。
+WINDOW_SIZE = "720,640"
 
 
 def _app_window_cmd(url, geometry=None):
@@ -1886,7 +2718,8 @@ def _place_if_needed(placer=None, tries=24, interval=0.35, run_id=None,
 DEFAULT_SETTLE_SEC = 12.0
 
 
-def open_console_settled(url, wait_sec=DEFAULT_SETTLE_SEC, token=None, verbose=True):
+def open_console_settled(url, wait_sec=DEFAULT_SETTLE_SEC, token=None, verbose=True,
+                         root=None):
     """开独立窗口，**并等它就位**（一次性调用方专用；服务路径仍走 `_place_if_needed`）。
 
     ★★ 为什么必须有这个函数（C4，2026-10-13 **实测**抓到的真缺陷，不是推演）：
@@ -1975,6 +2808,258 @@ def open_console_settled(url, wait_sec=DEFAULT_SETTLE_SEC, token=None, verbose=T
         out["why"] = "%s；且回读失败：%s" % (why, e)
         return out
     out["placed"] = bool(ok) and all(tuple(g) == tuple(rect) for g in out["got"])
+    # ★ 0.50.0：值守台展开 ⇒ 屏幕上那枚漂浮哨标该退役（用户从托盘/冒泡/
+    #   CLI 展开时也会走到这里）。**退役的唯一实现**是 `inbox_logo.retire()，
+    #   这里不重写一遍。退役失败只影响"多漂着一枚"，不拖垮开窗 ⇒ 如实记
+    #   进 why 尾部，不抛。
+    try:
+        import inbox_logo as _IL
+        _r = _IL.retire(root=root, verbose=False)
+        if _r.get("acted") and not _r.get("ok"):
+            out["why"] = "%s｜漂浮哨标退役没成（%s）" % (out["why"], _r.get("why", ""))
+    except Exception as e:                                  # noqa: BLE001
+        out["why"] = "%s｜漂浮哨标退役查询失败：%s: %s" % (
+            out["why"], type(e).__name__, e)
+    return out
+
+
+def open_console_via_daemon(url, wait_sec=DEFAULT_SETTLE_SEC, token=None,
+                            verbose=True, root=None):
+    """经**守护进程**开独立窗口，并等它就位（调用方短命时的唯一活路）。
+
+    ★★★★ 为什么必须有这条路（2026-10-14 创始人实测「起得来、活不久」）：
+      CLI 直起（`open_console_settled`）时 msedge 挂在 **CLI 进程树**下。
+      在「调用方寿命短于窗口寿命」的环境（agent 沙箱／CI runner／一次性
+      脚本），调用方一退出，进程树连带清理 ⇒ **窗口秒死**，而 CLI 已如实
+      报过「已就位」——用户看到的是"报了功、窗没了"。
+      同机同命令**四路实证**（全部起出窗口、命令内回读全对）：
+        · `Popen(CREATE_NO_WINDOW)`            ⇒ 跨边界死
+        · `Popen(DETACHED｜NEW_GROUP)`        ⇒ 跨边界死
+        · `cmd /c start`                       ⇒ 跨边界死
+        · **daemon（长命进程）Popen**          ⇒ **跨边界存活**
+      ⇒ 病根不是"起法不对"，是"**谁来起**"：必须由**活得比窗口久**的
+        进程起。daemon 正是那个进程（supervise 单例，实测跨小时存活）。
+    ★ 实现走**既有机制**，不新造接口：推托盘 `open` 动作（`push_action`），
+      daemon tick（2s）消费 ⇒ `open_console_now` ⇒ `open_console` 开窗。
+      这里只做「等窗 + 落位 + 回读」，与 `open_console_settled` **同一把尺**
+      （同一个 `place_all`、同一个回读取证），不另写一套。
+    ★ 身份匹配：daemon 用**同一个 token** 派生 run_id（`build_run_id`
+      是确定性派生）⇒ 这里按同一 run_id 严格匹配，绝不碰用户窗口。
+    ★ 失败**如实降级**：daemon 不在／没开出 ⇒ `opened="none"` 加人话，
+      由调用方决定是否降级直起（`cmd_window` 会降级，**不假装成功**）。
+    """
+    import inbox_window as WIN
+    import inbox_tray as TR
+    out = {"opened": "none", "placed": False, "want": None, "got": [],
+           "why": "", "via": "daemon"}
+    try:
+        geo = WIN.console_geometry()
+    except Exception as e:                                  # noqa: BLE001
+        out["why"] = "取不到目标几何：%s: %s" % (type(e).__name__, e)
+        return out
+    rect = geo.get("rect")
+    out["want"] = list(rect) if rect else None
+    if not rect:
+        out["why"] = geo.get("reason") or "屏幕放不下，未开"
+        return out
+    if token is None and url:
+        try:
+            from urllib.parse import parse_qs, urlparse
+            token = (parse_qs(urlparse(url).query).get("t") or [None])[0]
+        except Exception:                                   # noqa: BLE001
+            token = None
+    try:
+        run_id = WIN.build_run_id(token)
+        suffix = WIN.console_title_suffix(run_id)
+    except Exception as e:                                  # noqa: BLE001
+        out["why"] = "算不出本次身份：%s: %s" % (type(e).__name__, e)
+        return out
+    try:
+        TR.push_action("open", root=root)
+    except Exception as e:                                  # noqa: BLE001
+        out["why"] = "推动作失败（daemon 可能没起）：%s: %s" % (type(e).__name__, e)
+        return out
+    deadline = time.time() + float(wait_sec)
+    # ★ 通用后缀匹配（**不是** run_id 严格匹配）：daemon 的 `open_console_now`
+    #   在自己进程内 `ensure_background` ⇒ 可能用**另一个服务实例**（端口
+    #   漂移，实测 daemon 19704 自听 14305）开窗 ⇒ 窗口 run_id 与本次不同。
+    #   「服务多开」是独立缺陷（已单独记账，今天不混进来修）；这里只保证
+    #   **窗口跨边界存活**这件主事，匹配放宽到通用后缀。
+    hwnds, last = [], "daemon 没开出值守台窗口（通用后缀也没匹配到）"
+    while time.time() < deadline:
+        try:
+            hwnds = WIN.find_console_windows()
+        except Exception as e:                              # noqa: BLE001
+            last = "枚举窗口出错（%s）" % type(e).__name__
+            time.sleep(0.2)
+            continue
+        if hwnds:
+            break
+        time.sleep(0.25)
+    if not hwnds:
+        out["why"] = "%s（等了 %.1fs；daemon 在跑吗？）" % (last, float(wait_sec))
+        return out
+    out["opened"] = "app"
+    try:
+        ok, why = WIN.place_all(hwnds, rect)
+    except Exception as e:                                  # noqa: BLE001
+        out["why"] = "落位抛异常：%s: %s" % (type(e).__name__, e)
+        return out
+    out["why"] = why
+    try:
+        out["got"] = [list(WIN.window_rect_of(h)) for h in hwnds]
+    except Exception as e:                                  # noqa: BLE001
+        out["why"] = "%s；且回读失败：%s" % (why, e)
+        return out
+    out["placed"] = bool(ok) and all(tuple(g) == tuple(rect) for g in out["got"])
+    try:
+        import inbox_logo as _IL
+        _r = _IL.retire(root=root, verbose=False)
+        if _r.get("acted") and not _r.get("ok"):
+            out["why"] = "%s｜漂浮哨标退役没成（%s）" % (out["why"], _r.get("why", ""))
+    except Exception:                                       # noqa: BLE001
+        pass
+    return out
+
+
+def bubble_open_route(root=None, token=None, vis=None, finder=None,
+                      focuser=None, opener=None, probe=None):
+    """冒泡窗「打开值守台」的**唯一决策点**。返回与页面 JSON 同形的 dict。
+
+    ★★★ 为什么抽成一个函数（创始人 2026-10-14：「点击打开值守台后，之前的
+      关闭了，打开了新的……点完了按钮显示'打开值守台'按钮好像不对吧，
+      值守台打开着呢」）：
+      旧链路只有一条动作 —— `open_console_settled()`，而它**先收旧窗、再开新窗**
+      （那条路是为「没有窗、要开一个」设计的）。⇒ 面板**本来就开着**时点一下，
+      用户看到的是"窗闪了一下、内容从头来"（而且新窗刚加载，状态读数是重新算的
+      —— 那正是他说的"状态不对了"）。而他要的只是**切过去**。
+
+      ⇒ 三条出路，按「用户此刻真的看得见值守台吗」分流：
+        · 看得见（`vis is True`）⇒ **只切到前面**（`inbox_window.focus_windows`，
+          不关、不开、不重建）⇒ `opened="existing"`；
+        · 看不见（`vis is False`）⇒ 走老路 `open_console_settled()` 开一个；
+        · **判不出来**（`vis is None`）⇒ 走老路开窗 —— 方向往"宁可多开一个窗"
+          偏，绝不让用户点了没反应（"漏做"比"多做"坏）。
+
+    ★ 为什么抽出来：判据要能**打在行为上**（三条分流的**调用顺序与返回值**），
+      而不是去查源码里有没有某个 `if`。⇒ 五个注入点（`vis`/`probe`/`finder`/`focuser`/
+      `opener`）让判据**不起真浏览器、不动真窗口**就能验全三条路
+      （与 `pop(opener=…)`、`open_console(opener=…)` 同一套纪律）。
+      `vis` 直接给定就跳过探测；`vis=None` 时走 `probe()`（默认＝真探测）——
+      这样"判不出来"那一路也能被夹具覆盖（否则它永远测不到）。
+    ★ 不二次实现：可见性走 `host_shield.console_is_visible()`（唯一实现）、
+      枚举走 `inbox_window.find_console_windows()`、切换走
+      `inbox_window.focus_windows()`、开窗走 `open_console_settled()`。
+    """
+    rec = read_console_record(root) or {}
+    url = rec.get("url") or ""
+    if not url:
+        return {"ok": False, "opened": "none",
+                "why": "没有值守台记录（URL），开不出来"}
+    if vis is None:
+        try:
+            if probe is not None:
+                vis = probe()
+            else:
+                import host_shield as _hs
+                vis = _hs.console_is_visible()
+        except Exception:                                   # noqa: BLE001
+            vis = None
+    if vis is True:
+        import inbox_window as _W
+        find = finder or _W.find_console_windows
+        try:
+            hwnds = find()
+        except Exception as e:                              # noqa: BLE001
+            hwnds = []
+            print("[bubble] 枚举值守台窗口失败：%s" % type(e).__name__)
+        ok, why = (focuser or _W.focus_windows)(hwnds)
+        print("[bubble] 已在值守台 -> focus=%s %s" % (ok, why))
+        return {"ok": bool(ok), "opened": "existing", "why": why}
+    rep = (opener or open_console_settled)(url, token=token, verbose=False)
+    print("[bubble] open -> %s" % rep)
+    return {"ok": bool(rep.get("placed")), "opened": rep.get("opened"),
+            "why": rep.get("why", "")}
+
+
+def open_bubble_window(url, geometry=None, wait_sec=6.0, token=None, verbose=True):
+    """开一枚**冒泡窗**并等它就位、置顶；返回如实 dict（不谎报）。
+
+    ★ 与 `open_console_settled` 的分工：那个等的是**值守台**窗口
+      （`find_console_windows`＋`console_geometry`），这个等的是**冒泡**窗
+      （`find_bubble_windows`＋`bubble_geometry`，且**置顶**）。
+      共用的都是 `inbox_window` 的同一批原语（命令构造／枚举／落位／置顶）——
+      窗口语义只有一份，这里只是冒泡自己的编排。
+    ★ 为什么不合并成一个函数：两者的标题标记、几何来源、置顶诉求都不同，
+      硬合并要靠一串开关分发，那是把简单事情绕复杂。
+    ★ 纪律同 C4：等窗→落位→**回读取证**；失败不关窗、如实上报。
+    """
+    import inbox_window as WIN
+    out = {"opened": "none", "placed": False, "topmost": False,
+           "want": None, "got": [], "why": ""}
+    try:
+        geo = WIN.bubble_geometry() if geometry is None else geometry
+    except Exception as e:                                  # noqa: BLE001
+        out["why"] = "取不到冒泡几何：%s: %s" % (type(e).__name__, e)
+        return out
+    rect = (geo or {}).get("rect")
+    out["want"] = list(rect) if rect else None
+    if not rect:
+        out["why"] = geo.get("reason") or "屏幕放不下冒泡窗，未开"
+        return out
+    cmd = _app_window_cmd(url, geo)
+    if not cmd:
+        out["why"] = "找不到可用的 app 浏览器（Edge/Chrome）"
+        return out
+    try:
+        subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         creationflags=_DETACHED_FLAGS)
+        out["opened"] = "app"
+    except Exception as e:                                  # noqa: BLE001
+        out["why"] = "起浏览器失败：%s: %s" % (type(e).__name__, e)
+        return out
+    try:
+        run_id = WIN.build_run_id(token)
+    except Exception as e:                                  # noqa: BLE001
+        out["why"] = "算不出本次冒泡身份：%s: %s" % (type(e).__name__, e)
+        return out
+    deadline = time.time() + float(wait_sec)
+    hwnds, last = [], "没看到带本次标识的冒泡窗"
+    while time.time() < deadline:
+        try:
+            hwnds = WIN.find_bubble_windows(run_id=run_id)
+        except Exception as e:                              # noqa: BLE001
+            last = "枚举窗口出错（%s）" % type(e).__name__
+            time.sleep(0.2)
+            continue
+        if hwnds:
+            break
+        time.sleep(0.25)
+    if not hwnds:
+        out["why"] = "%s（等了 %.1fs；浏览器可能正冷启动）" % (last, float(wait_sec))
+        return out
+    try:
+        ok, why = WIN.place_all(hwnds, rect, skip_if_placed=False)
+    except Exception as e:                                  # noqa: BLE001
+        out["why"] = "落位抛异常：%s: %s" % (type(e).__name__, e)
+        return out
+    out["why"] = why
+    try:
+        out["got"] = [list(WIN.window_rect_of(h)) for h in hwnds]
+    except Exception as e:                                  # noqa: BLE001
+        out["why"] = "%s；且回读失败：%s" % (why, e)
+        return out
+    out["placed"] = bool(ok) and all(tuple(g) == tuple(rect) for g in out["got"])
+    try:
+        tok, _tw = WIN.set_topmost(hwnds, True)
+        out["topmost"] = bool(tok)
+    except Exception as e:                                  # noqa: BLE001
+        out["why"] = (out["why"] + "；" if out["why"] else "") \
+                     + "置顶失败：%s: %s" % (type(e).__name__, e)
+    if verbose:
+        print("[bubble-window] opened=%s placed=%s topmost=%s %s"
+              % (out["opened"], out["placed"], out["topmost"], out["why"]))
     return out
 
 
@@ -2114,7 +3199,7 @@ def open_console(url, opener=None, placer=None, token=None, verbose=True):
             else:
                 subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                  stderr=subprocess.DEVNULL,
-                                 creationflags=_CREATE_NO_WINDOW)
+                                 creationflags=_DETACHED_FLAGS)
             # ── 步骤 4：开窗之后落位。参数是"请求"，这一步才是"事实" ──
             #   落位自己起守护线程（窗口刚起还没成型，不能同步等），
             #   失败只打到 stderr —— 不影响"窗口开出来了"这个返回值。

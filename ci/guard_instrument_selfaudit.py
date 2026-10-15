@@ -297,7 +297,7 @@ def n_s46():
     return True
 
 
-# ══════════ S47 · 并发夹具不许赌运气（N 路齐冲必须走会合栅栏） ══════════════
+# ══════════ S47-selfaudit · 并发夹具不许赌运气（N 路齐冲必须走会合栅栏） ══════════════
 #: "一次起 N 个进程"的语法形态：`Popen` 出现在**循环/推导式**里
 _BURST_NODES = (ast.For, ast.While, ast.ListComp, ast.SetComp, ast.DictComp,
                 ast.GeneratorExp)
@@ -342,7 +342,7 @@ def _race_burst_violations(tree):
     return out
 
 
-@check("S47 判据里「一次起 N 个真进程」必须走会合栅栏（race_amp）")
+@check("S47-selfaudit 判据里「一次起 N 个真进程」必须走会合栅栏（race_amp）")
 def s47():
     """R3：函数体里 `Popen` 调用落在**循环/推导式**内（= 一次起 N 个进程抢同一样
     东西）⇒ 该函数必须**真调用** `race_amp`（`ci/race_amp.py` 的会合栅栏）。
@@ -387,7 +387,7 @@ def s47():
     return True
 
 
-@check("N-S47 负控：造一个「列表推导里 Popen 齐冲」的片段 ⇒ S47 必须报红")
+@check("N-S47-selfaudit 负控：造一个「列表推导里 Popen 齐冲」的片段 ⇒ S47-selfaudit 必须报红")
 def n_s47():
     snippet = (
         "import subprocess\n"
@@ -396,7 +396,7 @@ def n_s47():
         "    for p in procs:\n"
         "        p.wait()\n")
     if not _race_burst_violations(ast.parse(snippet)):
-        return "负控失效：构造的违规片段没被检出（S47 的检测逻辑是假的）"
+        return "负控失效：构造的违规片段没被检出（S47-selfaudit 的检测逻辑是假的）"
     # ★ 反向对照：固定两个进程（读者/写者握手，如 0450 `_run_rw`）**不许**被误判
     pair = (
         "import subprocess\n"
@@ -421,7 +421,7 @@ def n_s47():
 
 
 # ══════════ S48 · 判据扫渲染产物必须**显式选层**（C2 遗留问题）══════════════
-#   同族第四面（S45 = `ast.dump` 子串、S46 = `ast.walk` 取首、S47 = 并发赌运气）：
+#   同族第四面（S45 = `ast.dump` 子串、S46 = `ast.walk` 取首、S47-selfaudit = 并发赌运气）：
 #   **把「非正文层」当正文**。两类实测：
 #     ① 渲染产物面 —— U-10 断言「本机 · 127.0.0.1」零出现，正文早删干净了，
 #        可 `<style>` 的 CSS 注释里复述过一遍 ⇒ **误红**；U-03 的「分母」从
@@ -618,7 +618,7 @@ def s48():
          `page_caliber.body(...)` / `page_caliber.body_without_terms(...)`；
       ② 数源码里的调用点必须 AST，不许 `len(re.findall(<调用语法>))`。
     ★ 反空转：`ci/page_caliber.py` 必须存在、且**至少一个判据文件真的在用它**
-      —— 装置建了不落地 = 下次照样赌注释（S47 同款纪律）。
+      —— 装置建了不落地 = 下次照样赌注释（S47-selfaudit 同款纪律）。
     ★ 口径本身不在这里重写：层名逐字取自 `page_caliber.py`（维一）。
     """
     contract = _caliber_contract()

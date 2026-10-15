@@ -28,7 +28,7 @@
     S18 说明＝实现：`guard_posture()` 的 docstring 规则句必须与 `POSTURE_LABEL` 同口径 ——
         这是把 S17 那条纪律从"只锁术语表"**扩到关键函数的规则句**。0.39.1 修的是
         术语表的同型错，而 `guard_posture()` 的 docstring **同型复发且当时无人管**；
-    S19 版本行归一化：改 `hooks/pre_tool_use.py` 的 `_ANTINEL_VERSION` **值** ⇒ 哈希不变；
+    S19-380 版本行归一化：改 `hooks/pre_tool_use.py` 的 `_ANTINEL_VERSION` **值** ⇒ 哈希不变；
         改该行**行内注释**或**别的任何一行** ⇒ 哈希照变；且所有算这个文件哈希的
         消费方**只能有一个实现**（只改一侧 ⇒ 哈希**恒失配**，比不改更糟）。
 
@@ -510,7 +510,7 @@ def n_s18():
     return True
 
 
-# ═══════════════════ S19 版本行归一化（唯一实现）════════════════════════════════
+# ═══════════════════ S19-380 版本行归一化（唯一实现）════════════════════════════════
 def _norm_selfcheck(norm, raw):
     """纯函数：给**一个归一化实现** ＋ `hooks/pre_tool_use.py` 的原始字节，返回问题清单。
 
@@ -543,7 +543,7 @@ def _norm_selfcheck(norm, raw):
     return problems
 
 
-@check("S19 版本行归一化：改版本值不动哈希；改注释/别的行照变；消费方只有一个实现")
+@check("S19-380 版本行归一化：改版本值不动哈希；改注释/别的行照变；消费方只有一个实现")
 def s19():
     import host_shield as H
     p = os.path.join(ROOT, "hooks", "pre_tool_use.py")
@@ -583,17 +583,17 @@ def s19():
     return True
 
 
-@check("N-S19 负控：把归一化换成'恒等'（等于不归一化）⇒ S19 ①必须报红")
+@check("N-S19-380 负控：把归一化换成'恒等'（等于不归一化）⇒ S19-380 ①必须报红")
 def n_s19():
     p = os.path.join(ROOT, "hooks", "pre_tool_use.py")
     with open(p, "rb") as f:
         raw = f.read()
     if not _norm_selfcheck(lambda b: b, raw):
-        return "负控失效：恒等归一化（＝不归一化）下 S19 ①仍然绿"
+        return "负控失效：恒等归一化（＝不归一化）下 S19-380 ①仍然绿"
     return True
 
 
-@check("N-S19b 负控：把归一化改成'整行替换'（连行尾注释一起吞）⇒ S19 ②必须报红")
+@check("N-S19b 负控：把归一化改成'整行替换'（连行尾注释一起吞）⇒ S19-380 ②必须报红")
 def n_s19b():
     p = os.path.join(ROOT, "hooks", "pre_tool_use.py")
     with open(p, "rb") as f:
@@ -601,7 +601,7 @@ def n_s19b():
     whole = lambda b: re.sub(rb"(?m)^[ \t]*_ANTINEL_VERSION[^\r\n]*", b"X", b)   # noqa: E731
     probs = _norm_selfcheck(whole, raw)
     if not any("②" in x for x in probs):
-        return "负控失效：整行替换（吞掉行尾注释）未被 S19 ② 抓出"
+        return "负控失效：整行替换（吞掉行尾注释）未被 S19-380 ② 抓出"
     return True
 
 

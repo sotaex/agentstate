@@ -550,7 +550,7 @@ def u97():
 
 # ════════════════════════════ U-10 · 丁2/丁3（who 块删、口号变证据）═════
 @check("U-10 ★ 丁2/丁3：who 块零出现（四页）；运行状态页有回环证据行")
-def u10():
+def u10(mod=SV):
     """丁2：「本机 · 127.0.0.1」零信息量（回环地址每台机器一样）；
     丁3：「数据不出门」是定位宣言混进状态栏 —— 口号不是证据。
 
@@ -558,15 +558,18 @@ def u10():
     证据（「监听地址：仅本机回环——服务不接受外部连接」），而那句证据由
     `_check_bind` 的硬校验背书（非回环直接抛错）。判据同时断言三件事：
     删干净、证据在、后盾真（行为级，不只查文案）。
+
+    ★ 0.50.2：加 `mod` 参数（默认真模块）—— 负控才能**拿变异模块跑同一条
+      正判据**，从而证明"正判据真的会翻面"，而不是只证明"变异看得见"。
     """
     for view in _VIEWS:
-        page = _page(view)
+        page = _page(view, mod=mod)
         for bad in ("本机 · 127.0.0.1", "数据不出门"):
             # ★ C2：经 `PC.body(...)` —— 剥掉 `<style>` 后，CSS 注释里复述过的
             #   同一串不再冒充正文（U-10 曾因此**误红**，见交接件 §C2）。
             if bad in PC.body(page):
                 return "%s 页仍含 %r（丁2/丁3：零信息量块没删干净）" % (view, bad)
-    health = _page("health")
+    health = _page("health", mod=mod)
     for want in ("仅本机回环", "服务不接受外部连接"):
         if want not in PC.body(health):
             return "运行状态页缺回环证据 %r（口号删了，证据没补上）" % want
@@ -581,26 +584,32 @@ def u10():
 
 @check("N-U10 负控：who 块加回顶部条 ⇒ U-10 必须红")
 def n_u10():
-    """反向对照（维二）：把删掉的 who 块原样加回 _bar 的返回串。"""
-    src = _src(_SERVER_REL)
-    anchor = '        "%s%s<div class=\\"spacer\\"></div></header>"'
-    if anchor not in src:
-        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
-    page, _why = _mut_render(src.replace(
-        anchor,
-        '        "%s%s<div class=\\"spacer\\"></div>"\n'
-        '        "<div class=\\"who\\">本机 · 127.0.0.1<br>数据不出门</div></header>"'),
-        "is0490_nu10", _SERVER_REL,
-                             view="inbox", filt=M.BUCKET_ACTION,
-                           root=tempfile.mkdtemp(prefix="g0490_nu10_"),
-                           token="T", items=_items(), posture=_POSTURE)
-    if _why:
-        return _why
+    """反向对照（维二）：把删掉的 who 块加回 `_bar` 的产出。
+
+    ★ 0.50.2：改用**行为变异**（换掉 `_bar` 的产出），不再做源码文本替换 ——
+      老锚点 `"%s%s<div class=\\"spacer\\"></div></header>"` 在 0.50.0 加了
+      收缩钮（`<button class="collbtn">` ＋ `.collst`）之后就成了死字符串，
+      负控连着报"变异锚点未找到（源码已变，需更新负控）"。
+      **锚点跟着源码形状走 = 每改一次产品就得修一次尺子** ⇒ 变异打在行为上，
+      产品怎么重排都不腐化。两步法不变：先证明变异真生效，再证明正判据翻面。
+    """
+    try:
+        mut = _load(_src(_SERVER_REL), "is0490_nu10", _SERVER_REL)
+    except Exception as e:                                          # noqa: BLE001
+        return ("负控自身失效：变异模块加载就抛 %s: %s —— 量具故障，不算通过"
+                % (type(e).__name__, e))
+    orig_bar = mut._bar
+    mut._bar = lambda *a, **k: orig_bar(*a, **k).replace(
+        "</header>",
+        '<div class="who">本机 · 127.0.0.1<br>数据不出门</div></header>')
+    page = _page("inbox", filt=M.BUCKET_ACTION, mod=mut)
     if "本机 · 127.0.0.1" not in PC.body(page):
         return "负控失效：who 块加回后页面仍不含它（注入没生效）"
     live = _page("inbox", filt=M.BUCKET_ACTION)
     if "本机 · 127.0.0.1" in PC.body(live):
         return "夹具不成立：真实现本身还带 who 块 ⇒ 负控无分辨力"
+    if u10(mod=mut) is True:
+        return "负控失效：who 块回来了 U-10 仍判合格 —— 这条判据是装饰"
     return True
 
 
@@ -681,13 +690,16 @@ def n_u05():
     """反向对照（维二）：把丁5 删掉的句子原样加回日报页调用点。"""
     src = _src(_SERVER_REL)
     # ★ 0.48.6（B3）：锚点同步 —— 拉起次数链接不再挂 `&t=%s`，参数表少收 `_esc(token)`。
-    anchor = ('                     "%d 次</a> / %d"\n'
+    # ★ 0.50.4（Q-03）：源码把「%d 次</a> / %d」改成「%d 次</a>；同期记录 %d 条」
+    #   （次数与条数是异质单位，不再相除）⇒ 锚点**同步更新**，否则注入不生效、
+    #   负控失效（那才是真危险：负控失效＝本条防线形同没有）。
+    anchor = ('                     "%d 次</a>；同期记录 %d 条"\n'
               '                     % (hrs, _revived, _win_total))')
     if anchor not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
     page, _why = _mut_render(src.replace(
         anchor,
-        '                     "%d 次</a> / %d（点开看每一次）"\n'
+        '                     "%d 次</a>；同期记录 %d 条（点开看每一次）"\n'
         '                     % (hrs, _revived, _win_total))'),
         "is0490_nu05", _SERVER_REL,
                              view="report",
@@ -733,8 +745,11 @@ def u04():
         if "<details" in m.group(1):
             return "芯片嵌套在 <a> 里（链接内嵌 interactive 是坏味道）"
     # ③ 展开体首行带词本名（复用 head 机制，不另写一套）
+    #    ★ U-19（0.50.4）：发射器现带 name="term"（互斥小窗），子串随之更新
+    #      —— 断言强度不变（head／summary／tdef 仍逐字在场）。
     for key in want:
-        if ('data-t="%s"><summary>？</summary><div class="tdef"><b>' % key) \
+        if ('data-t="%s" name="term"><summary>？</summary>'
+                '<div class="tdef"><b>' % key) \
                 not in page:
             return "芯片 %s 的展开体首行缺词本名（head 机制没接上）" % key
     # ④ 未登记术语零命中（rendered 自动覆盖新芯片）
@@ -764,6 +779,74 @@ def n_u04():
                       _page("inbox"))
     if len(live) != 8:
         return "夹具不成立：真实现本身就不是 8 个芯片 ⇒ 负控无分辨力"
+    return True
+
+
+# ══════════════ U-19 · 术语小窗互斥（0.50.4，创始人 2026-10-15 判定）══════════════
+def _u19_offenders(page):
+    """U-19 的唯一尺子（正负判据共用，不许二次实现）：
+    返回 (缺 name 的术语芯片标记串列表, 术语芯片总数)。"""
+    tags = re.findall(r'<details class="term[^"]*"[^>]*>', page or "")
+    return [t for t in tags if 'name="term"' not in t], len(tags)
+
+
+@check("U-19 ★ 术语小窗互斥：四视图每个术语芯片都带 name=\"term\"（原生互斥手风琴）")
+def u19():
+    """创始人 2026-10-15 判定「点开下一个问号小窗，上一个必须自动关闭」。
+
+    机制层修法＝WHATWG HTML `<details name>` **原生互斥手风琴**：同名即同组
+    （散在全页也算同组），开一个、浏览器**原生保证**关掉组里其它 open 的
+    —— 零 JS、零状态（Edge 120+／2023-12 起；旧引擎退回多开＝渐进增强）。
+    病根：`.term>.tdef` 是 fixed 视口定位（_FLIP_JS fit()），同时 open 两个
+    就叠两个窗 ⇒ 互斥后同时至多一个。范围只锁 `GL.chip()` 的术语芯片；
+    details.where／item／rem 等**行内**展开不进组（多开无害）。
+    ★ 0.36.1 的 CSS 注释早就宣称这个行为（「点开别的词条会收起上一个」），
+      但机制从未存在 —— 本判据钉的就是「这次真的在」。
+    """
+    bad, grand = [], 0
+    for view in ("inbox", "report", "health", "ledger"):
+        miss, total = _u19_offenders(_page(view))
+        grand += total
+        if miss:
+            bad.append("%s: %d/%d 缺 name，如 %r" % (view, len(miss), total, miss[0]))
+    if grand == 0:
+        bad.append("四视图合计 0 个术语芯片（发射器疑似整体失效）")
+    if bad:
+        return "；".join(bad)
+    return True
+
+
+@check("N-U19 负控：发射器被剥掉 name ⇒ U-19 必须红")
+def n_u19():
+    """反向对照（维二）：把 `GL.chip` 的输出剥掉 ` name="term"` 再渲染。
+
+    变异落在**发射器**上（import 后 monkeypatch GL.chip；_load 内存加载，
+    磁盘一字节不动）。用完在 finally 里**还原共享模块** —— 量具不许给
+    后续判据留脏状态。两步法走 `_mut_render`（C-01）。
+    """
+    src = _src(_SERVER_REL)
+    if "import glossary as GL" not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    patch = ("\n# [N-U19] 变异：发射器不再输出 name\n"
+             "GL.chip = (lambda _orig: lambda *a, **k: "
+             "_orig(*a, **k).replace(' name=\"term\"', '', 1))(GL.chip)\n")
+    import glossary as _gl
+    _orig = _gl.chip
+    try:
+        page, _why = _mut_render(src + patch, "is0490_nu19", _SERVER_REL,
+                                 view="inbox",
+                                 root=tempfile.mkdtemp(prefix="g0490_nu19_"),
+                                 token="T", items=_items(), posture=_POSTURE)
+        if _why:
+            return _why
+        miss, total = _u19_offenders(page)
+        if total == 0 or not miss:
+            return "负控失效：剥掉 name 后 U-19 仍绿（注入没生效）"
+    finally:
+        _gl.chip = _orig
+    live_miss, live_total = _u19_offenders(_page("inbox"))
+    if live_total == 0 or live_miss:
+        return "夹具不成立：真实现本身缺 name ⇒ 负控无分辨力"
     return True
 
 
@@ -810,7 +893,7 @@ def n_u06():
 
 # ════════════════════════════ U-13 · 戊1（头部 logo.svg）＋ 戊2 机械部分 ══
 @check("U-13 ★ 戊1：头部用 logo.svg、零 mp4；svg 内部哨点已去（戊2 机械部分）")
-def u13():
+def u13(mod=SV):
     """戊1：768×768 → 46×46 的 mp4 缩放下发虚（607 KB 换一个模糊角标）
     ⇒ 头部改用矢量 `logo.svg`；mp4 留给托盘（16×16 合理，不动），
     favicon.ico 不变（U-13 只查头部，不碰托盘与 favicon）。
@@ -818,8 +901,10 @@ def u13():
     戊2 的机械部分并在这里断言（视觉部分走截图验收，§5.8）：
     svg 内部那颗橙色哨点已去 —— 它与顶部条 `.dot` 是两套「点」语言，
     状态由 `.dot` 独占（单一真源）。
+
+    ★ 0.50.2：加 `mod` 参数（默认真模块），负控才能拿变异模块跑同一条正判据。
     """
-    page = _page("inbox")
+    page = _page("inbox", mod=mod)
     head = re.search(r'<header class="bar">.*?</header>', page, re.S)
     if not head:
         return "抽不到 <header class=\"bar\">"
@@ -839,36 +924,33 @@ def u13():
 
 @check("N-U13 负控：头部换回 mp4 ⇒ U-13 必须红")
 def n_u13():
-    """反向对照（维二）：把 img 换回 state 专属 mp4（戊1 前的形状）。"""
-    src = _src(_SERVER_REL)
-    # ★ 0.48.6（B3）：锚点同步 —— 头部 img 的 `src` 不再挂 `?t=%s`（口令走
-    #   HttpOnly cookie），`_bar` 的参数表也不再收 `_esc(token)`。变异本身不变
-    #   （仍是"把 img 换回 state 专属 mp4"，且 mp4 那条仍带 `?t=%s` —— 于是
-    #   参数表要多收两个，与下面的替换严格配对）。
-    a_img = ('        "<div class=\\"logo\\"><img alt=\\"Antinel\\" '
-             'src=\\"/assets/logo.svg\\"></div>"')
-    a_args = "        % (M.STATE_VAR[st], M.STATE_VAR[st],"
-    if a_img not in src or a_args not in src:
-        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
-    page, _why = _mut_render(src.replace(
-        a_img,
-        '        "<div class=\\"logo\\"><video autoplay loop muted playsinline "\n'
-        '        "src=\\"/assets/%s.mp4?t=%s\\"></video></div>"').replace(
-        a_args,
-        "        % (_esc(M.STATE_LOGO[st]), _esc(token), M.STATE_VAR[st],"
-        " M.STATE_VAR[st],"),
-        "is0490_nu13", _SERVER_REL,
-                             view="inbox", filt=M.BUCKET_ACTION,
-                           root=tempfile.mkdtemp(prefix="g0490_nu13_"),
-                           token="T", items=_items(), posture=_POSTURE)
-    if _why:
-        return _why
+    """反向对照（维二）：把头部图标换回 state 专属 mp4（戊1 前的形状）。
+
+    ★ 0.50.2：改用**行为变异**（换掉 `_logo_mark` 的产出），不再做源码文本替换。
+      老锚点 `"<div class=\\"logo\\"><img alt=\\"Antinel\\" …>"` 在 0.49.0
+      换成内联动效 SVG（＋`<noscript>` 退回图）时就死了 —— 负控连着两轮报
+      "变异锚点未找到（源码已变，需更新负控）"，也就是**尺子自己先失效**。
+      锚点绑源码形状 ⇒ 产品每改一次形状就得修一次尺子。变异打在行为上，
+      无论头部怎么重排都不会腐化；而且 U-13 认的本来就是"头部这份图标是什么"
+      这个行为，不是某一行字面量。
+    """
+    try:
+        mut = _load(_src(_SERVER_REL), "is0490_nu13", _SERVER_REL)
+    except Exception as e:                                          # noqa: BLE001
+        return ("负控自身失效：变异模块加载就抛 %s: %s —— 量具故障，不算通过"
+                % (type(e).__name__, e))
+    mut._logo_mark = lambda st, label="Antinel": (
+        '<video autoplay loop muted playsinline src="/assets/%s.mp4"></video>'
+        % M.STATE_LOGO.get(st, "L0"))
+    page = _page("inbox", filt=M.BUCKET_ACTION, mod=mut)
     head = re.search(r'<header class="bar">.*?</header>', page, re.S)
     if not head or ".mp4" not in head.group(0):
         return "负控失效：换回 mp4 后头部仍无 mp4（注入没生效）"
     live = re.search(r'<header class="bar">.*?</header>', _page("inbox"), re.S)
     if ".mp4" in live.group(0):
         return "夹具不成立：真实现本身头部就带 mp4 ⇒ 负控无分辨力"
+    if u13(mod=mut) is True:
+        return "负控失效：头部是 mp4 时 U-13 仍判合格 —— 这条判据是装饰"
     return True
 
 

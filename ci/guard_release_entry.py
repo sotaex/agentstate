@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: Apache-2.0
 
-"""0.42.0 判据 —— **发布入口不许退化成"建了没人用"**（S40–S42 ＋ S48/S49，各带负控）。
+"""0.42.0 判据 —— **发布入口不许退化成"建了没人用"**（S40–S42 ＋ S48-release/S49，各带负控）。
 
 ★★ 这条判据为什么必须存在（2026-10-09 本班三次复发）：
 
@@ -230,7 +230,7 @@ def n_s42():
     return True
 
 
-# ══════════ S48 · verify_release 的 sdist 陈旧判据必须是结构的 ══════════════
+# ══════════ S48-release · verify_release 的 sdist 陈旧判据必须是结构的 ══════════════
 #
 # ★ 为什么补这条（0.42.1，一次实测逼出来的）：
 #   0.42.0 出包后第一次真跑 `verify_release.py`，它在 [B] 步报
@@ -252,7 +252,7 @@ _VER = "0.42.0"
 
 
 def _judge_stale_fn(fn):
-    """S48 的判据本体（行为判据：喂成员表，不看源码形状）。
+    """S48-release 的判据本体（行为判据：喂成员表，不看源码形状）。
 
     ★ 期望值**写死**在本文件里（_CLEAN_MEMBERS / _STALE_MEMBERS / _VER），
       不取自被测对象 —— 0380 S10 的教训：期望跟着被测对象变 ⇒ 判据永远绿。
@@ -270,7 +270,7 @@ def _judge_stale_fn(fn):
     return True
 
 
-@check("S48 sdist 陈旧判据必须结构化：干净不误杀、混旧版必抓到")
+@check("S48-release sdist 陈旧判据必须结构化：干净不误杀、混旧版必抓到")
 def s48():
     rel = "scripts/verify_release.py"
     if not os.path.isfile(os.path.join(ROOT, rel)):
@@ -282,7 +282,7 @@ def s48():
     return _judge_stale_fn(fn)
 
 
-@check("N-S48 负控：把判据换回第一版的子串写法 ⇒ 干净 sdist 必被误杀（S48 必须因此红）")
+@check("N-S48-release 负控：把判据换回第一版的子串写法 ⇒ 干净 sdist 必被误杀（S48-release 必须因此红）")
 def n_s48():
     src = _src("scripts/verify_release.py")
     anchor = '        if top != want:\n'
@@ -310,7 +310,7 @@ def n_s48():
     r = _judge_stale_fn(fn)
     if r is True:
         return ("负控失效：换回第一版子串写法后，干净 sdist 仍不被误杀 —— "
-                "说明 S48 分辨不出这次复发（判据白装）")
+                "说明 S48-release 分辨不出这次复发（判据白装）")
     return True
 
 
@@ -320,7 +320,7 @@ def n_s48():
 #   [B] 的子串假红修好后，verify_release 第一次走到 [D] 就挂在安装态探针上 ——
 #   `antinel.main(['--version'])` 打完成本走 **SystemExit(0)**，第一版探针没接，
 #   进程在 `process_elevation()` 之前就退了 ⇒ "E2E-OK" 永远打不出来 ⇒ 假红。
-#   ★ 与 S48 同族、但更狠：**脚本化 D 步一次都没跑完过**（0.42.0 出包后被 [B]
+#   ★ 与 S48-release 同族、但更狠：**脚本化 D 步一次都没跑完过**（0.42.0 出包后被 [B]
 #     中止；文档里 0.41.0 那次"通过"是手工探针）—— **零覆盖的路径必然是坏的**。
 # ⇒ 本条把探针当**可执行对象**真跑（对源码树，不装包）：接住 SystemExit、
 #   核对版本、提权探测可调，三件事缺一即红；负控两个变异都必须让它红。
@@ -397,7 +397,7 @@ def n_s49():
 
 def main():
     print("=" * 74)
-    print("0.42.0 判据 —— 发布入口不许退化成「建了没人用」（S40–S42 ＋ S48/S49）")
+    print("0.42.0 判据 —— 发布入口不许退化成「建了没人用」（S40–S42 ＋ S48-release/S49）")
     print("=" * 74)
     for n, r in PASSED:
         print("  ✅ %s" % n)

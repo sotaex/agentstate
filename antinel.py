@@ -36,7 +36,7 @@ if _HERE not in sys.path:
 
 from strings import detect_lang, get_string
 
-VERSION = "0.48.4"
+VERSION = "0.50.3"
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 

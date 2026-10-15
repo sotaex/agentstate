@@ -703,8 +703,12 @@ def j_docstring_paths_exist():
     ★ 语料同 D-29（docstring，不扫注释/代码字符串 —— 那里大量故意引用坏形状）。
     ★ 断言打在**存在性**上（相对 PKG），不打字面（维三）。
     ★ 注册前已自扫修光（0482/j2 两处描述旧形态的措辞改写法，见提交信息）。
+    ★★ 2026-10-15 修一处**量具假红**（假红不是缺陷、是盲区）：原扩展交替表
+      缺 `jsonl` 且无结尾边界 ⇒ 把 `.jsonl` 后缀截成 `.json` 去查存在性 ⇒
+      对写着正确 jsonl 路径的 docstring 报「不存在」。修法：扩展表补 `jsonl`
+      （放在 `json` 前，长配优先）＋ 结尾负向预查 `(?![\w./-])`。
     """
-    pat = re.compile(r"(?:ci|scripts|tools|hooks|_tools_\d+)/[\w./-]+\.(?:py|json|md|ps1|yml)")
+    pat = re.compile(r"(?:ci|scripts|tools|hooks|_tools_\d+)/[\w./-]+\.(?:jsonl|json|py|md|ps1|yml)(?![\w./-])")
     bad = []
     n = 0
     for rel, docs in _docstring_corpus():

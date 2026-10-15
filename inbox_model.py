@@ -690,6 +690,9 @@ def filter_label(filt, hours=WINDOW_HOURS):
         return state_short(lv)
     if filt.startswith("kind:"):
         return TITLE_OF_KIND.get(filt[5:], filt[5:])
+    if filt.startswith("ids:"):
+        n = len([x for x in filt[4:].split(",") if x])
+        return "指定的 %d 条记录" % n
     if filt.startswith("rule:"):
         return "规则 " + filt[5:]
     if filt.startswith("win:"):
@@ -733,6 +736,9 @@ def filter_items(items, filt, now=None, hours=WINDOW_HOURS):
         return [it for it in items if it.level == filt[3:]]
     if filt.startswith("kind:"):
         return [it for it in items if it.kind == filt[5:]]
+    if filt.startswith("ids:"):
+        wanted = {x for x in filt[4:].split(",") if x}
+        return [it for it in items if it.id in wanted]
     if filt.startswith("rule:"):
         return [it for it in items if it.rule_id == filt[5:]]
     return [it for it in items if bucket_of(it, now=now, hours=hours) == filt]
@@ -853,7 +859,15 @@ def reading_note():
          窗口自载入起算。分母与单位下沉到每个 tab 的**可见单位**与「？」词条的
          口径行（那才是定义处）。**先删谎，再谈增强**（§5.3 反漂移）。
     """
-    return "以上数字均为本次载入时的读数；窗口自载入起算，不随页面停留刷新。"
+    # ★ 0.50.4（Q-22）：补上**载入时刻**。页面诚实声明"不随页面停留刷新"，
+    #   可用户看不出手上这一屏是 1 分钟前还是 3 小时前的 —— 只说"不刷新"
+    #   而不给时刻，等于让用户自己猜快照的新旧。
+    #   ★ 不加参数（调用点保持 `M.reading_note()` 形态）：判据
+    #     `ci/inbox_guards_0490.py` 用 AST 查调用形态，`ci/inbox_guards_0470.py`
+    #     直接比对 `M.reading_note()` 与页面文本 —— 加参数会让两边都错位。
+    _at = datetime.now().astimezone().strftime("%H:%M")
+    return ("以上数字均为本次载入时的读数（载入于 %s）；窗口自载入起算，"
+            "不随页面停留刷新。" % _at)
 
 
 def known_filter(filt):
@@ -863,6 +877,9 @@ def known_filter(filt):
     for p in ("lv:", "kind:", "rule:"):
         if filt.startswith(p) and len(filt) > len(p):
             return True
+    if filt.startswith("ids:"):
+        ids = filt[4:].split(",")
+        return bool(ids and all(x.strip() for x in ids))
     if filt.startswith("win:") or filt.startswith("day:"):
         try:
             prefix, scope, inner = filt.split(":", 2)
@@ -1355,7 +1372,15 @@ def light_explain(posture, items, now=None, hours=WINDOW_HOURS, granary=None):
         #   「灯这样报，是因为 24 小时里有没处理的事」**已不成立** ——
         #   此刻好 ⇒ 灯是绿的，根本没有"被账报红"这回事。改成"另外…"，
         #   如实把它说成**另一件事**，而不是灯色的来源。
-        reason = "此刻是好的（%s）；另外，24 小时里还有没处理的事。" % _nt
+        # ★★ 0.50.4（Q-12，2026-10-15 品质扫描）：原句「此刻是好的…；**另外**，
+        #   24 小时里还有没处理的事」把两件事说成并列，可状态词恰恰是**后者**
+        #   取的（此刻好 ⇒ 灯色只能来自 24 小时账）—— 页面上就出现
+        #   「橙红的『拦截』」紧挨着「此刻是好的」，读者第一眼是自相矛盾的。
+        #   ⇒ 把"灯色从哪儿来"这层关系**写出来**（不是改口径，改的是说法）：
+        #   先说此刻（设计原则：始终先说此刻），再点明灯报的是账上那件事。
+        #   ★ 判据 `ci/inbox_guards_0380.py` 守两条：原因句必须含「没处理」、
+        #     且不得退回旧语义「灯这样报」—— 本句两条都满足。
+        reason = "此刻是好的（%s）；这盏灯报的是 24 小时里还没处理的事。" % _nt
     else:
         reason = "%s；24 小时里也没有等你处理的事。" % _nt
     return {"state": st, "label": label, "now_text": now_text,

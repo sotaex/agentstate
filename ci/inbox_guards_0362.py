@@ -280,15 +280,19 @@ def c_place_all_moves_every_window():
     return True
 
 
-def c_place_all_partial_failure_is_not_success():
+def c_place_all_partial_failure_is_not_success(mod=None):
     """★★ 根因②的正面判据：**局部成功不算成功**。
 
     ★★ 这条是本轮最要紧的行为判据。实测故障形态：
       旧窗口挪走了、新窗口没挪 ⇒ 若此时报"已落位"，
       用户看到的就是"修复没生效"而日志说成功 —— **谎报**。
       ⇒ 要求：N 个里任一个不符 ⇒ 整体 False，且说清几个不符。
+
+    ★ 0.50.2：加 `mod` 注入点（默认真模块）—— 负控才能拿**变异模块**跑
+      同一条正判据，证明"正判据真的会翻面"（原来只证明"变异看得见"）。
     """
-    import inbox_window as WIN
+    import inbox_window as _W
+    WIN = mod or _W
     good = (2440, 1264, 520, 640)
     bad = (10, 10, 1050, 1932)          # 实测真实故障形状
     ok, why = WIN.place_all([1, 2], good,
@@ -318,20 +322,47 @@ def c_place_all_partial_failure_is_not_success():
 
 
 def n_place_all_partial_ok_is_caught():
-    """负控：把"整体成功"改成"任一成功即成功" ⇒ 本条必须报红。"""
+    """负控：把 `place_all` 的「整体成功」改成「任一成功即成功」⇒ 本条必须报红。
+
+    ★★ 0.50.2 修两处（都是**实测**出来的量具故障，不是产品问题）：
+      ① **变异打错了函数**：文件里有**两处** `if all(oks):`
+         （`set_topmost` 与 `place_all`），`src.replace(..., 1)` 命中的是
+         **前面那处** ⇒ `place_all` 行为一字未变 ⇒ 负控恒报"失效"，
+         而屏上只打一个裸 `False`，看不出是"锚点过时"还是"变异没翻面"。
+         ⇒ 改成先切出 `place_all` 的函数段再变异。
+      ② 失败时返回**说明串**（不再返回裸 `False`）—— 量具故障要能一眼读出。
+      ③ 负控改成**拿变异模块跑同一条正判据**（`mod=` 注入），
+         而不是自己重写一遍"变异后应该成功"的判断。
+    """
+    import types
+
     import inbox_window as WIN
     src = _src_of(WIN)
-    mutated = src.replace("if all(oks):", "if any(oks):", 1)
+    seg = _func_seg(src, "place_all")
+    if "if all(oks):" not in seg:
+        return ("变异锚点未找到（`place_all` 段里没有 `if all(oks):`）"
+                "—— 负控自身失效，不算通过")
+    mutated_seg = seg.replace("if all(oks):", "if any(oks):", 1)
+    if mutated_seg == seg:
+        return "负控自身失效：段内替换没生效"
+    mutated = src.replace(seg, mutated_seg, 1)
     if mutated == src:
-        return False                     # 变异没生效 ⇒ 锚点过时
+        return "负控自身失效：变异没落到源上"
     ns = {}
-    exec(compile(mutated, "<mut>", "exec"), ns)             # noqa: S102
+    exec(compile(mutated, "<mut_place_all>", "exec"), ns)       # noqa: S102
+    shim = types.SimpleNamespace(place_all=ns["place_all"])
     good = (2440, 1264, 520, 640)
     bad = (10, 10, 1050, 1932)
-    ok, _why = ns["place_all"]([1, 2], good,
+    ok, _why = shim.place_all([1, 2], good,
                               setter=lambda h, r: True,
                               reader=lambda h: good if h == 1 else bad)
-    return ok is True                    # 变异后必须报成功 ⇒ 原判据抓得住
+    if ok is not True:
+        return ("负控失效：变异成「任一成功即成功」后 `place_all` 仍报失败"
+                "（实测 %r）—— 变异没打到判分点" % (str(_why)[:70],))
+    # 拿变异模块跑**同一条正判据** ⇒ 必须翻面
+    if c_place_all_partial_failure_is_not_success(mod=shim) is True:
+        return "负控失效：变异模块跑正判据仍判合格 —— 这条判据是装饰"
+    return True
 
 
 def c_place_all_refuses_empty_and_none():
@@ -513,7 +544,7 @@ def n_browser_window_matched_is_caught():
     return True                             # 变异生效：去掉防护后确实误命中
 
 
-def c_wide_enumeration_default_is_wide():
+def c_wide_enumeration_default_is_wide(src=None):
     """★★ 宽泛枚举的**默认路径**必须真的是宽泛的（不是"函数存在就算"）。
 
     ★★★ 这条判据来自 0.36.2 的**第二次同型踩坑**：
@@ -524,12 +555,15 @@ def c_wide_enumeration_default_is_wide():
       ★ 教训：**新增一个正确的函数 ≠ 修正调用它的默认路径**。
         所以这条判据不看"函数在不在"，而是**真跑默认参数**，
         并要求它能认出带身份串的窗口（严格 endswith 认不出的那种）。
+
+    ★ 0.50.2：加 `src` 注入点（默认真源码）—— 负控才能拿**变异源码**跑
+      同一条正判据（本条的落点是源码形状，不是运行期行为）。
     """
     import inbox_window as WIN
     # 默认参数（不给 run_id）下，枚举必须走宽泛判据。
     # 判据要求：默认分支里**直接**调 `is_console_title`，
     # 而不是在 run_id 为空时退回 `_matches_title`（那是窄的）。
-    code = _code_only(_src_of(WIN))
+    code = _code_only(src if src is not None else _src_of(WIN))
     seg = _func_seg(code, "find_console_windows")
     if "is_console_title" not in seg:
         return ("枚举的默认路径没有走 `is_console_title`"
@@ -545,15 +579,35 @@ def c_wide_enumeration_default_is_wide():
 
 
 def n_wide_default_narrowed_is_caught():
-    """负控：把默认分支改回窄判据 ⇒ 上一条必须报红。"""
+    """负控：把默认分支改回窄判据 ⇒ 上一条必须报红。
+
+    ★★ 0.50.2 修两处（实测的量具故障）：
+      ① **锚点已死**：老锚点 `if is_console_title(buf.value, run_id):`
+         在 `find_console_windows` 改成列表推导后就不存在了 ⇒ 负控恒报
+         "失效"，屏上只打一个裸 `False`。⇒ 改成按**调用形态**变异
+         （正则认 `is_console_title(...)` 整体，参数名改了也不会腐化）。
+      ② 改成**拿变异源码跑同一条正判据**（`src=` 注入），不再自己重写
+         "变异后应该没有 is_console_title" 的判断。
+    """
     import inbox_window as WIN
-    code = _code_only(_src_of(WIN))
+    src = _src_of(WIN)
+    code = _code_only(src)
     seg = _func_seg(code, "find_console_windows")
-    mutated = seg.replace("if is_console_title(buf.value, run_id):",
-                          "if _matches_title(buf.value, suffix):", 1)
-    if mutated == seg:
-        return False                        # 锚点过时
-    return "is_console_title" not in mutated
+    if "is_console_title" not in seg:
+        return ("变异锚点未找到（`find_console_windows` 段里没有 "
+                "`is_console_title`）—— 负控自身失效，不算通过")
+    mutated_seg, n = re.subn(r"is_console_title\([^)]*\)",
+                             "_matches_title(title, suffix)", seg, count=1)
+    if n == 0:
+        return "负控自身失效：按调用形态变异没命中"
+    if "is_console_title" in mutated_seg:
+        return "负控自身失效：变异后段里仍有 is_console_title"
+    mutated = code.replace(seg, mutated_seg, 1)
+    if mutated == code:
+        return "负控自身失效：变异没落到源码上"
+    if c_wide_enumeration_default_is_wide(src=mutated) is True:
+        return "负控失效：变异源码跑正判据仍判合格 —— 这条判据是装饰"
+    return True
 
 
 def c_two_level_matching_covers_all_forms():

@@ -10,12 +10,12 @@
     每次交付前跑它，任何一条复发当场报红。
 
 ★ 本文件检查的 6 条，全部来自 0.36.4 的实测错误（不是假想）：
-  G2  `inspect.cleandoc` 破坏缩进 ⇒ `ast.parse` 失败 ⇒ 判据自身崩溃
+  G2-selfcheck  `inspect.cleandoc` 破坏缩进 ⇒ `ast.parse` 失败 ⇒ 判据自身崩溃
   G5  判据逐字匹配文案 ⇒ 措辞一改就假红（本轮踩过："1 个没落位"）
   G6  判据用例没跟上被测函数的签名 ⇒ 抛异常（本轮踩过两处）
-  M1  结论没有贴"实测"证据标签（本项目老纪律，跨项目通用）
-  M2  版本号用字符串比较 ⇒ `0.99 < 0.1`（本轮踩过，方向反了）
-  M4  未登记状态直接进集合运算 ⇒ 不可哈希值抛 `TypeError`
+  M1-selfcheck  结论没有贴"实测"证据标签（本项目老纪律，跨项目通用）
+  M2-selfcheck  版本号用字符串比较 ⇒ `0.99 < 0.1`（本轮踩过，方向反了）
+  M4-selfcheck  未登记状态直接进集合运算 ⇒ 不可哈希值抛 `TypeError`
   ＋ P6  本轮第六条：治标不治因（本轮关窗治标 ⇒ 改独立 profile 断根）
 """
 from __future__ import annotations
@@ -50,7 +50,7 @@ def check(name):
 def _strip_comments_and_docstrings(src):
     """剥掉注释与 docstring，只留可执行代码（按行号删除整行）。
 
-    ★ 为什么必须有（本轮 M2 判据第一版踩过）：
+    ★ 为什么必须有（本轮 M2-selfcheck 判据第一版踩过）：
       在源码**文本**里正则扫描会命中 docstring 里那些**举例说明**的字符串——
       而那些说明恰恰是在警告「别这么写」。判据于是把说明当成了实现。
       ⇒ 与本轮 G1（`find` 命中注释）同源：**文本 ≠ 语法**。
@@ -75,8 +75,8 @@ def _guard_files():
     return sorted(f for f in os.listdir(CI) if f.startswith("inbox_guards_"))
 
 
-# ══════════════════════════════════════════════ 组 1：判据自身可靠（防 G2/G5/G6）
-@check("G2 判据里没有 inspect.cleandoc（会破坏缩进使 AST 解析失败）")
+# ══════════════════════════════════════════════ 组 1：判据自身可靠（防 G2-selfcheck/G5/G6）
+@check("G2-selfcheck 判据里没有 inspect.cleandoc（会破坏缩进使 AST 解析失败）")
 def g2_no_cleandoc():
     bad = []
     for f in _guard_files():
@@ -193,8 +193,8 @@ def g6_signature_sync():
     return "已核对 %d 处跨模块调用的关键字参数，全部对得上" % checked
 
 
-# ══════════════════════════════════════════════ 组 2：我自己最容易犯的（防 M1/M2/M4）
-@check("M2 版本比较用逐段整数，不用字符串（字符串会让 0.99 < 0.1）")
+# ══════════════════════════════════════════════ 组 2：我自己最容易犯的（防 M1-selfcheck/M2-selfcheck/M4-selfcheck）
+@check("M2-selfcheck 版本比较用逐段整数，不用字符串（字符串会让 0.99 < 0.1）")
 def m2_version_compare():
     sys.path.insert(0, HERE)
     import host_shield as HS
@@ -218,7 +218,7 @@ def m2_version_compare():
     return "逐段整数比较，对拍 3 组全对"
 
 
-@check("M4 light() 对非字符串状态不抛 TypeError（先 isinstance 再查集合）")
+@check("M4-selfcheck light() 对非字符串状态不抛 TypeError（先 isinstance 再查集合）")
 def m4_unknown_state_type():
     sys.path.insert(0, HERE)
     import inbox_model as M
@@ -245,7 +245,7 @@ def m4_unknown_state_type():
     return "6 个非法状态全部兜底为未知，无一报绿"
 
 
-@check("M1 每个判据函数都说明它验证什么（禁止无说明的裸 assert）")
+@check("M1-selfcheck 每个判据函数都说明它验证什么（禁止无说明的裸 assert）")
 def m1_every_check_explains():
     """本项目铁律：说「我实测过」之前先真的跑一遍。
     ⇒ 反向检查：每个判据都必须有 docstring 或 return 说明，
@@ -393,8 +393,8 @@ def p8_guards_test_the_real_thing():
          `return bool(...)` 改成 `return False`（行为全坏）⇒ F1 照样绿。
       ③ **F3** 写了 `for bad in (...)` 却**从不注入**那个变量
          ⇒ 等于用同一个真实姿态断言了三次，还报得言之凿凿。
-      ④ **G2** 只查 `"_delivery_gate(" in 源码` ⇒ 把调用挪进 `if False:`
-         （永不执行）⇒ G2 照样绿。
+      ④ **G2-selfcheck** 只查 `"_delivery_gate(" in 源码` ⇒ 把调用挪进 `if False:`
+         （永不执行）⇒ G2-selfcheck 照样绿。
       ⇒ 它们的共同形态：**判据验的是"源码里有没有某个字样"，
         而不是"运行起来是不是对的"**。
       ★ 后果最严重的一类是 ②④：它们是**假绿** —— 判据坏了而账面是绿的。

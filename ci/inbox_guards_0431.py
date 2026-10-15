@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """0.43.1 判据 —— **右下冒泡根治（十维）**：通知不许撒谎、不许重复、不许各自为政；
-外加**状态判据**两维（研发态必须可达 S67；且其根因 S69「构建产物不许冒充手工承载件」
-不许被改回去）。
+外加**状态判据**三维（研发态必须可达 S67；其根因 S69「构建产物不许冒充手工承载件」
+不许被改回去；**S70 研发态的"可达性"本身要被守** —— 0.50.3 补，见下）。
 
 ★★ 这一份判据的由来（2026-10-10 实测「右下冒泡」复发，非推演）：
 
@@ -43,13 +43,19 @@ if ROOT not in sys.path:
 RESULTS = []
 
 
+class Skip(Exception):
+    """夹具凑不齐（例：本机没有 git / 不在工作树里）⇒ **不判**，也**不许判绿**。"""
+
+
 def check(name):
-    """★ 判据**必须真会红** —— 返回说明串一律转成抛异常。"""
+    """★ 判据**必须真会红** —— 返回说明串一律转成抛异常；`SKIP` 前缀转 Skip。"""
     def deco(fn):
         def wrapper():
             r = fn()
             if r is True or r is None:
                 return True
+            if isinstance(r, str) and r.startswith("SKIP"):
+                raise Skip(r)
             raise AssertionError(r if isinstance(r, str) else repr(r))
         RESULTS.append((name, wrapper))
         return fn
@@ -449,9 +455,153 @@ def n_s69():
     return True
 
 
+# ════════ 维度十二 · 研发态的**可达性**本身要被守（0.50.3 补，创始人 2026-10-14）════════
+#: 为什么单开一维（**同一句话创始人说过两遍**，中间隔了四天 —— 这就是"旧病复发"）：
+#:   2026-10-10：「目前状态是失守，这是不对的……是不是机制上有欠缺，给补上」
+#:     ⇒ 0.43.1 判出**根因**在 `ci/version_check.py`（把构建产物 manifest 当手工承载件
+#:       ⇒ 每次升版被迫把 manifest 的 version 刷平 ⇒ 落差恒为 0 ⇒ 研发态结构性失效），
+#:       修法＝把它从"逐字一致"里**摘出**（S69 钉住"摘出不被改回去"）。
+#:   2026-10-14：「这段词是旧病复发，显然缺乏目前的九维机制吧？……这是开发态，
+#:                如果缺乏机制，也请修到位」—— 实测本机：
+#:       `antinel.py VERSION = 0.48.4`，`psl/manifest.json version = 0.48.4` ⇒ **落差 = 0**
+#:       ⇒ `is_dev_build()` 恒 False ⇒ 开发树上任何一次自检漂移都被渲染成
+#:         **失守 ＋「这份守门的代码我认不出是不是出厂那份」**（两臂实测见下）。
+#:
+#:   ★★ 0.43.1 修对了**根因**，但只修了「**机制**」这一半，漏了「**可达性**」这一半：
+#:      S67 验的是"**给定落差存在**，函数行为对不对"；S69 验的是"落差**能不能**存在"。
+#:      两者都在**注入的版本号**上跑 —— **没有任何一条判据看这棵树自己**。
+#:      ⇒ 于是"落差在这棵树上实际为 0"这件事，**没有任何东西会红**，
+#:        只能靠创始人肉眼看见"失守"再回来报（本轮实测正是如此）。
+#:      ⇒ 本维补的就是它：**研发树上，落差必须真实存在**（否则红，并给一条命令的出路）。
+#:
+#:   ★★★ 两臂实测（本机，`ci/inbox_guards_0431.py` 写之前先跑过一遍）：
+#:     漂移 = `host_shield.py 与 manifest 不符（运行代码可能被改）`，自检强制为不符：
+#:       A 落差存在（登记 0.48.4 ＜ 代码 0.50.3）⇒ posture=**dev**，灯=**研发中**（蓝）
+#:       B 落差为 0（登记 0.50.3 ＝ 代码 0.50.3）⇒ posture=**warn**，灯=**失守**（红）
+#:     B 的 `why` 与创始人截图**逐字相同**：
+#:       「哨兵在岗，但这份守门的代码我认不出是不是出厂那份——可能被改动过，
+#:         也可能是这次没装好。」
+#:     ⇒ 这就是"失守"那条红字的**唯一来源**，也证明修法（把落差恢复）**对症**。
+#:
+#:   ★ 为什么"研发树"要**用 git 判**（而产品侧不许用 —— S27 的红线）：
+#:     `is_dev_build()` 是**产品运行时代码**，它一旦用环境信号（`.git`／mtime），
+#:     本机"跑哨兵的就是源码检出"⇒ 那条信号**恒真** ⇒ 已发版包被篡改也会被读成
+#:     "研发中"（0.40.0 B1 撤回的正是这条）。**判据不是产品**：它在开发仓里跑，
+#:     `git` 是"这棵树相对最近一次发布有没有差异"的**可靠读数**，不会恒真。
+#:     ⇒ 产品侧继续只认版本落差（S67 守着），本判据负责**逼出**那个落差。
+def _git_out(args):
+    """跑一条 git 命令，返回 `(returncode, stdout.strip())`；跑不起来返回 `(None, "")`。"""
+    import shutil
+    import subprocess
+    exe = shutil.which("git")
+    if not exe:
+        return None, ""
+    try:
+        p = subprocess.run([exe] + list(args), cwd=ROOT, capture_output=True,
+                           timeout=30)
+    except Exception:                                           # noqa: BLE001
+        return None, ""
+    return p.returncode, p.stdout.decode("utf-8", "replace").strip()
+
+
+def _dev_tree_facts():
+    """这棵树是不是"研发树"。返回 `(is_dev, 说明)`；判不了 ⇒ `(None, 原因)`（→ SKIP）。
+
+    ★ 口径（**刻意用"相对最近一次发布"而不是"有没有脏文件"**）：
+      提交完工作树也会变干净，可代码**照样**比登记的新 —— 只看脏文件会漏掉
+      "已经 commit、还没发版"这个最常见的中段。⇒ 两个读数取**或**：
+        · `git status --porcelain` 非空（有未提交/未跟踪改动）
+        · `git diff --name-only <最近 tag> HEAD` 非空（已提交、但比上次发布新）
+    """
+    rc, inside = _git_out(["rev-parse", "--is-inside-work-tree"])
+    if rc is None or inside != "true":
+        return None, "本机没有 git，或这里不是一个 git 工作树（判不了 ⇒ 不判）"
+    rc, dirty = _git_out(["status", "--porcelain"])
+    if rc != 0:
+        return None, "`git status` 跑不通（判不了 ⇒ 不判）"
+    rc, tag = _git_out(["describe", "--tags", "--abbrev=0"])
+    ahead = ""
+    if rc == 0 and tag:
+        rc2, ahead = _git_out(["diff", "--name-only", tag, "HEAD"])
+        if rc2 != 0:
+            return None, "`git diff %s HEAD` 跑不通（判不了 ⇒ 不判）" % tag
+    else:
+        # 一个 tag 都没有 ⇒ 从没发布过 ⇒ 整棵树都是"还没发出去"的
+        tag = "(无 tag)"
+    is_dev = bool(dirty) or bool(ahead)
+    return is_dev, ("工作树相对 %s %s（未提交 %d 行、已提交未发布 %d 个文件）"
+                    % (tag, "有差异 ⇒ 这是研发树" if is_dev else "无差异 ⇒ 不是研发树",
+                       len(dirty.splitlines()), len(ahead.splitlines())))
+
+
+def _dev_gap_fails(is_dev, inst, code):
+    """S70 的核心（**纯函数，可注入**）：研发树上落差必须存在。返回错误串或 None。"""
+    if not is_dev:
+        return None                      # 不是研发树 ⇒ 不要求落差（已发版本来就相等）
+    if not inst or not code:
+        return ("这是研发树，却读不到版本对照（登记 %r／代码 %r）⇒ 研发态判据"
+                "无法成立，任何自检漂移都会被读成失守" % (inst, code))
+    try:
+        sys.path.insert(0, ROOT)
+        import host_shield as _HS
+        newer = _HS._ver_lt(inst, code)
+    except Exception as e:                                      # noqa: BLE001
+        return "版本号比不了（%s vs %s，%s）⇒ 往严偏，判红" % (inst, code, type(e).__name__)
+    if newer is None:
+        return "版本号比不了（%s vs %s）⇒ 往严偏，判红" % (inst, code)
+    if not newer:
+        return ("**研发态判据在这棵树上结构性失效**：工作树是研发树，而版本落差为 0"
+                "（登记 %s ≮ 代码 %s）⇒ `is_dev_build()` 恒 False ⇒ 任何自检漂移"
+                "都会被渲染成**失守 ＋「这份守门的代码我认不出是不是出厂那份」**"
+                "（创始人 2026-10-14 截图那条）。出路（一条命令）："
+                "`python ci/bump_version.py %s --apply` —— 只升九处承载件，"
+                "`psl/manifest.json` 保持落后，落差即恢复。"
+                % (inst, code, code))
+    return None
+
+
+@check("S70 ★ 研发树上版本落差必须存在（否则研发态判据结构性失效 ⇒ 自检漂移被读成失守）")
+def s70():
+    is_dev, why = _dev_tree_facts()
+    if is_dev is None:
+        return "SKIP：%s" % why
+    import host_shield as HS
+    err = _dev_gap_fails(is_dev, HS._installed_version(), HS._code_version())
+    if err:
+        return err
+    # 连带对照：落差真的被**用上**了 —— `is_dev_build()` 必须判得出研发态。
+    #   （只查"落差存在"不够：函数里任何一处早退都会让落差白存在。）
+    ok, dev_why = HS.is_dev_build()
+    if is_dev and ok is not True:
+        return ("落差存在，`is_dev_build()` 却仍判 False（%s）⇒ 研发态**不可达**，"
+                "落差白存在（自检一漂移就掉回失守）" % dev_why)
+    return True
+
+
+@check("N-S70 负控：研发树 + 落差为 0 ⇒ 同一条尺子必须判红")
+def n_s70():
+    # ① 反空转：正例（研发树 + 落差）必须**不红**，否则负控没有分辨力
+    if _dev_gap_fails(True, "0.48.4", "0.50.3") is not None:
+        return "夹具不成立：研发树 + 有落差被判红，负控无分辨力"
+    # ② 非研发树（已发版）⇒ 落差为 0 也**不该**红（方向不许往另一头偏）
+    if _dev_gap_fails(False, "0.50.3", "0.50.3") is not None:
+        return "非研发树 + 无落差被判红 ⇒ 尺子误伤已发版形态"
+    # ③ 变异：研发树 + 落差 0 ⇒ 必红，且必须报出"研发态判据结构性失效"
+    why = _dev_gap_fails(True, "0.50.3", "0.50.3")
+    if why is None:
+        return "负控失效：研发树 + 落差 0 仍判合格 —— 这条尺子是装饰"
+    if "结构性失效" not in str(why):
+        return "负控方向不对：报的不是'研发态判据结构性失效'（报的是 %r）" % (why,)
+    # ④ 变异：落差**反向**（登记 ＞ 代码）同样必红
+    if _dev_gap_fails(True, "0.50.3", "0.48.4") is None:
+        return "负控失效：登记版本超前代码版本仍判合格 —— 方向没往严的一边偏"
+    return True
+
+
 def main():
     print("=" * 78)
     print("0.43.1 判据 —— 右下冒泡根治（十维）：不撒谎 / 不重复 / 单一通道 / 可观测 / 研发态可达")
+    print("（＋0.50.3 S70：研发态在这棵树上的**可达性**必须被守 —— 落差为 0 即红，并给出路）")
     print("（全部内存变异，不写任何产品文件）")
     print("=" * 78)
     ok = fail = 0
@@ -465,6 +615,8 @@ def main():
         except AssertionError as e:
             print("  ❌ %-58s %s" % (name, e))
             fail += 1
+        except Skip as s:
+            print("  ⏭️  %-58s %s" % (name, s))
         except Exception as e:                                  # noqa: BLE001
             print("  💥 %-58s %r" % (name, e))
             fail += 1

@@ -243,7 +243,18 @@ def cmd_window(a):
               file=sys.stderr)
         return 1
     print("值守台%s：%s" % ("已重拉" if started else "已在跑", rec["url"]))
-    rep = SV.open_console_settled(rec["url"])
+    # ★★ 2026-10-14（创始人实测「起得来、活不久」）：**先经 daemon 开**。
+    #   CLI 直起时 msedge 挂在 CLI 进程树下；在调用方寿命短于窗口的环境
+    #   （agent 沙箱/CI/一次性脚本），调用方退出连带杀死窗口 ⇒「报了已
+    #   就位、窗口秒没」。同机四路实证：Popen／DETACHED／start 全死，
+    #   **daemon（长命进程）起的活** ⇒ 窗口必须由活得比它久的进程起。
+    #   daemon 不在/没开出来 ⇒ **如实降级**直起（不假装成功，也不卡用户）。
+    rep = SV.open_console_via_daemon(rec["url"], root=getattr(a, "root", None))
+    if rep.get("opened") == "none":
+        rep = SV.open_console_settled(rec["url"], root=getattr(a, "root", None))
+        if rep.get("opened") == "none" and rep.get("why"):
+            print("[window] ⚠ daemon 路径没开出来（%s），已按直起路径重试。"
+                  % rep.get("why"), file=sys.stderr)
     if rep.get("placed"):
         w = rep.get("want") or [0, 0, 0, 0]
         print("[window] 已就位：%dx%d @(%d,%d)（开窗方式：%s）"
