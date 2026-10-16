@@ -24,6 +24,10 @@
                                         在 `ci/guard_instrument_selfaudit.py` 里守）
      批次 12（C5 问号同形 ＋ C4 落位） → **U-16**（问号全站同形：字隐藏、徽章保留）＋
                                         **W-07**（一次性调用方自己等窗就位，真进程实测）
+     批次 15（0.51.0 账本四问）        → **T-04 / T-04b / T-04c**（＋ 三条负控）：
+                                        账本按天明细（银行流水模式）—— 最近 7 天＋
+                                        按月折叠、无记录天不许渲染成 0、`closed:<日期>`
+                                        按关闭日收件（账准侧判据在 0353）
 
    ★ 批次 12 两条都是**存量/本轮自查缺陷**，不是 19 条里的新项：
      · C4：`_place_if_needed` 的 daemon 线程随一次性进程死 ⇒ 落位从未执行
@@ -3024,6 +3028,293 @@ def n_t03():
     return True
 
 
+# ======================================================================
+# 批 15 · T-04 族：账本页**明细**（0.51.0 四问，创始人 2026-10-16 截图指认）
+# ----------------------------------------------------------------------
+# ★ 四问里的第四问（「汇总看不了明细，体验糟」）＋ 追加问（「日期太多怎么办」）
+#   的判据落点。设计定稿见《Antinel·账本页明细设计 v1.1》。
+# ★ 三条硬约束（都是"不许把没查渲染成没事"的同族护栏）：
+#   ① 无记录的天/月**淡显「无记录」**，绝不渲染成 0；
+#   ② 月行**默认收起**（页高不随历史增长：1 年后＝7 日行＋12 月行）；
+#   ③ 每格数字与深链**同源**于 `M.day_counts`（F40：页面数与点进去对得上）。
+# ======================================================================
+
+def _ledger_items():
+    """账本明细夹具（**不写死任何日期** —— 0470 0.48.4 时间炸弹教训）。
+
+    今天 4 条（拦截 2 / 注意 1 / 缺口 1）· 3 天前 1 条（已老去，未关闭）·
+    3 天前 1 条（当天关闭）· 2 天前发生、**今天**才关闭 1 条（发生日≠关闭日，
+    供 `closed:` 证明它按关闭日收）· 75 天前 1 条（当天关闭，撑出月区）。
+    """
+    now = datetime.now().astimezone()
+
+    def ts(days_ago, hour):
+        return (now - timedelta(days=days_ago)).replace(
+            hour=hour, minute=0, second=0, microsecond=0).isoformat()
+
+    def mk(id_, days, hour, level, kind, state="unread", closed=None):
+        a = M.Alert(id=id_, ts=ts(days, hour), level=level, kind=kind, title="t")
+        return M.Item(alert=a, state=state, closed_at=closed)
+
+    return [
+        mk("u0490_L1", 0, 9, "L2", "tool_call_blocked"),        # 今天 · 拦截
+        mk("u0490_L2", 0, 10, "L2", "tool_call_blocked"),       # 今天 · 拦截
+        mk("u0490_L3", 0, 11, "L1", "host_shield_changed"),     # 今天 · 注意
+        mk("u0490_L4", 0, 12, "R0", "host_shield_breach"),      # 今天 · 缺口
+        mk("u0490_L5", 3, 8, "L1", "host_shield_changed"),      # 已老去 · 未关闭
+        mk("u0490_L6", 3, 9, "L2", "tool_call_blocked",
+           state="done", closed=ts(3, 10)),                     # 发生日＝关闭日
+        mk("u0490_L7", 2, 8, "L2", "tool_call_blocked",
+           state="done", closed=ts(0, 13)),                     # 发生日≠关闭日
+        mk("u0490_L8", 75, 8, "L2", "tool_call_blocked",
+           state="done", closed=ts(75, 9)),                     # 撑出月区
+    ]
+
+
+def _ledger_rep(items=None):
+    """账本页要读的 `ledger` 键 —— **由 `M.day_counts` 现算**，不手写数字。
+
+    ★ 判据不许二次实现：汇总与明细必须是同一份口径，否则页面数与点进去对不上
+      （F40 病灶；日报族已栽过一次）。
+    """
+    items = _ledger_items() if items is None else items
+    idx = M.day_counts(items)
+    today = datetime.now().astimezone().date().isoformat()
+    tot = {k: sum(int(e.get(k) or 0) for e in idx.values()) for k in M.LEDGER_KEYS}
+    led = {"days": len(idx), "streak_days": 1, "today": idx.get(today) or {}}
+    led.update(tot)
+    return dict(_REP, ledger=led)
+
+
+def _ledger_page(mod=SV, items=None, rep=None):
+    items = _ledger_items() if items is None else items
+    return mod.render_page(view="ledger", root=tempfile.mkdtemp(prefix="g0490_l_"),
+                           token="T", items=items,
+                           rep=_ledger_rep(items) if rep is None else rep,
+                           posture=_POSTURE)
+
+
+def _t04_core(page, items):
+    """区一（最近 7 天）＋ 六卡深链 ＋ 累计行已撤。返回 True / 说明串。"""
+    body = PC.body(page)
+    idx = M.day_counts(items)
+    today = datetime.now().astimezone().date()
+    today_s = today.isoformat()
+    w7 = [(today - timedelta(days=k)).isoformat() for k in range(7)]
+
+    # ① 区一在，且**固定 7 个日历天**全部出现（无记录的天也要出现）
+    if "最近 7 天" not in body:
+        return "账本页没有「最近 7 天」区（明细区没了）"
+    missing = [d for d in w7 if d not in body]
+    if missing:
+        return "最近 7 天缺日历天（7 天窗口是承诺，不许只列有数的天）：%s" % missing
+    # ② ★ 无记录天：淡显「当天无记录」，**不许渲染成 0**
+    n_empty = sum(1 for d in w7
+                  if not any(int((idx.get(d) or {}).get(k) or 0)
+                             for k in M.LEDGER_KEYS))
+    got_empty = body.count("当天无记录")
+    if got_empty != n_empty:
+        return ("无记录天渲染数不对：页面 %d / 现算 %d —— 要么把「没查」渲染成了数字，"
+                "要么漏了天（0.37.2 同款护栏：没查≠查过没事）" % (got_empty, n_empty))
+    # ③ 有记录的天：四格数字与深链**同源**（F40）
+    for d in w7:
+        e = idx.get(d) or {}
+        n = {k: int(e.get(k) or 0) for k in M.LEDGER_KEYS}
+        if not any(n.values()):
+            continue
+        for word, key, lv in (("拦截", "blocked", "L2"), ("注意", "noticed", "L1"),
+                              ("防护缺口", "breached", "R0")):
+            if n[key] and ('f=day:%s:lv:%s">%s %d</a>' % (d, lv, word, n[key])) not in body:
+                return "%s 的「%s」格数字或深链不对（现算 %d）" % (d, word, n[key])
+        if n["acked"] and ('f=closed:%s">已处理 %d</a>' % (d, n["acked"])) not in body:
+            return "%s 的「已处理」格数字或深链不对（现算 %d）" % (d, n["acked"])
+    # ④ 六卡：当天四个数**可点**，且数字等于现算（含 0 —— 0 也要能点进去看是空的）
+    td = idx.get(today_s) or {}
+    for key, lv in (("blocked", "L2"), ("noticed", "L1"), ("breached", "R0")):
+        want = int(td.get(key) or 0)
+        if ('f=day:%s:lv:%s">%d</a>' % (today_s, lv, want)) not in body:
+            return "六卡「%s」没连到当天深链或数字不对（现算 %d）" % (key, want)
+    if ('f=closed:%s">%d</a>' % (today_s, int(td.get("acked") or 0))) not in body:
+        return "六卡「已处理」没连到当天深链（现算 %d）" % int(td.get("acked") or 0)
+    # ⑤ 累计行已撤（创始人 2026-10-16 拍板「有记录以来 8 天累计这一行可以不要了」）
+    if "有记录以来" in body:
+        return "「有记录以来 N 天累计」那一行回来了 —— 明细区已给出同一批数的来龙去脉"
+    return True
+
+
+def _t04b_core(page, items):
+    """区二（更早 · 按月）：默认收起 ＋ 页高不变量 ＋ 月行自报有记录天数。"""
+    body, raw = PC.body(page), PC.raw(page)
+    if "更早 · 按月" not in body:
+        return "账本页没有「更早 · 按月」区"
+    # ① 月行**默认收起**（页高不变量的前提）
+    if 'details class="month" open' in raw:
+        return "月行默认展开了 ⇒ 页高会随历史增长（1 年后 12 个月全摊开）"
+    idx = M.day_counts(items)
+    rec = {d: e for d, e in idx.items()
+           if any(int(e.get(k) or 0) for k in M.LEDGER_KEYS)}
+    if not rec:
+        return "夹具不成立：没有任何有记录的天"
+    # ② 有记录的月＝一个可展开行；月数＝从最早有记录月到当月（**不缺月**）
+    months = sorted({d[:7] for d in rec}, reverse=True)
+    n_details = body.count('details class="month"')
+    if n_details != len(months):
+        return "可展开月行 %d ≠ 有记录月数 %d（%s）" % (n_details, len(months), months)
+    y, mth = datetime.now().astimezone().year, datetime.now().astimezone().month
+    n_all = 0
+    while True:
+        ym = "%04d-%02d" % (y, mth)
+        n_all += 1
+        if ym <= min(rec)[:7]:
+            break
+        mth -= 1
+        if mth == 0:
+            y, mth = y - 1, 12
+    n_rows = n_details + body.count("当月无记录")
+    if n_rows != n_all:
+        return "月区总行数 %d ≠ 应有月数 %d（从 %s 到当月）—— 页高不变量破了" % (
+            n_rows, n_all, min(rec)[:7])
+    # ③ 月行自报「有记录 N 天」（不跳转，只展开 ⇒ 报告的是天数不是数字）
+    for ym in months:
+        n = len([d for d in rec if d[:7] == ym])
+        if ("有记录 %d 天" % n) not in body:
+            return "%s 月行没自报「有记录 %d 天」" % (ym, n)
+    return True
+
+
+@check("T-04 ★ 账本明细区一：最近 7 天＋无记录天不许渲染成 0＋六卡当天数可点")
+def t04():
+    """创始人 2026-10-16 第四问「汇总看不了明细」＋追加问「日期太多怎么办」。
+
+    明细的唯一实现在收件箱（归并/处置/筛选都在那边），账本只做**一击直达**
+    的深链 —— 所以这里断言的是「数字与链接同源」，不是把明细抄一份过来。
+    """
+    items = _ledger_items()
+    return _t04_core(_ledger_page(items=items), items)
+
+
+@check("N-T04 ★ 负控：无记录天改回渲染 0 ⇒ T-04 必须红")
+def n_t04():
+    """C1 两步法：变异＝淡显文案换成 0。这是第四问最危险的回潮 ——
+    「没查」被渲染成「查过，是 0」，用户据此以为那天平安无事。"""
+    src = _src(_SERVER_REL)
+    anchor = "—（当天无记录）"
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    items = _ledger_items()
+    page, _why = _mut_render(
+        src.replace(anchor, "拦截 0 ｜ 注意 0 ｜ 防护缺口 0 ｜ 已处理 0"),
+        "is0490_nt04", _SERVER_REL, view="ledger",
+        root=tempfile.mkdtemp(prefix="g0490_nt04_"), token="T", items=items,
+        rep=_ledger_rep(items), posture=_POSTURE)
+    if _why:
+        return _why
+    if _t04_core(page, items) is True:
+        return "负控失效：无记录天渲染成 0 后 T-04 没红"
+    if _t04_core(_ledger_page(items=items), items) is not True:
+        return "夹具不成立：真实现本身就红 ⇒ 负控无分辨力"
+    return True
+
+
+@check("T-04b ★ 账本明细区二：按月折叠（默认收起）＋页高不变量＋月行自报天数")
+def t04b():
+    """「日期太多怎么办」的裁决落点：**不引入滚动条**（页高无界、零信息指向）、
+    **不引入按周**（第三套词汇无增益），用**按月折叠**把页高压成
+    「7 日行 ＋ 12 月行/年」—— 5 年后仍一屏内。
+    """
+    items = _ledger_items()
+    return _t04b_core(_ledger_page(items=items), items)
+
+
+@check("N-T04b ★ 负控：月行默认展开 ⇒ T-04b 必须红")
+def n_t04b():
+    """C1 两步法：变异＝给 `<details class="month">` 加 `open`。
+    这是「日期太多」最省事的写法，也是页高不变量的死法。"""
+    src = _src(_SERVER_REL)
+    anchor = '<details class=\\"month\\">'
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    items = _ledger_items()
+    page, _why = _mut_render(
+        src.replace(anchor, '<details class=\\"month\\" open>'),
+        "is0490_nt04b", _SERVER_REL, view="ledger",
+        root=tempfile.mkdtemp(prefix="g0490_nt04b_"), token="T", items=items,
+        rep=_ledger_rep(items), posture=_POSTURE)
+    if _why:
+        return _why
+    if _t04b_core(page, items) is True:
+        return "负控失效：月行默认展开后 T-04b 没红"
+    if _t04b_core(_ledger_page(items=items), items) is not True:
+        return "夹具不成立：真实现本身就红 ⇒ 负控无分辨力"
+    return True
+
+
+def _t04c_core(mod):
+    """`closed:<日期>` ＝ 按**关闭日**收已关闭件（`mod` 可换成变异模块）。"""
+    items = _ledger_items()
+    today = datetime.now().astimezone().date().isoformat()
+    want = [it for it in items if it.state in M.CLOSED_STATES
+            and str(it.closed_at or "")[:10] == today]
+    if not want:
+        return "夹具不成立：今天没有任何已关闭件"
+    got = mod.filter_items(items, "closed:" + today)
+    if len(got) != len(want):
+        return "closed:%s 收到 %d 条，按关闭日应为 %d 条" % (today, len(got), len(want))
+    return True
+
+
+@check("T-04c ★ `closed:<日期>` 过滤器：按关闭日收件（账本「已处理」格的深链）")
+def t04c():
+    """★ 为什么必须有它：`day:<d>:archive` 的归档桶混着「已老去、无后果、
+    **从未被关闭**」的记录（实测 2026-10-14：归档收 [a,b]，`closed:` 只收 [b]）
+    ⇒ 账本「已处理」格点进去会看到对不上数的一页。
+    """
+    items = _ledger_items()
+    r = _t04c_core(M)
+    if r is not True:
+        return r
+    today = datetime.now().astimezone().date().isoformat()
+    # ① 口径必须是**关闭日**，不是发生日：夹具里至少有一件「发生日≠关闭日」
+    cross = [it for it in items if it.state in M.CLOSED_STATES
+             and str(it.closed_at or "")[:10] == today and str(it.ts)[:10] != today]
+    if not cross:
+        return "夹具不成立：没有「发生日≠关闭日」的件 ⇒ 判据无分辨力"
+    # ② 链接必须被认（否则会被 `known_filter` 挡回默认档，点了等于没点）
+    if not M.known_filter("closed:" + today):
+        return "known_filter 不认 closed:<日期> ⇒ 深链会被当非法值挡回默认档"
+    if M.filter_items(items, "closed:2026-13-45"):
+        return "坏日期没有返回空集（静默当「全部」＝口径污染）"
+    # ③ 与旧过滤器不是一回事（否则新增它就没有独立语义）
+    days = sorted({str(it.ts)[:10] for it in items})
+    differ = [d for d in days
+              if {i.id for i in M.filter_items(items, "day:%s:archive" % d)}
+              != {i.id for i in M.filter_items(items, "closed:" + d)}]
+    if not differ:
+        return "closed:<d> 与 day:<d>:archive 在每个日子都完全相同 ⇒ 新过滤器没有独立语义"
+    return True
+
+
+@check("N-T04c ★ 负控：closed: 退化成按**发生日**收 ⇒ T-04c 必须红")
+def n_t04c():
+    """变异＝把 `closed_at` 换成 `ts`。这正是当初"顺手复用 day::archive"的写法，
+    也是账本「已处理」与收件箱对不上的老根。"""
+    src = _src(_MODEL_REL)
+    anchor = '                and str(it.closed_at or "")[:10] == filt[7:]]'
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    try:
+        mut = _load(src.replace(anchor,
+                                "                and str(it.ts)[:10] == filt[7:]]"),
+                    "is0490_nt04c", _MODEL_REL)
+    except Exception as e:                                          # noqa: BLE001
+        return "负控自身失效：变异模块**加载就抛** %s: %s" % (type(e).__name__, e)
+    if _t04c_core(mut) is True:
+        return "负控失效：closed: 改成按发生日后 T-04c 没红"
+    if _t04c_core(M) is not True:
+        return "夹具不成立：真实现本身就红 ⇒ 负控无分辨力"
+    return True
+
+
 def main():
     print("=" * 78)
     print("0.48.5 Antinel 监理细节修订判据（交接件 v1.1 §5.7）—— "
@@ -3035,7 +3326,9 @@ def main():
           "批12 C5/U-16（问号同形）＋ C4/W-07（一次性调用方等窗就位，真进程实测）· "
           "批13 T-02/N-T02（四态词条内容派生审计：R0/L1 事件类型层、L2 规则层、"
           "类别中文名与徽标映射；U-04 同步徽标芯片）· "
-          "批14 T-03/N-T03（排行行形态：短名主显示＋编号淡显＋审计全文退 hover）")
+          "批14 T-03/N-T03（排行行形态：短名主显示＋编号淡显＋审计全文退 hover）· "
+          "批15 T-04/T-04b/T-04c（账本按天明细：最近 7 天＋按月折叠＋无记录天"
+          "不渲染成 0＋closed: 按关闭日收件）")
     print("（变异只在内存，账本与链只落临时目录，不写任何产品文件；"
           "戊2/戊3 视觉项无判据，走 §6.1 截图验收 —— U-13 只含戊2 机械部分）")
     print("=" * 78)

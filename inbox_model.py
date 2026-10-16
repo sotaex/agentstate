@@ -675,6 +675,7 @@ def counts_by_level(items, only_open=True):
 #     lv:R0 / lv:L2 / lv:L1 / lv:Ls      —— 按级别
 #     kind:<kind>                        —— 按类型
 #     rule:<rule_id>                     —— 按规则
+#     closed:<日期>                      —— 按关闭日（0.51.0，账本「已处理」深链）
 FILTER_LABEL = {
     BUCKET_ACTION: "要处理", BUCKET_INFO: "看一眼", BUCKET_ARCHIVE: "归档",
     "all": "已载入记录",
@@ -695,6 +696,8 @@ def filter_label(filt, hours=WINDOW_HOURS):
         return "指定的 %d 条记录" % n
     if filt.startswith("rule:"):
         return "规则 " + filt[5:]
+    if filt.startswith("closed:"):
+        return "%s · 已处理/已忽略" % filt[7:]
     if filt.startswith("win:"):
         try:
             _p, h, inner = filt.split(":", 2)
@@ -741,7 +744,65 @@ def filter_items(items, filt, now=None, hours=WINDOW_HOURS):
         return [it for it in items if it.id in wanted]
     if filt.startswith("rule:"):
         return [it for it in items if it.rule_id == filt[5:]]
+    # ★ 0.51.0（账本明细深链）：`closed:<日期>` ＝ **closed_at 落在该天**的
+    #   已关闭件。为什么不用 `day:<d>:archive`：归档桶混着「已老去滑窗」的
+    #   无后果记录，标签对不上数；账本「已处理」格要的是**精确的关闭日**
+    #   口径（与账本 acked 同源）。坏日期一律空集，不静默当成"全部"。
+    if filt.startswith("closed:"):
+        try:
+            datetime.strptime(filt[7:], "%Y-%m-%d")
+        except (ValueError, TypeError):
+            return []
+        return [it for it in items
+                if it.state in CLOSED_STATES
+                and str(it.closed_at or "")[:10] == filt[7:]]
     return [it for it in items if bucket_of(it, now=now, hours=hours) == filt]
+
+
+# ────────────────────────────────────────────────────────────────────────
+# ★★ 0.51.0（账本页四问，创始人 2026-10-16 拍板）：按天四格账的**唯一实现**。
+#   为什么放 model 不放页面/daemon：「拦截/注意/缺口按 ts 落日数、已处理按
+#   closed_at 落日数」是**数据口径**，账本写入（`record_day` 的补记＋更正）
+#   与账本页明细（按天表/按月聚合）都要用 —— 两处各写一遍＝第二套口径
+#   （本仓标准禁形）。账准修复后，daily.jsonl 快照与本函数现算一致。
+LEDGER_KEYS = ("blocked", "noticed", "breached", "acked")
+
+
+def day_counts(items, days=None):
+    """按天四格账（拦截/注意/防护缺口/已处理）—— 账本侧唯一数据源。
+
+    全量扫一遍 `items`（O(N)）；`days` 给定时只统计落在这些天的格子
+    （供 `record_day` 的 14 天窗口用），缺省统计出现过的**全部**天
+    （供账本页按月聚合）。事件按 **ts 落日**计数、已处理按 **closed_at
+    落日**计数 —— 与 `record_day` 既有口径逐字一致（口径只此一份）。
+    返回 `{date: {"date","blocked","noticed","breached","acked"}}`。
+    """
+    want = set(days) if days is not None else None
+    out = {}
+
+    def _slot(d):
+        if want is not None and d not in want:
+            return None
+        e = out.get(d)
+        if e is None:
+            e = out[d] = {"date": d, "blocked": 0, "noticed": 0,
+                          "breached": 0, "acked": 0}
+        return e
+
+    for it in items:
+        e = _slot(str(it.ts)[:10])
+        if e is not None:
+            if it.level == "L2":
+                e["blocked"] += 1
+            elif it.level == "L1":
+                e["noticed"] += 1
+            elif it.level == "R0":
+                e["breached"] += 1
+        if it.state in CLOSED_STATES and it.closed_at:
+            e2 = _slot(str(it.closed_at)[:10])
+            if e2 is not None:
+                e2["acked"] += 1
+    return out
 
 
 
@@ -891,6 +952,12 @@ def known_filter(filt):
             else:
                 return False
             return known_filter(inner)
+        except (ValueError, TypeError):
+            return False
+    if filt.startswith("closed:"):
+        try:
+            datetime.strptime(filt[7:], "%Y-%m-%d")
+            return True
         except (ValueError, TypeError):
             return False
     return False

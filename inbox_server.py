@@ -39,7 +39,7 @@ import threading
 _MD_STARS = re.compile(r"\*\*")
 import time
 import webbrowser
-from datetime import date
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlparse
 
@@ -312,8 +312,23 @@ details.grp>summary .t{font-weight:600}
      有什么办法能解决，如果没办法，如何做到不造成实际损失，
      总之要让用户能有机会不断改进，**不能无法改进，只能看**。」
    ⇒ 一个只能看的失守就是产品失败。面板固定四段：根因／多严重／能做什么／代价。 */
-details.rem[open]>summary .t{color:var(--r0)}
-.rem{border:1px solid var(--line);border-radius:8px;margin:10px 0 0;background:var(--panel)}
+details.rem[open]>summary .t{color:var(--r0)}.rem{border:1px solid var(--line);border-radius:8px;margin:10px 0 0;background:var(--panel)}
+/* ---- 0.51.0：账本明细（银行流水模式：最近 7 天 ＋ 更早按月折叠）----
+   月行用原生 <details>（与词条芯片同款互斥思路的行内版：多开无害，不进 term 组）。
+   无记录的天/月整体淡显（.dim）—— 「没查」≠「查过没事」，不许渲染成 0。 */
+.row.dim{color:var(--muted)}
+.row.dim .k{color:var(--muted)}
+details.month{display:block;border-bottom:1px solid var(--line)}
+details.month:last-child{border-bottom:0}
+details.month>summary{display:flex;gap:12px;align-items:baseline;padding:9px 15px;
+  cursor:pointer;list-style:none;font-size:13px}
+details.month>summary::-webkit-details-marker{display:none}
+details.month>summary::after{content:"\\25be";color:var(--muted);font-size:12px;
+  flex:none;margin-left:auto}
+details.month[open]>summary::after{content:"\\25b4"}
+details.month>summary .k{flex:none;color:var(--muted)}
+details.month[open]>summary{border-bottom:1px solid var(--line)}
+details.month>.rows{border:0;border-radius:0}
 .rem>summary{display:flex;gap:10px;align-items:center;padding:8px 12px;cursor:pointer;
   list-style:none;font-size:13px}
 .rem>summary::-webkit-details-marker{display:none}
@@ -2004,30 +2019,34 @@ def _view_health(rep, token, items=None):
             % (PAGE_TITLES["health"], _esc(rep.get("day") or ""), body, _six))
 
 
-def _view_ledger(rep, token):
+def _view_ledger(rep, token, items=None):
     led = rep["ledger"]
     has_data = bool(led.get("days", 0))
     # ★ 0.50.4（Q-01，2026-10-15 品质扫描）：六个大字**只数今天**，累计另起一行。
-    #   为什么必须改：`ledger.summary()` 的 `blocked/noticed/breached/acked`
-    #   是**全部有记录天数的累加**（`for e in days.values()`），而四个「？」词条
-    #   写的是「账本里：**当天**…条数」—— 页面与词条差一个口径，实测同屏
-    #   顶部灯「失守 0」与账本大字「防护缺口 293」相差 293 倍（7 天累计）。
-    #   当天字段 `summary()` 本来就算好了（`tot["today"]`），只是页面没用它。
-    #   ⇒ 大字取 `today`；累计值**不丢**，压成一行小字并写明「累计 N 天」。
+    #   ★★ 0.51.0（创始人 2026-10-16 拍板「有记录以来 8 天累计这一行可以不要了」）：
+    #     累计行**已撤** —— 按天/按月明细区（下方）给出的是同一批数的来龙去脉，
+    #     一行静态汇总在明细面前没有信息量；累计口径仍由 `ledger.summary()`
+    #     承载（导出/认领用它，ci/inbox_guards.py P1 钉着），只是不再上屏。
+    #   六大字口径不变（当天四指标＋连续在岗＋有记录天数）。
     _td = led.get("today") or {}
     values = ([led.get("streak_days", 0), int(_td.get("blocked", 0) or 0),
                int(_td.get("noticed", 0) or 0), int(_td.get("breached", 0) or 0),
                int(_td.get("acked", 0) or 0), led.get("days", 0)]
               if has_data else ["—"] * 6)
-    _days = int(led.get("days", 0) or 0)
-    # 累计行：与大字同源（`summary()` 的全期累加），只在大字改口径后仍有信息量
-    # —— 它答的是「这台机器有记录以来被拦过多少次」，大字答的是「今天怎么样」。
-    _sum = ("<p class=\"note\">有记录以来 %d 天累计：拦截 %d ｜ 注意 %d ｜ "
-            "防护缺口 %d ｜ 已处理/已忽略 %d</p>"
-            % (_days, int(led.get("blocked", 0) or 0),
-               int(led.get("noticed", 0) or 0),
-               int(led.get("breached", 0) or 0),
-               int(led.get("acked", 0) or 0)) if has_data else "")
+    # ★★ 0.51.0（账本页四问）：六个大字里**当天四个数字可点** —— 明细的唯一
+    #   实现在收件箱（归并/处置/筛选都在那边），账本只做一击直达的深链入口
+    #   （同一纪律家族：明细页也只能有一份）。streak 与有记录天数是元信息，不链。
+    _today = datetime.now().astimezone().strftime("%Y-%m-%d")
+    _card_link = {"ledger_blocked": "day:%s:lv:L2" % _today,
+                  "ledger_noticed": "day:%s:lv:L1" % _today,
+                  "ledger_breached": "day:%s:lv:R0" % _today,
+                  "ledger_acked": "closed:%s" % _today} if has_data else {}
+
+    def _v(key, i):
+        raw = str(values[i])
+        link = _card_link.get(key)
+        return ('<a href="/?v=inbox&f=%s">%s</a>' % (link, raw)) if link else raw
+
     m = ("<div class=\"metrics\">"
          "<div class=\"metric\"><div class=\"k\">%s</div><div class=\"v\">%s<small> 天</small></div></div>"
          "<div class=\"metric\"><div class=\"k\">%s</div><div class=\"v\">%s</div></div>"
@@ -2035,12 +2054,12 @@ def _view_ledger(rep, token):
          "<div class=\"metric\"><div class=\"k\">%s</div><div class=\"v\">%s</div></div>"
          "<div class=\"metric\"><div class=\"k\">%s</div><div class=\"v\">%s</div></div>"
          "<div class=\"metric\"><div class=\"k\">%s</div><div class=\"v\">%s</div></div></div>"
-         % (GL.chip("streak"), str(values[0]),
-            GL.chip("ledger_blocked"), str(values[1]),
-            GL.chip("ledger_noticed"), str(values[2]),
-            GL.chip("ledger_breached"), str(values[3]),
-            GL.chip("ledger_acked"), str(values[4]),
-            GL.chip("days"), str(values[5])))
+         % (GL.chip("streak"), _v("streak", 0),
+            GL.chip("ledger_blocked"), _v("ledger_blocked", 1),
+            GL.chip("ledger_noticed"), _v("ledger_noticed", 2),
+            GL.chip("ledger_breached"), _v("ledger_breached", 3),
+            GL.chip("ledger_acked"), _v("ledger_acked", 4),
+            GL.chip("days"), _v("days", 5)))
     # ★★ 0.37.2（创始人 2026-10-09 截图）：账本页**只留数字 ＋ 一处「？」**。
     #   页面上原先堆了三段解释（"这份账本在这台电脑上…"整卡、
     #   "账本存在哪个文件里"折叠块、"认领到账号"下的说明段）—— 创始人原话：
@@ -2057,13 +2076,92 @@ def _view_ledger(rep, token):
             "不是确认累计为零。</p>" if not has_data else "")
     # ★ 0.50.4：口径说明一行 —— 大字改当天后**必须**写明窗口，否则读者无从
     #   判断这四个数是今天的还是有史以来的（同族：日报页「只数最近 N 小时」）。
+    #   ★★ 0.51.0：累计行撤了 ⇒ 「累计见本页末行」改为指向**按天明细区**。
     _lead = ("<p class=\"note\">下列四个数只数<b>今天</b>（本地自然日）；"
-             "有记录以来的累计见本页末行。</p>" if has_data else "")
+             "更早的日子看下面的按天明细。</p>" if has_data else "")
+    # ────────────────────────────────────────────────────────────────
+    # ★★ 0.51.0 明细区（银行流水模式，v1.1 设计）：区一「最近 7 天」＋
+    #   区二「更早 · 按月」折叠。数据源＝store 现算（`M.day_counts`，唯一实现），
+    #   不用旧快照 —— 快照有整天漏记/历史少记的缺陷（0.51.0 record_day
+    #   账准修复后才与现算合一）。无记录的天**不许渲染成 0**：
+    #   「没查」≠「查过没事」（0.37.2 同款护栏），缺口与真零必须可区分。
+    idx = M.day_counts(items or [])
+    _rec = {d: e for d, e in idx.items()
+            if any(int(e.get(k) or 0) for k in M.LEDGER_KEYS)}
+
+    def _day_cells(d, e):
+        out = []
+        for word, key, lv in (("拦截", "blocked", "L2"), ("注意", "noticed", "L1"),
+                              ("防护缺口", "breached", "R0")):
+            n = int(e.get(key) or 0)
+            # 当天没有事件的级别显示 0 但**不可点**（点了是空页，纯噪音）。
+            out.append(('<a href="/?v=inbox&f=day:%s:lv:%s">%s %d</a>' % (d, lv, word, n))
+                       if n else "%s 0" % word)
+        a = int(e.get("acked") or 0)
+        out.append(('<a href="/?v=inbox&f=closed:%s">已处理 %d</a>' % (d, a))
+                   if a else "已处理 0")
+        return " ｜ ".join(out)
+
+    def _day_row(d, e):
+        if not any(int(e.get(k) or 0) for k in M.LEDGER_KEYS):
+            return ("<div class=\"row dim\"><span class=\"k\">%s</span>"
+                    "<span>—（当天无记录）</span></div>" % d)
+        return ("<div class=\"row\"><span class=\"k\">"
+                "<a href=\"/?v=inbox&f=day:%s\">%s</a></span>"
+                "<span>%s</span></div>" % (d, d, _day_cells(d, e)))
+
+    sections = ""
+    if _rec:
+        # 区一：固定 7 个日历天（含今天），新→旧。没开机的日子也出现在这里，
+        # 淡显示「当天无记录」—— 7 天窗口是承诺，有数的行才可点。
+        _w7 = [(datetime.now().astimezone().date() - timedelta(days=k)).isoformat()
+               for k in range(7)]
+        _rows7 = "".join(_day_row(d, idx.get(d) or {}) for d in _w7)
+        sections += ("<div class=\"card\"><h2>最近 7 天</h2>"
+                     "<div class=\"rows\">%s</div></div>" % _rows7)
+        # 区二：从最早有记录的月份到当月，每月一行（新→旧）——**整月完整**，
+        # 不扣最近 7 天已列的天（宁重复 ≤7 行，不做边界算术）。月行只展开
+        # 不跳转（展开后日行自带全部深链）。**默认全部收起**：页高不随历史
+        # 增长 —— 1 年后＝7 日行＋12 月行，5 年后 7＋60，仍一屏内。
+        first_ym = min(_rec)[:7]
+        _y, _mth = int(_today[:4]), int(_today[5:7])
+        yms = []
+        while True:
+            ym = "%04d-%02d" % (_y, _mth)
+            yms.append(ym)
+            if ym <= first_ym:
+                break
+            _mth -= 1
+            if _mth == 0:
+                _y, _mth = _y - 1, 12
+
+        def _mlabel(ym):
+            return "%s 年 %d 月" % (ym[:4], int(ym[5:7]))
+
+        mrows = []
+        for ym in yms:
+            mdays = {d: e for d, e in _rec.items() if d[:7] == ym}
+            if not mdays:
+                mrows.append("<div class=\"row dim\"><span class=\"k\">%s</span>"
+                             "<span>—（当月无记录）</span></div>" % _mlabel(ym))
+                continue
+            tot = {k: sum(int(e.get(k) or 0) for e in mdays.values())
+                   for k in M.LEDGER_KEYS}
+            body_rows = "".join(_day_row(d, mdays[d])
+                                for d in sorted(mdays, reverse=True))
+            mrows.append(
+                "<details class=\"month\"><summary><span class=\"k\">%s</span>"
+                "<span>拦截 %d · 注意 %d · 缺口 %d · 已处理 %d ｜ 有记录 %d 天</span></summary>"
+                "<div class=\"rows\">%s</div></details>"
+                % (_mlabel(ym), tot["blocked"], tot["noticed"], tot["breached"],
+                   tot["acked"], len(mdays), body_rows))
+        sections += ("<div class=\"card\"><h2>更早 · 按月</h2>"
+                     "<div class=\"rows\">%s</div></div>" % "".join(mrows))
     return ("<h2>%s · 本地摘要</h2>%s%s%s%s"
             "<div class=\"card\"><button class=\"btn\" disabled "
             "title=\"将来上线账号后才可用，现在没有这个能力\">"
             "认领到账号（未启用）</button></div>"
-            % (GL.chip("ledger"), _lead, m, warn, _sum))
+            % (GL.chip("ledger"), _lead, m, sections, warn))
 
 
 #: ★ 0.36.5 **页面名的唯一真源**（从 `render_page` 体内提为模块级）。
@@ -2119,7 +2217,7 @@ def render_page(view="inbox", filt=None, root=None, token="", items=None, rep=No
         elif view == "health":
             body = _view_health(rep, token, items)
         else:
-            body = _view_ledger(rep, token)
+            body = _view_ledger(rep, token, items)
     else:
         body = _view_inbox(items, token, filt, now=now)
     if notice:
