@@ -626,6 +626,17 @@ def n_server_unknown_view():
         srv.stop()
 
 
+# ★ 0.51.0：XML 命名空间**白名单** —— 它们是标识符，不是资源引用。
+#   `xmlns="http://www.w3.org/2000/svg"` 不会发起任何网络请求，
+#   旧判据按 `http://` 串扫却把它当外链 ⇒ P3 **恒红**（基线实测同红）。
+#   恒红的判据＝没判据：真有人引入 CDN 外链时它已经是红的，谁也看不出来
+#   （与「死判据」同型，一个恒绿一个恒红，都在取消一条防线的可见性）。
+#   ⇒ 扫描前先剥掉这些命名空间；其余 http(s) 引用照旧判红。
+_XMLNS_URIS = ("http://www.w3.org/2000/svg",
+               "http://www.w3.org/1999/xlink",
+               "http://www.w3.org/1998/math/mathml")
+
+
 def c_server_no_external_refs():
     """页面**零外部资源**：HTML/CSS 里不许出现 http(s) 引用。"""
     hub = new_hub()
@@ -634,8 +645,11 @@ def c_server_no_external_refs():
     try:
         _, _, body = req(srv.port, "/?v=inbox", token=srv.token)
         low = body.lower()
+        scan = low
+        for ns in _XMLNS_URIS:
+            scan = scan.replace(ns, "")
         for tok in ("http://", "https://", "//cdn", "src=\"//"):
-            if tok in low:
+            if tok in scan:
                 return False
         return True
     finally:
@@ -643,9 +657,25 @@ def c_server_no_external_refs():
 
 
 def n_server_no_external_refs():
-    """负控：注入一个外部 script 标签 ⇒ 扫描必须能发现。"""
-    bad = "<script src=\"https://evil.example.com/x.js\"></script>"
-    return any(t in bad.lower() for t in ("http://", "https://"))
+    """负控：把外部 script **真的塞进渲染产物** ⇒ 扫描必须发现。
+
+    ★★ 0.51.0 重写（旧负控是纸糊的）：旧版只检查**自己写的那段常量**
+      `bad = '<script src="https://evil...">'` 里有没有 `http://`
+      ⇒ 恒真，跟页面渲染一点关系都没有，判据改成永远返回 True 它也绿。
+      ⇒ 改为真注入：patch 模块级 `render_page`（handler 在 2411 行直接调它），
+        走与正判据**同一条** HTTP 渲染路径，再断言判据必须翻红。
+    """
+    import inbox_server as SV
+    orig = SV.render_page
+
+    def wrapped(*a, **kw):
+        return orig(*a, **kw) + '<script src="https://evil.example.com/x.js"></script>'
+
+    SV.render_page = wrapped
+    try:
+        return c_server_no_external_refs() is False
+    finally:
+        SV.render_page = orig
 
 
 def c_server_empty_state_renders():

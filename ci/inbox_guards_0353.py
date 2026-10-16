@@ -2974,6 +2974,13 @@ CHECKS_0353 = [
      n_ledger_doc_citation_is_not_vague),
     ("P14 账本页有认领位与所在地", c_ledger_page_has_claim_slot_and_location,
      n_ledger_page_claim_slot_is_not_clickable),
+    # ★★ 为什么这两条要补登记：本批做「全仓死判据扫描」时发现
+    #   `c_ledger_levels_match_meaning` 与它的负控**只定义、没登记** ⇒ 从未跑过。
+    #   更隐蔽的是：主判据被自己那条死负控调用（`return not c_...()`），
+    #   ⇒ 按「名字是否被引用」判断登记的旧扫描器会把它当活的（**假阴性**）。
+    #   判据死了，它守的那条「账本分级数字与标题字面一致」就没人验。
+    ("P14 账本分级与字面对得上", c_ledger_levels_match_meaning,
+     n_ledger_levels_match_meaning),
     # ---- 十三之二、账本**账准**（0.51.0 四问：整天漏记 / 历史少记 / acked 漂移）----
     # ★ 为什么补登记：`c_ledger_page_populates_from_chain_snapshot` 与它的负控
     #   此前**只定义、没登记** ⇒ 从未跑过（语义整批改掉也不翻红）。死判据＝没判据，

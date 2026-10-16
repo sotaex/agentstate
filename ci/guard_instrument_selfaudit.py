@@ -46,6 +46,20 @@
          浮层的词条口径行漏出剥离层 ⇒ **误红**；U-01 数调用点把注释里的
          `M.reading_note()` 也算上（2 调用 ＋ 2 注释 ＝ 4）⇒ 判据自己瞎了还不知道。
          ⇒ 判据 **S48**（＋负控 N-S48）。
+
+  ★★ 0.51.0 追加 R5（第五个面：**判据定义了却没登记**，死判据＝没判据）：
+     R5：`def c_xxx` / `def n_xxx` 必须出现在**登记表**里（顶层 `CHECKS* = [(str, fn, …)]`、
+         `RESULTS.append(...)`、`@check` 装饰器自动登记、或 `@check("…", "n_xxx")`
+         的字符串形式）。只定义不登记 ⇒ **从未执行**，它守的那条语义整批改掉也不翻红。
+         由来：2026-10-17 做账本明细时实测 —— `c_ledger_page_populates_from_chain_snapshot`
+         只定义没登记，账本落盘语义整批重写它都不吭声；同批还揪出
+         `c_ledger_levels_match_meaning` 与它的负控同样是死的。
+     ★ 判"登记"的口径很容易错，本判据自己踩了两次（写进负控里当标本）：
+         ① 拿「名字在全文被引用过」当登记 ⇒ 主判据被自己那条死负控调用
+            （`return not c_xxx()`）就算"活的" —— **假阴性**；
+         ② 漏了 `@check("…", "n_xxx")` 这一种字符串登记形态 ⇒ 0366 三条被误报 —— **假阳性**。
+         ⇒ 必须是「名字出现在登记表字面量/装饰器参数里」。
+         ⇒ 判据 **S54**（＋负控 N-S54）。
 """
 from __future__ import annotations
 
@@ -707,6 +721,155 @@ def n_s48():
         "    return len(re.findall('^\\\\s*\\\\(', src, re.M))\n")
     if _s48b_violations(ast.parse(good_b)):
         return "负控有问题：数行数（`^\\s*\\(`）被误判成「数调用点」⇒ 会误伤合法写法"
+    return True
+
+
+# ══════════ S54 · 死判据：定义了必须进登记表 ═══════════════════
+
+
+def _registry_names(tree):
+    """「登记表」里的名字集合。登记形态共四种，漏任何一种都会误报：
+
+      ① 顶层 `CHECKS* = [("名字", c_xxx, n_xxx), ...]`（元素 tuple 且首元素是字符串）
+      ② `RESULTS.append((...))`
+      ③ `@check("名字")` 装饰器 ⇒ 自动登记（不看名字，见 `_is_autoreg`）
+      ④ `@check("名字", "n_xxx")` —— 负控以**字符串**传名（那时函数还没定义，
+         0366 就是这么写的；它的 `main()` 会 `globals().get(neg)` 解析并执行）
+
+    ★ 为什么不能拿「名字在全文被引用过」当登记（本判据自己踩的坑）：
+      主判据被自己那条**死负控**调用（`return not c_xxx()`）也算"被引用"
+      ⇒ 两条一起死，旧口径却只报负控一条（**假阴性**）。
+    """
+    names = set()
+
+    def _collect(node):
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Name):
+                names.add(sub.id)
+            elif isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+                names.add(sub.value)
+                for tok in re.split(r"[\s\"'（）()，,]+", sub.value):
+                    if tok:
+                        names.add(tok)
+
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and isinstance(node.value, (ast.List, ast.Tuple)):
+            elts = node.value.elts
+            if elts and isinstance(elts[0], ast.Tuple) and elts[0].elts:
+                first = elts[0].elts[0]
+                if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                    _collect(node.value)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            f = node.func
+            if isinstance(f, ast.Attribute) and f.attr in ("append", "extend"):
+                _collect(node)
+            elif isinstance(f, ast.Name) and f.id == "check":      # ④ 字符串传名
+                for a in node.args:
+                    if isinstance(a, ast.Constant) and isinstance(a.value, str):
+                        _collect(a)
+    return names
+
+
+def _is_autoreg(node):
+    for d in node.decorator_list:
+        nm = None
+        if isinstance(d, ast.Name):
+            nm = d.id
+        elif isinstance(d, ast.Call) and isinstance(d.func, ast.Name):
+            nm = d.func.id
+        if nm == "check":
+            return True
+    return False
+
+
+def _dead_check_names(tree):
+    """[(lineno, name)] —— 定义了、却没进任何登记表的判据族函数。"""
+    reg = _registry_names(tree)
+    dead = []
+    for node in tree.body:
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        nm = node.name
+        if not (nm.startswith("c_") or nm.startswith("n_")):
+            continue
+        if _is_autoreg(node):
+            continue
+        if nm not in reg:
+            dead.append((node.lineno, nm))
+    return dead
+
+
+@check("S54 判据定义了必须进登记表（死判据＝没判据）")
+def s54():
+    """R5：只定义不登记的判据**从未执行** —— 它守的那条语义整批改掉也不翻红。
+
+    实测由来（2026-10-17 账本明细批）：`c_ledger_page_populates_from_chain_snapshot`
+    只定义没登记 ⇒ 账本落盘语义整批重写，它一声不吭；同批还揪出
+    `c_ledger_levels_match_meaning` 与它的负控同样是死的（主判据被死负控调用，
+    按"被引用过"判断的旧口径扫不出来）。
+    """
+    bad = []
+    scanned = 0
+    for path in _judge_files():
+        try:
+            tree = ast.parse(io.open(path, encoding="utf-8").read())
+        except (SyntaxError, UnicodeDecodeError) as e:
+            bad.append("%s 解析失败：%r" % (os.path.basename(path), e))
+            continue
+        scanned += 1
+        for lineno, nm in _dead_check_names(tree):
+            bad.append("%s:%d `%s` 只定义没登记 ⇒ 从未执行"
+                       % (os.path.basename(path), lineno, nm))
+    if bad:
+        uniq = sorted(set(bad))
+        return ("；".join(uniq[:6])
+                + ("（共 %d 处）" % len(uniq) if len(uniq) > 6 else ""))
+    if scanned == 0:
+        return "一个判据文件都没扫到 ⇒ 本判据判不出（判不出不许算通过）"
+    return True
+
+
+@check("N-S54 负控：真死判据必须报红；四种合法登记形态不许误报")
+def n_s54():
+    """反向对照（维二）：S54 最容易在**两个方向**上失手，各造标本钉住。
+
+      方向一（漏报）：主判据被自己那条死负控调用 ⇒ 不许当活的（本仓真踩过）。
+      方向二（误报）：四种合法登记形态 ⇒ 一律不许报（本仓真踩过 0366 那次）。
+    """
+    # ① 纯死判据：def 了，既没 @check 也没进表 ⇒ 必须被抓
+    if not _dead_check_names(ast.parse(
+            "def c_thing_is_true():\n    return True\n"
+            "def n_thing_is_true():\n    return not c_thing_is_true()\n")):
+        return "负控失效：纯死判据没被检出（S54 的检测逻辑是假的）"
+    # ①' 更隐蔽的那种：主判据被自己那条**死负控**调用 ⇒ 两条都得报
+    got = {nm for _, nm in _dead_check_names(ast.parse(
+        "def c_thing():\n    return True\n"
+        "def n_thing():\n    return not c_thing()\n"))}
+    if got != {"c_thing", "n_thing"}:
+        return ("负控失效：主判据被死负控调用就被当成活的（实得 %r）⇒ 假阴性还在"
+                % sorted(got))
+    # ② 四种合法登记形态 ⇒ 一律不许报（踩过：0366 的字符串形态被误报过一次）
+    good = [
+        ("CHECKS 表",
+         "CHECKS = [\n    (\"名\", c_thing, n_thing),\n]\n"
+         "def c_thing():\n    return True\n"
+         "def n_thing():\n    return True\n"),
+        ("@check 自动登记",
+         "@check(\"名\")\ndef c_thing():\n    return True\n"),
+        ("@check 字符串负控",
+         "@check(\"名\", \"n_thing\")\ndef c_thing():\n    return True\n"
+         "def n_thing():\n    return True\n"),
+        ("RESULTS.append",
+         "RESULTS.append((\"名\", c_thing, n_thing))\n"
+         "def c_thing():\n    return True\n"
+         "def n_thing():\n    return True\n"),
+    ]
+    for label, src in good:
+        got = {nm for _, nm in _dead_check_names(ast.parse(src))}
+        if got:
+            return ("负控有问题：合法的「%s」形态被误报成死判据 %r ⇒ 会误伤正确写法"
+                    % (label, sorted(got)))
     return True
 
 
