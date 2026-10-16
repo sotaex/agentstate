@@ -2031,23 +2031,35 @@ def _view_health(rep, token, items=None):
 
 
 def _view_ledger(rep, token, items=None):
-    led = rep["ledger"]
-    has_data = bool(led.get("days", 0))
-    # ★ 0.50.4（Q-01，2026-10-15 品质扫描）：六个大字**只数今天**，累计另起一行。
-    #   ★★ 0.51.0（创始人 2026-10-16 拍板「有记录以来 8 天累计这一行可以不要了」）：
-    #     累计行**已撤** —— 按天/按月明细区（下方）给出的是同一批数的来龙去脉，
-    #     一行静态汇总在明细面前没有信息量；累计口径仍由 `ledger.summary()`
-    #     承载（导出/认领用它，ci/inbox_guards.py P1 钉着），只是不再上屏。
-    #   六大字口径不变（当天四指标＋连续在岗＋有记录天数）。
-    _td = led.get("today") or {}
-    values = ([led.get("streak_days", 0), int(_td.get("blocked", 0) or 0),
-               int(_td.get("noticed", 0) or 0), int(_td.get("breached", 0) or 0),
-               int(_td.get("acked", 0) or 0), led.get("days", 0)]
-              if has_data else ["—"] * 6)
-    # ★★ 0.51.0（账本页四问）：六个大字里**当天四个数字可点** —— 明细的唯一
-    #   实现在收件箱（归并/处置/筛选都在那边），账本只做一击直达的深链入口
-    #   （同一纪律家族：明细页也只能有一份）。streak 与有记录天数是元信息，不链。
+    # ★★ 0.51.1（创始人 2026-10-17 截图三问）：头部**只留当天四个指标**，
+    #   历史元信息（连续/有记录天数）降为一行小字。三问逐条修：
+    #     ① 「下列四个数」下面摆了**六张卡**（当天四指标＋连续＋有记录天数）
+    #        ⇒ 文案与结构自相矛盾。根因：当天指标与历史元信息混在同一排卡里。
+    #        （0.50.4 起就是这样，本批只改了后半句，漏了「四个数」这个数量词。）
+    #     ② 「连续有记录 11 天」与「有记录的天数 11」同页并列，有记录天数等于
+    #        连续天数时**必然**出现两个同数 ⇒ 创始人原话「11天显示两次，为什么要两次」。
+    #     ③ 六卡取 `ledger.summary()`（**旧快照** daily.jsonl），明细区取
+    #        `M.day_counts`（**链现算**）⇒ 同页两个口径，实测卡片「有记录 11 天」
+    #        与月行「有记录 8 天」当场打架（快照有整天漏记/历史少记的旧缺陷）。
+    #   ⇒ 三条一起落：卡＝当天四指标（**链现算**、可点深链）；连续/有记录合成
+    #     **一行小字**，且**两数相等时只说一次**（「连续至今」）—— 同页永不出现
+    #     两个同数；文案「下列四个数」如今名副其实。
+    #   ★ 口径唯一：连续天数用 `ledger._streak`（与 `daily_report` 同一实现），
+    #     输入是 `M.day_counts` 现算出来的有记录日集合 —— 全页一份口径。
+    #   ★ 旧快照仍由 `ledger.summary()` 承载（导出/认领与 P1 判据用它），只是不上屏。
     _today = datetime.now().astimezone().strftime("%Y-%m-%d")
+    idx = M.day_counts(items or [])
+    _rec = {d: e for d, e in idx.items()
+            if any(int(e.get(k) or 0) for k in M.LEDGER_KEYS)}
+    _n_days = len(_rec)
+    has_data = bool(_n_days)
+    _streak = L._streak(set(_rec), today=_today) if _rec else 0
+    _td = idx.get(_today) or {}
+    values = ([int(_td.get("blocked", 0) or 0), int(_td.get("noticed", 0) or 0),
+               int(_td.get("breached", 0) or 0), int(_td.get("acked", 0) or 0)]
+              if has_data else ["—"] * 4)
+    # 当天四个数字可点 —— 明细的唯一实现在收件箱（归并/处置/筛选都在那边），
+    # 账本只做一击直达的深链入口（同一纪律家族：明细页也只能有一份）。
     _card_link = {"ledger_blocked": "day:%s:lv:L2" % _today,
                   "ledger_noticed": "day:%s:lv:L1" % _today,
                   "ledger_breached": "day:%s:lv:R0" % _today,
@@ -2059,18 +2071,28 @@ def _view_ledger(rep, token, items=None):
         return ('<a href="/?v=inbox&f=%s">%s</a>' % (link, raw)) if link else raw
 
     m = ("<div class=\"metrics\">"
-         "<div class=\"metric\"><div class=\"k\">%s</div><div class=\"v\">%s<small> 天</small></div></div>"
-         "<div class=\"metric\"><div class=\"k\">%s</div><div class=\"v\">%s</div></div>"
          "<div class=\"metric\"><div class=\"k\">%s</div><div class=\"v\">%s</div></div>"
          "<div class=\"metric\"><div class=\"k\">%s</div><div class=\"v\">%s</div></div>"
          "<div class=\"metric\"><div class=\"k\">%s</div><div class=\"v\">%s</div></div>"
          "<div class=\"metric\"><div class=\"k\">%s</div><div class=\"v\">%s</div></div></div>"
-         % (GL.chip("streak"), _v("streak", 0),
-            GL.chip("ledger_blocked"), _v("ledger_blocked", 1),
-            GL.chip("ledger_noticed"), _v("ledger_noticed", 2),
-            GL.chip("ledger_breached"), _v("ledger_breached", 3),
-            GL.chip("ledger_acked"), _v("ledger_acked", 4),
-            GL.chip("days"), _v("days", 5)))
+         % (GL.chip("ledger_blocked"), _v("ledger_blocked", 0),
+            GL.chip("ledger_noticed"), _v("ledger_noticed", 1),
+            GL.chip("ledger_breached"), _v("ledger_breached", 2),
+            GL.chip("ledger_acked"), _v("ledger_acked", 3)))
+    # 历史覆盖：**一行**（不再占两张卡）；连续与总数相等时只说一次 ——
+    # 「11 天、11 天」这种同数并列会让读者以为是 bug（创始人三问之二）。
+    # ★★ 这一行**无条件渲染**（2026-10-17 复跑抓到）：`days`/`streak` 两个
+    #   词条的芯片此前只在 `has_data` 为真时出现 ⇒ 一台**还没有可计数事件**
+    #   的机器上，两个术语就没有任何落点（0353「四栏目都能点开定义」当场翻红）。
+    #   旧版六卡无论有无数据都渲染（只是显示「—」），芯片落点因此从未丢过 ——
+    #   这是本批改造引入的**回归**，判据抓到了它。
+    if has_data:
+        _streak_txt = ("连续至今" if _streak >= _n_days
+                       else "当前连续 %d 天" % _streak)
+    else:
+        _streak_txt = "尚未开始"
+    _meta = ("<p class=\"note\">%s 有记录 <b>%d</b> 天 · %s %s</p>"
+             % (GL.chip("days"), _n_days, GL.chip("streak"), _streak_txt))
     # ★★ 0.37.2（创始人 2026-10-09 截图）：账本页**只留数字 ＋ 一处「？」**。
     #   页面上原先堆了三段解释（"这份账本在这台电脑上…"整卡、
     #   "账本存在哪个文件里"折叠块、"认领到账号"下的说明段）—— 创始人原话：
@@ -2096,9 +2118,8 @@ def _view_ledger(rep, token, items=None):
     #   不用旧快照 —— 快照有整天漏记/历史少记的缺陷（0.51.0 record_day
     #   账准修复后才与现算合一）。无记录的天**不许渲染成 0**：
     #   「没查」≠「查过没事」（0.37.2 同款护栏），缺口与真零必须可区分。
-    idx = M.day_counts(items or [])
-    _rec = {d: e for d, e in idx.items()
-            if any(int(e.get(k) or 0) for k in M.LEDGER_KEYS)}
+    #   ★ `idx` / `_rec` 在函数开头就现算了（头部四个数**必须**与这里同一份），
+    #     此处不再二次计算 —— 二次实现正是 F40 的作案现场。
 
     def _day_cells(d, e):
         out = []
@@ -2168,11 +2189,11 @@ def _view_ledger(rep, token, items=None):
                    tot["acked"], len(mdays), body_rows))
         sections += ("<div class=\"card\"><h2>更早 · 按月</h2>"
                      "<div class=\"rows\">%s</div></div>" % "".join(mrows))
-    return ("<h2>%s · 本地摘要</h2>%s%s%s%s"
+    return ("<h2>%s · 本地摘要</h2>%s%s%s%s%s"
             "<div class=\"card\"><button class=\"btn\" disabled "
             "title=\"将来上线账号后才可用，现在没有这个能力\">"
             "认领到账号（未启用）</button></div>"
-            % (GL.chip("ledger"), _lead, m, sections, warn))
+            % (GL.chip("ledger"), _lead, m, _meta, sections, warn))
 
 
 #: ★ 0.36.5 **页面名的唯一真源**（从 `render_page` 体内提为模块级）。

@@ -3271,6 +3271,129 @@ def n_t04c():
     return True
 
 
+def _t04d_core(page, items):
+    """账本页头部的**跨元素一致性**（创始人 2026-10-17 截图三问）。
+
+    三条断言的共同点：**都在验同一页里两处说法是否一致**，而不是"某个结构
+    在不在"。已有判据（T-04/T-04b）卡的是结构存在 —— 所以「下列四个数」
+    下面并排摆六张卡、头部 11 天与月行 8 天打架，都没人报红。
+    """
+    body = PC.body(page)
+    idx = M.day_counts(items)
+    rec = {d: e for d, e in idx.items()
+           if any(int(e.get(k) or 0) for k in M.LEDGER_KEYS)}
+    today = datetime.now().astimezone().date().isoformat()
+    if not rec:
+        return "夹具不成立：没有有记录的天 ⇒ 判据无分辨力"
+    # ① 文案里的数量词 ＝ 实际卡片数（三问之一：说四个数、摆六张卡）
+    n_card = body.count('class="metric"')
+    mw = re.search(r"下列(.)个数", body)
+    if not mw:
+        return "头部没有「下列 N 个数」口径说明（读者无从判断这些数是今天的还是有史以来的）"
+    zh = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6}
+    if zh.get(mw.group(1)) != n_card:
+        return ("文案说「%s 个数」，页面却有 %d 张卡 ⇒ 文案与结构自相矛盾（三问之一）"
+                % (mw.group(1), n_card))
+    # ② 同页天数**同源**：头部＝链现算，月行当月天数＝链现算（三问之三）
+    m = re.search(r"有记录 <b>(\d+)</b> 天", body)
+    if not m:
+        return "头部没有「有记录 N 天」（历史覆盖信息丢了）"
+    if int(m.group(1)) != len(rec):
+        return ("头部「有记录 %s 天」≠ 链现算 %d 天 ⇒ 同页两个口径（三问之三）"
+                % (m.group(1), len(rec)))
+    for ym in sorted({d[:7] for d in rec}):
+        n = sum(1 for d in rec if d[:7] == ym)
+        if ("有记录 %d 天" % n) not in body:
+            return ("%s 月行天数 ≠ 链现算 %d 天 ⇒ 页面上两个天数打架（三问之三）"
+                    % (ym, n))
+    # ③ 连续与总数**相等时只说一次**（三问之二：11 天出现两次）
+    import ledger as L
+    st = L._streak(set(rec), today=today)
+    if st >= len(rec):
+        if "连续至今" not in body:
+            return "连续＝有记录天数时没走「连续至今」⇒ 同页会出现两个同数（三问之二）"
+        if re.search(r"连续 \d+ 天", body):
+            return "既说「连续至今」又报「连续 N 天」—— 同数并列没消掉"
+    else:
+        if ("当前连续 %d 天" % st) not in body:
+            return "有断档时没报「当前连续 %d 天」（现算 %d）" % (st, st)
+    return True
+
+
+@check("T-04d ★ 头部：文案数量词＝卡片数 ＋ 同页天数同源 ＋ 不重复同数")
+def t04d():
+    """创始人 2026-10-17 截图三问（账本页头部）：
+      ① 「下列四个数」下面摆了六张卡；
+      ② 「连续有记录 11 天」与「有记录的天数 11」同页并列；
+      ③ 头部「11 天」与月行「有记录 8 天」打架（头部走旧快照、明细走链现算）。
+    """
+    items = _ledger_items()
+    r = _t04d_core(_ledger_page(items=items), items)
+    if r is not True:
+        return r
+    # ③' 把「连续＝总数」那一支也走到：连续三天都有记录 ⇒ 必须只说一次
+    now2 = datetime.now().astimezone()
+
+    def _ts(d, h):
+        return (now2 - timedelta(days=d)).replace(
+            hour=h, minute=0, second=0, microsecond=0).isoformat()
+
+    cont = [M.Item(alert=M.Alert(id="t04d_c%d" % k, ts=_ts(k, 9), level="L2",
+                                 kind="tool_call_blocked", title="t"))
+            for k in range(3)]
+    if "连续至今" not in PC.body(_ledger_page(items=cont)):
+        return "连续三天都有记录时没出现「连续至今」⇒ 那就会同屏显示两个 3"
+    return True
+
+
+@check("N-T04d ★ 负控：文案数量词改成「六个数」⇒ T-04d 必须红")
+def n_t04d():
+    """变异＝**只改文案里的数量词**（四→六），不动结构。
+    这正是本批之前的形态：六张卡配「下列四个数」，两处说法不一致却无人报红。"""
+    src = _src(_SERVER_REL)
+    anchor = "下列四个数"
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    items = _ledger_items()
+    page, _why = _mut_render(
+        src.replace(anchor, "下列六个数"),
+        "is0490_nt04d", _SERVER_REL, view="ledger",
+        root=tempfile.mkdtemp(prefix="g0490_nt04d_"), token="T", items=items,
+        rep=_ledger_rep(items), posture=_POSTURE)
+    if _why:
+        return _why
+    if _t04d_core(page, items) is True:
+        return "负控失效：文案数量词写错后 T-04d 没红"
+    if _t04d_core(_ledger_page(items=items), items) is not True:
+        return "夹具不成立：真实现本身就红 ⇒ 负控无分辨力"
+    return True
+
+
+@check("N-T04d-b ★ 负控：头部天数与链现算脱钩（+1）⇒ T-04d 必须红")
+def n_t04d_b():
+    """变异＝头部「有记录 N 天」的 N 改成 `_n_days + 1`。
+    模拟的正是三问之三的老形态：头部一个口径（旧快照）、明细另一个口径（链现算），
+    同一页两个数，读者不知道信哪个。"""
+    src = _src(_SERVER_REL)
+    anchor = '% (GL.chip("days"), _n_days, GL.chip("streak"), _streak_txt))'
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    items = _ledger_items()
+    page, _why = _mut_render(
+        src.replace(anchor,
+                    '% (GL.chip("days"), _n_days + 1, GL.chip("streak"), _streak_txt))'),
+        "is0490_nt04db", _SERVER_REL, view="ledger",
+        root=tempfile.mkdtemp(prefix="g0490_nt04db_"), token="T", items=items,
+        rep=_ledger_rep(items), posture=_POSTURE)
+    if _why:
+        return _why
+    if _t04d_core(page, items) is True:
+        return "负控失效：头部天数与链现算脱钩后 T-04d 没红"
+    if _t04d_core(_ledger_page(items=items), items) is not True:
+        return "夹具不成立：真实现本身就红 ⇒ 负控无分辨力"
+    return True
+
+
 def main():
     print("=" * 78)
     print("0.48.5 Antinel 监理细节修订判据（交接件 v1.1 §5.7）—— "
@@ -3284,7 +3407,9 @@ def main():
           "类别中文名与徽标映射；U-04 同步徽标芯片）· "
           "批14 T-03/N-T03（排行行形态：短名主显示＋编号淡显＋审计全文退 hover）· "
           "批15 T-04/T-04b/T-04c（账本按天明细：最近 7 天＋按月折叠＋无记录天"
-          "不渲染成 0＋closed: 按关闭日收件）")
+          "不渲染成 0＋closed: 按关闭日收件）· "
+          "批16 T-04d（头部跨元素一致性：文案数量词＝卡片数、同页天数同源、"
+          "连续与总数相等时只说一次）")
     print("（变异只在内存，账本与链只落临时目录，不写任何产品文件；"
           "戊2/戊3 视觉项无判据，走 §6.1 截图验收 —— U-13 只含戊2 机械部分）")
     print("=" * 78)

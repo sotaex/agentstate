@@ -2130,13 +2130,20 @@ def n_ledger_history_acked_rule_is_date_scoped():
 
 
 def n_ledger_page_populates_from_chain_snapshot():
-    """负控：未启用账本刷新时，不写账本；证明页面守卫不是「永远有账」。"""
+    """负控：**链里没有记录时页面不许凭空有账**，也不许把「没查」渲染成 0。
+
+    ★★ 2026-10-17 更新口径（P1 报「负控没红」⇒ 当场查明，不是判据瞎了）：
+      旧负控断言的是「不刷新 ⇒ 没有快照文件 ⇒ 页面无账」。0.51.1 把头部数字
+      改成**链现算**之后，页面与快照文件彻底脱钩 ⇒ 旧断言恒假（负控失效）。
+      语义搬到**链**这一轴 —— 这才是页面数字真正的来源：
+      链为空 ⇒ 四个数必须显示「—」（不是 0）＋ 如实说「尚无可核对记录」。
+    """
     hub = _tmpdir()
-    day, items = _ledger_test_items()
-    page = SV.render_page(view="ledger", root=hub, token="t", items=items,
+    page = SV.render_page(view="ledger", root=hub, token="t", items=[],
                           record_ledger=False)
-    return (not os.path.exists(L.daily_path(hub))
-            and "账本尚无可核对记录" in PC.body(page)
+    body = PC.body(page)
+    return ("账本尚无可核对记录" in body
+            and "—" in body                       # 没查 ≠ 0（0.37.2 同款护栏）
             and not L.load_days(hub))
 
 
