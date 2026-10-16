@@ -421,7 +421,14 @@ def inv3_version_consistency(ok_list, bad_list):
 
 def inv4_rules_self_consistent(ok_list, bad_list):
     """INV-4：规则表自洽（id 唯一 / severity 合法 / apply_to_tools 非空 / 无 ReDoS 形态 /
-    description 非空）。"""
+    description 非空 / label_zh 上屏短名合规）。
+
+    ★★ label_zh 一节（0.51.0，2026-10-16 日报页品质审查）：`label_zh` 是
+      **上屏字段**（日报排行主显示位），与 description_zh（审计受众全文）受众
+      不同 ⇒ 单独立规矩：存在非空、≤14 字（窄列单行）、无规则号自引用
+      （Q-04 退编号不许从数据后门回来）、英文只许 SSH/MCP（公认缩写）。
+      缺一条 ⇒ 整表不自洽 —— 上屏的东西不许靠兜底运气。
+    """
     p = _find("rules/default.json")
     if not p:
         bad_list.append("INV-4 跳过：找不到 rules/default.json")
@@ -449,6 +456,21 @@ def inv4_rules_self_consistent(ok_list, bad_list):
             problems.append("%s：apply_to_tools 为空（= 适用于全部工具，通常不是本意）" % rid)
         if not (r.get("description") or "").strip():
             problems.append("%s：缺 description" % rid)
+        # ★ 0.51.0：上屏短名合规（见 docstring）。
+        lb = (r.get("label_zh") or "").strip()
+        if not lb:
+            problems.append("%s：缺 label_zh（上屏短名，排行主显示位用）" % rid)
+        else:
+            if len(lb) > 14:
+                problems.append("%s：label_zh 长 %d 字（>14，窄列必折行）%r"
+                                % (rid, len(lb), lb))
+            if re.search(r"[A-Z]{2,4}-\d{2}", lb):
+                problems.append("%s：label_zh 内嵌规则号自引用 %r" % (rid, lb))
+            bad_en = [w for w in re.findall(r"[A-Za-z][A-Za-z0-9-]*", lb)
+                      if w not in ("SSH", "MCP")]
+            if bad_en:
+                problems.append("%s：label_zh 含英文词 %s（只许 SSH/MCP）"
+                                % (rid, bad_en))
         for key in ("command_patterns", "file_patterns", "content_patterns", "exclude_patterns"):
             for pat in (r.get(key) or []):
                 if not isinstance(pat, str):
@@ -461,7 +483,7 @@ def inv4_rules_self_consistent(ok_list, bad_list):
             bad_list.append("        · " + x)
     else:
         ok_list.append("INV-4 规则表自洽：%d 条规则，id 唯一、severity 合法、"
-                       "apply_to_tools 非空、无 ReDoS 形态" % len(rules))
+                       "apply_to_tools 非空、无 ReDoS 形态、label_zh 合规" % len(rules))
 
 
 def inv5_rule_count_not_stale(ok_list, bad_list):

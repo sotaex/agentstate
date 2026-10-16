@@ -8,7 +8,7 @@
     ① 读链（真源）→ 组装收件箱
     ② 找**新**告警（`seen.json` 记已见 id）→ 通知层（Toast）+ 强调层（仅 R0）+ 兜底层
     ③ 刷**托盘**状态（五态 + 未处理数）
-    ④ 记**当日账本**（追加写，同日取末行）
+    ④ 记**账本**（最近 14 天补记＋更正，追加写、同日取末行）
     ⑤ 消费**托盘动作**（open / quit；0.35.3 起取消 read_all）
     ⑥ **匿名计数心跳**（默认关；开着时每个本地日最多 `HB_MAX_TRIES` 次尝试）
 
@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from datetime import date, timedelta
 
 import inbox_config as CFG
 import inbox_bubble as BB
@@ -53,8 +54,15 @@ def hb_mark_path(root=None):
     return os.path.join(CFG.console_dir(root), "hb_mark.json")
 
 
+#: ★ 0.51.0（账准修复，创始人 2026-10-16 拍板）：补记/更正窗口＝最近 14 个日历天。
+#:   窗口取 14 不取 7：一次离开超过一周（出差/休假）回来也要能把漏掉的天补齐，
+#:   而每天 14 次比对的开销是常数级（幂等日子一个字节都不写）。
+BACKFILL_DAYS = 14
+
+
 def record_day(items=None, today=None, root=None):
-    """记当日账本 —— **唯一实现**（守护进程 `tick()` 与值守台都调它，不二次实现）。
+    """记账本（最近 14 天补记＋更正）—— **唯一实现**
+    （守护进程 `tick()` 与值守台都调它，不二次实现）。
 
     ★★ 为什么提出来（真缺陷，创始人 2026-10-07「账本这栏数据永远都是零」）：
       旧版这段逻辑**只**在 `Daemon.tick()` 里，而 `Daemon` 只能靠
@@ -62,34 +70,42 @@ def record_day(items=None, today=None, root=None):
       ⇒ 账本文件从不落盘 ⇒ 页面四个数**恒为 0**（`~/.antinel/ledger/daily.jsonl`
       本机实测不存在）。值守台（`inbox_server.serve`）才是用户真正会打开的东西，
       所以让它**在打开期间**也记这一行。
-    ★ 幂等：当日数字与已记的一致 ⇒ **不重复追加**（否则每轮一行，文件涨成垃圾）。
-      「追加即更正」仍成立：数字一变就追加一行，`ledger.load_days` 取末行。
+    ★★ 0.51.0 账准修复（创始人 2026-10-16「最近 7 天几乎全零」四问）：
+      旧版只写 `today` 一天 ⇒ ① 值守台没开的日子**整天漏记**（实测 10-11/10-12
+      零行，而链里这两天有 24 次拦截）；② 快照后补进链的事件，历史日**永不
+      更正**（10-09 快照 9/9/60，链现算实为 18/81/117）。⇒ 扩成对**最近 14 天**
+      逐日：缺行且链里有事件 ⇒ 补记；有行但数字与链现算不符 ⇒ **追加更正行**
+      （「追加即更正」机制不变，旧行一字不改）。
+    ★ acked 以快照为准（历史日不回改）：状态文件不保留关闭历史（本函数下方
+      注释的既有边界）⇒ 关了又重开的件会让 store 现算的历史 acked **只少不多**，
+      拿它改历史是把不完整的数据当真源。⇒ 历史日更正时 acked 沿用旧行值、
+      且不参与「是否更正」的比对；**今天**仍按现算走（原语义，0353 判据钉着）。
+    ★ 幂等：与已记一致 ⇒ **不重复追加**（否则每轮一行，文件涨成垃圾）。
     """
     items = S.load_items(root=root) if items is None else items
-    today = today or time.strftime("%Y-%m-%d")
-    day_items = [it for it in items if str(it.ts)[:10] == today]
-    # 「已处理」按**关闭日期**记，不把所有历史关闭项每天重复算一遍。
-    # 这里记的是此刻仍处于已处理/已忽略状态、且本地关闭日期为 today 的事项数，
-    # 不是完整的点击操作流水（状态文件只保存当前看法，不保留每次迁移历史）。
-    acked_today = [i for i in items
-                   if i.state in M.CLOSED_STATES and str(i.closed_at or "")[:10] == today]
-    entry = {
-        "date": today,
-        "blocked": sum(1 for i in day_items if i.level == "L2"),
-        "noticed": sum(1 for i in day_items if i.level == "L1"),
-        "breached": sum(1 for i in day_items if i.level == "R0"),
-        "acked": len(acked_today),
-    }
-    prev = L.load_days(root).get(today) or {}
-    # 没有可核对事件时，不造一条全 0 日账；但若今天此前已有快照，必须允许
-    # 追加全零更正（例如事项后来被重开），不能把旧数字永久留在日账上。
-    has_count = any(entry[k] for k in ("blocked", "noticed", "breached", "acked"))
-    if not has_count and not prev:
-        return entry
-    if prev and all(prev.get(k) == v for k, v in entry.items()):
-        return entry                            # 数字没变 ⇒ 不重复追加
-    L.append_day(entry, root=root)
-    return entry
+    base = date.fromisoformat(today or time.strftime("%Y-%m-%d"))
+    window = [(base - timedelta(days=k)).isoformat() for k in range(BACKFILL_DAYS)]
+    counts = M.day_counts(items, days=window)
+    prev_all = L.load_days(root)
+    for d in reversed(window):                      # 旧→新落笔，文件时间序可读
+        c = counts.get(d) or {"date": d, "blocked": 0, "noticed": 0,
+                              "breached": 0, "acked": 0}
+        prev = prev_all.get(d) or {}
+        # 没有可核对事件也无旧行 ⇒ 不造一条全 0 日账；已有快照的日子必须允许
+        # 追加全零更正（例如事项后来被重开），不能把旧数字永久留在日账上。
+        if not prev and not any(c[k] for k in M.LEDGER_KEYS):
+            continue
+        is_today = (d == window[0])
+        # 今天：四格全比（原语义）；历史日：acked 以快照为准，只比三格。
+        keys = M.LEDGER_KEYS if is_today else M.LEDGER_KEYS[:3]
+        if prev and all(prev.get(k) == c[k] for k in keys):
+            continue                                # 数字没变 ⇒ 不重复追加
+        row = dict(c)
+        if not is_today and prev:
+            row["acked"] = int(prev.get("acked") or 0)
+        L.append_day(row, root=root)
+    return counts.get(window[0]) or {
+        "date": window[0], "blocked": 0, "noticed": 0, "breached": 0, "acked": 0}
 
 
 def _load_seen(root=None):
@@ -425,7 +441,7 @@ class Daemon:
         except Exception as e:                  # noqa: BLE001
             out["errors"].append("tray: %s" % e)
 
-        # ④ 记当日账本（唯一实现见模块级 `record_day`）
+        # ④ 记账本（最近 14 天补记＋更正，唯一实现见模块级 `record_day`）
         try:
             record_day(items=items, today=today, root=self.root)
         except Exception as e:                  # noqa: BLE001

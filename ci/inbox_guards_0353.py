@@ -2007,10 +2007,24 @@ def n_ledger_levels_match_meaning():
 
 
 def c_ledger_page_populates_from_chain_snapshot():
-    """账本页打开时必须经 `record_day()` 刷新，不依赖用户另外启动 daemon。"""
+    """账本页打开时必须经 `record_day()` 刷新，不依赖用户另外启动 daemon。
+
+    ★★ 0.51.0（账本四问 · 缺陷①「整天漏记」）：断言口径从「只写今天一行」
+      改为「写满最近 `BACKFILL_DAYS` 天里**有账的每一天**」。
+      夹具里有一条 `ts` 落在昨天、今天才被关闭的记录 —— 旧实现把它那次
+      「拦截」**永远漏掉**（`record_day` 只算 `ts` 当天，且只在值守台打开时跑），
+      新实现必须**落出昨天那一行**。
+      ⇒ `days == 2`、`昨天 blocked == 1`、累计 `blocked == 3` 三条合起来
+        就是「漏记已修」的机械证明（以下数字是 2026-10-16 实测真值，非推演）。
+    ★★ 本条此前**定义了却没登记进 `CHECKS_0353`** ⇒ 从未执行过（实测：
+      账本落盘语义整批改掉，它也不翻红）。**死判据与没有判据等价**，本批
+      一并登记 —— 同型教训见 0360 W06（夹具 `rules: []` 让排行卡从未进入
+      扫描视野）：判据没覆盖到的那个面，就是缺陷会长的那个面。
+    """
     import inbox_daemon as DM
     day, items = _ledger_test_items()
     hub = _tmpdir()
+    y1 = (datetime.fromisoformat(day).date() - timedelta(days=1)).isoformat()
     old_report = SV.R.daily_report
     SV.R.daily_report = lambda **_kw: {"ledger": L.summary(root=hub, today=day)}
     try:
@@ -2019,6 +2033,8 @@ def c_ledger_page_populates_from_chain_snapshot():
     finally:
         SV.R.daily_report = old_report
     s = L.summary(root=hub, today=day)
+    td = s.get("today") or {}
+    y1row = L.load_days(root=hub).get(y1) or {}
     lines = open(L.daily_path(hub), encoding="utf-8").read().splitlines()
     DM.record_day(items=items, today=day, root=hub)
     lines_after_repeat = open(L.daily_path(hub), encoding="utf-8").read().splitlines()
@@ -2027,13 +2043,90 @@ def c_ledger_page_populates_from_chain_snapshot():
     lines_after_correction = open(L.daily_path(hub), encoding="utf-8").read().splitlines()
     DM.record_day(items=[], today=day, root=hub)
     lines_after_same_correction = open(L.daily_path(hub), encoding="utf-8").read().splitlines()
-    return (s["blocked"] == 2 and s["noticed"] == 1 and s["breached"] == 1
-            and s["acked"] == 1 and s["days"] == 1
-            and len(lines) == len(lines_after_repeat) == 1
-            and len(lines_after_correction) == len(lines_after_same_correction) == 2
+    return (td.get("blocked") == 2 and td.get("noticed") == 1
+            and td.get("breached") == 1 and td.get("acked") == 1
+            and s["days"] == 2 and s["blocked"] == 3
+            and int(y1row.get("blocked") or 0) == 1      # 补记：昨天那行真的落了
+            and len(lines) == len(lines_after_repeat) == 2
+            and len(lines_after_correction) == len(lines_after_same_correction) == 4
             and all(corrected.get(k) == 0 for k in ("blocked", "noticed", "breached", "acked"))
             and "账本尚无可核对记录" not in PC.body(page)
             and "拦截危险操作" in PC.body(page) and "防护缺口" in PC.body(page))
+
+
+def c_ledger_backfill_fills_day_that_was_never_recorded():
+    """★ 缺陷①的正面证明：**某天没开过值守台 ⇒ 那天一行都没有 ⇒ 补记必须补出。**
+
+    造法：手工只给**今天**写一行（模拟"今天开过、昨天没开"），再跑
+    `record_day` ⇒ 昨天那行必须被补出来，且数字等于现算值。
+    ★ 补记是**追加式**的：不改旧行，只补缺行/追加更正行（链只许追加）。
+    """
+    import inbox_daemon as DM
+    day, items = _ledger_test_items()
+    hub = _tmpdir()
+    y1 = (datetime.fromisoformat(day).date() - timedelta(days=1)).isoformat()
+    L.append_day({"date": day, "blocked": 0, "noticed": 0,
+                  "breached": 0, "acked": 0}, root=hub)
+    before = L.load_days(root=hub)
+    DM.record_day(items=items, today=day, root=hub)
+    after = L.load_days(root=hub)
+    return (y1 not in before                                   # 昨天原本一行都没有
+            and int((after.get(y1) or {}).get("blocked") or 0) == 1
+            and int((after.get(day) or {}).get("blocked") or 0) == 2)
+
+
+def n_ledger_backfill_fills_day_that_was_never_recorded():
+    """负控：补记窗口缩成 1 天 ⇒ 昨天必须**不**被补出（证明"补记"真是补记）。"""
+    import inbox_daemon as DM
+    day, items = _ledger_test_items()
+    hub = _tmpdir()
+    y1 = (datetime.fromisoformat(day).date() - timedelta(days=1)).isoformat()
+    old = DM.BACKFILL_DAYS
+    DM.BACKFILL_DAYS = 1
+    try:
+        DM.record_day(items=items, today=day, root=hub)
+    finally:
+        DM.BACKFILL_DAYS = old
+    return (y1 not in L.load_days(root=hub)                    # 窗口只 1 天 ⇒ 昨天缺席
+            and int((L.load_days(root=hub).get(day) or {}).get("blocked") or 0) == 2)
+
+
+def c_ledger_history_acked_keeps_snapshot():
+    """★ 缺陷③（acked 漂移）的边界：历史日的 acked **沿用快照**，不被现算改写。
+
+    为什么必须这样：状态文件只保存**当前看法**，不保留每次迁移历史（关了又
+    重开的件会让现算值**只少不多**）⇒ 拿现算去改历史，是把不完整的数据当真源。
+    ⇒ 历史日只更正三格（拦截/注意/缺口），acked 保持旧行值；**今天**仍走现算。
+    """
+    import inbox_daemon as DM
+    day, items = _ledger_test_items()
+    hub = _tmpdir()
+    y1 = (datetime.fromisoformat(day).date() - timedelta(days=1)).isoformat()
+    L.append_day({"date": y1, "blocked": 9, "noticed": 9,
+                  "breached": 9, "acked": 7}, root=hub)
+    DM.record_day(items=items, today=day, root=hub)
+    row = L.load_days(root=hub).get(y1) or {}
+    return (int(row.get("acked") or 0) == 7                    # 快照值保留
+            and int(row.get("blocked") or 0) == 1              # 三格已更正为现算
+            and int(row.get("noticed") or 0) == 0
+            and int(row.get("breached") or 0) == 0)
+
+
+def n_ledger_history_acked_rule_is_date_scoped():
+    """负控（同尺换输入）：**今天**的 acked 仍走现算，**不**沿用快照。
+
+    证明「历史日沿用快照」不是「acked 永远不改」—— 后者会让当天的账永远错。
+    """
+    import inbox_daemon as DM
+    day, items = _ledger_test_items()
+    hub = _tmpdir()
+    L.append_day({"date": day, "blocked": 9, "noticed": 9,
+                  "breached": 9, "acked": 7}, root=hub)
+    DM.record_day(items=items, today=day, root=hub)
+    row = L.load_days(root=hub).get(day) or {}
+    return (int(row.get("acked") or 0) == 1                    # 现算：夹具今天关了 1 件
+            and int(row.get("blocked") or 0) == 2
+            and int(row.get("noticed") or 0) == 1)
 
 
 def n_ledger_page_populates_from_chain_snapshot():
@@ -2881,6 +2974,16 @@ CHECKS_0353 = [
      n_ledger_doc_citation_is_not_vague),
     ("P14 账本页有认领位与所在地", c_ledger_page_has_claim_slot_and_location,
      n_ledger_page_claim_slot_is_not_clickable),
+    # ---- 十三之二、账本**账准**（0.51.0 四问：整天漏记 / 历史少记 / acked 漂移）----
+    # ★ 为什么补登记：`c_ledger_page_populates_from_chain_snapshot` 与它的负控
+    #   此前**只定义、没登记** ⇒ 从未跑过（语义整批改掉也不翻红）。死判据＝没判据，
+    #   本批连同三条新判据一并进表，让「漏记已修」变成**每次交付前会报红**的机制。
+    ("P14 账本页刷新即记当日账", c_ledger_page_populates_from_chain_snapshot,
+     n_ledger_page_populates_from_chain_snapshot),
+    ("P14 漏记那天补得回来", c_ledger_backfill_fills_day_that_was_never_recorded,
+     n_ledger_backfill_fills_day_that_was_never_recorded),
+    ("P14 历史日已处理沿用快照", c_ledger_history_acked_keeps_snapshot,
+     n_ledger_history_acked_rule_is_date_scoped),
     # ---- 十四、日报数字与钻取同口径（F40 病灶）----
     ("P14 日报数字点进去对得上", c_report_drill_counts_match_headline,
      n_report_drill_counts_match_headline),
