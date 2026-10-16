@@ -26,3 +26,4 @@ _ux_fix_*.py
 antinel-*/
 _archive_dist/
 .workbuddy-ai/
+.worktrees/
