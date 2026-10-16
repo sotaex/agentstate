@@ -1,0 +1,58 @@
+{
+  "note": "冻结区登记簿（2026-10-16 建；机制见 docs/Antinel·冻结区机制 v1.0（2026-10-16）.md；制度见并行修订制度规则 H）。口径：status=candidate 是候选（契约已记录、待修复或待确认，D-38 不执法）；status=frozen 是生效冻结（D-38 执法，触碰即红，改动须走 retire_log）。字段：id / status / unit / kind（source＝源码哈希，unit 形如 file.py 或 file.py::func；output＝输出契约，跑登记的 check）/ contract / check（output 类）/ hash（source 类，冻结时填）/ frozen_at / decision（定型原话＋日期，由创始人批准语言触发）/ retire_log / blocked_on（候选的卡点）。退休＝retire_log 追加 {by, date, reason}，顺序是先登记新契约→退休→改代码→重新冻结（反了闸门先红）。frozen 条目缺 hash/check 或 check 未实现 ⇒ D-38 红（登记簿自身不一致，不静默放过）。",
+  "version": 1,
+  "entries": [
+    {
+      "id": "FZ-001",
+      "status": "candidate",
+      "unit": "inbox_server.py::_logo_mark",
+      "kind": "source",
+      "contract": "LOGO 状态球必须肉眼可辨：amber 圆的颜色不得与光束同色（创始人 2026-10-16 截图 #1：橙色小球弄丢了，AI 对此毫无意识；现状：fill 跟光束走，inbox_server.py:935/1013）",
+      "check": null,
+      "hash": null,
+      "frozen_at": null,
+      "decision": null,
+      "retire_log": [],
+      "blocked_on": "修复需《品牌动效报警语法》规格的球色梯度（外部 PSL 仓）——颜色定了、代码改绿之后再冻结。冻结后 kind=source：这枚函数字节即契约，演化走退休通道"
+    },
+    {
+      "id": "FZ-002",
+      "status": "candidate",
+      "unit": "窗口标题（render_page 经 _head 注入的 <title> 全串）",
+      "kind": "output",
+      "contract": "标题＝「Antinel 监理#<6hex>」，不含状态词（创始人 2026-10-16：『只要保留 Antinel 监理加上编号就行了』）",
+      "check": "window_title_format",
+      "hash": null,
+      "frozen_at": null,
+      "decision": null,
+      "retire_log": [],
+      "blocked_on": "待创始人确认 #3 需求反转（0.48.5 原话相反，见 inbox_server.py:2062 注释与 W-01/0490:1126）；确认后顺序：登记本契约→退休 W-01 标题形态断言＋n_w01→改代码→实现 window_title_format→冻结"
+    },
+    {
+      "id": "FZ-003",
+      "status": "candidate",
+      "unit": "logo 行布局（_bar 头部：LOGO 钮 → 状态块 → 徽标）",
+      "kind": "output",
+      "contract": "状态文字紧跟 LOGO 右侧、右侧不留空（创始人 2026-10-16 截图 #2：被擅自挪到下边、后边空缺、占地方；此前创始人要求过挪到 LOGO 后边，旧病复发）",
+      "check": "logo_row_layout",
+      "hash": null,
+      "frozen_at": null,
+      "decision": null,
+      "retire_log": [],
+      "blocked_on": "现版式即违例；修复（文字回 logo 右侧）后实现 logo_row_layout 再冻结"
+    },
+    {
+      "id": "FZ-004",
+      "status": "candidate",
+      "unit": "状态解释行（inbox_model.py::light_explain 的 reason 段）",
+      "kind": "output",
+      "contract": "主行只留状态词本身；版本差与收件箱计数不进主行（挪 ? 点击展开）（创始人 2026-10-16 截图 #4：啰嗦、浓重机器味）",
+      "check": "reason_line_budget",
+      "hash": null,
+      "frozen_at": null,
+      "decision": null,
+      "retire_log": [],
+      "blocked_on": "目标文案待创始人确认（我 2026-10-16 提议：gloss 删、版本差挪 ? 点击后、46 条计数删）；确认后改代码→实现 reason_line_budget→冻结"
+    }
+  ]
+}

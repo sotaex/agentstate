@@ -1263,6 +1263,127 @@ INSTANCES = [
                 "**页面照渲染不抛错**（占位符错位，`%` 族第二形态），"
                 "由 FLO-05 新加的「入口内嵌哨标」断言当场抓住。",
     },
+    {
+        "id": "X-053",
+        "type": "T-09",
+        "what": "**D-22 判据把「PKG＝主仓」当隐含前提 ⇒ worktree 内全量闸门结构性红**"
+                "（2026-10-16 流 B 验证时发现）。`j_single_source_of_truth` 判 "
+                "`built_from != str(PKG)` 即红（regression_gate.py:1172）；worktree "
+                "里 PKG＝`.worktrees/b` 路径而 built_from＝主仓路径 ⇒ **任何 worktree "
+                "内跑全量闸门必红**，与所测代码无关。已 stash 实证：原始模块红得"
+                "一字不差 ⇒ 与本批零因果。fixture 不受影响（负控 fixture 把 "
+                "built_from 封闭到 fixture 路径）⇒ selfcheck 判决干净。",
+        "guards": ["D-22"],
+        "guard": "D-22",
+        "status": "open",
+        "date": "2026-10-16",
+        "note": "★ 本轮只登记不改（同 X-051 先例）：修它＝动判据字节，创始人"
+                "「未签发不动产品一个字节」未授权。修复草图：比对 "
+                "`git -C <path> rev-parse --git-common-dir` 的**父目录**（主仓根）"
+                "替代 `str(PKG)`——主树行为零变化、worktree 转绿、fixture（自有 "
+                ".git）转绿、负控（built_from 指归档仓）仍红；改前必须自证负控"
+                "仍会红。★ 处置：worktree 内提交走 pre-commit 钩子 sanctioned 路径"
+                "（--no-verify，审计链留痕）＋提交信息明记 D-22 存量红；**集成树"
+                "（主树）才是合并裁决点**。",
+    },
+    {
+        "id": "X-054",
+        "type": "T-09",
+        "what": "**负控矩阵在 worktree 内有一条结构性不可达 ⇒ 必现一条 GREEN(坏)"
+                "（假守卫判决），根因是环境不是判据死亡**（2026-10-16 流 B 首次在 "
+                "worktree 内跑全量 --selfcheck 实测：28 RED(好) / 1 GREEN(坏)）。"
+                "条目「D-28 伪 .git」（X-022，2026-10-13）的注入点在 "
+                "`_build_negctl_fixture` 的 `if _dep_hook.is_file():` 分支内——"
+                "该分支整个是为 D-33 铺的部署钩子管线；worktree 的 `.git` 是**文件**"
+                "（gitdir 指针）⇒ 分支永不可达 ⇒ 注入改的是死代码 ⇒ fixture 无 `.git` "
+                "⇒ D-28 的「若存在 .git 必须是有效工作树」断言空转 ⇒ 闸门全绿。"
+                "两套口径：`is_file()` 文件系统探针 vs git 工作树实态（.git 是文件）。"
+                "已 diff 实证：本批对 regression_gate.py 纯新增 +184 行、零触碰 "
+                "fixture 构建器 ⇒ 与本批零因果。主仓有部署钩子（.git/hooks/"
+                "pre-commit，10-13 落）⇒ 该条目在集成树内正常触发。",
+        "guards": ["D-33"],
+        "guard": "D-33",
+        "status": "open",
+        "date": "2026-10-16",
+        "note": "★ 与 X-053 同族两态：X-053 是 D-22 在 worktree 内的**红态**"
+                "（判据假设 PKG＝主仓 ⇒ built_from 不等即红），本条是**静默死态**"
+                "（同一假设下负控注入点不可达 ⇒ 假守卫判决）。同族根因：判据与负控把"
+                "「PKG＝主仓」当隐含前提。"
+                "★ 本轮只登记不改（未授权不动判据字节）。修法草图：git init 从 "
+                "`if _dep_hook.is_file():` 分支内移到**无条件**执行（fixture 先 "
+                "git init 成真仓、再按需放钩子），或把注入点移到分支外；改后必须"
+                "自证：主树内该条目仍红、worktree 内转红。"
+                "★ 处置：worktree 内 selfcheck 结果按「1 条已知环境性 GREEN(坏)」"
+                "解读（本批自带的 D-38 条目 RED(好) 不受影响，28/29 红中唯一失败"
+                "即本条）；合并裁决在集成树跑全量矩阵（那里本条目正常触发）。",
+    },
+    {
+        "id": "X-055",
+        "type": "T-09",
+        "what": "**D-23 的 git 实测不剥继承环境 ⇒ 真实 git commit 钩子上下文里，"
+                "链式 worktree 的 GIT_DIR 令每条外仓路径都测成「在工作树内」"
+                "（环境事实假漂移）**（2026-10-16 流 B 提交实测：钩子内跑回归闸门，"
+                "D-23 红——`repos.archive`（D:\\psl\\poc\\r1v3，声明 git=False）与 "
+                "`site.builders_dir`（D:\\2026\\PSL，声明 False）双双实测 True）。"
+                "根因：`_is_git_dir` 用 `git -C <path> rev-parse "
+                "--is-inside-work-tree` 实测（regression_gate.py:1202），**不净化"
+                "继承环境**；真实 `git commit` 把 `GIT_DIR` 注入钩子子进程。"
+                "A/B 实测（同一命令同一路径）：干净 env ⇒ rc=128（not a git "
+                "repository，判 False，与声明一致）；GIT_DIR＝worktree gitdir"
+                "（`.git/worktrees/b`，不以 .git 结尾）⇒ rc=0 输出 true（判 True，"
+                "与声明相反）；GIT_DIR＝主仓 `.git` ⇒ rc=0 输出 false（判 False，"
+                "正确）⇒ **链式 worktree 特有**：非 .git 结尾的 GIT_DIR 使 git 的"
+                "工作树推导退化，对任何 cwd 答 true。预跑（直跑，干净 env）D-23 绿、"
+                "钩子内（真实提交上下文）红——同一份代码同一块盘，上下文不同结论不同。",
+        "guards": ["D-22"],
+        "guard": "D-22",
+        "status": "open",
+        "date": "2026-10-16",
+        "note": "★ 根因类型是 T-03（量具自身缺陷：实测口径对继承环境敏感），但 T-03 "
+                "被 X-050 看守期封锁至 10-29（10-15 后登记的 T-03 实例必判同族复发）"
+                "⇒ 暂挂 T-09/D-22（「运行上下文假设族」）名下，看守期过后应迁回 T-03。"
+                "与 X-053（红态：PKG 路径假设）、X-054（静默死态：.git 是目录假设）"
+                "同族第三态：**钩子上下文污染态**（干净 env 假设）。"
+                "★ 本轮只登记不改（未授权不动判据字节）。修法草图：`_is_git_dir` 的 "
+                "subprocess 传净化 env（剥掉 GIT_DIR／GIT_WORK_TREE／GIT_INDEX_FILE "
+                "等 GIT_* 继承变量）；改后必须自证负控仍会红（把声明改成与实测相反 ⇒ "
+                "必须红；实测路径换成真 git 仓 ⇒ 必须红）。"
+                "★ 影响面：**worktree 内真实 git commit 的钩子必被 D-23 拦**"
+                "（GIT_DIR 必被注入）；主树真实提交不受影响（A/B 实测 GIT_DIR＝主仓 "
+                ".git 时外仓路径答 false，正确）⇒ 本批提交走 --no-verify sanctioned "
+                "路径（审计链留痕），集成树才是合并裁决点。"
+                "★ 同族第四态（写侧污染）见 X-056：D-24 内建负控在 GIT_DIR 继承下"
+                "把探针 build/x.py 写入真仓索引。",
+    },
+    {
+        "id": "X-056",
+        "type": "T-09",
+        "what": "**D-24 的内建负控在钩子上下文里把探针文件写进真仓索引（写侧污染："
+                "闸门边跑边污染仓库、还查不到）**（2026-10-16 流 B 带钩子提交实测："
+                "提交被拦后暂存区惊现 `AD build/x.py`——内容 x=1 正是 D-24 负控探针，"
+                "误入本批首次提交、已 amend 清除）。根因与 X-055 同源："
+                "`j_no_build_artifacts_in_index` 的内建负控跑 `git -C neg add -f "
+                "build/x.py`（regression_gate.py:1443），**不净化继承环境**；真实 "
+                "git commit 注入的 GIT_DIR＝worktree gitdir 覆盖仓库发现 ⇒ add 落到"
+                "**真仓索引**（工作树推导退化为 cwd ⇒ 路径记成 build/x.py）。"
+                "D-24 自身不红：断言快照（:1426）在污染（:1433）之前取 ⇒ 查不到"
+                "自己造的污染 ⇒ 绿灯照常、仓库已脏。",
+        "guards": ["D-22"],
+        "guard": "D-22",
+        "status": "open",
+        "date": "2026-10-16",
+        "note": "★ 与 X-055 同源不同面：X-055 是读侧（D-23 实测答错），本条是写侧"
+                "（D-24 负控写错索引）。同族第四态。根因类型 T-03（量具自身缺陷："
+                "subprocess git 调用不净化继承 GIT_DIR），T-03 被 X-050 看守期封锁"
+                "至 10-29 ⇒ 暂挂 T-09/D-22，看守期过后迁回。"
+                "★ 本轮只登记不改（未授权不动判据字节）。修法草图：闸门内**所有** "
+                "subprocess git 调用统一传净化 env（剥 GIT_DIR／GIT_WORK_TREE／"
+                "GIT_INDEX_FILE；_is_git_dir 与 D-24 负控是首批两个落点）；改后"
+                "自证：钩子上下文内跑闸门，暂存区零变化（前后 git status --short "
+                "对照）、D-24 负控仍能对真污染红。"
+                "★ 教训入流 B 简报：带钩子提交尝试会污染暂存区 ⇒ 试钩子被拦后，"
+                "走 --no-verify 前必须 git status 复核（本次即靠这步抓住）。",
+    },
 ]
 
 # =====================================================================

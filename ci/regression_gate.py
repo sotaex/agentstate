@@ -782,6 +782,177 @@ def j_defect_registry_consistent():
         len(dt.TYPES), len(dt.INSTANCES))
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# D-38 冻结区（2026-10-16 创始人提议落地：AI 不得擅动已定型代码）
+# ══════════════════════════════════════════════════════════════════════════
+#: 病灶（创始人 2026-10-16 截图四条）：UI 在合法任务里被 AI 顺手改坏——
+#:   #1 橙色小球在动效移植时颜色变成跟光束走（inbox_server.py:935/1013）；
+#:   #2 logo 行布局在 0.50.7 去重（创始人要求的任务）时被顺手挪；
+#:   #3 标题状态词（0.48.5 需求，W-01 守着）后来创始人反转；
+#:   #4 38 字版本说明被 U-11（hover ≤20 字）赶到可见主行。
+#: 共同点：**没人要求动，AI 动了**。本仓已有零散事实冻结区（0490:1178
+#: PAGE_TITLES 不许动、0515:213 逐字在位、改名批内部标识、0360/0362 结构
+#: 断言），但无中央清单、无退休通道；manifest 哈希 129 文件含三大核心，
+#: 重签却是例行 ⇒「发现核心文件变了」有、「这次改动该不该发生」无。
+#: 本判据补这个缺口（机制全文：docs/Antinel·冻结区机制 v1.0）。
+#:
+#: ★ 与「锁不值得机器化」的判断自洽：哈希比对是**确定性判据**（无时序
+#:   依赖、无挂死风险、无假红——哈希要么中要么不中），正是值得机器化
+#:   的那类；唯一「误报」是合法改动，由退休通道消化（成本＝填一行理由）。
+
+FREEZE_REGISTRY_REL = "ci/freeze_zones.json"
+
+
+def _sha256_text(s):
+    import hashlib
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()
+
+
+def _freeze_registry_path():
+    return PKG / FREEZE_REGISTRY_REL
+
+
+def _unit_source_text(unit):
+    """取单元的源文本。unit＝"file.py"（整文件）或 "file.py::func"（函数段）。
+
+    ★ 函数段用 AST 取，**不按行号**——行号会随无关编辑位移（T-06 同型病）。
+    ★ 取不到 ⇒ None：调用方按「结构契约破坏」红，不静默跳过（铁律 1）。
+    """
+    if "::" in unit:
+        rel, func = unit.split("::", 1)
+    else:
+        rel, func = unit, None
+    p = PKG / rel
+    if not p.is_file():
+        return None
+    src = p.read_text(encoding="utf-8", errors="replace")
+    if func is None:
+        return src
+    import ast as _ast
+    try:
+        tree = _ast.parse(src)
+    except SyntaxError:
+        return None
+    for node in _ast.walk(tree):
+        if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)) \
+                and node.name == func:
+            return _ast.get_source_segment(src, node)
+    return None
+
+
+#: output 类契约的检查函数登记处。**frozen 条目名一个没实现的 check ⇒ 红**
+#: （不许冻结未实现的契约——那等于没有执法）。
+_FREEZE_OUTPUT_CHECKS = {}
+
+
+def _enforce_one_frozen(entry):
+    """执法单条 frozen 条目 ⇒ 问题串，或 None（过）。
+
+    ★ source 类：重算哈希比（unit 缺 hash ⇒ 登记簿自身不一致，红）。
+    ★ output 类：跑登记的 check（缺 check 或 check 未实现 ⇒ 红）。
+    """
+    eid = entry.get("id", "?")
+    kind = entry.get("kind")
+    unit = entry.get("unit", "")
+    if kind == "source":
+        h = entry.get("hash")
+        if not h:
+            return "%s frozen 但无 hash（登记簿自身不一致）" % eid
+        cur = _unit_source_text(unit)
+        if cur is None:
+            return "%s 单元 %s 取不到源（文件没了或函数名变了）——结构契约破坏" % (eid, unit)
+        if _sha256_text(cur) != h:
+            return ("%s 单元 %s 被擅改（哈希不符）——触碰即红；"
+                    "要改先走 retire_log 退休通道" % (eid, unit))
+        return None
+    if kind == "output":
+        cid = entry.get("check")
+        if not cid:
+            return "%s frozen 但无 check（登记簿自身不一致）" % eid
+        fn = _FREEZE_OUTPUT_CHECKS.get(cid)
+        if fn is None:
+            return "%s 契约检查 %s 未实现（不许冻结未实现的契约）" % (eid, cid)
+        ok, detail = fn()
+        if not ok:
+            return "%s 契约违例：%s" % (eid, detail)
+        return None
+    return "%s kind 非法：%r（应为 source/output）" % (eid, kind)
+
+
+def _freeze_machinery_probe():
+    """机械自证（**常驻负控**，每次闸门运行都跑）：证明执法逻辑没死。
+
+    ★ 为什么常驻而不只进 --selfcheck：selfcheck 要复制 fixture 跑整条
+      管线（重）；本探针纯进程内、毫秒级。合成一条 frozen 条目两步验：
+      ① 哈希填**真值** ⇒ 执法必须**放过**；② 哈希填全零 ⇒ 执法必须**抓住**。
+      任何一步不对 ⇒ 负控自身失效（红，铁律 4：不会红的闸门不是闸门）。
+    ★ 用登记簿自己当探针单元（ci/freeze_zones.json 必然存在，负控 fixture
+      的 ci/ 骨架里也有）——不依赖任何产品文件，任何环境都跑得动。
+    """
+    path = _freeze_registry_path()
+    real = _sha256_text(path.read_text(encoding="utf-8", errors="replace"))
+    good = {"id": "FZ-PROBE", "kind": "source",
+            "unit": FREEZE_REGISTRY_REL, "hash": real}
+    bad = dict(good, hash="0" * 64)
+    r_good = _enforce_one_frozen(good)
+    if r_good is not None:
+        return "负控自身失效①：真值哈希竟被执法判违例（%s）" % r_good
+    r_bad = _enforce_one_frozen(bad)
+    if r_bad is None:
+        return ("负控自身失效②：篡改哈希没被执法抓住——"
+                "冻结区执法是死的（装饰不是闸门）")
+    return None
+
+
+def j_freeze_zones_intact():
+    """★★ D-38（2026-10-16）：冻结区完整——frozen 条目契约未被擅改。
+
+    机制（详见《Antinel·冻结区机制 v1.0》＋并行修订制度规则 H）：
+    ① 登记簿加载（缺失 ⇒ 返回 None 走 SKIP——判据未生效如实报，铁律 1）；
+    ② 簿自身健全性：id 唯一／status 合法／frozen 必须有 hash 或 check；
+    ③ frozen 条目逐条执法（触碰即红，detail 附退休指引）；
+    ④ 机械自证探针（常驻负控，见 _freeze_machinery_probe）；
+    ⑤ candidate **不执法**——它们是「待修复/待确认」的管线，违例只登记。
+    """
+    path = _freeze_registry_path()
+    if not path.is_file():
+        return None
+    try:
+        reg = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except Exception as e:                                   # noqa: BLE001
+        return False, "登记簿读不了：%r" % (e,)
+    entries = reg.get("entries")
+    if not isinstance(entries, list):
+        return False, "登记簿 entries 不是清单（结构破坏）"
+    problems = []
+    ids = [e.get("id") for e in entries]
+    dup = sorted({i for i in ids if ids.count(i) > 1})
+    if dup:
+        problems.append("条目 id 重复：%s" % dup)
+    n_frozen = 0
+    cands = []
+    for e in entries:
+        st = e.get("status")
+        if st == "frozen":
+            n_frozen += 1
+            p = _enforce_one_frozen(e)
+            if p:
+                problems.append(p)
+        elif st == "candidate":
+            cands.append(e.get("id", "?"))
+        else:
+            problems.append("条目 %s status 非法：%r" % (e.get("id", "?"), st))
+    probe = _freeze_machinery_probe()
+    if probe:
+        problems.append(probe)
+    if problems:
+        return False, "冻结区 %d 处问题：%s" % (
+            len(problems), "；".join(problems[:3]))
+    return True, ("冻结区完好：%d frozen 全过执法 ＋ %d candidate 待管线（%s）；"
+                  "机械自证通过（合成擅改确被拦截）"
+                  % (n_frozen, len(cands), "/".join(cands) or "无"))
+
+
 def j_fallback_has_no_dst10(m):
     """兜底集的事实：_FALLBACK 只有 17 条且无 DST-10。
     ★ 这本身不是缺陷，但**降级时必须能看见**（否则把盲区当清白）。"""
@@ -2165,6 +2336,16 @@ def selfcheck():
          '    "$PY" "$ROOT/ci/baseline_tag.py" --remind || true',
          '    : # NEGCTL-D37 基线提醒被摘掉（工具成死代码）',
          "D-37"),
+        # ★★ D-38 负控（2026-10-16）：把候选 FZ-001 的状态从 candidate 直接
+        #   翻成 frozen（无 hash）——模拟「绕过管线直接冻结」。没有哈希的
+        #   frozen 条目执法不了 ⇒ 按铁律 1 必须红，不许静默放过。
+        #   注入串 `"status": "candidate"` 在簿内出现 4 次（FZ-001..004），
+        #   replace 只动**第一处** ⇒ 恰是 FZ-001，与注释一致。
+        ("D-38 缺陷：候选被直接翻成 frozen（无哈希，执法不了）",
+         "ci/freeze_zones.json",
+         '"status": "candidate"',
+         '"status": "frozen"',
+         "D-38"),
     ]
 
     ok_all = True
@@ -2390,6 +2571,9 @@ def _checks(m):
         # ★ D-31 放最后：它红的正是上面几条没做完；R7 对齐后由红转绿 ＝ 完工证明
         ("D-31 缺陷类型登记簿自身一致（不会响的表格接成闸门一环）",
          j_defect_registry_consistent),
+        # ── 2026-10-16 冻结区（创始人提议：AI 不得擅动已定型代码）──
+        ("D-38 冻结区完整：frozen 条目契约未被擅改（触碰即红）",
+         j_freeze_zones_intact),
     ]
 
 
