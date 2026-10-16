@@ -565,9 +565,17 @@ def _inside(work, rect):
 #   MARK／_TAIL_RE／console_title_suffix／is_console_title 全从它派生，
 #   零机制改动（0360 按常量名断言，名不变）。上面 0.36.x 的注释块是当时的
 #   机制记录，其中的「 · 值守台」字样按「记录原文不改写」保留。
-CONSOLE_WINDOW_TITLE_SUFFIX = " · Antinel 监理"
+# ★★ 0.51.1 反转（创始人 2026-10-16 拍板；W-01 退休、FZ-002 冻结）：
+#   标题形态再变 —— 状态词/页面名前缀整体退役（0.48.5「标题该显示
+#   状态」原话作废，新话「只要保留 Antinel 监理加上编号就行了」）。
+#   值从「 · Antinel 监理」收为 **`Antinel 监理`**（去前导分隔符）：
+#   标题整串＝`Antinel 监理#<run_id>`（品牌开头，其后只允许身份串）。
+#   MARK／console_title_suffix／认窗判据全从本行派生，随值自动翻转；
+#   `_TAIL_RE` 改名 `_HEAD_RE`（标记从末尾挪到开头，名字跟事实走）。
+CONSOLE_WINDOW_TITLE_SUFFIX = "Antinel 监理"
 #: 完整标题（仅用于文档/展示；**代码请用 `is_console_title`**）。
-CONSOLE_WINDOW_TITLE = "收件箱" + CONSOLE_WINDOW_TITLE_SUFFIX
+#: ★ 0.51.1：无身份串时的完整标题即品牌本身（反转后标题恒为品牌形态）。
+CONSOLE_WINDOW_TITLE = CONSOLE_WINDOW_TITLE_SUFFIX
 
 # ── 0.36.2：窗口**身份标识**（治"认错窗口"这个根） ────────────────────────
 # ★★★ 为什么必须有身份标识（0.36.2 修的是真缺陷，不是锦上添花）：
@@ -661,13 +669,23 @@ BROWSER_TITLE_MARKS = ("Microsoft", "Chromium", "Google Chrome")
 def is_console_title(actual, run_id=None):
     """这个窗口标题**是不是值守台 app 窗口**？
 
-    ★ `run_id` 为空 ⇒ 只问"是不是值守台 app 窗口"（**中段标记**匹配）：
-      覆盖「收件箱 · 值守台」「收件箱 · 值守台#abc123」两种形态。
+    ★ `run_id` 为空 ⇒ 只问"是不是值守台 app 窗口"（**开头标记**匹配）：
+      覆盖「Antinel 监理」「Antinel 监理#abc123」两种形态（0.51.1
+      反转后标题恒为品牌开头整串）。
+    ★★ **旧形态本版不认领**（诚实缓建，不是遗漏声明）：0.48.5 前缀
+      形态、0.50.4 前「… · 值守台#…」在 `_HEAD_RE` 品牌前置结构下
+      天然被排除；`_mark_at_tail_any` 只服务 logo/bubble 窗（历史
+      事实），console 路径**没有** legacy 认领 —— 无分发⇒无升级人口
+      （《改名零后遗症执行策略》§8 L2/L3-sweep 缓建裁定），dev 机
+      旧窗手动关闭/重启消化；分发前必须补 legacy 认领（LEGACY 标记
+      常量＋`_mark_at_tail(title, mark=None)` 默认参数化＋daemon
+      sweep），否则升级用户旧窗成孤儿。
     ★ `run_id` 给了 ⇒ 只问"是不是**本次运行**的"（**整串后缀**匹配）：
       这是**移动窗口前的唯一合法判据**（只有它能排除用户窗口）。
     ★★ 无论哪种模式，都先排除**浏览器普通窗口**（见 `BROWSER_TITLE_MARKS`）
       —— 否则宽泛判据会关掉用户自己的浏览器窗口（实测已闯过这个祸）。
 
+    ── 历史沿革（记录原文不改写）─────────────────────────────────
     ★★★ 0.36.5 修一个**真缺陷**（0360 P15 实测抓出来的，不是假红）：
       宽泛模式原来用 `MARK in t`（**任意位置子串**），实测后果：
 
@@ -710,9 +728,35 @@ def is_console_title(actual, run_id=None):
 
 
 def _mark_at_tail(title):
-    """整串是否形如「**页面名** · 值守台」或「**页面名** · 值守台#<hex 身份>」。
+    """整串是否形如「**Antinel 监理**」或「**Antinel 监理#<hex 身份>**」。
 
-    ★ 0.48.5（交接件 §5.5 W-01）：前缀也可以是**状态词**（失守/拦截/注意/
+    ★★ 0.51.1 反转（创始人 2026-10-16 拍板；W-01 退休入
+      suite_retirement.json、新契约冻结为 FZ-002）：标题形态从
+      「<状态词> · Antinel 监理(#[hex])?」（0.48.5）翻转为**品牌开头
+      整串**——0.48.5 原话「标题该显示的是状态」作废，新话「只要保留
+      Antinel 监理加上编号就行了」。防误伤层（0.36.5 硬化、T-05/G-05
+      守护）随之从「前缀白名单」迁移为两条结构判据：
+        ① 品牌必须在**开头**（`_HEAD_RE` 的 `^` 锚定）—— 挡「记事本 -
+           Antinel 监理#abc」类**前面挂程序**的窗口（0.36.5 实测误伤形态
+           之一；旧形态靠前缀白名单挡，新形态品牌前置天然排除）；
+        ② 品牌之后**只允许身份串**（rest 检查）—— 挡「Antinel 监理#abc
+           记事本」类**后面挂字**的窗口（0.36.5 实测误伤形态之二，
+           「收件箱 · 值守台助手」在新形态下的对应物）。
+      浏览器品牌排除在 `is_console_title` 入口（BROWSER_TITLE_MARKS）
+      不动；legacy 窗口（0.50.4 前的「… · 值守台#…」与 0.48.5 的
+      「状态词 · Antinel 监理#…」）**本版不认领**（诚实缓建：`_mark_
+      at_tail_any` 只服务 logo/bubble 窗，console 无 legacy 路径；
+      无分发⇒无升级人口，分发前须补 LEGACY 认领，见
+      `is_console_title` docstring 的缓建注记）。
+
+    ★★ G-05 负控锚点（regression_gate.py 的 G-05 注入指着下面两行）：
+      W-01 退休同批从旧锚点（`if page not in names:` ＋ `return False`，
+      page 前缀概念随反转消失）迁移到 `if rest …: return False` 两行。
+      改成放行 ⇒ 「Antinel 监理#abc 记事本」被误认 ⇒ G-05 必须红
+      （铁律 4：不会红的保护不是保护；迁移自带 selfcheck 自证）。
+
+    ── 历史沿革（记录原文不改写）─────────────────────────────────
+    ★ 0.48.5（交接件 §5.5 W-01）：前缀曾是**状态词**（失守/拦截/注意/
       缺粮/值守中/研发中/未启用/中断 —— 标题自该版起恒用状态词，见
       `inbox_server.render_page`）。整串形态不变，只是白名单放宽一维。
 
@@ -740,57 +784,30 @@ def _mark_at_tail(title):
         标题里表示"另一个窗口"的分隔符（` - `、` – `、` — `）。
       ★ 这条思路的来源：**判据不该假设标题长什么样，只该认可它产生的那个程序**
         —— 与「窗口枚举复用唯一实现」「判据不许二次实现」同源。
+      （0.51.1 反转后本段的"前缀白名单"思路整体退役：品牌前置后
+      "前面挂程序"由 ① 的结构判据天然排除，不再需要真源白名单。）
     """
     if not title:
         return False
-    # ① 标记必须在末尾（其后只允许 `#hex` 身份串）
-    m = _TAIL_RE.search(title)
+    # ① 品牌必须在开头（其后要么结尾、要么紧跟身份串）
+    m = _HEAD_RE.match(title)
     if not m:
         return False
-    page = title[:m.start()]
-    # ② 前面必须是**认得的前缀**（页面名或状态词），不得含"另一个窗口"的标题分隔符
-    if not page or any(sep in page for sep in _WINDOW_TITLE_SEPS):
-        return False
-    # ③ 前缀必须**不含路径/可执行扩展名**等程序特征（记事本.exe 之类）
-    if re.search(r"[\w.-]+\.(?:exe|py|bat|cmd|ps1)$", page, re.I):
-        return False
-    # ④ ★★ 0.36.5 真缺口（本轮实测当场抓到，不是推演）：
-    #   「前缀」这三个字，上面 ②③ 只查了**形状**（有没有分隔符/扩展名），
-    #   **根本没查它是不是我们自己认得的那几种之一** ⇒ 用户窗口标题里
-    #   恰好含 ` · 值守台#a8276c` 时会被误认（实测 `请给我一个 · 值守台#a8276c`
-    #   宽泛模式返回 True）⇒ 宽泛模式是用来**关窗**的 ⇒ 会关掉用户自己的窗口。
-    #   ⇒ 补上白名单这一层，注释里承诺的判据才真正落地。
-    #   清单**不写死在这里**，import 两个唯一真源：
-    #     · `inbox_server.PAGE_TITLES`（四个页面名）
-    #     · `host_shield.POSTURE_LABEL_ALLOWED`（8 个状态词，S04 真源）
-    try:
-        import inbox_server as _SV
-        import host_shield as _HS
-        # ★★ 0.48.5（交接件 §5.5 W-01）：白名单＝**页面名 ∪ 状态词**。
-        #   标题自 0.48.5 起恒用状态词（render_page 传 `M.light_explain()`
-        #   的 label）⇒ 前缀不再只是页面名；页面名仍保留：旧窗口/别的入口
-        #   可能还带它，且 0360 P15 逐页「认得出」继续有效。
-        #   ⚠️ 必须保持「一个 names 集合」而不是 `page in names or
-        #      page in state_names` —— 回归闸门 G-05 负控的注入锚点**逐字**
-        #      锁着下面 `if page not in names:` + `return False` 两行；
-        #      改了写法 ＝ G-05 负控失配，那层「不许误关用户窗口」的保护
-        #      会悄悄失效（交接件 §5.5 连带栏原话）。
-        names = set(_SV.PAGE_TITLES.values()) | set(_HS.POSTURE_LABEL_ALLOWED)
-    except Exception:                                          # noqa: BLE001
-        # ★ 拿不到真源 ⇒ 判不出 ⇒ 走**严**的一边：不认。
-        #   与 `console_is_visible()` 的取向相反是有意的——
-        #   那边漏报会藏起真失守，这边误认会去动用户的窗口。
-        return False
-    if page not in names:
+    # ② 品牌之后只允许身份串（`#hex{4,}`）；挂别的字 ⇒ 不是我们的窗口
+    #    （G-05 负控锚点：这两行改成放行 ⇒ 误认用户窗口 ⇒ 必须红）
+    rest = title[m.end():]
+    if rest and not _RID_RE.fullmatch(rest):
         return False
     return True
 
 
-#: 标题**末尾**形态：标记（＋可选身份串）。
-_TAIL_RE = re.compile(re.escape(CONSOLE_WINDOW_TITLE_MARK) + r"(?:#[0-9a-fA-F]{4,})?$")
+#: 标题**开头**形态（★ 0.51.1 反转：标记从末尾挪到开头，`_TAIL_RE` 改名
+#:   `_HEAD_RE`——名字跟事实走，见 `_mark_at_tail` 0.51.1 段）。品牌必须
+#:   在开头；其后由 `_mark_at_tail` 的 rest 检查约束只允许身份串。
+_HEAD_RE = re.compile(r"^" + re.escape(CONSOLE_WINDOW_TITLE_MARK))
+#: 身份串形态（品牌之后唯一允许的后缀，`#hex{4,}`）。
+_RID_RE = re.compile(r"#[0-9a-fA-F]{4,}")
 
-#: 窗口标题里表示"这是另一个窗口"的分隔符（Edge 会把标签页标题串进去）。
-_WINDOW_TITLE_SEPS = (" - ", " \u2013 ", " \u2014 ", " | ", " \u00b7 ")
 
 
 def is_window_on_screen(hwnd):
@@ -873,8 +890,11 @@ def find_console_windows(suffix=CONSOLE_WINDOW_TITLE_SUFFIX, visible_only=True,
     ★★ 两级匹配（0.36.2，见 `CONSOLE_WINDOW_TITLE_MARK` 的说明）：
       · 给 `run_id` ⇒ 只认**本次运行**的窗口（整串后缀匹配）。
         **只有这个模式可以用于移动窗口。**
-      · 不给 `run_id` ⇒ 认**任何**值守台窗口（中段标记匹配），
-        覆盖带身份串的旧窗口。**只用于关窗**，不用于移动。
+      · 不给 `run_id` ⇒ 认**任何**值守台窗口（品牌开头宽泛匹配）。
+        **只用于关窗**，不用于移动。★ 0.51.1 反转后通用模式同样品牌
+        前置（原「中段标记匹配」语义作废）：旧形态窗口（页面名/状态词
+        前缀）**不再被认领** —— 诚实缓建，无分发⇒无升级人口；分发前
+        须补 LEGACY 认领（见 `is_console_title` docstring 的缓建注记）。
 
     ★★★ 0.36.2 实测再抓一个真缺陷（这个坑踩了两次才算看清）：
       第一版把"不给 run_id"的分支写成 `_matches_title(标题, 通用后缀)`
@@ -888,7 +908,8 @@ def find_console_windows(suffix=CONSOLE_WINDOW_TITLE_SUFFIX, visible_only=True,
         ⇒ 教训：**新增一个正确的函数 ≠ 修正调用它的默认路径**。
         判据必须覆盖"默认参数下的真实行为"，而不是"某个函数存在"。
       ⇒ 现在默认分支直接用 `is_console_title(title, run_id)`：
-        `run_id` 为空 ⇒ 中段标记匹配（宽泛）；给了 ⇒ 整串后缀（严格）。
+        `run_id` 为空 ⇒ 品牌开头宽泛模式（0.51.1 反转，原「中段标记
+        匹配」作废）；给了 ⇒ 整串后缀（严格）。
         **一条路径，两个语义**，不再有"默认是哪种"的分叉。
 
     ★ 可测性：`lister` 是注入点，判据不必真起浏览器。

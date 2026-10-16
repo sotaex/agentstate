@@ -808,6 +808,26 @@ _GUARDED_CHAIN_FILES = (
     "egress.py",                      # 出口记账
 )
 
+# ★★ 0.51.1 新增：**研发树专属**保护名单（Phase B3，冻结区机制的外层守卫）。
+#   为什么单独一张表、不进 `_GUARDED_CHAIN_FILES`：冻结区登记簿
+#   `ci/freeze_zones.json` 是**研发态治理件**——`ci/` 整个目录不进 wheel
+#   （MANIFEST.in 无 ci/ 规则，0.48.3 起清单主体＝wheel 载荷）⇒ 若把它
+#   塞进 `_GUARDED_CHAIN_FILES`（那份随包发），**出包产品的 self_check 会
+#   恒红**（"在保护名单里却没登记进 manifest"——清单里永远不会有它）⇒
+#   `spawn_sentinel()` 硬拦 ⇒ 监理在产品里拉不起来。本表**在场才校验**：
+#   研发树里它在（git 跟踪）⇒ 必须登记进 manifest 且字节相符（fail-closed
+#   同 0.36.4 纪律：没登记＝红）；出包产品里它不在 ⇒ 跳过，不误报。
+#   它挡的正是 D-38 不变式挡不住的那一半：**伪造完整退休记录**（by/date/
+#   reason 三字段齐全）后翻状态改代码——语义自洽但字节被改 ⇒ 哈希失配。
+#   ★ 已知时点：发布构建会把主树 manifest 刷成纯 wheel 清单（本条目被
+#     抹掉）⇒ 发布后本表会红一条「没登记」——与 S70 同族的**已知出包后
+#     状态**，下一轮开工时补登记＋重签即恢复（`_resign_manifest.py`
+#     只重算已有条目 ⇒ 需先补条目；同 workspace_facts 五字段的手工同步
+#     纪律）。
+_DEV_GUARDED_CHAIN_FILES = (
+    "ci/freeze_zones.json",           # 冻结区登记簿（研发态治理，不在 wheel）
+)
+
 
 #: 气泡停留秒数（＝可点击的时间窗）。★ 判据要能在秒级验完 ⇒ 允许调小。
 _NOTIFY_LINGER = 15
@@ -2093,6 +2113,29 @@ def self_check():
         lv = file_digest(os.path.join(root, rel.replace("/", os.sep)), rel)
         if mh and lv and mh != lv:
             problems.append("%s 与 manifest 不符（告警链路文件可能被改）" % rel)
+    # ★★ 0.51.1：研发树专属名单（Phase B3 冻结区外层守卫）——**在场才校验**：
+    #   ci/ 不进 wheel（MANIFEST.in 无 ci/ 规则）⇒ 出包产品里没这个文件 ⇒
+    #   跳过不误报；研发树里它在（git 跟踪）⇒ fail-closed 同 0.36.4 纪律
+    #   （没登记＝红），字节不符＝红（伪造退休记录也逃不过这层哈希）。
+    #   出包后主树 manifest 被刷成纯 wheel 清单 ⇒ 本表会红一条「没登记」，
+    #   修法即下条红给出的命令（同 S70 的出包后已知态）。
+    for rel in _DEV_GUARDED_CHAIN_FILES:
+        p = os.path.join(root, rel.replace("/", os.sep))
+        if not os.path.isfile(p):
+            continue                        # 不在场 ⇒ 不适用（出包语境）
+        mh = _manifest_hash(rel)
+        if not mh:
+            problems.append(
+                "%s 在研发树专属保护名单里，却没登记进 manifest"
+                "（研发态治理登记簿可被改而查不出；修法："
+                "`python _tools_034/_resign_manifest.py --adopt-dev`）" % rel)
+            continue
+        lv = file_digest(p, rel)
+        if mh and lv and mh != lv:
+            problems.append(
+                "%s 与 manifest 不符（冻结区登记簿可能被改——伪造退休"
+                "记录也逃不过这层哈希；修法：`python _tools_034/"
+                "_resign_manifest.py`）" % rel)
     return (not problems), problems
 
 

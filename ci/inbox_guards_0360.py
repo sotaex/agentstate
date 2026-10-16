@@ -633,16 +633,21 @@ def c_place_reports_failure_honestly():
 
 
 def c_place_window_title_is_exact_not_substring(src=None):
-    """★ 窗口识别用**后缀精确匹配**，不用 `in` 子串（子串会误伤别的窗口）。
+    """★ 窗口识别用**开头精确匹配**，不用 `in` 子串（子串会误伤别的窗口）。
 
-    ★★ 为什么是「后缀」而不是「完整标题」（0.36.1 真缺陷，本轮实测）：
+    ★★ 为什么是「品牌开头整串」而不是「任意子串」（0.36.1 真缺陷，本轮实测）：
       页面标题是 `"%s · Antinel 监理"`，**前半段随当前页面变** ——
       收件箱 / 运行状态 / 账本 / 日报 各是一个标题。
       实测落位那一刻窗口标题已是「运行状态 · Antinel 监理」，
       只认「收件箱 · Antinel 监理」⇒ 找不到窗口、**落位静默失败**，
       而日志还打着「已落到 520x640」（量的是别的窗口）。
+      ★ 0.51.1 反转（W-01 退休、FZ-002 冻结）：标题恒为
+        「Antinel 监理#<6hex>」（状态词/页面名前缀退役）⇒ 认窗从
+        「后缀 endswith」翻转为**品牌开头 + 其后只允许身份串**两层
+        结构判据（见 `inbox_window._mark_at_tail` 0.51.1 段）。本条
+        守的意图不变：**不许退化成子串匹配**。
 
-    ★ 后缀匹配**不是**子串搜索：必须是 `endswith`（整串结尾），
+    ★ 开头匹配**不是**子串搜索：必须是 `^` 锚定（品牌必须在开头），
       不是 `in`（任意位置出现）。这条守住它。
 
     ★★ 0.50.2 两处修正（都是**实测**出来的量具故障）：
@@ -706,35 +711,31 @@ def n_place_window_title_substring_is_caught():
     return True
 
 
-def c_window_title_prefix_is_variable():
-    """★ 页面标题前半段**确实会变** —— 这是认后缀的**前提**；
-    前提若变（标题固定了）而后缀规则仍在，那是一条死规则。
+def c_window_title_matches_console_suffix():
+    """★ 页面标题必须**恰好是**认窗后缀本体（无第二份实现）。
 
-    实测依据：`inbox_server` 的 `<title>%s · Antinel 监理…</title>` 里 `%s`
-    是当前页面名。
-    ★ 0.36.2：标题末尾追加了身份串 `%s`（`#<run_id>`），
-      所以字面量从 `<title>%s · Antinel 监理</title>` 变成
-      `<title>%s · Antinel 监理%s</title>`。判据跟着改，但**判据的意图不变**：
-      仍然是"前半段必须是变量（页面名）"。
-    ★★ 0.50.4（改名批，B7）改写为**行为级**：`_head()` 的后缀已收编为
-      `inbox_window.console_title_suffix()` 派生（原先 inbox_server 自造一份
-      字面量，两处实现）—— 那时的"源码里搜 `<title>%s · …`"会**假红**
-      （字面量搬了家，行为没变），而那正是本仓最恨的"查文案"式判据。
-      ⇒ 改为**真渲染一次**，断言"标题 == 页面名 + 派生后缀"：
-        · 页面名必须是变量（固定标题 ⇒ 红）；
-        · 后缀必须与 `is_console_title` 认的**同一个串**（两处实现漂移 ⇒ 红）。
-      这比原文案检查更强：文案搬家不红，行为退化才红。
+    0.36.2 起源时本条叫「页面标题前缀确实会变」（P13）—— 断言
+    「标题 == 页面名 ＋ 派生后缀」，因为那时的认窗判据是**后缀匹配**，
+    前半段随页面变是前提。
+    ★★ 0.51.1 反转（W-01 退休、FZ-002 冻结，创始人 2026-10-16 拍板）：
+      标题不再带状态词/页面名前缀，整串恒为「Antinel 监理#<6hex>」
+      ⇒「前缀会变」的前提被**设计性地推翻**（页面名在选项卡＋h2）。
+      但本条更深一层的意图**不变且更重要**：**标题与 `is_console_title`
+      认的必须是同一个串** —— `inbox_server._head` 与
+      `inbox_window.console_title_suffix` 两处实现漂移 ⇒ 认窗失效
+      ⇒ 红。0.50.4 B7 收编为行为级后，这条就是「无第二份标题实现」
+      的守门人（行为级：文案搬家不红，行为退化才红）。
     """
     import inbox_server as SV
     import inbox_window as WIN
     tok = "0360p13"
     head = SV._head("inbox", tok)
-    want = "<title>inbox%s</title>" % WIN.console_title_suffix(
+    want = "<title>%s</title>" % WIN.console_title_suffix(
         WIN.build_run_id(tok))
     if want not in head:
         got = re.search(r"<title>(.*?)</title>", head)
-        return ("页面标题不再是「页面名 + 派生后缀」—— 认后缀的理由需重新评估"
-                "（实测 %r）" % (got.group(1) if got else None))
+        return ("页面标题不再是认窗后缀本体—— 标题与认窗判据漂移（两处"
+                "实现），认窗会失效（实测 %r）" % (got.group(1) if got else None))
     return True
 
 
@@ -795,15 +796,19 @@ def c_window_suffix_matches_every_page():
     if set(pages_obj.keys()) != {"inbox", "report", "health", "ledger"}:
         return ("PAGE_TITLES 的键变了：%s —— 判据的页面清单需要复核"
                 % sorted(pages_obj.keys()))
-    # ② 每个页面标题都必须被认出来（**走真实匹配入口 `is_console_title`**）
+    # ② 标题形态必须被认出来（**走真实匹配入口 `is_console_title`**）
+    #   ★ 0.51.1 反转（W-01 退休、FZ-002 冻结，创始人 2026-10-16 拍板）：
+    #     标题不再随页面变（状态词/页面名前缀退役，整串恒为品牌形态）
+    #     ⇒ 「逐页认窗」的测试点消失，替换为品牌两种形态（无身份／带
+    #     身份）——「用户切到任何页后窗口都认得出」由「标题恒为品牌」
+    #     **更强地**满足：不再有「切到某页后窗口失联」的可能（旧形态
+    #     0.36.1 实测的那个故障在结构上不再存在）。
     import inbox_window as WIN
-    for p in pages:
-        if not WIN.is_console_title(p + " · Antinel 监理", None):
-            return "页面标题 %r 认不出来 ⇒ 用户切到该页后窗口就失联" % p
-        # 带身份串的形态也必须认出来（0.36.2 起 run_id 放在标题末尾）
-        if not WIN.is_console_title(p + " · Antinel 监理#486acd", None):
-            return ("页面标题 %r 带身份串的形态认不出来 ⇒ 用户切到该页后"
-                    "窗口失联" % p)
+    bare = WIN.CONSOLE_WINDOW_TITLE_MARK
+    if not WIN.is_console_title(bare, None):
+        return "品牌形态（无身份串）认不出来 ⇒ 窗口失联"
+    if not WIN.is_console_title(bare + "#486acd", None):
+        return "品牌形态（带身份串）认不出来 ⇒ 窗口失联"
     # ③ 反向：非值守台窗口绝不能被认出来
     # ★★ 0.36.5 修判据的**测点**（实测抓出来的，不是改判据放松）：
     #   原来测的是 `_matches_title` —— 那个函数是 0.36.2 之前的旧口径
@@ -813,25 +818,33 @@ def c_window_suffix_matches_every_page():
     #   ⇒ 这里**不改意图、不删用例**，只把测点换成真源。
     #   ★ 教训与 F3 同源：**测的不是被测对象 ⇒ 红项指向的可能是废代码**。
     #     判据"报红"不等于"产品有问题"—— 必须先确认它在测谁。
+    #   ★★ 0.36.5 本轮实测当场抓到的真缺口（不是补的想象用例）：
+    #     宽泛模式只查了标记位置/分隔符/扩展名三层**形状**，
+    #     注释里承诺的「页面前缀必须是已知页面名之一」**从没实现**
+    #     ⇒ 用户窗口标题里恰好含 ` · 值守台#486acd` 时被误认
+    #     ⇒ 宽泛模式是用来**关窗**的 ⇒ 会关掉用户自己的窗口。
+    #     （0.51.1 反转后这层「前缀白名单」退役——品牌前置天然排除；
+    #     下列旧形状仍全部保留：新形态更严，它们仍被拒认。）
+    # ★ 0.51.1 反转：另补**新形态特有**的两类负形状：品牌后挂字
+    #   （「Antinel 监理#486acd 记事本」——旧形态「收件箱 · Antinel 监理
+    #   助手」的对应物）与非 hex 身份串。
     for bad in ("记事本", "收件箱 · Antinel 监理 - 记事本", "记事本 - 收件箱 · Antinel 监理",
                 "Microsoft Edge", "Antinel 监理（副本）", "我的Antinel 监理",
                 "Antinel 监理备份", "收件箱", "收件箱 · Antinel 监理助手",
                 "收件箱 · Antinel 监理#zzzzzzzz", "收件箱 · Antinel 监理#",
-                # ★★ 0.36.5 本轮实测当场抓到的真缺口（不是补的想象用例）：
-                #   宽泛模式只查了标记位置/分隔符/扩展名三层**形状**，
-                #   注释里承诺的「页面前缀必须是已知页面名之一」**从没实现**
-                #   ⇒ 用户窗口标题里恰好含 ` · 值守台#486acd` 时被误认
-                #   ⇒ 宽泛模式是用来**关窗**的 ⇒ 会关掉用户自己的窗口。
                 "请给我一个 · Antinel 监理#486acd", "问题：收件箱 · Antinel 监理#486acd 怎么办",
-                "备份 · Antinel 监理#486acd", "收件箱 · Antinel 监理#486acd - 副本"):
+                "备份 · Antinel 监理#486acd", "收件箱 · Antinel 监理#486acd - 副本",
+                "Antinel 监理#486acd 记事本", "Antinel 监理#486acd 和另外 14 个页面",
+                "Antinel 监理#zzzz", "Antinel 监理助手"):
         if WIN.is_console_title(bad, None):
             return ("非Antinel 监理窗口 %r 被误认成Antinel 监理（会误关/误移用户窗口）" % bad)
     # ④ 严格模式（唯一允许**移动**窗口的判据）必须更严：
     #   它必须只认本次运行的窗口，连**别的 run_id** 都不认。
-    if not WIN.is_console_title("收件箱 · Antinel 监理#486acd", "486acd"):
+    #   ★ 0.51.1：夹具换品牌形态；负清单补「品牌＋别的 rid」。
+    if not WIN.is_console_title("Antinel 监理#486acd", "486acd"):
         return "严格模式认不出本次运行窗口 ⇒ 窗口永远落不了位"
-    for other in ("收件箱 · Antinel 监理", "收件箱 · Antinel 监理#ffff",
-                  "记事本 - 收件箱 · Antinel 监理#486acd"):
+    for other in ("Antinel 监理", "Antinel 监理#ffff",
+                  "记事本 - Antinel 监理#486acd", "Antinel 监理#486acd - 副本"):
         if WIN.is_console_title(other, "486acd"):
             return ("严格模式把 %r 当成本次运行窗口 ⇒ 会移动/关闭别人的窗口" % other)
     return True
@@ -1969,7 +1982,7 @@ CHECKS = [
     ("P10 收旧窗口只认精确标题", c_close_old_windows_only_exact_title, None),
     ("P11 收旧窗口如实报数量", c_close_old_windows_reports_count, None),
     ("P12 收旧窗口有注入点", c_close_old_windows_uses_injection_point, None),
-    ("P13 页面标题前缀确实会变", c_window_title_prefix_is_variable, None),
+    ("P13 页面标题与认窗后缀同串（无第二份实现）", c_window_title_matches_console_suffix, None),
     ("P14 窗口识别不硬编码页面名", c_window_id_does_not_hardcode_page_name, None),
     ("P15 后缀匹配对每个页面都成立", c_window_suffix_matches_every_page, None),
     ("W01 页面无 markdown 星号", c_no_markdown_star_leaks_to_user,

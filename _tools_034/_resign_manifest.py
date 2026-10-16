@@ -13,6 +13,14 @@
 边界（刻意保守）：
   · **只重算清单里已有的条目**——不新增文件、不删除条目。
     增删清单是构建器的职责（`scripts/build_package.py`），本工具不越权。
+    **唯一例外**：`--adopt-dev`——把 `host_shield._DEV_GUARDED_CHAIN_FILES`
+    里**缺登记**的条目补进清单。为什么必须破这个例：那些是研发树专属件
+    （`ci/freeze_zones.json`），`ci/` 不进 wheel（MANIFEST.in 无 ci/ 规则）
+    ⇒ 构建器永远不会收它们 ⇒ 不补就永远红一条「没登记」，且构建器
+    给不出修法（它重生清单也不会有）。补登名单**从 host_shield import**
+    （不另抄一份），逐条按在场才校验（不在场跳过，同 self_check 口径），
+    哈希口径与主循环同函数（非版本承载件 ⇒ 裸 sha256，与 `file_digest`
+    一致）。
   · 文件不存在 ⇒ **报错并跳过**，不静默写 null（静默＝把"缺件"说成"已签"）。
   · 不碰 `name/version/built_at` 等元数据。
 
@@ -25,7 +33,7 @@
   三条同时满足 ⇒ 把死条目改指向那个文件并重签；任一不满足 ⇒ **报错退出**，
   不猜、不静默（猜错＝把清单指向另一个错文件，比不修更坏）。
 
-跑法：python _resign_manifest.py [--dry] [--roll]
+跑法：python _resign_manifest.py [--dry] [--roll] [--adopt-dev]
 """
 import argparse
 import hashlib
@@ -60,6 +68,9 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--dry", action="store_true")
 ap.add_argument("--roll", action="store_true",
                 help="死条目结构化对齐：同目录+同扩展名+唯一 ⇒ 改指向它并重签")
+ap.add_argument("--adopt-dev", action="store_true",
+                help="研发树专属名单补登记：把 host_shield._DEV_GUARDED_CHAIN_FILES"
+                     " 里缺登记且在场的条目补进清单（哈希口径同主循环）")
 args = ap.parse_args()
 
 
@@ -96,6 +107,27 @@ d = json.load(open(MANIFEST, encoding="utf-8"))
 files = d.get("files")
 if not isinstance(files, dict) or not files:
     sys.exit("★ manifest 里没有 files 字典 ——  refusing to touch it")
+
+# ---- --adopt-dev：研发树专属名单缺登记补入（0.51.1，self_check 的配套出路）----
+#   ★ 为什么这里能破「不增删清单」的边界：这些件构建器永远不会收
+#     （ci/ 不进 wheel）⇒ 不补就永远红，构建器给不出修法。名单从
+#     host_shield import（单一真源），在场才校验（同 self_check 口径），
+#     哈希走本文件的 sha256()（非版本承载件 ⇒ 裸 sha256，与 file_digest 一致）。
+adopted = []
+if args.adopt_dev:
+    _dev_list = tuple(getattr(_hs_hash, "_DEV_GUARDED_CHAIN_FILES", ()) or ())
+    if not _dev_list:
+        print("（--adopt-dev：host_shield 没有 _DEV_GUARDED_CHAIN_FILES，无从补登）")
+    for rel in _dev_list:
+        p = os.path.join(ROOT, rel.replace("/", os.sep))
+        if not os.path.isfile(p):
+            print("  ADOPT-SKIP %s（文件不在场——在场才校验，同 self_check 口径）" % rel)
+            continue
+        if rel in files:
+            continue                    # 已登记 ⇒ 走下面的重算主循环
+        files[rel] = sha256(rel)
+        adopted.append(rel)
+        print("  ADOPT  %s（研发树专属名单缺登记，已按主循环同口径补入）" % rel)
 
 # ★★ 量具先自检（维七：防量具假红假绿）—— 2026-10-12 由一次真实破坏逼出来。
 #   本轮我跑本工具（旧口径）把 hooks/pre_tool_use.py "重签"成裸哈希，
@@ -180,8 +212,8 @@ if missing and args.roll:
             merged[k] = v
         files = merged
 
-print("manifest 条目 %d ｜ 未变 %d ｜ 需重签 %d ｜ 文件不存在 %d"
-      % (len(files), same, len(changed), len(missing)))
+print("manifest 条目 %d ｜ 未变 %d ｜ 需重签 %d ｜ 文件不存在 %d ｜ 补登记 %d"
+      % (len(files), same, len(changed), len(missing), len(adopted)))
 for r in changed:
     print("  RESIGN  %s" % r)
 for r in missing:
@@ -206,7 +238,7 @@ if args.dry:
     print("\n预览（未写）。")
     sys.exit(0)
 
-if changed or rolled:
+if changed or rolled or adopted:
     d["files"] = files
     # ★★ 2026-10-13：`indent` 必须与**构建器**（`scripts/build_package.py`
     #   的两处 `json.dumps(manifest, ensure_ascii=False, indent=1)`）**逐字一致**。
@@ -217,6 +249,7 @@ if changed or rolled:
     with open(MANIFEST, "w", encoding="utf-8", newline="") as f:
         json.dump(d, f, ensure_ascii=False, indent=1)
         f.write("\n")
-    print("\n已写回：重签 %d 条、结构化对齐 %d 条。" % (len(changed), len(rolled)))
+    print("\n已写回：重签 %d 条、结构化对齐 %d 条、补登记 %d 条。"
+          % (len(changed), len(rolled), len(adopted)))
 else:
     print("\n无需重签。")

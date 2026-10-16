@@ -70,7 +70,7 @@
   "hooks/post_tool_use.py": "sha256:4ff4d36f5f3025a8dfce10ac0bb90e8389d511f8eddee516c277d93361cc12e3",
   "hooks/pre_tool_use.py": "sha256:79ebea2caef471c0c546056e5b969a70f8df0410ece46a5b866fe52b59f6a5f6",
   "hooks/session_start_banner.py": "sha256:2dfb0633094220e4f70850cfc843962116716b24f7b74724a45b33f0817d87c3",
-  "host_shield.py": "sha256:6c66fbd72e2be43cb037cb3e04f99d309e695e39d170b5016085af51868f0f20",
+  "host_shield.py": "sha256:a1ba53de2784ed34b215a0df9467c9ba7f07f67b93c944f53dcc40ca898597f6",
   "hub.py": "sha256:edcb1b94194e551d5b0023749ae5417e67729b22eb391198fcae74a906668c08",
   "inbox_bubble.py": "sha256:29bba26bdba4342386b34f12694de12143d9e74af15cf89029a176776110d796",
   "inbox_cli.py": "sha256:f687a8de2243261407e8dd4847f837f95e7c971a73c0968fc3c1e6b49e3df562",
@@ -82,10 +82,10 @@
   "inbox_model.py": "sha256:59ae858ec5399ffa4539ce640c9440d12423c59b933894c882921a9388bce6cf",
   "inbox_notify.py": "sha256:14053b338929f717a5cf4c4ee8fd2146a8d70242106dd0ec1deaab4f83662638",
   "inbox_report.py": "sha256:817fdfb7a9d588bc6dcf5e57715995bb88b116e23049502c2c08c4354b938e95",
-  "inbox_server.py": "sha256:941c5a7eeb6a56c459567609501184060d758b2c604d81c09f9c96f2803c8e5f",
+  "inbox_server.py": "sha256:111ee4b5aa3e896bf53e23240691b3b4ecc54a16420f1a55203813cf5f71387d",
   "inbox_store.py": "sha256:05a8292205523794998f7a10e7c2ed387eebe31491ebe8b434ceb93a6ccb242e",
   "inbox_tray.py": "sha256:b690e6aefd7899759572cd01b19340a6d6cc26801a7982713f04dac9dbea8181",
-  "inbox_window.py": "sha256:480b70032677ecfcbdcd0116ab302208d5aa4dd2db0d518259bb6449c95679eb",
+  "inbox_window.py": "sha256:746a2916c184359f43caee4c7ad145b1f693374408be42cd79037aa2776bca4a",
   "ledger.py": "sha256:a3904f9d21502b729c7b323f2699e16a7d21d9df977f288afce3ef5ba46e63ad",
   "machine_id.py": "sha256:362c7e43b777d4d924d46b46d3c922506f91b9c19b8d591b5d8cd68c35cd03da",
   "psl/SKILL.md": "sha256:bfc92aff06f166a11eedf54337a414a0a73b3274433143e79e8a07e951a9823d",
@@ -150,6 +150,7 @@
   "tools/verify_event_types.py": "sha256:ee8b611e2672ef6c7ca2c7468bdd7c3b902b06f0482b0cbd4de5da3cde48c4c2",
   "tools/verify_namespaces.py": "sha256:85d6ffb905dcf5abffb453ca5b1992f02b3aeb63f93aaad39bc6dcf3fb15e0b0",
   "transcript_reader.py": "sha256:c0ce99c5bdfb255f170ca744c011ae64ceb9569d1c9dd8efc1a2c096ff89dc1c",
-  "ui_server.py": "sha256:bf6db4c1f700dce610f6ffacd696386acc24ab4d984d7da47e8133d733ca175b"
+  "ui_server.py": "sha256:bf6db4c1f700dce610f6ffacd696386acc24ab4d984d7da47e8133d733ca175b",
+  "ci/freeze_zones.json": "sha256:3c63cf8d0d986fde0e2e0528231502246e7d3212fe88597da110115e621954c3"
  }
 }

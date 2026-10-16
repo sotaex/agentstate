@@ -4,6 +4,16 @@
   "grace_days": 30,
   "retirements": [
     {
+      "suite": "inbox_guards_0490.w01",
+      "date": "2026-10-16",
+      "status": "done",
+      "removed_from_suites_on": "2026-10-16",
+      "reason": "W-01 标题形态断言整体退休（判据级，不减 SUITES 套件数）：创始人 2026-10-16 需求反转——0.48.5 原话『标题该显示的是状态』作废，新话『只要保留 Antinel 监理加上编号就行了』。w01() 的四条断言（is_console_title 旧形态夹具／渲染四页 <title> 正则＋与头部同词／状态词词表覆盖＋PAGE_TITLES 连带）全部建立在『状态词 · Antinel 监理#<6hex>』旧形态上，反转后逐条作废；n_w01() 负控（白名单缩维 ⇒ 状态词翻面）同批退休。连带：inbox_window._mark_at_tail 的 names 白名单（页面名∪状态词）随 page 前缀概念一并退役，G-05 负控锚点从『if page not in names』两行迁移到新防误伤层（品牌开头＋其后只允许身份串），迁移自带 selfcheck 自证。",
+      "replacement": "regression_gate._FREEZE_OUTPUT_CHECKS['window_title_format']（D-38 冻结执法，FZ-002 frozen 后生效：渲染四页 <title> 必须为『Antinel 监理#<6hex>』形态）",
+      "merged_on": null,
+      "merge_note": null
+    },
+    {
       "suite": "0518",
       "date": "2026-10-16",
       "status": "done",
@@ -12,6 +22,16 @@
       "replacement": "0514",
       "merged_on": "2026-10-16",
       "merge_note": "J1–J5 与 N-J1…N-J4（9 条，判据 ID 一字未改）已原样并入 ci/inbox_guards_0514.py 的「J 族」段；0518 已从 delivery_gate.SUITES 移除（REQUIRED 随之自动少一条）；原文件改名让开（ci/inbox_guards_0518.py.away-20261016-merged-into-0514，零删除纪律）；ci/defect_types.py 的 T-11 guards 与 inbox_server.py 的注释按 ID 引用，无需改名。常驻数回到 29。"
+    },
+    {
+      "suite": "inbox_guards_0362.c_run_id_not_in_token_position",
+      "date": "2026-10-16",
+      "status": "done",
+      "removed_from_suites_on": "2026-10-16",
+      "reason": "Q15「身份段在末尾」判据级退休（不减 SUITES 套件数——0362 整体照跑，仅从 CHECKS 摘除该条＋墓碑）：标题形态从『<页面> · Antinel 监理#<id>』翻转为**品牌开头整串**『Antinel 监理#<id>』（创始人 2026-10-16 需求反转，0.48.5『标题该显示的是状态』作废，新话『只要保留 Antinel 监理加上编号就行了』）——「末尾」位置概念随页面名/状态词前缀整体退役，反转后身份串紧跟品牌天然在末尾且无歧义。旧正则 ^.+ · Antinel 监理#\\w+$ 在新认窗判据（品牌开头＋其后只允许 #hex）下恒不匹配，保留即假红。形态契约现由 FZ-002 冻结的 window_title_format（output 类，D-38 执法）与 Q14 精确形态断言（整串 == console_title_suffix(rid)，期望串由产品常量派生）全覆盖。",
+      "replacement": "regression_gate._FREEZE_OUTPUT_CHECKS['window_title_format']（FZ-002）＋ inbox_guards_0362.Q14 精确形态断言",
+      "merged_on": null,
+      "merge_note": null
     }
   ]
 }

@@ -582,11 +582,16 @@ def _head(title, token):
     except Exception:                                       # noqa: BLE001
         rid = ""
         tail = ""
+    # ★ 0.51.1（W-01 反转，创始人 2026-10-16 拍板）：标题＝身份后缀**本体**
+    #   （`Antinel 监理#<run_id>`，0.48.5 的状态词前缀作废）。`tail` 正常时
+    #   整串就是它；`title` 参数降级为 **fallback** —— 只有 inbox_window
+    #   注入失败（认窗机制整体不可用）才退回页面名：人话可读、不假造。
+    shown = tail if tail else title
     return ("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
             "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-            "<title>%s%s</title><link rel=\"icon\" href=\"/assets/favicon.ico\">"
+            "<title>%s</title><link rel=\"icon\" href=\"/assets/favicon.ico\">"
             "<style>%s</style></head><body>"
-            % (_esc(title), tail, CSS))
+            % (_esc(shown), CSS))
 
 
 def _tabs(view, token):
@@ -846,6 +851,11 @@ LOGO_CY = 512
 LOGO_R = 215          #: 探针环半径（画布单位）
 LOGO_RING_W = 46      #: 探针环宽（画布单位）
 LOGO_AMBER_R = 24     #: 灯头（哨点）半径（画布单位；`_LOGO_JS` 的 AMBER_R）
+#: 灯头（哨点）填充色 —— **固定琥珀，与光束色解耦**（FZ-001：创始人 2026-10-16
+#:   截图 #1「橙色小球弄丢了，AI 对此毫无意识」—— 原实现 fill 跟 V.beamC 走，
+#:   绿态下小球与光束同色、肉眼不可辨）。静态骨架与状态机赋值**同取此常量**
+#:   （单一真源；灯色判据 lamp_color_contract 从它派生期望值，不二次实现）。
+LOGO_AMBER_FILL = "#E8A33D"
 LOGO_WAVE_GAP = 8     #: 涟漪起始半径 = 灯头半径 ＋ 这个缝（`_LOGO_JS` 的 `+8`）
 LOGO_BEAM_LEN = 200   #: 波束长度（`_LOGO_JS` 的 L_BEAM）
 LOGO_BEAM_W = 11      #: 波束宽度（`_LOGO_JS` 的 W_BEAM）
@@ -955,8 +965,8 @@ def _logo_mark(state, label="Antinel"):
         '<circle data-p="wave1" fill="none" stroke="#7E9B84" opacity="0"></circle>'
         '<line data-p="beam" x1="512" y1="512" x2="512" y2="312" stroke="#7E9B84"'
         ' stroke-width="11" stroke-linecap="butt"></line>'
-        '<circle data-p="amber" r="24" fill="#7E9B84"></circle>'
-        "</svg>" % (_logo_viewbox(), mode, _esc(label)))
+        '<circle data-p="amber" r="24" fill="%s"></circle>'
+        "</svg>" % (_logo_viewbox(), mode, _esc(label), LOGO_AMBER_FILL))
 
 
 #: 状态机（`antinel-motion-demo-v2.html` 的产品化移植）。
@@ -1037,7 +1047,7 @@ function boot(svg){
     }
     var ap=px(V.theta,R), amber=q(svg,"amber");
     amber.setAttribute("cx",ap[0]); amber.setAttribute("cy",ap[1]);
-    amber.setAttribute("fill", css(V.beamC));
+    amber.setAttribute("fill", __AMBER_FILL__);
     amber.setAttribute("opacity", String(V.amberO));
     var on=(mode==="L1"||mode==="L2"||mode==="LD");
     for(var wv=0;wv<2;wv++){
@@ -1081,7 +1091,8 @@ for(var i=0;i<list.length;i++){ boot(list[i]); }
 _LOGO_JS = (_LOGO_JS_TMPL
             .replace("__STYLE__", json.dumps(LOGO_MOTION_RENDER, ensure_ascii=False))
             .replace("__RING_GREEN__", json.dumps(list(LOGO_RING_GREEN)))
-            .replace("__RING_DARKRED__", json.dumps(list(LOGO_RING_DARKRED))))
+            .replace("__RING_DARKRED__", json.dumps(list(LOGO_RING_DARKRED)))
+            .replace("__AMBER_FILL__", json.dumps(LOGO_AMBER_FILL)))
 
 
 #: ★★ 0.49.0（2026-10-14，创始人截图 3/4/5）：术语浮层**突破窗口边界**。
@@ -2090,9 +2101,19 @@ def render_page(view="inbox", filt=None, root=None, token="", items=None, rep=No
     #   状态词取值必然落在 `host_shield.POSTURE_LABEL_ALLOWED` 内
     #   （`STATE_LABEL` ∪ ｢未启用｣ 是它的子集 —— W-01 判据逐词断言）
     #   ⇒ 窗口在任何可达灯态下都认得出、落位不失效。
+    # ★★ 0.51.1 反转（创始人 2026-10-16 拍板；W-01 退休入
+    #   suite_retirement.json，新契约冻结为 FZ-002）：上面 0.48.5 原话
+    #   **作废**——创始人新话「只要保留 Antinel 监理加上编号就行了」。
+    #   标题恒为「Antinel 监理#<6hex>」（身份串由 `_head` 注入：无状态词、
+    #   无页面名前缀）。状态词的可见位移到页面内顶部条（`_bar` 的 light
+    #   状态块，`ex["label"]` 原样在那里）；Alt-Tab 一行的信息密度让位
+    #   于**窗口唯一可认领性**（认窗 `_mark_at_tail` 只认品牌开头形态）。
+    #   title 参数降级为 fallback：`_head` 的 inbox_window 注入失败时退回
+    #   页面名（人话可读、不假造标题）。旧形态断言随退休走 D-38 冻结
+    #   执法（`window_title_format`）。
     p = posture or posture_now()
     ex = M.light_explain(p, items, now=now, granary=M.granary_now())
-    title = ex["label"]
+    title = PAGE_TITLES.get(view, "收件箱")
     if view in ("report", "health", "ledger"):
         rep = (R.daily_report(root=root, items=items) if rep is None else rep)
         if view == "report":

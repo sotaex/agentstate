@@ -637,9 +637,11 @@ def u97():
     if set(SV.PAGE_TITLES) != {"inbox", "report", "health", "ledger"}:
         return "PAGE_TITLES 四键被改动：%r" % (sorted(SV.PAGE_TITLES),)
     # ④ 认窗基线（0360 的真实判定，不在这里二次实现）
+    #   ★ 0.51.1 反转（W-01 退休、FZ-002 冻结）：窗口标题恒为品牌形态
+    #     「Antinel 监理#<6hex>」⇒ 基线夹具换品牌形态。
     import inbox_window as IW
-    if not IW.is_console_title("收件箱 · Antinel 监理#abc123", "abc123"):
-        return "页面名标题认不出了（认窗基线被破坏）"
+    if not IW.is_console_title("Antinel 监理#abc123", "abc123"):
+        return "品牌形态标题认不出了（认窗基线被破坏）"
     if IW.is_console_title("请给我一个 · Antinel 监理#a8276c", "a8276c"):
         return "用户窗口形状被误认（G-05 红线）"
     # ⑤ 无未登记术语
@@ -977,7 +979,12 @@ def u06():
     """乙3：收件箱页无 `<h2>` 页面名，其余三页都有 —— 同一页三个身份
     （title「收件箱 · Antinel 监理#hash」/ 选项卡「收件箱」/ 无 h2）。
     文案取 `PAGE_TITLES`（唯一真源，0360:741 硬锁四键 —— 加了状态词那种
-    字段立刻红，所以这里只许读它，不许另写）。"""
+    字段立刻红，所以这里只许读它，不许另写）。
+    ★ 0.51.1 反转注记（2026-10-16，W-01 退休、FZ-002 冻结）：上文
+      「title『收件箱 · Antinel 监理#hash』」是**过场引用**（记录当时
+      的页面身份三件套）—— 反转后 `<title>` 恒为「Antinel 监理#hash」，
+      页面名只剩选项卡＋h2 两处（正是乙3 补 h2 的延续：页面名去标题化）。
+      本条断言（h2 == PAGE_TITLES["inbox"]）不受影响，照跑。"""
     page = _page("inbox")
     heads = re.findall(r"<h2>([^<]*)</h2>", page)
     if not heads:
@@ -1131,6 +1138,11 @@ def n_u15():
 #: ★★ 这一批动的是 `inbox_window._mark_at_tail()` 的认窗白名单 ——
 #:   0.36.5 硬化过的「不许误关/误移用户窗口」边界（T-05 / G-05）。
 #:   ⇒ 单独 commit；负控实测见过红；连回检查盯着 G-05 注入锚点两行。
+#: ★★ 0.51.1 反转（2026-10-16，创始人需求反转）：**W-01 已退休**
+#:   （去处：ci/suite_retirement.json 的 retirements[0]；墓碑见下方
+#:   W-01 段）；**W-02 保留照跑**（正文零 #hex 与标题形态无关）。
+#:   G-05 负控锚点已随反转迁移到 `_mark_at_tail` 的 rest 检查两行
+#:   （旧锚点 `if page not in names` 随 page 前缀概念退役）。
 
 
 def _state_words():
@@ -1142,91 +1154,28 @@ def _state_words():
     return set(_HS.POSTURE_LABEL_ALLOWED)
 
 
-@check("W-01 ★ 状态词标题：四条认窗断言 ＋ 标题形态 ＋ 词表覆盖")
-def w01():
-    """§5.5 定稿落地：标题恒用状态词（`<状态词> · Antinel 监理#<hash>`）。
-
-    ① 四条 `is_console_title` 断言（逐字取自交接件 §5.5「四条负控」）：
-       状态词 True / 用户形状 False / 挂程序 False / 页面名 True；
-    ② 渲染四页：`<title>` ＝ 状态词 · Antinel 监理#<6hex>，且与头部 `<b>` **同词**
-       （标题与头部不许两种说法）；
-    ③ 覆盖：`STATE_LABEL` ∪ ｢未启用｣ ⊆ 认窗白名单 —— 漏一个词，
-       那个态的窗口就认不出、落位失效（§5.5 原话警告）。
-    """
-    import inbox_window as WIN
-    four = (
-        ("拦截 · Antinel 监理#abc123", "abc123", True,
-         "状态词标题认不出（W-01 前提不成立）"),
-        ("请给我一个 · Antinel 监理#a8276c", "a8276c", False,
-         "用户窗口形状被误认（0.36.5 实测形状，绝不许放行）"),
-        ("记事本 - 拦截 · Antinel 监理#abc123", "abc123", False,
-         "挂了别的程序的标题被误认"),
-        ("收件箱 · Antinel 监理#abc123", "abc123", True,
-         "页面名标题认不出（四页导航保底失效）"),
-    )
-    for t, rid, want, why in four:
-        got = WIN.is_console_title(t, rid)
-        if got is not want:
-            return "%s（期望 %s，实得 %s）" % (why, want, got)
-    # ② 渲染面：标题形态 + 标题与头部同词（四页逐页验）
-    words = _state_words()
-    for view in ("inbox", "report", "health", "ledger"):
-        page = _page(view)
-        m = re.search(r"<title>([^<]+)</title>", page)
-        if not m:
-            return "%s 页没有 <title>（判据扫的锚点没了）" % view
-        tm = re.match(r"^(.+) · Antinel 监理#[0-9a-f]{6}$", m.group(1))
-        if not tm:
-            return ("%s 页标题形态不对：%r（应为「状态词 · Antinel 监理#<6hex>」）"
-                    % (view, m.group(1)))
-        word = tm.group(1)
-        if word not in words:
-            return ("%s 页标题状态词 %r 不在 POSTURE_LABEL_ALLOWED 封闭词表里"
-                    "—— 那个态的窗口认不出" % (view, word))
-        bm = re.search(r'<b style="color:var\(--[a-z0-9]+\)">([^<]+)</b>', page)
-        if not bm or bm.group(1) != word:
-            return ("%s 页标题状态词与头部不是同一个（标题 %r / 头部 %r）"
-                    % (view, word, bm.group(1) if bm else None))
-    # ③ 覆盖：头部可达的每个状态词，认窗白名单都必须接纳
-    reachable = set(M.STATE_LABEL.values()) | {"未启用"}
-    if not reachable <= words:
-        return ("有状态词不在认窗白名单里：%s —— 那个态的窗口认不出、落位失效"
-                % sorted(reachable - words))
-    # 连带：PAGE_TITLES 四键没被本批动过（0360 硬锁的对象）
-    if set(SV.PAGE_TITLES.keys()) != {"inbox", "report", "health", "ledger"}:
-        return "PAGE_TITLES 键变了（W-01 不许动它）: %s" % sorted(SV.PAGE_TITLES)
-    return True
-
-
-@check("N-W01 负控：认窗白名单缩回「仅页面名」⇒ W-01 必须红")
-def n_w01():
-    """反向对照（维二）：把 §5.5 点名的那一跳改回 0.48.5 前的形状。
-
-    注入点逐字取自磁盘（`names = … | set(_HS.POSTURE_LABEL_ALLOWED)`），
-    缩成 `names = set(_SV.PAGE_TITLES.values())`。期望：**只有** ① 的
-    状态词断言翻面（用户形状/挂程序/页面名三条不受影响 —— 白名单只少一维，
-    不是整层拆掉，那由回归闸门 G-05 专守）。
-    """
-    src = _src(_WINDOW_REL)
-    a_union = ("        names = set(_SV.PAGE_TITLES.values())"
-               " | set(_HS.POSTURE_LABEL_ALLOWED)")
-    a_only = "        names = set(_SV.PAGE_TITLES.values())"
-    if a_union not in src:
-        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
-    # 连回：G-05 注入锚点两行必须仍在（regression_gate 的 G-05 负控指着它们）
-    if "    if page not in names:\n        return False" not in src:
-        return ("G-05 注入锚点两行不在了 —— regression_gate 的 G-05 负控"
-                "会失配，「不许误关用户窗口」的保护悄悄失效")
-    mut = _load(src.replace(a_union, a_only), "is0490_nw01", _WINDOW_REL)
-    if mut.is_console_title("拦截 · Antinel 监理#abc123", "abc123") is not False:
-        return "负控失效：缩回仅页面名后状态词标题仍被认出（注入没生效）"
-    if mut.is_console_title("收件箱 · Antinel 监理#abc123", "abc123") is not True:
-        return "负控失效：缩回仅页面名后页面名标题反而认不出（变异改错了地方）"
-    # 连回正判据：真实现下状态词必须认得出（否则负控无分辨力）
-    import inbox_window as WIN
-    if WIN.is_console_title("拦截 · Antinel 监理#abc123", "abc123") is not True:
-        return "夹具不成立：真实现本身状态词标题就认不出 ⇒ 负控无分辨力"
-    return True
+# ══════════ W-01 / N-W01 · 已退休（2026-10-16，创始人需求反转）══════════
+#: ★★ w01()＋n_w01() 已随**标题形态反转**整体退休（不是删除即完事 ——
+#:   记录去处见 ci/suite_retirement.json 的 retirements[0]）：
+#:   0.48.5 原话「标题该显示的是状态」作废，创始人新话「只要保留
+#:   Antinel 监理加上编号就行了」⇒ 标题恒为「Antinel 监理#<6hex>」
+#:   （新契约冻结为 FZ-002，kind=output，check=window_title_format，
+#:   由 D-38 执法）。w01 的四条断言（is_console_title 旧形态夹具／
+#:   渲染四页 <title> 正则＋与头部同词／状态词词表覆盖／PAGE_TITLES
+#:   连带）全部建立在旧形态上，逐条作废；n_w01 负控（白名单缩维 ⇒
+#:   状态词翻面）同批退休。
+#: ★ 连带：`_state_words()`（本档上方）随 w01 退休失去唯一消费者 ——
+#:   保留（注释已注明退役原因）：它是 §5.5 词表的记忆载体，下一个人
+#:   考古时不该面对一个凭空消失的函数。
+#: ★ 别再复活它们 —— 旧形态的形状（「状态词 · Antinel 监理#…」）在
+#:   新认窗判据（品牌开头＋其后只允许身份串）下**全部认不出**，复活
+#:   即假红；legacy 窗口**本版不认领**（诚实缓建：`_mark_at_tail_any`
+#:   只服务 logo/bubble 窗，console 无 legacy 路径；无分发⇒无升级
+#:   人口，分发前须补 LEGACY 认领 —— 见 inbox_window.is_console_title
+#:   docstring 的缓建注记）。
+#:
+# def w01(): ...（原文 2026-10-13 交接件 §5.5 定稿，2026-10-16 退休）
+# def n_w01(): ...（负控，同批退休）
 
 
 @check("W-02 ★ 丁1：正文（除 <title>）零 #hex6 —— hash 只在标题尾")
@@ -1255,28 +1204,33 @@ def w02():
 def n_w02():
     """反向对照（维二）：丁1 原貌 ＝ hash 在正文可见。
 
-    注入点逐字取自磁盘 `_head()`：把 mark（`#<run_id>`，**真实哈希**）
-    再加进 body 起始 —— 与「run_id 回潮正文」同一条路径、同一个变量，
-    不是另编一个假串。
+    ★★ 0.51.1 行为变异版（2026-10-16）：`_head` 重构后（`shown = tail if
+      tail else title` ＋ 格式元组 3 参→2 参），旧源码锚点
+      `'% (_esc(title), tail, CSS))'` 成死串 —— 负控连报「变异锚点未找到」，
+      也就是**尺子自己先失效**（0.50.2 N-U13 踩过的同族坑）。按那次的
+      先例改**行为变异**：变异补丁追加在模块尾部，包一层 `_head` —— 从
+      渲染出的 `<title>` 里把**真实身份串**（`#<run_id>`，6 位小写 hex）
+      复制一份进正文起始：与「run_id 回潮正文」同一条路径、同一个真串，
+      不是另编一个假串。补丁只认函数名 `_head`，不绑任何源码行形状 ——
+      产品以后怎么重排这个函数都不腐化；`_head` 若改名 ⇒ 加载即抛
+      NameError ⇒ `_mut_render` 报「量具故障」，诚实红，不冒充产品红。
     """
     src = _src(_SERVER_REL)
-    # ★ 0.48.6（B3）：锚点同步 —— `_head` 的 favicon 不再挂 `?t=%s`，
-    #   于是参数表少收一个 `_esc(token)`（变异体也同步少收一个）。
-    # ★★ 0.50.4（改名批，B7）：`_head` 的后缀收编为
-    #   `WIN.console_title_suffix(rid)` 派生（原先这里自造 `"%s · 值守台%s"`）
-    #   ⇒ 参数表由 `mark` 改为 `tail`，锚点与变异体同步改。
-    a_body = ('            "<style>%s</style></head><body>"\n'
-              '            % (_esc(title), tail, CSS))')
-    if a_body not in src:
-        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
-    page, _why = _mut_render(src.replace(
-        a_body,
-        '            "<style>%s</style></head><body><span>%s</span>"\n'
-        '            % (_esc(title), tail, CSS, tail))'),
-        "is0490_nw02", _SERVER_REL,
+    patch = (
+        "\n# [N-W02] 变异：正文置回 run_id（0.51.1 行为变异版）\n"
+        "_orig_head_0490 = _head\n"
+        "def _head(title, token):\n"
+        "    h = _orig_head_0490(title, token)\n"
+        "    m = re.search(r\"<title>(.*?)</title>\", h)\n"
+        "    if not m:\n"
+        "        return h\n"
+        "    return h.replace(\"</head><body>\",\n"
+        "                    \"</head><body><span>%s</span>\" % m.group(1))\n"
+    )
+    page, _why = _mut_render(src + patch, "is0490_nw02", _SERVER_REL,
                              view="inbox", filt=M.BUCKET_ACTION,
-                           root=tempfile.mkdtemp(prefix="g0490_nw02_"),
-                           token="T", items=_items(), posture=_POSTURE)
+                             root=tempfile.mkdtemp(prefix="g0490_nw02_"),
+                             token="T", items=_items(), posture=_POSTURE)
     if _why:
         return _why
     body = page.split("<body>", 1)[-1]
@@ -1332,15 +1286,17 @@ def _w03_assert():
     ]
     for name, items, want_word, banned, want_count, want_total, want_st in cases:
         hub = tempfile.mkdtemp(prefix="g0490_w03_")
-        # ① 页面侧：标题状态词＝页面**自己**算出来的（render_page 内部同一调用）
+        # ① 页面侧：状态词＝页面**自己**算出来的（render_page 内部同一调用）
+        #   ★ 0.51.1 反转（W-01 退休、FZ-002 冻结）：标题不再带状态词
+        #     （整串恒为「Antinel 监理#<6hex>」）⇒ 状态词同源的观测点
+        #     从 <title> 迁移到顶部条 .state 块内首个 <b>（ex["label"]
+        #     的唯一可见位；w01 旧 ② 的"标题与头部同词"断言已随 W-01
+        #     退休）。**意图不变**：页面状态词必须＝该 items 算出来的。
         page = _page("inbox", items=items, rep=_REP)
-        tm = re.search(r"<title>([^<]+)</title>", page)
-        if not tm:
-            return "%s：页面没有 <title>（判据扫的锚点没了）" % name
-        pm = re.match(r"^(.+) · Antinel 监理#[0-9a-f]{6}$", tm.group(1))
-        if not pm:
-            return "%s：标题形态不对：%r" % (name, tm.group(1))
-        page_word = pm.group(1)
+        st = re.search(r'<div class="state">.*?<b[^>]*>(.*?)</b>', page, re.S)
+        if not st:
+            return "%s：页面没有 .state 状态词（判据扫的锚点没了）" % name
+        page_word = st.group(1)
         # ② 夹具自检（把 0.39.0 铁律钉进来：R0 绝不由账给）
         if page_word != want_word:
             return ("%s：页面状态词应 %r，实得 %r —— current_state 口径变了"

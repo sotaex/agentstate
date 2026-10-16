@@ -737,7 +737,14 @@ def j_page_titles_guard():
     ★ ①② 两条都过才绿：
       ① 0360 的专守函数必须通过（页面清单逐条实跑认窗）；
       ② T-05 本质断言：0.36.5 实测过的用户窗口形状
-         `is_console_title("请给我一个 · Antinel 监理#a8276c", "a8276c")` 必须为 False。
+        `is_console_title("请给我一个 · Antinel 监理#a8276c", "a8276c")` 必须为 False。
+    ★★ 0.51.1 反转（W-01 退休、FZ-002 冻结）：② 补两条**新形态**用户
+      形状（旧形态条目保留，仍被正确拒认）—— 品牌开头但带浏览器后缀
+      （「Antinel 监理#f356b0 和另外 14 个页面 - 个人 - Microsoft Edge」）
+      与品牌后挂字（「Antinel 监理#486acd 记事本」）。G-05 负控锚点随
+      反转迁移到 `_mark_at_tail` 的 rest 检查两行；变异放行后宽泛模式
+      误认后挂字窗口，由 0360 宽泛负形状经 ① 抓住（0360 ③负清单已含
+      新形态负形状）。
     ★ 连带：0360 全量（52 条）、收旧窗、`find_console_windows` 两级匹配
       在交付闸门里照跑；W-01 批次改 `_mark_at_tail` 时本条继续守。
     """
@@ -754,10 +761,16 @@ def j_page_titles_guard():
     win = _load_module_file("inbox_window.py", "inbox_window_g05")
     if win is None:
         return False, "inbox_window.py 加载失败"
-    if win.is_console_title("请给我一个 · Antinel 监理#a8276c", "a8276c"):
-        return False, ("用户窗口形状「请给我一个 · Antinel 监理#a8276c」被误认成本次运行窗口"
-                       "（T-05 复发：宽泛匹配认对象）")
-    return True, "认窗白名单在位（0360 专守过 ＋ 用户形状拒认）"
+    for shape, rid in (
+            ("请给我一个 · Antinel 监理#a8276c", "a8276c"),          # 旧形态实测
+            ("Antinel 监理#f356b0 和另外 14 个页面 - 个人 - Microsoft Edge",
+             "f356b0"),                                              # 新形态：浏览器后缀
+            ("Antinel 监理#486acd 记事本", "486acd"),                # 新形态：品牌后挂字
+    ):
+        if win.is_console_title(shape, rid):
+            return False, ("用户窗口形状 %r 被误认成本次运行窗口"
+                           "（T-05 复发：宽泛匹配认对象）" % shape)
+    return True, "认窗白名单在位（0360 专守过 ＋ 用户形状拒认：旧形态＋新形态两条）"
 
 
 def j_defect_registry_consistent():
@@ -846,10 +859,14 @@ _FREEZE_OUTPUT_CHECKS = {}
 
 
 def _enforce_one_frozen(entry):
-    """执法单条 frozen 条目 ⇒ 问题串，或 None（过）。
+    """执法单条 frozen 条目 ⇒ `(verdict, detail)`。
 
+    verdict ∈ True（过）/ False（违例）/ None（SKIP：环境测不出）。
     ★ source 类：重算哈希比（unit 缺 hash ⇒ 登记簿自身不一致，红）。
-    ★ output 类：跑登记的 check（缺 check 或 check 未实现 ⇒ 红）。
+    ★ output 类：跑登记的 check（缺 check 或 check 未实现 ⇒ 红）；
+      check 返回 None（环境测不出，如产品模块加载失败）⇒ SKIP ——
+      铁律 1：测不出 ≠ 查出来是好的，也不许把盲区当违例
+      （None 是 falsy，老实现把 SKIP 当违例 ⇒ 负控环境假连带红）。
     """
     eid = entry.get("id", "?")
     kind = entry.get("kind")
@@ -857,26 +874,74 @@ def _enforce_one_frozen(entry):
     if kind == "source":
         h = entry.get("hash")
         if not h:
-            return "%s frozen 但无 hash（登记簿自身不一致）" % eid
+            return False, "%s frozen 但无 hash（登记簿自身不一致）" % eid
         cur = _unit_source_text(unit)
         if cur is None:
-            return "%s 单元 %s 取不到源（文件没了或函数名变了）——结构契约破坏" % (eid, unit)
+            return False, "%s 单元 %s 取不到源（文件没了或函数名变了）——结构契约破坏" % (eid, unit)
         if _sha256_text(cur) != h:
-            return ("%s 单元 %s 被擅改（哈希不符）——触碰即红；"
+            return False, ("%s 单元 %s 被擅改（哈希不符）——触碰即红；"
                     "要改先走 retire_log 退休通道" % (eid, unit))
-        return None
+        return True, None
     if kind == "output":
         cid = entry.get("check")
         if not cid:
-            return "%s frozen 但无 check（登记簿自身不一致）" % eid
+            return False, "%s frozen 但无 check（登记簿自身不一致）" % eid
         fn = _FREEZE_OUTPUT_CHECKS.get(cid)
         if fn is None:
-            return "%s 契约检查 %s 未实现（不许冻结未实现的契约）" % (eid, cid)
-        ok, detail = fn()
+            return False, "%s 契约检查 %s 未实现（不许冻结未实现的契约）" % (eid, cid)
+        try:
+            ok, detail = fn()
+        except Exception as e:                                   # noqa: BLE001
+            return False, "%s 契约检查自身抛错：%s: %s" % (eid, type(e).__name__, e)
+        if ok is None:
+            return None, "%s：SKIP（环境测不出，铁律 1——不是通过也不是违例）" % eid
         if not ok:
-            return "%s 契约违例：%s" % (eid, detail)
-        return None
-    return "%s kind 非法：%r（应为 source/output）" % (eid, kind)
+            return False, "%s 契约违例：%s" % (eid, detail)
+        return True, detail
+    return False, "%s kind 非法：%r（应为 source/output）" % (eid, kind)
+
+
+def _registry_invariant_problems(entries):
+    """登记簿不变式（Phase B3，2026-10-16）：退休通道的机器化守卫。
+
+    ★ 不读盘——entries 由调用方给（`_logo_overflow_reasons(mod=None)` 先例：
+      纯函数才可被合成夹具驱动，负控才验得到）。
+    两条（机制文档《Antinel·冻结区机制 v1.0》退休通道的正反两面）：
+    ① retire_log 每条记录 by/date/reason 三字段**非空** —— 缺一 ⇒ 红
+       （伪造/半拉子退休＝留痕不全，闸门不许蒙过）；
+    ② 曾冻结（frozen_at 在位）而今 status != "frozen" 且 retire_log 为空
+       ⇒ **裸降级**红 —— 不填理由直接翻状态；有 retire_log 记录
+       ＝合法退休（顺序：先登记新契约→退休→改代码→重新冻结），不红。
+    （注册表文件自身的任何字节改动由 `_GUARDED_CHAIN_FILES`＋manifest
+     哈希挡在外面——本条守的是「即便改了，登记簿内部也必须自洽」。）
+
+    返回问题串清单（空＝不变式在位）。
+    """
+    problems = []
+    for e in entries:
+        eid = e.get("id", "?")
+        log = e.get("retire_log")
+        if not isinstance(log, list):
+            problems.append("条目 %s retire_log 不是清单（结构破坏）" % eid)
+            continue
+        for rec in log:
+            if not isinstance(rec, dict):
+                problems.append("条目 %s retire_log 记录不是对象：%r"
+                                % (eid, rec))
+                continue
+            missing = [k for k in ("by", "date", "reason")
+                       if not rec.get(k)]
+            if missing:
+                problems.append(
+                    "条目 %s retire_log 记录缺字段 %s（退休必须留痕："
+                    "by/date/reason 三字段齐全，缺一即红）"
+                    % (eid, "/".join(missing)))
+        if e.get("frozen_at") and e.get("status") != "frozen" and not log:
+            problems.append(
+                "条目 %s 曾冻结（frozen_at=%s）却被裸降级为 %r 且无 retire_log"
+                "记录 —— 不填理由直接翻状态，退休通道不是这么走的"
+                % (eid, e.get("frozen_at"), e.get("status")))
+    return problems
 
 
 def _freeze_machinery_probe():
@@ -895,12 +960,129 @@ def _freeze_machinery_probe():
             "unit": FREEZE_REGISTRY_REL, "hash": real}
     bad = dict(good, hash="0" * 64)
     r_good = _enforce_one_frozen(good)
-    if r_good is not None:
-        return "负控自身失效①：真值哈希竟被执法判违例（%s）" % r_good
+    if r_good[0] is not True:
+        return "负控自身失效①：真值哈希竟被执法判违例（%r）" % (r_good,)
     r_bad = _enforce_one_frozen(bad)
-    if r_bad is None:
+    if r_bad[0] is not False:
         return ("负控自身失效②：篡改哈希没被执法抓住——"
                 "冻结区执法是死的（装饰不是闸门）")
+    return None
+
+
+def _freeze_invariants_probe():
+    """机械自证（**常驻负控**）：退休通道不变式的两条腿都有牙。
+
+    ★ 全合成夹具（不读盘、不加载产品——纯字典驱动
+      `_registry_invariant_problems`）：三步
+      ① 合法退休（by/date/reason 三字段齐全）必须**无问题** —— 夹具成立
+         ＋「合法退休不红」证反方向（堵死合法通道同样是闸门失效）；
+      ② 缺 reason 的退休记录必须红（方向断言 retire_log）—— 伪造半退休；
+      ③ frozen_at 在位＋status=candidate＋retire_log 空 必须红
+         （方向断言裸降级）—— 不填理由翻状态。
+    返回 None（全过）／问题串（负控失效，铁律 4：不会红的闸门不是闸门）。
+    ★ 纯进程内字典、无外部输入面 ⇒ 无 SKIP 通路（铁律 1 的「测不出」
+      在这里不存在——不存在环境依赖，探针要么全过要么报负控失效）。
+    """
+    ok_entry = {"id": "FZ-INV-OK", "status": "candidate",
+                "frozen_at": "2026-10-16",
+                "retire_log": [{"by": "founder", "date": "2026-10-16",
+                                "reason": "规格反转，按新契约重冻结"}]}
+    v1 = _registry_invariant_problems([ok_entry])
+    if v1:
+        return ("负控自身失效①：合法退休记录竟被判问题（%s）—— "
+                "不变式误报，合法退休通道被堵" % v1[0])
+    bad_reason = dict(ok_entry,
+                      retire_log=[{"by": "founder", "date": "2026-10-16",
+                                   "reason": ""}])
+    v2 = _registry_invariant_problems([bad_reason])
+    if not v2:
+        return ("负控自身失效②：缺 reason 的退休记录没被判问题—— "
+                "不变式对半拉子退休没牙")
+    if "retire_log" not in v2[0]:
+        return ("负控方向不对：缺字段报的不是 retire_log（报的是 %r）"
+                % (v2[0],))
+    naked = {"id": "FZ-INV-NAKED", "status": "candidate",
+             "frozen_at": "2026-10-16", "retire_log": []}
+    v3 = _registry_invariant_problems([naked])
+    if not v3:
+        return ("负控自身失效③：裸降级没被判问题—— "
+                "不变式对不填理由翻状态没牙（退休通道形同虚设）")
+    if "裸降级" not in v3[0]:
+        return ("负控方向不对：裸降级报的不是裸降级（报的是 %r）"
+                % (v3[0],))
+    return None
+
+
+def _lamp_color_machinery_probe():
+    """机械自证（常驻负控）：灯色判据对「回耦光束」必须真会红。
+
+    ★ 与 `_freeze_machinery_probe` 同族分层（元纪律 M-C：产品／量具／钩子／
+      登记簿各层自证）：探针证的是**判据本身有牙**，不是执法 —— FZ-001 是
+      candidate（D-38 条目循环不碰它），这条探针照跑：check 先自证有效，
+      冻结那一刻才被 D-38 真正调用。
+    ★ 三步（变异锚点逐字取自产品，打不中 ⇒ 报量具故障，诚实红不静默）：
+      ① 未变异必须过 —— 不过 ⇒ 产品违例候选契约，**照红**（创始人截图 #1
+         的教训正是「AI 对此毫无意识」：原病复发必须被闸门看见）；
+      ② 状态机回耦 `css(V.beamC)`（FZ-001 原病，任务指定的负控）⇒ 必须红；
+      ③ 静态骨架 fill 回骨架灰 ⇒ 必须红。
+    返回 None（全过）／问题串（负控失效或产品违例）／"SKIP"（环境读不到
+    产品 —— 调用方收进 skips 出声，铁律 1：不许静默当绿）。
+    """
+    mod = _load_module_file("inbox_server.py", "inbox_server_fz1probe")
+    if mod is None:
+        return "SKIP"                    # 环境读不到产品 ⇒ 出声不当绿
+    amber = getattr(mod, "LOGO_AMBER_FILL", None)
+    try:
+        v = j_lamp_color_contract(mod=mod)
+    except Exception as e:                                   # noqa: BLE001
+        return "负控自身失效：灯色判据自身抛错 %s: %s" % (
+            type(e).__name__, e)
+    if v[0] is None:
+        return None
+    if v[0] is not True:
+        return ("灯色判据夹具不成立：未变异就不过（%s）—— 产品违例候选"
+                "契约照红（创始人截图 #1：AI 必须对此有意识）" % (v[1],))
+    # ② 状态机回耦光束（beamC 覆写必红）
+    js_anchor = 'amber.setAttribute("fill", %s);' % (json.dumps(amber),)
+    if js_anchor not in mod._LOGO_JS:
+        return ("负控自身失效：状态机变异锚点未打中（产品灯头赋值句变了，"
+                "探针需同步）—— 量具故障，不算通过")
+    saved_js = mod._LOGO_JS
+    try:
+        mod._LOGO_JS = saved_js.replace(
+            js_anchor, 'amber.setAttribute("fill", css(V.beamC));')
+        try:
+            v2 = j_lamp_color_contract(mod=mod)
+        except Exception as e:                               # noqa: BLE001
+            return "负控自身失效：回耦后判据抛错 %s: %s" % (
+                type(e).__name__, e)
+        if v2[0] is not False:
+            return ("负控自身失效：回耦光束后判据没红（%r）—— "
+                    "灯色尺子是装饰（铁律 4：不会红的闸门不是闸门）"
+                    % (v2,))
+        if "回耦" not in str(v2[1]):
+            return ("负控方向不对：回耦变异报的不是回耦（报的是 %r）"
+                    % (v2[1],))
+    finally:
+        mod._LOGO_JS = saved_js
+    # ③ 静态骨架回灰（另一条腿的牙）
+    mark_anchor = 'fill="%s"' % (amber,)
+    orig_mark = mod._logo_mark
+
+    def _mut_mark(*a, **k):
+        return orig_mark(*a, **k).replace(mark_anchor, 'fill="#7E9B84"')
+
+    mod._logo_mark = _mut_mark
+    try:
+        v3 = j_lamp_color_contract(mod=mod)
+        if v3[0] is not False:
+            return ("负控自身失效：静态骨架回灰后判据没红（%r）—— "
+                    "静态腿的尺子是装饰" % (v3,))
+        if "静态骨架" not in str(v3[1]):
+            return ("负控方向不对：回灰变异报的不是静态骨架（报的是 %r）"
+                    % (v3[1],))
+    finally:
+        mod._logo_mark = orig_mark
     return None
 
 
@@ -910,8 +1092,14 @@ def j_freeze_zones_intact():
     机制（详见《Antinel·冻结区机制 v1.0》＋并行修订制度规则 H）：
     ① 登记簿加载（缺失 ⇒ 返回 None 走 SKIP——判据未生效如实报，铁律 1）；
     ② 簿自身健全性：id 唯一／status 合法／frozen 必须有 hash 或 check；
+       **退休通道不变式**（`_registry_invariant_problems`：retire_log 三字段
+       齐全 ＋ 曾冻结者不许裸降级——Phase B3 补）；
     ③ frozen 条目逐条执法（触碰即红，detail 附退休指引）；
-    ④ 机械自证探针（常驻负控，见 _freeze_machinery_probe）；
+    ④ 机械自证探针（常驻负控×3：冻结执法见 `_freeze_machinery_probe`；
+       灯色判据见 `_lamp_color_machinery_probe` —— 后者证的是 candidate 的
+       check **有牙**，不是执法：FZ-001 违例只登记，探针照跑自证；
+       退休通道不变式见 `_freeze_invariants_probe` —— 合成夹具证两条
+       不变式腿都有牙且不堵合法退休）；
     ⑤ candidate **不执法**——它们是「待修复/待确认」的管线，违例只登记。
     """
     path = _freeze_registry_path()
@@ -929,15 +1117,21 @@ def j_freeze_zones_intact():
     dup = sorted({i for i in ids if ids.count(i) > 1})
     if dup:
         problems.append("条目 id 重复：%s" % dup)
+    problems.extend(_registry_invariant_problems(entries))
     n_frozen = 0
     cands = []
+    skips = []
     for e in entries:
         st = e.get("status")
         if st == "frozen":
             n_frozen += 1
-            p = _enforce_one_frozen(e)
-            if p:
-                problems.append(p)
+            verdict, detail = _enforce_one_frozen(e)
+            if verdict is None:
+                # ★ 环境测不出（铁律 1）：不是违例、也不是通过 —— 收集后在
+                #   成功 detail 里**出声**（不许静默当绿，也不许假连带红）
+                skips.append(detail or e.get("id", "?"))
+            elif not verdict:
+                problems.append(detail)
         elif st == "candidate":
             cands.append(e.get("id", "?"))
         else:
@@ -945,12 +1139,185 @@ def j_freeze_zones_intact():
     probe = _freeze_machinery_probe()
     if probe:
         problems.append(probe)
+    inv = _freeze_invariants_probe()
+    if inv:
+        problems.append(inv)
+    lamp = _lamp_color_machinery_probe()
+    if lamp == "SKIP":
+        skips.append("灯色判据机械自证（inbox_server 读不到，铁律 1——"
+                     "不是通过也不是违例）")
+    elif lamp:
+        problems.append(lamp)
     if problems:
         return False, "冻结区 %d 处问题：%s" % (
             len(problems), "；".join(problems[:3]))
+    tail = ""
+    if skips:
+        tail = "；另有 %d 条环境不可判（SKIP，铁律 1——不是通过）：%s" % (
+            len(skips), "；".join(skips))
+    lamp_note = ("灯色判据回耦/回灰确被抓住" if lamp is None
+                 else "灯色判据自证未跑（环境不可判，见上 SKIP）")
     return True, ("冻结区完好：%d frozen 全过执法 ＋ %d candidate 待管线（%s）；"
-                  "机械自证通过（合成擅改确被拦截）"
-                  % (n_frozen, len(cands), "/".join(cands) or "无"))
+                  "退休通道不变式在位；机械自证通过（合成擅改确被拦截"
+                  " ＋ %s ＋ 退休通道合成夹具三腿）%s"
+                  % (n_frozen, len(cands), "/".join(cands) or "无",
+                     lamp_note, tail))
+
+
+def j_window_title_format():
+    """★★ FZ-002（2026-10-16）：窗口标题形态契约（output 类冻结执法）。
+
+    契约（创始人 2026-10-16 拍板「只要保留 Antinel 监理加上编号就行了」，
+    W-01 退休的接替者）：四个视图渲染出的 `<title>` **整串**必须恰为
+    「Antinel 监理#<6hex>」—— 品牌开头＋身份串，无状态词、无页面名前缀。
+    这是认窗机制（`inbox_window._mark_at_tail`：品牌开头＋其后只允许
+    身份串）的**唯一结构依据**：形态漂移 ⇒ 窗口认不出 ⇒ 落位失效。
+
+    口径全部**由产品常量派生**（`build_run_id`＋`console_title_suffix`），
+    不二次实现；先自证夹具成立（期望串必须被认窗判据认得出），再逐视图
+    断言（恰一个 `<title>` 且整串 == 期望串）。
+
+    返回 `(verdict, detail)`；verdict=None ⇒ SKIP（产品模块加载失败或
+    夹具自证失败——环境测不出，铁律 1：测不出 ≠ 查出来是好的；认窗机制
+    本身的正确性由 0360/0362/G-05 的活判据独立守）。
+    """
+    import html as _html
+    import tempfile
+    # ── 环境隔离（0490 同款纪律）：中枢换临时目录，渲染路径不碰真中枢 ──
+    _old_hub = os.environ.get("ANTINEL_HUB_DIR")
+    _old_aud = os.environ.get("ANTINEL_AUDIT_DIRS")
+    os.environ["ANTINEL_HUB_DIR"] = tempfile.mkdtemp(prefix="rg_fz2_hub_")
+    os.environ.pop("ANTINEL_AUDIT_DIRS", None)
+    # inbox_server 的内部 import（inbox_model 等）按 sys.path 解析 ⇒ 插 PKG，
+    # 负控 fixture 里解析到的才是 fixture 副本（量具测错对象已犯过两次）。
+    _added_path = str(PKG) not in sys.path
+    if _added_path:
+        sys.path.insert(0, str(PKG))
+    try:
+        SV = _load_module_file("inbox_server.py", "inbox_server_fz2")
+        WIN = _load_module_file("inbox_window.py", "inbox_window_fz2")
+        M = _load_module_file("inbox_model.py", "inbox_model_fz2")
+        if SV is None or WIN is None or M is None:
+            return None, "SKIP：产品模块加载失败（inbox_server/inbox_window/inbox_model 读不到）"
+        # ── 夹具（0490 同形：6 条 items ＋ _REP 键集 ＋ posture 全注入）──
+        from datetime import datetime, timedelta
+        _POSTURE = {"state": "guarding", "label": "值守中", "why": "在岗"}
+
+        def _mk(level="R0", state="unread", i=0, hours_ago=1.0,
+                kind="host_shield_breach"):
+            a = M.Alert(id="fz2_%s_%d" % (level, i),
+                        ts=(datetime.now().astimezone()
+                            - timedelta(hours=hours_ago)).replace(
+                                microsecond=0).isoformat(),
+                        level=level, kind=kind, title="t")
+            return M.Item(alert=a, state=state)
+
+        _items = [
+            _mk("R0", "unread", 1, 1.0),
+            _mk("R0", "unread", 2, 2.0),
+            _mk("R0", "unread", 3, 1.5, kind="host_shield_tamper"),
+            _mk("L2", "unread", 4, 1.0, kind="tool_call_blocked"),
+            _mk("L2", "unread", 5, 3.0, kind="tool_call_blocked"),
+            _mk("L1", "unread", 6, 30.0, kind="host_shield_changed"),
+        ]
+        _REP = {
+            "day": "2026-10-16", "levels": {"R0": 1, "L2": 2, "L1": 3, "Ls": 0},
+            "window_levels": {"R0": 1, "L2": 2, "L1": 3, "Ls": 0},
+            "window_hours": 24,
+            "buckets": {"action": 2, "info": 2, "archive": 1},
+            "action_groups": 2, "revived_window": 0,
+            "posture": dict(_POSTURE),
+            "rules": [{"rule_id": "DST-01", "count": 2}],
+            "chain": {"status": "ok", "files": 1, "records": 2, "broken": 0,
+                      "unchained": 0, "reason": ""},
+            "ledger": {"days": 0, "streak_days": 0, "blocked": 0,
+                       "noticed": 0, "breached": 0, "acked": 0},
+        }
+        # ── 期望串由产品常量派生（唯一真源）＋ 夹具自证 ──
+        rid = WIN.build_run_id("T")
+        want = WIN.console_title_suffix(rid)
+        if not WIN.is_console_title(want, rid):
+            return None, ("SKIP：夹具自证失败——期望串 %r 不被认窗判据认领"
+                          "（量具与产品脱节，量具故障）" % want)
+        for view in ("inbox", "report", "health", "ledger"):
+            page = SV.render_page(view=view,
+                                  root=tempfile.mkdtemp(prefix="rg_fz2_r_"),
+                                  token="T", items=_items, rep=_REP,
+                                  posture=_POSTURE)
+            titles = re.findall(r"<title>(.*?)</title>", page, re.S)
+            if len(titles) != 1:
+                return False, ("%s 视图 <title> 数量 %d（期望恰 1 个）：%r"
+                               % (view, len(titles), titles[:3]))
+            t = _html.unescape(titles[0])
+            if t != want:
+                return False, ("%s 视图标题形态不符：%r（期望整串 %r）—— "
+                               "状态词/页面名前缀回潮 ⇒ 认窗机制失据"
+                               % (view, t, want))
+        return True, "标题形态契约在位：四视图 <title> 整串 == 「%s」" % want
+    finally:
+        if _old_hub is None:
+            os.environ.pop("ANTINEL_HUB_DIR", None)
+        else:
+            os.environ["ANTINEL_HUB_DIR"] = _old_hub
+        if _old_aud is not None:
+            os.environ["ANTINEL_AUDIT_DIRS"] = _old_aud
+
+
+#: FZ-002 的 output 类检查实现（冻结区登记表 check=window_title_format 指向它）。
+#: ★ 顺序纪律：先实现＋三态执法就位，再翻 freeze_zones.json 的 status。
+_FREEZE_OUTPUT_CHECKS["window_title_format"] = j_window_title_format
+
+
+def j_lamp_color_contract(mod=None):
+    """★★ FZ-001（候选，2026-10-16）：灯头颜色契约 —— amber 圆填充固定琥珀，
+    与光束色解耦（创始人截图 #1「橙色小球弄丢了，AI 对此毫无意识」）。
+
+    契约（FZ-001 contract 原话）：LOGO 状态球必须肉眼可辨 —— amber 圆的
+    颜色不得与光束同色。Phase B2 修复形态：固定 `#E8A33D`（产品常量
+    `LOGO_AMBER_FILL`），静态骨架与状态机赋值**同取此常量**（单一真源，
+    本判据从它派生期望值，不二次实现）。
+
+    两条腿（`mod` 可注入 —— 机械自证探针的变异臂用，与 0514 的
+    `_logo_overflow_reasons(mod=None)` 同款）：
+      ① 静态骨架 `_logo_mark()` 的 amber 圆 fill == `LOGO_AMBER_FILL`；
+      ② 状态机 `_LOGO_JS` 的灯头赋值是固定常量，且**不得**回耦
+         `css(V.beamC)`（FZ-001 原病复发入口）。
+    返回 `(verdict, detail)` 三态；None ⇒ SKIP（产品模块加载失败，铁律 1：
+    测不出 ≠ 查出来是好的）。
+    """
+    if mod is None:
+        mod = _load_module_file("inbox_server.py", "inbox_server_fz1")
+    if mod is None:
+        return None, "SKIP：inbox_server 加载失败（灯色判据环境测不出）"
+    amber = getattr(mod, "LOGO_AMBER_FILL", None)
+    if not amber:
+        return False, "产品缺 LOGO_AMBER_FILL 常量 —— 灯头色唯一真源没了"
+    # ① 静态骨架
+    mark = mod._logo_mark("L0")
+    m = re.search(r'<circle data-p="amber"[^>]*fill="([^"]*)"', mark)
+    if not m:
+        return False, "静态骨架里找不到 amber 圆（哨标结构被改）"
+    if m.group(1) != amber:
+        return False, ("静态骨架 amber fill=%r ≠ LOGO_AMBER_FILL=%r —— "
+                       "回灰/回耦（FZ-001 原病：小球肉眼不可辨）"
+                       % (m.group(1), amber))
+    # ② 状态机
+    js = mod._LOGO_JS
+    if re.search(r'amber\.setAttribute\("fill",\s*css\(V\.beamC\)\)', js):
+        return False, ("状态机把灯头 fill 与光束回耦（css(V.beamC)）—— "
+                       "FZ-001 原病复发（创始人截图 #1）")
+    if json.dumps(amber) not in js:
+        return False, ("状态机里没有固定琥珀色赋值 %s —— 灯头色不是常量"
+                       % (json.dumps(amber),))
+    return True, ("灯头颜色契约在位：静态＋状态机两处 amber fill 固定 %s，"
+                  "与光束解耦" % amber)
+
+
+#: FZ-001 的 output 类检查实现（冻结区登记表 check=lamp_color_contract 指向它）。
+#: ★ 顺序纪律同 FZ-002：先实现＋自证（_lamp_color_machinery_probe）就位。
+#:   FZ-001 保持 candidate ⇒ D-38 条目循环不调用它（违例只登记），
+#:   但机械自证探针每次闸门运行都验它有牙 —— 冻结那一刻即生效。
+_FREEZE_OUTPUT_CHECKS["lamp_color_contract"] = j_lamp_color_contract
 
 
 def j_fallback_has_no_dst10(m):
@@ -1675,8 +2042,13 @@ def j_hook_same_anchor():
                        % (gate_rel, "、".join(bad)))
 
     # ③ 部署件与源逐字一致
-    dep_p = PKG / dep_rel
-    if not dep_p.is_file():
+    # ★★ 2026-10-16：部署件解析必须 **worktree 感知**（linked worktree 的
+    #   `.git` 是指针文件，钩子走 common gitdir 共享、worktree 提交也跑
+    #   那一份）⇒ 走 `_deployed_hook_path`。直接拼路径在 worktree 里恒报
+    #   「部署件不存在」—— 一句假话（钩子此刻明明生效）且漂移在 worktree
+    #   里查不出（T-09「同一事实两套口径」在钩子上的原样复发）。
+    dep_p = _deployed_hook_path(PKG)
+    if dep_p is None:
         return True, ("部署件不存在（%s）—— 新克隆的正常状态，但**提交钩子此刻不生效**："
                       "装它 `cp %s %s`" % (dep_rel, src_rel, dep_rel))
     dep = dep_p.read_text(encoding="utf-8", errors="replace")
@@ -1684,7 +2056,7 @@ def j_hook_same_anchor():
         return False, ("部署件与仓内源**不一致**（%s ≠ %s）：钩子该跑什么是两份答案，"
                        "而生效的那份没人看（2026-10-13 实测漂了 6 天，"
                        "28 套快档判据一次没跑）。修法：`cp %s %s`"
-                       % (dep_rel, src_rel, src_rel, dep_rel))
+                       % (str(dep_p), src_rel, src_rel, str(dep_p)))
     return True, "钩子源与部署件逐字一致（%d 字节）；承诺的路径/参数均真实" % len(src)
 
 
@@ -1852,10 +2224,18 @@ def j_pinned_hashes_match_manifest():
       这正是 `spawn_sentinel()` 放行的**必要条件**（不满足必拦）。
     ★ 反空转：`_GUARDED_CHAIN_FILES` 非空 ＋ `host_shield.py` 在 manifest 里。
       否则 `(True, [])` 可能是"什么都没比"（＝自检对自己失明的同型）。
+    ★ 0.51.1 起 `self_check()` 还覆盖 `_DEV_GUARDED_CHAIN_FILES`（研发树
+      专属、**在场才校验**：`ci/freeze_zones.json` 不进 wheel ⇒ 出包产品
+      不在场、不误报；研发树在场 ⇒ fail-closed）。故本条的绿在含登记簿的
+      树里**同时蕴含**「登记簿已钉住」——伪造退休记录那一路被这层哈希
+      兜住（D-38 不变式管语义自洽，本条管字节）。
     ★ 红时必须给修法（否则是 T-04「红而无出路」）：
       `python _tools_034/_resign_manifest.py`（只重算已有条目）；
-      报「没登记进 manifest」⇒ `python scripts/build_package.py`
-      （清单条目的增删是构建器职责，重签工具刻意不越权）。
+      报「没登记进 manifest」⇒ 告警链路件跑 `python scripts/build_package.py`
+      （清单条目的增删是构建器职责，重签工具刻意不越权）；
+      研发树专属件（ci/freeze_zones.json）报「没登记」⇒
+      `python _tools_034/_resign_manifest.py --adopt-dev`（构建器永远
+      不收 ci/ ⇒ 唯一出路是补登，名单从 host_shield import 不另抄）。
     ★ 与 D-27 的分工：D-27 守**量具口径**（工具算的值 == 登记值，防口径分叉）；
       本条守**事实一致**（磁盘字节 == 登记哈希）。两条读同一张表，判两件事。
     ★ 已知连带（是同一个根因，不是噪声）：`--selfcheck` 里凡注入到
@@ -2029,6 +2409,50 @@ def _aside_dir(path):
     return False
 
 
+def _deployed_hook_path(root):
+    """解析 `root` 工作树里**实际生效**的部署钩子（`.git/hooks/pre-commit`）。
+
+    ★★ 为什么不能直接拼路径（2026-10-16 实测，本轮 selfcheck 暴露）：
+      linked worktree（stream-b 等）的 `.git` 是 **gitdir 指针文件**
+      （不是目录）⇒ `root/".git"/"hooks"/"pre-commit"` 永远不存在 ——
+      而钩子是**跨 worktree 共享**的（走 common gitdir 的 hooks/，
+      worktree 里提交也跑那一份）。直接拼路径的后果（两类调用方全中）：
+      · D-33 ③ 在 worktree 里变哑：恒报「部署件不存在」—— 一句假话
+        （钩子此刻明明生效），且 X-012 那种「漂了 6 天」在 worktree
+        里查不出（T-09「同一事实两套口径」在钩子上的原样复发）；
+      · fixture 构建器拿不到钩子 ⇒ 整个 `.git` 构建块被跳过 ⇒
+        D-28 的「有效工作树」断言（X-022）在 worktree 里是**死代码**
+        ⇒ 它的负控之二 vacuous 假绿（selfcheck 实测 [★GREEN(坏)]——
+        比红更坏：不会红的闸门不是闸门，而 vacuous 的绿连闸门都不是）。
+    ★ 解法：问 git 自己。`git rev-parse --git-path hooks/pre-commit`
+      对 hooks/ 走 common_list ⇒ 主树回 `.git/hooks/pre-commit`（相对），
+      worktree 回 common gitdir 下的绝对路径 —— **两种形态一律落到
+      实际生效的那份**（2026-10-16 实测：主树/worktree 均验证）。
+    ★ git 不在或查不动 ⇒ None（调用方按「查不到」处理，铁律 1：
+      测不出 ≠ 查出来是好的，也不许静默当绿）。
+    """
+    p = root / ".git" / "hooks" / "pre-commit"
+    if p.is_file():
+        return p
+    import subprocess as _sp
+    try:
+        r = _sp.run(["git", "-C", str(root), "rev-parse", "--git-path",
+                     "hooks/pre-commit"],
+                    capture_output=True, text=True, encoding="utf-8",
+                    errors="replace", timeout=30)
+    except Exception:                                          # noqa: BLE001
+        return None
+    if r.returncode != 0:
+        return None
+    cand = (r.stdout or "").strip()
+    if not cand:
+        return None
+    cp = Path(cand)
+    if not cp.is_absolute():
+        cp = root / cp
+    return cp if cp.is_file() else None
+
+
 def _build_negctl_fixture(label=""):
     """构建负控 fixture（`selfcheck()` 与判据 D-28 共用的**唯一真源**）。
 
@@ -2072,8 +2496,14 @@ def _build_negctl_fixture(label=""):
     #   而且会让 D-33 的负控变成假的（改了源也看不出漂移）。
     #   带上它之后，fixture 里"源 ＝ 部署件"成立，注入改坏源 ⇒ 立刻漂移 ⇒ 真能红。
     #   ★ 只碰 fixture 自己的 `.git/hooks/`，不动真仓（真仓的钩子由 D-33 正面守）。
-    _dep_hook = PKG / ".git" / "hooks" / "pre-commit"
-    if _dep_hook.is_file():
+    # ★★ 2026-10-16：部署钩子解析必须 **worktree 感知**（stream-b 等 linked
+    #   worktree 的 `.git` 是 gitdir 指针文件，直接拼路径恒不存在；钩子走
+    #   common gitdir 共享）⇒ 走 `_deployed_hook_path`。直接拼路径的后果：
+    #   fixture 永远拿不到 `.git` ⇒ 整个本块被跳过 ⇒ D-28 的「有效工作树」
+    #   断言（X-022）在 worktree 里是死代码 ⇒ 其负控之二 vacuous 假绿
+    #   （本轮 selfcheck 实测 [★GREEN(坏)]，比红更坏）。
+    _dep_hook = _deployed_hook_path(PKG)
+    if _dep_hook is not None:
         # ★★ 2026-10-13 补（本轮实测发现）：**先 `git init` 把 fixture 变成真仓**，再放钩子。
         #   为什么（实测，不是推演）：D-33 那次只 `mkdir` 出 `.git/hooks/`
         #   ⇒ 留下一个「**只含 hooks/ 的 .git**」—— 现实中不可能存在的形态。
@@ -2306,12 +2736,18 @@ def selfcheck():
          "D-30"),
         # ★★ G-05 负控（2026-10-12）：把认窗白名单那一跳改成**放行**。
         #   模拟 0.36.5 原貌（宽泛匹配认对象 ⇒ 误关/误移用户窗口）。
-        #   ② 会抓到「用户形状被误认」。W-01 批次改 _mark_at_tail 时
-        #   **必须保留这两行**（只改 names 的算法），否则本负控失效。
+        #   ② 会抓到「用户形状被误认」。
+        # ★★ 0.51.1 锚点迁移（W-01 反转）：旧锚点（page 前缀白名单
+        #   `if page not in names`）随 page 概念整体退役，不改 ⇒ 注入点
+        #   未找到 ⇒ 负控 SKIP ⇒ 假绿误读（比红更坏）。新锚点＝防误伤层
+        #   的结构判据（`_mark_at_tail` 的 rest 检查两行：品牌之后只允许
+        #   身份串）。改成放行 ⇒ 宽泛模式误认「Antinel 监理#486acd 记事本」
+        #   类后挂字窗口 ⇒ 0360 宽泛负形状经 c_window_suffix_matches_every_page
+        #   抓住 ⇒ G-05 ①红（0360 ③负清单已含新形态负形状，2026-10-16 就位）。
         ("G-05 缺陷：认窗白名单那一跳改成放行（用户窗口被误认）",
          "inbox_window.py",
-         '    if page not in names:\n        return False',
-         '    if page not in names:\n        pass',
+         '    if rest and not _RID_RE.fullmatch(rest):\n        return False',
+         '    if rest and not _RID_RE.fullmatch(rest):\n        pass',
          "G-05"),
         # ★★ D-31 负控（2026-10-12）：往类型表里塞一个**幻想判据 ID**。
         #   模拟「有病无药被掩盖」：不注册就红，才是登记簿接成闸门一环。
@@ -2344,6 +2780,25 @@ def selfcheck():
          "ci/git-hooks/pre-commit",
          '"$PY" "$GATE" --hook',
          '"$PY" "$GATE" --nonexistent-flag',
+         "D-33"),
+        # ★★ D-33 负控之二（2026-10-16）：③ 腿自己的牙——**只改注释**
+        #   （字节变、①②的断言面不变）⇒ 源 ≠ 部署件 ⇒ ③ 必须红。
+        #   为什么需要单独一条：原负控改的是参数承诺，② 先 return、③
+        #   根本跑不到 ⇒ ③ 在任何语境下都没有负控（「尺子有牙」只证了
+        #   ①②两腿）。且 2026-10-16 把 D-33 的部署件解析改成 worktree
+        #   感知（`_deployed_hook_path`）后，③ 在 worktree 语境**新开了
+        #   一条执行路径**——按铁律，新路径必须有牙，否则「修好了」无凭证。
+        #   ⚠️ 环境前提：fixture 带上了部署钩子（`_build_negctl_fixture`
+        #   复制实际生效那份）。没有部署钩子的新克隆形态 ③ 本就不适用
+        #   （判据文档：不存在 ⇒ 不算红），该语境下本条无分辨力 ——
+        #   与 D-28 负控之二同族的环境依赖；本仓钩子已部署（主树那份，
+        #   worktree 经 common gitdir 共享）。
+        #   ⚠️ 无 D-36 连带：`ci/git-hooks/pre-commit` 不在 manifest
+        #   钉住清单（`_GUARDED_CHAIN_FILES` 只有钩子运行件四件）。
+        ("D-33 缺陷：部署件与源字节不一致（只改注释，③ 腿的牙）",
+         "ci/git-hooks/pre-commit",
+         "# Antinel 统一交付闸门 —— 提交前自动运行（**快道**）",
+         "# Antinel 统一交付闸门 —— 提交前自动运行（**快道**）  # NEGCTL-D33-③",
          "D-33"),
         # ★★ D-34 负控（2026-10-13）：让快道**静默**少跑（预算外的不打印）。
         #   模拟 X-014 那一族（快道悄悄少跑 ⇒ 与"没有闸门"等价）。
@@ -2398,15 +2853,25 @@ def selfcheck():
          '    "$PY" "$ROOT/ci/baseline_tag.py" --remind || true',
          '    : # NEGCTL-D37 基线提醒被摘掉（工具成死代码）',
          "D-37"),
-        # ★★ D-38 负控（2026-10-16）：把候选 FZ-001 的状态从 candidate 直接
-        #   翻成 frozen（无 hash）——模拟「绕过管线直接冻结」。没有哈希的
-        #   frozen 条目执法不了 ⇒ 按铁律 1 必须红，不许静默放过。
-        #   注入串 `"status": "candidate"` 在簿内出现 4 次（FZ-001..004），
-        #   replace 只动**第一处** ⇒ 恰是 FZ-001，与注释一致。
-        ("D-38 缺陷：候选被直接翻成 frozen（无哈希，执法不了）",
+        # ★★ D-38 负控（2026-10-16）：把候选 FZ-003 的状态从 candidate 直接
+        #   翻成 frozen ——模拟「绕过管线直接冻结」。FZ-003 的 check
+        #   （logo_row_layout）**尚未实现** ⇒ frozen 却执法不了 ⇒ 登记簿
+        #   健全性 ②「不许冻结未实现的契约」必须红，不许静默放过。
+        #   ★★ 2026-10-16 换注入对象（Phase B2 的后坐力，自证伪暴露）：
+        #   原注入翻 FZ-001，而 FZ-001 现为 output 类（check=lamp_color_
+        #   contract 已实现且产品正确）⇒ 该注入被**合法放过**，闸门只连带
+        #   红 D-36（manifest 哈希钉住 freeze_zones.json）—— 负控方向错
+        #   （期望 D-38、实际红的是 D-36，selfcheck 实测）。换 FZ-003：
+        #   check 未实现是**当下真实存在**的健全性缺口（blocked_on 明写
+        #   「实现 logo_row_layout 再冻结」——顺序反了正是要防的形状）。
+        #   注入串带 id 前缀锚定 FZ-003（簿内 `"status": "candidate"` 出现
+        #   3 次，裸 replace 命中的是 FZ-001——Phase B2 后不适用的旧前提）。
+        #   ⚠️ 已知连带：改 freeze_zones.json 字节 ⇒ D-36 一并红（同根因，
+        #   机器打 △——那正是 Phase B3 研发树专属保护名单在起作用）。
+        ("D-38 缺陷：候选被直接翻成 frozen（check 未实现，执法不了）",
          "ci/freeze_zones.json",
-         '"status": "candidate"',
-         '"status": "frozen"',
+         '"id": "FZ-003",\n      "status": "candidate"',
+         '"id": "FZ-003",\n      "status": "frozen"',
          "D-38"),
         # ★★ D-23 ⑥ 负控（2026-10-16，机制层方案 v1.0 §5）：把 target_version
         #   注回一个旧版 ⇒ 与 release.version 分家 ⇒ j_workspace_facts 必须红。

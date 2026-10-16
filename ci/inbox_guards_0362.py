@@ -450,7 +450,9 @@ def c_console_title_suffix_carries_run_id():
     """
     import inbox_window as WIN
     s = WIN.console_title_suffix("abc123")
-    if s != " · Antinel 监理#abc123":
+    # ★ 0.51.1 反转（W-01 退休、FZ-002 冻结）：后缀值随
+    #   CONSOLE_WINDOW_TITLE_SUFFIX 收为品牌本体（去前导「 · 」）。
+    if s != "Antinel 监理#abc123":
         return "身份后缀形状不对：%r" % s
     # 身份串在**末尾** ⇒ 通用后缀不是它的后缀（这是设计好的，必须如此）
     if s.endswith(WIN.CONSOLE_WINDOW_TITLE_SUFFIX):
@@ -484,6 +486,10 @@ def c_browser_window_never_matched():
         # ↓ 实测本机真实标题（2026-10-07）
         "收件箱 · Antinel 监理 和另外 14 个页面 - 个人 - Microsoft Edge",
         "收件箱 · Antinel 监理 - 个人 - Microsoft Edge",     # 单标签形态
+        # ★ 0.51.1 反转后的**新形态误伤面**：标签页恰为纯品牌标题时，
+        #   Edge 把它串成「Antinel 监理#f356b0 和另外 14 个页面…」——
+        #   品牌在开头（第一层过了），靠 rest 检查＋浏览器品牌排除挡。
+        "Antinel 监理#f356b0 和另外 14 个页面 - 个人 - Microsoft Edge",
         "新建标签页 - 个人 - Microsoft Edge",
     ]
     for t in user_windows:
@@ -492,8 +498,9 @@ def c_browser_window_never_matched():
         if WIN.is_console_title(t, run_id="any123"):
             return "严格判据命中了用户浏览器窗口：%r" % t
     # 反面：自己的 app 窗口必须仍然被认出来（别把判据修成"永不匹配"）
-    for t in ("收件箱 · Antinel 监理#f356b0", "运行状态 · Antinel 监理#f356b0",
-              "收件箱 · Antinel 监理"):
+    # ★ 0.51.1 反转：app 窗口形态从「页面名 · Antinel 监理#f356b0」
+    #   （随页面变的三种）收为**品牌恒形态**两种（无身份／带身份）。
+    for t in ("Antinel 监理#f356b0", "Antinel 监理"):
         if not WIN.is_console_title(t):
             return "自己的 app 窗口认不出来了：%r" % t
     return True
@@ -620,22 +627,31 @@ def n_wide_default_narrowed_is_caught():
 def c_two_level_matching_covers_all_forms():
     """★★ 宽泛判据必须**认得出所有形态**的Antinel 监理窗口（关窗才关得掉）。
 
-    ★ 这条是 0.36.2 真实设计缺陷的正面判据。三种形态都要被宽泛判据认领：
-      「收件箱 · Antinel 监理」            （无标识，最老）
-      「收件箱 · Antinel 监理#abc123」      （带身份 —— **通用后缀 endswith 认不出**）
-      「运行状态 · Antinel 监理#abc123」    （换页）
+    ★★ 0.51.1 标题反转（创始人 2026-10-16 拍板；W-01 退休、
+      FZ-002 冻结）：形态从「<页面名> · Antinel 监理#<rid>」翻转为
+      **品牌开头整串**——「Antinel 监理」（无身份）与「Antinel 监理#abc123」
+      （带身份）。正向夹具随形态迁移；旧形态（0.48.5 前缀形态、
+      0.50.4 前「… · 值守台#…」）本版**不认领**（`_HEAD_RE` 品牌前置
+      天然排除）：无分发⇒无升级人口，dev 机旧窗手动关闭/重启消化；
+      分发前必须补 legacy 认领（LEGACY 标记常量＋`_mark_at_tail(title,
+      mark=None)` 默认参数化＋daemon sweep），否则升级用户旧窗成孤儿
+      ——与《改名零后遗症执行策略》§8 L2/L3-sweep 缓建裁定同源。
+    ★ 形态契约由 FZ-002（freeze_zones.json：window_title_format，output 类）
+      与 Q14 精确形态断言钉死。
+    ★ 这条是 0.36.2 真实设计缺陷的正面判据。两种形态都要被宽泛判据认领：
+      「Antinel 监理」              （无标识）
+      「Antinel 监理#abc123」       （带身份 —— **通用后缀 endswith 认不出**）
     而**严格**判据（给 run_id）必须只认本次这一种。
     """
     import inbox_window as WIN
-    for t in ("收件箱 · Antinel 监理",
-              "收件箱 · Antinel 监理#abc123",
-              "运行状态 · Antinel 监理#abc123"):
+    for t in ("Antinel 监理",
+              "Antinel 监理#abc123"):
         if not WIN.is_console_title(t):
             return "宽泛判据认不出这类Antinel 监理窗口（关窗会漏）：%r" % t
-    if not WIN.is_console_title("收件箱 · Antinel 监理#abc123", run_id="abc123"):
+    if not WIN.is_console_title("Antinel 监理#abc123", run_id="abc123"):
         return "严格判据认不出本次窗口"
-    for t in ("收件箱 · Antinel 监理#OLD",
-              "收件箱 · Antinel 监理",
+    for t in ("Antinel 监理#OLD",
+              "Antinel 监理",
               "记事本"):
         if WIN.is_console_title(t, run_id="abc123"):
             return "严格判据认错了对象：%r" % t
@@ -650,19 +666,24 @@ def c_match_title_rejects_other_windows():
         「收件箱 · Antinel 监理 和另外 14 个页面 - 个人 - Microsoft Edge」
       —— 它**含有**「 · Antinel 监理」。若用通用后缀去 endswith，
       某些标题形态会命中它 ⇒ `SetWindowPos` 把用户浏览器搬走。
+    ★★ 0.51.1 标题反转（W-01 退休、FZ-002 冻结）：用户浏览器窗的
+      新形态对应物「Antinel 监理#f356b0 和另外 14 个页面 - 个人 -
+      Microsoft Edge」一并入列（仍含 Microsoft ⇒ 入口排除；且 rest
+      检查也会挡）。旧形态实测条目保留——仍被正确拒认，且作为
+      legacy 判据负向锚点有效。
     """
     import inbox_window as WIN
     rid = "abc123"
     s = WIN.console_title_suffix(rid)
     must_match = [
-        "收件箱 · Antinel 监理#abc123",         # 本次运行 · 收件箱
-        "运行状态 · Antinel 监理#abc123",        # 换页后仍应命中
-        "账本 · Antinel 监理#abc123",
+        "Antinel 监理#abc123",             # 本次运行（0.51.1 反转后唯一形态）
     ]
     must_not = [
-        "收件箱 · Antinel 监理 和另外 14 个页面 - 个人 - Microsoft Edge",   # 实测：用户普通窗口
-        "收件箱 · Antinel 监理#OLDRUN",         # 上次运行
-        "收件箱 · Antinel 监理",                 # 无身份标识的旧窗口
+        "Antinel 监理#f356b0 和另外 14 个页面 - 个人 - Microsoft Edge",  # 0.51.1 新形态：实测同款用户浏览器窗
+        "收件箱 · Antinel 监理 和另外 14 个页面 - 个人 - Microsoft Edge",   # 实测：用户普通窗口（旧形态保留）
+        "Antinel 监理#OLDRUN",             # 上次运行（新形态）
+        "收件箱 · Antinel 监理#OLDRUN",         # 上次运行（旧形态保留）
+        "Antinel 监理",                 # 无身份标识（0.51.1 新形态：宽泛认得、严格不认）
         "记事本",                          # 无关窗口
         "",
     ]
@@ -674,6 +695,10 @@ def c_match_title_rejects_other_windows():
     #   严格模式同样要挡②：它是**唯一允许移动窗口**的路径，
     #   一次误认就把用户的记事本搬到屏幕角落并改尺寸
     #   —— 那正是本轮最初那个投诉（「窗口出现在旧位置而且变成了旧尺寸」）。
+    # ★★ 0.51.1 反转：两类误伤形态的新形态对应物一并入列
+    #   （「Antinel 监理助手」后挂字、「Antinel 监理#486acd 记事本」
+    #   身份串后挂字）；旧形态条目保留——仍被正确拒认（`_HEAD_RE`
+    #   品牌前置天然排除），且作为 legacy 判据负向锚点有效。
     must_not_wide = [
         "收件箱 · Antinel 监理助手",
         "收件箱 · Antinel 监理 - 记事本",
@@ -682,6 +707,8 @@ def c_match_title_rejects_other_windows():
         "收件箱 · 值守中",
         "收件箱 · Antinel 监理#zzzzzzzz",   # 身份串必须是 hex：非本服务生成的串不认
         "收件箱 · Antinel 监理#",           # 半个身份串
+        "Antinel 监理助手",                 # 0.51.1 新形态：标记后面挂了字
+        "Antinel 监理#486acd 记事本",       # 0.51.1 新形态：身份串后面挂了字
     ]
     # ★★ 0.36.5：`_matches_title` 已删除（子串匹配，且注释与实现相反）。
     #   这里改用**真源** `is_console_title(t, run_id)` ——
@@ -700,7 +727,8 @@ def c_match_title_rejects_other_windows():
         if WIN.is_console_title(t, None):
             return ("宽泛判据（收旧窗用）把用户窗口 %r 认成Antinel 监理 ⇒ 会误关它" % t)
     # 宽泛模式**必须**仍然认得出所有形态（正向不能被反向用例挤掉）
-    for t in ("收件箱 · Antinel 监理", "收件箱 · Antinel 监理#abc123", "运行状态 · Antinel 监理#abc123"):
+    # ★ 0.51.1 反转：正向夹具同步迁移到品牌两形态（页面名随反转退休）
+    for t in ("Antinel 监理", "Antinel 监理#abc123"):
         if not WIN.is_console_title(t, None):
             return "宽泛判据认不出这类Antinel 监理窗口（关窗会漏）：%r" % t
     return True
@@ -753,6 +781,12 @@ def c_page_title_carries_run_id():
 
     ★ 为什么必须在**服务端**注入而不是 JS 改 `document.title`：
       JS 改标题晚于开窗，落位那一刻读到的仍是旧标题 ⇒ 认不出窗口。
+    ★★ 0.51.1 标题反转（W-01 退休、FZ-002 冻结）：标题整串从
+      「<页面名> · Antinel 监理#<rid>」翻转为**品牌开头整串**
+      「Antinel 监理#<rid>」（页面名/状态词从标题退休）⇒ 断言
+      从「含身份串 ＋ 页面名前缀」升级为**精确形态**：整串必须等于
+      `console_title_suffix(rid)`（期望串由产品常量派生，不二次
+      实现口径）。负控（剥掉 #rid ⇒ 整串退为品牌名）仍必红。
     """
     import re as _re
     import inbox_server as SV
@@ -767,8 +801,11 @@ def c_page_title_carries_run_id():
     rid = WIN.build_run_id("tok-for-test")
     if ("#" + rid) not in title:
         return "标题里没有本次身份串：%r（期望含 #%s）" % (title, rid)
-    if not title.startswith("收件箱"):
-        return "标题丢了可变前缀（页面名）：%r" % title
+    # ★ 0.51.1：精确形态断言 —— 期望串由产品常量派生（唯一真源）
+    want = WIN.console_title_suffix(rid)
+    if title != want:
+        return ("标题形态不是「Antinel 监理#<rid>」整串：%r（期望 %r）"
+                % (title, want))
     return True
 
 
@@ -802,22 +839,33 @@ def n_page_title_without_run_id_is_caught():
         SV._head = orig
 
 
-def c_run_id_not_in_token_position():
-    """★ 标题里的身份段在**末尾**（紧贴稳定后缀），不放前面。
+# ══════════ Q15 · 已退休（0.51.1 标题反转，创始人 2026-10-16 拍板）═════════
+#: ★★ c_run_id_not_in_token_position（「身份段在末尾」）已退休：
+#:   标题形态从「<页面> · Antinel 监理#<id>」翻转为**品牌开头整串**
+#:   「Antinel 监理#<id>」——「末尾」这个位置概念随页面名/状态词前缀
+#:   整体退役（反转后身份串紧跟品牌，天然在末尾且无歧义）。形态契约
+#:   现由 FZ-002 冻结的 window_title_format（output 类，D-38 执法）
+#:   与 Q14 精确形态断言（整串 == console_title_suffix(rid)）全覆盖。
+#:   登记：ci/suite_retirement.json（判据级退休，不减套件数）。
+#: ★ 别再复活它 —— 旧形态的正则 `^.+ · Antinel 监理#\w+$` 在新认窗
+#:   判据（品牌开头＋其后只允许 #hex）下**恒不匹配**，复活即假红。
+#:
+# def c_run_id_not_in_token_position():
+#     """★ 标题里的身份段在**末尾**（紧贴稳定后缀），不放前面。
 
-    ★ 放末尾才能同时满足：① `_matches_title` 的 endswith 结构不变；
-      ② 一眼能看出这是"同一次运行"的标识。
-    """
-    import re as _html_re
-    import html as _html
-    import inbox_server as SV
-    head = SV._head("收件箱", "tok-x")
-    title = _html.unescape(
-        _html_re.search(r"<title>(.*?)</title>", head, _html_re.S).group(1))
-    m = _html_re.match(r"^.+ · Antinel 监理#\w+$", title)
-    if not m:
-        return "标题形状不是「<页面> · Antinel 监理#<id>」：%r" % title
-    return True
+#     ★ 放末尾才能同时满足：① `_matches_title` 的 endswith 结构不变；
+#       ② 一眼能看出这是"同一次运行"的标识。
+#     """
+#     import re as _html_re
+#     import html as _html
+#     import inbox_server as SV
+#     head = SV._head("收件箱", "tok-x")
+#     title = _html.unescape(
+#         _html_re.search(r"<title>(.*?)</title>", head, _html_re.S).group(1))
+#     m = _html_re.match(r"^.+ · Antinel 监理#\w+$", title)
+#     if not m:
+#         return "标题形状不是「<页面> · Antinel 监理#<id>」：%r" % title
+#     return True
 
 
 # ═══════════════════════ 时序：WM_CLOSE 异步 ⇒ 必须等 ═════════════════════
@@ -931,7 +979,8 @@ CHECKS = [
     ("负控 Q13b 宽泛模式退回子串", n_wide_mode_substring_is_caught, None),
     ("Q14 标题带身份串", c_page_title_carries_run_id,
      n_page_title_without_run_id_is_caught),
-    ("Q15 身份段在末尾", c_run_id_not_in_token_position, None),
+    # Q15（身份段在末尾）已于 0.51.1 退休：形态契约由 FZ-002＋Q14
+    # 精确形态断言全覆盖（墓碑见上方，登记 suite_retirement.json）
     # 时序
     ("Q16 无窗立刻判定清空", c_wait_gone_returns_when_empty, None),
     ("Q17 等不到如实报剩余", c_wait_gone_reports_remaining_honestly, None),

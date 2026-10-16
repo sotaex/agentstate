@@ -1411,11 +1411,17 @@ def n_u18d():
     node = _node_path()
     if not node:
         return "SKIP：本机没有可执行 node —— 这一条**不判**（绝不假绿）"
-    bad_js = (SV._LOGO_JS_TMPL
-              .replace("__STYLE__", json.dumps(SV.LOGO_MOTION,
-                                               ensure_ascii=False))
-              .replace("__RING_GREEN__", json.dumps(list(SV.LOGO_RING_GREEN)))
-              .replace("__RING_DARKRED__", json.dumps(list(SV.LOGO_RING_DARKRED))))
+    # ★ 0.51.1（Phase B2）：**不二次实现装配** —— 从产品装配产物 `_LOGO_JS`
+    #   派生，只把 STYLE 表换回未归一的规格波幅。原实现手抄
+    #   __STYLE__/__RING_GREEN__/__RING_DARKRED__ 三条替换，产品新增
+    #   __AMBER_FILL__ 占位符时负控先炸（变异 JS 里占位符裸奔 ⇒ Node
+    #   ReferenceError）—— 同 N-W02「尺子跟着源码形状走」的坑。
+    bad_js = SV._LOGO_JS.replace(
+        json.dumps(SV.LOGO_MOTION_RENDER, ensure_ascii=False),
+        json.dumps(SV.LOGO_MOTION, ensure_ascii=False))
+    if bad_js == SV._LOGO_JS:
+        return ("负控自身失效：变异锚点未打中（STYLE 表替换没生效，"
+                "产品装配口径可能变了）—— 量具故障，不算通过")
     with _Patch(SV, _LOGO_JS=bad_js):
         why = c_u18d()
         if why is True or why is None:
@@ -1566,8 +1572,12 @@ def n_b13():
 # ═══════════════════════════════════════════════════ B-12 认窗口径必须同一把尺 ══
 #: 假桌面：五枚可见窗，其中两枚是**用户窗口** —— 标题里恰好含哨标/紧急提醒的标记，
 #: 但标记**不在末尾**。这就是实测误伤的形状（`_p_probe_win.py` 的内存替换夹具）。
+#: ★ 0.51.1 反转（Phase B1）：console 窗标题改为「品牌开头＋身份串」整串
+#:   （原「页面名 · Antinel 监理#rid」前缀形态本版不认领 —— 诚实缓建，
+#:   0360 已钉负形状）⇒ 夹具 1 号窗同步换新形态；哨标/紧急提醒两路
+#:   仍是标记收尾口径（`_mark_at_tail_any`，0.51.1 未动），夹具不动。
 _FAKE_WINDOWS = [
-    (1, "收件箱 · Antinel 监理#abc123"),        # 本次值守台
+    (1, "Antinel 监理#abc123"),                  # 本次值守台（0.51.1 新形态）
     (2, "我的 · 哨标 收藏夹"),             # ★ 用户窗口（含标记，不在末尾）
     (3, "Antinel · 哨标#abc123"),          # 本次哨标
     (4, "整理一下 · 紧急提醒 记录"),         # ★ 用户窗口（含标记，不在末尾）
@@ -1581,13 +1591,19 @@ def _fake_enum(visible_only=True):                          # noqa: ARG001
 
 @check("B-12 认窗口径一致：哨标/紧急提醒宽泛分支不许用任意位置子串（会关用户窗口）")
 def c_b12(mod=None):
-    """★★ 清单 B4（实测真缺陷）：三处认窗必须同一口径 —— 标记**在末尾**。
+    """★★ 清单 B4（实测真缺陷）：三处认窗必须同一口径 —— 标记只在合规位置。
+
+    ★ 0.51.1 反转（Phase B1）后三路口径：console＝**品牌开头＋身份串收尾**
+      （标题恒为「Antinel 监理#<rid>」，`is_console_title` 的 `_HEAD_RE`
+      ＋rest 检查）；哨标/紧急提醒＝**标记收尾**（`_mark_at_tail_any`）。
+      形态不同、**同一把尺**：标记之外不许挂别的字 ⇒ 用户窗口一律拒认。
 
     原来 `find_logo_windows` / `find_bubble_windows` 的宽泛分支用
     `mark in title`（任意位置子串），而 `is_console_title` 用 `_mark_at_tail`
-    （末尾＋白名单）。实测后果：用户窗口「我的 · 哨标 收藏夹」
-    「整理一下 · 紧急提醒 记录」被认成本次哨标/紧急提醒窗，而这两条路径通向
-    `WM_CLOSE` ⇒ **可能关掉用户自己的窗口**（0.36.5 明令不可接受）。
+    （0.36.5 时是末尾＋白名单，0.51.1 后为品牌开头＋身份串）。实测后果：
+    用户窗口「我的 · 哨标 收藏夹」「整理一下 · 紧急提醒 记录」被认成本次
+    哨标/紧急提醒窗，而这两条路径通向 `WM_CLOSE` ⇒ **可能关掉用户自己的
+    窗口**（0.36.5 明令不可接受）。
 
     ★ `mod` 注入点：负控拿**变异模块**跑同一条判据（不是自己重写一遍口径）。
     """

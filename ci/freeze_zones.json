@@ -1,32 +1,32 @@
 {
-  "note": "冻结区登记簿（2026-10-16 建；机制见 docs/Antinel·冻结区机制 v1.0（2026-10-16）.md；制度见并行修订制度规则 H）。口径：status=candidate 是候选（契约已记录、待修复或待确认，D-38 不执法）；status=frozen 是生效冻结（D-38 执法，触碰即红，改动须走 retire_log）。字段：id / status / unit / kind（source＝源码哈希，unit 形如 file.py 或 file.py::func；output＝输出契约，跑登记的 check）/ contract / check（output 类）/ hash（source 类，冻结时填）/ frozen_at / decision（定型原话＋日期，由创始人批准语言触发）/ retire_log / blocked_on（候选的卡点）。退休＝retire_log 追加 {by, date, reason}，顺序是先登记新契约→退休→改代码→重新冻结（反了闸门先红）。frozen 条目缺 hash/check 或 check 未实现 ⇒ D-38 红（登记簿自身不一致，不静默放过）。",
+  "note": "冻结区登记簿（2026-10-16 建；机制见 docs/Antinel·冻结区机制 v1.1（2026-10-16）.md；制度见并行修订制度规则 H）。口径：status=candidate 是候选（契约已记录、待修复或待确认，D-38 不执法）；status=frozen 是生效冻结（D-38 执法，触碰即红，改动须走 retire_log）。字段：id / status / unit / kind（source＝源码哈希，unit 形如 file.py 或 file.py::func；output＝输出契约，跑登记的 check）/ contract / check（output 类）/ hash（source 类，冻结时填）/ frozen_at / decision（定型原话＋日期，由创始人批准语言触发）/ retire_log / blocked_on（候选的卡点）。退休＝retire_log 追加 {by, date, reason}，顺序是先登记新契约→退休→改代码→重新冻结（反了闸门先红）；不变式（retire_log 三字段齐全＋曾冻结者不许裸降级）由 regression_gate._registry_invariant_problems 机器守。本簿自身字节由 host_shield._DEV_GUARDED_CHAIN_FILES（在场才校验）＋manifest 哈希兜住；缺登记修法 _tools_034/_resign_manifest.py --adopt-dev。frozen 条目缺 hash/check 或 check 未实现 ⇒ D-38 红（登记簿自身不一致，不静默放过）。",
   "version": 1,
   "entries": [
     {
       "id": "FZ-001",
       "status": "candidate",
-      "unit": "inbox_server.py::_logo_mark",
-      "kind": "source",
-      "contract": "LOGO 状态球必须肉眼可辨：amber 圆的颜色不得与光束同色（创始人 2026-10-16 截图 #1：橙色小球弄丢了，AI 对此毫无意识；现状：fill 跟光束走，inbox_server.py:935/1013）",
-      "check": null,
+      "unit": "LOGO 哨标 amber 圆填充（_logo_mark 静态骨架 ＋ _LOGO_JS 状态机灯头赋值）",
+      "kind": "output",
+      "contract": "LOGO 状态球必须肉眼可辨：amber 圆的颜色不得与光束同色（创始人 2026-10-16 截图 #1：橙色小球弄丢了，AI 对此毫无意识）。Phase B2 已修复：fill 解耦为固定 #E8A33D（产品常量 LOGO_AMBER_FILL，静态骨架与状态机赋值同取此常量、经 __AMBER_FILL__ 占位符替换）",
+      "check": "lamp_color_contract",
       "hash": null,
       "frozen_at": null,
       "decision": null,
       "retire_log": [],
-      "blocked_on": "修复需《品牌动效报警语法》规格的球色梯度（外部 PSL 仓）——颜色定了、代码改绿之后再冻结。冻结后 kind=source：这枚函数字节即契约，演化走退休通道"
+      "blocked_on": "修复已落地（Phase B2：kind 由 source 改 output —— 契约从「函数字节」改为「输出关系」，常量值不在冻结面）；check 已实现＋机械自证就位（_lamp_color_machinery_probe 每次闸门运行验回耦/回灰有牙），但保持 candidate 不执法（违例只登记）：《品牌动效报警语法》规格（外部 PSL 仓）的球色梯度未定稿 —— 规格确认后视需要升级为 frozen（届时 D-38 开始执法 lamp_color_contract）"
     },
     {
       "id": "FZ-002",
-      "status": "candidate",
+      "status": "frozen",
       "unit": "窗口标题（render_page 经 _head 注入的 <title> 全串）",
       "kind": "output",
       "contract": "标题＝「Antinel 监理#<6hex>」，不含状态词（创始人 2026-10-16：『只要保留 Antinel 监理加上编号就行了』）",
       "check": "window_title_format",
       "hash": null,
-      "frozen_at": null,
-      "decision": null,
+      "frozen_at": "2026-10-16",
+      "decision": "创始人 2026-10-16 拍板原话『只要保留 Antinel 监理加上编号就行了』（0.48.5 原话『标题该显示的是状态』作废）。执行顺序（全部已完成）：登记本契约→退休 W-01 标题形态断言＋n_w01（suite_retirement.json retirements[0]）＋Q15（retirements[2]）→改代码（_head shown=tail、_mark_at_tail 品牌开头）→实现 window_title_format（regression_gate.j_window_title_format，期望串由 console_title_suffix 派生，三态执法 SKIP 通路）→冻结（本条）",
       "retire_log": [],
-      "blocked_on": "待创始人确认 #3 需求反转（0.48.5 原话相反，见 inbox_server.py:2062 注释与 W-01/0490:1126）；确认后顺序：登记本契约→退休 W-01 标题形态断言＋n_w01→改代码→实现 window_title_format→冻结"
+      "blocked_on": ""
     },
     {
       "id": "FZ-003",
