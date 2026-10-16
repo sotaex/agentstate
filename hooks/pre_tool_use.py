@@ -3317,6 +3317,162 @@ def _slop_hit(tool_name, command, policy):
             "remediation_zh": "核对包名拼写与官方文档；确认后再安装；已安装的立即移除并轮换凭据"}
 
 
+# -------------------------------------------------------------- GOV-01 ----
+# 2026-10-16（机制层方案 v1.0 §3）：套件治理（A1/A2）前移到**写入时刻**。
+# 病灶：0518 当天「先登记、闸门才发现缺 P1-P5 ＋ 常驻超限」——检查在提交时刻，
+# 登记在写入时刻，违规状态已经存在了半天。本函数把检查搬 到登记动作发生的那一刻。
+# ★ 自包含（不 import ci/ 模块）：钩子在安装态运行，ci/ 不保证在旁。
+#   下面两个常量与 ci/delivery_gate.py 双向同步 —— 改那边必须同步这边
+#   （delivery_gate 侧注释已声明此约束）。
+_GOV_P1P5 = re.compile(r"^\s*P([1-5])\s*[:：]\s*\S", re.M)   # = delivery_gate._P1P5_LINE
+_GOV_RESIDENT = re.compile(
+    r"\(\s*\"[^\"]*\"\s*,\s*\"ci/(?:inbox_guards_|guard_)[^\"]*\.py\"")
+_GOV_RES_PATH = re.compile(r"\"ci/(?:inbox_guards_|guard_)[^\"]*\.py\"")
+_GOV_CAP = 29                                                # = delivery_gate.RESIDENT_SUITE_CAP
+
+
+def _gov_p1p5_ok(text):
+    """前 60 行里 P1..P5 五行齐全？（口径 = delivery_gate.suites_missing_p1p5）"""
+    head = "\n".join(text.split("\n")[:60])
+    return set(_GOV_P1P5.findall(head)) >= set("12345")
+
+
+def _gov_retirement_pending(project_root):
+    """退休簿里 pending 记录数；读不到 ⇒ 0（无额度）。"""
+    try:
+        with open(os.path.join(project_root, "ci", "suite_retirement.json"),
+                  encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return 0
+    recs = data.get("records") if isinstance(data, dict) else data
+    if not isinstance(recs, list):
+        return 0
+    return sum(1 for r in recs
+               if isinstance(r, dict) and str(r.get("status", "")).lower() == "pending")
+
+
+def _gov_resident_count(project_root):
+    """磁盘 delivery_gate.py 里登记的常驻套件数；读不到 ⇒ None（判不了不放行也不拦）。"""
+    try:
+        with open(os.path.join(project_root, "ci", "delivery_gate.py"),
+                  encoding="utf-8") as f:
+            return len(_GOV_RESIDENT.findall(f.read()))
+    except Exception:
+        return None
+
+
+def _gov_hit_payload(action, snippet, zh, en, rem_zh, rem_en):
+    return {"rule_id": "GOV-01", "severity": "critical" if action == "block" else "warning",
+            "action": action, "match_kind": "file", "match_snippet": snippet[:120],
+            "description": en, "remediation": rem_en,
+            "description_zh": zh, "remediation_zh": rem_zh}
+
+
+def _suite_gov_hit(tool_name, file_path, tool_input, project_root):
+    """GOV-01：A1/A2 写入时刻拦截（照 _budget_hit/_slop_hit 同构模式返回 hit dict）。
+
+    口径（方案 v1.0 §3）：
+      · Write 新常驻套件（ci/inbox_guards_*.py / ci/guard_*.py）：
+          content 前 60 行缺 P1-P5 ⇒ block（A1，0518 事故原样）；
+          磁盘常驻数 +1 > cap 且退休簿无 pending ⇒ alert（草稿出声不拦）。
+      · Write 覆盖**既有**常驻套件：全文前 60 行缺 P1-P5 同样 block（删块也拦）。
+        Edit 既有套件收窄放行（old/new 拼不出完整头部；存量由闸门兜底）。
+      · Write/Edit ci/delivery_gate.py：登记条目差值 Δ>0 时——
+          新登记文件磁盘不存在 ⇒ block（登记悬空）；
+          存在但缺 P1-P5 ⇒ block（A1）；
+          常驻数 + Δ > cap 且无 pending ⇒ block（A2）。
+    fail-open（A-08）：内部任何异常 ⇒ None 放行——本函数绝不能成为第二个
+    「钩子故障拦死合法操作」的单点。
+    """
+    try:
+        tool_name = TOOL_ALIASES.get(tool_name, tool_name)
+        if tool_name not in ("Write", "Edit") or not file_path or not project_root:
+            return None
+        norm = str(file_path).replace("\\", "/").lower()
+        m_suite = re.search(r"(?:^|/)ci/(inbox_guards_[^/]+|guard_[^/]+)\.py$", norm)
+        m_gate = re.search(r"(?:^|/)ci/delivery_gate\.py$", norm)
+        if not m_suite and not m_gate:
+            return None
+
+        if m_suite:
+            content = tool_input.get("content") or ""
+            if tool_name != "Write" or not content:
+                return None                      # Edit 既有套件：收窄放行（见 docstring）
+            existed = os.path.isfile(file_path)
+            if not _gov_p1p5_ok(content):
+                return _gov_hit_payload(
+                    "block", "ci/%s.py" % m_suite.group(1),
+                    "新常驻套件缺 P1-P5 作答块（A1 前置门）——0518 事故原样",
+                    "New resident suite lacks its P1-P5 block (gate A1)",
+                    "在文件头 60 行内补 P1:…P5: 五行自答（P5 不满足 ⇒ 并入现有套件，不立新站）",
+                    "Add P1:..P5: answer lines within the first 60 lines")
+            if not existed:
+                n_now = _gov_resident_count(project_root)
+                if n_now is not None and n_now + 1 > _GOV_CAP \
+                        and _gov_retirement_pending(project_root) < 1:
+                    return _gov_hit_payload(
+                        "alert", "ci/%s.py（第 %d 个常驻套件，上限 %d）"
+                                 % (m_suite.group(1), n_now + 1, _GOV_CAP),
+                        "常驻套件将超上限且无退休 pending 额度（A2）——登记前先并站或补退休记录",
+                        "Resident suite count would exceed the cap with no pending retirement",
+                        "并入现有套件（P5）或在 ci/suite_retirement.json 登记 pending 额度",
+                        "Merge into an existing suite or register a pending retirement")
+            return None
+
+        # ---- delivery_gate.py：登记动作 ----
+        new_text = tool_input.get("content") if tool_name == "Write" \
+            else (tool_input.get("new_string") or "")
+        old_text = ""
+        if tool_name == "Edit":
+            old_text = tool_input.get("old_string") or ""
+        else:
+            try:
+                with open(file_path, encoding="utf-8") as f:
+                    old_text = f.read()
+            except Exception:
+                old_text = ""
+        if not new_text:
+            return None
+        delta = (len(_GOV_RESIDENT.findall(new_text))
+                 - len(_GOV_RESIDENT.findall(old_text)))
+        if delta <= 0:
+            return None
+        old_paths = set(_GOV_RES_PATH.findall(old_text))
+        new_paths = [p for p in _GOV_RES_PATH.findall(new_text) if p not in old_paths]
+        for p in new_paths[:4]:                  # 报前 4 个，够定位
+            target = os.path.join(project_root, p.strip('"'))
+            if not os.path.isfile(target):
+                return _gov_hit_payload(
+                    "block", p,
+                    "登记悬空：SUITES 里登记的套件文件不在磁盘上",
+                    "Registered suite file does not exist on disk",
+                    "先写套件文件（含 P1-P5 块）再登记；或撤下这条登记",
+                    "Create the suite file first, then register it")
+            with open(target, encoding="utf-8") as f:
+                head = f.read()
+            if not _gov_p1p5_ok(head):
+                return _gov_hit_payload(
+                    "block", p,
+                    "登记的套件缺 P1-P5 作答块（A1 前置门）——0518 事故原样",
+                    "Registered suite lacks its P1-P5 block (gate A1)",
+                    "给该文件头 60 行补 P1:…P5: 五行自答，或暂缓登记",
+                    "Add P1:..P5: lines to the suite header, or hold the registration")
+        n_now = _gov_resident_count(project_root)
+        if n_now is not None and n_now + delta > _GOV_CAP \
+                and _gov_retirement_pending(project_root) < (n_now + delta - _GOV_CAP):
+            return _gov_hit_payload(
+                "block", "SUITES 常驻 %d + %d > 上限 %d，退休簿额度不足"
+                         % (n_now, delta, _GOV_CAP),
+                "常驻套件登记超上限且 pending 额度不足（A2 硬红）",
+                "Resident suite cap exceeded with insufficient pending quota",
+                "并入现有套件（P5 正解）或先在 ci/suite_retirement.json 登记 pending",
+                "Merge into an existing suite or register pending quota first")
+        return None
+    except Exception:
+        return None                              # A-08 fail-open：治理检查绝不开杀戒
+
+
 def notify_owner(title, body, kind="block|owner"):
     """拦截时通知主人（气泡）—— **委托给唯一发射口** `host_shield.notify_owner`。
 
@@ -3470,6 +3626,12 @@ def main():
     _sh = _slop_hit(tool_name, cmd, policy)
     if _sh:
         hits.append(_sh)
+        hits.sort(key=lambda h: SEV_RANK.get(h["severity"], 9))
+    # 2026-10-16 (GOV-01): 套件治理前移到写入时刻——A1/A2 违规在「登记动作」发生的
+    # 那一刻就拦下，而不是等闸门跑时才发现已经登记进去了（0518 事故原样）。
+    _gov = _suite_gov_hit(tool_name, fpath, tool_input, project_root)
+    if _gov:
+        hits.append(_gov)
         hits.sort(key=lambda h: SEV_RANK.get(h["severity"], 9))
     t_match_done = time.perf_counter()           # 0.32.2 (B1)
     # 0.26.0 (对抗分析 v1.0): net_mode=block —— 网络外传从"提醒"升级为"拦截"。

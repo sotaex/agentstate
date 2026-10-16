@@ -1035,6 +1035,46 @@ def _is_git_dir(p):
     return r.returncode == 0 and (r.stdout or "").strip() == "true"
 
 
+def _registration_consistency_problems(rel, want):
+    """⑥⑦：出包登记与当前版本一致性（2026-10-16，机制层方案 v1.0 §5）。
+
+    病灶（0.50.5 事故）：`_note_0510` 写「保持 0.50.5、出包等禁令解除」——
+    版本前进到 0.51.0 后，该登记从「暂缓」变成「登记了一个**永远产不出**的
+    版本」（版本号出自 pyproject），直到收尾被 D-23 拦住才发现。
+    「暂缓」类决定没有失效条件 ⇒ 本尺子把它制度化：
+
+      ⑥ `pypi.target_version` 必须 == `release.version`（都登记时）——
+         出包登记与当前版本分家 ＝ dist/wheel 链条全部失真；
+      ⑦ `release.publish_hold`（若存在，暂缓决定的机器可读形态）必须含
+         `hold_version`；`release.version != hold_version` ＝ 暂缓决定已失效
+         ⇒ 复核登记（撤下或更新并重述理由）。
+
+    纯函数（rel=release 段 dict，want=release.version）——j_workspace_facts 与
+    内建负控共用同一把尺子（不复制逻辑）。
+    """
+    probs = []
+    py = rel.get("pypi") or {}
+    tv = py.get("target_version")
+    if tv and want and tv != want:
+        probs.append(
+            "release.pypi.target_version(%s) 与 release.version(%s) 分家 —— "
+            "出包登记说一个产不出的版本（0.50.5 事故）。确要暂缓出包 ⇒ 用 "
+            "release.publish_hold 显式登记（含 hold_version），不许让 "
+            "target_version 停在旧版" % (tv, want))
+    hold = rel.get("publish_hold")
+    if hold is not None:
+        if not isinstance(hold, dict) or not hold.get("hold_version"):
+            probs.append(
+                "release.publish_hold 存在但缺 hold_version —— 暂缓决定必须有"
+                "机器可读的失效条件（hold_version），不许只写散文注记")
+        elif want and hold.get("hold_version") != want:
+            probs.append(
+                "暂缓决定已失效：release.version(%s) 已偏离 publish_hold."
+                "hold_version(%s) —— 复核登记：撤下 publish_hold，或更新 "
+                "hold_version 并重述暂缓理由" % (want, hold.get("hold_version")))
+    return probs
+
+
 def j_workspace_facts():
     """★★★ 2026-09-29（D-23）：**「东西在哪儿／它是不是 git 仓」必须会红**，不能靠记忆。
 
@@ -1061,7 +1101,10 @@ def j_workspace_facts():
       ⑤ `release.pypi`（**发布版本唯一真源**，2026-09-30 加）：版本串已登记、
          wheel 存在且文件名含该版本、`host_audit_fixture` 存在 ——
          站点与三条判据一律从这里读，**不许各自写死版本号**
-         （此前 new_user_cmd_journey 写死 0.28.0、cmp_check_out 写死 0.33.2 ⇒ 站上混搭无人发现）。
+         （此前 new_user_cmd_journey 写死 0.28.0、cmp_check_out 写死 0.33.2 ⇒ 站上混搭无人发现）；
+      ⑥⑦ 出包登记一致性（2026-10-16，机制层方案 v1.0 §5）：target_version 必须
+         == release.version；publish_hold（若存在）必须含 hold_version 且版本
+         前进即失效 ⇒ 红 —— 0.50.5 事故（登记一个永远产不出的版本）的制度化。
     """
     f = PKG / "psl" / "workspace_facts.json"
     if not f.is_file():
@@ -1204,6 +1247,25 @@ def j_workspace_facts():
     if not fx.is_file():
         probs.append("release.pypi.host_audit_fixture 不存在：%r"
                      % py.get("host_audit_fixture"))
+
+    # ★ 2026-10-16（⑥⑦，机制层方案 v1.0 §5）：出包登记一致性＋暂缓失效条件。
+    probs += _registration_consistency_problems(rel, want)
+    # 内建负控（照 D-28 ③先例）：尺子必须真的有牙——
+    #   ① tv 分家必须红；② 失效 hold 必须红；③ 合法 hold 必须放过。
+    _neg = _registration_consistency_problems(
+        {"pypi": {"target_version": "0.0.1"}}, "9.9.9")
+    _neg += _registration_consistency_problems(
+        {"pypi": {}, "publish_hold": {"hold_version": "0.0.1"}}, "9.9.9")
+    if len(_neg) < 2:
+        return False, ("内建负控未生效：⑥⑦ 的尺子对变异登记（tv=%r / hold=%r）没报满 "
+                       "2 条问题 ⇒ 0.50.5 型分家会漏放：%r"
+                       % ("0.0.1", "0.0.1", _neg))
+    _pos = _registration_consistency_problems(
+        {"pypi": {"target_version": "9.9.9"},
+         "publish_hold": {"hold_version": "9.9.9"}}, "9.9.9")
+    if _pos:
+        return False, ("内建负控未生效：合法登记（tv==version、hold_version==version）"
+                       "被误报 ⇒ 尺子过宽：%r" % (_pos,))
 
     if probs:
         return False, "；".join(probs[:4])
@@ -2165,6 +2227,14 @@ def selfcheck():
          '    "$PY" "$ROOT/ci/baseline_tag.py" --remind || true',
          '    : # NEGCTL-D37 基线提醒被摘掉（工具成死代码）',
          "D-37"),
+        # ★★ D-23 ⑥ 负控（2026-10-16，机制层方案 v1.0 §5）：把 target_version
+        #   注回一个旧版 ⇒ 与 release.version 分家 ⇒ j_workspace_facts 必须红。
+        #   注入值**运行时构造**（D-6 教训：跟着版本走的注入串不许写死）——
+        #   old 取磁盘当前值，new 写一个必然不同的占位版。
+        ("D-23 缺陷（⑥ 出包登记分家）：target_version 停在旧版 ⇒ j_workspace_facts 必红",
+         "psl/workspace_facts.json",
+         "@TV_STALE@", "@TV_STALE_NEW@",
+         "D-23"),
     ]
 
     ok_all = True
@@ -2198,6 +2268,28 @@ def selfcheck():
                 ok_all = False
                 continue
             src = src.replace(_cur, _tgt, 1)
+        # ★★ D-23 ⑥ 专项（2026-10-16）：target_version 分家注入，值运行时构造。
+        #   old 取磁盘当前 target_version（升版不失配）；new 写一个必然不同的
+        #   占位版 ⇒ 与 release.version 分家 ⇒ ⑥ 必须红。若磁盘值已与 version
+        #   分家（不该发生）⇒ 诚实 SKIP（此刻真树自身已红，注入无分辨力）。
+        if old == "@TV_STALE@" and rel == "psl/workspace_facts.json":
+            try:
+                _facts = json.loads(src)
+                _want = (_facts.get("release") or {}).get("version") or ""
+                _mtv = re.search(r'"target_version"\s*:\s*"([^"]+)"', src)
+            except Exception:
+                _want, _mtv = "", None
+            if not _want or not _mtv:
+                print("  [SKIP] %-40s facts 里取不到 version/target_version" % label)
+                ok_all = False
+                continue
+            if _mtv.group(1) != _want:
+                print("  [SKIP] %-40s 磁盘 target_version(%s) 已与 version(%s) 分家"
+                      % (label, _mtv.group(1), _want))
+                ok_all = False
+                continue
+            old = '"target_version": "%s"' % _mtv.group(1)
+            new = '"target_version": "0.0.0-stale-inject"'
         # ★★ 「清单分叉」专项：把 SPOTS 里的一整项（标签行 + 正则行）剔掉，
         #   断言 version_check.py 的判据 4 会因此变红。
         #   这一条本身也是踩坑产物：初版判据 4 **是假守卫** —— 我用全文件字符串匹配

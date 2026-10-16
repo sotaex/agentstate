@@ -511,8 +511,12 @@ def n_u03a():
     if "分母" not in PC.body_without_terms(page):
         return "负控失效：旧内联串没渲染出来（注入没生效）"
     # 连回正判据：真实现下日报页必须同源且正文无「分母」
+    # ★ 2026-10-16：T-01 上线首日抓到的第三处存量（修 U-01/S95 时漏了这）——
+    #   同一时钟竞态：渲染与判据两侧独立读「载入于 HH:MM」，跨分钟 ⇒ 此处伪报
+    #   「夹具不成立」。两侧归一（U-01 同法）。
     live = _page("report")
-    if M.reading_note() not in PC.body(live) or "分母" in PC.body_without_terms(live):
+    if (PC.note_text(M.reading_note()) not in PC.note_text(PC.body(live))
+            or "分母" in PC.body_without_terms(live)):
         return "夹具不成立：真实现本身就不满足 U-03 ⇒ 负控无分辨力"
     return True
 
@@ -2672,6 +2676,126 @@ def n_w07():
         return ("负控失效：只调 open_console 也落位了 %d 次 —— 要么夹具不忠实"
                 "（窗口一上来就在），要么 C4 已用别的方式修好（那 W-07 的说法要改）"
                 % calls.get("place", 0))
+    return True
+
+
+# ════════════ T-01 · 时变产物消费点审计（2026-10-16，机制层方案 v1.0 §2）════════════
+#   ★ 病灶（本判据存在的理由）：0.50.4（Q-22）给 `M.reading_note()` 加了实时
+#     「载入于 HH:MM」之后，**消费它的判据**若逐字比对（渲染后独立再调一次），
+#     两次读数跨分钟即伪红——同日全量复跑实测撞上（U-01），0470 S95 同病。
+#     修法是两侧经 `PC.note_text()` 归一（见本文件 `_note_matches`），但那只是
+#     修了两处存量——**没有尺子守着「今后不许再出现裸逐字比对」**。
+#   ★ P1 频率×损失：每次给时变实现加字段/每轮全量复跑都可能触发，伪红一轮浪费
+#     一轮分类（本仓已实测两次）；P2 二值可判定：AST 结构比对，无观感成分；
+#     P3 咽喉点：消费点唯一入口是 ci/ 套件目录，可枚举；P4 自检闭环：N-T01
+#     双向实测（裸必红/归一必绿）；P5 扩展优先：reading_note 的家就在本套件，
+#     并入不新建（常驻上限 29 不动）。
+#   ★ 口径（**方向判定**是本尺子的灵魂）：
+#     · `not in` / `!=` ＝「不等就判红」——时变产物两侧读数跨分钟必然不等
+#       ⇒ 伪红 ⇒ 记问题；
+#     · `in` / `==` ＝正向在场检查——时刻错过只会让该红的当轮不红（负控分辨力
+#       弱化），**不会把好的判红** ⇒ 豁免（本判据刻意做窄，防伪红不防弱分辨）；
+#     · 任何一侧经 `*.note_text(...)` 包裹 ＝ 已归一 ＝ 合规。
+#   ★ 名单 `_TIME_BARE_ATTRS` 刻意只有已知的时变唯一实现；给新实现加实时读数时
+#     **扩名单要过 L2 自问**（方案 §2 边界：本尺子只盯已知名单）。
+_TIME_BARE_ATTRS = ("reading_note",)
+
+
+def _time_consumption_problems(src, rel):
+    """AST 尺子：时变产物出现在「不等就红」方向的**裸**比对 ⇒ 问题串列表。
+
+    正判据与 N-T01 负控共用**同一把尺子**（不复制逻辑）。解析失败按问题报
+    （解析不了的东西守不了）。
+    """
+    import ast as _ast
+    try:
+        tree = _ast.parse(src)
+    except SyntaxError as e:
+        return ["%s 源码解析失败：%s" % (rel, e)]
+    probs = []
+
+    def _bare_time_call(operand):
+        """返回 None=与本审计无关；False=时变调用但已归一；True=**裸**时变调用。"""
+        call = operand
+        wrapped = False
+        if (isinstance(call, _ast.Call) and isinstance(call.func, _ast.Attribute)
+                and call.func.attr == "note_text"):
+            if not call.args:
+                return None                       # note_text() 无参——形态怪，不判
+            call, wrapped = call.args[0], True
+        if not isinstance(call, _ast.Call):
+            return None
+        f = call.func
+        if isinstance(f, _ast.Attribute) and f.attr in _TIME_BARE_ATTRS:
+            return not wrapped
+        return None
+
+    for node in _ast.walk(tree):
+        if not isinstance(node, _ast.Compare):
+            continue
+        risky = any(isinstance(op, (_ast.NotIn, _ast.NotEq)) for op in node.ops)
+        if not risky:
+            continue
+        for operand in [node.left] + list(node.comparators):
+            verdict = _bare_time_call(operand)
+            if verdict:
+                probs.append("%s:L%d 时变产物 %s() 出现在裸「不等」比对里 —— 跨分钟必伪红，"
+                             "两侧须经 PC.note_text 归一（U-01 事故同型）"
+                             % (rel, getattr(node, "lineno", 0),
+                                _TIME_BARE_ATTRS[0]))
+    return probs
+
+
+@check("T-01 ★ 时变产物消费点审计：全部套件里 reading_note() 不许裸身出现在「不等」比对")
+def t_01():
+    """正判据：扫 ci/ 全部套件源码（含本文件），裸比对 ⇒ 红。"""
+    cdir = os.path.join(ROOT, "ci")
+    names = sorted(n for n in os.listdir(cdir)
+                   if n.startswith(("inbox_guards_", "guard_")) and n.endswith(".py"))
+    names.append("regression_gate.py")
+    all_probs = []
+    for n in names:
+        p = os.path.join(cdir, n)
+        if not os.path.isfile(p):
+            continue
+        all_probs += _time_consumption_problems(
+            io.open(p, encoding="utf-8").read(), "ci/" + n)
+    if all_probs:
+        return "；".join(all_probs[:4])
+    return True
+
+
+@check("N-T01 ★ 负控：裸「不等」比对必须被 T-01 的尺子抓到；归一后必须放过")
+def n_t01():
+    """内建负控（同尺双喂）：①裸形态 ⇒ 尺子必须报；②归一形态 ⇒ 必须空。
+
+    少了②，归一可能只是「把一切吞掉」的纸糊；少了①，尺子可能根本没牙。
+    """
+    naked = ("from x import inbox_model as M, page_caliber as PC\n"
+             "def judge(page):\n"
+             "    if M.reading_note() not in page:\n"
+             "        return '红'\n"
+             "    return True\n")
+    p1 = _time_consumption_problems(naked, "负控-裸")
+    if not p1:
+        return "负控失效：裸「不等」比对没被抓到 ⇒ T-01 没牙（U-01 事故会重演）"
+    wrapped = ("from x import inbox_model as M, page_caliber as PC\n"
+               "def judge(page):\n"
+               "    if PC.note_text(M.reading_note()) not in PC.note_text(page):\n"
+               "        return '红'\n"
+               "    return True\n")
+    p2 = _time_consumption_problems(wrapped, "负控-归一")
+    if p2:
+        return "负控失效：归一后的形态仍被抓 ⇒ 尺子过宽（会把 U-01 的修法也判掉）：%r" % p2
+    # 正向在场检查必须豁免（方向判定的一半，不测就等于没定方向）
+    fwd = ("from x import inbox_model as M\n"
+           "def judge(page):\n"
+           "    if M.reading_note() in page:\n"
+           "        return '红'\n"
+           "    return True\n")
+    p3 = _time_consumption_problems(fwd, "负控-正向")
+    if p3:
+        return "负控失效：正向 in 比对不该被抓（它不伪红）：%r" % p3
     return True
 
 
