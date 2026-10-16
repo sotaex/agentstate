@@ -60,6 +60,25 @@
          ② 漏了 `@check("…", "n_xxx")` 这一种字符串登记形态 ⇒ 0366 三条被误报 —— **假阳性**。
          ⇒ 必须是「名字出现在登记表字面量/装饰器参数里」。
          ⇒ 判据 **S54**（＋负控 N-S54）。
+
+  ★★ 0.51.2 追加 R6（第六个面：**文案与结构脱钩**，事后判据守不住全站）：
+     R6：页面渲染函数（`_view_*`）里，**指向性数量词**（下列/以下/这 N 个·数·项…）
+        不许是字符串**字面量**，必须带格式化占位符（即**派生**自结构）；
+        同一渲染函数内不许并存两份计数来源（唯一实现）。
+        由来：2026-10-17 账本页三问 —— 「下列四个数」硬编码、四张卡手写 4 组
+        `%s`，两者**无引用关系** ⇒ 改卡片数忘改文案是**必然**；头部取旧快照、
+        明细取链现算 ⇒ 同页「11 天 vs 8 天」打架。
+     ★ 为什么不能只靠事后判据：0490 的 T-04d 只能守**账本页**这一个点，
+        日报页同样 4 张卡 + 口径文案却没有对应判据。**要从源头取消这种不一致
+        的可能，只能卡「数量词是不是派生的」这个结构**。
+     ★ 试过做「全站通用正则判据」，**此路不通**（实测连翻三次车）：
+        ① 把 `<style>` 里 CSS 注释与术语悬停当正文 ⇒ 满屏假阳性；
+        ② 单位表漏了「数」⇒ 正好漏掉本批那个形态「下列四个**数**」；
+        ③ 剥术语层的正则贪心（`.*?</span>` 跨区）⇒ 把整段正文吃掉。
+        另有**本质性假阳性**：页面有「以下 N 项」这类合法数量词，
+        判断它指向哪个结构需要 DOM 位置关系 —— 正则做不到。
+        ⇒ 故只做**AST 结构判据**（窄而准），不做文本正则。
+         ⇒ 判据 **S55**（＋负控 N-S55）。
 """
 from __future__ import annotations
 
@@ -870,6 +889,142 @@ def n_s54():
         if got:
             return ("负控有问题：合法的「%s」形态被误报成死判据 %r ⇒ 会误伤正确写法"
                     % (label, sorted(got)))
+    return True
+
+
+# ══════════ S55 · 页面文案与结构一致：数量词必须**派生** ════════════════
+#
+# ★★ 为什么这是机制层（创始人 2026-10-17「这个能上升到机制层就好了」）：
+#   账本页三问之一的真正成因不是「忘改文案」，而是**结构**——
+#   「下列四个数」是字符串**字面量**、四张卡是**手写 4 组 `%s`**，
+#   两者没有任何引用关系 ⇒ 改了卡片数而文案不跟，是**必然**而非疏忽。
+#   事后判据（0490 T-04d）只能守账本页这一个点；要**全站**防住，
+#   必须卡「数量词是不是从结构派生出来的」这个结构本身。
+#
+# 两条断言（扫所有定义了 `_view_*` 的顶层模块）：
+#   ① 渲染函数里不许有**字面量形式的指向性数量词**
+#      （下列/以下/这 N 个·数·项·条·张·类）—— 必须带格式化占位符。
+#   ② 同一渲染函数内不许并存**两份**计数来源（唯一实现）——
+#      三问之三（头部「11 天」vs 月行「8 天」）就是两份来源并存。
+#
+# 实测边界（写进负控，本仓真踩过）：
+#   · 只认**字符串常量节点**（`ast.Constant`）⇒ 注释/docstring 里的同名字样
+#     自动排除（本仓注释里就写着「下列四个数」在讲这段历史）；
+#   · **误报标本**：`inbox_server.py:726`「以下 %d 项」是**派生**写法，
+#     不许报（数量词带 `%d`）；范围限定在 `_view_*` 内，
+#     叙述性文字（如「装着 37 条规则」）本就不在里面。
+
+_PAGE_FN_PREFIX = "_view_"
+_COUNT_WORD_RE = re.compile(
+    r"(下列|以下|以上|这|那)\s*[0-9一二三四五六七八九十]{1,3}\s*"
+    r"(个|数|项|条|张|类|种|块|栏)")
+_COUNT_SRCS = ("day_counts", "load_days", "summary")
+
+
+def _page_files():
+    """顶层模块里**定义了 `_view_*` 渲染函数**的文件（页面文案的产地）。"""
+    out = []
+    if not os.path.isdir(ROOT):
+        return out
+    for n in sorted(os.listdir(ROOT)):
+        if not n.endswith(".py"):
+            continue
+        p = os.path.join(ROOT, n)
+        try:
+            tree = ast.parse(io.open(p, encoding="utf-8").read())
+        except Exception:                              # noqa: BLE001
+            continue
+        if any(isinstance(x, ast.FunctionDef) and x.name.startswith(_PAGE_FN_PREFIX)
+               for x in ast.walk(tree)):
+            out.append((p, tree))
+    return out
+
+
+def _renderer_defs(tree):
+    return {n.name: n for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name.startswith(_PAGE_FN_PREFIX)}
+
+
+def _literal_count_words(fn):
+    """函数内**字面量形式**的指向性数量词 ⇒ [(行号, 片段)]。"""
+    out = []
+    for sub in ast.walk(fn):
+        if not isinstance(sub, ast.Constant) or not isinstance(sub.value, str):
+            continue
+        m = _COUNT_WORD_RE.search(sub.value)
+        if m and "%" not in sub.value and "{" not in sub.value:
+            out.append((sub.lineno, m.group(0)))
+    return out
+
+
+def _called_names(fn):
+    names = set()
+    for sub in ast.walk(fn):
+        if isinstance(sub, ast.Call):
+            f = sub.func
+            if isinstance(f, ast.Attribute):
+                names.add(f.attr)
+            elif isinstance(f, ast.Name):
+                names.add(f.id)
+    return names
+
+
+@check("S55 页面渲染函数：数量词必须派生；同页计数来源须唯一")
+def s55():
+    """R6：数量词与结构脱钩是**必然出错**的结构，靠事后检查守不住全站。
+
+    实测由来（2026-10-17 账本页三问）：「下列四个数」硬编码 + 四张卡手写
+    ⇒ 卡片增删文案不跟；头部取旧快照、明细取链现算 ⇒ 同页两个口径。
+    """
+    files = _page_files()
+    if not files:
+        return "一个页面渲染文件都没扫到 ⇒ 本判据判不出（判不出不许算通过）"
+    bad = []
+    for path, tree in files:
+        rel = os.path.relpath(path, ROOT).replace("\\", "/")
+        for name, fn in sorted(_renderer_defs(tree).items()):
+            for lineno, frag in _literal_count_words(fn):
+                bad.append("%s %s:%d 「%s」是字面量 ⇒ 数量词没派生"
+                           "（改结构时文案不会跟）" % (rel, name, lineno, frag))
+            hits = _called_names(fn) & set(_COUNT_SRCS)
+            if len(hits) >= 2:
+                bad.append("%s %s 同时用了 %s ⇒ 同页可能两个计数口径"
+                           % (rel, name, "/".join(sorted(hits))))
+    if bad:
+        return "；".join(sorted(set(bad))[:6])
+    return True
+
+
+@check("N-S55 负控：字面量数量词要报红；派生写法/注释字样/双来源都要能分辨")
+def n_s55():
+    """反向对照：两个方向各造标本（本仓 2026-10-17 真踩过前两个坑）。
+
+      方向一（漏报）：字面量「下列四个数」⇒ 必须抓。
+      方向二（误报）：派生写法（带 `%s`）、注释里的同名字样 ⇒ 不许抓。
+      方向三（漏报）：同函数并存两份计数来源 ⇒ 必须抓。
+    """
+    # ① 字面量 ⇒ 必须报
+    fn = _renderer_defs(ast.parse(
+        "def _view_x():\n    return '<p>下列四个数只数今天</p>'\n"))["_view_x"]
+    if not _literal_count_words(fn):
+        return "负控失效：字面量「下列四个数」没被检出（S55 的检测逻辑是假的）"
+    # ② 派生写法 ⇒ 不许报（本仓 inbox_server.py:726「以下 %d 项」是这个形态）
+    fn = _renderer_defs(ast.parse(
+        "def _view_x(n):\n    return '<p>下列%s个数只数今天</p>' % n\n"))["_view_x"]
+    if _literal_count_words(fn):
+        return "负控有问题：派生写法（带 %%s）被误报 ⇒ 会误伤正确写法"
+    # ②' 注释里的同名汉字 ⇒ 不许报（只认字符串常量这条必须真生效）
+    fn = _renderer_defs(ast.parse(
+        "def _view_x():\n    # 历史上写过「下列四个数」，现已改为派生\n    return ''\n"
+    ))["_view_x"]
+    if _literal_count_words(fn):
+        return "负控有问题：注释里的字样被误报 ⇒ 「只认字符串常量」没生效"
+    # ③ 双来源 ⇒ 必须报
+    fn = _renderer_defs(ast.parse(
+        "def _view_x():\n    a = M.day_counts(x)\n    b = L.load_days(y)\n    return a\n"
+    ))["_view_x"]
+    if len(_called_names(fn) & set(_COUNT_SRCS)) < 2:
+        return "负控失效：同函数并存两份计数来源没被检出"
     return True
 
 

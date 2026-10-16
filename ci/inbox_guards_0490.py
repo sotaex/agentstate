@@ -3348,15 +3348,24 @@ def t04d():
 
 @check("N-T04d ★ 负控：文案数量词改成「六个数」⇒ T-04d 必须红")
 def n_t04d():
-    """变异＝**只改文案里的数量词**（四→六），不动结构。
-    这正是本批之前的形态：六张卡配「下列四个数」，两处说法不一致却无人报红。"""
+    """变异＝**破坏派生**：让文案的数量词与结构脱钩（说「六个数」而卡片仍是 4 张）。
+
+    ★ 2026-10-17 二次修正（产品同日改为「数量词派生」）：
+      旧变异锚点是**文案字面量**「下列四个数」；产品改成
+      `"下列%s个数" % _zh_num(len(_cards))` 后该字面量不复存在 ⇒
+      负控**静默失效**（它自己报了「负控自身失效，不算通过」，护栏起作用）。
+      ⇒ 锚点移到**派生表达式**上：`len(_cards)` → `len(_cards) + 2`，
+        文案说「六」而结构仍是 4 张 —— 正是本批之前的形态。
+    ★ 教训（值得记住）：**负控的变异锚点若依赖会被重构掉的字面量，
+      重构就会让负控失效**；锚在**结构性表达式**上更稳。
+    """
     src = _src(_SERVER_REL)
-    anchor = "下列四个数"
+    anchor = "% _zh_num(len(_cards))"
     if anchor not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
     items = _ledger_items()
     page, _why = _mut_render(
-        src.replace(anchor, "下列六个数"),
+        src.replace(anchor, "% _zh_num(len(_cards) + 2)"),
         "is0490_nt04d", _SERVER_REL, view="ledger",
         root=tempfile.mkdtemp(prefix="g0490_nt04d_"), token="T", items=items,
         rep=_ledger_rep(items), posture=_POSTURE)

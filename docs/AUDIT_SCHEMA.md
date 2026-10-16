@@ -1,7 +1,19 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
-# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.18（随 v0.51.0）
+# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.19（随 v0.51.2）
 
+> v1.19（0.51.2）：**补登记 1 类** —— `credits_low`（见下文「降级与配置变更类」）。
+> **不改**已有字段名、**不改**已有取值域、**不改** append-only 契约，只**新增一个记录类型**。
+> 语义：缺粮事件（积分余额偏低），**Ls** 级；是徽标「缺粮」的**第二个来源**
+> （存在未关闭的 `credits_low` 记录即亮徽标，`inbox_model.badges`）。
+> ★ **当前无生产者** —— 没有任何产品代码路径写它（链上暂无此类型记录）；
+> 本条登记的是**类型存在性与字段语义**，不是"链上已有记录"。
+> ★ 与 `credits_snapshot` 是两件事：一个是**告警态**（余额偏低），一个是**事实快照**
+> （用户主动登记的余额，`antinel credits snapshot`）。
+> ★ 为什么必须补：0.51.0 把该类型写进 `inbox_model.LEVEL_OF_KIND`／`TITLE_OF_KIND`
+> 时没同步 schema —— 与 0.40.0 那次同型（只写代码不写 schema ⇒ F-10 红）。
+> 登记方式＝`tools/verify_event_types.py` 扫代码写出的 type。
+>
 > v1.18（0.47.0 登记、0.48.0 随版）：**提醒预算族新增 2 类** —— `notice_budget_merged`、
 > `notice_budget_window_closed`（见下文「提醒预算类」）。**不改**已有字段名、
 > **不改**已有取值域、**不改** append-only 契约，只**新增两个记录类型**。
@@ -206,6 +218,7 @@
 | `rules_unreadable_fallback` | pre | `error`, `rules_loaded` | 规则文件**读不出来**（缺失/坏 JSON/无权限）⇒ 退回内置兜底集。与上一条**分开命名**：`tampered` 与 `unreadable` 是两种不同的失败，不能合并成一条 |
 | `policy_changed` | antinel CLI | `change`, `field`, `old_sha256`, `new_sha256`, `invoked_by` | `.psl/policy.json` 被 CLI 改写（白名单/阈值/档位）。每一次都记，因为**放行范围因此改变**。**v1.10 补登记 `field` 取值域**：`zones` / `workspaces` / `windows` / `roots` / `paths` / `domains` / 预算与限额项 …。★ 门闸的**链背书判定**按 `field` 取字段（`host_shield._backing_field()`）——`field=zones` 的记录才替 `host_shield.json` 的 `zones` 变化背书。**改这个取值域＝改门闸的判据**，必须同步改 `_BACKING_TYPES` 的守卫 |
 | `credits_snapshot` | antinel CLI | 余额快照 | 用户登记的积分余额事实（`antinel credits snapshot`）。**是事实记录，不是估算** |
+| `credits_low` | （暂无生产者） | `reason` | **v1.19（0.51.2）补登记**：缺粮事件——积分余额偏低。0.51.0 起在 `inbox_model.LEVEL_OF_KIND`（**Ls** 级）与 `TITLE_OF_KIND`（「缺粮：积分余额偏低」）登记，并是徽标「缺粮」的**第二个来源**（存在未关闭的 `credits_low` 记录即亮徽标）。★ **当前无生产者** —— 链上暂无此类型记录；本条登记的是**类型存在性与字段语义**。★ 与 `credits_snapshot` 是两件事：一个是**告警态**，一个是**事实快照** |
 | `digest_rollup` | antinel CLI | 汇总 | 日报/汇总层生成的滚存记录 |
 
 ### 资源账本类（0.23.0）

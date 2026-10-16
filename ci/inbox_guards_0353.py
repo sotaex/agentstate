@@ -1679,10 +1679,11 @@ def n_task_unknown_recorded_once():
     return recs.count("host_shield_task_unknown") == 1
 
 
-def _task_installed_probe(shim_present, schtasks):
+def _task_installed_probe(shim_present, schtasks, kind="cmd"):
     """脚手架：把 APPDATA 指到临时目录、`subprocess.run` 打桩，问 `task_installed()`。
 
     `schtasks` 取值：`"raise"`（本机实况：被程序黑名单拦死）/ `"no"`（能查、说没有）。
+    `kind`：放哪种自启物 —— `"cmd"`（旧装/兜底）或 `"lnk"`（0.51.2 无窗口首选）。
     ★ 全程临时目录 + 打桩，**不碰真启动文件夹、不真的起 schtasks**。
     """
     import host_shield as HS
@@ -1691,7 +1692,8 @@ def _task_installed_probe(shim_present, schtasks):
         sd = os.path.join(tmp, "Microsoft", "Windows", "Start Menu",
                           "Programs", "Startup")
         os.makedirs(sd, exist_ok=True)
-        with open(os.path.join(sd, "antinel-shield.cmd"), "w",
+        nm = "antinel-shield.lnk" if kind == "lnk" else "antinel-shield.cmd"
+        with open(os.path.join(sd, nm), "w",
                   encoding="utf-8", newline="\n") as f:
             f.write("@echo off\n")
     old = os.environ.get("APPDATA")
@@ -1736,6 +1738,106 @@ def n_task_installed_sees_startup_shim():
     a = _task_installed_probe(shim_present=False, schtasks="raise")
     b = _task_installed_probe(shim_present=False, schtasks="no")
     return a is None and b is False
+
+
+def c_task_installed_sees_startup_lnk():
+    """★★ 0.51.2：启动项是 `.lnk`（**无窗口自启**）时也必须说"在"。
+
+    ★ 为什么（创始人 2026-10-17「重启时弹出的大黑窗口……让用户感觉不到
+      存在是最好的」）：自启物从 `.cmd` 换成 `.lnk`（→ pythonw.exe，见
+      `antinel._create_startup_lnk`）后，若 `task_installed()` 仍**只认
+      `.cmd`** ⇒ 每次巡视都记一条「自启缺失」——而启动项明明就在那儿
+      （与本族 P12 那条「文件系统事实优先」是同一个坑换了张脸）。
+    """
+    return _task_installed_probe(shim_present=True, schtasks="raise",
+                                 kind="lnk") is True
+
+
+def n_task_installed_sees_startup_lnk():
+    """负控：**两种自启物都不在**时不许说"在"（两个名字是分开查的，不许串味）。"""
+    return (_task_installed_probe(shim_present=False, schtasks="raise",
+                                  kind="lnk") is not True)
+
+
+def _autostart_branch_order(src):
+    """AST：`antinel.py` 里 `autostart` 被赋成两个常量时的行号。返回 (lnk, folder, err)。"""
+    import ast as _ast
+    lnk = folder = None
+    try:
+        tree = _ast.parse(src)
+    except SyntaxError as e:
+        return None, None, "源码解析失败：%r" % (e,)
+    for node in _ast.walk(tree):
+        if not isinstance(node, _ast.Assign) or len(node.targets) != 1:
+            continue
+        t = node.targets[0]
+        if not isinstance(t, _ast.Name) or t.id != "autostart":
+            continue
+        v = getattr(node.value, "value", None)
+        if v == "startup-lnk":
+            lnk = node.lineno
+        elif v == "startup-folder":
+            folder = node.lineno
+    return lnk, folder, None
+
+
+def c_startup_autostart_prefers_windowless():
+    """★★ 0.51.2：登录自启**首选无窗口形式**（`.lnk` → pythonw.exe），`.cmd` 只作兜底。
+
+    ★ 为什么（创始人 2026-10-17）：「重启时弹出的大黑窗口……这种能否不显示，
+      **甚至不一闪而过**？让用户感觉不到存在是最好的」——`.cmd` 由 cmd.exe
+      执行 ⇒ **必然**有一个控制台窗口；前台跑常驻哨兵时它会一直开着。
+      唯一**真无窗口**的入口是 `.lnk` → `pythonw.exe`（GUI 子系统）。
+    ★ 判法（AST 结构，非文本匹配）：① 两个分支都在；② `.lnk` 分支排在
+      `.cmd` 之前（**优先**）；③ `_create_startup_lnk` 经 `_pythonw_exe()`
+      取解释器（不许直接用有控制台的 `sys.executable`）。
+    """
+    import ast as _ast
+    src = _read_antinel_src()
+    lnk, folder, err = _autostart_branch_order(src)
+    if err:
+        return err
+    if lnk is None:
+        return "找不到 `autostart = \"startup-lnk\"` 分支 ⇒ 无窗口自启没落地"
+    if folder is None:
+        return "找不到 `autostart = \"startup-folder\"` 兜底分支（不该没有）"
+    if lnk > folder:
+        return ("`.cmd` 兜底排在前、`.lnk` 在后 ⇒ 自启仍会弹控制台窗口"
+                "（创始人 2026-10-17 黑窗口）")
+    fn = next((n for n in _ast.walk(_ast.parse(src))
+               if isinstance(n, _ast.FunctionDef) and n.name == "_create_startup_lnk"),
+              None)
+    if fn is None:
+        return "`antinel._create_startup_lnk` 不存在 ⇒ 无窗口自启能力缺失"
+    called = {x.func.id for x in _ast.walk(fn)
+              if isinstance(x, _ast.Call) and isinstance(x.func, _ast.Name)}
+    if "_pythonw_exe" not in called:
+        return ("`_create_startup_lnk` 没走 `_pythonw_exe()` ⇒ 可能仍指向有控制台的"
+                " python.exe（窗口又回来了）")
+    return True
+
+
+def n_startup_autostart_prefers_windowless():
+    """负控：把两个分支**顺序反过来**（`.cmd` 在前）⇒ 判据必须红。"""
+    bad = ("def f(st):\n"
+           "    if x:\n"
+           "        st = \"startup-folder\"\n"
+           "    else:\n"
+           "        st = \"startup-lnk\"\n")
+    lnk, folder, err = _autostart_branch_order(bad)
+    if err or lnk is None or folder is None:
+        return "负控脚手架失效：造的分支没被解析出来（检测逻辑是假的）"
+    if lnk <= folder:
+        return "负控失效：顺序反了却判成合格 ⇒ 判据没有分辨力"
+    return True
+
+
+def _read_antinel_src():
+    """读 `antinel.py` 源码（登录自启逻辑的唯一产地）。"""
+    here = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(os.path.dirname(here), "antinel.py"),
+              encoding="utf-8") as f:
+        return f.read()
 
 
 def _notify_probe(recs):
@@ -2957,6 +3059,11 @@ CHECKS_0353 = [
      n_task_unknown_recorded_once),
     ("P12 自启在岗认得启动项", c_task_installed_sees_startup_shim,
      n_task_installed_sees_startup_shim),
+    ("P12 自启在岗也认得无窗口快捷方式", c_task_installed_sees_startup_lnk,
+     n_task_installed_sees_startup_lnk),
+    ("P12 登录自启首选无窗口形式（.lnk→pythonw）",
+     c_startup_autostart_prefers_windowless,
+     n_startup_autostart_prefers_windowless),
     ("P12 气泡只给要动手的事", c_notify_only_when_owner_needed,
      n_notify_only_when_owner_needed),
     ("P12 钩子登记哈希不误报", c_hook_reg_hash_no_false_alarm,

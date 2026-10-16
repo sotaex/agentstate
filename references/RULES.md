@@ -1,5 +1,5 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
-# Antinel detection rules (generated from rules/default.json v0.50.5 - do not edit by hand)
+# Antinel detection rules (generated from rules/default.json v0.51.2 - do not edit by hand)
 
 Category order = match priority: secrets > destructive > network > injection > context > metadata.
 Severity to action: critical = block, warning = alert (logged, allowed). All hits are collected; highest severity decides.
@@ -358,7 +358,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - category: destructive | severity: critical | dynamic (hook only) | tools: Bash
 - purpose: Blocks alternate-data-stream writes from a shell (redirect / -Stream / copy / open -- the command half of DST-09)
 - description: Agent attempted to write an NTFS alternate data stream from a shell (redirect / -Stream / copy / open) -- the command-line half of DST-09
-- 说明: 从命令行写入 NTFS 备用数据流（重定向 / -Stream / copy / open）——DST-09 的命令通道
+- 说明: 从命令行写入 NTFS 备用数据流（重定向 / -Stream / copy / open 等命令通道）
 - 处理建议: 与 DST-09 同一通道的命令行写法，产物同样逃过审查；请改用普通文件
 - command_patterns:
     - `>\s*[^\s|;&\"'<>]*\.[^\\/:\s]{1,32}:(?!Zone\.Identifier\b)`

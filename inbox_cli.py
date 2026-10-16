@@ -481,5 +481,34 @@ def main(argv=None):
         return 2
 
 
+def _no_console_streams():
+    """无控制台解释器（pythonw.exe）下接管 stdout/stderr ⇒ 双击启动不弹黑窗。
+
+    ★★ 为什么需要（创始人 2026-10-17「重启时弹出的大黑窗口……甚至不一闪而过？
+      让用户感觉不到存在是最好的」）：`antinel.cmd` / 桌面启动器此前都是
+      **前台调 `python.exe`** ⇒ 必然弹一个控制台窗口（标题就是解释器路径）。
+      唯一的**真无窗口**方式是换成 `pythonw.exe`（GUI 子系统），但 pythonw 下
+      `sys.stdout`/`sys.stderr` 是 `None` ⇒ 本模块里的 print（`cmd_window`
+      等有十来处）会 `AttributeError`。
+      ⇒ 启动时先接上文件流，print 照旧可用（落到日志，不再上屏）。
+    ★ 只在**缺流**时才动手：有控制台时（人手跑、判据跑）行为完全不变。
+    ★ 与 `host_shield._no_console_streams` 是同一条纪律的两处落点（见那边的说明）。
+    """
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    try:
+        d = os.path.join(os.path.expanduser("~"), ".antinel", "logs")
+        os.makedirs(d, exist_ok=True)
+        fh = open(os.path.join(d, "console.log"), "a", encoding="utf-8",
+                  errors="replace")
+    except OSError:
+        fh = open(os.devnull, "w", encoding="utf-8")
+    if sys.stdout is None:
+        sys.stdout = fh
+    if sys.stderr is None:
+        sys.stderr = fh
+
+
 if __name__ == "__main__":
+    _no_console_streams()
     sys.exit(main())

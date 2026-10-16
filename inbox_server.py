@@ -519,6 +519,20 @@ def _esc(s):
     return html.escape("" if s is None else str(s), quote=True)
 
 
+def _zh_num(n):
+    """数字 → 中文小写（0–10），超范围退回阿拉伯数字。
+
+    ★★ 存在的理由（机制层，创始人 2026-10-17「这个能上升到机制层就好了」）：
+      页面文案里的**指向性数量词**（「下列四个数」）必须能**派生**自结构；
+      中文文案写「四个」比「4 个」自然 ⇒ 派生需要一个「数 → 中文」转换。
+      手抄数量词与结构脱钩是**必然出错**的结构（账本页三问之一的成因），
+      所以这个函数是「数量词派生」纪律的配套件，不是排版偏好。
+    """
+    zh = "零一二三四五六七八九十"
+    n = int(n)
+    return zh[n] if 0 <= n <= 10 else str(n)
+
+
 def _ts_hm(s):
     """时间戳的**唯一短式**：`MM-DD HH:MM`（★ 0.50.4 / Q-07，唯一实现）。
 
@@ -2070,15 +2084,20 @@ def _view_ledger(rep, token, items=None):
         link = _card_link.get(key)
         return ('<a href="/?v=inbox&f=%s">%s</a>' % (link, raw)) if link else raw
 
-    m = ("<div class=\"metrics\">"
-         "<div class=\"metric\"><div class=\"k\">%s</div><div class=\"v\">%s</div></div>"
-         "<div class=\"metric\"><div class=\"k\">%s</div><div class=\"v\">%s</div></div>"
-         "<div class=\"metric\"><div class=\"k\">%s</div><div class=\"v\">%s</div></div>"
-         "<div class=\"metric\"><div class=\"k\">%s</div><div class=\"v\">%s</div></div></div>"
-         % (GL.chip("ledger_blocked"), _v("ledger_blocked", 0),
-            GL.chip("ledger_noticed"), _v("ledger_noticed", 1),
-            GL.chip("ledger_breached"), _v("ledger_breached", 2),
-            GL.chip("ledger_acked"), _v("ledger_acked", 3)))
+    # ★★ 0.51.2（机制层，创始人 2026-10-17「这个能上升到机制层就好了」）：
+    #   卡片由**列表**生成、数量词取 `len(_cards)`（见下方 `_lead`）—— 不再
+    #   手写 4 组 `%s` 配一句硬编码「下列四个数」。旧写法下两者**没有任何
+    #   引用关系** ⇒ 「改了卡片数忘改文案」不是疏忽而是**必然**（本批三问之
+    #   一的成因）。派生后结构一变文案自动跟。
+    #   ★ 同页另一处数字的根治同理：全页**只有一个**按天计数来源
+    #     （`M.day_counts`，唯一实现），不许在渲染层另写一份。
+    _cards = [("ledger_blocked", _v("ledger_blocked", 0)),
+              ("ledger_noticed", _v("ledger_noticed", 1)),
+              ("ledger_breached", _v("ledger_breached", 2)),
+              ("ledger_acked", _v("ledger_acked", 3))]
+    m = ('<div class="metrics">' + "".join(
+        '<div class="metric"><div class="k">%s</div><div class="v">%s</div></div>'
+        % (GL.chip(k), v) for k, v in _cards) + "</div>")
     # 历史覆盖：**一行**（不再占两张卡）；连续与总数相等时只说一次 ——
     # 「11 天、11 天」这种同数并列会让读者以为是 bug（创始人三问之二）。
     # ★★ 这一行**无条件渲染**（2026-10-17 复跑抓到）：`days`/`streak` 两个
@@ -2110,8 +2129,10 @@ def _view_ledger(rep, token, items=None):
     # ★ 0.50.4：口径说明一行 —— 大字改当天后**必须**写明窗口，否则读者无从
     #   判断这四个数是今天的还是有史以来的（同族：日报页「只数最近 N 小时」）。
     #   ★★ 0.51.0：累计行撤了 ⇒ 「累计见本页末行」改为指向**按天明细区**。
-    _lead = ("<p class=\"note\">下列四个数只数<b>今天</b>（本地自然日）；"
-             "更早的日子看下面的按天明细。</p>" if has_data else "")
+    # ★★ 0.51.2：数量词**派生**自卡片列表（`_zh_num(len(_cards))`），不手抄。
+    _lead = ("<p class=\"note\">下列%s个数只数<b>今天</b>（本地自然日）；"
+             "更早的日子看下面的按天明细。</p>" % _zh_num(len(_cards))
+             if has_data else "")
     # ────────────────────────────────────────────────────────────────
     # ★★ 0.51.0 明细区（银行流水模式，v1.1 设计）：区一「最近 7 天」＋
     #   区二「更早 · 按月」折叠。数据源＝store 现算（`M.day_counts`，唯一实现），

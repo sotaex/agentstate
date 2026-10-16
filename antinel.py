@@ -36,7 +36,7 @@ if _HERE not in sys.path:
 
 from strings import detect_lang, get_string
 
-VERSION = "0.51.0"
+VERSION = "0.51.2"
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
@@ -1741,11 +1741,89 @@ def cmd_zone(args):
 
 
 def _startup_folder_cmd():
-    """启动文件夹里的自启 shim 路径（schtasks 被宿主 Program Blacklist 拦时的回退位）。"""
+    """启动文件夹里的自启 shim 路径（schtasks 被宿主 Program Blacklist 拦时的回退位）。
+
+    ★ 0.51.2：本条**降为兜底**（PowerShell 不可用时才用）—— 首选见
+      `_startup_folder_lnk()`：`.cmd` 必然带一个控制台窗口，见那边的说明。
+    """
     appdata = os.environ.get("APPDATA") or os.path.join(
         os.path.expanduser("~"), "AppData", "Roaming")
     return os.path.join(appdata, "Microsoft", "Windows", "Start Menu",
                         "Programs", "Startup", "antinel-shield.cmd")
+
+
+def _startup_folder_lnk():
+    """启动文件夹里的**无窗口**自启快捷方式（`.lnk` → `pythonw.exe`）。"""
+    appdata = os.environ.get("APPDATA") or os.path.join(
+        os.path.expanduser("~"), "AppData", "Roaming")
+    return os.path.join(appdata, "Microsoft", "Windows", "Start Menu",
+                        "Programs", "Startup", "antinel-shield.lnk")
+
+
+def _pythonw_exe():
+    """`sys.executable` 的 pythonw 变体（GUI 子系统，不建控制台）；没有则退回本尊。"""
+    exe = sys.executable or ""
+    d, _b = os.path.split(exe)
+    w = os.path.join(d, "pythonw.exe")
+    return w if os.path.isfile(w) else exe
+
+
+def _create_startup_lnk(lnk_path):
+    """建 `.lnk`（PowerShell + WScript.Shell COM，Windows 自带，不装依赖）。成功返回 True。
+
+    ★★ 为什么自启**必须**是 .lnk 而不是 .cmd（创始人 2026-10-17：
+      「重启时弹出的大黑窗口……这种能否不显示，甚至不一闪而过？
+        让用户感觉不到存在是最好的」）：
+      `.cmd` 由 cmd.exe/conhost 执行 ⇒ **必然**有一个控制台窗口 —— 前台跑
+      常驻哨兵时它会**一直开着**；改成 `start /b` 只能消掉"常驻"，消不掉
+      启动那一闪。唯一**真无窗口**的入口是 `.lnk` → `pythonw.exe`
+      （GUI 子系统，不创建控制台）：explorer 直接 CreateProcess，全程无 conhost。
+    ★ 代价与兜底：pythonw 下 `sys.stdout`/`sys.stderr` 是 `None` ⇒
+      `host_shield._no_console_streams()` 先把流接到
+      `~/.antinel/logs/sentinel.log`，否则那些 `print(flush=True)` 会把哨兵打崩
+      （那比看得见窗口严重得多：用户以为有保护，实际没有）。
+      PowerShell 不可用时**如实退回 .cmd**（有窗口，但哨兵照跑）——
+      宁可看得见，不可没有保护。
+    """
+    import host_shield as _hs                 # 与文件内其他处一致：延迟导入
+    pyw = _pythonw_exe()
+    hsp = _sibling("host_shield.py")
+    root = os.path.dirname(_sibling("antinel.py"))
+    if not (pyw and hsp and os.path.isfile(hsp)):
+        return False
+    args = '-I -S "%s" sentinel "%s"' % (hsp, root)
+    ps = ("$w=New-Object -ComObject WScript.Shell;"
+          "$s=$w.CreateShortcut('%s');"
+          "$s.TargetPath='%s';$s.Arguments='%s';$s.WorkingDirectory='%s';"
+          "$s.Description='Antinel sentinel (no window)';$s.Save()"
+          % (lnk_path, pyw, args, root))
+    try:
+        r = subprocess.run([_hs._POWERSHELL, "-NoProfile", "-NonInteractive",
+                            "-ExecutionPolicy", "Bypass", "-Command", ps],
+                           capture_output=True, timeout=30,
+                           creationflags=_hs._CREATE_NO_WINDOW)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0 and os.path.isfile(lnk_path)
+
+
+def _retire_old_startup_cmd():
+    """把启动文件夹里旧的 `antinel-shield.cmd` **改名归档**（不删）。返回归档路径或 None。
+
+    ★ 为什么必须归档（创始人 2026-10-17 黑窗口）：换成 `.lnk` 之后旧 `.cmd`
+      若还留着，下次登录会**两个都跑** —— 多一个控制台窗口（正是要消掉的
+      那个），哨兵的 singleton 守卫会拒掉第二个进程，但**窗口已经闪过了**。
+    ★ 零删除纪律：只改名（追加 `.away-<时间戳>`），随时可人工恢复。
+    """
+    old = _startup_folder_cmd()
+    if not os.path.isfile(old):
+        return None
+    away = old + ".away-" + datetime.now().strftime("%Y%m%d%H%M%S")
+    try:
+        os.replace(old, away)
+        return away
+    except OSError:
+        return None
 
 
 # ★ 单一真源（2026-09-26 B3）：护盾"开着"时**到底拦不拦**。
@@ -1914,11 +1992,18 @@ def cmd_host_shield(args):
             _rc1 = -1
             print("  ⚠ 计划任务工具无法启动（%s）——改走启动文件夹" % type(_e).__name__)
         if _rc1 != 0:
-            try:
-                shutil.copyfile(shim, _startup_folder_cmd())
-                autostart = "startup-folder"
-            except OSError:
-                autostart = "none"
+            # ★ 0.51.2：回退位**优先 `.lnk`（无窗口）**，`.cmd` 只作 PowerShell
+            #   不可用时的兜底 —— 见 `_create_startup_lnk` 的说明（创始人
+            #   2026-10-17「重启时弹出的大黑窗口」）。
+            if _create_startup_lnk(_startup_folder_lnk()):
+                autostart = "startup-lnk"
+                _retire_old_startup_cmd()   # 旧 .cmd 归档（并存会多闪一次窗）
+            else:
+                try:
+                    shutil.copyfile(shim, _startup_folder_cmd())
+                    autostart = "startup-folder"
+                except OSError:
+                    autostart = "none"
         # 0.28.1（死因 RC3）：哨兵由 spawn_sentinel 拉起——脱离会话/作业对象，
         # 会话结束不再连带被杀；失败也如实上报（不再无条件宣布成功）。
         # 幂等：哨兵已在岗则不重复拉起（重复拉起会立刻被唯一性守卫退出，
@@ -1939,6 +2024,8 @@ def cmd_host_shield(args):
         print("✓ 护盾已布防：%s" % SHIELD_STATE_ON)
         if autostart == "schtasks":
             print("  自启：计划任务 AntinelHostShield（登录触发）")
+        elif autostart == "startup-lnk":
+            print("  自启：启动文件夹快捷方式（**无窗口**，计划任务被本机策略拦截已回退）")
         elif autostart == "startup-folder":
             print("  自启：启动文件夹（计划任务命令被这台电脑上的策略拦截，已回退）")
         else:

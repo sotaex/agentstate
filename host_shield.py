@@ -3839,17 +3839,21 @@ def task_installed():
       ⇒ 修法：**文件系统事实优先**（启动项在就是在，不必问 schtasks）；
         schtasks 只是补充证据；两者都查不出来才回 None。
     """
-    shim = None
     try:
         appdata = os.environ.get("APPDATA") or os.path.join(
             os.path.expanduser("~"), "AppData", "Roaming")
-        shim = os.path.join(appdata, "Microsoft", "Windows",
-                            "Start Menu", "Programs", "Startup",
-                            "antinel-shield.cmd")
-        if os.path.isfile(shim):
-            return True                      # ★ 文件系统事实优先：在就是在
+        sdir = os.path.join(appdata, "Microsoft", "Windows",
+                            "Start Menu", "Programs", "Startup")
+        # ★ 0.51.2：`.lnk`（**无窗口，0.51.2 起的首选**）与 `.cmd`（旧装 /
+        #   PowerShell 不可用时的兜底）**都算在** —— 只认 `.cmd` 会把已换成
+        #   `.lnk` 的机器误判成「自启缺失」⇒ 每次巡视都报假失联。
+        #   由来：创始人 2026-10-17「重启时弹出的大黑窗口」，
+        #   见 `antinel._create_startup_lnk` 的说明。
+        for nm in ("antinel-shield.lnk", "antinel-shield.cmd"):
+            if os.path.isfile(os.path.join(sdir, nm)):
+                return True                  # ★ 文件系统事实优先：在就是在
     except Exception:                                                # noqa: BLE001
-        shim = None
+        pass
     try:
         if subprocess.run([_SCHTASKS, "/Query", "/TN", "AntinelHostShield"],
                           capture_output=True, timeout=20,
@@ -4076,9 +4080,41 @@ def run_sentinel(root):
         time.sleep(POLL_SECONDS)
 
 
+def _no_console_streams():
+    """无控制台解释器（pythonw.exe）下接管 stdout/stderr ⇒ 常驻哨兵不因 print 崩。
+
+    ★★ 为什么需要（创始人 2026-10-17「重启时弹出的大黑窗口……甚至不一闪而过？
+      让用户感觉不到存在是最好的」）：唯一的**真无窗口**启动方式是换
+      `pythonw.exe`（GUI 子系统，不创建控制台）。但 pythonw 下
+      `sys.stdout`/`sys.stderr` 是 `None` ⇒ 本模块里的 `print(..., flush=True)`
+      会 `AttributeError` **崩掉常驻哨兵**——那比黑窗口严重得多
+      （用户以为有保护，实际没有）。
+      ⇒ 启动时先接上文件流，print 照旧可用（落到日志，不再上屏）。
+    ★ 只在**缺流**时才动手：有控制台时（人手跑、判据跑）行为完全不变。
+    ★ 与 `inbox_cli._no_console_streams` 是**同一条纪律的两处落点**：两个入口
+      各被各自的启动器拉起（一个开机常驻、一个双击），环境不同；
+      且本模块以 `-I` 启动（isolated），不适合跨模块共享，故各留一份。
+    """
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    try:
+        d = os.path.join(os.path.expanduser("~"), ".antinel", "logs")
+        os.makedirs(d, exist_ok=True)
+        fh = open(os.path.join(d, "sentinel.log"), "a", encoding="utf-8",
+                  errors="replace")
+    except OSError:
+        fh = open(os.devnull, "w", encoding="utf-8")
+    if sys.stdout is None:
+        sys.stdout = fh
+    if sys.stderr is None:
+        sys.stderr = fh
+
+
 # 0.28.1（死因 RC1）：真实入口。此前 host_shield.py 没有任何 __main__/argv 处理——
 # shim 的 `python -I -S host_shield.py sentinel <root>` 只会定义完函数就退出。
+# 0.51.2：入口先接无控制台流（pythonw 启动时 stdout/stderr 为 None）。
 if __name__ == "__main__":
+    _no_console_streams()
     if len(sys.argv) >= 2 and sys.argv[1] == "sentinel":
         run_sentinel(sys.argv[2] if len(sys.argv) >= 3 else os.getcwd())
     else:

@@ -194,7 +194,7 @@ HARNESS_SRC = SRC / "scripts" / "verification_tests.py"
 if not HARNESS_SRC.is_file():
     raise SystemExit("★ 构建器找不到套件：%s\n  （产物仓构建必须用本仓的套件）" % HARNESS_SRC)
 NAME = "antinel-security"
-VERSION = "0.51.0"
+VERSION = "0.51.2"
 # P-A3: the namespace this build declares itself under. derive_object_ownership()
 # reads git remote first, then THIS field; fail-closed unattributed when neither
 # resolves. Kept beside the hashes so a third party can see what was declared.
@@ -2493,6 +2493,46 @@ def _archive_stale_dist(dist_dir, version, archive_root):
     return moved
 
 
+def _adopt_dev_entries(final):
+    """harness 期间**临时补登**研发树专属条目；返回纯清单字节供跑后恢复（0.51.2）。
+
+    ★ 为什么需要（80f0125 冻结区机制 × merge 顺序的未测碰撞，本版出包首次撞上）：
+      `_merge(pkg, final)` 把**纯 wheel 口径**的 manifest 覆盖回 final（final 就是
+      仓本身）—— `ci/freeze_zones.json` 不在 wheel 载荷里 ⇒ 研发树专属条目被抹。
+      而两轮 harness 跑在 final 上：F-13/F-17 要拉哨兵 ⇒ `self_check()` 的
+      `_DEV_GUARDED_CHAIN_FILES`「在场才校验」因缺登记而红 ⇒ 构建自带 harness
+      永远 FAIL ⇒ rc=1 ⇒ release.py 步骤 1 失败、**一个包都产不出来**。
+      （0.51.0 出包在该机制落地之前，故从未暴露。）
+    ★ 修法三不：**不弱化自检**（条目照查，只是这期间它在场）、**不污染 wheel**
+      （harness 后恢复纯净，`python -m build` 带走的清单必须纯——[E] 对账要求
+      清单 ⊆ wheel 载荷）、**不留半成品**（恢复用 merge 落盘的原字节，逐字节
+      可复现，不靠重新序列化）。
+    ★ 口径与 `_tools_034/_resign_manifest.py --adopt-dev` 逐字同源：名单从
+      host_shield import（单一真源）、在场才补、非版本承载件走裸 sha256。
+    """
+    import host_shield as _hs
+    mfp = Path(final) / "psl" / "manifest.json"
+    pure = mfp.read_bytes()
+    try:
+        d = json.loads(pure.decode("utf-8"))
+    except Exception as e:                                       # noqa: BLE001
+        print("!! 读不到 %s（%s）—— 跳过研发条目补登（harness 可能红 F-13/F-17）"
+              % (mfp, e))
+        return pure
+    files = d.get("files") or {}
+    dev = tuple(getattr(_hs, "_DEV_GUARDED_CHAIN_FILES", ()) or ())
+    for rel in dev:
+        p = os.path.join(str(final), rel.replace("/", os.sep))
+        if not os.path.isfile(p) or rel in files:
+            continue                        # 不在场（出包语境）／已登记
+        files[rel] = "sha256:" + hashlib.sha256(open(p, "rb").read()).hexdigest()
+        print("  ADOPT(dev) %s（harness 期间临时补登；跑后恢复纯净）" % rel)
+    d["files"] = files
+    mfp.write_text(json.dumps(d, ensure_ascii=False, indent=1),
+                   encoding="utf-8", newline="\n")
+    return pure
+
+
 def build(out_root, verify=False):
     # ★★ 0.42.0：**先把 dist/ 里的非本版发布件挪走**，再跑闸门。
     #   位置必须在 `_delivery_gate()` **之前**：D-23/JDG-06 判的就是"dist 里混旧包"，
@@ -3176,6 +3216,10 @@ def build(out_root, verify=False):
         # (PY = ANTINEL_PY or sys.executable), and fall back to sys.executable.
         PY_HARNESS = os.environ.get("ANTINEL_PY") or sys.executable
         print("harness interpreter: %s  (build interpreter: %s)" % (PY_HARNESS, sys.executable))
+        # ★★ 0.51.2：harness 期间临时补登研发树专属条目（见 _adopt_dev_entries
+        #   docstring：merge 抹条目 × self_check 在场才校验的碰撞）。位置在
+        #   build_plugin **之后**——插件内容按 manifest 钉，补登必须晚于它。
+        _pure_manifest = _adopt_dev_entries(final)
         # ★ 2026-09-29（D-17）：跑在 **`final`（产物仓）** —— 要验的是产物，
         #   不是装配中转站。原为 `pkg`（stage），见上面的判据 ①。
         _harness_py = str(final / "scripts" / "run_harness.py")
@@ -3188,6 +3232,12 @@ def build(out_root, verify=False):
               "fresh tree (the record is an input to the run that writes it)" % rc1)
         rc = subprocess.call([PY_HARNESS, _harness_py])
         print("harness(final, shipped record) exit:", rc)
+        # ★★ 0.51.2：harness 跑完 ⇒ 恢复纯净 wheel 口径清单（用 merge 落盘的原
+        #   字节，逐字节可复现）。随后 `python -m build` 打包带走它 —— 带研发
+        #   条目会撞 verify_release 的 [E]「清单 ⊆ wheel 载荷」对账。
+        #   恢复后主树回到既有的「出包后已知态」（缺研发条目），下一轮开工按
+        #   self_check 红项给出的命令补登：`_resign_manifest.py --adopt-dev`。
+        (Path(final) / "psl" / "manifest.json").write_bytes(_pure_manifest)
         # ★★★ 0.42.0：自证卡的刷新点在**这里**，不在装配时。
         #   装配时那份记录描述的是上一次的字节 ⇒ 必然 false；只有跑完这一次，
         #   shipped 记录才真的描述本次字节 ⇒ 这时写 true 才不是谎话。
