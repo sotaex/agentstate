@@ -435,6 +435,9 @@ _HOOK_BUDGET = 12.0
 #:   为什么要"逐条"：机制论文档 §3 的五判据是**与**关系（五条全满足
 #:   才允许建机制），缺一条的作答块等于没有作答。
 _P1P5_HEADER_LINES = 60
+# ★ 双向同步：此正则在 hooks/pre_tool_use.py 有**自包含副本**（_GOV_P1P5，
+#   GOV-01 写入时刻拦截）——钩子在安装态运行、ci/ 不保证在旁，故复制。
+#   改这里必须同步那里，反之亦然。
 _P1P5_LINE = re.compile(r"^\s*P([1-5])\s*[:：]\s*\S")
 
 #: 现有套件不追溯清单 ＝ A1 落地时点（2026-10-15）SUITES 已登记的全部键。
@@ -501,6 +504,8 @@ def suites_missing_p1p5(suites=None, grandfathered=None):
 #:   · pending 额度 30 天过期（防"登了记永不退休"把上限软化成没有）；
 #:   · 超额且额度不足 ⇒ struct_bad ⇒ 闸门红。
 RESIDENT_SUITE_CAP = 29
+# ★ 双向同步：29 这个数在 hooks/pre_tool_use.py 有自包含副本（_GOV_CAP，
+#   GOV-01 写入时刻拦截）——改这里必须同步那里，反之亦然。
 _RETIREMENT_LEDGER = os.path.join(_HERE, "suite_retirement.json")
 _RETIREMENT_GRACE_DAYS = 30
 

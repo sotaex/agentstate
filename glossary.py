@@ -38,6 +38,7 @@ import html as _H
 import re
 
 import inbox_model as _M
+import inbox_report as _R
 
 
 def _wl(key):
@@ -52,6 +53,95 @@ class UnknownTerm(KeyError):
 
 #: 字段齐全性要求。缺任何一个字段 ⇒ 视为未定义。
 _REQUIRED = ("w", "one", "inc", "exc", "unit")
+
+
+# ---------------------------------------------- 态的"具体包括什么"派生 ----
+# ★★ 0.51.0（四态问号小窗方案 v1.1，创始人 2026-10-16 拍板"编号＋一句话＋
+#   具体包括哪几类"）：态词条的 inc **不许手写第二份清单** —— 手写必漂
+#   （实测两处：R0 词条漏「安全区加锁失败」、L1 词条漏 0.40.0 归入的
+#   「研发迭代中」）。失守／注意的内容全集＝事件类型层（`LEVEL_OF_KIND`），
+#   拦截的内容全集＝**规则层**（`rules/default.json`，每条带 description_zh，
+#   antinel_verify INV 强制必备）—— 各按各自的真实深度派生，不硬凑对称。
+
+def _kinds_of(state):
+    """事件类型层清单：归该态的每个 kind 的人话标题，剥态名前缀、
+    按真源声明序顿号连接。
+
+    真源：`inbox_model.LEVEL_OF_KIND` ＋ `TITLE_OF_KIND`。判据 T-02 钉
+    "词条 inc 与本函数派生逐字相等" —— 分类真源加了新 kind，词条自动跟上。
+    """
+    parts = []
+    for kind, lv in _M.LEVEL_OF_KIND.items():
+        if lv != state:
+            continue
+        t = _M.TITLE_OF_KIND.get(kind) or kind
+        parts.append(t.split("：", 1)[1] if "：" in t else t)
+    return "、".join(parts)
+
+
+#: 规则类别 → 中文。**fail-loud**：规则表新增类别没登记中文名 ⇒ 抛错，
+#: 绝不静默露英文 —— 与 `inbox_model.level_of` 未登记 kind 抛错同哲学。
+_CATEGORY_ZH = {
+    "secrets": "机密与隐私",
+    "destructive": "破坏性操作",
+    "network": "对外联网",
+    "injection": "注入与伪装",
+    "context": "环境信息探测",
+    "metadata": "技能元数据",
+    "supply_chain": "供应链与插件",
+    "canary": "金丝雀布防",
+}
+
+
+def _cat_zh(category):
+    z = _CATEGORY_ZH.get(category)
+    if not z:
+        raise UnknownTerm(
+            "拦截规则类别 %r 未登记中文名 —— 请在 _CATEGORY_ZH 登记，不许露英文" % category)
+    return z
+
+
+def _shield_overview():
+    """拦截态概述句：规则总数、类别数、各类条数**全部派生**（绝不写死 37 ——
+    那会变成又一个永不更新的真数字）。
+
+    规则表读不到 ⇒ **降级真话**（指向失守处理路径），不编清单、不装没事
+    —— 规则文件损坏本身通常就是「失守 R0」级事件，值守台拒绝在数据被动过
+    的情况下冒充一切正常。
+    """
+    rows = _R.rule_table()
+    if not rows:
+        return ("拦截规则表现在读不到 —— 通常意味着防护文件被改动；"
+                "先按「失守」处理，再来这里看规则清单。")
+    counts, order = {}, []
+    for r in rows:
+        c = r.get("category") or "?"
+        if c not in counts:
+            order.append(c)
+        counts[c] = counts.get(c, 0) + 1
+    return ("监理现在装着 %d 条拦截规则，分 %d 类：%s。" % (
+        len(rows), len(order),
+        " · ".join("%s（%d）" % (_cat_zh(c), counts[c]) for c in order)))
+
+
+def _shield_list_html():
+    """拦截态词条的**规则全表**（嵌套折叠块；空表 ⇒ 空串，chip 自动跳过）。
+
+    每行＝规则编号（淡显，供与收件箱记录上的「规则 SEC-01」对号入座——
+    编号是把"记录上的工程事实"与这里的解释连起来的唯一钥匙）＋中文说明。
+    两段都经转义（规则表是数据文件，防意外字符）。**不带 name 属性**：
+    它不是术语芯片，不进 name="term" 互斥组。
+    """
+    rows = _R.rule_table()
+    if not rows:
+        return ""
+    lines = "".join(
+        '<div class="rrow"><span class="rid">%s</span>%s</div>'
+        % (_H.escape(str(r["id"]), quote=True),
+           _H.escape(str(r.get("description_zh") or r["id"])))
+        for r in rows)
+    return ('<details class="rlist"><summary>展开看全部 %d 条规则</summary>'
+            '<div class="rbody">%s</div></details>' % (len(rows), lines))
 
 TERMS = {
     # ------------------------------------------------ 分档（收件箱）----
@@ -87,7 +177,10 @@ TERMS = {
     "R0": {
         "w": _wl("R0"),
         "one": "防线本身没生效 —— 有东西没被挡住，或没人守门。",
-        "inc": "防护文件被改动、监理没能启动、登录自启缺失、防护有缺口。",
+        # ★★ 0.51.0：inc 改由 LEVEL_OF_KIND 派生（手写清单已实测漂移——
+        #   漏了「安全区加锁失败」）。判据 T-02 钉逐字相等。
+        "inc": "包括这几类：%s。具体是哪一件事，看收件箱每条记录的原因。"
+               % _kinds_of("R0"),
         "exc": "<b>不是</b>已被拦下的操作 —— 那是「拦截 L2」；R0 是<b>没挡住</b>，不是挡住了。",
         # ★★ 0.50.7（创始人截图四「归并无解释」）：顶部数字的括号
         #   「（已归并为 N 件事）」此前**全站没有任何一处解释**条与件的关系
@@ -100,17 +193,25 @@ TERMS = {
     "L2": {
         "w": _wl("L2"),
         "one": "危险操作被规则实际挡下了。",
-        "inc": "规则命中后拦下来的工具调用。",
+        # ★★ 0.51.0：inc 由**规则层**派生（概述句的规则总数、类别数、各类
+        #   条数全部来自 rules/default.json，绝不写死）＋引导句（收件箱每条
+        #   记录上写着命中规则，与这里的全表可对号）。`list_html` 是代码
+        #   生成的成品 HTML（嵌套折叠全表 37 条），chip 拼装点直拼、不经
+        #   render 转义（render 白名单只有 b/code），也不进互斥组。
+        "inc": _shield_overview() + "每条被拦下的记录上，写明了命中的是哪条规则。",
         "exc": "不含只是提醒的 —— 那是「注意 L1」；也不含没挡住的 —— 那是「失守 R0」。",
         # ★★ 0.50.7（同上）：条→件事的换算口径写明（括号自解释的前提）。
         "unit": "单位是<b>条记录</b>，按最近 24 小时数。同一件事的几条记录"
                 "<b>算一件事</b>——顶部数字的括号里「已归并为 N 件事」报的"
-                "就是这个件数。"
+                "就是这个件数。",
+        "list_html": _shield_list_html(),
     },
     "L1": {
         "w": _wl("L1"),
         "one": "需要你知道、但通常不用动手的变动。",
-        "inc": "防护设置被改动、已自动恢复等状态类事件。",
+        # ★★ 0.51.0：inc 改由 LEVEL_OF_KIND 派生（手写清单已实测漂移——
+        #   漏了 0.40.0 归入 L1 的「研发迭代中」）。判据 T-02 钉逐字相等。
+        "inc": "包括这几类：%s。" % _kinds_of("L1"),
         "exc": "不含已造成后果的（升到 R0）；不含被挡下的操作（L2）。",
         # ★★ 0.50.7（同上）：条→件事的换算口径写明（括号自解释的前提）。
         "unit": "单位是<b>条记录</b>，按最近 24 小时数。同一件事的几条记录"
@@ -143,6 +244,17 @@ TERMS = {
             _M.state_short(k) for k in ("R0", "L2", "L1", "Ls")),
         "exc": "<b>不等于</b>「防护全天在线」——它只是说这一刻没读到要处理的记录。",
         "unit": "它不数东西，只看此刻。"
+    },
+    # ★★ 0.51.0（四态问号小窗方案 v1.1 拍板点三，2026-10-16）：新增 dev 词条
+    #   —— 研发中徽标此前只能 hover 一句话，与旁边可点开的缺粮徽标**不一致**
+    #   （体验伤害：用户会疑惑"为什么这个能点、那个不能"）。dev 是身份态
+    #   （无 kind、不进派生），五字段手写；落点＝顶栏徽标旁的问号芯片。
+    "dev": {
+        "w": _wl("dev"),
+        "one": "这台机器在用还没发布的监理版本 —— 研发迭代的常态。",
+        "inc": "本机的版本号比已发布的版本号新时亮起。",
+        "exc": "不是故障，也不是失守 —— 它是灯旁边的一枚徽标，不跟主灯抢位。",
+        "unit": "它不数东西，只比本机版本与已发布版本。",
     },
     # ------------------------------------------------ 运行状态 ----
     # ★★ 0.37.2：原术语 `posture`（「现在的防线状态」）**改名并重写**为 `light`
@@ -428,13 +540,19 @@ def chip(key, text=None, mk=False):
     #   ★ 五字段写入纪律**不动**（判据 0353 逐词条核齐全、unit 空必须抛错），
     #     变的只是屏幕上显示多少 —— 显示层让步，定义层不松。
     #   ★ 顺序保持 inc→exc→unit：先说"有什么"，再说"不是什么"，最后说"怎么数"。
+    sup = "".join('<div class="tsup">%s</div>' % render(t[f])
+                  for f in ("inc", "exc", "unit")
+                  if (t.get(f) or "").strip())
+    # ★★ 0.51.0：代码生成的成品 HTML 块（目前仅拦截词条的规则全表）紧随 inc
+    #   之后 —— 不经 render（其白名单只有 b/code），也不带 name（不进互斥组：
+    #   外层术语芯片互斥时，用户可能正读到展开的规则表）。
+    extra = t.get("list_html") or ""
+    if extra:
+        sup += extra
     return ("<details class=\"%s\" data-t=\"%s\" name=\"term\"><summary>%s</summary>"
             "<div class=\"tdef\">%s%s%s</div></details>"
             % (cls, _H.escape(key, quote=True), _H.escape(label),
-               head, render(t["one"]),
-               "".join('<div class="tsup">%s</div>' % render(t[f])
-                       for f in ("inc", "exc", "unit")
-                       if (t.get(f) or "").strip())))
+               head, render(t["one"]), sup))
 
 
 def line(keys, title="这些词是什么意思（点开看）"):

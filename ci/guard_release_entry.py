@@ -38,6 +38,10 @@ ROOT = os.path.dirname(HERE)
 
 PASSED = []
 FAILED = []
+SKIPPED = []          # 2026-10-16（S53）：补上本仓判据协议的 SKIP 通道
+                      # （「返回 True/None=绿、SKIP 前缀=跳过、问题串=红」——
+                      # 本套件此前没实现 SKIP；S53 的「无暂存＝非交接时刻」
+                      # 需要诚实的跳过语义，不许假绿也不许假红）
 
 
 def check(name):
@@ -46,7 +50,10 @@ def check(name):
             r = fn()
         except Exception as e:                       # noqa: BLE001
             r = "判据自身异常：%r" % (e,)
-        (PASSED if r is True else FAILED).append((name, r))
+        if isinstance(r, str) and r.startswith("SKIP"):
+            SKIPPED.append((name, r))
+        else:
+            (PASSED if r is True else FAILED).append((name, r))
         return fn
     return deco
 
@@ -469,17 +476,114 @@ def n_s50():
     return True
 
 
+# ══════════ S53 · 交接自检（2026-10-16，机制层方案 v1.0 §4）══════════════════
+#   病灶：交接单接手时——暂存区带空白缺陷（--check rc=2）、manifest 未对齐、
+#   新文件裸奔未归批 ⇒ 接手人先考古一小时。三件全是**可机械判**的状态，
+#   却全靠人自觉。本判据把它们钉成「有暂存（＝交接时刻的机械代理）就必查」。
+#
+#   ★ 口径：`git diff --cached --quiet` rc≠0 ＝ 有暂存 ＝ 交接时刻 ⇒ 三件套全查；
+#     无暂存 ⇒ 诚实 SKIP（「非交接时刻测不出」——协议允许，不假绿）。
+#   ★ 判定逻辑抽纯函数（_staged_ws_clean / _naked_new_files），N-S53 喂变异输入，
+#     **零写脏真实暂存区**。
+#   ★ ②（manifest 对齐）无既有判据设站（已排查 self_check 在 ci/ 下零消费），
+#     P5 允许；它放最后（最贵的一个）。
+_NAKED_DOMAINS = ("ci/", "hooks/", "psl/", "scripts/", "rules/", "docs/")
+
+
+def _staged_ws_clean(check_out):
+    """① git diff --cached --check 的输出为空 ＝ 暂存区空白干净。"""
+    return not (check_out or "").strip()
+
+
+def _naked_new_files(status_out):
+    """③ 未跟踪文件裸奔在产品/判据域 ⇒ 返回清单（豁免项不列）。
+
+    敏感域：ci/ hooks/ psl/ scripts/ rules/ docs/ ＋ 根目录非 `_p_`/`_tools_`
+    前缀的 .py（后两者是本仓探针/工具惯例）。output/ .workbuddy/ out/ dist/
+    logs/ 是产物与工作区，不在敏感域。
+    """
+    naked = []
+    for ln in (status_out or "").splitlines():
+        ln = ln.rstrip("\r")
+        if not ln.startswith("??"):
+            continue
+        p = ln[2:].strip().strip('"').replace("\\", "/")
+        if not p:
+            continue
+        if any(p.startswith(d) for d in _NAKED_DOMAINS):
+            naked.append(p)
+        elif "/" not in p and p.endswith(".py") \
+                and not p.startswith(("_p_", "_tools_")):
+            naked.append(p)
+    return naked
+
+
+@check("S53 交接自检（有暂存才查）：暂存空白干净 ＋ 无裸奔新文件 ＋ manifest 对齐")
+def s53():
+    q = subprocess.run(["git", "-C", ROOT, "diff", "--cached", "--quiet"],
+                       capture_output=True, timeout=30)
+    if q.returncode == 0:
+        return ("SKIP：无暂存内容——非交接时刻，三件套测不出（诚实跳过；"
+                "交接时暂存区非空即自动转为全查）")
+    # ① 暂存空白干净
+    chk = subprocess.run(["git", "-C", ROOT, "diff", "--cached", "--check"],
+                         capture_output=True, text=True, encoding="utf-8",
+                         errors="replace", timeout=30)
+    if not _staged_ws_clean(chk.stdout):
+        return "暂存区带空白缺陷（交接债，`git diff --cached --check` 非空）：\n%s" \
+               % chk.stdout.strip()[:300]
+    # ③ 无裸奔新文件
+    st = subprocess.run(["git", "-C", ROOT, "status", "--porcelain"],
+                        capture_output=True, text=True, encoding="utf-8",
+                        errors="replace", timeout=30)
+    naked = _naked_new_files(st.stdout)
+    if naked:
+        return ("新文件裸奔未归批（交接债）：%s —— 显式 git add 归批，"
+                "或 .gitignore 登记豁免" % naked[:6])
+    # ② manifest 与源码对齐（只读调用；产品真源不复制逻辑）
+    try:
+        if ROOT not in sys.path:
+            sys.path.insert(0, ROOT)
+        import host_shield                                   # noqa: E402
+        ok, probs = host_shield.self_check()
+    except Exception as e:                                   # noqa: BLE001
+        return "self_check 调用失败（不可判非通过）：%r" % (e,)
+    if not ok:
+        return "manifest 与源码不对齐（交接债，先重签再交接）：%s" % (list(probs)[:3],)
+    return True
+
+
+@check("N-S53 负控：空白缺陷必须被抓、裸奔必须被抓、豁免必须放过（零写脏真实暂存区）")
+def n_s53():
+    if _staged_ws_clean("inbox_model.py:12: trailing whitespace.\n+xxx \n"):
+        return "负控失效：带尾随空格的 check 输出没被抓 ⇒ ①没牙"
+    if not _staged_ws_clean(""):
+        return "负控失效：干净输出被误抓 ⇒ ①过宽"
+    naked = _naked_new_files('?? ci/new_suite.py\n?? _p_probe.py\n'
+                             '?? docs/new.md\n?? output/x.png\n'
+                             '?? loose.py\n?? _tools_x/helper.py\n')
+    for need in ("ci/new_suite.py", "docs/new.md", "loose.py"):
+        if need not in naked:
+            return "负控失效：裸奔文件 %s 没抓到 ⇒ ③没牙（ got=%r）" % (need, naked)
+    for exempt in ("_p_probe.py", "output/x.png", "_tools_x/helper.py"):
+        if exempt in naked:
+            return "负控失效：豁免项 %s 被误抓 ⇒ ③过宽（got=%r）" % (exempt, naked)
+    return True
+
+
 def main():
     print("=" * 74)
     print("0.42.0 判据 —— 发布入口不许退化成「建了没人用」"
-          "（S40–S42 ＋ S48-release/S49/S50-release）")
+          "（S40–S42 ＋ S48-release/S49/S50-release ＋ S53 交接自检）")
     print("=" * 74)
     for n, r in PASSED:
         print("  ✅ %s" % n)
+    for n, r in SKIPPED:
+        print("  ⏭️ %s\n       → %s" % (n, r))
     for n, r in FAILED:
         print("  ❌ %s\n       → %s" % (n, r))
     print("-" * 74)
-    print("  通过 %d / 失败 %d" % (len(PASSED), len(FAILED)))
+    print("  通过 %d / 失败 %d / 跳过 %d" % (len(PASSED), len(FAILED), len(SKIPPED)))
     return 1 if FAILED else 0
 
 

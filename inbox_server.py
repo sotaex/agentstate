@@ -223,6 +223,21 @@ h2{font-size:15px;margin:0 0 12px}
 .tsup{margin-top:6px;padding-top:6px;border-top:1px dashed var(--line);color:var(--fg)}
 .tsup:first-of-type{margin-top:8px}
 .tdef b{color:var(--brand)}
+/* ★ 0.51.0（四态问号小窗）：拦截词条内的规则全表（嵌套折叠）。**不带
+   name 属性** —— 不是术语芯片，不进 name="term" 互斥组；展开体自带限高
+   滚动，外层小窗不被 37 行撑爆。规则编号淡显等宽，供与收件箱记录上的
+   「规则 SEC-01」对号入座（索引位；0.50.4 Q-04 退编号的是日报排行主显示位，
+   职责不同）。 */
+.tdef .rlist{margin:6px 0 0 0;font-size:12px}
+.tdef .rlist>summary{cursor:pointer;list-style:none;color:var(--muted);user-select:none}
+.tdef .rlist>summary::-webkit-details-marker{display:none}
+.tdef .rlist>summary::before{content:"\\25be  "}
+.tdef .rlist[open]>summary::before{content:"\\25b4  "}
+.tdef .rbody{margin-top:4px;max-height:45vh;overflow:auto;
+  border-top:1px dashed var(--line);padding-top:4px}
+.tdef .rrow{padding:1px 0}
+.tdef .rrow .rid{display:inline-block;min-width:56px;
+  font-family:var(--mono);font-size:10px;color:var(--muted)}
 /* 「账本存在哪个文件里」这类**补充细节**：默认收起，不占版面 */
 details.where{margin-top:8px;font-size:12px;color:var(--muted)}
 details.where>summary{cursor:pointer;list-style:none}
@@ -729,10 +744,18 @@ def _bar(items, token, posture=None, now=None, view="inbox", ex=None):
     #     `M.BADGE_TIP`（模型层与 `BADGE_LABEL` 同处，仍是**唯一真源**）；
     #     **完整原因句走顶栏可见的那句**（`light_explain()["reason"]` 的
     #     「另外：…」段），不靠 hover 兜。
-    _chips = "".join(
-        "<span class=\"bdg %s\" title=\"%s\">%s</span>"
-        % (_esc(k), _esc(M.BADGE_TIP.get(k, name)), _esc(name))
-        for k, name, why in (ex.get("badges") or []))
+    # ★★ 0.51.0（四态问号小窗方案 v1.1 拍板点三，2026-10-16）：每枚徽标后跟
+    #   一个裸「？」芯片（兄弟节点，不塞进 span —— 与药丸问号同构）。徽标 →
+    #   态词条键走 `M.BADGE_STATE`；未知徽标键 ⇒ **不加芯片**（.get 判空 ——
+    #   判据 S06/S14 会注入替身 dict，缺键当"没有"，不许 KeyError）。
+    _chip_parts = []
+    for k, name, why in (ex.get("badges") or []):
+        _st = M.BADGE_STATE.get(k)
+        _chip_parts.append(
+            "<span class=\"bdg %s\" title=\"%s\">%s</span>%s"
+            % (_esc(k), _esc(M.BADGE_TIP.get(k, name)), _esc(name),
+               GL.chip(_st, mk=True) if _st else ""))
+    _chips = "".join(_chip_parts)
     badge_html = ("<span class=\"badges\">%s</span>" % _chips) if _chips else ""
     return (
         "<header class=\"bar\">"

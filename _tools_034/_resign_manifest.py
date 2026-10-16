@@ -101,17 +101,47 @@ if not isinstance(files, dict) or not files:
 #   本轮我跑本工具（旧口径）把 hooks/pre_tool_use.py "重签"成裸哈希，
 #   而 `--manifest` 用归一化口径 ⇒ 校验立刻从绿变红。**量具自己错了，
 #   而它没有任何一道自检会发现**（自检只注入产品缺陷，不验量具口径）。
-#   ⇒ 现在：写回之前，先对每个"口径特殊件"验一次 —— 本工具算出的值必须与
-#     manifest 已记录值一致（干净状态下理应相等）。不一致 ⇒ 本工具口径就错了
-#     ⇒ **拒绝写回**（修工具，不许修清单）。
+#   ⇒ 2026-10-12 引入：写回之前，先对每个"口径特殊件"验一次。
+#
+# ★★ 2026-10-16 修订（GOV-01 落地时实测撞上）：原自检把「文件真实变更」
+#   与「口径漂移」混为一谈——特殊件发生**非版本行**的实质演进（本次给钩子加
+#   GOV-01 函数）时，归一化哈希必然变化 ⇒ 自检恒拒 ⇒ 钩子的实质演进被
+#   **永久阻塞**。这是自检自身的设计缺陷（它想验的是"口径一致"，却验成了
+#   "文件没变"）。改良：
+#     · 与构建器 `_manifest_hash_of` **逐字互证**（两个独立实现，import 真源
+#       不复制逻辑）——互证不一致 ⇒ 口径漂移 ⇒ 拒绝写回（X-003 硬保护保留）；
+#     · 互证一致但与 manifest 旧值不等 ⇒ 只能是文件真变了 ⇒ 正是重签的本职
+#       ⇒ 放行（打印声明，留下痕）。
+try:
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import build_package as _bp_cross                     # noqa: E402
+    _bp_hash_of = getattr(_bp_cross, "_manifest_hash_of", None)
+except Exception:                                         # noqa: BLE001
+    _bp_hash_of = None                                    # 构建器不在 ⇒ 退回旧口径（从严）
+
 _selfcheck_bad = []
+_selfcheck_changed = []
 for _rel in getattr(_hs_hash, "VERSION_BEARING_CHAIN_FILES", ()):
     if _rel in files and os.path.isfile(os.path.join(ROOT, _rel)):
-        if sha256(_rel) != files[_rel]:
-            _selfcheck_bad.append(_rel)
+        _got = sha256(_rel)
+        if _bp_hash_of is not None:
+            _bp = _bp_hash_of(_rel, os.path.join(ROOT, _rel))
+            if _bp != _got:
+                sys.exit("★ 量具自检失败：本工具口径(%s)与构建器口径(%s)在 %s 上不一致"
+                         " —— 口径漂移，**拒绝写回**（修工具，别修清单）"
+                         % (_got[:19], _bp[:19], _rel))
+        if _got != files[_rel]:
+            if _bp_hash_of is not None:
+                _selfcheck_changed.append(_rel)   # 口径已互证 ⇒ 是文件真变了，放行
+            else:
+                _selfcheck_bad.append(_rel)       # 无互证 ⇒ 无法区分，从严拒写
 if _selfcheck_bad:
-    sys.exit("★ 量具自检失败：口径特殊件 %s 算出的值与清单不符 —— 本工具口径与构建器"
-             "不一致，**拒绝写回**（修工具，别修清单）" % _selfcheck_bad)
+    sys.exit("★ 量具自检失败：口径特殊件 %s 算出的值与清单不符，且构建器口径不可用"
+             " —— 无法区分口径漂移与文件变更，**拒绝写回**（修工具，别修清单）" % _selfcheck_bad)
+if _selfcheck_changed:
+    print("（量具自检：口径特殊件 %s 已与构建器 `_manifest_hash_of` 逐字互证一致；"
+          "与清单旧值不同判为**文件真实变更**，照重签——非版本行演进是合法变更，"
+          "这正是本工具的本职）" % (_selfcheck_changed,))
 
 changed, missing, same = [], [], 0
 for rel in list(files):

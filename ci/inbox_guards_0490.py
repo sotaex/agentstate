@@ -511,8 +511,12 @@ def n_u03a():
     if "分母" not in PC.body_without_terms(page):
         return "负控失效：旧内联串没渲染出来（注入没生效）"
     # 连回正判据：真实现下日报页必须同源且正文无「分母」
+    # ★ 2026-10-16：T-01 上线首日抓到的第三处存量（修 U-01/S95 时漏了这）——
+    #   同一时钟竞态：渲染与判据两侧独立读「载入于 HH:MM」，跨分钟 ⇒ 此处伪报
+    #   「夹具不成立」。两侧归一（U-01 同法）。
     live = _page("report")
-    if M.reading_note() not in PC.body(live) or "分母" in PC.body_without_terms(live):
+    if (PC.note_text(M.reading_note()) not in PC.note_text(PC.body(live))
+            or "分母" in PC.body_without_terms(live)):
         return "夹具不成立：真实现本身就不满足 U-03 ⇒ 负控无分辨力"
     return True
 
@@ -815,7 +819,7 @@ def n_u05():
 
 
 # ════════════════════════════ U-04 · 乙1（铺「？」芯片，8 个落点）════════
-@check("U-04 ★ 乙1：8 个裸「？」芯片落位（筛选条4 + 药丸3 + 顶部灯1）")
+@check("U-04 ★ 乙1：基线 8 芯片落位（筛选条4+药丸3+灯1）＋ 徽标芯片按 BADGE_STATE 齐备")
 def u04():
     """乙1：日报页每个重要词都可点开看定义，收件箱页却一个「？」都没有
     （实测 term 芯片数 0）—— 同一个词两个页面两种待遇。
@@ -825,17 +829,32 @@ def u04():
     （屏幕上的「？」由 CSS `::after` 徽章渲染，summary 自身的字由
     `.term.mk>summary{font-size:0}` 藏掉 —— 徽章**不许**关掉去"消重复"，
     那是 C5 的错法，由 **U-16** 锁）；词本名进展开体首行。
-    词条清单 8 个：筛选条 action/info/archive/all（4）＋ 药丸 R0/L2/L1（3）
-    ＋ 顶部灯 light（1）。词条文字一律不动（0380 S17 钉死，只加落点）。
+    基线词条 8 个：筛选条 action/info/archive/all（4）＋ 药丸 R0/L2/L1（3）
+    ＋ 顶部灯 light（1）。
+    ★★ 0.51.0（四态问号小窗方案 v1.1 拍板点三）：**徽标芯片**加入 ——
+      顶栏每枚徽标（研发中/缺粮）旁各带对应态的问号芯片（`BADGE_STATE`
+      派生）。同步规则：**基线 8 全在（强度不降）**；出现陌生词条芯片 ⇒ 红；
+      有徽标无芯片 ⇒ 红；重复落点 ⇒ 红。
     """
     page = _page("inbox")
     chips = re.findall(r'<details class="term mk" data-t="([^"]+)"', page)
-    want = {"action", "info", "archive", "all", "R0", "L2", "L1", "light"}
-    if set(chips) != want:
-        return "mk 芯片集合 ≠ 8 词条：实到 %r" % (sorted(set(chips)),)
-    if len(chips) != 8:
-        return "mk 芯片数 = %d，应为 8（有重复落点）" % len(chips)
-    # ① summary 只能是「？」一个（"？？”＝ summary 自身的字没藏干净，见 U-16）
+    base = {"action", "info", "archive", "all", "R0", "L2", "L1", "light"}
+    if not base <= set(chips):
+        return "基线 8 芯片缺：%r" % sorted(base - set(chips))
+    # ★ 0.51.0：徽标 → 芯片派生断言（出现徽标必有对应芯片；陌生芯片即红）
+    bks = re.findall(r'<span class="bdg ([\w-]+)"', page)
+    for bk in bks:
+        st = M.BADGE_STATE.get(bk)
+        if not st:
+            return "徽标 %s 未登记 BADGE_STATE（有徽标没解释）" % bk
+        if st not in chips:
+            return "徽标 %s 旁缺「？」芯片（应指向词条 %s）" % (bk, st)
+    expect = base | {M.BADGE_STATE[b] for b in bks if b in M.BADGE_STATE}
+    if not set(chips) <= expect:
+        return "mk 芯片出现陌生词条：%r" % sorted(set(chips) - expect)
+    if len(chips) != len(set(chips)):
+        return "mk 芯片有重复落点（实到 %d 个标签）" % len(chips)
+    # ① summary 只能是「？」一个（"？？"＝ summary 自身的字没藏干净，见 U-16）
     if not re.search(r'<summary>？</summary>', page):
         return "mk 芯片的 summary 不是单个「？」（屏幕上会出现「？？」）"
     # ② 芯片不许被塞进链接里（兄弟节点，不是嵌套）
@@ -845,7 +864,7 @@ def u04():
     # ③ 展开体首行带词本名（复用 head 机制，不另写一套）
     #    ★ U-19（0.50.4）：发射器现带 name="term"（互斥小窗），子串随之更新
     #      —— 断言强度不变（head／summary／tdef 仍逐字在场）。
-    for key in want:
+    for key in set(chips):
         if ('data-t="%s" name="term"><summary>？</summary>'
                 '<div class="tdef"><b>' % key) \
                 not in page:
@@ -875,8 +894,12 @@ def n_u04():
         return "负控失效：摘掉 light 芯片后它仍在（注入没生效）"
     live = re.findall(r'<details class="term mk" data-t="([^"]+)"',
                       _page("inbox"))
-    if len(live) != 8:
-        return "夹具不成立：真实现本身就不是 8 个芯片 ⇒ 负控无分辨力"
+    live_bks = re.findall(r'<span class="bdg ([\w-]+)"', _page("inbox"))
+    expect = ({"action", "info", "archive", "all", "R0", "L2", "L1", "light"}
+              | {M.BADGE_STATE[b] for b in live_bks if b in M.BADGE_STATE})
+    if set(live) != expect:
+        return ("夹具不成立：真实现芯片集 %r ≠ 期望 %r ⇒ 负控无分辨力"
+                % (sorted(set(live)), sorted(expect)))
     return True
 
 
@@ -2675,6 +2698,247 @@ def n_w07():
     return True
 
 
+# ════════════ T-01 · 时变产物消费点审计（2026-10-16，机制层方案 v1.0 §2）════════════
+#   ★ 病灶（本判据存在的理由）：0.50.4（Q-22）给 `M.reading_note()` 加了实时
+#     「载入于 HH:MM」之后，**消费它的判据**若逐字比对（渲染后独立再调一次），
+#     两次读数跨分钟即伪红——同日全量复跑实测撞上（U-01），0470 S95 同病。
+#     修法是两侧经 `PC.note_text()` 归一（见本文件 `_note_matches`），但那只是
+#     修了两处存量——**没有尺子守着「今后不许再出现裸逐字比对」**。
+#   ★ P1 频率×损失：每次给时变实现加字段/每轮全量复跑都可能触发，伪红一轮浪费
+#     一轮分类（本仓已实测两次）；P2 二值可判定：AST 结构比对，无观感成分；
+#     P3 咽喉点：消费点唯一入口是 ci/ 套件目录，可枚举；P4 自检闭环：N-T01
+#     双向实测（裸必红/归一必绿）；P5 扩展优先：reading_note 的家就在本套件，
+#     并入不新建（常驻上限 29 不动）。
+#   ★ 口径（**方向判定**是本尺子的灵魂）：
+#     · `not in` / `!=` ＝「不等就判红」——时变产物两侧读数跨分钟必然不等
+#       ⇒ 伪红 ⇒ 记问题；
+#     · `in` / `==` ＝正向在场检查——时刻错过只会让该红的当轮不红（负控分辨力
+#       弱化），**不会把好的判红** ⇒ 豁免（本判据刻意做窄，防伪红不防弱分辨）；
+#     · 任何一侧经 `*.note_text(...)` 包裹 ＝ 已归一 ＝ 合规。
+#   ★ 名单 `_TIME_BARE_ATTRS` 刻意只有已知的时变唯一实现；给新实现加实时读数时
+#     **扩名单要过 L2 自问**（方案 §2 边界：本尺子只盯已知名单）。
+_TIME_BARE_ATTRS = ("reading_note",)
+
+
+def _time_consumption_problems(src, rel):
+    """AST 尺子：时变产物出现在「不等就红」方向的**裸**比对 ⇒ 问题串列表。
+
+    正判据与 N-T01 负控共用**同一把尺子**（不复制逻辑）。解析失败按问题报
+    （解析不了的东西守不了）。
+    """
+    import ast as _ast
+    try:
+        tree = _ast.parse(src)
+    except SyntaxError as e:
+        return ["%s 源码解析失败：%s" % (rel, e)]
+    probs = []
+
+    def _bare_time_call(operand):
+        """返回 None=与本审计无关；False=时变调用但已归一；True=**裸**时变调用。"""
+        call = operand
+        wrapped = False
+        if (isinstance(call, _ast.Call) and isinstance(call.func, _ast.Attribute)
+                and call.func.attr == "note_text"):
+            if not call.args:
+                return None                       # note_text() 无参——形态怪，不判
+            call, wrapped = call.args[0], True
+        if not isinstance(call, _ast.Call):
+            return None
+        f = call.func
+        if isinstance(f, _ast.Attribute) and f.attr in _TIME_BARE_ATTRS:
+            return not wrapped
+        return None
+
+    for node in _ast.walk(tree):
+        if not isinstance(node, _ast.Compare):
+            continue
+        risky = any(isinstance(op, (_ast.NotIn, _ast.NotEq)) for op in node.ops)
+        if not risky:
+            continue
+        for operand in [node.left] + list(node.comparators):
+            verdict = _bare_time_call(operand)
+            if verdict:
+                probs.append("%s:L%d 时变产物 %s() 出现在裸「不等」比对里 —— 跨分钟必伪红，"
+                             "两侧须经 PC.note_text 归一（U-01 事故同型）"
+                             % (rel, getattr(node, "lineno", 0),
+                                _TIME_BARE_ATTRS[0]))
+    return probs
+
+
+@check("T-01 ★ 时变产物消费点审计：全部套件里 reading_note() 不许裸身出现在「不等」比对")
+def t_01():
+    """正判据：扫 ci/ 全部套件源码（含本文件），裸比对 ⇒ 红。"""
+    cdir = os.path.join(ROOT, "ci")
+    names = sorted(n for n in os.listdir(cdir)
+                   if n.startswith(("inbox_guards_", "guard_")) and n.endswith(".py"))
+    names.append("regression_gate.py")
+    all_probs = []
+    for n in names:
+        p = os.path.join(cdir, n)
+        if not os.path.isfile(p):
+            continue
+        all_probs += _time_consumption_problems(
+            io.open(p, encoding="utf-8").read(), "ci/" + n)
+    if all_probs:
+        return "；".join(all_probs[:4])
+    return True
+
+
+@check("N-T01 ★ 负控：裸「不等」比对必须被 T-01 的尺子抓到；归一后必须放过")
+def n_t01():
+    """内建负控（同尺双喂）：①裸形态 ⇒ 尺子必须报；②归一形态 ⇒ 必须空。
+
+    少了②，归一可能只是「把一切吞掉」的纸糊；少了①，尺子可能根本没牙。
+    """
+    naked = ("from x import inbox_model as M, page_caliber as PC\n"
+             "def judge(page):\n"
+             "    if M.reading_note() not in page:\n"
+             "        return '红'\n"
+             "    return True\n")
+    p1 = _time_consumption_problems(naked, "负控-裸")
+    if not p1:
+        return "负控失效：裸「不等」比对没被抓到 ⇒ T-01 没牙（U-01 事故会重演）"
+    wrapped = ("from x import inbox_model as M, page_caliber as PC\n"
+               "def judge(page):\n"
+               "    if PC.note_text(M.reading_note()) not in PC.note_text(page):\n"
+               "        return '红'\n"
+               "    return True\n")
+    p2 = _time_consumption_problems(wrapped, "负控-归一")
+    if p2:
+        return "负控失效：归一后的形态仍被抓 ⇒ 尺子过宽（会把 U-01 的修法也判掉）：%r" % p2
+    # 正向在场检查必须豁免（方向判定的一半，不测就等于没定方向）
+    fwd = ("from x import inbox_model as M\n"
+           "def judge(page):\n"
+           "    if M.reading_note() in page:\n"
+           "        return '红'\n"
+           "    return True\n")
+    p3 = _time_consumption_problems(fwd, "负控-正向")
+    if p3:
+        return "负控失效：正向 in 比对不该被抓（它不伪红）：%r" % p3
+    return True
+
+
+@check("T-02 ★ 四态词条内容派生审计：R0/L1 事件类型层逐字派生 · "
+       "L2 规则层同源（总数/行数/说明）· 类别中文名与徽标映射完备")
+def t_02():
+    """0.51.0 四态问号小窗方案 v1.1 动作二/三（2026-10-16）。
+
+    病灶：手写清单必漂（实测 R0 漏「安全区加锁失败」、L1 漏「研发迭代中」）；
+    拦截态内容全集在规则层（37 条），kind 只是投影容器。本判据钉死三件事：
+    ① R0/L1 的 inc 与 `glossary._kinds_of` 派生**逐字相等**（手写回潮即红）；
+    ② L2 的概述句数字、全表行数、每行说明与 `inbox_report.rule_table()`
+      **同源**（写死 37 即红）；
+    ③ 类别中文名映射（`_CATEGORY_ZH`）与徽标→词条映射（`BADGE_STATE`）
+      **完备**（新增类别/徽标没登记 ⇒ 红）。
+    """
+    import glossary as GL
+    import inbox_report as R
+    # ── ① R0/L1：事件类型层逐字派生 ──
+    for st, tail in (("R0", "具体是哪一件事，看收件箱每条记录的原因。"), ("L1", "")):
+        want = "包括这几类：%s。%s" % (GL._kinds_of(st), tail)
+        got = GL.TERMS[st]["inc"]
+        if got != want:
+            return "%s 词条 inc 与派生不一致（手写回潮？）：%r" % (st, got[:60])
+    # 派生本身必须覆盖真源里的每个 kind（防 _kinds_of 与真源脱节）
+    for st in ("R0", "L1"):
+        for kind, lv in M.LEVEL_OF_KIND.items():
+            if lv != st:
+                continue
+            t = M.TITLE_OF_KIND.get(kind) or kind
+            seg = t.split("：", 1)[1] if "：" in t else t
+            if seg not in GL.TERMS[st]["inc"]:
+                return "%s 派生清单漏 %s（%s）" % (st, kind, seg)
+    # ── ② L2：规则层同源 ──
+    rows = R.rule_table()
+    if not rows:
+        return "规则表为空 —— 正常环境（安装态/仓根态）必带 rules/default.json"
+    inc = GL.TERMS["L2"]["inc"]
+    if ("装着 %d 条拦截规则" % len(rows)) not in inc:
+        return "L2 概述句的规则总数与 rule_table() 不同源（写死数字？）：%r" % inc[:50]
+    lh = GL.TERMS["L2"]["list_html"] or ""
+    n_rows = lh.count('class="rrow"')
+    if n_rows != len(rows):
+        return "L2 全表行数(%d) != 规则表条数(%d)" % (n_rows, len(rows))
+    for r in rows:
+        if (">%s</span>" % r["id"]) not in lh:
+            return "L2 全表缺规则 %s" % r["id"]
+        zh = r.get("description_zh")
+        if zh and zh not in lh:
+            return "L2 全表规则 %s 的中文说明缺失（写死/漏译？）" % r["id"]
+    # ── ③ 类别中文名完备（fail-loud 的正向面）──
+    for r in rows:
+        try:
+            GL._cat_zh(r.get("category") or "?")
+        except GL.UnknownTerm as e:
+            return "类别中文名未登记：%s" % e
+    # ── ④ 徽标 → 态词条映射完备（缺粮＝Ls、研发中＝dev）──
+    for bk in M.BADGE_LABEL:
+        st = M.BADGE_STATE.get(bk)
+        if not st:
+            return "徽标 %s 未登记 BADGE_STATE（页面将不出问号芯片）" % bk
+        if st not in GL.TERMS:
+            return "徽标 %s 指向的词条 %s 不存在" % (bk, st)
+    return True
+
+
+@check("N-T02 ★ 负控：假 kind 入清单 / 假 category 抛错 / 假规则改总数与空表降级")
+def n_t02():
+    """同尺三喂：证明清单是**派生**不是手写、fail-loud 真有牙、还原后回绿。"""
+    import glossary as GL
+    import inbox_report as R
+    # ── ① 假 kind 注入 → 清单必须跟上（派生的证据；手写串不会变）──
+    orig_lk = dict(M.LEVEL_OF_KIND)
+    orig_tk = dict(M.TITLE_OF_KIND)
+    try:
+        M.LEVEL_OF_KIND["host_shield_xxx"] = "R0"
+        M.TITLE_OF_KIND["host_shield_xxx"] = "失守：判据自造的假问题"
+        if "判据自造的假问题" not in GL._kinds_of("R0"):
+            return "负控失效：注入假 kind 后清单没跟上 ⇒ 清单不是派生（手写回潮）"
+    finally:
+        M.LEVEL_OF_KIND.clear()
+        M.LEVEL_OF_KIND.update(orig_lk)
+        M.TITLE_OF_KIND.clear()
+        M.TITLE_OF_KIND.update(orig_tk)
+    if "判据自造的假问题" in GL._kinds_of("R0"):
+        return "还原链路坏：还原 LEVEL_OF_KIND 后假条目仍在"
+    # ── ② 未登记类别 ⇒ _cat_zh 必须抛（不静默露英文）──
+    try:
+        GL._cat_zh("alien_cat")
+        return "负控失效：未登记类别没抛错 ⇒ fail-loud 失守（页面会露英文）"
+    except GL.UnknownTerm:
+        pass
+    # ── ③ 假规则夹具：概述句总数/全表跟着变；含假类别 ⇒ 抛错；空表 ⇒ 降级真话 ──
+    #   （概述句与全表**都**要过类别映射 ⇒ 夹具分三段：全合法类别验证派生、
+    #    含未登记类别验证抛错、空表验证降级 —— 混在一段会让抛错提前、测不到派生。）
+    orig_rt = R.rule_table
+    fake_ok = [{"id": "FAKE-01", "category": "secrets", "description_zh": "判据自造的假规则"},
+               {"id": "FAKE-02", "category": "secrets", "description_zh": "假规则二"}]
+    fake_bad = [{"id": "FAKE-03", "category": "alien_cat", "description_zh": "假规则三"}]
+    try:
+        R.rule_table = lambda: fake_ok
+        if "装着 2 条拦截规则" not in GL._shield_overview():
+            return "负控失效：夹具 2 条 ⇒ 概述句没跟着变 ⇒ 总数写死"
+        _lh = GL._shield_list_html()
+        if _lh.count('class="rrow"') != 2 or "判据自造的假规则" not in _lh:
+            return "负控失效：夹具 2 条 ⇒ 全表没跟着变（行数写死或漏派生）"
+        R.rule_table = lambda: fake_bad
+        try:
+            GL._shield_overview()
+            return "负控失效：未登记类别 alien_cat ⇒ 未抛错（fail-loud 失守）"
+        except GL.UnknownTerm:
+            pass
+        R.rule_table = lambda: []
+        if "读不到" not in GL._shield_overview():
+            return "负控失效：空表 ⇒ 概述句没有降级真话（会编清单或装没事）"
+        if GL._shield_list_html() != "":
+            return "负控失效：空表 ⇒ list_html 应为空串（chip 跳过全表）"
+    finally:
+        R.rule_table = orig_rt
+    if "装着 %d 条拦截规则" % len(R.rule_table()) not in GL._shield_overview():
+        return "还原链路坏：还原 rule_table 后概述句与真源不一致"
+    return True
+
+
 def main():
     print("=" * 78)
     print("0.48.5 Antinel 监理细节修订判据（交接件 v1.1 §5.7）—— "
@@ -2683,7 +2947,9 @@ def main():
           "批6 W-03（A2）· 批7 W-04（B1）· 批8 W-05（B2）· 批9 W-06（B3）· "
           "批10 C1（负控模板化：渲染型负控走 _mut_render 两步法）· "
           "批11 C2（扫渲染产物统一走 page_caliber，由元判据 S48 守）· "
-          "批12 C5/U-16（问号同形）＋ C4/W-07（一次性调用方等窗就位，真进程实测）")
+          "批12 C5/U-16（问号同形）＋ C4/W-07（一次性调用方等窗就位，真进程实测）· "
+          "批13 T-02/N-T02（四态词条内容派生审计：R0/L1 事件类型层、L2 规则层、"
+          "类别中文名与徽标映射；U-04 同步徽标芯片）")
     print("（变异只在内存，账本与链只落临时目录，不写任何产品文件；"
           "戊2/戊3 视觉项无判据，走 §6.1 截图验收 —— U-13 只含戊2 机械部分）")
     print("=" * 78)
