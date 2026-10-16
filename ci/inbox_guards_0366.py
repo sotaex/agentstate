@@ -482,7 +482,13 @@ def m7_snapshot_not_in_package():
     rel = os.path.relpath(G._SNAP_DIR, G.PKG).replace("\\", "/")
     man = os.path.join(G.PKG, "psl", "manifest.json")
     if not os.path.isfile(man):
-        return "manifest 不存在（本轮尚未打包）"
+        # ★ 0.51.0：原先这里是 `return "manifest 不存在（本轮尚未打包）"`。
+        #   本文件的 main() 是**宽松口径**（拿到非 True 也记 ✅，只有抛异常才红）
+        #   ⇒ 这句"判不出"会被记成**绿**，正是本仓点名的「带备注的通过」。
+        #   改抛 ⇒ 判不出按红记（本轮 `_p_harness_audit.py` 全仓扫出的 2 处 WARN 之一）。
+        raise AssertionError(
+            "manifest 不存在（本轮尚未打包）⇒ 本判据判不出，按红记 —— "
+            "「判不出」不许冒充「通过」")
     with io.open(man, encoding="utf-8") as f:
         m = json.load(f)
     files = m.get("files") or m.get("entries") or []

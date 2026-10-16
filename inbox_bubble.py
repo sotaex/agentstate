@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: Apache-2.0
 
-"""值守台 · 冒泡（0.49.0）：「需要人工介入马上处理」的通知窗。
+"""Antinel 监理 · 紧急提醒（0.49.0）：「需要人工介入马上处理」的通知窗。
 
 ★★ 起点（创始人 2026-10-14 夜间三条意见之一）：
   「以前默认的冒泡，会当时弹出来，还有声音。当出现需要人工介入马上处理的
@@ -13,8 +13,8 @@
   · 旧气泡 15 秒就没 ⇒ **一闪而过**（急事被漏掉的那个老毛病）；
   · WinRT Toast 落操作中心，但**放不下「确认」按钮**，界面也由 Windows 画，
     与值守台两张皮。
-  ⇒ 本模块用**值守台自己的 app 小窗**（Edge `--app`，与面板同一个浏览器
-    profile、同一套 CSS、同一枚动效哨标）承载冒泡：置顶、不自动消失、
+  ⇒ 本模块用**Antinel 监理自己的 app 小窗**（Edge `--app`，与面板同一个浏览器
+    profile、同一套 CSS、同一枚动效哨标）承载紧急提醒：置顶、不自动消失、
     带「知道了（去处理）」确认钮，点确认才关。**界面就是值守台的一部分。**
 
 ★ 三条纪律（与全仓同构）：
@@ -36,12 +36,12 @@ from urllib.parse import urlencode
 import inbox_config as C
 import inbox_model as M
 
-#: 冒泡触达的级别：**要你马上动手**的事。其余级别走 `inbox_notify`（toast）。
+#: 紧急提醒触达的级别：**要你马上动手**的事。其余级别走 `inbox_notify`（toast）。
 URGENT_LEVELS = ("R0", "L2")
 
-#: 同类两次冒泡的最小间隔（秒）—— 与 `inbox_notify.MIN_INTERVAL` 同值同源。
+#: 同类两次紧急提醒的最小间隔（秒）—— 与 `inbox_notify.MIN_INTERVAL` 同值同源。
 MIN_INTERVAL = 1800
-#: 用户「知道了」之后，同类多久不再冒（秒）。
+#: 用户「知道了」之后，同类多久不再提醒（秒）。
 ACK_QUIET_SEC = 1800
 
 #: 事由正文最大长度（URL 里带着它，别把查询串撑爆；截断处加省略号）。
@@ -81,7 +81,7 @@ def play_sound(root=None):
 
 # ---------------------------------------------------------------- 页面 ----
 def _url(base, title, body, level, state, kind):
-    """冒泡页 URL（事由走 query —— 一次性渲染，不进任何历史）。"""
+    """紧急提醒页 URL（事由走 query —— 一次性渲染，不进任何历史）。"""
     q = urlencode({"v": "bubble", "bt": title, "bb": body,
                    "bl": level, "bs": state, "bk": kind})
     sep = "&" if "?" in base else "?"
@@ -89,7 +89,7 @@ def _url(base, title, body, level, state, kind):
 
 
 def render(title, body, level, token, run_id="", kind="R0", console_open=False):
-    """冒泡页 HTML：**值守台同一套 CSS ＋ 同一枚动效哨标**（ founder 要求）。
+    """紧急提醒页 HTML：**值守台同一套 CSS ＋ 同一枚动效哨标**（ founder 要求）。
 
     `console_open`：渲染这一刻值守台**已经开着**（`host_shield.console_is_visible()`
       的当场读数）⇒ **不画**「打开值守台」按钮，改画一句"它开着"的状态。
@@ -100,12 +100,17 @@ def render(title, body, level, token, run_id="", kind="R0", console_open=False):
         内容从头来"。⇒ 如实说"开着"，并把它**切到前面**。
     """
     import inbox_server as SV
+    import inbox_window as _WIN
     st = level if level in M.STATE_VAR else "R0"
-    mark = (" · 冒泡#" + run_id) if run_id else " · 冒泡"
+    # ★ 0.50.6（T-09 收编）：标题标记只从 `inbox_window.BUBBLE_TITLE_MARK`
+    #   **派生**，不在此硬编码第二份 —— 0.49.0 起两处各写各的，本轮改名
+    #   （冒泡→紧急提醒）因此只改常量一处即全链生效。
+    _mark = _WIN.BUBBLE_TITLE_MARK
+    mark = (_mark + "#" + run_id) if run_id else _mark
     body_txt = str(body or "")[:BODY_MAX] + ("…" if len(str(body or "")) > BODY_MAX
                                               else "")
     css = SV.CSS + """
-/* ---- 0.49.0 冒泡窗（与值守台同源：同一份 CSS，只加冒泡自己的几行）---- */
+/* ---- 0.49.0 紧急提醒窗（与值守台同源：同一份 CSS，只加紧急提醒自己的几行）---- */
 /* ★★★ 0.50.1（创始人截图一「泡泡下沿没露出来」）：
    `height:100%` 把文档钉死在视口高度上 ⇒ 内容超出时只能被**裁掉**，
    而且页面**量不出**自己缺多少。改 `min-height` ⇒ 内容能撑开文档，
@@ -190,10 +195,13 @@ ok.addEventListener("click", function(){
     }
     /* 不替用户标记「已处理」，也不自动关窗：确认≠处理，处理完由用户手动关。
        ★★ 但**按钮要退场**（见 `.bub-done` 的注释）：换一行状态文字，
-       不留一个"点不动的按钮"（那正是创始人截图二看到的形状）。 */
+       不留一个"点不动的按钮"（那正是创始人截图二看到的形状）。
+       ★ 0.50.6（STE）：状态行 28 字缩到 22 字 —— 三个事实一个不少：
+       「已确认」（知悉）、「还没标记处理」（≠已处理）、
+       「点右上角 × 关」（手工关）。判据 B-03 锚点同步（逐字串替换）。 */
     var s = document.createElement("span");
     s.className = "bub-done";
-    s.textContent = "已确认（尚未标记处理）· 处理后请点右上角 × 关闭";
+    s.textContent = "已确认，还没标记处理 · 处理后点右上角 × 关";
     ok.replaceWith(s);
     setTimeout(fit, 30);
   });
@@ -265,8 +273,8 @@ op.addEventListener("click", function(){
         #   不是「讲我们怎么实现的机制」。
         #   ① 「知道了（去处理）」→「知道了」：括号把**两件事**绑成一个动作，
         #      而代码立场明确是「确认 ≠ 处理」（bubble_ack 不代用户标已处理）
-        #      ⇒ 原按钮文案与代码立场相反。确认态里的「尚未标记处理 /
-        #      处理后请点右上角 × 关闭」已经把后一步说清了。
+        #      ⇒ 原按钮文案与代码立场相反。确认态里的「还没标记处理 /
+        #      点右上角 × 关」已经把后一步说清了。
         #   ② 「不自动消失 · 处理完手工关」→「会一直留着，直到你处理完」：
         #      前半句在讲机制，后半句「手工关」是口语；改后直接说用户利益。
         "<span class=\"bub-note\">会一直留着，直到你处理完</span>"
@@ -276,14 +284,14 @@ op.addEventListener("click", function(){
            SV._esc(title), SV._esc(body_txt), act_open, SV._LOGO_JS, js))
 
 
-# ---------------------------------------------------------------- 冒泡 ----
+# ---------------------------------------------------------------- 紧急提醒 ----
 def _throttled(kind, root, now):
     """同类是否在静默期（刚弹过 / 用户刚确认过）。返回 `(该不该跳过, 原因)`。"""
     import inbox_notify as NT
     th = NT.throttle_state(root) or {}
     last = th.get("bubble:" + str(kind))
     if isinstance(last, (int, float)) and now - last < MIN_INTERVAL:
-        return True, "同类 %d 秒内已冒过泡（门铃节流，台账照记）" % MIN_INTERVAL
+        return True, "同类 %d 秒内已提醒过（门铃节流，台账照记）" % MIN_INTERVAL
     acked = th.get("bubble-ack:" + str(kind))
     if isinstance(acked, (int, float)) and now - acked < ACK_QUIET_SEC:
         return True, "你 %d 秒前确认过同类，先不打扰" % ACK_QUIET_SEC
@@ -293,9 +301,9 @@ def _throttled(kind, root, now):
 def pop(title, body, level="R0", state=None, root=None, kind=None, force=False,
         now=None, sound=True, port=None, opener=None, verbose=True, cfg=None,
         console=None):
-    """弹一枚冒泡。返回 dict **如实报告**（`ok` 只在窗口真就位时为 True）。
+    """弹一枚紧急提醒。返回 dict **如实报告**（`ok` 只在窗口真就位时为 True）。
 
-    ★ 闸（不变式 I4）：值守台窗口正开着 ⇒ 不弹（用户自己正看着，
+    ★ 闸（不变式 I4）：Antinel 监理窗口正开着 ⇒ 不弹（用户自己正看着，
       再弹就是「右下角又冒小泡泡」那个老毛病）。
     ★ 一次只留一枚：先收旧的，再开新的（不许叠成一串）。
     ★ `opener` 可注入：判据不起真浏览器也能验这条链。
@@ -306,7 +314,7 @@ def pop(title, body, level="R0", state=None, root=None, kind=None, force=False,
     now = time.time() if now is None else float(now)
     kind = kind or level
     if level not in URGENT_LEVELS:
-        rep["why"] = "级别 %s 不走冒泡（冒泡只给 %s）" % (level, "/".join(URGENT_LEVELS))
+        rep["why"] = "级别 %s 不走紧急提醒（紧急提醒只给 %s）" % (level, "/".join(URGENT_LEVELS))
         return rep
     on, _why = cfg_bubble_on(cfg, root)
     if not on:
@@ -332,34 +340,34 @@ def pop(title, body, level="R0", state=None, root=None, kind=None, force=False,
         rep["why"] = why
         return rep
 
-    # ③ 承载页面 = 值守台服务 ⇒ 先确保它在跑（沿用守护进程那套幂等）。
+    # ③ 承载页面 = Antinel 监理服务 ⇒ 先确保它在跑（沿用守护进程那套幂等）。
     #   ★ `console` 是第二个注入点：判据要能在**不绑端口、不起进程**的
     #     前提下验「服务起不来 ⇒ 如实说发不出」这条路。
     import inbox_server as SV
     _ensure = console or SV.ensure_console
     rec, _started = _ensure(port if port is not None else SV.DEFAULT_PORT, root)
     if not rec:
-        rep["why"] = "Antinel 监理服务起不来，冒泡没有承载页面（急事仍在收件箱里）"
+        rep["why"] = "Antinel 监理服务起不来，紧急提醒没有承载页面（急事仍在收件箱里）"
         return rep
     base = rec.get("url") or ""
     if not base:
-        rep["why"] = "Antinel 监理记录里没有 URL，冒泡发不出去"
+        rep["why"] = "Antinel 监理记录里没有 URL，紧急提醒发不出去"
         return rep
 
-    # ④ 一次只留一枚：收旧冒泡
+    # ④ 一次只留一枚：收旧窗
     import inbox_window as WIN
     try:
         n_closed, _why = WIN.close_bubble_windows()
         rep["closed_old"] = int(n_closed)
     except Exception as e:                                  # noqa: BLE001
-        rep["why"] = "收旧冒泡失败：%s: %s" % (type(e).__name__, e)
+        rep["why"] = "收旧窗失败：%s: %s" % (type(e).__name__, e)
 
     # ⑤ 开窗 + 等它就位 + 置顶
     url = _url(base, str(title), str(body), level, state or level, str(kind))
     try:
         rid = WIN.build_run_id(rec.get("token"))
     except Exception as e:                                  # noqa: BLE001
-        rep["why"] = "算不出冒泡窗口身份：%s: %s" % (type(e).__name__, e)
+        rep["why"] = "算不出紧急提醒窗口身份：%s: %s" % (type(e).__name__, e)
         return rep
     if opener is not None:
         rep.update(opener(url) or {})
@@ -403,5 +411,5 @@ def cfg_bubble_on(cfg=None, root=None):
     """配置开关（默认开：创始人要它回来）。返回 `(开不开, 原因)`。"""
     cfg = cfg if cfg is not None else C.load(root)
     if not bool(cfg.get("bubble", True)):
-        return False, "配置里关掉了冒泡（bubble=false）"
+        return False, "配置里关掉了紧急提醒（bubble=false）"
     return True, ""

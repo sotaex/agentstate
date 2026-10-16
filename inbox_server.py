@@ -57,7 +57,7 @@ ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 #: （netstat/tasklist/powershell…）时若不显式给这个标志，Windows 会**新建一个
 #: 控制台** ⇒ 用户看到黑窗一闪。`host_shield`/`egress` 同款常量，不在本文件另立口径。
 _CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
-# ★ 2026-10-14（创始人实证「起得来、活不久」）：**app 窗口/冒泡窗的浏览器
+# ★ 2026-10-14（创始人实证「起得来、活不久」）：**app 窗口/紧急提醒窗的浏览器
 #   必须与调用方进程树分离**。实测（两臂对照，同一台机同一条命令）：
 #     命令内：窗口 t+0、t+5 都在；命令结束、下一个调用：窗口没了。
 #   ⇒ Popen 只带 _CREATE_NO_WINDOW 时，msedge 挂在调用方（CLI／一次性
@@ -111,15 +111,19 @@ button{font:inherit;cursor:pointer}
 .pill{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid var(--line)}
 .dot{width:8px;height:8px;border-radius:50%}
 /* ★ 0.50.0（创始人「值守台应该有一个能漂浮的最小态……哨兵很多时候不要
-   碍事，只要在，就行了」）：顶部条**右上角**（与系统最小化同一行）的
-   收缩钮。符号＝**动效哨标本体**（与头部左侧同一枚实时 SVG）——
-   点它，值守台就收缩成屏幕上那枚漂浮哨标，所见即所得，不用猜符号。
-   判据 FLO-02 锁：按钮在、用的是 `_logo_mark`（不是静态图）、
-   title 说人话、POST 的是 `op=collapse`。 */
-.collbtn{flex:none;width:40px;height:40px;padding:0;border:1px solid var(--line);
-  border-radius:10px;background:var(--bg);line-height:0}
-.collbtn:hover{border-color:var(--brand)}
-.collbtn svg{width:100%;height:100%;display:block}
+   碍事，只要在，就行了」）：收缩入口。★★ 0.50.7（2026-10-16 创始人截图
+   「左上角 LOGO 与右上角收缩钮是同一枚图形、两个入口」）起**合并进
+   LOGO 本体** —— 点这枚动效哨标，值守台就收缩成屏幕上那枚漂浮哨标，
+   所见即所得，不用猜符号；右上角那枚重复的 SVG 删除（全页只一枚
+   lgmark，判据 J1 守）。判据 FLO-05 锁：入口在、用的是 `_logo_mark`
+   （不是静态图）、title 说人话、POST 的是 `op=collapse`。
+   ★ 按钮形态：全局 `button{font:inherit;cursor:pointer}` 已给手势；
+     `*{box-sizing:border-box}` 已在位 ⇒ 内边距/边框归零后仍是 48px
+     方框（`.logo` 的尺寸/圆角/深底照旧）；line-height:0 防空行盒撑高；
+     hover 用 inset 阴影（不改布局，与旧 collbtn 的描边变体同效果）。 */
+button.logo{padding:0;border:none;line-height:0}
+button.logo:hover{box-shadow:inset 0 0 0 1px var(--brand)}
+button.logo:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .collst{font-size:12px;color:var(--muted);margin-left:8px;align-self:center}
 .spacer{flex:1}
 /* ★ 0.48.5（交接件 §5.4 丁2/丁3）：顶部条右侧那个零信息量块连同类规则一起删
@@ -145,6 +149,15 @@ h2{font-size:15px;margin:0 0 12px}
 .badge{flex:none;width:44px;text-align:center;font-family:var(--mono);font-size:12px;font-weight:700;padding:4px 0;border-radius:6px;color:#fff}
 .badge.r0{background:var(--r0)}.badge.l2{background:var(--l2)}
 .badge.l1{background:var(--l1)}.badge.ls{background:var(--ls)}
+/* ★★ 0.51.0（规格 v1.2 §2.4）：**并存徽标**（研发中／缺粮）—— 与主灯**不争位**、
+   可多枚常驻同屏。★ 用纯 `span`（不接 `GL.chip()` 的「？」芯片）：芯片数量是
+   全站被逐个数过的锚（0490 U-04 / 0514 J1），徽标是**条件出现**的，加芯片会让
+   那个"数量"随之浮动、锚点当场失效；解释改由 `title` 承担。 */
+.badges{display:inline-flex;gap:4px;margin-left:6px;vertical-align:middle}
+.bdg{font-size:11px;font-weight:700;padding:1px 7px;border-radius:999px;
+  border:1px solid currentColor;font-family:inherit}
+.bdg.dev{color:var(--brand)}
+.bdg.granary{color:var(--ls)}
 .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:16px}
 /* ★ 0.50.4（Q-17）：同上，数字卡内边距 14px→11px。 */
 .metric{background:var(--panel);border-radius:10px;padding:11px}
@@ -204,12 +217,11 @@ h2{font-size:15px;margin:0 0 12px}
   border-left:4px solid var(--brand);border-radius:8px;background:var(--panel);color:var(--fg)}
 /* 旧 flipx 类保留为兼容标记；定位由 _FLIP_JS 用固定视口坐标统一计算。 */
 .term.flipx>.tdef{left:8px;right:auto}
-/* 三行结构（包含/不含/口径）改成**成对列**，不再挤成一长条 */
-.tr{margin-top:6px;padding-top:6px;border-top:1px dashed var(--line);color:var(--fg)}
-.tr:first-of-type{margin-top:8px}
-.tl{display:inline-block;min-width:34px;margin-right:6px;padding:1px 6px;
-  border-radius:4px;background:var(--line);color:var(--muted);
-  font-size:11px;font-weight:700;vertical-align:1px;text-align:center}
+/* 0.50.6：术语词条的补充行（原「包含/不含/口径」三行徽章退场 ——
+   创始人「能大白话就大白话，用户体验第一」）。无标签，内容自己会说话；
+   顺序由 glossary.chip() 保证：先说"有什么"，再说"不是什么"，最后说"怎么数"。 */
+.tsup{margin-top:6px;padding-top:6px;border-top:1px dashed var(--line);color:var(--fg)}
+.tsup:first-of-type{margin-top:8px}
 .tdef b{color:var(--brand)}
 /* 「账本存在哪个文件里」这类**补充细节**：默认收起，不占版面 */
 details.where{margin-top:8px;font-size:12px;color:var(--muted)}
@@ -236,6 +248,10 @@ details.where code{font-family:var(--mono);font-size:11.5px;word-break:break-all
 .ok{color:var(--l0);font-weight:700}.warn{color:var(--l1);font-weight:700}.bad{color:var(--r0);font-weight:700}.neutral{color:var(--muted);font-weight:700}.dev{color:var(--brand);font-weight:700}
 .empty{text-align:center;padding:40px;color:var(--muted)}
 .note{font-size:12px;color:var(--muted)}
+/* ★ 0.50.7（创始人截图二「失守后换行」）：六态枚举的原子单元 ——
+   每个态包一层 span 且 nowrap，窄面板下也只会在态与态之间的「·」处
+   折行，绝不再把「失守」「拦截」这类短词切成一截。 */
+.sixit{white-space:nowrap}
 .unread-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--brand);margin-right:6px;vertical-align:middle}
 /* ---- 0.35.3：三档 + 可展开卡片（创始人 2026-10-06 四条意见）---- */
 .fixbtn{border:1px solid var(--r0);background:var(--r0);color:#fff;border-radius:8px;
@@ -682,6 +698,12 @@ def _bar(items, token, posture=None, now=None, view="inbox", ex=None):
                    # ★ 0.50.4（Q-08）：「（3 件事）」补上动词 —— 光一个括号，
                    #   读者看不出「11 条」与「3 件事」是什么关系（条→件的换算
                    #   只有词条里写了）。⇒「（已归并为 3 件事）」自解释。
+                   # ★★ 0.50.7：「词条里写了」此前是**愿望不是事实** ——
+                   #   glossary 的 unit 字段零命中「归并」（`git log -S` 查史
+                   #   亦零命中 ⇒ 从写下那天就是空的，正是创始人截图四
+                   #   「归并无解释」的病灶，T-11「愿望写成了事实」同族）。
+                   #   本批把换算真写进 R0/L2/L1 的 unit 字段，这句注释
+                   #   才第一次成真。
                    "" if not show_groups else "（已归并为 %d 件事）" % g))
 
     # ★ 0.37.2：顺序改为**由重到轻**（失守 → 拦截 → 注意）。
@@ -694,36 +716,65 @@ def _bar(items, token, posture=None, now=None, view="inbox", ex=None):
                _pill("失守", "R0") + GL.chip("R0", mk=True),
                _pill("拦截", "L2") + GL.chip("L2", mk=True),
                _pill("注意", "L1") + GL.chip("L1", mk=True)))
+    # ★★ 0.51.0（规格 v1.2 §2.4）：**并存徽标**行（研发中／缺粮）。
+    #   与主灯**不争位**：主灯互斥、徽标可多枚常驻 —— "研发中的机器此刻失守"
+    #   就是 R0 主灯 ＋ 研发中徽标同屏，两个事实都显示，谁也不掩盖谁。
+    #   ★ `ex.get("badges")`（不是 `["badges"]`）：判据 S06/S14 会注入**只含
+    #     老键的替身 dict**（证明"真读 light_explain"）—— 缺键必须当"没有徽标"，
+    #     不许 KeyError。
+    #   ★★ 0.51.0 出包前实测（0490 U-11 判红，**我自己引入的**）：
+    #     第一版把 `why`（完整原因句，38 字）塞进了芯片的 `title=`，
+    #     而 U-11 锁的是**收件箱页全部 title 属性 ≤ 20 字**（丁4 立规：
+    #     工程说明归词条，hover 只给一句人话）。⇒ 这里改用短提示
+    #     `M.BADGE_TIP`（模型层与 `BADGE_LABEL` 同处，仍是**唯一真源**）；
+    #     **完整原因句走顶栏可见的那句**（`light_explain()["reason"]` 的
+    #     「另外：…」段），不靠 hover 兜。
+    _chips = "".join(
+        "<span class=\"bdg %s\" title=\"%s\">%s</span>"
+        % (_esc(k), _esc(M.BADGE_TIP.get(k, name)), _esc(name))
+        for k, name, why in (ex.get("badges") or []))
+    badge_html = ("<span class=\"badges\">%s</span>" % _chips) if _chips else ""
     return (
         "<header class=\"bar\">"
         # ★★ 0.49.0：图标恢复动效（五态动法，规格《品牌动效报警语法 v1.2》，
         #   实现基线 motion-demo-v2 的产品化移植；矢量 SVG  ⇒ 48px 不发虚，
         #   也解决了 0.48.5 戊1 换静态图的理由）。JS 不在时 `<noscript>` 里
         #   退回静态矢量（认得出是 Antinel，只是不动 —— **不假装能动**）。
-        "<div class=\"logo\">" + _logo_mark(st)
-        + "<noscript><img alt=\"Antinel\" src=\"/assets/logo.svg\"></noscript></div>"
+        # ★★ 0.50.7（2026-10-16，创始人截图「左上角 LOGO 与右上角收缩钮是
+        #   同一枚图形、两个入口，重复了」）：**去重复**（L2 触发层 UX 洁癖
+        #   清单第 6 条）—— 收缩入口合并进 LOGO 本体：点这枚钮＝收缩成
+        #   漂浮哨标（title 说人话）。右上角那枚同款 SVG 一并删除，全页
+        #   只一枚 lgmark（判据 J1 守去重）。判据 FLO-05 随设计更新
+        #   （追随规格，不是放松）：锁入口在／用 `_logo_mark`／title 说
+        #   人话／op=collapse 链三处，不再锁 `collbtn` 类名。
+        #   ⚠️ SVG 走 `%s` 占位（**不能**用 `+` 拼进来）：`%` 的优先级高于
+        #   `+`，`+` 会把字面量组切断 ⇒ `%` 只作用到末尾没有占位符的片段
+        #   ⇒ "not all arguments converted"（本仓踩过）。
+        #   ⚠️⚠ 0.50.7 实测近失（同族第二形态）：**占位符顺序必须跟着布局
+        #   顺序走** —— 按钮从条尾移到条首时，实参元组忘了同步 ⇒ SVG 落进
+        #   状态行后面、按钮里被塞进 `var(--l0)`。页面照渲染、不抛错、
+        #   静默错位（比抛错更坏）。FLO-05 的「入口内嵌动效哨标」断言
+        #   当场抓住 —— 判据先于眼睛。
+        "<button class=\"logo\" type=\"button\" data-coll=\"1\" "
+        "title=\"收缩成漂浮哨标 · 点它再展开\" aria-label=\"收缩成漂浮哨标\">%s"
+        "<noscript><img alt=\"Antinel\" src=\"/assets/logo.svg\"></noscript></button>"
         # ★ 0.48.5（交接件 §5.6 乙1）：顶部灯的「？」芯片跟在 `<b>` 后
         #   （灯不是链接，芯片可以直接挨着；全站共 8 个落点，U-04 逐个数）。
         # ★ 0.48.5（交接件 §5.4 戊4）：状态词 16px 粗体、**色随态**
         #   （与 `.dot` 同一个 `M.STATE_VAR` —— 单一真源）；解释句降为
         #   13px 常规色（信息量大的那句占主导，见 U-15）。
         "<div class=\"state\"><span class=\"dot\" style=\"background:var(%s)\"></span>"
-        "<b style=\"color:var(%s)\">%s</b>%s%s<br><span>%s</span></div>"
+        "<b style=\"color:var(%s)\">%s</b>%s%s%s<br><span>%s</span></div>"
         "%s%s"
-        # ★★ 0.50.0：右上角收缩钮（漂浮最小态）——**符号用动效哨标本体**
-        #   （`_logo_mark` 同一份渲染），标题写人话。它后面跟一个
-        #   `.collstat` 状态行：请求失败/起不来时**就地如实说**，
-        #   绝不静默（用户点了没反应＝本项目最恨的形状）。
-        #   ⚠️ 收缩钮的 SVG 走 `%s` 占位（**不能**用 `+` 拼进来）：
-        #   `%` 的优先级高于 `+`，`+` 会把字面量组切断 ⇒ `%` 只作用到末尾
-        #   没有占位符的片段 ⇒ "not all arguments converted"（本仓踩过）。
-        "<button class=\"collbtn\" type=\"button\" data-coll=\"1\" "
-        "title=\"收缩成漂浮哨标 · 点它再展开\" aria-label=\"收缩成漂浮哨标\">%s</button>"
+        # ★★ 0.50.0：收缩入口的**状态行**（漂浮最小态）——请求失败/起不来时
+        #   **就地如实说**，绝不静默（用户点了没反应＝本项目最恨的形状）。
         "<span class=\"collst\" id=\"collst\"></span>"
         "<div class=\"spacer\"></div></header>"
-        % (M.STATE_VAR[st], M.STATE_VAR[st],
-           label, GL.chip("light", mk=True), suffix, state_reason, nums, fix,
-           _logo_mark(st)))
+        # ⚠️ 实参顺序 ＝ 占位符在串里出现的顺序（布局变了就同步改这里）：
+        #   按钮的 SVG 在最前 ⇒ `_logo_mark(st)` 也在最前。
+        % (_logo_mark(st), M.STATE_VAR[st], M.STATE_VAR[st],
+           label, GL.chip("light", mk=True), suffix, badge_html,
+           state_reason, nums, fix))
 
 
 #: ★★ 0.49.0（2026-10-14，创始人「现在的图标好了，但是'死了'，让它继续动」）：
@@ -864,7 +915,7 @@ def _logo_mark(state, label="Antinel"):
     """动效图标：内联 SVG（骨架）＋ `_LOGO_JS` 状态机点亮。
 
     ★ 为什么用 `data-p` 而不是 `id`：同一页/同一时刻可能有多个哨标
-      （面板头部、冒泡窗……），`id` 全局唯一会互相踩；`data-p` 在各自的
+      （面板头部、紧急提醒窗……），`id` 全局唯一会互相踩；`data-p` 在各自的
       `<svg>` 作用域内查询，天然不串。
     ★ viewBox 由 `_logo_viewbox()` 反算（0.50.2），**不写死 1024 画布**
       —— 写死就会在 48px 方框里缩成一半（创始人截图的那条）。
@@ -1203,7 +1254,7 @@ def _winfit_restore(token):
 
 
 def _bubble_fit(dh, token):
-    """把冒泡窗**按内容实需**长高（下沿不动，往上长）；返回 dict 如实。
+    """把紧急提醒窗**按内容实需**长高（下沿不动，往上长）；返回 dict 如实。
 
     ★★★ 0.50.1（创始人 2026-10-14 截图「泡泡下沿没露出来」）：
       为什么需要它 —— 落位（`place_all`）只保证"窗口落在目标矩形上"，
@@ -1215,7 +1266,7 @@ def _bubble_fit(dh, token):
       （绝不缩，避免与用户的拖拽打架），锚点在下沿 ⇒ `top` 上移、`h` 增加。
 
     ★ 边界（不猜、如实）：
-      · 找不到本次的冒泡窗 ⇒ `ok=False` + 说清（**不假成功**）；
+      · 找不到本次的紧急提醒窗 ⇒ `ok=False` + 说清（**不假成功**）；
       · 上方已到工作区上沿 ⇒ 长不了多少就长多少，剩下的记在 `left` 里
         （**绝不把"没露全"说成"露全了"**）；
       · 单次最多 `FIT_MAX` 像素 —— 防止页面量错时窗口无限长高。
@@ -1231,14 +1282,14 @@ def _bubble_fit(dh, token):
     try:
         rid = WIN.build_run_id(token)
     except Exception as e:                                  # noqa: BLE001
-        return {"ok": False, "why": "算不出冒泡窗口身份：%s" % e}
+        return {"ok": False, "why": "算不出紧急提醒窗口身份：%s" % e}
     hs = WIN.find_bubble_windows(run_id=rid)
     if not hs:
         return {"ok": False,
-                "why": "没找到带本次标识（#%s）的冒泡窗 —— 不出声假装加高了" % rid}
+                "why": "没找到带本次标识（#%s）的紧急提醒窗 —— 不出声假装加高了" % rid}
     cur = WIN.window_rect_of(hs[0])
     if cur is None:
-        return {"ok": False, "why": "读不到冒泡窗当前矩形"}
+        return {"ok": False, "why": "读不到紧急提醒窗当前矩形"}
     l, t, w, h = tuple(cur)
     work = WIN.pick_work_area(None)
     room = max(0, t - work.top)                 # 上方还剩多少可以长
@@ -1829,10 +1880,15 @@ def _view_health(rep, token, items=None):
     _hrs = rep.get("window_hours", 24)
     _revived_count = rep.get("revived_window", 0)
     # ★ 0.47.0：拉起次数是分子 ⇒ 分母＝窗口内总记录数（与日报页同一口径）。
+    # ★★ 0.50.4（Q-03）日报页已改成「；同期记录 %d 条」（次数单位是「次」、
+    #   条数单位是「条」，两个异质量的量摆成一条斜杠＝没意义的除法）——
+    #   **本页漏改**，实测仍是「54 次 / 54」（创始人截图五：裸分母连单位
+    #   都没有）。本条注释原写「与日报页同一口径」而渲染是两套 —— 把愿望
+    #   写成了事实（T-11 同族）。现在两处逐字同形。
     _win_total_h = sum(int((rep.get("window_levels") or {}).get(k, 0) or 0)
                        for k in ("R0", "L2", "L1"))
     _revived_value = ("<a href=\"/?v=inbox&f=win:%d:kind:host_shield_revived\">"
-                      "%d 次</a> / %d"
+                      "%d 次</a>；同期记录 %d 条"
                       % (_hrs, _revived_count, _win_total_h))
     # ★★ 0.37.2：**删掉本页第一行「此刻这一次」**（旧版 `GL.chip("posture",
     #   "此刻这一次")` + 值「值守中 —— 哨兵在岗…」）。
@@ -1882,10 +1938,25 @@ def _view_health(rep, token, items=None):
     #   ★ 只给缺落点的两态挂「？」：其余三态的落点在顶部药丸，不重复铺问号
     #     （Q-11：一屏十几个「？」在安全语境里像"十几处有问题"）。
     _order = sorted(("R0", "Ls", "L2", "L1", "L0"), key=lambda k: -M.PRIORITY[k])
-    _six = ("<p class=\"note\">灯的六态由重到轻："
-            + " · ".join(GL.chip(k) if k in ("Ls", "L0") else M.state_short(k)
-                         for k in _order)
-            + "</p>")
+    # ★★ 0.50.7（创始人截图二「失守后换行」＋截图三「缺粮（Ls）括号不一致」）：
+    #   ① 断行确定性化：标签独占一行（显式 `<br>`），各态包原子
+    #     `<span class="sixit">`（white-space:nowrap）—— 旧形状是单行
+    #     `<p>`＋自然换行，断点落在哪全看窗口宽度，实测断在「失守」后。
+    #     且旧写法把 `<details>` 芯片塞进 `<p>`：details 会**隐式闭合**
+    #     `<p>`（HTML 解析规则）⇒ 枚举从第一枚芯片处断成两截、其后的
+    #     「·」分隔符还丢了 `.note` 样式 —— 改 `<div>` 一并修掉。
+    #   ② 码进词条：Ls/L0 的 summary 原显示「缺粮（Ls）」「值守中（L0）」
+    #     （`GL.chip` 默认取 `TERMS[w]`＝`_wl()` 带码形态），与其余三态的
+    #     裸词「失守 · 拦截 · 注意」同屏两种写法。传 `text=M.state_short(k)`
+    #     后 summary 只显示词（单一真源，不手写第二份），码留在词条展开体
+    #     首行（`chip()` 的 head 机制自动补 `<b>缺粮（Ls）</b>：）——
+    #     P13 落点（`data-t`）不变。
+    _six = ("<div class=\"note sixline\">灯的六态由重到轻：<br>"
+            + " · ".join("<span class=\"sixit\">%s</span>" % (
+                GL.chip(k, text=M.state_short(k)) if k in ("Ls", "L0")
+                else M.state_short(k))
+                for k in _order)
+            + "</div>")
     return ("<h2>%s · %s</h2><div class=\"rows\">%s</div>%s"
             "<p class=\"note\">全绿不等于安全：也可能是检查压根没跑。</p>"
             % (PAGE_TITLES["health"], _esc(rep.get("day") or ""), body, _six))
@@ -2143,7 +2214,7 @@ def _make_handler(token, root):
             if u.path in ("/", "/index.html"):
                 view = (q.get("v") or ["inbox"])[0]
                 filt = (q.get("f") or [M.BUCKET_ACTION])[0]
-                # ★ 0.49.0：`v=bubble` 是冒泡窗（「需要人工介入马上处理」的
+                # ★ 0.49.0：`v=bubble` 是紧急提醒窗（「需要人工介入马上处理」的
                 #   通知页）—— 与面板同源同 CSS，但**没有 tab、没有收件箱**，
                 #   只有事由＋「知道了/打开值守台」。事由走 query（一次性渲染）。
                 if view == "bubble":
@@ -2153,7 +2224,7 @@ def _make_handler(token, root):
                         _rid = _W.build_run_id(token)
                     except Exception:                       # noqa: BLE001
                         _rid = ""
-                    # ★ 0.50.3：渲染这一枚冒泡的**那一刻**，值守台是不是已经开着。
+                    # ★ 0.50.3：渲染这一枚紧急提醒的**那一刻**，Antinel 监理是不是已经开着。
                     #   开着 ⇒ 不再画「打开值守台」按钮（点了它本来就该只是"切过去"，
                     #   画一个"打开"按钮是在说一件不成立的事）。判不出来 ⇒ 照旧画
                     #   （宁可多一个按钮，也不让用户点了没反应）。
@@ -2272,7 +2343,7 @@ def _make_handler(token, root):
                         except M.InboxError:
                             pass
                 elif op in ("bubble_ack", "bubble_open"):
-                    # ★ 0.49.0：冒泡窗的两个按钮。
+                    # ★ 0.49.0：紧急提醒窗的两个按钮。
                     #   `bubble_ack` ＝用户说「知道了」—— 只记确认时间
                     #     （同类 ACK_QUIET 秒内不再冒），**不**代用户把事标成
                     #     已处理（那会篡夺用户的决定，也把台账改假）。
@@ -2303,7 +2374,7 @@ def _make_handler(token, root):
                     print("[console] collapse run=%s -> %s" % (_rid, _rep))
                     return self._json(_rep)
                 elif op == "bubblefit":
-                    # ★★★ 0.50.1（创始人截图「泡泡下沿没露出来」）：冒泡窗
+                    # ★★★ 0.50.1（创始人截图「泡泡下沿没露出来」）：紧急提醒窗
                     #   按**内容实需**长高。为什么单开一条路而不是调 BUBBLE_H：
                     #   常量是"出生差不多对"，而**内容长度是变的**（事由长短、
                     #   确认后文案变化）⇒ 只有"页面量、服务端动窗、回读校验"
@@ -2814,7 +2885,7 @@ def open_console_settled(url, wait_sec=DEFAULT_SETTLE_SEC, token=None, verbose=T
         out["why"] = "%s；且回读失败：%s" % (why, e)
         return out
     out["placed"] = bool(ok) and all(tuple(g) == tuple(rect) for g in out["got"])
-    # ★ 0.50.0：值守台展开 ⇒ 屏幕上那枚漂浮哨标该退役（用户从托盘/冒泡/
+    # ★ 0.50.0：值守台展开 ⇒ 屏幕上那枚漂浮哨标该退役（用户从托盘/紧急提醒/
     #   CLI 展开时也会走到这里）。**退役的唯一实现**是 `inbox_logo.retire()，
     #   这里不重写一遍。退役失败只影响"多漂着一枚"，不拖垮开窗 ⇒ 如实记
     #   进 why 尾部，不抛。
@@ -2930,7 +3001,7 @@ def open_console_via_daemon(url, wait_sec=DEFAULT_SETTLE_SEC, token=None,
 
 def bubble_open_route(root=None, token=None, vis=None, finder=None,
                       focuser=None, opener=None, probe=None):
-    """冒泡窗「打开值守台」的**唯一决策点**。返回与页面 JSON 同形的 dict。
+    """紧急提醒窗「打开 Antinel 监理」的**唯一决策点**。返回与页面 JSON 同形的 dict。
 
     ★★★ 为什么抽成一个函数（创始人 2026-10-14：「点击打开值守台后，之前的
       关闭了，打开了新的……点完了按钮显示'打开值守台'按钮好像不对吧，
@@ -2989,13 +3060,13 @@ def bubble_open_route(root=None, token=None, vis=None, finder=None,
 
 
 def open_bubble_window(url, geometry=None, wait_sec=6.0, token=None, verbose=True):
-    """开一枚**冒泡窗**并等它就位、置顶；返回如实 dict（不谎报）。
+    """开一枚**紧急提醒窗**并等它就位、置顶；返回如实 dict（不谎报）。
 
-    ★ 与 `open_console_settled` 的分工：那个等的是**值守台**窗口
-      （`find_console_windows`＋`console_geometry`），这个等的是**冒泡**窗
+    ★ 与 `open_console_settled` 的分工：那个等的是 **Antinel 监理** 窗口
+      （`find_console_windows`＋`console_geometry`），这个等的是**紧急提醒**窗
       （`find_bubble_windows`＋`bubble_geometry`，且**置顶**）。
       共用的都是 `inbox_window` 的同一批原语（命令构造／枚举／落位／置顶）——
-      窗口语义只有一份，这里只是冒泡自己的编排。
+      窗口语义只有一份，这里只是紧急提醒自己的编排。
     ★ 为什么不合并成一个函数：两者的标题标记、几何来源、置顶诉求都不同，
       硬合并要靠一串开关分发，那是把简单事情绕复杂。
     ★ 纪律同 C4：等窗→落位→**回读取证**；失败不关窗、如实上报。
@@ -3006,12 +3077,12 @@ def open_bubble_window(url, geometry=None, wait_sec=6.0, token=None, verbose=Tru
     try:
         geo = WIN.bubble_geometry() if geometry is None else geometry
     except Exception as e:                                  # noqa: BLE001
-        out["why"] = "取不到冒泡几何：%s: %s" % (type(e).__name__, e)
+        out["why"] = "取不到紧急提醒几何：%s: %s" % (type(e).__name__, e)
         return out
     rect = (geo or {}).get("rect")
     out["want"] = list(rect) if rect else None
     if not rect:
-        out["why"] = geo.get("reason") or "屏幕放不下冒泡窗，未开"
+        out["why"] = geo.get("reason") or "屏幕放不下紧急提醒窗，未开"
         return out
     cmd = _app_window_cmd(url, geo)
     if not cmd:
@@ -3028,10 +3099,10 @@ def open_bubble_window(url, geometry=None, wait_sec=6.0, token=None, verbose=Tru
     try:
         run_id = WIN.build_run_id(token)
     except Exception as e:                                  # noqa: BLE001
-        out["why"] = "算不出本次冒泡身份：%s: %s" % (type(e).__name__, e)
+        out["why"] = "算不出本次紧急提醒身份：%s: %s" % (type(e).__name__, e)
         return out
     deadline = time.time() + float(wait_sec)
-    hwnds, last = [], "没看到带本次标识的冒泡窗"
+    hwnds, last = [], "没看到带本次标识的紧急提醒窗"
     while time.time() < deadline:
         try:
             hwnds = WIN.find_bubble_windows(run_id=run_id)

@@ -2164,12 +2164,18 @@ def n_ledger_doc_citation_is_not_vague():
 
 
 def c_ledger_page_has_claim_slot_and_location():
-    """规格 §5.6 点名的两件：①「这份账本在哪里＋可导出可迁移」②禁用态认领按钮。"""
+    """规格 §5.6 点名的两件：①「这份账本在哪里＋可导出可迁移」②禁用态认领按钮。
+
+    ★ 0.50.6 锚点同步：ledger 词条的 one 按 STE 拆句（原 53/57 字长句），
+      位置说明句由「这份账本在……」改为「它在……是一个文件（路径）」——
+      断言子串随之迁移为「是一个文件」，**强度不变**：仍钉「位置说明」与
+      「可导出」两件事实在场（后者子串未动）。
+    """
     hub = _tmpdir()
     day, items = _ledger_test_items()
     page = SV.render_page(view="ledger", root=hub, token="t", items=items,
                           record_ledger=True)
-    if "这份账本在" not in PC.body(page) or "可以整体导出带走" not in PC.body(page):
+    if "是一个文件" not in PC.body(page) or "可以整体导出带走" not in PC.body(page):
         return False
     m = re.search(r'<button[^>]*\bdisabled\b[^>]*>([^<]*)</button>', page)
     return bool(m) and "认领到账号" in m.group(1)

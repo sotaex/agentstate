@@ -2,5 +2,16 @@
   "note": "常驻套件退休/合并登记簿（A2，2026-10-15 建）。口径：29 上限 = SUITES 里 ci/inbox_guards_* 与 ci/guard_* 的登记数；JDG/PCM/selfcheck/version/regression 五条基础设施项不计入。规则：登记数 > 29 即 gate 自红，除非本簿有足够 pending 记录（每条须含 suite/date/reason/replacement 四字段；pending 额度 30 天过期；无替代者不计）。退休完成（套件真从 SUITES 移除）后把 status 改为 done 并填 removed_from_suites_on。",
   "cap": 29,
   "grace_days": 30,
-  "retirements": []
+  "retirements": [
+    {
+      "suite": "0518",
+      "date": "2026-10-16",
+      "status": "done",
+      "removed_from_suites_on": "2026-10-16",
+      "reason": "A2 超限来源：0518 于 2026-10-16 晨随 L2 品质触发层 v1.2 升级加入 SUITES，常驻数由 29 变 30（同时漏了 A1 的 P1-P5 作答块，已补）。其 P5（扩展优先）自答为**不满足**：五条判据与 0514 同域——消费面同为 inbox_server.py 的渲染产物，病灶同属「创始人截图违和的机械可判形状」。按 P5「不满足 ⇒ 并入现有套件」的正确动作＝并入 0514，不立新套件。本记录即该合并的 30 天额度。",
+      "replacement": "0514",
+      "merged_on": "2026-10-16",
+      "merge_note": "J1–J5 与 N-J1…N-J4（9 条，判据 ID 一字未改）已原样并入 ci/inbox_guards_0514.py 的「J 族」段；0518 已从 delivery_gate.SUITES 移除（REQUIRED 随之自动少一条）；原文件改名让开（ci/inbox_guards_0518.py.away-20261016-merged-into-0514，零删除纪律）；ci/defect_types.py 的 T-11 guards 与 inbox_server.py 的注释按 ID 引用，无需改名。常驻数回到 29。"
+    }
+  ]
 }

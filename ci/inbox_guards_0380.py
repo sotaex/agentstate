@@ -51,8 +51,22 @@ RESULTS = []
 
 
 def check(name):
+    """★ 判据**必须真会红** —— 返回说明串一律转成抛异常（0490/0470 同款）。
+
+    ★★ 0.51.0 修（本轮**审核抓到的 Sev-0**）：此前本文件的 `check` **不包装**，
+      而全部判据都是 `return "问题说明"` 的写法 ⇒ `main()` 把返回串**照 ✅ 计数**
+      ⇒ **本套件 29 条判据从来不可能红**（"写在纸上的守卫"）。
+      文件自己的注释（`_EXPECT` 上方）早就承认过这个形状
+      （「它报了'负控失效'却被计为绿 ⇒ 判据本身失效」），却从未修 harness。
+      ⇒ 与 0490 的 `check` 对齐：非 `True`/`None` 一律 `raise AssertionError`。
+    """
     def deco(fn):
-        RESULTS.append((name, fn))
+        def wrapper():
+            r = fn()
+            if r is True or r is None:
+                return True
+            raise AssertionError(r if isinstance(r, str) else repr(r))
+        RESULTS.append((name, wrapper))
         return fn
     return deco
 
@@ -80,7 +94,10 @@ _EXPECT = {
     "interrupted": "L1",
     "unknown": "L1",
     "off": "L0",
-    "dev": "dev",
+    # ★★ 0.51.0（规格 v1.2 §2.1）：`dev` 姿态的主灯是 **L0**（"监理在岗、
+    #   此刻没查出缺口"）—— 研发**身份**移**徽标**（`badges()`）；
+    #   主灯不再为"研发中"单独留一档（0.36.4 的彻底化：两个通道各说各的）。
+    "dev": "L0",
 }
 
 
@@ -100,7 +117,7 @@ def _light_equals_now(items, granary=None):
     return bad
 
 
-@check("S10 灯＝此刻：light_explain().state 恒等于此刻态（与 24h 账无关）")
+@check("S10 主灯＝此刻：light_explain().state 恒等于此刻态（与 24h 账无关）")
 def s10():
     import inbox_model as M
     G = _g()
@@ -111,10 +128,14 @@ def s10():
         bad = _light_equals_now(items)
         if bad:
             return "有账时灯偏离了此刻：items=%d ⇒ %r" % (len(items), bad)
-    st = M.light_explain({"state": "guarding", "why": "x"}, r0,
-                         granary={"state": "low", "why": "粮快见底了"})["state"]
-    if st != "Ls":
-        return "监理在岗 ＋ 粮低 ⇒ 应亮 Ls，实际 %s" % st
+    # ★★ 0.51.0 重签：粮低 **不再抬主灯** —— 主灯保持 L0，缺粮改挂**徽标**。
+    ex = M.light_explain({"state": "guarding", "why": "x"}, r0,
+                         granary={"state": "low", "why": "粮快见底了"})
+    if ex["state"] != M.STATE_L0:
+        return ("监理在岗 ＋ 粮低 ⇒ 主灯应 L0（缺粮是徽标不是灯），实际 %s"
+                % ex["state"])
+    if "granary" not in [b[0] for b in ex["badges"]]:
+        return "监理在岗 ＋ 粮低 ⇒ 缺粮徽标必须亮：badges=%r" % (ex["badges"],)
     return True
 
 
@@ -212,7 +233,7 @@ def n_s12():
 
 
 # ═══════════════════════════════════════ S13 真警报仍能亮 ═══════════════════
-@check("S13 真警报仍能亮：down/warn ⇒ R0、粮低 ⇒ Ls（改'此刻'不许把真警报改没）")
+@check("S13 真警报仍能亮：down/warn ⇒ R0、粮低 ⇒ **缺粮徽标**（改'此刻'不许把真警报改没）")
 def s13():
     import inbox_model as M
     bad = []
@@ -220,15 +241,25 @@ def s13():
         st = M.light_explain({"state": ps, "why": "x"}, [], granary=None)["state"]
         if st != M.STATE_R0:
             bad.append((ps, st))
-    if M.light_explain({"state": "guarding", "why": "x"}, [],
-                       granary={"state": "low"})["state"] != M.STATE_Ls:
-        bad.append(("guarding+低粮", "未亮 Ls"))
+    # ★★ 0.51.0 重签（规格 v1.2 §2.1）：粮低**不抬主灯**，改挂「缺粮」徽标。
+    #   判据仍咬住"真警报不许被改没"：主灯必须是干净的 L0（不是被压成别的），
+    #   而"缺粮"这件事必须**在徽标通道上确实亮着** —— 通道换了，事实不许丢。
+    ex = M.light_explain({"state": "guarding", "why": "x"}, [],
+                         granary={"state": "low", "why": "粮快见底了"})
+    if ex["state"] != M.STATE_L0:
+        bad.append(("guarding+低粮", "主灯应 L0（缺粮是徽标），得 %s" % ex["state"]))
+    if "granary" not in [b[0] for b in ex["badges"]]:
+        bad.append(("guarding+低粮", "缺粮徽标没亮：%r" % (ex["badges"],)))
     if M.light_explain({"state": "guarding", "why": "x"}, [],
                        granary={"state": "ok"})["state"] != M.STATE_L0:
         bad.append(("guarding+粮足", "非 L0"))
-    if M.light_explain({"state": "off", "why": "x"}, [],
-                       granary={"state": "low"})["state"] != M.STATE_L0:
-        bad.append(("off+低粮", "未在岗不该报缺粮"))
+    # ★ 反向：**不在岗不该报缺粮** —— 徽标通道同样受这条约束。
+    ex_off = M.light_explain({"state": "off", "why": "x"}, [],
+                             granary={"state": "low"})
+    if ex_off["state"] != M.STATE_L0:
+        bad.append(("off+低粮", "未在岗主灯应 L0，得 %s" % ex_off["state"]))
+    if "granary" in [b[0] for b in ex_off["badges"]]:
+        bad.append(("off+低粮", "未在岗不该报缺粮（徽标亮了）"))
     if M.light_explain({"state": "interrupted", "why": "x"}, [],
                        granary=None)["state"] != M.STATE_L1:
         bad.append(("interrupted", "非 L1"))
@@ -295,13 +326,20 @@ def n_s14():
 #: ★ 为什么这条必须有：0.39.0 **第一版**把灯写成"纯此刻"，`L2 拦截` 因此
 #:   **永远亮不起来** —— 六态里少了一个**可达态**。这是实测探针抓到的
 #:   （不是推演），所以必须有一条判据把它钉死：**任何一态点不亮 ⇒ 报红**。
+#: ★★ 0.51.0 重签（规格 v1.2 §2）：显示模型改**三通道** ⇒ 可达性也分通道 ——
+#:   主灯只该有 R0/L2/L1/L0 四态可及（dev/Ls 不再是灯），而 dev/Ls 必须
+#:   在**徽标通道**上可及。两个集合都**写死**（不取自 `M.LIGHT_STATES`／
+#:   `M.STATE_LABEL`）—— 与本族纪律一致：期望取自被测对象则负控一变异就跟着变。
+_LAMP_REACH = ("R0", "L2", "L1", "L0")
+_BADGE_REACH = ("dev", "granary")
 _COMBOS = [
     ("down", 0, False), ("warn", 0, False), ("guarding", 0, False),
     ("interrupted", 0, False), ("unknown", 0, False), ("off", 0, False),
     ("dev", 0, False),
-    ("guarding", 1, False),      # + 历史失守账
-    ("guarding", 2, False),      # + 历史拦截账
+    ("guarding", 1, False),      # + 历史失守账（R0 不抬灯）
+    ("guarding", 2, False),      # + 刚发生的拦截账（info 桶，保持期内）
     ("guarding", 3, False),      # + 两者都有
+    ("guarding", 4, False),      # + 刚发生的注意账（info 桶，保持期内）
     ("guarding", 0, True),       # + 粮低
     ("off", 2, False),
 ]
@@ -315,12 +353,14 @@ def _combo_items(items_n):
         return [G._mk_item(kind="host_shield_breach")]        # R0 事件
     if items_n == 2:
         return [G._mk_item(kind="tool_call_blocked")]         # L2 事件
+    if items_n == 4:
+        return [G._mk_item(kind="host_shield_revived")]       # L1 事件（info 桶）
     return [G._mk_item(kind="host_shield_breach"),
             G._mk_item(kind="tool_call_blocked")]
 
 
 def _reach_table():
-    """穷举上表 ⇒ `{(posture, n_items, gran): 灯态}`。"""
+    """穷举上表 ⇒ `{(posture, n_items, gran): 主灯态}`。"""
     import inbox_model as M
     low = {"state": "low", "why": "x"}
     out = {}
@@ -331,13 +371,36 @@ def _reach_table():
     return out
 
 
-@check("S15 六态**逐态可达**：穷举「姿态 × 账 × 粮」，六态一个都不能少")
-def s15():
+def _badge_reach():
+    """穷举「版本对 × 粮」⇒ 徽标键集合（分通道可达性的另一半）。"""
     import inbox_model as M
+    seen = set()
+    for loc, pub in (("9.9.9", "1.0.0"), ("1.0.0", "1.0.0"),
+                     ("1.0.0", "9.9.9"), (None, None)):
+        for gran in (None, {"state": "low", "why": "x"}):
+            for k, _n, _w in M.badges("guarding", gran, [],
+                                      versions=(loc, pub)):
+                seen.add(k)
+    return seen
+
+
+@check("S15 主灯四态 ＋ 徽标两态**逐态可达**（分通道，缺任何一态即红）")
+def s15():
     seen = set(_reach_table().values())
-    missing = [s for s in M.LIGHT_STATES if s not in seen]
+    missing = [s for s in _LAMP_REACH if s not in seen]
     if missing:
-        return "有态点不亮（不可达）：%r —— 六态里每态都必须有能点亮它的真实组合" % missing
+        return ("有**主灯**态点不亮（不可达）：%r —— 每态都必须有能点亮它的"
+                "真实组合（实测集 %r）" % (missing, sorted(seen)))
+    # ★ 反向：dev/Ls **不该**再出现在主灯上（它们已移徽标通道）。
+    leaked = [s for s in ("dev", "Ls") if s in seen]
+    if leaked:
+        return ("主灯上出现了已移出主灯的态 %r —— dev/Ls 应只在徽标通道"
+                "（规格 v1.2 §2）" % leaked)
+    bseen = _badge_reach()
+    bmiss = [s for s in _BADGE_REACH if s not in bseen]
+    if bmiss:
+        return ("有**徽标**态点不亮（不可达）：%r —— dev/Ls 必须能在徽标通道上"
+                "点亮（实测集 %r）" % (bmiss, sorted(bseen)))
     return True
 
 
@@ -411,10 +474,14 @@ def n_s16():
 #:   ＋「它答的是该不该紧张，**不是**此刻哨兵好不好」）—— 而后者在新设计下
 #:   **恰是说反了**（灯的状态部分**就是**"此刻"）。释义不改 ⇒ 页面「口径」一栏
 #:   仍在教旧规则 ⇒ 术语表成了**新的假来源**（0.37.2 注释自己警告过的形状）。
+#: ★★ 0.51.0 重签（规格 v1.2 §7.4）：显示模型改**三通道** ⇒ 词条必须点明
+#:   「缺粮不点灯、只挂徽标」；旧措辞「失守、**缺粮**只认此刻」（把缺粮当成
+#:   灯的一档）**已不成立**，故从 MUST 拆出并列入 FORBID。
 #: ★ 期望短语／禁语都**写死在这里**（不取自 `glossary` 对象）—— 与本族纪律一致：
 #:   期望若取自被测对象，负控一变异它就跟着变，判据永远绿。
-_GL_MUST = ("失守、缺粮只认此刻", "拦截／注意")   # 必须点明的两处来源分工
-_GL_FORBID = ("两个读数", "不是「此刻监理好不好」")  # 旧口径的两处特征措辞
+_GL_MUST = ("失守只认此刻", "拦截／注意", "徽标")   # 灯只认此刻/刚发生；并存态是徽标
+_GL_FORBID = ("两个读数", "不是「此刻监理好不好」",  # 旧口径的两处特征措辞
+              "缺粮只认此刻")                       # 0.51.0：缺粮已不在灯上
 
 
 def _gl_light_plain():
@@ -602,6 +669,201 @@ def n_s19b():
     probs = _norm_selfcheck(whole, raw)
     if not any("②" in x for x in probs):
         return "负控失效：整行替换（吞掉行尾注释）未被 S19-380 ② 抓出"
+    return True
+
+
+# ══════════ S100–S103 三通道（0.51.0 规格 v1.2 §2／§3／§7.2）═══════════
+#: ★ 为什么并入本套件而不是新开一套（机制层 A2）：常驻套件上限 29，新开一套
+#:   就得先退休一个。这四条守的正是本套件同一对象（主灯／灯态语义与它的
+#:   渲染出口），并进 0380 是**同域聚合**，不是"为了躲上限"。
+
+@check("S100 保持期：info 桶事件只在**未读 ∧ 刚发生**时抬主灯；已读／超期转待阅")
+def s100():
+    import inbox_model as M
+    G = _g()
+    H = M.LAMP_HOLD_MINUTES
+    bad = []
+    # ① info 桶（`tool_call_blocked` 在"自动处理"黑名单里 ⇒ info）
+    for name, kw, want in (
+            ("刚发生·未读", {"hours_ago": 0.0}, "L2"),
+            ("H 内·未读", {"hours_ago": (H - 1) / 60.0}, "L2"),
+            ("超 H·未读", {"hours_ago": (H + 1) / 60.0}, "L0"),
+            ("刚发生·已读", {"hours_ago": 0.0, "state": "read"}, "L0"),
+            ("刚发生·已处理", {"hours_ago": 0.0, "state": "done"}, "L0")):
+        got = M.light_explain({"state": "guarding", "why": "x"},
+                              [G._mk_item(kind="tool_call_blocked", **kw)])["state"]
+        if got != want:
+            bad.append((name, got, want))
+    # ② ★ action 桶**不适用保持期**：待办不是新闻，窗口内未关闭即持续抬灯。
+    #   今天没有 L2/L1 的 action kind ⇒ 用 monkeypatch 造一个（规格 §7.2 记的手法）：
+    #   把 `tool_call_blocked` 暂时移出"自动处理"黑名单 ⇒ 它变成"只有你能解决"。
+    old = M.AUTO_HANDLED_KINDS
+    M.AUTO_HANDLED_KINDS = frozenset(old - {"tool_call_blocked"})
+    try:
+        got_a = M.light_explain(
+            {"state": "guarding", "why": "x"},
+            [G._mk_item(kind="tool_call_blocked", hours_ago=1.0)])["state"]
+        got_r = M.light_explain(
+            {"state": "guarding", "why": "x"},
+            [G._mk_item(kind="tool_call_blocked", hours_ago=1.0,
+                        state="read")])["state"]
+    finally:
+        M.AUTO_HANDLED_KINDS = old
+    if got_a != "L2":
+        bad.append(("action·1h·未读（应持续抬灯）", got_a, "L2"))
+    if got_r != "L2":
+        bad.append(("action·1h·已读（待办不许被'看过'消掉）", got_r, "L2"))
+    if bad:
+        return "保持期不对：%r" % bad
+    return True
+
+
+@check("N-S100 负控：拿掉保持期（info 一律抬灯）⇒ S100 必须报红")
+def n_s100():
+    import inbox_model as M
+    orig = M._event_lamp_level
+
+    def no_hold(items, hours=None, now=None):          # ← MUTANT：无新鲜度条件
+        best = None
+        for it in M._window_open(items, hours or M.WINDOW_HOURS, now):
+            if it.level not in (M.STATE_L2, M.STATE_L1):
+                continue
+            if M.PRIORITY.get(it.level, 0) > M.PRIORITY.get(best, 0):
+                best = it.level
+        return best
+
+    M._event_lamp_level = no_hold
+    try:
+        r = s100()
+    finally:
+        M._event_lamp_level = orig
+    if r is True:
+        return "负控失效：拿掉保持期后 S100 仍然绿"
+    return True
+
+
+@check("S101 研发徽标：版本四态（> / = / < / 取不到）＋ **数值**比较（0.9.0 vs 0.10.0）")
+def s101():
+    import inbox_model as M
+    bad = []
+    for name, vp, want in (("本机更新", ("9.9.9", "1.0.0"), True),
+                           ("相同", ("1.0.0", "1.0.0"), False),
+                           ("本机更旧", ("1.0.0", "9.9.9"), False),
+                           ("取不到", (None, None), False)):
+        if M.is_ahead_of_published(*vp) is not want:
+            bad.append(("is_ahead_of_published %s" % name,
+                        M.is_ahead_of_published(*vp), want))
+        has = "dev" in [k for k, _n, _w in M.badges("guarding", None, [],
+                                                    versions=vp)]
+        if has is not want:
+            bad.append(("徽标 %s" % name, has, want))
+    # ★ F47/F54 同族的"看起来对、其实错"：**字符串**比较下 0.9.0 > 0.10.0 为真。
+    if M.is_ahead_of_published("0.9.0", "0.10.0"):
+        bad.append(("0.9.0 vs 0.10.0（字符串比较的陷阱）", True, False))
+    # ★ 降级不假阳：已发布版本取不到 ⇒ 不亮徽标
+    if M.badges("guarding", None, [], versions=(None, "0.1.0")):
+        bad.append(("published 取不到却亮了徽标", M.badges(
+            "guarding", None, [], versions=(None, "0.1.0")), "不亮"))
+    if bad:
+        return "研发徽标判据不对：%r" % bad
+    return True
+
+
+@check("N-S101 负控：把版本比较退回**字符串** ⇒ 0.9.0 vs 0.10.0 当场误判 ⇒ 必须红")
+def n_s101():
+    import inbox_model as M
+    orig = M._ver_tuple
+    M._ver_tuple = lambda s: s                        # ← MUTANT：字符串比较
+    try:
+        r = s101()
+    finally:
+        M._ver_tuple = orig
+    if r is True:
+        return "负控失效：退回字符串比较后 S101 仍然绿"
+    return True
+
+
+@check("S102 三通道**并存**：研发徽标 ＋ R0 主灯不抬 ＋ 要处理计数 同时为真")
+def s102():
+    import inbox_model as M
+    G = _g()
+    ex = M.light_explain({"state": "guarding", "why": "监理在岗"},
+                         [G._mk_item(kind="host_shield_breach", state="unread")],
+                         granary={"state": "low", "why": "粮快见底了"},
+                         versions=("9.9.9", "1.0.0"))
+    bad = []
+    if ex["state"] != M.STATE_L0:
+        bad.append(("主灯", ex["state"], "L0（R0 绝不由账给）"))
+    keys = [k for k, _n, _w in ex["badges"]]
+    for want in ("dev", "granary"):
+        if want not in keys:
+            bad.append(("徽标缺 %s" % want, keys, "含 %s" % want))
+    if ex["action_count"] < 1:
+        bad.append(("要处理件事数", ex["action_count"], ">=1"))
+    # ★ 立规：action>0 时**禁止**说"此刻是好的"（只有你能解决的事还在）
+    if "此刻是好的" in ex["reason"]:
+        bad.append(("原因句", ex["reason"][:40], "action>0 禁说'此刻是好的'"))
+    if bad:
+        return "三通道没同时成立（并存被压平？）：%r" % bad
+    return True
+
+
+@check("N-S102 负控：让徽标恒为空 ⇒ S102 必须红（证明并存靠徽标通道承重）")
+def n_s102():
+    import inbox_model as M
+    orig = M.badges
+    M.badges = lambda *a, **k: []                      # ← MUTANT
+    try:
+        r = s102()
+    finally:
+        M.badges = orig
+    if r is True:
+        return "负控失效：徽标恒空后 S102 仍然绿"
+    return True
+
+
+@check("S103 原因句三元组：主灯原因 ＋ 徽标原因 ＋ 待办提示（缺一即红）")
+def s103():
+    import inbox_model as M
+    G = _g()
+    bad = []
+    # ① 空账：先说此刻，且以句号收尾（多段拼接不许漏标点）
+    ex = M.light_explain({"state": "guarding", "why": "监理在岗"}, [],
+                         versions=("1.0.0", "9.9.9"))
+    if "此刻" not in ex["reason"]:
+        bad.append(("空账缺'此刻'", ex["reason"]))
+    if not ex["reason"].rstrip().endswith("。"):
+        bad.append(("空账未以句号收尾", ex["reason"]))
+    # ② 有账：必须提"没处理"（账不许被藏）
+    ex2 = M.light_explain({"state": "guarding", "why": "监理在岗"},
+                          [G._mk_item(kind="host_shield_breach")],
+                          versions=("1.0.0", "9.9.9"))
+    if "没处理" not in ex2["reason"]:
+        bad.append(("有账缺'没处理'", ex2["reason"]))
+    # ③ 徽标原因进句（研发中）
+    ex3 = M.light_explain({"state": "guarding", "why": "监理在岗"}, [],
+                          versions=("9.9.9", "1.0.0"))
+    if "研发" not in ex3["reason"]:
+        bad.append(("徽标原因没进句", ex3["reason"]))
+    # ④ 旧语义不许回来
+    if "灯这样报" in ex2["reason"]:
+        bad.append(("退回旧语义'灯这样报'", ex2["reason"]))
+    if bad:
+        return "原因句三元组不对：%r" % bad
+    return True
+
+
+@check("N-S103 负控：让分桶恒为归档（待办看不见）⇒ S103 必须红")
+def n_s103():
+    import inbox_model as M
+    orig = M.bucket_of
+    M.bucket_of = lambda *a, **k: M.BUCKET_ARCHIVE     # ← MUTANT
+    try:
+        r = s103()
+    finally:
+        M.bucket_of = orig
+    if r is True:
+        return "负控失效：待办被藏起来后 S103 仍然绿"
     return True
 
 

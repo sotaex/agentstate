@@ -39,6 +39,12 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+# ★ 渲染产物断言的**统一口径**（C2，`ci/page_caliber.py`）：`body(...)` 剥
+#   `<style>`/HTML 注释；`note_text(...)` 归一口径行里的**实时载入时刻**
+#   （0.50.4 起 `M.reading_note()` 含 `载入于 HH:MM` —— 逐字比对会跨分钟伪红，
+#    与上面 `_iso_now` 记的「量具时间炸弹」同族，见 S95 处注释）。
+import page_caliber as PC                                        # noqa: E402
+
 # ★★ 必须在 import 产品模块**之前**把中枢换到临时目录 —— 否则本判据会写脏
 #    真实中枢的 `notify_state.json`（那正是 0.40.0 分出来的展示层账本）。
 _HUB = tempfile.mkdtemp(prefix="g0470_hub_")
@@ -317,7 +323,17 @@ def n_s92():
 
 
 # ══════════════ S93 · 篡改分通道：两条不共用一盏灯 ══════════════
-@check("S93 ★ 篡改分通道：自研迭代 ⇒ dev 灯；疑似投毒 ⇒ 不是 dev 灯（不共用一盏）")
+#: ★★ 0.51.0 重签（规格 v1.2 §7.2 拍板 8）：**dev 身份移出主灯**（走进「研发中」徽标，
+#:   与 PyPI 版本比对），`host_shield_dev_drift` **回归普通 L1 事件**（0.40.0 本意）。
+#:   结论**不变**：两条通道仍不共用一盏灯 —— 但机制换了，所以原断言「l_dev == STATE_DEV」
+#:   的前提已不存在，必须重签（旧版会把本判据判成"自研迭代没走自己的灯 ⇒ 红"）。
+#:   新机制：`dev_drift` ⇒ L1（info 桶、未读、保持期内）；
+#:           `tamper`（未自愈 R0／**已自愈降档 L1**）⇒ **一律不抬灯**（poison 通道）。
+#:   ★ 实测（本轮 `output/_0470_rebase_probe.py`）：已自愈 tamper 的 level 是 **L1**
+#:     且落 info 桶 —— 也就是说，**若没有 poison 这道门，它会抬成一盏 L1 灯**。
+#:     ⇒ 这条判据里"投毒不抬灯"那一半是**承重**的，不是冗余（未自愈那条由 R0 级
+#:     天然挡住，已自愈那条只靠这道门挡）。
+@check("S93 ★ 篡改分通道：自研迭代 ⇒ 普通 L1 事件灯；疑似投毒 ⇒ 不抬灯（不共用一盏）")
 def s93():
     import inbox_model as M
     import inbox_store as S
@@ -342,10 +358,15 @@ def s93():
                 % l_dev)
     if l_dev == l_fresh:
         return "自研迭代与未自愈投毒共用一盏灯（都是 %s）" % l_dev
-    if l_dev != M.STATE_DEV:
-        return "自研迭代没有走它自己的 dev 灯（得到 %s）" % l_dev
-    if l_heal == M.STATE_DEV:
-        return "疑似投毒（已自愈）被判成研发中 ⇒ 把投毒读成了自己改代码"
+    if l_dev != M.STATE_L1:
+        return ("自研迭代没有走普通 L1 事件灯（得到 %s）—— v1.2 把 dev 身份移到"
+                "「研发中」徽标，dev_drift 回归 L1；退到 L0 等于把「机器在迭代」"
+                "这件事从灯里删掉（0.40.0 本意）" % l_dev)
+    if l_heal == M.STATE_L1:
+        return ("疑似投毒（已自愈、level 已降为 L1、落 info 桶）抬了 L1 灯 ⇒ "
+                "poison 通道这道门没在承重：把「有人动了我的文件」读成了普通注意事件")
+    if l_fresh == M.STATE_L1:
+        return "疑似投毒（未自愈）抬了 L1 灯 ⇒ 投毒被读成「注意」"
     return True
 
 
@@ -358,17 +379,17 @@ def _mk_item(mod, kind, recovered=False, topic=""):
     return mod.Item(alert=a, state="unread")
 
 
-@check("N-S93 负控：把 dev_drift 放回共用的 L1 桶 ⇒ 两条重新共用一盏灯 ⇒ 必须红")
+@check("N-S93 负控：摘掉 poison 通道这道门 ⇒ 已自愈投毒抬灯、与自研迭代同灯 ⇒ 必须红")
 def n_s93():
-    # ★ 为什么变异这一处：真正让两条"共用一盏灯"的，是 **dev_drift 被算进
-    #   L1 抬灯桶**（0.46.0 的原状）。只摘掉 `_tamper_channel_light` 里的
-    #   dev 分支，dev_drift 会掉回 L0 —— 两条**仍然不同灯**，负控就没有分辨力
-    #   （首跑已实测：L0 vs L1）。⇒ 变异必须打在"共用的那个桶"上。
+    # ★ 0.51.0 重签：旧锚点（`_tamper_channel_light` 里的 L1 桶推导式）随 0.51.0
+    #   拆分 `_event_lamp_level` 消失。新锚点＝**poison 排除那两行** ——
+    #   它才是现在唯一挡住"已自愈投毒抬灯"的东西（实测：已自愈 tamper 降档 L1、
+    #   落 info 桶、未读、fresh ⇒ 拆掉这道门它就抬灯）。
     src = _src(_MODEL_REL)
-    anchor = '              and tamper_channel_of(it.kind) != "dev"]'
+    anchor = '        if tamper_channel_of(it.kind) == "poison":\n            continue\n'
     if anchor not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
-    mut = _load(src.replace(anchor, "]"), "im0470_ns93")
+    mut = _load(src.replace(anchor, ""), "im0470_ns93")
     import inbox_model as M0
 
     # 夹具前提：真实现下两条**不同灯** —— 否则负控无分辨力
@@ -384,29 +405,35 @@ def n_s93():
     b = mut.current_state("guarding", None,
                           [_mk_item(mut, "host_shield_tamper", recovered=True)])
     if a != b:
-        return "负控失效：放回共用桶后两条仍不同灯（%s vs %s）⇒ 该排除没被依赖" % (a, b)
+        return "负控失效：摘掉 poison 门后两条仍不同灯（%s vs %s）⇒ 该门没被依赖" % (a, b)
     return True
 
 
-@check("N-S93b 负控：摘掉 dev 灯分支 ⇒ 自研迭代丢掉自己的灯 ⇒ 必须红")
+@check("N-S93b 负控：把 dev_drift 也排除在抬灯之外 ⇒ 自研迭代丢掉自己的灯 ⇒ 必须红")
 def n_s93b():
+    # ★ 0.51.0 重签：旧锚点（`_tamper_channel_light` 里的 dev 分支）随 0.51.0 拆分
+    #   消失。新锚点仍是"poison 排除"那两行，但变异方向相反：
+    #   把 `"dev"` 也并进排除集 ⇒ dev_drift 不再抬灯（退回 L0）⇒
+    #   **自研迭代丢掉自己的灯**（正因为 v1.2 里它走的是普通 L1 事件这条路）。
     src = _src(_MODEL_REL)
-    anchor = '    if "dev" in chans and lv in (STATE_L0, STATE_DEV):\n        return STATE_DEV'
+    anchor = '        if tamper_channel_of(it.kind) == "poison":\n            continue\n'
     if anchor not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
-    mut = _load(src.replace(anchor, "    if False:\n        return STATE_DEV"),
-                "im0470_ns93b")
+    mut = _load(src.replace(
+        anchor,
+        '        if tamper_channel_of(it.kind) in ("poison", "dev"):\n'
+        '            continue\n'), "im0470_ns93b")
     import inbox_model as M0
     real = M0.current_state("guarding", None,
                             [_mk_item(M0, "host_shield_dev_drift",
                                       topic="code_drift")])
-    if real != M0.STATE_DEV:
-        return "夹具不成立：真实现下自研迭代就没走 dev 灯（%s）" % real
+    if real != M0.STATE_L1:
+        return "夹具不成立：真实现下自研迭代就没走普通 L1 事件灯（%s）" % real
     got = mut.current_state("guarding", None,
                             [_mk_item(mut, "host_shield_dev_drift",
                                       topic="code_drift")])
-    if got == M0.STATE_DEV:
-        return "负控失效：摘掉 dev 分支后仍亮 dev 灯 ⇒ 该分支没在承重"
+    if got == M0.STATE_L1:
+        return "负控失效：把 dev 并进排除集后仍亮 L1 灯 ⇒ 自研迭代的抬灯路径没在承重"
     return True
 
 
@@ -478,9 +505,15 @@ def s95():
     #      （旧 `window_note` 承诺「分母均为 N 条」—— 对四个 tab 至少三个是假的，
     #      且「最近 24 小时」不随页面停留滚动）。分母纪律并未放松：它下沉到
     #      每 tab 可见单位、hover 口径与「？」词条，本套件 ①③ 仍守 count_text。
+    #   ★★ 2026-10-16 修（**判据自身时变**，非产品漂移）：0.50.4（Q-22）给
+    #      `M.reading_note()` 加了**实时**载入时刻（`载入于 HH:MM`）。原先是
+    #      渲染之后**再调一次**该函数逐字比对 —— 两次独立读数跨分钟即伪红
+    #      （满载单页渲染实测可达秒级）。⇒ 两侧先归一刻时刻（`PC.note_text`）
+    #      再比静态文案；顺带按 C2 走 `PC.body(...)`（正文层，剥 style/注释）。
+    #      断言强度未降：静态文案仍须逐字来自唯一实现（0490 N-U01c 反证）。
     page = SV.render_page(view="inbox", root=tempfile.mkdtemp(prefix="g0470_s95_"),
                           token="T", items=items)
-    if M.reading_note() not in page:
+    if PC.note_text(M.reading_note()) not in PC.note_text(PC.body(page)):
         return "收件箱页缺口径行（应有 %r）" % M.reading_note()
 
     # ③ 托盘：`total`（分母）必须落盘，tip 必须带窗口与分母
@@ -800,8 +833,14 @@ def _race_arm(src, tag, modname):
     return (_ledger_total(d), _sum_missed(d))
 
 
-# ══════════════ S99 · 疑似投毒在场 ⇒ 不许抬 dev 灯 ══════════════
-@check("S99 ★ 疑似投毒在场 ⇒ 不抬 dev 灯（不许把「有人动了我的文件」解释成「我在改代码」）")
+# ══════════════ S99 · 疑似投毒 ⇒ 不许被读成「研发中」 ══════════════
+#: ★★ 0.51.0 重签（规格 v1.2 §7.2）：v1.1 版断言的是「投毒在场 ⇒ 不抬 **dev 灯**」。
+#:   v1.2 里 **dev 已不是灯**（身份移徽标、判据是 PyPI 版本比对，与事件无关），
+#:   所以旧断言的落点没了。**不变的是那条纪律**：不许把「有人动了我的文件」
+#:   解释成「我在改代码」—— 现在它由两件事共同守住：
+#:     ① 通道分类：`tamper ⇒ "poison"`、`dev_drift ⇒ "dev"`，**两值不许相等**；
+#:     ② poison 通道**一律不抬灯**（已自愈的 tamper 降档 L1 后也不抬，见 S93）。
+@check("S99 ★ 疑似投毒不许被读成「研发中」：通道两值不等 ＋ 投毒一律不抬灯")
 def s99():
     import inbox_model as M
     import inbox_store as S
@@ -814,33 +853,53 @@ def s99():
                               "severity": "critical"}, kinds)
         return M.Item(alert=a, state="unread")
 
-    # ① 自研迭代 ＋ 疑似投毒（未自愈）⇒ 不是 dev
+    # ① 通道分类：两条通道必须是**两个不同的值**（"投毒被并进自研通道"即红）
+    cp = M.tamper_channel_of("host_shield_tamper")
+    cd = M.tamper_channel_of("host_shield_dev_drift")
+    if cp is None or cd is None:
+        return "篡改类 kind 没进 TAMPER_CHANNEL_KINDS（%r / %r）⇒ 分通道失效" % (cp, cd)
+    if cp == cd:
+        return ("投毒与自研迭代被归成同一个通道（都是 %r）⇒ 分通道名存实亡" % cp)
+
+    # ② ★ 承重那一半：**只有已自愈投毒**在场（降档 L1、落 info 桶、未读、fresh）
+    #    ⇒ 仍须不抬灯。少了 poison 那道门，它就会抬成一盏 L1 灯（实测见 S93 注释）。
+    lv0 = M.current_state("guarding", None,
+                          [it("host_shield_tamper", recovered=True)])
+    if lv0 != M.STATE_L0:
+        return ("只有已自愈投毒在场时灯是 %s（应 L0）⇒ 投毒被读成了普通事件"
+                % lv0)
+
+    # ③ 自研迭代 ＋ 未自愈投毒 ⇒ 灯是自研迭代那条 L1，绝不染成 R0「失守」
     lv = M.current_state("guarding", None,
                          [it("host_shield_dev_drift", topic="code_drift"),
                           it("host_shield_tamper", recovered=False)])
     if lv == M.STATE_DEV:
-        return "投毒（未自愈）在场仍抬 dev 灯 ⇒ 把投毒读成了自己改代码"
-    # ② 自研迭代 ＋ 疑似投毒（已自愈）⇒ 也不是 dev
-    lv2 = M.current_state("guarding", None,
-                          [it("host_shield_dev_drift", topic="code_drift"),
-                           it("host_shield_tamper", recovered=True)])
-    if lv2 == M.STATE_DEV:
-        return "投毒（已自愈）在场仍抬 dev 灯（得到 %s）" % lv2
-    # ③ ★ 反向：只有自研迭代时**必须**还是 dev（不许这道门把正常分支也关掉）
+        return "投毒（未自愈）在场仍抬 dev ⇒ 把投毒读成了自己改代码"
+    if lv == M.STATE_R0:
+        return ("投毒（未自愈）在场把灯染成 R0「失守」（得到 %s）—— R0 绝不由账给"
+                % lv)
+
+    # ④ ★ 反向：只有自研迭代时**必须**还有它那盏 L1（不许这道门把正常分支也关掉）
     lv3 = M.current_state("guarding", None,
                           [it("host_shield_dev_drift", topic="code_drift")])
-    if lv3 != M.STATE_DEV:
-        return "只有自研迭代时反而丢了 dev 灯（得到 %s）⇒ 门开反了" % lv3
+    if lv3 != M.STATE_L1:
+        return "只有自研迭代时反而丢了灯（得到 %s）⇒ 门开反了" % lv3
     return True
 
 
-@check("N-S99 负控：摘掉 poison 在场这道门 ⇒ 投毒在场仍抬 dev ⇒ 必须红")
+@check("N-S99 负控：把投毒并进自研通道 ⇒ 已自愈投毒抬灯 ⇒ 必须红")
 def n_s99():
+    # ★ 0.51.0 重签：旧锚点（`if "poison" in chans: return lv`）随 0.51.0 消失。
+    #   新变异＝**把两条通道归成一类**（投毒写成 "dev"）—— 正是 S99 标题点名的病：
+    #   「把有人动了我的文件，读成我在改代码」。归成一类后 poison 那道排除门
+    #   不再命中 ⇒ 已自愈投毒（降档 L1）就抬灯了 ⇒ S99①/② 必须红。
     src = _src(_MODEL_REL)
-    anchor = '    if "poison" in chans:\n        return lv'
+    anchor = '    "host_shield_tamper": "poison",       # 疑似投毒（防护文件被动过）'
     if anchor not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
-    mut = _load(src.replace(anchor, "    pass"), "im0470_ns99")
+    mut = _load(src.replace(
+        anchor, '    "host_shield_tamper": "dev",          # ← MUTANT：并进自研通道'),
+        "im0470_ns99")
     import inbox_store as S0
     import host_shield as HS0
     kinds = set(HS0._ALERT_KINDS)
@@ -851,12 +910,14 @@ def n_s99():
                                "severity": "critical"}, kinds)
         return mut.Item(alert=a, state="unread")
 
-    lv = mut.current_state("guarding", None,
-                           [it("host_shield_dev_drift", topic="code_drift"),
-                            it("host_shield_tamper", recovered=False)])
-    if lv != mut.STATE_DEV:
-        return "负控失效：摘掉这道门后仍不抬 dev（得到 %s）⇒ 该门没在承重" % lv
-    return True
+    if mut.tamper_channel_of("host_shield_tamper") == \
+       mut.tamper_channel_of("host_shield_dev_drift"):
+        lv0 = mut.current_state("guarding", None,
+                                [it("host_shield_tamper", recovered=True)])
+        if lv0 == mut.STATE_L0:
+            return "负控失效：两条通道归成一类后，已自愈投毒仍不抬灯（%s）" % lv0
+        return True
+    return "负控失效：变异没生效（两值仍不等）⇒ 该分类没被 S99① 依赖"
 
 
 def main():

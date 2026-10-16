@@ -308,6 +308,12 @@ def sync_from_items(items, root=None, tip=None, posture=None):
         # ★ 状态词与**页面顶部条/标题同一个词**（`ex["label"]`，W-03 逐字断言）。
         #   哨兵态只作第二段：图标维度的话（在岗/不在岗/盲区/未启用）。
         tip = "%s · %s" % (ex["label"], SHIELD_TIP[sh])
+        # ★★ 0.51.0（规格 v1.2 §2.4）：**并存徽标**（研发中／缺粮）带进提示 ——
+        #   位置放在状态词**之后**：W-03 断言 `tip.startswith(状态词)`，
+        #   前缀不许动（两个界面说同一个词，是第一顺位）。缺键 ⇒ 当没有徽标。
+        _bd = ex.get("badges") or []
+        if _bd:
+            tip = "%s · %s" % (tip, "、".join(n for _k, n, _w in _bd))
     # ★★ 0.47.0（方案 §5 步三）：这条 tip 是分子 ⇒ **必带窗口与分母**。
     #   分母＝本次载入的全部记录条数（`items`），窗口＝`M.WINDOW_HOURS`。
     #   ★ 图标上只放得下分子，分母与窗口写进提示（悬停可见）与 `tray.json`。

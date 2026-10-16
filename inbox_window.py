@@ -80,9 +80,9 @@ MARGIN_B = 48
 MIN_WORK_W = 480
 MIN_WORK_H = 360
 
-# --- 冒泡窗（0.49.0）："需要人工介入马上处理"的通知窗 -------------------------
+# --- 紧急提醒窗（0.49.0）："需要人工介入马上处理"的通知窗 -------------------------
 #: ★ 为什么与面板分开两个几何：面板是**工作台**（按工作区比例收缩，
-#:   哨兵不碍事）；冒泡是**通知**（必须一眼看得全，固定小尺寸即可）。
+#:   哨兵不碍事）；紧急提醒是**通知**（必须一眼看得全，固定小尺寸即可）。
 BUBBLE_W = 384
 #: ★★★ 0.50.1 修（创始人 2026-10-14 截图：「泡泡下沿没露出来」）：
 #:   148 **不够** —— 那是按"内容高度"估的，而 `rect` 是**窗口**矩形，
@@ -276,11 +276,11 @@ def window_size_str(rect):
 
 
 def bubble_geometry(areas=None):
-    """冒泡窗的一站式几何：能不能开 + 开在哪。
+    """紧急提醒窗的一站式几何：能不能开 + 开在哪。
 
     ★ 与 `console_geometry` 同源同纪律（工作区实算、不写死绝对坐标），
-      但**不收工作区比例**：冒泡是通知，148px 必须一眼看得全。
-    ★ 位置与面板同锚（右下、紧贴任务栏上方）——冒泡与托盘/面板同处一地，
+      但**不收工作区比例**：紧急提醒是通知，148px 必须一眼看得全。
+    ★ 位置与面板同锚（右下、紧贴任务栏上方）——紧急提醒与托盘/面板同处一地，
       认知成本最低（`ANCHOR` 的同一理由）。
     """
     work = pick_work_area(areas)
@@ -288,13 +288,13 @@ def bubble_geometry(areas=None):
     h = min(BUBBLE_H, work.h - MARGIN_B - MARGIN_R)
     if w < 200 or h < 80:
         return {"ok": False,
-                "reason": ("工作区 %d×%d 太小，放不下 %d×%d 的冒泡窗"
+                "reason": ("工作区 %d×%d 太小，放不下 %d×%d 的紧急提醒窗"
                            % (work.w, work.h, BUBBLE_W, BUBBLE_H)),
                 "rect": None, "work": work}
     rect = (work.right - MARGIN_R - w, work.bottom - MARGIN_B - h, w, h)
     if not _inside(work, rect):
         return {"ok": False,
-                "reason": "按工作区算出来的冒泡位置会越出可用区域，不开冒泡。",
+                "reason": "按工作区算出来的紧急提醒位置会越出可用区域，不开紧急提醒。",
                 "rect": None, "work": work}
     return {"ok": True, "reason": "", "rect": rect, "work": work}
 
@@ -302,10 +302,10 @@ def bubble_geometry(areas=None):
 def set_topmost(hwnds, on=True, setter=None):
     """把给定窗口置顶／取消置顶；返回 `(是否全部成功, 汇总人话)`。
 
-    ★ 为什么冒泡必须置顶（0.49.0）：冒泡＝「需要人工介入马上处理」的通知。
-      被别的窗口压住的冒泡等于没弹 —— 那正是本仓禁止的形状
+    ★ 为什么紧急提醒必须置顶（0.49.0）：紧急提醒＝「需要人工介入马上处理」的通知。
+      被别的窗口压住的紧急提醒等于没弹 —— 那正是本仓禁止的形状
       （"看起来发了，其实没被看见"）。面板**不置顶**（它是工作台，
-      不该压在用户正在干活的窗口上）；置顶只属于冒泡这类通知。
+      不该压在用户正在干活的窗口上）；置顶只属于紧急提醒这类通知。
     ★ 只动 Z 序，不动位置和尺寸（`SWP_NOMOVE|SWP_NOSIZE`）。
     ★ 边界同 `place_all`：只碰调用方传进来的句柄，不枚举、不猜测。
     """
@@ -389,7 +389,7 @@ def focus_windows(hwnds, focusser=None):
 
     ★ 与 `set_topmost` 的分工（两件事，不许混）：
       · `set_topmost` 改的是**Z 序归属**（长期置顶）—— 面板**不置顶**
-        （它是工作台，长期压在用户正在干活的窗口上就是碍事）；置顶只属于冒泡。
+        （它是工作台，长期压在用户正在干活的窗口上就是碍事）；置顶只属于紧急提醒。
       · 本函数是**一次性的"切到前面"** —— 用户接着点别的窗口，它就该让位。
     ★ 边界同 `place_all`：**只碰调用方传进来的句柄**，不枚举、不猜测。
     """
@@ -827,7 +827,7 @@ def is_window_on_screen(hwnd):
 def enum_windows(visible_only=True):
     """枚举顶层窗口，返回 `[(hwnd, title), ...]`（**唯一**枚举实现）。
 
-    ★ 为什么抽它出来（0.49.0）：冒泡窗也需要"按标题标记找窗口"，而本仓
+    ★ 为什么抽它出来（0.49.0）：紧急提醒窗也需要"按标题标记找窗口"，而本仓
       禁止同一件 Win32 遍历写两份（第二份必然与第一份漂移 —— 本仓
       「一个事实一个实现」的老纪律）。⇒ 枚举只此一处，
       `find_console_windows` / `find_bubble_windows` 都只是它的**过滤器**。
@@ -895,7 +895,7 @@ def find_console_windows(suffix=CONSOLE_WINDOW_TITLE_SUFFIX, visible_only=True,
     """
     if lister is not None:
         return [h for h in lister(suffix=suffix, visible_only=visible_only) if h]
-    # ★ 枚举走唯一的 `enum_windows`（0.49.0 抽出，冒泡窗共用同一份遍历）
+    # ★ 枚举走唯一的 `enum_windows`（0.49.0 抽出，紧急提醒窗共用同一份遍历）
     #   —— 同一件 Win32 遍历只此一处，过滤条件才是各自的语义。
     return [h for (h, title) in enum_windows(visible_only=visible_only)
             if is_console_title(title, run_id)]
@@ -915,16 +915,17 @@ def find_console_windows(suffix=CONSOLE_WINDOW_TITLE_SUFFIX, visible_only=True,
 #     ...（0.36.2 全文见 git 历史；不要再复活它 —— 要全量就调 find_console_windows）
 
 
-#: ★★ 0.49.0：冒泡窗的标题标记 —— **刻意不含「· 值守台」字样**。
-#:   `host_shield.console_is_visible()`（0.36.8 立的降噪闸）按值守台标记判
-#:   「用户此刻是否正看着面板」；冒泡是**通知**、不是面板。若冒泡标题带上
-#:   值守台标记，它一弹出就会被闸当成「用户在看面板」⇒ 后续急事全被咽掉
+#: ★★ 0.49.0：紧急提醒窗的标题标记 —— **刻意不含「· Antinel 监理」字样**。
+#:   `host_shield.console_is_visible()`（0.36.8 立的降噪闸）按 Antinel 监理标记判
+#:   「用户此刻是否正看着面板」；紧急提醒是**通知**、不是面板。若紧急提醒标题带上
+#:   Antinel 监理标记，它一弹出就会被闸当成「用户在看面板」⇒ 后续急事全被咽掉
 #:   —— 漏报比多弹坏得多（0.36.8 原话：宁可多弹不可漏报）。
-#:   ⇒ 冒泡标题形如 `需要你处理 · 冒泡#<run_id>`，与值守台**结构上可分**。
-BUBBLE_TITLE_MARK = " · 冒泡"
+#:   ⇒ 紧急提醒标题形如 `失守：防护文件被改动 · 紧急提醒#<run_id>`，
+#:     与 Antinel 监理**结构上可分**。
+BUBBLE_TITLE_MARK = " · 紧急提醒"
 
 #: ★ 0.50.0（创始人 2026-10-14「值守台应该有一个能漂浮的最小态」）：
-#:   漂浮哨标窗的标题标记。为什么与冒泡/值守台**结构上可分**：
+#:   漂浮哨标窗的标题标记。为什么与紧急提醒/值守台**结构上可分**：
 #:   `console_is_visible()`（0.36.8 降噪闸）与 `find_console_windows` 都按
 #:   标题认窗；哨标不叫「值守台」，才不会被当成"用户正看着大面板"。
 #:   同理 `Windows + Aero` 任务栏里它显示成 `Antinel · 哨标`，一眼可知。
@@ -944,16 +945,16 @@ def _mark_at_tail_any(title, mark):
       `enum_windows`，不碰真桌面）：
 
         '我的 · 哨标 收藏夹'    → 被认成哨标窗   ← 用户窗口
-        '整理一下 · 冒泡 记录'  → 被认成冒泡窗   ← 用户窗口
+        '整理一下 · 紧急提醒 记录'  → 被认成紧急提醒窗   ← 用户窗口
 
       而这两条路径都通向 `WM_CLOSE` ⇒ **会关掉用户自己的窗口** ——
       0.36.5 把这一类明令为"不可接受的祸"，宽泛模式这一侧当时**漏了**
       （同型教训：严格模式收紧了 ≠ 宽泛模式也跟着收紧）。
 
     ★ 为什么不直接复用 `_mark_at_tail`：它的第 ④ 层前缀白名单是**值守台
-      页面名/状态词**（收件箱、失守、拦截…）；而冒泡窗的前缀是**告警标题**
+      页面名/状态词**（收件箱、失守、拦截…）；而紧急提醒窗的前缀是**告警标题**
       （任意用户可见文案）—— 白名单化不成立。⇒ 这里只保留"标记在末尾、
-      其后只允许 `#身份`"这一条：对哨标（前缀恒为 `Antinel`）与冒泡
+      其后只允许 `#身份`"这一条：对哨标（前缀恒为 `Antinel`）与紧急提醒
       （前缀是标题）都成立，且足以排除上面那两类实测误伤。
     """
     if not title or not mark:
@@ -986,14 +987,14 @@ def find_logo_windows(mark=LOGO_TITLE_MARK, visible_only=True, run_id=None):
 
 
 def find_bubble_windows(mark=BUBBLE_TITLE_MARK, visible_only=True, run_id=None):
-    """枚举冒泡窗；`run_id` 给定时只认**本次**那枚（严格后缀匹配）。
+    """枚举紧急提醒窗；`run_id` 给定时只认**本次**那枚（严格后缀匹配）。
 
     ★ 与 `find_console_windows` 同源同构（两级匹配），过滤器走唯一的
-      `enum_windows`；冒泡**不设 `lister` 注入点**：它的调用方（冒泡模块）
+      `enum_windows`；紧急提醒**不设 `lister` 注入点**：它的调用方（紧急提醒模块）
       自己按 run_id 收，测试不必在这里造假桌面。
     ★★ 0.50.2：宽泛分支从 `mark in title`（任意位置子串）改成
       `_mark_at_tail_any`（标记在末尾）—— 见该函数的说明（清单 B4）。
-      冒泡窗通向 `WM_CLOSE`（一次只留一枚），子串匹配会连用户窗口一起关。
+      紧急提醒窗通向 `WM_CLOSE`（一次只留一枚），子串匹配会连用户窗口一起关。
     """
     out = []
     for (h, title) in enum_windows(visible_only=visible_only):
@@ -1006,9 +1007,9 @@ def find_bubble_windows(mark=BUBBLE_TITLE_MARK, visible_only=True, run_id=None):
 
 
 def close_bubble_windows(visible_only=True, closer=None, run_id=None, why=""):
-    """关掉冒泡窗（**发 WM_CLOSE，不强杀**）；返回 `(关掉几个, 人话)`。
+    """关掉紧急提醒窗（**发 WM_CLOSE，不强杀**）；返回 `(关掉几个, 人话)`。
 
-    ★ 一次只留一枚冒泡：新的要弹之前，先把旧的收掉 —— 不然屏幕上会叠起
+    ★ 一次只留一枚紧急提醒：新的要弹之前，先把旧的收掉 —— 不然屏幕上会叠起
       一串同类通知，那正是「告警泛洪」（规格《品牌动效报警语法》铁律二）。
     ★ `closer` 可注入（判据不必碰真实桌面）—— 与 `close_console_windows`
       同一条纪律：**注入点必须出现在签名里**（0.36.2 的教训）。
@@ -1025,8 +1026,8 @@ def close_bubble_windows(visible_only=True, closer=None, run_id=None, why=""):
         except Exception:                                   # noqa: BLE001
             continue
     if not hs:
-        return 0, "没有开着的冒泡窗。"
-    return n, ("关掉了 %d 枚冒泡窗%s" % (n, ("（%s）" % why) if why else "。"))
+        return 0, "没有开着的紧急提醒窗。"
+    return n, ("关掉了 %d 枚紧急提醒窗%s" % (n, ("（%s）" % why) if why else "。"))
 
 
 def close_logo_windows(visible_only=True, closer=None, run_id=None, why=""):
@@ -1128,7 +1129,7 @@ def close_console_windows(suffix=CONSOLE_WINDOW_TITLE_SUFFIX, visible_only=True,
     try:
         if finder is not None:
             # ★ 0.50.0：`finder` 注入点（与 `closer` 同一条纪律：**注入点必须
-            #   出现在签名里**，0.36.2 的教训）。为什么冒泡/哨标那条链不需要、
+            #   出现在签名里**，0.36.2 的教训）。为什么紧急提醒/哨标那条链不需要、
             #   这里需要：`inbox_logo.collapse_console` 的判据要在**假桌面**上
             #   验"关掉的是本 run 的面板窗"，而枚举走真桌面就无从造假 ⇒ 判据
             #   只能 SKIP（ fixtures 不忠实比没有更坏）。默认 None ⇒ 行为不变。

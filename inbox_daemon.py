@@ -294,7 +294,7 @@ class Daemon:
         #   `console_url` 给定 ⇒ 跳过起服务（测试）；`opener(url)` 换掉真开窗口。
         self.opener = opener
         self.console_url = console_url
-        # ★ 0.49.0：冒泡发射点（可注入 —— 判据不起真浏览器、不响真声音）。
+        # ★ 0.49.0：紧急提醒发射点（可注入 —— 判据不起真浏览器、不响真声音）。
         self.bubbler = bubbler
 
     def _open_console(self):
@@ -311,10 +311,10 @@ class Daemon:
                                 console_url=self.console_url)
 
     def _pop_bubble(self, it):
-        """急事 → 冒泡（0.49.0）。发射点经 `bubbler` 注入，判据不碰真桌面。
+        """急事 → 紧急提醒（0.49.0）。发射点经 `bubbler` 注入，判据不碰真桌面。
 
         ★ 为什么单独一个方法而不是在 tick 里内联：判据要能**只换掉这一条
-          发射点**来验路由（急事进冒泡、普通事进 toast），不必连坐整轮 tick。
+          发射点**来验路由（急事进紧急提醒、普通事进 toast），不必连坐整轮 tick。
         """
         import inbox_bubble as BB
         fn = self.bubbler or BB.pop
@@ -379,9 +379,9 @@ class Daemon:
                "heartbeat": None}
 
         # ② 新告警 → 通知 / 强调 / 兜底
-        #   ★★ 0.49.0（创始人 2026-10-14）：**急事走冒泡、普通事走 toast**。
+        #   ★★ 0.49.0（创始人 2026-10-14）：**急事走紧急提醒、普通事走 toast**。
         #      `R0`（失守）与 `L2`（拦截进行中）＝「需要人工介入马上处理」
-        #      ⇒ 冒泡窗（置顶、不自动消失、带「知道了」确认钮、与值守台同界面）；
+        #      ⇒ 紧急提醒窗（置顶、不自动消失、带「知道了」确认钮、与 Antinel 监理同界面）；
         #      其余级别仍走 `inbox_notify`（WinRT toast，落操作中心）。
         #      **同一个事件只走一条通道** —— 两条都响就是告警泛洪。
         seen = _load_seen(self.root)

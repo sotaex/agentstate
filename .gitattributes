@@ -1,1 +1,12 @@
 * -text
+# ★ 2026-10-16（三任务批收尾）：whitespace 门禁与「* -text（全仓不归一行尾）」的现实对齐。
+#   本仓 CRLF 文件（delivery_gate / inbox_tray / inbox_window 等）的行终止符是 CRLF，
+#   `git diff --check` 默认把行尾 CR 当 trailing whitespace ⇒ 每个 CRLF 文件的每条
+#   新增行都误报 ⇒ 门禁信噪比归零（实测：交接单 P0 的「暂存尾随空格」14 条全是 CR，
+#   一条真垃圾都没有）。cr-at-eol＝把「紧贴 LF 的 CR」当终止符，不是行尾垃圾；
+#   真空格／真 tab 照样报。
+* whitespace=cr-at-eol
+#   Markdown 的行尾双空格是**硬换行语义**（改名执行记录 v1.0 全文在用），
+#   按 blank-at-eol 报红会逼人剥掉它 ⇒ 文档渲染被门禁改坏。md 关掉这一条，
+#   blank-at-eof（文件末尾多空行）照报。
+*.md whitespace=cr-at-eol,-blank-at-eol

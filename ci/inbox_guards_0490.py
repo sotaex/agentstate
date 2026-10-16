@@ -259,6 +259,17 @@ def _note_calls(src):
 
 
 # ════════════════════════════ U-01 · 甲2（＋甲3 并入）════════════════
+def _note_matches(page_body):
+    """U-01 的口径行比对 —— **唯一落点**（两侧先归一刻载入时刻，再逐字比静态文案）。
+
+    ★★ 为什么单独抽出来（2026-10-16）：负控 N-U01b / N-U01c **要直接调用它**，
+      才能证明「修法是否还在承重」。若负控只是"再写一遍比对去比字符串"，那
+      把这里的归一删掉、退回逐字比对，负控照样绿 ⇒ **纸负控**。
+      抽成函数后，负控打的与正判据用的是同一个比对（维一：不许二次实现）。
+    """
+    return PC.note_text(M.reading_note()) in PC.note_text(page_body)
+
+
 @check("U-01 ★ 甲2：读数口径不承诺活的（新措辞在位；分钟前/分母均为 零出现）")
 def u01():
     """甲2：「最近 24 小时」窗口冻结，不随时间滚动 —— 页面却把它说成活的。
@@ -270,6 +281,14 @@ def u01():
     陈旧守卫与刷新同一批做（§5.3）。
 
     断言面：四页 ＋ 收件箱各 tab 的**渲染产物**（不打行号、不打函数名）。
+
+    ★★ 2026-10-16 修（**判据自身时变**，非产品漂移）：
+      0.50.4（Q-22）给 `M.reading_note()` 加了**实时**载入时刻（`载入于 HH:MM`）。
+      本条原先「渲染之后**再调一次**该函数逐字比对」—— 两次独立读数**跨分钟即伪红**
+      （满载单页渲染实测可达秒级 ⇒ 每 tab 约数 % 概率翻面；全量复跑实测撞到一次）。
+      ⇒ 比对改走 `PC.note_text(...)`（先把两侧时刻归一，再逐字比静态文案）。
+      **断言强度未降**：静态文案仍须逐字来自唯一实现，回潮旧串照样红
+      （N-U01c 反证归一没吞掉真漂移；N-U01b 反证「只差时刻」不再伪红）。
     """
     src = _src(_SERVER_REL)
     # ① 入口唯一（维一）：两个调用点都走 reading_note；旧名零残留
@@ -289,9 +308,10 @@ def u01():
                 return "%s 页仍含 %r（承诺维持不住的口径／冻结读数）" % (view, bad)
     for tab in _TABS:
         page = _page("inbox", filt=tab)
-        if "不随页面停留刷新" not in PC.body(page):
+        body = PC.body(page)
+        if "不随页面停留刷新" not in body:
             return "收件箱 tab=%s 缺新措辞「不随页面停留刷新」" % tab
-        if M.reading_note() not in PC.body(page):
+        if not _note_matches(body):
             return "收件箱 tab=%s 的口径行 ≠ M.reading_note()（唯一实现漂移）" % tab
     page = _page("report")
     if "不随页面停留刷新" not in PC.body(page):
@@ -334,6 +354,84 @@ def n_u01():
     live = _page("inbox", filt=M.BUCKET_ACTION)
     if "不随页面停留刷新" not in PC.body(live) or "分母均为" in PC.body(live):
         return "夹具不成立：真实现本身就不满足 U-01 ⇒ 负控无分辨力"
+    return True
+
+
+# ═══════════ N-U01b / N-U01c · U-01「瞬间读数的时钟」这对负控 ═══════════
+#   ★★ 由来（2026-10-16 实测，**判据自身时变**不是产品漂移）：
+#     0.50.4（Q-22）给 `M.reading_note()` 加了**实时**载入时刻。U-01 原先渲染后
+#     **再调一次**该函数逐字比对 ⇒ 两次独立读数跨分钟即伪红。全量复跑实测撞到。
+#     修法＝两侧先归一刻载入时刻（`PC.note_text`），比对落在**唯一落点**
+#     `_note_matches()`。这两条负控**直接打在 `_note_matches()` 上**（同 N-S48
+#     直接调 S48 的检测函数那一招）—— 不是"再写一遍比对"，所以修法若被回退，
+#     负控会当场转红；只会背书的负控是纸负控。
+@check("N-U01b ★ 负控：口径行**只差载入时刻**不得红（0.50.4 实时钟竞态，2026-10-16）")
+def n_u01b():
+    """反向对照（维二）：复现**旧口径的伪红**，并证明归一修法有效。
+
+    步骤（**只动内存里的模块属性，磁盘一字节不动**）：
+      ① 真渲染一页 —— 页面上的口径行 ＝ 该次渲染真产出的那一串（时刻 A）；
+      ② 把 `M.reading_note` 换成"**只差时刻**"的版本（时刻 B，静态文案一字不动），
+         模拟"渲染与比对是两次独立读数、期间跨了一分钟"；
+      ③ 旧口径（逐字比对）在这一步**必红** —— 这是事故的复现，不是产品缺陷；
+      ④ 新口径 `_note_matches()`（两侧归一后比静态文案）**必须绿**。
+         若有人把 `_note_matches()` 回退成逐字比对，本条当场红 ⇒ 负控在承重。
+    """
+    orig = M.reading_note
+    body = PC.body(_page("inbox", filt=M.BUCKET_ACTION))
+    if "不随页面停留刷新" not in body:
+        return "夹具不成立：真实现渲染页里没有口径行 ⇒ 负控无分辨力"
+    live = orig()
+    mm = re.search(r"载入于\s*(\d{1,2}):(\d{2})", live)
+    if not mm:
+        return ("夹具不成立：`reading_note()` 产物里找不到 `载入于 HH:MM` —— "
+                "要么产品改了形态（需同步本负控），要么时钟已被移除")
+    hh, mi = int(mm.group(1)), int(mm.group(2))          # 造一个**保证不同**的时刻
+    stale_clock = "%02d:%02d" % ((hh + (mi + 1) // 60) % 24, (mi + 1) % 60)
+    stale = live[:mm.start(1)] + stale_clock + live[mm.end(2):]
+    # ③ 旧口径（逐字）必须红 —— 把曾发生的事故钉成可复跑的证据
+    if stale in body:
+        return ("夹具不成立：改写时刻后的串仍在页面里（%r）⇒ "
+                "时刻不是页面里的唯一可变量，本负控测不出竞态" % stale_clock)
+    # ④ 新口径必须绿（**打在 U-01 真正用的那个比对函数上**）
+    M.reading_note = lambda: stale
+    try:
+        if not _note_matches(body):
+            return ("负控失效：渲染与比对**只差载入时刻**时 `_note_matches()` "
+                    "不通过 ⇒ 修法没生效（U-01 跨分钟仍会伪红）")
+    finally:
+        M.reading_note = orig
+    return True
+
+
+@check("N-U01c ★ 负控：口径行**静态文案**漂移必须仍红（时刻归一无掩蔽）")
+def n_u01c():
+    """反向对照（维二）：证明「归一刻」没有把 U-01 变成纸糊的。
+
+    ① 真渲染一页；② 把 `M.reading_note` 换成**静态文案**漂移版
+       （`本次载入时` → `本次载入前`，时刻形态不变）；③ `_note_matches()` **必须红**
+       —— 否则说明归一顺手把"页面自造/回潮旧串"这类真漂移也吞了（修法过宽）。
+    ★ 与 N-U01 分工：N-U01 打**调用点**回潮（页面侧），本条打**静态文案**漂移
+      （实现侧）；两面都不许被归一掩蔽。
+    """
+    orig = M.reading_note
+    body = PC.body(_page("inbox", filt=M.BUCKET_ACTION))
+    live = orig()
+    if not _note_matches(body):
+        return "夹具不成立：真实现下 U-01 的比对不通过 ⇒ 负控无分辨力"
+    if "本次载入时" not in live:
+        return ("夹具不成立：唯一实现产物的静态文案里没有「本次载入时」"
+                "（产品又改了措辞 ⇒ 本负控的注入点需同步）")
+    M.reading_note = lambda: live.replace("本次载入时", "本次载入前")
+    try:
+        if _note_matches(body):
+            return ("负控失效：静态文案漂移后 `_note_matches()` 仍通过 ⇒ "
+                    "`PC.note_text` 把真漂移一起吞掉了（U-01 变纸糊）")
+    finally:
+        M.reading_note = orig
+    # 变异-红-还原：还原后必须回绿
+    if not _note_matches(body):
+        return "负控失效：还原唯一实现后比对仍不通过 ⇒ 变异没清干净"
     return True
 
 
@@ -1179,19 +1277,35 @@ def n_w02():
 def _w03_assert():
     """W-03 正判据的纯判断（正/负控共用）。返回 None＝过，否则说明串。
 
-    两个现场（都注入 guarding 姿态，专盯 A2 那一对矛盾）：
+    四个现场（都注入 guarding 姿态），三个维度都盯：
       ① 账内 R0 × 2 条（同因一件） ⇒ 页面「值守中」（0.39.0：历史 R0 不抬灯），
          旧合并读会给「失守」—— A2 实测的就是这一对；
-      ② 账内 L2 一条（已拦下）     ⇒ 页面「拦截」（事件级 L2 照常抬灯）——
+      ② 账内 L2 一条（已拦下）**刚发生**（0.1h，在保持期内）⇒ 页面「拦截」——
          防"同源"被做反成"谁都不抬灯"（负向也要同源）。
+      ③ 账内 L2 一条**过了保持期**（1.0h > `LAMP_HOLD_MINUTES`=30min）⇒
+         页面「值守中」—— ★ 0.51.0 规格 v1.2 §2.1：info 桶只在**未读 ∧ 刚发生**
+         时抬灯，超期只进「待阅 N」。把「拦截」钉成**禁用词**＝谁把保持期拆掉
+         （退回 v1.1 的"info 一律抬灯"）这条就红。
+      ④ 账内 L2 一条**已读**（刚发生）⇒ 页面「值守中」—— 已读＝已知情，
+         保持期**提前结束**（0.35.3「你知情即可」的机制化）。
+
+    ★ 四个现场的 `count`/`total` 一律不变（0/1 或 1/2）：本条判据只管**状态词
+      同源**，件数/分母口径由 W-01/U-06 等另管 —— 不许一条判据同时改两个口径。
     """
     import inbox_tray as TR
     posture = _POSTURE                   # guarding：哨兵在岗
     cases = [
         ("账内 R0", [_mk("R0", "unread", 1, 1.0), _mk("R0", "unread", 2, 2.0)],
          "值守中", "失守", 1, 2, "L0"),
-        ("账内 L2", [_mk("L2", "unread", 4, 1.0, kind="tool_call_blocked")],
+        ("账内 L2（保持期内）",
+         [_mk("L2", "unread", 4, 0.1, kind="tool_call_blocked")],
          "拦截", None, 0, 1, "L2"),
+        ("账内 L2（过保持期）",
+         [_mk("L2", "unread", 5, 1.0, kind="tool_call_blocked")],
+         "值守中", "拦截", 0, 1, "L0"),
+        ("账内 L2（已读）",
+         [_mk("L2", "read", 6, 0.1, kind="tool_call_blocked")],
+         "值守中", "拦截", 0, 1, "L0"),
     ]
     for name, items, want_word, banned, want_count, want_total, want_st in cases:
         hub = tempfile.mkdtemp(prefix="g0490_w03_")

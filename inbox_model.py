@@ -1016,6 +1016,141 @@ def _granary_why(granary):
     return (granary or {}).get("why") or "粮快见底了"
 
 
+# ---------------------------------------------------- 保持期（时长）----
+#: ★★ 0.51.0（规格 v1.2 §3）：**info 桶事件的保持期**（分钟）。
+#:   创始人 2026-10-16 第二问「拦截是瞬时的事情，是否约定一个时长，在拦截
+#:   刚发生之后的一定时间段内显示」⇒ 定 H＝30 分钟（参数化，改值不改结构）。
+#:   · info 桶（Antinel 自己处理掉的）只在 `未读 ∧ now - ts ≤ H` 内抬主灯；
+#:     **已读＝已知情，提前结束**（0.35.3「你知情即可」的机制化）；
+#:   · action 桶（只有你能解决）**不适用保持期** —— 待办不是新闻，
+#:     24h 窗口内未关闭即持续抬灯（窗口是 0.35.3 既定，不改）。
+#:   ★ H 与"紧急提醒"气泡分工：气泡管「刚发生」、灯管「还新鲜」、计数管
+#:     「还没看」；参数化 ⇒ 改值只是改这个常量，判据锁的是**结构**不是数值。
+LAMP_HOLD_MINUTES = 30
+
+# -------------------------------------------------------- 徽标（并存维）----
+#: ★★ 0.51.0（规格 v1.2 §2.2）：**研发中**与**缺粮**不再抢主灯，改为
+#:   「徽标」——**不互斥、可多枚、常驻**。主灯（`current_state`）只答
+#:   「此刻什么情况」（R0/L2/L1/L0，互斥）；徽标答「还有哪些并存态」。
+#:   ⇒ 创始人 2026-10-16 第一问（"缺粮跟其他几态可能同时存在"）与第四问
+#:     （"研发中跟其他态始终同时"）由**通道分工**回答：不选一个遮一个。
+#: 键 → 人话名（**唯一真源**；判据 0372 S08 只认 inbox_model 里的态名声明）。
+BADGE_DEV = "dev"              # 研发中（本机代码版本 > 已发布版本）
+BADGE_GRANARY = "granary"      # 缺粮（粮低 ∧ 在岗 ∨ 未关闭的 credits_low）
+BADGE_LABEL = {BADGE_DEV: "研发中", BADGE_GRANARY: "缺粮"}
+#: ★★ 0.51.0：徽标的**短提示**（hover 用），与 `BADGE_LABEL` 同处 —— 判据
+#:   0490 U-11 锁「收件箱页全部 title 属性 ≤ 20 字」，而 `badges()` 返回的
+#:   `why` 是**完整原因句**（含具体版本号，如「研发中——本机这一版（0.51.0）
+#:   比已发布的（0.35.1）新，还没发出去」= 38 字）⇒ 那句**不许进 title**，
+#:   它走顶栏可见的原因句（`light_explain()["reason"]` 的「另外：…」段）。
+#:   这里是 hover 的一句话：**说这个词是什么意思**，不搬工程说明。
+BADGE_TIP = {
+    BADGE_DEV: "本机这一版比已发布的更新",
+    BADGE_GRANARY: "粮快见底了",
+}
+
+
+def _ver_tuple(s):
+    """`"0.50.6"` → `(0, 50, 6)`；非字符串／坏格式 ⇒ `None`（**不猜**）。"""
+    if not isinstance(s, str):
+        return None
+    m = re.match(r"^\s*(\d+)\.(\d+)\.(\d+)", s)
+    if not m:
+        return None
+    return tuple(int(x) for x in m.groups())
+
+
+def is_ahead_of_published(local, published):
+    """本机版本是否**高于**已发布版本（研发中徽标的**唯一判据**）。
+
+    ★ 取不到任何一侧 ⇒ `False`（**降级不假阳**）—— 与 `granary_now` 同一条
+      容错哲学：读不到就当"没有这回事"，绝不编一个"研发中"出来。
+    ★ 用**数值元组**比较，不用字符串比较：字符串比较下 `"0.9.0" > "0.10.0"`
+      为真（逐字符先比 `"9" > "1"`）—— 版本 0.9.0 会被误判成比 0.10.0 新。
+    """
+    a, b = _ver_tuple(local), _ver_tuple(published)
+    if a is None or b is None:
+        return False
+    return a > b
+
+
+def version_pair(root=None):
+    """`(本机代码版本, 已发布版本)` —— 容错读，取不到给 `None`。
+
+    ★ 真源：本机＝`antinel.py::VERSION`；已发布＝`psl/workspace_facts.json`
+      的 `release.pypi.published_version`（**该位只由 PyPI 实查改写**，是本仓
+      既有纪律；`release.version` 作本机版本的兜底）。
+    ★ 读不到（已装成包、无 dev 事实件）⇒ `(None, None)` ⇒ 徽标不显示
+      （降级，不假绿也不假阳）。
+    ★ 与 `granary_now` 同一条边界：模型层只做**容错转发**，读不到不抛错。
+    """
+    local = pub = None
+    try:
+        import antinel as _A
+        local = getattr(_A, "VERSION", None)
+    except Exception:                                      # noqa: BLE001
+        pass
+    try:
+        import io
+        import json
+        import os
+        p = os.path.join(root or os.path.dirname(os.path.abspath(__file__)),
+                         "psl", "workspace_facts.json")
+        with io.open(p, encoding="utf-8") as f:
+            d = json.load(f)
+        rel = d.get("release") or {}
+        pub = (rel.get("pypi") or {}).get("published_version")
+        if local is None:
+            local = rel.get("version")
+    except Exception:                                      # noqa: BLE001
+        pass
+    return local, pub
+
+
+def badges(posture_state, granary=None, items=None, now=None,
+           hours=WINDOW_HOURS, versions=None):
+    """**徽标**（并存维）：返回 `[(键, 人话名, 原因), …]`，可同时多枚、常驻。
+
+    ★ 徽标**不互斥、不抢主灯**：主灯说"此刻什么情况"，徽标说"还有哪些并存态"
+      （规格 v1.2 §2.2）。「研发中的机器此刻失守」＝研发徽标 ＋ R0 主灯，
+      两个事实都显示，谁也不掩盖谁。
+
+    · **研发中**＝本机代码版本 > 已发布版本（`is_ahead_of_published`）。
+      ★ 姿态 `dev`（自检与登记表不符）**不**并点这枚徽标 —— 那是**另一套信号**
+        （`host_shield.is_dev_build`，比 manifest，服务安全路径与自检解释），
+        与"发布身份"（比 PyPI）分开：两套信号说两个问题，不许互相冒充。
+    · **缺粮**＝粮低 ∧ 哨兵在岗（`_granary_level`）**或**存在未关闭的
+      `credits_low` 记录（已活的那一个源）。
+    """
+    out = []
+    # ① 研发中
+    if versions is None:
+        versions = version_pair()
+    if isinstance(versions, (tuple, list)) and len(versions) == 2:
+        loc, pub = versions
+    else:
+        loc, pub = None, None
+    if is_ahead_of_published(loc, pub):
+        out.append((BADGE_DEV, BADGE_LABEL[BADGE_DEV],
+                    "%s——本机这一版（%s）比已发布的（%s）新，还没发出去"
+                    % (BADGE_LABEL[BADGE_DEV], loc, pub)))
+    # ② 缺粮
+    gl = _granary_level(granary, posture_state)
+    cred = [it for it in (items or [])
+            if it.kind == "credits_low" and it.state in OPEN_STATES
+            and within_hours(it.ts, hours, now)]
+    if gl is not None:
+        out.append((BADGE_GRANARY, BADGE_LABEL[BADGE_GRANARY],
+                    "%s——%s" % (BADGE_LABEL[BADGE_GRANARY], _granary_why(granary))))
+    elif cred:
+        # ★ 原因句从 `TITLE_OF_KIND` **派生**（不另写一份），去掉"缺粮："前缀。
+        _t = TITLE_OF_KIND.get("credits_low", "")
+        _why = _t.split("：", 1)[1] if "：" in _t else "粮快见底了"
+        out.append((BADGE_GRANARY, BADGE_LABEL[BADGE_GRANARY],
+                    "%s——%s" % (BADGE_LABEL[BADGE_GRANARY], _why)))
+    return out
+
+
 def light(posture_state, items, now=None, hours=WINDOW_HOURS, granary=None):
     """「此刻 ＋ 24h 账」的**合并读**。返回 `(state, why)`（六态之一）。
 
@@ -1170,18 +1305,19 @@ def current_state(posture_state, granary=None, items=None, now=None,
                   hours=WINDOW_HOURS):
     """★★ 「灯态」的**唯一真源**（2026-10-09 创始人裁定 ＋ 逐态复审，0.39.0）。
 
-    ★★★ 六态的**来源分工**（这是本函数存在的全部理由，判据 `ci/inbox_guards_0380.py` 钉死）：
+    ★★★ 主灯的**来源分工**（这是本函数存在的全部理由，判据 `ci/inbox_guards_0380.py` 钉死）：
 
       | 态 | 性质 | 唯一来源 | 为什么 |
       |----|------|----------|--------|
       | R0 失守 | **状态**（有时态） | **只由此刻** | 「现在失守」才叫失守；「昨天失守过、已恢复」≠ 现在失守 |
       | L2 拦截 | **事件**（天然过去时） | **只由账** | 不存在"此刻正在拦截"——拦下就是拦下了 |
       | L1 注意 | 兼有 | 此刻（缺岗无损失／探不到）＋账 | 盲区与提示都是"别慌，但要知道" |
-      | Ls 缺粮 | **状态**（余额） | **只由此刻** | 余额是当下事实 |
       | L0 值守中 | 状态 | 只由此刻 | — |
-      | dev 研发中 | 状态 | 只由此刻 | — |
 
-      ⇒ **铁律：R0 绝不由账给。** 其余事件级（L2/L1）绝不由"姿态"编。
+      ⇒ **铁律：R0 绝不由账给。** 事件级（L2/L1）绝不由"姿态"编。
+      ⇒ ★★ 0.51.0：`Ls 缺粮` 与 `dev 研发中` **不再是主灯态** ——
+        它们是**并存徽标**（`badges()`）：主灯互斥、徽标可多枚常驻。
+        六态**词表不动**（0372 S09 键不可撤），变的是**组成方式**与判据锚点。
 
     ★★★ 为什么必须有它（真问题，本机实测，不是设计偏好）：
       旧实现里页面那盏灯取 `light()` —— 那是**两个维度的合并读**（此刻 × 24h 账）。
@@ -1200,26 +1336,30 @@ def current_state(posture_state, granary=None, items=None, now=None,
       · `current_state()` ⇒ **灯**用它（本函数）；
       · `light()`         ⇒ 答"此刻＋账合起来最该提哪一档"（含历史 R0）⇒
                              只用于诊断/账，**页面渲染不得直接调它**。
+
+    ★★ 0.51.0 改口径（规格 v1.2 §2）：改"单值优先级梯"为**三通道**——
+      本函数只给**主灯**（互斥，R0/L2/L1/L0），只答"**此刻什么情况**"。
+      研发中／缺粮**移出主灯**，改为 `badges()` 的**并存徽标**：
+        · `dev` 姿态 ⇒ 主灯 **L0**（哨兵在岗是事实；研发**身份**由徽标说）；
+        · 粮低 ⇒ **不再抬灯**（缺粮徽标 ＋ 要处理计数出面）。
+      抬灯按**桶**分流（详见 `_event_lamp_level`）：action 桶持续抬灯；
+      info 桶只在**未读 ∧ 刚发生**（保持期 `LAMP_HOLD_MINUTES`）内抬灯。
     """
     lv, _ = base_state(posture_state)
-    # ---- 事件级：只取 L2/L1；**历史 R0 一律不抬灯** ----
-    if items:
-        win = _window_open(items, hours, now)
-        # ★ 0.47.0：**自研迭代通道不参与 L1 抬灯** —— 它有自己的灯（`dev`）。
-        #   否则 `dev_drift`（L1）会先把自己抬成 L1，分通道分支就永远够不着。
-        ev = [it.level for it in win
-              if it.level in (STATE_L2, STATE_L1)
-              and tamper_channel_of(it.kind) != "dev"]
-        if ev:
-            top = max(ev, key=lambda x: PRIORITY.get(x, 0))
-            if PRIORITY.get(top, 0) > PRIORITY.get(lv, 0):
-                lv = top
-    # ---- ★★ 0.47.0（方案 v3.0 §5 步二）：篡改**分通道**，两条不共用一盏灯 ----
-    lv = _tamper_channel_light(items, lv, hours, now)
-    # ---- 粮：此刻的余额缺口 ----
-    gl = _granary_level(granary, posture_state)
-    if gl is not None and PRIORITY.get(gl, 0) > PRIORITY.get(lv, 0):
-        lv = gl
+    # ---- ★ 0.51.0：dev 姿态的主灯是 L0（"监理在岗、此刻没查出缺口"）----
+    #   研发**身份**移徽标（`badges()`）；主灯不再为"研发中"单独留一档。
+    #   依据规格 v1.2 §2.1 —— dev 姿态下哨兵在岗放哨是**事实**；"我在研发"
+    #   是**身份**；两者各说各的（0.36.4「研发中不掩盖真实状况」的彻底化：
+    #   不是把研发身份说成在岗，是**两个通道各说各的**）。
+    if lv == STATE_DEV:
+        lv = STATE_L0
+    # ---- 事件抬灯：只取 L2/L1；**历史 R0 一律不抬灯** ----
+    ev = _event_lamp_level(items, hours, now)
+    if ev is not None and PRIORITY.get(ev, 0) > PRIORITY.get(lv, 0):
+        lv = ev
+    # ---- 粮**不再**抬主灯：缺粮是并存徽标（`badges()`），不是"此刻的灯"----
+    #   ★ `granary` 形参保留只为兼容既有调用点与判据的按位传参，
+    #     本函数**不再读它**（规格 v1.2 §2.1：Ls 从灯态变徽标态）。
     return lv
 
 
@@ -1247,6 +1387,16 @@ def current_state(posture_state, granary=None, items=None, now=None,
 #:     已有 L1/L2/R0/Ls 时**不动**（0.36.4 纪律「研发中不掩盖真实状况」的反向也成立）。
 #:   · `tamper` 那一侧**一个字都不改**（R0 仍不由账给 —— 0.39.0 创始人裁定，
 #:     「昨天失守过、已恢复 ≠ 现在失守」，必须保留）。
+#:
+#: ★★ 0.51.0 更新（规格 v1.2 §2.1／§7.2）：**dev 不再是一盏灯**，改为
+#:   **并存徽标**（`badges()`，判据＝版本比对）。上面 0.47.0 的"给它一盏自己的灯"
+#:   在 0.51.0 由通道分工**升级**为：
+#:     · 「自研迭代」`host_shield_dev_drift` ⇒ 回归**普通 L1 事件**
+#:       （info 桶，保持期内、未读 ⇒ 抬 L1；0.40.0 的本意）；
+#:     · 「疑似投毒」`host_shield_tamper` ⇒ **不抬灯**（R0 家族；未自愈进
+#:       「要处理」，已自愈归计数）；
+#:   ⇒ **两条仍然不共用一盏灯**（一条能抬、一条不抬），只是"研发中"这枚标记
+#:     从灯搬到了常驻徽标上 —— 与"我在研发"是**身份**、不是"此刻的灯"相符。
 TAMPER_CHANNEL_KINDS = {
     "host_shield_tamper": "poison",       # 疑似投毒（防护文件被动过）
     "host_shield_dev_drift": "dev",       # 自研迭代（代码与登记表不符）
@@ -1258,25 +1408,43 @@ def tamper_channel_of(kind):
     return TAMPER_CHANNEL_KINDS.get(kind)
 
 
-def _tamper_channel_light(items, lv, hours=WINDOW_HOURS, now=None):
-    """篡改分通道的抬灯（**只**在 `current_state()` 里被调用一次）。
+def _event_lamp_level(items, hours=WINDOW_HOURS, now=None):
+    """窗口内**值得抬主灯**的事件里最高的级别（L2/L1）；没有 ⇒ `None`。
 
-    ★ 为什么单独抽出来：`current_state()` 是灯的唯一真源，但"两条通道不共用一盏灯"
-      是一条**独立可验**的规矩，抽出来才能给它配单独的负控。
+    ★★ 0.51.0（规格 v1.2 §2.1／§3）：抬灯按**桶**分流 ——
+      · **action 桶**（只有你本人能解决）⇒ 抬灯，24h 窗口内持续到处理/关闭
+        （它是**待办**，不是新闻 ⇒ **不适用保持期**）；
+      · **info 桶**（Antinel 自己处理掉的）⇒ 只在 **未读 ∧ 刚发生**
+        （`now - ts ≤ LAMP_HOLD_MINUTES`）时抬灯；**已读＝已知情，提前结束**
+        （0.35.3「你知情即可」的机制化），超期只进「待阅 N」；
+      · **R0 级一律不抬灯**（0.39.0 铁律；R0 由"要处理"计数与原因句出面）；
+      · **疑似投毒（tamper）通道不抬灯** —— 它是 R0 家族、天然过去时；
+        把它读成"此刻的注意"会与"自研迭代"混成一盏灯（0.47.0 分通道的延续：
+        两条通道**不共用一盏灯** ⇒ 自研迭代走普通 L1 事件，投毒不抬灯）。
+
+    ★ 为什么单独抽出来：`current_state()` 是主灯的唯一真源，但"抬灯按桶分流 ∧
+      保持期"是一条**独立可验**的规矩，抽出来才能给它配单独的负控与探针。
     """
     if not items:
-        return lv
-    chans = {tamper_channel_of(it.kind) for it in _window_open(items, hours, now)}
-    # ★★ 0.47.0（并发/边界压测 B4 撞出来的缺口）：**疑似投毒在场 ⇒ 不抬 dev 灯**。
-    #   `dev`（研发中）不是一盏中性的灯，它是一句**解释**："这是你自己在改代码，
-    #   别紧张"。当投毒通道也有记录时给出这个解释，等于替用户下了结论 ——
-    #   把"有人动了我的防护文件"读成了"我在改代码"，正是分通道要根治的那个病
-    #   （方案 v3.0 §5 步二）。⇒ 保守方向：投毒在场时，dev 那盏解释灯不亮。
-    if "poison" in chans:
-        return lv
-    if "dev" in chans and lv in (STATE_L0, STATE_DEV):
-        return STATE_DEV
-    return lv
+        return None
+    best = None
+    hold = LAMP_HOLD_MINUTES / 60.0
+    for it in _window_open(items, hours, now):
+        lv = it.level
+        if lv not in (STATE_L2, STATE_L1):
+            continue
+        if tamper_channel_of(it.kind) == "poison":
+            continue
+        b = bucket_of(it, now=now, hours=hours)
+        if b == BUCKET_ACTION:
+            lift = True
+        elif b == BUCKET_INFO:
+            lift = (it.state == "unread" and within_hours(it.ts, hold, now))
+        else:                                    # archive：不抬灯
+            lift = False
+        if lift and (best is None or PRIORITY.get(lv, 0) > PRIORITY.get(best, 0)):
+            best = lv
+    return best
 
 
 def posture_light(posture, hours=WINDOW_HOURS):
@@ -1292,7 +1460,8 @@ def posture_light(posture, hours=WINDOW_HOURS):
     return st, state_label(st, p.get("state")), why
 
 
-def light_explain(posture, items, now=None, hours=WINDOW_HOURS, granary=None):
+def light_explain(posture, items, now=None, hours=WINDOW_HOURS, granary=None,
+                  versions=None):
     """★★ 顶部灯的**完整说明**（0.37.2 新增，★ 唯一实现）。
 
     ★ 0.38.0：新增 `granary`（可选）—— 粮的读数。**不传 ⇒ 与 0.37.x 逐字同行为**。
@@ -1325,12 +1494,14 @@ def light_explain(posture, items, now=None, hours=WINDOW_HOURS, granary=None):
       是哪一维给的。
 
     返回 dict：
-      `state`      六态之一
+      `state`      **主灯**态（R0/L2/L1/L0；互斥）
       `label`      人话状态词
       `now_text`   「此刻」这一维的事实句（取守门模块**当场**给出的原话）
       `now_bad`    此刻这一维本身是不是就该报警
       `ledger_bad` 24 小时账这一维是不是有未处理项
-      `reason`     拼好的一句话原因（页面直接用，不再自己拼）
+      `reason`     拼好的原因句（**三元组**：主灯原因 ＋ 徽标原因 ＋ 待办提示）
+      `badges`     ★ 0.51.0：**并存徽标** `[(键, 人话名, 原因)]`（研发中／缺粮）
+      `action_count` / `info_count`  ★ 0.51.0：要处理件事数／待阅条数
     """
     p = posture or {}
     # ★★★ 0.39.0（创始人裁定「没有失守却显示失守，就是错误的」）：
@@ -1347,46 +1518,49 @@ def light_explain(posture, items, now=None, hours=WINDOW_HOURS, granary=None):
     # ---- 维度一：此刻（走 base_state 的**同一份**映射 + 当场原话）----
     bst, fallback = base_state(p.get("state"))
     now_text = (p.get("why") or "").strip() or fallback
-    # L0（含未启用）与 dev 都算"此刻这一维是干净的"；其余（R0/L1/Ls/盲区）都要说
-    # ★ 0.38.0：粮低也算"此刻不干净"（余额是**当下的事实**，不是历史账）。
-    gran_bad = _granary_level(granary, p.get("state")) is not None
-    now_bad = bst not in (STATE_L0, STATE_DEV) or gran_bad
+    # ★★ 0.51.0：粮不再算"此刻不干净" —— 缺粮改为**并存徽标**（`badges()`），
+    #   它不与主灯争"此刻"，也不该把主灯的原因句改写成粮的原因句。
+    now_bad = bst not in (STATE_L0, STATE_DEV)
 
     # ---- 维度二：24 小时账（与灯同一批记录，绝不各数各的）----
     ledger_bad = bool(_window_open(items, hours, now))
 
-    # ---- 拼一句话：始终先说此刻，再说账 ----
-    # ★ 不放件数：`light()` 的 why 里放件数是 0.37.1 就删掉的重复源，
-    #   件数归筛选条/顶部钻取/药丸各管一处；这一句只答"为什么是这个色"。
-    # ★ 0.37.2 fix：守门模块给的 `why` **自带句号**（如"…这次没装好。"）——
-    #   直接往后接"；另外…"会拼出「。；」这种双层句读（本机实测见账本页
-    #   顶部条）。⇒ 只在**把 `now_text` 嵌进更长的句子**时去掉它的尾部句读；
-    #   单独成句的那条分支照旧保留原文（它是一个完整句子）。
+    # ---- 维度三：**并存徽标**（研发中／缺粮）----
+    #   ★ 与前两维**不争位**：主灯答"此刻什么情况"，徽标答"还有哪些并存态"。
+    bs = badges(p.get("state"), granary, items, now, hours, versions)
+
+    # ---- 计数（待办/待阅；与页面「要处理 N」同一把尺子）----
+    n_act = count_groups([it for it in (items or [])
+                          if bucket_of(it, now=now, hours=hours) == BUCKET_ACTION])
+    n_info = len([it for it in (items or [])
+                  if bucket_of(it, now=now, hours=hours) == BUCKET_INFO])
+
+    # ---- 拼原因句：**主灯原因 ＋ 徽标原因 ＋ 待办提示**（三元组）----
+    # ★ 不放件数式重复：件数归筛选条/顶部钻取（0.37.1 去重纪律）；这一句只答
+    #   "为什么它是这个色、还有哪些并存态、有没有等你办的事"。
     _nt = now_text.rstrip("。；;.")
-    if gran_bad:
-        # 此刻这一维不干净的原因就是粮 —— 照实说粮，不许再说"此刻是好的"。
-        _gt = _granary_why(granary).rstrip("。；;.")
-        reason = ("此刻：%s；另外，24 小时里还有没处理的事。" % _gt if ledger_bad
-                  else "此刻：%s" % _gt)
-    elif now_bad and ledger_bad:
-        reason = "此刻：%s；另外，24 小时里还有没处理的事。" % _nt
-    elif now_bad:
-        reason = "此刻：%s" % now_text
-    elif ledger_bad:
-        # ★★ 0.39.0：灯现在**就是**"此刻"（`current_state`）⇒ 旧文案
-        #   「灯这样报，是因为 24 小时里有没处理的事」**已不成立** ——
-        #   此刻好 ⇒ 灯是绿的，根本没有"被账报红"这回事。改成"另外…"，
-        #   如实把它说成**另一件事**，而不是灯色的来源。
-        # ★★ 0.50.4（Q-12，2026-10-15 品质扫描）：原句「此刻是好的…；**另外**，
-        #   24 小时里还有没处理的事」把两件事说成并列，可状态词恰恰是**后者**
-        #   取的（此刻好 ⇒ 灯色只能来自 24 小时账）—— 页面上就出现
-        #   「橙红的『拦截』」紧挨着「此刻是好的」，读者第一眼是自相矛盾的。
-        #   ⇒ 把"灯色从哪儿来"这层关系**写出来**（不是改口径，改的是说法）：
-        #   先说此刻（设计原则：始终先说此刻），再点明灯报的是账上那件事。
-        #   ★ 判据 `ci/inbox_guards_0380.py` 守两条：原因句必须含「没处理」、
-        #     且不得退回旧语义「灯这样报」—— 本句两条都满足。
-        reason = "此刻是好的（%s）；这盏灯报的是 24 小时里还没处理的事。" % _nt
+    parts = []
+    if now_bad:
+        parts.append("此刻：%s" % _nt)
+    elif n_act > 0:
+        # ★★ 立规（规格 v1.2 §2.3）：**action>0 时禁止说"此刻是好的"** ——
+        #   只有你能解决的事还躺在待办里，灯却是绿的；说"是好的"会把
+        #   待办读成没事（v1.1 探针 B5 记的正是这个缺陷）。
+        parts.append("此刻没查出缺口（%s）" % _nt)
     else:
-        reason = "%s；24 小时里也没有等你处理的事。" % _nt
+        parts.append("此刻是好的（%s）" % _nt)
+    _bt = "；".join(r for _k, _n, r in bs)
+    if _bt:
+        parts.append("另外：%s" % _bt.rstrip("。；;."))
+    if n_act > 0:
+        parts.append("还有 %d 件事没处理" % n_act)
+    elif n_info > 0:
+        # ★ 窗口内未处理但都不需你动手（info 桶）⇒ 说"没处理"而**不说"事"**，
+        #   并把"看过即知、不用动手"讲清（0.35.3「你知情即可」）。
+        parts.append("还有 %d 条没处理（看过即知，不用动手）" % n_info)
+    else:
+        parts.append("24 小时里也没有等你处理的事")
+    reason = "；".join(parts) + "。"
     return {"state": st, "label": label, "now_text": now_text,
-            "now_bad": now_bad, "ledger_bad": ledger_bad, "reason": reason}
+            "now_bad": now_bad, "ledger_bad": ledger_bad, "reason": reason,
+            "badges": bs, "action_count": n_act, "info_count": n_info}

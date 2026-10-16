@@ -12,13 +12,14 @@
   ③ U-17 图标动效：0.48.5 戊1（461b4ef）把头部动效 mp4 换成静态 logo.svg
      ⇒ "好了但是死了"。修：内联 SVG＋rAF 状态机（规格 v1.2 的"代码即规格"
      实现 `antinel-motion-demo-v2.html` 的产品化移植）。
-  ④ B-02…B-08 冒泡：急事（R0/L2）要"当时弹出来＋有声音＋不一闪而过＋
-     人工确认"。路由换代（R0/L2→冒泡、其余→toast、同一事件只走一条通道）
+  ④ B-02…B-08 紧急提醒：急事（R0/L2）要"当时弹出来＋有声音＋不一闪而过＋
+     人工确认"。路由换代（R0/L2→紧急提醒、其余→toast、同一事件只走一条通道）
      由 `ci/inbox_guards.py` 的 `c_daemon_tick_notifies_once`（记 B-01）守；
      **本文件守它的下游**：界面同源、不闪退、声音、节流/ack、可见性闸、
      服务起不来如实、一次一枚。
-  ⑤ FLO-01…FLO-05 漂浮最小态："监理很多时候不要碍事，只要在"——收缩成
-     一枚漂浮哨标（点击展开），面板右上角一个钮，展开即退役哨标。
+  ⑤ FLO-01…FLO-05 漂浮最小态："监理很多时候不要碍事，只要在"——收缩成一
+     枚漂浮哨标（点击展开），展开即退役哨标。0.50.7 起收缩入口＝左上角
+     LOGO 本体（创始人截图去重复，判据 FLO-05 跟着换锁 `button.logo`）。
   ⑥ U-18 哨标比例（0.50.2 补）：内联动效 SVG 照搬 demo 的 1024 画布 ⇒
      环只占半宽 0.465，定稿 logo.svg 是 0.844 ⇒ 缩进 48px 方框比定稿小 45%，
      创始人截图原话"LOGO 活了，但旧病复发，变得太小了"。修法：**只收紧
@@ -44,6 +45,10 @@
      **判不出来 ⇒ 开窗**，宁可多开一个窗也不许点了没反应）；文案侧开着就不画
      按钮、点完按钮退场换状态。判据打在**行为**上（三条路的动作序列＋返回值），
      N-B13 把分流条件反过来、**拿变异体跑同一条正判据** ⇒ 必红。
+  ⑨ J1–J5「五条违和」同类可抓（**原 0518，2026-10-16 并入**）：创始人
+     2026-10-16 截图标出五条违和，四条可机械判 ⇒ 同一个消费面
+     （`inbox_server.py` 渲染产物）的尺子按 A2/P5 规则**并入本套件**，
+     不立新套件。详见文件末「J 族」段头。
 
 ★ 规格真源（U-17 的唯一依据，不许凭记忆）：
     `D:\\2026\\PSL\\Antinel品牌动效报警语法v1.2（2026-09-27）.md`
@@ -68,6 +73,7 @@ import re
 import sys
 import tempfile
 import time
+from datetime import datetime
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 
@@ -88,6 +94,7 @@ import inbox_model as M                                         # noqa: E402
 import inbox_notify as NT                                       # noqa: E402
 import inbox_server as SV                                       # noqa: E402
 import inbox_window as WIN                                      # noqa: E402
+import glossary as GL                                           # noqa: E402
 import page_caliber as PC                                       # noqa: E402
 RESULTS = []
 
@@ -114,6 +121,11 @@ def check(name):
         RESULTS.append((name, wrapper))
         return fn
     return deco
+
+
+def _note(*a):
+    """判据的**说明行**（原 0518 同款；并入后沿用同一输出形状）。"""
+    print("      · %s" % " ".join(str(x) for x in a))
 
 
 def _src(rel):
@@ -399,7 +411,7 @@ def n_w09e():
     return True
 
 
-# ═══════════════════════════════════════════════════ B-09 冒泡窗"看得见" ══
+# ═══════════════════════════════════════════════════ B-09 紧急提醒窗"看得见" ══
 #: ★★★ 0.50.1（创始人 2026-10-14 截图一「泡泡下沿没露出来」）：
 #:   为什么这条必须存在 —— 旧版的保证链是「`bubble_geometry` 算出 384×148
 #:   → `place_all` 落位 → **回读一致** → 报 placed=True」，而它**全绿**、
@@ -407,13 +419,13 @@ def n_w09e():
 #:   它**不知道内容有没有被裁掉** ⇒ "回读一致"≠"看得见"，缺的正是
 #:   「内容 ↔ 窗口」这条闭环。所以尺子不能只量"落位成功"。
 
-@check("B-09 冒泡窗高度闭环在位：页面报缺 → 服务端按内容长高（下沿不动）→ 回读")
+@check("B-09 紧急提醒窗高度闭环在位：页面报缺 → 服务端按内容长高（下沿不动）→ 回读")
 def c_b09():
     page = BB.render("t", "b", "R0", "tok-b09", run_id="r", kind="k")
     if "bubblefit" not in page:
-        return "冒泡页没有把'还差多少高度'报上去 ⇒ 窗口只能靠常量猜，裁掉也无声"
+        return "紧急提醒页没有把'还差多少高度'报上去 ⇒ 窗口只能靠常量猜，裁掉也无声"
     if "scrollHeight" not in page or "clientHeight" not in page:
-        return "冒泡页没有量 scrollHeight/clientHeight ⇒ 报上去的不是真缺量"
+        return "紧急提醒页没有量 scrollHeight/clientHeight ⇒ 报上去的不是真缺量"
     # ★ 量具纪律（两条，都是实测踩出来的）：
     #   ① **不许用子串判** —— 首版写的是 `"height:100%" in …`，而
     #      `min-height:100%` 里**含**这个子串 ⇒ 好值被判红（尺子反咬）。
@@ -422,10 +434,10 @@ def c_b09():
     #      另一层，拿整页原文当 CSS 会把注释/正文一起算进来）。
     _bub_css = PC.chrome(page)
     if not re.search(r"html,body\{[^}]*min-height:100%", _bub_css):
-        return ("冒泡页没有 `html,body{min-height:100%}` ⇒ 文档被钉死在视口上，"
+        return ("紧急提醒页没有 `html,body{min-height:100%}` ⇒ 文档被钉死在视口上，"
                 "内容超出只能被裁（这正是旧版那条断掉的链）")
     if re.search(r"html,body\{[^}]*[^-]height:100%", _bub_css):
-        return "冒泡页又把 html/body 钉回 height:100% 了 ⇒ 量不出缺多少"
+        return "紧急提醒页又把 html/body 钉回 height:100% 了 ⇒ 量不出缺多少"
     src = _src(_SERVER_REL)
     if 'op == "bubblefit"' not in src:
         return "服务端没有 bubblefit 路由 ⇒ 页面报了也没人接（半条链）"
@@ -550,7 +562,7 @@ def n_b10():
     return True
 
 
-@check("B-11 冒泡页不许把字切开：按钮/注脚不折行，正文截断要给省略号")
+@check("B-11 紧急提醒页不许把字切开：按钮/注脚不折行，正文截断要给省略号")
 def c_b11():
     page = BB.render("t", "b", "R0", "tok-b11", run_id="r", kind="k")
     css = page.split("<style>")[1].split("</style>")[0]
@@ -1552,14 +1564,14 @@ def n_b13():
 
 
 # ═══════════════════════════════════════════════════ B-12 认窗口径必须同一把尺 ══
-#: 假桌面：五枚可见窗，其中两枚是**用户窗口** —— 标题里恰好含哨标/冒泡的标记，
+#: 假桌面：五枚可见窗，其中两枚是**用户窗口** —— 标题里恰好含哨标/紧急提醒的标记，
 #: 但标记**不在末尾**。这就是实测误伤的形状（`_p_probe_win.py` 的内存替换夹具）。
 _FAKE_WINDOWS = [
     (1, "收件箱 · Antinel 监理#abc123"),        # 本次值守台
     (2, "我的 · 哨标 收藏夹"),             # ★ 用户窗口（含标记，不在末尾）
     (3, "Antinel · 哨标#abc123"),          # 本次哨标
-    (4, "整理一下 · 冒泡 记录"),           # ★ 用户窗口（含标记，不在末尾）
-    (5, "需要你处理 · 冒泡#abc123"),       # 本次冒泡
+    (4, "整理一下 · 紧急提醒 记录"),         # ★ 用户窗口（含标记，不在末尾）
+    (5, "失守：防护文件被改动 · 紧急提醒#abc123"),   # 本次紧急提醒
 ]
 
 
@@ -1567,14 +1579,14 @@ def _fake_enum(visible_only=True):                          # noqa: ARG001
     return list(_FAKE_WINDOWS)
 
 
-@check("B-12 认窗口径一致：哨标/冒泡宽泛分支不许用任意位置子串（会关用户窗口）")
+@check("B-12 认窗口径一致：哨标/紧急提醒宽泛分支不许用任意位置子串（会关用户窗口）")
 def c_b12(mod=None):
     """★★ 清单 B4（实测真缺陷）：三处认窗必须同一口径 —— 标记**在末尾**。
 
     原来 `find_logo_windows` / `find_bubble_windows` 的宽泛分支用
     `mark in title`（任意位置子串），而 `is_console_title` 用 `_mark_at_tail`
     （末尾＋白名单）。实测后果：用户窗口「我的 · 哨标 收藏夹」
-    「整理一下 · 冒泡 记录」被认成本次哨标/冒泡窗，而这两条路径通向
+    「整理一下 · 紧急提醒 记录」被认成本次哨标/紧急提醒窗，而这两条路径通向
     `WM_CLOSE` ⇒ **可能关掉用户自己的窗口**（0.36.5 明令不可接受）。
 
     ★ `mod` 注入点：负控拿**变异模块**跑同一条判据（不是自己重写一遍口径）。
@@ -1594,7 +1606,7 @@ def c_b12(mod=None):
         return ("哨标认窗把用户窗口也算进来了：%r（应为 [3]）—— 这条路径通向 "
                 "WM_CLOSE，会关掉用户自己的窗口" % (logo,))
     if bub != [5]:
-        return ("冒泡认窗把用户窗口也算进来了：%r（应为 [5]）—— 同上，"
+        return ("紧急提醒认窗把用户窗口也算进来了：%r（应为 [5]）—— 同上，"
                 "会关掉用户自己的窗口" % (bub,))
     return True
 
@@ -1606,7 +1618,7 @@ def n_b12():
     mutated, n = re.subn(r"elif _mark_at_tail_any\(title, mark\):",
                          "elif mark in title:", src)
     if n != 2:
-        return ("变异锚点命中 %d 处（应为 2 处：哨标＋冒泡各一）"
+        return ("变异锚点命中 %d 处（应为 2 处：哨标＋紧急提醒各一）"
                 "—— 负控自身失效，不算通过" % n)
     mod = types.ModuleType("is0514_b12_mut")
     mod.__file__ = os.path.join(ROOT, _WINDOW_REL)
@@ -1618,7 +1630,7 @@ def n_b12():
 
 # ════════════════════════════════════════════════════════════ B-02…B-08 ══
 class _PopEnv:
-    """冒泡链路的假桌面：假 opener（记录调用）、假 console（不起真服务）。"""
+    """紧急提醒链路的假桌面：假 opener（记录调用）、假 console（不起真服务）。"""
 
     def __init__(self):
         self.root = tempfile.mkdtemp(prefix="g0514_pop_")
@@ -1654,7 +1666,7 @@ def _b02_ok(html):
             and "会一直留着" in html)
 
 
-@check("B-02 冒泡界面与Antinel 监理同源：同一套 CSS＋同一枚动效哨标＋确认/打开钮")
+@check("B-02 紧急提醒界面与Antinel 监理同源：同一套 CSS＋同一枚动效哨标＋确认/打开钮")
 def c_b02():
     html = BB.render("R0 失守：探针", "正文……", "R0", "tok", "run42",
                      kind="host_shield_revived")
@@ -1665,9 +1677,9 @@ def c_b02():
                                ("确认钮", "知道了" in page),
                                ("打开钮", "打开 Antinel 监理" in page),
                                ("留存说明", "会一直留着" in page)) if not v]
-        return "冒泡页缺：%s —— 与Antinel 监理同源是 founder 点名要的" % "、".join(miss)
-    if " · 冒泡#run42" not in page:
-        return "标题没带 #run_id —— 认窗（关旧冒泡）会失去目标"
+        return "紧急提醒页缺：%s —— 与Antinel 监理同源是 founder 点名要的" % "、".join(miss)
+    if " · 紧急提醒#run42" not in page:
+        return "标题没带 #run_id —— 认窗（收旧窗）会失去目标"
     if 'data-kind="host_shield_revived"' not in page:
         return "冒泡页未携带真实 kind —— 确认按钮无法对准下一次节流键"
     # ★ 0.50.1：动作脚本重写后，kind 不再拼成字面 `&kind=`，而是走
@@ -1709,7 +1721,10 @@ def c_b03():
         return "有 setTimeout 自动关 —— 「不能一闪而过」被推翻"
     if "bubble_ack" not in js or "bubble_open" not in js:
         return "确认/打开两个动作没接上服务端 op"
-    if "尚未标记处理" not in js or "处理后请点右上角 × 关闭" not in js:
+    # ★ 0.50.6 锚点同步：确认态行按 STE 缩行（28→22 字），逐字断言串随之
+    #   替换 —— 强度不变（同一串，砍任何一半都红；三个事实仍在：
+    #   已确认／还没标记处理／点右上角 × 关）。
+    if "已确认，还没标记处理 · 处理后点右上角 × 关" not in js:
         return "确认态没有区分「已知悉」与「已处理」，或没说清要手工关闭"
     if "!j || !j.ok" not in js or "没记上" not in js:
         return "服务端确认失败时仍可能显示成功（UI 会撒谎）"
@@ -1784,7 +1799,7 @@ def c_b05():
     r2 = env.pop(kind=kind, now=T + 60)
     if r2.get("ok") or len(env.urls) != 1:
         return "同类 60 秒后又弹了一枚（%r）—— 门铃节流失效" % r2.get("why")
-    if "已冒过泡" not in (r2.get("why") or ""):
+    if "已提醒过" not in (r2.get("why") or ""):
         return "节流原因没说清：%r" % r2.get("why")
     # ★ force **不穿节流**（只穿可见性闸，见 B-06b）：节流是时间窗，
     #   窗口过了自然放行 —— 人工/演示要连时间窗一起穿，是另一条路径的事。
@@ -1882,14 +1897,14 @@ def c_b08():
     r = env.pop(level="L1", now=6000000.0)
     if r.get("ok") or env.urls:
         return "L1 也走冒泡了 —— 两条通道同时响＝告警泛洪"
-    if "不走冒泡" not in (r.get("why") or ""):
+    if "不走紧急提醒" not in (r.get("why") or ""):
         return "级别门原因没说清：%r" % r.get("why")
     with _Patch(WIN, close_bubble_windows=lambda *a, **k: (1, "收了 1 枚")):
         r2 = env.pop(level="R0", kind="R0", now=6000100.0)
     if not r2.get("ok") or len(env.urls) != 1:
         return "该弹没弹：%s" % r2.get("why")
     if r2.get("closed_old") != 1:
-        return "没收旧冒泡（closed_old=%r）—— 会长成一串" % r2.get("closed_old")
+        return "没收旧窗（closed_old=%r）—— 会长成一串" % r2.get("closed_old")
     r3 = env.pop(level="R0", kind="R0", now=6000200.0, cfg={"bubble": False})
     if r3.get("ok") or len(env.urls) != 1:
         return "配置关掉了还弹 —— 配置闸失效"
@@ -2238,15 +2253,24 @@ def n_flo04b():
     return True
 
 
-@check("FLO-05 面板收缩钮＋服务端 op＋展开即退役哨标，三处都在")
+@check("FLO-05 收缩入口（LOGO 本体）＋服务端 op＋展开即退役哨标，三处都在")
 def c_flo05():
+    """★★ 0.50.7（2026-10-16，创始人截图「左上角 LOGO 与右上角收缩钮是
+    同一枚图形、两个入口」）：收缩入口**合并进 LOGO 本体** —— 右上角那枚
+    独立的 collbtn 删除，全页只一枚 lgmark（去重本身由判据 J1 守）。
+    追随规格更新（不是放松）：入口在、用的是 `_logo_mark`（不是静态图）、
+    title 说人话、op=collapse 链三处 —— 断言一条不少，只换锁的类名
+    （`collbtn` → `logo`），并补上「入口内嵌动效哨标本体」这条原文只在
+    CSS 注释里声称、判据并未锁的断言。
+    """
     html = _page()
-    button = re.search(r'<button class="collbtn".*?</button>', html, re.S)
+    button = re.search(r'<button class="logo".*?</button>', html, re.S)
     if not button or 'data-coll="1"' not in button.group(0):
-        return "页面里没有收缩钮 —— 漂浮最小态没有入口"
+        return "页面里没有收缩入口（LOGO 本体即钮）—— 漂浮最小态没有入口"
+    if "data-logo=" not in button.group(0):
+        return "收缩入口没用动效哨标本体（退回了静态图）—— 所见即所得没了"
     if "收缩成漂浮哨标" not in PC.body(button.group(0)):
-        return "收缩钮标题没说人话（用户不知道点了会怎样）"
-        return "收缩钮标题没说人话（用户不知道点了会怎样）"
+        return "收缩入口标题没说人话（用户不知道点了会怎样）"
     if "op=collapse" not in html:
         return "收缩钮没接 op=collapse"
     sv = _src(_SERVER_REL)
@@ -2260,21 +2284,395 @@ def c_flo05():
     return True
 
 
-@check("N-FLO05 负控：把收缩钮从页面里拔掉 ⇒ 同一条判据必须判红")
+@check("N-FLO05 负控：把收缩入口（LOGO 钮）从页面里拔掉 ⇒ 同一条判据必须判红")
 def n_flo05():
     html = _page()
-    dead = re.sub(r"<button class=\"collbtn\".*?</button>", "", html, flags=re.S)
+    dead = re.sub(r"<button class=\"logo\".*?</button>", "", html, flags=re.S)
     if dead == html:
-        return "夹具不成立：页面里拔不出收缩钮，负控无分辨力"
-    if re.search(r'<button class="collbtn".*?</button>', dead, re.S):
-        return "负控失效：按钮拔除后仍匹配到 collbtn"
+        return "夹具不成立：页面里拔不出收缩入口，负控无分辨力"
+    if re.search(r'<button class="logo".*?</button>', dead, re.S):
+        return "负控失效：入口拔除后仍匹配到 logo 按钮"
     return True
+
+
+# ══════════════════ J 族：创始人「五条违和」的同类可抓（原 0518 并入）═══════════
+#
+# ★★ 并入由来（2026-10-16，A2 唯一合法出路 —— 不是随手挪文件）：
+#   0518 于 2026-10-16 晨随机制升级加入 `delivery_gate.SUITES`（常驻 29→30），
+#   其 A1 前置门的 **P5（扩展优先）自答「不满足」** —— 五条判据与本套件**同域**：
+#   消费面同为 `inbox_server.py` 的渲染产物，病灶同属「创始人截图标出的、
+#   机械可判的页面形状」。按 P5「不满足 ⇒ 并入现有套件」，**整套原样并入本文件**。
+#   随之：`ci/suite_retirement.json` 的 pending 记录转 `done`、
+#   `delivery_gate.SUITES` 撤下 0518、原文件改名让开（零删除纪律）。
+#   ★ 判据 ID（J1–J5 / N-J1…N-J4）**一字未改** —— `ci/defect_types.py` T-11 的
+#     guards 与 `inbox_server.py` 的注释都按 ID 引用，改名会造出第二个断链。
+#
+#   五条违和（创始人 2026-10-16 截图）与对应尺子：
+#     #1 同一图形两入口（左上 LOGO 与右上收缩钮同渲染 `_logo_mark`）⇒ J1
+#     #2 一句枚举被断行切成两截（单行 <p> ＋ details 隐式闭合 <p>）⇒ J2
+#     #3 同屏括号不一致（Ls/L0 走 chip 默认带码形态）⇒ J3
+#     #4 归并无解释（`_pill` 注释声称词条写了，unit 字段零命中＝T-11）⇒ J4
+#     #5 裸数字无单位（健康页「23 次 / 54」；日报页 0.50.4 已修、本页漏改）⇒ J4
+#   ★ 残余（人为判断）如实申报盲区：J2 只锁**结构确定性**（不再被浏览器自由断），
+#     不锁「折成几行好看」—— 观感不可机械判，已在 L2 触发层清单留记。
+#
+#   编写纪律沿用本文件：负控先实测见红；断言打在渲染产物的结构/行为上；
+#   不写任何产品文件（变异只在内存/临时目录）；测不出 ⇒ SKIP，绝不假绿。
+
+_NOW = datetime(2026, 10, 16, 12, 0, 0).astimezone()
+#: ★ `Alert.ts` 是 **ISO 字符串**（`within_hours` 走 `_parse_ts`）——
+#:   传数值时间戳会被判"解析不了 ⇒ 不算在窗口内"（首跑实测 wl 全 0）。
+_TS = _NOW.isoformat()
+
+
+def _mk(kind, n, groups):
+    """同 kind 的 n 条记录、groups 个事由（group_key＝kind+topic+level）。"""
+    out = []
+    for i in range(n):
+        a = M.Alert.build(_TS, kind, reason="r%d" % (i % groups),
+                          topic="tp%d" % (i % groups))
+        out.append(M.Item(a))
+    return out
+
+
+def _items():
+    return _mk("tool_call_blocked", 11, 3) + _mk("host_shield_changed", 43, 3)
+
+
+def _bar(items=None):
+    return SV._bar(items if items is not None else _items(), "T",
+                   posture={"state": "guarding", "can_fix": False}, now=_NOW)
+
+
+def _rep():
+    """合成日报（0353/0490 同款形状；账本页要读 `ledger` 键，给全）。
+
+    ★ `window_levels` **从真源算**（`M.window_levels(_items(), now=_NOW)`），
+      不硬编码 —— 硬编码一改夹具就与真源脱节（判据依赖的数字必须同源）。
+    """
+    wl = M.window_levels(_items(), now=_NOW)
+    wg = M.window_level_groups(_items(), now=_NOW)
+    return {"day": "2026-10-16",
+            "levels": dict(wl), "window_levels": dict(wl),
+            "window_hours": M.WINDOW_HOURS,
+            "buckets": {"action": 2, "info": 2, "archive": 1},
+            "action_groups": M.count_groups(
+                [it for it in _items()
+                 if M.bucket_of(it, now=_NOW) == M.BUCKET_ACTION]),
+            "revived_window": sum(wl.get(k, 0) for k in ("R0", "L2", "L1")),
+            "posture": {"state": "guarding", "can_fix": False},
+            "rules": [{"rule_id": "DST-01", "count": 2}],
+            "chain": {"status": "ok", "files": 12, "records": 54,
+                      "broken": 0, "unchained": 0, "reason": ""},
+            "ledger": {"days": 3, "streak_days": 3, "blocked": wg.get("L2", 0),
+                       "noticed": wg.get("L1", 0), "breached": 0, "acked": 0}}
+
+
+def _health(items=None):
+    return SV._view_health(_rep(), "T", items=items if items is not None
+                           else _items())
+
+
+def _src_or_skip(rel):
+    """原 0518 的 `_src`（找不到文件 ⇒ **Skip**，不凭空判）。
+
+    ★ 为什么改名：本文件早有 `_src`（读不到就抛 `FileNotFoundError`）。
+      两者语义不同（一个报错、一个跳过），**不许互相覆盖** ⇒ 并入时改名保留。
+    """
+    p = os.path.join(ROOT, rel)
+    if not os.path.exists(p):
+        raise Skip("找不到 %s（拒绝凭空判）" % rel)
+    return io.open(p, encoding="utf-8").read()
+
+
+# ══════════════════════════════════ J1 同一图形不被渲染两遍 ═══════════════════
+@check("J1 ★ 全页动效哨标恰一枚（同一图形不许两处入口）")
+def j1():
+    """★★ #1 的尺子（2026-10-16 创始人截图「左上角 LOGO 与右上角收缩钮是
+    同一枚图形、两个入口」）：
+
+    病根不是"多了个按钮"，是**同一份渲染（`_logo_mark`）在同一个页面上
+    落两处** —— 用户看到两枚一模一样的动效哨标，不知道点哪一枚、
+    猜它们是不是干同一件事（L2 触发层 UX 洁癖清单第 6 条「去重复」）。
+
+    ★ 为什么数 `lgmark` 而不是数"按钮"：一枚 lgmark ＝ 一枚用户看得见的
+      动效标（`_logo_mark` 是它的唯一渲染入口）。数按钮会被"把标拆到
+      span 里"绕开；数 lgmark 数的是**用户看到的那个东西**。
+    ★ 四视图全数：只在顶部条有标、但**每页都可能单独加一枚** ——
+      实测 0.50.6 之前健康页/日报页各有一枚 top logo ＋ 一枚收缩钮 ⇒ 2。
+    """
+    hub = tempfile.mkdtemp(prefix="g0514_j1_")
+    items = _items()
+    bad = []
+    for view, filt in (("inbox", "action"), ("report", None),
+                       ("health", None), ("ledger", None)):
+        html = SV.render_page(view=view, filt=filt, root=hub, token="T",
+                              items=items, rep=_rep(),
+                              posture={"state": "guarding", "can_fix": False})
+        n = len(re.findall(r'<svg class="lgmark"[^>]*data-logo="1"', html))
+        if n != 1:
+            bad.append("%s 页有 %d 枚动效哨标（应恰 1）" % (view, n))
+    if bad:
+        return "；".join(bad) + " —— 同一图形两处入口＝用户要猜点哪一枚"
+    _note("四视图各恰 1 枚 lgmark")
+
+
+@check("N-J1 负控：让 logo 渲染两遍（模拟双入口）⇒ 同一条 J1 判据必须判红")
+def n_j1():
+    """反向对照（真跑正判据）：把 `_logo_mark` 变异成**渲染两枚**，
+    再调**同一条 `j1()`** —— 它必须判红（不是另写一套条件）。
+
+    ★ 裸 `j1()` 返回**说明串**（不抛异常；抛异常是 `check` wrapper 干的）
+      ⇒ 负控判"返回值不是 True"，不判"抛没抛"（首版踩到：判 except 永不成立）。
+    """
+    orig = SV._logo_mark
+    try:
+        SV._logo_mark = (lambda st, label="Antinel":
+                         (orig(st, label) + orig(st, label)))
+        r = j1()
+        if r is True or r is None:
+            return "负控失效：渲染两枚哨标后 J1 仍判绿（尺子没分辨力）"
+        if "两处入口" in str(r) or "应恰 1" in str(r):
+            return True
+        return "负控方向不对：判红了，但原因不是双入口（%s）" % r
+    finally:
+        SV._logo_mark = orig
+
+
+# ═══════════════════════════════ J2 枚举断行确定性 ════════════════════════════
+#: 六态行的结构锚（正判据与负控**共用同一把尺子**）。
+_SIX_RE = re.compile(r'灯的六态由重到轻：<br>(.*?)</div>\s*<p class="note">',
+                     re.S)
+
+
+def _six_ok(html):
+    """纯判据：六态行结构确定（标签独占一行＋5 枚 nowrap span＋4 分隔符）。
+    返回 True 或说明串。★ 抽成吃 html 的纯函数 ⇒ 负控能把变异 html
+    喂进**同一个实现**（而不是另写一套条件冒充负控）。"""
+    m = _SIX_RE.search(html)
+    if not m:
+        return ("六态行不是「标签＋显式 <br>」形状 —— 断点又交给浏览器自由决定"
+                "（#2 复发）")
+    body = m.group(1)
+    spans = re.findall(r'<span class="sixit">.*?</span>', body, re.S)
+    if len(spans) != 5:
+        return "六态行原子 span 是 %d 枚（应 5）—— 有态没被包住，会被切断" % len(spans)
+    if body.count(" · ") != 4:
+        return "六态行分隔符「 · 」是 %d 个（应 4）—— 枚举散了" % body.count(" · ")
+    if ".sixit{white-space:nowrap}" not in PC.chrome("<style>" + SV.CSS
+                                                    + "</style>"):
+        return "CSS 里没有 .sixit{white-space:nowrap} —— span 是空壳，态名照样被切"
+    return True
+
+
+@check("J2 ★ 六态行断行确定：标签独占一行＋各态包原子 span")
+def j2():
+    """★★ #2 的尺子（2026-10-16 创始人截图二「失守后换行」）：
+
+    旧形状 `<p class="note">灯的六态由重到轻：失守 · 拦截 · …</p>` 有三个病：
+      ① 单行纯文本 ⇒ 断点落在哪**全看窗口宽度**，实测断在「失守」后
+         （用户读到「失守」一行、「拦截 · 注意…」另一行，像两组）；
+      ② 枚举里塞了 `<details>` 芯片 —— HTML 解析规则里 details 会
+         **隐式闭合** `<p>`，于是从第一枚芯片处整段被切成两截；
+      ③ 断点落在态名中间时，一个短词被切成两半（观感最差）。
+    ⇒ 修法：标签后显式 `<br>`（第一行就是标签）、每个态包
+      `<span class="sixit">`（`white-space:nowrap` ⇒ 态名永不被内部切断）。
+
+    ★ 只锁**结构确定性**，不锁"折成几行好看"（那是人为判断，已在 L2
+      触发层清单留记并申报盲区 —— 见文件头第 5 条残余说明）。
+    """
+    r = _six_ok(_health())
+    if r is not True:
+        return r
+    _note("标签独占一行＋5 枚 nowrap span＋4 个分隔符")
+
+
+@check("N-J2 负控：六态行退回单行 <p> 且剥掉 span ⇒ 同一条 J2 判据必须判红")
+def n_j2():
+    """反向对照（真跑正判据 `_six_ok`，非另写条件）：把 J2 锁的结构逐个
+    拆掉（退回单行 <p> ＋剥 span），喂进**同一个 `_six_ok`** 必须判假。"""
+    h = _health()
+    if _six_ok(h) is not True:
+        return "夹具不成立：现行渲染就判红 —— 负控无分辨力"
+    dead = h.replace('<div class="note sixline">灯的六态由重到轻：<br>',
+                     '<p class="note">灯的六态由重到轻：')
+    dead = re.sub(r'<span class="sixit">(.*?)</span>', r"\1", dead, flags=re.S)
+    r = _six_ok(dead)
+    if r is True:
+        return "负控失效：退回单行 <p>＋剥 span 后 J2 仍判绿（尺子没分辨力）"
+    return True
+
+
+# ═════════════════════════════ J3 同屏括号形态一致 ══════════════════════════
+def _six_summaries_ok(html):
+    """纯判据：六态行两只芯片的 summary 都不带码。返回 True 或说明串。"""
+    m = _SIX_RE.search(html)
+    if not m:
+        return "找不到六态行（J2 的前置结构不在）—— 拒绝在错误形状上判括号"
+    summaries = re.findall(r"<summary>(.*?)</summary>", m.group(1), re.S)
+    if len(summaries) != 2:
+        return ("六态行可点开芯片是 %d 枚（应 2：Ls/L0）—— 落点变了，"
+                "J3 的比对面要重新认" % len(summaries))
+    bad = [s for s in summaries if "（Ls）" in s or "（L0）" in s]
+    if bad:
+        return ("六态行 summary 仍带码：%r —— 与裸词三态同屏两种写法（#3 复发）"
+                % bad)
+    return True
+
+
+@check("J3 ★ 六态行 summary 无可见码（同屏括号形态一致）")
+def j3():
+    """★★ #3 的尺子（2026-10-16 创始人截图三「缺粮（Ls）／值守中（L0）
+    与失守／拦截／注意 括号不一致」）：
+
+    六态行里五态并列，其中三态是裸词、两态带码 —— 同屏两种写法。
+    `GL.chip()` 默认取 `TERMS[k]["w"]`＝`_wl()` 的「词（码）」形态 ⇒
+    落点改造时**忘了传 `text=`**，于是默认形态漏进六态行。
+
+    ★ 断言打在 summary 层（码只能留在**展开体首行** —— 那是词条定义
+      的一部分，P13 的落点也在）；不锁"码彻底消失"（那会与词条定义冲突）。
+    ★ 两态都要查：只查 Ls 会漏 L0（同族）。
+    """
+    r = _six_summaries_ok(_health())
+    if r is not True:
+        return r
+    # 码必须仍在展开体首行（不许用"把码删掉"来假过）
+    for k in ("Ls", "L0"):
+        chip = GL.chip(k, text=M.state_short(k))
+        if "<b>%s（%s）</b>：" % (M.state_short(k), k) not in chip:
+            return "%s 词条展开体首行丢了本名带码（用删码假过 J3）" % k
+    _note("summary 无码；码仍在词条展开体首行")
+
+
+@check("N-J3 负控：把带码 summary 注入六态行 ⇒ 同一条 J3 判据必须判红")
+def n_j3():
+    """反向对照（真跑正判据 `_six_summaries_ok`）：默认 `GL.chip("Ls")`
+    就是带码形态；把它注回六态行，**同一个 `_six_summaries_ok`** 必须判假。
+    """
+    if _six_summaries_ok(_health()) is not True:
+        return "夹具不成立：现行渲染就判红 —— 负控无分辨力"
+    # 默认 chip 的 summary 确实带码（负控前提成立）
+    summary = re.search(r"<summary>(.*?)</summary>", GL.chip("Ls"), re.S)
+    if not summary or "（Ls）" not in summary.group(1):
+        return "夹具不成立：chip 默认形态不带码 —— 负控无分辨力"
+    h = _health()
+    dead = h.replace("<summary>缺粮</summary>", "<summary>缺粮（Ls）</summary>")
+    if "（Ls）" not in dead:
+        return "夹具不成立：六态行里摘不到「缺粮」summary（结构已变）"
+    r = _six_summaries_ok(dead)
+    if r is True:
+        return "负控失效：注入带码 summary 后 J3 仍判绿（尺子没分辨力）"
+    return True
+
+
+# ═══════════════════════════ J4 数字自己带单位（裸分母）═══════════════════════
+def _bare_denom_ok(html, total, revived):
+    """纯判据：健康页拉起次数分子分母各自带单位。返回 True 或说明串。"""
+    if not re.search(r"%d 次</a>；同期记录 %d 条" % (revived, total), html):
+        return ("健康页拉起次数不是「N 次；同期记录 M 条」形状（M=%d）—— "
+                "分母又裸了，或数字与真源不符（#5 复发）" % total)
+    if re.search(r"次</a>\s*/\s*\d+", html):
+        return "健康页仍有「次</a> / N」裸斜杠分母（异质量相除）"
+    return True
+
+
+def _unit_has_merge(k):
+    """纯判据：级词条 unit 含条→件事换算说明。"""
+    u = GL.TERMS[k].get("unit") or ""
+    return "算一件事" in u and "已归并为" in u
+
+
+@check("J4 ★ 拉起次数分子分母各自带单位（界面不许有裸分母）")
+def j4():
+    """★★ #4/#5 的尺子（2026-10-16 创始人截图四「（已归并为 N 件事）
+    无解释」＋截图五「54 次 / 54 裸分母」）：
+
+    两个病同源 —— **异质量的量被摆在一起时没各自交代单位/口径**：
+      · 「23 次 / 54」：分子单位是「次」、分母没有单位，一条斜杠暗示
+        "每 N 条里 23 次"（做了一个没意义的除法）。0.50.4 Q-03 修了日报页
+        （改成「；同期记录 %d 条」），**健康页漏改**。
+      · 「（已归并为 N 件事）」：条→件的换算只有这一处出现，词条里没写
+        （`_pill` 注释声称"词条里写了"＝愿望写成事实）。
+    ⇒ 两条腿：① 健康页拉起次数分母带单位；② R0/L2/L1 的 unit 字段
+      必须含条→件换算说明（括号自解释的前提）。
+
+    ★ ① 的数字从产品真源算（`_rep()["revived_window"]`／`window_levels`），
+      不硬编码 —— 硬编码的数字一改产品就假绿。
+    """
+    r = _rep()
+    want_total = sum(int(r["window_levels"].get(k, 0) or 0)
+                     for k in ("R0", "L2", "L1"))
+    res = _bare_denom_ok(_health(), want_total, r["revived_window"])
+    if res is not True:
+        return res
+    miss = [k for k in ("R0", "L2", "L1") if not _unit_has_merge(k)]
+    if miss:
+        return ("这些级词条的 unit 没解释条→件事换算：%s —— "
+                "页面上「（已归并为 N 件事）」仍是不会解释的括号（#4 复发）"
+                % "、".join(miss))
+    _note("分母带单位＝同期记录 %d 条；级词条 unit 均含换算说明" % want_total)
+
+
+@check("N-J4 负控：分母退回裸斜杠 / unit 退回无换算文本 ⇒ J4 必须判红")
+def n_j4():
+    """反向对照（真跑正判据）：两条腿各变异一次，喂进**同一个纯判据**。"""
+    r = _rep()
+    want_total = sum(int(r["window_levels"].get(k, 0) or 0)
+                     for k in ("R0", "L2", "L1"))
+    h = _health()
+    if _bare_denom_ok(h, want_total, r["revived_window"]) is not True:
+        return "夹具不成立：现行渲染就判红 —— 负控无分辨力"
+    # 腿①：分母退回裸斜杠
+    dead = h.replace("次</a>；同期记录 %d 条" % want_total,
+                     "次</a> / %d" % want_total)
+    r1 = _bare_denom_ok(dead, want_total, r["revived_window"])
+    if r1 is True:
+        return "负控失效：裸分母替换后 J4 腿① 仍判绿"
+    # 腿②：unit 退回无换算的旧文本
+    orig = GL.TERMS["L2"]["unit"]
+    try:
+        GL.TERMS["L2"]["unit"] = "单位是<b>条记录</b>，按最近 24 小时数。"
+        if _unit_has_merge("L2"):
+            return "负控失效：退回旧 unit 文本后 J4 腿② 仍判绿"
+    finally:
+        GL.TERMS["L2"]["unit"] = orig
+    return True
+
+
+# ═════════════════════════════ J5 连带（判据自身不空转）═══════════════════════
+@check("J5 连带：四条尺子都真会红（正判据在真源上跑、不空转）")
+def j5():
+    """连带对照：J1–J4 的正判据若在**现行产品**上都判绿，说明它们不是
+    "恒红"；再确认它们依赖的真源（`_logo_mark`／`state_short`／
+    `TERMS[*].unit`／`_revived_value`）都在位 —— 少一个真源，尺子就空转。"""
+    for rel, want in ((_SERVER_REL, "_logo_mark"),
+                      (_SERVER_REL, "window_level_groups")):
+        if want not in _src_or_skip(rel):
+            return "%s 里找不到 %s —— J 族依赖的真源变了" % (rel, want)
+    import inbox_model as MM
+    if MM.state_short("Ls") != "缺粮" or MM.state_short("L0") != "值守中":
+        return "state_short 的六态短名变了 —— J3 的比对面要重新认"
+    if len(GL.TERMS) < 20:
+        return "术语表条数异常（%d）—— J4 的 unit 断言覆盖面可疑" % len(GL.TERMS)
+    # 四条正判据必须都判绿（否则"尺子恒红"＝噪音）
+    #   ★ 调 RESULTS 里注册的 **wrapper**（它把 None 归成 True），
+    #     不调裸 fn（裸 fn 返回 None ⇒ 误判"恒红"，首跑踩到）。
+    want = ("J1 ", "J2 ", "J3 ", "J4 ")
+    wrappers = {n: f for n, f in RESULTS if n.startswith(want)}
+    if len(wrappers) != 4:
+        return "四条正判据的注册名对不上（找到 %d 条）" % len(wrappers)
+    for n, f in wrappers.items():
+        r = f()
+        if r is not True:
+            return "%s 在现行产品上判红（尺子恒红＝噪音）：%s" % (n.strip(), r)
+    _note("四条正判据在现行产品上均绿；四条真源都在位")
 
 
 def main():
     print("=" * 78)
     print("0.49.0 收口判据 —— W-08 默认尺寸 · W-09 浮层逃逸 · U-17 图标动效 · "
           "U-18 哨标比例/不被裁 · B-02…B-08/B-13 冒泡 · FLO-01…FLO-05 漂浮哨标")
+    print("＋ J1–J5「五条违和」同类可抓（原 0518，2026-10-16 按 A2/P5 并入）")
     print("（负控全部内存/临时目录变异，不写任何产品文件；node 缺失 ⇒ SKIP，不假绿）")
     print("=" * 78)
     ok = fail = skip = 0
