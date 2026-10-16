@@ -146,6 +146,7 @@ def chain_health(chain_files):
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _RULE_ZH = None          #: `id → description_zh` 缓存（读一次；读不到 ⇒ 空表）
 _RULE_TABLE = None       #: 完整规则列表缓存（0.51.0；读不到 ⇒ 空表）
+_RULE_LB = None          #: `id → label_zh` 上屏短名缓存（0.51.0；读不到 ⇒ 空表）
 
 
 def rule_table():
@@ -205,6 +206,26 @@ def rule_zh_map():
     return _RULE_ZH
 
 
+def rule_label_map():
+    """`rules/default.json` 的规则**上屏短名**（`id → label_zh`，唯一实现）。
+
+    ★★ 为什么新增（0.51.0，2026-10-16 日报页品质审查，创始人拍板点 4）：
+       Q-04 把 description_zh 搬上排行主显示位是**受众错配** —— 那是写给
+       审计方看的全文（实测 23/37 条带英文词或超 30 字），上屏就挤成三四行。
+       短名是**新造的上屏字段**：≤14 字、无英文（SSH/MCP 除外）、无规则号
+       自引用，由 INV-4 强制存在。全文 description_zh 不删（审计受众不动），
+       退到 hover title；编号淡显上屏（与问号全表 .rid 同一视觉语言）。
+    ★ 兜底纪律同族：读不到该字段 ⇒ 空串，页面按 label → zh → 规则号 退链，
+       绝不编造。
+    """
+    global _RULE_LB
+    if _RULE_LB is not None:
+        return _RULE_LB
+    _RULE_LB = {r["id"]: r["label_zh"]
+                for r in rule_table() if r.get("label_zh")}
+    return _RULE_LB
+
+
 def daily_report(day=None, root=None, chain_files=None, items=None,
                  chain=None, led=None):
     """生成某一天的日报。`day` 缺省＝本地今天。
@@ -227,8 +248,13 @@ def daily_report(day=None, root=None, chain_files=None, items=None,
             rules[it.rule_id] = rules.get(it.rule_id, 0) + 1
     # ★ 0.50.4（Q-04）：带上规则**人话名**（`description_zh`）；取不到为空串，
     #   页面据此退回规则号 —— 报告侧只提供数据，显示取舍由页面唯一实现决定。
+    # ★★ 0.51.0（品质审查拍板点 4）：再带上**上屏短名**（`label_zh`）——
+    #   description_zh 是审计受众的全文（实测最长 60 字），上屏挤成三四行；
+    #   短名 ≤14 字由 INV-4 强制。页面显示取舍：label → zh → 规则号。
     _zh = rule_zh_map()
-    rule_rows = sorted(({"rule_id": k, "count": v, "zh": _zh.get(k, "")}
+    _lb = rule_label_map()
+    rule_rows = sorted(({"rule_id": k, "count": v, "zh": _zh.get(k, ""),
+                         "label": _lb.get(k, "")}
                         for k, v in rules.items()),
                        key=lambda r: (-r["count"], r["rule_id"]))
 

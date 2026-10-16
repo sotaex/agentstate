@@ -2939,6 +2939,91 @@ def n_t02():
     return True
 
 
+# ══════════════ T-03 · 排行行形态（0.51.0 日报页品质审查，拍板点 3/4）══════════════
+_RANK_ROWS = [
+    {"rule_id": "DST-04", "count": 2,
+     "zh": "建立持久化机制（计划任务/系统服务/启动项/注册表 Run 键）",
+     "label": "设置开机自动启动"},
+    {"rule_id": "SEC-01", "count": 1,
+     "zh": "读取 .env 文件可能泄露 API 密钥与机密配置",
+     "label": "读取密钥配置文件"},
+]
+
+
+def _t03_core(page):
+    """排行行形态断言本体（T-03 与 N-T03 共用 —— 负控证明这把尺子会咬）。
+
+    ★ 剥层用 `body_without_terms`（C2 纪律：显式选层）：排行行不在词条里，
+      短名与 rid 保留；L2 问号全表（details 词条，同为 .rrow/.rid 形态）
+      必须剥掉 —— 它装 description_zh 全文是**设计如此**（学习场景），
+      不剥会跟排行行的「全文不许上屏」断言打架。
+    """
+    body = re.sub(r"\x00+", " ", re.sub(
+        r"<[^>]+>", "\x00", PC.body_without_terms(page)))
+    # ↑ 分层（剥 style/script/词条浮层）之后**再剥标签**取纯可见文本 ——
+    #   body 层保留标签，title 属性里的 hover 全文会混进来冒充可见文本
+    #   （首跑实测：zh 在 title 里被误判「上屏」）。与 0360 W06 同口径。
+    # ① 主显示＝上屏短名（label）；审计全文（zh）不得出现在可见文本
+    #    （zh 只住 hover title —— title 属性随标签一起被剥，天然区分）。
+    for r in _RANK_ROWS:
+        if r["label"] not in body:
+            return "排行行主显示缺短名 %r（label → zh → 规则号 退链断了？）" % r["label"]
+        if r["zh"] in body:
+            return "排行行可见文本出现审计全文 %r…（受众错配回潮）" % r["zh"][:24]
+    # ② 规则号淡显索引位在（.rid），且是**唯一**的编号出现形态：
+    #    剥掉 rid 后可见文本不许再有任何规则号（裸 rule_id 兜底回潮即红 ——
+    #    Q-04 自违反形态，2026-10-16 查证实锤过）。
+    if not re.search(r'<span class="rid">[A-Z]{2,4}-\d{2}</span>', page):
+        return "排行行缺淡显编号（.rid）—— 收件箱记录「规则 SEC-01」对不上号"
+    bare = re.sub(r"\x00+", " ", re.sub(r"<[^>]+>", "\x00", PC.body_without_terms(
+        re.sub(r'<span class="rid">[A-Za-z0-9-]*</span>', " ", page))))
+    if re.search(r"[A-Z]{2,4}-\d{2}", bare):
+        return "剥掉 .rid 后可见文本仍有规则号（裸 rule_id 兜底上了主显示）"
+    # ③ 命中次数在（排行卡的数）
+    if "命中 2 次" not in body:
+        return "排行行缺命中次数"
+    return True
+
+
+@check("T-03 ★ 排行行形态：短名主显示＋编号淡显＋审计全文退 hover")
+def t03():
+    """0.51.0（品质审查拍板点 3/4，创始人 2026-10-16 截图指认）：Q-04 退编号
+    方向没错，但替代品 description_zh 是审计受众全文（最长 60 字、DST-10 内嵌
+    「——DST-09」自引用）⇒ 上屏挤成三四行、编号从数据后门回来。
+    新形态锁三件事：① 主显示＝label_zh（≤14 字，品质由 0360 W15/INV-4 锁）；
+    ② 规则号淡显 .rid（与问号全表同视觉语言，收件箱「规则 SEC-01」可对号）；
+    ③ rid 是可见文本里**唯一**的编号形态（zh 全文退 hover、裸 rule_id 兜底
+    不许上主显示）。
+    """
+    page = _page("report", rep=dict(_REP, rules=_RANK_ROWS))
+    return _t03_core(page)
+
+
+@check("N-T03 ★ 负控：主显示退回 zh 全文（Q-04 前旧形态回潮）⇒ T-03 必须红")
+def n_t03():
+    """C1 两步法：变异＝渲染退链里删掉 label ⇒ 短名消失、全文上屏，
+    _t03_core 必须报「出现审计全文」。"""
+    src = _src(_SERVER_REL)
+    anchor = '               _esc(r.get("label") or r.get("zh") or r["rule_id"]),'
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    page, _why = _mut_render(
+        src.replace(anchor, '               _esc(r.get("zh") or r["rule_id"]),'),
+        "is0490_nt03", _SERVER_REL, view="report",
+        rep=dict(_REP, rules=_RANK_ROWS),
+        root=tempfile.mkdtemp(prefix="g0490_nt03_"),
+        token="T", items=_items(), posture=_POSTURE)
+    if _why:
+        return _why
+    r = _t03_core(page)
+    if r is True or r is None:
+        return "负控失效：主显示退回 zh 全文 ⇒ T-03 没红"
+    # 连回正判据：真实现必须全绿
+    if _t03_core(_page("report", rep=dict(_REP, rules=_RANK_ROWS))) is not True:
+        return "夹具不成立：真实现本身就红 ⇒ 负控无分辨力"
+    return True
+
+
 def main():
     print("=" * 78)
     print("0.48.5 Antinel 监理细节修订判据（交接件 v1.1 §5.7）—— "
@@ -2949,7 +3034,8 @@ def main():
           "批11 C2（扫渲染产物统一走 page_caliber，由元判据 S48 守）· "
           "批12 C5/U-16（问号同形）＋ C4/W-07（一次性调用方等窗就位，真进程实测）· "
           "批13 T-02/N-T02（四态词条内容派生审计：R0/L1 事件类型层、L2 规则层、"
-          "类别中文名与徽标映射；U-04 同步徽标芯片）")
+          "类别中文名与徽标映射；U-04 同步徽标芯片）· "
+          "批14 T-03/N-T03（排行行形态：短名主显示＋编号淡显＋审计全文退 hover）")
     print("（变异只在内存，账本与链只落临时目录，不写任何产品文件；"
           "戊2/戊3 视觉项无判据，走 §6.1 截图验收 —— U-13 只含戊2 机械部分）")
     print("=" * 78)

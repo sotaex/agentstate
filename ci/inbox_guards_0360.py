@@ -1432,7 +1432,19 @@ def _view_html(name="report", **over):
            "buckets": {"action": 0, "info": 32, "archive": 216},
            "posture": {"state": "guarding", "label": "值守中",
                        "why": "监理在岗", "consequences": []},
-           "revived_window": 25, "ledger": {"days": 0}, "rules": [],
+           "revived_window": 25, "ledger": {"days": 0},
+           # ★★ 0.51.0（2026-10-16 盲区修复）：`rules` 原先写死 [] ⇒
+           #   `if rep["rules"]:` 不成立 ⇒ **排行卡在判据的渲染里从未存在过**，
+           #   数据驱动的行（label/命中次数）从未进过 W 系扫描视野 ——
+           #   2026-10-16 实测排行行英文词（NTFS/Stream/DST-09 自引用）上屏
+           #   无人抓。⇒ 夹具给**带内容的样本行**（label_zh 干净短名），
+           #   「判据没覆盖到的那个面，就是缺陷会长的那个面」（本文件 W 星号
+           #   判据的原话，同一文件再证一次）。
+           "rules": [{"rule_id": "DST-01", "count": 3,
+                      "zh": "执行文件或目录删除命令", "label": "删除文件或目录"},
+                     {"rule_id": "SEC-01", "count": 1,
+                      "zh": "读取 .env 文件可能泄露 API 密钥与机密配置",
+                      "label": "读取密钥配置文件"}],
            "chain": {"status": "ok", "files": 9, "records": 40101,
                      "broken": 0, "unchained": 0, "bad_lines": 0}}
     rep.update(over)
@@ -1616,6 +1628,11 @@ def c_no_english_status_leaks_to_user():
         #   ⚠️ 非贪婪匹配：正文里这些 `<details>` 互不嵌套，故可整块剥掉。
         #   （顺带清掉旧版两行死代码：先算了一遍 `vis` 又立刻被覆盖。）
         vis = re.sub(r"<details\b.*?</details>", " ", h, flags=re.S)
+        # ★★ 0.51.0（拍板点 3，2026-10-16）：`.rid` 是**编号索引位**（淡显，
+        #   创始人拍板上屏）—— 不是正文，剥掉再扫：规则号在收件箱记录上本来
+        #   可见（「规则 SEC-01」），排行行的 rid 让两处能对号入座。它的内容
+        #   唯一来源是 r["rule_id"]（T-03 锁形态、INV-4 锁数据），不靠本判据。
+        vis = re.sub(r'<span class="rid">[^<]*</span>', " ", vis)
         vis = re.sub(r"<[^>]+>", "\x00", vis)
         vis = re.sub(r"\x00+", " ", vis)
         allow = {"Antinel", "AI", "L2", "L1", "R0", "Ls", "L0", "TOKEN"}
@@ -1943,6 +1960,61 @@ def c_close_old_windows_uses_injection_point():
     return True
 
 
+# ══════════════ W15 · 上屏短名品质（0.51.0 日报页品质审查）══════════════
+def c_ranking_label_zh_clean():
+    """排行行**上屏短名**（rules/default.json 的 `label_zh`）品质审计。
+
+    ★★ 病灶（2026-10-16 创始人截图指认）：Q-04 把 description_zh 搬上排行
+      主显示位是**受众错配** —— 那是审计受众的全文（23/37 条带英文词或
+      超 30 字，DST-10 的 zh 还内嵌「——DST-09」自引用），上屏挤成三四行。
+      ⇒ 拍板点 4：新造上屏短名字段 `label_zh`（≤14 字、无英文除 SSH/MCP、
+      无规则号自引用），全文退 hover，编号淡显（.rid）。
+    ★ 本判据扫**真实数据**（`R.rule_table()`）—— 与产品侧 INV-4 同口径、
+      两道独立防线（改松任何一道，另一道仍咬）。数据驱动的卡片**必须在
+      判据的扫描视野里**：W06 夹具盲区（rules:[] ⇒ 排行卡从未被渲染过）
+      是本轮根因之一，本判据直接吃真表，不再依赖夹具。
+    ★ 为什么判据自己不带夹具：label_zh 是**我们写的产品文案**（数据文件里
+      的上屏字段），它的品质与数据无关性不同 —— 数据变了才可能红，红了
+      就该修数据。这与「真实数据会时红时绿」的老教训不冲突：那条防的是
+      **运行态**数据（记录被关闭/归档），本条的数据是**发布物**（随 wheel 走）。
+    """
+    import inbox_report as R
+    for r in R.rule_table():
+        rid = r.get("id") or "(无id)"
+        lb = (r.get("label_zh") or "").strip()
+        if not lb:
+            return "%s：缺 label_zh（上屏短名，排行主显示位用）" % rid
+        if len(lb) > 14:
+            return "%s：label_zh 长 %d 字（>14，窄列必折行）%r" % (rid, len(lb), lb)
+        if re.search(r"[A-Z]{2,4}-\d{2}", lb):
+            return "%s：label_zh 内嵌规则号自引用 %r（Q-04 退编号不许从数据后门回来）" % (rid, lb)
+        bad = [w for w in re.findall(r"[A-Za-z][A-Za-z0-9-]*", lb)
+               if w not in ("SSH", "MCP")]
+        if bad:
+            return "%s：label_zh 含英文词 %s（只许 SSH/MCP）" % (rid, bad)
+    if not R.rule_table():
+        return "夹具失效：规则表读不到（空表）—— 本判据失去对象"
+    return True
+
+
+def n_ranking_label_zh_clean():
+    """负控：注入一条带英文词的假短名 ⇒ W15 必须红（同一把尺子换输入）。"""
+    import inbox_report as R
+    orig = R.rule_table
+    fake = [{"id": "FAKE-01", "label_zh": "读取 API 密钥文件"}]
+    try:
+        R.rule_table = lambda: fake
+        r = c_ranking_label_zh_clean()
+        if r is True or r is None:
+            return "负控失效：假短名含英文 API ⇒ 没红"
+        # 连回正判据：真实现必须全绿
+        R.rule_table = orig
+        if c_ranking_label_zh_clean() is not True:
+            return "夹具不成立：真实现本身就红 ⇒ 负控无分辨力"
+        return True
+    finally:
+        R.rule_table = orig
+
 
 CHECKS = [
     ("G01 面板几何随分辨率变化", c_window_geometry_follows_resolution,
@@ -1987,6 +2059,8 @@ CHECKS = [
     ("W12 页面不露进程号", c_user_text_has_no_process_ids, None),
     ("W13 术语不用代码速记", c_glossary_avoids_bare_code_lists, None),
     ("W14 文件路径收进折叠区", c_path_details_is_collapsed_by_default, None),
+    ("W15 上屏短名品质", c_ranking_label_zh_clean,
+     n_ranking_label_zh_clean),
     ("T01 托盘带监理态", c_tray_carries_sentinel_state,
      n_tray_without_shield_field_is_caught),
     ("T02 坏了绝不画成在岗", c_broken_posture_never_maps_to_on_duty, None),

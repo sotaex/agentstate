@@ -164,6 +164,13 @@ h2{font-size:15px;margin:0 0 12px}
 .metric .k{font-size:12px;color:var(--muted)}
 .metric .v{font-size:26px;font-weight:700}
 .metric a{text-decoration:none}
+/* ★ 0.51.0（品质审查拍板点 1）：四卡撤分母后，单位「条／件」小号灰显跟上 ——
+   单位可见（U-08 立意），但不与数字抢 26px 的视觉权重。 */
+.metric .unit{font-size:13px;font-weight:600;color:var(--muted)}
+/* ★ 0.51.0（拍板点 3）：排行行规则号**淡显上屏**（索引位）—— 与问号全表
+   `.tdef .rrow .rid` 同一视觉语言；收件箱记录「规则 SEC-01」能对号入座。 */
+.rows .rid{display:inline-block;min-width:52px;margin-left:6px;
+  font-family:var(--mono);font-size:11px;font-weight:400;color:var(--muted)}
 /* ---- 0.36.1：术语词条改成**浮层**（创始人截图三）----
    ★ 原形状的病：`.term{display:inline}` 把详情块塞进 `.metrics` 的
      140px 窄格里 ⇒ 展开后宽度只有卡片那么宽 ⇒ 中文逐字换行，
@@ -1739,14 +1746,18 @@ def _view_report(rep, token, items=None):
         # ★ 0.47.0（方案 §5 步三）：这个数是分子 ⇒ 同行带分母（窗口内总记录数）。
         return ("<div class=\"metric\"><div class=\"k\">%s</div>"
                 "<div class=\"v\" style=\"color:var(%s)\">"
-                # ★ 0.50.4（Q-02）：给分母带上**单位**（条）—— 原先只是一个
-                #   光秃秃的「/ 13」，全页没有任何一处说 13 是什么（它是
-                #   最近 24 小时三档记录之和）。单位可见（U-08 的立意：
-                #   只放 hover title 不算可见）。
+                # ★ 0.50.4（Q-02）：给分母带上**单位**（条）—— 单位可见（U-08
+                #   的立意：只放 hover title 不算可见）。
+                # ★★ 0.51.0（品质审查拍板点 1，2026-10-16）：**撤「/ N 条」分母**
+                #   —— 三无数（无落点/无就地口径），需要页头一整句解释才看得懂
+                #   ＝显示自证失败；失守卡「0 / 47」误导（失守不是从记录里抽样）；
+                #   要处理卡件数除条数＝Q-03 自己批判的同型。⇒ 只留绝对数＋单位
+                #   （`.unit` 小号灰显）；占比参照由「当日合计 · 共 N 条」承担。
+                #   分母纪律在顶部条后缀/拉起行/托盘照旧（0470 S95、U-97 不动）。
                 "<a href=\"/?v=inbox&f=%s\">%d</a>"
-                "<span class=\"den\"> / %d 条</span></div>"
+                "<span class=\"unit\"> 条</span></div>"
                 "</div>"
-                % (GL.chip(k), var, _esc(scoped_filter), n, _win_total))
+                % (GL.chip(k), var, _esc(scoped_filter), n))
 
     #: ★ 0.48.5（交接件 §5.4 甲4）：这一排四个数字的口径说明走
     #   `M.reading_note()` —— 与收件箱筛选条**同一个唯一实现**（旧版这里另写
@@ -1767,9 +1778,8 @@ def _view_report(rep, token, items=None):
          + metric("L1", W.get("L1", 0), "--l1", "lv:L1")
          + "<div class=\"metric\"><div class=\"k\">%s</div><div class=\"v\">"
            "<a href=\"/?v=inbox&f=action\">%d</a>"
-           "<span class=\"den\"> / %d</span></div></div></div>"
-         % (GL.chip("action"), rep.get("action_groups", 0),
-            _win_total))
+           "<span class=\"unit\"> 件</span></div></div></div>"
+         % (GL.chip("action"), rep.get("action_groups", 0)))
 
     # ★★ 0.37.2：**删掉「现在的防线状态」整张卡**。
     #   理由不是"它没用"，而是它**与顶部条重复且会打架**：
@@ -1822,15 +1832,22 @@ def _view_report(rep, token, items=None):
         #   本页页头已声明一次（U-05 不许行内再挂「点开看每一次」那类旧句）。
         _rule_total = sum(int(r["count"]) for r in rep["rules"])
         rows = "".join(
-            # ★ 0.50.4（Q-04）：显示规则**人话名**（`rules/default.json` 的
-            #   `description_zh`，由 `R.rule_zh_map()` 提供）；取不到 ⇒ 退回
-            #   规则号（不编造、不用英文 `name` 充数）。规则号退到 `title`
-            #   （hover 可见）—— 内部工程串不上主界面，但也不丢可检索性。
+            # ★ 0.50.4（Q-04）：显示规则**人话名**；规则号退到 hover —— 工程串
+            #   不上主界面。★★ 0.51.0（品质审查拍板点 3/4，2026-10-16）：Q-04 的
+            #   替代品 description_zh 是审计受众的全文（最长 60 字）⇒ 挤成三四行，
+            #   且 DST-10 的 zh 自带「——DST-09」内部自引用（编号从数据后门回来）。
+            #   ⇒ 主显示改**上屏短名**（`label_zh`，≤14 字，INV-4 强制），
+            #   规则号**淡显上屏**（`.rid`，与问号全表同一视觉语言 —— 收件箱记录
+            #   「规则 SEC-01」能对号入座），全文 zh 退到 hover title。
+            #   退链 label → zh → 规则号（不编造、不用英文 `name` 充数）。
             "<div class=\"row\"><span class=\"k\">"
-            "<a href=\"/?v=inbox&f=day:%s:rule:%s\" title=\"规则号 %s\">%s</a></span>"
+            "<a href=\"/?v=inbox&f=day:%s:rule:%s\" title=\"%s\">%s"
+            "<span class=\"rid\">%s</span></a></span>"
             "<span>命中 %d 次</span></div>"
-            % (_esc(rep["day"]), _esc(r["rule_id"]), _esc(r["rule_id"]),
-               _esc(r.get("zh") or r["rule_id"]), int(r["count"]))
+            % (_esc(rep["day"]), _esc(r["rule_id"]),
+               _esc(r.get("zh") or r["rule_id"]),
+               _esc(r.get("label") or r.get("zh") or r["rule_id"]),
+               _esc(r["rule_id"]), int(r["count"]))
             for r in rep["rules"][:10])
         rules = ("<div class=\"card\"><h2>规则命中排行 · 当日共 %d 次"
                  "</h2><div class=\"rows\">%s</div></div>" % (_rule_total, rows))
@@ -1876,9 +1893,11 @@ def _view_report(rep, token, items=None):
     #   ★ 也不写「/ N」：那个 N 是**裸英文词**，正文可见文本里出现它会被
     #     0360 W06 判红（「页面正文露出英文词 'N'」）—— 2026-10-15 实测撞到，
     #     是 Q-02 自己引入的。
+    # ★★ 0.51.0（品质审查拍板点 1，2026-10-16）：斜杠解释句随分母一起撤 ——
+    #   「需要一整句话才能解释的显示，本身就是显示失败」（Q-02 补丁即自供状）；
+    #   四卡只留绝对数＋单位，时间口径保留（W07：说一次，且不许整句删掉）。
     return ("<h2>%s · %s</h2>"
-            "<p class=\"note\">四个数都只数<b>最近 %d 小时</b>；"
-            "数字后面「/」右边那个数，是同一时间窗内的记录条数。</p>%s%s%s%s"
+            "<p class=\"note\">四个数都只数<b>最近 %d 小时</b>。</p>%s%s%s%s"
             % (PAGE_TITLES["report"], _esc(rep["day"]), hrs, m, pr, rules, chain))
 
 
