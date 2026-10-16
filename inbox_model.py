@@ -1048,6 +1048,11 @@ BADGE_TIP = {
     BADGE_DEV: "本机这一版比已发布的更新",
     BADGE_GRANARY: "粮快见底了",
 }
+#: ★★ 0.51.0（四态问号小窗方案 v1.1 拍板点三，2026-10-16）：徽标 → 态词条键
+#:   （顶栏徽标旁的问号芯片按它查 `glossary.TERMS`）。缺粮徽标的语义就是
+#:   Ls 态（词条键 `Ls`）；研发中即 `dev`。新徽标必须同批登记三张表
+#:   （BADGE_LABEL／BADGE_TIP／本表）—— 缺本表键 ⇒ 页面不出问号（.get 判空）。
+BADGE_STATE = {BADGE_DEV: "dev", BADGE_GRANARY: "Ls"}
 
 
 def _ver_tuple(s):

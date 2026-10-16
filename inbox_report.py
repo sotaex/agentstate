@@ -145,6 +145,42 @@ def chain_health(chain_files):
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _RULE_ZH = None          #: `id → description_zh` 缓存（读一次；读不到 ⇒ 空表）
+_RULE_TABLE = None       #: 完整规则列表缓存（0.51.0；读不到 ⇒ 空表）
+
+
+def rule_table():
+    """`rules/default.json` 的**完整规则列表**（唯一读取实现）。
+
+    ★ 0.51.0（四态问号小窗方案 v1.1 动作二，2026-10-16）：拦截态问号小窗要
+      下钻到**规则层**——总数、类别分组、每条中文说明全部从规则表派生，
+      `rule_zh_map()` 改由本函数派生（同一份文件只读一次，两条消费面共享
+      一份缓存；不出现第二份路径定位逻辑）。
+    ★ 返回 list[dict]（每条＝规则表原字段；至少含 id，通常含 category /
+      severity / description_zh）。
+    ★ 兜底纪律（与 `rule_zh_map` 同源）：读不到 / 解析失败 ⇒ 空表。
+      词条层（glossary）拿到空表**自己抛 UnknownTerm** —— 词条定义不许空，
+      比静默编一段"暂不可用"诚实；日报排行行则退回规则号，两处受众不同。
+    """
+    global _RULE_TABLE
+    if _RULE_TABLE is not None:
+        return _RULE_TABLE
+    rows = []
+    # 两种布局都能找到（与 `hooks/pre_tool_use.py::_locate` 同思路：
+    # 扁平仓 `rules/` 在旁边，技能包 `rules/` 在上一层）。
+    for base in (_HERE, os.path.dirname(_HERE)):
+        p = os.path.join(base, "rules", "default.json")
+        if not os.path.isfile(p):
+            continue
+        try:
+            with open(p, encoding="utf-8") as f:
+                d = json.load(f)
+            rr = d.get("rules") if isinstance(d, dict) else d
+            rows = [r for r in (rr or []) if isinstance(r, dict) and r.get("id")]
+        except Exception:                                   # noqa: BLE001
+            rows = []                      # 读坏 ⇒ 当没有（词条层抛错兜住）
+        break
+    _RULE_TABLE = rows
+    return rows
 
 
 def rule_zh_map():
@@ -158,29 +194,15 @@ def rule_zh_map():
        ⇒ 返回空串，页面**退回显示规则号**，绝不拿 `name`（英文）充数、更不编造。
     ★ 只读一次并缓存：日报每渲染一次就扫 37 条规则不划算，且规则文件在
        会话内不变。
+    ★ 0.51.0：本函数**改由 `rule_table()` 派生** —— 文件读取只有一份实现，
+       缓存也只有一份（`_RULE_TABLE`），本函数只剩"id→中文"这一层投影。
     """
     global _RULE_ZH
     if _RULE_ZH is not None:
         return _RULE_ZH
-    m = {}
-    # 两种布局都能找到（与 `hooks/pre_tool_use.py::_locate` 同思路：
-    # 扁平仓 `rules/` 在旁边，技能包 `rules/` 在上一层）。
-    for base in (_HERE, os.path.dirname(_HERE)):
-        p = os.path.join(base, "rules", "default.json")
-        if not os.path.isfile(p):
-            continue
-        try:
-            with open(p, encoding="utf-8") as f:
-                d = json.load(f)
-            rows = d.get("rules") if isinstance(d, dict) else d
-            for r in rows or []:
-                if isinstance(r, dict) and r.get("id") and r.get("description_zh"):
-                    m[r["id"]] = r["description_zh"]
-        except Exception:                                   # noqa: BLE001
-            m = {}                      # 读坏 ⇒ 当没有，页面退回规则号
-        break
-    _RULE_ZH = m
-    return m
+    _RULE_ZH = {r["id"]: r["description_zh"]
+                for r in rule_table() if r.get("description_zh")}
+    return _RULE_ZH
 
 
 def daily_report(day=None, root=None, chain_files=None, items=None,

@@ -819,7 +819,7 @@ def n_u05():
 
 
 # ════════════════════════════ U-04 · 乙1（铺「？」芯片，8 个落点）════════
-@check("U-04 ★ 乙1：8 个裸「？」芯片落位（筛选条4 + 药丸3 + 顶部灯1）")
+@check("U-04 ★ 乙1：基线 8 芯片落位（筛选条4+药丸3+灯1）＋ 徽标芯片按 BADGE_STATE 齐备")
 def u04():
     """乙1：日报页每个重要词都可点开看定义，收件箱页却一个「？」都没有
     （实测 term 芯片数 0）—— 同一个词两个页面两种待遇。
@@ -829,17 +829,32 @@ def u04():
     （屏幕上的「？」由 CSS `::after` 徽章渲染，summary 自身的字由
     `.term.mk>summary{font-size:0}` 藏掉 —— 徽章**不许**关掉去"消重复"，
     那是 C5 的错法，由 **U-16** 锁）；词本名进展开体首行。
-    词条清单 8 个：筛选条 action/info/archive/all（4）＋ 药丸 R0/L2/L1（3）
-    ＋ 顶部灯 light（1）。词条文字一律不动（0380 S17 钉死，只加落点）。
+    基线词条 8 个：筛选条 action/info/archive/all（4）＋ 药丸 R0/L2/L1（3）
+    ＋ 顶部灯 light（1）。
+    ★★ 0.51.0（四态问号小窗方案 v1.1 拍板点三）：**徽标芯片**加入 ——
+      顶栏每枚徽标（研发中/缺粮）旁各带对应态的问号芯片（`BADGE_STATE`
+      派生）。同步规则：**基线 8 全在（强度不降）**；出现陌生词条芯片 ⇒ 红；
+      有徽标无芯片 ⇒ 红；重复落点 ⇒ 红。
     """
     page = _page("inbox")
     chips = re.findall(r'<details class="term mk" data-t="([^"]+)"', page)
-    want = {"action", "info", "archive", "all", "R0", "L2", "L1", "light"}
-    if set(chips) != want:
-        return "mk 芯片集合 ≠ 8 词条：实到 %r" % (sorted(set(chips)),)
-    if len(chips) != 8:
-        return "mk 芯片数 = %d，应为 8（有重复落点）" % len(chips)
-    # ① summary 只能是「？」一个（"？？”＝ summary 自身的字没藏干净，见 U-16）
+    base = {"action", "info", "archive", "all", "R0", "L2", "L1", "light"}
+    if not base <= set(chips):
+        return "基线 8 芯片缺：%r" % sorted(base - set(chips))
+    # ★ 0.51.0：徽标 → 芯片派生断言（出现徽标必有对应芯片；陌生芯片即红）
+    bks = re.findall(r'<span class="bdg ([\w-]+)"', page)
+    for bk in bks:
+        st = M.BADGE_STATE.get(bk)
+        if not st:
+            return "徽标 %s 未登记 BADGE_STATE（有徽标没解释）" % bk
+        if st not in chips:
+            return "徽标 %s 旁缺「？」芯片（应指向词条 %s）" % (bk, st)
+    expect = base | {M.BADGE_STATE[b] for b in bks if b in M.BADGE_STATE}
+    if not set(chips) <= expect:
+        return "mk 芯片出现陌生词条：%r" % sorted(set(chips) - expect)
+    if len(chips) != len(set(chips)):
+        return "mk 芯片有重复落点（实到 %d 个标签）" % len(chips)
+    # ① summary 只能是「？」一个（"？？"＝ summary 自身的字没藏干净，见 U-16）
     if not re.search(r'<summary>？</summary>', page):
         return "mk 芯片的 summary 不是单个「？」（屏幕上会出现「？？」）"
     # ② 芯片不许被塞进链接里（兄弟节点，不是嵌套）
@@ -849,7 +864,7 @@ def u04():
     # ③ 展开体首行带词本名（复用 head 机制，不另写一套）
     #    ★ U-19（0.50.4）：发射器现带 name="term"（互斥小窗），子串随之更新
     #      —— 断言强度不变（head／summary／tdef 仍逐字在场）。
-    for key in want:
+    for key in set(chips):
         if ('data-t="%s" name="term"><summary>？</summary>'
                 '<div class="tdef"><b>' % key) \
                 not in page:
@@ -879,8 +894,12 @@ def n_u04():
         return "负控失效：摘掉 light 芯片后它仍在（注入没生效）"
     live = re.findall(r'<details class="term mk" data-t="([^"]+)"',
                       _page("inbox"))
-    if len(live) != 8:
-        return "夹具不成立：真实现本身就不是 8 个芯片 ⇒ 负控无分辨力"
+    live_bks = re.findall(r'<span class="bdg ([\w-]+)"', _page("inbox"))
+    expect = ({"action", "info", "archive", "all", "R0", "L2", "L1", "light"}
+              | {M.BADGE_STATE[b] for b in live_bks if b in M.BADGE_STATE})
+    if set(live) != expect:
+        return ("夹具不成立：真实现芯片集 %r ≠ 期望 %r ⇒ 负控无分辨力"
+                % (sorted(set(live)), sorted(expect)))
     return True
 
 
@@ -2799,6 +2818,127 @@ def n_t01():
     return True
 
 
+@check("T-02 ★ 四态词条内容派生审计：R0/L1 事件类型层逐字派生 · "
+       "L2 规则层同源（总数/行数/说明）· 类别中文名与徽标映射完备")
+def t_02():
+    """0.51.0 四态问号小窗方案 v1.1 动作二/三（2026-10-16）。
+
+    病灶：手写清单必漂（实测 R0 漏「安全区加锁失败」、L1 漏「研发迭代中」）；
+    拦截态内容全集在规则层（37 条），kind 只是投影容器。本判据钉死三件事：
+    ① R0/L1 的 inc 与 `glossary._kinds_of` 派生**逐字相等**（手写回潮即红）；
+    ② L2 的概述句数字、全表行数、每行说明与 `inbox_report.rule_table()`
+      **同源**（写死 37 即红）；
+    ③ 类别中文名映射（`_CATEGORY_ZH`）与徽标→词条映射（`BADGE_STATE`）
+      **完备**（新增类别/徽标没登记 ⇒ 红）。
+    """
+    import glossary as GL
+    import inbox_report as R
+    # ── ① R0/L1：事件类型层逐字派生 ──
+    for st, tail in (("R0", "具体是哪一件事，看收件箱每条记录的原因。"), ("L1", "")):
+        want = "包括这几类：%s。%s" % (GL._kinds_of(st), tail)
+        got = GL.TERMS[st]["inc"]
+        if got != want:
+            return "%s 词条 inc 与派生不一致（手写回潮？）：%r" % (st, got[:60])
+    # 派生本身必须覆盖真源里的每个 kind（防 _kinds_of 与真源脱节）
+    for st in ("R0", "L1"):
+        for kind, lv in M.LEVEL_OF_KIND.items():
+            if lv != st:
+                continue
+            t = M.TITLE_OF_KIND.get(kind) or kind
+            seg = t.split("：", 1)[1] if "：" in t else t
+            if seg not in GL.TERMS[st]["inc"]:
+                return "%s 派生清单漏 %s（%s）" % (st, kind, seg)
+    # ── ② L2：规则层同源 ──
+    rows = R.rule_table()
+    if not rows:
+        return "规则表为空 —— 正常环境（安装态/仓根态）必带 rules/default.json"
+    inc = GL.TERMS["L2"]["inc"]
+    if ("装着 %d 条拦截规则" % len(rows)) not in inc:
+        return "L2 概述句的规则总数与 rule_table() 不同源（写死数字？）：%r" % inc[:50]
+    lh = GL.TERMS["L2"]["list_html"] or ""
+    n_rows = lh.count('class="rrow"')
+    if n_rows != len(rows):
+        return "L2 全表行数(%d) != 规则表条数(%d)" % (n_rows, len(rows))
+    for r in rows:
+        if (">%s</span>" % r["id"]) not in lh:
+            return "L2 全表缺规则 %s" % r["id"]
+        zh = r.get("description_zh")
+        if zh and zh not in lh:
+            return "L2 全表规则 %s 的中文说明缺失（写死/漏译？）" % r["id"]
+    # ── ③ 类别中文名完备（fail-loud 的正向面）──
+    for r in rows:
+        try:
+            GL._cat_zh(r.get("category") or "?")
+        except GL.UnknownTerm as e:
+            return "类别中文名未登记：%s" % e
+    # ── ④ 徽标 → 态词条映射完备（缺粮＝Ls、研发中＝dev）──
+    for bk in M.BADGE_LABEL:
+        st = M.BADGE_STATE.get(bk)
+        if not st:
+            return "徽标 %s 未登记 BADGE_STATE（页面将不出问号芯片）" % bk
+        if st not in GL.TERMS:
+            return "徽标 %s 指向的词条 %s 不存在" % (bk, st)
+    return True
+
+
+@check("N-T02 ★ 负控：假 kind 入清单 / 假 category 抛错 / 假规则改总数与空表降级")
+def n_t02():
+    """同尺三喂：证明清单是**派生**不是手写、fail-loud 真有牙、还原后回绿。"""
+    import glossary as GL
+    import inbox_report as R
+    # ── ① 假 kind 注入 → 清单必须跟上（派生的证据；手写串不会变）──
+    orig_lk = dict(M.LEVEL_OF_KIND)
+    orig_tk = dict(M.TITLE_OF_KIND)
+    try:
+        M.LEVEL_OF_KIND["host_shield_xxx"] = "R0"
+        M.TITLE_OF_KIND["host_shield_xxx"] = "失守：判据自造的假问题"
+        if "判据自造的假问题" not in GL._kinds_of("R0"):
+            return "负控失效：注入假 kind 后清单没跟上 ⇒ 清单不是派生（手写回潮）"
+    finally:
+        M.LEVEL_OF_KIND.clear()
+        M.LEVEL_OF_KIND.update(orig_lk)
+        M.TITLE_OF_KIND.clear()
+        M.TITLE_OF_KIND.update(orig_tk)
+    if "判据自造的假问题" in GL._kinds_of("R0"):
+        return "还原链路坏：还原 LEVEL_OF_KIND 后假条目仍在"
+    # ── ② 未登记类别 ⇒ _cat_zh 必须抛（不静默露英文）──
+    try:
+        GL._cat_zh("alien_cat")
+        return "负控失效：未登记类别没抛错 ⇒ fail-loud 失守（页面会露英文）"
+    except GL.UnknownTerm:
+        pass
+    # ── ③ 假规则夹具：概述句总数/全表跟着变；含假类别 ⇒ 抛错；空表 ⇒ 降级真话 ──
+    #   （概述句与全表**都**要过类别映射 ⇒ 夹具分三段：全合法类别验证派生、
+    #    含未登记类别验证抛错、空表验证降级 —— 混在一段会让抛错提前、测不到派生。）
+    orig_rt = R.rule_table
+    fake_ok = [{"id": "FAKE-01", "category": "secrets", "description_zh": "判据自造的假规则"},
+               {"id": "FAKE-02", "category": "secrets", "description_zh": "假规则二"}]
+    fake_bad = [{"id": "FAKE-03", "category": "alien_cat", "description_zh": "假规则三"}]
+    try:
+        R.rule_table = lambda: fake_ok
+        if "装着 2 条拦截规则" not in GL._shield_overview():
+            return "负控失效：夹具 2 条 ⇒ 概述句没跟着变 ⇒ 总数写死"
+        _lh = GL._shield_list_html()
+        if _lh.count('class="rrow"') != 2 or "判据自造的假规则" not in _lh:
+            return "负控失效：夹具 2 条 ⇒ 全表没跟着变（行数写死或漏派生）"
+        R.rule_table = lambda: fake_bad
+        try:
+            GL._shield_overview()
+            return "负控失效：未登记类别 alien_cat ⇒ 未抛错（fail-loud 失守）"
+        except GL.UnknownTerm:
+            pass
+        R.rule_table = lambda: []
+        if "读不到" not in GL._shield_overview():
+            return "负控失效：空表 ⇒ 概述句没有降级真话（会编清单或装没事）"
+        if GL._shield_list_html() != "":
+            return "负控失效：空表 ⇒ list_html 应为空串（chip 跳过全表）"
+    finally:
+        R.rule_table = orig_rt
+    if "装着 %d 条拦截规则" % len(R.rule_table()) not in GL._shield_overview():
+        return "还原链路坏：还原 rule_table 后概述句与真源不一致"
+    return True
+
+
 def main():
     print("=" * 78)
     print("0.48.5 Antinel 监理细节修订判据（交接件 v1.1 §5.7）—— "
@@ -2807,7 +2947,9 @@ def main():
           "批6 W-03（A2）· 批7 W-04（B1）· 批8 W-05（B2）· 批9 W-06（B3）· "
           "批10 C1（负控模板化：渲染型负控走 _mut_render 两步法）· "
           "批11 C2（扫渲染产物统一走 page_caliber，由元判据 S48 守）· "
-          "批12 C5/U-16（问号同形）＋ C4/W-07（一次性调用方等窗就位，真进程实测）")
+          "批12 C5/U-16（问号同形）＋ C4/W-07（一次性调用方等窗就位，真进程实测）· "
+          "批13 T-02/N-T02（四态词条内容派生审计：R0/L1 事件类型层、L2 规则层、"
+          "类别中文名与徽标映射；U-04 同步徽标芯片）")
     print("（变异只在内存，账本与链只落临时目录，不写任何产品文件；"
           "戊2/戊3 视觉项无判据，走 §6.1 截图验收 —— U-13 只含戊2 机械部分）")
     print("=" * 78)
