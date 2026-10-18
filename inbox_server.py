@@ -2495,27 +2495,130 @@ def _resolve_view(view):
     return view if view in _VIEWS_ALLOWED else "inbox"
 
 
-def _exam_ago(path):
-    """「上次体检：N 天前」—— 当天＝「刚刚」（设计 §20.4 一行版；§20.5：对比不展开）。
+def _exam_when(path):
+    """`(相对, 绝对时刻)` —— 如 `("1 天前", "10-18 18:01")`。
 
-    ★ 取快照里的 `generated_at`（存档唯一事实）；读不出 ⇒ 如实说时间不详，
+    ★ 取存档里的 `generated_at`（存档唯一事实）；读不出 ⇒ 如实说时间不详，
       不拿文件名猜（文件名是第二来源，两份事实迟早对不上）。
+    ★ 相对与绝对**同一次算出**：页头一行与回看标注若各算一遍，迟早对不上
+      （本仓第三份时间实现，故收口在这里）。
     """
     try:
         with open(path, encoding="utf-8") as f:
             doc = json.load(f)
         dt = datetime.fromisoformat(str(doc.get("generated_at") or ""))
     except Exception:                                         # noqa: BLE001
-        return "时间不详"
+        return ("时间不详", "")
     n = (datetime.now().astimezone().date() - dt.date()).days
-    return "刚刚" if n <= 0 else "%d 天前" % n
+    return ("刚刚" if n <= 0 else "%d 天前" % n, dt.strftime("%m-%d %H:%M"))
+
+
+def _exam_ago(path):
+    """「上次体检：N 天前」—— 当天＝「刚刚」（设计 §20.4 一行版；§20.5：对比不展开）。
+
+    ★ 唯一实现＝`_exam_when`（本函数只取相对那一半，不第二份算）。
+    """
+    return _exam_when(path)[0]
+
+
+def _exam_replay_note(path):
+    """回看标注（设计 §30.2）：说清这是**存档里那一次**，不是刚跑的。
+
+    ★ 只给**绝对时刻**：若这里也算一遍相对天数，在「最近一份是命令行体检」
+      时会与页头那句互相打脸（页头 2 天前／标注 1 天前）——两句话讲同一件事
+      却给出两个数，是本节要防的病。
+    """
+    _rel, _abs = _exam_when(path)
+    return ("本机存档里上一次体检的结果（%s），不是刚跑的。"
+            "当时每个工具自己写下的原文也在里面。" % (_abs or _rel))
+
+
+def _exam_history():
+    """历次控制台体检（**倒序**，最近在前）。每项 `{"path","base","when","ok"}`。
+
+    ★ `ok`＝**能回看**（存档里带明细）。旧存档 `ok=False` ⇒ 列表里标「没存明细」，
+      **不生成链接**（点进去也没东西，那是骗点击）。
+    ★ 只读，不写、不改。
+    """
+    import host_shield as _hs
+    out = []
+    for p in reversed(_hs.health_reports()):
+        try:
+            with open(p, encoding="utf-8") as f:
+                doc = json.load(f)
+        except Exception:                                     # noqa: BLE001
+            continue
+        if not isinstance(doc, dict) or doc.get("source") != "console-exam":
+            continue
+        _rel, _abs = _exam_when(p)
+        out.append({"path": p, "base": os.path.basename(p),
+                    "when": _abs or _rel,
+                    "ok": bool(isinstance(doc.get("report"), dict)
+                               and doc.get("report"))})
+    return out
+
+
+def _exam_pick(hist, pick):
+    """从历次里挑出要看的那一次；挑不出 ⇒ 最近一次**能回看**的。
+
+    ★★ `pick` 只认**档案自己的文件名**，绝不拿它拼路径：它来自 URL 查询串，
+      任何拼路径的写法都是路径穿越。挑不到就退回默认（不报错、不渲染空页）。
+    """
+    if pick:
+        for h in hist:
+            if h["base"] == pick and h["ok"]:
+                return h
+    for h in hist:
+        if h["ok"]:
+            return h
+    return None
+
+
+def _exam_history_html(hist, chosen):
+    """「历次体检」一行：能回看的给链接，不能回看的**只给字、不给链接**。
+
+    ★ 只有一次时不显示（品质性：不啰嗦 —— 一行只有一个选项的列表是噪音）。
+    ★ 当前那一次加粗、**不给链接**（它已经是这一页）。
+    """
+    if len(hist) < 2:
+        return ""
+    items = []
+    for h in hist:
+        if not h["ok"]:
+            items.append("<span class=\"muted\">%s（没存明细）</span>" % _esc(h["when"]))
+        elif chosen and h["base"] == chosen["base"]:
+            items.append("<b>%s</b>" % _esc(h["when"]))
+        else:
+            items.append("<a href=\"/?v=health_exam&e=%s\">%s</a>"
+                         % (h["base"], _esc(h["when"])))
+    return "<div class=\"note\">历次体检：%s</div>" % " ｜ ".join(items)
+
+
+def _exam_stale_note(path):
+    """旧存档（0.53.0 T2 之前）的如实说明：那次**只存了汇总**，明细没存下来。
+
+    ★ 不许写成「还没体检」——体检做过，只是当时的实现没把明细落盘。
+      把「没存下明细」说成「没体检过」，就是本仓最忌的那件事：
+      **没查/没存 与 查了没事 显示成同一个样子**。
+    """
+    _rel, _abs = _exam_when(path)
+    return ("本机存档里有一次体检（%s），但那次只存了汇总数字，明细没存下来。"
+            "要看明细得重跑一次。" % (_abs or _rel))
 
 
 def _exam_absorb(res):
-    """体检跑完把结论收成一份快照（设计 §21.2 接触点 4：「体检完成后写快照」）。
+    """体检跑完把结论收成一份存档（设计 §30.1：存档＝可回看的报告）。
 
-    ★ 只含计数、不收任何文件内容（与 host-audit 存档同一条纪律）；
-      写失败返回 None ⇒ 引导条照旧显示（「完成一次体检」这件事没留下证据），
+    ★★ 0.53.0（T2，创始人 2026-10-19 拍板）**存档里要有能回看的细节**：
+      旧版只存 6 个汇总数（实测 245 字节）⇒ 服务重启后内存一空，用户看到的是
+      「上次体检：1 天前」配「这次打开还没跑过体检」——**同一页两句相反的话**，
+      而那次的结论一个字都找不回来。存档因此**连带存整份结果**（含每个工具
+      自己写下的原文），回看时走同一个渲染函数，不写第二套。
+
+    ★ 边界（如实写，不许含糊）：存的是**工具自己写下的字段原文**（它自认的
+      那部分），不是用户项目文件的内容。这条边界由判据 H9d 的键白名单守。
+
+    ★ 写失败返回 None ⇒ 引导条照旧显示（「完成一次体检」这件事没留下证据），
       **不许**把没存下来渲染成存下来了。
     """
     import antinel as _A
@@ -2528,11 +2631,40 @@ def _exam_absorb(res):
            "source": "console-exam",
            "tools": len(scan.get("tools") or []),
            "verdicts": {k: int(vc.get(k, 0) or 0) for k in _A.VERDICTS},
-           "conns": len(((eg.get("snapshot") or {}).get("conns")) or [])}
+           "conns": len(((eg.get("snapshot") or {}).get("conns")) or []),
+           # ★ 回看的唯一来源：整份结果原样存，回看时不裁剪、不重算。
+           "report": res or {}}
     try:
         return _hs.save_health_report(doc)
     except Exception:                                         # noqa: BLE001
         return None
+
+
+def _exam_last_report(require_report=True):
+    """最近一份控制台体检存档，返回 `(doc, path)`；没有 ⇒ `(None, "")`。
+
+    ★ 只看 `source == "console-exam"`：命令行体检那份（host-audit）形状不同，
+      喂给体检页的渲染函数会渲染出别的页面。
+    ★ `require_report=True`（默认）＝只要**能回看**的（带 `report`）；
+      传 False ＝也要**不能回看的旧存档**（0.53.0 T2 之前存的只有汇总数字），
+      页面用它来如实说「那次的明细没存下来」，而不是掉进
+      「这次打开还没跑过体检」——后者与页头「上次体检：1 天前」自相矛盾。
+    ★ 只读，不写、不改。
+    """
+    import host_shield as _hs
+    for p in reversed(_hs.health_reports()):
+        try:
+            with open(p, encoding="utf-8") as f:
+                doc = json.load(f)
+        except Exception:                                     # noqa: BLE001
+            continue
+        if not isinstance(doc, dict) or doc.get("source") != "console-exam":
+            continue
+        if require_report and not (isinstance(doc.get("report"), dict)
+                                   and doc.get("report")):
+            continue
+        return doc, p
+    return None, ""
 
 
 def _exam_start():
@@ -2572,9 +2704,13 @@ def _exam_job():
                          finished=time.time())
 
 
-def _view_exam(token=""):
+def _view_exam(token="", pick=None):
     """体检页（第五个 TAB）。★ 接入不是新建：渲染复用 `ui_server._result_html`
-    （唯一实现），本函数只做入口、缓存读取、快照行、三态与边界。"""
+    （唯一实现），本函数只做入口、缓存读取、快照行、三态与边界。
+
+    ★ `pick`＝要看哪一次（档案文件名）。**每一次体检都能回看**，不是只最近一次
+      （创始人 2026-10-19 追加要求）。
+    """
     import ui_server as _U
     import antinel as _A
     import host_shield as _hs
@@ -2583,6 +2719,21 @@ def _view_exam(token=""):
     with _EXAM_LOCK:
         st = dict(_EXAM)
     res = st.get("result")
+    hist = _exam_history()
+    chosen = _exam_pick(hist, pick)
+    # ★★ 0.53.0（T2）：内存里没有（服务重启过）⇒ **读本机存档**，不落到
+    #   「这次打开还没跑过体检」。旧版在这里直接掉进空态 ⇒ 页头写着
+    #   「上次体检：1 天前」、正文写着「还没跑过」，同一页两句相反的话
+    #   （创始人 2026-10-19 实测）。存档是回看的唯一来源，不是装饰。
+    _arch = ""
+    if res is None and st.get("state") not in ("running", "error"):
+        if chosen is not None:
+            try:
+                with open(chosen["path"], encoding="utf-8") as f:
+                    res = (json.load(f) or {}).get("report") or None
+                _arch = chosen["path"]
+            except Exception:                                 # noqa: BLE001
+                res, _arch = None, ""
     # ---- 页头：标题 ＋「上次体检」一行（§20.4；空态不显示那一行，§21.3）----
     _last = _exam_ago(reports[-1]) if reports else ""
     if _last:
@@ -2596,6 +2747,8 @@ def _view_exam(token=""):
         out.append("<div class=\"guide\"><b>%s</b></div>" % _EXAM_GUIDE)
     # ---- 边界（§20.2：TPL 原文逐字保留 ＋ 局部边界新增，写在首屏）----
     out.append(_EXAM_BOUND)
+    # ---- 历次体检（每一次都能回看；只有一次时不显示，不啰嗦）----
+    out.append(_exam_history_html(hist, chosen))
     # ---- 触发／进行中／结果 ----
     if st.get("state") == "running":
         out.append("<div class=\"note\">体检正在进行：%s"
@@ -2607,6 +2760,10 @@ def _view_exam(token=""):
                    % _esc(st.get("error") or "原因不详"))
         out.append(_form(token, "exam", label="重新体检"))
     elif res:
+        if _arch:
+            # ★ 回看标注必须在报告**之前**：读者先知道这是旧的、是哪一次的，
+            #   再看内容。放后面 ⇒ 有人会把旧结果当成刚跑的。
+            out.append("<div class=\"note\">%s</div>" % _exam_replay_note(_arch))
         scan = res.get("scan") or {}
         tools = scan.get("tools")
         if tools is None:
@@ -2614,14 +2771,23 @@ def _view_exam(token=""):
         else:
             if not tools:
                 out.append("<div class=\"warn\">%s</div>" % _EXAM_NO_TOOLS)
+            # ★ 渲染唯一实现＝`_U._result_html`（与刚跑完同一条路，不写第二套）
             out.append(_U._result_html(res, _A.VERDICTS, _A._ev_human))
-        if not st.get("saved"):
+        if _arch:
+            pass                      # 回看时不谈「这次存没存下来」
+        elif not st.get("saved"):
             out.append("<div class=\"note\">这次体检的结果没能存成本机档案"
                        "（目录不可写？）——下次打开还会提醒你做一次。</div>")
         out.append(_form(token, "exam", label="重新体检"))
     else:
-        out.append("<div class=\"note\">这次打开还没跑过体检。跑一次只要几分钟，"
-                   "全程只读，不改你电脑上的任何文件。</div>")
+        # ★ 有旧存档（没明细）⇒ **如实说它没明细**，不许说「还没跑过体检」——
+        #   页头正写着「上次体检：1 天前」，这两句摆一起就是自相矛盾。
+        _doc0, _p0 = _exam_last_report(require_report=False)
+        if _p0:
+            out.append("<div class=\"note\">%s</div>" % _exam_stale_note(_p0))
+        else:
+            out.append("<div class=\"note\">这次打开还没跑过体检。跑一次只要几分钟，"
+                       "全程只读，不改你电脑上的任何文件。</div>")
         out.append(_form(token, "exam", label="开始体检"))
     return "<div class=\"exam\">%s</div>" % "".join(out)
 
@@ -2637,7 +2803,7 @@ PAGE_TITLES = {"inbox": "收件箱", "report": "日报", "health": "运行状态
 
 
 def render_page(view="inbox", filt=None, root=None, token="", items=None, rep=None,
-                posture=None, now=None, record_ledger=False, notice=""):
+                posture=None, now=None, record_ledger=False, notice="", exam=None):
     """渲染整页。可注入 items/rep/posture（测试用）。
 
     ★★ 0.35.2 修（真缺陷，创始人 2026-10-06「点开像卡死」）：
@@ -2693,7 +2859,7 @@ def render_page(view="inbox", filt=None, root=None, token="", items=None, rep=No
     elif view == "health_exam":
         # ★ 0.53.0（T0）：体检页**不算日报**（不白等 7.8s 复算审计链）——
         #   它要的数据由 _view_exam 里的进程内缓存负责，GET 从不触发采集。
-        body = _view_exam(token)
+        body = _view_exam(token, pick=exam)
     else:
         body = _view_inbox(items, token, filt, now=now, posture=posture)
     if notice:
@@ -2867,8 +3033,11 @@ def _make_handler(token, root):
                 #   以为自己看到的是筛选结果，其实是一整条历史）。
                 if not M.known_filter(filt):
                     filt = M.BUCKET_ACTION
+                # ★ 0.53.0（T2）：`e`＝要看哪一次体检（档案文件名）。
+                #   只作为**挑选键**用，绝不拼进路径（`_exam_pick` 里兜着）。
+                _epick = (q.get("e") or [""])[0]
                 page = render_page(view=view, filt=filt, root=root, token=token,
-                                   record_ledger=(view == "ledger"))
+                                   record_ledger=(view == "ledger"), exam=_epick)
                 return self._send(200, "text/html; charset=utf-8", page.encode("utf-8"))
             return self._send(404, "text/plain; charset=utf-8", "没有这个页面".encode("utf-8"))
 

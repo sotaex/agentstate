@@ -3626,6 +3626,285 @@ def _p18_generic(store):
     return True
 
 
+# ------------------------------------------------ 体检可回看（§38 / P21）----
+#: ★ 0.53.0（T2，创始人 2026-10-19 拍板「回看到细节，证据原文一起存」）
+#:   控制台体检存档的顶层键白名单。守的是**边界**：存的是「工具自己写下的
+#:   字段原文」（它自认的那部分），不是用户项目文件的内容。
+#:   ★ 旧版那把尺子只校验 host-audit 形态的 hosts/workspaces ⇒ console-exam
+#:     形态**根本不进循环**，「少存了什么」从来没人管 —— 本轮实撞：那次存档
+#:     只有 245 字节、没有工具名，谁都没发现。
+_EXAM_ARCHIVE_KEYS = {"schema", "generated_at", "source", "tools",
+                      "verdicts", "conns", "report"}
+
+
+def _exam_archive_judge(doc):
+    """控制台体检存档的尺子：顶层键白名单 ＋ `report` 必须是能回看的整份结果。"""
+    if not isinstance(doc, dict):
+        return "存档不是 JSON 对象（%s）" % type(doc).__name__
+    bad = []
+    if doc.get("source") != "console-exam":
+        bad.append("source=%r（本尺子只管控制台体检那份）" % (doc.get("source"),))
+    if doc.get("schema") != "antinel.health/1":
+        bad.append("schema=%r（不声明版本，日后改字段就无法分辨新旧）"
+                   % (doc.get("schema"),))
+    extra = set(doc) - _EXAM_ARCHIVE_KEYS
+    if extra:
+        bad.append("顶层多出白名单外的键 %r（存档边界：路径、计数、工具自认的原文）"
+                   % sorted(extra))
+    rep = doc.get("report")
+    if not isinstance(rep, dict) or not rep:
+        bad.append("report 缺失或为空 —— 回看的唯一来源没了，重启后只剩一句"
+                   "「上次体检：N 天前」")
+    else:
+        scan = rep.get("scan")
+        if not isinstance(scan, dict):
+            bad.append("report.scan 不是对象（回看渲染要它）")
+        elif not isinstance(scan.get("tools"), list):
+            bad.append("report.scan.tools 不是列表（回看渲染要它）")
+        if not isinstance(rep.get("egress"), dict):
+            bad.append("report.egress 不是对象（回看渲染要它）")
+    return "；".join(bad) if bad else True
+
+
+#: 夹具里的工具名。**故意生造**：真工具名在页面上到处都有，用它断言会假绿。
+_EXAM_FIXTURE_TOOL = "ZcodeCheck"
+
+
+def _exam_fixture_report():
+    """一份能回看的体检结果夹具。
+
+    ★★ 形状必须**照真结果写**，不能照想象写：`ev` 的元素是 `(指纹, 命中对象)`
+       **二元组**（`antinel.py:2988`），不是字典 —— 首版按字典写 ⇒ 渲染在
+       `ui_server._evidence_html` 里 unpack 崩（ValueError: expected 2, got 1）。
+       合成形状不只是"不严谨"，它会让判据红在错误的地方（本仓记过同型：假绿三族）。
+    ★ `detail` 的元素带 `file`（渲染「从这些文件里读到」用它）。
+    """
+    _ev_item = [("fp-abc123", {"file": "C:\\t\\zcode\\settings.json",
+                               "kpath": "a.b", "value": "2026-10-18 上传过"})]
+    _detail = [{"file": "C:\\t\\zcode\\settings.json", "kpath": "a.b",
+                "value": "2026-10-18 上传过", "raw": "uploaded=1"}]
+    return {
+        "scan": {
+            "tools": [
+                {"name": _EXAM_FIXTURE_TOOL, "verdict": "SENT", "path": "C:\\t\\zcode",
+                 "size": 1048576, "files": 12, "ev": _ev_item, "detail": _detail},
+                {"name": "CleanTool", "verdict": "CLEAN", "path": "C:\\t\\clean",
+                 "size": 2048, "files": 3, "ev": [], "detail": []},
+            ],
+            "details": {"C:\\t\\zcode": _detail},
+            "counts_by_verdict": {"PACK": 0, "SENT": 1, "SYNC": 0,
+                                  "CLEAN": 1, "BLIND": 0, "NA": 0},
+            "coverage": {"unscanned": 0, "registered_roots": 2, "present": 2,
+                         "added_by_registry": 0},
+        },
+        "egress": {"snapshot": {"ok": True, "conns": [{"proc": "p", "dst": "d"}]},
+                   "sample_failed": 0},
+        "canary": {"rows": []},
+    }
+
+
+def _exam_write_console_exam(report=None, drop_report=False, stamp=None):
+    """往当前 hub 写一份控制台体检存档，返回路径。`drop_report=True`＝旧形态（无明细）。
+
+    ★ `stamp`＝`generated_at`（列表里显示的时刻）。写多份时**必须给不同时刻**，
+      否则「历次体检」那一行出现三个同样的时间 —— 列表分不清，判据也就测不出
+      「选的是不是那一次」。
+    """
+    import host_shield as HS
+    doc = {"schema": "antinel.health/1",
+           "generated_at": stamp or "2026-10-19T04:00:00+08:00",
+           "source": "console-exam", "tools": 2,
+           "verdicts": {"PACK": 0, "SENT": 1, "SYNC": 0, "CLEAN": 1, "BLIND": 0, "NA": 0},
+           "conns": 1}
+    if not drop_report:
+        doc["report"] = _exam_fixture_report() if report is None else report
+    return HS.save_health_report(doc)
+
+
+def _exam_fixture_named(tool):
+    """一份只含**一个**指定工具名的结果夹具（用来分辨「回看的是哪一次」）。"""
+    rep = _exam_fixture_report()
+    rep["scan"]["tools"] = [
+        {"name": tool, "verdict": "SENT", "path": "C:\\t\\%s" % tool,
+         "size": 1024, "files": 1, "ev": [], "detail": []}]
+    rep["scan"]["details"] = {}
+    return rep
+
+
+def _p21_replay_core():
+    """尺子（正判据与负控共用）：**内存空 ＋ 有存档** ⇒ 页面必须回看得出内容。
+
+    ★ 内存空＝服务重启后的真实形状（创始人 2026-10-19 撞的就是这个）。
+    """
+    with SV._EXAM_LOCK:
+        SV._EXAM.update(state="idle", result=None, stage="", error="", saved="",
+                        started=0.0, finished=0.0)
+    try:
+        html = SV._view_exam(token="T")
+    except Exception as e:                                    # noqa: BLE001
+        return "渲染体检页抛异常（%s: %s）—— 回看路径根本不通" % (type(e).__name__, e)
+    txt = PC.body(html)
+    if _EXAM_FIXTURE_TOOL not in txt:
+        return ("回看没把存档里的报告渲染出来（页面上找不到 %s）—— "
+                "存档写了、页面不看，就是创始人撞的那个形状" % _EXAM_FIXTURE_TOOL)
+    if "不是刚跑的" not in txt:
+        return "回看没标注这是存档里那一次（缺「不是刚跑的」）"
+    i_note, i_tool = txt.find("不是刚跑的"), txt.find(_EXAM_FIXTURE_TOOL)
+    if i_note > i_tool:
+        return "标注落在报告之后（标注 %d ／ 报告 %d）—— 有人会把旧结果当成刚跑的" % (
+            i_note, i_tool)
+    if "这次打开还没跑过体检" in txt:
+        return "有存档可回看，页面却说「这次打开还没跑过体检」—— 与页头自相矛盾"
+    return True
+
+
+def c_exam_report_replayable():
+    """P21-1：服务重启（内存空）后，体检页**仍能回看**上次体检的结果与细节。
+
+    ★ 守的是创始人 2026-10-19 的原话：「昨晚体检了一次，现在想看体检结果，却看不到」。
+      旧形状：页头「上次体检：1 天前」＋ 正文「这次打开还没跑过体检」——同一页两句
+      相反的话，而那次的结论一个字都没有。
+    """
+    hub = G.new_hub()
+    p = _exam_write_console_exam()
+    why = _p21_replay_core()
+    if why is not True:
+        return why
+    with open(p, encoding="utf-8") as f:
+        if _exam_archive_judge(json.load(f)) is not True:
+            return "写下来的存档过不了 P21-2 的尺子（两份判据对不上同一份事实）"
+    _note("内存空 ＋ 1 份存档 ⇒ 回看渲染出 %s，标注在报告之前" % _EXAM_FIXTURE_TOOL)
+    return True
+
+
+def n_exam_report_replay_is_not_decorative():
+    """负控：把「读存档」摘掉 ⇒ P21-1 必须红（回看不是装饰）。
+
+    ★ 守的是本仓付过学费的那个形状：**存档写了、页面不看**。
+      只断言「存档里有 report」不够 —— 没人读的存档等于没存。
+    """
+    hub = G.new_hub()
+    _exam_write_console_exam()
+    orig = SV._exam_history
+    try:
+        # ★ 打桩**读盘那一下**（历次清单一空 ⇒ 没有可选的一次 ⇒ 不该有回看）。
+        #   旧版打桩 ` _exam_last_report`，产品改用 `_exam_history` 后那个桩
+        #   就成了空气桩 —— 负控打不到产品，等于没写。
+        SV._exam_history = lambda: []
+        why = _p21_replay_core()
+    finally:
+        SV._exam_history = orig
+    if why is True:
+        return "负控失效：摘掉读存档后 P21-1 仍绿（回看是装饰，页面根本没在读）"
+    if _EXAM_FIXTURE_TOOL not in str(why) and "还没跑过" not in str(why):
+        return "方向不对：红因不是「没回看」（%s）—— 量具打偏" % str(why)[:60]
+    _note("摘掉读盘 ⇒ 尺子红（回看是真在读盘，不是装饰）")
+    return True
+
+
+def c_exam_archive_keys_are_bounded():
+    """P21-2：控制台体检存档**顶层键白名单** ＋ `report` 必须是能回看的整份结果。
+
+    ★ 守的边界（创始人拍板后的新边界）：存的是**工具自己写下的字段原文**，
+      不是用户项目文件的内容。多一个顶层键 ⇒ 有可能把别的东西带进了存档。
+    ★ 旧版那把尺子只校验 host-audit 形态 ⇒ console-exam 形态**没人管**
+      （实测：245 字节、没有工具名，谁都没发现）。
+    """
+    doc = {"schema": "antinel.health/1",
+           "generated_at": "2026-10-19T04:00:00+08:00", "source": "console-exam",
+           "tools": 2, "verdicts": {}, "conns": 1,
+           "report": _exam_fixture_report()}
+    if _exam_archive_judge(doc) is not True:
+        return "合格存档被判红：%s" % _exam_archive_judge(doc)
+    _note("顶层 %d 键全在白名单内 ／ report 含 scan.tools 与 egress" % len(doc))
+    return True
+
+
+def n_exam_archive_keys_are_bounded():
+    """负控（两条）：①多一个顶层键 ⇒ 红；②去掉 `report` ⇒ 红。
+
+    ★ ②最重要：report 是回看的唯一来源。少了它，存档退回「只证明体检过」，
+      重启后又只剩页头那一行。
+    """
+    base = {"schema": "antinel.health/1",
+            "generated_at": "2026-10-19T04:00:00+08:00", "source": "console-exam",
+            "tools": 2, "verdicts": {}, "conns": 1,
+            "report": _exam_fixture_report()}
+    leak = dict(base, project_file_text="def secret(): pass")
+    if _exam_archive_judge(leak) is True:
+        return "尺子没分辨力：多带一个顶层键也判绿（白名单失效）"
+    no_rep = {k: v for k, v in base.items() if k != "report"}
+    why = _exam_archive_judge(no_rep)
+    if why is True:
+        return "尺子没分辨力：去掉 report 也判绿（回看的唯一来源可以被悄悄拿掉）"
+    if "report" not in why:
+        return "方向不对：红因不是「缺 report」（%s）—— 量具打偏" % why
+    _note("多键 / 缺 report ⇒ 两条各自红")
+    return True
+
+
+def _p21_pick_core(pick, names):
+    """尺子（正判据与负控**共用**，只有这一份）：点 `pick` ⇒ 渲染那一次。
+
+    ★ 三条断言缺一不可：
+      ①出现被点的那次（回看跟着选择走）；
+      ②不出现最近一次（否则「点别的」只是摆设）；
+      ③有「历次体检」那一行（没有入口 ⇒ 有 N 次也只看得到一次）。
+    """
+    html = SV._view_exam(token="T", pick=pick)
+    txt = PC.body(html)
+    if names[1] not in txt:
+        return "点了中间那一次，页面却没渲染它的工具（缺 %s）—— 只能看最近一次" % names[1]
+    if names[2] in txt:
+        return "点的是中间那一次，页面上却有最近一次的 %s —— 回看没跟着选择走" % names[2]
+    if "历次体检" not in txt:
+        return "没给「历次体检」那一行 —— 有三次却没法选，等于只能看最近一次"
+    return True
+
+
+def c_exam_every_report_is_replayable():
+    """P21-3：**每一次**体检都能回看，不是只最近一次（创始人 2026-10-19 追加）。
+
+    ★ 三份存档、三个不同的工具名、三个不同的时刻。点中间那一次 ⇒
+      必须渲染**那一次**。尺子＝`_p21_pick_core`（正判据与负控同一把）。
+    """
+    hub = G.new_hub()
+    names = ("ExamToolA", "ExamToolB", "ExamToolC")
+    paths = [_exam_write_console_exam(_exam_fixture_named(nm),
+                                      stamp="2026-10-19T0%d:00:00+08:00" % (i + 1))
+             for i, nm in enumerate(names)]
+    why = _p21_pick_core(os.path.basename(paths[1]), names)
+    if why is not True:
+        return why
+    _note("三份存档 ⇒ 点中间那份渲染 %s，不含 %s" % (names[1], names[2]))
+    return True
+
+
+def n_exam_every_report_is_replayable():
+    """负控：把挑选改成「永远返回最近一次」⇒ P21-3 必须红。
+
+    ★ 守的是「列表画出来了、点了却没用」—— 最容易假装完成的一种形状。
+    """
+    hub = G.new_hub()
+    names = ("ExamToolA", "ExamToolB", "ExamToolC")
+    paths = [_exam_write_console_exam(_exam_fixture_named(nm),
+                                      stamp="2026-10-19T0%d:00:00+08:00" % (i + 1))
+             for i, nm in enumerate(names)]
+    orig = SV._exam_pick
+    try:
+        SV._exam_pick = lambda hist, pick: (hist[0] if hist else None)
+        why = _p21_pick_core(os.path.basename(paths[1]), names)
+    finally:
+        SV._exam_pick = orig
+    if why is True:
+        return ("负控失效：挑选永远返回最近一次，P21-3 仍绿 —— "
+                "列表是装饰，点了不换内容")
+    if names[1] not in str(why) and names[2] not in str(why):
+        return "方向不对：红因不是「选错了那一次」（%s）—— 量具打偏" % str(why)[:60]
+    _note("挑选失效 ⇒ 尺子红（列表点了真的换内容）")
+    return True
+
+
 def c_host_attribution_threaded_to_inbox():
     """P18-1（T2.2）：链上的 `host`／`host_confidence` 穿透到收件箱 Item。"""
     return _p18_transmission(S)
@@ -4081,6 +4360,19 @@ CHECKS_0353 = [
     ("P20 按天账 JSON：同源 day_counts／无记录天给 null 不给 0",
      c_ledger_rows_json_shape,
      n_ledger_rows_gap_is_not_zero),
+    # ---- 二十一、体检可回看（0.53.0 T2 · 设计 §38）----
+    # ★ 创始人 2026-10-19「昨晚体检了一次，现在想看体检结果，却看不到」。
+    #   两条分开：回看**真的在读盘**（P21-1）与**存档装得下细节**（P21-2）——
+    #   只守后者会变成「存档写了、页面不看」，正是本轮撞的形状。
+    ("P21 服务重启后仍能回看上次体检（内存空 ⇒ 读存档）",
+     c_exam_report_replayable,
+     n_exam_report_replay_is_not_decorative),
+    ("P21 控制台体检存档：顶层键白名单 ＋ report 是回看唯一来源",
+     c_exam_archive_keys_are_bounded,
+     n_exam_archive_keys_are_bounded),
+    ("P21 每一次体检都能回看（不只最近一次）",
+     c_exam_every_report_is_replayable,
+     n_exam_every_report_is_replayable),
 ]
 
 
