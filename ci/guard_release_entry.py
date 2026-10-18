@@ -526,7 +526,15 @@ def s53():
         return ("SKIP：无暂存内容——非交接时刻，三件套测不出（诚实跳过；"
                 "交接时暂存区非空即自动转为全查）")
     # ① 暂存空白干净
-    chk = subprocess.run(["git", "-C", ROOT, "diff", "--cached", "--check"],
+    # ★★ 0.53.0：加 `-c core.whitespace=cr-at-eol` —— **不是放宽判据，是修口径**。
+    #   本仓 `.gitattributes` 是构建器拥有的 `* -text`（永不做 EOL 转换），
+    #   所以 CRLF 文件的 `\r` 是**内容**不是"行尾多余空白"。不加这个开关时，
+    #   任何 CRLF 文件（实测 `ci/delivery_gate.py`）只要有一行被改过，
+    #   那条新增行就会被逐行报成 trailing whitespace ⇒ **真缺陷被淹没在假红里**。
+    #   `cr-at-eol` 只把 `\r` 归入行终止符：`foo \r\n` 仍会报（真空格照样抓）；
+    #   `foo\r\n` 不再报。判据强度一点没降。
+    chk = subprocess.run(["git", "-C", ROOT, "-c", "core.whitespace=cr-at-eol",
+                          "diff", "--cached", "--check"],
                          capture_output=True, text=True, encoding="utf-8",
                          errors="replace", timeout=30)
     if not _staged_ws_clean(chk.stdout):

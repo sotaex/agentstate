@@ -6,19 +6,19 @@
 ★★ 起点（创始人 2026-10-14 夜间三条意见之一）：
   「以前默认的冒泡，会当时弹出来，还有声音。当出现需要人工介入马上处理的
     问题时，还是需要用到的，不过不能一闪而过，要有『确认』按钮，用户处理
-    过了手工关掉最好；界面需要保持跟值守台一致，要有图标，让用户感觉是
-    值守台的一部分。」
+    过了手工关掉最好；界面需要保持跟Antinel 监理一致，要有图标，让用户感觉是
+    Antinel 监理的一部分。」
 
 ★ 为什么不是旧气泡（`ShowBalloonTip`）也不是现在的 WinRT Toast：
   · 旧气泡 15 秒就没 ⇒ **一闪而过**（急事被漏掉的那个老毛病）；
   · WinRT Toast 落操作中心，但**放不下「确认」按钮**，界面也由 Windows 画，
-    与值守台两张皮。
+    与Antinel 监理两张皮。
   ⇒ 本模块用**Antinel 监理自己的 app 小窗**（Edge `--app`，与面板同一个浏览器
     profile、同一套 CSS、同一枚动效哨标）承载紧急提醒：置顶、不自动消失、
-    带「知道了（去处理）」确认钮，点确认才关。**界面就是值守台的一部分。**
+    带「知道了（去处理）」确认钮，点确认才关。**界面就是Antinel 监理的一部分。**
 
 ★ 三条纪律（与全仓同构）：
-  ① **闸**：值守台窗口正开着（用户自己正看着）⇒ 不弹（0.36.8 立的
+  ① **闸**：Antinel 监理窗口正开着（用户自己正看着）⇒ 不弹（0.36.8 立的
      `console_is_visible`，不变式 I4；宁可多弹不可漏报 ⇒ 判不出时照弹）。
   ② **节流只节门铃不节台账**：同类 `MIN_INTERVAL` 秒内不重复弹；
      用户确认过（`ack`）的同类 `ACK_QUIET_SEC` 秒内不再弹。
@@ -89,12 +89,12 @@ def _url(base, title, body, level, state, kind):
 
 
 def render(title, body, level, token, run_id="", kind="R0", console_open=False):
-    """紧急提醒页 HTML：**值守台同一套 CSS ＋ 同一枚动效哨标**（ founder 要求）。
+    """紧急提醒页 HTML：**Antinel 监理同一套 CSS ＋ 同一枚动效哨标**（ founder 要求）。
 
-    `console_open`：渲染这一刻值守台**已经开着**（`host_shield.console_is_visible()`
-      的当场读数）⇒ **不画**「打开值守台」按钮，改画一句"它开着"的状态。
+    `console_open`：渲染这一刻Antinel 监理**已经开着**（`host_shield.console_is_visible()`
+      的当场读数）⇒ **不画**「打开Antinel 监理」按钮，改画一句"它开着"的状态。
       ★ 为什么不画（创始人 2026-10-14：「点完了按钮显示'打开值守台'按钮好像
-        不对吧，值守台打开着呢」）：按钮上的字是一个**承诺**（"点了我给你打开"），
+        不对吧，Antinel 监理打开着呢」）：按钮上的字是一个**承诺**（"点了我给你打开"），
         而它已经开着 ⇒ 那个承诺不成立；且旧链路上点它会**关掉旧窗再开新窗**
         （见 `inbox_server` 的 `bubble_open` 分支），用户看到的是"窗闪了一下、
         内容从头来"。⇒ 如实说"开着"，并把它**切到前面**。
@@ -110,7 +110,7 @@ def render(title, body, level, token, run_id="", kind="R0", console_open=False):
     body_txt = str(body or "")[:BODY_MAX] + ("…" if len(str(body or "")) > BODY_MAX
                                               else "")
     css = SV.CSS + """
-/* ---- 0.49.0 紧急提醒窗（与值守台同源：同一份 CSS，只加紧急提醒自己的几行）---- */
+/* ---- 0.49.0 紧急提醒窗（与Antinel 监理同源：同一份 CSS，只加紧急提醒自己的几行）---- */
 /* ★★★ 0.50.1（创始人截图一「泡泡下沿没露出来」）：
    `height:100%` 把文档钉死在视口高度上 ⇒ 内容超出时只能被**裁掉**，
    而且页面**量不出**自己缺多少。改 `min-height` ⇒ 内容能撑开文档，
@@ -129,7 +129,7 @@ body.bubpage{margin:0;background:var(--bg)}
    截断可以，但必须看得出来"还有" —— 不许把事藏起来（W08 立意）。 */
 .bub-body{margin:5px 0 9px;font-size:12.5px;line-height:1.6;color:var(--fg);
   display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-/* ★ 0.50.1：三个元素都不许折行。旧版一窄就把「打开值守台」折成
+/* ★ 0.50.1：三个元素都不许折行。旧版一窄就把「打开Antinel 监理」折成
    「打开值 / 守台」（创始人截图二），按钮折行整行就垮了；
    放不下应该换行（flex-wrap），不该拆字。 */
 .bub-act{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
@@ -146,7 +146,7 @@ body.bubpage{margin:0;background:var(--bg)}
    —— 那既像坏了，又让人以为还能点。确认是**一次性动作**，做完就该
    **退场换状态**：按钮消失，留一行状态文字（并且状态色不用危险红）。 */
 .bub-done{font-size:12px;color:var(--brand);font-weight:600}
-/* ★ 0.50.3：值守台**已经开着**时，那个位置不再是按钮，而是一句状态 ——
+/* ★ 0.50.3：Antinel 监理**已经开着**时，那个位置不再是按钮，而是一句状态 ——
    按钮上写着"打开"，而它本来就开着 ⇒ 那是一个**不成立的承诺**
    （创始人 2026-10-14 截图二）。样式与 `.bub-done` 同族（状态色，不用危险红）。 */
 .bub-has{font-size:12px;color:var(--brand);font-weight:600;white-space:nowrap}
@@ -215,8 +215,8 @@ op.addEventListener("click", function(){
   op.disabled = true;
   post("bubble_open", "", function(j){
     /* ★★★ 0.50.3（创始人 2026-10-14：「点击打开值守台后，之前的关闭了，
-       打开了新的……点完了按钮显示'打开值守台'按钮好像不对吧，值守台打开着呢」）：
-       服务端先问「用户此刻真的看得见值守台吗」——
+       打开了新的……点完了按钮显示'打开Antinel 监理'按钮好像不对吧，Antinel 监理打开着呢」）：
+       服务端先问「用户此刻真的看得见Antinel 监理吗」——
          · 看得见 ⇒ 只把它**切到前面**（`opened === "existing"`），
            一个窗口都不关、不重建 ⇒ 按钮**退场**换一句状态
            （与"知道了"那条同一形状：一次性动作做完就退场，不留一个
@@ -246,7 +246,7 @@ op.addEventListener("click", function(){
 })();
 </script>
 """
-    # ★ 0.50.3：值守台开着 ⇒ 那个位置不画按钮，改一句状态（见 docstring）。
+    # ★ 0.50.3：Antinel 监理开着 ⇒ 那个位置不画按钮，改一句状态（见 docstring）。
     #   ★★ 0.50.4 命名变更注记（D4，创始人 2026-10-15 签发）：「值守台」在用户
     #      可见面退休 ⇒ 按钮「打开值守台」→「**打开 Antinel 监理**」、状态句
     #      同步换词；同一份 JS 模板里 CSS/JS **注释**中的旧名是当时的决策记录，

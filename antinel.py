@@ -36,7 +36,7 @@ if _HERE not in sys.path:
 
 from strings import detect_lang, get_string
 
-VERSION = "0.51.2"
+VERSION = "0.53.0"
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
@@ -72,7 +72,7 @@ ROUTES = [
     ("阻止Agent外传 / 开安全区", "antinel settings set net_mode block ＋ antinel zone add <目录>", "防范"),
     ("证据链有没有被动过", "antinel verify", "账本"),
     ("跨工具汇总（多个AI工具一起看）", "antinel digest --scope all", "审核"),
-    # ★ 0.35.0：值守台 —— 把 15 秒就消失的气泡，变成能翻、能点、能归档的台账。
+    # ★ 0.35.0：Antinel 监理 —— 把 15 秒就消失的气泡，变成能翻、能点、能归档的台账。
     #   分类＝审核（"已经发生了什么"），与 digest/ui 同栏。
     ("看 Antinel 监理 / 有什么要处理的", "antinel inbox list", "审核"),
     ("今天日报 / 值守情况", "antinel inbox report", "审核"),
@@ -699,6 +699,58 @@ def _agg_audit(audit_dir, days):
             "probe_last": probe_last}
 
 
+def canary_summary():
+    """诱饵文件状态（**唯一实现**：体检页 ③ 组与任何调用方都读它，不各写一份）。
+
+    数据源＝hub 登记的各项目 `.psl/audit/` 链（与 `_agg_audit` 同一个读取器
+    `session_dna._rows/_iter_day_files`，禁第二份链读法），聚合三件**已经
+    发生**的事：
+      · planted  —— 链上 `canary_planted` 按 marker 去重 ⇒ 放了几枚
+      · read     —— SEC-11 提醒次数（工具**读过**诱饵文件；规则故意只 alert
+                    不拦——拦下就观察不到外传链路，见 rules/default.json SEC-11 note）
+      · observed —— `canaries_observed` 次数＋涉及哪些 marker（标记出现在工具
+                    **输出里**＝读过**且**带出去过，唯一强证据）
+
+    ★ 三态不许混（页面文案的地基）：没登记项目 ≠ 没放诱饵 ≠ 放了没被读 ≠
+      被读过 ≠ 带出去过。调用方必须分别措辞，**不许**把"被读"渲染成"出事"。
+    ★ 读不出/没登记项目 ⇒ `projects: 0` 且三个计数给 0 —— 调用方据此说
+      「还没登记过项目」，**绝不**渲染成「一个诱饵文件都没有」（没查过与
+      查过没有是两件事，本仓铁律）。
+    """
+    sd = _session_dna()
+    import hub as _hub
+    reg = _hub.load_registry()
+    planted, read, observed, marks = {}, 0, 0, {}
+    projects = 0
+    for p in (reg.get("projects") or []):
+        root = str(p.get("root") or "")
+        if not root or not os.path.isdir(root):
+            continue
+        projects += 1
+        try:
+            for _day, rec in sd._rows(sd._iter_day_files(_audit_dir(root)),
+                                      float("inf"), [False]):
+                t = rec.get("type")
+                if t == "canary_planted":
+                    mk = str(rec.get("marker") or "")
+                    if mk and mk not in planted:
+                        planted[mk] = rec.get("ts") or ""
+                elif t == "pre_tool_use":
+                    if "SEC-11" in (rec.get("rules_hit") or []):
+                        read += 1
+                elif t == "post_tool_use":
+                    for c in (rec.get("canaries_observed") or []):
+                        observed += 1
+                        mk = c if isinstance(c, str) else (c.get("marker") or "")
+                        if mk and mk not in marks:
+                            marks[mk] = rec.get("ts") or ""
+        except Exception:                                     # noqa: BLE001
+            continue        # 单个项目的链读不出不影响别的项目（家务事不搞崩正经事）
+    return {"projects": projects,
+            "planted": sorted(planted), "planted_at": planted,
+            "read": read, "observed": observed, "observed_marks": marks}
+
+
 def cmd_canary(args):
     """0.31.0 (F3)：源码金丝雀。plant = 在 <root>/.canary/ 放一个含
     CANARY-<slug>-<8hex> 标记的蜜饵文件并上链 canary_planted；list = 列出
@@ -1281,6 +1333,35 @@ def _sibling_dir(sub):
     return os.path.join(_HERE, sub)
 
 
+def cmd_ledger_top(args):
+    """★ 0.53.0（T4.1）`antinel ledger [--days N] [--json]`：按天账的机器出口。
+
+    ★ 数据只走 `inbox_model.ledger_rows`（**唯一实现**，内部就是账本页用的
+      `day_counts`）—— 本函数只取数＋排版，不另算一份（同源纪律）。
+    ★★ 无记录的天在 JSON 里是 `null`、在文本里是「—（当天无记录）」，
+      **不给 0**：那台机器那天可能没开机，「没查」与「查过没事」必须可区分。
+    """
+    import json as _json
+    import inbox_model as _M
+    import inbox_store as _ST
+    days = getattr(args, "days", None) or 7
+    rows = _M.ledger_rows(_ST.load_items(), days=days)
+    if getattr(args, "json_out", False):
+        print(_json.dumps(rows, ensure_ascii=False, indent=1))
+        return 0
+    if not any(r.get("events") is not None for r in rows):
+        print("账本尚无可核对记录；这表示还没有可统计的事件，不是确认累计为零。")
+        return 0
+    for r in rows:
+        if r.get("events") is None:
+            print("%s  —（当天无记录）" % r["date"])
+        else:
+            print("%s  记录 %d 条 ｜ 已处理 %d ｜ 未处理 %d"
+                  % (r["date"], r["events"], r["acked"], r["pending"]))
+    print("只统计本机审计记录；不代表全天在线，也不是 AI 工具积分余额。")
+    return 0
+
+
 def cmd_brief(args):
     """★ 0.34.0（E1）**决策层一页纸**。
 
@@ -1467,8 +1548,18 @@ def cmd_report(args):
     root = find_project_root()
     if root is None:
         _die("未找到项目")
-    argv = [sys.executable, _sibling("report.py"),
-            "--root", root, "--session", args.session]
+    argv = [sys.executable, _sibling("report.py"), "--root", root]
+    # ★ 0.53.0 修复（2026-10-17）：`scripts/report.py` 里 `if args.session:
+    #   return _session_dna_main(...)` 排在 days 处理**之前** ⇒ 只要传了
+    #   --session，--days 就被静默吞掉。而本函数此前无条件传 --session latest
+    #   （default 值），于是「按天看明细」这个语义永远到不了底层。
+    #   ⇒ 用户没点名会话（仍是默认 latest）时不传 --session，让它走按天路径；
+    #     显式点名会话时两样都传（report.py 的既有优先序：会话优先）。
+    _days = getattr(args, "days", None)
+    if _days is None or args.session != "latest":
+        argv += ["--session", args.session]
+    if _days is not None:
+        argv += ["--days", str(_days)]
     if getattr(args, "write", False):
         argv.append("--write")
     if args.write:
@@ -1641,7 +1732,7 @@ def _sync_zone_state(norm, adding=True):
       ⇒ 现在：改了才写、幂等、并且**把授权记录写到哨兵自己那条链上**。
 
     ★ 不弹气泡（`notify=False`）：创始人 2026-10-06 明确说右下冒泡有问题；
-      安全区变更由值守台收件箱呈现，不再走弹窗。
+      安全区变更由Antinel 监理收件箱呈现，不再走弹窗。
     返回 True 表示哨兵状态**真的变了**。
     """
     try:
@@ -1792,11 +1883,15 @@ def _create_startup_lnk(lnk_path):
     if not (pyw and hsp and os.path.isfile(hsp)):
         return False
     args = '-I -S "%s" sentinel "%s"' % (hsp, root)
+    icon = _brand_icon()
     ps = ("$w=New-Object -ComObject WScript.Shell;"
           "$s=$w.CreateShortcut('%s');"
           "$s.TargetPath='%s';$s.Arguments='%s';$s.WorkingDirectory='%s';"
-          "$s.Description='Antinel sentinel (no window)';$s.Save()"
+          "$s.Description='Antinel 监理 登录自启';"
           % (lnk_path, pyw, args, root))
+    if icon:
+        ps += "$s.IconLocation='%s';" % icon
+    ps += "$s.Save()"
     try:
         r = subprocess.run([_hs._POWERSHELL, "-NoProfile", "-NonInteractive",
                             "-ExecutionPolicy", "Bypass", "-Command", ps],
@@ -1821,6 +1916,94 @@ def _retire_old_startup_cmd():
     away = old + ".away-" + datetime.now().strftime("%Y%m%d%H%M%S")
     try:
         os.replace(old, away)
+        return away
+    except OSError:
+        return None
+
+
+# ------------------------------------------------- 0.52.0：桌面入口 ----
+# ★ 为什么要有桌面入口（创始人 2026-10-17：「用户下载安装之后，是否也默认在
+#   用户桌面放上呢，用户体验一定要照顾周全」）：pip 装完只有 `antinel` 命令，
+#   普通用户找不到入口 ⇒ 装了却用不上。enable 一键布防时**默认放**桌面
+#   （`--no-desktop` 可关），与自启同形态（pythonw 无窗口＋品牌图标）。
+# ★ 对称卸载（UX 周全的另一半）：disable 撤防时一并**归档**桌面入口（改名
+#   不删）—— pip uninstall 删不到包外文件，不处理的话卸载后桌面留个点开
+#   报错的死图标，那是"卸载不干净"差评最常见的来源。完整卸载＝disable ＋
+#   pip uninstall（文档里写清）。
+
+def _desktop_dir():
+    """桌面目录（Known Folder，尊重 OneDrive 重定向）；取不到退回 `~/Desktop`。"""
+    try:
+        import ctypes
+        buf = ctypes.create_unicode_buffer(260)
+        # CSIDL_DESKTOP = 0（每用户桌面，不含公用）；S_OK = 0
+        if ctypes.windll.shell32.SHGetFolderPathW(None, 0, None, 0, buf) == 0:
+            return buf.value
+    except Exception:
+        pass
+    return os.path.join(os.path.expanduser("~"), "Desktop")
+
+
+def _desktop_entry_path():
+    """桌面入口路径：`Antinel 监理.lnk`（与 Toast AUMID 快捷方式同名不同目录）。"""
+    return os.path.join(_desktop_dir(), "Antinel 监理.lnk")
+
+
+def _brand_icon():
+    """品牌图标绝对路径（**单一真源** `inbox_window.brand_icon_path`）；缺失 None。"""
+    try:
+        import inbox_window as _iw
+        return _iw.brand_icon_path()
+    except Exception:
+        return None
+
+
+def _create_desktop_lnk(lnk_path=None):
+    """建桌面入口 `.lnk`（pythonw 无窗口＋品牌图标）。成功返回路径，失败返回 None。
+
+    ★ 目标：`pythonw.exe -I -S inbox_cli.py window`（与启动文件夹自启同一手法：
+      PowerShell＋WScript.Shell COM，Windows 自带，零依赖）。`-I -S` 与哨兵
+      一致（隔离 PYTHONPATH 等环境投毒；本机实测不清 PYTHONPATH 会站点初始化卡死）。
+    ★ 开窗是**短命进程**（窗口归长命服务所有，关掉入口不影响服务）；
+      pythonw 下 print 落 `~/.antinel/logs/console.log`（`_no_console_streams`），
+      失败不静默。
+    ★ 失败不假装：任何一步不成立就返回 None，由调用方如实告知＋给补建命令。
+    """
+    import host_shield as _hs                 # 与文件内其他处一致：延迟导入
+    pyw = _pythonw_exe()
+    icli = _sibling("inbox_cli.py")
+    root = os.path.dirname(_sibling("antinel.py"))
+    if not (pyw and icli and os.path.isfile(icli)):
+        return None
+    path = lnk_path or _desktop_entry_path()
+    args = '-I -S "%s" window' % icli
+    icon = _brand_icon()
+    ps = ("$w=New-Object -ComObject WScript.Shell;"
+          "$s=$w.CreateShortcut('%s');"
+          "$s.TargetPath='%s';$s.Arguments='%s';$s.WorkingDirectory='%s';"
+          "$s.Description='Antinel 监理';"
+          % (path, pyw, args, root))
+    if icon:
+        ps += "$s.IconLocation='%s';" % icon
+    ps += "$s.Save()"
+    try:
+        r = subprocess.run([_hs._POWERSHELL, "-NoProfile", "-NonInteractive",
+                            "-ExecutionPolicy", "Bypass", "-Command", ps],
+                           capture_output=True, timeout=30,
+                           creationflags=_hs._CREATE_NO_WINDOW)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return path if (r.returncode == 0 and os.path.isfile(path)) else None
+
+
+def _archive_desktop_entry(lnk_path=None):
+    """桌面入口**改名归档**（零删除）。返回归档路径；不在则 None（不谎报归档）。"""
+    path = lnk_path or _desktop_entry_path()
+    if not os.path.isfile(path):
+        return None
+    away = path + ".away-" + datetime.now().strftime("%Y%m%d%H%M%S")
+    try:
+        os.replace(path, away)
         return away
     except OSError:
         return None
@@ -2012,6 +2195,13 @@ def cmd_host_shield(args):
             ok, pid, mode = True, st.get("sentinel_pid"), "already-running"
         else:
             ok, pid, mode = hs.spawn_sentinel(os.path.dirname(_sibling("antinel.py")))
+        # ★ 0.52.0：桌面入口 —— 默认放（创始人 2026-10-17「用户下载安装之后，
+        #   是否也默认在用户桌面放上呢，用户体验一定要照顾周全」）。与自启同形态
+        #   （pythonw 无窗口＋品牌图标）；`--no-desktop` 可关；建不成就地如实说，
+        #   不假装成功（补建：antinel host-shield desktop）。
+        _desk = None
+        if not getattr(args, "no_desktop", False):
+            _desk = _create_desktop_lnk()
         st = hs.load_state()
         st["autostart"] = autostart
         hs.save_state(st)
@@ -2025,12 +2215,18 @@ def cmd_host_shield(args):
         if autostart == "schtasks":
             print("  自启：计划任务 AntinelHostShield（登录触发）")
         elif autostart == "startup-lnk":
-            print("  自启：启动文件夹快捷方式（**无窗口**，计划任务被本机策略拦截已回退）")
+            print("  自启：启动文件夹快捷方式（无窗口，计划任务被本机策略拦截已回退）")
         elif autostart == "startup-folder":
             print("  自启：启动文件夹（计划任务命令被这台电脑上的策略拦截，已回退）")
         else:
             print("  ⚠ 自启未能注册（schtasks 与启动文件夹都失败）——"
                   "兜底：每次 Agent 活动时钩子会自动复活监理（paramedic）")
+        if getattr(args, "no_desktop", False):
+            print("  桌面入口：未创建（--no-desktop；补建：antinel host-shield desktop）")
+        elif _desk:
+            print("  桌面入口：%s（双击开监理窗口，无黑窗）" % _desk)
+        else:
+            print("  ⚠ 桌面入口未能创建——补建：antinel host-shield desktop")
         if ok:
             print("  监理：已在岗（pid %s，%s）" % (pid, mode))
         else:
@@ -2090,6 +2286,23 @@ def cmd_host_shield(args):
                 _auto_removed = False
                 print("  ⚠ 启动文件夹自启项未能删除（%s）——下次登录可能仍会拉起监理"
                       % type(_e).__name__)
+        # ★ 0.52.0：自启 `.lnk` 也要撤（**0.51.2 漏洞**：disable 只删 `.cmd`。
+        #   0.51.2 起自启首选形态就是 `.lnk` ⇒ 撤防后启动文件夹里还躺着它 ⇒
+        #   下次登录仍拉起哨兵，而 status 读 state 说"关着" —— 机器状态与账实
+        #   不一致，与 D-18 修的是同一类病换了张脸）。零删除：改名归档。
+        try:
+            _lnk = _startup_folder_lnk()
+            if os.path.exists(_lnk):
+                os.replace(_lnk, _lnk + ".away-" + datetime.now().strftime("%Y%m%d%H%M%S"))
+        except OSError as _e:
+            if os.path.exists(_startup_folder_lnk()):
+                _auto_removed = False
+                print("  ⚠ 启动文件夹无窗口自启项未能撤除（%s）——下次登录可能仍会拉起监理"
+                      % type(_e).__name__)
+        # ★ 0.52.0：桌面入口**对称归档**（改名不删）—— pip uninstall 删不到包外
+        #   文件，不处理的话卸载后桌面留个点开报错的死图标（"卸载不干净"差评最
+        #   常见的来源）。完整卸载＝disable ＋ pip uninstall（文档里写清）。
+        _desk_away = _archive_desktop_entry()
         if _alive_pid:
             try:
                 subprocess.run([hs._TASKKILL, "/F", "/PID", str(_alive_pid)],
@@ -2122,10 +2335,22 @@ def cmd_host_shield(args):
         #   所以合法撤防必须在这里显式放行，否则 `disable` 会静默失效。
         hs.save_state(st, allow_disarm=True)
         print("✓ 护盾已撤防，ACL 已还原")
+        if _desk_away:
+            print("  桌面入口已归档：%s（要恢复改回来即可）" % _desk_away)
         if not _auto_removed:
-            print("  ⚠ 但**自启项未能删除**——下次登录可能仍会拉起监理。请手工检查："
+            print("  ⚠ 但自启项未能删除——下次登录可能仍会拉起监理。请手工检查："
                   "计划任务 AntinelHostShield ／ %s" % _startup_folder_cmd())
         return
+    if args.sub == "desktop":
+        # ★ 0.52.0：桌面入口**补建/刷新**（当时 enable 带了 --no-desktop，后来
+        #   改主意；或品牌图标/入口形态升级后要刷新）。幂等：重复建＝覆盖。
+        _desk = _create_desktop_lnk()
+        if _desk:
+            print("✓ 桌面入口已就位：%s" % _desk)
+            print("  双击打开 Antinel 监理窗口（pythonw 启动，无黑窗）")
+            return
+        _die("桌面入口未能创建——请确认桌面目录可写；手工建法见设计文档"
+             "《Antinel·文案派生与无窗口自启 v1.0（2026-10-17）》")
     if args.sub == "decide":
         ws = os.path.abspath(args.workspace).lower()
         dec = args.decision
@@ -2176,6 +2401,21 @@ def cmd_host_shield(args):
         return
 
 
+def _save_health_report(doc):
+    """把这次体检的结论存到本机（`~/.antinel/health/audit-<时间>.json`）。
+
+    ★ 为什么落盘（方案 v1.7 §28.4「桥一」）：网站上的体检**没有服务端** ——
+      它给的是提示词，让用户在自己机器上跑**同一个包**。所以「装前体检过」这件事
+      只能由本机留下证据；不落盘就必然在装完监理之后再催一次（创始人明确不接受）。
+    ★ 边界：只写自家目录、只增不改、只含**路径与计数**、留最近 12 份。
+      落盘实现放在 `host_shield`（那里是中枢目录的唯一真源）。
+    ★ 目录不可写时**抛异常**，由调用方如实说「没存下来」——
+      绝不把「没存下来」渲染成「存下来了」。
+    """
+    import host_shield as _hs
+    return _hs.save_health_report(doc)
+
+
 def cmd_host_audit(args):
     import host_shield as hs
     root = os.path.dirname(_sibling("antinel.py"))
@@ -2192,12 +2432,21 @@ def cmd_host_audit(args):
     armed = [r for r in regs if r.get("watch")]
     if not armed:
         _die("登记表里没有任何【已布门闸】的宿主（watch 全为空）")
+    # ★ 0.53.0（P6 第一步）：这次体检的结论**同时**收成一份机读档案 ——
+    #   屏幕上的字是给人看的，存档是给「装完监理之后还认不认这次体检」用的。
+    #   只收路径与计数，不收任何文件内容（键白名单见 0353 H9）。
+    _rep = {"schema": "antinel.health/1",
+            "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "source": "host-audit",
+            "hosts": [], "workspaces": []}
     for reg in armed:
         print("== 宿主:", reg.get("host"))
         for w in reg.get("watch", []):
             base = hs.expand(w.get("path", ""))
             print("  路径:", base, "存在" if os.path.isdir(base) else "不存在")
             if not os.path.isdir(base):
+                _rep["hosts"].append({"host": reg.get("host"), "root": base,
+                                      "present": False, "bytes": 0, "workspaces": 0})
                 continue
             # 0.29.0：此处原有一行死代码（`sum(...) if False else None`），从不被使用，
             # 且会在每次调用时构造生成器 —— 已删。
@@ -2209,6 +2458,7 @@ def cmd_host_audit(args):
                     except OSError:
                         pass
             print("  体量: %.1f MB" % (size / 1048576))
+            _ws_n = 0
             for ws in sorted(os.listdir(base)):
                 wd = os.path.join(base, ws)
                 if not os.path.isdir(wd):
@@ -2257,6 +2507,18 @@ def cmd_host_audit(args):
                 print(line)
                 if sens_n:
                     print("    ⚠ 敏感扩展命中——核对凭据轮换")
+                # ★ 存档用：与屏幕上这一行**同一批数**（`entries` / `git_n` / `sens_n` /
+                #   `pending_n` / `accepted`），不许另算一遍 —— 同一次体检两处数分叉
+                #   正是本仓反复吃亏的形状（0353 H9 会当场判红）。
+                _ws_n += 1
+                _rep["workspaces"].append({
+                    "host": reg.get("host"), "checkpoint": ws,
+                    "path": ws_path or "", "entries": entries,
+                    "git_entries": git_n, "sensitive_entries": sens_n,
+                    "pending": pending_n, "accepted": bool(accepted)})
+            _rep["hosts"].append({"host": reg.get("host"), "root": base,
+                                  "present": True, "bytes": size,
+                                  "workspaces": _ws_n})
     print("（覆盖声明：登记表共 %d 个宿主，其中【已布门闸】%d 个（即上表）。）"
           % (len(regs), len(armed)))
     print("  ⚠ 未被列出的工具 ≠ 安全：'本次取证未发现外传证据' 只说明【没查出来】，"
@@ -2279,6 +2541,16 @@ def cmd_host_audit(args):
     print("         python -m antinel canary plant     # 放一个标记文件，")
     print("         然后正常使用 AI 工具；标记出现在输出里就会被记下")
     print("    （两者都只读你的机器，不联网、不上传。）")
+    # ★ 0.53.0（P6 第一步）：存档 —— 「网站体检过 ⇒ 装完监理不再催」的唯一本机证据。
+    #   只多这一行（人读文本一字不动，方案 §28.7 写死）。
+    try:
+        _hp = _save_health_report(_rep)
+        print("这次体检已存档：%s" % _hp)
+    except Exception:                                        # noqa: BLE001
+        # 存不下来要**如实说**（不能沉默），但也不许把异常栈倒给用户。
+        # 唯一一处这么宽的捕获，理由：它是本次体检的收尾动作，
+        # 失败不该让已经打完的体检结论作废。
+        print("这次体检没存下来（目录不可写）")
 
 
 # ------------------------------------------------------------ host-scan ----
@@ -3163,7 +3435,7 @@ def cmd_host_scan(args):
     _verdict = {k.lower(): v for k, v in (_st.get("workspaces") or {}).items()}
     _win = {k.lower(): v for k, v in (_st.get("windows") or {}).items()}
 
-    print("== Antinel 你电脑上的 AI 工具落盘点扫描（只读）")
+    print("== Antinel 体检：扫你电脑上的 AI 工具（只读）")
     print("扫描根：~ ／ %APPDATA% ／ %LOCALAPPDATA%")
     print("生成时刻：%s" % datetime.now().astimezone().isoformat(timespec="seconds"))
     print("判据：**工具自己写下的外传自认**（不看目录名——目录名启发式误报率约 85%）")
@@ -3218,7 +3490,7 @@ def cmd_host_scan(args):
           % (len(rows), cnt["T1"], cnt["T2"], cnt["T3"], cnt["T4"]))
     print()
     if cnt["T1"] + cnt["T2"]:
-        print("★ 你电脑上有实证的落点 %d 个（T1 %d ＋ T2 %d）。本次为**只读**扫描，未登记、不会拦。"
+        print("★ 你电脑上有实证的地方 %d 个（T1 %d ＋ T2 %d）。本次为**只读**扫描，未登记、不会拦。"
               % (cnt["T1"] + cnt["T2"], cnt["T1"], cnt["T2"]))
         print("  要交给门闸（未裁决＝拦）：antinel host-scan --arm")
         print("  逐个确认放行：antinel host-shield decide \"<路径>\" allow_always")
@@ -3247,18 +3519,18 @@ def cmd_host_scan(args):
     _reg_scanned = sum(1 for _h, _raw, _k in _reg_present_keys
                        if _k in _scanned_keys)
     _reg_unscanned = _reg_present - _reg_scanned
-    print("  登记表 %d 张 ／ 登记落点 %d 个" % (len(regs), _reg_total))
+    print("  登记表 %d 张 ／ 登记的地方 %d 个" % (len(regs), _reg_total))
     # ★★ 这条不是"探测器"，是**回归守卫**：登记过的一定扫 ⇒ 修好后恒为 0。
     #   它存在的意义是：谁把登记表这条路径又拆了（roots 变回死数据、落点被过滤掉），
     #   这里立刻不再是无声的 0 —— 下面第一条就是让它**有对象可查**。
     if regs and _reg_total == 0:
-        print("  ★★ 告警：登记表有 %d 张，却读出 0 个落点 —— "
+        print("  ★★ 告警：登记表有 %d 张，却读出 0 个地方 —— "
               "`roots` 又变回【死数据】了（P0-3 复发）。" % len(regs))
         print("     查 `host_shield.load_watch_registry()` 是否仍在装载 `roots`。")
     print("  你电脑上有 %d ／ 已扫 %d ／ ★ 未扫 %d"
           % (_reg_present, _reg_scanned, _reg_unscanned))
     if _reg_unscanned:
-        print("  ★★ 未扫的登记落点（这一项我们**没查**，请当空白读）：")
+        print("  ★★ 没扫到的登记地方（这一项我们**没查**，请当空白读）：")
         for _h, _raw, _k in _reg_present_keys:
             if _k not in _scanned_keys:
                 print("      ⚫ %-14s %s" % (_h, _raw))
@@ -3267,12 +3539,12 @@ def cmd_host_scan(args):
         for _h, _raw in _reg_added:
             print("      · %-14s %s" % (_h, _raw))
     if _reg_absent:
-        print("  登记了但你电脑上没有的落点 %d 个（不是盲区，是没装）：" % len(_reg_absent))
+        print("  登记了但你电脑上没有的地方 %d 个（不是盲区，是没装）：" % len(_reg_absent))
         for _h, _raw in _reg_absent:
             print("      · %-14s %s" % (_h, _raw))
     print("  ⚠ 上面只覆盖【已登记的 %d 个工具】＋【目录名命中 %d 个厂商词的目录】；"
           % (len(regs), len(_SCAN_VENDOR_KW)))
-    print("    两者之外的落点，本命令**没有看** —— 不是「看了没发现」。")
+    print("    这两者之外的地方，本命令**没有看** —— 不是「看了没发现」。")
     # ★ 0.33.1（2026-09-28）：**布防数**。此前 `host-audit` 会打「登记表共 24 个宿主，
     #   其中【已布门闸】1 个」，而本命令没有 ⇒ 用户只看到「这条说 24、那条说 1」，
     #   拼不出全貌，于是"登记了 24 个"很容易被读成"24 个都被盯住"。
@@ -3379,7 +3651,7 @@ def cmd_host_scan(args):
     print("  · 门闸拦的是【文件落盘】这一步；工具若直接内存发包（不经落盘），只能记账、拦不住。")
     print("  · 观察项**不读文件内容**：它告诉你「这里有什么、有多大」，"
           "不替你下「这是外传」的结论。")
-    print("  · 登记落点 %d 个：已扫 %d ／ ★ 未扫 %d（见上方「登记表覆盖对账」）。"
+    print("  · 登记的地方 %d 个：已扫 %d ／ ★ 未扫 %d（见上方「登记表覆盖对账」）。"
           % (_reg_total, _reg_scanned, _reg_unscanned))
     # ★ 0.33.1（2026-09-28）：**布防数**放在读者真正会读到的地方（末尾这一块）。
     #   中部「登记表覆盖对账」段里另有一行同源数字，两处**故意重复** ——
@@ -3416,7 +3688,15 @@ def cmd_host_scan(args):
                                        "truncated": t} for (q, l, n, b, t) in crash_res],
                 "residue_dirs": [{"path": q, "label": l, "entries": n, "bytes": b,
                                   "truncated": t} for (q, l, n, b, t) in other_res],
-                "index_dirs": [{"path": q, "entries": n, "bytes": b} for (q, n, b, _t) in index],
+                # ★ 0.53.0 修复（2026-10-17）：`_index_obs()` 在 `_INDEX_SUBDIRS`
+                #   为空时**故意**返回 None（区分「没配置、没查」与「查过、0 处」），
+                #   人读分支判了 None，JSON 分支却直接拿去迭代 ⇒ 本命令 `--json`
+                #   自 0.33.1 起一跑就崩（TypeError），`antinel ui` 体检页因此
+                #   永远取不到数。这里必须渲染成 null，**绝不能写 `or []`** ——
+                #   那正好把两种状态压成一种，是该观察项明令禁止的病。
+                "index_dirs": ([{"path": q, "entries": n, "bytes": b}
+                                for (q, n, b, _t) in index]
+                               if index is not None else None),
                 "ime_dirs": [{"path": q, "entries": n, "bytes": b} for (q, n, b, _t) in ime],
                 "im_stores": [{"path": q, "entries": n, "bytes": b} for (q, n, b, _t) in im],
                 "sync_dirs": [{"path": q, "entries": n, "bytes": b} for (q, n, b, _t) in sync],
@@ -3670,9 +3950,20 @@ def main(argv=None):
     p = sub.add_parser("verify")
     p = sub.add_parser("report"); p.add_argument("--session", default="latest")
     p.add_argument("--write", action="store_true")
+    # ★ 0.53.0 修复（2026-10-17）：`scripts/report.py:777` 早就支持 --days
+    #   （「only the last N calendar days」），本层却从未注册也从未透传 ⇒ 产品在
+    #   四处输出里提示用户敲 `antinel report --days N`，敲下去必得 argparse 报错。
+    #   与 host-scan --arm 同一族：实现有、出口没接上。
+    p.add_argument("--days", type=int)
 
     # ★ 0.34.0（E1）：决策层一页纸。默认不带参数就能跑（days 默认 7）。
     p = sub.add_parser("brief"); p.add_argument("--days", type=int, default=7)
+    # ★ 0.53.0（T4.1）：按天账的机器出口。`--json` 给程序吃（`null`＝当天无记录）。
+    p = sub.add_parser("ledger", help="按天账（拦截/注意/防护缺口/已处理）；--json 给程序吃")
+    p.add_argument("--days", type=int, default=7,
+                   help="往回数几个日历天（含今天，默认 7）")
+    p.add_argument("--json", dest="json_out", action="store_true",
+                   help="输出 JSON（无记录的天是 null，不是 0）")
 
     p = sub.add_parser("hub"); ps = p.add_subparsers(dest="sub", required=True)
     q = ps.add_parser("register"); q.add_argument("path"); q.add_argument("--host")
@@ -3697,7 +3988,12 @@ def main(argv=None):
     p.add_argument("--json", action="store_true")
     p = sub.add_parser("host-shield")
     ps = p.add_subparsers(dest="sub", required=True)
-    ps.add_parser("status"); ps.add_parser("enable"); ps.add_parser("disable")
+    ps.add_parser("status"); ps.add_parser("disable")
+    q = ps.add_parser("enable")
+    q.add_argument("--no-desktop", action="store_true",
+                   help="不在桌面放 Antinel 监理入口（默认放）")
+    # ★ 0.52.0：桌面入口补建/刷新（enable 默认就建；这个是当时关了要补的出口）。
+    ps.add_parser("desktop")
     q = ps.add_parser("decide"); q.add_argument("workspace"); q.add_argument("decision")
     ps.add_parser("list")
     # 0.29.0 (H-4)：**已上锁目录必须有出口**。此前用户跑 status 时因 workspaces == {}
@@ -3706,7 +4002,7 @@ def main(argv=None):
     q = ps.add_parser("unlock"); q.add_argument("path")
     # 0.29.0 (H-2)：待裁决队列的呈现端（此前只有记录端，报告写了没人看）。
     ps.add_parser("queue")
-    # ★ 0.35.0：值守台 —— 自包含 CLI（收件箱 / 日报 / 托盘 / 守护进程 / 心跳配置）。
+    # ★ 0.35.0：Antinel 监理 —— 自包含 CLI（收件箱 / 日报 / 托盘 / 守护进程 / 心跳配置）。
     #   `REMAINDER` 把 `antinel inbox` 之后的全部参数**原样**交给 inbox_cli 自己的
     #   argparse；这样将来给 inbox 加子命令**不必再动 antinel.py**
     #   —— 集成面永远只有这 6 行，`inbox_cli` 可整体摘除而不影响别处。
@@ -3726,21 +4022,27 @@ def main(argv=None):
     p.add_argument("--json", action="store_true")
     p.add_argument("--deep", action="store_true",
                    help="真正查完：文件数放到 50 万、不截断（默认 3000）")
-    p = sub.add_parser("egress")
-    p.add_argument("--all", action="store_true")
-    p.add_argument("--no-resolve", action="store_true")
-    p.add_argument("--json", action="store_true")
-    p.add_argument("--days", type=int)
     # 0.29.0 (F-6)：**默认只读，--arm 才登记并进监管**。
     # ★ 为什么必须分开：本命令的标题就写着"（只读）"。若默认既写 findings 又让门闸
     #   对未裁决落点上锁，那"只读"就是假的 —— 扫一遍 = 开始拦，用户还没看报告。
     #   副作用用**显式动作**控制，而不是靠命令不跑。
     #   默认：只看不动（可放心跑）。--arm：登记 findings、门闸开始监管。
+    # ★ 0.53.0 修复（2026-10-17）：这两行**原先注册在 egress 上**，而真正消费
+    #   args.arm / args.survey 的代码一直在本命令里（见上面 save_findings /
+    #   save_survey 两段），cmd_egress 从头到尾没读过它们 ⇒ 两个后果：
+    #     ① 本命令自己输出里提示的 `antinel host-scan --arm` 敲不了（argparse 报错）；
+    #     ② `antinel egress --arm` 是个**静默空操作** —— 用户以为布防了，
+    #        门闸其实什么都没收到。静默无效比报错更危险，所以参数归位而不是补文案。
     p.add_argument("--arm", action="store_true",
                    help="登记发现并交门闸监管（未裁决＝拦）。默认只读不写")
     # 0.29.0 (F-7)：**写本机取证档案**。--arm 隐含 --survey（布防必先留档）。
     p.add_argument("--survey", action="store_true",
                    help="把你电脑上的取证状态写入档案（含'扫过但没找到证据'的工具），不改随包表、不进监管")
+    p = sub.add_parser("egress")
+    p.add_argument("--all", action="store_true")
+    p.add_argument("--no-resolve", action="store_true")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--days", type=int)
     p = sub.add_parser("zone"); ps = p.add_subparsers(dest="sub", required=True)
     q = ps.add_parser("add"); q.add_argument("dir")
     q = ps.add_parser("remove"); q.add_argument("dir")
@@ -3896,13 +4198,15 @@ def main(argv=None):
         cmd_report(args)
     elif args.cmd == "brief":                     # ★ 0.34.0 (E1)
         sys.exit(cmd_brief(args) or 0)
+    elif args.cmd == "ledger":                    # ★ 0.53.0 (T4.1)
+        return cmd_ledger_top(args)
     elif args.cmd == "hub":
         cmd_hub(args)
     elif args.cmd == "routes":
         cmd_routes(args)
     elif args.cmd == "host-shield":
         cmd_host_shield(args)
-    elif args.cmd == "inbox":                     # ★ 0.35.0：值守台（自包含 CLI）
+    elif args.cmd == "inbox":                     # ★ 0.35.0：Antinel 监理（自包含 CLI）
         import inbox_cli
         return inbox_cli.main(args.rest)
     elif args.cmd == "host-audit":

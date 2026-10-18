@@ -1,5 +1,6 @@
 {
  "host": "kimi",
+ "name": "Kimi",
  "vendor": "Moonshot",
  "roots": [
   "~/.kimi-work",

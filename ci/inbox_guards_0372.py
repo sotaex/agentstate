@@ -777,7 +777,7 @@ def n_s09():
 
 
 # ══════════════ S19 哨兵自注册心跳链；读不到心跳 ≠ 失守（0.48.5 A1） ══════════════
-#: 盯的已修缺陷：值守台遗留问题清单 2026-10-13 **A1 假失守** ——
+#: 盯的已修缺陷：Antinel 监理遗留问题清单 2026-10-13 **A1 假失守** ——
 #:   心跳读取按**读者**包根猜哨兵写哪条链（`_shield_audit_dir(_pkg_root())`），
 #:   哨兵进程与读者不在同一个包根时读到**另一条链**（中枢 rollup 的老记录）
 #:   ⇒ `guard_posture` 判"心跳断档" ⇒ 渲染成红、还给「马上修复」按钮
@@ -1013,10 +1013,13 @@ def s20():
     return "真身分支通过：说人话 + 返回 0（%s）" % out.strip()[:40]
 
 
-@check("N-S20 负控：把 import os 拿掉（C6 原貌）⇒ S20 必须抓到")
+@check("N-S20 负控：这条分支看不到 os（C6 原貌）⇒ S20 必须抓到")
 def n_s20():
-    """反向对照（维二）：**撤销修复即变红** —— 在**内存里**造一个拿掉
-    `import os` 的 `inbox_cli`（不写盘，本文件纪律），同一条分支必须崩。
+    """反向对照（维二）：**撤销修复即变红** —— 在**内存里**造一个让这条分支
+    **看不到 `os`** 的 `inbox_cli`（不写盘，本文件纪律），同一条分支必须崩。
+    ★ 变异形态 2026-10-18 已改（理由写在函数体里）：不再是「删掉 `import os`」
+      —— 那是**导入即崩**，与这条分支无关，分辨力为零；
+      改为**原样导入后在模块全局里摘掉 `os`**，测到的才是这条分支本身。
     ★ 另验还原链：真身在变异后必须仍然通过（补丁没把尺子本身弄坏）。
     """
     import io
@@ -1024,17 +1027,29 @@ def n_s20():
     p = os.path.join(ROOT, "inbox_cli.py")
     with io.open(p, encoding="utf-8") as f:
         src = f.read()
-    anchor = "import os\nimport sys"
-    if anchor not in src:
-        return _raise("变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过")
+    # ★ 0.53.0 收尾（2026-10-18 实测）：**不再**从源码里删掉 `import os`。
+    #   那是"撤销修复"的字面形态，但今天它已经**做不出来**了 ——
+    #   `inbox_cli.py:33` 是**模块级** `sys.path.insert(0, os.path.dirname(...))`
+    #   （AST 实测：全模块唯一的模块级 `os` 使用）⇒ 删掉 `import os` 后，
+    #   模块在 **exec（导入）阶段第 33 行就崩**，而 `exec` 当时写在 `try` 之外
+    #   ⇒ NameError 直接冒泡出本函数，被 main 打成 💥（这就是那条红的样子）。
+    #   ★ 更要紧的一层：那时的崩与 `cmd_daemon` 那条分支**毫无关系** ——
+    #     任何模块删掉 os 都会在第 33 行死 ⇒ **负控分辨力为零**，
+    #     它测的从来不是它声称测的东西（死判据族的新变体：活着，但测错了对象）。
+    #   ⇒ 变异形态改为**只在这条分支的作用域里屏蔽 `os`**：原样导入（模块级那次
+    #     os 已用完），再把模块全局里的 `os` 拿掉 ⇒ 分支里的 `os.getpid()`
+    #     （309 行）全局查找不到 ⇒ NameError。这样测到的才是
+    #     「这条分支是否真的依赖 os」——若哪天它改用别的写法，变异后就不崩，
+    #     本负控会如实报「负控失效」，而不是像旧版那样恒红或恒绿。
     mut = types.ModuleType("inbox_cli_ns20")
     mut.__file__ = p
     sys.modules["inbox_cli_ns20"] = mut
-    exec(compile(src.replace(anchor, "import sys", 1), p, "exec"),   # noqa: S102
-         mut.__dict__)
     try:
+        exec(compile(src, p, "exec"), mut.__dict__)              # noqa: S102
+        mut.__dict__.pop("os", None)                             # ← MUTANT
         rc, out, err = _s20_run(mut)
     finally:
+        # ★ 旧版 `exec` 在 try 外 ⇒ exec 一崩，sys.modules 里的坏品种就滞留。
         sys.modules.pop("inbox_cli_ns20", None)
     if not err:
         return _raise("负控失效：拿掉 import os 后该分支仍不抛 ⇒ S20 是装饰")

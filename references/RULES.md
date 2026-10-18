@@ -1,5 +1,5 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
-# Antinel detection rules (generated from rules/default.json v0.51.2 - do not edit by hand)
+# Antinel detection rules (generated from rules/default.json v0.53.0 - do not edit by hand)
 
 Category order = match priority: secrets > destructive > network > injection > context > metadata.
 Severity to action: critical = block, warning = alert (logged, allowed). All hits are collected; highest severity decides.
@@ -563,8 +563,8 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - category: canary | severity: warning | dynamic (hook only) | tools: Read, Bash
 - purpose: unknown (generator table missing an entry)
 - description: Agent read a canary file -- if its marker (CANARY-*) appears in any external channel, that proves exfiltration of project content
-- 说明: Agent 读取了金丝雀文件
-- 处理建议: 记录并观察：金丝雀被读取本身不是泄露，标记出现在外部通道才是证据（report 的 canaries 统计）
+- 说明: Agent 读取了诱饵文件
+- 处理建议: 记录并观察：诱饵文件被读取本身不是泄露，标记出现在外部通道才是证据（report 的 canaries 统计）
 - file_patterns:
     - `(^|[\\/])\.canary[\\/]CANARY-`
 - content_patterns:

@@ -1147,16 +1147,27 @@ def c_daemon_tick_notifies_once():
 
 
 def n_daemon_tick_notifies_once():
-    """负控：链里**新增**一条（另一种 kind）⇒ 必须再走一次通道。"""
+    """负控：链里**新增**一条（另一种 kind）⇒ 必须再走一次通道。
+
+    ★★ 0.53.0（T0 收尾）修抖动：旧写法在第二次 `put_chain` 时**重新调一次**
+      `breach(ts=_ago(2))` —— 而 `alert_id = sha1(ts|kind|reason)`，两次调用
+      只要跨了 1 秒就是**两个 id** ⇒ tick2 把同一条旧事件当成新件再响一次
+      ⇒ 总泡泡数 3 ⇒ 负控红。同一份代码跑两遍，一遍同一秒内（过）、一遍跨秒
+      （红）—— 与 0460「git 子进程 2.09s 超 2.0s 线」同族的负载抖动。
+      修法：**复用同一条记录对象**（id 稳定＝语义要求的"同一条旧事件"），
+      只让新增的那条真是新的。断言强度不变：产品若不再按 id 去重（每轮都响）
+      或对新事件不响，照样红。
+    """
     hub = new_hub()
-    put_chain(hub, [breach(ts=_ago(2), reason="a")])
+    rec_a = breach(ts=_ago(2), reason="a")
+    put_chain(hub, [rec_a])
     b = NT.RecordingBackend()
     bub = []
     d = DM.Daemon(root=hub, backend=b,
                   bubbler=lambda **kw: bub.append(kw) or {"ok": True, "why": ""})
     d.tick()
     n1 = len(bub)
-    put_chain(hub, [breach(ts=_ago(2), reason="a"),
+    put_chain(hub, [rec_a,
                     {"ts": _ago(1), "type": "host_shield_tamper",
                      "reason": "t", "hash": "h2"}])
     d.tick()
@@ -2283,7 +2294,7 @@ CHECKS = [
     ("P10 tick通知一次不重复", c_daemon_tick_notifies_once, n_daemon_tick_notifies_once),
     ("P10 强调层只对R0", c_daemon_r0_emphasis_only, n_daemon_r0_emphasis_only),
     ("P10 read_all已取消(不动状态)", c_daemon_ignores_read_all, n_daemon_ignores_read_all),
-    # ★ 0.35.2：托盘「打开值守台」必须有消费点（旧版 open_console 无人读＝死动作）
+    # ★ 0.35.2：托盘「打开Antinel 监理」必须有消费点（旧版 open_console 无人读＝死动作）
     ("P10 打开Antinel 监理动作（有消费点）", c_daemon_open_action, n_daemon_open_action),
     ("P10 后台Antinel 监理幂等", c_console_background_idempotent, n_console_background),
     ("P10 Antinel 监理开独立窗口(app)", c_console_app_window, n_console_app_window),

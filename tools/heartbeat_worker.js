@@ -1,5 +1,5 @@
 /**
- * Antinel 值守台 · 匿名计数端点（Cloudflare Worker）
+ * Antinel Antinel 监理 · 匿名计数端点（Cloudflare Worker）
  * =================================================
  * 职责**极简**：收一个只含固定字段的计数报文，去重、累加、给一个汇总。
  *
@@ -14,7 +14,7 @@
  *     `ExactCounter`（Durable Object 版，本文件末尾附）启用即可 —— 客户端不用改。
  *   对外表述纪律：**只能叫"开启了统计的安装数"，不能叫"用户数"。**
  *
- * 部署：见 outputs/Antinel 值守台·心跳端点部署说明 v1.0（2026-10-05）.md
+ * 部署：见 outputs/Antinel Antinel 监理·心跳端点部署说明 v1.0（2026-10-05）.md
  *   wrangler kv namespace create ANTINEL_HB   # 把返回的 id 填进 wrangler.toml
  *   wrangler deploy
  */

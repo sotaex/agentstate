@@ -620,6 +620,12 @@ def install(root, host_override=None, redetect=False, skip_scan=False, strict=Fa
             print("      shim: %s（把该目录加入 PATH 后任意终端可用 antinel）" % shim)
         except Exception as _e:
             print("      shim: skipped (%s)" % _e)
+    # ★ 0.53.0（T1.4，设计 v1.11 §29.2 触点 1＋施工单 v1.4）：装好之后的
+    #   收尾一句话 —— 创始人原话「装后建议用户先做一次体检……要有设计」。
+    #   **只打印命令，不自动开浏览器**：Agent 环境自动弹窗会打断（设计原文）。
+    #   无条件打印（generic 扫描-only 安装同样该知道有体检这件事）。
+    #   判据：ci/inbox_guards_0353.py P17（AST 逐字，含负控）。
+    print("装好了。建议现在花一分钟做一次体检：antinel ui")
     return 0
 
 

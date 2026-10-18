@@ -822,7 +822,7 @@ def n_s102():
     return True
 
 
-@check("S103 原因句三元组：主灯原因 ＋ 徽标原因 ＋ 待办提示（缺一即红）")
+@check("S103 原因句：主灯原因 ＋ 待办提示进句；徽标原因**不进**主行但徽标须在（缺一即红）")
 def s103():
     import inbox_model as M
     G = _g()
@@ -840,11 +840,26 @@ def s103():
                           versions=("1.0.0", "9.9.9"))
     if "没处理" not in ex2["reason"]:
         bad.append(("有账缺'没处理'", ex2["reason"]))
-    # ③ 徽标原因进句（研发中）
+    # ③ 徽标原因**不进主行**，但徽标本身必须在（FZ-004 冻结契约）
+    #    ★ 原断言是「'研发' 必须出现在 reason 里」。FZ-004（创始人 2026-10-16
+    #      截图 #4「啰嗦、浓重机器味」⇒ 2026-10-17 冻结）把徽标原因句**移出**
+    #      主行后，这条旧断言开始把**正确实现判红** —— 与 U-13 同型的过期判据：
+    #      判据守着一条已被推翻的口径，就会反过来逼人把缺陷改回来。
+    #    新口径双向：主行**不许**出现徽标原因（否则啰嗦复发）＋ 徽标**必须**
+    #      还在 badges 里且带完整原因（不许用「删掉徽标」让主行变干净——那是
+    #      信息丢失，FZ-004 只许挪位置）。「版号出现在 title／点开可见」那一腿
+    #      由 FZ-004 的 j_reason_line_budget 三腿守着，本条不重复实现。
     ex3 = M.light_explain({"state": "guarding", "why": "监理在岗"}, [],
                           versions=("9.9.9", "1.0.0"))
-    if "研发" not in ex3["reason"]:
-        bad.append(("徽标原因没进句", ex3["reason"]))
+    if "研发" in ex3["reason"]:
+        bad.append(("徽标原因又拼进主行（FZ-004 已禁）", ex3["reason"]))
+    _dev_badges = [b for b in (ex3.get("badges") or [])
+                   if isinstance(b, (list, tuple)) and b and b[0] == "dev"]
+    if not _dev_badges:
+        bad.append(("研发中徽标整个不见了（只许挪位置，不许删信息）",
+                    ex3.get("badges")))
+    elif not (len(_dev_badges[0]) > 2 and "9.9.9" in str(_dev_badges[0][2])):
+        bad.append(("研发中徽标缺完整原因（版号要留得住）", _dev_badges[0]))
     # ④ 旧语义不许回来
     if "灯这样报" in ex2["reason"]:
         bad.append(("退回旧语义'灯这样报'", ex2["reason"]))

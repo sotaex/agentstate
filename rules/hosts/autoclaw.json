@@ -1,5 +1,6 @@
 {
  "host": "autoclaw",
+ "name": "AutoClaw",
  "vendor": "AutoClaw",
  "roots": [
   "%APPDATA%/autoclaw",

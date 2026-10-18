@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: Apache-2.0
 
-"""值守台 · 托盘（第 2 层）：常驻、不占地方、一眼读状态。
+"""Antinel 监理 · 托盘（第 2 层）：常驻、不占地方、一眼读状态。
 
 ★ 为什么是 PowerShell 而不是 pystray（创始人让我分析后定）：
   产品仓 `[project]` **一个运行时依赖都没有**；`System.Drawing.Icon` 能**直读 `.ico`
@@ -105,9 +105,9 @@ def probe_posture(root=None):
 
 
 def console_port(root=None):
-    """值守台此刻开在哪个端口（读 `url.json`，**唯一真源**）。没有 ⇒ `None`。
+    """Antinel 监理此刻开在哪个端口（读 `url.json`，**唯一真源**）。没有 ⇒ `None`。
 
-    ★★ 为什么需要（0.48.5 B2，遗留问题清单）：首选端口被占时值守台会漂到
+    ★★ 为什么需要（0.48.5 B2，遗留问题清单）：首选端口被占时Antinel 监理会漂到
       临时端口 —— 用户手输 `127.0.0.1:8790` 打不开。托盘提示里带上**实际
       端口**，才知道该点哪个。
     ★ 惰性 import（`probe_posture` 同款）：避免托盘 ↔ 服务在模块加载期成环。
@@ -221,7 +221,7 @@ def read_state(root=None, now=None, stale_after=STALE_AFTER_SEC):
 
     ★★ 0.35.3 修（真缺陷，交接件 §5 点名待审）：
       `tray.ps1` 每秒读一次 `tray.json` 更新图标与提示，但**从来不看 `ts`**。
-      Python 侧（守护进程 / 值守台）一旦停了，托盘会**无限期显示最后一次状态**
+      Python 侧（守护进程 / Antinel 监理）一旦停了，托盘会**无限期显示最后一次状态**
       —— "值守中 · 一切正常" 一直挂着，而实际上**早就没人再更新它**。
       这与本项目最反对的形状同型：**把「没在查」渲染成「没问题」**。
       ⇒ 读的一侧必须自己判陈旧，并把"停止更新"如实说出来。
@@ -320,7 +320,7 @@ def sync_from_items(items, root=None, tip=None, posture=None):
     if tip is not None and " / " not in str(tip):
         tip = "%s / %d（最近 %d 小时）" % (str(tip), len(items or []),
                                       M.WINDOW_HOURS)
-    # ★★ 0.48.5（B2）：带上**实际端口** —— 默认端口被占时值守台会漂到临时
+    # ★★ 0.48.5（B2）：带上**实际端口** —— 默认端口被占时Antinel 监理会漂到临时
     #   端口，用户手输 8790 打不开；提示里给出真地址，才知道该点哪个。
     #   没有落盘记录（没起过）⇒ 不编一个端口。
     if tip is not None:

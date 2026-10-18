@@ -1,5 +1,6 @@
 {
  "host": "yuanbao",
+ "name": "腾讯元宝",
  "vendor": "Tencent",
  "roots": [
   "%LOCALAPPDATA%/com.tencent.yuanbao"

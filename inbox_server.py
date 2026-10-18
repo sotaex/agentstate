@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: Apache-2.0
 
-"""值守台 · 本地页（**只在你自己的电脑上开**）。
+"""Antinel 监理 · 本地页（**只在你自己的电脑上开**）。
 
 ★★ 为什么必须本地：静态站跑在别人的服务器上，读不到你机器上的链。
   真正的"看"必须发生在**本机**，结果页也开在本机，**一个字节都不出本机**。
@@ -52,7 +52,7 @@ import ledger as L
 DEFAULT_PORT = 8790
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 
-#: Windows：起子进程时**不新建控制台**。★ 0353 P12 专守这条 —— 哨兵/值守台
+#: Windows：起子进程时**不新建控制台**。★ 0353 P12 专守这条 —— 哨兵/Antinel 监理
 #: 是 `DETACHED_PROCESS` 拉起的（**没有控制台**），它们再起控制台程序
 #: （netstat/tasklist/powershell…）时若不显式给这个标志，Windows 会**新建一个
 #: 控制台** ⇒ 用户看到黑窗一闪。`host_shield`/`egress` 同款常量，不在本文件另立口径。
@@ -113,7 +113,7 @@ button{font:inherit;cursor:pointer}
 /* ★ 0.50.0（创始人「值守台应该有一个能漂浮的最小态……哨兵很多时候不要
    碍事，只要在，就行了」）：收缩入口。★★ 0.50.7（2026-10-16 创始人截图
    「左上角 LOGO 与右上角收缩钮是同一枚图形、两个入口」）起**合并进
-   LOGO 本体** —— 点这枚动效哨标，值守台就收缩成屏幕上那枚漂浮哨标，
+   LOGO 本体** —— 点这枚动效哨标，Antinel 监理就收缩成屏幕上那枚漂浮哨标，
    所见即所得，不用猜符号；右上角那枚重复的 SVG 删除（全页只一枚
    lgmark，判据 J1 守）。判据 FLO-05 锁：入口在、用的是 `_logo_mark`
    （不是静态图）、title 说人话、POST 的是 `op=collapse`。
@@ -149,6 +149,12 @@ h2{font-size:15px;margin:0 0 12px}
 .badge{flex:none;width:44px;text-align:center;font-family:var(--mono);font-size:12px;font-weight:700;padding:4px 0;border-radius:6px;color:#fff}
 .badge.r0{background:var(--r0)}.badge.l2{background:var(--l2)}
 .badge.l1{background:var(--l1)}.badge.ls{background:var(--ls)}
+/* ★★ 0.53.0（T3.3，设计 §14.3 第 3 条）：行内**工具徽标**——**只在观测到
+   ≥2 个工具时**才渲染（单工具机器上每行都挂一个工具名＝几百次重复的噪声）。
+   与 `.badge`（级别，等宽方牌、满色）刻意不同形：这是**归属**信息，浅边框
+   胶囊、弱色，绝不抢级别的颜色。 */
+.hbadge{flex:none;font-size:11px;font-weight:600;padding:1px 7px;border-radius:999px;
+  border:1px solid var(--line);color:var(--muted);margin-left:6px;white-space:nowrap}
 /* ★★ 0.51.0（规格 v1.2 §2.4）：**并存徽标**（研发中／缺粮）—— 与主灯**不争位**、
    可多枚常驻同屏。★ 用纯 `span`（不接 `GL.chip()` 的「？」芯片）：芯片数量是
    全站被逐个数过的锚（0490 U-04 / 0514 J1），徽标是**条件出现**的，加芯片会让
@@ -402,6 +408,52 @@ button[disabled]{opacity:.55;cursor:not-allowed;border-style:dashed !important;
 .trow:last-child{border-bottom:0}
 """
 
+#: ★ 0.53.0（T0）：体检页（第五 TAB）专用样式。**为什么单开一份**：体检正文是
+#:   `ui_server._result_html` 的产物（唯一实现，禁第二份渲染），它用的类名
+#:   （blind/warn/tiles/row/pt/ev/fold/evo…）与本站有**真实冲突** ——
+#:   `.row` 本站是「标签+值」横排、体检是逐条堆叠；`.warn` 本站是文字色、
+#:   体检是提示盒。整份灌进来会互相污染 ⇒ 一律 `.exam` 作用域移植，
+#:   本站全局规则一字节不动（非必要不能动）。
+EXAM_CSS = """
+.exam .blind{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:12px 0}
+.exam .warn{background:#fff8e6;border:1px solid #f0d38a;border-radius:10px;padding:12px 14px;margin:12px 0;color:var(--fg)}
+.exam .err{background:#fdecec;border:1px solid #f0b4b4;border-radius:10px;padding:12px 14px;margin:12px 0;color:#8a1f1f}
+.exam .guide{background:var(--panel);border:1px solid var(--brand);border-radius:10px;padding:12px 14px;margin:0 0 12px}
+.exam .muted{color:var(--muted)}
+.exam .small{font-size:12px}
+.exam .tiles{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0 4px}
+.exam .tile{flex:1 1 168px;min-width:168px;border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:var(--bg)}
+.exam .tile .n{font-size:24px;font-weight:600;line-height:1.2}
+.exam .tile .t{font-size:14px;font-weight:600;margin-top:2px}
+.exam .tile .d{font-size:12px;color:var(--muted);margin-top:4px;line-height:1.45}
+.exam .row{border-top:1px solid var(--line);padding:10px 0;display:block}
+.exam .row .nm{font-weight:600}
+.exam .row .pt{font-size:12px;color:var(--muted);word-break:break-all;margin-top:2px}
+.exam .row .ev{font-size:13px;margin-top:5px}
+.exam .tag{display:inline-block;font-size:12px;padding:1px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);background:var(--panel);margin-left:8px}
+.exam .ev{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:12px 14px;margin-top:8px}
+.exam .ev .l1{font-size:14px;line-height:1.7}
+.exam .ev .mean{font-size:13px;color:var(--fg);background:var(--bg);border-radius:7px;padding:9px 11px;margin-top:10px;line-height:1.65}
+.exam .orig{font-size:11px;margin-top:7px;word-break:break-all;color:var(--muted)}
+.exam .nums{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.exam .num{flex:1 1 108px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+.exam .num .k{font-size:11px;color:var(--muted)}
+.exam .num .v{font-size:14px;font-weight:500;margin-top:2px;word-break:break-all}
+.exam .one{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 11px;margin-top:10px;font-size:14px}
+.exam details.fold{margin-top:11px}
+.exam details.fold>summary{cursor:pointer;font-size:13px;color:var(--brand);user-select:none;padding:5px 0}
+.exam details.fold>summary:hover{text-decoration:underline}
+.exam table.evo{width:100%;border-collapse:collapse;margin-top:8px;font-size:12px;table-layout:fixed}
+.exam table.evo th{text-align:left;color:var(--muted);font-weight:500;padding:5px 7px;border-bottom:1px solid var(--line);font-size:11px}
+.exam table.evo td{padding:5px 7px;border-bottom:1px solid var(--line);vertical-align:top;word-break:break-all}
+.exam table.evo td.kd{width:9%;color:var(--muted);font-size:11px}
+.exam table.evo td.kp{width:33%;font-family:var(--mono);font-size:11px;color:var(--muted)}
+.exam table.evo td.tm{width:17%;color:var(--muted);font-size:11px;white-space:nowrap}
+.exam table.evo tr.mark td{background:#fffafa}
+.exam code{background:var(--panel);border-radius:4px;padding:1px 5px;font-size:13px}
+.exam hr{border:0;border-top:1px solid var(--line);margin:20px 0}
+"""
+
 #: ★★ 0.50.3：术语浮层按**视口坐标**完整落位，不是「溢出右边就翻到左边」。
 #:   旧法只看 `r.right` 并给 `.flipx` 加 `right:0`：锚点在视口中部、浮层宽于
 #:   锚点左侧余量时，右对齐会把整个浮层推到视口左边之外（2026-10-14 截图）。
@@ -595,8 +647,12 @@ def posture_now():
 
 
 # ------------------------------------------------------------- 页面 ----
-def _head(title, token):
+def _head(title, token, extra_css=""):
     """页面 `<head>`。
+
+    ★ 0.53.0（T0）：加 `extra_css` —— 体检页要挂 `EXAM_CSS`（`.exam` 作用域）。
+      为什么不走全局 CSS：体检正文的类名与本站有真实冲突（见 `EXAM_CSS` 注释），
+      整份灌进来会互相污染；只在这一视图注入，其它四页一字节不变。
 
     ★★ 0.36.2：标题末尾注入**本次运行的窗口身份串**（`#<run_id>`）。
       这不是装饰，是**窗口能被唯一认领的机制**（详见 `inbox_window`）：
@@ -610,7 +666,7 @@ def _head(title, token):
         import inbox_window as WIN
         rid = WIN.build_run_id(token)
         # ★ 0.50.4（B7）：标题后缀**收编为 inbox_window 常量派生** —— 原先这里
-        #   自造 `"%s · 值守台%s"`，与 inbox_window 是**两处实现**（先于改名
+        #   自造 `"%s · Antinel 监理%s"`，与 inbox_window 是**两处实现**（先于改名
         #   存在的 T-09 隐患；改名会让两处各改各的）。现在走既有派生 API
         #   `console_title_suffix()`（唯一真源）；import 失败 ⇒ tail 退空
         #   （不假造标题，也不留第二个会腐烂的兜底串）。
@@ -626,8 +682,9 @@ def _head(title, token):
     return ("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
             "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
             "<title>%s</title><link rel=\"icon\" href=\"/assets/favicon.ico\">"
-            "<style>%s</style></head><body>"
-            % (_esc(shown), CSS))
+            "<style>%s</style>%s</head><body>"
+            % (_esc(shown), CSS,
+               ("<style>%s</style>" % extra_css) if extra_css else ""))
 
 
 def _tabs(view, token):
@@ -644,6 +701,7 @@ def _tabs(view, token):
         return "<a href=\"/?v=%s\"%s>%s</a>" % (v, cls, label)
     return ("<nav class=\"tabs\">" + a("inbox", "收件箱")
             + a("report", "日报") + a("health", "运行状态") + a("ledger", "账本")
+            + a("health_exam", "体检")
             + "</nav>")
 
 
@@ -660,6 +718,8 @@ def _bar(items, token, posture=None, now=None, view="inbox", ex=None):
 
     ★★ 数字**只出现一次**（0.37.1 去重 —— 创始人实测「同一件事的 4 件
       在首页出现了 5 次」）：
+      · 24h 按级计数（失守/拦截/注意）：唯一家在**日报四指标** ——
+        0.53.0 T3.2 撤掉了顶栏那排（同窗口同口径两个落点即红）；
       · 收件箱页：件数只在**筛选条**（「要处理 N」），本行不重复；
       · 日报/运行状态/账本页：件数只在本行后缀（`M.count_text` 的
         「N 件 / 分母（最近 24 小时）」—— 0.48.5 删掉了其中的动作描述词），
@@ -726,52 +786,20 @@ def _bar(items, token, posture=None, now=None, view="inbox", ex=None):
         fix = ("<span class=\"cons\"><b>失守的损失：以下 %d 项（此刻实况，"
                "非计数）：</b><ul>%s</ul></span>"
                % (len(cons), lis)) + fix
-    # ★ 0.35.3：三个数字**各自带上自己的事由件数**，口径写明；点进去仍是全部明细。
-    #   记录数/件事数成对同源（`window_levels` ＋ `window_level_groups`，
-    #   0.37.1 起不再手抄一遍分组逻辑）。
-    wl = M.window_levels(items, now=now)
-    wg = M.window_level_groups(items, now=now)
-
-    def _pill(label, level):
-        n, g = wl.get(level, 0), wg.get(level, 0)
-        same = (n == g)
-        # ★ 0.37.2：括号**每一页都显示**（旧版收件箱页不显示 —— 于是同一排
-        #   数字在收件箱页和其他页**长得不一样**：首页「失守 104」、
-        #   日报页「失守 104（4 件事）」。跨页不一致本身就是违和感）。
-        #   它防的是「104 条记录被当成 104 件事」（P14 判据的实测依据：
-        #   R0 有 80 条、只有 8 种原因）；件数与「要处理 N」是**两个不同的量**
-        #   （前者＝该级别的事由件数，后者＝需要你动手的件数），
-        #   只是本机此刻恰好同值 —— 量不同就不算重复，不许为了省数字把口径藏掉。
-        show_groups = not same
-        # ★ 0.48.5（交接件 §5.4 丁4）：title 从 40+ 字工程说明收缩到一句人话
-        #   （判据 U-11 锁 title ≤ 20 字，**含空格脚本点数** —— 文档目标串
-        #   「最近 24 小时的记录数（自本次载入起算）」实测 21 字超限，同义
-        #   收作「自载入起算」19 字）。「按事由归并后的件数」的解释归「？」
-        #   词条的口径行；旧 title 后半句还是替用户描述他的动作（W08 立意）。
-        return ("<a title=\"最近 %d 小时的记录数（自载入起算）\" "
-                "href=\"/?v=inbox&f=win:%d:lv:%s\">%s <b>%d</b>%s</a>"
-                % (M.WINDOW_HOURS, M.WINDOW_HOURS, level, label, n,
-                   # ★ 0.50.4（Q-08）：「（3 件事）」补上动词 —— 光一个括号，
-                   #   读者看不出「11 条」与「3 件事」是什么关系（条→件的换算
-                   #   只有词条里写了）。⇒「（已归并为 3 件事）」自解释。
-                   # ★★ 0.50.7：「词条里写了」此前是**愿望不是事实** ——
-                   #   glossary 的 unit 字段零命中「归并」（`git log -S` 查史
-                   #   亦零命中 ⇒ 从写下那天就是空的，正是创始人截图四
-                   #   「归并无解释」的病灶，T-11「愿望写成了事实」同族）。
-                   #   本批把换算真写进 R0/L2/L1 的 unit 字段，这句注释
-                   #   才第一次成真。
-                   "" if not show_groups else "（已归并为 %d 件事）" % g))
-
-    # ★ 0.37.2：顺序改为**由重到轻**（失守 → 拦截 → 注意）。
-    #   旧版是「拦截 · 注意 · 失守」—— 最重的排在最后，读起来像"越读越轻"，
-    #   与页面其余处（收件箱归并列表、日报卡片）按级别倒序排的规矩相反。
-    # ★ 0.48.5（交接件 §5.6 乙1）：每个药丸后跟一个**裸「？」芯片**
-    #   （兄弟节点，不塞进 `<a>` —— 链接里嵌 interactive 是坏味道）。
-    nums = ("<span class=\"pill\">最近 %d 小时：%s · %s · %s</span>"
-            % (M.WINDOW_HOURS,
-               _pill("失守", "R0") + GL.chip("R0", mk=True),
-               _pill("拦截", "L2") + GL.chip("L2", mk=True),
-               _pill("注意", "L1") + GL.chip("L1", mk=True)))
+    # ★★ 0.53.0（T3.2，设计 §14.3 第 1 条）：**撤顶部 24h 计数排**。
+    #   撤掉的是什么：原「最近 24 小时：失守 N（已归并为 M 件事）· 拦截 N ·
+    #   注意 N」一排按级计数（原 `_pill` ×3 ＋ `nums` 整排，含 R0/L2/L1
+    #   三枚「？」芯片）。
+    #   为什么撤：与**日报四指标**（R0/L2/L1 按级 ＋ 要处理按桶，同一 24h
+    #   窗口）同口径 ⇒ 同一个数两个落点（「重复即红」—— 0.37.1「数字只
+    #   出现一次」纪律的彻底执行）。
+    #   信息去哪了：24h 按级计数的**唯一家**＝日报四指标，其钻取链接
+    #   （`f=win:24:lv:X`）与可见单位照旧；R0/L2/L1 的「？」芯片随指标留
+    #   在日报页（术语表 100% 有落点由 P13 四视图并集守）。收件箱页顶部条
+    #   只剩灯／状态词／徽标／修复入口 —— 计数归筛选条（三档按**桶**，
+    #   量与日报四指标不同，不是同一份数的搬家）。
+    #   判据：0490 U20（四视图无第二份）＋ 0353 P14（家的数字与链现算
+    #   一致）；减法留账三列见施工单 v1.6 登记簿第 1 笔。
     # ★★ 0.51.0（规格 v1.2 §2.4）：**并存徽标**行（研发中／缺粮）。
     #   与主灯**不争位**：主灯互斥、徽标可多枚常驻 —— "研发中的机器此刻失守"
     #   就是 R0 主灯 ＋ 研发中徽标同屏，两个事实都显示，谁也不掩盖谁。
@@ -792,9 +820,23 @@ def _bar(items, token, posture=None, now=None, view="inbox", ex=None):
     _chip_parts = []
     for k, name, why in (ex.get("badges") or []):
         _st = M.BADGE_STATE.get(k)
+        # ★★ FZ-004（2026-10-17）：版本差已从顶栏主行移走，**关键信息（哪两版）
+        #   不能跟着丢** ⇒ 悬停提示带上具体版本号（原句 `why` 开头就是
+        #   「研发中——本机这一版（0.51.2）比已发布的（0.51.1）新，还没发出去」，
+        #   而 `BADGE_TIP` 是静态短句）。
+        #   ★ 但仍受 U-11 约束（title ≤ 20 字）⇒ 只取**括号里的两版号**，
+        #     拼成「本机0.51.2/发布0.51.1」这种最省字的形态（19 字；实测
+        #     带空格的「本机 0.51.2 / 发布 0.51.1」＝ 21 字，越 U-11 上限）。
+        #     取不到版本号 ⇒ 退回静态 `BADGE_TIP`（绝不编造）。
+        _tip = M.BADGE_TIP.get(k, name)
+        _vs = re.findall(r"（([0-9][0-9A-Za-z.\-]*)）", why or "")
+        if k == M.BADGE_DEV and len(_vs) >= 2:
+            _cand = "本机%s/发布%s" % (_vs[0], _vs[1])
+            if len(_cand) <= 20:
+                _tip = _cand
         _chip_parts.append(
             "<span class=\"bdg %s\" title=\"%s\">%s</span>%s"
-            % (_esc(k), _esc(M.BADGE_TIP.get(k, name)), _esc(name),
+            % (_esc(k), _esc(_tip), _esc(name),
                GL.chip(_st, mk=True) if _st else ""))
     _chips = "".join(_chip_parts)
     badge_html = ("<span class=\"badges\">%s</span>" % _chips) if _chips else ""
@@ -823,22 +865,26 @@ def _bar(items, token, posture=None, now=None, view="inbox", ex=None):
         "title=\"收缩成漂浮哨标 · 点它再展开\" aria-label=\"收缩成漂浮哨标\">%s"
         "<noscript><img alt=\"Antinel\" src=\"/assets/logo.svg\"></noscript></button>"
         # ★ 0.48.5（交接件 §5.6 乙1）：顶部灯的「？」芯片跟在 `<b>` 后
-        #   （灯不是链接，芯片可以直接挨着；全站共 8 个落点，U-04 逐个数）。
+        #   （灯不是链接，芯片可以直接挨着；0.53.0 T3.2 起本页共 5 个落点 ——
+        #   药丸那 3 颗随顶部计数排撤走，U-04 逐个数）。
         # ★ 0.48.5（交接件 §5.4 戊4）：状态词 16px 粗体、**色随态**
         #   （与 `.dot` 同一个 `M.STATE_VAR` —— 单一真源）；解释句降为
         #   13px 常规色（信息量大的那句占主导，见 U-15）。
         "<div class=\"state\"><span class=\"dot\" style=\"background:var(%s)\"></span>"
         "<b style=\"color:var(%s)\">%s</b>%s%s%s<br><span>%s</span></div>"
-        "%s%s"
+        "%s"
         # ★★ 0.50.0：收缩入口的**状态行**（漂浮最小态）——请求失败/起不来时
         #   **就地如实说**，绝不静默（用户点了没反应＝本项目最恨的形状）。
         "<span class=\"collst\" id=\"collst\"></span>"
         "<div class=\"spacer\"></div></header>"
         # ⚠️ 实参顺序 ＝ 占位符在串里出现的顺序（布局变了就同步改这里）：
         #   按钮的 SVG 在最前 ⇒ `_logo_mark(st)` 也在最前。
+        #   ★ 0.53.0（T3.2）：原第 9 个实参 `nums`（24h 计数排）随药丸整排
+        #   撤掉，格式串里的 `"%s%s"` 同步收成 `"%s"`（占位符与实参一对多
+        #   少 ⇒ `not all arguments converted`，本仓踩过）。
         % (_logo_mark(st), M.STATE_VAR[st], M.STATE_VAR[st],
            label, GL.chip("light", mk=True), suffix, badge_html,
-           state_reason, nums, fix))
+           state_reason, fix))
 
 
 #: ★★ 0.49.0（2026-10-14，创始人「现在的图标好了，但是'死了'，让它继续动」）：
@@ -1132,7 +1178,7 @@ _LOGO_JS = (_LOGO_JS_TMPL
 
 
 #: ★★ 0.49.0（2026-10-14，创始人截图 3/4/5）：术语浮层**突破窗口边界**。
-#:   实测：浮层（`.tdef`）被值守台窗口的**右缘/下缘**裁掉 ——「注意 1」的
+#:   实测：浮层（`.tdef`）被Antinel 监理窗口的**右缘/下缘**裁掉 ——「注意 1」的
 #:   问号点开，右侧看不见；日报页底部词条，下沿被截。
 #:   ★ 为什么页内修不了：HTML **画不出自己窗口的外面**。0.36.1 的 `.flipx`
 #:     只是"改成从左边展开"，宽浮层照样出界；`max-width:calc(100vw-40px)`
@@ -1240,7 +1286,7 @@ _WINFIT_LOCK = threading.Lock()
 
 
 def _winfit_apply(dr, db, token):
-    """把本次值守台窗口平移/撑开，使右/下沿各多露出 `dr`/`db` 像素。
+    """把本次Antinel 监理窗口平移/撑开，使右/下沿各多露出 `dr`/`db` 像素。
 
     返回 dict **如实报告**：`ok`（落位并回读一致）、`moved`（平移量）、
     `grew`（撑开量）、`left`（仍没露出的余量，>0 不许说成"露出了"）、
@@ -1394,12 +1440,32 @@ def _form(token, op, iid="", note="", label="", cls="", ids=""):
                (" class=\"%s\"" % _esc(cls)) if cls else "", _esc(label)))
 
 
-def _item_html(it, token):
+def _host_label(h):
+    """工具标签 → 页面显示名（显示名真源＝`host_shield.host_names()`，本处只兜底）。
+
+    ★ 0.53.0（T3.3）：为什么不在本文件另立一张名表 —— 那就是第二份实现，
+      而 `rules/hosts/*.json` 的读取权归登记表宿主模块。宿主没写 `name`
+      就**照实显示标签**（`host_display_name` 的语义），绝不编。
+    """
+    h = str(h or "").strip()
+    if not h:
+        return ""
+    try:
+        import host_shield as _hs
+        return _hs.host_display_name(h)
+    except Exception:                                       # noqa: BLE001
+        return h
+
+
+def _item_html(it, token, posture=None, show_host=False):
     """一条记录：★ 收起时**一个按钮都没有**，点开才给两个动作。
 
     ★ 创始人 2026-10-06：「每一条右侧都是三个按钮，占地方不说，太多了也不会有人去点」
       ⇒ 行内 0 按钮、展开后 2 个（知道了 / 忽略）。
     ★「标为已读」**已取消**（创始人拍板①）—— 点开**自动**记为已读（见 `_READ_JS`）。
+    ★★ 0.53.0（T3.3，设计 §14.3 第 3 条）：`show_host` 由调用方按
+      「本次载入的记录里观测到 ≥2 个工具」判定，**单工具机器上不渲染** ——
+      否则同一句话在每一行重复几百次，信息量为 0。
     """
     if it.state in M.OPEN_STATES:
         acts = (_form(token, "done", it.id, label="知道了", cls="ok")
@@ -1407,27 +1473,36 @@ def _item_html(it, token):
     else:
         acts = _form(token, "read", it.id, label="重开")
     dot = "<span class=\"unread-dot\"></span>" if it.state == "unread" else ""
-    # ★ "每次报警信息要齐"：原因(detail)、规则、命中、时间、链引用、备注一个都不能少
-    meta = " · ".join(x for x in (
-        it.detail,
-        ("规则 " + it.rule_id) if it.rule_id else "",
-        ("命中「%s」" % it.snippet) if it.snippet else "",
-        it.ts, ("链 " + it.chain_ref[:10]) if it.chain_ref else "",
-        ("备注：" + it.note) if it.note else "") if x)
+    # ★★ 0.51.2 **第二轮**（创始人 2026-10-17 四张截图，裁定见
+    #   docs/Antinel·界面文案问题清单 v1.0）：
+    #   第一轮改完仍是鸟语——规则编号写两遍、「（哪条防护规则拦下它的）」看不懂、
+    #   「命中「os.remove」」不告诉用户删什么、裸 ISO 时间、64 位核对号。
+    #   ⇒ 详情行（第二行）**整体重做**，唯一实现是 `M.record_meta(it)`：
+    #     「执行文件或目录删除命令，目标 _dbg_logo.txt · 规则 DST-01 · 北京时间 10-17 09:23」
+    #   规则编号只出现一次；时间走时区命名（海外机器显示美西/美东时间）。
+    #   行内时间（`.when`）保持 MM-DD HH:MM 短式（全站唯一短式 `_ts_hm`）。
+    meta = M.record_meta(it)
+    # ★ 0.53.0（T3.3）：工具徽标（条件渲染 —— 见 docstring）
+    _hb = ""
+    if show_host:
+        _hn = _host_label(getattr(it, "host", ""))
+        if _hn:
+            _hb = "<span class=\"hbadge\">%s</span>" % _esc(_hn)
     return ("<details class=\"item %s %s\" data-id=\"%s\" data-token=\"%s\">"
-            "<summary><span class=\"badge %s\">%s</span>"
+            "<summary><span class=\"badge %s\">%s</span>%s"
             "<span class=\"t\">%s%s</span><span class=\"when\">%s</span></summary>"
             "<div class=\"det\"><p class=\"m\">%s</p>%s"
             "<div class=\"act\">%s</div></div></details>"
             % (_esc(it.level.lower()), _esc(it.state), _esc(it.id), _esc(token),
-               _esc(it.level.lower()), _esc(it.level), dot, _vis(it.title),
-               _esc(_ts_hm(it.ts)), _vis(meta), _rem_html(it, token), acts))
+               _esc(it.level.lower()), _esc(it.level), _hb, dot, _vis(it.title),
+               _esc(_ts_hm(it.ts)), _vis(meta),
+               _rem_html(it, token, posture), acts))
 
 
 # --------------------------------------------------------------------------
 # 0.36.0：失守归因面板
 # --------------------------------------------------------------------------
-def _rem_html(it, token):
+def _rem_html(it, token, posture=None):
     """失守条目的「为什么 & 怎么办」面板（R0 才有；L1/L2 不给）。
 
     ★ 为什么只给 R0：L2 是「已拦下的操作」，L1 是「知情即可」，
@@ -1439,7 +1514,9 @@ def _rem_html(it, token):
         return ""
     try:
         import remediation as RM
-        a = RM.attribute(it)
+        # ★ 0.51.2 第二轮：**态势穿线** —— 归因模块据此决定「现在能做什么」
+        #   （创始人截图四：看得到页面＝监理在跑，还让「重新拉起监理」＝逻辑矛盾）。
+        a = RM.attribute(it, posture=posture)
     except Exception as e:                                   # noqa: BLE001
         # ★ 归因模块坏了也不能让整页500 —— 如实说"这一项算不出来"，
         #   并**仍然给一步可做的**（去运行状态页看现探）。
@@ -1450,7 +1527,7 @@ def _rem_html(it, token):
              "severity_note": "（这是产品故障，不是你的操作问题。）",
              "actions": [{"op": "info", "label": "回运行状态页看现探",
                           "cmd": "", "hint": "那里有此刻的实测态势。"}],
-             "cost": "归因失败 ⇒ 你只能看到「失守」，拿不到「为什么」。"}
+             "cost": "归因失败，你只能看到「失守」，拿不到「为什么」。"}
 
     # ★★ 0.37.1：归因文案走 `GL.render()`（**不是** `_esc`）——
     #   归因作者习惯写 markdown 的 `**重点**`，而 `_esc` 只是转义，
@@ -1458,20 +1535,36 @@ def _rem_html(it, token):
     #   里都带着 `**`，8 个归因类无一幸免）。`GL.render()` 既吃 markdown
     #   又只放行 `<b>/<code>`，且仍会转义用户输入 ⇒ 两头都安全。
     def _tx(s):
-        return GL.render(str(s or ""))
+        # ★★ 0.51.2（创始人 2026-10-17「都在说鸟语」）：归因面板的文案除了
+        #   markdown（`GL.render`），还要**过一遍机器腔人话化** ——
+        #   因为 `cause` 段会把**原始 detail**（含 `pid=` / `self-check-failed:`
+        #   等）嵌进句子里，而这里走的是 `GL.render` 而非 `_vis` ⇒
+        #   不补这一步，面板里就漏出鸟语。
+        #   `humanize` 内部已保护文件名/路径/反引号内容（不会改坏命令）。
+        return GL.render(M.humanize(str(s or "")))
 
     badge = ('<span class="bclass">修不了根因 · 请选一条路</span>'
              if a.get("b_class") else "")
     txt = ("<span class=\"why\">这一条是靠记录文案认出来的</span>"
            if a.get("by_text") else "")
 
+    # ★★ 0.51.2 **第二轮**（创始人四张截图裁定「改结构，精炼，剃刀原则」）：
+    #   旧版四段标题「根因是什么／现在有多严重／你现在能做什么／如果什么都不做」
+    #   全是工程腔自问自答。现在：
+    #     ① 发生了什么（cause；spawn_failed 把严重程度并进这段，不单列）
+    #     ② 现在怎么样（severity ＋ 态势和解句；都没有就不出这段）
+    #     ③ 你能做什么（动作按**当前态势**门控——见 remediation）
+    #     ④ 不做的后果（cost；空则不渲染，不硬凑一段）
     segs = [
-        '<div class="seg root"><h4>① 根因是什么</h4><p>%s</p>%s</div>'
+        '<div class="seg root"><h4>① 发生了什么</h4><p>%s</p>%s</div>'
         % (_tx(a.get("cause")), txt),
-        '<div class="seg sev"><h4>② 现在有多严重</h4><p>%s</p>'
-        '<p class="note">%s</p></div>'
-        % (_tx(a.get("severity")), _tx(a.get("severity_note"))),
     ]
+    sev = _tx(a.get("severity") or "")
+    note = _tx(a.get("severity_note") or "")
+    if sev or note:
+        segs.append('<div class="seg sev"><h4>② 现在怎么样</h4>%s%s</div>'
+                    % (('<p>%s</p>' % sev) if sev else "",
+                       ('<p class="note">%s</p>' % note) if note else ""))
 
     # ③ 能做什么 —— **按「可执行性」排序**，命令型排最前
     items_html = []
@@ -1479,20 +1572,20 @@ def _rem_html(it, token):
         op = act.get("op")
         cls = {"fix": "go", "retry": "go", "rearm": "go",
                "drop": "drop", "accept": "risk", "info": ""}.get(op, "")
-        cmd = act.get("cmd") or ""
-        cmd_html = ('<code class="cmd">%s</code>' % _esc(cmd)) if cmd else ""
         why = act.get("hint") or ""
         why_html = ('<div class="why">%s</div>' % _tx(why)) if why else ""
         items_html.append(
-            "<li><b>%s</b>%s%s"
+            "<li><b>%s</b>%s"
             '<div class="pick">%s</div></li>'
-            % (_tx(act.get("label") or op), cmd_html, why_html,
+            % (_tx(act.get("label") or op), why_html,
                _rem_pick_buttons(it, token, op, cls, act)))
-    segs.append('<div class="seg act"><h4>③ 你现在能做什么</h4><ol>%s</ol></div>'
+    segs.append('<div class="seg act"><h4>③ 你能做什么</h4><ol>%s</ol></div>'
                 % "".join(items_html))
 
-    segs.append('<div class="seg cost"><h4>④ 如果什么都不做</h4><p>%s</p></div>'
-                % _tx(a.get("cost")))
+    cost = _tx(a.get("cost") or "")
+    if cost:
+        segs.append('<div class="seg cost"><h4>④ 不做的后果</h4><p>%s</p></div>'
+                    % cost)
 
     # ★ badge 放在**body 第一段**（不是 summary 里）——
     #   `_rem_panel_only()`给归并行复用时只取 body，badge 放summary 会被丢掉。
@@ -1506,10 +1599,15 @@ def _rem_html(it, token):
 
 
 #: 三类动作 → 按钮文案。★ B 类三选一必须**都在**页面上（创始人拍板）。
+#: ★ 0.51.2 第二轮：去掉 `rearm`（「按正规入口重新布防」）—— 研发/运维动作
+#:   不进用户面板（创始人：用户不会修，我也不会让用户修）。
 _PICK = {
     "fix": ("试一下，看能不能修好", "go"),
-    "retry": ("重新拉起监理", "go"),
-    "rearm": ("按正规入口重新布防", "go"),
+    # ★ 0.52.0（剃刀，裁定 #4）：按钮文案与动作标题分工 —— 标题讲
+    #   「这是什么选项」（remediation 的 ACT_RETRY label「重新拉起监理」），
+    #   按钮是点下去的那一下。旧版两者同文（「重新拉起监理」×2）＝
+    #   同一行里同一个意思出现两次，与 0.37.2 accept 的同型教训一致。
+    "retry": ("现在重新拉起", "go"),
     "drop": ("承认打不赢，移出监管", "drop"),
     # ★ 0.37.2：「就这样，我不处理」⇒「我不处理，我担着」——
     #   上面那条选项标题已经是「就这样放着，我自己盯着」，按钮再写"就这样"
@@ -1535,7 +1633,7 @@ def _rem_pick_buttons(it, token, op, cls, act):
         n[0] += 1
         return _form(token, o, it.id, note=(act.get("label") or o),
                      label=label, cls=bcls)
-    if op in ("fix", "retry", "rearm"):
+    if op in ("fix", "retry"):
         return form("guard_fix")
     if op == "drop":
         return form("remediation_drop") + _form(
@@ -1552,7 +1650,7 @@ def _rem_pick_buttons(it, token, op, cls, act):
     return form("remediation_ack")
 
 
-def _group_html(g, token, bucket=None, total=None):
+def _group_html(g, token, bucket=None, total=None, posture=None, host_dist=""):
     """一类/一事归并成一行。
 
     ★ 0.47.0：`total` ＝ 这一档的**记录总条数**（分母）。归并行上的「×N」是
@@ -1578,10 +1676,21 @@ def _group_html(g, token, bucket=None, total=None):
                 + drill)
     else:
         acts = drill
+    # ★★ 0.51.2 第二轮：归并行的说明行**也走** `M.record_meta`（不带时间——
+    #   行内另有「最近/最早」时间段）⇒ 归并行不再露出「规则 X · 命中「Y」」
+    #   那串机器腔（创始人「全覆盖无遗漏」，归并行同病）。
+    _fi = g.get("first_item")
+    scene = (M.record_meta(_fi, with_time=False) if _fi is not None
+             else (g.get("detail") or "").strip())
     meta = " ｜ ".join(x for x in (
-        (g.get("detail") or "").strip(),
+        scene,
         "最近 %s" % _ts_hm(g["last_ts"]),
         ("最早 %s" % _ts_hm(g["first_ts"])) if n > 1 else "",
+        # ★★ 0.53.0（T3.3，设计 §14.3 第 6 条）：**归并行尾部**给工具分布，
+        #   **不新增小节** —— 另开一节＝同一页两套计数（「重复即红」）。
+        #   组内全无归因（旧记录）⇒ 空串，位置上什么都不出现（不写「未知 N 条」：
+        #   那会把"不知道"说成一种工具，P18 同一条纪律）。
+        host_dist,
     ) if x)
     # ★ 0.36.0：归并行也要有归因面板 —— 「要处理」档走的是这条路，
     #   而用户看到的正是这个档；只有单条有面板的话，归并后的 R0
@@ -1592,7 +1701,7 @@ def _group_html(g, token, bucket=None, total=None):
         try:
             import remediation as RM
             first = g.get("first_item") or g.get("items")[0]
-            rem = _rem_panel_only(first, token)
+            rem = _rem_panel_only(first, token, posture)
         except Exception:                                   # noqa: BLE001
             rem = ""
     return ("<details class=\"item grp %s\" data-ids=\"%s\" data-token=\"%s\">"
@@ -1614,12 +1723,12 @@ def _group_html(g, token, bucket=None, total=None):
                _vis(meta), rem, acts))
 
 
-def _rem_panel_only(it, token):
+def _rem_panel_only(it, token, posture=None):
     """只渲染归因面板本体（不给外层 `<details class="rem">` 的收起壳）。
 
     归并行已经有自己的收起壳（`details.item.grp`），再套一层会双层折叠。
     """
-    full = _rem_html(it, token)
+    full = _rem_html(it, token, posture)
     if not full:
         return ""
     i = full.find("<div class=\"body\">")
@@ -1629,7 +1738,7 @@ def _rem_panel_only(it, token):
     return full[i:j].replace("<div class=\"body\">", "<div class=\"rem\">", 1)
 
 
-def _view_inbox(items, token, filt, now=None):
+def _view_inbox(items, token, filt, now=None, posture=None):
     """收件箱。★ 三档（要处理 / 看一眼 / 归档），窗口默认 24 小时。
 
     ★★ 0.35.3（创始人 2026-10-06「**尽可能少让人处理**」）：
@@ -1692,13 +1801,22 @@ def _view_inbox(items, token, filt, now=None):
             #      都不出现**（脚本逐 key 查 `GL.chip` 落点：均为 0）—— 给页面上
             #      没有的东西配定义，等于把说明书摆进界面（与 Q-14 同型）；
             #   ② 其余 11 个词**各自都有「？」落点**：筛选条 4 ＋ 级别药丸 3 ＋
-            #      顶部灯 1 ＋ 各处 `GL.chip`。同一页两套入口 ⇒ 一屏十几个「？」；
+            #      顶部灯 1 ＋ 各处 `GL.chip`（0.53.0 T3.2 起药丸那 3 颗随顶部计数排
+            #      撤走，R0/L2/L1 的落点改在日报四指标 —— U-04 基线随之 8→5）。
+            #      同一页两套入口 ⇒ 一屏十几个「？」；
             #      在安全语境里，用户第一反应是「有十几处有问题」（Q-11 双入口）；
             #   ③ 创始人原话：「根本没必要写，应直接去掉」。
             #   ⇒ 删它**不减**任何曾在页面出现过的词的可达性：U-04 数的是
-            #     `class="term mk"` 落点（8 个，未动），这里删的是 `GL.line` 整块。
+            #     `class="term mk"` 落点（当时 8 个；0.53.0 起 5 个），这里删的是
+            #     `GL.line` 整块。
             )
     rows = M.filter_items(items, filt, now=now)
+    # ★★ 0.53.0（T3.3，设计 §14.3 第 3 条）：工具徽标的开关＝**本次载入的
+    #   全部记录**里观测到 ≥2 个工具（＝设计原话"本机观测"）。刻意**不按
+    #   当前筛选**算：否则按工具筛一次、徽标自己就消失了 —— 同一个事实
+    #   在两种筛选下两种显示。单工具机器上恒不出现（那才是 v0 的错法：
+    #   每行重复几百次同一个工具名）。
+    _show_host = M.host_count(items) >= 2
     if not rows:
         if filt == M.BUCKET_ACTION:
             empty_title = "当前读取到的记录里，没有要你处理的事。"
@@ -1724,10 +1842,18 @@ def _view_inbox(items, token, filt, now=None):
         parts = []
         for g in groups:
             if g["count"] == 1 and g["ids"] and g["ids"][0] in by_id:
-                parts.append(_item_html(by_id[g["ids"][0]], token))
+                parts.append(_item_html(by_id[g["ids"][0]], token, posture,
+                                        show_host=_show_host))
             else:
-                parts.append(_group_html(g, token, bucket=M.BUCKET_ACTION,
-                                         total=len(rows)))
+                parts.append(_group_html(
+                    g, token, bucket=M.BUCKET_ACTION, total=len(rows),
+                    posture=posture,
+                    # ★ 与徽标同一个开关：单工具机器上这行分布恒等于"全部那一
+                    #   个工具"，每行再说一遍就是 v0 的噪声错法。见 `_show_host`。
+                    host_dist=(M.host_phrase([by_id[i] for i in g["ids"]
+                                              if i in by_id],
+                                             label_of=_host_label)
+                               if _show_host else "")))
         # ★ 0.37.1 去重：归并说明**不重复数字**（件数已在筛选条、24h 各级
         #   口径已在顶部条那排药丸各显示一次），这里只说"怎么读这些行"。
         # ★ 0.37.2 精简（创始人 2026-10-09「解释放注释里，点问号看」）：
@@ -1741,6 +1867,8 @@ def _view_inbox(items, token, filt, now=None):
         return head + note + "".join(parts)
     if filt in (M.BUCKET_INFO, M.BUCKET_ARCHIVE):
         groups = M.group_by_kind(rows)
+        by_id2 = {it.id: it for it in rows}
+        # ★ 0.53.0（T3.3）：工具分布同样挂在归并行尾部（同一函数，不另写）
         return (head
                 # ★ 0.37.2 去重：「共 N 条」的 N 与筛选条上同一个 tab 的数字
                 #   **逐字相同**（两者都是 `filter_items` 的条数）⇒ 同一屏
@@ -1750,7 +1878,11 @@ def _view_inbox(items, token, filt, now=None):
                 + ("<div class=\"note\" style=\"margin:0 0 10px\">"
                    "%s：按类型归并。"
                    "</div>" % _esc(M.filter_label(filt)))
-                + "".join(_group_html(g, token, bucket=filt, total=len(rows))
+                + "".join(_group_html(
+                    g, token, bucket=filt, total=len(rows), posture=posture,
+                    host_dist=(M.host_phrase(
+                        [by_id2[i] for i in (g.get("ids") or []) if i in by_id2],
+                        label_of=_host_label) if _show_host else ""))
                           for g in groups))
     if filt not in ("action", "all"):
         head += ("<div class=\"note\" style=\"margin:0 0 10px\">"
@@ -1758,7 +1890,8 @@ def _view_inbox(items, token, filt, now=None):
                  "筛选：<b>%s</b> · %d / %d 条（<a href=\"/?v=inbox&f=all\">"
                  "返回已载入记录</a>）"
                  "</div>" % (_esc(M.filter_label(filt)), len(rows), n_all))
-    return head + "".join(_item_html(i, token) for i in rows)
+    return head + "".join(_item_html(i, token, posture, show_host=_show_host)
+                          for i in rows)
 
 
 def _view_report(rep, token, items=None):
@@ -1871,6 +2004,20 @@ def _view_report(rep, token, items=None):
         #   总数，与分子同质却看不出来，而「1 / 1」天然被读成占比。窗口口径
         #   本页页头已声明一次（U-05 不许行内再挂「点开看每一次」那类旧句）。
         _rule_total = sum(int(r["count"]) for r in rep["rules"])
+        # ★★ 0.53.0（T5.1，设计 §14.4 第 3 条）：**行尾**给工具分布，
+        #   不新增小节（另开一节＝同页两套计数）。开关与收件箱徽标同一条：
+        #   本机只观测到一个工具时恒等于"全是它"，每行再说一遍是纯噪声。
+        #   ★ 每条规则只取**当天**、**该规则**的记录 —— 与行里的"命中 N 次"
+        #     同一个集合（否则就是两个口径摆在一行）。
+        _show_host_dist = M.host_count(items or []) >= 2
+
+        def _rule_host(r):
+            if not _show_host_dist:
+                return ""
+            sub = [it for it in (items or [])
+                   if it.rule_id == r["rule_id"]
+                   and str(it.ts)[:10] == str(rep.get("day"))[:10]]
+            return M.host_phrase(sub, limit=2, label_of=_host_label)
         rows = "".join(
             # ★ 0.50.4（Q-04）：显示规则**人话名**；规则号退到 hover —— 工程串
             #   不上主界面。★★ 0.51.0（品质审查拍板点 3/4，2026-10-16）：Q-04 的
@@ -1883,11 +2030,12 @@ def _view_report(rep, token, items=None):
             "<div class=\"row\"><span class=\"k\">"
             "<a href=\"/?v=inbox&f=day:%s:rule:%s\" title=\"%s\">%s"
             "<span class=\"rid\">%s</span></a></span>"
-            "<span>命中 %d 次</span></div>"
+            "<span>命中 %d 次%s</span></div>"
             % (_esc(rep["day"]), _esc(r["rule_id"]),
                _esc(r.get("zh") or r["rule_id"]),
                _esc(r.get("label") or r.get("zh") or r["rule_id"]),
-               _esc(r["rule_id"]), int(r["count"]))
+               _esc(r["rule_id"]), int(r["count"]),
+               (" ｜ " + _esc(_rule_host(r))) if _rule_host(r) else "")
             for r in rep["rules"][:10])
         rules = ("<div class=\"card\"><h2>规则命中排行 · 当日共 %d 次"
                  "</h2><div class=\"rows\">%s</div></div>" % (_rule_total, rows))
@@ -1911,7 +2059,7 @@ def _view_report(rep, token, items=None):
              "<div class=\"row\"><span class=\"k\">%s 被改过几处</span><span>%d</span></div>"
              "<div class=\"row\"><span class=\"k\">坏了几行</span><span>%d</span></div>"
              "<div class=\"row\"><span class=\"k\">%s</span><span>%d（本来就不参与比对）</span></div>%s%s</div></div>"
-             % (GL.chip("chain_check"), cls, _esc(R.chain_status_label(ch["status"])),
+             % (GL.chip("chain_check"), cls, _esc(_chain_verdict(ch)),
                 ch["files"], ch["records"],
                 GL.chip("chain"), ch["broken"], ch.get("bad_lines", 0),
                 GL.chip("unchained"), ch.get("unchained", 0),
@@ -1939,6 +2087,24 @@ def _view_report(rep, token, items=None):
     return ("<h2>%s · %s</h2>"
             "<p class=\"note\">四个数都只数<b>最近 %d 小时</b>。</p>%s%s%s%s"
             % (PAGE_TITLES["report"], _esc(rep["day"]), hrs, m, pr, rules, chain))
+
+
+def _chain_ok_state(ch):
+    """这次链检到底**查成了**没有（除 `status` 之外任何地方不许各判一次）。"""
+    return str((ch or {}).get("status") or "") != "unknown"
+
+
+def _chain_verdict(ch):
+    """「校验结果」这一格该显示什么：查成了给中文状态词，没查成给告警句。
+
+    ★ 0.53.0（T5.2／设计 §4.4-3、§14.6-4）：原来"没查成"显示的是「未能核验」——
+      那是**状态**，读起来像"暂时没数据"，而真相是这次检查一条结论都没产出
+      （页面别处的绿色因此不能算数）。⇒ 换成 `R.chain_unverified()` 的告警句。
+    ★ 两处落点（运行状态页、日报页链卡）都走本函数，**不许各写一份**。
+    """
+    if _chain_ok_state(ch):
+        return R.chain_status_label((ch or {}).get("status"))
+    return R.chain_unverified((ch or {}).get("files", 0))
 
 
 def _view_health(rep, token, items=None):
@@ -1981,6 +2147,41 @@ def _view_health(rep, token, items=None):
     #   ⇒ 状态词全站只有**顶部条**一处；本页只放顶部条没有的证据。
     # (标签, 值, 颜色样式, 值是否可信 HTML)
     # ★ 标签一律 trusted=True：`GL.chip()` 是我们自己生成的 HTML。
+    # ★ 0.53.0（T5.2／设计 §4.4-3）：链检"没查成"改说告警句（见 `_chain_verdict`）。
+    #   有查成时原句**逐字不变**（上版两处单位修正都在那半句里，不许顺手改）。
+    if _chain_ok_state(ch):
+        _chain_value = ("%s（检查了 %d 个文件、%d 条记录，被改 %d）"
+                        % (R.chain_status_label(ch["status"]), ch["files"],
+                           ch["records"], ch["broken"]))
+    else:
+        _chain_value = _chain_verdict(ch)
+    # ★ 0.53.0（T5.2／设计 §4.4-1、§14.6-2）：工具识别**最小版**（一行，不另开小节）。
+    #   三样：判定方式（哪条线索）／近 7 天认得出几条／说不清占比超 5% 提醒。
+    #   ★ 不做「旧记录分代」（v1.5 划到非目标：分代钻取）。
+    #   ★ 百分比同句给分母（F40）：句子里先有「N 条记录」，再有「（X%）」。
+    #   ★ `total` 为零不许渲染成「0% 说不清」—— 那是"没查"，不是"查过没事"。
+    _hs = M.host_attribution_stats(items or [], days=7)
+    if _hs["total"] <= 0:
+        _host_value = "近 7 天没有记录——暂时看不出它认不认得工具"
+        _host_css = "neutral"
+    else:
+        _conf = []
+        for _k in ("high", "medium", "low"):
+            _n = _hs["by_conf"].get(_k, 0)
+            if _n:
+                _conf.append("%s %d 条" % (M.HOST_CONF_ZH[_k], _n))
+        if not _conf:                       # host 有值但没留置信度 ⇒ 照实说线索不明
+            _conf = ["线索不明 %d 条" % _hs["by_conf"].get("none", 0)]
+        _pct = int(round(_hs["unclear_ratio"] * 100))
+        _host_value = ("近 7 天 %d 条记录里，%d 条认得出是哪个工具（%s），"
+                       "%d 条说不清（%d%%）；线索取工具自己报的环境信息。"
+                       % (_hs["total"], _hs["attributed"], "、".join(_conf),
+                          _hs["unclear"], _pct))
+        if _hs["unclear_ratio"] > 0.05:
+            _host_value += "说不清偏多——多半是记录太旧，或最近换过工具。"
+            _host_css = "warn"
+        else:
+            _host_css = "ok"
     rows = [
         (GL.chip("sentinel", "最近 %d 小时被拉起过" % _hrs),
          _revived_value, "warn" if _revived_count else "ok", True),
@@ -1988,16 +2189,16 @@ def _view_health(rep, token, items=None):
         #   事实搬来本页作**证据**（口号变证据）—— 这句由 `_check_bind` 的
         #   硬校验背书：非回环地址 make_server 直接抛错，不是嘴上说回环。
         ("监听地址", "仅本机回环——服务不接受外部连接", "ok", False),
-        (GL.chip("chain_check"),
-         "%s（检查了 %d 个文件、%d 条记录，被改 %d）"
-         # ★ 0.36.1：原先直接输出 `ch["status"]`，那是英文变量
-         #   （ok / broken / unknown）—— 页面上冒出英文变量词。
-         #   ⇒ 一律走 `chain_status_label()` 的中文。
-         % (R.chain_status_label(ch["status"]), ch["files"],
-            ch["records"], ch["broken"]), cls, False),
+        # ★ 0.36.1：原先直接输出 `ch["status"]`，那是英文变量
+        #   （ok / broken / unknown）—— 页面上冒出英文变量词。
+        #   ⇒ 一律走 `chain_status_label()` 的中文。
+        # ★ 0.53.0（T5.2）：句子的**拼装**提到 `rows` 之前（见上）——因为"没查成"
+        #   时它换成告警句，而告警句自带文件数，不再套那层括号。
+        (GL.chip("chain_check"), _chain_value, cls, False),
         # ★ 0.50.4（Q-16）：原正文「本页没查这台电脑的实际安装情况」与 `hook`
         #   词条的 exc「这一页没查你这台电脑的实际安装情况」**是同一句出现两次**
         #   ⇒ 正文改成讲**结论**（它装在哪个环节），否证交给词条（定义处只讲一次）。
+        ("工具识别", _host_value, _host_css, False),
         (GL.chip("hook"), "工具调用前先过规则；本页不查它装没装", "neutral", False),
         (GL.chip("boundary"), "浏览器里的操作、没接进来的工具，Antinel 管不到",
          "warn", False),
@@ -2068,36 +2269,15 @@ def _view_ledger(rep, token, items=None):
     _n_days = len(_rec)
     has_data = bool(_n_days)
     _streak = L._streak(set(_rec), today=_today) if _rec else 0
-    _td = idx.get(_today) or {}
-    values = ([int(_td.get("blocked", 0) or 0), int(_td.get("noticed", 0) or 0),
-               int(_td.get("breached", 0) or 0), int(_td.get("acked", 0) or 0)]
-              if has_data else ["—"] * 4)
-    # 当天四个数字可点 —— 明细的唯一实现在收件箱（归并/处置/筛选都在那边），
-    # 账本只做一击直达的深链入口（同一纪律家族：明细页也只能有一份）。
-    _card_link = {"ledger_blocked": "day:%s:lv:L2" % _today,
-                  "ledger_noticed": "day:%s:lv:L1" % _today,
-                  "ledger_breached": "day:%s:lv:R0" % _today,
-                  "ledger_acked": "closed:%s" % _today} if has_data else {}
-
-    def _v(key, i):
-        raw = str(values[i])
-        link = _card_link.get(key)
-        return ('<a href="/?v=inbox&f=%s">%s</a>' % (link, raw)) if link else raw
-
-    # ★★ 0.51.2（机制层，创始人 2026-10-17「这个能上升到机制层就好了」）：
-    #   卡片由**列表**生成、数量词取 `len(_cards)`（见下方 `_lead`）—— 不再
-    #   手写 4 组 `%s` 配一句硬编码「下列四个数」。旧写法下两者**没有任何
-    #   引用关系** ⇒ 「改了卡片数忘改文案」不是疏忽而是**必然**（本批三问之
-    #   一的成因）。派生后结构一变文案自动跟。
-    #   ★ 同页另一处数字的根治同理：全页**只有一个**按天计数来源
-    #     （`M.day_counts`，唯一实现），不许在渲染层另写一份。
-    _cards = [("ledger_blocked", _v("ledger_blocked", 0)),
-              ("ledger_noticed", _v("ledger_noticed", 1)),
-              ("ledger_breached", _v("ledger_breached", 2)),
-              ("ledger_acked", _v("ledger_acked", 3))]
-    m = ('<div class="metrics">' + "".join(
-        '<div class="metric"><div class="k">%s</div><div class="v">%s</div></div>'
-        % (GL.chip(k), v) for k, v in _cards) + "</div>")
+    # ★★ 0.53.0（T4.2，设计 §14.5 第 1 条）：**撤头部四指标卡**。
+    #   撤掉的是什么：当天「拦截 / 注意 / 防护缺口 / 已处理」四张卡（带当天的数）。
+    #   为什么撤：这四个数的家是**日报**（同一 24 小时窗口、同一口径）——
+    #     同口径两个落点＝重复（U20 是同一条纪律）。账本这页的职责是**历史**。
+    #   信息去哪了：① 今天 → 下方一行深链直达日报（数不在这里再抄一份）；
+    #     ② 任一历史日的四个数仍在按天明细行里，且每个数都是可点深链；
+    #     ③ 四个词的定义仍可点开 —— 「？」芯片随卡片一起消失就会让词条无落点
+    #        （P13 术语 100% 有落点），故**移**到「过去 7 天」小节的读法行。
+    #   ★ 减法留账三列见施工单 v1.6 登记簿第 2 笔。
     # 历史覆盖：**一行**（不再占两张卡）；连续与总数相等时只说一次 ——
     # 「11 天、11 天」这种同数并列会让读者以为是 bug（创始人三问之二）。
     # ★★ 这一行**无条件渲染**（2026-10-17 复跑抓到）：`days`/`streak` 两个
@@ -2126,13 +2306,12 @@ def _view_ledger(rep, token, items=None):
     #     ② 底部**禁用态**「认领到账号（未启用）」按钮保留。
     warn = ("<p class=\"note\">账本尚无可核对记录；这表示还没有可统计的事件，"
             "不是确认累计为零。</p>" if not has_data else "")
-    # ★ 0.50.4：口径说明一行 —— 大字改当天后**必须**写明窗口，否则读者无从
-    #   判断这四个数是今天的还是有史以来的（同族：日报页「只数最近 N 小时」）。
-    #   ★★ 0.51.0：累计行撤了 ⇒ 「累计见本页末行」改为指向**按天明细区**。
-    # ★★ 0.51.2：数量词**派生**自卡片列表（`_zh_num(len(_cards))`），不手抄。
-    _lead = ("<p class=\"note\">下列%s个数只数<b>今天</b>（本地自然日）；"
-             "更早的日子看下面的按天明细。</p>" % _zh_num(len(_cards))
-             if has_data else "")
+    # ★ 0.53.0（T4.3，设计 §14.5 第 2 条）：**今天不在这一页出数** ——
+    #   一行深链到日报。刻意**不**把今天的四个数搬过来：搬过来就是同一事实
+    #   两个落点，而两个落点迟早不同源（本仓 F40 的经典作案现场）。
+    _today_line = ('<p class="note">今天的数在 <a href="/?v=report">日报</a>'
+                   '（同一口径，这里不重复）；下面是已经过完的日子。</p>'
+                   if has_data else "")
     # ────────────────────────────────────────────────────────────────
     # ★★ 0.51.0 明细区（银行流水模式，v1.1 设计）：区一「最近 7 天」＋
     #   区二「更早 · 按月」折叠。数据源＝store 现算（`M.day_counts`，唯一实现），
@@ -2163,14 +2342,26 @@ def _view_ledger(rep, token, items=None):
                 "<a href=\"/?v=inbox&f=day:%s\">%s</a></span>"
                 "<span>%s</span></div>" % (d, d, _day_cells(d, e)))
 
+    # ★★ 0.53.0（T4.2）：四个词的**读法行无条件渲染** —— 撤掉头部四卡后，
+    #   这四颗「？」是 `ledger_blocked/noticed/breached/acked` 四条词条在本页的
+    #   唯一落点。若把它挂在 `if _rec`（有记录才渲染）里，一台**还没有可计数
+    #   事件**的机器上这四个词就没有任何落点 —— 0353 P13（术语表 100% 有落点）
+    #   会当场翻红（本批实测踩到一次；0.51.2 同型：`has_data` 变严把术语芯片
+    #   一起弄没）。
+    _legend = ("<div class=\"note\">每天依次是：%s ｜ %s ｜ %s ｜ %s"
+               "（单位：条）。</div>"
+               % (GL.chip("ledger_blocked"), GL.chip("ledger_noticed"),
+                  GL.chip("ledger_breached"), GL.chip("ledger_acked")))
     sections = ""
     if _rec:
         # 区一：固定 7 个日历天（含今天），新→旧。没开机的日子也出现在这里，
         # 淡显示「当天无记录」—— 7 天窗口是承诺，有数的行才可点。
+        # ★★ 0.53.0（T4.3）：起点改**昨天**（昨天起 7 个日历天）—— 今天在
+        #   日报，这里只列过完的日子；含今天会让同一屏两个"今天"。
         _w7 = [(datetime.now().astimezone().date() - timedelta(days=k)).isoformat()
-               for k in range(7)]
+               for k in range(1, 8)]
         _rows7 = "".join(_day_row(d, idx.get(d) or {}) for d in _w7)
-        sections += ("<div class=\"card\"><h2>最近 7 天</h2>"
+        sections += ("<div class=\"card\"><h2>过去 7 天</h2>"
                      "<div class=\"rows\">%s</div></div>" % _rows7)
         # 区二：从最早有记录的月份到当月，每月一行（新→旧）——**整月完整**，
         # 不扣最近 7 天已列的天（宁重复 ≤7 行，不做边界算术）。月行只展开
@@ -2210,11 +2401,204 @@ def _view_ledger(rep, token, items=None):
                    tot["acked"], len(mdays), body_rows))
         sections += ("<div class=\"card\"><h2>更早 · 按月</h2>"
                      "<div class=\"rows\">%s</div></div>" % "".join(mrows))
-    return ("<h2>%s · 本地摘要</h2>%s%s%s%s%s"
+    return ("<h2>%s · 本地摘要</h2>%s%s%s%s"
             "<div class=\"card\"><button class=\"btn\" disabled "
             "title=\"将来上线账号后才可用，现在没有这个能力\">"
             "认领到账号（未启用）</button></div>"
-            % (GL.chip("ledger"), _lead, m, _meta, sections, warn))
+            % (GL.chip("ledger"), _today_line, _meta, _legend + sections, warn))
+
+
+# ═════════════════════════ 体检页（第五 TAB · 0.53.0 T0）════════════════════════
+#: 创始人 2026-10-18 03:18 截图交办：四个 TAB 变五个，多一个「体检」。
+#: ★ 接入不是新建（设计 §20.1）：渲染与采集**全部复用 ui_server**（唯一实现），
+#:   本模块只做四件控制台侧的事 —— 入口（第五 TAB）、进程内缓存、
+#:   快照（设计 §21.2 接触点 4）、三态与边界（§21.3／§20.2 原文）。
+#: ★★ GET 从不触发采集：host-scan 要 4～9 分钟，每次翻页都跑会把页面拖死
+#:   （0.35.2 同款事故：日报无条件复算审计链 7.8s）⇒ 只有用户点「开始体检」
+#:   （POST op=exam）才起后台线程；线程里跑 ui_server 的**同一对**采集器
+#:   （同一子进程命令＝同一数据路径，禁第二份）。
+_EXAM = {"state": "idle", "stage": "", "error": "", "result": None,
+         "saved": "", "started": 0.0, "finished": 0.0}
+_EXAM_LOCK = threading.Lock()
+
+#: 三态原文（设计 §21.3 写死，不许临场编；负控 N-H10 守互斥）
+_EXAM_FIRST = "首次体检，还没有对比基线。"
+_EXAM_FAILED = "这次没查成：0 个地方被检查——结果不算数。"
+_EXAM_NO_TOOLS = ("这台电脑上没找到 AI 工具。这可能是好事，也可能是我们没找到"
+                  "——可以跑 <code>antinel host-scan</code> 再看一次。")
+#: 首启引导条（设计 §21.2 接触点 2，逐字）
+_EXAM_GUIDE = "这是第一次打开监理。先做一次体检吧——它只读，不会改任何东西。"
+#: 边界声明（设计 §20.2）：前四行＝ui_server TPL 原文（控制台版逐字保留），
+#:   后四行＝本节新增的局部边界（写在首屏，挡「体检过了＝我安全了」这个误解）
+_EXAM_BOUND = (
+    "<p class=\"muted small\"><b>先说清楚它能查到什么、查不到什么：</b><br>"
+    "· 它读的是<b>工具自己写下来的字段</b>（比如某个工具在自己的文件里记了「上次上传」）。"
+    "会偷的工具不会写，所以我们读不到 —— 这不是\"它干净\"，是\"它没说\"。<br>"
+    "· 下面每一档都带「<b>自认</b>」二字，就是这个意思：我们看到的是它自己承认的部分。<br>"
+    "· 「<b>没查到</b>」会单独列出来 —— 那是我们<b>没走到</b>的地方，"
+    "请当空白读，<b>不要</b>当成\"没问题\"。</p>"
+    "<p class=\"muted small\"><b>这次体检只是局部的。</b>查的是「你电脑上装了哪些 AI 工具、"
+    "它们自己有没有承认往外送过东西」。<b>不查</b>代码漏洞、不查病毒、不查性能、"
+    "不查别的软件、也不查你有没有被入侵。想要那种全面体检，需要另外的工具。</p>")
+
+
+def default_view():
+    """首启默认落点（设计 §21.2 接触点 2）：从未体检过 ⇒ 先落体检页。
+
+    ★ 读不出快照状态时落收件箱（老行为）—— 不拿用户的首屏赌一个可能误判的默认值。
+    """
+    try:
+        import host_shield as _hs
+        seen = bool(_hs.health_reports())
+    except Exception:                                         # noqa: BLE001
+        seen = True
+    return "inbox" if seen else "health_exam"
+
+
+#: 路由白名单（0.53.0 T0 起五把视图；`bubble` 在 handler 里单独分支，不走这里）
+_VIEWS_ALLOWED = ("inbox", "report", "health", "ledger", "health_exam")
+
+
+def _resolve_view(view):
+    """URL 里的视图名 → 真视图名。空 ⇒ 首启落点；不在白名单 ⇒ 收件箱。
+
+    ★ 不静默当成"全部"：坏视图名落回收件箱，与坏筛选值落默认档同一条纪律
+      （用户以为自己看到了某个页，其实看到的是另一个）。
+    """
+    if not view:
+        return default_view()
+    return view if view in _VIEWS_ALLOWED else "inbox"
+
+
+def _exam_ago(path):
+    """「上次体检：N 天前」—— 当天＝「刚刚」（设计 §20.4 一行版；§20.5：对比不展开）。
+
+    ★ 取快照里的 `generated_at`（存档唯一事实）；读不出 ⇒ 如实说时间不详，
+      不拿文件名猜（文件名是第二来源，两份事实迟早对不上）。
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            doc = json.load(f)
+        dt = datetime.fromisoformat(str(doc.get("generated_at") or ""))
+    except Exception:                                         # noqa: BLE001
+        return "时间不详"
+    n = (datetime.now().astimezone().date() - dt.date()).days
+    return "刚刚" if n <= 0 else "%d 天前" % n
+
+
+def _exam_absorb(res):
+    """体检跑完把结论收成一份快照（设计 §21.2 接触点 4：「体检完成后写快照」）。
+
+    ★ 只含计数、不收任何文件内容（与 host-audit 存档同一条纪律）；
+      写失败返回 None ⇒ 引导条照旧显示（「完成一次体检」这件事没留下证据），
+      **不许**把没存下来渲染成存下来了。
+    """
+    import antinel as _A
+    import host_shield as _hs
+    scan = (res or {}).get("scan") or {}
+    eg = (res or {}).get("egress") or {}
+    vc = scan.get("counts_by_verdict") or {}
+    doc = {"schema": "antinel.health/1",
+           "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+           "source": "console-exam",
+           "tools": len(scan.get("tools") or []),
+           "verdicts": {k: int(vc.get(k, 0) or 0) for k in _A.VERDICTS},
+           "conns": len(((eg.get("snapshot") or {}).get("conns")) or [])}
+    try:
+        return _hs.save_health_report(doc)
+    except Exception:                                         # noqa: BLE001
+        return None
+
+
+def _exam_start():
+    """起一次体检（幂等：正在跑就不再起一条）。返回是否真的起了。"""
+    with _EXAM_LOCK:
+        if _EXAM.get("state") == "running":
+            return False
+        _EXAM.update(state="running", stage="正在看有没有程序在往外发数据…",
+                     error="", started=time.time(), finished=0.0)
+    threading.Thread(target=_exam_job, daemon=True).start()
+    return True
+
+
+def _exam_job():
+    """后台跑一次体检：先快后慢（与 ui_server._job 同一次序）。
+
+    ★ 跑完收快照（`_exam_absorb`）—— 存档只增不改，超量由 host_shield 轮转。
+    ★ 诱饵文件状态走 `antinel.canary_summary`（唯一实现），取不到说「没查到」，
+      **不许**静默变成「没有诱饵文件」。
+    """
+    import ui_server as _U
+    try:
+        eg = _U._run_egress(_pkg_root())
+        with _EXAM_LOCK:
+            _EXAM["stage"] = "正在逐个检查你电脑上的 AI 工具…（这一步通常要几分钟）"
+        scan = _U._run_host_scan(_pkg_root())
+        res = {"scan": scan, "egress": eg,
+               "canary": _U._canary_data(_pkg_root())}
+        saved = _exam_absorb(res)
+        with _EXAM_LOCK:
+            _EXAM.update(state="done", result=res, stage="", saved=saved or "",
+                         finished=time.time())
+    except Exception as e:                                     # noqa: BLE001
+        with _EXAM_LOCK:
+            _EXAM.update(state="error",
+                         error="%s: %s" % (type(e).__name__, e),
+                         finished=time.time())
+
+
+def _view_exam(token=""):
+    """体检页（第五个 TAB）。★ 接入不是新建：渲染复用 `ui_server._result_html`
+    （唯一实现），本函数只做入口、缓存读取、快照行、三态与边界。"""
+    import ui_server as _U
+    import antinel as _A
+    import host_shield as _hs
+    out = []
+    reports = _hs.health_reports()
+    with _EXAM_LOCK:
+        st = dict(_EXAM)
+    res = st.get("result")
+    # ---- 页头：标题 ＋「上次体检」一行（§20.4；空态不显示那一行，§21.3）----
+    _last = _exam_ago(reports[-1]) if reports else ""
+    if _last:
+        out.append("<h2>%s · 上次体检：%s</h2>"
+                   % (PAGE_TITLES["health_exam"], _last))
+    else:
+        out.append("<h2>%s</h2>" % PAGE_TITLES["health_exam"])
+        out.append("<div class=\"note\">%s</div>" % _EXAM_FIRST)
+    # ---- 首启引导条（§21.2 接触点 2，逐字；快照存在后永久消失，§21.4）----
+    if not reports:
+        out.append("<div class=\"guide\"><b>%s</b></div>" % _EXAM_GUIDE)
+    # ---- 边界（§20.2：TPL 原文逐字保留 ＋ 局部边界新增，写在首屏）----
+    out.append(_EXAM_BOUND)
+    # ---- 触发／进行中／结果 ----
+    if st.get("state") == "running":
+        out.append("<div class=\"note\">体检正在进行：%s"
+                   "　<a href=\"/?v=health_exam\">刷新这一页看看</a></div>"
+                   % _esc(st.get("stage") or ""))
+    elif st.get("state") == "error":
+        out.append("<div class=\"err\">这次没查成：%s——结果不算数，"
+                   "不要当成「全部干净」。</div>"
+                   % _esc(st.get("error") or "原因不详"))
+        out.append(_form(token, "exam", label="重新体检"))
+    elif res:
+        scan = res.get("scan") or {}
+        tools = scan.get("tools")
+        if tools is None:
+            out.append("<div class=\"err\">%s</div>" % _EXAM_FAILED)
+        else:
+            if not tools:
+                out.append("<div class=\"warn\">%s</div>" % _EXAM_NO_TOOLS)
+            out.append(_U._result_html(res, _A.VERDICTS, _A._ev_human))
+        if not st.get("saved"):
+            out.append("<div class=\"note\">这次体检的结果没能存成本机档案"
+                       "（目录不可写？）——下次打开还会提醒你做一次。</div>")
+        out.append(_form(token, "exam", label="重新体检"))
+    else:
+        out.append("<div class=\"note\">这次打开还没跑过体检。跑一次只要几分钟，"
+                   "全程只读，不改你电脑上的任何文件。</div>")
+        out.append(_form(token, "exam", label="开始体检"))
+    return "<div class=\"exam\">%s</div>" % "".join(out)
 
 
 #: ★ 0.36.5 **页面名的唯一真源**（从 `render_page` 体内提为模块级）。
@@ -2224,7 +2608,7 @@ def _view_ledger(rep, token, items=None):
 #:   上一次是 `_matches_title` 的注释与实现相反）。
 #:   ⇒ 唯一真源在这里，窗口侧 **import 它**，不二次实现。
 PAGE_TITLES = {"inbox": "收件箱", "report": "日报", "health": "运行状态",
-               "ledger": "账本"}
+               "ledger": "账本", "health_exam": "体检"}
 
 
 def render_page(view="inbox", filt=None, root=None, token="", items=None, rep=None,
@@ -2281,12 +2665,17 @@ def render_page(view="inbox", filt=None, root=None, token="", items=None, rep=No
             body = _view_health(rep, token, items)
         else:
             body = _view_ledger(rep, token, items)
+    elif view == "health_exam":
+        # ★ 0.53.0（T0）：体检页**不算日报**（不白等 7.8s 复算审计链）——
+        #   它要的数据由 _view_exam 里的进程内缓存负责，GET 从不触发采集。
+        body = _view_exam(token)
     else:
-        body = _view_inbox(items, token, filt, now=now)
+        body = _view_inbox(items, token, filt, now=now, posture=posture)
     if notice:
         body = ('<div class="notice" role="status"><b>操作回执：</b>%s</div>'
                 % _esc(str(notice)[:800])) + body
-    return (_head(title, token)
+    return (_head(title, token,
+                  extra_css=EXAM_CSS if view == "health_exam" else "")
             + _bar(items, token, posture=p, now=now, view=view, ex=ex)
             + _tabs(view, token)
             + "<main>" + body + "</main>"
@@ -2415,11 +2804,13 @@ def _make_handler(token, root):
             if u.path == "/api/health":
                 return self._json({"ok": True, "bind": self.server.server_address[0]})
             if u.path in ("/", "/index.html"):
-                view = (q.get("v") or ["inbox"])[0]
+                # ★ 0.53.0（T0）：没带 v 时按首检状态落点（无快照 ⇒ 体检页）；
+                #   坏视图名落回收件箱（_resolve_view，不静默当成"全部"）。
+                view = (q.get("v") or [""])[0]
                 filt = (q.get("f") or [M.BUCKET_ACTION])[0]
                 # ★ 0.49.0：`v=bubble` 是紧急提醒窗（「需要人工介入马上处理」的
                 #   通知页）—— 与面板同源同 CSS，但**没有 tab、没有收件箱**，
-                #   只有事由＋「知道了/打开值守台」。事由走 query（一次性渲染）。
+                #   只有事由＋「知道了/打开Antinel 监理」。事由走 query（一次性渲染）。
                 if view == "bubble":
                     import inbox_bubble as BB
                     try:
@@ -2428,7 +2819,7 @@ def _make_handler(token, root):
                     except Exception:                       # noqa: BLE001
                         _rid = ""
                     # ★ 0.50.3：渲染这一枚紧急提醒的**那一刻**，Antinel 监理是不是已经开着。
-                    #   开着 ⇒ 不再画「打开值守台」按钮（点了它本来就该只是"切过去"，
+                    #   开着 ⇒ 不再画「打开Antinel 监理」按钮（点了它本来就该只是"切过去"，
                     #   画一个"打开"按钮是在说一件不成立的事）。判不出来 ⇒ 照旧画
                     #   （宁可多一个按钮，也不让用户点了没反应）。
                     try:
@@ -2444,8 +2835,9 @@ def _make_handler(token, root):
                                      console_open=(_cop is True))
                     return self._send(200, "text/html; charset=utf-8",
                                       page.encode("utf-8"))
-                if view not in ("inbox", "report", "health", "ledger"):
-                    view = "inbox"
+                # ★ 0.53.0（T0）：白名单从四把扩到五把（health_exam）；
+                #   空/坏视图名的归落一律走 _resolve_view（唯一决策点）。
+                view = _resolve_view(view)
                 # ★ 非法筛选值 ⇒ 退回默认档（**不静默当成"全部"** —— 那会让用户
                 #   以为自己看到的是筛选结果，其实是一整条历史）。
                 if not M.known_filter(filt):
@@ -2550,7 +2942,7 @@ def _make_handler(token, root):
                     #   `bubble_ack` ＝用户说「知道了」—— 只记确认时间
                     #     （同类 ACK_QUIET 秒内不再冒），**不**代用户把事标成
                     #     已处理（那会篡夺用户的决定，也把台账改假）。
-                    #   `bubble_open` ＝把完整值守台开出来（复用 C4 那条
+                    #   `bubble_open` ＝把完整Antinel 监理开出来（复用 C4 那条
                     #     「谁开窗谁等它就位」的路，不另起一套）。
                     import inbox_bubble as BB
                     if op == "bubble_ack":
@@ -2566,7 +2958,7 @@ def _make_handler(token, root):
                     # ★ 0.50.0：收缩成漂浮哨标（最小态）。全链只有一处实现
                     #   （`inbox_logo.collapse_console`）——本段只做路由与如实打印。
                     #   ★ 顺序安全：哨标没起来 ⇒ **不关面板窗**（用户不至于
-                    #     点一下收缩，值守台没了、哨标也没起）。
+                    #     点一下收缩，Antinel 监理没了、哨标也没起）。
                     #   ★ 关的是**本面板窗**（按 token 派生 run_id 严格匹配），
                     #     不是枚举批量关。
                     import inbox_logo as IL
@@ -2606,6 +2998,15 @@ def _make_handler(token, root):
                           % (op, {k: _rep.get(k) for k in ("ok", "moved", "grew",
                                                           "left", "windows")}))
                     return self._json(_rep)
+                elif op == "exam":
+                    # ★ 0.53.0（T0）：体检入口。GET 从不触发采集（host-scan
+                    #   4～9 分钟）—— 只有点了「开始体检」才起后台线程；线程里
+                    #   跑 ui_server 的同一对采集器（同一子进程命令＝同一数据
+                    #   路径，禁第二份）。正在跑 ⇒ 幂等忽略（不叠第二条线程）。
+                    if _exam_start():
+                        print("[console] exam -> started")
+                    else:
+                        print("[console] exam -> already running")
                 else:
                     iid = (form.get("id") or [""])[0]
                     ids = [x for x in (form.get("ids") or [""])[0].split(",") if x]
@@ -2638,8 +3039,10 @@ def _make_handler(token, root):
                 # 点开即已读由页面 fetch 调用；回 JSON 让页面只在**写入成功**后
                 # 撤掉未读点。303 后再 GET 会因 cookie 禁用造成「实际已写、UI 误报」。
                 return self._json({"ok": True})
+            # ★ 0.53.0（T0）：体检动作落回体检页（其余动作照旧回收件箱）。
+            _back = "/?v=health_exam" if op == "exam" else "/?v=inbox"
             return self._send(303, "text/plain; charset=utf-8", b"",
-                              extra={"Location": "/?v=inbox"})
+                              extra={"Location": _back})
 
         def _json(self, obj):
             body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
@@ -2667,7 +3070,7 @@ def _port_busy(port, host="127.0.0.1", timeout=0.35):
       `ThreadingHTTPServer` 默认 `allow_reuse_address = 1`，而 **Windows 的
       `SO_REUSEADDR` 语义等于「允许两个进程绑同一个端口」** ⇒ 端口明明被占，
       `bind()` **照样成功、不抛 `OSError`**。
-      后果：两个值守台抢同一端口、**口令各不相同** ⇒ 开出来的窗口一半请求 403。
+      后果：两个Antinel 监理抢同一端口、**口令各不相同** ⇒ 开出来的窗口一半请求 403。
       ⇒ 先主动探一下，占了就直接换临时端口，别指望 `OSError`。
     """
     if not port:
@@ -2802,7 +3205,7 @@ def _app_window_cmd(url, geometry=None):
     """返回能开「**独立窗口**」的命令（app 模式：无地址栏/无标签页/无书签栏）；没有则 None。
 
     ★ 为什么必须 app 模式（0.35.2）：创始人 2026-10-06 明确要求
-      「我希望值守台界面看上去是**一个独立的界面**」。
+      「我希望Antinel 监理界面看上去是**一个独立的界面**」。
       浏览器普通标签页带着地址栏与标签栏，看着就是"一个网页"；
       Edge/Chrome 的 `--app=URL` 开出来的窗口只有页面本身，像独立应用。
     ★ 0.35.3：加 `--window-size` —— 默认窗口太高，一屏看不完反而显得"内容很长"。
@@ -2831,7 +3234,7 @@ def _app_window_cmd(url, geometry=None):
       窗口若由**用户的 Edge 复用旧进程**开出来，这些参数**被完全忽略**
       ⇒ 参数是"请求"，不是"事实" ⇒ 0.36.0 才被迫加落位补救，
       而补救必须有兜底 ⇒ 0.36.3 才被迫"落位失败就关窗"。
-      ⇒ 现在**换掉那个前置条件**：加 `--user-data-dir` 让值守台成为
+      ⇒ 现在**换掉那个前置条件**：加 `--user-data-dir` 让Antinel 监理成为
         **独立浏览器进程**，参数即刻生效（实测本机，Δ 全 0）：
           · E1 独立 profile 首次冷启动 ⇒ 520×640 @(2440,1264)
           · E2 同一 profile **第二次**（进程已在跑）⇒ 仍然精确
@@ -2858,7 +3261,7 @@ def _app_window_cmd(url, geometry=None):
         if not exe:
             continue
         cmd = [exe]
-        # ── 0.36.4 根治第一步：值守台**自己的**浏览器 profile ──
+        # ── 0.36.4 根治第一步：Antinel 监理**自己的**浏览器 profile ──
         # 有了它，app 窗口由**独立进程**开出来 ⇒ 命令行几何即刻生效（实测 Δ=0）。
         # 取不到（如非 Windows / 无 LOCALAPPDATA）⇒ 不加，如实走落位兜底老路。
         try:
@@ -2906,7 +3309,7 @@ def _place_if_needed(placer=None, tries=24, interval=0.35, run_id=None,
     ★★ 0.36.2 三处机制性改动（治"窗口出现在旧位置旧尺寸"这个根）：
       ① 认窗口**只认本次运行的**（`#<run_id>` 后缀）——
          旧版用通用后缀，会命中**用户自己的普通浏览器窗口**
-         （实测本机 Edge 标题「收件箱 · 值守台 和另外 14 个页面…」）
+         （实测本机 Edge 标题「收件箱 · Antinel 监理 和另外 14 个页面…」）
          并把它 `SetWindowPos` 搬走。错方向是**破坏用户环境**。
       ② 落位**全量**且**逐个回读校验**（`place_all`）——
          旧版只取第一个同名窗口；同标题有多个时（旧的+新的）
@@ -2920,7 +3323,7 @@ def _place_if_needed(placer=None, tries=24, interval=0.35, run_id=None,
       0.36.0–0.36.3 里，落位是**唯一**能产出正确几何的手段
       （因为窗口由用户 Edge 复用旧进程开出来，命令行参数被忽略，实测 E3），
       所以它是"必须成功"的关键路径 ⇒ 关键路径必须有兜底 ⇒ 有了 0.36.3 的关窗。
-      ⇒ 现在 `_app_window_cmd` 给了值守台**自己的 `--user-data-dir`**
+      ⇒ 现在 `_app_window_cmd` 给了Antinel 监理**自己的 `--user-data-dir`**
         （实测 E1/E2/E4/E5：窗口**出生即正确**，Δ 全 0，且连开 3 次不退化），
         **落位从"关键路径"降级为"兜底复核"**：
           · `place_all` 先回读，**已对齐就一条 SetWindowPos 都不发**
@@ -2928,7 +3331,7 @@ def _place_if_needed(placer=None, tries=24, interval=0.35, run_id=None,
           · 只有"出生没对齐"才真的搬它，且搬完仍逐个回读校验。
       ⇒ **失败路径同时改掉**：重试耗尽**不再关窗**。
         理由（也是 0.36.3 那版的错处）：落位失败只说明"这次没搬成"，
-        而那个窗口**就是值守台面板**、**完全正常**，主人正要看的正是它。
+        而那个窗口**就是Antinel 监理面板**、**完全正常**，主人正要看的正是它。
         为"位置不对"杀掉"内容"＝手段颠倒目的；而且杀掉之后
         "为什么没搬成"这条线索**连同窗口一起消失** ⇒ 根因被永久掩盖。
         ⇒ 现在如实上报，**面板留在它该在的地方、由用户决定关不关**。
@@ -2952,7 +3355,7 @@ def _place_if_needed(placer=None, tries=24, interval=0.35, run_id=None,
                 return
             try:
                 # ★★ 严格模式：**只动本次运行**的窗口（带 `#run_id`）。
-                #   宽泛模式（认任何值守台窗口）在这里是**危险的** ——
+                #   宽泛模式（认任何Antinel 监理窗口）在这里是**危险的** ——
                 #   它可能命中用户自己的浏览器窗口并把它搬走。
                 hwnds = WIN.find_console_windows(suffix=suffix, run_id=run_id)
             except Exception as e:                           # noqa: BLE001
@@ -2960,7 +3363,7 @@ def _place_if_needed(placer=None, tries=24, interval=0.35, run_id=None,
                 time.sleep(interval)
                 continue
             if not hwnds:
-                last = "还没看到带本次标识（%s）的值守台窗口" % (suffix,)
+                last = "还没看到带本次标识（%s）的 Antinel 监理窗口" % (suffix,)
                 time.sleep(interval)
                 continue
             ok, why = WIN.place_all(hwnds, rect)
@@ -2982,7 +3385,7 @@ def _place_if_needed(placer=None, tries=24, interval=0.35, run_id=None,
             print("[place] 未能对齐到 %dx%d @(%d,%d)：%s"
                   % (rect[2], rect[3], rect[0], rect[1], last),
                   file=sys.stderr)
-            print("[place] 值守台面板**仍在屏幕上**，没有被关掉"
+            print("[place] Antinel 监理面板**仍在屏幕上**，没有被关掉"
                   "（它就是面板，由你决定关不关）。",
                   file=sys.stderr)
         return False
@@ -3059,7 +3462,7 @@ def open_console_settled(url, wait_sec=DEFAULT_SETTLE_SEC, token=None, verbose=T
 
     # ── 等本次运行的窗口出现（严格模式：只认带 #run_id 的，绝不碰用户窗口）──
     deadline = time.time() + float(wait_sec)
-    hwnds, last = [], "没看到带本次标识（%s）的值守台窗口" % suffix
+    hwnds, last = [], "没看到带本次标识（%s）的 Antinel 监理窗口" % suffix
     while time.time() < deadline:
         try:
             hwnds = WIN.find_console_windows(run_id=run_id)
@@ -3088,17 +3491,18 @@ def open_console_settled(url, wait_sec=DEFAULT_SETTLE_SEC, token=None, verbose=T
         out["why"] = "%s；且回读失败：%s" % (why, e)
         return out
     out["placed"] = bool(ok) and all(tuple(g) == tuple(rect) for g in out["got"])
-    # ★ 0.50.0：值守台展开 ⇒ 屏幕上那枚漂浮哨标该退役（用户从托盘/紧急提醒/
-    #   CLI 展开时也会走到这里）。**退役的唯一实现**是 `inbox_logo.retire()，
-    #   这里不重写一遍。退役失败只影响"多漂着一枚"，不拖垮开窗 ⇒ 如实记
+    # ★ 0.50.0：Antinel 监理展开 ⇒ 屏幕上那枚漂浮哨标该退场（用户从托盘/紧急提醒/
+    #   CLI 展开时也会走到这里）。★ 0.52.0：退场＝**hide（藏起待命）**，
+    #   不再 retire —— 哨标进程常驻，下一次收缩才能毫秒级唤出。
+    #   藏起失败只影响"多漂着一枚"，不拖垮开窗 ⇒ 如实记
     #   进 why 尾部，不抛。
     try:
         import inbox_logo as _IL
-        _r = _IL.retire(root=root, verbose=False)
+        _r = _IL.hide(root=root, verbose=False)
         if _r.get("acted") and not _r.get("ok"):
-            out["why"] = "%s｜漂浮哨标退役没成（%s）" % (out["why"], _r.get("why", ""))
+            out["why"] = "%s｜漂浮哨标藏起没成（%s）" % (out["why"], _r.get("why", ""))
     except Exception as e:                                  # noqa: BLE001
-        out["why"] = "%s｜漂浮哨标退役查询失败：%s: %s" % (
+        out["why"] = "%s｜漂浮哨标藏起查询失败：%s: %s" % (
             out["why"], type(e).__name__, e)
     return out
 
@@ -3165,7 +3569,7 @@ def open_console_via_daemon(url, wait_sec=DEFAULT_SETTLE_SEC, token=None,
     #   漂移，实测 daemon 19704 自听 14305）开窗 ⇒ 窗口 run_id 与本次不同。
     #   「服务多开」是独立缺陷（已单独记账，今天不混进来修）；这里只保证
     #   **窗口跨边界存活**这件主事，匹配放宽到通用后缀。
-    hwnds, last = [], "daemon 没开出值守台窗口（通用后缀也没匹配到）"
+    hwnds, last = [], "daemon 没开出 Antinel 监理窗口（通用后缀也没匹配到）"
     while time.time() < deadline:
         try:
             hwnds = WIN.find_console_windows()
@@ -3194,9 +3598,9 @@ def open_console_via_daemon(url, wait_sec=DEFAULT_SETTLE_SEC, token=None,
     out["placed"] = bool(ok) and all(tuple(g) == tuple(rect) for g in out["got"])
     try:
         import inbox_logo as _IL
-        _r = _IL.retire(root=root, verbose=False)
+        _r = _IL.hide(root=root, verbose=False)
         if _r.get("acted") and not _r.get("ok"):
-            out["why"] = "%s｜漂浮哨标退役没成（%s）" % (out["why"], _r.get("why", ""))
+            out["why"] = "%s｜漂浮哨标藏起没成（%s）" % (out["why"], _r.get("why", ""))
     except Exception:                                       # noqa: BLE001
         pass
     return out
@@ -3207,14 +3611,14 @@ def bubble_open_route(root=None, token=None, vis=None, finder=None,
     """紧急提醒窗「打开 Antinel 监理」的**唯一决策点**。返回与页面 JSON 同形的 dict。
 
     ★★★ 为什么抽成一个函数（创始人 2026-10-14：「点击打开值守台后，之前的
-      关闭了，打开了新的……点完了按钮显示'打开值守台'按钮好像不对吧，
-      值守台打开着呢」）：
+      关闭了，打开了新的……点完了按钮显示'打开Antinel 监理'按钮好像不对吧，
+      Antinel 监理打开着呢」）：
       旧链路只有一条动作 —— `open_console_settled()`，而它**先收旧窗、再开新窗**
       （那条路是为「没有窗、要开一个」设计的）。⇒ 面板**本来就开着**时点一下，
       用户看到的是"窗闪了一下、内容从头来"（而且新窗刚加载，状态读数是重新算的
       —— 那正是他说的"状态不对了"）。而他要的只是**切过去**。
 
-      ⇒ 三条出路，按「用户此刻真的看得见值守台吗」分流：
+      ⇒ 三条出路，按「用户此刻真的看得见Antinel 监理吗」分流：
         · 看得见（`vis is True`）⇒ **只切到前面**（`inbox_window.focus_windows`，
           不关、不开、不重建）⇒ `opened="existing"`；
         · 看不见（`vis is False`）⇒ 走老路 `open_console_settled()` 开一个；
@@ -3235,7 +3639,7 @@ def bubble_open_route(root=None, token=None, vis=None, finder=None,
     url = rec.get("url") or ""
     if not url:
         return {"ok": False, "opened": "none",
-                "why": "没有值守台记录（URL），开不出来"}
+                "why": "没有 Antinel 监理记录（URL），开不出来"}
     if vis is None:
         try:
             if probe is not None:
@@ -3252,9 +3656,9 @@ def bubble_open_route(root=None, token=None, vis=None, finder=None,
             hwnds = find()
         except Exception as e:                              # noqa: BLE001
             hwnds = []
-            print("[bubble] 枚举值守台窗口失败：%s" % type(e).__name__)
+            print("[bubble] 枚举 Antinel 监理窗口失败：%s" % type(e).__name__)
         ok, why = (focuser or _W.focus_windows)(hwnds)
-        print("[bubble] 已在值守台 -> focus=%s %s" % (ok, why))
+        print("[bubble] 已在 Antinel 监理 -> focus=%s %s" % (ok, why))
         return {"ok": bool(ok), "opened": "existing", "why": why}
     rep = (opener or open_console_settled)(url, token=token, verbose=False)
     print("[bubble] open -> %s" % rep)
@@ -3344,7 +3748,7 @@ def open_bubble_window(url, geometry=None, wait_sec=6.0, token=None, verbose=Tru
 
 
 def open_console(url, opener=None, placer=None, token=None, verbose=True):
-    """把值守台打开成**一个独立窗口**（app 模式）；拿不到 app 浏览器就退回默认浏览器。
+    """把Antinel 监理打开成**一个独立窗口**（app 模式）；拿不到 app 浏览器就退回默认浏览器。
 
     ★ `opener` 是可测性注入点：判据要能在**不起任何进程**的前提下，
       验「拿到的是 app 模式命令」与「拿不到时退回浏览器」两条路。
@@ -3387,7 +3791,7 @@ def open_console(url, opener=None, placer=None, token=None, verbose=True):
 
       根因 ③：落位认窗口的判据**可能命中用户自己的浏览器窗口**。
         实测本机 Edge 普通窗口标题为
-        「收件箱 · 值守台 和另外 14 个页面 - 个人 - Microsoft Edge」，
+        「收件箱 · Antinel 监理 和另外 14 个页面 - 个人 - Microsoft Edge」，
         它**含有**面板标题；一旦被 `SetWindowPos` 命中，
         错的方向是**把用户的浏览器搬到右下角 520×640**。
 
@@ -3411,7 +3815,7 @@ def open_console(url, opener=None, placer=None, token=None, verbose=True):
         而救命稻草必须有兜底 ⇒ 才有 0.36.3 的"落位失败就关窗"。
         **关窗不是设计选择，是补丁链的必然产物。**
       ⇒ **根治 = 换掉那个前提**（不是再打一层补丁）：
-        `_app_window_cmd` 现在给值守台**自己的 `--user-data-dir`**
+        `_app_window_cmd` 现在给Antinel 监理**自己的 `--user-data-dir`**
         （`inbox_window.console_profile_dir()`），它因此成为
         **独立浏览器进程** ⇒ 命令行几何**即刻生效**，窗口**出生即正确**。
         本机实测（Δ = 实测矩形 − 请求矩形，全 0 即完全精确）：
@@ -3447,20 +3851,20 @@ def open_console(url, opener=None, placer=None, token=None, verbose=True):
     cmd = _app_window_cmd(url)
     if cmd:
         try:
-            # ── 步骤 1：收掉已开着的值守台窗口（旧的 / 上次运行的）──
+            # ── 步骤 1：收掉已开着的Antinel 监理窗口（旧的 / 上次运行的）──
             #   只关标题后缀匹配的，绝不误关用户窗口（见 close_console_windows）。
             #   这里用**通用后缀**（不带本次 run_id）⇒ 连"上次运行"的残留
             #   也一并收掉；那正是要清的对象。
             # ★★ 顺序很重要：**先收旧窗并等它们消失，再开新的**。
             #   `WM_CLOSE` 只是投信，浏览器何时销毁窗口不受我们控制；
-            #   不等 ⇒ 那一刻屏幕上有两个「· 值守台」窗口，
+            #   不等 ⇒ 那一刻屏幕上有两个「· Antinel 监理」窗口，
             #   后续任何"取第一个"都可能抓到正在退场的旧窗口
             #   ⇒ 落位落到旧窗上（用户看到"修复没生效"）。
             if WIN is not None:
                 try:
                     _n = WIN.close_console_windows()
                     if _n and verbose:
-                        print("[open_console] 已收掉 %d 个上次的值守台窗口"
+                        print("[open_console] 已收掉 %d 个上次的 Antinel 监理窗口"
                               "（服务重启后没人喂它们的残留窗口）" % _n,
                               file=sys.stderr)
                 except Exception as e:                      # noqa: BLE001
@@ -3499,12 +3903,12 @@ def open_console(url, opener=None, placer=None, token=None, verbose=True):
         return "none"
 
 
-#: 后台值守台的单例（守护进程「打开值守台」用；幂等复用，不重复绑端口）
+#: 后台Antinel 监理的单例（守护进程「打开Antinel 监理」用；幂等复用，不重复绑端口）
 _BG = {"httpd": None, "url": None}
 
 
 def ensure_background(port=DEFAULT_PORT, root=None):
-    """确保值守台在**后台**跑着。**幂等**：已经在跑就复用。返回 `(url, started)`。
+    """确保Antinel 监理在**后台**跑着。**幂等**：已经在跑就复用。返回 `(url, started)`。
 
     ★ 为什么需要它（0.35.2）：托盘菜单「Open console」/左键点图标写出的 `open`
       动作**必须有消费点** —— 旧版只把 `open_console=True` 塞进 tick 结果，
@@ -3525,7 +3929,7 @@ def ensure_background(port=DEFAULT_PORT, root=None):
 
 
 def stop_background():
-    """停掉后台值守台（测试/退出用）。没在跑 ⇒ 返回 False。"""
+    """停掉后台Antinel 监理（测试/退出用）。没在跑 ⇒ 返回 False。"""
     h = _BG.get("httpd")
     if h is None:
         return False
@@ -3537,9 +3941,9 @@ def stop_background():
     return True
 
 
-# --------------------------------------------------- 值守台常驻（0.48.5 B1）----
+# --------------------------------------------------- Antinel 监理常驻（0.48.5 B1）----
 #: ★★ 为什么要这一族（遗留问题清单 2026-10-13 B1，实测证据）：
-#:   值守台服务原来是"代理会话里拉的前台进程"—— 会话结束就没了，托盘与守护
+#:   Antinel 监理服务原来是"代理会话里拉的前台进程"—— 会话结束就没了，托盘与守护
 #:   进程**都不负责把它拉回来**。用户看到的是"窗口开着，点一下全是失败"。
 #:   B1 验收：**杀掉服务进程后 60 秒内自行恢复，端口与 URL 不变**。
 #:   三件套：
@@ -3554,14 +3958,14 @@ def stop_background():
 
 
 def console_record_path(root=None):
-    """值守台"开在哪"的落盘位置（`<中枢>/console/url.json`）。"""
+    """Antinel 监理"开在哪"的落盘位置（`<中枢>/console/url.json`）。"""
     import inbox_config as _C
     return os.path.join(_C.console_dir(root), "url.json")
 
 
 def write_console_record(port, token, pid=None, root=None, started_at=None,
                          want_port=None):
-    """把"值守台开在哪"落盘（临时文件 + 原子替换）。返回写下的 dict。
+    """把"Antinel 监理开在哪"落盘（临时文件 + 原子替换）。返回写下的 dict。
 
     ★ 0.48.5（B2）：`want_port` ＝ 这次**想要**的端口。它与 `port` 不同
       ⇒ 说明发生了漂移 —— 留一份在盘上（stderr 那句随终端一起消失，落盘不会）。
@@ -3583,7 +3987,7 @@ def write_console_record(port, token, pid=None, root=None, started_at=None,
 
 
 def read_console_record(root=None):
-    """读"值守台开在哪"。没有 / 读坏 / 缺端口或缺口令 ⇒ `None`（**不编默认值**）。"""
+    """读"Antinel 监理开在哪"。没有 / 读坏 / 缺端口或缺口令 ⇒ `None`（**不编默认值**）。"""
     try:
         with open(console_record_path(root), encoding="utf-8") as f:
             d = json.load(f)
@@ -3595,15 +3999,15 @@ def read_console_record(root=None):
 
 
 def console_status(root=None, rec=None):
-    """值守台此刻在不在。返回 `(alive, rec, why)` —— 守护进程与判据共用一处。
+    """Antinel 监理此刻在不在。返回 `(alive, rec, why)` —— 守护进程与判据共用一处。
 
     ★ 判活**两条都要**：
       · 只看 pid ⇒ pid 会被复用（判活看的是"那个进程"，不是"那个号"）；
-      · 只看端口 ⇒ 别的程序占了 8790 也会被当成"值守台在跑"。
+      · 只看端口 ⇒ 别的程序占了 8790 也会被当成"Antinel 监理在跑"。
     """
     rec = read_console_record(root) if rec is None else rec
     if not rec:
-        return False, None, "还没有值守台的落盘记录（没起过）"
+        return False, None, "还没有 Antinel 监理的落盘记录（没起过）"
     pid, port = rec.get("pid"), int(rec.get("port"))
     alive_pid = False
     try:
@@ -3622,7 +4026,7 @@ def console_status(root=None, rec=None):
 
 
 def _console_spawn_cmd(port, token, root=None):
-    """重拉值守台要跑的命令（**唯一实现**：守护进程与判据都看它，不各拼一份）。"""
+    """重拉Antinel 监理要跑的命令（**唯一实现**：守护进程与判据都看它，不各拼一份）。"""
     entry = os.path.join(os.path.dirname(os.path.abspath(__file__)), "antinel.py")
     cmd = [sys.executable, entry, "inbox", "serve",
            "--port", str(int(port)), "--token", str(token)]
@@ -3632,7 +4036,7 @@ def _console_spawn_cmd(port, token, root=None):
 
 
 def spawn_console(port, token, root=None):
-    """按给定端口/口令**另起一个进程**跑值守台（分离、无窗）。返回 `Popen`。"""
+    """按给定端口/口令**另起一个进程**跑Antinel 监理（分离、无窗）。返回 `Popen`。"""
     flags = 0
     if os.name == "nt":
         flags = 0x00000008 | _CREATE_NO_WINDOW   # DETACHED_PROCESS | CREATE_NO_WINDOW
@@ -3644,7 +4048,7 @@ def spawn_console(port, token, root=None):
 
 
 def ensure_console(port=DEFAULT_PORT, root=None, spawner=None, wait_sec=8.0):
-    """确保值守台在跑（**幂等**）。返回 `(rec|None, started: bool)`。
+    """确保Antinel 监理在跑（**幂等**）。返回 `(rec|None, started: bool)`。
 
     ★ 0.48.5（B1）验收口径：被杀掉后重拉时**端口与口令都沿用记录里的**
       （URL 不变）；没有记录（从没起过）才用默认端口 + 新口令。
@@ -3687,9 +4091,56 @@ def _serve_setup(port, root, token=None, record=True):
         except Exception as e:                          # noqa: BLE001
             # ★ 落盘失败**出声**：它失败 ⇒ 守护进程判不出活、也就不会重拉
             #   （"保护在起作用却没人看得见"是本仓点名禁止的形状）。
-            print("!! 值守台落盘记录没写成（%r）—— 守护进程将无法判活/重拉" % (e,),
+            print("!! Antinel 监理落盘记录没写成（%r）—— 守护进程将无法判活/重拉" % (e,),
                   file=sys.stderr)
     return httpd, token, real_port, drift
+
+
+#: ★ 0.52.0：哨标 `open` 动作的**服务端消费节拍**（秒）。
+#:   为什么服务端也要消费（而不仅是守护进程/托盘）：点哨标写出的 `open`
+#:   原来只有 daemon/tray 会读 —— 只开Antinel 监理服务（B1 常驻）时**没人消费**，
+#:   实测（创始人 2026-10-17）点击哨标后它自毁、Antinel 监理永远开不出来。
+#:   服务是收缩↔展开循环里**必然活着**的那一方 ⇒ 它必须会消费。
+#:   消费仍走 `inbox_daemon.handle_actions()`（**唯一实现**，改名消费原子，
+#:   与 daemon/tray 并存也不会双开）。0.5s ≈ 哨标点击后的可感延迟下限。
+CONSUME_INTERVAL_SEC = 0.5
+
+
+def _consume_actions_loop(root=None, console_url=None, stop=None,
+                          interval=CONSUME_INTERVAL_SEC, consumer=None):
+    """服务端消费托盘动作的循环（0.52.0，跑在后台线程里）。
+
+    ★ 动作语义**不二次实现**：默认调 `inbox_daemon.handle_actions()`，
+      并把**自己的 URL** 作为 `console_url` 传入 —— 否则 `open_console_now`
+      会在本进程里再起一个后台服务实例（端口漂移同款病）。
+    ★ `consumer` 可注入（判据不起真服务、不真开窗）；一轮出错不许打死循环。
+    ★ stop 是 threading.Event；None ⇒ 永跑（daemon 线程随进程退）。
+    """
+    import inbox_daemon as DM
+    fn = consumer or DM.handle_actions
+    while not (stop is not None and stop.is_set()):
+        try:
+            fn(root=root, console_url=console_url)
+        except Exception:                       # noqa: BLE001
+            pass
+        stop.wait(float(interval)) if stop is not None else time.sleep(float(interval))
+
+
+def _prewarm_logo_once(root=None):
+    """预埋隐藏常驻哨标（0.52.0，只此一处调用：`serve()` 起来后后台跑）。
+
+    ★ 为什么服务起来就预热：不预热的话，每次开机后的第一次收缩仍要冷启
+      PowerShell（慢一次）。失败只打 stderr —— 预热是优化，冷启路径兜底。
+    """
+    try:
+        import inbox_logo as IL
+        rep = IL.prewarm(root=root, verbose=False)
+        if not rep.get("ok"):
+            print("[logo] 预热没成（不影响使用，首次收缩会冷启）：%s"
+                  % rep.get("why", ""), file=sys.stderr)
+    except Exception as e:                      # noqa: BLE001
+        print("[logo] 预热失败（不影响使用）：%s: %s" % (type(e).__name__, e),
+              file=sys.stderr)
 
 
 def serve(port=DEFAULT_PORT, root=None, open_browser=False, token=None, record=True):
@@ -3700,12 +4151,21 @@ def serve(port=DEFAULT_PORT, root=None, open_browser=False, token=None, record=T
       `record=True` 把"开在哪"落盘（`url.json`）—— 守护进程靠它判活与重拉。
     ★ 0.48.5（B2）：被占时**不再静默** —— `_serve_setup()` 会把"换了端口"
       说到 stderr，并把 `want_port` 一并落盘。
+    ★★ 0.52.0：起服务即 ① 起后台线程**消费托盘动作**（点哨标 ⇒ 开Antinel 监理，
+      不再依赖 daemon/tray 是否在跑）＋ ② 预埋隐藏常驻哨标（首次收缩也瞬时）。
     """
     httpd, token, real_port, _drift = _serve_setup(port, root, token=token,
                                                    record=record)
     url = "http://127.0.0.1:%d/?t=%s" % (real_port, token)
-    print("值守台已开在：%s" % url)
+    print("Antinel 监理已开在：%s" % url)
     print("（只监听本机；关掉这个窗口就停）")
+    # ★ 0.52.0 ①：动作消费线程（daemon 线程，随进程退；与 daemon/tray 的
+    #   消费并存不双开 —— `poll_actions` 的改名消费是原子的）
+    threading.Thread(target=_consume_actions_loop, daemon=True,
+                     kwargs={"root": root, "console_url": url}).start()
+    # ★ 0.52.0 ②：预埋哨标（后台线程 —— PowerShell 冷启不该拖住开服）
+    threading.Thread(target=_prewarm_logo_once, daemon=True,
+                     kwargs={"root": root}).start()
     if open_browser:
         # ★ 0.35.2：开成**独立窗口**（app 模式），不再塞进浏览器标签页。
         threading.Timer(0.6, lambda: open_console(url)).start()

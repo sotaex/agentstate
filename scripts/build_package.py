@@ -79,7 +79,7 @@ _LAYOUT = {
     "antinel_verify.py":         "tools/antinel_verify.py",
     "verify_namespaces.py":      "tools/verify_namespaces.py",
     "verify_chain.py":           "tools/verify_chain.py",
-    # ★ 0.35.0：值守台托盘渲染脚本。`inbox_tray.script_path()` 找的是
+    # ★ 0.35.0：Antinel 监理托盘渲染脚本。`inbox_tray.script_path()` 找的是
     #   `<包目录>/tools/tray.ps1` —— 不登记进布局表，`srcfile("tray.ps1")`
     #   会去找仓根的 tray.ps1（不存在）⇒ 静默少拷一个文件（A1 同款病）。
     "tray.ps1":                  "tools/tray.ps1",
@@ -194,7 +194,7 @@ HARNESS_SRC = SRC / "scripts" / "verification_tests.py"
 if not HARNESS_SRC.is_file():
     raise SystemExit("★ 构建器找不到套件：%s\n  （产物仓构建必须用本仓的套件）" % HARNESS_SRC)
 NAME = "antinel-security"
-VERSION = "0.51.2"
+VERSION = "0.53.0"
 # P-A3: the namespace this build declares itself under. derive_object_ownership()
 # reads git remote first, then THIS field; fail-closed unattributed when neither
 # resolves. Kept beside the hashes so a third party can see what was declared.
@@ -266,7 +266,7 @@ antinel = "antinel:main"
 py-modules = ["antinel", "audit_chain", "session_dna", "strings",
               "transcript_reader", "host_shield", "hub", "antinel_mcp", "egress",
               "ui_server",
-              # ★ 0.35.0 值守台：13 个新模块（与 build() 里的 root_mod 复制清单逐字一致）
+              # ★ 0.35.0 Antinel 监理：13 个新模块（与 build() 里的 root_mod 复制清单逐字一致）
               "inbox_model", "inbox_store", "inbox_report", "inbox_server",
               "inbox_tray", "inbox_notify", "inbox_emphasis", "inbox_fallback",
               "inbox_daemon", "inbox_config", "inbox_cli",
@@ -287,12 +287,15 @@ packages = ["hooks", "scripts", "tools", "rules", "psl", "assets", "challenge"]
 rules = ["*.json"]
 psl = ["*.json", "*.md"]
 hooks = ["*.py"]
-# ★ 0.35.0 值守台静态资源。实测（_p9_wheeltest 构建中间产物
-#   `build/bdist.*/wheel/assets/`）：**这三条 glob 本身就够**，11 个文件全进 wheel。
+# ★ 0.35.0 Antinel 监理静态资源。实测（_p9_wheeltest 构建中间产物
+#   `build/bdist.*/wheel/assets/`）：**这几条 glob 本身就够**，assets 下 28 个静态
+#   文件全进 wheel（icons 20 + logo 5 mp4 + logo.svg + antinel.ico + sounds 1）。
+#   ★ 0.52.0：`logo/*.ico` 是品牌图标（桌面/自启/AUMID 快捷方式共用），生成器
+#   `tools/mk_logo_ico.py`（构建期从 logo.svg 栅格化，与 mk_icons 同 Convention）。
 #   `_manifest_for` **不会**再为 assets 生成 `recursive-include` —— 它只补
 #   package-data 覆盖不到的文件（如 `rules/hosts/*.json`）。非 package 目录
 #   （docs/ references/）只进 sdist，wheel 里 0 个（实测）。
-assets = ["icons/*.ico", "logo/*.mp4", "logo/*.svg", "sounds/*.wav"]
+assets = ["icons/*.ico", "logo/*.mp4", "logo/*.svg", "logo/*.ico", "sounds/*.wav"]
 # ★ 0.35.2：`challenge/` 公开挑战件 —— **必须进 wheel**。
 #   为什么：`antinel verify` 在链干净时会告诉用户"你可以自己复算"，并给出
 #   `<包目录>/challenge/verify.py` 这条命令。而此前 `challenge/` **只进 sdist**
@@ -2299,7 +2302,7 @@ def _delivery_gate(out_root, full=True):
     """★★ 0.36.5：打包**之前**必跑统一交付闸门（第二个强制执行点）。
 
     ★★ 为什么这道闸门是本轮最要紧的一处接线（不是"多加一道检查"这么轻）：
-      此前全仓有 **113 条值守台判据 ＋ 7 条交付自检，一条调用方都没有**。
+      此前全仓有 **113 条Antinel 监理判据 ＋ 7 条交付自检，一条调用方都没有**。
       实测后果不是"少跑了几个检查"，而是：
         · `ci/inbox_guards_0363.py` 有一条红、`0364.py` 有一条红，
           **已经红了一段时间却没人知道**；
@@ -2494,7 +2497,11 @@ def _archive_stale_dist(dist_dir, version, archive_root):
 
 
 def _adopt_dev_entries(final):
-    """harness 期间**临时补登**研发树专属条目；返回纯清单字节供跑后恢复（0.51.2）。
+    """harness 期间**临时补登**研发树专属条目；返回**纯 wheel 口径**字节供跑后恢复。
+
+    ★ 0.52.0 起 pure 恒是 wheel 口径（剥掉研发态专属条目）—— 提交态 manifest
+      带着 `ci/freeze_zones.json`（研发树 self_check 需要），旧实现拿现字节当
+      pure ⇒ 构建把不随包文件写进 wheel 清单（0516 PKG16-a [E] 实测红）。
 
     ★ 为什么需要（80f0125 冻结区机制 × merge 顺序的未测碰撞，本版出包首次撞上）：
       `_merge(pkg, final)` 把**纯 wheel 口径**的 manifest 覆盖回 final（final 就是
@@ -2505,31 +2512,45 @@ def _adopt_dev_entries(final):
       （0.51.0 出包在该机制落地之前，故从未暴露。）
     ★ 修法三不：**不弱化自检**（条目照查，只是这期间它在场）、**不污染 wheel**
       （harness 后恢复纯净，`python -m build` 带走的清单必须纯——[E] 对账要求
-      清单 ⊆ wheel 载荷）、**不留半成品**（恢复用 merge 落盘的原字节，逐字节
-      可复现，不靠重新序列化）。
+      清单 ⊆ wheel 载荷）、**不留半成品**（pure 由现清单剥研发态条目重算，
+      口径与重签工具同格式 `indent=1`＋尾换行，逐字节可复现）。
     ★ 口径与 `_tools_034/_resign_manifest.py --adopt-dev` 逐字同源：名单从
       host_shield import（单一真源）、在场才补、非版本承载件走裸 sha256。
     """
     import host_shield as _hs
     mfp = Path(final) / "psl" / "manifest.json"
-    pure = mfp.read_bytes()
+    dirty = mfp.read_bytes()
     try:
-        d = json.loads(pure.decode("utf-8"))
+        d = json.loads(dirty.decode("utf-8"))
     except Exception as e:                                       # noqa: BLE001
         print("!! 读不到 %s（%s）—— 跳过研发条目补登（harness 可能红 F-13/F-17）"
               % (mfp, e))
-        return pure
+        return dirty
     files = d.get("files") or {}
     dev = tuple(getattr(_hs, "_DEV_GUARDED_CHAIN_FILES", ()) or ())
+    # ① pure ＝ 现清单**剥掉**研发态专属条目（wheel 口径：不随包就不进清单）。
+    #    0.52.0 修（0516 PKG16-a [E] 实测红）：仓内提交态 manifest 带着
+    #    ci/freeze_zones.json（5ca682f 起，研发树 self_check 需要），旧逻辑
+    #    「已登记 ⇒ 跳过」让它混进 restore 目标 ⇒ python -m build 把不随包
+    #    的文件写进 wheel 内清单 ⇒ 纯净安装 --manifest 报 superseded。
+    stripped = [rel for rel in dev if rel in files]
+    for rel in dev:
+        files.pop(rel, None)
+    d["files"] = files
+    pure = (json.dumps(d, ensure_ascii=False, indent=1) + "\n").encode("utf-8")
+    # ② harness 期间临时补登**在场**的研发态条目（self_check 在场才校验）。
+    adopted = []
     for rel in dev:
         p = os.path.join(str(final), rel.replace("/", os.sep))
-        if not os.path.isfile(p) or rel in files:
-            continue                        # 不在场（出包语境）／已登记
+        if not os.path.isfile(p):
+            continue                        # 不在场（出包语境）
         files[rel] = "sha256:" + hashlib.sha256(open(p, "rb").read()).hexdigest()
-        print("  ADOPT(dev) %s（harness 期间临时补登；跑后恢复纯净）" % rel)
+        adopted.append(rel)
     d["files"] = files
-    mfp.write_text(json.dumps(d, ensure_ascii=False, indent=1),
+    mfp.write_text(json.dumps(d, ensure_ascii=False, indent=1) + "\n",
                    encoding="utf-8", newline="\n")
+    print("  ADOPT(dev) 补登 %s；pure 剥掉 %s（跑后恢复 wheel 口径）"
+          % (adopted or "无", stripped or "无"))
     return pure
 
 
@@ -2601,7 +2622,7 @@ def build(out_root, verify=False):
     for root_mod in ("session_dna.py", "transcript_reader.py", "audit_chain.py",
                      "antinel.py", "antinel_mcp.py", "hub.py", "host_shield.py", "strings.py", "egress.py",
                      "ui_server.py",  # 0.26: +i18n; 0.28: +audit_chain; 0.33.2: +ui_server
-                     # ★ 0.35.0：值守台 13 个模块。**必须与 PYPROJECT 的 py-modules 逐字一致**：
+                     # ★ 0.35.0：Antinel 监理 13 个模块。**必须与 PYPROJECT 的 py-modules 逐字一致**：
                      #   这里少一个 ⇒ 干净树打 wheel 缺文件、用户 import 就炸；
                      #   那里少一个 ⇒ 同样。构建末尾的 `_check_*` 守卫会同时盯住两边。
                      "inbox_model.py", "inbox_store.py", "inbox_report.py", "inbox_server.py",
@@ -2642,7 +2663,7 @@ def build(out_root, verify=False):
     else:
         print("   [notice] 源码树没有 SKILL.md —— Agent 装完将拿不到随包操作手册（非错误）")
 
-    # ★ 0.35.0：值守台静态资源（五态 MP4 ＋ 五态 .ico ＋ logo.svg）。
+    # ★ 0.35.0：Antinel 监理静态资源（五态 MP4 ＋ 五态 .ico ＋ logo.svg）。
     #   页面按 `<模块目录>/assets/...` 取（`inbox_server.ASSETS_DIR`），
     #   托盘按 `<模块目录>/assets/icons/...` 取（`inbox_tray.icon_path`）。
     #   ⇒ 它必须与模块**同级**落进 site-packages。实测（_p9_wheeltest）：**声明为 package
@@ -2769,7 +2790,7 @@ def build(out_root, verify=False):
     # verification aid, all shipped in tools/
     #
     # ★★★ 0.36.5 修两处真缺陷（实测：`tools/enforce_probe.py` 明明"已登记进
-    #   `_LAYOUT`"，却既没进包、也没进 manifest ⇒ 值守台自检永远报
+    #   `_LAYOUT`"，却既没进包、也没进 manifest ⇒ Antinel 监理自检永远报
     #   「在告警链路保护名单里，却没登记进 manifest」⇒ 界面长期挂「存疑」）。
     #
     #   ① **复制清单与 `_LAYOUT` 分叉**：`_LAYOUT` 只被 `_verify_layout()` **校验**，

@@ -1,12 +1,12 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
-# Antinel · 值守台细节修订 + 缺陷类型登记簿 交接文件 v1.0（2026-10-12）
+# Antinel · 监理细节修订 + 缺陷类型登记簿 交接文件 v1.0（2026-10-12）
 
 > **这份文件给谁**：接手继续做两件事的下一位执行者（人或 AI）。
 >
 > **要完成的两件事**
 > 1. **把「缺陷类型登记簿」落成机制** —— 半成品，见 §3。
-> 2. **把值守台 19 条细节修订做完** —— 清单已定稿、方案已设计、代码一行未动（除甲1 已修），见 §4。
+> 2. **把Antinel 监理 19 条细节修订做完** —— 清单已定稿、方案已设计、代码一行未动（除甲1 已修），见 §4。
 >
 > **贯穿两件事的判据**：**九维机制**（防复发十道机制）＋ **四件套**。做完任何一处，都
 > 必须按 §2 的判据自检，**缺任何一件都不算改完**。用户的原始要求原话是
@@ -34,8 +34,8 @@
 | **负控 fixture 提取重构** | ⚠️ 已改、未提交 | `ci/regression_gate.py` 提取 `_build_negctl_fixture()` |
 | **判据 D-27 / D-28 / D-29 / D-30** | ❌ 未实现 | 只在注释与 docstring 里被引用（**红而无出路**） |
 | **G-05 注册进闸门注册表** | ❌ 未实现 | 守卫在 `inbox_guards_0360.py`，但 `defect_types.gate_ids_from_registry()` 只读 `regression_gate.py` |
-| **值守台 19 条** | ❌ 代码一行未动（除甲1） | `inbox_server.py` / `inbox_model.py` 等 |
-| push 到远端 | ❌ 未做（`ahead 58`） | 等值守台定稿后一次推一次 CI |
+| **Antinel 监理 19 条** | ❌ 代码一行未动（除甲1） | `inbox_server.py` / `inbox_model.py` 等 |
+| push 到远端 | ❌ 未做（`ahead 58`） | 等Antinel 监理定稿后一次推一次 CI |
 
 **当前 git**：`HEAD = 914c5dc`；工作树有 **2 处未提交**：`M ci/regression_gate.py`、`?? ci/defect_types.py`。
 **版本**：`pyproject.toml` = `0.48.4`。
@@ -98,11 +98,11 @@
 - 对策：断言打在**函数名/导出符号/可观测行为**上，不打在字面与行号；文档引用用**函数名锚**并写核验日；**禁止**用语法树文本转储做子串比对。
 - 会红的对照：给被测对象改名但不动行为 ⇒ 判据仍须绿；改坏行为但不动名字 ⇒ 判据必须红。
 
-**维四 · 既有保护清单**（防连带破坏）★ 值守台 19 条必用
+**维四 · 既有保护清单**（防连带破坏）★ Antinel 监理 19 条必用
 - 死法：修好一处，弄坏另一处。本项目已实证**四次**，最新一次是「读不到就拒写」这道保护让另一道保护（节流）**静默**失效。
 - 对策：维护一张**既有保护清单**；每次改动前逐条问「这次会让哪条既有保证变松」；改动必须配「没弄坏别的」的对照。**特别盯「静默」二字：变松不可怕，变松且不出声才可怕。**
 - 会红的对照：保护清单里每条都有一个仍在绿的判据；改动后全跑，任何一条由绿转红即未通过。
-- **值守台既有保护清单（接手者必须先建这张表）**：至少含 `inbox_guards_0360`（含 `c_user_text_has_no_process_ids`、`PAGE_TITLES` 白名单）、`inbox_guards_0372`（posture 脚手架）、`inbox_guards_0483`（随包清单）、`regression_gate`（16 条）、`drift_audit`、`judgment 21/21`、`--invariants`。
+- **Antinel 监理既有保护清单（接手者必须先建这张表）**：至少含 `inbox_guards_0360`（含 `c_user_text_has_no_process_ids`、`PAGE_TITLES` 白名单）、`inbox_guards_0372`（posture 脚手架）、`inbox_guards_0483`（随包清单）、`regression_gate`（16 条）、`drift_audit`、`judgment 21/21`、`--invariants`。
 
 **维五 · 保护自报**（防失效不可见）
 - 死法：保护还在、代码没被改，但它已经不生效了，**而且看起来跟正常一模一样**。只能靠事后数据统计发现。
@@ -114,7 +114,7 @@
 - 死法：代码改了、测试绿了、包也出了，但**跑着的还是旧代码的进程**。于是「已修」是假的，且看起来一切正常。
 - 对策：验收必须含**运行态生效确认**：实际加载的模块版本与磁盘版本一致，或明确记录「旧进程仍在、已重启」。**文件写完不等于修完。**
 - 会红的对照：故意留一个跑旧代码的进程 ⇒ 验收必须红，而不是报「已修」。
-- **值守台特别注意**：值守台是**常驻 Web 服务**（`inbox_server.py`）。改完必须**重启服务并实测页面**，不能只看代码 diff。
+- **Antinel 监理特别注意**：Antinel 监理是**常驻 Web 服务**（`inbox_server.py`）。改完必须**重启服务并实测页面**，不能只看代码 diff。
 
 **维七 · 量具先自检**（防量具假红假绿）★ 本轮已实证踩坑
 - 死法：量具自己错了——**零覆盖的路径必然是坏的**：一个从未成功执行过的闸门，第一次真跑就坏，且它的红不代表产物有问题。
@@ -220,7 +220,7 @@
 | X-004 | T-03 | 负控 fixture 缺 manifest 覆盖的文件 ⇒ D-25 每条负控连线假红 | D-28 | fixed |
 | X-005 | T-04 | D-25 docstring 承诺 `--roll`，该参数当时不存在 | D-29 | fixed |
 | X-006 | T-06 | `regression_gate.py` docstring 写 `scripts/`，实际在 `ci/` | D-30 | fixed |
-| X-007 | T-05 | 认窗判据曾用宽泛匹配，误把用户记事本当值守台窗口（0.36.5） | G-05 | fixed |
+| X-007 | T-05 | 认窗判据曾用宽泛匹配，误把用户记事本当Antinel 监理窗口（0.36.5） | G-05 | fixed |
 | X-008 | T-07 | 断言「29 个套件零引用」，实际 0483 经 manifest **间接**引用 | —— | **open（申报盲区）** |
 
 ### 3.5 当前状态与剩余工作
@@ -297,15 +297,15 @@ python ci/defect_types.py --json       # 机器可读（退出码 0=一致 / 1=�
 
 ---
 
-## 4. 值守台 19 条（具体完备）★ 交付物二
+## 4. Antinel 监理 19 条（具体完备）★ 交付物二
 
-### 4.0 值守台是什么（先看清架构，否则会改错文件）
+### 4.0 Antinel 监理是什么（先看清架构，否则会改错文件）
 
-**关键区分——「值守台」有三层，别改混**：
+**关键区分——「Antinel 监理」有三层，别改混**：
 
 | 层 | 文件 | 是什么 |
 |---|---|---|
-| **Web 值守台**（本文档的主对象） | `inbox_server.py`（1862 行）+ `inbox_model.py`（1354 行）+ `glossary.py`（405 行） | **带窗口的网页 UI**，用 Edge/Chrome `--app=URL` 开独立窗口 |
+| **Web Antinel 监理**（本文档的主对象） | `inbox_server.py`（1862 行）+ `inbox_model.py`（1354 行）+ `glossary.py`（405 行） | **带窗口的网页 UI**，用 Edge/Chrome `--app=URL` 开独立窗口 |
 | 开窗与认窗 | `inbox_window.py`（979 行） | `build_run_id()` / `open_console()` / `PAGE_TITLES` 白名单 / `GetWindowTextW` 认窗 |
 | 系统托盘 | `inbox_tray.py`（427 行）+ `tools/tray.ps1`（134 行） | 16×16 托盘图标，靠 `tray.json` / `tray_action.txt` 纯文本协议与 Python 通信 |
 
@@ -318,8 +318,8 @@ python ci/defect_types.py --json       # 机器可读（退出码 0=一致 / 1=�
 **① `#96a621` 这一串是什么？该不该显示？**
 
 - **它是什么**：`inbox_window.build_run_id(token)` = `sha256(token)[:6]`（`inbox_window.py:419`）。
-- **它是不是装饰**：**不是，是机制**。值守台用 Edge/Chrome `--app=URL` 开独立窗口，OS 窗口标题跟随页面 `<title>`（`inbox_server.py:409` 的 `<title>%s · 值守台%s</title>`）；`inbox_window` 靠 `GetWindowTextW` + `endswith("· 值守台#<id>")` 认「本次运行的窗口」——这是移动窗口/收旧窗前**唯一合法判据**（0.36.5 实测：宽泛匹配会误认并关掉用户自己的记事本）。
-- **结论**：**必须留在标题尾部**。但**标题该显示的是状态**——那是 Alt-Tab / 任务栏里唯一不用开窗就能看到的一行，用户要的是「拦截/值守中/失守」，不是「收件箱」、更不是 `#96a621`。理想形态：**`拦截 · 值守台#96a621`**。
+- **它是不是装饰**：**不是，是机制**。Antinel 监理用 Edge/Chrome `--app=URL` 开独立窗口，OS 窗口标题跟随页面 `<title>`（`inbox_server.py:409` 的 `<title>%s · Antinel 监理%s</title>`）；`inbox_window` 靠 `GetWindowTextW` + `endswith("· Antinel 监理#<id>")` 认「本次运行的窗口」——这是移动窗口/收旧窗前**唯一合法判据**（0.36.5 实测：宽泛匹配会误认并关掉用户自己的记事本）。
+- **结论**：**必须留在标题尾部**。但**标题该显示的是状态**——那是 Alt-Tab / 任务栏里唯一不用开窗就能看到的一行，用户要的是「拦截/值守中/失守」，不是「收件箱」、更不是 `#96a621`。理想形态：**`拦截 · Antinel 监理#96a621`**。
 - ⚠️ **这是有边界的改动**：`_mark_at_tail` 用 `PAGE_TITLES` 白名单认页面前缀，把「拦截」放进前缀就要扩白名单——**而那正是 0.36.5 硬化过的「不许误关用户窗口」边界（T-05 / G-05）**。**必须单独改、单独加负控，不混进细节批次。**（见 §4.4）
 - **对应条目**：丁1（`#acc4c7` 进标题）。**与「标题带状态词」是两件事**：丁1 是把短 hash 从**可见位置**移除/降噪；标题带状态词是**增强**。两者一起做才算完整。
 
@@ -389,7 +389,7 @@ python ci/defect_types.py --json       # 机器可读（退出码 0=一致 / 1=�
 | **乙1** | 同一个词日报页有「？」、收件箱页没有 | 收件箱页 `class="term"` 芯片数 **0** | 铺「？」到筛选条四标签 + 药丸三标签 + 顶部灯；四页交互统一 |
 | **乙2** | 同一「下钻看明细」动作 **5 种说法** | 点开查看 / 点开看每一次 / 点规则名看具体是哪几条 / 点开可整组处置 / 点进去看全部明细 | 收敛为**一种**说法（唯一实现），全站替换 |
 | **乙3** | 收件箱页无 `<h2>` 页面名，其余三页都有 | `_view_inbox`（`inbox_server.py:786`）；日报页有 `<h2>日报 · 日期</h2>` | 给收件箱页补 `<h2>`，文案取 `PAGE_TITLES["inbox"]` |
-| **乙4** | 同一页三个身份：title「收件箱 · 值守台#acc4c7」/ 选项卡「收件箱」/ 无 h2 | — | 与乙3、丁1 联动：title 前缀统一取 `PAGE_TITLES`（已是唯一真源）、补 h2、去短 hash 噪音 |
+| **乙4** | 同一页三个身份：title「收件箱 · Antinel 监理#acc4c7」/ 选项卡「收件箱」/ 无 h2 | — | 与乙3、丁1 联动：title 前缀统一取 `PAGE_TITLES`（已是唯一真源）、补 h2、去短 hash 噪音 |
 
 **丙组 · 异质单位**（F54 同型——不同质的量当同质单位相加减）
 
@@ -444,18 +444,18 @@ python ci/defect_types.py --json       # 机器可读（退出码 0=一致 / 1=�
 连带对照： 这条改动会让哪条既有保护变松？
            （至少核对：0360 / 0372 / 0483 / regression_gate 16 条 / drift_audit / 21 judgment / --invariants）
 可观测：   这条修复能回答「我今天生效了吗」吗？答不出 ⇒ 不许上线。
-运行态：   值守台是常驻服务 ⇒ 改完**重启服务并实测页面**（维六）。文件名写完 ≠ 修完。
+运行态：   Antinel 监理是常驻服务 ⇒ 改完**重启服务并实测页面**（维六）。文件名写完 ≠ 修完。
 ```
 
 ---
 
 ## 5. 相关上下文与文件
 
-### 5.1 代码地图（值守台 + 闸门）
+### 5.1 代码地图（Antinel 监理 + 闸门）
 
 | 路径 | 行数 | 职责 | 本件相关条目 |
 |---|---|---|---|
-| `inbox_server.py` | 1862 | **Web 值守台**（HTML/CSS/JS 模板 + 路由） | 甲/乙/丙/丁/戊 全部 |
+| `inbox_server.py` | 1862 | **Web Antinel 监理**（HTML/CSS/JS 模板 + 路由） | 甲/乙/丙/丁/戊 全部 |
 | `inbox_model.py` | 1354 | 数据与文案层（`window_note` / `light_explain` / `counts_by_bucket` / `filter_items` / `STATE_*`） | 甲2/甲4/丙 |
 | `glossary.py` | 405 | 术语词条（`TERMS` / `chip()` / `line()`） | 乙1 / ⑤ |
 | `inbox_window.py` | 979 | 开窗与认窗（`build_run_id` / `open_console` / `PAGE_TITLES`） | 第①条 / 丁1 / §4.4 |
@@ -478,7 +478,7 @@ python ci/defect_types.py --json       # 机器可读（退出码 0=一致 / 1=�
 |---|---|
 `docs/Antinel·三处根治 交接文件 v1.0（2026-10-10）.md` | **§5 防复发十道机制 + §6 四件套**——本件 §2 的源，**必读** |
 | `docs/Antinel·三处根治的最优方案 v3.0（2026-10-10）.md` | 同上方案版 |
-| `docs/Antinel·用户旅程问题账本 v1.1（2026-10-12）.md` | 安装/首用旅程账本（0.48.3→0.48.4 的 A/B/C/D 组），**不是**值守台 UI 账本，勿混 |
+| `docs/Antinel·用户旅程问题账本 v1.1（2026-10-12）.md` | 安装/首用旅程账本（0.48.3→0.48.4 的 A/B/C/D 组），**不是**Antinel 监理 UI 账本，勿混 |
 | `docs/Antinel·剩余工作 交接文件 v1.0（2026-10-10）.md` | 剩余工作盘点 |
 | `.workbuddy/memory/2026-10-12.md` | **本轮全过程日志**：§⑦ 19 条源头、§⑧ 0483 红纠正、§⑨ 四件套根治、§⑩ 量具误破坏与防线 |
 | `.workbuddy/memory/MEMORY.md` | 项目长期约定（若存在） |
@@ -504,7 +504,7 @@ python ci/delivery_gate.py --json               # 交付闸门（应 29 PASS / 0
 python ci/defect_types.py --report              # 覆盖现状（当前 7 类 / 8 实例 / 10 处不一致）
 python ci/defect_types.py --check               # 自检（改完应 exit 0）
 
-# —— 值守台（渲染与实测）——
+# —— Antinel 监理（渲染与实测）——
 python -c "
 import inbox_server as S
 u,t,p = S._bind_first_free(S.DEFAULT_PORT, None)
@@ -528,12 +528,12 @@ C:/Users/大马/.workbuddy/binaries/python/versions/3.13.12/python.exe -m venv C
 
 | 项 | 状态 | 谁处理 |
 |---|---|---|
-| **push 到远端** | `ahead 58`，未推 | 值守台定稿后一次推一次 CI（推 main 触发 **16 个 CI job**：harness 4 + verify 12，跑 ubuntu/macos/windows × py3.10–3.13；**macos 从未本地验证**） |
+| **push 到远端** | `ahead 58`，未推 | Antinel 监理定稿后一次推一次 CI（推 main 触发 **16 个 CI job**：harness 4 + verify 12，跑 ubuntu/macos/windows × py3.10–3.13；**macos 从未本地验证**） |
 | **本机无 GitHub push 凭据** | `git push --dry-run` → `could not read Username`；`credential.helper=helper-selector` | 需用户提供 token 或配置 creds（`_uxtest2/git_sync.ps1 -Push`） |
 | **PyPI 令牌撤销** | `pypi1006.txt` / `pypi-0924-WorkBuddy.txt` / `pypi-0924-WorkBuddy.sanitized.txt` 含完整令牌 | 用户在 PyPI 后台撤销 |
 | **清理清单** | `_uxtest2/cleanup_final.ps1`（默认空跑，19 项 / 105.46 MB，已剔除 `_archive_dist`） | 用户在自己终端 `-Execute` |
 | **`_archive_dist/`（46M）** | **不可删**——`ci/inbox_guards_0460.py` 的测试夹具（被 35 处引用） | —— |
-| **版本 bump** | 值守台用户可见文案变了 ⇒ 按纪律至少 patch，runtime 变更 ⇒ minor | 本批次收口后决定 |
+| **版本 bump** | Antinel 监理用户可见文案变了 ⇒ 按纪律至少 patch，runtime 变更 ⇒ minor | 本批次收口后决定 |
 | **registry 接判据** | `defect_types.py --check` 尚未接进闸门（建议做成 D-31） | 接手者 |
 
 ---
@@ -542,7 +542,7 @@ C:/Users/大马/.workbuddy/binaries/python/versions/3.13.12/python.exe -m venv C
 
 1. **先读 §2，再动手。** 用户说「从机制上修好」的意思是字面意思：每处修复都要配**会红的判据**（维二）、**实测见过红**（反向对照）、**没弄坏别的**（连带对照）、**能自报活着**（可观测）。**缺一不算改完。**
 2. **§4 的 19 条方案已过审，不要重新论证、不要扩大范围。** 用户明确反漂移：只修被指出的，改完即收。§4.4 的两项（标题带状态词、去短 hash）**必须单独改**，因为它们触碰认窗边界。
-3. **改完必须重启值守台实测页面**（维六：文件写完 ≠ 修完）。验证命令见 §5.3。
+3. **改完必须重启Antinel 监理实测页面**（维六：文件写完 ≠ 修完）。验证命令见 §5.3。
 
 ---
 

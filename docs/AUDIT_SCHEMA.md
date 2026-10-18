@@ -1,7 +1,17 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
-# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.19（随 v0.51.2）
+# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.20（随 v0.53.0）
 
+> v1.20（0.53.0）：**补登记 1 类** —— `exam_reminder`（见下文「体检提醒类」）。
+> 语义：该做体检了（装好 ≥24 小时没做过／上次体检过去很久），**L1** 级。
+> **不改**已有字段名、**不改**已有取值域、**不改** append-only 契约。
+> ★ 为什么必须补：0.53.0 的 T1.3 把它写进 `inbox_model.LEVEL_OF_KIND`／`TITLE_OF_KIND`
+> 并有了**真生产者**（`host_shield.exam_reminder_check`），却没同步 schema ——
+> 与 0.40.0、0.51.2 那次完全同型（只写代码不写 schema ⇒ `tools/verify_event_types.py`
+> 当场判"未登记"，harness F-10 红：实测 `未登记: ['exam_reminder']`）。
+>
+> ——— 以下为 v1.19 的登记说明（保留原文，零删除）———
+>
 > v1.19（0.51.2）：**补登记 1 类** —— `credits_low`（见下文「降级与配置变更类」）。
 > **不改**已有字段名、**不改**已有取值域、**不改** append-only 契约，只**新增一个记录类型**。
 > 语义：缺粮事件（积分余额偏低），**Ls** 级；是徽标「缺粮」的**第二个来源**
@@ -170,7 +180,7 @@
 | `input.file_path` | pre/post | 目标路径（脱敏后原文保留） |
 | `input.content_len` | pre | 内容长度（只记长度，不记内容） |
 | `content_digest` | pre/post | `sha256(canonical_json({tool_name, tool_input}))` — **pre↔post 配对键**（两侧同配方，spec 2.8） |
-| `recovered` | 可选（v1.10 起） | **布尔**。`true` ＝ 本条描述的事**已经自动愈合、没有留下后果**（例：`host_shield_tamper` 的 state 回写恢复类——防线把被改的配置回滚回去了，用户配置与执法状态均未受损）。★ **是结构化字段，不是文案**：消费者（值守台分档、日报）必须读它，**不许解析 `reason` 里的"已回写恢复"**。字段缺省 ⇒ 语义＝"未知"（按"有后果"处理，方向收紧）。**★ v1.14（0.43.0）收窄为强制：消费侧必须据此降档** —— `true` 的记录**不得再定成 R0**（`inbox_model.level_of_record` 是唯一实现），且标题**不得再写"失守"**（`title_of_record`）。原因（实测 24h 内 17 条）：定档此前按类型一刀切，档位说"失守"、分桶又说"不用你管"，同一条记录自相矛盾 |
+| `recovered` | 可选（v1.10 起） | **布尔**。`true` ＝ 本条描述的事**已经自动愈合、没有留下后果**（例：`host_shield_tamper` 的 state 回写恢复类——防线把被改的配置回滚回去了，用户配置与执法状态均未受损）。★ **是结构化字段，不是文案**：消费者（Antinel 监理分档、日报）必须读它，**不许解析 `reason` 里的"已回写恢复"**。字段缺省 ⇒ 语义＝"未知"（按"有后果"处理，方向收紧）。**★ v1.14（0.43.0）收窄为强制：消费侧必须据此降档** —— `true` 的记录**不得再定成 R0**（`inbox_model.level_of_record` 是唯一实现），且标题**不得再写"失守"**（`title_of_record`）。原因（实测 24h 内 17 条）：定档此前按类型一刀切，档位说"失守"、分桶又说"不用你管"，同一条记录自相矛盾 |
 
 ## 4. 记录类型枚举
 
@@ -265,6 +275,16 @@
 | `notice_budget_merged` | 钩子 `notice_gate` | `rule_id`, `total`, `used`, `merged`, `quota`, `window_seconds`, `decision="allow"`, `severity="info"` | 某条规则**在本窗口内首次跨过配额**时写一条（每窗口每规则**最多一条**，不是每条提醒一条 —— 否则降噪机制自己把账本灌满）。语义："接下来不再逐条出声，改为合并"。★ 只记"进入合并态"这一次，不记后续每一次 |
 | `notice_budget_window_closed` | 钩子 `notice_gate` | `rule_id`, `total`, `used`, `dup`, `merged`, `window_seconds`, `decision="allow"`, `severity="info"` | 滚动窗口**结束时**的补记：`total` ＝ 本窗口该规则被请求提醒的**原始总条数**（＝ `used + dup + merged`）。★ 这是"原始条数不丢"的**可验真处** —— 三个分项之和必须等于 `total`，判据 `ci/inbox_guards_0470.py` 常驻核对 |
 
+### 体检提醒类（0.53.0，v1.20 新增）
+
+> 0.53.0 起体检进控制台（第五个选项卡），「还没做过体检」不再只写在引导条上：
+> 到点出一条收件箱记录。**提醒的独占家在收件箱**（设计 §29），体检页只写
+> 「上次体检 X 天前」，不重复出声。
+
+| type | 来源 | 关键字段 | 说明 |
+|---|---|---|---|
+| `exam_reminder` | `host_shield.exam_reminder_check`（daemon tick 调用） | `reason`（人话整句）, `subkind` ∈ `never` / `overdue`, `severity="info"`, `decision` 缺省, `notify=False` | **v1.20（0.53.0）补登记**：该做体检了。`subkind="never"` ＝ 装好 ≥24 小时一次体检都没做过（`exam_state` 的 `S1`）；`subkind="overdue"` ＝ 上次体检已过去很久（`S3`）。★ **去重靠链不靠内存**：hub rollup 链上已有 `type=exam_reminder` 就再也不出（`exam_reminder_check` 里查链），所以这类型全历史**最多一条** —— 它是「提醒过了」的证据，不是台账。★ 级别定在 **L1（注意）** 而不是 L2：L2 会弹置顶紧急窗，而"还没体检"只是知情即可（`inbox_model.LEVEL_OF_KIND` 一处可翻回，判据同源跟随）。★ 与 `credits_low` 同类：都是**通知性质**、都不代表防线出事 |
+
 ### 门闸类（host-shield，v1.3 补登记；v1.4 增补）
 
 > 由 `host_shield.py` 哨兵与 `antinel.py host-shield enable/disable` 写入**与上表同一条链**。
@@ -282,7 +302,7 @@
 | `host_shield_revived` | 哨兵/paramedic | `decision="allow"`, `pid`, `cause`, `spawn_mode` | **v1.4 新增**：哨兵死亡后被重新拉起（钩子 paramedic 或 CLI）。复活记录本身就是"此前有断档"的证据 |
 | `host_shield_spawn_failed` | 哨兵/paramedic | `decision="deny"`, `severity="critical"`, `cause` | **v1.4 新增**：哨兵死亡且拉起失败——门闸无人值守的显式记录（此前该状态只存在于沉默里） |
 | `host_shield_tamper` | 哨兵 | `decision="deny"`, `severity="critical"`, `field`, `reason`, `recovered` | **v1.5 新增**：本地配置与权威依据不符——state 文件 `enabled` 与链不一致（B4b/b2/c/d）；workspaces/zones/windows 无链背书被改并已回写恢复；启动自检发现运行代码/登记表与 manifest 不符（B4e/f）。执法按链/按已知值继续，绝不因文件被改而静默停摆。**v1.10**：`field="state"` 的回写恢复类**必须带 `recovered=true`**（防线已自愈、无后果）；`reason` 增补"哪个字段从什么变成什么"（`host_shield._fp_diff_txt()`）——旧文案只说"workspaces/zones/windows 被修改"，**不说改了哪个**，事后无法定位真因（2026-10-06 就是靠翻全链邻居才认出真因） |
-| `host_shield_dev_drift` | 哨兵 | `decision="deny"`, `severity="warning"`, `field="self-check"`, `subkind="code_drift"` | **v1.11 新增**：启动自检不符，但**判定为研发态**（登记表`psl/manifest.json`停在发版那一刻，而工作树比它新）⇒ 这是**范畴事实，不是防线失守**。★ 为什么必须与 `host_shield_tamper` **分开记**：类型错了，读者层再修也修不回来 —— 旧口径把这情形判成 R0「失守」，而**那个判断本身就是错的**（创始人 2026-10-09 点名的「没有失守却显示失守」）。值守台按 **L1（注意）** 呈现、**不进**「要处理」、**不弹气泡**（不在 `host_shield._ALERT_KINDS` 里）。★ 报红条件（负控，判据 S25）：一旦**已出厂** ⇒ 仍记 `host_shield_tamper` critical ⇒ R0。★ **v1.15（0.43.1）收窄"已出厂"的定义**：原口径是「登记版本 ≥ 代码版本」，但那把「登记版本 == 代码版本」也算进去了 —— 而 `ci/version_check.py` 要求 10 处承载件（含 `psl/manifest.json`）逐字相同，升版**必然**把 manifest 的 version 刷成同号 ⇒ 落差永远为 0 ⇒ 研发态**长期不可达**（实测：界面挂 R0「失守」而事实是正常迭代）。新口径：**已出厂 ⇔ 登记版本 ＞ 代码版本，或（登记版本 == 代码版本 且清单与工作树逐字节相符）**；登记版本 == 代码版本**但清单与工作树不符** ⇒ 这是"版本已升、尚未重打包"⇒ 仍判研发态。判据 S67/N-S67（`ci/inbox_guards_0431.py`）常驻防复发。★ 登记纪律：新增链类型必须**同时**进本文 §4 —— 只写抬头说明会被 `tools/verify_event_types.py` 判"未登记"（0.40.0 实际踩过：F-10 因此变红） |
+| `host_shield_dev_drift` | 哨兵 | `decision="deny"`, `severity="warning"`, `field="self-check"`, `subkind="code_drift"` | **v1.11 新增**：启动自检不符，但**判定为研发态**（登记表`psl/manifest.json`停在发版那一刻，而工作树比它新）⇒ 这是**范畴事实，不是防线失守**。★ 为什么必须与 `host_shield_tamper` **分开记**：类型错了，读者层再修也修不回来 —— 旧口径把这情形判成 R0「失守」，而**那个判断本身就是错的**（创始人 2026-10-09 点名的「没有失守却显示失守」）。Antinel 监理按 **L1（注意）** 呈现、**不进**「要处理」、**不弹气泡**（不在 `host_shield._ALERT_KINDS` 里）。★ 报红条件（负控，判据 S25）：一旦**已出厂** ⇒ 仍记 `host_shield_tamper` critical ⇒ R0。★ **v1.15（0.43.1）收窄"已出厂"的定义**：原口径是「登记版本 ≥ 代码版本」，但那把「登记版本 == 代码版本」也算进去了 —— 而 `ci/version_check.py` 要求 10 处承载件（含 `psl/manifest.json`）逐字相同，升版**必然**把 manifest 的 version 刷成同号 ⇒ 落差永远为 0 ⇒ 研发态**长期不可达**（实测：界面挂 R0「失守」而事实是正常迭代）。新口径：**已出厂 ⇔ 登记版本 ＞ 代码版本，或（登记版本 == 代码版本 且清单与工作树逐字节相符）**；登记版本 == 代码版本**但清单与工作树不符** ⇒ 这是"版本已升、尚未重打包"⇒ 仍判研发态。判据 S67/N-S67（`ci/inbox_guards_0431.py`）常驻防复发。★ 登记纪律：新增链类型必须**同时**进本文 §4 —— 只写抬头说明会被 `tools/verify_event_types.py` 判"未登记"（0.40.0 实际踩过：F-10 因此变红） |
 | `host_shield_lock_held` | 哨兵 | `decision="deny"`, `severity="none"`, `reason`(含路径) | **v1.6a 补登记**：门闸**持锁中**的周期性状态留痕（每 `LOCK_HELD_EVERY` 一次，`lock_held_at` 去重）。★ 与 `breach` **分开**：锁**在**是正常态，不该只在"出事"时才出现在账本上 —— 旧机制下 `if is_denied(...)` 为真就**整支跳过**，于是"锁挂了两个月、账本一字不提"（09-25/26 审计只剩心跳、零 breach） |
 | `host_shield_contested` | 哨兵 | `decision="deny"`, `severity="critical"`, `reason`(含路径与补锁次数) | **v1.6a 补登记**：同一落点在 `CONTEST_WINDOW` 内被补锁 ≥ `CONTEST_TIMES` 次 —— 上锁**未稳定生效**或**有进程在对抗门闸**，须人工介入。★ 与 `breach` 的分工：`breach` 是"发现未拦的落点"（第 1 次，且明说"不等于有进程在对抗"），本类是"补锁反复不生效"（第 N 次） |
 | `host_shield_state_write_refused` | 哨兵/钩子 | `decision="deny"`, `severity="warning"`, `fields`(被拒写的字段名列表), `subkind`(`refused`/`optimistic_lock_lost`), `reason` | **v1.15 新增；v1.16 增补 `subkind`**：`update_state_fields()` 这道"没保住就出声"的留痕，**两种成因按 `subkind` 分派**：`refused`=状态文件**存在但读不到**（坏/半截）⇒ 主动拒写、返回 False；`optimistic_lock_lost`=写后读回版本号（`_rev`）不符 ⇒ 被并发覆盖、重试一次仍不符。★ 为什么必须出声：保护静默生效会让**节流与记账一起悄悄失效**（症状＝哨兵被反复拉起，实测当天 19 次 `host_shield_revived`），而过去三处调用点**全部忽略返回值** ⇒ 无人可见。★ **不弹气泡**（`notify=False`，不在 `host_shield._ALERT_KINDS` 内）：它是诊断，不是"需要你动手"。★ 登记纪律：新增链类型必须**同时**进本文 §4，由 `tools/verify_event_types.py` 扫代码写出的 type 校验（只写抬头说明会判"未登记"，0.40.0 踩过 F-10） |

@@ -1,5 +1,6 @@
 {
  "host": "qwen-agent",
+ "name": "Qwen-Agent",
  "vendor": "Alibaba",
  "roots": [
   "~/.qwen-agent",

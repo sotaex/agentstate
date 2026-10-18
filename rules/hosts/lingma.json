@@ -1,5 +1,6 @@
 {
  "host": "lingma",
+ "name": "通义灵码",
  "vendor": "Alibaba",
  "roots": [
   "~/.lingma",

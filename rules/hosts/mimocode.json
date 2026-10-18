@@ -1,5 +1,6 @@
 {
  "host": "mimocode",
+ "name": "MiMo Code",
  "vendor": "Xiaomi",
  "roots": [
   "~/.mimocode",

@@ -1,5 +1,6 @@
 {
  "host": "vscode",
+ "name": "Visual Studio Code",
  "vendor": "Microsoft",
  "roots": [
   "~/.vscode",

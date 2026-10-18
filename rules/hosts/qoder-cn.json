@@ -1,5 +1,6 @@
 {
  "host": "qoder-cn",
+ "name": "Qoder（国内版）",
  "vendor": "Alibaba",
  "roots": [
   "~/.qoder-cn",

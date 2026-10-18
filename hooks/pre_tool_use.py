@@ -56,7 +56,7 @@ _T0 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段起点（性能
 
 # ---------------------------------------------------------------- constants --
 PKG_DIR = os.path.dirname(os.path.abspath(__file__))
-_ANTINEL_VERSION = "0.51.2"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
+_ANTINEL_VERSION = "0.53.0"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
 _T1 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段终点（性能插桩）
 
 
@@ -3976,7 +3976,7 @@ def main():
         # 0.26.0: 实时通知主人——对手采取行动的第一时间，主人要能知道并手工介入
         # ★★ 0.35.3（创始人 2026-10-06「**不停地有弹窗**」＋「尽可能少让人处理」）：
         #   拦截**本来就是 Antinel 干完的活** —— 同一条规则 + 同一段命中，
-        #   **一天只敲一次门**；其余只留痕（值守台台账里翻得到）。
+        #   **一天只敲一次门**；其余只留痕（Antinel 监理台账里翻得到）。
         #   否则一条常用规则反复拦 ⇒ 气泡刷屏 ⇒ 人开始无视气泡
         #   （"会误报的检查器用两次就没人信"）。
         if str((policy.get("settings") or {}).get("notify_owner", "true")).lower() != "false":

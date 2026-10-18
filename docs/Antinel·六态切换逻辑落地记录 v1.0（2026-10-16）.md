@@ -222,7 +222,7 @@
 | 1 | 杀旧窗 PID ＋ 旧 daemon PID | 杀 daemon ⇒ service 同死（W-04 再次实证，8790 立刻无监听） |
 | 2 | `run_in_background` 跑 `python -W ignore -c "import inbox_daemon; inbox_daemon.run_daemon()"`（cwd=仓根） | 新 daemon **26720**；supervise 按记录重拉 service **5756 @8790**，**token/URL 不变**（B1） |
 | 3 | `inbox_cli.py window`（同步调用、launch-and-return） | 打印「[window] 已就位：720x640 @(2240,1264)」 |
-| 4 | 默认落点被 WorkBuddy 主窗遮挡 ⇒ 用**产品自己的** `inbox_window.place_all` 挪到 (150,150) 并回读 | `True ｜ 已把 1 个值守台窗口都落到 870x790 @(150,150)` |
+| 4 | 默认落点被 WorkBuddy 主窗遮挡 ⇒ 用**产品自己的** `inbox_window.place_all` 挪到 (150,150) 并回读 | `True ｜ 已把 1 个Antinel 监理窗口都落到 870x790 @(150,150)` |
 
 **在屏证据**（`_p_console_open.py` 绕代理探窗口真加载的那份 HTML ＋
 `_p_console_shot.py` 截图）：窗口标题「**值守中 · Antinel 监理#b39a0a**」、

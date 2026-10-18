@@ -1,5 +1,6 @@
 {
  "host": "workbuddy",
+ "name": "WorkBuddy",
  "vendor": "Tencent",
  "roots": [
   "~/.workbuddy",

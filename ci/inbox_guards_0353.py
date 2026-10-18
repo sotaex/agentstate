@@ -944,17 +944,32 @@ def c_server_read_all_cancelled():
 
 
 def n_server_read_all_cancelled():
-    """负控：`op=read` **仍然可用**（证明不是"整个 /action 都坏了"）。"""
+    """负控：`op=read` **仍然可用**（证明不是"整个 /action 都坏了"）。
+
+    ★★ 0.53.0（T0 收尾）重锚：原断言 `s == 303 and after == "read"` 锚的是
+      0.48.6（B3）之前的设计——口令改走 HttpOnly cookie 后，`op=read` 由页面
+      fetch 调用，**故意**回 200＋JSON（`inbox_server.py` 注释：303 后再 GET
+      会因 cookie 禁用造成「实际已写、UI 误报」）。
+      旧锚点从 0.48.6 起恒假 ⇒ 聚合器 WARN「负控没红」整整六个版本。
+      修的是锚点，**不是放松**：仍然要求"写入真的落库"（after == "read"），
+      且把响应契约（200＋ok）一并锁上——产品若退化成不落盘或回错误码照样红。
+    """
     hub = G.new_hub()
     G.put_chain(hub, [G.breach(reason="r1")])
     it = S.load_items(root=hub)[0]
     srv = G.Server(hub)
     try:
-        s, _h, _b = G.req(srv.port, "/action", token=srv.token, method="POST",
-                          body="op=read&id=%s" % it.id,
-                          ctype="application/x-www-form-urlencoded")
+        s, _h, b = G.req(srv.port, "/action", token=srv.token, method="POST",
+                         body="op=read&id=%s" % it.id,
+                         ctype="application/x-www-form-urlencoded")
         after = S.load_items(root=hub)[0].state
-        return s == 303 and after == "read"
+        if s != 200:
+            return False                      # 不是 fetch 契约的 200
+        try:
+            ok = json.loads(b).get("ok") is True
+        except ValueError:
+            return False                      # 回的不是 JSON ⇒ 契约坏了
+        return ok and after == "read"
     finally:
         srv.stop()
 
@@ -1958,7 +1973,7 @@ def n_notify_only_when_owner_needed():
 
 # ==================== 九、闪窗（0.35.3，创始人报障「窗口不停弹出又马上关掉」）====
 # ★ 根因（本机实测 2026-10-06）：哨兵由 `DETACHED_PROCESS` 拉起 ⇒ **没有控制台**；
-#   它（或钩子／MCP／值守台）再起**控制台程序**（netstat/tasklist/icacls/taskkill/
+#   它（或钩子／MCP／Antinel 监理）再起**控制台程序**（netstat/tasklist/icacls/taskkill/
 #   schtasks/powershell/python）时，若不显式 `CREATE_NO_WINDOW`，Windows 会为子进程
 #   **新建控制台** ⇒ 用户看到黑窗一闪。`egress` 采样每 30 秒各起 netstat+tasklist
 #   一次 ⇒ **一直闪**。`-WindowStyle Hidden` 挡不住（那是 PowerShell 自己的窗；
@@ -1966,7 +1981,7 @@ def n_notify_only_when_owner_needed():
 # ★ 判据形态：**静态扫**生产运行模块里每一个起子进程的调用，必须带 `creationflags`。
 #   `**kwargs` 展开（`**kw`）无法静态确认 ⇒ **也算未登记**（fail-loud，不许蒙混）。
 
-# 生产运行模块（常驻／热路径）：哨兵、钩子、MCP、值守台、CLI。
+# 生产运行模块（常驻／热路径）：哨兵、钩子、MCP、Antinel 监理、CLI。
 _PROD_SPAWN_FILES = (
     "host_shield.py", "egress.py", "antinel.py", "antinel_mcp.py",
     "inbox_server.py", "inbox_notify.py", "inbox_emphasis.py",
@@ -2114,7 +2129,7 @@ def c_ledger_page_populates_from_chain_snapshot():
     ★★ 0.51.0（账本四问 · 缺陷①「整天漏记」）：断言口径从「只写今天一行」
       改为「写满最近 `BACKFILL_DAYS` 天里**有账的每一天**」。
       夹具里有一条 `ts` 落在昨天、今天才被关闭的记录 —— 旧实现把它那次
-      「拦截」**永远漏掉**（`record_day` 只算 `ts` 当天，且只在值守台打开时跑），
+      「拦截」**永远漏掉**（`record_day` 只算 `ts` 当天，且只在Antinel 监理打开时跑），
       新实现必须**落出昨天那一行**。
       ⇒ `days == 2`、`昨天 blocked == 1`、累计 `blocked == 3` 三条合起来
         就是「漏记已修」的机械证明（以下数字是 2026-10-16 实测真值，非推演）。
@@ -2157,7 +2172,7 @@ def c_ledger_page_populates_from_chain_snapshot():
 
 
 def c_ledger_backfill_fills_day_that_was_never_recorded():
-    """★ 缺陷①的正面证明：**某天没开过值守台 ⇒ 那天一行都没有 ⇒ 补记必须补出。**
+    """★ 缺陷①的正面证明：**某天没开过Antinel 监理 ⇒ 那天一行都没有 ⇒ 补记必须补出。**
 
     造法：手工只给**今天**写一行（模拟"今天开过、昨天没开"），再跑
     `record_day` ⇒ 昨天那行必须被补出来，且数字等于现算值。
@@ -2252,7 +2267,7 @@ def n_ledger_page_populates_from_chain_snapshot():
 # ====================================== 十三、账本规格件核对（交接 §七.2）=====
 # ★ 本轮实测结论：交接件说「找不到 ledger.py 引用的详细设计 §10.5–§10.6」——
 #   不是找不到，是**引用指错了文件**。§10.5（合规红线）/§10.6（与 credits 的关系）
-#   实际出自《Antinel 值守台（便签）方案 v1.0（2026-10-05）》，
+#   实际出自《Antinel Antinel 监理（便签）方案 v1.0（2026-10-05）》，
 #   《值守台·详细设计 v1.0》的第十章是「待创始人拍板」，其 §5.6 才是账本页界面规范。
 # ⇒ 判据锁两件事：① 引用必须指对文件；② 规格 §5.6 点名的两个界面件不许消失。
 def _ledger_docstring():
@@ -2315,7 +2330,7 @@ def c_ledger_doc_citation_points_at_real_section():
     # 反向自查：那份便签方案文件**确实在仓内**，且两节标题真的存在
     # （否则就是把一个不存在的锚点写进注释 —— 比错引用更难发现）。
     # ★ 用 listdir 逐个按内容筛，不靠 glob 猜文件名：文件名里有全角括号
-    #   （「值守台（便签）方案 v1.0（2026-10-05）.md」），按片段 glob 会漏。
+    #   （「Antinel 监理（便签）方案 v1.0（2026-10-05）.md」），按片段 glob 会漏。
     odir = os.path.join(PSL_ROOT, "outputs")
     if not os.path.isdir(odir):
         return False
@@ -2696,74 +2711,82 @@ def n_report_drill_counts_match_headline():
     return with_win == 1 and no_win == 2
 
 
-# ==== 十五、顶部数字必须带事由件数（创始人第四条 · 奥卡姆剃刀，本轮实测）====
-def c_header_numbers_state_both_denominators():
-    """★ 顶部每个数字都要**同时**给出记录条数与事由件数。
-
-    ★ 本轮实测依据：R0 共 80 条，但只有 **8 种不同原因**，最大一支 37 次
-      （同一个钩子哈希不匹配被反复记录）⇒ 按事由归并只有 **4 件**。
-      只报 69 ⇒ 用户以为有 69 件事要做，实际只需做 4 件 ——
-      这正是创始人点名"大量其实不需要用户处理的待处理"。
-      修法不是藏数，而是**把两个分母都摆出来**（F40 的正面处理）。
-    """
+# ==== 十五、24h 按级计数的唯一家（0.53.0 T3.2 重写；旧断言随药丸排退役）====
+# ★★ supersession 记录（**追随规格更新，不是放松**）：
+#   0.50.x–0.52.x 本条守的是**顶部药丸排**「失守 N（已归并为 M 件事）·
+#   拦截 N · 注意 N」—— 每个数同时给出记录条数与事由件数（创始人第
+#   四条：69 条记录不能读成 69 件事）。设计 v1.11 §14.3 第 1 条**撤那
+#   一排**（与日报四指标同窗口同口径 ⇒ 同一个数两个落点，重复即红），
+#   24h 按级计数的唯一家＝日报四指标。
+#   ⇒ 旧断言的对象（药丸）随规格消失，本条改写为守**新家**：
+#     四指标的数字与链现算一致、钻取链接在位。旧负控（"只报件事数
+#     糊过去"）的对象（药丸括号）也没了，换成"家的数字与链不符必须红"。
+#   "同页没有第二份"那一面由 0490 U20 守（四视图一起查），本条不重复。
+def c_window_level_counts_live_only_in_report():
+    """P14（T3.2 重写）：日报四指标的数字与链现算一致，钻取链接在位。"""
     hub = _tmpdir()
-    day, items = _ledger_test_items()
+    _day, items = _ledger_test_items()
     html = SV.render_page(view="report", root=hub, token="T", items=items)
-    # 三个数字链接：括号内必须是按事由归并后的件数
-    # ★ 0.48.6（B3）：链接里不再挂 `&t=T`（口令走 HttpOnly cookie）—— 同步去掉。
-    pairs = re.findall(
-        # ★ 0.50.4（Q-08）：括号补了动词「已归并为」—— 光一个「（3 件事）」
-        #   读者看不出条与件是什么关系。锚点同步，断言强度不变（件数仍须对得上）。
-        r'f=win:%d:lv:(L2|L1|R0)">(?:拦截|注意|失守) <b>(\d+)</b>'
-        r'(?:（已归并为 (\d+) 件事）)?'
-        % M.WINDOW_HOURS, html)
-    if len(pairs) != 3:
-        return False                      # 三个数字没都带钻取链接
-    for lvl, n, g in pairs:
-        want_n = len([i for i in items
-                      if i.level == lvl and M.within_hours(i.ts, M.WINDOW_HOURS)])
-        want_g = M.count_groups([i for i in items if i.level == lvl
-                                 and M.within_hours(i.ts, M.WINDOW_HOURS)])
-        if int(n) != want_n:
-            return False                  # 条数与实测不符
-        if g and int(g) != want_g:
-            return False                  # 件事数与实测不符
-        # 条数 != 件事数 时**必须**显示括号，否则两个口径混成一个数
-        if want_n != want_g and not g:
-            return False
-    # ★ 0.48.5（交接件 §5.4 丁4）：原断言锁的是 43 字工程说明串
-    #   「记录数；括号里是按事由归并后的件数」—— 正是丁4 点名要删的那句
-    #   （title 是消歧位，不是说明书；解释移交「？」词条，U-04 批次 3 落地）。
-    #   追随规格更新，**不是放松**：两个分母仍由可见的「N（G 件事）」括号
-    #   摆着（上面 pairs 已逐个数过）；这里改锁 title 仍是那个口径说明位 ——
-    #   点明「记录数」与窗口、且 ≤20 字，工程腔不许回来（0490 U-11 同限）。
-    pill_titles = [t for t in re.findall(r'title="([^"]*)"', html)
-                   if "记录数" in t]
-    return (len(pill_titles) >= 3
-            and all("最近 %d 小时" % M.WINDOW_HOURS in t and len(t) <= 20
-                    for t in pill_titles))
+    # 夹具的 24h 窗口真值（链现算，不硬编码 —— 硬编码的数字一改产品就假绿）
+    win = {lv: [i for i in items
+                if i.level == lv and M.within_hours(i.ts, M.WINDOW_HOURS)]
+           for lv in ("R0", "L2", "L1")}
+    # ① 三个级指标的**条数**与钻取链接都在（家的数字对、家可点）
+    for lvl in ("R0", "L2", "L1"):
+        want = len(win[lvl])
+        m = re.search(r'f=win:%d:lv:%s">(\d+)</a>' % (M.WINDOW_HOURS, lvl), html)
+        if not m:
+            return "日报页缺 %s 指标的 24h 钻取链接（唯一家不完整）" % lvl
+        if int(m.group(1)) != want:
+            return ("日报 %s 指标显示 %s，链现算 %d —— 家的数字与链不符"
+                    % (lvl, m.group(1), want))
+    # ② 要处理指标是**件事**（不是条数）—— 归并口径唯一体现在这里
+    act = [i for i in items if M.bucket_of(i) == M.BUCKET_ACTION]
+    want_g = M.count_groups(act)
+    m2 = re.search(r'f=action">(\d+)</a>', html)
+    if not m2 or int(m2.group(1)) != want_g:
+        return ("日报要处理指标不是件事数（现算 %d 件）—— 归并口径没了"
+                % want_g)
+    return True
 
 
-def n_header_numbers_dont_hide_records():
-    """负控：**不许用"只报件事数"的方式糊过去** —— 那会把 69 条明细藏起来。
-
-    ★ 换成一个"条数≠事由数"的样本：同因 3 条 + 另一因 1 条
-      ⇒ 必须显示「3（1 件事）」这类形态，且明细链接仍指向全部记录。
-    """
-    hub = _tmpdir()
-    now = datetime.now().astimezone()
-    ts = now.isoformat(timespec="seconds")
-    same = [M.Item(M.Alert.build(ts, "host_shield_breach", reason="same"))
-            for _ in range(3)]
-    other = M.Item(M.Alert.build(ts, "tool_call_blocked", reason="other"))
-    items = same + [other]
-    html = SV.render_page(view="report", root=hub, token="T", items=items)
-    txt = _page_text(html)
-    if "（1 件事）" not in txt:
-        return False                      # 没归并，也没写明 ⇒ 口径缺失
-    # 明细链接必须仍然是全部 3+1 条（不许把 3 条藏起来只显示 1 件）
-    if 'f=win:%d:lv:R0' % M.WINDOW_HOURS not in html:
-        return False
+def n_window_level_counts_match_chain():
+    """负控：把日报 R0 指标的数字改成与链不符的常数 ⇒ P14 必须红。"""
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "inbox_server.py")
+    with open(p, encoding="utf-8") as f:
+        src = f.read()
+    anchor = 'metric("R0", W.get("R0", 0), "--r0", "lv:R0")'
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效"
+    import types
+    mod = types.ModuleType("inbox_server_mut")
+    mod.__file__ = p
+    sys.modules["inbox_server_mut"] = mod
+    try:
+        exec(compile(src.replace(anchor, 'metric("R0", 99, "--r0", "lv:R0")'),
+                     p, "exec"), mod.__dict__)
+        hub = _tmpdir()
+        _day, items = _ledger_test_items()
+        html = mod.render_page(view="report", root=hub, token="T", items=items)
+    except Exception as e:                              # noqa: BLE001
+        return "变异模块渲染失败（%s）—— 量具故障" % (e,)
+    finally:
+        sys.modules.pop("inbox_server_mut", None)
+    if re.search(r'f=win:%d:lv:R0">99</a>' % M.WINDOW_HOURS, html) is None:
+        return "负控失效：常数 99 没上页面（注入没生效）"
+    live = SV.render_page(view="report", root=_tmpdir(), token="T",
+                          items=_ledger_test_items()[1])
+    if re.search(r'f=win:%d:lv:R0">99</a>' % M.WINDOW_HOURS, live):
+        return "夹具不成立：真实现的 R0 指标本来就是 99 ⇒ 负控无分辨力"
+    # 变异页喂正判据的同一把尺子（R0 数字与链现算比对）⇒ 必须红
+    want_r0 = len([i for i in items
+                   if i.level == "R0"
+                   and M.within_hours(i.ts, M.WINDOW_HOURS)])
+    if int(re.search(r'f=win:%d:lv:R0">(\d+)</a>' % M.WINDOW_HOURS,
+                     html).group(1)) == want_r0:
+        return "负控失效：数字与链一致时判据仍绿（这条判据是摆设）"
+    _note("家的数字与链不符 ⇒ 尺子红（P14 有牙）")
     return True
 
 
@@ -2973,6 +2996,904 @@ def n_self_check_chain_catch_is_not_vacuous():
         shutil.copy2(copy, live)
 
 
+# ============ 十九、体检存档（0.53.0 P6 第一步 · H9）============
+# ★ 为什么这条判据必须先立：「体检页四组明细」与「装前体检过就不再催」两件事
+#   **都只认本机这一份存档**（方案 v1.7 §28.5 三条链的第一条）。存档没写下来，
+#   那两块会一起静默失效 —— 而失效的样子（页面没有卡片、没有明细）与「一切正常」
+#   长得一模一样。本仓最忌的就是这个形状：**没查/没存 与 查了没事 显示成同一个样子**。
+# ★ 尺子只有一把：`_health_judge` ＋ `_health_probe`，正判据与负控共用，
+#   负控的要求不是"看着像红"，而是**同一把尺子在旧形态上必须判红**。
+_HEALTH_HOST_KEYS = {"host", "root", "present", "bytes", "workspaces"}
+_HEALTH_WS_KEYS = {"host", "checkpoint", "path", "entries", "git_entries",
+                   "sensitive_entries", "pending", "accepted"}
+
+
+def _note(msg):
+    """判据量出来的证据（走 stderr：可见，但不进绿/红账、不污染主清单）。"""
+    sys.stderr.write("       · %s\n" % msg)
+
+
+def _health_files(hub):
+    d = os.path.join(hub, "health")
+    if not os.path.isdir(d):
+        return []
+    import glob as _g
+    return sorted(_g.glob(os.path.join(d, "audit-*.json")))
+
+
+def _antinel_cli(argv):
+    """在**本进程**里跑 antinel 的命令行（不是子进程）。
+
+    ★ 为什么必须同进程：负控要把写盘函数打桩成"什么都不做"，跨进程打桩打不到
+      （子进程会重新 import 产品模块，桩对它不存在）。
+    ★ 为什么不是 `G._cli`：那个跑的是 **inbox** 的命令行（`inbox_cli`），
+      拿它跑 `host-audit` 只会得到 `invalid choice: 'host-audit'` —— 一条永远红
+      的判据，红得还很误导。
+    """
+    import contextlib
+    import io
+    import antinel as A
+    buf = io.StringIO()
+    rc = 0
+    with contextlib.redirect_stdout(buf):
+        try:
+            rc = int(A.main(argv) or 0)
+        except SystemExit as e:                  # argparse / _die 走这条
+            rc = int(e.code or 0)
+    return rc, buf.getvalue()
+
+
+def _health_judge(doc):
+    """体检存档的唯一尺子：字段齐全 ＋ **只含路径与计数**。"""
+    if not isinstance(doc, dict):
+        return "存档不是 JSON 对象（%s）" % type(doc).__name__
+    bad = []
+    if doc.get("source") != "host-audit":
+        bad.append("source=%r（必须是 host-audit，否则分不清这份是谁写的）"
+                   % (doc.get("source"),))
+    if doc.get("schema") != "antinel.health/1":
+        bad.append("schema=%r（不声明版本，日后改字段就无法分辨新旧）"
+                   % (doc.get("schema"),))
+    ts = doc.get("generated_at")
+    if not (isinstance(ts, str) and re.match(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d", ts)):
+        bad.append("generated_at=%r 不是 ISO 时刻" % (ts,))
+    for k in ("hosts", "workspaces"):
+        if not isinstance(doc.get(k), list):
+            bad.append("%s 不是列表" % k)
+    # ★ 白名单校验＝「只含路径与计数」这条承诺的机器形态。
+    #   多一个键 ⇒ 有可能把文件内容/凭据带进了这份报告（它是「只读」承诺的边界）。
+    for h in doc.get("hosts") or []:
+        extra = (set(h) - _HEALTH_HOST_KEYS) if isinstance(h, dict) else {"（不是对象）"}
+        if extra:
+            bad.append("hosts 条目多出白名单外的键 %r" % (sorted(map(str, extra)),))
+            break
+    for w in doc.get("workspaces") or []:
+        extra = (set(w) - _HEALTH_WS_KEYS) if isinstance(w, dict) else {"（不是对象）"}
+        if extra:
+            bad.append("workspaces 条目多出白名单外的键 %r" % (sorted(map(str, extra)),))
+            break
+        for k in ("entries", "git_entries", "sensitive_entries", "pending"):
+            if not isinstance(w.get(k), int):
+                bad.append("workspaces.%s 不是整数（%r）" % (k, w.get(k)))
+                break
+    return "；".join(bad) if bad else True
+
+
+def _health_probe(hub, out, rc=0):
+    """跑完 `host-audit` 之后该看到的四件事（正判据与负控同一把尺子）。"""
+    if rc != 0:
+        return "host-audit 退出码 %s（体检本身没跑成，存档无从谈起）" % rc
+    files = _health_files(hub)
+    if len(files) != 1:
+        return ("跑一次 host-audit，health/ 下 audit-*.json 是 %d 个（应为 1）"
+                % len(files))
+    try:
+        with open(files[0], encoding="utf-8") as f:
+            doc = json.load(f)
+    except (ValueError, OSError) as e:
+        return "存档解析不了：%s" % e
+    why = _health_judge(doc)
+    if why is not True:
+        return "存档不合格：%s" % why
+    if "这次体检已存档：" not in out:
+        return "屏幕上没打「这次体检已存档：」—— 用户不知道有这份存档"
+    if os.path.basename(files[0]) not in out:
+        return "屏幕上的路径不是实际落盘那份（%s）" % os.path.basename(files[0])
+    # 同源：屏幕列了几个项目目录，存档里就得有几条 —— 两处数不许分叉。
+    shown = sum(1 for ln in out.splitlines() if ln.strip().startswith("工作区 "))
+    if shown != len(doc["workspaces"]):
+        return ("屏幕列了 %d 个项目目录，存档里 %d 条 —— 同一次体检两处数对不上"
+                % (shown, len(doc["workspaces"])))
+    return True
+
+
+def c_health_report_saved_after_audit():
+    """H9：跑一次 `antinel host-audit` ⇒ 本机留下**一份**可解析、可追溯的体检存档。"""
+    hub = G.new_hub()
+    rc, out = _antinel_cli(["host-audit"])
+    why = _health_probe(hub, out, rc)
+    if why is not True:
+        return why
+    files = _health_files(hub)
+    with open(files[0], encoding="utf-8") as f:
+        doc = json.load(f)
+    _note("1 份存档 ／ %d 个落点 ／ %d 个项目目录 ／ %s"
+          % (len(doc["hosts"]), len(doc["workspaces"]),
+             os.path.basename(files[0])))
+    return True
+
+
+def n_health_report_saved_after_audit():
+    """负控：把写盘函数打桩成"什么都不做"⇒ **同一把尺子必须判红**。
+
+    ★ 为什么不满足于「读代码看到有调用」：本仓本轮刚吃过三次同一个亏——
+      **实现有、出口没接**（json 迭代 None／arm 挂错 parser／days 被 session 吞）。
+      读代码能看出"写了调用"，看不出"调用之后真的落盘"。所以这里真打桩、真跑一遍。
+    ★ 另两条负控守尺子自身的分辨力：①多带一个内容字段必须判红（白名单）；
+      ②"没存档"这个形态必须被判红（否则尺子只会说好话）。
+    """
+    import antinel as A
+    hub = G.new_hub()
+    orig = A._save_health_report
+    try:
+        A._save_health_report = lambda doc: os.path.join(hub, "health", "audit-stub.json")
+        rc, out = _antinel_cli(["host-audit"])
+    finally:
+        A._save_health_report = orig
+    if rc != 0:
+        return "打桩后命令跑不通（%s）—— 负控样本无效，不是产品红" % rc
+    if _health_files(hub):
+        return "打桩了却仍落盘 %d 个文件 —— 说明另有一条写入路径（副本）" % len(_health_files(hub))
+    why = _health_probe(hub, out, rc)
+    if why is True:
+        return "负控失效：根本没存档，尺子却判绿（尺子只会说好话）"
+    if "audit-" not in why:
+        return "方向不对：报的红不是「没存档」（%s）—— 量具打偏" % why
+    if any("已存档" in ln for ln in out.splitlines()):
+        return "没存下来却仍打印了「已存档」—— 屏幕在撒谎"
+    leak = {"schema": "antinel.health/1",
+            "generated_at": "2026-10-17T22:00:00+08:00", "source": "host-audit",
+            "hosts": [],
+            "workspaces": [{"host": "z", "checkpoint": "c", "path": "p",
+                            "entries": 1, "git_entries": 0, "sensitive_entries": 0,
+                            "pending": 0, "accepted": True,
+                            "content_sample": "第一行源码"}]}
+    if _health_judge(leak) is True:
+        return "尺子没分辨力：把文件内容带进存档也判绿（白名单失效）"
+    _note(why)
+    return True
+
+
+def c_health_report_rotation_keeps_twelve():
+    """H9b：存档**只增不改**，且只留最近 12 份（超出的按最旧清理）。"""
+    import host_shield as H
+    hub = G.new_hub()
+    keep = int(getattr(H, "HEALTH_KEEP", 0) or 0)
+    if keep != 12:
+        return "HEALTH_KEEP=%r（方案定的是 12）" % (keep,)
+    for i in range(keep + 1):
+        H.save_health_report({"schema": "antinel.health/1",
+                              "generated_at": "2026-10-17T22:00:00+08:00",
+                              "source": "host-audit", "hosts": [], "workspaces": [],
+                              "n": i})
+    files = _health_files(hub)
+    if len(files) != keep:
+        return "连存 %d 次后剩 %d 份（应恰为 %d）" % (keep + 1, len(files), keep)
+    with open(files[-1], encoding="utf-8") as f:
+        if json.load(f).get("n") != keep:
+            return "留下的最新一份不是第 %d 次（说明按名字排错了序）" % keep
+    with open(files[0], encoding="utf-8") as f:
+        if json.load(f).get("n") == 0:
+            return "最旧那份（n=0）还在 —— 清理没落到最旧的上"
+    _note("%d 份存档 ／ 最旧已转归档（不删） ／ 最新是第 %d 次" % (len(files), keep))
+    return True
+
+
+def n_health_report_rotation_keeps_twelve():
+    """负控：把保留份数改成"不清理"⇒ 同一把尺子必须判红（防"写了清理但没生效"）。"""
+    import host_shield as H
+    hub = G.new_hub()
+    orig = H.HEALTH_KEEP
+    try:
+        H.HEALTH_KEEP = 99
+        for i in range(13):
+            H.save_health_report({"schema": "antinel.health/1",
+                                  "generated_at": "2026-10-17T22:00:00+08:00",
+                                  "source": "host-audit", "hosts": [], "workspaces": [],
+                                  "n": i})
+        files = _health_files(hub)
+    finally:
+        H.HEALTH_KEEP = orig
+    if len(files) != 13:
+        return "样本无效：应落 13 份，实际 %d 份" % len(files)
+    if len(files) == 12:
+        return "负控失效：不清理时仍只剩 12 份（清理逻辑另有来源？）"
+    _note("不清理 ⇒ %d 份（尺子会红）" % len(files))
+    return True
+
+
+# ---- 0.53.0 T1.2：超量存档**归档不删**（设计 §14.7 原文"多余归档，不删"）----
+def _h13_core(hub):
+    """H13 尺子本体（正判据与负控共用）：连存 13 份后最旧那份**改名归档**。
+
+    ★ 归档语义：文件不再匹配 `audit-*.json` ⇒ `health_reports()` 不再列它
+      （轮转行为不变），但字节都还在（零删除纪律；误清了也找得回）。
+    """
+    import glob as _g
+    import host_shield as H
+    active = _health_files(hub)
+    if len(active) != int(H.HEALTH_KEEP):
+        return "连存 13 次后活跃 %d 份（应恰为 %d）" % (len(active), H.HEALTH_KEEP)
+    d = os.path.join(hub, "health")
+    archived = sorted(_g.glob(os.path.join(d, "audit-*.json.away-*")))
+    if len(archived) != 1:
+        return ("归档文件 %d 个（应恰为 1：连存 %d 次只溢出最旧那份）—— "
+                "超量存档被硬删了？" % (len(archived), H.HEALTH_KEEP + 1))
+    with open(archived[0], encoding="utf-8") as f:
+        n = json.load(f).get("n")
+    if n != 0:
+        return "归档的不是最旧那份（n=%r，应 ）—— 归档落错对象" % (n,)
+    _note("%d 活跃 ／ 最旧已归档为 %s（字节都还在）"
+          % (len(active), os.path.basename(archived[0])))
+    return True
+
+
+def c_health_prune_archives_not_deletes():
+    """H13：超出 HEALTH_KEEP 的最旧存档**改名归档**，不是硬删。"""
+    import host_shield as H
+    hub = G.new_hub()
+    for i in range(int(H.HEALTH_KEEP) + 1):
+        H.save_health_report({"schema": "antinel.health/1",
+                              "generated_at": "2026-10-17T22:00:00+08:00",
+                              "source": "host-audit", "hosts": [], "workspaces": [],
+                              "n": i})
+    return _h13_core(hub)
+
+
+def n_health_prune_archives_not_deletes():
+    """负控：把 `_prune_health` 换回**硬删**（0.53.0 之前的旧行为）⇒ H13 必须红。"""
+    import host_shield as H
+    hub = G.new_hub()
+    orig = H._prune_health
+
+    def _hard_delete():
+        files = H.health_reports()
+        extra = len(files) - int(H.HEALTH_KEEP)
+        for p in files[:max(0, extra)]:
+            try:
+                os.remove(p)
+            except Exception:                                # noqa: BLE001
+                pass
+
+    try:
+        H._prune_health = _hard_delete
+        for i in range(int(H.HEALTH_KEEP) + 1):
+            H.save_health_report({"schema": "antinel.health/1",
+                                  "generated_at": "2026-10-17T22:00:00+08:00",
+                                  "source": "host-audit", "hosts": [], "workspaces": [],
+                                  "n": i})
+        why = _h13_core(hub)
+    finally:
+        H._prune_health = orig
+    if why is True:
+        return "负控失效：改回硬删，H13 仍判绿（归档断言是摆设）"
+    if "归档" not in str(why):
+        return "方向不对：红的原因不是「没归档」（%s）—— 量具打偏" % why
+    _note("硬删 ⇒ 无归档文件（H13 会红）")
+    return True
+
+
+# ------------------------------------- 十、体检引导（0.53.0 T1.3/T1.4）----
+
+#: T1.4 逐字文案（施工单 v1.4；设计 v1.11 §29.2 触点 1：只打印，不自动开浏览器）。
+_INSTALL_EXAM_ADVICE = "装好了。建议现在花一分钟做一次体检：antinel ui"
+#: T1.3 S1 逐字文案（同上施工单）。
+_EXAM_REMINDER_S1 = "装好一天了，还没做过体检——点这里花一分钟做一次"
+
+
+def _p17_hub(hours_installed=25.0, exam_days_ago=None):
+    """T1.3 夹具 hub：一条 N 小时前登记的项目（「装好时间」锚＝registry 的
+    `registered_at`，安装即入册写的）；可选造一份体检存档（三链之链①）。
+
+    ★ 隔离：`G.new_hub()` 把 `ANTINEL_HUB_DIR` 指到临时目录 ⇒ 不碰真机
+      `~/.antinel`（含真实 health 存档与 rollup 链）。
+    """
+    import host_shield as H
+    hub = G.new_hub()
+    reg = {"version": 1,
+           "projects": [{"root": "C:/nope/proj", "hosts": ["workbuddy"],
+                         "registered_at": (datetime.now().astimezone()
+                                           - timedelta(hours=hours_installed)
+                                           ).isoformat(timespec="seconds"),
+                         "registered_by": "installer"}],
+           "tools_declared": []}
+    with open(os.path.join(hub, "registry.json"), "w", encoding="utf-8") as f:
+        json.dump(reg, f, ensure_ascii=False)
+    if exam_days_ago is not None:
+        os.makedirs(os.path.join(hub, "health"), exist_ok=True)
+        stamp = (datetime.now().astimezone()
+                 - timedelta(days=exam_days_ago)).strftime("%Y%m%d-%H%M%S")
+        with open(os.path.join(hub, "health", "audit-%s-000.json" % stamp),
+                  "w", encoding="utf-8") as f:
+            json.dump({"schema": H.HEALTH_SCHEMA}, f)
+    return hub
+
+
+def _p17_chain(hub):
+    """hub rollup 链上的记录列表（**同一读取器** `session_dna._rows`，
+    禁第二份链读法 —— 与产品 `exam_reminder_check` 去重同源）。"""
+    import session_dna as sd
+    return [rec for _day, rec in
+            sd._rows(sd._iter_day_files(os.path.join(hub, "rollup")),
+                     float("inf"), [False])]
+
+
+def _p17_core(check):
+    """P17-1 尺子本体（正判据传真身、负控传变异身 —— 尺子与产品解耦，
+    负控才能真的把产品改坏给尺子看）。
+
+    `check` ＝待测的「提醒检查」函数（`host_shield.exam_reminder_check`
+    或它的变异身）。设计 v1.11 §29.1 四态：S0 不出／S1 出 1 条／S2 不出／
+    S3 出 1 条；「只出一次，出过就记」。
+    """
+    import inbox_model as MM
+    import inbox_store as ST
+    # ① S1：装好 25h、三链全无 ⇒ 出 1 条（逐字文案、info、不气泡）
+    hub = _p17_hub(hours_installed=25.0)
+    ok, why = check()
+    if ok is not True:
+        return "装好 25h 没体检过却没出提醒（%r）—— S1 漏了" % (why,)
+    recs = [r for r in _p17_chain(hub) if r.get("type") == "exam_reminder"]
+    if len(recs) != 1:
+        return "链上 exam_reminder %d 条（应恰 1）" % len(recs)
+    if recs[0].get("reason") != _EXAM_REMINDER_S1:
+        return "S1 文案不是施工单 v1.4 逐字：%r" % (recs[0].get("reason"),)
+    if recs[0].get("severity") != "info":
+        return "severity=%r（应 info：温和提醒，不是事故）" % (recs[0].get("severity"),)
+    # ② 去重：出过就记，再调不出
+    ok2, _why2 = check()
+    if ok2 is not False:
+        return "去重失效：出过了还再出（设计 §29.1「只出一次，出过就记」）"
+    # ③ S0：装好才 2h ⇒ 不出（Grace 期）
+    _p17_hub(hours_installed=2.0)
+    ok0, why0 = check()
+    if ok0 is not False:
+        return "装好才 2h 就催（%r）—— 24h Grace 期被跳过" % (why0,)
+    # ④ S2：3 天前体检过 ⇒ 不出（「体检过了还提醒」是不可接受缺陷，设计 §29.3）
+    _p17_hub(hours_installed=25.0, exam_days_ago=3)
+    ok2b, why2b = check()
+    if ok2b is not False:
+        return "3 天前体检过还催（%r）—— 创始人原话「网站体检过就不要再提醒」" % (why2b,)
+    # ⑤ S3：40 天前体检（干净 hub）⇒ 出 1 条 overdue
+    hub3 = _p17_hub(hours_installed=25.0, exam_days_ago=40)
+    ok3, why3 = check()
+    if ok3 is not True:
+        return "40 天前体检过却没再提醒（%r）—— S3 漏了" % (why3,)
+    recs3 = [r for r in _p17_chain(hub3) if r.get("type") == "exam_reminder"]
+    if len(recs3) != 1 or recs3[0].get("subkind") != "overdue":
+        return "S3 那条形状不对：n=%d subkind=%r" % (
+            len(recs3), recs3[0].get("subkind") if recs3 else None)
+    # ⑥ 投影：进收件箱、L1「注意」、落「要处理」
+    items = [it for it in ST.load_items(root=hub) if it.kind == "exam_reminder"]
+    if len(items) != 1:
+        return "收件箱里 exam_reminder %d 条（应 1）" % len(items)
+    it = items[0]
+    if it.level != "L1":
+        return ("level=%r（应 L1「注意」—— 级别决策记录见 "
+                "host_shield.exam_reminder_check docstring）" % it.level)
+    if MM.bucket_of(it) != MM.BUCKET_ACTION:
+        return "分档=%r（应「要处理」：做体检只有用户本人能完成）" % MM.bucket_of(it)
+    _note("S1 出 1 条（逐字）／再调不出／S0 S2 不出／S3 出 overdue／L1·要处理")
+    return True
+
+
+def c_exam_reminder_fires_once_when_overdue():
+    """P17-1（T1.3）：装好 ≥24h 没体检过 ⇒ 收件箱 1 条；出过就记；体检过不催。"""
+    import host_shield as H
+    return _p17_core(H.exam_reminder_check)
+
+
+def n_exam_reminder_dedup_is_enforced():
+    """负控：把 host_shield 的链上去重那段**变异掉**（exec 第二份代码，
+    与 0360 `_h_mut` 同法），连调两次必出两条 ⇒ 尺子必须红在「去重失效」。
+
+    ★ 为什么用 exec 而不是 patch 属性：去重逻辑**内联**在
+      `exam_reminder_check` 函数体内（读链逐条比 type），没有可 patch 的
+      属性口子；尺子本体 `_p17_core(check)` 因此按函数注入设计 ——
+      正判据传真身、负控传变异身，产品与尺子都不各写一份。
+    """
+    import types
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "host_shield.py")
+    with open(p, encoding="utf-8") as f:
+        src = f.read()
+    anchor = 'if rec.get("type") == "exam_reminder":'
+    if anchor not in src:
+        return "变异锚点未找到（去重段源码已变，需更新负控）—— 负控自身失效"
+    mut = src.replace(anchor, 'if False and rec.get("type") == "exam_reminder":')
+    mod = types.ModuleType("is0353_np17a")
+    mod.__file__ = p
+    sys.modules["is0353_np17a"] = mod
+    try:
+        exec(compile(mut, p, "exec"), mod.__dict__)          # noqa: S102
+        why = _p17_core(mod.exam_reminder_check)
+    finally:
+        sys.modules.pop("is0353_np17a", None)
+    if why is True:
+        return "负控失效：去重被拿掉后尺子仍绿（「只出一次」是摆设）"
+    if "去重" not in str(why):
+        return "方向不对：红因不是「去重失效」（%s）—— 量具打偏" % str(why)[:60]
+    _note("去重被拿掉 ⇒ 连调两次出 2 条（尺子红在「去重失效」）")
+    return True
+
+
+def _p17_install_core(src):
+    """P17-2 尺子本体：install() 函数体里含逐字体检建议，且**不自动开浏览器**。"""
+    import ast
+    try:
+        tree = ast.parse(src)
+    except SyntaxError as e:
+        return "变异源码解析失败（%s）—— 量具故障" % e
+    fn = next((n for n in ast.walk(tree)
+               if isinstance(n, ast.FunctionDef) and n.name == "install"), None)
+    if fn is None:
+        return "install.py 里找不到 install()（文件重构了？判据需更新）"
+    lits = [n.value for n in ast.walk(fn)
+            if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+    if _INSTALL_EXAM_ADVICE not in lits:
+        return ("install() 里没有逐字体检建议 %r —— 装好之后的引导断了"
+                "（设计 §29.2 触点 1；T1.4）" % _INSTALL_EXAM_ADVICE)
+    for s in lits:
+        if "webbrowser" in s or "open_url" in s:
+            return ("install() 里出现自动开浏览器动作（%r）—— 设计明令"
+                    "「只打印，不自动开浏览器」" % s[:60])
+    _note("install() 收尾逐字：%s" % _INSTALL_EXAM_ADVICE)
+    return True
+
+
+def c_install_ends_with_exam_advice():
+    """P17-2（T1.4）：install() 返回前打印逐字体检建议（只打印不自动开）。"""
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "scripts", "install.py")
+    with open(p, encoding="utf-8") as f:
+        return _p17_install_core(f.read())
+
+
+def n_install_exam_advice_is_checked():
+    """负控：把逐字句从 install.py 内存源码里删掉 ⇒ P17-2 必须红。"""
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "scripts", "install.py")
+    with open(p, encoding="utf-8") as f:
+        src = f.read()
+    if _INSTALL_EXAM_ADVICE not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效"
+    why = _p17_install_core(src.replace(_INSTALL_EXAM_ADVICE, "装好了。"))
+    if why is True:
+        return "负控失效：删掉逐字句后 P17-2 仍绿（断言是摆设）"
+    if "逐字" not in str(why):
+        return "方向不对：红因不是「缺逐字句」（%s）—— 量具打偏" % str(why)[:60]
+    _note("删掉逐字句 ⇒ 尺子红（P17-2 有牙）")
+    return True
+
+
+def _p17_daemon_core(src):
+    """P17-3 尺子本体：`Daemon.tick()` 里真的调用 `exam_reminder_check()`。"""
+    import ast
+    try:
+        tree = ast.parse(src)
+    except SyntaxError as e:
+        return "变异源码解析失败（%s）—— 量具故障" % e
+    tick = None
+    for n in ast.walk(tree):
+        if (isinstance(n, ast.ClassDef) and n.name == "Daemon"):
+            for sub in n.body:
+                if isinstance(sub, ast.FunctionDef) and sub.name == "tick":
+                    tick = sub
+    if tick is None:
+        return "inbox_daemon.py 里找不到 Daemon.tick()（文件重构了？判据需更新）"
+    calls = [getattr(n.func, "attr", None) or getattr(n.func, "id", None)
+             for n in ast.walk(tick) if isinstance(n, ast.Call)]
+    if "exam_reminder_check" not in calls:
+        return ("Daemon.tick() 里没有调 exam_reminder_check —— 生成侧没挂上，"
+                "提醒永远不会出现（「写了没人调」的标准形状）")
+    _note("Daemon.tick() 调 exam_reminder_check（挂载在岗）")
+    return True
+
+
+def c_daemon_tick_calls_exam_reminder():
+    """P17-3（T1.3 挂载）：提醒的生成侧挂在 daemon tick 上（否则是死功能）。"""
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "inbox_daemon.py")
+    with open(p, encoding="utf-8") as f:
+        return _p17_daemon_core(f.read())
+
+
+def n_daemon_exam_reminder_hook_is_checked():
+    """负控：把 tick 里的 `exam_reminder_check` 调用从内存源码里删掉 ⇒ P17-3 必须红。"""
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "inbox_daemon.py")
+    with open(p, encoding="utf-8") as f:
+        src = f.read()
+    if "exam_reminder_check" not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效"
+    why = _p17_daemon_core(src.replace("exam_reminder_check", "exam_reminder_gone"))
+    if why is True:
+        return "负控失效：删掉调用后 P17-3 仍绿（挂载断言是摆设）"
+    if "exam_reminder_check" not in str(why):
+        return "方向不对：红因不是「缺挂载」（%s）—— 量具打偏" % str(why)[:60]
+    _note("删掉挂载 ⇒ 尺子红（P17-3 有牙）")
+    return True
+
+
+# ---------------------------------- 二十、host 归因穿透（0.53.0 T2.2/T2.3）----
+# ★ 为什么单独一族（不是"锦上添花"）：链上**写侧** 0.33.1 起就填了
+#   `host`／`host_confidence` 两个字段（`hooks/post_tool_use.py`，detector
+#   是唯一来源 `hooks/_host_detect.py`），但**投影层从来没读** ⇒ 字段写了
+#   没人消费（本仓「登记了没人查」的标准形状，第 N 次）。T2.2 补这条穿透。
+# ★ 两族分开登记，因为两个**方向**比"透传"本身更值得钉：
+#   · 透传族（①②③⑤）：有 host 要亮得出、多工具不串味、拦截类最该亮；
+#   · 不冒充族（④）：字段缺失 ⇒ 空串、generic 兜底 ⇒ 空串 ——
+#     「不知道」不许显示成「知道」（generic 是 detect 失败的 fallback 标签，
+#     不是工具名；显示成"generic 工具"就是把不知道显示成知道）。
+def _p18_project(store, recs):
+    """全链夹具：写链 → `store.load_items(root=hub)`。
+
+    ★ 为什么走全链不只直射 `project_record`：链往返的 `read_records` 若哪天
+      改成字段白名单（"只认这几个 key"），直射会绿而产品是坏的 ——
+      全链夹具才能抓住那种"半截穿透"。
+    """
+    hub = G.new_hub()
+    G.put_chain(hub, recs)
+    return store.load_items(root=hub)
+
+
+def _p18_changed(**kw):
+    """一条 L1「防护设置被改动」记录（reason 各不相同 ⇒ id 不撞）。"""
+    r = G.breach(reason=kw.pop("reason", "x"))
+    r["type"] = "host_shield_changed"
+    r.update(kw)
+    return r
+
+
+def _p18_transmission(store):
+    """透传族尺子本体（store 可注入 ⇒ 负控喂变异模块，P17 `_p17_core` 同型）。
+
+    四条腿：① 有 host 高置信逐字透传；② 旧记录（0.33.1 前无字段）空串；
+    ③ 同一链多工具各自归因不串味；⑤ 项目链拦截穿透（host 最该亮的一类）。
+    """
+    # ① 有 host 高置信 ⇒ 逐字透传
+    its = _p18_project(store, [_p18_changed(reason="改了防护设置",
+                                            host="workbuddy",
+                                            host_confidence="high")])
+    if len(its) != 1:
+        return "腿①夹具没投影出 1 条（%d）—— 量具故障" % len(its)
+    if (its[0].host, its[0].host_confidence) != ("workbuddy", "high"):
+        return ("腿①：链上有 host 却没透传（%r/%r）—— 字段写了没人消费"
+                % (its[0].host, its[0].host_confidence))
+
+    # ② 旧记录（0.33.1 前，两个字段都没有）⇒ 空串（不猜）
+    r2 = _p18_changed(reason="旧记录没这俩字段")
+    r2.pop("host", None)
+    its2 = _p18_project(store, [r2])
+    if len(its2) != 1:
+        return "腿②夹具没投影出 1 条（%d）—— 量具故障" % len(its2)
+    if its2[0].host != "":
+        return ("腿②：旧记录没有 host 字段，却填成了 %r —— "
+                "「不知道」被显示成「知道」" % its2[0].host)
+
+    # ③ 同一链里两条不同 host ⇒ 各自归因（不串味、不取第一个）
+    ra = _p18_changed(reason="甲工具干的", host="workbuddy", host_confidence="high")
+    rb = _p18_changed(reason="乙工具干的", host="zcode", host_confidence="medium")
+    its3 = _p18_project(store, [ra, rb])
+    if len(its3) != 2:
+        return "腿③夹具没投影出 2 条（%d）—— 量具故障" % len(its3)
+    by_reason = {it.detail: it for it in its3}
+    if "甲工具干的" not in by_reason or "乙工具干的" not in by_reason:
+        return "腿③：两条记录按 reason 认不出来了（夹具坏了）"
+    if (by_reason["甲工具干的"].host != "workbuddy"
+            or by_reason["乙工具干的"].host != "zcode"):
+        return ("腿③：多工具串味了（甲=%r 乙=%r）—— 各自归因没做到"
+                % (by_reason["甲工具干的"].host, by_reason["乙工具干的"].host))
+
+    # ⑤ 项目链拦截（pre_tool_use + block）⇒ host 穿透。
+    #    ★ 为什么单列一条腿：这是 host 字段**最该亮**的一类 ——
+    #      用户看到「拦截：危险操作被挡下」却不知道是哪个客户端触发的，
+    #      「哪个工具想干危险事」这个信息只有这一条路能亮出来。
+    b = G.block_rec(rule="DST-01", snip="rm -rf",
+                    host="zcode", host_confidence="medium")
+    its5 = _p18_project(store, [b])
+    if len(its5) != 1:
+        return "腿⑤夹具没投影出 1 条（%d）—— 量具故障" % len(its5)
+    if (its5[0].host, its5[0].host_confidence) != ("zcode", "medium"):
+        return ("腿⑤：拦截事件没带上 host（%r/%r）—— "
+                "「哪个工具想干危险事」亮不出来"
+                % (its5[0].host, its5[0].host_confidence))
+    _note("host 归因四形状全穿透（有/缺/多工具/拦截）")
+    return True
+
+
+def _p18_generic(store):
+    """不冒充族尺子本体：generic 兜底标签（detect 失败）不许显示成工具名。"""
+    r = _p18_changed(reason="认不出来是哪个工具")
+    r["host"], r["host_confidence"] = "generic", "none"
+    its = _p18_project(store, [r])
+    if len(its) != 1:
+        return "腿④夹具没投影出 1 条（%d）—— 量具故障" % len(its)
+    if its[0].host != "":
+        return ("generic 兜底标签被显示成工具名 %r —— "
+                "把「不知道」显示成「知道」" % its[0].host)
+    _note("generic 兜底不冒充工具名（按未知分代）")
+    return True
+
+
+def c_host_attribution_threaded_to_inbox():
+    """P18-1（T2.2）：链上的 `host`／`host_confidence` 穿透到收件箱 Item。"""
+    return _p18_transmission(S)
+
+
+def c_generic_fallback_is_not_shown_as_host():
+    """P18-2（T2.2）：`generic`（detect 失败的 fallback）不冒充工具名。"""
+    return _p18_generic(S)
+
+
+def _p18_mut_store(anchor, repl):
+    """内存变异 `inbox_store.py` 成第二模块喂尺子（0360 `_h_mut` 同型：
+    负控**绝不改盘上文件**）。返回 `(模块, 错误串)`。"""
+    import types
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "inbox_store.py")
+    with open(p, encoding="utf-8") as f:
+        src = f.read()
+    if anchor not in src:
+        return None, "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效"
+    mod = types.ModuleType("inbox_store_mut")
+    mod.__file__ = p
+    try:
+        exec(compile(src.replace(anchor, repl), p, "exec"), mod.__dict__)
+    except Exception as e:                          # noqa: BLE001
+        return None, "变异模块 exec 失败（%s）—— 量具故障" % (e,)
+    return mod, ""
+
+
+def n_host_attribution_drop_is_caught():
+    """负控：把四个投影分支里的 `host=_host, host_confidence=_conf` 从内存
+    源码里抹掉（硬编码空串）⇒ 透传族必须红（否则"透传"断言是摆设）。"""
+    mod, err = _p18_mut_store("host=_host, host_confidence=_conf",
+                              'host="", host_confidence=""')
+    if mod is None:
+        return err
+    why = _p18_transmission(mod)
+    if why is True:
+        return "负控失效：抹掉 host 穿透后判据仍绿（透传断言是摆设）"
+    if "host" not in str(why):
+        return "方向不对：红因不含 host（%s）—— 量具打偏" % str(why)[:60]
+    _note("抹掉穿透 ⇒ 尺子红（透传断言有牙）")
+    return True
+
+
+def n_generic_fallback_is_not_shown_as_host():
+    """负控：把 `_host_of` 的 generic 门从内存源码里删掉 ⇒ 不冒充族必须红。"""
+    mod, err = _p18_mut_store('if not h or h == "generic" or c == "none":',
+                              "if not h:")
+    if mod is None:
+        return err
+    why = _p18_generic(mod)
+    if why is True:
+        return "负控失效：删掉 generic 门后判据仍绿（不冒充断言是摆设）"
+    if "generic" not in str(why):
+        return "方向不对：红因不是「generic 冒充」（%s）—— 量具打偏" % str(why)[:60]
+    _note("删掉 generic 门 ⇒ 尺子红（不冒充断言有牙）")
+    return True
+
+
+# ---------------------------------- 二十一、host 过滤前缀（0.53.0 T3.1）----
+# ★ 为什么是第 7 个前缀：`win/day/lv/kind/ids/rule/closed` 之后按 host 归因
+#   筛 —— 设计 §14.3 第 5 条。它的**第一消费点**是 T3.3 的「归并行尾部
+#   工具分布」（每个工具名链到 `host:<工具名>`），所以数据层先做。
+# ★ 两条方向（比"能筛"更重要）：
+#   · 不存在的工具名 ⇒ **空集**，绝不静默当"全部"（fallthrough 到桶比较
+#     恰好也是空集 —— 那是偶然不是设计，写清楚才是不漏）；
+#   · host 缺失的旧记录不被任何工具名筛中（未知分代，不冒充任何工具）。
+def _p19_item(host, i=1, level="L2"):
+    """带 host 的夹具 Item（`G.item()` 不设 host，这里直造）。"""
+    return M.Item(M.Alert(id="h%d" % i, ts=_iso(i), level=level,
+                          kind="host_shield_breach", title="t", host=host))
+
+
+def _p19_core(filter_items):
+    """P19-1 尺子本体（`filter_items` 可注入 ⇒ 负控喂变异模块，P18 同型）。
+
+    ★ 腿的顺序：**先验不溢出（②③），再验筛得中（①）** —— 方向属性
+      （不许静默当全部）比功能属性优先；负控把 fallthrough 改成"返回全部"
+      时，必须先红在②上，红因才指得准。
+    """
+    a = _p19_item("workbuddy", 1)
+    b = _p19_item("zcode", 2)
+    c = _p19_item("", 3)                       # 旧记录：host 缺失
+    # ② 不存在的工具名 ⇒ 空集（不许静默当"全部"）
+    if filter_items([a, b, c], "host:nope"):
+        return ("host:nope 返回了非空集 —— 不存在的工具名被静默当成「全部」"
+                "（筛动词成静默全量的标准形状）")
+    # ③ 空工具名 ⇒ 空集（`host:` 后面什么都没有，不是"不过滤"）
+    if filter_items([a, b, c], "host:"):
+        return "host:（空工具名）返回了非空集 —— 空值被当成不过滤"
+    # ① 有 host ⇒ 只归那条（且不带出 host 缺失的旧记录）
+    got = filter_items([a, b, c], "host:workbuddy")
+    if [x.id for x in got] != [a.id]:
+        return ("host:workbuddy 没筛出唯一那条（%r）—— 前缀没接上，"
+                "或把 host 缺失的旧记录也带出来了" % [x.id for x in got])
+    # ④ 标签是人话（不许把 `host:workbuddy` 原样甩给用户看）
+    lab = M.filter_label("host:workbuddy")
+    if "host:" in lab or not lab.strip():
+        return "host: 的筛选标签不是人话：%r" % lab
+    # ⑤ 页面级闸门认得这个前缀 —— `render_page` 对 `known_filter` 不认识的
+    #    filt 会**退回「要处理」**：数据层通了、页面层不认 ⇒ 钻取链接点下去
+    #    看到的是另一个视图（本腿就是活体闸当场抓到的那一版，见 T3.1 记录）。
+    if not M.known_filter("host:workbuddy"):
+        return ("known_filter 不认 host: —— 页面级闸门会把钻取链接打回"
+                "「要处理」（模型层绿、页面层改道）")
+    if M.known_filter("host:") or M.known_filter("host:   "):
+        return "known_filter 放了空工具名过去 —— 页面级闸门漏了空值"
+    _note("host: 前缀五形状全过（不存在空／空名空／筛中／标签人话／闸门认）")
+    return True
+
+
+def c_host_filter_prefix_works():
+    """P19-1（T3.1）：`host:<工具名>` 第 7 前缀 —— 筛中、不存在⇒空、标签人话。"""
+    return _p19_core(M.filter_items)
+
+
+def n_host_filter_unknown_is_not_silently_all():
+    """负控：把 `host:` 分支本体从内存源码里改成"返回全部"（不存在的工具名
+    静默当全量的标准形状）⇒ P19-1 必须红。
+
+    ★ 为什么锚在分支本体而不是末尾 fallthrough：产品先实现了 `host:` 分支，
+      未知工具名在分支内就滤掉了，根本到不了 fallthrough —— 变异 fallthrough
+      打的是空（第一版就这样白绿过一次）。锚点必须打在**真的那条路**上。
+    """
+    import types
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "inbox_model.py")
+    with open(p, encoding="utf-8") as f:
+        src = f.read()
+    anchor = "        return [it for it in items if it.host == want]"
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效"
+    mod = types.ModuleType("inbox_model_mut")
+    mod.__file__ = p
+    # ★ 必须先注册进 `sys.modules`：`inbox_model` 里有 `@dataclass` 类，
+    #   `from __future__ import annotations` 让注解全成字符串 ⇒ dataclasses
+    #   处理时要 `sys.modules[cls.__module__].__dict__` 解析；不注册 ⇒
+    #   `'NoneType' object has no attribute '__dict__'`（量具自己踩坑）。
+    sys.modules["inbox_model_mut"] = mod
+    try:
+        exec(compile(src.replace(anchor, "        return list(items)"), p, "exec"),
+             mod.__dict__)
+    except Exception as e:                          # noqa: BLE001
+        return "变异模块 exec 失败（%s）—— 量具故障" % (e,)
+    finally:
+        sys.modules.pop("inbox_model_mut", None)
+    why = _p19_core(mod.filter_items)
+    if why is True:
+        return "负控失效：未知前缀静默当全部后判据仍绿（这条判据是摆设）"
+    if "全部" not in str(why):
+        return "方向不对：红因不是「静默当全部」（%s）—— 量具打偏" % str(why)[:60]
+    _note("未知前缀当全部 ⇒ 尺子红（host: 断言有牙）")
+    return True
+
+
+# ══════════════ 二十、按天账的机器出口（0.53.0 · T4.1）═════════════
+#: P20 的窗口：5 天（够放下「今天/昨天/前天/空天」四种形状）
+_P20_DAYS = 5
+
+
+def _p20_items():
+    """按天账夹具（**按天数相对现在取**，不写死日期）。
+
+    形状：今天 2 条（其中 1 条已关闭）／昨天 1 条／前天 0 条／3 天前 1 条／
+    4 天前 0 条。⇒ 覆盖「有记录且有未处理」「有记录但都关了」「当天无记录」
+    三种天，外加一个**跨天关闭**（今天关掉的那条是昨天产生的）。
+    """
+    from datetime import datetime as _dt, timedelta as _td
+    now = _dt.now().astimezone()
+
+    def _iso(days, hours=1):
+        return ((now - _td(days=days)).replace(hour=max(0, 23 - hours),
+                                               minute=0, second=0,
+                                               microsecond=0)).isoformat()
+
+    def _it(kind, days, state="unread", closed=None):
+        a = M.Alert.build(ts=_iso(days), kind=kind,
+                          reason="p20-%s-%d" % (kind, days))
+        it = M.Item(alert=a, state=state)
+        if closed:
+            it.closed_at = _iso(closed)
+        return it
+
+    return [_it("host_shield_breach", 0),                 # 今天，未处理
+            _it("host_shield_breach", 0, "done", 0),      # 今天产生／今天关
+            _it("tool_call_blocked", 1),                  # 昨天
+            _it("host_shield_breach", 3)]                 # 3 天前
+
+
+def _p20_core(rows_fn):
+    """P20-1 尺子本体（`ledger_rows` 可注入 ⇒ 负控喂变异模块，P18/P19 同型）。"""
+    from datetime import datetime as _dt, timedelta as _td
+    today = _dt.now().astimezone().date()
+    want = [(today - _td(days=k)).isoformat() for k in range(_P20_DAYS)]
+    items = _p20_items()
+    rows = rows_fn(items, days=_P20_DAYS)
+    # ① 恰好 N 个日历天、新→旧、日期连续（缺天＝把缺口从输出里删掉）
+    got = [str(r.get("date")) for r in rows]
+    if got != want:
+        return ("--days %d 的天集不对（得到 %r，应为 %r）—— 缺天＝把缺口删掉了"
+                % (_P20_DAYS, got[:3], want[:3]))
+    by = {str(r.get("date")): r for r in rows}
+    # ② 无记录的天：三格必须 **null**，不许 0（没开机 ≠ 查过没事）
+    gap = by[want[2]]
+    if any(gap.get(k) is not None for k in ("events", "acked", "pending")):
+        return ("当天无记录的那一天给了 %r（应为 null）—— 缺口被洗成零"
+                % ({k: gap.get(k) for k in ("events", "acked", "pending")},))
+    # ③ 有记录的天：events / acked 必须与 `day_counts` 逐格相等（同源）
+    cnt = M.day_counts(items, days=want)
+    for d in (want[0], want[1], want[3]):
+        e = cnt.get(d) or {}
+        ev = sum(int(e.get(k) or 0) for k in ("blocked", "noticed", "breached"))
+        if int(by[d].get("events") or 0) != ev:
+            return ("%s 的 events=%r 与按天账现算 %d 不符 —— 两套口径"
+                    % (d, by[d].get("events"), ev))
+        if int(by[d].get("acked") or 0) != int(e.get("acked") or 0):
+            return ("%s 的 acked=%r 与按天账现算 %r 不符"
+                    % (d, by[d].get("acked"), e.get("acked")))
+    # ④ pending 只数**仍未关闭**的（已关的那条不算），且不许为负
+    p_today = by[want[0]].get("pending")
+    if p_today != 1:
+        return ("今天的 pending=%r（应为 1：两条里有一条已关）—— "
+                "「未处理」口径错了" % (p_today,))
+    if any(isinstance(r.get("pending"), int) and r["pending"] < 0 for r in rows):
+        return "出现了负的 pending —— 两个异质口径相减了"
+    # ⑤ 坏 days（0 / 负数）不许给空表（空表会被读成"这台机器没有记录"）
+    if len(rows_fn(items, days=0)) != 7:
+        return "days=0 没有退回默认 7 天 —— 空表会被读成「没有记录」"
+    return True
+
+
+def c_ledger_rows_json_shape():
+    """P20：`ledger_rows` 与账本页同一份数据源（`day_counts`），无记录天给 null。"""
+    return _p20_core(M.ledger_rows)
+
+
+def n_ledger_rows_gap_is_not_zero():
+    """负控：把「无记录天」的 `null` 改成 `0` ⇒ P20 必须红。"""
+    import types
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "inbox_model.py")
+    with open(p, encoding="utf-8") as f:
+        src = f.read()
+    # ★ 锚点取**单行**（跨行的源码锚在补丁里容易被转义吃掉换行）
+    anchor = '            out.append({"date": d, "events": None, "acked": None,'
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效"
+    mod = types.ModuleType("inbox_model_p20")
+    mod.__file__ = p
+    sys.modules["inbox_model_p20"] = mod
+    try:
+        exec(compile(src.replace(anchor,
+                                 '            out.append({"date": d, "events": 0, '
+                                 '"acked": 0,'),
+                     p, "exec"), mod.__dict__)
+    except Exception as e:                          # noqa: BLE001
+        return "变异模块 exec 失败（%s）—— 量具故障" % (e,)
+    finally:
+        sys.modules.pop("inbox_model_p20", None)
+    why = _p20_core(mod.ledger_rows)
+    if why is True:
+        return "负控失效：缺口填成 0 后判据仍绿（缺口护栏是摆设）"
+    if "null" not in str(why):
+        return "方向不对：红因不是「缺口被洗成零」（%s）—— 量具打偏" % str(why)[:60]
+    return True
+
+
 CHECKS_0353 = [
     # ---- 九、闪窗（黑窗一闪）----
     ("P12 起子进程必须无窗", c_no_console_flash_on_spawn,
@@ -3108,9 +4029,12 @@ CHECKS_0353 = [
     # ---- 十四、日报数字与钻取同口径（F40 病灶）----
     ("P14 日报数字点进去对得上", c_report_drill_counts_match_headline,
      n_report_drill_counts_match_headline),
-    # ---- 十五、顶部数字带事由件数（奥卡姆剃刀）----
-    ("P14 顶部数字给两个分母", c_header_numbers_state_both_denominators,
-     n_header_numbers_dont_hide_records),
+    # ---- 十五、24h 按级计数的唯一家（0.53.0 T3.2 重写）----
+    # ★ supersession：旧「P14 顶部数字给两个分母」的对象（药丸排）随设计
+    #   §14.3 第 1 条撤掉，改写为守新家（日报四指标）—— 追随规格，不是放松。
+    ("P14 24h 按级计数唯一家在日报四指标（数字与链现算一致）",
+     c_window_level_counts_live_only_in_report,
+     n_window_level_counts_match_chain),
     # ---- 十六、心跳唯一口径 ----
     ("P15 态势读监理那条心跳", c_posture_reads_sentinel_heartbeat,
      n_posture_heartbeat_reading_is_not_constant),
@@ -3122,6 +4046,41 @@ CHECKS_0353 = [
     # ---- 十八、自检覆盖告警链路 ----
     ("P15 自检覆盖告警链路", c_self_check_covers_alert_chain,
      n_self_check_chain_catch_is_not_vacuous),
+    # ---- 十九、体检存档（0.53.0 P6 第一步 · H9/H9b）----
+    # ★ 登记簿是唯一清单：写函数≠进表。这两条**必须**在这里，
+    #   否则「体检存档」会变成下一个只会写不会跑的判据（本仓已付过一次学费）。
+    ("P16 体检留得下本机存档", c_health_report_saved_after_audit,
+     n_health_report_saved_after_audit),
+    ("P16 体检存档留最近 12 份", c_health_report_rotation_keeps_twelve,
+     n_health_report_rotation_keeps_twelve),
+    ("P16 超量存档归档不删", c_health_prune_archives_not_deletes,
+     n_health_prune_archives_not_deletes),
+    ("P17 装好超 24h 没体检 ⇒ 收件箱 1 条（出过就记／体检过不催）",
+     c_exam_reminder_fires_once_when_overdue,
+     n_exam_reminder_dedup_is_enforced),
+    ("P17 install 收尾逐字体检建议（只打印不自动开浏览器）",
+     c_install_ends_with_exam_advice,
+     n_install_exam_advice_is_checked),
+    ("P17 提醒生成侧挂在 daemon tick（防死功能）",
+     c_daemon_tick_calls_exam_reminder,
+     n_daemon_exam_reminder_hook_is_checked),
+    # ---- 二十、host 归因穿透（0.53.0 T2.2/T2.3）----
+    # ★ 登记簿是唯一清单：写函数≠进表（本仓已付过两次「死判据」学费）。
+    #   两族分开：透传（有/缺/多工具/拦截）与不冒充（generic 不当工具名）
+    #   是两个方向，混在一条里负控打不齐。
+    ("P18 host 归因穿透到收件箱（有/缺/多工具/拦截四形状）",
+     c_host_attribution_threaded_to_inbox,
+     n_host_attribution_drop_is_caught),
+    ("P18 generic 兜底不冒充工具名（不知道不显示成知道）",
+     c_generic_fallback_is_not_shown_as_host,
+     n_generic_fallback_is_not_shown_as_host),
+    # ---- 二十一、host 过滤前缀（0.53.0 T3.1）----
+    ("P19 host: 第 7 前缀（筛中／不存在⇒空集不静默当全部／标签人话）",
+     c_host_filter_prefix_works,
+     n_host_filter_unknown_is_not_silently_all),
+    ("P20 按天账 JSON：同源 day_counts／无记录天给 null 不给 0",
+     c_ledger_rows_json_shape,
+     n_ledger_rows_gap_is_not_zero),
 ]
 
 

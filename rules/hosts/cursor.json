@@ -1,5 +1,6 @@
 {
  "host": "cursor",
+ "name": "Cursor",
  "vendor": "Anysphere",
  "roots": [
   "~/.cursor",

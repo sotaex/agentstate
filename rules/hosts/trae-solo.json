@@ -1,5 +1,6 @@
 {
  "host": "trae-solo",
+ "name": "Trae Solo",
  "vendor": "ByteDance",
  "roots": [
   "%APPDATA%/TRAE SOLO"

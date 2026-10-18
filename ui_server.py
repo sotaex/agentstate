@@ -107,6 +107,20 @@ def _run_egress(antinel_dir):
         return {"_raw": out}        # 非 Windows 会返回一句话，原样呈现，不假装是数据
 
 
+def _canary_data(antinel_dir):
+    """体检 payload 的诱饵文件一块（`antinel.canary_summary` 唯一实现）。
+
+    ★ 取不到 ⇒ `{"failed": True}`，页面说「没查到」——**不许**静默变成
+      「没有诱饵文件」（没查过与查过没有是两件事）。
+    """
+    try:
+        sys.path.insert(0, antinel_dir)
+        import antinel as _A
+        return _A.canary_summary()
+    except Exception:                                        # noqa: BLE001
+        return {"failed": True}
+
+
 def _job(verdicts, ev_human, antinel_dir):
     """工作线程：先快后慢，边跑边更新阶段。"""
     try:
@@ -115,7 +129,8 @@ def _job(verdicts, ev_human, antinel_dir):
         _set(stage="正在逐个检查你电脑上的 AI 工具…（这一步通常要几分钟）")
         scan = _run_host_scan(antinel_dir)
         _set(state="done", finished=time.time(), stage="",
-             result={"scan": scan, "egress": eg})
+             result={"scan": scan, "egress": eg,
+                     "canary": _canary_data(antinel_dir)})
     except subprocess.TimeoutExpired:
         _set(state="error", error="检查超时（超过 %d 秒还没跑完）。"
              % SCAN_TIMEOUT)
@@ -469,6 +484,31 @@ def _evidence_html(r, detail, verdicts, ev_human, verdict):
         or "；".join(html.escape(str(fp)) for fp, _k in evs[:2]))
 
 
+def _finding_li(f):
+    """一条 finding 怎么显示 —— `lines` 三行**都要上页面**（0.53.0 收尾）。
+
+    ★ 实测（施工单 v1.2 S10，真跑 `egress.run(as_json=True)`）：
+      `findings` 每条**只有 `kind` 与 `lines`**，而 `label` **恒不存在**；
+      `lines` 恒 3 行 —— 第 1 行主句（进程名 ＋ 数字）、第 2 行补充（远端／样本）、
+      第 3 行处置提示（恒以 `→ ` 开头）。
+      ⇒ 旧写法 `<li>{label or kind}</li>` 实际渲染的就是**类别名**，
+      本机 10 条里只有「空闲期外连」「长连接」两个词在重复：
+      **外框写着「值得看一眼的 10 条」，实质内容一行也没有**。
+      这与「四组明细」是同一种病：有内容，但被显示成了没内容。
+
+    ★ 第 1 行走 `_md_bold`（与旧行为同款，**它内部已先转义**）；
+      第 2 行起用小字，因为它们是对第 1 行的补充，不该跟主句抢分量。
+    """
+    lines = [str(x).strip() for x in (f.get("lines") or []) if str(x).strip()]
+    if not lines:
+        return "<li>%s</li>" % _md_bold(f.get("label") or f.get("kind") or str(f))
+    out = ["<li>", _md_bold(lines[0])]
+    for ln in lines[1:]:
+        out.append("<div class='muted small'>%s</div>" % html.escape(ln))
+    out.append("</li>")
+    return "".join(out)
+
+
 def _egress_html(eg):
     if not isinstance(eg, dict) or eg.get("_raw"):
         return "<p class='muted'>%s</p>" % html.escape(str(eg.get("_raw") if isinstance(eg, dict) else eg))
@@ -490,8 +530,7 @@ def _egress_html(eg):
                         html.escape(str(days if days is not None else "不足 1")),
                         ("（覆盖约 %.1f 小时）" % (cov / 3600.0)) if cov else ""))
     if findings:
-        lis = "".join("<li>%s</li>" % _md_bold(f.get("label") or f.get("kind") or str(f))
-                      for f in findings[:12])
+        lis = "".join(_finding_li(f) for f in findings[:12])
         # ★ 0.47.0：总数是分母、列出数是分子 ⇒ 两个都给，读者才知道看的是不是全部。
         parts.append("<p><b>值得看一眼的 %d 条</b>（下面列出前 %d 条；"
                      "只标记，<b>不下结论</b>）：</p><ul>%s</ul>"
@@ -502,6 +541,318 @@ def _egress_html(eg):
     parts.append("<p class='muted small'>说明：外传账本每采样一次会往<b>你自己电脑上的</b>"
                  "账本追加一条记录（这是它的本职），同样不会上传到任何地方。</p>")
     return "".join(parts)
+
+
+#: 未配置（payload 为 `null`）时的说法。**不许**渲染成 0 —— 那是把「没查」写成
+#: 「查过、没有」（v1.11 §37.2：本机只有 `index_dirs` 是这个态）。
+#: ★ 这句话里**不许出现「0 处」字样**：判据 H5 用「该行不含 0」区分三态，
+#:   文案自带 0 会让判据永远分不开（自己把自己的尺子废掉）。
+_OBS_NOT_CONFIGURED = "这一类我们还没配，所以没查 —— 不是「查过、没有」。"
+
+#: 十类观察项：人话名 ／ 单位 ／ 备注（要说清的那句）
+_OBS_META = {
+    "crash_dumps":       ("崩溃转储文件", "个", ""),
+    "crash_report_dirs": ("崩溃上报目录", "处", ""),
+    "residue_dirs":      ("残留目录", "处", ""),
+    "index_dirs":        ("索引/向量类", "处", ""),
+    "ime_dirs":          ("输入法词库", "处", "词库＝你打过什么字。"),
+    "im_stores":         ("聊天/邮件本地库", "处", "只报存在与体积。"),
+    "sync_dirs":         ("云盘同步目录", "处",
+                          "写进去＝客户端自动上传。"),
+    "share_targets":     ("系统分享目标", "个",
+                          "影子通道：点一下分享内容就出去，"
+                          "全程不经 Agent 工具。"),
+    "cross_device":      ("跨设备平台", "处", ""),
+    "print_spool":       ("打印后台", "条", ""),
+}
+
+_OBS_MAX_ROWS = 5          #: 组内最多摊几条，其余折叠为「还有 N 条」
+
+
+def _obs_norm(key, val):
+    """十类观察项 → 一个 5 元组 `(人话名, 条目数 or None, 字节, 单位, 备注)`。
+
+    ★★ 归一的目的：payload 里这十个键是**五种形状**
+      （`list[dict]`／`list[str]`／单 `dict`／`null`／以及 `crash_dumps` 用 `count`
+       而非 `entries`）。渲染层**不许**写十段 `if key == "..."` ——
+      十份实现迟早不一致，而不一致时往往还都判绿。
+
+    口径（实测逐类核对）：
+      · `null`        ⇒ 条目数 None（**没配**，不是 0）
+      · `list`        ⇒ 条目数＝**几个这样的地方**（`share_targets` 是字符串列表，
+                          名称即内容，也用容器数）
+      · 单 `dict`     ⇒ 条目数＝它里面的 `entries`（`print_spool` 的 0 就是这么来的）
+    """
+    name, unit, note = _OBS_META.get(key, (key, "处", ""))
+    if val is None:
+        return (name, None, None, unit, _OBS_NOT_CONFIGURED)
+    if isinstance(val, dict):
+        n, b = val.get("entries"), val.get("bytes")
+    elif isinstance(val, list):
+        n = len(val)
+        b = sum(int(x.get("bytes") or 0) for x in val if isinstance(x, dict))
+    else:
+        n, b = None, None
+    try:
+        n = int(n) if n is not None else None
+    except Exception:
+        n = None
+    return (name, n, b, unit, note)
+
+
+def _obs_row(item, inner=None):
+    """**唯一**的观察项模板。渲染层不许为某个键另写一份。"""
+    name, n, b, unit, note = item
+    if n is None:
+        q = "<span class='muted'>%s</span>" % html.escape(note)
+    else:
+        q = "<b>%d %s</b>" % (n, unit)
+        if b:
+            q += "（%s）" % html.escape(str(_fmt_bytes(b)))
+        if note:
+            q += "　<span class='muted'>%s</span>" % html.escape(note)
+    out = ("<div class='row'><div class='pn'>%s</div><div class='pt'>%s</div>"
+           % (html.escape(name), q))
+    for t in (inner or []):
+        out += "<div class='pt muted'>%s</div>" % html.escape(str(t))
+    return out + "</div>"
+
+
+def _obs_html(observations):
+    """④ 别处还有什么（数据源 `scan["observations"]`，**零新增采集**）。
+
+    ★ 这一组**只看「这里有什么、有多大」**，不读任何文件内容，也不替用户下
+      「这是外传」的结论 —— 组头免责句一个字不许压。
+    ★ 三态计数（有几类有东西／几类空着正常／几类没查到）**由数据现算**，
+      不许写死（本机实测 7／2／1，换个机器就不是这三个数）。
+    """
+    obs = observations or {}
+    items = []
+    for key, val in obs.items():
+        name, n, _b, _u, _note = _obs_norm(key, val)
+        items.append((key, val, (name, n, _b, _u, _note)))
+    # 有东西的在前（按条目数降序）→ 空着的 → **没查到的排最后**
+    # ★ 排序键第一项是「态」：0 有东西 ／ 1 空着 ／ 2 没查到（None）
+    items.sort(key=lambda x: (2 if x[2][1] is None else (1 if x[2][1] == 0 else 0),
+                              -(x[2][1] or 0)))
+    have = sum(1 for it in items if it[2][1])
+    empty = sum(1 for it in items if it[2][1] == 0)
+    miss = sum(1 for it in items if it[2][1] is None)
+
+    out = ["<p class='muted small'>观察项不读文件内容：它告诉你"
+           "「这里有什么、有多大」，不替你下「这是外传」的结论。</p>"]
+    out.append("<p class='muted small'>看了 %d 类：<b>%d 类有东西</b>　"
+               "·　%d 类空着（空＝正常）　·　%d 类这次没查到。</p>"
+               % (len(items), have, empty, miss))
+    for key, val, item in items:
+        inner = []
+        if isinstance(val, list):
+            names = [x if isinstance(x, str)
+                     else (x.get("path") or x.get("label") or "")
+                     for x in val]
+            names = [x for x in names if x]
+            if len(names) > _OBS_MAX_ROWS:
+                inner = (names[:_OBS_MAX_ROWS]
+                         + ["还有 %d 条" % (len(names) - _OBS_MAX_ROWS)])
+            else:
+                inner = names
+        elif isinstance(val, dict) and val.get("path"):
+            inner = [val.get("path")]
+        out.append(_obs_row(item, inner))
+    return "".join(out)
+
+
+def _conns_html(eg):
+    """③ 此刻谁在往外连 —— 逐进程表（数据源 `egress`，**零新增采集**）。
+
+    ★★ 行集合＝`longest_by_proc` 的键 **∪** `conns` 里的进程，**不是后者**。
+      `conns` 只答「此刻谁连着」；`longest_by_proc` 答「账本里谁连得久」。
+      只取 `conns` 会漏掉**已退出但账本里有长连接**的进程 ——
+      实测本机 `AutoClaw.exe`（≥49.4 小时）就是这么被漏掉的：
+      **有证据却不显示，比显示错更糟**（v1.11 §36.1）。
+
+    ★ 「最长」是**下界**（`egress.py` 原文注释：账本只知道从第一次看见它算起）
+      ⇒ 每格必须带 `≥`；缺值时显示 `—`，**不许显示 0 小时**（那是把没算读成 0）。
+      且必须与账本覆盖时长**挨着**，否则会被读成「一条连接连了 6.8 天」。
+    """
+    if not isinstance(eg, dict) or eg.get("_raw"):
+        return ""
+    snap = eg.get("snapshot") or {}
+    longest = eg.get("longest_by_proc") or {}
+    n_by = {}
+    for c in (snap.get("conns") or []):
+        p = str(c.get("proc") or "?")
+        n_by[p] = n_by.get(p, 0) + 1
+    procs = list((eg.get("longest_by_proc") or {}).keys())
+    for p in n_by:
+        if p not in procs:
+            procs.append(p)
+    if not procs:
+        return ("<p class='muted'>这次没取到任何进程的连接记录"
+                " —— 这一项是<b>没查到</b>，请当空白读。</p>")
+    procs.sort(key=lambda p: -float(longest.get(p) or 0))
+
+    rows = []
+    for p in procs:
+        _n = n_by.get(p)
+        _lg = longest.get(p)
+        _cnt = ("%d 条连接" % _n) if _n else "此刻没有连接"
+        try:
+            _tail = ("最长 ≥ %.1f 小时" % (float(_lg) / 3600.0)
+                     ) if _lg is not None else "最长 —"
+        except Exception:
+            _tail = "最长 —"
+        rows.append("<div class='row'><div class='pn'>%s</div>"
+                    "<div class='pt'>%s　%s</div></div>"
+                    % (html.escape(str(p)),
+                       html.escape(_cnt), html.escape(_tail)))
+
+    _cov = eg.get("coverage_seconds")
+    # ★ 单位必须与上一组（`_egress_html`）**完全一致**：那里写「覆盖约 144.4 小时」，
+    #   这里若写成「6.01 天」，同一页就出现两个不一样的数（一个按小时、一个按天），
+    #   读者会去对账而对不上 —— 正是本项目禁止的「同页两处不同口径」。
+    _age = ("，这次账本覆盖总时长约 %.1f 小时" % (_cov / 3600.0)) if _cov else ""
+    out = list(rows)
+    out.append("<p class='muted'>「最长」只能算个下限：账本只知道从第一次看见它算起，"
+               "可能更早就在了%s。它接近这个总时长时，说的是"
+               "「账本开始记的时候它就在了」，不是「一条连接连了那么久」。</p>" % _age)
+    if int(eg.get("sample_failed") or 0):
+        out.append("<p class='muted'>⚠ 本窗口有 %d 次采样失败"
+                   "（<b>未采到 ≠ 没问题</b>）。</p>"
+                   % int(eg.get("sample_failed") or 0))
+    out.append("<p class='muted small'>AI 工具正常工作时本来就在往外发"
+               " ⇒ 有连接 ≠ 有问题。</p>")
+    return "".join(out)
+
+
+def _canary_html(c):
+    """③ 组尾：诱饵文件状态（放了几枚、有没有被读过）。
+
+    ★ 术语：页面一律「诱饵文件」——CLI 命令名 `antinel canary` 不动
+      （v1.11 §20.3 术语表；0360 H6 禁词盯着）。
+    ★ 五态不许混（文案地基，与 `antinel.canary_summary` 的三态注释同一套）：
+      没登记项目 ≠ 没放诱饵 ≠ 放了没被读 ≠ 被读过 ≠ 带出去过。
+      「带出去过」只有 `observed` 一种证据，**不许**把"被读"说成"出事"。
+    ★ 数据不在 payload 里（测试夹具/老调用方）⇒ 返回空串，不渲染、不谎报。
+    """
+    if not isinstance(c, dict):
+        return ""
+    if c.get("failed"):
+        return ("<p class='muted small'>诱饵文件状态这次没查到"
+                "——请当空白读，不要当成「没有问题」。</p>")
+    projects = int(c.get("projects") or 0)
+    if not projects:
+        return ("<p class='muted small'><b>诱饵文件：</b>"
+                "还没有登记过项目，无从查起——这不是「没有诱饵」，是「没查」。</p>")
+    planted = c.get("planted") or []
+    read = int(c.get("read") or 0)
+    observed = int(c.get("observed") or 0)
+    out = ["<p class='muted small'><b>诱饵文件：</b>"]
+    if not planted:
+        out.append("还没有放过诱饵文件。想查「有没有东西被带出去」，"
+                   "在项目里跑一次 <code>antinel canary plant</code> 就能放一个。")
+    elif read == 0:
+        out.append("放了 %d 个诱饵文件，都还没有被任何工具读过。" % len(planted))
+    else:
+        out.append("放了 %d 个诱饵文件，被读过 %d 次。被读不等于出事"
+                   "——但要是哪个工具的标记出现在输出里，"
+                   "那就是确有内容被带出去过。" % (len(planted), read))
+    if observed:
+        out.append("<br><b>⚠ 有 %d 次诱饵标记出现在工具输出里</b>"
+                   "——这是确有内容被带出去过的证据。" % observed)
+    out.append("</p>")
+    return "".join(out)
+
+
+def _proj_rows(details):
+    """取数：从 `details` 里抽出「打包过哪些项目目录」，每个目录一行。
+
+    ★ 与渲染分开：组标题要显示「几个」，渲染要显示明细 ——
+      各算一遍就会出现两处口径（本项目明令禁止的同源纪律）。
+    """
+    rows = []
+    seen = set()
+    for _path in sorted(details or {}):
+        for blk in (details.get(_path) or []):
+            kv = {it.get("kpath"): it.get("value")
+                  for it in (blk.get("items") or [])}
+            ws = kv.get("workspacePath")
+            if not ws:
+                continue
+            ws = str(ws)
+            if ws in seen:
+                continue
+            seen.add(ws)
+            rows.append({
+                "ws": ws,
+                "raw": kv.get("lastCompressedSize.workspaceSizeBytes"),
+                "enc": kv.get("lastCompressedSize.encryptedSizeBytes"),
+                "accepted": bool(kv.get("lastAcceptedManifestHash")),
+                "ts": kv.get("lastCompressedSize.recordedAt"),
+                "fail": kv.get("failureCount"),
+            })
+    rows.sort(key=lambda r: -float(r.get("raw") or 0))
+    return rows
+
+
+def _proj_html(rows):
+    """② 我的哪些项目被打包过。
+
+    ★ 数据源**只有** `scan["details"]`（`host-scan --json` 里就有），**零新增采集**。
+      填的是工具自己记下的**打包快照**：上次打包那一刻的工作区大小、加密后多大、
+      服务器有没有确认收到、什么时候打的。
+
+    ★★ 两个数**不许并排成一句**：`workspaceSizeBytes` 是**上次打包那一刻**的快照，
+      而「这个目录现在有多少条目」是另一条轴（需实时遍历目录）⇒ 并排会被读成
+      「X MB 由 N 个文件组成」（v1.11 §36.1 T-1）。条目数**不在本组**，
+      组尾给终端命令指路（减法留账第三列：信息去哪了）。
+
+    ★ 四个项目目录同在 `C:\\Users\\<你>\\.zcode` **一个键下的多个块**里
+      ⇒ 必须遍历**块**，不能只遍历键（只遍历键会只剩一行）。
+    """
+    if not rows:
+        return ("<p class='muted'>这次没找到「打包过项目」的记录"
+                " —— <b>不等于没打包过</b>。</p>")
+    out = ["<p class='muted small'>这一组只读工具自己记下的打包快照，"
+           "不看你的项目内容。</p>"]
+    for r in rows:
+        ws = r["ws"]
+        try:
+            raw_n, enc_n = float(r.get("raw") or 0), float(r.get("enc") or 0)
+        except Exception:
+            continue
+        row = "<div class='row'><div class='pn'>%s</div>" % html.escape(ws)
+        if not raw_n:
+            out.append(row + "<div class='pt muted'>这次没读到它打包时多大。"
+                             "</div></div>")
+            continue
+        _ratio = ("（压缩 <b>%.1f</b> 倍）" % (raw_n / enc_n)) if enc_n else ""
+        row += ("<div class='pt'>上次打包时 %s　→　加密后 %s%s"
+                % (html.escape(str(_fmt_bytes(raw_n))),
+                   html.escape(str(_fmt_bytes(enc_n))), _ratio))
+        if r.get("accepted"):
+            row += "　·　服务器收下了"
+        else:
+            row += ("　·　<b>服务器没有确认收到</b>"
+                    " —— 这包可能没发出去")
+        _ts = r.get("ts")
+        if _ts:
+            try:
+                # ★ 用 time 而不是 datetime —— 本文件已 import time，
+                #   不为一次日期格式化新增一个 import。
+                row += "　·　打包于 %s" % time.strftime(
+                    "%Y-%m-%d", time.localtime(float(_ts) / 1000.0))
+            except Exception:
+                pass
+        row += "</div>"
+        if r.get("fail"):
+            row += "<div class='pt muted'>它试了 %d 次才成。</div>" % int(r["fail"])
+        row += ("<div class='pt muted'>传出去的是压缩后的包，"
+                "不是你的明文源码。</div></div>")
+        out.append(row)
+    out.append("<p class='muted small'>想看每个目录现在有多少条目，"
+               "在终端跑：<code>antinel host-audit</code></p>")
+    return "".join(out)
 
 
 def _result_html(res, verdicts, ev_human):
@@ -518,30 +869,54 @@ def _result_html(res, verdicts, ev_human):
     if blind_n:
         # ★ 0.47.0：分子（没查到几个）＋ 分母（一共查了几个）⇒ 读者才知道"没查到"占多大。
         head.append(
-            "<div class='blind'><b>⚫ 有 %d 个地方我们没查到（共 %d 个落点）。</b><br>"
+            "<div class='blind'><b>⚫ 有 %d 个地方我们没查到"
+            "（这次一共查了 %d 个地方）。</b><br>"
             "它们登记过、你电脑上也确实存在，但这次扫描没走到 —— "
             "<b>请把它们当空白读，不要当成「没问题」。</b></div>"
             % (blind_n, len(tools)))
     else:
-        head.append("<div class='warn'>登记过的落点这次<b>全部走到了</b>"
+        head.append("<div class='warn'>登记过的地方这次<b>全部走到了</b>"
                     "（没查到 0 个）。</div>")
 
     n_ev = int(vc.get("PACK", 0)) + int(vc.get("SENT", 0)) + int(vc.get("SYNC", 0))
     if n_ev:
-        head.append("<div class='warn'><b>有 %d 个工具（共 %d 个落点）在自己的文件里"
+        head.append("<div class='warn'><b>有 %d 个工具"
+                    "（这次一共查了 %d 个地方）在自己的文件里"
                     "写下了「打包／上传／推送／同步」这类字样。</b><br>"
                     "那是<b>它自己承认</b>的，不是我们抓到它在发 —— "
                     "我们的能力只到「读它写下的字」。</div>" % (n_ev, len(tools)))
 
+    # ★ 0.53.0（T-8）：**两个口径都给，各自标分母**。
+    #   甲＝这次扫出来多少条（页面原本就只用它）；乙＝登记表写了多少、本机存在多少
+    #   （终端 `host-scan` 的人读输出用这一套）。两个数**互不包含**（实测：59 vs 43/41），
+    #   只给一个 ⇒ 用户拿页面与终端对账时对不上，而两边都没说错。
+    #   ⇒ 这里一句里同时给，是唯一不用读者自己折算的做法。
+    if int(cov.get("registered_roots") or 0):
+        _walked = ("这次<b>全部走到了</b> —— 没查到 0 个。" if not blind_n
+                   else "这次<b>还有 %d 个没走到</b>。" % blind_n)
+        head.append(
+            "<p>这次扫到 <b>%d</b> 个 AI 工具（其中 <b>%d</b> 个是靠登记表补上的）；"
+            "登记表里写的 <b>%d</b> 个位置，你电脑上存在 <b>%d</b> 个，%s</p>"
+            % (len(tools), int(cov.get("added_by_registry") or 0),
+               int(cov.get("registered_roots") or 0),
+               int(cov.get("present") or 0), _walked))
+
+    _projs = _proj_rows(scan.get("details"))
     body = [
-        "<h2>总共查了 %d 个落点</h2>" % len(tools),
+        "<h2>① 我电脑上有哪些 AI 工具（%d 个）</h2>" % len(tools),
         _tiles(vc, verdicts, blind_n, total=len(tools)),
         "<p class='muted small'>六档是这么分的：🔴 自认打包过 ＞ 🟠 自认往外发过 ＞ "
         "🟡 自认在同步 ＞ ⚪ 查过、没发现记录 ＞ ⚫ 没查到 ＞ · 不适用。</p>",
         "<h2>逐个看</h2>",
         _rows_html(tools, verdicts, ev_human, scan.get("details")),
-        "<h2>有没有程序在往外发数据</h2>",
+        "<h2>② 我的哪些项目被打包过（%d 个）</h2>" % len(_projs),
+        _proj_html(_projs),
+        "<h2>③ 此刻谁在往外连</h2>",
         _egress_html(res.get("egress")),
+        _conns_html(res.get("egress")),
+        _canary_html(res.get("canary")),
+        "<h2>④ 别处还有什么</h2>",
+        _obs_html(scan.get("observations")),
     ]
     gen = html.escape(str(scan.get("generated_at") or ""))
     return ("".join(head) + "".join(body)

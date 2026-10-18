@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: Apache-2.0
 
-"""值守台 · 收件箱存储（读链 ＋ 一份可变状态）。
+"""Antinel 监理 · 收件箱存储（读链 ＋ 一份可变状态）。
 
 ★★ 架构关键（详细设计 §2.7）::
 
@@ -103,6 +103,23 @@ _TOPIC_ALIAS = {
 }
 
 
+def _host_of(rec):
+    """链记录 → `(host, host_confidence)`（T2.2 唯一读取处，四个投影分支共用）。
+
+    ★ **缺失／兜底标签都不填**：没有 `host` 字段（0.33.1 前的旧记录）⇒ `("", "")`；
+      `host == "generic"` 且 `host_confidence == "none"`（detect 失败的 fallback
+      路径，`hooks/post_tool_use.py:556`）⇒ 同样 `("", "")` —— generic 不是工具名，
+      是「不知道」的标签，显示成"generic 工具"就是把不知道显示成知道。
+    ★ 读 `host_confidence` 平铺字段（写侧已从 `host_evidence.confidence` 平出，
+      `post_tool_use.py:580`）；旧记录两字段都没有 ⇒ 空串（页面按未知分代）。
+    """
+    h = str(rec.get("host") or "").strip()
+    c = str(rec.get("host_confidence") or "").strip()
+    if not h or h == "generic" or c == "none":
+        return "", c if c and c != "none" else ""
+    return h, c
+
+
 def project_record(rec, kinds):
     """把一条链记录投影成 Alert；不是告警 ⇒ 返回 None。
 
@@ -143,6 +160,9 @@ def project_record(rec, kinds):
         #   这一层改"写了旧名字"的 —— 两层都是**只在投影期归一**，链不动。
         _topic = _TOPIC_ALIAS.get(_topic, _topic)
         _recovered = bool(rec.get("recovered"))
+        # ★ 0.53.0（T2.2）：host 归因（「这件事是哪个工具环境里发生的」）——
+        #   读链记录的**结构化字段**，缺失／兜底标签都不填（见 `_host_of`）。
+        _host, _conf = _host_of(rec)
         _a = M.Alert(
             id=M.alert_id(ts, t, str(rec.get("reason") or "")),
             ts=ts, level=lvl, kind=t,
@@ -157,6 +177,7 @@ def project_record(rec, kinds):
             # ★ 0.35.3：`subkind` → `topic`，用于把"同一件事反复发生"归并。
             #   例：登录自启缺失 → subkind=autostart_missing（14 条 = 1 件事）。
             topic=_topic,
+            host=_host, host_confidence=_conf,
         )
         # ★★ 0.43.0：**所有"按记录改档"只在这里、只走这两个函数** ——
         #   · A8（0.40.0）：`host_shield_zone_locked` 兼表成败 ⇒ 成功不是失守
@@ -178,6 +199,7 @@ def project_record(rec, kinds):
     #   研发期每次改码都弹一次泡，正是创始人说的"泡泡又冒了"）；
     #   但要**进收件箱**（知情即可）：级别由 `LEVEL_OF_KIND` 给 L1「注意」。
     if t == "host_shield_dev_drift":
+        _host, _conf = _host_of(rec)
         return M.Alert(
             id=M.alert_id(ts, t, str(rec.get("reason") or "")),
             ts=ts, level=M.level_of_record(t), kind=t,
@@ -189,6 +211,29 @@ def project_record(rec, kinds):
             chain_ref=str(rec.get("hash") or ""),
             recovered=False,
             topic=str(rec.get("subkind") or ""),
+            host=_host, host_confidence=_conf,
+        )
+
+    # ★★ 0.53.0（T1.3）：首检提醒 —— 与 `host_shield_dev_drift` **同型**：
+    #   故意不进 `_ALERT_KINDS`（⇒ 不弹气泡：温和提醒不该敲门），但要
+    #   **进收件箱**（level 由 `LEVEL_OF_KIND` 给 L1「注意」）。生成侧与
+    #   去重见 `host_shield.exam_reminder_check`；判定唯一实现是
+    #   `inbox_model.exam_state`。
+    if t == "exam_reminder":
+        _topic = str(rec.get("subkind") or "")
+        _host, _conf = _host_of(rec)
+        return M.Alert(
+            id=M.alert_id(ts, t, str(rec.get("reason") or "")),
+            ts=ts, level=M.level_of_record(t), kind=t,
+            # ★ 标题只取 `TITLE_OF_KIND`（S1/S3 的具体事由在 detail/reason 里，
+            #   不借 `TITLE_OF_TOPIC` —— 那个表是 R0 tamper 的病因标题）。
+            title=M.TITLE_OF_KIND.get(t, t),
+            detail=str(rec.get("reason") or ""),
+            severity=str(rec.get("severity") or ""),
+            chain_ref=str(rec.get("hash") or ""),
+            recovered=False,
+            topic=_topic,
+            host=_host, host_confidence=_conf,
         )
 
     if t == "pre_tool_use" and rec.get("decision") == "block":
@@ -196,6 +241,14 @@ def project_record(rec, kinds):
         rule = str(hits[0]) if hits else ""
         snip = str(rec.get("match_snippet") or "")
         detail = "规则 %s · 命中「%s」" % (rule or "?", snip) if (rule or snip) else ""
+        # ★ 0.51.2 第二轮：原始命令/目标路径一并进 Alert —— 详情行要亮
+        #   「要删的是哪个文件」（创始人：直接讲要删什么文件）。写侧已
+        #   mask_secrets；渲染出口 `_vis` 会 HTML 转义，不会注入页面。
+        _inp = rec.get("input") or {}
+        # ★ 0.53.0（T2.2）：拦截事件的 host 归因 —— 「哪个工具环境里想干危险事」。
+        #   这是 host 字段**最该亮**的一类：项目链拦截不带 host，用户看到
+        #   「拦截：危险操作被挡下」却不知道是哪个客户端触发的。
+        _host, _conf = _host_of(rec)
         return M.Alert(
             id=M.alert_id(ts, "tool_call_blocked", rule + snip),
             ts=ts, level=M.level_of("tool_call_blocked"), kind="tool_call_blocked",
@@ -203,8 +256,11 @@ def project_record(rec, kinds):
             detail=detail, rule_id=rule, snippet=snip,
             severity=str(rec.get("severity") or ""),
             chain_ref=str(rec.get("hash") or ""),
+            command=str(_inp.get("command") or ""),
+            file_path=str(_inp.get("file_path") or ""),
             # ★ 同一规则反复拦 ⇒ 归并成一件事（"规则 DST-01 拦了 6 次"）。
             topic=rule,
+            host=_host, host_confidence=_conf,
         )
     return None
 

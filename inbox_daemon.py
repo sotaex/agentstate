@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: Apache-2.0
 
-"""值守台 · 守护进程：把五层串起来跑。
+"""Antinel 监理 · 守护进程：把五层串起来跑。
 
 一轮 `tick()` 干这些事（顺序固定）：
 
@@ -62,16 +62,16 @@ BACKFILL_DAYS = 14
 
 def record_day(items=None, today=None, root=None):
     """记账本（最近 14 天补记＋更正）—— **唯一实现**
-    （守护进程 `tick()` 与值守台都调它，不二次实现）。
+    （守护进程 `tick()` 与Antinel 监理都调它，不二次实现）。
 
     ★★ 为什么提出来（真缺陷，创始人 2026-10-07「账本这栏数据永远都是零」）：
       旧版这段逻辑**只**在 `Daemon.tick()` 里，而 `Daemon` 只能靠
       `antinel inbox daemon` 手动起 —— 全仓**没有任何自动启动点**
       ⇒ 账本文件从不落盘 ⇒ 页面四个数**恒为 0**（`~/.antinel/ledger/daily.jsonl`
-      本机实测不存在）。值守台（`inbox_server.serve`）才是用户真正会打开的东西，
+      本机实测不存在）。Antinel 监理（`inbox_server.serve`）才是用户真正会打开的东西，
       所以让它**在打开期间**也记这一行。
     ★★ 0.51.0 账准修复（创始人 2026-10-16「最近 7 天几乎全零」四问）：
-      旧版只写 `today` 一天 ⇒ ① 值守台没开的日子**整天漏记**（实测 10-11/10-12
+      旧版只写 `today` 一天 ⇒ ① Antinel 监理没开的日子**整天漏记**（实测 10-11/10-12
       零行，而链里这两天有 24 次拦截）；② 快照后补进链的事件，历史日**永不
       更正**（10-09 快照 9/9/60，链现算实为 18/81/117）。⇒ 扩成对**最近 14 天**
       逐日：缺行且链里有事件 ⇒ 补记；有行但数字与链现算不符 ⇒ **追加更正行**
@@ -145,7 +145,7 @@ def _save_hb_mark(d, root=None):
 
 
 def _ensure_console(root=None):
-    """确保值守台服务在跑（B1）。**转发到 `inbox_server` 的唯一实现**。
+    """确保Antinel 监理服务在跑（B1）。**转发到 `inbox_server` 的唯一实现**。
 
     ★ 为什么单独包一层：`inbox_server` 在本模块里是**惰性导入**（它 import
       本模块做账本采样，顶层互相 import 会成环）。这一层只做转发，不重算。
@@ -156,7 +156,7 @@ def _ensure_console(root=None):
 
 # ------------------------------------------------- 守护进程单例（0.48.5 B1）----
 #: ★★ 为什么要它：一键入口（`antinel.cmd`）会"起一次守护进程"，用户多点两次
-#:   就会有两份在跑（两份 tick：双份通知、双份记账、双份重拉值守台）。
+#:   就会有两份在跑（两份 tick：双份通知、双份记账、双份重拉Antinel 监理）。
 #:   本仓对哨兵已有同款纪律（`run_sentinel`：已有活哨兵 ⇒ 安静退出，避免双跑双锁），
 #:   守护进程照抄同一条 —— **机制在代码里，不靠启动脚本自觉**。
 def daemon_pid_path(root=None):
@@ -201,7 +201,7 @@ def run_daemon(root=None, interval=2.0, max_ticks=None, supervise=True,
 
     ★ 单例：已有**别的**活守护进程 ⇒ 不跑（返回 `(0, "already-running")`），
       不报错、不抢锁 —— 与 `run_sentinel` 同一条纪律。
-    ★ `supervise=True`（默认，CLI 入口用）：顺带监督值守台服务，被杀掉后按
+    ★ `supervise=True`（默认，CLI 入口用）：顺带监督Antinel 监理服务，被杀掉后按
       原端口/口令重拉（URL 不变）。
     ★ 退出时清掉自己的 pid 登记（不是自己写的不清 —— 别替别人擦桌子）。
     """
@@ -224,7 +224,7 @@ def run_daemon(root=None, interval=2.0, max_ticks=None, supervise=True,
 
 
 def open_console_now(root=None, opener=None, console_url=None):
-    """把「打开值守台」这件事**真的做掉**。返回 "app"/"browser"/"none"/"error: …"。
+    """把「打开Antinel 监理」这件事**真的做掉**。返回 "app"/"browser"/"none"/"error: …"。
 
     ★★ 为什么是模块级函数而不是 `Daemon` 的方法（0.35.2）：
       托盘自己也要消费动作（见 `inbox_tray._consume_loop`），
@@ -237,32 +237,35 @@ def open_console_now(root=None, opener=None, console_url=None):
             url, _started = SV.ensure_background(root=root)
         if opener is not None:
             _ret = opener(url)
-            _okm, _whym = _retire_mark(root)
+            _okm, _whym = _hide_mark(root)
             if not _okm:
-                print("[daemon] 漂浮哨标退役没成：%s" % _whym)
+                print("[daemon] 漂浮哨标藏起没成：%s" % _whym)
             return _ret
         import inbox_server as SV2
         _ret = SV2.open_console(url)
-        # ★ 0.50.0：值守台展开 ⇒ 漂浮哨标退役（点哨标/点托盘展开都会走到这）。
-        #   退役的唯一实现是 `inbox_logo.retire()`，这里只调用 + 如实转述。
-        #   退役失败不改变"窗已开"的事实 ⇒ 打一行到屏上（不吞），不改返回值。
-        _okm, _whym = _retire_mark(root)
+        # ★ 0.50.0：Antinel 监理展开 ⇒ 漂浮哨标退役（点哨标/点托盘展开都会走到这）。
+        # ★ 0.52.0：改成 **hide（藏起待命）**而非 retire（退役）—— 哨标进程
+        #   常驻，下一次收缩才能毫秒级唤出；真退役只剩 `retire()`（去重/收孤儿）。
+        #   藏起失败不改变"窗已开"的事实 ⇒ 打一行到屏上（不吞），不改返回值。
+        _okm, _whym = _hide_mark(root)
         if not _okm:
-            print("[daemon] 漂浮哨标退役没成：%s" % _whym)
+            print("[daemon] 漂浮哨标藏起没成：%s" % _whym)
         return _ret
     except Exception as e:                      # noqa: BLE001
         return "error: %s" % e
 
 
-def _retire_mark(root=None):
-    """展开值守台后，让漂浮哨标退役。**失败只如实报，不吞、不谎报**。
+def _hide_mark(root=None):
+    """展开Antinel 监理后，把漂浮哨标**藏起待命**（0.52.0：原 retire 改 hide）。
 
     ★ 为什么不内联进 `open_console_now`：托盘消费者（`handle_actions`）
       与本函数都要用，抽出来只有一处实现。
+    ★ 为什么是 hide 不是 retire：哨标进程常驻（`logo.hide` 只藏窗不杀进程），
+      下一次收缩才能毫秒级唤出 —— 每次展开都真退役，是把"切换慢"亲手加回去。
     """
     try:
         import inbox_logo as IL
-        rep = IL.retire(root=root, verbose=False)
+        rep = IL.hide(root=root, verbose=False)
         return rep.get("ok", False), rep.get("why", "")
     except Exception as e:                      # noqa: BLE001
         return False, "%s: %s" % (type(e).__name__, e)
@@ -305,7 +308,7 @@ class Daemon:
         # `today` / `hb_poster` 只为可测性注入：判据要能改日期验跨零点、换掉发信器
         self.today = today or (lambda: time.strftime("%Y-%m-%d"))
         self.hb_poster = hb_poster
-        # ★ 0.35.2：「打开值守台」的两个注入点 —— 只为可测性，
+        # ★ 0.35.2：「打开Antinel 监理」的两个注入点 —— 只为可测性，
         #   判据要能在**不起任何进程/不绑端口**的前提下验这条链。
         #   `console_url` 给定 ⇒ 跳过起服务（测试）；`opener(url)` 换掉真开窗口。
         self.opener = opener
@@ -394,6 +397,19 @@ class Daemon:
                "bubble": [],
                "heartbeat": None}
 
+        # ①b 首检提醒（T1.3，设计 v1.11 §29.1）：装好 ≥24h 仍没体检过 ⇒
+        #   链上补 1 条（只出一次，去重在 host_shield.exam_reminder_check）。
+        #   放在②（通知）之前：本 tick 生成、下 tick 进 fresh ⇒ toast 知会。
+        #   每 tick 都判 —— 判定是几个文件存在性检查＋链尾去重，比
+        #   另养一个节流状态便宜，且节流状态本身就是第二份真源。
+        try:
+            import host_shield as _HS
+            _ok_er, _why_er = _HS.exam_reminder_check()
+            out["exam_reminder"] = {"fired": bool(_ok_er), "why": _why_er}
+        except Exception as e:          # noqa: BLE001
+            out["errors"].append("exam-reminder: %s" % e)
+            out["exam_reminder"] = {"fired": False, "why": "异常：%s" % e}
+
         # ② 新告警 → 通知 / 强调 / 兜底
         #   ★★ 0.49.0（创始人 2026-10-14）：**急事走紧急提醒、普通事走 toast**。
         #      `R0`（失守）与 `L2`（拦截进行中）＝「需要人工介入马上处理」
@@ -473,7 +489,7 @@ class Daemon:
             ensure=None, supervise_every=15.0):
         """常驻循环。`max_ticks` 只为测试用（None ＝ 一直跑）。
 
-        ★★ 0.48.5（B1）：`supervise=True` ⇒ 顺带**监督值守台服务** ——
+        ★★ 0.48.5（B1）：`supervise=True` ⇒ 顺带**监督Antinel 监理服务** ——
           每 `supervise_every` 秒判一次活（pid + 端口两条），死了就按
           **记录里的原端口/口令**重拉（URL 不变）。B1 验收＝杀掉服务进程后
           60 秒内自行恢复；默认 15 秒判一次，留足余量。

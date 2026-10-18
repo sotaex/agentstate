@@ -1,5 +1,5 @@
 {
-  "version": "0.51.2",
+  "version": "0.53.0",
   "description": "Antinel Security Suite default detection rules (37 rules, 4 gates + canary/supply-chain families; flat layout: patterns at rule top level)",
   "gates": {
     "secrets": "Gate 2 sensitive surface",
@@ -1130,13 +1130,13 @@
       ],
       "description": "Agent read a canary file -- if its marker (CANARY-*) appears in any external channel, that proves exfiltration of project content",
       "remediation": "Record and observe: reading a canary is not itself a leak -- the marker appearing in an external channel is the evidence (see the canaries count in `report`).",
-      "description_zh": "Agent 读取了金丝雀文件",
-      "remediation_zh": "记录并观察：金丝雀被读取本身不是泄露，标记出现在外部通道才是证据（report 的 canaries 统计）",
+      "description_zh": "Agent 读取了诱饵文件",
+      "remediation_zh": "记录并观察：诱饵文件被读取本身不是泄露，标记出现在外部通道才是证据（report 的 canaries 统计）",
       "note": "0.31.0 F3：**故意只 alert 不拦** —— 拦下就观察不到外传链路；输出中出现 CANARY 标记由 post_tool_use 的 canaries_observed 既有机制接管。",
       "content_patterns": [
         "\\.canary[\\\\/]CANARY-"
       ],
-      "label_zh": "读取金丝雀文件"
+      "label_zh": "读取诱饵文件"
     },
     {
       "id": "SLOP-01",

@@ -15,6 +15,8 @@
 """
 from __future__ import annotations
 
+import ast
+import io
 import os
 import re
 import sys
@@ -486,7 +488,7 @@ def c_place_window_does_not_touch_other_windows():
     # ★★ 0.36.5 修这条判据的**合法动作清单**（实测：修好 P15 后它反而红了）：
     #   原来只认 `endswith` 与 `CONSOLE_WINDOW_TITLE_MARK` 两个**字样**，
     #   而 0.36.5 把宽泛判据改成 `fullmatch`（连前缀一起认，才防得住
-    #   '记事本 - 收件箱 · 值守台' 这类**前面挂了别的程序**的窗口）
+    #   '记事本 - 收件箱 · Antinel 监理' 这类**前面挂了别的程序**的窗口）
     #   ⇒ 代码是对的、判据是旧的。
     #   ⇒ 这里**不是放宽成"什么都行"**（那等于没有判据），
     #     而是补上**同样严格、甚至更严格**的那一类：整串匹配。
@@ -531,7 +533,7 @@ def c_place_window_does_not_touch_other_windows():
         return "place_one 里没有 SetWindowPos（落位链路断了）"
     # ⑤ ★ 0.36.2 新增：落位**必须只认本次运行的身份串**。
     #    没有这一条，"只按标题过滤"仍可能命中用户自己的浏览器窗口
-    #    （实测 Edge 普通窗口标题含「 · 值守台」）。
+    #    （实测 Edge 普通窗口标题含「 · Antinel 监理」）。
     if "console_title_suffix" not in full:
         return "没有按 run_id 派生的窗口身份后缀（无法只认本次运行的窗口）"
     return True
@@ -676,7 +678,7 @@ def c_place_window_title_is_exact_not_substring(src=None):
         return ("严格模式（唯一允许移动窗口的路径）必须用 endswith 整串匹配"
                 "本次身份后缀，否则会把别的窗口当成本次运行窗口")
     # 宽泛模式（收旧窗用）不许落回纯子串 —— 实测 0.36.5 两种都会误认：
-    #   '收件箱 · 值守台助手'（标记后面还挂字）、'记事本 - 收件箱 · 值守台'（前面挂程序）
+    #   '收件箱 · Antinel 监理助手'（标记后面还挂字）、'记事本 - 收件箱 · Antinel 监理'（前面挂程序）
     if re.search(r"return\s+CONSOLE_WINDOW_TITLE_MARK\s+in\s+", fn):
         return ("`is_console_title` 宽泛模式退回 `MARK in title`（任意位置子串）"
                 "⇒ 会把『收件箱 · Antinel 监理助手』这类用户窗口当成Antinel 监理")
@@ -793,9 +795,11 @@ def c_window_suffix_matches_every_page():
             return ("导航里有页面 %r 不在标题映射里 ⇒ 它会被当成默认标题，"
                     "窗口可能认不出" % nav_name)
     # ★ 视图名清单也要与字典的键一致（漏一个键 = 那个视图会落回默认标题）
-    if set(pages_obj.keys()) != {"inbox", "report", "health", "ledger"}:
-        return ("PAGE_TITLES 的键变了：%s —— 判据的页面清单需要复核"
-                % sorted(pages_obj.keys()))
+    #   ★ 0.53.0 T0：四键 → 五键（新增 health_exam＝体检第五 TAB）。
+    if set(pages_obj.keys()) != {"inbox", "report", "health", "ledger",
+                                 "health_exam"}:
+        return ("PAGE_TITLES 的键变了（基线五键，含 health_exam）：%s —— "
+                "判据的页面清单需要复核" % sorted(pages_obj.keys()))
     # ② 标题形态必须被认出来（**走真实匹配入口 `is_console_title`**）
     #   ★ 0.51.1 反转（W-01 退休、FZ-002 冻结，创始人 2026-10-16 拍板）：
     #     标题不再随页面变（状态词/页面名前缀退役，整串恒为品牌形态）
@@ -809,11 +813,11 @@ def c_window_suffix_matches_every_page():
         return "品牌形态（无身份串）认不出来 ⇒ 窗口失联"
     if not WIN.is_console_title(bare + "#486acd", None):
         return "品牌形态（带身份串）认不出来 ⇒ 窗口失联"
-    # ③ 反向：非值守台窗口绝不能被认出来
+    # ③ 反向：非Antinel 监理窗口绝不能被认出来
     # ★★ 0.36.5 修判据的**测点**（实测抓出来的，不是改判据放松）：
     #   原来测的是 `_matches_title` —— 那个函数是 0.36.2 之前的旧口径
     #   （只做 `suffix in actual`），**已不是匹配入口**；
-    #   它对 '收件箱 · 值守台 - 记事本' 返回真，于是这条红。
+    #   它对 '收件箱 · Antinel 监理 - 记事本' 返回真，于是这条红。
     #   而真实入口 `is_console_title` 在 0.36.5 已修好（连前缀一起认）。
     #   ⇒ 这里**不改意图、不删用例**，只把测点换成真源。
     #   ★ 教训与 F3 同源：**测的不是被测对象 ⇒ 红项指向的可能是废代码**。
@@ -821,7 +825,7 @@ def c_window_suffix_matches_every_page():
     #   ★★ 0.36.5 本轮实测当场抓到的真缺口（不是补的想象用例）：
     #     宽泛模式只查了标记位置/分隔符/扩展名三层**形状**，
     #     注释里承诺的「页面前缀必须是已知页面名之一」**从没实现**
-    #     ⇒ 用户窗口标题里恰好含 ` · 值守台#486acd` 时被误认
+    #     ⇒ 用户窗口标题里恰好含 ` · Antinel 监理#486acd` 时被误认
     #     ⇒ 宽泛模式是用来**关窗**的 ⇒ 会关掉用户自己的窗口。
     #     （0.51.1 反转后这层「前缀白名单」退役——品牌前置天然排除；
     #     下列旧形状仍全部保留：新形态更严，它们仍被拒认。）
@@ -1095,33 +1099,93 @@ def c_every_r0_class_gives_an_action():
     return True
 
 
+def _b_class_fixture():
+    """B 类（zone_locked 失败）的**当前写侧形态**夹具（0.52.0）。
+
+    ★ 为什么必须自己造对象（实测时炸弹，2026-10-17）：
+      旧版 R02 只查**真实库**里的 B 类记录 ⇒ 库里没有就恒红
+      「本机没有 B 类失守」。实测成因：审计链发现窗口只有最近 8 天
+      （`discover_chain_files`），10-09 那批 `zone_lock_failed` 滚出
+      窗口后判据就没了对象 —— 与本文件 P10 的教训同族（「判据必须
+      显式构造它要验的场景，不能让机器状态决定红绿」）。
+      夹具形态 = `host_shield.py:3665` 当前写侧（0.45.0 H-7 起）。
+    """
+    import inbox_model as M
+    al = M.Alert.build(
+        ts="2026-10-17T12:00:00+08:00",
+        kind="host_shield_zone_locked",
+        title="安全区上锁失败",
+        detail=("安全区【上锁没生效】——本目录的访问控制没能限制写入"
+                "（可核：icacls 该目录）；注意：「不等于」有进程在对抗门闸："
+                "D:\\ws\\zone_vault"),
+        severity="critical",
+        topic="zone_lock_failed")
+    return M.Item(alert=al, state="unread")
+
+
 def c_b_class_offers_three_choices():
     """★ B 类（修不了根因）必须给出**三选一**：修复／移出监管／接受风险。
 
     ★ 创始人 2026-10-07 拍板：「不能只给修复，得让用户选。」
       只给"修"的话，用户点完发现修不了就**又回到只能看**。
+    ★★ 0.52.0 修判据自身（时炸弹）：夹具恒有一个对象（验归因层）；
+      真实库有 B 类记录时**一并**查（验投影层，真实覆盖不丢）。
     """
     import inbox_store as S
     import remediation as R
-    items = S_items()
     need = set(R.B_CLASS_CHOICES)
-    checked = 0
-    for it in items:
+    # ① 夹具：恒有对象 —— 验归因层（b_class 分派＋三选一齐全）
+    a = R.attribute(_b_class_fixture())
+    if not a.get("b_class"):
+        return ("夹具没被归成 B 类（zone_lock_failed 的分派坏了）："
+                "kind=%r title=%r" % (a.get("kind"), a.get("title")))
+    got = set(x.get("op") for x in (a.get("actions") or []))
+    miss = need - got
+    if miss:
+        return "B 类夹具缺这些选项：%s（只有 %s）" % (sorted(miss), sorted(got))
+    # ② 真实库：有 B 类记录时一并查（真记录也得落成 B 类且三选一齐全）
+    probs = []
+    for it in S_items():
         if str(getattr(it, "level", "")).upper() != "R0":
             continue
-        a = R.attribute(it)
-        if not a.get("b_class"):
+        a2 = R.attribute(it)
+        if not a2.get("b_class"):
             continue
-        checked += 1
-        got = set(x.get("op") for x in (a.get("actions") or []))
-        miss = need - got
-        if miss:
-            return ("B 类%s 缺这些选项：%s（只有 %s）"
-                    % (a.get("kind"), sorted(miss), sorted(got)))
-    if not checked:
-        return ("本机没有 B 类失守 ⇒ 判据没作用到对象"
-                "（不构成失败，但要如实知道）")
+        got2 = set(x.get("op") for x in (a2.get("actions") or []))
+        miss2 = need - got2
+        if miss2:
+            probs.append("真实记录 %s 缺选项 %s（只有 %s）"
+                         % (a2.get("kind"), sorted(miss2), sorted(got2)))
+    if probs:
+        return "；".join(probs[:3])
     return True
+
+
+def n_b_class_missing_choice_is_caught():
+    """负控：把 B 类的三选一摘掉一个 ⇒ 判据必须报红。
+
+    ★ 0.52.0：旧版 R02 无负控（登记簿 44 条无负控之一）且只查真实库 ——
+      库里没 B 类记录时恒红「没作用到对象」、库里有时也不证明它看得见
+      「缺选项」。加夹具后负控打在夹具上，**恒可证**
+      （与 `n_rem_panel_without_actions_is_caught` 同型：monkey-patch）。
+    """
+    import remediation as R
+    orig = R.attribute
+    try:
+        def broken(item, *a, **k):
+            d = orig(item, *a, **k)
+            d["actions"] = [x for x in (d.get("actions") or [])
+                            if x.get("op") != R.ACT_ACCEPT]
+            return d
+        R.attribute = broken
+        r = c_b_class_offers_three_choices()
+        if r is True or r is None:
+            return "负控失效：摘掉「接受风险」选项后 R02 仍判绿"
+        if "缺" not in str(r):
+            return "负控方向不对：判红了但原因不是缺选项（%s）" % r
+        return True
+    finally:
+        R.attribute = orig
 
 
 def c_zone_lock_failure_lands_in_action_bucket():
@@ -1264,7 +1328,23 @@ def c_unregistered_class_still_gives_a_step():
 
 
 def c_rem_panel_has_four_segments():
-    """归因面板固定**四段**：根因／多严重／能做什么／代价。"""
+    """归因面板固定**四段**：根因／多严重／能做什么／代价。
+
+    ★★ 2026-10-17 改口径（0.52.0 文案人话化把它判红，是**判据的问题**）：
+      旧版把四段的**完整文案**当锚点（「① 根因是什么」「② 现在有多严重」…）。
+      并发批把标题改成「① 发生了什么／② 现在怎么样／③ 你能做什么／
+      ④ 不做的后果」—— 意思一字未变、反而更好懂，判据却当场报「面板缺段」。
+      这正是「文案锚点陷阱」：**每一次文案改进都会被读成机制破损**，
+      最后逼人为了过闸门而把话说回机器腔。
+      ⇒ 改卡**结构不变量**（改文案不该动、改结构才该动）：
+        ① 四个 `seg` 样式类按 root→sev→act→cost 的**顺序**出现（顺序是语义，
+           颠倒＝把「代价」放到「能做什么」前面，那才是真破损）；
+        ② 每段各自以 ①②③④ 开头（编号是四段制的骨架，撤掉就不是四段了）；
+        ③ 每段正文非空（≥ 12 个汉字级字符，防"只剩标题的空壳"）。
+      语义层面的判据留在**归因结果**上（`n_rem_panel_without_actions_is_caught`
+      与 `c_pick_buttons_wired_to_real_ops`），不再压在渲染文案上。
+    """
+    import re as _re
     import inbox_server as SV
     import inbox_store as S
     r0 = [i for i in S.load_items()
@@ -1272,14 +1352,19 @@ def c_rem_panel_has_four_segments():
     if not r0:
         return "本机没有 R0 —— 判据没作用到对象"
     h = SV._item_html(r0[0], "TOK")
-    for kw, seg in (("① 根因是什么", "seg root"),
-                    ("② 现在有多严重", "seg sev"),
-                    ("③ 你现在能做什么", "seg act"),
-                    ("④ 如果什么都不做", "seg cost")):
-        if kw not in h:
-            return "面板缺第 %s 段" % kw
-        if seg not in h:
-            return "面板缺 %s 的样式类" % seg
+    segs = _re.findall(r'<div class="seg ([a-z]+)"[^>]*>(.*?)</div>', h, _re.S)
+    order = [k for k, _t in segs]
+    want = ["root", "sev", "act", "cost"]
+    if order[:4] != want:
+        return "面板四段不符：实测顺序 %r ≠ %r" % (order, want)
+    for idx, (_k, body) in enumerate(segs[:4]):
+        txt = _re.sub(r"<[^>]+>", "", body).strip()
+        mark = "①②③④"[idx]
+        if not txt.startswith(mark):
+            return "第 %s 段没以「%s」开头（四段制的骨架）: %r" % (
+                want[idx], mark, txt[:30])
+        if len(txt) < 14:
+            return "第 %s 段正文过短（空壳标题）: %r" % (want[idx], txt[:30])
     return True
 
 
@@ -2029,6 +2114,502 @@ def n_ranking_label_zh_clean():
         R.rule_table = orig
 
 
+# ═════════════════════════ NM 族：产品面旧名「值守台」防线（0.52.0）═════════════
+#
+# ★★ 为什么必须有（创始人 2026-10-17 三次点名，同族复发三次）：
+#   ① 2026-10-15《旧名退休与窗口命名裁定》（0.50.4，71 文件改名）把
+#      **用户可见面**统一改成「Antinel 监理」；
+#   ② 2026-10-16 创始人再收敛（只要「Antinel 监理＋编号」）；
+#   ③ 2026-10-17 创始人第三次抓到旧名 —— inbox_window.py 的 7 条人话串
+#      （落位/关窗汇总，CLI 真会打印）＋ 并发批次在 0514 新增的 4 条 why 串
+#      （闸门输出真会被看见）**还写着「值守台」**。改名批漏它们的形状：
+#      那两处的串不是页面渲染产物（页面判据看不见），是**函数返回值**。
+#   ⇒ 本条把尺子铺到**源码字符串字面量**层：注释与 docstring 豁免（按
+#      「记录原文不改写」约），多行字面量里的注释行豁免（TOML/CSS/JS
+#      注释是记录不是渲染文本），`_p_*` 探针/负控夹具整件豁免（故意携带
+#      旧形态），检测器自身的禁令词常量按命名约定豁免（`_LEGACY*`）。
+#
+# ★ 机械口径（与 0.36.0 起「判据只读代码，不读解释代码的文字」同纪律）：
+#   AST 取字符串字面量（docstring 靠语句位置判定，不靠猜）；旧名出现在
+#   字面量里 ⇒ 逐行看：该行是注释行（# // /* * <!-- 开头）⇒ 记录，放过；
+#   否则 ⇒ 用户可见候选污染，红。
+
+#: 旧名（用户可见面已退休；记录层按约保留）。
+_LEGACY_CONSOLE_NAME = "值守台"
+
+#: 产品面扫描根（目录白名单 —— 其余目录是构建/测试残渣，不进尺子）。
+_NM_DIRS = ("", "ci", "tools", "scripts", "hooks", "challenge")
+
+#: 文件名豁免：`_p_*` 探针与负控夹具（故意携带旧形态，是量具的粮）。
+_NM_SKIP_BASENAMES = ("_p_guards_mutation.py",)
+
+
+def _nm_is_comment_line(line, in_block):
+    """该行是不是注释行（多行字面量里的 TOML/CSS/JS 注释）。
+
+    `in_block`＝行首是否已在 `/* */` 块注释里（由调用方逐行推进）。
+    判三样：行首在块里／行首是注释记号（# // /* * <!--）／本行在旧名
+    出现之前就开了块（`/*` 在前）。块注释的**续行**不带任何记号
+    （实测 inbox_bubble.py:218 的形状），不跟踪块状态就会把它当污染。
+    """
+    s = line.strip()
+    if in_block or s.startswith(("#", "//", "/*", "*", "<!--")):
+        return True
+    i_old = s.find(_LEGACY_CONSOLE_NAME)
+    i_open = s.find("/*")
+    return 0 <= i_old and 0 <= i_open < i_old
+
+
+def _nm_docstring_nodes(tree):
+    """语句位置的裸字符串节点 id 集合（＝ docstring，豁免）。"""
+    out = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                             ast.AsyncFunctionDef)):
+            body = getattr(node, "body", [])
+            if (body and isinstance(body[0], ast.Expr)
+                    and isinstance(body[0].value, ast.Constant)
+                    and isinstance(body[0].value.value, str)):
+                out.add(id(body[0].value))
+    return out
+
+
+def _nm_literal_hits(src, rel=""):
+    """源码 ⇒ [(行号, 行文本)]：字符串字面量里含旧名且**不是注释行**的命中。
+
+    ★ 检测器自身豁免：赋值目标名匹配 `_*LEGACY*`/`_*BANNED*`/`_*OLD_NAME*`
+      时，RHS 里**恰为旧名本身**的 Constant 都豁免（直接赋值与 tuple/list
+      形态都覆盖 —— 0515 的 `_LEGACY_LNK_MARKS` 三元组就走这条）——
+      尺子不许判自己。更长的串（真污染）不豁免。
+    """
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return []
+    docs = _nm_docstring_nodes(tree)
+    banned_assign = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name) and (
+                        "LEGACY" in t.id.upper()
+                        or "BANNED" in t.id.upper()
+                        or "OLD_NAME" in t.id.upper()):
+                    for sub in ast.walk(node.value):
+                        if (isinstance(sub, ast.Constant)
+                                and isinstance(sub.value, str)
+                                and sub.value == _LEGACY_CONSOLE_NAME):
+                            banned_assign.add(id(sub))
+    lines = src.splitlines()
+    hits = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Constant)
+                and isinstance(node.value, str)):
+            continue
+        if id(node) in docs or id(node) in banned_assign:
+            continue
+        if _LEGACY_CONSOLE_NAME not in node.value:
+            continue
+        lo = getattr(node, "lineno", 1)
+        hi = getattr(node, "end_lineno", lo) or lo
+        in_block = False
+        for ln in range(lo, min(hi, len(lines)) + 1):
+            line = lines[ln - 1]
+            is_cmt = _nm_is_comment_line(line, in_block)
+            # 推进块状态：本行开了块且没在本行合上 ⇒ 下一行起在块里
+            i_open = line.find("/*")
+            i_close = line.find("*/")
+            if i_open >= 0 and (i_close < 0 or i_close < i_open):
+                in_block = True
+            elif i_close >= 0:
+                in_block = False
+            if _LEGACY_CONSOLE_NAME in line and not is_cmt:
+                hits.append((ln, line.strip()[:80]))
+    return hits
+
+
+def _nm_product_sources(root=None):
+    """产品面 [(rel, src)]：根级 *.py ＋ 白名单目录；`_p_*` 夹具整件跳过。"""
+    import glob
+    root = root or ROOT
+    out = []
+    pats = [os.path.join(root, "*.py")]
+    for d in _NM_DIRS:
+        if d:
+            pats.append(os.path.join(root, d, "*.py"))
+    seen = set()
+    for pat in pats:
+        for p in sorted(glob.glob(pat)):
+            base = os.path.basename(p)
+            if base.startswith("_p_") or base in _NM_SKIP_BASENAMES:
+                continue
+            if p in seen:
+                continue
+            seen.add(p)
+            try:
+                with io.open(p, encoding="utf-8") as f:
+                    out.append((os.path.relpath(p, root).replace(os.sep, "/"),
+                                f.read()))
+            except OSError:
+                continue
+    return out
+
+
+def c_no_legacy_console_name_in_literals(sources=None):
+    """★ 产品面用户可见字符串字面量不许含旧名「值守台」（0.52.0，NM-01）。
+
+    见上方族注：扫描面＝根级＋ci/tools/scripts/hooks/challenge 的 *.py；
+    豁免＝docstring／多行字面量里的注释行／`_p_*` 夹具／禁令词常量本身。
+    `sources` 可注入（负控拿合成源码跑同一把尺子，与 P04 的 `src=` 同款）。
+    """
+    pairs = sources if sources is not None else _nm_product_sources()
+    bad = []
+    for rel, src in pairs:
+        for ln, text in _nm_literal_hits(src, rel):
+            bad.append("%s:%d %s" % (rel, ln, text))
+    if bad:
+        return ("产品面还有 %d 处用户可见字符串写着旧名「%s」：%s"
+                "（0.50.4 改名批漏的返回值/why 串形状——页面判据看不见它们）"
+                % (len(bad), _LEGACY_CONSOLE_NAME, "；".join(bad[:4])))
+    return True
+
+
+def n_legacy_name_in_literal_is_caught():
+    """负控两连：合成污染串必须红；合成注释行必须放过（尺子双向有牙）。"""
+    # ① 用户可见形状（函数返回值串）⇒ 必须红
+    polluted = ('def f():\n'
+                '    return "点了哨标展不开%s"\n' % _LEGACY_CONSOLE_NAME)
+    r = c_no_legacy_console_name_in_literals(
+        sources=[("synthetic_pollution.py", polluted)])
+    if r is True:
+        return "负控失效：合成污染串没判红 —— 旧名尺子是装饰"
+    # ② 记录形状（多行字面量里的注释行）⇒ 必须放过（不误伤记录）
+    record = ('S = """\n'
+              '# 0.50.4 改名批注记：%s在用户可见面退休\n'
+              '正文没有旧名\n'
+              '"""\n' % _LEGACY_CONSOLE_NAME)
+    r2 = c_no_legacy_console_name_in_literals(
+        sources=[("synthetic_record.py", record)])
+    if r2 is not True:
+        return ("方向失效：多行字面量里的注释行被当成污染（%s）—— "
+                "记录原文不改写的约被尺子自己破了" % (r2,))
+    # ③ docstring ⇒ 必须放过（记录层）
+    doc = ('"""模块说明：%s退休与命名裁定记录。\n'
+           '\n'
+           '创始人 2026-10-15 原话引用。\n'
+           '"""\n'
+           'X = 1\n' % _LEGACY_CONSOLE_NAME)
+    r3 = c_no_legacy_console_name_in_literals(
+        sources=[("synthetic_doc.py", doc)])
+    if r3 is not True:
+        return "方向失效：docstring 里的旧名记录被当成污染（%s）" % (r3,)
+    return True
+
+
+# ============================================== 体检页四组（0.53.0 P6 二）====
+# 施工单 v1.0 S2.2：H5（三态互斥）／H6（术语零鸟语），各配一条负控。
+#
+# ★ H5 的假绿陷阱（v1.9 踩过，必须记住）：不要只写「null 时不含 0」——
+#   D 组**根本没渲染时这条自动成立**，判据会在旧代码上直接绿。
+#   ⇒ 必须**三态两两互斥**断言（null / [] / entries:0 各自有且只有一种说法）。
+
+_H_BANNED = ["落点", "金丝雀", "pending", "workspace"]
+#: 归一后的人话名（与 ui_server._obs_norm 的人话名一一对应）
+_H_OBS_NAME = {"crash_dumps": "崩溃转储文件", "index_dirs": "索引/向量类",
+               "print_spool": "打印后台"}
+
+
+def _h_canary():
+    """诱饵文件夹具（0.53.0 T1.1）——取**词最多**的「被读过」态，
+    让 H6 的禁词扫描尽可能罩住 ③ 组尾新块的每个字。"""
+    return {"projects": 2, "planted": ["CANARY-a-1", "CANARY-a-2"],
+            "read": 3, "observed": 0}
+
+
+def _h_scan_obs(obs):
+    """合成体检 payload（只给 observations，其余为空 —— 三态断言要干净的背景）。"""
+    return {"generated_at": "", "tools": [], "details": {},
+            "coverage": {"registered_roots": 0, "present": 0, "scanned": 0,
+                         "unscanned": 0, "added_by_registry": 0, "absent": 0},
+            "counts_by_verdict": {}, "observations": obs}
+
+
+def _h_render(scan, src=None, tag="is0360_health"):
+    """跑一次体检页渲染。返回 `(page, None)` 或 `(None, 说明串)`。
+
+    ★ 量具故障与产品红必须分开（0490 的 `_mut_render` 同型）：
+      否则「负控自己崩了」会被读成「产品有缺陷」。
+    ★ 0.53.0（T1.1）：payload 带一份诱饵夹具（`_h_canary`）—— H6 的禁词扫描
+      因此罩住 ③ 组尾的诱饵文件块（页面词必须是「诱饵文件」）。
+    """
+    import antinel                                                # noqa: E402
+    try:
+        if src is None:
+            import ui_server as U                                 # noqa: E402
+            return U._result_html({"scan": scan, "egress": {},
+                                   "canary": _h_canary()},
+                                  antinel.VERDICTS, antinel._ev_human), None
+        import types
+        mod = types.ModuleType(tag)
+        mod.__file__ = os.path.join(ROOT, "ui_server.py")
+        sys.modules[tag] = mod
+        exec(compile(src, mod.__file__, "exec"), mod.__dict__)     # noqa: S102
+        return mod._result_html({"scan": scan, "egress": {},
+                                 "canary": _h_canary()},
+                                antinel.VERDICTS, antinel._ev_human), None
+    except Exception as e:                                        # noqa: BLE001
+        return None, ("量具故障：渲染抛 %s: %s —— 不是产品问题，不算通过"
+                      % (type(e).__name__, e))
+
+
+def _h_mut(anchor, repl, tag, scan):
+    """负控两步法第一步：注入必须**真的生效**（锚点不存在 ⇒ 负控自身失效）。"""
+    p = os.path.join(ROOT, "ui_server.py")
+    src = io.open(p, encoding="utf-8").read()
+    if anchor not in src:
+        return None, ("变异锚点未找到（源码已变，需更新负控）—— "
+                      "负控自身失效，不算通过：%r" % anchor[:60])
+    return _h_render(scan, src=src.replace(anchor, repl), tag=tag)
+
+
+def _h_row(page, human):
+    """取出该观察项那一行的可见文本（去标签后取该行＋后两行）。
+
+    ★ 为什么按「行」取而不是扫全文：全文里有几十个 `0`，
+      「null 时不含 0」这种断言在全文上根本分不开 —— 那是假绿的温床。
+    """
+    txt = re.sub(r"<[^>]+>", "\n", page)
+    lines = [x.strip() for x in txt.splitlines() if x.strip()]
+    for i, ln in enumerate(lines):
+        if human in ln:
+            return " ".join(lines[i:i + 3])
+    return None
+
+
+def _h5_core(page):
+    """三态两两互斥：null ⇒ 说「没配」且不出 0；[] ⇒ 出 0 且不说「没配」；
+    entries:0 ⇒ 出「0 条」且不说「没找到」。"""
+    row = _h_row(page, _H_OBS_NAME["index_dirs"])
+    if row is None:
+        return "页面上找不到 `%s` 这一行 —— D 组没渲染" % _H_OBS_NAME["index_dirs"]
+    if "还没配" not in row:
+        return "`%s` 是 null（未配置 ⇒ 没查），这一行却没说「还没配」" % _H_OBS_NAME["index_dirs"]
+    if re.search(r"0\s*(处|个|条)", row):
+        return "`%s` 是 null，却被渲染成 0 —— 把「没查」写成了「查过、没有」" % _H_OBS_NAME["index_dirs"]
+
+    row = _h_row(page, _H_OBS_NAME["crash_dumps"])
+    if row is None:
+        return "页面上找不到 `%s` 这一行" % _H_OBS_NAME["crash_dumps"]
+    if "0 个" not in row:
+        return "`%s` 是空数组（查过、是空的），这一行却没出「0 个」" % _H_OBS_NAME["crash_dumps"]
+    if "没配" in row:
+        return "`%s` 是空数组，却说「还没配」—— 把「查过、是空的」写成了「没查」" % _H_OBS_NAME["crash_dumps"]
+
+    row = _h_row(page, _H_OBS_NAME["print_spool"])
+    if row is None:
+        return "页面上找不到 `%s` 这一行" % _H_OBS_NAME["print_spool"]
+    if "0 条" not in row:
+        return "`%s` 是 entries:0（打印队列空着正常），这一行却没出「0 条」" % _H_OBS_NAME["print_spool"]
+    if "没找到" in row:
+        return ("`%s` 实际是 entries:0（v1.11 §37.2 更正：它不是 null），"
+                "却说「没找到」" % _H_OBS_NAME["print_spool"])
+    return True
+
+
+def c_health_obs_states_are_mutually_exclusive():
+    """H5 ★ D 组三态互斥：null（没查）／[]（查过是空的）／entries:0（空＝正常）。
+
+    ★ 三态各有各的话，**不许共用同一个词** —— 否则判据分不开，用户也分不开。
+      `print_spool` 本机是 `entries:0`（**不是 null**），这一格专防 v1.9 那次
+      「看错 payload、把本来正确的原文改掉」的复发。
+    """
+    page, why = _h_render(_h_scan_obs({
+        "crash_dumps": [],
+        "index_dirs": None,
+        "print_spool": {"path": "C:/WINDOWS/System32/spool/PRINTERS",
+                        "entries": 0, "bytes": 0},
+    }))
+    return why or _h5_core(page)
+
+
+def n_health_null_rendered_as_zero_is_caught():
+    """负控：把 null 当空数组渲染 ⇒ H5 必须红。
+
+    变异＝把 `_obs_norm` 的 `if val is None` 分支短路掉，null 就会掉进
+    「有值」那条路 ⇒ 页面出 0 —— 正是「没查」被写成「查过、没有」的老病。
+    """
+    anchor = ("    if val is None:\n"
+              "        return (name, None, None, unit, _OBS_NOT_CONFIGURED)")
+    scan = _h_scan_obs({"crash_dumps": [], "index_dirs": None,
+                        "print_spool": {"path": "p", "entries": 0, "bytes": 0}})
+    page, why = _h_mut(anchor, anchor.replace("if val is None:", "if False:"),
+                       "is0360_nh5", scan)
+    if why:
+        return why
+    if _h5_core(page) is True:
+        return "负控失效：null 被当成空数组渲染后 H5 没红"
+    if _h5_core(_h_render(scan)[0]) is not True:
+        return "夹具不成立：真实现本身就红 ⇒ 负控无分辨力"
+    return True
+
+
+def _cmd_host_scan_literals():
+    """取 `cmd_host_scan` 里**真的会打印出来**的字符串字面量。
+
+    ★ 三重收窄（每一重都是实测撞出来的，别放宽）：
+      1. 只取 `print(...)` / `_die(...)` 调用里的字面量 —— 用户可见面就这两处；
+      2. 不取 docstring（内部术语不算鸟语）；
+      3. **不取字典键**：`_st.get("workspaces")` 里的 `workspaces` 是状态字段名，
+         不是文案；第一版没收窄这一条 ⇒ H6 永远红在这一处（假红）。
+    ★ 为什么用 AST 而不是真跑一次扫描：真跑要 40 秒以上，而这里要断言的是
+      「这趟旅程的**文案**」，print 的字面量就是它的全集。
+    """
+    tree = ast.parse(io.open(os.path.join(ROOT, "antinel.py"),
+                             encoding="utf-8").read())
+    out = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.FunctionDef) and node.name == "cmd_host_scan"):
+            continue
+        for sub in ast.walk(node):
+            if not isinstance(sub, ast.Call):
+                continue
+            fn = sub.func
+            nm = getattr(fn, "id", None) or getattr(fn, "attr", None)
+            if nm not in ("print", "_die"):
+                continue
+            for a in sub.args:
+                if isinstance(a, ast.Constant) and isinstance(a.value, str):
+                    out.append(a.value)
+    return out
+
+
+def _h6_copy_sources():
+    """H6 补丁（2026-10-18 活体闸自撞）：**会进页面的文案派生源**全量扫描。
+
+    ★ 为什么加这一段：H6 原本只渲染 `_result_html`（体检结果块），而
+      「金丝雀」是从 **console chrome 的术语芯片**漏进整页的 —— 同一事实
+      的四条渲染路径：
+        ① `glossary._CATEGORY_ZH` 分类显示名 → `_shield_overview()` 概述句
+        ② 规则 `description_zh` → `_shield_list_html()` 问号全表
+        ③ 规则 `label_zh` → `inbox_report.rule_label_map()` 日报排行上屏
+        ④ 规则 `description_zh` → `inbox_model._rule_desc()` 收件箱详情行
+      尺子只量局部 ⇒ 假绿（本批活体闸整页回读才抓到，H6 却全绿）。
+      这一段把四个真源都罩住，对齐设计 v1.10 §20.3「页面一律不用金丝雀」。
+    ★ 术语词条五字段一并扫：词条正文也是页面文案（问号芯片正文）。
+    ★ 实证基线（2026-10-18）：197 个派生源 6 处命中，全在 SEC-11/L2
+      这一族；无「落点」等门闸领域词假红（那类只在终端文案，不在这四个源里）。
+    """
+    import glossary as GL
+    import inbox_report as RR
+    srcs = [("shield 概述句", GL._shield_overview()),
+            ("shield 规则全表", GL._shield_list_html())]
+    for key, term in (GL.TERMS or {}).items():
+        if not isinstance(term, dict):
+            continue
+        for field in ("w", "one", "inc", "exc", "unit"):
+            val = term.get(field)
+            if val:
+                srcs.append(("术语词条 %s.%s" % (key, field), str(val)))
+        if term.get("list_html"):
+            srcs.append(("术语词条 %s.list_html" % key, str(term["list_html"])))
+    for rid, zh in sorted((RR.rule_zh_map() or {}).items()):
+        srcs.append(("规则 %s description_zh" % rid, str(zh)))
+    for rid, lb in sorted((RR.rule_label_map() or {}).items()):
+        srcs.append(("规则 %s label_zh" % rid, str(lb)))
+    return srcs
+
+
+def _h6_core(page):
+    """H6 的尺子本体（正判据与负控共用同一把）。"""
+    hits = [w for w in _H_BANNED if w in page]
+    if hits:
+        return "体检页渲染产物里有鸟语：%s" % "、".join(hits)
+    lits = _cmd_host_scan_literals()
+    if not lits:
+        return "量具故障：没取到 cmd_host_scan 的字面量（函数名变了？）"
+    hits2 = sorted({w for w in _H_BANNED for s in lits if w in s})
+    if hits2:
+        return "host-scan 终端文案里有鸟语：%s" % "、".join(hits2)
+    return True
+
+
+def c_health_copy_sources_are_clean():
+    """H6b ★ 页面文案派生源零鸟语（2026-10-18 活体闸自撞补丁）。
+
+    ★ 与 H6 的分工：H6 守「这一趟渲染出来的整块页面 ＋ 终端文案」，
+      本判据守「会进页面的文案的**四个真源**」—— 术语芯片走的是后者，
+      H6 的夹具（`_result_html` 局部块）结构上罩不到它（实测：H6 全绿
+      而活体闸整页回读抓到「金丝雀布防」）。
+    ★ 为什么不让 `_h6_core` 兼扫派生源：同一断言两个入口必漂（本仓
+      「同一事实两处实现」标准形状）—— 各守一层，各配负控。
+    """
+    try:
+        srcs = _h6_copy_sources()
+    except Exception as e:                                        # noqa: BLE001
+        return ("量具故障：页面文案派生源扫不到（%s: %s）—— "
+                "不是产品问题，不算通过" % (type(e).__name__, e))
+    for name, txt in srcs:
+        hits = [w for w in _H_BANNED if w in txt]
+        if hits:
+            return "%s 里有鸟语：%s" % (name, "、".join(hits))
+    return True
+
+
+def c_health_page_speaks_plain_language():
+    """H6 ★ 体检可见面零鸟语：页面渲染产物 ＋ `cmd_host_scan` 终端文案。
+
+    ★ 范围按 v1.11 §37.8 的 **A″** 定：**只管体检这一趟旅程的两个界面**。
+      `host-shield`／`brief`／help 里的「落点」是**门闸领域词**（指待裁决的
+      外传目标），与体检侧不同义，不动它们不算「两套说法」。
+    """
+    page, why = _h_render(_h_scan_obs({}))
+    return why or _h6_core(page)
+
+
+def n_health_canary_term_in_page_is_caught():
+    """负控：往页面注入「金丝雀」⇒ H6 必须红。
+
+    ★ 锚点是**页尾声明**（本批不会改动的那句），不随四组实现漂移 ——
+      0490 N-T04d 的教训：锚在会被重构掉的字面量上，重构一次负控就失效。
+    """
+    anchor = "本次为<b>只读</b>检查：没有登记、没有布防、没有上锁。"
+    page, why = _h_mut(anchor, anchor + "金丝雀", "is0360_nh6", _h_scan_obs({}))
+    if why:
+        return why
+    if "金丝雀" not in page:
+        return "注入未生效：变异后页面里没有「金丝雀」—— 负控自身失效"
+    if _h6_core(page) is True:
+        return "负控失效：页面里注入「金丝雀」后 H6 没红"
+    if _h6_core(_h_render(_h_scan_obs({}))[0]) is not True:
+        return "夹具不成立：真实现本身就红 ⇒ 负控无分辨力"
+    return True
+
+
+def n_health_copy_sources_banned_term_is_caught():
+    """负控：往派生源注入「金丝雀」（patch `_CATEGORY_ZH` 分类显示名）⇒ H6b 必须红。
+
+    ★ 为什么 patch 字典而不是改文件：`_cat_zh` 运行时查表，patch 即时生效，
+      try/finally 还原 —— 不碰产品文件（负控纪律）。
+    ★ 与 N-H6（注入页面正文）互补：那条证明「结果块」那段有牙，这条证明
+      「派生源」这段有牙 —— 活体闸抓到的正是后者漏的，两段都要有负控。
+    """
+    import glossary as GL
+    orig = dict(GL._CATEGORY_ZH)
+    try:
+        GL._CATEGORY_ZH["canary"] = "金丝雀布防"
+        r = c_health_copy_sources_are_clean()
+        if r is True:
+            return "负控失效：派生源里注入「金丝雀」后 H6b 没红"
+        if "shield 概述句" not in str(r):
+            return "红因不在派生源（%r）—— 尺子结构坏了" % str(r)[:60]
+    finally:
+        GL._CATEGORY_ZH.clear()
+        GL._CATEGORY_ZH.update(orig)
+    if c_health_copy_sources_are_clean() is not True:
+        return "还原链路坏：还原 _CATEGORY_ZH 后仍红"
+    return True
+
+
 CHECKS = [
     ("G01 面板几何随分辨率变化", c_window_geometry_follows_resolution,
      n_window_geometry_is_not_constant),
@@ -2082,7 +2663,8 @@ CHECKS = [
     ("T05 三个监理态角标可区分", c_badge_marks_differ_per_shield_state, None),
     ("T06 托盘自刷新不靠守护进程", c_tray_refreshes_without_daemon, None),
     ("R01 每类失守都给出动作", c_every_r0_class_gives_an_action, None),
-    ("R02 B 类给三选一", c_b_class_offers_three_choices, None),
+    ("R02 B 类给三选一（夹具恒在＋真实库叠加）", c_b_class_offers_three_choices,
+     n_b_class_missing_choice_is_caught),
     ("R03 上锁失败进要处理档", c_zone_lock_failure_lands_in_action_bucket, None),
     ("R04 归因不依赖窗口枚举", c_attribution_uses_no_window_enumeration, None),
     ("R05 回答已放过什么", c_attribution_states_what_got_through, None),
@@ -2092,6 +2674,18 @@ CHECKS = [
     ("R08 按钮接到真实动作", c_pick_buttons_wired_to_real_ops, None),
     ("R09 移出监管不静默改防线", c_drop_does_not_silently_disable_protection, None),
     ("R10 文案识别如实标注", c_by_text_recognition_is_labelled, None),
+    ("NM01 产品面字面量不含已退休旧名（定义见族注）",
+     c_no_legacy_console_name_in_literals,
+     n_legacy_name_in_literal_is_caught),
+    ("H5 D 组三态互斥（null 没查／[] 查过是空的／entries:0 空＝正常）",
+     c_health_obs_states_are_mutually_exclusive,
+     n_health_null_rendered_as_zero_is_caught),
+    ("H6 体检可见面零鸟语（页面渲染产物 ＋ cmd_host_scan 终端文案 ＋ 页面文案派生源）",
+     c_health_page_speaks_plain_language,
+     n_health_canary_term_in_page_is_caught),
+    ("H6b 派生源注入「金丝雀」被逮（shield 概述句／规则文案四路径）",
+     c_health_copy_sources_are_clean,
+     n_health_copy_sources_banned_term_is_caught),
 ]
 
 

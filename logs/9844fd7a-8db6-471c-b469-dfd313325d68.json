@@ -1,0 +1,18 @@
+{
+  "request_id": "9844fd7a-8db6-471c-b469-dfd313325d68",
+  "stage": 2,
+  "route": "html",
+  "html_sub": "template",
+  "genre": "general",
+  "skills_invoked": [
+    "design-token",
+    "doc-typeset",
+    "html-review"
+  ],
+  "template_used": "base.html",
+  "html_review_attempts": 0,
+  "fallback": false,
+  "fallback_reason": null,
+  "duration_ms": 982000,
+  "timestamp": "2026-10-16T07:22:22+08:00"
+}

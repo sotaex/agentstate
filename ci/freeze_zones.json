@@ -13,7 +13,20 @@
       "frozen_at": null,
       "decision": null,
       "retire_log": [],
-      "blocked_on": "修复已落地（Phase B2：kind 由 source 改 output —— 契约从「函数字节」改为「输出关系」，常量值不在冻结面）；check 已实现＋机械自证就位（_lamp_color_machinery_probe 每次闸门运行验回耦/回灰有牙），但保持 candidate 不执法（违例只登记）：《品牌动效报警语法》规格（外部 PSL 仓）的球色梯度未定稿 —— 规格确认后视需要升级为 frozen（届时 D-38 开始执法 lamp_color_contract）"
+      "blocked_on": "修复已落地（Phase B2：kind 由 source 改 output —— 契约从「函数字节」改为「输出关系」，常量值不在冻结面）；check 已实现＋机械自证就位（_lamp_color_machinery_probe 每次闸门运行验回耦/回灰有牙），但保持 candidate 不执法（违例只登记）：《品牌动效报警语法》规格（外部 PSL 仓）的球色梯度未定稿 —— 规格确认后视需要升级为 frozen（届时 D-38 开始执法 lamp_color_contract）。★ 覆盖面注记（2026-10-17）：本条守**页面层**灯色；**资产层**（logo.svg 的 circle ＋ antinel.ico 的哨点像素）的在场＋可辨由 FZ-005 独立冻结执法 —— 0.48.5 删球事故断在资产层，页面层当时完好，两处必须分开守。"
+    },
+    {
+      "id": "FZ-005",
+      "status": "frozen",
+      "unit": "品牌哨点在场＋可辨（资产层：assets/logo/logo.svg 的 <circle> ＋ assets/logo/antinel.ico 的哨点像素）",
+      "kind": "output",
+      "contract": "小黄球（哨点）在资产层必须在场且肉眼可辨：① logo.svg 有 <circle>（0.48.5「去哨点」是 AI 幻觉裁定、出处捏造，已作废；要真去掉它先走退休流程，创始人签字）；② 哨点填充色不与背景/环/指针同色（同色＝肉眼不可辨＝等于没有）；③ antinel.ico 最大图含 ≥8 个哨点纯色像素，质心与 logo.svg circle 派生期望一致 ±2px（SVG 与 ico 不同源＝红）。页面层灯色契约由 FZ-001 独立守（仍 candidate）。",
+      "check": "brand_dot_presence",
+      "hash": null,
+      "frozen_at": "2026-10-17",
+      "decision": "创始人 2026-10-17 截图原话『0.48.5 那个是 AI 幻觉裁定的，请取消，回复小黄球。机继续』＋同日『为啥 LOGO 上的橙色小球你又丢了？之前就发生过这个事，机制层约束失效了吗？分析分析并改进』。执行顺序（全部已完成）：logo.svg 恢复 <circle>（与 git 9c208df 版逐字一致）并把幻觉裁定的作废记录写进文件 → tools/mk_logo_ico.py 重写为机制层自检版（⓪ 元素清单 fail-loud／① 哨点在场 FATAL／② 逐元素像素问责／③ 可辨断言）→ 重生成 antinel.ico 且自检全过（16px 哨点 4 像素、逐元素问责无缺失、ICO round-trip 四尺寸 32bpp 掩码全零、质心 (18.1,14.9)≈期望 (18.6,15.4)）→ ci/inbox_guards_0515.py 增 ICO 族套件判据（正判据＋三条负控：删 circle／刷哨点像素／缺 package-data，全部实测见红）→ 实现 brand_dot_presence ＋ _brand_dot_machinery_probe 三步自证 → 冻结（本条）。",
+      "retire_log": [],
+      "blocked_on": ""
     },
     {
       "id": "FZ-002",
@@ -43,16 +56,16 @@
     },
     {
       "id": "FZ-004",
-      "status": "candidate",
+      "status": "frozen",
       "unit": "状态解释行（inbox_model.py::light_explain 的 reason 段）",
       "kind": "output",
       "contract": "主行只留状态词本身；版本差与收件箱计数不进主行（挪 ? 点击展开）（创始人 2026-10-16 截图 #4：啰嗦、浓重机器味）",
       "check": "reason_line_budget",
       "hash": null,
-      "frozen_at": null,
-      "decision": null,
+      "frozen_at": "2026-10-17",
+      "decision": "创始人 2026-10-17 三截图反馈原话『请看所有的截图说明，都在说鸟语，请你都改成看得懂的人话吧』＋『链哈希应该保留吧？体现监理的严谨性。规则编号肯定也保留，不过要加上一句大白话说明。另外，事件发生的时间等关键要肯定也要保留』。本轮兑现方式（信息不丢、只换位置）：① 版本差（两版号）从主行「另外：…」段移出 —— 原病是研发中徽标的完整原因句被拼进每一态主行；② 版本号保留在徽标悬停提示（title，19 字内守 U-11）；③ 徽标问号点开仍见完整解释（glossary dev 词条补了落点说明）。实现：j_reason_line_budget 三腿（主行无版号对/无收件箱计数、徽标信息不丢、渲染层 title 带版号）+ _reason_budget_machinery_probe 三步自证",
       "retire_log": [],
-      "blocked_on": "目标文案待创始人确认（我 2026-10-16 提议：gloss 删、版本差挪 ? 点击后、46 条计数删）；确认后改代码→实现 reason_line_budget→冻结"
+      "blocked_on": ""
     }
   ]
 }

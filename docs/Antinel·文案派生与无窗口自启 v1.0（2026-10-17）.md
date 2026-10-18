@@ -84,7 +84,7 @@ _lead = "下列%s个数只数<b>今天</b>…" % _zh_num(len(_cards))     # 派�
 | 窗口 | 源头 | 为什么有窗 |
 |---|---|---|
 | **常驻大黑窗** | 启动文件夹里的 `antinel-shield.cmd`（开机自启） | `.cmd` 由 cmd.exe/conhost 执行 ⇒ **必然**建控制台；且它**前台**跑常驻哨兵 ⇒ 窗口一直开着 |
-| **一闪而过** | 桌面 `Antinel 值守台.cmd`（双击入口） | 同样前台调 `python.exe`，一闪 |
+| **一闪而过** | 桌面 `Antinel Antinel 监理.cmd`（双击入口） | 同样前台调 `python.exe`，一闪 |
 
 用户机器实测：`schtasks` 被本机策略拦死 ⇒ `antinel enable` 走了**启动文件夹
 回退**（`state.autostart == "startup-folder"`），所以 Startup 里是 `.cmd`。
@@ -170,7 +170,7 @@ python antinel.py host-shield enable
 > 兜底说明：万一 PowerShell 在这台机器上不可用，它会**如实退回 `.cmd`**
 > （有窗口，但哨兵照跑）——宁可看得见，不可没有保护。
 
-桌面那个「一闪而过」的入口（`Antinel 值守台.cmd`）是**手工创建**的、不在
+桌面那个「一闪而过」的入口（`Antinel Antinel 监理.cmd`）是**手工创建**的、不在
 产品逻辑里，需要另外换成一个指向 `pythonw.exe` 的快捷方式；等本条自启生效、
 你确认效果后我再给具体做法（同样需要你本人操作）。
 

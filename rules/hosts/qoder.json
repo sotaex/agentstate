@@ -1,5 +1,6 @@
 {
  "host": "qoder",
+ "name": "Qoder",
  "vendor": "Alibaba",
  "roots": [
   "~/.qoder",

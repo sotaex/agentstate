@@ -72,8 +72,10 @@ import os
 import re
 import sys
 import tempfile
+import threading
 import time
-from datetime import datetime
+import inspect
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 
@@ -1431,9 +1433,9 @@ def n_u18d():
     return True
 
 
-# ═════════════════════════════ B-13 「打开值守台」已开着就别重开（0.50.3）══
+# ═════════════════════════════ B-13 「打开Antinel 监理」已开着就别重开（0.50.3）══
 #: ★★★ 创始人 2026-10-14：「点击打开值守台后，之前的关闭了，打开了新的，但是
-#:   状态不对了……另外，点完了按钮显示'打开值守台'按钮好像不对吧，值守台打开着
+#:   状态不对了……另外，点完了按钮显示'打开Antinel 监理'按钮好像不对吧，Antinel 监理打开着
 #:   呢」。两句话指的是同一件事的两个侧面：
 #:     · **动作**：旧链路只有 `open_console_settled()`，而它**先收旧窗、再开新窗**
 #:       ⇒ 面板本来就开着时点一下 = 窗闪一下、内容从头加载（状态读数是重新算的
@@ -1510,7 +1512,7 @@ def c_b13():
     err = _bubble_open_arms_fail(SV.bubble_open_route)
     if err:
         return err
-    # ---- 文案侧：渲染那一刻值守台已开着 ⇒ 不画按钮，改一句状态 ----
+    # ---- 文案侧：渲染那一刻Antinel 监理已开着 ⇒ 不画按钮，改一句状态 ----
     BTN = '<button class="bub-open"'
     STA = '<span class="bub-has">'
     off = BB.render("t", "b", "R0", "tok-b13", run_id="r", kind="k",
@@ -1577,7 +1579,7 @@ def n_b13():
 #:   0360 已钉负形状）⇒ 夹具 1 号窗同步换新形态；哨标/紧急提醒两路
 #:   仍是标记收尾口径（`_mark_at_tail_any`，0.51.1 未动），夹具不动。
 _FAKE_WINDOWS = [
-    (1, "Antinel 监理#abc123"),                  # 本次值守台（0.51.1 新形态）
+    (1, "Antinel 监理#abc123"),                  # 本次Antinel 监理（0.51.1 新形态）
     (2, "我的 · 哨标 收藏夹"),             # ★ 用户窗口（含标记，不在末尾）
     (3, "Antinel · 哨标#abc123"),          # 本次哨标
     (4, "整理一下 · 紧急提醒 记录"),         # ★ 用户窗口（含标记，不在末尾）
@@ -1932,18 +1934,10 @@ def c_b08():
 # ════════════════════════════════════════════════════════════ FLO-01…05 ══
 #: logo.ps1 里的动法表必须与规格 v1.2 同值（它是 Python 侧状态机的
 #: PowerShell 孪生；两处各写一份 ⇒ 迟早漂，这条就是防漂的）。
-_FLO_SPEC_ROWS = {
-    "L0": ((126, 155, 132), 12.0, 1.0, 0),
-    "L1": ((205, 194, 154), 8.0, 1.0, 45),
-    "L2": ((224, 180, 85), 5.5, 1.0, 70),
-    "LD": ((232, 163, 61), 3.5, 1.0, 105),
-    "R0": ((178, 84, 84), 0.0, 0.45, 0),
-}
-_ROW_RE = re.compile(r'"(\w+)"\s*=\s*@\{\s*c\s*=\s*@\((\d+),\s*(\d+),\s*(\d+)\);'
-                     r'\s*lap\s*=\s*([\d.]+);\s*ringO\s*=\s*([\d.]+);'
-                     r'\s*waveR\s*=\s*(\d+);')
-
-
+#: 0.52.0 新契约（创始人 2026-10-17 截图：哨标颤抖难看、切换慢、点它不回值守台）：
+#: **托盘同族静态图标＋双缓冲**（颤抖根源＝GDI+ 动效 40ms 全量重绘，删净）；
+#: **常驻三标志**（quit / hide / show）；**点击不自毁**（写完 open 原地待命，
+#: 消费方开出Antinel 监理后写 hide 藏它 —— 旧契约「点击成功即退」正是反向切换坏掉的病根）。
 def _flo01_ok(src):
     if 'FormBorderStyle = "None"' not in src:
         return "没钉死无边框 —— 会有标题栏，哨标不像哨标"
@@ -1956,35 +1950,39 @@ def _flo01_ok(src):
     if "Test-Path -LiteralPath $Quit" not in src or "Quit-Now" not in src:
         return "没有轮询退役标志自退 —— 退役只能靠强杀"
     if 'Write-Action "open"' not in src:
-        return "点击没写 open 动作 —— 点了哨标展不开Antinel 监理"
-    if 'if (Write-Action "open") { Quit-Now }' not in src:
-        return "open 动作写失败也会自退 —— 窗口消失但托盘没收到，用户无从重试"
+        return "点击没写 open 动作 —— 点了哨标展不开 Antinel 监理"
+    # 0.52.0：点击**不自毁** —— Quit-Now 只许出现两处（函数定义 + quit 标志轮询）
+    if src.count("Quit-Now") != 2:
+        return ("点击路径在自毁（Quit-Now 出现 %d 次 ≠ 2）—— "
+                "哨标消失而 Antinel 监理没开，正是 2026-10-17 截图的病"
+                % src.count("Quit-Now"))
     if "$script:actionWriteFailed = $true" not in src or "$script:actionWriteFailTip" not in src:
         return "动作写盘失败没有可观测反馈 —— 用户点了没反应"
     if "add_MouseMove" not in src or "dragging" not in src:
         return "不能拖拽 —— 用户无法把它挪到不碍事的位置"
-    if "1.4" not in src:
-        return "找不到涟漪周期 1.4s —— 频次通道漂了"
-    if "coast" not in src:
-        return "没有惯性滑行量 —— R0「滑行 20° 后永停」演不出来"
-    rows = {}
-    for m in _ROW_RE.finditer(src):
-        rows[m.group(1)] = ((int(m.group(2)), int(m.group(3)), int(m.group(4))),
-                            float(m.group(5)), float(m.group(6)),
-                            int(m.group(7)))
-    if set(rows) != set(_FLO_SPEC_ROWS):
-        return "动法键集合 %s ≠ 规格 %s" % (sorted(rows), sorted(_FLO_SPEC_ROWS))
-    for k, want in _FLO_SPEC_ROWS.items():
-        got = rows[k]
-        if (got[0] != want[0] or abs(got[1] - want[1]) > 1e-9
-                or abs(got[2] - want[2]) > 1e-9 or got[3] != want[3]):
-            return "%s 行 %r ≠ 规格 %r" % (k, got, want)
-    if "waveR / 105.0" not in src:
-        return "波幅缩放没以规格满档 105 为基准"
+    # 0.52.0 常驻三标志：hide/show 必须有（且各自把窗真藏/真现出）
+    if "Consume-Flag $Show" not in src or "$form.Show()" not in src:
+        return "没有唤标志处理 —— 常驻哨标唤不出，收缩仍要冷启 PowerShell（切换慢）"
+    if "Consume-Flag $Hide" not in src or "$form.Hide()" not in src:
+        return "没有藏标志处理 —— 展开后哨标退不死也藏不了，屏幕上多漂一枚"
+    # 0.52.0 静态图标：托盘同族 .ico + 双缓冲 + 回落链
+    if "[string]$IconDir" not in src:
+        return "-IconDir 没接 —— 哨标画不了托盘同族状态图标"
+    if "ToBitmap" not in src or "DrawImage" not in src:
+        return "不是按 .ico 画 —— 哨标与 Antinel 监理图标不同源（创始人要「同样的图标」）"
+    if '$form.GetType().GetProperty("DoubleBuffered",' not in src:
+        return "没开双缓冲 —— 40ms 重绘照旧颤抖"
+    if '($st + $suf + ".ico")' not in src or '($st + ".ico")' not in src:
+        return "状态图标回落链不完整 —— 组合态缺文件时该回落基础态（icon_file 同规）"
+    if '"unposted" = "-unposted"' not in src or '"off" = "-off"' not in src:
+        return "哨兵态后缀表不全 —— shield 维度画不出来（托盘同族映射漂了）"
+    # 0.52.0：旧 GDI+ 动效必须删净（旋转弧线/浮动/滑行 —— 颤抖的根源）
+    if "waveR" in src or "$MOTION" in src or "bob" in src or "coast" in src:
+        return "GDI+ 动效没删干净 —— 颤抖根源还在"
     return None
 
 
-@check("FLO-01 logo.ps1 契约：动法表同规格、无边框、置顶、可拖、标志自退")
+@check("FLO-01 logo.ps1 契约（0.52.0）：托盘同族静态图标、双缓冲、常驻三标志、点击不自毁")
 def c_flo01():
     src = _src(_LOGO_PS1_REL)
     why = _flo01_ok(src)
@@ -1995,26 +1993,32 @@ def c_flo01():
     return True
 
 
-@check("N-FLO01 负控：把 R0 圈时改成 3.5（不停摆）⇒ 尺子必须判红")
+@check("N-FLO01 负控：不双缓冲／点击自毁／动效复活 ⇒ 尺子必须判红")
 def n_flo01():
     src = _src(_LOGO_PS1_REL)
-    bad = src.replace('"R0" = @{ c = @(178,84,84);   lap = 0.0;',
-                      '"R0" = @{ c = @(178,84,84);   lap = 3.5;')
+    bad = src.replace('$form.GetType().GetProperty("DoubleBuffered",',
+                      '$form.GetType().GetProperty("XoubleBuffered",')
     if bad == src:
-        return "夹具不成立：变异没生效（要改的那行没匹配上）"
+        return "夹具不成立：双缓冲变异没生效（要改的那行没匹配上）"
     if _flo01_ok(bad) is None:
-        return "负控失效：R0 不停摆也判合格 —— 规格锁是装饰"
-    bad2 = src.replace('$form.TopMost = $true', '$form.TopMost = $false')
+        return "负控失效：不双缓冲也判合格 —— 颤抖没人抓"
+    bad2 = src.replace('Write-Action "open" | Out-Null',
+                       'Write-Action "open" | Out-Null; Quit-Now')
     if bad2 == src:
-        return "夹具不成立：置顶变异没生效"
+        return "夹具不成立：点击自毁变异没命中"
     if _flo01_ok(bad2) is None:
-        return "负控失效：不置顶也判合格"
-    bad3 = src.replace('if (Write-Action "open") { Quit-Now }',
-                       'Write-Action "open"\n    Quit-Now')
+        return "负控失效：点击自毁也判合格 —— 哨标消失而 Antinel 监理没开没人抓"
+    bad3 = src.replace("function Read-State",
+                       "$MOTION = @{}\nfunction Read-State")
     if bad3 == src:
-        return "夹具不成立：点击失败仍退出的变异没命中"
+        return "夹具不成立：动效复活变异没生效"
     if _flo01_ok(bad3) is None:
-        return "负控失效：点击动作可能写失败还无条件退出也被判合格"
+        return "负控失效：GDI+ 动效复活也判合格 —— 颤抖根源没人抓"
+    bad4 = src.replace('$form.TopMost = $true', '$form.TopMost = $false')
+    if bad4 == src:
+        return "夹具不成立：置顶变异没生效"
+    if _flo01_ok(bad4) is None:
+        return "负控失效：不置顶也判合格"
     return True
 
 
@@ -2054,6 +2058,203 @@ def n_flo06_root():
     why = _logo_root_problem(bad, root)
     if not why:
         return "负控失效：默认中枢路径被误判成自定义 root"
+    return True
+
+
+class _HideEnv:
+    """假桌面：一枚「看见 hide 标志就自己藏」的哨标（忠实 logo.ps1 的约定）。
+
+    ★ 与 `_MarkEnv` 分开立：hide 用的是 `logo.hide`（不是 quit），finder
+      必须按同一规则反应，否则「标志没被消费」这个真缺陷测不出来。
+    """
+
+    def __init__(self, root, old=True):
+        self.root = root
+        self.win = [66] if old else []
+        self.log = []
+
+    def finder(self):
+        if os.path.exists(IL.hide_flag_path(self.root)):
+            self.win = []                    # 哨标看到藏标志，自己藏
+        return list(self.win)
+
+    def killer(self, why=""):
+        self.log.append("killer")
+        n = len(self.win)
+        self.win = []
+        return (n, "兜底关掉 %d 枚（%s）" % (n, why))
+
+
+@check("FLO-07 hide 三态：没有⇒空转并清陈年标志；标志劝动⇒自己藏；劝不动⇒兜底退役")
+def c_flo07():
+    root = tempfile.mkdtemp(prefix="g0514_flo_")
+    # a) 没有哨标 ⇒ 空转成功，且**陈年 hide 标志被清**（留着它，下一枚
+    #    哨标一出生就被藏 —— "开了等于没开"同型）
+    os.makedirs(os.path.dirname(IL.hide_flag_path(root)), exist_ok=True)
+    with open(IL.hide_flag_path(root), "w") as f:
+        f.write("stale\n")
+    env = _HideEnv(root, old=False)
+    rep = IL.hide(root=root, finder=env.finder, killer=env.killer,
+                  wait_sec=0.5, verbose=False)
+    if not rep.get("ok") or rep.get("acted"):
+        return "没有哨标时 hide 不空转：%r" % rep
+    if os.path.exists(IL.hide_flag_path(root)):
+        return "陈年 hide 标志没清 —— 下一枚哨标一出生就被藏"
+    # b) 标志劝动 ⇒ 哨标自己藏，不走兜底
+    env = _HideEnv(root, old=True)
+    rep = IL.hide(root=root, finder=env.finder, killer=env.killer,
+                  wait_sec=1.0, verbose=False)
+    if not rep.get("ok") or not rep.get("acted"):
+        return "藏标志劝动这条没成：%s" % rep.get("why")
+    if env.log:
+        return "藏标志劝动了还兜底关窗（%r）—— 白绕一圈 WM_CLOSE" % env.log
+    if os.path.exists(IL.hide_flag_path(root)):
+        return "藏起后标志没清 —— 虽由哨标消费，写方兜底也没接住"
+    # c) 劝不动 ⇒ 兜底真退役，并在 why 里说明
+    class Stubborn(_HideEnv):
+        def finder(self):
+            return list(self.win)            # 无视藏标志
+    env = Stubborn(root, old=True)
+    rep = IL.hide(root=root, finder=env.finder, killer=env.killer,
+                  wait_sec=0.4, verbose=False)
+    if not rep.get("ok") or not env.log:
+        return "兜底退役没走成：%s / log=%r" % (rep.get("why"), env.log)
+    if "兜底" not in (rep.get("why") or ""):
+        return "用了兜底却不说 —— 用户以为哨标自己藏的：%r" % rep.get("why")
+    return True
+
+
+@check("N-FLO07 负控：藏不动且兜底也失败 ⇒ 如实报失败，不许说藏了")
+def n_flo07():
+    root = tempfile.mkdtemp(prefix="g0514_flo_")
+
+    class StubbornDead(_HideEnv):
+        def finder(self):
+            return list(self.win)
+
+        def killer(self, why=""):
+            raise OSError("桩：关窗也失败")
+    env = StubbornDead(root, old=True)
+    rep = IL.hide(root=root, finder=env.finder, killer=env.killer,
+                  wait_sec=0.4, verbose=False)
+    if rep.get("ok"):
+        return "负控失效：兜底失败了还报藏起成功 —— 假成功"
+    if "兜底" not in (rep.get("why") or ""):
+        return "没说清兜底失败：%r" % rep.get("why")
+    return True
+
+
+class _ResidentEnv:
+    """假桌面：一枚常驻（隐藏）哨标，看见 show 标志就自己现出。"""
+
+    def __init__(self, root, responsive=True):
+        self.root = root
+        self.resident = [55]                 # 常驻（隐藏）窗
+        self.visible = []
+        self.log = []
+        self.responsive = responsive
+
+    def finder(self):
+        if self.responsive and os.path.exists(IL.show_flag_path(self.root)):
+            self.visible = list(self.resident)
+        return list(self.visible)
+
+    def any_finder(self):
+        return list(self.resident)
+
+    def topmost(self, hs):
+        self.log.append("topmost")
+        return (True, "")
+
+    def launcher(self, cmd):
+        self.log.append("launch")            # fast 路径不该走到冷启
+        self.visible = [77]                  # 冷启后窗出现（忠实真哨标）
+
+
+@check("FLO-08 show_or_spawn：常驻哨标 ⇒ 写 show 唤出（不冷启、置顶、消费标志）；没有 ⇒ 回落冷启")
+def c_flo08():
+    root = tempfile.mkdtemp(prefix="g0514_flo_")
+    env = _ResidentEnv(root)
+    rep = IL.show_or_spawn(root=root, launcher=env.launcher,
+                           finder=env.finder, any_finder=env.any_finder,
+                           wait_sec=1.5, topmost=env.topmost, verbose=False)
+    if not rep.get("ok"):
+        return "常驻哨标没唤出：%s" % rep.get("why")
+    if not rep.get("fast"):
+        return "走了冷启而非唤出 —— 「瞬时切换」没兑现：%r" % rep
+    if env.log != ["topmost"]:
+        return "唤出路径动作 %r ≠ [topmost]（不该 launch）" % env.log
+    if os.path.exists(IL.show_flag_path(root)):
+        return "唤标志没被消费也没清 —— 下一枚哨标一出生就被唤"
+    # 回落：唤不动（僵尸）⇒ 清标志后冷启，不谎报就位
+    env2 = _ResidentEnv(root, responsive=False)
+    rep2 = IL.show_or_spawn(root=root, launcher=env2.launcher,
+                            finder=env2.finder, any_finder=env2.any_finder,
+                            wait_sec=0.6, topmost=env2.topmost, verbose=False)
+    if not rep2.get("ok"):
+        return "唤不动时没回落冷启：%s" % rep2.get("why")
+    if "launch" not in env2.log:
+        return "回落路径没走冷启（launch 没发生）：%r" % rep2
+    if os.path.exists(IL.show_flag_path(root)):
+        return "回落冷启后唤标志还留着 —— 新哨标会被它一出生就唤"
+    return True
+
+
+@check("N-FLO08 负控：判据注入 finder 而不给 any_finder ⇒ 不做隐藏检查（假桌面行为同旧）")
+def n_flo08():
+    root = tempfile.mkdtemp(prefix="g0514_flo_")
+    env = _ResidentEnv(root)                 # 有"常驻"窗，但不给 any_finder
+    rep = IL.show_or_spawn(root=root, launcher=env.launcher,
+                           finder=env.finder, wait_sec=1.0,
+                           topmost=env.topmost, verbose=False)
+    if "launch" not in env.log:
+        return "注入 finder 未给 any_finder 时却走了隐藏检查 —— 判据假桌面的行为被改了"
+    if not rep.get("ok"):
+        return "回落冷启失败：%s" % rep.get("why")
+    return True
+
+
+@check("FLO-09 服务端消费哨标 open 动作：serve 起消费线程、URL 注入、唯一实现、错了不死")
+def c_flo09():
+    sv = _src(_SERVER_REL)
+    if "_consume_actions_loop" not in sv:
+        return "服务端没有动作消费循环 —— 点哨标后只有 daemon/tray 会消费，都不在跑时 Antinel 监理永远开不出来"
+    if "threading.Thread(target=_consume_actions_loop" not in sv:
+        return "serve() 没起消费线程 —— 判据锁的是那一次真实调用"
+    src_fn = inspect.getsource(SV._consume_actions_loop)
+    if "handle_actions" not in src_fn:
+        return "消费循环没走 inbox_daemon.handle_actions —— 动作语义出了第二份实现"
+    # 行为：consumer 被注入，收到的 console_url 必须原样透传
+    root = tempfile.mkdtemp(prefix="g0514_flo_")
+    got = {}
+    stop = threading.Event()
+
+    def consumer(root=None, console_url=None):
+        got["url"] = console_url
+        stop.set()
+    SV._consume_actions_loop(root=root, console_url="http://127.0.0.1:1/?t=x",
+                             stop=stop, interval=0.05, consumer=consumer)
+    if got.get("url") != "http://127.0.0.1:1/?t=x":
+        return "消费循环没把自己的 URL 传下去 —— open_console_now 会另起一个服务实例（端口漂移同款病）"
+    return True
+
+
+@check("N-FLO09 负控：consumer 连环抛错 ⇒ 循环必须活着（不许一轮打死）")
+def n_flo09():
+    root = tempfile.mkdtemp(prefix="g0514_flo_")
+    calls = {"n": 0}
+    stop = threading.Event()
+
+    def bad_consumer(root=None, console_url=None):
+        """验证点：consumer 每轮抛错 ⇒ 循环必须吞掉并继续下一轮（不死）。"""
+        calls["n"] += 1
+        if calls["n"] >= 3:
+            stop.set()
+        raise OSError("桩：消费轮出错")
+    SV._consume_actions_loop(root=root, console_url="http://127.0.0.1:1/?t=x",
+                             stop=stop, interval=0.02, consumer=bad_consumer)
+    if calls["n"] < 3:
+        return "负控失效：一轮异常打死了消费循环（%d 次）—— 之后点哨标永远没反应" % calls["n"]
     return True
 
 
@@ -2295,8 +2496,10 @@ def c_flo05():
     if "collapse_console" not in sv:
         return "服务端没调 inbox_logo.collapse_console —— 路由断了"
     dm = _src(_DAEMON_REL)
-    if "_retire_mark" not in dm:
-        return "守护进程没有展开退役钩子 —— 点哨标展开后会多出一枚寡妇哨标"
+    if "_hide_mark" not in dm:
+        return "守护进程没有展开后藏哨标的钩子（0.52.0：hide 非 retire）—— 展开后会多出一枚寡妇哨标"
+    if "IL.retire(" in dm:
+        return "守护进程展开后仍在真退役哨标（0.52.0 应 hide 藏起待命）—— 下一次收缩又要冷启"
     return True
 
 
@@ -2593,9 +2796,15 @@ def _bare_denom_ok(html, total, revived):
 
 
 def _unit_has_merge(k):
-    """纯判据：级词条 unit 含条→件事换算说明。"""
+    """纯判据：级词条 unit 含条→件事换算说明，并指向**仍活着的展示位**。
+
+    ★ 0.53.0（T3.2）重锚：旧锚点「已归并为」是顶部计数排括号的字面
+      「（已归并为 N 件事）」—— 那排随 T3.2 撤掉 ⇒ 词条改指「要处理」
+      后面的件数（收件箱筛选条／日报要处理指标）。锚点跟着展示位走，
+      不跟着已删的字面走（判据守已不存在的东西＝死判据）。
+    """
     u = GL.TERMS[k].get("unit") or ""
-    return "算一件事" in u and "已归并为" in u
+    return "算一件事" in u and "要处理" in u
 
 
 @check("J4 ★ 拉起次数分子分母各自带单位（界面不许有裸分母）")
@@ -2607,10 +2816,12 @@ def j4():
       · 「23 次 / 54」：分子单位是「次」、分母没有单位，一条斜杠暗示
         "每 N 条里 23 次"（做了一个没意义的除法）。0.50.4 Q-03 修了日报页
         （改成「；同期记录 %d 条」），**健康页漏改**。
-      · 「（已归并为 N 件事）」：条→件的换算只有这一处出现，词条里没写
-        （`_pill` 注释声称"词条里写了"＝愿望写成事实）。
+      · 「（已归并为 N 件事）」：条→件的换算当时只有顶部计数排括号一处
+        出现，词条里没写（`_pill` 注释声称"词条里写了"＝愿望写成事实）。
     ⇒ 两条腿：① 健康页拉起次数分母带单位；② R0/L2/L1 的 unit 字段
-      必须含条→件换算说明（括号自解释的前提）。
+      必须含条→件换算说明（「要处理」件数自解释的前提）。
+    ★ 0.53.0（T3.2）：括号随顶部计数排撤了，腿②的落点改为「要处理」
+      后面的件数（词条与锚点同批更新，见 `_unit_has_merge`）。
 
     ★ ① 的数字从产品真源算（`_rep()["revived_window"]`／`window_levels`），
       不硬编码 —— 硬编码的数字一改产品就假绿。
@@ -2662,7 +2873,11 @@ def j5():
     "恒红"；再确认它们依赖的真源（`_logo_mark`／`state_short`／
     `TERMS[*].unit`／`_revived_value`）都在位 —— 少一个真源，尺子就空转。"""
     for rel, want in ((_SERVER_REL, "_logo_mark"),
-                      (_SERVER_REL, "window_level_groups")):
+                      # ★ 0.53.0（T3.2）：原锚 `window_level_groups`（顶部药丸
+                      #   的"件数"口径）随计数排撤销从 inbox_server 消失 ——
+                      #   本腿查的是"J 族依赖的真源还在"，故改锚仍在的
+                      #   `window_levels`（日报四指标的同一份数）。
+                      (_SERVER_REL, "window_levels")):
         if want not in _src_or_skip(rel):
             return "%s 里找不到 %s —— J 族依赖的真源变了" % (rel, want)
     import inbox_model as MM
@@ -2682,6 +2897,711 @@ def j5():
         if r is not True:
             return "%s 在现行产品上判红（尺子恒红＝噪音）：%s" % (n.strip(), r)
     _note("四条正判据在现行产品上均绿；四条真源都在位")
+
+
+# ════════════ W-SPK 族：界面机器腔人话化（0.51.2，创始人 2026-10-17 截图）═══════════
+# 创始人原话：「请看所有的截图说明，都在说鸟语，请你都改成看得懂的人话吧？
+#   请好好设计方案，务必一次做干净，全覆盖无遗漏，包括可能我没截图的其他
+#   说明文字。严格遵循相关机制，避免复发，避免引入新问题。」
+#
+# ★ 为什么并入本套件（A2/P5 扩展优先）：W-SPK 的**消费面**与 J 族同一处 ——
+#   `inbox_server` 的渲染产物（收件箱页）。同一消费面按 A2 规则并入，
+#   不立新套件（0518 并入 0514 是同一条纪律的先例）。
+#
+# 四条守四件事：
+#   W-SPK1 告警**第二行**（meta）不含机器腔键值对（pid=/mode=/cause=）
+#   W-SPK2 **整页渲染**不含裸术语（manifest/state 文件/哈希，非代码样位置）
+#   W-SPK3 **读侧兜底**：旧版机器串经读侧出口后仍是人话（链 append-only）
+#   W-SPK4 归因抠原因：新/旧文案的 spawn_failed **都仍能归因**（不静默退化）
+
+_SPK_KV = ("pid=", "mode=", "cause=", "subkind=", "reason=", "topic=", "kind=")
+_SPK_TERMS = ("manifest", "state 文件", "哈希")
+
+
+def _spk_item(kind, detail="", ts=None, chain_ref="abc123",
+              rule_id="", snippet="", topic="", command="", file_path=""):
+    """造一条 Item（口径走产品：标题由 TITLE_OF_TOPIC/KIND 派生）。
+
+    ★★ 0.53.0（T3.2）拆时间炸弹：原来 `ts` 写死 `"2026-10-17T01:22:31+08:00"`。
+      收件箱「要处理」是按 **24 小时窗口**筛的（`bucket_of`），过了这个窗口
+      ⇒ 这些夹具**根本不进页面**。后果两样都坏：
+        ① 正向 W-SPK2「整页不含裸术语」变成**对空页面打分**（假绿）；
+        ② 负控 N-WSPK2 报「关掉 humanize 也找不到」＝夹具失效（2026-10-18 实测）。
+      ⇒ 默认取「一小时前」，永远落在窗口内。要考时间的老化行为请显式传 ts。
+    """
+    if ts is None:
+        ts = (datetime.now().astimezone()
+              - timedelta(hours=1)).isoformat(timespec="seconds")
+    title = M.TITLE_OF_TOPIC.get(topic) or M.TITLE_OF_KIND.get(kind, kind)
+    al = M.Alert.build(ts=ts, kind=kind, title=title, detail=detail,
+                       rule_id=rule_id, snippet=snippet, chain_ref=chain_ref,
+                       reason=detail, topic=topic,
+                       command=command, file_path=file_path)
+    return M.Item(alert=al, state="unread")
+
+
+def _spk_meta(h):
+    m = re.search(r'<p class="m">(.*?)</p>', h, re.S)
+    return m.group(1) if m else ""
+
+
+@check("W-SPK1 告警第二行（meta）不含机器腔键值对（pid=/mode=/cause=）")
+def c_spk_meta_no_kv():
+    cases = [
+        _spk_item("host_shield_revived",
+                  "监理不在（旧 pid=19764），由 hook-parametric 重新拉起（mode=detached）"),
+        _spk_item("host_shield_spawn_failed",
+                  "监理死亡（旧 pid=None）且拉起失败（cause=hook-parametric, "
+                  "mode=self-check-failed: xxx）——门闸无人值守", topic="spawn_failed"),
+        _spk_item("tool_call_blocked", rule_id="DST-04", snippet="schtasks"),
+    ]
+    probs = []
+    for it in cases:
+        meta = _spk_meta(SV._item_html(it, "tok-wspk1"))
+        for k in _SPK_KV:
+            if k in meta:
+                probs.append("%s 的 meta 仍含 %r" % (it.kind, k))
+    if probs:
+        return "；".join(probs[:4])
+    # 反向对照：meta 要**有**人话（pid → 进程号），证明尺子不是恒真
+    if "进程号" not in SV._item_html(cases[0], "tok-wspk1"):
+        return "反向对照失败：pid 没被换成人话「进程号」（尺子无分辨力？）"
+    _note("三类记录 meta 均无键值对；pid 已换「进程号」")
+    return True
+
+
+@check("N-WSPK1 负控：关掉读侧 humanize ⇒ 同一条 W-SPK1 必须报红")
+def n_spk_meta_no_kv():
+    it = _spk_item("host_shield_revived", "监理不在（旧 pid=19764）")
+    if not any(k in it.detail for k in _SPK_KV):
+        return "负控夹具失效：原始 detail 里没有机器腔键值对"
+    orig = M.humanize
+    try:
+        M.humanize = lambda s: ("" if s is None else str(s))
+        meta = _spk_meta(SV._item_html(it, "tok-n1"))
+    finally:
+        M.humanize = orig
+    if not any(k in meta for k in _SPK_KV):
+        return "负控失效：关掉读侧免疫后 meta 仍无机器腔 —— 尺子没接在真闸上"
+    return True
+
+
+@check("W-SPK2 整页渲染不含裸术语（manifest/state 文件/哈希，非代码样位置）")
+def c_spk_render_no_terms():
+    hub = tempfile.mkdtemp(prefix="g0514_spk_")
+    items = [
+        _spk_item("host_shield_dev_drift",
+                  "研发态：代码与登记表不符（改动未重建清单）——这一版还没发出去，"
+                  "不是防线失守；监理照常在岗。", topic="code_drift"),
+        _spk_item("host_shield_tamper",
+                  "state 文件 enabled=False 与审计链最近状态（armed）不一致——以链为准。",
+                  topic="state_drift"),
+        _spk_item("host_shield_breach",
+                  "登记表与 manifest 不符（疑似运行期投毒）——按启动缓存执法：x",
+                  topic="registry_manifest"),
+    ]
+    h = SV.render_page(view="inbox", root=hub, token="tok2", items=items,
+                       posture={"state": "guarding", "can_fix": False})
+    probs = []
+    for term in _SPK_TERMS:
+        for mm in re.finditer(re.escape(term), h):
+            s, e = mm.start(), mm.end()
+            ctx = h[max(0, s - 40):min(len(h), e + 10)]
+            if M._CODEY_RE.search(ctx):
+                continue
+            probs.append("%r 出现在非代码样位置：…%s…" % (term, ctx[-30:]))
+            break
+    if probs:
+        return "；".join(probs[:3])
+    _note("整页渲染无裸术语（代码样位置如 _resign_manifest.py 已豁免）")
+    return True
+
+
+@check("N-WSPK2 负控：关掉 humanize 把裸术语塞进渲染 ⇒ 同一条 W-SPK2 判红")
+def n_spk_render_no_terms():
+    # ★ 0.52.0：负控夹具从「manifest」换成「state 文件」——
+    #   strip_governance v2 起，「manifest」是治理标记，含它的子句在
+    #   record_meta 层就被整段删掉（根本到不了 humanize）⇒ 拿 manifest
+    #   做负控夹具，关掉 humanize 页面上也不会有它，负控恒「夹具失效」
+    #   （假红，方向还错）。「state 文件」不在治理标记表里：strip 不动它，
+    #   只有 humanize 词表会删 ⇒ 关掉 humanize 它就上屏（红），
+    #   恢复就消失（方向对），且证明的是 humanize 层本身接在闸上。
+    bare = "state 文件"
+    orig = M.humanize
+    try:
+        M.humanize = lambda s: ("" if s is None else str(s))
+        hub = tempfile.mkdtemp(prefix="g0514_spkn_")
+        it = _spk_item("host_shield_tamper",
+                       "state 文件 enabled=False 与审计链最近状态（armed）不一致——以链为准。",
+                       topic="state_drift")
+        h_bad = SV.render_page(view="inbox", root=hub, token="tok2", items=[it],
+                               posture={"state": "guarding", "can_fix": False})
+    finally:
+        M.humanize = orig
+    # ★★ 0.53.0（T6.3）：**注入点必须真的过 humanize** —— 原来只断言「整页能找到」，
+    #   而整页有好几条渲染路径（明细行 meta／归因面板 cause／note），其中有的本来就
+    #   不过 humanize。于是"关掉 humanize 就上屏"这句话在页面上**分辨不出是哪条路**
+    #   —— 关掉的是 A 路的闸，红的是 B 路的门。现在改成钉在**过 humanize 的那个字段**
+    #   （`record_meta` 产出的 `<p class="m">`）上：两向都只看这一处。
+    if bare not in _spk_meta(h_bad):
+        return ("负控注入点失效：关掉 humanize 后 %r 没出现在过 humanize 的明细行里"
+                "（说明它从别的渲染路径上屏，这条负控证明的不是 humanize）" % bare)
+    hub2 = tempfile.mkdtemp(prefix="g0514_spkn2_")
+    it2 = _spk_item("host_shield_tamper",
+                    "state 文件 enabled=False 与审计链最近状态（armed）不一致——以链为准。",
+                    topic="state_drift")
+    h_ok = SV.render_page(view="inbox", root=hub2, token="tok2", items=[it2],
+                          posture={"state": "guarding", "can_fix": False})
+    if bare in _spk_meta(h_ok):
+        return "负控方向异常：humanize 恢复后 %r 仍在明细行里" % bare
+    if bare in PC.body(h_ok):
+        return "负控方向异常：humanize 恢复后 %r 仍在页面上" % bare
+    return True
+
+
+@check("W-SPK3 读侧兜底：旧版机器串记录渲染后仍是人话（链 append-only）")
+def c_spk_legacy_humanized():
+    legacy = [
+        ("监理不在（旧 pid=19764），由 hook-parametric 重新拉起（mode=detached）", "pid="),
+        ("state 文件 enabled=False 与审计链最近状态（armed）不一致——以链为准", "state 文件"),
+        ("登记表与 manifest 不符（疑似运行期投毒）", "manifest"),
+    ]
+    probs = []
+    for text, machine in legacy:
+        out = M.visible_text(text)                 # 读侧**唯一**出口
+        if machine in out:
+            probs.append("读侧未免疫 %r" % machine)
+        if out == text:
+            probs.append("读侧对 %r 没做任何变换（兜底没接线？）" % text[:20])
+    if probs:
+        return "；".join(probs[:3])
+    once = M.visible_text(legacy[0][0])
+    if once != M.visible_text(once):
+        return "读侧非幂等：二次过读侧结果变化"
+    _note("三条旧机器串过读侧后均人话化且幂等")
+    return True
+
+
+@check("N-WSPK3 负控：拆掉读侧 humanize ⇒ 同一条 W-SPK3 必须报红")
+def n_spk_legacy_humanized():
+    orig = M.humanize
+    try:
+        M.humanize = lambda s: ("" if s is None else str(s))
+        out = M.visible_text("监理不在（旧 pid=19764），由 hook-parametric 重新拉起")
+    finally:
+        M.humanize = orig
+    if "pid=" not in out:
+        return "负控失效：拆掉 humanize 后 pid= 仍消失（尺子没接在 humanize 上）"
+    return True
+
+
+@check("W-SPK4 归因抠原因：新/旧文案的 spawn_failed 都仍能归因（不静默退化）")
+def c_spk_spawn_failed_both():
+    import remediation as RM
+    new = _spk_item("host_shield_spawn_failed",
+                    "监理已停止（旧进程号 5），重新拉起也没成功（触发方式：钩子机制自动触发，"
+                    "拉起方式：自检没通过：ci/freeze_zones.json 未登记）——现在没人值守。",
+                    topic="spawn_failed")
+    old = _spk_item("host_shield_spawn_failed",
+                    "监理死亡（旧 pid=5）且拉起失败（cause=manual, "
+                    "mode=self-check-failed: ci/freeze_zones.json 未登记）——门闸无人值守",
+                    topic="spawn_failed")
+    probs = []
+    for tag, it in (("新文案", new), ("旧文案", old)):
+        a = RM.attribute(it)
+        if a.get("kind") != "spawn_failed":
+            probs.append("%s 没归到 spawn_failed（实为 %r）" % (tag, a.get("kind")))
+            continue
+        cause = str(a.get("cause") or "")
+        if "失败环节" not in cause:
+            probs.append("%s 的 cause 丢了「失败环节」（抠原因退化）" % tag)
+        if "self-check-failed" not in cause and "自检没通过" not in cause:
+            probs.append("%s 的 cause 里看不到失败原因内容" % tag)
+    if probs:
+        return "；".join(probs[:4])
+    _note("新/旧文案的 spawn_failed 都抠出了失败环节")
+    return True
+
+
+@check("N-WSPK4 负控：抽掉新文案锚点 ⇒ 新记录归因必须丢原因（证明 W-SPK4 有牙）")
+def n_spk_spawn_failed_both():
+    import remediation as RM
+    orig = RM._path_from_detail
+
+    def _no_new(text, patterns):
+        return orig(text, [p for p in patterns if "拉起方式" not in p])
+
+    try:
+        RM._path_from_detail = _no_new
+        it = _spk_item("host_shield_spawn_failed",
+                       "监理已停止（旧进程号 5），重新拉起也没成功（触发方式：钩子机制自动触发，"
+                       "拉起方式：自检没通过：ci/freeze_zones.json 未登记）——现在没人值守。",
+                       topic="spawn_failed")
+        a = RM.attribute(it)
+    finally:
+        RM._path_from_detail = orig
+    if "失败环节" in str(a.get("cause") or ""):
+        return "负控失效：抽掉新锚点后仍抠出了原因 ⇒ W-SPK4 是空转的"
+    return True
+
+
+# ═══════════ W-SPK5…W-SPK11 · 0.51.2 **第二轮**（创始人四张截图后的新契约）═══════════
+# 为什么需要这一族：第一轮的 W-SPK1…4 只禁**词级机器串**（pid=/mode=/manifest），
+# 截图证明「术语替换后新生成的赘肉」完全无感——规则编号两遍、「命中「os.remove」」
+# 不告诉用户删什么、裸 ISO 时间、64 位核对号、研发态修法命令、态势矛盾的按钮。
+# 这一族全部打在**结构与行为**上（渲染产物、可见文本、动作集合、按态势分支），
+# 且每条配**「赘肉注入」型负控**（把坏形状塞回去 ⇒ 必须判红）——
+# 区别于 W-SPK1…4 的回退型负控（只证明「退不回去」，不证明「新坨进不来」）。
+#
+# ★ 机器无关：时区名断言打形状（`<名> MM-DD HH:MM`），不写死「北京时间」——
+#   海外机器上名字本来就不同（创始人：洛杉矶写美西时间，波士顿写美东时间）。
+
+_ISO_TIME_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}")
+_TIME_SHAPE_RE = re.compile(r"(\S.{0,12}?)\s(\d{2}-\d{2} \d{2}:\d{2})$")
+_HEX64_RE = re.compile(r"[0-9a-fA-F]{32,}")
+
+
+def _spk_page(items, posture, filt="all"):
+    """渲染一整页（真实渲染路径，posture 穿线到面板）。"""
+    hub = tempfile.mkdtemp(prefix="g0514_spk_")
+    return SV.render_page(view="inbox", filt=filt, root=hub, token="T",
+                          items=items, posture=posture)
+
+
+@check("W-SPK5 详情行时间：无裸 ISO（T/+08:00），是「时区名 MM-DD HH:MM」形状")
+def c_spk_meta_time_shape():
+    import inbox_model as _M
+    it = _spk_item("host_shield_revived", "监理刚才不在（旧进程号 5）。")
+    meta = _M.record_meta(it)
+    if _ISO_TIME_RE.search(meta) or "+08:00" in meta:
+        return "详情行仍有裸 ISO 时间：%r" % meta
+    m = _TIME_SHAPE_RE.search(meta)
+    if not m:
+        return "详情行时间不是「时区名 MM-DD HH:MM」形状：%r" % meta
+    _note("时间形状：%s" % m.group(0))
+    return True
+
+
+@check("N-WSPK5 负控（赘肉注入）：ts_label 变异回裸 ISO ⇒ W-SPK5 必须判红")
+def n_spk_meta_time_shape():
+    import inbox_model as _M
+    orig = _M.ts_label
+    try:
+        _M.ts_label = lambda s: ("" if s is None else str(s))
+        r = c_spk_meta_time_shape()
+        if r is True or r is None:
+            return "负控失效：时间退回裸 ISO 后 W-SPK5 仍判绿（尺子没接在闸上）"
+        if "裸 ISO" in str(r):
+            return True
+        return "负控方向不对：判红了但原因不是裸 ISO（%s）" % r
+    finally:
+        _M.ts_label = orig
+
+
+@check("W-SPK6 详情行无「核对号」与长十六进制串（链哈希不再上屏）")
+def c_spk_meta_no_chain():
+    import inbox_model as _M
+    it = _spk_item("tool_call_blocked", "规则 DST-01 · 命中「os.remove」",
+                   rule_id="DST-01", snippet="os.remove", chain_ref="a" * 64)
+    meta = _M.record_meta(it)
+    if "核对号" in meta:
+        return "详情行仍有「核对号」：%r" % meta
+    if _HEX64_RE.search(meta):
+        return "详情行仍有长十六进制串（链哈希）：%r" % meta
+    return True
+
+
+@check("N-WSPK6 负控（赘肉注入）：record_meta 变异成补回核对号 ⇒ W-SPK6 必须判红")
+def n_spk_meta_no_chain():
+    import inbox_model as _M
+    orig = _M.record_meta
+
+    def _fat(it, with_time=True):
+        return orig(it, with_time=with_time) + " · 核对号 " + "b" * 64
+
+    try:
+        _M.record_meta = _fat
+        r = c_spk_meta_no_chain()
+        if r is True or r is None:
+            return "负控失效：补回核对号后 W-SPK6 仍判绿（尺子没分辨力）"
+        if "核对号" in str(r) or "十六进制" in str(r):
+            return True
+        return "负控方向不对：判红了但原因不是核对号（%s）" % r
+    finally:
+        _M.record_meta = orig
+
+
+@check("W-SPK7 详情行：规则编号只出现一次；无「命中「」」字样")
+def c_spk_meta_rule_once():
+    import inbox_model as _M
+    it = _spk_item("tool_call_blocked", "规则 DST-01 · 命中「os.remove」",
+                   rule_id="DST-01", snippet="os.remove")
+    meta = _M.record_meta(it)
+    n = meta.count("DST-01")
+    if n != 1:
+        return "规则编号在详情行出现 %d 次（应恰 1 次）：%r" % (n, meta)
+    if "命中" in meta:
+        return "详情行仍有「命中」字样：%r" % meta
+    return True
+
+
+@check("N-WSPK7 负控（赘肉注入）：record_meta 变异成规则写两遍 ⇒ W-SPK7 必须判红")
+def n_spk_meta_rule_once():
+    import inbox_model as _M
+    orig = _M.record_meta
+
+    def _dup(it, with_time=True):
+        m = orig(it, with_time=with_time)
+        return m.replace("规则 DST-01", "规则 DST-01（哪条防护规则拦下它的）· 规则 DST-01", 1)
+
+    try:
+        _M.record_meta = _dup
+        r = c_spk_meta_rule_once()
+        if r is True or r is None:
+            return "负控失效：规则写两遍后 W-SPK7 仍判绿（尺子没分辨力）"
+        if "2 次" in str(r) or "1 次" in str(r):
+            return True
+        return "负控方向不对：判红了但原因不是重复（%s）" % r
+    finally:
+        _M.record_meta = orig
+
+
+@check("W-SPK8 详情行 ≤90 字（行级预算：单项合规、总量也会失控）")
+def c_spk_meta_budget():
+    import inbox_model as _M
+    # ★ 0.52.0：夹具扩到**真实记录形状**。旧夹具只有一种（三目标 rm）；
+    #   真实 spawn_failed/tamper 记录的 detail 带嵌套括号＋治理清单，
+    #   消毒后必须仍够短——只测合成形状 = 机制对真记录无覆盖。
+    cases = [
+        _spk_item("tool_call_blocked", "规则 DST-01 · 命中「os.remove」",
+                  rule_id="DST-01", snippet="os.remove",
+                  command="rm -rf 'C:/a b/c.txt' 'C:/d/e.json' 'C:/f/g.md'"),
+        _spk_item("host_shield_spawn_failed",
+                  "监理已停止（旧进程号 33416），重新拉起也没成功（触发方式：钩子机制自动触发，"
+                  "拉起方式：自检没通过：host_shield.py 与出厂登记不符（运行代码可能被改）；"
+                  "hooks/pre_tool_use.py 与出厂登记不符（告警链路文件可能被改）；"
+                  "tools/enforce_probe.py 与出厂登记）——现在没人值守。",
+                  topic="spawn_failed"),
+        _spk_item("host_shield_tamper",
+                  "监理启动时的自检没通过：host_shield.py 与出厂登记不符（运行代码可能被改）；"
+                  "hooks/pre_tool_use.py 与出厂登记不符（告警链路文件可能被改）；"
+                  "tools/enforce_probe.py 与出厂登记不符（告警链路文件可能被改）",
+                  topic="code_drift"),
+        # ★ 0.53.0：**真记录形状**——12:14 那条在页面上拼到 94 字（三目标＋
+        #   等文件＋规则大白话＋时间＋规则编号）。旧夹具只有「三目标 rm」一种，
+        #   目标数恰好顶格，从未撞到行预算 ⇒ 现网违规而判据全绿。
+        _spk_item("tool_call_blocked", "规则 DST-01 · 命中「rm」",
+                  rule_id="DST-01", snippet="rm",
+                  command="rm -rf _dbg_logo.txt inbox_store.py inbox_server.py "
+                          "_dbg_probe.json"),
+    ]
+    worst = 0
+    for it in cases:
+        meta = _M.record_meta(it)
+        worst = max(worst, len(meta))
+        if len(meta) > _M._META_MAX:
+            return ("详情行 %d 字，超 %d 字预算（%s）：%r"
+                    % (len(meta), _M._META_MAX, it.kind, meta))
+    _note("最长情形 %d 字（%d 个夹具，含真实记录形状）" % (worst, len(cases)))
+    return True
+
+
+@check("N-WSPK8 负控（赘肉注入）：record_meta 变异成 200 字 ⇒ W-SPK8 必须判红")
+def n_spk_meta_budget():
+    import inbox_model as _M
+    orig = _M.record_meta
+
+    def _fat(it, with_time=True):
+        return orig(it, with_time=with_time) + " · " + "啰" * 130
+
+    try:
+        _M.record_meta = _fat
+        r = c_spk_meta_budget()
+        if r is True or r is None:
+            return "负控失效：详情行涨到 200 字后 W-SPK8 仍判绿（预算尺子空转）"
+        if "预算" in str(r):
+            return True
+        return "负控方向不对：判红了但原因不是超预算（%s）" % r
+    finally:
+        _M.record_meta = orig
+
+
+#: 目标抽取的五类真实形状（全部取自 2026-10-17 本机链上真实记录，不是编的）。
+#: 每条给「必须出现」与「绝不许出现」两侧，缺任一侧都算不上有牙。
+_SPK_TARGET_CASES = (
+    ("grep 正则片段",
+     r'cd "D:\psl\poc\antinel-security" && grep -n "def _item_html\|def _group_html'
+     r'\|def _badge_html\|attribute(" inbox_server.py',
+     "", r"\|"),
+    ("python -c 的代码体",
+     'PYTHONPATH= TMP=/x "C:/Users/大马/.workbuddy/binaries/python/versions/3.13.12/'
+     'python.exe" -E -X utf8 -c "\nimport sys\norig = SV._item_html\n'
+     'lambda it: (\'<div class=\\"seg cost\\">④</div>\')"',
+     "", "seg cost"),
+    ("cd 的目录（上下文不是目标）",
+     'cd "D:\\psl\\poc\\antinel-security" && ls',
+     "", "antinel-security"),
+    ("持久化：深层长路径只亮文件名",
+     'reg add HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v x /d '
+     '"C:/Users/大马/.workbuddy/config/plugins/startup/Startup"',
+     "Startup", "C:/Users"),
+    ("对照·删除三目标（不许改坏）",
+     "rm -rf 'C:/a b/c.txt' 'C:/d/e.json' 'C:/f/g.md'",
+     "c.txt、e.json、g.md", "C:/a b"),
+    ("对照·裸文件名",
+     "rm build_package.py",
+     "build_package.py", ""),
+    ("对照·URL 与版本号",
+     "curl https://pypi.org/project/antinel/ && pip install antinel==0.52.0",
+     "", "pypi"),
+)
+
+
+@check("W-SPK13 详情行「目标」：只认会动文件的段（删除/写入/持久化），"
+       "正则片段·cd 上下文·转义残尾不许当文件，深层路径只亮文件名")
+def c_spk_targets_plausible():
+    import inbox_model as _M
+    probs = []
+    for label, cmd, must, forbid in _SPK_TARGET_CASES:
+        got = _M._targets_phrase(cmd)
+        if must and must not in got:
+            probs.append("%s：应含 %r，实得 %r" % (label, must, got))
+        if forbid and forbid in got:
+            probs.append("%s：不该出现 %r，实得 %r" % (label, forbid, got))
+        if len(got) > 60:
+            probs.append("%s：目标片段 %d 字，超 60 字预算（%r）"
+                         % (label, len(got), got))
+    if probs:
+        return "；".join(probs[:3]) + ("（共 %d 处）" % len(probs) if len(probs) > 3 else "")
+    # 对照腿再走一遍整行：目标片段确实落在详情行里（不是函数对、渲染没接上）
+    it = _spk_item("tool_call_blocked", "规则 DST-01 · 命中「rm」",
+                   rule_id="DST-01", snippet="rm",
+                   command="rm build_package.py")
+    meta = _M.record_meta(it)
+    if "目标 build_package.py" not in meta:
+        return "渲染层没接上：详情行缺「目标 build_package.py」（%r）" % meta
+    _note("%d 类真实形状（含 3 条对照）" % len(_SPK_TARGET_CASES))
+    return True
+
+
+@check("N-WSPK13 负控（退回旧抽取）：恢复「抓引号里所有像路径的串」⇒ W-SPK13 必须判红")
+def n_spk_targets_plausible():
+    import inbox_model as _M
+    orig = _M._file_targets
+
+    def _old(text):
+        """0.52.0 之前的实现：三档全抓，无合法性、无角色、不缩 basename。"""
+        if not text:
+            return [], False
+        t = str(text)
+        out, seen = [], set()
+
+        def _add(tok):
+            tok = (tok or "").strip().strip("'\"").rstrip(",;)")
+            if not tok or len(tok) > 120 or tok in seen:
+                return
+            if tok.startswith("//") or "://" in tok:
+                return
+            if ("/" in tok or "\\" in tok) or _M._ext_ok(tok):
+                seen.add(tok)
+                out.append(tok)
+
+        import re as _re
+        for m in _re.findall(r"['\"]([^'\"]{1,200})['\"]", t):
+            _add(m)
+        for m in _re.findall(r"\b([A-Za-z0-9_\-]+\.[A-Za-z0-9]{1,6})\b", t):
+            _add(m)
+        if not out:
+            for m in _re.findall(r"(?:[A-Za-z]:|\.{1,2})?[\\/][^\s'\"|;&)]+", t):
+                _add(m)
+        return (out[:_M._MAX_TARGETS], len(out) > _M._MAX_TARGETS)
+
+    try:
+        _M._file_targets = _old
+        r = c_spk_targets_plausible()
+        if r is True or r is None:
+            return "负控失效：退回旧抽取后 W-SPK13 仍判绿（尺子没分辨力）"
+        return True
+    finally:
+        _M._file_targets = orig
+
+
+@check("W-SPK9 整页渲染：无研发态话术（保护名单/登记簿/研发树/研发态治理）、"
+       "无 python 命令、无 --flag")
+def c_spk_render_no_gov():
+    import inbox_model as _M
+    gov_detail = ("监理已停止（旧进程号 5），重新拉起也没成功（触发方式：钩子机制自动触发，"
+                  "拉起方式：自检没通过：ci/freeze_zones.json 在研发树专属保护名单里，"
+                  "却没登记进 manifest（研发态治理登记簿可被改而查不出；修法：python "
+                  "_tools_034/_resign_manifest.py --adopt-dev））——现在没人值守。")
+    # ★ 0.52.0：**真实记录形状**两例（10-17 实测漏网的两型）：
+    #   ① 嵌套括号：治理细节整段在外层括号、内层是无标记小括号
+    #      （旧算法只删最内层 ⇒ 外层永远不被检查）；
+    #   ② 裸标记：治理清单在括号外（「：<文件> 与出厂登记不符；…」）。
+    real_nested = ("监理已停止（旧进程号 33416），重新拉起也没成功（触发方式：钩子机制自动触发，"
+                   "拉起方式：自检没通过：host_shield.py 与出厂登记不符（运行代码可能被改）；"
+                   "hooks/pre_tool_use.py 与出厂登记不符（告警链路文件可能被改）；"
+                   "tools/enforce_probe.py 与出厂登记）——现在没人值守。")
+    real_bare = ("监理启动时的自检没通过：host_shield.py 与出厂登记不符（运行代码可能被改）；"
+                 "hooks/pre_tool_use.py 与出厂登记不符（告警链路文件可能被改）；"
+                 "tools/enforce_probe.py 与出厂登记不符（告警链路文件可能被改）")
+    items = [
+        _spk_item("host_shield_spawn_failed", gov_detail, topic="spawn_failed"),
+        _spk_item("host_shield_spawn_failed", real_nested, topic="spawn_failed"),
+        _spk_item("host_shield_tamper", real_bare, topic="code_drift"),
+    ]
+    bad = []
+    for posture in ({"state": "guarding", "can_fix": False},
+                    {"state": "warn", "can_fix": False}):
+        h = _spk_page(items, posture)
+        # ★ S48（C2）：文案断言必须显式选正文层 —— 裸渲染变量会把
+        #   <style>/HTML 注释里的复述一并算进来（U-16 同族事故）。
+        b = PC.body(h)
+        for w in ("保护名单", "登记簿", "研发树", "研发态治理", "--adopt-dev",
+                  "python _tools", "_resign_manifest", "出厂登记",
+                  "host_shield.py", "enforce_probe.py", "hooks/pre_tool_use.py"):
+            if w in b:
+                bad.append("态势 %s 仍含研发态话术 %r" % (posture["state"], w))
+        if re.search(r"python\s+\S+\.py", b):
+            bad.append("态势 %s 仍含 python 命令形状" % posture["state"])
+    if bad:
+        return "；".join(bad[:4])
+    _note("研发态治理话术在两种态势下都不上屏（含真实嵌套/裸标记两型）")
+    return True
+
+
+@check("N-WSPK9 负控（赘肉注入）：strip_governance 变异成恒等 ⇒ W-SPK9 必须判红")
+def n_spk_render_no_gov():
+    import inbox_model as _M
+    orig = _M.strip_governance
+    try:
+        _M.strip_governance = lambda t: ("" if t is None else str(t))
+        r = c_spk_render_no_gov()
+        if r is True or r is None:
+            return "负控失效：消毒函数失效后 W-SPK9 仍判绿（尺子没接在闸上）"
+        if "研发态" in str(r) or "python" in str(r):
+            return True
+        return "负控方向不对：判红了但原因不是治理话术（%s）" % r
+    finally:
+        _M.strip_governance = orig
+
+
+@check("W-SPK10 「现在重新拉起」按钮按态势渲染：值守中不出现，非值守才出现")
+def c_spk_retry_posture_gate():
+    import remediation as RM
+    it = _spk_item("host_shield_spawn_failed",
+                   "监理已停止（旧进程号 5），重新拉起也没成功。",
+                   topic="spawn_failed")
+    h_guard = _spk_page([it], {"state": "guarding", "can_fix": False})
+    h_fail = _spk_page([it], {"state": "warn", "can_fix": False})
+    # ★ 断言打在**按钮文案**上（按态势门控的是按钮，不是动作标题）：
+    #   标题「重新拉起监理」讲选项是什么，按钮「现在重新拉起」是点下去的
+    #   那一下（0.52.0 去重，与 0.37.2 accept 的同型教训一致）。
+    # ★ S48：中文文案断言必须显式选层走 `PC.body(...)`（不许拿整页渲染原文当正文）。
+    if "现在重新拉起" in PC.body(h_guard):
+        return "值守中仍渲染「现在重新拉起」按钮（看得到页面＝监理在跑，按钮逻辑矛盾）"
+    if "现在重新拉起" not in PC.body(h_fail):
+        return "非值守时「现在重新拉起」按钮不见了（该给动作时不给）"
+    # 门控函数真的被调（不是碰巧两种态势都不渲染）
+    if not RM._can_revive({"state": "guarding"}) and RM._can_revive({"state": "warn"}):
+        _note("值守中不给、非值守才给；_can_revive 两向都对")
+    return True
+
+
+@check("N-WSPK10 负控（赘肉注入）：_can_revive 变异成恒真 ⇒ W-SPK10 必须判红")
+def n_spk_retry_posture_gate():
+    import remediation as RM
+    orig = RM._can_revive
+    try:
+        RM._can_revive = lambda posture: True
+        r = c_spk_retry_posture_gate()
+        if r is True or r is None:
+            return "负控失效：门控恒真后 W-SPK10 仍判绿（尺子没分辨力）"
+        if "重新拉起" in str(r):
+            return True
+        return "负控方向不对：判红了但原因不是按钮（%s）" % r
+    finally:
+        RM._can_revive = orig
+
+
+@check("W-SPK11 R0 面板无 <code class=\"cmd\"> 命令块（研发/运维命令不上屏）")
+def c_spk_panel_no_cmd():
+    import remediation as RM
+    it = _spk_item("host_shield_spawn_failed",
+                   "监理已停止（旧进程号 5），重新拉起也没成功。",
+                   topic="spawn_failed")
+    for posture in ({"state": "guarding", "can_fix": False},
+                    {"state": "warn", "can_fix": False}):
+        h = _spk_page([it], posture)
+        if '<code class="cmd"' in h:
+            return "态势 %s 的面板仍渲染 <code class=\"cmd\"> 命令块" % posture["state"]
+    return True
+
+
+@check("N-WSPK11 负控（赘肉注入）：把 cmd 代码块加回面板渲染 ⇒ W-SPK11 必须判红")
+def n_spk_panel_no_cmd():
+    orig = SV._rem_html
+
+    def _with_cmd(it, token, posture=None):
+        h = orig(it, token, posture)
+        return h.replace("</div></details>",
+                         '<code class="cmd">antinel host-shield enable</code>'
+                         "</div></details>", 1)
+
+    try:
+        SV._rem_html = _with_cmd
+        r = c_spk_panel_no_cmd()
+        if r is True or r is None:
+            return "负控失效：命令块加回面板后 W-SPK11 仍判绿（尺子没分辨力）"
+        if "cmd" in str(r):
+            return True
+        return "负控方向不对：判红了但原因不是命令块（%s）" % r
+    finally:
+        SV._rem_html = orig
+
+
+@check("W-SPK12 B 类面板亮出落点路径（当前写侧形态：路径在记录结尾冒号后）")
+def c_spk_zone_path_on_panel():
+    """★ 裁定 #3「亮文件名」的 zone_locked 对应物（0.52.0 实测缺口）。
+
+    当前写侧（`host_shield.py:3665`，0.45.0 H-7 起）的失败记录把路径放在
+    文案结尾「…对抗门闸：<盘符路径>」，**没有**「人工介入」锚点 ⇒ 旧提取
+    模式全落空，面板 ① 段显示「(落点路径没在记录里)」——路径明明在记录里。
+    0.52.0 补了「全角冒号＋盘符＋分隔符＋行尾」的兜底模式；本条判据
+    守在**渲染产物**上（① 段可见文本），提取与渲染两头都盖住。
+    """
+    it = _spk_item("host_shield_zone_locked",
+                   "安全区【上锁没生效】——本目录的访问控制没能限制写入"
+                   "（可核：icacls 该目录）；注意：「不等于」有进程在对抗门闸："
+                   "D:\\ws\\zone_vault",
+                   topic="zone_lock_failed")
+    h = SV._item_html(it, "tok-wspk12")
+    m = re.search(r'<div class="seg root">(.*?)</div>', h, re.S)
+    if not m:
+        return "面板没有 ① 段（发生了什么）——四段制骨架破了"
+    root_txt = re.sub(r"<[^>]+>", "", m.group(1))
+    if "(落点路径没在记录里)" in root_txt:
+        return "① 段仍显示占位串「(落点路径没在记录里)」——路径提取失效"
+    if "D:\\ws\\zone_vault" not in root_txt:
+        return "① 段没有落点路径（裁定 #3：亮文件名）"
+    _note("落点路径已上屏：D:\\ws\\zone_vault")
+    return True
+
+
+@check("N-WSPK12 负控（赘肉注入）：路径提取失效 ⇒ W-SPK12 必须判红")
+def n_spk_zone_path_on_panel():
+    import remediation as RM
+    orig = RM._path_from_detail
+    try:
+        RM._path_from_detail = lambda d, pats: ""
+        r = c_spk_zone_path_on_panel()
+        if r is True or r is None:
+            return "负控失效：路径提取失效后 W-SPK12 仍判绿（尺子没分辨力）"
+        if "路径" in str(r):
+            return True
+        return "负控方向不对：判红了但原因不是路径（%s）" % r
+    finally:
+        RM._path_from_detail = orig
 
 
 def main():

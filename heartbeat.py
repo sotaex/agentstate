@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: Apache-2.0
 
-"""值守台 · 匿名计数心跳（第 8 阶段 · 方案 B）。**默认关。**
+"""Antinel 监理 · 匿名计数心跳（第 8 阶段 · 方案 B）。**默认关。**
 
 ★★ 三条不许松的纪律：
   1. **默认关**（`config["heartbeat"]` 为 False）—— 关闭时**一个网络请求都不发**；

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "antinel"
-version = "0.51.2"
+version = "0.53.0"
 description = "Local-first audit chain and ledger for AI coding agents: every action recorded, every record verifiable."
 readme = "README.md"
 license = {file = "LICENSE"}
@@ -55,7 +55,7 @@ antinel = "antinel:main"
 py-modules = ["antinel", "audit_chain", "session_dna", "strings",
               "transcript_reader", "host_shield", "hub", "antinel_mcp", "egress",
               "ui_server",
-              # ★ 0.35.0 值守台：13 个新模块（与 build() 里的 root_mod 复制清单逐字一致）
+              # ★ 0.35.0 Antinel 监理：13 个新模块（与 build() 里的 root_mod 复制清单逐字一致）
               "inbox_model", "inbox_store", "inbox_report", "inbox_server",
               "inbox_tray", "inbox_notify", "inbox_emphasis", "inbox_fallback",
               "inbox_daemon", "inbox_config", "inbox_cli",
@@ -76,12 +76,15 @@ packages = ["hooks", "scripts", "tools", "rules", "psl", "assets", "challenge"]
 rules = ["*.json"]
 psl = ["*.json", "*.md"]
 hooks = ["*.py"]
-# ★ 0.35.0 值守台静态资源。实测（_p9_wheeltest 构建中间产物
-#   `build/bdist.*/wheel/assets/`）：**这三条 glob 本身就够**，11 个文件全进 wheel。
+# ★ 0.35.0 Antinel 监理静态资源。实测（_p9_wheeltest 构建中间产物
+#   `build/bdist.*/wheel/assets/`）：**这几条 glob 本身就够**，assets 下 28 个静态
+#   文件全进 wheel（icons 20 + logo 5 mp4 + logo.svg + antinel.ico + sounds 1）。
+#   ★ 0.52.0：`logo/*.ico` 是品牌图标（桌面/自启/AUMID 快捷方式共用），生成器
+#   `tools/mk_logo_ico.py`（构建期从 logo.svg 栅格化，与 mk_icons 同 Convention）。
 #   `_manifest_for` **不会**再为 assets 生成 `recursive-include` —— 它只补
 #   package-data 覆盖不到的文件（如 `rules/hosts/*.json`）。非 package 目录
 #   （docs/ references/）只进 sdist，wheel 里 0 个（实测）。
-assets = ["icons/*.ico", "logo/*.mp4", "logo/*.svg", "sounds/*.wav"]
+assets = ["icons/*.ico", "logo/*.mp4", "logo/*.svg", "logo/*.ico", "sounds/*.wav"]
 # ★ 0.35.2：`challenge/` 公开挑战件 —— **必须进 wheel**。
 #   为什么：`antinel verify` 在链干净时会告诉用户"你可以自己复算"，并给出
 #   `<包目录>/challenge/verify.py` 这条命令。而此前 `challenge/` **只进 sdist**

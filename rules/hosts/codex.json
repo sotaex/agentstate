@@ -1,5 +1,6 @@
 {
  "host": "codex",
+ "name": "Codex",
  "vendor": "OpenAI",
  "roots": [
   "~/.codex"

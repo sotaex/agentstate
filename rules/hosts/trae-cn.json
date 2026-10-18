@@ -1,5 +1,6 @@
 {
  "host": "trae-cn",
+ "name": "Trae（国内版）",
  "vendor": "ByteDance",
  "roots": [
   "~/.trae-cn",

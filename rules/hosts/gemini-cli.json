@@ -1,5 +1,6 @@
 {
  "host": "gemini-cli",
+ "name": "Gemini CLI",
  "vendor": "Google",
  "roots": [
   "~/.gemini"

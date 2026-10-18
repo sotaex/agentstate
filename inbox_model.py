@@ -1,11 +1,18 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: Apache-2.0
 
-"""值守台 · 数据模型与状态聚合（唯一真源）。
+"""Antinel 监理 · 数据模型与状态聚合（唯一真源）。
 
-★ 本模块只做**纯逻辑**：不读盘、不联网、不 import 产品其它模块。
+★ 本模块只做**纯逻辑**：不写盘、不联网、不 import 产品其它模块。
   页面 / 托盘 / 通知 / 日报 / 导出，全部 import 本模块取口径 ——
   **判据不许二次实现**（本仓铁律）。
+
+★ 两处**只读**例外（0.51.2 第二轮「人话化」加入，均有失败回落）：
+  ① `rules/default.json`（随包发布的规则大白话表）—— 读一次、模块级缓存；
+  ② 本机时区注册表（`TimeZoneKeyName`）—— 失败回落偏移名，再回落「当地时间」。
+  两处都只影响**显示文案**，不影响任何判定口径 ⇒ 不破坏「纯逻辑」的本意
+  （可测、无副作用）。判据断言一律打在**形状**上（有时区名、MM-DD HH:MM、
+  无裸 ISO），不写死「北京时间」—— 海外机器上名字本来就不同。
 
 四态（创始人 2026-10-05 拍板）::
 
@@ -27,7 +34,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # ------------------------------------------------------------------ 四态 ----
 STATES = ("unread", "read", "done", "ignored")
@@ -48,7 +55,7 @@ _TRANSITIONS = {
 
 
 class InboxError(Exception):
-    """值守台数据层的统一异常基类。"""
+    """Antinel 监理数据层的统一异常基类。"""
 
 
 class UnknownKind(InboxError):
@@ -101,6 +108,13 @@ LEVEL_OF_KIND = {
     #   链上的 type 不叫这个名字，是投影时归一化出来的（见 inbox_store.project_record）。
     #   它不在 host_shield._ALERT_KINDS 里，但同样是"拦截"级事实。
     "tool_call_blocked": "L2",
+    # ★★ 0.53.0（T1.3）：首检提醒 —— 装好 ≥24h 仍没体检过 ⇒ 收件箱 1 条。
+    #   **归 L1 不归 L2**：L2 在产品机制里＝`inbox_bubble.URGENT_LEVELS`＝
+    #   置顶不自动消失的紧急提醒窗（0514 判据钉死），"还没体检"是温和提醒，
+    #   弹紧急窗与设计 §29 意图冲突；L1「注意：知情即可」语义准确且走 toast。
+    #   ★ 施工单字面写 L2，这条决策已记入施工单 v1.5 待创始人复核；
+    #     若裁定改回 L2，改本行一处，TITLE/判据全部同源跟随。
+    "exam_reminder": "L1",
 }
 
 # 人类可读标题（大白话，不许写成内部术语）。
@@ -122,9 +136,13 @@ TITLE_OF_KIND = {
     "host_shield_breach": "失守：防护有缺口（有东西没被挡住）",
     "host_shield_revived": "注意：防护已恢复",
     "host_shield_changed": "注意：防护设置被改动",
-    "host_shield_dev_drift": "注意：研发迭代中（代码与登记表不符）",
+    "host_shield_dev_drift": "注意：研发迭代中（代码与登记的那份不符）",
     "credits_low": "缺粮：积分余额偏低",
     "tool_call_blocked": "拦截：危险操作被挡下",
+    # ★ 0.53.0（T1.3）：首检提醒标题。S1/S3 两种事由的**具体文案**走
+    #   host_shield.record 的 reason（subkind=never/overdue 区分），
+    #   这里只给默认标题（TITLE_OF_TOPIC 未登记 subkind 时的回落）。
+    "exam_reminder": "提醒：还没做过体检",
 }
 
 #: ★ 0.35.3：按**事由**（链记录 `subkind`）给更准的标题；没有则回落到 `TITLE_OF_KIND`。
@@ -139,7 +157,7 @@ TITLE_OF_TOPIC = {
     #   `enabled` / `state` 都是「安全状态字段在运行期漂移、哨兵已回写恢复」⇒ **另一件事**（state_drift）。
     #   改前：前者被拆成两行、后者三因挤一行（归并键 `(kind, topic, level)`，后三者 topic 为空）。
     #   ★ 旧 `self_check` 词条**保留**：链 append-only，历史记录（实测 47 条）仍是那个 subkind。
-    "code_drift": "失守：防护文件被改动（代码与登记表不符）",
+    "code_drift": "失守：防护文件被改动（代码与登记的那份不符）",
     "state_drift": "失守：防护文件被改动（状态被改，已自动恢复）",
     "self_check": "失守：防护文件被改动（要你核对/重装）",
     # ★★ 0.40.0（A8）：`zone_locked` 兼表成败 —— **成功**那条不能借用 kind 标题
@@ -147,6 +165,114 @@ TITLE_OF_TOPIC = {
     "zone_ok": "注意：安全区已上锁（区内防篡改）",
     "zone_lock_failed": "失守：安全区加锁失败",
 }
+
+#: 首检提醒判定常量（设计 v1.11 §29.1；判定本体见 `exam_state`）。
+EXAM_GRACE_HOURS = 24         #: 装好不满一天不催 —— 装完给时间，不追杀
+EXAM_STALE_DAYS = 30          #: 体检过但超过 30 天 ⇒ 再提醒一次
+
+
+def exam_state(hub_dir=None, now=None):
+    """首检提醒判定：**设计 v1.11 §29.1 四态状态机的唯一实现**（放本模块，不放页面）。
+
+    返回 `(state, info)`：
+
+    · `S0` 三链全无且装好 < 24h —— **不出**（装完给时间）
+    · `S1` 三链全无且装好 ≥ 24h —— **出 1 条**（去重靠链，见 `host_shield.exam_reminder_check`）
+    · `S2` 三链任一命中且 ≤ 30 天 —— **不出**
+    · `S3` 三链任一命中但 > 30 天 —— **出 1 条**（同 S1 去重）
+
+    三链（设计 §28.5，按优先级；都是**本机留下过的痕迹**）：
+      ① `<hub>/health/audit-*.json` —— 体检存档（控制台/CLI/网站桥一都落这里）
+      ② `<hub>/findings.json`（`host-scan --arm`）／`<hub>/survey.json`（`--survey`）
+      ③ 用户粘进来的回执（桥二）—— **无文件形态，本函数不判**：它的场景是
+         「在网站上自查过」，本机无痕迹；本机跑过必有 ①②。缺 ③ 的方向是
+         **可能多催一次**（另一端「催了但人家查过」由 ①② 挡住）——
+         误催有「忽略」出口，漏催没有，方向取保守是对的。
+
+    「装好时间」锚＝hub 注册表里**最早**的 `registered_at`（安装即入册，
+      `scripts/install.py` 第 6 步经 `hub.register` 写入）—— 安装事实，
+      不是「安装时间早于某时刻」式推断（§28.5 禁的是那个）。
+      取不到 ⇒ 判 `S0`：无法判定安装时长就不催（催用户是动作，方向取保守）。
+
+    `now` 可注入（判据/测试用；缺省＝此刻）。
+    """
+    import os
+    from datetime import datetime
+    if now is None:
+        now = datetime.now().astimezone()
+    hub = hub_dir
+    if hub is None:
+        try:
+            import host_shield as _hs
+            hub = _hs._hub_dir()
+        except Exception:                                   # noqa: BLE001
+            hub = ""
+    info = {"installed_at": "", "last_exam_at": "", "days_installed": None,
+            "days_since_exam": None}
+    if not hub:
+        return "S0", info
+
+    # ── 三链：任一命中 ⇒ 体检过；取链①最新一份的时间作「上次体检」 ──
+    try:
+        import host_shield as _hs
+        reports = _hs.health_reports()
+    except Exception:                                       # noqa: BLE001
+        reports = []
+    examined = bool(reports)
+    if examined:
+        # ★ 文件名格式 `audit-%Y%m%d-%H%M%S-%03d.json`（定宽后缀，见
+        #   `host_shield.save_health_report`）⇒ 剥前缀/后缀会留下 `-000`，
+        #   必须用正则只取时间两段（第一版直接切片 ⇒ strptime 失败 ⇒
+        #   S3「超 30 天」永远判不出来，被探针当场抓到）。
+        _m = re.match(r"audit-(\d{8}-\d{6})", os.path.basename(reports[-1]))
+        if _m:
+            info["last_exam_at"] = _m.group(1)
+    if not examined:
+        for rel in ("findings.json", "survey.json"):
+            if os.path.isfile(os.path.join(hub, rel)):
+                examined = True
+                break
+
+    # ── 装好时间：注册表里最早的 registered_at ──
+    try:
+        import hub as _hub
+        reg = _hub.load_registry()
+        stamps = [str(p.get("registered_at") or "") for p in (reg.get("projects") or [])]
+        stamps = [s for s in stamps if s]
+        if stamps:
+            first = min(stamps)
+            info["installed_at"] = first
+            try:
+                t0 = datetime.fromisoformat(first)
+                if t0.tzinfo is None:
+                    t0 = t0.astimezone()
+                info["days_installed"] = (now - t0).total_seconds() / 3600.0
+            except ValueError:
+                pass
+    except Exception:                                       # noqa: BLE001
+        pass
+
+    if info["days_installed"] is None:
+        return "S0", info            # 判不出装了多久 ⇒ 不催（保守方向）
+
+    if examined:
+        # 体检过：算「距上次体检」——链①有时间；链②（findings/survey）没有
+        # 可靠时间字段，只在 S2 边界内用（不催），不算天数。
+        if info["last_exam_at"]:
+            try:
+                t1 = datetime.strptime(info["last_exam_at"], "%Y%m%d-%H%M%S")
+                t1 = t1.replace(tzinfo=now.tzinfo)
+                info["days_since_exam"] = (now - t1).total_seconds() / 86400.0
+            except ValueError:
+                pass
+        if info["days_since_exam"] is not None and info["days_since_exam"] > EXAM_STALE_DAYS:
+            return "S3", info
+        return "S2", info
+
+    if info["days_installed"] >= EXAM_GRACE_HOURS:
+        return "S1", info
+    return "S0", info
+
 
 # 忽略时必须写备注的级别（最高级："防线失效"不能一句话就抹掉）。
 NOTE_REQUIRED_TO_IGNORE = ("R0",)
@@ -442,13 +568,218 @@ _MD_STARS = re.compile(r"\*+")
 
 
 def visible_text(s):
-    """**用户可见文本**的出口：去掉 markdown 星号（★ 唯一实现，纯文本版）。
+    """**用户可见文本**的出口：去掉 markdown 星号 ＋ 机器腔人话化
+    （★ 唯一实现，纯文本版）。
 
     ★ 只改写侧文案不够（旧记录改不了）⇒ 读侧免疫，与 0.41.0 修 `is_denied()`
       同一条思路（换 oracle，而不是把某一次的结果改对）。
     ★ 口径：`**X**` → `X`（删掉加粗标记，语义不变）。
+    ★★ 0.51.2（创始人 2026-10-17「都在说鸟语」）：在去星号之后，
+      **再过一遍 `humanize()`** —— 这是读侧对**机器腔**的免疫：
+      审计链 append-only，用户机上躺着各旧版本写下的 `pid=` / `mode=` /
+      `manifest` 等机器串，光改写侧治不了它们的旧记录。
+      ⇒ 收进这里，网页（`inbox_server._vis`）与命令行（`inbox_cli`）共用一份。
     """
-    return _MD_STARS.sub("", "" if s is None else str(s))
+    return humanize(_MD_STARS.sub("", "" if s is None else str(s)))
+
+
+# --------------------------------------------------------------------------
+# ★★ 0.51.2：机器腔 → 人话（**唯一真源**）
+#
+# 创始人 2026-10-17 三张截图原话：「都在说鸟语，都改成看得懂的人话」。
+#
+# 口径（为什么是**两张表**而不是一张）：
+#   ① `_TERM_MAP` —— **裸术语**（词级替换，整串里换词，顺序无关、可叠加）；
+#      例：`manifest` → 「登记的那份」、`哈希` → 「指纹」。
+#   ② `_KV_MAP`   —— **键值对**（正则替换，把 `pid=123` 这种序列化碎片
+#      连字段名一起换成人话）。
+#   ⇒ 分开的原因：术语是"换词"，键值对是"换结构"，两者的匹配方式不同。
+#     合一张表会写成"正则里塞词"，难读也难验。
+#
+# ★ 三条纪律（写在这里是因为**这里是唯一真源**，判据也读这张表）：
+#   1. **顺序敏感**：长模式在前（否则 `state 文件` 会被 `state` 先吃掉半截）。
+#   2. **不许编**：认不出的键值对**原样保留**（fail-loud），绝不猜一个中文。
+#   3. **术语表词条不动**：`glossary.TERMS` 是"解释层"（点开才看），
+#      本表是"主行层"（扫一眼就要懂）—— 两层各司其职，不互相改写。
+# --------------------------------------------------------------------------
+
+#: 裸术语 → 人话（长模式在前）。
+_TERM_MAP = [
+    ("state 文件", "防护设置文件"),
+    ("manifest", "登记的那份"),
+    ("登记表", "登记清单"),
+    ("哈希", "指纹"),
+    ("链记录", "安全记录"),
+    ("链上", "安全记录里"),
+    ("基线", "布防时记下的样子"),
+    ("子类型", "事由"),
+]
+
+#: ★★ **不许被替换的"代码样"片段**（2026-10-17 实测踩到）：
+#:   `_tools_034/_resign_manifest.py` 里的 `manifest` 被词级替换成
+#:   `_resign_出厂登记.py` —— 把**文件名**改坏了。这正是创始人要防的
+#:   「避免引入新问题」。⇒ 替换前先把这些片段**抠出来占位**，替换完再放回。
+#:   判定口径（任一命中即算代码样）：含路径分隔符 `/` 或 `\`、含扩展名
+#:   `.py/.json/.jsonl/.md/.exe/.cmd`、被反引号包裹、或含 `__`。
+_CODEY_RE = re.compile(
+    r"`[^`]*`"                                  # 反引号包裹
+    r"|[A-Za-z0-9_.\-]*[\\/][A-Za-z0-9_.\-\\/]*"  # 含路径分隔符
+    r"|[A-Za-z0-9_\-]+\.(?:py|json|jsonl|md|exe|cmd|bat|ps1|txt|log|cfg|ini)\b"  # 带扩展名
+    r"|[A-Za-z0-9_]*__[A-Za-z0-9_]*"            # 双下划线标识符
+)
+
+
+def _protect_codey(t):
+    """把"代码样"片段抠成占位符，返回 (占位后的串, 还原表)。"""
+    stash = []
+
+    def _stash(m):
+        stash.append(m.group(0))
+        return "\x00%d\x00" % (len(stash) - 1)
+
+    return _CODEY_RE.sub(_stash, t), stash
+
+
+def _restore_codey(t, stash):
+    for i, s in enumerate(stash):
+        t = t.replace("\x00%d\x00" % i, s)
+    return t
+
+#: 键值对 → 人话（字段名换成中文词，值原样保留）。
+#: ★ 值是**机器枚举**（detached / hook-parametric / self-check-failed …）
+#:   也一并换；认不出的值原样留（见 `_MODE_TEXT` / `_CAUSE_TEXT`）。
+_KV_RE = re.compile(
+    r"(?<![A-Za-z_])"
+    r"(pid|mode|cause|subkind|reason|kind|topic|enabled|severity)="
+    r"([^\s，。；）)、,]+)")
+_KV_MAP = {
+    "pid": "进程号",
+    "mode": "方式",
+    "cause": "触发",
+    "subkind": "事由",
+    "reason": "原因",
+    "kind": "类型",
+    "topic": "事由",
+    "enabled": "开关",
+    "severity": "严重度",
+}
+
+#: 机器枚举值 → 人话。认不出的原样保留（fail-loud，不编）。
+_MODE_TEXT = {
+    "detached+breakaway": "后台独立拉起并脱离子进程组",
+    "detached": "后台独立拉起",
+    "self-check-failed": "自检没通过",
+    "already-running": "已经在运行",
+    "script-missing": "找不到启动脚本",
+    "spawn-failed": "拉起命令执行失败",
+    "unsupported-platform": "此系统不支持",
+}
+_CAUSE_TEXT = {
+    "hook-paramedic": "钩子机制自动触发",
+    "hook-parametric": "钩子机制自动触发",
+    "console": "控制台",
+    "manual": "手动操作",
+    "guard": "巡检",
+    "self-check": "自检",
+}
+
+#: ★★ **裸枚举**兜底（0.51.2）：有些**旧记录**把枚举值**直接嵌在句子里**
+#:   （不是 `key=value` 形态），例如「由 hook-paramedic 重新拉起」「mode=
+#:   self-check-failed: …」被别的正则抠出来后剩下裸枚举。
+#:   ⇒ 这些词在任何位置出现都换成人话（词级，长词在前）。
+#:   ★ 键一律带"业务特征"，不用短词（避免误伤英文正文）。
+_BARE_ENUM_TEXT = [
+    ("detached+breakaway", "后台独立拉起并脱离子进程组"),
+    ("self-check-failed", "自检没通过"),
+    ("hook-paramedic", "钩子机制自动触发"),
+    ("hook-parametric", "钩子机制自动触发"),
+    ("already-running", "已经在运行"),
+    ("script-missing", "找不到启动脚本"),
+    ("unsupported-platform", "此系统不支持"),
+]
+
+#: **短语级**固定搭配（键值对换完之后再过一遍，修接缝）。
+#: ★ 为什么需要：`旧 pid=` → `旧 进程号` 的接缝空格人读起来硌眼，
+#:   这是"词级替换"必然留下的碎屑 ⇒ 用短语表抹平，而不是让渲染层去猜。
+_PHRASE_MAP = [
+    ("旧 进程号", "旧进程号"),
+    ("新 进程号", "新进程号"),
+]
+
+
+def _kv_human(m):
+    """一个 `字段=值` → 人话。
+
+    ★ 值的**枚举翻译只对"整值相等"生效**（`val` 完全等于 `detached` 才翻）；
+      `self-check-failed: …` 这类"值里还带冒号说明"的，只翻前缀、保留尾巴。
+    ★ 值里可能是 `None`（旧记录）⇒ 说成「未知」，不说 `None` 这个 Python 字。
+    """
+    key, val = m.group(1), m.group(2)
+    label = _KV_MAP.get(key, key)
+    v = val
+    if key == "mode":
+        v = _enum_text(val, _MODE_TEXT)
+    elif key == "cause":
+        v = _enum_text(val, _CAUSE_TEXT)
+    if v == "None":
+        v = "未知"
+    return "%s %s" % (label, v)
+
+
+def _enum_text(val, table):
+    """枚举值 → 人话：整值命中就换；带尾巴（`x: y`）就换前缀、留尾巴。"""
+    if val in table:
+        return table[val]
+    if ":" in val:
+        head, _, tail = val.partition(":")
+        if head in table:
+            return "%s：%s" % (table[head], tail.strip())
+    return val
+
+
+def humanize(s):
+    """机器腔 → 人话（★ 唯一实现）。输入输出都是普通字符串。
+
+    ★ 幂等：已人话化的串再过一遍不变（判据 W-SPK3 钉这条）。
+    ★ 顺序：**先键值对、后术语** —— 键值对替换会引入中文（如「进程号」），
+      中文不会再被术语表误伤；反过来（先术语）会把 `state 文件` 里的
+      `state` 当成键值对键名去匹配（虽然 `state=` 才匹配，但先做更稳）。
+    ★★ **代码样片段受保护**（0.51.2 实测踩到）：文件名 `_resign_manifest.py`
+      里的 `manifest` 不能被换成中文（会把文件名改坏）。⇒ 替换前把
+      `_CODEY_RE` 命中的片段抠成占位符，替换完再放回（见 `_protect_codey`）。
+    ★ 收尾**合并多余空格**：词级替换会在「旧 pid=123」→「旧 进程号 123」
+      这样的接缝处留出多余空格，人读起来硌眼 ⇒ 统一压成单空格并
+      修掉标点前后的空格。
+    """
+    if s is None:
+        return ""
+    t = str(s)
+    if not t:
+        return t
+    # 1) 抠出代码样片段（文件名/路径/标识符/反引号内容）
+    t, stash = _protect_codey(t)
+    # 2) 键值对 → 人话
+    t = _KV_RE.sub(_kv_human, t)
+    # 3) 裸术语 → 人话
+    for a, b in _TERM_MAP:
+        if a in t:
+            t = t.replace(a, b)
+    # 3b) 裸枚举 → 人话（旧记录里枚举直接嵌在句子里）
+    for a, b in _BARE_ENUM_TEXT:
+        if a in t:
+            t = t.replace(a, b)
+    for a, b in _PHRASE_MAP:
+        if a in t:
+            t = t.replace(a, b)
+    # 4) 接缝整理：重复空格 → 单空格；中文标点/右括号前后不留空格；
+    #    **两个中文字之间的空格**全去掉（词级替换留下的接缝）。
+    t = re.sub(r"[ \t]{2,}", " ", t)
+    t = re.sub(r"\s+([，。；：、）】》])", r"\1", t)
+    t = re.sub(r"([（【《])\s+", r"\1", t)
+    t = re.sub(r"([，。；：、])\s+", r"\1", t)
+    t = re.sub(r"(?<=[\u4e00-\u9fff]) +(?=[\u4e00-\u9fff])", "", t)
+    # 5) 放回代码样片段
+    return _restore_codey(t, stash)
 
 
 def alert_id(ts, kind, reason):
@@ -458,6 +789,497 @@ def alert_id(ts, kind, reason):
     """
     raw = "%s|%s|%s" % (ts, kind, reason)
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:8]
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 0.51.2 第二轮「人话化」（创始人 2026-10-17 四张截图裁定）：
+# 时区命名 ＋ 详情行（第二行）重做
+# ══════════════════════════════════════════════════════════════════════
+# 创始人原话：
+#   「时间的时区是北京时间，是吧？？？？你直接写北京时间不行吗？？？？？？」
+#   「因为用户可能在海外，比如洛杉矶的就写美西时间，波士顿的就写美东时间，
+#    等等，这块需要专门设计。一切围绕用户体验。」
+#   「规则编号保留一次。一句大白话解释清楚，能结合具体情形场景是最好的体验。」
+#   「亮文件名。如果文件很多，亮三个加上『等文件』。」
+#   「什么狗屁核对号，去掉！！！！！！」
+
+#: Windows 时区键名 → 人话（唯一真源：注册表 `TimeZoneKeyName`）。
+#: ★ 为什么按**键名**而不是按偏移：偏移撞车（+8 有北京/新加坡/珀斯；-5 有
+#:   美东/哥伦比亚/秘鲁）⇒ 把用户的时区叫成别的城市的名，比不给名字更糟。
+#:   键名是系统自己认的辖区，不撞车。
+#: ★ 夏令时不区分：美西夏令时仍叫「美西时间」（通行说法），不按季节改名。
+_TZ_KEY_ZH = {
+    "China Standard Time": "北京时间",
+    "Pacific Standard Time": "美西时间",
+    "Eastern Standard Time": "美东时间",
+    "Central Standard Time": "美中时间",
+    "Mountain Standard Time": "美山区时间",
+    "US Mountain Standard Time": "美山区时间",
+    "GMT Standard Time": "格林尼治时间",
+    "Tokyo Standard Time": "东京时间",
+    "Korea Standard Time": "首尔时间",
+    "Singapore Standard Time": "新加坡时间",
+    "India Standard Time": "印度时间",
+    "W. Europe Standard Time": "中欧时间",
+    "Romance Standard Time": "中欧时间",
+    "Central Europe Standard Time": "中欧时间",
+    "AUS Eastern Standard Time": "澳洲东部时间",
+    "E. Australia Standard Time": "澳洲东部时间",
+    "New Zealand Standard Time": "新西兰时间",
+    "SE Asia Standard Time": "中南半岛时间",
+    "Canada Central Standard Time": "加拿大中部时间",
+}
+
+#: 偏移回落表（拿不到注册表键名时用；只收不撞车的常用偏移）。
+#: ±7 既是美西夏令时也是山区标准时 ⇒ 都归「美西时间」可能误标山区用户 ——
+#: 回落路径本就是降级，宁可少猜：只收 8/9/0 与美东两档（最常见的海外华人分布）。
+_TZ_OFFSET_ZH = {
+    8: "北京时间", 9: "东京时间", 0: "格林尼治时间",
+    -8: "美西时间", -7: "美西时间", -5: "美东时间", -4: "美东时间",
+}
+
+
+def tz_name():
+    """本机时区的人话名（北京时间/美西时间/美东时间/…）。**唯一实现**。
+
+    取值链：注册表 `TimeZoneKeyName` → 键名映射表 → 偏移映射表 →
+    「UTC±N」→「当地时间」。任一步失败都不抛，只降级。
+    """
+    try:
+        import winreg
+        with winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SYSTEM\CurrentControlSet\Control\TimeZoneInformation") as k:
+            key = str(winreg.QueryValueEx(k, "TimeZoneKeyName")[0])
+        name = _TZ_KEY_ZH.get(key)
+        if name:
+            return name
+    except Exception:                                   # noqa: BLE001
+        pass
+    try:
+        off = datetime.now().astimezone().utcoffset()
+        if off is not None:
+            h = int(round(off.total_seconds() / 3600))
+            name = _TZ_OFFSET_ZH.get(h)
+            if name:
+                return name
+            return "UTC%+d" % h
+    except Exception:                                   # noqa: BLE001
+        pass
+    return "当地时间"
+
+
+def ts_label(s):
+    """ISO 时间戳 → 人话时间：`北京时间 10-17 09:23`（**唯一实现**）。
+
+    ★ 口径：`fromisoformat` 解析后 `astimezone()` 落到**本机**时区 ——
+      记录里带任意偏移（旧机器/跨时区机器写的）都按本机时区读，不按
+      记录里的偏移原样显示（那样等于让用户心算时差）。
+    ★ 解析失败回落字符串切片（旧 `_ts_hm` 口径：不编造、不截半）。
+    ★ 返回形状恒为「<时区名> MM-DD HH:MM」——判据断言打在这个形状上，
+      不写死具体城市名（海外机器名字本来就不同）。
+    """
+    t = "" if s is None else str(s)
+    try:
+        dt = datetime.fromisoformat(t).astimezone()
+        return "%s %s" % (tz_name(), dt.strftime("%m-%d %H:%M"))
+    except Exception:                                   # noqa: BLE001
+        body = t[5:16].replace("T", " ") if len(t) >= 16 else t
+        return "%s %s" % (tz_name(), body) if body else tz_name()
+
+
+#: 规则编号 → 一句大白话（`description_zh` 首句，唯一真源：随包发布的
+#: `rules/default.json`）。**为什么读表而不是在页面另写一份**：规则表是
+#: 产品的口径，页面写第二份就会漂移（本仓「同一事实两处实现」的标准形状）。
+_RULE_DESC = None
+
+
+def _rule_desc(rule_id):
+    """规则编号 → 大白话首句（读不到表/没这条 ⇒ `""`，调用方回落）。"""
+    global _RULE_DESC
+    if _RULE_DESC is None:
+        table = {}
+        try:
+            import json
+            import os
+            p = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "rules", "default.json")
+            with open(p, encoding="utf-8") as fh:
+                for r in (json.load(fh).get("rules") or []):
+                    rid = str(r.get("id") or "")
+                    desc = str(r.get("description_zh") or "").strip()
+                    #: 首句：分号/全角括号切开取第一段（长描述的补充情形留给
+                    #: 规则表本身，详情行不放说明书）。
+                    head = re.split(r"[；（(]", desc)[0].strip()
+                    if rid and head:
+                        table[rid] = head
+        except Exception:                               # noqa: BLE001
+            table = {}
+        _RULE_DESC = table
+    return _RULE_DESC.get(str(rule_id or ""), "")
+
+
+#: 命令文本里抠「目标文件名」的扩展名白名单（裸文件名必须有已知扩展名才算
+#: 目标 —— 否则 `v1.2`、`127.0.0.1`、`os.remove` 都会被当成文件）。
+_FILE_EXTS = frozenset((
+    "py", "json", "jsonl", "md", "txt", "log", "cfg", "ini", "csv", "xml",
+    "yaml", "yml", "ps1", "bat", "cmd", "sh", "db", "sqlite", "sqlite3",
+    "env", "toml", "lock", "pem", "key", "crt", "zip", "tar", "gz", "png",
+    "jpg", "jpeg", "html", "htm", "js", "ts", "whl",
+))
+
+#: 最多亮几个目标（创始人：亮三个，多了加「等文件」）。
+_MAX_TARGETS = 3
+
+#: 详情行（第二行）的**行级字数上限**——判据 W-SPK8 与本函数共用这一个数
+#: （两处各写一个 90 就是又一处「同页两个口径」）。
+#: 0.52.0 实测：合成夹具全部 ≤63 字，而真实记录里三目标＋规则大白话拼到 94 字
+#: ⇒ 上限必须**反过来约束目标个数**，不能只在判据里事后数。
+_META_MAX = 90
+
+
+def _ext_ok(tok):
+    base = tok.replace("\\", "/").rsplit("/", 1)[-1]
+    if "." not in base:
+        return False
+    return base.rsplit(".", 1)[-1].lower() in _FILE_EXTS
+
+
+#: 不产目标的段动词：这些是**读**或**上下文**，段里的路径不是「会被动的文件」。
+#: 0.52.0 实测（创始人截图三行）：`grep` 的正则片段、`cd` 的目录、`python -c`
+#: 的代码体全被当成目标 ⇒ 详情行出现「目标 def _item_html\|def _group_html\|…」。
+#: 宁可少说一个目标，也不许说错一个目标（说错＝把正则当文件，读者无从判断真假）。
+_NO_TARGET_VERBS = frozenset((
+    "cd", "pushd", "popd", "set", "export", "setx",
+    "grep", "rg", "ag", "find", "fd", "ls", "dir", "tree", "stat", "wc",
+    "cat", "type", "more", "less", "head", "tail", "sed", "awk", "sort",
+    "echo", "printf", "which", "where", "tasklist", "netstat", "curl", "wget",
+    "git", "npm", "pip", "pip3", "node", "python", "pythonw", "py",
+    "powershell", "pwsh", "bash", "sh", "cmd",
+))
+
+#: 目标串里绝不许出现的字符（正则/通配/变量/赋值/重定向/引号/注释）。
+#: 真实文件名极少含这些；含了几乎一定是命令片段而非文件（`command=`、`a\|b`）。
+_TARGET_BAD_CHARS = "|*?$<>{}=`\"'#"
+
+
+def _plausible(tok):
+    """这个串**像不像**一个文件/目录（合法性，不看角色）。"""
+    if not tok or len(tok) > 120:
+        return False
+    if tok.startswith("//") or "://" in tok:              # URL 不是文件
+        return False
+    if any(ch in tok for ch in _TARGET_BAD_CHARS):
+        return False
+    if tok.endswith("\\") or tok.endswith("/"):           # 悬空分隔符
+        return False
+    if re.search(r'\\[\s"\'\\]', tok):                    # 转义残尾（`seg cost\`）
+        return False
+    if "(" in tok or ")" in tok:
+        # 半角括号只在成对且不贴结尾时算文件名（`attribute(` 是正则残片；
+        # `report (1).py` 这类真实文件名仍放行）。
+        if tok.count("(") != tok.count(")") or tok.rstrip().endswith(")"):
+            return False
+    return ("/" in tok or "\\" in tok) or _ext_ok(tok)
+
+
+def _short_name(tok):
+    """只亮文件名（创始人裁定）：`C:/a/b/Startup` → `Startup`。"""
+    base = tok.replace("\\", "/").rsplit("/", 1)[-1]
+    return base or tok
+
+
+def _cmd_segments(text):
+    """按**引号外**的 `&&`/`||`/`;`/`|`/换行 切段（引号内的分隔符不算）。"""
+    segs, buf, quote = [], [], ""
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if quote:
+            buf.append(ch)
+            if ch == quote:
+                quote = ""
+            elif ch == "\\" and i + 1 < n:
+                buf.append(text[i + 1])
+                i += 1
+            i += 1
+            continue
+        if ch in "\"'":
+            quote = ch
+            buf.append(ch)
+            i += 1
+            continue
+        if ch in ";|\n":
+            segs.append("".join(buf))
+            buf = []
+            i += 1
+            continue
+        if ch == "&" and i + 1 < n and text[i + 1] == "&":
+            segs.append("".join(buf))
+            buf = []
+            i += 2
+            continue
+        buf.append(ch)
+        i += 1
+    segs.append("".join(buf))
+    return [s for s in segs if s.strip()]
+
+
+def _seg_verb(seg):
+    """段的动词：首个 token（跳过 `VAR=value` 前缀），去路径、去 .exe、小写。"""
+    for raw in seg.strip().split():
+        tok = raw.strip("'\"")
+        if not tok:
+            continue
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", tok):    # 环境变量前缀
+            continue
+        tok = tok.replace("\\", "/").rsplit("/", 1)[-1]
+        if tok.lower().endswith(".exe"):
+            tok = tok[:-4]
+        return tok.strip("'\"").lower()
+    return ""
+
+
+def _file_targets(text):
+    """从命令/路径文本里抠目标文件名：去重、保序、≤3。
+
+    两把尺子，缺一不可：
+
+    ★ **角色**（`_cmd_segments`/`_seg_verb`）：只从「会动文件的段」取参数。
+      读类与上下文类动词（`grep`/`cd`/`python -c` …）整段跳过 —— 它们的
+      参数是被读的东西或工作目录，不是「会被动的文件」。
+    ★ **合法性**（`_plausible`）：正则片段、shell 赋值、转义残尾一律拒收。
+
+    内部仍按三档取候选（① 引号包裹 → ② 带已知扩展名的裸词 → ③ 带路径
+    分隔符的裸路径），但**每档都过合法性**；档③ 仍只在①②都没收获时才跑
+    （`cd d:/x && rm y` 里 `d:/x` 是上下文，补进来只会掺噪声）。
+    显示层只留文件名（`_short_name`）。
+    """
+    if not text:
+        return [], False
+    t = str(text)
+    out, seen = [], set()
+
+    def _add(tok):
+        tok = (tok or "").strip().strip("'\"").rstrip(",;)")
+        if not _plausible(tok):
+            return
+        tok = _short_name(tok)
+        if not tok or tok in seen:
+            return
+        seen.add(tok)
+        out.append(tok)
+
+    live = [s for s in _cmd_segments(t) if _seg_verb(s) not in _NO_TARGET_VERBS]
+    if not live:                                          # 全是读/上下文 ⇒ 无目标
+        return [], False
+    joined = "\n".join(live)
+
+    for m in re.findall(r"['\"]([^'\"]{1,200})['\"]", joined):   # ① 引号包裹
+        _add(m)
+    for m in re.findall(r"\b([A-Za-z0-9_\-]+\.[A-Za-z0-9]{1,6})\b", joined):
+        _add(m)                                                   # ② 裸词带扩展名
+    if not out:
+        for m in re.findall(r"(?:[A-Za-z]:|\.{1,2})?[\\/][^\s'\"|;&)]+", joined):
+            _add(m)                                               # ③ 裸路径（兜底）
+    return (out[:_MAX_TARGETS], len(out) > _MAX_TARGETS)
+
+
+def _targets_phrase(text, budget=0):
+    """目标文件名 → 人话片段（`a、b、c 等文件`；≤3 个不带「等文件」）。
+
+    `budget>0` ⇒ 片段最长 budget 字：**从尾往前减目标**，减到还剩几个就写几个，
+    收尾一律加「等文件」（因为确实还有没写出来的）。这样行预算由**结构**保证，
+    而不是靠事后数——合成夹具合规、真记录 94 字的事不该再发生。
+    """
+    out, more = _file_targets(text)
+    if not out:
+        return ""
+
+    def _join(names, tail):
+        return "、".join(names) + (" 等文件" if tail else "")
+
+    names = list(out)
+    phrase = _join(names, more)
+    if budget <= 0 or len(phrase) <= budget:
+        return phrase
+    while len(names) > 1:
+        names.pop()
+        cand = _join(names, True)
+        if len(cand) <= budget:
+            return cand
+    return _join(names, True) if len(_join(names, True)) <= budget else ""
+
+
+#: 研发态治理话术标记（0.51.2 第二轮，创始人截图三裁定）：含这些词的
+#: 括号段整段不进用户可见文案。
+#: 创始人原话：「那些文件名不列出来会死吗？？？？？？为什么要写修法，
+#:   这个是我修，用户不会修，我也不会让用户修，你为什么要写？？？？？？」
+_GOV_MARKERS = ("研发树", "保护名单", "登记簿", "manifest", "出厂登记",
+                "修法", "python", "--", "freeze_zones", "_resign")
+
+#: 治理子句的分句符（全角句读——治理细节多半挂在分句尾巴上）。
+#: ★ 0.52.0 补「—」（破折号）：真实 dev_drift 记录里用户相关的事实挂在
+#:   治理子句尾巴的「——」后面（「…与出厂登记不符（…）——这一版还没发出去」），
+#:   不拆就整条被连带删掉（实测丢「这一版还没发出去」）。破折号紧跟
+#:   句读时不可能合法 ⇒ 删段留下的悬空破折号由残迹清理收掉。
+_GOV_CLAUSE_SEPS = "，、：；。—"
+
+
+def _top_paren_spans(t):
+    """所有**顶层**平衡括号段的 (start, end)（不含嵌套在别的括号段里的）。
+
+    ★ 为什么需要它（0.52.0 实测缺口）：旧 `strip_governance` 只匹配
+      **最内层**括号（正则 `（[^（）]*）`），而真实记录里治理细节整段在
+      **外层**括号、内层反而是无标记小括号（如「（运行代码可能被改）」）
+      ⇒ 外层永远不被检查、整段漏网（实测 spawn_failed 详情行 165 字、
+      含「出厂登记」原样上屏）。
+      从最外层开始删：外层含标记 ⇒ 整段删（内层跟着走，本来就是治理细节）。
+    """
+    spans = []
+    depth = 0
+    start = -1
+    for i, ch in enumerate(t):
+        if ch == "（":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "）" and depth > 0:
+            depth -= 1
+            if depth == 0 and start >= 0:
+                spans.append((start, i + 1))
+                start = -1
+    return spans
+
+
+def _drop_marker_clauses(t):
+    """删掉**含治理标记的子句**（按分句符切；标记出现在括号外时靠这级兜住）。
+
+    例：「监理启动时的自检没通过：host_shield.py 与出厂登记不符（…）；…」
+      ⇒ 只留「监理启动时的自检没通过」——文件名与出厂登记是研发态内部事，
+        用户面板只需要「自检没通过」这个事实（详见 ① 段归因）。
+    幂等；无标记 ⇒ 原样返回。
+    """
+    if not any(w in t for w in _GOV_MARKERS):
+        return t
+    kept = []
+    buf = ""
+    for ch in t:
+        buf += ch
+        if ch in _GOV_CLAUSE_SEPS:
+            if not any(w in buf for w in _GOV_MARKERS):
+                kept.append(buf)
+            buf = ""
+    if buf and not any(w in buf for w in _GOV_MARKERS):
+        kept.append(buf)
+    return "".join(kept)
+
+
+def gov_free(text):
+    """文本是否**不含**研发态治理标记（True ⇒ 可以进用户可见文案）。
+
+    与 `strip_governance` 共用同一份标记表（`_GOV_MARKERS`）——
+    短标签过滤（`remediation` 抠「失败环节」）也走本函数，不另写一份。
+    """
+    t = str(text or "")
+    return not any(w in t for w in _GOV_MARKERS)
+
+
+def strip_governance(text):
+    """研发态治理细节 → 不进用户可见文案（**唯一实现**）。
+
+    做法（两级，反复到干净）：
+      ① **括号段**（`_top_paren_spans`）：从**最外层**删含治理标记的
+         平衡括号段 —— 治理细节整段挂在大括号里（触发方式/拉起方式/
+         自检明细），内层无标记小括号不挡路；
+      ② **裸标记子句**（`_drop_marker_clauses`）：标记出现在括号外时
+         （如「host_shield.py 与出厂登记不符；…」），按分句删掉含标记
+         的子句 —— 只留事实（「监理启动时的自检没通过」）。
+    ★ 不变式：输出**不再含**任何治理标记（`gov_free(out) is True`）；
+      输入本来就干净 ⇒ 原样返回（幂等）。
+    ★ 为什么在渲染层做而不是改链：审计链 append-only，旧记录改不了；
+      读侧免疫才是「修得彻底、不复发」（与 `humanize` 同一条思路）。
+    ★ 消费方：详情行 `record_meta` 与归因面板 `remediation._base`
+      —— 两处都调本函数，不各写一份。
+    """
+    t = str(text or "")
+    if not t or not any(w in t for w in _GOV_MARKERS):
+        return t
+    changed = True
+    while changed:
+        changed = False
+        for (s, e) in _top_paren_spans(t):
+            if any(w in t[s:e] for w in _GOV_MARKERS):
+                t = t[:s] + t[e:]
+                changed = True
+                break
+        if changed:
+            continue
+        t2 = _drop_marker_clauses(t)
+        if t2 != t:
+            t = t2
+            changed = True
+    # 删段留下的标点残迹：重复句读、悬空分号/冒号
+    t = re.sub(r"[，。；、]\s*[，。；、]+", "。", t)   # 删除留下的标点连击
+    t = re.sub(r"[：；，、]+\s*。", "。", t)          # 悬空句读 + 句号
+    t = re.sub(r"[：；，、]+\s*$", "", t.strip())     # 结尾悬空句读
+    # 悬空破折号：治理子句被删后，它尾部的「—」会把下一节的「—」顶成句首
+    #   （「研发迭代中：——这一版还没发出去」）⇒ 句读后的破折号连击全部剥掉
+    #   （中文行文里「：——」「，——」不可能合法；句中的「没生效——现在」
+    #    型破折号不在句读后，不受影响）。
+    t = re.sub(r"([：；，、])—+", r"\1", t)
+    return t.strip()
+
+
+def record_meta(it, with_time=True):
+    """告警**详情行**（第二行）—— 0.51.2 第二轮「人话化」重做。**唯一实现**。
+
+    结构（三个片段，` · ` 连接）::
+
+        拦截类：  <规则大白话>（，目标 <文件>） · 规则 <编号> · <时区> <MM-DD HH:MM>
+        其它类：  <detail（已人话化）> · <时区> <MM-DD HH:MM>（＋ 备注）
+
+    ★ 规则编号**只出现一次** —— 旧版两遍的根因：`inbox_store` 拼的 detail 已含
+      「规则 X · 命中「Y」」，渲染层又把 `rule_id`/`snippet` 拼了一遍
+      （实测第二行 135 字符）。现在渲染层**不看 detail 里的规则部分**，
+      一律从规则表取大白话 ＋ 从命令抠目标文件。
+    ★ 去掉的：核对号＋64 位链哈希（创始人「什么狗屁核对号，去掉」）、
+      「命中「X」」片段（改成讲目标文件）、裸 ISO 时间（`T`/`+08:00`）。
+    ★ 时间由 `ts_label` 统一（北京时间/美西时间/…），渲染出口照旧 `_vis`
+      （HTML 转义 ⇒ 命令文本不会注入页面）。
+    ★ `with_time=False` 给**归并行**用：它另有「最近/最早」时间段
+      （行内时间保持 MM-DD HH:MM 短式 `_ts_hm`，全站唯一短式）。
+    """
+    parts = []
+    rid = str(getattr(it, "rule_id", "") or "")
+    ts_txt = ts_label(getattr(it, "ts", "")) if with_time else ""
+    note = str(getattr(it, "note", "") or "").strip()
+    if rid:
+        head = _rule_desc(rid) or "危险操作被拦下"
+        #: 其余片段的固定开销先扣掉，剩下的才是「目标」能用的预算。
+        #: 目标个数由预算**派生**（不是固定 3 个）——真记录拼到 94 字就是
+        #: 「个数写死、预算事后数」的必然结果。
+        tail_len = len(" · 规则 %s" % rid)
+        if ts_txt:
+            tail_len += len(" · ") + len(ts_txt)
+        if note and ts_txt:
+            tail_len += len(" · 备注：") + len(note)
+        budget = _META_MAX - len(head) - len("，目标 ") - tail_len
+        targets = _targets_phrase(getattr(it, "command", "") or
+                                  getattr(it, "file_path", ""), budget=budget)
+        if targets:
+            head += "，目标 %s" % targets
+        parts.append(head)
+        parts.append("规则 %s" % rid)
+    else:
+        d = strip_governance(str(getattr(it, "detail", "") or "").strip())
+        if d:
+            parts.append(d)
+    if ts_txt:
+        parts.append(ts_txt)
+    if note and ts_txt:
+        parts.append("备注：%s" % note)
+    return " · ".join(p for p in parts if p)
 
 
 def can_transition(src, dst):
@@ -493,6 +1315,12 @@ class Alert:
     snippet: str = ""
     severity: str = ""
     chain_ref: str = ""
+    #: ★ 0.51.2（第二轮「人话化」）：拦截记录的**原始命令与目标路径**
+    #:   （来自审计记录 `input.command` / `input.file_path`，写侧已 mask_secrets）。
+    #:   用途：详情行亮「要删/动的是哪个文件」（创始人：直接讲要删什么文件）。
+    #:   渲染出口一律走 `_vis`（HTML 转义）⇒ 命令文本不会注入页面。
+    command: str = ""
+    file_path: str = ""
     #: ★ 0.35.3：链记录的结构化字段 `recovered`（见 docs/AUDIT_SCHEMA.md v1.10）。
     #:   True ＝ 这件事已经自动愈合、没留后果。**不许靠解析 reason 文案得到它。**
     recovered: bool = False
@@ -501,13 +1329,22 @@ class Alert:
     #:   例：登录自启缺失 → `autostart_missing`；自检不符 → `self_check`。
     #:   缺省 `""` ＝ 该类型没细分（同 kind 同级别归为一件事）。
     topic: str = ""
+    #: ★★ 0.53.0（T2.1）：**归因宿主**（哪个 AI 工具做的这件事）＋ 归因置信度。
+    #:   来源＝链记录 `host` 与 `host_confidence`（写侧 `hooks/post_tool_use.py`
+    #:   0.33.1 起填，detector 是唯一来源 `hooks/_host_detect.py`）。
+    #:   **缺失留 `""`，不填 `generic`**：generic 是 detect 失败时的 fallback
+    #:   标签，把它显示成"generic 工具"＝把「不知道」显示成「知道」。
+    #:   0.33.1 前的旧记录没有这两个字段 ⇒ 按未知分代，不显示成任何工具。
+    host: str = ""
+    host_confidence: str = ""
 
     def to_dict(self):
         return asdict(self)
 
     @classmethod
     def build(cls, ts, kind, title="", detail="", rule_id="", snippet="",
-              severity="", chain_ref="", reason=None, recovered=False, topic=""):
+              severity="", chain_ref="", reason=None, recovered=False, topic="",
+              command="", file_path="", host="", host_confidence=""):
         """由原始事件造一条 Alert。level 一律经 level_of() 得到（唯一真源）。"""
         lvl = level_of(kind)
         return cls(
@@ -515,6 +1352,8 @@ class Alert:
             ts=ts, level=lvl, kind=kind, title=title, detail=detail,
             rule_id=rule_id, snippet=snippet, severity=severity, chain_ref=chain_ref,
             recovered=bool(recovered), topic=str(topic or ""),
+            command=str(command or ""), file_path=str(file_path or ""),
+            host=str(host or ""), host_confidence=str(host_confidence or ""),
         )
 
 
@@ -571,6 +1410,15 @@ class Item:
     def chain_ref(self):
         return self.alert.chain_ref
 
+    #: 0.51.2：拦截记录的原始命令/目标路径（详情行亮文件名用）。
+    @property
+    def command(self):
+        return self.alert.command
+
+    @property
+    def file_path(self):
+        return self.alert.file_path
+
     @property
     def recovered(self):
         return self.alert.recovered
@@ -578,6 +1426,16 @@ class Item:
     @property
     def topic(self):
         return self.alert.topic
+
+    #: ★ 0.53.0（T2.2）：host 归因（「哪个工具环境里发生的」）—— 与 topic 同型透传。
+    #:   缺失/兜底标签都不填 ⇒ `""`（页面按未知分代，不显示成任何工具）。
+    @property
+    def host(self):
+        return self.alert.host
+
+    @property
+    def host_confidence(self):
+        return self.alert.host_confidence
 
     @property
     def is_open(self):
@@ -668,6 +1526,97 @@ def counts_by_level(items, only_open=True):
     return d
 
 
+# --------------------------------------------------- 工具归因（显示，唯一实现）----
+# ★★ 0.53.0（T3.3，设计 §14.3 第 3／6 条）：
+#   ① 行内**工具徽标**只在"本机观测到 ≥2 个工具"时显示 —— 单工具上徽标＝
+#      每行重复几百次（v0 的教训），信息量 0、噪声满屏；
+#   ② **归并行尾部**给一行工具分布，**不新增小节** —— 另开一节＝同一页
+#      两套计数，正是「重复即红」要消灭的形状。
+#
+# ★ 为什么这两个函数在模型层、而"工具→人话名"的映射在 `host_shield`：
+#   本模块的契约是**纯逻辑**（不读盘）；`rules/hosts/*.json` 的读取权归
+#   登记表的宿主模块。故标签映射走 `label_of` **注入**（默认原样返回
+#   封闭标签 —— 缺名字时照实显示标签，绝不编一个）。
+def host_distribution(items, label_of=None):
+    """→ `[(显示名, 条数)]` 全量，按条数降序（同数按标签字典序，稳定）。
+
+    ★ **host 缺失的旧记录不计入**（0.33.1 前的链记录占 16.4%）：设计
+      §14.2 定的口径是「按『未知（旧记录）』分代，**不显示成任何工具**」。
+      在分布里列一个「未知 N 条」等于把"不知道"变成一个新的工具名 ——
+      与 P18（generic 不冒充工具名）同一条纪律。
+    """
+    cnt = {}
+    for it in items or ():
+        h = str(getattr(it, "host", "") or "").strip()
+        if not h or h == "generic":
+            continue
+        cnt[h] = cnt.get(h, 0) + 1
+    if not cnt:
+        return []
+    rows = sorted(cnt.items(), key=lambda kv: (-kv[1], kv[0]))
+    f = label_of or (lambda h: h)
+    return [(str(f(h) or h), n) for h, n in rows]
+
+
+def host_count(items):
+    """观测到几个**有归因**的工具（行内徽标的开关：≥2 才显示）。"""
+    return len(host_distribution(items))
+
+
+#: 工具归因的置信度 → 人话（页面上不许出现 high/medium/none）
+HOST_CONF_ZH = {"high": "有直接证据", "medium": "间接线索",
+                "low": "线索很弱", "none": "说不清"}
+
+
+def host_attribution_stats(items, days=7, now=None):
+    """近 N 天的**工具归因**统计（运行状态页「工具识别」块的唯一数据源）。
+
+    返回 `{total, attributed, unclear, by_conf, unclear_ratio}`：
+      · `total`      ＝ 窗口内记录条数（分母）；
+      · `attributed` ＝ 有归因的条数（`host` 非空且不是 `generic` 兜底）；
+      · `unclear`    ＝ `total - attributed`（**说不清**：旧记录或检测失败）；
+      · `by_conf`    ＝ 有归因记录按置信度分组（`{high: n, medium: n}`）；
+      · `unclear_ratio` ＝ `unclear / total`（`total == 0` ⇒ `0.0`）。
+
+    ★ 为什么「说不清」要单独算：设计 §14.6 要求占比 >5% 提醒 —— 而
+      **分母必须是窗口内全部记录**，不是"有归因的那些"（后者天然 0%，
+      这个指标就永远绿，等于没做）。F40 同型：分母选错＝指标失效。
+    ★ `generic` 一并算进"说不清"：它是 detect 失败的兜底标签，不是工具名
+      （与 P18／`_host_of` 同一条纪律）。
+    """
+    win = [it for it in (items or ()) if within_hours(it.ts, days * 24, now=now)]
+    total = len(win)
+    by_conf = {}
+    attributed = 0
+    for it in win:
+        h = str(getattr(it, "host", "") or "").strip()
+        if not h or h == "generic":
+            continue
+        attributed += 1
+        c = str(getattr(it, "host_confidence", "") or "").strip() or "none"
+        by_conf[c] = by_conf.get(c, 0) + 1
+    unclear = total - attributed
+    return {"total": total, "attributed": attributed, "unclear": unclear,
+            "by_conf": by_conf,
+            "unclear_ratio": (float(unclear) / total) if total else 0.0}
+
+
+def host_phrase(items, limit=3, label_of=None):
+    """归并行尾部的一句工具分布（唯一实现）：「工具：WorkBuddy 3 条 · Qoder 1 条」。
+
+    ★ 超过 3 种只列前 3 ＋ 「等 N 种」：详情行有 90 字预算（`_META_MAX`），
+      列 8 个工具会把归并行撑成两行；截断只影响**标签**，不影响计数口径
+      （页面上没有第二个"工具总数"可被拿来对不上）。
+    """
+    rows = host_distribution(items, label_of=label_of)
+    if not rows:
+        return ""
+    head = " · ".join("%s %d 条" % (nm, n) for nm, n in rows[:limit])
+    if len(rows) > limit:
+        head += " · 等 %d 种" % len(rows)
+    return "工具：" + head
+
+
 # ------------------------------------------------------------- 筛选（唯一实现）----
 # ★ 页面上的筛选条与日报里每个数字的**钻取链接**共用这一套取值。
 #   取值文法：
@@ -676,6 +1625,7 @@ def counts_by_level(items, only_open=True):
 #     kind:<kind>                        —— 按类型
 #     rule:<rule_id>                     —— 按规则
 #     closed:<日期>                      —— 按关闭日（0.51.0，账本「已处理」深链）
+#     host:<工具名>                      —— 按工具归因（0.53.0 T3.1，工具分布深链）
 FILTER_LABEL = {
     BUCKET_ACTION: "要处理", BUCKET_INFO: "看一眼", BUCKET_ARCHIVE: "归档",
     "all": "已载入记录",
@@ -698,6 +1648,11 @@ def filter_label(filt, hours=WINDOW_HOURS):
         return "规则 " + filt[5:]
     if filt.startswith("closed:"):
         return "%s · 已处理/已忽略" % filt[7:]
+    # ★ 0.53.0（T3.1）：host 归因筛选的人话标签。「工具」前缀点明这一筛
+    #   的是"哪个工具环境"；工具名本身是检测器写的封闭标签（T6.1 会给
+    #   宿主人话名，到位后这里优先用人话名）。
+    if filt.startswith("host:"):
+        return "工具 %s" % (filt[5:] or "？")
     if filt.startswith("win:"):
         try:
             _p, h, inner = filt.split(":", 2)
@@ -756,6 +1711,23 @@ def filter_items(items, filt, now=None, hours=WINDOW_HOURS):
         return [it for it in items
                 if it.state in CLOSED_STATES
                 and str(it.closed_at or "")[:10] == filt[7:]]
+    # ★★ 0.53.0（T3.1，设计 §14.3 第 5 条）：`host:<工具名>` 第 7 个前缀
+    #   —— 按链上的 host 归因筛（「这件事是哪个工具环境里发生的」）。
+    #   第一消费点：归并行尾部的工具分布（T3.3）—— 每个工具名链到这里。
+    #   ★ **两条不变量**（比"能筛"更重要，判据 P19 钉住）：
+    #     ① 不存在的工具名 ⇒ **空集**。绝不像未知前缀那样有"静默当全部"
+    #        的退路 —— 末尾 fallthrough 是桶比较（对非桶值恒空），那是
+    #        偶然不是设计；这里显式写空集才是"不漏"。
+    #     ② host 缺失（0.33.1 前旧记录）⇒ `""`，不被任何工具名筛中
+    #        （未知分代，不冒充任何工具 —— 与 `_host_of` 同向）。
+    #   ★ 精确匹配不做大小写/模糊：工具名是检测器写的封闭标签
+    #     （`rules/hosts/*.json` 的 host 字段），模糊匹配会把"近似"
+    #     显示成"就是它"。
+    if filt.startswith("host:"):
+        want = filt[5:].strip()
+        if not want:
+            return []
+        return [it for it in items if it.host == want]
     return [it for it in items if bucket_of(it, now=now, hours=hours) == filt]
 
 
@@ -805,6 +1777,57 @@ def day_counts(items, days=None):
     return out
 
 
+def ledger_rows(items, days=7, today=None):
+    """按天账的**机器可读形态**（`antinel ledger --days N --json` 的唯一实现）。
+
+    返回 `[{"date", "events", "acked", "pending"}, ...]`，**新→旧**，恰好 `days`
+    个日历天（含今天）。
+
+    三格口径（与账本页同源，全部来自 `day_counts` ＋ 同一次遍历）：
+      · `events` ＝ 当天**产生**的记录数（按 `ts` 落日）；
+      · `acked`  ＝ 当天**关闭**的记录数（按 `closed_at` 落日，可以是更早的事）；
+      · `pending`＝ 当天产生的记录里**此刻仍未关闭**的条数。
+        ★ 刻意**不用** `events - acked`：`acked` 落的是关闭日，关掉的是老事
+          ⇒ 相减会出负数（异质口径做减法，F54 同型）。
+
+    ★★ **无记录的天给 `null`，不给 `0`**（设计 §14.5 第 4 条）：这台机器那天
+      可能没开机 —— 「没查」与「查过没事」在 JSON 里必须可区分，否则下游
+      任何"日均"一算就把缺口洗成零。
+    ★ 坏 `days`（≤0 / 非整数）⇒ 退回 7，**不静默给空表**：空表会被读成
+      "这台机器没有记录"，那是另一个谎。
+    """
+    try:
+        n = int(days)
+    except (TypeError, ValueError):
+        n = 7
+    if n <= 0:
+        n = 7
+    base = today or datetime.now().astimezone().date()
+    if isinstance(base, str):
+        try:
+            base = datetime.strptime(base[:10], "%Y-%m-%d").date()
+        except ValueError:
+            base = datetime.now().astimezone().date()
+    dlist = [(base - timedelta(days=k)).isoformat() for k in range(n)]
+    cnt = day_counts(items, days=dlist)
+    pend = {d: 0 for d in dlist}
+    for it in items:
+        d = str(it.ts)[:10]
+        if d in pend and it.state in OPEN_STATES:
+            pend[d] += 1
+    out = []
+    for d in dlist:
+        e = cnt.get(d)
+        if not e or not any(int(e.get(k) or 0) for k in LEDGER_KEYS):
+            out.append({"date": d, "events": None, "acked": None,
+                        "pending": None})
+            continue
+        out.append({"date": d,
+                    "events": sum(int(e.get(k) or 0)
+                                  for k in ("blocked", "noticed", "breached")),
+                    "acked": int(e.get("acked") or 0),
+                    "pending": pend.get(d, 0)})
+    return out
 
 
 def group_by_kind(items):
@@ -960,6 +1983,12 @@ def known_filter(filt):
             return True
         except (ValueError, TypeError):
             return False
+    # ★ 0.53.0（T3.1）：`host:<工具名>` 也必须过页面级闸门 —— `render_page`
+    #   对 `known_filter` 不认识的 filt 会**退回「要处理」**（防"静默当全部"
+    #   的設計）。数据层加了前缀而这里漏加 ⇒ 钻取链接点下去看到的是**另一个
+    #   视图**（模型层全绿、页面层改道 —— 活体闸当场抓到过这一版）。
+    if filt.startswith("host:"):
+        return bool(filt[5:].strip())
     return False
 
 
@@ -1313,7 +2342,7 @@ def _posture_direct(posture_state):
         return STATE_R0, "防线此刻确实不在岗，而且有东西没人管"
     if posture_state == "warn":
         # 出厂码不符且非研发（dev 已在 host_shield 侧分流）⇒ fail-closed。
-        return STATE_R0, ("监理进程在岗，但守门的这份代码跟出厂登记的那份对不上"
+        return STATE_R0, ("监理进程在岗，但守门的这份代码跟登记的那份对不上"
                           "（可能被改动过，也可能这次没装好）——认不出它守的是不是"
                           "原来那道门，先按失守算")
     return None
@@ -1607,9 +2636,17 @@ def light_explain(posture, items, now=None, hours=WINDOW_HOURS, granary=None,
     n_info = len([it for it in (items or [])
                   if bucket_of(it, now=now, hours=hours) == BUCKET_INFO])
 
-    # ---- 拼原因句：**主灯原因 ＋ 徽标原因 ＋ 待办提示**（三元组）----
+    # ---- 拼原因句：**主灯原因 ＋ 待办提示**（二元组）----
     # ★ 不放件数式重复：件数归筛选条/顶部钻取（0.37.1 去重纪律）；这一句只答
-    #   "为什么它是这个色、还有哪些并存态、有没有等你办的事"。
+    #   "为什么它是这个色、有没有等你办的事"。
+    # ★★ FZ-004（2026-10-17 兑现）：**徽标原因不进主行**。
+    #   原病（创始人 2026-10-16 截图 #4「啰嗦、浓重机器味」）：研发中徽标的
+    #   完整原因句（「本机这一版（0.51.2）比已发布的（0.51.1）新，还没发出去」
+    #   ＝ 30+ 字版本差工程说明）被拼进**每一态**的主行「另外：…」段 ——
+    #   于是失守/注意/值守中 每一行都拖着同一条版本说明，主行被淹没。
+    #   契约：主行只留状态词本身的原因；**版本差与计数挪 ? 点击展开**
+    #   ⇒ 版本差仍完整保留在 `badges`（页面按 `BADGE_STATE` 挂问号芯片，
+    #     点开即见），只是不占主行。**信息不丢，只换位置**（不是删）。
     _nt = now_text.rstrip("。；;.")
     parts = []
     if now_bad:
@@ -1621,9 +2658,6 @@ def light_explain(posture, items, now=None, hours=WINDOW_HOURS, granary=None,
         parts.append("此刻没查出缺口（%s）" % _nt)
     else:
         parts.append("此刻是好的（%s）" % _nt)
-    _bt = "；".join(r for _k, _n, r in bs)
-    if _bt:
-        parts.append("另外：%s" % _bt.rstrip("。；;."))
     if n_act > 0:
         parts.append("还有 %d 件事没处理" % n_act)
     elif n_info > 0:

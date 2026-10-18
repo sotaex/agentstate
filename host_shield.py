@@ -395,6 +395,133 @@ def save_findings(rows):
     _replace_with_retry(tmp, p)
 
 
+# ------------------------------------------------- 体检存档（0.53.0 · P6）----
+# ★ 为什么必须有这一份：网站上的「体检」**没有服务端** —— 它给的是提示词，让用户
+#   在自己机器上跑这个包（`pip install --user antinel` ＋ `host-audit`）。
+#   所以「装前体检过」这件事**只可能**由本机留下证据。不落盘就永远判不出来，
+#   装完监理之后必然再催一次 —— 而「催了但人家已经查过」是不可接受的缺陷。
+# ★ 边界（「只读」承诺能否保住的全部关键，方案 v1.7 §28.4）：
+#   · 只写自家目录 `~/.antinel/health/`，**只增不改**；
+#   · 内容**只含路径与计数**（键白名单由 `ci/inbox_guards_0353.py` 的 H9 钉死），
+#     不含任何文件内容 —— 它读的是体检结论，不是用户的数据；
+#   · 保留最近 12 份（`HEALTH_KEEP`），超出的按最旧清理。清理失败**不影响**存档
+#     本身：宿主 safe-delete 会抛**非 OSError**（同 `audit_chain.py` 踩过的那个坑），
+#     家务事不许把正经事搞崩、更不许让屏幕谎报「没存下来」。
+HEALTH_SCHEMA = "antinel.health/1"
+HEALTH_KEEP = 12
+
+
+def health_dir():
+    return os.path.join(_hub_dir(), "health")
+
+
+def health_reports():
+    """本机历次体检存档，按时间升序（文件名带定宽时间戳 ⇒ 名字序＝时间序）。"""
+    d = health_dir()
+    try:
+        names = [n for n in os.listdir(d)
+                 if n.startswith("audit-") and n.endswith(".json")]
+    except OSError:
+        return []
+    return [os.path.join(d, n) for n in sorted(names)]
+
+
+def save_health_report(doc):
+    """存一份体检报告，返回落盘路径。★ 只增不改 ＋ 保留最近 HEALTH_KEEP 份。"""
+    d = health_dir()
+    os.makedirs(d, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    # ★ 后缀**定宽**（`-000`／`-001`…）而不是"撞名才补 `-2`"：
+    #   后者在**同一秒内连存**时字典序会乱（`-10` 排在 `-2` 前面），
+    #   而清理与"哪份最新"全靠名字序 —— 排错就等于清掉最新的那份。
+    n = 0
+    while True:
+        p = os.path.join(d, "audit-%s-%03d.json" % (stamp, n))
+        if not os.path.exists(p):
+            break
+        n += 1
+    tmp = p + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(doc, f, ensure_ascii=False, indent=1)
+    _replace_with_retry(tmp, p)
+    _prune_health()
+    return p
+
+
+def _prune_health():
+    """超出 HEALTH_KEEP 的最旧存档**改名归档**（零删除纪律），返回归档几份。
+
+    ★ 0.53.0（T1.2）改：旧版是 `os.remove` 硬删 —— 设计 §14.7 原文"保留最近
+      12 次（多余归档，不删）"，且硬删违本仓零删除纪律（退役件 `.away-<时间戳>`
+      命名）。改名后文件不再匹配 `audit-*.json` ⇒ `health_reports()` 不再列它，
+      **轮转语义不变**，但字节都还在（误清了也找得回）。
+    归档失败就留着（不抛）—— 家务事不许把正经事搞崩。
+    """
+    try:
+        files = health_reports()
+    except Exception:                                        # noqa: BLE001
+        return 0
+    extra = len(files) - int(HEALTH_KEEP)
+    if extra <= 0:
+        return 0
+    gone = 0
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    for p in files[:extra]:
+        try:
+            os.replace(p, "%s.away-%s" % (p, stamp))
+            gone += 1
+        except Exception:                                    # noqa: BLE001
+            continue        # 宿主守卫抛的可能不是 OSError（同 audit_chain 踩过的坑）
+    return gone
+
+
+def exam_reminder_check(now=None):
+    """T1.3：超 24h 未体检 ⇒ 收件箱出 1 条提醒（设计 v1.11 §29.1）。返回 `(出了吗, 为什么)`。
+
+    ★ **判定唯一实现＝`inbox_model.exam_state`**（本函数不第二份判定；
+      四态状态机 S0–S3 的定义与三链口径都在那个 docstring 里）。
+    ★ **去重＝链上查**：hub rollup 链里已有 `type=exam_reminder` 的记录
+      ⇒「出过了」，不再出。记在链上而不是另养一个状态文件 —— 链本身就是
+      这类事实的家（「只出一次，出过就记」，设计 §29.1 原文）。
+    ★ **不弹气泡**（`notify=False`）：温和提醒不走敲门通道；收件箱呈现 ＋
+      daemon 的 toast 知会足够 —— 与 zone 同步记录同一哲学（0.35.3）。
+    ★ **级别 L1「注意」不归 L2**：施工单 v1.4 字面写 L2，但 L2 在产品机制里
+      ＝`inbox_bubble.URGENT_LEVELS`＝**置顶不自动消失的紧急提醒窗**
+      （`ci/inbox_guards_0514.py` 判据钉死三元组），「还没体检」弹紧急窗与
+      设计 §29「出现一条」的意图冲突 ⇒ 归 L1（toast 知会、语义＝知情即可、
+      分档落「要处理」——做体检确实只有用户本人能完成）。
+      ★ 这条决策已记入施工单 v1.5 待创始人复核；若裁定改回 L2，改
+        `inbox_model.LEVEL_OF_KIND["exam_reminder"]` 一处即可，TITLE／
+        判据／分档全部同源跟随。
+    ★ 出不出都不抛：家务事不许把正经事搞崩（调用方是 daemon tick）。
+    """
+    try:
+        import inbox_model as M
+        state, info = M.exam_state(now=now)
+        if state not in ("S1", "S3"):
+            return False, "不出（%s）" % state
+        # ── 去重：链上出过就不再出 ──
+        import session_dna as sd
+        for _day, rec in sd._rows(sd._iter_day_files(_hub_rollup_dir()),
+                                  float("inf"), [False]):
+            if rec.get("type") == "exam_reminder":
+                return False, "出过了（链上已有 exam_reminder）"
+        if state == "S1":
+            reason = "装好一天了，还没做过体检——点这里花一分钟做一次"
+            subkind = "never"
+        else:
+            _d = info.get("days_since_exam")
+            reason = ("上次体检是 %d 天前——点这里花一分钟做一次" % int(_d)
+                      if _d is not None else
+                      "上次体检过去挺久了——点这里花一分钟做一次")
+            subkind = "overdue"
+        record(None, "exam_reminder", reason=reason, subkind=subkind,
+               severity="info", notify=False)
+        return True, "出了 1 条（%s）" % state
+    except Exception as e:                                    # noqa: BLE001
+        return False, "判定失败（不出）：%s: %s" % (type(e).__name__, e)
+
+
 def load_watch_registry(root):
     """rules/hosts/*.json → [{host, lock_dirs, tier, roots, watch:[{path, kind, gate_default, lock_dirs}]}]
 
@@ -432,9 +559,54 @@ def load_watch_registry(root):
     return out
 
 
+def host_names(root=None):
+    """`rules/hosts/*.json` → `{host: 人话名}`（只收**写了 `name`** 的宿主）。
+
+    ★★ 0.53.0（T3.3/T6.1）：页面上的工具名走这一处映射。为什么放在本模块：
+      `rules/hosts/*.json` 的读取权归登记表宿主模块（`load_watch_registry`
+      同在此），否则就成了第二份读取实现。
+    ★ **没有 `name` 的宿主不在表里**，调用方（`host_display_name`）退回原
+      标签 —— 编一个好听的显示名，就是把"没核实"显示成"已核实"。
+    ★ 缓存一次：登记表随包发布、运行期不变（被投毒是链另一侧的事）。
+    """
+    global _HOST_NAMES_CACHE
+    if _HOST_NAMES_CACHE is not None:
+        return _HOST_NAMES_CACHE
+    out = {}
+    gdir = os.path.join(root or _pkg_root(), "rules", "hosts")
+    try:
+        for f in sorted(os.listdir(gdir)):
+            if not f.endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(gdir, f), encoding="utf-8") as fh:
+                    d = json.load(fh)
+            except Exception:                                  # noqa: BLE001
+                continue
+            h = str(d.get("host") or f[:-5]).strip()
+            nm = str(d.get("name") or "").strip()
+            if h and nm:
+                out[h] = nm
+    except OSError:
+        pass
+    _HOST_NAMES_CACHE = out
+    return out
+
+
+def host_display_name(h):
+    """工具标签 → 页面显示名（有 `name` 用 `name`，没有照实显示标签）。"""
+    h = str(h or "").strip()
+    if not h:
+        return ""
+    return host_names().get(h) or h
+
+
+#: `host_names()` 的缓存（模块级；`None`＝还没读过）
+_HOST_NAMES_CACHE = None
+
+
 def expand(path):
     """展开 `~` 与 `%VAR%`。
-
     0.28.4：登记表 roots 里用了 `%APPDATA%`／`%LOCALAPPDATA%`（比写死
     `~/AppData/Roaming/...` 可读、可跨机移植），故在 expanduser 之外补 expandvars。
     """
@@ -834,15 +1006,15 @@ _NOTIFY_LINGER = 15
 
 
 def console_is_visible():
-    """★ 0.36.5：值守台窗口**此刻是否可见**（真实枚举，不是推测）。
+    """★ 0.36.5：Antinel 监理窗口**此刻是否可见**（真实枚举，不是推测）。
 
     ★★★ 这条是「右下角又冒小泡泡」那个遗留的**根治点**。
       先纠正上一轮的结论：那次我给的是「服务没启动」—— 那是**现象**，不是根因。
-      实测本轮：服务在监听、值守台窗口在位（520×640）⇒ 它是**间歇**的。
+      实测本轮：服务在监听、Antinel 监理窗口在位（520×640）⇒ 它是**间歇**的。
       ⇒ 「重启就好了」必然复发，因为它压根没碰机制。
 
       泡泡的真身是 `_notify()` 的 `ShowBalloonTip` —— **Windows 气泡通知**，
-      它与值守台窗口是**两条互不相干的通道**。所以「泡泡 ≠ 值守台」不是故障，
+      它与Antinel 监理窗口是**两条互不相干的通道**。所以「泡泡 ≠ Antinel 监理」不是故障，
       是机制设计如此；真正的缺陷是：**该有窗口的时候，它照样弹**。
 
       ⇒ 机制性修法：把「此刻有没有该看的窗口」变成**一个可判定的事实**，
@@ -962,7 +1134,7 @@ def _notify(title, body, click_cmd=None, click_cwd=None):
     ANTINEL_SHIELD_NOTIFY=0 关闭（回归套件用）。
 
     ★★ 0.35.2 改（创始人 2026-10-06「右下冒泡是有问题的」）：
-      1. **可点**：点气泡直接开值守台（旧版 8 秒后自己消失，点了**没有任何反应**）。
+      1. **可点**：点气泡直接开Antinel 监理（旧版 8 秒后自己消失，点了**没有任何反应**）。
       2. 想收到点击就必须**泵消息**：`Start-Sleep` **不泵消息** ⇒
          `BalloonTipClicked` 永远不会触发。这里改成
          **有时限的 `Application::DoEvents()` 循环** —— 既泵消息，又**不会永久挂住**
@@ -1031,7 +1203,7 @@ def notify(title, body):
       修之前本函数直接调 `_notify`，**绕过了 0.36.5 的「窗口可见 ⇒ 不重复弹」判据**
       ⇒ 实测链条：安全键变更（`antinel roots add` / `policy set` / `settings set`）
         → `seven_step` → 本函数 → `_notify` → `_notify_icon_and_tip`（真身
-        ShowBalloonTip），**全链无闸** ⇒ 值守台窗口开着、正显示同一条急事时，
+        ShowBalloonTip），**全链无闸** ⇒ Antinel 监理窗口开着、正显示同一条急事时，
         右下角照样弹泡。
       这是同族第 7 例，也是第一例由**机器调用图**（JDG-02）指出的——
       前 6 例都是人眼撞见的。闸不二次实现：直接问 `console_is_visible()`；
@@ -1048,7 +1220,7 @@ def notify(title, body):
 
 # ══════════════ 通知账（展示层，独立于安全状态文件）══════════════
 # ★★★ 0.40.0（「四行失守」源②的另一半，2026-10-09）：
-#   气泡节流记账（"已弹过" / "已在值守台窗口里显示过"）是**展示层**的事，过去却写在
+#   气泡节流记账（"已弹过" / "已在Antinel 监理窗口里显示过"）是**展示层**的事，过去却写在
 #   **安全状态文件** `host_shield.json` 里，而且每次都是「读整份 → 改一个键 → 整份写回」。
 #   两条后果：
 #     ① 读失败时把默认值写回 ⇒ **编造"已撤防"** ⇒ 哨兵记一条 R0 假失守（source ②）；
@@ -1059,7 +1231,7 @@ def notify(title, body):
 #     互不覆盖：`notice_gate` 用 `rule|snippet`；本模块用 `shown|*` 与 `sent|*`。
 #   ★ 失败方向：拿不到锁 / 读写异常 ⇒ **放弃这一次记账**（少记一次最多多弹一个泡，
 #     绝不许变成"写坏了安全状态"或"卡住钩子"）。
-_LEDGER_SHOWN = "shown|"        # 已在值守台窗口里显示过
+_LEDGER_SHOWN = "shown|"        # 已在Antinel 监理窗口里显示过
 _LEDGER_SENT = "sent|"          # 已弹过气泡
 
 
@@ -1140,7 +1312,7 @@ def ledger_set(key, value):
 
 
 def mark_notify_shown(kind):
-    """记「这件事已经在值守台窗口里显示过」。**只写展示账，绝不碰安全状态。**"""
+    """记「这件事已经在Antinel 监理窗口里显示过」。**只写展示账，绝不碰安全状态。**"""
     return ledger_set(_LEDGER_SHOWN + str(kind), time.time())
 
 
@@ -1168,12 +1340,12 @@ def notify_shown_age(kind):
 
 
 def _notify_throttled(kind, body, force=False, title="Antinel 门闸"):
-    """★ 0.36.5：降噪闸新增**「值守台此刻可见」**这一维 —— 根治右下角小泡泡。
+    """★ 0.36.5：降噪闸新增**「Antinel 监理此刻可见」**这一维 —— 根治右下角小泡泡。
 
     ★★★ 为什么这一维是关键（这是「泡泡又冒出来」的根治点，不是又一个补丁）：
       原降噪闸只有一条规则：**同类事件 30 分钟内不重复**。
       这条规则**完全不看窗口** ⇒ 于是出现这个组合：
-        「值守台窗口正开着，正显示这条急事」 ＋  「系统又弹一个气泡」
+        「Antinel 监理窗口正开着，正显示这条急事」 ＋  「系统又弹一个气泡」
       而这两件事讲的是**同一件事**（有急事，你该去看）。
       ⇒ 用户被迫二选一：看窗 或 消泡。**这是设计缺口，不是偶发故障。**
 
@@ -1230,7 +1402,7 @@ def _click_args():
 #
 #   当天 11:11:47 实测一条 `host_shield_tamper`（`field=enabled`、`subkind=state_drift`、
 #   **`recovered=true`**）—— 它描述的事**已经自愈**（哨兵已按链权威回写恢复），
-#   值守台早就按 `recovered` 把它降到 L1（`inbox_model.level_of_record`）。
+#   Antinel 监理早就按 `recovered` 把它降到 L1（`inbox_model.level_of_record`）。
 #   可**气泡通道**仍按类型一刀切地敲门（`kind in _ALERT_KINDS and not _silent`）。
 #   而同一时刻 `guard_posture()` 是 **guarding（值守中）** ——
 #   也就是说：**通知在说「失守」，事实是「值守中」。通知与事实相反。**
@@ -1262,7 +1434,7 @@ def note_bubble_suppressed(kind, why):
 
 
 def bubble_self_report():
-    """气泡保护的自报（可查询）：弹了几条、压了几条、各为什么、值守台在不在岗。
+    """气泡保护的自报（可查询）：弹了几条、压了几条、各为什么、Antinel 监理在不在岗。
 
     ★ 回答「这个保护今天生效了吗」—— 答不出来的保护不许上线（交接件 §6）。
     """
@@ -1277,12 +1449,12 @@ def bubble_self_report():
 
 
 def console_channel_status():
-    """值守台通道**在岗吗** —— 气泡只是「值守台不在岗」时的兜底，必须能说清。
+    """Antinel 监理通道**在岗吗** —— 气泡只是「Antinel 监理不在岗」时的兜底，必须能说清。
 
-    ★ 为什么（0.43.1 实测）：值守台的正当通道是 `inbox_notify` 的 Windows Toast
+    ★ 为什么（0.43.1 实测）：Antinel 监理的正当通道是 `inbox_notify` 的 Windows Toast
       （落操作中心、错过还能回头看），它由 `inbox_daemon` 发；而 `inbox_daemon`
-      **全仓没有自动启动点**（其模块自述）。⇒ 值守台不在岗时，气泡是唯一通道。
-      "气泡在弹"到底是"有急事"还是"值守台没起"，必须能从一处看出来。
+      **全仓没有自动启动点**（其模块自述）。⇒ Antinel 监理不在岗时，气泡是唯一通道。
+      "气泡在弹"到底是"有急事"还是"Antinel 监理没起"，必须能从一处看出来。
     """
     st = {"visible": console_is_visible(), "windows": None}
     try:
@@ -1433,7 +1605,7 @@ def bubble_decision(kind, rec, force=False):
     不取自"名字在不在名单里"。五条规则，缺一不可：
 
       ① 不在告警集合 ⇒ 不弹（心跳、执法留痕、usage_delta 等常规记录）；
-      ② **已自愈（`recovered is True`）⇒ 不弹** —— 它**没有后果**，值守台仍收。
+      ② **已自愈（`recovered is True`）⇒ 不弹** —— 它**没有后果**，Antinel 监理仍收。
          这是 0.43.1 修的那条：过去自愈事件照样敲门，通知与事实相反；
       ③ `host_shield_revived` ⇒ 不弹（Antinel 自己已经处理掉了，"能自己解决的不敲门"）；
       ④ 非 critical 的 `host_shield_zone_locked` ⇒ 不弹（常规执法）；
@@ -1464,7 +1636,7 @@ def notify_owner(title, body, kind="block|owner", force=False):
         · `host_shield._notify`（哨兵/paramedic 事件）—— 图标随姿态（0.36.5 修过）；
         · `hooks/pre_tool_use.notify_owner`（拦截事件）—— **自己 spawn 一份 PowerShell，
           图标写死 `SystemIcons.Warning`**（0.36.5 的图标修复**只改了这一条的另一份**）；
-        · `inbox_notify.toast`（值守台，WinRT，落操作中心）。
+        · `inbox_notify.toast`（Antinel 监理，WinRT，落操作中心）。
       三条各自一套去重、各自一套图标 ⇒ 修好一条、漏掉另一条（本仓「同一件事两处实现」
       的标准形状，且这正是「改了一处漏一处」的第 N 次）。
       ⇒ 现在钩子与 CLI 只发一条命令：**委托到本函数**。
@@ -1524,7 +1696,7 @@ def record(audit_dir, kind, **kw):
 
     ★ 可选结构化字段 `recovered=True`（0.35.3，见 docs/AUDIT_SCHEMA.md v1.10）：
       ＝"这条记录描述的事**已经自动愈合、没有留下后果**"。
-      消费者（值守台分档 / 日报）**必须读这个字段**，不许解析 `reason` 文案 ——
+      消费者（Antinel 监理分档 / 日报）**必须读这个字段**，不许解析 `reason` 文案 ——
       文案会改，按文案判档的判据会**静默失效**。
       字段缺省 ⇒ 语义＝"未知"，按"有后果"处理（方向收紧）。
     """
@@ -1535,7 +1707,7 @@ def record(audit_dir, kind, **kw):
     force = bool(kw.pop("alert_force", False))
     # ★ 0.35.3：`notify=False` 明确不要气泡。用于**由别的命令顺带产生**的状态记录
     #   （如 `zone add` 同步哨兵执法状态）——创始人 2026-10-06 明确说右下冒泡有问题，
-    #   这类变更由值守台收件箱呈现即可，不再叠一个弹窗。
+    #   这类变更由Antinel 监理收件箱呈现即可，不再叠一个弹窗。
     want_notify = bool(kw.pop("notify", True))
     # 0.28.3（B6 拉锯判定）：窗口在 record()——所有 breach 的必经之路。放在
     # scan_once 会让 paramedic/CLI/直调的 breach 绕过判定（F-19 首版实测踩过：
@@ -1563,7 +1735,7 @@ def record(audit_dir, kind, **kw):
     #   「尽可能少让人处理」）：**气泡只给"需要你动手"的事**。
     #   Antinel 自己已经处理掉的（自愈 = `host_shield_revived`；常规执法 =
     #   非 critical 的 `host_shield_zone_locked`）**不再弹** —— 它们仍然进链、
-    #   仍然在值守台台账里翻得到，但不会来敲你。
+    #   仍然在Antinel 监理台账里翻得到，但不会来敲你。
     #   ★ 判据：**能自己解决的不敲门；只有你才能解决的才敲门。**
     # ★★★ 0.43.1：「该不该弹」交给**唯一真源** `bubble_decision`（判据取自事实：
     #   类型 / recovered / severity / invoked_by），不再内联一段"名单 + 静默"的 if。
@@ -2876,6 +3048,51 @@ def _release_revive_lock(lock):
         pass
 
 
+def _mode_text(mode):
+    """拉起方式（`mode`）→ **人话**（★ 0.51.2，只用于渲染文案）。
+
+    ★ 值的三种形状都要认：
+      · 纯枚举（`detached`）；
+      · `+` 复合（`detached+breakaway`）；
+      · 枚举 **带冒号说明**（`self-check-failed: …`）—— 只翻前缀、留尾巴。
+    ★ 认不出的原样返回（不编）。
+    """
+    s = str(mode or "")
+    table = {
+        "detached+breakaway": "后台独立拉起并脱离子进程组",
+        "detached": "后台独立拉起",
+        "already-running": "已经在运行",
+        "script-missing": "找不到启动脚本",
+        "spawn-failed": "拉起命令执行失败",
+        "unsupported-platform": "此系统不支持",
+        "self-check-failed": "自检没通过",
+    }
+    if s in table:
+        return table[s]
+    if ":" in s:
+        head, _, tail = s.partition(":")
+        if head in table:
+            return "%s：%s" % (table[head], tail.strip())
+    return s
+
+
+def _cause_text(cause):
+    """拉起触发器（`cause`）→ **人话**（★ 0.51.2，只用于**渲染文案**）。
+
+    ★ 结构化字段 `cause=` 照旧写原始枚举（判据/审计按它匹配）；
+      这里只把**给人看的那句话**里的枚举换成人话。
+    ★ 认不出的原样返回（fail-loud：不编一个中文名）。
+    """
+    return {
+        "hook-paramedic": "钩子机制自动触发",
+        "hook-parametric": "钩子机制自动触发",
+        "console": "控制台",
+        "manual": "手动操作",
+        "guard": "巡检",
+        "self-check": "自检",
+    }.get(str(cause or ""), str(cause or ""))
+
+
 def ensure_alive(pkg_root, cause="manual"):
     """paramedic：布防中且哨兵不在/僵死 → 拉起并留痕；拉不起也留痕（不再沉默）。
     armed 以链为准（B4b 系）。心跳陈旧（B2 挂起/僵死）→ 杀掉重拉。
@@ -2884,7 +3101,7 @@ def ensure_alive(pkg_root, cause="manual"):
 
     ★★★ 0.45.0（乙层）：**把「检查（节流）＋ 记账（`last_revive_attempt`）＋ 拉起」
       合成一个临界区**（交接件 §4.3 乙层）。为什么：节流失效的主因是"秒到分钟级
-      错开的覆盖或静默拒写"（§4.2）—— 钩子 / 值守台 / 计划任务三个 paramedic
+      错开的覆盖或静默拒写"（§4.2）—— 钩子 / Antinel 监理 / 计划任务三个 paramedic
       会各自读到"该拉起了" ⇒ 双双拉起。锁把「检查完了还没记账就去拉起」这条
       路径直接关掉。**语义一字未改**（原函数体原样搬进 `_ensure_alive_locked`）。
     返回 "disabled"|"throttled"|"alive"|"stale-revived"|"revived"|"spawn-failed"|"error"。"""
@@ -2920,8 +3137,9 @@ def _ensure_alive_locked(pkg_root, cause="manual"):
             _on_duty, _why = sentinel_on_duty(st)
             if _why == "pid-reused":
                 record(audit_dir, "host_shield_breach", decision="deny", severity="warning",
-                       reason="监理 pid=%s 的进程号已被复用（在岗名片记的启动时刻与"
-                              "进程实际创建时刻不符）——旧监理已死，判不在岗并重启" % old_pid)
+                       reason="监理（进程号 %s）的进程号已被系统分给了别的程序"
+                              "（在岗名片记的启动时刻与进程实际创建时刻对不上）"
+                              "——旧监理已停止，判定不在岗并重启。" % old_pid)
                 _alive = False
         if _alive:
             # B2：pid 活着 ≠ 在干活。心跳陈旧 = 挂起/僵死 → 杀掉重拉。
@@ -2962,9 +3180,10 @@ def _ensure_alive_locked(pkg_root, cause="manual"):
                 if started_age is None:
                     record(audit_dir, "host_shield_breach", decision="deny",
                            severity="warning",
-                           reason="监理 pid=%s 活着但心跳与启动时刻均不可读——"
-                                  "无法判定在岗，保守不杀（宁可漏杀不可误杀）；"
-                                  "请人工检查" % old_pid)
+                           reason="监理（进程号 %s）还在运行，但读不到它的心跳、"
+                                  "也读不到它的启动时刻——没法判断它到底在不在岗，"
+                                  "所以先不动它（宁可漏杀，不可误杀）；请人工检查。"
+                                  % old_pid)
                     return "alive"
                 # 落到这里：进程活得比 _STALE_AFTER 久，却一条心跳都没有 → 判僵死
             elif age <= _STALE_AFTER:
@@ -2980,8 +3199,9 @@ def _ensure_alive_locked(pkg_root, cause="manual"):
                        else "%.0f 分钟前" % (age / 60.0))
             if img and not img.lower().endswith(("python.exe", "pythonw.exe")):
                 record(audit_dir, "host_shield_breach", decision="deny", severity="critical",
-                       reason="监理无心跳（%s）且旧进程镜像异常（%s），"
-                              "拒绝自动重启——须人工检查 pid=%s" % (age_txt, img, old_pid))
+                       reason="监理没有心跳（%s），而且旧进程的运行程序不对（%s），"
+                              "拒绝自动重启——需要人工检查（进程号 %s）。"
+                              % (age_txt, img, old_pid))
                 return "stale-revived"
             if old_pid:
                 subprocess.run([_TASKKILL, "/F", "/PID", str(old_pid)],
@@ -2991,14 +3211,14 @@ def _ensure_alive_locked(pkg_root, cause="manual"):
             ok, pid, mode = spawn_sentinel(pkg_root)
             if ok:
                 record(audit_dir, "host_shield_revived", decision="allow", severity="critical",
-                       reason="监理无心跳（%s，疑似挂起/僵死），已强制重启"
-                              "（旧 pid=%s，mode=%s）" % (age_txt, old_pid, mode),
+                       reason="监理没有心跳（%s，像是卡住了），已经强制重启"
+                              "（旧进程号 %s，拉起方式：%s）。" % (age_txt, old_pid, _mode_text(mode)),
                        pid=pid, cause=cause, spawn_mode=mode)
                 return "stale-revived"
             record(audit_dir, "host_shield_spawn_failed", decision="deny", severity="critical",
                    subkind="spawn_failed",
-                   reason="监理无心跳（%s）且重启失败（旧 pid=%s，cause=%s）——门闸无人值守"
-                          % (age_txt, old_pid, cause),
+                   reason="监理没有心跳（%s），重启也没成功（旧进程号 %s，触发方式：%s）"
+                          "——现在没人值守。" % (age_txt, old_pid, cause),
                    cause=cause)
             return "spawn-failed"
         # ★ 0.40.0：按字段更新（旧写法在 state 读坏时会把默认值整份写回）
@@ -3009,13 +3229,16 @@ def _ensure_alive_locked(pkg_root, cause="manual"):
         ok, pid, mode = spawn_sentinel(pkg_root)
         if ok:
             record(audit_dir, "host_shield_revived", decision="allow", severity="warning",
-                   reason="监理不在（旧 pid=%s），由 %s 重新拉起（mode=%s）" % (old_pid, cause, mode),
+                   reason="监理刚才不在（旧进程号 %s），已经由%s重新拉起（拉起方式：%s）。"
+                          % (old_pid, _cause_text(cause), _mode_text(mode)),
                    pid=pid, cause=cause, spawn_mode=mode)
             return "revived"
         record(audit_dir, "host_shield_spawn_failed", decision="deny", severity="critical",
                subkind="spawn_failed",
-               reason="监理死亡（旧 pid=%s）且拉起失败（cause=%s，mode=%s）——门闸无人值守"
-                      % (old_pid, cause, mode), cause=cause)
+               reason="监理已停止（旧进程号 %s），重新拉起也没成功（触发方式：%s，"
+                      "拉起方式：%s）——现在没人值守。"
+                      % (old_pid, _cause_text(cause), _mode_text(mode)),
+               cause=cause)
         return "spawn-failed"
     except Exception:
         return "error"
@@ -3216,7 +3439,7 @@ def guard_posture(pkg_root=None):
                     "why": "监理默认没在值守。开启后才会拦、才会记账。",
                     "evidence": {"armed": False}, "can_fix": False, "fix": None,
                     # ★ 0.35.3：**不给按钮**。开启要装一个开机自启任务（要管理员权限），
-                    #   值守台点一下**做不到** —— 给个点了没用的按钮，就是"假按钮"
+                    #   Antinel 监理点一下**做不到** —— 给个点了没用的按钮，就是"假按钮"
                     #   （创始人最恨的形状）。所以只如实说"去哪儿开"。
                     "fix_hint": "要开启，在终端执行一次：antinel host-shield enable"
                                 "（需要管理员权限；装一次后开机自启）"}
@@ -3326,7 +3549,7 @@ def guard_posture(pkg_root=None):
                     #   它仍然留在 `evidence` 里（要查的人查得到）。
                     # ★★ 0.49.0 再删「最后心跳 N 分钟前」（创始人 2026-10-12 第 3 条）：
                     #   与 pid **同型**，而且比 pid 更糟 —— pid 只是没用，
-                    #   心跳读数是**会说谎的数字**：值守台页面**零自动刷新**
+                    #   心跳读数是**会说谎的数字**：Antinel 监理页面**零自动刷新**
                     #   （无 meta refresh / setInterval / location.reload，实测），
                     #   所以「最后心跳 6 分钟前」是**渲染那一刻冻结的值**，
                     #   页面开一小时它永远写 6 分钟前。这与托盘 0.35.3 修掉的
@@ -3397,7 +3620,7 @@ def guard_posture(pkg_root=None):
 
 
 def guard_fix(pkg_root=None, action=None):
-    """就地修好当前态势（值守台上那个"马上修复"按钮的落地）。
+    """就地修好当前态势（Antinel 监理上那个"马上修复"按钮的落地）。
 
     返回 `(ok, msg)`。★ 修不了就**如实说修不了**，不许回一个"已修复"。
     """
@@ -3481,7 +3704,7 @@ def _sentinel_heartbeat_chain():
     ★★ 为什么需要"自注册"（**真缺陷**，本机 worktree 实测 2026-10-13）：
       `sentinel_audit_dir()` 旧实现是 `_shield_audit_dir(_pkg_root())` —— 按
       **读者**的包根猜哨兵写哪。哨兵在 A 仓（带 `.psl` ⇒ 写包审计）、读者
-      （值守台/CLI）跑在 B 目录（无 `.psl` ⇒ 读中枢 rollup）时，两边指向
+      （Antinel 监理/CLI）跑在 B 目录（无 `.psl` ⇒ 读中枢 rollup）时，两边指向
       **不同的链**：读到几小时/几天前的老记录 ⇒ `guard_posture` 判"心跳断档"
       ⇒ **假失守**（进程明明活着，页面挂红，点「马上修复」还撞 already-running
       幂 etc. 点了没反应）。这与 0.35.3 修过两次的"包根/审计目录二义性"
@@ -3549,7 +3772,7 @@ def _task_watchdog(state, audit_dir, now):
         · 状态**转变**（在→不在）⇒ 立刻留痕 + 弹窗一次；
         · 状态**持续**不变 ⇒ 不重复留痕，但每 `_TASK_MISSING_REANNOUNCE`
           再提醒一次（免得"没声了"被读成"好了"）；
-        · 状态本身在值守台常驻显示（`guard_posture` / 运行状态页），**不隐藏**。
+        · 状态本身在Antinel 监理常驻显示（`guard_posture` / 运行状态页），**不隐藏**。
     """
     _ti = task_installed()
     _prev_ti = state.get("_task_installed_last", "unset")
@@ -3571,13 +3794,13 @@ def _task_watchdog(state, audit_dir, now):
     if _ti is False:
         record(audit_dir, "host_shield_breach", decision="deny",
                severity="warning", subkind="autostart_missing",
-               reason="登录自启缺失（计划任务与启动文件夹均无）"
-                      "——监理不会随登录自启（#6）")
+               reason="开机自启没装上（计划任务和启动文件夹里都没有）"
+                      "——重开机后监理不会自己起来。")
     else:
         record(audit_dir, "host_shield_task_unknown", decision="alert",
                severity="warning", subkind="task_unknown",
-               reason="无法确认自启状态（schtasks 不可用或被策略拦截）"
-                      "——门闸是否随登录自启，这台电脑查不出来（#6）")
+               reason="查不到开机自启的状态（系统的计划任务命令用不了、或被安全策略挡了）"
+                      "——这台电脑上，监理会不会随开机起来，查不出来。")
     return True
 
 
@@ -3607,15 +3830,15 @@ def scan_once(root, state, audit_dir, regs=None):
             #   与「有人在对抗」是两回事。此处对齐 H-7 在补锁路径上的既有措辞：
             #   只陈述事实（ACL 未能限制写入），**不**做不成立的归因。
             #   ★ 0.42.0：文案里的 markdown 加粗（`**不等于**`）被 `0360 W01`
-            #     「页面无 markdown 星号」抓到 —— 值守台把 `**` 当字面文本显示，
+            #     「页面无 markdown 星号」抓到 —— Antinel 监理把 `**` 当字面文本显示，
             #     用户会看到一对裸星号。这是 **0.41.0 修 S34 时我自己引入的回归**，
             #     直到 0.42.0 才被 W01 抓住（"修好 A 却弄坏 B"的又一实例）。
             #     改成引号限定，**不弱化语义**：「不等于」三个字必须留着（S34 守着它）。
             record(audit_dir, "host_shield_zone_locked", decision="deny",
                    severity="warning" if _ok else "critical",
                    subkind="zone_ok" if _ok else "zone_lock_failed",
-                   reason=("安全区已上锁（区内防篡改；出网由 net_mode 把闸）：%s" if _ok
-                           else "安全区【上锁未生效】——本目录 ACL 未能限制写入"
+                   reason=("安全区已上锁（区内防改；出网另由网络闸管）：%s" if _ok
+                           else "安全区【上锁没生效】——本目录的访问控制没能限制写入"
                                 "（可核：icacls 该目录）；注意：「不等于」有进程在对抗门闸：%s")
                           % zpath)
             touched = True
@@ -3652,8 +3875,8 @@ def scan_once(root, state, audit_dir, regs=None):
                 if not os.path.isfile(_sp):
                     record(audit_dir, "host_shield_breach", decision="deny",
                            severity="critical", subkind="hook_registration_lost",
-                           reason="宿主钩子注册文件消失：%s —— 闸门可能已被拔线"
-                                  "（uninstall 或删除），须人工确认" % _sp)
+                           reason="工具的钩子注册文件不见了：%s —— 闸门可能已被拔线"
+                                  "（被卸载或删除），需要人工确认。" % _sp)
                     touched = True
                 else:
                     with open(_sp, "rb") as _f:
@@ -3662,13 +3885,13 @@ def scan_once(root, state, audit_dir, regs=None):
                     if "pre_tool_use.py" not in _txt and "post_tool_use.py" not in _txt:
                         record(audit_dir, "host_shield_breach", decision="deny",
                                severity="critical", subkind="hook_registration_lost",
-                               reason="注册文件中已找不到 Antinel 钩子条目：%s" % _sp)
+                               reason="注册文件里已经找不到 Antinel 的钩子条目：%s" % _sp)
                         touched = True
                     elif _sha_hex(_cur) != _sha_hex(_reg.get("sha256")):
                         record(audit_dir, "host_shield_breach", decision="deny",
                                severity="warning", subkind="hook_registration_changed",
-                               reason="钩子注册文件与布防时不一致（合法编辑后请重新 "
-                                      "host-shield enable 刷新基线）：%s" % _sp)
+                               reason="钩子注册文件与布防时记下的样子对不上"
+                                      "（如果你是自己改的，重新布防一次就能对齐）：%s" % _sp)
                         touched = True
             except Exception:
                 pass
@@ -3715,7 +3938,7 @@ def _lock_pending_tree(base, lock_dirs, state, audit_dir, now,
                         touched = True
                     record(audit_dir, "host_shield_breach",
                            decision="deny", severity="warning",
-                           reason="发现符号链接（绕过载体），不予放行：%s" % target)
+                           reason="发现符号链接（可以借它绕开防护），不予放行：%s" % target)
                     touched = True
                 dirnames.remove(dn)
                 continue
@@ -3789,7 +4012,7 @@ def _lock_pending_tree(base, lock_dirs, state, audit_dir, now,
                         touched = True
                     record(audit_dir, "host_shield_lock_held", decision="deny",
                            severity="none",
-                           reason="门闸持锁中（周期性状态留痕；旧机制此处空白）：%s" % target)
+                           reason="门闸正持锁（周期性状态留痕；旧机制这里没有记录）：%s" % target)
                     touched = True
                 continue
             _ok = acl_deny(target)
@@ -3816,8 +4039,8 @@ def _lock_pending_tree(base, lock_dirs, state, audit_dir, now,
             elif _cnt == CONTEST_TIMES:
                 record(audit_dir, "host_shield_contested", decision="deny",
                        severity="critical",
-                       reason="同一落点 %.0f 分钟内被补锁 %d 次 —— 上锁未稳定生效或"
-                              "有进程在对抗门闸，须人工介入：%s"
+                       reason="同一个落点在 %.0f 分钟内被补锁 %d 次 —— 上锁没能稳定生效，"
+                              "或者有进程在对抗门闸，需要人工介入：%s"
                               % (CONTEST_WINDOW / 60.0, _cnt, target))
             touched = True
     return touched
@@ -3870,7 +4093,7 @@ def _register_sentinel_start(pid, started_at, audit_dir, armed):
 
     登记四个字段：`sentinel_pid` / `sentinel_started_at` /
     **`sentinel_audit_dir`**（心跳链目录，新增）/ `enabled`（布防位）。
-    ★ 为什么自注册 `sentinel_audit_dir`：读者（值守台/CLI）从此不再按
+    ★ 为什么自注册 `sentinel_audit_dir`：读者（Antinel 监理/CLI）从此不再按
       **读者包根**猜哨兵写哪条链（猜错 ⇒ 读老心跳 ⇒ 假失守，A1）。
       哨兵是心跳的**生产者**，链的位置只有它说得准 —— 自注册即事实来源。
     ★ 为什么单独成函数：`run_sentinel` 是死循环、判据跑不起来；抽出来后
@@ -3911,7 +4134,7 @@ def run_sentinel(root):
     #   研发期自检**必然**不符（登记停在发版那一刻），那是**范畴事实**，不是防线失守。
     #   记 `host_shield_dev_drift`（**另一种类型**，不是 severity 更低的 tamper）——
     #   因为"防线失守"这个判断本身就是**错的**；类型错了，读者层再修也修不回来。
-    #      · `host_shield_dev_drift` ⇒ 值守台 L1（注意）＋ 不进"要处理"；**不弹气泡**
+    #      · `host_shield_dev_drift` ⇒ Antinel 监理 L1（注意）＋ 不进"要处理"；**不弹气泡**
     #        （它不在 `_ALERT_KINDS` 里 —— 研发噪声不该敲门）。
     #      · 已出厂（登记版本 ≥ 代码版本、或不是源码检出）⇒ 照旧 `host_shield_tamper`
     #        critical ⇒ **R0**（负控；判据 S25）。
@@ -3922,13 +4145,13 @@ def run_sentinel(root):
         if _is_dev:
             record(audit_dir, "host_shield_dev_drift", decision="deny", severity="warning",
                    field="self-check", subkind="code_drift",
-                   reason="研发态：代码与登记表不符（改动未重建清单）——"
+                   reason="研发迭代中：运行代码与出厂登记对不上（改了代码还没重新登记）——"
                           "这一版还没发出去，不是防线失守；监理照常在岗。"
                           + "；".join(problems))
         else:
             record(audit_dir, "host_shield_tamper", decision="deny", severity="critical",
                    field="self-check", subkind="code_drift",
-                   reason="监理启动自检不符：" + "；".join(problems))
+                   reason="监理启动时的自检没通过：" + "；".join(problems))
     # armed 权威（B4b 系）：链有据→链；无据→state 文件（残差见模块头）
     chain_armed = chain_armed_scan(audit_dir)
     armed = bool(state.get("enabled")) if chain_armed is None else chain_armed
@@ -3938,9 +4161,9 @@ def run_sentinel(root):
         #   （结构化"已自愈、无后果"），否则它冒充 R0 失守（源②的假失守之一）。
         record(audit_dir, "host_shield_tamper", decision="deny", severity="critical",
                field="enabled", subkind="state_drift", recovered=True,
-               reason="state 文件 enabled=%s 与审计链最近状态（%s）不一致——以链为准。"
-                      "如非本人操作请检查；需变更请走 antinel host-shield enable/disable"
-                      % (state.get("enabled"), "armed" if chain_armed else "disarmed"))
+               reason="防护开关的实际值（%s）与安全记录里最后一次的值（%s）对不上"
+                      "——以记录为准。如果不是你自己改的，请检查；要改开关请走正规入口"
+                      % (state.get("enabled"), "已布防" if chain_armed else "已撤防"))
     state["enabled"] = armed
     last_good = json.loads(json.dumps(state))       # 深拷贝基线（workspaces/zones/windows 的可信值）
     fp = _state_fp(last_good)
@@ -3955,7 +4178,7 @@ def run_sentinel(root):
     # ★ 0.48.5（A1）：启动登记收敛到 `_register_sentinel_start()` —— state 的
     #   **唯一写入口**（与 `update_state_fields` 的纪律一致：登记字段只此一处），
     #   并新增 `sentinel_audit_dir`：哨兵**自注册**它写心跳的那条链的目录。
-    #   读者（值守台/CLI）优先认这个注册值，不再按读者包根猜（A1 假失守的根因：
+    #   读者（Antinel 监理/CLI）优先认这个注册值，不再按读者包根猜（A1 假失守的根因：
     #   猜错链 ⇒ 读老心跳 ⇒ 判"心跳断档" ⇒ 渲染成红，而哨兵明明活着）。
     if not _register_sentinel_start(state["sentinel_pid"],
                                     state["sentinel_started_at"],
@@ -4005,14 +4228,14 @@ def run_sentinel(root):
                            subkind="state_drift",
                            # ★★ 0.40.0（A3）：这条**已经自动愈合**（本函数刚把
                            #   enabled 回写成链权威）⇒ 必须带**结构化标记**
-                           #   `recovered=True`，让值守台按字段降档到"看一眼"。
+                           #   `recovered=True`，让Antinel 监理按字段降档到"看一眼"。
                            #   过去缺这个标记 ⇒ 33 条自愈事件冒充 R0 失守
                            #   （全链 30 天只有 3 条打对了标记）。
                            recovered=True,
-                           reason="state 文件 enabled 在运行期被改为 %s，与链权威（%s）不一致"
-                                  "——已回写恢复。如非本人操作请检查；变更请走 "
-                                  "antinel host-shield enable/disable"
-                                  % (not armed, "armed" if armed else "disarmed"))
+                           reason="防护开关在运行期被改成了 %s，与安全记录里的值（%s）对不上"
+                                  "——已自动改回来。如果不是你自己改的，请检查；"
+                                  "要改开关请走正规入口"
+                                  % (not armed, "已布防" if armed else "已撤防"))
             state["enabled"] = armed
             # 2) state 安全字段守卫（B4 系）：无链背书的变化 → 宽限 2 拍后回写恢复
             #    ★ 0.35.3：判定与回写全部走 `_state_guard_step()`（唯一实现，
@@ -4062,7 +4285,8 @@ def run_sentinel(root):
                         _REG_TAMPER_LAST[0] = time.time()
                         record(audit_dir, "host_shield_tamper", decision="deny",
                                severity="critical", field="registry", subkind="code_drift",
-                               reason="登记表与 manifest 不符（疑似运行期投毒）——按启动缓存执法："
+                               reason="登记清单与出厂登记对不上（疑似运行期被投毒）"
+                                      "——按启动时缓存的那份执行："
                                       + "；".join(prob_regs)[:120])
             scan_once(root, state, audit_dir, regs=regs)
             # ★ 出口账本（0.29.0）：节流到每 15 拍 ≈ 30 秒一次。

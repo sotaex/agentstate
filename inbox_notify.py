@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: Apache-2.0
 
-"""值守台 · 通知层（第 1 层）：Toast 替掉"15 秒就没了"的气泡。
+"""Antinel 监理 · 通知层（第 1 层）：Toast 替掉"15 秒就没了"的气泡。
 
 ★ 要解决的原问题：**告警会消失、会被漏掉**。
   旧气泡 `ShowBalloonTip(15000)` 15 秒后不见、也不进通知中心；
@@ -23,6 +23,7 @@ import time
 
 import inbox_config as C
 import inbox_model as M
+import inbox_window as WIN
 
 MIN_INTERVAL = 1800          # 同类通知最小间隔（秒），与 host_shield 同值
 
@@ -63,6 +64,10 @@ def _ps_quote(s):
 
 def register_aumid_script():
     """生成注册 AppUserModelID 的 PowerShell（不注册 AUMID，Toast 可能不显示）。"""
+    # ★ 0.52.0：Toast 图标从 python.exe 换成**品牌图标**（桌面/自启/AUMID 三处
+    #   快捷方式统一；单一真源 inbox_window.brand_icon_path）。缺失（极旧安装）
+    #   退回 sys.executable —— 有总比没有强，但不假造"品牌图标已就位"。
+    icon = WIN.brand_icon_path() or sys.executable
     return (
         "$ErrorActionPreference='SilentlyContinue';"
         "$dir=Join-Path $env:APPDATA 'Microsoft\\Windows\\Start Menu\\Programs';"
@@ -72,7 +77,7 @@ def register_aumid_script():
         "$s.TargetPath=(Get-Command pythonw.exe -ErrorAction SilentlyContinue).Source;"
         "$s.Arguments='-m antinel inbox serve';"
         "$s.IconLocation='%s';"
-        "$s.Save()" % _ps_quote(sys.executable)
+        "$s.Save()" % _ps_quote(icon)
     )
 
 

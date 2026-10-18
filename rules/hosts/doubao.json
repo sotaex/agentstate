@@ -1,5 +1,6 @@
 {
  "host": "doubao",
+ "name": "豆包",
  "vendor": "ByteDance",
  "roots": [
   "%LOCALAPPDATA%/Doubao"

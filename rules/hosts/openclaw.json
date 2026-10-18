@@ -1,5 +1,6 @@
 {
  "host": "openclaw",
+ "name": "OpenClaw",
  "vendor": "OpenClaw",
  "roots": [
   "~/.openclaw-autoclaw"

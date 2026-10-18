@@ -61,8 +61,28 @@ _WALK_EXCLUDE = {".git", ".workbuddy", "__pycache__", "build", "dist", "node_mod
                  "output",
                  # ★ 0.50.4：归档的旧发布件（.whl/.gz/.old 解包副本）同理 ——
                  #   它们是**历史字节**，不是本仓归属对象。
-                 "_archive_dist"}
-_WALK_EXCLUDE_PREFIX = ("antinel-0.", "_backup.away-", "antinel_mcp.away")
+                 "_archive_dist",
+                 # ★★ 0.53.0：`.worktrees/` 是 **git worktree 的另一份检出**
+                 #   （分支副本，实测 `.worktrees/b/` 是旧分支整树：42 处
+                 #   MIT != Apache-2.0 / 缺 SPDX 头）。它与 `out/` 同性质 ——
+                 #   那是**另一棵树**，不是本仓工作树的内容；扫它等于拿
+                 #   "另一个分支的许可证头"判本仓归属，必然假红。
+                 #   ★ 登记：这条此前是**存量红**（L1 长期红在 .worktrees/b，
+                 #     记作"worktree 豁免待创始人拍板"）。本批为了让交付闸门
+                 #     能给出真实结论而**先按口径修正**（不是放宽判据：
+                 #     worktree 里的文件一个都没被改写，只是不再冒充本仓文件）。
+                 #     **待创始人复核**：若要连 worktree 一起管，正确做法是给
+                 #     worktree 自己的 license-map，而不是在本仓判据里混算。
+                 ".worktrees"}
+_WALK_EXCLUDE_PREFIX = ("antinel-0.", "_backup.away-", "antinel_mcp.away",
+                        # ★★ 0.53.0：探针/补丁脚本（`.gitignore` 里已有
+                        #   `_p_*` / `_t_*` / `_probe_*.py` / `_patch_*.py`）
+                        #   是**不入库的工作底稿**，与 `output/` 同性质。
+                        #   实测：不排除 ⇒ L1 每次多报 25 处「缺 SPDX 头」，
+                        #   而这 25 个文件本来就不会进包。
+                        #   ★ 判据与 .gitignore **同口径**：凡是 git 都不收的，
+                        #     就不是"本仓归属对象"，不该被许可证归属判据算进去。
+                        "_p_", "_t_", "_probe_", "_patch_")
 SPDX_RE = re.compile(r"SPDX-License-Identifier:\s*([A-Za-z0-9\-.]+)")
 
 #: 这些目录里的 py/md/html **不要求** SPDX 头（理由登记在 license-map.spdx_exempt_reason）

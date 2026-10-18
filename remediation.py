@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: Apache-2.0
 
-"""值守台 · 失守归因（「为什么 & 怎么办」按钮背后的实现，**唯一实现**）。
+"""Antinel 监理 · 失守归因（「为什么 & 怎么办」按钮背后的实现，**唯一实现**）。
 
 ★ 为什么要有这个模块（创始人2026-10-07 原话）：
   「要让用户知道，是什么原因造成了这个失守，有什么办法能解决，
@@ -136,11 +136,19 @@ def what_got_through(detail=""):
 
 
 def _base(item):
+    import inbox_model as M
+    _raw = str(getattr(item, "detail", "") or "")
     d = dict(
         kind=str(getattr(item, "kind", "") or ""),
         topic=str(getattr(item, "topic", "") or ""),
         level=str(getattr(item, "level", "") or ""),
-        detail=str(getattr(item, "detail", "") or ""),
+        # ★★ 0.51.2 第二轮（创始人截图三）：**detail 进面板前先过
+        #   `M.strip_governance`** —— 研发态治理细节（文件名、保护名单、
+        #   修法命令）不进用户可见文案。唯一实现调 inbox_model，不另写。
+        detail=M.strip_governance(_raw),
+        #: 原文（未消毒）—— 只给 spawn_failed 抠「失败环节」短标签用
+        #: （抠完只留冒号前的用户能懂的一截，治理细节照样进不来）。
+        detail_raw=_raw,
         ts=str(getattr(item, "ts", "") or ""),
         chain_ref=str(getattr(item, "chain_ref", "") or ""),
     )
@@ -229,7 +237,10 @@ def _kind_of(item):
         return "autostart_missing"
     # ★ 文本兜底（只对 `topic` 为空的旧记录；匹配**完整前缀**）
     if k == "host_shield_breach" and not t:
-        if d.startswith("登录自启缺失"):
+        # ★ 0.51.2：新增新文案前缀（`开机自启没装上`）—— 双前缀同列。
+        #   旧记录仍是「登录自启缺失」；新记录走结构化 subkind（上面那条），
+        #   这里只是**兜底不落空**（万一 subkind 丢了也认得出）。
+        if d.startswith("登录自启缺失") or d.startswith("开机自启没装上"):
             return "autostart_missing"
     if k == "host_shield_spawn_failed":
         return "spawn_failed"
@@ -269,10 +280,47 @@ def attribute(item, posture=None, consequences=None):
     b["by_text"] = recognised_by_text(item)   # ★ 靠文案认出来的，页面要标出来
 
     if k == "zone_locked":
-        path = _path_from_detail(b["detail"], [r"须人工介入：(.+)$"])
+        # ★ 0.51.2：路径锚点跟着写侧文案搬家（新「需要人工介入：」＋旧「须人工介入：」）。
+        # ★★ 0.52.0（实测缺口）：当前写侧（host_shield.py:3665，0.45.0 H-7 起）的失败
+        #   文案是「安全区【上锁没生效】——…；注意：「不等于」有进程在对抗门闸：<路径>」，
+        #   **没有**「人工介入」锚点 ⇒ 上面两个模式全落空，面板显示
+        #   「(落点路径没在记录里)」——路径明明在记录里（创始人裁定 #3：亮文件名）。
+        #   兜底模式只认**明确的路径形状**（全角冒号＋盘符＋分隔符＋行尾），不猜。
+        path = _path_from_detail(b["detail"], [r"需要人工介入：(.+)$",
+                                               r"须人工介入：(.+)$",
+                                               r"：([A-Za-z]:[\\/][^：；]*)$"])
         b["path"] = path or "(落点路径没在记录里)"
         t, n = what_got_through(b["detail"])
-        return dict(b, kind=k, title="安全区上锁失败（有进程在写）", b_class=True,
+        # ★★ 0.52.0：面板不许与记录矛盾。当前写侧形态的记录**明确写了**
+        #   「不等于有进程在对抗门闸」（真相是 ACL 没限制住写入）——
+        #   旧文案 headline 却断言「有进程正在写」，与记录直接打架（裁定 #5）。
+        #   ⇒ 按记录形态分流：ACL 形态说 ACL 的实话，对抗形态说对抗的实话。
+        if "上锁没生效" in b["detail"] or "不等于" in b["detail"]:
+            return dict(b, kind=k, title="安全区上锁失败", b_class=True,
+                        cause=("这个落点的安全区锁没有真正生效：落在它上面的改动"
+                               "拦不住，也发现不了。记录里写明了原因——本目录的"
+                               "访问控制没能限制写入（常见于 OWNER RIGHTS 类"
+                               "权限设置），并不是有进程在对抗门闸。落点：%s。"
+                               % b["path"]),
+                        severity=("**这个落点此刻是开着的**：落在它上面的改动拦不住、"
+                                  "也发现不了。"),
+                        severity_note=t,
+                        actions=[
+                            _a(ACT_DROP, "移出监管名单",
+                               hint=("把它从安全区拿掉，监理不再为一个它守不住的落点"
+                                     "反复报警。代价：那个目录从此**不受保护**，"
+                                     "你得自己保证它不被改。")),
+                            _a(ACT_ACCEPT, "就这样放着，我自己盯着",
+                               hint="不改任何设置。代价：这个落点持续无人巡检，"
+                                    "改动不会被告警。"),
+                            _a(ACT_FIX, "再试一次上锁",
+                               hint="Antinel 当场重试一次；还是失败会把原因报给你，"
+                                    "不会假装好了。想自己核验，就看这个目录的"
+                                    "权限设置（记录里写了核验办法）。"),
+                        ],
+                        cost=("一直报警，但监理确实守不住这个落点。"
+                              "反复红而无改善，红灯就没人看了，等于没有守卫。"))
+        return dict(b, kind=k, title="安全区上锁失败", b_class=True,
                     cause=("有进程正在写这个落点，Antinel 上不了锁："
                            "%s。"
                            "上不了锁——要么是有权限的进程正在改它（可能是你自己"
@@ -304,189 +352,251 @@ def attribute(item, posture=None, consequences=None):
                                 "给不出命令，需要你自己确认那个目录是什么程序在写。"),
                     ],
                     cost=("一直报警，但监理确实守不住这个落点。"
-                          "反复红而无改善 ⇒ 红灯就没人看了，"
-                          "等于没有守卫。"))
+                          "反复红而无改善，红灯就没人看了，等于没有守卫。"))
 
     if k in ("self_check", "registry_manifest"):
         # ★ 0.37.1 新增（旧版这两类都被当成「enabled 被改」，给错了第一步）。
         #   两者的处置是同一件：**让代码/登记表与 manifest 重新对上**。
-        return dict(b, kind=k, title="守门的这份代码跟出厂登记对不上",
+        # ★★ 0.51.2 第二轮（创始人：研发态话术/文件名/修法命令不进用户面板）：
+        #   · 「出厂登记/指纹/登记表」是我第一轮自造的术语，用户读不懂 ⇒ 换成
+        #     大白话（「登记的那份」「系统里记的那份」）；
+        #   · cause 不再整段嵌 `b["detail"]`（那里有研发态治理细节、文件名、
+        #     修法命令）——自检没通过这个事实一句说完，细节留研发侧；
+        #   · 去掉 ACT_REARM（用户不会修，也不许让用户修）。
+        return dict(b, kind=k, title="守门的程序跟登记的那份不一样了",
                     b_class=False,
-                    cause=("每次启动都会拿**正在运行的文件**与 manifest 里登记的"
-                           "哈希对一遍；这次对不上：%s。"
-                           "两种可能 —— ①你（或你的构建流程）刚改过这些文件、"
-                           "还没重新签发登记；②有人动过这些文件。"
-                           % (b["detail"] or "（记录里没写具体文件）")),
-                    severity=("认不出此刻守门的是不是原来那道门 ⇒ "
-                              "**按失守算**（宁可报错也不装作没事）。"),
+                    cause=("每次启动都会把**正在运行的程序**跟系统里登记的那份"
+                           "对一遍；这次对不上。"
+                           "两种可能：一、这些程序被改动过，还没重新登记；"
+                           "二、有东西动过它们。"),
+                    severity=("守门的这份程序是不是原来那份，已经认不出来了。"
+                              "这种情况按失守处理——宁可报错，也不装作没事。"),
                     severity_note=_posture_note(posture),
                     actions=[
-                        _a(ACT_REARM, "是我改的：重新签发登记",
-                           cmd="antinel host-shield enable",
-                           hint="走正规入口重装一次，manifest 会被重签，"
-                                "这份代码就重新有了户口。"),
-                        _a(ACT_INFO, "不是我改的：先核对这两个文件",
-                           hint="看它们的修改时间与来源；若不是你自己动的，"
-                                "按「文件被动过」处理。"),
+                        _a(ACT_INFO, "不是我改的：查一下是谁动的",
+                           hint="看看这些程序的修改时间和来源；不是你动的，"
+                                "就按有人动过防护处理。"),
                     ],
-                    cost=("不重签就一直对不上 ⇒ 每次监理启动都会重报同一条，"
-                          "这条红到最后就没人看了。"))
+                    cost="对不上会一直挂着：每次监理启动都报同一条，"
+                         "时间久了就没人看这些红字了。")
 
     if k == "tamper_registry":
-        return dict(b, kind=k, title="受监管名单在没有链记录的情况下被改",
+        # ★★ 0.51.2 第二轮：cause 不再嵌 `b["detail"]`（含研发态治理话术）；
+        #   去掉 ACT_REARM 与其命令行。
+        return dict(b, kind=k, title="受监管名单被改动，改动没走正规入口",
                     b_class=False,
-                    cause=("state 文件里的名单被改动，而这次改动"
-                           "**没有对应的链记录**（说明它不是走正规入口改的）：%s。"
-                           % (b["detail"] or "（记录里没写具体字段）")),
+                    cause=("防护设置文件里记着的受监管名单被改动过，"
+                           "而这次改动在安全记录里没有对应条目"
+                           "——说明它不是走正规入口改的。"),
                     severity=("名单被动过的那段时间，实际被看着的范围"
-                              "**可能跟你的设置不一致**。"),
+                              "可能跟你的设置不一致。"),
                     severity_note=_posture_note(posture),
                     actions=[
-                        _a(ACT_REARM, "按现在的设置重新布防",
-                           cmd="antinel host-shield enable",
-                           hint="把你认可的名单重新登记一次，链上就有了背书。"),
                         _a(ACT_INFO, "先看改成什么了",
                            hint="明细里写了改动前后的值；确认那是不是你要的。"),
                     ],
-                    cost="没有背书的改动会一直被当成可疑；开着又不处理 ⇒ "
-                         "分不清真告警和历史噪音。")
+                    cost="没有登记的改动会一直被当成可疑；一直不处理，"
+                         "就分不清真告警和历史噪音。")
 
     if k == "tamper_enabled":
-        return dict(b, kind=k, title="防护状态文件与审计链不一致", b_class=False,
-                    cause=("有人改过 `host_shield.json` 里的 `enabled`，"
-                           "而链上最后一次记录与之相反。"
-                           "两条记录对不上 ⇒ 要么改文件的人没走正规入口，"
+        return dict(b, kind=k, title="防护状态与安全记录对不上", b_class=False,
+                    cause=("有人改过防护设置文件里的开关值，"
+                           "而安全记录里最后一次记的正好相反。"
+                           "两处对不上：要么改文件的人没走正规入口，"
                            "要么有人想绕开监理的拦截。"),
-                    severity="**防护可能被关掉了**，而这次改动没走 `host-shield`（链上没有）。",
+                    severity="**防护可能被关掉了**，而这次改动没走正规命令（安全记录里没有）。",
                     # ★ 0.37.1：旧版这句写死成 `state 写 enabled=False，链上是 armed`
                     #   —— 一旦实际值不同（或链上最后状态不是 armed），
                     #   界面就在**编数据**。⇒ 改为照抄记录原文，让记录自己说话。
                     severity_note="（这条记录原文：%s）" % (b["detail"] or "（无原文）"),
                     actions=[
-                        _a(ACT_REARM, "重新布防（以链为准，把状态改回来）",
-                           cmd="antinel host-shield enable",
-                           hint="用正规入口重跑一次，链与state 就一致了。"),
-                        _a(ACT_FIX, "确认是不是我改的",
-                           hint="如果你没改过，那就是有东西在动它——"
-                                "先查这个文件的修改时间与来源。"),
+                        # ★ 0.51.2 第二轮：原来是 ACT_FIX（按钮写着「试一下，
+                        #   看能不能修好」）——它并不修什么，只是让人去查；
+                        #   按钮文案与动作对不上（0.37.2 在 zone_locked 修过
+                        #   的同型错）。⇒ 改 ACT_INFO，按钮说「知道了」。
+                        _a(ACT_INFO, "先查是谁动的",
+                           hint="看看这个文件的修改时间和来源；不是你动的，"
+                                "就是有东西在动防护。"),
                     ],
-                    cost="状态与链不一致期间，监理按哪一份执法是**不确定**的；"
-                         "不一致一直挂着，自检就一直不通过。")
+                    cost="设置与安全记录对不上期间，监理按哪一份执行是**不确定**的；"
+                         "一直挂着，自检就一直不通过。")
 
     if k == "tamper":
         # ★ 上面都没对上：不猜，把原文摆出来。
         return dict(b, kind=k, title="登记文件被动过（具体字段记录里没写）",
                     b_class=False,
-                    cause=("这条记录只说动了 `state`，没写清动了哪个字段。"
+                    cause=("这条记录只说动了防护设置，没写清动了哪个字段。"
                            "**不替它猜一个** —— 原文在下面，请你自己核对：%s。"
                            % (b["detail"] or "（无原文）")),
                     severity="防护设置可能被改动了（方向不确定）。",
                     severity_note=_posture_note(posture),
                     actions=[
-                        _a(ACT_REARM, "按现在的设置重新布防",
-                           cmd="antinel host-shield enable",
-                           hint="把你认可的设置重新登记一次，链上就有了背书。"),
                         _a(ACT_INFO, "看这条记录的原文",
-                           hint="原文在「为什么」第一段。"),
+                           hint="原文在「发生了什么」那一段。"),
                     ],
-                    cost="没有背书的改动会一直挂着 ⇒ 自检一直不过。")
+                    cost="没有登记的改动会一直挂着，自检就一直过不了。")
 
     if k == "hook_registration_changed":
-        p = _path_from_detail(b["detail"], [r"基线）：(.+)$", r"不一致：(.+)$"])
+        # ★ 0.51.2：写侧文案人话化后，路径抽取的锚点跟着搬 —— 同时保留旧锚
+        #   （历史记录仍是旧文案）。两条都不命中 ⇒ 路径给"没在记录里"。
+        # ★★ 0.51.2 第二轮：去掉 ACT_REARM＋命令行；「先看改了什么」是查证
+        #   动作不是修复 ⇒ 改 ACT_INFO（按钮不许写着「修」却什么也没修）。
+        p = _path_from_detail(b["detail"], [
+            r"就能对齐）：(.+)$",            # 0.51.2 新文案
+            r"基线）：(.+)$", r"不一致：(.+)$",  # 0.51.2 之前
+        ])
         b["path"] = p or "(设置文件路径没在记录里)"
         return dict(b, kind=k, title="钩子注册文件被改动（防护有缺口）",
                     b_class=False,
                     cause=("工具的钩子注册文件（决定「哪些调用会被拦」）"
-                           "与布防时记录的基线不一致：%s。"
-                           "要么是你合法编辑了它（没刷新基线），"
+                           "与布防时记下的样子对不上：%s。"
+                           "要么是你自己合法编辑了它（没重新布防对齐），"
                            "要么是有东西在拆防护。" % b["path"]),
                     severity="**这个工具的调用现在可能拦不住**——"
                              "取决于改动的内容。",
-                    severity_note="（能确定的是「基线对不上」，不能确定的是「改了什么」。）",
+                    severity_note="（能确定的是「跟布防时的样子对不上」，"
+                                  "不能确定的是「改了什么」。）",
                     actions=[
-                        _a(ACT_REARM, "刷新基线（按现在的文件重新布防）",
-                           cmd="antinel host-shield enable",
-                           hint="如果你确认那个改动是你合法做的，"
-                                "跑这条把基线对齐，缺口就补上了。"),
-                        _a(ACT_FIX, "先看改了什么",
-                           hint="比对设置文件与布防时的基线副本，"
+                        _a(ACT_INFO, "先看改了什么",
+                           hint="比对设置文件与布防时留下的副本，"
                                 "看是不是你改的。"),
                     ],
-                    cost="基线一直不对 ⇒ 每次巡视都报同一条，"
+                    cost="布防基准一直对不上，每次巡视都报同一条，"
                          "要么一直红，要么被忽略；两种都等于没有守卫。")
 
     if k == "autostart_missing":
-        return dict(b, kind=k, title="登录自启缺失（监理不会随开机起来）",
+        return dict(b, kind=k, title="开机自启没装上（监理不会随开机起来）",
                     b_class=False,
-                    cause=("计划任务与启动文件夹里**都没有**登记项"
-                           "（自启三态判定为「不在」）。"
+                    cause=("计划任务和启动文件夹里**都没有**登记项"
+                           "（这两种方式都查过，确实没有）。"
                            "所以监理只在这次会话里活着——"
                            "**一重启就没人在守**。"),
-                    severity="**现在这一刻还在守，但下次登录后不会守。**",
-                    severity_note="（自启三态：True=在／False=不在／None=查不到；"
-                                  "这里是 False=确实不在。）",
+                    severity="**现在这一刻还在守，但下次开机后不会守。**",
+                    severity_note="（自启查过三处：计划任务、启动文件夹，"
+                                  "两处都没有。不是查不到，是真的没装。）",
+                    # ★★ 0.51.2 第二轮：这条**本来就是用户自己的装机动作**
+                    #   （与运行状态页「要开启，在终端执行一次」同口径）——
+                    #   命令留在 hint 里当说明；按钮不再假装能就地修好
+                    #   （旧版 ACT_REARM 点了只会回「没有可就地修复的动作」，
+                    #   是创始人最恨的假按钮形状）。
                     actions=[
-                        _a(ACT_REARM, "装上登录自启（一次就够）",
-                           cmd="antinel host-shield enable",
-                           hint="需要管理员权限。装完之后重启也能自动守。"),
+                        _a(ACT_INFO, "在终端装上开机自启",
+                           hint="执行一次：antinel host-shield enable"
+                                "（需要管理员权限）。装完之后重启也能自动守。"),
                     ],
                     cost="**最坏的一类**：此刻看起来一切正常，"
-                         "但关机重启后防线就没了，且**没有人会告诉你**。")
+                         "但关机重启后防线就没了，而且没有人会告诉你。")
 
     if k == "spawn_failed":
-        reason = _path_from_detail(b["detail"], [r"mode=([^）]*)）"])
-        return dict(b, kind=k, title="监理拉起失败（没人值守）", b_class=False,
-                    cause=("监理进程死后没能被重新拉起。"
-                           + ("失败原因：%s。" % reason if reason else "")
-                           + "常见于**运行中的代码与登记的 manifest 不符**——"
-                           "也就是跑着的守门代码可能不是登记过的那份。"),
-                    severity="**监理不在的这段时间，没人在巡检受监管落点**"
-                             "（外传发现不了）。",
+        # ★★ 0.51.2（创始人 2026-10-17「都在说鸟语」）：**不再从机器串里抠原因**。
+        #   旧实现 `_path_from_detail(b["detail"], [r"mode=([^）]*)）"])` 是从
+        #   `mode=self-check-failed: …）` 这段**序列化碎片**里正则抠出失败原因 ——
+        #   写侧文案一旦人话化（本轮改成「拉起方式：…」），这条正则就**静默失效**，
+        #   归因会退化成"没有原因"（本仓最恨的形状：改 A 悄悄弄坏 B）。
+        #   ⇒ 改成**两段式**：
+        #     ① 新文案（「拉起方式：X」）—— 直接匹配中文键；
+        #     ② 旧文案（`mode=X`）—— 兜底，让**历史记录**仍能归因。
+        # ★★ 0.51.2 第二轮（创始人截图三「集鸟语和愚蠢之大成」）：
+        #   抠 reason 走**原文**（`detail_raw`，消毒前）——消毒后「拉起方式」
+        #   那段括号已被摘掉；抠出后只保留**冒号前的短标签**（「自检没通过」），
+        #   冒号后面是研发态治理细节（文件名、保护名单、修法命令），
+        #   一律不进用户面板（创始人：文件名不列出来会死吗？为什么要写修法，
+        #   用户不会修，我也不会让用户修）。
+        reason = _path_from_detail(b["detail_raw"], [
+            r"拉起方式：([^）]*)）",          # 0.51.2 新文案
+            r"mode=([^）]*)）",               # 0.51.2 之前的历史记录
+        ])
+        short = ""
+        if reason:
+            reason = reason.strip()
+            #: 冒号前短标签：新文案全角「：」、旧文案 ASCII「:」都要切
+            #: （W-SPK4 旧文案夹具 `mode=self-check-failed: xxx` 是 ASCII 冒号）。
+            head = re.split(r"[：:]", reason, 1)[0].strip()
+            #: 旧枚举值先过人话化（self-check-failed → 自检没通过）。
+            try:
+                import inbox_model as _M
+                head = _M.humanize(head)
+            except Exception:                               # noqa: BLE001
+                pass
+            #: 短标签只认「用户能懂且无治理标记」的；治理细节整段丢弃
+            #: （研发态修法在审计链/CLI 里查得到，不进用户面板）。
+            try:
+                import inbox_model as _M
+                _ok = _M.gov_free(head)
+            except Exception:                               # noqa: BLE001
+                _ok = not any(w in head for w in ("研发", "登记", "manifest",
+                                                  "python", "保护名单", "修法"))
+            if head and len(head) <= 20 and _ok:
+                short = head
+        return dict(b, kind=k, title="监理拉起失败", b_class=False,
+                    cause=("监理进程停止后，没能把它重新拉起来。"
+                           + ("失败环节：%s。" % short if short else "")
+                           + "常见于守门的程序被改动过——正在跑的这份"
+                             "和系统里登记的那份不是同一份。"),
+                    severity=("失守的那段时间，受监管的改动没人巡检，"
+                              "文件被改出去也发现不了。"),
                     severity_note=_posture_note(posture),
-                    actions=[
-                        _a(ACT_RETRY, "重新拉起监理",
-                           hint="点这个会当场重试并复测；"
-                                "如果还是失败，会告诉你失败原因，不会假绿。"),
-                        _a(ACT_REARM, "先让代码与登记一致",
-                           cmd="antinel host-shield enable",
-                           hint="自检不符时重跑安装/布防，"
-                                "让 manifest 与实际文件对上。"),
-                    ],
-                    cost="监理不在 ⇒ 这段时间发生的改动不会有告警。")
+                    actions=([_a(ACT_INFO, "知道了",
+                                 hint="现在监理已经在值守，这条是当时的记录。")]
+                             if not _can_revive(posture) else
+                             [_a(ACT_RETRY, "重新拉起监理",
+                                 hint="点这个会当场重试并复测；还是失败会告诉你"
+                                      "失败原因，不会假绿。")]),
+                    cost="监理不在的这段时间，发生的改动不会有告警。")
 
     # breach_other / unknown —— 不硬编归因，但**必须给得出下一步**
+    _acts = [_a(ACT_INFO, "回运行状态页看现探",
+                hint="那里有此刻的实测态势（监理在不在、心跳多旧、自检过不过）。")]
+    if _can_revive(posture):
+        _acts.append(_a(ACT_RETRY, "先试一次拉起监理",
+                        hint="多数「没人守」都能这样恢复。"))
     return dict(b, kind=k, title="防护有缺口（未归类）", b_class=False,
                 cause=("这一类失守我没有专门的归因规则（记录原文：%s）。"
                        "**不编一个听起来合理的原因**——"
                        "归因规则没有覆盖它，就如实说没有。" % (b["detail"] or "（无原文）")),
                 severity="按运行状态页的现探结果为准。",
                 severity_note=_posture_note(posture),
-                actions=[
-                    _a(ACT_FIX, "回运行状态页看现探",
-                       hint="那里有此刻的实测态势（监理在不在、心跳多旧、自检过不过）。"),
-                    _a(ACT_RETRY, "先试一次拉起监理",
-                       hint="多数「没人守」都能这样恢复。"),
-                ],
-                cost="归因规则没覆盖 ⇒ 你只能看到「有缺口」，"
-                     "拿不到「为什么」。这是本产品的已知短板，不是你的操作问题。")
+                actions=_acts,
+                cost="归因规则没覆盖这件事，你只能看到「有缺口」，拿不到「为什么」。"
+                     "这是产品的已知短板，不是你的操作问题。")
 
 
-def _a(op, label, cmd="", hint=""):
-    return {"op": op, "label": label, "cmd": cmd, "hint": hint}
+def _a(op, label, hint=""):
+    """一个可执行动作。★ 0.51.2 第二轮：**去掉 `cmd` 字段** ——
+    研发/运维命令（`antinel host-shield enable`）不再以 `<code>` 块
+    的形式摆在用户面板上（创始人：用户不会修，也不许让用户修）。
+    真需要用户在终端执行的动作，命令写在 hint 里当说明，不当按钮。
+    """
+    return {"op": op, "label": label, "hint": hint}
 
 
 def _posture_note(posture):
-    """★ 0.37.2：**不再把内部函数名印到用户屏幕上**。
+    """「现在怎么样」段的和解句（0.51.2 第二轮：与面板标题不许自相矛盾）。
 
-    旧版渲染成「（本机实测：此刻 `guard_posture()` = 值守中）」——
-    带反引号的 Python 标识符是**给开发者看的**，摆在「② 现在有多严重」
-    下面就是工程腔，而且是创始人点名的"违和感"。
-    ★ 值是**实时算出来的**（`_six_state_label` → 六态），这点没错，
-      要改的只是说法：把函数名换成"此刻实测"。
+    ★★ 创始人截图三：面板标题「监理拉起失败（没人值守）」，这句却写
+       「（此刻实测：值守中）」—— 面板是**历史**记录，这句算的是**当前**
+       态势，两个时刻打架。⇒ 措辞统一成「现在实测」，与「① 发生了什么」
+       （当时的事）分属两段，不再互相矛盾。
+    ★ 值是**实时算出来的**（`_six_state_label` → 六态）。
     """
     if posture is None:
-        return "（此刻实测：%s）" % (_live_posture_label(),)
-    return "（此刻实测：%s）" % (_six_state_label(posture),)
+        return "（现在实测：%s。）" % (_live_posture_label(),)
+    return "（现在实测：%s。）" % (_six_state_label(posture),)
+
+
+def _can_revive(posture):
+    """当前态势能不能「重新拉起监理」——0.51.2 第二轮（创始人截图四）。
+
+    创始人原话：「如果用户能看到，必然监理系统在运行，否则用户看不到，
+    那么你设置这个按钮干什么呢？？？？？？已经再跑了，还要重新拉起？？？」
+    ⇒ 态势是**值守中**时不给 retry（看得到页面＝在跑）；
+      非值守（含断档/失守/未启用）才给；
+      `posture=None`（判据/CLI 直调 attribute 的无参路径）保持旧行为
+      —— 0360「每条 R0 至少一个可执行动作」走的正是无参路径。
+    """
+    if posture is None:
+        return True
+    return str(posture.get("state") or "") != "guarding"
 
 
 def _six_state_label(posture):
@@ -537,7 +647,7 @@ _TITLE = {
     "zone_locked": "安全区上锁失败",
     "tamper": "防护状态被改动",
     "hook_registration_changed": "钩子注册被改动",
-    "autostart_missing": "登录自启缺失",
+    "autostart_missing": "开机自启没装上",
     "spawn_failed": "监理拉起失败",
     "breach_other": "防护有缺口（未归类）",
     "unknown": "未归类",

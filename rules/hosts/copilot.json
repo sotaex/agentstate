@@ -1,5 +1,6 @@
 {
  "host": "copilot",
+ "name": "GitHub Copilot",
  "vendor": "GitHub",
  "roots": [
   "~/.copilot",

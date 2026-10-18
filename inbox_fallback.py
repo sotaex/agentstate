@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: Apache-2.0
 
-"""值守台 · 兜底层（第 5 层）：人不在电脑前时的最后一招。**默认关。**
+"""Antinel 监理 · 兜底层（第 5 层）：人不在电脑前时的最后一招。**默认关。**
 
 ★ 两条纪律：
   1. **默认关**（`email.enabled` / `webhook.enabled` 都是 False）；

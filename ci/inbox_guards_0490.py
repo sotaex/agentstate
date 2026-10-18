@@ -50,6 +50,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import re
 import sys
@@ -109,6 +110,32 @@ def _load(src, tag, rel):
     sys.modules[tag] = mod
     exec(compile(src, mod.__file__, "exec"), mod.__dict__)          # noqa: S102
     return mod
+
+
+_G15_CACHE = []
+
+
+def _g15():
+    """共享尺子（品牌哨点/ico 结构）—— **只此一份**，从 0515 import。
+
+    ★ 为什么不在本文件再写一段 circle 解析：品牌哨点这条事实**已有一处实现**
+      （`ci/inbox_guards_0515.py` 的 `_svg_dot`/`_ico_judge`，FZ-005 冻结执法
+      也 import 它）。同一个事实写两份＝迟早不一致，而不一致时往往两份都判绿
+      —— 那正是「判据看着很多、缺陷照样复发」的由来。
+    """
+    if _G15_CACHE:
+        return _G15_CACHE[0]
+    try:
+        import inbox_guards_0515 as G15                             # noqa: E402
+    except Exception:                                               # noqa: BLE001
+        import importlib.util as _ilu
+        _p = os.path.join(ROOT, "ci", "inbox_guards_0515.py")
+        _spec = _ilu.spec_from_file_location("inbox_guards_0515", _p)
+        G15 = _ilu.module_from_spec(_spec)
+        sys.modules.setdefault("inbox_guards_0515", G15)
+        _spec.loader.exec_module(G15)
+    _G15_CACHE.append(G15)
+    return G15
 
 
 def _mut_render(src_mutated, tag, rel, **kw):
@@ -617,7 +644,8 @@ def u97():
        （顶部条钻取后缀、日报 `/ N`、托盘 tip 都走它）；
     ② 丙2 只禁**正文**，术语词条口径行里的「分母」是定义处，必须仍在
        （否则用户点开「？」也看不到口径 —— 那是把定义一起删了）；
-    ③ `PAGE_TITLES` 四键不动（0360 硬锁的基线；W-01 批次才会动标题）；
+    ③ `PAGE_TITLES` 基线（0.53.0 T0 起**五键**：新增 `health_exam`＝体检第五 TAB；
+       本条基线随 T0 同批更新 —— 旧四键基线会挡住这次有意变更）；
     ④ 认窗基线：四个页面名标题仍认得出（W-01 批次要动白名单，先留底）；
     ⑤ 渲染页无未登记术语（`GL.unknown` 零命中）。
     """
@@ -637,9 +665,10 @@ def u97():
             return "术语 %s 的口径行丢了「分母」（定义被误删）" % k
     if "没有时间上限" not in GL.TERMS["archive"]["unit"]:
         return "术语 archive 的口径行被改动（它的分母事实是「没有时间上限」）"
-    # ③ 页面名四键
-    if set(SV.PAGE_TITLES) != {"inbox", "report", "health", "ledger"}:
-        return "PAGE_TITLES 四键被改动：%r" % (sorted(SV.PAGE_TITLES),)
+    # ③ 页面名基线（0.53.0 T0：四键 → 五键，新增 health_exam）
+    if set(SV.PAGE_TITLES) != {"inbox", "report", "health", "ledger",
+                               "health_exam"}:
+        return "PAGE_TITLES 五键基线被改动：%r" % (sorted(SV.PAGE_TITLES),)
     # ④ 认窗基线（0360 的真实判定，不在这里二次实现）
     #   ★ 0.51.1 反转（W-01 退休、FZ-002 冻结）：窗口标题恒为品牌形态
     #     「Antinel 监理#<6hex>」⇒ 基线夹具换品牌形态。
@@ -743,21 +772,30 @@ def u11():
     return True
 
 
-@check("N-U11 负控：40 字工程串加回药丸 title ⇒ U-11 必须红")
+@check("N-U11 负控：40 字工程串加回标题栏 title ⇒ U-11 必须红")
 def n_u11():
-    """反向对照（维二）：把丁4 描述的那个 40+ 字工程 title 原样加回。"""
+    """反向对照（维二）：把丁4 描述的那个 40+ 字工程 title 原样加回。
+
+    ★★ 0.53.0（T3.2）重锚：原锚点是**药丸**的 title（「最近 24 小时的
+      记录数（自载入起算）」）—— 那排随顶部 24h 计数排一起撤了（U20），
+      锚点消失 ⇒ 负控报「变异锚点未找到」。新锚点选**顶部收缩钮**的
+      title：它每个视图都渲染、且是 U-11 同一把尺子（「全部 title ≤20 字」
+      **不只是药丸那一处**，docstring 早写明要防「别处复发」）。
+      注入的仍是丁4 原句，断言不降。
+    """
     src = _src(_SERVER_REL)
-    anchor = ('        return ("<a title=\\"最近 %d 小时的记录数（自载入起算）\\" "')
+    anchor = ('        "title=\\"收缩成漂浮哨标 · 点它再展开\\" '
+              'aria-label=\\"收缩成漂浮哨标\\">%s"')
     if anchor not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
-    page, _why = _mut_render(src.replace(
-        anchor,
-        '        return ("<a title=\\"最近 %d 小时的记录数；括号里是按事由归并后的件数，'
-        '点进去看全部明细\\" "'),
+    page, _why = _mut_render(
+        src.replace(anchor,
+                    '        "title=\\"最近 24 小时的记录数；括号里是按事由归并后的'
+                    '件数，点进去看全部明细\\" aria-label=\\"收缩成漂浮哨标\\">%s"'),
         "is0490_nu11", _SERVER_REL,
-                             view="inbox", filt=M.BUCKET_ACTION,
-                           root=tempfile.mkdtemp(prefix="g0490_nu11_"),
-                           token="T", items=_items(), posture=_POSTURE)
+        view="inbox", filt=M.BUCKET_ACTION,
+        root=tempfile.mkdtemp(prefix="g0490_nu11_"),
+        token="T", items=_items(), posture=_POSTURE)
     if _why:
         return _why
     if not any(len(t) > 20 for t in re.findall(r'title="([^"]*)"', page)):
@@ -825,7 +863,7 @@ def n_u05():
 
 
 # ════════════════════════════ U-04 · 乙1（铺「？」芯片，8 个落点）════════
-@check("U-04 ★ 乙1：基线 8 芯片落位（筛选条4+药丸3+灯1）＋ 徽标芯片按 BADGE_STATE 齐备")
+@check("U-04 ★ 乙1：基线 5 芯片落位（筛选条4+灯1）＋ 徽标芯片按 BADGE_STATE 齐备")
 def u04():
     """乙1：日报页每个重要词都可点开看定义，收件箱页却一个「？」都没有
     （实测 term 芯片数 0）—— 同一个词两个页面两种待遇。
@@ -835,18 +873,24 @@ def u04():
     （屏幕上的「？」由 CSS `::after` 徽章渲染，summary 自身的字由
     `.term.mk>summary{font-size:0}` 藏掉 —— 徽章**不许**关掉去"消重复"，
     那是 C5 的错法，由 **U-16** 锁）；词本名进展开体首行。
-    基线词条 8 个：筛选条 action/info/archive/all（4）＋ 药丸 R0/L2/L1（3）
-    ＋ 顶部灯 light（1）。
+    基线词条 5 个：筛选条 action/info/archive/all（4）＋ 顶部灯 light（1）。
+    ★★ 0.53.0（T3.2）：**基线 8 → 5**，撤掉的是药丸 R0/L2/L1 三颗。
+      这三颗随**顶部 24h 计数排**一起撤（同口径两个落点即红）；它们的
+      词条落点没有消失，而是跟着指标搬到**日报页四指标**（`metric()` 里
+      `GL.chip(k)`）—— 术语 100% 有落点由 0353 P13（四视图并集）守，
+      本判据守的是**收件箱页这一页**的落位，两边分层各守一层。
+      ⇒ 这不是降强度：删除的是"同一份计数在第二处出现"，芯片总数在
+      四视图并集里不减（P13 会红）。
     ★★ 0.51.0（四态问号小窗方案 v1.1 拍板点三）：**徽标芯片**加入 ——
       顶栏每枚徽标（研发中/缺粮）旁各带对应态的问号芯片（`BADGE_STATE`
-      派生）。同步规则：**基线 8 全在（强度不降）**；出现陌生词条芯片 ⇒ 红；
+      派生）。同步规则：**基线 5 全在（强度不降）**；出现陌生词条芯片 ⇒ 红；
       有徽标无芯片 ⇒ 红；重复落点 ⇒ 红。
     """
     page = _page("inbox")
     chips = re.findall(r'<details class="term mk" data-t="([^"]+)"', page)
-    base = {"action", "info", "archive", "all", "R0", "L2", "L1", "light"}
+    base = {"action", "info", "archive", "all", "light"}
     if not base <= set(chips):
-        return "基线 8 芯片缺：%r" % sorted(base - set(chips))
+        return "基线 5 芯片缺：%r" % sorted(base - set(chips))
     # ★ 0.51.0：徽标 → 芯片派生断言（出现徽标必有对应芯片；陌生芯片即红）
     bks = re.findall(r'<span class="bdg ([\w-]+)"', page)
     for bk in bks:
@@ -883,7 +927,11 @@ def u04():
 
 @check("N-U04 负控：摘掉顶部灯那颗芯片 ⇒ U-04 必须红")
 def n_u04():
-    """反向对照（维二）：8 个落点里摘掉一个 —— 精确集合立刻不满。"""
+    """反向对照（维二）：5 个落点里摘掉一个 —— 精确集合立刻不满。
+
+    ★ 0.53.0（T3.2）：基线随药丸撤销 8 → 5，期望集合同批改（否则「夹具
+      不成立」腿会先红，负控自己失效）。
+    """
     src = _src(_SERVER_REL)
     anchor = 'label, GL.chip("light", mk=True), suffix,'
     if anchor not in src:
@@ -901,7 +949,7 @@ def n_u04():
     live = re.findall(r'<details class="term mk" data-t="([^"]+)"',
                       _page("inbox"))
     live_bks = re.findall(r'<span class="bdg ([\w-]+)"', _page("inbox"))
-    expect = ({"action", "info", "archive", "all", "R0", "L2", "L1", "light"}
+    expect = ({"action", "info", "archive", "all", "light"}
               | {M.BADGE_STATE[b] for b in live_bks if b in M.BADGE_STATE})
     if set(live) != expect:
         return ("夹具不成立：真实现芯片集 %r ≠ 期望 %r ⇒ 负控无分辨力"
@@ -1024,15 +1072,23 @@ def n_u06():
 
 
 # ════════════════════════════ U-13 · 戊1（头部 logo.svg）＋ 戊2 机械部分 ══
-@check("U-13 ★ 戊1：头部用 logo.svg、零 mp4；svg 内部哨点已去（戊2 机械部分）")
+@check("U-13 ★ 戊1：头部用 logo.svg、零 mp4；品牌哨点必须在场且可辨（戊2 已反转）")
 def u13(mod=SV):
     """戊1：768×768 → 46×46 的 mp4 缩放下发虚（607 KB 换一个模糊角标）
     ⇒ 头部改用矢量 `logo.svg`；mp4 留给托盘（16×16 合理，不动），
     favicon.ico 不变（U-13 只查头部，不碰托盘与 favicon）。
 
-    戊2 的机械部分并在这里断言（视觉部分走截图验收，§5.8）：
-    svg 内部那颗橙色哨点已去 —— 它与顶部条 `.dot` 是两套「点」语言，
-    状态由 `.dot` 独占（单一真源）。
+    ★★ 戊2 已**反转**（2026-10-17 创始人裁定，截图原话「0.48.5 那个是 AI
+       幻觉裁定的，请取消，回复小黄球」）：0.48.5（461b4ef）那条「svg 内部
+       不许有 circle」所依据的理由（"与 `.dot` 是两套点语言、抢读"）**查无出处**，
+       定稿图 R4 从来就有这颗哨点 ⇒ 该断言是**幻觉裁定的固化**，本次撤除。
+       新契约：品牌哨点**必须在场且肉眼可辨** —— 与 FZ-005 资产层冻结同一条。
+       **不在这里另写判定**：直接调 0515 的共享尺子 `_ico_judge`（同一事实
+       两处副本＝迟早不一致）；删圆/刷像素的负控由 FZ-005 三臂探针守着，
+       本条不再重复登记负控。
+       教训：判据注释里写「两套语言/抢读」这类**设计理由**时，必须能指到
+       签发件或定稿图；指不到的就是幻觉，而幻觉一旦写成判据，就会反过来
+       把正确实现判红（本轮实测：正确的球被 U-13 判红了一整批）。
 
     ★ 0.50.2：加 `mod` 参数（默认真模块），负控才能拿变异模块跑同一条正判据。
     """
@@ -1047,10 +1103,19 @@ def u13(mod=SV):
         return "头部仍引用 mp4（戊1：mp4 留给托盘，favicon.ico 不变）"
     if "<img" not in h:
         return "头部图标不是 <img>（戊1 要的是矢量位）"
-    # 戊2 机械部分：svg 里不再有 circle（状态点只由 CSS .dot 出）
+    # 戊2（反转后）：品牌哨点必须在场，且能过资产层共享尺子（色可辨＋ico 一致）
     svg = _src("assets/logo/logo.svg")
-    if "<circle" in svg:
-        return "logo.svg 内部哨点还在（戊2：两套点语言，状态归 .dot 独占）"
+    if "<circle" not in svg:
+        return ("logo.svg 里没有品牌哨点（2026-10-17 裁定：小黄球必须在场；"
+                "0.48.5 的「去哨点」是幻觉裁定，已作废）")
+    ico_path = os.path.join(ROOT, "assets", "logo", "antinel.ico")
+    if not os.path.exists(ico_path):
+        return "assets/logo/antinel.ico 缺失（品牌资产不全）"
+    with open(ico_path, "rb") as f:
+        ico = f.read()
+    why = _g15()._ico_judge(svg, ico)
+    if why:
+        return "品牌哨点不合格（共享尺子 _ico_judge）：%s" % why
     return True
 
 
@@ -1218,13 +1283,17 @@ def n_w02():
       不是另编一个假串。补丁只认函数名 `_head`，不绑任何源码行形状 ——
       产品以后怎么重排这个函数都不腐化；`_head` 若改名 ⇒ 加载即抛
       NameError ⇒ `_mut_render` 报「量具故障」，诚实红，不冒充产品红。
+    ★★ 0.53.0（T0）再修一次同型：产品给 `_head` 加了口令外的第三参
+      `extra_css`（体检页挂 EXAM_CSS）⇒ 两参包装器当场 TypeError
+      （「变异模块渲染抛」—— 量具故障伪装成产品红）。包装器改
+      `**kw` 透传：连**签名**也不绑了，产品再加参它也不腐化。
     """
     src = _src(_SERVER_REL)
     patch = (
         "\n# [N-W02] 变异：正文置回 run_id（0.51.1 行为变异版）\n"
         "_orig_head_0490 = _head\n"
-        "def _head(title, token):\n"
-        "    h = _orig_head_0490(title, token)\n"
+        "def _head(title, token, **kw):\n"
+        "    h = _orig_head_0490(title, token, **kw)\n"
         "    m = re.search(r\"<title>(.*?)</title>\", h)\n"
         "    if not m:\n"
         "        return h\n"
@@ -1376,8 +1445,8 @@ def n_w03():
     return True
 
 
-# ══════════ W-04 · B1（值守台常驻：同端口/口令自恢复，遗留问题清单）══════════
-#: ★★ 盯的已修缺陷：**B1 无常驻入口** —— 值守台服务原来是"会话里拉的前台进程"，
+# ══════════ W-04 · B1（Antinel 监理常驻：同端口/口令自恢复，遗留问题清单）══════════
+#: ★★ 盯的已修缺陷：**B1 无常驻入口** —— Antinel 监理服务原来是"会话里拉的前台进程"，
 #:   会话一结束就没了；托盘与守护进程都不负责把它拉回来（窗口开着、点一下全失败）。
 #:   B1 验收：**杀掉服务进程后 60 秒内自行恢复，端口与 URL 不变**。
 #:   修法（产品侧）：`inbox_server` 落盘 `url.json`（端口/口令/pid/url）＋
@@ -3051,28 +3120,49 @@ def _ledger_page(mod=SV, items=None, rep=None):
 
 
 def _t04_core(page, items):
-    """区一（最近 7 天）＋ 六卡深链 ＋ 累计行已撤。返回 True / 说明串。"""
+    """区一（**过去 7 天，起点＝昨天**）＋头部零卡片＋每格深链同源。
+
+    ★★ 0.53.0（T4.2/T4.3）重写三条 —— **不是放松**：删掉的是已被撤走的
+      结构（头部四指标卡），补上的是新契约的三条断言，护栏一条不减。
+      · 头部四指标卡撤了（数字的家是日报）⇒「当天四个数可点」没有对象了，
+        换成「头部零卡片」＋「今天有一行深链去日报」；
+      · 区一窗口改「昨天起 7 个日历天」⇒ 今天**不许**出现在区一里
+        （同一屏两个"今天"，读者会以为账本与日报是两笔账）；
+      · 「无记录天淡显」与「有记录天每格深链」**逐字不动**（这是护栏，
+        不随版式改）。
+    """
     body = PC.body(page)
     idx = M.day_counts(items)
     today = datetime.now().astimezone().date()
     today_s = today.isoformat()
-    w7 = [(today - timedelta(days=k)).isoformat() for k in range(7)]
+    w7 = [(today - timedelta(days=k)).isoformat() for k in range(1, 8)]
 
-    # ① 区一在，且**固定 7 个日历天**全部出现（无记录的天也要出现）
-    if "最近 7 天" not in body:
-        return "账本页没有「最近 7 天」区（明细区没了）"
-    missing = [d for d in w7 if d not in body]
+    # ① 头部**零指标卡**（撤卡后不许换个名字把同一份数搬回来）
+    if 'class="metric"' in body:
+        return "账本头部还有指标卡 —— 与日报同口径两个落点（T4.2 已撤）"
+    # ② 今天：一行深链到日报（今天的数在这里没有第二份）
+    if "今天的数在" not in body or 'href="/?v=report"' not in body:
+        return "头部没有「今天的数在日报」深链 —— 今天的数没有去处"
+    # ③ 区一在，窗口＝昨天起 7 个日历天（**今天不在区一**）
+    if "过去 7 天" not in body:
+        return "账本页没有「过去 7 天」区（明细区没了）"
+    i = body.index("过去 7 天")
+    j = body.find('<div class="card">', i)
+    sec = body[i:j if j > 0 else len(body)]
+    if today_s in sec:
+        return "区一里出现了今天（%s）—— 今天应在日报，明细只列过完的日子" % today_s
+    missing = [d for d in w7 if d not in sec]
     if missing:
-        return "最近 7 天缺日历天（7 天窗口是承诺，不许只列有数的天）：%s" % missing
-    # ② ★ 无记录天：淡显「当天无记录」，**不许渲染成 0**
+        return "过去 7 天缺日历天（窗口是承诺，不许只列有数的天）：%s" % missing
+    # ④ ★ 无记录天：淡显「当天无记录」，**不许渲染成 0**
     n_empty = sum(1 for d in w7
                   if not any(int((idx.get(d) or {}).get(k) or 0)
                              for k in M.LEDGER_KEYS))
-    got_empty = body.count("当天无记录")
+    got_empty = sec.count("当天无记录")
     if got_empty != n_empty:
         return ("无记录天渲染数不对：页面 %d / 现算 %d —— 要么把「没查」渲染成了数字，"
                 "要么漏了天（0.37.2 同款护栏：没查≠查过没事）" % (got_empty, n_empty))
-    # ③ 有记录的天：四格数字与深链**同源**（F40）
+    # ⑤ 有记录的天：四格数字与深链**同源**（F40）
     for d in w7:
         e = idx.get(d) or {}
         n = {k: int(e.get(k) or 0) for k in M.LEDGER_KEYS}
@@ -3084,15 +3174,11 @@ def _t04_core(page, items):
                 return "%s 的「%s」格数字或深链不对（现算 %d）" % (d, word, n[key])
         if n["acked"] and ('f=closed:%s">已处理 %d</a>' % (d, n["acked"])) not in body:
             return "%s 的「已处理」格数字或深链不对（现算 %d）" % (d, n["acked"])
-    # ④ 六卡：当天四个数**可点**，且数字等于现算（含 0 —— 0 也要能点进去看是空的）
-    td = idx.get(today_s) or {}
-    for key, lv in (("blocked", "L2"), ("noticed", "L1"), ("breached", "R0")):
-        want = int(td.get(key) or 0)
-        if ('f=day:%s:lv:%s">%d</a>' % (today_s, lv, want)) not in body:
-            return "六卡「%s」没连到当天深链或数字不对（现算 %d）" % (key, want)
-    if ('f=closed:%s">%d</a>' % (today_s, int(td.get("acked") or 0))) not in body:
-        return "六卡「已处理」没连到当天深链（现算 %d）" % int(td.get("acked") or 0)
-    # ⑤ 累计行已撤（创始人 2026-10-16 拍板「有记录以来 8 天累计这一行可以不要了」）
+    # ⑥ 四个词的定义仍可点开（撤卡不能把词条落点一起弄没）
+    for k in ("ledger_blocked", "ledger_noticed", "ledger_breached", "ledger_acked"):
+        if ('data-t="%s"' % k) not in page:
+            return "撤卡后词条 %s 没有落点了 —— 术语表 100% 有落点（P13）会红" % k
+    # ⑦ 累计行已撤（创始人 2026-10-16 拍板）
     if "有记录以来" in body:
         return "「有记录以来 N 天累计」那一行回来了 —— 明细区已给出同一批数的来龙去脉"
     return True
@@ -3138,7 +3224,7 @@ def _t04b_core(page, items):
     return True
 
 
-@check("T-04 ★ 账本明细区一：最近 7 天＋无记录天不许渲染成 0＋六卡当天数可点")
+@check("T-04 ★ 账本明细区一：过去 7 天（起点昨天）＋无记录天不许渲染成 0＋每格深链")
 def t04():
     """创始人 2026-10-16 第四问「汇总看不了明细」＋追加问「日期太多怎么办」。
 
@@ -3285,15 +3371,15 @@ def _t04d_core(page, items):
     today = datetime.now().astimezone().date().isoformat()
     if not rec:
         return "夹具不成立：没有有记录的天 ⇒ 判据无分辨力"
-    # ① 文案里的数量词 ＝ 实际卡片数（三问之一：说四个数、摆六张卡）
+    # ① 撤卡后**不许留下指向卡片的文案**（三问之一的反面）：
+    #   0.53.0（T4.2）头部四指标卡撤了 ⇒「下列 N 个数」这类数量词若还在，
+    #   就是在指一个不存在的结构。三问之一的病根（文案与结构无引用关系）
+    #   在这一版的具体形态就是「撤结构没撤文案」。
     n_card = body.count('class="metric"')
-    mw = re.search(r"下列(.)个数", body)
-    if not mw:
-        return "头部没有「下列 N 个数」口径说明（读者无从判断这些数是今天的还是有史以来的）"
-    zh = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6}
-    if zh.get(mw.group(1)) != n_card:
-        return ("文案说「%s 个数」，页面却有 %d 张卡 ⇒ 文案与结构自相矛盾（三问之一）"
-                % (mw.group(1), n_card))
+    if n_card:
+        return "账本头部还有 %d 张指标卡 —— T4.2 已撤，数字的家是日报" % n_card
+    if re.search(r"下列(.)个数", body):
+        return "头部还留着「下列 N 个数」——卡片已撤，这句在指空气"
     # ② 同页天数**同源**：头部＝链现算，月行当月天数＝链现算（三问之三）
     m = re.search(r"有记录 <b>(\d+)</b> 天", body)
     if not m:
@@ -3320,7 +3406,7 @@ def _t04d_core(page, items):
     return True
 
 
-@check("T-04d ★ 头部：文案数量词＝卡片数 ＋ 同页天数同源 ＋ 不重复同数")
+@check("T-04d ★ 头部：撤卡后零卡片零旧文案 ＋ 同页天数同源 ＋ 不重复同数")
 def t04d():
     """创始人 2026-10-17 截图三问（账本页头部）：
       ① 「下列四个数」下面摆了六张卡；
@@ -3346,33 +3432,32 @@ def t04d():
     return True
 
 
-@check("N-T04d ★ 负控：文案数量词改成「六个数」⇒ T-04d 必须红")
+@check("N-T04d ★ 负控：撤卡后把「下列四个数」塞回头部 ⇒ T-04d 必须红")
 def n_t04d():
-    """变异＝**破坏派生**：让文案的数量词与结构脱钩（说「六个数」而卡片仍是 4 张）。
+    """反向对照：模拟「撤了结构没撤文案」—— 头部塞回一句「下列四个数」。
 
-    ★ 2026-10-17 二次修正（产品同日改为「数量词派生」）：
-      旧变异锚点是**文案字面量**「下列四个数」；产品改成
-      `"下列%s个数" % _zh_num(len(_cards))` 后该字面量不复存在 ⇒
-      负控**静默失效**（它自己报了「负控自身失效，不算通过」，护栏起作用）。
-      ⇒ 锚点移到**派生表达式**上：`len(_cards)` → `len(_cards) + 2`，
-        文案说「六」而结构仍是 4 张 —— 正是本批之前的形态。
-    ★ 教训（值得记住）：**负控的变异锚点若依赖会被重构掉的字面量，
-      重构就会让负控失效**；锚在**结构性表达式**上更稳。
+    ★★ 0.53.0（T4.2）重锚：旧锚点是 `% _zh_num(len(_cards))`（卡片的派生
+      数量词）—— 卡片整块撤掉后该表达式不复存在 ⇒ 负控自己会报「锚点未找到」。
+      新锚点选**仍然存在的头部小字行**（`_meta`），往里前置一句旧文案。
+      ★ 教训延续（0.51.2 记过一次）：负控锚点要跟着**仍存在的结构**走，
+        不能挂在会被整块删掉的东西上。
     """
     src = _src(_SERVER_REL)
-    anchor = "% _zh_num(len(_cards))"
+    anchor = ('    _meta = ("<p class=\\"note\\">%s 有记录 <b>%d</b> 天 · %s %s</p>"')
     if anchor not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
     items = _ledger_items()
     page, _why = _mut_render(
-        src.replace(anchor, "% _zh_num(len(_cards) + 2)"),
+        src.replace(anchor,
+                    '    _meta = ("<p class=\\"note\\">下列四个数：%s 有记录 '
+                    '<b>%d</b> 天 · %s %s</p>"'),
         "is0490_nt04d", _SERVER_REL, view="ledger",
         root=tempfile.mkdtemp(prefix="g0490_nt04d_"), token="T", items=items,
         rep=_ledger_rep(items), posture=_POSTURE)
     if _why:
         return _why
     if _t04d_core(page, items) is True:
-        return "负控失效：文案数量词写错后 T-04d 没红"
+        return "负控失效：塞回旧文案后 T-04d 没红"
     if _t04d_core(_ledger_page(items=items), items) is not True:
         return "夹具不成立：真实现本身就红 ⇒ 负控无分辨力"
     return True
@@ -3403,6 +3488,1209 @@ def n_t04d_b():
     return True
 
 
+# ============================================== 体检页四组（0.53.0 P6 二）====
+# 施工单 v1.0 S2.1：H3 / H4b / H7 / H3-c2，各配一条负控。
+# ★ 数据源全部来自 payload（details / egress / observations），**零新增采集**。
+# ★ 六档与译文一律 `import antinel` 取真源，判据不许二次实现。
+
+_H_TITLES = [
+    "① 我电脑上有哪些 AI 工具",
+    "② 我的哪些项目被打包过",
+    "③ 此刻谁在往外连",
+    "④ 别处还有什么",
+]
+_HEALTH_REL = "ui_server.py"
+
+
+def _h_scan(n_tools=17, details=None, obs=None, **cov):
+    """合成体检 payload。
+
+    ★ 数字刻意取**不可能自然撞上**的值（17 / 991 / 992 / 993）：
+      若页面只渲染其中一个口径，另一个口径的数就不会出现 ⇒ 断言不会误绿。
+      （v1.11 §36.3：页面用 59、终端用 41，两个数都合法且**互不包含**，
+      用户两边看会对不上 —— 本判据就是把「两个都必须出现」钉成机器守的事实。）
+    """
+    c = {"registered_roots": 991, "present": 992, "scanned": 992,
+         "unscanned": 0, "added_by_registry": 993, "absent": 5,
+         "armed_hosts": 1, "unarmed_hosts": 23}
+    c.update(cov)
+    return {
+        "generated_at": "2026-10-17T00:00:00+08:00",
+        "tools": [{"name": "t%02d" % i, "host": "h%02d" % i,
+                   "path": "D:/t/%02d" % i, "root": "D:/t/%02d" % i,
+                   "verdict": "CLEAN", "ev": [], "files": []}
+                  for i in range(n_tools)],
+        "details": details or {},
+        "coverage": c,
+        "counts_by_verdict": {"PACK": 0, "SENT": 0, "SYNC": 0,
+                              "CLEAN": n_tools, "NA": 0},
+        "observations": obs if obs is not None else {},
+    }
+
+
+def _h_egress(with_ghost=True, findings=None):
+    """合成 egress payload。
+
+    ★ `Ghost.exe` **只在 `longest_by_proc` 里**（账本有 49.4 小时证据、此刻已退出，
+      `conns` 里没有）⇒ 只取 `conns` 就会把它弄丢。
+      v1.11 §36.1 实测：本机 `AutoClaw.exe` 正是这么被漏掉的 ——
+      「有证据却不显示」比显示错更糟。
+
+    ★ `findings` 默认空（C 组判据不关心它）；H8 族显式传入。
+    """
+    lg = {"A.exe": 162.5 * 3600, "B.exe": 32.9 * 3600}
+    if with_ghost:
+        lg["Ghost.exe"] = 49.4 * 3600
+    return {"snapshot": {"ok": True, "conns": [
+                {"proc": "A.exe", "pid": 11}, {"proc": "A.exe", "pid": 11},
+                {"proc": "A.exe", "pid": 11},
+                {"proc": "B.exe", "pid": 22}, {"proc": "B.exe", "pid": 22}]},
+            "findings": findings if findings is not None else [],
+            "longest_by_proc": lg,
+            "days_with_data": 7,
+            "coverage_seconds": 601268.0,
+            "sample_failed": 1}
+
+
+def _h_proj_details(ws_bytes, enc_bytes, accepted=True, fail=None, ws="D:/proj"):
+    """合成 B 组数据源。**键名与本机实测逐字一致**（2026-10-17 实读）：
+
+      workspacePath / lastCompressedSize.workspaceSizeBytes /
+      lastCompressedSize.encryptedSizeBytes / lastCompressedSize.recordedAt /
+      lastAcceptedManifestHash / failureCount（仅 D:\\2026\\PSL 有，值 3）
+
+    ★ 四个项目目录同在 `C:\\Users\\大马\\.zcode` **一个键下的多个块**里
+      ⇒ B 组必须遍历**块**，不能只遍历键（否则只剩一行）。
+    """
+    items = [
+        {"kpath": "workspacePath", "kind": "context", "value": ws},
+        {"kpath": "lastCompressedSize.workspaceSizeBytes", "kind": "context",
+         "value": ws_bytes},
+        {"kpath": "lastCompressedSize.encryptedSizeBytes", "kind": "mark",
+         "value": enc_bytes},
+        {"kpath": "lastCompressedSize.recordedAt", "kind": "context",
+         "value": 1788827124448},
+    ]
+    if accepted:
+        items.append({"kpath": "lastAcceptedManifestHash", "kind": "mark",
+                      "value": "c8b5bb31ed38014c"})
+    if fail is not None:
+        items.append({"kpath": "failureCount", "kind": "mark", "value": fail})
+    return {"C:/u/.zcode": [{"file": ".zcode/v2/checkpoints/x/state.json",
+                             "items": items}]}
+
+
+def _health_render(scan, egress=None, src=None, tag="is0490_health"):
+    """跑一次体检页渲染。返回 `(page, None)` 或 `(None, 说明串)`。
+
+    ★ 与 C1 的 `_mut_render` 同型：**量具故障（抛异常）与产品红必须分开**，
+      否则「负控自己崩了」会被读成「产品有缺陷」。
+    """
+    import antinel                                                 # noqa: E402
+    res = {"scan": scan, "egress": egress if egress is not None else {}}
+    try:
+        if src is None:
+            import ui_server as U                                  # noqa: E402
+            return U._result_html(res, antinel.VERDICTS, antinel._ev_human), None
+        mod = _load(src, tag, _HEALTH_REL)
+        return mod._result_html(res, antinel.VERDICTS, antinel._ev_human), None
+    except Exception as e:                                         # noqa: BLE001
+        return None, ("量具故障：渲染抛 %s: %s —— 不是产品问题，不算通过"
+                      % (type(e).__name__, e))
+
+
+def _h_mut(anchor, repl, tag, scan, egress=None):
+    """负控两步法第一步：注入必须**真的生效**（锚点不存在 ⇒ 负控自身失效）。"""
+    src = _src(_HEALTH_REL)
+    if anchor not in src:
+        return None, ("变异锚点未找到（源码已变，需更新负控）—— "
+                      "负控自身失效，不算通过：%r" % anchor[:60])
+    return _health_render(scan, egress, src=src.replace(anchor, repl), tag=tag)
+
+
+def _h3_core(page):
+    miss = [t for t in _H_TITLES if t not in page]
+    if miss:
+        return "页面缺少组标题：%s" % "、".join(miss)
+    return True
+
+
+@check("H3 ★ 体检页四组标题齐全（①AI 工具／②被打包项目／③此刻外连／④别处还有什么）")
+def h3():
+    """★ 四组是创始人 2026-10-17 定的明细单骨架（v1.11 §27.3）。
+
+    判据只断言**标题存在且在渲染产物里**，不查行号、不查实现细节 ——
+    组里填什么由 H4b／H7／H3-c2／H5 各自守。
+    """
+    page, why = _health_render(_h_scan())
+    return why or _h3_core(page)
+
+
+@check("N-H3 ★ 负控：D 组的渲染被摘掉 ⇒ H3 必须红")
+def n_h3():
+    # ★ 锚点是**组标题字面量**：它随四组一起落地，且不在别处出现
+    #   （0490 N-T04d 的教训：锚在会被重构掉的字面量上，重构一次负控就失效）。
+    page, why = _h_mut('"<h2>④ 别处还有什么</h2>"', '""',
+                       "is0490_nh3", _h_scan())
+    if why:
+        return why
+    if _h3_core(page) is True:
+        return "负控失效：D 组被摘掉后 H3 没红"
+    if _h3_core(_health_render(_h_scan())[0]) is not True:
+        return "夹具不成立：真实现本身就红 ⇒ 负控无分辨力"
+    return True
+
+
+def _h4b_core(page, scan):
+    c = scan["coverage"]
+    need = {"扫到数(%d)" % len(scan["tools"]): str(len(scan["tools"])),
+            "登记数(%d)" % c["registered_roots"]: str(c["registered_roots"]),
+            "存在数(%d)" % c["present"]: str(c["present"]),
+            "登记表补上(%d)" % c["added_by_registry"]: str(c["added_by_registry"])}
+    miss = [k for k, v in need.items() if v not in page]
+    if miss:
+        return ("L0 双口径缺数：%s —— 只给一个口径，用户拿页面与终端对账时会对不上"
+                % "、".join(miss))
+    return True
+
+
+@check("H4b ★ L0 双口径：扫到 N ＋ 登记/存在/登记表补上 各自带分母（只给一个即红）")
+def h4b():
+    scan = _h_scan()
+    page, why = _health_render(scan)
+    return why or _h4b_core(page, scan)
+
+
+@check("N-H4b ★ 负控：第二口径被第一口径顶掉（登记数写成 len(tools)）⇒ H4b 必须红")
+def n_h4b():
+    """变异模拟的正是 v1.11 §36.3 撞出的病：**两口径互不包含，却被写成一个**。"""
+    page, why = _h_mut("int(cov.get(\"registered_roots\") or 0)",
+                       "len(tools)", "is0490_nh4b", _h_scan())
+    if why:
+        return why
+    scan = _h_scan()
+    if _h4b_core(page, scan) is True:
+        return "负控失效：登记数被顶掉后 H4b 没红"
+    if _h4b_core(_health_render(scan)[0], scan) is not True:
+        return "夹具不成立：真实现本身就红 ⇒ 负控无分辨力"
+    return True
+
+
+def _h7_core(page, want):
+    if want in page:
+        return True
+    return ("B 组没渲染出压缩倍数 %s —— 取数不是 details 里的 "
+            "workspaceSizeBytes／encryptedSizeBytes" % want)
+
+
+@check("H7 ★ B 组同源：压缩倍数取自 details（143378975/242231⇒591；88144362/46224⇒1906）")
+def h7():
+    """★ 负控方向：改成另一份 size（encryptedSizeBytes）⇒ 倍数变 ⇒ 必红。
+    两个真值都测，防「只对一组数碰巧成立」。"""
+    scan1 = _h_scan(details=_h_proj_details(143378975, 242231))
+    page1, why1 = _health_render(scan1)
+    if why1:
+        return why1
+    r = _h7_core(page1, "591")
+    if r is not True:
+        return r
+    scan2 = _h_scan(details=_h_proj_details(88144362, 46224))
+    page2, why2 = _health_render(scan2)
+    if why2:
+        return why2
+    return _h7_core(page2, "1906")
+
+
+@check("N-H7 ★ 负控：取数换成 encryptedSizeBytes（也是 size，口径错）⇒ H7 必须红")
+def n_h7():
+    """★ 锚点选**结构性字面量**而不是文案（0490 N-T04d 的教训：
+    锚在会被重构掉的文案上，重构一次负控就失效）。"""
+    scan = _h_scan(details=_h_proj_details(143378975, 242231))
+    page, why = _h_mut('"lastCompressedSize.workspaceSizeBytes"',
+                       '"lastCompressedSize.encryptedSizeBytes"',
+                       "is0490_nh7", scan)
+    if why:
+        return why
+    if _h7_core(page, "591") is True:
+        return "负控失效：取数换成加密后大小后 H7 没红（倍数应变成 1.0）"
+    if _h7_core(_health_render(scan)[0], "591") is not True:
+        return "夹具不成立：真实现本身就红 ⇒ 负控无分辨力"
+    return True
+
+
+def _h3c2_core(page):
+    return True if "Ghost.exe" in page else (
+        "页面上没有 `Ghost.exe` —— 它只在 `longest_by_proc` 里（账本有 49.4 小时证据、"
+        "此刻已退出）；只取 `conns` 就会把这条证据弄丢")
+
+
+@check("H3-c2 ★ C 组行集合＝longest_by_proc 键 ∪ conns 进程（只取 conns 即红）")
+def h3c2():
+    page, why = _health_render(_h_scan(), _h_egress())
+    return why or _h3c2_core(page)
+
+
+@check("N-H3-c2 ★ 负控：行集合退回只取 conns ⇒ Ghost.exe 消失 ⇒ H3-c2 必须红")
+def n_h3c2():
+    scan, eg = _h_scan(), _h_egress()
+    page, why = _h_mut(
+        'procs = list((eg.get("longest_by_proc") or {}).keys())',
+        'procs = []', "is0490_nh3c2", scan, eg)
+    if why:
+        return why
+    if _h3c2_core(page) is True:
+        return "负控失效：只取 conns 后 H3-c2 没红"
+    if _h3c2_core(_health_render(scan, eg)[0]) is not True:
+        return "夹具不成立：真实现本身就红 ⇒ 负控无分辨力"
+    return True
+
+
+# ═════════ 批18 · H8（findings 的 lines 必须上页面）═════════
+# 施工单 v1.2 第一件（0.53.0 收尾）：S10 实测 egress.run(as_json=True) 的 findings
+#   10 条，每条**只有 `kind` 和 `lines`**（`label` 恒不存在），`lines` 恒 3 行。
+#   而旧渲染 `<li>{label or kind}</li>` ⇒ 页面上 10 条只有「空闲期外连」「长连接」
+#   两个词在重复 —— **外框写着「值得看一眼的 10 条」，实质内容一行没有**。
+# ★ 编号为什么是 H8 不是 F1：`F1` 已被 `0364` 占（"泡泡真身是气泡通道"），
+#   0515 的 UID15-b（跨套件重名折叠检测）当场判红 —— 新判据编号**必须先查重名**。
+_F_LINES = [
+    "你已空闲 7777 小时；这期间 Probe.exe 新建 8642 条外部连接",
+    "远端：10.0.0.1:443, 10.0.0.2:443",
+    "→ 若是你主动发起的任务或后台更新，忽略即可。",
+]
+#: ★ 四个串都取**不可能自然撞上**的值（7777／8642／10.0.0.1），
+#:   且**分别来自 lines 的三行** ⇒ 任一行丢了都会被抓到（不是只对一行碰巧成立）。
+_F_NEED = ["Probe.exe", "8642", "10.0.0.1", "忽略即可"]
+
+
+def _h_findings(n=2):
+    """合成 findings。**键与实测逐字一致**（`kind` + `lines`，无 `label`）。"""
+    return [{"kind": "长连接", "lines": list(_F_LINES)} for _ in range(n)]
+
+
+def _h8_core(page):
+    miss = [s for s in _F_NEED if s not in page]
+    if miss:
+        return ("页面上找不到 findings 的实质内容（缺 %s）—— 每条只渲染了 `kind`"
+                "（类别名），而 `label` 实测恒不存在 ⇒ 10 条里只有两个词在重复"
+                % "、".join(miss))
+    return True
+
+
+@check("H8 ★ findings 的 lines 三行必须上页面（只显示 kind ⇒ 有内容等于没内容）")
+def h8():
+    """★ 与「四组明细」同病：payload 里有内容，页面把内容显示成了没有。
+
+    判据只断言 **lines 的三行都出现在渲染产物里**，不查行号、不查实现细节。
+    """
+    eg = _h_egress(findings=_h_findings(2))
+    page, why = _health_render(_h_scan(), eg)
+    return why or _h8_core(page)
+
+
+@check("N-H8 ★ 负控：渲染退回只显示 kind（lines 全丢）⇒ H8 必须红")
+def n_h8():
+    """★ 锚点选**新代码里的结构性字面量**（N-T04d 教训：锚在会被重构掉的文案上，
+    重构一次负控就失效）。变异形态 = 把取 lines 的那一步换成空列表。"""
+    eg = _h_egress(findings=_h_findings(2))
+    page, why = _h_mut('(f.get("lines") or [])', '[]',
+                       "is0490_nf1", _h_scan(), eg)
+    if why:
+        return why
+    if _h8_core(page) is True:
+        return "负控失效：lines 全丢后 H8 没红"
+    if _h8_core(_health_render(_h_scan(), eg)[0]) is not True:
+        return "夹具不成立：真实现本身就红 ⇒ 负控无分辨力"
+    return True
+
+
+# ═════════ 批19 · T0（第五 TAB：体检进控制台，0.53.0 第一优先）═════════
+# 施工单 v1.3 T0.6；创始人 2026-10-18 03:18 截图交办（四个 TAB 变五个）。
+# 设计 v1.11 §21.2（接触点 2/4）／§21.3（三态写死）／§20.2（局部边界）／§20.4（版面）。
+# ★ 编号：H 族续 H8（体检页）；H9/H10/H11 全树无重名 —— 0353 里的"H9"只在
+#   docstring，登记名是「P16 体检留得下本机存档」（0515 UID15-b 按登记名折叠）。
+# ★ 注入点：体检页 GET **从不触发采集**（host-scan 4～9 分钟）⇒ 判据渲染
+#   零子进程，结果经模块级缓存 `_EXAM` 注入（state="done" + 合成 payload）。
+_EXAM_RES = {"scan": _h_scan(), "egress": _h_egress()}
+#: 首启引导条原文（设计 §21.2 写死）—— 判据独立持一份，产品那边写错即红
+_EXAM_GUIDE = "这是第一次打开监理。先做一次体检吧——它只读，不会改任何东西。"
+_VERDICT_KEYS = ("PACK", "SENT", "SYNC", "CLEAN", "BLIND", "NA")
+
+
+def _exam_inject(mod=SV, res=None):
+    """把模块的体检缓存置为「已跑完」，返回原状态（调用方 try/finally 还原）。"""
+    old = dict(getattr(mod, "_EXAM", None) or {})
+    if not hasattr(mod, "_EXAM"):
+        return old          # 旧代码没有体检缓存 ⇒ 无从注入（页面落回收件箱 ⇒ H9 红）
+    mod._EXAM.update(state="done", result=res if res is not None else _EXAM_RES,
+                     stage="", error="", saved="x", started=1.0, finished=2.0)
+    return old
+
+
+def _exam_restore(mod, old):
+    if hasattr(mod, "_EXAM"):
+        mod._EXAM.clear()
+        mod._EXAM.update(old)
+
+
+def _exam_page(mod=SV, res=None):
+    """渲染体检页（第五 TAB；结果注入 + 用完还原）。"""
+    old = _exam_inject(mod, res)
+    try:
+        return _page("health_exam", mod=mod)
+    finally:
+        _exam_restore(mod, old)
+
+
+def _exam_mut(src, tag, res=None):
+    """C1 两步法 · **体检版**：变异源码 → 内存加载 → 注入体检缓存 → 渲染。
+
+    与 `_mut_render` 同一契约（加载抛／渲染抛 ⇒ 明确判「负控自身失效，
+    不算通过」—— 量具故障不许伪装成产品问题），多一步 `_EXAM` 注入：
+    体检页 GET 从不触发采集，结果只在进程内缓存里，不注入就渲染不出四组
+    （负控会因「缺标题」这种错原因翻红，证明不了想证明的那件事）。
+    ★ 为什么不像 `_mut_render` 那样只收 kw：注入点在加载之后、渲染之前，
+      `_mut_render` 的「加载即渲染」插不进这一步；两步契约逐字保持一致。
+    """
+    try:
+        mod = _load(src, tag, _SERVER_REL)
+    except Exception as e:                                     # noqa: BLE001
+        return None, ("负控自身失效：变异模块**加载就抛** %s: %s —— "
+                      "量具故障（变异把源码写坏了），不算通过"
+                      % (type(e).__name__, e))
+    old = _exam_inject(mod, res)
+    try:
+        return mod.render_page(view="health_exam", token="T",
+                               root=tempfile.mkdtemp(prefix="g0490_%s_" % tag),
+                               items=[], posture=_POSTURE), None
+    except Exception as e:                                     # noqa: BLE001
+        return None, ("负控自身失效：变异模块**渲染抛** %s: %s —— "
+                      "量具故障（多半是变异少给了参数），不算通过"
+                      % (type(e).__name__, e))
+    finally:
+        _exam_restore(mod, old)
+
+
+def _fresh_hub():
+    """换一个临时中枢，返回 (dir, 旧值) —— 判据动环境必须 try/finally 还原。"""
+    d = tempfile.mkdtemp(prefix="g0490_exam_")
+    old = os.environ.get("ANTINEL_HUB_DIR")
+    os.environ["ANTINEL_HUB_DIR"] = d
+    return d, old
+
+
+def _restore_hub(old):
+    if old is None:
+        os.environ.pop("ANTINEL_HUB_DIR", None)
+    else:
+        os.environ["ANTINEL_HUB_DIR"] = old
+
+
+def _snap(days_ago, hub):
+    """在临时中枢写一份体检快照（console-exam 形状，与产品写入同构）。"""
+    d = os.path.join(hub, "health")
+    os.makedirs(d, exist_ok=True)
+    ts = (datetime.now().astimezone() - timedelta(days=days_ago)).replace(
+        microsecond=0)
+    p = os.path.join(d, "audit-%s-000.json" % ts.strftime("%Y%m%d-%H%M%S"))
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump({"schema": "antinel.health/1", "generated_at": ts.isoformat(),
+                   "source": "console-exam", "tools": 3,
+                   "verdicts": {"PACK": 0, "SENT": 0, "SYNC": 0, "CLEAN": 3,
+                                "BLIND": 0, "NA": 0},
+                   "conns": 0}, f, ensure_ascii=False)
+    return p
+
+
+def _nav(page):
+    """导航选项卡 [(view, 可见文本)] —— 按 <nav class="tabs"> 圈定。
+
+    ★ 与 `_tabs()`（筛选项）不是一回事：那个按 `title="单位："` 认筛选条，
+      这是页面顶部的视图导航（第五 TAB 加在这里）。
+    """
+    m = re.search(r'<nav class="tabs">(.*?)</nav>', page, re.S)
+    if not m:
+        return None
+    return re.findall(r'<a href="/\?v=([a-z_]+)"[^>]*>([^<]*)</a>', m.group(1))
+
+
+def _h9_core(page):
+    nav = _nav(page)
+    if nav is None:
+        return "页面上没有选项卡条 —— 第五 TAB 无从谈起"
+    if len(nav) != 5:
+        return "选项卡是 %d 个（应为 5）：%s" % (len(nav), "／".join(
+            t for _v, t in nav))
+    if ("health_exam", "体检") not in nav:
+        return "第五个选项卡不是「体检」（v=health_exam）：%r" % (nav,)
+    # 四组标题与 H3 共用 `_H_TITLES`（不另写一份尺子）
+    miss = [t for t in _H_TITLES if t not in page]
+    if miss:
+        return ("体检正文缺四组标题：%s —— 渲染没有复用 ui_server._result_html？"
+                % "、".join(miss))
+    return True
+
+
+@check("H9 ★ 第五 TAB「体检」落地：选项卡恰 5 项＋正文含四组标题（H3 同一把尺子）")
+def h9():
+    """★ T0 第一优先（创始人 03:18 截图：四个 TAB 变五个，多一个体检）。
+
+    断言打在**行为**上（渲染产物），不查行号；视图名不与运行状态（health）
+    撞车由 N-H9 守；第二份六档由 H11 守。
+    """
+    page = _exam_page()
+    return _h9_core(PC.body(page))
+
+
+@check("N-H9 ★ 负控：第五 TAB 的视图名撞上 health（运行状态）⇒ H9 必须红")
+def n_h9():
+    """★ 锚点选**结构性字面量** `a("health_exam", "体检")`（随 T0 一起落地；
+    N-T04d 教训：不锚在会被重构掉的文案上）。变异形态＝视图名改成 health：
+    两个 TAB 指向同一页，体检入口消失（用户点「体检」落到运行状态）。"""
+    src = _src(_SERVER_REL)
+    anchor = 'a("health_exam", "体检")'
+    if anchor not in src:
+        return ("变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，"
+                "不算通过：%r" % anchor)
+    page, why = _exam_mut(src.replace(anchor, 'a("health", "体检")'),
+                          "is0490_nh9")
+    if why:
+        return why
+    page = PC.body(page)
+    if _h9_core(page) is True:
+        return "负控失效：视图名撞上 health 后 H9 没红"
+    if _h9_core(PC.body(_exam_page())) is not True:
+        return "夹具不成立：真实现本身就红 ⇒ 负控无分辨力"
+    return True
+
+@check("H10 ★ 首启落体检页＋引导条逐字；有快照后引导条消失＋「上次体检：N 天前」")
+def h10():
+    """设计 §21.2 接触点 2／§21.4／§20.4。四件事全落在**行为**上：
+    默认落点（default_view）、引导条逐字在/不在、「上次体检」行的数与三态互斥。"""
+    dv = getattr(SV, "default_view", None)
+    if dv is None:
+        return "inbox_server 没有 default_view（T0.2 首启落点未实现）"
+    # ① 无快照：默认落点＝体检页；引导条逐字在；不许出现「上次体检」
+    hub, old = _fresh_hub()
+    try:
+        if dv() != "health_exam":
+            return "无快照时默认落点是 %r（应为 health_exam）" % (dv(),)
+        page = PC.body(_exam_page())
+        if _EXAM_GUIDE not in page:
+            return "首启引导条不在页面上（逐字：%s）" % _EXAM_GUIDE
+        if "上次体检" in page:
+            return "首装空态出现了「上次体检」—— §21.3 明令不显示那一行"
+        # ② 有快照（3 天前）：默认回落收件箱；引导条消失；行在且数对
+        _snap(3, hub)
+        if dv() != "inbox":
+            return "有快照后默认落点仍是 %r（引导条会永远在）" % (dv(),)
+        page2 = PC.body(_exam_page())
+        if _EXAM_GUIDE in page2:
+            return "快照存在后引导条仍在（§21.4：完成一次体检后永久消失）"
+        if "上次体检：3 天前" not in page2:
+            return "有快照但页面上没有「上次体检：3 天前」（T0.3 一行版）"
+    finally:
+        _restore_hub(old)
+    # ③ 当天的快照 ⇒ 「刚刚」（换个新中枢，不删任何文件）
+    hub, old = _fresh_hub()
+    try:
+        _snap(0, hub)
+        page3 = PC.body(_exam_page())
+        if "上次体检：刚刚" not in page3:
+            return "当天的快照没有渲染成「刚刚」（T0.3：当天＝刚刚）"
+    finally:
+        _restore_hub(old)
+    return True
+
+
+@check("N-H10 ★ 负控：空态编「上次体检：0 天前」/ 没查成说成「没问题」⇒ 必须红")
+def n_h10():
+    """三态互斥（§21.3）的两把尺子，各配一个变异证明尺子有牙：
+    ① 空态不许出现「上次体检」—— 变异：空态分支值从 "" 换成 "0 天前"；
+    ② 没查成不许说「都没问题」—— 变异：在没查成句尾追加"不过其它都没问题"。
+    ★ 排除词扫 `<div class="err">` **单句**，不扫全页 —— 边界声明里逐字含
+      「不要当成"没问题"」（§20.2 TPL 原文），全页扫会把**正确的页面**判红
+      （「文案自带禁词把尺子废掉」同族：2026-10-17 `_OBS_NOT_CONFIGURED`）。"""
+    src = _src(_SERVER_REL)
+    a1 = 'if reports else ""'
+    if a1 not in src:
+        return ("变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，"
+                "不算通过：%r" % a1)
+    hub, old = _fresh_hub()
+    try:
+        page, why = _exam_mut(src.replace(a1, 'if reports else "0 天前"'),
+                              "is0490_nh10a")
+    finally:
+        _restore_hub(old)
+    if why:
+        return why
+    page = PC.body(page)
+    if "上次体检" not in page:
+        return "负控失效：空态编出「0 天前」后尺子没红"
+    # 尺子②：没查成态（tools 缺失）的 err 单句排除 affirmative 干净话
+    a2 = '结果不算数。"'
+    if a2 not in src:
+        return ("变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，"
+                "不算通过：%r" % a2)
+    page2, why = _exam_mut(src.replace(a2, '结果不算数。不过其它都没问题。"', 1),
+                           "is0490_nh10b",
+                           res={"scan": {}, "egress": _h_egress()})
+    if why:
+        return why
+    page2 = PC.body(page2)
+    err = re.search(r'<div class="err">(.*?)</div>', page2, re.S)
+    if not err:
+        return "夹具不成立：没查成态没有渲染 err 单句 ⇒ 尺子②无对象"
+    if not any(w in err.group(1) for w in ("都没问题", "全部干净", "一切正常",
+                                           "没有发现问题")):
+        return "负控失效：没查成句追加「都没问题」后尺子②没红"
+    # 连回正判据：真实现的没查成态 err 单句必须不含那些话
+    real = PC.body(_exam_page(res={"scan": {}, "egress": _h_egress()}))
+    err2 = re.search(r'<div class="err">(.*?)</div>', real, re.S)
+    if not err2:
+        return "夹具不成立：真实现的没查成态没有 err 单句"
+    if any(w in err2.group(1) for w in ("都没问题", "全部干净", "一切正常",
+                                        "没有发现问题")):
+        return "真实现的没查成句自带干净话：%r" % err2.group(1)
+    return True
+
+
+def _verdict_titles():
+    """六档人话标题（真源 antinel.VERDICTS）—— 判据不手抄，产品改词尺子跟着走。"""
+    import antinel as _A
+    return tuple(str(v.get("title") or "") for v in _A.VERDICTS.values())
+
+
+def _h11_core(src_server, src_ui):
+    """体检渲染路径上不许有第二份六档（VERDICTS 必须 import，不许写字面量）。
+
+    ★ 两把尺子（AST，不是正则）：
+      ① 六键齐全且**值为字典**的 dict 字面量＝表格形状的副本
+         （ui_server `_tiles` 里的键→**颜色**表值是字符串，是排版不是第二份六档，放行）；
+      ② 六键齐全且有值命中六档标题＝扁平副本（能渲染的最小抄法）。
+    """
+    import ast
+    titles = set(_verdict_titles())
+    bad = []
+    for rel, src in ((_SERVER_REL, src_server), (_HEALTH_REL, src_ui)):
+        try:
+            tree = ast.parse(src)
+        except SyntaxError as e:
+            bad.append("%s 解析失败：%s" % (rel, e))
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Dict):
+                continue
+            keys = {k.value for k in node.keys
+                    if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+            if not set(_VERDICT_KEYS) <= keys:
+                continue
+            if any(isinstance(v, ast.Dict) for v in node.values):
+                bad.append("%s 里有六键齐全且值为字典的字面量（第二份六档表）" % rel)
+                break
+            vals = {v.value for v in node.values
+                    if isinstance(v, ast.Constant) and isinstance(v.value, str)}
+            if vals & titles:
+                bad.append("%s 里有六键齐全且值命中六档标题的字面量（第二份六档）" % rel)
+                break
+    return "；".join(bad) if bad else True
+
+
+@check("H11 ★ 体检渲染不出现第二份六档：VERDICTS 是 import 不是写字面量（AST）")
+def h11():
+    """设计 §20.1「六档一律 import，禁止第二份实现」的控制台侧落点。
+
+    ★ 为什么必须是源码尺子：一份抄来的六档**渲染结果与真源逐字一样**
+      （同一批标题/图标/次序）⇒ 行为断言分辨不出来，只有 AST 能抓到。
+    """
+    return _h11_core(_src(_SERVER_REL), _src(_HEALTH_REL))
+
+
+def _verdicts_copy_src():
+    """一份**形状兼容**的六档副本（负控注入用）—— 字段与真源逐字一致，
+    渲染结果与真源完全相同 ⇒ 证明该缺陷只有源码尺子抓得到。"""
+    import antinel as _A
+    rows = []
+    for k, v in sorted(_A.VERDICTS.items(), key=lambda kv: kv[1].get("order", 9)):
+        rows.append('"%s": {"key": "%s", "icon": "%s", "title": "%s", '
+                    '"order": %d, "short": "%s"}'
+                    % (k, v["key"], v["icon"], v["title"],
+                       int(v.get("order", 9)),
+                       str(v.get("short") or "").replace("\\", "\\\\").replace('"', '\\"')))
+    return "{\n    " + ",\n    ".join(rows) + "}"
+
+
+@check("N-H11 ★ 负控：往体检渲染里塞一份形状兼容的六档副本 ⇒ H11 必须红")
+def n_h11():
+    """★ 变异＝`_view_exam` 改用模块级副本 `_EXAM_VERDICTS_COPY`（抄真源形状）。
+    两步都验：① 变异页**照样渲染出四组标题**（副本形状兼容 ⇒ 缺陷在行为上
+    不可见）；② H11 的源码尺子在变异源码上必须红。"""
+    src = _src(_SERVER_REL)
+    anchor = "_U._result_html(res, _A.VERDICTS, _A._ev_human)"
+    if anchor not in src:
+        return ("变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，"
+                "不算通过：%r" % anchor)
+    mut_src = src.replace(
+        anchor, "_U._result_html(res, _EXAM_VERDICTS_COPY, _A._ev_human)")
+    mut_src = mut_src.replace(
+        "def _view_exam(",
+        "_EXAM_VERDICTS_COPY = %s\n\n\ndef _view_exam(" % _verdicts_copy_src(), 1)
+    # ① 变异页照样渲染（副本形状兼容）—— 否则是量具故障不是产品缺陷证明
+    page, why = _exam_mut(mut_src, "is0490_nh11")
+    if why:
+        return why
+    page = PC.body(page)
+    miss = [t for t in _H_TITLES if t not in page]
+    if miss:
+        return ("夹具不成立：副本形状不兼容，四组标题缺 %s —— "
+                "变异没模拟出「行为上看不见」的缺陷" % "、".join(miss))
+    # ② 源码尺子必须红
+    if _h11_core(mut_src, _src(_HEALTH_REL)) is True:
+        return "负控失效：塞了六档副本后 H11 没红"
+    if _h11_core(_src(_SERVER_REL), _src(_HEALTH_REL)) is not True:
+        return "夹具不成立：真实现本身就被 H11 判红 ⇒ 负控无分辨力"
+    return True
+
+
+# ═════════ 批20 · T1.1（诱饵文件状态进体检 ③ 组，0.53.0 P6 收尾）═════════
+# 施工单 v1.3/v1.4 T1.1；设计 v1.11 §14.7 二段（外传与布防：egress 摘要＋诱饵文件）
+# ／§20.3 术语表（页面一律「诱饵文件」，CLI 命令名 antinel canary 不动）。
+# ★ 数据流：`antinel.canary_summary()`（唯一实现）→ payload `res["canary"]`
+#   → `ui_server._canary_html` 渲染。判据经 `_result_html` 直接渲染，不起服务。
+# ★ 五态不许混（文案地基）：没登记项目 ≠ 没放诱饵 ≠ 放了没被读 ≠ 被读过 ≠
+#   带出去过。`observed` 是唯一强证据，「被读」不许渲染成「出事」。
+
+
+def _canary_render(c, src=None, tag="is0490_h12"):
+    """带诱饵 payload 跑一次体检页渲染（其余组用最小干净背景）。"""
+    import antinel                                                 # noqa: E402
+    res = {"scan": _h_scan(1), "egress": _h_egress(False), "canary": c}
+    try:
+        if src is None:
+            import ui_server as U                                  # noqa: E402
+            return U._result_html(res, antinel.VERDICTS,
+                                  antinel._ev_human), None
+        mod = _load(src, tag, _HEALTH_REL)
+        return mod._result_html(res, antinel.VERDICTS,
+                                antinel._ev_human), None
+    except Exception as e:                                         # noqa: BLE001
+        return None, ("量具故障：渲染抛 %s: %s —— 不是产品问题，不算通过"
+                      % (type(e).__name__, e))
+
+
+#: 五态夹具（数字取不可能自然撞上的值；planted 用 marker 名）
+_C_NO_PROJ = {"projects": 0, "planted": [], "read": 0, "observed": 0}
+_C_NONE_PLANTED = {"projects": 2, "planted": [], "read": 0, "observed": 0}
+_C_UNREAD = {"projects": 2, "planted": ["CANARY-a-1", "CANARY-a-2"],
+             "read": 0, "observed": 0}
+_C_READ = {"projects": 2, "planted": ["CANARY-a-1", "CANARY-a-2"],
+           "read": 3, "observed": 0}
+_C_LEAKED = {"projects": 2, "planted": ["CANARY-a-1"], "read": 3,
+             "observed": 2}
+
+
+def _h12_core(render):
+    """H12 尺子本体（正判据与负控共用同一把；render＝payload→页面的调用）。"""
+    # 态①没登记项目：说「没查」，**不许**说成「没有」
+    p, why = render(_C_NO_PROJ)
+    if why:
+        return why
+    t = PC.body(p)
+    if "还没有登记过项目" not in t:
+        return "态①（没登记项目）没有自己的话——「没查」被渲染成了别的"
+    if "一个诱饵文件都没有" in t:
+        return "态①把「没查」说成了「没有」（本仓铁律：没查过≠查过没有）"
+    # 态②没放过：给放置入口
+    p, why = render(_C_NONE_PLANTED)
+    if why:
+        return why
+    if "还没有放过诱饵文件" not in PC.body(p):
+        return "态②（没放过）没有自己的话"
+    if "antinel canary plant" not in p:
+        return "态②没给放置入口（CLI 命令名）"
+    # 态③放了没被读
+    p, why = render(_C_UNREAD)
+    if why:
+        return why
+    t = PC.body(p)
+    if "放了 2 个诱饵文件" not in t or "都还没有被任何工具读过" not in t:
+        return "态③（放了没被读）数量或措辞不对：%r" % t[-120:]
+    # 态④被读过：必须带「被读不等于出事」的澄清
+    p, why = render(_C_READ)
+    if why:
+        return why
+    t = PC.body(p)
+    if "被读过 3 次" not in t:
+        return "态④（被读过）没报次数"
+    if "被读不等于出事" not in t:
+        return "态④没澄清「被读不等于出事」——会把观察证据说成事故"
+    # 态⑤带出去过（唯一强证据）：标记出现在输出里
+    p, why = render(_C_LEAKED)
+    if why:
+        return why
+    t = PC.body(p)
+    if "有 2 次诱饵标记出现在工具输出里" not in t:
+        return "态⑤（强证据）没报次数"
+    if "确有内容被带出去过的证据" not in t:
+        return "态⑤没点明「这是确有内容被带出去过的证据」"
+    # 术语：页面零「金丝雀」（与 0360 H6 同一条禁令，这里守新块自身）
+    for name, c in (("①", _C_NO_PROJ), ("②", _C_NONE_PLANTED),
+                    ("③", _C_UNREAD), ("④", _C_READ), ("⑤", _C_LEAKED)):
+        p, why = render(c)
+        if why:
+            return why
+        # ★ 0.53.0（S48 存量红，本批顺手清）：这里原先直接扫裸渲染变量 ——
+        #   裸串里含 <style> 与术语浮层（「金丝雀」正是术语浮层的词），
+        #   于是"页面上没有金丝雀"既可能被 CSS 注释误判、也可能被浮层掩盖。
+        if "金丝雀" in PC.body(p):
+            return "态%s渲染里有「金丝雀」—— 页面词必须是「诱饵文件」" % name
+    # 数据缺失（老 payload/夹具）⇒ 不渲染、不谎报
+    p, why = render(None)
+    if why:
+        return why
+    if "诱饵文件" in PC.body(p):
+        return "没带诱饵数据却渲染了诱饵块——空数据不许产出文案"
+    # 明确取失败 ⇒ 说「没查到」，不许说成「没有问题」
+    p, why = render({"failed": True})
+    if why:
+        return why
+    t = PC.body(p)
+    if "没查到" not in t or "不要当成「没有问题」" not in t:
+        return "取失败态没说清「没查到≠没有问题」：%r" % t[-120:]
+    return True
+
+
+@check("H12 ★ 诱饵文件五态不混：没登记/没放过/没被读/被读过/带出去过 各有其词")
+def h12():
+    """T1.1 的判据落点（渲染→0490）。与 0360 H6 的分工：H6 守**整页**禁词，
+    本判据守**五态措辞不互相塌陷**（「没查」不许说成「没有」这类）。"""
+    return _h12_core(lambda c: _canary_render(c))
+
+
+@check("N-H12 ★ 负控：把「没登记」说成「没有」／删掉强证据句 ⇒ H12 必须红")
+def n_h12():
+    """两变异各验一边（都走两步法：先证注入生效，再证尺子红）：
+
+    ① 态①文案塌陷成「一个诱饵文件都没有」—— 把「没查」说成「没有」；
+    ② 态⑤删掉「确有内容被带出去过的证据」—— 强证据降级成普通观察。
+    """
+    src = _src(_HEALTH_REL)
+    a1 = "还没有登记过项目，无从查起——这不是「没有诱饵」，是「没查」。"
+    if a1 not in src:
+        return ("变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，"
+                "不算通过：%r" % a1)
+    mut1 = src.replace(a1, "一个诱饵文件都没有。")
+    r1 = _h12_core(lambda c: _canary_render(c, src=mut1, tag="is0490_nh12a"))
+    if r1 is True:
+        return "负控①失效：态①塌陷成「没有」后 H12 没红"
+    if "态①" not in str(r1):
+        return "负控①方向不对：红的原因不是态①（%s）—— 量具打偏" % r1
+    a2 = "——这是确有内容被带出去过的证据。"
+    if a2 not in src:
+        return ("变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，"
+                "不算通过：%r" % a2)
+    mut2 = src.replace(a2, "。")
+    r2 = _h12_core(lambda c: _canary_render(c, src=mut2, tag="is0490_nh12b"))
+    if r2 is True:
+        return "负控②失效：删掉强证据句后 H12 没红"
+    if "态⑤" not in str(r2):
+        return "负控②方向不对：红的原因不是态⑤（%s）—— 量具打偏" % r2
+    if _h12_core(lambda c: _canary_render(c)) is not True:
+        return "夹具不成立：真实现本身就被 H12 判红 ⇒ 负控无分辨力"
+    return True
+
+
+# ══════════════════ U20 · 0.53.0 T3.2（撤顶部 24h 计数排；设计 §14.3 判据）══════════════════════
+#: ★ 由来（设计 §14.3 第 1 条）：顶部条曾挂一排「最近 24 小时：失守 N
+#:   （已归并为 M 件事）· 拦截 N · 注意 N」**按级**计数 —— 与**日报四指标**
+#:   （R0/L2/L1 按级 ＋ 要处理按桶，同一 24h 窗口）同口径 ⇒ 同一个数两个
+#:   落点（「重复即红」）。T3.2 撤这一排；24h 按级计数的**唯一家**是
+#:   日报四指标（其钻取链接由 0353 `c_report_drill_links` 守、数字与链
+#:   现算一致由 0353 P14 守）。
+#: ★ 为什么**四视图都查**：顶部条是共享 chrome（`_bar` 四个视图都渲染
+#:   一遍）—— 只查收件箱页的话，报表页留着照样是"同页两份"。
+def _u20_offenders(page):
+    """U20 的唯一尺子（正负判据共用，不许二次实现）：
+    返回页面上「第二份 24h 按级计数」的形态标记列表（空 ＝ 干净）。"""
+    out = []
+    # ① 排头字面：「最近 24 小时：」＋**冒号**是药丸排的专用形状。
+    #    报表页自己的「最近 24 小时被拉起过」行、顶部后缀的
+    #    「（最近 24 小时）」、口径说明的「四个数都只数最近 24 小时。」
+    #    都不带这个冒号形状 —— 不误伤（尺子窄而准，不做全站正则）。
+    if "最近 %d 小时：" % M.WINDOW_HOURS in page:
+        out.append("顶部 24h 计数排头（「最近 %d 小时：」）" % M.WINDOW_HOURS)
+    # ② 药丸的链接形状：`f=win:24:lv:R0">失守 <b>`（日报四指标的链接
+    #    后面跟的是裸数字，不是「失守 <b>」—— 两种形状分得开）。
+    for m in re.finditer(
+            r'f=win:%d:lv:(R0|L2|L1)">(?:失守|拦截|注意) <b>' % M.WINDOW_HOURS,
+            page):
+        out.append("药丸计数链接（%s）" % m.group(1))
+    return out
+
+
+@check("U20 ★ T3.2：四视图顶部条无第二份 24h 按级计数（唯一家在日报四指标）")
+def u20():
+    for view in _VIEWS:
+        bad = _u20_offenders(_page(view))
+        if bad:
+            return "%s 视图还有第二份 24h 计数：%s" % (view, "；".join(bad[:3]))
+    # 家的存在性：撤的是**第二份**，不是把数杀干净 —— 日报四指标的钻取
+    # 链接必须在（否则"唯一家"名存实亡）。
+    rep = _page("report")
+    for lvl in ("R0", "L2", "L1"):
+        if ('f=win:%d:lv:%s' % (M.WINDOW_HOURS, lvl)) not in rep:
+            return "日报页缺 %s 指标的 24h 钻取链接 —— 唯一家没了" % lvl
+    return True
+
+
+@check("N-U20 负控：把药丸计数排加回顶部条 ⇒ U20 必须红")
+def n_u20():
+    """反向对照（C1 两步法）：往 `_bar` 的返回里注回一排药丸形态的计数。
+
+    ★ 变异锚点选 `collst` 那一行：它在 `_bar` 返回串的拼接里，前插一串
+      字面量即成新的一"排"—— 与真药丸同形（排头冒号 ＋ 级链接 ＋ <b> 数）。
+    """
+    src = _src(_SERVER_REL)
+    anchor = '        "<span class=\\"collst\\" id=\\"collst\\"></span>"'
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    pills = ('        "<span class=\\"pill\\">最近 %d 小时：'
+             '<a href=\\"/?v=inbox&f=win:%d:lv:R0\\">失守 <b>9</b>'
+             '（已归并为 1 件事）</a> · '
+             '<a href=\\"/?v=inbox&f=win:%d:lv:L2\\">拦截 <b>9</b></a> · '
+             '<a href=\\"/?v=inbox&f=win:%d:lv:L1\\">注意 <b>9</b></a></span>"\n'
+             % (M.WINDOW_HOURS, M.WINDOW_HOURS, M.WINDOW_HOURS, M.WINDOW_HOURS))
+    page, why = _mut_render(src.replace(anchor, pills + anchor),
+                            "is0490_nu20", _SERVER_REL,
+                            view="inbox", filt=M.BUCKET_ACTION,
+                            root=tempfile.mkdtemp(prefix="g0490_nu20_"),
+                            token="T", items=_items(), posture=_POSTURE)
+    if why:
+        return why
+    bad = _u20_offenders(page)
+    if not bad:
+        return "负控失效：加回药丸排后 U20 仍判绿（这条判据是装饰）"
+    if _u20_offenders(_page("inbox")):
+        return "夹具不成立：真实现本身还带药丸排 ⇒ 负控无分辨力"
+    return True
+
+
+def _u21_fixture(hosts, same_topic=True):
+    """T3.3 夹具：每条带显式 `host`（空串＝0.33.1 前的旧记录）。
+
+    ★ `same_topic=True` ⇒ 全部落进**一个归并行**（考"归并行尾部的分布"）；
+      `False` ⇒ 每条各成一组，退回**明细行**（考"行内徽标"）。
+    ★ 时间用 `_ago()` 相对现在 —— 不写死日期（0.48.4 时间炸弹教训）。
+    """
+    out = []
+    for i, h in enumerate(hosts):
+        a = M.Alert(id="u0490_u21_%d" % i, ts=_ago(1.0 + i * 0.1),
+                    level="R0", kind="host_shield_breach", title="t",
+                    detail="d%d" % i,
+                    topic="same" if same_topic else "t%d" % i,
+                    host=h, host_confidence=("high" if h else ""))
+        out.append(M.Item(alert=a, state="unread"))
+    return out
+
+
+def _u21_core(render):
+    """U21/T3.3 的唯一尺子（`render` 可注入 ⇒ 负控喂变异模块，P18/P19 同型）。
+
+    四条腿，各守一个"显示位 → 事实"的对应：
+      ① 双工具 ＋ 归并成一行 ⇒ 归并行尾部有「工具：」且**每个工具都在、都带条数**；
+      ② 单工具 ⇒ **零徽标零分布**（单工具机器上每行重复同一句＝v0 的噪声错法）；
+      ③ 双工具 ＋ 不归并 ⇒ **每条明细行**都有徽标，且名字与记录对得上；
+      ④ 旧记录（无 host）⇒ **不显示成任何工具**（不写「未知 N 条」，P18 同纪律）。
+    """
+    def _r(items, filt):
+        return render(view="inbox", filt=filt,
+                      root=tempfile.mkdtemp(prefix="g0490_u21_"),
+                      token="T", items=items, rep=_REP, posture=_POSTURE)
+
+    # ① 双工具归并行（workbuddy 2 条 ＋ qoder 1 条：条数必须算对，不只列名字）
+    # ★ 0.53.0（T6.1）：宿主有了人话名（`WorkBuddy` / `Qoder`）⇒ 名字比对**不区大小写**。
+    #   这里守的是"哪个工具、几条"，不是"品牌名怎么写"（后者由 0515 的
+    #   宿主表判据守，见 `c_host_names_cover_detector_labels`）。
+    page = _r(_u21_fixture(["workbuddy", "workbuddy", "qoder"]), M.BUCKET_ACTION)
+    m = re.search(r'工具：[^<]*', page)
+    if not m:
+        return "双工具机器上，归并行尾部没有工具分布 —— 归因在页面上不存在"
+    dist = m.group(0)
+    low = dist.lower()
+    for nm in ("workbuddy", "qoder"):
+        if nm not in low:
+            return "工具分布漏了 %s（实际 %r）" % (nm, dist[:50])
+    if "workbuddy 2 条" not in low or "qoder 1 条" not in low:
+        return "工具分布的条数算错了（实际 %r；应为 workbuddy 2 条 · qoder 1 条）" % dist[:50]
+    # ② 单工具 ⇒ 两处都不许出现
+    one = _r(_u21_fixture(["workbuddy", "workbuddy"]), M.BUCKET_ACTION)
+    if 'class="hbadge"' in one:
+        return "单工具机器上仍渲染了工具徽标 —— 每行重复同一个工具名（v0 错法）"
+    if "工具：" in one:
+        return "单工具机器上仍渲染了工具分布 —— 同上，纯噪声"
+    # ③ 明细行徽标（不归并 ⇒ 每条一行）
+    rows = _r(_u21_fixture(["workbuddy", "qoder"], same_topic=False), "all")
+    names = re.findall(r'<span class="hbadge">([^<]*)</span>', rows)
+    if len(names) != 2:
+        return ("双工具明细行的工具徽标数 %d ≠ 2（实到 %r）—— 行内归因没接上"
+                % (len(names), names))
+    if sorted(n.strip().lower() for n in names) != ["qoder", "workbuddy"]:
+        return "行内徽标的工具名对不上记录（实到 %r）" % (names,)
+    # ④ 旧记录（无 host）：不冒充
+    legacy = _r(_u21_fixture(["", ""], same_topic=False), "all")
+    if 'class="hbadge"' in legacy or "工具：" in legacy:
+        return "旧记录（无归因）被显示成了某个工具 —— 不知道被说成了知道"
+    if "generic" in legacy:
+        return "页面出现了 generic 兜底标签 —— 那是检测失败的内部标记"
+    return True
+
+
+@check("U21 ★ T3.3：工具徽标只在 ≥2 工具时出现＋归并行尾部有工具分布")
+def u21():
+    """设计 §14.3 第 3／6 条。
+
+    ★ 为什么必须靠**夹具**自证：本机近 8 天 100% workbuddy ⇒ 真实数据里
+      这个功能**永远不会出现**，只靠现网样本＝与死判据同型（永远没人执行）。
+    """
+    return _u21_core(SV.render_page)
+
+
+@check("N-U21 负控：把「≥2 工具」的开关打掉（恒真）⇒ U21 必须红")
+def n_u21():
+    """反向对照：`_show_host` 恒为 True ⇒ 单工具机器上也会渲染徽标/分布。"""
+    src = _src(_SERVER_REL)
+    anchor = "    _show_host = M.host_count(items) >= 2"
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    try:
+        mut = _load(src.replace(anchor, "    _show_host = True"),
+                    "is0490_nu21", _SERVER_REL)
+    except Exception as e:                                      # noqa: BLE001
+        return ("负控自身失效：变异模块加载就抛 %s: %s —— 量具故障，不算通过"
+                % (type(e).__name__, e))
+    why = _u21_core(mut.render_page)
+    if why is True:
+        return "负控失效：开关恒真后 U21 仍判绿（单工具腿是摆设）"
+    if "单工具" not in str(why):
+        return "方向不对：红因不是「单工具也渲染」（%s）—— 量具打偏" % str(why)[:60]
+    return True
+
+
+# ---------------------------------------------------------------- T5.2（0.53.0）----
+#: 「工具识别」那一行的值（只取这一格，避免把 CSS/术语浮层里的英文算进去）
+_U22_ROW = re.compile(r'<span class="k">工具识别</span><span class="([a-z]+)">([^<]*)</span>')
+
+
+def _u22_items(rows):
+    """T5.2 夹具：`(host, host_confidence, 几小时前)` —— 时间全部相对现在。
+
+    ★ 不写死日期（0.48.4 时间炸弹教训）：收件箱/日报按窗口筛，夹具一旦过期
+      就"不在页面里"，正判据对空页面打分＝假绿，负控还会报"夹具失效"。
+    """
+    out = []
+    for i, (h, c, hrs) in enumerate(rows):
+        a = M.Alert(id="u0490_u22_%d" % i, ts=_ago(hrs), level="L1",
+                    kind="pre_tool_use", host=h, host_confidence=c)
+        out.append(M.Item(alert=a, state="unread"))
+    return out
+
+
+def _u22_row(render, rows):
+    """渲染运行状态页，返回 `(css 类, 值文本)`；这一行不存在 ⇒ `(None, None)`。"""
+    page = render(view="health", root=tempfile.mkdtemp(prefix="g0490_u22_"),
+                  token="T", items=_u22_items(rows), rep=_REP, posture=_POSTURE)
+    m = _U22_ROW.search(page)
+    return (m.group(1), m.group(2)) if m else (None, None)
+
+
+def _u22_core(render):
+    """U22/T5.2 的唯一尺子（`render` 可注入 ⇒ 负控喂变异模块，U21 同型）。
+
+    五条腿，对应设计 §4.4-1／§14.6-2 的三样要求（判定方式／成功数／说不清提醒）：
+      ① 双工具 ＋ 一条旧记录 ⇒ 分母＝窗口内总条数、成功数、说不清数与占比**逐字对**；
+      ② 全说不清 ⇒ 出「说不清偏多」提醒（这是这个块存在的理由）；
+      ③ 全认得出 ⇒ **不出**提醒（否则提醒常亮＝噪声，和"永远红"的报警器一样没用）；
+      ④ 空记录 ⇒ 给真话、**不许渲染 0%**（"没查"不是"查过没事"）；
+      ⑤ 8 天前的记录不计入 7 天分母（窗口真的按 7 天算，不是"全部记录"）。
+    """
+    # ① 双工具：workbuddy 2 条（直接证据）＋ qoder 1 条（间接线索）＋ 旧记录 1 条
+    css, val = _u22_row(render, [("workbuddy", "high", 2), ("workbuddy", "high", 3),
+                                 ("qoder", "medium", 4), ("", "none", 5)])
+    if val is None:
+        return "运行状态页没有「工具识别」这一格 —— 这块在页面上不存在"
+    if "近 7 天 4 条记录里" not in val:
+        return "分母不对：应为窗口内全部 4 条记录（实际 %r）" % val[:60]
+    if "3 条认得出是哪个工具" not in val:
+        return "成功数不对：应为 3 条认得出（实际 %r）" % val[:60]
+    if "有直接证据 2 条" not in val or "间接线索 1 条" not in val:
+        return "置信度分布不对或没上屏（实际 %r）" % val[:80]
+    if "1 条说不清（25%）" not in val:
+        return "说不清条数/占比不对：应为 1 条（25%）（实际 %r）" % val[:80]
+    if "线索取工具自己报的环境信息" not in val:
+        return "缺「判定方式」—— 读者不知道这个数是怎么来的（实际 %r）" % val[:80]
+    for en in ("high", "medium", "low", "none"):
+        if en in val:
+            return "页面出现了英文置信度 %r —— 那是内部值" % en
+    if css != "warn":
+        return "25%% 说不清应标 warn（实际 %r）" % css
+
+    # ② 全说不清（旧记录机器）⇒ 必须提醒
+    css2, val2 = _u22_row(render, [("", "none", 2), ("", "none", 3)])
+    if "说不清偏多" not in (val2 or ""):
+        return "占比 100%% 时没有「说不清偏多」提醒 —— 这个块等于没做（实际 %r）" % (val2 or "")[:60]
+    if css2 != "warn":
+        return "占比 100%% 时未标 warn（实际 %r）" % css2
+
+    # ③ 全认得出 ⇒ 不许提醒（防"常亮报警器"）
+    css3, val3 = _u22_row(render, [("workbuddy", "high", 1)] * 5)
+    if "说不清偏多" in (val3 or ""):
+        return "0%% 说不清时仍出提醒 —— 提醒会常亮，等于噪声（实际 %r）" % (val3 or "")[:60]
+    if "5 条记录里，5 条认得出" not in (val3 or ""):
+        return "5/5 口径不对（实际 %r）" % (val3 or "")[:60]
+
+    # ④ 空记录 ⇒ 真话，且不出现 0%
+    css4, val4 = _u22_row(render, [])
+    if val4 is None:
+        return "空机器上连这一格都没有 —— 空态不许整块消失"
+    if "近 7 天没有记录" not in val4:
+        return "空机器上没有说真话（实际 %r）" % val4[:60]
+    if "%" in val4:
+        return "空机器上渲染了百分比 —— 「没查」被说成了「查过没事」（实际 %r）" % val4[:60]
+
+    # ⑤ 8 天前那条不计入 7 天
+    css5, val5 = _u22_row(render, [("workbuddy", "high", 2), ("workbuddy", "high", 3),
+                                   ("qoder", "medium", 4), ("", "none", 5),
+                                   ("workbuddy", "high", 8 * 24)])
+    if "近 7 天 4 条记录里" not in (val5 or ""):
+        return ("8 天前的记录被算进了 7 天分母（实际 %r）—— 窗口不是 7 天"
+                % (val5 or "")[:60])
+    return True
+
+
+@check("U22 ★ T5.2：运行状态「工具识别」行（分母／成功数／说不清占比／判定方式）")
+def u22():
+    """设计 §4.4-1、§14.6-2（最小版）。
+
+    ★ 为什么必须夹具自证：本机近 8 天 100% workbuddy、且旧记录占比可能为 0——
+      现网样本既碰不到"双工具"也碰不到"说不清偏多"，只靠真数据＝与死判据同型。
+    """
+    return _u22_core(SV.render_page)
+
+
+@check("N-U22 负控：「说不清偏多」提醒关掉 ⇒ U22 必须红（且红在提醒那条腿）")
+def n_u22():
+    src = _src(_SERVER_REL)
+    anchor = ('        if _hs["unclear_ratio"] ' + ">" + ' 0.05:')
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    try:
+        mut = _load(src.replace(anchor, "        if False:"), "is0490_nu22", _SERVER_REL)
+    except Exception as e:                                      # noqa: BLE001
+        return ("负控自身失效：变异模块加载就抛 %s: %s —— 量具故障，不算通过"
+                % (type(e).__name__, e))
+    why = _u22_core(mut.render_page)
+    if why is True:
+        return "负控失效：提醒关掉后 U22 仍判绿（提醒那条腿是摆设）"
+    # ★ 方向判断放宽到"提醒 或 warn 那两条腿"：`if` 被关掉时**同一分支**同时失去
+    #   提醒句与 warn 颜色 —— ① 腿先撞到颜色，② 腿才撞到句子。要求"必须红在句子"
+    #   等于要求变异只改一半，那是把量具写死（本轮实测撞到，故记在这里）。
+    if "提醒" not in str(why) and "warn" not in str(why):
+        return "方向不对：红因不是「提醒缺失/warn 消失」（%s）—— 量具打偏" % str(why)[:60]
+    return True
+
+
+@check("N-U22b 负控：7 天窗口改成 30 天 ⇒ U22 必须红（分母那条腿）")
+def n_u22_b():
+    src = _src(_SERVER_REL)
+    anchor = "M.host_attribution_stats(items or [], days=7)"
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    try:
+        mut = _load(src.replace(anchor, "M.host_attribution_stats(items or [], days=30)"),
+                    "is0490_nu22b", _SERVER_REL)
+    except Exception as e:                                      # noqa: BLE001
+        return ("负控自身失效：变异模块加载就抛 %s: %s —— 量具故障，不算通过"
+                % (type(e).__name__, e))
+    why = _u22_core(mut.render_page)
+    if why is True:
+        return "负控失效：窗口改成 30 天后 U22 仍判绿（窗口那条腿是摆设）"
+    if "分母" not in str(why) and "7 天" not in str(why):
+        return "方向不对：红因不是「分母/窗口」（%s）—— 量具打偏" % str(why)[:60]
+    return True
+
+
+#: 施工单 T5.2 给的逐字告警句（0 文件那种输入下的形态）
+_U23_ALARM = "这次没核验成：0 个文件被检查——结果不算数"
+
+
+def _u23_rep(status, files, records=0):
+    rep = dict(_REP)
+    rep["chain"] = {"status": status, "files": files, "records": records,
+                    "broken": 0, "bad_lines": 0, "unchained": 0,
+                    "first_bad": "", "reason": ""}
+    return rep
+
+
+def _u23_page(view, status, files, records=0):
+    return SV.render_page(view=view, root=tempfile.mkdtemp(prefix="g0490_u23_"),
+                          token="T", items=_items(),
+                          rep=_u23_rep(status, files, records), posture=_POSTURE)
+
+
+@check("U23 ★ T5.2：链检「没查成」说告警句，不许再显示中性词「未能核验」")
+def u23():
+    """设计 §4.4-3、§14.6-4（废弃口径 §9-6）。
+
+    ★ 为什么这不是文字洁癖：中性状态词会被读成"暂时没数据"，而真相是
+      **这次检查一条结论都没产出** —— 同页别处的"没问题"因此不能算数。
+    """
+    # ① 没查成（0 文件）⇒ 逐字告警句，且中性词消失
+    # ★ 0.53.0：断言一律打在 `PC.body()` 上（S48 纪律：判据扫渲染产物必须显式选层，
+    #   裸变量里有 <style>/术语浮层，会让"页面上没有某词"这种断言变成假绿）。
+    h = PC.body(_u23_page("health", "unknown", 0))
+    if _U23_ALARM not in h:
+        return "运行状态页没有逐字告警句：%r" % _U23_ALARM
+    if "未能核验" in h:
+        return "运行状态页仍出现中性词「未能核验」—— 没查成被说成了状态"
+    # ② 查成了 ⇒ 原句不许被顺手改掉（上版两处单位修正都在那半句里）
+    ok_page = PC.body(_u23_page("health", "ok", 1, 2))
+    if "完整（检查了 1 个文件、2 条记录，被改 0）" not in ok_page:
+        return "查成了的原句被改动了（应逐字保留「完整（检查了 …）」）"
+    # ③ 日报页链卡同一句（两处落点同源）
+    r = PC.body(_u23_page("report", "unknown", 0))
+    if _U23_ALARM not in r:
+        return "日报页链卡仍显示中性词 —— 两个落点不同源"
+    # ④ 有文件但一条可校验记录都没有 ⇒ 另说一句，不许谎报「0 个文件」
+    alt = SV.R.chain_unverified(3)
+    if "0 个文件" in alt:
+        return "3 个文件却报了「0 个文件」—— 数字没从 files 派生（F40 同型）"
+    if "3 个文件里没有一条可校验的记录" not in alt:
+        return "另一种没查成的形态没有自己的说法（实际 %r）" % alt
+    return True
+
+
+@check("N-U23 负控：把告警句改回「未能核验」⇒ U23 必须红")
+def n_u23():
+    src = _src(_SERVER_REL)
+    anchor = '    return R.chain_unverified((ch or {}).get("files", 0))'
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    # ★ 走 `_mut_render` 两步法（C-01 守的就是这条）：变异模块能 import ＋ 渲染不抛
+    #   才算"量具没问题"；否则量具故障会被读成产品问题。
+    h, why = _mut_render(src.replace(anchor, '    return "未能核验"'),
+                         "is0490_nu23", _SERVER_REL,
+                         view="health", root=tempfile.mkdtemp(prefix="g0490_nu23_"),
+                         token="T", items=_items(),
+                         rep=_u23_rep("unknown", 0), posture=_POSTURE)
+    if why:
+        return why
+    hv = PC.body(h)                       # S48：断言必须打在显式选层上
+    if _U23_ALARM in hv:
+        return "负控失效：改回「未能核验」后页面仍有告警句（那条腿是摆设）"
+    if "未能核验" not in hv:
+        return "负控自身失效：变异没有生效（页面既无告警句也无中性词）"
+    return True
+
+
 def main():
     print("=" * 78)
     print("0.48.5 Antinel 监理细节修订判据（交接件 v1.1 §5.7）—— "
@@ -3418,7 +4706,25 @@ def main():
           "批15 T-04/T-04b/T-04c（账本按天明细：最近 7 天＋按月折叠＋无记录天"
           "不渲染成 0＋closed: 按关闭日收件）· "
           "批16 T-04d（头部跨元素一致性：文案数量词＝卡片数、同页天数同源、"
-          "连续与总数相等时只说一次）")
+          "连续与总数相等时只说一次）· "
+          "批17 H3/H4b/H7/H3-c2（0.53.0 体检页四组：标题齐全、L0 双口径、"
+          "B 组取 details、C 组行集合＝longest_by_proc ∪ conns）· "
+          "批18 H8/N-H8（0.53.0 收尾：findings 的 lines 三行必须上页面，"
+          "只显示类别名＝有内容等于没内容）· "
+          "批19 T0/H9-H11（0.53.0 第一优先：第五 TAB 体检进控制台 —— "
+          "选项卡恰 5 项＋四组标题、首启落体检页＋引导条逐字＋上次体检一行、"
+          "渲染不出现第二份六档）· "
+          "批20 H12/N-H12（0.53.0 T1.1：诱饵文件五态不混 —— 没登记/没放过/"
+          "没被读/被读过/带出去过各有其词；「没查」不许说成「没有」）· "
+          "批21 U20/N-U20（0.53.0 T3.2：撤顶部 24h 计数排 —— 四视图顶部条"
+          "无第二份按级计数，唯一家在日报四指标）· "
+          "批22 U21/N-U21（0.53.0 T3.3：工具归因显示 —— 徽标只在 ≥2 工具时"
+          "出现、归并行尾部带工具分布、旧记录不冒充任何工具）· "
+          "批23 T-04 族重写（0.53.0 T4.2/T4.3：账本撤头部四指标卡、区一起点"
+          "改昨天、今天改一行深链日报；撤卡后旧文案「下列四个数」必须一起撤）· "
+          "批24 U22/N-U22/N-U22b/U23/N-U23（0.53.0 T5.2：运行状态「工具识别」"
+          "最小版 —— 分母＝窗口内全部记录、提醒不许常亮、空态不渲染 0%；"
+          "链检「没查成」说告警句，中性词「未能核验」在页面上退场）")
     print("（变异只在内存，账本与链只落临时目录，不写任何产品文件；"
           "戊2/戊3 视觉项无判据，走 §6.1 截图验收 —— U-13 只含戊2 机械部分）")
     print("=" * 78)

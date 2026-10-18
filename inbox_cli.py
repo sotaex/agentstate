@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: Apache-2.0
 
-"""值守台 · 命令行（自包含）。
+"""Antinel 监理 · 命令行（自包含）。
 
 ★ 为什么自包含：本模块**不依赖 `antinel.py` 的内部结构**，
   集成时只需在 `antinel.py` 里加三行把参数转进来（见交付件里的补丁）。
@@ -23,6 +23,14 @@ import argparse
 import json
 import os
 import sys
+
+# ★ 0.52.0（2026-10-17 实测）：`-I` 隐含 `-P` ⇒ 运行脚本时**脚本目录不进
+#   sys.path**（隔离 PYTHONPATH 投毒是 `-I` 的本意，但顺带把同目录兄弟模块
+#   也隔离了）。桌面入口 `pythonw -I -S inbox_cli.py window` 因此一启动就
+#   ModuleNotFoundError: inbox_config —— pythonw 无控制台，用户侧**什么都不
+#   显示**（实测：双击桌面「Antinel 监理」毫无反应）。与 host_shield
+#   `_ensure_pkg_on_path()` 同一手法：自己把本文件所在目录放上 sys.path。
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import inbox_config as CFG
 import inbox_model as M
@@ -76,9 +84,13 @@ def cmd_list(a):
         #   —— 0.42.0 只做了网页两条路径，CLI 这条漏了（实测 `**不等于**` 照样露出）。
         print("  [%s] %-12s %s  %s" % (i.id, _fmt_level(i.level), _fmt_state(i.state),
                                        M.visible_text(i.title)))
-        meta = " · ".join(x for x in (M.visible_text(i.detail),
-                                      ("规则 " + i.rule_id) if i.rule_id else "",
-                                      i.ts) if x)
+        # ★ 0.51.2 第二轮：列表的说明行**与网页同一口径**（`M.record_meta`
+        #   唯一实现）——不再自己拼「detail · 规则 X · 裸 ISO 时间」。
+        # ★★ 0.52.0 修（0430 S52 抓到的真回归）：record_meta 只做治理消毒，
+        #   **不做机器腔人话化**——网页侧是 `_vis(meta)` 补的 humanize 那一步。
+        #   CLI 直接打 record_meta 会漏出 `pid=` / `mode=` / 裸 ISO（实测漏）。
+        #   ⇒ 与网页逐层同构：visible_text 在外层（S52 钉的就是这一层）。
+        meta = M.visible_text(M.record_meta(i))
         if meta:
             print("        %s" % meta)
     return 0
@@ -104,7 +116,9 @@ def cmd_show(a):
     print("  级别：%s ｜ 状态：%s" % (_fmt_level(it.level), _fmt_state(it.state)))
     print("  标题：%s" % M.visible_text(it.title))
     if it.detail:
-        print("  原因：%s" % M.visible_text(it.detail))
+        # ★ 0.51.2 第二轮：研发态治理细节（文件名/修法命令）在 CLI 也不裸奔
+        #   ——与网页同一消毒口径（唯一实现 `M.strip_governance`）。
+        print("  原因：%s" % M.visible_text(M.strip_governance(it.detail)))
     if it.rule_id:
         print("  规则：%s ｜ 命中：%s" % (it.rule_id, M.visible_text(it.snippet)))
     print("  时间：%s" % it.ts)
@@ -203,9 +217,9 @@ def cmd_serve(a):
 
 
 def cmd_open(a):
-    """★ 0.35.2：**打开值守台**的唯一入口（托盘气泡、外部调用都走这里）。
+    """★ 0.35.2：**打开Antinel 监理**的唯一入口（托盘气泡、外部调用都走这里）。
 
-    ★ 本进程**就是**值守台：`serve()` 会一直跑（`serve_forever`）。
+    ★ 本进程**就是**Antinel 监理：`serve()` 会一直跑（`serve_forever`）。
       为什么不能只用 `ensure_background()` —— 它把服务放在**后台线程**里，
       命令一返回、进程一退，服务就没了（开出来的窗口**立刻失联**）。
     ★ 不自己拼 URL、不自己起服务：都委托 `inbox_server`，**不二次实现**。
@@ -420,7 +434,7 @@ def build_parser():
     p = sub.add_parser("ignore"); p.add_argument("id"); p.add_argument("--note", default="")
     p.set_defaults(fn=cmd_ignore)
     # ★ 0.35.3：`read-all` 子命令**已取消**（创始人 2026-10-06「1 取消吧」）。
-    #   已读改由「点开即已读」（值守台页面）产生，不再有批量入口。
+    #   已读改由「点开即已读」（Antinel 监理页面）产生，不再有批量入口。
 
     p = sub.add_parser(
         "export",
@@ -442,7 +456,7 @@ def build_parser():
                    help="复用指定口令（守护进程重拉时用；缺省随机生成）")
     p.add_argument("--root", default=None, help="中枢根目录（判据/多实例隔离用）")
     p.add_argument("--open", action="store_true"); p.set_defaults(fn=cmd_serve)
-    # ★ 0.35.2：「打开值守台」的稳定入口（气泡点击 / 托盘 / 外部调用都用它）
+    # ★ 0.35.2：「打开Antinel 监理」的稳定入口（气泡点击 / 托盘 / 外部调用都用它）
     sub.add_parser("open").set_defaults(fn=cmd_open)
     # ★ 0.48.5（B1）：「确保服务在跑 + 开独立窗口」—— 一键入口（antinel.cmd 用它）
     sub.add_parser("window").set_defaults(fn=cmd_window)

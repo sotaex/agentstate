@@ -1,5 +1,6 @@
 {
  "host": "claude-code",
+ "name": "Claude Code",
  "vendor": "Anthropic",
  "roots": [
   "~/.claude",

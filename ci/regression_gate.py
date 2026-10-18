@@ -453,7 +453,7 @@ def j_posture_why_no_frozen_numbers():
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# D-27 ~ D-31 / G-05（2026-10-12 值守台交接件 §4.5，剩余工作 R1–R6）
+# D-27 ~ D-31 / G-05（2026-10-12 Antinel 监理交接件 §4.5，剩余工作 R1–R6）
 #   六条判据补上「登记簿从不会响的表格变成闸门一环」缺的那几环：
 #     D-27 量具口径一致性（T-03）  D-28 fixture 覆盖（T-03）
 #     D-29 docstring 工具参数（T-04） D-30 docstring 路径（T-06）
@@ -1086,6 +1086,73 @@ def _lamp_color_machinery_probe():
     return None
 
 
+def _reason_budget_machinery_probe():
+    """机械自证（常驻负控）：解释行预算判据对「版本差回主行」必须真会红。
+
+    ★ 与 `_lamp_color_machinery_probe` 同族分层（元纪律 M-C）：证的是
+      **判据本身有牙**。FZ-004 本轮由 candidate 翻 frozen ⇒ D-38 直接执法，
+      但探针照跑（冻结后被擅改时，本探针先报"判据还能抓"，而不是让
+      D-38 拿着一把不确定的尺子）。
+    ★ 三步（变异锚点逐字取自产品，打不中 ⇒ 报量具故障，诚实红不静默）：
+      ① 未变异必须过 —— 不过 ⇒ 产品违例候选契约，**照红**；
+      ② 把版本差「另外：…」段**塞回**主行（FZ-004 原病）⇒ 必须红且方向对；
+      ③ 把徽标的版本号**抹掉**（"挪丢了"而非"挪位置"）⇒ 必须红且方向对。
+    返回 None（全过）／问题串（负控失效或产品违例）／"SKIP"（环境读不到）。
+    """
+    M = _load_module_file("inbox_model.py", "inbox_model_fz4probe")
+    if M is None:
+        return "SKIP"
+    try:
+        v = j_reason_line_budget(mod=M)
+    except Exception as e:                                   # noqa: BLE001
+        return "负控自身失效：解释行判据自身抛错 %s: %s" % (
+            type(e).__name__, e)
+    if v[0] is None:
+        return None
+    if v[0] is not True:
+        return ("解释行判据夹具不成立：未变异就不过（%s）—— 产品违例"
+                "候选契约照红（FZ-004 原病复发必须被看见）" % (v[1],))
+    # ② 版本差回主行（FZ-004 原病）
+    orig = M.light_explain
+
+    def _mut_back(*a, **k):
+        out = orig(*a, **k)
+        if isinstance(out, dict):
+            out = dict(out)
+            out["reason"] = (str(out.get("reason") or "")
+                             + "另外：研发中——本机这一版（0.99.9）比已发布的"
+                               "（0.99.8）新，还没发出去。")
+        return out
+
+    M.light_explain = _mut_back
+    try:
+        v2 = j_reason_line_budget(mod=M)
+    finally:
+        M.light_explain = orig
+    if v2[0] is not False:
+        return ("负控自身失效：版本差塞回主行后判据没红（%r）—— "
+                "解释行尺子是装饰（铁律 4）" % (v2,))
+    if "版本差" not in str(v2[1]):
+        return "负控方向不对：回塞变异报的不是版本差（报的是 %r）" % (v2[1],)
+    # ③ 徽标版本号抹掉（挪丢了）
+    orig_badges = M.badges
+
+    def _mut_lost(*a, **k):
+        out = orig_badges(*a, **k)
+        return [(kk, nn, "研发中") if kk == M.BADGE_DEV else (kk, nn, ww)
+                for kk, nn, ww in out]
+
+    M.badges = _mut_lost
+    try:
+        v3 = j_reason_line_budget(mod=M)
+    finally:
+        M.badges = orig_badges
+    if v3[0] is not False:
+        return ("负控自身失效：抹掉徽标版本号后判据没红（%r）—— "
+                "「信息不丢」那条腿是装饰" % (v3,))
+    return None
+
+
 def j_freeze_zones_intact():
     """★★ D-38（2026-10-16）：冻结区完整——frozen 条目契约未被擅改。
 
@@ -1148,6 +1215,18 @@ def j_freeze_zones_intact():
                      "不是通过也不是违例）")
     elif lamp:
         problems.append(lamp)
+    bd = _brand_dot_machinery_probe()
+    if bd == "SKIP":
+        skips.append("品牌哨点判据机械自证（logo.svg/ico 读不到，铁律 1——"
+                     "不是通过也不是违例）")
+    elif bd:
+        problems.append(bd)
+    rb = _reason_budget_machinery_probe()
+    if rb == "SKIP":
+        skips.append("解释行预算判据机械自证（inbox_model 读不到，铁律 1——"
+                     "不是通过也不是违例）")
+    elif rb:
+        problems.append(rb)
     if problems:
         return False, "冻结区 %d 处问题：%s" % (
             len(problems), "；".join(problems[:3]))
@@ -1157,11 +1236,15 @@ def j_freeze_zones_intact():
             len(skips), "；".join(skips))
     lamp_note = ("灯色判据回耦/回灰确被抓住" if lamp is None
                  else "灯色判据自证未跑（环境不可判，见上 SKIP）")
+    bd_note = ("品牌哨点判据删圆/刷像素确被抓住" if bd is None
+               else "品牌哨点判据自证未跑（环境不可判，见上 SKIP）")
+    rb_note = ("解释行预算判据回塞/抹版本号确被抓住" if rb is None
+               else "解释行预算判据自证未跑（环境不可判，见上 SKIP）")
     return True, ("冻结区完好：%d frozen 全过执法 ＋ %d candidate 待管线（%s）；"
                   "退休通道不变式在位；机械自证通过（合成擅改确被拦截"
-                  " ＋ %s ＋ 退休通道合成夹具三腿）%s"
+                  " ＋ %s ＋ %s ＋ %s ＋ 退休通道合成夹具三腿）%s"
                   % (n_frozen, len(cands), "/".join(cands) or "无",
-                     lamp_note, tail))
+                     lamp_note, bd_note, rb_note, tail))
 
 
 def j_window_title_format():
@@ -1318,6 +1401,229 @@ def j_lamp_color_contract(mod=None):
 #:   FZ-001 保持 candidate ⇒ D-38 条目循环不调用它（违例只登记），
 #:   但机械自证探针每次闸门运行都验它有牙 —— 冻结那一刻即生效。
 _FREEZE_OUTPUT_CHECKS["lamp_color_contract"] = j_lamp_color_contract
+
+
+def _brand_dot_assets():
+    """(svg 文本, ico 字节, SKIP 原因) —— 资产不在/读不了 ⇒ SKIP（铁律 1）。
+
+    ★ 尺子不二次实现：SVG/ICO 解析与哨点判定**复用 0515 ICO 族的纯函数**
+      （`inbox_guards_0515._svg_dot/_svg_other_colors/_ico_images/_ico_judge`）
+      —— 同一事实两处副本是本仓反复踩过的病，冻结执法与套件判据必须同源。
+    """
+    try:
+        import inbox_guards_0515 as G15
+    except Exception as e:                                   # noqa: BLE001
+        return None, None, ("SKIP：0515 ICO 族尺子加载失败（%s: %s）—— "
+                            "环境测不出，不是通过也不是违例"
+                            % (type(e).__name__, e))
+    svg_p = PKG / G15._LOGO_SVG_REL
+    ico_p = PKG / G15._LOGO_ICO_REL
+    if not svg_p.is_file() or not ico_p.is_file():
+        return None, None, ("SKIP：%s 或 %s 不在（安装态可能无资产）—— "
+                            "铁律 1：测不出 ≠ 查出来是好的"
+                            % (G15._LOGO_SVG_REL, G15._LOGO_ICO_REL))
+    try:
+        return svg_p.read_text(encoding="utf-8"), ico_p.read_bytes(), None
+    except OSError as e:
+        return None, None, "SKIP：品牌资产读不了（%s）" % e
+
+
+def j_brand_dot_presence(mod=None):
+    """★★ FZ-005（2026-10-17 frozen）：品牌哨点**在场＋可辨**（资产层）。
+
+    契约（创始人 2026-10-17 截图「0.48.5 那个是 AI 幻觉裁定的，请取消，
+    回复小黄球」）：小黄球在资产层必须在场且肉眼可辨 ——
+      ① `assets/logo/logo.svg` 有 `<circle>`（0.48.5「去哨点」是 AI 幻觉
+         裁定、出处捏造，已作废；要真去掉它先走 FZ-001 式退休流程）；
+      ② 哨点填充色不与背景/环/指针同色（同色＝肉眼不可辨＝等于没有）；
+      ③ `assets/logo/antinel.ico` 最大图含 ≥8 个哨点纯色像素，质心与
+         SVG circle 派生期望一致 ±2px（SVG 与 ico 不同源＝红）。
+    页面层灯色契约由 FZ-001 独立守（`lamp_color_contract`，仍 candidate）。
+
+    判定复用 0515 ICO 族纯函数（不二次实现）；资产不在/读不了 ⇒ None
+    （SKIP，铁律 1）。
+    """
+    svg_text, ico_bytes, skip = _brand_dot_assets()
+    if skip:
+        return None, skip
+    import inbox_guards_0515 as G15
+    try:
+        why = G15._ico_judge(svg_text, ico_bytes)
+    except Exception as e:                                   # noqa: BLE001
+        return None, ("SKIP：FZ-005 判定自身抛错（%s: %s）—— 环境测不出"
+                      % (type(e).__name__, e))
+    if why:
+        return False, why
+    dot = G15._svg_dot(svg_text)
+    return True, ("品牌哨点在场且可辨：logo.svg circle=(%.1f,%.1f) r=%.1f "
+                  "#%02x%02x%02x；antinel.ico 最大图哨点纯色像素质心与"
+                  "派生期望一致" % (dot[0], dot[1], dot[2],
+                                  dot[3][0], dot[3][1], dot[3][2]))
+
+
+#: FZ-005 的 output 类检查实现（先实现＋自证就位，再冻结 —— 顺序纪律）。
+_FREEZE_OUTPUT_CHECKS["brand_dot_presence"] = j_brand_dot_presence
+
+
+def _brand_dot_machinery_probe():
+    """机械自证（常驻负控）：FZ-005 尺子对「删圆点/刷掉哨点」必须真会红。
+
+    ★ 与 `_lamp_color_machinery_probe` 同族分层（元纪律 M-C）：证的是
+      **判据本身有牙**。三步（变异都走内存合成件，不碰真资产）：
+      ① 未变异必须过 —— 不过 ⇒ 产品违例候选契约，**照红**；
+      ② 删 `<circle>`（0.48.5 事故形状）⇒ 必须报「没有 <circle>」；
+      ③ 把 ico 里哨点纯色像素刷成底色（栅格化吞球形状）⇒ 必须报哨点不在。
+    返回 None（全过）／问题串（负控失效）／"SKIP"（资产读不到）。
+    """
+    svg_text, ico_bytes, skip = _brand_dot_assets()
+    if skip:
+        return "SKIP"
+    import inbox_guards_0515 as G15
+    try:
+        why = G15._ico_judge(svg_text, ico_bytes)
+    except Exception as e:                                   # noqa: BLE001
+        return "负控自身失效：FZ-005 判定抛错 %s: %s" % (
+            type(e).__name__, e)
+    if why:
+        return ("FZ-005 夹具不成立：未变异就不过（%s）—— 产品违例候选"
+                "契约照红（0.48.5 事故必须被闸门看见）" % why)
+    # ② 删 circle（0.48.5 形状）
+    mutated_svg = re.sub(r"<circle\b[^>]*/>", "", svg_text, count=1)
+    if mutated_svg == svg_text:
+        return "负控自身失效：circle 删除没生效（锚点没打中）"
+    why2 = G15._ico_judge(mutated_svg, ico_bytes)
+    if not why2 or "circle" not in why2:
+        return ("负控自身失效：删 circle 后没报「没有 <circle>」（%r）—— "
+                "SVG 腿的尺子是装饰（铁律 4：不会红的闸门不是闸门）"
+                % (why2,))
+    # ③ 哨点像素刷底色（栅格化吞球形状）
+    dot = G15._svg_dot(svg_text)
+    if dot is None:
+        return "负控自身失效：真 SVG 没有 circle（夹具不成立）"
+    _cx, _cy, _r, rgb = dot
+    rm = re.search(r"<rect\b[^>]*/>", svg_text)
+    ra = dict(re.findall(r'([\w-]+)\s*=\s*"([^"]*)"', rm.group(0)))
+    bg = tuple(int(ra["fill"][i:i + 2], 16) for i in (1, 3, 5))
+    want = (rgb[2], rgb[1], rgb[0], 255)
+    mutated_ico = G15._ico_rewrite(ico_bytes,
+                                   repaint=(want, (bg[2], bg[1], bg[0], 255)))
+    if mutated_ico == ico_bytes:
+        return "负控自身失效：重编码后字节没变（哨点色没打中）"
+    why3 = G15._ico_judge(svg_text, mutated_ico)
+    if not why3 or "哨点" not in why3:
+        return ("负控自身失效：哨点像素刷成底色后没报哨点不在（%r）—— "
+                "ico 腿的尺子是装饰" % (why3,))
+    return None
+
+
+#: FZ-004 的**判据常量**（判据与探针共用，改口径只改这里）。
+#: 主行禁的**版本差**＝「主行同时出现**本机版号与已发布版号**」这一信息结构。
+#: ★ 为什么按结构而非禁词（第一版踩到的坑）：`dev` 态本身的原因句是
+#:   「正在研发迭代：这一版还没发出去，代码与登记不一致是改出来的（…）」
+#:   —— 那是**状态词自己的解释**（契约明确要保留），用「还没发出去」当禁词
+#:   会把它一起打成违例（假红：误伤合法文案）。版本差的**独有特征**是
+#:   两个版本号同现，故按版号对判。
+_FZ4_VER_RE = re.compile(r"\b\d+\.\d+\.\d+\b")
+#: 计数禁词：主行不许出现"收件箱里有多少条"这类读数（件数归筛选条/顶部条）。
+#: ★ 只禁**收件箱计数**的形状，不禁待办句「还有 N 件事没处理」——
+#:   那是契约要求的待办提示（P12：看到"有事"必须能落到具体内容）。
+_FZ4_COUNT_SHAPE = re.compile(r"收件箱|条记录|条未处理|条没处理")
+
+
+def j_reason_line_budget(mod=None):
+    """★★ FZ-004（2026-10-17 兑现）：状态解释行预算 —— 主行只留状态词的原因。
+
+    契约（`ci/freeze_zones.json` FZ-004 contract 原话）：主行只留状态词本身；
+    **版本差与收件箱计数不进主行**（挪 ? 点击展开）。
+
+    原病（创始人 2026-10-16 截图 #4「啰嗦、浓重机器味」）：
+    `light_explain()["reason"]` 的「另外：…」段把**研发中徽标的完整原因句**
+    （「本机这一版（0.51.2）比已发布的（0.51.1）新，还没发出去」＝ 30+ 字
+    版本差工程说明）拼进**每一态**主行 ⇒ 失守/注意/值守中每一行都拖着
+    同一条版本说明，状态词本身的原因被淹掉。
+
+    ★★ 三条腿（**信息不丢，只换位置**——这是本判据与「删掉省事」的分水岭）：
+      ① 主行（`reason`）**不含版本差形状**、不含收件箱计数形状；
+      ② 版本差信息**仍在 `badges`** 里（完整原因句未丢）；
+      ③ 渲染层把那两版号**带到了徽标悬停提示**（`title`，≤20 字守 U-11）
+         —— 否则「挪到 ? 展开」只是把信息弄丢的美化说法。
+
+    口径全部**由产品派生**（`inbox_model.light_explain`／`badges` 直调，
+    不二次实现"什么算版本差"）；`mod` 可注入（机械自证探针的变异臂用，
+    与 `j_lamp_color_contract(mod=…)` 同款）。
+    返回 `(verdict, detail)` 三态；None ⇒ SKIP（产品模块加载失败，铁律 1）。
+    """
+    M = mod or _load_module_file("inbox_model.py", "inbox_model_fz4")
+    if M is None:
+        return None, "SKIP：inbox_model 加载失败（解释行判据环境测不出）"
+    # ★ 夹具：用**真的会点亮研发中徽标**的版本对（本机 > 已发布），
+    #   否则 ② 那条腿是空的（没有徽标 ⇒ 无从证明"信息仍在"）。
+    VERS = ("0.99.9", "0.99.8")
+    bad = []
+    for pst in ("down", "warn", "interrupted", "unknown", "off", "dev"):
+        try:
+            ex = M.light_explain({"state": pst, "why": ""}, [],
+                                 granary=None, versions=VERS)
+        except Exception as e:                               # noqa: BLE001
+            return False, ("light_explain(%r) 抛错 %s: %s —— 判据测不出，"
+                           "按违例算（不许静默当绿）"
+                           % (pst, type(e).__name__, e))
+        reason = str(ex.get("reason") or "")
+        # 版本差＝**两个版号同现**（本机一版 + 已发布一版）
+        _vs_in_reason = _FZ4_VER_RE.findall(reason)
+        if len(_vs_in_reason) >= 2:
+            bad.append("%s 主行含版本差（%s）" % (
+                pst, "/".join(_vs_in_reason[:3])))
+        m2 = _FZ4_COUNT_SHAPE.search(reason)
+        if m2:
+            bad.append("%s 主行含收件箱计数「%s」" % (pst, m2.group(0)))
+        # ② 信息不丢：徽标里仍有完整版本差原因句
+        _bs = ex.get("badges") or []
+        _dev = [w for k, _n, w in _bs if k == M.BADGE_DEV]
+        if not _dev:
+            bad.append("%s 研发中徽标不见了 —— 版本差信息被删（不是挪）" % pst)
+        elif VERS[0] not in str(_dev[0]) or VERS[1] not in str(_dev[0]):
+            bad.append("%s 研发中徽标原因句缺具体版本号（%r）—— "
+                       "信息在挪动中丢了" % (pst, str(_dev[0])[:50]))
+    if bad:
+        return False, "FZ-004 解释行预算越界 %d 处：%s" % (
+            len(bad), "；".join(bad[:3]))
+    # ③ 渲染层：徽标悬停提示带上两版号，且守 U-11（≤20 字）
+    SV = _load_module_file("inbox_server.py", "inbox_server_fz4")
+    if SV is None:
+        return None, "SKIP：inbox_server 加载失败（③ 渲染腿环境测不出）"
+    try:
+        ex = SV.M.light_explain({"state": "off", "why": ""}, [],
+                                granary=None, versions=VERS)
+        html = SV._bar([], "tok", posture={"state": "off"}, ex=ex)
+    except Exception as e:                                   # noqa: BLE001
+        return False, ("徽标悬停提示腿抛错 %s: %s —— 测不出按违例算"
+                       % (type(e).__name__, e))
+    tips = re.findall(r'<span class="bdg dev" title="([^"]*)"', html)
+    if not tips:
+        return False, "顶栏渲染里找不到 dev 徽标 —— ③ 腿无从取证"
+    tip = html_lib_unescape(tips[0])
+    if VERS[0] not in tip or VERS[1] not in tip:
+        return False, ("徽标悬停提示没带上两版号（%r）—— 版本差被挪丢了，"
+                       "不是挪到 ? 展开" % (tip,))
+    if len(tip) > 20:
+        return False, ("徽标悬停提示 %r 长 %d 字 > 20（U-11 上限）"
+                       % (tip, len(tip)))
+    return True, ("解释行预算在位：六态主行均无版本差/收件箱计数形状；"
+                  "研发中徽标仍带完整两版号；悬停提示 %r（%d 字 ≤ 20）"
+                  "—— 信息不丢，只换位置" % (tip, len(tip)))
+
+
+def html_lib_unescape(s):
+    """最小的 HTML 反转义（判据内部用；只处理 title 里可能出现的实体）。"""
+    import html as _h
+    return _h.unescape(s)
+
+
+#: FZ-004 的 output 类检查实现（冻结区登记表 check=reason_line_budget 指向它）。
+#: ★ 顺序纪律同 FZ-001/002：先实现＋自证（_reason_budget_machinery_probe）就位，
+#:   再翻 freeze_zones.json 的 status。
+_FREEZE_OUTPUT_CHECKS["reason_line_budget"] = j_reason_line_budget
 
 
 def j_fallback_has_no_dst10(m):
@@ -3101,7 +3407,7 @@ def _checks(m):
          j_manifest_no_dead_entries),
         ("D-26 态势说明无冻结读数（心跳/分钟前：会说谎的数字）",
          j_posture_why_no_frozen_numbers),
-        # ── 2026-10-12 值守台交接件 §4.5（R1–R6）：元层机制补环 ──
+        # ── 2026-10-12 Antinel 监理交接件 §4.5（R1–R6）：元层机制补环 ──
         ("D-27 重签工具口径与构建器登记一致（量具假红/写回破坏，T-03）",
          j_resign_caliber_matches_builder),
         ("D-28 负控 fixture 覆盖 manifest 全部条目（防 D-25 负控假红，T-03）",

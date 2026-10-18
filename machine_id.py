@@ -31,7 +31,7 @@
 ★ 与既有模块的关系
     - `hub.py`：per-user 的 `~/.antinel/`（registry/rollup）。本模块**住同一个 hub 目录**，
       但**不是** per-user——它是 per-machine。二者**不合并**。
-    - `ledger.py`：值守台本地账本。`granary.py`（粮，待建）将用本模块的 `code` 作记账键。
+    - `ledger.py`：Antinel 监理本地账本。`granary.py`（粮，待建）将用本模块的 `code` 作记账键。
     - ⚠️ 与 `antinel credits` **无关**：那个记的是**宿主 AI 工具**烧的积分，是另一本账。
 
 ★ Phase 边界（不藏）

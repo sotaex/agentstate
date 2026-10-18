@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
-# Antinel·值守台九维四件套 交接文件 v1.0（2026-10-14）
+# Antinel·监理九维四件套 交接文件 v1.0（2026-10-14）
 
 **交接对象**：接手本仓的下一个 AI（或维护者）。
 **成文时点**：2026-10-14 15:35（GMT+8），文中「本轮」均指该时点的只读核验。
@@ -39,7 +39,7 @@
 
 - **Git**：`main...origin/main [ahead 85]`，HEAD `c84627c`（「C6：daemon『已在跑』分支从出生起没被执行过」）。**全程未提交，接手者不得 reset / checkout / 覆盖 / 清理 / 擅自提交**。
 - **已修改（M）**：`SKILL.md`、`antinel.py`、`antinel_mcp.py`、`ci/defect_types.py`、`ci/delivery_gate.py`、`ci/inbox_guards.py`、`ci/inbox_guards_0353.py`、`ci/inbox_guards_0360.py`、`ci/inbox_guards_0362.py`、`ci/inbox_guards_0431.py`、`ci/inbox_guards_0490.py`、`docs/AUDIT_SCHEMA.md`、`hooks/pre_tool_use.py`、`inbox_daemon.py`、`inbox_model.py`、`inbox_notify.py`、`inbox_server.py`、`inbox_window.py`、`pyproject.toml`、`rules/default.json`、`scripts/build_package.py`、`server.json`。
-- **未跟踪（??）**：`assets/sounds/`、`ci/_pkg_sandbox.py`、`ci/bump_version.py`、`ci/inbox_guards_0514.py`、`docs/值守台UI缺陷清单与修复计划（0.50.1）.md`、`inbox_bubble.py`、`inbox_logo.py`、`output/`、`tools/logo.ps1`、`tools/mk_sound.py`。⚠️ 未跟踪判据套件曾触发 JDG-04 红；**不要未经审查 `git add`**。
+- **未跟踪（??）**：`assets/sounds/`、`ci/_pkg_sandbox.py`、`ci/bump_version.py`、`ci/inbox_guards_0514.py`、`docs/监理UI缺陷清单与修复计划（0.50.1）.md`、`inbox_bubble.py`、`inbox_logo.py`、`output/`、`tools/logo.ps1`、`tools/mk_sound.py`。⚠️ 未跟踪判据套件曾触发 JDG-04 红；**不要未经审查 `git add`**。
 - **版本事实**：`antinel.py`／`pyproject.toml`／`server.json` = **0.50.3**；`psl/manifest.json` = **0.48.4**。**差值是研发态识别机制（`host_shield.is_dev_build()`），不得为数字一致刷平 manifest**（P1-1 另有处理方案）。
 - **登记簿**：`python ci/defect_types.py --check` 本轮 exit 0（一致）；实例 **45** 条，最新 X-040…X-045。
 - **0514 判据套件**（`ci/inbox_guards_0514.py`，未跟踪）：最近一轮全量 **74 绿 / 0 红 / 0 跳过**（2026-10-14 实测）。
@@ -77,12 +77,12 @@
 ### 3.2 更早批次（本日/前日已完成，均有四件套，详见各判据与记忆日志）
 
 - **0.50.2 哨标比例根治**：`inbox_server.py` 的 `LOGO_CANVAS/CX/CY/R/RING_W + LOGO_BOX_RATIO=27/32` 反算 viewBox（现渲染 `229.926 229.926 564.148 564.148`）；真机像素实测比例 0.458→0.833（1.82 倍），连拍证仍在动。判据 U-18/U-18b＋N-U18/N-U18b（负控均独立实测见红）。登记 X-039。[会话历史实测]
-- **B-13 冒泡「点开值守台」唯一决策点**：`bubble_open_route()` 三路分流（可见⇒只 focus；看不见⇒open；判不出⇒open），按钮退场/状态文字/null 守卫；行为判据＋负控变异体实测红。登记 X-042。[会话历史实测]
+- **B-13 冒泡「点开Antinel 监理」唯一决策点**：`bubble_open_route()` 三路分流（可见⇒只 focus；看不见⇒open；判不出⇒open），按钮退场/状态文字/null 守卫；行为判据＋负控变异体实测红。登记 X-042。[会话历史实测]
 - **U-18c/d**：方框与定稿环形比例、涟漪波幅归一；X-042 记录 k=0.314991。[会话历史实测]
 - **C4/C5（W-07/U-16）**：`open_console_settled()` 修一次性调用方落位随进程死；`font-size:0` 藏字保徽章；量具纪律四条（chrome() 选层／行边界取函数体／docstring 复述不当代码／假件延迟出现）。[会话历史实测]
 - **0490 负控改造**：`N-U10`/`N-U13` 从「死字符串锚点」改为**行为变异**（换 `_bar`/`_logo_mark` 产出），正判据加 `mod=SV` 参数；0490 41 绿/0 红。[会话历史实测]
 - **UI 交互修复一批**（冒泡 ack kind 键位、确认不自动关、分组钻取 ids、空态文案、点开已读需服务端成功、winfit OverflowError 如实回包、logo root 参数、动作落盘失败可见）。[会话历史实测]
-- **`docs/值守台UI缺陷清单与修复计划（0.50.1）.md`**：A1–A4 失效按钮＋B1–B6 语句违和的取证与修复计划（只读取证、零产品改动）。
+- **`docs/监理UI缺陷清单与修复计划（0.50.1）.md`**：A1–A4 失效按钮＋B1–B6 语句违和的取证与修复计划（只读取证、零产品改动）。
 - **主闸门 28/28 全绿**；`delivery_gate` 已登记 `("0514","ci/inbox_guards_0514.py","fast")`。**注意：登记 0514 为 fast ⇒ 全量/quick 解禁前必须连同 0364/0363/JDG-0368 一起隔离评估。**
 
 ---
@@ -100,7 +100,7 @@
 - 守护重拉完成：旧服务 pid 32100（10:06 起，跑旧页面）已被杀，守护进程 2.4 秒内按**原端口/口令**重拉为新服务 pid **16916**（16:45:40 起）。新页面 direct-read 确认新标记全部在位（`position:fixed`、`top:8px;left:8px`、`min(560px, …)`、`_FLIP_JS` clamp）。留证 `output/p00_runtime_reload.txt`、`output/p00_newpage.html`。
 - 守护进程本身也换了当前代码：旧 daemon 登记于 08:24（早于当日修复），已按单例流程换代（杀旧起新）；换代后 supervise 链路**实测走通一次**（27240 死 ⇒ 自动重拉 16916），tick 活性由 `notify_state.json`/`tray.json` 实时 mtime 证实。
 - 运行态留证截图（Edge headless，服务真实渲染的 CSS/JS，词条注入 `open`）：713×600 中部/左缘/右缘锚点 ＋ 600×800 窄窗，四张全部完整落在视口内（含 8px 边距），存 `output/p00_tooltip_runtime/`。
-- 值守台独立窗口已为用户拉起（720×640 @(2240,1264)，app 模式；`inbox window` 报"已就位"）。
+- Antinel 监理独立窗口已为用户拉起（720×640 @(2240,1264)，app 模式；`inbox window` 报"已就位"）。
 - **仍 [待测]**：用户真机三点复核（中部/左缘/右缘/窄窗）未做 ⇒ X-045 运行态待测项**未销**。不得写成运行态完全验收通过。
 
 ### P0-1：隔离所有写真树的测试套件（解禁全量闸门的前置）
@@ -158,7 +158,7 @@ byte 级实测（会话历史）：CRLF=0、裸 LF=36 ⇒ `cmd.exe` 按字节错
 
 ### P2-1：UI 缺陷计划逐项复验（A1–A4、B1–B6）
 
-背景、取证与建议四件套都在 `docs/值守台UI缺陷清单与修复计划（0.50.1）.md`，逐卡验收要求见 `stage1/final_draft.md` §6 P2-1 表。要点：B4（finder 口径）已改 `_mark_at_tail_any` 且有历史复验，但**不因摘要「已修」销项**，需真机复验；A2、B6 必须真机条件。
+背景、取证与建议四件套都在 `docs/监理UI缺陷清单与修复计划（0.50.1）.md`，逐卡验收要求见 `stage1/final_draft.md` §6 P2-1 表。要点：B4（finder 口径）已改 `_mark_at_tail_any` 且有历史复验，但**不因摘要「已修」销项**，需真机复验；A2、B6 必须真机条件。
 
 ### P2-2：探针/残留只读盘点
 
@@ -177,10 +177,10 @@ byte 级实测（会话历史）：CRLF=0、裸 LF=36 ⇒ `cmd.exe` 按字节错
 | 元机制 | 先结构化识别目标/权限再问授权；不因测试名含 sandbox/guard 就认定安全，按**实际写入路径**分类 |
 | 一 入口唯一 | 冒泡点击按可见状态走 `bubble_open_route()` 唯一分支；测试闸门同样唯一登记（P0-2） |
 | 二 撤销即红 | 每个修复保留负控真实红样本（范式：`_Patch(SV, CSS=bad)` 让正判据跑变异体） |
-| 三 行为判据 | 断言用户可观察行为：值守台看真实窗口状态、弹层看 DOMRect、包验收读归档内容 |
+| 三 行为判据 | 断言用户可观察行为：Antinel 监理看真实窗口状态、弹层看 DOMRect、包验收读归档内容 |
 | 四 连带对照 | 改路由/沙盒/姿态时检查既有注册表、never-exempt、删除保护、空值路径，防静默风险迁移 |
 | 五 自报活跃 | guard/沙盒报 active/次数/最近生效，不许只在通过时沉默 |
-| 六 运行态确认 | **源码修复 ≠ 运行中的值守台已加载**；daemon/tray 重启后复核（P0-0 现状即此） |
+| 六 运行态确认 | **源码修复 ≠ 运行中的Antinel 监理已加载**；daemon/tray 重启后复核（P0-0 现状即此） |
 | 七 量具先自检 | 负控自身故障报「负控失效」；正判据导入产品真源（import，不复制逻辑） |
 | 八 数据版本迁移 | 未知版本不静默按空处理；研发态差值用于识别，不得刷平 manifest |
 | 九 同锚 | 文档/代码/运行结果同日期同版本；数字机器核验，精确分子/分母 |
@@ -210,7 +210,7 @@ byte 级实测（会话历史）：CRLF=0、裸 LF=36 ⇒ `cmd.exe` 按字节错
 ## 7. 接手 AI 第一轮操作清单
 
 1. 只读复核 `git status`/HEAD，对照 §1 快照；有出入先停下查清，不 reset/覆盖。
-2. 只读通读：`ci/inbox_guards_0514.py`（含 `_tooltip_bounds_probe`/`_Patch` 范式）、`ci/inbox_guards_0364.py` 写入点、`ci/_pkg_sandbox.py`、`ci/defect_types.py`、`ci/delivery_gate.py` SUITES、`docs/值守台UI缺陷清单与修复计划（0.50.1）.md`。
+2. 只读通读：`ci/inbox_guards_0514.py`（含 `_tooltip_bounds_probe`/`_Patch` 范式）、`ci/inbox_guards_0364.py` 写入点、`ci/_pkg_sandbox.py`、`ci/defect_types.py`、`ci/delivery_gate.py` SUITES、`docs/监理UI缺陷清单与修复计划（0.50.1）.md`。
 3. 先做 **P0-0 收尾**（守护重拉＋真机三点复核 tooltip），这是唯一接近完成的卡。
 4. 做 **P0-1 隔离**；完成并过四件套前，**全量闸门/quick/selfcheck 保持禁令**。
 5. P0-2 ID 唯一化 → P0-3 antinel.cmd CRLF → P1 打包/版本 → P2 UI 逐项 → P3 全链路。
@@ -241,7 +241,7 @@ byte 级实测（会话历史）：CRLF=0、裸 LF=36 ⇒ `cmd.exe` 按字节错
 | **全系统三清单扫描（追加）** | ✅ B1 机制缺口 13 项（6 已修／3 待判定／4 记账）；B2 问题扫描 9 项（**实跑 24 套：22 绿／2 红**＝0431 S70、0481 L1；未跑 10 套含 0360/0366 写真树与 0363/0364/JDG-0368 禁令）；B3 品质扫描 4 项全绿（UX 文案零违和、编号全连续、14 新件 SPDX 头齐） |
 | **按清单修复（双条件门）（追加）** | ✅ 仅 **C-1** 一项过双条件门并修：8 个 `_p_*` 探针遗留补 SPDX 头，0481 L1 违规 **140→132**；余 132 处全在 `out/`(76)＋`output/`(56) 暂存/日志区，其中 47 处系 override 匹配口径误判 ⇒ 进 J2 不冒充已修。其余一律进判定文档 |
 | **创始人判定事项（追加）** | ❌ **J1–J9 共 9 项默认不动**（0431 S70 版本落差／0481 扫描口径／manifest 4 件重签／0360-0366 禁令扩容／控制台实例／PyPI 0.50.3 推送／P0-0 真机复核／A6 合并提案／inbox_server.py:155 陈旧注释）。见《创始人判定事项 v1.0》，每项带事实-选项-建议-默认动作 |
-| **运行态更正（2026-10-15 04:57 追加）** | ⚠️ **本表首行所载「运行态服务已换代加载（pid 16916）」仅为 2026-10-14 时点真值**：04:57 复测 8790/14305 **均无 LISTENING 行**、值守台窗口已不在窗口枚举、python 进程仅 pid 1184（`host_shield.py sentinel`）在跑且 `.psl` 侧秒级活跃 ⇒ 当前为「**哨兵在、控制台零实例**」。真机三点复核随之无法取证，进 J7 |
+| **运行态更正（2026-10-15 04:57 追加）** | ⚠️ **本表首行所载「运行态服务已换代加载（pid 16916）」仅为 2026-10-14 时点真值**：04:57 复测 8790/14305 **均无 LISTENING 行**、Antinel 监理窗口已不在窗口枚举、python 进程仅 pid 1184（`host_shield.py sentinel`）在跑且 `.psl` 侧秒级活跃 ⇒ 当前为「**哨兵在、控制台零实例**」。真机三点复核随之无法取证，进 J7 |
 | **闭环纪律（追加）** | ✅ 全程零 rm、零 commit、零 git add、零 reset；全量/`--quick`/`--selfcheck` 闸门禁令遵守（只跑单套件/局部形态）；值守台 daemon 与窗口仅只读观测，未杀未启未搬移 |
 | **窗口「起得来、活不久」**（用户 2026-10-14 两次实测） | ✅ **本轮根治（X-049）**：`inbox window` 报「已就位」后窗口秒死。同机**四路实证**：CLI Popen 裸 flags／Popen+DETACHED+NEW_GROUP／cmd start ⇒ 跨调用边界全死；**daemon（长命 supervise 进程）Popen ⇒ 跨边界存活** ⇒ 病根是「**谁来起**」不是「怎么起」。修法＝`cmd_window` 先走 `open_console_via_daemon`（推托盘 open 动作，daemon 2s tick 消费开窗），失败**如实降级**直起；0517 四件套 6 绿/0 红/1 跳过（W17-d SKIP 语义＝关窗不停服务是设计语义，非故障）。连带记账未修：daemon 自听 14305 起第二服务实例（服务多开，独立缺陷） |
 

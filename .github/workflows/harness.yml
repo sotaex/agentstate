@@ -52,8 +52,8 @@ jobs:
   # ★★ 0.36.5：统一交付闸门接进 CI（第三个强制执行点，也是**云端唯一**那一处）。
   #   为什么单开一个 job 而不是并进上面的 guards：
   #     · guards 里的三项是**各自**被 workflow 点名调用的 —— 这次我数了一遍，
-  #       发现**113 条值守台判据 ＋ 7 条交付自检，一条都没被点过名**。
-  #       也就是说：本轮之前，值守台的任何缺陷在 GitHub Actions 上
+  #       发现**113 条Antinel 监理判据 ＋ 7 条交付自检，一条都没被点过名**。
+  #       也就是说：本轮之前，Antinel 监理的任何缺陷在 GitHub Actions 上
   #       **根本不存在被检查的可能**（不是"没发现"，是"没跑"）。
   #     · 统一入口的意义正是**消灭"要记得逐个点名"这件事**：
   #       以后新增判据只需登记进 `ci/delivery_gate.py::SUITES`，
@@ -61,7 +61,7 @@ jobs:
   #   失败语义与本地一致：变红 / 崩或缺失 / 零输出，三种都不许当通过。
   delivery-gate:
     name: delivery gate (all registered guard suites)
-    runs-on: windows-latest        # 值守台判据用 ctypes 调 Win32，Linux 跑不了
+    runs-on: windows-latest        # Antinel 监理判据用 ctypes 调 Win32，Linux 跑不了
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

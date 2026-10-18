@@ -1,5 +1,6 @@
 {
  "host": "codebuddy",
+ "name": "CodeBuddy",
  "vendor": "Tencent",
  "roots": [
   "~/.codebuddy",

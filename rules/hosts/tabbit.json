@@ -1,5 +1,6 @@
 {
  "host": "tabbit",
+ "name": "Tabbit",
  "vendor": "Tabbit",
  "roots": [
   "%LOCALAPPDATA%/Tabbit"
