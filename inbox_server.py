@@ -2173,10 +2173,26 @@ def _view_health(rep, token, items=None):
         if not _conf:                       # host 有值但没留置信度 ⇒ 照实说线索不明
             _conf = ["线索不明 %d 条" % _hs["by_conf"].get("none", 0)]
         _pct = int(round(_hs["unclear_ratio"] * 100))
-        _host_value = ("近 7 天 %d 条记录里，%d 条认得出是哪个工具（%s），"
+        # ★★ 0.53.1（创始人 2026-10-18 质问「要求指明哪个 AI 编程工具，可我没看到」）：
+        #   原句只给置信度（"有直接证据 104 条"），**从不给工具名** —— 读者看到
+        #   "认得出是哪个工具"，却永远得不到那个名字。设计 §6 要的正是「工具名」。
+        #   工具名走 `M.host_distribution`（唯一实现，不在这里另算一份）；
+        #   置信度留在括号里当「判定方式」，两者不能互相顶替。
+        #   ★ 单工具时说「全是 X」而不是「X 104 条」：全量与总量并列会被读成占比。
+        _win7 = [it for it in (items or ()) if M.within_hours(it.ts, 7 * 24)]
+        _dist = M.host_distribution(_win7, label_of=_host_label)
+        if len(_dist) == 1:
+            _who = "——全是 %s" % _dist[0][0]
+        elif _dist:
+            _who = "——" + "、".join("%s %d 条" % (_nm, _n) for _nm, _n in _dist[:3])
+            if len(_dist) > 3:
+                _who += " 等 %d 种" % len(_dist)
+        else:
+            _who = ""
+        _host_value = ("近 7 天 %d 条记录里，%d 条认得出是哪个工具%s（%s），"
                        "%d 条说不清（%d%%）；线索取工具自己报的环境信息。"
-                       % (_hs["total"], _hs["attributed"], "、".join(_conf),
-                          _hs["unclear"], _pct))
+                       % (_hs["total"], _hs["attributed"], _who,
+                          "、".join(_conf), _hs["unclear"], _pct))
         if _hs["unclear_ratio"] > 0.05:
             _host_value += "说不清偏多——多半是记录太旧，或最近换过工具。"
             _host_css = "warn"
@@ -2323,8 +2339,14 @@ def _view_ledger(rep, token, items=None):
 
     def _day_cells(d, e):
         out = []
-        for word, key, lv in (("拦截", "blocked", "L2"), ("注意", "noticed", "L1"),
-                              ("防护缺口", "breached", "R0")):
+        # ★★ 0.53.1（创始人 2026-10-18 质问）：这里原写「防护缺口」—— 它是 0.48
+        #   时代的旧词，不在六态表里（`M.STATE_LABEL`：R0＝**失守**）。同一个事实
+        #   在本页曾有三个名字：词条「防护缺口」／月行「缺口」／六态表「失守」。
+        # ★★ 根治：**词从六态表派生，不在这里写死** —— 写死就是第二份命名源，
+        #   六态一改名就必然漏掉这一处（0.51.0 定名「失守」而账本留「防护缺口」，
+        #   就是这么发生的，且没有任何判据能发现）。派生后改六态名，账本自动跟。
+        for key, lv in (("blocked", "L2"), ("noticed", "L1"), ("breached", "R0")):
+            word = M.STATE_LABEL[lv]
             n = int(e.get(key) or 0)
             # 当天没有事件的级别显示 0 但**不可点**（点了是空页，纯噪音）。
             out.append(('<a href="/?v=inbox&f=day:%s:lv:%s">%s %d</a>' % (d, lv, word, n))
@@ -2395,9 +2417,12 @@ def _view_ledger(rep, token, items=None):
                                 for d in sorted(mdays, reverse=True))
             mrows.append(
                 "<details class=\"month\"><summary><span class=\"k\">%s</span>"
-                "<span>拦截 %d · 注意 %d · 缺口 %d · 已处理 %d ｜ 有记录 %d 天</span></summary>"
+                # ★ 0.53.1：月行的格子名同样从六态表派生（与日行同一份词源）。
+                "<span>%s %d · %s %d · %s %d · 已处理 %d ｜ 有记录 %d 天</span></summary>"
                 "<div class=\"rows\">%s</div></details>"
-                % (_mlabel(ym), tot["blocked"], tot["noticed"], tot["breached"],
+                % (_mlabel(ym), M.STATE_LABEL["L2"], tot["blocked"],
+                   M.STATE_LABEL["L1"], tot["noticed"],
+                   M.STATE_LABEL["R0"], tot["breached"],
                    tot["acked"], len(mdays), body_rows))
         sections += ("<div class=\"card\"><h2>更早 · 按月</h2>"
                      "<div class=\"rows\">%s</div></div>" % "".join(mrows))

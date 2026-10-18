@@ -446,7 +446,7 @@ def attribute(item, posture=None, consequences=None):
             r"基线）：(.+)$", r"不一致：(.+)$",  # 0.51.2 之前
         ])
         b["path"] = p or "(设置文件路径没在记录里)"
-        return dict(b, kind=k, title="钩子注册文件被改动（防护有缺口）",
+        return dict(b, kind=k, title="钩子注册文件被改动（防护失效）",
                     b_class=False,
                     cause=("工具的钩子注册文件（决定「哪些调用会被拦」）"
                            "与布防时记下的样子对不上：%s。"
@@ -550,14 +550,16 @@ def attribute(item, posture=None, consequences=None):
     if _can_revive(posture):
         _acts.append(_a(ACT_RETRY, "先试一次拉起监理",
                         hint="多数「没人守」都能这样恢复。"))
-    return dict(b, kind=k, title="防护有缺口（未归类）", b_class=False,
+    # ★ 0.53.1（创始人 2026-10-18）：标题与 cost 里的「防护有缺口／有缺口」去掉 ——
+    #   这个词不在六态表里，会被读成第四种态；同一件事的标准名是**失守**。
+    return dict(b, kind=k, title="失守（未归类）", b_class=False,
                 cause=("这一类失守我没有专门的归因规则（记录原文：%s）。"
                        "**不编一个听起来合理的原因**——"
                        "归因规则没有覆盖它，就如实说没有。" % (b["detail"] or "（无原文）")),
                 severity="按运行状态页的现探结果为准。",
                 severity_note=_posture_note(posture),
                 actions=_acts,
-                cost="归因规则没覆盖这件事，你只能看到「有缺口」，拿不到「为什么」。"
+                cost="归因规则没覆盖这件事，你只能看到「有问题」，拿不到「为什么」。"
                      "这是产品的已知短板，不是你的操作问题。")
 
 
@@ -649,6 +651,6 @@ _TITLE = {
     "hook_registration_changed": "钩子注册被改动",
     "autostart_missing": "开机自启没装上",
     "spawn_failed": "监理拉起失败",
-    "breach_other": "防护有缺口（未归类）",
+    "breach_other": "失守（未归类）",
     "unknown": "未归类",
 }

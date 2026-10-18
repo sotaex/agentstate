@@ -2168,7 +2168,7 @@ def c_ledger_page_populates_from_chain_snapshot():
             and len(lines_after_correction) == len(lines_after_same_correction) == 4
             and all(corrected.get(k) == 0 for k in ("blocked", "noticed", "breached", "acked"))
             and "账本尚无可核对记录" not in PC.body(page)
-            and "拦截危险操作" in PC.body(page) and "防护缺口" in PC.body(page))
+            and "拦截危险操作" in PC.body(page) and "失守" in PC.body(page))
 
 
 def c_ledger_backfill_fills_day_that_was_never_recorded():

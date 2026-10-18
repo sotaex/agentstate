@@ -3168,8 +3168,12 @@ def _t04_core(page, items):
         n = {k: int(e.get(k) or 0) for k in M.LEDGER_KEYS}
         if not any(n.values()):
             continue
-        for word, key, lv in (("拦截", "blocked", "L2"), ("注意", "noticed", "L1"),
-                              ("防护缺口", "breached", "R0")):
+        # ★ 0.53.0 **根治（不是同步硬编码）**：期望词从六态表 `M.STATE_LABEL` 派生 ——
+        #   判据与产品同源：改六态名，产品与判据一起动，不存在"改了一边忘了另一边"。
+        #   原来的写法把「防护缺口」直接写进判据 ⇒ 产品与判据**同时**停在旧词上，
+        #   这条判据反过来还替旧词背书（正是它让 0.53.0 看起来全绿）。
+        for key, lv in (("blocked", "L2"), ("noticed", "L1"), ("breached", "R0")):
+            word = M.STATE_LABEL[lv]
             if n[key] and ('f=day:%s:lv:%s">%s %d</a>' % (d, lv, word, n[key])) not in body:
                 return "%s 的「%s」格数字或深链不对（现算 %d）" % (d, word, n[key])
         if n["acked"] and ('f=closed:%s">已处理 %d</a>' % (d, n["acked"])) not in body:
@@ -3245,7 +3249,7 @@ def n_t04():
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
     items = _ledger_items()
     page, _why = _mut_render(
-        src.replace(anchor, "拦截 0 ｜ 注意 0 ｜ 防护缺口 0 ｜ 已处理 0"),
+        src.replace(anchor, "拦截 0 ｜ 注意 0 ｜ 失守 0 ｜ 已处理 0"),
         "is0490_nt04", _SERVER_REL, view="ledger",
         root=tempfile.mkdtemp(prefix="g0490_nt04_"), token="T", items=items,
         rep=_ledger_rep(items), posture=_POSTURE)
@@ -3255,6 +3259,59 @@ def n_t04():
         return "负控失效：无记录天渲染成 0 后 T-04 没红"
     if _t04_core(_ledger_page(items=items), items) is not True:
         return "夹具不成立：真实现本身就红 ⇒ 负控无分辨力"
+    return True
+
+
+#: 退休的态名（六态表的历史旧称）。**登记即永久**：退休词不许回潮。
+#: 真需要用到这些字（例如"资金缺口"）时，必须在本表旁边登记例外并写清
+#: 「为何它不会被读成态名」—— 否则这条闸会替旧词开路。
+_RETIRED_STATE_WORDS = (
+    ("防护缺口", "0.51.0 定名「失守」后退役（0.48 旧称）"),
+    ("缺口", "同上；裸用会被读成第四种态（账本月行曾用它简称失守）"),
+)
+
+
+def _retired_state_core(pages):
+    """尺子：喂 `[(页名, 可见文本)]`，命中退休态名即红。"""
+    for view, body in pages:
+        for w, why in _RETIRED_STATE_WORDS:
+            if w in body:
+                return "%s 页出现退休态名 %r（%s）" % (view, w, why)
+    return True
+
+
+@check("T-04e ★ 退休态名不许回潮：五页可见文本出现「防护缺口」/「缺口」即红")
+def t04e():
+    """0.53.0（创始人 2026-10-18）：「六态是封闭集合，态名只许一处定义」。
+
+    ★ 这条闸治的不是"写错了一个词"，而是**判据替旧词背书**这个结构性缺陷：
+      0.53.0 的账本写「防护缺口」／月行写「缺口」／六态表写「失守」—— 三个词
+      指同一个事实；而 T-04 把「防护缺口」**硬编码成期望值** ⇒ 判据与产品一起
+      停在旧词上，两边"一致"、全绿，谁也没发现。
+      现在产品与 T-04 都改成从 `M.STATE_LABEL` **派生**，这条闸负责堵住旧词
+      从**任何别的渲染路径**回来（新增页面、历史文案、注释式复述都算）。
+    """
+    pages = []
+    for view in ("inbox", "report", "health", "ledger", "health_exam"):
+        try:
+            p = SV.render_page(view=view, root=tempfile.mkdtemp(prefix="g0490_t04d_"),
+                               token="T", items=_items(), rep=_REP, posture=_POSTURE)
+        except Exception as e:                                  # noqa: BLE001
+            return ("渲染 %s 失败：%s: %s —— 量具故障，不算通过"
+                    % (view, type(e).__name__, e))
+        pages.append((view, PC.body(p)))
+    return _retired_state_core(pages)
+
+
+@check("N-T04e 负控：把退休态名喂进页面文本 ⇒ T-04e 必须红")
+def n_t04e():
+    """尺子自证：不是"真实现里没这词"就算过，而是"出现就必红；合法词不许误伤"。"""
+    if _retired_state_core([("账本", "拦截 1 ｜ 防护缺口 2 ｜ 已处理 0")]) is True:
+        return "负控失效：退休态名「防护缺口」喂进去仍判绿（尺子没有分辨力）"
+    if _retired_state_core([("月行", "拦截 115 · 注意 226 · 缺口 189")]) is True:
+        return "负控失效：月行形态的「缺口」喂进去仍判绿"
+    if _retired_state_core([("账本", "拦截 1 ｜ 失守 2 ｜ 已处理 0")]) is not True:
+        return "负控方向异常：合法文本「失守」被判红 —— 尺子误伤真实现"
     return True
 
 
@@ -4523,6 +4580,16 @@ def _u22_core(render):
         return "成功数不对：应为 3 条认得出（实际 %r）" % val[:60]
     if "有直接证据 2 条" not in val or "间接线索 1 条" not in val:
         return "置信度分布不对或没上屏（实际 %r）" % val[:80]
+    # ①b（0.53.0，创始人 2026-10-18 当场质问）：**必须点名是哪个工具**。
+    #   设计 §6 要的是「工具名（env 铁证）」；只说"认得出是哪个工具"却不给名字，
+    #   等于承诺了答案又不给 —— 0.53.0 的现网句子正是这样，而当时五条腿全绿。
+    #   ★ 期望名走 `SV._host_label` **派生**，不在判据里硬编码品牌：
+    #     宿主改名/换品牌时判据不必跟着改，也就不会因"判据没改"而误红或假绿。
+    _lb = SV._host_label
+    for _h in ("workbuddy", "qoder"):
+        if _lb(_h) not in val:
+            return ("句子没点名是哪个工具（缺 %r，实际 %r）—— 只说「认得出」"
+                    "不给名字，读者永远看不到答案" % (_lb(_h), val[:90]))
     if "1 条说不清（25%）" not in val:
         return "说不清条数/占比不对：应为 1 条（25%）（实际 %r）" % val[:80]
     if "线索取工具自己报的环境信息" not in val:
@@ -4546,6 +4613,8 @@ def _u22_core(render):
         return "0%% 说不清时仍出提醒 —— 提醒会常亮，等于噪声（实际 %r）" % (val3 or "")[:60]
     if "5 条记录里，5 条认得出" not in (val3 or ""):
         return "5/5 口径不对（实际 %r）" % (val3 or "")[:60]
+    if SV._host_label("workbuddy") not in (val3 or ""):
+        return "单工具时没点名是哪一个（实际 %r）" % (val3 or "")[:60]
 
     # ④ 空记录 ⇒ 真话，且不出现 0%
     css4, val4 = _u22_row(render, [])
@@ -4595,6 +4664,32 @@ def n_u22():
     #   等于要求变异只改一半，那是把量具写死（本轮实测撞到，故记在这里）。
     if "提醒" not in str(why) and "warn" not in str(why):
         return "方向不对：红因不是「提醒缺失/warn 消失」（%s）—— 量具打偏" % str(why)[:60]
+    return True
+
+
+@check("N-U22c 负控：把工具名从句子摘掉 ⇒ U22 必须红（点名那条腿）")
+def n_u22_c():
+    """变异＝`_dist = []`（句子退回"只说认得出、不给名字"）。
+
+    ★ 为什么必须有这条：0.53.0 的 U22 五条腿**全部放过**这种句子 —— 本机现网
+      就长这样（"104 条认得出是哪个工具（有直接证据 104 条）"），读起来像漏了
+      名字，而判据全绿。创始人 2026-10-18 一句"要求指明哪个 AI 编程工具，但是
+      我没看到"把它抓了出来 ⇒ 尺子缺一条腿。
+    """
+    src = _src(_SERVER_REL)
+    anchor = "_dist = M.host_distribution(_win7, label_of=_host_label)"
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    try:
+        mut = _load(src.replace(anchor, "_dist = []"), "is0490_nu22c", _SERVER_REL)
+    except Exception as e:                                      # noqa: BLE001
+        return ("负控自身失效：变异模块加载就抛 %s: %s —— 量具故障，不算通过"
+                % (type(e).__name__, e))
+    why = _u22_core(mut.render_page)
+    if why is True:
+        return "负控失效：工具名摘掉后 U22 仍判绿（点名那条腿是摆设）"
+    if "点名" not in str(why):
+        return "方向不对：红因不是「没点名工具」（%s）—— 量具打偏" % str(why)[:60]
     return True
 
 
