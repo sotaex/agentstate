@@ -251,10 +251,26 @@ def cmd_window(a):
         位置没对由人决定怎么办；但**必须出声**，不许静默。
     """
     import inbox_server as SV
-    rec, started = SV.ensure_console(root=getattr(a, "root", None))
-    if not rec or not rec.get("url"):
-        print("Antinel 监理没起来：拿不到端口/口令记录 —— 看 `antinel inbox serve` 的输出",
+    _root = getattr(a, "root", None)
+    # ★★ 0.53.0：**开窗前先确保守护进程在**，而不是"开窗失败之后再降级"。
+    #   窗口归**启动它的进程**所有：CLI 直起的窗口挂在本次命令名下，命令一退
+    #   窗口就死（2026-10-14 四路实证）。daemon 是唯一活得比窗口久的进程
+    #   ⇒ 「daemon 在不在」是开窗的**前置条件**。
+    #   旧实现从不检查这一点，只在 `open_console_via_daemon` 返回 none 之后
+    #   降级直起 —— 于是「已就位」和「窗口秒死」可以同时成立，两条判据各自还绿。
+    d_alive, _d_pid, _d_started, d_why = SV.ensure_daemon(root=_root)
+    if not d_alive:
+        print("[window] ⚠ 守护进程没起来（%s）—— 窗口只能由本次调用直接开，"
+              "**活不过本命令**。" % d_why, file=sys.stderr)
+        print("[window]     现在能用，但命令行一退/一刷新可能就没了；要常驻请先"
+              "解决守护进程（`antinel inbox daemon`），再点一次。",
               file=sys.stderr)
+    rec, started = SV.ensure_console(root=_root)
+    if not rec or not rec.get("url"):
+        # ★ 0.53.0：**如实报原因**。旧话术是「拿不到端口/口令记录」，
+        #   而真因多半是「服务没起来」—— 两件事不同，不能混成一句。
+        _alive, _rec, _why = SV.console_status(root=_root)
+        print("Antinel 监理没起来：%s" % (_why or "原因不明"), file=sys.stderr)
         return 1
     print("Antinel 监理%s：%s" % ("已重拉" if started else "已在跑", rec["url"]))
     # ★★ 2026-10-14（创始人实测「起得来、活不久」）：**先经 daemon 开**。

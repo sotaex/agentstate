@@ -4072,6 +4072,63 @@ def spawn_console(port, token, root=None):
                             creationflags=flags)
 
 
+def _daemon_spawn_cmd(root=None):
+    """重拉守护进程要跑的命令（**唯一实现**：入口与判据都看它，不各拼一份）。
+
+    ★ 带 `--supervise`：daemon 不能只是躺着，还要顺带维持服务 ——
+      否则「窗口有了宿主」但「服务没人管」，用户刷新还是白屏。
+    ★ 不带 `--root`：`daemon` 子命令的 parser 目前没有这个参数（只有 `serve`
+      有）。root 只用于**判活**与判据注入 spawner，不往命令行塞不存在的开关。
+    """
+    entry = os.path.join(os.path.dirname(os.path.abspath(__file__)), "antinel.py")
+    return [sys.executable, entry, "inbox", "daemon", "--supervise"]
+
+
+def spawn_daemon(root=None):
+    """另起一个**守护进程**（分离、无窗）。返回 `Popen`。`root` 仅为签名一致。"""
+    flags = 0
+    if os.name == "nt":
+        flags = 0x00000008 | _CREATE_NO_WINDOW   # DETACHED_PROCESS | CREATE_NO_WINDOW
+    return subprocess.Popen(_daemon_spawn_cmd(root),
+                            stdin=subprocess.DEVNULL,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            creationflags=flags)
+
+
+def ensure_daemon(root=None, spawner=None, wait_sec=6.0):
+    """确保守护进程在跑（**幂等**）。返回 `(alive, pid, started, why)`。
+
+    ★★★★ 为什么窗口入口必须先过这一关（2026-10-18 创始人「点图标看不到」）：
+      窗口归**启动它的进程**所有。CLI 直起的窗口挂在本次命令名下，命令一退
+      窗口就死（2026-10-14 四路实证：`Popen`／`DETACHED`／`cmd start` 全死，
+      只有 **daemon（长命进程）起的活**）。所以「daemon 在不在」不是优化项，
+      是**开窗的前置条件**。
+      旧 `cmd_window` 只在开窗**失败后**降级，从不检查 daemon 在不在 ——
+      于是「已就位」和「窗口秒死」可以同时成立，而两条判据各自都绿。
+
+    ★ 成功判定**只认回读**：`spawner` 返回一个 Popen 不算数，必须
+      `daemon_alive` 为真。与 `ensure_console` 同一条纪律 ——
+      **报成功不许由「走了哪个分支」决定**。
+    """
+    import inbox_daemon as DM
+    alive, pid = DM.daemon_alive(root)
+    if alive:
+        return True, pid, False, "已在跑"
+    try:
+        (spawner or spawn_daemon)(root)
+    except Exception as e:                                  # noqa: BLE001
+        return False, None, True, "拉不起来：%s: %s" % (type(e).__name__, e)
+    deadline = time.time() + float(wait_sec)
+    while time.time() < deadline:
+        alive2, pid2 = DM.daemon_alive(root)
+        if alive2:
+            return True, pid2, True, "已重拉"
+        time.sleep(0.15)
+    return False, None, True, ("拉不起来：%.1f 秒内没登记到守护进程"
+                               "（多半是命令跑起来就退了）" % float(wait_sec))
+
+
 def ensure_console(port=DEFAULT_PORT, root=None, spawner=None, wait_sec=8.0):
     """确保Antinel 监理在跑（**幂等**）。返回 `(rec|None, started: bool)`。
 
@@ -4090,9 +4147,18 @@ def ensure_console(port=DEFAULT_PORT, root=None, spawner=None, wait_sec=8.0):
         if _port_busy(want_port):
             break
         time.sleep(0.2)
-    _alive, rec2, _why2 = console_status(root)
-    # ★ 起没起来都**如实返回**：拿不到记录就返回 None（不编一个"看起来好了"的）
-    return (rec2 or rec), True
+    _alive2, rec2, why2 = console_status(root)
+    # ★★ 0.53.0：**成功只由回读说了算** —— spawn 分支走过 ≠ 服务起来了。
+    #   旧实现 `rec2 or rec`：没起来时把**旧记录**还回去，调用方据此打印
+    #   「已重拉」，而端口根本没开。本机实测：`console.log` 连打 7 次
+    #   「已重拉」，`netstat` 里 8790 一次都没出现过 —— 用户看到的是
+    #   「报了功、窗没了」，一刷新还是白屏。
+    #   以旧充新 = **报成功不由事实决定**，与 0.53.0 T-04e 抓到的态名分裂
+    #   是同一族毛病（判据替实现背书）。⇒ 没起来就返回 None，让调用方
+    #   如实说「没起来」并给原因（`console_status` 的 why）。
+    if not _alive2:
+        return None, True
+    return rec2, True
 
 
 def _serve_setup(port, root, token=None, record=True):

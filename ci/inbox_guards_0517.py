@@ -11,8 +11,18 @@
   修法：`cmd_window` 先走 `open_console_via_daemon`（推托盘 open 动作，
   daemon 2s tick 消费后开窗），失败**如实降级**直起，不假装成功。
 
+★★ 2026-10-18（创始人「点图标看不到、我真怕你」）—— 上面那条修法**只修了一半**：
+  它解决了"窗口由谁开"，没解决"**daemon 根本不在**"。实测：daemon 不在时
+  `open_console_via_daemon` 必然返回 none ⇒ 降级直起 ⇒ 窗口挂在短命 CLI 名下
+  ⇒ 打印「已就位」而窗口几秒后消失（本机枚举：日志有「已就位」，窗口命中 0 个）。
+  而**当时的 W17-a 臂② 恰恰把这条路断言为合格**（"降级直起且不返回非零"）。
+  ⇒ 判据把已知会坏的路批成了合格，这是比缺判据更坏的形状。
+  另有一处同族：`ensure_console` 用 `rec2 or rec` 兜底，没起来时拿**旧记录**
+  冒充「已重拉」（本机连打 7 次「已重拉」，8790 一次都没听）。
+
 四件套（全部内存注入，不起真浏览器、不动真窗口）：
-  W17-a   正：cmd_window 委托优先；daemon 路径失败 ⇒ 降级直起且不返回非零
+  W17-a   正：cmd_window **先确保 daemon 在**再开窗；daemon 起不来 ⇒ 必须
+           **出声说"活不过本命令"**在降级（静默降级判红）
   N-W17-a 负：同一把尺子 —— 跳过委托的变体必须判红（委托不是可选装饰）
   W17-b   正：via_daemon 协议 —— 推动作/通用后缀等窗/落位/回读取证；
            placed 只能由回读说了算
@@ -20,6 +30,11 @@
   W17-c   连带：_DETACHED_FLAGS 在，两处起浏览器的 Popen 都用它；
            spawn_console（服务路径）的 DETACHED 不受影响
   W17-d   观测：运行态 direct read —— 服务/窗口实态如实留痕（无窗≠故障）
+  W17-e   正：ensure_console 的**成功只由回读决定** —— spawn 走过但端口没起
+           ⇒ 必须返回 None，不许拿旧记录冒充
+  N-W17-e 负：把 `rec2 or rec` 兜底塞回一个同尺的变体 ⇒ 必须判红
+  W17-f   正：ensure_daemon 的**成功只由回读决定** —— 没登记到 pid ⇒ alive=False
+  N-W17-f 负：合成"spawn 即成功"的变体 ⇒ 必须判红
 """
 import ast
 import contextlib
@@ -27,6 +42,8 @@ import importlib.util
 import io
 import os
 import sys
+import tempfile
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
@@ -104,13 +121,21 @@ def _patched(pairs):
 
 # ═══════════════════════ W17-a：cmd_window 委托优先 + 诚实降级 ═══════════════════
 
-@check("W17-a ★ cmd_window：daemon 委托优先；daemon 失败 ⇒ 降级直起且不卡用户")
+@check("W17-a ★ cmd_window：**先确保 daemon 在**再开窗；daemon 起不来必须出声（不许静默降级）")
 def w17a():
-    calls = {"ensure": 0, "via": 0, "settled": 0}
+    calls = {"ensure": 0, "daemon": 0, "via": 0, "settled": 0}
 
     def _ensure(root=None):
         calls["ensure"] += 1
         return {"url": _URL}, False
+
+    def _daemon_ok(root=None):
+        calls["daemon"] += 1
+        return True, 4242, False, "已在跑"
+
+    def _daemon_bad(root=None):
+        calls["daemon"] += 1
+        return False, None, True, "拉不起来：6.0 秒内没登记到守护进程"
 
     def _via(url, root=None):
         calls["via"] += 1
@@ -123,13 +148,17 @@ def w17a():
                 "got": list(_RECT), "why": "直起就位"}
 
     buf = io.StringIO()
-    with _patched([(SV, "ensure_console", _ensure),
+    with _patched([(SV, "ensure_daemon", _daemon_ok),
+                   (SV, "ensure_console", _ensure),
                    (SV, "open_console_via_daemon", _via),
                    (SV, "open_console_settled", _settled)]):
         with contextlib.redirect_stdout(buf):
             rc = CLI.cmd_window(_NS())
     if rc != 0:
         return "委托成功路径返回了非零（%r）—— 不卡用户的契约破了" % rc
+    if calls["daemon"] != 1:
+        return ("开窗前**没检查守护进程**（ensure_daemon 调用 %d 次）—— "
+                "daemon 不在时窗口只能由 CLI 直起，命令一退就死" % calls["daemon"])
     if calls["via"] != 1:
         return "daemon 委托没被调用（%r）—— 窗口又会挂在 CLI 进程树下" % calls
     if calls["settled"] != 0:
@@ -137,8 +166,8 @@ def w17a():
     if "已就位" not in buf.getvalue():
         return "成功路径没出声（可观测性退回）"
 
-    # 臂②：daemon 路径失败 ⇒ 必须降级直起、仍返回 0（用户仍拿到窗口）
-    calls.update({"via": 0, "settled": 0})
+    # 臂②：daemon 在、但开窗失败 ⇒ 必须降级直起、仍返回 0（用户仍拿到窗口）
+    calls.update({"via": 0, "settled": 0, "daemon": 0})
 
     def _via_none(url, root=None):
         calls["via"] += 1
@@ -146,7 +175,8 @@ def w17a():
                 "got": [], "why": "daemon 没开出窗口", "via": "daemon"}
 
     buf2 = io.StringIO()
-    with _patched([(SV, "ensure_console", _ensure),
+    with _patched([(SV, "ensure_daemon", _daemon_ok),
+                   (SV, "ensure_console", _ensure),
                    (SV, "open_console_via_daemon", _via_none),
                    (SV, "open_console_settled", _settled)]):
         with contextlib.redirect_stdout(buf2):
@@ -155,7 +185,29 @@ def w17a():
         return "降级路径返回了非零（%r）—— daemon 不在时用户被卡住" % rc2
     if calls["via"] != 1 or calls["settled"] != 1:
         return "降级路径没走 委托→直起（%r）" % calls
-    _note("臂① 委托优先（settled 0 次）；臂② daemon 失败 ⇒ 降级直起、rc=0")
+
+    # 臂③ ★ 0.53.0 新增：**daemon 起不来** ⇒ 可以降级（不卡人），但必须
+    #   **出声**说清"这个窗口活不过本命令"。静默降级 = 让用户以为常驻了。
+    calls.update({"via": 0, "settled": 0, "daemon": 0})
+    err3 = io.StringIO()
+    with _patched([(SV, "ensure_daemon", _daemon_bad),
+                   (SV, "ensure_console", _ensure),
+                   (SV, "open_console_via_daemon", _via_none),
+                   (SV, "open_console_settled", _settled)]):
+        with contextlib.redirect_stderr(err3), contextlib.redirect_stdout(io.StringIO()):
+            rc3 = CLI.cmd_window(_NS())
+    if calls["daemon"] != 1:
+        return "臂③：ensure_daemon 没被调用（%r）" % calls
+    if rc3 != 0:
+        return "臂③：daemon 起不来就把用户卡死（rc=%r）—— 必须降级且不卡人" % rc3
+    if calls["settled"] != 1:
+        return "臂③：daemon 起不来时也没直起（%r）—— 用户什么窗口都拿不到" % calls
+    _e3 = err3.getvalue()
+    if "活不过本命令" not in _e3:
+        return ("臂③：daemon 起不来却**没告诉用户窗口会死**（stderr=%r）—— "
+                "「已就位」和「窗口秒死」又能同时成立了" % _e3[:120])
+    _note("臂① 先确保 daemon（1 次）再委托；臂② 委托失败降级直起 rc=0；"
+          "臂③ daemon 起不来 ⇒ 明确告警「活不过本命令」")
     return True
 
 
@@ -187,7 +239,8 @@ def n_w17a():
                 "got": list(_RECT), "why": "x"}
 
     buf = io.StringIO()
-    with _patched([(SV, "ensure_console", _ensure),
+    with _patched([(SV, "ensure_daemon", lambda root=None: (True, 1, False, "在")),
+                   (SV, "ensure_console", _ensure),
                    (SV, "open_console_via_daemon", _via),
                    (SV, "open_console_settled", _settled)]):
         with contextlib.redirect_stdout(buf):
@@ -335,6 +388,106 @@ def w17c():
 
 # ═════════════════ W17-d：观测 —— 运行态 direct read（无窗≠故障） ═════════════════
 
+# ══════════ W17-e/f：**成功只由回读决定**（报成功不许由「走了哪个分支」决定） ══════════
+#
+# 这一组守的不是某一行代码，是**一族病**：
+#   `ensure_console` 旧实现 `rec2 or rec` ⇒ spawn 走过就还记录 ⇒ 调用方打印
+#   「已重拉」而端口没开；`ensure_daemon` 若写成"spawn 回来就算成功"同型。
+# 本机实测（2026-10-18）：`console.log` 连打 7 次「已重拉」，`netstat` 里
+# 8790 一次都没出现过；日志写「已就位」，枚举窗口命中 0 个。两句话都在撒谎，
+# 而当时所有判据都是绿的 —— 因为判据问的是"重拉了没有"，不是"起来了没有"。
+
+def _stale_record_hub(prefix):
+    """造一个「记录在、服务不在」的中枢：登记 pid 是个死号，端口不绑。"""
+    hub = tempfile.mkdtemp(prefix=prefix)
+    SV.write_console_record(8799, "TOK-STALE", pid=999999, root=hub)
+    return hub
+
+
+def _ensure_readback_core(impl):
+    """尺子：喂一个**什么都不做**的 spawner，要求「没起来」被如实返回。"""
+    hub = _stale_record_hub("g0517_w17e_")
+    try:
+        rec, started = impl(root=hub, spawner=lambda *a: None, wait_sec=1.0)
+    except Exception as e:                                  # noqa: BLE001
+        return "调用崩了：%s: %s" % (type(e).__name__, e)
+    if rec is not None:
+        return ("服务没起来，却还回了记录（url=%r）—— 调用方会打印「已重拉」，"
+                "而端口根本没开" % ((rec or {}).get("url"),))
+    if started is not True:
+        return "没走重拉分支（started=%r）—— 场景没构造对" % (started,)
+    return True
+
+
+@check("W17-e ★ ensure_console：spawn 走过但端口没起 ⇒ 必须返回 None（不许拿旧记录冒充）")
+def w17e():
+    r = _ensure_readback_core(SV.ensure_console)
+    if r is not True:
+        return r
+    _note("假 spawner（什么都不做）⇒ rec=None：不拿旧记录充「已重拉」")
+    return True
+
+
+@check("N-W17-e 负控：把 `rec2 or rec` 兜底塞进同尺变体 ⇒ W17-e 必须红")
+def n_w17e():
+    def _old_ensure(root=None, spawner=None, wait_sec=1.0, port=8790):
+        """**旧形状**（0.48.5→0.53.0 的实现）。不是缓存，是负控标本。"""
+        alive, rec, _why = SV.console_status(root)
+        if alive:
+            return rec, False
+        want_port = int((rec or {}).get("port") or port)
+        want_tok = (rec or {}).get("token") or "TOK"
+        (spawner or SV.spawn_console)(want_port, want_tok, root)
+        time.sleep(min(float(wait_sec), 1.0))
+        _a, rec2, _w = SV.console_status(root)
+        return (rec2 or rec), True                  # ← 病灶：以旧充新
+
+    r = _ensure_readback_core(_old_ensure)
+    if r is True:
+        return "负控失效：旧形状（rec2 or rec）在同一把尺子上被判绿 —— 尺子是摆设"
+    _note("旧形状同尺判红：%s" % str(r)[:80])
+    return True
+
+
+def _daemon_readback_core(impl):
+    """尺子：喂一个什么都不做的 spawner，要求「没登记到 pid」被如实返回。"""
+    hub = tempfile.mkdtemp(prefix="g0517_w17f_")
+    try:
+        alive, pid, started, why = impl(root=hub, spawner=lambda *a: None,
+                                        wait_sec=0.6)
+    except Exception as e:                                  # noqa: BLE001
+        return "调用崩了：%s: %s" % (type(e).__name__, e)
+    if alive:
+        return "守护进程没登记到 pid，却报 alive=True（pid=%r）" % (pid,)
+    if not why:
+        return "没给原因（why 为空）—— 调用方无法出声"
+    if started is not True:
+        return "没走重拉分支（started=%r）—— 场景没构造对" % (started,)
+    return True
+
+
+@check("W17-f ★ ensure_daemon：spawn 走过但没登记到 pid ⇒ 必须 alive=False")
+def w17f():
+    r = _daemon_readback_core(SV.ensure_daemon)
+    if r is not True:
+        return r
+    _note("假 spawner ⇒ alive=False，原因如实返回（调用方据此出声）")
+    return True
+
+
+@check("N-W17-f 负控：合成「spawn 即成功」的变体 ⇒ W17-f 必须红")
+def n_w17f():
+    def _spawn_is_success(root=None, spawner=None, wait_sec=0.6):
+        (spawner or SV.spawn_daemon)(root)
+        return True, 1234, True, "已重拉"            # ← 病灶：分支即成功
+
+    r = _daemon_readback_core(_spawn_is_success)
+    if r is True:
+        return "负控失效：「spawn 即成功」的变体被判绿 —— 尺子是摆设"
+    _note("旧形状同尺判红：%s" % str(r)[:80])
+    return True
+
+
 @check("W17-d 观测：运行态 direct read —— 服务/窗口实态如实留痕（无窗≠故障）")
 def w17d():
     """★ 语义修正（首版写错，2026-10-14）：「关窗不停服务」是**设计语义**
@@ -364,9 +517,17 @@ def w17d():
         else:
             raise Skip("SKIP: 无桌面枚举环境（CI）")
     else:
-        if desktops:
-            return "Antinel 监理服务（8790）没在听，但本会话有桌面 —— 保服务链路断了"
-        raise Skip("SKIP: 无Antinel 监理服务且无桌面（CI 环境）")
+        # ★★ 0.53.0：**区分「用户没启动」与「链路断了」**。
+        #   旧实现「有桌面却没服务 ⇒ 判红」把**环境态**混进了代码门禁：
+        #   用户没开监理时，任何提交都会被拦 —— 与 byte-budget 那条纪律
+        #   （环境态的项不许进 pass/fail 分母）是同一件事。
+        #   准确判据：**daemon 在跑、服务却没起** ⇒ supervise 链路真断了（红）；
+        #   daemon 也不在 ⇒ 用户压根没启动，SKIP 并说明。
+        import inbox_daemon as DM
+        d_alive, _dpid = DM.daemon_alive()
+        if d_alive:
+            return "守护进程在跑，服务（8790）却没在听 —— supervise 链路断了"
+        raise Skip("SKIP: 服务没在听且守护进程未在跑（用户没启动监理，非链路故障）")
     return True
 
 
