@@ -1306,7 +1306,7 @@ def cmd_verify(args):
             if rc == 0:
                 print("")
                 print("─" * 60)
-                print(" 这条链**你可以自己复算**，不需要相信我们：")
+                print(" 这条链**你可以自己复算**，不需要相信监理：")
                 for i, (rel, desc, link) in enumerate(_VERIFY_RECOMPUTE, 1):
                     local = _sibling(rel)
                     print("   %d) %s：" % (i, desc))
@@ -3231,8 +3231,11 @@ def cmd_ui(args):
 # ★ 唯一实现：判据与译文的真源在本文件；`ux_verdict.py` 等展示层一律 import 这里的
 #   `classify` / `EVIDENCE_MEANING` / `VERDICTS`，**不许自己再翻一遍**（本仓纪律：
 #   判据不许二次实现，否则两份实现迟早对不上）。
-# ★ 措辞纪律：**一个字都不许多说**。我们的能力是「读工具自己写下的字段」，
-#   所以每档都带「自认」二字 —— 写成「我们抓到它在发」就是宣称未实现的东西。
+# ★ 措辞纪律：**一个字都不许多说**。监理的能力是「读工具自己写下的字段」，
+#   所以每档都带「自认」二字 —— 写成「监理抓到它在发」就是宣称未实现的东西。
+# ★ 主语纪律（创始人 2026-10-19）：用户可见文案里**不许出现「我们」** ——
+#   读者是被监理的那一方，「我们」让他不知道这句话是谁说的（开发方？工具？）。
+#   一律以「监理」作主语：**谁查的、谁没查到、谁的能力到哪儿**，都写「监理」。
 
 # 证据语义表：键名/后缀 → (档位, 人话)。★ 这是**翻译**不是判定：键名字面就是它的语义。
 EVIDENCE_MEANING = {
@@ -3262,7 +3265,7 @@ VERDICTS = {
     "CLEAN": {"key": "CLEAN", "icon": "⚪", "title": "查过，没发现记录", "order": 3,
               "short": "扫过了，这次没找到它自己写下的外传记录 —— **不等于它没有**"},
     "BLIND": {"key": "BLIND", "icon": "⚫", "title": "没查到（扫描器走不到）", "order": 4,
-              "short": "登记了、你电脑上也确实有，但扫描器**没走到** —— 这一项我们没查"},
+              "short": "登记了、你电脑上也确实有，但扫描器**没走到** —— 这一项监理没查"},
     "NA":    {"key": "NA",    "icon": "·",  "title": "不适用", "order": 5,
               "short": "更新包 / 非 AI 工具本体"},
 }
@@ -3530,7 +3533,7 @@ def cmd_host_scan(args):
     print("  你电脑上有 %d ／ 已扫 %d ／ ★ 未扫 %d"
           % (_reg_present, _reg_scanned, _reg_unscanned))
     if _reg_unscanned:
-        print("  ★★ 没扫到的登记地方（这一项我们**没查**，请当空白读）：")
+        print("  ★★ 没扫到的登记地方（这一项监理**没查**，请当空白读）：")
         for _h, _raw, _k in _reg_present_keys:
             if _k not in _scanned_keys:
                 print("      ⚫ %-14s %s" % (_h, _raw))
@@ -4258,6 +4261,6 @@ if __name__ == "__main__":
             _p = "(无法写入)"
         print("✗ 这一步失败了：%s: %s" % (type(_e).__name__, _e), file=sys.stderr)
         print("  完整错误栈已写入：%s" % _p, file=sys.stderr)
-        print("  → 其余功能不受影响；若这是「装监理」失败，把上面第一行原文发给我们即可。",
+        print("  → 其余功能不受影响；若这是「装监理」失败，把上面第一行原文发来即可。",
               file=sys.stderr)
         sys.exit(3)

@@ -3905,6 +3905,186 @@ def n_exam_every_report_is_replayable():
     return True
 
 
+# -------------------------------------- 同一次体检只列一次（§38.5 / P22）----
+#: 创始人 2026-10-19 那一趟的**真实间隔**：03:58 → 04:20（22 分钟）→ 04:32（12 分钟）。
+#: ★ 最旧那份是 0.53.0 T2 之前的形态（只有汇总、没有明细）—— 夹具**照抄真形状**，
+#:   不合成"三份都带明细"：形状一假，就测不到「没明细那份被当成定稿」这个病
+#:   （本仓付过学费：夹具合成形状 ⇒ 长度/数量判据全绿而真形状崩）。
+_EXAM_ONE_RUN = (("2026-10-19T03:58:29+08:00", False),
+                 ("2026-10-19T04:20:23+08:00", True),
+                 ("2026-10-19T04:32:14+08:00", True))
+#: 隔一小时的三趟（**不该**被并掉）—— 与 P21-3 同一组时刻口径。
+_EXAM_THREE_RUNS = (("2026-10-19T01:00:00+08:00", True),
+                    ("2026-10-19T02:00:00+08:00", True),
+                    ("2026-10-19T03:00:00+08:00", True))
+
+
+def _p22_write(runs):
+    """往当前 hub 写 `runs=[(时刻, 带明细), ...]`（升序），返回路径列表。"""
+    return [_exam_write_console_exam(_exam_fixture_named("ExamTool%d" % i),
+                                     drop_report=not detail, stamp=st)
+            for i, (st, detail) in enumerate(runs)]
+
+
+def _p22_reset_memory():
+    """把进程内体检结果清成"服务刚重启"（内存空）—— 回看必须走读盘那条路。"""
+    with SV._EXAM_LOCK:
+        SV._EXAM.update(state="idle", result=None, stage="", error="", saved="",
+                        started=0.0, finished=0.0)
+
+
+def _p22_core(runs, expect_n, expect_idx=None, expect_line=None):
+    """尺子（正判据与负控**共用**，只有这一份）。
+
+    ★ `expect_n`：这几份在「历次体检」里该列几次（同一趟 ⇒ 1 次）。
+    ★ `expect_idx`：最近那一次必须是第几份（**定稿＝组内最新那份**）。
+    ★ `expect_line`：页面上该不该有「历次体检」那一行（只有一次时不该有）。
+    """
+    hub = G.new_hub()
+    paths = _p22_write(runs)
+    _p22_reset_memory()
+    hist = SV._exam_history()
+    if len(hist) != expect_n:
+        return ("「历次体检」该列 %d 次，实际 %d 次（%s）"
+                % (expect_n, len(hist),
+                   "、".join(h["when"] for h in hist) or "一次都没有"))
+    if expect_idx is not None:
+        want = os.path.basename(paths[expect_idx])
+        if hist[0]["base"] != want:
+            return "最近那一次该是第 %d 份（%s），实际是 %s" % (
+                expect_idx, want, hist[0]["base"])
+        if not hist[0]["ok"]:
+            return ("列出来那一次不能回看（缺明细）—— 同趟里明明有带明细的那份，"
+                    "把没存的那份当定稿就是瞒报")
+    txt = PC.body(SV._view_exam(token="T"))
+    if expect_line is True and "历次体检" not in txt:
+        return "有 %d 次，页面上却没有「历次体检」那一行 —— 选不了" % expect_n
+    if expect_line is False and "历次体检" in txt:
+        return "只有 %d 次却画了「历次体检」那一行 —— 一行只有一个选项是噪音" % expect_n
+    return True
+
+
+def c_exam_same_run_is_one_entry():
+    """P22-1：同一趟里连跑三次 ⇒ 「历次体检」只列**一次**（设计 §38.5）。
+
+    ★ 守的是创始人 2026-10-19 原话：「历次体检：10-19 04:32 ｜ 10-19 04:20 ｜
+      10-19 03:58（没存明细）—— 实际上这就是一次。」
+      体检要跑几分钟，跑完看结果再跑一遍是同一件事；列三条就是把一次体检
+      冒充成三次（**一次动作被记成三次**，与"没查 与 查了没事 同形"同族）。
+    """
+    why = _p22_core(_EXAM_ONE_RUN, expect_n=1, expect_idx=2, expect_line=False)
+    if why is not True:
+        return why
+    _note("同一趟三条（间隔 22／12 分钟）⇒ 列一次，定稿是最新的 10-19 04:32")
+    return True
+
+
+def n_exam_same_run_is_one_entry():
+    """负控：摘掉合并（每条各自一组）⇒ P22-1 必须红。
+
+    ★ 守的是「合并只是说说」—— 判据最容易假绿的一种形状：
+      函数写了、没接到列表上，页面照旧列三条。
+    """
+    orig = SV._exam_group_runs
+    try:
+        SV._exam_group_runs = lambda items: [[i] for i in items]
+        why = _p22_core(_EXAM_ONE_RUN, expect_n=1, expect_idx=2, expect_line=False)
+    finally:
+        SV._exam_group_runs = orig
+    if why is True:
+        return "负控失效：摘掉合并后仍只列一次 —— 合并是装饰，页面其实没并"
+    if "该列 1 次" not in str(why):
+        return "方向不对：红因不是「列多了」（%s）—— 量具打偏" % str(why)[:60]
+    _note("摘掉合并 ⇒ 尺子红（列了三次）")
+    return True
+
+
+def c_exam_two_runs_stay_two():
+    """P22-2：隔一小时的三趟**不许被并掉** —— 合并窗口不能大到吞掉真正的两次。
+
+    ★ 反向那条同样重要：只守"要合并"不守"不合并"，窗口就会被放大到无限
+      （放大到 24 小时后，历次永远只剩一次，"每一次都能回看"名存实亡）。
+    """
+    why = _p22_core(_EXAM_THREE_RUNS, expect_n=3, expect_idx=2, expect_line=True)
+    if why is not True:
+        return why
+    _note("隔一小时的三趟 ⇒ 仍列三次（窗口没吞掉真正的两次）")
+    return True
+
+
+def n_exam_two_runs_stay_two():
+    """负控：把窗口放大到 120 分钟 ⇒ P22-2 必须红（窗口不是装饰）。"""
+    orig = SV.EXAM_SAME_RUN_MIN
+    try:
+        SV.EXAM_SAME_RUN_MIN = 120
+        why = _p22_core(_EXAM_THREE_RUNS, expect_n=3, expect_idx=2, expect_line=True)
+    finally:
+        SV.EXAM_SAME_RUN_MIN = orig
+    if why is True:
+        return "负控失效：窗口放大到 120 分钟后仍列三次 —— 窗口根本没在起作用"
+    if "该列 3 次" not in str(why):
+        return "方向不对：红因不是「被吞掉了」（%s）—— 量具打偏" % str(why)[:60]
+    _note("窗口放大 ⇒ 三趟被并成一趟 ⇒ 尺子红")
+    return True
+
+
+def _p22_shown_core():
+    """尺子（正判据与负控共用）：页面上那一格必须是**定稿那次**，且真能回看。
+
+    ★ 三条断言：①不出现同趟里最旧那个时刻；②出现定稿的时刻；③**渲染得出
+      定稿的内容** —— ③最关键：把「没存明细」那份当定稿时，页面会说
+      「明细没存下来」，而同趟里明明有一份带明细（瞒报，同 P21-1 那个病）。
+    """
+    hub = G.new_hub()
+    _p22_write(_EXAM_ONE_RUN)
+    _p22_reset_memory()
+    txt = PC.body(SV._view_exam(token="T"))
+    if "10-19 03:58" in txt:
+        return "页面上还留着同趟里最旧那个时刻（10-19 03:58）—— 一次体检被列成了多次"
+    if "10-19 04:32" not in txt:
+        return "页面上没有这一趟的定稿时刻（10-19 04:32）—— 看不出看的是哪一次"
+    if "没存明细" in txt:
+        return ("页面说「没存明细」—— 同趟里明明有一份带明细的，"
+                "把没存的那份当定稿就是瞒报")
+    if "ExamTool2" not in txt:
+        return ("页面没把这一趟的定稿渲染出来（找不到 ExamTool2）—— "
+                "带明细那份没被当成定稿，回看落到了空态")
+    return True
+
+
+def c_exam_shown_run_is_the_final_one():
+    """P22-3：列出来那一刻＝**定稿那次**（组内最新），内容也跟它同源。
+
+    ★ 时刻与内容必须同源：显示 04:32 却渲染 03:58 的内容（或反之），
+      就是本仓最忌的「两句话讲同一件事却给出两个数」。
+    """
+    why = _p22_shown_core()
+    if why is not True:
+        return why
+    _note("页面只出现 10-19 04:32（定稿）＋ 渲染出 ExamTool2，不出现 10-19 03:58")
+    return True
+
+
+def n_exam_shown_run_is_the_final_one():
+    """负控：把「一趟里留哪一份」改成留**最旧**那份 ⇒ P22-3 必须红。
+
+    ★ 这是最像"也对"的一种错：留最旧那份看着更"忠实地记录了第一次"，
+      但那份没有明细 ⇒ 用户看到的是「明细没存下来」—— 有证据却报没证据。
+    """
+    orig = SV._exam_run_kept
+    try:
+        SV._exam_run_kept = lambda g: g[0]
+        why = _p22_shown_core()
+    finally:
+        SV._exam_run_kept = orig
+    if why is True:
+        return "负控失效：留最旧那份后仍绿 —— 页面其实没在按定稿显示"
+    if "ExamTool2" not in str(why) and "没存明细" not in str(why):
+        return "方向不对：红因不是「显示成了没明细那次」（%s）—— 量具打偏" % str(why)[:60]
+    _note("留最旧那份 ⇒ 页面渲染不出定稿 ⇒ 尺子红")
+    return True
+
+
 def c_host_attribution_threaded_to_inbox():
     """P18-1（T2.2）：链上的 `host`／`host_confidence` 穿透到收件箱 Item。"""
     return _p18_transmission(S)
@@ -4373,6 +4553,18 @@ CHECKS_0353 = [
     ("P21 每一次体检都能回看（不只最近一次）",
      c_exam_every_report_is_replayable,
      n_exam_every_report_is_replayable),
+    # ---- 二十二、同一次体检只列一次（0.53.0 T2 追加 · 设计 §38.5）----
+    # ★ 创始人 2026-10-19 原话：「实际上这就是一次」。
+    #   正反两条都要守：只守"要合并" ⇒ 窗口会被放大到吞掉真正的两次。
+    ("P22 同一趟里连跑三次只列一次（一次体检不冒充成三次）",
+     c_exam_same_run_is_one_entry,
+     n_exam_same_run_is_one_entry),
+    ("P22 隔一小时的三趟仍分列（窗口不吞掉真正的两次）",
+     c_exam_two_runs_stay_two,
+     n_exam_two_runs_stay_two),
+    ("P22 列出来那一刻＝定稿那次（时刻与内容同源，不报没存明细）",
+     c_exam_shown_run_is_the_final_one,
+     n_exam_shown_run_is_the_final_one),
 ]
 
 

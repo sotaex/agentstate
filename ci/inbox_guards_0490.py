@@ -3315,6 +3315,140 @@ def n_t04e():
     return True
 
 
+#: 文案主语纪律（创始人 2026-10-19 拍板）：用户可见文案**不许出现「我们」**。
+#:   理由不是"文风"，是**读者不知道这句话是谁说的**：读者是被监理的那一方，
+#:   「我们」可能是开发方、可能是那个 AI 工具、也可能是电脑本身 —— 而这一句
+#:   要说清的恰恰是**谁查的／谁没查到／谁的能力到哪儿**。一律以「监理」作主语。
+#: ★ 与退休态名闸同型（T-04e）：**登记即永久**，新文案撞上就红。
+_VOICE_BANNED = (
+    ("我们", "开发方视角；主语必须是「监理」（谁查的／谁没查到／能力到哪儿）"),
+)
+
+#: 用户可见文案的载体（产品侧）。判据自身与一次性脚本不在内 —— 它们不面向用户。
+_VOICE_SRC_FILES = ("antinel.py", "ui_server.py", "inbox_server.py",
+                    "inbox_model.py", "inbox_daemon.py", "inbox_window.py",
+                    "host_shield.py", "inbox_store.py")
+
+
+def _voice_core(pages):
+    """尺子：喂 `[(页名, 可见文本)]`，命中禁用主语即红。"""
+    for view, body in pages:
+        for w, why in _VOICE_BANNED:
+            if w in body:
+                return "%s 页出现禁用主语 %r（%s）" % (view, w, why)
+    return True
+
+
+def _voice_render_pages():
+    """用户可见文案的**全部渲染入口**：监理五页 ＋ `antinel ui` 索引页（TPL）。
+
+    ★ 索引页为什么必须在内：ui_server 那段边界声明写在**三引号模板**里 ——
+      它既不在监理五页里，也不在「同一行成对引号」里 ⇒ 两条腿**都照不到**，
+      只扫五页就是本仓最忌的那个形状：**查不到的那一半天然全绿**。
+    """
+    pages = []
+    for view in ("inbox", "report", "health", "ledger", "health_exam"):
+        try:
+            p = SV.render_page(view=view, root=tempfile.mkdtemp(prefix="g0490_t04f_"),
+                               token="T", items=_items(), rep=_REP, posture=_POSTURE)
+        except Exception as e:                                  # noqa: BLE001
+            return None, ("渲染 %s 失败：%s: %s —— 量具故障，不算通过"
+                          % (view, type(e).__name__, e))
+        pages.append((view, PC.body(p)))
+    try:
+        import ui_server as _U
+        pages.append(("antinel ui 索引页", PC.body(_U._index_page("T"))))
+    except Exception as e:                                      # noqa: BLE001
+        return None, ("渲染 ui 索引页失败：%s: %s —— 量具故障，不算通过"
+                      % (type(e).__name__, e))
+    return pages, None
+
+
+@check("T-04f ★ 文案主语：五页可见文本不许出现「我们」（一律以「监理」作主语）")
+def t04f():
+    """0.53.0（创始人 2026-10-19）：「我们的能力」「我们没查到」这种口吻不对。
+
+    ★ 撞出来的样子：体检页边界写着「所以我们读不到」「那是我们没走到的地方」，
+      而读者是被监理的那一方 —— 他不知道「我们」是谁。
+    ★ 与 T-04e 同一条结构性教训：**文案纪律不进机器检查 ⇒ 迟早回潮**。
+      这次改的是 12 处；闸不立，下一次改文案的人看不见这条纪律。
+    """
+    pages, why = _voice_render_pages()
+    if why:
+        return why
+    return _voice_core(pages)
+
+
+@check("N-T04f 负控：把「我们」喂进页面文本 ⇒ T-04f 必须红；「监理」不许误伤")
+def n_t04f():
+    """尺子自证：出现就必红 ＋ 合法主语判绿（缺后者 ⇒ 尺子会误伤真文案）。"""
+    for bad in ("有 3 个地方我们没查到", "我们的能力只到「读它写下的字」",
+                "那是我们没走到的地方"):
+        if _voice_core([("体检", bad)]) is True:
+            return "负控失效：%r 喂进去仍判绿（尺子没有分辨力）" % bad
+    for ok in ("有 3 个地方监理没查到", "监理的能力只到「读它写下的字」",
+               "那是监理没走到的地方"):
+        if _voice_core([("体检", ok)]) is not True:
+            return "负控方向异常：合法主语文本 %r 被判红 —— 尺子误伤真实现" % ok
+    return True
+
+
+def _voice_scan_text(src, rel):
+    """扫**一份源码**里的文案字面量；命中 ⇒ 红。★ 唯一实现（正判据与负控共用）。
+
+    ★ 只认**同一行内成对引号包住**的中文字面量 ⇒ 行注释里的「我们」不算
+      （不面向用户），而 `print("…我们…")` 与模块级文案常量都在网里。
+    """
+    pat = re.compile(r'"[^"\n]*%s[^"\n]*"' % _VOICE_BANNED[0][0])
+    for i, line in enumerate(src.splitlines(), 1):
+        if pat.search(line):
+            return "%s:%d 的文案字面量里出现 %r —— 主语改「监理」" % (
+                rel, i, _VOICE_BANNED[0][0])
+    return True
+
+
+def _voice_src_core():
+    """第二腿：扫产品源码的文案字面量 —— 页面渲染不到的那一半
+    （终端人读输出，如 `host-scan` 的「这一项我们没查」）。
+    """
+    for rel in _VOICE_SRC_FILES:
+        try:
+            src = _src(rel)
+        except Exception:                                      # noqa: BLE001
+            continue
+        why = _voice_scan_text(src, rel)
+        if why is not True:
+            return why
+    return True
+
+
+@check("T-04g ★ 文案主语（第二腿）：产品源码的文案字面量里不许出现「我们」")
+def t04g():
+    """★ 为什么要有第二腿：T-04f 只看**渲染得出来**的那五页；终端人读输出
+    （`antinel host-scan`、`--verify` 那句「不需要相信我们」）不在任何页面里，
+    第一腿永远照不到它 —— 只守一腿就是「查不到的那一半天然全绿」。
+    """
+    return _voice_src_core()
+
+
+@check("N-T04g 负控：源码里塞回一句「我们…」⇒ T-04g 必须红")
+def n_t04g():
+    """变异＝把真源码里一处「监理」字面量换回「我们」（C1 两步法，磁盘一字节不动）。
+
+    ★ 顺带自证：真实现喂同一把尺子必须是绿的（否则这条闸在误伤，不是守卫）。
+    """
+    src = _src(_SERVER_REL)
+    anchor = "也可能是监理没找到"
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    if _voice_scan_text(src.replace(anchor, "也可能是我们没找到"),
+                        _SERVER_REL) is True:
+        return "负控失效：字面量换回「我们」后 T-04g 没红（第二腿是装饰）"
+    if _voice_scan_text(src, _SERVER_REL) is not True:
+        return "夹具不成立：真实现本身就红 ⇒ 负控无分辨力"
+    return True
+
+
 @check("T-04b ★ 账本明细区二：按月折叠（默认收起）＋页高不变量＋月行自报天数")
 def t04b():
     """「日期太多怎么办」的裁决落点：**不引入滚动条**（页高无界、零信息指向）、

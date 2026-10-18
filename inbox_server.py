@@ -2449,7 +2449,7 @@ _EXAM_LOCK = threading.Lock()
 #: 三态原文（设计 §21.3 写死，不许临场编；负控 N-H10 守互斥）
 _EXAM_FIRST = "首次体检，还没有对比基线。"
 _EXAM_FAILED = "这次没查成：0 个地方被检查——结果不算数。"
-_EXAM_NO_TOOLS = ("这台电脑上没找到 AI 工具。这可能是好事，也可能是我们没找到"
+_EXAM_NO_TOOLS = ("这台电脑上没找到 AI 工具。这可能是好事，也可能是监理没找到"
                   "——可以跑 <code>antinel host-scan</code> 再看一次。")
 #: 首启引导条（设计 §21.2 接触点 2，逐字）
 _EXAM_GUIDE = "这是第一次打开监理。先做一次体检吧——它只读，不会改任何东西。"
@@ -2458,9 +2458,9 @@ _EXAM_GUIDE = "这是第一次打开监理。先做一次体检吧——它只�
 _EXAM_BOUND = (
     "<p class=\"muted small\"><b>先说清楚它能查到什么、查不到什么：</b><br>"
     "· 它读的是<b>工具自己写下来的字段</b>（比如某个工具在自己的文件里记了「上次上传」）。"
-    "会偷的工具不会写，所以我们读不到 —— 这不是\"它干净\"，是\"它没说\"。<br>"
-    "· 下面每一档都带「<b>自认</b>」二字，就是这个意思：我们看到的是它自己承认的部分。<br>"
-    "· 「<b>没查到</b>」会单独列出来 —— 那是我们<b>没走到</b>的地方，"
+    "会偷的工具不会写，所以监理读不到 —— 这不是\"它干净\"，是\"它没说\"。<br>"
+    "· 下面每一档都带「<b>自认</b>」二字，就是这个意思：监理看到的是它自己承认的部分。<br>"
+    "· 「<b>没查到</b>」会单独列出来 —— 那是监理<b>没走到</b>的地方，"
     "请当空白读，<b>不要</b>当成\"没问题\"。</p>"
     "<p class=\"muted small\"><b>这次体检只是局部的。</b>查的是「你电脑上装了哪些 AI 工具、"
     "它们自己有没有承认往外送过东西」。<b>不查</b>代码漏洞、不查病毒、不查性能、"
@@ -2495,22 +2495,40 @@ def _resolve_view(view):
     return view if view in _VIEWS_ALLOWED else "inbox"
 
 
-def _exam_when(path):
-    """`(相对, 绝对时刻)` —— 如 `("1 天前", "10-18 18:01")`。
+def _exam_dt(doc):
+    """从**已读出的存档**取 `generated_at`（`datetime`）；解析不出 ⇒ `None`。
 
-    ★ 取存档里的 `generated_at`（存档唯一事实）；读不出 ⇒ 如实说时间不详，
-      不拿文件名猜（文件名是第二来源，两份事实迟早对不上）。
-    ★ 相对与绝对**同一次算出**：页头一行与回看标注若各算一遍，迟早对不上
-      （本仓第三份时间实现，故收口在这里）。
+    ★ 时刻解析的**唯一实现**（页头一行、回看标注、同趟分组三处都走它）。
+      分组是第三处要时刻的地方 —— 不在这一层收口，就会出现第四份解析。
+    ★ 解析不出 ⇒ `None`，**不猜**：拿文件名（写入时刻）当第二来源，
+      两份事实迟早对不上。
     """
     try:
-        with open(path, encoding="utf-8") as f:
-            doc = json.load(f)
-        dt = datetime.fromisoformat(str(doc.get("generated_at") or ""))
+        return datetime.fromisoformat(str((doc or {}).get("generated_at") or ""))
     except Exception:                                         # noqa: BLE001
+        return None
+
+
+def _exam_when_doc(doc):
+    """`(相对, 绝对时刻)` —— 如 `("1 天前", "10-18 18:01")`。
+
+    ★ 相对与绝对**同一次算出**：页头一行与回看标注若各算一遍，迟早对不上。
+    """
+    dt = _exam_dt(doc)
+    if dt is None:
         return ("时间不详", "")
     n = (datetime.now().astimezone().date() - dt.date()).days
     return ("刚刚" if n <= 0 else "%d 天前" % n, dt.strftime("%m-%d %H:%M"))
+
+
+def _exam_when(path):
+    """同 `_exam_when_doc`，但从**路径**读（存档里的时间是唯一事实）。"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            doc = json.load(f)
+    except Exception:                                         # noqa: BLE001
+        return ("时间不详", "")
+    return _exam_when_doc(doc)
 
 
 def _exam_ago(path):
@@ -2533,29 +2551,77 @@ def _exam_replay_note(path):
             "当时每个工具自己写下的原文也在里面。" % (_abs or _rel))
 
 
-def _exam_history():
-    """历次控制台体检（**倒序**，最近在前）。每项 `{"path","base","when","ok"}`。
+#: 同一次体检的判定（分钟）：两次体检**间隔不到这个值** ⇒ 同一趟（重跑），
+#: 「历次体检」里只列一次。
+#:
+#: ★ 为什么是 30（实测推出来的，不是拍的）：体检跑完要几分钟；跑完看结果、
+#:   发现不对再跑一次，这一整套来回实测落在 35 分钟内 —— 创始人 2026-10-19
+#:   那一趟三条：03:58 → 04:20 → 04:32，间隔 22／12 分钟。
+#: ★ 窗口再大就会吞掉真正分两次的体检（隔一小时该分列，见判据 P22-2）。
+#: ★ 合并不了就**不合并**（保守方向）：读不出时刻（`None`）⇒ 各自算一次。
+EXAM_SAME_RUN_MIN = 30
 
+
+def _exam_group_runs(items):
+    """把**升序**的体检存档并成「一次体检」的组：`[[{...}], [{...}, {...}]]`。
+
+    ★ 纯函数（不读盘、不写盘）⇒ 判据可以直接喂形状，负控可以直接换掉它
+      （可替换是判据能打到它的前提）。
+    ★ 组内顺序保持升序 ⇒ 定稿＝组内最后一份（`_exam_run_kept`）。
+    """
+    groups = []
+    for it in items:
+        prev = groups[-1][-1] if groups else None
+        _a, _b = (prev or {}).get("dt"), it.get("dt")
+        if (_a is not None and _b is not None
+                and 0 <= (_b - _a).total_seconds() < EXAM_SAME_RUN_MIN * 60):
+            groups[-1].append(it)
+        else:
+            groups.append([it])
+    return groups
+
+
+def _exam_run_kept(group):
+    """一趟体检里「历次」**列哪一份**：定稿＝组内**最新**那份。
+
+    ★ 取最旧那份的后果（实测）：同趟里明明有一份带明细，页面却说「没存明细」
+      —— 有证据却报没证据，正是本仓最忌的形状：
+      **没查／没存 与 查了没事 显示成同一个样子**（判据 N-P22-3 守这条）。
+    """
+    return group[-1]
+
+
+def _exam_history():
+    """历次**体检**（**倒序**，最近在前）。每项 `{"path","base","when","ok"}`。
+
+    ★★ 0.53.0（T2 追加，设计 §38.5）：**同一趟里的重跑只算一次**。
+      体检要跑几分钟，跑完看结果、再跑一遍是同一件事 —— 列三条就是把一次
+      体检冒充成三次（创始人 2026-10-19 原话：「实际上这就是一次」）。
+      合并窗口＝`EXAM_SAME_RUN_MIN`，一趟里列**最新那份**（定稿）。
     ★ `ok`＝**能回看**（存档里带明细）。旧存档 `ok=False` ⇒ 列表里标「没存明细」，
       **不生成链接**（点进去也没东西，那是骗点击）。
-    ★ 只读，不写、不改。
+    ★ 只读，不写、不改：被并掉的那几份字节仍在磁盘上（零删除），只是不再
+      单列 —— 合并是**列表口径**，不是销毁。
     """
     import host_shield as _hs
-    out = []
-    for p in reversed(_hs.health_reports()):
+    items = []
+    for p in _hs.health_reports():
         try:
             with open(p, encoding="utf-8") as f:
                 doc = json.load(f)
         except Exception:                                     # noqa: BLE001
             continue
+        # ★ 只认控制台体检：命令行体检（host-audit）形状不同，喂给体检页的
+        #   渲染函数会渲染出别的页面 —— 合并逻辑也不许把它并进同一趟。
         if not isinstance(doc, dict) or doc.get("source") != "console-exam":
             continue
-        _rel, _abs = _exam_when(p)
-        out.append({"path": p, "base": os.path.basename(p),
-                    "when": _abs or _rel,
-                    "ok": bool(isinstance(doc.get("report"), dict)
-                               and doc.get("report"))})
-    return out
+        _rel, _abs = _exam_when_doc(doc)
+        items.append({"path": p, "base": os.path.basename(p),
+                      "when": _abs or _rel, "dt": _exam_dt(doc),
+                      "ok": bool(isinstance(doc.get("report"), dict)
+                                 and doc.get("report"))})
+    groups = _exam_group_runs(items)
+    return [_exam_run_kept(g) for g in reversed(groups)]
 
 
 def _exam_pick(hist, pick):
