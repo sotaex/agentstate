@@ -347,19 +347,18 @@ details.month>.rows{border:0;border-radius:0}
 .rem .seg.root{border-left-color:var(--r0)}
 .rem .seg.sev{border-left-color:var(--r1)}
 .rem .seg.act{border-left-color:var(--brand)}
-.rem .seg.cost{border-left-color:var(--muted)}
 .rem .seg h4{margin:0 0 4px;font-size:12px;color:var(--muted);font-weight:700;
   text-transform:none}
 .rem .seg p{margin:0}
 .rem .seg .note{font-size:11px;color:var(--muted);margin-top:5px}
+/* ★ 0.53.0 T4：动作行（原 `<ol><li>` 编号制）—— 编号是自问自答，
+   按钮本身就是祈使句，说一遍"你能做什么"是同义重复 ⇒ 换成普通行块。 */
+.rem .arow{margin:9px 0 0}
+.rem .arow>b{display:block;font-size:12px;color:var(--muted)}
+.rem .arow .why{font-size:12px;color:var(--muted);margin-top:2px}
 .rem .bclass{display:inline-block;font-size:11px;padding:2px 8px;border-radius:99px;
   background:rgba(220,60,60,.12);color:var(--r0);border:1px solid var(--r0);
   margin-left:8px;white-space:nowrap}
-.rem ol{margin:6px 0 0;padding-left:20px}
-.rem ol li{margin:7px 0}
-.rem .cmd{display:block;font-family:var(--mono);font-size:12px;background:var(--bg);
-  border:1px solid var(--line);border-radius:6px;padding:6px 9px;margin:5px 0;
-  user-select:all}
 .rem .pick{display:flex;gap:8px;flex-wrap:wrap;margin-top:7px}
 .rem .pick button{border:1px solid var(--line);background:transparent;color:var(--fg);
   border-radius:7px;padding:5px 12px;font-size:12px}
@@ -1522,19 +1521,23 @@ def _rem_html(it, token, posture=None):
     try:
         import remediation as RM
         # ★ 0.51.2 第二轮：**态势穿线** —— 归因模块据此决定「现在能做什么」
-        #   （创始人截图四：看得到页面＝监理在跑，还让「重新拉起监理」＝逻辑矛盾）。
+        # ★ 0.53.0 T4：缺省就地现探 —— 0.51.2 那条穿线只在调用方记得传时
+        #   成立；"调用方忘了传"正是本轮那个死灰复燃按钮的成因。到点消费前
+        #   解析，比要求每个调用方都记得更牢靠。
+        posture = posture or posture_now()
         a = RM.attribute(it, posture=posture)
     except Exception as e:                                   # noqa: BLE001
         # ★ 归因模块坏了也不能让整页500 —— 如实说"这一项算不出来"，
         #   并**仍然给一步可做的**（去运行状态页看现探）。
         a = {"kind": "unknown", "title": "这一项归因算不出来",
              "b_class": False, "by_text": False,
-             "cause": "归因模块报错（%s）——不编一个听起来合理的原因。" % e,
-             "severity": "算不出来。",
-             "severity_note": "（这是产品故障，不是你的操作问题。）",
-             "actions": [{"op": "info", "label": "回运行状态页看现探",
-                          "cmd": "", "hint": "那里有此刻的实测态势。"}],
-             "cost": "归因失败，你只能看到「失守」，拿不到「为什么」。"}
+             "cause": "归因模块报错，这一项的原因算不出来。",
+             "severity": "",
+             "severity_note": "",
+             "actions": [{"op": "info", "label": "看运行状态页",
+                          "cmd": "", "hint": "",
+                          "href": "/?v=health", "ack": False}],
+             "cost": ""}
 
     # ★★ 0.37.1：归因文案走 `GL.render()`（**不是** `_esc`）——
     #   归因作者习惯写 markdown 的 `**重点**`，而 `_esc` 只是转义，
@@ -1555,13 +1558,18 @@ def _rem_html(it, token, posture=None):
     txt = ("<span class=\"why\">这一条是靠记录文案认出来的</span>"
            if a.get("by_text") else "")
 
-    # ★★ 0.51.2 **第二轮**（创始人四张截图裁定「改结构，精炼，剃刀原则」）：
-    #   旧版四段标题「根因是什么／现在有多严重／你现在能做什么／如果什么都不做」
-    #   全是工程腔自问自答。现在：
-    #     ① 发生了什么（cause；spawn_failed 把严重程度并进这段，不单列）
-    #     ② 现在怎么样（severity ＋ 态势和解句；都没有就不出这段）
-    #     ③ 你能做什么（动作按**当前态势**门控——见 remediation）
-    #     ④ 不做的后果（cost；空则不渲染，不硬凑一段）
+    # ★★ 0.53.0 T4（创始人 2026-10-19 截图裁定「把违和、废话都清理」）：
+    #   四段制 → 两段制，动作不再单列一段：
+    #     ① 发生了什么   —— 当时的事
+    #     ② 有多严重     —— 后果 ＋ 需要时的「现在实测」一句
+    #     然后直接是动作（能做的才上屏）
+    #   删掉的：
+    #     · ③ 你能做什么 —— 标题与编号是自问自答；按钮本身就是祈使句，
+    #       再说一遍"你能做什么"是同义重复（ASD-STE100：不多余）。
+    #     · ④ 不做的后果 —— 创始人定性「完全是废话」：它把 ② 已经说过的
+    #       后果换个说法再说一遍，且通篇是"你什么都不做就会…"的恐吓式预告。
+    #     · 每个动作下面的说明段（"点这个会当场重试并复测；不会假绿"）——
+    #       讲的是产品怎么实现，不是用户要办的事。
     segs = [
         '<div class="seg root"><h4>① 发生了什么</h4><p>%s</p>%s</div>'
         % (_tx(a.get("cause")), txt),
@@ -1569,37 +1577,37 @@ def _rem_html(it, token, posture=None):
     sev = _tx(a.get("severity") or "")
     note = _tx(a.get("severity_note") or "")
     if sev or note:
-        segs.append('<div class="seg sev"><h4>② 现在怎么样</h4>%s%s</div>'
+        segs.append('<div class="seg sev"><h4>② 有多严重</h4>%s%s</div>'
                     % (('<p>%s</p>' % sev) if sev else "",
                        ('<p class="note">%s</p>' % note) if note else ""))
 
-    # ③ 能做什么 —— **按「可执行性」排序**，命令型排最前
+    # 动作 —— **只上真能做的**：ack（纯"收下这条通知"）不上屏，
+    #   条目底部已经有「知道了」，同一张卡片里出现两次就是噪音。
     items_html = []
     for act in a.get("actions") or []:
+        if act.get("ack"):
+            continue
         op = act.get("op")
         cls = {"fix": "go", "retry": "go", "rearm": "go",
                "drop": "drop", "accept": "risk", "info": ""}.get(op, "")
         why = act.get("hint") or ""
         why_html = ('<div class="why">%s</div>' % _tx(why)) if why else ""
         items_html.append(
-            "<li><b>%s</b>%s"
-            '<div class="pick">%s</div></li>'
+            '<div class="arow"><b>%s</b>%s<div class="pick">%s</div></div>'
             % (_tx(act.get("label") or op), why_html,
                _rem_pick_buttons(it, token, op, cls, act)))
-    segs.append('<div class="seg act"><h4>③ 你能做什么</h4><ol>%s</ol></div>'
-                % "".join(items_html))
-
-    cost = _tx(a.get("cost") or "")
-    if cost:
-        segs.append('<div class="seg cost"><h4>④ 不做的后果</h4><p>%s</p></div>'
-                    % cost)
+    if items_html:
+        segs.append('<div class="seg act">%s</div>' % "".join(items_html))
 
     # ★ badge 放在**body 第一段**（不是 summary 里）——
     #   `_rem_panel_only()`给归并行复用时只取 body，badge 放summary 会被丢掉。
     #   实测踩过：归并行的三选一按钮都出来了，badge 却0 个。
     head = ('<p>%s</p>' % badge) if badge else ""
+    # ★ 0.53.0 T4：收起壳的标题 —— 「为什么 & 怎么办」里的 `&` 是半个英文
+    #   符号，且"怎么办"在动作区已改成不单列（按钮本身就是祈使句）
+    #   ⇒ 收成「为什么、怎么办」。
     return ("<details class=\"rem\"><summary><span class=\"why\">"
-            "为什么 &amp; 怎么办</span>"
+            "为什么、怎么办</span>"
             "<span class=\"t\">%s</span></summary>"
             "<div class=\"body\">%s%s</div></details>"
             % (_tx(a.get("title")), head, "".join(segs)))
@@ -1647,11 +1655,14 @@ def _rem_pick_buttons(it, token, op, cls, act):
             token, "remediation_ack", it.id, note="我已知代价，先放着",
             label="先不处理，只记一笔", cls="risk")
     if op == "info":
-        # 归因模块不可用时，文案承诺的下一步必须真有入口。
-        # 「知道了」只记已读；另给一个明确的运行状态页链接，两个动作不混。
-        return (_form(token, "remediation_ack", it.id, note="知道了",
-                      label="知道了")
-                + '<a class="btn" href="/?v=health">打开运行状态页</a>')
+        # ★★ 0.53.0 T4：info 行**不再画「知道了」按钮** ——
+        #   · 纯告知动作（看原文/查是谁动的）没有"点一下"的必要，
+        #     卡片底部已有「知道了」；
+        #   · 真要指路（看运行状态页）就给一条真链接，不拿按钮冒充动作
+        #     （按钮点了只记一笔，链接才真到那里）。
+        h = str(act.get("href") or "")
+        return ('<a class="btn" href="%s">%s</a>'
+                % (_esc(h), _esc(act.get("label") or "打开")) ) if h else ""
     if op == "accept":
         return form("remediation_ack")
     return form("remediation_ack")
@@ -1748,6 +1759,10 @@ def _rem_panel_only(it, token, posture=None):
 def _view_inbox(items, token, filt, now=None, posture=None):
     """收件箱。★ 三档（要处理 / 看一眼 / 归档），窗口默认 24 小时。
 
+    ★★ 0.53.0 T4：`posture` 缺省就地现探（**不许把 None 往下传**）——
+      上一轮正是"调用方忘了传"让归因面板的按钮门控退化成恒真。
+      到点消费前解析一次，是"一个事实只从一个地方取"的收口。
+
     ★★ 0.35.3（创始人 2026-10-06「**尽可能少让人处理**」）：
       · 「要处理」＝**只有你本人动手才能解决**的事（`needs_owner`）。
         Antinel 自己已经处理掉的（拦下 / 自愈 / 状态变更）都在「看一眼」——
@@ -1760,6 +1775,7 @@ def _view_inbox(items, token, filt, now=None, posture=None):
     n_act = M.count_groups(act_rows)          # ★ 显示的是**件事数**，不是记录条数
     b = M.counts_by_bucket(items, now=now)
     n_all = len(items)
+    posture = posture or posture_now()
 
     def f(v, label, n, tip, unit):
         # ★ 0.37.2：四个数字**单位不同**（要处理＝件事，其余＝条记录），
@@ -2934,7 +2950,13 @@ def render_page(view="inbox", filt=None, root=None, token="", items=None, rep=No
         #   它要的数据由 _view_exam 里的进程内缓存负责，GET 从不触发采集。
         body = _view_exam(token, pick=exam)
     else:
-        body = _view_inbox(items, token, filt, now=now, posture=posture)
+        # ★★ 0.53.0 T4（创始人 2026-10-19「这种超级违和还能死灰复燃」）：
+        #   旧版这里传的是**入参 `posture`**，而 `p = posture or posture_now()`
+        #   在上面 —— 不注入时（＝每一次真实打开）整页拿到 None ⇒ 归因模块的
+        #   态势门控走 `posture is None` 那条兜底路径 ⇒ 值守中照样渲染
+        #   「现在重新拉起」。判据 W-SPK10 只注入姿态跑，走不到这条路 ⇒ 假绿。
+        #   ⇒ 传 `p`：**一个事实一个变量**，页面从头到尾同一份态势。
+        body = _view_inbox(items, token, filt, now=now, posture=p)
     if notice:
         body = ('<div class="notice" role="status"><b>操作回执：</b>%s</div>'
                 % _esc(str(notice)[:800])) + body

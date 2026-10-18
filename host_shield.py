@@ -3093,6 +3093,20 @@ def _cause_text(cause):
     }.get(str(cause or ""), str(cause or ""))
 
 
+def _pid_note(pid):
+    """「（旧进程号 N）」—— **没有进程号就整段不写**。
+
+    ★★ 0.53.0 T4（创始人 2026-10-19 截图）：现场记录文案出现过
+      「监理已停止（旧进程号 None），重新拉起也没成功」——`None` 是
+      Python 的字，不是给人看的字。旧写法用 `%s` 硬塞，pid 为空时
+      必然漏出去。
+    ★ 为什么不在渲染层兜：渲染层补得了一处，补不了已经写进审计链的
+      那些条；且"哪个字段没有值"只有写侧知道。**不写**比**写个占位**
+      更干净（占位符本身也是噪音）。
+    """
+    return ("（旧进程号 %s）" % pid) if pid else ""
+
+
 def ensure_alive(pkg_root, cause="manual"):
     """paramedic：布防中且哨兵不在/僵死 → 拉起并留痕；拉不起也留痕（不再沉默）。
     armed 以链为准（B4b 系）。心跳陈旧（B2 挂起/僵死）→ 杀掉重拉。
@@ -3200,8 +3214,8 @@ def _ensure_alive_locked(pkg_root, cause="manual"):
             if img and not img.lower().endswith(("python.exe", "pythonw.exe")):
                 record(audit_dir, "host_shield_breach", decision="deny", severity="critical",
                        reason="监理没有心跳（%s），而且旧进程的运行程序不对（%s），"
-                              "拒绝自动重启——需要人工检查（进程号 %s）。"
-                              % (age_txt, img, old_pid))
+                              "拒绝自动重启——需要人工检查%s。"
+                              % (age_txt, img, _pid_note(old_pid)))
                 return "stale-revived"
             if old_pid:
                 subprocess.run([_TASKKILL, "/F", "/PID", str(old_pid)],
@@ -3211,14 +3225,14 @@ def _ensure_alive_locked(pkg_root, cause="manual"):
             ok, pid, mode = spawn_sentinel(pkg_root)
             if ok:
                 record(audit_dir, "host_shield_revived", decision="allow", severity="critical",
-                       reason="监理没有心跳（%s，像是卡住了），已经强制重启"
-                              "（旧进程号 %s，拉起方式：%s）。" % (age_txt, old_pid, _mode_text(mode)),
+                       reason="监理没有心跳（%s，像是卡住了），已经强制重启%s"
+                              "（拉起方式：%s）。" % (age_txt, _pid_note(old_pid), _mode_text(mode)),
                        pid=pid, cause=cause, spawn_mode=mode)
                 return "stale-revived"
             record(audit_dir, "host_shield_spawn_failed", decision="deny", severity="critical",
                    subkind="spawn_failed",
-                   reason="监理没有心跳（%s），重启也没成功（旧进程号 %s，触发方式：%s）"
-                          "——现在没人值守。" % (age_txt, old_pid, cause),
+                   reason="监理没有心跳（%s），重启也没成功%s（触发方式：%s）"
+                          "——当时没人值守。" % (age_txt, _pid_note(old_pid), _cause_text(cause)),
                    cause=cause)
             return "spawn-failed"
         # ★ 0.40.0：按字段更新（旧写法在 state 读坏时会把默认值整份写回）
@@ -3229,15 +3243,15 @@ def _ensure_alive_locked(pkg_root, cause="manual"):
         ok, pid, mode = spawn_sentinel(pkg_root)
         if ok:
             record(audit_dir, "host_shield_revived", decision="allow", severity="warning",
-                   reason="监理刚才不在（旧进程号 %s），已经由%s重新拉起（拉起方式：%s）。"
-                          % (old_pid, _cause_text(cause), _mode_text(mode)),
+                   reason="监理刚才不在%s，已经由%s重新拉起（拉起方式：%s）。"
+                          % (_pid_note(old_pid), _cause_text(cause), _mode_text(mode)),
                    pid=pid, cause=cause, spawn_mode=mode)
             return "revived"
         record(audit_dir, "host_shield_spawn_failed", decision="deny", severity="critical",
                subkind="spawn_failed",
-               reason="监理已停止（旧进程号 %s），重新拉起也没成功（触发方式：%s，"
-                      "拉起方式：%s）——现在没人值守。"
-                      % (old_pid, _cause_text(cause), _mode_text(mode)),
+               reason="监理已停止%s，重新拉起也没成功（触发方式：%s，"
+                      "拉起方式：%s）——当时没人值守。"
+                      % (_pid_note(old_pid), _cause_text(cause), _mode_text(mode)),
                cause=cause)
         return "spawn-failed"
     except Exception:

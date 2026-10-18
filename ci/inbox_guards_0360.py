@@ -1308,6 +1308,13 @@ def c_unregistered_class_still_gives_a_step():
 
     ★ 纪律：归因规则没覆盖它，就说"这类我没归因过"，
       但**仍必须给一步能做的** —— 否则用户的失守进了一个死胡同。
+    ★★ 0.53.0 T4：文案锚点从「没归因／不编」换成「没有专门的归因规则」——
+      0.52.0 那次"文案锚点陷阱"的教训（本文件 1333 行自己记着）在
+      **改文案**这一侧又复现了一次：本轮按 STE 精炼把自问自答的
+      「我没有专门的归因规则…**不编一个听起来合理的原因**」压成一句陈述，
+      判据却仍按旧关键词判红 ⇒ 又一次"文案进步被读成机制破损"。
+      ⇒ 改判据：断言的是**语义**（如实说没有规则），不是**措辞**；
+        关键词只是最小可判形式，措辞再变仍按"是否声称没有规则"判。
     """
     import remediation as R
 
@@ -1322,25 +1329,30 @@ def c_unregistered_class_still_gives_a_step():
     acts = [x for x in (a.get("actions") or []) if x.get("op") != R.ACT_ACCEPT]
     if not acts:
         return "未登记的失守类给不出任何动作（用户会走进死胡同）"
-    if "没归因" not in (a.get("cause") or "") and "不编" not in (a.get("cause") or ""):
+    cause = a.get("cause") or ""
+    if not ("没有专门的归因规则" in cause or "没归因" in cause
+            or "不编" in cause):
         return "未登记的失守类**编了一个原因**（不许编，要如实说没有规则）"
     return True
 
 
 def c_rem_panel_has_four_segments():
-    """归因面板固定**四段**：根因／多严重／能做什么／代价。
+    """归因面板结构：**两段 ＋ 可选动作区**，且**没有「不做的后果」段**。
 
-    ★★ 2026-10-17 改口径（0.52.0 文案人话化把它判红，是**判据的问题**）：
-      旧版把四段的**完整文案**当锚点（「① 根因是什么」「② 现在有多严重」…）。
-      并发批把标题改成「① 发生了什么／② 现在怎么样／③ 你能做什么／
-      ④ 不做的后果」—— 意思一字未变、反而更好懂，判据却当场报「面板缺段」。
-      这正是「文案锚点陷阱」：**每一次文案改进都会被读成机制破损**，
-      最后逼人为了过闸门而把话说回机器腔。
+    ★★ 0.53.0 T4（创始人 2026-10-19 截图裁定「把违和、废话都清理」）：
+      四段制 → 两段制。删掉的两段各有各的理由，且都不是"文案改进"，
+      是**结构变更**，所以这条判据跟着改（不是为了让闸门变绿）：
+        · ③ 你能做什么：标题与编号是自问自答，按钮本身就是祈使句
+          ⇒ 同义重复（ASD-STE100：不多余）；
+        · ④ 不做的后果：创始人原话「完全是废话」——它把 ② 段说过的后果
+          换个说法再说一遍。**这一条必须反向守住**：谁再把它加回来，
+          本条判红。
       ⇒ 改卡**结构不变量**（改文案不该动、改结构才该动）：
-        ① 四个 `seg` 样式类按 root→sev→act→cost 的**顺序**出现（顺序是语义，
-           颠倒＝把「代价」放到「能做什么」前面，那才是真破损）；
-        ② 每段各自以 ①②③④ 开头（编号是四段制的骨架，撤掉就不是四段了）；
-        ③ 每段正文非空（≥ 12 个汉字级字符，防"只剩标题的空壳"）。
+        ① `seg` 样式类按 root→sev→act 的**顺序**出现（顺序是语义：
+           因果颠倒才是真破损）；
+        ② 前两段各自以 ①② 开头（编号是骨架）；
+        ③ 每段正文非空（≥ 12 个汉字级字符，防"只剩标题的空壳"）；
+        ④ **全文不许出现 `seg cost`**（④ 死灰复燃的直接形状）。
       语义层面的判据留在**归因结果**上（`n_rem_panel_without_actions_is_caught`
       与 `c_pick_buttons_wired_to_real_ops`），不再压在渲染文案上。
     """
@@ -1354,22 +1366,72 @@ def c_rem_panel_has_four_segments():
     h = SV._item_html(r0[0], "TOK")
     segs = _re.findall(r'<div class="seg ([a-z]+)"[^>]*>(.*?)</div>', h, _re.S)
     order = [k for k, _t in segs]
-    want = ["root", "sev", "act", "cost"]
-    if order[:4] != want:
-        return "面板四段不符：实测顺序 %r ≠ %r" % (order, want)
-    for idx, (_k, body) in enumerate(segs[:4]):
+    want = ["root", "sev"]
+    if order[:2] != want:
+        return "面板前两段不符：实测顺序 %r ≠ %r" % (order, want)
+    if "cost" in order:
+        return ("面板里又出现「不做的后果」段（`seg cost`）—— 0.53.0 T4 已裁定"
+                "删除：它与②段同义反复。若确有必要，先改设计文件再改判据。")
+    for idx, (_k, body) in enumerate(segs[:2]):
         txt = _re.sub(r"<[^>]+>", "", body).strip()
-        mark = "①②③④"[idx]
+        mark = "①②"[idx]
         if not txt.startswith(mark):
-            return "第 %s 段没以「%s」开头（四段制的骨架）: %r" % (
+            return "第 %s 段没以「%s」开头（两段制的骨架）: %r" % (
                 want[idx], mark, txt[:30])
         if len(txt) < 14:
             return "第 %s 段正文过短（空壳标题）: %r" % (want[idx], txt[:30])
     return True
 
 
+def n_rem_panel_cost_segment_is_caught():
+    """负控（赘肉注入）：把「不做的后果」段加回渲染 ⇒ R07 必须判红。
+
+    ★ 为什么单独一条负控：删除④是本轮唯一一处**结构**变更，
+      而"删掉的东西被悄悄加回来"正是本轮那个按钮违和的历史形状
+      （判据只注入姿态跑，生产走默认路径 ⇒ 假绿）。删就要有反向判据。
+    """
+    import re as _re
+    import inbox_server as SV
+    import inbox_store as S
+    r0 = [i for i in S.load_items()
+          if str(getattr(i, "level", "")).upper() == "R0"]
+    if not r0:
+        return False
+    orig = SV._rem_html
+
+    def _with_cost(it, token, posture=None):
+        body = orig(it, token, posture)
+        if not body:
+            return body
+        seg = ('<div class="seg cost"><h4>④ 不做的后果</h4>'
+               '<p>什么都不做，监理不在的这段时间发生的改动不会有告警。</p></div>')
+        return body.replace("</div></details>", seg + "</div></details>", 1)
+
+    try:
+        SV._rem_html = _with_cost
+        h = SV._item_html(r0[0], "TOK")
+        if "seg cost" not in h:
+            return "夹具不成立：加回的④段没出现在渲染结果里 ⇒ 负控无分辨力"
+        r = c_rem_panel_has_four_segments()
+    finally:
+        SV._rem_html = orig
+    if r is True or r is None:
+        return "负控失效：④段已上屏，R07 仍判绿（尺子没分辨力）"
+    if "后果" not in str(r) and "cost" not in str(r):
+        return "负控方向不对：判红了但报的不是④段（%s）" % r
+    return True
+
+
 def n_rem_panel_without_actions_is_caught():
-    """负控：归因返回空动作时，判据必须红。"""
+    """负控（赘肉注入）：归因返回空动作 ⇒ R06 必须判红。
+
+    ★ 0.53.0 T4 改挂点：它原本给 R07（四段制里有「③ 能做什么」段），
+      本轮③段整段删除后**动作区变成可选**，空动作不再让 R07 红。
+      若继续挂在 R07 名下，这条负控会变成"跑着但永远抓不到东西"的
+      僵尸 —— 比没有负控更坏（它会让人以为 R07 有反向保护）。
+      ⇒ 改挂 **R06（未登记类仍给一步）**：那条判据断言的正是
+        "动作不能为空"，与这个变异方向一一对应。
+    """
     import remediation as R
     orig = R.attribute
     try:
@@ -1378,16 +1440,14 @@ def n_rem_panel_without_actions_is_caught():
             d["actions"] = []
             return d
         R.attribute = broken
-        import inbox_store as S
-        r0 = [i for i in S.load_items()
-              if str(getattr(i, "level", "")).upper() == "R0"]
-        if not r0:
-            return False
-        a = R.attribute(r0[0])
-        acts = [x for x in (a.get("actions") or []) if x.get("op") != R.ACT_ACCEPT]
-        return not acts
+        r = c_unregistered_class_still_gives_a_step()
     finally:
         R.attribute = orig
+    if r is True or r is None:
+        return "负控失效：动作被清空后 R06 仍判绿（尺子没分辨力）"
+    if "动作" not in str(r):
+        return "负控方向不对：判红了但报的不是空动作（%s）" % r
+    return True
 
 
 def c_pick_buttons_wired_to_real_ops():
@@ -2668,9 +2728,11 @@ CHECKS = [
     ("R03 上锁失败进要处理档", c_zone_lock_failure_lands_in_action_bucket, None),
     ("R04 归因不依赖窗口枚举", c_attribution_uses_no_window_enumeration, None),
     ("R05 回答已放过什么", c_attribution_states_what_got_through, None),
-    ("R06 未登记类仍给一步", c_unregistered_class_still_gives_a_step, None),
-    ("R07 面板四段齐全", c_rem_panel_has_four_segments,
+    ("R06 未登记类仍给一步", c_unregistered_class_still_gives_a_step,
      n_rem_panel_without_actions_is_caught),
+    ("R07 面板结构：两段＋可选动作区，且无「不做的后果」段",
+     c_rem_panel_has_four_segments,
+     n_rem_panel_cost_segment_is_caught),
     ("R08 按钮接到真实动作", c_pick_buttons_wired_to_real_ops, None),
     ("R09 移出监管不静默改防线", c_drop_does_not_silently_disable_protection, None),
     ("R10 文案识别如实标注", c_by_text_recognition_is_labelled, None),

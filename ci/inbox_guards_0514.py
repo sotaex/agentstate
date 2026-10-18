@@ -3629,25 +3629,36 @@ def n_spk_render_no_gov():
         _M.strip_governance = orig
 
 
-@check("W-SPK10 「现在重新拉起」按钮按态势渲染：值守中不出现，非值守才出现")
+@check("W-SPK10 「现在重新拉起」按钮按态势渲染：值守中不出现，真缺岗才出现")
 def c_spk_retry_posture_gate():
     import remediation as RM
     it = _spk_item("host_shield_spawn_failed",
                    "监理已停止（旧进程号 5），重新拉起也没成功。",
                    topic="spawn_failed")
+    # ★ 0.53.0 T4：正臂从 `warn` 改成 `down`／`interrupted` —— 门控口径
+    #   从黑名单（≠guarding）改成**白名单**（只有真缺岗）。`warn`／`dev`
+    #   是"在岗但代码认不出/比登记的新"，看得见页面就说明它在跑，
+    #   给"重新拉起"仍然是一句不成立的话（本轮现场正是 dev 态）。
     h_guard = _spk_page([it], {"state": "guarding", "can_fix": False})
-    h_fail = _spk_page([it], {"state": "warn", "can_fix": False})
+    h_dev = _spk_page([it], {"state": "dev", "can_fix": False})
+    h_fail = _spk_page([it], {"state": "down", "can_fix": False})
+    h_int = _spk_page([it], {"state": "interrupted", "can_fix": False})
     # ★ 断言打在**按钮文案**上（按态势门控的是按钮，不是动作标题）：
     #   标题「重新拉起监理」讲选项是什么，按钮「现在重新拉起」是点下去的
     #   那一下（0.52.0 去重，与 0.37.2 accept 的同型教训一致）。
     # ★ S48：中文文案断言必须显式选层走 `PC.body(...)`（不许拿整页渲染原文当正文）。
-    if "现在重新拉起" in PC.body(h_guard):
-        return "值守中仍渲染「现在重新拉起」按钮（看得到页面＝监理在跑，按钮逻辑矛盾）"
-    if "现在重新拉起" not in PC.body(h_fail):
-        return "非值守时「现在重新拉起」按钮不见了（该给动作时不给）"
-    # 门控函数真的被调（不是碰巧两种态势都不渲染）
-    if not RM._can_revive({"state": "guarding"}) and RM._can_revive({"state": "warn"}):
-        _note("值守中不给、非值守才给；_can_revive 两向都对")
+    btn = SV._PICK["retry"][0]
+    if btn in PC.body(h_guard):
+        return "值守中仍渲染「%s」按钮（看得到页面＝监理在跑，按钮逻辑矛盾）" % btn
+    if btn in PC.body(h_dev):
+        return "研发中仍渲染「%s」按钮（在岗，只是代码比登记的新）" % btn
+    if btn not in PC.body(h_fail):
+        return "真缺岗（down）时「%s」按钮不见了（该给动作时不给）" % btn
+    if btn not in PC.body(h_int):
+        return "缺岗无损失（interrupted）时「%s」按钮不见了" % btn
+    # 门控函数真的被调（不是碰巧几种态势都不渲染）
+    if not RM._can_revive({"state": "guarding"}) and RM._can_revive({"state": "down"}):
+        _note("值守中不给、真缺岗才给；_can_revive 两向都对")
     return True
 
 
@@ -3745,6 +3756,324 @@ def n_spk_zone_path_on_panel():
         return "负控方向不对：判红了但原因不是路径（%s）" % r
     finally:
         RM._path_from_detail = orig
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 0.53.0 T4（创始人 2026-10-19 截图裁定）：**违和与废话的根治判据**
+#
+# 现场三件事，合起来是一个问题：**面板在替自己说话，而不是替事实说话**。
+#   ① 小窗／面板出现「重新拉起监理」按钮，而看得见这个页面本身
+#      就证明监理在跑 —— 创始人原话：「那个按钮我专门讲过，如果能看到，
+#      说明 Antinel 监理在运行，否则怎么看到？？？」
+#   ② 「④ 不做的后果」整段 —— 创始人定性「完全是废话」：它把②段说过的
+#      后果换个说法再说一遍。
+#   ③ 详情行（L1/L2 的说明）仍在上屏「旧进程号 None」「mode=detached」
+#      「哨兵」—— Python 的字与退休词。
+#
+# ★★ 为什么这一族必须**单独立判据**：W-SPK10 早在 0.51.2 就守同一个按钮，
+#   却让它死灰复燃了一整轮。根因不是没判据，是**判据走的那条路与生产
+#   走的那条路不是同一条**：
+#     · W-SPK10 用 `_spk_page(items, posture)` —— **注入姿态**；
+#     · 生产 `render_page(...)` 不注入 ⇒ `posture=None` ⇒ 归因模块的
+#       `posture is None` 兜底路径 ⇒ 按钮恒现。
+#   ⇒ 本轮每一条都从**生产默认路径**出发（不打注入、不打桩产品函数），
+#     负控一律把守的那条机制反过来，看判据是否真的会红。
+# ══════════════════════════════════════════════════════════════════════
+_SPAWN_DETAIL = ("监理已停止（旧进程号 None），重新拉起也没成功"
+                 "（触发方式：钩子机制自动触发，拉起方式：自检没通过）"
+                 "——当时没人值守。")
+_ZONE_DETAIL = ("安全区【上锁没生效】——本目录的访问控制没能限制写入"
+                "（可核：icacls 该目录）；注意：「不等于」有进程在对抗门闸："
+                "D:\\ws\\zone_vault")
+_GUARD_POSTURE = {"state": "guarding", "label": "值守中", "can_fix": False}
+
+
+def _t4_page(items, posture=None):
+    """真实渲染路径：`render_page` 默认入口（**不注入姿态**时传 None）。"""
+    hub = tempfile.mkdtemp(prefix="g0514_t4_")
+    return SV.render_page(view="inbox", root=hub, token="T",
+                          items=items, posture=posture)
+
+
+@check("T4-01 ★ 值守中（生产默认路径）不出现「重新拉起监理」按钮")
+def c_t4_revive_gate_on_default_path():
+    """★ 判据走**生产默认路径**：不打注入姿态、不打桩产品函数，
+    只把 `posture_now` 换成已知值（那是"现探"的唯一入口，本来就该可换）。
+
+    ★ 为什么不再信"注入姿态"的判据：见本段段头。注入姿态那条路
+      永远绿，因为生产根本不走它。
+    """
+    it = _spk_item("host_shield_spawn_failed", _SPAWN_DETAIL,
+                   topic="spawn_failed")
+    orig = SV.posture_now
+    SV.posture_now = lambda: dict(_GUARD_POSTURE)
+    try:
+        h = _t4_page([it])
+    finally:
+        SV.posture_now = orig
+    txt = PC.body(h)
+    # ★ 断言打在**按钮文案**上（从 `_PICK` 取，不另抄一份）—— 记录原文里
+    #   也有「重新拉起也没成功」这种字样，拿它当锚点会把判据判成永红。
+    btn = SV._PICK["retry"][0]
+    if btn in txt:
+        return ("值守中仍渲染「%s」按钮 —— 看得到页面＝监理在跑，"
+                "这个按钮是一句不成立的话" % btn)
+    if "现在实测" not in txt:
+        return ("和解句「现在实测」不见了 —— 这条历史记录会被读成"
+                "此刻也没人在守")
+    _note("生产默认路径下按钮不在、和解句在位")
+    return True
+
+
+@check("N-T4-01 负控：门控恒真 ⇒ T4-01 必须判红")
+def n_t4_revive_gate_on_default_path():
+    import remediation as RM
+    it = _spk_item("host_shield_spawn_failed", _SPAWN_DETAIL,
+                   topic="spawn_failed")
+    orig_rev, orig_now = RM._can_revive, SV.posture_now
+    try:
+        RM._can_revive = lambda posture: True
+        SV.posture_now = lambda: dict(_GUARD_POSTURE)
+        r = c_t4_revive_gate_on_default_path()
+    finally:
+        RM._can_revive, SV.posture_now = orig_rev, orig_now
+    if r is True or r is None:
+        return "负控失效：门控恒真后 T4-01 仍判绿（尺子没分辨力）"
+    if SV._PICK["retry"][0] not in str(r):
+        return "负控方向不对：判红了但报的不是那个按钮（%s）" % r
+    return True
+
+
+@check("T4-02 ★ _can_revive(None) 一律现探；只有真缺岗才给按钮（白名单）")
+def c_t4_can_revive_none_fail_closed():
+    """None 这条路就是**生产默认路径**（调用方不注入姿态时拿到 None）。
+    旧实现在这里 `return True` —— 那是本轮按钮违和的直接成因。
+    白名单口径见 `remediation._revive_ok_states`：研发中／可信性存疑／
+    未启用都在岗（或拉起也白拉），一个都不发给按钮。
+    """
+    import remediation as RM
+    orig = RM._live_posture
+    try:
+        RM._live_posture = lambda: None
+        if RM._can_revive(None) is not False:
+            return "探不到态势 ⇒ 仍给按钮（宁可少一个入口，不许给假的）"
+        for st, want in (("guarding", False), ("warn", False), ("dev", False),
+                         ("off", False), ("unknown", False),
+                         ("down", True), ("interrupted", True)):
+            RM._live_posture = (lambda s: (lambda: {"state": s}))(st)
+            got = RM._can_revive(None)
+            if got is not want:
+                return "None＋%s ⇒ 判 %r，应为 %r" % (st, got, want)
+        RM._live_posture = lambda: None
+        if RM._can_revive({"state": "down"}) is not True:
+            return "显式 down 却没给按钮"
+        if RM._can_revive("不是字典") is not False:
+            return "posture 不是字典也发给按钮"
+    finally:
+        RM._live_posture = orig
+    _note("None→现探→七态全对（只有 down/interrupted 给按钮）")
+    return True
+
+
+@check("N-T4-02 负控：_can_revive 对 None 恒真 ⇒ T4-02 必须判红")
+def n_t4_can_revive_none_fail_closed():
+    import remediation as RM
+    orig = RM._live_posture
+
+    def _always_true(posture):
+        return True
+    try:
+        RM._live_posture = lambda: None
+        RM._can_revive, keep = _always_true, RM._can_revive
+        r = c_t4_can_revive_none_fail_closed()
+    finally:
+        RM._can_revive = keep
+        RM._live_posture = orig
+    if r is True or r is None:
+        return "负控失效：None 恒真后 T4-02 仍判绿"
+    if "探不到" not in str(r):
+        return "负控方向不对：判红了但报的不是恒真（%s）" % r
+    return True
+
+
+#: 详情行（L1/L2 的说明）里不许出现的机器残留。
+_META_RESIDUE = ("None", "pid=", "mode=", "enabled=", "severity=",
+                 "subkind=", "topic=", "哨兵", "armed", "already-running",
+                 "self-check-failed", "hook-paramedic")
+
+
+@check("T4-03 ★ 详情行不出现机器残留（None／字段名／退休词／英文枚举）")
+def c_t4_meta_no_machine_residue():
+    """★ 为什么查**本机真实记录**而不是夹具：夹具只能覆盖我想到的形状，
+    而本机 469 条里躺着的形状比我想到的多（`enabled=None`／`armed`／
+    `net_mode` 都是这一遍才撞见的）。夹具 + 真记录两头都查。
+    """
+    samples = [
+        _spk_item("host_shield_revived",
+                  "监理不在（旧进程号 None），由 hook-paramedic 重新拉起"
+                  "（mode=detached）"),
+        _spk_item("host_shield_breach",
+                  "state 文件 enabled=None 与审计链最近状态（armed）不一致"
+                  "——以链为准"),
+        _spk_item("host_shield_breach",
+                  "安全区已上锁（区内防篡改；出网由 net_mode 把闸）："
+                  "C:\\Temp\\x\\proj\\zone_vault"),
+        _spk_item("host_shield_breach",
+                  "监理 pid=19764 的进程号已被复用——旧哨兵已死，判不在岗并重启"),
+    ]
+    try:
+        import inbox_store as S
+        samples.extend(S.load_items())
+    except Exception:                                           # noqa: BLE001
+        pass                                    # 读不到真记录 ⇒ 只判夹具
+    for it in samples:
+        meta = M.record_meta(it)
+        for tok in _META_RESIDUE:
+            if tok in meta:
+                return "详情行仍含 %r：%s" % (tok, meta[:110])
+    _note("查了 %d 条（含本机真实记录）" % len(samples))
+    return True
+
+
+@check("N-T4-03 负控：关掉人话化 ⇒ T4-03 必须判红")
+def n_t4_meta_no_machine_residue():
+    orig = M.humanize
+    try:
+        M.humanize = lambda s: s
+        r = c_t4_meta_no_machine_residue()
+    finally:
+        M.humanize = orig
+    if r is True or r is None:
+        return "负控失效：人话化关掉后 T4-03 仍判绿（尺子没分辨力）"
+    return True
+
+
+#: 面板文案里的**禁用语**：自夸／讲自己怎么实现／恐吓式预告／自问自答标题。
+_PANEL_BANNED = (
+    "不会假绿",          # 产品自夸（创始人：说事实，别说自己好）
+    "不会假装好了",       # 同上
+    "不是你的操作问题",   # 把责任推给产品的同时还教育用户
+    "这是产品的已知短板",  # 同上
+    "点这个会",           # 讲按钮怎么实现
+    "什么都不做",         # 恐吓式预告（④ 段的口气）
+    "不做的后果",         # 已删除的段名
+    "你能做什么",         # 已删除的自问自答标题
+    "现在怎么样",         # 同上
+    "如果什么都不做",
+    "你就只能看到",       # 恐吓式预告
+    "等于没有守卫",       # 产品自我评价
+)
+
+
+def _panel_banned_hit(src):
+    """扫**字符串字面量**（注释里复述历史事故原文不算 —— 那是给人看的账）。"""
+    for lit in re.findall(r'"[^"\n]*"', src or ""):
+        for b in _PANEL_BANNED:
+            if b in lit:
+                return "文案字面量里出现 %r：%s" % (b, lit[:70])
+    return None
+
+
+@check("T4-04 ★ 归因面板文案无自夸／机制句／恐吓句（ASD-STE100 精炼）")
+def c_t4_panel_copy_ste():
+    import remediation as RM
+    why = _panel_banned_hit(inspect.getsource(RM))
+    if why:
+        return why
+    _note("扫了 %d 个禁用语" % len(_PANEL_BANNED))
+    return True
+
+
+@check("N-T4-04 负控：把一句自夸塞回文案 ⇒ T4-04 必须判红")
+def n_t4_panel_copy_ste():
+    import remediation as RM
+    src = inspect.getsource(RM)
+    anchor = '_a(ACT_FIX, "再试一次上锁"),'
+    if anchor not in src:
+        return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
+    mut = src.replace(anchor,
+                      '_a(ACT_FIX, "再试一次上锁",'
+                      ' hint="点了会当场重试，不会假装好了。"),', 1)
+    why = _panel_banned_hit(mut)
+    if not why:
+        return "夹具不成立：变异源码里没有禁用语 ⇒ 负控无分辨力"
+    if _panel_banned_hit(src) is not None:
+        return "夹具不成立：真源码本身就红 ⇒ 负控无分辨力"
+    return True
+
+
+@check("T4-05 ★ 写侧进程号缺省时整段不写（None 不许上屏）")
+def c_t4_pid_note_no_none():
+    import host_shield as HS
+    if HS._pid_note(None) != "":
+        return "pid 为空仍写出 %r —— Python 的字上屏了" % HS._pid_note(None)
+    if HS._pid_note("") != "":
+        return "pid 为空串仍写出 %r" % HS._pid_note("")
+    if HS._pid_note(5) != "（旧进程号 5）":
+        return "有进程号时形状变了：%r" % HS._pid_note(5)
+    # 渲染层兜底：detail 里带 None 的历史记录，上屏后不许还有 None
+    it = _spk_item("host_shield_spawn_failed", _SPAWN_DETAIL,
+                   topic="spawn_failed")
+    if "None" in PC.body(_t4_page([it])):
+        return "页面上仍有裸 None（写侧修了，读侧还有漏）"
+    return True
+
+
+@check("N-T4-05 负控：_pid_note 回到「%s 硬塞」⇒ T4-05 必须判红")
+def n_t4_pid_note_no_none():
+    import host_shield as HS
+    orig = HS._pid_note
+    try:
+        HS._pid_note = lambda pid: "（旧进程号 %s）" % pid
+        r = c_t4_pid_note_no_none()
+    finally:
+        HS._pid_note = orig
+    if r is True or r is None:
+        return "负控失效：回到硬塞 None 后 T4-05 仍判绿"
+    if "None" not in str(r):
+        return "负控方向不对：判红了但报的不是 None（%s）" % r
+    return True
+
+
+@check("T4-06 ★ 「现在实测」只在需要的类别出现（值守中不挂无关和解句）")
+def c_t4_posture_note_only_when_needed():
+    """值守中时：讲监理自己的记录要一句现场来和解；讲某个落点的记录不要 ——
+    落点开着与监理在岗两件事都真，摆一句"现在值守中"反而像自相矛盾
+    （与截图里的违和同型：同一张卡片两个时刻打架）。
+    """
+    zone = _spk_item("host_shield_zone_locked", _ZONE_DETAIL,
+                     topic="zone_lock_failed")
+    spawn = _spk_item("host_shield_spawn_failed",
+                      "监理已停止（旧进程号 5），重新拉起也没成功。",
+                      topic="spawn_failed")
+    h_zone = PC.body(_t4_page([zone], posture=dict(_GUARD_POSTURE)))
+    if "现在实测" in h_zone:
+        return "值守中＋落点类记录也挂「现在实测」—— 与①段的历史时刻打架"
+    h_spawn = PC.body(_t4_page([spawn], posture=dict(_GUARD_POSTURE)))
+    if "现在实测" not in h_spawn:
+        return "监理自己没起来的那条，值守中却没有和解句 —— 会被读成此刻也没在守"
+    _note("落点类不出、监理类出")
+    return True
+
+
+@check("N-T4-06 负控：落点类记录也挂和解句 ⇒ T4-06 必须判红")
+def n_t4_posture_note_only_when_needed():
+    """变异走**真实入口**：`zone_locked` 分支的 `severity_note` 取自
+    `what_got_through()`（不是 `_posture_note`）—— 把那个函数的返回换成
+    和解句，等价于"落点类也挂了现在实测"。
+    """
+    import remediation as RM
+    orig = RM.what_got_through
+    try:
+        RM.what_got_through = lambda d: ("（现在实测：值守中。）", "")
+        r = c_t4_posture_note_only_when_needed()
+    finally:
+        RM.what_got_through = orig
+    if r is True or r is None:
+        return "负控失效：落点类也挂和解句后 T4-06 仍判绿"
+    if "现在实测" not in str(r):
+        return "负控方向不对：判红了但报的不是和解句（%s）" % r
+    return True
 
 
 def main():

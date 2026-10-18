@@ -268,11 +268,15 @@ def attribute(item, posture=None, consequences=None):
     返回字段：
       `kind`/`title`   这类失守叫什么
       `b_class`        `True` = 修不了根因（页面上要显示"降损"三选一）
-      `cause`          根因（**大白话**，带具体文件/路径）
-      `severity`       现在有多严重（**查过的**，不是推断的）
-      `severity_note`  查证范围/盲区说明
-      `actions`        `[{"op":..,"label":..,"cmd":..,"hint":..}, ...]`
-      `cost`           什么都不做的代价
+      `cause`          发生了什么（**大白话**，带具体文件/路径）
+      `severity`       有多严重（**查过的**，不是推断的）
+      `severity_note`  现场一句（现在实测）；只在需要与历史记录和解时出现
+      `actions`        `[{"op":..,"label":..,"hint":..,"ack":..,"href":..}, ...]`
+                       `ack=True` 的动作不上面板（见 `_a`）
+      `cost`           ★ 0.53.0 T4 起恒为空串：旧版「不做的后果」整段删除
+                       （创始人 2026-10-19 定性"完全是废话"——它把 ② 段已经
+                       说过的事换个说法再说一遍）。字段保留只为不打断既有
+                       调用方；渲染层不再读它。
     """
     k = _kind_of(item)
     b = _base(item)
@@ -297,62 +301,31 @@ def attribute(item, posture=None, consequences=None):
         #   ⇒ 按记录形态分流：ACL 形态说 ACL 的实话，对抗形态说对抗的实话。
         if "上锁没生效" in b["detail"] or "不等于" in b["detail"]:
             return dict(b, kind=k, title="安全区上锁失败", b_class=True,
-                        cause=("这个落点的安全区锁没有真正生效：落在它上面的改动"
-                               "拦不住，也发现不了。记录里写明了原因——本目录的"
-                               "访问控制没能限制写入（常见于 OWNER RIGHTS 类"
-                               "权限设置），并不是有进程在对抗门闸。落点：%s。"
-                               % b["path"]),
-                        severity=("**这个落点此刻是开着的**：落在它上面的改动拦不住、"
-                                  "也发现不了。"),
+                        cause=("这个落点的安全区锁没有生效。落在它上面的改动"
+                               "拦不住，也发现不了。记录写明了原因：本目录的"
+                               "访问控制没能限制写入。落点：%s。" % b["path"]),
+                        severity="这个落点现在是开着的。",
                         severity_note=t,
                         actions=[
                             _a(ACT_DROP, "移出监管名单",
-                               hint=("把它从安全区拿掉，监理不再为一个它守不住的落点"
-                                     "反复报警。代价：那个目录从此**不受保护**，"
-                                     "你得自己保证它不被改。")),
+                               hint="这个目录从此不受保护，改动不会被发现。"),
                             _a(ACT_ACCEPT, "就这样放着，我自己盯着",
-                               hint="不改任何设置。代价：这个落点持续无人巡检，"
-                                    "改动不会被告警。"),
-                            _a(ACT_FIX, "再试一次上锁",
-                               hint="Antinel 当场重试一次；还是失败会把原因报给你，"
-                                    "不会假装好了。想自己核验，就看这个目录的"
-                                    "权限设置（记录里写了核验办法）。"),
-                        ],
-                        cost=("一直报警，但监理确实守不住这个落点。"
-                              "反复红而无改善，红灯就没人看了，等于没有守卫。"))
+                               hint="这个落点持续无人巡检。"),
+                            _a(ACT_FIX, "再试一次上锁"),
+                        ])
         return dict(b, kind=k, title="安全区上锁失败", b_class=True,
-                    cause=("有进程正在写这个落点，Antinel 上不了锁："
-                           "%s。"
-                           "上不了锁——要么是有权限的进程正在改它（可能是你自己"
-                           "装的工具、备份软件、同步盘），要么是有东西在故意绕开。"
-                           % b["path"]),
-                    severity=("**这个落点此刻是开着的**：落在它上面的改动拦不住、"
-                              "也发现不了。"),
+                    cause=("监理上不了这个落点的锁：%s。"
+                           "可能有程序的权限正在改它（备份软件、同步盘），"
+                           "也可能有东西在绕开监理。" % b["path"]),
+                    severity="这个落点现在是开着的。",
                     severity_note=t,
                     actions=[
-                        # ★ 0.37.2：选项标题去掉「（承认打不赢）」——
-                        #   按钮上写的就是「承认打不赢，移出监管」，
-                        #   标题再写一遍 ⇒ 同一行里同一个意思出现两次。
                         _a(ACT_DROP, "移出监管名单",
-                           hint=("把它从安全区拿掉，监理不再为一个它守不住的落点"
-                                 "反复报警。代价：那个目录从此**不受保护**，"
-                                 "你得自己保证它不被改。")),
+                           hint="这个目录从此不受保护，改动不会被发现。"),
                         _a(ACT_ACCEPT, "就这样放着，我自己盯着",
-                           hint="不改任何设置。代价：这个落点持续无人巡检，"
-                                "改动不会被告警。"),
-                        # ★ 0.37.2：选项标题原来是「先查是谁在对抗」，而它下面
-                        #   挂的按钮是「试一下，看能不能修好」（ACT_FIX 的通用
-                        #   文案）⇒ 标题说"查"、按钮说"修"，点下去做的事和
-                        #   标题对不上。改成与按钮同一件事：再试一次上锁；
-                        #   "查是谁在对抗"那部分如实写进说明（它本机查不到）。
-                        _a(ACT_FIX, "再试一次上锁",
-                           hint="Antinel 当场重试一次；还是失败会把原因报给你，"
-                                "不会假装好了。想查**是谁在占用**那个目录 —— "
-                                "这一项**本机查不到**（窗口枚举不可靠），"
-                                "给不出命令，需要你自己确认那个目录是什么程序在写。"),
-                    ],
-                    cost=("一直报警，但监理确实守不住这个落点。"
-                          "反复红而无改善，红灯就没人看了，等于没有守卫。"))
+                           hint="这个落点持续无人巡检。"),
+                        _a(ACT_FIX, "再试一次上锁"),
+                    ])
 
     if k in ("self_check", "registry_manifest"):
         # ★ 0.37.1 新增（旧版这两类都被当成「enabled 被改」，给错了第一步）。
@@ -365,76 +338,57 @@ def attribute(item, posture=None, consequences=None):
         #   · 去掉 ACT_REARM（用户不会修，也不许让用户修）。
         return dict(b, kind=k, title="守门的程序跟登记的那份不一样了",
                     b_class=False,
-                    cause=("每次启动都会把**正在运行的程序**跟系统里登记的那份"
-                           "对一遍；这次对不上。"
-                           "两种可能：一、这些程序被改动过，还没重新登记；"
-                           "二、有东西动过它们。"),
-                    severity=("守门的这份程序是不是原来那份，已经认不出来了。"
-                              "这种情况按失守处理——宁可报错，也不装作没事。"),
-                    severity_note=_posture_note(posture),
+                    cause=("监理每次启动都核对：正在运行的程序与系统里登记的"
+                           "那份是不是同一份。这次对不上。可能是程序改动后"
+                           "还没重新登记，也可能有人动过它。"),
+                    severity="守门的这份程序是不是原来那份，已经认不出来了。",
+                    severity_note=_posture_note(posture, k),
                     actions=[
-                        _a(ACT_INFO, "不是我改的：查一下是谁动的",
-                           hint="看看这些程序的修改时间和来源；不是你动的，"
+                        _a(ACT_INFO, "查一下是谁动的",
+                           hint="看这些程序的修改时间和来源。不是你动的，"
                                 "就按有人动过防护处理。"),
-                    ],
-                    cost="对不上会一直挂着：每次监理启动都报同一条，"
-                         "时间久了就没人看这些红字了。")
+                    ])
 
     if k == "tamper_registry":
         # ★★ 0.51.2 第二轮：cause 不再嵌 `b["detail"]`（含研发态治理话术）；
         #   去掉 ACT_REARM 与其命令行。
         return dict(b, kind=k, title="受监管名单被改动，改动没走正规入口",
                     b_class=False,
-                    cause=("防护设置文件里记着的受监管名单被改动过，"
-                           "而这次改动在安全记录里没有对应条目"
-                           "——说明它不是走正规入口改的。"),
-                    severity=("名单被动过的那段时间，实际被看着的范围"
-                              "可能跟你的设置不一致。"),
-                    severity_note=_posture_note(posture),
+                    cause=("受监管名单被改动过，安全记录里没有对应条目。"
+                           "改动没走正规入口。"),
+                    severity="被看着的范围可能跟你的设置不一致。",
+                    severity_note=_posture_note(posture, k),
                     actions=[
-                        _a(ACT_INFO, "先看改成什么了",
-                           hint="明细里写了改动前后的值；确认那是不是你要的。"),
-                    ],
-                    cost="没有登记的改动会一直被当成可疑；一直不处理，"
-                         "就分不清真告警和历史噪音。")
+                        _a(ACT_INFO, "看改成什么了",
+                           hint="明细里写了改动前后的值。"),
+                    ])
 
     if k == "tamper_enabled":
         return dict(b, kind=k, title="防护状态与安全记录对不上", b_class=False,
-                    cause=("有人改过防护设置文件里的开关值，"
-                           "而安全记录里最后一次记的正好相反。"
-                           "两处对不上：要么改文件的人没走正规入口，"
-                           "要么有人想绕开监理的拦截。"),
-                    severity="**防护可能被关掉了**，而这次改动没走正规命令（安全记录里没有）。",
+                    cause=("防护设置文件里的开关值被改过，"
+                           "安全记录里最后记的正好相反。"),
+                    severity="防护可能被关掉了。",
                     # ★ 0.37.1：旧版这句写死成 `state 写 enabled=False，链上是 armed`
                     #   —— 一旦实际值不同（或链上最后状态不是 armed），
                     #   界面就在**编数据**。⇒ 改为照抄记录原文，让记录自己说话。
-                    severity_note="（这条记录原文：%s）" % (b["detail"] or "（无原文）"),
+                    severity_note="（记录原文：%s）" % (b["detail"] or "（无原文）"),
                     actions=[
-                        # ★ 0.51.2 第二轮：原来是 ACT_FIX（按钮写着「试一下，
-                        #   看能不能修好」）——它并不修什么，只是让人去查；
-                        #   按钮文案与动作对不上（0.37.2 在 zone_locked 修过
-                        #   的同型错）。⇒ 改 ACT_INFO，按钮说「知道了」。
-                        _a(ACT_INFO, "先查是谁动的",
-                           hint="看看这个文件的修改时间和来源；不是你动的，"
+                        _a(ACT_INFO, "查是谁动的",
+                           hint="看这个文件的修改时间和来源。不是你动的，"
                                 "就是有东西在动防护。"),
-                    ],
-                    cost="设置与安全记录对不上期间，监理按哪一份执行是**不确定**的；"
-                         "一直挂着，自检就一直不通过。")
+                    ])
 
     if k == "tamper":
         # ★ 上面都没对上：不猜，把原文摆出来。
         return dict(b, kind=k, title="登记文件被动过（具体字段记录里没写）",
                     b_class=False,
                     cause=("这条记录只说动了防护设置，没写清动了哪个字段。"
-                           "**不替它猜一个** —— 原文在下面，请你自己核对：%s。"
-                           % (b["detail"] or "（无原文）")),
-                    severity="防护设置可能被改动了（方向不确定）。",
-                    severity_note=_posture_note(posture),
+                           "原文：%s。" % (b["detail"] or "（无原文）")),
+                    severity="防护设置可能被改动了，方向不确定。",
+                    severity_note=_posture_note(posture, k),
                     actions=[
-                        _a(ACT_INFO, "看这条记录的原文",
-                           hint="原文在「发生了什么」那一段。"),
-                    ],
-                    cost="没有登记的改动会一直挂着，自检就一直过不了。")
+                        _a(ACT_INFO, "看这条记录的原文"),
+                    ])
 
     if k == "hook_registration_changed":
         # ★ 0.51.2：写侧文案人话化后，路径抽取的锚点跟着搬 —— 同时保留旧锚
@@ -448,44 +402,35 @@ def attribute(item, posture=None, consequences=None):
         b["path"] = p or "(设置文件路径没在记录里)"
         return dict(b, kind=k, title="钩子注册文件被改动（防护失效）",
                     b_class=False,
-                    cause=("工具的钩子注册文件（决定「哪些调用会被拦」）"
-                           "与布防时记下的样子对不上：%s。"
-                           "要么是你自己合法编辑了它（没重新布防对齐），"
-                           "要么是有东西在拆防护。" % b["path"]),
-                    severity="**这个工具的调用现在可能拦不住**——"
-                             "取决于改动的内容。",
+                    cause=("工具的钩子注册文件决定哪些调用会被拦。"
+                           "它与布防时记下的样子对不上：%s。"
+                           "可能你自己改过它，也可能有人在拆防护。" % b["path"]),
+                    severity="这个工具的调用现在可能拦不住。",
                     severity_note="（能确定的是「跟布防时的样子对不上」，"
                                   "不能确定的是「改了什么」。）",
                     actions=[
-                        _a(ACT_INFO, "先看改了什么",
-                           hint="比对设置文件与布防时留下的副本，"
-                                "看是不是你改的。"),
-                    ],
-                    cost="布防基准一直对不上，每次巡视都报同一条，"
-                         "要么一直红，要么被忽略；两种都等于没有守卫。")
+                        _a(ACT_INFO, "看改了什么",
+                           hint="比对设置文件与布防时留下的副本，看是不是你改的。"),
+                    ])
 
     if k == "autostart_missing":
         return dict(b, kind=k, title="开机自启没装上（监理不会随开机起来）",
                     b_class=False,
-                    cause=("计划任务和启动文件夹里**都没有**登记项"
-                           "（这两种方式都查过，确实没有）。"
-                           "所以监理只在这次会话里活着——"
-                           "**一重启就没人在守**。"),
-                    severity="**现在这一刻还在守，但下次开机后不会守。**",
-                    severity_note="（自启查过三处：计划任务、启动文件夹，"
-                                  "两处都没有。不是查不到，是真的没装。）",
+                    cause=("计划任务和启动文件夹里都没有登记项。"
+                           "监理只在这次会话里活着，一重启就没人守。"),
+                    severity="现在还在守，下次开机后不守。",
+                    severity_note="（自启查过两处：计划任务、启动文件夹。"
+                                  "不是查不到，是没装。）",
                     # ★★ 0.51.2 第二轮：这条**本来就是用户自己的装机动作**
                     #   （与运行状态页「要开启，在终端执行一次」同口径）——
                     #   命令留在 hint 里当说明；按钮不再假装能就地修好
                     #   （旧版 ACT_REARM 点了只会回「没有可就地修复的动作」，
                     #   是创始人最恨的假按钮形状）。
                     actions=[
-                        _a(ACT_INFO, "在终端装上开机自启",
-                           hint="执行一次：antinel host-shield enable"
-                                "（需要管理员权限）。装完之后重启也能自动守。"),
-                    ],
-                    cost="**最坏的一类**：此刻看起来一切正常，"
-                         "但关机重启后防线就没了，而且没有人会告诉你。")
+                        _a(ACT_INFO, "装开机自启",
+                           hint="在终端执行一次：antinel host-shield enable"
+                                "（需要管理员权限）。装完以后重启也能守。"),
+                    ])
 
     if k == "spawn_failed":
         # ★★ 0.51.2（创始人 2026-10-17「都在说鸟语」）：**不再从机器串里抠原因**。
@@ -528,62 +473,105 @@ def attribute(item, posture=None, consequences=None):
                                                   "python", "保护名单", "修法"))
             if head and len(head) <= 20 and _ok:
                 short = head
-        return dict(b, kind=k, title="监理拉起失败", b_class=False,
-                    cause=("监理进程停止后，没能把它重新拉起来。"
-                           + ("失败环节：%s。" % short if short else "")
-                           + "常见于守门的程序被改动过——正在跑的这份"
-                             "和系统里登记的那份不是同一份。"),
-                    severity=("失守的那段时间，受监管的改动没人巡检，"
-                              "文件被改出去也发现不了。"),
-                    severity_note=_posture_note(posture),
-                    actions=([_a(ACT_INFO, "知道了",
-                                 hint="现在监理已经在值守，这条是当时的记录。")]
+        return dict(b, kind=k, title="监理没能启动", b_class=False,
+                    cause=("监理进程停了，重新拉起没成功。"
+                           + ("失败环节：%s。" % short if short else "")),
+                    severity=("那段时间受监管的改动没人巡检，改了也发现不了。"),
+                    severity_note=_posture_note(posture, k),
+                    # ★★ 0.53.0 T4（创始人 2026-10-19「那个按钮我专门讲过」）：
+                    #   看得见这个页面 ⇒ 监理在跑。值守中只发 ack（不上屏），
+                    #   不发给「重新拉起」——那个按钮在值守中恒为一句假话。
+                    actions=([_a(ACT_INFO, "知道了", ack=True)]
                              if not _can_revive(posture) else
-                             [_a(ACT_RETRY, "重新拉起监理",
-                                 hint="点这个会当场重试并复测；还是失败会告诉你"
-                                      "失败原因，不会假绿。")]),
-                    cost="监理不在的这段时间，发生的改动不会有告警。")
+                             [_a(ACT_RETRY, "重新拉起监理")]),
+                    cost="")
 
     # breach_other / unknown —— 不硬编归因，但**必须给得出下一步**
-    _acts = [_a(ACT_INFO, "回运行状态页看现探",
-                hint="那里有此刻的实测态势（监理在不在、心跳多旧、自检过不过）。")]
+    _acts = [_a(ACT_INFO, "看运行状态页",
+                hint="那里有此刻的实测态势：监理在不在、心跳多旧、自检过不过。",
+                href="/?v=health")]
     if _can_revive(posture):
-        _acts.append(_a(ACT_RETRY, "先试一次拉起监理",
-                        hint="多数「没人守」都能这样恢复。"))
-    # ★ 0.53.1（创始人 2026-10-18）：标题与 cost 里的「防护有缺口／有缺口」去掉 ——
+        _acts.append(_a(ACT_RETRY, "先试一次拉起监理"))
+    # ★ 0.53.1（创始人 2026-10-18）：标题里的「防护有缺口／有缺口」去掉 ——
     #   这个词不在六态表里，会被读成第四种态；同一件事的标准名是**失守**。
     return dict(b, kind=k, title="失守（未归类）", b_class=False,
-                cause=("这一类失守我没有专门的归因规则（记录原文：%s）。"
-                       "**不编一个听起来合理的原因**——"
-                       "归因规则没有覆盖它，就如实说没有。" % (b["detail"] or "（无原文）")),
+                cause=("这一类失守没有专门的归因规则。记录原文：%s。"
+                       % (b["detail"] or "（无原文）")),
                 severity="按运行状态页的现探结果为准。",
-                severity_note=_posture_note(posture),
+                severity_note=_posture_note(posture, k),
                 actions=_acts,
-                cost="归因规则没覆盖这件事，你只能看到「有问题」，拿不到「为什么」。"
-                     "这是产品的已知短板，不是你的操作问题。")
+                cost="")
 
 
-def _a(op, label, hint=""):
+def _a(op, label, hint="", ack=False, href=""):
     """一个可执行动作。★ 0.51.2 第二轮：**去掉 `cmd` 字段** ——
     研发/运维命令（`antinel host-shield enable`）不再以 `<code>` 块
     的形式摆在用户面板上（创始人：用户不会修，也不许让用户修）。
     真需要用户在终端执行的动作，命令写在 hint 里当说明，不当按钮。
+
+    ★★ 0.53.0 T4（创始人 2026-10-19「那个按钮我专门讲过」）：
+      `ack=True` ＝ 这条动作只是「收下这条通知」，不改变任何东西。
+      面板**不渲染**它 —— 条目底部已经有「知道了」；同一件事在一张卡片里
+      出现两次，第二次就只是噪音。数据层仍保留（0360 判据要求每条 R0
+      至少给一个动作，那个「动作」不一定要上屏）。
     """
-    return {"op": op, "label": label, "hint": hint}
+    d = {"op": op, "label": label, "hint": hint, "ack": bool(ack)}
+    if href:
+        d["href"] = href
+    return d
 
 
-def _posture_note(posture):
-    """「现在怎么样」段的和解句（0.51.2 第二轮：与面板标题不许自相矛盾）。
+def _posture_note(posture, kind=""):
+    """「有多严重」段末尾的**现场**一句（与面板标题不许自相矛盾）。
 
     ★★ 创始人截图三：面板标题「监理拉起失败（没人值守）」，这句却写
-       「（此刻实测：值守中）」—— 面板是**历史**记录，这句算的是**当前**
-       态势，两个时刻打架。⇒ 措辞统一成「现在实测」，与「① 发生了什么」
-       （当时的事）分属两段，不再互相矛盾。
+      「（此刻实测：值守中）」—— 面板是**历史**记录，这句算的是**当前**
+      态势，两个时刻打架。⇒ 措辞统一成「现在实测」，与「① 发生了什么」
+      （当时的事）分属两段，不再互相矛盾。
     ★ 值是**实时算出来的**（`_six_state_label` → 六态）。
+    ★★ 0.53.0 T4（创始人 2026-10-19）：「现在实测」这句**只在两种时候出现**：
+        ① 现在不是值守中（此刻真的在失守，读者必须知道）；
+        ② 这条记录讲的是监理自己没起来（spawn_failed / 自检不符 /
+           登记不符 / 没装自启）—— 那类历史记录容易被读成"现在也没在守"，
+         必须给一句现场来和解。
+      其余类别（例如某个落点上不了锁）在值守中时**不出**这句：它在值守中
+      仍然成立（落点开着与监理在岗两件事都真），摆一句"现在值守中"反而像
+      自相矛盾 —— 与截图里的"违和"同型。
     """
     if posture is None:
-        return "（现在实测：%s。）" % (_live_posture_label(),)
-    return "（现在实测：%s。）" % (_six_state_label(posture),)
+        posture = _live_posture()
+    if posture is None:
+        return ""
+    st = str(posture.get("state") or "")
+    if st != "guarding":
+        return "（现在实测：%s。）" % (_six_state_label(posture),)
+    if kind in _LIVE_KINDS:
+        return "（现在实测：%s。）" % (_six_state_label(posture),)
+    return ""
+
+
+#: 「现在实测」这句必须出现的类别（见 `_posture_note`）—— 记录讲的是监理自己。
+_LIVE_KINDS = frozenset(("spawn_failed", "self_check", "registry_manifest",
+                         "autostart_missing"))
+
+
+def _revive_ok_states():
+    """允许「重新拉起监理」的态势**白名单**（0.53.0 T4）。
+
+    ★★ 为什么从黑名单改成白名单：旧口径是 `state != "guarding"` —— 凡是
+      不在"值守中"这一格里的都发给按钮。实测本机姿态是 **dev（研发中）**
+      （在岗、只是代码比登记的新）⇒ 页面照样挂「现在重新拉起」——
+      而看得见页面就说明它在跑，这个按钮仍然是一句不成立的话。
+      黑名单的错在于：**它假设"不在岗"只有一种形状**，而六态里有四种
+      都在岗（guarding／warn／dev）加一种未启用（off，拉起也白拉）。
+    ★ 取值只有两个：真缺岗（down＝有损失；interrupted＝无损失）。
+      导入失败 ⇒ 空集（一个都不给）—— 宁可少一个入口，不许给假的。
+    """
+    try:
+        import host_shield as HS
+        return frozenset((HS.POSTURE_DOWN, HS.POSTURE_INTERRUPTED))
+    except Exception:                                           # noqa: BLE001
+        return frozenset()
 
 
 def _can_revive(posture):
@@ -591,14 +579,23 @@ def _can_revive(posture):
 
     创始人原话：「如果用户能看到，必然监理系统在运行，否则用户看不到，
     那么你设置这个按钮干什么呢？？？？？？已经再跑了，还要重新拉起？？？」
-    ⇒ 态势是**值守中**时不给 retry（看得到页面＝在跑）；
-      非值守（含断档/失守/未启用）才给；
-      `posture=None`（判据/CLI 直调 attribute 的无参路径）保持旧行为
-      —— 0360「每条 R0 至少一个可执行动作」走的正是无参路径。
+
+    ★★ 0.53.0 T4（创始人 2026-10-19「这种超级违和还能死灰复燃，要查清原因」）：
+      两处都改，缺一处都不算修完：
+      ① `posture is None` 旧实现返回 True —— 而生产渲染路径**恰恰就是
+         None**（`render_page` 只把注入值往下传，不注入时整页拿到 None），
+         于是每一次真实打开都判"可以拉起"，按钮恒现。判据 W-SPK10 只用
+         注入姿态跑，走不到这条 None 路径 ⇒ 假绿。现在 None 一律**现探**。
+      ② 判据从"≠ 值守中"换成**白名单**（见 `_revive_ok_states`）——
+         研发中／可信性存疑／未启用都不再发给按钮。
+      探不到态势 ⇒ False：按钮是**可执行承诺**，宁可少一个入口，
+      不许给一个点了可能白点的按钮（创始人最恨的形状）。
     """
     if posture is None:
-        return True
-    return str(posture.get("state") or "") != "guarding"
+        posture = _live_posture()
+    if not isinstance(posture, dict):
+        return False
+    return str(posture.get("state") or "") in _revive_ok_states()
 
 
 def _six_state_label(posture):
@@ -618,13 +615,25 @@ def _six_state_label(posture):
         return posture.get("label") or "?"
 
 
-def _live_posture_label():
+def _live_posture():
+    """现探当前态势（唯一实现：`host_shield.guard_posture`，带包根）。
+
+    ★ 0.53.0 T4：把**取态势**与**给标签**拆成两个函数 —— 旧版只有
+      `_live_posture_label()`（返回人话串），而门控判断需要的是**原始
+      state**。过去要 state 的一方只能再猜一次字符串（"值守中" == guarding?）
+      ⇒ 两把尺子。现在一律拿 dict，标签由 `_six_state_label` 出。
+    """
     try:
         import host_shield as HS
-        return _six_state_label(
-            HS.guard_posture(os.path.dirname(os.path.abspath(__file__))))
+        return HS.guard_posture(os.path.dirname(os.path.abspath(__file__)))
     except Exception:                                           # noqa: BLE001
-        return "探不到"
+        return None
+
+
+def _live_posture_label():
+    """现探态势的六态标签（探不到 ⇒ 空串，不编）。"""
+    p = _live_posture()
+    return "" if p is None else _six_state_label(p)
 
 
 def summarize(items):
@@ -650,7 +659,7 @@ _TITLE = {
     "tamper": "防护状态被改动",
     "hook_registration_changed": "钩子注册被改动",
     "autostart_missing": "开机自启没装上",
-    "spawn_failed": "监理拉起失败",
+    "spawn_failed": "监理没能启动",
     "breach_other": "失守（未归类）",
     "unknown": "未归类",
 }
