@@ -647,6 +647,13 @@ def posture_now():
 
 
 # ------------------------------------------------------------- 页面 ----
+#: 页面图标（**监理五页与紧急提醒窗共用这一枚**）。
+#: ★ 0.53.0 T3（创始人 2026-10-19 截图）：小窗原先没有图标链接 ⇒ app 窗标题栏
+#:   只能落浏览器默认的网格球，与监理的圆环并排像两个产品。图标只有一份定义，
+#:   两处都引它 —— 换图标时不会只换一半。
+FAVICON_LINK = '<link rel="icon" href="/assets/favicon.ico">'
+
+
 def _head(title, token, extra_css=""):
     """页面 `<head>`。
 
@@ -681,9 +688,9 @@ def _head(title, token, extra_css=""):
     shown = tail if tail else title
     return ("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
             "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-            "<title>%s</title><link rel=\"icon\" href=\"/assets/favicon.ico\">"
+            "<title>%s</title>%s"
             "<style>%s</style>%s</head><body>"
-            % (_esc(shown), CSS,
+            % (_esc(shown), FAVICON_LINK, CSS,
                ("<style>%s</style>" % extra_css) if extra_css else ""))
 
 
@@ -3197,6 +3204,18 @@ def _make_handler(token, root):
                             S.set_state(iid, "done", root=root, level=lv[iid])
                         except M.InboxError:
                             pass
+                elif op == "bubble_vis":
+                    # ★ 0.53.0 T3（创始人 2026-10-19 截图）：小窗在**后来**才被
+                    #   拉开监理时，也要撤掉「打开 Antinel 监理」。渲染那一刻判一次
+                    #   不够 —— 那一枚按钮是在承诺"点了我给你打开"，而窗已经开着。
+                    #   只读：不看、不关、不动任何窗口；判不出来回 null，页面照旧
+                    #   留着按钮（宁可多一个入口，也不让用户点了没反应）。
+                    try:
+                        import host_shield as _hsvis
+                        _v = _hsvis.console_is_visible()
+                    except Exception:                       # noqa: BLE001
+                        _v = None
+                    return self._json({"ok": _v is not None, "vis": _v})
                 elif op in ("bubble_ack", "bubble_open"):
                     # ★ 0.49.0：紧急提醒窗的两个按钮。
                     #   `bubble_ack` ＝用户说「知道了」—— 只记确认时间

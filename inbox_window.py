@@ -962,14 +962,35 @@ def find_console_windows(suffix=CONSOLE_WINDOW_TITLE_SUFFIX, visible_only=True,
 #     ...（0.36.2 全文见 git 历史；不要再复活它 —— 要全量就调 find_console_windows）
 
 
-#: ★★ 0.49.0：紧急提醒窗的标题标记 —— **刻意不含「· Antinel 监理」字样**。
-#:   `host_shield.console_is_visible()`（0.36.8 立的降噪闸）按 Antinel 监理标记判
-#:   「用户此刻是否正看着面板」；紧急提醒是**通知**、不是面板。若紧急提醒标题带上
-#:   Antinel 监理标记，它一弹出就会被闸当成「用户在看面板」⇒ 后续急事全被咽掉
-#:   —— 漏报比多弹坏得多（0.36.8 原话：宁可多弹不可漏报）。
-#:   ⇒ 紧急提醒标题形如 `失守：防护文件被改动 · 紧急提醒#<run_id>`，
-#:     与 Antinel 监理**结构上可分**。
+#: ★★ 0.49.0：紧急提醒窗的标题标记（**收尾**）。完整标题由 `bubble_title()` 生成。
+#:
+#:   ── 0.53.0 T3（创始人 2026-10-19 拍板）────────────────────────────
+#:   原话：「把那个小窗口的标题栏修成跟监理同样格式 —— Antinel 监理（编号）
+#:   点 紧急提醒」。⇒ 标题从「事由开头、标记收尾」（`失守：… · 紧急提醒#rid`）
+#:   改成**与监理同款开头**：`Antinel 监理#<rid> · 紧急提醒`。
+#:   ★ 事由不再进标题栏（标题只回答"这是谁"，事由在正文第一行）。
+#:
+#:   ⚠️ 下面这条老顾虑**仍然成立，但已经改由结构挡住，不再靠"标题里不写品牌"**：
+#:   `host_shield.console_is_visible()`（0.36.8 的降噪闸）按标题认「用户此刻是否
+#:   正看着面板」；紧急提醒是**通知**、不是面板。若它被认成面板，后来的急事全被
+#:   咽掉 —— 漏报比多弹坏得多（0.36.8 原话：宁可多弹不可漏报）。
+#:   新标题带品牌，为什么仍不会被认成面板：`_mark_at_tail` 要求**品牌之后只允许
+#:   身份串**（`#hex`），而这里后面还挂着 ` · 紧急提醒` ⇒ 监理认窗一律拒认
+#:   （判据 0514 B-14 正反各一条钉住；这条是降噪闸的前提，不是字体细节）。
 BUBBLE_TITLE_MARK = " · 紧急提醒"
+
+
+def bubble_title(run_id=None, mark=BUBBLE_TITLE_MARK):
+    """紧急提醒窗的完整标题：`Antinel 监理#<rid> · 紧急提醒`。
+
+    ★ 与监理窗**同一真源**：前半段直接取 `console_title_suffix(run_id)`
+      （不是照抄一份品牌串 —— 品牌改名时两窗一起走，不会一个改了一个没改）。
+    ★ `run_id` 为空 ⇒ `Antinel 监理 · 紧急提醒`（无身份的兜底形态）。
+    ★ 为什么身份串在**中间**而不是收尾：创始人的格式是"品牌（编号）· 事由"，
+      编号属于品牌那一段。收尾位置留给 `BUBBLE_TITLE_MARK`，认窗（收旧窗）
+      与置顶都靠它 —— 两者位置互换会同时打坏认窗与格式。
+    """
+    return console_title_suffix(run_id) + mark
 
 #: ★ 0.50.0（创始人 2026-10-14「值守台应该有一个能漂浮的最小态」）：
 #:   漂浮哨标窗的标题标记。为什么与紧急提醒/Antinel 监理**结构上可分**：
@@ -1034,7 +1055,7 @@ def find_logo_windows(mark=LOGO_TITLE_MARK, visible_only=True, run_id=None):
 
 
 def find_bubble_windows(mark=BUBBLE_TITLE_MARK, visible_only=True, run_id=None):
-    """枚举紧急提醒窗；`run_id` 给定时只认**本次**那枚（严格后缀匹配）。
+    """枚举紧急提醒窗；`run_id` 给定时只认**本次**那枚（整串相等匹配）。
 
     ★ 与 `find_console_windows` 同源同构（两级匹配），过滤器走唯一的
       `enum_windows`；紧急提醒**不设 `lister` 注入点**：它的调用方（紧急提醒模块）
@@ -1042,11 +1063,16 @@ def find_bubble_windows(mark=BUBBLE_TITLE_MARK, visible_only=True, run_id=None):
     ★★ 0.50.2：宽泛分支从 `mark in title`（任意位置子串）改成
       `_mark_at_tail_any`（标记在末尾）—— 见该函数的说明（清单 B4）。
       紧急提醒窗通向 `WM_CLOSE`（一次只留一枚），子串匹配会连用户窗口一起关。
+    ★★ 0.53.0 T3：严格分支从「标记收尾＋`#rid`」改为**整串等于
+      `bubble_title(run_id)`**（`Antinel 监理#rid · 紧急提醒`）。身份串挪到
+      中间后，"收尾＋#rid"再也匹配不到；而整串相等比后缀更严（标题里多一个字
+      就不认），移动/置顶前的判据本该如此。占位新开一枚用；旧形态的窗由
+      宽泛分支（`_mark_at_tail_any`）收掉，不在这里兼容两份格式。
     """
     out = []
     for (h, title) in enum_windows(visible_only=visible_only):
         if run_id:
-            if title.endswith(mark + "#" + str(run_id)):
+            if title.strip() == bubble_title(run_id, mark):
                 out.append(h)
         elif _mark_at_tail_any(title, mark):
             out.append(h)

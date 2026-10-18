@@ -102,11 +102,11 @@ def render(title, body, level, token, run_id="", kind="R0", console_open=False):
     import inbox_server as SV
     import inbox_window as _WIN
     st = level if level in M.STATE_VAR else "R0"
-    # ★ 0.50.6（T-09 收编）：标题标记只从 `inbox_window.BUBBLE_TITLE_MARK`
-    #   **派生**，不在此硬编码第二份 —— 0.49.0 起两处各写各的，本轮改名
-    #   （冒泡→紧急提醒）因此只改常量一处即全链生效。
-    _mark = _WIN.BUBBLE_TITLE_MARK
-    mark = (_mark + "#" + run_id) if run_id else _mark
+    # ★ 0.50.6（T-09 收编）：标题只从 `inbox_window` **派生**，不在此硬编码第二份。
+    # ★★ 0.53.0 T3（创始人 2026-10-19）：「标题栏修成跟监理同样格式 ——
+    #   Antinel 监理（编号）点 紧急提醒」。整串由 `bubble_title()` 生成
+    #   （品牌段与监理窗同一真源），这里不再自己拼「事由 + 标记 + #编号」。
+    full_title = _WIN.bubble_title(run_id)
     body_txt = str(body or "")[:BODY_MAX] + ("…" if len(str(body or "")) > BODY_MAX
                                               else "")
     css = SV.CSS + """
@@ -207,6 +207,27 @@ ok.addEventListener("click", function(){
   });
 });
 var op = document.querySelector(".bub-open");
+/* ★ 0.53.0 T3（创始人 2026-10-19 截图）：小窗弹出之后，用户可能自己把监理
+   拉起来了 —— 那一刻起，按钮上的"打开"就成了不成立的承诺（而服务端只在
+   渲染时判过一次）。⇒ 页面自己复查：加载后、窗口获得焦点时、以及每 10 秒，
+   问一次 `bubble_vis`（只读，不抢占焦点、不动窗口）。
+   判不出来（null）⇒ 什么都不做，按钮留着（宁可多一个入口，不许点了没反应）。
+   按钮一旦撤掉，下一次复查在第一行就返回 ⇒ 轮询自动停。 */
+function syncOpen(){
+  var b = document.querySelector(".bub-open");
+  if (!b) { return; }
+  post("bubble_vis", "", function(j){
+    if (!j || j.vis !== true) { return; }
+    var s = document.createElement("span");
+    s.className = "bub-has";
+    s.textContent = "Antinel 监理开着（在那边看）";
+    var cur = document.querySelector(".bub-open");
+    if (cur) { cur.replaceWith(s); setTimeout(fit, 30); }
+  });
+}
+window.addEventListener("load", function(){ setTimeout(syncOpen, 80); });
+window.addEventListener("focus", syncOpen);
+setInterval(syncOpen, 10000);
 /* ★ 0.50.3：`console_open` 为真时服务端**根本不画**这个按钮 ⇒ 这里必须容忍 null
    （旧版直接 `op.addEventListener` ⇒ 没按钮时整段 JS 抛错，
    连带把上面的 `fit()` 与"知道了"那条链一起打死）。 */
@@ -255,10 +276,13 @@ op.addEventListener("click", function(){
     act_open = ("<span class=\"bub-has\">Antinel 监理开着（在那边看）</span>"
                 if console_open else
                 "<button class=\"bub-open\" type=\"button\">打开 Antinel 监理</button>")
+    # ★ 0.53.0 T3：图标与监理**同一枚**（同一 favicon 链接）。没有它，app 窗
+    #   标题栏只能显示浏览器默认的网格球（创始人截图里就是那个球）——
+    #   两扇窗一个圆环一个球，读者会以为是两个产品。
     return (
         "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-        "<title>%s</title><style>%s</style></head>"
+        "<title>%s</title>%s<style>%s</style></head>"
         "<body class=\"bubpage\" data-tok=\"%s\" data-kind=\"%s\">"
         "<div class=\"bub\">"
         "<div class=\"logo\">%s</div>"
@@ -279,9 +303,10 @@ op.addEventListener("click", function(){
         #      前半句在讲机制，后半句「手工关」是口语；改后直接说用户利益。
         "<span class=\"bub-note\">会一直留着，直到你处理完</span>"
         "</div></div></div>%s%s</body></html>"
-        % (SV._esc(title) + mark, css, SV._esc(token), SV._esc(kind),
-           SV._logo_mark(st), M.STATE_VAR[st], SV._esc(M.state_label(st)),
-           SV._esc(title), SV._esc(body_txt), act_open, SV._LOGO_JS, js))
+        % (SV._esc(full_title), SV.FAVICON_LINK, css, SV._esc(token),
+           SV._esc(kind), SV._logo_mark(st), M.STATE_VAR[st],
+           SV._esc(M.state_label(st)), SV._esc(title), SV._esc(body_txt),
+           act_open, SV._LOGO_JS, js))
 
 
 # ---------------------------------------------------------------- 紧急提醒 ----

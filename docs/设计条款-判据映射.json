@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "design_doc": "docs/Antinel·监理五页信息架构与工具归因方案 v1.14（2026-10-19）.md",
+ "design_doc": "docs/Antinel·监理五页信息架构与工具归因方案 v1.15（2026-10-19）.md",
  "note": "设计要求→判据映射。规则（由 ci/guard_instrument_selfaudit.py 的 S57 执行）：①设计文件里每个一级章号（## N.）必须在这里有一条；②guarded 的 guarded_by 必须非空且每个 id 都是真实存在的判据 id；③quote 必须逐字落在该章正文里（升版时 quote 变了就红，逼你重读那一章）；④uncovered 必须写 why 和 next（账要看得见，不许悄悄放过）；⑤record 条数受 record_cap 约束（不许把疑问章一律标成『记录』逃出去）；⑥design_doc 必须是该族最高版本。",
  "record_cap": 15,
  "entries": [
@@ -295,6 +295,17 @@
     "P22"
    ],
    "title": "体检结果可回看（服务重启后仍看得到上次结论＋细节）＋同一趟只算一次（§38.5）"
+  },
+  {
+   "clause": "§39",
+   "kind": "guarded",
+   "quote": "标题只回答「这是谁」，事由在正文第一行",
+   "guarded_by": [
+    "B-14",
+    "B-15",
+    "B-16"
+   ],
+   "title": "紧急提醒窗与监理是同一个身份（标题同款／同一枚图标／开着就不画打开按钮）"
   }
  ]
 }

@@ -1571,6 +1571,147 @@ def n_b13():
     return True
 
 
+# ═════════════════════════════════ B-14…B-16 小窗与监理同款（0.53.0 T3）══
+#: 创始人 2026-10-19 截图三条：① 小窗标题栏要「Antinel 监理（编号）· 紧急提醒」；
+#: ② 小窗图标是浏览器默认网格球，与监理的圆环并排像两个产品；③ 监理开着，小窗
+#: 还挂着「打开 Antinel 监理」。三条都属「同一个产品两副面孔」，故并成一组。
+def _bubble_js(html):
+    """小窗的**动作脚本**（含 `bubble_ack` 的那一段）。
+
+    ★ 页面里有多段 `<script>`（动效状态机 ＋ 动作），抓第一段会全程空转 ——
+      B-03 的探针第一版就栽在这里，这里按**内容**挑段。
+    """
+    for body in re.findall(r"<script>\n(.*?)\n</script>", html, re.S):
+        if "bubble_ack" in body:
+            return body
+    return ""
+
+
+def _b14_core(html, rid):
+    """小窗标题：**与监理同款开头** ＋ 标记收尾 ＋ 不被认成监理窗 ＋ 认窗跟得上。"""
+    m = re.search(r"<title>(.*?)</title>", html, re.S)
+    if not m:
+        return "小窗页面没有 <title> —— 标题栏只能显示浏览器默认名"
+    title = m.group(1)
+    # ★ 顺序有意：先判"会不会被认成监理窗"。摘掉标记的标题同时满足两条，
+    #   但真正的危害是前者（通知被当成面板 ⇒ 后续急事全被咽掉）。
+    if WIN.is_console_title(title) or WIN.is_console_title(title, rid):
+        return ("小窗标题 %r 被认成监理窗 ⇒ 降噪闸会把通知当成「用户在看面板」，"
+                "后续急事全被咽掉" % (title,))
+    want = "%s#%s%s" % (WIN.CONSOLE_WINDOW_TITLE_SUFFIX, rid, WIN.BUBBLE_TITLE_MARK)
+    if title != want:
+        return "小窗标题是 %r，应为 %r —— 与监理不同款" % (title, want)
+    # 认窗：按本次身份必须认得到（开窗后的落位/置顶都靠它）
+    real = WIN.enum_windows
+    WIN.enum_windows = _fake_enum
+    try:
+        strict = WIN.find_bubble_windows(run_id=rid)
+    finally:
+        WIN.enum_windows = real
+    if strict != [5]:
+        return ("按本次身份认不到小窗（得到 %r）—— 身份串挪位后严格匹配没跟上，"
+                "开窗后的落位与置顶都会失效" % (strict,))
+    return True
+
+
+@check("B-14 小窗标题＝监理同款：品牌＋编号＋· 紧急提醒，且不被认成监理窗")
+def c_b14():
+    return _b14_core(BB.render("拦截：危险操作被挡下", "正文……", "R0", "tok-b14",
+                               run_id="abc123", kind="k"), "abc123")
+
+
+@check("N-B14 负控：摘掉「 · 紧急提醒」⇒ 被认成监理窗；退回旧格式 ⇒ 不同款")
+def n_b14():
+    html = BB.render("拦截：危险操作被挡下", "正文……", "R0", "tok-b14",
+                     run_id="abc123", kind="k")
+    good = re.search(r"<title>.*?</title>", html, re.S).group(0)
+    # ① 只留品牌＋编号：这正是**会被当成面板**的形状（降噪闸最危险的假肯定）
+    bare = "<title>%s#abc123</title>" % WIN.CONSOLE_WINDOW_TITLE_SUFFIX
+    why = _b14_core(html.replace(good, bare), "abc123")
+    if why is True:
+        return "负控失效：摘掉标记后仍判合格"
+    if "认成监理窗" not in why:
+        return "负控方向不对：红的原因不是「被认成监理窗」（实际：%s）" % why
+    # ② 旧格式（事由开头、编号收尾）：与监理不同款
+    old = "<title>拦截：危险操作被挡下%s#abc123</title>" % WIN.BUBBLE_TITLE_MARK
+    why2 = _b14_core(html.replace(good, old), "abc123")
+    if why2 is True:
+        return "负控失效：旧格式标题仍判合格"
+    if "不同款" not in why2:
+        return "负控方向不对：旧格式红的原因不是「不同款」（实际：%s）" % why2
+    return True
+
+
+def _b15_core(html, console_html):
+    if SV.FAVICON_LINK not in html:
+        return ("小窗没有图标链接 ⇒ 标题栏落浏览器默认的网格球（创始人截图），"
+                "与监理的圆环并排像两个产品")
+    if SV.FAVICON_LINK not in console_html:
+        return "监理页没有同一枚图标链接 ⇒ 「统一」只是小窗单方面"
+    return True
+
+
+@check("B-15 小窗与监理同一枚图标：favicon 链接同源，不落浏览器默认球")
+def c_b15():
+    return _b15_core(BB.render("t", "b", "R0", "tok-b15", run_id="r", kind="k"),
+                     SV._head("收件箱", "tok-b15"))
+
+
+@check("N-B15 负控：把小窗的图标链接摘掉 ⇒ 必须红（两边任一摘掉都算）")
+def n_b15():
+    html = BB.render("t", "b", "R0", "tok-b15", run_id="r", kind="k")
+    con = SV._head("收件箱", "tok-b15")
+    if _b15_core(html.replace(SV.FAVICON_LINK, ""), con) is True:
+        return "负控失效：小窗摘掉图标链接仍判合格"
+    if _b15_core(html, con.replace(SV.FAVICON_LINK, "")) is True:
+        return "负控失效：监理页摘掉图标链接仍判合格"
+    return True
+
+
+def _b16_core(js, server_src):
+    """小窗必须**自己复查**监理是否开着 —— 渲染那一刻判一次不够。"""
+    if "bubble_vis" not in js:
+        return ("小窗不会复查监理是否开着 ⇒ 用户后来把监理拉开，按钮仍写着"
+                "「打开 Antinel 监理」（创始人 2026-10-19 截图）")
+    if 'addEventListener("load"' not in js:
+        return "加载后不复查 ⇒ 只有渲染那一刻判过一次"
+    if 'addEventListener("focus"' not in js:
+        return "窗口获得焦点时不复查 ⇒ 用户切回来还看得见旧按钮"
+    if "setInterval(syncOpen" not in js:
+        return "没有定时复查 ⇒ 用户不动鼠标，按钮就一直挂着"
+    if "bub-has" not in js:
+        return "撤掉按钮后没有去处（应换成一句状态）"
+    i = server_src.find('op == "bubble_vis"')
+    if i < 0:
+        return "服务端没有 bubble_vis 出口 ⇒ 页面复查只能拿到失败"
+    seg = server_src[i:i + 800]
+    if "console_is_visible" not in seg:
+        return "bubble_vis 没走唯一的可见性实现（console_is_visible）"
+    if "find_console_windows" in seg or "enum_windows" in seg:
+        return "bubble_vis 自己又枚举了一遍窗口 —— 同一件事不许两份实现"
+    return True
+
+
+@check("B-16 监理后来才被打开也要撤掉「打开」按钮：加载/聚焦/定时三处复查")
+def c_b16():
+    html = BB.render("t", "b", "R0", "tok-b16", run_id="r", kind="k")
+    return _b16_core(_bubble_js(html), _src("inbox_server.py"))
+
+
+@check("N-B16 负控：拆掉复查那条链 / 服务端出口 ⇒ 必须红")
+def n_b16():
+    html = BB.render("t", "b", "R0", "tok-b16", run_id="r", kind="k")
+    js = _bubble_js(html)
+    src = _src("inbox_server.py")
+    if not js or 'op == "bubble_vis"' not in src:
+        return "夹具不成立：取不到动作脚本或服务端没有该出口"
+    if _b16_core(js.replace("bubble_vis", "bubble_xx"), src) is True:
+        return "负控失效：拆掉复查调用仍判合格"
+    if _b16_core(js, src.replace('op == "bubble_vis"', 'op == "bubble_xx"')) is True:
+        return "负控失效：服务端摘掉出口仍判合格"
+    return True
+
+
 # ═══════════════════════════════════════════════════ B-12 认窗口径必须同一把尺 ══
 #: 假桌面：五枚可见窗，其中两枚是**用户窗口** —— 标题里恰好含哨标/紧急提醒的标记，
 #: 但标记**不在末尾**。这就是实测误伤的形状（`_p_probe_win.py` 的内存替换夹具）。
@@ -1583,7 +1724,7 @@ _FAKE_WINDOWS = [
     (2, "我的 · 哨标 收藏夹"),             # ★ 用户窗口（含标记，不在末尾）
     (3, "Antinel · 哨标#abc123"),          # 本次哨标
     (4, "整理一下 · 紧急提醒 记录"),         # ★ 用户窗口（含标记，不在末尾）
-    (5, "失守：防护文件被改动 · 紧急提醒#abc123"),   # 本次紧急提醒
+    (5, "Antinel 监理#abc123 · 紧急提醒"),   # 本次紧急提醒（0.53.0 T3 同款开头）
 ]
 
 
@@ -1696,8 +1837,10 @@ def c_b02():
                                ("打开钮", "打开 Antinel 监理" in page),
                                ("留存说明", "会一直留着" in page)) if not v]
         return "紧急提醒页缺：%s —— 与Antinel 监理同源是 founder 点名要的" % "、".join(miss)
-    if " · 紧急提醒#run42" not in page:
-        return "标题没带 #run_id —— 认窗（收旧窗）会失去目标"
+    # ★ 0.53.0 T3：标题改为**与监理同款开头**（品牌#编号 · 紧急提醒）。
+    #   断言强度不变：品牌、编号、标记三样都必须逐字在场。
+    if "<title>Antinel 监理#run42 · 紧急提醒</title>" not in page:
+        return "标题不是「Antinel 监理#编号 · 紧急提醒」—— 与监理不同款，认窗也失去目标"
     if 'data-kind="host_shield_revived"' not in page:
         return "冒泡页未携带真实 kind —— 确认按钮无法对准下一次节流键"
     # ★ 0.50.1：动作脚本重写后，kind 不再拼成字面 `&kind=`，而是走
