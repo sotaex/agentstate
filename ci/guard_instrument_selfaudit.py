@@ -79,11 +79,30 @@
         判断它指向哪个结构需要 DOM 位置关系 —— 正则做不到。
         ⇒ 故只做**AST 结构判据**（窄而准），不做文本正则。
          ⇒ 判据 **S55**（＋负控 N-S55）。
+
+  ★★ 0.53.0 追加 R7（第七个面：**设计要求没人承接**，2026-10-18）：
+     R7：设计文件里每个一级章号（`## N.`）必须在 `docs/设计条款-判据映射.json`
+         里有登记；`guarded` 的 `guarded_by` 必须指向**真实存在**的判据 id；
+         `quote` 必须**逐字落在该章正文里**；`uncovered` 必须写 why／next。
+         由来：创始人 2026-10-18 两问 —— 账本出现「防护缺口／缺口」、
+         「要求指明哪个 AI 编程工具但看不到」。查下去是同一个病：
+         **§6 要求「工具名」、§4.4-1 枚举里却没有「点名」这一项**，两份要求
+         分散在不同章节；实现只跟了 §4.4，判据 U22 也只跟了 §4.4 ⇒
+         一个专答「是哪个工具」的块，没有任何一条尺子检查工具名。
+         人读漏一节，机器不提醒 —— 这就是「下一次没人读到的那一章」。
+     ★ 为什么不是「再写一条 assert」：那只能抓住已经知道的那一次。
+         本尺子守的是**覆盖关系**本身：新增条款不登记 ⇒ 红；登记了却指向
+         不存在的判据 ⇒ 红；`quote` 拼错或搬到别的章 ⇒ 红。
+     ★ 允许 `record`／`uncovered` 两类，但都不许沉默：前者必须写 why，
+         后者必须写 why ＋ next，且 `record` 条数受 `record_cap` 约束 ——
+         防「把每一章都标成记录」这条逃逸路线。
+         ⇒ 判据 **S57**（＋负控 N-S57）。
 """
 from __future__ import annotations
 
 import ast
 import io
+import json
 import os
 import re
 import sys
@@ -94,6 +113,11 @@ CI = os.path.join(ROOT, "ci")
 
 PASSED = []
 FAILED = []
+
+
+def _note(msg):
+    """说明行（不是判据）：跑的时候看得见，方便人复核本条到底量了什么。"""
+    print("  · %s" % msg)
 
 
 def check(name):
@@ -1025,6 +1049,317 @@ def n_s55():
     ))["_view_x"]
     if len(_called_names(fn) & set(_COUNT_SRCS)) < 2:
         return "负控失效：同函数并存两份计数来源没被检出"
+    return True
+
+
+# ══════════ S57 · 设计要求→判据映射：覆盖自审 ═════════════════════════
+
+#: 映射表（设计要求 → 判据）。**它是账，不是尺子**：尺子是下面的 S57。
+_MAP_REL = "docs/设计条款-判据映射.json"
+
+#: 设计文件族前缀。族内版本号取最大值 —— 升版而映射表没跟，S57 就红。
+_DESIGN_FAMILY = "Antinel·监理五页信息架构与工具归因方案 v"
+
+
+def _squash(s):
+    """去掉全部空白 —— 跨行引文与折行表格都能逐字比对（markdown 会折行）。"""
+    return "".join(str(s or "").split())
+
+
+def _design_chapters(text):
+    """`[{"num": "4", "body": <本章归一文本，含标题行>}]` —— 章号从文件**派生**。
+
+    ★ 为什么派生而不在映射表里列一份章号清单：清单会跟丢。设计文件新增一章，
+      清单不会自己长；派生之后「新增一章没登记」当场红 —— 这正是本判据要守的。
+    """
+    out, cur, buf = [], None, []
+    for line in text.splitlines():
+        if line.startswith("## "):
+            head = line[3:].strip()
+            digits = ""
+            for ch in head:
+                if ch.isdigit():
+                    digits += ch
+                else:
+                    break
+            if digits:
+                if cur is not None:
+                    out.append({"num": cur, "body": _squash("\n".join(buf))})
+                cur, buf = digits, [line]
+                continue
+        if cur is not None:
+            buf.append(line)
+    if cur is not None:
+        out.append({"num": cur, "body": _squash("\n".join(buf))})
+    return out
+
+
+#: 判据 id 允许的字符（`U22`／`T-04e`／`W-SPK13`／`G1-granary`／`N-U22c` 都是真 id）
+_ID_CHARS = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-")
+
+
+def _looks_like_id(tok):
+    # 长度下限取 2：体检族真有 `H3`／`H7`／`H8`／`H9` 这种两字符 id（首版写 3，
+    # 结果把四条真判据判成「不存在」—— 尺子自己先瞎了一次，记在这里）。
+    if not (2 <= len(tok) <= 14):
+        return False
+    if tok[0] not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+        return False
+    if not any(c.isdigit() for c in tok):
+        return False
+    return all(c in _ID_CHARS for c in tok)
+
+
+def _judge_titles():
+    """`{判据 id: [来源文件]}` —— 从判据源码 AST 里取**登记形态**的标题首词。
+
+    ★ 为什么不复用 `defect_types._declared_ids()`：那支的 id 正则是给**登记簿**
+      用的（归一化口径），实测把 `T-04e` 归一成 `T-04`、把 `W-SPK13` 整条丢掉
+      （本轮实测清单：T-04e／W-SPK13／UID15-a／HSCAN15-a／H4b／N-U22c 全 MISS）。
+      拿它验覆盖会逼人写**错的** id，或把真判据判成不存在 —— 两向都是假话。
+      这里要的只是「这个 id 真的有一条判据」，故取标题首词原样。
+    """
+    out = {}
+    for path in _judge_files():
+        try:
+            tree = ast.parse(io.open(path, encoding="utf-8").read())
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        rel = os.path.relpath(path, ROOT).replace("\\", "/")
+        for node in ast.walk(tree):
+            texts = []
+            if isinstance(node, ast.FunctionDef):
+                for d in node.decorator_list:
+                    if (isinstance(d, ast.Call) and d.args
+                            and isinstance(d.args[0], ast.Constant)
+                            and isinstance(d.args[0].value, str)):
+                        texts.append(d.args[0].value)
+            elif isinstance(node, ast.Tuple) and len(node.elts) >= 2:
+                first = node.elts[0]
+                if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                    texts.append(first.value)
+            for text in texts:
+                parts = text.strip().split()
+                if not parts:
+                    continue
+                tok = parts[0]
+                if _looks_like_id(tok):
+                    out.setdefault(tok, [])
+                    if rel not in out[tok]:
+                        out[tok].append(rel)
+    return out
+
+
+def _doc_version(name):
+    """文件名里的 `vN.M` → `(N, M)`；取不到就是 `(0, 0)`。"""
+    tail = name[len(_DESIGN_FAMILY):] if name.startswith(_DESIGN_FAMILY) else ""
+    digits, minor, stage = "", "", 0
+    for ch in tail:
+        if ch.isdigit() and stage == 0:
+            digits += ch
+        elif ch == "." and stage == 0:
+            stage = 1
+        elif ch.isdigit() and stage == 1:
+            minor += ch
+        elif stage == 1:
+            break
+    if not digits:
+        return (0, 0)
+    return (int(digits), int(minor or 0))
+
+
+def _map_problems(doc_text, table, known_ids, doc_names):
+    """尺子：把「设计文件 × 映射表 × 真判据清单」三样对上。纯函数，不读盘。
+
+    ★ 纯函数是**为负控**：负控可以喂任意表/任意文件头，不写任何产品文件
+      （零写脏纪律）。所有分支都可被负控直接撞到。
+    """
+    chapters = _design_chapters(doc_text)
+    if not chapters:
+        return "设计文件里一个「## N.」章都没解析出来 ⇒ 判不出（判不出不许算通过）"
+    bodies = {c["num"]: c["body"] for c in chapters}
+    entries = table.get("entries") or []
+    if not entries:
+        return "映射表 entries 为空 —— 空表也能全绿的话，这条尺子就是摆设"
+    problems, seen = [], set()
+    for e in entries:
+        clause = str(e.get("clause") or "")
+        if not clause.startswith("§"):
+            problems.append("clause %r 不是 § 开头" % clause)
+            continue
+        top = clause[1:].split(".")[0]
+        if top not in bodies:
+            problems.append("%s 在设计文件里不存在（防幻觉条款号）" % clause)
+            continue
+        if clause in seen:
+            problems.append("%s 重复登记" % clause)
+        seen.add(clause)
+        kind = e.get("kind")
+        if kind not in ("guarded", "uncovered", "record"):
+            problems.append("%s kind=%r 不认识" % (clause, kind))
+            continue
+        if kind == "record":
+            if not str(e.get("why") or "").strip():
+                problems.append("%s 标了 record 却没写 why（不许无理由退场）" % clause)
+            continue
+        quote = _squash(e.get("quote"))
+        if not quote:
+            problems.append("%s 缺 quote —— 引不出原文就等于没读那一条" % clause)
+        elif quote not in bodies[top]:
+            problems.append("%s 的 quote「%s」不逐字落在本章正文里"
+                            % (clause, str(e.get("quote"))[:28]))
+        if kind == "uncovered":
+            if not str(e.get("why") or "").strip():
+                problems.append("%s uncovered 没写 why" % clause)
+            if not str(e.get("next") or "").strip():
+                problems.append("%s uncovered 没写 next（谁来关这条）" % clause)
+            continue
+        guards = e.get("guarded_by") or []
+        if not guards:
+            problems.append("%s 是 guarded 但 guarded_by 为空" % clause)
+        for gid in guards:
+            if gid not in known_ids:
+                problems.append("%s 指向不存在的判据 %r" % (clause, gid))
+    missing = [c["num"] for c in chapters if ("§" + c["num"]) not in seen]
+    if missing:
+        problems.append("设计文件有、映射表没有的章：%s"
+                        % "、".join("§" + n for n in missing))
+    recs = sum(1 for e in entries if e.get("kind") == "record")
+    cap = int(table.get("record_cap") or 0)
+    if recs > cap:
+        problems.append("record 条数 %d 超过 record_cap %d（不许把疑问章一律标记录）"
+                        % (recs, cap))
+    want = os.path.basename(str(table.get("design_doc") or ""))
+    best = ""
+    for name in doc_names:
+        if name.startswith(_DESIGN_FAMILY) and _doc_version(name) > _doc_version(best):
+            best = name
+    if not best:
+        problems.append("docs/ 下找不到设计文件族（前缀 %r）" % _DESIGN_FAMILY)
+    elif want != best:
+        problems.append("设计文件已到 %r，映射表还指着 %r —— 升版必须逐条复核"
+                        % (best, want))
+    if not problems:
+        return True
+    extra = "" if len(problems) <= 8 else "（共 %d 处）" % len(problems)
+    return "；".join(problems[:8]) + extra
+
+
+@check("S57 设计要求→判据映射：每章都要有登记，且登记指向真判据")
+def s57():
+    """R7：**守的是覆盖关系本身**，不是某一条文案。
+
+    由来（2026-10-18）：创始人问「账本怎么出现『防护缺口』」「要求指明哪个
+    AI 编程工具，我怎么没看到」。两处的共同根因不是写错字，是**设计要求没人
+    承接**：§6 要求工具名、§4.4-1 的枚举里却没有「点名」；实现与判据都只
+    跟了 §4.4 ⇒ 一个专答「是哪个工具」的块，没有一条尺子检查工具名。
+
+    ⇒ 本判据把「设计文件里有哪些章」与「每章由谁守」对上。它上线当刻就抓到
+      **7 条登记为 uncovered 的章**（5 条一条判据都没有：§7 句子指纹／§11 用量／
+      §15 粮草负控／§18 五列标准／§28 网站接入；2 条部分落地：§22 五道闸只落了
+      闸五、§24 四条规矩无机器）—— 与 T-04e 首跑抓到 5 处旧词同型：**负数项自证有效**。
+    """
+    mp = os.path.join(ROOT, _MAP_REL)
+    if not os.path.isfile(mp):
+        return "映射表不存在：%s —— 没有它，设计要求与判据之间就没有账" % _MAP_REL
+    try:
+        table = json.loads(io.open(mp, encoding="utf-8").read())
+    except ValueError as e:
+        return "映射表不是合法 JSON：%r" % (e,)
+    rel_doc = str(table.get("design_doc") or "")
+    doc_path = os.path.join(ROOT, rel_doc.replace("/", os.sep))
+    if not os.path.isfile(doc_path):
+        return "映射表指的设计文件不存在：%r" % rel_doc
+    doc_text = io.open(doc_path, encoding="utf-8").read()
+    known = _judge_titles()
+    if not known:
+        return "一条判据 id 都没提取到 ⇒ 本判据判不出（判不出不许算通过）"
+    docs_dir = os.path.join(ROOT, "docs")
+    names = sorted(os.listdir(docs_dir)) if os.path.isdir(docs_dir) else []
+    r = _map_problems(doc_text, table, known, names)
+    if r is not True:
+        return r
+    kinds = {"guarded": 0, "uncovered": 0, "record": 0}
+    for e in table.get("entries") or []:
+        kinds[e.get("kind")] = kinds.get(e.get("kind"), 0) + 1
+    _note("章 %d｜guarded %d｜uncovered %d｜record %d（cap %s）｜真判据 id %d 个"
+          % (len(_design_chapters(doc_text)), kinds["guarded"],
+             kinds["uncovered"], kinds["record"], table.get("record_cap"),
+             len(known)))
+    return True
+
+
+@check("N-S57 负控：缺章／假判据／跨章 quote／record 超帽／版本掉队 ⇒ 必须各自红")
+def n_s57():
+    """反向对照：六个方向各造标本（全部内存态，零写盘）。
+
+    ★ 为什么负控要这么多方向：这条尺子守的是「账」——账最容易被**看起来
+      像账**的东西骗过（空表、全 record、指向不存在的判据、指旧版本）。
+      每一个方向对应一条真实的逃逸路线。
+    """
+    doc = ("## 0. 甲\n本工具必须点名是哪家。\n"
+           "## 1. 乙\n页面上只读不写。\n")
+    ids = {"U22": ["ci/x.py"], "T-04": ["ci/y.py"]}
+    names = [_DESIGN_FAMILY + "v1.12（2026-10-17）.md",
+             _DESIGN_FAMILY + "v1.13（2026-10-19）.md"]
+    ok_table = {
+        "design_doc": "docs/" + names[1],
+        "record_cap": 0,
+        "entries": [
+            {"clause": "§0", "kind": "guarded", "quote": "必须点名是哪家",
+             "guarded_by": ["U22"]},
+            {"clause": "§1", "kind": "guarded", "quote": "只读不写",
+             "guarded_by": ["T-04"]},
+        ],
+    }
+    # ① 合法表 ⇒ 不许误伤（否则下面所有红都没有意义）
+    base = _map_problems(doc, ok_table, ids, names)
+    if base is not True:
+        return "负控方向异常：合法表被判红（%s）—— 尺子会误伤真账" % str(base)[:80]
+    # ② 缺一章 ⇒ 必须红，且点名缺的章号
+    miss = {"design_doc": ok_table["design_doc"], "record_cap": 0,
+            "entries": ok_table["entries"][:1]}
+    got = str(_map_problems(doc, miss, ids, names))
+    if "§1" not in got:
+        return "负控失效：少登记一章没被抓到（实得 %r）" % got[:80]
+    # ③ 指向不存在的判据 ⇒ 必须红
+    fake = json.loads(json.dumps(ok_table))
+    fake["entries"][0]["guarded_by"] = ["U99"]
+    got = str(_map_problems(doc, fake, ids, names))
+    if "不存在的判据" not in got:
+        return "负控失效：假判据 id 没被抓到（实得 %r）" % got[:80]
+    # ④ 把别章的句子当 quote（章节区间腿）⇒ 必须红
+    cross = json.loads(json.dumps(ok_table))
+    cross["entries"][1]["quote"] = "必须点名是哪家"
+    got = str(_map_problems(doc, cross, ids, names))
+    if "不逐字落在本章" not in got:
+        return "负控失效：跨章 quote 没被抓到（实得 %r）" % got[:80]
+    # ⑤ 全标 record 逃逸 ⇒ 必须红（record_cap 是唯一的闸）
+    esc = {"design_doc": ok_table["design_doc"], "record_cap": 0,
+           "entries": [{"clause": "§0", "kind": "record", "why": "不想查"},
+                       {"clause": "§1", "kind": "record", "why": "不想查"}]}
+    got = str(_map_problems(doc, esc, ids, names))
+    if "record 条数" not in got:
+        return "负控失效：把章节标成 record 就能逃（实得 %r）" % got[:80]
+    # ⑥ 设计升版而表没跟 ⇒ 必须红
+    old = {"design_doc": "docs/" + names[0], "record_cap": 0,
+           "entries": ok_table["entries"]}
+    got = str(_map_problems(doc, old, ids, names))
+    if "设计文件已到" not in got:
+        return "负控失效：设计升版而映射表掉队没被抓到（实得 %r）" % got[:80]
+    # ⑦ 真账上跑一遍（不只测标本）—— 正向自证
+    mp = os.path.join(ROOT, _MAP_REL)
+    real_doc = ""
+    if os.path.isfile(mp):
+        table = json.loads(io.open(mp, encoding="utf-8").read())
+        p = os.path.join(ROOT, str(table.get("design_doc") or "").replace("/", os.sep))
+        if os.path.isfile(p):
+            real_doc = io.open(p, encoding="utf-8").read()
+        docs_dir = os.path.join(ROOT, "docs")
+        r = _map_problems(real_doc, table, _judge_titles(),
+                          sorted(os.listdir(docs_dir)) if os.path.isdir(docs_dir) else [])
+        if r is not True:
+            return "真账被判红（%s）—— 标本全过而真账不过，说明尺子只认标本" % str(r)[:80]
     return True
 
 
