@@ -65,6 +65,18 @@
      腿上。T4-09 的必要性：前两条都按**字段**切分，而用户看到的是浮层里
      连续的四段 —— 四段各自合规、合起来说两遍同一件事，前两条都抓不到。
      详见「T4-07／T4-08」段头与 T4-09 的 docstring。
+  ⑫ J6／J7／J8（**0.53.3，2026-10-20 创始人截图三件事**）：
+     ① 页面上写「灯的六态」但列的是五项 ⇒ 对外只说**五态**（六态＝五态＋
+        研发态，研发态内部用，用户机器上永远见不到那一档）。J6 只扫
+        **渲染结果的可见文本**（源码里的"六态"是内部口径与判据名，不上屏，
+        扫源码＝逼人删内部事实来讨好判据）。
+     ② 五态只有两态挂问号 ⇒ 五态各一枚。旧判据 J3 写死"应 2 枚：Ls/L0",
+        那是把**当时的缺陷钉成了判据** —— 谁也不会觉得少了。J3 改为五枚。
+     ③ 末句「全绿不等于安全：也可能是检查压根没跑」删除；J8 锁它不许回来
+        （减法留账）。另：J2 的边界从「`</div>` 后跟什么文案」改成显式
+        结构标记 —— 删那句尾注时旧尺子当场瞎掉，而产品没坏。
+     ★ 缺粮「暂未启用」（J7）做**双向断言**：`granary.state()=="off"` ⇒
+       必须写；非 off ⇒ **不许**写。只判"必须有"的话，粮账一开那句就成了假话。
 
 ★ 规格真源（U-17 的唯一依据，不许凭记忆）：
     `D:\\2026\\PSL\\Antinel品牌动效报警语法v1.2（2026-09-27）.md`
@@ -82,6 +94,7 @@
 from __future__ import annotations
 
 import hashlib
+import html as HT                      # 可见文本提取：实体还原（&amp; → &）
 import io
 import json
 import math
@@ -4106,32 +4119,60 @@ def n_j1():
 
 
 # ═══════════════════════════════ J2 枚举断行确定性 ════════════════════════════
-#: 六态行的结构锚（正判据与负控**共用同一把尺子**）。
-_SIX_RE = re.compile(r'灯的六态由重到轻：<br>(.*?)</div>\s*<p class="note">',
-                     re.S)
+#: ★★ 0.53.3：边界改成**显式标记**。旧边界是「`</div>` 后面跟一个
+#:   `<p class="note">`」—— 那是把尺子绑在**文案**上：本批删掉那句尾注
+#:   「全绿不等于安全…」，旧尺子当场失锚（判红），而产品其实没坏。
+#:   **判据不许锚在会改的文案上** —— 本仓"改文案顺手把尺子弄瞎"的标准形状。
+#:   现在起止都用结构标记（`id` 与 HTML 注释），这一段里加减文案都不影响。
+_LO_BEGIN = 'id="lightorder"'
+_LO_END = "<!-- lightorder:end -->"
+#: 标签独占一行：起标记之后先是纯文本标签，紧跟一个显式 `<br>`。
+_LO_HEAD_RE = re.compile(r'^id="lightorder">([^<]+)<br>', re.S)
 
 
-def _six_ok(html):
-    """纯判据：六态行结构确定（标签独占一行＋5 枚 nowrap span＋4 分隔符）。
-    返回 True 或说明串。★ 抽成吃 html 的纯函数 ⇒ 负控能把变异 html
-    喂进**同一个实现**（而不是另写一套条件冒充负控）。"""
-    m = _SIX_RE.search(html)
-    if not m:
-        return ("六态行不是「标签＋显式 <br>」形状 —— 断点又交给浏览器自由决定"
+def _light_order_body(html):
+    """取五态行的**区段**（两锚之间）。返回 `(body, None)` 或 `(None, 说明串)`。
+
+    ★ 抽成吃 html 的纯函数 ⇒ 负控能把变异 html 喂进**同一个实现**
+      （而不是另写一套条件冒充负控）。
+    """
+    i = html.find(_LO_BEGIN)
+    if i < 0:
+        return None, ("五态行没有 %s 标记 —— 判据失锚（不许再拿「后面跟着什么"
+                      "文案」当边界）" % _LO_BEGIN)
+    j = html.find(_LO_END, i)
+    if j < 0:
+        return None, ("五态行缺结束标记 %s —— 边界被拆了；本行之后新增的内容"
+                      "请放在标记**之外**" % _LO_END)
+    return html[i:j], None
+
+
+def _light_order_ok(html):
+    """纯判据：五态行结构确定（标签独占一行＋5 枚 nowrap span＋4 个分隔符）。
+
+    返回 True 或说明串。
+    ★ 分隔符只数 `<span…>…</span> · <span class="sixit">` 这一种接缝：
+      芯片内部（L2 的规则全表）自己也可能出现「 · 」，按裸串 count 会数歪。
+    """
+    body, why = _light_order_body(html)
+    if body is None:
+        return why
+    if not _LO_HEAD_RE.match(body):
+        return ("五态行不是「标签＋显式 <br>」形状 —— 断点又交给浏览器自由决定"
                 "（#2 复发）")
-    body = m.group(1)
-    spans = re.findall(r'<span class="sixit">.*?</span>', body, re.S)
-    if len(spans) != 5:
-        return "六态行原子 span 是 %d 枚（应 5）—— 有态没被包住，会被切断" % len(spans)
-    if body.count(" · ") != 4:
-        return "六态行分隔符「 · 」是 %d 个（应 4）—— 枚举散了" % body.count(" · ")
+    n_span = len(re.findall(r'<span class="sixit">', body))
+    if n_span != 5:
+        return "五态行原子 span 是 %d 枚（应 5）—— 有态没被包住，会被切断" % n_span
+    seps = len(re.findall(r'</span> · <span class="sixit">', body))
+    if seps != 4:
+        return "五态行 span 之间的「 · 」是 %d 个（应 4）—— 枚举散了" % seps
     if ".sixit{white-space:nowrap}" not in PC.chrome("<style>" + SV.CSS
                                                     + "</style>"):
         return "CSS 里没有 .sixit{white-space:nowrap} —— span 是空壳，态名照样被切"
     return True
 
 
-@check("J2 ★ 六态行断行确定：标签独占一行＋各态包原子 span")
+@check("J2 ★ 五态行断行确定：标签独占一行＋各态包原子 span")
 def j2():
     """★★ #2 的尺子（2026-10-16 创始人截图二「失守后换行」）：
 
@@ -4147,87 +4188,115 @@ def j2():
     ★ 只锁**结构确定性**，不锁"折成几行好看"（那是人为判断，已在 L2
       触发层清单留记并申报盲区 —— 见文件头第 5 条残余说明）。
     """
-    r = _six_ok(_health())
+    r = _light_order_ok(_health())
     if r is not True:
         return r
     _note("标签独占一行＋5 枚 nowrap span＋4 个分隔符")
 
 
-@check("N-J2 负控：六态行退回单行 <p> 且剥掉 span ⇒ 同一条 J2 判据必须判红")
+@check("N-J2 负控：退回单行 <p>／剥 span／拆掉边界标记 ⇒ 同一条 J2 必须判红")
 def n_j2():
-    """反向对照（真跑正判据 `_six_ok`，非另写条件）：把 J2 锁的结构逐个
-    拆掉（退回单行 <p> ＋剥 span），喂进**同一个 `_six_ok`** 必须判假。"""
+    """反向对照（真跑正判据 `_light_order_ok`，非另写条件）：把 J2 锁的结构
+    逐个拆掉，喂进**同一个 `_light_order_ok`** 必须判假。三个面。"""
     h = _health()
-    if _six_ok(h) is not True:
+    if _light_order_ok(h) is not True:
         return "夹具不成立：现行渲染就判红 —— 负控无分辨力"
-    dead = h.replace('<div class="note sixline">灯的六态由重到轻：<br>',
-                     '<p class="note">灯的六态由重到轻：')
+    # ① 退回单行 <p> ＋ 剥掉 span（#2 复发形状）
+    dead = h.replace(
+        '<div class="note sixline" id="lightorder">灯的五态由重到轻：<br>',
+        '<p class="note">灯的五态由重到轻：')
+    dead = dead.replace(_LO_END, "")
     dead = re.sub(r'<span class="sixit">(.*?)</span>', r"\1", dead, flags=re.S)
-    r = _six_ok(dead)
-    if r is True:
+    if _light_order_ok(dead) is True:
         return "负控失效：退回单行 <p>＋剥 span 后 J2 仍判绿（尺子没分辨力）"
+    # ② 只砍掉结束标记 ⇒ 边界没了也必须红（否则"边界"那条断言是装饰）
+    if _light_order_ok(h.replace(_LO_END, "")) is True:
+        return "负控失效：拆掉结束标记后 J2 仍判绿 —— 边界断言没有分辨力"
+    # ③ 只砍掉起标记 id ⇒ 同样必须红（面②只证明了一端）
+    if _light_order_ok(h.replace(' id="lightorder"', "")) is True:
+        return "负控失效：剥掉起标记后 J2 仍判绿 —— 边界断言没有分辨力"
     return True
 
 
 # ═════════════════════════════ J3 同屏括号形态一致 ══════════════════════════
-def _six_summaries_ok(html):
-    """纯判据：六态行两只芯片的 summary 都不带码。返回 True 或说明串。"""
-    m = _SIX_RE.search(html)
-    if not m:
-        return "找不到六态行（J2 的前置结构不在）—— 拒绝在错误形状上判括号"
-    summaries = re.findall(r"<summary>(.*?)</summary>", m.group(1), re.S)
-    if len(summaries) != 2:
-        return ("六态行可点开芯片是 %d 枚（应 2：Ls/L0）—— 落点变了，"
-                "J3 的比对面要重新认" % len(summaries))
-    bad = [s for s in summaries if "（Ls）" in s or "（L0）" in s]
+def _light_order_summaries_ok(html):
+    """纯判据：五态行**五枚**芯片的 summary 都不带码。返回 True 或说明串。
+
+    ★★ 0.53.3：枚数从 2 改成 5。旧断言「应 2：Ls/L0」是**上一版实现的化石**
+      —— 它把"只有两态挂问号"这个当时的**缺陷**钉成了判据，于是后来谁也
+      不会觉得少。创始人 2026-10-20 截图「五态目前只有两个态有问号」正是
+      这条化石养出来的。⇒ 枚数由五态自己决定，不许再写死"哪几态有"。
+    """
+    body, why = _light_order_body(html)
+    if body is None:
+        return why
+    summ = re.findall(r'<span class="sixit"><details\b[^>]*>'
+                      r'<summary>(.*?)</summary>', body, re.S)
+    if len(summ) != 5:
+        return ("五态行可点开的芯片是 %d 枚（应 5：五态各一枚）—— 少一枚就是"
+                "有一档问不到（创始人 2026-10-20：只有两个态有问号）"
+                % len(summ))
+    bad = [s for s in summ if re.search(r"[（(][A-Za-z][A-Za-z0-9]*[)）]", s)]
     if bad:
-        return ("六态行 summary 仍带码：%r —— 与裸词三态同屏两种写法（#3 复发）"
+        return ("五态行 summary 仍带码：%r —— 与裸词形态同屏两种写法（#3 复发）"
                 % bad)
     return True
 
 
-@check("J3 ★ 六态行 summary 无可见码（同屏括号形态一致）")
+@check("J3 ★ 五态行五枚芯片都可点开，且 summary 无可见码（同屏括号一致）")
 def j3():
     """★★ #3 的尺子（2026-10-16 创始人截图三「缺粮（Ls）／值守中（L0）
     与失守／拦截／注意 括号不一致」）：
 
-    六态行里五态并列，其中三态是裸词、两态带码 —— 同屏两种写法。
+    五态行里五态并列，原来三态是裸词、两态带码 —— 同屏两种写法。
     `GL.chip()` 默认取 `TERMS[k]["w"]`＝`_wl()` 的「词（码）」形态 ⇒
-    落点改造时**忘了传 `text=`**，于是默认形态漏进六态行。
+    落点改造时**忘了传 `text=`**，于是默认形态漏进这一行。
 
     ★ 断言打在 summary 层（码只能留在**展开体首行** —— 那是词条定义
       的一部分，P13 的落点也在）；不锁"码彻底消失"（那会与词条定义冲突）。
-    ★ 两态都要查：只查 Ls 会漏 L0（同族）。
+    ★★ 0.53.3：五态都查。旧版只查 Ls/L0（当时只有两枚芯片）⇒ 补上另外
+      三枚后，旧版判据会**天然全绿**（它根本不看那三枚）。
     """
-    r = _six_summaries_ok(_health())
+    r = _light_order_summaries_ok(_health())
     if r is not True:
         return r
     # 码必须仍在展开体首行（不许用"把码删掉"来假过）
-    for k in ("Ls", "L0"):
+    for k in ("R0", "Ls", "L2", "L1", "L0"):
         chip = GL.chip(k, text=M.state_short(k))
         if "<b>%s（%s）</b>：" % (M.state_short(k), k) not in chip:
             return "%s 词条展开体首行丢了本名带码（用删码假过 J3）" % k
-    _note("summary 无码；码仍在词条展开体首行")
+    _note("五枚 summary 无码；码仍在词条展开体首行")
 
 
-@check("N-J3 负控：把带码 summary 注入六态行 ⇒ 同一条 J3 判据必须判红")
+@check("N-J3 负控：注入带码 summary／撤掉一枚芯片 ⇒ 同一条 J3 必须判红")
 def n_j3():
-    """反向对照（真跑正判据 `_six_summaries_ok`）：默认 `GL.chip("Ls")`
-    就是带码形态；把它注回六态行，**同一个 `_six_summaries_ok`** 必须判假。
+    """反向对照（真跑正判据 `_light_order_summaries_ok`）。**两个面**：
+
+    ① 默认 `GL.chip("Ls")`（带码形态）注回五态行 ⇒ 必须判假；
+    ② 把其中一枚换回裸词（不可点）⇒ 枚数变 4 ⇒ 必须判假。
+
+    ★ 面② 专门守"五态各一枚"：只有它会抓到"又把某一档的问号撤掉了"。
+      少了这个面，J3 就退化成"只要没码就绿"，问号撤掉它一声不吭。
     """
-    if _six_summaries_ok(_health()) is not True:
+    h = _health()
+    if _light_order_summaries_ok(h) is not True:
         return "夹具不成立：现行渲染就判红 —— 负控无分辨力"
     # 默认 chip 的 summary 确实带码（负控前提成立）
     summary = re.search(r"<summary>(.*?)</summary>", GL.chip("Ls"), re.S)
     if not summary or "（Ls）" not in summary.group(1):
         return "夹具不成立：chip 默认形态不带码 —— 负控无分辨力"
-    h = _health()
     dead = h.replace("<summary>缺粮</summary>", "<summary>缺粮（Ls）</summary>")
     if "（Ls）" not in dead:
-        return "夹具不成立：六态行里摘不到「缺粮」summary（结构已变）"
-    r = _six_summaries_ok(dead)
-    if r is True:
+        return "夹具不成立：五态行里摘不到「缺粮」summary（结构已变）"
+    if _light_order_summaries_ok(dead) is True:
         return "负控失效：注入带码 summary 后 J3 仍判绿（尺子没分辨力）"
+    # ② 撤掉 R0 那枚（退回裸词）⇒ 枚数 4 ⇒ 必须红
+    dead2 = re.sub(r'<span class="sixit"><details\b[^>]*data-t="R0".*?</details>'
+                   r'</span>', '<span class="sixit">失守</span>', h, flags=re.S)
+    if dead2 == h:
+        return "夹具不成立：摘不到 R0 那枚芯片（结构已变）"
+    if _light_order_summaries_ok(dead2) is True:
+        return "负控失效：撤掉 R0 的问号后 J3 仍判绿 —— 「五态各一枚」是装饰"
     return True
 
 
@@ -4344,6 +4413,202 @@ def j5():
         if r is not True:
             return "%s 在现行产品上判红（尺子恒红＝噪音）：%s" % (n.strip(), r)
     _note("四条正判据在现行产品上均绿；四条真源都在位")
+
+
+# ══════ J6／J7／J8：对外五态 · 缺粮暂未启用 · 删掉的尾注不许回来 ════════════════
+#: ★★ 0.53.3（创始人 2026-10-20 截图三件事）：
+#:   · 写了六态、实际列的是五个 ⇒ 对外只说五态（研发态内部用，用户没有这一档）；
+#:   · 五态只有两态有问号 ⇒ 补另外三个；
+#:   · 末句「全绿不等于安全」多此一举，且把「安全」这个词引进来。
+#:   三条各配一条判据＋负控，避免"只改字面、下版又漂回去"。
+
+
+def _visible_text(html):
+    """把渲染结果压成**用户读到的字**（去注释／script／style／标签／实体）。
+
+    ★ 为什么要去 HTML 注释：注释不上屏。若把它算进去，`<!-- lightorder:end -->`
+      这类标记会被当文案，判据就开始管它不该管的东西。
+    """
+    s = re.sub(r"<!--.*?-->", "", html, flags=re.S)
+    s = re.sub(r"<script\b.*?</script>", "", s, flags=re.S)
+    s = re.sub(r"<style\b.*?</style>", "", s, flags=re.S)
+    s = re.sub(r"<[^>]+>", " ", s)
+    return re.sub(r"\s+", " ", HT.unescape(s))
+
+
+def _around(s, word, n=12):
+    """取命中词前后各 n 字（报错时要能看见**读者看到的那一句**）。"""
+    i = s.find(word)
+    if i < 0:
+        return ""
+    return s[max(0, i - n):i + len(word) + n]
+
+
+def _views_html(prefix):
+    """四视图渲染结果（与 J1 同款夹具）。返回 generator(view, html)。"""
+    hub = tempfile.mkdtemp(prefix=prefix)
+    for view, filt in (("inbox", "action"), ("report", None),
+                       ("health", None), ("ledger", None)):
+        yield view, SV.render_page(view=view, filt=filt, root=hub, token="T")
+
+
+def _five_not_six_problem(html):
+    """纯判据：可见文本里不许出现「六态」。返回说明串或 None（None = 过）。
+
+    ★ 为什么扫**渲染结果的可见文本**而不是源码：源码里「六态」到处都是 ——
+      判据名（`ci/inbox_guards_0372.py` 的"六态封闭"）、产品注释、内部口径。
+      那些**不上屏**。扫源码会逼人把内部口径也改成五态 —— 那是把内部事实
+      删掉来讨好一条判据（本仓最忌的形状）。
+    ⇒ 只守**用户读到的字**；内部口径继续叫六态，两不相扰。
+    """
+    txt = _visible_text(html)
+    if "六态" in txt:
+        return ("可见文本里出现了「六态」（…%s…）—— 对外只说五态：六态是"
+                "**内部口径**（五态＋研发态），用户机器上永远见不到研发态那一档"
+                "（创始人原话「研发态只是内部用，不用告诉用户」），写六态等于"
+                "让他去找一个不存在的位置" % _around(txt, "六态"))
+    return None
+
+
+@check("J6 ★ 对外只说五态：四个页面的可见文本里不许出现「六态」")
+def j6():
+    bad = []
+    for view, h in _views_html("g0514_j6_"):
+        why = _five_not_six_problem(h)
+        if why is not None:
+            bad.append("%s 页｜%s" % (view, why))
+    if bad:
+        return "；".join(bad)
+    _note("四视图可见文本均无「六态」")
+
+
+@check("N-J6 负控：把五态行的「五」改回「六」 ⇒ 同一条 J6 判据必须判红")
+def n_j6():
+    """反向对照（真跑同一把尺子 `_five_not_six_problem`）。
+
+    ★ 只改**渲染结果里的一个字**（不是改产品文件）：负控证明的是"尺子会红"，
+      不是"产品现在错了"。喂变异 html 进同一个实现，与 J2/J3 同一手法。
+    """
+    for view, h in _views_html("g0514_nj6_"):
+        if _five_not_six_problem(h) is not None:
+            return "夹具不成立：%s 页本来就有「六态」⇒ 负控无分辨力" % view
+        if view == "health":
+            if "灯的五态由重到轻" not in h:
+                return "负控夹具不成立：摘不到五态行（结构已变）"
+            dead = h.replace("灯的五态由重到轻", "灯的六态由重到轻")
+            if _five_not_six_problem(dead) is None:
+                return "负控失效：改成「六态」后 J6 仍判绿（尺子没分辨力）"
+    return True
+
+
+def _ls_enabled_problem(root=None):
+    """纯判据：缺粮词条的「暂未启用」必须与 `granary` 的**真实状态**同步。
+
+    ★★ 为什么不能只判"词条里必须有这四个字"：粮账一旦真开（`granary.state()`
+      不再是 `off`），那句话当场变成**假话** —— 而它当初正是因为真才写上去的
+      （实测：`has_ledger()` ＝ False，`state()` ＝ `off`）。
+      ⇒ 双向断言（本仓"一个事实一个源"的标准形状）：
+        · `off`（还没记过粮账，这一档永远不会亮）⇒ 词条**必须**写；
+        · 非 `off`（粮账已在跑）⇒ 词条**不许**写。
+      负控的面② 专门守后者：少了它，这条判据只往一个方向使劲。
+    """
+    try:
+        import granary as GR
+    except ImportError:
+        return "granary 模块读不到 —— 无从比对真源（不假绿）"
+    st = GR.state(root=root)["state"]
+    txt = re.sub(r"<[^>]+>", "", GL.TERMS["Ls"].get("one") or "")
+    said = "暂未启用" in txt
+    if st == "off" and not said:
+        return ("粮账还没开（`granary.state()`＝off ⇒ 缺粮这一档永远不会亮），"
+                "缺粮词条却没写「暂未启用」—— 读者会去找一个不存在的红档"
+                "（创始人 2026-10-20 原话「缺粮这个态补一句---暂未启用」）")
+    if st != "off" and said:
+        return ("粮账已经在跑（`granary.state()`＝%s），缺粮词条却还写着"
+                "「暂未启用」—— 那是**假话**：真源说这一档已经会亮了" % st)
+    return None
+
+
+@check("J7 ★ 缺粮词条写明「暂未启用」，且与 granary 真源双向同步")
+def j7():
+    return _ls_enabled_problem()
+
+
+@check("N-J7 负控：删掉这句／让粮账真的开起来 ⇒ J7 都必须判红")
+def n_j7():
+    import granary as GR
+    if _ls_enabled_problem() is not None:
+        return "负控前置失败：当前真源就没通过 J7"
+    orig = GL.TERMS["Ls"]["one"]
+    # ① 词条里删掉这句 ⇒ 必须红
+    try:
+        GL.TERMS["Ls"]["one"] = orig.replace("这一档<b>暂未启用</b>。", "")
+        if "暂未启用" in re.sub(r"<[^>]+>", "", GL.TERMS["Ls"]["one"]):
+            return "负控夹具不成立：替换没生效（%r）" % GL.TERMS["Ls"]["one"]
+        if _ls_enabled_problem() is None:
+            return "负控失效：删掉「暂未启用」后 J7 仍判绿（尺子没分辨力）"
+    finally:
+        GL.TERMS["Ls"]["one"] = orig
+    # ② 让粮账真的开起来（临时 root 发一笔）⇒ 这句变成假话 ⇒ 必须红
+    root = tempfile.mkdtemp(prefix="g0514_nj7_")
+    GR.grant("入驻口粮", GR.SEED_GRANT, root=root)
+    st = GR.state(root=root)["state"]
+    if st == "off":
+        return "负控夹具不成立：发了粮但 state 仍是 off"
+    if _ls_enabled_problem(root=root) is None:
+        return ("负控失效：粮账已经开起来（state=%s）后 J7 仍判绿 —— 这条判据"
+                "只往一个方向使劲，另一半是装饰" % st)
+    return True
+
+
+#: 0.53.3 删掉的那句尾注（创始人原话：「最后一句，我觉得可能多此一举，是否
+#: 去除呢？而且，这句提到了'安全'，监理并不负责安全，也实质上负责不了」）。
+_DEAD_NOTE = "全绿不等于安全"
+
+
+def _dead_note_problem(html):
+    """纯判据：页面上不许再出现那句被删的尾注。返回说明串或 None。"""
+    if _DEAD_NOTE in _visible_text(html):
+        return ("被删掉的尾注「%s」又回来了 —— 三条理由（创始人 2026-10-20）："
+                "① 它挂在五态**枚举**下面，读者会当成第六档的说明（结构错位）；"
+                "② 「检查没跑成」已有唯一告警句 —— 链读不到时 `chain_check` 那行"
+                "整行换成 `R.chain_unverified()`（0490 那条守着），这里是同一件"
+                "事说第二遍；③ 它把「安全」引进页面，而监理**不承担安全**、也"
+                "实质上承担不了 —— 一句免责声明换来一个它根本不该认领的词。"
+                % _DEAD_NOTE)
+    return None
+
+
+@check("J8 ★ 删掉的尾注「全绿不等于安全」不许回来（减法留账）")
+def j8():
+    """★ 减法留账的机器化：删的是**那句话**，不是"没查成必须告警"这条规矩。
+
+    后者仍在 `_view_health` 的 `chain_check` 行（链读不到 ⇒ 整行换成
+    `R.chain_unverified()` 的告警句），由 0490 那条判据守 —— 本条**不重复**
+    开第二份断言（本仓"同一事实两处实现"标准形状），只锁"不许回来"。
+    """
+    bad = []
+    for view, h in _views_html("g0514_j8_"):
+        why = _dead_note_problem(h)
+        if why is not None:
+            bad.append("%s 页｜%s" % (view, why))
+    if bad:
+        return "；".join(bad)
+    _note("四视图可见文本均无那句尾注")
+
+
+@check("N-J8 负控：把那句尾注注回页面 ⇒ 同一条 J8 判据必须判红")
+def n_j8():
+    for view, h in _views_html("g0514_nj8_"):
+        if _dead_note_problem(h) is not None:
+            return "夹具不成立：%s 页本来就有那句 ⇒ 负控无分辨力" % view
+    _, h = next(_views_html("g0514_nj8b_"))
+    dead = h + "<p class=\"note\">%s：也可能是检查压根没跑。</p>" % _DEAD_NOTE
+    if _DEAD_NOTE not in _visible_text(dead):
+        return "负控夹具不成立：注入后仍读不到那句（结构已变）"
+    if _dead_note_problem(dead) is None:
+        return "负控失效：注回那句尾注后 J8 仍判绿（尺子没分辨力）"
+    return True
 
 
 # ════════════ W-SPK 族：界面机器腔人话化（0.51.2，创始人 2026-10-17 截图）═══════════
@@ -5628,14 +5893,29 @@ def c_t4_term_no_dup():
     return True
 
 
-@check("N-T4-09 负控：把「低于一周口粮时亮」同时塞进缺粮的 one 与 inc ⇒ T4-09 必须判红")
+@check("N-T4-09 负控：把缺粮 one 里的一句话塞进 inc ⇒ T4-09 必须判红")
 def n_t4_term_no_dup():
+    """★ 注入串**从当前 one 派生**，不写死一句旧文案。
+
+    ★★ 0.53.3 踩到：原负控写死 `"粮的余额低于一周口粮时亮起。"`，指望它与
+       old `one`（含"低于一周口粮时亮"）凑出 ≥6 字公共子串。本批把 `one`
+       改成「这一档暂未启用。粮只够一周时才会亮。」之后，那句注入串与新的
+       `one` 再无 ≥6 字重合 ⇒ **负控退化成恒绿**（它还在跑、还在返回 True，
+       只是永远测不到东西）。
+       ⇒ 教训再次成立：**改产品输出面时，所有靠"注入那个面"工作的负控都要
+         回头查一遍**（此前 `N-H6b` 同款）。修法：注入串从 `one` 现取。
+    """
     import glossary as GL
     if _term_dup_problems(GL.TERMS):
         return "夹具不成立：真词条本身就有跨字段重复 ⇒ 负控无分辨力"
+    one_txt = re.sub(r"<[^>]+>", "", GL.TERMS["Ls"].get("one") or "")
+    first = (one_txt.split("。")[0] or "").strip()
+    if len(first) < _TERM_DUP_MIN:
+        return ("负控夹具不成立：one 的第一句不足 %d 字（%r）—— 取不出可复用的"
+                "片段，请改用别的字段" % (_TERM_DUP_MIN, one_txt))
     orig = GL.TERMS["Ls"]["inc"]
     try:
-        GL.TERMS["Ls"]["inc"] = "粮的余额低于一周口粮时亮起。"
+        GL.TERMS["Ls"]["inc"] = first + "。"
         r = c_t4_term_no_dup()
     finally:
         GL.TERMS["Ls"]["inc"] = orig

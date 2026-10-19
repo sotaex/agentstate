@@ -4934,6 +4934,271 @@ def n_u23():
     return True
 
 
+# ======================================================================
+# 批 25 · L-01/L-02 族（0.53.2，创始人 2026-10-20「账本有记录永远是 8 天，
+#   从来不会增长」）
+# ----------------------------------------------------------------------
+# ★ 根因不是"数算错了"，是**取数窗口把口径封了顶**：
+#   `discover_chain_files(days=7)` ⇒ cutoff＝今天−7 ⇒ 最早能读到今天−7
+#   ⇒ 「有记录多少天」**恒等于窗口长度**（含今天恰好 8 天）。读者看到的是
+#   **取数参数**，不是数据。实测本机：窗口 7 天 ⇒ 8 天；全量 ⇒ 39 天
+#   （2026-09-10 → 2026-10-20，1929 条 vs 463 条）。
+# ★ 三条腿，缺一条就会以别的形状复发：
+#   ① 窗口**能**放开（真值：远古文件能被发现）；
+#   ② `load_items_all` **真的**用无窗口取数（行为，不是看源码里写了什么）；
+#   ③ 账本页**接的是**全量入口（AST 结构 ＋ 负控变异）。
+#   ★ 只改一处而另两处不动 ⇒ 另两处天然全绿（§42 同型病）。
+# ★ L-02 是性能腿：缓存上限小于一次全量扫描的文件数 ⇒ 缓存 100% 未命中
+#   （实测 64 vs 107 个文件：连续两次全量各 6.6s / 5.5s）。窗口在参数上放开了、
+#   实际每次仍重投影 21 万行 ⇒ 账本仍然没人敢点 —— 那是"修了一半"。
+# ======================================================================
+
+#: 故意写死一个**远古**日期：语义就是"比任何合理窗口都早"。
+#: ★ 为什么可以写死：0470 时间炸弹教训针对的是"把今天算进去"的夹具；
+#:   这里的断言恰好相反 —— 要的就是"它足够早，绝不该被任何窗口留下"。
+_L01_ANCIENT_DAY = "2020-01-01"
+
+
+def _l01_root():
+    """临时 hub：rollup 里放一个远古链文件 ＋ 一个今天的。不写任何产品文件。"""
+    root = tempfile.mkdtemp(prefix="g0490_l01_")
+    roll = os.path.join(root, "rollup")
+    os.makedirs(roll, exist_ok=True)
+    today = datetime.now().astimezone().date().isoformat()
+    for name in (_L01_ANCIENT_DAY, today):
+        with io.open(os.path.join(roll, name + ".jsonl"), "w",
+                     encoding="utf-8") as f:
+            f.write("{}\n")          # 内容无关：发现只按**文件名日期**过滤
+    return root
+
+
+@check("L-01a 取数窗口能放开：`days=WINDOW_ALL` 收全部链文件（远古文件不许被窗口吃掉）")
+def c_l01_window_can_open():
+    S = SV.S
+    root = _l01_root()
+    recent = S.discover_chain_files(days=S.WINDOW_RECENT_DAYS, root=root)
+    every = S.discover_chain_files(days=S.WINDOW_ALL, root=root)
+    ancient = os.path.normpath(
+        os.path.join(root, "rollup", _L01_ANCIENT_DAY + ".jsonl"))
+    if ancient not in every:
+        return ("`days=WINDOW_ALL` 没收到 %s —— 窗口根本没放开，账本的天数"
+                "会被窗口封顶（这就是「永远是 8 天」的形状）" % _L01_ANCIENT_DAY)
+    # 判别力自检：同一个夹具在默认窗口下**必须**看不到它，否则这条判据是装饰
+    if ancient in recent:
+        return ("判别力失效：默认窗口也能看到 %s ⇒ 夹具没造出差异，"
+                "这条判据永远绿" % _L01_ANCIENT_DAY)
+    if not set(recent) <= set(every):
+        return "全量集合竟然不含窗口集合 —— 放开窗口反而丢了文件（越放越窄）"
+    return True
+
+
+@check("N-L01a 负控：把 WINDOW_ALL 换回 7 天窗口 ⇒ 远古文件必须消失（判据不是装饰）")
+def n_l01_window_can_open():
+    S = SV.S
+    root = _l01_root()
+    ancient = os.path.normpath(
+        os.path.join(root, "rollup", _L01_ANCIENT_DAY + ".jsonl"))
+    # 面①：显式传 7 天 —— 远古文件必须看不到
+    if ancient in S.discover_chain_files(days=7, root=root):
+        return "负控失效：7 天窗口下远古文件仍被收进来（窗口根本没在过滤）"
+    # 面②：把常量本身换成 7 —— 走全量的那个入口必须跟着一起变窄
+    saved = S.WINDOW_ALL
+    try:
+        S.WINDOW_ALL = 7
+        if os.path.basename(ancient) in [
+                os.path.basename(p) for p in
+                S.discover_chain_files(days=S.WINDOW_ALL, root=root)]:
+            return "负控失效：WINDOW_ALL 改成 7 之后仍能收到远古文件"
+    finally:
+        S.WINDOW_ALL = saved
+    return True
+
+
+@check("L-01b `load_items_all` 真走无窗口取数（行为断言：抓它实际传给发现的 days）")
+def c_l01_all_entry_uses_no_window():
+    S = SV.S
+    seen = {}
+    orig = S.discover_chain_files
+
+    def spy(days=S.WINDOW_RECENT_DAYS, root=None, include_projects=True):
+        seen["days"] = days
+        seen["root"] = root
+        return orig(days=days, root=root, include_projects=include_projects)
+
+    S.discover_chain_files = spy
+    try:
+        S.load_items_all(root=tempfile.mkdtemp(prefix="g0490_l01b_"))
+    finally:
+        S.discover_chain_files = orig
+    if "days" not in seen:
+        return "`load_items_all` 根本没调 `discover_chain_files` —— 判据锚点失效"
+    if seen["days"] is not S.WINDOW_ALL:
+        return ("`load_items_all` 传给发现层的 days=%r（应为 WINDOW_ALL=%r）"
+                " —— 名字叫 all 却仍带窗口，账本天数会被重新封顶"
+                % (seen["days"], S.WINDOW_ALL))
+    return True
+
+
+@check("N-L01b 负控：`load_items_all` 退回带窗口取数 ⇒ L-01b 必须红")
+def n_l01_all_entry_uses_no_window():
+    S = SV.S
+    seen = {}
+    orig = S.discover_chain_files
+    # ★★ 两个都要存，**各还原各的**。曾经写错成 `saved = S.load_items`
+    #   并在 finally 里 `S.load_items_all = saved` ⇒ 负控跑完之后
+    #   `load_items_all` 被永久指向带窗口的 `load_items`，后面的判据（L-02）
+    #   因此拿到 7 天窗口的结果而红 —— 红的是负控的残留，不是产品。
+    saved_all = S.load_items_all
+    saved_find = S.discover_chain_files
+
+    def spy(days=S.WINDOW_RECENT_DAYS, root=None, include_projects=True):
+        seen["days"] = days
+        return orig(days=days, root=root, include_projects=include_projects)
+
+    try:
+        # 变异：把 load_items_all 换成"带默认窗口"的旧形状（内存，不落盘）
+        S.discover_chain_files = spy
+        S.load_items_all = (lambda root=None, kinds=None:
+                            S.load_items(root=root, kinds=kinds))
+        S.load_items_all(root=tempfile.mkdtemp(prefix="g0490_nl01b_"))
+    finally:
+        S.discover_chain_files = saved_find
+        S.load_items_all = saved_all
+    if seen.get("days") == S.WINDOW_ALL:
+        return "负控失效：退回带窗口取数后，days 仍等于 WINDOW_ALL（变异没生效）"
+    if seen.get("days") is None:
+        return "负控失效：变异后根本没走到发现层，负控无分辨力"
+    return True
+
+
+def _l01c_problem(src):
+    """账本页在 `items is None` 时**必须**走 `load_items_all`（AST，不看注释）。
+
+    ★ 为什么用 AST 而不是文本 `in`：`if "load_items_all" in src` 会被
+      注释里的同一串字骗过（本仓已栽过：注释与实现相反、判据却绿）。
+    """
+    import ast
+    try:
+        tree = ast.parse(src)
+    except SyntaxError as e:
+        return "inbox_server.py 解析失败（判据锚点失效）：%s" % e
+    fn = next((n for n in ast.walk(tree)
+               if isinstance(n, ast.FunctionDef) and n.name == "render_page"), None)
+    if fn is None:
+        return "找不到 render_page —— 判据锚点失效（改名了？）"
+    for node in ast.walk(fn):
+        if not isinstance(node, ast.If):
+            continue
+        # `items is None` 这一支
+        if not (isinstance(node.test, ast.Compare)
+                and isinstance(node.test.left, ast.Name)
+                and node.test.left.id == "items"):
+            continue
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute):
+                if sub.func.attr == "load_items_all":
+                    return None
+    return ("render_page 的 `items is None` 分支里没有调 `load_items_all`"
+            " —— 账本又回到 7 天窗口，「有记录多少天」会重新被封顶在 8 天")
+
+
+@check("L-01c 账本页接的是全量入口（AST：`render_page` 的 items 空分支调 load_items_all）")
+def c_l01c():
+    with io.open(os.path.join(ROOT, "inbox_server.py"), encoding="utf-8") as f:
+        return _l01c_problem(f.read())
+
+
+@check("N-L01c 负控：把账本分支改回 `S.load_items` ⇒ L-01c 必须红")
+def n_l01c():
+    with io.open(os.path.join(ROOT, "inbox_server.py"), encoding="utf-8") as f:
+        src = f.read()
+    if _l01c_problem(src) is not None:
+        return "负控前置失败：当前生产实现没通过 L-01c"
+    mut = src.replace("S.load_items_all(root=root)", "S.load_items(root=root)", 1)
+    if mut == src:
+        return "负控夹具不成立：没找到 load_items_all 调用点"
+    if _l01c_problem(mut) is None:
+        return "负控失效：账本分支改回带窗口的 load_items 仍判合格"
+    return True
+
+
+#: 夹具文件数：**约 6~7 个月的逐日链文件**。为什么是 200 而不是"当前真实文件数"：
+#:   本套件导入时就把 hub 指到临时目录（隔离，不碰真机），真实文件数在这里恒为 0
+#:   —— 拿它比就是一条永远绿的假判据。用固定夹具 ⇒ 断言变成可复现的**行为**：
+#:   「全量扫完 200 个文件，这 200 个的投影必须**都还在**缓存里」。
+#:   ★ 淘汰是 FIFO（挤最早那个），夹具的 200 个最后插入 ⇒ 它们存活 ⟺ 上限 ≥ 200。
+_L02_FIXTURE_N = 200
+
+
+def _l02_root(n):
+    """临时 hub：连续 n 天的链文件（内容与本判据无关，发现只按文件名日期）。"""
+    root = tempfile.mkdtemp(prefix="g0490_l02_")
+    roll = os.path.join(root, "rollup")
+    os.makedirs(roll, exist_ok=True)
+    today = datetime.now().astimezone().date()
+    for k in range(n):
+        d = (today - timedelta(days=k)).isoformat()
+        with io.open(os.path.join(roll, d + ".jsonl"), "w", encoding="utf-8") as f:
+            f.write("{}\n")
+    return root
+
+
+def _l02_missing(cap):
+    """在**干净缓存**上做一次全量扫描，返回 `(丢了几个, 一共几个)`。
+
+    ★★ 为什么必须先把缓存清空（实测踩到，不是防御性设计）：
+      `_project_file` 的淘汰是"插入一个之前先挤掉最早一个" ⇒ 缓存**只增不减**，
+      长度永远停在历史最大值。于是同一段代码在"缓存已有 200 条"和"缓存为空"
+      两种前提下，**结论相反**（实测：前者 0 丢、后者 190 丢）。
+      判据若吃这个前提，就会变成一条**随执行顺序变脸**的假判据 —— 比没有更坏
+      （绿的时候你以为守住了）。⇒ 本函数自带干净前提，用完还原。
+    ★ 清空是安全的：`_PROJ_CACHE` 是**纯记忆化**（键含 mtime_ns/size，内容一变
+      就必然重算），丢掉它只会变慢，不会算错。
+    """
+    S = SV.S
+    saved_cap, saved_cache = S._PROJ_CACHE_MAX, dict(S._PROJ_CACHE)
+    try:
+        S._PROJ_CACHE.clear()
+        S._PROJ_CACHE_MAX = cap
+        root = _l02_root(_L02_FIXTURE_N)
+        S.load_items_all(root=root)
+        paths = S.discover_chain_files(days=S.WINDOW_ALL, root=root)
+        have = {k[0] for k in S._PROJ_CACHE}
+        return (sum(1 for p in paths if os.path.normpath(p) not in have),
+                len(paths))
+    finally:
+        S._PROJ_CACHE.clear()
+        S._PROJ_CACHE.update(saved_cache)
+        S._PROJ_CACHE_MAX = saved_cap
+
+
+@check("L-02 全量扫描后每个文件的投影都还在缓存里（缓存不许被自己挤空）")
+def c_l02():
+    missing, total = _l02_missing(SV.S._PROJ_CACHE_MAX)
+    if total != _L02_FIXTURE_N:
+        return "判据夹具不成立：只发现 %d 个文件（应 %d）" % (total, _L02_FIXTURE_N)
+    if missing:
+        return ("全量扫完 %d 个文件后，缓存里丢了 %d 个（`_PROJ_CACHE_MAX`=%d）"
+                " —— 每读一个新文件就挤掉一个旧的，缓存**必然**全部未命中"
+                "（实测 64 vs 107：连续两次全量各 6.6s / 5.5s）⇒ 账本每次开都要"
+                "重投影 21 万行，窗口放开了但没人敢点 —— 那是「修了一半」"
+                % (total, missing, SV.S._PROJ_CACHE_MAX))
+    return True
+
+
+@check("N-L02 负控：把上限压到 10（远小于 200 个文件）⇒ 必然丢缓存，L-02 必须红")
+def n_l02():
+    if _l02_missing(SV.S._PROJ_CACHE_MAX)[0]:
+        return "负控前置失败：当前生产实现没通过 L-02"
+    missing, total = _l02_missing(10)
+    if total != _L02_FIXTURE_N:
+        return "负控夹具不成立：只发现 %d 个文件（应 %d）" % (total, _L02_FIXTURE_N)
+    if not missing:
+        return ("负控失效：上限压到 10 之后 %d 个文件一个都没丢 ⇒ L-02 永远绿，"
+                "这条判据是装饰" % total)
+    return True
+
+
 def main():
     print("=" * 78)
     print("0.48.5 Antinel 监理细节修订判据（交接件 v1.1 §5.7）—— "

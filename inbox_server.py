@@ -312,9 +312,12 @@ details.where code{font-family:var(--mono);font-size:11.5px;word-break:break-all
 .ok{color:var(--l0);font-weight:700}.warn{color:var(--l1);font-weight:700}.bad{color:var(--r0);font-weight:700}.neutral{color:var(--muted);font-weight:700}.dev{color:var(--brand);font-weight:700}
 .empty{text-align:center;padding:40px;color:var(--muted)}
 .note{font-size:12px;color:var(--muted)}
-/* ★ 0.50.7（创始人截图二「失守后换行」）：六态枚举的原子单元 ——
+/* ★ 0.50.7（创始人截图二「失守后换行」）：灯的五态枚举的原子单元 ——
    每个态包一层 span 且 nowrap，窄面板下也只会在态与态之间的「·」处
-   折行，绝不再把「失守」「拦截」这类短词切成一截。 */
+   折行，绝不再把「失守」「拦截」这类短词切成一截。
+   ★ 0.53.3：改名 —— 它描述的是页面上**这一行**（对外），不是内部灯态
+     表；叫错会让后来的人以为页面上应该有六个（创始人原话：研发态只是
+     内部用，不用告诉用户，用户是没有这个态的）。 */
 .sixit{white-space:nowrap}
 .unread-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--brand);margin-right:6px;vertical-align:middle}
 /* ---- 0.35.3：三档 + 可展开卡片（创始人 2026-10-06 四条意见）---- */
@@ -2432,8 +2435,20 @@ def _view_health(rep, token, items=None):
     #   两条判据同时守住。
     #   ★ 次序由 `M.PRIORITY` 派生、词名由 `GL`／`M.state_short` 取 —— **不手写
     #     第二份次序**（六态次序漂移正是由这条纪律挡住的）。
-    #   ★ 只给缺落点的两态挂「？」：其余三态的落点在顶部药丸，不重复铺问号
-    #     （Q-11：一屏十几个「？」在安全语境里像"十几处有问题"）。
+    #   ★★ 0.53.3（创始人 2026-10-20 截图「五态只有两个态有问号」）：
+    #     上一版只给 Ls/L0 挂问号，理由是「其余三态的落点在顶部药丸」。
+    #     那个理由站不住：读者读的是**这一行**，不会为了问"失守是什么"
+    #     再跑到顶部去找一枚长得一样的「？」；顶栏那枚问号答的是"灯上这个
+    #     词叫什么"，与"这一档是什么意思"不是同一个问题。⇒ 五态全挂。
+    #     ★ Q-11（"一屏十几个「？」像十几处有问题"）的边界：那一屏十几个
+    #       指的是**散落各处**的问号；这里是**同一行枚举里各一枚**，形态
+    #       一致、数量等于枚举项数，读者读到的是"每一项都能查"，不是
+    #       "有五处问题"。刻意推翻 Q-11 的这条推论，记在此处。
+    #   ★★ 0.53.3：对外只说**五态**。六态是内部口径（五态＋研发态）—— 用户
+    #     机器上永远见不到研发态那一档，写六态等于让他去找一个不存在的位置
+    #     （创始人原话：「研发态只是内部用，不用告诉用户，用户是没有这个态
+    #     的」）。研发态**不是**灯的一档，`light.exc` 里的"不点灯、只挂徽标"
+    #     那句仍保留 —— 它说的正是"徽标≠灯的档位"，与此处不冲突。
     _order = sorted(("R0", "Ls", "L2", "L1", "L0"), key=lambda k: -M.PRIORITY[k])
     # ★★ 0.50.7（创始人截图二「失守后换行」＋截图三「缺粮（Ls）括号不一致」）：
     #   ① 断行确定性化：标签独占一行（显式 `<br>`），各态包原子
@@ -2448,15 +2463,28 @@ def _view_health(rep, token, items=None):
     #     后 summary 只显示词（单一真源，不手写第二份），码留在词条展开体
     #     首行（`chip()` 的 head 机制自动补 `<b>缺粮（Ls）</b>：）——
     #     P13 落点（`data-t`）不变。
-    _six = ("<div class=\"note sixline\">灯的六态由重到轻：<br>"
-            + " · ".join("<span class=\"sixit\">%s</span>" % (
-                GL.chip(k, text=M.state_short(k)) if k in ("Ls", "L0")
-                else M.state_short(k))
-                for k in _order)
-            + "</div>")
+    # ★★ 0.53.3：这一行自带**显式边界**（`id` 起、`<!-- lightorder:end -->`
+    #   止）。旧版判据的收尾锚是文字「`</div>` 后面跟一个 `<p class="note">`」
+    #   —— 那是把尺子绑在**文案**上：删掉下面那句尾注，尺子当场瞎掉。
+    #   锚在结构标记上，这一段里加什么减什么都不影响判据。
+    _lorder = ("<div class=\"note sixline\" id=\"lightorder\">灯的五态由重到轻：<br>"
+               + " · ".join("<span class=\"sixit\">%s</span>"
+                            % GL.chip(k, text=M.state_short(k)) for k in _order)
+               + "</div><!-- lightorder:end -->")
+    # ★★ 0.53.3（创始人 2026-10-20 截图末句）：删掉尾注
+    #   「全绿不等于安全：也可能是检查压根没跑。」三条理由：
+    #     ① **结构错位**：它挂在五态枚举下面，读者会当成第六档的说明；
+    #     ② **同一件事说第二遍**："检查没跑成"已有唯一告警句 —— 链读不到
+    #        时 `chain_check` 那行整行换成 `R.chain_unverified()` 的告警
+    #        （见 `_chain_value`），这里再说一遍没有新信息；
+    #     ③ **认领了不该认领的职责**：它把「安全」这个词引进页面，而监理
+    #        不承担安全、也实质上承担不了（创始人原话）。一句免责声明换来
+    #        一个它根本不该碰的词 —— 用户读完会问"那你到底管不管安全"，
+    #        这个问题原本不存在。
+    #   ★ 减法留账：删的是**这句话**，不是"没查成必须告警"这条规矩 ——
+    #     后者仍在 `_chain_value`，判据 J8 同时锁住"这句不许回来"。
     return ("<h2>%s · %s</h2><div class=\"rows\">%s</div>%s"
-            "<p class=\"note\">全绿不等于安全：也可能是检查压根没跑。</p>"
-            % (PAGE_TITLES["health"], _esc(rep.get("day") or ""), body, _six))
+            % (PAGE_TITLES["health"], _esc(rep.get("day") or ""), body, _lorder))
 
 
 def _view_ledger(rep, token, items=None):
@@ -3078,7 +3106,16 @@ def render_page(view="inbox", filt=None, root=None, token="", items=None, rep=No
 
     ★★ 0.35.3：视图名默认改 `action`（要处理），并且**每个视图都不再默认"全部历史"**。
     """
-    items = S.load_items(root=root) if items is None else items
+    if items is None:
+        # ★★ 0.53.2（创始人 2026-10-20「账本有记录永远是 8 天，从来不会增长」）：
+        #   账本＝**历史全量**，收件箱／日报＝"最近"。旧版五个视图共用一句
+        #   `S.load_items(root=root)`，而它默认 `days=7` ⇒ 账本的「有记录多少天」
+        #   **恒等于窗口长度**（含今天恰好 8 天），读者看到的是取数参数不是数据。
+        #   实测本机：窗口 7 天 ⇒ 8 天；全量 ⇒ **39 天**（2026-09-10 → 10-20）。
+        #   ★ 只改账本这一个视图 —— 收件箱「看一眼」本就是近期口径，动它会把
+        #     一批既有计数判据一起改掉（那是另一个问题，不在本轮）。
+        items = (S.load_items_all(root=root) if view == "ledger"
+                 else S.load_items(root=root))
     # ★ 0.35.3：打开账本页时，用当前可读到的链记录刷新当日快照。
     #   旧版只有显式运行 `inbox daemon` 才写 ledger；正常打开 server 无人写，
     #   因而账本文件不存在、数字一直全零。写入委托给 daemon 唯一实现；只在
