@@ -95,6 +95,31 @@ _URL = "http://127.0.0.1:8790/?t=OX5MreAJH2aYj98rn3SyXSFonmX1MXDv"
 _RECT = (2240, 1264, 720, 640)
 
 
+def _svc_port():
+    """服务端口：**只读运行时真源** `~/.antinel/console/url.json`。
+
+    ★★ 2026-10-19 实测（0.53.2）：W17-d 原先在 netstat 里写死 "8790"。而
+      8790 被占用时产品会取一个空闲端口重新拉起（本机实测漂到 35089）——
+      于是 daemon 明明在跑、服务明明在听，判据却报
+      「守护进程在跑，服务（8790）却没在听 —— supervise 链路断了」。
+      这是**量具自己在编事实**：本仓纪律早就写着「活体回读的 URL/端口
+      只读 `~/.antinel/console/url.json`，仓内 console/url.json 是旧缓存」，
+      判据却没照做。读不到真源才回落 8790（默认端口，保持旧行为）。
+    """
+    import io as _io
+    import json as _json
+    import os as _os
+    p = _os.path.expanduser("~/.antinel/console/url.json")
+    try:
+        with _io.open(p, encoding="utf-8") as f:
+            port = int((_json.load(f) or {}).get("port") or 0)
+        if port > 0:
+            return port
+    except Exception:                                          # noqa: BLE001
+        pass
+    return 8790
+
+
 class _NS(object):
     """argparse Namespace 的最小替身（cmd_window 只读 root）。"""
 
@@ -533,12 +558,13 @@ def w17d():
     import subprocess
     out = subprocess.run(["netstat", "-ano"], capture_output=True).stdout
     txt = out.decode("utf-8", "replace")
+    port = _svc_port()
     listening = [ln for ln in txt.splitlines()
-                 if "8790" in ln and "LISTENING" in ln]
+                 if (":%d" % port) in ln and "LISTENING" in ln]
     desktops = [1 for (_h, t) in WIN.enum_windows(visible_only=True) if t]
     hwnds = WIN.find_console_windows()
     if listening:
-        _note("服务 8790 LISTENING ✓；窗口=%s" % (hwnds or "无（用户可能已关窗）"))
+        _note("服务 %d LISTENING ✓；窗口=%s" % (port, hwnds or "无（用户可能已关窗）"))
         if hwnds:
             on_screen = []
             for h in hwnds:
@@ -568,7 +594,8 @@ def w17d():
         import inbox_daemon as DM
         d_alive, _dpid = DM.daemon_alive()
         if d_alive:
-            return "守护进程在跑，服务（8790）却没在听 —— supervise 链路断了"
+            return ("守护进程在跑，服务（%d）却没在听 —— supervise 链路断了"
+                    % port)
         raise Skip("SKIP: 服务没在听且守护进程未在跑（用户没启动监理，非链路故障）")
     return True
 

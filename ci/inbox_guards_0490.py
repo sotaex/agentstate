@@ -2863,8 +2863,12 @@ def t_02():
     import glossary as GL
     import inbox_report as R
     # ── ① R0/L1：事件类型层逐字派生 ──
+    # ★★ 0.53.2：模板去掉「包括这几类：」引子（列举本身即"包括这些"，
+    #   ASD-STE100：同一件事不说两遍）。**断言强度不变** —— 仍然要求
+    #   `inc` 与 `_kinds_of()` 的结果**逐字相等**（手写回潮照样红）。
+    #   改动原因：引子占 6 字宽，使 L1.inc 超出一句 40 字的预算。
     for st, tail in (("R0", "具体是哪一件事，看收件箱每条记录的原因。"), ("L1", "")):
-        want = "包括这几类：%s。%s" % (GL._kinds_of(st), tail)
+        want = "%s。%s" % (GL._kinds_of(st), tail)
         got = GL.TERMS[st]["inc"]
         if got != want:
             return "%s 词条 inc 与派生不一致（手写回潮？）：%r" % (st, got[:60])

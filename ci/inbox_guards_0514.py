@@ -57,6 +57,11 @@
      线程池定时器帧泵。判据方法：PowerShell 驱动 dot-source **产品同一个**
      帧数学脚本真跑，Python 侧只做从同一份规格出发的独立推导（oracle）与
      逐项比对 —— 不二次实现被测逻辑。详见「FLO-10 族」段头。
+  ⑪ T4-07／T4-08 问号词条文案（**0.53.2，2026-10-19 补**）：T4 那六条只覆盖
+     归因面板与收件箱条目，**没有一条经过 `glossary.TERMS`** ⇒ 一个 233 字、
+     单句 65 字、四段全讲实现的灯词条活了两版没人报红。补法：把品质性机制层
+     的**预算网**（一句 ≤40 字、一字段 ≤2 句）与**禁用语网**接到词条这条腿上。
+     详见「T4-07／T4-08」段头（含为什么「我们」不重复进禁用语表）。
 
 ★ 规格真源（U-17 的唯一依据，不许凭记忆）：
     `D:\\2026\\PSL\\Antinel品牌动效报警语法v1.2（2026-09-27）.md`
@@ -5124,6 +5129,175 @@ def n_t4_posture_note_only_when_needed():
         return "负控失效：落点类也挂和解句后 T4-06 仍判绿"
     if "现在实测" not in str(r):
         return "负控方向不对：判红了但报的不是和解句（%s）" % r
+    return True
+
+
+# ════════ T4-07／T4-08 词条文案：把品质性机制层的两张网接上「问号」这条腿 ════════
+#: ★ 为什么单立这两条（0.53.2，创始人 2026-10-19 06:21 交办）：
+#:   原话「我建议所有的---R0、L1、L2的说明都过一遍，把违和、废话都清理了。
+#:         还有，参考ASD-STE100做一下精炼，防范各种啰嗦废话。」
+#:   T4 那一批只改了**归因面板**（`remediation.py`）：T4-04 扫的是
+#:   `inspect.getsource(RM)`，一个字都不看 `glossary.TERMS`。于是「问号词条」
+#:   这条腿在品质性机制层里是**空的** ——
+#:     · 预算网（单句 ≤40 字）挂在 `record_meta()`（收件箱条目）；
+#:     · 禁用语网挂在归因面板；
+#:     · 主语网（网四）挂在渲染出的页面。
+#:   三张网都不经过「词条正文」这个消费面 ⇒ 一个 233 字、四句机制话的灯词条
+#:   **活了两版没人报红**。这正是本仓最贵的那个形状：
+#:   **只守一条腿，另一条腿天然全绿**。
+#:   ★ 已有的 H6b（`ci/inbox_guards_0360.py`）确实**扫了**词条五个字段 ——
+#:     但只扫「鸟语」（金丝雀那类未登记词）。同一字段被守了一个维度，
+#:     另一个维度没守，看起来像"词条已经有判据了"—— 这比完全没有判据更危险。
+#:   ★ 为什么不把「我们」也放进 `_TERM_BANNED`：网四的 `T-04f` 渲染六个页面
+#:     取可见文本，词条正文就在那六个页面的 HTML 里 ⇒ **已被覆盖**。
+#:     同一断言开两个入口必漂（本仓「同一事实两处实现」标准形状），故不重复。
+#:   ★ 与 T4-04 的分工：T4-04 扫**源码字面量**（面板文案是拼出来的，只能看源码）；
+#:     这两条扫**运行时的词条字典**（问号正文是数据，且含 `_shield_overview()`
+#:     这类派生句 —— 扫源码会漏掉派生结果）。各守一层，各配负控。
+
+#: ASD-STE100 折算：一句 ≤20 词 ⇒ 中文按 1 词 ≈ 2 字 ⇒ **一句 ≤40 字**。
+_TERM_SENT_MAX = 40
+#: 一个字段最多几句：STE 一段 ≤6 句，但词条字段是短说明 ⇒ **2 句封顶**。
+_TERM_SENT_PER_FIELD = 2
+
+
+def _tw(s):
+    """显示宽度（不叫"字数"）：汉字算 1，其余非空白算 0.5。
+
+    ★ 为什么不用 `len()`：`~/.antinel/ledger/daily.jsonl` 有 29 个字符但只占
+      约 15 个汉字宽 —— 用 `len()` 会让"该不该带路径"变成"会不会判红"，
+      判据就逼着产品藏信息（本仓最忌的形状）。宽度才是浮层的真实预算。
+    """
+    w = 0.0
+    for ch in s or "":
+        if ch.isspace():
+            continue
+        w += 1.0 if ord(ch) > 0x2E7F else 0.5
+    return int(w + 0.5)
+
+
+def _term_sentences(s):
+    """把一段词条正文切成句子（按 。！？ 断；`<b>` 等标签不计宽）。"""
+    plain = re.sub(r"<[^>]+>", "", str(s or ""))
+    return [p for p in re.split(r"(?<=[。！？])", plain) if p.strip()]
+
+
+def _term_budget_problems(terms):
+    """纯函数：给「键 → 词条字典」，返回问题清单（空 = 过预算网）。
+
+    ★ 纯函数是为了让负控**直接复用同一把尺子**：给变异后的字典，
+      与正判据走同一段代码 —— 不另写一份"负控专用"的判读。
+    """
+    bad = []
+    for k in sorted(terms):
+        t = terms.get(k)
+        if not isinstance(t, dict):
+            continue
+        for f in ("one", "inc", "exc", "unit"):
+            ss = _term_sentences(t.get(f))
+            if not ss:
+                continue
+            if len(ss) > _TERM_SENT_PER_FIELD:
+                bad.append("%s.%s 有 %d 句（上限 %d）"
+                           % (k, f, len(ss), _TERM_SENT_PER_FIELD))
+            for s in ss:
+                w = _tw(s)
+                if w > _TERM_SENT_MAX:
+                    bad.append("%s.%s 有一句 %d 字（上限 %d）：%s…"
+                               % (k, f, w, _TERM_SENT_MAX, s.strip()[:24]))
+    return bad
+
+
+#: 词条专属禁用语。每一条都能追到创始人的一句原话，不是"我觉得不好"。
+_TERM_BANNED = (
+    "按来源",    # 讲"怎么算出来的"，不是回答"这是什么"（创始人：这是机制话）
+    "抢位",      # 内部隐喻：灯和徽标谁占版面，用户不需要知道版面协商
+    "不冒充",    # 自我评价（"不冒充此刻"）—— 说事实，别说自己不撒谎
+    "也就是说",  # 同义反复的标志（网二：同一句话说两次）
+    "换句话说",  # 同上
+)
+
+
+def _term_banned_hits(terms, banned=None):
+    """纯函数：词条正文命中禁用语 ⇒ 返回清单（空 = 干净）。"""
+    ban = tuple(banned if banned is not None else (_TERM_BANNED + _PANEL_BANNED))
+    hits = []
+    for k in sorted(terms):
+        t = terms.get(k)
+        if not isinstance(t, dict):
+            continue
+        for f in ("w", "one", "inc", "exc", "unit"):
+            plain = re.sub(r"<[^>]+>", "", str(t.get(f) or ""))
+            for b in ban:
+                if b in plain:
+                    hits.append("%s.%s 里出现 %r" % (k, f, b))
+    return hits
+
+
+@check("T4-07 ★ 词条文案过预算网：一句 ≤40 字、一个字段 ≤2 句（ASD-STE100 折算）")
+def c_t4_term_budget():
+    """★ 从**运行时的词条字典**出发，不从源码字面量出发。
+
+    词条里有派生句（`L2.inc` 由 `_shield_overview()` 现算），扫源码只能看到
+    表达式 —— 派生出来的长句会被漏掉，而它恰恰是最长的那一类。
+    """
+    import glossary as GL
+    bad = _term_budget_problems(GL.TERMS)
+    if bad:
+        more = "…（共 %d 处）" % len(bad) if len(bad) > 4 else ""
+        return "；".join(bad[:4]) + more
+    _note("%d 条词条 × 4 字段全过预算网" % len(GL.TERMS))
+    return True
+
+
+@check("N-T4-07 负控：把灯词条退回 107 字的旧机制句 ⇒ T4-07 必须判红")
+def n_t4_term_budget():
+    import glossary as GL
+    if _term_budget_problems(GL.TERMS):
+        return "夹具不成立：真词条本身就超预算 ⇒ 负控无分辨力"
+    orig = GL.TERMS["light"]["inc"]
+    try:
+        GL.TERMS["light"]["inc"] = (
+            "它按来源拼：失守只认此刻；拦截／注意看最近 24 小时的账，"
+            "但只有刚发生的才算数 —— 你看过、或放久了，就转成「待阅」里的一条，"
+            "不再占着灯。")
+        r = c_t4_term_budget()
+    finally:
+        GL.TERMS["light"]["inc"] = orig
+    if r is True or r is None:
+        return "负控失效：退回旧机制句后仍判绿（尺子没有分辨力）"
+    if "light.inc" not in str(r):
+        return "负控方向不对：判红了但没点名词条（%s）" % r
+    return True
+
+
+@check("T4-08 ★ 词条文案过禁用语网：不出现机制句／内部隐喻／同义反复标志")
+def c_t4_term_banned():
+    import glossary as GL
+    hits = _term_banned_hits(GL.TERMS)
+    if hits:
+        more = "…（共 %d 处）" % len(hits) if len(hits) > 4 else ""
+        return "；".join(hits[:4]) + more
+    _note("扫了 %d 个禁用语 × %d 条词条" % (len(_TERM_BANNED) + len(_PANEL_BANNED),
+                                            len(GL.TERMS)))
+    return True
+
+
+@check("N-T4-08 负控：把「不跟灯抢位」塞回灯词条 ⇒ T4-08 必须判红")
+def n_t4_term_banned():
+    import glossary as GL
+    if _term_banned_hits(GL.TERMS):
+        return "夹具不成立：真词条本身就有禁用语 ⇒ 负控无分辨力"
+    orig = GL.TERMS["light"]["exc"]
+    try:
+        GL.TERMS["light"]["exc"] = orig + "另有研发中、缺粮两件事不跟灯抢位。"
+        r = c_t4_term_banned()
+    finally:
+        GL.TERMS["light"]["exc"] = orig
+    if r is True or r is None:
+        return "负控失效：塞回「不跟灯抢位」后仍判绿（尺子没有分辨力）"
+    if "抢位" not in str(r):
+        return "负控方向不对：判红了但报的不是「抢位」（%s）" % r
     return True
 
 

@@ -64,7 +64,7 @@
   "challenge/tamper.py": "sha256:588ac3ca6225b74a95934a47289f732200efd0f921509d2e5199fff5830fe2ef",
   "challenge/verify.py": "sha256:09dad42fd22b3cbe77abfcf6042cbd71f8c9a19b7a6e78302962121e55b70ee1",
   "egress.py": "sha256:a2b51c220a66de74ebd4ad6a231043013c6caa12970adb50b93cd74d33fc502d",
-  "glossary.py": "sha256:aba49590642a175ae29ccca9117c9860f30d2fc69c019afc863182569cc3cc57",
+  "glossary.py": "sha256:c30cf5ba8a53e94718364d24f0c379740a9b019e928d4ecafdd4c67f6964bec3",
   "granary.py": "sha256:4db8a5a6bc3e207755d772d4cae7197f0fe3f5f57747436c5563760d43e96f14",
   "heartbeat.py": "sha256:5baafdb799379fe820a4dda2c0d73d0f737b66496abf17d7f630eef0c7d2cc72",
   "hooks/_host_detect.py": "sha256:3c445590179cc9927fb9e4adab896f43636524c7f4002285138058a8beda78ee",
