@@ -129,7 +129,7 @@
   "scripts/check_github_license.py": "sha256:3c7a500a1d30f019a0aa149efc2aff844ec02593fa2c8c39ed51170e447be125",
   "scripts/cleanup_staging_once.py": "sha256:8245dc52b4a8dc77e7c2a907751564c81502dc3ba15f9c98757c509edc26117c",
   "scripts/install.py": "sha256:f6a2a6dccf9539bb0ef2f573d7712418ff850eee14ec0b564119761749405545",
-  "scripts/release.py": "sha256:4797c371a0228639e91b050279fc929684f353f1bc84a1db43f0ec8613396e67",
+  "scripts/release.py": "sha256:9967cd6de55b09cbf61e9ae488011527fe5c54d805621ddd9032ee5e9aac343b",
   "scripts/report.py": "sha256:deeedb87775792a0eb3f39592f96dda6d45064f07ca3c40a73eadef1315c5945",
   "scripts/run_harness.py": "sha256:125bbbcd5d659283ef5bb1cbf8d20f4e22d9ecc561a0cfa8540dfe12d3fdf6e9",
   "scripts/scan.py": "sha256:029e3dd67d0fa7ede2b8d9300df5e52f0e497b781be853117b0bb2cc3fee2cc1",
