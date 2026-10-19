@@ -202,6 +202,16 @@ def write_state(state, count=0, tip="", root=None, shield=None, total=None,
                "total": None if total is None else int(total),
                "shield": shield if shield in SHIELD_SUFFIX else SHIELD_UNKNOWN,
                "ts": time.time()}
+    # ★★ 0.53.1：多写一个 `logo` 块 ＝ **漂浮哨标的动效规格**（从
+    #   `inbox_server.logo_motion_spec()` 单一真源派生）。哨标
+    #   （tools/logo.ps1）照它画与主窗口同一份动法（规格 v1.2）；
+    #   没有它 ⇒ 哨标如实回落托盘同族静态图标（不假装会动）。
+    #   ★ 取不到 ⇒ **不写这个键**（tray.json 照写，托盘不受连累）——
+    #   但不许在这里编一份（规格只有 inbox_server 一个家）；缺失由判据
+    #   FLO-10c 每次闸门机器守（静默缺失＝哨标悄悄变哑）。
+    spec = _logo_spec_block()
+    if spec is not None:
+        payload["logo"] = spec
     p = state_path(root)
     os.makedirs(os.path.dirname(p), exist_ok=True)
     tmp = p + ".tmp"
@@ -214,6 +224,19 @@ def write_state(state, count=0, tip="", root=None, shield=None, total=None,
 #: 托盘状态多久没被刷新就算**陈旧**。守护进程默认 2 秒一拍（`Daemon.run`），
 #:  这里给 15 倍余量，避免正常抖动被误判成"停了"。
 STALE_AFTER_SEC = 30
+
+
+def _logo_spec_block():
+    """漂浮哨标的动效规格（0.53.1）。取不到 ⇒ `None`（详见 `write_state` 注）。
+
+    ★ 为什么走懒加载：`inbox_server` 反过来也（在函数内）import 本模块，
+      模块级互相 import 会成环 —— 本仓的既有解法就是函数内 import。
+    """
+    try:
+        import inbox_server as SV
+        return SV.logo_motion_spec()
+    except Exception:                                           # noqa: BLE001
+        return None
 
 
 def read_state(root=None, now=None, stale_after=STALE_AFTER_SEC):

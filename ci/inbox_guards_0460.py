@@ -182,7 +182,32 @@ def _no_signal(d):
             and d.get("vote1", "") in ("", "unavailable"))
 
 
-def _fixture_live(m, fix, tries=2):
+#: 取不到信号时**重读一次**的次数（见 `_read` 的说明）。
+_READ_TRIES = 2
+#: `_fixture_live` 的尝试次数。★ 0.53.1 由 2 抬到 4：实测本机**任何**进程启动
+#: 就要 0.5–0.9 秒（`cmd /c exit` 0.86s、`git --version` 1.1s，杀软实时扫描），
+#: 而产品的 `VCT_TIMEOUT = 2.0s` ⇒ 只留 1.8 倍余量，机器一有负载就撞超时。
+#: 两次尝试在"瞬时抖动"面前太脆（0.53.1 出包前实测：同一轮里 S80 连撞两次、
+#: 紧随其后的 N-S8x 全绿 —— 这就是抖动，不是机器测不了）。
+def _read(m, cmd, fix):
+    """读一次裁决；**取不到信号就再读一遍**。返回第一次拿到信号的结果。
+
+    为什么重读**不会**削弱判据：判据断言的是「裁决值」，重读一个外部依赖
+    不会改变裁决值（产品逻辑是确定性的）。重读只把「读不到」这一种失败
+    从"一次就判"降到"两次都读不到才算"，把**瞬时抖动**与**真的测不了**分开。
+
+    ★ 与「判据走注入参数、生产走默认参数」那一族**无关**：这里没有给产品换
+      任何参数（超时仍是生产默认的 `VCT_TIMEOUT`），只是把一次外部读取重做一遍。
+    """
+    d = None
+    for _ in range(_READ_TRIES):
+        d = m.deletion_permission(cmd, fix)
+        if not _no_signal(d):
+            return d
+    return d
+
+
+def _fixture_live(m, fix, tries=4):
     """前置断言（C1 两步法的**第一步**）：夹具必须**自证成立**。
 
     拿一个已知良性的目标（夹具里的 `build`：既被忽略、又是目录）试一次，
@@ -192,6 +217,9 @@ def _fixture_live(m, fix, tries=2):
     ★ 为什么要 retry：高负载是**瞬时**的。一次取不到就判失效太脆；
       重试仍取不到，才说明"这台机器此刻测不了"，那时报夹具失效才是诚实的
       （本仓纪律：**测不出的情况绝不报 PASS**，但也绝不把"测不出"说成"测出坏了"）。
+    ★★ 0.53.1 实测（出包前的那次红）：`tries=2` 在同一轮里连撞两次，而**紧随其
+      后**的 N-S80/81/82/83/84/86/87/88 全绿 —— 说明那是抖动不是测不了。
+      ⇒ 抬到 4 次。抬次数**不削弱**判据：真测不了时 4 次全空，仍报「夹具失效」。
     """
     last = None
     for _ in range(tries):
@@ -230,14 +258,14 @@ def _s80_impl(m):
                 "（量具/环境问题，不是产品缺陷）" % why)
     bad, blind = [], []
     for t in _ALLOWED:
-        d = m.deletion_permission("rm -rf " + t, fix)
+        d = _read(m, "rm -rf " + t, fix)
         if _no_signal(d):
             blind.append(t)
             continue
         if d["allow"] is not True or d["vote1"] != "ignored" or d["vote2"] != "regenerable":
             bad.append("%s→%s/%s/%s" % (t, d["allow"], d["vote1"], d["vote2"]))
     for t in _PROTECTED:
-        d = m.deletion_permission("rm -rf " + t, fix)
+        d = _read(m, "rm -rf " + t, fix)
         if _no_signal(d):
             blind.append(t)
             continue
@@ -256,7 +284,13 @@ def _s80_impl(m):
     f = _tracked_ignored_file()
     if not f:
         return "夹具缺失：仓内找不到「已追踪且被忽略」的文件 ⇒ 本判据无法验证（不算通过）"
-    d = m.deletion_permission("rm -rf " + f, ROOT)
+    d = _read(m, "rm -rf " + f, ROOT)
+    # ★★ 0.53.1：**取不到信号 ≠ 被放行**。此前这一支直接看 `allow is not False`，
+    #   于是 git 撞超时（allow=None）会被报成「声明为产物但不可再生的目标仍被放行」
+    #   —— 把一个"没测成"说成了"测出漏拦"，正是 T-08 在判据自己身上的复发。
+    if _no_signal(d):
+        return ("夹具失效：本仓目标 %s **取不到信号**（allow=%r）⇒ 本判据测不出，"
+                "不算通过（机器天气，不是产品缺陷）" % (f, d.get("allow")))
     if d["allow"] is not False or d["vote2"] != "not_regenerable":
         return ("声明为产物但不可再生的目标仍被放行（%s ⇒ allow=%s vote2=%s）"
                 " ⇒ 第二票没在承重" % (f, d["allow"], d["vote2"]))
@@ -328,6 +362,48 @@ def n_s80b():
     if "两票裁决不符" in msg:
         return ("负控失效：S80 把「取不到信号」报成了「两票裁决不符」（%r）"
                 " —— 机器天气仍被说成产品缺陷" % msg[:120])
+    return True
+
+
+@check("N-S80c 负控：只让第三支（本仓「已追踪且被忽略」文件）取不到信号 ⇒ S80 必须报"
+       "「夹具失效」，不许报「仍被放行」")
+def n_s80c():
+    """反向对照（维二，0.53.1 新增）：证明**第三支**也分得开「测不出」与「漏拦」。
+
+    ★ 病灶：`_s80_impl` 的第三支原先直接看 `allow is not False`。git 撞超时
+      （出口丙 ⇒ `allow=None`）时，这一支会把「**没测成**」报成
+      「**声明为产物但不可再生的目标仍被放行**」—— 一句听上去像产品漏拦的话。
+      这正是 T-08（查不到就下结论）在**判据自己身上**的复发，与 N-S80b 守的
+      是同一个病，但落在另一个分支上（只守一条腿 ⇒ 另一条腿天然全绿）。
+    ★ 注入方式：**只对那一个目标**返回「取不到信号」，其余委托真产品
+      —— 这样前置断言与两个循环仍走真路径，唯一被点掉的就是第三支。
+    """
+    f = _tracked_ignored_file()
+    if not f:
+        return "夹具缺失：仓内找不到「已追踪且被忽略」的文件 ⇒ 负控无从注入（不算通过）"
+    real = _hook()
+    base = os.path.basename(f).lower()
+
+    class _BlindThird(object):
+        """只把「针对 f 那一次读」变聋的代理；其余原样转给真产品。"""
+
+        def deletion_permission(self, command, project_root=None):
+            if base and base in (command or "").lower():
+                return {"allow": None, "exit": "丙", "vote1": "", "vote2": "",
+                        "why": "NEGCTL 模拟第三支撞 VCT_TIMEOUT",
+                        "targets": [f], "is_delete": True}
+            return real.deletion_permission(command, project_root)
+
+    got = _s80_impl(_BlindThird())
+    if got is True:
+        return ("负控失效：第三支取不到信号时 S80 仍报通过"
+                "（测不出被当成了绿）")
+    msg = got if isinstance(got, str) else repr(got)
+    if "仍被放行" in msg:
+        return ("负控失效：第三支取不到信号被报成「仍被放行」（%r）"
+                " —— 没测成又被说成了漏拦（T-08）" % msg[:140])
+    if "夹具失效" not in msg:
+        return "负控失效：第三支取不到信号时 S80 没报「夹具失效」（%r）" % msg[:140]
     return True
 
 

@@ -57,6 +57,15 @@
 编写纪律（沿用 0514/0515）：负控先实测见红；断言打行为/结构；正判据
 导入产品真源；不写任何产品文件（夹具全在临时目录）；测不出 ⇒ SKIP，
 绝不报 PASS。
+
+★ 0.53.1 追加一件（同一把尺子，不改口径）：`tools/logo_frame.ps1`。
+  它是哨标的**纯帧数学**，`tools/logo.ps1` 用 `. $Frame` dot-source 它；
+  漏登记进 `_LAYOUT` ⇒ 装出来的包里没有这一枚 ⇒ dot-source 失败 ⇒ 哨标
+  回落成托盘同族静态图标（「标准 LOGO」与「保持动态」同时失效）。
+  形状与 0.36.4 的 `enforce_probe.py` 完全同型（随包却没进清单 ⇒ 保护范围
+  与被保护对象不匹配），所以这次在**登记的同时**把它加进 `_FOCUS`，
+  让真 wheel 载荷对它逐项对账 —— 登记表与判据必须同时改，否则就是
+  「改了登记、没人查」。
 """
 from __future__ import annotations
 
@@ -86,9 +95,11 @@ import defect_types as DT                                       # noqa: E402
 
 RESULTS = []
 
-#: 焦点五件：卡片三件 ＋ 本轮 [E] 实测补出的两件 tools 脚本（均未跟踪新件）。
+#: 焦点件：0.48.4 的五件（卡片三件 ＋ 本轮 [E] 实测补出的两件 tools 脚本）
+#: ＋ 0.53.1 的 `tools/logo_frame.ps1`（哨标的纯帧数学，`logo.ps1` dot-source
+#: 它 —— 不进 wheel 就等于装出来的哨标没有标准 LOGO、也不动）。
 _FOCUS = ("inbox_bubble.py", "inbox_logo.py", "assets/sounds/alert.wav",
-          "tools/logo.ps1", "tools/mk_sound.py")
+          "tools/logo.ps1", "tools/mk_sound.py", "tools/logo_frame.ps1")
 
 #: 发布验收日志的留存路径（观测判据的锚）。
 _VERIFY_LOG = os.path.join(ROOT, "output", "p12_verify_release.log")
@@ -227,6 +238,8 @@ def _presence_judge(wheel_names, sdist_names=None, decls=None):
             probs.append("pyproject package-data assets 未含 sounds/*.wav")
         if "tools/logo.ps1" not in layout_paths:
             probs.append("build_package._LAYOUT 未登记 tools/logo.ps1")
+        if "tools/logo_frame.ps1" not in layout_paths:
+            probs.append("build_package._LAYOUT 未登记 tools/logo_frame.ps1")
         if rootmod is not None:
             for m in ("inbox_bubble.py", "inbox_logo.py"):
                 if m not in rootmod:
@@ -272,7 +285,8 @@ def _build_fixture_tree(root, version):
     os.makedirs(os.path.join(root, "assets", "sounds"), exist_ok=True)
     for m in mods:
         shutil.copy2(os.path.join(ROOT, m + ".py"), os.path.join(root, m + ".py"))
-    for rel in ("tools/logo.ps1", "tools/mk_sound.py", "assets/sounds/alert.wav"):
+    for rel in ("tools/logo.ps1", "tools/logo_frame.ps1", "tools/mk_sound.py",
+                "assets/sounds/alert.wav"):
         shutil.copy2(os.path.join(ROOT, rel), os.path.join(root, rel))
     lines = [
         "[build-system]",

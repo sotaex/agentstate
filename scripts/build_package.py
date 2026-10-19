@@ -85,6 +85,12 @@ _LAYOUT = {
     "tray.ps1":                  "tools/tray.ps1",
     # ★ 0.49.0：漂浮哨标 WinForms 窗口脚本（inbox_logo.script_path() 的运行时依赖）。
     "logo.ps1":                  "tools/logo.ps1",
+    # ★ 0.53.1：哨标的**纯帧数学**（logo.ps1 里 `. $Frame` dot-source 它）。
+    #   不登记 = 装出来的包没有这枚文件 ⇒ `Import-Spec` 之前的 dot-source 失败
+    #   ⇒ 哨标回落成托盘同族静态圆圈，「标准 LOGO」与「保持动态」全部失效。
+    #   同一形状 0.36.4 已踩过一次（enforce_probe.py 一直随包却没进 _LAYOUT），
+    #   这里不再重演：登记在本表，且在 0516 的 _FOCUS 里被真 wheel 载荷对账。
+    "logo_frame.ps1":            "tools/logo_frame.ps1",
     # ★★ 0.36.4 补：本机实测抓到 —— `tools/enforce_probe.py` **一直随包发布**
     #   （实测产物 `build/lib/tools/enforce_probe.py` 在），却**从未登记进
     #   `_LAYOUT`**，因此**从未进 `psl/manifest.json`**（实测 manifest 101 项里
@@ -194,7 +200,7 @@ HARNESS_SRC = SRC / "scripts" / "verification_tests.py"
 if not HARNESS_SRC.is_file():
     raise SystemExit("★ 构建器找不到套件：%s\n  （产物仓构建必须用本仓的套件）" % HARNESS_SRC)
 NAME = "antinel-security"
-VERSION = "0.53.0"
+VERSION = "0.53.1"
 # P-A3: the namespace this build declares itself under. derive_object_ownership()
 # reads git remote first, then THIS field; fail-closed unattributed when neither
 # resolves. Kept beside the hashes so a third party can see what was declared.

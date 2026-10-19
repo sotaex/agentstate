@@ -69,13 +69,48 @@ _CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 #   寿命解耦。与「关窗不停服务」是同一原则的反方向：调用方死，也不关窗。
 _DETACHED_FLAGS = (_CREATE_NO_WINDOW | 0x00000008 | 0x00000200) if os.name == "nt" else 0
 
+def _brand_favicon_rel():
+    """`/assets/favicon.ico` 指向哪个文件 —— **从品牌图标唯一真源实时派生**。
+
+    ★★★ 0.53.1（创始人 2026-10-19 截图「LOGO 又又又被改了，完整的LOGO呢」）：
+      这一格原来是 `"favicon.ico": "icons/L0.ico"` —— 拿**姿态灯**当品牌标。
+      而 `inbox_window.brand_icon_path()` 的注释里早就写着这条纪律：
+      「状态灯是**会随态势变的**，拿来当品牌标等于把"当前没事"写进图标
+        —— 那是假陈述。宁可没有图标。」
+      纪律修在桌面快捷方式那条路上，favicon 这条路上**没修** ⇒ 修在一条腿上。
+      → 后果不只是"图标不好看"：favicon 写死 L0 ⇒ **失守时标题栏仍显示值守灯**，
+        等于对用户撒谎（而这正是本产品最不该犯的错）。
+      → 复发机制：`B-15` 只守「链接同源」，**没守「解析到哪个文件」** ——
+        一条腿绿了，另一条腿天然全绿。0.53.1 起补 `B-15b` 守解析结果本身。
+
+    ★ 派生而不是再抄一份 `logo/antinel.ico`：抄了就是"一个事实两个来源"，
+      换品牌文件时必然再次分叉 —— 那就是本条的复发机制本身。
+
+    ★ 只在**请求时**调用（不在模块顶层）：顶层派生要把 `inbox_window` 拖进
+      服务启动路径，重；而且服务已经跑起来之后 import 才不会碰循环导入。
+
+    ★ 派生失败 ⇒ 回落**品牌**路径（不是 L0），并由判据钉住回落值与
+      `inbox_window.BRAND_ICON_REL` 一致。
+    """
+    try:
+        import inbox_window as _iw
+        rel = str(_iw.BRAND_ICON_REL).replace("\\", "/")
+        if rel.startswith("assets/"):
+            return rel[len("assets/"):]
+    except Exception:                                            # noqa: BLE001
+        pass
+    return "logo/antinel.ico"
+
+
 # 允许对外提供的静态文件名（白名单 —— 杜绝路径穿越）
+# ★ `favicon.ico` **刻意不在本表**：它不是「可按名请求的姿态资源」，而是
+#   **品牌图标**。放进本表就意味着品牌标有了第二份来源（值抄一遍），
+#   换品牌文件时必然分叉 —— 见 `_brand_favicon_rel()` 的说明。
 ASSET_WHITELIST = {
     "L0.mp4": "logo/L0.mp4", "L1.mp4": "logo/L1.mp4", "L2.mp4": "logo/L2.mp4",
     "Ls.mp4": "logo/Ls.mp4", "R0.mp4": "logo/R0.mp4", "logo.svg": "logo/logo.svg",
     "L0.ico": "icons/L0.ico", "L1.ico": "icons/L1.ico", "L2.ico": "icons/L2.ico",
     "Ls.ico": "icons/Ls.ico", "R0.ico": "icons/R0.ico",
-    "favicon.ico": "icons/L0.ico",
 }
 _MIME = {".mp4": "video/mp4", ".svg": "image/svg+xml", ".ico": "image/x-icon",
          ".png": "image/png"}
@@ -980,6 +1015,34 @@ LOGO_BOX_RATIO = 27.0 / 32.0
 #:     这条语义没变，变的只是它在 48px 方框里的绝对尺度。
 LOGO_WAVE_MARGIN = 2.0   #: 波最外缘距方框内缘的余量（画布单位）
 
+#: ★★ 0.53.1：动效状态机的**动画常量**从 `_LOGO_JS` 里写死的数字提升为
+#:   Python 常量（单一真源）。为什么必须提升：漂浮哨标（tools/logo.ps1，
+#:   PowerShell）要照**同一份**动法动，它 import 不了 Python —— 规格经
+#:   `tray.json` 的 `logo` 块下发（`logo_motion_spec()`）。这些数字若仍写死在
+#:   JS 里，就会出现「页面一套、哨标一套」两份，迟早漂（U-18b 同族）。
+#:   本块的值经占位符注入 `_LOGO_JS_TMPL` ⇒ 渲染出的 JS 与提升前**逐字一致**
+#:   （唯一有意改动：reduced-motion 静态帧，见 `_LOGO_JS_TMPL` 内注）。
+LOGO_TRAIL_N = 5          #: 拖尾段数
+LOGO_TRAIL_STEP = 3       #: 相邻拖尾段的角度差（度）
+LOGO_TRAIL_OPA = (0.38, 0.27, 0.18, 0.11, 0.06)   #: 各段不透明度（由头到尾）
+LOGO_TRAIL_FRAC = 0.42    #: 拖尾内端占波束长度的比例
+LOGO_TRAIL_INSET = 6      #: 拖尾外端比波束端短多少（画布单位）
+LOGO_TRAIL_COLOR = "#7E9B84"   #: 拖尾静态骨架色（运行时随光束色走）
+LOGO_WAVE_PERIOD = 1.4    #: 单枚涟漪的周期（秒）
+LOGO_WAVE_W0 = 7.0        #: 涟漪线宽（起始，画布单位）
+LOGO_WAVE_W1 = 5.0        #: 涟漪线宽随相位的缩减量（⇒ 消散端 2）
+LOGO_BEAM_A0 = 315        #: 波束标称角（度，自正北顺时针；规格 demo 的 A_P）
+LOGO_BEAM_START = 205.0   #: 初始相位（度）＝ A0 − 110（demo 的起步角）
+LOGO_SEG_GAP = 10         #: 环四段之间的缝（度）
+LOGO_BREATH_BASE = 0.94   #: 呼吸中位（环不透明度 = base + amp·sin）
+LOGO_BREATH_AMP = 0.06    #: 呼吸幅度 ⇒ 0.88…1.00
+LOGO_BREATH_PERIOD = 4.0  #: 呼吸周期（秒）
+LOGO_XFADE = 0.4          #: 换态的渐变时长（秒）
+LOGO_L0_DELAY = 0.15      #: L0 起步前的停顿（秒）
+LOGO_L0_RAMP = 0.35       #: L0 从半速匀到全速的时长（秒）
+LOGO_R0_SLIDE = 20.0      #: R0 滑行角度（度）—— 滑完永停（讣告）
+LOGO_R0_SLIDE_T = 0.8     #: R0 滑行时长（秒）
+
 
 def _logo_half():
     """方框半宽（画布单位）—— 环外缘占半宽的比例恰为 `LOGO_BOX_RATIO`。"""
@@ -1032,6 +1095,57 @@ def _logo_motion_render():
 LOGO_MOTION_RENDER = _logo_motion_render()
 
 
+def _hex_rgb(s):
+    """`"#RRGGBB"` → `(r, g, b)`。规格色值在 Python 侧是 hex 字面量，
+    下发协议（JSON 数字）与判据比对都要三元组 —— 一处转换，不写第二份。"""
+    h = str(s).lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def logo_motion_spec():
+    """**漂浮哨标的动效规格**（0.53.1）—— 单一真源，全部由上面常量派生。
+
+    ★ 为什么需要它：哨标是 PowerShell 脚本（tools/logo.ps1），import 不了
+      Python。规格经 `tray.json` 的 `logo` 块下发（`inbox_tray.write_state`
+      每次写状态都带上），哨标照它画**与主窗口同一份动法**（环/光束/灯头/
+      涟漪/拖尾/呼吸，规格 v1.2）⇒ 页面与哨标永远同源，不会"页面一套、
+      哨标一套"。
+    ★ 波幅用**渲染表** `LOGO_MOTION_RENDER`（规格 × 归一系数）：哨标窗与
+      页面方框同几何（`half`），照抄规格表的 45/70/105 会伸出框外 ——
+      0.50.3「冒泡的 LOGO 不完整」那条缺陷在 46px 哨标上一样会发生。
+    ★ 判据 FLO-10c 拿它对着 `LOGO_MOTION_RENDER` 与几何常量逐项锁；负控
+      把一份手写的未归一一波幅塞进来必须红（与 U-18c 同一族）。
+    """
+    return {
+        "v": 1,
+        "geom": {"cx": LOGO_CX, "cy": LOGO_CY, "r": LOGO_R,
+                 "ringW": LOGO_RING_W, "amberR": LOGO_AMBER_R,
+                 "waveGap": LOGO_WAVE_GAP, "beamLen": LOGO_BEAM_LEN,
+                 "beamW": LOGO_BEAM_W, "boxRatio": LOGO_BOX_RATIO,
+                 "half": round(_logo_half(), 3)},
+        "colors": {"ringGreen": list(LOGO_RING_GREEN),
+                   "ringDarkRed": list(LOGO_RING_DARKRED),
+                   "amber": list(_hex_rgb(LOGO_AMBER_FILL)),
+                   "trail": list(_hex_rgb(LOGO_TRAIL_COLOR))},
+        "anim": {"trailN": LOGO_TRAIL_N, "trailStep": LOGO_TRAIL_STEP,
+                 "trailOpa": list(LOGO_TRAIL_OPA),
+                 "trailFrac": LOGO_TRAIL_FRAC, "trailInset": LOGO_TRAIL_INSET,
+                 "wavePeriod": LOGO_WAVE_PERIOD, "waveW0": LOGO_WAVE_W0,
+                 "waveW1": LOGO_WAVE_W1, "beamA0": LOGO_BEAM_A0,
+                 "beamStart": LOGO_BEAM_START, "segGap": LOGO_SEG_GAP,
+                 "breathBase": LOGO_BREATH_BASE, "breathAmp": LOGO_BREATH_AMP,
+                 "breathPeriod": LOGO_BREATH_PERIOD, "xfade": LOGO_XFADE,
+                 "l0Delay": LOGO_L0_DELAY, "l0Ramp": LOGO_L0_RAMP,
+                 "r0Slide": LOGO_R0_SLIDE, "r0SlideT": LOGO_R0_SLIDE_T},
+        "motion": {k: {"c": list(v["c"]), "lap": v["lap"],
+                       "ringO": v["ringO"], "amberO": v["amberO"],
+                       "ringRed": v["ringRed"], "waveR": v["waveR"],
+                       "waveO": v["waveO"]}
+                    for k, v in LOGO_MOTION_RENDER.items()},
+        "modes": dict(LOGO_MODE),
+    }
+
+
 def _logo_mark(state, label="Antinel"):
     """动效图标：内联 SVG（骨架）＋ `_LOGO_JS` 状态机点亮。
 
@@ -1058,8 +1172,10 @@ def _logo_mark(state, label="Antinel"):
 
 
 #: 状态机（`antinel-motion-demo-v2.html` 的产品化移植）。
-#: ★ `__STYLE__`/`__RING_*__` 由服务端从 `LOGO_MOTION_RENDER`（规格表 × 波幅
-#:   归一系数）渲染 —— 规格参数单一真源（U-17 锁规格表、U-18c 锁归一关系）。
+#: ★ `__STYLE__`/`__RING_*__`/`__*__`（几何与动画常量）由服务端从
+#:   `LOGO_MOTION_RENDER`（规格表 × 波幅归一系数）与上面的 Python 常量渲染
+#:   —— 规格参数单一真源（U-17 锁规格表、U-18b/c 锁几何与归一关系、
+#:   FLO-10d 锁"JS 文本里的常量 == Python 常量"，防有人手改 JS 文本）。
 #: ★ 无外部资源、无依赖；`dt` 钳制 0.05s（规格 §四：无头/卡顿时不静默跳变）。
 _LOGO_JS_TMPL = """
 <script>
@@ -1067,8 +1183,8 @@ _LOGO_JS_TMPL = """
 "use strict";
 var STYLE=__STYLE__;
 var RING_GREEN=__RING_GREEN__, RING_DARKRED=__RING_DARKRED__;
-var DEG=Math.PI/180, CX=512, CY=512, R=215, W_BEAM=11, L_BEAM=200, AMBER_R=24, A_P=315, GAP=10;
-var TRAIL_N=5, TRAIL_STEP=3, TRAIL_OPA=[.38,.27,.18,.11,.06], TRAIL_FRAC=.42, WAVE_PERIOD=1.4;
+var DEG=Math.PI/180, CX=__CX__, CY=__CY__, R=__R__, W_BEAM=__BEAM_W__, L_BEAM=__BEAM_LEN__, AMBER_R=__AMBER_R__, GAP=__SEG_GAP__;
+var TRAIL_N=__TRAIL_N__, TRAIL_STEP=__TRAIL_STEP__, TRAIL_OPA=[__TRAIL_OPA__], TRAIL_FRAC=__TRAIL_FRAC__, TRAIL_INSET=__TRAIL_INSET__, WAVE_PERIOD=__WAVE_PERIOD__, WAVE_W0=__WAVE_W0__, WAVE_W1=__WAVE_W1__;
 function px(a,r){return [CX+r*Math.sin(a*DEG), CY-r*Math.cos(a*DEG)];}
 function mod(a){return ((a%360)+360)%360;}
 var SEGS=[[GAP/2,90-GAP/2],[90+GAP/2,180-GAP/2],[180+GAP/2,270-GAP/2],[270+GAP/2,360-GAP/2]];
@@ -1084,7 +1200,7 @@ function q(el,n){return el.querySelector('[data-p="'+n+'"]');}
 function boot(svg){
   var mode=svg.getAttribute("data-mode")||"L0";
   if(!STYLE[mode]){mode="L0";}
-  var V={theta:A_P-110, beamC:STYLE.L0.c.slice(), ringO:1, amberO:.35, ringRed:0, breath:1};
+  var V={theta:__BEAM_START__, beamC:STYLE.L0.c.slice(), ringO:1, amberO:.35, ringRed:0, breath:1};
   var snap=null, mt=0, last=0, trail=[];
   for(var i=0;i<TRAIL_N;i++){
     var l=document.createElementNS("http://www.w3.org/2000/svg","line");
@@ -1115,7 +1231,7 @@ function boot(svg){
     var showTrail=(mode==="L0");
     for(var i=0;i<TRAIL_N;i++){
       var a=mod(V.theta-(i+1)*TRAIL_STEP);
-      var r0=L_BEAM*(1-TRAIL_FRAC), r1=L_BEAM-6;
+      var r0=L_BEAM*(1-TRAIL_FRAC), r1=L_BEAM-TRAIL_INSET;
       var p0=px(a,r0), p1=px(a,r1), l=trail[i];
       l.setAttribute("x1",p0[0]); l.setAttribute("y1",p0[1]);
       l.setAttribute("x2",p1[0]); l.setAttribute("y2",p1[1]);
@@ -1146,7 +1262,7 @@ function boot(svg){
       wl.setAttribute("cx",ap[0]); wl.setAttribute("cy",ap[1]);
       wl.setAttribute("r", String(AMBER_R+8+ph*st.waveR));
       wl.setAttribute("stroke", css(V.beamC));
-      wl.setAttribute("stroke-width", String(7-5*ph));
+      wl.setAttribute("stroke-width", String(WAVE_W0-WAVE_W1*ph));
       wl.setAttribute("opacity", String(st.waveO*(1-ph)*(1-ph)));
     }
   }
@@ -1162,12 +1278,17 @@ function boot(svg){
   //   在常驻窗口里没有退路 —— 全仓原先零处 `prefers-reduced-motion`。
   //   ⇒ 命中时**只画一帧静态**就停：色相与形状照旧（状态照样认得出），
   //     只是不动。★ 不假装"已经减少了动效"，是真的停掉 rAF 循环。
+  // ★★★ 0.53.1 修（移植哨标时实测发现的同源缺陷）：静态帧必须
+  //   `update(__XFADE__)`（跨完整段渐变），**不能** `update(0)` ——
+  //   update(0) 会让 V 停在**启动态**（L0 绿）：R0 页在减少动效下会渲染成
+  //   一枚**绿环**（环色/灯头透明度全是 L0 的），状态读错。判据 FLO-10e
+  //   拿 Node 真跑这条（reduce=true ⇒ R0 必须是暗红）。
   // ★ `typeof window` 必须先判：判据 `ci/inbox_guards_0514.py` U-17c/U-18d
   //   把这段 JS **抽出来在 Node 里真跑**（验动效规格），那里没有 `window`
   //   —— 直接取 `window.matchMedia` 会 ReferenceError 判红（本轮实测踩到）。
   var _reduce = (typeof window !== "undefined") && window.matchMedia
       && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  if (_reduce) { update(0); render(); }
+  if (_reduce) { update(__XFADE__); render(); }
   else { requestAnimationFrame(loop); }
 }
 var list=document.querySelectorAll("svg[data-logo]");
@@ -1176,11 +1297,43 @@ for(var i=0;i<list.length;i++){ boot(list[i]); }
 </script>
 """
 
+def _jsnum(v):
+    """JS 数字字面量：整数不带小数点，小数去掉前导 0（`.38`）。
+
+    ★ 为什么讲究逐字一致：占位符替换后的 `_LOGO_JS` 与提升前（数字写死在
+      模板里）必须**逐字相同** —— 否则"提升常量"这件事本身就构成一次未经验
+      证的渲染变更（U-17c/U-18d 的 Node 真跑、以及任何人肉眼比对都依赖它）。
+    """
+    if isinstance(v, bool):
+        raise TypeError("bool 不是 JS 数字")
+    f = float(v)
+    if f.is_integer():
+        return str(int(f))
+    return ("%g" % f).lstrip("0") or "0"
+
+
 _LOGO_JS = (_LOGO_JS_TMPL
             .replace("__STYLE__", json.dumps(LOGO_MOTION_RENDER, ensure_ascii=False))
             .replace("__RING_GREEN__", json.dumps(list(LOGO_RING_GREEN)))
             .replace("__RING_DARKRED__", json.dumps(list(LOGO_RING_DARKRED)))
-            .replace("__AMBER_FILL__", json.dumps(LOGO_AMBER_FILL)))
+            .replace("__AMBER_FILL__", json.dumps(LOGO_AMBER_FILL))
+            .replace("__CX__", _jsnum(LOGO_CX))
+            .replace("__CY__", _jsnum(LOGO_CY))
+            .replace("__R__", _jsnum(LOGO_R))
+            .replace("__BEAM_W__", _jsnum(LOGO_BEAM_W))
+            .replace("__BEAM_LEN__", _jsnum(LOGO_BEAM_LEN))
+            .replace("__AMBER_R__", _jsnum(LOGO_AMBER_R))
+            .replace("__SEG_GAP__", _jsnum(LOGO_SEG_GAP))
+            .replace("__TRAIL_N__", _jsnum(LOGO_TRAIL_N))
+            .replace("__TRAIL_STEP__", _jsnum(LOGO_TRAIL_STEP))
+            .replace("__TRAIL_OPA__", ",".join(_jsnum(v) for v in LOGO_TRAIL_OPA))
+            .replace("__TRAIL_FRAC__", _jsnum(LOGO_TRAIL_FRAC))
+            .replace("__TRAIL_INSET__", _jsnum(LOGO_TRAIL_INSET))
+            .replace("__WAVE_PERIOD__", _jsnum(LOGO_WAVE_PERIOD))
+            .replace("__WAVE_W0__", _jsnum(LOGO_WAVE_W0))
+            .replace("__WAVE_W1__", _jsnum(LOGO_WAVE_W1))
+            .replace("__BEAM_START__", _jsnum(LOGO_BEAM_START))
+            .replace("__XFADE__", _jsnum(LOGO_XFADE)))
 
 
 #: ★★ 0.49.0（2026-10-14，创始人截图 3/4/5）：术语浮层**突破窗口边界**。
@@ -3350,7 +3503,10 @@ def _make_handler(token, root):
             return self._send(200, "application/json; charset=utf-8", body)
 
         def _asset(self, name):
-            rel = ASSET_WHITELIST.get(os.path.basename(name))
+            base = os.path.basename(name)
+            # ★ favicon **实时问品牌真源**（0.53.1）：不许再从姿态灯表里取。
+            rel = _brand_favicon_rel() if base == "favicon.ico" \
+                else ASSET_WHITELIST.get(base)
             if not rel:
                 return self._send(404, "text/plain; charset=utf-8", b"no asset")
             p = os.path.join(ASSETS_DIR, rel)

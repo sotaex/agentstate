@@ -28,12 +28,37 @@
      把它藏起来；没人消费 ⇒ 哨标还在，用户可以再点。
 
 ★ **四态只有一本账**，不许四处各写一遍：
-      collapse（收缩）：唤出哨标（show / 冷启）＋ 关本面板窗
-      expand （展开）：哨标写 open 待命；服务端 open 路径顺手 **hide**（藏起待命）
-      prewarm（预热）：Antinel 监理展开时起一枚**隐藏**常驻哨标（首次收缩也瞬时）
-      retire （退役）：`logo.quit` 标志 ⇒ 哨标进程真退；超时才 WM_CLOSE 兜底
+     collapse（收缩）：唤出哨标（show / 冷启）＋ 关本面板窗
+     expand （展开）：哨标写 open 待命；服务端 open 路径顺手 **hide**（藏起待命）
+     prewarm（预热）：Antinel 监理展开时起一枚**隐藏**常驻哨标（首次收缩也瞬时）
+     retire （退役）：`logo.quit` 标志 ⇒ 哨标进程真退；超时才 WM_CLOSE 兜底
   `retire()` 仍是**退役的唯一实现**（去重、收孤儿）；展开路径改调
   `hide()`——哨标藏而不死，下一次收缩才是瞬时的。
+
+★ 0.53.1（创始人 2026-10-19 截图，三症同源）：**哨标画的就是标准动效 LOGO**。
+  ① 0.52.0 改画托盘同族静态 `.ico` 后，最小态出现的是一枚**光秃秃的圆圈**
+     ——「跟主窗口不一样」。②  TransparencyKey 镂空窗＋图标中心全透 ⇒
+     命中测试只覆盖不透明像素，**点圆圈中间没反应**，只有点在环线上才切回。
+  ③ 那一版还是**死的**（0.50.0 的 GDI+ 动效因 40ms 全量重绘无双缓冲而颤抖，
+      0.52.0 一刀切改成静态）。
+  修法（三症各对症，且都不复发）：
+  · **画什么**：`tools/logo_frame.ps1`（纯帧数学，可被判据 dot-source 后真跑）
+    照 `tray.json` 的 `logo` 块（`inbox_server.logo_motion_spec()` 单一真源）
+    算出与 `_LOGO_JS` **同一份**动法的帧；`logo.ps1` 只做"画布→像素"映射。
+  · **怎么画**：`WS_EX_LAYERED`＋`UpdateLayeredWindow` **逐像素透明** ——
+    AA 边缘不再与 TransparencyKey 的 Fuchsia 混色（0.50.0 粉边的根治，
+    不是"把 alpha 吸附成 0/255"那种以画面质量换不粉边的做法）；帧在
+    2× 离屏上 AA 绘制后高质量缩小到 46px（0.3–0.9px 的细线只有真 AA 不抖）。
+  · **点什么**：`WM_NCHITTEST` 自行判定 —— **画得出来的范围（内切圆）内**
+    一律 `HTCLIENT`（圆中间、环上、涟漪里都点得到），四角返回
+    `HTTRANSPARENT`（不挡背后窗口的点击）。半径由规格几何派生
+    （`Get-HitRadius`），不写死数字。
+  · **减少动效**：读系统的 `MinAnimate`（对应页面的
+    `prefers-reduced-motion`，Q-20 同族）—— 命中时**不打拍**，每次换态
+    只推一帧静态（静态帧取目标态，不是启动态，见 FLO-10e）。
+  · **拿不到规格**（旧 daemon 写的 tray.json／规格构建失败）：如实**回落**
+    托盘同族静态 `.ico`（不假装会动），其余生命线（三标志/点击待命/拖拽）
+    一律不变。
 
 ★ 如实原则（本仓铁律，与紧急提醒/浮层同一标准）：
     · 哨标没起来 ⇒ `ok=False` 且 `why` 说清（**不关面板窗**，
@@ -97,6 +122,17 @@ def script_path():
                         "tools", "logo.ps1")
 
 
+def frame_script_path():
+    """帧数学（**纯函数**）脚本的路径（0.53.1）。
+
+    `logo.ps1` dot-source 它；判据（`ci/inbox_guards_0514.py` FLO-10a/b）也
+    dot-source **同一个文件**真跑 —— 一份实现，两个调用方，杜绝"判据另写了
+    一遍帧数学"（假绿第四族的形状）。
+    """
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "tools", "logo_frame.ps1")
+
+
 def action_path(root=None):
     """哨标点击写动作去**托盘那一个**动作文件（`open` 语义只许一份实现）。"""
     import inbox_tray as TR
@@ -148,7 +184,10 @@ def logo_cmd(title=None, tip=None, size=46, x=-1, y=-1, stale_after=30,
     ★ 中文/标记全走参数：ps1 源文件保持 ASCII（PS 5.1 无 BOM 会解错 UTF-8）。
     ★ 0.52.0：多传 `-Show/-Hide`（藏/唤标志）与 `-IconDir`（托盘同族状态
       图标目录，`assets/icons`）；`hidden=True` ⇒ `-Hidden`（常驻预热：
-      出生即隐藏，等 show 标志）。"""
+      出生即隐藏，等 show 标志）。
+    ★ 0.53.1：多传 `-Frame`（纯帧数学脚本 `tools/logo_frame.ps1`）—— 哨标
+      照 `tray.json` 的 `logo` 块（动效规格）画标准动效 LOGO；`-IconDir`
+      从此只是**回落**路径（拿不到规格时的静态兜底），不再是主渲染。"""
     import inbox_window as WIN
     cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
            script_path(),
@@ -159,6 +198,7 @@ def logo_cmd(title=None, tip=None, size=46, x=-1, y=-1, stale_after=30,
            "-Hide", hide_flag_path(root),
            "-IconDir", os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                     "assets", "icons"),
+           "-Frame", frame_script_path(),
            "-Title", title if title is not None else ("Antinel" + WIN.LOGO_TITLE_MARK),
            "-Size", str(int(size)),
            "-StaleAfterSec", str(int(stale_after))]

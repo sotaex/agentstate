@@ -49,6 +49,14 @@
      2026-10-16 截图标出五条违和，四条可机械判 ⇒ 同一个消费面
      （`inbox_server.py` 渲染产物）的尺子按 A2/P5 规则**并入本套件**，
      不立新套件。详见文件末「J 族」段头。
+  ⑩ FLO-10a…e 漂浮哨标动效三态（**0.53.1，2026-10-19 并入**）：创始人截图
+     三句话——「出现的居然是圆圈不是标准 LOGO」「点圆圈中间没反应」「LOGO
+     应该跟主窗口一样保持动态」。修法：哨标改画**标准动效徽标**（动法＝
+     `tools/logo_frame.ps1` 纯帧数学，规格经 tray.json 的 logo 块由
+     `inbox_server.logo_motion_spec()` 单一真源下发）＋分层窗整圆可点＋
+     线程池定时器帧泵。判据方法：PowerShell 驱动 dot-source **产品同一个**
+     帧数学脚本真跑，Python 侧只做从同一份规格出发的独立推导（oracle）与
+     逐项比对 —— 不二次实现被测逻辑。详见「FLO-10 族」段头。
 
 ★ 规格真源（U-17 的唯一依据，不许凭记忆）：
     `D:\\2026\\PSL\\Antinel品牌动效报警语法v1.2（2026-09-27）.md`
@@ -95,6 +103,7 @@ import inbox_logo as IL                                         # noqa: E402
 import inbox_model as M                                         # noqa: E402
 import inbox_notify as NT                                       # noqa: E402
 import inbox_server as SV                                       # noqa: E402
+import inbox_tray as TR                                         # noqa: E402
 import inbox_window as WIN                                      # noqa: E402
 import glossary as GL                                           # noqa: E402
 import page_caliber as PC                                       # noqa: E402
@@ -104,6 +113,8 @@ _SERVER_REL = "inbox_server.py"
 _WINDOW_REL = "inbox_window.py"
 _DAEMON_REL = "inbox_daemon.py"
 _LOGO_PS1_REL = "tools/logo.ps1"
+_FRAME_PS1_REL = "tools/logo_frame.ps1"
+_TRAY_PS1_REL = "tools/tray.ps1"
 
 
 class Skip(Exception):
@@ -1668,6 +1679,95 @@ def n_b15():
     return True
 
 
+#: 姿态灯（六态）—— **一枚都不许当品牌标**。
+_B15B_POSE_ICONS = ("L0.ico", "L1.ico", "L2.ico", "Ls.ico", "R0.ico")
+
+
+def _b15b_core(server_src, resolve, brand_path, assets_dir):
+    """favicon 必须解析到**品牌完整 LOGO**；姿态灯一律不算。
+
+    ★★ 为什么 B-15 拦不住（0.53.1 复发的机制）：B-15 守的是「**链接**同源」
+      —— 它只证明小窗与监理页引**同一个 URL**，完全不证明那个 URL
+      **解析到哪个文件**。于是 `"favicon.ico": "icons/L0.ico"` 可以长期与
+      「品牌图标不许用姿态灯」这条纪律并存：修在一条腿上，另一条腿天然全绿。
+      创始人 2026-10-19 截图原话「LOGO 又又又被改了……完整的LOGO呢」。
+
+    ★ 三条腿，缺一条就会被绕过：
+      ① **结构**：资源白名单里不许有 `favicon.ico` 条目（那是品牌标的
+         第二份来源，抄一份值就是分叉的开始）；
+      ② **派生**：解析必须走品牌真源（`_brand_favicon_rel`）；
+      ③ **真值**：解析出的**字节**必须等于品牌图标、且不等于任一枚姿态灯。
+         只看源码文本不够 —— 路径改了而文件没换时 ①② 都绿，用户看到的还是灯。
+    """
+    if not server_src or not server_src.strip():
+        return "读不到 inbox_server.py 源码 —— 判据锚点失效"
+
+    m = re.search(r"ASSET_WHITELIST\s*=\s*\{(.*?)\n\}", server_src, re.S)
+    if not m:
+        return "找不到 ASSET_WHITELIST 定义 —— 判据锚点失效（改名了？）"
+    if re.search(r"""["']favicon\.ico["']\s*:""", m.group(1)):
+        return ("favicon.ico 又出现在资源白名单里 —— 那是品牌标的**第二份来源**；"
+                "值一旦写成姿态灯，失守时标题栏仍显示值守灯（对用户撒谎）")
+    if "_brand_favicon_rel" not in server_src:
+        return "favicon 没有从品牌真源派生（缺 `_brand_favicon_rel`）"
+
+    rel = resolve()
+    if not rel:
+        return "品牌图标派生返回空 ⇒ favicon 会 404（落浏览器默认球）"
+    p = os.path.join(assets_dir, rel)
+    if not os.path.isfile(p):
+        return "派生出的 %s 不存在 ⇒ favicon 404（落浏览器默认球）" % rel
+    if not brand_path or not os.path.isfile(brand_path):
+        return "拿不到品牌图标本体（brand_icon_path() 返回 %r）" % (brand_path,)
+    got = io.open(p, "rb").read()
+    want = io.open(brand_path, "rb").read()
+    if got != want:
+        return ("favicon 解析到 %s，与品牌图标 %s **不是同一份字节**"
+                " ⇒ 用户看到的不是完整 LOGO" % (rel, os.path.basename(brand_path)))
+    for name in _B15B_POSE_ICONS:
+        q = os.path.join(assets_dir, "icons", name)
+        if not os.path.isfile(q):
+            continue
+        if io.open(q, "rb").read() == got:
+            return ("favicon 与姿态灯 %s **字节相同** —— 拿状态灯当品牌标"
+                    "（失守时标题栏仍显示值守灯，等于说没事）" % name)
+    return True
+
+
+@check("B-15b 小窗与监理共用的 favicon **解析到品牌完整 LOGO**，不许是姿态灯")
+def c_b15b():
+    return _b15b_core(_src("inbox_server.py"), SV._brand_favicon_rel,
+                      WIN.brand_icon_path(), SV.ASSETS_DIR)
+
+
+@check("N-B15b 负控：favicon 解析回姿态灯 / 白名单里再挂一条 ⇒ 必须红")
+def n_b15b():
+    src = _src("inbox_server.py")
+    assets = SV.ASSETS_DIR
+    brand = WIN.brand_icon_path()
+    ok = _b15b_core(src, SV._brand_favicon_rel, brand, assets)
+    if ok is not True:
+        return "负控前置失败：当前生产实现没通过 B-15b（%r）" % (ok,)
+    # ① 把解析改回姿态灯 —— 字节口径必须当场红
+    bad = _b15b_core(src, lambda: "icons/L0.ico", brand, assets)
+    if bad is True:
+        return "负控失效：favicon 解析到 L0.ico 仍判合格"
+    if "字节" not in str(bad):
+        return ("方向不对：解析到 L0 报的红不是字节不符（%s）—— 量具打偏"
+                % str(bad)[:140])
+    # ② 结构：白名单里重新挂上 favicon 条目
+    anchor = '"Ls.ico": "icons/Ls.ico", "R0.ico": "icons/R0.ico",\n}'
+    if anchor not in src:
+        return "负控锚点未找到（ASSET_WHITELIST 写法变了）—— 负控自身失效"
+    mut = src.replace(anchor,
+                      '"Ls.ico": "icons/Ls.ico", "R0.ico": "icons/R0.ico",\n'
+                      '    "favicon.ico": "icons/L0.ico",\n}', 1)
+    bad2 = _b15b_core(mut, SV._brand_favicon_rel, brand, assets)
+    if bad2 is True:
+        return "负控失效：白名单里重新挂上 favicon 仍判合格"
+    return True
+
+
 def _b16_core(js, server_src):
     """小窗必须**自己复查**监理是否开着 —— 渲染那一刻判一次不够。"""
     if "bubble_vis" not in js:
@@ -2081,11 +2181,40 @@ def c_b08():
 #: **托盘同族静态图标＋双缓冲**（颤抖根源＝GDI+ 动效 40ms 全量重绘，删净）；
 #: **常驻三标志**（quit / hide / show）；**点击不自毁**（写完 open 原地待命，
 #: 消费方开出Antinel 监理后写 hide 藏它 —— 旧契约「点击成功即退」正是反向切换坏掉的病根）。
+#: 0.53.1 契约（创始人 2026-10-19 截图：最小化后是秃圆圈、点圆圈中间没反应、不会动）
+#: —— 静态图标修好了颤抖，却同时制造三个新症状，全部在本条里钉住：
+#:   ① 「出现的居然是圆圈，不是标准 LOGO」⇒ 哨标画**标准动效徽标**：环＋光束＋
+#:      拖尾＋灯头＋涟漪，动法＝`tools/logo_frame.ps1` 的纯帧数学（dot-source
+#:      同一文件，**不许在 logo.ps1 里另写一遍**）；规格经 tray.json 的 logo 块
+#:      下发（FLO-10c 锁下发、FLO-10d 锁页面 JS 与它逐项同源）。
+#:   ② 「点圆圈中间没反应，只有点在线圈上才切得回」⇒ 窗口是**逐像素 alpha 的
+#:      分层窗**（WS_EX_LAYERED＋UpdateLayeredWindow，**禁 TransparencyKey**
+#:      —— 镂空只命中不透明像素，图标中心全透明 ⇒ 点中间没反应；AA 边的粉边
+#:      也是它）。WndProc 自答 WM_NCHITTEST：**整个内切圆内**可点，四角
+#:      HTTRANSPARENT 让位给背后的窗口。命中半径从规格推导（Get-HitRadius），
+#:      不写死（FLO-10a 拿独立推导的 oracle 对数值）。
+#:   ③ 「LOGO 应该跟主窗口一样保持动态」⇒ 帧泵＝**线程池定时器投递到窗体线程**
+#:      （System.Timers.Timer＋SynchronizingObject，AutoReset=$false，finally
+#:      带 quitting 闸重启，add_Load 起泵，读盘有 LastWriteTimeUtc 守卫）。
+#:      禁 WinForms Timer（WM_TIMER 只在队列空时合成，输入负载下饿死 —— 0.50.0
+#:      病根）与自续期 posted invoke（队列永不空 ⇒ 自造饥饿 —— 8 轮实测
+#:      ticks=1/frames=352，2026-10-19）；两个被否设计都写进 logo.ps1 注释。
+#:   ④ 减少动效（MinAnimate=0）：只画一帧静态，且取在**目标态**（xfade 处），
+#:      不是启动态 —— 启动态会让 R0 演成一枚绿环（FLO-10e 锁这条）。
+#:   ⑤ 回落链：规格取不到 ⇒ 回落托盘同族静态图标（0.52.0 的腿），不假装会动。
+#: ★ 0.52.0 的「双缓冲」条款在 0.53.1 **退役**：分层窗的内容是整帧位图，窗体
+#:   自己的 DC 从不显示，双缓冲无从谈起（颤抖的根治在架构层，不在这个开关）。
 def _flo01_ok(src):
+    """0.53.1 契约。返回 None = 合格；否则返回第一条不合格的原因（人读）。"""
+    # ---- 0.52.0 仍然成立的条款（常驻三标志 / 点击不自毁 / 拖拽 / 回落链）----
     if 'FormBorderStyle = "None"' not in src:
         return "没钉死无边框 —— 会有标题栏，哨标不像哨标"
-    if "TopMost = $true" not in src:
-        return "没置顶 —— 会被别的窗盖住（监理要「一直在」）"
+    # ★ 锚「建窗时」那一段（ShowInTaskbar 紧接 TopMost），不是任意一处
+    #   `TopMost = $true`：Show-Now 里也有一句重申报（从托盘唤回时补），
+    #   只认那一句的话「建窗时没置顶」照样判绿 —— 负控「不置顶」会失去
+    #   分辨力（2026-10-19 实测：锚点出现 2 次，变异打不到真位置）。
+    if "$form.ShowInTaskbar = $false\n$form.TopMost = $true" not in src:
+        return "建窗时没置顶 —— 会被别的窗盖住（监理要「一直在」）"
     for edge in ("MinimumSize", "MaximumSize"):
         if ("$form.%s = New-Object System.Drawing.Size($Size, $Size)" % edge
                 not in src):
@@ -2094,11 +2223,15 @@ def _flo01_ok(src):
         return "没有轮询退役标志自退 —— 退役只能靠强杀"
     if 'Write-Action "open"' not in src:
         return "点击没写 open 动作 —— 点了哨标展不开 Antinel 监理"
-    # 0.52.0：点击**不自毁** —— Quit-Now 只许出现两处（函数定义 + quit 标志轮询）
-    if src.count("Quit-Now") != 2:
-        return ("点击路径在自毁（Quit-Now 出现 %d 次 ≠ 2）—— "
+    # 0.52.0：点击**不自毁** —— Quit-Now 在**代码里**只许出现两处（函数定义 +
+    # quit 标志轮询）。★ 只数代码行：注释里提到函数名是正常文档（0.53.1 的架构
+    # 注记就提了一次），把文档提及当成调用，尺子就会红在措辞上而不是缺陷上。
+    code = "\n".join(l for l in src.splitlines()
+                     if not l.lstrip().startswith("#"))
+    if code.count("Quit-Now") != 2:
+        return ("点击路径在自毁（Quit-Now 在代码里出现 %d 次 ≠ 2）—— "
                 "哨标消失而 Antinel 监理没开，正是 2026-10-17 截图的病"
-                % src.count("Quit-Now"))
+                % code.count("Quit-Now"))
     if "$script:actionWriteFailed = $true" not in src or "$script:actionWriteFailTip" not in src:
         return "动作写盘失败没有可观测反馈 —— 用户点了没反应"
     if "add_MouseMove" not in src or "dragging" not in src:
@@ -2108,24 +2241,90 @@ def _flo01_ok(src):
         return "没有唤标志处理 —— 常驻哨标唤不出，收缩仍要冷启 PowerShell（切换慢）"
     if "Consume-Flag $Hide" not in src or "$form.Hide()" not in src:
         return "没有藏标志处理 —— 展开后哨标退不死也藏不了，屏幕上多漂一枚"
-    # 0.52.0 静态图标：托盘同族 .ico + 双缓冲 + 回落链
+    # 0.52.0 静态图标：托盘同族 .ico + 回落链（0.53.1 起它是规格缺失时的回落）
     if "[string]$IconDir" not in src:
-        return "-IconDir 没接 —— 哨标画不了托盘同族状态图标"
+        return "-IconDir 没接 —— 规格取不到时画不了托盘同族状态图标（回落链断了）"
     if "ToBitmap" not in src or "DrawImage" not in src:
-        return "不是按 .ico 画 —— 哨标与 Antinel 监理图标不同源（创始人要「同样的图标」）"
-    if '$form.GetType().GetProperty("DoubleBuffered",' not in src:
-        return "没开双缓冲 —— 40ms 重绘照旧颤抖"
+        return "不是按 .ico 画 —— 回落图标与 Antinel 监理图标不同源（创始人要「同样的图标」）"
     if '($st + $suf + ".ico")' not in src or '($st + ".ico")' not in src:
         return "状态图标回落链不完整 —— 组合态缺文件时该回落基础态（icon_file 同规）"
     if '"unposted" = "-unposted"' not in src or '"off" = "-off"' not in src:
         return "哨兵态后缀表不全 —— shield 维度画不出来（托盘同族映射漂了）"
-    # 0.52.0：旧 GDI+ 动效必须删净（旋转弧线/浮动/滑行 —— 颤抖的根源）
-    if "waveR" in src or "$MOTION" in src or "bob" in src or "coast" in src:
-        return "GDI+ 动效没删干净 —— 颤抖根源还在"
+    # ---- 0.53.1：分层透明窗（粉边／命中区的病根都在这一层）----
+    if "cp.ExStyle |= 0x00080000" not in src:
+        return "没开 WS_EX_LAYERED —— 逐像素 alpha 的分层窗才是 0.53.1 的画法"
+    if "UpdateLayeredWindow" not in src:
+        return "没有 UpdateLayeredWindow —— 帧没有真正成为窗口内容（会留一块底色）"
+    if "TransparencyKey =" in src:
+        return ("又用回 TransparencyKey 镂空 —— 只命中不透明像素（点图标中间没反应），"
+                "AA 边还会出现粉边（0.50.0 实测）")
+    # ---- 0.53.1：整个内切圆可点，四角让位 ----
+    if "m.Msg == 0x0084" not in src or "NcHitTest" not in src:
+        return "WndProc 没有自答 WM_NCHITTEST —— 命中区回到系统默认（点中间没反应）"
+    if "return -1" not in src:
+        return "四角没有 HTTRANSPARENT —— 哨标会抢走背后窗口的点击"
+    if "Test-Hit $x $y $Size $script:hitRadius" not in src:
+        return "命中判定没走规格推导的 Test-Hit —— 半径又成了写死的数"
+    if "Get-HitRadius $Size $script:spec" not in src:
+        return "hitRadius 没从规格推导 —— 画的和点的不是同一个圆（FLO-10a 锁数值）"
+    # ---- 0.53.1：帧数学单一实现（logo_frame.ps1），logo.ps1 只管画 ----
+    if ". $Frame" not in src:
+        return "没有 dot-source 帧数学 —— 徽标动法要在 PowerShell 里另写一遍"
+    if "Get-Frame -Spec $script:spec" not in src:
+        return "没有按规格算帧 —— 标准动效 LOGO 只是摆设"
+    for fn in ("Get-Frame", "Get-HitRadius", "Test-Hit", "New-Visual",
+               "ConvertTo-Hashtable", "Get-RingSegments", "Get-Clamp"):
+        if ("function %s" % fn) in src:
+            return "logo.ps1 里又定义了 %s —— 帧数学出现了第二份实现（迟早漂）" % fn
+    # ---- 0.53.1：帧泵＝池定时器投递（两个被实测否掉的设计都不许复活）----
+    if "System.Windows.Forms.Timer" in src:
+        return ("又用回 WinForms Timer —— WM_TIMER 只在消息队列空时合成，"
+                "鼠标一压上来动画就饿死（0.50.0 颤抖／停摆的病根）")
+    if "New-Object System.Timers.Timer($LOGO_FRAME_MS)" not in src:
+        return "帧泵不是线程池定时器 —— 满载下会堆积或饿死（0.53.1 实测定稿）"
+    if src.count(".SynchronizingObject = $form") != 2:
+        return ("SynchronizingObject 不是正好两处（帧泵＋轮询）—— "
+                "池线程上触发的回调会跨线程踩窗体")
+    if src.count("AutoReset = $false") != 2:
+        return "AutoReset 没关 —— 回调会堆积（最多一枚待投递是这条架构的前提）"
+    if src.count("if (-not $script:quitting) {") != 2:
+        return ("finally 里的 quitting 闸不是正好两处 —— 处理器抛异常时泵要么死掉"
+                "（静默冻住），要么退出了还重启（往死句柄上投递）")
+    # ★ 只看「有没有 add_Load」不够：句柄建好不开泵，徽标一样是死的
+    #   （负控实测：把 Start-Pump/Start-Poll 挖空后老条款仍判绿）。
+    if "$form.add_Load({\n  Start-Pump\n  Start-Poll\n})" not in src:
+        return ("add_Load 里没起泵/起轮询 —— 句柄建好前投递会炸"
+                "（InvalidOperationException），不起泵徽标就是死的")
+    if "LastWriteTimeUtc" not in src:
+        return "读盘没有 LastWriteTimeUtc 守卫 —— 常驻哨标会每秒重解析 JSON（实测 ~77ms/次）"
+    if "$left = $LOGO_FRAME_MS -" not in src:
+        return "帧间隔没有自适应（预算−实测工作量）—— 慢机堆积、快机不满预算"
+    if "TotalSeconds -gt 1.5" not in src or "lastFrameUtc" not in src:
+        return "帧泵没有看门狗 —— 泵悄悄死了徽标就静默冻住（最糟的失败）"
+    # ---- 0.53.1：减少动效取目标态 ----
+    if "MinAnimate" not in src:
+        return "没读系统的「显示动画」偏好 —— 晕动敏感用户没有退路（Q-20 同族）"
+    if "$mt = [double]$script:spec.anim.xfade" not in src:
+        return ("减少动效的静态帧没取在目标态（xfade）—— 会演成启动态："
+                "R0 在减少动效下成一枚绿环，状态读错（FLO-10e 锁这条）")
+    # ---- 回落链：规格取不到就静态图标，不假装会动 ----
+    if "Import-Spec" not in src or "Load-Icon (Resolve-IconPath $st $sh)" not in src:
+        return "规格缺失时没有回落托盘同族静态图标 —— 要么假动要么空白"
+    # ---- 0.53.1：源码 ASCII-only（PS 5.1 无 BOM 按 GBK 读 .ps1）----
+    # 同一轮三轮实证：无 BOM 的 .ps1 里任何非 ASCII 字节——哪怕只在注释里——
+    # 都会被按 GBK 误解码并**静默劣化行为**（驱动「循环跑 9 次但 hashtable
+    # 键一个不进」5/5 复现）；用户可见字符串更直接变乱码（tray.ps1 的
+    # `·` 实测显示成「路」）。产品三件套（logo/tray/logo_frame）的字节级
+    # 检查在 c_flo01；这里守**内存里的源码形状**（负控的变异走这条）。
+    try:
+        src.encode("ascii")
+    except UnicodeEncodeError:
+        return ("源码含非 ASCII 字符 —— PS 5.1 把无 BOM 的 .ps1 按 GBK 读，"
+                "注释里的全角字符都会静默劣化行为，用户可见字符串直接变乱码")
     return None
 
 
-@check("FLO-01 logo.ps1 契约（0.52.0）：托盘同族静态图标、双缓冲、常驻三标志、点击不自毁")
+@check("FLO-01 logo.ps1 契约（0.53.1）：标准动效徽标＋分层窗整圆可点＋池定时器帧泵＋常驻三标志")
 def c_flo01():
     src = _src(_LOGO_PS1_REL)
     why = _flo01_ok(src)
@@ -2133,35 +2332,887 @@ def c_flo01():
         return why
     if not os.path.isfile(IL.script_path()):
         return "IL.script_path() 指向的脚本不在：%s" % IL.script_path()
+    if not os.path.isfile(IL.frame_script_path()):
+        return "帧数学脚本不在：%s —— dot-source 会失败，哨标只能回落静态图标" % IL.frame_script_path()
+    # 字节级 ASCII 检查（三件套）：文本级条款守内存形状，这里守**落盘的字节**——
+    # UTF-8 编解码都正常的字符，只要 >127 就会在 PS 5.1 眼里变形。
+    for rel in (_LOGO_PS1_REL, _FRAME_PS1_REL, _TRAY_PS1_REL):
+        p = os.path.join(ROOT, rel)
+        with open(p, "rb") as f:
+            raw = f.read()
+        bad = [i for i, b in enumerate(raw) if b > 127]
+        if bad:
+            line = raw[:bad[0]].count(b"\n") + 1
+            return ("%s 第 %d 行含非 ASCII 字节（共 %d 个）—— PS 5.1 按 GBK 读它，"
+                    "行为静默劣化／用户可见字符串变乱码（2026-10-19 实证）"
+                    % (rel, line, len(bad)))
     return True
 
 
-@check("N-FLO01 负控：不双缓冲／点击自毁／动效复活 ⇒ 尺子必须判红")
+@check("N-FLO01 负控：九种复发（镂空复活／点击自毁／第二份帧数学／WinForms 计时器／"
+       "重启闸被阉／Load 不起泵／读盘守卫拔掉／不置顶／非 ASCII 字节混入源）⇒ 尺子必须全判红")
 def n_flo01():
     src = _src(_LOGO_PS1_REL)
-    bad = src.replace('$form.GetType().GetProperty("DoubleBuffered",',
-                      '$form.GetType().GetProperty("XoubleBuffered",')
-    if bad == src:
-        return "夹具不成立：双缓冲变异没生效（要改的那行没匹配上）"
-    if _flo01_ok(bad) is None:
-        return "负控失效：不双缓冲也判合格 —— 颤抖没人抓"
-    bad2 = src.replace('Write-Action "open" | Out-Null',
-                       'Write-Action "open" | Out-Null; Quit-Now')
-    if bad2 == src:
-        return "夹具不成立：点击自毁变异没命中"
-    if _flo01_ok(bad2) is None:
-        return "负控失效：点击自毁也判合格 —— 哨标消失而 Antinel 监理没开没人抓"
-    bad3 = src.replace("function Read-State",
-                       "$MOTION = @{}\nfunction Read-State")
-    if bad3 == src:
-        return "夹具不成立：动效复活变异没生效"
-    if _flo01_ok(bad3) is None:
-        return "负控失效：GDI+ 动效复活也判合格 —— 颤抖根源没人抓"
-    bad4 = src.replace('$form.TopMost = $true', '$form.TopMost = $false')
-    if bad4 == src:
-        return "夹具不成立：置顶变异没生效"
-    if _flo01_ok(bad4) is None:
-        return "负控失效：不置顶也判合格"
+    base = _flo01_ok(src)
+    if base is not None:
+        return "夹具不成立：未变异时 FLO-01 就不合格（%s），负控无分辨力" % base
+    # 每个变异：(名字, 锚, 替换体, 期望原因关键词)。锚必须**恰好出现一次**——
+    # 0 次＝尺子跟源码形状漂了（负控自身失效），>1 次＝变异会打到别处去。
+    muts = [
+        ("TransparencyKey 镂空复活",
+         "$form.Text = $Title",
+         "$form.Text = $Title\n"
+         "$form.TransparencyKey = [System.Drawing.Color]::Fuchsia",
+         "TransparencyKey"),
+        ("点击自毁",
+         'Write-Action "open" | Out-Null',
+         'Write-Action "open" | Out-Null; Quit-Now',
+         "自毁"),
+        ("第二份帧数学",
+         "function Read-State",
+         "function Get-Frame { param($Spec,[string]$Mode,[double]$Mt,$Snap) return $null }\n"
+         "function Read-State",
+         "第二份实现"),
+        ("WinForms 计时器复活",
+         "New-Object System.Timers.Timer($LOGO_FRAME_MS)",
+         "New-Object System.Windows.Forms.Timer\n"
+         "$script:frameTimer.Interval = $LOGO_FRAME_MS",
+         "WinForms"),
+        ("finally 重启闸被阉",
+         "      if (-not $script:quitting) {\n        $left = $LOGO_FRAME_MS",
+         "      if ($true) {\n        $left = $LOGO_FRAME_MS",
+         "quitting"),
+        ("add_Load 不起泵",
+         "$form.add_Load({\n  Start-Pump\n  Start-Poll\n})",
+         "$form.add_Load({\n})",
+         "add_Load"),
+        ("读盘守卫拔掉",
+         "    $w = (Get-Item -LiteralPath $State).LastWriteTimeUtc\n"
+         "    if ((-not $script:stateParsed) -or ($w -ne $script:stateStamp)) {",
+         "    if ($true) {",
+         "LastWriteTimeUtc"),
+        ("不置顶",
+         "$form.ShowInTaskbar = $false\n$form.TopMost = $true",
+         "$form.ShowInTaskbar = $false\n$form.TopMost = $false",
+         "置顶"),
+        ("非 ASCII 字节混入源",
+         "try { . $Frame; $script:frameOk = $true }",
+         "try { . $Frame; $script:frameOk = $true }  # \u00b7 note",
+         "非 ASCII"),
+    ]
+    for name, anchor, repl, kw in muts:
+        n = src.count(anchor)
+        if n != 1:
+            return ("夹具不成立：%s 的锚点出现 %d 次（要恰好 1 次）—— 尺子跟源码"
+                    "形状漂了，负控自身失效，不算通过" % (name, n))
+        why = _flo01_ok(src.replace(anchor, repl))
+        if why is None:
+            return "负控失效：%s 仍判合格 —— 这条尺子是装饰" % name
+        if kw not in why:
+            return "负控方向不对：%s 判红了但报的不是预期原因（%r）" % (name, why)
+    return True
+
+
+# ═══════════════════════════════════════════════ FLO-10 族（0.53.1）══
+#: ★★★ 创始人 2026-10-19 截图（最小化后的哨标）三句话，四条判据腿：
+#:   「出现的居然是圆圈，不是标准 LOGO」     ⇒ FLO-10c/d 锁动效规格单一真源与下发
+#:   「点圆圈中间没反应，只有点线上才切得回」 ⇒ FLO-10a 锁命中区（规格推导的内切圆）
+#:   「LOGO 应该跟主窗口一样保持动态」        ⇒ FLO-10b 锁帧随时间推进（五态各对规格）
+#:   ＋ FLO-10e：减少动效的静态帧取**目标态**（R0 不许演成启动态的一枚绿环）。
+#: ★ 方法纪律（本族的心脏）：帧数学的判据**不二次实现**。写一个 ASCII-only 的
+#:   PowerShell 驱动（`_FLO10_DRIVER`），dot-source 产品同一个
+#:   `tools/logo_frame.ps1`，真跑 `Get-Frame`/`Get-HitRadius`/`Test-Hit`/
+#:   `New-Visual`，JSON 出栈；Python 侧只做两件事：① 从**同一份规格**出发的
+#:   独立推导（oracle）；② 逐项比对。两份实现在同一输入上必须给出同一个答案
+#:   —— 分歧即红。负控只动 `logo_frame.ps1` 的**临时副本**，不落产品文件。
+#: ★ 为什么值得单独一族：这三句话是「监理要不要碍事」这条产品线的三个面
+#:   （看得见、点得到、是活的），任何一个面坏掉，哨标就从「监理在」退化成
+#:   「一个碍事的装饰」—— 而装饰比没有更糟（用户会以为它在守）。
+
+# ---- 驱动：真跑帧数学（ASCII-only；PS 5.1 无 BOM 会解错 UTF-8 源）----
+# ★★ 驱动内局部变量**严禁**与参数名大小写碰撞（PowerShell 变量名大小写
+#   不敏感）：曾用 `$spec = ConvertTo-Hashtable $j.logo`，而参数块里有
+#   `[string]$Spec` —— 同一个变量，[string] 类型 ⇒ 整个 Hashtable 被
+#   强制转成字符串 "System.Collections.Hashtable" ⇒ `.geom` 为 null
+#   ⇒ half=0 ⇒ scale=∞ ⇒ `[int]NaN` 崩（2026-10-19 实测定位）。故一律
+#   用 `$sp` 这类与任何参数都不同名的短名。
+# ★★ 驱动**必须 ASCII-only**：PS 5.1 把无 BOM 的 .ps1 按 GBK 读，文件里
+#   任何非 ASCII 字节——哪怕在注释里——都会静默劣化行为（同一轮实证：
+#   中文注释版驱动「循环跑 9 次但 hashtable 键一个不进」，5/5 复现；
+#   换成 ASCII 立即恢复）。`_flo10_ps` 落盘前有断言把守。
+_FLO10_DRIVER = r"""
+param(
+  [Parameter(Mandatory=$true)][string]$Frame,
+  [Parameter(Mandatory=$true)][string]$Spec,
+  [Parameter(Mandatory=$true)][string]$Job,
+  [string]$Mode = "L0",
+  [string]$Mts = "",
+  [int]$Size = 46,
+  [string]$Points = ""
+)
+$ErrorActionPreference = "Stop"
+. $Frame
+$j = Get-Content -LiteralPath $Spec -Raw -Encoding UTF8 | ConvertFrom-Json
+$sp = ConvertTo-Hashtable $j.logo
+if ($null -eq $sp) {
+  [Console]::Out.Write('{"error":"tray.json has no logo block"}'); exit 2
+}
+if ($Job -eq "hit") {
+  $hr = Get-HitRadius $Size $sp
+  $res = @{ radius = $hr }
+  $i = 0
+  foreach ($p in ($Points -split ';')) {
+    if ($p -eq "") { continue }
+    $xy = $p -split ','
+    # NOTE (ASCII-only file!): the cast MUST be ([int]$xy[0]), NOT
+    # [int]$xy[0] -- in PowerShell a cast binds tighter than indexing,
+    # so the latter is ([int]$xy)[0]: the array gets OFS-joined into
+    # "23 23" and the int cast explodes (measured 2026-10-19).
+    $res["p$i"] = [bool](Test-Hit ([int]$xy[0]) ([int]$xy[1]) $Size $hr)
+    $i = $i + 1
+  }
+  [Console]::Out.Write((ConvertTo-Json $res -Compress))
+} elseif ($Job -eq "frames") {
+  $snap = New-Visual $sp
+  $out = @()
+  foreach ($m in ($Mts -split ',')) {
+    if ($m -eq "") { continue }
+    $f = Get-Frame -Spec $sp -Mode $Mode -Mt ([double]$m) -Snap $snap
+    $row = @{ mt = [double]$m
+              theta = [double]$f.theta
+              ringO = [double]$f.ringO
+              amberO = [double]$f.amberO
+              ringRed = [double]$f.ringRed
+              breath = [double]$f.breath
+              beamC = @([double]$f.beamC[0], [double]$f.beamC[1], [double]$f.beamC[2])
+              ringC = @([double]$f.ringC[0], [double]$f.ringC[1], [double]$f.ringC[2])
+              bx = [double]$f.beam.x2
+              by = [double]$f.beam.y2
+              waves = @() }
+    foreach ($w in $f.waves) {
+      $row.waves += @{ r = [double]$w.r; w = [double]$w.w; opa = [double]$w.opa }
+    }
+    $out += $row
+  }
+  [Console]::Out.Write((ConvertTo-Json @{ frames = $out } -Compress -Depth 7))
+} else {
+  [Console]::Out.Write('{"error":"unknown job"}'); exit 2
+}
+"""
+
+
+def _ps_path():
+    import shutil
+    return shutil.which("powershell") or shutil.which("pwsh")
+
+
+def _flo10_ps(job, spec_path, frame_path=None, mode="L0", mts="", size=46,
+              points=""):
+    """真跑帧数学（PowerShell + dot-source 产品脚本）。返回解析后的 JSON dict。
+
+    `frame_path` 不给 = 产品脚本；给 = 临时变异副本（负控用）。跑不动 ⇒ 抛
+    （调用方按红处理，**不许**静默当成"测不出"）。
+    """
+    ps = _ps_path()
+    if not ps:
+        raise RuntimeError("PATH 上没有 powershell/pwsh —— 帧数学无法真跑")
+    import subprocess
+    # ★ 机制层断言：驱动 ASCII-only。PS 5.1 无 BOM 按 GBK 读 .ps1，非
+    #   ASCII 字节（哪怕只在注释里）会静默劣化行为——不在这里炸一声，
+    #   症状会变成「量具莫名其妙测不出」（2026-10-19 三轮实证）。
+    try:
+        _FLO10_DRIVER.encode("ascii")
+    except UnicodeEncodeError as e:
+        raise RuntimeError("帧数学驱动含非 ASCII 字节（%s）—— PS 5.1 会按 GBK "
+                           "误解码，行为静默劣化；注释说明放 Python 侧" % e)
+    d = tempfile.mkdtemp(prefix="g0514_flo10_")
+    drv = os.path.join(d, "flo10_driver.ps1")
+    with io.open(drv, "w", encoding="utf-8", newline="\n") as f:
+        f.write(_FLO10_DRIVER)
+    cmd = [ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", drv,
+           "-Frame", frame_path or IL.frame_script_path(),
+           "-Spec", spec_path, "-Job", job, "-Mode", mode,
+           "-Mts", mts, "-Size", str(int(size)), "-Points", points]
+    p = subprocess.run(cmd, capture_output=True, timeout=300)
+    out = (p.stdout or b"").decode("utf-8", "replace").strip()
+    if p.returncode != 0 or not out:
+        raise RuntimeError("帧数学驱动失败 rc=%r out=%r err=%r" % (
+            p.returncode, out[:200],
+            (p.stderr or b"").decode("utf-8", "replace")[:300]))
+    return json.loads(out)
+
+
+def _flo10_tray(state="L2"):
+    """写一份**真** tray.json（含 logo 规格块），返回 (root, 路径, 读回的 payload)。
+
+    为什么不直接拿 `logo_motion_spec()` 的返回值喂驱动：那样就只测了函数本身。
+    走 `inbox_tray.write_state` ⇒ 测的是**下发通路**（规格真的落到托盘那一个
+    状态文件里），驱动读的也是哨标真正会读的那个文件。
+    """
+    root = tempfile.mkdtemp(prefix="g0514_flo10_hub_")
+    TR.write_state(state, 1, "intercepting - unhandled 1", root=root)
+    p = TR.state_path(root)
+    with io.open(p, encoding="utf-8") as f:
+        payload = json.load(f)
+    return root, p, payload
+
+
+# ---------------------------------------------------------------- FLO-10a --
+def _flo10_hit_extent(spec):
+    """「画出来的最大半径」（画布单位）——`Get-ContentExtent` 的 Python 孪生。
+
+    这是**故意的第二份实现**（oracle）：产品在 PowerShell 里算一遍，判据在
+    Python 里从同一份规格算一遍，两份必须一致。它防两类事：半径被写死（不随
+    规格走），以及产品公式自身写错（缩放/取整/封顶）。
+    """
+    g = spec["geom"]
+    ext = 0.0
+    for m in spec["motion"].values():
+        e = (float(g["r"]) + float(g["amberR"]) + float(g["waveGap"])
+             + float(m["waveR"]))
+        if e > ext:
+            ext = e
+    half = float(g["half"])
+    return ext if ext <= half else half
+
+
+def _flo10_hit_raw(spec, size):
+    half = float(spec["geom"]["half"])
+    return _flo10_hit_extent(spec) * float(size) / (2.0 * half)
+
+
+@check("FLO-10a 命中区＝规格推导的内切圆：整个 LOGO 边界内可点，四角让位")
+def c_flo10a(frame_path=None):
+    root, tray, payload = _flo10_tray()
+    spec = payload.get("logo")
+    if not isinstance(spec, dict):
+        return "tray.json 里没有 logo 规格块 —— 哨标只能回落静态图标（FLO-10c 锁下发）"
+    size = 46
+    raw = _flo10_hit_raw(spec, size)
+    hr = int(round(raw))
+    c = size / 2.0
+    pts = [("center", int(c), int(c)),
+           ("right_in", int(c + hr - 3), int(c)),
+           ("left_in", int(c - hr + 3), int(c)),
+           ("top_in", int(c), int(c - hr + 3)),
+           ("bottom_in", int(c), int(c + hr - 3)),
+           ("corner_tl", 2, 2),
+           ("corner_br", size - 3, size - 3),
+           ("out_right", int(c + hr + 3), int(c)),
+           ("out_left", int(c - hr - 3), int(c))]
+    got = _flo10_ps("hit", tray, frame_path=frame_path, size=size,
+                    points=";".join("%d,%d" % (x, y) for _, x, y in pts))
+    if "radius" not in got:
+        return "帧数学驱动没返回半径：%r" % (got,)
+    # 半径数值：容差 0.5px（PS 的 Round 是四舍五入远零，Python 的 round 是
+    # 银行家舍入 —— 真出现 x.5 时两者可差 1，那不是产品缺陷）。
+    if abs(float(got["radius"]) - raw) > 0.5 + 1e-9:
+        return ("Get-HitRadius 实测 %s ≠ 规格推导 %.4f —— 画出来的圆和点得到的圆"
+                "不是一个（创始人截图：点圆圈中间没反应）" % (got["radius"], raw))
+    for i, (name, x, y) in enumerate(pts):
+        want = ((x - c) ** 2 + (y - c) ** 2) <= hr * hr
+        key = "p%d" % i
+        if key not in got:
+            return "驱动没判 %s 点（%d,%d）—— 量具缺腿" % (name, x, y)
+        if bool(got[key]) != want:
+            return ("%s 点（%d,%d）Test-Hit=%s ≠ 推导 %s —— 命中区与规格不一致"
+                    % (name, x, y, got[key], want))
+    # 半径随窗口尺寸缩放（证明是推出来的，不是写死的 23）
+    raw2 = _flo10_hit_raw(spec, 2 * size)
+    got2 = _flo10_ps("hit", tray, frame_path=frame_path, size=2 * size, points="")
+    if abs(float(got2.get("radius", -1)) - raw2) > 0.5 + 1e-9:
+        return ("窗口放大一倍后半径 %s ≠ 推导 %.4f —— hitRadius 是写死的数"
+                % (got2.get("radius"), raw2))
+    if hr > size // 2:
+        return "命中半径 %d 超出内切圆 %d —— 会抢走四角属于背后窗口的点击" % (
+            hr, size // 2)
+    return True
+
+
+@check("N-FLO10a 负控：半径改 Floor／Test-Hit 恒真 ⇒ 同一条尺子必须判红")
+def n_flo10a():
+    root, tray, payload = _flo10_tray()
+    if "logo" not in payload:
+        return "夹具不成立：tray.json 没有 logo 块，负控无从测起"
+    base = c_flo10a()
+    if base is not True:
+        return "夹具不成立：未变异时 FLO-10a 就不合格：%s" % (base,)
+    frame_src = io.open(IL.frame_script_path(), encoding="utf-8").read()
+    d = tempfile.mkdtemp(prefix="g0514_flo10n_")
+    # 变异 1：Round → Floor（边界差一；对当前规格 23 → 22）。
+    # ★ 为什么不用「直接返回 Size/2」：当前规格推导出的半径恰好就是 23＝Size/2
+    #   （extent 280.074 ≈ half 282.074，缩放取整后重合）—— 那个变异**不改变
+    #   取值**，量具看不见。负控必须是真能改变取值的变异，否则就是假负控。
+    a = "return [int][Math]::Round((Get-ContentExtent $Spec) * $scale)"
+    if frame_src.count(a) != 1:
+        return "夹具不成立：Get-HitRadius 锚点没打中（源码已变，需更新负控）"
+    p1 = os.path.join(d, "frame_floor.ps1")
+    with io.open(p1, "w", encoding="utf-8", newline="\n") as f:
+        f.write(frame_src.replace(
+            a, "return [int][Math]::Floor((Get-ContentExtent $Spec) * $scale)"))
+    why = c_flo10a(frame_path=p1)
+    if why is True or why is None:
+        return "负控失效：半径退回 Floor 仍判合格 —— 差一像素没人抓"
+    # 变异 2：Test-Hit 恒真（半径约束整个掉）⇒ 探针必须翻
+    b = "return (($dx * $dx + $dy * $dy) -le ($Radius * $Radius))"
+    if frame_src.count(b) != 1:
+        return "夹具不成立：Test-Hit 锚点没打中（源码已变，需更新负控）"
+    p2 = os.path.join(d, "frame_always.ps1")
+    with io.open(p2, "w", encoding="utf-8", newline="\n") as f:
+        f.write(frame_src.replace(b, "return $true"))
+    why = c_flo10a(frame_path=p2)
+    if why is True or why is None:
+        return "负控失效：Test-Hit 恒真仍判合格 —— 四角也会被哨标抢走点击"
+    return True
+
+
+# ---------------------------------------------------------------- FLO-10b --
+_FLO10B_FINE = [round(0.02 * i, 2) for i in range(0, 151)]        # 0 … 3.00
+_FLO10B_COARSE = [round(3.25 + 0.25 * i, 2) for i in range(0, 88)]  # 3.25 … 25.00
+_FLO10B_MTS = _FLO10B_FINE + _FLO10B_COARSE
+
+
+def _flo10b_unwrap1(t0, t1):
+    d = t1 - t0
+    if d > 180:
+        d -= 360
+    if d < -180:
+        d += 360
+    return d
+
+
+def _flo10b_swept(thetas):
+    swept, prev = 0.0, None
+    for th in thetas:
+        if prev is not None:
+            swept += _flo10b_unwrap1(prev, th)
+        prev = th
+    return swept
+
+
+def _flo10b_mode(mode, fr, spec):
+    """一个态的全部帧动态断言。返回 None = 合格，否则第一条不符的原因。"""
+    g, a, row = spec["geom"], spec["anim"], spec["motion"][mode]
+    idx = {m: i for i, m in enumerate(_FLO10B_MTS)}
+
+    def at(m):
+        return fr[idx[m]]
+
+    # ① 换态渐变：Mt=0 必须是启动态（L0 行），Mt≥xfade 必须到达目标态
+    f0, f2 = at(0.0), at(2.0)
+    for key, want0, want2 in (("ringO", 1.0, float(row["ringO"])),
+                              ("amberO", 0.35, float(row["amberO"])),
+                              ("ringRed", 0.0, float(row["ringRed"]))):
+        if abs(f0[key] - want0) > 1e-9:
+            return "%s Mt=0 的 %s=%.6f ≠ 启动态 %.2f（渐变没从快照起）" % (
+                mode, key, f0[key], want0)
+        if abs(f2[key] - want2) > 1e-9:
+            return "%s Mt=2 的 %s=%.6f ≠ 目标态 %.2f（xfade=%.1fs 没走完）" % (
+                mode, key, f2[key], want2, a["xfade"])
+    for i in range(3):
+        if abs(f0["beamC"][i] - spec["motion"]["L0"]["c"][i]) > 1e-9:
+            return "%s Mt=0 的光束色不是启动态 L0" % mode
+        if abs(f2["beamC"][i] - row["c"][i]) > 1e-9:
+            return "%s Mt=2 的光束色 %r ≠ 目标色 %r" % (mode, f2["beamC"], row["c"])
+    # ② 角度通道
+    if mode == "R0":
+        glide = _flo10b_unwrap1(at(0.0)["theta"], at(0.8)["theta"])
+        if abs(glide - float(a["r0Slide"])) > 0.5:
+            return "R0 滑行 %.3f° ≠ 规格 %.1f°（停摆没停住或滑距不对）" % (
+                glide, a["r0Slide"])
+        tail = [f["theta"] for f in fr if f["mt"] >= 1.0]
+        if max(tail) - min(tail) > 1e-9:
+            return ("R0 滑行结束后 24 秒内漂移 %.6f° —— 规格是永停（讣告不该"
+                    "一直转）" % (max(tail) - min(tail)))
+        seg = [at(m)["theta"] for m in _FLO10B_FINE if m <= 0.8]
+        if any(_flo10b_unwrap1(seg[i], seg[i + 1]) < -1e-12
+               for i in range(len(seg) - 1)):
+            return "R0 滑行段回摆 —— 不是单调滑行"
+    elif mode == "L0":
+        if abs(at(0.1)["theta"] - at(0.0)["theta"]) > 1e-12:
+            return "L0 在起步停顿 %.2fs 内就转了（规格：%.2fs 后才起转）" % (
+                0.1, a["l0Delay"])
+        lap = float(row["lap"])
+        sp = _flo10b_unwrap1(at(6.0)["theta"], at(7.0)["theta"])
+        if abs(sp - 360.0 / lap) > 0.5:
+            return "L0 稳速 %.3f°/s ≠ %.3f°/s（%.1fs/圈 没兑现）" % (
+                sp, 360.0 / lap, lap)
+        thetas = [f["theta"] for f in fr]
+        if _flo10b_swept(thetas) <= 0 or any(
+                _flo10b_unwrap1(thetas[i], thetas[i + 1]) < -1e-12
+                for i in range(len(thetas) - 1)):
+            return "L0 全程没有单调推进 —— 徽标「不动了」"
+    else:
+        lap = float(row["lap"])
+        end = {"L1": 8.0, "L2": 5.5, "LD": 3.5}[mode]
+        swept = _flo10b_swept([f["theta"] for f in fr if f["mt"] <= end])
+        if abs(swept - 360.0) > 1.0:
+            return "%s：%.1fs 扫过 %.3f° ≠ 360°（%.1fs/圈 没兑现）" % (
+                mode, end, swept, lap)
+        sp = _flo10b_unwrap1(at(end - 1.0)["theta"], at(end)["theta"])
+        if abs(sp - 360.0 / lap) > 0.5:
+            return "%s 稳速 %.3f°/s ≠ %.3f°/s" % (mode, sp, 360.0 / lap)
+    # ③ 涟漪通道：L1/L2/LD 开（扩散＋衰减），L0/R0 止
+    on = mode in ("L1", "L2", "LD")
+    base_r = float(g["amberR"]) + float(g["waveGap"])
+    amp, peak = float(row["waveR"]), float(row["waveO"])
+    max_opa = 0.0
+    for f in fr:
+        for w in f["waves"]:
+            if not on:
+                if w["r"] != 0.0 or w["opa"] != 0.0 or w["w"] != 0.0:
+                    return ("%s 态不该有涟漪（r=%.3f opa=%.3f）—— 规格：波止"
+                            % (mode, w["r"], w["opa"]))
+                continue
+            if w["r"] < base_r - 1e-9 or w["r"] > base_r + amp + 1e-9:
+                return "%s 涟漪半径 %.4f 跳出 [%g, %g]" % (mode, w["r"], base_r,
+                                                          base_r + amp)
+            if w["r"] > base_r + 1e-6:
+                ph = (w["r"] - base_r) / amp
+                if abs(w["opa"] - peak * (1.0 - ph) ** 2) > 1e-6:
+                    return ("%s 涟漪 ph=%.4f 处不透明度 %.5f ≠ %.5f（扩散衰减"
+                            "公式：越远越淡）" % (mode, ph, w["opa"],
+                                                peak * (1.0 - ph) ** 2))
+                if abs(w["w"] - (float(a["waveW0"]) - float(a["waveW1"]) * ph)) > 1e-6:
+                    return "%s 涟漪线宽 %.4f 与相位 ph=%.4f 不符" % (mode, w["w"], ph)
+            max_opa = max(max_opa, w["opa"])
+    if on and abs(max_opa - peak) > 0.01:
+        return ("%s 涟漪峰值不透明度 %.3f ≠ 规格 %.2f —— 波峰从没出现过，"
+                "涟漪是假的" % (mode, max_opa, peak))
+    # ④ R0 环色塌暗
+    if mode == "R0":
+        dark = spec["colors"]["ringDarkRed"]
+        if any(abs(f2["ringC"][i] - dark[i]) > 1e-6 for i in range(3)):
+            return "R0 环色 %r ≠ 规格暗红 %r" % (f2["ringC"], dark)
+    return None
+
+
+@check("FLO-10b 帧随时间推进：五态速度/停摆/涟漪扩散衰减/波止，逐项对规格")
+def c_flo10b(frame_path=None):
+    root, tray, payload = _flo10_tray()
+    spec = payload.get("logo")
+    if not isinstance(spec, dict):
+        return "tray.json 里没有 logo 规格块"
+    mts_txt = ",".join("%g" % m for m in _FLO10B_MTS)
+    for mode in ("L0", "L1", "L2", "LD", "R0"):
+        got = _flo10_ps("frames", tray, frame_path=frame_path, mode=mode,
+                        mts=mts_txt)
+        fr = got.get("frames")
+        if not fr or len(fr) != len(_FLO10B_MTS):
+            return "%s：驱动返回 %d 帧 ≠ 请求 %d 帧（量具缺腿）" % (
+                mode, len(fr or []), len(_FLO10B_MTS))
+        why = _flo10b_mode(mode, fr, spec)
+        if why:
+            return why
+    return True
+
+
+@check("N-FLO10b 负控：渐变系数置 0／起转冻结 ⇒ 同一条尺子必须判红")
+def n_flo10b():
+    root, tray, payload = _flo10_tray()
+    if "logo" not in payload:
+        return "夹具不成立：tray.json 没有 logo 块"
+    base = c_flo10b()
+    if base is not True:
+        return "夹具不成立：未变异时 FLO-10b 就不合格：%s" % (base,)
+    frame_src = io.open(IL.frame_script_path(), encoding="utf-8").read()
+    d = tempfile.mkdtemp(prefix="g0514_flo10n_")
+    # 变异 1：k=0 —— 换态渐变永远不起（Mt=2 仍停在启动态）
+    a = "$k = Get-EaseOut (Get-Clamp ($Mt / [double]$a.xfade) 0 1)"
+    if frame_src.count(a) != 1:
+        return "夹具不成立：xfade 锚点没打中（源码已变，需更新负控）"
+    p1 = os.path.join(d, "frame_k0.ps1")
+    with io.open(p1, "w", encoding="utf-8", newline="\n") as f:
+        f.write(frame_src.replace(a, "$k = 0"))
+    why = c_flo10b(frame_path=p1)
+    if why is True or why is None:
+        return "负控失效：渐变系数恒 0 仍判绿 —— Mt=2 的帧停在了启动态"
+    # 变异 2：起转冻结（theta 不吃 Mt）—— 「不动了」必须有人抓
+    b = "$theta = Get-Mod ($Snap.theta + $Mt * 360.0 / $lap)"
+    if frame_src.count(b) != 1:
+        return "夹具不成立：起转锚点没打中（源码已变，需更新负控）"
+    p2 = os.path.join(d, "frame_frozen.ps1")
+    with io.open(p2, "w", encoding="utf-8", newline="\n") as f:
+        f.write(frame_src.replace(b, "$theta = Get-Mod ($Snap.theta)"))
+    why = c_flo10b(frame_path=p2)
+    if why is True or why is None:
+        return "负控失效：起转冻结仍判绿 —— 徽标「不动了」没人抓"
+    return True
+
+
+# ---------------------------------------------------------------- FLO-10c --
+@check("FLO-10c 动效规格单一真源：logo_motion_spec ≡ 渲染表＋几何常量，且真写进 tray.json")
+def c_flo10c():
+    spec = SV.logo_motion_spec()
+    # ① motion 表 ≡ LOGO_MOTION_RENDER（逐态逐字段，含字段集）
+    for name, row in SV.LOGO_MOTION_RENDER.items():
+        got = spec["motion"].get(name)
+        if not isinstance(got, dict):
+            return "规格缺 %s 态 —— 哨标演不了这一态" % name
+        if set(got) != set(row):
+            return "规格 %s 态字段集 %r ≠ 渲染表 %r" % (name, sorted(got), sorted(row))
+        if list(row["c"]) != got["c"]:
+            return "规格 %s.c=%r ≠ 渲染表 %r" % (name, got["c"], list(row["c"]))
+        for f in ("lap", "ringO", "amberO", "ringRed", "waveR", "waveO"):
+            if float(row[f]) != float(got[f]):
+                return "规格 %s.%s=%r ≠ 渲染表 %r" % (name, f, got[f], row[f])
+    if set(spec["motion"]) != set(SV.LOGO_MOTION_RENDER):
+        return "规格多出渲染表没有的态：%r" % (
+            sorted(set(spec["motion"]) - set(SV.LOGO_MOTION_RENDER)),)
+    # ② 几何逐项 ≡ 常量
+    want_geom = {"cx": SV.LOGO_CX, "cy": SV.LOGO_CY, "r": SV.LOGO_R,
+                 "ringW": SV.LOGO_RING_W, "amberR": SV.LOGO_AMBER_R,
+                 "waveGap": SV.LOGO_WAVE_GAP, "beamLen": SV.LOGO_BEAM_LEN,
+                 "beamW": SV.LOGO_BEAM_W, "boxRatio": SV.LOGO_BOX_RATIO,
+                 "half": round(SV._logo_half(), 3)}
+    for k, v in want_geom.items():
+        if k not in spec["geom"]:
+            return "规格 geom 缺 %s" % k
+        if float(spec["geom"][k]) != float(v):
+            return "规格 geom.%s=%r ≠ 常量 %r" % (k, spec["geom"][k], v)
+    # ③ 色表
+    want_colors = {"ringGreen": list(SV.LOGO_RING_GREEN),
+                   "ringDarkRed": list(SV.LOGO_RING_DARKRED),
+                   "amber": list(SV._hex_rgb(SV.LOGO_AMBER_FILL)),
+                   "trail": list(SV._hex_rgb(SV.LOGO_TRAIL_COLOR))}
+    for k, v in want_colors.items():
+        if list(spec["colors"].get(k, [])) != v:
+            return "规格 colors.%s=%r ≠ %r" % (k, spec["colors"].get(k), v)
+    # ④ 动画常量逐项
+    want_anim = {"trailN": SV.LOGO_TRAIL_N, "trailStep": SV.LOGO_TRAIL_STEP,
+                 "trailOpa": list(SV.LOGO_TRAIL_OPA), "trailFrac": SV.LOGO_TRAIL_FRAC,
+                 "trailInset": SV.LOGO_TRAIL_INSET, "wavePeriod": SV.LOGO_WAVE_PERIOD,
+                 "waveW0": SV.LOGO_WAVE_W0, "waveW1": SV.LOGO_WAVE_W1,
+                 "beamA0": SV.LOGO_BEAM_A0, "beamStart": SV.LOGO_BEAM_START,
+                 "segGap": SV.LOGO_SEG_GAP, "breathBase": SV.LOGO_BREATH_BASE,
+                 "breathAmp": SV.LOGO_BREATH_AMP, "breathPeriod": SV.LOGO_BREATH_PERIOD,
+                 "xfade": SV.LOGO_XFADE, "l0Delay": SV.LOGO_L0_DELAY,
+                 "l0Ramp": SV.LOGO_L0_RAMP, "r0Slide": SV.LOGO_R0_SLIDE,
+                 "r0SlideT": SV.LOGO_R0_SLIDE_T}
+    for k, v in want_anim.items():
+        if k not in spec["anim"]:
+            return "规格 anim 缺 %s" % k
+        if spec["anim"][k] != v:
+            return "规格 anim.%s=%r ≠ 常量 %r" % (k, spec["anim"][k], v)
+    if spec["modes"] != dict(SV.LOGO_MODE):
+        return "规格 modes=%r ≠ LOGO_MODE %r" % (spec["modes"], dict(SV.LOGO_MODE))
+    # ⑤ 真下发：写一份 tray.json，读回来必须带着同一份规格
+    root, tray, payload = _flo10_tray()
+    if "logo" not in payload:
+        return "tray.json 里没有 logo 块 —— 规格没有真下发（哨标会悄悄变哑）"
+    if payload["logo"] != spec:
+        return "tray.json 的 logo 块 ≠ logo_motion_spec() —— 下发路上被改过"
+    return True
+
+
+@check("N-FLO10c 负控：规格塞进未归一的波幅（45/70/105）⇒ 同一条尺子必须判红")
+def n_flo10c():
+    if c_flo10c() is not True:
+        return "夹具不成立：未变异时 FLO-10c 就不合格，负控无分辨力"
+    good = SV.logo_motion_spec()
+    bad = json.loads(json.dumps(good))                # 深拷贝，只动一波幅
+    for name, row in SV.LOGO_MOTION.items():
+        bad["motion"][name]["waveR"] = float(row["waveR"])   # 未归一的规格值
+    with _Patch(SV, logo_motion_spec=lambda: bad):
+        why = c_flo10c()
+        if why is True or why is None:
+            return ("负控失效：波幅退回未归一仍判合格 —— 哨标上的涟漪会伸出"
+                    "窗外被裁（0.50.3「冒泡的 LOGO 不完整」同型）")
+        if "waveR" not in str(why):
+            return "负控方向不对：判红了但报的不是波幅（%r）" % (why,)
+    return True
+
+
+# ---------------------------------------------------------------- FLO-10d --
+_LOGO_STYLE_RE = re.compile(r"var STYLE=(\{.*?\});\r?\nvar RING_GREEN=", re.S)
+
+
+def _flo10d_js_pins():
+    """渲染产物 `_LOGO_JS` 里必须逐字出现的常量针（占位符注入的那些）。
+
+    注入是渲染时从常量算的，正常不可能漂；这条钉的是**渲染之后有人手改文本**。
+    """
+    pins = []
+    for name, const in (("CX", SV.LOGO_CX), ("CY", SV.LOGO_CY), ("R", SV.LOGO_R),
+                        ("W_BEAM", SV.LOGO_BEAM_W), ("L_BEAM", SV.LOGO_BEAM_LEN),
+                        ("AMBER_R", SV.LOGO_AMBER_R), ("GAP", SV.LOGO_SEG_GAP),
+                        ("TRAIL_N", SV.LOGO_TRAIL_N), ("TRAIL_STEP", SV.LOGO_TRAIL_STEP),
+                        ("TRAIL_FRAC", SV.LOGO_TRAIL_FRAC),
+                        ("TRAIL_INSET", SV.LOGO_TRAIL_INSET),
+                        ("WAVE_PERIOD", SV.LOGO_WAVE_PERIOD), ("WAVE_W0", SV.LOGO_WAVE_W0),
+                        ("WAVE_W1", SV.LOGO_WAVE_W1)):
+        pins.append(("%s=%s" % (name, SV._jsnum(const)), name))
+    pins.append(("TRAIL_OPA=[%s]" % ",".join(SV._jsnum(v) for v in SV.LOGO_TRAIL_OPA),
+                 "TRAIL_OPA"))
+    pins.append(("V={theta:%s," % SV._jsnum(SV.LOGO_BEAM_START), "BEAM_START"))
+    return pins
+
+
+def _flo10d_handwritten():
+    """模板里**手写**（不经占位符）的数字 —— 0.53.1 提升常量时漏掉的那几个。
+
+    每个都要能在 JS 文本里按 Python 常量的字面量找到（前导 0 有无都认）。
+    为什么不顺手把它们也改成占位符：那是渲染路径上的改动，超出本轮截图三
+    症状的范围；先把漂移钉成红项，让"改常量不忘改模板"成为机械可判的事。
+    """
+    def lit(v):
+        return "0?" + re.escape(SV._jsnum(v))
+    return [
+        (r"V\.breath=" + lit(SV.LOGO_BREATH_BASE), SV.LOGO_BREATH_BASE,
+         "呼吸中位 breathBase"),
+        (r"\+" + lit(SV.LOGO_BREATH_AMP) + r"\*Math\.sin", SV.LOGO_BREATH_AMP,
+         "呼吸幅度 breathAmp"),
+        (r"\*2\*Math\.PI/" + lit(SV.LOGO_BREATH_PERIOD), SV.LOGO_BREATH_PERIOD,
+         "呼吸周期 breathPeriod"),
+        (r"clamp\(mt/" + lit(SV.LOGO_XFADE) + r",0,1\)", SV.LOGO_XFADE,
+         "渐变时长 xfade"),
+        (r"mt>" + lit(SV.LOGO_L0_DELAY), SV.LOGO_L0_DELAY, "L0 起步停顿 l0Delay"),
+        (r"\)/" + lit(SV.LOGO_L0_RAMP) + r",0,1", SV.LOGO_L0_RAMP,
+         "L0 匀加速 l0Ramp"),
+        (r"snap\.theta\+" + lit(SV.LOGO_R0_SLIDE) + r"\*easeInOut",
+         SV.LOGO_R0_SLIDE, "R0 滑行角 r0Slide"),
+        (r"clamp\(mt/" + lit(SV.LOGO_R0_SLIDE_T) + r",0,1\)", SV.LOGO_R0_SLIDE_T,
+         "R0 滑行时长 r0SlideT"),
+        (r"AMBER_R\+" + lit(SV.LOGO_WAVE_GAP), SV.LOGO_WAVE_GAP,
+         "涟漪起始缝 waveGap"),
+    ]
+
+
+@check("FLO-10d 页面 JS 与哨标规格同源：STYLE 表逐项一致，手写字面量逐个钉住")
+def c_flo10d():
+    js = SV._LOGO_JS
+    spec = SV.logo_motion_spec()
+    m = _LOGO_STYLE_RE.search(js)
+    if not m:
+        return "状态机里取不出 var STYLE=... 表 —— 页面动法的家当不见了"
+    try:
+        style = json.loads(m.group(1))
+    except ValueError:
+        return "STYLE 表不是合法 JSON：%r" % (m.group(1)[:120],)
+    # ① STYLE 表 ≡ 哨标规格的 motion 表（同一份 LOGO_MOTION_RENDER 的两个出口）
+    if set(style) != set(spec["motion"]):
+        return "STYLE 表的态集 %r ≠ 哨标规格 %r" % (sorted(style),
+                                                  sorted(spec["motion"]))
+    for name, row in spec["motion"].items():
+        got = style.get(name)
+        if not isinstance(got, dict):
+            return "STYLE 表缺 %s 态" % name
+        if set(got) != set(row):
+            return "STYLE %s 字段集不同：%r ≠ %r" % (name, sorted(got), sorted(row))
+        for f, v in row.items():
+            if got.get(f) != v:
+                return ("STYLE %s.%s=%r ≠ 哨标规格 %r —— 页面一套、哨标一套"
+                        % (name, f, got.get(f), v))
+    # ② 占位符注入的常量（渲染产物里逐个钉）
+    for needle, name in _flo10d_js_pins():
+        if needle not in js:
+            return "状态机里找不到 %s（期望 %r）—— 有人手改了 JS 文本" % (name, needle)
+    # ③ 手写在模板里的字面量逐个钉
+    for pat, const, name in _flo10d_handwritten():
+        if not re.search(pat, js):
+            return ("状态机里 %s 的字面量与 Python 常量 %r 对不上 —— 模板手写处"
+                    "漂了（页面会动、哨标不会动，或反过来）" % (name, const))
+    return True
+
+
+@check("N-FLO10d 负控：STYLE 表改一个数／手写字面量改一个数 ⇒ 同一条尺子必须判红")
+def n_flo10d():
+    if c_flo10d() is not True:
+        return "夹具不成立：未变异时 FLO-10d 就不合格，负控无分辨力"
+    # 变异 1：STYLE 表里 L2 的圈速 5.5 → 6.0（页面快了、哨标没快）
+    a = '"lap": 5.5'
+    if SV._LOGO_JS.count(a) != 1:
+        return "夹具不成立：STYLE 锚点没打中（json.dumps 口径变了，需更新负控）"
+    with _Patch(SV, _LOGO_JS=SV._LOGO_JS.replace(a, '"lap": 6.0')):
+        why = c_flo10d()
+        if why is True or why is None:
+            return "负控失效：STYLE 表与规格脱节仍判合格 —— 页面一套、哨标一套"
+    # 变异 2：手写的呼吸中位 .94 → .95（Python 常量没动）
+    b = "V.breath=.94+.06*Math.sin"
+    if SV._LOGO_JS.count(b) != 1:
+        return "夹具不成立：手写字面量锚点没打中（源码已变，需更新负控）"
+    with _Patch(SV, _LOGO_JS=SV._LOGO_JS.replace(b, "V.breath=.95+.06*Math.sin")):
+        why = c_flo10d()
+        if why is True or why is None:
+            return "负控失效：手写字面量漂了仍判合格 —— 模板里的第二份数字没人抓"
+    return True
+
+
+# ---------------------------------------------------------------- FLO-10e --
+def _flo10e_reduce_ok(logo_src, js_tmpl):
+    """减少动效的静态帧必须取在**目标态**（xfade 处），不是启动态。"""
+    if "$mt = [double]$script:spec.anim.xfade" not in logo_src:
+        return ("哨标的减少动效分支没把静态帧取在目标态 —— R0 会演成启动态"
+                "的一枚绿环（状态读错）")
+    # ★ 锚**代码行**，不是裸 `update(__XFADE__)`：模板里那段注释为了解释
+    #   「为什么不能 update(0)」也原样写了这个片段 ⇒ 裸锚在变异成 update(0)
+    #   之后仍命中注释，判据永远绿（2026-10-19 负控实测抓出）。
+    if "if (_reduce) { update(__XFADE__); render(); }" not in js_tmpl:
+        return "页面的减少动效分支没有 update(__XFADE__) —— 同型 bug 在页面侧没人守"
+    return None
+
+
+#: reduce 桩：把系统的「减少动态效果」偏好看成开着（页面侧的
+#: prefers-reduced-motion: reduce）—— boot() 于是只画一帧静态就收工，
+#: 没有 rAF 循环。DOM 桩与 `_NODE_STUB` 同一套。
+_NODE_STUB_REDUCE = r"""
+function El(){ this.attrs={}; this.children=[]; }
+El.prototype.setAttribute=function(k,v){ this.attrs[k]=String(v); };
+El.prototype.getAttribute=function(k){ return this.attrs[k]; };
+El.prototype.appendChild=function(c){ this.children.push(c); };
+function q(el,n){
+  var hit=el.children.filter(function(c){ return c.attrs["data-p"]===n; });
+  if(hit.length) return hit[0];
+  var e=new El(); e.attrs["data-p"]=n; el.children.push(e); return e;
+}
+El.prototype.querySelector=function(sel){
+  var m=/^\[data-p="(.+)"\]$/.exec(sel);
+  return m ? q(this, m[1]) : null;
+};
+var svg=new El(); svg.attrs["data-logo"]="1"; svg.attrs["data-mode"]=process.argv[2];
+var RAF=[];
+var document={
+  querySelectorAll:function(sel){ return sel==="svg[data-logo]" ? [svg] : []; },
+  createElementNS:function(){ return new El(); },
+  addEventListener:function(){}
+};
+var requestAnimationFrame=function(cb){ RAF.push(cb); };
+var window={ matchMedia:function(q){ return { matches:true }; } };
+__JS__
+var out={ ring:q(svg,"seg0").attrs["stroke"], ringO:+q(svg,"seg0").attrs["opacity"],
+          amberO:+q(svg,"amber").attrs["opacity"], amberFill:q(svg,"amber").attrs["fill"],
+          beam:q(svg,"beam").attrs["stroke"], w0:+q(svg,"wave0").attrs["opacity"],
+          bx:+q(svg,"beam").attrs["x2"], by:+q(svg,"beam").attrs["y2"] };
+console.log(JSON.stringify(out));
+"""
+
+
+def _node_run_reduce(mode):
+    """真跑页面状态机的**减少动效**路径。返回最终那一帧的属性 dict。
+
+    夹具失效（取不出 JS）⇒ 抛；Node 退出码非 0 ⇒ 抛（那是产品坏，不是
+    "测不出"—— 绝不把产品失败洗成 SKIP）。
+    """
+    node = _node_path()
+    if not node:
+        raise RuntimeError("没有可执行 node")
+    import subprocess
+    html = _page()
+    js = None
+    for body in _JS_BLOCK_RE.findall(html):
+        if "svg[data-logo]" in body and "var STYLE=" in body:
+            js = body
+            break
+    if not js:
+        raise RuntimeError("页面里找不到哨标状态机脚本（夹具失效）")
+    src = _NODE_STUB_REDUCE.replace("__JS__", js)
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False,
+                                     encoding="utf-8") as f:
+        f.write(src)
+        path = f.name
+    try:
+        p = subprocess.run([node, path, mode], capture_output=True, timeout=90)
+        if p.returncode != 0:
+            raise RuntimeError("reduce 桩退出码 %d：%s" % (
+                p.returncode, p.stderr.decode("utf-8", "replace")[:400]))
+        return json.loads(p.stdout.decode("utf-8"))
+    finally:
+        os.unlink(path)
+
+
+@check("FLO-10e 减少动效：静态帧取目标态（xfade），启动态≠目标态有分辨力")
+def c_flo10e():
+    node = _node_path()
+    if not node:
+        return "SKIP：本机没有可执行 node —— 这一条**不判**（绝不假绿）"
+    # ① 结构性：两条腿（哨标 / 页面）都把静态帧放在 xfade
+    why = _flo10e_reduce_ok(_src(_LOGO_PS1_REL), SV._LOGO_JS_TMPL)
+    if why:
+        return why
+    # ② 行为（哨标侧）：Get-Frame 在 Mt=xfade 必须是目标态；Mt=0 是启动态
+    root, tray, payload = _flo10_tray()
+    if "logo" not in payload:
+        return "tray.json 里没有 logo 规格块"
+    spec = payload["logo"]
+    got = _flo10_ps("frames", tray, mode="R0",
+                    mts="0,%g" % float(spec["anim"]["xfade"]))
+    fr = got.get("frames") or []
+    if len(fr) != 2:
+        return "帧数学驱动没返回两帧（量具缺腿）"
+    boot, target = fr[0], fr[1]
+    r0, l0 = spec["motion"]["R0"], spec["motion"]["L0"]
+    for key, want in (("ringRed", float(r0["ringRed"])), ("ringO", float(r0["ringO"])),
+                      ("amberO", float(r0["amberO"]))):
+        if abs(target[key] - want) > 1e-9:
+            return "减少动效静态帧 %s=%.6f ≠ R0 目标态 %.2f" % (key, target[key], want)
+        if abs(boot[key] - float(l0[key])) > 1e-9:
+            return ("Mt=0 帧不是启动态（%s=%.6f）—— 分辨力没了，这条尺子测不出"
+                    "「冻住」和「到位」的差异" % (key, boot[key]))
+    for i in range(3):
+        if abs(target["ringC"][i] - spec["colors"]["ringDarkRed"][i]) > 1e-6:
+            return "减少动效下 R0 环色 %r ≠ 暗红 —— 会演成绿环" % (target["ringC"],)
+        if abs(target["beamC"][i] - r0["c"][i]) > 1e-9:
+            return "减少动效下 R0 光束色不是目标色 %r" % (r0["c"],)
+    if abs(boot["ringRed"] - target["ringRed"]) < 0.5:
+        return ("启动态与目标态的 ringRed 差 %.3f < 0.5 —— 尺子分不清『冻住』"
+                "和『到位』" % abs(boot["ringRed"] - target["ringRed"]))
+    # ③ 行为（页面侧）：Node 真跑 reduce=true ⇒ R0 必须是暗红，且与不 reduce 的首帧不同
+    red = _node_run_reduce("R0")
+    dark = "rgb(%d,%d,%d)" % tuple(spec["colors"]["ringDarkRed"])
+    green = "rgb(%d,%d,%d)" % tuple(spec["colors"]["ringGreen"])
+    if red["ring"] != dark:
+        return "页面减少动效下 R0 环色 %r ≠ 暗红 %r —— 静态帧停在启动态（绿环）" % (
+            red["ring"], dark)
+    if abs(red["amberO"] - float(r0["amberO"])) > 0.02:
+        return "页面减少动效下 R0 灯头不透明度 %.3f ≠ %.2f" % (
+            red["amberO"], r0["amberO"])
+    if red["amberFill"] != SV.LOGO_AMBER_FILL:
+        return "页面减少动效下灯头填充色 %r ≠ %r（FZ-001 定过的琥珀色）" % (
+            red["amberFill"], SV.LOGO_AMBER_FILL)
+    if red["w0"] != 0:
+        return "页面减少动效下 R0 还有涟漪（opacity=%r）—— 规格：波止" % (red["w0"],)
+    seq = _node_run("R0", frames=1)
+    if not seq:
+        return "不 reduce 的首帧没跑出来（对照组失效）"
+    if seq[0]["ring"] == red["ring"]:
+        return ("reduce 与不 reduce 的首帧环色相同（%r）—— 测的不是『取目标态』"
+                % (red["ring"],))
+    if seq[0]["ring"] != green:
+        return "不 reduce 首帧不是启动态绿色 %r —— 对照组本身就不对" % (seq[0]["ring"],)
+    return True
+
+
+@check("N-FLO10e 负控：静态帧退回 update(0)（哨标／页面两腿）⇒ 必须判红")
+def n_flo10e():
+    if c_flo10e() is not True:
+        return "夹具不成立：未变异时 FLO-10e 就不合格，负控无分辨力"
+    src = _src(_LOGO_PS1_REL)
+    # 变异 1：哨标侧 mt=0（历史 bug 原样复活）
+    a = "$mt = [double]$script:spec.anim.xfade"
+    if src.count(a) != 1:
+        return "夹具不成立：哨标变异锚点没打中（源码已变，需更新负控）"
+    if _flo10e_reduce_ok(src.replace(a, "$mt = 0"), SV._LOGO_JS_TMPL) is None:
+        return "负控失效：哨标静态帧退回 mt=0 也判合格 —— R0 在减少动效下会演成绿环"
+    # 变异 2：页面侧 update(0)（模板层）
+    # ★ 锚必须是**代码行**，不能是裸 `update(__XFADE__)`：同一段注释里为了
+    #   说明「为什么不是 update(0)」也写了这个片段，裸锚会出现 2 次 ⇒ 变异
+    #   打不中（2026-10-19 实测，负控自己报「夹具不成立」）。
+    b = "if (_reduce) { update(__XFADE__); render(); }"
+    nb = SV._LOGO_JS_TMPL.count(b)
+    if nb != 1:
+        return ("夹具不成立：页面变异锚点出现 %d 次（要恰好 1 次）—— 源码已变，"
+                "需更新负控" % nb)
+    if _flo10e_reduce_ok(src, SV._LOGO_JS_TMPL.replace(b, "if (_reduce) { update(0); render(); }")) is None:
+        return "负控失效：页面静态帧退回 update(0) 也判合格"
+    # 变异 3：渲染产物里的 reduce 帧退回 update(0) ⇒ Node 腿必须抓住
+    c = "if (_reduce) { update(.4); render(); }"
+    if SV._LOGO_JS.count(c) != 1:
+        return "夹具不成立：渲染态锚点没打中（_jsnum 口径变了，需更新负控）"
+    with _Patch(SV, _LOGO_JS=SV._LOGO_JS.replace(
+            c, "if (_reduce) { update(0); render(); }")):
+        why = c_flo10e()
+        if why is True or why is None:
+            return "负控失效：渲染出的 reduce 帧退回 update(0)，Node 腿仍判绿"
     return True
 
 
@@ -4080,6 +5131,7 @@ def main():
     print("=" * 78)
     print("0.49.0 收口判据 —— W-08 默认尺寸 · W-09 浮层逃逸 · U-17 图标动效 · "
           "U-18 哨标比例/不被裁 · B-02…B-08/B-13 冒泡 · FLO-01…FLO-05 漂浮哨标")
+    print("＋ FLO-10a…e 哨标动效三态（0.53.1：标准 LOGO／整圆可点／保持动态）")
     print("＋ J1–J5「五条违和」同类可抓（原 0518，2026-10-16 按 A2/P5 并入）")
     print("（负控全部内存/临时目录变异，不写任何产品文件；node 缺失 ⇒ SKIP，不假绿）")
     print("=" * 78)

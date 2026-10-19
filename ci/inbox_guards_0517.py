@@ -488,6 +488,31 @@ def n_w17f():
     return True
 
 
+#: 窗口几何的最小合理尺寸（像素）。小于它 ⇒ 这不是一枚**在屏上**的监理窗。
+#: ★ 提到模块级：正判据与负控读**同一个数**（本仓铁律 8，不许各写一份）。
+_W17D_MIN_SIDE = 200
+
+
+def _rect_problem(rect, on_screen):
+    """纯函数（正判据与负控共用同一把尺子）：几何回读有问题 ⇒ 返回人读串。
+
+    `on_screen` 取 `inbox_window.is_window_on_screen()` 的语义：
+      · False ⇒ **最小化或不在屏上**：Windows 这时给的是图标占位矩形
+        `(-32000,-32000,160,28)`，拿它判「几何坏了」就是把用户的正常动作
+        判成缺陷 ⇒ **不判**（返回 None）。
+      · None  ⇒ 判不出（取不到窗口）：不当成通过，按「取不到矩形」处理。
+      · True  ⇒ 真在屏上：宽高都必须 ≥ `_W17D_MIN_SIDE`。
+    """
+    if on_screen is False:
+        return None
+    if not rect or len(rect) < 4:
+        return "取不到窗口矩形（%r）—— 几何回读失败" % (rect,)
+    if rect[2] < _W17D_MIN_SIDE or rect[3] < _W17D_MIN_SIDE:
+        return ("窗口矩形异常（%r）—— 几何回读失败（在屏窗宽高应 ≥ %d）"
+                % (tuple(rect), _W17D_MIN_SIDE))
+    return None
+
+
 @check("W17-d 观测：运行态 direct read —— 服务/窗口实态如实留痕（无窗≠故障）")
 def w17d():
     """★ 语义修正（首版写错，2026-10-14）：「关窗不停服务」是**设计语义**
@@ -496,6 +521,14 @@ def w17d():
     有桌面却连服务都没在听（保服务链路断了）。
     窗口「跨边界存活」的实证在探针留痕（四路对照 + 修复后复测），
     不塞进判据里让它在无窗环境误红。
+
+    ★★ 2026-10-19（0.53.1 出包实测）：**最小化不许判红**。
+      窗口最小化时 Windows 给的是图标占位矩形 `(-32000,-32000,160,28)`，
+      旧实现只问「宽或高 < 200」⇒ 判「几何回读失败」⇒ **把用户的正常动作
+      判成了缺陷**。而这恰恰是本产品的**前置动作**：先最小化/收缩，才看得见
+      漂浮哨标 —— 用户天天都会做。⇒ 先问 `is_window_on_screen()`
+      （产品真源：可见 **且** 没被最小化），最小化就**不判几何**、只留痕；
+      只要还有一枚真在屏上的窗，几何照判。
     """
     import subprocess
     out = subprocess.run(["netstat", "-ano"], capture_output=True).stdout
@@ -507,11 +540,20 @@ def w17d():
     if listening:
         _note("服务 8790 LISTENING ✓；窗口=%s" % (hwnds or "无（用户可能已关窗）"))
         if hwnds:
+            on_screen = []
             for h in hwnds:
-                r = WIN.window_rect_of(h)
-                if r[2] < 200 or r[3] < 200:
-                    return "窗口矩形异常（%r）—— 几何回读失败" % (r,)
-                _note("  hwnd=%s rect=%s" % (h, r))
+                why = _rect_problem(WIN.window_rect_of(h),
+                                    WIN.is_window_on_screen(h))
+                if why:
+                    return why
+                if WIN.is_window_on_screen(h) is False:
+                    _note("  hwnd=%s 最小化/不在屏上（图标占位矩形）⇒ 几何不判" % h)
+                else:
+                    on_screen.append(h)
+                    _note("  hwnd=%s rect=%s" % (h, WIN.window_rect_of(h)))
+            if not on_screen:
+                raise Skip("SKIP: 窗口都在最小化态（用户主动收起，几何无从回读；"
+                           "收缩后应出现漂浮哨标）")
         elif desktops:
             raise Skip("SKIP: 服务在、窗口不在（关窗不停服务是设计语义，非故障）")
         else:
@@ -528,6 +570,29 @@ def w17d():
         if d_alive:
             return "守护进程在跑，服务（8790）却没在听 —— supervise 链路断了"
         raise Skip("SKIP: 服务没在听且守护进程未在跑（用户没启动监理，非链路故障）")
+    return True
+
+
+@check("N-W17-d 负控：最小化占位矩形不许判红；真在屏的小窗仍必须判红")
+def n_w17d():
+    """同一把尺子（`_rect_problem`）换输入，证明三件事：
+
+    ① **最小化** `(-32000,-32000,160,28)` ＋ `on_screen=False` ⇒ 不判红
+       （这是用户的正常动作，也是哨标的前置动作）；
+    ② 同一枚矩形若 `on_screen=True`（谎报在屏）⇒ **仍判红** —— 豁免只跟
+       真源 `is_window_on_screen()` 走，不跟矩形长相走，没法靠形状骗过去；
+    ③ 真在屏的小窗（如 160×28 的畸形窗）⇒ 判红，断言强度没被这条豁免吃掉。
+    """
+    iconic = (-32000, -32000, 160, 28)
+    if _rect_problem(iconic, False) is not None:
+        return "负控失效：最小化占位矩形被判红了 —— 用户收起窗口就会被拦"
+    if _rect_problem(iconic, True) is None:
+        return ("负控失效：同一枚矩形在**谎报在屏**时也放过了 —— 豁免跟着矩形"
+                "形状走而不是跟着真源走，可以靠形状骗过去")
+    if _rect_problem((100, 100, 160, 28), True) is None:
+        return "负控失效：真在屏的小窗（160×28）被放过 —— 断言强度被豁免吃掉了"
+    if _rect_problem((100, 100, 1200, 800), True) is not None:
+        return "负控失效：正常窗口（1200×800）被判红 —— 尺子过宽，会压正常态"
     return True
 
 

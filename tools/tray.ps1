@@ -12,7 +12,7 @@
 #   must SAY SO instead of showing the last known state forever -- "no longer
 #   updated" must never render as "everything is fine".
 #   out: -Action <file>      <- append one line: open | quit
-#        (0.35.3: "read_all" removed — the bulk "Mark all read" item is gone)
+#        (0.35.3: "read_all" removed -- the bulk "Mark all read" item is gone)
 #
 # The timer polls the state file once a second and swaps the icon + tooltip.
 # Icons are pre-generated .ico files (see tools/mk_icons.py); System.Drawing
@@ -103,7 +103,7 @@ function Update-Tray {
     }
     $tip = [string]$j.tip
     if ([string]::IsNullOrWhiteSpace($tip)) { $tip = $DefaultTip }
-    if ($badgeMissing) { $tip = "$tip · (sentinel state icon not built yet)" }
+    if ($badgeMissing) { $tip = "$tip; (sentinel state icon not built yet)" }
 
     # 0.35.3: stale guard -- never render "not updating" as "all good".
     $age = -1
