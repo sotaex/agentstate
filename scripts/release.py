@@ -269,9 +269,96 @@ def main():
         print("\n!! 步骤 3 失败（rc=%d）—— 产物不可发布。" % rc)
         return rc
 
+    # ★★ 0.53.1：发布的**最后一步**是复位研发树。构建器按设计把 manifest
+    #   恢复成纯 wheel 口径，而本仓就是研发树 ⇒ 不复位就留下**假失守**
+    #   （窗口显示「失守：防护文件被改动」）。见 `_finalize_dev_tree`。
+    if _finalize_dev_tree(version) != 0:
+        return 1
+
     print("\n" + "=" * 74)
     print("发布就绪：antinel-%s-py3-none-any.whl ＋ antinel-%s.tar.gz" % (version, version))
     print("=" * 74)
+    return 0
+
+
+#: 研发树 manifest 的**惯例登记版本**（刻意低于代码版本）。
+#: ★ 为什么必须有落差：`host_shield.is_dev_build()` 靠「登记版 < 代码版」判定
+#:   研发树；落差为 0 时它恒为 False ⇒ 任何自检漂移都会被渲染成
+#:   **失守 ＋「这份守门的代码我认不出是不是出厂那份」**（0431 S70 守着）。
+_DEV_MANIFEST_VERSION = "0.50.5"
+
+
+def _finalize_dev_tree(version):
+    """发布的**最后一步**：把研发树复位到「自检通过 ＋ 版本有落差」。
+
+    ★★ 为什么必须自动做（0.53.1 实测，创始人 2026-10-19 截图）：
+      `build_package.py` 按其设计在跑完后把 `psl/manifest.json` 恢复成
+      **纯 wheel 口径**（剥掉 `ci/freeze_zones.json`）并把 version 刷平到本版。
+      而本仓就是**研发树**（final == 仓根）⇒ 出包一结束，研发树立刻进入两种坏态：
+        ① `self_check()` 红 ⇒ 监理启动自检不过 ⇒ 窗口显示
+           「失守：防护文件被改动」—— 这是**假失守**，而且是用户**直接看得见**的；
+        ② version 与代码版本落差为 0 ⇒ 0421/0431 S70 与 0516 PKG16-c 结构性红。
+      以前靠人记着再跑两条命令（`--adopt-dev` ＋ version 回落），
+      **漏一次就把假失守摆到用户眼前**（0.53.1 这一轮漏了两次）。
+      ⇒ 把这两步挪进发布的最后一步：走正规入口就不可能留下假失守。
+
+    ★ 位置纪律（S40）：本函数**不自己实现检查逻辑** —— 补登调
+      `_tools_034/_resign_manifest.py --adopt-dev`（与手工同一把尺子），
+      收口用产品自己的 `host_shield.self_check()`。
+      version 回落只改 manifest 的一个字段（没有工具做"只回落登记版本"这件事，
+      且必须保留原文件的缩进格式）。
+    ★ 失败方向：修不成就**大声说**并返回非零 —— 绝不允许"包发出去了、
+      研发树在报假失守"这种状态悄悄留在机器上。
+    """
+    print("\n" + "-" * 74)
+    print("复位研发树（自检通过 ＋ 版本有落差）")
+    print("-" * 74)
+    tool = os.path.join(ROOT, "_tools_034", "_resign_manifest.py")
+    if not os.path.isfile(tool):
+        print("  ⚠️  找不到 %s —— 研发树**未复位**。请手工：\n"
+              "     1) python _tools_034/_resign_manifest.py --adopt-dev\n"
+              "     2) 把 psl/manifest.json 的 version 回落为 %s"
+              % (tool, _DEV_MANIFEST_VERSION))
+        return 1
+    rc = _run([sys.executable, tool, "--adopt-dev"], cwd=ROOT)
+    if rc != 0:
+        print("!! 补登研发树专属件失败（rc=%d）" % rc)
+        return rc
+
+    mp = os.path.join(ROOT, "psl", "manifest.json")
+    with open(mp, encoding="utf-8") as f:
+        txt = f.read()
+    m = re.search(r'"version"\s*:\s*"([^"]*)"', txt)
+    if not m:
+        print("!! psl/manifest.json 里找不到 version 字段 —— 无法回落，拒绝静默放过")
+        return 1
+    cur = m.group(1)
+    if cur != _DEV_MANIFEST_VERSION:
+        old = '"version": "%s"' % cur
+        if old not in txt:
+            print("!! 定位不到 `%s`（格式变了？）—— 手工回落为 %s"
+                  % (old, _DEV_MANIFEST_VERSION))
+            return 1
+        with open(mp, "w", encoding="utf-8", newline="") as f:
+            f.write(txt.replace(old, '"version": "%s"' % _DEV_MANIFEST_VERSION, 1))
+        print("  manifest version：%s → %s（研发态落差就位）"
+              % (cur, _DEV_MANIFEST_VERSION))
+    else:
+        print("  manifest version：已是 %s，无需回落" % cur)
+
+    # ---- 用产品自己的自检收口（不另写一套判定）----
+    probe = ("import sys, host_shield\n"
+             "ok, probs = host_shield.self_check()\n"
+             "print('self_check ok=%r' % (ok,))\n"
+             "for p in probs[:5]:\n"
+             "    print('  -', p)\n"
+             "sys.exit(0 if ok else 1)\n")
+    rc = _run([sys.executable, "-c", probe], cwd=ROOT)
+    if rc != 0:
+        print("!! 研发树自检仍不通过（rc=%d）—— 包已出，但监理会显示失守，必须修好" % rc)
+        return rc
+    print("  ✅ 研发树已复位：自检通过 ＋ 登记版 %s < 代码版 %s"
+          % (_DEV_MANIFEST_VERSION, version))
     return 0
 
 
