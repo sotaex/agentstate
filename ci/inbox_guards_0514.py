@@ -57,11 +57,14 @@
      线程池定时器帧泵。判据方法：PowerShell 驱动 dot-source **产品同一个**
      帧数学脚本真跑，Python 侧只做从同一份规格出发的独立推导（oracle）与
      逐项比对 —— 不二次实现被测逻辑。详见「FLO-10 族」段头。
-  ⑪ T4-07／T4-08 问号词条文案（**0.53.2，2026-10-19 补**）：T4 那六条只覆盖
-     归因面板与收件箱条目，**没有一条经过 `glossary.TERMS`** ⇒ 一个 233 字、
-     单句 65 字、四段全讲实现的灯词条活了两版没人报红。补法：把品质性机制层
-     的**预算网**（一句 ≤40 字、一字段 ≤2 句）与**禁用语网**接到词条这条腿上。
-     详见「T4-07／T4-08」段头（含为什么「我们」不重复进禁用语表）。
+  ⑪ T4-07／T4-08／T4-09 问号词条文案（**0.53.2，2026-10-19 补**）：T4 那六条
+     只覆盖归因面板与收件箱条目，**没有一条经过 `glossary.TERMS`** ⇒ 一个
+     233 字、单句 65 字、四段全讲实现的灯词条活了两版没人报红。补法：把
+     品质性机制层的**预算网**（一句 ≤40 字、一字段 ≤2 句）、**禁用语网**、
+     **跨字段重复网**（同一词条任意两字段公共子串 ≥6 字即红）接到词条这条
+     腿上。T4-09 的必要性：前两条都按**字段**切分，而用户看到的是浮层里
+     连续的四段 —— 四段各自合规、合起来说两遍同一件事，前两条都抓不到。
+     详见「T4-07／T4-08」段头与 T4-09 的 docstring。
 
 ★ 规格真源（U-17 的唯一依据，不许凭记忆）：
     `D:\\2026\\PSL\\Antinel品牌动效报警语法v1.2（2026-09-27）.md`
@@ -5298,6 +5301,103 @@ def n_t4_term_banned():
         return "负控失效：塞回「不跟灯抢位」后仍判绿（尺子没有分辨力）"
     if "抢位" not in str(r):
         return "负控方向不对：判红了但报的不是「抢位」（%s）" % r
+    return True
+
+
+#: 同一词条内两个字段之间，公共子串到这么长就认定「同一件事说了两遍」。
+#: 取 6 的来处：中文里 6 字已经能承载一个完整的断言（「低于一周口粮」7 字、
+#: 「有东西没被挡住」7 字）。4–5 字多是功能词（「你已经处理」「没被挡住」），
+#: 那两个字段本来就是在讲同一件事的两面，压到 4 会逼产品把话说得别扭。
+_TERM_DUP_MIN = 6
+
+_TERM_FIELDS = ("one", "inc", "exc", "unit")
+
+
+def _term_dup_norm(s):
+    """去标签、去标点、去空白 —— 只留下"说了什么字"。"""
+    s = re.sub(r"<[^>]+>", "", str(s or ""))
+    return re.sub(r"[\s，。、；：「」（）()—…·/]", "", s)
+
+
+def _lcs_len(a, b):
+    """最长公共**子串**长度（不是子序列 —— 子序列会把不相干的字凑成一条）。"""
+    if not a or not b:
+        return 0
+    best = 0
+    prev = [0] * (len(b) + 1)
+    for i in range(1, len(a) + 1):
+        cur = [0] * (len(b) + 1)
+        for j in range(1, len(b) + 1):
+            if a[i - 1] == b[j - 1]:
+                cur[j] = prev[j - 1] + 1
+                if cur[j] > best:
+                    best = cur[j]
+        prev = cur
+    return best
+
+
+def _term_dup_problems(terms, limit=None):
+    """纯函数：词条内跨字段同义反复清单（空 = 干净）。
+
+    ★ 为什么单立这一条（不改 T4-07／T4-08 的量法）：那两条按**字段**切分
+      —— 一句 ≤40 字、一字段 ≤2 句 —— 而创始人看到的是一个浮层里的**连续
+      四段**。四段各自合规、合起来把同一件事说了两遍，两条尺子都抓不到。
+      实测过的形状：`days` 的 one「账本里有事件记录的天数，一共多少天」与
+      unit「就是账本里记着事的天数」（逐字同义）；`archive` 的 exc 与 unit
+      都在说"文件读得到才显示"。
+    ★ 与网二（信息网：同一句话说两次 ≥8 字即红）的分工：网二挂在**整页
+      渲染结果**上（跨条目、跨区域），本条挂在**单条词条内部**（跨字段）
+      —— 两者的分母不同，不是同一断言开两个入口。
+    """
+    cap = _TERM_DUP_MIN if limit is None else limit
+    out = []
+    for k in sorted(terms):
+        t = terms.get(k)
+        if not isinstance(t, dict):
+            continue
+        plain = {f: _term_dup_norm(t.get(f)) for f in _TERM_FIELDS}
+        for i in range(len(_TERM_FIELDS)):
+            for j in range(i + 1, len(_TERM_FIELDS)):
+                f1, f2 = _TERM_FIELDS[i], _TERM_FIELDS[j]
+                n = _lcs_len(plain[f1], plain[f2])
+                if n >= cap:
+                    out.append("%s.%s 与 %s 重复 %d 字（上限 %d）"
+                               % (k, f1, f2, n, cap - 1))
+    return out
+
+
+@check("T4-09 ★ 词条内不许同一件事说两遍：任意两字段公共子串 ≥6 字即红")
+def c_t4_term_no_dup():
+    """创始人 2026-10-19「把违和的、错的、啰嗦的等等都修掉」的第二把尺子。
+
+    ★ 量的是**运行时的词条字典**，不是源码 —— 理由同 T4-07（`L2.inc` 是
+      现算的）。也正因为是运行时的，负控可以就地变异一个字段再还原。
+    """
+    import glossary as GL
+    bad = _term_dup_problems(GL.TERMS)
+    if bad:
+        more = "…（共 %d 处）" % len(bad) if len(bad) > 4 else ""
+        return "；".join(bad[:4]) + more
+    _note("%d 条词条内部无跨字段同义反复（阈值 %d 字）"
+          % (len(GL.TERMS), _TERM_DUP_MIN))
+    return True
+
+
+@check("N-T4-09 负控：把「低于一周口粮时亮」同时塞进缺粮的 one 与 inc ⇒ T4-09 必须判红")
+def n_t4_term_no_dup():
+    import glossary as GL
+    if _term_dup_problems(GL.TERMS):
+        return "夹具不成立：真词条本身就有跨字段重复 ⇒ 负控无分辨力"
+    orig = GL.TERMS["Ls"]["inc"]
+    try:
+        GL.TERMS["Ls"]["inc"] = "粮的余额低于一周口粮时亮起。"
+        r = c_t4_term_no_dup()
+    finally:
+        GL.TERMS["Ls"]["inc"] = orig
+    if r is True or r is None:
+        return "负控失效：同一句话塞进两个字段后仍判绿（尺子没有分辨力）"
+    if "Ls" not in str(r):
+        return "负控方向不对：判红了但没点名缺粮词条（%s）" % r
     return True
 
 

@@ -2646,27 +2646,31 @@ def n_health_canary_term_in_page_is_caught():
 
 
 def n_health_copy_sources_banned_term_is_caught():
-    """负控：往派生源注入「金丝雀」（patch `_CATEGORY_ZH` 分类显示名）⇒ H6b 必须红。
+    """负控：往派生源注入「金丝雀」（patch 术语词条正文）⇒ H6b 必须红。
 
-    ★ 为什么 patch 字典而不是改文件：`_cat_zh` 运行时查表，patch 即时生效，
+    ★ 为什么 patch 字典而不是改文件：`TERMS` 运行时查表，patch 即时生效，
       try/finally 还原 —— 不碰产品文件（负控纪律）。
     ★ 与 N-H6（注入页面正文）互补：那条证明「结果块」那段有牙，这条证明
       「派生源」这段有牙 —— 活体闸抓到的正是后者漏的，两段都要有负控。
+    ★★ 0.53.2（T10）换注入点：原来 patch `_CATEGORY_ZH["canary"]`，靠
+      `_shield_overview()` 把类别中文名拼进概述句。T10 把**统计移出释义**
+      后概述句读得到时返回空串 ⇒ 这条注入再也进不了任何页面文案，负控
+      从"有牙"退化成"恒不红"。改注入 `L2.inc`（真实进页面的一条源），
+      仍是"派生源"这条腿，只是落在仍在输出的那一个源上。
     """
     import glossary as GL
-    orig = dict(GL._CATEGORY_ZH)
+    orig = GL.TERMS["L2"]["inc"]
     try:
-        GL._CATEGORY_ZH["canary"] = "金丝雀布防"
+        GL.TERMS["L2"]["inc"] = orig + "金丝雀布防"
         r = c_health_copy_sources_are_clean()
         if r is True:
             return "负控失效：派生源里注入「金丝雀」后 H6b 没红"
-        if "shield 概述句" not in str(r):
+        if "术语词条 L2.inc" not in str(r):
             return "红因不在派生源（%r）—— 尺子结构坏了" % str(r)[:60]
     finally:
-        GL._CATEGORY_ZH.clear()
-        GL._CATEGORY_ZH.update(orig)
+        GL.TERMS["L2"]["inc"] = orig
     if c_health_copy_sources_are_clean() is not True:
-        return "还原链路坏：还原 _CATEGORY_ZH 后仍红"
+        return "还原链路坏：还原词条正文后仍红"
     return True
 
 

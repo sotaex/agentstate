@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "design_doc": "docs/Antinel·监理五页信息架构与工具归因方案 v1.18（2026-10-19）.md",
+  "design_doc": "docs/Antinel·监理五页信息架构与工具归因方案 v1.19（2026-10-19）.md",
   "note": "设计要求→判据映射。规则（由 ci/guard_instrument_selfaudit.py 的 S57 执行）：①设计文件里每个一级章号（## N.）必须在这里有一条；②guarded 的 guarded_by 必须非空且每个 id 都是真实存在的判据 id；③quote 必须逐字落在该章正文里（升版时 quote 变了就红，逼你重读那一章）；④uncovered 必须写 why 和 next（账要看得见，不许悄悄放过）；⑤record 条数受 record_cap 约束（不许把疑问章一律标成『记录』逃出去）；⑥design_doc 必须是该族最高版本。",
   "record_cap": 15,
   "entries": [
@@ -344,6 +344,15 @@
         "T4-08"
       ],
       "title": "问号词条文案：预算网与禁用语网接上词条这条腿（40 字／一句、2 句／字段、机制句禁用）"
+    },
+    {
+      "clause": "§43",
+      "kind": "guarded",
+      "quote": "七类病（每条都举本例，不举抽象的）",
+      "guarded_by": [
+        "T4-09"
+      ],
+      "title": "24 条问号词条逐条过一遍：七类病（循环定义／跨字段同义／讲实现／串场导航／虚构否定／旧词／统计冒充释义）＋跨字段重复网"
     }
   ]
 }

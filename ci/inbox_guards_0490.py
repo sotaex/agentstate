@@ -2863,12 +2863,12 @@ def t_02():
     import glossary as GL
     import inbox_report as R
     # ── ① R0/L1：事件类型层逐字派生 ──
-    # ★★ 0.53.2：模板去掉「包括这几类：」引子（列举本身即"包括这些"，
-    #   ASD-STE100：同一件事不说两遍）。**断言强度不变** —— 仍然要求
-    #   `inc` 与 `_kinds_of()` 的结果**逐字相等**（手写回潮照样红）。
-    #   改动原因：引子占 6 字宽，使 L1.inc 超出一句 40 字的预算。
-    for st, tail in (("R0", "具体是哪一件事，看收件箱每条记录的原因。"), ("L1", "")):
-        want = "%s。%s" % (GL._kinds_of(st), tail)
+    # ★★ 0.53.2（T10）：模板去掉末尾的「具体是哪一件事，看收件箱每条记录的
+    #   原因。」—— 那是**导航**（指路到别处），不是释义，而且读者此刻就在
+    #   收件箱里。**断言强度不变**：仍要求 `inc` 与 `_kinds_of()` 逐字相等，
+    #   手写回潮照样红。
+    for st in ("R0", "L1"):
+        want = "%s。" % GL._kinds_of(st)
         got = GL.TERMS[st]["inc"]
         if got != want:
             return "%s 词条 inc 与派生不一致（手写回潮？）：%r" % (st, got[:60])
@@ -2886,9 +2886,17 @@ def t_02():
     if not rows:
         return "规则表为空 —— 正常环境（安装态/仓根态）必带 rules/default.json"
     inc = GL.TERMS["L2"]["inc"]
-    if ("装着 %d 条拦截规则" % len(rows)) not in inc:
-        return "L2 概述句的规则总数与 rule_table() 不同源（写死数字？）：%r" % inc[:50]
+    # ★★ 0.53.2（T10）：数字的落点从 `inc` 换到规则全表的展开标题。
+    #   理由：`inc` 是**释义**，报"装着 N 条规则分 M 类"答不了"拦截是什么"
+    #   （那是统计）。断言强度**加强**而非放松 —— 变成两条：
+    #     ① 释义里**不许**出现规则统计（写了就红）；
+    #     ② 全表标题里的条数必须与 `rule_table()` 同源（写死就红）。
+    #   旧断言只查"这个数字出现在 inc 里"，那正好是"永不更新的真数字"的温床。
+    if ("%d 条" % len(rows)) in inc or "条拦截规则" in inc:
+        return "L2 释义里又报了规则统计（统计不是释义）：%r" % inc[:60]
     lh = GL.TERMS["L2"]["list_html"] or ""
+    if ("展开看全部 %d 条规则" % len(rows)) not in lh:
+        return "L2 规则全表的标题条数与 rule_table() 不同源（写死数字？）：%r" % lh[:60]
     n_rows = lh.count('class="rrow"')
     if n_rows != len(rows):
         return "L2 全表行数(%d) != 规则表条数(%d)" % (n_rows, len(rows))
@@ -2949,8 +2957,10 @@ def n_t02():
     fake_bad = [{"id": "FAKE-03", "category": "alien_cat", "description_zh": "假规则三"}]
     try:
         R.rule_table = lambda: fake_ok
-        if "装着 2 条拦截规则" not in GL._shield_overview():
-            return "负控失效：夹具 2 条 ⇒ 概述句没跟着变 ⇒ 总数写死"
+        # ★ 0.53.2（T10）：读得到时概述句返回空串（统计已移出释义）；
+        #   分辨力由紧接着的「全表跟着变」承担 —— 两条合起来才完整。
+        if GL._shield_overview() != "":
+            return "负控失效：规则表读得到时概述句应该不说话（统计已移出释义）"
         _lh = GL._shield_list_html()
         if _lh.count('class="rrow"') != 2 or "判据自造的假规则" not in _lh:
             return "负控失效：夹具 2 条 ⇒ 全表没跟着变（行数写死或漏派生）"
@@ -2967,7 +2977,7 @@ def n_t02():
             return "负控失效：空表 ⇒ list_html 应为空串（chip 跳过全表）"
     finally:
         R.rule_table = orig_rt
-    if "装着 %d 条拦截规则" % len(R.rule_table()) not in GL._shield_overview():
+    if GL._shield_overview() != "":
         return "还原链路坏：还原 rule_table 后概述句与真源不一致"
     return True
 
