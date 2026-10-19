@@ -67,7 +67,7 @@
  {
   "name": "DST-02 Write outside root",
   "pass": true,
-  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /var/folders/36/tjdph2t9"
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /var/folders/n6/hn37q6pj"
  },
  {
   "name": "DST-02 Write inside root",
@@ -262,7 +262,7 @@
  {
   "name": "A5 5MB command handled fast (truncated before matching)",
   "pass": true,
-  "detail": "median ms=3554 (runs: 3274, 3772, 3554; load-sensitive; ladder B-021..023 tracks the budget)"
+  "detail": "median ms=2713 (runs: 2713, 2792, 2684; load-sensitive; ladder B-021..023 tracks the budget)"
  },
  {
   "name": "A-08 invalid JSON -> allow",
@@ -337,7 +337,7 @@
  {
   "name": "hook latency median (ms, includes interpreter start)",
   "pass": true,
-  "detail": "median=56 min=49 max=66"
+  "detail": "median=47 min=46 max=55"
  },
  {
   "name": "T3 scan skills (skipped: skills dir not present at D:\\psl\\skills)",
@@ -382,7 +382,7 @@
  {
   "name": "install claude-code: hooks appended, foreign kept",
   "pass": true,
-  "detail": "rc=0 ms=130"
+  "detail": "rc=0 ms=95"
  },
  {
   "name": "D7 .psl/.gitignore auto-written",
@@ -800,7 +800,7 @@
  {
   "name": "F-06 whitelist.paths exempts SEC-01 under tests/fixtures",
   "pass": false,
-  "detail": "fp=/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/antinel_harness_c7fs61ly/proj/tests/fixtures/.env real=/private/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/antinel_harness_c7fs61ly/proj/tests/fixtures/.env root=/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/antinel_harness_c7fs61ly/proj root_real=/private/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/antinel_harness_c7fs61ly/proj rel=tests/fixtures/.env || Antinel 拦截 [SEC-01] 读取 .env 文件可能泄露 API 密钥与机密配置 | 命中: .env | 放行/处理: 把 .env 移出 Agent 可读范围；确需变量时手动复制具体几行；测试夹具路径可在 policy.js"
+  "detail": "fp=/var/folders/n6/hn37q6pj7sj_9dmqqc2113800000gn/T/antinel_harness_ezv8het9/proj/tests/fixtures/.env real=/private/var/folders/n6/hn37q6pj7sj_9dmqqc2113800000gn/T/antinel_harness_ezv8het9/proj/tests/fixtures/.env root=/var/folders/n6/hn37q6pj7sj_9dmqqc2113800000gn/T/antinel_harness_ezv8het9/proj root_real=/private/var/folders/n6/hn37q6pj7sj_9dmqqc2113800000gn/T/antinel_harness_ezv8het9/proj rel=tests/fixtures/.env || Antinel 拦截 [SEC-01] 读取 .env 文件可能泄露 API 密钥与机密配置 | 命中: .env | 放行/处理: 把 .env 移出 Agent 可读范围；确需变量时手动复制具体几行；测试夹具路径可在 policy.js"
  },
  {
   "name": "F-06 whitelist.paths does not exempt other paths",
@@ -885,17 +885,17 @@
  {
   "name": "C9 nested ReDoS pattern '(a+)+$' rejected, hook not wedged",
   "pass": true,
-  "detail": "162ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
+  "detail": "106ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
  },
  {
   "name": "C9 alternation ReDoS pattern '(a|aa)+$' rejected, hook not wedged",
   "pass": true,
-  "detail": "198ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
+  "detail": "105ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
  },
  {
   "name": "C9 inner-optional ReDoS pattern '(a?)+$' rejected, hook not wedged",
   "pass": true,
-  "detail": "130ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
+  "detail": "109ms rc=0 [Antinel] CUSTOM RULE REJECTED CUSTOM-REDOS: nes"
  },
  {
   "name": "C9 benign custom rule still loads and fires (read-only downgrade to alert)",
@@ -920,7 +920,7 @@
  {
   "name": "workspace_roots: undeclared location still blocked",
   "pass": true,
-  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /var/folders/36/tjdph2t9"
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /var/folders/n6/hn37q6pj"
  },
  {
   "name": "workspace_roots: drive root rejected",
@@ -940,17 +940,17 @@
  {
   "name": "workspace_roots: '..' segment rejected",
   "pass": true,
-  "detail": "rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'/var/folders/36/tjd"
+  "detail": "rc=2 id=DST-02 err=[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：'/var/folders/n6/hn3"
  },
  {
   "name": "workspace_roots: wildcard rejected",
   "pass": true,
-  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /var/folders/36/tjdph2t9"
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /var/folders/n6/hn37q6pj"
  },
  {
   "name": "workspace_roots: missing config file = pre-feature behaviour",
   "pass": true,
-  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /var/folders/36/tjdph2t9"
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /var/folders/n6/hn37q6pj"
  },
  {
   "name": "DST-02 host config: the file the hook reads is writable by the tool that maintains it",
@@ -965,7 +965,7 @@
  {
   "name": "DST-02 host config: a sibling of the config is NOT released (exact file, not its directory)",
   "pass": true,
-  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /var/folders/36/tjdph2t9"
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /var/folders/n6/hn37q6pj"
  },
  {
   "name": "RO: grep for a destructive verb is allowed",
@@ -1055,12 +1055,12 @@
  {
   "name": "WS-1 POSIX: root rejected",
   "pass": true,
-  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /var/folders/36/tjdph2t9"
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /var/folders/n6/hn37q6pj"
  },
  {
   "name": "WS-1 POSIX: system dir rejected",
   "pass": true,
-  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /var/folders/36/tjdph2t9"
+  "detail": "rc=2 id=DST-02 err=Antinel 拦截 [DST-02] 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件 | 命中: /var/folders/n6/hn37q6pj"
  },
  {
   "name": "WS-1 POSIX: home shorthand rejected",
@@ -1095,7 +1095,7 @@
  {
   "name": "WS-3 rejected config entry is visible in report.py",
   "pass": true,
-  "detail": ": /private/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/antinel_harness_c7fs61ly/proj/.psl/audit\n Re-scan: python scan.py\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+  "detail": ": /private/var/folders/n6/hn37q6pj7sj_9dmqqc2113800000gn/T/antinel_harness_ezv8het9/proj/.psl/audit\n Re-scan: python scan.py\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
  },
  {
   "name": "A12 policy.json edited out of band is reported once",
@@ -1280,7 +1280,7 @@
  {
   "name": "0.18.0 R-20 anchor recovers after new records (monotonic size)",
   "pass": true,
-  "detail": "2026-09-23.jsonl: 2 OK\nverdict: 0 anomalies\n⇒ rc=0 (clean)"
+  "detail": "2026-10-19.jsonl: 2 OK\nverdict: 0 anomalies\n⇒ rc=0 (clean)"
  },
  {
   "name": "0.18.0 R-20 deleting the WHOLE day file is detected (manifest-driven)",
@@ -1355,7 +1355,7 @@
  {
   "name": "0.22.0 verify_chain green over C1/B1/A5 records",
   "pass": true,
-  "detail": "rc=0 2026-09-23.jsonl: 9 OK\nverdict: 0 anomalies\n⇒ rc=0 (clean)"
+  "detail": "rc=0 2026-10-19.jsonl: 9 OK\nverdict: 0 anomalies\n⇒ rc=0 (clean)"
  },
  {
   "name": "0.22.0 A5 SessionStart roll-up chains the previous session's DNA",
@@ -1370,7 +1370,7 @@
  {
   "name": "0.23.0 A1 first harvest chains usage_delta with token facts",
   "pass": true,
-  "detail": "{'path_tag': 'sha256:de177ccba726a78d', 'scope': 'tail_first_sight', 'reset': False, 'byte"
+  "detail": "{'path_tag': 'sha256:9490e6ba5ba0ab23', 'scope': 'tail_first_sight', 'reset': False, 'byte"
  },
  {
   "name": "0.23.0 privacy: raw transcript path is not in the ledger",
@@ -1415,7 +1415,7 @@
  {
   "name": "0.23.0 verify_chain green over usage_delta records",
   "pass": true,
-  "detail": "rc=0 2026-09-23.jsonl: 24 OK\nverdict: 0 anomalies\n⇒ rc=0 (clean)"
+  "detail": "rc=0 2026-10-19.jsonl: 24 OK\nverdict: 0 anomalies\n⇒ rc=0 (clean)"
  },
  {
   "name": "0.23.1 help shows host line, dialogue routes, commands",
@@ -1435,7 +1435,7 @@
  {
   "name": "0.23.1 policy_changed chained with invoked_by + digests",
   "pass": true,
-  "detail": "[{'ts': '2026-09-23T14:49:29+00:00', 'type': 'policy_changed', 'tool': '-', 'session': 'an"
+  "detail": "[{'ts': '2026-10-19T08:26:18+00:00', 'type': 'policy_changed', 'tool': '-', 'session': 'an"
  },
  {
   "name": "0.23.1 roots add drive-root rejected (fail-closed)",
