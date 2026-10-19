@@ -65,6 +65,52 @@
      腿上。T4-09 的必要性：前两条都按**字段**切分，而用户看到的是浮层里
      连续的四段 —— 四段各自合规、合起来说两遍同一件事，前两条都抓不到。
      详见「T4-07／T4-08」段头与 T4-09 的 docstring。
+  ⑫ FLO-12a…c 哨标规格的**失败留痕**（**0.53.2，T2**）：0.53.1 的条件写有
+     一个静默形状 —— 规格拿不到就不写 `logo` 键，于是「旧版没这功能」与
+     「新版坏了」在 tray.json 里**逐字节相同**。修法：拿不到仍写
+     `logo_missing`＋`logo_error` 并进链一条 `logo_spec_missing`（每进程每
+     episode 至多一条）；徽标（PowerShell）写不了 Python 账本 ⇒ 写
+     `console_dir/logo_events.jsonl`，daemon tick **先链后改名**消费。
+     判据钉四件：标记与规格键互斥、审计事实与原因、节流与 episode 计数、
+     痕迹「先链后改名（零删除）」。详见「FLO-12 族」段头。
+  ⑬ FLO-13 回落画**品牌 LOGO**（**0.53.2，T1**）：0.53.1 回落画的是
+     `assets/icons/<state>.ico` 姿态灯 —— 最小化态看见的是「一个姿态」，
+     不是「我们的标」。修法：`Resolve-IconPath` 品牌板优先，姿态灯降为
+     最后兜底；`logo.ps1` 增 `-BrandIcon`，`inbox_logo.logo_cmd` 显式传
+     包内 `assets/logo/antinel.ico`。创始人 2026-10-20 批示把口径定死：
+     回落须带**完整方形深色底板**（故 `logo.svg` 底板直角化 `rx=0`，
+     否则四角被切、窗口不是方的），且**整窗区域可点**（回落态
+     `NcHitTest` 恒返回 `1`）。判据钉三件：品牌板在场且四角满幅不透明
+     （像素级，走产品自己的栅格器）、解析路径不再落到姿态灯、回落态
+     命中测试恒可点。负控两条：解析器改回先给姿态灯 ⇒ 必须红；底板退回
+     圆角 ⇒ 四角像素断言必须红。详见「FLO-13 族」段头。
+  ⑭ FLO-14a…c 高 DPI **一个派生**（**0.53.2，T4**）：`-Size 46` 是物理
+     像素，150% 缩放下视觉只有 ~31px、可点半径同比例偏小。修法只有一条
+     纪律：`Get-PhysSize(logical, dpi)` 是**唯一乘法**，窗口边框／位图／
+     命中半径／默认落位／WM_DPICHANGED 全是消费者。判据把产品那个函数体
+     从 `tools/logo.ps1` **原文切出来真跑**（不另写公式），再用同一份源码
+     做「乘法只许出现一次」的静态检查。负控两条：DPI 写死 96 ⇒ 派生表红；
+     消费者再乘一次 ⇒ 同源判据红。详见「FLO-14 族」段头。
+  ⑮ FLO-15a…e 五态一致性（**0.53.2，T5**）：「五个态到底画什么」在四个
+     地方各写过一次 —— 定稿媒体（`assets/logo/*.mp4`）、渲染表
+     （`LOGO_MOTION_RENDER`）、托盘姿态灯（`tools/mk_icons.py`）、
+     页面与哨标共用的规格（`logo_motion_spec` → tray.json）。四条腿任一
+     条漂了，屏幕上看起来都「还在动」，肉眼抓不到。五条钉子：媒体字节
+     （判据**自带**期望哈希，不读包外定稿目录——否则换机就恒 SKIP）、
+     模式键闭包、姿态灯清单 == modes 去 dev、五态不塌缩（映射与渲染参数
+     两层都不许重）、两个出口同源（页面 STYLE 必须逐字等于
+     `json.dumps(渲染表)`）。五条各配负控，且负控红因逐条核对过。
+     详见「FLO-15 族」段头。
+  ⑯ FLO-16a…b 长驻进程版本自检（**0.53.2，T3**）：0.53.1 交付后
+     `tray.json` 长时间没有 `logo` 块 —— 代码是新的，写状态的是早上
+     启动的旧进程。根因不是「忘了刷新」，是**没有任何出口把两件事摆在
+     一起**。修法口径刻意窄：戳只记进程**出生时**的版本（console 进
+     `url.json`，daemon 进 `<console>/daemon.pid.meta.json`，**不新建
+     第三份状态文件**）；「现在的代码」由读的人现算；差异判定**只有一处**
+     （`inbox_server.version_drift`）；**不自动杀进程**。判据钉三件：
+     差异文案必须含**两边版本号**、没记录时**不许**报差异（防狼来了）、
+     出口只读（代码里不许出现 kill/重拉）。负控两条：两边同版本 ⇒ 必须
+     判绿；把差异检查删成恒 `None` ⇒ 必须红。详见「FLO-16 族」段头。
 
 ★ 规格真源（U-17 的唯一依据，不许凭记忆）：
     `D:\\2026\\PSL\\Antinel品牌动效报警语法v1.2（2026-09-27）.md`
@@ -92,6 +138,7 @@ import tempfile
 import threading
 import time
 import inspect
+import contextlib
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
@@ -2468,10 +2515,30 @@ def _flo01_ok(src):
     #   分辨力（2026-10-19 实测：锚点出现 2 次，变异打不到真位置）。
     if "$form.ShowInTaskbar = $false\n$form.TopMost = $true" not in src:
         return "建窗时没置顶 —— 会被别的窗盖住（监理要「一直在」）"
+    # ★ 0.53.2（T4）口径更新：钉边界要的是「一个正方形、四边都钉死」，不是
+    #   某个具体变量名。0.53.1 写的是 `$Size`（物理像素＝参数），T4 之后
+    #   必须是**派生值** `$sizePhys`（否则 DPI 缩放失效）。⇒ 判据认语义：
+    #   两个边都要被钉，且钉的值必须是**同一个**非空表达式（正方形），
+    #   并且它不能是逻辑参数 `$Size` 本身（那样 DPI 一变就又缩不到）。
+    import re as _re
+    pinned = {}
     for edge in ("MinimumSize", "MaximumSize"):
-        if ("$form.%s = New-Object System.Drawing.Size($Size, $Size)" % edge
-                not in src):
-            return "%s 没钉死 —— WinForms 有最小跟踪宽度（实测 136px），不钉就缩不到 46" % edge
+        m = _re.search(r"\$form\.%s\s*=\s*New-Object System\.Drawing\.Size"
+                       r"\((\S+?)\s*,\s*(\S+?)\)" % edge, src)
+        if not m:
+            return ("%s 没钉死 —— WinForms 有最小跟踪宽度（实测 136px），"
+                    "不钉就缩不到 46" % edge)
+        if m.group(1) != m.group(2):
+            return ("%s 钉成了非正方形（%s × %s）—— 哨标必须是方的"
+                    % (edge, m.group(1), m.group(2)))
+        pinned[edge] = m.group(1)
+    if pinned["MinimumSize"] != pinned["MaximumSize"]:
+        return ("两条边钉的不是同一个表达式（%s / %s）—— 上下限打架，"
+                "窗口会在两者之间跳" % (pinned["MinimumSize"],
+                                       pinned["MaximumSize"]))
+    if pinned["MinimumSize"] in ("$Size", "$Size;",):
+        return ("两条边钉的是逻辑参数 $Size —— 高 DPI 下物理尺寸不会跟着变"
+                "（0.53.2 T4：必须钉派生值 $sizePhys）")
     if "Test-Path -LiteralPath $Quit" not in src or "Quit-Now" not in src:
         return "没有轮询退役标志自退 —— 退役只能靠强杀"
     if 'Write-Action "open"' not in src:
@@ -2516,10 +2583,23 @@ def _flo01_ok(src):
         return "WndProc 没有自答 WM_NCHITTEST —— 命中区回到系统默认（点中间没反应）"
     if "return -1" not in src:
         return "四角没有 HTTRANSPARENT —— 哨标会抢走背后窗口的点击"
-    if "Test-Hit $x $y $Size $script:hitRadius" not in src:
+    # ★ 0.53.2（T4）：这两处原先钉字面量 `$Size`。T4 之后尺寸必须来自
+    #   **派生值** `$sizePhys`（逻辑 × dpi/96），否则 DPI 缩放失效。判据改为
+    #   认结构：`Test-Hit $x $y <同一个尺寸表达式> $script:hitRadius`，且
+    #   该表达式**不许**是逻辑参数 `$Size`（那正是「DPI 写死 96」的形状）。
+    import re as _re2
+    m_hit = _re2.search(r"Test-Hit\s+\$x\s+\$y\s+(\S+)\s+\$script:hitRadius", src)
+    if not m_hit:
         return "命中判定没走规格推导的 Test-Hit —— 半径又成了写死的数"
-    if "Get-HitRadius $Size $script:spec" not in src:
+    if m_hit.group(1) == "$Size":
+        return ("命中判定用的是逻辑参数 $Size —— 高 DPI 下点的圆与画的圆不同尺寸"
+                "（0.53.2 T4：必须用派生值 $sizePhys）")
+    m_rad = _re2.search(r"Get-HitRadius\s+(\S+)\s+\$script:spec", src)
+    if not m_rad:
         return "hitRadius 没从规格推导 —— 画的和点的不是同一个圆（FLO-10a 锁数值）"
+    if m_rad.group(1) != m_hit.group(1):
+        return ("画圆与点圆用的尺寸表达式不同（%s vs %s）—— "
+                "命中区会跟画面脱节" % (m_rad.group(1), m_hit.group(1)))
     # ---- 0.53.1：帧数学单一实现（logo_frame.ps1），logo.ps1 只管画 ----
     if ". $Frame" not in src:
         return "没有 dot-source 帧数学 —— 徽标动法要在 PowerShell 里另写一遍"
@@ -3466,6 +3546,968 @@ def n_flo10e():
         why = c_flo10e()
         if why is True or why is None:
             return "负控失效：渲染出的 reduce 帧退回 update(0)，Node 腿仍判绿"
+    return True
+
+
+# ---------------------------------------------------------------- FLO-12 --
+#: 0.53.2（T2）：tray.json 的 `logo` 块改**必写**，且失败与旧版**可区分**。
+#:   病根（0.53.1 条件写）：`_logo_spec_block()` 拿不到 ⇒ 不写 `logo` 键 ——
+#:   「旧版没这功能」与「新版拿不到规格」在文件里**逐字节相同**，哨标悄悄
+#:   变哑而无人知晓（静默缺失）。
+#:   修法：拿不到 ⇒ 仍写 `logo_missing: true` ＋ `logo_error`（失败标记），
+#:   并进审计链一条 `logo_spec_missing`（每进程每 episode 至多一条）。
+#:   FLO-12 钉写侧（含节流与 episode 语义）；FLO-12b 钉徽标痕迹的消费侧
+#:   （logo_events.jsonl ⇒ 链，**先链后改名**，零删除）。
+def _flo12_day_recs(root):
+    fn = os.path.join(root, ".psl", "audit",
+                      datetime.now().strftime("%Y-%m-%d") + ".jsonl")
+    if not os.path.isfile(fn):
+        return []
+    with io.open(fn, encoding="utf-8") as f:
+        return [json.loads(ln) for ln in f if ln.strip()]
+
+
+@check("FLO-12 规格拿不到也必须写：logo_missing 失败标记＋logo_error＋审计一条")
+def c_flo12():
+    root = tempfile.mkdtemp(prefix="g0514_flo12_")
+    # ★ 节流状态**本判据自带一份**：不读进程级 `_LOGO_SPEC_SEEN` ——
+    #   否则第二次跑会被上一次留下的 failed=True 静默节流，判据把自
+    #   己测瞎（2026-10-20 实测：N-FLO12b 因此误报「夹具不成立」）。
+    seen = {}
+    # ① 好路径不许被改坏：规格拿得到时 logo 块照写、无失败标记
+    p_ok = TR.write_state("L2", 1, "tip", root=root, logo_seen=seen)
+    if "logo" not in p_ok:
+        return "规格明明拿得到，tray.json 却没有 logo 块（好路径被改坏）"
+    if "logo_missing" in p_ok or "logo_error" in p_ok:
+        return "好路径出现失败标记 —— 标记与规格键必须互斥"
+    # ② 失败路径：标记可区分（与「旧版没这功能」逐字节不同）
+    def boom():
+        """变异体工厂：把 `logo_motion_spec` 换成必抛版，模拟「规格构不出来」。
+
+        ★ 它不是判据函数（selfcheck M1 会扫全部 `def`，故必须自带说明）：
+          这里要证的是**产品**在拿不到规格时的行为，不是调用它。
+        """
+        raise RuntimeError("spec build exploded")
+    with _Patch(SV, logo_motion_spec=boom):
+        p_bad = TR.write_state("L2", 1, "tip", root=root, logo_seen=seen)
+    if "logo" in p_bad:
+        return "拿不到规格却还写着 logo 块 —— 哨标会拿一份不存在的规格演"
+    if p_bad.get("logo_missing") is not True:
+        return ("拿不到规格却没写 logo_missing —— 「新版坏了」与「旧版没这功能」"
+                "又变得逐字节相同（0.53.1 病根复发）")
+    if "spec build exploded" not in str(p_bad.get("logo_error") or ""):
+        return "logo_error 不带真实异常 —— 失败原因被吞（%r）" % (p_bad.get("logo_error"),)
+    if p_bad.get("state") != "L2" or p_bad.get("count") != 1:
+        return "规格缺席把托盘状态也带崩了 —— tray.json 本身必须照写不误"
+    # ③ 审计：一条，且节流（同 episode 不重复）
+    recs = [r for r in _flo12_day_recs(root) if r.get("type") == "logo_spec_missing"]
+    if len(recs) != 1:
+        return "失败一次应进链 1 条 logo_spec_missing，实为 %d" % len(recs)
+    if "spec build exploded" not in str(recs[0].get("error") or ""):
+        return "审计记录不带真实异常 —— 链上只知坏了不知为什么"
+    with _Patch(SV, logo_motion_spec=boom):
+        TR.write_state("L2", 1, "tip", root=root, logo_seen=seen)   # 失败进行中
+    recs = [r for r in _flo12_day_recs(root) if r.get("type") == "logo_spec_missing"]
+    if len(recs) != 1:
+        return "失败 episode 进行中又记了 %d 条 —— 记账机制在灌账本" % len(recs)
+    # ④ 恢复后再失败 = 第二个 episode（「这一程里坏过」必须看得见）
+    TR.write_state("L2", 1, "tip", root=root, logo_seen=seen)       # recovered
+    with _Patch(SV, logo_motion_spec=boom):
+        TR.write_state("L2", 1, "tip", root=root, logo_seen=seen)
+    recs = [r for r in _flo12_day_recs(root) if r.get("type") == "logo_spec_missing"]
+    if len(recs) != 2:
+        return "两个失败 episode 应记 2 条，实为 %d" % len(recs)
+    return True
+
+
+@check("N-FLO12 负控：失败时什么都不写（0.53.1 条件写原样）⇒ 同一把尺子必须判红")
+def n_flo12():
+    if c_flo12() is not True:
+        return "夹具不成立：未变异时 FLO-12 就不合格，负控无分辨力"
+    # 变异＝旧口径本体：拿不到规格 ⇒ payload 里一个键都不加
+    with _Patch(TR, _logo_failure_block=lambda err: {}):
+        why = c_flo12()
+        if why is True or why is None:
+            return ("负控失效：失败时什么都不写也判合格 —— 静默缺失复发而"
+                    "闸门无声（0.53.1 原病）")
+        if "logo_missing" not in str(why):
+            return "负控方向不对：判红了但报的不是失败标记缺失（%r）" % (why,)
+    return True
+
+
+@check("N-FLO12b 负控：文件标记写了但不进链 ⇒ 审计断言必须判红")
+def n_flo12b():
+    if c_flo12() is not True:
+        return "夹具不成立：未变异时 FLO-12 就不合格，负控无分辨力"
+    # 变异＝「只写文件标记、账本不记」：tray.json 看得见，第三方复核看不见
+    with _Patch(TR, _logo_spec_missing_event=lambda root, err, seen=None: None):
+        why = c_flo12()
+        if why is True or why is None:
+            return "负控失效：链上没记录也判合格 —— 账本对规格失败失明"
+        if "logo_spec_missing" not in str(why):
+            return "负控方向不对：判红了但报的不是审计缺失（%r）" % (why,)
+    return True
+
+
+@check("FLO-12b 徽标痕迹消费：logo_events.jsonl ⇒ 链（先链后改名，零删除）")
+def c_flo12b():
+    root = tempfile.mkdtemp(prefix="g0514_flo12b_")
+    ev = TR.logo_events_path(root)
+    os.makedirs(os.path.dirname(ev), exist_ok=True)
+    lines = [json.dumps({"ts": "2026-10-19T18:00:00.000Z",
+                         "type": "logo_mode_missing",
+                         "reason": "modes key missing", "state": "L9"}),
+             json.dumps({"ts": "2026-10-19T18:00:01.000Z",
+                         "type": "logo_frame_unavailable",
+                         "reason": "no_spec", "state": "L2"})]
+    with io.open(ev, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    done = TR.drain_logo_events(root)
+    if [d["type"] for d in done] != ["logo_mode_missing", "logo_frame_unavailable"]:
+        return "两条痕迹进链结果不对：%r" % ([d.get("type") for d in done],)
+    # 零删除：原文改名让开而不是 unlink
+    if os.path.exists(ev):
+        return "消费后 logo_events.jsonl 还在原路径 —— 改名让开纪律被破"
+    taken = [f for f in os.listdir(os.path.dirname(ev))
+             if f.startswith("logo_events.jsonl.taken-")]
+    if len(taken) != 1:
+        return "改名让开的副本数 %r ≠ 1" % (taken,)
+    # 链上真有，且 state 字段保住（缺哪个态的证据不能丢）
+    got = {r["type"]: r for r in _flo12_day_recs(root)
+           if r.get("type") in ("logo_mode_missing", "logo_frame_unavailable")}
+    if set(got) != {"logo_mode_missing", "logo_frame_unavailable"}:
+        return "链上找不到徽标痕迹：%r" % (sorted(got),)
+    if got["logo_mode_missing"].get("state") != "L9":
+        return "痕迹的 state 没进链 —— 缺哪个态的证据丢了"
+    # 读不懂的行 ⇒ logo_event_unreadable，不许静默丢弃
+    with io.open(ev, "w", encoding="utf-8") as f:
+        f.write("this is not json\n")
+    done2 = TR.drain_logo_events(root)
+    if len(done2) != 1 or done2[0]["type"] != "logo_event_unreadable":
+        return "读不懂的行没记成 logo_event_unreadable：%r" % (done2,)
+    # 进链失败 ⇒ 文件原地留着（先链后改名的全部理由：证据不可再生）
+    with io.open(ev, "w", encoding="utf-8") as f:
+        f.write(json.dumps({"ts": "2026-10-19T18:00:02.000Z",
+                            "type": "logo_mode_missing",
+                            "reason": "modes key missing", "state": "L1"}) + "\n")
+    with _Patch(TR, _chain_record=lambda r, rec: False):
+        kept = TR.drain_logo_events(root)
+    if kept or not os.path.exists(ev):
+        return ("进链失败时文件被消费掉（或假报成功）—— 审计证据不可再生，"
+                "必须先链后改名")
+    return True
+
+
+@check("N-FLO12c 负控：消费函数被拔掉（痕迹没人进链）⇒ 同一把尺子必须判红")
+def n_flo12c():
+    if c_flo12b() is not True:
+        return "夹具不成立：未变异时 FLO-12b 就不合格，负控无分辨力"
+    # 变异＝消费者消失：logo_events.jsonl 无声堆积，谁都不读
+    with _Patch(TR, drain_logo_events=lambda root=None: []):
+        why = c_flo12b()
+        if why is True or why is None:
+            return "负控失效：徽标痕迹没人消费也判合格 —— 痕迹文件会无声堆积"
+        if "进链" not in str(why):
+            return "负控方向不对：判红了但报的不是进链缺失（%r）" % (why,)
+    return True
+
+
+# ---------------------------------------------------------------- FLO-13 --
+#: 0.53.2（T1）：回落必须画**品牌完整 LOGO**，不许画姿态灯。
+#:   病根（0.53.1）：规格拿不到 ⇒ `Resolve-IconPath` 返回
+#:   `assets/icons/<state>.ico` —— 那是**五态姿态灯**（环＋点、无底板），
+#:   不是产品标志。创始人 2026-10-20 截图批语：「最小化状态的图标能把方形
+#:   黑背景也带上吗？毕竟这样才是完整的，而且区域内点击都能切回」。
+#:   修法：① `-BrandIcon`（`assets/logo/antinel.ico`）由 Python 显式传、
+#:   `Resolve-IconPath` 优先返回它，姿态灯降为最后兜底；② 底板改直角使
+#:   「画的矩形＝可点的矩形」，回落态**整窗可点**；③ 回落留痕
+#:   `logo_frame_unavailable`（reason 四选一，见 logo.ps1）。
+#:   ★ 判据怎么"真跑产品"：logo.ps1 一旦执行就会起窗口与消息循环，所以
+#:   这里**只抽取** `Resolve-IconPath` 的函数体 dot-source 进驱动（与生产
+#:   同一份源码文本，不复制逻辑），另从 PS 解析器取「回落分支里画的是哪个
+#:   解析器」这条结构事实。
+_BRAND_REL = "assets/logo/antinel.ico"
+
+
+def _brand_ico_alpha(size):
+    """`antinel.ico` 在 `size` 下四角/四边中点/中心的 alpha（真读文件，不猜）。
+
+    返回 list[int]（9 个取样点，按 4 角→4 边中点→中心）。读不出 ⇒ 抛
+    （调用方按红处理：拿不到证据不许当合格）。
+    """
+    return _brand_ico_alpha_at(os.path.join(ROOT, _BRAND_REL), size)
+
+
+def _brand_ico_alpha_at(ico_path, size):
+    """同 `_brand_ico_alpha`，但读**任意** ico（负控用临时变异件）。
+
+    ★ 取样点必须用**预先算好的标量变量**构造（`$x1 = $w - 1` 再 `@($x1,0)`）：
+      在数组字面量里直接写 `@($w-1,0)`，PS 5.1 会把 `$w-1` 当成
+      「数组减一」并静默产出空数组（实测 2026-10-20：`$res` 恒为空）。
+      这与 `[int]$xy[0]` 那条坑是同一族 —— PS 里**先算好再放进结构**。
+    """
+    ps = _ps_path()
+    if not ps:
+        raise RuntimeError("PATH 上没有 powershell/pwsh —— ico 像素取样无法真跑")
+    import subprocess
+    d = tempfile.mkdtemp(prefix="g0514_flo13_")
+    drv = os.path.join(d, "px.ps1")
+    body = (
+        "param([string]$Ico,[int]$S)\n"
+        "Add-Type -AssemblyName System.Drawing\n"
+        "$i = New-Object System.Drawing.Icon($Ico,$S,$S)\n"
+        "$b = $i.ToBitmap()\n"
+        "$w = [int]$b.Width\n"
+        "$h = [int]$b.Height\n"
+        "$x1 = $w - 1\n"
+        "$y1 = $h - 1\n"
+        "$cx = [int]($w / 2)\n"
+        "$cy = [int]($h / 2)\n"
+        "$pts = @(@(0,0),@($x1,0),@(0,$y1),@($x1,$y1),"
+        "@(0,$cy),@($x1,$cy),@($cx,0),@($cx,$y1),@($cx,$cy))\n"
+        "$res = @()\n"
+        "foreach ($p in $pts) { $res += $b.GetPixel($p[0],$p[1]).A }\n"
+        "$o = @{a=$res;w=$w;h=$h}\n"
+        "Write-Output (ConvertTo-Json $o -Compress)\n")
+    body.encode("ascii")            # 机制层断言：驱动必须 ASCII-only
+    with io.open(drv, "w", encoding="ascii", newline="\n") as f:
+        f.write(body)
+    p = subprocess.run([ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                        drv, "-Ico", ico_path, "-S", str(int(size))],
+                       capture_output=True, timeout=240)
+    out = (p.stdout or b"").decode("utf-8", "replace").strip()
+    if p.returncode != 0 or not out:
+        raise RuntimeError("ico 取样驱动失败 rc=%r err=%r" % (
+            p.returncode, (p.stderr or b"").decode("gbk", "replace")[:200]))
+    d2 = json.loads(out)
+    if int(d2.get("w") or 0) != int(d2.get("h") or -1):
+        raise RuntimeError("ico 帧不是正方形：%rx%r" % (d2.get("w"), d2.get("h")))
+    return d2["a"]
+
+
+def _flo13_resolve(icon_dir, brand, state="L2", shield="on"):
+    """真跑生产 `Resolve-IconPath`（抽取同一份源码的该函数体），返回解析结果。"""
+    ps = _ps_path()
+    if not ps:
+        raise RuntimeError("PATH 上没有 powershell/pwsh —— Resolve-IconPath 无法真跑")
+    import subprocess
+    src = io.open(IL.script_path(), encoding="utf-8").read()
+    i = src.find("function Resolve-IconPath")
+    if i < 0:
+        raise RuntimeError("产品 logo.ps1 里找不到 Resolve-IconPath（源码已变，需更新判据）")
+    j = src.find("\n}\n", i)
+    if j < 0:
+        raise RuntimeError("Resolve-IconPath 函数体边界找不到（源码已变，需更新判据）")
+    fn = src[i:j + 3]
+    d = tempfile.mkdtemp(prefix="g0514_flo13r_")
+    drv = os.path.join(d, "res.ps1")
+    body = (
+        "param([string]$Fn,[string]$IconDir,[string]$Brand,[string]$St,[string]$Sh)\n"
+        "$ErrorActionPreference = 'Stop'\n"
+        "Invoke-Expression $Fn\n"
+        "$script:brandIcon = $Brand\n"
+        "$SHIELD_SUFFIX = @{ 'on'=''; 'unposted'='-unposted'; 'unknown'='-unknown'; 'off'='-off' }\n"
+        "Write-Output (Resolve-IconPath $St $Sh)\n")
+    body.encode("ascii")
+    with io.open(drv, "w", encoding="ascii", newline="\n") as f:
+        f.write(body)
+    p = subprocess.run([ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                        drv, "-Fn", fn, "-IconDir", icon_dir, "-Brand", brand,
+                        "-St", state, "-Sh", shield],
+                       capture_output=True, timeout=240)
+    out = (p.stdout or b"").decode("utf-8", "replace").strip()
+    if p.returncode != 0:
+        raise RuntimeError("Resolve-IconPath 驱动失败 rc=%r err=%r" % (
+            p.returncode, (p.stderr or b"").decode("utf-8", "replace")[:300]))
+    return out
+
+
+@check("FLO-13 回落画品牌完整 LOGO（方形深色底板），不画姿态灯")
+def c_flo13():
+    icon_dir = os.path.join(ROOT, "assets", "icons")
+    brand = os.path.join(ROOT, _BRAND_REL)
+    if not os.path.isfile(brand):
+        return "品牌标志文件不存在：%s（回落无图可画）" % _BRAND_REL
+    # ① 生产解析器：给了品牌图标 ⇒ 必须返回它（而不是 assets/icons/<state>.ico）
+    got = _flo13_resolve(icon_dir, brand, "L2", "on")
+    if os.path.normcase(got) != os.path.normcase(brand):
+        return ("回落解析成 %r，不是品牌标志 %r —— 哨标画的是姿态灯"
+                "（创始人：『能把方形黑背景也带上吗，这样才是完整的』）"
+                % (got, brand))
+    # 状态/哨兵态变化都还指向品牌标志（回落是"产品标志"，与五态无关）
+    for st, sh in (("R0", "unposted"), ("L0", "off"), ("Ls", "unknown")):
+        got2 = _flo13_resolve(icon_dir, brand, st, sh)
+        if os.path.normcase(got2) != os.path.normcase(brand):
+            return "回落随 %s/%s 漂走（%r）—— 五态各画一个假标志" % (st, sh, got2)
+    # ② 像素证据：品牌板必须是**满幅不透明**的方形（角/边 alpha=255），
+    #    否则"整个区域可点"与像素对不上（圆角 rx=10 时四角 alpha=0）。
+    for size in (16, 32, 48, 64):
+        a = _brand_ico_alpha(size)
+        if len(a) != 9:
+            return "ico 取样点数 %d ≠ 9（量具缺腿）" % len(a)
+        if a[:8] != [255] * 8:
+            return ("%dpx 品牌板不是满幅不透明（四角/边 alpha=%r）—— 四角是透明像素，"
+                    "『区域内点击都能切回』做不到" % (size, a[:8]))
+    # ③ Python 侧把品牌图标显式传给哨标（不靠 PS 猜兄弟目录）
+    root = tempfile.mkdtemp(prefix="g0514_flo13c_")
+    cmd = IL.logo_cmd(root=root)
+    if "-BrandIcon" not in cmd:
+        return "logo_cmd 没传 -BrandIcon —— 哨标只能从 -IconDir 猜路径"
+    passed = cmd[cmd.index("-BrandIcon") + 1]
+    if os.path.normcase(os.path.abspath(passed)) != os.path.normcase(brand):
+        return "-BrandIcon 传的是 %r，不是 %r" % (passed, brand)
+    return True
+
+
+@check("N-FLO13 负控：解析器改回先给姿态灯（0.53.1 原样）⇒ 同一把尺子必须判红")
+def n_flo13():
+    if c_flo13() is not True:
+        return "夹具不成立：未变异时 FLO-13 就不合格，负控无分辨力"
+    # 变异＝0.53.1 的解析顺序：品牌图标**不传** ⇒ 落到 assets/icons/<state>.ico
+    icon_dir = os.path.join(ROOT, "assets", "icons")
+    got = _flo13_resolve(icon_dir, "", "L2", "on")
+    if not got.replace("\\", "/").endswith("assets/icons/L2.ico"):
+        return ("负控方向不对：不传品牌图标时解析成 %r，不是姿态灯 —— "
+                "变异没打在真锚点上（产品逻辑已变，需更新负控）" % (got,))
+    if os.path.normcase(got) == os.path.normcase(os.path.join(ROOT, _BRAND_REL)):
+        return "负控失效：不传品牌图标仍解析成品牌标志 —— 断言测不出"
+    return True
+
+
+@check("N-FLO13b 负控：底板退回圆角 rx=10 ⇒ 四角像素断言必须判红")
+def n_flo13b():
+    if c_flo13() is not True:
+        return "夹具不成立：未变异时 FLO-13 就不合格，负控无分辨力"
+    # 变异＝圆角构图：拿**产品自己的栅格器**（同一实现，不二次实现像素规则）
+    # 把 svg 的 rx 换回 10 画一张临时 ico，再用同一条像素断言去量它。
+    svg_path = os.path.join(ROOT, "assets", "logo", "logo.svg")
+    svg = io.open(svg_path, encoding="utf-8").read()
+    if 'rx="0"' not in svg:
+        return "夹具不成立：logo.svg 的底板已不是 rx=\"0\"，负控锚点漂了"
+    import importlib.util
+    tmp_root = tempfile.mkdtemp(prefix="g0514_flo13n_")
+    svg2 = os.path.join(tmp_root, "logo.svg")
+    ico2 = os.path.join(tmp_root, "antinel.ico")
+    with io.open(svg2, "w", encoding="utf-8", newline="\n") as f:
+        f.write(svg.replace('rx="0"', 'rx="10"'))
+    spec = importlib.util.spec_from_file_location(
+        "_mk_logo_ico_negctl", os.path.join(ROOT, "tools", "mk_logo_ico.py"))
+    mod = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)
+        mod.SVG_PATH = svg2
+        mod.OUT_ICO = ico2
+        # 栅格器的 main() 会往 stdout 打 ASCII 字符画；闸门日志不是画廊，吞掉。
+        # 只在此处静音，不去动 tools/mk_logo_ico.py（它与 FZ 冻结契约相关）。
+        _buf = io.StringIO()
+        with contextlib.redirect_stdout(_buf):
+            mod.main()
+    except SystemExit as e:
+        return "夹具不成立：圆角 svg 过不了栅格器自检（%r）—— 负控无分辨力" % (e,)
+    except Exception as e:                                       # noqa: BLE001
+        return "夹具不成立：用圆角 svg 栅格失败（%r）—— 负控无分辨力" % (e,)
+    a = _brand_ico_alpha_at(ico2, 48)
+    if a[:4] == [255, 255, 255, 255]:
+        return ("负控失效：圆角底板四角 alpha 仍是 255 —— 像素断言没有分辨力"
+                "（『整窗可点』这条承诺就没人守得住）")
+    return True
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# FLO-14 族 —— 高 DPI 派生（0.53.2，T4）
+#
+# 病：`-Size 46` 是**物理像素**，150% 缩放下视觉只有 ~31px，可点半径同比例
+# 偏小。修法只有一条纪律：**一个派生，全窗消费**。
+#   `Get-PhysSize(logical, dpi)` = round(logical × dpi/96)  ← 唯一乘法
+#   form 边框 / 位图 / 命中半径 / 默认落位 / WM_DPICHANGED ← 全是消费者
+# 判据不另写公式：把产品 `Get-PhysSize`、`Get-HitRadius` 的函数体从
+# `tools/logo.ps1` **原文切出来**真跑（与 FLO-10、FLO-13 同一手法），
+# 再用同一份源码做「静态口径」检查（乘法只许出现一次）。
+# ═══════════════════════════════════════════════════════════════════════
+
+#: 任务书 §T4 钉死的那张表：dpi -> 46 逻辑像素换算出的物理像素
+_DPI_TABLE = [(96, 46), (120, 58), (144, 69), (192, 92)]
+
+#: 尺寸参数在源码里的「唯一乘法」现场（函数体内的那一行）
+_FL14_DERIVE_FN = "function Get-PhysSize"
+
+
+def _fl14_src(logo_path=None):
+    return io.open(logo_path or IL.script_path(), encoding="utf-8").read()
+
+
+def _fl14_fn_slice(src, name, sink):
+    """切出产品 `logo.ps1` 里 `function <name>` 的函数体（含尾 `}`）。
+
+    `sink` 是函数体之后的**第一行锚点**：切到这里为止，避免把整个脚本
+    （含开窗的脚本体）一起喂给 Invoke-Expression —— 那会真的弹一个窗。
+    """
+    i = src.find(name)
+    if i < 0:
+        raise RuntimeError("产品 logo.ps1 里找不到 %r（源码已变，需更新判据）" % name)
+    j = src.find(sink, i)
+    if j < 0:
+        raise RuntimeError("%r 的边界锚点 %r 找不到（源码已变，需更新判据）"
+                           % (name, sink))
+    return src[i:j]
+
+
+def _fl14_derive_table(logical=46, dpis=None, logo_path=None):
+    """真跑产品 `Get-PhysSize`，返回 {dpi: size_phys}。
+
+    ★ 驱动必须 ASCII-only（PS 5.1 无 BOM 按 GBK 读）。
+    ★ `param` 与函数名不撞：本仓踩过 `$Spec`/`$spec` 大小写同变量的坑。
+    """
+    ps = _ps_path()
+    if not ps:
+        raise Skip("PATH 上没有 powershell/pwsh —— DPI 派生无法真跑")
+    import subprocess
+    src = _fl14_src(logo_path)
+    fn = _fl14_fn_slice(src, _FL14_DERIVE_FN, "$script:dpi = Get-DpiInfo")
+    d = tempfile.mkdtemp(prefix="g0514_flo14_")
+    drv = os.path.join(d, "dpi.ps1")
+    body = (
+        "param([string]$Fn)\n"
+        "$ErrorActionPreference = 'Stop'\n"
+        "Invoke-Expression $Fn\n"
+        "$res = @{}\n"
+        "foreach ($dv in @(96,120,144,168,192)) {\n"
+        "  $res[\"$dv\"] = Get-PhysSize %d $dv\n"
+        "}\n"
+        "$o = @{ rows = $res }\n"
+        "Write-Output (ConvertTo-Json $o -Compress)\n" % int(logical))
+    body.encode("ascii")
+    with io.open(drv, "w", encoding="ascii", newline="\n") as f:
+        f.write(body)
+    p = subprocess.run([ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                        drv, "-Fn", fn], capture_output=True, timeout=240)
+    out = (p.stdout or b"").decode("utf-8", "replace").strip()
+    if p.returncode != 0 or not out:
+        raise RuntimeError("DPI 派生驱动失败 rc=%r err=%r" % (
+            p.returncode, (p.stderr or b"").decode("utf-8", "replace")[:300]))
+    rows = json.loads(out).get("rows") or {}
+    return dict((int(k), int(v)) for k, v in rows.items())
+
+
+@check("FLO-14 高 DPI：一个派生算出物理尺寸（46@96/120/144/192 -> 46/58/69/92）")
+def c_flo14():
+    got = _fl14_derive_table()
+    bad = [(d, n, got.get(d)) for d, n in _DPI_TABLE if got.get(d) != n]
+    if bad:
+        return "派生表不符：%s" % ", ".join(
+            "dpi %d 期望 %d 实得 %r" % (d, n, g) for d, n, g in bad)
+    # 单调不减：缩放变了尺寸必须跟着变（写死 96 的病就在这条上现形）
+    seq = [got[d] for d, _ in _DPI_TABLE]
+    if seq != sorted(seq) or len(set(seq)) != len(seq):
+        return "物理尺寸不随 DPI 单调增长：%r —— 派生没接上 DPI" % (seq,)
+    return True
+
+
+@check("FLO-14b 全窗同源：窗口/位图/命中半径都吃派生值，DPI 只乘一次")
+def c_flo14b():
+    src = _fl14_src()
+    # ① 乘法只在 Get-PhysSize 里出现一次
+    fn = _fl14_fn_slice(src, _FL14_DERIVE_FN, "$script:dpi = Get-DpiInfo")
+    if "96" not in fn or "*" not in fn:
+        return ("Get-PhysSize 不再是一处乘法（找不到 ×dpi/96）—— "
+                "派生函数的形状变了，判据锚点需同步")
+    body = src.replace(fn, "")
+    # 注释行与 `-PrintDpi` 自检出口里的 scale 展示不算「消费者乘法」：
+    # 前者是解释，后者只打印、不参与任何像素计算。其余任何位置出现 dpi/96
+    # 都是「各自乘一次」的形状，必须红。
+    live = []
+    for ln in body.split("\n"):
+        s = ln.strip()
+        if not s or s.startswith("#"):
+            continue
+        live.append(ln)
+    body = "\n".join(live)
+    for pat in ("/ 96", "/ 96.0", "* $script:dpi", "*$script:dpi"):
+        if pat not in body:
+            continue
+        hits = [ln.strip() for ln in body.split("\n") if pat in ln]
+        # `scale = ...` 是 -PrintDpi 的显示字段（`$script:dpi` 换算成倍数），
+        # 不进入任何几何量；它是「派生被看见」的手段，不是第二个派生。
+        hits = [h for h in hits if not h.startswith("scale = ")]
+        if hits:
+            return ("DPI 乘法在 Get-PhysSize 之外又出现了一次（%r）：%r —— "
+                    "「各自乘一次」正是这条判据要防的形状" % (pat, hits[:2]))
+    # ② 消费者全部指向派生值
+    misses = []
+    for pat, label in (
+            ("New-Object System.Drawing.Size($sizePhys, $sizePhys)", "窗口尺寸"),
+            ("New-Object System.Drawing.Bitmap($sizePhys, $sizePhys", "低位图"),
+            ("System.Drawing.Bitmap((2 * $sizePhys), (2 * $sizePhys)", "高位图"),
+            ("Get-HitRadius $sizePhys $script:spec", "命中半径入参"),
+            ("Test-Hit $x $y $sizePhys $script:hitRadius", "命中测试"),
+            ("Draw-Image-Plate", "占位"),
+    ):
+        if label == "占位":
+            continue
+        if pat not in src:
+            misses.append(label)
+    if misses:
+        return "仍有消费者没吃派生值（%s）—— DPI 只该影响最终像素尺寸，一处派生" % (
+            "、".join(misses))
+    # ③ 参数 $Size 只做输入，不许再被当像素直接用
+    leftovers = [ln.strip() for ln in src.split("\n")
+                 if "$Size" in ln and not ln.strip().startswith("[int]$Size")
+                 and "$sizeLogical = [int]$Size" not in ln
+                 and "$Size,$sizePhys" not in ln
+                 and "-- $Size" not in ln and "dpi -> " in ln]
+    return True if not leftovers else "参数 $Size 仍被当物理像素用：%r" % (leftovers[:3],)
+
+
+@check("FLO-14c 换屏重算：WM_DPICHANGED 走同一派生并留痕")
+def c_flo14c():
+    src = _fl14_src()
+    for pat, label in (
+            ("WM_DPICHANGED", "注释"),
+            ("m.Msg == 0x02E0", "LogoForm 里的分支"),
+            ("$form.DpiChanged = {", "处理器挂载"),
+            ("Get-PhysSize $sizeLogical $script:dpi", "派生调用"),
+            ('"logo_dpi_changed"', "留痕类型"),
+    ):
+        if pat not in src:
+            return "换屏重算缺件：%s（%r）" % (label, pat)
+    # 处理器里必须**重新派生**，不许沿用旧 $sizePhys（那是"改了没效果"的另一种写法）
+    i = src.find("$form.DpiChanged = {")
+    seg = src[i:i + 1600]
+    if "$sizePhys = Get-PhysSize" not in seg:
+        return "WM_DPICHANGED 处理器没重新派生物理尺寸 —— 换屏后尺寸会原地不动"
+    if "$script:hitRadius = Get-HitRadius $sizePhys" not in seg:
+        return "WM_DPICHANGED 处理器没重算命中半径 —— 换了屏可点区会跟画面脱节"
+    return True
+
+
+@check("N-FLO14 负控：DPI 写死 96 ⇒ 派生表判据必须红")
+def n_flo14():
+    if c_flo14() is not True:
+        return "夹具不成立：未变异时 FLO-14 就不合格，负控无分辨力"
+    src = _fl14_src()
+    fn = _fl14_fn_slice(src, _FL14_DERIVE_FN, "$script:dpi = Get-DpiInfo")
+    # 变异＝把派生函数退化成「原样返回逻辑像素」（等价于 DPI 写死 96）
+    mutant = ("function Get-PhysSize {\n"
+              "  param([int]$Logical, [int]$Dpi)\n"
+              "  return [int]$Logical\n"
+              "}\n")
+    d = tempfile.mkdtemp(prefix="g0514_flo14n1_")
+    mp = os.path.join(d, "logo.ps1")
+    with io.open(mp, "w", encoding="utf-8", newline="\n") as f:
+        f.write(src.replace(fn, mutant))
+    got = _fl14_derive_table(logo_path=mp)
+    if all(got.get(dpi) == n for dpi, n in _DPI_TABLE):
+        return ("负控失效：DPI 写死成 96 之后派生表仍然全对 —— "
+                "这条判据只认表不认算法，写死也能过")
+    return True
+
+
+@check("N-FLO14b 负控：DPI 乘两次 ⇒ 同源判据必须红")
+def n_flo14b():
+    if c_flo14b() is not True:
+        return "夹具不成立：未变异时 FLO-14b 就不合格，负控无分辨力"
+    src = _fl14_src()
+    # 变异＝在消费者那一侧再乘一次 DPI（0.53.x 最容易犯的形状）
+    mutant = src.replace(
+        "$form.Size = New-Object System.Drawing.Size($sizePhys, $sizePhys)",
+        "$form.Size = New-Object System.Drawing.Size(($sizePhys * $script:dpi"
+        " / 96), ($sizePhys * $script:dpi / 96))")
+    if mutant == src:
+        return "夹具不成立：窗口尺寸那行已经不是 $sizePhys 口径，负控锚点漂了"
+    d = tempfile.mkdtemp(prefix="g0514_flo14n2_")
+    mp = os.path.join(d, "logo.ps1")
+    with io.open(mp, "w", encoding="utf-8", newline="\n") as f:
+        f.write(mutant)
+    saved = IL.script_path
+    try:
+        IL.script_path = lambda: mp                              # noqa: E731
+        why = c_flo14b()
+    finally:
+        IL.script_path = saved
+    if why is True:
+        return ("负控失效：DPI 乘两次之后同源判据仍然绿 —— "
+                "「一个派生」这条纪律没人守")
+    return True
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# FLO-15 族 —— 五态一致性（0.53.2，T5）
+#
+# 背景：0.53.0/0.53.1 把「五个态到底画什么」在**四个地方**各写过一次 ——
+# 定稿媒体（assets/logo/*.mp4）、渲染表（LOGO_MOTION_RENDER）、托盘静态
+# 姿态灯（tools/mk_icons.py → assets/icons/*.ico）、页面与哨标共用的规格
+# （logo_motion_spec → tray.json）。四条腿只要有**一条**漂了，屏幕上看
+# 起来都「还在动」，肉眼抓不到 —— 这族判据就是那四条腿的钉子。
+#
+#   15a 媒体字节   —— 定稿视频逐字节钉住（判据自带期望值，不读包外目录）
+#   15b 模式键闭包 —— modes 的值集 ⊆ 渲染表键集，且 Ls→LD、dev→L0
+#   15c 姿态灯来源 —— mk_icons 的态清单 == modes 键集去 dev，且 ico 在场
+#   15d 五态不塌缩 —— 五态映射出五个互不相同的动法
+#   15e 两个出口同源 —— 页面 STYLE 由 json.dumps(渲染表) 装配，哨标走 spec()
+# ═══════════════════════════════════════════════════════════════════════
+
+#: T5-a 定稿媒体的 sha256（**实测值，钉死**）。
+#: ★ 为什么不「读定稿目录再比」：定稿在 `D:\2026\PSL\antinel-logo-final_assets`，
+#:   不在包里 —— 换台机器就没有那个目录，判据会变成恒 SKIP（假绿的温床）。
+#: ★ 重取法（改了媒体才允许动这张表）：`sha256sum assets/logo/<态>.mp4`，
+#:   取完**同步改任务书 §2.3 的表**，两处同一个数。
+_MP4_SHA = {
+    "L0": "b2a138fda1e8e52ec0e41f9e820fa07dd3a567dafc49202548bb55cd7b5a26d0",
+    "L1": "e8ca87d84c371087c77510f7bdbefe1f51c736fa8db1da80db0e87d04b704ef1",
+    "L2": "17ddffe81da74294329a6cb9f3c14b96ed8794f5ffe618633b986675f1f82b49",
+    "Ls": "646fd37cf6a99d798b0312360e6c51c8d8c8b56847b468e087e01c6a2214f984",
+    "R0": "0863247107e9a3ae36de22ea868055a38dbf40471ac0521b79ce0e93c0db8628",
+}
+
+
+def _flo15_modes():
+    """五态 → 动法键的映射（取自生产 `logo_motion_spec()`，不抄一份）。"""
+    return dict(SV.logo_motion_spec()["modes"])
+
+
+def _flo15a_hashes(dirpath=None):
+    """量一个目录下五个 mp4 的 sha256。判定与取样分离，负控才能喂变异体。"""
+    import hashlib
+    base = dirpath or os.path.join(ROOT, "assets", "logo")
+    out = {}
+    for st in sorted(_MP4_SHA):
+        p = os.path.join(base, "%s.mp4" % st)
+        if not os.path.exists(p):
+            out[st] = None
+            continue
+        h = hashlib.sha256()
+        with open(p, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        out[st] = h.hexdigest()
+    return out
+
+
+def _flo15a_judge(dirpath=None):
+    got = _flo15a_hashes(dirpath)
+    bad = []
+    for st, want in sorted(_MP4_SHA.items()):
+        g = got.get(st)
+        if g is None:
+            bad.append("%s.mp4 不在场" % st)
+        elif g != want:
+            bad.append("%s.mp4 sha256 漂了（期望 %s… 实得 %s…）"
+                       % (st, want[:12], g[:12]))
+    if bad:
+        return "五态媒体与定稿不一致：%s" % "；".join(bad)
+    return True
+
+
+@check("FLO-15a 五态媒体字节：五个 mp4 的 sha256 等于定稿实测值")
+def c_flo15a():
+    return _flo15a_judge()
+
+
+@check("N-FLO15a 负控：媒体改一个字节 ⇒ 字节判据必须红")
+def n_flo15a():
+    if c_flo15a() is not True:
+        return "夹具不成立：未变异时 FLO-15a 就不合格，负控无分辨力"
+    # 变异＝整目录复制一份，把 L0.mp4 的最后一个字节翻掉，再用**同一条判据**量它
+    d = tempfile.mkdtemp(prefix="g0514_flo15a_")
+    import shutil
+    for st in _MP4_SHA:
+        shutil.copy2(os.path.join(ROOT, "assets", "logo", "%s.mp4" % st),
+                     os.path.join(d, "%s.mp4" % st))
+    p = os.path.join(d, "L0.mp4")
+    raw = bytearray(io.open(p, "rb").read())
+    raw[-1] = (raw[-1] + 1) & 0xFF
+    with open(p, "wb") as f:
+        f.write(bytes(raw))
+    why = _flo15a_judge(d)
+    if why is True:
+        return ("负控失效：改了一个字节判据仍然绿 —— 字节判据只是一句空话"
+                "（多半在比文件名而不是比内容）")
+    return True
+
+
+@check("FLO-15b 模式键闭包：modes 的值全在渲染表里（Ls→LD、dev→L0）")
+def c_flo15b():
+    modes = _flo15_modes()
+    render = set(SV.LOGO_MOTION_RENDER.keys())
+    missing = sorted(set(modes.values()) - render)
+    if missing:
+        return ("modes 指向了渲染表里没有的键 %r —— 页面会白画、哨标会回落"
+                "（渲染表键集 %r）" % (missing, sorted(render)))
+    if modes.get("Ls") != "LD":
+        return "modes['Ls'] 必须是 'LD'（预算态沿用规格的 LD 动法），实得 %r" % (
+            modes.get("Ls"),)
+    if modes.get("dev") != "L0":
+        return "modes['dev'] 必须是 'L0'（研发态按最静的 L0 动），实得 %r" % (
+            modes.get("dev"),)
+    for k in ("L0", "L1", "L2", "R0"):
+        if modes.get(k) != k:
+            return "modes[%r] 必须自映射，实得 %r" % (k, modes.get(k))
+    return True
+
+
+@check("N-FLO15b 负控：modes['Ls'] 改成渲染表里没有的键 ⇒ 闭包判据必须红")
+def n_flo15b():
+    if c_flo15b() is not True:
+        return "夹具不成立：未变异时 FLO-15b 就不合格，负控无分辨力"
+    saved = SV.LOGO_MODE
+    mutant = dict(saved)
+    mutant["Ls"] = "LS"                     # 大小写之差：渲染表里只有 "LD"
+    try:
+        SV.LOGO_MODE = mutant
+        why = c_flo15b()
+    finally:
+        SV.LOGO_MODE = saved
+    if why is True:
+        return "负控失效：闭包破了之后判据仍然绿 —— 键闭包没人守"
+    return True
+
+
+def _flo15c_icon_states(mk_icons_path=None):
+    """从 `tools/mk_icons.py` 读出**真正画出来**的态清单（build_ico 的循环）。"""
+    p = mk_icons_path or os.path.join(ROOT, "tools", "mk_icons.py")
+    src = io.open(p, encoding="utf-8").read()
+    loops = re.findall(r'for\s+st\s+in\s*\(([^)]*)\)\s*:', src)
+    sets = [frozenset(re.findall(r'"([A-Za-z0-9]+)"', g)) for g in loops]
+    return sets
+
+
+def _flo15c_judge(mk_icons_path=None, icons_dir=None):
+    want = set(_flo15_modes().keys()) - {"dev"}
+    sets = _flo15c_icon_states(mk_icons_path)
+    if not sets:
+        return "mk_icons 里找不到画图标的态清单循环 —— 判据锚点需同步"
+    if len(set(sets)) > 1:
+        return "mk_icons 的两处态清单不一致：%r —— 一处改了另一处没改" % (sets,)
+    got = set(sets[0])
+    if got != want:
+        return ("mk_icons 的态清单 %r ≠ modes 去 dev %r —— 姿态灯与动效五态脱节"
+                % (sorted(got), sorted(want)))
+    idir = icons_dir or os.path.join(ROOT, "assets", "icons")
+    miss = [st for st in sorted(want)
+            if not os.path.exists(os.path.join(idir, "%s.ico" % st))]
+    if miss:
+        return "assets/icons 缺姿态灯：%r —— 回落路径会拿空" % (miss,)
+    return True
+
+
+@check("FLO-15c 姿态灯来源：mk_icons 的态清单 == modes 去 dev，且五个 .ico 在场")
+def c_flo15c():
+    return _flo15c_judge()
+
+
+@check("N-FLO15c 负控：mk_icons 清单删掉 R0 ⇒ 来源判据必须红")
+def n_flo15c():
+    if c_flo15c() is not True:
+        return "夹具不成立：未变异时 FLO-15c 就不合格，负控无分辨力"
+    p = os.path.join(ROOT, "tools", "mk_icons.py")
+    src = io.open(p, encoding="utf-8").read()
+    mutant = src.replace('("L0", "L1", "L2", "Ls", "R0")',
+                         '("L0", "L1", "L2", "Ls")')
+    if mutant == src:
+        return "夹具不成立：mk_icons 的态清单形状变了，负控锚点漂了"
+    d = tempfile.mkdtemp(prefix="g0514_flo15c_")
+    mp = os.path.join(d, "mk_icons.py")
+    with io.open(mp, "w", encoding="utf-8", newline="\n") as f:
+        f.write(mutant)
+    why = _flo15c_judge(mk_icons_path=mp)
+    if why is True:
+        return "负控失效：清单删了 R0 判据仍然绿 —— 来源判据没有分辨力"
+    return True
+
+
+@check("FLO-15d 五态不塌缩：五个态映射出五个互不相同的动法")
+def c_flo15d():
+    modes = _flo15_modes()
+    states = ("L0", "L1", "L2", "Ls", "R0")
+    vals = [modes.get(st) for st in states]
+    if None in vals:
+        return "五态里有没映射的：%r" % (dict(zip(states, vals)),)
+    if len(set(vals)) != 5:
+        dup = sorted(v for v in set(vals) if vals.count(v) > 1)
+        return ("五态塌缩成 %d 个动法（重复 %r）—— 看着在动，其实什么都没变"
+                % (len(set(vals)), dup))
+    # 渲染表那一侧也要不同：映射不同但参数一模一样，屏幕上是同一幅画
+    seen = {}
+    for st in states:
+        k = modes[st]
+        sig = json.dumps(SV.LOGO_MOTION_RENDER[k], sort_keys=True)
+        if sig in seen:
+            return ("%s 与 %s 映射到参数完全相同的动法 —— 屏幕上看不出区别"
+                    % (st, seen[sig]))
+        seen[sig] = st
+    return True
+
+
+@check("N-FLO15d 负控：把 L1 也映射成 L0 ⇒ 塌缩判据必须红")
+def n_flo15d():
+    if c_flo15d() is not True:
+        return "夹具不成立：未变异时 FLO-15d 就不合格，负控无分辨力"
+    saved = SV.LOGO_MODE
+    mutant = dict(saved)
+    mutant["L1"] = "L0"
+    try:
+        SV.LOGO_MODE = mutant
+        why = c_flo15d()
+    finally:
+        SV.LOGO_MODE = saved
+    if why is True:
+        return "负控失效：L1 塌进 L0 之后判据仍然绿 —— 塌缩没人守"
+    return True
+
+
+def _flo15e_judge(js=None, src=None):
+    """两出口同源判定。参数可注入 ⇒ 负控喂变异体，不必动产品模块全局。"""
+    js = SV._LOGO_JS if js is None else js
+    src = io.open(
+        getattr(SV, "__file__", None) or os.path.join(ROOT, "inbox_server.py"),
+        encoding="utf-8").read() if src is None else src
+    # ① 页面的 STYLE 必须是 json.dumps(渲染表) 的装配产物（源码层）
+    if "json.dumps(LOGO_MOTION_RENDER" not in src:
+        return "页面 STYLE 不是由 json.dumps(LOGO_MOTION_RENDER) 装配的 —— 两个出口会各写一份"
+    if "var STYLE=__STYLE__;" not in src and "STYLE=__STYLE__" not in src:
+        return "页面模板里没有 STYLE=__STYLE__ 占位 —— 风格可能已被手写常量接管"
+    # ② 装配必须真跑过（模板里留着占位符＝拿到的是字面量 "__STYLE__"）
+    if "__STYLE__" in js:
+        return "_LOGO_JS 里 __STYLE__ 没被替换 —— 页面拿到的是占位符"
+    # ③ 出口一的 STYLE 内容必须**逐字等于**渲染表的 JSON
+    want = "var STYLE=%s;" % json.dumps(SV.LOGO_MOTION_RENDER, ensure_ascii=False)
+    if want not in js:
+        return ("页面 STYLE 与渲染表 json.dumps 不一致 —— "
+                "手写常量、键序被打散或渲染表被改写一半，三者必有其一")
+    # ④ 出口二（哨标）：spec.motion 逐键逐字段来自渲染表
+    spec = SV.logo_motion_spec()
+    render = SV.LOGO_MOTION_RENDER
+    if set(spec["motion"].keys()) != set(render.keys()):
+        return ("spec.motion 的键集 %r ≠ 渲染表 %r —— 哨标会画到表外"
+                % (sorted(spec["motion"]), sorted(render)))
+    for k in render:
+        if json.dumps(spec["motion"][k], sort_keys=True) != json.dumps(
+                dict((kk, render[k][kk]) for kk in render[k]), sort_keys=True):
+            return "spec.motion[%r] 与渲染表不一致 —— 哨标与页面各画一套" % (k,)
+    return True
+
+
+@check("FLO-15e 两个出口同源：页面 STYLE 由渲染表装配，哨标规格走 spec()")
+def c_flo15e():
+    return _flo15e_judge()
+
+
+@check("N-FLO15e 负控：页面 STYLE 换成手写常量 ⇒ 同源判据必须红")
+def n_flo15e():
+    if c_flo15e() is not True:
+        return "夹具不成立：未变异时 FLO-15e 就不合格，负控无分辨力"
+    # 变异＝把装配出来的 STYLE 整句换成一份**手抄的**常量
+    # （形状就是 0.53.0 之前的"页面另写一份"）
+    js = SV._LOGO_JS
+    i = js.find("var STYLE=")
+    if i < 0:
+        return "夹具不成立：页面里找不到 var STYLE=，负控锚点漂了"
+    j = js.find("\n", i)
+    mutant = js[:i] + ('var STYLE={"L0":{"c":[126,155,132],"lap":12},'
+                       '"L1":{"c":[205,194,154],"lap":8}};') + js[j:]
+    why = _flo15e_judge(js=mutant)
+    if why is True:
+        return ("负控失效：手写常量照样通过 —— 两个出口同源这条承诺没人守")
+    return True
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# FLO-16 族 —— 长驻进程版本自检（0.53.2，T3）
+#
+# 病（0.53.1 交付后实测）：`tray.json` 长时间没有 `logo` 块；代码是新的，
+# 写状态的是**早上启动的旧进程**。重启 serve 无效 ⇒ 用户看到旧行为，
+# 排查方向被带偏。根因不是"忘了刷新"，是**没有任何出口把两件事摆在一起**。
+#
+# 修法口径（刻意窄，不许滑向"自动重启"）：
+#   · 戳只记进程**出生时**的版本；「现在的代码」由读的人现算
+#     ⇒ 两边来自不同时刻，差异才有信息量；
+#   · 不新建第三份状态文件：console 用 `url.json`，daemon 用
+#     `<console>/daemon.pid.meta.json`（同目录同前缀）；
+#   · **不自动杀进程** —— 那是用户的机器；
+#   · 差异判定**只有一处**（`inbox_server.version_drift`），出口只排版。
+# ═══════════════════════════════════════════════════════════════════════
+
+@check("FLO-16 版本自检：运行时版本 ≠ 仓里版本 ⇒ 出口报差异且含两边版本号")
+def c_flo16():
+    import inbox_server as SV
+    cur = {"version": "0.53.2", "mtime": 1.0, "file": "inbox_server.py"}
+    # ① 明确不同的版本 ⇒ 必须报，且文案里两边的版本号都要在
+    msg = SV.version_drift({"code_version": "0.53.1"}, current=cur)
+    if not msg:
+        return "跑 0.53.1、仓里 0.53.2 却报『没有差异』—— 自检等于没接"
+    for v in ("0.53.1", "0.53.2"):
+        if v not in msg:
+            return ("差异文案缺一边的版本号（缺 %s）：%r —— "
+                    "只说『版本不一致』等于把人又推回猜" % (v, msg))
+    # ② 有记录但缺戳 ⇒ 那也是差异（0.53.0 及更早的进程正在跑）
+    msg2 = SV.version_drift({"pid": 1234, "started_at": "x"}, current=cur)
+    if msg2 is None:
+        return ("有运行时记录却没有版本戳、却报『无差异』—— "
+                "『旧进程在跑』正是 T3 要抓的那个形状")
+    if "0.53.2" not in msg2:
+        return "缺戳那条差异里没报仓里版本：%r" % (msg2,)
+    # ③ 根本没有记录 ⇒ 没有证据 ⇒ 不许报差异（那不是版本问题）
+    if SV.version_drift(None, current=cur) is not None:
+        return ("没有运行时记录却报差异 —— 『没跑着』不是『版本不一致』，"
+                "这样每次空闲都会报一次狼来了")
+    return True
+
+
+@check("N-FLO16 负控：两边同版本 ⇒ 必须判绿（防误报）")
+def n_flo16():
+    import inbox_server as SV
+    cur = {"version": "0.53.2", "mtime": 1.0, "file": "inbox_server.py"}
+    if SV.version_drift({"code_version": "0.53.2"}, current=cur) is not None:
+        return ("负控失效：两边都是 0.53.2 却报差异 —— "
+                "这条自检会把每次正常启动都报成黄的（狼来了）")
+    # 反方向也钉住：**没有记录**更不许报差异
+    if SV.version_drift(None, current=cur) is not None:
+        return ("负控失效：根本没在跑却报版本差异 —— "
+                "空闲时天天报黄，真差异来了就没人看")
+    return True
+
+
+@check("FLO-16b 出口在场：daemon status 只读、报两边、且有差异时退出码非 0")
+def c_flo16b():
+    import inbox_cli as CLI
+    src = io.open(os.path.join(ROOT, "inbox_cli.py"), encoding="utf-8").read()
+    for pat, label in (
+            ('p.add_argument("status", nargs="?", const=None', "daemon status 参数"),
+            ("def _daemon_status(", "status 实现"),
+            ("def _runtime_lines(", "两出口共用的排版函数"),
+            ('return 1 if any("⚠" in ln for ln in lines) else 0', "退出码"),
+    ):
+        if pat not in src:
+            return "版本自检出口缺件：%s（%r）" % (label, pat)
+    # 只读纪律：status 分支里不许出现杀进程/重拉
+    i = src.find("def _daemon_status(")
+    j = src.find("\ndef ", i + 10)
+    seg = src[i:j]
+    for bad, why in (("kill", "杀进程"), ("terminate", "终止进程"),
+                     ("ensure_console", "重拉服务"), ("spawn_", "起进程")):
+        if bad in seg:
+            return ("版本自检出口在**动手**（%s）—— T3 明令只读，"
+                    "那是用户的机器" % why)
+    # 差异判定只许一处实现：出口里不许另写版本比较
+    if "== cur" in seg or "!= cur" in seg or "code_version\"] ==" in seg:
+        return "出口里另写了一份版本比较 —— 差异判定必须只走 version_drift"
+    return True
+
+
+@check("N-FLO16b 负控：删掉差异检查（version_drift 恒 None）⇒ 出口判据必须红")
+def n_flo16b():
+    import inbox_server as SV
+    if c_flo16() is not True:
+        return "夹具不成立：未变异时 FLO-16 就不合格，负控无分辨力"
+    saved = SV.version_drift
+    try:
+        SV.version_drift = lambda running, current=None: None   # 变异：永不报差异
+        why = c_flo16()
+    finally:
+        SV.version_drift = saved
+    if why is True:
+        return ("负控失效：把差异检查删成恒 None 之后判据仍然绿 —— "
+                "这条判据测的不是差异，是函数存在")
     return True
 
 
@@ -5651,6 +6693,11 @@ def main():
     print("0.49.0 收口判据 —— W-08 默认尺寸 · W-09 浮层逃逸 · U-17 图标动效 · "
           "U-18 哨标比例/不被裁 · B-02…B-08/B-13 冒泡 · FLO-01…FLO-05 漂浮哨标")
     print("＋ FLO-10a…e 哨标动效三态（0.53.1：标准 LOGO／整圆可点／保持动态）")
+    print("＋ FLO-12a…c 哨标规格失败留痕（0.53.2 T2：必写标记／进链／先链后改名）")
+    print("＋ FLO-13 回落画品牌 LOGO（0.53.2 T1：方形深色底板满幅／整窗可点）")
+    print("＋ FLO-14a…c 高 DPI 一个派生（0.53.2 T4：46->46/58/69/92／换屏重算）")
+    print("＋ FLO-15a…e 五态一致性（0.53.2 T5：媒体字节／键闭包／姿态灯源／不塌缩／同源）")
+    print("＋ FLO-16a…b 长驻进程版本自检（0.53.2 T3：跑的是哪版 vs 仓里哪版／只读）")
     print("＋ J1–J5「五条违和」同类可抓（原 0518，2026-10-16 按 A2/P5 并入）")
     print("（负控全部内存/临时目录变异，不写任何产品文件；node 缺失 ⇒ SKIP，不假绿）")
     print("=" * 78)

@@ -4459,6 +4459,9 @@ def write_console_record(port, token, pid=None, root=None, started_at=None,
            "pid": int(pid if pid is not None else os.getpid()),
            "url": "http://127.0.0.1:%d/?t=%s" % (int(port), token),
            "started_at": started_at or time.strftime("%Y-%m-%dT%H:%M:%S")}
+    # ★ 0.53.2（T3）：**出生时**的版本与代码指纹。写在这里而不是心跳里：
+    #   它回答"这个进程跑的是哪份代码"，不是"现在的代码是什么"。
+    stamp_runtime(rec)
     if want_port is not None and int(want_port) != int(port):
         rec["want_port"] = int(want_port)
     tmp = p + ".tmp"
@@ -4478,6 +4481,88 @@ def read_console_record(root=None):
     if not isinstance(d, dict) or not d.get("port") or not d.get("token"):
         return None
     return d
+
+
+# ------------------------------------------------ 版本戳（0.53.2，T3）----
+# ★★ 病（0.53.1 交付后实测）：`tray.json` 长时间没有 `logo` 块；代码是新的，
+#   写状态的是**早上启动的旧进程**。重启 serve 无效 ⇒ 用户看到旧行为，
+#   排查方向被带偏（以为新功能没写，其实旧进程没换）。
+#   根因是「长驻进程」与「仓里的代码」是两个独立演化的东西，而**没有任何
+#   出口把两者摆在一起**——用户只能靠猜。
+# ★ 口径（刻意窄）：
+#   · 戳只记**启动那一刻**的版本与代码指纹，之后不再刷新（它描述的是
+#     "这个进程跑的是哪份代码"，不是"现在的代码是什么"）；
+#   · 「现在的代码」由**读的人**现算（`code_identity()`），因为旧进程算不了
+#     未来的代码 —— 两边必须来自两个不同时刻，这条差异才有信息量；
+#   · 不新建第二份状态文件：console 的戳进 `url.json`（它本来就是"这个进程
+#     是谁"的落盘），daemon 的戳进 `<pid 文件>.meta.json`（同目录、同前缀，
+#     读它的地方本来就在读 pid）。
+#   · **不自动杀进程**：那是用户的机器。只把话说清楚 + 给一条可复制的修法。
+
+def code_version():
+    """仓里（本包根）的版本号。读不到 ⇒ `None`（不编）。"""
+    try:
+        import antinel as _A
+        v = str(getattr(_A, "VERSION", "") or "").strip()
+        return v or None
+    except Exception:                                   # noqa: BLE001
+        return None
+
+
+def code_identity():
+    """「现在这份代码」的身份：`{version, mtime}`。`mtime` 取写规格的那个源文件。
+
+    ★ 为什么取 `inbox_server.py` 自己的 mtime：它就是规格（`logo_motion_spec`）
+      与页面（`_LOGO_JS`）的所在地 —— 0.53.1 那次"改了没效果"的正是这个文件。
+      取包根目录的 mtime 会被任何无关文件干扰（`output/` 里落个探针就变）。
+    """
+    me = os.path.abspath(__file__)
+    try:
+        mt = os.path.getmtime(me)
+    except OSError:
+        mt = None
+    return {"version": code_version(), "mtime": mt, "file": os.path.basename(me)}
+
+
+def version_drift(running, current=None):
+    """**这一个判断，全仓只有一处**。返回人话差异；一致 ⇒ `None`。
+
+    `running` 是长驻进程启动时落下的戳。三种情形分清，不许合并：
+      · 没有记录（`None`）⇒ **没有证据** ⇒ `None` —— 「没跑着」不是「版本不一致」，
+        把它报成黄的，等于每次没人跑时报一次狼来了；
+      · 有记录但**没有版本戳** ⇒ **是差异**（0.53.1 及更早的进程在跑，
+        它们永远不会用上新代码）；
+      · 有戳但版本不同 ⇒ 差异，文案里两边的版本号都要在（只说"不一致"
+        等于把人又推回猜）。
+    """
+    cur = code_identity() if current is None else current
+    if running is None:
+        return None                     # 没有记录：没有证据，不编差异
+    if not isinstance(running, dict):
+        return None
+    rv = running.get("code_version")
+    cv = cur.get("version")
+    if not rv:
+        return ("服务跑的是**没有版本戳的旧进程**（0.53.0 及更早），仓里是 %s。"
+                "旧进程不会用新代码 —— 重启一次即可：`antinel inbox window`"
+                % (cv or "?"))
+    if rv != cv:
+        return ("服务跑的是 %s，仓里是 %s —— 旧进程不会用新代码。"
+                "重启一次即可：`antinel inbox window`（或 `antinel inbox serve`）"
+                % (rv, cv or "?"))
+    return None
+
+
+def stamp_runtime(rec, current=None):
+    """给一份运行时记录补上版本戳（就地改并返回）。启动时调用一次。
+
+    ★ 只在字段**缺**时写：这是一次性的"我出生时是什么"，不是心跳。
+    """
+    cur = code_identity() if current is None else current
+    if rec is not None and cur.get("version"):
+        rec.setdefault("code_version", cur.get("version"))
+        rec.setdefault("code_mtime", cur.get("mtime"))
+    return rec
 
 
 def console_status(root=None, rec=None):

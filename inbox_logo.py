@@ -187,8 +187,13 @@ def logo_cmd(title=None, tip=None, size=46, x=-1, y=-1, stale_after=30,
       出生即隐藏，等 show 标志）。
     ★ 0.53.1：多传 `-Frame`（纯帧数学脚本 `tools/logo_frame.ps1`）—— 哨标
       照 `tray.json` 的 `logo` 块（动效规格）画标准动效 LOGO；`-IconDir`
-      从此只是**回落**路径（拿不到规格时的静态兜底），不再是主渲染。"""
+      从此只是**回落**路径（拿不到规格时的静态兜底），不再是主渲染。
+    ★ 0.53.2（T1）：多传 `-BrandIcon`（`assets/logo/antinel.ico`，品牌完整
+      LOGO：深色方形底板＋探针环＋琥珀哨点）—— 回落画它而不是姿态灯。
+      显式传参而不是让 PS 从 `-IconDir` 推兄弟目录：路径只有 Python 这
+      一侧说得准（`-IconDir` 是既有参数，语义不扩权）。"""
     import inbox_window as WIN
+    _pkg = os.path.dirname(os.path.abspath(__file__))
     cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
            script_path(),
            "-State", state_path(root),
@@ -196,8 +201,8 @@ def logo_cmd(title=None, tip=None, size=46, x=-1, y=-1, stale_after=30,
            "-Quit", flag_path(root),
            "-Show", show_flag_path(root),
            "-Hide", hide_flag_path(root),
-           "-IconDir", os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                    "assets", "icons"),
+           "-IconDir", os.path.join(_pkg, "assets", "icons"),
+           "-BrandIcon", os.path.join(_pkg, "assets", "logo", "antinel.ico"),
            "-Frame", frame_script_path(),
            "-Title", title if title is not None else ("Antinel" + WIN.LOGO_TITLE_MARK),
            "-Size", str(int(size)),

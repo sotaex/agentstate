@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
-# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.20（随 v0.53.1）
+# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.21（随 v0.53.2）
 
 > v1.20（0.53.0）：**补登记 1 类** —— `exam_reminder`（见下文「体检提醒类」）。
 > 语义：该做体检了（装好 ≥24 小时没做过／上次体检过去很久），**L1** 级。
@@ -284,6 +284,29 @@
 | type | 来源 | 关键字段 | 说明 |
 |---|---|---|---|
 | `exam_reminder` | `host_shield.exam_reminder_check`（daemon tick 调用） | `reason`（人话整句）, `subkind` ∈ `never` / `overdue`, `severity="info"`, `decision` 缺省, `notify=False` | **v1.20（0.53.0）补登记**：该做体检了。`subkind="never"` ＝ 装好 ≥24 小时一次体检都没做过（`exam_state` 的 `S1`）；`subkind="overdue"` ＝ 上次体检已过去很久（`S3`）。★ **去重靠链不靠内存**：hub rollup 链上已有 `type=exam_reminder` 就再也不出（`exam_reminder_check` 里查链），所以这类型全历史**最多一条** —— 它是「提醒过了」的证据，不是台账。★ 级别定在 **L1（注意）** 而不是 L2：L2 会弹置顶紧急窗，而"还没体检"只是知情即可（`inbox_model.LEVEL_OF_KIND` 一处可翻回，判据同源跟随）。★ 与 `credits_low` 同类：都是**通知性质**、都不代表防线出事 |
+
+### 哨标规格类（0.53.2，v1.21 新增）
+
+> 0.53.2 起，漂浮哨标（tools/logo.ps1）与托盘之间的动效规格链有了**留痕**：
+> 规格取不到（T2）／规格缺态键（T2）都不再静默回落。
+> ★ 两条路的进链方式不同，各有各的原因：
+>   · `logo_spec_missing` 由 Python 侧（`inbox_tray.write_state`）直接写本链；
+>   · 徽标是 PowerShell，**写不了** Python 账本（hash 链与锁协议都在
+>     Python 侧）⇒ 它往 `console_dir/logo_events.jsonl` 追加 JSON 行，
+>     由 daemon tick（`inbox_daemon.Daemon.tick` ③b）**改名消费**后按同一
+>     配方进链 —— 顺序是**先链后改名**（与 `poll_actions` 的先改名相反，
+>     故意的）：动作丢了只是少点一下，**审计证据丢了不可再生**；进链失败
+>     不消费，下 tick 重试（最坏重复记几条，好过静默丢失）。
+> ★ 谁来读它：晨报／日报与 `antinel inbox status`；托盘状态文件
+>   （tray.json 的 `logo_missing`/`logo_error`）是**同一事实的文件标记**，
+>   两类读者各取所需，不互相依赖。
+
+| type | 来源 | 关键字段 | 说明 |
+|---|---|---|---|
+| `logo_spec_missing` | `inbox_tray.write_state`（daemon tick ③ 顺带） | `reason`（人话整句）, `error`（`Type: msg`）, `severity="warning"` | **v1.21（0.53.2 T2）**：写托盘状态时拿不到动效规格。tray.json 同拍写出 `logo_missing: true` ＋ `logo_error`（文件标记），哨标回落品牌 LOGO 静态图标。★ **每进程每个失败 episode 至多一条**（失败→恢复→再失败是两个 episode；失败进行中不重复）——守护进程 2 秒一拍，不节流会一天写出四万多条同因记录（0470 提醒预算同款纪律）。★ 与 0.53.1「不写这个键」的区别就在这张表里：旧口径下「旧版没这功能」与「新版坏了」在 tray.json 里**逐字节相同**，静默且不可分辨 |
+| `logo_mode_missing` | 徽标 `tools/logo.ps1`（经 logo_events.jsonl 进链） | `state`（缺键的那个态）, `reason`, `severity="warning"` | **v1.21（0.53.2 T2）**：规格 `modes` 里没有当前态的键（例：来了个 `L9`）。回落 L0 帧照旧（画点什么总比不画好），但**不许静默**——静默回落会让「规格丢了键」与「规格好好的」在屏幕上长得一样。★ 进程内每 `(type\|reason)` 至多一条。★ 与 `logo_frame_unavailable` 同型：**Python 侧无直接生产者**（生产者是 PowerShell；`tools/verify_event_types.py` 只扫 Python 的 dict 字面量）——本条登记的是**类型存在性与字段语义**；Python 侧唯一的常量出现是 `inbox_tray.LOGO_EVENTS_KNOWN` 白名单（进链时按它校验 type） |
+| `logo_event_unreadable` | `inbox_tray.drain_logo_events` | `raw`（原文截断 200 字符）, `severity="warning"` | **v1.21（0.53.2）**：徽标往 logo_events.jsonl 写过一行**读不懂**的东西（坏 JSON／未知 type／非对象）。★ 为什么单列而不丢弃：「徽标写过一行没人看得懂的东西」本身就是证据；静默丢弃是与本表同类要防的形状 |
+| `logo_dpi_changed` | 徽标 `tools/logo.ps1`（WM_DPICHANGED ⇒ 经 logo_events.jsonl 进链） | `state`, `reason`（`dpi <旧> -> <新>`）, `severity="warning"` | **v1.21（0.53.2 T4）**：哨标所在显示器的缩放变了（拖到另一块屏／改系统缩放），徽标按**同一个派生**重算物理尺寸与可点半径并重画。★ 为什么算「注意」而不是「信息」：换屏重算如果悄悄没生效，症状是「大小不对／点不准」，而屏幕上没有任何东西会自己喊；本条是**换屏这件事发生过**的可溯源证据。★ 与 `logo_mode_missing` 同型：PowerShell 侧生产者，Python 侧只出现在 `LOGO_EVENTS_KNOWN` 白名单 |
 
 ### 门闸类（host-shield，v1.3 补登记；v1.4 增补）
 
