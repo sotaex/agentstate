@@ -81,6 +81,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import math
@@ -1773,6 +1774,250 @@ def n_b15b():
     bad2 = _b15b_core(mut, SV._brand_favicon_rel, brand, assets)
     if bad2 is True:
         return "负控失效：白名单里重新挂上 favicon 仍判合格"
+    return True
+
+
+# ══════════════════════════════════════════════════════ B-15c（2026-10-20）══
+#: ★★ 为什么 B-15b 全绿了还要第四条腿（0.53.2 抓到的机制）：
+#:   B-15b 验的是「URL 解析到的**字节**是不是品牌件」—— 它只证明**服务器会给出什么**，
+#:   **完全不证明浏览器会不会去取**。favicon 由**容器**（浏览器／窗口外壳）加载，
+#:   页面刷新不会让它重取；同一个 URL 换内容 ⇒ 容器继续用缓存里的旧图。
+#:   于是「产品改了 ＋ 判据全绿 ＋ 用户看到的还是圆环」三者可以同时成立 ——
+#:   创始人连续两轮截图都是这个形状，上一轮被判成「死灰复燃」，真因是缓存，
+#:   **不是有人又改回去了**。⇒ 判据必须再钉一条：**换内容就换 URL**。
+#:   ★ 这条腿一撤，「改了没效果」就会以原样复发，且**所有活体判据都测不出来**
+#:     （活体判据直连那个 URL，拿到的一定是最新文件）。
+
+
+def _b15c_expected_fp(brand_path):
+    """品牌文件内容的 sha256 前 8 位 —— **现算**，不许从源码里抄一个值。"""
+    with io.open(brand_path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()[:8]
+
+
+def _b15c_core(server_src, link_html, brand_path):
+    """favicon 的 href 必须带**内容指纹**，且指纹真的派生自那个文件。
+
+    ★ 四条腿，少一条就会被绕过：
+      ① **形状**：href 里必须有 `?v=`（裸 URL 一律红）—— 裸 URL 就是"换内容不换
+         URL"，容器的缓存不失效，用户看到的还是旧图标；
+      ② **真值**：`?v=` 的值必须等于品牌文件的 sha256 前 8 位 —— 写死的常量
+         （哪怕当前恰好等于真值）在这条上红；
+      ③ **派生**：`_favicon_href` 函数体内必须真读文件、真算 sha —— 防止有人把
+         ② 的实现换成"从别处抄一个值"，那样 ② 会永远绿而内容换了它不变；
+      ④ **能取到**：`_asset()` 必须剥掉查询串再查白名单 —— 不剥的话带指纹的请求
+         必然 404，图标反而彻底没了（这是**加指纹新引入**的失败面，必须同批钉住）。
+    """
+    if not server_src or not server_src.strip():
+        return "读不到 inbox_server.py 源码 —— 判据锚点失效"
+    m = re.search(r'href="([^"]+)"', link_html or "")
+    if not m:
+        return "FAVICON_LINK 里取不到 href —— 判据锚点失效（改写法了？）"
+    href = m.group(1)
+
+    if "?v=" not in href:                                              # ①
+        return ("favicon 的 href 是裸 URL（%r）—— 换内容不换 URL ⇒ 容器的缓存"
+                "不失效 ⇒ 改了没效果，用户看到的还是旧图标" % href[:60])
+
+    got_fp = href.split("?v=", 1)[1]
+    want_fp = _b15c_expected_fp(brand_path)                            # ②
+    if got_fp != want_fp:
+        return ("favicon 的指纹 %r 不是品牌文件内容的 sha8（现算为 %r）—— 写死的"
+                "常量会让缓存永远命中错内容" % (got_fp[:24], want_fp))
+
+    body = re.search(r"def _favicon_href\(\):(.*?)(?=\n\S)", server_src, re.S)  # ③
+    if not body:
+        return "找不到 `_favicon_href` 定义 —— 判据锚点失效（改名了？）"
+    b = body.group(1)
+    if "hashlib.sha256(" not in b or ".read()" not in b:
+        return ("`_favicon_href` 里没有「读文件算 sha」—— 指纹不是从内容派生的，"
+                "内容换了它也不会变")
+
+    if not re.search(r'split\(\s*"\?"\s*,\s*1\s*\)', server_src):      # ④
+        return ("`_asset()` 不剥查询串 ⇒ 带指纹的请求在白名单里查不中 ⇒ favicon "
+                "直接 404（加指纹新引入的失败面）")
+    return True
+
+
+@check("B-15c favicon 带**内容指纹**：换内容就换 URL（容器缓存不失效＝改了没效果）")
+def c_b15c():
+    return _b15c_core(_src(_SERVER_REL), SV.FAVICON_LINK, WIN.brand_icon_path())
+
+
+@check("N-B15c 负控：裸 URL／写死指纹／不读文件／不剥查询串 ⇒ 必须各自红")
+def n_b15c():
+    src = _src(_SERVER_REL)
+    link = SV.FAVICON_LINK
+    brand = WIN.brand_icon_path()
+    base = _b15c_core(src, link, brand)
+    if base is not True:
+        return "负控前置失败：当前生产实现没通过 B-15c（%r）" % (base,)
+
+    # ① 裸 URL：把指纹摘掉（这是"死灰复燃"会以原样复发的那个形状）
+    bare = re.sub(r"\?v=[0-9a-f]+", "", link)
+    if bare == link:
+        return "负控夹具不成立：href 里没有可摘的指纹"
+    r1 = _b15c_core(src, bare, brand)
+    if r1 is True:
+        return "负控失效：href 退回裸 URL 仍判合格"
+    if "裸 URL" not in str(r1):
+        return "方向不对：裸 URL 报的红不是缓存那条（%s）" % str(r1)[:120]
+
+    # ② 形状还在、值写死（专治"常量恰好等于当前真值"这种假绿）
+    dead = re.sub(r"\?v=[0-9a-f]+", "?v=deadbeef", link)
+    r2 = _b15c_core(src, dead, brand)
+    if r2 is True:
+        return "负控失效：指纹写死成 deadbeef 仍判合格"
+    if "sha8" not in str(r2):
+        return "方向不对：写死指纹报的红不是真值那条（%s）" % str(r2)[:120]
+
+    # ③ 指纹不再从内容派生（把读文件算 sha 换成抄值）
+    mut3 = src.replace("hashlib.sha256(", "_noop_hash(", 1)
+    if mut3 == src:
+        return "负控夹具不成立：没找到 hashlib.sha256( 锚点"
+    r3 = _b15c_core(mut3, link, brand)
+    if r3 is True:
+        return "负控失效：指纹不再从文件内容派生仍判合格"
+    if "派生" not in str(r3):
+        return "方向不对：派生那条没抓住（%s）" % str(r3)[:120]
+
+    # ④ 不剥查询串（加指纹引入的新失败面：图标会 404）
+    anchor = 'base = os.path.basename(name).split("?", 1)[0]'
+    mut4 = src.replace(anchor, "base = os.path.basename(name)", 1)
+    if mut4 == src:
+        return "负控夹具不成立：没找到剥查询串那一行"
+    if re.search(r'split\(\s*"\?"\s*,\s*1\s*\)', mut4):
+        return "负控夹具不成立：别处还有 split(\"?\", 1)，变异没生效"
+    r4 = _b15c_core(mut4, link, brand)
+    if r4 is True:
+        return "负控失效：_asset() 不剥查询串仍判合格（favicon 会 404）"
+    return True
+
+
+# ══════════════════════════════════════════════════════ FLO-11（2026-10-20）══
+#: ★★ 为什么单列一条、不并入 T03b（0360）：T03b 只锁 `tools/tray.ps1`。
+#:   托盘与**哨标静态回落**是两条独立的渲染路径，只锁一处 ⇒ 另一处天然全绿
+#:   （同 §42「只守一条腿，另一条腿天然全绿」）。`logo.ps1` 的 `Resolve-IconPath`
+#:   原来直接取 `{state}{shield}.ico` —— 那是姿态灯；动效规格不可用／无帧时回落
+#:   出来的就是一枚圆环，正好是创始人截图里那一枚。
+
+
+def _flo11_core(src):
+    """哨标的静态回落图标＝品牌标；**品牌缺失才**回落到按态图标。"""
+    if not src or not src.strip():
+        return "读不到 tools/logo.ps1 —— 判据锚点失效"
+    brand = src.find('"logo\\antinel.ico"')
+    if brand < 0:
+        return ("logo.ps1 里找不到品牌图标（logo\\antinel.ico）—— 回落时会画姿态灯"
+                "（创始人：「圆圈毕竟不是 LOGO」）")
+    fallback = src.find('Join-Path $IconDir ($st + $suf + ".ico")')
+    if fallback < 0:
+        return "丢了按态回落分支（品牌文件缺失时不许画不出来）"
+    if fallback < brand:
+        return "按态分支排在品牌之前 —— 哨标回落后仍先画姿态灯"
+    if "Test-Path -LiteralPath $brand" not in src:
+        return "品牌分支没有存在性检查 —— 缺文件时会拿一个打不开的路径当图标"
+    return None
+
+
+@check("FLO-11 哨标静态回落图标＝品牌标（品牌优先，缺文件才回落按态图标）")
+def c_flo11():
+    return _flo11_core(_src(_LOGO_PS1_REL))
+
+
+@check("N-FLO11 负控：退回姿态灯／品牌分支排到按态之后 ⇒ 必须各自红")
+def n_flo11():
+    src = _src(_LOGO_PS1_REL)
+    base = _flo11_core(src)
+    if base is not None:
+        return "负控前置失败：当前生产实现没通过 FLO-11（%r）" % (base,)
+    # ① 品牌路径改回姿态灯
+    mut1 = src.replace('"logo\\antinel.ico"', '"icons\\L1.ico"', 1)
+    if mut1 == src:
+        return "负控夹具不成立：没找到可变异的品牌路径"
+    if _flo11_core(mut1) is None:
+        return "负控失效：品牌路径改成 L1.ico 仍判合格"
+    # ② 三条断言字面都在，但品牌分支挪到按态之后（写成死代码）
+    i = src.find("$brand = Join-Path")
+    j = src.find("$cand = Join-Path $IconDir ($st + $suf + \".ico\")")
+    if i < 0 or j < 0:
+        return "负控夹具不成立：取不到两个分支的锚点"
+    mut2 = src[:i] + src[j:]
+    if mut2 == src or _flo11_core(mut2) is None:
+        return "负控失效：品牌分支排到按态之后（死代码）仍判合格"
+    return True
+
+
+# ══════════════════════════════════════════════════════ FLO-12（2026-10-20）══
+#: ★ 防的是**源与仓副本漂移**：五态动效就是 LOGO 本体。仓里若被人重新导出一份
+#:   （压缩参数／帧数／时长任一不同），**所有"图标＝品牌件"的判据都会继续绿**
+#:   —— 因为它们比的都是仓内 vs 仓内（favicon vs `assets/logo/antinel.ico`、
+#:   托盘 vs `assets/logo/antinel.ico`），没有一条锚到**源**。
+#:   ⇒ 必须有一条**跨目录字节比对**，把"仓内自洽"升级成"仓内＝源"。
+#:   ★ 源不在（换机器／目录被移走）⇒ **SKIP，不判绿**：那是夹具不在，不是产品对。
+
+_FLO12_SRC_DIR = r"D:\2026\PSL\antinel-logo-final_assets"
+
+#: 仓内文件名 → 源文件名。**写死这张表就是唯一真源**（源目录里文件名带中文后缀）。
+_FLO12_MAP = {
+    "L0.mp4": "R4_L0_值守.mp4",
+    "L1.mp4": "R4_L1_注意.mp4",
+    "L2.mp4": "R4_L2_拦截.mp4",
+    "Ls.mp4": "R4_Ls_预算.mp4",
+    "R0.mp4": "R4_R0_失守.mp4",
+}
+
+
+def _flo12_core(assets_dir, src_dir, override=None):
+    """仓内五态动效必须**逐字节**等于源。`override` 供负控注入变异字节。"""
+    override = override or {}
+    bad = []
+    for ours, theirs in sorted(_FLO12_MAP.items()):
+        a = os.path.join(assets_dir, ours)
+        b = os.path.join(src_dir, theirs)
+        if not os.path.isfile(a):
+            bad.append("仓内没有 %s" % ours)
+            continue
+        if not os.path.isfile(b):
+            bad.append("源目录里没有 %s（换名了？）" % theirs)
+            continue
+        got = override.get(ours)
+        if got is None:
+            got = io.open(a, "rb").read()
+        if got != io.open(b, "rb").read():
+            bad.append("%s 与源 %s **不是同一份字节**（仓内被重新导出过）"
+                       % (ours, theirs))
+    return "；".join(bad) if bad else None
+
+
+@check("FLO-12 五态动效＝源（逐字节）：仓内副本不许与标准件漂移")
+def c_flo12():
+    if not os.path.isdir(_FLO12_SRC_DIR):
+        raise Skip("SKIP：找不到 LOGO 源目录 %s —— 夹具不在，不凭空判绿"
+                   % _FLO12_SRC_DIR)
+    # ★ LOGO 目录从**品牌图标本体**派生（`brand_icon_path()` 的唯一真源），
+    #   不另写一遍 `assets/logo` —— 那是同一事实的第二份副本（迟早漂）。
+    return _flo12_core(os.path.dirname(WIN.brand_icon_path()), _FLO12_SRC_DIR)
+
+
+@check("N-FLO12 负控：仓内任一态被改成不同字节 ⇒ 必须红（源不在 ⇒ SKIP）")
+def n_flo12():
+    if not os.path.isdir(_FLO12_SRC_DIR):
+        raise Skip("SKIP：找不到 LOGO 源目录 %s —— 负控同样不凭空判" % _FLO12_SRC_DIR)
+    logo_dir = os.path.dirname(WIN.brand_icon_path())
+    base = _flo12_core(logo_dir, _FLO12_SRC_DIR)
+    if base is not None:
+        return "负控前置失败：当前仓内副本就没通过 FLO-12（%s）" % base
+    raw = bytearray(io.open(os.path.join(logo_dir, "L1.mp4"), "rb").read())
+    if not raw:
+        return "负控夹具不成立：L1.mp4 是空文件"
+    raw[-1] ^= 0xFF                                  # 只改内存里的副本，不落盘
+    bad = _flo12_core(logo_dir, _FLO12_SRC_DIR,
+                      override={"L1.mp4": bytes(raw)})
+    if bad is None:
+        return "负控失效：仓内 L1.mp4 与源不同字节仍判合格"
+    if "字节" not in bad:
+        return "方向不对：报的红不是字节不符（%s）" % bad[:120]
     return True
 
 

@@ -1008,6 +1008,71 @@ def c_tray_ps1_reads_shield_field():
     return True
 
 
+def _tray_brand_problem(src):
+    """纯判据：托盘图标必须是**品牌标**，且品牌分支排在按态分支之前。
+
+    ★ 为什么顺序也判：PowerShell 的 if/else 是"先到先得"，品牌分支若排在
+      按态分支之后，`$ico` 早被赋成 `L1.ico`，品牌那段就是**死代码** ——
+      文件里有这行、产品却不走它，正是「写了但没用」的形状。
+    """
+    brand = src.find("logo\\antinel.ico")
+    if brand < 0:
+        return "找不到品牌图标路径（logo\\antinel.ico）"
+    fallback = src.find('$st + $sfx + ".ico"')
+    if fallback < 0:
+        return "丢了按态回落分支（品牌缺失时也不许装死）"
+    if fallback < brand:
+        return "按态分支排在品牌之前 —— 托盘仍会先画姿态灯"
+    if "Test-Path -LiteralPath $brandIco" not in src:
+        return "品牌分支没有存在性检查 —— 缺文件时会拿一个打不开的路径当图标"
+    return None
+
+
+def c_tray_icon_is_brand_mark():
+    """★ 2026-10-20（创始人：「三个地方统一换成 LOGO……圆圈毕竟不是 LOGO」）：
+    托盘图标必须是**品牌标**，静态。
+
+    ★ 这条不是新增的洁癖，是替换一个已失效的断言：`c_tray_ps1_reads_shield_field`
+      守的是"按 shield 选态图标"，而创始人 2026-10-20 裁定托盘图标**不再承载
+      态势**（态势在悬停提示与面板里）⇒ 那个断言守的东西已不存在。
+      **旧判据不删**（它仍守"20 个态图标文件齐备 ＋ shield 字段仍被读"这条
+      降级链），新增本条守新事实。两条并存 = 品牌优先 ＋ 能降级。
+    """
+    import io
+    p = os.path.join(ROOT, "tools", "tray.ps1")
+    src = _strip_comments(io.open(p, encoding="utf-8").read())
+    bad = _tray_brand_problem(src)
+    return bad or True
+
+
+def n_tray_icon_is_brand_mark():
+    """负控：把品牌路径改回姿态灯 ⇒ 必须红（证明这条尺子有分辨力）。"""
+    import io
+    p = os.path.join(ROOT, "tools", "tray.ps1")
+    src = _strip_comments(io.open(p, encoding="utf-8").read())
+    if _tray_brand_problem(src) is not None:
+        return "夹具不成立：真文件本身就红 ⇒ 负控无分辨力"
+    dead = src.replace("logo\\antinel.ico", "icons\\L1.ico")
+    if dead == src:
+        return "负控夹具不成立：没找到可变异的目标"
+    if _tray_brand_problem(dead) is None:
+        return "负控失效：退回姿态灯后仍判绿"
+    # 第二个面：品牌分支挪到按态分支之后（写成死代码）
+    i = src.find("$brandIco")
+    j = src.find('$st + $sfx + ".ico"')
+    if i < 0 or j < 0:
+        return "负控夹具不成立：取不到两个分支的锚点"
+    dead2 = src.replace(
+        "$brandIco = Join-Path",
+        '$ico = Join-Path $IconDir ($st + $sfx + ".ico")' + "\n    "
+        + "$brandIco = Join-Path", 1)
+    if dead2 == src:
+        return "负控夹具不成立：顺序变异没有生效"
+    if _tray_brand_problem(dead2) is None:
+        return "负控失效：品牌分支排到按态之后（死代码）仍判绿"
+    return True
+
+
 def c_all_icon_combinations_exist():
     """五事件态 × 四监理态 = 20 个 `.ico` 必须**都在**。
 
@@ -2723,6 +2788,8 @@ CHECKS = [
      n_tray_without_shield_field_is_caught),
     ("T02 坏了绝不画成在岗", c_broken_posture_never_maps_to_on_duty, None),
     ("T03 tray.ps1 读监理态", c_tray_ps1_reads_shield_field, None),
+    ("T03b 托盘图标＝品牌标（品牌分支优先，缺文件才回落态图标）",
+     c_tray_icon_is_brand_mark, n_tray_icon_is_brand_mark),
     ("T04 20 个图标组合齐全", c_all_icon_combinations_exist, None),
     ("T05 三个监理态角标可区分", c_badge_marks_differ_per_shield_state, None),
     ("T06 托盘自刷新不靠守护进程", c_tray_refreshes_without_daemon, None),

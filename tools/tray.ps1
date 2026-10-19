@@ -88,11 +88,24 @@ function Update-Tray {
     if ([string]::IsNullOrWhiteSpace($sh)) { $sh = "unknown" }
     $sfx = ""
     if ($SHIELD_SUFFIX.ContainsKey($sh)) { $sfx = $SHIELD_SUFFIX[$sh] }
-    $badgeMissing = $false
-    $ico = Join-Path $IconDir ($st + $sfx + ".ico")
-    if (-not (Test-Path -LiteralPath $ico)) {
-      $badgeMissing = $true
-      $ico = Join-Path $IconDir ($st + ".ico")
+    # 2026-10-20 (founder: "all three places use the logo"): the tray icon is
+    # the BRAND mark, static. A posture light is not a logo -- it *changes with
+    # the current state*, so using it as the product icon means the icon itself
+    # claims "right now nothing is wrong", which is a false statement and, in
+    # practice, reads as "a circle" rather than as this product.
+    # Posture is still readable: it lives in $tip (hover) and in the panel.
+    # Degrade honestly: if the brand .ico is missing, fall back to the old
+    # per-state family instead of drawing nothing.
+    $brandIco = Join-Path (Split-Path -Parent $IconDir) "logo\antinel.ico"
+    if (Test-Path -LiteralPath $brandIco) {
+      $ico = $brandIco
+      $badgeMissing = $false
+    } else {
+      $ico = Join-Path $IconDir ($st + $sfx + ".ico")
+      if (-not (Test-Path -LiteralPath $ico)) {
+        $badgeMissing = $true
+        $ico = Join-Path $IconDir ($st + ".ico")
+      }
     }
 
     if ((Test-Path -LiteralPath $ico) -and ($ico -ne $script:lastIcon)) {

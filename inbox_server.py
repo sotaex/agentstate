@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import html
+import hashlib
 import json
 import os
 import re
@@ -685,7 +686,28 @@ def posture_now():
 #: ★ 0.53.0 T3（创始人 2026-10-19 截图）：小窗原先没有图标链接 ⇒ app 窗标题栏
 #:   只能落浏览器默认的网格球，与监理的圆环并排像两个产品。图标只有一份定义，
 #:   两处都引它 —— 换图标时不会只换一半。
-FAVICON_LINK = '<link rel="icon" href="/assets/favicon.ico">'
+#: ★★ 2026-10-20（创始人截图「三个地方统一换成 LOGO」）：href 带**内容指纹**。
+#:   为什么必须有（这是"改了没效果"的机制级根因，不是锦上添花）：
+#:     favicon 有**独立于页面的缓存**，同一个 URL `/assets/favicon.ico`
+#:     的内容从姿态灯换成品牌 LOGO 之后，Edge 仍然渲染旧图 —— 产品改了、
+#:     用户看到没改，于是被当成"死灰复燃"。URL 随内容变，缓存自然失效，
+#:     不依赖用户手动清缓存，也不指望 Ctrl+F5。
+def _favicon_href():
+    """favicon 的 href：`/assets/favicon.ico?v=<内容 sha8>`。
+
+    取不到品牌文件 ⇒ 退回不带指纹的裸 URL（仍是同一个文件，只是缓存不刷新）；
+    **不编造一个指纹** —— 编出来的指纹会让缓存永远命中错内容。
+    """
+    try:
+        p = os.path.join(ASSETS_DIR, _brand_favicon_rel())
+        with open(p, "rb") as f:
+            return "/assets/favicon.ico?v=%s" % hashlib.sha256(
+                f.read()).hexdigest()[:8]
+    except OSError:
+        return "/assets/favicon.ico"
+
+
+FAVICON_LINK = '<link rel="icon" href="%s">' % _favicon_href()
 
 
 def _head(title, token, extra_css=""):
@@ -3503,7 +3525,10 @@ def _make_handler(token, root):
             return self._send(200, "application/json; charset=utf-8", body)
 
         def _asset(self, name):
-            base = os.path.basename(name)
+            # ★ 2026-10-20：先剥查询串。favicon 的 href 带内容指纹
+            #   （`?v=<sha8>`，见 `_favicon_href`），而白名单按**文件名**查表；
+            #   不剥的话 basename 会带着 `?v=…`，白名单必然查不中 ⇒ 404。
+            base = os.path.basename(name).split("?", 1)[0]
             # ★ favicon **实时问品牌真源**（0.53.1）：不许再从姿态灯表里取。
             rel = _brand_favicon_rel() if base == "favicon.ico" \
                 else ASSET_WHITELIST.get(base)

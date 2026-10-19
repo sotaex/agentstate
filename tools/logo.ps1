@@ -161,6 +161,11 @@ function Resolve-IconPath([string]$st, [string]$sh) {
   # {state}{shield}.ico preferred, fall back to {state}.ico, then "" (draw nothing).
   # Same fallback rule as inbox_tray.icon_file -- no second opinion here.
   if ($IconDir -eq "") { return "" }
+  # 2026-10-20: brand mark first (same reasoning as tray.ps1). The posture
+  # light is not a logo; when the motion spec is unavailable we still want the
+  # product mark, not "a circle".
+  $brand = Join-Path (Split-Path -Parent $IconDir) "logo\antinel.ico"
+  if (Test-Path -LiteralPath $brand) { return $brand }
   $suf = ""
   if ($SHIELD_SUFFIX.ContainsKey($sh)) { $suf = $SHIELD_SUFFIX[$sh] }
   if ($suf -ne "") {
