@@ -5574,7 +5574,8 @@ def _t10_problem(page_h, page_r, ch):
          行不在 ⇒ 注里必须有）—— 创始人 13:04「没有纳入比对的记录重复了」；
       ⑤ 边界注必须在（单条能查／整份替换查不出）；
       ⑥ 日报侧：不许再有链卡（结构判定，不拿结论词当锚 —— 「记录有没有被
-         改过」这句指路话里**天然含**「没有被被改过」这几个字）。
+         改过」这句指路话里**天然含**「没有被被改过」这几个字）；
+      ⑥' 日报正文**不许再有跨页导航链接**（页签之外）。
     """
     seg = _chain_seg(page_h)
     if seg is None:
@@ -5641,8 +5642,21 @@ def _t10_problem(page_h, page_r, ch):
                 "看到一个没有结论的定义）")
     if _row_value(page_r, "检查范围") is not None:
         return "日报仍有「检查范围」行 —— 链卡没搬干净"
-    if 'href="/?v=health"' not in page_r:
-        return "日报没有指路到运行状态页（读者找不到结论去哪了）"
+    # ⑥' 日报正文不许再有**跨页导航**链接（页签之外）
+    # ★ 旧腿（要求 `href="/?v=health"` 存在）是一条**死判据**：顶部页签 `_tabs`
+    #   每页都渲染这个 href ⇒ 指路句删没删、那条腿都一样绿（实测删句后仍绿）。
+    #   ⇒ 换腿：正文区（`</nav>` 之后）只许出现**钻取**链接（指向收件箱且带
+    #   `f=` 筛选＝同一件事的明细，点数字看是哪几条），不许出现**导航**链接
+    #   （指向另一个主题在另一页）—— 那正是 2026-10-21 撤掉的那句「在…页」。
+    #   ★ 机制层理由：跨页指路是页签的活；正文再写一遍＝把导航说两遍，而且
+    #   东西搬走后句子会烂（还指着旧地方）。
+    _body = page_r.split("</nav>", 1)[-1] if "</nav>" in page_r else page_r
+    _body = re.sub(r"<script.*?</script>", "", _body, flags=re.S)
+    _navs = [u for u in re.findall(r'href="/(\?v=[^"]+)"', _body)
+             if not (u.startswith("?v=inbox") and "&f=" in u)]
+    if _navs:
+        return ("日报正文里有跨页导航链接 %r —— 指路是页签的活，正文再写一遍"
+                "就是把导航说两遍（而且东西搬走了句子会烂）" % _navs[:2])
     return None
 
 
@@ -5660,10 +5674,12 @@ def n_t10():
     if _t10_problem(page_h, page_r, ch) is not None:
         return "夹具不成立：现行渲染就判红 —— 负控无分辨力"
     # 面①：日报把链卡加回来（0.53.3 形态）
-    dead = page_r.replace('<p class="note">记录有没有被改过',
-                          _chain_seg(page_h) + '<p class="note">记录有没有被改过')
+    # ★ 2026-10-21：锚点从"指路句"换成页头的时间口径句 —— 指路句被撤掉了，
+    #   再拿它当锚 ⇒ 负控第一步就"夹具不成立"（锚随产品走，不随旧文案留）。
+    dead = page_r.replace('<p class="note">四个数都只数',
+                          _chain_seg(page_h) + '<p class="note">四个数都只数')
     if dead == page_r:
-        return "夹具不成立：摘不到日报的指路句（结构已变）"
+        return "夹具不成立：摘不到日报正文的收尾（结构已变）"
     if _t10_problem(page_h, dead, ch) is None:
         return "负控失效①：日报加回链卡仍判合格（归属那条腿没分辨力）"
     # 面②：总数只报 records（漏掉没纳入比对的 142 条）
@@ -5707,6 +5723,19 @@ def n_t10():
         return "负控失效⑤：0 条且无落点仍判合格（落点那条腿没分辨力）"
     if "落点" not in why5:
         return "负控方向不符⑤：报的是 %r（应指向「落点」）" % (why5[:60],)
+    # 面⑥：把「在…页」指路句加回日报正文（2026-10-21 撤掉的那句）
+    dead6 = page_r.replace(
+        '<p class="note">四个数都只数',
+        '<p class="note">记录有没有被改过、核对了多少条，'
+        '<a href="/?v=health">在运行状态</a>页。</p>'
+        '<p class="note">四个数都只数', 1)
+    if dead6 == page_r:
+        return "夹具不成立：摘不到日报正文的收尾（结构已变）"
+    why6 = _t10_problem(page_h, dead6, ch)
+    if why6 is None:
+        return "负控失效⑥：指路句加回来仍判合格（⑥' 那条腿没分辨力）"
+    if "导航" not in why6:
+        return "负控方向不符⑥：报的是 %r（应指向「导航」）" % (why6[:60],)
     return True
 
 
