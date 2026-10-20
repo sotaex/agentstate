@@ -62,31 +62,31 @@ def chain_unverified(files):
     return "这次没核验成：%d 个文件里没有一条可校验的记录——结果不算数" % n
 
 
-def _chain_file_name(path):
-    """链文件的**上屏名字**：basename 去扩展名（逐日文件即日期）。
-
-    ★ 只取文件名，不带目录：用户问"核对了哪些文件"要的是**哪些**，
-      绝对路径是噪声（账本明细已踩过：路径上屏被创始人点名）。
-    """
-    return os.path.splitext(os.path.basename(path))[0]
-
-
 def _chain_check_file(path, ac):
-    """校验**一个**链文件，返回计数 dict（按文件指纹缓存）。"""
+    """校验**一个**链文件，返回计数 dict（按文件指纹缓存）。
+
+    ★ 0.53.4 修订（创始人 2026-10-20 10:18）：无指纹记录按 `type` 计数，
+      供日报圈问号回答「这次是些什么记录」。旧版逐文件明细（`file_list`）
+      已退役 —— 它的「N 条」是**带指纹**的记录数，与 unchained（不带指纹）
+      是两个口径，怎么加都对不上（用户实测：「对不上 147 这个数」）。
+    """
     try:
         stt = os.stat(path)
         fp = (os.path.normpath(path), stt.st_mtime_ns, stt.st_size)
     except OSError:
-        return {"records": 0, "broken": 0, "bad": 1, "unchained": 0, "first_bad": ""}
+        return {"records": 0, "broken": 0, "bad": 1, "unchained": 0,
+                "first_bad": "", "types": {}}
     hit = _CHAIN_CACHE.get(fp)
     if hit is not None:
         return hit
     records = broken = badjson = unchained = 0
     first_bad = ""
+    types = {}
     try:
         f = open(path, encoding="utf-8", errors="replace")
     except OSError:
-        return {"records": 0, "broken": 0, "bad": 1, "unchained": 0, "first_bad": ""}
+        return {"records": 0, "broken": 0, "bad": 1, "unchained": 0,
+                "first_bad": "", "types": {}}
     with f:
         prev = ""
         for line in f:
@@ -104,6 +104,8 @@ def _chain_check_file(path, ac):
             h = rec.get("hash")
             if not h:
                 unchained += 1                  # ★ 未链接记录，不是断链
+                _t = rec.get("type") or ""
+                types[_t] = types.get(_t, 0) + 1
                 continue
             records += 1
             rc = ac.chain_with(rec, prev)       # ← 产品原语
@@ -113,7 +115,7 @@ def _chain_check_file(path, ac):
                     first_bad = "%s@%s" % (path, rec.get("ts"))
             prev = h
     out = {"records": records, "broken": broken, "bad": badjson,
-           "unchained": unchained, "first_bad": first_bad}
+           "unchained": unchained, "first_bad": first_bad, "types": types}
     if len(_CHAIN_CACHE) >= _CHAIN_CACHE_MAX:
         _CHAIN_CACHE.pop(next(iter(_CHAIN_CACHE)), None)
     _CHAIN_CACHE[fp] = out
@@ -136,17 +138,19 @@ def chain_health(chain_files):
         return {"status": "unknown", "files": 0, "records": 0, "broken": 0,
                 "unchained": 0, "bad_lines": 0, "first_bad": "",
                 "reason": "没有可校验的链文件 —— 这是「没查成」，不是「没问题」。",
-                "file_list": []}
+                "first_day": "", "last_day": "", "types": {}}
     try:
         import audit_chain as ac
     except Exception as e:                      # noqa: BLE001
         return {"status": "unknown", "files": len(chain_files), "records": 0,
                 "broken": 0, "unchained": 0, "bad_lines": 0, "first_bad": "",
-                "reason": "拿不到校验器：%s" % (e,), "file_list": []}
+                "reason": "拿不到校验器：%s" % (e,),
+                "first_day": "", "last_day": "", "types": {}}
 
     files = records = broken = badjson = unchained = 0
     first_bad = ""
-    file_list = []
+    types = {}
+    days = []
     for p in chain_files:
         r = _chain_check_file(p, ac)
         files += 1
@@ -156,14 +160,13 @@ def chain_health(chain_files):
         unchained += r["unchained"]
         if not first_bad and r["first_bad"]:
             first_bad = r["first_bad"]
-        # ★ 0.53.4：逐文件明细 —— 日报「没纳入比对的记录」行旁的问号要回答
-        #   「本次核对了哪些文件」。**只带文件名（basename 去扩展名）**：
-        #   绝对路径不上屏（账本明细踩过：路径是噪声，用户要的是"哪些"）。
-        file_list.append({"name": _chain_file_name(p),
-                          "records": r["records"],
-                          "unchained": r["unchained"]})
-    # 日期名排序＝时间序；项目级文件名不保证可比，混入时排后面也不影响正确性。
-    file_list.sort(key=lambda d: d["name"])
+        # ★ 0.53.4 修订：无指纹记录按类型聚合 —— 圈问号据此说出「这次是些什么」。
+        for _t, _c in (r.get("types") or {}).items():
+            types[_t] = types.get(_t, 0) + _c
+        # ★ 核对范围从文件名里的日期派生（项目级文件名可能不是日期 ⇒ 跳过）。
+        _d = S._day_of(p)
+        if _d is not None:
+            days.append(_d)
 
     if records == 0:
         status = "unknown"                      # 一条可校验的都没有 ⇒ 没查成
@@ -171,7 +174,10 @@ def chain_health(chain_files):
         status = "broken" if (broken or badjson) else "ok"
     return {"status": status, "files": files, "records": records,
             "broken": broken, "unchained": unchained, "bad_lines": badjson,
-            "first_bad": first_bad, "reason": "", "file_list": file_list}
+            "first_bad": first_bad, "reason": "",
+            "first_day": min(days).isoformat() if days else "",
+            "last_day": max(days).isoformat() if days else "",
+            "types": types}
 
 
 _HERE = os.path.dirname(os.path.abspath(__file__))

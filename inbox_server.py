@@ -244,9 +244,6 @@ h2{font-size:15px;margin:0 0 12px}
   background:var(--bg,#fff);border:1px solid var(--line);border-left:3px solid var(--brand);
   border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.16);font-weight:400;
   white-space:normal;text-align:left}
-.qsum .flist{margin:6px 0 0 0;font-size:12px}
-.qsum .flist .fr{display:flex;gap:14px;justify-content:space-between;padding:1px 0}
-.qsum .flist .fr .fn{font-family:var(--mono);color:var(--muted)}
 /* ---- 0.36.1：术语词条改成**浮层**（创始人截图三）----
    ★ 原形状的病：`.term{display:inline}` 把详情块塞进 `.metrics` 的
      140px 窄格里 ⇒ 展开后宽度只有卡片那么宽 ⇒ 中文逐字换行，
@@ -2299,7 +2296,7 @@ def _view_report(rep, token, items=None):
              "<div class=\"row\"><span class=\"k\">坏了几行</span><span>%d</span></div>"
              # ★ 0.53.4（创始人 2026-10-20 截图：「『本来就不参与比对』这种是
              #   废话吧？」）：删掉值里的同义括号句 —— 为什么"没纳入比对"由
-             #   **行左的词条问号**答（概念），这次是哪些文件、142 条是什么由
+             #   **行左的词条问号**答（概念），这次是些什么记录由
              #   **值后的圈问号**答（本日数据）。一句话说三遍正是 STE 要灭的。
              "<div class=\"row\"><span class=\"k\">%s</span><span>%d%s</span></div>%s%s</div></div>"
              % (GL.chip("chain_check"), cls, _esc(_chain_verdict(ch)),
@@ -2350,30 +2347,48 @@ def _chain_verdict(ch):
     return R.chain_unverified((ch or {}).get("files", 0))
 
 
-def _qsum_html(ch):
-    """「没纳入比对的记录」行**值后**的圈问号展开体：本次核对了哪些文件。
+#: 无指纹记录的类型 → 上屏人话。**只做翻译**：类型取自数据（`chain["types"]`），
+#: 这里不预设数据里有什么；表里没有的类型 ⇒ 走通用句（不编人话）。
+_UNCHAINED_TYPE_ZH = {
+    "session_start": "开始一次对话时留下的记录",
+}
 
-    ★ 0.53.4（创始人 2026-10-20 截图：「用户可能会看具体检查了哪些文件——
-      截图是 30 个文件，以及没有纳入比对的记录——是否要做个小小的总结说明，
-      在 142 后侧也挂个圈问号的方式？」）。
-    ★ 与术语词条分工：行左 `unchained` 芯片答"这是什么"（概念，静态）；
-      这个问号答"这次是什么"（本日数据）—— 两边不互相抄，点哪个都看得懂。
-    ★ 文件只列**名字**（逐日文件即日期）：绝对路径是噪声，不上屏
-      （账本明细踩过：路径上屏被创始人点名）。
-    ★ 没有逐文件明细（注入的旧形状 chain dict）⇒ 不挂问号，不编内容。
+
+def _qsum_html(ch):
+    """「没纳入比对的记录」行**值后**的圈问号展开体：这次是些什么记录。
+
+    ★ 0.53.4 修订（创始人 2026-10-20 10:18 截图：「对不上 147 这个数啊……
+      这种明细不仅对不上，用户也看不懂。让用户知道具体情况就行，把用户的
+      问号拉直就行，体验还是第一位的。还有上边 32 个文件也是。」）：
+      初版展开体列了 32 个文件、每个文件跟一个「N 条」—— 那个 N 是**该文件
+      带指纹的记录数**，与 147（不带指纹的记录数）是两个口径 ⇒ 怎么加都对
+      不上；而且逐文件是内部实现细节，用户读不懂。⇒ 明细整段退役，只答
+      两件事：这些记录是什么（类型从数据派生）、核对范围（日期从文件派生）。
+    ★ 与术语词条分工：行左 `unchained` 芯片答"为什么没纳入比对"（概念，
+      静态）；这个问号答"这次是些什么"（本日数据）—— 点哪个都看得懂。
+    ★ 单类型且有已知人话 ⇒ 直说「都是…」；混合/未知 ⇒ 只说"不带指纹"，
+      不把一类说成全部（对外强度不许超过数据能支撑的）。
+    ★ 数字与范围全部派生：`ch["unchained"]` / `ch["types"]` /
+      `ch["first_day"]` / `ch["last_day"]`，不写死。
     """
-    fl = [d for d in (ch or {}).get("file_list") or [] if d.get("name")]
-    if not fl:
-        return ""
-    rows = "".join(
-        "<div class=\"fr\"><span class=\"fn\">%s</span><span>%d 条</span></div>"
-        % (_esc(d["name"]), int(d.get("records") or 0)) for d in fl)
+    ch = ch or {}
+    n = int(ch.get("unchained") or 0)
+    if n <= 0:
+        return ""                               # 没有带问号的数，就不挂问号
+    types = ch.get("types") or {}
+    head = ""
+    if len(types) == 1:
+        _only = next(iter(types))
+        _zh = _UNCHAINED_TYPE_ZH.get(_only)
+        if _zh:
+            head = "这 %d 条都是%s。" % (n, _zh)
+    body = ("%s它们不带指纹，不算被改过。" % head) if head else \
+        ("这 %d 条记录不带指纹，不算被改过。" % n)
+    fd, ld = ch.get("first_day") or "", ch.get("last_day") or ""
+    scope = ("核对范围是 %s 到 %s 的链文件。" % (_esc(fd), _esc(ld))
+             if fd and ld else "")
     return ("<details class=\"qsum\"><summary>？</summary><div class=\"qbody\">"
-            "本次核对了 %d 个文件，从 %s 到 %s。"
-            "<div class=\"flist\">%s</div>"
-            "%d 条不带指纹，没纳入比对。</div></details>"
-            % (len(fl), _esc(fl[0]["name"]), _esc(fl[-1]["name"]), rows,
-               int((ch or {}).get("unchained") or 0)))
+            "%s%s</div></details>" % (body, scope))
 
 
 def _view_health(rep, token, items=None):

@@ -5200,14 +5200,13 @@ def n_l02():
 
 
 # ═══════════ 批25 · 0.53.4 日报细节（编号前缀位／同字号／布局／同义句／本次明细问号） ═══════════
-#: 链卡夹具：带**逐文件明细**（问号展开体的数据源）。数字全部派生自本夹具，
-#: 判据不写死任何计数（写死＝判据与产品各说各话）。
-_CH_FILES = [{"name": "2026-10-18", "records": 21011, "unchained": 48},
-             {"name": "2026-10-19", "records": 21033, "unchained": 47},
-             {"name": "2026-10-20", "records": 21245, "unchained": 47}]
+#: 链卡夹具：无指纹记录的类型＋核对范围（问号展开体的数据源）。
+#: 数字全部派生自本夹具，判据不写死任何计数（写死＝判据与产品各说各话）。
+_CH_TYPES = {"session_start": 142}
 _REP_0534 = dict(_REP, rules=_RANK_ROWS,
                  chain=dict(_REP["chain"], files=3, records=63289,
-                            unchained=142, file_list=_CH_FILES))
+                            unchained=142, types=_CH_TYPES,
+                            first_day="2026-10-18", last_day="2026-10-20"))
 
 
 def _css_rule(src, sel):
@@ -5400,50 +5399,93 @@ def n_t08():
     return True
 
 
-def _t09_problem(page):
-    """圈问号展开体给**本次**明细：逐文件＋条数＋起止＋不带指纹数，全部派生。"""
-    ch = _REP_0534["chain"]
+#: 已知类型的上屏人话 —— 取**设计意图**，不从产品实现 import
+#: （从实现 import 会让判据替实现背书：产品改错字也照样绿）。
+#: 产品改文案必须同批改这里 —— 这是「改页面文案必须同步判据锚点」的落点。
+_T09_KNOWN = {"session_start": "开始一次对话"}
+
+
+def _t09_problem(page, ch):
+    """圈问号展开体：说清「这些记录是什么」＋核对范围，且**不许列明细**。
+
+    ★ 0.53.4 二次修订（创始人 2026-10-20 10:18 截图：「对不上 147 这个数啊……
+      这种明细不仅对不上，用户也看不懂。让用户知道具体情况就行，把用户的
+      问号拉直就行」）。旧尺子（逐文件/条数/起止全派生）恰好**把病当成了
+      标准** —— 它要求明细存在，而明细的口径（每个文件带指纹的记录数）与
+      147（不带指纹的记录数）根本不同源。新尺子四条腿：
+        ① 条数从 unchained 派生；
+        ② 类型从 types 派生（单类型有已知人话必须说出；混合不许冒充单一口径）；
+        ③ 范围从 first_day/last_day 派生；
+        ④ 逐文件明细**不许存在**（它就是"对不上"的来源）。
+    """
     m = re.search(r'<div class="qbody">(.*?)</div></details>', page, re.S)
     if not m:
         return "找不到 qbody 展开体（问号是个空壳？）"
     body = m.group(1)
-    fl = ch["file_list"]
-    for d in fl:
-        if d["name"] not in body:
-            return "展开体缺文件 %s —— 用户问的就是「检查了哪些文件」" % d["name"]
-        if ("%d 条" % d["records"]) not in body:
-            return "展开体缺文件 %s 的记录条数" % d["name"]
-    if ("本次核对了 %d 个文件" % len(fl)) not in body:
-        return "展开体的文件数与 file_list 不同源（写死数字了？）"
-    if ("从 %s 到 %s" % (fl[0]["name"], fl[-1]["name"])) not in body:
-        return "展开体缺起止日期（从哪份到哪份）"
-    if ("%d 条不带指纹" % ch["unchained"]) not in body:
-        return "展开体的不带指纹数与 chain 不同源（写死数字了？）"
+    n = int(ch.get("unchained") or 0)
+    if ("%d 条" % n) not in body:
+        return "展开体没说清「%d 条」（数字不是从 unchained 派生的？）" % n
+    types = ch.get("types") or {}
+    if len(types) == 1:
+        _zh = _T09_KNOWN.get(next(iter(types)))
+        if _zh and _zh not in body:
+            return ("展开体没说这些记录是什么（单类型应说出「%s」—— "
+                    "类型是人话写死的，不是从数据派生的？）" % _zh)
+        if not _zh and "不带指纹" not in body:
+            return "未知类型没有可读的说明（应退回通用句）"
+    else:
+        if any(z in body for z in _T09_KNOWN.values()):
+            return "混合类型却声称「都是%s」（把一类说成了全部）" % _T09_KNOWN["session_start"]
+        if "不带指纹" not in body:
+            return "混合类型没有通用说明（读者不知道这些是什么）"
+    fd, ld = ch.get("first_day"), ch.get("last_day")
+    if fd and ld and ("%s 到 %s" % (fd, ld)) not in body:
+        return "展开体缺核对范围（%s 到 %s）" % (fd, ld)
+    if 'class="flist"' in body:
+        return ("逐文件明细又回来了 —— 每文件的「N 条」是带指纹的记录数，"
+                "与「%d 条不带指纹」是两个口径，怎么加都对不上（创始人 10:18）" % n)
     return None
 
 
-@check("T-09 圈问号展开体＝本次明细：逐文件／条数／起止全部从 chain 派生")
+@check("T-09 圈问号：说清是什么＋范围，且不列明细（数字/类型/范围全派生）")
 def t09():
-    return _t09_problem(_page("report", rep=_REP_0534))
+    return _t09_problem(_page("report", rep=_REP_0534), _REP_0534["chain"])
 
 
-@check("N-T09 负控：文件名抹掉／文件数写死 30 ⇒ T-09 必须各自判红")
+@check("N-T09 负控：条数写死／明细加回／混合类型冒充 ⇒ T-09 必须各自判红")
 def n_t09():
+    ch = _REP_0534["chain"]
     page = _page("report", rep=_REP_0534)
-    if _t09_problem(page) is not None:
+    if _t09_problem(page, ch) is not None:
         return "夹具不成立：现行渲染就判红 —— 负控无分辨力"
-    # 面①：抹掉中间那个文件名（"核对了哪些文件"答不全）
-    dead = page.replace("2026-10-19", "20XX-XX-XX")
+    # 面①：条数写死（与 unchained 脱钩）
+    dead = page.replace("%d 条" % ch["unchained"], "999 条")
     if dead == page:
-        return "夹具不成立：摘不到文件名（结构已变）"
-    if _t09_problem(dead) is None:
-        return "负控失效①：少列一个文件仍判合格（明细那条腿没分辨力）"
-    # 面②：文件数写死 30（与 file_list 脱钩 —— 数据换了页面不换）
-    dead2 = page.replace("本次核对了 3 个文件", "本次核对了 30 个文件")
+        return "夹具不成立：摘不到条数句（结构已变）"
+    if _t09_problem(dead, ch) is None:
+        return "负控失效①：条数写死仍判合格（派生那条腿没分辨力）"
+    # 面②：逐文件明细加回来（0.53.4 初版形态）
+    dead2 = re.sub(r'(<div class="qbody">)(.*?)(</div></details>)',
+                   r'\1\2<div class="flist"><div class="fr">'
+                   r'<span class="fn">2026-10-18</span><span>21011 条</span>'
+                   r'</div></div>\3', page, count=1, flags=re.S)
     if dead2 == page:
-        return "夹具不成立：摘不到文件数句（结构已变）"
-    if _t09_problem(dead2) is None:
-        return "负控失效②：文件数写死仍判合格（派生那条腿没分辨力）"
+        return "夹具不成立：摘不到 qbody 收尾"
+    if _t09_problem(dead2, ch) is None:
+        return "负控失效②：明细加回来仍判合格（明细禁令没分辨力）"
+    # 面③：混合类型 ⇒ 不许再声称「都是开始一次对话」
+    ch3 = dict(ch, types={"session_start": 100, "other": 42})
+    page3 = _page("report", rep=dict(_REP_0534, chain=ch3))
+    _p3 = _t09_problem(page3, ch3)
+    if _p3 is not None:
+        return "夹具不成立：混合类型渲染就判红（%s）" % _p3
+    dead3 = page3.replace("这 %d 条记录不带指纹" % ch3["unchained"],
+                          "这 %d 条都是%s" % (ch3["unchained"],
+                                             _T09_KNOWN["session_start"]))
+    if dead3 == page3:
+        return "夹具不成立：摘不到混合类型的通用句"
+    if _t09_problem(dead3, ch3) is None:
+        return "负控失效③：混合类型冒充单一口径仍判合格（类型派生那条腿没分辨力）"
     return True
 
 
