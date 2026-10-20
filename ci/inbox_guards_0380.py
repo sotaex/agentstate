@@ -171,8 +171,13 @@ def s11():
         return "无账却 ledger_bad=%r" % (none["ledger_bad"],)
     if some["ledger_bad"] is not True:
         return "有账却 ledger_bad=%r（账被藏了）" % (some["ledger_bad"],)
-    if "没处理" not in some["reason"]:
-        return "有账但原因句没提：%r" % some["reason"]
+    # ★★ 0.53.5（2026-10-21）**换锚**：原断言是 `「没处理」 in reason`。
+    #   它守的本意是「**账不许被藏**」，可它绑在**一个词**上 ⇒ 换种说法
+    #   （"都替你处理完了"）就把判据绕过去了，反之改了措辞又会假红。
+    #   ⇒ 改守**结构**：账的**件数/条数**必须出现在主行（数由同一份 `ex` 派生）。
+    _n = int(some.get("action_count") or some.get("info_count") or 0)
+    if _n <= 0 or str(_n) not in some["reason"]:
+        return "有账但原因句没把账说出来（缺件数 %d）：%r" % (_n, some["reason"])
     if "灯这样报" in some["reason"]:
         return "原因句还在用旧语义（此刻好却说'灯这样报'）：%r" % some["reason"]
     if some["state"] != M.STATE_L0:
@@ -783,6 +788,14 @@ def n_s101():
     return True
 
 
+#: ★★ 0.53.5（2026-10-21）：**报平安词族** —— 待办还躺着时，主行不许出现这些词。
+#:   为什么要"词族"而不是"一个词"：S102 的契约是「**只有你能解决的事还在，
+#:   不许让人以为没事**」。只禁「此刻是好的」⇒ 说"没事""一切正常"就绕过去了
+#:   （字面判据的通病）。反过来，绑词族也不会假红：待办真清零时那句
+#:   「最近 24 小时没出事」不含本族任何一词（它说的是事实，不是安慰）。
+_REASSURE_RE = re.compile(r"好|没事|没问题|安全|一切正常|正常|无异常")
+
+
 @check("S102 三通道**并存**：研发徽标 ＋ R0 主灯不抬 ＋ 要处理计数 同时为真")
 def s102():
     import inbox_model as M
@@ -800,9 +813,13 @@ def s102():
             bad.append(("徽标缺 %s" % want, keys, "含 %s" % want))
     if ex["action_count"] < 1:
         bad.append(("要处理件事数", ex["action_count"], ">=1"))
-    # ★ 立规：action>0 时**禁止**说"此刻是好的"（只有你能解决的事还在）
-    if "此刻是好的" in ex["reason"]:
-        bad.append(("原因句", ex["reason"][:40], "action>0 禁说'此刻是好的'"))
+    # ★★ 立规：action>0 时**禁止报平安**（只有你能解决的事还在）。
+    #   ★ 0.53.5 换锚：原断言只禁「此刻是好的」这一个**字面** ⇒
+    #     说"没事""一切正常""没问题"就绕过去了，而契约守的是**语义**
+    #     （待办还躺着，不许让人以为没事）。⇒ 改禁"报平安词族"。
+    if _REASSURE_RE.search(ex["reason"] or ""):
+        bad.append(("原因句", ex["reason"][:40],
+                    "action>0 禁报平安（好/没事/安全/正常…）"))
     if bad:
         return "三通道没同时成立（并存被压平？）：%r" % bad
     return True
@@ -827,19 +844,24 @@ def s103():
     import inbox_model as M
     G = _g()
     bad = []
-    # ① 空账：先说此刻，且以句号收尾（多段拼接不许漏标点）
+    # ① 空账：必须有**时间口径**，且以句号收尾（多段拼接不许漏标点）
+    #   ★★ 0.53.5 换锚：原断言是 `「此刻」 in reason` —— 绑在一个词上。
+    #     契约要的是"这句话交代了是什么时间范围"（否则读者不知道"没出事"
+    #     是哪个范围没出事），与用哪个词无关 ⇒ 改守**窗口口径**（由
+    #     `M.WINDOW_HOURS` 派生，改窗口判据自动跟着走）。
     ex = M.light_explain({"state": "guarding", "why": "监理在岗"}, [],
                          versions=("1.0.0", "9.9.9"))
-    if "此刻" not in ex["reason"]:
-        bad.append(("空账缺'此刻'", ex["reason"]))
+    if ("%d 小时" % M.WINDOW_HOURS) not in ex["reason"] and "今天" not in ex["reason"]:
+        bad.append(("空账缺时间口径", ex["reason"]))
     if not ex["reason"].rstrip().endswith("。"):
         bad.append(("空账未以句号收尾", ex["reason"]))
-    # ② 有账：必须提"没处理"（账不许被藏）
+    # ② 有账：账的**件数**必须说出来（账不许被藏）—— 同 S11 的换锚口径
     ex2 = M.light_explain({"state": "guarding", "why": "监理在岗"},
                           [G._mk_item(kind="host_shield_breach")],
                           versions=("1.0.0", "9.9.9"))
-    if "没处理" not in ex2["reason"]:
-        bad.append(("有账缺'没处理'", ex2["reason"]))
+    _n2 = int(ex2.get("action_count") or ex2.get("info_count") or 0)
+    if _n2 <= 0 or str(_n2) not in ex2["reason"]:
+        bad.append(("有账缺件数", ex2["reason"]))
     # ③ 徽标原因**不进主行**，但徽标本身必须在（FZ-004 冻结契约）
     #    ★ 原断言是「'研发' 必须出现在 reason 里」。FZ-004（创始人 2026-10-16
     #      截图 #4「啰嗦、浓重机器味」⇒ 2026-10-17 冻结）把徽标原因句**移出**

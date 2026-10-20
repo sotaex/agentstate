@@ -3600,9 +3600,11 @@ def guard_posture(pkg_root=None):
                     #        已修：dev 不再吞掉它）会显示橙灯并指向具体事项。
                     _cons = _outage_consequences(st, pkg_root)
                     return {"state": POSTURE_DEV, "label": POSTURE_LABEL[POSTURE_DEV],
-                            "why": "研发迭代中：这一版还没发出去，"
-                                   "守门代码与上次登记的不一致是改出来的，不是被改的。"
-                                   "监理仍在正常放哨；它发现状况时该报的一样会报。",
+                            # ★ 0.53.5：与 `inbox_model.DEV_LINE` **逐字同句**
+                            #   （两个模块不能互相 import；改一处必须改另一处）。
+                            #   旧句 40+ 字的版本差工程说明会被渲染进顶部条主行，
+                            #   而 FZ-004 契约明写"版本差不进主行"（版本差归徽标）。
+                            "why": "正在用还没发布的版本守着，能拦的照拦",
                             "evidence": ev, "consequences": _cons,
                             "can_fix": False, "fix": None,
                             "fix_hint": ("正在开发中。这一版发出去之后会自动回到"
@@ -3617,8 +3619,11 @@ def guard_posture(pkg_root=None):
                 #   就是创始人说的"跟假失守没区别"—— 红灯很快就没人看了。
                 #   ★ 绝不为了消红灯而放松自检：自检照旧跑、照旧报，只是**换了档位**。
                 return {"state": POSTURE_WARN, "label": POSTURE_LABEL[POSTURE_WARN],
-                        "why": "监理在岗，但这份守门的代码我认不出是不是出厂那份"
-                               "——可能被改动过，也可能是这次没装好。",
+                        # ★ 0.53.5：旧句「我认不出」的主语是**说话人**，
+                        #   而用户面主语只许监理（纪律 §23.2）；且"出厂那份"
+                        #   是内部说法 ⇒ 改说"出厂记录"。
+                        "why": "守门用的代码跟出厂记录对不上：可能被改过，"
+                               "也可能这次没装好",
                         "evidence": ev, "consequences": [], "can_fix": False,
                         "fix": None,
                         "fix_hint": "就地核对不了：请重新安装当前版本"
@@ -3657,9 +3662,14 @@ def guard_posture(pkg_root=None):
         #     （读到了、但陈旧）仍走下面缺岗分支按后果分红/黄 —— 那一档有据。
         if alive and age is None and not fresh:
             return {"state": POSTURE_UNKNOWN, "label": POSTURE_LABEL[POSTURE_UNKNOWN],
-                    "why": "监理进程在岗，但读不到它写的心跳链——此刻只是「注意」"
-                           "（盲区），不是「失守」：它可能还在正常值守，也可能已经"
-                           "悄悄停写，这里区分不出来。",
+                    # ★ 0.53.5：旧句带「「注意」不是「失守」」这种**档位名**，
+                    #   档位已由标签颜色表达，正文重复档位是噪音；
+                    #   「可能还在正常值守」的"正常"也会被 S102 的报平安词族判红
+                    #   （待办还躺着时不许说"正常"）⇒ 一并去掉。
+                    # ★ 「心跳链」三个字**必须保留**：0372 S19 用它判"读者能自救"
+                    #   （点得出来是心跳链读不到，而不是笼统的"不知道"）。
+                    "why": "监理在岗，但它写的心跳链读不到：可能还在值守，"
+                           "也可能已经停写，这里分不出来",
                     "evidence": ev, "consequences": None,
                     "can_fix": True, "fix": "revive",
                     "fix_hint": "马上修复（重新拉起监理，让它重新登记心跳链）"}
@@ -3673,21 +3683,31 @@ def guard_posture(pkg_root=None):
         #   ⇒ 人类面只留「哨兵」；「防护」作中性名词描述开着这件事。
         #   `门闸` 仍是**记录层**的历史写法（链记录原文不改写），但它不该
         #   出现在这两句返回给页面的文案里。
+        # ★★ 0.53.5：旧句「**防护开着**，但监理进程不在岗——此刻没人值守」有
+        #   两个毛病：① "防护开着"与"没人值守"同一句自相矛盾（读者第一反应
+        #   是"到底开着没有"）；② "进程"是实现细节，用户既看不懂也没法拿它做事。
+        #   ⇒ 只说处境：**掉线了，没人替你挡着**。
+        #   ★ 心跳断档的分钟数**保留**：那是"要不要手动拉起"的决策信息，
+        #     且不会自己好转（0.49.0 删掉的是"最后心跳 N 分钟前"—— 那个会冻结）。
         if not alive:
-            why = "防护开着，但监理进程不在岗——此刻没人值守。"
+            # ★ 「不在岗」三个字**必须保留**：0372 N-S19 用它判"现场走的是缺岗分支"
+            #   （换成"掉线了"这类近义说法 ⇒ 判据失去分辨力）。
+            why = "监理不在岗，现在没人替你挡着"
         else:
-            why = ("防护开着，监理进程在，但心跳断档 %s（应 ≤10 分钟）——疑似挂起/僵死。"
-                   % (("%.0f 分钟" % (age / 60.0)) if age is not None else "（读不到心跳）"))
+            why = ("监理 %s 没动静了（平时 10 分钟一次），可能卡住了"
+                   % (("%.0f 分钟" % (age / 60.0)) if age is not None else "有一段时候"))
         if _code_untrusted:
-            why += " 另外，这份守门的代码我也认不出是不是出厂那份。"
+            why += "；另外守门用的代码跟出厂记录对不上"
         if not cons:
             # ★ 缺岗但**没有任何监管对象** ⇒ 缺岗期间不可能放过什么 ⇒ 只叫「中断」。
             #   仍然黄灯、仍然给「马上修复」——**不隐藏**，只是不冒称"失守"。
+            #   ★ 0.53.5：旧句带 `**` 星号（markdown 语法漏到界面）＋ 括号里
+            #     四个术语堆叠（放行窗/安全区/受监管工作区/受监管落点）。
+            #     「没有监管对象」五个字**必须保留** —— 0353 那条判据钉的是它
+            #     （守"为什么不算失守"这一语义，不是守字面装饰）。
             return {"state": POSTURE_INTERRUPTED,
                     "label": POSTURE_LABEL[POSTURE_INTERRUPTED],
-                    "why": why + " 不过此刻监理**没有监管对象**"
-                                 "（无放行窗、无安全区、无受监管工作区、无受监管落点），"
-                                 "所以这段时间没有放过任何东西。",
+                    "why": why + "；好在这段时间没有监管对象，没有放过任何东西",
                     "evidence": ev, "consequences": [], "can_fix": True,
                     "fix": "revive", "fix_hint": "马上修复（重新拉起监理）"}
         return {"state": POSTURE_DOWN, "label": POSTURE_LABEL[POSTURE_DOWN],
@@ -3695,10 +3715,16 @@ def guard_posture(pkg_root=None):
                 "can_fix": True, "fix": "revive",
                 "fix_hint": "马上修复（重新拉起监理）"}
     except Exception as e:                                   # noqa: BLE001
+        # ★ 0.53.5：旧句把 `%r`（异常 repr，含英文类名与引号）直接上屏 ——
+        #   那是给开发看的。用户面只说"判断不了"；异常细节留 `evidence`
+        #   （要查的人查得到，与 0.36.1 删 pid 同一条纪律：不删信息，换位置）。
+        #   ★ 措辞上刻意避开"没事/没问题/正常"：这些词会被 S102 的报平安词族
+        #     判红（待办还躺着时不许报平安），而这里要说的是"**说不准**"。
         return {"state": POSTURE_UNKNOWN, "label": POSTURE_LABEL[POSTURE_UNKNOWN],
-                "why": "探不到监理状态：%r" % (e,), "evidence": {},
+                "why": "看不到监理的状态：现在判断不了它还在不在守",
+                "evidence": {"error": repr(e)},
                 "consequences": None, "can_fix": False, "fix": None,
-                "fix_hint": "这是「盲区」，不等于「没问题」"}
+                "fix_hint": "这是盲区，不等于没事"}
 
 
 def guard_fix(pkg_root=None, action=None):

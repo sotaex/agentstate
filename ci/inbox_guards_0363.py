@@ -181,8 +181,9 @@ def n_light_greens_on_unknown_is_caught():
         mutated = src.replace(anchor, "if False:", 1)
         # ② 把函数末尾的防御性黄灯也改成打绿 —— 复现 0.36.2 那个真缺陷的形状
         #    （当年没有兜底，未知姿态一路穿到末尾拿到绿灯）
-        tail = ('    return STATE_L1, ("收到一个没登记的防线状态（%r）——这是盲区，"\n'
-                '                      "不等于没问题" % (posture_state,))')
+        tail = ('    return STATE_L1, ("监理报了一个没登记的防线状态：认不出它是什么，"'
+                "\n"
+                '                      "先按最谨慎的档位显示")')
         assert tail in mutated, "定位防御性黄灯失败（锚点漂移，负控需更新）"
         mutated = mutated.replace(
             tail, '    return STATE_L0, "坏：未登记姿态打绿（历史缺陷复现）"', 1)

@@ -26,6 +26,7 @@
     python ci/regression_gate.py --json      # 机器可读
 """
 import argparse
+import datetime
 import importlib.util
 import json
 import os
@@ -1548,6 +1549,16 @@ def j_reason_line_budget(mod=None):
       ③ 渲染层把那两版号**带到了徽标悬停提示**（`title`，≤20 字守 U-11）
          —— 否则「挪到 ? 展开」只是把信息弄丢的美化说法。
 
+    ★★★ 0.53.5（2026-10-21）**输入空间补齐** —— 死判据第六种形态的现场：
+      旧版遍历六态时 `items` 恒为 `[]`（空账），于是 **info 桶 / action 桶
+      两种有账形状从来没被测过**。实测本机（`light_explain` 直调）：
+        · 空账句「…24 小时里也没有等你处理的事。」      ⇒ 不含形状（绿）
+        · 25 条 info「…还有 25 **条没处理**（…）」        ⇒ 正中 `条没处理`（**违例**）
+        · 3 件待办「…还有 1 件事没处理。」                ⇒ 不含形状（正则只禁"条"）
+      ⇒ **产品处于 FZ-004 现行违例状态，而本判据天天绿**（契约 2026-10-17 已冻结）。
+      修法不是放松口径，是**把违例喂进取证路径**：三种账形状各跑一遍。
+      （前五种死判据都是"锚/前提"的毛病，这一种是**输入空间没覆盖**。）
+
     口径全部**由产品派生**（`inbox_model.light_explain`／`badges` 直调，
     不二次实现"什么算版本差"）；`mod` 可注入（机械自证探针的变异臂用，
     与 `j_lamp_color_contract(mod=…)` 同款）。
@@ -1559,32 +1570,55 @@ def j_reason_line_budget(mod=None):
     # ★ 夹具：用**真的会点亮研发中徽标**的版本对（本机 > 已发布），
     #   否则 ② 那条腿是空的（没有徽标 ⇒ 无从证明"信息仍在"）。
     VERS = ("0.99.9", "0.99.8")
+
+    def _mk_items(kind, n):
+        """★ 造 n 条**窗口内未读**记录（5 分钟前）—— 有账形状的输入夹具。"""
+        _ts = (datetime.datetime.now().astimezone()
+               - datetime.timedelta(minutes=5)).isoformat(timespec="seconds")
+        return [M.Item(alert=M.Alert.build(_ts, kind, title="t"), state="unread")
+                for _ in range(n)]
+
+    # ★★ 三种账形状（0.53.5 补齐）：空账 / info 桶（次数口径）/ action 桶（件事口径）。
+    #   只跑空账 ⇒ info 桶那条「条没处理」违例永远进不了取证路径（见 docstring）。
+    LEDGERS = (("空账", []),
+               ("info桶", _mk_items("tool_call_blocked", 25)),
+               ("action桶", _mk_items("exam_reminder", 3)))
     bad = []
     for pst in ("down", "warn", "interrupted", "unknown", "off", "dev"):
-        try:
-            ex = M.light_explain({"state": pst, "why": ""}, [],
-                                 granary=None, versions=VERS)
-        except Exception as e:                               # noqa: BLE001
-            return False, ("light_explain(%r) 抛错 %s: %s —— 判据测不出，"
-                           "按违例算（不许静默当绿）"
-                           % (pst, type(e).__name__, e))
-        reason = str(ex.get("reason") or "")
-        # 版本差＝**两个版号同现**（本机一版 + 已发布一版）
-        _vs_in_reason = _FZ4_VER_RE.findall(reason)
-        if len(_vs_in_reason) >= 2:
-            bad.append("%s 主行含版本差（%s）" % (
-                pst, "/".join(_vs_in_reason[:3])))
-        m2 = _FZ4_COUNT_SHAPE.search(reason)
-        if m2:
-            bad.append("%s 主行含收件箱计数「%s」" % (pst, m2.group(0)))
-        # ② 信息不丢：徽标里仍有完整版本差原因句
-        _bs = ex.get("badges") or []
-        _dev = [w for k, _n, w in _bs if k == M.BADGE_DEV]
-        if not _dev:
-            bad.append("%s 研发中徽标不见了 —— 版本差信息被删（不是挪）" % pst)
-        elif VERS[0] not in str(_dev[0]) or VERS[1] not in str(_dev[0]):
-            bad.append("%s 研发中徽标原因句缺具体版本号（%r）—— "
-                       "信息在挪动中丢了" % (pst, str(_dev[0])[:50]))
+        for _lname, _items in LEDGERS:
+            try:
+                ex = M.light_explain({"state": pst, "why": ""}, _items,
+                                     granary=None, versions=VERS)
+            except Exception as e:                           # noqa: BLE001
+                return False, ("light_explain(%r/%s) 抛错 %s: %s —— 判据测不出，"
+                               "按违例算（不许静默当绿）"
+                               % (pst, _lname, type(e).__name__, e))
+            reason = str(ex.get("reason") or "")
+            # 版本差＝**两个版号同现**（本机一版 + 已发布一版）
+            _vs_in_reason = _FZ4_VER_RE.findall(reason)
+            if len(_vs_in_reason) >= 2:
+                bad.append("%s/%s 主行含版本差（%s）" % (
+                    pst, _lname, "/".join(_vs_in_reason[:3])))
+            m2 = _FZ4_COUNT_SHAPE.search(reason)
+            if m2:
+                bad.append("%s/%s 主行含收件箱计数「%s」" % (pst, _lname, m2.group(0)))
+            # ★ 0.53.5 加**长度腿**（budget 的字面意思）：上限从产品派生
+            #   （`inbox_model.REASON_MAX_CHARS`），不在判据里写死数字。
+            #   为什么要有它：文案改短容易、变长很难被发现 —— 顶部条那一行
+            #   是横向高密度区，一句话超过两行就没人读了。
+            _cap = int(getattr(M, "REASON_MAX_CHARS", 48))
+            if len(reason) > _cap:
+                bad.append("%s/%s 主行 %d 字 > %d（读不完就等于没写）"
+                           % (pst, _lname, len(reason), _cap))
+            # ② 信息不丢：徽标里仍有完整版本差原因句
+            _bs = ex.get("badges") or []
+            _dev = [w for k, _n, w in _bs if k == M.BADGE_DEV]
+            if not _dev:
+                bad.append("%s/%s 研发中徽标不见了 —— 版本差信息被删（不是挪）"
+                           % (pst, _lname))
+            elif VERS[0] not in str(_dev[0]) or VERS[1] not in str(_dev[0]):
+                bad.append("%s/%s 研发中徽标原因句缺具体版本号（%r）—— "
+                           "信息在挪动中丢了" % (pst, _lname, str(_dev[0])[:50]))
     if bad:
         return False, "FZ-004 解释行预算越界 %d 处：%s" % (
             len(bad), "；".join(bad[:3]))
@@ -1609,9 +1643,10 @@ def j_reason_line_budget(mod=None):
     if len(tip) > 20:
         return False, ("徽标悬停提示 %r 长 %d 字 > 20（U-11 上限）"
                        % (tip, len(tip)))
-    return True, ("解释行预算在位：六态主行均无版本差/收件箱计数形状；"
-                  "研发中徽标仍带完整两版号；悬停提示 %r（%d 字 ≤ 20）"
-                  "—— 信息不丢，只换位置" % (tip, len(tip)))
+    return True, ("解释行预算在位：六态 × 三种账形状（空账/info/action）主行均无"
+                  "版本差/收件箱计数形状；研发中徽标仍带完整两版号；"
+                  "悬停提示 %r（%d 字 ≤ 20）—— 信息不丢，只换位置"
+                  % (tip, len(tip)))
 
 
 def html_lib_unescape(s):

@@ -2383,13 +2383,69 @@ def _posture_direct(posture_state):
       ⇒ 抽成一份，`light()` 与 `base_state()` 共用，不会再漏。
     """
     if posture_state == "down":
-        return STATE_R0, "防线此刻确实不在岗，而且有东西没人管"
+        # ★ 同 `host_shield` 缺岗分支：「不在岗」是判据锚（0372 N-S19），不许换词。
+        return STATE_R0, "监理不在岗，现在没人替你挡着"
     if posture_state == "warn":
         # 出厂码不符且非研发（dev 已在 host_shield 侧分流）⇒ fail-closed。
-        return STATE_R0, ("监理进程在岗，但守门的这份代码跟登记的那份对不上"
-                          "（可能被改动过，也可能这次没装好）——认不出它守的是不是"
-                          "原来那道门，先按失守算")
+        # ★ 0.53.5：旧句「防护开着…」先说"开着"再说"没人守"⇒ 一句话自相矛盾；
+        #   且"认不出它守的是不是原来那道门"是**机制**，读者要的是**处境**。
+        return STATE_R0, ("守门用的代码跟出厂记录对不上：可能被改过，"
+                          "也可能这次没装好")
     return None
+
+
+# ───────────────────────────────────── 0.53.5 状态说明句（唯一真源）─────────
+#: ★★ 顶部条那句话的**全部字面**都在这里（判据与页面都从这里取，不许另写一份）。
+#:   旧形状（`light_explain` 里现拼）的病，见 `base_state()` 头上的 0.53.5 注记。
+#:
+#:   立规（创始人 2026-10-21 拍板）：
+#:     ① **两段制**：先说处境（结论），再说动作（要不要你动手）；不第三段；
+#:     ② **标签说过的不再说第二遍**（标签「值守中」⇒ 正文不许再写"好/正常/在岗"）；
+#:     ③ **主语只许监理**；无反引号、无裸英文、无技术名词（纪律 §23.2）；
+#:     ④ 一句最多**一个括号**、**一个数字**；整句 ≤ `REASON_MAX_CHARS` 字；
+#:     ⑤ **红/黄态不许有玩笑**，也不许拖一句无关的"24 小时没事"当安慰。
+#:
+#: ★ 时间口径一律由 `hours` 派生（写死 24 会与 `WINDOW_HOURS` 漂移）。
+#: ★ `HUMOR` 只影响**无账那一句**：那是唯一每天出现、且真的没事的一档；
+#:   关掉它回落到平实版（对外演示/企业客户场景用）。
+HUMOR = True
+REASON_MAX_CHARS = 48
+
+#: 未启用：**不许**报平安（没开就是没开 —— 说"好"是假绿）。
+_OFF_LINE = "还没开启，现在没有任何东西在替你看门"
+#: 研发中（姿态 dev）：**身份**由徽标说，主行只说"照常在守"。
+#: ★ 与 `host_shield.guard_posture()` 的 dev 分支**逐字同句**（两处都写是因为
+#:   两个模块不能互相 import；改动必须同步，注释即为契约）。
+DEV_LINE = "正在用还没发布的版本守着，能拦的照拦"
+#: 无账（最常见、每天看几十次的那一句）。B 档＝有人味，A 档＝平实回落。
+_QUIET_HUMOR = "最近 %d 小时没出事。监理盯着呢，你忙你的"
+_QUIET_PLAIN = "最近 %d 小时没有需要你处理的事"
+#: 有账 · info 桶（监理自己处理掉了）：动词由**级别**派生，不写死 kind 表 ——
+#:   全是 L2（被拦下）⇒ 说"挡下"；掺了 L1（自愈/状态变更）⇒ 说"变动"。
+_INFO_BLOCKED = "最近 %d 小时挡下 %d 次，都替你处理完了"
+_INFO_MIXED = "最近 %d 小时有 %d 条变动，都替你处理完了"
+#: 有账 · action 桶（只有你能办）。
+_ACTION_LINE = "有 %d 件事只有你能办"
+#: 处境句已经占了主行时，账句用**短式**（"另有…"）—— 账不许被藏，但不许啰嗦。
+_ACTION_SHORT = "另有 %d 件事只有你能办"
+_INFO_SHORT = "另有 %d 次已处理"
+
+
+def quiet_line(hours=WINDOW_HOURS):
+    """无账那一句（**唯一实现**）。`HUMOR` 关掉 ⇒ 平实版。"""
+    return (("%s" % _QUIET_HUMOR) if HUMOR else _QUIET_PLAIN) % hours
+
+
+def info_line(n, hours=WINDOW_HOURS, levels=None):
+    """info 桶那一句（**唯一实现**）。动词由**级别**派生，不由 kind 写死。
+
+    ★ 为什么按级别而不是列一张 kind 表：`LEVEL_OF_KIND` 已经说了每条记录是
+      哪一档（L2＝被拦下，L1＝知情即可），再抄一份 kind 表必然与它漂移
+      （本仓"两份清单"的老病）。
+    """
+    if levels and levels <= {STATE_L2}:
+        return _INFO_BLOCKED % (hours, n)
+    return _INFO_MIXED % (hours, n)
 
 
 def base_state(posture_state):
@@ -2416,6 +2472,14 @@ def base_state(posture_state):
     direct = _posture_direct(posture_state)
     if direct is not None:
         return direct
+    # ★★ 0.53.5（2026-10-21）**全量改句**：本函数这六句会直接进页面顶部条与
+    #   运行状态页（见 `light_explain()` 的 `now_text`）。旧句的四个毛病
+    #   （创始人 2026-10-21 截图点名）：
+    #     ① **同义反复**：标签已经说「值守中」，正文又说"好的"，括号再说"在岗"；
+    #     ② **审计腔自贬**："没查出问题"把"我查过、干净"说成了"我尽力了没查到"；
+    #     ③ **技术残渣**：`%r`（异常 repr）、`**`（markdown 星号）上屏；
+    #     ④ **未启用说"好"**：没开却报平安 —— 与本仓"绝不打假绿"正面冲突。
+    #   ⇒ 新口径：**说处境，不说机制**；**主语只许监理**；一句最多一个括号。
     if posture_state == "interrupted":
         # ★ 0.37.2：`哨兵` 是页面上**唯一**的守护角色（创始人 2026-10-09：
         #   「不要制造并列的护盾加哨兵两个概念，哨兵一个概念足矣，
@@ -2428,22 +2492,28 @@ def base_state(posture_state):
         #      一句随之更新为「一律用监理」；上面 0.37.2 的注释是**当时的决策
         #      记录**，按「记录原文不改写」纪律保留原样。下面各状态原因文案
         #      已同批换词（哨兵→监理）。
-        return STATE_L1, ("监理缺岗，但此刻没有监管对象——可证明没损失；"
-                          "仍建议尽快拉起来")
+        # ★ "没有监管对象"这五个字被 `ci/inbox_guards_0353.py` 的
+        #   `c_outage_without_consequence_is_interrupted` 钉住（它守的是
+        #   "为什么不算失守"这一**语义**）⇒ 改句不许把它改没，只许去掉
+        #   括号里那四个术语（放行窗/安全区/受监管工作区/受监管落点）。
+        return STATE_L1, ("监理暂停了一会儿，好在这段时间没有监管对象，"
+                          "没有放过任何东西")
     if posture_state == "unknown":
-        return STATE_L1, "探不到监理状态——这是盲区，不等于没问题"
+        return STATE_L1, "看不到监理的状态：现在判断不了它还在不在守"
     if posture_state == "off":
-        return STATE_L0, "监理默认没在值守。开启后才会拦、才会记账。"
+        # ★ 未启用**绝不许**出现"好/正常/没事"（那是假绿）：没开就是没开。
+        return STATE_L0, "还没开启，现在不会拦，也不会记账"
     if posture_state == "dev":
-        return STATE_DEV, ("正在研发迭代：这一版还没发出去，代码与登记不一致是"
-                           "改出来的（监理仍在正常值守；它发现状况时该报的一样会报）")
+        return STATE_DEV, DEV_LINE
     if posture_state == "guarding":
-        return STATE_L0, "监理在岗，此刻没查出问题"
+        return STATE_L0, "监理在岗，没发现问题"
     # 理论上不可达（上面已穷尽 POSTURE_ALL，`light()` 里集合外已被拦成 L1）。
     # 保留是**故意的**：万一 POSTURE_ALL 扩容而这里忘了加分支，它打**黄**
     # （盲区）而不是绿 —— 新增状态忘记接线时必须**看得见**。
-    return STATE_L1, ("收到一个没登记的防线状态（%r）——这是盲区，"
-                      "不等于没问题" % (posture_state,))
+    # ★ 0.53.5：旧句把 `%r`（原始 repr）直接上屏 —— 那是给开发看的。
+    #   用户面只说处境；原始值由调用方（日志／evidence）承载，不进页面。
+    return STATE_L1, ("监理报了一个没登记的防线状态：认不出它是什么，"
+                      "先按最谨慎的档位显示")
 
 
 def current_state(posture_state, granary=None, items=None, now=None,
@@ -2677,8 +2747,11 @@ def light_explain(posture, items, now=None, hours=WINDOW_HOURS, granary=None,
     # ---- 计数（待办/待阅；与页面「要处理 N」同一把尺子）----
     n_act = count_groups([it for it in (items or [])
                           if bucket_of(it, now=now, hours=hours) == BUCKET_ACTION])
-    n_info = len([it for it in (items or [])
-                  if bucket_of(it, now=now, hours=hours) == BUCKET_INFO])
+    # ★ info 桶的**列表**留下来（不只要个数）：0.53.5 的措辞要按**级别**派生动词
+    #   （全是被拦下 ⇒ "挡下"；掺了自愈/变更 ⇒ "变动"），级别只能从记录本身取。
+    _info_items = [it for it in (items or [])
+                   if bucket_of(it, now=now, hours=hours) == BUCKET_INFO]
+    n_info = len(_info_items)
 
     # ---- 拼原因句：**主灯原因 ＋ 待办提示**（二元组）----
     # ★ 不放件数式重复：件数归筛选条/顶部钻取（0.37.1 去重纪律）；这一句只答
@@ -2692,32 +2765,36 @@ def light_explain(posture, items, now=None, hours=WINDOW_HOURS, granary=None,
     #   ⇒ 版本差仍完整保留在 `badges`（页面按 `BADGE_STATE` 挂问号芯片，
     #     点开即见），只是不占主行。**信息不丢，只换位置**（不是删）。
     _nt = now_text.rstrip("。；;.")
+    # ★★ 0.53.5（2026-10-21 创始人拍板）：**整句重写**，结构从"两维拼接"改成
+    #   "**处境 ＋ 动作**"两段制。旧形状的三个病（截图实测）：
+    #     ① 「此刻是好的（监理在岗）」—— 标签说"值守中"、正文说"好的"、
+    #        括号说"在岗"，同一件事说三遍；而真正的信息在分号后面；
+    #     ② 「还有 25 条没处理（监理已自动处理…）」—— 主句"没处理"与括号
+    #        "已自动处理"自我打架，还得靠 18 个字圆回来；
+    #     ③ 危险态后面拖「24 小时里也没有等你处理的事」—— 最紧张时说句无关安慰。
+    #   ⇒ 新结构：**有处境先说处境；有账说账（账不许被藏）；都没有才说"没事"**。
+    #     ★ 关键：未启用/研发中不走"没事"分支（未启用说"没事"就是假绿）。
     parts = []
-    if now_bad:
-        parts.append("此刻：%s" % _nt)
-    elif n_act > 0:
-        # ★★ 立规（规格 v1.2 §2.3）：**action>0 时禁止说"此刻是好的"** ——
-        #   只有你能解决的事还躺在待办里，灯却是绿的；说"是好的"会把
-        #   待办读成没事（v1.1 探针 B5 记的正是这个缺陷）。
-        # ★ 0.53.1（创始人 2026-10-18）：原句「此刻没查出缺口」——「缺口」不在六态
-        #   表里，读者会把它当成第四种态（账本那一格也叫过「防护缺口/缺口」）。
-        #   这里说的是"没发现任何问题"，改用平实词「问题」，不引入态名。
-        parts.append("此刻没查出问题（%s）" % _nt)
-    else:
-        parts.append("此刻是好的（%s）" % _nt)
+    _pst = p.get("state")
+    if _pst == "off":
+        parts.append(_OFF_LINE)
+    elif bst == STATE_DEV:
+        # ★ dev 这一档**不取** `posture["why"]`：那条 why 是 30+ 字的工程说明
+        #   （版本差），按 FZ-004 契约它不许进主行 —— 版本差归徽标与悬停提示。
+        parts.append(DEV_LINE)
+    elif now_bad:
+        parts.append(_nt)
+    # ---- 第二段：账（有就说，绝不藏）----
     if n_act > 0:
-        parts.append("还有 %d 件事没处理" % n_act)
+        parts.append(_ACTION_SHORT % n_act if parts else _ACTION_LINE % n_act)
     elif n_info > 0:
-        # ★ 窗口内未处理但都不需你动手（info 桶）⇒ 说"没处理"而**不说"事"**，
-        #   并把"看过即知、不用动手"讲清（0.35.3「你知情即可」）。
-        # ★★ 0.51.0（品质审查，2026-10-16）：括号里补**谁处理掉了** —— info 桶
-        #   定义原话是「Antinel 自己已经处理掉了（拦下/自愈/状态变更）」，旧句
-        #   只说"没处理"与桶定义自相矛盾（同一批记录两个说法）；括号自述口径
-        #   后两个说法各归其位：没处理的是你，处理掉的是监理。
-        #   「没处理」「看过即知」两个词被 0380 S11/S17 钉住，不许动。
-        parts.append("还有 %d 条没处理（监理已自动处理，看过即知，不用动手）" % n_info)
-    else:
-        parts.append("24 小时里也没有等你处理的事")
+        if parts:
+            parts.append(_INFO_SHORT % n_info)
+        else:
+            parts.append(info_line(n_info, hours,
+                                   levels={it.level for it in _info_items}))
+    elif not parts:
+        parts.append(quiet_line(hours))
     reason = "；".join(parts) + "。"
     return {"state": st, "label": label, "now_text": now_text,
             "now_bad": now_bad, "ledger_bad": ledger_bad, "reason": reason,
