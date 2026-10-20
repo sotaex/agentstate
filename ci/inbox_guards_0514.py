@@ -6450,6 +6450,138 @@ def n_tp_a2():
     return True
 
 
+# ═══════════ TP-E · TAB 切换即时反馈（2026-10-21 创始人拍板 E）═══════════
+#
+#: 方案 E（治标不治本的那一半，与 A/B/C 并行）：切 TAB 点击即高亮＋顶部
+#: 细进度条＋悬停 100ms 预取。治"等好久"的心理时长；服务端零计算变化。
+#: 判据方法：渲染产物断言（挂点在、线在、渐进增强在）＋ **node 真跑
+#: 语法校验**（JS 是字符串常量，不解析就不知道它是不是坏的）。
+
+_TAB_NODE = None
+for _cand in (os.path.join(os.environ.get("LOCALAPPDATA", ""), "..", "..",
+                           ".workbuddy-ai", "binaries", "node",
+                           "versions", "22.22.2-6", "node.exe"),
+              "node"):
+    try:
+        import subprocess as _sp
+        if _sp.run([_cand, "--version"], capture_output=True,
+                   timeout=10).returncode == 0:
+            _TAB_NODE = _cand
+            break
+    except Exception:                                      # noqa: BLE001
+        continue
+
+
+def _tp_e_problems(page):
+    """E 的量尺（纯清单返回；正负控共用）：挂点／走线／渐进增强四件事。"""
+    bad = []
+    if 'id="tabprog"' not in page or 'class="tabprog"' not in page:
+        bad.append("页面没有进度条挂点（class/id 各缺一半就算缺）")
+    if ".tabprog{" not in page or "@keyframes tabprog" not in page:
+        bad.append("CSS 缺 .tabprog 规则或 @keyframes（没样式＝挂了也看不见）")
+    for needle, why in (
+            ("addEventListener('click'", "点击即高亮的接线没了"),
+            ("addEventListener('mouseenter'", "悬停预取的接线没了"),
+            ("fetch(a.href", "预取请求没了（悬停 100ms 形同虚设）"),
+            ("credentials:'same-origin'", "预取没带 cookie（口令在 httpOnly cookie 里）"),
+            ("}, 100);", "100ms 意图阈值没了（鼠标划过就预取）"),
+            ("e.metaKey || e.ctrlKey", "修饰键护栏没了（新窗打开会误亮当前页）"),
+            ("activate(a);", "点击后没有真正切高亮（activate 调用没了——线在、效果没了）"),
+            ("pageshow", "进度条没有收尾（pageshow 摘 .run）")):
+        if needle not in page:
+            bad.append("_TAB_JS 缺：%s（锚 %r）" % (why, needle))
+    if page.count('href="/?v=') < 5:
+        bad.append("选项卡 href 不足 5 个 —— 渐进增强破了（禁用 JS 时将无法导航）")
+    return bad
+
+
+@check("TP-E1 切页即时反馈：进度条挂点＋点击/悬停接线＋渐进增强（href 仍在）")
+def c_tp_e1():
+    """★ 四件事全在才叫"反馈层長好了"：挂点（div+.css）、两条接线
+    （click 高亮／mouseenter 预取）、一条护栏（修饰键）、一条退路
+    （href 是真的 ⇒ 无 JS 可导航）。"""
+    page = SV.render_page(view="inbox", root=_HUB, token="t", items=[])
+    bad = _tp_e_problems(page)
+    if bad:
+        return "；".join(bad)
+    return True
+
+
+@check("N-TPE1 负控：把点击接线从 _TAB_JS 里拆掉 ⇒ TP-E1 必须红")
+def n_tp_e1():
+    """变异体模拟的形状：E 被"顺手删了半边"（比如有人清理脚本时把
+    click 接线删了）—— 同一把尺子必须抓得到。参数还在、线没了，
+    正是最容易复发的漂移形状。"""
+    page = SV.render_page(view="inbox", root=_HUB, token="t", items=[])
+    if _tp_e_problems(page):
+        return "负控前置失败：当前实现没过 TP-E1 正判据"
+    saved = SV._TAB_JS
+    SV._TAB_JS = saved.replace("      activate(a);\n", "")
+    try:
+        page2 = SV.render_page(view="inbox", root=_HUB, token="t", items=[])
+    finally:
+        SV._TAB_JS = saved
+    if "activate(a);" in page2:
+        return "变异没生效（页面里还有 activate 调用）—— 负控自身失效"
+    bad = _tp_e_problems(page2)
+    if not bad:
+        return "负控失效：点击接线拆了仍全绿 —— 尺子分不出'线在/线没'"
+    return True
+
+
+@check("TP-E2 _TAB_JS 过 node --check（脚本真是能跑的 JS，不是摆设）")
+def c_tp_e2():
+    """★ 为什么真跑：`_TAB_JS` 是 Python 字符串常量 —— **写坏了Python
+    不报错**（字符串就是字符串），只有浏览器第一次执行时才发现，而那
+    就是用户点 TAB 没反应的那一刻。node --check 是这道工序的活体验验。
+    本机没有 node ⇒ SKIP（不假绿）。"""
+    import re as _re
+    import subprocess as _sp
+    import tempfile as _tf
+    if _TAB_NODE is None:
+        raise Skip("本机没有可用的 node —— 语法校验这一腿测不出（不装绿）")
+    m = _re.search(r"<script>(.*)</script>", SV._TAB_JS, _re.S)
+    if not m:
+        return "_TAB_JS 里找不到 <script> 块（形状变了，量具要跟上）"
+    p = os.path.join(_tf.gettempdir(), "tp_e2_tabjs.js")
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(m.group(1))
+    r = _sp.run([_TAB_NODE, "--check", p], capture_output=True, timeout=30)
+    if r.returncode != 0:
+        return "_TAB_JS 语法坏（node --check 退出 %d）：%s" % (
+            r.returncode, (r.stderr or b"")[:200])
+    return True
+
+
+@check("N-TPE2 负控：往脚本里塞一个语法错误 ⇒ node --check 必须失败")
+def n_tp_e2():
+    """证明上一条不是"node 跑了但什么都没验"：塞进去的语法错误
+    （少一个收尾括号）必须被 --check 抓到。"""
+    import re as _re
+    import subprocess as _sp
+    import tempfile as _tf
+    if _TAB_NODE is None:
+        raise Skip("本机没有 node —— 本负控与 TP-E2 同腿，一起SKIP")
+    saved = SV._TAB_JS
+    # ★ 变异体必须是**真语法错误**：`})();` → `});` 只是把自调用改成
+    #   表达式语句（合法 JS，node --check 照过 —— 第一版负控就这么失效过）。
+    #   直接塞一个配不对的 `if (true {`，任何 JS 引擎都必报。
+    SV._TAB_JS = saved.replace("</script>", "if (true {\n</script>")
+    try:
+        m = _re.search(r"<script>(.*)</script>", SV._TAB_JS, _re.S)
+        if not m:
+            return "变异后找不到 <script> 块 —— 变异体形状不对"
+        p = os.path.join(_tf.gettempdir(), "tp_e2n_tabjs.js")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(m.group(1))
+        r = _sp.run([_TAB_NODE, "--check", p], capture_output=True, timeout=30)
+    finally:
+        SV._TAB_JS = saved
+    if r.returncode == 0:
+        return "负控失效：塞了语法错误 node --check 仍通过 —— 这条校验是摆设"
+    return True
+
+
 def main():
     print("=" * 78)
     print("0.49.0 收口判据 —— W-08 默认尺寸 · W-09 浮层逃逸 · U-17 图标动效 · "

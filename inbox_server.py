@@ -170,6 +170,12 @@ button.logo:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .tabs{display:flex;gap:4px;padding:10px 20px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .tabs a{padding:9px 14px;color:var(--muted);font-weight:600;text-decoration:none;border-bottom:2px solid transparent}
 .tabs a.on{color:var(--brand);border-bottom-color:var(--brand)}
+/* ★ 2026-10-21（TAB 切换卡顿根治·方案 E）：切页**细进度条**。2px、贴顶、
+   随 var(--brand) 换色；`pointer-events:none` ⇒ 永不抢点击。JS 不可用
+   （或没点 TAB）时 width 恒 0 ⇒ 什么都不显示，不是占位的假条。 */
+.tabprog{position:fixed;top:0;left:0;height:2px;width:0;z-index:60;pointer-events:none;background:var(--brand)}
+.tabprog.run{animation:tabprog 1.1s .05s ease-out forwards}
+@keyframes tabprog{from{width:0}to{width:88%}}
 main{max-width:1000px;margin:0 auto;padding:20px}
 /* ★ 0.50.4（Q-17）：卡片内边距 14px→11px、卡片间距 12px→9px —— 日报页原先
    必须滚动才看得到「规则命中排行」和「有没有被改过」两张卡。 */
@@ -1524,6 +1530,58 @@ btn.addEventListener("click", function(){
 
 def _collapse_js(token):
     return _COLLAPSE_JS_TMPL.replace("__TOKEN__", _esc(token))
+
+
+#: ★ 2026-10-21（TAB 切换卡顿根治·方案 E，创始人拍板"顺带做"）：
+#:   切 TAB 的**即时反馈**三件 —— 点击即高亮、顶部细进度条、悬停预取。
+#:   治的是"等好久"的**心理时长**（真时长由方案 A/B/C 在服务端修），
+#:   本文件零计算变化、零新请求类型。
+#:   ★ 渐进增强：`_tabs` 的 href 是真的 ⇒ 禁用 JS 时导航照旧；本脚本
+#:     只加一层反馈，删掉它页面一个字节都不少。
+#:   ★ 悬停预取打的是**同一个 GET**（`/?v=…`）：0.48.6 B3 起口令在
+#:     httpOnly cookie 里，`same-origin` 默认带上 ⇒ 服务端把该视图的
+#:     缓存温热，真点击时几乎命中。100ms 是**意图阈值**（鼠标划过不算）；
+#:     失败静默（`.catch`）—— 预取是优化，不是功能。
+#:   ★ 只 GET 只读视图、不碰任何带副作用的按钮；账本视图的记账已被
+#:     方案 C 节流（45s 一次）⇒ 预取不会造成重复落账。
+#:   ★ 修饰键/中键＝新窗打开：不动当前页的高亮与进度条（点了却给
+#:     当前页换高亮＝假的即时反馈）。
+_TAB_JS = """
+<script>
+(function(){
+"use strict";
+var bar = document.getElementById('tabprog');
+var links = document.querySelectorAll('.tabs a');
+function activate(a){
+  if (bar) bar.classList.add('run');
+  for (var i = 0; i < links.length; i++) links[i].classList.remove('on');
+  a.classList.add('on');
+}
+for (var i = 0; i < links.length; i++) {
+  (function(a){
+    var tid = null;
+    a.addEventListener('click', function(e){
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+      activate(a);
+    });
+    a.addEventListener('mouseenter', function(){
+      if (tid) clearTimeout(tid);
+      tid = setTimeout(function(){
+        tid = null;
+        fetch(a.href, {credentials:'same-origin'}).catch(function(){});
+      }, 100);
+    });
+    a.addEventListener('mouseleave', function(){
+      if (tid) { clearTimeout(tid); tid = null; }
+    });
+  })(links[i]);
+}
+window.addEventListener('pageshow', function(){
+  if (bar) bar.classList.remove('run');
+});
+})();
+</script>
+"""
 
 
 #: 浮层逃逸的当前状态（原矩形/调整后矩形/窗口标识）。**只有一次调整是活的**：
@@ -3432,9 +3490,13 @@ def render_page(view="inbox", filt=None, root=None, token="", items=None, rep=No
                   extra_css=EXAM_CSS if view == "health_exam" else "")
             + _bar(items, token, posture=p, now=now, view=view, ex=ex)
             + _tabs(view, token)
+            # ★ 2026-10-21（方案 E）：切页细进度条的挂点（fixed 定位，
+            #   JS 给它加 .run 才动；无 JS 时 width 恒 0 不可见）。
+            + "<div class=\"tabprog\" id=\"tabprog\"></div>"
             + "<main>" + body + "</main>"
             + _FLIP_JS + _READ_JS + _LOGO_JS + _escape_js(token)
             + _collapse_js(token)
+            + _TAB_JS
             + "</body></html>")
 
 
