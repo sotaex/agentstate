@@ -2739,6 +2739,484 @@ def n_health_copy_sources_banned_term_is_caught():
     return True
 
 
+# ══════════ X 族 · 体检结果呈现与导出（2026-10-21 创始人拍板，只读轮 §10）══════════
+# 施工单：docs/Antinel·体检页体验深度分析（2026-10-21 只读轮）§10.1/§10.2/§10.3。
+# 四条拍板：① A2 改小＝**分层不搬话题**；② D1 自包含 HTML（PDF 走后端打印，
+#   不破零运行时依赖）；③ 默认脱敏、一键完整版；④ 版本真源＝`antinel.VERSION`
+#   （`ci/version_check.py` 的 9 处逐字一致判据守着，取任一皆等值）。
+# ★ ID「X1…X5」本轮全树无重名（先用 `grep '@check('`＋CHECKS 表两种形态查过，
+#   X 前缀零占用 —— 铁律 9：编号必须唯一，落笔前先查撞号）。
+# ★ 与 0490 的 X6/X7 分工：本文件守**渲染与导出本身**（ui_server 产物），
+#   0490 守**控制台入口与路由**（inbox_server）—— 各守一层，各配负控。
+_X_USER = "xprobeuser"          #: 夹具专用假用户名（判据跑前设进 env，跑后还原）
+
+#: 正判据只读**真模块**（不起子进程、不改文件）；负控走 `_x_mod` 内存变异版。
+import ui_server as _U                                       # noqa: E402
+
+
+def _x_tools():
+    """X 族夹具：五个档位各一条（PACK/SENT/CLEAN×2/NA），数字取不自然撞上的值。"""
+    u = _X_USER
+    return [
+        {"name": "X-PACK-1",
+         "path": "C:\\Users\\%s\\AppData\\Roaming\\xpack" % u,
+         "verdict": "PACK", "size": 12345678, "files": 7,
+         "ev": [("a", "lastCompressedSize")]},
+        {"name": "X-SENT-1", "path": "D:\\xwork\\xsent", "verdict": "SENT",
+         "size": 100, "files": 1, "ev": [("b", "lastUploaded")]},
+        {"name": "X-CLEAN-1", "path": "D:\\xwork\\xclean1", "verdict": "CLEAN",
+         "size": 999, "files": 3},
+        {"name": "X-CLEAN-2", "path": "D:\\xwork\\xclean2", "verdict": "CLEAN",
+         "size": 998, "files": 2, "trunc": True},
+        {"name": "X-NA-1", "path": "D:\\xwork\\xna", "verdict": "NA",
+         "size": 1, "files": 1, "excl": "不适用：更新包"},
+    ]
+
+
+def _x_details():
+    """一个工具的 details 块：`workspacePath` 里带假用户名（覆盖证据区脱敏）。
+
+    ★ 为什么证据区也要带：59/59 路径含用户名只是**上半页**；证据原文表里
+      另有 kpath/值（manifest×9、json×17）。只断言路径列表被脱敏 ⇒ 假绿。
+    """
+    u = _X_USER
+    return {"C:\\Users\\%s\\AppData\\Roaming\\xpack" % u: [{
+        "mtime_ms": 0, "mtime_text": "", "items": [
+            {"kind": "mark", "kpath": "workspacePath",
+             "value": "C:\\Users\\%s\\work\\proj-x" % u,
+             "ts_ms": 0, "ts_text": ""},
+            {"kind": "mark", "kpath": "lastCompressedSize.workspaceSizeBytes",
+             "value": 143378975, "ts_ms": 0, "ts_text": ""},
+            {"kind": "mark", "kpath": "lastCompressedSize.encryptedSizeBytes",
+             "value": 242231, "ts_ms": 0, "ts_text": ""},
+            {"kind": "mark", "kpath": "lastAcceptedManifestHash",
+             "value": "xprobehash", "ts_ms": 0, "ts_text": ""},
+        ]}]}
+
+
+def _x_scan():
+    return {"generated_at": "2026-10-21T05:00:00+08:00",
+            "tools": _x_tools(), "details": _x_details(),
+            "counts_by_verdict": {"PACK": 1, "SENT": 1, "SYNC": 0,
+                                  "CLEAN": 2, "BLIND": 0, "NA": 1},
+            "coverage": {"registered_roots": 7, "present": 6, "scanned": 5,
+                         "unscanned": 1, "added_by_registry": 2, "absent": 1},
+            "observations": {"crash_dumps": [{"path": "D:\\xwork\\cd",
+                                              "bytes": 10}],
+                             "index_dirs": None}}
+
+
+def _x_res(canary=None):
+    u = _X_USER
+    return {"scan": _x_scan(),
+            "egress": {"snapshot": {"ok": True, "conns": [
+                           {"proc": "X-PACK-1.exe", "pid": 1},
+                           {"proc": "X-PACK-1.exe", "pid": 1},
+                           {"proc": "B.exe", "pid": 2}]},
+                       "findings": [], "longest_by_proc": {"X-PACK-1.exe": 3600.0},
+                       "days_with_data": 3, "coverage_seconds": 519840},
+            "canary": ({"projects": 2, "planted": ["CANARY-x-1", "CANARY-x-2"],
+                        "read": 3, "observed": 0} if canary is None else canary)}
+
+
+def _x_mod(src=None, tag="is0360_x"):
+    """（可变异）加载 ui_server 模块 —— 与 0490 `_load` 同型，量具故障与
+    产品红必须分开（加载抛 ⇒ 负控自身失效，不算通过）。"""
+    import types
+    mod = types.ModuleType(tag)
+    mod.__file__ = os.path.join(ROOT, "ui_server.py")
+    sys.modules[tag] = mod
+    exec(compile(src, mod.__file__, "exec"), mod.__dict__)          # noqa: S102
+    return mod
+
+
+def _x_render(res=None, src=None, tag="is0360_x"):
+    """渲染体检结果块，返回 `(html, None)` 或 `(None, 说明串)`。"""
+    import antinel                                                 # noqa: E402
+    try:
+        mod = _U if src is None else _x_mod(src, tag)
+        return (mod._result_html(res or _x_res(), antinel.VERDICTS,
+                                 antinel._ev_human), None)
+    except Exception as e:                                         # noqa: BLE001
+        return None, ("量具故障：渲染抛 %s: %s —— 不是产品问题，不算通过"
+                      % (type(e).__name__, e))
+
+
+def _x_src(rel="ui_server.py"):
+    """读产品源码（负控变异用）。★ 与 0490 `_src` 同型：本文件不引它的私有件。"""
+    with io.open(os.path.join(ROOT, rel), encoding="utf-8") as f:
+        return f.read()
+
+
+def _x_mut(anchor, repl, tag, res=None):
+    """负控两步法第一步：变异必须**真的进得去**（锚点不在 ⇒ 负控自身失效）。"""
+    src = _x_src()
+    if anchor not in src:
+        return None, None, ("变异锚点未找到（源码已变，需更新负控）—— "
+                            "负控自身失效，不算通过：%r" % anchor[:70])
+    mod = _x_mod(src.replace(anchor, repl), tag)
+    import antinel                                                 # noqa: E402
+    try:
+        page = mod._result_html(res or _x_res(), antinel.VERDICTS,
+                                antinel._ev_human)
+    except Exception as e:                                         # noqa: BLE001
+        return None, None, ("量具故障：变异版渲染抛 %s: %s —— 不是产品问题，"
+                            "不算通过" % (type(e).__name__, e))
+    return page, mod, None
+
+
+def _x_visible(page):
+    """渲染产物 → 可见文本（先剥 style/script 与折叠区，双口径分开报）。"""
+    t = re.sub(r"(?is)<(script|style).*?</\1>", "", page)
+    t = re.sub(r"(?is)<details.*?</details>", "", t)
+    t = re.sub(r"<[^>]+>", " ", t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _x_text_of_tile(page, label):
+    """取汇总卡里某格的可见文本（`label` 那一段）—— 按**行片**取，不扫全文
+    （全文里有几十个数字，「带分母」这种断言在全文上分不开，那是假绿温床）。"""
+    txt = _x_visible(page)
+    i = txt.find(label)
+    if i < 0:
+        return None
+    return txt[i:i + 90]
+
+
+def _x1_core(page):
+    if "这次体检的结论" not in page:
+        return "页面上没有结论汇总卡（A1：先看这一卡）"
+    # 卡必须在 ① 之前（置顶，不是埋在四组后面）
+    if page.find("这次体检的结论") > page.find("① 我电脑上有哪些 AI 工具"):
+        return "汇总卡排在四组后面 —— 置顶要求没落地"
+    # 三态各带分母（0.47.0 纪律：裸分子会让读者不知道分母）
+    want = [("在自己写的记录里有外传字样", "2 / 5"),
+            ("查过，没发现记录", "2 / 5"),
+            ("没查到（当空白读）", "1 / 5")]
+    for label, val in want:
+        seg = _x_text_of_tile(page, label)
+        if seg is None:
+            return "汇总卡缺这一格：%s" % label
+        if val not in seg:
+            return "汇总卡「%s」没带分母（应含 %r）：%r" % (label, val, seg[:60])
+    # 「没查到」那格必须说清它是空白而不是没问题（禁词/口径两层）
+    seg = _x_text_of_tile(page, "没查到（当空白读）")
+    if "登记过、也在，但扫描没走到" not in seg:
+        return "「没查到」没说清它是什么（%r）" % seg[:60]
+    # 其余四格：项目／外连／诱饵／别处（都是页面已有口径，无第二套算法）
+    for label, val in (("项目被打包过", "1"), ("此刻谁在往外连", "3 条"),
+                      ("诱饵文件", "2 个"), ("别处观察到的东西", "1 类")):
+        seg = _x_text_of_tile(page, label)
+        if seg is None or val not in seg:
+            return "汇总卡缺「%s %s」：%r" % (label, val, (seg or "")[:60])
+    # 卡的脚注必须把「没发现 ≠ 没有问题」写在同一屏
+    if "不是「没有问题」" not in _x_visible(page[:page.find("① 我电脑上有哪些")]):
+        return "汇总卡脚注没写「没发现 ≠ 没有问题」"
+    return True
+
+
+def c_x1():
+    """X1 ★ 结论汇总卡置顶：三态（有事/没发现/没查到）各带分母，四类汇总齐。"""
+    page, why = _x_render()
+    return why or _x1_core(page)
+
+
+def n_x1():
+    """负控：把「没查到」那一格的说明摘掉 ⇒ X1 必须红。
+
+    ★ 锚点是卡上**独有**的那句说明（不锚分母数字 —— 分母在三格里重复，
+      变异会一次打穿三格，证明不了「专守盲区那一格」）。
+    """
+    anchor = '"登记过、也在，但扫描没走到"'
+    page, _mod, why = _x_mut(anchor, '""', "is0360_nx1")
+    if why:
+        return why
+    if _x1_core(page) is True:
+        return "负控失效：「没查到」的说明被摘掉后 X1 没红"
+    if _x1_core(_x_render()[0]) is not True:
+        return "夹具不成立：真实现本身就被 X1 判红 ⇒ 负控无分辨力"
+    return True
+
+
+def _x2_core(page):
+    # 免责话只说一次（51 行重复＝没说；聚合后只剩组标题那一次）
+    n = page.count("扫过了，没找到它们自己写下的外传记录")
+    if n != 1:
+        return "CLEAN 的免责话出现 %d 次（聚合后应恰 1 次）" % n
+    if "查过，没发现记录（2 个）" not in page:
+        return "CLEAN 没有收成一组（组标题带个数）"
+    if "class='fold xfold'" not in page:
+        return ("CLEAN 组不是可折叠的 —— 默认折叠让首屏先看见有事的"
+                "（分层不是删行）")
+    if "点开看是哪些（2 个）" not in page:
+        return "折叠区的summary没说清里面是什么、有几个"
+    # 有事的仍逐行、且带档位 tag（不许被折叠吞掉）
+    for nm in ("X-PACK-1", "X-SENT-1"):
+        if nm not in page:
+            return "有事的行丢了：%s" % nm
+    if "自认打包过" not in page or "自认往外发过" not in page:
+        return "有事的行没带档位文案"
+    # NA 仍逐行：「没检查」的事实不许折叠没了
+    if "未检查：不适用：更新包" not in page:
+        return "NA（不适用/未检查）行丢了 —— 那是「没查」的事实"
+    if "不适用／没检查的（1 个）" not in page:
+        return "NA 没有自己的组"
+    # 名单一个字不减（信息去哪了：折叠区，不是删了）
+    for nm in ("X-CLEAN-1", "X-CLEAN-2"):
+        if nm not in page:
+            return "CLEAN 名单少了 %s —— 聚合不许丢名单" % nm
+    # 截断标记必须留在折叠区里（「这次没看完」的事实）
+    if "扫描被截断（没看完）" not in page:
+        return "CLEAN 的截断标记丢了"
+    return True
+
+
+def c_x2():
+    """X2 ★ CLEAN 分层：聚合成一个默认折叠的组；有事/NA 仍逐行；名单不减。"""
+    page, why = _x_render()
+    return why or _x2_core(page)
+
+
+def n_x2():
+    """负控：把 CLEAN 并回逐行（0.53.0 前的形态）⇒ X2 必须红。
+
+    ★ 这正是本轮要治的形状：51 行同字号并列，免责话重复 51 遍。
+    """
+    anchor = "        out.append(_clean_group_html(clean, verdicts))"
+    repl = ("        out.append(\"\".join(_row_html(r, verdicts, ev_human, details)\n"
+            "                           for r in clean))")
+    page, _mod, why = _x_mut(anchor, repl, "is0360_nx2")
+    if why:
+        return why
+    if _x2_core(page) is True:
+        return "负控失效：CLEAN 并回逐行后 X2 没红"
+    if _x2_core(_x_render()[0]) is not True:
+        return "夹具不成立：真实现本身就被 X2 判红 ⇒ 负控无分辨力"
+    return True
+
+
+def _x3_core(page, js):
+    # ① 接线锚：两个开关按钮（全部展开/全部收起）都在渲染产物里
+    for b in ("data-foldall='1'", "data-foldall='0'"):
+        if b not in page:
+            return "折叠开关少一个：%r" % b
+    if "全部展开" not in page or "全部收起" not in page:
+        return "开关按钮没有可见文字"
+    # ② 分区锚点：四组 h2 带 id，跳到条是真 <a href="#…">（禁 JS 照旧跳）
+    for i in ("x-tools", "x-projs", "x-egress", "x-obs"):
+        if ("id='%s'" % i) not in page:
+            return "分区缺锚点 id=%s" % i
+        if ("href='#%s'" % i) not in page:
+            return "跳到条缺链接 #%s" % i
+    # ③ 效果锚（#29 纪律：尺子钉效果不只钉接线）：
+    #    被摆布的对象带 xfold，脚本里真有".querySelectorAll + .open ="的动作
+    if "class='fold xfold'" not in page:
+        return "没有 details 带 xfold —— 开关没有摆布对象（假接线）"
+    for frag in ("data-foldall", "details.xfold", ".open"):
+        if frag not in js:
+            return "折叠脚本缺效果语句 %r（只接线不动作＝假实现）" % frag
+    # ④ 渐进增强：开关不许变成唯一出路（禁 JS 时 details 原生可用）
+    if "<details" not in page:
+        return "没有原生 details —— 禁 JS 用户什么都看不了"
+    return True
+
+
+def c_x3():
+    """X3 ★ 分区锚点＋折叠开关：接线锚、效果锚、渐进增强三层都要在。"""
+    page, why = _x_render()
+    if why:
+        return why
+    import ui_server as U
+    return _x3_core(page, U._EXAM_FOLD_JS)
+
+
+def n_x3():
+    """负控两变异各验一边（#29：接线在、效果不在也必须抓）：
+
+    ① 摘掉 xfold 类 ⇒ 开关没有摆布对象；
+    ② 脚本里把 `.open = open` 换成空动作 ⇒ 接线还在、效果没了。
+    """
+    anchor = "ds[i].open = open;"
+    page, mod, why = _x_mut("ds[i].open = open;", "void 0;", "is0360_nx3b")
+    if why:
+        return why
+    r = _x3_core(page, mod._EXAM_FOLD_JS)
+    if r is True:
+        return "负控失效：脚本只剩接线（.open 被摘）后 X3 没红"
+    page2, mod2, why = _x_mut("class='fold xfold'", "class='fold'", "is0360_nx3a")
+    if why:
+        return why
+    r2 = _x3_core(page2, mod2._EXAM_FOLD_JS)
+    if r2 is True:
+        return "负控失效：xfold 被摘掉后 X3 没红"
+    if _x3_core(_x_render()[0], _U._EXAM_FOLD_JS) is not True:
+        return "夹具不成立：真实现本身就被 X3 判红 ⇒ 负控无分辨力"
+    return True
+
+
+def _x_export(res=None, level=1, version="0.99.9"):
+    """跑一次导出（**不脱敏**的原始件），返回 `(html, meta)`。
+
+    ★ 版本故意用一个不可能撞上的数（0.99.9）：断言「文件里有它」才证明
+      真的印了版本戳，而不是页面上本来就有的某个数字。
+    """
+    import antinel                                                 # noqa: E402
+    mod = _U
+    res = res if res is not None else _x_res()
+    meta = {"version": version,
+            "scan_at": (res.get("scan") or {}).get("generated_at") or "",
+            "made_at": "2026-10-21T05:10:00+08:00",
+            "archive": "exam-xprobe.json", "level": level}
+    return mod._exam_export_html(res, antinel.VERDICTS,
+                                 antinel._ev_human, meta), meta
+
+
+def _x4_core(html_txt, meta):
+    # ① 自包含：零外部资源、零脚本（附件不带行为，只带数据）
+    if re.search(r"(?i)<script", html_txt):
+        return "导出件带 <script> —— 附件不该带行为"
+    if re.search(r'(?i)(?:src|href)\s*=\s*["\']?\s*(?:https?:|//)', html_txt):
+        return "导出件引外部资源 —— 「自包含」没做到"
+    # ② 版本戳（F：以哪一处为真源 —— `antinel.VERSION`，9 处判据逐字守着）
+    if meta["version"] not in html_txt:
+        return "导出件缺版本戳 %r（F 的落点）" % meta["version"]
+    # ③ 快照三要素 + 存档来源（§10.2：附件是快照，不是活页）
+    for k in ("体检时刻", "报告生成", "存档 <code>exam-xprobe.json</code>"):
+        if k not in html_txt:
+            return "导出件缺 %r" % k
+    # ④ 边界声明随文件走（E：否则收到的人只看见「体检报告」四个字）
+    for s in ("只读", "本地生成", "不是「没有问题」"):
+        if s not in html_txt:
+            return "导出件缺边界声明：%r" % s
+    # ⑤ 脱敏声明在文件里自证（默认档）
+    if "脱敏版" not in html_txt:
+        return "导出件缺「脱敏版」自证"
+    if "完整版" not in html_txt:
+        return "导出件缺「完整版」警示（给错版本的第二道防线）"
+    # ⑥ 摘要卡与逐行都在（附件与版面共享同一批取数，不写第二套算法）
+    if "这次体检的结论" not in html_txt or "X-PACK-1" not in html_txt:
+        return "导出件缺汇总卡或逐行 —— 它不是一份体检结果"
+    return True
+
+
+def c_x4():
+    """X4 ★ 导出件：自包含（零外链零脚本）＋版本戳＋快照三要素＋边界/脱敏声明。"""
+    html_txt, meta = _x_export()
+    return _x4_core(html_txt, meta)
+
+
+def n_x4():
+    """负控：版本戳漏掉 ⇒ X4 必须红（锚点是 meta→ver 那一行，独有）。"""
+    anchor = 'ver = html.escape(str(meta.get("version") or ""))'
+    page, mod, why = _x_mut(anchor, 'ver = ""', "is0360_nx4")
+    if why:
+        return why
+    import antinel                                                 # noqa: E402
+    try:
+        html_txt = mod._exam_export_html(_x_res(), antinel.VERDICTS,
+                                         antinel._ev_human,
+                                         {"version": "0.99.9",
+                                          "scan_at": "2026-10-21T05:00:00+08:00",
+                                          "made_at": "x", "archive": "exam-xprobe.json",
+                                          "level": 1})
+    except Exception as e:                                         # noqa: BLE001
+        return "量具故障：变异版导出抛 %s: %s" % (type(e).__name__, e)
+    if _x4_core(html_txt, {"version": "0.99.9"}) is True:
+        return "负控失效：版本戳被抹掉后 X4 没红"
+    if _x4_core(*_x_export()) is not True:
+        return "夹具不成立：真实现本身就被 X4 判红 ⇒ 负控无分辨力"
+    return True
+
+
+def _x_nums(html_txt):
+    """导出件的数字集合（脱敏前后比对：脱敏只许替文字，不许动计数）。"""
+    t = re.sub(r"(?is)<(script|style).*?</\1>", "", html_txt)
+    return sorted(re.findall(r"\d+(?:\.\d+)?", re.sub(r"<[^>]+>", " ", t)))
+
+
+def _x5_core():
+    """X5 ★ 默认脱敏：全文 0 命中；计数一字不改；文件名带脱敏态。"""
+    import antinel                                                 # noqa: E402
+    old = os.environ.get("USERNAME")
+    os.environ["USERNAME"] = _X_USER
+    try:
+        u = _X_USER
+        # ① 完整版（未脱敏）必须真含假用户名 —— 否则后面什么都不能证明
+        full, meta0 = _x_export(level=0)
+        if u not in full and u.upper() not in full:
+            return "夹具不成立：完整版里没有假用户名（什么都不能证明）"
+        # ② 默认档（level=1）全文 0 命中（含证据区）
+        san, masked = _U._exam_sanitize(full, 1)
+        for bad in (u, u.upper(), u.lower()):
+            if bad in san:
+                return "默认档脱敏后 %r 仍在件里 —— 只脱敏路径列表＝白脱" % bad
+        if not masked:
+            return "脱敏器报告「什么都没替」—— 不许拿空串假装替过了"
+        # ③ 脱敏不许动计数（同一个量的两种表示被相加／数字被改）
+        if _x_nums(san) != _x_nums(full):
+            return "脱敏改了数字 —— 附件与账面从此对不上"
+        # ④ 文件名带脱敏态（给错版本要在文件名层就能发现）
+        fn1 = _U._exam_export_filename(dict(meta0, level=1))
+        fn0 = _U._exam_export_filename(dict(meta0, level=0))
+        if "sanitized" not in fn1:
+            return "脱敏版文件名没带 sanitized：%r" % fn1
+        if "sanitized" in fn0:
+            return "完整版文件名也带 sanitized（%r）—— 给错版本发现不了" % fn0
+        # ⑤ level=0 一律不替（一键完整版要真是完整的）
+        back, m0 = _U._exam_sanitize(full, 0)
+        if m0 or u not in back:
+            return "level=0 也动了文字 —— 「完整版」不完整"
+        return True
+    finally:
+        if old is None:
+            os.environ.pop("USERNAME", None)
+        else:
+            os.environ["USERNAME"] = old
+
+
+def c_x5():
+    """X5 ★ 导出脱敏（默认档）：全文 0 命中＋计数不变＋文件名带脱敏态。"""
+    return _x5_core()
+
+
+def n_x5():
+    """负控：把替换表清空（脱敏器退化成 no-op）⇒ X5 必须红。
+
+    ★ 变异打在**替换表的来源**上（不是打在调用处）—— 这样连
+      「masked 报告什么都没替」那条腿也一并证明。
+    """
+    anchor = "for cand in (home, user, user.lower(), user.upper()):"
+    old = os.environ.get("USERNAME")
+    os.environ["USERNAME"] = _X_USER
+    try:
+        src = _x_src()
+        if anchor not in src:
+            return ("变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，"
+                    "不算通过：%r" % anchor[:60])
+        mod = _x_mod(src.replace(anchor, "for cand in ():"), "is0360_nx5")
+        import antinel                                             # noqa: E402
+        full = mod._exam_export_html(_x_res(), antinel.VERDICTS,
+                                     antinel._ev_human,
+                                     {"version": "0.99.9",
+                                      "scan_at": "2026-10-21T05:00:00+08:00",
+                                      "made_at": "x", "archive": "exam-xprobe.json",
+                                      "level": 1})
+        san, masked = mod._exam_sanitize(full, 1)
+        if _X_USER not in san:
+            return "夹具不成立：变异后假用户名仍不在件里（夹具失去了分辨力）"
+        if masked:
+            return "变异不成立：清空替换表后仍报告 masked=True"
+        # 真实现必须仍然全绿（证明红来自变异，不来自夹具基线）
+        if _x5_core() is not True:
+            return "夹具不成立：真实现本身就被 X5 判红 ⇒ 负控无分辨力"
+        return True
+    finally:
+        if old is None:
+            os.environ.pop("USERNAME", None)
+        else:
+            os.environ["USERNAME"] = old
+
+
 CHECKS = [
     ("G01 面板几何随分辨率变化", c_window_geometry_follows_resolution,
      n_window_geometry_is_not_constant),
@@ -2819,6 +3297,17 @@ CHECKS = [
     ("H6b 派生源注入「金丝雀」被逮（shield 概述句／规则文案四路径）",
      c_health_copy_sources_are_clean,
      n_health_copy_sources_banned_term_is_caught),
+    # ---- X 族（2026-10-21 体检页优化·创始人拍板；渲染与导出侧）----
+    ("X1 结论汇总卡置顶：三态各带分母＋四类汇总＋「没发现≠没有问题」同屏",
+     c_x1, n_x1),
+    ("X2 CLEAN 分层：聚合成默认折叠的组；有事/NA 仍逐行；名单一字不减",
+     c_x2, n_x2),
+    ("X3 分区锚点＋折叠开关：接线锚／效果锚／渐进增强三层都在",
+     c_x3, n_x3),
+    ("X4 导出件：自包含（零外链零脚本）＋版本戳＋快照三要素＋边界/脱敏声明",
+     c_x4, n_x4),
+    ("X5 导出默认脱敏：全文 0 命中＋计数不变＋文件名带脱敏态",
+     c_x5, n_x5),
 ]
 
 
