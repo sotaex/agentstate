@@ -3305,6 +3305,39 @@ def _view_exam(token="", pick=None):
 PAGE_TITLES = {"inbox": "收件箱", "report": "日报", "health": "运行状态",
                "ledger": "账本", "health_exam": "体检"}
 
+#: ★ 2026-10-21（TAB 切换卡顿根治·方案 C，创始人拍板）：账本页 GET 的
+#:   **进程内节流**参数与状态缝。
+#:   为什么（只读轮实测 R3）：旧版每次打开账本页都同步跑 `record_day()`
+#:   ——14 天窗口逐日比对＋持锁追加，实测单次追加 6 个变更多天、每笔
+#:   0.4–1.0s；而它是**幂等**的（数字没变一行都不写）⇒ 重复跑的收益
+#:   是零、成本全付。实测账本页空闲 9.88s vs 运行状态 0.79s 的 9 秒差
+#:   大头就在这里。
+#:   ★ 语义不变（0.51.0 账准修复的承诺不破）：daemon `tick()` 照旧每轮
+#:     **直调** `record_day`（不经过本函数，守护进程一个字节都没动）；
+#:     这里只节流"用户打开账本页"这一路。首次打开必然触发一次
+#:     （`t=None`），GAP 内重复打开跳过；守护进程没跑的日子，第一次
+#:     打开仍然补记 —— 0.51.0 修复的核心场景不受影响。
+#:   ★ 状态缝可注入可复位（判据 Lesson：进程级可变状态必须能让量具
+#:     复位，否则同进程内前序检查的残留会让后一条判据假红/假绿）。
+_RECORD_DAY_MIN_GAP = 45.0
+_RECORD_DAY_STATE = {"t": None}
+
+
+def _maybe_record_day(items=None, root=None, now=None):
+    """账本页 GET 的记账入口：进程内 N 秒内只跑一次（方案 C）。
+
+    返回 `record_day` 的结果；被节流跳过 ⇒ None。`now` 可注入（判据
+    专用；生产不传，走 `time.monotonic()` —— 跨进程只在本进程内有效，
+    换进程（重启监理服务）后第一次打开必然重新触发）。
+    """
+    import inbox_daemon as _DM
+    t = time.monotonic() if now is None else now
+    last = _RECORD_DAY_STATE["t"]
+    if last is not None and (t - last) < _RECORD_DAY_MIN_GAP:
+        return None
+    _RECORD_DAY_STATE["t"] = t
+    return _DM.record_day(items=items, root=root)
+
 
 def render_page(view="inbox", filt=None, root=None, token="", items=None, rep=None,
                 posture=None, now=None, record_ledger=False, notice="", exam=None):
@@ -3333,8 +3366,10 @@ def render_page(view="inbox", filt=None, root=None, token="", items=None, rep=No
     #   因而账本文件不存在、数字一直全零。写入委托给 daemon 唯一实现；只在
     #   用户打开账本页时采样，不让普通收件箱 GET 多做持久化。
     if record_ledger and view == "ledger":
-        import inbox_daemon as _DM
-        _DM.record_day(items=items, root=root)
+        # ★ 2026-10-21（方案 C）：改走节流入口 `_maybe_record_day` ——
+        #   每打开一次账本页就全量重跑 14 天窗口是白付（幂等：没变一行
+        #   不写）。daemon tick 的记账**不走这里**（它直调 record_day）。
+        _maybe_record_day(items=items, root=root)
     # ★ 非法/缺省筛选值 ⇒ 默认「要处理」（**不静默当成"全部"** —— 那会让用户以为
     #   自己看到的是筛选结果，其实是一整条历史）。
     if not filt or not M.known_filter(filt):

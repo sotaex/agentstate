@@ -2142,6 +2142,11 @@ def c_ledger_page_populates_from_chain_snapshot():
     day, items = _ledger_test_items()
     hub = _tmpdir()
     y1 = (datetime.fromisoformat(day).date() - timedelta(days=1)).isoformat()
+    # ★ 2026-10-21（方案 C）：记账节流缝**开工前复位** —— 同进程内前序判据
+    #   （TP-C 族）可能已触发过节流，不复位本例的 record_day 会被静默跳过
+    #   ⇒ 账本文件不落盘 ⇒ 假红（Lesson：进程级可变状态必须可复位，否则
+    #   判据把自己测瞎）。
+    SV._RECORD_DAY_STATE["t"] = None
     old_report = SV.R.daily_report
     SV.R.daily_report = lambda **_kw: {"ledger": L.summary(root=hub, today=day)}
     try:
@@ -4652,12 +4657,104 @@ def n_tp_b2_heartbeat_tail_matches_full():
     return True
 
 
+# ---------------------------------------------------------------- C ----
+def _tp_c_problems():
+    """账本页记账节流量尺（纯清单返回；正负控共用）。
+
+    四臂：
+      ① 缝复位（新进程态）⇒ 第一次打开账本页 `record_day` 恰好跑 1 次；
+      ② GAP 内再打开 ⇒ 不再跑，且页面照常渲染（契约先于精简）；
+      ③ 节流窗过期（把缝拨到 GAP 之前）⇒ 再打开必须跑（补记不被吞）；
+      ④ daemon **直调** `record_day` 不消耗前端节流缝 —— 守护进程那条
+         路径与监理页这条路径不许耦死（0.51.0 账准修复的承诺在此）。
+    """
+    import inbox_daemon as DM
+    bad = []
+    hub = _tmpdir()
+    day, items = _ledger_test_items()
+    calls = {"n": 0}
+    saved = DM.record_day
+
+    def _counting(*a, **kw):
+        calls["n"] += 1
+        return saved(*a, **kw)
+
+    SV._RECORD_DAY_STATE["t"] = None
+    DM.record_day = _counting
+    try:
+        SV.render_page(view="ledger", root=hub, token="t", items=items,
+                       record_ledger=True)                    # ① 首次必跑
+        if calls["n"] != 1:
+            bad.append("① 首次打开账本页 record_day 跑了 %d 次（应 1）"
+                       % calls["n"])
+        page2 = SV.render_page(view="ledger", root=hub, token="t", items=items,
+                               record_ledger=True)            # ② GAP 内跳过
+        if calls["n"] != 1:
+            bad.append("② GAP 内再打开又跑了（累计 %d 次）—— 节流没生效，"
+                       "每打开一遍就重跑 14 天窗口" % calls["n"])
+        if "账本" not in PC.body(page2):
+            bad.append("② 节流跳过记账后页面渲染异常（页面契约先于精简）")
+        # ③ 把缝拨到 GAP 之前（时钟走过）⇒ 必须再跑
+        SV._RECORD_DAY_STATE["t"] = (time.monotonic()
+                                     - SV._RECORD_DAY_MIN_GAP - 1.0)
+        SV.render_page(view="ledger", root=hub, token="t", items=items,
+                       record_ledger=True)
+        if calls["n"] != 2:
+            bad.append("③ 节流窗过后再打开没跑（累计 %d 次）—— 补记被节流"
+                       "吞了，0.51.0 的承诺破" % calls["n"])
+        # ④ daemon 直调不消耗前端节流缝
+        before = SV._RECORD_DAY_STATE["t"]
+        DM.record_day(items=items, today=day, root=hub)
+        DM.record_day(items=items, today=day, root=hub)
+        if SV._RECORD_DAY_STATE["t"] != before:
+            bad.append("④ daemon 直调 record_day 竟消耗了前端节流缝 —— "
+                       "两条记账路径耦死了")
+    finally:
+        DM.record_day = saved
+        SV._RECORD_DAY_STATE["t"] = None
+    return bad
+
+
+def c_tp_c_record_day_throttled_on_ledger_get():
+    """★ 账本页 GET 的 record_day 进程内节流；daemon 路径不受影响。"""
+    bad = _tp_c_problems()
+    if bad:
+        return "；".join(bad)
+    return True
+
+
+def n_tp_c_record_day_throttled_on_ledger_get():
+    """负控：把 GAP 打到 0（节流失效）⇒ 同一把尺子必须在 ② 臂见红。
+
+    ★ 变异体模拟的形状：有人把节流删了/关了（性能回归回旧状）——
+      ② 臂"GAP 内又跑了"必须抓到它。
+    ★ 前置：当前实现过得正判据（否则负控无分辨力）。
+    """
+    if _tp_c_problems():
+        return "负控前置失败：当前实现没过 TP-C 正判据"
+    saved_gap = SV._RECORD_DAY_MIN_GAP
+    SV._RECORD_DAY_MIN_GAP = 0.0
+    try:
+        bad = _tp_c_problems()
+    finally:
+        SV._RECORD_DAY_MIN_GAP = saved_gap
+    hit = [x for x in bad if x.startswith("②")]
+    if not hit:
+        return ("负控失效：GAP=0 后量尺仍全绿 —— ② 臂是摆设，节流删了也"
+                "没人知道")
+    return True
+
+
 CHECKS_0353 = [
     # ---- 十、TAB 切换卡顿根治·方案 B（2026-10-21 创始人拍板）----
     ("TP-B1 self_check 指纹缓存：不变零重散／沙盒变异必失效必报",
      c_tp_b1_self_check_cache, n_tp_b1_self_check_cache),
     ("TP-B2 心跳尾窗读：真链同全扫＋四边界按契约（声明边界钉住）",
      c_tp_b2_heartbeat_tail_matches_full, n_tp_b2_heartbeat_tail_matches_full),
+    # ---- 十一、TAB 切换卡顿根治·方案 C（2026-10-21 创始人拍板）----
+    ("TP-C 账本页 GET 记账节流：GAP 内不重跑／过期照跑／daemon 路径不耦死",
+     c_tp_c_record_day_throttled_on_ledger_get,
+     n_tp_c_record_day_throttled_on_ledger_get),
     # ---- 九、闪窗（黑窗一闪）----
     ("P12 起子进程必须无窗", c_no_console_flash_on_spawn,
      n_no_console_flash_on_spawn),
