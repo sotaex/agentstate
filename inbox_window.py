@@ -1079,18 +1079,36 @@ def find_bubble_windows(mark=BUBBLE_TITLE_MARK, visible_only=True, run_id=None):
     return out
 
 
-def close_bubble_windows(visible_only=True, closer=None, run_id=None, why=""):
+def close_bubble_windows(visible_only=True, closer=None, run_id=None, why="",
+                         settle_sec=2.0, finder=None):
     """关掉紧急提醒窗（**发 WM_CLOSE，不强杀**）；返回 `(关掉几个, 人话)`。
 
     ★ 一次只留一枚紧急提醒：新的要弹之前，先把旧的收掉 —— 不然屏幕上会叠起
       一串同类通知，那正是「告警泛洪」（规格《品牌动效报警语法》铁律二）。
     ★ `closer` 可注入（判据不必碰真实桌面）—— 与 `close_console_windows`
       同一条纪律：**注入点必须出现在签名里**（0.36.2 的教训）。
+
+    ★★★ 0.53.2（2026-10-20，创始人「陈旧版冒泡在新版冒泡出现几秒后死灰复燃」）：
+      **「消息投出去了」≠「窗真的没了」**。`_post_close` 走的是
+      `PostMessageW(WM_CLOSE)` —— 异步投递，宿主（Edge/Chrome 承载的窗口）
+      收到到销毁之间有真实延迟（本机实测 **≈0.5s**，见下）。
+      旧版把「投递成功数」当成「关掉的数」直接返回，调用方（`inbox_bubble.pop`）
+      于是**立刻**开新窗（新窗还要等最多 6 秒就位）⇒ 屏幕上新旧并存、旧窗在
+      销毁前重绘一次 ⇒ 用户看到的就是「新的出来了，几秒后旧的又回来了」。
+      修法：投递后**轮询到窗口真的不在**（最多 `settle_sec`），并把「等了几秒」
+      如实写进返回的人话；超时仍活着 ⇒ **如实说还剩几枚**，不许报"关掉了"。
+      为什么修在这里而不是在 pop 里加 sleep：全仓只有一个关窗实现
+      （本条注释上一段的「唯一枚举」纪律），等待必须长在这个唯一实现上，
+      否则第二个调用点（退役/兜底）又会漏。
+    ★ `finder` 可注入：判据要在不碰真实桌面的前提下验「等不到 ⇒ 如实报剩余」。
     """
     if closer is None:
         def closer(h):                                      # noqa: E731
             return _post_close(h)
-    hs = find_bubble_windows(visible_only=visible_only, run_id=run_id)
+    _find = finder or find_bubble_windows
+    hs = _find(visible_only=visible_only, run_id=run_id)
+    if not hs:
+        return 0, "没有开着的紧急提醒窗。"
     n = 0
     for h in hs:
         try:
@@ -1098,9 +1116,21 @@ def close_bubble_windows(visible_only=True, closer=None, run_id=None, why=""):
                 n += 1
         except Exception:                                   # noqa: BLE001
             continue
-    if not hs:
-        return 0, "没有开着的紧急提醒窗。"
-    return n, ("关掉了 %d 枚紧急提醒窗%s" % (n, ("（%s）" % why) if why else "。"))
+    # 等它真的消失（PostMessage 是异步的）。轮询用**同一个** finder，
+    # 这样注入的判据 fixture 与真实路径走同一段判定。
+    waited = 0.0
+    left = _find(visible_only=False, run_id=run_id)
+    step = 0.05
+    while left and waited < float(settle_sec):
+        time.sleep(step)
+        waited += step
+        left = _find(visible_only=False, run_id=run_id)
+    tail = ("（%s）" % why) if why else ""
+    if left:
+        return n, ("发出 %d 条关闭指令，但 %.1f 秒后仍有 %d 枚紧急提醒窗没退"
+                   "（不是强杀，宿主没响应）%s" % (n, waited, len(left), tail))
+    return n, ("关掉了 %d 枚紧急提醒窗%s（%.1fs 内确认已消失）"
+               % (n, tail, waited))
 
 
 def close_logo_windows(visible_only=True, closer=None, run_id=None, why=""):

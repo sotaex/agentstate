@@ -2440,6 +2440,107 @@ def c_b08():
     return True
 
 
+# ═══ B-17 · 关旧窗要「确认没了」，不是「关闭指令发出去了」═══
+#: 0.53.2（创始人 2026-10-20：「陈旧版冒泡在新版冒泡出现几秒后死灰复燃」）。
+#: 病根不是"没关"，是**把投递当成结果**：`WM_CLOSE` 是异步投递，宿主从收到到
+#: 销毁有真实延迟（本机 ≈0.5s）；旧实现把「投递成功数」直接当「关掉的数」返回，
+#: 调用方立刻开新窗 ⇒ 屏幕上新旧并存、旧窗临死前重绘一次 ⇒ 看起来"又回来了"。
+#: 四条腿（每条都对着一个可观察的错法，不是对着实现抄）：
+#:   ① 一个窗都没有 ⇒ 早退、**一次都不投递**、人话说「没有开着的」；
+#:   ② 真收掉了 ⇒ 报「关掉了 N 枚」，且 finder **被再问过**（复核存在）；
+#:   ③ 等不到 ⇒ **不许出现「关掉了」**，必须报「仍有 N 枚没退」，N＝剩余数；
+#:   ④ 等待有上限，且上限按注入的 `settle_sec` 走（不许写死 2 秒）。
+#: ★ 腿③为什么拿「关掉了」这三个字当禁令：这正是用户看到的假象 ——
+#:   界面说关掉了，屏幕上还在。人话必须与屏幕一致，这条没有例外。
+def _b17_problem():
+    """返回 None＝四条腿都过；否则第一条不成立的原因（人读）。"""
+    hs = [101, 102]
+    fired = []
+
+    # ---- 腿①：没有窗 ⇒ 早退、不投递 ----
+    def _none(**k):
+        return []
+    n0, txt0 = WIN.close_bubble_windows(
+        finder=_none, closer=lambda h: fired.append(h) or True)
+    if fired:
+        return "没有开着的窗却投递了关闭指令（投递 %d 次）" % len(fired)
+    if n0 != 0:
+        return "没有开着的窗却报了 %r 枚关掉" % (n0,)
+    if "没有开着的" not in (txt0 or ""):
+        return "没有开着的窗，人话没说清：%r" % (txt0,)
+
+    # ---- 腿②：收掉了 ⇒ 报数正确，且回头复核过 ----
+    seen = {"n": 0}
+
+    def _settles(**k):
+        seen["n"] += 1
+        return list(hs) if seen["n"] == 1 else []
+    n1, txt1 = WIN.close_bubble_windows(finder=_settles, closer=lambda h: True)
+    if n1 != len(hs):
+        return "%d 枚窗只报了 %r 枚关掉" % (len(hs), n1)
+    if seen["n"] < 2:
+        return ("投递完没有回头再看一眼（finder 只被问 %d 次）—— "
+                "「消息发出去了」被当成了「窗没了」" % seen["n"])
+    if "关掉了" not in (txt1 or ""):
+        return "收掉了却没说「关掉了」：%r" % (txt1,)
+
+    # ---- 腿③④：永远等不到 ⇒ 如实报剩余 ＋ 有上限 ----
+    def _stays(**k):
+        return list(hs)
+    t0 = time.time()
+    n2, txt2 = WIN.close_bubble_windows(finder=_stays, closer=lambda h: True,
+                                        settle_sec=0.2)
+    el = time.time() - t0
+    if n2 != len(hs):
+        return "仍活着时报的投递数不对：%r（应 %d）" % (n2, len(hs))
+    if "关掉了" in (txt2 or ""):
+        return ("窗还在，人话却说「关掉了」—— 正是「旧窗死灰复燃」的假象来源"
+                "（%r）" % (txt2,))
+    if ("仍有 %d 枚" % len(hs)) not in (txt2 or ""):
+        return "等不到时没说清还剩几枚（应含「仍有 %d 枚」）：%r" % (len(hs), txt2)
+    if el > 0.9:
+        return ("settle_sec=0.2 却等了 %.2fs —— 上限没按注入值走（写死了？）" % el)
+    return None
+
+
+@check("B-17 关窗要确认没了：空不投递／收了要复核／等不到如实报剩余／上限按注入值")
+def c_b17():
+    return _b17_problem()
+
+
+@check("N-B17 负控：不复核／删空集早退／settle_sec 写死 ⇒ B-17 必须各自判红")
+def n_b17():
+    if _b17_problem() is not None:
+        return "夹具不成立：现行实现就判红 —— 负控无分辨力"
+    base = inspect.getsource(WIN.close_bubble_windows)
+    faces = (
+        # 面①：投递完不回头查（旧实现的原样）—— 复核那条腿先看见（finder 只问一次）
+        ("left = _find(visible_only=False, run_id=run_id)", "left = []",
+         "不复核就报关掉了", "回头再看一眼"),
+        # 面②：空集不早退 —— 会报「关掉了 0 枚」，等于说没窗也动了手
+        ('    if not hs:\n        return 0, "没有开着的紧急提醒窗。"\n', "",
+         "删掉空集早退", "没有开着的"),
+        # 面③：不管等没等到都走成功分支 —— 屏幕上还在、人话说关掉了
+        ("    if left:\n        return n, (", "    if False:\n        return n, (",
+         "等不到也报关掉了", "关掉了"),
+        # 面④：上限写死 2 秒（注入的 settle_sec 被忽略）
+        ("float(settle_sec)", "2.0", "settle_sec 被写死", "settle_sec"),
+    )
+    for old, new, name, want in faces:
+        mut = base.replace(old, new, 1)
+        if mut == base:
+            return "夹具不成立：锚点未命中（源码已变，需更新负控）—— %s" % name
+        ns = dict(WIN.__dict__)
+        exec(compile(mut, "<n-b17:%s>" % name, "exec"), ns)       # noqa: S102
+        with _Patch(WIN, close_bubble_windows=ns["close_bubble_windows"]):
+            why = _b17_problem()
+        if why is None:
+            return "负控失效：%s 仍判合格（那条腿没分辨力）" % name
+        if want not in why:
+            return "负控方向不符：%s 报的是 %r（应指向 %r）" % (name, why[:60], want)
+    return True
+
+
 # ════════════════════════════════════════════════════════════ FLO-01…05 ══
 #: logo.ps1 里的动法表必须与规格 v1.2 同值（它是 Python 侧状态机的
 #: PowerShell 孪生；两处各写一份 ⇒ 迟早漂，这条就是防漂的）。
