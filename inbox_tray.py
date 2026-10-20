@@ -21,6 +21,7 @@ import json
 import os
 import threading
 import time
+from datetime import datetime
 
 import inbox_config as C
 import inbox_model as M
@@ -171,7 +172,7 @@ def icon_path(state, root=None):
 
 
 def write_state(state, count=0, tip="", root=None, shield=None, total=None,
-                label=None):
+                label=None, logo_seen=None):
     """写托盘状态（原子替换）。返回写下的 dict。
 
     ★ 0.36.0：多写一个 `shield` 字段（哨兵态）。**不写它**的话图标只剩
@@ -188,6 +189,9 @@ def write_state(state, count=0, tip="", root=None, shield=None, total=None,
       页面自 0.39.0 起的 `current_state()`（历史 R0 一律不抬灯）各说各话。
       写进 `tray.json` 才能被**判据**逐字比对（W-03）。
       `label` 缺省 ⇒ 从 `state` 现算（`M.state_label`），不写空。
+
+    ★ 0.53.2（T2）：`logo_seen` 可注入**独立**的失败节流状态（判据用；
+      缺省 = 进程级的 `_LOGO_SPEC_SEEN`，见其注）。
     """
     if shield is None:
         shield = shield_state()
@@ -205,13 +209,25 @@ def write_state(state, count=0, tip="", root=None, shield=None, total=None,
     # ★★ 0.53.1：多写一个 `logo` 块 ＝ **漂浮哨标的动效规格**（从
     #   `inbox_server.logo_motion_spec()` 单一真源派生）。哨标
     #   （tools/logo.ps1）照它画与主窗口同一份动法（规格 v1.2）；
-    #   没有它 ⇒ 哨标如实回落托盘同族静态图标（不假装会动）。
-    #   ★ 取不到 ⇒ **不写这个键**（tray.json 照写，托盘不受连累）——
-    #   但不许在这里编一份（规格只有 inbox_server 一个家）；缺失由判据
-    #   FLO-10c 每次闸门机器守（静默缺失＝哨标悄悄变哑）。
-    spec = _logo_spec_block()
+    #   没有它 ⇒ 哨标如实回落品牌 LOGO 静态图标（不假装会动，0.53.2 T1）。
+    #   ★ 0.53.2（T2）：改**必写**。旧口径「取不到就不写这个键」有一个
+    #     静默形状：**「旧版没这功能」与「新版拿不到规格」在 tray.json 里
+    #     逐字节相同** —— 哨标悄悄变哑，而读文件的人分不出是哪种。现在
+    #     两条路都看得见：
+    #       ① 拿得到 ⇒ `logo` 块照写；
+    #       ② 拿不到 ⇒ **仍然写** `logo_missing: true` ＋ `logo_error`
+    #         （失败标记；`logo` 键缺位 ⇒ 哨标回落，见 logo.ps1），
+    #         并进审计链一条 `logo_spec_missing`（每进程每个失败
+    #         episode 至多一条，见 `_logo_spec_missing_event`）。
+    #     tray.json 本身照写不误 —— 托盘不因为规格缺席而停摆。
+    spec, spec_err = _logo_spec_block()
     if spec is not None:
         payload["logo"] = spec
+        # ★ 成功 ⇒ 清节流：此后再失败是**新的一程**（见 _LOGO_SPEC_SEEN 注）。
+        (_LOGO_SPEC_SEEN if logo_seen is None else logo_seen)["failed"] = False
+    else:
+        payload.update(_logo_failure_block(spec_err))
+        _logo_spec_missing_event(root, spec_err, seen=logo_seen)
     p = state_path(root)
     os.makedirs(os.path.dirname(p), exist_ok=True)
     tmp = p + ".tmp"
@@ -227,16 +243,211 @@ STALE_AFTER_SEC = 30
 
 
 def _logo_spec_block():
-    """漂浮哨标的动效规格（0.53.1）。取不到 ⇒ `None`（详见 `write_state` 注）。
+    """漂浮哨标的动效规格（0.53.1）＋ **失败原因**（0.53.2 T2）。
 
+    返回 `(spec, err)`：拿得到 ⇒ `(dict, None)`；拿不到 ⇒ `(None, err)`。
+
+    ★ 为什么要连原因一起给：只给 `None` 的话，「取不到这个事实」能写进
+      tray.json，但「**为什么**取不到」会在这里被吞掉 —— 下游只看到一个
+      缺失的键，分不清「inbox_server 挂了」还是「规格字典构到一半炸了」。
+      失败原因与失败事实一样是证据（0.53.2 T2）。
     ★ 为什么走懒加载：`inbox_server` 反过来也（在函数内）import 本模块，
       模块级互相 import 会成环 —— 本仓的既有解法就是函数内 import。
     """
     try:
         import inbox_server as SV
-        return SV.logo_motion_spec()
+        return SV.logo_motion_spec(), None
+    except Exception as e:                                           # noqa: BLE001
+        return None, e
+
+
+def _logo_failure_block(err):
+    """拿不到动效规格时**仍然写进 tray.json 的键**（0.53.2 T2，唯一定义处）。
+
+    ★ 为什么与 `logo` 键**互斥**而不是并存：哨标（logo.ps1）只认
+      `logo` 键的存在性来决定回落；并存会让「有规格」和「没规格」在
+      文件里长得一样。缺 `logo` ＋ 有 `logo_missing` ⇒ 下游能**逐字节
+      区分**「旧版没写该字段」与「新版写了但拿不到」——这正是 0.53.1
+      条件写法的静默缺口。
+    ★ `logo_error` 是**人话整句**（type: msg），不是裸异常串 —— 读
+      tray.json 的是 PowerShell 侧与人，不是 traceback 阅读器。
+    """
+    why = "spec unavailable"
+    if err is not None:
+        why = "%s: %s" % (type(err).__name__, err)
+    return {"logo_missing": True,
+            "logo_error": "motion spec unavailable (%s)" % why[:160]}
+
+
+#: 哨标规格失败态的**进程内**节流状态（0.53.2 T2）。
+#: ★ 为什么必须节流：托盘守护进程每 2 秒写一次状态，规格拿不到时
+#:   **每拍一条审计**会在一天内写出四万多条同因记录 —— 记账机制自己
+#:   把账本灌满，正是 0470 提醒预算同款要防的形状。
+#: ★ 形态是**状态机**而不是「一条 forever」：失败 → 恢复 → 再失败是**两个
+#:   episode**，各记一条；失败进行中不重复记。「这一程里坏过」必须看得见，
+#:   「每一拍都在坏」不许变成噪声。判据 FLO-12 钉这两个计数。
+#: ★ `write_state(..., logo_seen=...)` 可注入**独立**的一份（判据用）——
+#:   否则同一条判据第二次跑会被上一次留下的 `failed=True` 静默节流，
+#:   变成"判据自己把自己测瞎"（2026-10-20 实测：N-FLO12b 因此报「夹具不成立」）。
+_LOGO_SPEC_SEEN = {"failed": False}
+
+
+def _logo_spec_missing_event(root, err, seen=None):
+    """规格拿不到 ⇒ 进审计链一条 `logo_spec_missing`（0.53.2 T2）。
+
+    ★ 为什么进链而不只写 tray.json 文件标记：文件标记只有「下一个来读
+      tray.json 的人」看得到；链上的记录让晨报／日报不必翻临时状态文件
+      就能看见「这个进程曾经拿不到规格」。
+    ★ 家目录口径与 host_shield 一致：给了 root ⇒ 项目链
+      （`<root>/.psl/audit`）；没给 ⇒ 个人中枢 rollup（`append_chained`
+      的 None 语义在调用方兜住，见 `_chain_record`）。
+    ★ 记账失败**不抛**：家务事不许把正经事搞崩（调用方是 `write_state`，
+      托盘照写不误）——最坏结果是少一条记录，不是托盘不工作。
+    ★ `seen` 缺省 = 进程级节流状态；判据传一份独立的进来（见
+      `_LOGO_SPEC_SEEN` 注）。
+    """
+    st = _LOGO_SPEC_SEEN if seen is None else seen
+    if st.get("failed"):
+        return                      # 失败进行中：已记过，不重复
+    st["failed"] = True
+    rec = {"ts": datetime.now().astimezone().isoformat(timespec="seconds"),
+           "type": "logo_spec_missing", "tool": "-",
+           "session": "inbox-tray", "host": "generic",
+           "decision": "allow", "severity": "warning",
+           "reason": ("托盘写状态时拿不到漂浮哨标动效规格 —— tray.json 已写 "
+                      "logo_missing 失败标记，哨标回落品牌 LOGO 静态图标"
+                      "（不假装会动）"),
+           "error": "" if err is None else
+                    ("%s: %s" % (type(err).__name__, err))[:200]}
+    _chain_record(root, rec)
+
+
+def _chain_record(root, rec):
+    """产品侧进审计链的**唯一入口**（0.53.2 T2 抽出，托盘与徽标痕迹共用）。
+
+    ★ 配方与 `tools/enforce_probe.py`／`host_shield._chain` 同源：
+      `session_dna.append_chained`（C-1 唯一链实现）＋ day manifest。
+    ★ root 给了 ⇒ 项目链（`<root>/.psl/audit`，registry 消费点会读到）；
+      没给 ⇒ 中枢 rollup（host_shield `record(None, ...)` 的同一口径）。
+    ★ 任何失败都吞掉并返回 False —— 记账是旁路，不许把主业搞崩
+      （调用方 `write_state` / daemon tick 都已各自 try 住）。
+    """
+    try:
+        import session_dna as sd
+        audit_dir = (os.path.join(root, ".psl", "audit")
+                     if root else os.path.join(C.hub_dir(), "rollup"))
+        return bool(sd.append_chained(audit_dir, rec))
     except Exception:                                           # noqa: BLE001
-        return None
+        return False
+
+
+# ---------------------------------------------------------------- 徽标痕迹 --
+#: ★ 0.53.2（T1/T2）：徽标（tools/logo.ps1，PowerShell）**写不了** Python
+#:   的审计链（hash 链与锁协议都在 Python 侧）。它往 console_dir 下的
+#:   `logo_events.jsonl` 追加一行行 JSON；本模块改名消费（零删除纪律，
+#:   与 `poll_actions` 同族）后按同一配方进链。
+#:   ★ 纯文本文件协议是托盘 ↔ 徽标的既有约定（见模块头），这里是同一条
+#:     协议的第三个方向：徽标 ⇒ Python 账本。
+LOGO_EVENTS_KNOWN = ("logo_mode_missing", "logo_frame_unavailable",
+                     "logo_dpi_changed", "logo_event_unreadable")
+
+
+def logo_events_path(root=None):
+    return os.path.join(C.console_dir(root), "logo_events.jsonl")
+
+
+def drain_logo_events(root=None):
+    """把徽标侧的痕迹读走并进审计链（0.53.2）。返回进链的事件 list。
+
+    ★ 顺序是**先链后改名**（与 `poll_actions` 的先改名相反，故意的）：
+      动作丢了只是少点一下；**审计证据丢了不可再生**。改名只在全部行都
+      成功进链后做；有任一行失败 ⇒ 文件原地留着，下 tick 重试
+      （最坏重复记几条，好过静默丢失）。
+    ★ 读不懂的行不丢弃：包一条 `logo_event_unreadable` 进链 ——
+      「徽标写过一行没人看得懂的东西」本身就是证据（静默丢弃是同型病）。
+    ★ 改名让开，绝不 unlink（零删除纪律）。
+    """
+    p = logo_events_path(root)
+    if not os.path.exists(p):
+        return []
+    try:
+        with open(p, encoding="utf-8") as f:
+            lines = [ln.strip() for ln in f if ln.strip()]
+    except OSError:
+        return []                       # 读不出来 ⇒ 不消费，下 tick 再试
+    if not lines:
+        # 空文件也要让开（否则它会一直在场）——但先确认能改名成功
+        try:
+            os.rename(p, p + ".taken-%d" % int(time.time() * 1000))
+        except OSError:
+            pass
+        return []
+    done = []
+    for ln in lines:
+        rec = _logo_event_record(ln)
+        if rec is None:
+            continue
+        if _chain_record(root, rec):
+            done.append(rec)
+        else:
+            break                       # 进链失败 ⇒ 整体不消费，下 tick 重试
+    if len(done) == len(lines):
+        try:
+            os.rename(p, p + ".taken-%d" % int(time.time() * 1000))
+        except OSError:
+            pass
+    return done
+
+
+def _logo_event_record(line):
+    """一行徽标痕迹 JSON ⇒ 链记录（0.53.2）。读不懂 ⇒ `logo_event_unreadable`。
+
+    ★ ts／type 从行里取（徽标侧写的事实）；缺 ts ⇒ 现在补（标注 missing
+      会改变字段集，链记录按 schema 缺省即可，不新增字段）。
+    ★ session/tool/host 与 `logo_spec_missing` 同族固定值 —— 链上认得出
+      这是「徽标侧产生的痕迹」而不是钩子或门闸。
+    """
+    base = {"tool": "-", "session": "inbox-logo", "host": "generic",
+            "decision": "allow", "severity": "warning"}
+    try:
+        ev = json.loads(line)
+        if not isinstance(ev, dict):
+            raise ValueError("not an object")
+        typ = str(ev.get("type") or "").strip()
+        if not typ or typ not in LOGO_EVENTS_KNOWN:
+            raise ValueError("unknown type %r" % typ)
+        rec = dict(base)
+        rec["ts"] = str(ev.get("ts") or
+                        datetime.now().astimezone().isoformat(timespec="seconds"))
+        rec["type"] = typ
+        rec["reason"] = reason_of(ev)
+        for k in ("state", "title"):
+            if ev.get(k) is not None:
+                rec[k] = ev[k]
+        return rec
+    except Exception:                                           # noqa: BLE001
+        rec = dict(base)
+        rec["ts"] = datetime.now().astimezone().isoformat(timespec="seconds")
+        rec["type"] = "logo_event_unreadable"
+        rec["reason"] = "badge wrote an unreadable logo event line"
+        rec["raw"] = line[:200]
+        return rec
+
+
+def reason_of(ev):
+    """徽标痕迹 ⇒ 人话 reason（0.53.2）。类型 ⇒ 句子，一处定义不散两处。"""
+    t = ev.get("type")
+    if t == "logo_mode_missing":
+        return ("哨标规格 modes 缺 %s 态键 —— 已如实回落 L0 帧并在本留痕；"
+                "规格 modes 与 LOGO_MODE 的闭合由闸门判据常驻守"
+                % ev.get("state", "?"))
+    if t == "logo_frame_unavailable":
+        return ("哨标动效帧不可用（%s）—— 已回落品牌 LOGO 静态图标"
+                % ev.get("reason", "?"))
+    if t == "logo_dpi_changed":
+        return ("哨标换屏重算物理尺寸（%s）—— 尺寸与可点区已按新 DPI 重新派生"
+                % ev.get("reason", "?"))
+    return "badge logo event: %s" % t
 
 
 def read_state(root=None, now=None, stale_after=STALE_AFTER_SEC):

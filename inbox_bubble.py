@@ -325,7 +325,7 @@ def _throttled(kind, root, now):
 
 def pop(title, body, level="R0", state=None, root=None, kind=None, force=False,
         now=None, sound=True, port=None, opener=None, verbose=True, cfg=None,
-        console=None):
+        console=None, window_finder=None):
     """弹一枚紧急提醒。返回 dict **如实报告**（`ok` 只在窗口真就位时为 True）。
 
     ★ 闸（不变式 I4）：Antinel 监理窗口正开着 ⇒ 不弹（用户自己正看着，
@@ -380,10 +380,32 @@ def pop(title, body, level="R0", state=None, root=None, kind=None, force=False,
         return rep
 
     # ④ 一次只留一枚：收旧窗
+    # ★★ 0.53.2（2026-10-20）：这个调用的返回值现在**是可信的**
+    #   —— `close_bubble_windows` 改为「投递 WM_CLOSE 后轮询到窗口真的从枚举
+    #   里消失」才返回枚数（老版把投递成功数当结果，函数立刻返回 ⇒ 新窗与
+    #   旧窗在屏幕上并存，旧窗销毁前重绘 ⇒ 用户看到"几秒后旧的又回来了"）。
+    #   ⇒ 走到下一行时，旧窗**确实已经不在**，这里不需要再补 sleep
+    #   （sleep 是猜时长，换台机器就不准）。
+    #   ★ 但"没退干净"必须让人知道：`_why` 不许丢（旧版丢在这里）。
+    #   它不影响继续开新窗 —— 提醒的时效性优先 —— 但要留在 `why` 里，
+    #   否则就成了"程序自己知道有事，却什么都没说"。
     import inbox_window as WIN
     try:
         n_closed, _why = WIN.close_bubble_windows()
         rep["closed_old"] = int(n_closed)
+        # ★ 不靠"文案里有没有某个词"判断收没干净（那是锚字面量，改一个字
+        #   判据就失明）。**回读一次枚举**：投递过、但窗口还在 ⇒ 没收干净。
+        # ★ `window_finder` 是判据注入点（与 `opener`/`console` 同一条纪律：
+        #   **注入点必须出现在签名里**）。不注入的话判据会走到**真桌面**枚举，
+        #   而用户桌面上可能真开着紧急提醒窗 ⇒ 判据被现实污染（假红/假绿）。
+        _enum = window_finder or WIN.find_bubble_windows
+        try:
+            _left = _enum(visible_only=False)
+        except Exception:                               # noqa: BLE001
+            _left = []
+        if _left:
+            rep["why"] = "旧提醒窗没收干净（%s）" % (
+                _why or ("还有 %d 枚在" % len(_left)))
     except Exception as e:                                  # noqa: BLE001
         rep["why"] = "收旧窗失败：%s: %s" % (type(e).__name__, e)
 

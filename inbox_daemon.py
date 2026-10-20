@@ -185,14 +185,54 @@ def daemon_alive(root=None):
 
 
 def write_daemon_pid(root=None, pid=None):
-    """登记守护进程 pid（原子替换）。"""
+    """登记守护进程 pid（原子替换），并**顺带**落下出生版本戳（0.53.2 T3）。
+
+    ★ 戳落在 `<console>/daemon.pid.meta.json` —— 与 pid 同目录同前缀，
+      读的地方本来就在读 pid；**不新建第三份状态文件**（T3 任务书第 1 条）。
+    ★ 戳写不成**不影响** pid 登记：pid 是判活的命脉，戳只是诊断证据。
+    """
     p = daemon_pid_path(root)
     os.makedirs(os.path.dirname(p), exist_ok=True)
     tmp = p + ".tmp"
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         f.write(str(int(pid if pid is not None else os.getpid())))
     os.replace(tmp, p)
+    try:
+        write_daemon_stamp(root)
+    except Exception:                                   # noqa: BLE001
+        pass
     return True
+
+
+def daemon_stamp_path(root=None):
+    return daemon_pid_path(root) + ".meta.json"
+
+
+def write_daemon_stamp(root=None, current=None):
+    """守护进程**出生时**的版本戳（0.53.2 T3）。返回写下的 dict。"""
+    import inbox_server as _SV
+    cur = _SV.code_identity() if current is None else current
+    rec = {"pid": int(os.getpid()),
+           "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+           "code_version": cur.get("version"),
+           "code_mtime": cur.get("mtime")}
+    p = daemon_stamp_path(root)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    tmp = p + ".tmp"
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        json.dump(rec, f, ensure_ascii=False, indent=1, sort_keys=True)
+    os.replace(tmp, p)
+    return rec
+
+
+def read_daemon_stamp(root=None):
+    """读守护进程的出生版本戳。没有 / 读坏 ⇒ `None`（**不编**）。"""
+    try:
+        with open(daemon_stamp_path(root), encoding="utf-8") as f:
+            d = json.load(f)
+    except Exception:                                   # noqa: BLE001
+        return None
+    return d if isinstance(d, dict) else None
 
 
 def run_daemon(root=None, interval=2.0, max_ticks=None, supervise=True,
@@ -456,6 +496,15 @@ class Daemon:
             TR.sync_from_items(items, root=self.root)
         except Exception as e:                  # noqa: BLE001
             out["errors"].append("tray: %s" % e)
+
+        # ③b 徽标痕迹进链（0.53.2 T1/T2）：logo.ps1 写不了 Python 账本，
+        #   它往 console_dir/logo_events.jsonl 追加的行由这里改名消费。
+        #   ★ 放在③之后：同一拍里托盘刚写过新 tray.json，徽标的解析结果
+        #     随之产生，下一拍之前被吃掉 —— 痕迹停留 ≤ 一个 tick 间隔。
+        try:
+            out["logo_events"] = len(TR.drain_logo_events(root=self.root))
+        except Exception as e:                  # noqa: BLE001
+            out["errors"].append("logo-events: %s" % e)
 
         # ④ 记账本（最近 14 天补记＋更正，唯一实现见模块级 `record_day`）
         try:

@@ -1080,7 +1080,7 @@ def find_bubble_windows(mark=BUBBLE_TITLE_MARK, visible_only=True, run_id=None):
 
 
 def close_bubble_windows(visible_only=True, closer=None, run_id=None, why="",
-                         settle_sec=2.0, finder=None):
+                         settle_sec=2.0, finder=None, sleeper=None):
     """关掉紧急提醒窗（**发 WM_CLOSE，不强杀**）；返回 `(关掉几个, 人话)`。
 
     ★ 一次只留一枚紧急提醒：新的要弹之前，先把旧的收掉 —— 不然屏幕上会叠起
@@ -1101,30 +1101,47 @@ def close_bubble_windows(visible_only=True, closer=None, run_id=None, why="",
       （本条注释上一段的「唯一枚举」纪律），等待必须长在这个唯一实现上，
       否则第二个调用点（退役/兜底）又会漏。
     ★ `finder` 可注入：判据要在不碰真实桌面的前提下验「等不到 ⇒ 如实报剩余」。
+    ★ `sleeper` 亦可注入（与 `closer`/`finder` 同一条纪律）：
+      负控要在假桌面上复现「老口径不等」那一臂，不真等 2 秒。
     """
     if closer is None:
         def closer(h):                                      # noqa: E731
             return _post_close(h)
     _find = finder or find_bubble_windows
+    _sleep = sleeper or time.sleep
     hs = _find(visible_only=visible_only, run_id=run_id)
     if not hs:
         return 0, "没有开着的紧急提醒窗。"
+    targets = set(hs)               # ★ 只追**我投递过的这一批**，不追别人的窗
     n = 0
-    for h in hs:
+    for h in targets:
         try:
             if closer(h):
                 n += 1
         except Exception:                                   # noqa: BLE001
             continue
-    # 等它真的消失（PostMessage 是异步的）。轮询用**同一个** finder，
-    # 这样注入的判据 fixture 与真实路径走同一段判定。
+    # ── 关键：投递 ≠ 消失。轮询到枚举里真的不再有它（含不可见的退场中窗口）──
+    # ★★ 计数口径（2026-10-20 探针实测抓到的显示缺陷）：`left` 必须与
+    #   `targets` **取交集**再数。原来直接 `len(left)` ⇒
+    #     ① 退场中的窗若同时出现在 live 与 leaving 两份枚举里，会被数两遍
+    #        （实测：投递 2 枚，报「仍有 4 枚没退」，枚数虚高一倍）；
+    #     ② 不属于本次投递的窗（别的进程新开的）也被算成"我的没退" ⇒
+    #        一句本该准确的话变成吓人的错话。
+    #   人话里的数字必须能被现场核对 —— 否则用户拿它去查会发现对不上，
+    #   然后不再相信这条自检。
+    _step = 0.05
     waited = 0.0
-    left = _find(visible_only=False, run_id=run_id)
-    step = 0.05
+
+    def _left_now():
+        try:
+            return sorted(set(_find(visible_only=False, run_id=run_id)) & targets)
+        except Exception:                                   # noqa: BLE001
+            return sorted(targets)          # 枚举坏了 ⇒ 当"还在"，不假装没了
+    left = _left_now()
     while left and waited < float(settle_sec):
-        time.sleep(step)
-        waited += step
-        left = _find(visible_only=False, run_id=run_id)
+        _sleep(_step)
+        waited += _step
+        left = _left_now()
     tail = ("（%s）" % why) if why else ""
     if left:
         return n, ("发出 %d 条关闭指令，但 %.1f 秒后仍有 %d 枚紧急提醒窗没退"

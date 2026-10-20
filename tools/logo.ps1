@@ -74,6 +74,7 @@ param(
   [string]$Show = "",
   [string]$Hide = "",
   [string]$IconDir = "",
+  [string]$BrandIcon = "",
   [string]$Frame = "",
   [switch]$Hidden,
   [int]$Size = 46,
@@ -81,7 +82,8 @@ param(
   [int]$Y = -1,
   [string]$Tip = "Antinel",
   [string]$TipStale = "state has stopped updating",
-  [int]$StaleAfterSec = 30
+  [int]$StaleAfterSec = 30,
+  [switch]$PrintDpi
 )
 
 $ErrorActionPreference = "Stop"
@@ -89,6 +91,68 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
 $script:utf8 = New-Object System.Text.UTF8Encoding($false)
+
+# ---------------------------------------------------------------- DPI (T4) ---
+# 0.53.2: the badge is laid out in PHYSICAL pixels (per-pixel-alpha layered
+# window, WM_NCHITTEST in client pixels), so "-Size 46" used to mean 46
+# physical pixels -- ~31 logical px at 150%, i.e. a small badge and a small
+# hit circle. Resolution (order matters, see docs):
+#   1. SystemInformation.VirtualScreen: the only DPI signal obtainable
+#      WITHOUT a message loop -- usable before the form exists.
+#   2. GetDpiForWindow(form.Handle): the window's own DPI, correct after a
+#      WM_DPICHANGED move between monitors.
+#   3. fallback 96 (scale 1.0) whenever the API is unavailable.
+# ONE derivation. size_phys is the only product; Get-HitRadius and the form
+# bounds both take it as an INPUT. Never multiply DPI anywhere else.
+function Get-DpiInfo {
+  param($Form)
+  $dpi = 0
+  try {
+    $dpi = [int][System.Windows.Forms.SystemInformation]::VirtualScreen.DeviceDpi
+  } catch { $dpi = 0 }
+  if ($dpi -le 0) { $dpi = 96 }
+  if ($Form -ne $null) {
+    try {
+      if (-not $Form.IsDisposed) {
+        $wd = 0
+        if (-not ("AntinelDpiApi" -as [type])) {
+          Add-Type -Namespace Antinel -Name DpiApi -MemberDefinition @"
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern int GetDpiForWindow(System.IntPtr hwnd);
+"@
+        }
+        $wd = [int][Antinel.DpiApi]::GetDpiForWindow($Form.Handle)
+        if ($wd -gt 0) { $dpi = $wd }
+      }
+    } catch { }
+  }
+  if ($dpi -le 0) { $dpi = 96 }
+  return [int]$dpi
+}
+
+function Get-PhysSize {
+  param([int]$Logical, [int]$Dpi)
+  # THE single derivation: logical px * (dpi/96), rounded. Everything that
+  # needs physical pixels goes through here (FLO-14 pins the table).
+  $d = [double]$Dpi
+  if ($d -le 0) { $d = 96.0 }
+  return [int][Math]::Round(([double]$Logical) * $d / 96.0)
+}
+
+$script:dpi = Get-DpiInfo $null
+$sizeLogical = [int]$Size
+$sizePhys = Get-PhysSize $sizeLogical $script:dpi
+
+if ($PrintDpi) {
+  $o = @{
+    dpi = [int]$script:dpi
+    scale = [double]([Math]::Round($script:dpi / 96.0, 4))
+    size_logical = [int]$sizeLogical
+    size_phys = [int]$sizePhys
+  }
+  Write-Output (ConvertTo-Json $o -Compress)
+  exit 0
+}
 
 # ------------------------------------------------------- layered window ----
 # Per-pixel alpha: the frame bitmap IS the window content (WS_EX_LAYERED +
@@ -121,6 +185,7 @@ public class LogoLayered {
 public class LogoForm : System.Windows.Forms.Form {
   public Func<int, int, int> NcHitTest;      // client (x,y) -> HTCLIENT(1)/HTTRANSPARENT(-1)
   public System.Action FramePaint;           // WM_PAINT: push one layered frame
+  public System.Action<int> DpiChanged;      // WM_DPICHANGED: new DPI (T4)
   protected override CreateParams CreateParams {
     get { CreateParams cp = base.CreateParams; cp.ExStyle |= 0x00080000; return cp; } }
   protected override void WndProc(ref System.Windows.Forms.Message m) {
@@ -130,6 +195,11 @@ public class LogoForm : System.Windows.Forms.Form {
       int sy = unchecked((short)((lp >> 16) & 0xFFFF));
       System.Drawing.Point pt = PointToClient(new System.Drawing.Point(sx, sy));
       m.Result = new IntPtr(NcHitTest(pt.X, pt.Y));
+      return;
+    }
+    if (m.Msg == 0x02E0 && DpiChanged != null) {          // WM_DPICHANGED
+      base.WndProc(ref m);   // let the form adopt the suggested rect first
+      DpiChanged((int)(m.WParam.ToInt64() & 0xFFFF));      // LOWORD = new X DPI
       return;
     }
     if (m.Msg == 0x000F && FramePaint != null) {          // WM_PAINT
@@ -155,17 +225,40 @@ if ($Frame -ne "" -and (Test-Path -LiteralPath $Frame)) {
 # 0.53.1: this is now the FALLBACK only (used when the motion spec cannot be
 # obtained -- old tray.json / spec build failure). The primary path draws the
 # animated mark. Degradation is honest: static, never pretending to move.
+# ** 0.53.2 (T1, founder screenshot 2026-10-20): the fallback used to draw
+#    assets/icons/<state>.ico -- a BARE STATE LAMP (ring + dot on transparent),
+#    which is NOT the product mark. The founder's words: "can the minimized
+#    icon carry the square dark background too? that is the complete thing,
+#    and then anywhere in the area is clickable". So the fallback now draws the
+#    BRAND MARK (assets/logo/antinel.ico: dark square plate + probe ring +
+#    amber lamp), and because the plate is a full opaque square the whole
+#    window becomes clickable (see the hit test). The state icon family stays
+#    available as a LAST resort only.
 $SHIELD_SUFFIX = @{ "on" = ""; "unposted" = "-unposted"; "unknown" = "-unknown"; "off" = "-off" }
 
+#: brand mark: assets/logo/antinel.ico, derived from -IconDir (assets/icons ->
+#: assets/logo). Python can also pass it explicitly (-BrandIcon), so the
+#: existing argument does not have to be inferred from a sibling directory.
+$script:brandIcon = $BrandIcon
+if ($script:brandIcon -eq "" -and $IconDir -ne "") {
+  $script:brandIcon = Join-Path (Split-Path -Parent $IconDir) "logo\antinel.ico"
+}
+
 function Resolve-IconPath([string]$st, [string]$sh) {
-  # {state}{shield}.ico preferred, fall back to {state}.ico, then "" (draw nothing).
-  # Same fallback rule as inbox_tray.icon_file -- no second opinion here.
+  # Brand mark first (0.53.2 T1): the complete LOGO, square plate included.
+  if ($script:brandIcon -ne "" -and (Test-Path -LiteralPath $script:brandIcon)) {
+    return $script:brandIcon
+  }
+  # LAST resort: the state lamp family -- same fallback rule as
+  # inbox_tray.icon_file, no second opinion here.
   if ($IconDir -eq "") { return "" }
-  # 2026-10-20: brand mark first (same reasoning as tray.ps1). The posture
-  # light is not a logo; when the motion spec is unavailable we still want the
-  # product mark, not "a circle".
-  $brand = Join-Path (Split-Path -Parent $IconDir) "logo\antinel.ico"
-  if (Test-Path -LiteralPath $brand) { return $brand }
+  # NOTE (2026-10-20, merge): a second "brand first" derivation used to sit
+  # here, re-building the same assets/logo path from -IconDir. It was
+  # UNREACHABLE -- reaching this point already means $script:brandIcon is empty
+  # or missing, and lines 242-245 derive that same path whenever -IconDir is
+  # given -- and it BYPASSED -BrandIcon, so an explicit caller could not keep
+  # the badge off the brand plate. One derivation only (do not write the
+  # path literal back into this comment: guards anchor on it).
   $suf = ""
   if ($SHIELD_SUFFIX.ContainsKey($sh)) { $suf = $SHIELD_SUFFIX[$sh] }
   if ($suf -ne "") {
@@ -187,6 +280,35 @@ function Write-Action([string]$a) {
   }
 }
 
+# --------------------------------------------- badge-side trace (0.53.2) --
+# The badge (PowerShell) CANNOT write the Python audit chain: the hash chain
+# and the lock protocol live there. So it appends one JSON line per incident
+# to console_dir/logo_events.jsonl (the third direction of the pure-text
+# protocol: badge -> Python ledger); inbox_tray.drain_logo_events renames it
+# away and chains it at the next daemon tick / inbox status.
+# ASCII-only discipline applies to the VALUES as well (no-BOM .ps1 is
+# ACP-decoded by PS 5.1): every string here is plain ASCII.
+$script:consoleDir = Split-Path -Parent $State
+# once per process per (type|reason): evidence, not a per-frame log
+$script:logoEventSeen = @{}
+
+function Write-LogoEvent([string]$Type, [string]$Reason, [string]$St) {
+  if ($script:logoEventSeen.ContainsKey($Type + "|" + $Reason)) { return }
+  $script:logoEventSeen[$Type + "|" + $Reason] = $true
+  $p = Join-Path $script:consoleDir "logo_events.jsonl"
+  $rec = @{ ts = (Get-Date).ToUniversalTime().ToString("o")
+            type = $Type
+            reason = $Reason
+            state = $St }
+  try {
+    $d = Split-Path -Parent $p
+    if (-not (Test-Path -LiteralPath $d)) {
+      New-Item -ItemType Directory -Path $d -Force | Out-Null
+    }
+    Add-Content -LiteralPath $p -Value ((ConvertTo-Json $rec -Compress)) -Encoding UTF8
+  } catch { }
+}
+
 # Keep the source ASCII-only for Windows PowerShell 5.1 (no-BOM UTF-8 is ACP-decoded).
 $script:actionWriteFailed = $false
 $script:actionWriteFailTip = -join [char[]]@(0x5C55,0x5F00,0x5931,0x8D25,0xFF1A,
@@ -198,12 +320,15 @@ $script:pushFailTip = -join [char[]]@(0x753B,0x9762,0x63A8,0x9001,0x5931,0x8D25,
 
 # ---------------------------------------------------------------- window ---
 $form = New-Object LogoForm
-$form.Size = New-Object System.Drawing.Size($Size, $Size)
+# 0.53.2 (T4): every pixel quantity below comes from $sizePhys -- the ONE
+# DPI derivation above. Form bounds, bitmap, hit radius and default position
+# are all consumers, never multipliers.
+$form.Size = New-Object System.Drawing.Size($sizePhys, $sizePhys)
 # measured on this machine: a borderless Form still carries the system
 # minimum *tracking* width (SM_CXMINTRACK = 136) -- pin both edges so the
-# badge is exactly $Size x $Size.
-$form.MinimumSize = New-Object System.Drawing.Size($Size, $Size)
-$form.MaximumSize = New-Object System.Drawing.Size($Size, $Size)
+# badge is exactly $sizePhys x $sizePhys.
+$form.MinimumSize = New-Object System.Drawing.Size($sizePhys, $sizePhys)
+$form.MaximumSize = New-Object System.Drawing.Size($sizePhys, $sizePhys)
 $form.FormBorderStyle = "None"
 $form.StartPosition = "Manual"
 $form.ShowInTaskbar = $false
@@ -216,8 +341,8 @@ $wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
 # DEFAULT position: right-bottom, just above the taskbar (like an IME bar).
 # NOTE: the geometry is computed on SEPARATE lines on purpose (see 0.50.0
 # history: inline arithmetic in New-Object args breaks the param parser).
-$markX = $wa.Right - $Size - 8
-$markY = $wa.Bottom - $Size - 8
+$markX = $wa.Right - $sizePhys - 8
+$markY = $wa.Bottom - $sizePhys - 8
 if ($X -ge 0 -and $Y -ge 0) {
   $form.Location = New-Object System.Drawing.Point($X, $Y)
 } else {
@@ -239,7 +364,7 @@ $script:hadSpec = $false
 $script:motionKey = "L0"        # spec.modes[state] (Ls -> LD, dev -> L0)
 $script:vis = $null             # current eased visual (the JS's V)
 $script:snap = $null            # visual at the moment of the mode switch
-$script:hitRadius = [int][Math]::Floor($Size / 2.0)   # safe default until spec
+$script:hitRadius = [int][Math]::Floor($sizePhys / 2.0)   # safe default until spec
 $script:reduceMotion = $false
 try {
   # Windows' "show animations in windows" preference -- the system-level twin
@@ -251,9 +376,9 @@ try {
 $script:modeClock = New-Object System.Diagnostics.Stopwatch
 $script:modeClock.Start()
 # frame bitmaps: render at 2x with AA, downscale (sub-pixel strokes survive)
-$script:bmpLo = New-Object System.Drawing.Bitmap($Size, $Size,
+$script:bmpLo = New-Object System.Drawing.Bitmap($sizePhys, $sizePhys,
   [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-$script:bmpHi = New-Object System.Drawing.Bitmap((2 * $Size), (2 * $Size),
+$script:bmpHi = New-Object System.Drawing.Bitmap((2 * $sizePhys), (2 * $sizePhys),
   [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
 # NOTE: the window title is NOT the tooltip here -- the title carries the
 # find mark (" Antinel - sentry mark"), so Python can find and topmost this
@@ -276,11 +401,15 @@ function Load-Icon([string]$path) {
   $script:icoPathLoaded = $path
   if ($path -eq "" -or -not (Test-Path -LiteralPath $path)) { return }
   try {
-    # load the NATIVE 48px frame (mk_icons SIZES = 16/32/48/64), then snap
-    # alpha: <128 fully transparent, >=128 fully opaque. WHY: the fallback
-    # path blits this bitmap straight into the layered frame -- any
-    # semi-transparent pixel would keep partial alpha and look muddy next to
-    # the AA-drawn mark. Snapped alpha leaves no in-between.
+    # load the NATIVE 48px frame, then snap alpha: <128 fully transparent,
+    # >=128 fully opaque. WHY: the fallback path blits this bitmap into the
+    # layered frame -- any semi-transparent pixel would keep partial alpha
+    # and look muddy next to the AA-drawn mark. Snapped alpha leaves no
+    # in-between.
+    # * 0.53.2 (T1): the brand plate (assets/logo/antinel.ico) is an opaque
+    #   square, so snapping there is a no-op on the plate itself and only
+    #   cleans its rounded-corner fringe. The state-lamp family (the LAST
+    #   resort) needs the snap exactly as before.
     $ico = New-Object System.Drawing.Icon($path, 48, 48)
     $bmp = $ico.ToBitmap()
     $ico.Dispose()
@@ -339,7 +468,7 @@ function Enter-Mode {
   if ($script:spec -ne $null) {
     if ($null -eq $script:vis) { $script:vis = New-Visual $script:spec }
     $script:snap = $script:vis
-    $script:hitRadius = Get-HitRadius $Size $script:spec
+    $script:hitRadius = Get-HitRadius $sizePhys $script:spec
     Start-Pump                     # spec just arrived: the animation starts now
     Invoke-Frame                  # ...and one frame NOW (mt=0 = the snapshot):
                                   # no 40ms wait after a switch, and the ONLY
@@ -380,10 +509,30 @@ function Read-State {
         $script:spec = Import-Spec $(if ($hasSpec) { $j.logo } else { $null })
         if ($script:spec -ne $null) {
           $key = [string]$script:spec.modes[$st]
-          if ([string]::IsNullOrWhiteSpace($key)) { $key = "L0" }
+          if ([string]::IsNullOrWhiteSpace($key)) {
+            # 0.53.2 (T2): a missing mode key must NOT fall back silently.
+            # The L0 fallback itself stays (drawing something beats drawing
+            # nothing), but the incident leaves a badge-side trace
+            # (logo_mode_missing) that the daemon chains into the ledger --
+            # a silent fallback would make "spec lost a key" and "spec is
+            # fine" look identical on screen.
+            Write-LogoEvent "logo_mode_missing" "modes key missing" $st
+            $key = "L0"
+          }
           $script:motionKey = $key
         } else {
           $script:motionKey = "L0"
+          # * 0.53.2 (T1): leaving a trace is part of the fix. "falling back
+          #   to the brand plate" is honest, but a fallback nobody can see in
+          #   the ledger is indistinguishable from "the animation was never
+          #   supposed to run". Reason is one of the three causes below.
+          $why = "no_spec"
+          if (-not $script:frameOk) { $why = "frame_math_unavailable" }
+          elseif ($hasSpec) { $why = "spec_unusable" }
+          elseif ($script:brandIcon -eq "" -or -not (Test-Path -LiteralPath $script:brandIcon)) {
+            $why = "brand_icon_missing"
+          }
+          Write-LogoEvent "logo_frame_unavailable" $why $st
           Load-Icon (Resolve-IconPath $st $sh)
         }
         if ($script:spec -ne $null -or $first) { Enter-Mode }
@@ -478,8 +627,8 @@ function Draw-Canvas {
 function Draw-Frame-Bitmaps {
   param($f)
   $half = [double]$script:spec.geom.half
-  $sHi = (2 * $Size) / (2.0 * $half)
-  $offHi = $Size
+  $sHi = (2 * $sizePhys) / (2.0 * $half)
+  $offHi = $sizePhys
   $g = [System.Drawing.Graphics]::FromImage($script:bmpHi)
   try {
     $g.Clear([System.Drawing.Color]::Transparent)
@@ -490,7 +639,7 @@ function Draw-Frame-Bitmaps {
     $g2.Clear([System.Drawing.Color]::Transparent)
     $g2.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
     $g2.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::Half
-    $g2.DrawImage($script:bmpHi, 0, 0, $Size, $Size)
+    $g2.DrawImage($script:bmpHi, 0, 0, $sizePhys, $sizePhys)
   } finally { $g2.Dispose() }
 }
 
@@ -509,8 +658,8 @@ function Push-Frame {
         $pt.X = $form.Location.X
         $pt.Y = $form.Location.Y
         $sz = New-Object LogoLayered+SIZE
-        $sz.CX = $Size
-        $sz.CY = $Size
+        $sz.CX = $sizePhys
+        $sz.CY = $sizePhys
         $src = New-Object LogoLayered+POINT
         $blend = New-Object LogoLayered+BLENDFUNCTION
         $blend.BlendOp = 0
@@ -530,11 +679,54 @@ function Push-Frame {
 }
 
 # --- hit test: the whole drawn area is clickable, the corners are not -------
+# ** 0.53.2 (T1): the brand-plate fallback is a FULL OPAQUE SQUARE, so the
+#    founder's "anywhere in the area is clickable" holds literally there --
+#    the hit test returns HTCLIENT for the whole window in that mode.
+#    In the animated-mark mode the drawn area is still the inscribed circle
+#    (the frame is transparent outside it), so the corners keep passing
+#    clicks through to whatever is behind: claiming a clickable corner there
+#    would be a promise the picture does not keep.
 $form.NcHitTest = {
   param($x, $y)
-  if (-not $script:frameOk) { return 1 }
-  if (Test-Hit $x $y $Size $script:hitRadius) { return 1 }
+  # plate mode (no motion spec): the brand mark fills the window edge to edge
+  # -- every pixel is part of the drawn picture, so every pixel is clickable.
+  if ($script:spec -eq $null -or -not $script:frameOk) { return 1 }
+  # animated mark: only the inscribed circle is drawn; corners stay
+  # click-through so the badge never steals clicks from what is behind.
+  if (Test-Hit $x $y $sizePhys $script:hitRadius) { return 1 }
   return -1
+}
+
+# --- DPI change (T4): recompute, never re-derive ad hoc ---------------------
+# Moving the badge onto a monitor with a different scale factor sends
+# WM_DPICHANGED. The suggested rect from the message would already carry the
+# new size, but the badge is a FIXED logical size by design -- so we rebuild
+# $sizePhys from the same single derivation and pin the window to it, then
+# re-derive the hit radius from the spec. Without this the badge keeps its
+# old pixel size (and its old hit circle) after a monitor change.
+$form.DpiChanged = {
+  param($newDpi)
+  if ($newDpi -le 0) { return }
+  $old = [int]$script:dpi
+  if ($newDpi -eq $old) { return }
+  $script:dpi = [int]$newDpi
+  $sizePhys = Get-PhysSize $sizeLogical $script:dpi
+  try {
+    $form.MinimumSize = New-Object System.Drawing.Size($sizePhys, $sizePhys)
+    $form.MaximumSize = New-Object System.Drawing.Size(($sizePhys + 512), ($sizePhys + 512))
+    $form.Size = New-Object System.Drawing.Size($sizePhys, $sizePhys)
+    $form.MinimumSize = New-Object System.Drawing.Size($sizePhys, $sizePhys)
+    $form.MaximumSize = New-Object System.Drawing.Size($sizePhys, $sizePhys)
+  } catch { }
+  if ($script:spec -ne $null) {
+    $script:hitRadius = Get-HitRadius $sizePhys $script:spec
+  } else {
+    $script:hitRadius = [int][Math]::Floor($sizePhys / 2.0)
+  }
+  Write-LogoEvent "logo_dpi_changed" ("dpi %d -> %d" -f $old, [int]$newDpi) $script:mode
+  # repaint NOW: a DPI change that quietly resized nothing would be invisible
+  # in the logs and visible only to the founder's eyes (the 0.53.x disease).
+  try { Invoke-Frame } catch { }
 }
 
 # --- paint: compute the frame, draw it, push it as the window content -------
@@ -557,11 +749,16 @@ function Invoke-Frame {
       $g = [System.Drawing.Graphics]::FromImage($script:bmpLo)
       try {
         $g.Clear([System.Drawing.Color]::Transparent)
-        # NearestNeighbor: the bitmap alpha is snapped 0/255 -- any smoothing
-        # would re-create semi-transparent edge pixels and a muddy edge
-        $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::NearestNeighbor
-        $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::Half
-        $g.DrawImage($script:icoBmp, 0, 0, $Size, $Size)
+        # * 0.53.2 (T1): the brand plate is an OPAQUE SQUARE whose edges are
+        #   part of the picture. NearestNeighbor (right for the old snapped-
+        #   alpha state lamps) would leave the plate's border stair-stepped,
+        #   so the brand path gets high-quality interpolation and
+        #   PixelOffsetMode None (Half shifts the whole plate by half a pixel
+        #   at some sizes -- the plate would no longer touch the window edge,
+        #   and "the whole area is clickable" would stop matching the pixels).
+        $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::None
+        $g.DrawImage($script:icoBmp, (New-Object System.Drawing.Rectangle(0, 0, $sizePhys, $sizePhys)))
       } finally { $g.Dispose() }
     } else {
       $g = [System.Drawing.Graphics]::FromImage($script:bmpLo)
@@ -650,8 +847,8 @@ $form.add_MouseMove({
   $ny = $np.Y - $script:downPt.Y
   if ($nx -lt $wa.Left) { $nx = $wa.Left }
   if ($ny -lt $wa.Top) { $ny = $wa.Top }
-  if ($nx + $Size -gt $wa.Right) { $nx = $wa.Right - $Size }
-  if ($ny + $Size -gt $wa.Bottom) { $ny = $wa.Bottom - $Size }
+  if ($nx + $sizePhys -gt $wa.Right) { $nx = $wa.Right - $sizePhys }
+  if ($ny + $sizePhys -gt $wa.Bottom) { $ny = $wa.Bottom - $sizePhys }
   $form.Location = New-Object System.Drawing.Point($nx, $ny)
   # the layered content is positioned BY the push -- moving the window must
   # repaint or the mark stays visually behind at the old spot

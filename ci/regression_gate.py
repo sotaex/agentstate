@@ -1869,11 +1869,24 @@ def j_single_source_of_truth():
 
 
 def _is_git_dir(p):
-    """实测某目录是不是 git 工作树（不是"我记得它是"）。"""
+    """实测某目录是不是 git 工作树（不是"我记得它是"）。
+
+    ★★★ 0.53.2（2026-10-20，X-054 复发，实测踩到）：**必须剥掉 GIT_DIR 一族**。
+      病象：提交钩子里本判据报「repos.archive 声明 git=False、实测 True」，
+      而在 shell 里对同一目录跑 `git -C <p> rev-parse --is-inside-work-tree`
+      得到的是「不是仓库」—— 两边结论相反。
+      根因：git 跑 pre-commit 时导出 `GIT_DIR=.git`，而 **`git -C <dir>` 不覆盖
+      已设置的 `GIT_DIR`** ⇒ 命令实际作用在**注入的那个仓**上，`<p>` 被忽略 ⇒
+      任何目录都答 "true"。实测（_p_d23probe.py）：不注入时两目录均 rc=128，
+      注入 GIT_DIR 后均 rc=0 out='true'。
+      为什么修判据、不改 workspace_facts：声明是对的（那两个目录确实不是 git），
+      错的是观测 —— 把观测修好，判据才重新有分辨力；改声明＝把污染固化成谎言。
+    """
     import subprocess as _sp
     try:
         r = _sp.run(["git", "-C", str(p), "rev-parse", "--is-inside-work-tree"],
-                           capture_output=True, text=True, timeout=30)
+                           capture_output=True, text=True, timeout=30,
+                           env=_clean_git_env())
     except Exception:
         return None                       # git 不可用 ⇒ 不可判，不冒充"不是"
     return r.returncode == 0 and (r.stdout or "").strip() == "true"
@@ -2124,18 +2137,40 @@ def j_workspace_facts():
 _BUILD_INDEX_DIRS = ("build", "antinel.egg-info")
 
 
+def _clean_git_env():
+    """剥掉会把 `git -C <dir>` 变成空操作的 GIT_* 环境变量。
+
+    ★★★ 2026-10-20（实测踩到，两次各自独立发现）：git 跑 pre-commit 时会导出
+      `GIT_DIR=.git`，而 **`git -C <dir>` 不覆盖已设置的 `GIT_DIR`** —— 于是
+      `git -C 任意目录 ...` 实际作用在**注入的那个仓**上，`<dir>` 被忽略。
+      后果按判据分两类，都是"看着对、其实在测别的东西"：
+        · `_is_git_dir`：任何目录都答 True（D-23 报"声明 False、实测 True"）；
+        · `_index_build_artifacts`：查的永远是**真仓**索引 —— 负控在临时仓里
+          `git add -f build/x.py` 之后仍探测不到（报"假守卫"），而正判据也
+          读不到 PKG 自己的索引。
+      为什么必须两侧都剥：这不是某一条判据的局部毛病，是**所有** `git -C`
+      调用在钩子环境下的共同前提。凡后续新增 `git -C`，一律经本函数取 env。
+    """
+    return {k: v for k, v in os.environ.items()
+            if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
+                         "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY",
+                         "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_PREFIX")}
+
+
 def _index_build_artifacts(root):
     """返回 `root` 的 git 索引里 `build/`、`antinel.egg-info/` 下的文件清单。
 
     · 非 git 工作树（如负控 fixture，无 `.git`）⇒ 返回 `None`（不可判，非通过）。
     · `git ls-files` 失败 ⇒ **抛异常**（由调用方转红，不静默吞掉）。
+    · ★ 必须传 `env=_clean_git_env()`：否则在提交钩子里查到的是**真仓**索引，
+      负控（临时仓）永远探测不到 ⇒ 判"假守卫"（2026-10-20 实测）。
     """
     import subprocess
     if not (Path(root) / ".git").exists():
         return None
     r = subprocess.run(["git", "-C", str(root), "ls-files", "--", *_BUILD_INDEX_DIRS],
                        capture_output=True, text=True, encoding="utf-8",
-                       errors="replace", timeout=30)
+                       errors="replace", timeout=30, env=_clean_git_env())
     if r.returncode != 0:
         raise RuntimeError("git ls-files rc=%d：%s"
                            % (r.returncode, (r.stderr or "").strip()[:200]))
@@ -2167,15 +2202,22 @@ def j_no_build_artifacts_in_index():
 
     # ③ 内建负控（§6 四件套之「反向对照」）：造一个「build/ 已被追踪」的临时 git 仓，
     #    探测必须报出 ≥1 个 —— 否则这条探测是**假守卫**（D-11/D-22 两个假负控的形状）。
+    #    ★★ 2026-10-20：**构造步骤也必须剥 GIT_DIR**（`init` / `add` / 探测三处）。
+    #      实测：只修探测那侧不够 —— 在提交钩子里 `git -C neg init` 与
+    #      `git -C neg add` 都被注入的 GIT_DIR 劫持（`-C` 不覆盖 GIT_DIR），
+    #      于是临时仓根本没建成，探测自然"报不出" ⇒ 判成「假守卫」。
+    #      这三处必须同法，否则负控自己就变成它要抓的那种假守卫。
     import subprocess
     import tempfile
+    _env = _clean_git_env()
     neg = tempfile.mkdtemp(prefix="antinel_idxneg_")
     try:
-        subprocess.run(["git", "-C", neg, "init", "-q"], capture_output=True)
+        subprocess.run(["git", "-C", neg, "init", "-q"], capture_output=True, env=_env)
         os.makedirs(os.path.join(neg, "build"), exist_ok=True)
         with open(os.path.join(neg, "build", "x.py"), "w", encoding="utf-8") as fh:
             fh.write("x=1\n")
-        subprocess.run(["git", "-C", neg, "add", "-f", "build/x.py"], capture_output=True)
+        subprocess.run(["git", "-C", neg, "add", "-f", "build/x.py"],
+                       capture_output=True, env=_env)
         if not _index_build_artifacts(neg):
             return False, ("内建负控未生效：`build/` 已被追踪的临时仓里探测不到构建产物"
                            "（假守卫）")
@@ -3186,6 +3228,26 @@ def selfcheck():
         ("D-23 缺陷（⑥ 出包登记分家）：target_version 停在旧版 ⇒ j_workspace_facts 必红",
          "psl/workspace_facts.json",
          "@TV_STALE@", "@TV_STALE_NEW@",
+         "D-23"),
+        # ★★ D-23 负控之二（2026-10-20，X-054 复发）：把 `_is_git_dir` 的
+        #   环境剥离**去掉**（`env=env` → `env=None`）—— 即旧实现原貌。
+        #   为什么这条负控必须有：剥离逻辑的**唯一作用**就是在 git 钩子环境里
+        #   （GIT_DIR 已设）仍然答对。没有这条负控，下次有人「顺手简化」掉
+        #   env 参数，判据会在 shell 里永远绿、只在提交时红 —— 那正是我这次
+        #   踩到的形状（钩子里红、shell 里绿，两边结论相反，极难定位）。
+        #   ★ 注入点取 `_is_git_dir` 里那唯一一处 `env=env`（grep -c 实测唯一）。
+        #   ⚠️ 环境依赖：仅当 fixture 运行时**带 GIT_DIR** 才见红。fixture 由
+        #     本钩子进程派生 ⇒ GIT_DIR 天然在场（git 跑 pre-commit 会导出）。
+        #     在没有 GIT_DIR 的环境里单跑，本条无分辨力 —— 与 D-33 ③ 同族的
+        #     环境依赖，不是 vacuous（实测：注入后 GIT_DIR 环境 r1v3 答 True）。
+        ("D-23 缺陷（git 状态被 GIT_DIR 污染）：_is_git_dir 不剥环境变量 ⇒ 必红",
+         "ci/regression_gate.py",
+         '"rev-parse", "--is-inside-work-tree"],\n'
+         '                           capture_output=True, text=True, timeout=30,\n'
+         '                           env=_clean_git_env())',
+         '"rev-parse", "--is-inside-work-tree"],\n'
+         '                           capture_output=True, text=True, timeout=30,\n'
+         '                           env=None)',
          "D-23"),
     ]
 

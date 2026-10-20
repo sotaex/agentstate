@@ -1332,66 +1332,93 @@ def n_consequence_blindspot_counts_as_loss():
     return cons == []
 
 
+def _selfcheck_posture(iv, cv, sc_result):
+    """脚手架：造「在岗 + 心跳新鲜 + 自检结果可控」的态势现场（自注册心跳链）。
+
+    ★★ 2026-10-20 修（实测踩坑：**时红时绿的量具**，比恒红更坏）：
+      旧夹具补丁的是 `HS.heartbeat_age`，但 `guard_posture()` 第 3473 行调的是
+      **无参** `sentinel_heartbeat_age()` —— 它经 `_sentinel_heartbeat_chain()`
+      解析，state 里没有 `sentinel_audit_dir` 就回退**读者真实包根**的审计链
+      （跑在 worktree 里 = worktree 的 `.psl/audit`）⇒ "心跳新不新鲜"由
+      **机器上恰好有没有哨兵在写**决定。本机实测同一份夹具两个结果：
+        交付闸门跑时（链上最后心跳停在 3 小时 17 分前 ≫ 1800s 判死窗）
+          ⇒ `fresh=False` ⇒ 落缺岗分支 ⇒ `interrupted` ⇒ **红**；
+        随后探针跑时（另一套判据拉起的哨兵已在写心跳）
+          ⇒ `fresh=True` ⇒ `dev` ⇒ **绿**。
+      同样 `sentinel_started_at` 写的 `time.time()`（float）也从来不是合法 ISO
+      ⇒ `_sentinel_uptime` 恒 None（第二条腿一直是死的）。
+      ⇒ 修法：走产品**自己的注册机制** —— state 里 `sentinel_audit_dir` 指向
+        夹具自建的临时链（`heartbeat_source=registered`，最高优先级），
+        真实链路从此不参与判定；`sentinel_started_at` 改 ISO 字符串。
+    """
+    import host_shield as HS
+    pkg = _tmpdir()
+    adir = _chain_dir(pkg)
+    _write_rec(adir, {"ts": _iso(0), "type": "host_shield_heartbeat",
+                      "decision": "allow"})
+    os.environ["ANTINEL_HUB_DIR"] = _tmpdir()
+    HS.save_state({"enabled": True, "workspaces": {}, "zones": [], "windows": {},
+                   "sentinel_pid": 4242, "sentinel_audit_dir": adir,
+                   "sentinel_started_at": _iso(0)})
+    o_inst, o_code = HS._installed_version, HS._code_version
+    s_alive, s_sc = HS.sentinel_alive, HS.self_check
+    try:
+        HS._installed_version = lambda v=iv: v
+        HS._code_version = lambda v=cv: v
+        HS.sentinel_alive = lambda st: True
+        HS.self_check = lambda: sc_result
+        return HS.guard_posture(_tmpdir())
+    finally:
+        HS._installed_version, HS._code_version = o_inst, o_code
+        HS.sentinel_alive, HS.self_check = s_alive, s_sc
+
+
 def c_selfcheck_fail_is_warn_not_down():
     """★★ 在岗 + 自检不符 ⇒ **黄灯一档**（存疑或研发中），**绝不是失守（红）**。
 
-    ★ 为什么：本仓铁律「查不出来 ≠ 查出来是坏的」���"我认不出守门的是不是出厂那份"
+    ★ 为什么：本仓铁律「查不出来 ≠ 查出来是坏的」——"我认不出守门的是不是出厂那份"
       ≠ "此刻没在守"。把"认不出"渲染成"失守"就是创始人说的"跟假失守没区别"。
     ★ **绝不放松自检**：自检照旧跑、照旧报（`evidence.self_check_problems` 留着），
       只是**换档位**；而且给得出下一步。
 
     ★★★ 0.36.3：档位从**一种**变成**两种**，但不变的是"绝不是红灯"。
       研发期（登记版本 < 代码版本）⇒ `dev`「研发中」；
-      已出厂（版本一致/更高）⇒ `warn`「存疑」。
+      已出厂（版本一致/更高）⇒ `warn`「失守」。
       ★ 这里**不是把判据放宽成"两个都行"** —— 那样这条判据就失去分辨力了。
         所以下面**分别**断言每一档的完整性质（label / can_fix / evidence /
         fix_hint 全部照旧），任何一档退化成红灯或丢掉 evidence 都会红。
+    ★★ 2026-10-20：夹具改走 `_selfcheck_posture`（自注册心跳链）——
+      旧夹具补丁死函数 `HS.heartbeat_age`，"新不新鲜"由真实链路说话，
+      同一份夹具在闸门里红、在探针里绿（详见脚手架 docstring 的实测记录）。
+      判据断言一字未动，只是把变量真正控制住。
     """
     import host_shield as HS
-    o_inst, o_code = HS._installed_version, HS._code_version
     results = []
-    try:
-        for note, iv, cv in (("研发期", "0.1.0", "0.9.0"),
-                             ("已出厂", "0.5.0", "0.5.0")):
-            os.environ["ANTINEL_HUB_DIR"] = _tmpdir()
-            HS.save_state({"enabled": True, "workspaces": {}, "zones": [],
-                           "windows": {}, "sentinel_pid": 4242,
-                           "sentinel_started_at": time.time()})
-            s_alive, s_hb, s_sc = HS.sentinel_alive, HS.heartbeat_age, HS.self_check
-            HS._installed_version = lambda v=iv: v
-            HS._code_version = lambda v=cv: v
-            HS.sentinel_alive = lambda st: True
-            HS.heartbeat_age = lambda pkg=None: (30.0, _iso(0))
-            HS.self_check = lambda: (False, ["host_shield.py 与 manifest 不符"])
-            try:
-                p = HS.guard_posture(_tmpdir())
-            finally:
-                (HS.sentinel_alive, HS.heartbeat_age,
-                 HS.self_check) = s_alive, s_hb, s_sc
-            # ① 红档在任何情况下都不许出现
-            if p["state"] == HS.POSTURE_DOWN:
-                results.append("%s：自检不符被判成红灯失守（绝不允许）" % note)
-                continue
-            # ② 必须落在两个合法档之一
-            if p["state"] not in (HS.POSTURE_WARN, HS.POSTURE_DEV):
-                results.append("%s：落到计划外档位 %r" % (note, p["state"]))
-                continue
-            # ③ 每一档的完整性质都必须保留（不许因为换了档就放松别的）
-            # ★ 0.37.3：标签跟六态对齐 —— `warn` 的标签由「存疑」改成「失守」
-            #   （`light()` 对 warn 走 fail-closed 判 R0；姿态标签必须与灯色
-            #   同一套词，否则同一时刻两个叫法）。见
-            #   `host_shield.POSTURE_LABEL_ALLOWED`。
-            if p["label"] not in ("失守", "研发中"):
-                results.append("%s：标签不对 %r" % (note, p["label"]))
-            if p["can_fix"] is not False or p["fix"] is not None:
-                results.append("%s：给了修复动作（自检不符不该给）" % note)
-            if not p["evidence"].get("self_check_problems"):
-                results.append("%s：把自检问题吞掉了（必须如实留在 evidence）" % note)
-            if not p["fix_hint"]:
-                results.append("%s：没有给用户任何说明" % note)
-            results.append("%s→%s OK" % (note, p["state"]))
-    finally:
-        HS._installed_version, HS._code_version = o_inst, o_code
+    for note, iv, cv in (("研发期", "0.1.0", "0.9.0"),
+                         ("已出厂", "0.5.0", "0.5.0")):
+        p = _selfcheck_posture(iv, cv, (False, ["host_shield.py 与 manifest 不符"]))
+        # ① 红档在任何情况下都不许出现
+        if p["state"] == HS.POSTURE_DOWN:
+            results.append("%s：自检不符被判成红灯失守（绝不允许）" % note)
+            continue
+        # ② 必须落在两个合法档之一
+        if p["state"] not in (HS.POSTURE_WARN, HS.POSTURE_DEV):
+            results.append("%s：落到计划外档位 %r" % (note, p["state"]))
+            continue
+        # ③ 每一档的完整性质都必须保留（不许因为换了档就放松别的）
+        # ★ 0.37.3：标签跟六态对齐 —— `warn` 的标签由「存疑」改成「失守」
+        #   （`light()` 对 warn 走 fail-closed 判 R0；姿态标签必须与灯色
+        #   同一套词，否则同一时刻两个叫法）。见
+        #   `host_shield.POSTURE_LABEL_ALLOWED`。
+        if p["label"] not in ("失守", "研发中"):
+            results.append("%s：标签不对 %r" % (note, p["label"]))
+        if p["can_fix"] is not False or p["fix"] is not None:
+            results.append("%s：给了修复动作（自检不符不该给）" % note)
+        if not p["evidence"].get("self_check_problems"):
+            results.append("%s：把自检问题吞掉了（必须如实留在 evidence）" % note)
+        if not p["fix_hint"]:
+            results.append("%s：没有给用户任何说明" % note)
+        results.append("%s→%s OK" % (note, p["state"]))
     bad = [r for r in results if not r.endswith("OK")]
     if bad:
         return "；".join(bad)
@@ -1404,20 +1431,13 @@ def n_selfcheck_fail_is_warn_not_down():
     """负控：在岗 + 自检**通过** ⇒ 必须是**值守中**，不许一路"存疑"。
 
     ★ 证明上一条不是"只要活着就叫存疑"。
+    ★★ 2026-10-20：与上一条共用 `_selfcheck_posture` —— 自注册心跳链后，
+      新鲜度由夹具控制（自检通过 ⇒ 不疑 ⇒ `guarding`）。旧版这条裸读真实
+      链路，哨兵没在写时同样会掉出 `interrupted`，负控会假红。
     """
     import host_shield as HS
-    os.environ["ANTINEL_HUB_DIR"] = _tmpdir()
-    HS.save_state({"enabled": True, "workspaces": {}, "zones": [], "windows": {},
-                   "sentinel_pid": 4242, "sentinel_started_at": time.time()})
-    s_alive, s_hb, s_sc = HS.sentinel_alive, HS.heartbeat_age, HS.self_check
-    HS.sentinel_alive = lambda st: True
-    HS.heartbeat_age = lambda pkg=None: (30.0, _iso(0))
-    HS.self_check = lambda: (True, [])
-    try:
-        p = HS.guard_posture(_tmpdir())
-        return p["state"] == HS.POSTURE_GUARDING
-    finally:
-        HS.sentinel_alive, HS.heartbeat_age, HS.self_check = s_alive, s_hb, s_sc
+    p = _selfcheck_posture("0.5.0", "0.5.0", (True, []))
+    return p["state"] == HS.POSTURE_GUARDING
 
 
 def c_light_warn_is_down_and_interrupted_is_l1():

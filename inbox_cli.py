@@ -310,8 +310,108 @@ def cmd_tray(a):
     return 0 if ok else 1
 
 
+def _runtime_lines(name, running, alive, why_alive, pid=None):
+    """一条长驻进程的版本自检行（0.53.2 T3）。**两个出口共用**这一处实现。
+
+    ★★★ 0.53.2（2026-10-20 实测抓到的**假绿**）：进程在跑、但**没有版本戳**
+      时，旧实现走 `version_drift(None)` ⇒ 返回 `None`（"没有证据，不报差异"）
+      ⇒ 落到 else 分支打印「版本一致（<仓里版本>）」。
+      而"没有戳"恰恰是**最该报**的形状：0.53.0 及更早的进程从来不写戳。
+      实测现场：`daemon.pid`=99476 活着、`daemon.pid.meta.json` **不存在**，
+      出口却报「守护进程：版本一致（0.53.2）」—— 自检存在的唯一意义
+      （"旧进程还在跑"）在这一行上正好失效。
+      ⇒ 口径改死：**只有拿到戳、且与仓里一致，才许说"版本一致"**。
+        · 进程在跑但没有戳 ⇒ 未知 / 旧进程，报 ⚠（与 `version_drift` 同口径）；
+        · 进程在跑且有戳且一致 ⇒ 才可以打"版本一致"（并且版本号取**戳里的**，
+          不取仓里的 —— 拿仓里的版本报"一致"是自证）。
+    `pid` 只用来把人话写清楚（"哪个 pid 是旧的"），不参与判定。
+    """
+    import inbox_server as SV
+    lines = []
+    if not alive:
+        lines.append("%s：不在跑（%s）" % (name, why_alive))
+        return lines
+    drift = SV.version_drift(running)
+    if drift:
+        lines.append("%s：⚠ %s" % (name, drift))
+        return lines
+    if not isinstance(running, dict) or not running.get("code_version"):
+        # ★ 在跑、但看不出跑的是哪版 ⇒ **不许说一致**（测不出 ⇒ 不许报合格）
+        #   ★ 修法文案要带上 pid：`_restart_hint` 靠"记录里有没有 port/url"
+        #     分辨进程，这里两种记录都可能是空 ⇒ 显式把 pid 传进去，
+        #     不许为了让判据跑通就丢掉人话里最有用的那个号码。
+        _p = ("（pid %s）" % pid) if pid else ""
+        lines.append("%s%s：⚠ 在跑，但**没有版本戳** —— 看不出跑的是哪版代码，"
+                     "按旧进程处理（0.53.0 及更早从不写戳）。%s"
+                     % (name, _p,
+                        SV._restart_hint(running if isinstance(running, dict) else {},
+                                         pid=pid)[1]))
+        return lines
+    lines.append("%s：版本一致（%s）" % (name, running.get("code_version")))
+    return lines
+
+
+
+def _daemon_status(a):
+    """`antinel inbox daemon status`：把「跑的是什么」与「仓里是什么」摆在一起。
+
+    ★ 只读：不杀进程、不重启（那是用户的机器，T3 任务书第 2 条）。
+    ★ 差异判定只有一处实现（`inbox_server.version_drift`），这里只负责排版。
+    """
+    import inbox_daemon as DM
+    import inbox_server as SV
+    root = getattr(a, "root", None)
+    alive, pid = DM.daemon_alive(root)
+    lines = []
+    cur = SV.code_identity()
+    lines.append("仓里：%s（%s，mtime %s）"
+                 % (cur.get("version") or "?",
+                    cur.get("file") or "?",
+                    _fmt_mtime(cur.get("mtime"))))
+    lines.extend(_runtime_lines("守护进程", DM.read_daemon_stamp(root),
+                                alive, "没有登记到运行中的守护进程", pid=pid))
+    c_alive, c_rec, c_why = SV.console_status(root)
+    lines.extend(_runtime_lines("监理服务", c_rec, c_alive, c_why or "",
+                                pid=(c_rec or {}).get("pid")))
+    for ln in lines:
+        print(ln)
+    # 退出码：有差异 ⇒ 1（可被脚本消费）；否则 0。**不许把差异吞成 0**。
+    return 1 if any("⚠" in ln for ln in lines) else 0
+
+
+def _fmt_mtime(mt):
+    if mt is None:
+        return "?"
+    import datetime as _dt
+    try:
+        return _dt.datetime.fromtimestamp(float(mt)).strftime("%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError, OSError):
+        return "?"
+
+
 def cmd_daemon(a):
     import inbox_daemon as DM
+    # ★ 0.53.2（T3）：`antinel inbox daemon status` —— **只读**出口。
+    #   0.53.1 那次「改了没效果」的病根是：长驻进程跑的是早上那份代码，
+    #   而没有任何出口把「跑的是什么」与「仓里是什么」摆在一起。
+    # ★★ 0.53.2（2026-10-20 实测抓到的**静默吞**）：`status` 是 `nargs="?"`
+    #   的自由位置参数，所以 `antinel inbox daemon restart` **不会**被 argparse
+    #   拒绝 —— 它把 `restart` 塞进 `a.status`，而旧实现写的是
+    #   `if getattr(a, "status", False):` ⇒ 非空字符串恒为真 ⇒ 打一遍版本自检、
+    #   退出 0，**一个字都不说**。用户看到 "daemon status" 的输出，
+    #   会以为 restart 跑过了。同型病：`antinel inbox daemon typo` 也一样。
+    #   ⇒ 只认 `status` 这个值；别的值明说"不认识"，退出码非 0。
+    #     （`None` ＝ 没给位置参数 ＝ 正常启动守护进程，不走这里。）
+    _pos = getattr(a, "status", None)
+    if _pos is not None:
+        if str(_pos).strip().lower() != "status":
+            print("不认识这个用法：`antinel inbox daemon %s`。\n"
+                  "  可选：`antinel inbox daemon`（前台启动守护进程）／"
+                  "`antinel inbox daemon --supervise`（启动并监督监理服务）／"
+                  "`antinel inbox daemon status`（只看跑的是哪版）"
+                  % _pos, file=sys.stderr)
+            return 2
+        return _daemon_status(a)
     sup = bool(getattr(a, "supervise", False))
     # ★ 0.48.5（B1）：先看有没有**别的**守护进程在跑 —— 只为把话说清楚；
     #   真正的单例判定在 `run_daemon()` 里（唯一实现，启动脚本自觉不算数）。
@@ -480,6 +580,12 @@ def build_parser():
     p = sub.add_parser("daemon"); p.add_argument("--interval", type=float, default=2.0)
     p.add_argument("--supervise", action="store_true",
                    help="顺带监督 Antinel 监理服务：被杀掉后在 60 秒内按原端口/口令重拉")
+    # ★ 0.53.2（T3）：位置参数，**不加子解析器** —— 加了会把 `--supervise`
+    #   挤进 status 的作用域，`antinel inbox daemon --supervise` 立刻变成
+    #   "unrecognized arguments"（既有关键字参数一个都不许动）。
+    p.add_argument("status", nargs="?", const=None, default=None,
+                   help="只看不跑：把「守护进程/服务跑的是哪版代码」与「仓里是哪版」摆在一起")
+    p.add_argument("--root", default=None, help="中枢根目录（判据/多实例隔离用）")
     p.set_defaults(fn=cmd_daemon)
 
     p = sub.add_parser("config"); ps = p.add_subparsers(dest="sub", required=True)
