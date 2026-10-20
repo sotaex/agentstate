@@ -4894,14 +4894,27 @@ def u23():
         return "运行状态页没有逐字告警句：%r" % _U23_ALARM
     if "未能核验" in h:
         return "运行状态页仍出现中性词「未能核验」—— 没查成被说成了状态"
-    # ② 查成了 ⇒ 原句不许被顺手改掉（上版两处单位修正都在那半句里）
+    # ② 查成了 ⇒ 结论行逐字直答（0.53.4 改词后仍必须是唯一实现给的句子）
     ok_page = PC.body(_u23_page("health", "ok", 1, 2))
-    if "完整（检查了 1 个文件、2 条记录，被改 0）" not in ok_page:
-        return "查成了的原句被改动了（应逐字保留「完整（检查了 …）」）"
-    # ③ 日报页链卡同一句（两处落点同源）
-    r = PC.body(_u23_page("report", "unknown", 0))
-    if _U23_ALARM not in r:
-        return "日报页链卡仍显示中性词 —— 两个落点不同源"
+    _want = "2 条逐条对过，%s" % SV.R.chain_status_label("ok")
+    if _want not in ok_page:
+        return "查成了的结论行被改动了（应逐字含「%s」）" % _want
+    if "共 2 条记录" not in ok_page:
+        return "查成了却没给范围行（应含「共 2 条记录」）"
+    # ③ 终端纯文本报告同一套结论词 —— 改词必须两处同步（页面改了、文本没改
+    #   ＝两处不同源；而终端报告是邮件正文与 CLI 的正文，照旧会被读到）。
+    #   ★ 0.53.4：这一条原先是"日报页链卡同一句（两个落点同源）"—— 链卡已
+    #     搬离日报、全站只剩运行状态页**一个**落点，旧的第三条腿前提消失，
+    #     换成"页面与终端文本同源"（同一个改词，两个消费面）。
+    #   ★ 文本报告是**纯文本**产物（无 `<style>`／无术语浮层），`PC.body()`
+    #     对它等于原样返回 —— 仍然显式选层：S48 的立意是"扫之前先声明扫哪层"，
+    #     不是"所有产物都有三层"。
+    txt = PC.body(SV.R.render_text(dict(_u23_rep("ok", 1, 2),
+                                       states={"done": 0, "ignored": 0})))
+    if "没有被改过" not in txt:
+        return "终端报告还写着旧词（页面已改、文本没改 —— 两处不同源）"
+    if "完整（" in txt:
+        return "终端报告仍出现状态词「完整」—— 改词漏了这个消费面"
     # ④ 有文件但一条可校验记录都没有 ⇒ 另说一句，不许谎报「0 个文件」
     alt = SV.R.chain_unverified(3)
     if "0 个文件" in alt:
@@ -5303,18 +5316,27 @@ def n_t06():
     return True
 
 
-def _t07_problem(page, src):
-    """日报两卡 label 按内容撑开（不写死 150px），值列紧随。
+def _t07_problem(page, src, page_h=None):
+    """label 按内容撑开（不写死 150px），值列紧随。
 
     ★ 锚必须落在 `</h2>` 之后：页内 CSS 注释里有一句
       「必须滚动才看得到『规则命中排行』和『有没有被改过』两张卡」——
       按片名 split 会切在注释上（首跑实测就是这么红的），按结构锚不踩。
+    ★★ 0.53.4（链卡搬到运行状态页，创始人「这些好像不属于日报」）：
+      锚从 `</h2><div class="rows fit">` 退成 `class="rows fit"` —— 日报
+      第一张卡（最近 24 小时／当日合计）**没有小节标题**，旧锚数不到它，
+      于是"长 label 会换行"这个病只被查到一半。现在按**卡片数**数：
+      日报 2 张（同日两行卡 ＋ 规则命中排行），运行状态 1 张（记录卡）。
+      CSS 里写的是 `.rows.fit`（点号），不会与 `class="rows fit"` 撞。
     """
-    n = page.count('</h2><div class="rows fit">')
-    if n != 2:
-        return ("日报两卡只有 %d 个用 rows fit（应 2：规则命中排行＋链卡）—— "
-                "label 又会被 150px 挤到内部换行、值被孤零零留在行尾"
-                "（0.53.4 截图病：左边挤得换行、右边大片空缺）" % n)
+    n_r = page.count('class="rows fit"')
+    if n_r != 2:
+        return ("日报两卡只有 %d 个用 rows fit（应 2：最近 24 小时／当日合计 ＋ "
+                "规则命中排行）—— label 又会被 150px 挤到内部换行、值被孤零零"
+                "留在行尾（0.53.4 截图病：左边挤得换行、右边大片空缺）" % n_r)
+    if page_h is not None and page_h.count('class="rows fit"') != 1:
+        return ("运行状态页的「记录」卡没用 rows fit（应 1 —— 它的 label "
+                "「没纳入比对的记录」是最长的那个）")
     k = _css_rule(src, ".rows.fit .row .k")
     if not k:
         return "没有 .rows.fit .row .k 规则（fit 是空壳 class）"
@@ -5328,17 +5350,18 @@ def _t07_problem(page, src):
     return None
 
 
-@check("T-07 日报两卡布局：rows fit ＋ label 不写死宽度 ＋ 值列 min-width:0")
+@check("T-07 日报两卡＋运行状态记录卡布局：rows fit ＋ label 不写死宽度 ＋ 值列 min-width:0")
 def t07():
     page = _page("report", rep=_REP_0534)
-    return _t07_problem(page, _src(_SERVER_REL))
+    return _t07_problem(page, _src(_SERVER_REL), _page("health", rep=_REP_0534))
 
 
 @check("N-T07 负控：fit 的 k 加回 width:150px／卡片退回普通 rows ⇒ T-07 必须判红")
 def n_t07():
     page = _page("report", rep=_REP_0534)
     src = _src(_SERVER_REL)
-    if _t07_problem(page, src) is not None:
+    page_h = _page("health", rep=_REP_0534)
+    if _t07_problem(page, src, page_h) is not None:
         return "夹具不成立：现行实现就判红 —— 负控无分辨力"
     # 面①：CSS 把写死宽度加回去（尺子必须咬 CSS）
     dead_css = src.replace(
@@ -5346,14 +5369,20 @@ def n_t07():
         ".rows.fit .row .k{flex:0 1 auto;width:150px;min-width:0}")
     if dead_css == src:
         return "夹具不成立：摘不到 fit 的 k 规则（源码已变，需更新负控）"
-    if _t07_problem(page, dead_css) is None:
+    if _t07_problem(page, dead_css, page_h) is None:
         return "负控失效①：width:150px 加回去仍判合格（CSS 那条腿没分辨力）"
     # 面②：卡片退回普通 rows（尺子必须咬 HTML 接线）
     dead_html = page.replace('class="rows fit"', 'class="rows"')
     if dead_html == page:
         return "夹具不成立：摘不到 rows fit（HTML 已变，需更新负控）"
-    if _t07_problem(dead_html, src) is None:
-        return "负控失效②：卡片退回普通 rows 仍判合格（HTML 那条腿没分辨力）"
+    if _t07_problem(dead_html, src, page_h) is None:
+        return "负控失效②：日报卡片退回普通 rows 仍判合格（HTML 那条腿没分辨力）"
+    # 面③：只守日报、运行状态那张记录卡漏掉 fit（0.53.4 搬卡后的新半边）
+    dead_h = page_h.replace('class="rows fit"', 'class="rows"')
+    if dead_h == page_h:
+        return "夹具不成立：摘不到运行状态页的 rows fit"
+    if _t07_problem(page, src, dead_h) is None:
+        return "负控失效③：记录卡退回普通 rows 仍判合格（新落点天然全绿）"
     return True
 
 
@@ -5374,12 +5403,13 @@ def _t08_problem(page):
 
 @check("T-08 unchained 行无同义括号句 ＋ 圈问号挂在数字后侧")
 def t08():
-    return _t08_problem(_page("report", rep=_REP_0534))
+    # ★ 0.53.4：链卡搬到运行状态页 ⇒ 尺度跟着搬（断言一条不降）。
+    return _t08_problem(_page("health", rep=_REP_0534))
 
 
 @check("N-T08 负控：同义句加回值列／圈问号摘掉 ⇒ T-08 必须各自判红")
 def n_t08():
-    page = _page("report", rep=_REP_0534)
+    page = _page("health", rep=_REP_0534)
     if _t08_problem(page) is not None:
         return "夹具不成立：现行渲染就判红 —— 负控无分辨力"
     # 面①：把同义括号句加回值列（0.53.3 旧形态）
@@ -5406,19 +5436,25 @@ _T09_KNOWN = {"session_start": "开始一次对话"}
 
 
 def _t09_problem(page, ch):
-    """圈问号展开体：说清「这些记录是什么」＋核对范围，且**不许列明细**。
+    """圈问号展开体：说清「这些记录是什么」，且**不许列明细、不许重述范围**。
 
     ★ 0.53.4 二次修订（创始人 2026-10-20 10:18 截图：「对不上 147 这个数啊……
       这种明细不仅对不上，用户也看不懂。让用户知道具体情况就行，把用户的
       问号拉直就行」）。旧尺子（逐文件/条数/起止全派生）恰好**把病当成了
       标准** —— 它要求明细存在，而明细的口径（每个文件带指纹的记录数）与
-      147（不带指纹的记录数）根本不同源。新尺子四条腿：
-        ① 条数从 unchained 派生；
-        ② 类型从 types 派生（单类型有已知人话必须说出；混合不许冒充单一口径）；
-        ③ 范围从 first_day/last_day 派生；
-        ④ 逐文件明细**不许存在**（它就是"对不上"的来源）。
+      147（不带指纹的记录数）根本不同源。
+    ★ 0.53.4 三次修订（链卡搬到运行状态页＋新增 `.qinfo`）：
+      ① 取「值后圈问号」的展开体**必须锚在 `class="qsum"` 上** —— 同一页现在
+         有两种圈问号（`.qinfo` 答"这类东西是什么"、`.qsum` 答"这次是些什么"），
+         按 `<div class="qbody">` 找第一个会抓到 `.qinfo`，于是三条腿全打在
+         错的展开体上（**问号答错了问题也照样绿**）；
+      ② 第三条腿**换方向**：原要求"范围从 first_day/last_day 派生"，现在反过来
+         要求「**不许重述**范围」—— 链卡搬来后紧邻上一行就是「检查范围：A 到
+         B，共 N 条记录」，同一段日期说两遍正是 STE 要灭的。范围本身没失去
+         守卫：由 T-10 ③ 在同一屏那一行上守（断言只是搬家，不是消失）。
     """
-    m = re.search(r'<div class="qbody">(.*?)</div></details>', page, re.S)
+    m = re.search(r'<details class="qsum"><summary>？</summary>'
+                  r'<div class="qbody">(.*?)</div></details>', page, re.S)
     if not m:
         return "找不到 qbody 展开体（问号是个空壳？）"
     body = m.group(1)
@@ -5439,23 +5475,24 @@ def _t09_problem(page, ch):
         if "不带指纹" not in body:
             return "混合类型没有通用说明（读者不知道这些是什么）"
     fd, ld = ch.get("first_day"), ch.get("last_day")
-    if fd and ld and ("%s 到 %s" % (fd, ld)) not in body:
-        return "展开体缺核对范围（%s 到 %s）" % (fd, ld)
+    if fd and ld and ("%s 到 %s" % (fd, ld)) in body:
+        return ("展开体重述了核对范围（%s 到 %s）—— 紧邻上一行「检查范围」已经"
+                "写着同一段日期，一句话说两遍（STE）" % (fd, ld))
     if 'class="flist"' in body:
         return ("逐文件明细又回来了 —— 每文件的「N 条」是带指纹的记录数，"
                 "与「%d 条不带指纹」是两个口径，怎么加都对不上（创始人 10:18）" % n)
     return None
 
 
-@check("T-09 圈问号：说清是什么＋范围，且不列明细（数字/类型/范围全派生）")
+@check("T-09 圈问号：说清这次是什么记录；不列明细、不重述范围")
 def t09():
-    return _t09_problem(_page("report", rep=_REP_0534), _REP_0534["chain"])
+    return _t09_problem(_page("health", rep=_REP_0534), _REP_0534["chain"])
 
 
-@check("N-T09 负控：条数写死／明细加回／混合类型冒充 ⇒ T-09 必须各自判红")
+@check("N-T09 负控：条数写死／明细加回／混合冒充／重述范围 ⇒ T-09 必须各自判红")
 def n_t09():
     ch = _REP_0534["chain"]
-    page = _page("report", rep=_REP_0534)
+    page = _page("health", rep=_REP_0534)
     if _t09_problem(page, ch) is not None:
         return "夹具不成立：现行渲染就判红 —— 负控无分辨力"
     # 面①：条数写死（与 unchained 脱钩）
@@ -5465,7 +5502,8 @@ def n_t09():
     if _t09_problem(dead, ch) is None:
         return "负控失效①：条数写死仍判合格（派生那条腿没分辨力）"
     # 面②：逐文件明细加回来（0.53.4 初版形态）
-    dead2 = re.sub(r'(<div class="qbody">)(.*?)(</div></details>)',
+    dead2 = re.sub(r'(<details class="qsum"><summary>？</summary>'
+                   r'<div class="qbody">)(.*?)(</div></details>)',
                    r'\1\2<div class="flist"><div class="fr">'
                    r'<span class="fn">2026-10-18</span><span>21011 条</span>'
                    r'</div></div>\3', page, count=1, flags=re.S)
@@ -5475,7 +5513,7 @@ def n_t09():
         return "负控失效②：明细加回来仍判合格（明细禁令没分辨力）"
     # 面③：混合类型 ⇒ 不许再声称「都是开始一次对话」
     ch3 = dict(ch, types={"session_start": 100, "other": 42})
-    page3 = _page("report", rep=dict(_REP_0534, chain=ch3))
+    page3 = _page("health", rep=dict(_REP_0534, chain=ch3))
     _p3 = _t09_problem(page3, ch3)
     if _p3 is not None:
         return "夹具不成立：混合类型渲染就判红（%s）" % _p3
@@ -5486,6 +5524,230 @@ def n_t09():
         return "夹具不成立：摘不到混合类型的通用句"
     if _t09_problem(dead3, ch3) is None:
         return "负控失效③：混合类型冒充单一口径仍判合格（类型派生那条腿没分辨力）"
+    # 面④：把核对范围重述回展开体（链卡搬家前的形态）⇒ 必须红
+    #   ★ 不先断言"页面里没有 A 到 B"—— 范围本来就该在**上一行**出现，
+    #     那条断言会把正常页面判成夹具不成立（首跑实测撞到）。
+    dead4 = page.replace("它们不带指纹，不算被改过。",
+                         "它们不带指纹，不算被改过。核对范围是 %s 到 %s 的链文件。"
+                         % (ch["first_day"], ch["last_day"]))
+    if dead4 == page:
+        return "夹具不成立：摘不到展开体收尾"
+    if _t09_problem(dead4, ch) is None:
+        return "负控失效④：重述核对范围仍判合格（不重复那条腿没分辨力）"
+    return True
+
+
+# ═══ 批26 · 0.53.4 链卡搬家（创始人「这些好像不属于日报，放在日报里合适吗？」）═══
+#: 「记录」卡的**显式结构边界**：`id="chainrec"` 起、`<!-- chainrec:end -->` 止。
+#: ★ 为什么不按标题文字找：标题是 `chain` 词条芯片（HTML 一长串），按文案找
+#:   等于把尺子绑在文案上 —— 哪天标题改成纯文字，尺子当场瞎掉而产品没坏。
+_CHAIN_END = "<!-- chainrec:end -->"
+
+
+def _chain_seg(page):
+    """取运行状态页「记录」这一整段（含三行＋边界注）。找不到 ⇒ None。"""
+    i = page.find('id="chainrec"')
+    if i < 0:
+        return None
+    j = page.find(_CHAIN_END, i)
+    return page[i:j] if j > i else page[i:]
+
+
+def _row_value(seg, label):
+    """取 `<span class="k">label</span><span>值</span>` 里的**值**（只认纯文字标签）。"""
+    m = re.search(r'<span class="k">%s</span><span>(.*?)</span></div>'
+                  % re.escape(label), seg, re.S)
+    return m.group(1) if m else None
+
+
+def _t10_problem(page_h, page_r, ch):
+    """链卡归属与三行：日报不再有它，运行状态页三行各答一件事。
+
+    ★ 六条腿（每条都对着一句创始人原话或一个实测事故）：
+      ① 结论行**直答**（「N 条逐条对过，没有被改过」）—— 旧词「完整」是状态，
+         不是对"有没有被改过"这句话的回答；
+      ② 旧形状「检查了 N 个文件…被改 0」不许回来（一句话塞三个数）；
+      ③ 范围行总数 ＝ records ＋ unchained ＋ bad_lines —— 旧版只报 records，
+         读者拿去对账必然少 142 条，这正是 10:18「对不上 147 这个数」的根；
+      ④ 没纳入比对：有才列，0 条不列（列一个 0 只会生出"那是啥"）；
+      ⑤ 边界注必须在（单条能查／整份替换查不出）；
+      ⑥ 日报侧：不许再有链卡（结构判定，不拿结论词当锚 —— 「记录有没有被
+         改过」这句指路话里**天然含**「没有被被改过」这几个字）。
+    """
+    seg = _chain_seg(page_h)
+    if seg is None:
+        return "运行状态页没有「记录」小节卡（链卡搬过去了吗？）"
+    recs = int(ch.get("records") or 0)
+    unch = int(ch.get("unchained") or 0)
+    bad = int(ch.get("bad_lines") or 0)
+    # ① 结论行直答
+    want = "%d 条逐条对过，%s" % (recs, SV.R.chain_status_label(ch["status"]))
+    if want not in seg:
+        return ("结论行不是直答（应含「%s」）—— 数字须从 records 派生、"
+                "结论词须走 chain_status_label 唯一实现" % want)
+    # ② 老形状
+    old = "检查了 %d 个文件" % ch["files"]
+    if old in seg:
+        return "「一句话塞三个数」的老形状回来了（%r）—— 三行各答一件事" % old
+    # ③ 范围行：区间 ＋ 总数（含未纳入比对的）
+    total = recs + unch + bad
+    fd, ld = ch.get("first_day") or "", ch.get("last_day") or ""
+    scope = _row_value(seg, "检查范围")
+    if scope is None:
+        return "缺「检查范围」这一行"
+    if fd and ld and ("%s 到 %s" % (fd, ld)) not in scope:
+        return "检查范围缺日期区间（%s 到 %s）" % (fd, ld)
+    if ("共 %d 条记录" % total) not in scope:
+        return ("检查范围写的总数不是 %d（records＋unchained＋坏行）—— 只报 %d "
+                "就让读者拿它去对账，永远少 %d 条" % (total, recs, unch))
+    # ④ 没纳入比对：有才列
+    # ★ 只看**行区**（边界注之前）：「没纳入比对的记录」芯片在边界注里有一个
+    #   固定落点（P13 需要），拿整段去判"列没列"会把这个落点当成第三行 ——
+    #   于是 0 条也永远判"列了"。
+    _rows_part = seg.split('<p class="note"')[0]
+    # ★ 两形态都算「列了」：芯片（`data-t`）或纯文字标签。只认芯片的话，
+    #   哪天标签改成纯文字，这一行就"看起来没列"⇒ 判据反着红；
+    #   负控也就只能打一种形态。
+    has = ('data-t="unchained"' in _rows_part) or ("没纳入比对的记录" in _rows_part)
+    if unch > 0 and not has:
+        return "「没纳入比对的记录」有 %d 条却没列出来" % unch
+    if unch <= 0 and has:
+        return "0 条也照列 —— 列一个 0 只会生出「那是啥」（创始人：0 行不列）"
+    # ⑤ 边界注
+    if "整份被替换，看不出来" not in seg:
+        return ("缺边界注 —— 不写这句，卡片读起来像「整机全查过了」"
+                "（单条能查／整份替换查不出，是这条链的能力边界）")
+    # ⑥ 日报侧：链卡只许一处落点
+    if 'id="chainrec"' in page_r:
+        return "日报又把「记录」卡加回来了（创始人：这些好像不属于日报）"
+    if 'data-t="chain_check"' in page_r or 'data-t="chain"' in page_r:
+        return ("日报仍挂着链的词条芯片 —— 卡撤了芯片还在＝半搬（读者点开"
+                "看到一个没有结论的定义）")
+    if _row_value(page_r, "检查范围") is not None:
+        return "日报仍有「检查范围」行 —— 链卡没搬干净"
+    if 'href="/?v=health"' not in page_r:
+        return "日报没有指路到运行状态页（读者找不到结论去哪了）"
+    return None
+
+
+@check("T-10 ★ 链卡搬到运行状态页：三行各答一件事，日报只留指路")
+def t10():
+    return _t10_problem(_page("health", rep=_REP_0534),
+                        _page("report", rep=_REP_0534), _REP_0534["chain"])
+
+
+@check("N-T10 负控：日报加回链卡／总数漏掉未比对／0 条也列 ⇒ T-10 必须各自判红")
+def n_t10():
+    ch = _REP_0534["chain"]
+    page_h = _page("health", rep=_REP_0534)
+    page_r = _page("report", rep=_REP_0534)
+    if _t10_problem(page_h, page_r, ch) is not None:
+        return "夹具不成立：现行渲染就判红 —— 负控无分辨力"
+    # 面①：日报把链卡加回来（0.53.3 形态）
+    dead = page_r.replace('<p class="note">记录有没有被改过',
+                          _chain_seg(page_h) + '<p class="note">记录有没有被改过')
+    if dead == page_r:
+        return "夹具不成立：摘不到日报的指路句（结构已变）"
+    if _t10_problem(page_h, dead, ch) is None:
+        return "负控失效①：日报加回链卡仍判合格（归属那条腿没分辨力）"
+    # 面②：总数只报 records（漏掉没纳入比对的 142 条）
+    total = ch["records"] + ch["unchained"]
+    dead2 = page_h.replace("共 %d 条记录" % total,
+                           "共 %d 条记录" % ch["records"])
+    if dead2 == page_h:
+        return "夹具不成立：摘不到范围行的总数"
+    if _t10_problem(dead2, page_r, ch) is None:
+        return "负控失效②：总数漏掉未比对记录仍判合格（可加性那条腿没分辨力）"
+    # 面③：0 条也照列一行（列出来只会生出"那是啥"）
+    ch0 = dict(ch, unchained=0, types={})
+    page_h0 = _page("health", rep=dict(_REP_0534, chain=ch0))
+    _tail = '</div></div><p class="note" style="margin:8px'
+    if _tail not in page_h0:
+        return "夹具不成立：摘不到卡收尾（结构已变）"
+    dead3 = page_h0.replace(
+        _tail,
+        '</div><div class="row"><span class="k">%s</span><span>0</span>'
+        '</div></div><p class="note" style="margin:8px'
+        % SV.GL.chip("unchained"), 1)
+    if _t10_problem(dead3, page_r, ch0) is None:
+        return "负控失效③：0 条也照列仍判合格（「0 行不列」那条腿没分辨力）"
+    return True
+
+
+#: 记录说明圈问号必须答到的四件事（**设计意图**，不从产品常量 import）。
+#: 顺序 ＝ 读者会问的顺序：是什么 → 什么形式 → 放哪 → 存什么。
+#: 产品改文案必须同批改这里（「改页面文案必须同步判据锚点」的落点）。
+_T11_MUST = (
+    ("一件事", "一条记录＝发生过的一件事（不是一个文件、也不是一次扫描）"),
+    ("一行文字", "什么形式存在：一行文字，追加在文件末尾（不是在数据库里）"),
+    ("两处", "存在哪：本机汇总一处、各项目目录一处"),
+    ("摘要", "存什么：只有摘要（命令遮蔽密钥、内容只留指纹）"),
+    ("没有文件内容", "明说不存什么 —— 只说只有摘要，读者仍会担心文件被存了"),
+)
+
+
+def _t11_problem(page_h, ch):
+    """记录说明圈问号 `.qinfo`：挂在「检查范围」行的值尾，答四件事。
+
+    ★ 与 T-09 的分工：T-09 守 `.qsum`（答"**这一次**是些什么记录"），
+      本条守 `.qinfo`（答"**这类东西**是什么、存在哪、存了什么"）。
+      两者同形不同义 —— 混用一个类名，则"问号答错了问题"永远查不出来。
+    """
+    seg = _chain_seg(page_h)
+    if seg is None:
+        return "找不到「记录」小节卡"
+    scope = _row_value(seg, "检查范围")
+    if scope is None:
+        return "缺「检查范围」这一行"
+    if 'class="qinfo"' not in scope:
+        return ("「检查范围」行没挂记录说明问号 —— 创始人 2026-10-20："
+                "「系统里也把记录用圈问号做个说明」")
+    m = re.search(r'<details class="qinfo"><summary>？</summary>'
+                  r'<div class="qbody">(.*?)</div></details>', scope, re.S)
+    if not m:
+        return "圈问号是空壳（找不到展开体）"
+    body = m.group(1)
+    for kw, why in _T11_MUST:
+        if kw not in body:
+            return "展开体没答到「%s」（%s）" % (kw, why)
+    # 不许冒充成"这一次"的数据说明：本次 unchained 的数字不该出现在这里
+    n = int(ch.get("unchained") or 0)
+    if n > 0 and ("%d 条" % n) in body:
+        return ("记录说明里出现了本次的「%d 条」—— 那是 `.qsum` 该答的"
+                "（这次是些什么），两种问号混了内容" % n)
+    return None
+
+
+@check("T-11 ★ 记录说明圈问号：挂在检查范围上，答是什么/形式/位置/存什么")
+def t11():
+    return _t11_problem(_page("health", rep=_REP_0534), _REP_0534["chain"])
+
+
+@check("N-T11 负控：摘掉问号／说成存原文／混进本次条数 ⇒ T-11 必须各自判红")
+def n_t11():
+    ch = _REP_0534["chain"]
+    page_h = _page("health", rep=_REP_0534)
+    if _t11_problem(page_h, ch) is not None:
+        return "夹具不成立：现行渲染就判红 —— 负控无分辨力"
+    # 面①：问号摘掉
+    dead = re.sub(r'<details class="qinfo">.*?</details>', "", page_h, flags=re.S)
+    if dead == page_h:
+        return "夹具不成立：摘不到 qinfo"
+    if _t11_problem(dead, ch) is None:
+        return "负控失效①：问号摘掉仍判合格（存在性那条腿没分辨力）"
+    # 面②：写成"存了文件全文"（事实错，且正是读者最担心的那件事）
+    dead2 = page_h.replace("记录里只有摘要", "记录里存了文件全文")
+    if dead2 == page_h:
+        return "夹具不成立：摘不到「记录里只有摘要」"
+    if _t11_problem(dead2, ch) is None:
+        return "负控失效②：说成存文件全文仍判合格（隐私那条腿没分辨力）"
+    # 面③：把「这次是些什么」塞进记录说明（两种问号混了内容）
+    n = int(ch["unchained"])
+    dead3 = page_h.replace("记录文件放两处", "这 %d 条记录文件放两处" % n)
+    if dead3 == page_h:
+        return "夹具不成立：摘不到「记录文件放两处」"
+    if _t11_problem(dead3, ch) is None:
+        return "负控失效③：本次条数混进记录说明仍判合格（分工那条腿没分辨力）"
     return True
 
 
@@ -5527,7 +5789,12 @@ def main():
           "（0.53.4 日报细节，创始人 2026-10-20 截图：规则号移到短名之前"
           "＋字号跟正文一样大；日报两卡 label 按内容撑开不写死宽度；"
           "删「本来就不参与比对」同义句；「没纳入比对的记录」数字后侧挂"
-          "圈问号，展开体给本次核对的逐文件明细 —— 派生，不写死）")
+          "圈问号，展开体只答「是什么＋范围」—— 逐文件明细已退役）· "
+          "批26 T-10/N-T10/T-11/N-T11（0.53.4 链卡搬家：创始人「这些好像"
+          "不属于日报，放在日报里合适吗？」—— 链卡搬到运行状态页，三行各答"
+          "一件事（结论／范围／没纳入比对）＋边界注，日报只留一句指路；"
+          "记录本身挂圈问号 `.qinfo` 答「是什么／什么形式／放哪／存什么」，"
+          "T-07/T-08/T-09/U23 的落点同批跟搬）")
     print("（变异只在内存，账本与链只落临时目录，不写任何产品文件；"
           "戊2/戊3 视觉项无判据，走 §6.1 截图验收 —— U-13 只含戊2 机械部分）")
     print("=" * 78)

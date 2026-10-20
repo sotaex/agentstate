@@ -228,16 +228,20 @@ h2{font-size:15px;margin:0 0 12px}
 .rows.fit .row>span:last-child{flex:1 1 auto;min-width:0}
 /* ★ 0.53.4：行内「圈问号」—— **本次数据**的总结说明（不是术语词条：词条答
    "这是什么"，它答"这次是什么"）。徽章与 `.term` 的「？」**同一种形状**
-   （14×14 圆、10px、写死字号，U-16 立意），不进 name="term" 互斥组。 */
-.qsum{display:inline-block;position:relative;vertical-align:baseline;margin-left:6px}
-.qsum>summary{cursor:pointer;list-style:none;display:inline-block;width:14px;height:14px;
+   （14×14 圆、10px、写死字号，U-16 立意），不进 name="term" 互斥组。
+   ★★ 0.53.4 二次修订：第二形态 `.qinfo` —— 答"**这类东西是什么**"（记录的
+   来龙去脉），与 `.qsum`（答"这一次是些什么"）**同形不同义**。两者共用同
+   一套样式规则（形状必须一致，否则同屏两种问号），但**类名分开**：
+   判据各锁各的落点，混用一个类会让"问号答错了问题"这条永远查不出来。 */
+.qsum,.qinfo{display:inline-block;position:relative;vertical-align:baseline;margin-left:6px}
+.qsum>summary,.qinfo>summary{cursor:pointer;list-style:none;display:inline-block;width:14px;height:14px;
   font-size:0;line-height:0;color:transparent;letter-spacing:0}
-.qsum>summary::-webkit-details-marker{display:none}
-.qsum>summary::after{content:"？";position:absolute;top:0;left:0;
+.qsum>summary::-webkit-details-marker,.qinfo>summary::-webkit-details-marker{display:none}
+.qsum>summary::after,.qinfo>summary::after{content:"？";position:absolute;top:0;left:0;
   width:14px;height:14px;line-height:14px;text-align:center;border-radius:50%;
   background:var(--line);color:var(--muted);font-size:10px;font-weight:700}
-.qsum[open]>summary::after{background:var(--brand);color:#fff}
-.qsum>.qbody{position:fixed;z-index:60;top:8px;left:8px;right:auto;width:max-content;
+.qsum[open]>summary::after,.qinfo[open]>summary::after{background:var(--brand);color:#fff}
+.qsum>.qbody,.qinfo>.qbody{position:fixed;z-index:60;top:8px;left:8px;right:auto;width:max-content;
   max-width:min(560px,calc(100vw - 16px));min-width:min(260px,calc(100vw - 16px));
   max-height:calc(100vh - 16px);overflow:auto;
   margin:0;padding:12px 14px;font-size:12.5px;line-height:1.75;color:var(--fg);
@@ -2215,7 +2219,7 @@ def _view_report(rep, token, items=None):
                      " ｜ 共 %d 条"
                      % (_day, Lv["R0"], _day, Lv["L2"],
                         _day, Lv["L1"], _day_total))
-    pr = ("<div class=\"card\"><div class=\"rows\">"
+    pr = ("<div class=\"card\"><div class=\"rows fit\">"
           "<div class=\"row\"><span class=\"k\">最近 %d 小时%s</span><span>%s</span></div>"
           "<div class=\"row\"><span class=\"k\">%s 当日合计</span><span>%s</span></div>"
           "</div></div>"
@@ -2276,37 +2280,17 @@ def _view_report(rep, token, items=None):
         rules = ("<div class=\"card\"><h2>规则命中排行 · 当日共 %d 次"
                  "</h2><div class=\"rows fit\">%s</div></div>" % (_rule_total, rows))
 
-    ch = rep["chain"]
-    cls = {"ok": "ok", "broken": "bad", "unknown": "warn"}.get(ch["status"], "warn")
-    if ch["status"] == "broken" and not ch.get("first_bad"):
-        ch = dict(ch)
-        ch["first_bad"] = "存在无法读取的链记录；当前未能定位具体文件/行"
-    # ★ 0.37.2：词条不再传 `text=`（旧版传「记录有没有被改过」，而术语本名是
-    #   「有没有被改过」⇒ 展开后正文开头又补一遍本名，读成
-    #   「记录有没有被改过 有没有被改过：」，同一个意思叠两层）。
-    # ★「被改过的地方 / 坏行 0 / 0」⇒ 拆成两行（旧版把一个标签对两个数）。
-    chain = ("<div class=\"card\"><h2>%s（本日报能读取到的链文件）</h2><div class=\"rows fit\">"
-             "<div class=\"row\"><span class=\"k\">校验结果</span><span class=\"%s\">%s</span></div>"
-             # ★ 0.50.4（Q-06 ＋ Q-09）：这一行原先是「检查了几个文件 / 多少条记录
-             #   ＋ 值 23 / 48078」⇒ 同一行三个斜杠，且分别表示「或」与「与」两种
-             #   关系；两个异质量并排成一条斜杠还被读成比例。⇒ 值写成一句
-             #   「23 个文件、48078 条记录」（与运行状态页的完整句统一）。
-             "<div class=\"row\"><span class=\"k\">检查范围</span><span>%d 个文件、%d 条记录</span></div>"
-             "<div class=\"row\"><span class=\"k\">%s 被改过几处</span><span>%d</span></div>"
-             "<div class=\"row\"><span class=\"k\">坏了几行</span><span>%d</span></div>"
-             # ★ 0.53.4（创始人 2026-10-20 截图：「『本来就不参与比对』这种是
-             #   废话吧？」）：删掉值里的同义括号句 —— 为什么"没纳入比对"由
-             #   **行左的词条问号**答（概念），这次是些什么记录由
-             #   **值后的圈问号**答（本日数据）。一句话说三遍正是 STE 要灭的。
-             "<div class=\"row\"><span class=\"k\">%s</span><span>%d%s</span></div>%s%s</div></div>"
-             % (GL.chip("chain_check"), cls, _esc(_chain_verdict(ch)),
-                ch["files"], ch["records"],
-                GL.chip("chain"), ch["broken"], ch.get("bad_lines", 0),
-                GL.chip("unchained"), ch.get("unchained", 0), _qsum_html(ch),
-                ("<div class=\"row\"><span class=\"k\">第一个问题出在哪</span><span>%s</span></div>"
-                 % _esc(ch["first_bad"])) if ch.get("first_bad") else "",
-                ("<div class=\"row\"><span class=\"k\">说明</span><span>%s</span></div>"
-                 % _esc(ch["reason"])) if ch.get("reason") else ""))
+    # ★★ 0.53.4（创始人 2026-10-20「这些好像不属于日报，放在日报里合适吗？」）：
+    #   **链卡整张搬去运行状态页**（`_chain_card`）。日报只留一句出处 ——
+    #   搬走的理由不是它不重要，而是：
+    #     ① 它答的是「证据本身可靠不可靠」，与"今天发生了什么"不是同一件事；
+    #     ② 它每天的数几乎不变（同一批文件），放日报等于每天重复同一句；
+    #     ③ 它要三行才说得清（结论／范围／没纳入比对），放进日报就挤掉了
+    #        日报自己那两卡的位置。
+    #   ★ 减法留账：日报**不再给结论词**（"没有被改过"这四个字只出现在运行
+    #     状态页一处）—— 留一句指路，读者点过去看同一份结论；由 T-10 守。
+    chain = ("<p class=\"note\">记录有没有被改过、核对了多少条，"
+             "在<a href=\"/?v=health\">运行状态</a>页。</p>")
     # ★ 0.36.1：时间范围只在**小节标题**里说一次（原来四张卡片各写一遍）。
     # ★ 0.37.1：页面名与 `<title>`/选项卡统一取 `PAGE_TITLES`（唯一真源）——
     #   旧版这里写「今日值守 · 日期」，而浏览器标签与选项卡都写「日报」，
@@ -2384,11 +2368,121 @@ def _qsum_html(ch):
             head = "这 %d 条都是%s。" % (n, _zh)
     body = ("%s它们不带指纹，不算被改过。" % head) if head else \
         ("这 %d 条记录不带指纹，不算被改过。" % n)
-    fd, ld = ch.get("first_day") or "", ch.get("last_day") or ""
-    scope = ("核对范围是 %s 到 %s 的链文件。" % (_esc(fd), _esc(ld))
-             if fd and ld else "")
+    # ★★ 0.53.4 三次修订：**删掉「核对范围是 A 到 B 的链文件」这一句**。
+    #   链卡搬到运行状态页后，紧挨着的上一行就是「检查范围：A 到 B，共 N 条
+    #   记录」—— 同屏两处同一段日期，正是 STE 要灭的「一句话说两遍」。
+    #   （搬卡前这句是**唯一**给出日期的地方，所以它在当时是对的；前提变了。）
     return ("<details class=\"qsum\"><summary>？</summary><div class=\"qbody\">"
-            "%s%s</div></details>" % (body, scope))
+            "%s</div></details>" % body)
+
+
+#: 「记录」是什么 —— 圈问号 `.qinfo` 的展开体（创始人 2026-10-20：
+#: 「65119 条记录……这些记录是啥？什么形式存在？我需要了解清楚，我相信
+#: 用户也会有这样的疑问的」）。
+#: ★ 写法按 ASD-STE100：一句话一个意思、主动语态、现在时、不用缩略语、
+#:   不写路径与英文词（`jsonl` / `sha256` 一个都不上屏 —— 它们是**实现**，
+#:   用户问的是"这东西是什么、存在哪、存了什么"）。
+#: ★ 四句各答一问，顺序＝读者会问的顺序：是什么 → 什么形式 → 放哪 → 存什么。
+#:   "存什么"放最后且**明说不存什么**：隐私是这里唯一的真风险点，
+#:   说"只有摘要"而不说"没有文件内容"，读者仍然会担心。
+_RECORD_WHAT = (
+    "一条记录就是发生过的一件事。开一次对话、拦一次操作，都会留下一条。"
+    "每条记录是一行文字，写在记录文件的末尾，前面的行不改。"
+    "记录文件放两处：本机汇总一处，各项目目录一处。"
+    "记录里只有摘要：命令里认出密钥就遮住，文件只留内容指纹，没有文件内容。"
+)
+
+
+def _qinfo_html(text):
+    """行内圈问号的**第二形态**：答「这类东西是什么」（静态概念）。
+
+    ★ 与 `.qsum` 分工（两者同形不同义，类名分开）：
+      `.qsum`  答"**这一次**是些什么记录"（数字/类型/范围全部派生自本次数据）；
+      `.qinfo` 答"**这类东西**是什么、存在哪、存了什么"（与本次数据无关）。
+    ★ 不进 `name="term"` 互斥组：它不是术语词条（没有 `data-t`），
+      与术语表 24 条不共享开关状态。
+    """
+    return ("<details class=\"qinfo\"><summary>？</summary><div class=\"qbody\">"
+            "%s</div></details>" % _esc(text))
+
+
+def _chain_card(ch):
+    """运行状态页第二张小节卡「记录」（0.53.4 从日报搬来）。
+
+    ★ 为什么搬：创始人 2026-10-20「这些好像不属于日报，放在日报里合适吗？」
+      —— 日报答"今天发生了什么"，而"记录有没有被改过"答的是**证据本身可靠
+      不可靠**，与当天的账无关；而且它每天的数几乎不变（同一批文件），
+      放进日报等于每天重复同一句。
+
+    ★ 三行（创始人拍板「这张表就三行吧，漏掉的重要信息都补上」）：
+      ① 结论：逐条对过多少条、有没有被改过（直答，不再给"完整"这种状态词）
+      ② 检查范围：日期区间 ＋ 记录总数（总数含没纳入比对的，否则读者
+         拿 64972 去对账永远少 147 —— 这正是 10:18 那条"对不上"的根）
+      ③ 没纳入比对的记录：0 条时**整行不列**（列一个 0 只会生出"那是啥"）
+    ★ 有问题时才追加「第一个问题出在哪」；没查成时**只留告警句一行**——
+      此时范围/总数都还不存在，硬凑三行就是拿 0 冒充数据。
+    ★ 末挂一行边界注：没有这句，卡片读起来像"整机全查过了"。
+    """
+    ch = ch or {}
+    css = {"ok": "ok", "broken": "bad", "unknown": "warn"}.get(
+        str(ch.get("status") or ""), "warn")
+    recs = int(ch.get("records") or 0)
+    unch = int(ch.get("unchained") or 0)
+    bad = int(ch.get("bad_lines") or 0)
+    rows = []
+    if _chain_ok_state(ch):
+        # ★ 直答：数字从 records 派生，结论词从 `chain_status_label` 派生
+        #   （唯一实现，不在此另写一份中文字面）。
+        rows.append('<div class="row"><span class="k">%s</span>'
+                    '<span class="%s">%d 条逐条对过，%s</span></div>'
+                    % (GL.chip("chain_check"), css, recs,
+                       _esc(R.chain_status_label(ch.get("status")))))
+        total = recs + unch + bad
+        fd, ld = ch.get("first_day") or "", ch.get("last_day") or ""
+        # ★ 范围句两形态都派生：读得出日期 ⇒ 「A 到 B，共 N 条记录」；
+        #   读不出（项目级文件名不一定带日期）⇒ 只说条数，不编日期。
+        scope = ("%s 到 %s，共 %d 条记录" % (_esc(fd), _esc(ld), total)
+                 if fd and ld else "共 %d 条记录" % total)
+        rows.append('<div class="row"><span class="k">检查范围</span>'
+                    '<span>%s%s</span></div>' % (scope, _qinfo_html(_RECORD_WHAT)))
+        if unch > 0:
+            rows.append('<div class="row"><span class="k">%s</span>'
+                        '<span>%d%s</span></div>'
+                        % (GL.chip("unchained"), unch, _qsum_html(ch)))
+        if ch.get("first_bad"):
+            rows.append('<div class="row"><span class="k">第一个问题出在哪</span>'
+                        '<span>%s</span></div>' % _esc(ch["first_bad"]))
+        elif str(ch.get("status")) == "broken":
+            rows.append('<div class="row"><span class="k">第一个问题出在哪</span>'
+                        '<span>存在无法读取的链记录；当前没能定位到具体文件</span>'
+                        '</div>')
+    else:
+        rows.append('<div class="row"><span class="k">%s</span>'
+                    '<span class="%s">%s</span></div>'
+                    % (GL.chip("chain_check"), css, _esc(_chain_verdict(ch))))
+        # ★ 没查成时，**只有「读到了文件却一条都校验不了」这种才追加原因**：
+        #   `chain_health` 的三条 `reason` 路径互斥 —— files==0 ⇒ 原因是
+        #   「没有可校验的链文件」，而告警句已经说了「0 个文件被检查」，
+        #   再说一遍是废话（STE）；files>0 且 reason 非空 ⇒ 只可能是
+        #   「拿不到校验器：…」，这句是**唯一**能说清原因的地方，必须留。
+        if ch.get("reason") and int(ch.get("files") or 0) > 0:
+            rows.append('<div class="row"><span class="k">说明</span>'
+                        '<span>%s</span></div>' % _esc(ch["reason"]))
+    # ★ 小节标题走 `chain` 词条芯片（「防篡改记录」）—— 它既是这一节的**名字**，
+    #   也是这个词条唯一的落点（日报撤卡后 `chain` 芯片不能再只剩在旧卡里，
+    #   否则术语表 100% 有落点那条判据会红）。
+    # ★ 显式结构边界（`id="chainrec"` 起、`<!-- chainrec:end -->` 止）：
+    #   判据取段锚在标记上，卡里加行减行、改句子都不碰尺子。
+    # ★ 边界注两件事：① 这条链**查不到**什么（整份替换）；② 哪一类记录**根本
+    #   没法比**（没指纹的那几类）—— 后者带词条芯片，它是「没纳入比对的记录」
+    #   这个词条在本页的**固定落点**：第三行在 0 条时整行不列（创始人：0 行不列），
+    #   没有这个落点，机器上一条都没有时这个词就"定义了却看不到"（P13 死角）。
+    return ('<h2 id="chainrec">%s</h2><div class="rows fit">%s</div>'
+            '<p class="note" style="margin:8px 2px 2px">只比对本机读得到的记录：'
+            '单条被改能查出来；整份文件缺失、整份被替换，看不出来。'
+            '没指纹的记录没法比对，单独算一类：%s</p>'
+            '<!-- chainrec:end -->'
+            % (GL.chip("chain"), "".join(rows), GL.chip("unchained")))
 
 
 def _view_health(rep, token, items=None):
@@ -2408,7 +2502,6 @@ def _view_health(rep, token, items=None):
       钩子 / 边界）。
     """
     ch = rep["chain"]
-    cls = {"ok": "ok", "broken": "bad", "unknown": "warn"}.get(ch["status"], "warn")
     _hrs = rep.get("window_hours", 24)
     _revived_count = rep.get("revived_window", 0)
     # ★ 0.47.0：拉起次数是分子 ⇒ 分母＝窗口内总记录数（与日报页同一口径）。
@@ -2431,14 +2524,12 @@ def _view_health(rep, token, items=None):
     #   ⇒ 状态词全站只有**顶部条**一处；本页只放顶部条没有的证据。
     # (标签, 值, 颜色样式, 值是否可信 HTML)
     # ★ 标签一律 trusted=True：`GL.chip()` 是我们自己生成的 HTML。
-    # ★ 0.53.0（T5.2／设计 §4.4-3）：链检"没查成"改说告警句（见 `_chain_verdict`）。
-    #   有查成时原句**逐字不变**（上版两处单位修正都在那半句里，不许顺手改）。
-    if _chain_ok_state(ch):
-        _chain_value = ("%s（检查了 %d 个文件、%d 条记录，被改 %d）"
-                        % (R.chain_status_label(ch["status"]), ch["files"],
-                           ch["records"], ch["broken"]))
-    else:
-        _chain_value = _chain_verdict(ch)
+    # ★★ 0.53.4（创始人 2026-10-20「这些好像不属于日报，放在日报里合适吗？」）：
+    #   链检那行**搬出本块**，成为本页第二张小节卡（见 `_chain_card`）——
+    #   它要答三件事（结论／范围／没纳入比对），塞进这行只会变成
+    #   「一句话里三个数」的旧形状；而它答的问题（记录有没有被改过）
+    #   与本节其余各行（哨兵／监听地址／工具识别／钩子／边界）不是同一类。
+    #   减法留账：「一句话塞三个数」这个形状**不回来**，由 T-10 守。
     # ★ 0.53.0（T5.2／设计 §4.4-1、§14.6-2）：工具识别**最小版**（一行，不另开小节）。
     #   三样：判定方式（哪条线索）／近 7 天认得出几条／说不清占比超 5% 提醒。
     #   ★ 不做「旧记录分代」（v1.5 划到非目标：分代钻取）。
@@ -2494,7 +2585,7 @@ def _view_health(rep, token, items=None):
         #   ⇒ 一律走 `chain_status_label()` 的中文。
         # ★ 0.53.0（T5.2）：句子的**拼装**提到 `rows` 之前（见上）——因为"没查成"
         #   时它换成告警句，而告警句自带文件数，不再套那层括号。
-        (GL.chip("chain_check"), _chain_value, cls, False),
+        # ★★ 0.53.4：这一行已搬成独立小节卡 `_chain_card()`（本元组里不再有它）。
         # ★ 0.50.4（Q-16）：原正文「本页没查这台电脑的实际安装情况」与 `hook`
         #   词条的 exc「这一页没查你这台电脑的实际安装情况」**是同一句出现两次**
         #   ⇒ 正文改成讲**结论**（它装在哪个环节），否证交给词条（定义处只讲一次）。
@@ -2566,8 +2657,9 @@ def _view_health(rep, token, items=None):
     #        这个问题原本不存在。
     #   ★ 减法留账：删的是**这句话**，不是"没查成必须告警"这条规矩 ——
     #     后者仍在 `_chain_value`，判据 J8 同时锁住"这句不许回来"。
-    return ("<h2>%s · %s</h2><div class=\"rows\">%s</div>%s"
-            % (PAGE_TITLES["health"], _esc(rep.get("day") or ""), body, _lorder))
+    return ("<h2>%s · %s</h2><div class=\"rows\">%s</div>%s%s"
+            % (PAGE_TITLES["health"], _esc(rep.get("day") or ""), body,
+               _chain_card(ch), _lorder))
 
 
 def _view_ledger(rep, token, items=None):
