@@ -3362,7 +3362,16 @@ def render_page(view="inbox", filt=None, root=None, token="", items=None, rep=No
     ex = M.light_explain(p, items, now=now, granary=M.granary_now())
     title = PAGE_TITLES.get(view, "收件箱")
     if view in ("report", "health", "ledger"):
-        rep = (R.daily_report(root=root, items=items) if rep is None else rep)
+        # ★ 2026-10-21（TAB 切换卡顿根治·方案 A，创始人拍板）：旧版
+        #   `daily_report()` **函数体内又自算一次** `guard_posture`（入参经
+        #   核实与本函数 `posture_now()` 是同一目录、同一函数）⇒ report/
+        #   health/ledger 每页把同一件事实算两遍（满载实测 ~1.2s/页，另加
+        #   心跳链 15MB 双读）。现在把上面已现探的 `p` 注入进去：**一个事实
+        #   一个变量，页面从头到尾同一份态势**（0.53.0 T4 纪律的延伸）；
+        #   `daily_report` 的 `posture` 默认 None ⇒ 不自算时行为不变
+        #   （CLI 日报/邮件/判据零影响）。判据：TP-A1（0514 套件）。
+        rep = (R.daily_report(root=root, items=items, posture=p)
+               if rep is None else rep)
         if view == "report":
             body = _view_report(rep, token, items)
         elif view == "health":

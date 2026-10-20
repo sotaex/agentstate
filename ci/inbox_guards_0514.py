@@ -6272,6 +6272,184 @@ def n_t4_term_no_dup():
     return True
 
 
+# ═══════════ TP 族 · TAB 切换卡顿根治（2026-10-21 创始人拍板 A+B+C+E）═══════════
+#
+#: 背景（只读轮报告：`.worktrees/night/docs/Antinel·TAB 切换卡顿根因分析
+#: （2026-10-20 只读轮）.md`）：创始人「五个 TAB 切换很不畅」。实测根因 R1：
+#: `render_page` 与 `daily_report` 函数体内**各现探一次** `guard_posture`
+#:（同一目录、同一函数），report/health/ledger 每页白付一倍（满载 ~1.2s/页，
+#: 心跳链 15MB 双读）。方案 A：`daily_report(posture=None)` 可注入，
+#: `render_page` 传已现探的 `p` —— **语义零变化**（默认值＝旧行为）。
+#:
+#: 判据方法：不看文案不看行号，**数一次完整渲染里 `guard_posture` 的真实
+#: 调用次数**（打点计数，行为级）；负控把 `daily_report` 打回旧形状
+#:（吃掉 posture 注入）⇒ 同一把尺子必须报「2 次」。
+
+
+def _tp_posture_calls(view="report", drop_posture=False):
+    """一次完整渲染里 `guard_posture` 被现探几次（正判据期望恰好 1）。
+
+    ★ 纯夹具函数，**正负控共用同一把尺子**（L-02/T4-09 同款纪律）：
+      `drop_posture=True` 模拟旧形状（`daily_report` 吃掉注入、体内自算）
+      ⇒ 必须变成 2。负控不另写一份判读。
+    ★ 计数打点是行为级证据：产品若在某条渲染支线上又现探一次（漂移），
+      这里立刻见红 —— 不依赖"代码里看起来只调了一次"。
+    """
+    import host_shield as HS
+    calls = {"n": 0}
+    saved_gp, saved_dr = HS.guard_posture, SV.R.daily_report
+
+    def _counting(pkg_root=None):
+        calls["n"] += 1
+        return saved_gp(pkg_root)
+
+    HS.guard_posture = _counting
+    if drop_posture:
+        def _old_shape(*a, **kw):
+            kw.pop("posture", None)          # 旧签名没有这个参数 ⇒ 必然自算
+            return saved_dr(*a, **kw)
+
+        SV.R.daily_report = _old_shape
+    try:
+        SV.render_page(view=view, root=_HUB, token="t", items=[])
+    finally:
+        HS.guard_posture = saved_gp
+        SV.R.daily_report = saved_dr
+    return calls["n"]
+
+
+@check("TP-A1 三视图各一次完整渲染里 guard_posture 只现探一次（同一事实一个变量）")
+def c_tp_a1():
+    """★ 卡的是「白算的那一遍没了」，且**没有多出别的现探点**。
+
+    `render_page` 每个视图先 `p = posture or posture_now()` 现探一次（顶部条、
+    标题、归因模块共用它）；`_bar` 收 `posture=p` 不再自探；report/health/
+    ledger 的 `daily_report` 收 `posture=p` 不再自探。三视图各量一次。
+    """
+    for v in ("report", "health", "ledger"):
+        n = _tp_posture_calls(view=v)
+        if n != 1:
+            return ("%s 视图渲染期间 guard_posture 被现探 %d 次（应 1）—— "
+                    "同一事实两遍算（或多了新现探点）：满载实测每遍 ~1.2s，"
+                    "页面从 20s+ 回落的结构前提就没了" % (v, n))
+    _note("report/health/ledger 三视图各现探 1 次（旧实现 report 为 2 次）")
+    return True
+
+
+@check("N-TPA1 负控：daily_report 打回旧形状（吃掉 posture 注入）⇒ TP-A1 必须红")
+def n_tp_a1():
+    """负控前置：当前实现三视图都恰好 1 次（否则正判据是假的）。
+
+    变异：让 `daily_report` 忽略注入的 posture（旧形状）⇒ 尺子必须报
+    「2 次」；仍然绿 ⇒ 计数打点是装饰，TP-A1 永远抓不到复发。
+    """
+    for v in ("report", "health", "ledger"):
+        if _tp_posture_calls(view=v) != 1:
+            return "负控前置失败：当前 %s 视图就不是 1 次（正判据未过）" % v
+    for v in ("report", "health", "ledger"):
+        n = _tp_posture_calls(view=v, drop_posture=True)
+        if n != 2:
+            return ("负控失效：吃掉注入后 %s 视图现探 %d 次（应 2）—— "
+                    "要么变异没生效，要么页面本来就不走那条自算路径" % (v, n))
+    return True
+
+
+@check("TP-A2 posture 契约：不注入⇒自算一次；注入⇒原样使用且不再现探")
+def c_tp_a2():
+    """两臂都量（单臂会漏）：
+
+    ① 默认臂（旧行为不变）：`daily_report` 不带 posture ⇒ 自算一次，
+       且 `rep["posture"]` 就是 `guard_posture` 当场返回的那一份。
+    ② 注入臂：`guard_posture` 打点计数 —— 产品若无视注入回去自算，
+       计数立刻 >0（那一遍正是要消灭的白算）；且注入的那一份必须
+       原样进日报（同一事实一个变量）。
+    ★ 为什么不「一调就炸」当探测器：`daily_report` 自算带 blind-spot
+      兜底（探不到 ⇒ unknown，产品纪律，绝不冒充）—— AssertionError
+      会被那层 `except` 吞掉，**炸弹穿不透兜底**；计数才穿得透。
+    """
+    import host_shield as HS
+    sentinel = {"state": "值守中", "label": "注入哨兵", "why": "", "evidence": {},
+                "can_fix": False, "fix": None, "fix_hint": ""}
+    calls = {"n": 0}
+    saved = HS.guard_posture
+
+    def _counting(pkg_root=None):
+        calls["n"] += 1
+        return sentinel
+
+    HS.guard_posture = _counting
+    try:
+        rep = SV.R.daily_report(root=_HUB, chain_files=[], items=[])
+    finally:
+        HS.guard_posture = saved
+    if calls["n"] != 1:
+        return "默认臂：不注入 posture 时 guard_posture 被调 %d 次（应 1）" % calls["n"]
+    if rep.get("posture") is not sentinel:
+        return ("默认臂：rep['posture'] 不是 guard_posture 当场那一份 —— "
+                "日报与顶部条可能说两个时刻的态势")
+
+    calls["n"] = 0
+    HS.guard_posture = _counting
+    try:
+        rep2 = SV.R.daily_report(root=_HUB, chain_files=[], items=[],
+                                 posture=sentinel)
+    finally:
+        HS.guard_posture = saved
+    if calls["n"] != 0:
+        return ("注入臂：注入了 posture，产品却又回去现探了 %d 次 —— "
+                "白算的那一遍还在（满载实测 ~1.2s/页）" % calls["n"])
+    if rep2.get("posture") is not sentinel:
+        return "注入臂：注入的 posture 没有原样进日报（同一事实两个变量）"
+    return True
+
+
+@check("N-TPA2 负控：让 daily_report 无视注入（旧形状自算）⇒ TP-A2 必须红")
+def n_tp_a2():
+    """变异：包一层吃掉 posture 注入。尺子＝「注入后 guard_posture 还应不应该被调」。
+
+    产品正形态：注入 ⇒ **零调用**。变异体：注入被吃 ⇒ 自算 ⇒ 1 次调用
+    ⇒ TP-A2 注入臂判红（计数 >0 或 posture 不是原样那份）。
+    ★ 不用「一调就炸」：blind-spot 兜底会吞掉 AssertionError（见 TP-A2
+      docstring）—— 负控若要真会红，探测器必须穿得过那层兜底。
+    """
+    import host_shield as HS
+    calls = {"n": 0}
+    saved_dr, saved_gp = SV.R.daily_report, HS.guard_posture
+
+    def _counting(pkg_root=None):
+        calls["n"] += 1
+        return saved_gp(pkg_root)
+
+    def _old_shape(*a, **kw):
+        kw.pop("posture", None)              # 旧签名没有这个参数 ⇒ 必然自算
+        return saved_dr(*a, **kw)
+
+    # 前置：正形态下注入 ⇒ 零调用（否则正判据未过，负控无分辨力）
+    HS.guard_posture = _counting
+    try:
+        SV.R.daily_report(root=_HUB, chain_files=[], items=[],
+                          posture={"state": "x"})
+    finally:
+        HS.guard_posture = saved_gp
+    if calls["n"] != 0:
+        return "负控前置失败：正形态注入后仍现探了 %d 次" % calls["n"]
+
+    # 变异：吃掉注入 ⇒ 必须自探 1 次（观察到 ⇒ 负控绿）
+    calls["n"] = 0
+    SV.R.daily_report = _old_shape
+    HS.guard_posture = _counting
+    try:
+        SV.R.daily_report(root=_HUB, chain_files=[], items=[],
+                          posture={"state": "x"})
+    finally:
+        SV.R.daily_report = saved_dr
+        HS.guard_posture = saved_gp
+    if calls["n"] != 1:
+        return ("负控失效：吃掉注入后自探了 %d 次（应 1）—— 注入臂的分辨力"
+                "建立在「产品真的会用注入」上，此处应当证明它会自算" % calls["n"])
+    return True
+
+
 def main():
     print("=" * 78)
     print("0.49.0 收口判据 —— W-08 默认尺寸 · W-09 浮层逃逸 · U-17 图标动效 · "

@@ -272,10 +272,16 @@ def rule_label_map():
 
 
 def daily_report(day=None, root=None, chain_files=None, items=None,
-                 chain=None, led=None):
+                 chain=None, led=None, posture=None):
     """生成某一天的日报。`day` 缺省＝本地今天。
 
     `items` / `chain` / `led` 可注入（测试用；生产走真实来源）。
+    `posture` 可注入（2026-10-21 TAB 卡顿根治·方案 A）：门闸态势的**唯一
+    现探点**在 `inbox_server.render_page`（`p = posture or posture_now()`，
+    顶部条要用它）—— 旧版本函数体内**又自算一次** `guard_posture`（同一
+    目录、同一函数），三视图每页白付一倍（满载实测 ~1.2s/次）。**不注入
+    ⇒ 自算**（默认行为一字不变：CLI 日报、邮件、既有判据全部零影响）；
+    注入 ⇒ 用调用方那一份 ——「一个事实一个变量」（0.53.0 T4 同款纪律）。
     """
     day = day or date.today().isoformat()
     files = S.discover_chain_files(root=root) if chain_files is None else chain_files
@@ -318,12 +324,19 @@ def daily_report(day=None, root=None, chain_files=None, items=None,
         drill.append({"key": "Ls", "label": M.state_short("Ls"), "count": win_levels["Ls"],
                       "filt": "lv:Ls"})
 
-    try:
-        import host_shield as _hs
-        posture = _hs.guard_posture(os.path.dirname(os.path.abspath(__file__)))
-    except Exception as e:                      # noqa: BLE001
-        posture = {"state": "unknown", "label": "查不到", "why": "读不到监理状态：%r" % (e,),
-                   "evidence": {}, "can_fix": False, "fix": None, "fix_hint": ""}
+    # ★ 2026-10-21（TAB 卡顿根治·方案 A）：`posture=None` ⇒ 自算（旧行为，
+    #   唯一现探口径不变）；调用方注入 ⇒ 直接用（render_page 已为顶部条
+    #   现探过同一份，见该处注释）。**不注入不许返回空/假态势** ——
+    #   自算失败时仍走 unknown 盲区档，与本函数既有口径一致。
+    if posture is None:
+        try:
+            import host_shield as _hs
+            posture = _hs.guard_posture(os.path.dirname(os.path.abspath(__file__)))
+        except Exception as e:                  # noqa: BLE001
+            posture = {"state": "unknown", "label": "查不到",
+                       "why": "读不到监理状态：%r" % (e,),
+                       "evidence": {}, "can_fix": False, "fix": None,
+                       "fix_hint": ""}
 
     return {
         "day": day,
