@@ -62,6 +62,15 @@ def chain_unverified(files):
     return "这次没核验成：%d 个文件里没有一条可校验的记录——结果不算数" % n
 
 
+def _chain_file_name(path):
+    """链文件的**上屏名字**：basename 去扩展名（逐日文件即日期）。
+
+    ★ 只取文件名，不带目录：用户问"核对了哪些文件"要的是**哪些**，
+      绝对路径是噪声（账本明细已踩过：路径上屏被创始人点名）。
+    """
+    return os.path.splitext(os.path.basename(path))[0]
+
+
 def _chain_check_file(path, ac):
     """校验**一个**链文件，返回计数 dict（按文件指纹缓存）。"""
     try:
@@ -126,16 +135,18 @@ def chain_health(chain_files):
     if not chain_files:
         return {"status": "unknown", "files": 0, "records": 0, "broken": 0,
                 "unchained": 0, "bad_lines": 0, "first_bad": "",
-                "reason": "没有可校验的链文件 —— 这是「没查成」，不是「没问题」。"}
+                "reason": "没有可校验的链文件 —— 这是「没查成」，不是「没问题」。",
+                "file_list": []}
     try:
         import audit_chain as ac
     except Exception as e:                      # noqa: BLE001
         return {"status": "unknown", "files": len(chain_files), "records": 0,
                 "broken": 0, "unchained": 0, "bad_lines": 0, "first_bad": "",
-                "reason": "拿不到校验器：%s" % (e,)}
+                "reason": "拿不到校验器：%s" % (e,), "file_list": []}
 
     files = records = broken = badjson = unchained = 0
     first_bad = ""
+    file_list = []
     for p in chain_files:
         r = _chain_check_file(p, ac)
         files += 1
@@ -145,6 +156,14 @@ def chain_health(chain_files):
         unchained += r["unchained"]
         if not first_bad and r["first_bad"]:
             first_bad = r["first_bad"]
+        # ★ 0.53.4：逐文件明细 —— 日报「没纳入比对的记录」行旁的问号要回答
+        #   「本次核对了哪些文件」。**只带文件名（basename 去扩展名）**：
+        #   绝对路径不上屏（账本明细踩过：路径是噪声，用户要的是"哪些"）。
+        file_list.append({"name": _chain_file_name(p),
+                          "records": r["records"],
+                          "unchained": r["unchained"]})
+    # 日期名排序＝时间序；项目级文件名不保证可比，混入时排后面也不影响正确性。
+    file_list.sort(key=lambda d: d["name"])
 
     if records == 0:
         status = "unknown"                      # 一条可校验的都没有 ⇒ 没查成
@@ -152,7 +171,7 @@ def chain_health(chain_files):
         status = "broken" if (broken or badjson) else "ok"
     return {"status": status, "files": files, "records": records,
             "broken": broken, "unchained": unchained, "bad_lines": badjson,
-            "first_bad": first_bad, "reason": ""}
+            "first_bad": first_bad, "reason": "", "file_list": file_list}
 
 
 _HERE = os.path.dirname(os.path.abspath(__file__))

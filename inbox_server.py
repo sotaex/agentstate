@@ -209,10 +209,44 @@ h2{font-size:15px;margin:0 0 12px}
 /* ★ 0.51.0（品质审查拍板点 1）：四卡撤分母后，单位「条／件」小号灰显跟上 ——
    单位可见（U-08 立意），但不与数字抢 26px 的视觉权重。 */
 .metric .unit{font-size:13px;font-weight:600;color:var(--muted)}
-/* ★ 0.51.0（拍板点 3）：排行行规则号**淡显上屏**（索引位）—— 与问号全表
-   `.tdef .rrow .rid` 同一视觉语言；收件箱记录「规则 SEC-01」能对号入座。 */
-.rows .rid{display:inline-block;min-width:52px;margin-left:6px;
-  font-family:var(--mono);font-size:11px;font-weight:400;color:var(--muted)}
+/* ★ 0.51.0（拍板点 3）：排行行规则号**上屏**（索引位）—— 与问号全表
+   `.tdef .rrow .rid` 同一视觉语言；收件箱记录「规则 SEC-01」能对号入座。
+   ★★ 0.53.4（创始人 2026-10-20 截图：「规则代号是否放在前边更好？不要那么小，
+   字号大一些，跟旁边一样大」）：规则号**移到短名之前**（前缀位，与收件箱
+   「规则 SEC-01」同序），字号 11px→13px（＝`.row` 正文字号，不再淡小），
+   颜色收回正文色（放前面就是主显示的一部分，不是脚注）。
+   间距 margin-left→margin-right：它在前面，后面跟文字。 */
+.rows .rid{display:inline-block;min-width:52px;margin-right:8px;
+  font-family:var(--mono);font-size:13px;font-weight:400;color:inherit}
+/* ★ 0.53.4（创始人 2026-10-20 截图：日报两卡「右边大片空缺，左边有的都挤得
+   换行了」）：`.k` 原写死 width:150px ⇒ 含编号/长标签的行**内部换行**，
+   值被孤零零留在行尾（左两行、右一截，中间一大片空）。
+   ⇒ label 按内容撑开（basis:auto，放得下就不换行；极端窄才退化），
+   值列紧随其后（flex:1;min-width:0 ⇒ 长值自己换行，不反挤 label）。
+   只给日报两卡（`.rows.fit`）—— 其他页保持 150px 对齐列，不外溢。 */
+.rows.fit .row .k{flex:0 1 auto;width:auto;min-width:0}
+.rows.fit .row>span:last-child{flex:1 1 auto;min-width:0}
+/* ★ 0.53.4：行内「圈问号」—— **本次数据**的总结说明（不是术语词条：词条答
+   "这是什么"，它答"这次是什么"）。徽章与 `.term` 的「？」**同一种形状**
+   （14×14 圆、10px、写死字号，U-16 立意），不进 name="term" 互斥组。 */
+.qsum{display:inline-block;position:relative;vertical-align:baseline;margin-left:6px}
+.qsum>summary{cursor:pointer;list-style:none;display:inline-block;width:14px;height:14px;
+  font-size:0;line-height:0;color:transparent;letter-spacing:0}
+.qsum>summary::-webkit-details-marker{display:none}
+.qsum>summary::after{content:"？";position:absolute;top:0;left:0;
+  width:14px;height:14px;line-height:14px;text-align:center;border-radius:50%;
+  background:var(--line);color:var(--muted);font-size:10px;font-weight:700}
+.qsum[open]>summary::after{background:var(--brand);color:#fff}
+.qsum>.qbody{position:fixed;z-index:60;top:8px;left:8px;right:auto;width:max-content;
+  max-width:min(560px,calc(100vw - 16px));min-width:min(260px,calc(100vw - 16px));
+  max-height:calc(100vh - 16px);overflow:auto;
+  margin:0;padding:12px 14px;font-size:12.5px;line-height:1.75;color:var(--fg);
+  background:var(--bg,#fff);border:1px solid var(--line);border-left:3px solid var(--brand);
+  border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.16);font-weight:400;
+  white-space:normal;text-align:left}
+.qsum .flist{margin:6px 0 0 0;font-size:12px}
+.qsum .flist .fr{display:flex;gap:14px;justify-content:space-between;padding:1px 0}
+.qsum .flist .fr .fn{font-family:var(--mono);color:var(--muted)}
 /* ---- 0.36.1：术语词条改成**浮层**（创始人截图三）----
    ★ 原形状的病：`.term{display:inline}` 把详情块塞进 `.metrics` 的
      140px 窄格里 ⇒ 展开后宽度只有卡片那么宽 ⇒ 中文逐字换行，
@@ -2225,21 +2259,25 @@ def _view_report(rep, token, items=None):
             #   替代品 description_zh 是审计受众的全文（最长 60 字）⇒ 挤成三四行，
             #   且 DST-10 的 zh 自带「——DST-09」内部自引用（编号从数据后门回来）。
             #   ⇒ 主显示改**上屏短名**（`label_zh`，≤14 字，INV-4 强制），
-            #   规则号**淡显上屏**（`.rid`，与问号全表同一视觉语言 —— 收件箱记录
+            #   规则号**上屏**（`.rid`，与问号全表同一视觉语言 —— 收件箱记录
             #   「规则 SEC-01」能对号入座），全文 zh 退到 hover title。
             #   退链 label → zh → 规则号（不编造、不用英文 `name` 充数）。
+            # ★★ 0.53.4（创始人 2026-10-20 截图）：「规则代号放在前边、字号跟
+            #   旁边一样大」—— 规则号移到短名**之前**（前缀位，与收件箱
+            #   「规则 SEC-01」同序），字号收到正文 13px、颜色收回正文色。
             "<div class=\"row\"><span class=\"k\">"
-            "<a href=\"/?v=inbox&f=day:%s:rule:%s\" title=\"%s\">%s"
-            "<span class=\"rid\">%s</span></a></span>"
+            "<a href=\"/?v=inbox&f=day:%s:rule:%s\" title=\"%s\">"
+            "<span class=\"rid\">%s</span>%s</a></span>"
             "<span>命中 %d 次%s</span></div>"
             % (_esc(rep["day"]), _esc(r["rule_id"]),
                _esc(r.get("zh") or r["rule_id"]),
+               _esc(r["rule_id"]),
                _esc(r.get("label") or r.get("zh") or r["rule_id"]),
-               _esc(r["rule_id"]), int(r["count"]),
+               int(r["count"]),
                (" ｜ " + _esc(_rule_host(r))) if _rule_host(r) else "")
             for r in rep["rules"][:10])
         rules = ("<div class=\"card\"><h2>规则命中排行 · 当日共 %d 次"
-                 "</h2><div class=\"rows\">%s</div></div>" % (_rule_total, rows))
+                 "</h2><div class=\"rows fit\">%s</div></div>" % (_rule_total, rows))
 
     ch = rep["chain"]
     cls = {"ok": "ok", "broken": "bad", "unknown": "warn"}.get(ch["status"], "warn")
@@ -2250,7 +2288,7 @@ def _view_report(rep, token, items=None):
     #   「有没有被改过」⇒ 展开后正文开头又补一遍本名，读成
     #   「记录有没有被改过 有没有被改过：」，同一个意思叠两层）。
     # ★「被改过的地方 / 坏行 0 / 0」⇒ 拆成两行（旧版把一个标签对两个数）。
-    chain = ("<div class=\"card\"><h2>%s（本日报能读取到的链文件）</h2><div class=\"rows\">"
+    chain = ("<div class=\"card\"><h2>%s（本日报能读取到的链文件）</h2><div class=\"rows fit\">"
              "<div class=\"row\"><span class=\"k\">校验结果</span><span class=\"%s\">%s</span></div>"
              # ★ 0.50.4（Q-06 ＋ Q-09）：这一行原先是「检查了几个文件 / 多少条记录
              #   ＋ 值 23 / 48078」⇒ 同一行三个斜杠，且分别表示「或」与「与」两种
@@ -2259,11 +2297,15 @@ def _view_report(rep, token, items=None):
              "<div class=\"row\"><span class=\"k\">检查范围</span><span>%d 个文件、%d 条记录</span></div>"
              "<div class=\"row\"><span class=\"k\">%s 被改过几处</span><span>%d</span></div>"
              "<div class=\"row\"><span class=\"k\">坏了几行</span><span>%d</span></div>"
-             "<div class=\"row\"><span class=\"k\">%s</span><span>%d（本来就不参与比对）</span></div>%s%s</div></div>"
+             # ★ 0.53.4（创始人 2026-10-20 截图：「『本来就不参与比对』这种是
+             #   废话吧？」）：删掉值里的同义括号句 —— 为什么"没纳入比对"由
+             #   **行左的词条问号**答（概念），这次是哪些文件、142 条是什么由
+             #   **值后的圈问号**答（本日数据）。一句话说三遍正是 STE 要灭的。
+             "<div class=\"row\"><span class=\"k\">%s</span><span>%d%s</span></div>%s%s</div></div>"
              % (GL.chip("chain_check"), cls, _esc(_chain_verdict(ch)),
                 ch["files"], ch["records"],
                 GL.chip("chain"), ch["broken"], ch.get("bad_lines", 0),
-                GL.chip("unchained"), ch.get("unchained", 0),
+                GL.chip("unchained"), ch.get("unchained", 0), _qsum_html(ch),
                 ("<div class=\"row\"><span class=\"k\">第一个问题出在哪</span><span>%s</span></div>"
                  % _esc(ch["first_bad"])) if ch.get("first_bad") else "",
                 ("<div class=\"row\"><span class=\"k\">说明</span><span>%s</span></div>"
@@ -2306,6 +2348,32 @@ def _chain_verdict(ch):
     if _chain_ok_state(ch):
         return R.chain_status_label((ch or {}).get("status"))
     return R.chain_unverified((ch or {}).get("files", 0))
+
+
+def _qsum_html(ch):
+    """「没纳入比对的记录」行**值后**的圈问号展开体：本次核对了哪些文件。
+
+    ★ 0.53.4（创始人 2026-10-20 截图：「用户可能会看具体检查了哪些文件——
+      截图是 30 个文件，以及没有纳入比对的记录——是否要做个小小的总结说明，
+      在 142 后侧也挂个圈问号的方式？」）。
+    ★ 与术语词条分工：行左 `unchained` 芯片答"这是什么"（概念，静态）；
+      这个问号答"这次是什么"（本日数据）—— 两边不互相抄，点哪个都看得懂。
+    ★ 文件只列**名字**（逐日文件即日期）：绝对路径是噪声，不上屏
+      （账本明细踩过：路径上屏被创始人点名）。
+    ★ 没有逐文件明细（注入的旧形状 chain dict）⇒ 不挂问号，不编内容。
+    """
+    fl = [d for d in (ch or {}).get("file_list") or [] if d.get("name")]
+    if not fl:
+        return ""
+    rows = "".join(
+        "<div class=\"fr\"><span class=\"fn\">%s</span><span>%d 条</span></div>"
+        % (_esc(d["name"]), int(d.get("records") or 0)) for d in fl)
+    return ("<details class=\"qsum\"><summary>？</summary><div class=\"qbody\">"
+            "本次核对了 %d 个文件，从 %s 到 %s。"
+            "<div class=\"flist\">%s</div>"
+            "%d 条不带指纹，没纳入比对。</div></details>"
+            % (len(fl), _esc(fl[0]["name"]), _esc(fl[-1]["name"]), rows,
+               int((ch or {}).get("unchained") or 0)))
 
 
 def _view_health(rep, token, items=None):

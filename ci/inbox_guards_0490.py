@@ -5199,6 +5199,254 @@ def n_l02():
     return True
 
 
+# ═══════════ 批25 · 0.53.4 日报细节（编号前缀位／同字号／布局／同义句／本次明细问号） ═══════════
+#: 链卡夹具：带**逐文件明细**（问号展开体的数据源）。数字全部派生自本夹具，
+#: 判据不写死任何计数（写死＝判据与产品各说各话）。
+_CH_FILES = [{"name": "2026-10-18", "records": 21011, "unchained": 48},
+             {"name": "2026-10-19", "records": 21033, "unchained": 47},
+             {"name": "2026-10-20", "records": 21245, "unchained": 47}]
+_REP_0534 = dict(_REP, rules=_RANK_ROWS,
+                 chain=dict(_REP["chain"], files=3, records=63289,
+                            unchained=142, file_list=_CH_FILES))
+
+
+def _css_rule(src, sel):
+    """取一条 CSS 规则的声明体（`sel{...}` ⇒ `...`）。找不到 ⇒ None。"""
+    m = re.search(re.escape(sel) + r"\{([^}]*)\}", src or "")
+    return m.group(1) if m else None
+
+
+def _css_font_px(body):
+    m = re.search(r"font-size:\s*(\d+)px", body or "")
+    return int(m.group(1)) if m else None
+
+
+def _rid_prefix_problem(page):
+    """规则号在短名**之前**（前缀位）。唯一尺子，正负控共用。"""
+    for r in _RANK_ROWS:
+        m = re.search(r'<a href="/\?v=inbox&f=day:[^"]*:rule:%s"[^>]*>(.*?)</a>'
+                      % re.escape(r["rule_id"]), page, re.S)
+        if not m:
+            return "找不到规则 %s 的排行行（夹具或模板形状变了）" % r["rule_id"]
+        inner = m.group(1)
+        i_rid = inner.find('<span class="rid">%s</span>' % r["rule_id"])
+        i_lab = inner.find(r["label"])
+        if i_rid < 0:
+            return "规则 %s 行内没有 .rid 编号" % r["rule_id"]
+        if i_lab < 0:
+            return "规则 %s 行内没有上屏短名 %r" % (r["rule_id"], r["label"])
+        if i_rid > i_lab:
+            return ("规则号又退到短名后面（前缀位回潮）—— 创始人 2026-10-20："
+                    "「规则代号是否放在前边更好」")
+    return None
+
+
+@check("T-05 规则号前缀位：rid 在短名之前（与收件箱「规则 SEC-01」同序）")
+def t05():
+    return _rid_prefix_problem(_page("report", rep=_REP_0534))
+
+
+@check("N-T05 负控：把 rid 挪回短名后面（0.51.0 旧序）⇒ T-05 必须判红")
+def n_t05():
+    page = _page("report", rep=_REP_0534)
+    if _rid_prefix_problem(page) is not None:
+        return "夹具不成立：现行渲染就判红 —— 负控无分辨力"
+    dead = page.replace(
+        '<span class="rid">DST-04</span>设置开机自动启动',
+        '设置开机自动启动<span class="rid">DST-04</span>')
+    if dead == page:
+        return "夹具不成立：摘不到规则行的 rid＋短名（结构已变）"
+    if _rid_prefix_problem(dead) is None:
+        return "负控失效：rid 挪回后面仍判合格（这把尺子没分辨力）"
+    return True
+
+
+def _t06_problem(src):
+    """规则号字号＝正文字号、不是脚注（字号小＋灰＋后缀间距三件事一起锁）。"""
+    rid_body = _css_rule(src, ".rows .rid")
+    if not rid_body:
+        return "找不到 .rows .rid 规则（编号索引位没了）"
+    fs_row = _css_font_px(_css_rule(src, ".row{"))
+    fs_rid = _css_font_px(rid_body)
+    if fs_rid is None:
+        return ".rows .rid 没有写字号"
+    if fs_row and fs_rid < fs_row:
+        return ("规则号字号 %dpx 小于正文 %dpx —— 创始人 2026-10-20："
+                "「不要那么小，字号大一些，跟旁边一样大」" % (fs_rid, fs_row))
+    if "margin-left" in rid_body:
+        return "规则号还在用 margin-left（后缀位的残留间距 —— 它现在在前面）"
+    if "margin-right" not in rid_body:
+        return "规则号前缀位没有与短名的间距（margin-right 没了）"
+    if "color:var(--muted)" in rid_body:
+        return "规则号又是脚注灰 —— 放前面就是主显示的一部分，不是脚注"
+    return None
+
+
+@check("T-06 规则号同字号：.rows .rid 字号＝正文、非脚注灰、前缀间距")
+def t06():
+    return _t06_problem(_src(_SERVER_REL))
+
+
+@check("N-T06 负控：.rid 退回 0.51.0 旧形态（11px 灰＋margin-left）⇒ T-06 必须判红")
+def n_t06():
+    src = _src(_SERVER_REL)
+    if _t06_problem(src) is not None:
+        return "夹具不成立：现行源码就判红 —— 负控无分辨力"
+    dead = src.replace(
+        ".rows .rid{display:inline-block;min-width:52px;margin-right:8px;\n"
+        "  font-family:var(--mono);font-size:13px;font-weight:400;color:inherit}",
+        ".rows .rid{display:inline-block;min-width:52px;margin-left:6px;\n"
+        "  font-family:var(--mono);font-size:11px;font-weight:400;color:var(--muted)}")
+    if dead == src:
+        return "夹具不成立：摘不到 .rows .rid 现行规则（源码已变，需更新负控）"
+    if _t06_problem(dead) is None:
+        return "负控失效：退回 11px 脚注灰仍判合格（这把尺子没分辨力）"
+    return True
+
+
+def _t07_problem(page, src):
+    """日报两卡 label 按内容撑开（不写死 150px），值列紧随。
+
+    ★ 锚必须落在 `</h2>` 之后：页内 CSS 注释里有一句
+      「必须滚动才看得到『规则命中排行』和『有没有被改过』两张卡」——
+      按片名 split 会切在注释上（首跑实测就是这么红的），按结构锚不踩。
+    """
+    n = page.count('</h2><div class="rows fit">')
+    if n != 2:
+        return ("日报两卡只有 %d 个用 rows fit（应 2：规则命中排行＋链卡）—— "
+                "label 又会被 150px 挤到内部换行、值被孤零零留在行尾"
+                "（0.53.4 截图病：左边挤得换行、右边大片空缺）" % n)
+    k = _css_rule(src, ".rows.fit .row .k")
+    if not k:
+        return "没有 .rows.fit .row .k 规则（fit 是空壳 class）"
+    if re.search(r"width:\s*\d+px", k):
+        return "fit 的 k 又写死像素宽度：%r" % k
+    if "width:auto" not in k:
+        return "fit 的 k 不是 width:auto（按内容撑开）"
+    v = _css_rule(src, ".rows.fit .row>span:last-child")
+    if not v or "min-width:0" not in v:
+        return "fit 的值列没有 min-width:0（长值会反挤 label，换行病从另一边回来）"
+    return None
+
+
+@check("T-07 日报两卡布局：rows fit ＋ label 不写死宽度 ＋ 值列 min-width:0")
+def t07():
+    page = _page("report", rep=_REP_0534)
+    return _t07_problem(page, _src(_SERVER_REL))
+
+
+@check("N-T07 负控：fit 的 k 加回 width:150px／卡片退回普通 rows ⇒ T-07 必须判红")
+def n_t07():
+    page = _page("report", rep=_REP_0534)
+    src = _src(_SERVER_REL)
+    if _t07_problem(page, src) is not None:
+        return "夹具不成立：现行实现就判红 —— 负控无分辨力"
+    # 面①：CSS 把写死宽度加回去（尺子必须咬 CSS）
+    dead_css = src.replace(
+        ".rows.fit .row .k{flex:0 1 auto;width:auto;min-width:0}",
+        ".rows.fit .row .k{flex:0 1 auto;width:150px;min-width:0}")
+    if dead_css == src:
+        return "夹具不成立：摘不到 fit 的 k 规则（源码已变，需更新负控）"
+    if _t07_problem(page, dead_css) is None:
+        return "负控失效①：width:150px 加回去仍判合格（CSS 那条腿没分辨力）"
+    # 面②：卡片退回普通 rows（尺子必须咬 HTML 接线）
+    dead_html = page.replace('class="rows fit"', 'class="rows"')
+    if dead_html == page:
+        return "夹具不成立：摘不到 rows fit（HTML 已变，需更新负控）"
+    if _t07_problem(dead_html, src) is None:
+        return "负控失效②：卡片退回普通 rows 仍判合格（HTML 那条腿没分辨力）"
+    return True
+
+
+def _t08_problem(page):
+    """unchained 行：值不许带同义括号句；圈问号必须挂在数字后侧。"""
+    # 剥层口径与 0360 W06 一致：默认收起区块整块剥掉，再剥标签取可见文本
+    vis = re.sub(r"<details\b.*?</details>", " ", page, flags=re.S)
+    vis = re.sub(r"\x00+", " ", re.sub(r"<[^>]+>", "\x00", vis))
+    if "本来就不参与比对" in vis:
+        return ("值列又带同义括号句「本来就不参与比对」—— 为什么没纳入比对由"
+                "行左词条问号（概念）＋值后圈问号（本次）答，一句话不说三遍（STE）")
+    n = _REP_0534["chain"]["unchained"]
+    if ('<span>%d<details class="qsum">' % n) not in page:
+        return ("圈问号没挂在「%d」后侧 —— 创始人 2026-10-20：「在 142 后侧"
+                "也挂个圈问号的方式」" % n)
+    return None
+
+
+@check("T-08 unchained 行无同义括号句 ＋ 圈问号挂在数字后侧")
+def t08():
+    return _t08_problem(_page("report", rep=_REP_0534))
+
+
+@check("N-T08 负控：同义句加回值列／圈问号摘掉 ⇒ T-08 必须各自判红")
+def n_t08():
+    page = _page("report", rep=_REP_0534)
+    if _t08_problem(page) is not None:
+        return "夹具不成立：现行渲染就判红 —— 负控无分辨力"
+    # 面①：把同义括号句加回值列（0.53.3 旧形态）
+    n = _REP_0534["chain"]["unchained"]
+    dead = page.replace('<span>%d<details class="qsum">' % n,
+                        '<span>%d（本来就不参与比对）<details class="qsum">' % n)
+    if dead == page:
+        return "夹具不成立：摘不到 unchained 行的值（结构已变）"
+    if _t08_problem(dead) is None:
+        return "负控失效①：同义句加回值列仍判合格（这条腿没分辨力）"
+    # 面②：圈问号摘掉（用户要的"142 后侧的问号"没了）
+    dead2 = re.sub(r'<details class="qsum">.*?</details>', "", page, flags=re.S)
+    if dead2 == page:
+        return "夹具不成立：摘不到 qsum（结构已变）"
+    if _t08_problem(dead2) is None:
+        return "负控失效②：圈问号摘掉仍判合格（这条腿没分辨力）"
+    return True
+
+
+def _t09_problem(page):
+    """圈问号展开体给**本次**明细：逐文件＋条数＋起止＋不带指纹数，全部派生。"""
+    ch = _REP_0534["chain"]
+    m = re.search(r'<div class="qbody">(.*?)</div></details>', page, re.S)
+    if not m:
+        return "找不到 qbody 展开体（问号是个空壳？）"
+    body = m.group(1)
+    fl = ch["file_list"]
+    for d in fl:
+        if d["name"] not in body:
+            return "展开体缺文件 %s —— 用户问的就是「检查了哪些文件」" % d["name"]
+        if ("%d 条" % d["records"]) not in body:
+            return "展开体缺文件 %s 的记录条数" % d["name"]
+    if ("本次核对了 %d 个文件" % len(fl)) not in body:
+        return "展开体的文件数与 file_list 不同源（写死数字了？）"
+    if ("从 %s 到 %s" % (fl[0]["name"], fl[-1]["name"])) not in body:
+        return "展开体缺起止日期（从哪份到哪份）"
+    if ("%d 条不带指纹" % ch["unchained"]) not in body:
+        return "展开体的不带指纹数与 chain 不同源（写死数字了？）"
+    return None
+
+
+@check("T-09 圈问号展开体＝本次明细：逐文件／条数／起止全部从 chain 派生")
+def t09():
+    return _t09_problem(_page("report", rep=_REP_0534))
+
+
+@check("N-T09 负控：文件名抹掉／文件数写死 30 ⇒ T-09 必须各自判红")
+def n_t09():
+    page = _page("report", rep=_REP_0534)
+    if _t09_problem(page) is not None:
+        return "夹具不成立：现行渲染就判红 —— 负控无分辨力"
+    # 面①：抹掉中间那个文件名（"核对了哪些文件"答不全）
+    dead = page.replace("2026-10-19", "20XX-XX-XX")
+    if dead == page:
+        return "夹具不成立：摘不到文件名（结构已变）"
+    if _t09_problem(dead) is None:
+        return "负控失效①：少列一个文件仍判合格（明细那条腿没分辨力）"
+    # 面②：文件数写死 30（与 file_list 脱钩 —— 数据换了页面不换）
+    dead2 = page.replace("本次核对了 3 个文件", "本次核对了 30 个文件")
+    if dead2 == page:
+        return "夹具不成立：摘不到文件数句（结构已变）"
+    if _t09_problem(dead2) is None:
+        return "负控失效②：文件数写死仍判合格（派生那条腿没分辨力）"
+    return True
+
+
 def main():
     print("=" * 78)
     print("0.48.5 Antinel 监理细节修订判据（交接件 v1.1 §5.7）—— "
@@ -5232,7 +5480,12 @@ def main():
           "改昨天、今天改一行深链日报；撤卡后旧文案「下列四个数」必须一起撤）· "
           "批24 U22/N-U22/N-U22b/U23/N-U23（0.53.0 T5.2：运行状态「工具识别」"
           "最小版 —— 分母＝窗口内全部记录、提醒不许常亮、空态不渲染 0%；"
-          "链检「没查成」说告警句，中性词「未能核验」在页面上退场）")
+          "链检「没查成」说告警句，中性词「未能核验」在页面上退场）· "
+          "批25 T-05/N-T05/T-06/N-T06/T-07/N-T07/T-08/N-T08/T-09/N-T09"
+          "（0.53.4 日报细节，创始人 2026-10-20 截图：规则号移到短名之前"
+          "＋字号跟正文一样大；日报两卡 label 按内容撑开不写死宽度；"
+          "删「本来就不参与比对」同义句；「没纳入比对的记录」数字后侧挂"
+          "圈问号，展开体给本次核对的逐文件明细 —— 派生，不写死）")
     print("（变异只在内存，账本与链只落临时目录，不写任何产品文件；"
           "戊2/戊3 视觉项无判据，走 §6.1 截图验收 —— U-13 只含戊2 机械部分）")
     print("=" * 78)
