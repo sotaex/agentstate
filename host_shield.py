@@ -2208,6 +2208,62 @@ def is_dev_build():
         return False, "判研发态时出错（%s）⇒ 不按研发态处理" % (type(e).__name__,)
 
 
+# ═══════════════ self_check 指纹缓存（2026-10-21 TAB 切换卡顿根治·方案 B1）═══════════════════
+#
+#: 为什么需要（实测，非估计）：`self_check()` 每遍要把 **34 个文件**全部重读
+#:   重散（24 个 `rules/hosts/*.json` × 反复读+解析 13.8KB 的 manifest ＋
+#:   host_shield.py 与两张保护名单逐字节哈希），空载 **0.18s**／满载 0.44s；
+#:   而 `guard_posture()` 每次渲染都调它 ⇒ 每个 TAB 每页白付一遍。
+#
+#: 修法与口径：与 `inbox_report._CHAIN_CACHE` **同一族** —— 被读文件集的
+#:   `(path, mtime_ns, size, ino)` 指纹全都相同 ⇒ 输入集合同样 ⇒ 结果必然
+#:   相同，直接复用。任何真实写入都会改 mtime_ns/size ⇒ 自动失效
+#:   （append-only 链追加即失效，0.53.0 L-02 同款纪律）。
+#
+# ★ 残留边界（如实申报，不许说成"零盲区"）：与"同 size＋同 mtime_ns 的
+#   原地篡改"赛跑时，指纹会滑过 —— 这是本仓既有缓存族（`_CHAIN_CACHE`
+#   等）公认的边界，不是本处新开的口子；常规写入（内容变 ⇒ mtime/size 变）
+#   全数覆盖，哈希在缓存未命中时照旧全量比对。
+_SELF_CHECK_CACHE = {"fp": None, "res": None}
+
+
+def _self_check_fingerprint(root):
+    """`self_check()` 实际会读的**每一个**文件的 stat 指纹（缺文件记 None）。
+
+    ★ 必须是**全集**：manifest 本身、host_shield.py、`rules/hosts` 目录
+      列举＋每个 json、两张保护名单（`_GUARDED_CHAIN_FILES` ／
+      `_DEV_GUARDED_CHAIN_FILES`）里的每个文件 —— 漏一个就漏一类失效，
+      而漏掉的恰是"改了不重算"的那类。
+    ★ 目录列举在内：增删 json 不改任何文件 stat，但会改变指纹元组形状
+      ⇒ 照样失效。
+    ★ 每次现取 root（`_pkg_root()` 是调用时解析的）⇒ 判据沙盒
+      （`ci/_pkg_sandbox.py` 指临时副本）与真树路径不同 ⇒ 键不同，
+      缓存不会把沙盒结果带给真树（反之亦然）。
+    """
+    parts = [("psl/manifest.json", os.path.join(root, "psl", "manifest.json")),
+             ("host_shield.py", os.path.join(root, "host_shield.py"))]
+    gdir = os.path.join(root, "rules", "hosts")
+    try:
+        names = sorted(os.listdir(gdir))
+    except OSError:
+        names = []
+    for n in names:
+        if n.endswith(".json"):
+            parts.append(("rules/hosts/" + n, os.path.join(gdir, n)))
+    for rel in _GUARDED_CHAIN_FILES:
+        parts.append((rel, os.path.join(root, rel.replace("/", os.sep))))
+    for rel in _DEV_GUARDED_CHAIN_FILES:
+        parts.append((rel, os.path.join(root, rel.replace("/", os.sep))))
+    out = []
+    for rel, p in parts:
+        try:
+            stt = os.stat(p)
+            out.append((rel, stt.st_mtime_ns, stt.st_size, stt.st_ino))
+        except OSError:
+            out.append((rel, None, None, None))       # 缺文件也要进键（出现即失效）
+    return tuple(out)
+
+
 def self_check():
     """0.28.3（B4e/B4f）：自身脚本与登记表对 psl/manifest.json 哈希。
     返回 (ok, problems)。manifest 缺失 → (True, [])（无法校验，如实不谎报）。
@@ -2243,12 +2299,21 @@ def self_check():
       ⇒ **修法**：`self_check()` 对**保护名单内的文件**改为 **fail-closed** ——
         manifest 里查不到它的登记 ⇒ **判红**（"在保护名单里却没登记"本身就是问题）。
         名单**之外**的文件仍按"跳过"处理（保持 0.35.3 的原意：不误报）。
-      ★ 方向说明：这条比"哈希不符"更早触发，且**只能靠重新打包修好**
-        （`scripts/build_package.py` 生成 manifest）⇒ 用户照提示走即可，
-        不需要理解哈希。
+    ★ 方向说明：这条比"哈希不符"更早触发，且**只能靠重新打包修好**
+      （`scripts/build_package.py` 生成 manifest）⇒ 用户照提示走即可，
+      不需要理解哈希。
+
+    ★★ 2026-10-21（TAB 切换卡顿根治·方案 B1）：入口加**指纹缓存** ——
+       输入文件集 `(path, mtime_ns, size, ino)` 全同 ⇒ 直接复用上遍结论
+       （口径同 `inbox_report._CHAIN_CACHE`，残留边界见该常量段注释）。
+       判定逻辑一字未动：缓存只在"输入集合同样"时短路，任何文件变化
+       （含增删 rules/hosts json、manifest 自身）都会换键重算。
     """
-    problems = []
     root = _pkg_root()
+    _fp = _self_check_fingerprint(root)
+    if _SELF_CHECK_CACHE["fp"] == _fp and _SELF_CHECK_CACHE["res"] is not None:
+        return _SELF_CHECK_CACHE["res"]
+    problems = []
     me = _manifest_hash("host_shield.py")
     live = _file_sha256(os.path.join(root, "host_shield.py"))
     if me and live and me != live:
@@ -2308,7 +2373,10 @@ def self_check():
                 "%s 与 manifest 不符（冻结区登记簿可能被改——伪造退休"
                 "记录也逃不过这层哈希；修法：`python _tools_034/"
                 "_resign_manifest.py`）" % rel)
-    return (not problems), problems
+    res = (not problems), problems
+    _SELF_CHECK_CACHE["fp"] = _fp
+    _SELF_CHECK_CACHE["res"] = res
+    return res
 
 
 # ------------------------------------------------ 哨兵存活性 v2 (0.28.3) ----
@@ -3656,6 +3724,92 @@ def guard_fix(pkg_root=None, action=None):
         return False, "修复动作出错：%r" % (e,)
 
 
+#: 心跳链倒序读尾的**窗口**（字节）。定值依据是 2026-10-21 实测（不是拍脑袋）：
+#: 本机 `.psl/audit` 末 3 个 jsonl（10-19/10-20/10-21）里，最后一条
+#: `host_shield_*` 记录距 EOF **最远 36KB**（10-19）；256KB ≈ 7 倍余量，
+#: 满载（×2.5–3 写入密度）仍够。读 3×256KB ≈ 0.75MB，对比旧实现顺序读
+#: 3 个全文件 ≈ 11MB（实测 0.16–0.18s/次，而 guard_posture 每页都调）。
+_HB_TAIL_BYTES = 256 * 1024
+
+
+def _hb_ts_lines(f):
+    """迭代一个**二进制**文件流，产出其中 `host_shield_*` 记录的 ts（str）。
+
+    ★ 过滤链与旧实现逐字同口径（`_prefilter_ok` 前置 ＋ `type` 前缀判定，
+      逐行 `errors="replace"` 解码 —— 与旧 text-mode 读入等价）
+      —— 尾窗读与全扫回退共用这一份，不弄出第二套判据。
+    """
+    for raw in f:
+        line = raw.decode("utf-8", "replace")
+        if not _prefilter_ok(line):
+            continue
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue
+        if not str(rec.get("type", "")).startswith("host_shield_"):
+            continue
+        ts = rec.get("ts")
+        if ts:
+            yield ts
+
+
+def _hb_ts_of(line):
+    """单行（bytes）若是 `host_shield_*` 记录 ⇒ 其 ts，否则 None。"""
+    try:
+        rec = json.loads(line.decode("utf-8", "replace"))
+    except Exception:
+        return None
+    if not str(rec.get("type", "")).startswith("host_shield_"):
+        return None
+    return rec.get("ts")
+
+
+def _hb_tail_scan(p):
+    """(best_ts|None, head_ts|None)：**只读尾窗**的心跳记录。
+
+    ① 窗口从**行边界**起算（丢掉尾窗内第一段残行）—— 半行 json 解析
+       必败，不如不解析；残行只可能丢一条记录的最前半行，而完整拷贝
+       几乎总在窗口内（心跳 10 分钟一条、写入密度 KB 级）。
+    ② 取**尾窗内最大 ts**（不是"倒序第一条"：乱序追加时第一个匹配
+       不代表最新，取 max 才与旧实现"全局最大 ts"同口径）。
+    ③ `head_ts` ＝ 文件**首行** ts（一条 readline 的代价）：它比尾窗
+       最大值还大 ⇒ 乱序追加探针 ⇒ 调用方必须回退全扫。
+    """
+    best = None
+    head_ts = None
+    try:
+        with open(p, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(0)
+            head_ts = _hb_ts_of(f.readline())
+            if size > _HB_TAIL_BYTES:
+                f.seek(size - _HB_TAIL_BYTES)
+                f.readline()                       # 残行丢弃 ⇒ 行边界起算
+            else:
+                f.seek(0)
+            for ts in _hb_ts_lines(f):
+                if best is None or ts > best:
+                    best = ts
+    except OSError:
+        return None, None
+    return best, head_ts
+
+
+def _hb_full_scan(p):
+    """全量顺序扫（旧算法本体，抽出来只为回退与尾窗共用同一份过滤）。"""
+    best = None
+    try:
+        with open(p, "rb") as f:
+            for ts in _hb_ts_lines(f):
+                if best is None or ts > best:
+                    best = ts
+    except OSError:
+        return None
+    return best
+
+
 def _heartbeat_age_in(d):
     """(age_seconds|None, last_ts|None)：**按审计目录**算心跳年龄（唯一实现）。
 
@@ -3670,6 +3824,19 @@ def _heartbeat_age_in(d):
       `host_shield_revived`（在 `_ALERT_KINDS` 弹窗名单里）⇒ **右下角一直冒泡**。
       ⇒ 修法＝**消灭副本**：心跳读取只此一处、入参就是审计目录（没有"包根还是目录"
       这个二义性）；`heartbeat_age(pkg_root)` 退化成它的包装。
+
+    ★★ 2026-10-21（TAB 切换卡顿根治·方案 B2）：改**倒序读尾**。旧实现从
+       文件头顺序读 3 个全文件（实测 ≈11MB/次），而 `guard_posture` 每次
+       渲染都经 `sentinel_heartbeat_age()` 调它 ⇒ 每页白付 0.16–0.5s。
+       链是 append-only ⇒ 最新心跳必在尾部 ⇒ 读末 `_HB_TAIL_BYTES` 即可。
+       **四条声明边界**（契约，不是猜）：
+       ① 行边界起算（残行不解析）；② 取尾窗内最大 ts（同旧口径）；
+       ③ 尾窗内一条心跳都没有 ⇒ **回退全量顺序扫**（哨兵久死的场合恰在
+          此列 —— 那时正确性优先于速度，且慢＝如实反映"链很久没新心跳"）；
+       ④ 文件首行 ts 比尾窗最大值还大（乱序追加探针）⇒ 同样回退全扫。
+       残留边界（如实申报）：头尾之间、尾窗之外的"乱序且更大 ts"不在探针
+       覆盖内 —— append-only 链在锁内按写时 ts 落盘，该形态不可达；
+       真出现时方向是**偏旧**（报"僵死"而非报"健康"），与 fail-closed 同向。
     """
     best_ts = None
     try:
@@ -3677,22 +3844,12 @@ def _heartbeat_age_in(d):
     except OSError:
         files = []
     for name in files:
-        try:
-            with open(os.path.join(d, name), "r", encoding="utf-8", errors="replace") as f:
-                for line in f:
-                    if not _prefilter_ok(line):
-                        continue
-                    try:
-                        rec = json.loads(line)
-                    except Exception:
-                        continue
-                    if not str(rec.get("type", "")).startswith("host_shield_"):
-                        continue
-                    ts = rec.get("ts")
-                    if ts and (best_ts is None or ts > best_ts):
-                        best_ts = ts
-        except OSError:
-            continue
+        p = os.path.join(d, name)
+        ts, head_ts = _hb_tail_scan(p)
+        if ts is None or (head_ts is not None and head_ts > ts):
+            ts = _hb_full_scan(p)          # ③ ④：空窗/乱序探针 ⇒ 全扫回退
+        if ts and (best_ts is None or ts > best_ts):
+            best_ts = ts
     if not best_ts:
         return None, None
     try:

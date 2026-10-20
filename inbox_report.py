@@ -45,9 +45,17 @@ _CHAIN_CACHE_MAX = 64
 
 
 def chain_status_label(status):
-    """内部状态码 → 用户可读状态；JSON 数据仍保留稳定机器值。"""
-    return {"ok": "完整", "broken": "发现问题", "unknown": "未能核验"}.get(
-        str(status), "未能核验")
+    """内部状态码 → 用户可读**结论**；JSON 数据仍保留稳定机器值。
+
+    ★ 0.53.4 修订（创始人 2026-10-20）：原词「完整」是**状态**，不是对
+      「有没有被改过」这句问话的回答 —— 行左写着问题、行右答"完整"，
+      读者要多绕一步才对上号。⇒ 直接答结论；「发现问题」同理改「有地方
+      被改过」（原来那句没说清发现的是**什么**问题）。
+      `unknown` 仍是「未能核验」：页面在"没查成"时**不用**这个词（U23 守，
+      换成告警句），这个词只留给纯文本报告与 JSON 之外的兜底。
+    """
+    return {"ok": "没有被改过", "broken": "有地方被改过",
+            "unknown": "未能核验"}.get(str(status), "未能核验")
 
 
 #: 「没查成」的告警句（设计 §4.4-3／§14.6-4）。
@@ -63,21 +71,30 @@ def chain_unverified(files):
 
 
 def _chain_check_file(path, ac):
-    """校验**一个**链文件，返回计数 dict（按文件指纹缓存）。"""
+    """校验**一个**链文件，返回计数 dict（按文件指纹缓存）。
+
+    ★ 0.53.4 修订（创始人 2026-10-20 10:18）：无指纹记录按 `type` 计数，
+      供日报圈问号回答「这次是些什么记录」。旧版逐文件明细（`file_list`）
+      已退役 —— 它的「N 条」是**带指纹**的记录数，与 unchained（不带指纹）
+      是两个口径，怎么加都对不上（用户实测：「对不上 147 这个数」）。
+    """
     try:
         stt = os.stat(path)
         fp = (os.path.normpath(path), stt.st_mtime_ns, stt.st_size)
     except OSError:
-        return {"records": 0, "broken": 0, "bad": 1, "unchained": 0, "first_bad": ""}
+        return {"records": 0, "broken": 0, "bad": 1, "unchained": 0,
+                "first_bad": "", "types": {}}
     hit = _CHAIN_CACHE.get(fp)
     if hit is not None:
         return hit
     records = broken = badjson = unchained = 0
     first_bad = ""
+    types = {}
     try:
         f = open(path, encoding="utf-8", errors="replace")
     except OSError:
-        return {"records": 0, "broken": 0, "bad": 1, "unchained": 0, "first_bad": ""}
+        return {"records": 0, "broken": 0, "bad": 1, "unchained": 0,
+                "first_bad": "", "types": {}}
     with f:
         prev = ""
         for line in f:
@@ -95,6 +112,8 @@ def _chain_check_file(path, ac):
             h = rec.get("hash")
             if not h:
                 unchained += 1                  # ★ 未链接记录，不是断链
+                _t = rec.get("type") or ""
+                types[_t] = types.get(_t, 0) + 1
                 continue
             records += 1
             rc = ac.chain_with(rec, prev)       # ← 产品原语
@@ -104,7 +123,7 @@ def _chain_check_file(path, ac):
                     first_bad = "%s@%s" % (path, rec.get("ts"))
             prev = h
     out = {"records": records, "broken": broken, "bad": badjson,
-           "unchained": unchained, "first_bad": first_bad}
+           "unchained": unchained, "first_bad": first_bad, "types": types}
     if len(_CHAIN_CACHE) >= _CHAIN_CACHE_MAX:
         _CHAIN_CACHE.pop(next(iter(_CHAIN_CACHE)), None)
     _CHAIN_CACHE[fp] = out
@@ -126,16 +145,20 @@ def chain_health(chain_files):
     if not chain_files:
         return {"status": "unknown", "files": 0, "records": 0, "broken": 0,
                 "unchained": 0, "bad_lines": 0, "first_bad": "",
-                "reason": "没有可校验的链文件 —— 这是「没查成」，不是「没问题」。"}
+                "reason": "没有可校验的链文件 —— 这是「没查成」，不是「没问题」。",
+                "first_day": "", "last_day": "", "types": {}}
     try:
         import audit_chain as ac
     except Exception as e:                      # noqa: BLE001
         return {"status": "unknown", "files": len(chain_files), "records": 0,
                 "broken": 0, "unchained": 0, "bad_lines": 0, "first_bad": "",
-                "reason": "拿不到校验器：%s" % (e,)}
+                "reason": "拿不到校验器：%s" % (e,),
+                "first_day": "", "last_day": "", "types": {}}
 
     files = records = broken = badjson = unchained = 0
     first_bad = ""
+    types = {}
+    days = []
     for p in chain_files:
         r = _chain_check_file(p, ac)
         files += 1
@@ -145,6 +168,13 @@ def chain_health(chain_files):
         unchained += r["unchained"]
         if not first_bad and r["first_bad"]:
             first_bad = r["first_bad"]
+        # ★ 0.53.4 修订：无指纹记录按类型聚合 —— 圈问号据此说出「这次是些什么」。
+        for _t, _c in (r.get("types") or {}).items():
+            types[_t] = types.get(_t, 0) + _c
+        # ★ 核对范围从文件名里的日期派生（项目级文件名可能不是日期 ⇒ 跳过）。
+        _d = S._day_of(p)
+        if _d is not None:
+            days.append(_d)
 
     if records == 0:
         status = "unknown"                      # 一条可校验的都没有 ⇒ 没查成
@@ -152,7 +182,10 @@ def chain_health(chain_files):
         status = "broken" if (broken or badjson) else "ok"
     return {"status": status, "files": files, "records": records,
             "broken": broken, "unchained": unchained, "bad_lines": badjson,
-            "first_bad": first_bad, "reason": ""}
+            "first_bad": first_bad, "reason": "",
+            "first_day": min(days).isoformat() if days else "",
+            "last_day": max(days).isoformat() if days else "",
+            "types": types}
 
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -239,10 +272,16 @@ def rule_label_map():
 
 
 def daily_report(day=None, root=None, chain_files=None, items=None,
-                 chain=None, led=None):
+                 chain=None, led=None, posture=None):
     """生成某一天的日报。`day` 缺省＝本地今天。
 
     `items` / `chain` / `led` 可注入（测试用；生产走真实来源）。
+    `posture` 可注入（2026-10-21 TAB 卡顿根治·方案 A）：门闸态势的**唯一
+    现探点**在 `inbox_server.render_page`（`p = posture or posture_now()`，
+    顶部条要用它）—— 旧版本函数体内**又自算一次** `guard_posture`（同一
+    目录、同一函数），三视图每页白付一倍（满载实测 ~1.2s/次）。**不注入
+    ⇒ 自算**（默认行为一字不变：CLI 日报、邮件、既有判据全部零影响）；
+    注入 ⇒ 用调用方那一份 ——「一个事实一个变量」（0.53.0 T4 同款纪律）。
     """
     day = day or date.today().isoformat()
     files = S.discover_chain_files(root=root) if chain_files is None else chain_files
@@ -285,12 +324,19 @@ def daily_report(day=None, root=None, chain_files=None, items=None,
         drill.append({"key": "Ls", "label": M.state_short("Ls"), "count": win_levels["Ls"],
                       "filt": "lv:Ls"})
 
-    try:
-        import host_shield as _hs
-        posture = _hs.guard_posture(os.path.dirname(os.path.abspath(__file__)))
-    except Exception as e:                      # noqa: BLE001
-        posture = {"state": "unknown", "label": "查不到", "why": "读不到监理状态：%r" % (e,),
-                   "evidence": {}, "can_fix": False, "fix": None, "fix_hint": ""}
+    # ★ 2026-10-21（TAB 卡顿根治·方案 A）：`posture=None` ⇒ 自算（旧行为，
+    #   唯一现探口径不变）；调用方注入 ⇒ 直接用（render_page 已为顶部条
+    #   现探过同一份，见该处注释）。**不注入不许返回空/假态势** ——
+    #   自算失败时仍走 unknown 盲区档，与本函数既有口径一致。
+    if posture is None:
+        try:
+            import host_shield as _hs
+            posture = _hs.guard_posture(os.path.dirname(os.path.abspath(__file__)))
+        except Exception as e:                  # noqa: BLE001
+            posture = {"state": "unknown", "label": "查不到",
+                       "why": "读不到监理状态：%r" % (e,),
+                       "evidence": {}, "can_fix": False, "fix": None,
+                       "fix_hint": ""}
 
     return {
         "day": day,

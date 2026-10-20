@@ -1345,7 +1345,12 @@ def cmd_ledger_top(args):
     import inbox_model as _M
     import inbox_store as _ST
     days = getattr(args, "days", None) or 7
-    rows = _M.ledger_rows(_ST.load_items(), days=days)
+    # ★★ 0.53.2：`--days N` 只决定**输出几行**，记录本身必须**全量**取。
+    #   旧版 `_ST.load_items()` 默认 7 天窗口 ⇒ `--days 30` 打印 30 行、其中
+    #   22 行是「当天无记录」—— 那是**没读到**，不是那天没开机（与"无记录给
+    #   null 不给 0"的护栏意图正好相反：护栏是为了区分"没查"与"查过没事"，
+    #   而窗口把"没查"伪装成"没开机"）。
+    rows = _M.ledger_rows(_ST.load_items_all(), days=days)
     if getattr(args, "json_out", False):
         print(_json.dumps(rows, ensure_ascii=False, indent=1))
         return 0

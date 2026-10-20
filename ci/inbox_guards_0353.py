@@ -2162,6 +2162,11 @@ def c_ledger_page_populates_from_chain_snapshot():
     day, items = _ledger_test_items()
     hub = _tmpdir()
     y1 = (datetime.fromisoformat(day).date() - timedelta(days=1)).isoformat()
+    # ★ 2026-10-21（方案 C）：记账节流缝**开工前复位** —— 同进程内前序判据
+    #   （TP-C 族）可能已触发过节流，不复位本例的 record_day 会被静默跳过
+    #   ⇒ 账本文件不落盘 ⇒ 假红（Lesson：进程级可变状态必须可复位，否则
+    #   判据把自己测瞎）。
+    SV._RECORD_DAY_STATE["t"] = None
     old_report = SV.R.daily_report
     SV.R.daily_report = lambda **_kw: {"ledger": L.summary(root=hub, today=day)}
     try:
@@ -4373,7 +4378,403 @@ def n_ledger_rows_gap_is_not_zero():
     return True
 
 
+# ═══════════ TP 族 · TAB 切换卡顿根治·方案 B（2026-10-21 创始人拍板）═══════════
+#
+#: 背景：五个 TAB 切换卡顿的只读轮实测（2026-10-20）—— `guard_posture` 每次
+#: 渲染都调 `self_check()`（34 文件重散，空载 0.18s）与 `_heartbeat_age_in`
+#:（3 个全文件顺序读 ≈11MB，0.16–0.18s）。B1＝self_check 指纹缓存（口径同
+#: `inbox_report._CHAIN_CACHE`）；B2＝`_heartbeat_age_in` 倒序读尾窗
+#:（256KB，四条声明边界：行边界／窗内最大 ts／空窗回退全扫／乱序头探针）。
+#:
+#: 判据方法：① B1 量「二遍零重散＋沙盒变异必失效必报」，负控把指纹函数
+#: 冻成常量（缓存永不失效）⇒ 同一把尺子必须漏报；② B2 用**已知输入的
+#: 夹具**当 oracle（不二次实现产品口径），真链臂走快照两臂对照。
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _tp_b1_hash_calls():
+    """(哈希调用次数, (ok, problems))：一遍 `self_check()` 的打点计数。"""
+    import host_shield as HS
+    n = {"c": 0}
+    ofd, osha = HS.file_digest, HS._file_sha256
+
+    def _cfd(path, rel=None):
+        n["c"] += 1
+        return ofd(path, rel)
+
+    def _csha(path):
+        n["c"] += 1
+        return osha(path)
+
+    HS.file_digest = _cfd
+    HS._file_sha256 = _csha
+    try:
+        res = HS.self_check()
+    finally:
+        HS.file_digest = ofd
+        HS._file_sha256 = osha
+    return n["c"], res
+
+
+def c_tp_b1_self_check_cache():
+    """★ self_check 指纹缓存：输入不变 ⇒ 零重散且结论一致；一变必失效。
+
+    为什么（实测）：旧实现每遍 34 个文件重读重散（24 个 rules/hosts json
+    × 反复读+解析 13.8KB manifest），空载 0.18s／满载 0.44s，而
+    `guard_posture` 每页都调 ⇒ 每页白付。缓存键＝被读文件全集
+    `(path, mtime_ns, size, ino)`，与 `_CHAIN_CACHE` 同族口径。
+    沙盒臂证**失效**：变异一个 rules/hosts json（追加一字节）⇒ 必须重算
+    且把该文件报进 problems（缓存失效不是"忘了报"的借口）。
+    """
+    import host_shield as HS
+    n1, res1 = _tp_b1_hash_calls()
+    if n1 <= 0:
+        return "夹具不成立：首遍 self_check 零哈希调用（打点没生效？）"
+    n2, res2 = _tp_b1_hash_calls()
+    if n2 != 0:
+        return ("二遍 self_check 仍重散 %d 个文件（应 0：指纹未变就要复用）"
+                "—— 缓存没生效，满载 0.44s/页照付" % n2)
+    if res1 != res2:
+        return ("两遍结论不一致（%r vs %r）—— 缓存复用改带来了语义漂移"
+                % (res1, res2))
+
+    import _pkg_sandbox as SB
+    sb = SB.Sandbox()
+    saved_pkg = HS._pkg_root
+    HS._pkg_root = lambda: sb.path
+    try:
+        HS.self_check()                                  # 沙盒首遍（建缓存）
+        gdir = os.path.join(sb.path, "rules", "hosts")
+        names = sorted(n for n in os.listdir(gdir) if n.endswith(".json"))
+        if not names:
+            return "夹具不成立：沙盒里没有 rules/hosts json"
+        victim = os.path.join(gdir, names[0])
+        with open(victim, "a", encoding="utf-8") as f:
+            f.write("\n")                                # 追加换行 ⇒ size/mtime 变
+        n3, res3 = _tp_b1_hash_calls()
+    finally:
+        HS._pkg_root = saved_pkg
+    if n3 <= 0:
+        return ("沙盒变异后 self_check 零重散 —— 缓存**没有失效**：改了文件"
+                "还报旧结论，这是比慢更坏的红（自检对篡改失明）")
+    if not any(names[0] in x for x in res3[1]):
+        return ("沙盒变异后 problems 里没有 %s（%d 条）—— 缓存失效了但结论"
+                "没重算，自检照样失明" % (names[0], len(res3[1])))
+    return True
+
+
+def n_tp_b1_self_check_cache():
+    """负控：把指纹函数冻成常量（缓存永不失效）⇒ 同一把尺子必须漏报。
+
+    ★ 变异体模拟的不是"缓存坏了"，而是**最危险的那半**：键不随文件变。
+      此时沙盒变异后结论仍是旧的（True, []）—— 正判据的断言必须抓到它。
+    ★ 不用"删掉缓存"当变异：那只会变慢，不会漏报 —— 负控要证明的是
+      "尺子分得清'报出来了'和'没报出来'"。
+    """
+    import host_shield as HS
+    # 前置：当前生产实现过得正判据的两臂（否则负控无分辨力）
+    if c_tp_b1_self_check_cache() is not True:
+        return "负控前置失败：当前实现没过 TP-B1 正判据"
+    import _pkg_sandbox as SB
+    sb = SB.Sandbox()
+    saved_pkg, saved_fp = HS._pkg_root, HS._self_check_fingerprint
+    HS._pkg_root = lambda: sb.path
+    HS._self_check_fingerprint = lambda root: ("FROZEN",)
+    try:
+        HS.self_check()                                  # 冻结键 ⇒ 缓存永不失效
+        gdir = os.path.join(sb.path, "rules", "hosts")
+        names = sorted(n for n in os.listdir(gdir) if n.endswith(".json"))
+        victim = os.path.join(gdir, names[0])
+        with open(victim, "a", encoding="utf-8") as f:
+            f.write("\n")
+        _n, res = _tp_b1_hash_calls()
+    finally:
+        HS._pkg_root = saved_pkg
+        HS._self_check_fingerprint = saved_fp
+    # ★ 断言必须**文件级**：沙盒基线本身可能带着别的问题（例：研发树里
+    #   host_shield.py 改动后还没重签 manifest）—— 断言"一个问题都不许有"
+    #   会把那条真问题误判成"负控失效"。要打的只有一件事：冻结缓存后，
+    #   **刚被改的那个文件**的问题不再被报出（旧结论被当成新结论）。
+    if any(names[0] in x for x in res[1]):
+        return ("负控失效：冻结键后居然还报出了 %s 的问题 —— 量具打不到"
+                "「缓存不失效」这个缺陷上" % names[0])
+    return True                       # 观察到"变异体下漏报" ⇒ 尺子有牙
+
+
+# ---------------------------------------------------------------- B2 ----
+def _hb_rec(ts, typ="host_shield_heartbeat", **kw):
+    d = {"ts": ts, "type": typ}
+    d.update(kw)
+    return json.dumps(d, ensure_ascii=False)
+
+
+def _tp_b2_problems():
+    """B2 量尺（纯清单返回；正负控共用同一把尺子）。
+
+    oracle 全部来自**已知输入的夹具**（不二次实现产品口径）。每臂一个
+    独立子目录 —— `_heartbeat_age_in` 按目录扫末 3 个 jsonl，共用目录会
+    互相污染（量具自己制造的红/绿都不算数）：
+      a) 窗内最大 ts：窗内乱序（殿后的 ts 更小）也必须取最大（同旧算法）；
+      b) 空窗回退：尾窗内心跳一条都没有 ⇒ 回退全扫，取到文件头那条；
+      c) 乱序头探针：首行 ts 比窗内一切新 ⇒ 回退全扫，取首行那条；
+      d) 残行不解析：尾部半行 json 不许崩、不许算，取窗内完整最大；
+      e) 声明边界：尾窗**之外**的更新心跳不计入（契约钉住，防悄悄漂移）；
+      f) 窗口下限：`_HB_TAIL_BYTES` 不许低于实测最大距 EOF（36KB）的
+         1.7 倍（64KB）—— 低于它相当于把快路径让回给全扫；
+      g) 真链快照两臂：尾窗读与全扫在**同一份快照**上逐文件同 ts。
+    """
+    import host_shield as HS
+    bad = []
+    root = _tmpdir()
+
+    def _sub(name):
+        d = os.path.join(root, name)
+        os.makedirs(d, exist_ok=True)
+        return d
+
+    def _fill(path, head_rec=None, mid_hb=None, tail_hb=None, noise=30000):
+        with open(path, "w", encoding="utf-8") as f:
+            if head_rec is not None:
+                f.write(head_rec + "\n")
+            if mid_hb is not None:
+                f.write(_hb_rec(mid_hb) + "\n")
+            for i in range(noise):
+                f.write(json.dumps({"ts": "2026-01-01T09:00:00+08:00",
+                                    "type": "noise", "i": i},
+                                   ensure_ascii=False) + "\n")
+            if tail_hb is not None:
+                f.write(_hb_rec(tail_hb) + "\n")
+
+    def _noise_line(ts="2026-01-04T07:00:00+08:00"):
+        return json.dumps({"ts": ts, "type": "noise"}, ensure_ascii=False)
+
+    # (a) 窗内最大 ts：殿后那行 ts 更旧，也必须取前面的最大
+    d = _sub("a")
+    p = os.path.join(d, "a.jsonl")
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(_hb_rec("2026-01-01T10:00:00+08:00") + "\n")
+        f.write(_noise_line("2026-01-01T10:00:01+08:00") + "\n")
+        f.write(_hb_rec("2026-01-01T12:00:00+08:00") + "\n")
+        f.write(_hb_rec("2026-01-01T11:00:00+08:00") + "\n")   # 殿后但更旧
+    best, _head = HS._hb_tail_scan(p)
+    if best != "2026-01-01T12:00:00+08:00":
+        bad.append("(a) 窗内应取最大 ts，实得 %r" % best)
+
+    # (b) 空窗回退：唯一 heartbeat 在文件头，噪声把它挤出 256KB 尾窗
+    d = _sub("b")
+    p = os.path.join(d, "b.jsonl")
+    _fill(p, head_rec=_hb_rec("2026-01-01T08:00:00+08:00"))
+    age, ts = HS._heartbeat_age_in(d)
+    if ts != "2026-01-01T08:00:00+08:00":
+        bad.append("(b) 空窗必须回退全扫取到头条心跳，实得 %r" % ts)
+
+    # (c) 乱序头探针：首行 ts 比窗内一切新 ⇒ 必须回退全扫取首行
+    d = _sub("c")
+    p = os.path.join(d, "c.jsonl")
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(_hb_rec("2026-06-01T12:00:00+08:00") + "\n")
+        for i in range(30000):
+            f.write(json.dumps({"ts": "2026-01-02T09:00:00+08:00",
+                                "type": "noise", "i": i},
+                               ensure_ascii=False) + "\n")
+        f.write(_hb_rec("2026-01-02T23:59:00+08:00") + "\n")
+    age, ts = HS._heartbeat_age_in(d)
+    if ts != "2026-06-01T12:00:00+08:00":
+        bad.append("(c) 乱序头探针必须回退全扫取首行，实得 %r" % ts)
+
+    # (d) 残行不解析：尾部半行 json，结果取窗内完整最大
+    d = _sub("d")
+    p = os.path.join(d, "d.jsonl")
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(_hb_rec("2026-01-03T10:00:00+08:00") + "\n")
+        for i in range(30000):
+            f.write(json.dumps({"ts": "2026-01-03T11:00:00+08:00",
+                                "type": "noise", "i": i},
+                               ensure_ascii=False) + "\n")
+        f.write(_hb_rec("2026-01-03T12:00:00+08:00") + "\n")
+        f.write('{"ts":"2026-01-03T23:00:00+08:00","type":"host_shield_hea')
+    best, _head = HS._hb_tail_scan(p)
+    if best != "2026-01-03T12:00:00+08:00":
+        bad.append("(d) 残行不许解析，应取窗内完整最大，实得 %r" % best)
+
+    # (e) 声明边界：文件头之后一条**更新**的心跳被噪声挤出尾窗 ⇒ 不计入。
+    #     （首行是噪声 ⇒ 乱序头探针不响；这正是"窗外更大 ts"的申报形态。）
+    d = _sub("e")
+    p = os.path.join(d, "e.jsonl")
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(_noise_line() + "\n")                       # 首行噪声（探针不响）
+        f.write(_hb_rec("2026-01-04T12:00:00+08:00") + "\n")  # 窗外、更新
+        for i in range(30000):
+            f.write(json.dumps({"ts": "2026-01-04T09:00:00+08:00",
+                                "type": "noise", "i": i},
+                               ensure_ascii=False) + "\n")
+        f.write(_hb_rec("2026-01-04T08:00:00+08:00") + "\n")   # 窗内、更旧
+    best, _head = HS._hb_tail_scan(p)
+    full = HS._hb_full_scan(p)
+    if best != "2026-01-04T08:00:00+08:00":
+        bad.append("(e) 窗外更新的心跳不该赢过窗内（声明边界），实得 %r" % best)
+    if full != "2026-01-04T12:00:00+08:00":
+        bad.append("(e) 夹具不成立：全扫应看到窗外 12:00 那条，实得 %r" % full)
+
+    # (f) 窗口下限：实测最大距 EOF 36KB ×1.7 ≈ 64KB
+    if HS._HB_TAIL_BYTES < 64 * 1024:
+        bad.append("(f) _HB_TAIL_BYTES=%d < 64KB 下限 —— 快路径会让回全扫"
+                   % HS._HB_TAIL_BYTES)
+
+    # (g) 真链快照两臂（同一份字节，排除写入竞态）
+    adir = HS._shield_audit_dir(_REPO_ROOT)
+    try:
+        names = sorted((n for n in os.listdir(adir) if n.endswith(".jsonl")),
+                       reverse=True)[:3]
+    except OSError:
+        names = []
+    if not names:
+        bad.append("(g) 夹具不成立：%s 没有 jsonl（真链臂测不出，不装绿）" % adir)
+    else:
+        import shutil
+        snap = _sub("snap")
+        for n in names:
+            shutil.copyfile(os.path.join(adir, n), os.path.join(snap, n))
+        for n in names:
+            sp = os.path.join(snap, n)
+            tail, _head = HS._hb_tail_scan(sp)
+            full = HS._hb_full_scan(sp)
+            if tail != full:
+                bad.append("(g) 真链 %s：尾窗 %r vs 全扫 %r 不一致"
+                           % (n, tail, full))
+    return bad
+
+
+def c_tp_b2_heartbeat_tail_matches_full():
+    """★ B2：尾窗读与全扫在真链上同 ts；四条声明边界按契约行为。"""
+    bad = _tp_b2_problems()
+    if bad:
+        return "；".join(bad[:4])
+    return True
+
+
+def n_tp_b2_heartbeat_tail_matches_full():
+    """负控：把全扫回退打成"什么都扫不到"⇒ 量尺必须在 (b)(c) 两臂见红。
+
+    ★ 变异体模拟的回归形状：回退路径被简化掉（空窗/乱序时直接 None）——
+      那是"慢一点"和"哨兵久死时报不出真陈旧"之间的分水岭。
+    ★ 前置：当前实现过得正判据（否则负控无分辨力）。
+    """
+    import host_shield as HS
+    if _tp_b2_problems():
+        return "负控前置失败：当前实现没过 TP-B2 正判据"
+    saved = HS._hb_full_scan
+    HS._hb_full_scan = lambda p: None
+    try:
+        bad = _tp_b2_problems()
+    finally:
+        HS._hb_full_scan = saved
+    hit = [x for x in bad if x.startswith("(b)") or x.startswith("(c)")]
+    if not hit:
+        return ("负控失效：回退路径打残后量尺仍全绿 —— (b)(c) 两臂是摆设，"
+                "空窗回退坏了也没人知道")
+    return True
+
+
+# ---------------------------------------------------------------- C ----
+def _tp_c_problems():
+    """账本页记账节流量尺（纯清单返回；正负控共用）。
+
+    四臂：
+      ① 缝复位（新进程态）⇒ 第一次打开账本页 `record_day` 恰好跑 1 次；
+      ② GAP 内再打开 ⇒ 不再跑，且页面照常渲染（契约先于精简）；
+      ③ 节流窗过期（把缝拨到 GAP 之前）⇒ 再打开必须跑（补记不被吞）；
+      ④ daemon **直调** `record_day` 不消耗前端节流缝 —— 守护进程那条
+         路径与监理页这条路径不许耦死（0.51.0 账准修复的承诺在此）。
+    """
+    import inbox_daemon as DM
+    bad = []
+    hub = _tmpdir()
+    day, items = _ledger_test_items()
+    calls = {"n": 0}
+    saved = DM.record_day
+
+    def _counting(*a, **kw):
+        calls["n"] += 1
+        return saved(*a, **kw)
+
+    SV._RECORD_DAY_STATE["t"] = None
+    DM.record_day = _counting
+    try:
+        SV.render_page(view="ledger", root=hub, token="t", items=items,
+                       record_ledger=True)                    # ① 首次必跑
+        if calls["n"] != 1:
+            bad.append("① 首次打开账本页 record_day 跑了 %d 次（应 1）"
+                       % calls["n"])
+        page2 = SV.render_page(view="ledger", root=hub, token="t", items=items,
+                               record_ledger=True)            # ② GAP 内跳过
+        if calls["n"] != 1:
+            bad.append("② GAP 内再打开又跑了（累计 %d 次）—— 节流没生效，"
+                       "每打开一遍就重跑 14 天窗口" % calls["n"])
+        if "账本" not in PC.body(page2):
+            bad.append("② 节流跳过记账后页面渲染异常（页面契约先于精简）")
+        # ③ 把缝拨到 GAP 之前（时钟走过）⇒ 必须再跑
+        SV._RECORD_DAY_STATE["t"] = (time.monotonic()
+                                     - SV._RECORD_DAY_MIN_GAP - 1.0)
+        SV.render_page(view="ledger", root=hub, token="t", items=items,
+                       record_ledger=True)
+        if calls["n"] != 2:
+            bad.append("③ 节流窗过后再打开没跑（累计 %d 次）—— 补记被节流"
+                       "吞了，0.51.0 的承诺破" % calls["n"])
+        # ④ daemon 直调不消耗前端节流缝
+        before = SV._RECORD_DAY_STATE["t"]
+        DM.record_day(items=items, today=day, root=hub)
+        DM.record_day(items=items, today=day, root=hub)
+        if SV._RECORD_DAY_STATE["t"] != before:
+            bad.append("④ daemon 直调 record_day 竟消耗了前端节流缝 —— "
+                       "两条记账路径耦死了")
+    finally:
+        DM.record_day = saved
+        SV._RECORD_DAY_STATE["t"] = None
+    return bad
+
+
+def c_tp_c_record_day_throttled_on_ledger_get():
+    """★ 账本页 GET 的 record_day 进程内节流；daemon 路径不受影响。"""
+    bad = _tp_c_problems()
+    if bad:
+        return "；".join(bad)
+    return True
+
+
+def n_tp_c_record_day_throttled_on_ledger_get():
+    """负控：把 GAP 打到 0（节流失效）⇒ 同一把尺子必须在 ② 臂见红。
+
+    ★ 变异体模拟的形状：有人把节流删了/关了（性能回归回旧状）——
+      ② 臂"GAP 内又跑了"必须抓到它。
+    ★ 前置：当前实现过得正判据（否则负控无分辨力）。
+    """
+    if _tp_c_problems():
+        return "负控前置失败：当前实现没过 TP-C 正判据"
+    saved_gap = SV._RECORD_DAY_MIN_GAP
+    SV._RECORD_DAY_MIN_GAP = 0.0
+    try:
+        bad = _tp_c_problems()
+    finally:
+        SV._RECORD_DAY_MIN_GAP = saved_gap
+    hit = [x for x in bad if x.startswith("②")]
+    if not hit:
+        return ("负控失效：GAP=0 后量尺仍全绿 —— ② 臂是摆设，节流删了也"
+                "没人知道")
+    return True
+
+
 CHECKS_0353 = [
+    # ---- 十、TAB 切换卡顿根治·方案 B（2026-10-21 创始人拍板）----
+    ("TP-B1 self_check 指纹缓存：不变零重散／沙盒变异必失效必报",
+     c_tp_b1_self_check_cache, n_tp_b1_self_check_cache),
+    ("TP-B2 心跳尾窗读：真链同全扫＋四边界按契约（声明边界钉住）",
+     c_tp_b2_heartbeat_tail_matches_full, n_tp_b2_heartbeat_tail_matches_full),
+    # ---- 十一、TAB 切换卡顿根治·方案 C（2026-10-21 创始人拍板）----
+    ("TP-C 账本页 GET 记账节流：GAP 内不重跑／过期照跑／daemon 路径不耦死",
+     c_tp_c_record_day_throttled_on_ledger_get,
+     n_tp_c_record_day_throttled_on_ledger_get),
     # ---- 九、闪窗（黑窗一闪）----
     ("P12 起子进程必须无窗", c_no_console_flash_on_spawn,
      n_no_console_flash_on_spawn),

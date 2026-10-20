@@ -170,6 +170,12 @@ button.logo:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .tabs{display:flex;gap:4px;padding:10px 20px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .tabs a{padding:9px 14px;color:var(--muted);font-weight:600;text-decoration:none;border-bottom:2px solid transparent}
 .tabs a.on{color:var(--brand);border-bottom-color:var(--brand)}
+/* ★ 2026-10-21（TAB 切换卡顿根治·方案 E）：切页**细进度条**。2px、贴顶、
+   随 var(--brand) 换色；`pointer-events:none` ⇒ 永不抢点击。JS 不可用
+   （或没点 TAB）时 width 恒 0 ⇒ 什么都不显示，不是占位的假条。 */
+.tabprog{position:fixed;top:0;left:0;height:2px;width:0;z-index:60;pointer-events:none;background:var(--brand)}
+.tabprog.run{animation:tabprog 1.1s .05s ease-out forwards}
+@keyframes tabprog{from{width:0}to{width:88%}}
 main{max-width:1000px;margin:0 auto;padding:20px}
 /* ★ 0.50.4（Q-17）：卡片内边距 14px→11px、卡片间距 12px→9px —— 日报页原先
    必须滚动才看得到「规则命中排行」和「有没有被改过」两张卡。 */
@@ -209,10 +215,49 @@ h2{font-size:15px;margin:0 0 12px}
 /* ★ 0.51.0（品质审查拍板点 1）：四卡撤分母后，单位「条／件」小号灰显跟上 ——
    单位可见（U-08 立意），但不与数字抢 26px 的视觉权重。 */
 .metric .unit{font-size:13px;font-weight:600;color:var(--muted)}
-/* ★ 0.51.0（拍板点 3）：排行行规则号**淡显上屏**（索引位）—— 与问号全表
-   `.tdef .rrow .rid` 同一视觉语言；收件箱记录「规则 SEC-01」能对号入座。 */
-.rows .rid{display:inline-block;min-width:52px;margin-left:6px;
-  font-family:var(--mono);font-size:11px;font-weight:400;color:var(--muted)}
+/* ★ 0.51.0（拍板点 3）：排行行规则号**上屏**（索引位）—— 与问号全表
+   `.tdef .rrow .rid` 同一视觉语言；收件箱记录「规则 SEC-01」能对号入座。
+   ★★ 0.53.4（创始人 2026-10-20 截图：「规则代号是否放在前边更好？不要那么小，
+   字号大一些，跟旁边一样大」）：规则号**移到短名之前**（前缀位，与收件箱
+   「规则 SEC-01」同序），字号 11px→13px（＝`.row` 正文字号，不再淡小），
+   颜色收回正文色（放前面就是主显示的一部分，不是脚注）。
+   间距 margin-left→margin-right：它在前面，后面跟文字。 */
+.rows .rid{display:inline-block;min-width:52px;margin-right:8px;
+  font-family:var(--mono);font-size:13px;font-weight:400;color:inherit}
+/* ★ 0.53.4（创始人 2026-10-20 截图：日报两卡「右边大片空缺，左边有的都挤得
+   换行了」）：`.k` 原写死 width:150px ⇒ 含编号/长标签的行**内部换行**，
+   值被孤零零留在行尾（左两行、右一截，中间一大片空）。
+   ⇒ label 按内容撑开（basis:auto，放得下就不换行；极端窄才退化），
+   值列紧随其后（flex:1;min-width:0 ⇒ 长值自己换行，不反挤 label）。
+   只给日报两卡（`.rows.fit`）—— 其他页保持 150px 对齐列，不外溢。 */
+.rows.fit .row .k{flex:0 1 auto;width:auto;min-width:0}
+.rows.fit .row>span:last-child{flex:1 1 auto;min-width:0}
+/* ★ 0.53.4：行内「圈问号」—— **本次数据**的总结说明（不是术语词条：词条答
+   "这是什么"，它答"这次是什么"）。徽章与 `.term` 的「？」**同一种形状**
+   （14×14 圆、10px、写死字号，U-16 立意），不进 name="term" 互斥组。
+   ★★ 0.53.4 二次修订：第二形态 `.qinfo` —— 答"**这类东西是什么**"（记录的
+   来龙去脉），与 `.qsum`（答"这一次是些什么"）**同形不同义**。两者共用同
+   一套样式规则（形状必须一致，否则同屏两种问号），但**类名分开**：
+   判据各锁各的落点，混用一个类会让"问号答错了问题"这条永远查不出来。 */
+.qsum,.qinfo{display:inline-block;position:relative;vertical-align:baseline;margin-left:6px}
+.qsum>summary,.qinfo>summary{cursor:pointer;list-style:none;display:inline-block;width:14px;height:14px;
+  font-size:0;line-height:0;color:transparent;letter-spacing:0}
+.qsum>summary::-webkit-details-marker,.qinfo>summary::-webkit-details-marker{display:none}
+.qsum>summary::after,.qinfo>summary::after{content:"？";position:absolute;top:0;left:0;
+  width:14px;height:14px;line-height:14px;text-align:center;border-radius:50%;
+  background:var(--line);color:var(--muted);font-size:10px;font-weight:700}
+.qsum[open]>summary::after,.qinfo[open]>summary::after{background:var(--brand);color:#fff}
+/* ★ 落点不在这里：`top/left` 只是**无 JS 时的兜底**（会停在页顶）。真定位由
+   `_FLIP_JS` 的 `fit()` 现算 —— 与术语词条 `.tdef` **同一段代码、同一把尺子**
+   （0.53.4 四次修订：旧版 fit 只认 `.tdef`，于是 `.qbody` 永远停在 top:8px，
+   用户看到的就是「说明框弹到天花板上」）。 */
+.qsum>.qbody,.qinfo>.qbody{position:fixed;z-index:60;top:8px;left:8px;right:auto;width:max-content;
+  max-width:min(560px,calc(100vw - 16px));min-width:min(260px,calc(100vw - 16px));
+  max-height:calc(100vh - 16px);overflow:auto;
+  margin:0;padding:12px 14px;font-size:12.5px;line-height:1.75;color:var(--fg);
+  background:var(--bg,#fff);border:1px solid var(--line);border-left:3px solid var(--brand);
+  border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.16);font-weight:400;
+  white-space:normal;text-align:left}
 /* ---- 0.36.1：术语词条改成**浮层**（创始人截图三）----
    ★ 原形状的病：`.term{display:inline}` 把详情块塞进 `.metrics` 的
      140px 窄格里 ⇒ 展开后宽度只有卡片那么宽 ⇒ 中文逐字换行，
@@ -312,9 +357,12 @@ details.where code{font-family:var(--mono);font-size:11.5px;word-break:break-all
 .ok{color:var(--l0);font-weight:700}.warn{color:var(--l1);font-weight:700}.bad{color:var(--r0);font-weight:700}.neutral{color:var(--muted);font-weight:700}.dev{color:var(--brand);font-weight:700}
 .empty{text-align:center;padding:40px;color:var(--muted)}
 .note{font-size:12px;color:var(--muted)}
-/* ★ 0.50.7（创始人截图二「失守后换行」）：六态枚举的原子单元 ——
+/* ★ 0.50.7（创始人截图二「失守后换行」）：灯的五态枚举的原子单元 ——
    每个态包一层 span 且 nowrap，窄面板下也只会在态与态之间的「·」处
-   折行，绝不再把「失守」「拦截」这类短词切成一截。 */
+   折行，绝不再把「失守」「拦截」这类短词切成一截。
+   ★ 0.53.3：改名 —— 它描述的是页面上**这一行**（对外），不是内部灯态
+     表；叫错会让后来的人以为页面上应该有六个（创始人原话：研发态只是
+     内部用，不用告诉用户，用户是没有这个态的）。 */
 .sixit{white-space:nowrap}
 .unread-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--brand);margin-right:6px;vertical-align:middle}
 /* ---- 0.35.3：三档 + 可展开卡片（创始人 2026-10-06 四条意见）---- */
@@ -500,9 +548,27 @@ _FLIP_JS = """
 (function(){
   var PAD = 8;
   function clamp(v, lo, hi){ return Math.max(lo, Math.min(v, Math.max(lo, hi))); }
+  // ★★ 0.53.4 四次修订（创始人 2026-10-20 13:04 截图：「点击 150 后边的问号时，
+  //   说明框弹出到天花板上了，位置不对」）：浮层的**体**有两种 —— 术语词条
+  //   `.tdef`、行内圈问号 `.qbody`。旧版只认 `.tdef`，`.qbody` 因此从来没被
+  //   定位过，停在自己 CSS 里那个写死的 `top:8px` 上（＝天花板），与锚点毫无
+  //   关系。⇒ 定位**只有这一份实现**：谁打开就量谁，两种体走同一段坐标计算。
+  //   新增浮层只加类名到这里，不许再写第二套坐标（第二套必然漂）。
+  function boxOf(d){
+    return d.querySelector('.tdef') || d.querySelector('.qbody');
+  }
+  // ★★ 同一张截图里的第三个问题（「之前的问号说明框不会关掉」）：术语词条靠
+  //   `<details name="term">` 原生手风琴互斥，`.qsum`／`.qinfo` **刻意不进**
+  //   那个组（它们不是词条，U-19/T-09 分得很清）⇒ 三类之间没有任何互斥，
+  //   于是能叠一屏。⇒ 互斥也收成一份实现：**同屏最多一个浮层**，开一个就关掉
+  //   其它所有（三类同一口径）。按类名判断，新增浮层照样覆盖。
+  function overlays(){
+    return document.querySelectorAll(
+      'details.term[open],details.qsum[open],details.qinfo[open]');
+  }
   function fit(d){
     if (!d.classList) return;
-    var box = d.querySelector('.tdef');
+    var box = boxOf(d);
     var anchor = d.querySelector('summary');
     if (!box || !anchor) return;
     var root = document.documentElement;
@@ -524,11 +590,17 @@ _FLIP_JS = """
     box.style.top = top + 'px';
   }
   function fitOpen(){
-    document.querySelectorAll('details.term[open]').forEach(fit);
+    overlays().forEach(fit);
   }
   document.addEventListener('toggle', function(e){
     var d = e.target;
-    if (d.classList && d.classList.contains('term') && d.open) fit(d);
+    if (!d.classList || !d.open) return;
+    var isOverlay = d.classList.contains('term') ||
+                    d.classList.contains('qsum') ||
+                    d.classList.contains('qinfo');
+    if (!isOverlay) return;
+    overlays().forEach(function(o){ if (o !== d) o.open = false; });
+    fit(d);
   }, true);
   window.addEventListener('resize', fitOpen);
   window.addEventListener('scroll', fitOpen, true);
@@ -1460,6 +1532,58 @@ def _collapse_js(token):
     return _COLLAPSE_JS_TMPL.replace("__TOKEN__", _esc(token))
 
 
+#: ★ 2026-10-21（TAB 切换卡顿根治·方案 E，创始人拍板"顺带做"）：
+#:   切 TAB 的**即时反馈**三件 —— 点击即高亮、顶部细进度条、悬停预取。
+#:   治的是"等好久"的**心理时长**（真时长由方案 A/B/C 在服务端修），
+#:   本文件零计算变化、零新请求类型。
+#:   ★ 渐进增强：`_tabs` 的 href 是真的 ⇒ 禁用 JS 时导航照旧；本脚本
+#:     只加一层反馈，删掉它页面一个字节都不少。
+#:   ★ 悬停预取打的是**同一个 GET**（`/?v=…`）：0.48.6 B3 起口令在
+#:     httpOnly cookie 里，`same-origin` 默认带上 ⇒ 服务端把该视图的
+#:     缓存温热，真点击时几乎命中。100ms 是**意图阈值**（鼠标划过不算）；
+#:     失败静默（`.catch`）—— 预取是优化，不是功能。
+#:   ★ 只 GET 只读视图、不碰任何带副作用的按钮；账本视图的记账已被
+#:     方案 C 节流（45s 一次）⇒ 预取不会造成重复落账。
+#:   ★ 修饰键/中键＝新窗打开：不动当前页的高亮与进度条（点了却给
+#:     当前页换高亮＝假的即时反馈）。
+_TAB_JS = """
+<script>
+(function(){
+"use strict";
+var bar = document.getElementById('tabprog');
+var links = document.querySelectorAll('.tabs a');
+function activate(a){
+  if (bar) bar.classList.add('run');
+  for (var i = 0; i < links.length; i++) links[i].classList.remove('on');
+  a.classList.add('on');
+}
+for (var i = 0; i < links.length; i++) {
+  (function(a){
+    var tid = null;
+    a.addEventListener('click', function(e){
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+      activate(a);
+    });
+    a.addEventListener('mouseenter', function(){
+      if (tid) clearTimeout(tid);
+      tid = setTimeout(function(){
+        tid = null;
+        fetch(a.href, {credentials:'same-origin'}).catch(function(){});
+      }, 100);
+    });
+    a.addEventListener('mouseleave', function(){
+      if (tid) { clearTimeout(tid); tid = null; }
+    });
+  })(links[i]);
+}
+window.addEventListener('pageshow', function(){
+  if (bar) bar.classList.remove('run');
+});
+})();
+</script>
+"""
+
+
 #: 浮层逃逸的当前状态（原矩形/调整后矩形/窗口标识）。**只有一次调整是活的**：
 #: 连续开两个浮层时，第二次先还原再调（不会叠床架屋）。
 _WINFIT_STATE = {"orig": None, "adj": None, "run_id": None}
@@ -2181,7 +2305,7 @@ def _view_report(rep, token, items=None):
                      " ｜ 共 %d 条"
                      % (_day, Lv["R0"], _day, Lv["L2"],
                         _day, Lv["L1"], _day_total))
-    pr = ("<div class=\"card\"><div class=\"rows\">"
+    pr = ("<div class=\"card\"><div class=\"rows fit\">"
           "<div class=\"row\"><span class=\"k\">最近 %d 小时%s</span><span>%s</span></div>"
           "<div class=\"row\"><span class=\"k\">%s 当日合计</span><span>%s</span></div>"
           "</div></div>"
@@ -2222,49 +2346,38 @@ def _view_report(rep, token, items=None):
             #   替代品 description_zh 是审计受众的全文（最长 60 字）⇒ 挤成三四行，
             #   且 DST-10 的 zh 自带「——DST-09」内部自引用（编号从数据后门回来）。
             #   ⇒ 主显示改**上屏短名**（`label_zh`，≤14 字，INV-4 强制），
-            #   规则号**淡显上屏**（`.rid`，与问号全表同一视觉语言 —— 收件箱记录
+            #   规则号**上屏**（`.rid`，与问号全表同一视觉语言 —— 收件箱记录
             #   「规则 SEC-01」能对号入座），全文 zh 退到 hover title。
             #   退链 label → zh → 规则号（不编造、不用英文 `name` 充数）。
+            # ★★ 0.53.4（创始人 2026-10-20 截图）：「规则代号放在前边、字号跟
+            #   旁边一样大」—— 规则号移到短名**之前**（前缀位，与收件箱
+            #   「规则 SEC-01」同序），字号收到正文 13px、颜色收回正文色。
             "<div class=\"row\"><span class=\"k\">"
-            "<a href=\"/?v=inbox&f=day:%s:rule:%s\" title=\"%s\">%s"
-            "<span class=\"rid\">%s</span></a></span>"
+            "<a href=\"/?v=inbox&f=day:%s:rule:%s\" title=\"%s\">"
+            "<span class=\"rid\">%s</span>%s</a></span>"
             "<span>命中 %d 次%s</span></div>"
             % (_esc(rep["day"]), _esc(r["rule_id"]),
                _esc(r.get("zh") or r["rule_id"]),
+               _esc(r["rule_id"]),
                _esc(r.get("label") or r.get("zh") or r["rule_id"]),
-               _esc(r["rule_id"]), int(r["count"]),
+               int(r["count"]),
                (" ｜ " + _esc(_rule_host(r))) if _rule_host(r) else "")
             for r in rep["rules"][:10])
         rules = ("<div class=\"card\"><h2>规则命中排行 · 当日共 %d 次"
-                 "</h2><div class=\"rows\">%s</div></div>" % (_rule_total, rows))
+                 "</h2><div class=\"rows fit\">%s</div></div>" % (_rule_total, rows))
 
-    ch = rep["chain"]
-    cls = {"ok": "ok", "broken": "bad", "unknown": "warn"}.get(ch["status"], "warn")
-    if ch["status"] == "broken" and not ch.get("first_bad"):
-        ch = dict(ch)
-        ch["first_bad"] = "存在无法读取的链记录；当前未能定位具体文件/行"
-    # ★ 0.37.2：词条不再传 `text=`（旧版传「记录有没有被改过」，而术语本名是
-    #   「有没有被改过」⇒ 展开后正文开头又补一遍本名，读成
-    #   「记录有没有被改过 有没有被改过：」，同一个意思叠两层）。
-    # ★「被改过的地方 / 坏行 0 / 0」⇒ 拆成两行（旧版把一个标签对两个数）。
-    chain = ("<div class=\"card\"><h2>%s（本日报能读取到的链文件）</h2><div class=\"rows\">"
-             "<div class=\"row\"><span class=\"k\">校验结果</span><span class=\"%s\">%s</span></div>"
-             # ★ 0.50.4（Q-06 ＋ Q-09）：这一行原先是「检查了几个文件 / 多少条记录
-             #   ＋ 值 23 / 48078」⇒ 同一行三个斜杠，且分别表示「或」与「与」两种
-             #   关系；两个异质量并排成一条斜杠还被读成比例。⇒ 值写成一句
-             #   「23 个文件、48078 条记录」（与运行状态页的完整句统一）。
-             "<div class=\"row\"><span class=\"k\">检查范围</span><span>%d 个文件、%d 条记录</span></div>"
-             "<div class=\"row\"><span class=\"k\">%s 被改过几处</span><span>%d</span></div>"
-             "<div class=\"row\"><span class=\"k\">坏了几行</span><span>%d</span></div>"
-             "<div class=\"row\"><span class=\"k\">%s</span><span>%d（本来就不参与比对）</span></div>%s%s</div></div>"
-             % (GL.chip("chain_check"), cls, _esc(_chain_verdict(ch)),
-                ch["files"], ch["records"],
-                GL.chip("chain"), ch["broken"], ch.get("bad_lines", 0),
-                GL.chip("unchained"), ch.get("unchained", 0),
-                ("<div class=\"row\"><span class=\"k\">第一个问题出在哪</span><span>%s</span></div>"
-                 % _esc(ch["first_bad"])) if ch.get("first_bad") else "",
-                ("<div class=\"row\"><span class=\"k\">说明</span><span>%s</span></div>"
-                 % _esc(ch["reason"])) if ch.get("reason") else ""))
+    # ★★ 0.53.4（创始人 2026-10-20「这些好像不属于日报，放在日报里合适吗？」）：
+    #   **链卡整张搬去运行状态页**（`_chain_card`）。搬走的理由不是它不重要，
+    #   而是：① 它答的是「证据本身可靠不可靠」，与"今天发生了什么"不是同一件事；
+    #   ② 它每天的数几乎不变（同一批文件），放日报等于每天重复同一句；
+    #   ③ 它要三行才说得清，放进日报就挤掉了日报自己那两卡的位置。
+    # ★★ 2026-10-21 再撤一步（创始人「把日报最后一行去掉」）：连那句
+    #   「记录在运行状态页」的**指路句**也不留。机制层的理由 ——
+    #   **跨页指路是页签的活，不是正文的活**：顶部五个页签已经能到任何一页，
+    #   正文里再写一遍"在某某页"＝把导航说两遍；而且这类句子会**随搬家腐烂**
+    #   （东西搬走了，句子还指着旧地方）。⇒ 不留指路句，靠页签导航。
+    #   ★ 减法留账：链的三个词条（防篡改记录／有没有被改过／没纳入比对的记录）
+    #     全部只在运行状态页落点；日报连提都不再提，由 T-10 ⑥' 守。
     # ★ 0.36.1：时间范围只在**小节标题**里说一次（原来四张卡片各写一遍）。
     # ★ 0.37.1：页面名与 `<title>`/选项卡统一取 `PAGE_TITLES`（唯一真源）——
     #   旧版这里写「今日值守 · 日期」，而浏览器标签与选项卡都写「日报」，
@@ -2283,8 +2396,8 @@ def _view_report(rep, token, items=None):
     #   「需要一整句话才能解释的显示，本身就是显示失败」（Q-02 补丁即自供状）；
     #   四卡只留绝对数＋单位，时间口径保留（W07：说一次，且不许整句删掉）。
     return ("<h2>%s · %s</h2>"
-            "<p class=\"note\">四个数都只数<b>最近 %d 小时</b>。</p>%s%s%s%s"
-            % (PAGE_TITLES["report"], _esc(rep["day"]), hrs, m, pr, rules, chain))
+            "<p class=\"note\">四个数都只数<b>最近 %d 小时</b>。</p>%s%s%s"
+            % (PAGE_TITLES["report"], _esc(rep["day"]), hrs, m, pr, rules))
 
 
 def _chain_ok_state(ch):
@@ -2305,6 +2418,168 @@ def _chain_verdict(ch):
     return R.chain_unverified((ch or {}).get("files", 0))
 
 
+#: 无指纹记录的类型 → 上屏人话。**只做翻译**：类型取自数据（`chain["types"]`），
+#: 这里不预设数据里有什么；表里没有的类型 ⇒ 走通用句（不编人话）。
+_UNCHAINED_TYPE_ZH = {
+    "session_start": "开始一次对话时留下的记录",
+}
+
+
+def _qsum_html(ch):
+    """「没纳入比对的记录」行**值后**的圈问号展开体：这次是些什么记录。
+
+    ★ 0.53.4 修订（创始人 2026-10-20 10:18 截图：「对不上 147 这个数啊……
+      这种明细不仅对不上，用户也看不懂。让用户知道具体情况就行，把用户的
+      问号拉直就行，体验还是第一位的。还有上边 32 个文件也是。」）：
+      初版展开体列了 32 个文件、每个文件跟一个「N 条」—— 那个 N 是**该文件
+      带指纹的记录数**，与 147（不带指纹的记录数）是两个口径 ⇒ 怎么加都对
+      不上；而且逐文件是内部实现细节，用户读不懂。⇒ 明细整段退役，只答
+      两件事：这些记录是什么（类型从数据派生）、核对范围（日期从文件派生）。
+    ★ 与术语词条分工：行左 `unchained` 芯片答"为什么没纳入比对"（概念，
+      静态）；这个问号答"这次是些什么"（本日数据）—— 点哪个都看得懂。
+    ★ 单类型且有已知人话 ⇒ 直说「都是…」；混合/未知 ⇒ 只说"不带指纹"，
+      不把一类说成全部（对外强度不许超过数据能支撑的）。
+    ★ 数字与范围全部派生：`ch["unchained"]` / `ch["types"]` /
+      `ch["first_day"]` / `ch["last_day"]`，不写死。
+    """
+    ch = ch or {}
+    n = int(ch.get("unchained") or 0)
+    if n <= 0:
+        return ""                               # 没有带问号的数，就不挂问号
+    types = ch.get("types") or {}
+    head = ""
+    if len(types) == 1:
+        _only = next(iter(types))
+        _zh = _UNCHAINED_TYPE_ZH.get(_only)
+        if _zh:
+            head = "这 %d 条都是%s。" % (n, _zh)
+    body = ("%s它们不带指纹，不算被改过。" % head) if head else \
+        ("这 %d 条记录不带指纹，不算被改过。" % n)
+    # ★★ 0.53.4 三次修订：**删掉「核对范围是 A 到 B 的链文件」这一句**。
+    #   链卡搬到运行状态页后，紧挨着的上一行就是「检查范围：A 到 B，共 N 条
+    #   记录」—— 同屏两处同一段日期，正是 STE 要灭的「一句话说两遍」。
+    #   （搬卡前这句是**唯一**给出日期的地方，所以它在当时是对的；前提变了。）
+    return ("<details class=\"qsum\"><summary>？</summary><div class=\"qbody\">"
+            "%s</div></details>" % body)
+
+
+#: 「记录」是什么 —— 圈问号 `.qinfo` 的展开体（创始人 2026-10-20：
+#: 「65119 条记录……这些记录是啥？什么形式存在？我需要了解清楚，我相信
+#: 用户也会有这样的疑问的」）。
+#: ★ 写法按 ASD-STE100：一句话一个意思、主动语态、现在时、不用缩略语、
+#:   不写路径与英文词（`jsonl` / `sha256` 一个都不上屏 —— 它们是**实现**，
+#:   用户问的是"这东西是什么、存在哪、存了什么"）。
+#: ★ 四句各答一问，顺序＝读者会问的顺序：是什么 → 什么形式 → 放哪 → 存什么。
+#:   "存什么"放最后且**明说不存什么**：隐私是这里唯一的真风险点，
+#:   说"只有摘要"而不说"没有文件内容"，读者仍然会担心。
+_RECORD_WHAT = (
+    "一条记录就是发生过的一件事。开一次对话、拦一次操作，都会留下一条。"
+    "每条记录是一行文字，写在记录文件的末尾，前面的行不改。"
+    "记录文件放两处：本机汇总一处，各项目目录一处。"
+    "记录里只有摘要：命令里认出密钥就遮住，文件只留内容指纹，没有文件内容。"
+)
+
+
+def _qinfo_html(text):
+    """行内圈问号的**第二形态**：答「这类东西是什么」（静态概念）。
+
+    ★ 与 `.qsum` 分工（两者同形不同义，类名分开）：
+      `.qsum`  答"**这一次**是些什么记录"（数字/类型/范围全部派生自本次数据）；
+      `.qinfo` 答"**这类东西**是什么、存在哪、存了什么"（与本次数据无关）。
+    ★ 不进 `name="term"` 互斥组：它不是术语词条（没有 `data-t`），
+      与术语表 24 条不共享开关状态。
+    """
+    return ("<details class=\"qinfo\"><summary>？</summary><div class=\"qbody\">"
+            "%s</div></details>" % _esc(text))
+
+
+def _chain_card(ch):
+    """运行状态页第二张小节卡「记录」（0.53.4 从日报搬来）。
+
+    ★ 为什么搬：创始人 2026-10-20「这些好像不属于日报，放在日报里合适吗？」
+      —— 日报答"今天发生了什么"，而"记录有没有被改过"答的是**证据本身可靠
+      不可靠**，与当天的账无关；而且它每天的数几乎不变（同一批文件），
+      放进日报等于每天重复同一句。
+
+    ★ 三行（创始人拍板「这张表就三行吧，漏掉的重要信息都补上」）：
+      ① 结论：逐条对过多少条、有没有被改过（直答，不再给"完整"这种状态词）
+      ② 检查范围：日期区间 ＋ 记录总数（总数含没纳入比对的，否则读者
+         拿 64972 去对账永远少 147 —— 这正是 10:18 那条"对不上"的根）
+      ③ 没纳入比对的记录：0 条时**整行不列**（列一个 0 只会生出"那是啥"）
+    ★ 有问题时才追加「第一个问题出在哪」；没查成时**只留告警句一行**——
+      此时范围/总数都还不存在，硬凑三行就是拿 0 冒充数据。
+    ★ 末挂一行边界注：没有这句，卡片读起来像"整机全查过了"。
+    """
+    ch = ch or {}
+    css = {"ok": "ok", "broken": "bad", "unknown": "warn"}.get(
+        str(ch.get("status") or ""), "warn")
+    recs = int(ch.get("records") or 0)
+    unch = int(ch.get("unchained") or 0)
+    bad = int(ch.get("bad_lines") or 0)
+    rows = []
+    if _chain_ok_state(ch):
+        # ★ 直答：数字从 records 派生，结论词从 `chain_status_label` 派生
+        #   （唯一实现，不在此另写一份中文字面）。
+        rows.append('<div class="row"><span class="k">%s</span>'
+                    '<span class="%s">%d 条逐条对过，%s</span></div>'
+                    % (GL.chip("chain_check"), css, recs,
+                       _esc(R.chain_status_label(ch.get("status")))))
+        total = recs + unch + bad
+        fd, ld = ch.get("first_day") or "", ch.get("last_day") or ""
+        # ★ 范围句两形态都派生：读得出日期 ⇒ 「A 到 B，共 N 条记录」；
+        #   读不出（项目级文件名不一定带日期）⇒ 只说条数，不编日期。
+        scope = ("%s 到 %s，共 %d 条记录" % (_esc(fd), _esc(ld), total)
+                 if fd and ld else "共 %d 条记录" % total)
+        rows.append('<div class="row"><span class="k">检查范围</span>'
+                    '<span>%s%s</span></div>' % (scope, _qinfo_html(_RECORD_WHAT)))
+        if unch > 0:
+            rows.append('<div class="row"><span class="k">%s</span>'
+                        '<span>%d%s</span></div>'
+                        % (GL.chip("unchained"), unch, _qsum_html(ch)))
+        if ch.get("first_bad"):
+            rows.append('<div class="row"><span class="k">第一个问题出在哪</span>'
+                        '<span>%s</span></div>' % _esc(ch["first_bad"]))
+        elif str(ch.get("status")) == "broken":
+            rows.append('<div class="row"><span class="k">第一个问题出在哪</span>'
+                        '<span>存在无法读取的链记录；当前没能定位到具体文件</span>'
+                        '</div>')
+    else:
+        rows.append('<div class="row"><span class="k">%s</span>'
+                    '<span class="%s">%s</span></div>'
+                    % (GL.chip("chain_check"), css, _esc(_chain_verdict(ch))))
+        # ★ 没查成时，**只有「读到了文件却一条都校验不了」这种才追加原因**：
+        #   `chain_health` 的三条 `reason` 路径互斥 —— files==0 ⇒ 原因是
+        #   「没有可校验的链文件」，而告警句已经说了「0 个文件被检查」，
+        #   再说一遍是废话（STE）；files>0 且 reason 非空 ⇒ 只可能是
+        #   「拿不到校验器：…」，这句是**唯一**能说清原因的地方，必须留。
+        if ch.get("reason") and int(ch.get("files") or 0) > 0:
+            rows.append('<div class="row"><span class="k">说明</span>'
+                        '<span>%s</span></div>' % _esc(ch["reason"]))
+    # ★ 小节标题走 `chain` 词条芯片（「防篡改记录」）—— 它既是这一节的**名字**，
+    #   也是这个词条唯一的落点（日报撤卡后 `chain` 芯片不能再只剩在旧卡里，
+    #   否则术语表 100% 有落点那条判据会红）。
+    # ★ 显式结构边界（`id="chainrec"` 起、`<!-- chainrec:end -->` 止）：
+    #   判据取段锚在标记上，卡里加行减行、改句子都不碰尺子。
+    # ★ 边界注两件事：① 这条链**查不到**什么（整份替换）；② 哪一类记录**根本
+    #   没法比**（没指纹的那几类）。
+    # ★★ 0.53.4 四次修订（创始人 2026-10-20 13:04 截图：「没有纳入比对的记录
+    #   重复了，请去掉下边那条」）：② 的芯片**只在第三行缺席时出现**。
+    #   病根——上一版为了让「没纳入比对的记录」在 0 条的机器上也有术语落点
+    #   （P13），无条件把它挂进了边界注；可 0 条只是**一种**情形，常见情形
+    #   （有 150 条）第三行本来就在，边界注再写一遍＝同屏同一个词两次。
+    #   修法不是删词条、也不是把 0 行加回来，而是**让落点跟着缺位走**：
+    #   行在，芯片就在行上；行不在，芯片才落到注里。两个情形各有一处、且只有
+    #   一处。※ 机制教训：给判据补落点时，要问「这个落点在**别的分支**里会
+    #   不会变成重复」，不能只问「这样判据还绿不绿」。
+    _landing = (GL.chip("unchained") if unch <= 0 else "")
+    _note2 = ("没指纹的记录没法比对，单独算一类：%s" % _landing) if _landing else ""
+    return ('<h2 id="chainrec">%s</h2><div class="rows fit">%s</div>'
+            '<p class="note" style="margin:8px 2px 2px">只比对本机读得到的记录：'
+            '单条被改能查出来；整份文件缺失、整份被替换，看不出来。%s</p>'
+            '<!-- chainrec:end -->'
+            % (GL.chip("chain"), "".join(rows), _note2))
+
+
 def _view_health(rep, token, items=None):
     """★ 0.36.1 文字修订：这一页原先把**已生成的 HTML 整段转义**，
     于是术语词条的 `<details>` 在用户屏幕上显示成一串标签文本
@@ -2322,7 +2597,6 @@ def _view_health(rep, token, items=None):
       钩子 / 边界）。
     """
     ch = rep["chain"]
-    cls = {"ok": "ok", "broken": "bad", "unknown": "warn"}.get(ch["status"], "warn")
     _hrs = rep.get("window_hours", 24)
     _revived_count = rep.get("revived_window", 0)
     # ★ 0.47.0：拉起次数是分子 ⇒ 分母＝窗口内总记录数（与日报页同一口径）。
@@ -2345,14 +2619,12 @@ def _view_health(rep, token, items=None):
     #   ⇒ 状态词全站只有**顶部条**一处；本页只放顶部条没有的证据。
     # (标签, 值, 颜色样式, 值是否可信 HTML)
     # ★ 标签一律 trusted=True：`GL.chip()` 是我们自己生成的 HTML。
-    # ★ 0.53.0（T5.2／设计 §4.4-3）：链检"没查成"改说告警句（见 `_chain_verdict`）。
-    #   有查成时原句**逐字不变**（上版两处单位修正都在那半句里，不许顺手改）。
-    if _chain_ok_state(ch):
-        _chain_value = ("%s（检查了 %d 个文件、%d 条记录，被改 %d）"
-                        % (R.chain_status_label(ch["status"]), ch["files"],
-                           ch["records"], ch["broken"]))
-    else:
-        _chain_value = _chain_verdict(ch)
+    # ★★ 0.53.4（创始人 2026-10-20「这些好像不属于日报，放在日报里合适吗？」）：
+    #   链检那行**搬出本块**，成为本页第二张小节卡（见 `_chain_card`）——
+    #   它要答三件事（结论／范围／没纳入比对），塞进这行只会变成
+    #   「一句话里三个数」的旧形状；而它答的问题（记录有没有被改过）
+    #   与本节其余各行（哨兵／监听地址／工具识别／钩子／边界）不是同一类。
+    #   减法留账：「一句话塞三个数」这个形状**不回来**，由 T-10 守。
     # ★ 0.53.0（T5.2／设计 §4.4-1、§14.6-2）：工具识别**最小版**（一行，不另开小节）。
     #   三样：判定方式（哪条线索）／近 7 天认得出几条／说不清占比超 5% 提醒。
     #   ★ 不做「旧记录分代」（v1.5 划到非目标：分代钻取）。
@@ -2408,7 +2680,7 @@ def _view_health(rep, token, items=None):
         #   ⇒ 一律走 `chain_status_label()` 的中文。
         # ★ 0.53.0（T5.2）：句子的**拼装**提到 `rows` 之前（见上）——因为"没查成"
         #   时它换成告警句，而告警句自带文件数，不再套那层括号。
-        (GL.chip("chain_check"), _chain_value, cls, False),
+        # ★★ 0.53.4：这一行已搬成独立小节卡 `_chain_card()`（本元组里不再有它）。
         # ★ 0.50.4（Q-16）：原正文「本页没查这台电脑的实际安装情况」与 `hook`
         #   词条的 exc「这一页没查你这台电脑的实际安装情况」**是同一句出现两次**
         #   ⇒ 正文改成讲**结论**（它装在哪个环节），否证交给词条（定义处只讲一次）。
@@ -2432,8 +2704,20 @@ def _view_health(rep, token, items=None):
     #   两条判据同时守住。
     #   ★ 次序由 `M.PRIORITY` 派生、词名由 `GL`／`M.state_short` 取 —— **不手写
     #     第二份次序**（六态次序漂移正是由这条纪律挡住的）。
-    #   ★ 只给缺落点的两态挂「？」：其余三态的落点在顶部药丸，不重复铺问号
-    #     （Q-11：一屏十几个「？」在安全语境里像"十几处有问题"）。
+    #   ★★ 0.53.3（创始人 2026-10-20 截图「五态只有两个态有问号」）：
+    #     上一版只给 Ls/L0 挂问号，理由是「其余三态的落点在顶部药丸」。
+    #     那个理由站不住：读者读的是**这一行**，不会为了问"失守是什么"
+    #     再跑到顶部去找一枚长得一样的「？」；顶栏那枚问号答的是"灯上这个
+    #     词叫什么"，与"这一档是什么意思"不是同一个问题。⇒ 五态全挂。
+    #     ★ Q-11（"一屏十几个「？」像十几处有问题"）的边界：那一屏十几个
+    #       指的是**散落各处**的问号；这里是**同一行枚举里各一枚**，形态
+    #       一致、数量等于枚举项数，读者读到的是"每一项都能查"，不是
+    #       "有五处问题"。刻意推翻 Q-11 的这条推论，记在此处。
+    #   ★★ 0.53.3：对外只说**五态**。六态是内部口径（五态＋研发态）—— 用户
+    #     机器上永远见不到研发态那一档，写六态等于让他去找一个不存在的位置
+    #     （创始人原话：「研发态只是内部用，不用告诉用户，用户是没有这个态
+    #     的」）。研发态**不是**灯的一档，`light.exc` 里的"不点灯、只挂徽标"
+    #     那句仍保留 —— 它说的正是"徽标≠灯的档位"，与此处不冲突。
     _order = sorted(("R0", "Ls", "L2", "L1", "L0"), key=lambda k: -M.PRIORITY[k])
     # ★★ 0.50.7（创始人截图二「失守后换行」＋截图三「缺粮（Ls）括号不一致」）：
     #   ① 断行确定性化：标签独占一行（显式 `<br>`），各态包原子
@@ -2448,15 +2732,29 @@ def _view_health(rep, token, items=None):
     #     后 summary 只显示词（单一真源，不手写第二份），码留在词条展开体
     #     首行（`chip()` 的 head 机制自动补 `<b>缺粮（Ls）</b>：）——
     #     P13 落点（`data-t`）不变。
-    _six = ("<div class=\"note sixline\">灯的六态由重到轻：<br>"
-            + " · ".join("<span class=\"sixit\">%s</span>" % (
-                GL.chip(k, text=M.state_short(k)) if k in ("Ls", "L0")
-                else M.state_short(k))
-                for k in _order)
-            + "</div>")
-    return ("<h2>%s · %s</h2><div class=\"rows\">%s</div>%s"
-            "<p class=\"note\">全绿不等于安全：也可能是检查压根没跑。</p>"
-            % (PAGE_TITLES["health"], _esc(rep.get("day") or ""), body, _six))
+    # ★★ 0.53.3：这一行自带**显式边界**（`id` 起、`<!-- lightorder:end -->`
+    #   止）。旧版判据的收尾锚是文字「`</div>` 后面跟一个 `<p class="note">`」
+    #   —— 那是把尺子绑在**文案**上：删掉下面那句尾注，尺子当场瞎掉。
+    #   锚在结构标记上，这一段里加什么减什么都不影响判据。
+    _lorder = ("<div class=\"note sixline\" id=\"lightorder\">灯的五态由重到轻：<br>"
+               + " · ".join("<span class=\"sixit\">%s</span>"
+                            % GL.chip(k, text=M.state_short(k)) for k in _order)
+               + "</div><!-- lightorder:end -->")
+    # ★★ 0.53.3（创始人 2026-10-20 截图末句）：删掉尾注
+    #   「全绿不等于安全：也可能是检查压根没跑。」三条理由：
+    #     ① **结构错位**：它挂在五态枚举下面，读者会当成第六档的说明；
+    #     ② **同一件事说第二遍**："检查没跑成"已有唯一告警句 —— 链读不到
+    #        时 `chain_check` 那行整行换成 `R.chain_unverified()` 的告警
+    #        （见 `_chain_value`），这里再说一遍没有新信息；
+    #     ③ **认领了不该认领的职责**：它把「安全」这个词引进页面，而监理
+    #        不承担安全、也实质上承担不了（创始人原话）。一句免责声明换来
+    #        一个它根本不该碰的词 —— 用户读完会问"那你到底管不管安全"，
+    #        这个问题原本不存在。
+    #   ★ 减法留账：删的是**这句话**，不是"没查成必须告警"这条规矩 ——
+    #     后者仍在 `_chain_value`，判据 J8 同时锁住"这句不许回来"。
+    return ("<h2>%s · %s</h2><div class=\"rows\">%s</div>%s%s"
+            % (PAGE_TITLES["health"], _esc(rep.get("day") or ""), body,
+               _chain_card(ch), _lorder))
 
 
 def _view_ledger(rep, token, items=None):
@@ -3065,6 +3363,39 @@ def _view_exam(token="", pick=None):
 PAGE_TITLES = {"inbox": "收件箱", "report": "日报", "health": "运行状态",
                "ledger": "账本", "health_exam": "体检"}
 
+#: ★ 2026-10-21（TAB 切换卡顿根治·方案 C，创始人拍板）：账本页 GET 的
+#:   **进程内节流**参数与状态缝。
+#:   为什么（只读轮实测 R3）：旧版每次打开账本页都同步跑 `record_day()`
+#:   ——14 天窗口逐日比对＋持锁追加，实测单次追加 6 个变更多天、每笔
+#:   0.4–1.0s；而它是**幂等**的（数字没变一行都不写）⇒ 重复跑的收益
+#:   是零、成本全付。实测账本页空闲 9.88s vs 运行状态 0.79s 的 9 秒差
+#:   大头就在这里。
+#:   ★ 语义不变（0.51.0 账准修复的承诺不破）：daemon `tick()` 照旧每轮
+#:     **直调** `record_day`（不经过本函数，守护进程一个字节都没动）；
+#:     这里只节流"用户打开账本页"这一路。首次打开必然触发一次
+#:     （`t=None`），GAP 内重复打开跳过；守护进程没跑的日子，第一次
+#:     打开仍然补记 —— 0.51.0 修复的核心场景不受影响。
+#:   ★ 状态缝可注入可复位（判据 Lesson：进程级可变状态必须能让量具
+#:     复位，否则同进程内前序检查的残留会让后一条判据假红/假绿）。
+_RECORD_DAY_MIN_GAP = 45.0
+_RECORD_DAY_STATE = {"t": None}
+
+
+def _maybe_record_day(items=None, root=None, now=None):
+    """账本页 GET 的记账入口：进程内 N 秒内只跑一次（方案 C）。
+
+    返回 `record_day` 的结果；被节流跳过 ⇒ None。`now` 可注入（判据
+    专用；生产不传，走 `time.monotonic()` —— 跨进程只在本进程内有效，
+    换进程（重启监理服务）后第一次打开必然重新触发）。
+    """
+    import inbox_daemon as _DM
+    t = time.monotonic() if now is None else now
+    last = _RECORD_DAY_STATE["t"]
+    if last is not None and (t - last) < _RECORD_DAY_MIN_GAP:
+        return None
+    _RECORD_DAY_STATE["t"] = t
+    return _DM.record_day(items=items, root=root)
+
 
 def render_page(view="inbox", filt=None, root=None, token="", items=None, rep=None,
                 posture=None, now=None, record_ledger=False, notice="", exam=None):
@@ -3078,14 +3409,25 @@ def render_page(view="inbox", filt=None, root=None, token="", items=None, rep=No
 
     ★★ 0.35.3：视图名默认改 `action`（要处理），并且**每个视图都不再默认"全部历史"**。
     """
-    items = S.load_items(root=root) if items is None else items
+    if items is None:
+        # ★★ 0.53.2（创始人 2026-10-20「账本有记录永远是 8 天，从来不会增长」）：
+        #   账本＝**历史全量**，收件箱／日报＝"最近"。旧版五个视图共用一句
+        #   `S.load_items(root=root)`，而它默认 `days=7` ⇒ 账本的「有记录多少天」
+        #   **恒等于窗口长度**（含今天恰好 8 天），读者看到的是取数参数不是数据。
+        #   实测本机：窗口 7 天 ⇒ 8 天；全量 ⇒ **39 天**（2026-09-10 → 10-20）。
+        #   ★ 只改账本这一个视图 —— 收件箱「看一眼」本就是近期口径，动它会把
+        #     一批既有计数判据一起改掉（那是另一个问题，不在本轮）。
+        items = (S.load_items_all(root=root) if view == "ledger"
+                 else S.load_items(root=root))
     # ★ 0.35.3：打开账本页时，用当前可读到的链记录刷新当日快照。
     #   旧版只有显式运行 `inbox daemon` 才写 ledger；正常打开 server 无人写，
     #   因而账本文件不存在、数字一直全零。写入委托给 daemon 唯一实现；只在
     #   用户打开账本页时采样，不让普通收件箱 GET 多做持久化。
     if record_ledger and view == "ledger":
-        import inbox_daemon as _DM
-        _DM.record_day(items=items, root=root)
+        # ★ 2026-10-21（方案 C）：改走节流入口 `_maybe_record_day` ——
+        #   每打开一次账本页就全量重跑 14 天窗口是白付（幂等：没变一行
+        #   不写）。daemon tick 的记账**不走这里**（它直调 record_day）。
+        _maybe_record_day(items=items, root=root)
     # ★ 非法/缺省筛选值 ⇒ 默认「要处理」（**不静默当成"全部"** —— 那会让用户以为
     #   自己看到的是筛选结果，其实是一整条历史）。
     if not filt or not M.known_filter(filt):
@@ -3113,7 +3455,16 @@ def render_page(view="inbox", filt=None, root=None, token="", items=None, rep=No
     ex = M.light_explain(p, items, now=now, granary=M.granary_now())
     title = PAGE_TITLES.get(view, "收件箱")
     if view in ("report", "health", "ledger"):
-        rep = (R.daily_report(root=root, items=items) if rep is None else rep)
+        # ★ 2026-10-21（TAB 切换卡顿根治·方案 A，创始人拍板）：旧版
+        #   `daily_report()` **函数体内又自算一次** `guard_posture`（入参经
+        #   核实与本函数 `posture_now()` 是同一目录、同一函数）⇒ report/
+        #   health/ledger 每页把同一件事实算两遍（满载实测 ~1.2s/页，另加
+        #   心跳链 15MB 双读）。现在把上面已现探的 `p` 注入进去：**一个事实
+        #   一个变量，页面从头到尾同一份态势**（0.53.0 T4 纪律的延伸）；
+        #   `daily_report` 的 `posture` 默认 None ⇒ 不自算时行为不变
+        #   （CLI 日报/邮件/判据零影响）。判据：TP-A1（0514 套件）。
+        rep = (R.daily_report(root=root, items=items, posture=p)
+               if rep is None else rep)
         if view == "report":
             body = _view_report(rep, token, items)
         elif view == "health":
@@ -3139,9 +3490,13 @@ def render_page(view="inbox", filt=None, root=None, token="", items=None, rep=No
                   extra_css=EXAM_CSS if view == "health_exam" else "")
             + _bar(items, token, posture=p, now=now, view=view, ex=ex)
             + _tabs(view, token)
+            # ★ 2026-10-21（方案 E）：切页细进度条的挂点（fixed 定位，
+            #   JS 给它加 .run 才动；无 JS 时 width 恒 0 不可见）。
+            + "<div class=\"tabprog\" id=\"tabprog\"></div>"
             + "<main>" + body + "</main>"
             + _FLIP_JS + _READ_JS + _LOGO_JS + _escape_js(token)
             + _collapse_js(token)
+            + _TAB_JS
             + "</body></html>")
 
 

@@ -124,6 +124,18 @@
      「关掉了」）、**还有就如实报失败**（调用方才能据此不往下当成功）。
      负控把轮询「删掉」还原成旧口径 ⇒ 必须红（证明这条判据测的是
      「等」，不是「函数存在」）。详见「B-17 族」段头。
+  ⑱ J6／J7／J8（**0.53.3，2026-10-20 创始人截图三件事**）：
+     ① 页面上写「灯的六态」但列的是五项 ⇒ 对外只说**五态**（六态＝五态＋
+        研发态，研发态内部用，用户机器上永远见不到那一档）。J6 只扫
+        **渲染结果的可见文本**（源码里的"六态"是内部口径与判据名，不上屏，
+        扫源码＝逼人删内部事实来讨好判据）。
+     ② 五态只有两态挂问号 ⇒ 五态各一枚。旧判据 J3 写死"应 2 枚：Ls/L0",
+        那是把**当时的缺陷钉成了判据** —— 谁也不会觉得少了。J3 改为五枚。
+     ③ 末句「全绿不等于安全：也可能是检查压根没跑」删除；J8 锁它不许回来
+        （减法留账）。另：J2 的边界从「`</div>` 后跟什么文案」改成显式
+        结构标记 —— 删那句尾注时旧尺子当场瞎掉，而产品没坏。
+     ★ 缺粮「暂未启用」（J7）做**双向断言**：`granary.state()=="off"` ⇒
+       必须写；非 off ⇒ **不许**写。只判"必须有"的话，粮账一开那句就成了假话。
 
 ★ 规格真源（U-17 的唯一依据，不许凭记忆）：
     `D:\\2026\\PSL\\Antinel品牌动效报警语法v1.2（2026-09-27）.md`
@@ -141,6 +153,7 @@
 from __future__ import annotations
 
 import hashlib
+import html as HT                      # 可见文本提取：实体还原（&amp; → &）
 import io
 import json
 import math
@@ -797,11 +810,15 @@ function runOne(c) {
   const handlers = {doc: {}, win: {}};
   const root = {clientWidth:c.w, clientHeight:c.h};
   const pos = {x:c.x, y:c.y};
-  const classes = new Set(['term']);
+  // ★ 0.53.4：桩参数化 —— 浮层体有两种（术语 `.tdef`／圈问号 `.qbody`），
+  //   同一把尺子必须能分别量，否则"说明框弹到天花板上"这类坐标病只能靠人眼。
+  const CLS = p.cls || 'term';
+  const BOXSEL = p.boxSel || '.tdef';
+  const classes = new Set([CLS]);
   const d = {
     open:true,
     classList:{contains:n=>classes.has(n), add:n=>classes.add(n), remove:n=>classes.delete(n)},
-    querySelector:s=>s==='summary' ? summary : (s==='.tdef' ? box : null)
+    querySelector:s=>s==='summary' ? summary : (s===BOXSEL ? box : null)
   };
   const summary = {getBoundingClientRect:()=>({left:pos.x, right:pos.x+14,
     top:pos.y, bottom:pos.y+14, width:14, height:14})};
@@ -814,7 +831,8 @@ function runOne(c) {
       top=pos.y+20;
     }
     return {left:left, top:top, width:width, height:height, vw:root.clientWidth,
-      vh:root.clientHeight, right:left+width, bottom:top+height};
+      vh:root.clientHeight, right:left+width, bottom:top+height,
+      ax:pos.x, ay:pos.y};
   }};
   const document={documentElement:root,
     addEventListener:(n,f)=>{handlers.doc[n]=f;},
@@ -836,7 +854,7 @@ console.log(JSON.stringify(p.cases.map(runOne)));
 """
 
 
-def _tooltip_bounds_probe(script, layout="fixed"):
+def _tooltip_bounds_probe(script, layout="fixed", cls="term", box_sel=".tdef"):
     """在 Node DOM 桩里真执行页面定位脚本，回读打开/缩放/滚动后的矩形。"""
     node = _node_path()
     if not node:
@@ -857,7 +875,8 @@ def _tooltip_bounds_probe(script, layout="fixed"):
         dict(w=360,h=220,x=170,y=175,bw=560,bh=700,
              rw=360,rh=220,rx=4,ry=4,sx=340,sy=205),
     ]
-    payload = json.dumps({"script":script, "layout":layout, "cases":cases})
+    payload = json.dumps({"script":script, "layout":layout, "cases":cases,
+                          "cls":cls, "boxSel":box_sel})
     try:
         p = subprocess.run([node, "-e", _TOOLTIP_BOUNDS_RUNNER, payload],
                            capture_output=True, timeout=20)
@@ -934,6 +953,245 @@ def n_w09h():
     if not any("case1/opened 横向越界" in x and x.startswith("case1/opened")
                for x in bad):
         return "负控方向不符：截图同形的中部锚点未复现左边越界：%r" % bad[:3]
+    return True
+
+
+def _overlay_anchor_failures(rows):
+    """浮层必须**贴着锚点**（这一条才抓得住「弹到天花板上」）。
+
+    ★ 为什么要单立一条：坐标尺（`_tooltip_bounds_failures`）只问"在不在视口
+      内"，而**写死 top:8px 的浮层正好在视口内**——它只是离锚点十万八千里。
+      0.36.1 的 `.term` 走过这条路，0.53.4 的 `.qbody` 又走了一遍（用户：
+      「说明框弹出到天花板上了」）。
+      判法：垂直间隙取"下方 6px"与"上方 6px"两个方向中**更接近**的那个，
+      允许 1.5px 误差；水平必须与锚点有重叠。浮层高到撑满大半个视口时
+      （≥60% 视口高）位置只能被夹住，此时豁免 —— 那种情形下"贴哪儿"已无意义。
+    """
+    errors = []
+    for ci, result in enumerate(rows or []):
+        for phase, r in result.items():
+            if r["height"] >= 0.6 * r["vh"]:
+                continue
+            a_bottom = r["ay"] + 14
+            gap_below = r["top"] - (a_bottom + 6)
+            gap_above = (r["ay"] - 6) - r["bottom"]
+            if min(abs(gap_below), abs(gap_above)) > 1.5:
+                errors.append("case%d/%s 没贴着锚点（锚点在 y=%g，浮层顶 %g、底 %g）"
+                              % (ci + 1, phase, r["ay"], r["top"], r["bottom"]))
+                continue
+            # 横向：浮层被夹到视口宽时"贴哪边"没得选，豁免；否则必须与锚点相接。
+            # （允许**相等**：视口很窄时浮层会被夹到左缘，右缘正好压住锚点。）
+            if r["width"] >= r["vw"] - 16:
+                continue
+            if not (r["left"] <= r["ax"] + 14 and r["right"] >= r["ax"]):
+                errors.append("case%d/%s 与锚点横向完全不重叠（锚点 x=%g，浮层 [%g,%g]）"
+                              % (ci + 1, phase, r["ax"], r["left"], r["right"]))
+    return errors
+
+
+_QINFO_CSS = (".qsum>.qbody,.qinfo>.qbody{position:fixed")
+
+
+@check("W-09i 圈问号说明框与术语浮层**同一段定位**：贴锚点、不出视口、有安全区")
+def c_w09i():
+    """创始人 2026-10-20 13:04：「点击 150 后边的问号时，说明框弹出到天花板上
+    了，位置不对」。
+
+    病根不是"坐标算错"，是**压根没人给它算**：`_FLIP_JS` 的 `fit()` 只认
+    `.tdef`，`.qbody` 停在 CSS 里写死的 `top:8px` —— 那不是定位，是默认值。
+    修法是把两种浮层体收进**一份**坐标实现；本判据就用**同一把尺子**量两次
+    （术语一次、圈问号一次），任何一边出视口或离开锚点都算红。
+    """
+    css = SV.CSS
+    m = re.search(r"\.qsum>\.qbody,\.qinfo>\.qbody\{([^}]*)\}", css)
+    if not m:
+        return "圈问号说明框没有专属浮层规则（`.qbody` 还挂在行内？）"
+    block = m.group(1)
+    if "position:fixed" not in block:
+        return "说明框不是视口坐标定位（行内容器会把它裁掉）"
+    if "max-width:min(560px,calc(100vw - 16px))" not in block:
+        return "说明框没有为视口两侧各留 8px 安全区"
+    if "max-height:calc(100vh - 16px)" not in block or "overflow:auto" not in block:
+        return "说明框超过视口高度时没有自身滚动兜底"
+    js = SV._FLIP_JS
+    if ".qbody" not in js:
+        return "定位脚本里根本没有 `.qbody` —— 说明框停在写死的默认坐标上"
+    # 同一把尺子量两类浮层：谁都不许越界，谁都不许离开锚点
+    for cls, sel, name in (("qsum", ".qbody", "圈问号说明框"),
+                           ("term", ".tdef", "术语浮层")):
+        rows, why = _tooltip_bounds_probe(js, cls=cls, box_sel=sel)
+        if why:
+            return why
+        bad = _tooltip_bounds_failures(rows)
+        if bad:
+            return "%s出视口：%s" % (name, "；".join(bad[:3]))
+        bad2 = _overlay_anchor_failures(rows)
+        if bad2:
+            return "%s没贴住锚点：%s" % (name, "；".join(bad2[:3]))
+    return True
+
+
+@check("N-W09i 负控：定位脚本漏掉 .qbody／撤掉高度兜底／把落点写死 ⇒ 各自判红")
+def n_w09i():
+    if c_w09i() is not True:
+        return "夹具不成立：现行实现就判红 —— 负控无分辨力"
+    # 面①：定位脚本回到"只认 .tdef"（0.53.4 之前的原样）= 说明框停在页顶
+    dead_js = SV._FLIP_JS.replace(" || d.querySelector('.qbody')", "")
+    if dead_js == SV._FLIP_JS:
+        return "夹具不成立：摘不到 boxOf 的第二形态（源码已变，需更新负控）"
+    with _Patch(SV, _FLIP_JS=dead_js):
+        why = c_w09i()
+    if why is True or why is None:
+        return "负控失效①：定位脚本漏掉 .qbody 仍判合格（那条腿没分辨力）"
+    if "没贴住锚点" not in (why or ""):
+        return "负控方向不符①：报的是 %r（应指向「没贴住锚点」）" % (why[:70],)
+    # 面②：撤掉高度兜底
+    dead_css = SV.CSS.replace(
+        "max-height:calc(100vh - 16px)", "max-height:900px")
+    if dead_css == SV.CSS:
+        return "夹具不成立：摘不到高度兜底（CSS 已变，需更新负控）"
+    with _Patch(SV, CSS=dead_css):
+        why2 = c_w09i()
+    if why2 is True or why2 is None:
+        return "负控失效②：撤掉高度兜底仍判合格"
+    if "自身滚动" not in (why2 or ""):
+        return "负控方向不符②：报的是 %r（应指向「自身滚动」）" % (why2[:70],)
+    # 面③：把落点写死（浮层永远贴顶）—— 与用户看到的形态同形
+    dead3 = SV._FLIP_JS.replace("var below = a.bottom + 6;", "var below = 8;")
+    if dead3 == SV._FLIP_JS:
+        return "夹具不成立：摘不到下方落点计算（脚本已变，需更新负控）"
+    with _Patch(SV, _FLIP_JS=dead3):
+        why3 = c_w09i()
+    if why3 is True or why3 is None:
+        return "负控失效③：落点写死仍判合格"
+    if "没贴住锚点" not in (why3 or ""):
+        return "负控方向不符③：报的是 %r（应指向「没贴住锚点」）" % (why3[:70],)
+    return True
+
+
+#: 「同屏只留一个浮层」的行为桩：三类浮层 ＋ 两个非浮层（收件箱展开行）。
+#: 判的是**行为**（谁被关掉、谁被留下），不是脚本里有没有某行代码。
+_OVERLAY_EXCL_RUNNER = r"""
+const p = JSON.parse(process.argv[1]);
+const handlers = {};
+function mk(cls, open){
+  const el = {open: !!open, cls: cls, style:{}, dataset:{},
+    classList:{contains:n=>n===cls, add:()=>{}, remove:()=>{}},
+    querySelector:()=>null};
+  return el;
+}
+const A = mk('term', true);      // 先前开着的术语词条
+const B = mk('qsum', false);     // 本次数据说明
+const C = mk('qinfo', false);    // 这类东西说明
+const D = mk('item', true);      // 收件箱展开行（不是浮层）
+const E = mk('item', false);     // 再开一个非浮层
+const ALL = [A,B,C,D,E];
+const document = {documentElement:{clientWidth:800,clientHeight:600},
+  addEventListener:(n,f)=>{handlers[n]=f;},
+  querySelectorAll:(sel)=>{
+    const names=[]; const re=/details\.(\w+)\[open\]/g; let m;
+    while((m=re.exec(sel))) names.push(m[1]);
+    return ALL.filter(e=>e.open && names.indexOf(e.cls)>=0);
+  }};
+const window = {addEventListener:()=>{}};
+new Function('document','window',p.script)(document,window);
+function state(){ return {a:A.open,b:B.open,c:C.open,d:D.open,e:E.open}; }
+const out = {};
+B.open = true; handlers.toggle({target:B});
+out.after_qsum = state();
+C.open = true; handlers.toggle({target:C});
+out.after_qinfo = state();
+E.open = true; handlers.toggle({target:E});
+out.after_item = state();
+console.log(JSON.stringify(out));
+"""
+
+
+def _overlay_excl_probe(script):
+    node = _node_path()
+    if not node:
+        raise Skip("本机没有可执行 node；浮层互斥判据 SKIP，不报 PASS")
+    import subprocess
+    m = re.search(r"<script>\s*(.*?)\s*</script>", script, re.S)
+    if m:
+        script = m.group(1)
+    try:
+        p = subprocess.run([node, "-e", _OVERLAY_EXCL_RUNNER,
+                            json.dumps({"script": script})],
+                           capture_output=True, timeout=20)
+    except Exception as e:                                               # noqa: BLE001
+        return None, "Node 执行互斥脚本失败：%s: %s" % (type(e).__name__, e)
+    if p.returncode:
+        return None, "Node 互斥夹具退出 %d：%s" % (
+            p.returncode, p.stderr.decode("utf-8", "replace")[-400:])
+    try:
+        return json.loads(p.stdout.decode("utf-8")), ""
+    except Exception as e:                                               # noqa: BLE001
+        return None, "Node 互斥夹具没有 JSON 回读：%s: %s" % (type(e).__name__, e)
+
+
+@check("W-09j 同屏只留一个浮层：开新的关旧的，跨三类都管，且不波及收件箱展开行")
+def c_w09j():
+    """创始人 2026-10-20 13:04：「之前的问号说明框不会关掉」。
+
+    病根：术语词条靠 `name="term"` 原生手风琴互斥，而 `.qsum`／`.qinfo` **刻意
+    不进那个组**（它们不是词条）⇒ 三类之间没有任何机制，叠多少都开着。
+    修法不是给它们加 name（那会废掉"不是词条"这条区分），而是在**同一段脚本**
+    里做一件事：开任何一个浮层，关掉其它所有浮层。
+    """
+    js = SV._FLIP_JS
+    st, why = _overlay_excl_probe(js)
+    if why:
+        return why
+    a = st["after_qsum"]
+    if a["a"]:
+        return "开了「本次数据」问号，先前那个术语窗没关 —— 叠窗病回来了"
+    if not a["b"]:
+        return "开着的那个自己也关了（把整组清空 = 点了没反应）"
+    if not a["d"]:
+        return "关浮层把关着的收件箱展开行也收了（波及非浮层）"
+    b = st["after_qinfo"]
+    if b["b"]:
+        return "开了「这类东西」问号，上一个「本次数据」问号没关（跨类型不互斥）"
+    if not b["c"]:
+        return "后开的自己没留下"
+    c = st["after_item"]
+    if not c["c"]:
+        return "开一个收件箱行，把浮层关掉了（非浮层不该触发互斥）"
+    if not c["e"]:
+        return "非浮层自己也留不住"
+    return True
+
+
+@check("N-W09j 负控：拆掉互斥／把范围放大到所有 details ⇒ W-09j 必须各自判红")
+def n_w09j():
+    if c_w09j() is not True:
+        return "夹具不成立：现行实现就判红 —— 负控无分辨力"
+    # 面①：拆掉"关掉其它"那一行（页面回到只定位、不互斥）
+    dead = SV._FLIP_JS.replace(
+        "    overlays().forEach(function(o){ if (o !== d) o.open = false; });\n", "")
+    if dead == SV._FLIP_JS:
+        return "夹具不成立：摘不到互斥那行（脚本已变，需更新负控）"
+    with _Patch(SV, _FLIP_JS=dead):
+        why = c_w09j()
+    if why is True or why is None:
+        return "负控失效①：拆掉互斥仍判合格（叠窗那条腿没分辨力）"
+    if "叠窗" not in (why or ""):
+        return "负控方向不符①：报的是 %r" % (why[:60],)
+    # 面②：把范围放大到所有 details（收件箱展开行也会关掉浮层）
+    guard = ("    var isOverlay = d.classList.contains('term') ||\n"
+             "                    d.classList.contains('qsum') ||\n"
+             "                    d.classList.contains('qinfo');\n"
+             "    if (!isOverlay) return;\n")
+    dead2 = SV._FLIP_JS.replace(guard, "    if (!d.classList) return;\n")
+    if dead2 == SV._FLIP_JS:
+        return "夹具不成立：摘不到范围判定（脚本已变，需更新负控）"
+    with _Patch(SV, _FLIP_JS=dead2):
+        why2 = c_w09j()
+    if why2 is True or why2 is None:
+        return "负控失效②：范围放大到所有 details 仍判合格（波及那条腿没分辨力）"
+    if "非浮层" not in (why2 or ""):
+        return "负控方向不符②：报的是 %r" % (why2[:60],)
     return True
 
 
@@ -2519,6 +2777,107 @@ def c_b08():
         return "配置关掉了还弹 —— 配置闸失效"
     if "配置" not in (r3.get("why") or ""):
         return "配置闸原因没说清：%r" % r3.get("why")
+    return True
+
+
+# ═══ B-17 · 关旧窗要「确认没了」，不是「关闭指令发出去了」═══
+#: 0.53.2（创始人 2026-10-20：「陈旧版冒泡在新版冒泡出现几秒后死灰复燃」）。
+#: 病根不是"没关"，是**把投递当成结果**：`WM_CLOSE` 是异步投递，宿主从收到到
+#: 销毁有真实延迟（本机 ≈0.5s）；旧实现把「投递成功数」直接当「关掉的数」返回，
+#: 调用方立刻开新窗 ⇒ 屏幕上新旧并存、旧窗临死前重绘一次 ⇒ 看起来"又回来了"。
+#: 四条腿（每条都对着一个可观察的错法，不是对着实现抄）：
+#:   ① 一个窗都没有 ⇒ 早退、**一次都不投递**、人话说「没有开着的」；
+#:   ② 真收掉了 ⇒ 报「关掉了 N 枚」，且 finder **被再问过**（复核存在）；
+#:   ③ 等不到 ⇒ **不许出现「关掉了」**，必须报「仍有 N 枚没退」，N＝剩余数；
+#:   ④ 等待有上限，且上限按注入的 `settle_sec` 走（不许写死 2 秒）。
+#: ★ 腿③为什么拿「关掉了」这三个字当禁令：这正是用户看到的假象 ——
+#:   界面说关掉了，屏幕上还在。人话必须与屏幕一致，这条没有例外。
+def _b17_problem():
+    """返回 None＝四条腿都过；否则第一条不成立的原因（人读）。"""
+    hs = [101, 102]
+    fired = []
+
+    # ---- 腿①：没有窗 ⇒ 早退、不投递 ----
+    def _none(**k):
+        return []
+    n0, txt0 = WIN.close_bubble_windows(
+        finder=_none, closer=lambda h: fired.append(h) or True)
+    if fired:
+        return "没有开着的窗却投递了关闭指令（投递 %d 次）" % len(fired)
+    if n0 != 0:
+        return "没有开着的窗却报了 %r 枚关掉" % (n0,)
+    if "没有开着的" not in (txt0 or ""):
+        return "没有开着的窗，人话没说清：%r" % (txt0,)
+
+    # ---- 腿②：收掉了 ⇒ 报数正确，且回头复核过 ----
+    seen = {"n": 0}
+
+    def _settles(**k):
+        seen["n"] += 1
+        return list(hs) if seen["n"] == 1 else []
+    n1, txt1 = WIN.close_bubble_windows(finder=_settles, closer=lambda h: True)
+    if n1 != len(hs):
+        return "%d 枚窗只报了 %r 枚关掉" % (len(hs), n1)
+    if seen["n"] < 2:
+        return ("投递完没有回头再看一眼（finder 只被问 %d 次）—— "
+                "「消息发出去了」被当成了「窗没了」" % seen["n"])
+    if "关掉了" not in (txt1 or ""):
+        return "收掉了却没说「关掉了」：%r" % (txt1,)
+
+    # ---- 腿③④：永远等不到 ⇒ 如实报剩余 ＋ 有上限 ----
+    def _stays(**k):
+        return list(hs)
+    t0 = time.time()
+    n2, txt2 = WIN.close_bubble_windows(finder=_stays, closer=lambda h: True,
+                                        settle_sec=0.2)
+    el = time.time() - t0
+    if n2 != len(hs):
+        return "仍活着时报的投递数不对：%r（应 %d）" % (n2, len(hs))
+    if "关掉了" in (txt2 or ""):
+        return ("窗还在，人话却说「关掉了」—— 正是「旧窗死灰复燃」的假象来源"
+                "（%r）" % (txt2,))
+    if ("仍有 %d 枚" % len(hs)) not in (txt2 or ""):
+        return "等不到时没说清还剩几枚（应含「仍有 %d 枚」）：%r" % (len(hs), txt2)
+    if el > 0.9:
+        return ("settle_sec=0.2 却等了 %.2fs —— 上限没按注入值走（写死了？）" % el)
+    return None
+
+
+@check("B-17 关窗要确认没了：空不投递／收了要复核／等不到如实报剩余／上限按注入值")
+def c_b17():
+    return _b17_problem()
+
+
+@check("N-B17 负控：不复核／删空集早退／settle_sec 写死 ⇒ B-17 必须各自判红")
+def n_b17():
+    if _b17_problem() is not None:
+        return "夹具不成立：现行实现就判红 —— 负控无分辨力"
+    base = inspect.getsource(WIN.close_bubble_windows)
+    faces = (
+        # 面①：投递完不回头查（旧实现的原样）—— 复核那条腿先看见（finder 只问一次）
+        ("left = _left_now()", "left = []",
+         "不复核就报关掉了", "回头再看一眼"),
+        # 面②：空集不早退 —— 会报「关掉了 0 枚」，等于说没窗也动了手
+        ('    if not hs:\n        return 0, "没有开着的紧急提醒窗。"\n', "",
+         "删掉空集早退", "没有开着的"),
+        # 面③：不管等没等到都走成功分支 —— 屏幕上还在、人话说关掉了
+        ("    if left:\n        return n, (", "    if False:\n        return n, (",
+         "等不到也报关掉了", "关掉了"),
+        # 面④：上限写死 2 秒（注入的 settle_sec 被忽略）
+        ("float(settle_sec)", "2.0", "settle_sec 被写死", "settle_sec"),
+    )
+    for old, new, name, want in faces:
+        mut = base.replace(old, new, 1)
+        if mut == base:
+            return "夹具不成立：锚点未命中（源码已变，需更新负控）—— %s" % name
+        ns = dict(WIN.__dict__)
+        exec(compile(mut, "<n-b17:%s>" % name, "exec"), ns)       # noqa: S102
+        with _Patch(WIN, close_bubble_windows=ns["close_bubble_windows"]):
+            why = _b17_problem()
+        if why is None:
+            return "负控失效：%s 仍判合格（那条腿没分辨力）" % name
+        if want not in why:
+            return "负控方向不符：%s 报的是 %r（应指向 %r）" % (name, why[:60], want)
     return True
 
 
@@ -4608,7 +4967,7 @@ def _b17_desk():
 
 
 @check("B-17a 关窗确认消失：投递后 50ms 步长轮询到枚举里真的没有它才说『关掉了』")
-def c_b17():
+def c_b17a():
     import inbox_window as WIN
     # ① 第一拍就已消失 ⇒ 说"关掉了 N 枚（X.Xs 内确认已消失）"，且确实轮询过
     desk, finder, closer = _b17_desk()
@@ -4672,8 +5031,8 @@ def c_b17():
     return True
 
 
-@check("N-B17 负控：把轮询删掉、还原成「投递数＝关掉的数」⇒ B-17 必须红")
-def n_b17():
+@check("N-B17a 负控：把轮询删掉、还原成「投递数＝关掉的数」⇒ B-17 必须红")
+def n_b17a():
     import inspect as _inspect
     import inbox_window as WIN
     src = _inspect.getsource(WIN.close_bubble_windows)
@@ -5585,32 +5944,60 @@ def n_j1():
 
 
 # ═══════════════════════════════ J2 枚举断行确定性 ════════════════════════════
-#: 六态行的结构锚（正判据与负控**共用同一把尺子**）。
-_SIX_RE = re.compile(r'灯的六态由重到轻：<br>(.*?)</div>\s*<p class="note">',
-                     re.S)
+#: ★★ 0.53.3：边界改成**显式标记**。旧边界是「`</div>` 后面跟一个
+#:   `<p class="note">`」—— 那是把尺子绑在**文案**上：本批删掉那句尾注
+#:   「全绿不等于安全…」，旧尺子当场失锚（判红），而产品其实没坏。
+#:   **判据不许锚在会改的文案上** —— 本仓"改文案顺手把尺子弄瞎"的标准形状。
+#:   现在起止都用结构标记（`id` 与 HTML 注释），这一段里加减文案都不影响。
+_LO_BEGIN = 'id="lightorder"'
+_LO_END = "<!-- lightorder:end -->"
+#: 标签独占一行：起标记之后先是纯文本标签，紧跟一个显式 `<br>`。
+_LO_HEAD_RE = re.compile(r'^id="lightorder">([^<]+)<br>', re.S)
 
 
-def _six_ok(html):
-    """纯判据：六态行结构确定（标签独占一行＋5 枚 nowrap span＋4 分隔符）。
-    返回 True 或说明串。★ 抽成吃 html 的纯函数 ⇒ 负控能把变异 html
-    喂进**同一个实现**（而不是另写一套条件冒充负控）。"""
-    m = _SIX_RE.search(html)
-    if not m:
-        return ("六态行不是「标签＋显式 <br>」形状 —— 断点又交给浏览器自由决定"
+def _light_order_body(html):
+    """取五态行的**区段**（两锚之间）。返回 `(body, None)` 或 `(None, 说明串)`。
+
+    ★ 抽成吃 html 的纯函数 ⇒ 负控能把变异 html 喂进**同一个实现**
+      （而不是另写一套条件冒充负控）。
+    """
+    i = html.find(_LO_BEGIN)
+    if i < 0:
+        return None, ("五态行没有 %s 标记 —— 判据失锚（不许再拿「后面跟着什么"
+                      "文案」当边界）" % _LO_BEGIN)
+    j = html.find(_LO_END, i)
+    if j < 0:
+        return None, ("五态行缺结束标记 %s —— 边界被拆了；本行之后新增的内容"
+                      "请放在标记**之外**" % _LO_END)
+    return html[i:j], None
+
+
+def _light_order_ok(html):
+    """纯判据：五态行结构确定（标签独占一行＋5 枚 nowrap span＋4 个分隔符）。
+
+    返回 True 或说明串。
+    ★ 分隔符只数 `<span…>…</span> · <span class="sixit">` 这一种接缝：
+      芯片内部（L2 的规则全表）自己也可能出现「 · 」，按裸串 count 会数歪。
+    """
+    body, why = _light_order_body(html)
+    if body is None:
+        return why
+    if not _LO_HEAD_RE.match(body):
+        return ("五态行不是「标签＋显式 <br>」形状 —— 断点又交给浏览器自由决定"
                 "（#2 复发）")
-    body = m.group(1)
-    spans = re.findall(r'<span class="sixit">.*?</span>', body, re.S)
-    if len(spans) != 5:
-        return "六态行原子 span 是 %d 枚（应 5）—— 有态没被包住，会被切断" % len(spans)
-    if body.count(" · ") != 4:
-        return "六态行分隔符「 · 」是 %d 个（应 4）—— 枚举散了" % body.count(" · ")
+    n_span = len(re.findall(r'<span class="sixit">', body))
+    if n_span != 5:
+        return "五态行原子 span 是 %d 枚（应 5）—— 有态没被包住，会被切断" % n_span
+    seps = len(re.findall(r'</span> · <span class="sixit">', body))
+    if seps != 4:
+        return "五态行 span 之间的「 · 」是 %d 个（应 4）—— 枚举散了" % seps
     if ".sixit{white-space:nowrap}" not in PC.chrome("<style>" + SV.CSS
                                                     + "</style>"):
         return "CSS 里没有 .sixit{white-space:nowrap} —— span 是空壳，态名照样被切"
     return True
 
 
-@check("J2 ★ 六态行断行确定：标签独占一行＋各态包原子 span")
+@check("J2 ★ 五态行断行确定：标签独占一行＋各态包原子 span")
 def j2():
     """★★ #2 的尺子（2026-10-16 创始人截图二「失守后换行」）：
 
@@ -5626,87 +6013,115 @@ def j2():
     ★ 只锁**结构确定性**，不锁"折成几行好看"（那是人为判断，已在 L2
       触发层清单留记并申报盲区 —— 见文件头第 5 条残余说明）。
     """
-    r = _six_ok(_health())
+    r = _light_order_ok(_health())
     if r is not True:
         return r
     _note("标签独占一行＋5 枚 nowrap span＋4 个分隔符")
 
 
-@check("N-J2 负控：六态行退回单行 <p> 且剥掉 span ⇒ 同一条 J2 判据必须判红")
+@check("N-J2 负控：退回单行 <p>／剥 span／拆掉边界标记 ⇒ 同一条 J2 必须判红")
 def n_j2():
-    """反向对照（真跑正判据 `_six_ok`，非另写条件）：把 J2 锁的结构逐个
-    拆掉（退回单行 <p> ＋剥 span），喂进**同一个 `_six_ok`** 必须判假。"""
+    """反向对照（真跑正判据 `_light_order_ok`，非另写条件）：把 J2 锁的结构
+    逐个拆掉，喂进**同一个 `_light_order_ok`** 必须判假。三个面。"""
     h = _health()
-    if _six_ok(h) is not True:
+    if _light_order_ok(h) is not True:
         return "夹具不成立：现行渲染就判红 —— 负控无分辨力"
-    dead = h.replace('<div class="note sixline">灯的六态由重到轻：<br>',
-                     '<p class="note">灯的六态由重到轻：')
+    # ① 退回单行 <p> ＋ 剥掉 span（#2 复发形状）
+    dead = h.replace(
+        '<div class="note sixline" id="lightorder">灯的五态由重到轻：<br>',
+        '<p class="note">灯的五态由重到轻：')
+    dead = dead.replace(_LO_END, "")
     dead = re.sub(r'<span class="sixit">(.*?)</span>', r"\1", dead, flags=re.S)
-    r = _six_ok(dead)
-    if r is True:
+    if _light_order_ok(dead) is True:
         return "负控失效：退回单行 <p>＋剥 span 后 J2 仍判绿（尺子没分辨力）"
+    # ② 只砍掉结束标记 ⇒ 边界没了也必须红（否则"边界"那条断言是装饰）
+    if _light_order_ok(h.replace(_LO_END, "")) is True:
+        return "负控失效：拆掉结束标记后 J2 仍判绿 —— 边界断言没有分辨力"
+    # ③ 只砍掉起标记 id ⇒ 同样必须红（面②只证明了一端）
+    if _light_order_ok(h.replace(' id="lightorder"', "")) is True:
+        return "负控失效：剥掉起标记后 J2 仍判绿 —— 边界断言没有分辨力"
     return True
 
 
 # ═════════════════════════════ J3 同屏括号形态一致 ══════════════════════════
-def _six_summaries_ok(html):
-    """纯判据：六态行两只芯片的 summary 都不带码。返回 True 或说明串。"""
-    m = _SIX_RE.search(html)
-    if not m:
-        return "找不到六态行（J2 的前置结构不在）—— 拒绝在错误形状上判括号"
-    summaries = re.findall(r"<summary>(.*?)</summary>", m.group(1), re.S)
-    if len(summaries) != 2:
-        return ("六态行可点开芯片是 %d 枚（应 2：Ls/L0）—— 落点变了，"
-                "J3 的比对面要重新认" % len(summaries))
-    bad = [s for s in summaries if "（Ls）" in s or "（L0）" in s]
+def _light_order_summaries_ok(html):
+    """纯判据：五态行**五枚**芯片的 summary 都不带码。返回 True 或说明串。
+
+    ★★ 0.53.3：枚数从 2 改成 5。旧断言「应 2：Ls/L0」是**上一版实现的化石**
+      —— 它把"只有两态挂问号"这个当时的**缺陷**钉成了判据，于是后来谁也
+      不会觉得少。创始人 2026-10-20 截图「五态目前只有两个态有问号」正是
+      这条化石养出来的。⇒ 枚数由五态自己决定，不许再写死"哪几态有"。
+    """
+    body, why = _light_order_body(html)
+    if body is None:
+        return why
+    summ = re.findall(r'<span class="sixit"><details\b[^>]*>'
+                      r'<summary>(.*?)</summary>', body, re.S)
+    if len(summ) != 5:
+        return ("五态行可点开的芯片是 %d 枚（应 5：五态各一枚）—— 少一枚就是"
+                "有一档问不到（创始人 2026-10-20：只有两个态有问号）"
+                % len(summ))
+    bad = [s for s in summ if re.search(r"[（(][A-Za-z][A-Za-z0-9]*[)）]", s)]
     if bad:
-        return ("六态行 summary 仍带码：%r —— 与裸词三态同屏两种写法（#3 复发）"
+        return ("五态行 summary 仍带码：%r —— 与裸词形态同屏两种写法（#3 复发）"
                 % bad)
     return True
 
 
-@check("J3 ★ 六态行 summary 无可见码（同屏括号形态一致）")
+@check("J3 ★ 五态行五枚芯片都可点开，且 summary 无可见码（同屏括号一致）")
 def j3():
     """★★ #3 的尺子（2026-10-16 创始人截图三「缺粮（Ls）／值守中（L0）
     与失守／拦截／注意 括号不一致」）：
 
-    六态行里五态并列，其中三态是裸词、两态带码 —— 同屏两种写法。
+    五态行里五态并列，原来三态是裸词、两态带码 —— 同屏两种写法。
     `GL.chip()` 默认取 `TERMS[k]["w"]`＝`_wl()` 的「词（码）」形态 ⇒
-    落点改造时**忘了传 `text=`**，于是默认形态漏进六态行。
+    落点改造时**忘了传 `text=`**，于是默认形态漏进这一行。
 
     ★ 断言打在 summary 层（码只能留在**展开体首行** —— 那是词条定义
       的一部分，P13 的落点也在）；不锁"码彻底消失"（那会与词条定义冲突）。
-    ★ 两态都要查：只查 Ls 会漏 L0（同族）。
+    ★★ 0.53.3：五态都查。旧版只查 Ls/L0（当时只有两枚芯片）⇒ 补上另外
+      三枚后，旧版判据会**天然全绿**（它根本不看那三枚）。
     """
-    r = _six_summaries_ok(_health())
+    r = _light_order_summaries_ok(_health())
     if r is not True:
         return r
     # 码必须仍在展开体首行（不许用"把码删掉"来假过）
-    for k in ("Ls", "L0"):
+    for k in ("R0", "Ls", "L2", "L1", "L0"):
         chip = GL.chip(k, text=M.state_short(k))
         if "<b>%s（%s）</b>：" % (M.state_short(k), k) not in chip:
             return "%s 词条展开体首行丢了本名带码（用删码假过 J3）" % k
-    _note("summary 无码；码仍在词条展开体首行")
+    _note("五枚 summary 无码；码仍在词条展开体首行")
 
 
-@check("N-J3 负控：把带码 summary 注入六态行 ⇒ 同一条 J3 判据必须判红")
+@check("N-J3 负控：注入带码 summary／撤掉一枚芯片 ⇒ 同一条 J3 必须判红")
 def n_j3():
-    """反向对照（真跑正判据 `_six_summaries_ok`）：默认 `GL.chip("Ls")`
-    就是带码形态；把它注回六态行，**同一个 `_six_summaries_ok`** 必须判假。
+    """反向对照（真跑正判据 `_light_order_summaries_ok`）。**两个面**：
+
+    ① 默认 `GL.chip("Ls")`（带码形态）注回五态行 ⇒ 必须判假；
+    ② 把其中一枚换回裸词（不可点）⇒ 枚数变 4 ⇒ 必须判假。
+
+    ★ 面② 专门守"五态各一枚"：只有它会抓到"又把某一档的问号撤掉了"。
+      少了这个面，J3 就退化成"只要没码就绿"，问号撤掉它一声不吭。
     """
-    if _six_summaries_ok(_health()) is not True:
+    h = _health()
+    if _light_order_summaries_ok(h) is not True:
         return "夹具不成立：现行渲染就判红 —— 负控无分辨力"
     # 默认 chip 的 summary 确实带码（负控前提成立）
     summary = re.search(r"<summary>(.*?)</summary>", GL.chip("Ls"), re.S)
     if not summary or "（Ls）" not in summary.group(1):
         return "夹具不成立：chip 默认形态不带码 —— 负控无分辨力"
-    h = _health()
     dead = h.replace("<summary>缺粮</summary>", "<summary>缺粮（Ls）</summary>")
     if "（Ls）" not in dead:
-        return "夹具不成立：六态行里摘不到「缺粮」summary（结构已变）"
-    r = _six_summaries_ok(dead)
-    if r is True:
+        return "夹具不成立：五态行里摘不到「缺粮」summary（结构已变）"
+    if _light_order_summaries_ok(dead) is True:
         return "负控失效：注入带码 summary 后 J3 仍判绿（尺子没分辨力）"
+    # ② 撤掉 R0 那枚（退回裸词）⇒ 枚数 4 ⇒ 必须红
+    dead2 = re.sub(r'<span class="sixit"><details\b[^>]*data-t="R0".*?</details>'
+                   r'</span>', '<span class="sixit">失守</span>', h, flags=re.S)
+    if dead2 == h:
+        return "夹具不成立：摘不到 R0 那枚芯片（结构已变）"
+    if _light_order_summaries_ok(dead2) is True:
+        return "负控失效：撤掉 R0 的问号后 J3 仍判绿 —— 「五态各一枚」是装饰"
     return True
 
 
@@ -5823,6 +6238,202 @@ def j5():
         if r is not True:
             return "%s 在现行产品上判红（尺子恒红＝噪音）：%s" % (n.strip(), r)
     _note("四条正判据在现行产品上均绿；四条真源都在位")
+
+
+# ══════ J6／J7／J8：对外五态 · 缺粮暂未启用 · 删掉的尾注不许回来 ════════════════
+#: ★★ 0.53.3（创始人 2026-10-20 截图三件事）：
+#:   · 写了六态、实际列的是五个 ⇒ 对外只说五态（研发态内部用，用户没有这一档）；
+#:   · 五态只有两态有问号 ⇒ 补另外三个；
+#:   · 末句「全绿不等于安全」多此一举，且把「安全」这个词引进来。
+#:   三条各配一条判据＋负控，避免"只改字面、下版又漂回去"。
+
+
+def _visible_text(html):
+    """把渲染结果压成**用户读到的字**（去注释／script／style／标签／实体）。
+
+    ★ 为什么要去 HTML 注释：注释不上屏。若把它算进去，`<!-- lightorder:end -->`
+      这类标记会被当文案，判据就开始管它不该管的东西。
+    """
+    s = re.sub(r"<!--.*?-->", "", html, flags=re.S)
+    s = re.sub(r"<script\b.*?</script>", "", s, flags=re.S)
+    s = re.sub(r"<style\b.*?</style>", "", s, flags=re.S)
+    s = re.sub(r"<[^>]+>", " ", s)
+    return re.sub(r"\s+", " ", HT.unescape(s))
+
+
+def _around(s, word, n=12):
+    """取命中词前后各 n 字（报错时要能看见**读者看到的那一句**）。"""
+    i = s.find(word)
+    if i < 0:
+        return ""
+    return s[max(0, i - n):i + len(word) + n]
+
+
+def _views_html(prefix):
+    """四视图渲染结果（与 J1 同款夹具）。返回 generator(view, html)。"""
+    hub = tempfile.mkdtemp(prefix=prefix)
+    for view, filt in (("inbox", "action"), ("report", None),
+                       ("health", None), ("ledger", None)):
+        yield view, SV.render_page(view=view, filt=filt, root=hub, token="T")
+
+
+def _five_not_six_problem(html):
+    """纯判据：可见文本里不许出现「六态」。返回说明串或 None（None = 过）。
+
+    ★ 为什么扫**渲染结果的可见文本**而不是源码：源码里「六态」到处都是 ——
+      判据名（`ci/inbox_guards_0372.py` 的"六态封闭"）、产品注释、内部口径。
+      那些**不上屏**。扫源码会逼人把内部口径也改成五态 —— 那是把内部事实
+      删掉来讨好一条判据（本仓最忌的形状）。
+    ⇒ 只守**用户读到的字**；内部口径继续叫六态，两不相扰。
+    """
+    txt = _visible_text(html)
+    if "六态" in txt:
+        return ("可见文本里出现了「六态」（…%s…）—— 对外只说五态：六态是"
+                "**内部口径**（五态＋研发态），用户机器上永远见不到研发态那一档"
+                "（创始人原话「研发态只是内部用，不用告诉用户」），写六态等于"
+                "让他去找一个不存在的位置" % _around(txt, "六态"))
+    return None
+
+
+@check("J6 ★ 对外只说五态：四个页面的可见文本里不许出现「六态」")
+def j6():
+    bad = []
+    for view, h in _views_html("g0514_j6_"):
+        why = _five_not_six_problem(h)
+        if why is not None:
+            bad.append("%s 页｜%s" % (view, why))
+    if bad:
+        return "；".join(bad)
+    _note("四视图可见文本均无「六态」")
+
+
+@check("N-J6 负控：把五态行的「五」改回「六」 ⇒ 同一条 J6 判据必须判红")
+def n_j6():
+    """反向对照（真跑同一把尺子 `_five_not_six_problem`）。
+
+    ★ 只改**渲染结果里的一个字**（不是改产品文件）：负控证明的是"尺子会红"，
+      不是"产品现在错了"。喂变异 html 进同一个实现，与 J2/J3 同一手法。
+    """
+    for view, h in _views_html("g0514_nj6_"):
+        if _five_not_six_problem(h) is not None:
+            return "夹具不成立：%s 页本来就有「六态」⇒ 负控无分辨力" % view
+        if view == "health":
+            if "灯的五态由重到轻" not in h:
+                return "负控夹具不成立：摘不到五态行（结构已变）"
+            dead = h.replace("灯的五态由重到轻", "灯的六态由重到轻")
+            if _five_not_six_problem(dead) is None:
+                return "负控失效：改成「六态」后 J6 仍判绿（尺子没分辨力）"
+    return True
+
+
+def _ls_enabled_problem(root=None):
+    """纯判据：缺粮词条的「暂未启用」必须与 `granary` 的**真实状态**同步。
+
+    ★★ 为什么不能只判"词条里必须有这四个字"：粮账一旦真开（`granary.state()`
+      不再是 `off`），那句话当场变成**假话** —— 而它当初正是因为真才写上去的
+      （实测：`has_ledger()` ＝ False，`state()` ＝ `off`）。
+      ⇒ 双向断言（本仓"一个事实一个源"的标准形状）：
+        · `off`（还没记过粮账，这一档永远不会亮）⇒ 词条**必须**写；
+        · 非 `off`（粮账已在跑）⇒ 词条**不许**写。
+      负控的面② 专门守后者：少了它，这条判据只往一个方向使劲。
+    """
+    try:
+        import granary as GR
+    except ImportError:
+        return "granary 模块读不到 —— 无从比对真源（不假绿）"
+    st = GR.state(root=root)["state"]
+    txt = re.sub(r"<[^>]+>", "", GL.TERMS["Ls"].get("one") or "")
+    said = "暂未启用" in txt
+    if st == "off" and not said:
+        return ("粮账还没开（`granary.state()`＝off ⇒ 缺粮这一档永远不会亮），"
+                "缺粮词条却没写「暂未启用」—— 读者会去找一个不存在的红档"
+                "（创始人 2026-10-20 原话「缺粮这个态补一句---暂未启用」）")
+    if st != "off" and said:
+        return ("粮账已经在跑（`granary.state()`＝%s），缺粮词条却还写着"
+                "「暂未启用」—— 那是**假话**：真源说这一档已经会亮了" % st)
+    return None
+
+
+@check("J7 ★ 缺粮词条写明「暂未启用」，且与 granary 真源双向同步")
+def j7():
+    return _ls_enabled_problem()
+
+
+@check("N-J7 负控：删掉这句／让粮账真的开起来 ⇒ J7 都必须判红")
+def n_j7():
+    import granary as GR
+    if _ls_enabled_problem() is not None:
+        return "负控前置失败：当前真源就没通过 J7"
+    orig = GL.TERMS["Ls"]["one"]
+    # ① 词条里删掉这句 ⇒ 必须红
+    try:
+        GL.TERMS["Ls"]["one"] = orig.replace("这一档<b>暂未启用</b>。", "")
+        if "暂未启用" in re.sub(r"<[^>]+>", "", GL.TERMS["Ls"]["one"]):
+            return "负控夹具不成立：替换没生效（%r）" % GL.TERMS["Ls"]["one"]
+        if _ls_enabled_problem() is None:
+            return "负控失效：删掉「暂未启用」后 J7 仍判绿（尺子没分辨力）"
+    finally:
+        GL.TERMS["Ls"]["one"] = orig
+    # ② 让粮账真的开起来（临时 root 发一笔）⇒ 这句变成假话 ⇒ 必须红
+    root = tempfile.mkdtemp(prefix="g0514_nj7_")
+    GR.grant("入驻口粮", GR.SEED_GRANT, root=root)
+    st = GR.state(root=root)["state"]
+    if st == "off":
+        return "负控夹具不成立：发了粮但 state 仍是 off"
+    if _ls_enabled_problem(root=root) is None:
+        return ("负控失效：粮账已经开起来（state=%s）后 J7 仍判绿 —— 这条判据"
+                "只往一个方向使劲，另一半是装饰" % st)
+    return True
+
+
+#: 0.53.3 删掉的那句尾注（创始人原话：「最后一句，我觉得可能多此一举，是否
+#: 去除呢？而且，这句提到了'安全'，监理并不负责安全，也实质上负责不了」）。
+_DEAD_NOTE = "全绿不等于安全"
+
+
+def _dead_note_problem(html):
+    """纯判据：页面上不许再出现那句被删的尾注。返回说明串或 None。"""
+    if _DEAD_NOTE in _visible_text(html):
+        return ("被删掉的尾注「%s」又回来了 —— 三条理由（创始人 2026-10-20）："
+                "① 它挂在五态**枚举**下面，读者会当成第六档的说明（结构错位）；"
+                "② 「检查没跑成」已有唯一告警句 —— 链读不到时 `chain_check` 那行"
+                "整行换成 `R.chain_unverified()`（0490 那条守着），这里是同一件"
+                "事说第二遍；③ 它把「安全」引进页面，而监理**不承担安全**、也"
+                "实质上承担不了 —— 一句免责声明换来一个它根本不该认领的词。"
+                % _DEAD_NOTE)
+    return None
+
+
+@check("J8 ★ 删掉的尾注「全绿不等于安全」不许回来（减法留账）")
+def j8():
+    """★ 减法留账的机器化：删的是**那句话**，不是"没查成必须告警"这条规矩。
+
+    后者仍在 `_view_health` 的 `chain_check` 行（链读不到 ⇒ 整行换成
+    `R.chain_unverified()` 的告警句），由 0490 那条判据守 —— 本条**不重复**
+    开第二份断言（本仓"同一事实两处实现"标准形状），只锁"不许回来"。
+    """
+    bad = []
+    for view, h in _views_html("g0514_j8_"):
+        why = _dead_note_problem(h)
+        if why is not None:
+            bad.append("%s 页｜%s" % (view, why))
+    if bad:
+        return "；".join(bad)
+    _note("四视图可见文本均无那句尾注")
+
+
+@check("N-J8 负控：把那句尾注注回页面 ⇒ 同一条 J8 判据必须判红")
+def n_j8():
+    for view, h in _views_html("g0514_nj8_"):
+        if _dead_note_problem(h) is not None:
+            return "夹具不成立：%s 页本来就有那句 ⇒ 负控无分辨力" % view
+    _, h = next(_views_html("g0514_nj8b_"))
+    dead = h + "<p class=\"note\">%s：也可能是检查压根没跑。</p>" % _DEAD_NOTE
+    if _DEAD_NOTE not in _visible_text(dead):
+        return "负控夹具不成立：注入后仍读不到那句（结构已变）"
+    if _dead_note_problem(dead) is None:
+        return "负控失效：注回那句尾注后 J8 仍判绿（尺子没分辨力）"
+    return True
 
 
 # ════════════ W-SPK 族：界面机器腔人话化（0.51.2，创始人 2026-10-17 截图）═══════════
@@ -7107,14 +7718,29 @@ def c_t4_term_no_dup():
     return True
 
 
-@check("N-T4-09 负控：把「低于一周口粮时亮」同时塞进缺粮的 one 与 inc ⇒ T4-09 必须判红")
+@check("N-T4-09 负控：把缺粮 one 里的一句话塞进 inc ⇒ T4-09 必须判红")
 def n_t4_term_no_dup():
+    """★ 注入串**从当前 one 派生**，不写死一句旧文案。
+
+    ★★ 0.53.3 踩到：原负控写死 `"粮的余额低于一周口粮时亮起。"`，指望它与
+       old `one`（含"低于一周口粮时亮"）凑出 ≥6 字公共子串。本批把 `one`
+       改成「这一档暂未启用。粮只够一周时才会亮。」之后，那句注入串与新的
+       `one` 再无 ≥6 字重合 ⇒ **负控退化成恒绿**（它还在跑、还在返回 True，
+       只是永远测不到东西）。
+       ⇒ 教训再次成立：**改产品输出面时，所有靠"注入那个面"工作的负控都要
+         回头查一遍**（此前 `N-H6b` 同款）。修法：注入串从 `one` 现取。
+    """
     import glossary as GL
     if _term_dup_problems(GL.TERMS):
         return "夹具不成立：真词条本身就有跨字段重复 ⇒ 负控无分辨力"
+    one_txt = re.sub(r"<[^>]+>", "", GL.TERMS["Ls"].get("one") or "")
+    first = (one_txt.split("。")[0] or "").strip()
+    if len(first) < _TERM_DUP_MIN:
+        return ("负控夹具不成立：one 的第一句不足 %d 字（%r）—— 取不出可复用的"
+                "片段，请改用别的字段" % (_TERM_DUP_MIN, one_txt))
     orig = GL.TERMS["Ls"]["inc"]
     try:
-        GL.TERMS["Ls"]["inc"] = "粮的余额低于一周口粮时亮起。"
+        GL.TERMS["Ls"]["inc"] = first + "。"
         r = c_t4_term_no_dup()
     finally:
         GL.TERMS["Ls"]["inc"] = orig
@@ -7122,6 +7748,316 @@ def n_t4_term_no_dup():
         return "负控失效：同一句话塞进两个字段后仍判绿（尺子没有分辨力）"
     if "Ls" not in str(r):
         return "负控方向不对：判红了但没点名缺粮词条（%s）" % r
+    return True
+
+
+# ═══════════ TP 族 · TAB 切换卡顿根治（2026-10-21 创始人拍板 A+B+C+E）═══════════
+#
+#: 背景（只读轮报告：`.worktrees/night/docs/Antinel·TAB 切换卡顿根因分析
+#: （2026-10-20 只读轮）.md`）：创始人「五个 TAB 切换很不畅」。实测根因 R1：
+#: `render_page` 与 `daily_report` 函数体内**各现探一次** `guard_posture`
+#:（同一目录、同一函数），report/health/ledger 每页白付一倍（满载 ~1.2s/页，
+#: 心跳链 15MB 双读）。方案 A：`daily_report(posture=None)` 可注入，
+#: `render_page` 传已现探的 `p` —— **语义零变化**（默认值＝旧行为）。
+#:
+#: 判据方法：不看文案不看行号，**数一次完整渲染里 `guard_posture` 的真实
+#: 调用次数**（打点计数，行为级）；负控把 `daily_report` 打回旧形状
+#:（吃掉 posture 注入）⇒ 同一把尺子必须报「2 次」。
+
+
+def _tp_posture_calls(view="report", drop_posture=False):
+    """一次完整渲染里 `guard_posture` 被现探几次（正判据期望恰好 1）。
+
+    ★ 纯夹具函数，**正负控共用同一把尺子**（L-02/T4-09 同款纪律）：
+      `drop_posture=True` 模拟旧形状（`daily_report` 吃掉注入、体内自算）
+      ⇒ 必须变成 2。负控不另写一份判读。
+    ★ 计数打点是行为级证据：产品若在某条渲染支线上又现探一次（漂移），
+      这里立刻见红 —— 不依赖"代码里看起来只调了一次"。
+    """
+    import host_shield as HS
+    calls = {"n": 0}
+    saved_gp, saved_dr = HS.guard_posture, SV.R.daily_report
+
+    def _counting(pkg_root=None):
+        calls["n"] += 1
+        return saved_gp(pkg_root)
+
+    HS.guard_posture = _counting
+    if drop_posture:
+        def _old_shape(*a, **kw):
+            kw.pop("posture", None)          # 旧签名没有这个参数 ⇒ 必然自算
+            return saved_dr(*a, **kw)
+
+        SV.R.daily_report = _old_shape
+    try:
+        SV.render_page(view=view, root=_HUB, token="t", items=[])
+    finally:
+        HS.guard_posture = saved_gp
+        SV.R.daily_report = saved_dr
+    return calls["n"]
+
+
+@check("TP-A1 三视图各一次完整渲染里 guard_posture 只现探一次（同一事实一个变量）")
+def c_tp_a1():
+    """★ 卡的是「白算的那一遍没了」，且**没有多出别的现探点**。
+
+    `render_page` 每个视图先 `p = posture or posture_now()` 现探一次（顶部条、
+    标题、归因模块共用它）；`_bar` 收 `posture=p` 不再自探；report/health/
+    ledger 的 `daily_report` 收 `posture=p` 不再自探。三视图各量一次。
+    """
+    for v in ("report", "health", "ledger"):
+        n = _tp_posture_calls(view=v)
+        if n != 1:
+            return ("%s 视图渲染期间 guard_posture 被现探 %d 次（应 1）—— "
+                    "同一事实两遍算（或多了新现探点）：满载实测每遍 ~1.2s，"
+                    "页面从 20s+ 回落的结构前提就没了" % (v, n))
+    _note("report/health/ledger 三视图各现探 1 次（旧实现 report 为 2 次）")
+    return True
+
+
+@check("N-TPA1 负控：daily_report 打回旧形状（吃掉 posture 注入）⇒ TP-A1 必须红")
+def n_tp_a1():
+    """负控前置：当前实现三视图都恰好 1 次（否则正判据是假的）。
+
+    变异：让 `daily_report` 忽略注入的 posture（旧形状）⇒ 尺子必须报
+    「2 次」；仍然绿 ⇒ 计数打点是装饰，TP-A1 永远抓不到复发。
+    """
+    for v in ("report", "health", "ledger"):
+        if _tp_posture_calls(view=v) != 1:
+            return "负控前置失败：当前 %s 视图就不是 1 次（正判据未过）" % v
+    for v in ("report", "health", "ledger"):
+        n = _tp_posture_calls(view=v, drop_posture=True)
+        if n != 2:
+            return ("负控失效：吃掉注入后 %s 视图现探 %d 次（应 2）—— "
+                    "要么变异没生效，要么页面本来就不走那条自算路径" % (v, n))
+    return True
+
+
+@check("TP-A2 posture 契约：不注入⇒自算一次；注入⇒原样使用且不再现探")
+def c_tp_a2():
+    """两臂都量（单臂会漏）：
+
+    ① 默认臂（旧行为不变）：`daily_report` 不带 posture ⇒ 自算一次，
+       且 `rep["posture"]` 就是 `guard_posture` 当场返回的那一份。
+    ② 注入臂：`guard_posture` 打点计数 —— 产品若无视注入回去自算，
+       计数立刻 >0（那一遍正是要消灭的白算）；且注入的那一份必须
+       原样进日报（同一事实一个变量）。
+    ★ 为什么不「一调就炸」当探测器：`daily_report` 自算带 blind-spot
+      兜底（探不到 ⇒ unknown，产品纪律，绝不冒充）—— AssertionError
+      会被那层 `except` 吞掉，**炸弹穿不透兜底**；计数才穿得透。
+    """
+    import host_shield as HS
+    sentinel = {"state": "值守中", "label": "注入哨兵", "why": "", "evidence": {},
+                "can_fix": False, "fix": None, "fix_hint": ""}
+    calls = {"n": 0}
+    saved = HS.guard_posture
+
+    def _counting(pkg_root=None):
+        calls["n"] += 1
+        return sentinel
+
+    HS.guard_posture = _counting
+    try:
+        rep = SV.R.daily_report(root=_HUB, chain_files=[], items=[])
+    finally:
+        HS.guard_posture = saved
+    if calls["n"] != 1:
+        return "默认臂：不注入 posture 时 guard_posture 被调 %d 次（应 1）" % calls["n"]
+    if rep.get("posture") is not sentinel:
+        return ("默认臂：rep['posture'] 不是 guard_posture 当场那一份 —— "
+                "日报与顶部条可能说两个时刻的态势")
+
+    calls["n"] = 0
+    HS.guard_posture = _counting
+    try:
+        rep2 = SV.R.daily_report(root=_HUB, chain_files=[], items=[],
+                                 posture=sentinel)
+    finally:
+        HS.guard_posture = saved
+    if calls["n"] != 0:
+        return ("注入臂：注入了 posture，产品却又回去现探了 %d 次 —— "
+                "白算的那一遍还在（满载实测 ~1.2s/页）" % calls["n"])
+    if rep2.get("posture") is not sentinel:
+        return "注入臂：注入的 posture 没有原样进日报（同一事实两个变量）"
+    return True
+
+
+@check("N-TPA2 负控：让 daily_report 无视注入（旧形状自算）⇒ TP-A2 必须红")
+def n_tp_a2():
+    """变异：包一层吃掉 posture 注入。尺子＝「注入后 guard_posture 还应不应该被调」。
+
+    产品正形态：注入 ⇒ **零调用**。变异体：注入被吃 ⇒ 自算 ⇒ 1 次调用
+    ⇒ TP-A2 注入臂判红（计数 >0 或 posture 不是原样那份）。
+    ★ 不用「一调就炸」：blind-spot 兜底会吞掉 AssertionError（见 TP-A2
+      docstring）—— 负控若要真会红，探测器必须穿得过那层兜底。
+    """
+    import host_shield as HS
+    calls = {"n": 0}
+    saved_dr, saved_gp = SV.R.daily_report, HS.guard_posture
+
+    def _counting(pkg_root=None):
+        calls["n"] += 1
+        return saved_gp(pkg_root)
+
+    def _old_shape(*a, **kw):
+        kw.pop("posture", None)              # 旧签名没有这个参数 ⇒ 必然自算
+        return saved_dr(*a, **kw)
+
+    # 前置：正形态下注入 ⇒ 零调用（否则正判据未过，负控无分辨力）
+    HS.guard_posture = _counting
+    try:
+        SV.R.daily_report(root=_HUB, chain_files=[], items=[],
+                          posture={"state": "x"})
+    finally:
+        HS.guard_posture = saved_gp
+    if calls["n"] != 0:
+        return "负控前置失败：正形态注入后仍现探了 %d 次" % calls["n"]
+
+    # 变异：吃掉注入 ⇒ 必须自探 1 次（观察到 ⇒ 负控绿）
+    calls["n"] = 0
+    SV.R.daily_report = _old_shape
+    HS.guard_posture = _counting
+    try:
+        SV.R.daily_report(root=_HUB, chain_files=[], items=[],
+                          posture={"state": "x"})
+    finally:
+        SV.R.daily_report = saved_dr
+        HS.guard_posture = saved_gp
+    if calls["n"] != 1:
+        return ("负控失效：吃掉注入后自探了 %d 次（应 1）—— 注入臂的分辨力"
+                "建立在「产品真的会用注入」上，此处应当证明它会自算" % calls["n"])
+    return True
+
+
+# ═══════════ TP-E · TAB 切换即时反馈（2026-10-21 创始人拍板 E）═══════════
+#
+#: 方案 E（治标不治本的那一半，与 A/B/C 并行）：切 TAB 点击即高亮＋顶部
+#: 细进度条＋悬停 100ms 预取。治"等好久"的心理时长；服务端零计算变化。
+#: 判据方法：渲染产物断言（挂点在、线在、渐进增强在）＋ **node 真跑
+#: 语法校验**（JS 是字符串常量，不解析就不知道它是不是坏的）。
+
+_TAB_NODE = None
+for _cand in (os.path.join(os.environ.get("LOCALAPPDATA", ""), "..", "..",
+                           ".workbuddy-ai", "binaries", "node",
+                           "versions", "22.22.2-6", "node.exe"),
+              "node"):
+    try:
+        import subprocess as _sp
+        if _sp.run([_cand, "--version"], capture_output=True,
+                   timeout=10).returncode == 0:
+            _TAB_NODE = _cand
+            break
+    except Exception:                                      # noqa: BLE001
+        continue
+
+
+def _tp_e_problems(page):
+    """E 的量尺（纯清单返回；正负控共用）：挂点／走线／渐进增强四件事。"""
+    bad = []
+    if 'id="tabprog"' not in page or 'class="tabprog"' not in page:
+        bad.append("页面没有进度条挂点（class/id 各缺一半就算缺）")
+    if ".tabprog{" not in page or "@keyframes tabprog" not in page:
+        bad.append("CSS 缺 .tabprog 规则或 @keyframes（没样式＝挂了也看不见）")
+    for needle, why in (
+            ("addEventListener('click'", "点击即高亮的接线没了"),
+            ("addEventListener('mouseenter'", "悬停预取的接线没了"),
+            ("fetch(a.href", "预取请求没了（悬停 100ms 形同虚设）"),
+            ("credentials:'same-origin'", "预取没带 cookie（口令在 httpOnly cookie 里）"),
+            ("}, 100);", "100ms 意图阈值没了（鼠标划过就预取）"),
+            ("e.metaKey || e.ctrlKey", "修饰键护栏没了（新窗打开会误亮当前页）"),
+            ("activate(a);", "点击后没有真正切高亮（activate 调用没了——线在、效果没了）"),
+            ("pageshow", "进度条没有收尾（pageshow 摘 .run）")):
+        if needle not in page:
+            bad.append("_TAB_JS 缺：%s（锚 %r）" % (why, needle))
+    if page.count('href="/?v=') < 5:
+        bad.append("选项卡 href 不足 5 个 —— 渐进增强破了（禁用 JS 时将无法导航）")
+    return bad
+
+
+@check("TP-E1 切页即时反馈：进度条挂点＋点击/悬停接线＋渐进增强（href 仍在）")
+def c_tp_e1():
+    """★ 四件事全在才叫"反馈层長好了"：挂点（div+.css）、两条接线
+    （click 高亮／mouseenter 预取）、一条护栏（修饰键）、一条退路
+    （href 是真的 ⇒ 无 JS 可导航）。"""
+    page = SV.render_page(view="inbox", root=_HUB, token="t", items=[])
+    bad = _tp_e_problems(page)
+    if bad:
+        return "；".join(bad)
+    return True
+
+
+@check("N-TPE1 负控：把点击接线从 _TAB_JS 里拆掉 ⇒ TP-E1 必须红")
+def n_tp_e1():
+    """变异体模拟的形状：E 被"顺手删了半边"（比如有人清理脚本时把
+    click 接线删了）—— 同一把尺子必须抓得到。参数还在、线没了，
+    正是最容易复发的漂移形状。"""
+    page = SV.render_page(view="inbox", root=_HUB, token="t", items=[])
+    if _tp_e_problems(page):
+        return "负控前置失败：当前实现没过 TP-E1 正判据"
+    saved = SV._TAB_JS
+    SV._TAB_JS = saved.replace("      activate(a);\n", "")
+    try:
+        page2 = SV.render_page(view="inbox", root=_HUB, token="t", items=[])
+    finally:
+        SV._TAB_JS = saved
+    if "activate(a);" in page2:
+        return "变异没生效（页面里还有 activate 调用）—— 负控自身失效"
+    bad = _tp_e_problems(page2)
+    if not bad:
+        return "负控失效：点击接线拆了仍全绿 —— 尺子分不出'线在/线没'"
+    return True
+
+
+@check("TP-E2 _TAB_JS 过 node --check（脚本真是能跑的 JS，不是摆设）")
+def c_tp_e2():
+    """★ 为什么真跑：`_TAB_JS` 是 Python 字符串常量 —— **写坏了Python
+    不报错**（字符串就是字符串），只有浏览器第一次执行时才发现，而那
+    就是用户点 TAB 没反应的那一刻。node --check 是这道工序的活体验验。
+    本机没有 node ⇒ SKIP（不假绿）。"""
+    import re as _re
+    import subprocess as _sp
+    import tempfile as _tf
+    if _TAB_NODE is None:
+        raise Skip("本机没有可用的 node —— 语法校验这一腿测不出（不装绿）")
+    m = _re.search(r"<script>(.*)</script>", SV._TAB_JS, _re.S)
+    if not m:
+        return "_TAB_JS 里找不到 <script> 块（形状变了，量具要跟上）"
+    p = os.path.join(_tf.gettempdir(), "tp_e2_tabjs.js")
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(m.group(1))
+    r = _sp.run([_TAB_NODE, "--check", p], capture_output=True, timeout=30)
+    if r.returncode != 0:
+        return "_TAB_JS 语法坏（node --check 退出 %d）：%s" % (
+            r.returncode, (r.stderr or b"")[:200])
+    return True
+
+
+@check("N-TPE2 负控：往脚本里塞一个语法错误 ⇒ node --check 必须失败")
+def n_tp_e2():
+    """证明上一条不是"node 跑了但什么都没验"：塞进去的语法错误
+    （少一个收尾括号）必须被 --check 抓到。"""
+    import re as _re
+    import subprocess as _sp
+    import tempfile as _tf
+    if _TAB_NODE is None:
+        raise Skip("本机没有 node —— 本负控与 TP-E2 同腿，一起SKIP")
+    saved = SV._TAB_JS
+    # ★ 变异体必须是**真语法错误**：`})();` → `});` 只是把自调用改成
+    #   表达式语句（合法 JS，node --check 照过 —— 第一版负控就这么失效过）。
+    #   直接塞一个配不对的 `if (true {`，任何 JS 引擎都必报。
+    SV._TAB_JS = saved.replace("</script>", "if (true {\n</script>")
+    try:
+        m = _re.search(r"<script>(.*)</script>", SV._TAB_JS, _re.S)
+        if not m:
+            return "变异后找不到 <script> 块 —— 变异体形状不对"
+        p = os.path.join(_tf.gettempdir(), "tp_e2n_tabjs.js")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(m.group(1))
+        r = _sp.run([_TAB_NODE, "--check", p], capture_output=True, timeout=30)
+    finally:
+        SV._TAB_JS = saved
+    if r.returncode == 0:
+        return "负控失效：塞了语法错误 node --check 仍通过 —— 这条校验是摆设"
     return True
 
 

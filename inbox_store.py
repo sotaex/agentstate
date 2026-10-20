@@ -286,20 +286,35 @@ def _registry_roots(root=None):
         return []
 
 
-def discover_chain_files(days=7, root=None, include_projects=True):
+#: 取数窗口。**两个口径，不许混用**（混用就是"报告取数参数而不是报告数据"）：
+#:   `WINDOW_RECENT_DAYS` —— 收件箱／日报："最近"，看得见就够；
+#:   `WINDOW_ALL`         —— 账本：**历史全量，不设窗口**。
+#: ★★ 为什么账本不能沿用 7 天（创始人 2026-10-20「有记录永远是 8 天，从来不会
+#:   增长」）：账本的「有记录多少天」若被取数窗口封顶，它就**恒等于窗口长度**
+#:   （7 天窗口 ⇒ 含今天恰好 8 天），读者看到的是**取数参数**，不是数据。
+#:   实测本机：窗口 7 天 ⇒ 8 天；放开 ⇒ **39 天**（2026-09-10 → 2026-10-20）。
+WINDOW_RECENT_DAYS = 7
+WINDOW_ALL = None
+
+
+def discover_chain_files(days=WINDOW_RECENT_DAYS, root=None, include_projects=True):
     """发现要读的链文件。★ 每个来源都有消费点（不留"登记了没人查"的字段）。
 
     - host 级：`<hub>/rollup/*.jsonl`
     - 追加源：`ANTINEL_AUDIT_DIRS`（逗号分隔的目录）
     - 项目级：`registry.json` 里每个项目根的 `<root>/.psl/audit/*.jsonl`
+
+    ★ `days=None`（＝ `WINDOW_ALL`）⇒ **不设 cutoff**，返回全部链文件。
+      旧版任何取法都带窗口，账本因此永远读不到 7 天之前的记录。
     """
-    cutoff = datetime.now().date() - timedelta(days=max(0, int(days)))
+    cutoff = None if days is None else \
+        datetime.now().date() - timedelta(days=max(0, int(days)))
     files = []
 
     def _take(pat):
         for p in glob.glob(pat):
             d = _day_of(p)
-            if d is None or d >= cutoff:
+            if d is None or cutoff is None or d >= cutoff:
                 files.append(os.path.normpath(p))
 
     _take(os.path.join(rollup_dir(root), "*.jsonl"))
@@ -439,7 +454,16 @@ def set_state(item_id, dst, note="", actor="owner", now=None, level=None, root=N
 #    日报再逐条复算整条链 ≈ 5–10s ⇒ 四个视图实测 **5–18 秒**。
 #    有了它，一次刷新只重算**当天那个正在追加的文件**，其余 19 个直接命中。
 _PROJ_CACHE = {}
-_PROJ_CACHE_MAX = 64          # 只留最近 64 个指纹，防无界增长
+#: ★★ 0.53.2：64 → **512**。为什么（实测，不是估）：
+#:   64 是 0.35.2 按"本机 20 个链文件"定的。账本改**全量取数**后一次扫描
+#:   **107 个文件**（本机 2026-09-10 → 10-20）⇒ 上限小于文件数时，每读一个新
+#:   文件就挤掉一个旧的，**缓存 100% 未命中**（实测：连续两次全量各 6.6s / 5.5s）。
+#:   提到 512 后实测：首次 6.6s，**之后 0.02s**。
+#:   ⇒ **上限必须大于一次全量扫描的文件数**，否则"全量窗口"虽然在参数上放开了，
+#:     实际上每次开账本页都要重投影 21 万行 —— 窗口放开了一半，账本仍然慢得
+#:     让人不敢点。判据 L-02 钉住这条（用真文件数比对，不写死）。
+#:   512 约合 17 个月的逐日链文件（1 文件/天），留了余量；仍是无界增长的护栏。
+_PROJ_CACHE_MAX = 512
 
 
 def _project_file(path, kinds_key, kinds):
@@ -493,6 +517,20 @@ def load_items(chain_files=None, root=None, kinds=None):
                               actor=e.get("actor") or "owner"))
     out.sort(key=lambda it: (it.ts, it.id), reverse=True)
     return out
+
+
+def load_items_all(root=None, kinds=None):
+    """账本专用：**全量**取数（`discover_chain_files(days=WINDOW_ALL)`）。
+
+    ★ 为什么单开一个入口而不是让调用方各自传 `days=None`：账本的"有记录多少天"
+      一旦被窗口封顶，就**恒等于窗口长度**（创始人 2026-10-20 指出的"永远是 8 天"）。
+      这类事故的形状是**默认值吃掉了口径** —— 每多一个调用点就多一次机会写回
+      默认窗口。留一个**名字里带 all** 的入口，判据（L-01）才好锚住"账本不许用
+      带窗口的取数"，而不是去猜每个调用点传了什么。
+    ★ 口径本身没变：仍走同一个 `load_items`，只是 chain_files 不带窗口。
+    """
+    return load_items(chain_files=discover_chain_files(days=WINDOW_ALL, root=root),
+                      root=root, kinds=kinds)
 
 
 # ------------------------------------------------------------ 导出 ----
