@@ -750,11 +750,15 @@ function runOne(c) {
   const handlers = {doc: {}, win: {}};
   const root = {clientWidth:c.w, clientHeight:c.h};
   const pos = {x:c.x, y:c.y};
-  const classes = new Set(['term']);
+  // ★ 0.53.4：桩参数化 —— 浮层体有两种（术语 `.tdef`／圈问号 `.qbody`），
+  //   同一把尺子必须能分别量，否则"说明框弹到天花板上"这类坐标病只能靠人眼。
+  const CLS = p.cls || 'term';
+  const BOXSEL = p.boxSel || '.tdef';
+  const classes = new Set([CLS]);
   const d = {
     open:true,
     classList:{contains:n=>classes.has(n), add:n=>classes.add(n), remove:n=>classes.delete(n)},
-    querySelector:s=>s==='summary' ? summary : (s==='.tdef' ? box : null)
+    querySelector:s=>s==='summary' ? summary : (s===BOXSEL ? box : null)
   };
   const summary = {getBoundingClientRect:()=>({left:pos.x, right:pos.x+14,
     top:pos.y, bottom:pos.y+14, width:14, height:14})};
@@ -767,7 +771,8 @@ function runOne(c) {
       top=pos.y+20;
     }
     return {left:left, top:top, width:width, height:height, vw:root.clientWidth,
-      vh:root.clientHeight, right:left+width, bottom:top+height};
+      vh:root.clientHeight, right:left+width, bottom:top+height,
+      ax:pos.x, ay:pos.y};
   }};
   const document={documentElement:root,
     addEventListener:(n,f)=>{handlers.doc[n]=f;},
@@ -789,7 +794,7 @@ console.log(JSON.stringify(p.cases.map(runOne)));
 """
 
 
-def _tooltip_bounds_probe(script, layout="fixed"):
+def _tooltip_bounds_probe(script, layout="fixed", cls="term", box_sel=".tdef"):
     """在 Node DOM 桩里真执行页面定位脚本，回读打开/缩放/滚动后的矩形。"""
     node = _node_path()
     if not node:
@@ -810,7 +815,8 @@ def _tooltip_bounds_probe(script, layout="fixed"):
         dict(w=360,h=220,x=170,y=175,bw=560,bh=700,
              rw=360,rh=220,rx=4,ry=4,sx=340,sy=205),
     ]
-    payload = json.dumps({"script":script, "layout":layout, "cases":cases})
+    payload = json.dumps({"script":script, "layout":layout, "cases":cases,
+                          "cls":cls, "boxSel":box_sel})
     try:
         p = subprocess.run([node, "-e", _TOOLTIP_BOUNDS_RUNNER, payload],
                            capture_output=True, timeout=20)
@@ -887,6 +893,245 @@ def n_w09h():
     if not any("case1/opened 横向越界" in x and x.startswith("case1/opened")
                for x in bad):
         return "负控方向不符：截图同形的中部锚点未复现左边越界：%r" % bad[:3]
+    return True
+
+
+def _overlay_anchor_failures(rows):
+    """浮层必须**贴着锚点**（这一条才抓得住「弹到天花板上」）。
+
+    ★ 为什么要单立一条：坐标尺（`_tooltip_bounds_failures`）只问"在不在视口
+      内"，而**写死 top:8px 的浮层正好在视口内**——它只是离锚点十万八千里。
+      0.36.1 的 `.term` 走过这条路，0.53.4 的 `.qbody` 又走了一遍（用户：
+      「说明框弹出到天花板上了」）。
+      判法：垂直间隙取"下方 6px"与"上方 6px"两个方向中**更接近**的那个，
+      允许 1.5px 误差；水平必须与锚点有重叠。浮层高到撑满大半个视口时
+      （≥60% 视口高）位置只能被夹住，此时豁免 —— 那种情形下"贴哪儿"已无意义。
+    """
+    errors = []
+    for ci, result in enumerate(rows or []):
+        for phase, r in result.items():
+            if r["height"] >= 0.6 * r["vh"]:
+                continue
+            a_bottom = r["ay"] + 14
+            gap_below = r["top"] - (a_bottom + 6)
+            gap_above = (r["ay"] - 6) - r["bottom"]
+            if min(abs(gap_below), abs(gap_above)) > 1.5:
+                errors.append("case%d/%s 没贴着锚点（锚点在 y=%g，浮层顶 %g、底 %g）"
+                              % (ci + 1, phase, r["ay"], r["top"], r["bottom"]))
+                continue
+            # 横向：浮层被夹到视口宽时"贴哪边"没得选，豁免；否则必须与锚点相接。
+            # （允许**相等**：视口很窄时浮层会被夹到左缘，右缘正好压住锚点。）
+            if r["width"] >= r["vw"] - 16:
+                continue
+            if not (r["left"] <= r["ax"] + 14 and r["right"] >= r["ax"]):
+                errors.append("case%d/%s 与锚点横向完全不重叠（锚点 x=%g，浮层 [%g,%g]）"
+                              % (ci + 1, phase, r["ax"], r["left"], r["right"]))
+    return errors
+
+
+_QINFO_CSS = (".qsum>.qbody,.qinfo>.qbody{position:fixed")
+
+
+@check("W-09i 圈问号说明框与术语浮层**同一段定位**：贴锚点、不出视口、有安全区")
+def c_w09i():
+    """创始人 2026-10-20 13:04：「点击 150 后边的问号时，说明框弹出到天花板上
+    了，位置不对」。
+
+    病根不是"坐标算错"，是**压根没人给它算**：`_FLIP_JS` 的 `fit()` 只认
+    `.tdef`，`.qbody` 停在 CSS 里写死的 `top:8px` —— 那不是定位，是默认值。
+    修法是把两种浮层体收进**一份**坐标实现；本判据就用**同一把尺子**量两次
+    （术语一次、圈问号一次），任何一边出视口或离开锚点都算红。
+    """
+    css = SV.CSS
+    m = re.search(r"\.qsum>\.qbody,\.qinfo>\.qbody\{([^}]*)\}", css)
+    if not m:
+        return "圈问号说明框没有专属浮层规则（`.qbody` 还挂在行内？）"
+    block = m.group(1)
+    if "position:fixed" not in block:
+        return "说明框不是视口坐标定位（行内容器会把它裁掉）"
+    if "max-width:min(560px,calc(100vw - 16px))" not in block:
+        return "说明框没有为视口两侧各留 8px 安全区"
+    if "max-height:calc(100vh - 16px)" not in block or "overflow:auto" not in block:
+        return "说明框超过视口高度时没有自身滚动兜底"
+    js = SV._FLIP_JS
+    if ".qbody" not in js:
+        return "定位脚本里根本没有 `.qbody` —— 说明框停在写死的默认坐标上"
+    # 同一把尺子量两类浮层：谁都不许越界，谁都不许离开锚点
+    for cls, sel, name in (("qsum", ".qbody", "圈问号说明框"),
+                           ("term", ".tdef", "术语浮层")):
+        rows, why = _tooltip_bounds_probe(js, cls=cls, box_sel=sel)
+        if why:
+            return why
+        bad = _tooltip_bounds_failures(rows)
+        if bad:
+            return "%s出视口：%s" % (name, "；".join(bad[:3]))
+        bad2 = _overlay_anchor_failures(rows)
+        if bad2:
+            return "%s没贴住锚点：%s" % (name, "；".join(bad2[:3]))
+    return True
+
+
+@check("N-W09i 负控：定位脚本漏掉 .qbody／撤掉高度兜底／把落点写死 ⇒ 各自判红")
+def n_w09i():
+    if c_w09i() is not True:
+        return "夹具不成立：现行实现就判红 —— 负控无分辨力"
+    # 面①：定位脚本回到"只认 .tdef"（0.53.4 之前的原样）= 说明框停在页顶
+    dead_js = SV._FLIP_JS.replace(" || d.querySelector('.qbody')", "")
+    if dead_js == SV._FLIP_JS:
+        return "夹具不成立：摘不到 boxOf 的第二形态（源码已变，需更新负控）"
+    with _Patch(SV, _FLIP_JS=dead_js):
+        why = c_w09i()
+    if why is True or why is None:
+        return "负控失效①：定位脚本漏掉 .qbody 仍判合格（那条腿没分辨力）"
+    if "没贴住锚点" not in (why or ""):
+        return "负控方向不符①：报的是 %r（应指向「没贴住锚点」）" % (why[:70],)
+    # 面②：撤掉高度兜底
+    dead_css = SV.CSS.replace(
+        "max-height:calc(100vh - 16px)", "max-height:900px")
+    if dead_css == SV.CSS:
+        return "夹具不成立：摘不到高度兜底（CSS 已变，需更新负控）"
+    with _Patch(SV, CSS=dead_css):
+        why2 = c_w09i()
+    if why2 is True or why2 is None:
+        return "负控失效②：撤掉高度兜底仍判合格"
+    if "自身滚动" not in (why2 or ""):
+        return "负控方向不符②：报的是 %r（应指向「自身滚动」）" % (why2[:70],)
+    # 面③：把落点写死（浮层永远贴顶）—— 与用户看到的形态同形
+    dead3 = SV._FLIP_JS.replace("var below = a.bottom + 6;", "var below = 8;")
+    if dead3 == SV._FLIP_JS:
+        return "夹具不成立：摘不到下方落点计算（脚本已变，需更新负控）"
+    with _Patch(SV, _FLIP_JS=dead3):
+        why3 = c_w09i()
+    if why3 is True or why3 is None:
+        return "负控失效③：落点写死仍判合格"
+    if "没贴住锚点" not in (why3 or ""):
+        return "负控方向不符③：报的是 %r（应指向「没贴住锚点」）" % (why3[:70],)
+    return True
+
+
+#: 「同屏只留一个浮层」的行为桩：三类浮层 ＋ 两个非浮层（收件箱展开行）。
+#: 判的是**行为**（谁被关掉、谁被留下），不是脚本里有没有某行代码。
+_OVERLAY_EXCL_RUNNER = r"""
+const p = JSON.parse(process.argv[1]);
+const handlers = {};
+function mk(cls, open){
+  const el = {open: !!open, cls: cls, style:{}, dataset:{},
+    classList:{contains:n=>n===cls, add:()=>{}, remove:()=>{}},
+    querySelector:()=>null};
+  return el;
+}
+const A = mk('term', true);      // 先前开着的术语词条
+const B = mk('qsum', false);     // 本次数据说明
+const C = mk('qinfo', false);    // 这类东西说明
+const D = mk('item', true);      // 收件箱展开行（不是浮层）
+const E = mk('item', false);     // 再开一个非浮层
+const ALL = [A,B,C,D,E];
+const document = {documentElement:{clientWidth:800,clientHeight:600},
+  addEventListener:(n,f)=>{handlers[n]=f;},
+  querySelectorAll:(sel)=>{
+    const names=[]; const re=/details\.(\w+)\[open\]/g; let m;
+    while((m=re.exec(sel))) names.push(m[1]);
+    return ALL.filter(e=>e.open && names.indexOf(e.cls)>=0);
+  }};
+const window = {addEventListener:()=>{}};
+new Function('document','window',p.script)(document,window);
+function state(){ return {a:A.open,b:B.open,c:C.open,d:D.open,e:E.open}; }
+const out = {};
+B.open = true; handlers.toggle({target:B});
+out.after_qsum = state();
+C.open = true; handlers.toggle({target:C});
+out.after_qinfo = state();
+E.open = true; handlers.toggle({target:E});
+out.after_item = state();
+console.log(JSON.stringify(out));
+"""
+
+
+def _overlay_excl_probe(script):
+    node = _node_path()
+    if not node:
+        raise Skip("本机没有可执行 node；浮层互斥判据 SKIP，不报 PASS")
+    import subprocess
+    m = re.search(r"<script>\s*(.*?)\s*</script>", script, re.S)
+    if m:
+        script = m.group(1)
+    try:
+        p = subprocess.run([node, "-e", _OVERLAY_EXCL_RUNNER,
+                            json.dumps({"script": script})],
+                           capture_output=True, timeout=20)
+    except Exception as e:                                               # noqa: BLE001
+        return None, "Node 执行互斥脚本失败：%s: %s" % (type(e).__name__, e)
+    if p.returncode:
+        return None, "Node 互斥夹具退出 %d：%s" % (
+            p.returncode, p.stderr.decode("utf-8", "replace")[-400:])
+    try:
+        return json.loads(p.stdout.decode("utf-8")), ""
+    except Exception as e:                                               # noqa: BLE001
+        return None, "Node 互斥夹具没有 JSON 回读：%s: %s" % (type(e).__name__, e)
+
+
+@check("W-09j 同屏只留一个浮层：开新的关旧的，跨三类都管，且不波及收件箱展开行")
+def c_w09j():
+    """创始人 2026-10-20 13:04：「之前的问号说明框不会关掉」。
+
+    病根：术语词条靠 `name="term"` 原生手风琴互斥，而 `.qsum`／`.qinfo` **刻意
+    不进那个组**（它们不是词条）⇒ 三类之间没有任何机制，叠多少都开着。
+    修法不是给它们加 name（那会废掉"不是词条"这条区分），而是在**同一段脚本**
+    里做一件事：开任何一个浮层，关掉其它所有浮层。
+    """
+    js = SV._FLIP_JS
+    st, why = _overlay_excl_probe(js)
+    if why:
+        return why
+    a = st["after_qsum"]
+    if a["a"]:
+        return "开了「本次数据」问号，先前那个术语窗没关 —— 叠窗病回来了"
+    if not a["b"]:
+        return "开着的那个自己也关了（把整组清空 = 点了没反应）"
+    if not a["d"]:
+        return "关浮层把关着的收件箱展开行也收了（波及非浮层）"
+    b = st["after_qinfo"]
+    if b["b"]:
+        return "开了「这类东西」问号，上一个「本次数据」问号没关（跨类型不互斥）"
+    if not b["c"]:
+        return "后开的自己没留下"
+    c = st["after_item"]
+    if not c["c"]:
+        return "开一个收件箱行，把浮层关掉了（非浮层不该触发互斥）"
+    if not c["e"]:
+        return "非浮层自己也留不住"
+    return True
+
+
+@check("N-W09j 负控：拆掉互斥／把范围放大到所有 details ⇒ W-09j 必须各自判红")
+def n_w09j():
+    if c_w09j() is not True:
+        return "夹具不成立：现行实现就判红 —— 负控无分辨力"
+    # 面①：拆掉"关掉其它"那一行（页面回到只定位、不互斥）
+    dead = SV._FLIP_JS.replace(
+        "    overlays().forEach(function(o){ if (o !== d) o.open = false; });\n", "")
+    if dead == SV._FLIP_JS:
+        return "夹具不成立：摘不到互斥那行（脚本已变，需更新负控）"
+    with _Patch(SV, _FLIP_JS=dead):
+        why = c_w09j()
+    if why is True or why is None:
+        return "负控失效①：拆掉互斥仍判合格（叠窗那条腿没分辨力）"
+    if "叠窗" not in (why or ""):
+        return "负控方向不符①：报的是 %r" % (why[:60],)
+    # 面②：把范围放大到所有 details（收件箱展开行也会关掉浮层）
+    guard = ("    var isOverlay = d.classList.contains('term') ||\n"
+             "                    d.classList.contains('qsum') ||\n"
+             "                    d.classList.contains('qinfo');\n"
+             "    if (!isOverlay) return;\n")
+    dead2 = SV._FLIP_JS.replace(guard, "    if (!d.classList) return;\n")
+    if dead2 == SV._FLIP_JS:
+        return "夹具不成立：摘不到范围判定（脚本已变，需更新负控）"
+    with _Patch(SV, _FLIP_JS=dead2):
+        why2 = c_w09j()
+    if why2 is True or why2 is None:
+        return "负控失效②：范围放大到所有 details 仍判合格（波及那条腿没分辨力）"
+    if "非浮层" not in (why2 or ""):
+        return "负控方向不符②：报的是 %r" % (why2[:60],)
     return True
 
 

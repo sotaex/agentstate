@@ -241,6 +241,10 @@ h2{font-size:15px;margin:0 0 12px}
   width:14px;height:14px;line-height:14px;text-align:center;border-radius:50%;
   background:var(--line);color:var(--muted);font-size:10px;font-weight:700}
 .qsum[open]>summary::after,.qinfo[open]>summary::after{background:var(--brand);color:#fff}
+/* ★ 落点不在这里：`top/left` 只是**无 JS 时的兜底**（会停在页顶）。真定位由
+   `_FLIP_JS` 的 `fit()` 现算 —— 与术语词条 `.tdef` **同一段代码、同一把尺子**
+   （0.53.4 四次修订：旧版 fit 只认 `.tdef`，于是 `.qbody` 永远停在 top:8px，
+   用户看到的就是「说明框弹到天花板上」）。 */
 .qsum>.qbody,.qinfo>.qbody{position:fixed;z-index:60;top:8px;left:8px;right:auto;width:max-content;
   max-width:min(560px,calc(100vw - 16px));min-width:min(260px,calc(100vw - 16px));
   max-height:calc(100vh - 16px);overflow:auto;
@@ -538,9 +542,27 @@ _FLIP_JS = """
 (function(){
   var PAD = 8;
   function clamp(v, lo, hi){ return Math.max(lo, Math.min(v, Math.max(lo, hi))); }
+  // ★★ 0.53.4 四次修订（创始人 2026-10-20 13:04 截图：「点击 150 后边的问号时，
+  //   说明框弹出到天花板上了，位置不对」）：浮层的**体**有两种 —— 术语词条
+  //   `.tdef`、行内圈问号 `.qbody`。旧版只认 `.tdef`，`.qbody` 因此从来没被
+  //   定位过，停在自己 CSS 里那个写死的 `top:8px` 上（＝天花板），与锚点毫无
+  //   关系。⇒ 定位**只有这一份实现**：谁打开就量谁，两种体走同一段坐标计算。
+  //   新增浮层只加类名到这里，不许再写第二套坐标（第二套必然漂）。
+  function boxOf(d){
+    return d.querySelector('.tdef') || d.querySelector('.qbody');
+  }
+  // ★★ 同一张截图里的第三个问题（「之前的问号说明框不会关掉」）：术语词条靠
+  //   `<details name="term">` 原生手风琴互斥，`.qsum`／`.qinfo` **刻意不进**
+  //   那个组（它们不是词条，U-19/T-09 分得很清）⇒ 三类之间没有任何互斥，
+  //   于是能叠一屏。⇒ 互斥也收成一份实现：**同屏最多一个浮层**，开一个就关掉
+  //   其它所有（三类同一口径）。按类名判断，新增浮层照样覆盖。
+  function overlays(){
+    return document.querySelectorAll(
+      'details.term[open],details.qsum[open],details.qinfo[open]');
+  }
   function fit(d){
     if (!d.classList) return;
-    var box = d.querySelector('.tdef');
+    var box = boxOf(d);
     var anchor = d.querySelector('summary');
     if (!box || !anchor) return;
     var root = document.documentElement;
@@ -562,11 +584,17 @@ _FLIP_JS = """
     box.style.top = top + 'px';
   }
   function fitOpen(){
-    document.querySelectorAll('details.term[open]').forEach(fit);
+    overlays().forEach(fit);
   }
   document.addEventListener('toggle', function(e){
     var d = e.target;
-    if (d.classList && d.classList.contains('term') && d.open) fit(d);
+    if (!d.classList || !d.open) return;
+    var isOverlay = d.classList.contains('term') ||
+                    d.classList.contains('qsum') ||
+                    d.classList.contains('qinfo');
+    if (!isOverlay) return;
+    overlays().forEach(function(o){ if (o !== d) o.open = false; });
+    fit(d);
   }, true);
   window.addEventListener('resize', fitOpen);
   window.addEventListener('scroll', fitOpen, true);
@@ -2474,15 +2502,23 @@ def _chain_card(ch):
     # ★ 显式结构边界（`id="chainrec"` 起、`<!-- chainrec:end -->` 止）：
     #   判据取段锚在标记上，卡里加行减行、改句子都不碰尺子。
     # ★ 边界注两件事：① 这条链**查不到**什么（整份替换）；② 哪一类记录**根本
-    #   没法比**（没指纹的那几类）—— 后者带词条芯片，它是「没纳入比对的记录」
-    #   这个词条在本页的**固定落点**：第三行在 0 条时整行不列（创始人：0 行不列），
-    #   没有这个落点，机器上一条都没有时这个词就"定义了却看不到"（P13 死角）。
+    #   没法比**（没指纹的那几类）。
+    # ★★ 0.53.4 四次修订（创始人 2026-10-20 13:04 截图：「没有纳入比对的记录
+    #   重复了，请去掉下边那条」）：② 的芯片**只在第三行缺席时出现**。
+    #   病根——上一版为了让「没纳入比对的记录」在 0 条的机器上也有术语落点
+    #   （P13），无条件把它挂进了边界注；可 0 条只是**一种**情形，常见情形
+    #   （有 150 条）第三行本来就在，边界注再写一遍＝同屏同一个词两次。
+    #   修法不是删词条、也不是把 0 行加回来，而是**让落点跟着缺位走**：
+    #   行在，芯片就在行上；行不在，芯片才落到注里。两个情形各有一处、且只有
+    #   一处。※ 机制教训：给判据补落点时，要问「这个落点在**别的分支**里会
+    #   不会变成重复」，不能只问「这样判据还绿不绿」。
+    _landing = (GL.chip("unchained") if unch <= 0 else "")
+    _note2 = ("没指纹的记录没法比对，单独算一类：%s" % _landing) if _landing else ""
     return ('<h2 id="chainrec">%s</h2><div class="rows fit">%s</div>'
             '<p class="note" style="margin:8px 2px 2px">只比对本机读得到的记录：'
-            '单条被改能查出来；整份文件缺失、整份被替换，看不出来。'
-            '没指纹的记录没法比对，单独算一类：%s</p>'
+            '单条被改能查出来；整份文件缺失、整份被替换，看不出来。%s</p>'
             '<!-- chainrec:end -->'
-            % (GL.chip("chain"), "".join(rows), GL.chip("unchained")))
+            % (GL.chip("chain"), "".join(rows), _note2))
 
 
 def _view_health(rep, token, items=None):
