@@ -65,14 +65,17 @@
      腿上。T4-09 的必要性：前两条都按**字段**切分，而用户看到的是浮层里
      连续的四段 —— 四段各自合规、合起来说两遍同一件事，前两条都抓不到。
      详见「T4-07／T4-08」段头与 T4-09 的 docstring。
-  ⑫ FLO-12a…c 哨标规格的**失败留痕**（**0.53.2，T2**）：0.53.1 的条件写有
+  ⑫ FLO-17a…c 哨标规格的**失败留痕**（**0.53.2，T2**）：0.53.1 的条件写有
      一个静默形状 —— 规格拿不到就不写 `logo` 键，于是「旧版没这功能」与
      「新版坏了」在 tray.json 里**逐字节相同**。修法：拿不到仍写
      `logo_missing`＋`logo_error` 并进链一条 `logo_spec_missing`（每进程每
      episode 至多一条）；徽标（PowerShell）写不了 Python 账本 ⇒ 写
      `console_dir/logo_events.jsonl`，daemon tick **先链后改名**消费。
      判据钉四件：标记与规格键互斥、审计事实与原因、节流与 episode 计数、
-     痕迹「先链后改名（零删除）」。详见「FLO-12 族」段头。
+     痕迹「先链后改名（零删除）」。详见「FLO-17 族」段头。
+     ★ 编号说明（2026-10-20 校正）：这一组原写成 FLO-12，与既有
+     「FLO-12 五态动效＝源（逐字节）」**撞号** —— 两条不同的尺子同名，
+     报红时读的人分不清是哪条。号码只许唯一，故本组整体移到 FLO-17。
   ⑬ FLO-13 回落画**品牌 LOGO**（**0.53.2，T1**）：0.53.1 回落画的是
      `assets/icons/<state>.ico` 姿态灯 —— 最小化态看见的是「一个姿态」，
      不是「我们的标」。修法：`Resolve-IconPath` 品牌板优先，姿态灯降为
@@ -101,7 +104,7 @@
      两层都不许重）、两个出口同源（页面 STYLE 必须逐字等于
      `json.dumps(渲染表)`）。五条各配负控，且负控红因逐条核对过。
      详见「FLO-15 族」段头。
-  ⑯ FLO-16a…b 长驻进程版本自检（**0.53.2，T3**）：0.53.1 交付后
+  ⑯ FLO-16a…d 长驻进程版本自检（**0.53.2，T3**）：0.53.1 交付后
      `tray.json` 长时间没有 `logo` 块 —— 代码是新的，写状态的是早上
      启动的旧进程。根因不是「忘了刷新」，是**没有任何出口把两件事摆在
      一起**。修法口径刻意窄：戳只记进程**出生时**的版本（console 进
@@ -111,6 +114,16 @@
      差异文案必须含**两边版本号**、没记录时**不许**报差异（防狼来了）、
      出口只读（代码里不许出现 kill/重拉）。负控两条：两边同版本 ⇒ 必须
      判绿；把差异检查删成恒 `None` ⇒ 必须红。详见「FLO-16 族」段头。
+  ⑰ B-17a…b 「投出去了」≠「没了」（**0.53.2，2026-10-20**）：创始人实测
+     「新冒泡出来若干秒后，旧冒泡又回来了」——`PostMessageW(WM_CLOSE)`
+     是异步投递（本机实测 ≈0.5s 才真销毁），旧版把**投递成功数**当
+     「关掉的数」立刻返回 ⇒ 调用方马上开新窗，新旧并存的窗口期里旧窗
+     销毁前重绘一次。修法长在**原语**上：`close_bubble_windows` 投递后
+     轮询到枚举里真的没有它；等不到就如实说「仍有 N 枚没退」。判据钉两件：
+     两条路各自说对话（消失 ⇒ 说已确认／不消失 ⇒ 说没退，**不许**说
+     「关掉了」）、**还有就如实报失败**（调用方才能据此不往下当成功）。
+     负控把轮询「删掉」还原成旧口径 ⇒ 必须红（证明这条判据测的是
+     「等」，不是「函数存在」）。详见「B-17 族」段头。
 
 ★ 规格真源（U-17 的唯一依据，不许凭记忆）：
     `D:\\2026\\PSL\\Antinel品牌动效报警语法v1.2（2026-09-27）.md`
@@ -1950,19 +1963,32 @@ def n_b15c():
 
 
 def _flo11_core(src):
-    """哨标的静态回落图标＝品牌标；**品牌缺失才**回落到按态图标。"""
+    """哨标的静态回落图标＝品牌标；**品牌缺失才**回落到按态图标。
+
+    ★ 0.53.2 合并修正（实测踩到，别退回字面量锚点）：原来比的是
+      `src.find('"logo\\antinel.ico"')` —— 那是**归一处的路径字面量**
+      （函数体外的 `$script:brandIcon = ...` 那一行），它永远在按态分支
+      之前 ⇒ 「把品牌分支整段挪到按态之后」这种真实劣化**判不出来**
+      （实测：交换两段后本函数仍返回 None）。字面量存在 ≠ 品牌分支先执行。
+      改锚**分支结构**：品牌分支 = `if ($script:brandIcon ... Test-Path ...)
+      { return $script:brandIcon }` 这一段，按态分支 = `$cand = Join-Path
+      $IconDir ($st + $suf + ".ico")`。比的是两句**可执行语句**的位置。
+    """
     if not src or not src.strip():
         return "读不到 tools/logo.ps1 —— 判据锚点失效"
-    brand = src.find('"logo\\antinel.ico"')
-    if brand < 0:
+    if '"logo\\antinel.ico"' not in src:
         return ("logo.ps1 里找不到品牌图标（logo\\antinel.ico）—— 回落时会画姿态灯"
                 "（创始人：「圆圈毕竟不是 LOGO」）")
+    brand = src.find('if ($script:brandIcon -ne "" -and (Test-Path -LiteralPath $script:brandIcon))')
+    if brand < 0:
+        return ("品牌分支不见了（找不到 `if ($script:brandIcon ... Test-Path ...)`"
+                " 那段）—— 回落时会画姿态灯（创始人：「圆圈毕竟不是 LOGO」）")
     fallback = src.find('Join-Path $IconDir ($st + $suf + ".ico")')
     if fallback < 0:
         return "丢了按态回落分支（品牌文件缺失时不许画不出来）"
     if fallback < brand:
         return "按态分支排在品牌之前 —— 哨标回落后仍先画姿态灯"
-    if "Test-Path -LiteralPath $brand" not in src:
+    if "Test-Path -LiteralPath $script:brandIcon" not in src:
         return "品牌分支没有存在性检查 —— 缺文件时会拿一个打不开的路径当图标"
     return None
 
@@ -1984,14 +2010,23 @@ def n_flo11():
         return "负控夹具不成立：没找到可变异的品牌路径"
     if _flo11_core(mut1) is None:
         return "负控失效：品牌路径改成 L1.ico 仍判合格"
-    # ② 三条断言字面都在，但品牌分支挪到按态之后（写成死代码）
-    i = src.find("$brand = Join-Path")
-    j = src.find("$cand = Join-Path $IconDir ($st + $suf + \".ico\")")
+    # ② 品牌分支**整段挪到**按态之后 —— 必须红。
+    #    ★ 必须真交换位置，不能只把品牌段删掉：删掉后归一处的字面量仍在，
+    #      老版判据（比字面量索引）照样合格 ⇒ 负控 vacuous。交换才是
+    #      「品牌排到按态之后」这个劣化的忠实模型（实测见探针输出）。
+    i = src.find('if ($script:brandIcon -ne "" -and (Test-Path -LiteralPath $script:brandIcon))')
+    j = src.find("$base = Join-Path $IconDir ($st + \".ico\")")
     if i < 0 or j < 0:
-        return "负控夹具不成立：取不到两个分支的锚点"
-    mut2 = src[:i] + src[j:]
+        return ("负控夹具不成立：取不到两个分支的锚点（品牌=%s，按态=%s）"
+                " —— 产品结构变了就更新锚点，别放宽断言" % (i >= 0, j >= 0))
+    _tail = "    return $script:brandIcon\n  }\n"
+    _e = src.find(_tail, i)
+    if _e < 0 or _e < i:
+        return "负控夹具不成立：取不到品牌段的段尾（%r）" % (_tail,)
+    _e += len(_tail)
+    mut2 = src[:i] + src[_e:j] + src[i:_e] + src[j:]
     if mut2 == src or _flo11_core(mut2) is None:
-        return "负控失效：品牌分支排到按态之后（死代码）仍判合格"
+        return "负控失效：品牌分支排到按态之后仍判合格"
     return True
 
 
@@ -2203,11 +2238,24 @@ class _PopEnv:
     def console(self, port, root):
         return (dict(self.rec), False)
 
+    @staticmethod
+    def finder(visible_only=True, run_id=None):
+        """假枚举：**永远空**（这条链路测的是"开窗"，不是"收窗"）。
+
+        ★★ 0.53.2（2026-10-20）：`pop` 收旧窗后新增了一次**回读**（判断
+          "投递过但窗还在 ⇒ 没收干净"）。判据若不注入这一处，回读会走到
+          **真桌面** —— 创始人桌面上真开着紧急提醒窗时，判据会对着一枚
+          真实窗口报"没收干净"，红因与产品无关（假红）；反之桌面干净时
+          又永远绿（假绿）。⇒ 必须注入，且注入点已在 `pop` 签名里。
+        """
+        return []
+
     def pop(self, **kw):
         base = dict(title="R0 失守：判据夹具", body="这是判据在说话，不是真事。",
                     level="R0", root=self.root, force=True, now=1000000.0,
                     sound=False, opener=self.opener, verbose=False,
-                    cfg={"bubble": True}, console=self.console)
+                    cfg={"bubble": True}, console=self.console,
+                    window_finder=self.finder)
         base.update(kw)
         return BB.pop(**base)
 
@@ -3549,14 +3597,14 @@ def n_flo10e():
     return True
 
 
-# ---------------------------------------------------------------- FLO-12 --
+# ---------------------------------------------------------------- FLO-17 --
 #: 0.53.2（T2）：tray.json 的 `logo` 块改**必写**，且失败与旧版**可区分**。
 #:   病根（0.53.1 条件写）：`_logo_spec_block()` 拿不到 ⇒ 不写 `logo` 键 ——
 #:   「旧版没这功能」与「新版拿不到规格」在文件里**逐字节相同**，哨标悄悄
 #:   变哑而无人知晓（静默缺失）。
 #:   修法：拿不到 ⇒ 仍写 `logo_missing: true` ＋ `logo_error`（失败标记），
 #:   并进审计链一条 `logo_spec_missing`（每进程每 episode 至多一条）。
-#:   FLO-12 钉写侧（含节流与 episode 语义）；FLO-12b 钉徽标痕迹的消费侧
+#:   FLO-17 钉写侧（含节流与 episode 语义）；FLO-17b 钉徽标痕迹的消费侧
 #:   （logo_events.jsonl ⇒ 链，**先链后改名**，零删除）。
 def _flo12_day_recs(root):
     fn = os.path.join(root, ".psl", "audit",
@@ -3567,8 +3615,8 @@ def _flo12_day_recs(root):
         return [json.loads(ln) for ln in f if ln.strip()]
 
 
-@check("FLO-12 规格拿不到也必须写：logo_missing 失败标记＋logo_error＋审计一条")
-def c_flo12():
+@check("FLO-17 规格拿不到也必须写：logo_missing 失败标记＋logo_error＋审计一条")
+def c_flo17():
     root = tempfile.mkdtemp(prefix="g0514_flo12_")
     # ★ 节流状态**本判据自带一份**：不读进程级 `_LOGO_SPEC_SEEN` ——
     #   否则第二次跑会被上一次留下的 failed=True 静默节流，判据把自
@@ -3620,13 +3668,13 @@ def c_flo12():
     return True
 
 
-@check("N-FLO12 负控：失败时什么都不写（0.53.1 条件写原样）⇒ 同一把尺子必须判红")
-def n_flo12():
-    if c_flo12() is not True:
-        return "夹具不成立：未变异时 FLO-12 就不合格，负控无分辨力"
+@check("N-FLO17 负控：失败时什么都不写（0.53.1 条件写原样）⇒ 同一把尺子必须判红")
+def n_flo17():
+    if c_flo17() is not True:
+        return "夹具不成立：未变异时 FLO-17 就不合格，负控无分辨力"
     # 变异＝旧口径本体：拿不到规格 ⇒ payload 里一个键都不加
     with _Patch(TR, _logo_failure_block=lambda err: {}):
-        why = c_flo12()
+        why = c_flo17()
         if why is True or why is None:
             return ("负控失效：失败时什么都不写也判合格 —— 静默缺失复发而"
                     "闸门无声（0.53.1 原病）")
@@ -3635,13 +3683,13 @@ def n_flo12():
     return True
 
 
-@check("N-FLO12b 负控：文件标记写了但不进链 ⇒ 审计断言必须判红")
-def n_flo12b():
-    if c_flo12() is not True:
-        return "夹具不成立：未变异时 FLO-12 就不合格，负控无分辨力"
+@check("N-FLO17b 负控：文件标记写了但不进链 ⇒ 审计断言必须判红")
+def n_flo17b():
+    if c_flo17() is not True:
+        return "夹具不成立：未变异时 FLO-17 就不合格，负控无分辨力"
     # 变异＝「只写文件标记、账本不记」：tray.json 看得见，第三方复核看不见
     with _Patch(TR, _logo_spec_missing_event=lambda root, err, seen=None: None):
-        why = c_flo12()
+        why = c_flo17()
         if why is True or why is None:
             return "负控失效：链上没记录也判合格 —— 账本对规格失败失明"
         if "logo_spec_missing" not in str(why):
@@ -3649,8 +3697,8 @@ def n_flo12b():
     return True
 
 
-@check("FLO-12b 徽标痕迹消费：logo_events.jsonl ⇒ 链（先链后改名，零删除）")
-def c_flo12b():
+@check("FLO-17b 徽标痕迹消费：logo_events.jsonl ⇒ 链（先链后改名，零删除）")
+def c_flo17b():
     root = tempfile.mkdtemp(prefix="g0514_flo12b_")
     ev = TR.logo_events_path(root)
     os.makedirs(os.path.dirname(ev), exist_ok=True)
@@ -3698,13 +3746,13 @@ def c_flo12b():
     return True
 
 
-@check("N-FLO12c 负控：消费函数被拔掉（痕迹没人进链）⇒ 同一把尺子必须判红")
-def n_flo12c():
-    if c_flo12b() is not True:
-        return "夹具不成立：未变异时 FLO-12b 就不合格，负控无分辨力"
+@check("N-FLO17c 负控：消费函数被拔掉（痕迹没人进链）⇒ 同一把尺子必须判红")
+def n_flo17c():
+    if c_flo17b() is not True:
+        return "夹具不成立：未变异时 FLO-17b 就不合格，负控无分辨力"
     # 变异＝消费者消失：logo_events.jsonl 无声堆积，谁都不读
     with _Patch(TR, drain_logo_events=lambda root=None: []):
-        why = c_flo12b()
+        why = c_flo17b()
         if why is True or why is None:
             return "负控失效：徽标痕迹没人消费也判合格 —— 痕迹文件会无声堆积"
         if "进链" not in str(why):
@@ -4511,6 +4559,364 @@ def n_flo16b():
     return True
 
 
+# B-17 族 —— 「投出去了」≠「没了」（0.53.2，2026-10-20）
+#
+# 病（创始人实测）：新紧急提醒冒出来若干秒后，**陈旧那枚又回到屏幕上**。
+# 现场物证（本机，2026-10-20 07:14）：`url.json` 里 `code_version=None`
+# 的两枚旧进程（console 117496 / daemon 99476）仍在跑 ⇒ 陈旧窗确实可能被
+# 旧代码重新画出来；但**复发的机制**不止"旧进程还在"，还有一条在**新代码
+# 自己身上**：
+#   · `_post_close` 走 `PostMessageW(WM_CLOSE)` —— 异步投递，宿主收到到
+#     真正销毁之间有真实延迟（本机实测 ≈0.5s）；
+#   · 旧版把**投递成功数**当成"关掉的数"直接返回、函数立刻返回；
+#   · 调用方 `inbox_bubble.pop` ④→⑤ 拿到返回值就**马上**开新窗，而新窗
+#     要等浏览器起进程、等窗就位（最多 6s）⇒ 这段窗口期里旧窗还在屏幕上，
+#     旧窗销毁前会重绘一次 ⇒ 用户看到"新的出来了，几秒后旧的又回来了"。
+#
+# 修法（长在**原语**上，不在调用方补 sleep）：
+#   `close_bubble_windows` 投递后以 50ms 步长轮询（`visible_only=False`，
+#   连"正在退场、已不可见"的也算在内）到枚举里真的没有它；`settle_sec`
+#   到点还在 ⇒ 如实返回"发出 N 条、仍有 M 枚没退"。返回值语义因此变成
+#   **"已确认消失的枚数"**，与 `open_console_settled` 的 C 步
+#   （`wait_console_windows_gone`）同一条纪律 —— 那条链早就落实了，提醒窗
+#   这条链漏了（同 §42「只守一条腿，另一条腿天然全绿」）。
+#   `finder` / `sleeper` 是判据注入点（与 `closer` 同一条纪律：**注入点必须
+#   出现在签名里**），判据不碰真桌面、也不真等 2 秒。
+#
+# 判据边界：本族测的是**关窗原语的时序语义**。⚠ 陈旧窗"被谁画出来"（旧进程
+# 还在跑）本族不测 —— 那是 T3 版本自检的领地（FLO-16），此处申报盲区。
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def _b17_desk():
+    """假桌面：`finder` 返回当前"还在"的句柄表，`closer` 把句柄挪进"退场中"。"""
+    desk = {"live": [101, 102], "leaving": [], "finds": 0}
+
+    def finder(visible_only=True, run_id=None):
+        desk["finds"] += 1
+        if visible_only:
+            return list(desk["live"])
+        return list(desk["live"]) + list(desk["leaving"])
+
+    def closer(h):
+        if h in desk["live"]:
+            desk["live"].remove(h)
+            desk["leaving"].append(h)
+            return True
+        return False
+    return desk, finder, closer
+
+
+@check("B-17a 关窗确认消失：投递后 50ms 步长轮询到枚举里真的没有它才说『关掉了』")
+def c_b17():
+    import inbox_window as WIN
+    # ① 第一拍就已消失 ⇒ 说"关掉了 N 枚（X.Xs 内确认已消失）"，且确实轮询过
+    desk, finder, closer = _b17_desk()
+    desk["leaving"] = []                     # 宿主立刻销毁（最快的那台机器）
+    slept = []
+
+    def sleep0(s):
+        slept.append(s)
+        desk["leaving"] = []
+    n, why = WIN.close_bubble_windows(finder=finder, closer=closer,
+                                      sleeper=sleep0, settle_sec=2.0)
+    if n != 2:
+        return "收掉 2 枚却报 %d 枚（枚数口径错了）：%r" % (n, why)
+    if "确认" not in why:
+        return ("说了『关掉了』却没体现『确认』—— 那正是把投递当结果的老口径：%r"
+                % (why,))
+    # ② 退场中（不可见但还在）⇒ **不许**说关掉了，要点名还剩几枚
+    desk, finder, closer = _b17_desk()
+    desk["leaving"] = []                     # 先清空，再由 sleep 逐步递减
+    budget = {"k": 3}
+
+    def sleep1(s):
+        # 模拟宿主真的销毁（3 拍后退干净）—— 证明"会等"而不是"等固定时长"
+        if budget["k"] > 0:
+            budget["k"] -= 1
+            if budget["k"] == 0:
+                desk["leaving"] = []
+    desk["leaving"] = [101, 102]
+    n, why = WIN.close_bubble_windows(finder=finder, closer=closer,
+                                      sleeper=sleep1, settle_sec=2.0)
+    if n != 2:
+        return "退干净后枚数应为 2，实得 %d：%r" % (n, why)
+    if "确认" not in why:
+        return "等到了消失却没说已确认：%r" % (why,)
+    # ③ 永不消失 ⇒ 必须如实说"仍有 N 枚没退"，且**不许**说"关掉了"
+    desk, finder, closer = _b17_desk()
+    desk["leaving"] = [101, 102]
+
+    def sleep2(s):
+        return None
+    n, why = WIN.close_bubble_windows(finder=finder, closer=closer,
+                                      sleeper=sleep2, settle_sec=0.2)
+    if "没退" not in why:
+        return ("宿主没响应时没说『没退』—— 调用方会把没关掉的当成功、"
+                "接着开新窗，新旧并存就是死灰复燃：%r" % (why,))
+    if "枚" not in why or "2" not in why:
+        return "失败文案没点名还剩几枚（人话要能直接读）：%r" % (why,)
+    if "关掉了" in why:
+        return ("失败路径里仍出现『关掉了』—— 一句话自相矛盾，"
+                "人只读前半句又会以为是成功：%r" % (why,))
+    # ④ 枚数不许虚高：同一句柄在两份枚举里各出现一次（live + leaving）
+    #    ⇒ 只许数**一次**。实测踩到：投递 2 枚报「仍有 4 枚没退」（探针）。
+    #    这里直接读文案里的数字 —— 人话能不能被现场核对，正是这条的靶心。
+    _m = re.search(r"仍有\s*(\d+)\s*枚", why)
+    if not _m:
+        return "失败文案里读不出剩余枚数：%r" % (why,)
+    if int(_m.group(1)) != 2:
+        return ("剩余枚数虚高：投递 2 枚、报「仍有 %s 枚」—— 用户拿这个数字"
+                "去现场核对会发现对不上，然后不再信这条自检" % _m.group(1))
+    _note("三条路：立即消失／中途消失／永不消失 —— 文案各自如实，枚数不虚高")
+    return True
+
+
+@check("N-B17 负控：把轮询删掉、还原成「投递数＝关掉的数」⇒ B-17 必须红")
+def n_b17():
+    import inspect as _inspect
+    import inbox_window as WIN
+    src = _inspect.getsource(WIN.close_bubble_windows)
+    # 结构锚点：确认循环必须存在（删掉它 ⇒ 老口径 ⇒ 下面的桩会撒谎）
+    _loop = "while left and waited"
+    if _loop not in src:
+        return ("负控夹具不成立：关窗原语里找不到确认循环（%r）—— "
+                "产品结构变了就更新锚点，别放宽断言" % (_loop,))
+    saved = WIN.close_bubble_windows
+
+    def old_style(visible_only=True, closer=None, run_id=None, why="",
+                  settle_sec=2.0, finder=None, sleeper=None):
+        """0.53.1 的老口径：投递成功数直接当结果，**不等**。"""
+        _find = finder
+        hs = _find(visible_only=visible_only, run_id=run_id)
+        n = 0
+        for h in hs:
+            try:
+                if closer(h):
+                    n += 1
+            except Exception:                               # noqa: BLE001
+                continue
+        if not hs:
+            return 0, "没有开着的紧急提醒窗。"
+        return n, ("关掉了 %d 枚紧急提醒窗。" % n)
+    try:
+        WIN.close_bubble_windows = old_style
+        desk, finder, closer = _b17_desk()
+        desk["leaving"] = [101, 102]         # 退场中，永不消失
+        n, why = WIN.close_bubble_windows(finder=finder, closer=closer,
+                                          sleeper=lambda s: None, settle_sec=0.2)
+    finally:
+        WIN.close_bubble_windows = saved
+    if "没退" in why:
+        return "负控失效：老口径（不等）居然报出了『没退』，说明这条判据测的不是『等』"
+    if "关掉了" not in why:
+        return "负控方向不对：老口径既没报没退、也没报关掉了（%r）" % (why,)
+    return True
+
+
+@check("FLO-16c 没有版本戳 ≠ 版本一致：在跑但无戳时**不许**打『版本一致』")
+def c_flo16c():
+    """0.53.2（2026-10-20 实测抓到的**假绿**，比红危险得多）。
+
+    现场：`daemon.pid`=99476 活着、`daemon.pid.meta.json` **不存在**（那个
+    进程是 0.53.0 起的，从不写戳），而 `daemon status` 打的是
+      「守护进程：版本一致（0.53.2）」
+    —— 拿**仓里的版本**去证明"跑的是同一版"。T3 这条自检存在的唯一意义就是
+    「旧进程还在跑」，它却在这一行上把最该报的形状报成了绿。
+
+    修法口径：**只有拿到戳、且戳与仓里一致，才许说"版本一致"**。
+    判据直接打运行时那一行（不读源码）：造四组 (running, alive) 组合。
+    """
+    import inbox_cli as CLI
+    import inbox_server as SV
+    cur = SV.code_identity()
+    good = {"code_version": cur.get("version"), "code_mtime": cur.get("mtime")}
+    # ① 对齐：有戳且一致 ⇒ 必须说"版本一致"
+    ln = CLI._runtime_lines("X", good, True, "")[0]
+    if "版本一致" not in ln:
+        return "有戳且一致却没报『版本一致』：%r" % (ln,)
+    # ② 在跑、无戳 ⇒ **不许**出现"版本一致"（这一条是本判据的靶心）
+    for empty in (None, {}, {"pid": 99476, "started_at": "2026-10-20T07:14:03"}):
+        ln = CLI._runtime_lines("X", empty, True, "")[0]
+        if "版本一致" in ln:
+            return ("在跑但没有版本戳，却报『版本一致』—— 拿仓里的版本自证，"
+                    "旧的 0.53.0 进程会被报成绿的（现场原样）：%r" % (ln,))
+        if "⚠" not in ln:
+            return "在跑但没有版本戳，却没有 ⚠ 标记：%r" % (ln,)
+    # ③ 不在跑 ⇒ 不许报差异（那条是 version_drift 的纪律，这里顺带钉住出口）
+    ln = CLI._runtime_lines("X", None, False, "没登记")[0]
+    if "⚠" in ln or "版本一致" in ln:
+        return "没在跑却给出了版本判断：%r" % (ln,)
+    return True
+
+
+@check("FLO-16d 修法命令必须真实存在：出口里点名的每个代码命令都要能在 parser 里找到")
+def c_flo16d():
+    """0.53.2（2026-10-20）：**给一条不存在的命令，比不说修法更坏**。
+
+    实测踩到：修法文案原写「`antinel inbox daemon restart`」—— 该子命令
+    根本不存在（`daemon` 只有一个位置参数 `status`），照抄会得到
+    `invalid choice: 'restart'`，然后用户认定整个自检是坏的。
+
+    ★ 判据不查"文案里有没有某句话"（那又变成锚字面量），而是：
+      把出口可能产出的修法串**真跑出来**，用反引号切出命令，逐条到**产品的
+      argparse 定义**里核对它真的能走通。命令清单从 parser 现场取，
+      不另抄一份 —— 抄一份就会和产品漂移（同"判据不许二次实现"）。
+    """
+    import argparse
+    import re as _re
+    import inbox_cli as CLI
+    import inbox_server as SV
+    cur = SV.code_identity()
+    # 把两条差异路径的修法串都拿出来（有戳不同版 / 无戳）
+    hints = []
+    for rec in ({"port": 1, "url": "x", "code_version": "0.53.0"},
+                {"pid": 1, "started_at": "x"}):
+        msg = SV.version_drift(rec, current=cur)
+        if msg:
+            hints.append(msg)
+    hints.append(SV._restart_hint({})[1])
+    hints.append(SV._restart_hint({"port": 1})[1])
+    # ④ 从 CLI 现场构造 parser：能走通的命令才算数
+    #   ★ `inbox_cli.build_parser()` 是 `antinel inbox …` **这一层**的 parser
+    #     （prog="antinel inbox"）⇒ 文案里的 `antinel inbox daemon status`
+    #     要先剥掉前两个词再喂给它。剥的规则写死在这儿：文案只许以
+    #     `antinel inbox ` 开头参与核对，别的（`antinel stats` 这类顶层命令）
+    #     本判据**不核**并明说跳过 —— 宁可少核一条，不许假装核过。
+    if not hasattr(CLI, "build_parser"):
+        raise Skip("inbox_cli 没有 build_parser ⇒ 无法核对命令，不假绿")
+    parser = CLI.build_parser()
+    bad, unchecked = [], []
+    for h in hints:
+        for cmd in _re.findall(r"`([^`]+)`", h or ""):
+            toks = cmd.split()
+            if not toks or toks[0] != "antinel":
+                continue                    # 不是我们的命令（比如文件路径）就跳过
+            if len(toks) < 3 or toks[1] != "inbox":
+                unchecked.append(cmd)
+                continue
+            try:
+                ns = parser.parse_args(toks[2:])
+            except SystemExit:
+                bad.append(cmd)
+                continue
+            except Exception:               # noqa: BLE001
+                bad.append(cmd)
+                continue
+            if getattr(ns, "fn", None) is None and getattr(ns, "cmd", None) is None:
+                bad.append(cmd)             # 解析得过但没人接 = 等于不存在
+                continue
+            # ★★ 光"parse 得过"**不算数**（2026-10-20 实测）：`daemon` 的
+            #   `status` 是 `nargs="?"` 自由位置参数 ⇒ `daemon restart` 会被
+            #   静默塞成 `status="restart"`，parse_args **不报错**。
+            #   所以要看入口函数认不认这个形状。
+            # ★★★ 但**绝不能真跑入口**（2026-10-20 实测踩到，本条判据自己
+            #   把守护进程起起来了、卡死在 `run_daemon` 的常驻循环里）：
+            #     `antinel inbox daemon --supervise` 的 `status` 是 None，
+            #     "None ⇒ 正常启动" ⇒ `_fn(ns)` 直接进 `run_daemon()` 死循环。
+            #     判据去"核对命令"却把用户的机器改了 —— 这比不核更坏。
+            #   ⇒ 改成**只读地**核对：只接受 `daemon status` 这一种形状真跑
+            #     （它只读）；`daemon <别的>` 与不带位置参数的 `daemon`
+            #     **一律不跑**，只按"入口的取值契约"静态核对 ——
+            #     契约写在 `cmd_daemon` 里：位置参数只许 `status`。
+            #     核对方式是**读产品源码里那个契约常量/判断**，不猜。
+            _fn = getattr(ns, "fn", None)
+            if _fn is None:
+                continue
+            _pos = getattr(ns, "status", None)
+            if toks[2:3] != ["daemon"]:
+                # 别的子命令（window/open/tray/…）：**一律不真跑**（会开窗/起进程）
+                unchecked.append("%s（非 daemon，未真跑）" % cmd)
+                continue
+            if _pos is None:
+                unchecked.append("%s（不带位置参数＝启动守护进程，未真跑）" % cmd)
+                continue
+            if str(_pos).strip().lower() != "status":
+                # ★★ 这一种**必须判红**（2026-10-20 实测三次才想通）：
+                #   `daemon` 的位置参数是一个**自由字符串**（`nargs="?"`），
+                #   入口拒绝它（返回 2）只是"用户体验上的补救"，它
+                #   **在命令层面仍然不存在**。文案把人指向 `daemon restart`，
+                #   用户得到的是"不认识这个用法"—— 他想要的那件事没做成。
+                #   ⇒ 文案里出现任何非 `status` 的 daemon 位置参数 = 假命令 = 红。
+                #   （曾经写的是"静态看待入口有没有 return 2"—— 那只能证明
+                #     入口会拒绝，**证明不了这条命令能用**，负控因此一直绿。）
+                bad.append(cmd)
+                continue
+            # 只剩 `daemon status` —— **只读**，可以真跑
+            _buf = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(_buf), contextlib.redirect_stderr(_buf):
+                    _rc = _fn(ns)
+            except SystemExit:
+                bad.append(cmd)
+                continue
+            except Exception:               # noqa: BLE001
+                raise Skip("入口核对命令时抛异常（%s）⇒ 不改判，报 SKIP" % cmd) from None
+            if _rc == 2:
+                bad.append(cmd)
+    if bad:
+        return ("出口点名的命令在 parser 里走不通：%s —— 用户照抄会得到 "
+                "invalid choice，然后认定自检是坏的"
+                % "、".join("`%s`" % b for b in bad))
+    if not hints:
+        return "夹具不成立：一条修法串都没拿到，判据无分辨力"
+    if unchecked:
+        _note("未核对（非 inbox 子命令）：%s" % "、".join(unchecked))
+    return True
+
+
+@check("N-FLO16c 负控：把「无戳也算一致」的老逻辑塞回去 ⇒ FLO-16c 必须红")
+def n_flo16c():
+    """变异点打在**产品的排版函数**上（不是打判据）：把 `_runtime_lines`
+    换回 0.53.2 修之前那版口径（`version_drift` 为 None 就说一致）。"""
+    import inbox_cli as CLI
+    if c_flo16c() is not True:
+        return "夹具不成立：未变异时 FLO-16c 就不合格，负控无分辨力"
+    saved = CLI._runtime_lines
+
+    def old_lines(name, running, alive, why_alive, pid=None):
+        import inbox_server as SV
+        if not alive:
+            return ["%s：不在跑（%s）" % (name, why_alive)]
+        drift = SV.version_drift(running)
+        if drift:
+            return ["%s：⚠ %s" % (name, drift)]
+        v = (running or {}).get("code_version") or SV.code_version() or "?"
+        return ["%s：版本一致（%s）" % (name, v)]
+    try:
+        CLI._runtime_lines = old_lines
+        why = c_flo16c()
+    finally:
+        CLI._runtime_lines = saved
+    if why is True:
+        return ("负控失效：把『无戳也说一致』的老逻辑塞回去之后判据仍然绿 —— "
+                "这条尺子测的不是那条纪律")
+    return True
+
+
+@check("N-FLO16d 负控：文案里点一条不存在的命令（daemon restart）⇒ FLO-16d 必须红")
+def n_flo16d():
+    """★ 这条负控的变异是**真实踩过的那个错**（不是我编的），所以它有史可依。"""
+    import inbox_server as SV
+    if c_flo16d() is not True:
+        return "夹具不成立：未变异时 FLO-16d 就不合格，负控无分辨力"
+    saved = SV._restart_hint
+
+    def bad_hint(rec, pid=None):
+        return ("守护进程", "重启守护进程：`antinel inbox daemon restart`")
+    try:
+        SV._restart_hint = bad_hint
+        why = c_flo16d()
+    finally:
+        SV._restart_hint = saved
+    if why is True:
+        return ("负控失效：文案点了不存在的 `daemon restart` 却仍判绿 —— "
+                "这条尺子没在核对命令")
+    if "restart" not in str(why):
+        return "负控方向不对：判红了但没点名 restart 那条命令（%s）" % (why,)
+    return True
+
+
 def _logo_root_problem(cmd, root):
     expected = {"-State": IL.state_path(root),
                 "-Action": IL.action_path(root),
@@ -4711,8 +5117,39 @@ def c_flo09():
     if "threading.Thread(target=_consume_actions_loop" not in sv:
         return "serve() 没起消费线程 —— 判据锁的是那一次真实调用"
     src_fn = inspect.getsource(SV._consume_actions_loop)
-    if "handle_actions" not in src_fn:
-        return "消费循环没走 inbox_daemon.handle_actions —— 动作语义出了第二份实现"
+    # ★★ 0.53.2（2026-10-20 实测纠正）：原来这里查 `"handle_actions" not in
+    #   src_fn` —— **锚的是字面量**。产品把默认消费器提成注入点后写成
+    #      `fn = consumer or DM.handle_actions`
+    #   字面量还在，但"唯一实现"这件事已经由**结构**表达 ⇒ 判据改锚结构
+    #   （同 §42：字面量在场 ≠ 那个分支真的被调用）。两件都要：
+    #     ① 默认消费器必须是 `DM.handle_actions`（`inbox_daemon` 那一份，
+    #        不是又在服务端写一份语义）；
+    #     ② 循环体里直接调用的函数名里，不许出现 `open_console_now`
+    #        （那是 `handle_actions` 的职责 —— 直接调它就是绕过注入点）。
+    import ast as _ast
+    _tree = _ast.parse(src_fn)
+    _default_ok = False
+    for _n in _ast.walk(_tree):
+        if not isinstance(_n, (_ast.Assign, _ast.AnnAssign)):
+            continue
+        _v = _n.value
+        if not (isinstance(_v, _ast.BoolOp) and isinstance(_v.op, _ast.Or)):
+            continue
+        if len(_v.values) < 2:
+            continue
+        _tail = _v.values[-1]
+        if (isinstance(_tail, _ast.Attribute) and _tail.attr == "handle_actions"
+                and getattr(_tail.value, "id", "") == "DM"):
+            _default_ok = True
+    if not _default_ok:
+        return ("消费循环没有以 `inbox_daemon.handle_actions` 作**默认消费器** —— "
+                "动作语义出了第二份实现（或默认值被人换掉）")
+    _called = {_n.func.attr for _n in _ast.walk(_tree)
+               if isinstance(_n, _ast.Call)
+               and isinstance(_n.func, _ast.Attribute)}
+    if "open_console_now" in _called:
+        return ("消费循环体里直接调了 `open_console_now` —— 绕过了默认消费器，"
+                "注入点成了摆设")
     # 行为：consumer 被注入，收到的 console_url 必须原样透传
     root = tempfile.mkdtemp(prefix="g0514_flo_")
     got = {}
@@ -6688,38 +7125,59 @@ def n_t4_term_no_dup():
     return True
 
 
-def main():
+def main(argv=None):
+    # ★ 2026-10-20 加：`--only <前缀>` 单跑一族（可给多个）。
+    #   为什么需要：判据套件跑到中段阻塞时，全量重跑一次要十几分钟，
+    #   定位却只需看一族。**这不是放宽判定** —— 带 `--only` 时退出码只反映
+    #   被选中的那几条，屏上会明说"非全量"，绝不许拿它的绿当交付证据。
+    argv = list(sys.argv[1:] if argv is None else argv)
+    only = None
+    if "--only" in argv:
+        i = argv.index("--only")
+        only = [x for x in argv[i + 1:] if not x.startswith("-")]
+        if not only:
+            print("--only 后面要给前缀，例如 --only B-17 FLO-16", file=sys.stderr)
+            return 2
     print("=" * 78)
     print("0.49.0 收口判据 —— W-08 默认尺寸 · W-09 浮层逃逸 · U-17 图标动效 · "
           "U-18 哨标比例/不被裁 · B-02…B-08/B-13 冒泡 · FLO-01…FLO-05 漂浮哨标")
     print("＋ FLO-10a…e 哨标动效三态（0.53.1：标准 LOGO／整圆可点／保持动态）")
-    print("＋ FLO-12a…c 哨标规格失败留痕（0.53.2 T2：必写标记／进链／先链后改名）")
+    print("＋ FLO-17a…c 哨标规格失败留痕（0.53.2 T2：必写标记／进链／先链后改名）")
     print("＋ FLO-13 回落画品牌 LOGO（0.53.2 T1：方形深色底板满幅／整窗可点）")
     print("＋ FLO-14a…c 高 DPI 一个派生（0.53.2 T4：46->46/58/69/92／换屏重算）")
     print("＋ FLO-15a…e 五态一致性（0.53.2 T5：媒体字节／键闭包／姿态灯源／不塌缩／同源）")
-    print("＋ FLO-16a…b 长驻进程版本自检（0.53.2 T3：跑的是哪版 vs 仓里哪版／只读）")
+    print("＋ FLO-16a…d 长驻进程版本自检（0.53.2 T3：跑的是哪版 vs 仓里哪版／只读／无戳≠一致／修法命令须真实存在）")
+    print("＋ B-17a…b 关窗确认消失（0.53.2：投出去了≠没了／陈旧冒泡死灰复燃）")
     print("＋ J1–J5「五条违和」同类可抓（原 0518，2026-10-16 按 A2/P5 并入）")
     print("（负控全部内存/临时目录变异，不写任何产品文件；node 缺失 ⇒ SKIP，不假绿）")
+    if only:
+        print("⚠ 非全量：只跑前缀 %s —— 这几条的绿**不能**当交付证据" % ("／".join(only)))
     print("=" * 78)
     ok = fail = skip = 0
     for name, fn in RESULTS:
+        if only and not any(name.startswith(p) for p in only):
+            continue
         try:
             why = fn()
             if why is True or why is None:
                 why = ""
-            print("  ✅ %-62s %s" % (name, why or ""))
+            # ★ 每条都 flush：判据阻塞时，日志必须停在"正跑哪一条"上
+            #   （2026-10-20 实测：不 flush 时进程被卡住，日志停在上一条绿，
+            #    定位只能靠猜 —— 那本身就是一次"测不出却说不出"）。
+            print("  ✅ %-62s %s" % (name, why or ""), flush=True)
             ok += 1
         except Skip as s:
-            print("  ⏭️  %-62s %s" % (name, s))
+            print("  ⏭️  %-62s %s" % (name, s), flush=True)
             skip += 1
         except AssertionError as e:
-            print("  ❌ %-62s %s" % (name, e))
+            print("  ❌ %-62s %s" % (name, e), flush=True)
             fail += 1
         except Exception as e:                                  # noqa: BLE001
-            print("  💥 %-62s %r" % (name, e))
+            print("  💥 %-62s %r" % (name, e), flush=True)
             fail += 1
     print("-" * 78)
-    print("  %d 绿 / %d 红 / %d 跳过" % (ok, fail, skip))
+    print("  %d 绿 / %d 红 / %d 跳过%s" % (ok, fail, skip,
+                                          "（非全量）" if only else ""))
     return 0 if fail == 0 else 1
 
 

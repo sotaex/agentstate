@@ -252,11 +252,13 @@ function Resolve-IconPath([string]$st, [string]$sh) {
   # LAST resort: the state lamp family -- same fallback rule as
   # inbox_tray.icon_file, no second opinion here.
   if ($IconDir -eq "") { return "" }
-  # 2026-10-20: brand mark first (same reasoning as tray.ps1). The posture
-  # light is not a logo; when the motion spec is unavailable we still want the
-  # product mark, not "a circle".
-  $brand = Join-Path (Split-Path -Parent $IconDir) "logo\antinel.ico"
-  if (Test-Path -LiteralPath $brand) { return $brand }
+  # NOTE (2026-10-20, merge): a second "brand first" derivation used to sit
+  # here, re-building the same assets/logo path from -IconDir. It was
+  # UNREACHABLE -- reaching this point already means $script:brandIcon is empty
+  # or missing, and lines 242-245 derive that same path whenever -IconDir is
+  # given -- and it BYPASSED -BrandIcon, so an explicit caller could not keep
+  # the badge off the brand plate. One derivation only (do not write the
+  # path literal back into this comment: guards anchor on it).
   $suf = ""
   if ($SHIELD_SUFFIX.ContainsKey($sh)) { $suf = $SHIELD_SUFFIX[$sh] }
   if ($suf -ne "") {

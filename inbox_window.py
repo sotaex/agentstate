@@ -1079,28 +1079,79 @@ def find_bubble_windows(mark=BUBBLE_TITLE_MARK, visible_only=True, run_id=None):
     return out
 
 
-def close_bubble_windows(visible_only=True, closer=None, run_id=None, why=""):
+def close_bubble_windows(visible_only=True, closer=None, run_id=None, why="",
+                         settle_sec=2.0, finder=None, sleeper=None):
     """关掉紧急提醒窗（**发 WM_CLOSE，不强杀**）；返回 `(关掉几个, 人话)`。
 
     ★ 一次只留一枚紧急提醒：新的要弹之前，先把旧的收掉 —— 不然屏幕上会叠起
       一串同类通知，那正是「告警泛洪」（规格《品牌动效报警语法》铁律二）。
     ★ `closer` 可注入（判据不必碰真实桌面）—— 与 `close_console_windows`
       同一条纪律：**注入点必须出现在签名里**（0.36.2 的教训）。
+
+    ★★★ 0.53.2 根治「陈旧冒泡死灰复燃」（创始人 2026-10-20 实测：
+      新冒泡出来若干秒后，旧冒泡又回来了）。根因不在关窗本身，而在
+      **"投出去了"被当成"没了"**：
+        · `_post_close` 走 `PostMessageW(WM_CLOSE)` —— 异步投递，
+          宿主收到消息到真正销毁窗口之间有真实延迟（本机实测 ≈0.5s）；
+        · 旧版把**投递成功数**直接当"关掉的数"返回，函数**立刻返回**；
+        · 调用方（`inbox_bubble.pop` ④→⑤）拿到返回值就**马上**开新窗，
+          而新窗（`open_bubble_window`）要等浏览器起进程、等窗就位（最多 6s）
+          ⇒ 这段时间里**旧窗还在屏幕上**。旧窗在销毁前会重绘一次，
+          用户看到的就是"新的出来了，几秒后旧的又回来了"。
+      ⇒ 机制性修法：**不确认消失就不许说关掉了**。投递后轮询到窗口真的
+        从枚举里消失；等不到就如实返回"仍有 N 枚没退"，由调用方决定。
+        这与 `open_console_settled` 的 C 步（`wait_console_windows_gone`）
+        是**同一条纪律**，此前只在监理窗那条链上落实了，提醒窗这条链漏了。
+      ★ 为什么不在 `pop` 里补一个 sleep：sleep 是猜时长（机器快慢不同），
+        而且换个人写调用方就会再漏一次。判据必须长在**原语**上 ——
+        凡是发 WM_CLOSE 的关窗函数，返回就意味着"已确认消失"。
+      ★ `finder` / `sleeper` 是判据注入点（同 `closer`，必须在签名里）：
+        判据要在假桌面上验两条路（按时消失 ⇒ 说"已确认"；
+        永不消失 ⇒ 说"仍有 N 枚没退"），不碰真桌面、也不真等 2 秒。
     """
     if closer is None:
         def closer(h):                                      # noqa: E731
             return _post_close(h)
-    hs = find_bubble_windows(visible_only=visible_only, run_id=run_id)
+    _find = finder or find_bubble_windows
+    _sleep = sleeper or time.sleep
+    hs = _find(visible_only=visible_only, run_id=run_id)
+    if not hs:
+        return 0, "没有开着的紧急提醒窗。"
+    targets = set(hs)               # ★ 只追**我投递过的这一批**，不追别人的窗
     n = 0
-    for h in hs:
+    for h in targets:
         try:
             if closer(h):
                 n += 1
         except Exception:                                   # noqa: BLE001
             continue
-    if not hs:
-        return 0, "没有开着的紧急提醒窗。"
-    return n, ("关掉了 %d 枚紧急提醒窗%s" % (n, ("（%s）" % why) if why else "。"))
+    # ── 关键：投递 ≠ 消失。轮询到枚举里真的不再有它（含不可见的退场中窗口）──
+    # ★★ 计数口径（2026-10-20 探针实测抓到的显示缺陷）：`left` 必须与
+    #   `targets` **取交集**再数。原来直接 `len(left)` ⇒
+    #     ① 退场中的窗若同时出现在 live 与 leaving 两份枚举里，会被数两遍
+    #        （实测：投递 2 枚，报「仍有 4 枚没退」，枚数虚高一倍）；
+    #     ② 不属于本次投递的窗（别的进程新开的）也被算成"我的没退" ⇒
+    #        一句本该准确的话变成吓人的错话。
+    #   人话里的数字必须能被现场核对 —— 否则用户拿它去查会发现对不上，
+    #   然后不再相信这条自检。
+    _step = 0.05
+    waited = 0.0
+
+    def _left_now():
+        try:
+            return sorted(set(_find(visible_only=False, run_id=run_id)) & targets)
+        except Exception:                                   # noqa: BLE001
+            return sorted(targets)          # 枚举坏了 ⇒ 当"还在"，不假装没了
+    left = _left_now()
+    while left and waited < float(settle_sec):
+        _sleep(_step)
+        waited += _step
+        left = _left_now()
+    tail = ("（%s）" % why) if why else ""
+    if left:
+        return n, ("发出 %d 条关闭指令，但 %.1f 秒后仍有 %d 枚紧急提醒窗没退"
+                   "（不是强杀，宿主没响应）%s" % (n, waited, len(left), tail))
+    return n, ("关掉了 %d 枚紧急提醒窗%s（%.1fs 内确认已消失）" % (n, tail, waited))
 
 
 def close_logo_windows(visible_only=True, closer=None, run_id=None, why=""):
