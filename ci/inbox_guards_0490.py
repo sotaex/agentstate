@@ -2413,7 +2413,15 @@ RECT = (100, 100, 520, 640)
 APPEAR_AFTER = 2.5
 CALLS = {"find": 0, "place": 0, "rect": 0, "popen": 0,
          "first_find_empty": None}
-_T0 = [0.0]
+# ★★ 2026-10-21（时红时绿修复，创始人 05 点批）：epoch 由「模块 import 时刻」
+#   改成「**第一次轮询时刻**」。为什么（实测，非推演）：旧的 `_T0[0]` 在 import
+#   时置 0，2.5s 里混进了**解释器启动＋子进程拉起**的时间 —— 机器一慢（实测：
+#   我并发编译时）子进程起来就超过 2.5s ⇒ 窗口「第一次轮询就出现」⇒ 正臂报
+#   「夹具不忠实」假红，而随后连跑 8 次全绿。**时红时绿比恒红更坏**（铁律 2）。
+#   新口径：`_T0[0] is None` 时在第一次 find 里置 ⇒ 首轮必然空窗（铁律），
+#   而 2.5s 度量的就是**轮询开始后的建窗时长**（真机 Edge 实测 1–2.5s）——
+#   被测的那件事从「解释器快不快」还原成「等没等窗口」。
+_T0 = [None]
 
 
 def console_geometry():
@@ -2450,6 +2458,10 @@ def window_position_str(rect):
 
 def find_console_windows(suffix=None, run_id=None):
     CALLS["find"] += 1
+    # ★ 2026-10-21：epoch 在**第一次轮询**时置（见 `_T0` 注）——
+    #   解释器启动时间从此与「窗口出现早晚」无关，假红不再有发生地。
+    if _T0[0] is None:
+        _T0[0] = time.time()
     up = time.time() - _T0[0] >= APPEAR_AFTER
     if CALLS["first_find_empty"] is None:
         CALLS["first_find_empty"] = not up
@@ -2491,7 +2503,9 @@ SV.subprocess = types.SimpleNamespace(
     Popen=_Popen, DEVNULL=-3, CREATE_NO_WINDOW=0)
 SV.webbrowser = types.SimpleNamespace(open=lambda url: True)
 
-_T0[0] = time.time()
+# ★★ 2026-10-21：这里原来有一句 `_T0[0] = time.time()`（import 即起算）——
+#   它正是假红的源头（2.5s 里混进解释器启动）。已删；epoch 改由
+#   `find_console_windows` 第一次调用时置（见 `_T0` 定义处注释）。
 if MODE == "settled":
     rep = SV.open_console_settled(URL, wait_sec=WAIT)
 elif MODE == "bare":
