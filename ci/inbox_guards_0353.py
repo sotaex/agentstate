@@ -1305,6 +1305,14 @@ def c_consequence_blindspot_counts_as_loss():
     """★★ 查不出受监管落点清单 ⇒ **按"有"算**（红），不许当作"没有"。
 
     ★ 本仓铁律：「查不出来 ≠ 查出来是好的」。把读失败降级成"无损失"＝假失守。
+
+    ★★ 2026-10-21 换锚（第八次撞"尺子钉字面"那根钉子）：旧断言
+      `"盲区" in text` —— 本轮把文案里的「盲区」改成人话，判据当场假红，
+      而产品是**对的**。现在改钉**结构与派生**：
+        ① `kind == "landing_unknown"`（这一路确实被走到）；
+        ② 异常类名 `RuntimeError` 出现在文案里 ⇒ 这句话是**由真实失败派生**的，
+           不是写死的字符串（写死的字符串随时可能与事实不符）。
+      文案本身不再逐字钉。
     """
     import host_shield as HS
     os.environ["ANTINEL_HUB_DIR"] = _tmpdir()
@@ -1318,7 +1326,7 @@ def c_consequence_blindspot_counts_as_loss():
     try:
         cons = HS._outage_consequences(HS.load_state(), _tmpdir())
         return (len(cons) == 1 and cons[0]["kind"] == "landing_unknown"
-                and "盲区" in cons[0]["text"])
+                and "RuntimeError" in cons[0]["text"])
     finally:
         HS.iter_gate_targets = saved
 
@@ -1576,23 +1584,86 @@ def n_light_warn_is_down_and_interrupted_is_l1():
 
 
 def c_consequences_has_consumer():
-    """★★ 失守的**损失清单必须在页面上看得见**（登记了必须等于会被查）。
+    """★★ 监理不在岗的**后果清单必须在页面上看得见**（登记了必须等于会被查）。
 
     ★ 为什么：`guard_posture` 产出 `consequences` 却**零消费点** —— 正是本仓点名的
       「登记了却不会被查」的假守卫。创始人要的正是"说出损失"。
+    ★★ 2026-10-21：标题随产品文案一起换（旧「失守的损失：以下 N 项（此刻实况，
+      非计数）」已改成人话）。**只钉新标题这一处字面** —— 条目文案由
+      `c_consequences_has_action` 的行为臂覆盖，不再逐字钉（尺子钉字面 ⇒
+      改文案就假红，本轮已第八次撞同一根钉子）。
     """
     down = {"state": "down", "label": "失守", "why": "监理不在岗",
             "can_fix": True, "fix": "revive", "fix_hint": "马上修复（重新拉起监理）",
             "consequences": [{"kind": "zone_unlocked",
-                              "text": "有 1 个安全区，此刻没人给它们上锁：D:\\secret"}]}
+                              "text": "有 1 个安全区还没上锁：D:\\secret"}]}
     h = SV.render_page(view="inbox", root=G.new_hub(), token="t", posture=down,
                        items=[G.item("L2", "unread")])
     return ('class="cons"' in h and "D:\\secret" in h
-            and "失守的损失" in PC.body(h))
+            and "监理不在岗，这几件事现在没人管" in PC.body(h))
+
+
+def _cons_action_core(posture):
+    """纯判断（正/负控共用）：带 `consequences` 的姿态渲染后**必须给得出下一步**。
+
+    返回 True 或说明串。
+
+    ★ S48 选层（MEMORY #19）：`class="cons"`／`class="fixbtn"` 是**结构**锚
+      （纯 ASCII，打在裸 HTML 上）；`怎么解决` 是**正文文案**锚 ⇒ 必须过
+      `PC.body(...)`，与 `_cons_consumer_core` 同一口径（不选层就是假绿：
+      governance 消毒前的文本里同样能匹配上）。
+    """
+    h = SV.render_page(view="inbox", root=G.new_hub(), token="t", posture=posture,
+                       items=[G.item("L2", "unread")])
+    if 'class="cons"' not in h:
+        return "夹具不成立：有 consequences 却没渲染出红块（渲染链变了，需更新）"
+    if 'class="fixbtn"' not in h and "怎么解决" not in PC.body(h):
+        return ("红块没有下一步（既没按钮也没「怎么解决」）—— 用户被吓到却没法操作"
+                "（这正是创始人 2026-10-21 截图点名的形状）")
+    return True
+
+
+def c_consequences_has_action():
+    """★★ 红块必须带得出下一步（创始人 2026-10-21 截图：
+       「红色部分看着让人紧张，但是又没法操作」）。
+
+    截图那一格的形状：`consequences` 非空 ＋ `can_fix=False` ＋ `fix_hint` 空
+    ⇒ 页面出现一块红，**没有按钮、没有说明**。
+
+    ⇒ 规矩：**`consequences` 非空 ⇒ 必须给得出下一步**（按钮 or 「怎么解决」）。
+      给不出，就不该显示红色。
+
+    ★ 与 `0353 X11` 的分工：X11 守**源头**（研发态不许产出后果），
+      本条守**渲染层**（只要有后果就必须有下一步）。源头修了，规矩仍在 ——
+      换任何一条来路产出后果，都跑不掉这条。
+    """
+    r = _cons_action_core({"state": "down", "label": "失守", "why": "监理不在岗",
+                           "can_fix": True, "fix": "revive",
+                           "fix_hint": "马上修复（重新拉起监理）",
+                           "consequences": [{"kind": "zone_unlocked",
+                                             "text": "有 1 个安全区还没上锁"}]})
+    return r if r is not True else True
+
+
+def n_consequences_has_action():
+    """负控：把动作摘掉（`can_fix=False` 且 `fix_hint` 空 ⇒ 截图那一格）⇒ 必须红。
+
+    ★ 为什么这个负控不是 vacuous：它复现的正是**截图里真实出现过的那一格**，
+      而且产品今天已经没有来路能产出它（X11 把 dev 那条堵了）⇒ 本条是
+      **冗余保险**，与 0470 的 poison 门同型。保险的价值在于：
+      谁再造一条"有后果却给不出动作"的来路，这条当场红。
+    """
+    r = _cons_action_core({"state": "down", "label": "失守", "why": "监理不在岗",
+                           "can_fix": False, "fix": "revive", "fix_hint": "",
+                           "consequences": [{"kind": "zone_unlocked",
+                                             "text": "有 1 个安全区还没上锁"}]})
+    if r is True:
+        return "负控失效：摘掉动作后判据仍然绿 ⇒ 该规矩没在承重"
+    return True
 
 
 def n_consequences_has_consumer():
-    """负控：**没有后果**（中断）⇒ 页面上不许出现"失守的损失"那一块（否则是常驻噪音）。"""
+    """负控：**没有后果**（中断）⇒ 页面上不许出现那一块红（否则是常驻噪音）。"""
     intr = {"state": "interrupted", "label": "中断", "why": "此刻没有监管对象",
             "can_fix": True, "fix": "revive", "fix_hint": "马上修复（重新拉起监理）",
             "consequences": []}
@@ -4963,6 +5034,8 @@ CHECKS_0353 = [
      n_light_warn_is_down_and_interrupted_is_l1),
     ("P12 失守损失在页面上看得见", c_consequences_has_consumer,
      n_consequences_has_consumer),
+    ("P12 红块必须带得出下一步", c_consequences_has_action,
+     n_consequences_has_action),
     # ---- 八、告警降噪（0.35.3，创始人报障「右下一直冒泡」）----
     ("P12 自启缺失不刷屏留痕", c_task_missing_recorded_once,
      n_task_missing_recorded_once),

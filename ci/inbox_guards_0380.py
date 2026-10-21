@@ -335,7 +335,20 @@ def n_s14():
 #:   主灯只该有 R0/L2/L1/L0 四态可及（dev/Ls 不再是灯），而 dev/Ls 必须
 #:   在**徽标通道**上可及。两个集合都**写死**（不取自 `M.LIGHT_STATES`／
 #:   `M.STATE_LABEL`）—— 与本族纪律一致：期望取自被测对象则负控一变异就跟着变。
-_LAMP_REACH = ("R0", "L2", "L1", "L0")
+#: ★★★ 2026-10-21 二次重签（创始人「拦截态长时间保持是否有问题」那轮）：
+#:   **可达性拆成两个集合，不许混**：
+#:     · `_LAMP_REACH` ＝ **生产可达**（今天有真实来路点得亮它）⇒ R0/L1/L0；
+#:     · `_MECH_ONLY_REACH` ＝ **仅机制可达**（只有夹具合成才点得亮）⇒ **L2**。
+#:   为什么 L2 掉出生产可达：唯一 L2 级 kind 是 `tool_call_blocked`，而它在
+#:   `AUTO_HANDLED_KINDS`（Antinel 已自己拦下）⇒ 永远落 info 桶 ⇒ 不抬灯。
+#:   这不是回归，是**本轮裁决**（规格 v1.2 §3.5 曾用"保 L2 可达"否掉口径 B，
+#:   而创始人实测证明那一案的产物就是"灯一直挂在拦截"）⇒ 详见
+#:   设计稿 §47.11.7.10 与六态规格补条款。
+#:   ★ 纪律：**不许拿夹具制造的可达性冒充生产可达**（登记簿三纪律：
+#:     "实例不许借判据充数"）。所以 L2 的可达性单独一格、单独一个 check 名，
+#:     名字里就写清"生产今日无此来路"—— 每次闸门跑都会把这句事实念一遍。
+_LAMP_REACH = ("R0", "L1", "L0")                 # 生产可达
+_MECH_ONLY_REACH = ("L2",)                       # 仅机制可达（夹具合成）
 _BADGE_REACH = ("dev", "granary")
 _COMBOS = [
     ("down", 0, False), ("warn", 0, False), ("guarding", 0, False),
@@ -401,13 +414,20 @@ def _badge_reach():
     return seen
 
 
-@check("S15 主灯四态 ＋ 徽标两态**逐态可达**（分通道，缺任何一态即红）")
+@check("S15 主灯生产可达 R0/L1/L0；L2 仅机制级（生产今日无 action 桶 L2 记录，"
+       "见 §47.11.7.10）＋ 徽标两态可达")
 def s15():
     seen = set(_reach_table().values())
     missing = [s for s in _LAMP_REACH if s not in seen]
     if missing:
         return ("有**主灯**态点不亮（不可达）：%r —— 每态都必须有能点亮它的"
                 "真实组合（实测集 %r）" % (missing, sorted(seen)))
+    # ★ 仅机制可达的那一格：必须仍然点得亮（机制没坏），但**名字与注释都写清**
+    #   生产今日没有这条来路 —— 不许拿它冒充"生产可达"。
+    mech_missing = [s for s in _MECH_ONLY_REACH if s not in seen]
+    if mech_missing:
+        return ("仅机制级可达的态也点不亮了：%r —— 说明「action 桶的 L2」这条"
+                "机制本身坏了（不只是没有来路）。实测集 %r" % (mech_missing, sorted(seen)))
     # ★ 反向：dev/Ls **不该**再出现在主灯上（它们已移徽标通道）。
     leaked = [s for s in ("dev", "Ls") if s in seen]
     if leaked:
