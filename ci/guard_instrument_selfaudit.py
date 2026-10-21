@@ -1098,6 +1098,30 @@ def _design_chapters(text):
 _ID_CHARS = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-")
 
 
+def _title_const(arg):
+    """`@check` 首参的**常量部分**（判据 id 就在它的串首）。取不到 ⇒ None。
+
+    ★★ 为什么认 BinOp/JoinedStr（2026-10-22 修，S57 假阴性的根因）：
+      标题要带**运行时数字**时写作 `"U-26 ★ … ≤ %d …" % _STE_BOOK_MAX`
+      —— 首参是 BinOp 不是 Constant ⇒ 旧实现整条跳过 ⇒ U-26／U-29／U-30
+      **三条真判据对 `_judge_titles()` 隐形**（S57 报「指向不存在的判据」，
+      而它们明明在 0490 里）。尺子看不见真判据 ＝ 覆盖账双向失真
+      （该红的假红、真缺的假绿）。修法：取**左操作数常量**的首词 ——
+      id 在格式化之前就在串首，不需要求出格式化后的值。
+    ★ JoinedStr 只在**首段是常量**时认（f"{x} U-26" 这种 id 不在串首的形态
+      不猜 —— 猜了就是把「像 id」当 id）。
+    """
+    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+        return arg.value
+    if isinstance(arg, ast.BinOp) and isinstance(arg.op, ast.Mod):
+        return _title_const(arg.left)
+    if isinstance(arg, ast.JoinedStr) and arg.values:
+        first = arg.values[0]
+        if isinstance(first, ast.Constant) and isinstance(first.value, str):
+            return first.value
+    return None
+
+
 def _looks_like_id(tok):
     # 长度下限取 2：体检族真有 `H3`／`H7`／`H8`／`H9` 这种两字符 id（首版写 3，
     # 结果把四条真判据判成「不存在」—— 尺子自己先瞎了一次，记在这里）。
@@ -1130,10 +1154,10 @@ def _judge_titles():
             texts = []
             if isinstance(node, ast.FunctionDef):
                 for d in node.decorator_list:
-                    if (isinstance(d, ast.Call) and d.args
-                            and isinstance(d.args[0], ast.Constant)
-                            and isinstance(d.args[0].value, str)):
-                        texts.append(d.args[0].value)
+                    if (isinstance(d, ast.Call) and d.args):
+                        head = _title_const(d.args[0])
+                        if head:
+                            texts.append(head)
             elif isinstance(node, ast.Tuple) and len(node.elts) >= 2:
                 first = node.elts[0]
                 if isinstance(first, ast.Constant) and isinstance(first.value, str):
