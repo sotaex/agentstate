@@ -342,9 +342,10 @@ _COMBOS = [
     ("interrupted", 0, False), ("unknown", 0, False), ("off", 0, False),
     ("dev", 0, False),
     ("guarding", 1, False),      # + 历史失守账（R0 不抬灯）
-    ("guarding", 2, False),      # + 刚发生的拦截账（info 桶，保持期内）
+    ("guarding", 2, False),      # + 拦截账（info 桶 ⇒ **不抬灯**，见 S100）
     ("guarding", 3, False),      # + 两者都有
-    ("guarding", 4, False),      # + 刚发生的注意账（info 桶，保持期内）
+    ("guarding", 4, False),      # + 注意账（info 桶 ⇒ 不抬灯）
+    ("guarding", 5, False),      # + 拦截账（**action 桶**，机制级 ⇒ L2 的唯一来路）
     ("guarding", 0, True),       # + 粮低
     ("off", 2, False),
 ]
@@ -360,6 +361,11 @@ def _combo_items(items_n):
         return [G._mk_item(kind="tool_call_blocked")]         # L2 事件
     if items_n == 4:
         return [G._mk_item(kind="host_shield_revived")]       # L1 事件（info 桶）
+    if items_n == 5:
+        # ★ 2026-10-21：**action 桶的 L2**（机制级夹具）—— info 桶不再抬灯之后，
+        #   L2 的唯一可达路径就是"只有你能解决"的拦截（规格 v1.1 §B）。
+        #   调用方（`_reach_table`）负责把 `AUTO_HANDLED_KINDS` 临时摘掉它。
+        return [G._mk_item(kind="tool_call_blocked")]
     return [G._mk_item(kind="host_shield_breach"),
             G._mk_item(kind="tool_call_blocked")]
 
@@ -370,9 +376,15 @@ def _reach_table():
     low = {"state": "low", "why": "x"}
     out = {}
     for ps, n, g in _COMBOS:
-        out[(ps, n, g)] = M.light_explain(
-            {"state": ps, "why": "x"}, _combo_items(n),
-            granary=(low if g else None))["state"]
+        _old = M.AUTO_HANDLED_KINDS
+        if n == 5:
+            M.AUTO_HANDLED_KINDS = frozenset(_old - {"tool_call_blocked"})
+        try:
+            out[(ps, n, g)] = M.light_explain(
+                {"state": ps, "why": "x"}, _combo_items(n),
+                granary=(low if g else None))["state"]
+        finally:
+            M.AUTO_HANDLED_KINDS = _old
     return out
 
 
@@ -490,12 +502,17 @@ def n_s16():
 #:   一句「不随灯变色」点明二者不与主灯同显。
 #: ★ 期望短语／禁语都**写死在这里**（不取自 `glossary` 对象）—— 与本族纪律一致：
 #:   期望若取自被测对象，负控一变异它就跟着变，判据永远绿。
-_GL_MUST = ("失守只认此刻", "拦截／注意",            # 灯只认此刻/刚发生
+#: ★★ 2026-10-21（创始人「它一直是拦截，现在还是」）：MUST 第二项原写
+#:   「拦截／注意」（"灯看最近 24 小时的账"）—— 口径已反转为 **info 桶不抬灯**
+#:   （规格 v1.1 §B 上策）⇒ 换锚为「只进收件箱」＋把旧短语列入 FORBID
+#:   （谁把"拦截也会点灯"写回词条，S17 当场红）。
+_GL_MUST = ("失守只认此刻", "只进收件箱",            # 灯只认此刻；拦截不点灯
             "研发中", "缺粮", "不随灯变色")          # 并存态不抢灯，在旁边另显示
 _GL_FORBID = ("两个读数", "不是「此刻监理好不好」",  # 旧口径的两处特征措辞
               "缺粮只认此刻",                       # 0.51.0：缺粮已不在灯上
               "徽标",                               # 0.53.5：内部词，用户从未见过
-              "点灯")                               # 0.53.5：比喻，STE100 禁
+              "点灯",                               # 0.53.5：比喻，STE100 禁
+              "拦截／注意")                          # 2026-10-21：拦截已不点灯
 
 
 def _gl_light_plain():
@@ -517,8 +534,8 @@ def s17():
     miss = [p for p in _GL_MUST if p not in txt]
     if miss:
         return ("术语表没点明来源分工（缺 %r）—— '灯'的释义必须写明"
-                "「失守只认此刻」「拦截/注意看 24 小时」以及研发中、缺粮"
-                "不与主灯同显" % miss)
+                "「失守只认此刻」「拦截只进收件箱、不让灯变色」以及研发中、"
+                "缺粮不与主灯同显" % miss)
     return True
 
 
@@ -704,23 +721,31 @@ def n_s19b():
 #:   就得先退休一个。这四条守的正是本套件同一对象（主灯／灯态语义与它的
 #:   渲染出口），并进 0380 是**同域聚合**，不是"为了躲上限"。
 
-@check("S100 保持期：info 桶事件只在**未读 ∧ 刚发生**时抬主灯；已读／超期转待阅")
+@check("S100 info 桶**不抬主灯**（含未读刚发生）；action 桶持续抬灯（待办不是新闻）")
 def s100():
     import inbox_model as M
     G = _g()
     H = M.LAMP_HOLD_MINUTES
     bad = []
     # ① info 桶（`tool_call_blocked` 在"自动处理"黑名单里 ⇒ info）
-    for name, kw, want in (
-            ("刚发生·未读", {"hours_ago": 0.0}, "L2"),
-            ("H 内·未读", {"hours_ago": (H - 1) / 60.0}, "L2"),
-            ("超 H·未读", {"hours_ago": (H + 1) / 60.0}, "L0"),
-            ("刚发生·已读", {"hours_ago": 0.0, "state": "read"}, "L0"),
-            ("刚发生·已处理", {"hours_ago": 0.0, "state": "done"}, "L0")):
+    #   ★★ 2026-10-21 口径反转（创始人「它一直是拦截，现在还是」）：
+    #     旧断言是"未读 ∧ 刚发生 ⇒ L2"（30 分钟保持期）。实测病：24 小时
+    #     13 次拦截**跨 10 个小时**，每次新记录都把保持期重新计时 ⇒ 灯整天
+    #     黄着（约 6.5 小时）⇒ "一直是拦截"的灯等于没有灯。
+    #     而它说的是**监理在正常干活**（挡下的是 AI 自己的命令），用户无从
+    #     处理也不需要处理 ⇒ 规格 v1.1 §B（上策）：拦截是**事件**，不点灯。
+    #   ⇒ 现在：info 桶**任何状态都不抬灯**（未读/已读/超期/已处理），
+    #     信息改由收件箱＋待阅＋日报＋顶部条账句承载。
+    for name, kw in (
+            ("刚发生·未读", {"hours_ago": 0.0}),
+            ("H 内·未读", {"hours_ago": (H - 1) / 60.0}),
+            ("超 H·未读", {"hours_ago": (H + 1) / 60.0}),
+            ("刚发生·已读", {"hours_ago": 0.0, "state": "read"}),
+            ("刚发生·已处理", {"hours_ago": 0.0, "state": "done"})):
         got = M.light_explain({"state": "guarding", "why": "x"},
                               [G._mk_item(kind="tool_call_blocked", **kw)])["state"]
-        if got != want:
-            bad.append((name, got, want))
+        if got != "L0":
+            bad.append((name, got, "L0（info 桶不抬灯）"))
     # ② ★ action 桶**不适用保持期**：待办不是新闻，窗口内未关闭即持续抬灯。
     #   今天没有 L2/L1 的 action kind ⇒ 用 monkeypatch 造一个（规格 §7.2 记的手法）：
     #   把 `tool_call_blocked` 暂时移出"自动处理"黑名单 ⇒ 它变成"只有你能解决"。
@@ -741,31 +766,21 @@ def s100():
     if got_r != "L2":
         bad.append(("action·1h·已读（待办不许被'看过'消掉）", got_r, "L2"))
     if bad:
-        return "保持期不对：%r" % bad
+        return "抬灯口径不对：%r" % bad
     return True
 
 
-@check("N-S100 负控：拿掉保持期（info 一律抬灯）⇒ S100 必须报红")
+@check("N-S100 负控：把 info 桶改回'未读 ∧ 刚发生就抬灯'（旧行为）⇒ S100 必须红")
 def n_s100():
     import inbox_model as M
-    orig = M._event_lamp_level
-
-    def no_hold(items, hours=None, now=None):          # ← MUTANT：无新鲜度条件
-        best = None
-        for it in M._window_open(items, hours or M.WINDOW_HOURS, now):
-            if it.level not in (M.STATE_L2, M.STATE_L1):
-                continue
-            if M.PRIORITY.get(it.level, 0) > M.PRIORITY.get(best, 0):
-                best = it.level
-        return best
-
-    M._event_lamp_level = no_hold
+    orig = M.INFO_LAMP_LIFT
+    M.INFO_LAMP_LIFT = True                            # ← MUTANT：退回旧口径
     try:
         r = s100()
     finally:
-        M._event_lamp_level = orig
+        M.INFO_LAMP_LIFT = orig
     if r is True:
-        return "负控失效：拿掉保持期后 S100 仍然绿"
+        return "负控失效：退回'info 刚发生就抬灯'后 S100 仍然绿"
     return True
 
 
@@ -923,6 +938,87 @@ def n_s103():
         M.bucket_of = orig
     if r is True:
         return "负控失效：待办被藏起来后 S103 仍然绿"
+    return True
+
+
+def _s104_core(M):
+    """S104 的纯判断（正/负控共用；`M` 可注入变异体）。返回 True 或说明串。
+
+    ★ 2026-10-21 口径（创始人「一直是拦截」那轮）：
+      ① **有账 ⇒ 账句上主行**（灯说什么、正文就说什么），姿态句让位；
+      ② 灯被**事件**抬起时（action 桶待办），主行必须说那件事；
+      ③ **无账**时 dev 句仍占主行（身份不许被删）；
+      ④ 研发中徽标始终在（身份只换位置）。
+    """
+    G = _g()
+    VERS = ("0.99.9", "0.99.8")
+    info_items = [G._mk_item(kind="tool_call_blocked", hours_ago=0.0)]
+    ex = M.light_explain({"state": "dev", "why": ""}, info_items, granary=None,
+                         versions=VERS)
+    if ex["state"] != M.STATE_L0:
+        return ("夹具不成立：dev ＋ info 桶拦截 ⇒ 灯应是 L0（info 不抬灯），"
+                "实际 %s" % (ex["state"],))
+    _why = str(ex.get("reason") or "")
+    if "挡下" not in _why:
+        return "主行没把账说出来（缺'挡下'）：%r" % _why
+    if M.DEV_LINE in _why:
+        return ("主行被姿态句占位（账在下面躺着、正文说'在守着'）：%r" % _why)
+    _old = M.AUTO_HANDLED_KINDS
+    M.AUTO_HANDLED_KINDS = frozenset(_old - {"tool_call_blocked"})
+    try:
+        ex_act = M.light_explain(
+            {"state": "dev", "why": ""},
+            [G._mk_item(kind="tool_call_blocked", hours_ago=0.5)],
+            granary=None, versions=VERS)
+    finally:
+        M.AUTO_HANDLED_KINDS = _old
+    if ex_act["state"] != M.STATE_L2:
+        return ("夹具不成立：dev ＋ action 桶拦截 ⇒ 灯应是 L2，实际 %s"
+                % (ex_act["state"],))
+    _why2 = str(ex_act.get("reason") or "")
+    if "只有你能办" not in _why2:
+        return ("灯是 L2（拦截）但主行没说那件待办：%r" % _why2)
+    if M.DEV_LINE in _why2:
+        return "主行被姿态句占位（灯说拦截、正文说'在守着'）：%r" % _why2
+    if not [b for b in (ex.get("badges") or []) if b and b[0] == "dev"]:
+        return "研发中徽标不见了（身份信息被删，不是挪位置）"
+    ex2 = M.light_explain({"state": "dev", "why": ""}, [], granary=None,
+                          versions=VERS)
+    if M.DEV_LINE not in str(ex2.get("reason") or ""):
+        return "无账时主行丢了 dev 句：%r" % (ex2.get("reason"),)
+    return True
+
+
+@check("S104 有账时账句上主行：dev 姿态句让位（灯说什么、正文就说什么）")
+def s104():
+    import inbox_model as M
+    return _s104_core(M)
+
+
+@check("N-S104 负控：退回旧形状（dev 句恒占主行）⇒ S104 必须红")
+def n_s104():
+    import os
+    import sys
+    import types
+    import inbox_model as M
+    src = open(os.path.join(ROOT, "inbox_model.py"), encoding="utf-8").read()
+    old = "elif bst == STATE_DEV and not (n_act > 0 or n_info > 0):"
+    if old not in src:
+        return ("负控自身失效：源码锚点没找到（实现已漂移）—— 判据得跟着改，"
+                "不许默默放过")
+    mut_src = src.replace(old, "elif bst == STATE_DEV:")
+    mod = types.ModuleType("inbox_model_mutant_s104")
+    mod.__file__ = os.path.join(ROOT, "inbox_model.py")
+    # ★ 必须先登记进 `sys.modules`：`@dataclass` 装饰器会回头查
+    #   `sys.modules[cls.__module__].__dict__`（模块没登记 ⇒ AttributeError）。
+    sys.modules[mod.__name__] = mod
+    try:
+        exec(compile(mut_src, "inbox_model.py(mutant S104)", "exec"), mod.__dict__)
+        r = _s104_core(mod)
+    finally:
+        sys.modules.pop(mod.__name__, None)
+    if r is True:
+        return "负控失效：退回旧形状（dev 句占主行）后 S104 仍然绿"
     return True
 
 

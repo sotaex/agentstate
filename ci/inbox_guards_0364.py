@@ -622,18 +622,52 @@ def e3():
     assert hasattr(R, "ACT_INFO"), (
         "ACT_INFO 常量缺失 —— 它有真实消费方（inbox_server.py:557 归因故障兜底"
         "发 op=\"info\"），不是冗余")
-    # B 类那条「我自己盯着」带代价说明 ⇒ 必须走 accept（红按钮），不能走 info
+    # ★★★ 2026-10-21（**第八次**撞同一根钉子：尺子钉字面）：
+    #   旧版把 B 类那条按钮的**文案**当锚点。0.53.5 STE100 体检把
+    #   「我自己盯着」→「我自己守着」（与「值守中」「守门的程序」同一词族），
+    #   判据当场报「找不到 B 类那条…动作」—— 而产品是**对的**。
+    #   这与 0363 N-R01（第三次）、0470 S93（第五次）同型：
+    #   **尺子钉字面 ⇒ 改文案就假红 ⇒ 反过来逼人把文案改回去**。
+    #   ⇒ 改按**结构**：用 AST 找出「元素全是 `_a(...)` 调用、长度 3」的列表
+    #     字面量（＝三选一面板），比对它们下发的 **op 名集合**。
+    #     一个 op 都不许看文案、不许看行号。
+    import ast as _ast
     import inspect
     src = inspect.getsource(R)
-    i = src.find("就这样放着，我自己盯着")
-    assert i > 0, "找不到 B 类那条「我自己盯着」动作"
-    head = src[max(0, i - 400):i]
-    j = head.rfind("_a(")
-    assert "ACT_ACCEPT" in head[j:], (
-        "「我自己盯着」这条的 hint 写明了代价（持续无人巡检、改动不会被告警）"
-        "⇒ 它是「接受风险」，必须发 ACT_ACCEPT；发 ACT_INFO 会让它渲染成"
-        "普通按钮（用户看不到自己在担责）")
-    return "B 类那条发 ACT_ACCEPT，与 B_CLASS_CHOICES 声明一致"
+    tree = _ast.parse(src)
+    want = set(R.B_CLASS_CHOICES)
+    groups = []
+    for node in _ast.walk(tree):
+        if not isinstance(node, _ast.List) or len(node.elts) != 3:
+            continue
+        ops = []
+        for e in node.elts:
+            if not (isinstance(e, _ast.Call) and isinstance(e.func, _ast.Name)
+                    and e.func.id == "_a" and e.args
+                    and isinstance(e.args[0], _ast.Name)):
+                ops = None
+                break
+            ops.append(getattr(R, e.args[0].id, e.args[0].id))
+        if ops:
+            groups.append((node.lineno, ops))
+    assert groups, (
+        "在 remediation.py 里找不到任何「3 个 `_a(...)` 的列表字面量」⇒ "
+        "三选一面板的写法变了（结构锚点漂移，判据需更新），不是产品没问题")
+    got = {frozenset(ops) for _, ops in groups}
+    assert frozenset(want) in got, (
+        "三选一面板下发的 op 与 B_CLASS_CHOICES 声明不一致："
+        "声明 %s，实际下发的组 %s ⇒ 「接受风险」这条要么没发、要么被换成了"
+        "别的 op（发 ACT_INFO 会渲染成普通按钮，用户看不到自己在担责）"
+        % (sorted(want), [sorted(g) for g in got]))
+    # ★ 反向：ACT_ACCEPT 只许出现在 B 类三选一里（它是红按钮 ⇒ 必须真担责）
+    for ln, ops in groups:
+        if "ACT_ACCEPT" in ops and frozenset(ops) != frozenset(want):
+            assert False, (
+                "第 %d 行那组面板里有 ACT_ACCEPT，但整组 op 不等于 "
+                "B_CLASS_CHOICES（%s）⇒ 红按钮出现在非「接受风险」语境，"
+                "警示意义会被稀释" % (ln, sorted(ops)))
+    return "B 类三选一面板（%d 组）下发的 op 与 B_CLASS_CHOICES 一致：%s" % (
+        len(groups), sorted(want))
 
 
 # ══════════════════════════════════════════════ 0.36.5：右下角小泡泡根治

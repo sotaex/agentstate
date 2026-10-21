@@ -181,12 +181,31 @@ def n_light_greens_on_unknown_is_caught():
         mutated = src.replace(anchor, "if False:", 1)
         # ② 把函数末尾的防御性黄灯也改成打绿 —— 复现 0.36.2 那个真缺陷的形状
         #    （当年没有兜底，未知姿态一路穿到末尾拿到绿灯）
-        tail = ('    return STATE_L1, ("监理报了一个没登记的防线状态：认不出它是什么，"'
-                "\n"
-                '                      "先按最谨慎的档位显示")')
-        assert tail in mutated, "定位防御性黄灯失败（锚点漂移，负控需更新）"
-        mutated = mutated.replace(
-            tail, '    return STATE_L0, "坏：未登记姿态打绿（历史缺陷复现）"', 1)
+        #    ★★ 2026-10-21（**第三次**撞同一根钉子）：旧锚点把整句**字面**
+        #      钉住（含「先按最谨慎的档位显示」）⇒ 0.53.5 STE100 把「档位」
+        #      改成「情况」之后，负控当场报"锚点漂移"、R01 变红 —— 而产品
+        #      是**对的**。这正是 877bd66 修过一次的同型病：
+        #      **尺子钉字面 ⇒ 改文案就假红**（判据反过来逼人把缺陷改回来）。
+        #    ⇒ 改按**结构**定位：用 AST 找 `base_state` 里最后一条 `return`
+        #      的源码区间整段替换。不碰任何措辞 ⇒ 以后改文案不会再撞。
+        import ast as _ast
+        tree = _ast.parse(mutated)
+        _fn = [n for n in tree.body
+               if isinstance(n, _ast.FunctionDef) and n.name == "base_state"]
+        assert _fn, "定位 base_state 失败（锚点漂移，负控需更新）"
+        _rets = [n for n in _ast.walk(_fn[0]) if isinstance(n, _ast.Return)]
+        assert _rets, "base_state 里找不到 return（锚点漂移，负控需更新）"
+        _last = max(_rets, key=lambda n: (n.lineno, n.col_offset))
+        _lines = mutated.split("\n")
+        _s = _last.lineno - 1
+        _e = (_last.end_lineno or _last.lineno) - 1
+        assert "STATE_L1" in "\n".join(_lines[_s:_e + 1]), (
+            "末条 return 不是防御性黄灯（结构变了，负控需更新）：%r"
+            % ("\n".join(_lines[_s:_e + 1])[:80],))
+        mutated = "\n".join(
+            _lines[:_s]
+            + ['    return STATE_L0, "坏：未登记姿态打绿（历史缺陷复现）"']
+            + _lines[_e + 1:])
         with open(p, "w", encoding="utf-8") as f:
             f.write(mutated)
         importlib.reload(M)

@@ -2441,6 +2441,25 @@ def _posture_direct(posture_state):
 HUMOR = True
 REASON_MAX_CHARS = 48
 
+#: ★★★ 2026-10-21（创始人「它一直是拦截，现在还是。这是个问题吧」）：
+#:   **info 桶不再抬主灯** —— 规格 v1.1 §B（上策）落地。
+#:
+#:   为什么（实测数据，不是偏好）：本机 24 小时 13 次拦截**跨 10 个小时**，
+#:   而保持期是 30 分钟且**每来一条新记录就重新计时** ⇒ 灯整天黄着
+#:   （约 6.5 小时/24 小时）。一个"一直是拦截"的灯等于没有灯。
+#:   而它说的其实是**监理在正常干活**（挡下的是 AI 自己的命令，14 条全是
+#:   `rm`／`del`／`git checkout --`／临时目录）—— 用户既无从处理、也不需要处理。
+#:
+#:   语义依据（本仓自己的分工表）：L2 拦截是**事件**（天然过去时），
+#:   不是"此刻"。0.39.0 已为 R0 立过同一条铁律（失守不回溯），
+#:   info 桶的拦截是同一件事的另一种写法。
+#:
+#:   ★ 信息一个都没少（只换位置，不删）：收件箱按条列（带规则号与命中原文）
+#:     ＋ 待阅 N ＋ 日报 24 小时按级计数 ＋ **顶部条主行的账句**
+#:     （"最近 24 小时挡下 N 次，都替你处理完了。"）。
+#:   ★ `True` ＝ 回退开关：恢复"未读 ∧ 30 分钟内抬灯"的旧行为（一行改回）。
+INFO_LAMP_LIFT = False
+
 #: 未启用：**不许**报平安（没开就是没开 —— 说"好"是假绿）。
 _OFF_LINE = "还没开启，现在没有任何东西在替你看门"
 #: 研发中（姿态 dev）：**身份**由徽标说，主行只说"照常在守"。
@@ -2661,9 +2680,9 @@ def _event_lamp_level(items, hours=WINDOW_HOURS, now=None):
     ★★ 0.51.0（规格 v1.2 §2.1／§3）：抬灯按**桶**分流 ——
       · **action 桶**（只有你本人能解决）⇒ 抬灯，24h 窗口内持续到处理/关闭
         （它是**待办**，不是新闻 ⇒ **不适用保持期**）；
-      · **info 桶**（Antinel 自己处理掉的）⇒ 只在 **未读 ∧ 刚发生**
-        （`now - ts ≤ LAMP_HOLD_MINUTES`）时抬灯；**已读＝已知情，提前结束**
-        （0.35.3「你知情即可」的机制化），超期只进「待阅 N」；
+      · **info 桶**（Antinel 自己处理掉的）⇒ 由 `INFO_LAMP_LIFT` 说了算：
+        **现行＝一律不抬灯**（见该常量的注记：实测"一直是拦截"的那一轮）；
+        回退档＝只在 **未读 ∧ 刚发生**（`LAMP_HOLD_MINUTES`）内抬灯；
       · **R0 级一律不抬灯**（0.39.0 铁律；R0 由"要处理"计数与原因句出面）；
       · **疑似投毒（tamper）通道不抬灯** —— 它是 R0 家族、天然过去时；
         把它读成"此刻的注意"会与"自研迭代"混成一盏灯（0.47.0 分通道的延续：
@@ -2686,7 +2705,8 @@ def _event_lamp_level(items, hours=WINDOW_HOURS, now=None):
         if b == BUCKET_ACTION:
             lift = True
         elif b == BUCKET_INFO:
-            lift = (it.state == "unread" and within_hours(it.ts, hold, now))
+            lift = (INFO_LAMP_LIFT and it.state == "unread"
+                    and within_hours(it.ts, hold, now))
         else:                                    # archive：不抬灯
             lift = False
         if lift and (best is None or PRIORITY.get(lv, 0) > PRIORITY.get(best, 0)):
@@ -2810,9 +2830,25 @@ def light_explain(posture, items, now=None, hours=WINDOW_HOURS, granary=None,
     _pst = p.get("state")
     if _pst == "off":
         parts.append(_OFF_LINE)
-    elif bst == STATE_DEV:
+    elif bst == STATE_DEV and not (n_act > 0 or n_info > 0):
         # ★ dev 这一档**不取** `posture["why"]`：那条 why 是 30+ 字的工程说明
         #   （版本差），按 FZ-004 契约它不许进主行 —— 版本差归徽标与悬停提示。
+        # ★★ 2026-10-21（创始人「拦截」核实轮 · 设计 §47.11.6 补条款，**待签发**）：
+        #   **有账时，dev 姿态句不占主行。**
+        #   理由（实测，不是偏好）：旧形状是「主行说身份、灯说事件」⇒
+        #   同一屏两个说法 —— 灯明明写着「拦截」，正文却一句没提被拦了什么，
+        #   只说"另有 19 次已处理" ⇒ 正是创始人点名的那副形状
+        #   （吓人 + 说不清 + 无从下手）。
+        #   ⇒ 规矩：**账有话可说时，账句上主行**（设计 §47.11.2 的表：
+        #     info 桶 ⇒「最近 24 小时…都替你处理完了。」／action 桶 ⇒
+        #     「有 N 件事只有你能办。」）；**身份退到徽标**（研发中徽标 ＋
+        #     问号小窗 ＋ 运行状态页仍在 ⇒ 信息不丢，只是换位置）。
+        #   ⇒ 与**验收活体回读**同形：设计 §47.11 的验收行本来就是
+        #     「拦截｜研发中｜最近 24 小时有 25 条变动，都替你处理完了。」——
+        #     那一轮姿态是 guarding；**dev 姿态这一格当时没被测到**
+        #     （输入空间没覆盖，与 FZ-004 那次同型：判据天天绿，
+        #      因为夹具从没喂过 dev ＋ 有账）。
+        #   ★ 无账时 dev 句仍占主行（设计 §47.11.2 的「研发中」行）。
         parts.append(DEV_LINE)
     elif now_bad:
         parts.append(_nt)
