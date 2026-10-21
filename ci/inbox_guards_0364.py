@@ -240,17 +240,29 @@ def b2():
     return "dev+R0急事⇒R0（与guarding同色）；dev+无事⇒研发蓝"
 
 
-@check("B3 dev 分支不再返回硬编码的空 consequences")
-def b3():
-    ret_seg, asg_seg = _dev_branch_parts()
-    assert '"consequences": []' not in ret_seg, (
-        "dev 分支仍硬编码 consequences=[]（与'量过确实没有'长得一样，"
-        "却不是可复算的事实 ⇒ 会把监理发现的状况藏起来）")
-    assert '"consequences"' in ret_seg, "dev 分支的 return 里没有 consequences 字段"
-    assert "_outage_consequences" in asg_seg, (
-        "dev 分支没有走 _outage_consequences() ⇒ 后果是写死的，不是量的"
-        "（找到的赋值段：%r）" % asg_seg[:80])
-    return "dev 后果由 _outage_consequences 实测得出"
+# ══════════════ B3 已退休（2026-10-21）══════════════
+#: 原判据（0.36.4）：「dev 分支不许返回硬编码的空 consequences，必须走
+#:   `_outage_consequences()` 实测」——担心"写死的空与量过的空长得一样，
+#:   会把监理发现的状况藏起来"。
+#:
+#: ★★★ 退休理由（**创始人 2026-10-21 剃刀原则**，有截图实测）：
+#:   `_outage_consequences()` 算的是**缺岗**损失，而进入 dev 分支的前提正是
+#:   `alive and fresh`（哨兵在岗、心跳新鲜）—— **函数名写明了前提，调用处前提
+#:   正好相反**。实测后果：dev 态顶部条写「值守中」，下面红块却写
+#:   「有 4 个受监管落点，此刻没人巡检」（心跳才 491s）⇒ 同一屏两个相反结论，
+#:   比"藏状况"更坏。
+#:
+#: ★ 原担心的那件事**没有失守，只是换了守卫**：
+#:   ① `0353 X11` 现在守这条（**源码腿 ＋ 行为腿计数**：真跑一次 dev 姿态，
+#:      计算器一次都不许被调用）—— 比原 B3 更强（B3 只看源码字符串）；
+#:   ② 「dev 不许吞掉真状况」由 **B1**（dev + R0 急事 ⇒ 灯取 R0、why 带研发
+#:      注记、分支排在事件判读之后）与 **B2**（dev 与 guarding 对同批急事同色）
+#:      行为级守着 —— 这正是"写死的空会不会藏状况"的真正答案：
+#:      真发现的事项走 `inbox_model.light()` 的 24 小时账，**不经过这个字段**。
+#:
+#: ⇒ 按剃刀原则删除 B3（保留它与 X11 会**互斥**：一个要求必须有
+#:   `_outage_consequences`、一个要求必须没有 —— 两条同时存在，产品无论怎么写
+#:   都必有一条红。这正是"判据互相打架"的教科书现场，也是本轮必须留档的原因）。
 
 
 @check("B4 负控：把 dev 分支提到 ② 事件判读之前，判据必须报红")
