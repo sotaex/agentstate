@@ -23,7 +23,7 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {
          "host": {"type": "string", "description": "宿主名（可选）"}},
          "required": []}},
-    {"name": "antinel_report", "description": "查看最近会话的详细报告",
+    {"name": "antinel_report", "description": "查看指定会话的详细报告",
      "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "antinel_brief",
      "description": "决策层一页纸：数据有没有被 AI 工具带出去、比上期升还是降、"

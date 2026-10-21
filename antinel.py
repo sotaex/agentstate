@@ -92,8 +92,9 @@ SETTINGS_KEYS = {
     # ★ 为什么不把默认改成 block：改了会误伤正常装包/拉依赖（一次 pip install 就是
     #   一串非白名单域名），用户第一次用就被拦，产品直接不可用。分寸是"不静默加严"，
     #   但同样不能"静默宽松"—— 所以把默认值**写进 help 与 settings list**，让人知道。
-    "net_mode": "warn|block（**默认 warn：只提醒不拦**；要拦请 set 成 block）——"
-                "block：未白名单域名的网络命令升级为拦截（对抗分析 v1.0）",
+    "net_mode": "warn|block（默认 warn：只提醒不拦；要拦请 set 成 block）。"
+                "block 的意思：未白名单域名的网络命令，从提醒升级为拦截。"
+                "（依据见对抗分析 v1.0）",
     "notify_owner": "true|false（拦截时实时气泡通知主人，默认 true）",
 }
 
@@ -117,7 +118,7 @@ def load_economics(host):
             return json.load(f)
     except Exception:
         return {"host": host, "unit": "tokens", "unit_label": "tokens",
-                "digest_primary": "tokens", "note": "画像缺失，兜底 tokens"}
+                "digest_primary": "tokens", "note": "画像缺失，按默认值计 tokens"}
 
 
 def find_project_root(start=None):
@@ -273,7 +274,7 @@ def seven_step(label, target_file, loader, mutator, impact, undo_hint,
            "invoked_by": _invoked_by(),
            "reason": impact}
     _chain_record(_audit_dir(root), rec)
-    print("✓ 已应用并进审计链（policy_changed）")
+    print("✓ 已应用，写进审计链（policy_changed）")
     print("  撤销：%s" % undo_hint)
     if sensitive and not _is_tty():
         try:
@@ -480,7 +481,7 @@ def cmd_credits(args, prof):
     if root is None:
         _die("未找到项目")
     if prof.get("unit") != "credits":
-        _die("当前宿主（%s）经济画像为 %s——无积分口径，credits 不可用"
+        _die("当前宿主（%s）经济画像为 %s——没有积分换算依据，credits 不可用"
              % (prof.get("host"), prof.get("unit")))
     audit = _audit_dir(root)
     if args.sub == "plan":
@@ -494,13 +495,13 @@ def cmd_credits(args, prof):
                 "yuan_per_credit": round(yuan / credits, 6),
                 "updated_at": datetime.now().isoformat(timespec="seconds")}
         _save_json_atomic(uep, data)
-        print("✓ 套餐口径已存（你报的）：%.2f 元 / %s 积分 = %.4f 元/积分"
+        print("✓ 套餐设置已存（你报的）：%.2f 元 / %s 积分 = %.4f 元/积分"
               % (yuan, format(int(credits), ","), data["yuan_per_credit"]))
         return
     if args.sub == "reconcile":
         snaps = _snapshots(audit)
         if len(snaps) < 2:
-            _die("对账需要 ≥2 次快照")
+            _die("比对需要 ≥2 次快照")
         a, b = snaps[-2], snaps[-1]
         cdelta = float(b["balance"]) - float(a["balance"])
         toks = _tokens_between(audit, a.get("ts", ""), b.get("ts", ""))
@@ -518,7 +519,7 @@ def cmd_credits(args, prof):
             print("【套餐】%.4f 元/积分（你报：%.2f 元 / %s 积分）"
                   % (ppc, ue["plan_yuan_per_month"], format(int(ue["plan_credits_per_month"]), ",")))
             if observed is not None:
-                print("  → %.4f 积分/千token ≈ %.5f 元/千token（派生）" % (observed, observed * ppc))
+                print("  → %.4f 积分/千token ≈ %.5f 元/千token（换算值）" % (observed, observed * ppc))
         except Exception:
             print("【套餐】未登记——antinel credits plan <月费元> <每月积分>")
         cache_p = os.path.join(root, ".psl", "state", "pricing_cache.json")
@@ -527,8 +528,9 @@ def cmd_credits(args, prof):
             print("【牌价参照】来源 %s @ %s（对公开价，非你的账单）"
                   % (cache.get("source"), str(cache.get("fetched_at"))[:16]))
         except Exception:
-            print("【牌价参照】无缓存——antinel pricing update 拉取（可选参考位）")
-        print("  差异来源：缓存计价／模型组合变化／时间窗；不同口径永不加和。")
+            print("【牌价参照】无缓存。要拉取：antinel pricing update"
+                  "（可选，仅作参考位）")
+        print("  差异来源：缓存计价／模型组合变化／时间窗；两次的统计范围不同，不能相加。")
         return
     if args.sub == "snapshot":
         try:
@@ -569,7 +571,7 @@ def cmd_credits(args, prof):
         return
     # forecast
     if len(snaps) < 2:
-        _die("预测需要 ≥2 次快照（现在 %d 次）——明天再记一次余额即可" % len(snaps))
+        _die("预测需要 ≥2 次快照（现在 %d 次）——隔一天再记一次余额即可" % len(snaps))
     a, b = snaps[-2], snaps[-1]
     cdelta = float(b["balance"]) - float(a["balance"])
     toks = _tokens_between(audit, a.get("ts", ""), b.get("ts", ""))
@@ -588,7 +590,7 @@ def cmd_credits(args, prof):
             if rate is not None:
                 recent = _tokens_between(audit, b.get("ts", ""),
                                          datetime.now().astimezone().isoformat(timespec="seconds"))
-                lines.append("自上次快照已耗 %d tokens（估）——按此速度请明天再快照一次以细化预测" % recent)
+                lines.append("自上次快照已耗 %d tokens（估）——按此速度请隔一天再快照一次以细化预测" % recent)
             rb = (b.get("buckets") or {}).get("reward") or {}
             if rb.get("expires"):
                 lines.append("⚠ 奖励积分 %s 将于 %s 过期（平台通常先扣先过期的桶）"
@@ -596,7 +598,7 @@ def cmd_credits(args, prof):
         except Exception:
             lines.append("周期日期无法解析：%s" % b.get("cycle_end"))
     else:
-        lines.append("未登记周期——antinel credits snapshot <余额> --cycle 2026-09-30")
+        lines.append("未登记周期。示例：antinel credits snapshot <余额> --cycle 2026-09-30")
     print("\n".join(lines))
 
 
@@ -798,8 +800,10 @@ def cmd_canary(args):
             os.makedirs(cdir, exist_ok=True)
             cpath = os.path.join(cdir, marker)
             with open(cpath, "w", encoding="utf-8") as f:
-                f.write("%s\nAntinel canary：本文件是蜜饵。若这个标记出现在任何工具输出或外部通道，"
-                        "说明项目内容被读取后带了出去（antinel report 的 canaries 统计可见）。\nplanted: %s\n"
+                f.write("%s\nAntinel canary：本文件是蜜饵。"
+                        "若这个标记出现在任何工具输出或外部通道，"
+                        "说明项目内容被读走并带了出去。"
+                        "在 antinel report 的 canaries 统计里能看到。\nplanted: %s\n"
                         % (marker, datetime.now().isoformat(timespec="seconds")))
         _chain({"ts": datetime.now().astimezone().isoformat(timespec="seconds"),
                 "type": "canary_planted", "tool": "-", "session": "antinel-cli",
@@ -909,7 +913,7 @@ def cmd_digest(args):
         except Exception:
             pass
     print("【一句话】近 %d 天：%d 个项目/宿主组合，%d 次操作、拦截 %d 次、"
-          "token 进出 %s（事实）；记账口径 %s=%s%s。"
+          "token 进出 %s（事实）；记账方式 %s=%s%s。"
           % (days, len(per), total["actions"], total["blocks"],
              format(total["tokens"], ","), detect_host(), unit, econ))
     # ★★ 0.34.0（E2）：**「数据有没有出去」提到首屏**。
@@ -923,14 +927,14 @@ def cmd_digest(args):
     _so = total.get("sensitive_output", 0)
     if _ck:
         _first = min([v for v in total_marks.values() if v] or [""])
-        print("【数据外发】🔴 检出 %d 次蜜饵标记出现在工具输出里"
-              "（内容被读 ＋ 带出项目外）%s"
+        print("【数据外发】🔴 检出 %d 次蜜饵标记出现在工具输出里。"
+              "（内容被读，且带出项目外）%s"
               % (_ck, ("；首次 %s" % _first[:19]) if _first else ""))
         print("            用 python -m antinel report --days %d 看是哪条工具、哪个文件" % days)
     elif _so:
         print("【数据外发】🟠 未见蜜饵命中，但 %d 次输出命中敏感模式 —— 查 python -m antinel report" % _so)
     else:
-        print("【数据外发】未见蜜饵命中（只说明**没见到**，不等于没有——"
+        print("【数据外发】未见蜜饵命中（只说明没见到，不等于没有——"
               "会偷的工具不会写记录）。要更强的证据：python -m antinel canary plant")
     for a in sorted(per, key=lambda x: -x["actions"]):
         print("  %-9s %s" % (a["host"], a["root"]))
@@ -940,19 +944,22 @@ def cmd_digest(args):
                  a["warnings"], format(a["tokens"], ",")))
     # 0.30.0 (E-3): 执法状态进晨报——"闸门还在不在"必须能大声说出来。
     if total.get("gaps") or total.get("probe_fail"):
-        print("【执法】⚠ 缺口 %d 次（被拦的调用仍被执行）｜探针失败 %d/%d —— 拦截信号可能未生效，"
+        print("【执法】⚠ 缺口 %d 次（被拦的调用仍被执行）｜自检失败 %d/%d。"
+              "拦截信号可能未生效。"
               "运行 python -m tools.enforce_probe 复检，并核对宿主钩子协议"
               % (total.get("gaps", 0), total.get("probe_fail", 0),
                  total.get("probe_ok", 0) + total.get("probe_fail", 0)))
     elif total.get("probe_ok"):
-        print("【执法】自检探针 %d/%d 通过；缺口 0（被拦的调用没有再执行）"
+        print("【执法】自检 %d/%d 通过；缺口 0（被拦的调用没有再执行）"
               % (total.get("probe_ok", 0), total.get("probe_ok", 0)))
     # 0.32.0 (F5): fail-open 可见性——每次钩子异常都是一次"没判就放"。
     if total.get("fail_open"):
-        print("【护栏】⚠ fail-open %d 次（钩子异常放行，A-08）——闸门当时不在岗，详见 report" % total.get("fail_open", 0))
+        print("【护栏】⚠ fail-open %d 次（钩子异常时放行，A-08）。"
+              "当时闸门不在岗，详见 report" % total.get("fail_open", 0))
     if total.get("host_changes"):
-        print("【宿主】⚠ 版本变化 %d 次——钩子协议可能漂移，请重跑 probe_host.py 与 enforce_probe.py"
+        print("【宿主】⚠ 版本变化 %d 次，钩子协议可能与预期不符。"
               % total.get("host_changes", 0))
+        print("请重跑 probe_host.py 与 enforce_probe.py 各一次。")
     # 0.33.0 (B5): 钩子延迟可见性——pre/post 配对的时长中位数。
     _durs = []
     for a in per:
@@ -1005,14 +1012,14 @@ def cmd_digest(args):
             _stale = (datetime.now().astimezone() - _dt).total_seconds() > _iv * 3600 * 2
         if _stale and root:
             if _last:
-                print("【执法】⚠ 自检探针陈旧（最近一次 %s，已超过 %d 小时）——拦截自证停摆，"
+                print("【执法】⚠ 自检陈旧（上一次 %s，已超过 %d 小时）——拦截自证停摆，"
                       "运行 python -m tools.enforce_probe" % (_last, int(_iv * 2)))
             else:
-                print("【执法】⚠ 自检探针从未运行——拦截自证停摆，"
+                print("【执法】⚠ 自检从未运行——拦截自证停摆，"
                       "运行 python -m tools.enforce_probe")
         elif _last and not total.get("probe_ok"):
             # 窗口内已经报过「探针 N/N 通过」时不再重复；只在"窗口内没有、但也没陈旧"时报一句。
-            print("【执法】自检探针最近一次 %s（不在本次展示窗口内，未陈旧）" % _last)
+            print("【执法】自检上一次 %s（不在本次展示窗口内，未陈旧）" % _last)
     except Exception:
         pass
     # 0.33.1 (P4-1)：不可信日期段显式化——分母是"这段时间内的工具调用记录数"。
@@ -1035,7 +1042,7 @@ def cmd_digest(args):
                             "hosts": len({h for _p, h, _m in projects})},
                "chain_heads": heads,
                "derived": True,
-               "reason": "跨项目聚合快照（派生物；各项目链仍是唯一事实源）"}
+               "reason": "跨项目聚合快照（按各项目链汇总；各项目链仍是唯一的事实来源）"}
         import hub as hubmod
         _session_dna().append_chained(hubmod.rollup_dir(), rec)
         print("（汇总快照已进中枢链：~/.antinel/rollup/）")
@@ -1045,7 +1052,7 @@ def cmd_digest(args):
 # ★ 0.38.0：粮（哨兵的口粮）。**与 `credits` 是两本账** —— 见 `granary.py` 头部。
 #   判据 `ci/guard_granary.py` 会验：本条命令能用，且与 credits 不混。
 def cmd_granary(args, prof):                       # noqa: ARG001 (prof 仅保签名一致)
-    """`antinel 粮 [余额|明细|规则]`。真源在 `granary`；本函数只排版，不自己算账。"""
+    """antinel 粮 [余额|明细|规则]。真源在 granary；本函数只排版，不自己算账。"""
     import granary as G
     sub = getattr(args, "sub", None) or "余额"
     if sub == "规则":
@@ -1077,11 +1084,11 @@ def cmd_granary(args, prof):                       # noqa: ARG001 (prof 仅保�
     if not s["has_ledger"]:
         print("还没有粮账：监理还没开始站岗（没在消耗，也就不缺粮）。")
         return
-    print("粮：%d（还够 %s 天，档位 %s）" % (s["balance"], s["days_left"], s["tier"]))
+    print("粮：%d（还够 %s 天，状态 %s）" % (s["balance"], s["days_left"], s["tier"]))
     print("缺粮阈值：%d 粮；流水 %d 笔。" % (s["threshold"], s["entries"]))
     if s["state"] == "low":
         print("★ 缺粮灯亮：%s" % s["why"])
-    print("（这是监理的口粮，不是宿主 AI 工具的积分 —— 后者看 `antinel credits`。）")
+    print("（这是监理的口粮，不是宿主 AI 工具的积分 —— 后者看 antinel credits。）")
 
 
 # ------------------------------------------------- verify / report / hub ----
@@ -1096,7 +1103,8 @@ def cmd_morning(args):
         _die("未找到项目根（请在项目内运行晨报；跨项目见 digest --scope all）")
     ad = _audit_dir(root)
     if not os.path.isdir(ad):
-        _die("本项目还没有账本（.psl/audit 不存在）——先接入宿主跑一次 Agent 会话")
+        _die("本项目还没有账本（.psl/audit 不存在）。"
+             "先接入宿主，跑一次 Agent 会话。")
     sd = _session_dna()
     today = datetime.now().strftime("%Y-%m-%d")
     yest = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -1159,7 +1167,7 @@ def cmd_morning(args):
           % (_diff(cur["a"], prev["a"]), _diff(cur["b"], prev["b"]),
              _diff(cur["t"], prev["t"])))
     unit = (load_economics(detect_host()).get("unit_label") or "tokens")
-    print("  覆盖：本项目 / 宿主 %s（未接入工具不在此列）；记账口径 %s"
+    print("  覆盖：本项目 / 宿主 %s（未接入工具不在此列）；记账方式 %s"
           % (detect_host(), unit))
     # 0.28.1（哨兵存活性 v1）：门闸布防时把哨兵在岗状态说出口——dead-man 的消费端。
     # 此前心跳断档没有任何主动呈现，哨兵死了 5 天无人知晓（2026-09-24 死因取证）。
@@ -1215,7 +1223,7 @@ _VERIFY_RECOMPUTE = (
 )
 # 纯在线入口（本地没有对应文件，天然不会"跑不通"）。
 _VERIFY_LINKS = (
-    ("看**别人**的链每天被验一次（公开锚点，可交叉核对）",
+    ("看别人的链每天被验一次（公开可查，可交叉核对）",
      "https://github.com/sotaex/agentstate/tree/main/challenge/chain"),
 )
 
@@ -1290,10 +1298,10 @@ def cmd_verify(args):
                 #   即便哪天 verify_chain 的判定被改回去，这里也照样说实话。
                 print("")
                 print("─" * 60)
-                print(" ⚠ 这条链里 **0 条记录** —— 这不是「没问题」，是「这里没有东西可查」。")
-                print("   · `verify` 只验**当前目录**向上找到的那条链；")
-                print("   · `antinel inbox report` 验的是**登记过的所有项目**的链。")
-                print("   若你在别的目录跑过 antinel，请在**那个目录**下再跑一次 verify。")
+                print(" ⚠ 这条链里 0 条记录 —— 这不是「没问题」，是「这里没有东西可查」。")
+                print("   · verify 只验当前目录向上找到的那条链；")
+                print("   · antinel inbox report 验的是登记过的所有项目的链。")
+                print("   若你在别的目录跑过 antinel，请在那个目录下再跑一次 verify。")
                 print("─" * 60)
                 sys.exit(rc if rc else 4)
             # ★ 0.34.0（E6）：验完之后**把"如何独立复算"摆出来**。
@@ -1306,7 +1314,7 @@ def cmd_verify(args):
             if rc == 0:
                 print("")
                 print("─" * 60)
-                print(" 这条链**你可以自己复算**，不需要相信监理：")
+                print(" 这条链你可以自己复算，不需要相信监理：")
                 for i, (rel, desc, link) in enumerate(_VERIFY_RECOMPUTE, 1):
                     local = _sibling(rel)
                     print("   %d) %s：" % (i, desc))
@@ -1322,7 +1330,8 @@ def cmd_verify(args):
                     print("   %d) %s：" % (j, desc))
                     print("        %s" % url)
                 print("")
-                print("   ★ 复算规则：hash = sha256(上一条的 hash ＋ 本条的规范化 JSON)")
+                print("   ★ 复算规则。每条的 hash 这样算：")
+                print("   sha256(上一条的 hash ＋ 本条规范化后的 JSON)")
                 print("     改一个字节就能被指出；删掉中间任何一条，链就接不上。")
                 print("─" * 60)
             sys.exit(rc)
@@ -1355,7 +1364,8 @@ def cmd_ledger_top(args):
         print(_json.dumps(rows, ensure_ascii=False, indent=1))
         return 0
     if not any(r.get("events") is not None for r in rows):
-        print("账本尚无可核对记录；这表示还没有可统计的事件，不是确认累计为零。")
+        print("账本尚无可核对记录；这表示还没有能统计的内容，"
+              "不是确认累计为零。")
         return 0
     for r in rows:
         if r.get("events") is None:
@@ -1406,26 +1416,26 @@ def cmd_brief(args):
 
     print("=" * 68)
     print(" Antinel 决策层一页纸｜%s" % datetime.now().strftime("%Y-%m-%d %H:%M"))
-    print(" 口径：近 %d 天 ｜ 项目：%s" % (days, root))
+    print(" 统计范围：近 %d 天 ｜ 项目：%s" % (days, root))
     print("=" * 68)
 
     # ── ① 有没有把数据传出去 ────────────────────────────────────────
     print("")
     print("【一】数据有没有被 AI 工具带出去")
     if now.get("canary_leak"):
-        print("  🔴 **有确凿证据**：%d 次蜜饵标记出现在工具输出里" % now["canary_leak"])
+        print("  🔴 有确凿证据：%d 次蜜饵标记出现在工具输出里" % now["canary_leak"])
         print("        （内容被读过 ＋ 带出项目外。命令：antinel report --days %d 看是哪条工具）" % days)
     elif now.get("sensitive_output"):
         print("  🟠 未见蜜饵命中，但 %d 次输出命中敏感模式 —— 需要看一眼" % now["sensitive_output"])
         print("        （命令：antinel report --days %d）" % days)
     else:
-        print("  ⚪ **这一期没见到外传证据**")
-        print("        ★ 请读作『没查到』，**不是**『没有』——会偷的工具不会写记录。")
+        print("  ⚪ 这一期没见到外传证据")
+        print("        ★ 请读作『没查到』，不是『没有』——会偷的工具不会写记录。")
         print("        想换更强的证据：antinel canary plant（埋标记，"
               "标记出现在输出里才会被记下）")
     _zero = now.get("untrusted_host", 0) + now.get("low_conf_host", 0)
     if _zero:
-        print("        ⚠ 另有 %d 条记录的**宿主标签不可信**（旧格式，无归因证据）"
+        print("        ⚠ 另有 %d 条记录的宿主标签不可信（旧格式，无归因证据）"
               % _zero)
         print("          —— 这部分连『哪个工具做的』都说不准，antinel report 会单列。")
 
@@ -1445,7 +1455,7 @@ def cmd_brief(args):
             print("  ⚠ 放行次数 %d → %d  %s（钩子异常放行＝当时闸门不在岗）"
                   % (_d.get("fail_open", 0), now.get("fail_open", 0),
                      _arrow(now.get("fail_open", 0), _d.get("fail_open", 0))))
-        print("  ★ 「操作变多」本身不是坏事（用得多）；**要盯的是拦截与放行**。")
+        print("  ★ 「操作变多」本身不是坏事（用得多）；要盯的是拦截与放行。")
 
     # ── ③ 我现在该做什么 ────────────────────────────────────────────
     print("")
@@ -1485,15 +1495,16 @@ def cmd_brief(args):
     print("")
     print("-" * 68)
     print(" 覆盖：1 个项目 ｜ 本页只看【汇总计数】，逐条明细在 "
-          "`antinel report --days %d`" % days)
-    print(" 边界：规则只匹配工具调用文本，不解析脚本内容 —— 写进 .py/.sh 再执行不会被拦。")
+          "antinel report --days %d" % days)
+    print(" 边界：规则只匹配工具调用的文本，不解析脚本内容。"
+          "写进 .py/.sh 再执行，就不会被拦。")
     print("       护栏不是隔离层。antinel verify 可独立复算本机账本。")
     print("=" * 68)
     return 0
 
 
 def _arrow(cur, prev):
-    """涨跌标记。**只标方向不标好坏**——拦截变多是正常的。"""
+    """涨跌标记。只标方向不标好坏——拦截变多是正常的。"""
     if cur == prev:
         return "（持平）"
     d = cur - prev
@@ -1606,7 +1617,7 @@ def cmd_hub(args):
 
 
 # ------------------------------------------------------------ help ----
-HELP_HOSTLINE = "AgentState v%s ｜ 宿主: %s（记账口径: %s）"
+HELP_HOSTLINE = "AgentState v%s ｜ 宿主: %s（记账方式: %s）"
 
 
 def cmd_help(_args=None):
@@ -1643,7 +1654,8 @@ def cmd_help(_args=None):
     print("  包名是 antinel（pip install antinel）—— 不是 antinel-security")
     print("── 提示 ───────────────────────────────────")
     print("  拦截消息里给出的命令可直接执行；所有配置变更均进审计链。")
-    print("  多宿主共存机器：Agent 自报宿主（antinel --host zcode …），口径即随宿主。")
+    print("  多宿主共存机器：Agent 自报宿主。写法 antinel --host zcode …，"
+          "记在它报的那家名下。")
     print("  分寸：记录 Agent 的行为与消耗；不做人的效率排名。")
     # 0.29.0（G-4）：网络外传的默认档位**显式说出来**。
     # 实测：hooks/pre_tool_use.py 里 `.get("net_mode","warn")` —— 默认只提醒不拦；
@@ -1666,12 +1678,12 @@ def cmd_help(_args=None):
             _nm_note = "策略文件读取失败（%s），按内置默认" % type(_e).__name__
     if _nm is None:
         _nm = "warn"
-    print("  ⚠ 网络外传当前档位：net_mode=%s  [%s]" % (_nm, _nm_note))
+    print("  ⚠ 网络外传当前设置：net_mode=%s  [%s]" % (_nm, _nm_note))
     if _nm != "block":
-        print("     ★ 即：未白名单域名的网络命令**只提醒、不拦截**。"
+        print("     ★ 即：未白名单域名的网络命令只提醒、不拦截。"
               "要拦：antinel settings set net_mode block")
     else:
-        print("     ★ 未白名单域名的网络命令会被**挡下**。")
+        print("     ★ 未白名单域名的网络命令会被挡下。")
 
 
 def cmd_routes(args):
@@ -1679,15 +1691,17 @@ def cmd_routes(args):
         print("<!-- 由 `antinel routes --markdown` 生成；与 help 同源（ROUTES） -->")
         print("当用户表达下列意图时，运行对应命令（命令幂等；配置变更自动进审计链）。")
         print()
-        print("**★ 语义匹配，不是词表匹配**：下面的用户话语只是**示例**，不是触发条件。")
-        print("用户用任何说法表达同类意图——「胡搞/乱来/越界/偷传/不乖/瞎动」或未来任何新说法——")
-        print("都应执行对应命令：**语义对上就执行，不要等词对上**。")
+        print("★ 语义匹配，不是词表匹配：下面的用户话语只是示例，不是触发条件。")
+        print("用户用任何说法表达同类意图。下面这些只是例子："
+              "「胡搞/乱来/越界/偷传/不乖/瞎动」，将来出现新说法也一样。")
+        print("都应执行对应命令。语义对上就执行，不要等词对上。")
         print()
         for u, c, _cat in ROUTES:
-            print("- 「%s」→ `%s`" % (u, c.replace("\\", "\\\\")))
-        print("- 「antinel / 帮助 / 你能做什么」→ `antinel`（help 清单）")
-        print("- 多宿主共存的机器上，Agent 应自报所在宿主：`antinel --host zcode …`"
-              "（workbuddy|zcode|qoder|claude-code），否则记账口径按这台电脑探测显示。")
+            print("- 「%s」→ %s" % (u, c.replace("\\", "\\\\")))
+        print("- 「antinel / 帮助 / 你能做什么」→ antinel（help 清单）")
+        print("- 多宿主共存的机器上，Agent 应自报所在宿主：antinel --host zcode …"
+              "（workbuddy|zcode|qoder|claude-code）。"
+              "不报的话，记账方式按这台电脑探测到的显示。")
         return
     for u, c, _cat in ROUTES:
         print("%s\t%s" % (u, c))
@@ -1824,8 +1838,8 @@ def cmd_zone(args):
         return "zones - %s" % norm
 
     label = "zone %s %s" % ("add" if adding else "remove", norm)
-    impact = ("安全区生效：该目录对 Agent/宿主进程 只读（防篡改），"
-              "配合 net_mode=block 出网被闸" if adding else
+    impact = ("安全区生效：该目录对 Agent/宿主进程 只读（防篡改）。"
+              "配合 net_mode=block，出网被闸" if adding else
               "安全区解除：该目录恢复可写（出网闸由 net_mode 单独决定）")
     undo = ("antinel zone remove %s" % norm if adding
             else "antinel zone add %s" % norm)
@@ -1849,7 +1863,7 @@ def _startup_folder_cmd():
 
 
 def _startup_folder_lnk():
-    """启动文件夹里的**无窗口**自启快捷方式（`.lnk` → `pythonw.exe`）。"""
+    """启动文件夹里的无窗口自启快捷方式（.lnk → pythonw.exe）。"""
     appdata = os.environ.get("APPDATA") or os.path.join(
         os.path.expanduser("~"), "AppData", "Roaming")
     return os.path.join(appdata, "Microsoft", "Windows", "Start Menu",
@@ -1857,7 +1871,7 @@ def _startup_folder_lnk():
 
 
 def _pythonw_exe():
-    """`sys.executable` 的 pythonw 变体（GUI 子系统，不建控制台）；没有则退回本尊。"""
+    """sys.executable 的 pythonw 变体（GUI 子系统，不建控制台）；没有则退回本尊。"""
     exe = sys.executable or ""
     d, _b = os.path.split(exe)
     w = os.path.join(d, "pythonw.exe")
@@ -1937,7 +1951,7 @@ def _retire_old_startup_cmd():
 #   pip uninstall（文档里写清）。
 
 def _desktop_dir():
-    """桌面目录（Known Folder，尊重 OneDrive 重定向）；取不到退回 `~/Desktop`。"""
+    """桌面目录（Known Folder，尊重 OneDrive 重定向）；取不到退回 ~/Desktop。"""
     try:
         import ctypes
         buf = ctypes.create_unicode_buffer(260)
@@ -1950,12 +1964,12 @@ def _desktop_dir():
 
 
 def _desktop_entry_path():
-    """桌面入口路径：`Antinel 监理.lnk`（与 Toast AUMID 快捷方式同名不同目录）。"""
+    """桌面入口路径：Antinel 监理.lnk（与 Toast AUMID 快捷方式同名不同目录）。"""
     return os.path.join(_desktop_dir(), "Antinel 监理.lnk")
 
 
 def _brand_icon():
-    """品牌图标绝对路径（**单一真源** `inbox_window.brand_icon_path`）；缺失 None。"""
+    """品牌图标绝对路径（单一真源 inbox_window.brand_icon_path）；缺失 None。"""
     try:
         import inbox_window as _iw
         return _iw.brand_icon_path()
@@ -2002,7 +2016,7 @@ def _create_desktop_lnk(lnk_path=None):
 
 
 def _archive_desktop_entry(lnk_path=None):
-    """桌面入口**改名归档**（零删除）。返回归档路径；不在则 None（不谎报归档）。"""
+    """桌面入口改名归档（零删除）。返回归档路径；不在则 None（不谎报归档）。"""
     path = lnk_path or _desktop_entry_path()
     if not os.path.isfile(path):
         return None
@@ -2044,7 +2058,9 @@ def cmd_host_shield(args):
                 print("  ⚠ 监理进程：不在岗——每次 Agent 活动会自动尝试复活（paramedic）；"
                       "手动：antinel host-shield enable")
             print("  最后心跳：%s" % ("%.0f 分钟前（应 ≤10 分钟）" % (age / 60.0)
-                                      if age is not None else "无记录——监理从未成功留痕或刚布防"))
+                                      if age is not None else
+                                      "无记录——监理还没成功写下记录，"
+                                      "或者刚开始布防"))
             print("  自启方式：%s" % (st.get("autostart") or "<未登记（旧版布防）>"))
         for k, v in (st.get("workspaces") or {}).items():
             print("  %s → %s" % (k, v))
@@ -2058,7 +2074,8 @@ def cmd_host_shield(args):
             _locks = []
             print("  ⚠ 已上锁目录列举失败：%s" % _e)
         if _locks:
-            print("  ⚠ 当前 %d 个目录处于上锁状态（host-shield unlock <路径> 解除）：" % len(_locks))
+            print("  ⚠ 当前 %d 个目录处于上锁状态。" % len(_locks))
+            print("     解除：antinel host-shield unlock <路径>")
             for _l in _locks:
                 print("     · %s  [gate=%s / 来源=%s]" % (_l.get("path"), _l.get("gate"),
                                                           _l.get("source")))
@@ -2215,7 +2232,7 @@ def cmd_host_shield(args):
                   autostart=autostart, spawn=("ok" if ok else "failed"),
                   invoked_by=_invoked_by(),
                   reason="宿主审计门闸已布防（自启=%s；监理=%s）"
-                         % (autostart, ("pid %s %s" % (pid, mode)) if ok else "拉起失败，paramedic 兜底"))
+                         % (autostart, ("pid %s %s" % (pid, mode)) if ok else "拉起失败，由它自动复活"))
         print("✓ 护盾已布防：%s" % SHIELD_STATE_ON)
         if autostart == "schtasks":
             print("  自启：计划任务 AntinelHostShield（登录触发）")
@@ -2224,8 +2241,8 @@ def cmd_host_shield(args):
         elif autostart == "startup-folder":
             print("  自启：启动文件夹（计划任务命令被这台电脑上的策略拦截，已回退）")
         else:
-            print("  ⚠ 自启未能注册（schtasks 与启动文件夹都失败）——"
-                  "兜底：每次 Agent 活动时钩子会自动复活监理（paramedic）")
+            print("  ⚠ 自启未能注册（计划任务命令与启动文件夹都失败）。"
+                  "保险起见：每次 Agent 活动时钩子会自动复活监理。")
         if getattr(args, "no_desktop", False):
             print("  桌面入口：未创建（--no-desktop；补建：antinel host-shield desktop）")
         elif _desk:
@@ -2364,8 +2381,9 @@ def cmd_host_shield(args):
         # 0.28.3（E1 自签字堵死）：放行类决定必须人本人在终端跑——Agent 非 TTY
         # 调用一律拒绝。deny 是收紧方向，不拦。
         if dec in ("allow_once", "allow_always") and not _is_tty():
-            _die("allow_once/allow_always 是放行决定，必须在交互终端由你本人执行"
-                 "（防 Agent 自签字）。deny 可以由 Agent 代跑。")
+            _die("allow_once/allow_always 是放行决定。"
+                 "要你本人在交互终端里执行，防止 Agent 自签字。"
+                 "deny 可以由 Agent 代跑。")
         import host_shield as hs2
         import time as _t
         resolved = None
@@ -2471,7 +2489,7 @@ def cmd_host_audit(args):
                 accepted = pending_n = 0
                 git_n = sens_n = entries = 0
                 ws_path = ""
-                for f2 in glob.glob(wd + r"\**\*.json", recursive=True):
+                for f2 in glob.glob(wd + r"\\*.json", recursive=True):
                     try:
                         s = io.open(f2, encoding="utf-8", errors="replace").read()
                     except Exception:
@@ -2503,7 +2521,7 @@ def cmd_host_audit(args):
                             git_n += 1
                         if p.lower().endswith((".pem", ".key", ".p12", ".pfx", ".asc", ".kdbx")):
                             sens_n += 1
-                for f2 in glob.glob(wd + r"\**\pending\*", recursive=True):
+                for f2 in glob.glob(wd + r"\\pending\*", recursive=True):
                     pending_n += 1
                 line = "  工作区 %s: %s | 条目 %d | .git %d | 敏感 %d | pending %d" % (
                     ws[:12], (ws_path or "?")[:46], entries, git_n, sens_n, pending_n)
@@ -3244,17 +3262,17 @@ def cmd_ui(args):
 
 # 证据语义表：键名/后缀 → (档位, 人话)。★ 这是**翻译**不是判定：键名字面就是它的语义。
 EVIDENCE_MEANING = {
-    "lastCompressedSize": ("PACK", "上次**打包**后的体积"),
-    "encryptedSize": ("PACK", "**加密**后的体积"),
-    "manifestHash": ("PACK", "打包**清单**的哈希"),
-    "lastAccepted": ("SENT", "上次**被服务端接受**"),
-    "lastUploaded": ("SENT", "上次**上传**"),
-    "uploadedAt": ("SENT", "**上传**时间"),
-    "pushedAt": ("SENT", "**推送**时间"),
-    "syncedAt": ("SYNC", "上次**同步**时间"),
-    ".reported": ("SENT", "标记为**已上报**"),
-    ".sent": ("SENT", "标记为**已发送**"),
-    ".uploaded": ("SENT", "标记为**已上传**"),
+    "lastCompressedSize": ("PACK", "上次打包后的体积"),
+    "encryptedSize": ("PACK", "加密后的体积"),
+    "manifestHash": ("PACK", "打包清单的哈希"),
+    "lastAccepted": ("SENT", "上次被服务端接受"),
+    "lastUploaded": ("SENT", "上次上传"),
+    "uploadedAt": ("SENT", "上传时间"),
+    "pushedAt": ("SENT", "推送时间"),
+    "syncedAt": ("SYNC", "上次同步时间"),
+    ".reported": ("SENT", "标记为已上报"),
+    ".sent": ("SENT", "标记为已发送"),
+    ".uploaded": ("SENT", "标记为已上传"),
 }
 
 # 六档。★ 用户要三档（偷了/没有/有嫌疑），我们给六档 —— 因为三档里有两条我们没资格下：
@@ -3268,9 +3286,9 @@ VERDICTS = {
     "SYNC":  {"key": "SYNC",  "icon": "🟡", "title": "自认在同步", "order": 2,
               "short": "工具自己写下了「上次同步时间」；同步 ≠ 上传整份项目"},
     "CLEAN": {"key": "CLEAN", "icon": "⚪", "title": "查过，没发现记录", "order": 3,
-              "short": "扫过了，这次没找到它自己写下的外传记录 —— **不等于它没有**"},
+              "short": "扫过了，这次没找到它自己写下的外传记录 —— 不等于它没有"},
     "BLIND": {"key": "BLIND", "icon": "⚫", "title": "没查到（扫描器走不到）", "order": 4,
-              "short": "登记了、你电脑上也确实有，但扫描器**没走到** —— 这一项监理没查"},
+              "short": "登记了、你电脑上也确实有，但扫描器没走到 —— 这一项监理没查"},
     "NA":    {"key": "NA",    "icon": "·",  "title": "不适用", "order": 5,
               "short": "更新包 / 非 AI 工具本体"},
 }
@@ -3302,7 +3320,7 @@ def classify(ev, excl=None, tier=None):
 
 
 def _ev_human(kw):
-    """证据原文 → 人话译文；查不到就原样返回（**不许编**）。"""
+    """证据原文 → 人话译文；查不到就原样返回（不许编）。"""
     low = str(kw).lower()
     return next((h for n, (_k, h) in EVIDENCE_MEANING.items() if n.lower() in low), kw)
 
@@ -3446,12 +3464,12 @@ def cmd_host_scan(args):
     print("== Antinel 体检：扫你电脑上的 AI 工具（只读）")
     print("扫描根：~ ／ %APPDATA% ／ %LOCALAPPDATA%")
     print("生成时刻：%s" % datetime.now().astimezone().isoformat(timespec="seconds"))
-    print("判据：**工具自己写下的外传自认**（不看目录名——目录名启发式误报率约 85%）")
+    print("判据：工具自己写下的外传自认（不看目录名——目录名启发式误报率约 85%）")
     print()
     LAB = {"T1": "T1 已取证（已布门闸，deny）",
            "T2": "T2 你电脑上实测到（已进监管：未裁决＝拦）",
            "T3": "T3 未取证（未发现证据 ≠ 没有外传）",
-           "T4": "T4 已排除（更新包／浏览器内置／非 AI —— ★ 崩溃类已移出本表，改由观察项接管）"}
+           "T4": "T4 已排除（更新包／浏览器内置／非 AI）。崩溃类已移出本表，改由观察项接管。"}
     for t in ("T1", "T2", "T3", "T4"):
         rs = [r for r in rows if r["tier"] == t]
         if not rs:
@@ -3484,11 +3502,11 @@ def cmd_host_scan(args):
                 print("      裁决：窗口放行 至 %s"
                       % datetime.fromtimestamp(_win[_k]).strftime("%H:%M:%S"))
             else:
-                print("      裁决：**未裁决**")
+                print("      裁决：未裁决")
                 if _arm:
                     print("      ⇒ 已登记 findings，门闸将拦（不放行）")
                 else:
-                    print("      ⇒ 本次只读、**未登记**；加 --arm 才交门闸监管")
+                    print("      ⇒ 本次只读、未登记；加 --arm 才交门闸监管")
                 print("      放行：antinel host-shield decide \"%s\" allow_always" % r["path"])
         if t == "T4":
             for r in rs:
@@ -3498,7 +3516,7 @@ def cmd_host_scan(args):
           % (len(rows), cnt["T1"], cnt["T2"], cnt["T3"], cnt["T4"]))
     print()
     if cnt["T1"] + cnt["T2"]:
-        print("★ 你电脑上有实证的地方 %d 个（T1 %d ＋ T2 %d）。本次为**只读**扫描，未登记、不会拦。"
+        print("★ 你电脑上有实证的地方 %d 个（T1 %d ＋ T2 %d）。本次为只读扫描，未登记、不会拦。"
               % (cnt["T1"] + cnt["T2"], cnt["T1"], cnt["T2"]))
         print("  要交给门闸（未裁决＝拦）：antinel host-scan --arm")
         print("  逐个确认放行：antinel host-shield decide \"<路径>\" allow_always")
@@ -3520,7 +3538,7 @@ def cmd_host_scan(args):
     print()
 
     # ---- 0.29.0.r1（P0-4）：登记表覆盖对账 —— 漏了必须说出来 ------------------------
-    print("── 登记表覆盖对账（漏了就说，不许静默）──────────────")
+    print("── 登记表覆盖核对（漏了就说，不许静默）──────────────")
     # ★ 「已扫」不是照抄 `已加入 rows` 的次数 —— 那是恒等式，等于自欺。
     #   这里拿 rows 反查一遍：登记落点里，有几个**真的出现在本次结果里**。
     _scanned_keys = {os.path.realpath(_r["path"]).lower() for _r in rows}
@@ -3532,13 +3550,14 @@ def cmd_host_scan(args):
     #   它存在的意义是：谁把登记表这条路径又拆了（roots 变回死数据、落点被过滤掉），
     #   这里立刻不再是无声的 0 —— 下面第一条就是让它**有对象可查**。
     if regs and _reg_total == 0:
-        print("  ★★ 告警：登记表有 %d 张，却读出 0 个地方 —— "
-              "`roots` 又变回【死数据】了（P0-3 复发）。" % len(regs))
-        print("     查 `host_shield.load_watch_registry()` 是否仍在装载 `roots`。")
+        print("  ★★ 告警：登记表有 %d 张，却读出 0 个地方。" % len(regs))
+        print("  roots 又变回【死数据】了（P0-3 复发）。")
+        print("     查登记表加载函数是否仍在装载 roots。"
+              "函数名：host_shield.load_watch_registry。")
     print("  你电脑上有 %d ／ 已扫 %d ／ ★ 未扫 %d"
           % (_reg_present, _reg_scanned, _reg_unscanned))
     if _reg_unscanned:
-        print("  ★★ 没扫到的登记地方（这一项监理**没查**，请当空白读）：")
+        print("  ★★ 没扫到的登记地方（这一项监理没查，请当空白读）：")
         for _h, _raw, _k in _reg_present_keys:
             if _k not in _scanned_keys:
                 print("      ⚫ %-14s %s" % (_h, _raw))
@@ -3552,7 +3571,7 @@ def cmd_host_scan(args):
             print("      · %-14s %s" % (_h, _raw))
     print("  ⚠ 上面只覆盖【已登记的 %d 个工具】＋【目录名命中 %d 个厂商词的目录】；"
           % (len(regs), len(_SCAN_VENDOR_KW)))
-    print("    这两者之外的地方，本命令**没有看** —— 不是「看了没发现」。")
+    print("    这两者之外的地方，本命令没有看 —— 不是「看了没发现」。")
     # ★ 0.33.1（2026-09-28）：**布防数**。此前 `host-audit` 会打「登记表共 24 个宿主，
     #   其中【已布门闸】1 个」，而本命令没有 ⇒ 用户只看到「这条说 24、那条说 1」，
     #   拼不出全貌，于是"登记了 24 个"很容易被读成"24 个都被盯住"。
@@ -3587,7 +3606,7 @@ def cmd_host_scan(args):
         tot_n = sum(d[1] for d in dumps)
         tot_b = sum(d[2] for d in dumps)
         print("  [崩溃转储] %d 个 .dmp，共 %.1f MB" % (tot_n, _m(tot_b)))
-        print("       ★ .dmp 是**整进程内存镜像**：崩溃当时的工作区内容/密钥/token 都在里面。")
+        print("       ★ .dmp 是整进程内存镜像：崩溃当时的工作区内容/密钥/token 都在里面。")
         for (q, n, b, procs) in dumps:
             print("       %s" % q)
             print("           %d 个 ／ %.1f MB ／ 进程：%s" % (n, _m(b), ", ".join(procs)))
@@ -3600,7 +3619,7 @@ def cmd_host_scan(args):
     else:
         print("  [崩溃上报目录] 0 处")
     if other_res:
-        print("  [会话/历史/日志/诊断类] %d 处（**旧版整类跳过、看不见**；现在只报体量）"
+        print("  [会话/历史/日志/诊断类] %d 处（旧版整类跳过、看不见；现在只报体量）"
               % len(other_res))
         for (q, lbl, n, b, tr) in other_res[:10]:
             print("       %-14s %s  条目 %d ／ %.1f MB%s"
@@ -3608,10 +3627,10 @@ def cmd_host_scan(args):
     else:
         print("  [会话/历史/日志/诊断类] 0 处")
     if index is None:
-        print("  [索引/向量类] **本段未配置** —— `_INDEX_SUBDIRS` 为空（本机 0 实证，"
-              "见其注释）⇒ 这里**没有查**，不是「查过、0 处」。")
+        print("  [索引/向量类] 本段未配置：_INDEX_SUBDIRS 为空（本机 0 实证）。"
+              "这里没有查，不是「查过、0 处」。")
     elif index:
-        print("  [索引/向量类] %d 处（先取证：**不预设**它一定外传）" % len(index))
+        print("  [索引/向量类] %d 处（先取证：不预设它一定外传）" % len(index))
         for (q, n, b, tr) in index[:8]:
             print("       %s  条目 %d ／ %.1f MB%s" % (q, n, _m(b), "（截断）" if tr else ""))
     else:
@@ -3629,14 +3648,15 @@ def cmd_host_scan(args):
     else:
         print("  [IM/邮件的本地库] 0 处")
     if sync:
-        print("  [云盘同步目录] %d 处 —— **写进去＝客户端自动上传**（DST-11 已盯）" % len(sync))
+        print("  [云盘同步目录] %d 处 —— 写进去＝客户端自动上传（DST-11 已盯）" % len(sync))
         for (q, n, b, tr) in sync[:8]:
             print("       %s  条目 %d ／ %.1f MB" % (q, n, _m(b)))
     else:
         print("  [云盘同步目录] 0 处")
     if shares:
-        print("  [系统分享目标] %d 个 —— **影子通道**：点一下分享内容就出去，"
-              "全程不经 Agent 工具、钩子看不见" % len(shares))
+        print("  [系统分享目标] %d 个 —— 影子通道：点一下分享内容就出去。"
+              % len(shares))
+        print("  全程不经 Agent 工具，钩子看不见。")
         for s in shares[:8]:
             print("       %s" % s)
     else:
@@ -3657,9 +3677,9 @@ def cmd_host_scan(args):
     print("  · 本扫描为【本次取证】。未发现证据 ≠ 没有外传 —— 只代表这一遍没查出来。")
     print("  · 门闸只对 T1 生效（避免误报）。T2/T3 是否布防见《全工具覆盖设计 v1.0》§6 待拍板。")
     print("  · 门闸拦的是【文件落盘】这一步；工具若直接内存发包（不经落盘），只能记账、拦不住。")
-    print("  · 观察项**不读文件内容**：它告诉你「这里有什么、有多大」，"
+    print("  · 观察项不读文件内容：它告诉你「这里有什么、有多大」，"
           "不替你下「这是外传」的结论。")
-    print("  · 登记的地方 %d 个：已扫 %d ／ ★ 未扫 %d（见上方「登记表覆盖对账」）。"
+    print("  · 登记的地方 %d 个：已扫 %d ／ ★ 未扫 %d（见上方「登记表覆盖核对」）。"
           % (_reg_total, _reg_scanned, _reg_unscanned))
     # ★ 0.33.1（2026-09-28）：**布防数**放在读者真正会读到的地方（末尾这一块）。
     #   中部「登记表覆盖对账」段里另有一行同源数字，两处**故意重复** ——
@@ -3668,7 +3688,7 @@ def cmd_host_scan(args):
     #   其中【已布门闸】M 个」），这样用户在两页看到的是同一句话。
     print("  · 登记表共 %d 个宿主，其中【已布门闸】%d 个（即 T1）；"
           % (len(regs), len(t1_hosts)))
-    print("    其余 %d 个**没有门闸** —— 本命令能看到它们，但拦不住它们的落盘。"
+    print("    其余 %d 个没有门闸 —— 本命令能看到它们，但拦不住它们的落盘。"
           % (len(regs) - len(t1_hosts)))
     if getattr(args, "json", False):
         print()
@@ -3856,7 +3876,7 @@ def _agent_state_json():
         "skill_md": skill,
         "next_steps": steps,
         "exit_code_contract": {
-            "antinel install --check": "0=一致 / 1=未安装 / 3=有漂移",
+            "antinel install --check": "0=一致 / 1=未安装 / 3=与登记不符",
             "python -m tools.antinel_verify": "0=current / 1=superseded / 2=无法校验",
             "python -m scripts.scan": "0=扫描完成（有发现也是 0；看 JSON 里的 findings）",
         },
@@ -3869,7 +3889,7 @@ def _agent_state_json():
 
 
 def cmd_agent(args):
-    """`antinel agent [--json]` —— 机器可读的「我现在该干什么」。"""
+    """antinel agent [--json] —— 机器可读的「我现在该干什么」。"""
     d = _agent_state_json()
     if getattr(args, "json", False):
         print(json.dumps(d, ensure_ascii=False, indent=1))
@@ -3897,11 +3917,12 @@ def main(argv=None):
     #   argparse 自动帮助会把子命令清单以另一种版式再印一遍 ⇒ 两个版本不一致。
     #   故显式补出口，复用同一个 cmd_help()（单一真源）。
     ap.add_argument("-h", "--help", action="store_true", dest="show_help",
-                    help="显示帮助（等同 `antinel help`）")
+                    help="显示帮助（等同 antinel help）")
     # 多宿主共存：目录探测会误报（装了谁就报谁）——Agent/用户可显式指定所在宿主
     ap.add_argument("--host", dest="force_host",
-                    help="显式指定宿主（workbuddy|zcode|qoder|claude-code|generic），"
-                         "多宿主共存时 Agent 应自报所在宿主")
+                    help="显式指定宿主。可选值："
+                         "workbuddy|zcode|qoder|claude-code|generic。"
+                         "多宿主共存时由 Agent 自报。")
     # ★ 0.34.0：补 --version。此前 VERSION 常量在 :37 却没有出口，
     #   包管理器／CI／用户无法查询已安装版本（实测 `antinel --version` 报
     #   "unrecognized arguments"）—— 对一个声明了 [project.scripts] 入口的 CLI 是硬伤。
@@ -3969,7 +3990,7 @@ def main(argv=None):
     # ★ 0.53.0（T4.1）：按天账的机器出口。`--json` 给程序吃（`null`＝当天无记录）。
     p = sub.add_parser("ledger", help="按天账（拦截/注意/防护缺口/已处理）；--json 给程序吃")
     p.add_argument("--days", type=int, default=7,
-                   help="往回数几个日历天（含今天，默认 7）")
+                   help="往回数几个日历天（含当天，默认 7）")
     p.add_argument("--json", dest="json_out", action="store_true",
                    help="输出 JSON（无记录的天是 null，不是 0）")
 
@@ -3986,7 +4007,7 @@ def main(argv=None):
     p.add_argument("--root", default=None, help="项目根（默认当前目录）")
     p.add_argument("--host", choices=["claude-code", "zcode", "qoder", "generic"], default=None)
     p.add_argument("--global", dest="global_hooks", action="store_true")
-    p.add_argument("--check", action="store_true", help="只比对不改动（0=一致/1=未安装/3=漂移）")
+    p.add_argument("--check", action="store_true", help="只比对不改动（0=一致/1=未安装/3=与登记不符）")
     p.add_argument("--uninstall", action="store_true")
     p.add_argument("--purge", action="store_true")
     p.add_argument("--skip-scan", action="store_true")

@@ -678,7 +678,7 @@ def _evidence_html(r, detail, verdicts, ev_human, verdict):
         rows_html = ("<table class='evo'><tr><th>类别</th><th>它写的字段</th>"
                      "<th>值（逐字抄下）</th><th>时间</th></tr>%s</table>"
                      "<p class='muted small'>这四列是从它自己的文件里<b>逐字抄下来的</b>，"
-                     "没有加工 —— 需要时可作为证据引用。</p>" % "".join(rows))
+                     "没有加工。需要时可作为证据引用。</p>" % "".join(rows))
 
     return ("<div class='ev'>"
             "<div class='l1'>%s</div>%s%s"
@@ -727,7 +727,7 @@ def _egress_html(eg):
     parts = []
     if not snap.get("ok"):
         parts.append("<p class='muted'>这一次没能取到当前的网络连接快照"
-                     "（采样失败 %s 次）—— 这一项是<b>没查到</b>，请当空白读。</p>"
+                     "（采样失败 %s 次）。这一项是<b>没查到</b>，请当空白读。</p>"
                      % int(eg.get("sample_failed") or 0))
     else:
         # ★ 0.47.0：这是**此刻**的实况读数（窗口＝此刻），不是"一段时间里的告警数"
@@ -746,8 +746,8 @@ def _egress_html(eg):
     else:
         parts.append("<p class='muted'>账本里没有需要特别标记的连接。"
                      "注意：这只是<b>没记到值得看的</b>，不等于<q>没有外传</q>。</p>")
-    parts.append("<p class='muted small'>说明：外传账本每采样一次会往<b>你自己电脑上的</b>"
-                 "账本追加一条记录（这是它的本职），同样不会上传到任何地方。</p>")
+    parts.append("<p class='muted small'>说明：外传账本每采样一次，会往<b>你自己电脑上的</b>"
+                 "账本追加一条记录（这是它的本职）。它同样不会上传到任何地方。</p>")
     return "".join(parts)
 
 
@@ -1098,7 +1098,7 @@ def _result_html(res, verdicts, ev_human, after_card=""):
         head.append(
             "<div class='blind'><b>⚫ 有 %d 个地方监理没查到"
             "（这次一共查了 %d 个地方）。</b><br>"
-            "它们登记过、你电脑上也确实存在，但这次扫描没走到 —— "
+            "它们登记过、你电脑上也确实存在，但这次扫描没走到。"
             "<b>请把它们当空白读，不要当成「没问题」。</b></div>"
             % (blind_n, len(tools)))
 
@@ -1146,8 +1146,8 @@ def _result_html(res, verdicts, ev_human, after_card=""):
         "<button type='button' class='lnk' data-foldall='0'>全部收起</button></div>",
         "<h2 id='x-tools'>① 我电脑上有哪些 AI 工具（%d 个）</h2>" % len(tools),
         _tiles(vc, verdicts, blind_n, total=len(tools)),
-        "<p class='muted small'>六档是这么分的：🔴 自认打包过 ＞ 🟠 自认往外发过 ＞ "
-        "🟡 自认在同步 ＞ ⚪ 查过、没发现记录 ＞ ⚫ 没查到 ＞ · 不适用。</p>",
+        "<p class='muted small'>六档是这么分的。🔴 自认打包过；🟠 自认往外发过；"
+        "🟡 自认在同步；⚪ 查过、没发现记录；⚫ 没查到；· 不适用。</p>",
         "<h3 class='gh'>逐个看（%d 个）</h3>" % len(tools),
         _rows_html(tools, verdicts, ev_human, scan.get("details")),
         "<h2 id='x-projs'>② 我的哪些项目被打包过（%d 个）</h2>" % len(_projs),
@@ -1323,7 +1323,7 @@ def _exam_export_html(res, verdicts, ev_human, meta=None):
     if lvl >= 1:
         banner = ("<div class='banner san'><b>脱敏版</b>：本文件里的用户名已替换为 "
                   "<code>&lt;USER&gt;</code>%s。替换<b>只动文字</b>，"
-                  "没有改动任何计数、档位与结论。要原始细节，请在监理里另下"
+                  "没有改动任何计数或结论。要原始细节，请在监理里另下"
                   "「完整版」。</div>" % extra)
     else:
         banner = ("<div class='banner full'><b>完整版</b>：本文件含有你电脑上的"
@@ -1336,7 +1336,7 @@ def _exam_export_html(res, verdicts, ev_human, meta=None):
         "报告生成 %s</p>" % (ver or "（版本未知）", gen or "（未知）", src_note, made),
         banner,
         "<div class='bounds'><b>先说清楚这份文件是什么：</b><ul>"
-        "<li>它是<b>快照</b>：只记录上面那个时刻的检查结果，之后电脑上发生的事"
+        "<li>它是<b>快照</b>：只记录上面那个时刻的检查结果。之后电脑上发生的事"
         "不在里面。</li>"
         "<li>本次为<b>只读</b>检查：没有登记、没有布防、没有上锁。</li>"
         "<li>监理只读到工具<b>自己写下</b>的字段 —— 「没查到」「没发现」"
@@ -1348,8 +1348,8 @@ def _exam_export_html(res, verdicts, ev_human, meta=None):
         # 不冲突 —— 这是另一份文档，且两处的分区口径一致（同一个 _H_TITLES 尺子）。
         "<h2 id=\"x-tools\">① 我电脑上有哪些 AI 工具（%d 个）</h2>" % len(tools),
         _tiles(vc, verdicts, blind_n, total=len(tools)),
-        "<p class='muted small'>六档是这么分的：🔴 自认打包过 ＞ 🟠 自认往外发过 ＞ "
-        "🟡 自认在同步 ＞ ⚪ 查过、没发现记录 ＞ ⚫ 没查到 ＞ · 不适用。</p>",
+        "<p class='muted small'>六档是这么分的。🔴 自认打包过；🟠 自认往外发过；"
+        "🟡 自认在同步；⚪ 查过、没发现记录；⚫ 没查到；· 不适用。</p>",
         _rows_html(tools, verdicts, ev_human, scan.get("details")),
         "<h2 id=\"x-projs\">② 我的哪些项目被打包过（%d 个）</h2>" % len(projs),
         _proj_html(projs),

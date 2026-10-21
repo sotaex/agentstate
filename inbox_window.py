@@ -371,7 +371,7 @@ def _focus_one(hwnd):
         u.SetWindowPos(h, w.HWND(HWND_NOTOPMOST), 0, 0, 0, 0, 0x0003)
         if ok:
             return True, ""
-        return False, "SetForegroundWindow / SetWindowPos 都没能把它切到前面。"
+        return False, "切不到前面：SetForegroundWindow、SetWindowPos 都失败。"
     except Exception as e:                              # noqa: BLE001
         return False, "%s: %s" % (type(e).__name__, e)
 
@@ -1457,6 +1457,6 @@ def place_all(hwnds, rect, setter=None, reader=None, skip_if_placed=True):
     bad = [w for o, w in zip(oks, whys) if not o]
     # ★ 0.36.4：**失败不再关窗**（见 `close_window` 的职责收窄说明）。
     #   如实说清"没搬成"，并明说面板**仍在屏幕上**、由用户处置。
-    return False, ("%d 个匹配窗口里 %d 个没落到目标位置：%s"
-                   "（面板仍留在屏幕上，没有被关掉——它就是 Antinel 监理，"
-                   "由你决定关不关）" % (len(hwnds), len(bad), bad[0]))
+    return False, ("%d 个匹配窗口里 %d 个没落到目标位置：%s。"
+                   "面板仍留在屏幕上，没有被关掉——它就是 Antinel 监理，"
+                   "由你决定关不关。" % (len(hwnds), len(bad), bad[0]))

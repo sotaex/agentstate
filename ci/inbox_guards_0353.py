@@ -2767,11 +2767,16 @@ def n_tray_refresh_is_not_a_noop():
 
 # ============================================ 十二、导出口径（交接 §5）====
 def c_cli_export_states_its_scope():
-    """导出必须**先说口径**：全部已载入记录 ≠ 待办件数（实测本机 227 vs 4 件事）。"""
+    """导出必须**先说口径**：全部已载入记录 ≠ 待办件数（实测本机 227 vs 4 件事）。
+
+    ★ 批28c 换锚（STE100）：产品把这行前缀从「口径：」改成「统计范围：」——
+      「口径」是工程行话，普通读者不知道它指什么。断言强度未变：仍要求
+      ① 说清范围 ② 明写「不等于待办件数」③ 带得出条数（全部 N 条）。
+    """
     hub = G.new_hub()
     G.put_chain(hub, [G.breach(ts="2026-10-05T09:00:00+08:00", reason="a")])
     rc, out = G._cli(["export", "--format", "csv"])
-    return (rc == 0 and "口径" in out and "不等于待办件数" in out
+    return (rc == 0 and "统计范围" in out and "不等于待办件数" in out
             and "全部 1 条" in out)
 
 

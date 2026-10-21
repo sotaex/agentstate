@@ -309,9 +309,9 @@ def retire(root=None, finder=None, killer=None, wait_sec=RETIRE_WAIT_SEC,
     try:
         n, why = kill(why="标志退役超时 %ss" % int(wait_sec))
     except Exception as e:                                  # noqa: BLE001
-        why = "兜底关窗也失败：%s: %s" % (type(e).__name__, e)
+        why = "备用关窗也失败：%s: %s" % (type(e).__name__, e)
     out.update(ok=(cleared and n > 0), acted=True,
-               why=(out["why"] or "标志退役超时，已兜底 %s%s" % (
+               why=(out["why"] or "标志退役超时，已改用备用方式 %s%s" % (
                    why, "" if n > 0 else "（仍未关掉）")))
     return out
 
@@ -380,9 +380,10 @@ def hide(root=None, finder=None, killer=None, wait_sec=HIDE_WAIT_SEC,
     out["acted"] = True
     if ret.get("ok"):
         out.update(ok=True,
-                   why="哨标没响应 hide，已兜底退役（%s）" % (ret.get("why") or "quit"))
+                   why="哨标没响应 hide，已改用备用方式退役（%s）" % (
+                       ret.get("why") or "quit"))
     else:
-        out["why"] = "哨标藏不动、兜底退役也没成（%s）" % (ret.get("why") or "",)
+        out["why"] = "哨标藏不动、备用退役也没成（%s）" % (ret.get("why") or "",)
     return out
 
 
@@ -629,7 +630,8 @@ def collapse_console(root=None, run_id=None, token=None, closer=None,
                         wait_sec=wait_sec, topmost=topmost, verbose=verbose)
     out["floating"] = flo
     if not flo.get("ok"):
-        out["why"] = "哨标没起来（%s）⇒ **没有关面板窗**（不至于两头空）" % flo.get("why", "")
+        out["why"] = ("哨标没起来（%s）⇒ 面板窗先不关（不至于两头空）"
+                      % flo.get("why", ""))
         return out
     n = 0
     try:

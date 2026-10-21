@@ -3984,7 +3984,7 @@ def main():
                                str(top.get("match_snippet") or "")):
                 what = desc or top.get("description") or "危险操作"
                 detail = str(top.get("match_snippet", ""))[:80]
-                notify_owner("Antinel 已拦下危险操作",
+                notify_owner("Antinel 已挡下危险操作",
                              "%s%s。已留痕，详情见 antinel report --session latest"
                              % (what, ("｜" + detail) if detail else ""),
                              kind="block|" + str(top.get("rule_id") or "?"))

@@ -6302,20 +6302,24 @@ _STE_PY = ("glossary.py", "inbox_model.py", "inbox_server.py", "inbox_bubble.py"
            "audit_chain.py", "granary.py", "heartbeat.py", "hub.py",
            "inbox_config.py", "inbox_daemon.py", "inbox_emphasis.py",
            "inbox_fallback.py", "inbox_store.py", "ledger.py",
-           "machine_id.py", "session_dna.py", "transcript_reader.py")
+           "machine_id.py", "session_dna.py", "transcript_reader.py",
+           # ★ 批28c：旧版体检页（antinel ui）—— 改完 8 处长句＋1 处内部词，
+           #   余 4 条划界句过簿（见 _STE_REGISTRY 尾三条之前那四条）
+           "ui_server.py",
+           # ★ 批28c：终端出口 —— host_shield 15 条告警 reason 已拆短，
+           #   余 2 条划界句过簿；egress 仅剩 1 条划界句过簿
+           "host_shield.py", "egress.py",
+           # ★ 批28c：这五个清完之后**零命中**，直接进面
+           "strings.py", "inbox_cli.py", "inbox_logo.py",
+           "antinel_mcp.py", "inbox_window.py",
+           # ★ 批28d：antinel.py（终端出口）—— 65 个 token 去标记、28 条改词、
+           #   22 条拆句、4 条路由话语按结构豁免，余 5 条过簿
+           "antinel.py")
 # ★ 未清台账：文件 → 计划批次。**不许有无台账的未过簿文件**（U-24 ③）。
 #   清完一个就从这里挪进 _STE_PY；本台账为空之日＝面全部过簿。
-_STE_SURFACE_TODO = {
-    "antinel.py": "批28c（终端出口：帮助文本／SKILL 内嵌段，121 条）",
-    "host_shield.py": "批28c（终端出口：告警 reason，19 条）",
-    "ui_server.py": "批28c（网页出口：体检页旧版，13 条）",
-    "inbox_cli.py": "批28c（终端出口：命令输出，10 条）",
-    "strings.py": "批28c（6 条）",
-    "inbox_logo.py": "批28c（5 条）",
-    "egress.py": "批28c（3 条）",
-    "antinel_mcp.py": "批28c（1 条）",
-    "inbox_window.py": "批28c（1 条）",
-}
+#   ★ 2026-10-22 批28d：**台账已空** —— 30 个随包模块全部过簿。
+#     这条注释留着当锚：下一个人加模块忘了登记时，U-24 会红在这里。
+_STE_SURFACE_TODO = {}
 _STE_JSON = "rules/default.json"
 _STE_JSON_FIELDS = ("label_zh", "description_zh", "remediation_zh")
 
@@ -6340,7 +6344,13 @@ _STE_ENG = ("口径", "派生", "锚点", "判红", "判绿", "假绿", "假红"
 _STE_FAMILY = {"拦下": "挡下", "拦住": "挡下", "事件": "记录"}
 _STE_MAXLEN = 42                      # D7：用户可见叙述句上限（剥 HTML 后逐句）
 _STE_SKEL_MAXLEN = 60                 # U-29：吃了豁免的行，行文仍不许超过这个数
-_STE_SENT = re.compile(r"[。！？；]")
+_STE_SENT = re.compile(r"[。！？；\n]")
+# ★ 视觉断句：① 装饰线（────）不是给人读的字，撑长的长度不算行文；
+#             ② `<br>`／`</p>`／`</div>` 等块级标签＝真的换行，换行即断句
+#                （旧版只按标点切，一个三行提示块被当成一句 ⇒ 假红）。
+_STE_RULE_LINE = re.compile(r"[─━═—\-–·]{3,}")
+_STE_BLOCK_END = re.compile(r"<br\s*/?>|</p>|</div>|</li>|</tr>|</h[1-6]>",
+                            re.I)
 # ★★ D8 口径（0.53.5 族八修正）：从「否定式开头」收紧为**双重否定**。
 #   旧口径抓的是「未找到项目／不适用／未启用」这类清晰否定短标签 —— 而
 #   ASD-STE100 **只禁双重否定，不禁否定式**（清晰地说「没有」比绕弯强）。
@@ -6354,25 +6364,54 @@ _STE_NEG_LINK = (r"(不等于|不代表|并不代表|不当作|并不是|并非|
 _STE_NEG_DBL = re.compile(_STE_NEG_LINK + r"[^。；！？]{0,8}(没有|没|无|未)")
 # ★ 引用否定豁免：先剥掉「」""'' 里的内容再判（引用别人的否定不是双重否定）
 _STE_QUOTED = re.compile(r"「[^」]*」|“[^”]*”|\"[^\"]*\"|'[^']*'")
-# ★ D7 的命令示例句：命令是拿来**复制**的，不是拿来通读的（D7 守的是
-#   「人读不完的叙述句」）。但**括号里**若还藏着一句长叙述 ⇒ 照判（反滥用腿）。
-_STE_CMD = re.compile(r"^\s*\$?\s*(antinel|python3?|pip3?|py)\s|^\s*\$ ")
+# ★ D7 的命令片段：命令是拿来**复制**的，不是拿来通读的（D7 守的是「人读不完的
+#   叙述句」）。**剥掉命令片段后**再量剩下的行文 —— 一整句豁免会放过
+#   「antinel foo 然后你得做一件很长很长的事」这种假借命令躲尺子的写法；
+#   剥完再量，长叙述照样红（反滥用腿在规则里，不在补丁里）。
+#   剥除范围只到命令与它的参数（不含中文说明）⇒ 「修法：python xxx --flag」
+#   剥完只剩「修法：」，而「修法：python xxx，因为你还得……」里的中文跑不掉。
+_STE_CMD_SEG = re.compile(r"(?:^|[:：]\s*|\s)(?:antinel|python3?|pip3?|py)\b"
+                          r"[A-Za-z0-9_./\\\-–— ]*")
 _STE_PAREN = re.compile(r"[（(]([^）)]*)[）)]")
+# ★ 取值枚举（`warn|block`／`workbuddy|zcode|qoder`）：竖线连起来的英文取值
+#   是**机器标识符**，不是行文 —— 它没有主谓、也没法改写成句子，量它的
+#   长度等于量一个型号名有多长。剥掉再量剩下的行文（反滥用腿同样生效：
+#   剥完还剩长叙述照样红）。
+_STE_VALS = re.compile(r"[（(]?[a-z0-9][a-z0-9_\-]*"
+                       r"(?:[|｜][a-z0-9][a-z0-9_\-]*)+[）)]?")
 _STE_MARK = re.compile(r"\*\*|`")
 _STE_PH = re.compile(r"%[-# 0]*\d*(?:\.\d+)?[sdif]")
+# ★ 0.53.5 批28c：`strings.py` 走 .format()，占位符是 `{N}` 不是 `%s`。
+#   两者性质相同（都会被运行值替换）⇒ 一并按「骨架」处理，否则模板串会被
+#   当成一段纯行文来量长度，长度其实由运行值决定（尺子在量它不该量的东西）。
+_STE_BRACE = re.compile(r"\{[^{}]{0,24}\}")
 _STE_PATTERN = re.compile(r"\(\?\:|\(\.[+*]|\[\^|\\b")
 _STE_MIN_REASON = 20                  # 理由不许一句话搪塞
 # U-26：狼来了闸。**上限＝当前簿的实际条数**，加一条豁免就必须显式改这个数
 # （改数会在 diff 里留痕，逼人回答「为什么又多一条豁免」）。
-# 基线史：54（批27 立） → 10（批28：D8 口径收紧后删 46 条死登记 ＋ 加 2 条）。
-_STE_BOOK_MAX = 10
+# 基线史：54（批27 立） → 10（批28：D8 口径收紧后删 46 条死登记 ＋ 加 2 条）
+#        → 14（批28c：面扩进 ui_server（旧体检页），新增 4 条划界句。
+#          这 4 条是**面变大**带来的，不是标准放松 —— 面不变时上限也不许动）
+#        → 17（批28c 续：面再扩进 host_shield／egress，新增 3 条「查不出来
+#          ≠ 没事」的划界句。同类理由：面变大，不是尺子松）
+#        → 22（批28d：面最后扩进 antinel.py，新增 4 条划界句 ＋ 1 条含文档
+#          标题的（标题不可改）＋ 1 条「分母」＝其实 5 条，其中 L1025 那条
+#          是**既有**的拍板保留项，随面一起进簿）。
+_STE_BOOK_MAX = 22
 _STE_HUMOR_MAX = 2                    # U-30：幽默一句一登记（R-1）
 # U-29：开发者消息（带 %r／repr）豁免面上限。**上调必须留痕**（diff 可见）。
-# 基线史：13（批27 立，面 8 文件）→ 15（批28b，面扩到 21 个随包模块）。
+# 基线史：13（批27 立，面 8 文件）→ 15（批28b，面扩到 21 个随包模块）
+#        → 19（批28c，面再扩到 host_shield／egress／ui_server／inbox_cli 等：
+#          新增 4 条 —— ui_server「自动打开浏览器失败」／host_shield 两条
+#          「版本号比不了」与「修复动作出错」。**调上限不是放松**：面上限与
+#          登记上限一样，只许随面变大而变，面不变时谁都不许动）
+#        → 27（批28d，面最后扩进 antinel.py：新增 8 条 —— 全是「余额需为数字，
+#          收到：%r」「盘根样条目不放行（%r）」这类**参数校验诊断**，
+#          8 条逐条看过，没有一条是给用户读的叙述）。
 # ★ 批28b 复核：15 条逐条看过，全是诊断串 —— `[place]`／`[open_console]`／`!!`
 #   前缀的运行日志，或「请在 _CATEGORY_ZH 登记」这类给开发者的指令；没有一条
 #   是给终端用户读的叙述文案（真上屏的话 %r 打出来是带引号转义的乱码）。
-_STE_DEV_MAX = 15
+_STE_DEV_MAX = 27
 _STE_LINK = re.compile(r"<a [^>]*>.*?</a>", re.S)
 
 
@@ -6398,7 +6437,54 @@ def _ste_is_code(s):
 
 def _ste_skeleton(s):
     """占位符 → 定宽假值：D7 量的是**行文**，长度不由运行值决定。"""
-    return _STE_PH.sub("00", s)
+    return _STE_BRACE.sub("00", _STE_PH.sub("00", s))
+
+
+def _ste_ph_n(s):
+    """占位符个数（`%s` 与 `{N}` 同算）—— 用于「数据行」判定。"""
+    return len(_STE_PH.findall(s)) + len(_STE_BRACE.findall(s))
+
+
+def _ste_sentences(s):
+    """按**视觉**断句：块级标签→换行、装饰线剥掉、剩下标点与换行切。"""
+    t = _STE_BLOCK_END.sub("\n", s)
+    t = _ste_visible(t)
+    t = _STE_RULE_LINE.sub(" ", t)
+    return [f.strip() for f in _STE_SENT.split(t)]
+
+
+_STE_HELP_MAX = 24                    # 路由话语豁免的**结构**上限（＝ROUTES 行数）
+
+
+def _ste_route_quotes(src):
+    """`ROUTES` 第一列的字面量＝**用户自己的话**（Agent 路由的匹配键）。
+
+    ★ 为什么这一类必须豁免：那一列是「用户会怎么问」，不是我们写给人看的文案。
+      把它按文案规矩改写，改的就是**匹配键**——用户照原话问反而对不上，
+      路由当场失灵。判据守住它靠**结构**（只认 ROUTES 里三元组的第一项），
+      不靠文件名、也不靠关键词：谁把一段文案塞进第一列，它就变成「用户的话」，
+      而 U-24 ⑤ 同时要求这个豁免的**条数等于 ROUTES 的行数** —— 塞不进来。
+    """
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return set()
+    out = set()
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(t, ast.Name) and t.id == "ROUTES"
+                   for t in node.targets):
+            continue
+        if not isinstance(node.value, (ast.List, ast.Tuple)):
+            continue
+        for row in node.value.elts:
+            if isinstance(row, (ast.Tuple, ast.List)) and row.elts:
+                first = row.elts[0]
+                if isinstance(first, ast.Constant) and \
+                        isinstance(first.value, str):
+                    out.add(first.value.strip())
+    return out
 
 
 def _ste_strings(rel, src):
@@ -6412,6 +6498,7 @@ def _ste_strings(rel, src):
                     out.append(("%s.%s" % (r.get("id"), f), v.strip()))
         return out
     tree = ast.parse(src)
+    route_quotes = _ste_route_quotes(src)
     doc_ids = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef,
@@ -6426,6 +6513,8 @@ def _ste_strings(rel, src):
             if id(node) in doc_ids:
                 continue
             s = node.value.strip()
+            if s in route_quotes:
+                continue                  # 用户自己的话（见 _ste_route_quotes）
             if re.search(r"[一-鿿]", s) and len(s) >= 3:
                 out.append(("L%d" % node.lineno, s))
     return out
@@ -6482,7 +6571,10 @@ def _ste_hits(s):
     dims = set()
     if _STE_REL_TIME.search(vis) or _STE_REL_RECENT.search(vis):
         dims.add("D1")
-    if _STE_D2A.search(vis) or _STE_D2B.search(vis):
+    # D2 两条腿分得开：**时间＋状态**（「昨天拦截」）无论如何都是红；
+    #   **状态＋数字**（「拦截 %d」）在**数据行**里是计数展示（一行多个指标），
+    #   与 D7 同口径豁免 —— 不豁免的话每个指标行都会假红。
+    if _STE_D2A.search(vis) or (_STE_D2B.search(vis) and _ste_ph_n(s) < 3):
         dims.add("D2")
     if any(w in vis for w in _STE_HUMOR):
         dims.add("D3")
@@ -6494,17 +6586,12 @@ def _ste_hits(s):
         dims.add("W")
     # D7：数据行（≥3 占位符＝一行多个格子）与选项枚举行（≥2 链接）豁免长度；
     #     豁免**不是无限**的 —— 见 U-29。
-    if len(_STE_PH.findall(s)) < 3 and s.count("<a ") < 2:
+    if _ste_ph_n(s) < 3 and s.count("<a ") < 2:
         worst = 0
-        for frag in _STE_SENT.split(vis):
-            frag = frag.strip()
-            if _STE_CMD.match(frag):
-                # 命令示例句：命令本身豁免；括号里若还藏着长叙述句 ⇒ 照判
-                inner = " ".join(_STE_PAREN.findall(frag))
-                if len(inner) > _STE_MAXLEN:
-                    worst = max(worst, len(inner))
-                continue
-            worst = max(worst, len(frag))
+        for frag in _ste_sentences(s):
+            frag = _STE_CMD_SEG.sub(" ", frag.strip())
+            frag = _STE_VALS.sub(" ", frag)
+            worst = max(worst, len(frag.strip()))
         if worst > _STE_MAXLEN:
             dims.add("D7")
     if _STE_NEG_DBL.search(_STE_QUOTED.sub(" ", vis)):
@@ -6635,6 +6722,85 @@ _STE_REGISTRY = (
      '--format md 的格式语法（用户显式要 markdown'
      '，星号是该格式的语法；出口不过 visible_text 是有意'
      '的 —— 过了 md 就不合法）'),
+    # ★ 批28c：ui_server（旧版体检页）的四条**划界句**。它们都是
+    #   「扫过了没找到 ≠ 没有」—— 这句要守的正是这条边界：改成肯定句
+    #   就等于把「没查到」说成「没有」，与 null≠空 的产品纪律直接冲突。
+    #   四条不是重复：分别落在汇总分组头、单条事件、连接账本、打包记录
+    #   四个不同落点，读者可能只看到其中一处。
+    ("ui_server.py",
+     "<div class='grp g-clean'><h3 class='gh'>%s %s（%d 个）</h3><p "
+     "class='muted small'>扫过了，没找到它们自己写下的外传记录 —— "
+     "<b>不等于它们没有</b>。</p><details class='fold xfold'><summary>"
+     "点开看是哪些（%d 个）</summary>%s</details></div>",
+     'D8',
+     '汇总分组头的划界句（「扫过了没找到」不等于「它们没有外传」）；'
+     '改成肯定句会把没查到说成没有，与 null≠空 的产品纪律冲突'),
+    ("ui_server.py",
+     "<div class='ev muted'>扫过了，这次没找到它自己写下的外传记录 —— "
+     "<b>不等于它没有</b>。</div>",
+     'D8',
+     '单条事件的划界句；一条查不到与这台机器没有外传是两件事，'
+     '改成肯定句即假陈述'),
+    ("ui_server.py",
+     "<p class='muted'>这次没找到「打包过项目」的记录 —— "
+     "<b>不等于没打包过</b>。</p>",
+     'D8',
+     '打包记录的划界句（没有记录不等于没发生过）；'
+     '改成肯定句会把「查不到」说成「没打包装过」，是反向假陈述'),
+    ("ui_server.py",
+     "<p class='muted'>账本里没有需要特别标记的连接。注意：这只是"
+     "<b>没记到值得看的</b>，不等于<q>没有外传</q>。</p>",
+     'D8',
+     '连接账本的划界句（没记到值得看的≠没有外传）；'
+     '两句话分别答「账本里有什么」与「这能推出什么」，删任一句都丢边界'),
+    # ★ 批28c：三条「查不出来 ≠ 没事」的划界句。它们出现在**监理说不出话**
+    #   的地方（判据全没触发／清单读不出来／根本没法查），此时唯一的诚实
+    #   表述就是「不知道」，写成肯定句等于替电脑撒谎。
+    ("egress.py",
+     '（三条判据都没有触发 —— 这不等于没问题，只等于没看到异常特征）',
+     'D8',
+     '异常判据全没触发时唯一诚实的表述；改成肯定句等于把'
+     '「没看到异常特征」说成「没问题」，是替机器替用户下结论'),
+    ("host_shield.py",
+     '受监管落点清单查不出来（%s）—— 查不出不等于没有，按有处理',
+     'D8',
+     '清单读不出来时按「有」处理并说明理由；改成肯定句会让人'
+     '以为清单是空的，而实际是读不到（null≠空）'),
+    ("host_shield.py",
+     '这是盲区，不等于没事',
+     'D8',
+     '这一项查不了时的如实标注；「盲区」正是要说「这里没有证据」，'
+     '改成肯定句会把无证据说成无风险'),
+    # ★ 批28d：antinel.py 的五条。三条仍是「看不见 ≠ 没问题」的划界句；
+    #   一条带**不可改的文档标题**；一条是创始人拍板保留的「分母」。
+    ("antinel.py",
+     "⚠ 未被列出的工具 ≠ 安全：'本次取证未发现外传证据' 只说明【没查出来】，"
+     "不代表【没有外传】。",
+     'D8',
+     '未列出工具的那句边界：把「没查出来」与「没有外传」分开。'
+     '这句是产品最核心的一句诚实声明，改成肯定句直接变成假保证'),
+    ("antinel.py",
+     '扫过了，这次没找到它自己写下的外传记录 —— 不等于它没有',
+     'D8',
+     '终端版同一句（与 ui_server 的网页版同源）；读者可能只看终端'),
+    ("antinel.py",
+     '【数据外发】未见蜜饵命中（只说明没见到，不等于没有——会偷的工具不会写记录）。'
+     '要更强的证据：python -m antinel canary plant',
+     'D8',
+     '蜜饵未命中的边界句：命中＝有证据，未命中≠干净；'
+     '后半句给出更强的取证办法，整句不可拆'),
+    ("antinel.py",
+     '桌面入口未能创建——请确认桌面目录可写；手工建法见设计文档'
+     '《Antinel·文案派生与无窗口自启 v1.0（2026-10-17）》',
+     'D5+D7',
+     '句中的「派生」在**文档标题**里（《…文案派生与无窗口自启…》），'
+     '标题是外部事实、原样引用，改了就指向不存在的文件；'
+     '去掉标题引用则用户无从找来路'),
+    ("antinel.py",
+     '【覆盖】%d 个登记项目 / %d 个宿主；未接入工具不在此列（分母显式）',
+     'D5',
+     'S-13 保留（分子分母是小学词汇；0.53.2 T10 轮创始人批准，'
+     'U97 还要求含「分母」—— 此时改它是拿标准推翻拍板）'),
 )
 
 def _u24_problem():
@@ -6679,6 +6845,26 @@ def _u24_problem():
         out.append("台账里的 %s 已不在随包模块（台账没跟着真源走）" % rel)
     for rel in sorted(todo & scope):
         out.append("台账里的 %s 已过簿，应从 TODO 挪进 _STE_PY" % rel)
+    # ★ 批28d 腿⑤：路由话语豁免**按结构**给（ROUTES 第一列＝用户自己的话），
+    #   所以它的条数必须**等于 ROUTES 的行数** —— 多一条就说明有别的文案
+    #   混进了第一列，靠「那是用户的话」躲过尺子。
+    rq = _ste_route_quotes(_src("antinel.py"))
+    if rq:
+        rows = 0
+        try:
+            for node in ast.parse(_src("antinel.py")).body:
+                if isinstance(node, ast.Assign) and any(
+                        isinstance(t, ast.Name) and t.id == "ROUTES"
+                        for t in node.targets):
+                    rows = len(getattr(node.value, "elts", ()))
+        except SyntaxError:
+            rows = -1
+        if rows != len(rq):
+            out.append("路由话语豁免 %d 条 ≠ ROUTES 行数 %d"
+                       "（第一列混进了不是用户话语的文案）" % (len(rq), rows))
+        if len(rq) > _STE_HELP_MAX:
+            out.append("路由话语豁免 %d 条 > 上限 %d（豁免面不许扩大）"
+                       % (len(rq), _STE_HELP_MAX))
     return "；".join(out) or None
 
 
@@ -6691,17 +6877,21 @@ def u24():
 def n_u24():
     if _u24_problem() is not None:
         return "夹具不成立：现行判据就判红 —— 负控无分辨力"
-    # 面③：台账里删掉一个未过簿文件 ⇒ 那个文件就成了「未过簿且无台账」⇒ 红。
-    #   这条腿守的是「分期不许无声延期」—— 旧版 S-19 批准延期后没人再管，
-    #   就是因为没有任何机器在问「第二批还剩下吗」。
-    orig_todo = globals()["_STE_SURFACE_TODO"]
+    # 面③：台账为空（批28d 起，30 个随包模块全部过簿）⇒ 这条腿改测「新模块
+    #   进来却没登记」：往派生面里塞一个假模块名，它既不在 _STE_PY 也不在台账
+    #   ⇒ 必须红。这条腿守的是「分期不许无声延期」—— 旧版 S-19 批准延期后
+    #   没人再管，就是因为没有任何机器在问「第二批还剩下吗」。
+    #   ★ 换腿不删断言（旧写法「从台账里删掉 antinel.py」在台账空之后
+    #     天然全绿，是「死判据第五种形态：锚被别处天然满足」）。
+    orig_all = globals()["_ste_surface_all"]
     try:
-        globals()["_STE_SURFACE_TODO"] = {k: v for k, v in orig_todo.items()
-                                          if k != "antinel.py"}
+        globals()["_ste_surface_all"] = lambda: tuple(orig_all()) + (
+            "audit_chain.py", "未来新加的模块.py")
         if _u24_problem() is None:
-            return "负控失效③：台账里删掉 antinel.py 仍判绿（分期那条腿没牙）"
+            return ("负控失效③：面里多出一个未登记模块仍判绿"
+                    "（分期那条腿没牙）")
     finally:
-        globals()["_STE_SURFACE_TODO"] = orig_todo
+        globals()["_ste_surface_all"] = orig_all
     orig_py = globals()["_STE_PY"]
     try:
         globals()["_STE_PY"] = tuple(x for x in orig_py
@@ -6880,11 +7070,11 @@ def _u29_problem(rows):
         if _ste_is_dev(s):
             dev += 1
             continue
-        if len(_STE_PH.findall(s)) < 3 and s.count("<a ") < 2:
+        if _ste_ph_n(s) < 3 and s.count("<a ") < 2:
             continue
         body = _STE_LINK.sub(" ", s)
-        sk = _ste_visible(_ste_skeleton(body))
-        worst = max((len(f.strip()) for f in _STE_SENT.split(sk)), default=0)
+        sk = _ste_skeleton(body)
+        worst = max((len(f) for f in _ste_sentences(sk)), default=0)
         if worst > _STE_SKEL_MAXLEN:
             out.append("%s %s 豁免行 %d 字：%s" % (rel, key, worst,
                                                   _ste_visible(s)[:34]))
@@ -6911,7 +7101,7 @@ def n_u29():
     long_one = ("这一档表示监理已经连续值守了整整七天，并且在这七天里一次"
                 "都没有发现任何需要处理的事情，所以顶上那盏灯一直都是绿的"
                 "没有任何变化：%s ｜ %s ｜ %s")
-    if len(_STE_PH.findall(long_one)) < 3:
+    if _ste_ph_n(long_one) < 3:
         return "夹具不成立：探针串占位符不足，吃不到豁免"
     if "D7" in _ste_hits(long_one):
         return "夹具不成立：探针串没吃到 D7 豁免（负控打不到豁免那条缝）"

@@ -179,13 +179,14 @@ def cmd_export(a):
         txt = S.export_items(fmt="json", scope=scope)
     else:
         txt = S.export_items(fmt=fmt)
-    note = "口径：%s" % scope
+    note = "统计范围：%s" % scope
     if a.out:
         with open(a.out, "w", encoding="utf-8", newline="\n") as f:
             f.write(txt)
         if fmt == "json":
             # 机器可读文件不加前缀；口径已在 _export_scope 字段里
-            print("已导出到 %s（JSON；口径写在 _export_scope 字段里）" % a.out)
+            print("已导出到 %s（JSON；统计范围写在 _export_scope 字段里）"
+                  % a.out)
         else:
             print("%s" % note)
             print("已导出到 %s" % a.out)
@@ -261,7 +262,7 @@ def cmd_window(a):
     #   降级直起 —— 于是「已就位」和「窗口秒死」可以同时成立，两条判据各自还绿。
     d_alive, _d_pid, _d_started, d_why = SV.ensure_daemon(root=_root)
     if not d_alive:
-        print("[window] ⚠ 守护进程没起来（%s）—— 窗口只能由本次调用直接开，"
+        print("[window] ⚠ 守护进程没起来（%s）。窗口只能由本次调用开，"
               "活不过本命令。" % d_why, file=sys.stderr)
         print("[window]     现在能用，但命令行一退/一刷新可能就没了；要常驻请先"
               "解决守护进程（antinel inbox daemon），再点一次。",
@@ -296,8 +297,8 @@ def cmd_window(a):
         if rep.get("got"):
             print("[window]     实测 %s ／ 目标 %s"
                   % (rep["got"], rep.get("want")), file=sys.stderr)
-        print("[window]     面板仍在屏幕上，没有被关掉 —— 位置不对由你决定"
-              "（可手动拖，或重跑一次 antinel inbox window）。",
+        print("[window]     面板仍在屏幕上，没有被关掉。位置不对由你决定"
+              "（可手动拖，或重跑 antinel inbox window）。",
               file=sys.stderr)
     return 0
 
@@ -414,9 +415,9 @@ def cmd_daemon(a):
     if _pos is not None:
         if str(_pos).strip().lower() != "status":
             print("不认识这个用法：antinel inbox daemon %s。\n"
-                  "  可选：antinel inbox daemon（前台启动守护进程）／"
-                  "antinel inbox daemon --supervise（启动并监督监理服务）／"
-                  "`antinel inbox daemon status`（只看跑的是哪版）"
+                  "  可选：antinel inbox daemon（前台启动守护进程）／\n"
+                  "  antinel inbox daemon --supervise（启动并监督监理服务）／\n"
+                  "  antinel inbox daemon status（只看跑的是哪版）"
                   % _pos, file=sys.stderr)
             return 2
         return _daemon_status(a)
@@ -516,11 +517,16 @@ def cmd_ledger(a):
         DM.record_day(items=S.load_items())
         s = L.summary()
         if not s["days"]:
-            print("账本尚无可核对记录；这表示还没有可统计的事件，不是确认累计为零。")
+            print("账本尚无可核对记录；这表示还没有能统计的内容，"
+                  "不是确认累计为零。")
         else:
-            print("连续有记录 %d 天 ｜ 拦截 %d ｜ 注意 %d ｜ 防护缺口 %d ｜ 已处理/已忽略 %d ｜ 有记录的天数 %d"
-                  % (s["streak_days"], s["blocked"], s["noticed"], s["breached"],
-                     s["acked"], s["days"]))
+            # ★ 批28c：六个指标一行太长 ⇒ 拆两行（前四个／后两个）。
+            #   三处文案锚点（连续有记录／拦截／有记录的天数）一字未动。
+            print("连续有记录 %d 天 ｜ 拦截 %d ｜ 注意 %d ｜ 防护缺口 %d"
+                  % (s["streak_days"], s["blocked"], s["noticed"],
+                     s["breached"]))
+            print("已处理/已忽略 %d ｜ 有记录的天数 %d"
+                  % (s["acked"], s["days"]))
         print("只统计本机审计记录；不代表全天在线，也不是 AI 工具积分余额。")
         return 0
     if a.sub == "export":
@@ -569,7 +575,7 @@ def build_parser():
     p.set_defaults(fn=cmd_export)
 
     p = sub.add_parser("report", help="按某个本地自然日生成日报（不是最近24小时报告）")
-    p.add_argument("--date", help="本地日期 YYYY-MM-DD；省略时为今天")
+    p.add_argument("--date", help="本地日期 YYYY-MM-DD；省略时按本机当天")
     p.add_argument("--format", default="text", choices=["text", "md", "json"],
                    help="输出格式：text（默认）、md 或 json；输出到终端")
     p.set_defaults(fn=cmd_report)
@@ -607,9 +613,9 @@ def build_parser():
         ps.add_parser(name)
     p.set_defaults(fn=cmd_heartbeat)
 
-    p = sub.add_parser("ledger", help="查看或导出本机事件账本（非 AI 工具积分余额）")
+    p = sub.add_parser("ledger", help="查看或导出本机记录账本（非 AI 工具积分余额）")
     ps = p.add_subparsers(dest="sub", required=True)
-    ps.add_parser("show", help="刷新并查看本机可核对事件汇总")
+    ps.add_parser("show", help="刷新并查看本机可核对记录汇总")
     q = ps.add_parser("export", help="导出已记账的逐日摘要")
     q.add_argument("--out", help="将导出内容写入指定文件；省略则输出到终端")
     p.set_defaults(fn=cmd_ledger)

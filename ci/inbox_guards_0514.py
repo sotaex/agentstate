@@ -5424,8 +5424,11 @@ def n_flo07():
                   wait_sec=0.4, verbose=False)
     if rep.get("ok"):
         return "负控失效：兜底失败了还报藏起成功 —— 假成功"
-    if "兜底" not in (rep.get("why") or ""):
-        return "没说清兜底失败：%r" % rep.get("why")
+    if "备用" not in (rep.get("why") or "") or "失败" not in (rep.get("why") or ""):
+        # ★ 批28c 换锚：产品把工程词「兜底」改成「备用方式」（D5），
+        #   锚点跟着走。断言**没有降强度**：仍要求同时出现「备用」
+        #   （说明走过备用路径）与「失败」（说明如实报了失败）。
+        return "没说清备用方式也失败：%r" % rep.get("why")
     return True
 
 
@@ -5709,8 +5712,9 @@ def n_flo03():
                     wait_sec=0.4, verbose=False)
     if rep.get("ok"):
         return "负控失效：兜底失败了还报退役成功 —— 假成功"
-    if "兜底关窗也失败" not in (rep.get("why") or ""):
-        return "没说清兜底失败：%r" % rep.get("why")
+    if "备用关窗也失败" not in (rep.get("why") or ""):
+        # ★ 批28c 换锚：同上，「兜底关窗也失败」→「备用关窗也失败」。
+        return "没说清备用方式也失败：%r" % rep.get("why")
     if os.path.exists(IL.flag_path(root)):
         return "失败路径也没清标志 —— 下一枚照样一出生就退"
     return True
@@ -5758,7 +5762,9 @@ def n_flo04a():
     if rep.get("ok") or closed["n"]:
         return ("负控失效：哨标没起来也关了面板 —— 用户两手空空"
                 "（比不收缩坏得多）")
-    if "没有关面板窗" not in (rep.get("why") or ""):
+    if "面板窗先不关" not in (rep.get("why") or ""):
+        # ★ 批28c 换锚：产品原句「**没有关面板窗**」带星号（终端会原样上屏），
+        #   改成「面板窗先不关」。断言仍是同一件事：失败路径**明说没关**。
         return "没说清「没关」：%r" % rep.get("why")
     return True
 

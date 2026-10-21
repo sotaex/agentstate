@@ -554,7 +554,8 @@ def render(snap, findings, days_with, sentinel_on, sample_failed, ai_only=True,
 def run(days=LEDGER_DAYS, all_proc=False, do_resolve=True, as_json=False):
     """命令入口：即时快照 + 账本分析。"""
     if not is_windows():
-        return "外传账本：当前仅支持 Windows（`netstat`／`tasklist`／`GetLastInputInfo`）。"
+        return ("外传账本：当前仅支持 Windows。"
+                "取数靠 netstat、tasklist、GetLastInputInfo。")
     s = sample(ai_only=not all_proc)
     evs, days_with = load_events(days)
     cur = _read_json("current.json", {})

@@ -669,9 +669,9 @@ def process_elevation():
             else:
                 lvl = int(m.group(1))
                 if lvl >= 0x3000:                       # 0x3000=High, 0x4000=System
-                    res = (True, "进程处于提权上下文（Mandatory Level S-1-16-%d ≥ 0x3000）" % lvl)
+                    res = (True, "进程处于提权上下文。完整性级别 S-1-16-%d（≥ 0x3000）。" % lvl)
                 else:
-                    res = (False, "进程为受限令牌（Mandatory Level S-1-16-%d < 0x3000）" % lvl)
+                    res = (False, "进程为受限令牌。完整性级别 S-1-16-%d（< 0x3000）。" % lvl)
         except Exception as e:                                       # noqa: BLE001
             res = (False, "whoami 不可用（%s）⇒ 查不出完整性级别" % type(e).__name__)
     _ELEVATION_CACHE = res
@@ -2326,8 +2326,8 @@ def self_check():
     for rel in _GUARDED_CHAIN_FILES:
         if not _manifest_hash(rel):
             problems.append(
-                "%s 在告警链路保护名单里，却没登记进 manifest"
-                "（告警链路文件可能被改而查不出；重新打包即可补上）" % rel)
+                "%s 在告警链路保护名单里，却没登记进 manifest。"
+                "这些文件被改可能查不出，重新打包即可补上。" % rel)
     gdir = os.path.join(root, "rules", "hosts")
     try:
         names = sorted(os.listdir(gdir))
@@ -2363,16 +2363,16 @@ def self_check():
         mh = _manifest_hash(rel)
         if not mh:
             problems.append(
-                "%s 在研发树专属保护名单里，却没登记进 manifest"
-                "（研发态治理登记簿可被改而查不出；修法："
-                "python _tools_034/_resign_manifest.py --adopt-dev）" % rel)
+                "%s 在研发树专属保护名单里，却没登记进 manifest。"
+                "登记簿被改可能查不出。"
+                "修法：python _tools_034/_resign_manifest.py --adopt-dev" % rel)
             continue
         lv = file_digest(p, rel)
         if mh and lv and mh != lv:
             problems.append(
-                "%s 与 manifest 不符（冻结区登记簿可能被改——伪造退休"
-                "记录也逃不过这层哈希；修法：python _tools_034/"
-                "_resign_manifest.py）" % rel)
+                "%s 与 manifest 不符。"
+                "冻结区登记簿可能被改，伪造退休记录也逃不过这层哈希。"
+                "修法：python _tools_034/_resign_manifest.py" % rel)
     res = (not problems), problems
     _SELF_CHECK_CACHE["fp"] = _fp
     _SELF_CHECK_CACHE["res"] = res
@@ -2986,8 +2986,8 @@ def _state_guard_step(fp2, fp, last_good, grace, state, backed_now, audit_dir,
         st["enabled"] = armed
         return fp, last_good, grace, st, ""
 
-    reason = ("state 文件的 %s 在无链背书下被修改%s，已回写恢复"
-              "（疑似加白名单/开窗绕过）"
+    reason = ("state 文件的 %s 在无链背书下被修改%s，已回写恢复。"
+              "疑似加白名单或开窗绕过。"
               % ("/".join(sorted(need)) or "workspaces/zones/windows",
                  changed_txt))
     st = json.loads(json.dumps(last_good))
@@ -3219,9 +3219,9 @@ def _ensure_alive_locked(pkg_root, cause="manual"):
             _on_duty, _why = sentinel_on_duty(st)
             if _why == "pid-reused":
                 record(audit_dir, "host_shield_breach", decision="deny", severity="warning",
-                       reason="监理（进程号 %s）的进程号已被系统分给了别的程序"
-                              "（在岗名片记的启动时刻与进程实际创建时刻对不上）"
-                              "——旧监理已停止，判定不在岗并重启。" % old_pid)
+                       reason="监理（进程号 %s）的进程号已被分给别的程序。"
+                              "启动时刻对不上——旧监理已停止，判定不在岗并重启。"
+                              % old_pid)
                 _alive = False
         if _alive:
             # B2：pid 活着 ≠ 在干活。心跳陈旧 = 挂起/僵死 → 杀掉重拉。
@@ -3262,9 +3262,9 @@ def _ensure_alive_locked(pkg_root, cause="manual"):
                 if started_age is None:
                     record(audit_dir, "host_shield_breach", decision="deny",
                            severity="warning",
-                           reason="监理（进程号 %s）还在运行，但读不到它的心跳、"
-                                  "也读不到它的启动时刻——没法判断它到底在不在岗，"
-                                  "所以先不动它（宁可漏杀，不可误杀）；请人工检查。"
+                           reason="监理（进程号 %s）还在运行，但读不到心跳与启动时刻。"
+                                  "没法判断它在不在岗，所以先不动它。"
+                                  "宁可漏杀，不可误杀；请人工检查。"
                                   % old_pid)
                     return "alive"
                 # 落到这里：进程活得比 _STALE_AFTER 久，却一条心跳都没有 → 判僵死
@@ -4011,8 +4011,8 @@ def _task_watchdog(state, audit_dir, now):
     else:
         record(audit_dir, "host_shield_task_unknown", decision="alert",
                severity="warning", subkind="task_unknown",
-               reason="查不到开机自启的状态（系统的计划任务命令用不了、或被安全策略挡了）"
-                      "——这台电脑上，监理会不会随开机起来，查不出来。")
+               reason="查不到开机自启的状态（计划任务命令用不了或被安全策略挡了）。"
+                      "这台电脑上，监理会不会随开机起来，查不出来。")
     return True
 
 
@@ -4224,7 +4224,7 @@ def _lock_pending_tree(base, lock_dirs, state, audit_dir, now,
                         touched = True
                     record(audit_dir, "host_shield_lock_held", decision="deny",
                            severity="none",
-                           reason="门闸正持锁（周期性状态留痕；旧机制这里没有记录）：%s" % target)
+                           reason="门闸正持锁（周期性记下状态；旧机制这里没有记录）：%s" % target)
                     touched = True
                 continue
             _ok = acl_deny(target)
@@ -4245,9 +4245,10 @@ def _lock_pending_tree(base, lock_dirs, state, audit_dir, now,
                 record(audit_dir, "host_shield_breach", decision="deny",
                        severity="critical" if not _ok else "warning",
                        reason=(("发现未拦的外传落盘点（有写入证据），已上锁：%s" % target) if _ok
-                               else ("发现未拦的外传落盘点，但【上锁未生效】：%s —— 本目录 ACL"
-                                     "未能限制写入（常见于 OWNER RIGHTS 类 ACE）；"
-                                     "不等于有进程在对抗门闸" % target)))
+                               else ("发现未拦的外传落盘点，但【上锁未生效】：%s。"
+                                     "本目录 ACL 没限制住写入"
+                                     "（常见于 OWNER RIGHTS 类 ACE）。"
+                                     "这不等于有进程在对抗门闸" % target)))
             elif _cnt == CONTEST_TIMES:
                 record(audit_dir, "host_shield_contested", decision="deny",
                        severity="critical",
@@ -4357,7 +4358,7 @@ def run_sentinel(root):
         if _is_dev:
             record(audit_dir, "host_shield_dev_drift", decision="deny", severity="warning",
                    field="self-check", subkind="code_drift",
-                   reason="研发迭代中：运行代码与出厂登记对不上（改了代码还没重新登记）——"
+                   reason="研发迭代中：运行代码与出厂登记对不上（改了代码还没重新登记）。"
                           "这一版还没发出去，不是防线失守；监理照常在岗。"
                           + "；".join(problems))
         else:
@@ -4395,8 +4396,8 @@ def run_sentinel(root):
     if not _register_sentinel_start(state["sentinel_pid"],
                                     state["sentinel_started_at"],
                                     audit_dir, armed):
-        print("!! 监理登记（sentinel_pid/sentinel_audit_dir/enabled）未落盘 "
-              "—— 见链上 state_write_refused", flush=True)
+        print("!! 监理登记未落盘（sentinel_pid 等）。"
+              "见链上 state_write_refused。", flush=True)
     # ★ 0.45.0（丙层）：自写**在岗名片**（租约）—— 路径带自己的 pid + 启动时刻，
     #   不与他人共享 ⇒ 不需要保护；判死时靠"启动时刻"防进程号复用。
     if not write_sentinel_card(state["sentinel_pid"], state["sentinel_started_at"]):
@@ -4431,8 +4432,8 @@ def run_sentinel(root):
                 state["enabled"] = armed
                 # ★ 0.45.0（甲层）：按字段写（只写 enabled）＋ 返回值不许忽略
                 if not update_state_fields(enabled=armed, allow_disarm=True):
-                    print("!! enabled 回写未落盘（拒写/被覆盖）——见链上 state_write_refused",
-                          flush=True)
+                    print("!! enabled 回写未落盘（拒写或被覆盖）。"
+                          "见链上 state_write_refused。", flush=True)
                 if time.time() - _DIVERGE_LAST[0] > 1800:
                     _DIVERGE_LAST[0] = time.time()
                     record(audit_dir, "host_shield_tamper", decision="deny",
@@ -4470,8 +4471,8 @@ def run_sentinel(root):
                             zones=state.get("zones") or [],
                             windows=state.get("windows") or {},
                             enabled=armed, allow_disarm=True):
-                        print("!! state 回写恢复未落盘 —— 见链上 state_write_refused",
-                              flush=True)
+                        print("!! state 回写恢复未落盘。"
+                              "见链上 state_write_refused。", flush=True)
             else:
                 fp, last_good, grace = fp2, json.loads(json.dumps(state)), 0
             # 3) 心跳（armed 才打；monotonic 计时）
