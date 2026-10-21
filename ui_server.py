@@ -25,6 +25,7 @@
 import html
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -236,6 +237,43 @@ table.evo tr.mark td.kd{color:#a32d2d;font-weight:500}
 /* 折叠区内是"证据原文"，允许横向滚动，绝不撑破整页布局 */
 details.fold{overflow-x:auto}
 table.evo{min-width:520px}
+/* 2026-10-21 体检页优化（创始人拍板）：汇总卡／分组／紧凑行／锚点条 */
+.sum{border-left:4px solid #1f6feb}
+.sum .sumh{font-size:16px;font-weight:600;margin-bottom:6px}
+.sum .sumline{font-size:15px;line-height:1.7;margin-bottom:4px}
+.grp{margin-top:4px}
+.gh{font-size:14px;font-weight:600;margin:16px 0 2px}
+.crow{border-top:1px solid #eef0f3;padding:7px 0}
+.crow .nm{font-weight:500}
+.jump{background:#fff;border:1px solid #e4e7ec;border-radius:10px;
+ padding:9px 14px;margin:14px 0 4px;font-size:13px}
+.jump a{color:#1f6feb;text-decoration:none;margin:0 2px}
+.jump a:hover{text-decoration:underline}
+.lnk{background:none;border:0;color:#1f6feb;font-size:13px;cursor:pointer;
+ padding:2px 6px}
+.lnk:hover{text-decoration:underline}
+"""
+
+#: ★ 2026-10-21 体检页优化·创始人拍板（C：折叠开关）—— **唯一一份实现**。
+#:   两个入口都要它：本文件的本地页（`antinel exam`，结果经 innerHTML 注入）
+#:   与控制台体检页（`inbox_server`，服务端直出）⇒ 定义在这里，另一处 import，
+#:   **不许再抄一份**（抄了就漂 —— 本仓 R4 双实现风险的同族）。
+#:   ★ 事件委托（不写内联 onclick）：innerHTML 动态注入的按钮同样生效；
+#:   ★ 只摆布 `details.xfold`（收件箱展开行 `.item` 不在内，互不干扰）；
+#:   ★ 渐进增强：删掉它，面板只是少了「一次全展开」，`<details>` 原生照用。
+_EXAM_FOLD_JS = """
+(function(){
+  "use strict";
+  document.addEventListener('click', function(e){
+    var b = e.target;
+    if (!b || !b.getAttribute) return;
+    var mode = b.getAttribute('data-foldall');
+    if (mode === null) return;
+    var open = (mode === '1');
+    var ds = document.querySelectorAll('details.xfold');
+    for (var i = 0; i < ds.length; i++) ds[i].open = open;
+  });
+})();
 """
 
 JS = """
@@ -264,7 +302,7 @@ function go(){
     '<span class="spin"></span>正在启动检查…</div></div>';
   fetch('/api/start?t=TOK',{method:'POST'}).then(function(){busy=false;poll()});
 }
-"""
+""" + _EXAM_FOLD_JS
 
 TPL = """<!doctype html><meta charset="utf-8">
 <title>查一查我的电脑 · Antinel</title><style>%s</style>
@@ -321,28 +359,198 @@ def _tiles(vc, verdicts, blind_n, total=None):
     return '<div class="tiles">%s</div>' % "".join(parts)
 
 
-def _rows_html(tools, verdicts, ev_human, details=None):
-    """逐条列出。★ 顺序＝档位严重度（PACK>SENT>SYNC>CLEAN>NA），与产品同一口径。"""
-    details = details or {}
-    rank = {v["key"]: v.get("order", 9) for v in verdicts.values()}
-    rows = sorted(tools, key=lambda r: (rank.get(r.get("verdict"), 9),
-                                        str(r.get("name", "")).lower()))
-    out = []
-    for r in rows:
-        v = verdicts.get(r.get("verdict"), {})
-        evs = r.get("ev") or []
-        ev_html = _evidence_html(r, details.get(r.get("path") or "") or [],
-                                 verdicts, ev_human, r.get("verdict"))
-        out.append(
-            "<div class='row'><span class='nm'>%s %s</span>"
-            "<span class='tag'>%s %s</span>"
-            "<div class='pt'>%s　·　%.1f MB ／ %d 个文件%s</div>%s</div>"
+def _verdict_rank(verdicts):
+    """档位→严重度（产品 `VERDICTS` 的 `order`，判据不许二次实现）。"""
+    return {v["key"]: int(v.get("order", 9)) for v in verdicts.values()}
+
+
+def _summary_card(res, verdicts):
+    """★ 2026-10-21 体检页优化·创始人拍板（A1）：**结论汇总卡**，置顶。
+
+    排版纪律出处（创始人 2026-09-27）：「有很多非专业老板和高管也会检查自己电脑的，
+    要让他们看得懂」＋「尽可能把细节参数都加上」⇒ **分层**：老板看这一卡，
+    技术人往下滚、点开看证据。
+
+    ★ 口径纪律：卡上每个数都取**页面上已经在用**的那一个（`counts_by_verdict`
+      ／`coverage`／`_proj_rows`／egress 快照），**不新算第二个口径** ——
+      新算一个 ⇒ 两处口径必漂，而漂的时候往往两边都判绿。
+    ★ 没查到的（⚫ 盲区／快照失败／诱饵没查）**必须出现在卡上**，不许只报好事。
+    """
+    scan = res.get("scan") or {}
+    tools = scan.get("tools") or []
+    vc = scan.get("counts_by_verdict") or {}
+    cov = scan.get("coverage") or {}
+    blind_n = int(cov.get("unscanned") or 0)
+    n = len(tools)
+    n_ev = (int(vc.get("PACK", 0)) + int(vc.get("SENT", 0))
+            + int(vc.get("SYNC", 0)))
+    n_clean = int(vc.get("CLEAN", 0))
+    projs = _proj_rows(scan.get("details"))
+
+    tiles = []
+
+    def tile(k, v, d=""):
+        tiles.append("<div class='num'><div class='k'>%s</div>"
+                     "<div class='v'>%s</div>%s</div>"
+                     % (html.escape(k), v,
+                        ("<div class='k'>%s</div>" % d) if d else ""))
+
+    # 有事 / 查过没发现 / 没查到 —— 三行都带分母（0.47.0 纪律：裸分子＝假分母）
+    _bad_d = ("自认打包 %d ／ 往外发 %d ／ 同步 %d"
+              % (int(vc.get("PACK", 0)), int(vc.get("SENT", 0)),
+                 int(vc.get("SYNC", 0))))
+    tile("在自己写的记录里有外传字样",
+         "<b>%d</b> / %d" % (n_ev, n), _bad_d)
+    tile("查过，没发现记录",
+         "<b>%d</b> / %d" % (n_clean, n), "扫过 ≠ 干净")
+    tile("没查到（当空白读）",
+         "<b>%d</b> / %d" % (blind_n, n),
+         "登记过、也在，但扫描没走到")
+    tile("项目被打包过", "<b>%d</b>" % len(projs), "只读工具自己记下的快照")
+
+    # ③ 此刻外连：快照取不到 ⇒ 说「没查到」，不许显示 0
+    eg = res.get("egress") or {}
+    if not isinstance(eg, dict) or eg.get("_raw"):
+        tile("此刻谁在往外连", "没查到", "采样失败，当空白读")
+    else:
+        snap = eg.get("snapshot") or {}
+        if not snap.get("ok"):
+            tile("此刻谁在往外连", "没查到", "采样失败，当空白读")
+        else:
+            nf = len(eg.get("findings") or [])
+            tile("此刻谁在往外连", "<b>%d</b> 条" % len(snap.get("conns") or []),
+                 ("其中值得看一眼 %d 条（只标记，不下结论）" % nf) if nf
+                 else "账本里没有需要特别标记的连接")
+
+    # ③ 组尾：诱饵文件五态不许混。★ 与 `_canary_html` 同一条契约：
+    #   **数据缺失 ⇒ 一个字都不渲染**（空数据不许产出文案 —— H12 判据守着）；
+    #   明确取失败 ⇒ 说「没查到」，不许说成「没有问题」。
+    c = res.get("canary")
+    if isinstance(c, dict):
+        if c.get("failed"):
+            tile("诱饵文件", "没查到", "当空白读")
+        elif not int(c.get("projects") or 0):
+            tile("诱饵文件", "没查", "还没登记过项目")
+        else:
+            planted = len(c.get("planted") or [])
+            read = int(c.get("read") or 0)
+            obs = int(c.get("observed") or 0)
+            tile("诱饵文件", "%d 个" % planted,
+                 "被读过 %d 次（被读 ≠ 出事）" % read
+                 if not obs else "⚠ 有 %d 次标记出现在输出里" % obs)
+
+    # ④ 别处：十类观察里有几条
+    obs_d = scan.get("observations") or {}
+    if isinstance(obs_d, dict) and obs_d:
+        _hit = 0
+        for _k, _v in obs_d.items():
+            try:
+                _name, _n, _b, _u, _note = _obs_norm(_k, _v)
+            except Exception:                                 # noqa: BLE001
+                continue
+            if _n:
+                _hit += 1
+        tile("别处观察到的东西", "%d 类" % _hit, "只报存在与体量")
+    else:
+        tile("别处观察到的东西", "没查到", "当空白读")
+
+    return ("<div class='card sum'><div class='sumh'>这次体检的结论</div>"
+            "<div class='sumline'>查了 <b>%d</b> 个 AI 工具位置："
+            "<b>%d</b> 个在自己写下的记录里有外传字样，%d 个查过没发现，"
+            "%d 个没走到。</div><div class='nums'>%s</div>"
+            "<p class='muted small'>监理只读到工具<b>自己写下</b>的部分 —— "
+            "会偷的工具不会写；所以「没发现」不是「没有问题」，"
+            "「没查到」更不是。这一卡只做汇总，证据在下面四组里。</p></div>"
+            % (n, n_ev, n_clean, blind_n, "".join(tiles)))
+
+
+def _row_html(r, verdicts, ev_human, details=None):
+    """单行（0.53.0 起与分组前逐条一致）—— 从 `_rows_html` 拆出来，
+    「有事的」与「其它」两组复用同一份行模板（分组不许再抄一份：抄了就漂）。"""
+    v = verdicts.get(r.get("verdict"), {})
+    evs = r.get("ev") or []
+    ev_html = _evidence_html(r, (details or {}).get(r.get("path") or "") or [],
+                             verdicts, ev_human, r.get("verdict"))
+    return (
+        "<div class='row'><span class='nm'>%s %s</span>"
+        "<span class='tag'>%s %s</span>"
+        "<div class='pt'>%s　·　%.1f MB ／ %d 个文件%s</div>%s</div>"
+        % (v.get("icon", ""), html.escape(str(r.get("name", ""))),
+           v.get("icon", ""), html.escape(str(v.get("title", r.get("verdict", "")))),
+           html.escape(str(r.get("path", ""))),
+           (r.get("size") or 0) / 1048576, int(r.get("files") or 0),
+           "　·　扫描被截断（没看完）" if r.get("trunc") else "",
+           ev_html))
+
+
+def _clean_row_html(r, verdicts):
+    """CLEAN 的紧凑行：名字＋位置＋体量，**不重复那句免责话**。
+
+    ★ 那句话在组标题里只说一次 —— 同一页说 51 遍，等于没说（2026-10-21
+      实测：51 行 CLEAN 占「逐个看」正文 52%，字字重复）。
+    ★ 截断标记必须留着：`trunc`＝「这次没看完」的事实，折叠区里也不能没有。
+    """
+    v = verdicts.get("CLEAN", {})
+    return ("<div class='crow'><span class='nm'>%s %s</span>"
+            "<span class='pt'>%s　·　%.1f MB ／ %d 个文件%s</span></div>"
             % (v.get("icon", ""), html.escape(str(r.get("name", ""))),
-               v.get("icon", ""), html.escape(str(v.get("title", r.get("verdict", "")))),
                html.escape(str(r.get("path", ""))),
                (r.get("size") or 0) / 1048576, int(r.get("files") or 0),
-               "　·　扫描被截断（没看完）" if r.get("trunc") else "",
-               ev_html))
+               "　·　扫描被截断（没看完）" if r.get("trunc") else ""))
+
+
+def _clean_group_html(rows, verdicts):
+    """「查过，没发现记录」组（2026-10-21 体检页优化·创始人拍板 B）。
+
+    ★ 收成**一行计数＋一个折叠区**：名单一个字不减（信息去哪了：折叠区，
+      不是删了）；默认折叠让首屏先看见有事的。
+    ★ 组标题里的免责话只说一次，且用产品 `VERDICTS` 的原文（不自己改写）。
+    """
+    v = verdicts.get("CLEAN", {})
+    items = "".join(_clean_row_html(r, verdicts) for r in rows)
+    return ("<div class='grp g-clean'><h3 class='gh'>%s %s（%d 个）</h3>"
+            "<p class='muted small'>扫过了，没找到它们自己写下的外传记录 —— "
+            "<b>不等于它们没有</b>。</p>"
+            "<details class='fold xfold'><summary>点开看是哪些（%d 个）</summary>"
+            "%s</details></div>"
+            % (v.get("icon", ""), html.escape(str(v.get("title", "查过，没发现记录"))),
+               len(rows), len(rows), items))
+
+
+def _rows_html(tools, verdicts, ev_human, details=None):
+    """逐条列出。★ 分层（2026-10-21 体检页优化·创始人拍板 B）：
+    「有事」与「查过没发现」不再同一字号并列 —— 那是一堵墙，不是报告。
+
+    · 排序口径**不变**：仍是产品那把尺子（PACK>SENT>SYNC>CLEAN>NA）；
+    · 变的只是**呈现层级**：CLEAN 收成一组折叠，PACK/SENT/SYNC 各自成行；
+    · NA（不适用／未检查）仍逐行显示 —— 那是「没查」的事实，不许折叠没了。
+    """
+    details = details or {}
+    rank = _verdict_rank(verdicts)
+    clean_cut = rank.get("CLEAN", 3)
+    rows = sorted(tools, key=lambda r: (rank.get(r.get("verdict"), 9),
+                                        str(r.get("name", "")).lower()))
+    bad, clean, other = [], [], []
+    for r in rows:
+        vk = r.get("verdict")
+        if vk == "CLEAN" and not (r.get("ev") or []):
+            clean.append(r)
+        elif rank.get(vk, 9) < clean_cut:
+            bad.append(r)
+        else:
+            other.append(r)
+    out = []
+    if bad:
+        out.append("<div class='grp g-bad'><h3 class='gh'>有事的（%d 个）</h3>%s</div>"
+                   % (len(bad),
+                      "".join(_row_html(r, verdicts, ev_human, details) for r in bad)))
+    if other:
+        out.append("<div class='grp g-other'><h3 class='gh'>"
+                   "不适用／没检查的（%d 个）</h3>%s</div>"
+                   % (len(other),
+                      "".join(_row_html(r, verdicts, ev_human, details) for r in other)))
+    if clean:
+        out.append(_clean_group_html(clean, verdicts))
     return "".join(out)
 
 
@@ -905,25 +1113,238 @@ def _result_html(res, verdicts, ev_human):
 
     _projs = _proj_rows(scan.get("details"))
     body = [
-        "<h2>① 我电脑上有哪些 AI 工具（%d 个）</h2>" % len(tools),
+        _summary_card(res, verdicts),
+        # ★ 2026-10-21 体检页优化·创始人拍板 C：分区锚点 ＋ 折叠开关。
+        #   渐进增强：锚点是真 `<a href="#…">`（禁 JS 照旧跳），
+        #   开关只摆布 `details.xfold`（禁 JS ⇒ 一次只点一个，功能不丢）。
+        #   ③④ 不搬家（A2 改小版：分层不重排），但两屏内可达。
+        "<div class='jump'>跳到：<a href='#x-tools'>① AI 工具</a> · "
+        "<a href='#x-projs'>② 打包过的项目</a> · "
+        "<a href='#x-egress'>③ 此刻外连</a> · "
+        "<a href='#x-obs'>④ 别处</a>"
+        "　<button type='button' class='lnk' data-foldall='1'>全部展开</button>"
+        "<button type='button' class='lnk' data-foldall='0'>全部收起</button></div>",
+        "<h2 id='x-tools'>① 我电脑上有哪些 AI 工具（%d 个）</h2>" % len(tools),
         _tiles(vc, verdicts, blind_n, total=len(tools)),
         "<p class='muted small'>六档是这么分的：🔴 自认打包过 ＞ 🟠 自认往外发过 ＞ "
         "🟡 自认在同步 ＞ ⚪ 查过、没发现记录 ＞ ⚫ 没查到 ＞ · 不适用。</p>",
-        "<h2>逐个看</h2>",
+        "<h3 class='gh'>逐个看（%d 个）</h3>" % len(tools),
         _rows_html(tools, verdicts, ev_human, scan.get("details")),
-        "<h2>② 我的哪些项目被打包过（%d 个）</h2>" % len(_projs),
+        "<h2 id='x-projs'>② 我的哪些项目被打包过（%d 个）</h2>" % len(_projs),
         _proj_html(_projs),
-        "<h2>③ 此刻谁在往外连</h2>",
+        "<h2 id='x-egress'>③ 此刻谁在往外连</h2>",
         _egress_html(res.get("egress")),
         _conns_html(res.get("egress")),
         _canary_html(res.get("canary")),
-        "<h2>④ 别处还有什么</h2>",
+        "<h2 id='x-obs'>④ 别处还有什么</h2>",
         _obs_html(scan.get("observations")),
     ]
     gen = html.escape(str(scan.get("generated_at") or ""))
     return ("".join(head) + "".join(body)
             + "<hr><p class='muted small'>生成时刻 %s　·　"
               "本次为<b>只读</b>检查：没有登记、没有布防、没有上锁。</p>" % gen)
+
+
+# ------------------------------------------------- 导出（D1 自包含 HTML）----
+# ★ 2026-10-21 体检页优化·创始人拍板：①「PDF 只做附件、不影响版面」⇒ 附件化
+#   三边界（版面零耦合／附件是快照不入账／附件不引新依赖）；②「一个非脱敏版
+#   一个脱敏版都有使用场景」⇒ **不预生成双件**（选错文件＝静默给错版本，
+#   与「没说＝没有」同族），而是**一个导出器＋一个默认开关**，默认脱敏。
+# ★ 为什么不是服务端 PDF：本仓「零运行时依赖」是产品论点的一部分（ wheel 纯
+#   标准库 ），为一个导出格式加依赖是给自己的论点拆台；且 HTML 可被接收方
+#   **读源码核对每一个数字**，与「可被第三方验证」同构。要 .pdf 后缀与分页，
+#   浏览器打印对话框给出 —— 不花本仓一行代码。
+# ★ 模板与 `_result_html` **共享数据源、不共享排版**（§10.2 边界一）：
+#   汇总卡与逐行/证据区复用同一批取数函数（一个事实一个函数），框皮是导出
+#   自己的 —— 版面日后怎么改，默认不进导出件。
+_EXAM_DRIVE_RE = re.compile(r"(?i)\b([a-z]):[\\/]")
+
+_EXAM_EXPORT_CSS = """
+*{box-sizing:border-box}
+body{margin:0;background:#f6f7f9;color:#1f2328;
+ font:15px/1.65 -apple-system,"Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+.wrap{max-width:900px;margin:0 auto;padding:28px 20px 64px}
+h1{font-size:22px;font-weight:600;margin:0 0 4px}
+h2{font-size:17px;font-weight:600;margin:30px 0 10px}
+h3{font-size:14px;font-weight:600;margin:16px 0 2px}
+.ver{color:#5f6672;font-size:13px;margin:0 0 14px}
+.banner{border-radius:10px;padding:12px 14px;margin:0 0 14px;font-size:13px;
+ line-height:1.7}
+.banner.san{background:#eef6ff;border:1px solid #b6d4fe}
+.banner.full{background:#fff8e6;border:1px solid #f0d38a}
+.bounds{background:#fff;border:1px solid #e4e7ec;border-radius:10px;
+ padding:14px 18px;margin:0 0 18px;font-size:13px;line-height:1.8}
+.muted{color:#5f6672}.small{font-size:13px}
+ul{padding-left:20px;margin:8px 0}li{margin:3px 0}
+.tiles{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0 4px}
+.tile{flex:1 1 168px;min-width:168px;border:1px solid #e4e7ec;border-radius:10px;
+ padding:12px 14px}
+.tile .n{font-size:24px;font-weight:600;line-height:1.2}
+.tile .t{font-size:14px;font-weight:600;margin-top:2px}
+.tile .d{font-size:12px;color:#5f6672;margin-top:4px;line-height:1.45}
+.sum{border:1px solid #e4e7ec;border-left:4px solid #1f6feb;border-radius:10px;
+ padding:16px 20px;margin:0 0 18px;background:#fff}
+.sum .sumh{font-size:16px;font-weight:600;margin-bottom:6px}
+.sum .sumline{font-size:15px;line-height:1.7;margin-bottom:4px}
+.nums{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.num{flex:1 1 150px;background:#fff;border:1px solid #e4e7ec;border-radius:8px;
+ padding:8px 10px}
+.num .k{font-size:11px;color:#5f6672}
+.num .v{font-size:14px;font-weight:500;margin-top:2px;word-break:break-all}
+.row{border-top:1px solid #eef0f3;padding:10px 0}
+.row .nm{font-weight:600}
+.row .pt{font-size:12px;color:#6b7280;word-break:break-all;margin-top:2px}
+.crow{border-top:1px solid #eef0f3;padding:7px 0}
+.crow .nm{font-weight:500}
+.tag{display:inline-block;font-size:12px;padding:1px 8px;border-radius:999px;
+ border:1px solid #d7dbe1;color:#3d444d;background:#f6f7f9;margin-left:8px}
+.ev{background:#fbfcfd;border:1px solid #eceff3;border-radius:9px;padding:12px 14px;
+ margin-top:8px}
+.ev .l1{font-size:14px;line-height:1.7}
+.ev .mean{font-size:13px;color:#3d444d;background:#f6f7f9;border-radius:7px;
+ padding:9px 11px;margin-top:10px;line-height:1.65}
+.orig{font-size:11px;margin-top:7px;word-break:break-all;color:#6b7280}
+details{margin-top:11px}
+details>summary{cursor:pointer;font-size:13px;color:#1f6feb;padding:5px 0}
+table.evo{width:100%;border-collapse:collapse;margin-top:8px;font-size:12px}
+table.evo th{text-align:left;color:#6b7280;font-weight:500;padding:5px 7px;
+ border-bottom:1px solid #e4e7ec;font-size:11px}
+table.evo td{padding:5px 7px;border-bottom:1px solid #f1f3f5;vertical-align:top;
+ word-break:break-all}
+hr{border:0;border-top:1px solid #eceff3;margin:26px 0}
+code{background:#f2f4f7;border-radius:4px;padding:1px 5px;font-size:13px}
+@media print{body{background:#fff}.wrap{padding:0}}
+"""
+
+
+def _exam_sanitize(text, level=1, extra=()):
+    """导出脱敏（创始人 2026-10-21 拍板：默认脱敏、一键完整版）。
+
+    三条边界（写进判据，不只写在注释里）：
+    ① **只替文字，不动任何计数/档位/结论** —— 改了数字就是改了证据；
+    ② 替换覆盖**全文**（含证据原文区）—— 只脱敏路径列表＝白脱
+       （实测：59/59 路径含用户名，证据区另有 manifest×9、json×17 处键名）；
+    ③ 真用户名取不到 ⇒ 一档都不替，由调用方如实说「没脱敏」——
+       不许拿一个空串假装替过了。
+
+    `extra`＝L3 要替掉的工作区路径（取自报告数据的 `workspacePath`，
+    不让调用方自己编一串）。
+    """
+    try:
+        lvl = int(level or 0)
+    except Exception:                                         # noqa: BLE001
+        lvl = 0
+    if not text or lvl < 1:
+        return text, False
+    out, masked = text, False
+    user = (os.environ.get("USERNAME") or os.environ.get("USER") or "").strip()
+    home = ""
+    try:
+        home = os.path.expanduser("~")
+    except Exception:                                         # noqa: BLE001
+        home = ""
+    for cand in (home, user, user.lower(), user.upper()):
+        if cand and len(cand) >= 2 and cand in out:
+            out = out.replace(cand, "<HOME>" if cand == home else "<USER>")
+            masked = True
+    if lvl >= 2:
+        new = _EXAM_DRIVE_RE.sub(r"<盘符>:\\", out)
+        if new != out:
+            out, masked = new, True
+    if lvl >= 3:
+        for ws in sorted((str(x or "") for x in extra), key=len, reverse=True):
+            if ws and len(ws) >= 2 and ws in out:
+                out = out.replace(ws, "<工作区>")
+                masked = True
+    return out, masked
+
+
+def _exam_export_filename(meta):
+    """下载文件名。★ 脱敏态**写进文件名**（§10.3：选错文件＝静默给错版本，
+    而「给错版本在文件名层就能发现」是最便宜的防线）。"""
+    src = str(meta.get("scan_at") or meta.get("generated_at") or "exam")
+    stamp = re.sub(r"[^0-9A-Za-z]+", "", src)[:24] or "exam"
+    mid = "-sanitized" if int(meta.get("level") or 0) >= 1 else ""
+    return "antinel-exam-%s%s.html" % (stamp, mid)
+
+
+def _exam_export_html(res, verdicts, ev_human, meta=None):
+    """体检结果 → 一份**自包含** HTML（零外部资源、零脚本、可打印成 PDF）。
+
+    ★ 与 `_result_html` 的关系：**共享数据源、不共享排版**（附件化边界一）。
+      汇总卡／六档／逐行／证据区复用同一批取数函数（一个事实一个函数），
+      框皮（标题、版本戳、边界声明、脱敏声明）是导出自己的。
+    ★ 附件是快照不是活页：版本戳、体检时刻、存档名都在文件里；
+      附件内容**不入审计链**（附件是给人看的，不是证据）。
+    """
+    meta = dict(meta or {})
+    scan = res.get("scan") or {}
+    tools = scan.get("tools") or []
+    vc = scan.get("counts_by_verdict") or {}
+    cov = scan.get("coverage") or {}
+    blind_n = int(cov.get("unscanned") or 0)
+    projs = _proj_rows(scan.get("details"))
+    lvl = int(meta.get("level") or 0)
+    gen = html.escape(str(scan.get("generated_at") or ""))
+    ver = html.escape(str(meta.get("version") or ""))
+    made = html.escape(str(meta.get("made_at") or ""))
+    arch = html.escape(str(meta.get("archive") or ""))
+    src_note = ("存档 <code>%s</code>" % arch) if arch else "本次运行的结果（尚未存档）"
+
+    bits = []
+    if lvl >= 2:
+        bits.append("盘符已替换为 <code>&lt;盘符&gt;</code>")
+    if lvl >= 3:
+        bits.append("工作区路径已替换为 <code>&lt;工作区&gt;</code>")
+    extra = ("；另：%s" % "、".join(bits)) if bits else ""
+    if lvl >= 1:
+        banner = ("<div class='banner san'><b>脱敏版</b>：本文件里的用户名已替换为 "
+                  "<code>&lt;USER&gt;</code>%s。替换<b>只动文字</b>，"
+                  "没有改动任何计数、档位与结论。要原始细节，请在监理里另下"
+                  "「完整版」。</div>" % extra)
+    else:
+        banner = ("<div class='banner full'><b>完整版</b>：本文件含有你电脑上的"
+                  "用户名与绝对路径 —— <b>不要直接转给他人</b>。要分享，"
+                  "请在监理里下「脱敏版」。</div>")
+
+    body = "".join([
+        "<h1>Antinel 体检报告</h1>",
+        "<p class='ver'>Antinel <b>%s</b>　·　体检时刻 %s　·　%s　·　"
+        "报告生成 %s</p>" % (ver or "（版本未知）", gen or "（未知）", src_note, made),
+        banner,
+        "<div class='bounds'><b>先说清楚这份文件是什么：</b><ul>"
+        "<li>它是<b>快照</b>：只记录上面那个时刻的检查结果，之后电脑上发生的事"
+        "不在里面。</li>"
+        "<li>本次为<b>只读</b>检查：没有登记、没有布防、没有上锁。</li>"
+        "<li>监理只读到工具<b>自己写下</b>的字段 —— 「没查到」「没发现」"
+        "都<b>不是</b>「没有问题」。</li>"
+        "<li>本文件由你电脑上的 Antinel <b>本地生成</b>，没有经过任何网络上传。"
+        "</li></ul></div>",
+        _summary_card(res, verdicts),
+        # 导出件的分区同样带 id（打印／分享时可被定位）；与页面的 id **同名**
+        # 不冲突 —— 这是另一份文档，且两处的分区口径一致（同一个 _H_TITLES 尺子）。
+        "<h2 id=\"x-tools\">① 我电脑上有哪些 AI 工具（%d 个）</h2>" % len(tools),
+        _tiles(vc, verdicts, blind_n, total=len(tools)),
+        "<p class='muted small'>六档是这么分的：🔴 自认打包过 ＞ 🟠 自认往外发过 ＞ "
+        "🟡 自认在同步 ＞ ⚪ 查过、没发现记录 ＞ ⚫ 没查到 ＞ · 不适用。</p>",
+        _rows_html(tools, verdicts, ev_human, scan.get("details")),
+        "<h2 id=\"x-projs\">② 我的哪些项目被打包过（%d 个）</h2>" % len(projs),
+        _proj_html(projs),
+        "<h2 id=\"x-egress\">③ 此刻谁在往外连</h2>",
+        _egress_html(res.get("egress")),
+        _conns_html(res.get("egress")),
+        _canary_html(res.get("canary")),
+        "<h2 id=\"x-obs\">④ 别处还有什么</h2>",
+        _obs_html(scan.get("observations")),
+        "<hr><p class='muted small'>Antinel <b>%s</b>　·　体检时刻 %s　·　"
+        "报告生成 %s　·　%s。想要更新的结果，请在监理里重新体检。</p>"
+        % (ver, gen, made, src_note),
+    ])
+    return ("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
+            "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+            "<title>Antinel 体检报告 · %s</title><style>%s</style></head>"
+            "<body><div class=\"wrap\">%s</div></body></html>"
+            % (gen or "exam", _EXAM_EXPORT_CSS, body))
 
 
 # --------------------------------------------------------------- 服务 ----

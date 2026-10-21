@@ -2413,7 +2413,15 @@ RECT = (100, 100, 520, 640)
 APPEAR_AFTER = 2.5
 CALLS = {"find": 0, "place": 0, "rect": 0, "popen": 0,
          "first_find_empty": None}
-_T0 = [0.0]
+# ★★ 2026-10-21（时红时绿修复，创始人 05 点批）：epoch 由「模块 import 时刻」
+#   改成「**第一次轮询时刻**」。为什么（实测，非推演）：旧的 `_T0[0]` 在 import
+#   时置 0，2.5s 里混进了**解释器启动＋子进程拉起**的时间 —— 机器一慢（实测：
+#   我并发编译时）子进程起来就超过 2.5s ⇒ 窗口「第一次轮询就出现」⇒ 正臂报
+#   「夹具不忠实」假红，而随后连跑 8 次全绿。**时红时绿比恒红更坏**（铁律 2）。
+#   新口径：`_T0[0] is None` 时在第一次 find 里置 ⇒ 首轮必然空窗（铁律），
+#   而 2.5s 度量的就是**轮询开始后的建窗时长**（真机 Edge 实测 1–2.5s）——
+#   被测的那件事从「解释器快不快」还原成「等没等窗口」。
+_T0 = [None]
 
 
 def console_geometry():
@@ -2450,6 +2458,10 @@ def window_position_str(rect):
 
 def find_console_windows(suffix=None, run_id=None):
     CALLS["find"] += 1
+    # ★ 2026-10-21：epoch 在**第一次轮询**时置（见 `_T0` 注）——
+    #   解释器启动时间从此与「窗口出现早晚」无关，假红不再有发生地。
+    if _T0[0] is None:
+        _T0[0] = time.time()
     up = time.time() - _T0[0] >= APPEAR_AFTER
     if CALLS["first_find_empty"] is None:
         CALLS["first_find_empty"] = not up
@@ -2491,7 +2503,9 @@ SV.subprocess = types.SimpleNamespace(
     Popen=_Popen, DEVNULL=-3, CREATE_NO_WINDOW=0)
 SV.webbrowser = types.SimpleNamespace(open=lambda url: True)
 
-_T0[0] = time.time()
+# ★★ 2026-10-21：这里原来有一句 `_T0[0] = time.time()`（import 即起算）——
+#   它正是假红的源头（2.5s 里混进解释器启动）。已删；epoch 改由
+#   `find_console_windows` 第一次调用时置（见 `_T0` 定义处注释）。
 if MODE == "settled":
     rep = SV.open_console_settled(URL, wait_sec=WAIT)
 elif MODE == "bare":
@@ -3835,7 +3849,12 @@ def h3():
 def n_h3():
     # ★ 锚点是**组标题字面量**：它随四组一起落地，且不在别处出现
     #   （0490 N-T04d 的教训：锚在会被重构掉的字面量上，重构一次负控就失效）。
-    page, why = _h_mut('"<h2>④ 别处还有什么</h2>"', '""',
+    #   ★★ 2026-10-21（体检页优化）锚点随实现迁移：页面四组的 h2 带了分区
+    #   锚点 id（`<h2 id='x-obs'>④ …`），而**导出件**也有一份同题 h2 ——
+    #   锚在两个文件里都唯一的那个形态（带 id 的），否则变异会打在导出件
+    #   上、页面原样绿 ⇒ 负控失效（本轮实测踩过：锚的是无 id 旧形态，
+    #   正好命中导出件那份，H3 没红）。
+    page, why = _h_mut('"<h2 id=\'x-obs\'>④ 别处还有什么</h2>"', '""',
                        "is0490_nh3", _h_scan())
     if why:
         return why
@@ -4501,6 +4520,131 @@ def n_h12():
         return "负控②方向不对：红的原因不是态⑤（%s）—— 量具打偏" % r2
     if _h12_core(lambda c: _canary_render(c)) is not True:
         return "夹具不成立：真实现本身就被 H12 判红 ⇒ 负控无分辨力"
+    return True
+
+
+# ══════════ X 族 · 控制台侧：导出入口与路由（2026-10-21 创始人拍板 D1/E）══════════
+# 施工单：docs/Antinel·体检页体验深度分析（2026-10-21 只读轮）§10.2/§10.3。
+# ★ 与 0360 的 X1–X5 分工：那里守**渲染与导出本身**（ui_server 产物），
+#   这里守**控制台入口与路由**（inbox_server）—— 各守一层，各配负控。
+# ★ 三条拍板落在本文件：① 附件化三边界（版面零耦合在 `_view_exam` 只加一行
+#   入口，不碰 `_result_html`）；② 默认脱敏、一键完整版（两个链接指同一份存档）；
+#   ③ 附件不入账本（导出是 GET 只读，零采集、零写入）。
+
+
+def _x6_core(page):
+    """X6 尺子：体检页上的导出入口长得合规。"""
+    if "/exam-export?e=" not in page:
+        return "体检页没有导出入口（D1：用户可以下载、分享给有关人员）"
+    es = re.findall(r'/exam-export\?e=([^&"]+)&amp;san=([01])', page)
+    if len(es) < 2:
+        return "导出链接不是两个（脱敏版＋完整版）：%r" % (es,)
+    base = {b for b, _s in es}
+    if len(base) != 1:
+        return "两个链接指向不同存档：%r —— 选错文件＝静默给错版本" % sorted(base)
+    if {s for _b, s in es} != {"0", "1"}:
+        return "导出链接缺一种档位（san=1 脱敏／san=0 完整）"
+    txt = PC.body(page)
+    if "用户名已替换" not in txt:
+        return "脱敏态没写进可见文字（给错版本要在文字层就能发现）"
+    if "只适合自己留着" not in txt:
+        return "完整版没警告「含本机路径，别外传」"
+    return True
+
+
+@check("X6 ★ 体检页有导出入口：脱敏版＋完整版两个链接指**同一份**存档，脱敏态写进可见文字")
+def c_x6():
+    """★ 附件化（§10.2）落在页面上就是这一行：不碰版面、不入账本、
+    只多一个入口。没有可导出源时**不画按钮**（点了没反应比没有按钮更坏）。"""
+    page = _exam_page()
+    return _x6_core(page)
+
+
+@check("N-X6 ★ 负控：脱敏文案被摘／两个链接指向不同存档 ⇒ X6 必须各自红")
+def n_x6():
+    """两变异各验一边（都走两步法：先证注入真的生效，再证尺子红）。
+
+    ① 摘掉「用户名已替换」—— 脱敏态从可见文字里消失；
+    ② 两个链接指向不同存档 —— 正是 §10.3 说的「静默给错版本」。
+    """
+    src = _src(_SERVER_REL)
+    a1 = "（用户名已替换，可转给他人）｜"
+    a2 = "（含本机路径与用户名，只适合自己留着）</div>\" % (b, b))"
+    for a in (a1, a2):
+        if a not in src:
+            return ("变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，"
+                    "不算通过：%r" % a[:60])
+    # ① 摘脱敏文案
+    p1, why = _exam_mut(src.replace(a1, "（可转给他人）｜"), "is0490_nx6a")
+    if why:
+        return why
+    if _x6_core(p1) is True:
+        return "负控①失效：脱敏文案被摘掉后 X6 没红"
+    # ② 两个链接不同源
+    p2, why = _exam_mut(src.replace(a2, "（含本机路径与用户名，只适合自己留着）"
+                                     "</div>\" % (b, b + \"-x\"))"),
+                        "is0490_nx6b")
+    if why:
+        return why
+    if _x6_core(p2) is True:
+        return "负控②失效：两个链接指向不同存档后 X6 没红"
+    if _x6_core(_exam_page()) is not True:
+        return "夹具不成立：真实现本身就被 X6 判红 ⇒ 负控无分辨力"
+    return True
+
+
+def _x7_core(src):
+    """X7 尺子：导出路由在位、只读、路径穿越有防线。"""
+    if 'if u.path == "/exam-export":' not in src:
+        return "没有 /exam-export 路由（GET）"
+    if src.count("return self._exam_export(u.query)") != 1:
+        return "导出处理器的调用点不是恰好一个"
+    if "def _exam_export(self, query):" not in src:
+        return "没有导出处理器"
+    # 只读：导出路径**不许跑采集**（host-scan 4–9 分钟，用户点一下要等多久）
+    body = src.split("def _exam_export(self, query):", 1)[1]
+    body = body.split("\n        def ", 1)[0]
+    for bad in ("_run_host_scan", "_run_egress", "_exam_job", "_exam_absorb"):
+        if bad in body:
+            return "导出路径调了 %r —— GET 导出必须只读" % bad
+    # 取档只认**档案自己的文件名**（与 `_exam_pick` 同一纪律）
+    if "_exam_doc_by_base(base)" not in body:
+        return "导出没走 `_exam_doc_by_base`（路径穿越防线没接上）"
+    return True
+
+
+@check("X7 ★ /exam-export 路由：在位、只读零采集、取档只认档案文件名（防路径穿越）")
+def c_x7():
+    """结构锚 ＋ 行为锚各一半：结构看源码（路由/只读/取档口径），
+    行为直接调 `_exam_doc_by_base` 喂穿越载荷 —— 不起服务、零子进程。"""
+    r = _x7_core(_src(_SERVER_REL))
+    if r is not True:
+        return r
+    for bad in ("../antinel.py", "..", ".", "sub/dir.json", ""):
+        doc, path = SV._exam_doc_by_base(bad)
+        if doc is not None or path:
+            return "路径穿越没拦住（%r ⇒ %r）—— base 只许是档案自己的文件名" % (
+                bad, (doc, path))
+    # 不存在的真名 ⇒ 空（不许猜一份出来）
+    doc, path = SV._exam_doc_by_base("exam-x-no-such-archive.json")
+    if doc is not None or path:
+        return "不存在的档案没有返回空 ⇒ %r" % ((doc, path),)
+    return True
+
+
+@check("N-X7 ★ 负控：摘掉导出路由 ⇒ X7 必须红")
+def n_x7():
+    """结构尺子的负控同在源码上做：路由摘掉 ⇒ 同一把尺子必须红。"""
+    src = _src(_SERVER_REL)
+    anchor = ('            if u.path == "/exam-export":\n'
+              '                return self._exam_export(u.query)\n')
+    if anchor not in src:
+        return ("变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，"
+                "不算通过：%r" % anchor[:60])
+    if _x7_core(src.replace(anchor, "")) is True:
+        return "负控失效：路由被摘掉后 X7 没红"
+    if _x7_core(src) is not True:
+        return "夹具不成立：真实现本身就被 X7 判红 ⇒ 负控无分辨力"
     return True
 
 

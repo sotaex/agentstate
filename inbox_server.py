@@ -535,6 +535,21 @@ EXAM_CSS = """
 .exam table.evo tr.mark td{background:#fffafa}
 .exam code{background:var(--panel);border-radius:4px;padding:1px 5px;font-size:13px}
 .exam hr{border:0;border-top:1px solid var(--line);margin:20px 0}
+/* 2026-10-21 体检页优化（创始人拍板 A1/B/C）：汇总卡／分组／紧凑行／锚点条 */
+.exam .sum{border-left:4px solid var(--brand);background:var(--bg)}
+.exam .sum .sumh{font-size:16px;font-weight:600;margin-bottom:6px}
+.exam .sum .sumline{font-size:15px;line-height:1.7;margin-bottom:4px}
+.exam .grp{margin-top:4px}
+.exam .gh{font-size:14px;font-weight:600;margin:16px 0 2px}
+.exam .crow{border-top:1px solid var(--line);padding:7px 0}
+.exam .crow .nm{font-weight:500}
+.exam .jump{background:var(--bg);border:1px solid var(--line);border-radius:10px;
+ padding:9px 14px;margin:14px 0 4px;font-size:13px}
+.exam .jump a{color:var(--brand);text-decoration:none;margin:0 2px}
+.exam .jump a:hover{text-decoration:underline}
+.exam .lnk{background:none;border:0;color:var(--brand);font-size:13px;cursor:pointer;
+ padding:2px 6px}
+.exam .lnk:hover{text-decoration:underline}
 """
 
 #: ★★ 0.50.3：术语浮层按**视口坐标**完整落位，不是「溢出右边就翻到左边」。
@@ -3136,6 +3151,65 @@ def _exam_pick(hist, pick):
     return None
 
 
+def _exam_doc_by_base(base):
+    """按**档案文件名**取体检存档。返回 `(doc, path)`；取不到 ⇒ `(None, "")`。
+
+    ★ 与 `_exam_pick` 同一纪律：`base` 来自 URL ⇒ **绝不拼路径**，
+      只在 `host_shield.health_reports()` 列出的真档案里按 basename 认。
+    ★ 只认控制台体检（`source == "console-exam"`）：命令行体检
+      （host-audit）形状不同，导出它会得到另一份东西 —— 与
+      `_exam_history` 同一条口径。
+    """
+    import host_shield as _hs
+    if not base or os.path.basename(base) != base or base in (".", ".."):
+        return None, ""
+    for p in _hs.health_reports():
+        if os.path.basename(p) != base:
+            continue
+        try:
+            with open(p, encoding="utf-8") as f:
+                doc = json.load(f) or {}
+        except Exception:                                     # noqa: BLE001
+            return None, ""
+        if not isinstance(doc, dict) or doc.get("source") != "console-exam":
+            return None, ""
+        return doc, p
+    return None, ""
+
+
+def _exam_export_base(_arch, chosen, st):
+    """导出来源（档案文件名）。★ 优先**当前正在看的那一份**：
+
+    · 回看旧档 ⇒ 导出旧档（不许偷偷导成最新一次 —— 读者以为自己在存这一份）；
+    · 刚跑完、存档已落盘 ⇒ 导这一份；
+    · 两者都没有（内存结果没存下来／旧存档没明细）⇒ 空串 ⇒ 页面上不给链接
+      （没有可导出的东西却画一个下载按钮，就是「点了没反应」的源头）。
+    """
+    if _arch:
+        return os.path.basename(_arch)
+    if chosen and chosen.get("ok"):
+        return str(chosen.get("base") or "")
+    saved = (st or {}).get("saved") or ""
+    return os.path.basename(saved) if saved else ""
+
+
+def _exam_export_links(base):
+    """导出入口（2026-10-21 体检页优化·创始人拍板 D1/E）。
+
+    ★ 两个链接指**同一份存档**：默认脱敏版（分享用）＋完整版（自己留）。
+    ★ 脱敏态写进可见文字，也写进下载文件名 —— 给错版本要在文件名层
+      就能发现（§10.3：选错文件＝静默给错版本，与「没说＝没有」同族）。
+    ★ 不带 `?t=` 也照旧工作：0.48.6 B3 起站内口令走 httpOnly cookie
+      （与历次体检链接同一条路）。
+    """
+    b = _esc(base)
+    return ("<div class=\"note\">把这份结果存成一份文件："
+            "<a href=\"/exam-export?e=%s&amp;san=1\">下载脱敏版</a>"
+            "（用户名已替换，可转给他人）｜"
+            "<a href=\"/exam-export?e=%s&amp;san=0\">下载完整版</a>"
+            "（含本机路径与用户名，只适合自己留着）</div>" % (b, b))
+
+
 def _exam_history_html(hist, chosen):
     """「历次体检」一行：能回看的给链接，不能回看的**只给字、不给链接**。
 
@@ -3311,6 +3385,8 @@ def _view_exam(token="", pick=None):
     out.append(_EXAM_BOUND)
     # ---- 历次体检（每一次都能回看；只有一次时不显示，不啰嗦）----
     out.append(_exam_history_html(hist, chosen))
+    # ---- 导出入口（D1/E：默认脱敏、一键完整版；没有可导出源就不画按钮）----
+    out.append(_exam_export_links(_exam_export_base(_arch, chosen, st)))
     # ---- 触发／进行中／结果 ----
     if st.get("state") == "running":
         out.append("<div class=\"note\">体检正在进行：%s"
@@ -3432,6 +3508,13 @@ def render_page(view="inbox", filt=None, root=None, token="", items=None, rep=No
     #   自己看到的是筛选结果，其实是一整条历史）。
     if not filt or not M.known_filter(filt):
         filt = M.BUCKET_ACTION
+    # ★ 2026-10-21（体检页优化·C）：折叠开关脚本**只用这一份定义**
+    #   （`ui_server._EXAM_FOLD_JS`；本地页与控制台共用一个来源，
+    #   不许在两侧各抄一份 —— 抄了就漂）。
+    _fold_js = ""
+    if view == "health_exam":
+        import ui_server as _U
+        _fold_js = "<script>%s</script>" % _U._EXAM_FOLD_JS
     # ★★ 0.48.5（交接件 §5.5 W-01）：标题**恒用状态词**，与顶部条同一个词
     #   （`M.light_explain()` 是唯一实现 —— 标题与头部不许两种说法）。
     #   创始人原话：「标题该显示的是状态——那是 Alt-Tab / 任务栏里唯一
@@ -3497,6 +3580,7 @@ def render_page(view="inbox", filt=None, root=None, token="", items=None, rep=No
             + _FLIP_JS + _READ_JS + _LOGO_JS + _escape_js(token)
             + _collapse_js(token)
             + _TAB_JS
+            + _fold_js
             + "</body></html>")
 
 
@@ -3619,6 +3703,10 @@ def _make_handler(token, root):
                 return self._json(posture_now())
             if u.path == "/api/health":
                 return self._json({"ok": True, "bind": self.server.server_address[0]})
+            # ★ 2026-10-21 体检页优化·创始人拍板（D1/E）：体检结果导出。
+            #   只读、不起采集（GET 语义保持纯净）—— 与体检页同一个 `_guard`。
+            if u.path == "/exam-export":
+                return self._exam_export(u.query)
             if u.path in ("/", "/index.html"):
                 # ★ 0.53.0（T0）：没带 v 时按首检状态落点（无快照 ⇒ 体检页）；
                 #   坏视图名落回收件箱（_resolve_view，不静默当成"全部"）。
@@ -3874,6 +3962,59 @@ def _make_handler(token, root):
             _back = "/?v=health_exam" if op == "exam" else "/?v=inbox"
             return self._send(303, "text/plain; charset=utf-8", b"",
                               extra={"Location": _back})
+
+        def _exam_export(self, query):
+            """GET `/exam-export?e=<档案名>&san=1|0[&lv=1..3]` —— 导出一份体检结果。
+
+            ★ 只读、**不起采集**：渲染走 `ui_server._exam_export_html`
+              （与版面同一批取数函数、自己的框皮 —— 附件化三边界之一：
+              **版面零耦合**）。
+            ★ 默认脱敏（`san` 缺省即 1，`lv` 缺省即 1＝用户名）——
+              创始人 2026-10-21 拍板「默认脱敏、一键完整版」。
+            ★ `e` 只认**档案自己的文件名**（与 `_exam_pick`／`_exam_doc_by_base`
+              同一条纪律：URL 来的任何拼路径都是路径穿越）⇒ 对不上就 404，
+              不猜、不退回最新一份（那会把旧档导成新的，正好是反方向）。
+            """
+            import ui_server as _U
+            import antinel as _A
+            q = parse_qs(query)
+            base = (q.get("e") or [""])[0]
+            san = (q.get("san") or ["1"])[0] not in ("0", "false", "no")
+            try:
+                lv = int((q.get("lv") or ["1"])[0])
+            except Exception:                                 # noqa: BLE001
+                lv = 1
+            lv = 0 if not san else max(1, min(3, lv))
+            doc, path = _exam_doc_by_base(base) if base else (None, "")
+            if doc is None:
+                with _EXAM_LOCK:
+                    res = _EXAM.get("result")
+                    saved = _EXAM.get("saved") or ""
+                if res is not None:
+                    doc, path = {"report": res}, saved
+            rep = (doc or {}).get("report") or None
+            if not rep:
+                return self._send(404, "text/plain; charset=utf-8",
+                                  "没有可导出的体检结果 —— 先跑一次体检".encode("utf-8"))
+            scan = rep.get("scan") or {}
+            ws = [str(r.get("ws") or "")
+                  for r in _U._proj_rows(scan.get("details"))]
+            meta = {"version": getattr(_A, "VERSION", ""),
+                    "scan_at": scan.get("generated_at") or "",
+                    "made_at": datetime.now().astimezone().isoformat(
+                        timespec="seconds"),
+                    "archive": os.path.basename(path) if path else "",
+                    "level": lv}
+            html_txt = _U._exam_export_html(rep, _A.VERDICTS,
+                                            _A._ev_human, meta)
+            html_txt, masked = _U._exam_sanitize(html_txt, lv, extra=ws)
+            fn = _U._exam_export_filename(meta)
+            print("[console] exam-export -> %s (lv=%d, masked=%s)"
+                  % (fn, lv, masked))
+            return self._send(200, "text/html; charset=utf-8",
+                              html_txt.encode("utf-8"),
+                              extra={"Content-Disposition":
+                                     "attachment; filename=\"%s\"" % fn})
 
         def _json(self, obj):
             body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
