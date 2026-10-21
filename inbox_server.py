@@ -3207,7 +3207,11 @@ def _exam_export_links(base):
       三种都指**同一份存档**，格式只换壳、不换数（`fmt` 只决定打包方式）。
     """
     b = _esc(base)
-    return ("<div class=\"note\">把这份结果存成一份文件："
+    # ★ 2026-10-21 活体实测：Edge 打印一次 3～20 秒（机器负载高时更久）⇒
+    #   把预期写在句子裡，否则十几秒没反应会被当成坏了、还可能连点
+    #   （每次连点都会再起一个 Edge，排在锁后面等）。
+    return ("<div class=\"note\">把这份结果存成一份文件"
+            "（PDF 要十几秒生成，别重复点）："
             "<a href=\"/exam-export?e=%s&amp;san=1&amp;fmt=pdf\">PDF（脱敏）</a>"
             "（用户名已替换，可转给他人）｜"
             "<a href=\"/exam-export?e=%s&amp;san=0&amp;fmt=pdf\">PDF（完整）</a>"
