@@ -1291,7 +1291,7 @@ def record_meta(it, with_time=True):
     ts_txt = ts_label(getattr(it, "ts", "")) if with_time else ""
     note = str(getattr(it, "note", "") or "").strip()
     if rid:
-        head = _rule_desc(rid) or "危险操作被拦下"
+        head = _rule_desc(rid) or "危险操作被挡下"
         #: 其余片段的固定开销先扣掉，剩下的才是「目标」能用的预算。
         #: 目标个数由预算**派生**（不是固定 3 个）——真记录拼到 94 字就是
         #: 「个数写死、预算事后数」的必然结果。

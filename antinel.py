@@ -58,7 +58,7 @@ ROUTES = [
      "antinel host-scan（你电脑上的全部工具 ＋ 分级 ＋ 证据 ＋ 裁决状态）", "审核"),
     ("帮我放个源码金丝雀 / 埋个外传检测标记", "antinel canary plant（读取会提醒；标记出现在输出即外传证据，report 可见）", "防范"),
     ("今日日报 / 日报 / 昨天干了什么", "antinel digest --days 1（工作区=项目根）", "审核"),
-    ("确认放行某个落点 / 不放行就拦住它", "antinel host-shield decide <路径> allow_always｜deny（放行须本人在终端）", "防范"),
+    ("确认放行某个落点 / 不放行就挡下它", "antinel host-shield decide <路径> allow_always｜deny（放行须本人在终端）", "防范"),
     ("把 D:\\xxx 加进项目路径/白名单", "antinel roots add D:\\xxx ｜ antinel paths add <前缀>", "防范"),
     ("xxx 域名放行（装包老报警）", "antinel domains add xxx", "防范"),
     ("预算快超了提醒我 / 给会话设个预算", "antinel settings set budget_tokens_per_session <N>", "账本"),
@@ -1154,7 +1154,7 @@ def cmd_morning(args):
         inp = wrec.get("input") or {}
         detail = (wrec.get("match_snippet")
                   or inp.get("command") or inp.get("file_path") or "")[:56]
-        print("  最重一条：[%s] %s（已拦下）" % (rid, detail))
+        print("  最重一条：[%s] %s（已挡下）" % (rid, detail))
     print("  对比昨日：动作 %s ｜拦截 %s ｜tokens %s"
           % (_diff(cur["a"], prev["a"]), _diff(cur["b"], prev["b"]),
              _diff(cur["t"], prev["t"])))
@@ -1671,7 +1671,7 @@ def cmd_help(_args=None):
         print("     ★ 即：未白名单域名的网络命令**只提醒、不拦截**。"
               "要拦：antinel settings set net_mode block")
     else:
-        print("     ★ 未白名单域名的网络命令会被**拦下**。")
+        print("     ★ 未白名单域名的网络命令会被**挡下**。")
 
 
 def cmd_routes(args):
