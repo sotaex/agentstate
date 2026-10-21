@@ -2,7 +2,7 @@
  "name": "antinel-security",
  "version": "0.50.5",
  "psl_spec": "psl-vs-0.1",
- "built_at": "2026-10-19T10:56:25Z",
+ "built_at": "2026-10-21T11:20:34Z",
  "built_from": "D:\\psl\\poc\\antinel-security",
  "spec_document": "ANT-SEC-SPEC-001-FULL-R v1.1-R",
  "namespace": {
@@ -89,7 +89,7 @@
   "inbox_window.py": "sha256:3d1f03d95b7164f43df62414c1558badc3fd7ebf4a9eedbe0cde1474e0e11090",
   "ledger.py": "sha256:364634ebf7ad136db2b59340f490f176ff70fff0a8711effa357be086e3eed69",
   "machine_id.py": "sha256:a17381e06232d8a5b5ffbd97f003f78d237b3a92ef3061585bcd9545bfd3a41a",
-  "psl/SKILL.md": "sha256:7e599cab673a6a28f5af743b1064416edf57a61885618d158b75c5301fc86d59",
+  "psl/SKILL.md": "sha256:c3f958f544d703ba2d0223427988a641bfb5c114c56c5f85e8204baec43011d8",
   "psl/antinel-namespaces.json": "sha256:2db67f32a5b803560f458c4589bd4bb4678cc17bc16625f6b6b3ad20f9b202d2",
   "psl/workspace_facts.json": "sha256:3eb67c267a3150ec9d581fff25f301023e278f610ca42c25cabed8661a73b528",
   "remediation.py": "sha256:88118ac9b2670f269727da0de7df03e77b609fe567e88b561f2c8968610c6768",

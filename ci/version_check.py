@@ -48,6 +48,7 @@
     python ci/version_check.py --expect 0.33.2   # 指定期望值（发布前用）
 """
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -129,6 +130,75 @@ def extract():
     return out
 
 
+def _judgment_covers(j):
+    """judgment.digests 是否仍覆盖**当前**代码（内容哈希逐文件比）。
+
+    ★★ 为什么加（2026-10-21 STE100 施工期实测判据 5 误红）：
+      判据 5 原本只比对 SKILL 字段与 judgment.verdict 的**字面**。STE100
+      改了 antinel.py（CLI 文案）后，装配器按内容哈希如实把 SKILL 刷成
+      false ＋ evidence「digests DO NOT match」—— 而 judgment 还是上次
+      harness 的 PASS（digests 记的是旧 antinel.py）⇒ 判据 5 判
+      「SKILL=false 与 verdict=PASS 不一致 ⇒ 应为 true」——**误红**：
+      拿一份已不覆盖当前代码的旧 PASS，要求自证卡说「已验证」。
+      这正是原判据要防的「自证卡过期」的**另一侧**：判据盯住了 SKILL
+      侧会过期，没盯 judgment 侧也会过期。
+    ⇒ digests 逐文件比 sha256；对不上 ⇒ judgment 陈旧，其 verdict
+      **不构成**对当前代码的验证状态。没有 digests 时不判陈旧
+      （向后兼容：老 judgment 没有指纹集）。
+    """
+    dg = (j or {}).get("digests") or {}
+    if not dg:
+        return True, []
+    stale = []
+    for rel, want in dg.items():
+        p = PKG / rel
+        if not p.is_file():
+            stale.append(rel)
+            continue
+        try:
+            got = "sha256:" + hashlib.sha256(p.read_bytes()).hexdigest()
+        except OSError:
+            stale.append(rel)
+            continue
+        if got != want:
+            stale.append(rel)
+    return (not stale), stale
+
+
+def _psl_verified_judge(j, txt, covers=None, stale=()):
+    """判据 5 判定核心（从读盘拆出 ⇒ 负控可内存喂合成场景，不写盘）。
+
+    覆盖时走原逻辑（PASS⇒true / FAIL⇒false）；陈旧时只许 false 且
+    evidence 非空 —— 拿旧判定当新代码的验证（true）照旧红。
+    """
+    out = []
+    verdict = j.get("verdict")
+    m = re.search(r'^\s*psl-verified:\s*"([^"]*)"', txt, re.M)
+    if not m:
+        return ["SKILL.md 里读不到 psl-verified 字段"]
+    if covers is None:
+        covers, stale = _judgment_covers(j)
+    if covers:
+        want = "true" if verdict == "PASS" else "false"
+        if m.group(1) != want:
+            out.append("SKILL.md psl-verified=%r 与 judgment verdict=%r 不一致（应为 %r）"
+                       % (m.group(1), verdict, want))
+        if want == "true":
+            ma = re.search(r'^\s*psl-verified-at:\s*"([^"]*)"', txt, re.M)
+            if not ma or not ma.group(1).strip():
+                out.append('verdict=PASS 但 psl-verified-at 为空 —— "什么时候验的"不能留白')
+    else:
+        if m.group(1) != "false":
+            out.append("judgment 指纹已不覆盖当前代码（%s 等 %d 项），SKILL.md 却写 verified=%r"
+                       " —— 拿旧判定当新代码的验证"
+                       % (",".join(list(stale)[:3]), len(stale), m.group(1)))
+        ev = re.search(r'^\s*psl-verified-evidence:\s*"([^"]*)"', txt, re.M)
+        if not ev or not ev.group(1).strip():
+            out.append("judgment 陈旧期间 SKILL.md 的 psl-verified-evidence 不许留白"
+                       "（要写明为什么不验证）")
+    return out
+
+
 def _psl_verified_fails():
     """判据 5：SKILL.md 的 psl-verified* 字段必须与 psl/judgment.json 一致。
 
@@ -143,7 +213,6 @@ def _psl_verified_fails():
       · judgment 说 FAIL ⇒ SKILL.md 应为 false。
       不一致 ⇒ FAIL，并**指名**该改哪一边。
     """
-    out = []
     sk = PKG / "SKILL.md"
     jp = PKG / "psl" / "judgment.json"
     if not sk.is_file() or not jp.is_file():
@@ -152,19 +221,8 @@ def _psl_verified_fails():
         j = json.loads(jp.read_text(encoding="utf-8"))
     except Exception as e:
         return ["psl/judgment.json 解析失败：%r" % e]
-    want = "true" if j.get("verdict") == "PASS" else "false"
     txt = sk.read_text(encoding="utf-8")
-    m = re.search(r'^\s*psl-verified:\s*"([^"]*)"', txt, re.M)
-    if not m:
-        return ["SKILL.md 里读不到 psl-verified 字段"]
-    if m.group(1) != want:
-        out.append("SKILL.md psl-verified=%r 与 judgment verdict=%r 不一致（应为 %r）"
-                   % (m.group(1), j.get("verdict"), want))
-    if want == "true":
-        ma = re.search(r'^\s*psl-verified-at:\s*"([^"]*)"', txt, re.M)
-        if not ma or not ma.group(1).strip():
-            out.append('verdict=PASS 但 psl-verified-at 为空 —— "什么时候验的"不能留白')
-    return out
+    return _psl_verified_judge(j, txt)
 
 
 def _stability_schema_fails():
@@ -266,11 +324,54 @@ def _manifest_lag_fails():
     return out
 
 
+def _negctl_judged():
+    """判据 5 三条负控（内存合成场景，磁盘一个字节都不动）。
+
+    负控一：指纹覆盖 + verdict=PASS + SKILL=false ⇒ 必须红（无据不验证）
+    负控二：指纹陈旧 + SKILL=true             ⇒ 必须红（陈凭证当真）
+    负控三：指纹陈旧 + SKILL=false + evidence 空 ⇒ 必须红（不写理由）
+    正回归：指纹陈旧 + false + evidence 非空   ⇒ 必须绿（施工期诚实态）
+    """
+    real = "sha256:" + hashlib.sha256((PKG / "antinel.py").read_bytes()).hexdigest()
+    fails = []
+
+    def judge(verdict, verified, covers, stale, evidence="NOT VERIFIED for this build: 1/21 digests DO NOT match"):
+        txt = ('psl-verified: "%s"\npsl-verified-spec: "psl-vs-0.1"\n'
+               'psl-verified-at: ""\npsl-verified-evidence: "%s"\n' % (verified, evidence))
+        j = {"verdict": verdict}
+        return _psl_verified_judge(j, txt, covers=covers, stale=stale)
+
+    if not judge("PASS", "false", True, []):
+        fails.append("负控一未生效：digests 覆盖且 PASS，SKILL=false 却没红")
+    if not judge("PASS", "true", False, ["antinel.py"]):
+        fails.append("负控二未生效：digests 陈旧，SKILL=true 却没红")
+    if not judge("PASS", "false", False, ["antinel.py"], evidence=""):
+        fails.append("负控三未生效：digests 陈旧且 evidence 留白，却没红")
+    if judge("PASS", "false", False, ["antinel.py"]):
+        fails.append("正场景反被误红：digests 陈旧、SKILL 如实 false 且 evidence 非空，却红了")
+    # 指纹真的匹配时，false 必须照旧红（原判据的保护面不许松）
+    j_real = {"verdict": "PASS", "digests": {"antinel.py": real}}
+    cov, st = _judgment_covers(j_real)
+    if not cov:
+        fails.append("负控夹具不成立：真哈希居然判陈旧")
+    txt_false = ('psl-verified: "false"\npsl-verified-spec: "psl-vs-0.1"\n'
+                 'psl-verified-at: ""\npsl-verified-evidence: "x"\n')
+    if not _psl_verified_judge(j_real, txt_false, covers=cov, stale=st):
+        fails.append("负控四未生效：digests 真实覆盖且 PASS，SKILL=false 却没红（保护面松了）")
+    return fails
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--expect", help="期望版本（不给则用 psl/manifest.json 的 version）")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--negctl", action="store_true", help="只跑判据 5 的内存负控（不写盘）")
     a = ap.parse_args()
+
+    if a.negctl:
+        nf = _negctl_judged()
+        print("判据 5 负控（内存合成，不写盘）：%s" % ("四条全生效" if not nf else "；".join(nf)))
+        return 0 if not nf else 1
 
     rows = extract()
     print("=" * 78)

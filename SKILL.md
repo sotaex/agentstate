@@ -13,10 +13,10 @@ description: >
 license: Apache-2.0
 compatibility: Requires Python 3.10+; standard library only; no network access; no third-party packages. Hooks verified on Claude Code and ZCode (identical protocol); Qoder/TRAE profiles declared but unverified.
 metadata:
-  psl-verified: "true"
+  psl-verified: "false"
   psl-verified-spec: "psl-vs-0.1"
-  psl-verified-at: "2026-10-19T19:03:54+0800"
-  psl-verified-evidence: "live PreToolUse block of a real .env read in ZCode (SEC-01) plus a full-assertion judgment run; digest check 21/21 digests match this build (assertions 315/315)"
+  psl-verified-at: ""
+  psl-verified-evidence: "NOT VERIFIED for this build: 1/21 digests DO NOT match this build -- antinel.py: b006fd111d0e != recorded ea2c6fcb0328"
   psl-verifier: "scripts/run_harness.py"
   antinel-product: "security-audit"
   antinel-tier: "free"

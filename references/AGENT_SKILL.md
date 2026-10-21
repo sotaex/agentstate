@@ -15,7 +15,7 @@
 - 「这台电脑装了哪些 AI 工具 / 哪个在偷数据」→ `antinel host-scan（你电脑上的全部工具 ＋ 分级 ＋ 证据 ＋ 裁决状态）`
 - 「帮我放个源码金丝雀 / 埋个外传检测标记」→ `antinel canary plant（读取会提醒；标记出现在输出即外传证据，report 可见）`
 - 「今日日报 / 日报 / 昨天干了什么」→ `antinel digest --days 1（工作区=项目根）`
-- 「确认放行某个落点 / 不放行就拦住它」→ `antinel host-shield decide <路径> allow_always｜deny（放行须本人在终端）`
+- 「确认放行某个落点 / 不放行就挡下它」→ `antinel host-shield decide <路径> allow_always｜deny（放行须本人在终端）`
 - 「把 D:\xxx 加进项目路径/白名单」→ `antinel roots add D:\\xxx ｜ antinel paths add <前缀>`
 - 「xxx 域名放行（装包老报警）」→ `antinel domains add xxx`
 - 「预算快超了提醒我 / 给会话设个预算」→ `antinel settings set budget_tokens_per_session <N>`
