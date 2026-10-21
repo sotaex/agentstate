@@ -42,6 +42,7 @@ import os
 import re
 import sys
 import html as _H
+import io
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -56,6 +57,118 @@ def check(name):
         RESULTS.append((name, fn))
         return fn
     return deco
+
+
+# ══════════════════════════════════════════════ C2 闭合性（2026-10-22）═════
+# 完备性的三种含义里，只有「合同完备」与「闭合完备」能做到（见
+# docs/Antinel·盲区生成器与完备性方法 v1.0 §2）。C2 守的是第三种：
+#   **域外输入不许被静默映射成「正常」** —— 必须具名落到「不安全」。
+#
+# ★ 为什么这条要有：`light("banana")` 曾返回 ok（0.36.3 的教训写在 S02 的注释里），
+#   而 2026-10-22 又实测到同形状的四处：`_logo_mark` 的 `LOGO_MODE.get(state,"L0")`
+#   与托盘三处 `... else "L0"` —— 未知态被画成「值守中」。
+#   两件事同因：**默认分支返回的是「正常」**。
+#
+# ★ 覆盖形状（两种，写清楚比声称"全覆盖"有用）：
+#     ① `X if cond else "L0"`（三元）
+#     ② `d.get(k, "L0")`（两参数 get）
+#   不覆盖 `else:` 语句块 —— 它会与"显式写了 else 的正常分支"混淆，
+#   误报率高到没人会看。残余如实记在文件末尾的"已知不覆盖"里。
+
+def _c2_normal_tokens(M):
+    """「正常」的取值**从产品真源派生**，不写死 —— 否则改词后判据会静默失效。"""
+    k = M.STATE_L0
+    return {k}, {M.STATE_LABEL[k]}
+
+
+def _c2_surface():
+    """扫描面**派生**自 `pyproject.toml` 的 `py-modules`（与打包清单同源）。"""
+    import re as _re
+    p = os.path.join(ROOT, "pyproject.toml")
+    txt = io.open(p, encoding="utf-8").read()
+    m = _re.search(r"py-modules\s*=\s*\[(.*?)\]", txt, _re.S)
+    if not m:
+        _raise("pyproject.toml 里找不到 py-modules —— 扫描面派生失败，判据不能瞎猜")
+    names = _re.findall(r'"([A-Za-z_][A-Za-z0-9_]*)"', m.group(1))
+    out = []
+    for nm in names:
+        fp = os.path.join(ROOT, nm + ".py")
+        if os.path.exists(fp):
+            out.append(fp)
+    return out
+
+
+def _c2_scan_src(src, keys, words):
+    """扫一段源码，返回 [(shape, lineno, 值)]。纯函数，负控直接喂源码。"""
+    import ast as _ast
+    try:
+        tree = _ast.parse(src)
+    except SyntaxError:
+        return [("unparsable", 0, "")]
+    normal = set(keys) | set(words)
+    hits = []
+
+    def _is_normal(node):
+        return (isinstance(node, _ast.Constant)
+                and isinstance(node.value, str) and node.value in normal)
+
+    for n in _ast.walk(tree):
+        if isinstance(n, _ast.IfExp) and _is_normal(n.orelse):
+            hits.append(("else", n.lineno, n.orelse.value))
+        if (isinstance(n, _ast.Call) and isinstance(n.func, _ast.Attribute)
+                and n.func.attr == "get" and len(n.args) == 2
+                and not n.keywords and _is_normal(n.args[1])):
+            hits.append(("get-default", n.lineno, n.args[1].value))
+    return hits
+
+
+def _c2_scan_all(surface=None):
+    import inbox_model as M
+    keys, words = _c2_normal_tokens(M)
+    files = _c2_surface() if surface is None else surface
+    bad = []
+    for fp in files:
+        try:
+            src = io.open(fp, encoding="utf-8", errors="ignore").read()
+        except OSError:
+            continue
+        for shape, ln, val in _c2_scan_src(src, keys, words):
+            bad.append("%s:%d［%s］→ %r"
+                       % (os.path.basename(fp), ln, shape, val))
+    return bad, len(files)
+
+
+@check("C2 默认分支具名：域外输入不许被静默映射成『正常』")
+def c2():
+    bad, n = _c2_scan_all()
+    if bad:
+        _raise("%d 处把未知/域外值映射成『正常』（默认分支必须具名不安全）：%s"
+               % (len(bad), "；".join(bad[:6])))
+    return "扫描面 %d 模块（派生自 py-modules），0 处默认落到「值守中」" % n
+
+
+@check("N-C2 负控：三元/ get 两形状各必红、具名不安全与显式分支必绿")
+def n_c2():
+    import inbox_model as M
+    keys, words = _c2_normal_tokens(M)
+
+    BAD = ("def f(state):\n"
+           "    a = state if state in ('L0','L1') else 'L0'\n"      # ① 三元兜底
+           "    b = {'L0': 'L0'}.get(state, 'L0')\n"                 # ② get 默认
+           "    c = {'L0': 'L0'}.get(state, '值守中')\n")            # 词形同样要抓
+    GOOD = ("def f(state):\n"
+            "    a = state if state in ('L0','L1') else 'L1'\n"      # 落到「注意」
+            "    b = {'L0': 'L0'}.get(state) or 'L1'\n"             # 无默认
+            "    if state == 'L0':\n"                               # 显式分支不误报
+            "        return 'L0'\n"
+            "    return 'L1'\n")
+    hb = _c2_scan_src(BAD, keys, words)
+    hg = _c2_scan_src(GOOD, keys, words)
+    if len(hb) != 3:
+        _raise("负控失效：坏夹具应命中 3 处（三元＋get＋词形），实际 %d 处" % len(hb))
+    if hg:
+        _raise("负控误报：好夹具不该命中，实际 %d 处 %r" % (len(hg), hg))
+    return "坏夹具命中 3 处（两种形状＋词形），好夹具 0 处（含显式分支不误报）"
 
 
 # ══════════════════════════════════════════════════════════ 真源常量 ══════════

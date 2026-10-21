@@ -1086,6 +1086,12 @@ LOGO_RING_DARKRED = (74, 38, 38)
 LOGO_MODE = {"L0": "L0", "L1": "L1", "L2": "L2", "Ls": "LD", "R0": "R0",
              "dev": "L0"}
 
+#: 映射表里**没有**的状态落在这里（2026-10-22，C2 闭合判据）。
+#: ★ 为什么是「注意」而不是「值守中」：未知值被画成绿色，就是让"我不知道"
+#:   冒充"没事"。方向必须是**具名的不安全**。也不能判红——红要说出后果，
+#:   而这里一个后果都说不出来。注意（L1）正好：它不冒充安全，也不冒充故障。
+LOGO_MODE_FALLBACK = "L1"
+
 #: 画布几何 —— **唯一真源**：`_logo_mark` 的 viewBox 与 `_LOGO_JS` 里的
 #: `CX/CY/R/W_BEAM` 是同一份规格。判据 U-18 拿 `_LOGO_JS` 源码逐项比对，
 #: 任一处漂移即红（否则"页面一套、规格一套"）。
@@ -1275,8 +1281,11 @@ def _logo_mark(state, label="Antinel"):
       `<svg>` 作用域内查询，天然不串。
     ★ viewBox 由 `_logo_viewbox()` 反算（0.50.2），**不写死 1024 画布**
       —— 写死就会在 48px 方框里缩成一半（创始人截图的那条）。
+    ★ 2026-10-22（C2 闭合判据）：旧写法 `LOGO_MODE.get(state, "L0")` 把**表里没有
+      的状态**画成「值守中」—— 一个未知值被静默映射成"没事"。默认分支必须是
+      **具名的不安全**，不是具名的正常。
     """
-    mode = LOGO_MODE.get(state, "L0")
+    mode = LOGO_MODE.get(state) or LOGO_MODE_FALLBACK
     return (
         '<svg class="lgmark" viewBox="%s" data-logo="1" data-mode="%s"'
         ' role="img" aria-label="%s">'

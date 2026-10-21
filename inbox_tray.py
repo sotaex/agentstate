@@ -149,6 +149,27 @@ def shield_state(posture=None):
     }.get(st, SHIELD_UNKNOWN)
 
 
+#: 图标侧的状态映射（2026-10-22，C2 闭合判据）。
+#:
+#: ★ 为什么不能写 `state if state in (...) else "L0"`：那是一个**默认分支把未知值
+#:   画成「值守中」**的形状 —— 一个打错的/未来的/None 的状态，会被渲染成一片绿。
+#:   本仓已经在别处吃过这个形状的亏（`light("banana")` 曾返回 ok）。
+#: ★ 为什么把 `dev` 显式写进来：研发中是**合法**状态，不是"未知"。它沿用基础态
+#:   图标（品牌色在页面上表达）—— 但那是**写下来的决定**，不是被 else 顺手兜住的。
+#:   这一条很重要：如果把未知一律压成「注意」，研发态用户会天天看到黄灯，
+#:   那又是"长期黄＝没守卫"。
+#: ★ 缺省值是「注意」，与 `_shield_icon_suffix` 缺省给 `SHIELD_UNKNOWN` 同一纪律：
+#:   未知 ⇒ 具名的不安全，不冒充正常。
+_ICON_STATE = {"L0": "L0", "L1": "L1", "L2": "L2", "Ls": "Ls", "R0": "R0",
+               "dev": "L0"}
+_ICON_FALLBACK = "L1"
+
+
+def _icon_state(state):
+    """事件态 → 图标基名。未知态**具名**落到「注意」，不许静默落到「值守中」。"""
+    return _ICON_STATE.get(state) or _ICON_FALLBACK
+
+
 def icon_file(state, shield=None, root=None):
     """事件态(+哨兵态) → `.ico` 路径。
 
@@ -158,7 +179,7 @@ def icon_file(state, shield=None, root=None):
       （运行期画 ico 需要编码器，不引依赖）。
     """
     base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icons")
-    s = state if state in ("L0", "L1", "L2", "Ls", "R0") else "L0"
+    s = _icon_state(state)
     if shield and shield in SHIELD_SUFFIX:
         cand = os.path.join(base, "%s%s.ico" % (s, SHIELD_SUFFIX[shield]))
         if os.path.exists(cand):
@@ -167,7 +188,7 @@ def icon_file(state, shield=None, root=None):
 
 
 def icon_path(state, root=None):
-    """五态 → `.ico` 路径（**旧接口，保持兼容**）。未知态 ⇒ 退回 L0。"""
+    """五态 → `.ico` 路径（**旧接口，保持兼容**）。未知态 ⇒ 退回「注意」。"""
     return icon_file(state, None, root)
 
 
@@ -196,9 +217,8 @@ def write_state(state, count=0, tip="", root=None, shield=None, total=None,
     if shield is None:
         shield = shield_state()
     if label is None:
-        label = M.state_label(state if state in ("L0", "L1", "L2", "Ls", "R0")
-                              else "L0")
-    payload = {"state": state if state in ("L0", "L1", "L2", "Ls", "R0") else "L0",
+        label = M.state_label(_icon_state(state))
+    payload = {"state": _icon_state(state),
                "count": int(count), "tip": str(tip)[:200],
                "label": str(label),
                # ★ 分母：这条数来自多少条记录。取不到 ⇒ `None`（**不编 0**，
