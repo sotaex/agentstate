@@ -1340,7 +1340,7 @@ def check_ignore_note(level, note):
     """忽略某级别时是否必须写备注。不满足 ⇒ 抛 NoteRequired。"""
     if level in NOTE_REQUIRED_TO_IGNORE and not (note or "").strip():
         raise NoteRequired(
-            "忽略 %s 级事件必须写一句备注（说明为什么判断无需动作）。" % level
+            "忽略 %s 级记录必须写一句备注（说明为什么判断无需动作）。" % level
         )
 
 

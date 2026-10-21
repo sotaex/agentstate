@@ -125,7 +125,7 @@ INSTRUCTION_DIR_MARKERS = (".cursor/rules",)   # + basename endswith .mdc
 # G-03: embedded fallback, used only when the rules file is unreadable (flat layout).
 _FALLBACK = [
     {"id": "SEC-01",
-     "description_zh": "读取 .env 文件可能泄露 API 密钥与机密配置", "remediation_zh": "把 .env 移出 Agent 可读范围；确需变量时手动复制具体几行；测试夹具路径可在 policy.json 白名单登记", "category": "secrets", "severity": "critical", "apply_to_tools": ["Read", "Bash"],
+     "description_zh": "读取 .env 文件可能泄露 API 密钥与机密配置", "remediation_zh": "把 .env 移出 Agent 可读范围。确需变量时，手动复制具体几行。测试目录可在设置里登记", "category": "secrets", "severity": "critical", "apply_to_tools": ["Read", "Bash"],
      # 0.17.0 (P-B5): excludes kept literally identical to rules/default.json
      # (three separate strings, not a merged alternation) so the suite's
      # fallback-subset assertion can compare them mechanically.
@@ -171,7 +171,7 @@ _FALLBACK = [
     #   与 NET-01 是**同一个缺陷类**：兜底表比主表窄，且没有任何东西会红。
     #   手工比对只发现了 NET-01；是守卫把这一条也抓了出来。
     {"id": "DST-02",
-     "description_zh": "试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件", "remediation_zh": "放行：antinel paths add <目录前缀>（进审计链）；确需更大范围用 antinel roots add <路径>；或把文件写进项目内", "category": "destructive", "severity": "critical",
+     "description_zh": "试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件", "remediation_zh": "放行：antinel paths add <目录前缀>（进审计链）。确需更大范围用 antinel roots add <路径>。或把文件写进项目内", "category": "destructive", "severity": "critical",
      "apply_to_tools": ["Write", "Edit", "Bash"],
      "check": "path_outside_project_root",
      "description": "Agent attempted to write to a file outside the project root directory"},
@@ -202,7 +202,7 @@ _FALLBACK = [
     #   · command_patterns 必须是主表的**子集**（兜底可以更窄，但不得凭空多出模式）。
     # 两者由 `antinel_verify.py --invariants` 断言（无检查项的禁令 ＝ 没有禁令）。
     {"id": "NET-01",
-     "description_zh": "通过 Shell 向白名单外域名发起网络请求", "remediation_zh": "核对目标域名；常用下载源放行：antinel domains add <域名>（进审计链）", "category": "network", "severity": "warning",
+     "description_zh": "通过 Shell 向白名单外域名发起网络请求", "remediation_zh": "核对目标域名。常用下载源放行：antinel domains add <域名>（进审计链）", "category": "network", "severity": "warning",
      "apply_to_tools": ["Bash", "WebFetch", "WebSearch", "MCP"],
      "command_patterns": [r"\b(curl|wget|fetch)\b.*https?://",
                           r"https?://(?!registry\.npmjs\.org|pypi\.org|github\.com)",
@@ -281,7 +281,7 @@ _FALLBACK = [
                           r"(?i)(SogouPY|SogouInput|BaiduPinyin|QQPinyin)[^\n]{0,200}\.(dat|bin|db)\b"],
      "description": "Agent read the input-method user dictionary, which records what the user has typed"},
     {"id": "DST-11",
-     "description_zh": "写进云盘同步目录 —— 同步客户端会自动把它传上云", "remediation_zh": "确需放行：antinel paths add <目录前缀>（进审计链）；否则写进项目内", "category": "destructive", "severity": "critical",
+     "description_zh": "写进云盘同步目录 —— 同步客户端会自动把它传上云", "remediation_zh": "确需放行：antinel paths add <目录前缀>（进审计链）。否则写进项目内", "category": "destructive", "severity": "critical",
      "check": "path_in_cloud_sync_dir",
      "apply_to_tools": ["Write", "Edit", "Bash"],
      "description": "Agent wrote into a cloud-drive sync folder: the sync client will upload the file automatically"},

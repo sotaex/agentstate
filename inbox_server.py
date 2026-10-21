@@ -2023,7 +2023,7 @@ def _group_html(g, token, bucket=None, total=None, posture=None, host_dist=""):
              else (g.get("detail") or "").strip())
     meta = " ｜ ".join(x for x in (
         scene,
-        "最近 %s" % _ts_hm(g["last_ts"]),
+        "最新 %s" % _ts_hm(g["last_ts"]),
         ("最早 %s" % _ts_hm(g["first_ts"])) if n > 1 else "",
         # ★★ 0.53.0（T3.3，设计 §14.3 第 6 条）：**归并行尾部**给工具分布，
         #   **不新增小节** —— 另开一节＝同一页两套计数（「重复即红」）。
@@ -2769,7 +2769,7 @@ def _view_health(rep, token, items=None):
     #   止）。旧版判据的收尾锚是文字「`</div>` 后面跟一个 `<p class="note">`」
     #   —— 那是把尺子绑在**文案**上：删掉下面那句尾注，尺子当场瞎掉。
     #   锚在结构标记上，这一段里加什么减什么都不影响判据。
-    _lorder = ("<div class=\"note sixline\" id=\"lightorder\">灯的五态由重到轻：<br>"
+    _lorder = ("<div class=\"note sixline\" id=\"lightorder\">灯的五个状态由重到轻：<br>"
                + " · ".join("<span class=\"sixit\">%s</span>"
                             % GL.chip(k, text=M.state_short(k)) for k in _order)
                + "</div><!-- lightorder:end -->")
@@ -3259,12 +3259,11 @@ def _exam_export_links(base):
     #   （每次连点都会再起一个 Edge，排在锁后面等）。
     return ("<div class=\"note\">把这份结果存成一份文件"
             "（PDF 要十几秒生成，别重复点）："
-            "<a href=\"/exam-export?e=%s&amp;san=1&amp;fmt=pdf\">PDF（脱敏）</a>"
-            "（用户名已替换，可转给他人）｜"
-            "<a href=\"/exam-export?e=%s&amp;san=0&amp;fmt=pdf\">PDF（完整）</a>"
-            "（含本机路径与用户名，只适合自己留着）｜"
-            "<a href=\"/exam-export?e=%s&amp;san=1\">HTML 原件</a>"
-            "（可逐个核对数字）</div>" % (b, b, b))
+            "<a href=\"/exam-export?e=%s&amp;san=1&amp;fmt=pdf\">PDF（脱敏）</a> ｜ "
+            "<a href=\"/exam-export?e=%s&amp;san=0&amp;fmt=pdf\">PDF（完整）</a> ｜ "
+            "<a href=\"/exam-export?e=%s&amp;san=1\">HTML 原件</a></div>"
+            "<p class=\"note\">脱敏版换掉了用户名，可转给他人。"
+            "完整版含本机路径与用户名，只适合自己留着。</p>" % (b, b, b))
 
 
 #: PDF 打印用的 Edge 候选路径（本机实测只有 Edge；不装 Python PDF 库的理由见

@@ -438,14 +438,14 @@ def reason_of(ev):
     """徽标痕迹 ⇒ 人话 reason（0.53.2）。类型 ⇒ 句子，一处定义不散两处。"""
     t = ev.get("type")
     if t == "logo_mode_missing":
-        return ("哨标规格 modes 缺 %s 态键 —— 已如实回落 L0 帧并在本留痕；"
+        return ("哨标规格 modes 缺 %s 态键 —— 已如实回落 L0 帧并留下记录；"
                 "规格 modes 与 LOGO_MODE 的闭合由闸门判据常驻守"
                 % ev.get("state", "?"))
     if t == "logo_frame_unavailable":
         return ("哨标动效帧不可用（%s）—— 已回落品牌 LOGO 静态图标"
                 % ev.get("reason", "?"))
     if t == "logo_dpi_changed":
-        return ("哨标换屏重算物理尺寸（%s）—— 尺寸与可点区已按新 DPI 重新派生"
+        return ("哨标换屏重算物理尺寸（%s）—— 尺寸与可点区已按新 DPI 重新算过"
                 % ev.get("reason", "?"))
     return "badge logo event: %s" % t
 
@@ -498,7 +498,7 @@ def stale_note(d, stale_after=STALE_AFTER_SEC):
     else:
         when = "%d 秒前" % int(age)
     return ("托盘状态已停止更新（最后一次是%s，超过 %d 秒没刷新）；"
-            "这表示**没人再更新它**，不等于此刻一切正常。"
+            "这表示没人再更新它，不等于此刻一切正常。"
             % (when, stale_after))
 
 

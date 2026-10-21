@@ -49,6 +49,7 @@
 """
 from __future__ import annotations
 
+import ast
 import io
 import json
 import os
@@ -4563,7 +4564,7 @@ def _x6_core(page):
     if {s for _b, s in es} != {"0", "1"}:
         return "导出链接缺一种档位（san=1 脱敏／san=0 完整）"
     txt = PC.body(page)
-    if "用户名已替换" not in txt:
+    if "换掉了用户名" not in txt:
         return "脱敏态没写进可见文字（给错版本要在文字层就能发现）"
     if "只适合自己留着" not in txt:
         return "完整版没警告「含本机路径，别外传」"
@@ -4586,11 +4587,12 @@ def n_x6():
     ② 两个链接指向不同存档 —— 正是 §10.3 说的「静默给错版本」。
     """
     src = _src(_SERVER_REL)
-    a1 = "（用户名已替换，可转给他人）｜"
+    a1 = "脱敏版换掉了用户名，可转给他人。"
     # ★ 2026-10-21：导出行加了 PDF 两个链接后，尾锚从 `% (b, b))` 变成
-    #   `% (b, b, b))` —— 负控锚点必须跟着走（旧锚找不到时本判据会如实报
+    #   `% (b, b, b))`；0.53.5 STE100 批27 又把这行拆成「选项行 ＋ 说明行」，
+    #   尾锚再变一次 —— 负控锚点必须跟着走（旧锚找不到时本判据会如实报
     #   「负控自身失效」，不冒充通过；本轮就是这样被抓到的）。
-    a2 = "\"（可逐个核对数字）</div>\" % (b, b, b))"
+    a2 = "\"完整版含本机路径与用户名，只适合自己留着。</p>\" % (b, b, b))"
     for a in (a1, a2):
         if a not in src:
             return ("变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，"
@@ -4602,8 +4604,9 @@ def n_x6():
     if _x6_core(p1) is True:
         return "负控①失效：脱敏文案被摘掉后 X6 没红"
     # ② 两个链接不同源
-    p2, why = _exam_mut(src.replace(a2, "\"（可逐个核对数字）</div>\" % (b, b + \"-x\", b))"),
-                        "is0490_nx6b")
+    p2, why = _exam_mut(src.replace(
+        a2, "\"完整版含本机路径与用户名，只适合自己留着。</p>\" % (b, b + \"-x\", b))"),
+        "is0490_nx6b")
     if why:
         return why
     if _x6_core(p2) is True:
@@ -6252,6 +6255,902 @@ def n_t11():
     return True
 
 
+
+# ---------------------------------------------------------------------------
+# 批27（0.53.5 STE100 机制层）：U-24 … U-30 ＋ N-U24 … N-U30
+#
+# ★★ 本批**反**本文件惯例（「判据不许二次实现、口径一律 import 产品」）：
+#    本批守的是**文案本身**。词表若取自产品，产品改词 ⇒ 尺子跟着改 ⇒ 假绿。
+#    故族表／扫描面／阈值全部写死在本文件，并由 U-24 自己守「写死」这件事
+#    （写死的可观测证明：这些字面必须能在**本文件源码**里 grep 到）。
+#
+# 立尺子的三根柱子：
+#   ① 簿外命中即红（U-25）—— 想留一句违和文案，必须登记并写清理由；
+#   ② 簿内条目只减不增（U-26）—— 豁免不许靠加簿变绿（狼来了闸）；
+#   ③ 死登记即红（U-25 反向）—— 产品改好一句，簿里那条必须删，不许留着充数。
+#
+# 登记簿四要素（文件／文本／维度／理由）：**文本是键**。产品一改这句，
+# 簿里那条就对不上 ⇒ 尺子当场红 ⇒ 逼人重新过一遍「留还是改」。
+# ---------------------------------------------------------------------------
+
+# ★ 扫描面：A 渠道＝用户每天看到的（网页／气泡／托盘／日报／修法文案）。
+#   终端出口（inbox_cli / host_shield / antinel.py 帮助文本）留第二批 —— S-19
+#   已批准延期；**不许在这里悄悄扩面**（扩面＝把一整批豁免一次吃进来）。
+_STE_PY = ("glossary.py", "inbox_model.py", "inbox_server.py", "inbox_bubble.py",
+           "inbox_tray.py", "inbox_report.py", "inbox_notify.py",
+           "remediation.py")
+_STE_JSON = "rules/default.json"
+_STE_JSON_FIELDS = ("label_zh", "description_zh", "remediation_zh")
+
+# ★ 族表写死（判据不取自产品 —— 理由见批头）
+_STE_REL_TIME = re.compile(r"昨天|今天|明天|今晚|刚才|刚刚|目前|这会儿|顿时|"
+                           r"随后|不久前|之前|此前|日前|前一天")
+_STE_REL_RECENT = re.compile(r"最近(?![ ]*(%[sd]|[一二三四五六七八九十\d]+)"
+                             r"[ ]*(小时|分钟|天|日))")
+_STE_STATE = "失守|值守中|缺粮|拦截|注意"
+_STE_D2A = re.compile(r"(昨天|今天|刚才|刚刚|之前|此前|日前|前一天)"
+                      r"[^，。；]{0,6}(%s)" % _STE_STATE)
+_STE_D2B = re.compile(r"(?<![一二三四五六七八九十])(%s)[ ]*(%%d|\d+)"
+                      % _STE_STATE)
+_STE_HUMOR = ("盯着", "点灯", "歇菜", "搞定", "收拾", "玩意儿", "的事儿",
+              "犯嘀咕", "你忙你的", "太闲", "无聊", "没人来找麻烦", "小打小闹",
+              "熟面孔", "变红", "挂徽标", "亮红灯")
+_STE_UI = ("徽标", "档位", "一档", "几档", "这档", "那档", "每一档", "药丸",
+           "芯片", "顶部条", "主行", "问号芯片", "六态", "五态")
+_STE_ENG = ("口径", "派生", "锚点", "判红", "判绿", "假绿", "假红", "夹具",
+            "变异", "探针", "打桩", "同源", "漂移", "收口", "闭环", "留痕",
+            "归一", "对账", "兜底", "落地", "并进", "哨兵", "分母", "分子")
+_STE_FAMILY = {"拦下": "挡下", "拦住": "挡下", "事件": "记录"}
+_STE_MAXLEN = 42                      # D7：用户可见叙述句上限（剥 HTML 后逐句）
+_STE_SKEL_MAXLEN = 60                 # U-29：吃了豁免的行，行文仍不许超过这个数
+_STE_SENT = re.compile(r"[。！？；]")
+_STE_NEG = re.compile(r"^(不|没|无|非|未)")
+_STE_MARK = re.compile(r"\*\*|`")
+_STE_PH = re.compile(r"%[-# 0]*\d*(?:\.\d+)?[sdif]")
+_STE_PATTERN = re.compile(r"\(\?\:|\(\.[+*]|\[\^|\\b")
+_STE_MIN_REASON = 20                  # 理由不许一句话搪塞
+_STE_BOOK_MAX = 54                    # U-26：狼来了闸（当前簿内 54 条，只减不增）
+_STE_HUMOR_MAX = 2                    # U-30：幽默一句一登记（R-1）
+_STE_DEV_MAX = 13                     # U-29：开发者消息（带 %r）豁免面上限
+_STE_LINK = re.compile(r"<a [^>]*>.*?</a>", re.S)
+
+
+def _ste_visible(s):
+    """剥 HTML 标签 —— 各维度量的是**人读到的字**，不是源码。"""
+    if "<" in s and ">" in s:
+        return re.sub(r"<[^>]+>", " ", s)
+    return s
+
+
+def _ste_is_code(s):
+    """CSS/JS/HTML 整块不是文案，不进尺子。"""
+    if s.lstrip().startswith((":root", "(function", "<script", "<!doctype",
+                              "$w=", "$Error", "<!--")):
+        return True
+    if "\n" in s and re.search(r"(function |var |const |document\.|=>|"
+                               r"addEventListener|querySelector)", s):
+        return True
+    if s.count(";") > 6 and s.count("{") > 2:
+        return True
+    return False
+
+
+def _ste_skeleton(s):
+    """占位符 → 定宽假值：D7 量的是**行文**，长度不由运行值决定。"""
+    return _STE_PH.sub("00", s)
+
+
+def _ste_strings(rel, src):
+    """(定位键, 文本)。键供报错定位；文本供判定与登记。docstring 不是文案。"""
+    out = []
+    if rel == _STE_JSON:
+        for r in json.loads(src)["rules"]:
+            for f in _STE_JSON_FIELDS:
+                v = r.get(f)
+                if isinstance(v, str) and v.strip():
+                    out.append(("%s.%s" % (r.get("id"), f), v.strip()))
+        return out
+    tree = ast.parse(src)
+    doc_ids = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef,
+                             ast.ClassDef)):
+            body = getattr(node, "body", [])
+            if body and isinstance(body[0], ast.Expr) and \
+                    isinstance(body[0].value, ast.Constant) and \
+                    isinstance(body[0].value.value, str):
+                doc_ids.add(id(body[0].value))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if id(node) in doc_ids:
+                continue
+            s = node.value.strip()
+            if re.search(r"[一-鿿]", s) and len(s) >= 3:
+                out.append(("L%d" % node.lineno, s))
+    return out
+
+
+def _ste_is_dev(s):
+    """开发者消息：带 repr 占位符的诊断串（日志/终端），不进可见文案。
+
+    ★ 为什么 `%r` 是可靠的「不上屏」信号：上屏文案必须能读，`%r` 打出来是
+      `repr(...)`（带引号与转义），给用户看就是乱码 —— 所以它只出现在给开发
+      者的诊断串里。豁免面**不是无限**的：条数由 U-29 写死上限守着。
+    """
+    return "%r" in s
+
+
+def _ste_hits(s):
+    """命中维度集合（口径豁免已内置；**未过登记簿** —— 过簿是 U-25 的活）。"""
+    if _ste_is_code(s) or _ste_is_dev(s) or _STE_PATTERN.search(s):
+        return set()
+    vis = _ste_visible(s)
+    dims = set()
+    if _STE_REL_TIME.search(vis) or _STE_REL_RECENT.search(vis):
+        dims.add("D1")
+    if _STE_D2A.search(vis) or _STE_D2B.search(vis):
+        dims.add("D2")
+    if any(w in vis for w in _STE_HUMOR):
+        dims.add("D3")
+    if any(w in vis for w in _STE_UI):
+        dims.add("D4")
+    if any(w in vis for w in _STE_ENG):
+        dims.add("D5")
+    if any(w in vis for w in _STE_FAMILY):
+        dims.add("W")
+    # D7：数据行（≥3 占位符＝一行多个格子）与选项枚举行（≥2 链接）豁免长度；
+    #     豁免**不是无限**的 —— 见 U-29。
+    if len(_STE_PH.findall(s)) < 3 and s.count("<a ") < 2:
+        worst = max((len(f.strip()) for f in _STE_SENT.split(vis)), default=0)
+        if worst > _STE_MAXLEN:
+            dims.add("D7")
+    v = vis.strip()
+    if _STE_NEG.match(v) and len(v) < 30:
+        dims.add("D8")
+    if _STE_MARK.search(vis):
+        dims.add("D10")
+    return dims
+
+
+def _ste_rows_of(rel, src):
+    """扫一份源码 → [(文件, 键, 文本, 维度)]，只留有命中的。"""
+    out = []
+    for key, text in _ste_strings(rel, src):
+        d = _ste_hits(text)
+        if d:
+            out.append((rel, key, text, d))
+    return out
+
+
+def _ste_scan():
+    rows = []
+    for rel in _STE_PY:
+        rows.extend(_ste_rows_of(rel, _src(rel)))
+    rows.extend(_ste_rows_of(_STE_JSON, _src(_STE_JSON)))
+    return rows
+
+
+def _ste_all_strings():
+    rows = []
+    for rel in list(_STE_PY) + [_STE_JSON]:
+        for key, s in _ste_strings(rel, _src(rel)):
+            rows.append((rel, key, s))
+    return rows
+
+
+def _ste_book():
+    return {(f, t): (d, w) for f, t, d, w in _STE_REGISTRY}
+
+
+def _ste_problem(rows=None):
+    """尺子核心：簿外命中即红 ＋ 死登记即红 ＋ 理由过短即红。"""
+    rows = _ste_scan() if rows is None else rows
+    book = _ste_book()
+    hit = {(f, t.strip()) for f, _, t, _ in rows}
+    out = []
+    for f, key, t, d in rows:
+        if (f, t.strip()) not in book:
+            out.append("簿外命中 %s %s［%s］：%s"
+                       % (f, key, "/".join(sorted(d)), _ste_visible(t)[:34]))
+    for k in book:
+        if k not in hit:
+            out.append("死登记（已改好或已改词，该删簿）%s：%s"
+                       % (k[0], _ste_visible(k[1])[:34]))
+        if len(book[k][1]) < _STE_MIN_REASON:
+            out.append("理由过短 %s：%s" % (k[0], _ste_visible(k[1])[:24]))
+    return "；".join(out[:6]) or None
+
+
+def _ste_fallback():
+    """hooks 里内嵌的规则表（规则文件读不到时的兜底）—— 与 json 必须同源。"""
+    src = _src(os.path.join("hooks", "pre_tool_use.py"))
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name) and t.id == "_FALLBACK":
+                    return ast.literal_eval(node.value)
+    return None
+
+_STE_REGISTRY = (
+    (
+     'glossary.py',
+     '按件算，同一件事的几条记录合成一件；分母是最近 24 小时内还没关闭的记录。',
+     'D5',
+     ('S-13 保留（分子分母是小学词汇；0.53.2 T10 轮创始人批准，U97 '
+      '还要求含「分母」—— 此时改它是拿标准推翻拍板）'),
+    ),
+    (
+     'glossary.py',
+     '按条算；分母是最近 24 小时内没造成后果的记录。',
+     'D5',
+     ('S-13 保留（分子分母是小学词汇；0.53.2 T10 轮创始人批准，U97 '
+      '还要求含「分母」—— 此时改它是拿标准推翻拍板）'),
+    ),
+    (
+     'glossary.py',
+     '<b>不是全部历史</b>：记录文件读得到才显示。',
+     'D8',
+     ('术语表定义性否定（R-2 存量豁免：词条的边界字段，「不数什么」正是词条要定义的'
+      '内容；改成肯定句要么变长要么失真，STE100 禁否定开头针对的是操作指令与警告'
+      '，不是词典释义）'),
+    ),
+    (
+     'glossary.py',
+     '<b>不等于你要做的事数</b>；读不到的文件不在内。',
+     'D8',
+     ('术语表定义性否定（R-2 存量豁免：词条的边界字段，「不数什么」正是词条要定义的'
+      '内容；改成肯定句要么变长要么失真，STE100 禁否定开头针对的是操作指令与警告'
+      '，不是词典释义）'),
+    ),
+    (
+     'glossary.py',
+     '按条算；分母是这次读到的全部条目。',
+     'D5',
+     ('S-13 保留（分子分母是小学词汇；0.53.2 T10 轮创始人批准，U97 '
+      '还要求含「分母」—— 此时改它是拿标准推翻拍板）'),
+    ),
+    (
+     'glossary.py',
+     '<b>不是</b>被挡下的操作 —— 那是「拦截 L2」。',
+     'D8',
+     ('术语表定义性否定（R-2 存量豁免：词条的边界字段，「不数什么」正是词条要定义的'
+      '内容；改成肯定句要么变长要么失真，STE100 禁否定开头针对的是操作指令与警告'
+      '，不是词典释义）'),
+    ),
+    (
+     'glossary.py',
+     '不是故障，也不是危险操作 —— 只是粮不够。',
+     'D8',
+     ('术语表定义性否定（R-2 存量豁免：词条的边界字段，「不数什么」正是词条要定义的'
+      '内容；改成肯定句要么变长要么失真，STE100 禁否定开头针对的是操作指令与警告'
+      '，不是词典释义）'),
+    ),
+    (
+     'glossary.py',
+     '<b>不等于</b>防护一直在线 —— 只说明此刻没读到问题。',
+     'D8',
+     ('术语表定义性否定（R-2 存量豁免：词条的边界字段，「不数什么」正是词条要定义的'
+      '内容；改成肯定句要么变长要么失真，STE100 禁否定开头针对的是操作指令与警告'
+      '，不是词典释义）'),
+    ),
+    (
+     'glossary.py',
+     '不计数；换一刻就重看一次。',
+     'D8',
+     ('术语表定义性否定（R-2 存量豁免：词条的边界字段，「不数什么」正是词条要定义的'
+      '内容；改成肯定句要么变长要么失真，STE100 禁否定开头针对的是操作指令与警告'
+      '，不是词典释义）'),
+    ),
+    (
+     'glossary.py',
+     '不是故障，也不是失守 —— 只是版本更新。',
+     'D8',
+     ('术语表定义性否定（R-2 存量豁免：词条的边界字段，「不数什么」正是词条要定义的'
+      '内容；改成肯定句要么变长要么失真，STE100 禁否定开头针对的是操作指令与警告'
+      '，不是词典释义）'),
+    ),
+    (
+     'glossary.py',
+     '不计数；只比两个版本号。',
+     'D8',
+     ('术语表定义性否定（R-2 存量豁免：词条的边界字段，「不数什么」正是词条要定义的'
+      '内容；改成肯定句要么变长要么失真，STE100 禁否定开头针对的是操作指令与警告'
+      '，不是词典释义）'),
+    ),
+    (
+     'glossary.py',
+     ('过去出过事、现在已恢复，灯<b>不会</b>变红。研发中、缺粮<b>不随灯变色</b>，'
+      '只在旁边多一个标记。'),
+     'D3',
+     ('灯 literally 变色（R0 就是红）——「变红」是字面描述不是比喻；S-'
+      '01 定稿文案（族三 23083aa）'),
+    ),
+    (
+     'glossary.py',
+     '不计数；几种情况同时成立时，显示最要紧的那一种。',
+     'D8',
+     ('术语表定义性否定（R-2 存量豁免：词条的边界字段，「不数什么」正是词条要定义的'
+      '内容；改成肯定句要么变长要么失真，STE100 禁否定开头针对的是操作指令与警告'
+      '，不是词典释义）'),
+    ),
+    (
+     'glossary.py',
+     '不计数；它有没有在跑，看顶部那盏灯。',
+     'D8',
+     ('术语表定义性否定（R-2 存量豁免：词条的边界字段，「不数什么」正是词条要定义的'
+      '内容；改成肯定句要么变长要么失真，STE100 禁否定开头针对的是操作指令与警告'
+      '，不是词典释义）'),
+    ),
+    (
+     'glossary.py',
+     '不查你机器上装没装，只说明它怎么工作。',
+     'D8',
+     ('术语表定义性否定（R-2 存量豁免：词条的边界字段，「不数什么」正是词条要定义的'
+      '内容；改成肯定句要么变长要么失真，STE100 禁否定开头针对的是操作指令与警告'
+      '，不是词典释义）'),
+    ),
+    (
+     'glossary.py',
+     '不计数，也不分档。',
+     'D8',
+     ('术语表定义性否定（R-2 存量豁免：词条的边界字段，「不数什么」正是词条要定义的'
+      '内容；改成肯定句要么变长要么失真，STE100 禁否定开头针对的是操作指令与警告'
+      '，不是词典释义）'),
+    ),
+    (
+     'glossary.py',
+     '<b>不是</b>本机扫描结果。',
+     'D8',
+     ('术语表定义性否定（R-2 存量豁免：词条的边界字段，「不数什么」正是词条要定义的'
+      '内容；改成肯定句要么变长要么失真，STE100 禁否定开头针对的是操作指令与警告'
+      '，不是词典释义）'),
+    ),
+    (
+     'glossary.py',
+     '不计数，只列清单。',
+     'D8',
+     ('术语表定义性否定（R-2 存量豁免：词条的边界字段，「不数什么」正是词条要定义的'
+      '内容；改成肯定句要么变长要么失真，STE100 禁否定开头针对的是操作指令与警告'
+      '，不是词典释义）'),
+    ),
+    (
+     'glossary.py',
+     '<b>不是</b>积分，也不是在线时长。',
+     'D8',
+     ('术语表定义性否定（R-2 存量豁免：词条的边界字段，「不数什么」正是词条要定义的'
+      '内容；改成肯定句要么变长要么失真，STE100 禁否定开头针对的是操作指令与警告'
+      '，不是词典释义）'),
+    ),
+    (
+     'glossary.py',
+     '不含没挡住的（那是「失守」）。',
+     'D8',
+     ('术语表定义性否定（R-2 存量豁免：词条的边界字段，「不数什么」正是词条要定义的'
+      '内容；改成肯定句要么变长要么失真，STE100 禁否定开头针对的是操作指令与警告'
+      '，不是词典释义）'),
+    ),
+    (
+     'glossary.py',
+     '不含要你拍板的，那算「失守」。',
+     'D8',
+     ('术语表定义性否定（R-2 存量豁免：词条的边界字段，「不数什么」正是词条要定义的'
+      '内容；改成肯定句要么变长要么失真，STE100 禁否定开头针对的是操作指令与警告'
+      '，不是词典释义）'),
+    ),
+    (
+     'glossary.py',
+     '不是「已被挡下」。',
+     'D8',
+     ('术语表定义性否定（R-2 存量豁免：词条的边界字段，「不数什么」正是词条要定义的'
+      '内容；改成肯定句要么变长要么失真，STE100 禁否定开头针对的是操作指令与警告'
+      '，不是词典释义）'),
+    ),
+    (
+     'glossary.py',
+     '<b>不记你点过几次</b>，只记最后关掉没有。',
+     'D8',
+     ('术语表定义性否定（R-2 存量豁免：词条的边界字段，「不数什么」正是词条要定义的'
+      '内容；改成肯定句要么变长要么失真，STE100 禁否定开头针对的是操作指令与警告'
+      '，不是词典释义）'),
+    ),
+    (
+     'glossary.py',
+     '<b>不等于</b>连续在线天数。',
+     'D8',
+     ('术语表定义性否定（R-2 存量豁免：词条的边界字段，「不数什么」正是词条要定义的'
+      '内容；改成肯定句要么变长要么失真，STE100 禁否定开头针对的是操作指令与警告'
+      '，不是词典释义）'),
+    ),
+    (
+     'glossary.py',
+     '不是安装天数，也不是运行天数。',
+     'D8',
+     ('术语表定义性否定（R-2 存量豁免：词条的边界字段，「不数什么」正是词条要定义的'
+      '内容；改成肯定句要么变长要么失真，STE100 禁否定开头针对的是操作指令与警告'
+      '，不是词典释义）'),
+    ),
+    (
+     'glossary.py',
+     '不计数；按文件逐条核对。',
+     'D8',
+     ('术语表定义性否定（R-2 存量豁免：词条的边界字段，「不数什么」正是词条要定义的'
+      '内容；改成肯定句要么变长要么失真，STE100 禁否定开头针对的是操作指令与警告'
+      '，不是词典释义）'),
+    ),
+    (
+     'glossary.py',
+     '没纳入比对的记录',
+     'D8',
+     ('链卡「没纳入比对的记录」行标签（0.53.4 定稿；T-10 ④b 要求这个词的'
+      '落点跟着缺位走 —— 行在⇒注里不许有，行不在⇒注里必须有）'),
+    ),
+    (
+     'glossary.py',
+     '<b>不算被改过</b>，算进去会误报。',
+     'D8',
+     ('术语表定义性否定（R-2 存量豁免：词条的边界字段，「不数什么」正是词条要定义的'
+      '内容；改成肯定句要么变长要么失真，STE100 禁否定开头针对的是操作指令与警告'
+      '，不是词典释义）'),
+    ),
+    (
+     'inbox_model.py',
+     '最近 %d 小时没出事。监理守着呢，你忙你的',
+     'D3',
+     ('R-1 在册幽默（0.53.3 气质 A 拍板，HUMOR=True；全站唯一一'
+      '句，新增幽默必须过创始人拍板）'),
+    ),
+    (
+     'inbox_model.py',
+     '未启用',
+     'D8',
+     '姿态标签（未启用与值守中同属 L0，差别只在有没有在守；0.53.3 立的标签）',
+    ),
+    (
+     'inbox_server.py',
+     '未知原因',
+     'D8',
+     '状态标签（归因失败时的如实取值，与顶部条同源；它是状态词不是句子，无主谓可改）',
+    ),
+    (
+     'inbox_server.py',
+     '没看到带本次标识的紧急提醒窗',
+     'D8',
+     '紧急提醒窗落位探针的如实报告（没看到窗时的原话）',
+    ),
+    (
+     'inbox_server.py',
+     '没有要补的高度',
+     'D8',
+     '窗口排版内部串（补高度计算用，不进可见文本；探针读它只为定位，不是给人看的句子）',
+    ),
+    (
+     'inbox_server.py',
+     '没指纹的记录没法比对，单独算一类：%s',
+     'D8',
+     ('链卡「没纳入比对」行的说明（T-10 ③ 范围总数＝records＋unchai'
+      'ned＋坏行，这句是 unchained 行的标签）'),
+    ),
+    (
+     'inbox_server.py',
+     '没看到带本次标识（%s）的 Antinel 监理窗口',
+     'D8',
+     '窗口落位探针的如实报告（带本次标识的窗没出现）',
+    ),
+    (
+     'inbox_server.py',
+     '没有 Antinel 监理记录（URL），开不出来',
+     'D8',
+     '开窗失败的原因串（没有 URL 记录时开不出来）',
+    ),
+    (
+     'inbox_server.py',
+     '没有待还原的调整',
+     'D8',
+     '空态提示（它答的是「有没有」；改成肯定句就得凭空说有，与事实相反）',
+    ),
+    (
+     'inbox_server.py',
+     '没有这个页面',
+     'D8',
+     ('404 空态标题（点了不存在的页签时的如实报告；肯定形式要说「有哪个页面」，答非'
+      '所问）'),
+    ),
+    (
+     'inbox_server.py',
+     '未能修复：',
+     'D8',
+     ('修复结果标签（冒号前是结果位，取值是「已修复／未能修复」这一对；改肯定句失败那半'
+      '边说不出）'),
+    ),
+    (
+     'inbox_server.py',
+     '没有可导出的体检结果 —— 先跑一次体检',
+     'D8',
+     ('空态＋下一步（先跑一次体检才有可导出的结果；后半句是动作不是否定，整句不能倒过来'
+      '写）'),
+    ),
+    (
+     'inbox_server.py',
+     '<b>没修好</b>：%s｜此刻仍是：%s',
+     'D8',
+     ('修复结果标签（冒号前是结果位，取值成对；这句还带「此刻仍是」，否定的是上一句不是'
+      '本句）'),
+    ),
+    (
+     'inbox_server.py',
+     '不通过：',
+     'D8',
+     ('自检结果标签（冒号前是结论位，取值是「通过／不通过」这一对；只改一半另一半无处安'
+      '放）'),
+    ),
+    (
+     'inbox_bubble.py',
+     '非 Windows，没有提示音通道',
+     'D8',
+     '声音通道诊断串（非 Windows 时没有提示音通道）',
+    ),
+    (
+     'inbox_bubble.py',
+     '没响：',
+     'D8',
+     ('声音自检诊断串（冒号前是结果位，取值是「响了／没响」这一对；诊断串说事实不说建议'
+      '）'),
+    ),
+    (
+     'inbox_report.py',
+     '未能核验',
+     'D8',
+     ('链校验状态词兜底（页面对 unknown 用告警句，此值供 md/JSON 出口'
+      '）'),
+    ),
+    (
+     'inbox_report.py',
+     '没有可校验的链文件 —— 这是「没查成」，不是「没问题」。',
+     'D8',
+     '空态＋边界（没有可校验的链文件 —— 这是「没查成」，不是「没问题」）',
+    ),
+    (
+     'inbox_report.py',
+     ('- 最近 **%d** 小时：%s %d ｜ %s %d ｜ %s %d（监理被拉起 %'
+      'd 次）'),
+     'D1D10',
+     ('--format md 的格式语法（用户显式要 markdown，星号是该格式的'
+      '语法；出口不过 visible_text 是有意的 —— 过了 md 就不合法）'
+      '；「最近 **%d** 小时」是稳定窗口，星号只是打断了「最近带数字」的正则'),
+    ),
+    (
+     'inbox_report.py',
+     '- 要处理 **%d 件事**（%d 条记录）｜ 看一眼 %d 条 ｜ 归档 %d 条',
+     'D10',
+     ('--format md 的格式语法（用户显式要 markdown，星号是该格式的'
+      '语法；出口不过 visible_text 是有意的 —— 过了 md 就不合法）'),
+    ),
+    (
+     'inbox_report.py',
+     ('- 链校验：**%s**（检查 %d 个文件、%d 条链记录；断链 %d、坏行 %d、未'
+      '链接 %d 条）'),
+     'D10',
+     ('--format md 的格式语法（用户显式要 markdown，星号是该格式的'
+      '语法；出口不过 visible_text 是有意的 —— 过了 md 就不合法）'),
+    ),
+    (
+     'inbox_report.py',
+     '没有被改过',
+     'D8',
+     ('链卡结论词（0.53.4 创始人定稿「没有被改过」—— 状态词不是对问句的回答，'
+      'T-10 ① 正判据要求此形状在场）'),
+    ),
+    (
+     'inbox_notify.py',
+     '非 Windows，无 Toast',
+     'D8',
+     '平台能力诊断串（非 Windows 无 Toast）',
+    ),
+    (
+     'remediation.py',
+     '未归类',
+     'D8',
+     '类别标签（记录归不进任何一类时显示的类别名；它不是句子，没有可改写的肯定形式）',
+    ),
+    (
+     'remediation.py',
+     '不等于',
+     'D8',
+     '代码匹配条件（拿记录里的旧文案「不等于」对型，不上屏）',
+    ),
+    (
+     'rules/default.json',
+     '不要让 Agent 读剪贴板；需要某个值请用户自己粘贴',
+     'D8',
+     '存量修法句（R-2：S-21 只定了长度与工程词两条线，否定开头存量豁免）',
+    ),
+)
+
+def _u24_problem():
+    """族表写死 ＋ 扫描面完整 ＋ 簿里的文件都在扫描面里。"""
+    out = []
+    if len(_STE_PY) < 8 or _STE_JSON != "rules/default.json":
+        out.append("扫描面缩水（%d 个 py／json=%s）" % (len(_STE_PY), _STE_JSON))
+    for nm, floor in (("_STE_HUMOR", 10), ("_STE_UI", 10), ("_STE_ENG", 20)):
+        words = globals().get(nm) or ()
+        if len(words) < floor:
+            out.append("族表 %s 只剩 %d 词（写死的词表被掏空＝改从产品取）"
+                       % (nm, len(words)))
+    # ★ 写死的**可观测证明**：这些字面必须能在本文件源码里查到
+    self_src = _src(os.path.join("ci", "inbox_guards_0490.py"))
+    for w in ("盯着", "徽标", "口径"):
+        if w not in self_src:
+            out.append("族表字面「%s」在本文件里查不到（词表已不是写死的）" % w)
+    scope = set(_STE_PY) | {_STE_JSON}
+    miss = sorted({f for f, _, _, _ in _STE_REGISTRY} - scope)
+    if miss:
+        out.append("簿里的文件不在扫描面内（死登记）%s" % "、".join(miss))
+    return "；".join(out) or None
+
+
+@check("U-24 ★ 族表写死在判据里（不取自产品）＋扫描面完整＋簿内文件都在面内")
+def u24():
+    return _u24_problem()
+
+
+@check("N-U24 负控：扫描面缩水／词表被掏空 ⇒ U-24 必须各自判红")
+def n_u24():
+    if _u24_problem() is not None:
+        return "夹具不成立：现行判据就判红 —— 负控无分辨力"
+    orig_py = globals()["_STE_PY"]
+    try:
+        globals()["_STE_PY"] = tuple(x for x in orig_py
+                                     if x != "inbox_tray.py")
+        if _u24_problem() is None:
+            return "负控失效①：扫描面缩掉托盘仍判绿（面完整性那条腿没分辨力）"
+    finally:
+        globals()["_STE_PY"] = orig_py
+    orig_h = globals()["_STE_HUMOR"]
+    try:
+        globals()["_STE_HUMOR"] = ()
+        if _u24_problem() is None:
+            return "负控失效②：幽默词表清空仍判绿（写死那条腿没分辨力）"
+    finally:
+        globals()["_STE_HUMOR"] = orig_h
+    return True
+
+
+@check("U-25 ★ 十维扫描：簿外命中即红 ＋ 死登记即红 ＋ 理由不许一句话搪塞")
+def u25():
+    return _ste_problem()
+
+
+@check("N-U25 负控：注入一句簿外幽默／把簿里一条改好 ⇒ U-25 必须各自判红")
+def n_u25():
+    rows = _ste_scan()
+    if _ste_problem(rows) is not None:
+        return "夹具不成立：现行树就判红 —— 负控无分辨力"
+    # 面①：往 glossary.py 里注入一句「簿外幽默」（内存变异，磁盘不动）
+    probe = '_STE_PROBE = "监理正盯着你的每一次保存，歇菜了才算完"'
+    dead = _src("glossary.py") + "\n" + probe + "\n"
+    rows2 = _ste_rows_of("glossary.py", dead)
+    if not any("盯着" in r[2] for r in rows2):
+        return "夹具不成立：注入的串没被尺子认出来（扫描器没生效）"
+    if _ste_problem(rows2) is None:
+        return "负控失效①：簿外幽默句仍判绿（簿外命中那条腿没分辨力）"
+    # 面②：产品把簿里某句修好了 ⇒ 那条变死登记，必须红（逼人删簿）
+    f0, t0 = sorted(_ste_book().keys())[0]
+    rows3 = [r for r in rows if not (r[0] == f0 and r[2].strip() == t0)]
+    if len(rows3) == len(rows):
+        return "夹具不成立：摘不掉登记条目 %s" % _ste_visible(t0)[:20]
+    if _ste_problem(rows3) is None:
+        return "负控失效②：死登记仍判绿（只减不增那条腿没分辨力）"
+    return True
+
+
+def _u26_problem():
+    """狼来了闸：条目数只减不增，且不许重复登记（重复＝变相加簿）。"""
+    n = len(_STE_REGISTRY)
+    if n > _STE_BOOK_MAX:
+        return ("登记簿 %d 条 > 上限 %d —— 豁免不许靠加簿变绿；"
+                "要新增必须同时删掉一条并写明理由" % (n, _STE_BOOK_MAX))
+    if len({(f, t) for f, t, _, _ in _STE_REGISTRY}) != n:
+        return "登记簿里有重复条目（同一句登记两遍＝变相加簿）"
+    return None
+
+
+@check("U-26 ★ 狼来了闸：登记簿条目只减不增（≤ %d）且不许重复登记" % _STE_BOOK_MAX)
+def u26():
+    return _u26_problem()
+
+
+@check("N-U26 负控：往簿里加一条 ⇒ U-26 必须红")
+def n_u26():
+    if _u26_problem() is not None:
+        return "夹具不成立：现行簿就判红 —— 负控无分辨力"
+    orig = globals()["_STE_REGISTRY"]
+    try:
+        globals()["_STE_REGISTRY"] = orig + (
+            ("inbox_server.py", "监理先歇菜一下下", "D3",
+             "负控注入：新增幽默未经创始人拍板，必须被狼来了闸挡住"),)
+        if _u26_problem() is None:
+            return "负控失效：簿里加一条仍判绿（狼来了闸没分辨力）"
+    finally:
+        globals()["_STE_REGISTRY"] = orig
+    return True
+
+
+def _u27_problem():
+    """标记豁免只许落在 md 出口 —— 网页侧带 **／反引号，登记了也不豁免。"""
+    out = []
+    for f, t, d, w in _STE_REGISTRY:
+        if "D10" not in d:
+            continue
+        if f != "inbox_report.py" or "md" not in w:
+            out.append("标记豁免越界 %s：%s（只许 --format md 出口带标记）"
+                       % (f, _ste_visible(t)[:30]))
+    return "；".join(out[:6]) or None
+
+
+@check("U-27 ★ 标记豁免只许落在 md 出口：网页侧带 **／反引号一律红")
+def u27():
+    return _u27_problem()
+
+
+@check("N-U27 负控：给网页侧一句带 ** 的文案登记豁免 ⇒ U-27 必须红")
+def n_u27():
+    if _u27_problem() is not None:
+        return "夹具不成立：现行簿就判红 —— 负控无分辨力"
+    orig = globals()["_STE_REGISTRY"]
+    try:
+        globals()["_STE_REGISTRY"] = orig + (
+            ("glossary.py", "这一档**暂未启用**", "D10",
+             "负控注入：网页侧带星号，就算登记也不许豁免"),)
+        if _u27_problem() is None:
+            return "负控失效：网页侧带星号登记了仍判绿（豁免边界那条腿没分辨力）"
+    finally:
+        globals()["_STE_REGISTRY"] = orig
+    return True
+
+
+def _u28_problem():
+    """规则文件与 hook 内嵌兜底表同源（三处中文文案逐条相等）。"""
+    fb = _ste_fallback()
+    if not fb:
+        return "读不到 hooks/pre_tool_use.py 的 _FALLBACK（结构已变，判据要跟着改）"
+    with io.open(os.path.join(ROOT, _STE_JSON), encoding="utf-8") as fh:
+        rules = {r["id"]: r for r in json.load(fh)["rules"]}
+    out = []
+    for r in fb:
+        j = rules.get(r.get("id"))
+        if j is None:
+            continue
+        for f in _STE_JSON_FIELDS:
+            a = (r.get(f) or "").strip()
+            b = (j.get(f) or "").strip()
+            if a and b and a != b:
+                out.append("%s.%s 漂移（json=「%s」｜hook=「%s」）"
+                           % (r["id"], f, b[:22], a[:22]))
+    return "；".join(out[:6]) or None
+
+
+@check("U-28 ★ 规则文件与 hook 内嵌兜底表同源（三处中文文案逐条相等）")
+def u28():
+    return _u28_problem()
+
+
+@check("N-U28 负控：兜底表文案与规则文件差一个字 ⇒ U-28 必须红")
+def n_u28():
+    fb = _ste_fallback()
+    if not fb:
+        return "夹具不成立：读不到 _FALLBACK"
+    if _u28_problem() is not None:
+        return "夹具不成立：现行就判红 —— 负控无分辨力"
+    drift = [dict(r) for r in fb]
+    for r in drift:
+        for f in _STE_JSON_FIELDS:
+            if (r.get(f) or "").strip():
+                r[f] = r[f] + "（负控注入：差一个字）"
+                break
+        if any((r.get(f) or "").endswith("差一个字）") for f in _STE_JSON_FIELDS):
+            break
+    orig = globals()["_ste_fallback"]
+    try:
+        globals()["_ste_fallback"] = lambda: drift
+        if _u28_problem() is None:
+            return "负控失效：兜底表与规则文件差一个字仍判绿（同源那条腿没分辨力）"
+    finally:
+        globals()["_ste_fallback"] = orig
+    return True
+
+
+def _u29_problem(rows):
+    """豁免反滥用（三条腿）：
+
+    ① 吃了 D7 豁免的行（数据行／选项行），**剥掉链接后**的行文仍不许超上限
+       —— 选项行的长度本就该由选项个数决定，不是由行文决定；
+    ② 开发者消息（带 %r）是豁免面，条数写死上限（扩大即红，逼人复核）；
+    ③ 上限本身不许被偷偷抬高（常量与判据同源，见 U-24 的写死证明）。
+    """
+    out = []
+    dev = 0
+    for rel, key, s in rows:
+        if _ste_is_code(s) or _STE_PATTERN.search(s):
+            continue
+        if _ste_is_dev(s):
+            dev += 1
+            continue
+        if len(_STE_PH.findall(s)) < 3 and s.count("<a ") < 2:
+            continue
+        body = _STE_LINK.sub(" ", s)
+        sk = _ste_visible(_ste_skeleton(body))
+        worst = max((len(f.strip()) for f in _STE_SENT.split(sk)), default=0)
+        if worst > _STE_SKEL_MAXLEN:
+            out.append("%s %s 豁免行 %d 字：%s" % (rel, key, worst,
+                                                  _ste_visible(s)[:34]))
+    if dev > _STE_DEV_MAX:
+        out.insert(0, "开发者消息已 %d 条 > 上限 %d（豁免面不许扩大："
+                      "若真有 %r 串要上屏，它就必须进登记簿）"
+                   % (dev, _STE_DEV_MAX))
+    return "；".join(out[:6]) or None
+
+
+@check("U-29 ★ 豁免反滥用：豁免行剥掉链接后行文仍 ≤ %d 字 ＋ 开发者消息上限 %d 条"
+       % (_STE_SKEL_MAXLEN, _STE_DEV_MAX))
+def u29():
+    return _u29_problem(_ste_all_strings())
+
+
+@check("N-U29 负控：把一句超长行文塞进数据行躲尺子 ⇒ U-29 必须红")
+def n_u29():
+    rows = _ste_all_strings()
+    if _u29_problem(rows) is not None:
+        return "夹具不成立：现行树就判红 —— 负控无分辨力"
+    long_one = ("这一档表示监理已经连续值守了整整七天，并且在这七天里一次"
+                "都没有发现任何需要处理的事情，所以顶上那盏灯一直都是绿的"
+                "没有任何变化：%s ｜ %s ｜ %s")
+    if len(_STE_PH.findall(long_one)) < 3:
+        return "夹具不成立：探针串占位符不足，吃不到豁免"
+    if "D7" in _ste_hits(long_one):
+        return "夹具不成立：探针串没吃到 D7 豁免（负控打不到豁免那条缝）"
+    if _u29_problem(rows + [("inbox_server.py", "FAKE", long_one)]) is None:
+        return "负控失效：长行文塞进数据行仍判绿（豁免无限大＝尺子形同虚设）"
+    return True
+
+
+def _u30_problem():
+    """R-1 一句一登记：在册条数有上限，且每条理由必须点明依据。"""
+    hs = [(f, t, w) for f, t, d, w in _STE_REGISTRY if "D3" in d]
+    if len(hs) > _STE_HUMOR_MAX:
+        return ("幽默/口语在册 %d 条 > 上限 %d（R-1 一句一登记，"
+                "新增须创始人拍板）：%s"
+                % (len(hs), _STE_HUMOR_MAX,
+                   "、".join(_ste_visible(t)[:16] for _, t, _ in hs)))
+    for _f, t, w in hs:
+        if "R-1" not in w and "字面" not in w:
+            return "幽默条「%s」的理由没写清依据（须点明 R-1 在册或字面描述）" \
+                % _ste_visible(t)[:30]
+    return None
+
+
+@check("U-30 ★ 幽默一句一登记（R-1）：在册 ≤ %d 条且每条理由须点明依据"
+       % _STE_HUMOR_MAX)
+def u30():
+    return _u30_problem()
+
+
+@check("N-U30 负控：新写一句幽默未过拍板 ⇒ U-30 必须红")
+def n_u30():
+    if _u30_problem() is not None:
+        return "夹具不成立：现行簿就判红 —— 负控无分辨力"
+    orig = globals()["_STE_REGISTRY"]
+    try:
+        globals()["_STE_REGISTRY"] = orig + (
+            ("inbox_server.py", "别慌，这点小打小闹监理帮你摆平", "D3",
+             "负控注入：新写幽默未经创始人拍板，理由里也没写 R-1"),)
+        if _u30_problem() is None:
+            return "负控失效：未过拍板的新幽默仍判绿（一句一登记那条腿没分辨力）"
+    finally:
+        globals()["_STE_REGISTRY"] = orig
+    return True
+
+
+
 def main():
     print("=" * 78)
     print("0.48.5 Antinel 监理细节修订判据（交接件 v1.1 §5.7）—— "
@@ -6294,8 +7193,8 @@ def main():
           "批26 T-10/N-T10/T-11/N-T11（0.53.4 链卡搬家：创始人「这些好像"
           "不属于日报，放在日报里合适吗？」—— 链卡搬到运行状态页，三行各答"
           "一件事（结论／范围／没纳入比对）＋边界注，日报只留一句指路；"
-          "记录本身挂圈问号 `.qinfo` 答「是什么／什么形式／放哪／存什么」，"
-          "T-07/T-08/T-09/U23 的落点同批跟搬）")
+          "T-07/T-08/T-09/U23 的落点同批跟搬）· "
+          "批27 U-24…U-30/N-U24…N-U30（0.53.5 STE100 机制层：族表写死在判据里＋十维扫描簿外命中即红＋狼来了闸（豁免只减不增）＋死登记即红；标记豁免只许落在 md 出口；规则文件与 hook 兜底表同源；豁免反滥用；幽默一句一登记 R-1）")
     print("（变异只在内存，账本与链只落临时目录，不写任何产品文件；"
           "戊2/戊3 视觉项无判据，走 §6.1 截图验收 —— U-13 只含戊2 机械部分）")
     print("=" * 78)

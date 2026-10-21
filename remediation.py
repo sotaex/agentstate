@@ -429,8 +429,8 @@ def attribute(item, posture=None, consequences=None):
                     actions=[
                         _a(ACT_INFO, "装开机自启",
                            hint="在终端执行一次：antinel host-shield enable"
-                                "（需要管理员权限）。"
-                                "装完以后重启也能守。"),
+                                "（需管理员权限）。"
+                                "装完以后，重启也能守。"),
                     ])
 
     if k == "spawn_failed":

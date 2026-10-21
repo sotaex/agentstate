@@ -741,7 +741,7 @@
       ],
       "description": "Agent attempted to write an NTFS alternate data stream (path:stream) -- invisible to dir/ls and carried along by a plain file copy",
       "remediation": "Stored in the file's own stream table, an ADS does not show up in normal listings or in the copy that gets reviewed. Write the bytes as a normal file instead.",
-      "description_zh": "写入 NTFS 备用数据流（path:stream）——dir/ls 看不到，随文件复制一起走，是评审盲区",
+      "description_zh": "写入 NTFS 备用数据流（path:stream）。dir/ls 看不到，随文件复制一起走，是评审盲区",
       "remediation_zh": "ADS 在常规列表中不可见，且复制文件时随行，等于绕开评审；请改写为普通文件以便审查",
       "label_zh": "写入隐形备用数据流"
     },
@@ -769,7 +769,7 @@
       ],
       "description": "Agent attempted to write an NTFS alternate data stream from a shell (redirect / -Stream / copy / open) -- the command-line half of DST-09",
       "remediation": "Same channel as DST-09 reached from a shell; the file written this way survives review. Use a normal file.",
-      "description_zh": "从命令行写入 NTFS 备用数据流（重定向 / -Stream / copy / open 等命令通道）",
+      "description_zh": "从命令行写入 NTFS 备用数据流。重定向 / -Stream / copy / open 等命令通道都能做到。",
       "remediation_zh": "与 DST-09 同一通道的命令行写法，产物同样逃过审查；请改用普通文件",
       "label_zh": "命令行写隐形数据流"
     },

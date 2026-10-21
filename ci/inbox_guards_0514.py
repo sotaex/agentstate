@@ -6059,8 +6059,8 @@ def n_j2():
         return "夹具不成立：现行渲染就判红 —— 负控无分辨力"
     # ① 退回单行 <p> ＋ 剥掉 span（#2 复发形状）
     dead = h.replace(
-        '<div class="note sixline" id="lightorder">灯的五态由重到轻：<br>',
-        '<p class="note">灯的五态由重到轻：')
+        '<div class="note sixline" id="lightorder">灯的五个状态由重到轻：<br>',
+        '<p class="note">灯的五个状态由重到轻：')
     dead = dead.replace(_LO_END, "")
     dead = re.sub(r'<span class="sixit">(.*?)</span>', r"\1", dead, flags=re.S)
     if _light_order_ok(dead) is True:
@@ -6349,9 +6349,12 @@ def n_j6():
         if _five_not_six_problem(h) is not None:
             return "夹具不成立：%s 页本来就有「六态」⇒ 负控无分辨力" % view
         if view == "health":
-            if "灯的五态由重到轻" not in h:
+            if "灯的五个状态由重到轻" not in h:
                 return "负控夹具不成立：摘不到五态行（结构已变）"
-            dead = h.replace("灯的五态由重到轻", "灯的六态由重到轻")
+            # ★ 2026-10-21（STE100 族八 D4）：「五态」是 UI 内部词 ⇒ 产品改成
+            #   「五个状态」；负控的变异方向**仍是把它改回旧缺陷文案「六态」」
+            #   —— J6 的尺子盯的就是「六态」不许上屏，与产品用什么词无关。
+            dead = h.replace("灯的五个状态由重到轻", "灯的六态由重到轻")
             if _five_not_six_problem(dead) is None:
                 return "负控失效：改成「六态」后 J6 仍判绿（尺子没分辨力）"
     return True
@@ -6397,8 +6400,13 @@ def n_j7():
         return "负控前置失败：当前真源就没通过 J7"
     orig = GL.TERMS["Ls"]["one"]
     # ① 词条里删掉这句 ⇒ 必须红
+    # ★★ 2026-10-21（STE100 族八 D4）：「这一档」是 UI 内部词 ⇒ 产品改过两次
+    #   （「这一档」→「它」→「这项」），负控每改一次就得跟着改一次 ⇒ 这是
+    #   「负控夹具写死旧文案字面」第三次复发。**根治：注入串从当前字段值派生**
+    #   —— 按「含『暂未启用』的那一整句」删，改主语不改这个形状。
     try:
-        GL.TERMS["Ls"]["one"] = orig.replace("这一档<b>暂未启用</b>。", "")
+        GL.TERMS["Ls"]["one"] = re.sub(r"[^。]*暂未启用[^。]*。", "", orig,
+                                       count=1)
         if "暂未启用" in re.sub(r"<[^>]+>", "", GL.TERMS["Ls"]["one"]):
             return "负控夹具不成立：替换没生效（%r）" % GL.TERMS["Ls"]["one"]
         if _ls_enabled_problem() is None:
