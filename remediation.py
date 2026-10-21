@@ -309,7 +309,7 @@ def attribute(item, posture=None, consequences=None):
                         actions=[
                             _a(ACT_DROP, "移出监管名单",
                                hint="这个目录从此不受保护，改动不会被发现。"),
-                            _a(ACT_ACCEPT, "就这样放着，我自己盯着",
+                            _a(ACT_ACCEPT, "就这样放着，我自己守着",
                                hint="这个落点持续无人巡检。"),
                             _a(ACT_FIX, "再试一次上锁"),
                         ])
@@ -322,7 +322,7 @@ def attribute(item, posture=None, consequences=None):
                     actions=[
                         _a(ACT_DROP, "移出监管名单",
                            hint="这个目录从此不受保护，改动不会被发现。"),
-                        _a(ACT_ACCEPT, "就这样放着，我自己盯着",
+                        _a(ACT_ACCEPT, "就这样放着，我自己守着",
                            hint="这个落点持续无人巡检。"),
                         _a(ACT_FIX, "再试一次上锁"),
                     ])

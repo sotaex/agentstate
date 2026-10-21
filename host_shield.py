@@ -3432,21 +3432,21 @@ def _outage_consequences(state, pkg_root=None):
         try:
             if float(exp) < now:
                 cons.append({"kind": "window_open", "text":
-                             "放行窗已到期却没关：%s（本该由监理关上，此刻门还开着）" % p})
+                             "放行窗到期了还没关：%s —— 门还开着" % p})
         except (TypeError, ValueError):
             cons.append({"kind": "window_open", "text":
-                         "放行窗记录读不出到期时间：%s（读不出 ⇒ 按最坏算）" % p})
+                         "放行窗的到期时间读不出来：%s —— 读不出就按最坏算" % p})
     # ② 安全区：有区，但此刻没人上锁
     zs = state.get("zones") or []
     if zs:
         cons.append({"kind": "zone_unlocked", "text":
-                     "有 %d 个安全区，此刻没人给它们上锁：%s"
+                     "有 %d 个安全区还没上锁：%s"
                      % (len(zs), "、".join(str(z) for z in zs[:3]))})
     # ③ 受监管工作区：用户已经裁决过 ⇒ 门闸有在管的对象
     ws = state.get("workspaces") or {}
     if ws:
         cons.append({"kind": "workspace_unwatched", "text":
-                     "有 %d 个受监管工作区，此刻没人看着它们" % len(ws)})
+                     "有 %d 个受监管工作区现在没人看着" % len(ws)})
     # ④ 受监管落点：登记表 watch + findings —— 本产品的核心职能就是盯这些落点。
     try:
         root = pkg_root or os.path.dirname(os.path.abspath(__file__))
@@ -3471,13 +3471,21 @@ def _outage_consequences(state, pkg_root=None):
 
         cands, evid = _scan()
         if cands:
+            # ★ 2026-10-21 文案重写（创始人截图「让人紧张又没法操作」）：
+            #   ① 去掉「此刻没人巡检（监理在时会一直守着它们、有写入就报）」——
+            #      括号里那句是**机制说明**（哨兵平时怎么干活），用户不需要读实现；
+            #   ② 旧尾巴「其中 N 个相对上次记录有变动」是**含糊的真话** ——
+            #      "相对上次记录"是内部记账口径。它要说的是更要紧的事：
+            #      **没人看着的时候有过写入**。这是真证据（`_has_write_evidence`），
+            #      说清楚不吓人，含糊才吓人。
             cons.append({"kind": "landing_unwatched", "text":
-                         "有 %d 个受监管落点，此刻没人巡检（监理在时会一直盯着它们、"
-                         "有写入就报）%s"
-                         % (len(cands), ("；其中 %d 个相对上次记录有变动" % evid) if evid else "")})
+                         "有 %d 个受监管落点现在没人守着%s"
+                         % (len(cands),
+                            ("；其中 %d 个在没人看着的时候有过写入" % evid)
+                            if evid else "")})
     except Exception as e:                                   # noqa: BLE001
         cons.append({"kind": "landing_unknown", "text":
-                     "查不出受监管落点清单（%s）——这是**盲区**，不能当作「没有」"
+                     "受监管落点清单查不出来（%s）—— 查不出不等于没有，按有处理"
                      % type(e).__name__})
     return cons
 
