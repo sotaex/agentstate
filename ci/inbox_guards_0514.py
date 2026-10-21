@@ -2881,6 +2881,173 @@ def n_b17():
     return True
 
 
+# ═══════════════════════════════════════════════════════════ B-18 气泡通道健康可见面 ══
+#: 病（已知问题总账 §3.4，2026-10-21 立项；创始人 2026-10-22 拍板施工）：
+#: 紧急提醒四种「为什么没弹」（级别闸／配置闸／可见性闸／节流闸）只活在
+#: **当次 tick 的返回 dict** 里 —— 不落盘、不上屏 ⇒ 用户眼见一件 R0 躺在
+#: 收件箱里，事后没有任何可见面回答"该弹没弹"是通道坏了、还是本来就不该弹。
+#: 修法（0.53.6）：`inbox_bubble.bubble_health()` **派生**三件长期事实
+#: （配置闸／守护进程在跑吗／跑的哪版代码），收件箱页顶上一行 `.note`
+#: 显示。节流与可见性闸是**当次**事实，刻意不表（表了就是假承诺）。
+#: 判据三条腿：
+#:   c_b18  行为腿：六种注入态各自说各自的话；`ok` 只给"开着＋在跑＋有戳一致"；
+#:           没有版本戳（含戳里没那个键）⇒ **不许说健康**（0.53.2 假绿教训，
+#:           与 `inbox_cli._runtime_lines` 同口径）；差异文案必带**两边版本号**
+#:           （只说"旧代码"等于把人推回猜 —— FLO-16 同款纪律）。
+#:   c_b18b 渲染腿：页面**真的**显示那行（哨兵文本），且 `root` 透传
+#:           （参数在签名里 ≠ 默认路径会用 —— 透传断了，健康行读的就是
+#:           另一个中枢，而那正是"时红时绿"的温床）。
+#:   N-B18  负控：三个变异各打一条腿（恒说健康／把"没在跑"说成"在跑"／
+#:           页面不接那行）⇒ 必须各自红。
+#: ★ 注入纪律：三个真源（`BB.cfg_bubble_on`／`DM.daemon_alive`／
+#:   `DM.read_daemon_stamp`）全部走 `_Patch` 内存替换，**不写任何产品文件**；
+#:   `version_drift` 不注入（用真的 —— 差异判定全仓只有一处，注了它这条
+#:   腿就变成自证）。
+_B18_SENTINEL = "B18-SENTINEL-健康行"
+
+
+def _b18_health(hub, on=True, alive=True, stamp="cur", cur=None):
+    """换掉三个真源跑一次 `bubble_health`（全注入，不碰真实中枢）。
+
+    `stamp`：`"cur"`＝戳与仓里同版／`"old"`＝戳是旧版／`None`＝没有戳／
+    `"nokey"`＝戳在但里面没有 `code_version` 键（0.53.0 及更早的形状）。
+    """
+    def _stamp():
+        if stamp == "cur":
+            return {"pid": 4242, "code_version": cur}
+        if stamp == "old":
+            return {"pid": 4242, "code_version": "0.0.1-b18"}
+        if stamp is None:
+            return None
+        return {"pid": 4242}                                  # "nokey"
+
+    with _Patch(BB, cfg_bubble_on=lambda cfg=None, root=None: (on, "")), \
+         _Patch(DM, daemon_alive=lambda root=None:
+                (alive, 4242 if alive else None)), \
+         _Patch(DM, read_daemon_stamp=lambda root=None: _stamp()):
+        return BB.bubble_health(root=hub)
+
+
+@check("B-18 气泡通道健康：六态各自说各自的话，ok 只给开着＋在跑＋有戳一致")
+def c_b18():
+    hub = tempfile.mkdtemp(prefix="g0514_b18_")
+    cur = SV.code_identity().get("version")
+    if not cur:
+        return ("SKIP: 取不到仓里版本号（code_identity 读不到）—— "
+                "夹具不成立，不判绿")
+    seen = []
+
+    def _chk(name, r, want_ok, *must):
+        seen.append((name, r))
+        if bool(r["ok"]) != want_ok:
+            return ("%s：ok=%s（应 %s）文案 %r"
+                    % (name, r["ok"], want_ok, r["text"]))
+        for w in must:
+            if w not in r["text"]:
+                return "%s：文案缺 %r —— %r" % (name, w, r["text"])
+        return None
+
+    for name, r, want_ok, must in (
+            ("配置关", _b18_health(hub, on=False, stamp=None),
+             False, ("配置", "不会弹窗")),
+            ("守护进程没在跑", _b18_health(hub, alive=False, stamp=None),
+             False, ("没在跑", "不会弹窗")),
+            ("健康", _b18_health(hub, stamp="cur", cur=cur),
+             True, ("在跑",)),
+            ("旧版本戳", _b18_health(hub, stamp="old", cur=cur),
+             False, ("旧代码",)),
+            ("在跑但没戳", _b18_health(hub, stamp=None),
+             False, ("没有版本戳",)),
+            ("戳里没版本键", _b18_health(hub, stamp="nokey", cur=cur),
+             False, ("没有版本戳",)),
+    ):
+        why = _chk(name, r, want_ok, *must)
+        if why:
+            return why
+    # 差异文案必带**两边**版本号（只说"旧代码"＝把人推回猜，FLO-16 同款纪律）
+    old_txt = seen[3][1]["text"]
+    for v in ("0.0.1-b18", cur):
+        if v not in old_txt:
+            return "旧版本戳态文案缺版本号 %r：%r" % (v, old_txt)
+    # STE100 预算网（品质性机制，折算见 T4-07）：单句 ≤40 字
+    for name, r in seen:
+        for s in r["text"].replace("！", "。").split("。"):
+            if s and len(s) > 40:
+                return "%s 态文案超预算（单句 %d 字）：%r" % (name, len(s), r["text"])
+    _note("六态全部分辨正确；差异文案含两边版本号；单句均 ≤40 字")
+    return True
+
+
+@check("B-18b 收件箱页真的显示通道健康行，且 root 透传（派生，不许硬编码）")
+def c_b18b(mod=None):
+    mod = mod or SV
+    hub = tempfile.mkdtemp(prefix="g0514_b18b_")
+    seen = {}
+
+    def _fake(root=None):
+        seen["root"] = root
+        return {"ok": True, "text": _B18_SENTINEL}
+
+    with _Patch(BB, bubble_health=_fake):
+        page = mod.render_page(view="inbox", filt=M.BUCKET_ACTION, root=hub,
+                               token="T", items=[],
+                               posture={"state": "guarding", "can_fix": False})
+    if _B18_SENTINEL not in PC.body(page):
+        return ("收件箱页没有显示通道健康行（可见面没接上 —— "
+                "四种『为什么没弹』仍然只活在 tick 返回里）")
+    if seen.get("root") != hub:
+        return ("root 没透传给 bubble_health（拿到 %r，应 %r）—— "
+                "健康行读的会是另一个中枢" % (seen.get("root"), hub))
+    return True
+
+
+@check("N-B18 负控：恒说健康／把没在跑说成在跑／页面不接那行 ⇒ 各自必须红")
+def n_b18():
+    cur = SV.code_identity().get("version")
+    if not cur:
+        return "SKIP: 取不到仓里版本号 —— 夹具不成立，不判绿"
+    # 前置：两条正判据都绿（否则负控无分辨力）
+    if c_b18() is not True:
+        return "夹具不成立：现行实现下 B-18 就判红 —— 负控无分辨力"
+    if c_b18b() is not True:
+        return "夹具不成立：现行实现下 B-18b 就判红 —— 负控无分辨力"
+    # 变异①：bubble_health 恒说健康 ⇒ 行为腿必须在「配置关」态判红
+    with _Patch(BB, bubble_health=lambda root=None: {
+            "ok": True, "text": "紧急提醒：开着的，守护进程在跑。"}):
+        if c_b18() is True:
+            return ("负控失效①：恒说健康时行为腿仍绿 —— "
+                    "它测的不是状态，是函数存在")
+    # 变异②：把「没在跑」说成「在跑」（elif not alive ⇒ elif False）
+    base = inspect.getsource(BB.bubble_health)
+    mut = base.replace("elif not alive:", "elif False:")
+    if mut == base:
+        return ("夹具不成立：变异锚点未命中（源码已变，需更新负控）—— "
+                "负控自身失效，不算通过")
+    ns = dict(BB.__dict__)
+    exec(compile(mut, "<n-b18:alive>", "exec"), ns)                   # noqa: S102
+    with _Patch(BB, bubble_health=ns["bubble_health"]):
+        if c_b18() is True:
+            return ("负控失效②：守护进程没在跑却被说成'在跑'时行为腿仍绿 —— "
+                    "这正是总账 §3.4 要防的假话")
+    # 变异③：页面不接那行（删掉 _view_inbox 里的健康行）⇒ 渲染腿必须红
+    src = _src(_SERVER_REL)
+    anchor = ('            + ("<div class=\\"note\\" style=\\"margin:0 0 8px\\">%s</div>"\n'
+              '               % _esc(BB.bubble_health(root=root)["text"]))\n')
+    if anchor not in src:
+        return ("夹具不成立：渲染锚点未命中（源码已变，需更新负控）—— "
+                "负控自身失效，不算通过")
+    import types
+    mod = types.ModuleType("is0514_b18_mut")
+    mod.__file__ = os.path.join(ROOT, _SERVER_REL)
+    sys.modules["is0514_b18_mut"] = mod
+    exec(compile(src.replace(anchor, "", 1), mod.__file__, "exec"),   # noqa: S102
+         mod.__dict__)
+    if c_b18b(mod=mod) is True:
+        return ("负控失效③：页面不显示健康行时渲染腿仍绿 —— "
+                "可见面这条腿没有分辨力")
+    return True
+
+
 # ════════════════════════════════════════════════════════════ FLO-01…05 ══
 #: logo.ps1 里的动法表必须与规格 v1.2 同值（它是 Python 侧状态机的
 #: PowerShell 孪生；两处各写一份 ⇒ 迟早漂，这条就是防漂的）。
@@ -4883,8 +5050,12 @@ def n_flo16():
     return True
 
 
-@check("N-FLO16b 负控：差异文案被塞回 ** ⇒ 星号腿必须报红")
-def n_flo16b():
+# ★★ 2026-10-22 改号（铁律 9：编号唯一，含函数名）：本条 0.53.5 落笔时
+#   占了 `N-FLO16b` —— 与 0.53.2 那条「删掉差异检查」负控**同号**，且两条
+#   函数都叫 `n_flo16b`（后定义的把先定义的模块名覆盖掉）。同族新判据
+#   先查撞号再落笔，本轮补纠 ⇒ 移到空闲号 `N-FLO16e`（函数同步改名）。
+@check("N-FLO16e 负控：差异文案被塞回 ** ⇒ 星号腿必须报红")
+def n_flo16e():
     import inbox_server as SV
     real = SV.version_drift
     cur = {"version": "0.53.2", "mtime": 1.0, "file": "inbox_server.py"}
@@ -8129,6 +8300,8 @@ def main(argv=None):
     print("＋ FLO-15a…e 五态一致性（0.53.2 T5：媒体字节／键闭包／姿态灯源／不塌缩／同源）")
     print("＋ FLO-16a…d 长驻进程版本自检（0.53.2 T3：跑的是哪版 vs 仓里哪版／只读／无戳≠一致／修法命令须真实存在）")
     print("＋ B-17a…b 关窗确认消失（0.53.2：投出去了≠没了／陈旧冒泡死灰复燃）")
+    print("＋ B-18/B-18b 气泡通道健康可见面（0.53.6：总账 §3.4 —— "
+          "「为什么没弹」不再只活在 tick 返回里）")
     print("＋ J1–J5「五条违和」同类可抓（原 0518，2026-10-16 按 A2/P5 并入）")
     print("（负控全部内存/临时目录变异，不写任何产品文件；node 缺失 ⇒ SKIP，不假绿）")
     if only:

@@ -460,3 +460,57 @@ def cfg_bubble_on(cfg=None, root=None):
     if not bool(cfg.get("bubble", True)):
         return False, "配置里关掉了紧急提醒（bubble=false）"
     return True, ""
+
+
+# ---------------------------------------------------------------- 通道健康 ----
+def bubble_health(root=None):
+    """紧急提醒通道健康（0.53.6 B-18）：**派生**，不新增任何状态文件。
+
+    ★★ 为什么要有它（已知问题总账 §3.4）：四种「为什么没弹」只活在当次
+       tick 的返回里（级别闸／配置闸／可见性闸／节流闸），事后查不出来
+       ⇒ 用户眼看一件 R0 躺在收件箱里，没处判断"该弹没弹"是通道坏了、
+       还是本来就不该弹。本函数把**长期成立的三件事**合成一句可见的话：
+       配置开着吗／守护进程在跑吗／它跑的是哪版代码。
+       （节流与可见性闸是**当次**事实，不在此表 —— 表了就是假承诺。）
+
+    ★ 四个事实各自只有一个来源（不许二次实现）：
+      · 配置闸 ⇒ `cfg_bubble_on`（本模块唯一实现）；
+      · 守护进程 ⇒ `inbox_daemon.daemon_alive`（0.48.5 B1 单例那套）；
+      · 跑的哪版 ⇒ `inbox_daemon.read_daemon_stamp` ＋
+        `inbox_server.version_drift`（差异判定**全仓只有一处**，这里只排版）；
+      · 当前版本 ⇒ `inbox_server.code_identity`。
+
+    ★ 口径与 CLI 自检行（`inbox_cli._runtime_lines`）逐字对齐：
+      **没有版本戳 ⇒ 不许说一致**（0.53.2 假绿教训）⇒ `ok` 只在
+      "开着 ＋ 在跑 ＋ 有戳且一致" 时为真；测不出 ⇒ `ok=False` ——
+      宁可不说健康，不许假装健康（铁律 1：测不出 ⇒ SKIP，绝不报 PASS）。
+    ★ 守护进程不在跑时 `drift` 恒为 `None`：`run_daemon` 退出只删 pid、
+      不删戳，「没跑着」不是「版本不一致」（version_drift 同款纪律）。
+
+    返回 dict：`on`（配置闸）／`alive`／`pid`／`stamp`／`code`（仓里版本）／
+    `drift`（差异人话 or None）／`ok`／`text`（一句人话，STE100 一句一事）。
+    """
+    import inbox_daemon as DM
+    import inbox_server as SV
+    on, _why_off = cfg_bubble_on(root=root)
+    alive, pid = DM.daemon_alive(root)
+    stamp = DM.read_daemon_stamp(root)
+    cur = SV.code_identity()
+    rv = stamp.get("code_version") if isinstance(stamp, dict) else None
+    cv = cur.get("version")
+    drift = SV.version_drift(stamp, current=cur) if alive else None
+    if not on:
+        text = "紧急提醒：配置里关掉了，不会弹窗。"
+    elif not alive:
+        text = "紧急提醒：开着的，但守护进程没在跑，不会弹窗。"
+    elif not rv:
+        text = ("紧急提醒：守护进程在跑，但没有版本戳。"
+                "重启它，才会用上新代码。")
+    elif drift:
+        text = ("紧急提醒：守护进程跑的是旧代码（%s，本机 %s）。"
+                "重启它，才会用上新代码。" % (rv, cv or "？"))
+    else:
+        text = "紧急提醒：开着的，守护进程在跑。"
+    return {"on": bool(on), "alive": bool(alive), "pid": pid,
+            "stamp": stamp, "code": cv, "drift": drift,
+            "ok": bool(on and alive and rv and not drift), "text": text}

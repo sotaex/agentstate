@@ -2079,7 +2079,7 @@ def _rem_panel_only(it, token, posture=None):
     return full[i:j].replace("<div class=\"body\">", "<div class=\"rem\">", 1)
 
 
-def _view_inbox(items, token, filt, now=None, posture=None):
+def _view_inbox(items, token, filt, now=None, posture=None, root=None):
     """收件箱。★ 三档（要处理 / 看一眼 / 归档），窗口默认 24 小时。
 
     ★★ 0.53.0 T4：`posture` 缺省就地现探（**不许把 None 往下传**）——
@@ -2099,6 +2099,9 @@ def _view_inbox(items, token, filt, now=None, posture=None):
     b = M.counts_by_bucket(items, now=now)
     n_all = len(items)
     posture = posture or posture_now()
+    # ★ 0.53.6（B-18）：延迟 import（本文件对 inbox_bubble 一律函数内导入 ——
+    #   inbox_daemon 在模块层就 import 它，模块层再互相 import 会成环）。
+    import inbox_bubble as BB
 
     def f(v, label, n, tip, unit):
         # ★ 0.37.2：四个数字**单位不同**（要处理＝件事，其余＝条记录），
@@ -2140,6 +2143,17 @@ def _view_inbox(items, token, filt, now=None, posture=None):
             #   分母与单位下沉到每 tab 可见单位 ＋「？」词条口径行（U-03/U-08 守）。
             + ("<div class=\"note\" style=\"margin:0 0 8px\">%s</div>"
                % _esc(M.reading_note()))
+            # ★★ 0.53.6（B-18，已知问题总账 §3.4）：紧急提醒通道健康**派生行**。
+            #   四种「为什么没弹」只活在当次 tick 的返回里（级别闸／配置闸／
+            #   可见性闸／节流闸），事后查不出来 ⇒ 这一行把**长期成立的
+            #   三件事**（配置开着吗／守护进程在跑吗／跑的哪版代码）摆在
+            #   收件箱页顶上，用户眼见一件 R0 躺在列表里时，有个地方可查。
+            #   样式走 `.note`（与口径行同族：弱化、不抢戏）；**不带「？」芯片**
+            #   （U-04 数的是 `class="term mk"` 落点，加了就破那张网）。
+            #   `root` 由 `render_page` 透传（缺省 None ⇒ 读真机中枢，
+            #   与 `posture_now()` 等同款既有形态）。
+            + ("<div class=\"note\" style=\"margin:0 0 8px\">%s</div>"
+               % _esc(BB.bubble_health(root=root)["text"]))
             # ★★ 0.50.4（Q-25 ＋ Q-11，2026-10-15 品质扫描，创始人点头）：
             #   原先这里挂了一整块折叠入口「页面上的词都是什么意思（点开看）」，
             #   **本版删掉**。三条理由，都可复核：
@@ -3742,7 +3756,8 @@ def render_page(view="inbox", filt=None, root=None, token="", items=None, rep=No
         #   态势门控走 `posture is None` 那条兜底路径 ⇒ 值守中照样渲染
         #   「现在重新拉起」。判据 W-SPK10 只注入姿态跑，走不到这条路 ⇒ 假绿。
         #   ⇒ 传 `p`：**一个事实一个变量**，页面从头到尾同一份态势。
-        body = _view_inbox(items, token, filt, now=now, posture=p)
+        #   ★ 0.53.6（B-18）：`root` 一并透传 —— 通道健康行要读同一个中枢。
+        body = _view_inbox(items, token, filt, now=now, posture=p, root=root)
     if notice:
         body = ('<div class="notice" role="status"><b>操作回执：</b>%s</div>'
                 % _esc(str(notice)[:800])) + body
