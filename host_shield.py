@@ -2197,7 +2197,7 @@ def is_dev_build():
         if _never:
             # ★ 方向往严的一边偏：哪怕**其余**问题确实是迭代产物
             #   （改登记表 + 改代码同时发生），也不能拿"我在写代码"把"投毒"一起吞掉。
-            return False, ("%s（触发器成立），但自检里有 %d 条**不是代码迭代产物**（%s）"
+            return False, ("%s（触发器成立），但自检里有 %d 条不是代码迭代产物（%s）"
                            " ⇒ 不按研发态处理，按可能被改过报"
                            % (_trigger, len(_never), _never[0]))
         return True, ("%s ⇒ 这一版还没发出去；"
@@ -2365,14 +2365,14 @@ def self_check():
             problems.append(
                 "%s 在研发树专属保护名单里，却没登记进 manifest"
                 "（研发态治理登记簿可被改而查不出；修法："
-                "`python _tools_034/_resign_manifest.py --adopt-dev`）" % rel)
+                "python _tools_034/_resign_manifest.py --adopt-dev）" % rel)
             continue
         lv = file_digest(p, rel)
         if mh and lv and mh != lv:
             problems.append(
                 "%s 与 manifest 不符（冻结区登记簿可能被改——伪造退休"
-                "记录也逃不过这层哈希；修法：`python _tools_034/"
-                "_resign_manifest.py`）" % rel)
+                "记录也逃不过这层哈希；修法：python _tools_034/"
+                "_resign_manifest.py）" % rel)
     res = (not problems), problems
     _SELF_CHECK_CACHE["fp"] = _fp
     _SELF_CHECK_CACHE["res"] = res
@@ -4247,7 +4247,7 @@ def _lock_pending_tree(base, lock_dirs, state, audit_dir, now,
                        reason=(("发现未拦的外传落盘点（有写入证据），已上锁：%s" % target) if _ok
                                else ("发现未拦的外传落盘点，但【上锁未生效】：%s —— 本目录 ACL"
                                      "未能限制写入（常见于 OWNER RIGHTS 类 ACE）；"
-                                     "**不等于**有进程在对抗门闸" % target)))
+                                     "不等于有进程在对抗门闸" % target)))
             elif _cnt == CONTEST_TIMES:
                 record(audit_dir, "host_shield_contested", decision="deny",
                        severity="critical",

@@ -2691,10 +2691,11 @@ def _view_health(rep, token, items=None):
                 _who += " 等 %d 种" % len(_dist)
         else:
             _who = ""
-        _host_value = ("近 7 天 %d 条记录里，%d 条认得出是哪个工具%s（%s），"
-                       "%d 条说不清（%d%%）；线索取工具自己报的环境信息。"
+        _host_value = ("近 7 天 %d 条记录里，%d 条认得出是哪个工具%s，"
+                       "%d 条说不清（%d%%）。"
+                       "线索取工具自己报的环境信息（%s）。"
                        % (_hs["total"], _hs["attributed"], _who,
-                          "、".join(_conf), _hs["unclear"], _pct))
+                          _hs["unclear"], _pct, "、".join(_conf)))
         if _hs["unclear_ratio"] > 0.05:
             _host_value += "说不清偏多——多半是记录太旧，或换过工具。"
             _host_css = "warn"
@@ -2985,8 +2986,8 @@ _EXAM_LOCK = threading.Lock()
 #: 三态原文（设计 §21.3 写死，不许临场编；负控 N-H10 守互斥）
 _EXAM_FIRST = "首次体检，还没有对比基线。"
 _EXAM_FAILED = "这次没查成：0 个地方被检查——结果不算数。"
-_EXAM_NO_TOOLS = ("这台电脑上没找到 AI 工具。这可能是好事，也可能是监理没找到"
-                  "——可以跑 <code>antinel host-scan</code> 再看一次。")
+_EXAM_NO_TOOLS = ("这台电脑上没找到 AI 工具。这可能是好事，也可能是监理没找到。"
+                  "可以跑 <code>antinel host-scan</code> 复查。")
 #: 首启引导条（设计 §21.2 接触点 2，逐字）
 _EXAM_GUIDE = "这是第一次打开监理。先做一次体检吧——它只读，不会改任何东西。"
 #: 边界声明（设计 §20.2）：前四行＝ui_server TPL 原文（控制台版逐字保留），
@@ -4556,8 +4557,8 @@ def _place_if_needed(placer=None, tries=24, interval=0.35, run_id=None,
             print("[place] 未能对齐到 %dx%d @(%d,%d)：%s"
                   % (rect[2], rect[3], rect[0], rect[1], last),
                   file=sys.stderr)
-            print("[place] Antinel 监理面板**仍在屏幕上**，没有被关掉"
-                  "（它就是面板，由你决定关不关）。",
+            print("[place] Antinel 监理面板仍在屏幕上，没有被关掉。"
+                  "它就是面板，由你决定关不关。",
                   file=sys.stderr)
         return False
 
@@ -5035,7 +5036,7 @@ def open_console(url, opener=None, placer=None, token=None, verbose=True):
                 try:
                     _n = WIN.close_console_windows()
                     if _n and verbose:
-                        print("[open_console] 已收掉 %d 个上次的 Antinel 监理窗口"
+                        print("[open_console] 已收掉 %d 个上次的 Antinel 监理窗口。"
                               "（服务重启后没人喂它们的残留窗口）" % _n,
                               file=sys.stderr)
                 except Exception as e:                      # noqa: BLE001
@@ -5046,7 +5047,7 @@ def open_console(url, opener=None, placer=None, token=None, verbose=True):
                     _gone, _left = WIN.wait_console_windows_gone()
                     if not _gone:
                         print("[open_console] 警告：仍有 %d 个旧窗口没消失，"
-                              "继续开新窗（落位会覆盖全部匹配窗口）" % _left,
+                              "继续开新窗。落位会覆盖全部匹配窗口" % _left,
                               file=sys.stderr)
             # ── 步骤 3：开窗 ──
             if opener is not None:
@@ -5243,7 +5244,9 @@ def version_drift(running, current=None):
     _fix = _restart_hint(running)[1]
     if not rv:
         # ★ 行首调用方已经写了进程名 ⇒ 这里用「它」衔接，不重复「监理服务跑的是」
-        return ("它跑的是**没有版本戳的旧进程**（0.53.0 及更早），仓里是 %s。"
+        # ★ 0.53.5（STE100 族六）：文案是**纯文本出口**（daemon status 直接
+        #   上终端），源头就不写 markdown 加粗 —— 去星号不能只靠读侧。
+        return ("它跑的是没有版本戳的旧进程（0.53.0 及更早），仓里是 %s。"
                 "旧进程不会用新代码 —— %s" % (cv or "?", _fix))
     if rv != cv:
         return ("它跑的是 %s，仓里是 %s —— 旧进程不会用新代码。%s"
@@ -5270,17 +5273,17 @@ def _restart_hint(rec, pid=None):
     """
     keys = set(rec or {})
     if "port" in keys or "url" in keys:
-        return ("监理服务", "重启一次即可：`antinel inbox window`")
+        return ("监理服务", "重启一次即可：antinel inbox window")
     _pid = pid if pid is not None else (
         rec.get("pid") if isinstance(rec, dict) else None)
     # ★ 顺序不可交换：`run_daemon` 是**单例**（`daemon_alive` 为真就返回
     #   `already-running` 直接退出）⇒ 不先结束旧的，跑 `daemon` 是空操作，
     #   用户会以为重启过了。所以文案把顺序写死：**先结束 → 再拉**。
     return ("守护进程",
-            "它是常驻进程，**没有**内建重启命令（`inbox window` 只重启监理服务，"
+            "它是常驻进程，没有内建重启命令（inbox window 只重启监理服务，"
             "不动它）。换血两步，顺序不能反：① 先在任务管理器结束 %s；"
-            "② 再开一个终端跑 `antinel inbox daemon --supervise`"
-            "（不先结束旧的，这一步会因单例直接退出、什么都不做）"
+            "② 再开一个终端跑 antinel inbox daemon --supervise。"
+            "不先结束旧的，这一步会因单例直接退出、什么都不做"
             % (("pid %s" % _pid) if _pid else "这个进程"))
 
 

@@ -123,7 +123,8 @@ def cmd_show(a):
         print("  规则：%s ｜ 命中：%s" % (it.rule_id, M.visible_text(it.snippet)))
     print("  时间：%s" % it.ts)
     if it.chain_ref:
-        print("  链上位置：%s（可用 `antinel verify` 核）" % it.chain_ref)
+        # ★ 0.53.5（STE100 族六）：反引号是 markdown 标记，终端上没有渲染它的人
+        print("  链上位置：%s（可用 antinel verify 核）" % it.chain_ref)
     if it.note:
         print("  备注：%s" % it.note)
     return 0
@@ -261,9 +262,9 @@ def cmd_window(a):
     d_alive, _d_pid, _d_started, d_why = SV.ensure_daemon(root=_root)
     if not d_alive:
         print("[window] ⚠ 守护进程没起来（%s）—— 窗口只能由本次调用直接开，"
-              "**活不过本命令**。" % d_why, file=sys.stderr)
+              "活不过本命令。" % d_why, file=sys.stderr)
         print("[window]     现在能用，但命令行一退/一刷新可能就没了；要常驻请先"
-              "解决守护进程（`antinel inbox daemon`），再点一次。",
+              "解决守护进程（antinel inbox daemon），再点一次。",
               file=sys.stderr)
     rec, started = SV.ensure_console(root=_root)
     if not rec or not rec.get("url"):
@@ -290,13 +291,13 @@ def cmd_window(a):
         print("[window] 已就位：%dx%d @(%d,%d)（开窗方式：%s）"
               % (w[2], w[3], w[0], w[1], rep.get("opened")))
     else:
-        print("[window] ⚠ 窗口开出来了（%s），但**没能就位**：%s"
+        print("[window] ⚠ 窗口开出来了（%s），但没能就位：%s"
               % (rep.get("opened"), rep.get("why")), file=sys.stderr)
         if rep.get("got"):
             print("[window]     实测 %s ／ 目标 %s"
                   % (rep["got"], rep.get("want")), file=sys.stderr)
-        print("[window]     面板**仍在屏幕上，没有被关掉** —— 位置不对由你决定"
-              "（可手动拖，或重跑一次 `antinel inbox window`）。",
+        print("[window]     面板仍在屏幕上，没有被关掉 —— 位置不对由你决定"
+              "（可手动拖，或重跑一次 antinel inbox window）。",
               file=sys.stderr)
     return 0
 
@@ -333,7 +334,10 @@ def _runtime_lines(name, running, alive, why_alive, pid=None):
         return lines
     drift = SV.version_drift(running)
     if drift:
-        lines.append("%s：⚠ %s" % (name, drift))
+        # ★ 0.53.5（STE100 族六）：出口再过一遍 visible_text —— 改写侧已从
+        #   源头不写 markdown，读侧免疫兜住旧版本写的 `**`／机器腔
+        #   （0.43.0 口径：网页与命令行共用一份，不能只治一半）。
+        lines.append("%s：⚠ %s" % (name, M.visible_text(drift)))
         return lines
     if not isinstance(running, dict) or not running.get("code_version"):
         # ★ 在跑、但看不出跑的是哪版 ⇒ **不许说一致**（测不出 ⇒ 不许报合格）
@@ -341,7 +345,7 @@ def _runtime_lines(name, running, alive, why_alive, pid=None):
         #     分辨进程，这里两种记录都可能是空 ⇒ 显式把 pid 传进去，
         #     不许为了让判据跑通就丢掉人话里最有用的那个号码。
         _p = ("（pid %s）" % pid) if pid else ""
-        lines.append("%s%s：⚠ 在跑，但**没有版本戳** —— 看不出跑的是哪版代码，"
+        lines.append("%s%s：⚠ 在跑，但没有版本戳 —— 看不出跑的是哪版代码，"
                      "按旧进程处理（0.53.0 及更早从不写戳）。%s"
                      % (name, _p,
                         SV._restart_hint(running if isinstance(running, dict) else {},
@@ -374,7 +378,11 @@ def _daemon_status(a):
     lines.extend(_runtime_lines("监理服务", c_rec, c_alive, c_why or "",
                                 pid=(c_rec or {}).get("pid")))
     for ln in lines:
-        print(ln)
+        # ★ 0.53.5（STE100 族六 S-18）：**最终出口**过 visible_text ——
+        #   0.41.0 网页裸星号→0.42.0 治网页→0.43.0 收进 visible_text，
+        #   0.53.2 新写的 daemon status 又是裸 print。改写侧治源头、
+        #   读侧免疫兜旧记录与未来新增，两边都得有。
+        print(M.visible_text(ln))
     # 退出码：有差异 ⇒ 1（可被脚本消费）；否则 0。**不许把差异吞成 0**。
     return 1 if any("⚠" in ln for ln in lines) else 0
 
@@ -405,9 +413,9 @@ def cmd_daemon(a):
     _pos = getattr(a, "status", None)
     if _pos is not None:
         if str(_pos).strip().lower() != "status":
-            print("不认识这个用法：`antinel inbox daemon %s`。\n"
-                  "  可选：`antinel inbox daemon`（前台启动守护进程）／"
-                  "`antinel inbox daemon --supervise`（启动并监督监理服务）／"
+            print("不认识这个用法：antinel inbox daemon %s。\n"
+                  "  可选：antinel inbox daemon（前台启动守护进程）／"
+                  "antinel inbox daemon --supervise（启动并监督监理服务）／"
                   "`antinel inbox daemon status`（只看跑的是哪版）"
                   % _pos, file=sys.stderr)
             return 2
@@ -423,7 +431,7 @@ def cmd_daemon(a):
     #   判据 0372 S20 现在真调这条分支。）
     alive, pid = DM.daemon_alive()
     if alive and pid != os.getpid():
-        print("Antinel 监理守护进程**已经在跑**了（pid %s）—— 本次不重复启动。" % pid)
+        print("Antinel 监理守护进程已经在跑了（pid %s）—— 本次不重复启动。" % pid)
         return 0
     print("Antinel 监理守护进程已启动（每 %.1f 秒一轮%s）。Ctrl+C 停。"
           % (a.interval, "；顺带监督 Antinel 监理服务" if sup else ""))

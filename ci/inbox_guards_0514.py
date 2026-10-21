@@ -4857,6 +4857,15 @@ def c_flo16():
     if SV.version_drift(None, current=cur) is not None:
         return ("没有运行时记录却报差异 —— 『没跑着』不是『版本不一致』，"
                 "这样每次空闲都会报一次狼来了")
+    # ④ 0.53.5（STE100 族六）：出口文案不许带 markdown 标记 —— 这条线
+    #    经 daemon status 直接裸上终端，「去星号只治一半」第三次复发就
+    #    复发在这里（网页治过、CLI 这条线没治）。
+    for _m, _tag in ((msg, "有版本戳的差异"), (msg2, "缺戳的差异")):
+        for _bad in ("**", "`"):
+            if _bad in _m:
+                return ("差异文案带 markdown 标记 %r（%s）：%r —— "
+                        "源头不写 markdown、出口才睡得着"
+                        % (_bad, _tag, _m))
     return True
 
 
@@ -4871,6 +4880,28 @@ def n_flo16():
     if SV.version_drift(None, current=cur) is not None:
         return ("负控失效：根本没在跑却报版本差异 —— "
                 "空闲时天天报黄，真差异来了就没人看")
+    return True
+
+
+@check("N-FLO16b 负控：差异文案被塞回 ** ⇒ 星号腿必须报红")
+def n_flo16b():
+    import inbox_server as SV
+    real = SV.version_drift
+    cur = {"version": "0.53.2", "mtime": 1.0, "file": "inbox_server.py"}
+
+    def mutant(running, current=None):
+        m = real(running, current=current)
+        return m.replace("没有版本戳的旧进程", "**没有版本戳的旧进程**") if m else m
+
+    try:
+        SV.version_drift = mutant
+        r = c_flo16()
+    finally:
+        SV.version_drift = real
+    if r is True:
+        return ("负控失效：差异文案带 ** 时星号腿没红 —— "
+                "markdown 裸上终端会整条漏过去（0.41.0→0.42.0→0.43.0 的"
+                "『只治一半』第四次就从这里开口）")
     return True
 
 

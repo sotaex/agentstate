@@ -119,11 +119,11 @@ def what_got_through(detail=""):
         st = HS.load_state()
         cons = HS._outage_consequences(st)
     except Exception as e:                                       # noqa: BLE001
-        return ("查不到当前有哪些受监管对象（%s）——因此**不能**说"
+        return ("查不到当前有哪些受监管对象（%s）——因此不能说"
                 "「没有放过东西」。" % e, 0)
     if not cons:
-        return ("监理此刻没有受监管对象（无放行窗/安全区/受监管工作区/受监管落点），"
-                "所以这段时间**不可能**放过任何东西。", 0)
+        return ("监理此刻没有受监管对象（无放行窗、安全区、受监管工作区、受监管落点）。"
+                "所以这段时间不可能放过任何东西。", 0)
     # ★ 0.37.2 fix：旧版这里**以冒号结尾、却不给清单** ——
     #   页面上渲染成「…期间发生的改动 不会被发现 ：」然后什么都没有
     #   （实测截图：一句话悬在半空）。冒号是"下面要列东西"的承诺，
@@ -131,7 +131,7 @@ def what_got_through(detail=""):
     #   注意：这段会过 `glossary.render()`（只放行 `<b>/<code>`），
     #   所以用「；」分隔，不写 `<br>`/`<ul>`（那会被转义成一串标签文本）。
     names = [(c.get("text") if isinstance(c, dict) else str(c)) for c in cons]
-    return ("这些受监管对象此刻**无人巡检**，期间发生的改动**不会被发现**：%s"
+    return ("这些受监管对象此刻无人巡检，期间发生的改动不会被发现：%s"
             % "；".join(names), len(cons), )
 
 
@@ -429,7 +429,8 @@ def attribute(item, posture=None, consequences=None):
                     actions=[
                         _a(ACT_INFO, "装开机自启",
                            hint="在终端执行一次：antinel host-shield enable"
-                                "（需要管理员权限）。装完以后重启也能守。"),
+                                "（需要管理员权限）。"
+                                "装完以后重启也能守。"),
                     ])
 
     if k == "spawn_failed":

@@ -51,7 +51,7 @@
       "description": "Agent attempted to read a .env file which may contain API keys and secrets",
       "remediation": "Remove .env from agent-readable scope or add to deny list. Use environment variable injection instead.",
       "description_zh": "读取 .env 文件可能泄露 API 密钥与机密配置",
-      "remediation_zh": "把 .env 移出 Agent 可读范围；确需变量时手动复制具体几行；测试夹具路径可在 policy.json 白名单登记",
+      "remediation_zh": "把 .env 移出 Agent 可读范围。确需变量时，手动复制具体几行。测试目录可在设置里登记",
       "label_zh": "读取密钥配置文件"
     },
     {
@@ -205,7 +205,7 @@
       "description": "Agent made an external network request via shell command to a non-whitelisted domain",
       "remediation": "Pin downloads to whitelisted registries (npmjs/pypi/github) or review the destination.",
       "description_zh": "通过 Shell 向白名单外域名发起网络请求",
-      "remediation_zh": "核对目标域名；常用下载源放行：antinel domains add <域名>（进审计链）",
+      "remediation_zh": "核对目标域名。常用下载源放行：antinel domains add <域名>（进审计链）",
       "label_zh": "访问白名单外的域名"
     },
     {
@@ -355,7 +355,7 @@
       "description": "Agent attempted to write to a file outside the project root directory",
       "remediation": "Allow: run `antinel paths add <prefix>` (audited) or `antinel roots add <dir>`; or keep agent writes inside the project.",
       "description_zh": "试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件",
-      "remediation_zh": "放行：antinel paths add <目录前缀>（进审计链）；确需更大范围用 antinel roots add <路径>；或把文件写进项目内",
+      "remediation_zh": "放行：antinel paths add <目录前缀>（进审计链）。确需更大范围用 antinel roots add <路径>。或把文件写进项目内",
       "command_patterns": [
         "\\btar\\b[^\\n]{0,120}-C\\s+/(?:\\s|$)",
         "\\btar\\b[^\\n]{0,120}\\s-C\\s+/(?:etc|usr|bin|sbin|var|lib|boot|srv|opt|home|root)(?:\\s|$)"
@@ -955,7 +955,7 @@
       "description": "Agent wrote into a cloud-drive sync folder: the sync client will upload the file automatically",
       "remediation": "Allow deliberately with `antinel paths add <prefix>` (audited), or write inside the project.",
       "description_zh": "写进云盘同步目录 —— 同步客户端会自动把它传上云",
-      "remediation_zh": "确需放行：antinel paths add <目录前缀>（进审计链）；否则写进项目内",
+      "remediation_zh": "确需放行：antinel paths add <目录前缀>（进审计链）。否则写进项目内",
       "note": "0.29.0 G-8：新增 check `path_in_cloud_sync_dir`（在同步目录内 **且** 在项目外）。★ 为什么必须带'项目外'：项目本身放在 OneDrive 是常见配置，只看目录名会把全部正常写入都拦掉 —— 那正是「会误报的检查器用两次就没人信了」。",
       "label_zh": "写进云盘同步目录"
     },
@@ -1016,7 +1016,7 @@
       "description": "MCP configuration file written/modified -- verify the new server's source, command and url (malicious MCP servers are an active 2025-2026 supply-chain channel)",
       "remediation": "Verify the new server's source, command and url; remove any you do not recognize and rotate the related credentials.",
       "description_zh": "MCP 配置文件被写入或修改",
-      "remediation_zh": "核对新增 server 的来源与 command/url；不认识的一律移除并轮换相关凭据",
+      "remediation_zh": "核对新增 server 的来源。不认识的一律移除，并轮换相关凭据",
       "note": "0.32.1：content_patterns 收紧为 Bash **写形态**（重定向/tee/cp/mv + 配置文件名）——旧版 `cat .mcp.json`（纯读取）也会命中，属于误报；读取可见性由 MCP-02（Read 通道）承担。",
       "label_zh": "MCP 配置被改动"
     },
@@ -1131,7 +1131,7 @@
       "description": "Agent read a canary file -- if its marker (CANARY-*) appears in any external channel, that proves exfiltration of project content",
       "remediation": "Record and observe: reading a canary is not itself a leak -- the marker appearing in an external channel is the evidence (see the canaries count in `report`).",
       "description_zh": "Agent 读取了诱饵文件",
-      "remediation_zh": "记录并观察：诱饵文件被读取本身不是泄露，标记出现在外部通道才是证据（report 的 canaries 统计）",
+      "remediation_zh": "记录并观察：诱饵文件被读取本身不是泄露。标记出现在外部通道才是证据（日报的诱饵文件统计）",
       "note": "0.31.0 F3：**故意只 alert 不拦** —— 拦下就观察不到外传链路；输出中出现 CANARY 标记由 post_tool_use 的 canaries_observed 既有机制接管。",
       "content_patterns": [
         "\\.canary[\\\\/]CANARY-"

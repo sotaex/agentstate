@@ -314,9 +314,9 @@ def _logo_spec_missing_event(root, err, seen=None):
            "type": "logo_spec_missing", "tool": "-",
            "session": "inbox-tray", "host": "generic",
            "decision": "allow", "severity": "warning",
-           "reason": ("托盘写状态时拿不到漂浮哨标动效规格 —— tray.json 已写 "
-                      "logo_missing 失败标记，哨标回落品牌 LOGO 静态图标"
-                      "（不假装会动）"),
+           "reason": ("托盘写状态时拿不到漂浮哨标动效规格。"
+                      "tray.json 已写 logo_missing 标记，哨标回落静态图标。"
+                      "不假装会动。"),
            "error": "" if err is None else
                     ("%s: %s" % (type(err).__name__, err))[:200]}
     _chain_record(root, rec)
