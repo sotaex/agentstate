@@ -171,6 +171,155 @@ def n_c2():
     return "坏夹具命中 3 处（两种形状＋词形），好夹具 0 处（含显式分支不误报）"
 
 
+# ══════════════════════════════════════════════ C3 吞咽登记（2026-10-22）═════
+# 「吞掉」不是错，**没人写下吞掉之后世界变成什么样**才是错。
+# 三条腿，缺一条整条判据就是摆设：
+#   ① 未登记即红 —— 新加一个 `except: pass` 必须有人回答"失败了我当什么"；
+#   ② 死登记即红 —— 代码改好了，簿里那条必须删（否则簿会变成"历史欠账展览"）；
+#   ③ 面不许无声扩大 —— 不在 SCOPE 里的模块必须在 TODO 里挂账。
+# 簿本体在 ci/_c3_swallow_ledger.py（键、策略、逐条后果都在那里）。
+
+
+def _c3_key(func, ordinal, exc, body_src):
+    """与 `ci/_c3_swallow_ledger.py` 头部写明的构造逐字一致。"""
+    import hashlib as _hl
+    raw = (exc + "\x00" + body_src).encode("utf-8")
+    return "%s::%d::%s" % (func, ordinal, _hl.sha1(raw).hexdigest()[:6])
+
+
+def _c3_sites(src):
+    """返回 [(key, lineno, func)]：本段源码里所有**吞掉**型异常处理点。
+
+    「吞掉」＝处理体只有**一条**语句，且是 `pass` / `continue` / `return <默认值>`。
+    处理体有两条以上的不在本判据范围内（那是"做了点什么"，需要人读，机器判不了）——
+    这条边界如实写在登记簿头部，不许假装覆盖。
+    """
+    import ast as _ast
+    try:
+        tree = _ast.parse(src)
+    except SyntaxError:
+        _raise("C3 扫描面里有解析不了的源码 —— 判据不能靠猜")
+    lines = src.splitlines()
+    out = []
+    counter = {}
+
+    def walk(node, func):
+        for ch in _ast.iter_child_nodes(node):
+            nm = ch.name if isinstance(ch, (_ast.FunctionDef, _ast.AsyncFunctionDef)) else func
+            if isinstance(ch, _ast.ExceptHandler):
+                counter[nm] = counter.get(nm, 0) + 1
+                bd = "\n".join(l.strip() for l in
+                               lines[ch.body[0].lineno - 1: ch.body[-1].end_lineno])
+                et = _ast.unparse(ch.type) if ch.type is not None else "*"
+                one = len(ch.body) == 1
+                swallow = one and isinstance(ch.body[0], (_ast.Pass, _ast.Continue))
+                ret0 = (one and isinstance(ch.body[0], _ast.Return)
+                        and (ch.body[0].value is None
+                             or (isinstance(ch.body[0].value, _ast.Constant)
+                                 and ch.body[0].value.value in (None, False, 0, ""))))
+                if swallow or ret0:
+                    out.append((_c3_key(nm, counter[nm] - 1, et, bd), ch.lineno, nm))
+            walk(ch, nm)
+
+    walk(tree, "<module>")
+    return out
+
+
+def _c3_ledger():
+    import importlib.util as _iu
+    fp = os.path.join(ROOT, "ci", "_c3_swallow_ledger.py")
+    if not os.path.exists(fp):
+        _raise("登记簿不见了：ci/_c3_swallow_ledger.py")
+    spec = _iu.spec_from_file_location("_c3_ledger", fp)
+    mod = _iu.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _c3_audit(sources, ledger_keys):
+    """(未登记, 死登记)。sources = [(名字, 源码)]。纯函数，负控直接喂。"""
+    found = {}
+    for name, src in sources:
+        for key, ln, fn in _c3_sites(src):
+            found[key] = "%s:%d %s" % (name, ln, fn)
+    unreg = ["%s（%s）" % (k, found[k]) for k in found if k not in ledger_keys]
+    dead = [k for k in ledger_keys if k not in found]
+    return unreg, dead
+
+
+def _c3_sources(mods=None):
+    L = _c3_ledger()
+    names = list(L.SCOPE) if mods is None else list(mods)
+    out = []
+    for nm in names:
+        fp = os.path.join(ROOT, nm)
+        if not os.path.exists(fp):
+            _raise("SCOPE 里的模块不存在：%s ⇒ 扫描面在缩水" % nm)
+        out.append((nm, io.open(fp, encoding="utf-8", errors="ignore").read()))
+    return out
+
+
+@check("C3 吞咽登记：未登记即红 ＋ 死登记即红 ＋ 面不许无声扩大")
+def c3():
+    L = _c3_ledger()
+    srcs = _c3_sources()
+    unreg, dead = _c3_audit(srcs, set(L.LEDGER))
+    if unreg:
+        _raise("%d 处吞掉没有登记（谁都得回答'它失败时我当什么'）：%s"
+               % (len(unreg), "；".join(unreg[:5])))
+    if dead:
+        _raise("%d 条死在簿里（代码已改，登记必须跟着删）：%s"
+               % (len(dead), "；".join(dead[:5])))
+    # 面不许无声扩大：py-modules 里每个含"吞掉"的模块，必须在 SCOPE 或 TODO 里
+    import ast as _ast
+    missing = []
+    for fp in _c2_surface():
+        nm = os.path.basename(fp)
+        if nm in L.SCOPE or nm in L.TODO:
+            continue
+        try:
+            if _c3_sites(io.open(fp, encoding="utf-8", errors="ignore").read()):
+                missing.append(nm)
+        except AssertionError:
+            missing.append(nm + "（解析失败）")
+    if missing:
+        _raise("这些模块有吞掉、却既不在 SCOPE 也不在 TODO（不许无声漏掉）：%s"
+               % "、".join(missing))
+    n_sites = sum(len(_c3_sites(src)) for _nm, src in srcs)
+    return ("登记 %d 条 / 实测 %d 处，无未登记、无死登记；TODO 挂账 %d 个模块"
+            % (len(L.LEDGER), n_sites, len(L.TODO)))
+
+
+@check("N-C3 负控：新加一处吞掉必红、簿里留一条死登记必红")
+def n_c3():
+    L = _c3_ledger()
+    srcs = _c3_sources()
+    keys = set(L.LEDGER)
+
+    # ① 未登记腿：在真源码末尾追加一个没人登记过的 `except: pass`
+    inj = srcs[0][1] + ("\n\ndef _probe_c3_unregistered():\n"
+                        "    try:\n        pass\n"
+                        "    except Exception:\n        pass\n")
+    unreg, dead = _c3_audit([(srcs[0][0], inj)], keys)
+    if len(unreg) != 1 or dead:
+        _raise("负控①失效：注入一处未登记吞掉，应得 1 未登记 0 死登记，实际 %d/%d"
+               % (len(unreg), len(dead)))
+
+    # ② 死登记腿：簿里多出一条代码里根本不存在的键 ⇒ 必须报死登记
+    #    （注意：删掉一条登记是"未登记"腿，不是"死登记"腿 —— 我第一次写反了，
+    #      负控当场把我抓出来。两条腿各打各的变异，才叫各打各的。）
+    unreg2, dead2 = _c3_audit(srcs, keys | {"__probe_c3__::0::ffffff"})
+    if unreg2 or len(dead2) != 1:
+        _raise("负控②失效：多一条不存在的登记应得 0 未登记 1 死登记，实际 %d/%d"
+               % (len(unreg2), len(dead2)))
+
+    # ③ 干净样本必须全绿（否则判据只会天天红）
+    unreg3, dead3 = _c3_audit(srcs, keys)
+    if unreg3 or dead3:
+        _raise("负控③失效：现行树本该全绿，实际 未登记%d 死登记%d" % (len(unreg3), len(dead3)))
+    return "注入一处未登记 ⇒ 1 红；多一条假登记 ⇒ 1 红；现行树 ⇒ 0/0"
+
+
 # ══════════════════════════════════════════════════════════ 真源常量 ══════════
 #: ★ 六态，**逐字**（创始人：LOGO 五态 ＋ 开发态）。判据自己写死一份，
 #:   **故意不 import `inbox_model` 取它** —— 若两边都取自同一个常量，

@@ -3111,6 +3111,18 @@ def _elapsed_ok(seconds):
     return seconds is not None and seconds >= 0
 
 
+def _clock_skewed(*elapsed):
+    """任一「已过时长」为负 ⇒ 时钟被改过（墙钟回拨 / 记录时刻在未来）。
+
+    ★ 2026-10-22 新增（BL-02）。**唯一实现**：`guard_posture` 与
+      `_ensure_alive_locked` 两处都走它 —— 同一条判断两份 copy 必然漂移，
+      而这两处漂移的后果分别是「假绿」与「误杀活进程」。
+    ★ 为什么单独成函数：负控要能把它替换掉，才能证明这条判据是**承重**的。
+      写死在 if 里的判断没法被变异，也就没法证明它有用。
+    """
+    return any(v is not None and v < 0 for v in elapsed)
+
+
 def _sentinel_uptime(st):
     """哨兵已活多久（秒）——读它自己登记的 `sentinel_started_at`；读不到返 None。
 
@@ -3315,8 +3327,7 @@ def _ensure_alive_locked(pkg_root, cause="manual"):
             #   ⇒ 单列一支：记一条、**不动进程**。
             #     为什么既不判 alive 也不判死：判 alive 是假绿；判死会杀掉用户的
             #     活进程（本仓明令"宁可漏杀不可误杀"）。
-            if ((age is not None and age < 0)
-                    or (started_age is not None and started_age < 0)):
+            if _clock_skewed(age, started_age):
                 record(audit_dir, "host_shield_breach", decision="deny", severity="warning",
                        reason="系统时钟被改过：监理登记的启动时刻比机器时间还晚，"
                               "算不出它在岗多久。没有动它，请先校准机器时间再判断。")
@@ -3620,8 +3631,7 @@ def guard_posture(pkg_root=None):
         ok_self, problems = self_check()
         # ★★ 2026-10-22 修 BL-02：旧写法两处都用 `v <= _STALE_AFTER` —— 负数天然满足
         #   ⇒ 时钟被回拨时判"新鲜" ⇒ 实测直接返回「值守中」。改成先问 `_elapsed_ok`。
-        _skewed = ((age is not None and age < 0)
-                   or (uptime is not None and uptime < 0))
+        _skewed = _clock_skewed(age, uptime)
         fresh = ((_elapsed_ok(age) and age <= _STALE_AFTER)
                  or (age is None and _elapsed_ok(uptime) and uptime <= _STALE_AFTER))
         ev = {"armed": True, "sentinel_alive": alive,

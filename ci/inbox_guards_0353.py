@@ -2032,12 +2032,19 @@ def c_startup_autostart_prefers_windowless():
 
 
 def n_startup_autostart_prefers_windowless():
-    """负控：把两个分支**顺序反过来**（`.cmd` 在前）⇒ 判据必须红。"""
+    """负控：把两个分支**顺序反过来**（`.cmd` 在前）⇒ 判据必须红。
+
+    ★ 2026-10-22 修夹具：旧夹具把赋值目标写成 `st`，而解析器只认
+      `autostart = "startup-…"`（`_autostart_branch_order` 里 `t.id != "autostart"`）
+      ⇒ 两边都对不上，负控报"脚手架失效"而不是"顺序反了"。
+      这类**夹具与尺子对不上**的负控最危险：它永远绿——因为它测的根本不是那条规则。
+      （本条是 main() 接上负控之后才暴露的：没被执行时它一直是"绿"的。）
+    """
     bad = ("def f(st):\n"
            "    if x:\n"
-           "        st = \"startup-folder\"\n"
+           "        autostart = \"startup-folder\"\n"
            "    else:\n"
-           "        st = \"startup-lnk\"\n")
+           "        autostart = \"startup-lnk\"\n")
     lnk, folder, err = _autostart_branch_order(bad)
     if err or lnk is None or folder is None:
         return "负控脚手架失效：造的分支没被解析出来（检测逻辑是假的）"
@@ -4949,6 +4956,99 @@ def n_tp_c_record_day_throttled_on_ledger_get():
     return True
 
 
+# ------------------------------------------------ 时钟被改过（P23 / BL-02）----
+# ★ 2026-10-22 修的两处「方向错」之一。判据为什么必须进套件：
+#   修复本身只带了一个 output/ 下的探针，而 output/ 是 git 忽略的 ——
+#   探针不进套件，下一次有人把 `_elapsed_ok` 写回 `v <= 阈值`，没有任何机器会红。
+#   「修好了但没判据」＝下一次改动时的自由落体。
+
+
+def _p23_patch(HS, *, future_h=24.0, hb_age=None):
+    """把 `guard_posture` 的外部输入全部打桩；返回还原函数（不写盘、不改文件）。"""
+    import datetime as _dt
+    st = {"armed": True, "sentinel_pid": 424242,
+          "sentinel_started_at": _dt.datetime.fromtimestamp(
+              time.time() + future_h * 3600).astimezone().isoformat(timespec="seconds")}
+    saved = {}
+
+    def put(name, val):
+        saved[name] = getattr(HS, name)
+        setattr(HS, name, val)
+
+    put("load_state", lambda: dict(st))
+    put("armed_state", lambda audit_dir, s=None: True)
+    put("sentinel_alive", lambda s=None: True)
+    put("sentinel_heartbeat_age", lambda: (hb_age, None))
+    put("self_check", lambda: (True, []))
+    _probe_dir = os.path.join(tempfile.gettempdir(), "antinel_p23_probe")
+    put("_shield_audit_dir", lambda pkg=None: _probe_dir)
+    put("_sentinel_heartbeat_chain", lambda: (_probe_dir, "stub"))
+
+    def restore():
+        for k, v in saved.items():
+            setattr(HS, k, v)
+    return restore
+
+
+def c_clock_skew_is_a_blind_spot():
+    """P23：时钟被改过（启动时刻在未来）⇒ 归「注意（盲区）」，不许判「值守中」。"""
+    import host_shield as HS
+    restore = _p23_patch(HS, future_h=24.0)
+    try:
+        p = HS.guard_posture(None)
+        if p.get("state") == "guarding":
+            return ("时钟被改过 24 小时，却判「值守中」—— 死掉的哨兵可以被读成"
+                    "活着，而且要等一整天才会自己好")
+        if p.get("state") != "unknown":
+            return "时钟被改过应归盲区（unknown），实际 %r" % (p.get("state"),)
+        if HS._elapsed_ok(-1.0) is not False:
+            return "_elapsed_ok(-1) 必须是 False（负数＝这个时间差不可信）"
+        if HS._elapsed_ok(0.0) is not True:
+            return "_elapsed_ok(0) 必须是 True（刚刚启动是合法的新鲜度）"
+        # 对照组：同一套桩、启动时刻在过去 36 秒 ⇒ 必须仍然判在岗。
+        # 没有这一条，一个"恒返回 unknown"的死判据也能过上面所有断言。
+        restore()
+        restore2 = _p23_patch(HS, future_h=-0.01)
+        try:
+            p2 = HS.guard_posture(None)
+            if p2.get("state") != "guarding":
+                return ("对照失效：启动 36 秒前、心跳缺失但未超时，本该判在岗，"
+                        "实际 %r ⇒ 判据分不出「时钟坏了」与「刚起来」"
+                        % (p2.get("state"),))
+        finally:
+            restore2()
+        _note("时钟被改过 ⇒ 注意（盲区）；启动 36 秒前 ⇒ 仍判在岗（对照组）")
+        return True
+    finally:
+        restore()
+
+
+def n_clock_skew_is_a_blind_spot():
+    """负控：把**两条腿**都退回旧口径 ⇒ P23 必须红。
+
+    ★ 为什么必须同时退两条：这条负控第一次只替换了 `_clock_skewed`，
+      结果仍返回 unknown —— 因为 `_elapsed_ok` 也在挡着（负数不可用于判新鲜）。
+      那次"负控失效"其实证明了一件事：**这个修复有防御纵深**，
+      单摘一条不会退回假绿。所以要打回旧行为，两条都得退。
+      （这也是负控的价值：它会告诉你哪几行真的在承重。）
+    """
+    import host_shield as HS
+    orig_skew, orig_ok = HS._clock_skewed, HS._elapsed_ok
+    restore = _p23_patch(HS, future_h=24.0)
+    try:
+        HS._clock_skewed = lambda *a: False                  # 旧口径①：不认负数
+        HS._elapsed_ok = lambda v: v is not None             # 旧口径②：有值就算新鲜
+        p = HS.guard_posture(None)
+        if p.get("state") != "guarding":
+            return ("负控失效：两条腿都退回旧口径后仍不是「值守中」（%r）"
+                    "⇒ 这条判据没有承重" % (p.get("state"),))
+        return True
+    finally:
+        HS._clock_skewed = orig_skew
+        HS._elapsed_ok = orig_ok
+        restore()
+
+
 CHECKS_0353 = [
     # ---- 十、TAB 切换卡顿根治·方案 B（2026-10-21 创始人拍板）----
     ("TP-B1 self_check 指纹缓存：不变零重散／沙盒变异必失效必报",
@@ -5174,6 +5274,10 @@ CHECKS_0353 = [
     ("P22 列出来那一刻＝定稿那次（时刻与内容同源，不报没存明细）",
      c_exam_shown_run_is_the_final_one,
      n_exam_shown_run_is_the_final_one),
+    # ---- 二十三、时钟被改过（2026-10-22 BL-02）----
+    # ★ 「负数比阈值小」曾把"算不出"读成"刚刚启动"：死哨兵可被读成活着一整天。
+    ("P23 时钟被改过归盲区（不是值守中、也不误杀）；刚起来仍判在岗",
+     c_clock_skew_is_a_blind_spot, n_clock_skew_is_a_blind_spot),
 ]
 
 
@@ -5194,18 +5298,28 @@ CHECKS_0353 = [
 def main():
     green = red = 0
     for item in CHECKS_0353:
-        name, fn = item[0], item[1]
-        try:
-            r = fn()
-        except Exception as e:                              # noqa: BLE001
-            r = "判据自身报错：%s(%s)" % (type(e).__name__, e)
-        if r is True:
-            print("GREEN  %s" % name)
-            green += 1
-        else:
-            red += 1
-            print("RED  %s\n       %s" % (name, r))
-    print("0.35.3 guards: %d green / %d red" % (green, red))
+        # ★★ 2026-10-22 修：**负控从来没被执行过**。
+        #   旧驱动只取 `item[1]`（正控），而清单每行是
+        #   `(名字, 正控, 负控)` 三元组 —— 90 个负控函数写了、挂进清单了、
+        #   一次都没跑过。这正是「死判据」的第一形态（写了没登记）的变体：
+        #   **登记了没执行**，比没写更坏 —— 它让"每条判据都有负控"这句话
+        #   在账面上成立。
+        #   ⇒ 改为逐腿执行；正控与负控分开计数、分开命名，不混成一个分母。
+        for idx, tag in ((1, ""), (2, " ［负控］")):
+            if len(item) <= idx or not item[idx]:
+                continue
+            nm, fn = item[0] + tag, item[idx]
+            try:
+                r = fn()
+            except Exception as e:                          # noqa: BLE001
+                r = "判据自身报错：%s(%s)" % (type(e).__name__, e)
+            if r is True:
+                print("GREEN  %s" % nm)
+                green += 1
+            else:
+                red += 1
+                print("RED  %s\n       %s" % (nm, r))
+    print("0.35.3 guards: %d green / %d red（正控与负控各计一条）" % (green, red))
     return 0 if not red else 1
 
 
