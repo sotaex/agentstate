@@ -83,7 +83,7 @@
   "inbox_model.py": "sha256:3a448d104c3756faf55a75191e06aa85106b102d86ce23a814941cbdfa480046",
   "inbox_notify.py": "sha256:8ac8778e61a1437cbe143c5310c144ccac9c3a1f858c7eb16512ee4594a7a4aa",
   "inbox_report.py": "sha256:cb4e0a1f3e7b2c8221327a550023c20400726986a8c1e24ecb39f87dabd1e50d",
-  "inbox_server.py": "sha256:a50b3f331cda5ee05006d78ec71be31fe0533a466a43e67c60c105fa16523bad",
+  "inbox_server.py": "sha256:538d48f6867f6b018edd06ec1523172c445abb8f37a7b601aead1aed0a1cbc72",
   "inbox_store.py": "sha256:12eeb997bcb14d8a5878d24f6c144437a11cee16d717ea1d3fce447bbab8a5a6",
   "inbox_tray.py": "sha256:64542a7eb38b7da6de9dbd9bdd69c130ae5ba66507fe5c87e39daadc05ee3554",
   "inbox_window.py": "sha256:f026a1d86d4597ef8929e784231da28ccbec822f9740727bbd93fc5987652d39",
