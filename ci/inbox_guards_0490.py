@@ -4756,6 +4756,30 @@ def c_x9():
         return "找不到 Edge 时仍返回了字节 —— 失败必须如实返回 None"
     if "Edge" not in (why or ""):
         return "失败原因没说是找不到 Edge：%r" % (why,)
+    # ★ 行为腿二（2026-10-21 活体实测抓到的时红时绿）：Edge **进程退出 ≠ PDF 写完**
+    #   （实测 3～18s 才落盘）⇒ 必须轮询等新文件。两臂：晚到的必须等到；
+    #   给不够时间时**不许**报「等到了」（证明它不是无条件 True）。
+    import threading as _th
+    import time as _t
+    d = tempfile.mkdtemp(prefix="g0490_pdf_")
+    p = os.path.join(d, "late.pdf")
+    base_t = _t.time() - 1
+
+    def _late():
+        _t.sleep(0.8)
+        with open(p, "wb") as f:
+            f.write(b"%PDF-1.4 late")
+
+    th = _th.Thread(target=_late)
+    th.start()
+    got = SV._wait_fresh_file(p, base_t, timeout=6.0, interval=0.1)
+    th.join()
+    if not got:
+        return ("晚到的 PDF 没等到 —— Edge 写完 ≠ 进程退出，必须轮询"
+                "（旧实现单次 mtime 检查会时红时绿）")
+    if SV._wait_fresh_file(os.path.join(d, "never.pdf"), base_t,
+                           timeout=0.4, interval=0.1):
+        return "空路径也报「等到了」—— 轮询恒真，尺子失效"
     return True
 
 

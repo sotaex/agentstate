@@ -3236,7 +3236,37 @@ def _edge_exe():
     return ""
 
 
-def _exam_pdf_bytes(html_txt, root=None, timeout=60):
+def _wait_fresh_file(path, before, timeout=90.0, interval=0.25):
+    """等一个**比 `before` 新**、且**大小稳定**的文件出现。
+
+    ★★ 为什么必须等（2026-10-21 实测，时红时绿的真因）：Edge 的无头打印
+      **进程退出 ≠ PDF 写完** —— 实测同一台机器上，进程返回后 PDF 还要
+      3～18 秒才落盘（机器负载高时更久）。旧实现「进程一返回就看文件」
+      ⇒ 同一份代码时成时败（预览实例那次碰巧快、活体那次慢），
+      正是本仓铁律 2 最忌的形状。
+    ★ 判据是**两件事**：① mtime 前进（不是"文件在不在"——旧文件会把失败
+      伪装成成功）；② 大小连续两次不变（否则可能读到写了一半的 PDF）。
+    """
+    deadline = time.time() + float(timeout)
+    last = -1
+    stable = 0
+    while time.time() < deadline:
+        try:
+            if os.path.getmtime(path) > before:
+                size = os.path.getsize(path)
+                if size > 0 and size == last:
+                    stable += 1
+                    if stable >= 2:
+                        return True
+                else:
+                    stable, last = 0, size
+        except OSError:
+            pass
+        time.sleep(interval)
+    return False
+
+
+def _exam_pdf_bytes(html_txt, root=None, timeout=90):
     """导出 HTML → PDF（本机 Edge 的**无头打印**）。返回 `(pdf_bytes, 原因)`。
 
     ★★ 为什么不是 Python PDF 库：本仓「零运行时依赖」是产品论点的一部分（wheel
@@ -3273,9 +3303,11 @@ def _exam_pdf_bytes(html_txt, root=None, timeout=60):
                            creationflags=0x08000000 if os.name == "nt" else 0)
     except Exception as e:                        # noqa: BLE001
         return None, "Edge 打印没跑完（%s: %s）" % (type(e).__name__, e)
+    # ★ 进程退出 ≠ 写完（实测 3～18s 才落盘）⇒ 等文件真出现再读
+    if not _wait_fresh_file(out, before, timeout=timeout):
+        return None, ("Edge 打印进程回来了，但 %d 秒内没等到 PDF 落盘"
+                      % int(timeout))
     try:
-        if not os.path.exists(out) or os.path.getmtime(out) <= before:
-            return None, "Edge 没产出新的 PDF（版本不支持无头打印？）"
         with open(out, "rb") as f:
             data = f.read()
     except OSError as e:
