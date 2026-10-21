@@ -1967,7 +1967,9 @@ def count_text(n, total, hours=WINDOW_HOURS, unit="件"):
       不要显示一个光秃秃的分子。
     """
     if total is None:
-        return "%d %s / 分母未知" % (int(n or 0), unit)
+        # ★ 0.53.5（STE100 体检 S-13）：「分母未知」→「总数未知」——
+        #   0490 U-03 要求正文零「分母」，兜底句也不能破例。
+        return "%d %s / 总数未知" % (int(n or 0), unit)
     return "%d %s / %d（最近 %d 小时）" % (int(n or 0), unit, int(total), int(hours))
 
 
@@ -2541,7 +2543,9 @@ def base_state(posture_state):
     # ★ 0.53.5：旧句把 `%r`（原始 repr）直接上屏 —— 那是给开发看的。
     #   用户面只说处境；原始值由调用方（日志／evidence）承载，不进页面。
     return STATE_L1, ("监理报了一个没登记的防线状态：认不出它是什么，"
-                      "先按最谨慎的档位显示")
+                      # ★ 0.53.5（STE100 体检 S-12）：「档位」→「情况」
+                      #   —— 读者没有"档"这个概念。
+                      "先按最谨慎的情况显示")
 
 
 def current_state(posture_state, granary=None, items=None, now=None,

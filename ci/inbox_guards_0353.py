@@ -700,13 +700,16 @@ def c_page_grouped_buckets():
                        posture={"state": "guarding", "label": "值守中", "why": "",
                                 "can_fix": False, "fix": None, "fix_hint": ""},
                        items=items)
-    # ★ 0.50.4（Q-05）：归并计数从「×2」改成「2 条（这一档共 N 条）」——
+    # ★ 0.50.4（Q-05）：归并计数从「×2」改成「2 条（本级共 N 条）」——
     #   乘号在中文里不是"共"，且与后面的分母连读像算式。判据**跟着产品文案
     #   同步锚点**（与 0490 N-U05 同型）：断言的仍是"归并行给出了计数"，
     #   不是放宽 —— 计数不在了照样红。
     # ★★ S48：中文断言**必须显式选层**（`body()` 剥 style/注释、留词条浮层）——
     #   裸 `in h` 会被 <style> 里的说明文字误红（本套 0.50.4 实测被 S48 抓）。
-    return ("按类型归并" in PC.body(h) and "2 条（这一档共" in PC.body(h)
+    # ★ 0.53.5（STE100 体检 S-10）：「这一档共」→「本级共」—— 锚点跟着
+    #   产品措辞走（判据绑文案第六次现场）。断言的仍是"归并行给出计数"，
+    #   计数不在了照样红，不是放宽。
+    return ("按类型归并" in PC.body(h) and "2 条（本级共" in PC.body(h)
             and "看这 2 条" in PC.body(h))
 
 
@@ -731,7 +734,7 @@ def n_page_grouped_buckets():
     # ★★ S48：中文断言必须显式选层（负控与正判据同口径 —— 一边选层一边不选，
     #   等于给负控装了个不同的量具）。
     return (h.count('class="item ') == 2
-            and "2 条（这一档共" not in PC.body(h))
+            and "2 条（本级共" not in PC.body(h))
 
 
 def c_page_action_grouped_not_hidden():
@@ -762,7 +765,7 @@ def c_page_action_grouped_not_hidden():
     # ★★ S48：中文断言必须显式选层（`body()`）；纯 ASCII 结构标记
     #   （class=/value=）不在中文注释里出现，可留裸判（选层口径见
     #   `ci/page_caliber.py`：触发条件是「左操作数可能含中文」）。
-    return (h.count('class="item grp') == 1 and "3 条（这一档共" in PC.body(h)
+    return (h.count('class="item grp') == 1 and "3 条（本级共" in PC.body(h)
             and "监理进程不在岗" in PC.body(h)    # ① 原因
             and 'value="done_all"' in h           # ② 批量动作
             and "看这 3 条" in PC.body(h))        # ③ 钻取
@@ -788,7 +791,7 @@ def n_page_action_grouped_not_hidden():
                        items=items)
     # ★★ S48：中文断言必须显式选层（负控与正判据同口径 —— 一边选层一边不选，
     #   等于给负控装了个不同的量具）。
-    return h.count('class="item ') == 3 and "3 条（这一档共" not in PC.body(h)
+    return h.count('class="item ') == 3 and "3 条（本级共" not in PC.body(h)
 
 
 def c_server_done_all_marks_group():
@@ -1438,6 +1441,111 @@ def n_selfcheck_fail_is_warn_not_down():
     import host_shield as HS
     p = _selfcheck_posture("0.5.0", "0.5.0", (True, []))
     return p["state"] == HS.POSTURE_GUARDING
+
+
+# ══════════════ X11 · 2026-10-21（创始人剃刀原则：「红色部分不需要就直接去除」）══════════
+#: ★ 由来（创始人截图实测）：dev 态顶部条写「值守中」，下面红块却写
+#:   「有 4 个受监管落点，**此刻没人巡检**」—— 同一屏两个相反结论，而事实是
+#:   哨兵在岗、心跳 491s（判死线 1800s）。
+#:   根因：dev 分支为了不硬编码空列表，借用了**缺岗**损失计算器，而进该分支的
+#:   前提正是 `alive and fresh`。**函数名写明了前提，调用处前提不成立。**
+#: ★ 剃刀决定：dev 分支不再调用它（`consequences: []`，此时为真 —— 没缺岗就
+#:   没有缺岗损失）。真发现的事项走 `inbox_model.light()` ②（24h 未处理，
+#:   **排在 dev 之前**，研发态不吞）⇒ 信息不少，只是换了正确的家。
+#: ★ 为什么不加渲染层守卫：那要把档位名 `dev` 硬编码成第二份口径（T-09），
+#:   而生产者已有本判据守。剃刀同样适用于"多加一层保险"。
+#: ★ 判据打在**代码**上（先剥行注释）：本文件自己的说明里会出现那个函数名，
+#:   不剥注释就会**被自己的注释判红**（T-06 同型的反面教材）。
+
+
+def _x11_hs_src():
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "host_shield.py")
+    with open(p, encoding="utf-8") as f:
+        return f.read()
+
+
+def _x11_dev_branch(src):
+    """切出 dev 分支那一段（`if _is_dev:` 之后到 `"dev_why"` 之前）。"""
+    i = src.find("                if _is_dev:")
+    if i < 0:
+        return None
+    j = src.find('"dev_why"', i)
+    if j < 0:
+        return None
+    return src[i:j]
+
+
+def _x11_core(src):
+    seg = _x11_dev_branch(src)
+    if seg is None:
+        return ("夹具不成立：切不出 dev 分支（源码结构已变，需更新判据）—— "
+                "本判据测不出，不算通过")
+    code = re.sub(r"#[^\n]*", "", seg)          # 剥行注释：只判代码，不判说明
+    if "_outage_consequences(" in code:
+        return ("研发态分支调用了缺岗损失计算器 —— 哨兵在岗却说「没人巡检」"
+                "（同一屏两个相反结论）")
+    if '"consequences": []' not in code:
+        return "研发态分支没把 consequences 显式置空（不许留模糊形态）"
+    return True
+
+
+def c_x11():
+    """两条腿：源码腿（dev 分支里不许出现该调用）＋ 行为腿（真跑一次 dev，
+    计算器一次都不许被调用）。行为腿用**计数器**，不用抛异常
+    （抛异常会被上层 `except` 吞掉 —— 2026-10-21 教训）。
+    ★ 0353 不用 `@check` 装饰器：注册走文件末尾的元组表（`("X11 …", c_x11, n_x11)`）。"""
+    r = _x11_core(_x11_hs_src())
+    if r is not True:
+        return r
+    import host_shield as HS
+    calls = {"n": 0}
+    real = HS._outage_consequences
+
+    def _spy(st, root=None):
+        calls["n"] += 1
+        return [{"kind": "landing_unwatched",
+                 "text": "有 4 个受监管落点，此刻没人巡检（判据伪造）"}]
+
+    HS._outage_consequences = _spy
+    try:
+        # ── 量具自证（X-019）：计数器必须真的会跳 ──
+        #   否则"计数为 0"可能只是"表是死的"，与"没被调用"长得一样。
+        _spy({}, None)
+        if calls["n"] != 1:
+            return ("夹具失效：spy 自己调一次没计数（n=%d）—— "
+                    "本判据测不出，不算通过" % calls["n"])
+        calls["n"] = 0
+        p = _selfcheck_posture("0.1.0", "0.9.0",
+                               (False, ["host_shield.py 与 manifest 不符"]))
+    finally:
+        HS._outage_consequences = real
+    if p.get("state") != HS.POSTURE_DEV:
+        return ("夹具不成立：期望 dev 档，实得 %r —— 本判据测不出，不算通过"
+                % (p.get("state"),))
+    if calls["n"]:
+        return ("研发态调用了缺岗损失计算器 %d 次 —— 哨兵在岗却说「没人巡检」"
+                % calls["n"])
+    if p.get("consequences"):
+        return "研发态仍带出后果清单：%r" % (p["consequences"],)
+    return True
+
+
+def n_x11():
+    src = _x11_hs_src()
+    seg = _x11_dev_branch(src)
+    if seg is None or '"consequences": []' not in re.sub(r"#[^\n]*", "", seg):
+        return ("变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，"
+                "不算通过")
+    mut = src.replace(
+        seg,
+        seg.replace('"consequences": []',
+                    '"consequences": _outage_consequences(st, pkg_root)'), 1)
+    if _x11_core(mut) is True:
+        return "负控失效：改回调用缺岗计算器后 X11 没红"
+    if _x11_core(src) is not True:
+        return "夹具不成立：真实现本身就被 X11 判红 ⇒ 负控无分辨力"
+    return True
 
 
 def c_light_warn_is_down_and_interrupted_is_l1():
@@ -4843,6 +4951,8 @@ CHECKS_0353 = [
      n_outage_without_consequence_is_interrupted),
     ("P12 缺岗看得见受监管落点", c_outage_sees_supervised_landing,
      n_outage_sees_supervised_landing),
+    # ★ 2026-10-21（剃刀）：dev 态**不是缺岗**，不许借用缺岗损失计算器。
+    ("X11 研发态不许说「没人巡检」", c_x11, n_x11),
     ("P12 落点读不出按有损失算", c_consequence_blindspot_counts_as_loss,
      n_consequence_blindspot_counts_as_loss),
     # ★ 0.37.3：标签里的「存疑」已取消（六态换代）⇒ 换成描述**判定内容**的说法：
