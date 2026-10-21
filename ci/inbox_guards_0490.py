@@ -4358,12 +4358,14 @@ def n_h11():
     两步都验：① 变异页**照样渲染出四组标题**（副本形状兼容 ⇒ 缺陷在行为上
     不可见）；② H11 的源码尺子在变异源码上必须红。"""
     src = _src(_SERVER_REL)
-    anchor = "_U._result_html(res, _A.VERDICTS, _A._ev_human)"
+    # ★ 2026-10-21：`_view_exam` 的调用改成多行（加了 `after_card` 导出插槽），
+    #   锚点跟着走 —— 只锚**参数行**，不锚整条调用（整条会随排版再断一次）。
+    anchor = "res, _A.VERDICTS, _A._ev_human,"
     if anchor not in src:
         return ("变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，"
                 "不算通过：%r" % anchor)
     mut_src = src.replace(
-        anchor, "_U._result_html(res, _EXAM_VERDICTS_COPY, _A._ev_human)")
+        anchor, "res, _EXAM_VERDICTS_COPY, _A._ev_human,", 1)
     mut_src = mut_src.replace(
         "def _view_exam(",
         "_EXAM_VERDICTS_COPY = %s\n\n\ndef _view_exam(" % _verdicts_copy_src(), 1)
@@ -4807,6 +4809,127 @@ def n_x9():
         return "负控②失效：拿 HTML 冒充 PDF 后 X9 没红"
     if _x9_core(src) is not True:
         return "夹具不成立：真实现本身就被 X9 判红 ⇒ 负控无分辨力"
+    return True
+
+
+# ══════════════════ X10 · 2026-10-21（创始人 09:35「哪里是新的」＋09:41「PDF在哪儿」）══════════
+#: ★ 由来：X8 只钉到「卡在导出与历次之前」—— 可卡**前面**还压着三块告警
+#:   （覆盖声明／自认声明／两个口径），于是首屏仍是三块文字，卡落到第 6 块。
+#:   创始人 09:35 对照设计稿的判词是「**哪里是新的**」：卡早在 HTML 里、X8 也绿，
+#:   人却在首屏看不见它。设计稿 §38.6 的表格写的是「第 3 块＝结论汇总卡」，
+#:   X8 没钉这一条 ⇒ **尺子只钉了"谁在谁前面"的一个角**。
+#: ★ 09:41 又追加一条：「PDF下载在哪儿呢？应该放在前边文字区吧？」——
+#:   导出原排在 59 条明细的**末尾**（§38.6 只解决了"别挡在结论前"，
+#:   把下载推进了长尾）⇒ 现在钉：卡 < 导出 < ① 组。
+#: ★ 闸五（同源）：两条腿都调产品 `_result_html`，不另写渲染。
+
+def _x10_render(scan, src=None, tag="is0490_x10"):
+    """带导出插槽跑一次渲染（`after_card` 由本判据注入，与 `_view_exam` 同一契约）。"""
+    import antinel                                                 # noqa: E402
+    res = {"scan": scan, "egress": {}}
+    exp = ("<div class='note'>把这份结果存成一份文件："
+           "<a href='/exam-export?e=x&amp;fmt=pdf'>PDF</a></div>")
+    try:
+        if src is None:
+            import ui_server as U                                  # noqa: E402
+            return U._result_html(res, antinel.VERDICTS,
+                                  antinel._ev_human, after_card=exp), None
+        mod = _load(src, tag, _HEALTH_REL)
+        return mod._result_html(res, antinel.VERDICTS,
+                                antinel._ev_human, after_card=exp), None
+    except Exception as e:                                         # noqa: BLE001
+        return None, ("量具故障：渲染抛 %s: %s —— 不是产品问题，不算通过"
+                      % (type(e).__name__, e))
+
+
+def _x10_core(page):
+    """X10 尺子之一：导出入口必须落在**结论卡之后、① 组之前**（首屏文字区）。"""
+    i_card = page.find("card sum")
+    i_exp = page.find("把这份结果存成一份文件")
+    i_tools = page.find("① 我电脑上有哪些 AI 工具")
+    if i_card < 0:
+        return "页面上没有结论卡（A1）"
+    if i_exp < 0:
+        return "页面上没有导出入口（插槽没接上？）"
+    if i_tools < 0:
+        return "页面上没有 ① 组标题（夹具/渲染异常）"
+    if i_exp < i_card:
+        return ("导出入口跑到结论卡之前（export=%d card=%d）—— "
+                "又回到「第一屏只见下载」" % (i_exp, i_card))
+    if i_exp > i_tools:
+        return ("导出入口排在 ① 组之后（export=%d tools=%d）—— "
+                "要滚过全部明细才看得见「存一份」" % (i_exp, i_tools))
+    return True
+
+
+def _x10_blind_core(page):
+    """X10 尺子之二：结论卡必须排在**盲区告警之前**（整页第 3 块）。"""
+    i_card = page.find("card sum")
+    i_blind = page.find("个地方监理没查到")
+    if i_card < 0:
+        return "页面上没有结论卡（A1）"
+    if i_blind < 0:
+        return ("夹具不成立：盲区块没渲染出来（unscanned 没生效）—— "
+                "本腿测不出「卡在告警之前」")
+    if i_card > i_blind:
+        return ("结论卡排在盲区告警之后（card=%d blind=%d）—— "
+                "首屏仍是三块文字，不是结论" % (i_card, i_blind))
+    return True
+
+
+@check("X10 ★ 体检首屏：结论卡在盲区告警之前 ＋ 导出入口在 ① 组之前（§38.6 第 3 块）")
+def c_x10():
+    page, why = _x10_render(_h_scan(3, unscanned=2))
+    if why:
+        return why
+    for core in (_x10_blind_core, _x10_core):
+        r = core(page)
+        if r is not True:
+            return r
+    return True
+
+
+@check("N-X10 ★ 负控：卡挪到告警之后／导出挪到明细末尾 ⇒ X10 必须各自红")
+def n_x10():
+    """两个变异都打在**真实源码**上（锚点不存在 ⇒ 负控自身失效，如实报）。"""
+    src = _src(_HEALTH_REL)
+    a = ('    return (_summary_card(res, verdicts)\n'
+         '            # ★ 导出入口插槽（结论卡正下方；调用方注入，默认空串 ⇒ 老行为不变）\n'
+         '            + (after_card or "")\n'
+         '            + "".join(head) + "".join(body)')
+    b = ('            + (after_card or "")\n'
+         '            + "".join(head) + "".join(body)')
+    for x in (a, b):
+        if x not in src:
+            return ("变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，"
+                    "不算通过：%r" % x[:60])
+    # ① 卡挪到 head（含盲区告警）之后 ⇒ `_x10_blind_core` 必红
+    mut1 = src.replace(
+        a,
+        '    return ("".join(head) + _summary_card(res, verdicts)\n'
+        '            + (after_card or "")\n'
+        '            + "".join(body)', 1)
+    page1, why1 = _x10_render(_h_scan(3, unscanned=2), mut1, "is0490_nx10a")
+    if why1:
+        return why1
+    if _x10_blind_core(page1) is True:
+        return "负控①失效：卡挪到盲区告警之后，X10 的盲区腿没红"
+    # ② 导出挪到 body（含 ① 组）之后 ⇒ `_x10_core` 必红
+    mut2 = src.replace(
+        b,
+        '            + "".join(head) + "".join(body) + (after_card or "")', 1)
+    page2, why2 = _x10_render(_h_scan(3, unscanned=2), mut2, "is0490_nx10b")
+    if why2:
+        return why2
+    if _x10_core(page2) is True:
+        return "负控②失效：导出挪到明细末尾，X10 的导出路腿没红"
+    # ③ 真实现必须全绿（否则负控无分辨力）
+    page0, why0 = _x10_render(_h_scan(3, unscanned=2))
+    if why0:
+        return why0
+    for core in (_x10_blind_core, _x10_core):
+        if core(page0) is not True:
+            return "夹具不成立：真实现本身就被 %s 判红 ⇒ 负控无分辨力" % core.__name__
     return True
 
 
