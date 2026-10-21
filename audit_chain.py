@@ -205,42 +205,96 @@ def chain_with(rec, prev):
 
 
 # ------------------------------------------------------- 追加与降级 ----
+#: 写链失败的**进行时**计数（进程内唯一实现）。为什么非有不可：
+#: `written="none"` 是"这一条彻底没了"的唯一证据 —— 磁盘满/权限坏的时候，
+#: 盘上当然也没有任何痕迹，**跨进程永远事后查不出来**。所以必须在失败发生的
+#: 那个进程里留下计数，并由调用方转成用户看得见的一句话（见 host_shield）。
+_WRITE_HEALTH = {"lost": 0, "last_error": "", "last_ts": 0.0}
+
+
+def write_health():
+    """写链健康读数。`lost` > 0 ⇒ 有记录**一个字节都没落盘**。"""
+    return dict(_WRITE_HEALTH)
+
+
+def _note_write_failure(err):
+    _WRITE_HEALTH["lost"] += 1
+    _WRITE_HEALTH["last_error"] = "%s: %s" % (type(err).__name__, err)
+    _WRITE_HEALTH["last_ts"] = time.time()
+    tlog("append_lost", err=_WRITE_HEALTH["last_error"][:120])
+
+
 def append_chained(fn, rec, on_timeout="sidecar"):
-    """链式追加的唯一入口。返回 (rec, chained)：
-    chained=True  记录已按锁定协议写入主链（锁内读 prev → 锁内追加）；
-    chained=False 锁预算耗尽——sidecar 策略落 sidecar（chain:"unlocked"），
-                  drop 策略不落盘。主链永远线性可判定。"""
+    """链式追加的唯一入口。返回 `(rec, ok)`：
+
+    `rec["written"]` 是**四种事实**，不是两种（2026-10-22 修 BL-03）：
+      "chain"    已按锁定协议进主链（锁内读 prev → 锁内追加）
+      "sidecar"  锁预算耗尽或主链写不进，落在 sidecar（`chain:"unlocked"`）
+      "dropped"  `on_timeout="drop"` 且没拿到锁 ⇒ **按策略**不落盘
+      "none"     **一个字节都没落**（磁盘满 / 权限坏 / 读不到 prev）⇒ 记录已丢
+
+    `ok = written in ("chain", "sidecar")`，即**"这条还找得回来吗"**。
+
+    ★★ 为什么改（BL-03，2026-10-22）：旧实现把上面四种状态压成一个布尔 `chained`，
+      而它的含义是"**锁拿到了吗**"——不是"写成功了吗"：
+        · 主链 `open()` 抛 OSError 时异常**穿透整个函数**（旧代码没有 try），
+          于是 **sidecar 降级根本走不到** —— 而"磁盘满"恰好就是这一支；
+        · sidecar 的两处 `except OSError: pass` 把失败吞成同一个 `False`；
+        · 于是"落在 sidecar"（记录还在）与"彻底没了"（记录丢了）**长得一模一样**，
+          而调用方连这个 False 都不看（`host_shield.record()` 返回它，30 个调用点
+          零消费）。
+      ⇒ 净效果：**磁盘满 ⇒ 记录全丢 ⇒ 界面全绿**。安全产品最坏的失效形态不是
+        报错，是**报成功**。
+    """
     lock = acquire_lock(fn)
     got = lock is not None
     t_hold = time.time()
+    written = "none"
+    err = None
     try:
-        rec = chain_with(rec, last_hash(fn))        # 读 prev 在锁内（TN-09）
-        if not got:
-            rec["chain"] = "unlocked"
-        if got:
-            chaos()
-        line = json.dumps(rec, ensure_ascii=False) + "\n"
-        if got:
-            with open(fn, "a", encoding="utf-8") as f:
-                f.write(line)
-        elif on_timeout == "sidecar":
-            sd = os.path.join(os.path.dirname(fn), "sidecar")
-            try:
-                os.makedirs(sd, exist_ok=True)
-            except OSError:
-                pass
-            try:
-                with open(os.path.join(
-                        sd, os.path.basename(fn) + ".%d.jsonl" % os.getpid()),
-                        "a", encoding="utf-8") as f:
-                    f.write(line)
-            except OSError:
-                pass
-        tlog("append_done", hold_ms=round((time.time() - t_hold) * 1000),
-             sidecar=not got)
-        return rec, got
+        try:
+            rec = chain_with(rec, last_hash(fn))    # 读 prev 在锁内（TN-09）
+            if not got:
+                rec["chain"] = "unlocked"
+            line = json.dumps(rec, ensure_ascii=False) + "\n"
+            if got:
+                chaos()
+                try:
+                    with open(fn, "a", encoding="utf-8") as f:
+                        f.write(line)
+                    written = "chain"
+                except OSError as e:
+                    # ★ 主链写不进**不等于放弃**：先试 sidecar（可能是单文件被占/
+                    #   权限单点，而不是整盘满）。旧实现这里直接抛出去 ⇒ 降级失效。
+                    err = e
+            if written == "none":
+                if on_timeout == "drop":
+                    written = "dropped"             # 按策略不落盘，不算丢失
+                else:
+                    sd = os.path.join(os.path.dirname(fn), "sidecar")
+                    try:
+                        os.makedirs(sd, exist_ok=True)
+                        with open(os.path.join(
+                                sd, os.path.basename(fn) + ".%d.jsonl" % os.getpid()),
+                                "a", encoding="utf-8") as f:
+                            f.write(line)
+                        written = "sidecar"
+                    except OSError as e:
+                        err = err or e
+        except OSError as e:
+            # 读 prev / 序列化就失败 ⇒ 造不出**可验证**的记录。
+            # 这里刻意不写一条"hash 自己编"的 sidecar：那比缺一条更坏 ——
+            # 它看起来可复算，实际复算必错。
+            err = err or e
     finally:
         release_lock(lock)
+    rec["written"] = written
+    if written == "none":
+        rec["write_error"] = "%s: %s" % (type(err).__name__, err or "原因未知")
+        _note_write_failure(err or OSError("写不进，原因未知"))
+    tlog("append_done", hold_ms=round((time.time() - t_hold) * 1000),
+         sidecar=(written == "sidecar"), written=written)
+    return rec, written in ("chain", "sidecar")
 
 
 def append_locked(fn, line):

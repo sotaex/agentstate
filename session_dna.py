@@ -296,17 +296,26 @@ _AUDIT_CHAIN = None
 def append_chained(audit_dir, record):
     """C-1 (v0.28)：经 audit_chain 唯一实现追加。锁预算耗尽按条款 C-3 落
     sidecar——历史 docstring 的「不落盘」从未实现过（2026-09-21 对照发现，
-    统一为 sidecar），返回 False 仍表示「未进主链」，调用方告警语义不变。
-    返回 True = 已按锁定协议进主链。"""
+    统一为 sidecar）。
+
+    ★ 2026-10-22 修 BL-03：返回值从布尔改成**四态字符串**
+      （"chain"/"sidecar"/"dropped"/"none"），与 `audit_chain.append_chained`
+      的 `rec["written"]` 同值同义。
+      改的理由：旧布尔同时承担两件事——"进主链了吗"与"写成功了吗"，
+      于是「落在 sidecar」（记录还在）与「一个字节都没落」（记录丢了）
+      返回同一个 False，调用方无法区分；而磁盘满走的正是后者。
+      ⇒ 调用方判"记录丢了"必须写 `== "none"`，**不许**写 `if not ...`。
+    """
     try:
         os.makedirs(audit_dir, exist_ok=True)
     except OSError:
-        return False
+        return "none"
     fn = os.path.join(audit_dir, datetime.now().strftime("%Y-%m-%d") + ".jsonl")
     try:
-        _rec, chained = _ac().append_chained(fn, record, on_timeout="sidecar")
-        if chained:
+        _rec, _ok = _ac().append_chained(fn, record, on_timeout="sidecar")
+        _written = _rec.get("written") or "none"
+        if _written == "chain":
             _ac().touch_day_manifest(fn)
-        return chained
+        return _written
     except Exception:
-        return False
+        return "none"

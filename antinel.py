@@ -142,10 +142,19 @@ def _session_dna():
 
 
 def _chain_record(audit_dir, rec):
+    """进链并**如实报告落在哪**（2026-10-22 修 BL-03）。
+
+    旧写法 `if not sd.append_chained(...)` 把"落在 sidecar"（记录还在）与
+    "一个字节都没落"（记录丢了）判成同一件事；改成四态后必须分开说 ——
+    两种降级的动作不同：前者不用管，后者要人去查磁盘/权限。
+    """
     sd = _session_dna()
-    if not sd.append_chained(audit_dir, rec):
-        sys.stderr.write("警告：policy_changed 未能进链（记录不落无链账本）\n")
+    written = sd.append_chained(audit_dir, rec)
+    if written == "none":
+        sys.stderr.write("警告：policy_changed 没能落盘（磁盘或权限问题），这条记录已丢\n")
         return False
+    if written != "chain":
+        sys.stderr.write("警告：policy_changed 未进主链（落在 sidecar，记录还在）\n")
     return True
 
 
@@ -774,7 +783,11 @@ def cmd_canary(args):
             _die("audit_chain 不可用（包不完整）")
         os.makedirs(ad, exist_ok=True)
         fn = os.path.join(ad, datetime.now().strftime("%Y-%m-%d") + ".jsonl")
-        _acm.append_chained(fn, rec)
+        _rec, _ok = _acm.append_chained(fn, rec)
+        # 2026-10-22 修 BL-03：旧代码把返回值丢掉 ⇒ 记录彻底没落盘也没人知道。
+        if _rec.get("written") == "none":
+            sys.stderr.write("警告：这条记录没能落盘（%s）\n"
+                             % (_rec.get("write_error") or "原因未知"))
         _acm.touch_day_manifest(fn)
         mad = os.path.join(os.path.expanduser(
             os.environ.get("WORKBUDDY_CONFIG_DIR") or "~/.workbuddy"), "antinel-audit")
@@ -1044,8 +1057,15 @@ def cmd_digest(args):
                "derived": True,
                "reason": "跨项目聚合快照（按各项目链汇总；各项目链仍是唯一的事实来源）"}
         import hub as hubmod
-        _session_dna().append_chained(hubmod.rollup_dir(), rec)
-        print("（汇总快照已进中枢链：~/.antinel/rollup/）")
+        _w = _session_dna().append_chained(hubmod.rollup_dir(), rec)
+        # 2026-10-22 修 BL-03：旧代码**无条件**打印"已进中枢链"——而那一行可能是
+        # 一句谎（磁盘满时它什么都没写）。凡是要打印"已经落盘"的地方，必须回读结果。
+        if _w == "chain":
+            print("（汇总快照已进中枢链：~/.antinel/rollup/）")
+        elif _w == "none":
+            print("（汇总快照没能落盘：磁盘或权限有问题，这份快照已丢）")
+        else:
+            print("（汇总快照落在 sidecar，未进主链；记录还在，稍后可追）")
 
 
 # ------------------------------------------------------------ 粮 ----

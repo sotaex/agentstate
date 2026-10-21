@@ -203,9 +203,15 @@ _AUDIT_CHAIN = None
 
 
 def _chain_fields(fn, rec):
-    """0.20.0 (P0-1) → C-1 (v0.28)：实现收拢至 audit_chain（sidecar 策略）。"""
-    _rec, got = _ac().append_chained(fn, rec, on_timeout="sidecar")
-    if got:
+    """0.20.0 (P0-1) → C-1 (v0.28)：实现收拢至 audit_chain（sidecar 策略）。
+
+    ★ 2026-10-22 修 BL-03：第二个返回值从布尔改成四态字符串 `written`。
+      旧写法 `if got: touch_day_manifest(fn)` 里的 `got` 是"锁拿到了吗"，不是
+      "写成功了吗"；现在只有**真的进主链**才更新日锚（写失败时更新日锚，
+      等于给一个没写成的文件盖时间戳）。
+    """
+    _rec, _ok = _ac().append_chained(fn, rec, on_timeout="sidecar")
+    if _rec.get("written") == "chain":
         _ac().touch_day_manifest(fn)
 
 

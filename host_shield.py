@@ -1670,7 +1670,12 @@ def _mirror_dir():
 
 
 def _chain(audit_dir, rec):
-    """进链（复用 session_dna.append_chained）。audit_dir=None → 个人中枢 rollup。"""
+    """进链（复用 session_dna.append_chained）。audit_dir=None → 个人中枢 rollup。
+
+    返回四态字符串（2026-10-22 修 BL-03）：`"chain"/"sidecar"/"dropped"/"none"`。
+    旧实现返回布尔，语义是"进主链了吗"；它分不出「落在 sidecar」（记录还在）
+    与「一个字节都没落」（记录丢了）。磁盘满走的正是后者。
+    """
     global _IMPORT_OK
     if _IMPORT_OK is None:
         try:
@@ -1684,11 +1689,24 @@ def _chain(audit_dir, rec):
             except Exception:
                 _IMPORT_OK = False
     if not _IMPORT_OK:
-        return False
+        return "none"                               # 模块都导不进来 ⇒ 同样什么都没落
     import session_dna
     if audit_dir is None:
         audit_dir = _hub_rollup_dir()
     return session_dna.append_chained(audit_dir, rec)
+
+
+#: 本进程内**没能落盘**的记录（环形，上限 50）。为什么要在内存里留：
+#: `written="none"` 时盘上当然什么都没有 —— 磁盘满/权限坏这件事**跨进程事后查不出来**，
+#: 唯一能在当场被发现的位置就是失败发生的那个进程。任何读这个列表的地方都该把它
+#: 当成"看不清"（盲区），不许当"没问题"。
+_LOST_RECORDS = []
+_LOST_MAX = 50
+
+
+def lost_records():
+    """本进程内丢失的记录（最近的在后）。空列表 ⇒ 本进程没丢过（≠ 别的进程没丢）。"""
+    return list(_LOST_RECORDS)
 
 
 def record(audit_dir, kind, **kw):
@@ -1699,6 +1717,12 @@ def record(audit_dir, kind, **kw):
       消费者（Antinel 监理分档 / 日报）**必须读这个字段**，不许解析 `reason` 文案 ——
       文案会改，按文案判档的判据会**静默失效**。
       字段缺省 ⇒ 语义＝"未知"，按"有后果"处理（方向收紧）。
+
+    ★ 2026-10-22 修 BL-03：返回值语义＝「这条记录**落盘了吗**」（主链或 sidecar
+      都算），不再是「进主链了吗」。`False` ＝ 一个字节都没落，并已记入
+      `lost_records()`。改之前全仓 30 个调用点**没有一个**看返回值 —— 这正是
+      「磁盘满 ⇒ 记录全丢 ⇒ 界面全绿」能长期存在的原因。新代码若要把记录当证据，
+      必须先看这个返回值。
     """
     rec = {"ts": datetime.now().astimezone().isoformat(timespec="seconds"),
            "type": kind, "tool": "-", "session": "host-shield", "host": "generic",
@@ -1728,7 +1752,13 @@ def record(audit_dir, kind, **kw):
     #   消费侧见 `_backing_fields_of()`：scope 不匹配的记录**不采纳**。
     if kind in _BACKING_TYPES and not rec.get("scope"):
         rec["scope"] = auth_scope()
-    ok = _chain(audit_dir, rec)
+    written = _chain(audit_dir, rec)
+    ok = written in ("chain", "sidecar")
+    if written == "none":
+        _LOST_RECORDS.append({"ts": rec.get("ts"), "type": kind,
+                              "written": written,
+                              "write_error": rec.get("write_error") or ""})
+        del _LOST_RECORDS[:-_LOST_MAX]
     # 0.28.2/0.28.3：高危事件实时弹窗；host_shield_changed/tamper 入列（E1）；
     # force=True（拉锯判定/补锁失败）不节流。
     # ★★★ 0.35.3（创始人 2026-10-06「**不停地有弹窗，你要解决**」＋
@@ -3067,6 +3097,20 @@ class _ChainTail(object):
         return recs, saw_changed, reset
 
 
+def _elapsed_ok(seconds):
+    """一个"已过时长"能不能用来判断**新鲜度**。
+
+    ★ 2026-10-22 新增（BL-02 时钟回拨 fail-open 的唯一判据实现）：
+      负数＝"这个时间差不可信"（墙钟被回拨，或记录的绝对时刻在未来），
+      **不是**"很小"、更不是"刚刚"。
+      本仓曾经两处都写成 `v <= _STALE_AFTER`：负数天然满足 ⇒ 判"新鲜" ⇒
+      实测 `started_at=+24h` 时 `ensure_alive()` 返回 `alive`、
+      `guard_posture()` 返回「值守中」。一个死掉的哨兵可以被读成活着**一整天**。
+      ⇒ 结论是"算不出"，既不许当活着，也不许当僵死（判死会误杀活进程）。
+    """
+    return seconds is not None and seconds >= 0
+
+
 def _sentinel_uptime(st):
     """哨兵已活多久（秒）——读它自己登记的 `sentinel_started_at`；读不到返 None。
 
@@ -3074,7 +3118,12 @@ def _sentinel_uptime(st):
       心跳（audit 目录里的记录）与启动时刻（state 文件）**是两处副本**，
       单看一处就会出现「两处都查不到 ⇒ 不知道是真没有还是查不到」的盲区。
       这里刻意只用**墙钟**（`sentinel_started_at` 是 ISO 字符串），不用 monotonic——
-      它跨进程，只能读墙钟；墙钟被回拨时本函数会返回负数，调用方按 <= 宽限期处理。
+      它跨进程，只能读墙钟。
+
+    ★★ 2026-10-22 更正（BL-02）：本函数**会返回负数**（时钟被回拨 / 启动时刻在未来）。
+      旧 docstring 写"调用方按 <= 宽限期处理"——那句话本身就是缺陷的说明书：
+      负数一旦按"小于宽限期"处理，就等于把"算不出"读成"刚刚启动"。
+      ⇒ 判新鲜度一律走 `_elapsed_ok()`，不许直接与阈值比。
     """
     raw = st.get("sentinel_started_at")
     if not raw:
@@ -3186,7 +3235,8 @@ def ensure_alive(pkg_root, cause="manual"):
       错开的覆盖或静默拒写"（§4.2）—— 钩子 / Antinel 监理 / 计划任务三个 paramedic
       会各自读到"该拉起了" ⇒ 双双拉起。锁把「检查完了还没记账就去拉起」这条
       路径直接关掉。**语义一字未改**（原函数体原样搬进 `_ensure_alive_locked`）。
-    返回 "disabled"|"throttled"|"alive"|"stale-revived"|"revived"|"spawn-failed"|"error"。"""
+    返回 "disabled"|"throttled"|"alive"|"stale-revived"|"revived"|"spawn-failed"|"error"
+         |"clock-skew"（2026-10-22 新增：时钟被改过 ⇒ 算不出在岗多久，**不动进程**）。"""
     _lock = _acquire_revive_lock()
     try:
         return _ensure_alive_locked(pkg_root, cause)
@@ -3256,8 +3306,23 @@ def _ensure_alive_locked(pkg_root, cause="manual"):
             #   ③ 启动时刻也读不到（state 被改/损坏）⇒ 保守返回 alive 并留痕，
             #      **不在无据时杀进程**（宁可少杀不可误杀：杀错的是用户的活进程）。
             started_age = _sentinel_uptime(st)
+            # ★★ 2026-10-22 修 BL-02（时钟回拨 fail-open）：
+            #   旧判据 `started_age <= _STALE_AFTER` 对**负数成立** ⇒ 时钟被回拨
+            #   （或启动时刻在未来）时落进"首拍未到"分支 ⇒ 返回 alive。
+            #   实测（探针取证的原文）：`started_at=+24h` ⇒ ensure_alive → "alive"，
+            #   同一个桩下 guard_posture → 「值守中」。
+            #   负数的本义是"这个时间差不可信"，不是"很小"。
+            #   ⇒ 单列一支：记一条、**不动进程**。
+            #     为什么既不判 alive 也不判死：判 alive 是假绿；判死会杀掉用户的
+            #     活进程（本仓明令"宁可漏杀不可误杀"）。
+            if ((age is not None and age < 0)
+                    or (started_age is not None and started_age < 0)):
+                record(audit_dir, "host_shield_breach", decision="deny", severity="warning",
+                       reason="系统时钟被改过：监理登记的启动时刻比机器时间还晚，"
+                              "算不出它在岗多久。没有动它，请先校准机器时间再判断。")
+                return "clock-skew"
             if age is None:
-                if started_age is not None and started_age <= _STALE_AFTER:
+                if started_age is not None and 0 <= started_age <= _STALE_AFTER:
                     return "alive"                      # 首拍未到（armed 才打首拍）
                 if started_age is None:
                     record(audit_dir, "host_shield_breach", decision="deny",
@@ -3268,7 +3333,7 @@ def _ensure_alive_locked(pkg_root, cause="manual"):
                                   % old_pid)
                     return "alive"
                 # 落到这里：进程活得比 _STALE_AFTER 久，却一条心跳都没有 → 判僵死
-            elif age <= _STALE_AFTER:
+            elif 0 <= age <= _STALE_AFTER:
                 return "alive"
             img = _pid_image(old_pid) if old_pid else None
             # ★ 0.34.0（F-17）：`age` 可能是 None（心跳一条都没有）。
@@ -3553,8 +3618,12 @@ def guard_posture(pkg_root=None):
         _hb_dir, _hb_src = _sentinel_heartbeat_chain()
         uptime = _sentinel_uptime(st)
         ok_self, problems = self_check()
-        fresh = ((age is not None and age <= _STALE_AFTER)
-                 or (age is None and uptime is not None and uptime <= _STALE_AFTER))
+        # ★★ 2026-10-22 修 BL-02：旧写法两处都用 `v <= _STALE_AFTER` —— 负数天然满足
+        #   ⇒ 时钟被回拨时判"新鲜" ⇒ 实测直接返回「值守中」。改成先问 `_elapsed_ok`。
+        _skewed = ((age is not None and age < 0)
+                   or (uptime is not None and uptime < 0))
+        fresh = ((_elapsed_ok(age) and age <= _STALE_AFTER)
+                 or (age is None and _elapsed_ok(uptime) and uptime <= _STALE_AFTER))
         ev = {"armed": True, "sentinel_alive": alive,
               "heartbeat_age": (round(age, 1) if age is not None else None),
               "heartbeat_ts": last_ts,
@@ -3566,6 +3635,18 @@ def guard_posture(pkg_root=None):
               # 技术细节留在 evidence 里供诊断（页面上只说大白话）
               "self_check_problems": list(problems)}
         _code_untrusted = not ok_self
+        if _skewed:
+            # ★★ 2026-10-22（BL-02）：时钟被改过 ⇒ 归「注意（盲区）」，不打绿也不判死。
+            #   为什么归 L1 而不是 R0：R0 的语义是"有可指认的后果"。这里**什么都没
+            #   断言**——既没证据说防线破了，也没证据说在守；「盲区」正是它的名字。
+            #   为什么不给 revive 按钮：重新拉起在时钟坏掉时没有意义，会白杀一个
+            #   可能好好的进程 —— 给个点了没用的按钮就是假按钮。
+            return {"state": POSTURE_UNKNOWN, "label": POSTURE_LABEL[POSTURE_UNKNOWN],
+                    "why": "系统时钟被改过：监理登记的启动时刻比机器时间还晚，"
+                           "算不出它在岗多久。算不出，就给不出它在不在守的结论",
+                    "evidence": ev, "consequences": None,
+                    "can_fix": False, "fix": None,
+                    "fix_hint": "先校准机器时间，再看这一项。校准期间让监理进程保持原样"}
         if alive and fresh:
             if _code_untrusted:
                 # ★★★ 0.36.3：**先问"这是不是研发态"**，再谈"存疑"。
@@ -3752,6 +3833,12 @@ def guard_fix(pkg_root=None, action=None):
         action = action or p.get("fix")
         if action == "revive":
             r = ensure_alive(pkg_root, cause="console")
+            if r == "clock-skew":
+                # 2026-10-22（BL-02）：这不是"没拉起来"，是**我们选择不动它**。
+                # 旧代码会落进下面那句"没拉起来（clock-skew）——此刻仍无人值守"，
+                # 把一个时钟问题说成了拉起失败。
+                return False, ("系统时钟被改过，我算不出监理在岗多久。"
+                               "没有动它，请先校准机器时间")
             if r in ("revived", "stale-revived", "alive"):
                 p2 = guard_posture(pkg_root)
                 return (p2["state"] == POSTURE_GUARDING,
