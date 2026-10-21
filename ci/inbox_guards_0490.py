@@ -6297,32 +6297,24 @@ def _ste_surface_all():
 # 已过簿面（面内文件的簿外命中已清零）。本批逐个把 TODO 里的挪进来。
 _STE_PY = ("glossary.py", "inbox_model.py", "inbox_server.py", "inbox_bubble.py",
            "inbox_tray.py", "inbox_report.py", "inbox_notify.py",
-           "remediation.py")
+           "remediation.py",
+           # ★ 批28b：随包模块里实测**零命中**的 13 个，直接进面（无待清项）
+           "audit_chain.py", "granary.py", "heartbeat.py", "hub.py",
+           "inbox_config.py", "inbox_daemon.py", "inbox_emphasis.py",
+           "inbox_fallback.py", "inbox_store.py", "ledger.py",
+           "machine_id.py", "session_dna.py", "transcript_reader.py")
 # ★ 未清台账：文件 → 计划批次。**不许有无台账的未过簿文件**（U-24 ③）。
 #   清完一个就从这里挪进 _STE_PY；本台账为空之日＝面全部过簿。
 _STE_SURFACE_TODO = {
-    "antinel.py": "批28（终端出口：帮助文本／SKILL 内嵌段）",
-    "host_shield.py": "批28（终端出口：告警 reason）",
-    "ui_server.py": "批28（网页出口：体检页旧版）",
-    "inbox_cli.py": "批28（终端出口：命令输出）",
-    "inbox_window.py": "批28（终端出口：小窗提示）",
-    "inbox_logo.py": "批28",
-    "strings.py": "批28",
-    "egress.py": "批28",
-    "inbox_daemon.py": "批28",
-    "inbox_emphasis.py": "批28",
-    "inbox_fallback.py": "批28",
-    "inbox_store.py": "批28",
-    "heartbeat.py": "批28",
-    "ledger.py": "批28",
-    "granary.py": "批28",
-    "machine_id.py": "批28",
-    "hub.py": "批28",
-    "audit_chain.py": "批28",
-    "session_dna.py": "批28",
-    "transcript_reader.py": "批28",
-    "antinel_mcp.py": "批28",
-    "inbox_config.py": "批28",
+    "antinel.py": "批28c（终端出口：帮助文本／SKILL 内嵌段，121 条）",
+    "host_shield.py": "批28c（终端出口：告警 reason，19 条）",
+    "ui_server.py": "批28c（网页出口：体检页旧版，13 条）",
+    "inbox_cli.py": "批28c（终端出口：命令输出，10 条）",
+    "strings.py": "批28c（6 条）",
+    "inbox_logo.py": "批28c（5 条）",
+    "egress.py": "批28c（3 条）",
+    "antinel_mcp.py": "批28c（1 条）",
+    "inbox_window.py": "批28c（1 条）",
 }
 _STE_JSON = "rules/default.json"
 _STE_JSON_FIELDS = ("label_zh", "description_zh", "remediation_zh")
@@ -6375,7 +6367,12 @@ _STE_MIN_REASON = 20                  # 理由不许一句话搪塞
 # 基线史：54（批27 立） → 10（批28：D8 口径收紧后删 46 条死登记 ＋ 加 2 条）。
 _STE_BOOK_MAX = 10
 _STE_HUMOR_MAX = 2                    # U-30：幽默一句一登记（R-1）
-_STE_DEV_MAX = 13                     # U-29：开发者消息（带 %r）豁免面上限
+# U-29：开发者消息（带 %r／repr）豁免面上限。**上调必须留痕**（diff 可见）。
+# 基线史：13（批27 立，面 8 文件）→ 15（批28b，面扩到 21 个随包模块）。
+# ★ 批28b 复核：15 条逐条看过，全是诊断串 —— `[place]`／`[open_console]`／`!!`
+#   前缀的运行日志，或「请在 _CATEGORY_ZH 登记」这类给开发者的指令；没有一条
+#   是给终端用户读的叙述文案（真上屏的话 %r 打出来是带引号转义的乱码）。
+_STE_DEV_MAX = 15
 _STE_LINK = re.compile(r"<a [^>]*>.*?</a>", re.S)
 
 
@@ -6892,8 +6889,10 @@ def _u29_problem(rows):
             out.append("%s %s 豁免行 %d 字：%s" % (rel, key, worst,
                                                   _ste_visible(s)[:34]))
     if dev > _STE_DEV_MAX:
+        # ★ 0.53.5 批28b：原报错串里写了 %r，而 %r 也是一个占位符 ⇒ 参数不够，
+        #   一越线就 TypeError（判据崩了比假绿更糟：崩＝这条腿根本没在守）。
         out.insert(0, "开发者消息已 %d 条 > 上限 %d（豁免面不许扩大："
-                      "若真有 %r 串要上屏，它就必须进登记簿）"
+                      "若真有带 repr 的串要上屏，它就必须进登记簿）"
                    % (dev, _STE_DEV_MAX))
     return "；".join(out[:6]) or None
 
