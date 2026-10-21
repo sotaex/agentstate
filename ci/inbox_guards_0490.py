@@ -4569,7 +4569,10 @@ def n_x6():
     """
     src = _src(_SERVER_REL)
     a1 = "（用户名已替换，可转给他人）｜"
-    a2 = "（含本机路径与用户名，只适合自己留着）</div>\" % (b, b))"
+    # ★ 2026-10-21：导出行加了 PDF 两个链接后，尾锚从 `% (b, b))` 变成
+    #   `% (b, b, b))` —— 负控锚点必须跟着走（旧锚找不到时本判据会如实报
+    #   「负控自身失效」，不冒充通过；本轮就是这样被抓到的）。
+    a2 = "\"（可逐个核对数字）</div>\" % (b, b, b))"
     for a in (a1, a2):
         if a not in src:
             return ("变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，"
@@ -4581,8 +4584,7 @@ def n_x6():
     if _x6_core(p1) is True:
         return "负控①失效：脱敏文案被摘掉后 X6 没红"
     # ② 两个链接不同源
-    p2, why = _exam_mut(src.replace(a2, "（含本机路径与用户名，只适合自己留着）"
-                                     "</div>\" % (b, b + \"-x\"))"),
+    p2, why = _exam_mut(src.replace(a2, "\"（可逐个核对数字）</div>\" % (b, b + \"-x\", b))"),
                         "is0490_nx6b")
     if why:
         return why
@@ -4645,6 +4647,133 @@ def n_x7():
         return "负控失效：路由被摘掉后 X7 没红"
     if _x7_core(src) is not True:
         return "夹具不成立：真实现本身就被 X7 判红 ⇒ 负控无分辨力"
+    return True
+
+
+# ══════════════════ X8/X9 · 2026-10-21（创始人实测：首屏只见两个下载）══════════════════════
+#: ★ 由来：A1 写的是「汇总卡**置顶**」，可 `_view_exam` 把「历次体检＋导出入口」排在
+#:   报告**之前** ⇒ 第一屏是归档与下载，结论卡被推到下面。创始人原话：
+#:   「我只看到了两个PDF下载」。这是**连带闸**（设计 §22 闸三）的缺口 ——
+#:   卡加进了 `_result_html`，没查调用方前后的顺序。
+#: ★ 闸五（同源）：判据直接调产品 `_view_exam`，不另写渲染。
+
+
+def _x8_page():
+    """两张存档 ＋ 已跑完的体检 ⇒ 卡／导出／历次三样都在（非空夹具）。"""
+    hub, old = _fresh_hub()
+    try:
+        _snap(1, hub)
+        _snap(0, hub)
+        return _exam_page()
+    finally:
+        _restore_hub(old)
+
+
+def _x8_core(page):
+    """X8 尺子：结论卡必须排在「导出入口」「历次体检」**之前**。"""
+    i_card = page.find("card sum")
+    i_exp = page.find("把这份结果存成一份文件")
+    i_hist = page.find("历次体检")
+    if i_card < 0:
+        return "页面上没有汇总卡（A1 置顶的结论卡）"
+    if i_exp < 0:
+        return "页面上没有导出入口（夹具应有可导出源）"
+    if i_hist < 0:
+        return "页面上没有历次体检（夹具应有两次存档）"
+    if i_card > i_exp:
+        return ("结论卡排在导出入口之后（card=%d export=%d）—— "
+                "第一屏看到的是下载，不是结论" % (i_card, i_exp))
+    if i_card > i_hist:
+        return ("结论卡排在历次体检之后（card=%d history=%d）—— "
+                "归档导航占了首屏" % (i_card, i_hist))
+    return True
+
+
+@check("X8 ★ 体检页版面顺序：结论卡在「导出入口」「历次体检」之前（A1 置顶）")
+def c_x8():
+    return _x8_core(_x8_page())
+
+
+@check("N-X8 ★ 负控：把导出入口挪回报告之前 ⇒ X8 必须红")
+def n_x8():
+    src = _src(_SERVER_REL)
+    a = "    out.append(_EXAM_BOUND)\n"
+    if a not in src:
+        return ("变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，"
+                "不算通过：%r" % a)
+    mut = src.replace(
+        a, a + "    out.append(_exam_export_links(_exam_export_base(_arch, chosen, st)))\n", 1)
+    hub, old = _fresh_hub()
+    try:
+        _snap(1, hub)
+        _snap(0, hub)
+        p, why = _exam_mut(mut, "is0490_nx8")
+    finally:
+        _restore_hub(old)
+    if why:
+        return why
+    if _x8_core(p) is True:
+        return "负控失效：导出入口挪到结论卡之前后 X8 没红"
+    if _x8_core(_x8_page()) is not True:
+        return "夹具不成立：真实现本身就被 X8 判红 ⇒ 负控无分辨力"
+    return True
+
+
+def _x9_core(src):
+    """X9 尺子：PDF 导出 —— 与 HTML 同源；转不出来明确失败，不拿 HTML 冒充。"""
+    parts = src.split("def _exam_export(self, query):", 1)
+    if len(parts) != 2:
+        return "没有导出处理器"
+    body = parts[1].split("\n        def ", 1)[0]
+    if '== "pdf"' not in body:
+        return "导出处理器没有 fmt=pdf 分支（下载仍是 HTML）"
+    if "_exam_pdf_bytes(html_txt" not in body:
+        return "PDF 不是从同一份导出 HTML 转的（闸五 同源：不许第二个模板）"
+    if '"application/pdf"' not in body:
+        return "PDF 分支没按 application/pdf 发送"
+    if ".pdf" not in body:
+        return "文件名没换成 .pdf（下载下来还叫 .html）"
+    if "503" not in body:
+        return "转不出来时没有明确失败（不许拿 HTML 冒充 PDF）"
+    return True
+
+
+@check("X9 ★ 体检结果可下载为 PDF：与 HTML 同源；转不出来明确失败、不冒充")
+def c_x9():
+    """结构腿看源码；行为腿喂「本机没有 Edge」——失败必须如实返回 None。
+    ★ 真转 PDF（Edge 无头打印）由活体回读验证（闸四：同一 URL 回读、查 %PDF- 头），
+      本判据不起子进程 —— 闸门里起浏览器会时红时绿（铁律 2）。"""
+    r = _x9_core(_src(_SERVER_REL))
+    if r is not True:
+        return r
+    old = SV._edge_exe
+    try:
+        SV._edge_exe = lambda: ""
+        pdf, why = SV._exam_pdf_bytes("<h1>x</h1>")
+    finally:
+        SV._edge_exe = old
+    if pdf is not None:
+        return "找不到 Edge 时仍返回了字节 —— 失败必须如实返回 None"
+    if "Edge" not in (why or ""):
+        return "失败原因没说是找不到 Edge：%r" % (why,)
+    return True
+
+
+@check("N-X9 ★ 负控：摘掉 fmt=pdf 分支／让 PDF 拿 HTML 冒充 ⇒ X9 必须各自红")
+def n_x9():
+    src = _src(_SERVER_REL)
+    a = 'if (q.get("fmt") or ["html"])[0].lower() == "pdf":'
+    b = "_exam_pdf_bytes(html_txt, root=root)"
+    for x in (a, b):
+        if x not in src:
+            return ("变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，"
+                    "不算通过：%r" % x[:60])
+    if _x9_core(src.replace(a, "if False:")) is True:
+        return "负控①失效：fmt=pdf 分支被摘掉后 X9 没红"
+    if _x9_core(src.replace(b, "(html_txt.encode('utf-8'), '')")) is True:
+        return "负控②失效：拿 HTML 冒充 PDF 后 X9 没红"
+    if _x9_core(src) is not True:
+        return "夹具不成立：真实现本身就被 X9 判红 ⇒ 负控无分辨力"
     return True
 
 

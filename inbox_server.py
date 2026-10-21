@@ -3201,13 +3201,101 @@ def _exam_export_links(base):
       就能发现（§10.3：选错文件＝静默给错版本，与「没说＝没有」同族）。
     ★ 不带 `?t=` 也照旧工作：0.48.6 B3 起站内口令走 httpOnly cookie
       （与历次体检链接同一条路）。
+    ★★ 2026-10-21（创始人「下载能做成 PDF 而不是 HTML 吗」）：
+      **默认给 PDF**（转发给别人时 PDF 才是通用格式），HTML 原件仍留一个入口 ——
+      它是唯一「接收方可以读源码逐个核对数字」的形态（附件化三边界的信任属性）。
+      三种都指**同一份存档**，格式只换壳、不换数（`fmt` 只决定打包方式）。
     """
     b = _esc(base)
     return ("<div class=\"note\">把这份结果存成一份文件："
-            "<a href=\"/exam-export?e=%s&amp;san=1\">下载脱敏版</a>"
+            "<a href=\"/exam-export?e=%s&amp;san=1&amp;fmt=pdf\">PDF（脱敏）</a>"
             "（用户名已替换，可转给他人）｜"
-            "<a href=\"/exam-export?e=%s&amp;san=0\">下载完整版</a>"
-            "（含本机路径与用户名，只适合自己留着）</div>" % (b, b))
+            "<a href=\"/exam-export?e=%s&amp;san=0&amp;fmt=pdf\">PDF（完整）</a>"
+            "（含本机路径与用户名，只适合自己留着）｜"
+            "<a href=\"/exam-export?e=%s&amp;san=1\">HTML 原件</a>"
+            "（可逐个核对数字）</div>" % (b, b, b))
+
+
+#: PDF 打印用的 Edge 候选路径（本机实测只有 Edge；不装 Python PDF 库的理由见
+#: `_exam_pdf_bytes` 文档串）。
+_EDGE_CANDIDATES = (
+    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+)
+_EXAM_PDF_LOCK = threading.Lock()
+
+
+def _edge_exe():
+    """本机可用的 Edge 可执行文件；没有 ⇒ 空串（**不猜、不静默**）。"""
+    for p in _EDGE_CANDIDATES:
+        try:
+            if os.path.isfile(p):
+                return p
+        except OSError:
+            continue
+    return ""
+
+
+def _exam_pdf_bytes(html_txt, root=None, timeout=60):
+    """导出 HTML → PDF（本机 Edge 的**无头打印**）。返回 `(pdf_bytes, 原因)`。
+
+    ★★ 为什么不是 Python PDF 库：本仓「零运行时依赖」是产品论点的一部分（wheel
+      纯 stdlib，装完就能跑）。为一种导出格式塞 reportlab／weasyprint，等于给
+      自己的论点拆台 —— 而 Edge 是 Windows 自带、也正是用户此刻打开监理用的那个
+      浏览器。转不出来时**如实说**，不退回 HTML 冒充 PDF（格式给错与「选错文件」
+      同族：§10.3「静默给错版本」）。
+    ★ 落盘固定在自家中枢 `<hub>/console/export-tmp/`，**覆盖写、不删除**：
+      宿主的删除动作会走回收站（单次近 10s，本仓踩过）；`mtime` 前进才认新产物，
+      不靠「文件在不在」判断成功（旧文件会把失败伪装成成功）。
+    """
+    import inbox_config as _C
+    exe = _edge_exe()
+    if not exe:
+        return None, "这台机器上没找到 Edge（PDF 由它打印，本仓不带 PDF 依赖）"
+    d = os.path.join(_C.console_dir(root), "export-tmp")
+    try:
+        os.makedirs(d, exist_ok=True)
+        src = os.path.join(d, "exam.html")
+        out = os.path.join(d, "exam.pdf")
+        with open(src, "w", encoding="utf-8", newline="\n") as f:
+            f.write(html_txt)
+    except OSError as e:
+        return None, "临时文件写不进去（%s）" % e
+    before = os.path.getmtime(out) if os.path.exists(out) else 0.0
+    cmd = [exe, "--headless", "--disable-gpu", "--no-first-run",
+           "--user-data-dir=" + os.path.join(d, "edgeprof").replace("\\", "/"),
+           "--print-to-pdf=" + out.replace("\\", "/"),
+           "file:///" + src.replace("\\", "/")]
+    try:
+        with _EXAM_PDF_LOCK:                      # Edge 实例串行：并发打印会互相踢
+            subprocess.run(cmd, timeout=timeout, check=False,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           creationflags=0x08000000 if os.name == "nt" else 0)
+    except Exception as e:                        # noqa: BLE001
+        return None, "Edge 打印没跑完（%s: %s）" % (type(e).__name__, e)
+    try:
+        if not os.path.exists(out) or os.path.getmtime(out) <= before:
+            return None, "Edge 没产出新的 PDF（版本不支持无头打印？）"
+        with open(out, "rb") as f:
+            data = f.read()
+    except OSError as e:
+        return None, "PDF 读不回来（%s）" % e
+    if not data.startswith(b"%PDF-"):
+        return None, "Edge 产出的东西不是 PDF"
+    return data, ""
+
+
+def _exam_pdf_fail_html(base, why):
+    """PDF 转不出来时的**人话页**（带 HTML 入口，不让人走进死胡同）。"""
+    return ("<!doctype html><html lang=\"zh-CN\"><meta charset=\"utf-8\">"
+            "<title>PDF 没转出来</title>"
+            "<div style=\"font:15px/1.7 system-ui;padding:24px;max-width:680px\">"
+            "<h2>PDF 没转出来</h2><p>%s。</p>"
+            "<p>HTML 那一份仍然可以下载："
+            "<a href=\"/exam-export?e=%s&amp;san=1\">下载 HTML 原件</a></p>"
+            "<p style=\"color:#666\">PDF 由本机 Edge 打印生成 —— "
+            "本仓不带 PDF 依赖（装完就能跑，不额外拉库）。</p></div></html>"
+            % (_esc(why), _esc(base)))
 
 
 def _exam_history_html(hist, chosen):
@@ -3383,10 +3471,6 @@ def _view_exam(token="", pick=None):
         out.append("<div class=\"guide\"><b>%s</b></div>" % _EXAM_GUIDE)
     # ---- 边界（§20.2：TPL 原文逐字保留 ＋ 局部边界新增，写在首屏）----
     out.append(_EXAM_BOUND)
-    # ---- 历次体检（每一次都能回看；只有一次时不显示，不啰嗦）----
-    out.append(_exam_history_html(hist, chosen))
-    # ---- 导出入口（D1/E：默认脱敏、一键完整版；没有可导出源就不画按钮）----
-    out.append(_exam_export_links(_exam_export_base(_arch, chosen, st)))
     # ---- 触发／进行中／结果 ----
     if st.get("state") == "running":
         out.append("<div class=\"note\">体检正在进行：%s"
@@ -3427,6 +3511,13 @@ def _view_exam(token="", pick=None):
             out.append("<div class=\"note\">这次打开还没跑过体检。跑一次只要几分钟，"
                        "全程只读，不改你电脑上的任何文件。</div>")
         out.append(_form(token, "exam", label="开始体检"))
+    # ---- 导出入口（放在报告**之后**：先看结论，再决定要不要存一份）----
+    # ★★ 2026-10-21 创始人实测报障：这两块原先排在报告**之前**，第一屏看到的
+    #   是「历次体检一行 ＋ 两个下载」，而结论卡在它们下面 ⇒ 与 A1「汇总卡置顶」
+    #   自相矛盾（原话：「我只看到了两个PDF下载」）。设计稿 §38.6 已按此改写。
+    out.append(_exam_export_links(_exam_export_base(_arch, chosen, st)))
+    # ---- 历次体检（归档导航，放最后；只有一次时不显示，不啰嗦）----
+    out.append(_exam_history_html(hist, chosen))
     return "<div class=\"exam\">%s</div>" % "".join(out)
 
 
@@ -4009,6 +4100,22 @@ def _make_handler(token, root):
                                             _A._ev_human, meta)
             html_txt, masked = _U._exam_sanitize(html_txt, lv, extra=ws)
             fn = _U._exam_export_filename(meta)
+            # ★★ 2026-10-21（创始人：「下载能做成 PDF 而不是 HTML 吗」）：
+            #   `fmt=pdf` ⇒ 用**同一份**导出 HTML 交给本机 Edge 无头打印
+            #   （闸五 同源：格式只换壳，数还是那一份，不写第二个模板）。
+            #   转不出来 ⇒ 503 ＋ 人话页 ＋ HTML 入口；**绝不拿 HTML 冒充 PDF**。
+            if (q.get("fmt") or ["html"])[0].lower() == "pdf":
+                pdf, why = _exam_pdf_bytes(html_txt, root=root)
+                if pdf is None:
+                    print("[console] exam-export pdf failed: %s" % why)
+                    return self._send(503, "text/html; charset=utf-8",
+                                      _exam_pdf_fail_html(base, why).encode("utf-8"))
+                fn = os.path.splitext(fn)[0] + ".pdf"
+                print("[console] exam-export -> %s (lv=%d, masked=%s, pdf %dB)"
+                      % (fn, lv, masked, len(pdf)))
+                return self._send(200, "application/pdf", pdf,
+                                  extra={"Content-Disposition":
+                                         "attachment; filename=\"%s\"" % fn})
             print("[console] exam-export -> %s (lv=%d, masked=%s)"
                   % (fn, lv, masked))
             return self._send(200, "text/html; charset=utf-8",
