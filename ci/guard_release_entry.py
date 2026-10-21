@@ -2,7 +2,12 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: Apache-2.0
 
-"""0.42.0 判据 —— **发布入口不许退化成"建了没人用"**（S40–S42 ＋ S48-release/S49/S50-release，各带负控）。
+"""0.42.0 判据 —— **发布入口不许退化成"建了没人用"**（S40–S42 ＋ S48-release/S49/S50-release ＋ S53，各带负控）。
+
+  ★ S54-release（2026-10-22 新增）：**研发树复位步必须在入口里，且必须在验收之后**。
+    S40 只查三个 token，`_finalize_dev_tree` 那两行零判据覆盖 —— 删掉它 S40 照样绿，
+    而漏一次复位就把「研发树自检不符」渲染成假失守摆到用户眼前（0.53.1 漏两次、
+    19:22 绕行出包又复发一次）。S70/N-S70 守**效果**（落差必须在），本条守**存在**。
 
 ★★ 这条判据为什么必须存在（2026-10-09 本班三次复发）：
 
@@ -106,39 +111,88 @@ def _load_module(src, name):
 
 
 # ══════════ S40 · 发布入口必须真的串起三步 ══════════════════════════════
-@check("S40 发布入口串联三步：build_package(--verify) → 出包 → verify_release")
-def s40():
-    rel = "scripts/release.py"
-    if not os.path.isfile(os.path.join(ROOT, rel)):
-        return "找不到 %s —— 入口不存在" % rel
-    tree = _tree(_src(rel))
-    # 三个必需调用：build_package.py / python -m build / verify_release.py
-    text = _src(rel)
+def _s40_core(src):
+    """S40 的纯判断（正/负控共用，**不二次实现**）：三 token 在＋顺序对。
+
+    ★★ 2026-10-22 修正：顺序锚点改走 **AST 常量**。
+      旧写法用 `text.index(...)` 比 `build_package.py` 与 `verify_release.py`
+      的首现位置 —— 而这两个串都在 `release.py` 的**模块 docstring** 里就先出现过
+      （第 11 行／第 16 行）⇒ 11 < 16 恒成立 ⇒ **顺序检查恒绿**。
+      实证（`output/_p_s40_anchor.py`）：把 verify_release 那段调用真挪到
+      build_package 之前，旧逻辑仍判过。只认 `main` 函数体内的字符串常量。
+    """
+    text = src
     for token, why in (("build_package.py", "装配＋闸门＋两次 harness"),
                        ('"-m", "build"', "出 wheel/sdist"),
                        ("verify_release.py", "发布验收")):
         if token not in text:
             return "入口里没有调用 %s（%s）—— 这一步会变成没人做的手工活" % (token, why)
-    # 且顺序必须是 build_package 在前、verify_release 在后（不许验一个没出的包）
-    i_bp = text.index("build_package.py")
-    i_vr = text.index("verify_release.py")
-    if i_bp > i_vr:
-        return "顺序反了：verify_release 出现在 build_package 之前"
-    return True
+    tree = _tree(text)
+    main = _func(tree, "main")
+    if main is None:
+        return "找不到 main 函数（顺序判不出）"
+    bp = [n.lineno for n in ast.walk(main)
+          if isinstance(n, ast.Constant) and n.value == "build_package.py"]
+    vr = [n.lineno for n in ast.walk(main)
+          if isinstance(n, ast.Constant) and n.value == "verify_release.py"]
+    if not bp or not vr:
+        return ("main 里找不到 build_package.py / verify_release.py 的调用常量"
+                "（锚点没了，判不出不许算通过）")
+    if max(bp) > min(vr):
+        return ("顺序反了：build_package（第 %s 行）在 verify_release（第 %d 行）之后"
+                " —— 不许验一个没出的包" % (bp, min(vr)))
+    return None
 
 
-@check("N-S40 负控：把 verify_release 那一步摘掉 ⇒ S40 必须报红")
+@check("S40 发布入口串联三步：build_package(--verify) → 出包 → verify_release")
+def s40():
+    rel = "scripts/release.py"
+    if not os.path.isfile(os.path.join(ROOT, rel)):
+        return "找不到 %s —— 入口不存在" % rel
+    r = _s40_core(_src(rel))
+    return r if r is not None else True
+
+
+@check("N-S40 负控：把 verify_release 那一步摘掉／把顺序调换 ⇒ S40 必须各自红")
 def n_s40():
+    """两个方向都要真红：① 摘 token；② **只调顺序**（2026-10-22 补的方向）。
+
+    ★ 为什么补方向②：旧负控只验「摘掉」，而旧 S40 的顺序检查本身恒绿
+      （锚点钉在 docstring 上）⇒ 那个方向从来没被证过。现在 S40 用 AST 常量，
+      负控必须喂一个**真把顺序调换**的变异体，否则新锚点同样没被证。
+    """
     src = _src("scripts/release.py")
     anchor = '"verify_release.py"'
     if anchor not in src:
         return "负控无效：入口里找不到 verify_release 引用"
+    # 方向①：摘掉**全部**引用（旧版只摘第一处 —— 那处在 docstring 里， main 的
+    # 调用还在 ⇒ 新核心仍绿，负控会自曝失效，故必须全摘）。
     mut = src.replace(anchor, '"verify_release_REMOVED.py"')
-    if anchor not in _src("scripts/release.py"):
-        return "负控无效：变异没有落在真实文件上"
-    # 直接判字符串（S40 的同款逻辑，只是喂变异后的源码）
-    if '"verify_release.py"' in mut:
-        return "负控失效：摘掉那一步后入口仍引用 verify_release"
+    r1 = _s40_core(mut)
+    if r1 is None:
+        return "负控失效：摘掉 verify_release 后 S40 仍绿"
+    # 方向②：把 verify_release 那段调用整块挪到 build_package 调用之前。
+    a = '    cmd = [py, os.path.join(ROOT, "scripts", "verify_release.py"),'
+    if a not in src:
+        return "负控无效：找不到 verify_release 的 cmd 赋值锚点"
+    i = src.index(a)
+    j = src.index('    rc = _run(cmd, cwd=ROOT)', i)
+    j = src.index("\n", j) + 1
+    block = src[i:j]
+    rest = src[:i] + src[j:]
+    k = rest.index('    rc = _run([sys.executable, os.path.join(ROOT, "scripts",'
+                   ' "build_package.py"),')
+    # ★ 必须回到**行首**：这个 `_run([...])` 调用跨两行，插到第一行末尾会插在
+    #   语句中间 ⇒ 变异体语法坏（负控连抓两次：先 substring not found，再 SyntaxError）。
+    k = rest.rfind("\n", 0, k) + 1
+    mut2 = rest[:k] + block + rest[k:]
+    if mut2 == src:
+        return "负控无效：顺序变异没有落在真实文件上"
+    r2 = _s40_core(mut2)
+    if r2 is None:
+        return "负控失效：把 verify_release 调到 build_package 之前，S40 仍绿"
+    if "顺序" not in str(r2):
+        return "负控咬错地方：顺序变异该因「顺序」红，实得 %r" % str(r2)[:60]
     return True
 
 
@@ -579,10 +633,85 @@ def n_s53():
     return True
 
 
+# ══════════ S54-release · 研发树复位步必须在入口里（2026-10-22）══════════
+def _s54_core(src):
+    """S54-release 的纯判断（正/负控共用）：复位步**在**，且**在验收之后**。
+
+    ★ 为什么需要它：S40 只查三个 token，**复位步零判据覆盖** —— 今天把
+      `release.py` 里 `_finalize_dev_tree` 那两行删掉，S40 照样绿。而漏一次复位
+      就把「研发树自检不符」渲染成**假失守**摆到用户眼前（0.53.1 漏过两次，
+      19:22 又因绕行出包复发一次）。S70/N-S70 守的是**效果**（落差必须在），
+      本条守**存在**（这一步还在不在入口里）——两件事，两条尺子。
+
+    ★ 锚点纪律（与 S40 2026-10-22 修正同病）：顺序必须比 **main 内的 AST 常量**，
+      不许比 `src.find` —— `verify_release.py` 在模块 docstring 第 16 行就出现过，
+      比注释位置会让顺序检查恒绿（干跑时变异体当场溜过，见 output/_p_s54_dryrun.py）。
+    """
+    tree = _tree(src)
+    defs = [n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]
+    if "_finalize_dev_tree" not in defs:
+        return "同文件里没有 _finalize_dev_tree 的定义（调用会指向不存在的东西）"
+    main = _func(tree, "main")
+    if main is None:
+        return "找不到 main 函数"
+    calls = _calls(main)                      # [(lineno, name)]，按源码顺序
+    fin = [ln for ln, nm in calls if nm == "_finalize_dev_tree"]
+    if not fin:
+        return ("main 里没有调用 _finalize_dev_tree(...) —— 研发树复位这一步会变成"
+                "没人做的手工活（漏一次就把假失守摆到用户眼前）")
+    vr = [n.lineno for n in ast.walk(main)
+          if isinstance(n, ast.Constant) and n.value == "verify_release.py"]
+    if not vr:
+        return "main 里没有 verify_release.py 的调用常量（锚点没了，判不出）"
+    if not [ln for ln in fin if ln > max(vr)]:
+        return ("_finalize_dev_tree（第 %s 行）在 verify_release（第 %d 行）之前"
+                " —— 顺序反了：没验收完就复位" % (fin, max(vr)))
+    return None
+
+
+@check("S54-release 发布最后一步必须复位研发树（_finalize_dev_tree，且在 verify_release 之后）")
+def s54_release():
+    r = _s54_core(_src("scripts/release.py"))
+    return r if r is not None else True
+
+
+@check("N-S54-release 负控：摘掉复位调用／把它提到验收之前 ⇒ S54-release 必须各自红")
+def n_s54_release():
+    """两个方向都喂**内存变异**（零写盘），且必须因各自的红因红。
+
+    ★ 变异体只改**调用点**不改定义（干跑第一版用全局 replace 把定义也改了，
+      红因跑偏成「没有定义」，测的不是想测的那件事）。
+    """
+    src = _src("scripts/release.py")
+    anchor = "    if _finalize_dev_tree(version) != 0:\n        return 1\n"
+    if anchor not in src:
+        return "负控无效：入口里找不到复位调用那两行"
+    # 方向①：摘掉调用
+    r1 = _s54_core(src.replace(anchor, "", 1))
+    if r1 is None:
+        return "负控失效：摘掉复位调用后 S54-release 仍绿"
+    if "没有调用" not in str(r1):
+        return "负控咬错地方：摘除变异该因「没有调用」红，实得 %r" % str(r1)[:60]
+    # 方向②：把调用提到 verify_release 之前
+    mark = '    _step("3/3"'
+    if mark not in src:
+        return "负控无效：找不到 _step(\"3/3\") 锚点"
+    mut2 = src.replace(anchor, "", 1).replace(mark, anchor + "\n" + mark, 1)
+    if mut2 == src:
+        return "负控无效：提前变异没有落在真实文件上"
+    r2 = _s54_core(mut2)
+    if r2 is None:
+        return "负控失效：把复位提到验收之前，S54-release 仍绿"
+    if "顺序" not in str(r2):
+        return "负控咬错地方：提前变异该因「顺序」红，实得 %r" % str(r2)[:60]
+    return True
+
+
 def main():
     print("=" * 74)
     print("0.42.0 判据 —— 发布入口不许退化成「建了没人用」"
-          "（S40–S42 ＋ S48-release/S49/S50-release ＋ S53 交接自检）")
+          "（S40–S42 ＋ S48-release/S49/S50-release ＋ S53 交接自检"
+          " ＋ S54-release 复位步，各带负控）")
     print("=" * 74)
     for n, r in PASSED:
         print("  ✅ %s" % n)
