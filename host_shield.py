@@ -3311,9 +3311,9 @@ def _ensure_alive_locked(pkg_root, cause="manual"):
         ok, pid, mode = spawn_sentinel(pkg_root)
         if ok:
             record(audit_dir, "host_shield_revived", decision="allow", severity="warning",
-                   reason="监理刚才不在%s，已经由%s重新拉起（拉起方式：%s）。"
+                   reason="监理曾不在岗%s，已由%s重新拉起（拉起方式：%s）。"
                           % (_pid_note(old_pid), _cause_text(cause), _mode_text(mode)),
-                   pid=pid, cause=cause, spawn_mode=mode)
+                          pid=pid, cause=cause, spawn_mode=mode)
             return "revived"
         record(audit_dir, "host_shield_spawn_failed", decision="deny", severity="critical",
                subkind="spawn_failed",

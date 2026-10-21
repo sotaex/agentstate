@@ -2254,6 +2254,11 @@ def _view_report(rep, token, items=None):
         """
         scoped_filter = "win:%d:%s" % (hrs, filt)
         # ★ 0.47.0（方案 §5 步三）：这个数是分子 ⇒ 同行带分母（窗口内总记录数）。
+        # ★★ 0.53.5（STE100 体检 S-03）：卡片标题数的是**过去 24 小时**的事
+        #   ⇒ 显示词走 `event_short()`（出事/挡下/提醒），不再用只认此刻的
+        #   灯态词（旧标题「失守（R0）」把状态词当事件词数，与术语表词条
+        #   「失守只认此刻」自相矛盾）。词条本名与定义进展开体首行
+        #   （`chip()` 的 head 机制，data-t 落点不变 ⇒ P13 照绿）。
         return ("<div class=\"metric\"><div class=\"k\">%s</div>"
                 "<div class=\"v\" style=\"color:var(%s)\">"
                 # ★ 0.50.4（Q-02）：给分母带上**单位**（条）—— 单位可见（U-08
@@ -2267,7 +2272,7 @@ def _view_report(rep, token, items=None):
                 "<a href=\"/?v=inbox&f=%s\">%d</a>"
                 "<span class=\"unit\"> 条</span></div>"
                 "</div>"
-                % (GL.chip(k), var, _esc(scoped_filter), n))
+                % (GL.chip(k, text=M.event_short(k)), var, _esc(scoped_filter), n))
 
     #: ★ 0.48.5（交接件 §5.4 甲4）：这一排四个数字的口径说明走
     #   `M.reading_note()` —— 与收件箱筛选条**同一个唯一实现**（旧版这里另写
@@ -2311,15 +2316,18 @@ def _view_report(rep, token, items=None):
     _day = _esc(rep["day"])
     # ★ 0.47.0：当日三档各是分子 ⇒ 分母＝当日全部记录条数（当日 ＝ 24 小时窗口）。
     _day_total = sum(int(Lv.get(k, 0) or 0) for k in ("R0", "L2", "L1"))
-    _today_levels = ("<a href=\"/?v=inbox&f=day:%s:lv:R0\">失守 %d</a> ｜ "
-                     "<a href=\"/?v=inbox&f=day:%s:lv:L2\">拦截 %d</a> ｜ "
-                     "<a href=\"/?v=inbox&f=day:%s:lv:L1\">注意 %d</a>"
+    # ★★ 0.53.5（STE100 体检 S-02）：这里数的是**过去**的事 ⇒ 词走
+    #    `event_short()`（出事/挡下/提醒），不再用只认此刻的灯态词。
+    #    旧写法「失守 3」把状态词当事件词数，与术语表词条自相矛盾。
+    _today_levels = ("<a href=\"/?v=inbox&f=day:%s:lv:R0\">%s %d</a> ｜ "
+                     "<a href=\"/?v=inbox&f=day:%s:lv:L2\">%s %d</a> ｜ "
+                     "<a href=\"/?v=inbox&f=day:%s:lv:L1\">%s %d</a>"
                      # ★ 0.48.5（交接件 §5.4 丙2）：「分母 N」改成直述「共 N 条」——
                      #   「分母」是术语词条里的词（口径行才是它的定义处），
                      #   正文里裸它是把术语当时尚词；意思一点没少。
                      " ｜ 共 %d 条"
-                     % (_day, Lv["R0"], _day, Lv["L2"],
-                        _day, Lv["L1"], _day_total))
+                     % (_day, M.event_short("R0"), Lv["R0"], _day, M.event_short("L2"), Lv["L2"],
+                        _day, M.event_short("L1"), Lv["L1"], _day_total))
     pr = ("<div class=\"card\"><div class=\"rows fit\">"
           "<div class=\"row\"><span class=\"k\">最近 %d 小时%s</span><span>%s</span></div>"
           "<div class=\"row\"><span class=\"k\">%s 当日合计</span><span>%s</span></div>"
@@ -2679,7 +2687,7 @@ def _view_health(rep, token, items=None):
                        % (_hs["total"], _hs["attributed"], _who,
                           "、".join(_conf), _hs["unclear"], _pct))
         if _hs["unclear_ratio"] > 0.05:
-            _host_value += "说不清偏多——多半是记录太旧，或最近换过工具。"
+            _host_value += "说不清偏多——多半是记录太旧，或换过工具。"
             _host_css = "warn"
         else:
             _host_css = "ok"
@@ -2836,8 +2844,12 @@ def _view_ledger(rep, token, items=None):
     # ★ 0.53.0（T4.3，设计 §14.5 第 2 条）：**今天不在这一页出数** ——
     #   一行深链到日报。刻意**不**把今天的四个数搬过来：搬过来就是同一事实
     #   两个落点，而两个落点迟早不同源（本仓 F40 的经典作案现场）。
-    _today_line = ('<p class="note">今天的数在 <a href="/?v=report">日报</a>'
-                   '（同一口径，这里不重复）；下面是已经过完的日子。</p>'
+    # ★★ 0.53.5（STE100 体检 S-05）：①「今天」换成**具体日期**（相对时间词
+    #   会随阅读日期漂移——页面开着跨过午夜就指错天）；②「同一口径」换成
+    #   「两边算法一样」（「口径」是工程词，读者没有这个概念）。
+    _today_line = ('<p class="note">%s 的数在 <a href="/?v=report">日报</a>'
+                   '（两边算法一样，这里不重复）；下面是已经过完的日子。</p>'
+                   % _esc(rep.get("day") or "")
                    if has_data else "")
     # ────────────────────────────────────────────────────────────────
     # ★★ 0.51.0 明细区（银行流水模式，v1.1 设计）：区一「最近 7 天」＋
@@ -2857,7 +2869,9 @@ def _view_ledger(rep, token, items=None):
         #   六态一改名就必然漏掉这一处（0.51.0 定名「失守」而账本留「防护缺口」，
         #   就是这么发生的，且没有任何判据能发现）。派生后改六态名，账本自动跟。
         for key, lv in (("blocked", "L2"), ("noticed", "L1"), ("breached", "R0")):
-            word = M.STATE_LABEL[lv]
+            # ★ 0.53.5（STE100 体检 S-02）：日行格子数的是**过去**的事 ⇒ 词走
+            #   `event_short()`，与「当日合计」行同一份事件词源。
+            word = M.event_short(lv)
             n = int(e.get(key) or 0)
             # 当天没有事件的级别显示 0 但**不可点**（点了是空页，纯噪音）。
             out.append(('<a href="/?v=inbox&f=day:%s:lv:%s">%s %d</a>' % (d, lv, word, n))
@@ -2929,11 +2943,13 @@ def _view_ledger(rep, token, items=None):
             mrows.append(
                 "<details class=\"month\"><summary><span class=\"k\">%s</span>"
                 # ★ 0.53.1：月行的格子名同样从六态表派生（与日行同一份词源）。
+                # ★ 0.53.5（STE100 体检 S-02）：但**事件词**走第二真源
+                #   `event_short()`（出事/挡下/提醒）—— 月行数的全是过去的事。
                 "<span>%s %d · %s %d · %s %d · 已处理 %d ｜ 有记录 %d 天</span></summary>"
                 "<div class=\"rows\">%s</div></details>"
-                % (_mlabel(ym), M.STATE_LABEL["L2"], tot["blocked"],
-                   M.STATE_LABEL["L1"], tot["noticed"],
-                   M.STATE_LABEL["R0"], tot["breached"],
+                % (_mlabel(ym), M.event_short("L2"), tot["blocked"],
+                   M.event_short("L1"), tot["noticed"],
+                   M.event_short("R0"), tot["breached"],
                    tot["acked"], len(mdays), body_rows))
         sections += ("<div class=\"card\"><h2>更早 · 按月</h2>"
                      "<div class=\"rows\">%s</div></div>" % "".join(mrows))

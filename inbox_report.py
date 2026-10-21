@@ -315,13 +315,15 @@ def daily_report(day=None, root=None, chain_files=None, items=None,
     win_levels = M.window_levels(items, hours=hours)
 
     # ★ 每个数字都带**钻取键**（页面据此生成链接，判定不写在页面里）
+    # ★ 0.53.5（STE100 体检 S-03）：label 是**过去**的记录数 ⇒ 走
+    #   `event_short()`（出事/挡下/提醒），不用只认此刻的灯态词。
     drill = [
-        {"key": "L2", "label": M.state_short("L2"), "count": win_levels["L2"], "filt": "lv:L2"},
-        {"key": "L1", "label": M.state_short("L1"), "count": win_levels["L1"], "filt": "lv:L1"},
-        {"key": "R0", "label": M.state_short("R0"), "count": win_levels["R0"], "filt": "lv:R0"},
+        {"key": "L2", "label": M.event_short("L2"), "count": win_levels["L2"], "filt": "lv:L2"},
+        {"key": "L1", "label": M.event_short("L1"), "count": win_levels["L1"], "filt": "lv:L1"},
+        {"key": "R0", "label": M.event_short("R0"), "count": win_levels["R0"], "filt": "lv:R0"},
     ]
     if win_levels["Ls"]:
-        drill.append({"key": "Ls", "label": M.state_short("Ls"), "count": win_levels["Ls"],
+        drill.append({"key": "Ls", "label": M.event_short("Ls"), "count": win_levels["Ls"],
                       "filt": "lv:Ls"})
 
     # ★ 2026-10-21（TAB 卡顿根治·方案 A）：`posture=None` ⇒ 自算（旧行为，
@@ -377,11 +379,14 @@ def render_text(rep):
         "Antinel 监理日报 · %s" % rep["day"],
         "=" * 34,
         "%s %d ｜ %s %d ｜ %s %d ｜ %s %d" % (
-            M.state_short("L2"), L_["L2"], M.state_short("L1"), L_["L1"],
-            M.state_short("R0"), L_["R0"], M.state_short("Ls"), L_["Ls"]),
-        "最近 %d 小时：拦截 %d ｜ 注意 %d ｜ 失守 %d（监理被拉起 %d 次）" % (
-            rep.get("window_hours", 24), rep.get("window_levels", {}).get("L2", 0),
-            rep.get("window_levels", {}).get("L1", 0), rep.get("window_levels", {}).get("R0", 0),
+            M.event_short("L2"), L_["L2"], M.event_short("L1"), L_["L1"],
+            M.event_short("R0"), L_["R0"], M.event_short("Ls"), L_["Ls"]),
+        # ★ 0.53.5（STE100 体检 S-03）：窗口行数的也是过去的事 ⇒ 事件词。
+        "最近 %d 小时：%s %d ｜ %s %d ｜ %s %d（监理被拉起 %d 次）" % (
+            rep.get("window_hours", 24), M.event_short("L2"),
+            rep.get("window_levels", {}).get("L2", 0),
+            M.event_short("L1"), rep.get("window_levels", {}).get("L1", 0),
+            M.event_short("R0"), rep.get("window_levels", {}).get("R0", 0),
             rep.get("revived_window", 0)),
         "要处理 %d 件事（共 %d 条）｜ 看一眼 %d ｜ 归档 %d" % (
             rep.get("action_groups", rep.get("buckets", {}).get("action", 0)),
@@ -408,14 +413,16 @@ def render_markdown(rep):
     L_ = rep["levels"]
     out = ["# Antinel 监理日报 · %s" % rep["day"], "",
            "| 级别 | 今日 |", "|---|---|",
-           "| R0 %s | %d |" % (M.state_short("R0"), L_["R0"]),
-           "| L2 %s | %d |" % (M.state_short("L2"), L_["L2"]),
-           "| L1 %s | %d |" % (M.state_short("L1"), L_["L1"]),
-           "| Ls %s | %d |" % (M.state_short("Ls"), L_["Ls"]), "",
-           "- 最近 **%d** 小时：拦截 %d ｜ 注意 %d ｜ 失守 %d（监理被拉起 %d 次）" % (
-               rep.get("window_hours", 24), rep.get("window_levels", {}).get("L2", 0),
-               rep.get("window_levels", {}).get("L1", 0),
-               rep.get("window_levels", {}).get("R0", 0), rep.get("revived_window", 0)),
+           "| R0 %s | %d |" % (M.event_short("R0"), L_["R0"]),
+           "| L2 %s | %d |" % (M.event_short("L2"), L_["L2"]),
+           "| L1 %s | %d |" % (M.event_short("L1"), L_["L1"]),
+           "| Ls %s | %d |" % (M.event_short("Ls"), L_["Ls"]), "",
+           "- 最近 **%d** 小时：%s %d ｜ %s %d ｜ %s %d（监理被拉起 %d 次）" % (
+               rep.get("window_hours", 24), M.event_short("L2"),
+               rep.get("window_levels", {}).get("L2", 0),
+               M.event_short("L1"), rep.get("window_levels", {}).get("L1", 0),
+               M.event_short("R0"), rep.get("window_levels", {}).get("R0", 0),
+               rep.get("revived_window", 0)),
            "- 要处理 **%d 件事**（%d 条记录）｜ 看一眼 %d 条 ｜ 归档 %d 条" % (
                rep.get("action_groups", 0),
                rep.get("buckets", {}).get("action", 0),

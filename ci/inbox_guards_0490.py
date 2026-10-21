@@ -3169,8 +3169,13 @@ def _t04_core(page, items):
     if 'class="metric"' in body:
         return "账本头部还有指标卡 —— 与日报同口径两个落点（T4.2 已撤）"
     # ② 今天：一行深链到日报（今天的数在这里没有第二份）
-    if "今天的数在" not in body or 'href="/?v=report"' not in body:
-        return "头部没有「今天的数在日报」深链 —— 今天的数没有去处"
+    #   ★ 0.53.5（STE100 体检 S-05）：原锚「今天的数在」是**逐字文案** ——
+    #     产品把「今天」换成具体日期后尺子当场瞎掉（死判据第五种形态的
+    #     同族：锚被产品改动天然满足/天然失效）。改锚**结构**：
+    #     今天的日期在场 ＋「的数在」在前 ＋ 深链指向日报，三件事齐了才算。
+    if (today_s not in body or "的数在" not in body
+            or 'href="/?v=report"' not in body):
+        return ("头部没有「%s 的数在日报」深链 —— 今天的数没有去处" % today_s)
     # ③ 区一在，窗口＝昨天起 7 个日历天（**今天不在区一**）
     if "过去 7 天" not in body:
         return "账本页没有「过去 7 天」区（明细区没了）"
@@ -3196,12 +3201,16 @@ def _t04_core(page, items):
         n = {k: int(e.get(k) or 0) for k in M.LEDGER_KEYS}
         if not any(n.values()):
             continue
-        # ★ 0.53.0 **根治（不是同步硬编码）**：期望词从六态表 `M.STATE_LABEL` 派生 ——
-        #   判据与产品同源：改六态名，产品与判据一起动，不存在"改了一边忘了另一边"。
+        # ★ 0.53.0 **根治（不是同步硬编码）**：期望词从六态表派生 ——
+        #   判据与产品同源：改词，产品与判据一起动，不存在"改了一边忘了另一边"。
         #   原来的写法把「防护缺口」直接写进判据 ⇒ 产品与判据**同时**停在旧词上，
         #   这条判据反过来还替旧词背书（正是它让 0.53.0 看起来全绿）。
+        # ★★ 0.53.5（STE100 体检 S-02）：日行格子数的是**过去**的事 ⇒ 词源换成
+        #   第二真源 `M.event_short()`（出事/挡下/提醒）。**这不是放松**：
+        #   产品若退回 `STATE_LABEL`（「拦截」），期望词仍是「挡下」⇒ 照样红
+        #   —— 这条腿从此还兼守"状态词不许当事件词数"（0372 S08 第三腿的页面侧）。
         for key, lv in (("blocked", "L2"), ("noticed", "L1"), ("breached", "R0")):
-            word = M.STATE_LABEL[lv]
+            word = M.event_short(lv)
             if n[key] and ('f=day:%s:lv:%s">%s %d</a>' % (d, lv, word, n[key])) not in body:
                 return "%s 的「%s」格数字或深链不对（现算 %d）" % (d, word, n[key])
         if n["acked"] and ('f=closed:%s">已处理 %d</a>' % (d, n["acked"])) not in body:

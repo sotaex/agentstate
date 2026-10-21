@@ -339,7 +339,7 @@ def _main(argv):
                                           e.get("machine") or ""))
     elif cmd == "seed":
         e = seed_once()
-        print("已发入驻口粮" if e else "入驻口粮此前已发过（不重复发）")
+        print("已发入驻口粮" if e else "入驻口粮已经发过（不重复发）")
         print("余额：", balance())
     else:
         print(json.dumps(summary(), ensure_ascii=False, indent=1))

@@ -22,6 +22,9 @@
        顶部灯的说明只能由 `light_explain()` 拼（S05/S06/S07）；
     ④ 六态**名**与**次序**也单源：名只能在 `inbox_model.py` 定义一份、
        其余模块一律派生（S08）；次序量的是「离终结有多近」（S09）。
+    ⑤ 2026-10-21（STE100 体检 S-03）补：**灯态词与事件词是两个真源** ——
+       前者只描述此刻（`state_short`），后者数过去的事（`event_short`），
+       R0/L2/L1 两表的值不许重叠（S08 的第二/第三腿）。
 
 ★★ 本文件的编写纪律（沿用本仓惯例）：
   · **每条判据都配负控**：把被测的机制故意改坏，判据必须报红。
@@ -604,6 +607,17 @@ def n_s07():
 #: ★ 为什么挡"第二份"而不是"多写几条断言"：漂移的**入口**就是"又抄了一份" ——
 #:   0.37.3 前同一个 Ls 态同时叫过 预算 / 额度 / 额度提示，就是抄了三份的结果。
 #:   堵住入口，比在每个出口巡逻更省事、也更难绕过。
+#: ★★ 2026-10-21（STE100 体检 S-03，创始人拍板）：**两个真源** ——
+#:   `STATE_LABEL` 的六个词**只描述此刻**（"失守"＝现在没人替你挡着），
+#:   而账本／日报／筛选条要用同样的键**数过去的事**。「昨日失守 3 次」
+#:   是把"只认此刻"的词拿去数历史 —— 读者刚在灯上学会「失守＝现在」，
+#:   翻一页又看见它当过去用，两个语义在同一套界面里打架（术语表词条
+#:   「失守只认此刻」的下一行曾写着「昨天失守」，一个词条内自相矛盾）。
+#:   ⇒ 第二真源 `EVENT_LABEL`（出事/挡下/提醒），同样只许一份声明；
+#:     R0/L2/L1 三个键两表的值**不许重叠**（重叠＝一词二义）。
+#:   ★ 老 S08 只保证"全仓一份真源"，没保证"一个词只对一个语义" ——
+#:     这正是「昨天失守」能天天绿着上屏的原因：词表本身没脏，脏的是
+#:     **拿灯态词去数账**这个用法，而没有任何尺子量它。
 ALLOWED_DECL_FILES = ("inbox_model.py", "inbox_guards_0372.py")
 
 #: 一份"态名声明"长什么样：`"<六态键>": "<含中文的值>"`。
@@ -619,6 +633,13 @@ _STATE_NAME_TOKENS = frozenset(
     list(SIX_LABELS.values()) + [L0_VARIANT, "中断"]              # 现行名＋合法变体
     + ["预算", "额度", "额度提示", "值守", "值守正常", "已拦截"])   # 历史别名
 
+#: ★ 第二真源 `EVENT_LABEL` 的**对照样**（同样写死，不 import 产品 ——
+#:   两边取自同一个常量的话，"有人把产品表改坏"时判据会跟着变，等于没守）。
+#:   只列 R0/L2/L1 三个键：Ls/L0/dev 两表同值是有意的（见 inbox_model 注释），
+#:   它们不参与"此刻 vs 过去"的冲突。
+EVENT_LABELS_REF = {"R0": "出事", "L2": "挡下", "L1": "提醒"}
+_EVENT_NAME_TOKENS = frozenset(EVENT_LABELS_REF.values())
+
 
 def _core_state_name(v):
     """去掉尾部 `（R0）`/`（Ls）` 这类括注，得到"名"本身。"""
@@ -631,6 +652,9 @@ def _decl_scan(files):
 
     ★ 纯函数（文本进、清单出）—— 这样负控可以喂**合成文本**来验分辨力，
       不必往盘上写一个假的源文件（本判据绝不写盘）。
+    ★ 2026-10-21：**两份真源各扫一份第二声明**。第二份 EVENT_LABEL 的辨认方式是
+      "同键同值"—— 只有值正好是 出事/挡下/提醒 时才认；散文（「有过失守」）
+      与别处的合法同键表（填桶名/CSS 变量名）都不误报。
     """
     bad = []
     for rel, text in files:
@@ -638,11 +662,33 @@ def _decl_scan(files):
             continue
         for m in _STATE_DECL_RE.finditer(text):
             key, val = m.group(1), m.group(2)
-            if _core_state_name(val) not in _STATE_NAME_TOKENS:
-                continue
+            core = _core_state_name(val)
             line = text[:m.start()].count("\n") + 1
-            bad.append("%s:%d 又写了一份态名（%s → %r）" % (rel, line, key, val))
+            if core in _STATE_NAME_TOKENS:
+                bad.append("%s:%d 又写了一份态名（%s → %r）" % (rel, line, key, val))
+            elif core in _EVENT_NAME_TOKENS:
+                bad.append("%s:%d 又写了一份事件名（%s → %r，真源只能是 "
+                           "inbox_model.EVENT_LABEL）" % (rel, line, key, val))
     return bad
+
+
+def _two_sources_ok(event_tb):
+    """两个真源的**关系**检查（纯函数，判据与负控共用）。返回问题串或 True。
+
+    两条腿：
+      ① 产品 EVENT_LABEL 与对照样逐字一致（词是**敲定**的，不是随手起的）；
+      ② R0/L2/L1 三个键的事件词不许掉进灯态词表（一词二义即红）。
+    """
+    for k, want in EVENT_LABELS_REF.items():
+        got = event_tb.get(k)
+        if got != want:
+            return ("事件名 %s 应是 %r，实际 %r —— 过去的事用什么词是 0.53.5 "
+                    "敲定的，改它等于把那次裁定作废" % (k, want, got))
+    for k in EVENT_LABELS_REF:
+        if event_tb.get(k) in SIX_LABELS.values():
+            return ("事件词 %r 掉进了灯态词表 —— 一个词同时描述'此刻'和'过去'，"
+                    "就是截图里「昨天失守」的根因" % event_tb.get(k))
+    return True
 
 
 def _skip_dir(name):
@@ -673,28 +719,56 @@ def _source_files():
     return out
 
 
-@check("S08 六态名只有一个出处（其余模块一律派生，第二份声明即报红）")
+@check("S08 两个真源各一份（灯态词/事件词；第二份声明或一词二义即报红）")
 def s08():
+    import inbox_model as M
     bad = _decl_scan(_source_files())
     if bad:
         return _raise("；".join(bad[:6]))
-    return "全仓只有 inbox_model.py 定义六态名，其余模块全部派生"
+    r = _two_sources_ok(M.EVENT_LABEL)
+    if r is not True:
+        return _raise(r)
+    return ("灯态词全仓只有 inbox_model.py 一份、事件词同样只有 "
+            "EVENT_LABEL 一份；R0/L2/L1 两表值零重叠")
 
 
-@check("N-S08 负控：往别的文件写第二份态名要抓到；散文不许误报")
+@check("N-S08 负控：第二份事件名/一词二义/事件词漂移，各自必须被抓到")
 def n_s08():
-    fake = [("inbox_server.py", 'X = {"R0": "失守", "Ls": "预算"}\n')]
+    import inbox_model as M
+    # ① 第二份事件名（往别的文件写一份 EVENT_LABEL）
+    fake = [("inbox_server.py", 'EVIL = {"R0": "出事", "L2": "挡下"}\n')]
     if not _decl_scan(fake):
-        return _raise("在别的文件里写第二份态名，S08 仍判干净 ⇒ 扫描器空转")
-    # 反向：句子（不是态名）不许被误判 —— 假阳性会逼人关掉这条判据
-    prose = [("inbox_tray.py", 'X = {"R0": "有过失守"}\nY = {"L0": "一切正常"}\n')]
+        return _raise("在别的文件里写第二份事件名，S08 仍判干净 ⇒ 扫描器空转")
+    # 反向：散文不许被误判（假阳性会逼人关掉这条判据）
+    prose = [("inbox_tray.py", 'X = {"R0": "出过事"}\nY = {"L2": "挡住过"}\n')]
     if _decl_scan(prose):
-        return _raise("把散文误判成态名声明 ⇒ 扫描器有假阳性")
+        return _raise("把散文误判成事件名声明 ⇒ 扫描器有假阳性")
+    # ② 一词二义：把事件词改回灯态词（「昨天失守」的根因形态）
+    orig = dict(M.EVENT_LABEL)
+    try:
+        M.EVENT_LABEL["R0"] = "失守"                                # ← MUTANT
+        if _two_sources_ok(M.EVENT_LABEL) is True:
+            return _raise("事件词与灯态词重叠（一词二义），S08 仍判通过 "
+                          "⇒ 截图里「昨天失守」那个形态没人守")
+    finally:
+        M.EVENT_LABEL.clear()
+        M.EVENT_LABEL.update(orig)
+    if _two_sources_ok(M.EVENT_LABEL) is not True:
+        return _raise("还原 EVENT_LABEL 后仍判红 ⇒ 还原链路坏了")
+    # ③ 事件词漂移：换一个同义字（「挡住」）也要红 —— 词是敲定的
+    try:
+        M.EVENT_LABEL["L2"] = "挡住"                                # ← MUTANT
+        if _two_sources_ok(M.EVENT_LABEL) is True:
+            return _raise("把「挡下」换成「挡住」，S08 仍判通过 "
+                          "⇒ 一词多义族（0.53.4 拦下/挡下）会从这里复发")
+    finally:
+        M.EVENT_LABEL.clear()
+        M.EVENT_LABEL.update(orig)
     # 现行源必须干净（判据与源码不一致时先报出来）
     bad = _decl_scan(_source_files())
     if bad:
         return _raise("现行源码里仍有第二份声明：%s" % bad[:3])
-    return "第二份声明被抓到；散文不误报；现行源干净"
+    return "第二份事件名/一词二义/事件词漂移都被抓到；散文不误报；现行源干净"
 
 
 # ══════════════════════════════ S09 光梯次序＝离终结的距离 ═══════════════════
