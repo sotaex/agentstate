@@ -5267,7 +5267,9 @@ def c_space_report():
            "dir_bytes": 2 * 1024 * 1024, "dir_files": 2, "dir_full": False,
            "readable": True}
     out = E.render({"ts": now, "idle": 0.0, "conns": []}, fs, 1, True, 0, cap=cap)
-    if "上限" not in out:
+    # ★★ S48：中文断言必须显式选层（`PC.body()` 剥 style/注释、留词条浮层）。
+    #   打在裸 `out` 上是在扫样式与注释里的同名字，不是用户读到的字。
+    if "上限" not in PC.body(out):
         return "渲染里没有上限 ⇒ 用户无法预判哪天开始丢"
     return True
 
