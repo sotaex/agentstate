@@ -1409,6 +1409,130 @@ def _raise(msg):
     raise AssertionError(msg)
 
 
+# ══════════════════════════════════════ S58 契约存在性（2026-10-22）═══════
+#: ★★ 为什么编号是 S58 而不是 S21：S01–S57 全仓已占（S21 在 0400，S22–S57 在
+#:   其他套件）。编号唯一性是铁律，跳号无害、撞号致命。落笔前用脚本扫过全仓。
+#:
+#: 这一条来自 2026-10-22 的一次核查：**设计件写了要求、代码里没有，而没有任何
+#: 判据检查「要求的实体是否存在」**。三处同型缺口（`chain_link_ok` 未实现、
+#: 睡眠证据源零实现、新文件未登 manifest）都是这一个洞的产物。
+#: ⇒ 做成双向对账：
+#:   ① 白名单里的符号必须真的能取到；
+#:   ② 取不到的必须**显式登记**并带补齐计划（否则红）；
+#:   ③ 登记了但实际已存在的 ⇒ 也红（表过期＝有人实现了没销账）。
+#: 为什么不做「全文扫描设计件」：那需要一份长期维护的豁免表，而本仓纪律是
+#: **小而准的判据优于大而漏的判据**。白名单是 F1 冻结的最小集，先守住它。
+
+#: F1 白名单（冻结件 §F1 第 93 行）—— ★ 本表是**实测落点**，不是照抄设计件：
+#:   §F1 把 `write_health` 写成 `host_shield.write_health()`，实测在 `audit_chain`；
+#:   §10.1（同件、带行号实证）写的是 `audit_chain.write_health()` ⇒ 以 §10.1 为准。
+#:   已登记为第 53 号猜测点（同一份设计件两处自相矛盾）。
+_WHITELIST = (
+    ("host_shield", "guard_posture"),
+    ("host_shield", "sentinel_heartbeat_age"),
+    ("host_shield", "armed_state"),
+    ("host_shield", "self_check"),
+    ("audit_chain", "write_health"),          # #53：§F1 笔误
+    ("granary", "state"),
+    ("egress", "capacity"),
+    ("inbox_model", "day_counts"),
+    ("inbox_model", "ledger_rows"),
+    ("inbox_model", "unrepaired_count"),
+    ("host_matrix", None),                    # 「现探结果」＝模块级（tools/host_matrix.py）
+    ("audit_chain", "chain_link_ok"),         # §10.1 要求新增（现未实现）
+)
+
+#: 已登记、**尚未实现**的条目。每项必须带非空补齐计划；空计划 ⇒ 红（不是豁免）。
+_EXPECTED_MISSING = {
+    "audit_chain.chain_link_ok":
+        "DAG-1 前补薄包装（§10.1 已冻结落点：复用 verify_chain 的 index_file/classify，"
+        "校验范围＝当日文件）；未补前 F1 按 §7.2 走 trace.missing 记名",
+}
+
+#: 设计件（反向对账用；不在本树时 SKIP 这一段，**不记绿**）
+_DOC_IFACE = os.path.join("docs",
+                          "Antinel·编码前无猜测审核与接口冻结 v1.0（2026-10-22）.md")
+
+
+def _wl_key(modname, sym):
+    return "%s.%s" % (modname, sym or "<module>")
+
+
+def _wl_has(modname, sym):
+    """(ok, why)。`host_matrix` 在 `tools/` 下，需单独入 path。"""
+    import importlib
+    tools = os.path.join(ROOT, "tools")
+    if tools not in sys.path:
+        sys.path.insert(0, tools)
+    try:
+        mod = importlib.import_module(modname)
+    except Exception as e:                                   # noqa: BLE001
+        return False, "import %s 失败：%r" % (modname, e)
+    if sym is None:
+        return True, ""
+    if not hasattr(mod, sym):
+        return False, "%s 里没有 %s" % (modname, sym)
+    return True, ""
+
+
+def _s58_problems():
+    """S58 的纯函数版 —— 判据与负控共用同一段判断，负控才不会量错东西。"""
+    bad = []
+    for modname, sym in _WHITELIST:
+        key = _wl_key(modname, sym)
+        ok, why = _wl_has(modname, sym)
+        plan = (_EXPECTED_MISSING.get(key) or "").strip()
+        if ok:
+            if key in _EXPECTED_MISSING:
+                bad.append("%s 已实现但仍在 _EXPECTED_MISSING 里 —— 表过期，须销账"
+                           % key)
+            continue
+        if not plan:
+            bad.append("%s 取不到且未登记补齐计划 —— %s" % (key, why))
+    return bad
+
+
+@check("S58 冻结件白名单的代码实体真实存在（设计写了、代码没有 ⇒ 必须登记并带计划）")
+def s58():
+    bad = _s58_problems()
+    assert not bad, "；".join(bad)
+    doc = os.path.join(ROOT, _DOC_IFACE)
+    if not os.path.exists(doc):
+        # ★ 测不出 ⇒ 明说跳过，**不许静默当绿**（铁律 1）
+        return "白名单全部取到；设计件不在本树，反向对账 SKIP（不记绿）"
+    with open(doc, encoding="utf-8") as f:
+        txt = f.read()
+    lost = [nm for (m, s) in _WHITELIST for nm in [s or m] if nm not in txt]
+    assert not lost, ("判据表里的 %r 在设计件里找不到 —— 两边各写各的（漂移）"
+                      % sorted(set(lost)))
+    return "%d 个符号全部取到，且设计件逐名可查" % len(_WHITELIST)
+
+
+@check("N-S58 负控：抹掉补齐计划 / 塞一个假符号 ⇒ S58 必须报红")
+def n_s58():
+    # ① 先把当前状态钉住：必须绿（否则负控无意义）
+    assert not _s58_problems(), "负控前置失败：S58 现在就是红的"
+    # ② 抹掉补齐计划 ⇒ 必须红
+    saved = dict(_EXPECTED_MISSING)
+    try:
+        _EXPECTED_MISSING.clear()
+        assert _s58_problems(), "清空补齐计划后 S58 仍绿 —— 负控失效"
+    finally:
+        _EXPECTED_MISSING.clear()
+        _EXPECTED_MISSING.update(saved)
+    # ③ 塞一个全树不存在的符号 ⇒ 必须红
+    global _WHITELIST
+    old = _WHITELIST
+    try:
+        _WHITELIST = old + (("host_shield", "__no_such_symbol_zz"),)
+        assert _s58_problems(), "塞入假符号后 S58 仍绿 —— 负控失效"
+    finally:
+        _WHITELIST = old
+    # ④ 还原后必须回到绿（判据不许有副作用）
+    assert not _s58_problems(), "负控还原后 S58 仍红 —— 判据有副作用"
+    return "三种改法各自真红，还原后回绿"
+
+
 def main():
     print("=" * 78)
     print("0.37.3 判据 —— 六态封闭 ＋ 已敲定词表不漂移（全部内存变异，不写盘）")
