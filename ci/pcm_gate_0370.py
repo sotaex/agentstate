@@ -319,9 +319,15 @@ def evaluate(cur, rows, waivers):
                             detail + "，且无有效豁免单（kind=one-in-one-out）"))
 
     # ── PCM-04 P3 停滞即红 ──
-    seq = list(order)
-    if version not in seq:
-        seq.append(version)
+    # ★★ SS（2026-10-22）：「窗口末位」必须是**当前观测**，不能是「出现序的末项」。
+    #   版本回落后账本里会留着比当前更新的版本行（本仓实测：树是 0.53.2，账本里
+    #   夹着一行 `0.53.5 | product 1`）。此时 `seq[-1]` 不是当前版本 ⇒
+    #   `prods[-1]` 读到的是**别人的** product 数 ⇒ 一个已经清零的当前态
+    #   被判成「停滞」。这与本判据的文档契约（「product 已清零时永远通过」）相反。
+    #   ⇒ 把当前版本移到末位；窗口内它的历史行由下方循环的 `v == version`
+    #     分支用 `cur_p` 覆盖（同版本内重跑不构成一次版本推进，这点不变）。
+    seq = [v for v in order if v != version]
+    seq.append(version)
     window = seq[-STAGNATION_VERSIONS:]
     if len(window) < STAGNATION_VERSIONS:
         out.append(("PCM-04 P3 停滞即红", "SKIP-BASELINE",
@@ -335,7 +341,9 @@ def evaluate(cur, rows, waivers):
             else:
                 prods.append(int((last.get(v) or {}).get("product_count") or 0))
         drops = sum(1 for a, b in zip(prods, prods[1:]) if b < a)
-        if prods[-1] == 0:
+        if cur_p == 0:
+            # 判「当前」只看 cur_p，不看 prods[-1] —— 后者要对，前提是窗口末位
+            # 恰好是当前版本，而版本回落后不再成立（见上方 SS 注释）。
             out.append(("PCM-04 P3 停滞即红", "PASS",
                         "product 已清零（窗口 %s）—— 清零是目标态"
                         % "→".join(str(x) for x in prods)))
@@ -484,6 +492,37 @@ def n_p3_zero_is_pass():
     return s == "PASS"
 
 
+def n_p3_rollback_zero_is_pass():
+    """负控：**版本回落后**当前已清零 ⇒ 必须 PASS（不是停滞）。
+
+    形状照抄本仓实测：账本里留着比当前更新的版本行（树 0.53.2，账本一行 0.53.5
+    product=1）。旧实现拿 `prods[-1]` 当「当前」，读到的是那行的 1 ⇒
+    把已清零的当前态判成停滞。这条负控在旧实现上**是红的**。
+    """
+    cur = _mk("9.9.9", 0, {})
+    rows = [_mk("9.9.8", 0, {}),
+            _mk("9.9.9", 0, {}),
+            _mk("9.9.10", 1, {"a": "product"})]      # 回落前留下的"未来版本"行
+    out = dict((cid, (s, d)) for cid, s, d in evaluate(cur, rows, []))
+    s, _d = out["PCM-04 P3 停滞即红"]
+    return s == "PASS"
+
+
+def n_p3_rollback_stagnant_is_red():
+    """负控：同样的回落形状，但当前仍有 5 条且窗口一次没降 ⇒ 必须 RED。
+
+    ★ 与上一条成对：只加"回落即放行"会把 P3 变成一条对回落形状永远绿的判据。
+    """
+    f = {("f%d" % i): "product" for i in range(5)}
+    cur = _mk("9.9.9", 5, dict(f))
+    rows = [_mk("9.9.8", 5, dict(f)),
+            _mk("9.9.9", 5, dict(f)),
+            _mk("9.9.10", 5, dict(f))]
+    out = dict((cid, (s, d)) for cid, s, d in evaluate(cur, rows, []))
+    s, _d = out["PCM-04 P3 停滞即红"]
+    return s == "RED"
+
+
 def n_p4_reclass_is_red():
     """负控：两条 product 失败仍在，只是被改分类 ⇒ product 归零也必须红。"""
     cur = _mk("9.9.9", 0, {"a": "instrument", "b": "environment"})
@@ -521,7 +560,9 @@ def main():
     negctls = [(n.__name__, n) for n in (
         n_baseline_is_not_green, n_p1_regress_is_red, n_p1_waiver_is_accepted,
         n_p2_regress_is_red, n_p2_waiver_is_accepted, n_p3_stagnation_is_red,
-        n_p3_zero_is_pass, n_p4_reclass_is_red, n_p4_real_fix_is_pass,
+        n_p3_zero_is_pass, n_p3_rollback_zero_is_pass,
+        n_p3_rollback_stagnant_is_red,
+        n_p4_reclass_is_red, n_p4_real_fix_is_pass,
         n_contract_missing_is_red)]
     run_neg = "--negctl" in sys.argv
 
