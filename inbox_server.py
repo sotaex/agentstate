@@ -1798,6 +1798,22 @@ def _host_label(h):
         return h
 
 
+def _auto_read_allowed(auto, cur_state):
+    """页面**自动**发的「已读」能不能动这条记录？（★ 唯一判据点，A1）
+
+    · `auto=False`：用户点了「重开」的普通表单 ⇒ 任何状态都能改回未读；
+    · `auto=True` ：点开即已读 ⇒ **只许动 `unread`**。
+
+    ★★ 为什么抽成函数，而不是写在 handler 里的一个 `if`：
+      判据的负控要能"把这条规则换掉、再跑一遍"，看它是否真的红。
+      规则内联在 handler 里时，负控只能复制整个 handler —— 那测的是副本，
+      副本红了不代表线上红（本仓为"测副本"付过的学费已经够多）。
+      抽出来之后，负控是 `_auto_read_allowed = lambda a, s: True`，
+      **换的是同一份实现**。
+    """
+    return (not auto) or cur_state == "unread"
+
+
 def _item_html(it, token, posture=None, show_host=False):
     """一条记录：★ 收起时**一个按钮都没有**，点开才给两个动作。
 
@@ -1829,12 +1845,16 @@ def _item_html(it, token, posture=None, show_host=False):
         _hn = _host_label(getattr(it, "host", ""))
         if _hn:
             _hb = "<span class=\"hbadge\">%s</span>" % _esc(_hn)
-    return ("<details class=\"item %s %s\" data-id=\"%s\" data-token=\"%s\">"
+    # ★★ 0.54.0（A1）：非未读项标 `data-readed="1"` —— `_READ_JS` 见到它就早退，
+    #   不再发 `op=read`。没有这一条时，展开**任何一行**（含已处置/已忽略）都会
+    #   发一次 read，把缺口态从 acked/closed 打回 open ⇒「看一眼，缺口又活了」。
+    _rd = "" if it.state == "unread" else " data-readed=\"1\""
+    return ("<details class=\"item %s %s\" data-id=\"%s\" data-token=\"%s\"%s>"
             "<summary><span class=\"badge %s\">%s</span>%s"
             "<span class=\"t\">%s%s</span><span class=\"when\">%s</span></summary>"
             "<div class=\"det\"><p class=\"m\">%s</p>%s"
             "<div class=\"act\">%s</div></div></details>"
-            % (_esc(it.level.lower()), _esc(it.state), _esc(it.id), _esc(token),
+            % (_esc(it.level.lower()), _esc(it.state), _esc(it.id), _esc(token), _rd,
                _esc(it.level.lower()), _esc(it.level), _hb, dot, _vis(it.title),
                _esc(_ts_hm(it.ts)), _vis(meta),
                _rem_html(it, token, posture), acts))
@@ -3704,8 +3724,11 @@ def _unrepaired_line(items, now=None):
     if not u.get("n"):
         return ""
     txt = "你说过先不管、其实还没修好的：%d 条" % u["n"]
-    if u.get("oldest_days") is not None:
-        txt += "（最早 %d 天前）" % u["oldest_days"]
+    # ★ 只用 `oldest_ack_days`（A7）：它与下面那句"已过复核期"同基准（何时搁下），
+    #   两个数才能并排读。`oldest_record_days`（记录本身的年龄）是另一件事，
+    #   并排出现会把两个不同基准说成一句话。
+    if u.get("oldest_ack_days") is not None:
+        txt += "（最早的一条已经 %d 天没管）" % u["oldest_ack_days"]
     txt += "。"
     if u.get("due"):
         txt += "其中 %d 条已过 %d 天复核期，需要重新决定。" % (
@@ -3729,6 +3752,14 @@ def _lock_line():
         pr = AC.lock_pressure(path=AC.lock_events_path(d))
     except Exception:
         return ""
+    # ★ 没查成 ≠ 没竞争（A5）：读不到时**必须出声**。沉默的默认解释是
+    #   "没有竞争"，而真实情况是"不知道" —— 这正是本仓第 ④ 条判据。
+    #   ★ 文案避开双重否定（STE100 D8）：写"无从得知、可能发生过"，不写"不等于没有"。
+    if pr.get("checked") is False:
+        return ('<div class="note" style="margin:0 0 8px">%s</div>'
+                % _esc("记录连写的竞争读数读不到（%d 个文件）。"
+                       "竞争次数暂时无从得知，当时可能发生过竞争。"
+                       % len(pr.get("unreadable") or [])))
     if not (pr.get("timeouts") or pr.get("steals")):
         return ""
     parts = []
@@ -4202,17 +4233,36 @@ def _make_handler(token, root):
                     note = (form.get("note") or [""])[0]
                     if op not in M.STATES:
                         raise M.BadState("未知操作 %r" % (op,))
+                    # ★★ 0.54.0（A1）：「点开即已读」只对**未读**记录生效。
+                    #   页面自动发的 read 带 `X-Antinel-Read`；用户点的「重开」
+                    #   是普通表单、不带这个头 —— 两者 op 都是 read，靠头区分。
+                    #   没有这道门禁时，展开一条已忽略/已处置的记录会把它改回
+                    #   `read`+`open`（ack 撤销、`closed_at` 被清）—— 实测确认：
+                    #   「看一眼就把缺口重新打开」，直接抵消了缺口态拆分。
+                    _auto = (self.headers.get("X-Antinel-Read") or "") == "1"
                     if ids:
                         # 「点开即已读」对归并行同样生效（整组记已读）。
-                        lv = {it.id: it.level for it in S.load_items(root=root)}
+                        _cur = {it.id: it for it in S.load_items(root=root)}
                         for _i in ids:
-                            if _i not in lv:
+                            _it = _cur.get(_i)
+                            if _it is None:
                                 continue
+                            if not _auto_read_allowed(_auto, _it.state):
+                                continue        # 自动已读不许改别人的状态
                             try:
-                                S.set_state(_i, op, note=note, root=root, level=lv[_i])
+                                S.set_state(_i, op, note=note, root=root,
+                                            level=_it.level)
                             except M.InboxError:
                                 pass
                     else:
+                        if _auto:
+                            _it = next((x for x in S.load_items(root=root)
+                                        if x.id == iid), None)
+                            if _it is None or not _auto_read_allowed(_auto, _it.state):
+                                # 没写盘也要回 ok：页面只是撤未读点，而这条
+                                # 本来就没有未读点。回 409 会被记成"写入失败"，
+                                # 而事实是"不需要写"。
+                                return self._json({"ok": True, "skipped": "not-unread"})
                         S.set_state(iid, op, note=note, root=root)
                 if op in ("fix", "guard_fix"):
                     _page = render_page(view="inbox", filt=M.BUCKET_ACTION,

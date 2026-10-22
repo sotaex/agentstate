@@ -524,7 +524,8 @@ def ack_expired(item, now=None, days=ACK_REVIEW_DAYS):
 def unrepaired_count(items, now=None, hours=None):
     """「已知未修」台账：你说过先不管、但它其实还坏着的条数。
 
-    返回 `{"n":…, "due":…, "oldest_days":…|None, "kinds":[(kind, n)…]}`。
+    返回 `{"n":…, "due":…, "oldest_ack_days":…|None,
+           "oldest_record_days":…|None, "kinds":[(kind, n)…]}`。
 
     ★★ 为什么要有它（40 格 · 人·判）：忽略之后记录从待办消失，是对的
       （尊重你的决定）；但**从账面上也消失，是错的** —— 那就等于
@@ -539,16 +540,25 @@ def unrepaired_count(items, now=None, hours=None):
     if hours is not None:
         acked = [it for it in acked if within_hours(it.ts, hours, now)]
     due = sum(1 for it in acked if ack_expired(it, now))
-    ages = []
+    # ★★ 两个基准必须**各自具名**（A7）：`ts` 是"记录发生的时间"，
+    #   `closed_at` 是"你说先不管的时间"。一句话里并排给两个不同基准的"天前"，
+    #   读者会以为二者可比（`n=5, 最早 30 天前, 其中 4 条已过 14 天复核期`——
+    #   30 天是记录的年龄，14 天是搁置的年龄，两个数根本不在同一条轴上）。
+    #   页面只用 `oldest_ack_days`：它与 `due` 同基准，才能和"复核期"一起读。
+    rec_ages, ack_ages = [], []
     for it in acked:
         d = _parse_ts(it.ts)
         if d is not None:
-            ages.append(max(0.0, (now - d).total_seconds()) / 86400.0)
+            rec_ages.append(max(0.0, (now - d).total_seconds()) / 86400.0)
+        a = _parse_ts(getattr(it, "closed_at", "") or "")
+        if a is not None:
+            ack_ages.append(max(0.0, (now - a).total_seconds()) / 86400.0)
     by = {}
     for it in acked:
         by[it.kind] = by.get(it.kind, 0) + 1
     return {"n": len(acked), "due": due,
-            "oldest_days": int(max(ages)) if ages else None,
+            "oldest_ack_days": int(max(ack_ages)) if ack_ages else None,
+            "oldest_record_days": int(max(rec_ages)) if rec_ages else None,
             "kinds": sorted(by.items(), key=lambda kv: -kv[1])}
 
 

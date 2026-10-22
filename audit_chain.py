@@ -98,17 +98,37 @@ def _note_lock(lock, evt, **kw):
         pass
 
 
+def _checked_from(unreadable):
+    """`checked` 的**唯一判据**：存在的文件都读到了吗。
+
+    ★ 抽成函数的理由（与 `egress._merge_lost`／`_keep_target` 同）：负控要换掉
+      **同一份实现**：`_checked_from = lambda u: True` 就复现了旧行为 ——
+      旧实现末尾是"目录存在 ⇒ checked=True"，而夹具里目录一定存在，
+      所以在该夹具上旧实现恒为 True。换成这个 lambda，换的正是同一条规则。
+    """
+    return not unreadable
+
+
 def lock_pressure(hours=24.0, path=None):
     """读回并发读数（★ 唯一实现：页面/CLI 都调它，不许各数一遍）。
 
-    返回 `{"timeouts":n, "steals":n, "last":ts|None, "files":[...], "checked":bool}`。
+    返回 `{"timeouts":n, "steals":n, "last":ts|None, "files":[...],
+           "checked":bool, "unreadable":[...]}`。
 
     ★★ `checked` 必须与 0 分开：`timeouts=0, checked=True` 是"查了，没竞争"；
-      `checked=False` 是"这个文件读不到/不存在"—— 后者不是"没问题"，
+      `checked=False` 是"该读的地方读不到"—— 后者不是"没问题"，
       正好是本仓第 ④ 条判据（没查 ≠ 没发现）。
+    ★★ 2026-10-22（A5）：`checked` 的口径收紧为**"存在的文件都读到了吗"**。
+      旧实现末尾有一句 `if os.path.isdir(dirname): checked = True` ——
+      它只证明目录存在，却把"文件存在但读失败"也一起置成 True，
+      **等于把自己的契约作废**（那正是"善意的默认值"）。
+      现在：
+        · 文件不存在 ⇒ 从未记到竞争 ⇒ 空账本（合法形态，算查到了）；
+        · 文件存在但 `open` 失败 ⇒ 记进 `unreadable`，`checked=False`。
     """
     p = path or lock_events_path()
-    out = {"timeouts": 0, "steals": 0, "last": None, "files": [], "checked": False}
+    out = {"timeouts": 0, "steals": 0, "last": None, "files": [],
+           "checked": False, "unreadable": []}
     files = [p, p + ".1"]
     now = time.time()
     seen = set()
@@ -126,7 +146,6 @@ def lock_pressure(hours=24.0, path=None):
                     t = e.get("t")
                     if not isinstance(t, (int, float)) or now - t > hours * 3600:
                         continue
-                    out["checked"] = True
                     evt = e.get("evt")
                     if evt == "acq_timeout":
                         out["timeouts"] += 1
@@ -143,9 +162,9 @@ def lock_pressure(hours=24.0, path=None):
         except FileNotFoundError:
             continue
         except OSError:
+            out["unreadable"].append(os.path.basename(fp))
             continue
-    if os.path.isdir(os.path.dirname(p) or "."):
-        out["checked"] = True
+    out["checked"] = _checked_from(out["unreadable"])
     return out
 
 
