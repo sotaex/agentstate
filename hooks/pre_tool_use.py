@@ -56,7 +56,7 @@ _T0 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段起点（性能
 
 # ---------------------------------------------------------------- constants --
 PKG_DIR = os.path.dirname(os.path.abspath(__file__))
-_ANTINEL_VERSION = "0.53.2"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
+_ANTINEL_VERSION = "0.54.0"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
 _T1 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段终点（性能插桩）
 
 
@@ -858,11 +858,42 @@ _HEREDOC_EXECUTORS = (
 )
 
 
+def _strip_line_comment(line):
+    """剪掉行内注释（引号感知）。只用于 heredoc 的**去向判定**，不改原命令。
+
+    ★ 为什么需要它（A2）：判定改成"整行搜索解释器词"之后，
+      `cat <<'EOF'  # 这不是 bash` 的注释会把判定推成"不剥"⇒ 正文进扫描面 ⇒ 误拦。
+      剪掉注释，整行搜索才可用。
+    ★ 边界：只处理**单行**。跨行引号（`"…⏎…"`）不处理 —— 那种形状下的误判方向
+      是"保留更多内容"（多拦），不是漏放。
+    """
+    q = None
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if q:
+            if ch == "\\" and q == '"':
+                i += 2
+                continue
+            if ch == q:
+                q = None
+        elif ch in "'\"":
+            q = ch
+        elif ch == "#" and (i == 0 or line[i - 1] in " \t"):
+            return line[:i]
+        i += 1
+    return line
+
+
 def strip_heredoc_bodies(cmd):
     """把 heredoc 的**正文**删掉（保留起始行），返回净化后的命令文本。
 
     ★ 只在"接收方不是解释器"时剥：`cat <<EOF` 的正文是数据，
       `bash <<EOF` 的正文是脚本 —— 后者剥了就是把真删除放行（漏放方向）。
+    ★★ 2026-10-22（A2）：判据从 `line[:m.start()]`（只看 `<<` 左边）改成**整行**。
+      左边看不到正文的去向：`cat <<EOF | bash`、`tee f <<EOF | sh` 的正文经管道
+      交给下游解释器，而旧判据把它当数据剥掉 —— 实测三例漏放。
+      整行搜索是"生产者 + 所有下游"的超集 ⇒ 只会多拦，不会漏放。
     ★ 找不到结束定界符 ⇒ 原样返回。**剥错比不剥危险**。
     """
     if "<<" not in cmd or "\n" not in cmd:
@@ -877,7 +908,7 @@ def strip_heredoc_bodies(cmd):
             out.append(line)
             i += 1
             continue
-        if exec_re.search(line[:m.start()]):
+        if exec_re.search(_strip_line_comment(line)):
             out.append(line)                 # 正文会被执行 ⇒ 一块都不剥
             i += 1
             continue
