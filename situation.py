@@ -31,14 +31,39 @@
         （「今天没什么要拦的」），N8-c 的 `forbid_text` 正是抓这个。
     (e) 数字位不可得时的渲染形态（`breach` 的 D 位、`absent` 的 N 位）未冻结。
     (f) 期间行的「混合」形态需要比 `counts{action,info}` 更细的分桶，P2。
+
+## 在场证明（A5）的两条硬约束（#58）
+
+    (a) F2 的四键（`holes`/`asleep` 并列）与 D-07 的四元组（`asleep?` 塞进空档）
+        互相冲突 ⇒ 以 F2 四键为基，**加第五键 `unknown`**，三态才齐备。
+    (b) **睡眠证据当前拿不到**（`_sentinel_uptime()` 只用墙钟）⇒ 长空档一律
+        `unknown`（判缺席但原因算不清），**不判 `absent`**。
+        补取数的施工单见设计件 §11.9（未签发，前置是 T2 三钟实测）。
+
+## 披露句（A6）与「同一屏一句只说一次」
+
+披露句（`DISCLOSURES`）与主行是**两件事**：主行答「现在是什么状态」，披露句答
+「所以你看不见什么」。因此披露句**不与主行抢位**，而是：
+
+    · 主行已经说了同一句 ⇒ 披露位**不再重复**（同一屏一句说两次＝用户以为出了两件事）；
+    · 主行被更紧急的成因占了（停摆 ＋ 缺口 ⇒ 主行是 `absent` 句）⇒ 停摆句
+      **必须**由披露位补上 —— 这是 §5-N8-c「叠加只加停摆句不变」的落点。
+
+状态词条（`state_word`）**从 `state_registry` 取，本模块不写第二份**；停摆格
+返回 `None`（#59b）：`paused` 的定义句含 N8-c 的 `forbid_text`「没有要管的东西」，
+在「口粮用完了」旁边挂这个词条＝正面打脸，**宁可不给词条**。
 """
 
 import facts as _facts
 
 __all__ = [
     "SENTENCES", "ACTION_SENTENCE", "DEFAULT_SCOPE",
+    "DISCLOSURES", "DISCLOSURE_WHERE", "MIGRATION_NOTICES",
     "lamp", "cause", "sentence", "sentence_key", "badges", "detail",
+    "gaps", "gap_coverage", "at_risk_unregistered",
     "period_line", "spend_today", "recon_report",
+    "presence", "period_presence",
+    "disclosure", "state_word",
 ]
 
 #: 默认 scope（F2 冻结形状）。`window` 的第二位是窗口起点（ISO8601 或 None）。
@@ -95,16 +120,97 @@ SENTENCES = {
     "badge.disk": "账本快写不下了，写不下就不能记账。",
     "account.action": "有 {N} 件事只有你能办。",
     "account.info": "最近 24 小时挡下 {N} 次，都替你处理完成了。",
+    # ★ #58d：**待创始人核签的新句**（§4.3 没有覆盖「不可对账段」）。
+    #   睡眠证据拿不到 ⇒ 显式降级为「算不清」，而不是替机器断言「它睡了」或「它没守」。
+    "period.unknown_window": "有 {N} 分钟没留下记录，那段时间算不清。",
+    #: D-05 §6.2 的期间行原文。本期**不可达**（拿不到睡眠证据），补取数落地后启用。
+    "period.asleep": "它不在（机器睡着了）。",
 }
 
 #: 徽标的短词（D-10 登记表）。★ 与长句分开：短词上角标，长句进 tooltip／主行。
-BADGE_WORD = {"dev": "研发中", "granary": "缺粮", "disk": "磁盘"}
+#: ★★ **这里只许放「徽标专有词」**：`disk` 是唯一一个不是态名的徽标词。
+#:   `dev`／`granary` 两格**必须派生**（见 `BADGE_STATE`）—— 那两个中文名的唯一真源
+#:   是 `inbox_model.STATE_LABEL`。A4 第一版在这里把 `dev` 那格的中文名手写了一份，
+#:   B1 跑到 0372 S08（全仓扫第二份态名声明）时被当场抓红（28 绿 → 26 绿 / 2 红）。
+#:   教训：**新模块顺手抄一个中文名，就是漂移的入口** —— S08 挡的正是这个入口。
+#: ★ 本条注释**故意不写出那个键值对的字面量**：S08 的扫描器走文本（`_decl_scan`），
+#:   注释里写出「态键: 中文名」同样会被当成第二份声明。本仓已有同型前科
+#:   （0364 的判据在自己解释 bug 的注释里写了触发串而假红）。第一次改这里时
+#:   我正好又踩了一次：注释里引用了那个字面量，S08 照红不误（:132）。
+BADGE_WORD = {"disk": "磁盘"}
+
+#: 徽标键 → 真源态键（`inbox_model.STATE_LABEL` 的键）。**不写第二份中文名。**
+BADGE_STATE = {"dev": "dev", "granary": "Ls"}
+
+
+def _badge_word(key):
+    """徽标短词：专有词取 `BADGE_WORD`，其余从 `state_short()` 派生。
+
+    取不到 ⇒ 返回 `None`，调用方**不挂这枚徽标**（不编一个词出来）。
+    """
+    if key in BADGE_WORD:
+        return BADGE_WORD[key]
+    src = BADGE_STATE.get(key)
+    if src is None:
+        return None
+    try:
+        import inbox_model as _M
+        return _M.state_short(src)
+    except Exception:                                        # noqa: BLE001
+        return None
 
 #: 徽标动作（D-10 规则：每枚必须带动作，否则就是装饰）。
 BADGE_ACTION = {"dev": "none", "granary": "topup", "disk": "clean-ledger"}
 
 #: 成因的优先级（F2：`others` 按动作优先级排）。
 CAUSE_PRIORITY = ("absent", "breach", "blind", "paused", "draining", "ok")
+
+#: 披露句的去处（封闭集）。取值逐字对得上 §4.3 表的「去处」列：
+#:   `badge`＝徽标／`status_page`＝运行状态页／`inbox`＝收件箱／`period`＝期间行
+#:   `once`＝一次性提示（迁移用，没有常驻渲染点）
+DISCLOSURE_WHERE = ("inbox", "period", "badge", "status_page", "once")
+
+#: 披露句表 —— 逐字取自冻结件 §4.3 与深化件（出处逐条写在 `source` 里）。
+#: ★ 与 `SENTENCES` 分开的理由：`SENTENCES` 是「这一格说什么」，本表是
+#:   「这一格还欠用户一句什么」。混在一张表里，`sentence_key` 会开始返回
+#:   两类语义不同的键，判据就没法只认一个键了（F2 的 `sentence_key` 单值性）。
+DISCLOSURES = {
+    # N8-b：守备档生效 ⇒ 必须说出「少了什么」（设计审计件 :239 降档披露义务）
+    "guard_mode": {
+        "text": "现在只看基础目录，钩子停了。",
+        "where": ("badge", "status_page"),
+        "source": "冻结件 §4.3（宽度 14）",
+    },
+    # N8-c：停摆 ⇒ 主行换成这句；**不许出现「没有要管的东西」**
+    "stopped": {
+        "text": "口粮用完了，这段时间没在守。",
+        "where": ("inbox", "period"),
+        "source": "冻结件 §4.3 ＋ §5-N8-c（宽度 14）",
+    },
+    # 深化件 :365「partial 句式强制带披露」—— 时钟坏 ⇒ 时长读数全废，
+    # 但 duty 仍可判「在岗」；不说这句就等于把「算不出在岗多久」瞒下来。
+    "clock_skew": {
+        "text": "有一项没查到：系统时钟被改过，算不出它在岗多久。",
+        "where": ("inbox", "status_page"),
+        "source": "深化件 :365（**去处未冻结**，按 partial 句落点取；宽度 24 实算）",
+    },
+    # D-06 原句，逐字不改（迁移一次性）
+    "migrate_first_red": {
+        "text": "这些是升级前留下的问题，那时候报不出来。现在报给你了。",
+        "where": ("once",),
+        "source": "冻结件 §4.3（D-06 原句；宽度 27）",
+    },
+    "migrate_legacy_word": {
+        "text": "以前的『失守』，现在按三种说法讲。",
+        "where": ("once",),
+        "source": "冻结件 §4.3（D-06 原句；宽度 17）",
+    },
+}
+
+#: 迁移提示两条（一次性）。★ **当前没有 facts 触发源**（F1 无 migration 字段），
+#: 故**不进** `disclosure()` 的输出 —— 编一个 `migration_pending` 字段出来就是
+#: 造事实层（#59c）。接线期由迁移流程直接读本表，不经投影层。
+MIGRATION_NOTICES = ("migrate_first_red", "migrate_legacy_word")
 
 
 def _scope(scope):
@@ -121,15 +227,6 @@ def _num(v):
     if isinstance(v, bool):
         return None
     return float(v) if isinstance(v, (int, float)) else None
-
-
-def _hours_per_day():
-    """一天多少小时 —— 取自 `granary.HOURS_PER_DAY`（异质单位特冻 G4：不许当 24 写死）。"""
-    try:
-        from granary import HOURS_PER_DAY
-        return float(HOURS_PER_DAY)
-    except Exception:                                        # noqa: BLE001
-        return None
 
 
 def _spend_tiers():
@@ -225,9 +322,24 @@ def cause(facts, scope=None):
 
 
 # ───────────────────────────── 二、句子 ─────────────────────────────
-def _fmt_days(hours):
-    """小时 → 「N 天」（1 位小数）。★ 除的是 `HOURS_PER_DAY`，不是 24（G4 特冻）。"""
-    h, per = _num(hours), _hours_per_day()
+def _daily_spend(facts):
+    """当前档位**每天消耗多少口粮**（小时）。与 `spend_today()` 同一个真源。"""
+    return _num(spend_today(facts))
+
+
+def _fmt_days(hours, per_day):
+    """小时 → 「N 天」（1 位小数）。★ 除的是**每天消耗**，不是「一天几小时」（G4 特冻）。
+
+    ★★ #61a：原实现除 `HOURS_PER_DAY`（＝24，那是**时间换算**），而守备档
+      每天只扣 12（`SPEND_TIERS[0][1]`）⇒ 句子「粮还够 N 天」**系统性低估一半**。
+      而守备档正是**唯一**会显示这句话的档位 —— 也就是说这句话只要上屏就是错的。
+      今天 `DAILY_SPEND_DEFAULT == HOURS_PER_DAY == 24`，数值上不露馅，所以夹具
+      （只钉了 `spend_today=12`、没钉句中的 N）没抓到它。
+
+    ★ `per_day` **没有默认值**：任何调用点都必须显式给出分母，
+      不许再有一个「顺手拿 24 顶一下」的入口。
+    """
+    h, per = _num(hours), _num(per_day)
     if h is None or not per:
         return None
     return "%.1f" % (h / per)
@@ -248,10 +360,45 @@ def _is_stop_by_granary(facts):
     return facts.get("granary_level") != "off" and b is not None and b < 0
 
 
+def _granary_tier(facts):
+    """`granary.tier()` 的薄封装 —— 「守备档」判定的**唯一真源**。"""
+    b = _num(facts.get("granary_balance_hours"))
+    if b is None:
+        return None
+    try:
+        import granary as _G
+        return _G.tier(bal=b)
+    except Exception:                                        # noqa: BLE001
+        return None
+
+
+def _guard_tier():
+    """守备档的档位名 —— 取 `granary.SPEND_TIERS` 第一行（**数据**，不写字面量）。"""
+    tiers, _ = _spend_tiers()
+    return tiers[0][0] if tiers else None
+
+
 def _is_guard_mode(facts):
-    """守备档：`0 ≤ 余额 < 一天`（`granary.SPEND_TIERS[0]` 的条件，数字不写死）。"""
-    b, per = _num(facts.get("granary_balance_hours")), _hours_per_day()
-    return b is not None and per is not None and 0 <= b < per
+    """守备档：`granary.tier()` 说是守备档、且余额非负。
+
+    ★★ #61g：上界**不自己算**。档位是产品口径（`granary.tier`），本模块只读结论
+      （铁律 6：判据不二次实现产品口径）。原实现拿 `HOURS_PER_DAY` 当上界，docstring
+      却声称「取自 `SPEND_TIERS[0]`」—— 它其实**一次都没读 `SPEND_TIERS`**。三个数字
+      今天 `HOURS_PER_DAY == DAILY_SPEND_DEFAULT == 24`、而 `SPEND_TIERS[0][1] == 12`：
+      两个相等一个不等，只要有人调档位（或改日长）就分叉，而**分叉时不报错、只是档位判错**。
+      这是 #61a 的同族病灶：**用了一个今天恰好等于真值的常量**。
+
+    ★ 两个 `None` 不许相等：`_guard_tier()` 在 granary 导入失败时返回 `None`，
+      `_granary_tier()` 同理 —— 若直接写 `==`，两侧同时 `None` 会**判成守备档**
+      （fail-open 到半价档，观察期数据整体失真）。故先判 `t is not None`。
+
+    ★ 下界 `0 <=` 保留：负余额是**停摆**（`_is_stop_by_granary`），不是守备。
+    """
+    b = _num(facts.get("granary_balance_hours"))
+    if b is None or b < 0:
+        return False
+    t = _guard_tier()
+    return t is not None and _granary_tier(facts) == t
 
 
 def _harmful_gaps(facts):
@@ -266,10 +413,23 @@ def _harmful_gaps(facts):
 
 
 def _at_risk(facts):
-    """预告源的并集（派生 ＋ 采集侧预置）。顺序按 `AT_RISK_SOURCES`。"""
+    """预告源的并集（派生 ＋ 采集侧预置），顺序按 `AT_RISK_SOURCES`。"""
     got = set(_facts.at_risk_sources(facts))
     got |= set(facts.get("at_risk") or [])
     return [k for k in _facts.AT_RISK_SOURCES if k in got]
+
+
+def at_risk_unregistered(facts):
+    """点亮了 at-risk、但**不在 `AT_RISK_SOURCES` 注册表里**的来源（F4 表外来源）。
+
+    ★ F4 原文：「**表外来源点亮 at-risk ⇒ 判据红**（注册表唯一真源）」。
+      原实现里 `_at_risk()` 用 `AT_RISK_SOURCES` 过滤 —— 表外来源被**静默丢弃**：
+      徽标不亮、主行不提，用户完全看不见。**静默丢弃与假绿只差一步**。
+      本函数把表外来源显式交出来，由判据判红（不是靠人记得）。
+    """
+    got = set(facts.get("at_risk") or [])
+    got |= set(_facts.at_risk_sources(facts))
+    return sorted(got - set(_facts.AT_RISK_SOURCES))
 
 
 def _counts(facts):
@@ -319,7 +479,7 @@ def _fill(key, facts, scope=None):
     tpl = SENTENCES[key]
     if key in ("draining.main", "draining.granary", "draining.guard_mode",
                "badge.granary"):
-        n = _fmt_days(facts.get("granary_balance_hours"))
+        n = _fmt_days(facts.get("granary_balance_hours"), _daily_spend(facts))
         return tpl.replace("{N}", n) if n is not None else None
     if key in ("draining.heartbeat", "badge.heartbeat"):
         n = _fmt_minutes(facts.get("heartbeat_age"))
@@ -335,7 +495,12 @@ def _fill(key, facts, scope=None):
     if key == "absent.main":
         cons = facts.get("outage_consequences")
         n = len(cons) if isinstance(cons, list) else None
-        return tpl.replace("{N}", str(n)) if n is not None else None
+        # ★ #59f：`n == 0` 与红灯**不相容**（harm=some 才轮到 absent，说「有 0 件
+        #   没被挡」等于在红屏上报平安）。0 件不是「一件都没有」，是「这个数填不出」
+        #   —— 与 #57e 同一条纪律：数字位不可用就降级，不写 0。
+        if not n:
+            return None
+        return tpl.replace("{N}", str(n))
     if key == "partial.main":
         return tpl.replace("{N}", "1")
     if key == "partial.detail":
@@ -372,14 +537,45 @@ def _days_since_earliest(facts, scope=None):
         return None
 
 
+def _head(key, facts, scope=None):
+    """数字位填不出时的降级句 —— **从本格原句里切掉数字分句**（逐字，不另造）。
+
+    ★ 只许切标点，不许改措辞：切出来的每个字都来自 `SENTENCES` 原句。
+      新增一条降级就要在这里显式写一行 —— 通用切法（见 `。` 就切）会把
+      「有 {N} 处没修」切成带占位符的半句，占位符漏屏比说错话更糟（#57e）。
+    """
+    if key == "absent.main":
+        return SENTENCES[key].split("。")[0] + "。"
+    if key == "breach.main":
+        n = len(_harmful_gaps(facts))
+        return SENTENCES[key].split("，")[0].replace("{N}", str(n)) + "。"
+    return None
+
+
+def _def_sentence(cause_key):
+    """最后一级兜底：该成因的**定义句**（冻结件 §4.1 定义列，无数字位）。
+
+    ★ 宁可降到定义层，也不许主行留空 —— 空主行是「屏幕上没有结论」，
+      比一句不够亲切的实话坏得多。`drill` 的定义句在 `MODE_IDENTITY` 里。
+    """
+    try:
+        import state_registry as _SR
+    except Exception:                                        # noqa: BLE001
+        return None
+    e = _SR.STATES_BY_KEY.get(cause_key)
+    if e is not None:
+        return e["def_sentence"]
+    return (_SR.MODE_IDENTITY.get(cause_key) or {}).get("def_sentence")
+
+
 def sentence(cause_key, facts, scope=None):
-    """显示句 ＋ 动作句（F2 冻结的两键）。句子**逐字取**自 `SENTENCES`。"""
+    """显示句 ＋ 动作句（F2 冻结的两键）。句子**逐字取**自 `SENTENCES`。
+
+    主行的三级降级（**永不为空**）：数字位填全 → 切掉数字分句 → 该成因定义句。
+    """
     key = sentence_key(cause_key, facts, scope)
-    main = _fill(key, facts, scope)
-    if main is None:
-        # 数字位填不出 ⇒ 退回该成因的主句（仍不写 None、不编数字）
-        main = (_fill("%s.main" % cause_key, facts, scope)
-                if cause_key != "ok" else SENTENCES["ok.main"])
+    main = _fill(key, facts, scope) or _head(key, facts, scope) \
+        or _def_sentence(cause_key)
     return {"main": main or "",
             "action": ACTION_BY_KEY.get(key) or ACTION_SENTENCE.get(cause_key, "")}
 
@@ -387,6 +583,60 @@ def sentence(cause_key, facts, scope=None):
 def detail(facts, scope=None):
     """体检页的明细句（E3b 截断原文）。没有截断 ⇒ 空串。"""
     return _fill("partial.detail", facts, scope) or ""
+
+
+# ─────────────────────── 二·五、缺口清单（F2 冻结签名） ───────────────────────
+def gaps(facts, scope=None):
+    """缺口清单 —— F2 冻结六键：`id`／`kind`／`level`／`opened_at`／`gap_state`／`cons`。
+
+    ★ 本函数**只投影**：`facts["gaps"]` 已经是账本派生的缺口记录，这里**不重判**
+      「算不算缺口」—— 那会把族界口径写第二遍（铁律 6：判据不二次实现产品口径）。
+      `level` 一律从 `inbox_model.LEVEL_OF_KIND` 取，与 `axes()` 同一真源。
+    ★ 记录缺字段 ⇒ 给 `None`，**不编**：编出来的 `id` 会被下游当锚点用，
+      而它不属于任何一条真实记录；`cons` 缺失也是 `None` 而不是 `[]`
+      —— `[]` 与 `None` 在 F1 三态里是「查过了没有」与「查不到」两件事。
+    ★ 顺序**不重排**（`facts` 给的顺序就是账本顺序）：自己排一次序，
+      等于给同一批记录造了第二个次序。
+    """
+    raw = facts.get("gaps")
+    if not isinstance(raw, list):
+        return []
+    levels = _facts._kind_levels()
+    out = []
+    for g in raw:
+        if not isinstance(g, dict):
+            continue
+        kind = g.get("kind")
+        out.append({
+            "id": g.get("id"),
+            "kind": kind,
+            "level": levels.get(kind) if levels is not None else None,
+            "opened_at": g.get("opened_at"),
+            "gap_state": g.get("gap_state"),
+            "cons": g.get("cons"),
+        })
+    return out
+
+
+def gap_coverage(facts):
+    """`cons` 的**覆盖证明**（Q3 规则②）：三值 `complete`／`truncated`／`unreadable`。
+
+    ★ 为什么必须有：`cons=[]` 有两种完全不同的成因 —— **量过了真的没有**（真空）
+      与**没量到**（读不到／截断）。后者若按「无损失」读，就是本仓最恨的
+      「把没量过的说成没有」（BL-08）。三值里**只有 `complete` 允许把 `[]` 读成真空**。
+
+    ★ 判法只用 F1 既有字段，不新增读取点：
+        `gaps` 不是 list（读不到）       ⇒ `unreadable`
+        `partial_read` 非 None（截断过） ⇒ `truncated`
+        其余                            ⇒ `complete`
+    ★ 它是**兄弟函数**而不是 `gaps()` 的第七个键：F2 冻的是六键，加键＝改冻结形状。
+      冻结件没写这份证明挂在哪，本模块选兄弟函数（登记为 #61b）。
+    """
+    if not isinstance(facts.get("gaps"), list):
+        return "unreadable"
+    if facts.get("partial_read") is not None:
+        return "truncated"
+    return "complete"
 
 
 # ───────────────────────────── 三、徽标与期间行 ─────────────────────────────
@@ -398,14 +648,17 @@ def badges(facts, scope=None):
     """
     out = []
     if facts.get("is_dev") is True:
-        out.append({"key": "dev", "text": BADGE_WORD["dev"],
-                    "action": BADGE_ACTION["dev"]})
+        w = _badge_word("dev")
+        if w:
+            out.append({"key": "dev", "text": w, "action": BADGE_ACTION["dev"]})
     if facts.get("granary_level") == "low" or facts.get("credits_low_open") is True:
-        out.append({"key": "granary", "text": BADGE_WORD["granary"],
-                    "action": BADGE_ACTION["granary"]})
+        w = _badge_word("granary")
+        if w:
+            out.append({"key": "granary", "text": w, "action": BADGE_ACTION["granary"]})
     if "disk_write_full" in _at_risk(facts):
-        out.append({"key": "disk", "text": BADGE_WORD["disk"],
-                    "action": BADGE_ACTION["disk"]})
+        w = _badge_word("disk")
+        if w:
+            out.append({"key": "disk", "text": w, "action": BADGE_ACTION["disk"]})
     return out
 
 
@@ -422,6 +675,188 @@ def period_line(facts, scope=None):
         return {"kind": "info",
                 "text": SENTENCES["account.info"].replace("{N}", str(info_n))}
     return {"kind": "none", "text": ""}
+
+
+# ───────────────────── 三·五、披露句与状态词条（A6） ─────────────────────
+def _dlg(key):
+    """披露句的 F2 形状（`{"key","text","where"}`）。**只许从表里取**。"""
+    d = DISCLOSURES[key]
+    return {"key": key, "text": d["text"], "where": d["where"]}
+
+
+def disclosure(facts, scope=None):
+    """本格要**额外**说出口的话（list of `{"key","text","where"}`）。
+
+    三条规矩：
+
+      1. **与主行逐字相同的披露句不上屏**。同一屏一句说两次，用户会以为出了
+         两件事。停摆格的停摆句已经是主行（§5-N8-c 强制），此处不再重复；
+         但主行被更紧急的成因占了（停摆 ＋ 缺口 ⇒ 主行是 `absent` 句）时，
+         停摆句**必须**由这里补上 —— 那是「叠加只加停摆句不变」的落点。
+      2. **每句都有出处**（`DISCLOSURES[key]["source"]`），禁临场写。
+      3. 只由 `facts` 判，不看时钟、不读文件（F2 铁律 1）。
+
+    ★ 守备档披露要求 `granary_level == "low"` 两条腿同时成立：余额落在
+      `[0, 一天)` 但**档位读不到**时，说「现在只看基础目录」是替产品断言
+      一次它没确认的降档（#59e）。
+    """
+    out = []
+    if _is_guard_mode(facts) and facts.get("granary_level") == "low":
+        out.append(_dlg("guard_mode"))
+    if _is_stop_by_granary(facts):
+        out.append(_dlg("stopped"))
+    if facts.get("clock_skewed") is True:
+        out.append(_dlg("clock_skew"))
+    main = sentence(cause(facts, scope)["key"], facts, scope)["main"]
+    return [d for d in out if d["text"] != main]
+
+
+def state_word(facts, scope=None):
+    """本格的状态词条（`{"key","label","def"}`）；**本格不该挂词条时返回 `None`**。
+
+    ★ 词条一律从 `state_registry` 取（F3 的唯一真源），本模块**不写第二份**
+      中文名 —— 全仓「灯态词只有一份」这条已被 0372 S08 判红过一次
+      （`state_registry` 的注释里记着那次教训）。
+
+    ★ 停摆格返回 `None`（#59b）：`paused` 的定义句是「监理不在岗，但这段时间
+      **没有要管的东西**。」—— 它含 N8-c 的 `forbid_text`。在「口粮用完了，
+      这段时间没在守」旁边挂这个词条，等于同一屏自己打自己。**宁可不给词条，
+      不给说反话的词条**（补法＝给停摆单独一个词条，属产品改动，未签发不动）。
+
+    ★ `drill` 不出现在词条里：§4.2 已签收第 2 条让 drill 身份**退徽标**
+      （`BADGE_WORD["dev"]`），词条跟着**成因**走；把 `演练中` 再塞进词条位
+      就是同一个身份两个落点，用户会问「到底哪个算数」。
+    """
+    ck = cause(facts, scope)["key"]
+    if ck == "paused" and _is_stop_by_granary(facts):
+        return None
+    try:
+        import state_registry as _SR
+    except Exception:                                        # noqa: BLE001
+        return None                                          # 取不到就不挂，不编
+    e = _SR.STATES_BY_KEY.get(ck)
+    if e is None:
+        return None
+    return {"key": ck, "label": e["label"], "def": e["def_sentence"]}
+
+
+# ───────────────────────── 四、在场证明（A5：presence） ─────────────────────────
+def _iso(dt):
+    return dt.isoformat(timespec="seconds")
+
+
+def _parse_stamps(raw):
+    """`heartbeat_slices` → `(排好序的 datetime 列表, 解析失败的个数)`。
+
+    ★ #58c：F1 只写「list[Slice]」，**没定义 Slice 形状**。裁定＝**时间戳列表**
+      （每条心跳一个 ISO 时刻）：切片是**相对窗口**的概念，属投影；事实层只该有
+      时间点。这样不必为 `Slice` 再造一层子 schema，也不会把「窗口多长」这个
+      投影参数写进事实。
+    ★ 解析不了的元素**跳过并计数**（不静默丢），调用方据此决定要不要降级。
+    """
+    from datetime import datetime
+    out, dropped = [], 0
+    for x in (raw or []):
+        try:
+            out.append(datetime.fromisoformat(str(x)))
+        except (TypeError, ValueError):
+            dropped += 1
+    out.sort()
+    return out, dropped
+
+
+def _hole(start, k0, k1, hb):
+    """空档三元组（F2 形状）：起／止／分钟数。分钟数 = 缺片数 × 片长。"""
+    from datetime import timedelta
+    return (_iso(start + timedelta(seconds=k0 * hb)),
+            _iso(start + timedelta(seconds=(k1 + 1) * hb)),
+            int((k1 - k0 + 1) * hb // 60))
+
+
+def presence(facts, days=1):
+    """在场证明（F2 ＋ D-07）。**纯函数**：只读 `facts["heartbeat_slices"]`，不看时钟。
+
+    返回五键：
+
+      `slices`        本窗口应有的片数（`days × 86400 ÷ HEARTBEAT_SECONDS`；1 天＝144）
+      `with_evidence` 有证据的片数（**写 `141/144`，不写百分比** —— F40）
+      `holes`         全部空档 `[(起, 止, 分钟)]`，按时间升序
+      `asleep`        有**睡眠证据**的空档 —— **本期恒为空**（见下）
+      `unknown`       已判缺席（≥ `_STALE_AFTER`）却**没有睡眠证据**的空档
+
+    ★★ 睡眠证据（D-05 §6.1）当前**拿不到**：`_sentinel_uptime()` 只用墙钟，
+      「uptime 增量 < 墙钟增量」这条判据算不出来 ⇒ **机器睡了 8 小时与监理死了 8 小时
+      在现有数据上完全一样**。故（创始人 2026-10-22 16:2x 拍板「显式降级」）：
+
+        · `asleep` 恒 `[]` —— 不替机器断言「它睡了」；
+        · 长空档进 `unknown` —— 判缺席，但**原因算不清**；
+        · **不判 `absent`** —— 没证据就指控「失守」是假指控。D-05 §6.2 的
+          「空档 ∧ 无睡眠证据 ⇒ 照判」说的是「**查过了**没有睡眠」，不是「**查不了**」；
+          这两件事在 F1 三态里是 `False` 与 `None` 的区别。
+
+      补取数的施工单已写成待签发件（设计件 §11.9）。
+
+    ★ 空档阈值取 `_STALE_AFTER`（=3 片×600s=1800s，D-07 规则 2 原文「≥3 片 ⇒ 判缺席」），
+      **不写死 3 或 1800**。
+    """
+    hb = _heartbeat_seconds()
+    if not hb:
+        return {"slices": 0, "with_evidence": 0, "holes": [],
+                "asleep": [], "unknown": []}
+    n = int(days * 86400 // hb)
+    stamps, _dropped = _parse_stamps(facts.get("heartbeat_slices"))
+
+    if not stamps:
+        # 一条证据都没有 ⇒ 整段是一个空档。★ 起止给 None：**没有锚点就没有时间轴**，
+        #   编一个「今天 0 点」出来就是拿墙钟假装知道。
+        whole = (None, None, int(n * hb // 60))
+        return {"slices": n, "with_evidence": 0, "holes": [whole],
+                "asleep": [], "unknown": [whole]}
+
+    from datetime import timedelta
+    # 窗口＝(end − n×hb, end]，`end` 取「最后一条证据所在片的下一个边界」。
+    #   ★ 不能直接把 `end` 设成 `stamps[-1]`：那样最后一个点恰好落在右边界上，
+    #     最左一片会凭空空出来（一条 1 片假空档），是「自己造出来的缺席」。
+    end = stamps[-1] + timedelta(seconds=hb)
+    start = end - timedelta(seconds=n * hb)
+    used = set()
+    for ts in stamps:
+        k = int((ts - start).total_seconds() // hb)
+        if 0 <= k <= n:
+            used.add(min(k, n - 1))
+
+    holes, run = [], None
+    for k in range(n):
+        if k in used:
+            if run is not None:
+                holes.append(_hole(start, run, k - 1, hb))
+                run = None
+        elif run is None:
+            run = k
+    if run is not None:
+        holes.append(_hole(start, run, n - 1, hb))
+
+    floor = _facts._const("stale")
+    unknown = [h for h in holes if floor is not None and h[2] * 60 >= floor]
+    return {"slices": n, "with_evidence": len(used), "holes": holes,
+            "asleep": [], "unknown": unknown}
+
+
+def period_presence(pres):
+    """把空档投影成**期间行的一句话**（D-05 §6.2 的呈现面）。
+
+    · 有睡眠证据 ⇒ 「它不在（机器睡着了）」—— 本期不可达（无证据源），
+      但句子先摆在这里：补取数落地时只改 `presence`，呈现层一行不用动。
+    · 只有 `unknown` ⇒ `period.unknown_window`（#58d：**待核签的新句**）
+    · 都没有 ⇒ 空串（**不留白也不编「一切正常」**）
+    """
+    if pres.get("asleep"):
+        return SENTENCES["period.asleep"].replace(
+            "{N}", str(sum(x[2] for x in pres["asleep"])))
+    if pres.get("unknown"):
+        return SENTENCES["period.unknown_window"].replace(
+            "{N}", str(sum(x[2] for x in pres["unknown"])))
+    return ""
 
 
 def spend_today(facts):
