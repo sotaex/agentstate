@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
-# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.21（随 v0.53.2）
+# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.21（随 v0.54.0）
 
 > v1.20（0.53.0）：**补登记 1 类** —— `exam_reminder`（见下文「体检提醒类」）。
 > 语义：该做体检了（装好 ≥24 小时没做过／上次体检过去很久），**L1** 级。
