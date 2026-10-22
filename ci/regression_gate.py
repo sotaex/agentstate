@@ -25,6 +25,10 @@
     python ci/regression_gate.py --selfcheck # 跑负控（注入缺陷，必须变红）
     python ci/regression_gate.py --json      # 机器可读
 """
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import tmpreg as _TMP   # 0.55.0 (F3): temp dir registry
 import argparse
 import datetime
 import importlib.util
@@ -80,7 +84,7 @@ class neutral_cwd:
 
     def __init__(self):
         import tempfile
-        self.neutral = tempfile.mkdtemp(prefix="antinel_gate_")
+        self.neutral = _TMP.tmpdir(prefix="antinel_gate_")
         self.old = None
 
     def __enter__(self):
@@ -227,7 +231,7 @@ def j_a2_load_compare_same_source():
     import subprocess
     import tempfile
 
-    tmp = Path(tempfile.mkdtemp(prefix="antinel_a2_"))
+    tmp = Path(_TMP.tmpdir(prefix="antinel_a2_"))
     try:
         root = tmp / "cc"
         r = subprocess.run(
@@ -1270,7 +1274,7 @@ def j_window_title_format():
     # ── 环境隔离（0490 同款纪律）：中枢换临时目录，渲染路径不碰真中枢 ──
     _old_hub = os.environ.get("ANTINEL_HUB_DIR")
     _old_aud = os.environ.get("ANTINEL_AUDIT_DIRS")
-    os.environ["ANTINEL_HUB_DIR"] = tempfile.mkdtemp(prefix="rg_fz2_hub_")
+    os.environ["ANTINEL_HUB_DIR"] = _TMP.tmpdir(prefix="rg_fz2_hub_")
     os.environ.pop("ANTINEL_AUDIT_DIRS", None)
     # inbox_server 的内部 import（inbox_model 等）按 sys.path 解析 ⇒ 插 PKG，
     # 负控 fixture 里解析到的才是 fixture 副本（量具测错对象已犯过两次）。
@@ -1325,7 +1329,7 @@ def j_window_title_format():
                           "（量具与产品脱节，量具故障）" % want)
         for view in ("inbox", "report", "health", "ledger"):
             page = SV.render_page(view=view,
-                                  root=tempfile.mkdtemp(prefix="rg_fz2_r_"),
+                                  root=_TMP.tmpdir(prefix="rg_fz2_r_"),
                                   token="T", items=_items, rep=_REP,
                                   posture=_POSTURE)
             titles = re.findall(r"<title>(.*?)</title>", page, re.S)
@@ -1815,7 +1819,7 @@ def j_pymodules_guard():
 
     # ③ 内建负控：fixture 里 foo_mod 被 import 却没声明，守卫必须报出来
     import tempfile
-    tmp = Path(tempfile.mkdtemp(prefix="antinel_pymod_"))
+    tmp = Path(_TMP.tmpdir(prefix="antinel_pymod_"))
     (tmp / "foo_mod.py").write_text("X = 1\n", encoding="utf-8", newline="\n")
     (tmp / "bar_mod.py").write_text("import foo_mod\n", encoding="utf-8", newline="\n")
     (tmp / "pyproject.toml").write_text(
@@ -2245,7 +2249,7 @@ def j_no_build_artifacts_in_index():
     import subprocess
     import tempfile
     _env = _clean_git_env()
-    neg = tempfile.mkdtemp(prefix="antinel_idxneg_")
+    neg = _TMP.tmpdir(prefix="antinel_idxneg_")
     try:
         subprocess.run(["git", "-C", neg, "init", "-q"], capture_output=True, env=_env)
         os.makedirs(os.path.join(neg, "build"), exist_ok=True)
@@ -2357,7 +2361,7 @@ def j_three_state_discipline():
 
     # ③ 拿不准时锁必须按占用处理（活锁不许被偷）
     import tempfile
-    tmp = tempfile.mkdtemp(prefix="d32_lock_")
+    tmp = _TMP.tmpdir(prefix="d32_lock_")
     _keep_lock = dg._LOCK
     dg._LOCK = os.path.join(tmp, "run.lock")
     try:
@@ -2853,7 +2857,7 @@ def _build_negctl_fixture(label=""):
     import tempfile
     # ★ 只复制闸门真正需要的骨架（全仓 copytree 870 文件 × 4 次 = 会超时）。
     #   hooks/ ＋ rules/ ＋ ci/ 就是全部依赖：闸门 import 钩子、读规则表、自己。
-    tmp = Path(tempfile.mkdtemp(prefix="antinel_negctl_"))
+    tmp = Path(_TMP.tmpdir(prefix="antinel_negctl_"))
     dst = tmp / "pkg"
     dst.mkdir(parents=True, exist_ok=True)
     # ★★ 2026-09-29：补 `psl/` 与 `docs/`（D-22 要读 psl/manifest.json；

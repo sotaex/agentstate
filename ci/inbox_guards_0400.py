@@ -66,7 +66,7 @@
     · 判据**只查行为/结构**，不查文案 —— 凡按源码字面查的，一律走 **AST**
       （本文件写 S27 时就差点踩：`is_dev_build` 的**注释**里写着 `.git`，
        用子串查会**假红** —— 去查"解释这件事的那段文字"是本仓反复出现的坑）；
-    · **不写任何产品文件**：需要落盘的用例一律写 `tempfile.mkdtemp()` 建的临时目录。
+    · **不写任何产品文件**：需要落盘的用例一律写 `_TMPREG.tmpdir()` 建的临时目录。
 """
 from __future__ import annotations
 
@@ -81,6 +81,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 for _p in (ROOT, os.path.join(ROOT, "ci")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
+
+
+# 0.55.0 (F3): temp dir registry
+import tmpreg as _TMPREG                                              # noqa: E402
 
 RESULTS = []
 
@@ -179,7 +183,7 @@ def _load_state_strict_problems(mod, sp):
 @check("S20-400 A2「读不到」≠「已撤防」：读失败返 None ＋ 无背书撤防不落盘")
 def s20():
     import host_shield as H
-    tmp = tempfile.mkdtemp(prefix="g0400_s20_")
+    tmp = _TMPREG.tmpdir(prefix="g0400_s20_")
     o_sp = H.state_path
     H.state_path = lambda: os.path.join(tmp, "host_shield.json")
     try:
@@ -209,7 +213,7 @@ def n_s20():
     o = H.load_state_strict
     try:
         H.load_state_strict = lambda: {"enabled": False, "workspaces": {}}
-        tmp = tempfile.mkdtemp(prefix="g0400_n20_")
+        tmp = _TMPREG.tmpdir(prefix="g0400_n20_")
         probs = _load_state_strict_problems(
             H, lambda: os.path.join(tmp, "host_shield.json"))
         if not probs:
@@ -223,7 +227,7 @@ def n_s20():
 @check("S21 update_state_fields：坏状态文件 ⇒ 拒写且字节不变；好文件 ⇒ 真写")
 def s21():
     import host_shield as H
-    tmp = tempfile.mkdtemp(prefix="g0400_s21_")
+    tmp = _TMPREG.tmpdir(prefix="g0400_s21_")
     o_sp = H.state_path
     H.state_path = lambda: os.path.join(tmp, "host_shield.json")
     try:
@@ -257,7 +261,7 @@ def s21():
 @check("N-S21 负控：把拒写分支去掉（回到整份默认写回）⇒ S21 必须报红")
 def n_s21():
     import host_shield as H
-    tmp = tempfile.mkdtemp(prefix="g0400_n21_")
+    tmp = _TMPREG.tmpdir(prefix="g0400_n21_")
     o_sp = H.state_path
     H.state_path = lambda: os.path.join(tmp, "host_shield.json")
     try:
@@ -319,7 +323,7 @@ def _chain_dir_problems(chain_dir, hub_rollup, pkg_chain, sandbox):
 def s22():
     import antinel
     import host_shield as H
-    tmp = tempfile.mkdtemp(prefix="g0400_s22_")
+    tmp = _TMPREG.tmpdir(prefix="g0400_s22_")
     probs = _chain_dir_problems(
         antinel._shield_chain_dir, H._hub_rollup_dir,
         lambda: H._shield_audit_dir(H._pkg_root()), tmp)
@@ -337,7 +341,7 @@ def s22():
 @check("N-S22 负控：把「跟随中枢」那行去掉 ⇒ S22 必须报红")
 def n_s22():
     import host_shield as H
-    tmp = tempfile.mkdtemp(prefix="g0400_n22_")
+    tmp = _TMPREG.tmpdir(prefix="g0400_n22_")
     # 变异：一个**永远返回包链**的替身（＝把跟随中枢那行删掉的行为）
     fake = lambda: H._shield_audit_dir(H._pkg_root())                       # noqa: E731
     probs = _chain_dir_problems(fake, H._hub_rollup_dir,
@@ -386,7 +390,7 @@ def s23():
                 " ⇒ 降噪记账被删了（节流会失效）")
     # 行为级：`mark_notify_shown` 绝不能经由 `save_state` 落盘
     import host_shield as H
-    tmp = tempfile.mkdtemp(prefix="g0400_s23_")
+    tmp = _TMPREG.tmpdir(prefix="g0400_s23_")
     o_hub, o_save = H._hub_dir, H.save_state
     H._hub_dir = lambda: tmp
     H.save_state = lambda *a, **k: (_ for _ in ()).throw(

@@ -76,6 +76,10 @@
 """
 from __future__ import annotations
 
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import tmpreg as _TMP   # 0.55.0 (F3): temp dir registry
 import ast
 import io
 import json
@@ -197,14 +201,14 @@ def _eval_path_expr(expr, ns):
 
 
 def jdg01_body():
-    sandbox = str(Path(tempfile.mkdtemp(prefix="jdg01_")) / "hub")
+    sandbox = str(Path(_TMP.tmpdir(prefix="jdg01_")) / "hub")
 
     sites = _reset_sites()
     if not sites:
         raise AssertionError("测试套件里没有任何 notify 状态重置点（UX 用例不存在了？）")
 
     # 镜像套件自己的绑定：line 71 `os.environ["ANTINEL_HUB_DIR"] = str(WORK / "hub")`
-    work = Path(tempfile.mkdtemp(prefix="jdg01_work_"))
+    work = Path(_TMP.tmpdir(prefix="jdg01_work_"))
     mirror = {"WORK": work, "proj": work / "proj"}
     old_env = os.environ.get("ANTINEL_HUB_DIR")
     os.environ["ANTINEL_HUB_DIR"] = sandbox          # 两侧同一环境
@@ -534,7 +538,7 @@ def jdg02b_body():
 
     old_env = os.environ.get("ANTINEL_HUB_DIR")
     old_vis = hs.console_is_visible
-    sandbox = tempfile.mkdtemp(prefix="jdg02b_")
+    sandbox = _TMP.tmpdir(prefix="jdg02b_")
     os.environ["ANTINEL_HUB_DIR"] = sandbox
     results = {}
     try:
@@ -678,7 +682,7 @@ def n_bogus_digest_is_drift():
     dig[first] = "sha256:" + "0" * 64
     d["digests"] = dig
     d["__negctl_missing__"] = True
-    tmp = tempfile.mkdtemp(prefix="jdg03_")
+    tmp = _TMP.tmpdir(prefix="jdg03_")
     fake = os.path.join(tmp, "judgment.json")
     io.open(fake, "w", encoding="utf-8").write(json.dumps(d, ensure_ascii=False))
     # 指向一个必然不存在的路径，逼出「文件缺失」分支
@@ -966,7 +970,7 @@ def jdg06():
 def _mk_synthetic_wheel(double_distinfo=True, record_missing=False):
     """负控专用：在临时目录造一个最小 wheel。"""
     import zipfile
-    tmp = tempfile.mkdtemp(prefix="jdg06_")
+    tmp = _TMP.tmpdir(prefix="jdg06_")
     p = os.path.join(tmp, "antinel-9.9.9-py3-none-any.whl")
     with zipfile.ZipFile(p, "w") as z:
         if double_distinfo:

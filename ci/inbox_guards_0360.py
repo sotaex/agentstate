@@ -15,6 +15,10 @@
 """
 from __future__ import annotations
 
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import tmpreg as _TMP   # 0.55.0 (F3): temp dir registry
 import ast
 import io
 import os
@@ -910,7 +914,7 @@ def c_tray_carries_sentinel_state():
     import json
     import inbox_tray as T
     import tempfile
-    d = tempfile.mkdtemp(prefix="antinel-shield-")
+    d = _TMP.tmpdir(prefix="antinel-shield-")
     _SCRATCH.append(d)
     T.write_state("R0", 4, "测试", root=d)
     with open(T.state_path(d), encoding="utf-8") as f:
@@ -943,7 +947,7 @@ def n_tray_without_shield_field_is_caught():
 
     saved_write, saved_suffix = T.write_state, dict(T.SHIELD_SUFFIX)
     saved_path = T.state_path
-    d = tempfile.mkdtemp(prefix="antinel-shield-neg-")
+    d = _TMP.tmpdir(prefix="antinel-shield-neg-")
     _SCRATCH.append(d)
 
     def bad_write(*a, **kw):

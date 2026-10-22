@@ -16,6 +16,10 @@
 证据全部落 _uxtest2/<时间戳>/（**不删**，零删除纪律）。
 退出码 0 = 全部判据绿。
 """
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import tmpreg as _TMP   # 0.55.0 (F3): temp dir registry
 import io, os, re, sys, json, time, shutil, subprocess, tempfile, venv, glob
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
@@ -62,7 +66,7 @@ def venv_ant(vd):
 
 
 def make_venv(tag, parent=None):
-    vd = tempfile.mkdtemp(prefix="j2venv_%s_" % tag, dir=parent)
+    vd = _TMP.tmpdir(prefix="j2venv_%s_" % tag, dir=parent)
     t0 = time.time()
     venv.create(vd, with_pip=True)
     print("   venv(%s): %s（%.1fs）" % (tag, vd, time.time() - t0))
@@ -172,7 +176,7 @@ def main():
 
     # ---- M4 接入宿主（未初始化项目的报错文案 + 文档命令可达性）
     print("\n-- M4 接入宿主 / 文档命令可达性 --")
-    proj = tempfile.mkdtemp(prefix="j2proj_")
+    proj = _TMP.tmpdir(prefix="j2proj_")
     rc, out, err, dt = run([ant, "morning"], cwd=proj, timeout=120)
     dump("m4_morning_uninit.txt", out + "\n---stderr---\n" + err)
     msg = (err or out).strip()

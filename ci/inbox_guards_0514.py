@@ -172,10 +172,16 @@ from urllib.parse import parse_qs, urlparse
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
+# 0.55.0 (F3): 临时目录登记处
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+import tmpreg as _TMPREG                                              # noqa: E402
+
 
 # ★★ 必须在 import 产品模块**之前**把中枢换到临时目录（0470/0490 同款教训）：
 #   否则渲染/记账路径会碰真实中枢的 notify_state.json。
-_HUB = tempfile.mkdtemp(prefix="g0514_hub_")
+_HUB = _TMPREG.tmpdir(prefix="g0514_hub_")
 os.environ["ANTINEL_HUB_DIR"] = _HUB
 os.environ.pop("ANTINEL_AUDIT_DIRS", None)
 
@@ -2485,7 +2491,7 @@ class _PopEnv:
     """紧急提醒链路的假桌面：假 opener（记录调用）、假 console（不起真服务）。"""
 
     def __init__(self):
-        self.root = tempfile.mkdtemp(prefix="g0514_pop_")
+        self.root = _TMPREG.tmpdir(prefix="g0514_pop_")
         self.urls = []
         self.rec = {"url": "http://127.0.0.1:9/", "token": "tk0514"}
 
@@ -2930,7 +2936,7 @@ def _b18_health(hub, on=True, alive=True, stamp="cur", cur=None):
 
 @check("B-18 气泡通道健康：六态各自说各自的话，ok 只给开着＋在跑＋有戳一致")
 def c_b18():
-    hub = tempfile.mkdtemp(prefix="g0514_b18_")
+    hub = _TMPREG.tmpdir(prefix="g0514_b18_")
     cur = SV.code_identity().get("version")
     if not cur:
         return ("SKIP: 取不到仓里版本号（code_identity 读不到）—— "
@@ -2981,7 +2987,7 @@ def c_b18():
 @check("B-18b 收件箱页真的显示通道健康行，且 root 透传（派生，不许硬编码）")
 def c_b18b(mod=None):
     mod = mod or SV
-    hub = tempfile.mkdtemp(prefix="g0514_b18b_")
+    hub = _TMPREG.tmpdir(prefix="g0514_b18b_")
     seen = {}
 
     def _fake(root=None):
@@ -3432,7 +3438,7 @@ def _flo10_ps(job, spec_path, frame_path=None, mode="L0", mts="", size=46,
     except UnicodeEncodeError as e:
         raise RuntimeError("帧数学驱动含非 ASCII 字节（%s）—— PS 5.1 会按 GBK "
                            "误解码，行为静默劣化；注释说明放 Python 侧" % e)
-    d = tempfile.mkdtemp(prefix="g0514_flo10_")
+    d = _TMPREG.tmpdir(prefix="g0514_flo10_")
     drv = os.path.join(d, "flo10_driver.ps1")
     with io.open(drv, "w", encoding="utf-8", newline="\n") as f:
         f.write(_FLO10_DRIVER)
@@ -3456,7 +3462,7 @@ def _flo10_tray(state="L2"):
     走 `inbox_tray.write_state` ⇒ 测的是**下发通路**（规格真的落到托盘那一个
     状态文件里），驱动读的也是哨标真正会读的那个文件。
     """
-    root = tempfile.mkdtemp(prefix="g0514_flo10_hub_")
+    root = _TMPREG.tmpdir(prefix="g0514_flo10_hub_")
     TR.write_state(state, 1, "intercepting - unhandled 1", root=root)
     p = TR.state_path(root)
     with io.open(p, encoding="utf-8") as f:
@@ -3545,7 +3551,7 @@ def n_flo10a():
     if base is not True:
         return "夹具不成立：未变异时 FLO-10a 就不合格：%s" % (base,)
     frame_src = io.open(IL.frame_script_path(), encoding="utf-8").read()
-    d = tempfile.mkdtemp(prefix="g0514_flo10n_")
+    d = _TMPREG.tmpdir(prefix="g0514_flo10n_")
     # 变异 1：Round → Floor（边界差一；对当前规格 23 → 22）。
     # ★ 为什么不用「直接返回 Size/2」：当前规格推导出的半径恰好就是 23＝Size/2
     #   （extent 280.074 ≈ half 282.074，缩放取整后重合）—— 那个变异**不改变
@@ -3723,7 +3729,7 @@ def n_flo10b():
     if base is not True:
         return "夹具不成立：未变异时 FLO-10b 就不合格：%s" % (base,)
     frame_src = io.open(IL.frame_script_path(), encoding="utf-8").read()
-    d = tempfile.mkdtemp(prefix="g0514_flo10n_")
+    d = _TMPREG.tmpdir(prefix="g0514_flo10n_")
     # 变异 1：k=0 —— 换态渐变永远不起（Mt=2 仍停在启动态）
     a = "$k = Get-EaseOut (Get-Clamp ($Mt / [double]$a.xfade) 0 1)"
     if frame_src.count(a) != 1:
@@ -4143,7 +4149,7 @@ def _flo12_day_recs(root):
 
 @check("FLO-17 规格拿不到也必须写：logo_missing 失败标记＋logo_error＋审计一条")
 def c_flo17():
-    root = tempfile.mkdtemp(prefix="g0514_flo12_")
+    root = _TMPREG.tmpdir(prefix="g0514_flo12_")
     # ★ 节流状态**本判据自带一份**：不读进程级 `_LOGO_SPEC_SEEN` ——
     #   否则第二次跑会被上一次留下的 failed=True 静默节流，判据把自
     #   己测瞎（2026-10-20 实测：N-FLO12b 因此误报「夹具不成立」）。
@@ -4225,7 +4231,7 @@ def n_flo17b():
 
 @check("FLO-17b 徽标痕迹消费：logo_events.jsonl ⇒ 链（先链后改名，零删除）")
 def c_flo17b():
-    root = tempfile.mkdtemp(prefix="g0514_flo12b_")
+    root = _TMPREG.tmpdir(prefix="g0514_flo12b_")
     ev = TR.logo_events_path(root)
     os.makedirs(os.path.dirname(ev), exist_ok=True)
     lines = [json.dumps({"ts": "2026-10-19T18:00:00.000Z",
@@ -4324,7 +4330,7 @@ def _brand_ico_alpha_at(ico_path, size):
     if not ps:
         raise RuntimeError("PATH 上没有 powershell/pwsh —— ico 像素取样无法真跑")
     import subprocess
-    d = tempfile.mkdtemp(prefix="g0514_flo13_")
+    d = _TMPREG.tmpdir(prefix="g0514_flo13_")
     drv = os.path.join(d, "px.ps1")
     body = (
         "param([string]$Ico,[int]$S)\n"
@@ -4373,7 +4379,7 @@ def _flo13_resolve(icon_dir, brand, state="L2", shield="on"):
     if j < 0:
         raise RuntimeError("Resolve-IconPath 函数体边界找不到（源码已变，需更新判据）")
     fn = src[i:j + 3]
-    d = tempfile.mkdtemp(prefix="g0514_flo13r_")
+    d = _TMPREG.tmpdir(prefix="g0514_flo13r_")
     drv = os.path.join(d, "res.ps1")
     body = (
         "param([string]$Fn,[string]$IconDir,[string]$Brand,[string]$St,[string]$Sh)\n"
@@ -4423,7 +4429,7 @@ def c_flo13():
             return ("%dpx 品牌板不是满幅不透明（四角/边 alpha=%r）—— 四角是透明像素，"
                     "『区域内点击都能切回』做不到" % (size, a[:8]))
     # ③ Python 侧把品牌图标显式传给哨标（不靠 PS 猜兄弟目录）
-    root = tempfile.mkdtemp(prefix="g0514_flo13c_")
+    root = _TMPREG.tmpdir(prefix="g0514_flo13c_")
     cmd = IL.logo_cmd(root=root)
     if "-BrandIcon" not in cmd:
         return "logo_cmd 没传 -BrandIcon —— 哨标只能从 -IconDir 猜路径"
@@ -4459,7 +4465,7 @@ def n_flo13b():
     if 'rx="0"' not in svg:
         return "夹具不成立：logo.svg 的底板已不是 rx=\"0\"，负控锚点漂了"
     import importlib.util
-    tmp_root = tempfile.mkdtemp(prefix="g0514_flo13n_")
+    tmp_root = _TMPREG.tmpdir(prefix="g0514_flo13n_")
     svg2 = os.path.join(tmp_root, "logo.svg")
     ico2 = os.path.join(tmp_root, "antinel.ico")
     with io.open(svg2, "w", encoding="utf-8", newline="\n") as f:
@@ -4538,7 +4544,7 @@ def _fl14_derive_table(logical=46, dpis=None, logo_path=None):
     import subprocess
     src = _fl14_src(logo_path)
     fn = _fl14_fn_slice(src, _FL14_DERIVE_FN, "$script:dpi = Get-DpiInfo")
-    d = tempfile.mkdtemp(prefix="g0514_flo14_")
+    d = _TMPREG.tmpdir(prefix="g0514_flo14_")
     drv = os.path.join(d, "dpi.ps1")
     body = (
         "param([string]$Fn)\n"
@@ -4665,7 +4671,7 @@ def n_flo14():
               "  param([int]$Logical, [int]$Dpi)\n"
               "  return [int]$Logical\n"
               "}\n")
-    d = tempfile.mkdtemp(prefix="g0514_flo14n1_")
+    d = _TMPREG.tmpdir(prefix="g0514_flo14n1_")
     mp = os.path.join(d, "logo.ps1")
     with io.open(mp, "w", encoding="utf-8", newline="\n") as f:
         f.write(src.replace(fn, mutant))
@@ -4688,7 +4694,7 @@ def n_flo14b():
         " / 96), ($sizePhys * $script:dpi / 96))")
     if mutant == src:
         return "夹具不成立：窗口尺寸那行已经不是 $sizePhys 口径，负控锚点漂了"
-    d = tempfile.mkdtemp(prefix="g0514_flo14n2_")
+    d = _TMPREG.tmpdir(prefix="g0514_flo14n2_")
     mp = os.path.join(d, "logo.ps1")
     with io.open(mp, "w", encoding="utf-8", newline="\n") as f:
         f.write(mutant)
@@ -4782,7 +4788,7 @@ def n_flo15a():
     if c_flo15a() is not True:
         return "夹具不成立：未变异时 FLO-15a 就不合格，负控无分辨力"
     # 变异＝整目录复制一份，把 L0.mp4 的最后一个字节翻掉，再用**同一条判据**量它
-    d = tempfile.mkdtemp(prefix="g0514_flo15a_")
+    d = _TMPREG.tmpdir(prefix="g0514_flo15a_")
     import shutil
     for st in _MP4_SHA:
         shutil.copy2(os.path.join(ROOT, "assets", "logo", "%s.mp4" % st),
@@ -4879,7 +4885,7 @@ def n_flo15c():
                          '("L0", "L1", "L2", "Ls")')
     if mutant == src:
         return "夹具不成立：mk_icons 的态清单形状变了，负控锚点漂了"
-    d = tempfile.mkdtemp(prefix="g0514_flo15c_")
+    d = _TMPREG.tmpdir(prefix="g0514_flo15c_")
     mp = os.path.join(d, "mk_icons.py")
     with io.open(mp, "w", encoding="utf-8", newline="\n") as f:
         f.write(mutant)
@@ -5491,7 +5497,7 @@ def _logo_root_problem(cmd, root):
 
 @check("FLO-06 自定义 root：哨标状态/动作/退役标志全部跟着同一中枢目录")
 def c_flo06_root():
-    root = tempfile.mkdtemp(prefix="g0514_logo_root_")
+    root = _TMPREG.tmpdir(prefix="g0514_logo_root_")
     cmd = IL.logo_cmd(root=root)
     why = _logo_root_problem(cmd, root)
     if why:
@@ -5504,7 +5510,7 @@ def c_flo06_root():
 
 @check("N-FLO06 负控：把三条命令路径换回默认 root ⇒ 同一量具判红")
 def n_flo06_root():
-    root = tempfile.mkdtemp(prefix="g0514_logo_root_")
+    root = _TMPREG.tmpdir(prefix="g0514_logo_root_")
     bad = IL.logo_cmd(root=root)
     defaults = {"-State": IL.state_path(None),
                 "-Action": IL.action_path(None),
@@ -5543,7 +5549,7 @@ class _HideEnv:
 
 @check("FLO-07 hide 三态：没有⇒空转并清陈年标志；标志劝动⇒自己藏；劝不动⇒兜底退役")
 def c_flo07():
-    root = tempfile.mkdtemp(prefix="g0514_flo_")
+    root = _TMPREG.tmpdir(prefix="g0514_flo_")
     # a) 没有哨标 ⇒ 空转成功，且**陈年 hide 标志被清**（留着它，下一枚
     #    哨标一出生就被藏 —— "开了等于没开"同型）
     os.makedirs(os.path.dirname(IL.hide_flag_path(root)), exist_ok=True)
@@ -5582,7 +5588,7 @@ def c_flo07():
 
 @check("N-FLO07 负控：藏不动且兜底也失败 ⇒ 如实报失败，不许说藏了")
 def n_flo07():
-    root = tempfile.mkdtemp(prefix="g0514_flo_")
+    root = _TMPREG.tmpdir(prefix="g0514_flo_")
 
     class StubbornDead(_HideEnv):
         def finder(self):
@@ -5632,7 +5638,7 @@ class _ResidentEnv:
 
 @check("FLO-08 show_or_spawn：常驻哨标 ⇒ 写 show 唤出（不冷启、置顶、消费标志）；没有 ⇒ 回落冷启")
 def c_flo08():
-    root = tempfile.mkdtemp(prefix="g0514_flo_")
+    root = _TMPREG.tmpdir(prefix="g0514_flo_")
     env = _ResidentEnv(root)
     rep = IL.show_or_spawn(root=root, launcher=env.launcher,
                            finder=env.finder, any_finder=env.any_finder,
@@ -5661,7 +5667,7 @@ def c_flo08():
 
 @check("N-FLO08 负控：判据注入 finder 而不给 any_finder ⇒ 不做隐藏检查（假桌面行为同旧）")
 def n_flo08():
-    root = tempfile.mkdtemp(prefix="g0514_flo_")
+    root = _TMPREG.tmpdir(prefix="g0514_flo_")
     env = _ResidentEnv(root)                 # 有"常驻"窗，但不给 any_finder
     rep = IL.show_or_spawn(root=root, launcher=env.launcher,
                            finder=env.finder, wait_sec=1.0,
@@ -5715,7 +5721,7 @@ def c_flo09():
         return ("消费循环体里直接调了 `open_console_now` —— 绕过了默认消费器，"
                 "注入点成了摆设")
     # 行为：consumer 被注入，收到的 console_url 必须原样透传
-    root = tempfile.mkdtemp(prefix="g0514_flo_")
+    root = _TMPREG.tmpdir(prefix="g0514_flo_")
     got = {}
     stop = threading.Event()
 
@@ -5731,7 +5737,7 @@ def c_flo09():
 
 @check("N-FLO09 负控：consumer 连环抛错 ⇒ 循环必须活着（不许一轮打死）")
 def n_flo09():
-    root = tempfile.mkdtemp(prefix="g0514_flo_")
+    root = _TMPREG.tmpdir(prefix="g0514_flo_")
     calls = {"n": 0}
     stop = threading.Event()
 
@@ -5791,7 +5797,7 @@ class _MarkEnv:
 
 @check("FLO-02 起哨标顺序：先退役旧的（含清标志）⇒ 才起 ⇒ 等窗 ⇒ 置顶")
 def c_flo02():
-    root = tempfile.mkdtemp(prefix="g0514_flo_")
+    root = _TMPREG.tmpdir(prefix="g0514_flo_")
     env = _MarkEnv(root, old=True)
     rep = IL.open_floating(root=root, launcher=env.launcher, finder=env.finder,
                            killer=env.killer, wait_sec=1.5,
@@ -5813,7 +5819,7 @@ def c_flo02():
 
 @check("N-FLO02 负控：哨标进程起了但窗不出现 ⇒ 如实报没就位，不置顶")
 def n_flo02():
-    root = tempfile.mkdtemp(prefix="g0514_flo_")
+    root = _TMPREG.tmpdir(prefix="g0514_flo_")
     env = _MarkEnv(root, old=False)
 
     def dead_launcher(cmd):
@@ -5833,7 +5839,7 @@ def n_flo02():
 
 @check("FLO-03 退役三态：没有⇒空转；标志劝动⇒自己退；劝不动⇒兜底并说明")
 def c_flo03():
-    root = tempfile.mkdtemp(prefix="g0514_flo_")
+    root = _TMPREG.tmpdir(prefix="g0514_flo_")
     # a) 没有哨标 ⇒ 空转成功（不该有副作用）
     env = _MarkEnv(root, old=False)
     rep = IL.retire(root=root, finder=env.finder, killer=env.killer,
@@ -5870,7 +5876,7 @@ def c_flo03():
 
 @check("N-FLO03 负控：兜底也关不掉 ⇒ 如实报失败，不许说退了")
 def n_flo03():
-    root = tempfile.mkdtemp(prefix="g0514_flo_")
+    root = _TMPREG.tmpdir(prefix="g0514_flo_")
 
     class Stubborn(_MarkEnv):
         def finder(self):
@@ -5893,7 +5899,7 @@ def n_flo03():
 
 @check("FLO-04 收缩：哨标就位才关面板窗；strict 没中再宽泛一次")
 def c_flo04():
-    root = tempfile.mkdtemp(prefix="g0514_flo_")
+    root = _TMPREG.tmpdir(prefix="g0514_flo_")
     env = _MarkEnv(root, old=False)
     seen = []
 
@@ -5919,7 +5925,7 @@ def c_flo04():
 
 @check("N-FLO04a 负控：哨标起不来 ⇒ 一枚面板窗都不许关（顺序即安全）")
 def n_flo04a():
-    root = tempfile.mkdtemp(prefix="g0514_flo_")
+    root = _TMPREG.tmpdir(prefix="g0514_flo_")
     env = _MarkEnv(root, old=False)
     closed = {"n": 0}
 
@@ -5942,7 +5948,7 @@ def n_flo04a():
 
 @check("N-FLO04b 负控：关窗抛错 ⇒ 如实报失败，哨标留着（不两头空）")
 def n_flo04b():
-    root = tempfile.mkdtemp(prefix="g0514_flo_")
+    root = _TMPREG.tmpdir(prefix="g0514_flo_")
     env = _MarkEnv(root, old=False)
 
     def closer(h):
@@ -6113,7 +6119,7 @@ def j1():
     ★ 四视图全数：只在顶部条有标、但**每页都可能单独加一枚** ——
       实测 0.50.6 之前健康页/日报页各有一枚 top logo ＋ 一枚收缩钮 ⇒ 2。
     """
-    hub = tempfile.mkdtemp(prefix="g0514_j1_")
+    hub = _TMPREG.tmpdir(prefix="g0514_j1_")
     items = _items()
     bad = []
     for view, filt in (("inbox", "action"), ("report", None),
@@ -6479,7 +6485,7 @@ def _around(s, word, n=12):
 
 def _views_html(prefix):
     """四视图渲染结果（与 J1 同款夹具）。返回 generator(view, html)。"""
-    hub = tempfile.mkdtemp(prefix=prefix)
+    hub = _TMPREG.tmpdir(prefix=prefix)
     for view, filt in (("inbox", "action"), ("report", None),
                        ("health", None), ("ledger", None)):
         yield view, SV.render_page(view=view, filt=filt, root=hub, token="T")
@@ -6591,7 +6597,7 @@ def n_j7():
     finally:
         GL.TERMS["Ls"]["one"] = orig
     # ② 让粮账真的开起来（临时 root 发一笔）⇒ 这句变成假话 ⇒ 必须红
-    root = tempfile.mkdtemp(prefix="g0514_nj7_")
+    root = _TMPREG.tmpdir(prefix="g0514_nj7_")
     GR.grant("入驻口粮", GR.SEED_GRANT, root=root)
     st = GR.state(root=root)["state"]
     if st == "off":
@@ -6741,7 +6747,7 @@ def n_spk_meta_no_kv():
 
 @check("W-SPK2 整页渲染不含裸术语（manifest/state 文件/哈希，非代码样位置）")
 def c_spk_render_no_terms():
-    hub = tempfile.mkdtemp(prefix="g0514_spk_")
+    hub = _TMPREG.tmpdir(prefix="g0514_spk_")
     items = [
         _spk_item("host_shield_dev_drift",
                   "研发态：代码与登记表不符（改动未重建清单）——这一版还没发出去，"
@@ -6783,7 +6789,7 @@ def n_spk_render_no_terms():
     orig = M.humanize
     try:
         M.humanize = lambda s: ("" if s is None else str(s))
-        hub = tempfile.mkdtemp(prefix="g0514_spkn_")
+        hub = _TMPREG.tmpdir(prefix="g0514_spkn_")
         it = _spk_item("host_shield_tamper",
                        "state 文件 enabled=False 与审计链最近状态（armed）不一致——以链为准。",
                        topic="state_drift")
@@ -6799,7 +6805,7 @@ def n_spk_render_no_terms():
     if bare not in _spk_meta(h_bad):
         return ("负控注入点失效：关掉 humanize 后 %r 没出现在过 humanize 的明细行里"
                 "（说明它从别的渲染路径上屏，这条负控证明的不是 humanize）" % bare)
-    hub2 = tempfile.mkdtemp(prefix="g0514_spkn2_")
+    hub2 = _TMPREG.tmpdir(prefix="g0514_spkn2_")
     it2 = _spk_item("host_shield_tamper",
                     "state 文件 enabled=False 与审计链最近状态（armed）不一致——以链为准。",
                     topic="state_drift")
@@ -6916,7 +6922,7 @@ _HEX64_RE = re.compile(r"[0-9a-fA-F]{32,}")
 
 def _spk_page(items, posture, filt="all"):
     """渲染一整页（真实渲染路径，posture 穿线到面板）。"""
-    hub = tempfile.mkdtemp(prefix="g0514_spk_")
+    hub = _TMPREG.tmpdir(prefix="g0514_spk_")
     return SV.render_page(view="inbox", filt=filt, root=hub, token="T",
                           items=items, posture=posture)
 
@@ -7400,7 +7406,7 @@ _GUARD_POSTURE = {"state": "guarding", "label": "值守中", "can_fix": False}
 
 def _t4_page(items, posture=None):
     """真实渲染路径：`render_page` 默认入口（**不注入姿态**时传 None）。"""
-    hub = tempfile.mkdtemp(prefix="g0514_t4_")
+    hub = _TMPREG.tmpdir(prefix="g0514_t4_")
     return SV.render_page(view="inbox", root=hub, token="T",
                           items=items, posture=posture)
 

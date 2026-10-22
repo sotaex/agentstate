@@ -36,6 +36,10 @@
   W17-f   正：ensure_daemon 的**成功只由回读决定** —— 没登记到 pid ⇒ alive=False
   N-W17-f 负：合成"spawn 即成功"的变体 ⇒ 必须判红
 """
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import tmpreg as _TMP   # 0.55.0 (F3): temp dir registry
 import ast
 import contextlib
 import importlib.util
@@ -424,7 +428,7 @@ def w17c():
 
 def _stale_record_hub(prefix):
     """造一个「记录在、服务不在」的中枢：登记 pid 是个死号，端口不绑。"""
-    hub = tempfile.mkdtemp(prefix=prefix)
+    hub = _TMP.tmpdir(prefix=prefix)
     SV.write_console_record(8799, "TOK-STALE", pid=999999, root=hub)
     return hub
 
@@ -476,7 +480,7 @@ def n_w17e():
 
 def _daemon_readback_core(impl):
     """尺子：喂一个什么都不做的 spawner，要求「没登记到 pid」被如实返回。"""
-    hub = tempfile.mkdtemp(prefix="g0517_w17f_")
+    hub = _TMP.tmpdir(prefix="g0517_w17f_")
     try:
         alive, pid, started, why = impl(root=hub, spawner=lambda *a: None,
                                         wait_sec=0.6)

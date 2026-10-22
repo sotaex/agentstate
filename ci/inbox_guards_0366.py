@@ -41,6 +41,10 @@
 """
 from __future__ import annotations
 
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import tmpreg as _TMP   # 0.55.0 (F3): temp dir registry
 import ast
 import importlib
 import inspect
@@ -234,7 +238,7 @@ def m2_diff_reports_new_and_fixed():
       ⇒ 差分必须指出 0360 是新增红，且**不能**把其余 7 套算进去。
     """
     G = _load_gate()
-    d = tempfile.mkdtemp(prefix="psl_diff_")
+    d = _TMP.tmpdir(prefix="psl_diff_")
     try:
         snap_dir = os.path.join(d, "gate")
         os.makedirs(snap_dir)
@@ -432,7 +436,7 @@ def m8_crash_is_not_counted_as_new_red():
     """
     G = _load_gate()
     import tempfile
-    d = tempfile.mkdtemp(prefix="psl_crash_")
+    d = _TMP.tmpdir(prefix="psl_crash_")
     try:
         with io.open(os.path.join(d, "baseline.json"), "w", encoding="utf-8") as f:
             json.dump({"fingerprint": G._gate_fingerprint(), "ts": 0,

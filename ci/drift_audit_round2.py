@@ -2,6 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """漂移审计 round2：修正 4 处审计脚本误差 + 诊断 D1/D3"""
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import tmpreg as _TMP   # 0.55.0 (F3): temp dir registry
 import io, sys, os, json, re, subprocess, tempfile, shutil, hashlib, glob
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
@@ -9,7 +13,7 @@ PKG = r"D:\psl\poc\antinel-security"
 PY = sys.executable
 HOOK_PRE = os.path.join(PKG, "hooks", "pre_tool_use.py")
 
-base = tempfile.mkdtemp(prefix="drift2_")
+base = _TMP.tmpdir(prefix="drift2_")
 proj = os.path.join(base, "proj")
 os.makedirs(os.path.join(proj, ".psl", "rules"))
 shutil.copy(os.path.join(PKG, "rules", "default.json"), os.path.join(proj, ".psl", "rules", "default.json"))

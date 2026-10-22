@@ -37,8 +37,9 @@ from datetime import datetime, timedelta
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PKG = os.path.dirname(HERE)
-if PKG not in sys.path:
-    sys.path.insert(0, PKG)
+for _p in (HERE, PKG):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 import inbox_cli as CLI        # noqa: E402
 import inbox_config as CFG      # noqa: E402
@@ -51,10 +52,24 @@ import inbox_report as R        # noqa: E402
 import inbox_server as SV       # noqa: E402
 import inbox_store as S         # noqa: E402
 import inbox_tray as TR         # noqa: E402
+import tmpreg                   # noqa: E402  临时目录登记处（0.55.0，复核 F3）
 import heartbeat as HB          # noqa: E402
 import ledger as L              # noqa: E402
 
-_SCRATCH = []
+_SCRATCH = tmpreg._DIRS          # 兼容旧引用（同一个列表对象，登记即在此）
+
+
+def tmpdir(prefix):
+    """**唯一**建临时目录的入口：建完就登记，进程退出时统一收掉。
+
+    ★★ 0.55.0（复核 F3）：`_SCRATCH` 从前只 append、**从来没有一处清理**
+      ⇒ `D:/_antmp` 顶层堆到 70,312 项（几乎全是空目录），单次 `scandir` 冷扫 64.8 秒，
+      而那是**全局 TMP**（产品自己的 `tempfile` 也走这里）。
+    ★ 收口放在 `tmpreg` 里，是为了让**不 import 本模块**的套件（0490/0514/0470/0400）
+      也能用同一个登记处 —— 否则每个套件各写一份，等于再造 N 个口径。
+    ★ 逃生门：设 `ANTINEL_KEEP_TMP=1` ⇒ 不清（排查时要看现场）。
+    """
+    return tmpreg.tmpdir(prefix)
 
 
 # --------------------------------------------------------------- 脚手架 ----
@@ -76,8 +91,7 @@ def _ago(hours=1.0):
 
 
 def new_hub():
-    d = tempfile.mkdtemp(prefix="antinel-inbox-")
-    _SCRATCH.append(d)
+    d = tmpdir("antinel-inbox-")
     os.environ["ANTINEL_HUB_DIR"] = d
     os.environ.pop("ANTINEL_AUDIT_DIRS", None)
     return d
@@ -1945,8 +1959,7 @@ def c_no_network_in_data_layer():
 
 
 def n_no_network():
-    d = tempfile.mkdtemp(prefix="antinel-netscan-")
-    _SCRATCH.append(d)
+    d = tmpdir("antinel-netscan-")
     p = os.path.join(d, "fake.py")
     with open(p, "w", encoding="utf-8", newline="\n") as f:
         f.write("# -*- coding: utf-8 -*-\nimport socket\n")

@@ -37,6 +37,10 @@ from datetime import datetime, timedelta
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+# 0.55.0 (F3): 临时目录登记处在本目录（`ci/tmpreg.py`），必须把 ci/ 也放进来
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
 
 RESULTS = []          # [(name, ok, why)]
 _BACKUP = []          # [(path, backup)]
@@ -731,14 +735,14 @@ def f1_notify_gated_on_console_visibility():
     #   ⚠️ 用隔离环境 + 替身，**绝不去枚举用户真实的窗口**。
     import os as _os
     import sys as _sys
-    import tempfile as _tf
+    import tmpreg as _tf    # 0.55.0 (F3): 临时目录处
     calls = []
     o_cv = HS.console_is_visible
     o_notify = HS._notify
     o_mark = HS.mark_notify_shown
     o_fcw = None
     ohub = _os.environ.get("ANTINEL_HUB_DIR")
-    tmp = _tf.mkdtemp()
+    tmp = _tf.tmpdir()
     # ★ 注入点选 `inbox_window.find_console_windows` 这个**函数**，
     #   不是替换 `host_shield.inbox_window` 属性 ——
     #   后者无效：`console_is_visible()` 内部是 `import inbox_window`
@@ -756,7 +760,7 @@ def f1_notify_gated_on_console_visibility():
     #   ⇒ 与上面那条「注入点必须选被调用方真正解引用的那个名字」同源：
     #     产品加了一层依赖，判据的注入点也必须跟着加一层。
     o_iws = _IW.is_window_on_screen
-    tmp = _tf.mkdtemp()
+    tmp = _tf.tmpdir()
     try:
         sent = []
 
@@ -824,9 +828,9 @@ def f2_unknown_still_notifies():
     #   —— 与本轮 P7/R13 同型：**判据必须自造环境，不许在真实环境上试**。
     #   ⇒ 每次跑用唯一 kind（时间戳），并把 hub 目录指到临时目录，跑完还原。
     import time as _t
-    import tempfile as _tf
+    import tmpreg as _tf    # 0.55.0 (F3): 临时目录处
     ohub = os.environ.get("ANTINEL_HUB_DIR")
-    tmp = _tf.mkdtemp(prefix="g0364_f2_")
+    tmp = _tf.tmpdir(prefix="g0364_f2_")
     oload, osave = HS.load_state, HS.save_state
     kind = "F2_probe_%d" % int(_t.time() * 1000)
     try:
