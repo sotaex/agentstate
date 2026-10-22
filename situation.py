@@ -59,7 +59,7 @@ import facts as _facts
 __all__ = [
     "SENTENCES", "ACTION_SENTENCE", "DEFAULT_SCOPE",
     "DISCLOSURES", "DISCLOSURE_WHERE", "MIGRATION_NOTICES",
-    "lamp", "cause", "sentence", "sentence_key", "badges", "detail",
+    "lamp", "cause", "sentence", "sentence_key", "cause_key_of", "badges", "detail",
     "gaps", "gap_coverage", "at_risk_unregistered",
     "period_line", "spend_today", "recon_report",
     "presence", "period_presence",
@@ -439,6 +439,33 @@ def _counts(facts):
     return int(_num(c.get("action")) or 0), int(_num(c.get("info")) or 0)
 
 
+
+def _cause_inputs():
+    """`sentence()` 认得的输入集合 —— 从注册表**派生**，不写死。
+
+    ★ 为什么需要这道闸：成因键（`ok`/`draining`/…）、值勤值（`on`/`at-risk`/`off`）、
+      徽标键（`dev`/`granary`/`disk`）是**三个命名空间**，字面长得很像。
+      以前任何一个传错都会落进 `ok` 分支 ⇒ 屏幕说「今天没什么要拦的」，
+      而此刻值勤正是 `at-risk`。这正是 F2 最恨的一格（灯黄而话说没事）。
+    ★ 取不到注册表 ⇒ 返回空元组 ⇒ 调用方 fail-closed 到 `blind`（不是放行）。
+    """
+    try:
+        import state_registry as _SR
+    except Exception:                                        # noqa: BLE001
+        return ()
+    return tuple(_SR.CAUSE_KEYS) + tuple(_SR.MODE_IDENTITY)
+
+
+def cause_key_of(cause):
+    """`cause()` 的输出对象或裸成因键 → 成因键。认不出 ⇒ `None`（不猜）。"""
+    if isinstance(cause, dict):
+        k = cause.get("key")
+        return k if isinstance(k, str) else None
+    if isinstance(cause, str):
+        return cause
+    return None
+
+
 def sentence_key(cause_key, facts, scope=None):
     """这一格该用哪一句（句子表的键）。**渲染层与判据都只认这个键。**
 
@@ -448,6 +475,10 @@ def sentence_key(cause_key, facts, scope=None):
       `paused` 那一行是 #57c 补的：原表漏了它，于是「不在岗且无账」会落到 `ok` 句
       （「今天没什么要拦的」）—— N8-c 的 `forbid_text` 抓的正是这个。
     """
+    if cause_key not in _cause_inputs():
+        # ★ 域外键 **不许落进 `ok` 分支**（那会让屏幕报平安）。按最坏算，落 blind。
+        #   fail-closed 只在这一步：宁可说「我证明不了」，不许说「没什么要拦的」。
+        cause_key = "blind"
     if cause_key == "unarmed":
         return "unarmed.main"
     if cause_key in ("breach", "absent", "blind", "partial"):
@@ -568,16 +599,22 @@ def _def_sentence(cause_key):
     return (_SR.MODE_IDENTITY.get(cause_key) or {}).get("def_sentence")
 
 
-def sentence(cause_key, facts, scope=None):
+def sentence(cause, facts, scope=None):
     """显示句 ＋ 动作句（F2 冻结的两键）。句子**逐字取**自 `SENTENCES`。
 
     主行的三级降级（**永不为空**）：数字位填全 → 切掉数字分句 → 该成因定义句。
+
+    ★ 入参按 **F3 冻结签名**：`sentence(cause, facts, scope)` 收的是 `cause()` 的
+      **输出对象**（`{"key", "others"}`），也容忍裸成因键（内部与旧调用方）。
+      原先只收裸键，于是按冻结签名写的第一行 `sentence(cause(f), f)` 当场
+      `TypeError: unhashable type: 'dict'` —— 接线那一刻必崩，崩在第一个页面。
     """
-    key = sentence_key(cause_key, facts, scope)
+    ck = cause_key_of(cause)
+    key = sentence_key(ck, facts, scope)
     main = _fill(key, facts, scope) or _head(key, facts, scope) \
-        or _def_sentence(cause_key)
+        or _def_sentence(ck)
     return {"main": main or "",
-            "action": ACTION_BY_KEY.get(key) or ACTION_SENTENCE.get(cause_key, "")}
+            "action": ACTION_BY_KEY.get(key) or ACTION_SENTENCE.get(ck, "")}
 
 
 def detail(facts, scope=None):

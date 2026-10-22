@@ -291,6 +291,7 @@ def _live_values():
         "granary": ("granary_level", "granary_balance_hours"),
         "egress": ("egress_free_bytes",),
         "audit_chain": ("chain_write_lost",),
+        "ledger": ("gaps",),
     }
 
     # ① 聚合入口：guard_posture() —— 8 个字段 + probe_error + clock_skewed 派生
@@ -367,6 +368,29 @@ def _live_values():
         errs["audit_chain"] = repr(e)
         for _k in owned["audit_chain"]:
             srcs[_k] = "error[audit_chain]: %r" % (e,)
+
+    # ⑤ 账本派生 —— gaps（harm 轴的**唯一**来路）
+    #   ★ 为什么必须接上：`axes()` 的 harm 只读 `gaps`；它为 None ⇒ harm 恒
+    #     `unknown` ⇒ 灯恒红、成因恒 `blind`。届时空守状态机接上屏也只是把
+    #     「我证明不了自己在守」焊死（技术诚实，但不干活）。
+    #   ★ 口径不在这里重写：族界取 `inbox_model.LEVEL_OF_KIND`（与 `axes()` 同一真源），
+    #     处置态取 `inbox_model.gap_state_of`。本函数只做「按字段搬运」。
+    #   ★ `cons`（后果）**不给**：目前没有生产者，给 `None` 是事实，编 `[]` 是撒谎。
+    try:
+        import inbox_store as _S
+        import inbox_model as _M
+        _items = _S.load_items_all()
+        _levels = _M.LEVEL_OF_KIND
+        vals["gaps"] = [
+            {"id": it.id, "kind": it.kind, "opened_at": it.ts,
+             "gap_state": _M.gap_state_of(it)}
+            for it in _items if _levels.get(it.kind) == GAP_LEVEL]
+        srcs["gaps"] = ("inbox_store.load_items_all() ＋ "
+                        "inbox_model.gap_state_of()（族界取 LEVEL_OF_KIND）")
+    except Exception as e:                                   # noqa: BLE001
+        errs["ledger"] = repr(e)
+        for _k in owned["ledger"]:
+            srcs[_k] = "error[ledger]: %r" % (e,)
 
     return vals, srcs, errs
 
