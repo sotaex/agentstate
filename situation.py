@@ -60,6 +60,7 @@ __all__ = [
     "SENTENCES", "ACTION_SENTENCE", "DEFAULT_SCOPE",
     "DISCLOSURES", "DISCLOSURE_WHERE", "MIGRATION_NOTICES",
     "lamp", "cause", "sentence", "sentence_key", "badges", "detail",
+    "gaps", "gap_coverage", "at_risk_unregistered",
     "period_line", "spend_today", "recon_report",
     "presence", "period_presence",
     "disclosure", "state_word",
@@ -228,15 +229,6 @@ def _num(v):
     return float(v) if isinstance(v, (int, float)) else None
 
 
-def _hours_per_day():
-    """一天多少小时 —— 取自 `granary.HOURS_PER_DAY`（异质单位特冻 G4：不许当 24 写死）。"""
-    try:
-        from granary import HOURS_PER_DAY
-        return float(HOURS_PER_DAY)
-    except Exception:                                        # noqa: BLE001
-        return None
-
-
 def _spend_tiers():
     try:
         from granary import SPEND_TIERS, DAILY_SPEND_DEFAULT
@@ -330,9 +322,24 @@ def cause(facts, scope=None):
 
 
 # ───────────────────────────── 二、句子 ─────────────────────────────
-def _fmt_days(hours):
-    """小时 → 「N 天」（1 位小数）。★ 除的是 `HOURS_PER_DAY`，不是 24（G4 特冻）。"""
-    h, per = _num(hours), _hours_per_day()
+def _daily_spend(facts):
+    """当前档位**每天消耗多少口粮**（小时）。与 `spend_today()` 同一个真源。"""
+    return _num(spend_today(facts))
+
+
+def _fmt_days(hours, per_day):
+    """小时 → 「N 天」（1 位小数）。★ 除的是**每天消耗**，不是「一天几小时」（G4 特冻）。
+
+    ★★ #61a：原实现除 `HOURS_PER_DAY`（＝24，那是**时间换算**），而守备档
+      每天只扣 12（`SPEND_TIERS[0][1]`）⇒ 句子「粮还够 N 天」**系统性低估一半**。
+      而守备档正是**唯一**会显示这句话的档位 —— 也就是说这句话只要上屏就是错的。
+      今天 `DAILY_SPEND_DEFAULT == HOURS_PER_DAY == 24`，数值上不露馅，所以夹具
+      （只钉了 `spend_today=12`、没钉句中的 N）没抓到它。
+
+    ★ `per_day` **没有默认值**：任何调用点都必须显式给出分母，
+      不许再有一个「顺手拿 24 顶一下」的入口。
+    """
+    h, per = _num(hours), _num(per_day)
     if h is None or not per:
         return None
     return "%.1f" % (h / per)
@@ -353,10 +360,45 @@ def _is_stop_by_granary(facts):
     return facts.get("granary_level") != "off" and b is not None and b < 0
 
 
+def _granary_tier(facts):
+    """`granary.tier()` 的薄封装 —— 「守备档」判定的**唯一真源**。"""
+    b = _num(facts.get("granary_balance_hours"))
+    if b is None:
+        return None
+    try:
+        import granary as _G
+        return _G.tier(bal=b)
+    except Exception:                                        # noqa: BLE001
+        return None
+
+
+def _guard_tier():
+    """守备档的档位名 —— 取 `granary.SPEND_TIERS` 第一行（**数据**，不写字面量）。"""
+    tiers, _ = _spend_tiers()
+    return tiers[0][0] if tiers else None
+
+
 def _is_guard_mode(facts):
-    """守备档：`0 ≤ 余额 < 一天`（`granary.SPEND_TIERS[0]` 的条件，数字不写死）。"""
-    b, per = _num(facts.get("granary_balance_hours")), _hours_per_day()
-    return b is not None and per is not None and 0 <= b < per
+    """守备档：`granary.tier()` 说是守备档、且余额非负。
+
+    ★★ #61g：上界**不自己算**。档位是产品口径（`granary.tier`），本模块只读结论
+      （铁律 6：判据不二次实现产品口径）。原实现拿 `HOURS_PER_DAY` 当上界，docstring
+      却声称「取自 `SPEND_TIERS[0]`」—— 它其实**一次都没读 `SPEND_TIERS`**。三个数字
+      今天 `HOURS_PER_DAY == DAILY_SPEND_DEFAULT == 24`、而 `SPEND_TIERS[0][1] == 12`：
+      两个相等一个不等，只要有人调档位（或改日长）就分叉，而**分叉时不报错、只是档位判错**。
+      这是 #61a 的同族病灶：**用了一个今天恰好等于真值的常量**。
+
+    ★ 两个 `None` 不许相等：`_guard_tier()` 在 granary 导入失败时返回 `None`，
+      `_granary_tier()` 同理 —— 若直接写 `==`，两侧同时 `None` 会**判成守备档**
+      （fail-open 到半价档，观察期数据整体失真）。故先判 `t is not None`。
+
+    ★ 下界 `0 <=` 保留：负余额是**停摆**（`_is_stop_by_granary`），不是守备。
+    """
+    b = _num(facts.get("granary_balance_hours"))
+    if b is None or b < 0:
+        return False
+    t = _guard_tier()
+    return t is not None and _granary_tier(facts) == t
 
 
 def _harmful_gaps(facts):
@@ -371,10 +413,23 @@ def _harmful_gaps(facts):
 
 
 def _at_risk(facts):
-    """预告源的并集（派生 ＋ 采集侧预置）。顺序按 `AT_RISK_SOURCES`。"""
+    """预告源的并集（派生 ＋ 采集侧预置），顺序按 `AT_RISK_SOURCES`。"""
     got = set(_facts.at_risk_sources(facts))
     got |= set(facts.get("at_risk") or [])
     return [k for k in _facts.AT_RISK_SOURCES if k in got]
+
+
+def at_risk_unregistered(facts):
+    """点亮了 at-risk、但**不在 `AT_RISK_SOURCES` 注册表里**的来源（F4 表外来源）。
+
+    ★ F4 原文：「**表外来源点亮 at-risk ⇒ 判据红**（注册表唯一真源）」。
+      原实现里 `_at_risk()` 用 `AT_RISK_SOURCES` 过滤 —— 表外来源被**静默丢弃**：
+      徽标不亮、主行不提，用户完全看不见。**静默丢弃与假绿只差一步**。
+      本函数把表外来源显式交出来，由判据判红（不是靠人记得）。
+    """
+    got = set(facts.get("at_risk") or [])
+    got |= set(_facts.at_risk_sources(facts))
+    return sorted(got - set(_facts.AT_RISK_SOURCES))
 
 
 def _counts(facts):
@@ -424,7 +479,7 @@ def _fill(key, facts, scope=None):
     tpl = SENTENCES[key]
     if key in ("draining.main", "draining.granary", "draining.guard_mode",
                "badge.granary"):
-        n = _fmt_days(facts.get("granary_balance_hours"))
+        n = _fmt_days(facts.get("granary_balance_hours"), _daily_spend(facts))
         return tpl.replace("{N}", n) if n is not None else None
     if key in ("draining.heartbeat", "badge.heartbeat"):
         n = _fmt_minutes(facts.get("heartbeat_age"))
@@ -528,6 +583,60 @@ def sentence(cause_key, facts, scope=None):
 def detail(facts, scope=None):
     """体检页的明细句（E3b 截断原文）。没有截断 ⇒ 空串。"""
     return _fill("partial.detail", facts, scope) or ""
+
+
+# ─────────────────────── 二·五、缺口清单（F2 冻结签名） ───────────────────────
+def gaps(facts, scope=None):
+    """缺口清单 —— F2 冻结六键：`id`／`kind`／`level`／`opened_at`／`gap_state`／`cons`。
+
+    ★ 本函数**只投影**：`facts["gaps"]` 已经是账本派生的缺口记录，这里**不重判**
+      「算不算缺口」—— 那会把族界口径写第二遍（铁律 6：判据不二次实现产品口径）。
+      `level` 一律从 `inbox_model.LEVEL_OF_KIND` 取，与 `axes()` 同一真源。
+    ★ 记录缺字段 ⇒ 给 `None`，**不编**：编出来的 `id` 会被下游当锚点用，
+      而它不属于任何一条真实记录；`cons` 缺失也是 `None` 而不是 `[]`
+      —— `[]` 与 `None` 在 F1 三态里是「查过了没有」与「查不到」两件事。
+    ★ 顺序**不重排**（`facts` 给的顺序就是账本顺序）：自己排一次序，
+      等于给同一批记录造了第二个次序。
+    """
+    raw = facts.get("gaps")
+    if not isinstance(raw, list):
+        return []
+    levels = _facts._kind_levels()
+    out = []
+    for g in raw:
+        if not isinstance(g, dict):
+            continue
+        kind = g.get("kind")
+        out.append({
+            "id": g.get("id"),
+            "kind": kind,
+            "level": levels.get(kind) if levels is not None else None,
+            "opened_at": g.get("opened_at"),
+            "gap_state": g.get("gap_state"),
+            "cons": g.get("cons"),
+        })
+    return out
+
+
+def gap_coverage(facts):
+    """`cons` 的**覆盖证明**（Q3 规则②）：三值 `complete`／`truncated`／`unreadable`。
+
+    ★ 为什么必须有：`cons=[]` 有两种完全不同的成因 —— **量过了真的没有**（真空）
+      与**没量到**（读不到／截断）。后者若按「无损失」读，就是本仓最恨的
+      「把没量过的说成没有」（BL-08）。三值里**只有 `complete` 允许把 `[]` 读成真空**。
+
+    ★ 判法只用 F1 既有字段，不新增读取点：
+        `gaps` 不是 list（读不到）       ⇒ `unreadable`
+        `partial_read` 非 None（截断过） ⇒ `truncated`
+        其余                            ⇒ `complete`
+    ★ 它是**兄弟函数**而不是 `gaps()` 的第七个键：F2 冻的是六键，加键＝改冻结形状。
+      冻结件没写这份证明挂在哪，本模块选兄弟函数（登记为 #61b）。
+    """
+    if not isinstance(facts.get("gaps"), list):
+        return "unreadable"
+    if facts.get("partial_read") is not None:
+        return "truncated"
+    return "complete"
 
 
 # ───────────────────────────── 三、徽标与期间行 ─────────────────────────────
