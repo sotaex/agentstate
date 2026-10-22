@@ -61,8 +61,9 @@ facts 可以另有夹具不喂的诊断字段（值为 `None`，走 F1 的缺失
 
 __all__ = [
     "FIELDS", "GROUPS", "BASE_TYPES", "PROJECTION_KEYS", "EXPECTED_MISSING",
-    "AXIS_VALUES", "GAP_LEVEL",
-    "collect", "axes", "check_axes", "empty_trace", "check_types", "selfcheck",
+    "AXIS_VALUES", "GAP_LEVEL", "AT_RISK_SOURCES",
+    "collect", "axes", "at_risk_sources", "check_axes",
+    "empty_trace", "check_types", "selfcheck",
 ]
 
 #: 基类型封闭集（F1）。`?` 后缀表示允许 None，不是第七种类型。
@@ -512,6 +513,14 @@ AXIS_VALUES = {
 #: 缺口族 ⇔ 事件级别 `R0`（**派生，不写死族名** —— 见 `_kind_levels()` 的 #56 说明）。
 GAP_LEVEL = "R0"
 
+#: 预告源（at-risk）的三个键 —— 与 `state_registry.STATES["draining"]["badge"]` 同集。
+#: ★ #57a（A4 撞出）：`at_risk` 在 F1 里是**字段**，但它此前没有任何生产者 ——
+#:   `BASE["at_risk"]` 恒为 `[]`，于是 §5.2 的 at-risk 来路「`at_risk[]` 非空」永远为假，
+#:   而 `egress_free_bytes` 那条磁盘来路**只**经由 `at_risk[]` 进入判定
+#:   ⇒ N6-c（磁盘将满）会静默假绿。裁定：`at_risk` 由本模块**派生**（纯函数，
+#:   输入是 F1 已有字段与产品阈值），`collect()` 填进快照、`axes()` 直接读。
+AT_RISK_SOURCES = ("granary_low", "heartbeat_will_stall", "disk_write_full")
+
 #: 懒加载缓存：产品常量（阈值／级别表）。同一进程内恒定，故 `axes()` 仍是纯函数。
 _CONST_CACHE = {}
 
@@ -531,6 +540,17 @@ def _const(name):
             try:
                 from host_shield import _STALE_AFTER
                 _CONST_CACHE[name] = float(_STALE_AFTER)
+            except Exception:                                # noqa: BLE001
+                _CONST_CACHE[name] = None
+        elif name == "min_free":
+            #: 磁盘「快写满了」的阈值 —— 取 `egress.MIN_FREE_BYTES`（产品既有口径）。
+            #: ★ #57b：§5.3 N6-c 的理由写「19.6MB＝7 天写入量（84MB/月实测折算）」，
+            #:   但 84MB/月是**实测观测值**、产品里没有对应常量 ⇒ 按 19.6MB 实现
+            #:   等于把一次观测写死成阈值。改用产品既有的 64MB：夹具两点（15MB 亮、
+            #:   200MB 不亮）都满足；要严格 19.6MB 需先新增派生常量（P2）。
+            try:
+                from egress import MIN_FREE_BYTES
+                _CONST_CACHE[name] = float(MIN_FREE_BYTES)
             except Exception:                                # noqa: BLE001
                 _CONST_CACHE[name] = None
     return _CONST_CACHE[name]
@@ -592,12 +612,6 @@ def _fresh(age, uptime, stale):
     return False                       # 两个读数都没有 ⇒ 证明不了在岗（D-02：两者都 None ⇒ off）
 
 
-def _over_half(age, stale):
-    """心跳是否已过「陈旧阈值的一半」（at-risk 的第二来路，N6-b）。"""
-    a = _num(age)
-    return stale is not None and a is not None and a > 0.5 * stale
-
-
 def _self_check_unbounded(facts):
     """自检失败 ∧ 问题不在 dev 豁免里 ⇒ 无界无知。
 
@@ -633,6 +647,33 @@ def _bounded(facts):
     if facts.get("partial_read") is not None:                 # ⑥ 受监管落点截断（N7／#56）
         return True
     return False
+
+
+def at_risk_sources(facts):
+    """预告源（at-risk 三成分）—— **纯函数**，输入是 F1 已有字段与产品阈值。
+
+    返回按 `AT_RISK_SOURCES` 顺序排列的键列表（可能为空）。三条各自的成立条件：
+
+      · `granary_low`         ← `granary_level == "low"`（阈值已由 `granary.state()` 应用）
+      · `heartbeat_will_stall` ← 心跳过了陈旧阈值的一半，但**还没陈旧**
+        （`> 0.5×_STALE_AFTER ∧ ≤ _STALE_AFTER`；已陈旧是 duty=off，不是预告）
+      · `disk_write_full`     ← `egress_free_bytes` 有值且低于 `egress.MIN_FREE_BYTES`
+
+    ★ 「拿不到」一律不算预告（`None` ⇒ 不亮）：宁可少报一个黄，不许把「不知道」
+      说成「快满了」（N6-c 负控②：`capacity()=None` 亮 ⇒ 红）。
+    ★ 这是**派生**不是**采集**：不改 `facts`、不读文件、不看时钟。
+    """
+    stale = _const("stale")
+    out = []
+    if facts.get("granary_level") == "low":
+        out.append("granary_low")
+    age = _num(facts.get("heartbeat_age"))
+    if stale is not None and age is not None and 0 <= age <= stale and age > 0.5 * stale:
+        out.append("heartbeat_will_stall")
+    free, floor = _num(facts.get("egress_free_bytes")), _const("min_free")
+    if free is not None and floor is not None and free < floor:
+        out.append("disk_write_full")
+    return out
 
 
 def axes(facts):
@@ -674,10 +715,9 @@ def axes(facts):
         #   值勤也证明不了（探针 exception 路径）—— 不许拿半份读数判在岗。
         duty = "off"
     elif duty == "on" and (
-            facts.get("granary_level") == "low"          # 粮将尽
-            or facts.get("credits_low_open") is True     # 未关的额度预警
-            or _over_half(facts.get("heartbeat_age"), stale)   # 心跳将断
-            or bool(facts.get("at_risk"))):              # 注册表登记的预告源（N6）
+            facts.get("credits_low_open") is True     # 未关的额度预警
+            or bool(facts.get("at_risk"))             # 采集侧预置（可空，见 #57a）
+            or bool(at_risk_sources(facts))):         # 派生三成分：粮／心跳／磁盘
         duty = "at-risk"
 
     # ③ trust
