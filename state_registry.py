@@ -51,29 +51,6 @@ LAMP_RGB = {"grey": (0x5F, 0x5E, 0x5A), "green": (0x22, 0x6B, 0x4A),
 #: 灯 → 图标几何（mk_icons.SPEC 键；grey 借 L0 空环，不造新形状）
 SHAPE = {"grey": "L0", "green": "L0", "yellow": "L2", "red": "R0"}
 
-#: duty 三值 —— **与 `facts.AXIS_VALUES["duty"]` 必须同集**。
-#: ★ 本模块不重述 duty 的语义（那是 `facts.axes()` 的事），只做**呈现映射**；
-#:   两处集合是否相等由判据 `output/_p_shape_parity.py` 交叉核对 ——
-#:   任一边加值而另一边没加，判据立刻红（不靠自觉）。
-DUTY_VALUES = ("on", "at-risk", "off")
-
-#: 角标来源的封闭集 ＝ `tools/mk_icons.SHIELD_MARKS` 的键。
-#: ★ 运行时只存**键**，不存 RGB：颜色真源在 `mk_icons.SHIELD_MARKS`，
-#:   这里再写一份 `(0x2a,0x5d,0xb0)` 就是第二份声明（判据交叉核对）。
-MARK_SOURCES = ("on", "unposted", "unknown", "off")
-
-#: duty → 角标（**T1 决议**，创始人 2026-10-22 13:05 定案：at-risk 用 **dot**）。
-#:
-#:   · `on`      ⇒ 无角标（默认就是好状态，画角标＝制造噪音）
-#:   · `at-risk` ⇒ 借 `SHIELD_MARKS["unknown"]` 那枚 **dot 蓝 0x2a5db0**
-#:                 —— 冻结落点见冻结件 §11.3；`unposted`（slash 红）**不再用于 at-risk**
-#:   · `off`     ⇒ 借 `SHIELD_MARKS["off"]` 那枚 **bar 灰**（「没在守」是形态，不是告警）
-#:
-#: ★ 为什么 at-risk 不新造一枚：T1 的硬门槛是「duty 碰撞不可接受」，
-#:   dot 已被三组（正常＋两组色盲近似）判为可辨别；新造一枚等于把已测过的
-#:   结论作废重测（B1 任务卡「不许新造形状」）。
-DUTY_MARK = {"on": None, "at-risk": "unknown", "off": "off"}
-
 #: 八成因条目（顺序＝矩阵 CAUSES 顺序；`cause` 与 `key` 同值：本表就是成因表）
 STATES = [
     {"key": "unarmed", "lamp": "grey", "cause": "unarmed",
@@ -181,28 +158,12 @@ LEGACY_OF = {
 #:     前科（0364 的判据在自己解释 bug 的注释里写了触发串而假红）。
 
 
-def icon_spec(lamp, duty):
-    """灯 × duty → 一格的呈现四元组 `{"shape","color_var","rgb","mark"}`。
-
-    ★ **六点接线（X）只许走这一个入口**：色、几何、角标三者同一处出。
-      分开拼必然出现「灯已经是黄的，角标还是红的」——那种不一致用户第一眼就看见，
-      而判据只看灯值时抓不到。
-    ★ 任一输入不在封闭集 ⇒ 返回 `None`（调用方显式降级，**不猜**）。
-    ★ 返回键集由判据钉死（`_p_shape_parity.py`），改键要连判据一起改。
-    """
-    if lamp not in SHAPE or duty not in DUTY_MARK:
-        return None
-    return {"shape": SHAPE[lamp], "color_var": COLOR_VAR[lamp],
-            "rgb": LAMP_RGB[lamp], "mark": DUTY_MARK[duty]}
-
-
 def selfcheck():
     """结构自检（0a 验收的可执行版）。返回问题列表，空＝全绿。
 
     验六条：① 11 字段齐全；② tense 五值封闭且 blind 显式 unknowable；
     ③ 旧六键逐字保留；④ legacy_of 键集＝旧六键、值⊆成因键、全仓唯一；
-    ⑤ 灯/成因单射与动作单射（I4）；⑥ 四灯的色与几何覆盖完整；
-    ⑦ duty 三值齐、角标只借既有四枚、at-risk 必须是 dot（B1）。
+    ⑤ 灯/成因单射与动作单射（I4）；⑥ 四灯的色与几何覆盖完整。
     """
     bad = []
     for e in STATES:
@@ -242,23 +203,6 @@ def selfcheck():
     for key, e in STATES_BY_KEY.items():
         if e["action"] not in ACTION_SENTENCE:
             bad.append("动作类 %r 无动作句" % (e["action"],))
-    # ⑦ duty 轴与角标（B1）：三值齐、角标只许借既有四枚、at-risk 必须是 dot
-    for d in DUTY_VALUES:
-        if d not in DUTY_MARK:
-            bad.append("⑦ duty %r 无角标映射" % (d,))
-    for d, src in DUTY_MARK.items():
-        if src is not None and src not in MARK_SOURCES:
-            bad.append("⑦ duty %r 的角标键 %r 不在 MARK_SOURCES" % (d, src))
-    if DUTY_MARK.get("at-risk") != "unknown":
-        bad.append("⑦ at-risk 的角标必须是 dot（T1 13:05 冻结："
-                   "SHIELD_MARKS['unknown']；slash 已停用于 at-risk）")
-    if DUTY_MARK.get("on") is not None:
-        bad.append("⑦ `on` 不许挂角标（默认就是好状态）")
-    if set(DUTY_MARK) != set(DUTY_VALUES):
-        bad.append("⑦ DUTY_MARK 的键集≠DUTY_VALUES")
-    for lamp in LAMPS:
-        if icon_spec(lamp, "on") is None:
-            bad.append("⑦ 灯 %r 取不到呈现规格" % (lamp,))
     return bad
 
 

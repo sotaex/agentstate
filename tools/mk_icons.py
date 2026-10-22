@@ -58,29 +58,6 @@ SHIELD_MARKS = {
 SHIELD_SUFFIX = {"on": "", "unposted": "-unposted",
                  "unknown": "-unknown", "off": "-off"}
 
-# --- B1：灰灯（未启用）的色与几何 ------------------------------------------------
-# ★ 为什么必须补：新模型四灯里 `grey`（`unarmed`）在 `COLORS`／`SPEC` **都没有条目**
-#   ⇒ 生成灰图标时 `COLORS[state]` 直接 KeyError。B4 重生成资产会当场炸，
-#   而炸在构建期比炸在运行期好，所以这里显式补齐。
-# ★ 色**不另写 RGB**：同一个灰在托盘角标与主体上必须是同一个灰，
-#   故取 `SHIELD_MARKS["off"]` 的色（同模块，同源）。
-# ★ 几何**借 L0 空环**（`state_registry.SHAPE["grey"]=="L0"`）：不造新形状。
-COLORS["grey"] = SHIELD_MARKS["off"]["color"]
-SPEC["grey"] = dict(SPEC["L0"])
-
-
-def lamp_spec(lamp):
-    """灯 → 几何参数。★ 灯→SPEC 键的映射真源在 `state_registry.SHAPE`，
-    本模块**不写第二份**（写一份就会漂：注册表改了形状，构建器还画旧的）。"""
-    import state_registry as _SR
-    return SPEC[_SR.SHAPE[lamp]]
-
-
-def lamp_color(lamp):
-    """灯 → 主体色。★ 真源在 `state_registry.LAMP_RGB`，本模块不写第二份。"""
-    import state_registry as _SR
-    return _SR.LAMP_RGB[lamp]
-
 
 def _alpha_at_shield(mark, x, y, size):
     """角标覆盖度 0..1。画在**右上角**一个小方框里。
