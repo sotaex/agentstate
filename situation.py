@@ -39,6 +39,7 @@ __all__ = [
     "SENTENCES", "ACTION_SENTENCE", "DEFAULT_SCOPE",
     "lamp", "cause", "sentence", "sentence_key", "badges", "detail",
     "period_line", "spend_today", "recon_report",
+    "presence", "period_presence",
 ]
 
 #: 默认 scope（F2 冻结形状）。`window` 的第二位是窗口起点（ISO8601 或 None）。
@@ -95,6 +96,11 @@ SENTENCES = {
     "badge.disk": "账本快写不下了，写不下就不能记账。",
     "account.action": "有 {N} 件事只有你能办。",
     "account.info": "最近 24 小时挡下 {N} 次，都替你处理完成了。",
+    # ★ #58d：**待创始人核签的新句**（§4.3 没有覆盖「不可对账段」）。
+    #   睡眠证据拿不到 ⇒ 显式降级为「算不清」，而不是替机器断言「它睡了」或「它没守」。
+    "period.unknown_window": "有 {N} 分钟没留下记录，那段时间算不清。",
+    #: D-05 §6.2 的期间行原文。本期**不可达**（拿不到睡眠证据），补取数落地后启用。
+    "period.asleep": "它不在（机器睡着了）。",
 }
 
 #: 徽标的短词（D-10 登记表）。★ 与长句分开：短词上角标，长句进 tooltip／主行。
@@ -422,6 +428,125 @@ def period_line(facts, scope=None):
         return {"kind": "info",
                 "text": SENTENCES["account.info"].replace("{N}", str(info_n))}
     return {"kind": "none", "text": ""}
+
+
+# ───────────────────────── 四、在场证明（A5：presence） ─────────────────────────
+def _iso(dt):
+    return dt.isoformat(timespec="seconds")
+
+
+def _parse_stamps(raw):
+    """`heartbeat_slices` → `(排好序的 datetime 列表, 解析失败的个数)`。
+
+    ★ #58c：F1 只写「list[Slice]」，**没定义 Slice 形状**。裁定＝**时间戳列表**
+      （每条心跳一个 ISO 时刻）：切片是**相对窗口**的概念，属投影；事实层只该有
+      时间点。这样不必为 `Slice` 再造一层子 schema，也不会把「窗口多长」这个
+      投影参数写进事实。
+    ★ 解析不了的元素**跳过并计数**（不静默丢），调用方据此决定要不要降级。
+    """
+    from datetime import datetime
+    out, dropped = [], 0
+    for x in (raw or []):
+        try:
+            out.append(datetime.fromisoformat(str(x)))
+        except (TypeError, ValueError):
+            dropped += 1
+    out.sort()
+    return out, dropped
+
+
+def _hole(start, k0, k1, hb):
+    """空档三元组（F2 形状）：起／止／分钟数。分钟数 = 缺片数 × 片长。"""
+    from datetime import timedelta
+    return (_iso(start + timedelta(seconds=k0 * hb)),
+            _iso(start + timedelta(seconds=(k1 + 1) * hb)),
+            int((k1 - k0 + 1) * hb // 60))
+
+
+def presence(facts, days=1):
+    """在场证明（F2 ＋ D-07）。**纯函数**：只读 `facts["heartbeat_slices"]`，不看时钟。
+
+    返回五键：
+
+      `slices`        本窗口应有的片数（`days × 86400 ÷ HEARTBEAT_SECONDS`；1 天＝144）
+      `with_evidence` 有证据的片数（**写 `141/144`，不写百分比** —— F40）
+      `holes`         全部空档 `[(起, 止, 分钟)]`，按时间升序
+      `asleep`        有**睡眠证据**的空档 —— **本期恒为空**（见下）
+      `unknown`       已判缺席（≥ `_STALE_AFTER`）却**没有睡眠证据**的空档
+
+    ★★ 睡眠证据（D-05 §6.1）当前**拿不到**：`_sentinel_uptime()` 只用墙钟，
+      「uptime 增量 < 墙钟增量」这条判据算不出来 ⇒ **机器睡了 8 小时与监理死了 8 小时
+      在现有数据上完全一样**。故（创始人 2026-10-22 16:2x 拍板「显式降级」）：
+
+        · `asleep` 恒 `[]` —— 不替机器断言「它睡了」；
+        · 长空档进 `unknown` —— 判缺席，但**原因算不清**；
+        · **不判 `absent`** —— 没证据就指控「失守」是假指控。D-05 §6.2 的
+          「空档 ∧ 无睡眠证据 ⇒ 照判」说的是「**查过了**没有睡眠」，不是「**查不了**」；
+          这两件事在 F1 三态里是 `False` 与 `None` 的区别。
+
+      补取数的施工单已写成待签发件（设计件 §11.9）。
+
+    ★ 空档阈值取 `_STALE_AFTER`（=3 片×600s=1800s，D-07 规则 2 原文「≥3 片 ⇒ 判缺席」），
+      **不写死 3 或 1800**。
+    """
+    hb = _heartbeat_seconds()
+    if not hb:
+        return {"slices": 0, "with_evidence": 0, "holes": [],
+                "asleep": [], "unknown": []}
+    n = int(days * 86400 // hb)
+    stamps, _dropped = _parse_stamps(facts.get("heartbeat_slices"))
+
+    if not stamps:
+        # 一条证据都没有 ⇒ 整段是一个空档。★ 起止给 None：**没有锚点就没有时间轴**，
+        #   编一个「今天 0 点」出来就是拿墙钟假装知道。
+        whole = (None, None, int(n * hb // 60))
+        return {"slices": n, "with_evidence": 0, "holes": [whole],
+                "asleep": [], "unknown": [whole]}
+
+    from datetime import timedelta
+    # 窗口＝(end − n×hb, end]，`end` 取「最后一条证据所在片的下一个边界」。
+    #   ★ 不能直接把 `end` 设成 `stamps[-1]`：那样最后一个点恰好落在右边界上，
+    #     最左一片会凭空空出来（一条 1 片假空档），是「自己造出来的缺席」。
+    end = stamps[-1] + timedelta(seconds=hb)
+    start = end - timedelta(seconds=n * hb)
+    used = set()
+    for ts in stamps:
+        k = int((ts - start).total_seconds() // hb)
+        if 0 <= k <= n:
+            used.add(min(k, n - 1))
+
+    holes, run = [], None
+    for k in range(n):
+        if k in used:
+            if run is not None:
+                holes.append(_hole(start, run, k - 1, hb))
+                run = None
+        elif run is None:
+            run = k
+    if run is not None:
+        holes.append(_hole(start, run, n - 1, hb))
+
+    floor = _facts._const("stale")
+    unknown = [h for h in holes if floor is not None and h[2] * 60 >= floor]
+    return {"slices": n, "with_evidence": len(used), "holes": holes,
+            "asleep": [], "unknown": unknown}
+
+
+def period_presence(pres):
+    """把空档投影成**期间行的一句话**（D-05 §6.2 的呈现面）。
+
+    · 有睡眠证据 ⇒ 「它不在（机器睡着了）」—— 本期不可达（无证据源），
+      但句子先摆在这里：补取数落地时只改 `presence`，呈现层一行不用动。
+    · 只有 `unknown` ⇒ `period.unknown_window`（#58d：**待核签的新句**）
+    · 都没有 ⇒ 空串（**不留白也不编「一切正常」**）
+    """
+    if pres.get("asleep"):
+        return SENTENCES["period.asleep"].replace(
+            "{N}", str(sum(x[2] for x in pres["asleep"])))
+    if pres.get("unknown"):
+        return SENTENCES["period.unknown_window"].replace(
+            "{N}", str(sum(x[2] for x in pres["unknown"])))
+    return ""
 
 
 def spend_today(facts):
