@@ -6,7 +6,17 @@
 ## 职责一句话
 
 把「机器现在到底什么情况」采成一份**扁平、无逻辑、可序列化**的字典，供
-`situation.py` 的纯函数投影使用。**本模块不判断、不选词、不算灯**。
+`situation.py` 的纯函数投影使用。**本模块不选词、不算灯、不拼句子** ——
+那三件事全在 `situation.py`。
+
+## 本模块只做两件事（A1/A2 与 A3 的分界）
+
+1. `collect()` —— 采事实（A1 骨架／A2 白名单接线）；
+2. `axes()` —— 把事实**映射**成四轴（A3，冻结件 §5.2 的 14 行表）。
+
+★ `axes()` 是**映射**不是**判定**：它只回答「哪一格」，不回答「什么灯、什么词」。
+  灯与成因是 `situation.py` 的事（A4）——本模块一旦开始算灯，F2 的「投影不读文件
+  不看时钟」就会被从底下破掉：灯会跟着 facts 的采集时机漂移。
 
 ## 为什么字段表比代码长
 
@@ -51,7 +61,8 @@ facts 可以另有夹具不喂的诊断字段（值为 `None`，走 F1 的缺失
 
 __all__ = [
     "FIELDS", "GROUPS", "BASE_TYPES", "PROJECTION_KEYS", "EXPECTED_MISSING",
-    "collect", "empty_trace", "check_types", "selfcheck",
+    "AXIS_VALUES", "GAP_LEVEL",
+    "collect", "axes", "check_axes", "empty_trace", "check_types", "selfcheck",
 ]
 
 #: 基类型封闭集（F1）。`?` 后缀表示允许 None，不是第七种类型。
@@ -485,4 +496,238 @@ def selfcheck():
     for g in GROUPS:
         if g not in used:
             bad.append("⑥ 组 %r 没有任何字段（空组会让组名失去意义）" % g)
+    return bad
+
+
+# ──────────────────────── 四、四轴映射（A3：facts → 四轴） ────────────────────────
+#: 四轴取值 —— 封闭集，与 `ci/_state_matrix_ref.py` 的 MODES/DUTIES/TRUSTS/HARMS 逐字一致。
+#: ★ 键顺序即求值顺序：harm 依赖 trust（裁定 R2），必须最后算。
+AXIS_VALUES = {
+    "mode": ("unarmed", "drill", "armed"),
+    "duty": ("on", "at-risk", "off"),
+    "trust": ("sound", "bounded", "unbounded"),
+    "harm": ("none", "some", "unknown"),
+}
+
+#: 缺口族 ⇔ 事件级别 `R0`（**派生，不写死族名** —— 见 `_kind_levels()` 的 #56 说明）。
+GAP_LEVEL = "R0"
+
+#: 懒加载缓存：产品常量（阈值／级别表）。同一进程内恒定，故 `axes()` 仍是纯函数。
+_CONST_CACHE = {}
+
+
+def _const(name):
+    """取产品常量（懒加载＋缓存）。取不到返回 `None`，由调用方**显式降级**。
+
+    ★ 为什么不在模块顶层 import：`facts.py` 会被 `situation.py`、`inbox_server.py`
+      间接 import，顶层拉进 `host_shield`（含 subprocess/hashlib 与一堆 Windows 常量）
+      会让「只想用字段表」的调用方也付这份代价。A2 的 `_live_values()` 同样懒加载。
+    ★ 为什么不用「3 × HEARTBEAT_SECONDS」自己算：那是**二次实现产品口径**（铁律 6）。
+      `_STALE_AFTER` 改一次定义，这里就要跟着改一次 —— 直接 import 才只有一个真源。
+    """
+    if name not in _CONST_CACHE:
+        _CONST_CACHE[name] = None
+        if name == "stale":
+            try:
+                from host_shield import _STALE_AFTER
+                _CONST_CACHE[name] = float(_STALE_AFTER)
+            except Exception:                                # noqa: BLE001
+                _CONST_CACHE[name] = None
+    return _CONST_CACHE[name]
+
+
+def _kind_levels():
+    """事件级别表 —— 取自 `inbox_model.LEVEL_OF_KIND`（该表自述「唯一真源」）。
+
+    ★★ #56（A3 撞出，已登记）：冻结件 §5.2 的「缺口族」列了 7 个名字
+      （`host_shield_tamper`/`code_drift`/`state_drift`/`zone_lock_failed`/
+      `autostart_missing`/`spawn_failed`/`host_shield_breach`），实测**混装**了
+      4 个 kind 与 3 个 subkind，且两个名字与真实 kind 名不同：
+
+        | 冻结件写法 | 真实落点 | 实测出处 |
+        |---|---|---|
+        | `spawn_failed` | subkind ⊂ `host_shield_spawn_failed` | `host_shield.py:3413` |
+        | `autostart_missing` | subkind ⊂ `host_shield_breach` | `host_shield.py:4141` |
+        | `zone_lock_failed` | subkind ⊂ `host_shield_zone_locked` | `host_shield.py:4184` |
+        | `code_drift` / `state_drift` | subkind ⊂ `host_shield_tamper` | `host_shield.py:4498/4514` |
+
+      ⇒ 按字面实现，`kind` 永远匹配不上，`harm` **永远是 none** —— 那正是 F1 假绿的
+      根因原样保留。裁定：**在 kind 层取族界**（`LEVEL_OF_KIND[kind] == "R0"`），
+      7 个族名因此全部被覆盖，且不写死任何一个名字。
+
+    返回 `None` ⇒ 级别表读不到 ⇒ 族界不可判，`harm` 归 `unknown`（fail-closed）。
+    """
+    if "levels" not in _CONST_CACHE:
+        try:
+            from inbox_model import LEVEL_OF_KIND
+            _CONST_CACHE["levels"] = dict(LEVEL_OF_KIND)
+        except Exception:                                    # noqa: BLE001
+            _CONST_CACHE["levels"] = None
+    return _CONST_CACHE["levels"]
+
+
+def _num(v):
+    """数字或 `None`。★ `bool` 是 `int` 的子类，必须先排掉（否则 `True` 被当成 1 秒）。"""
+    if isinstance(v, bool):
+        return None
+    return float(v) if isinstance(v, (int, float)) else None
+
+
+def _fresh(age, uptime, stale):
+    """心跳是否新鲜（D-03 §4.2 原式 ＋ BL-02 的负数防护）。
+
+    `_elapsed_ok(v)` ≡ `v is not None ∧ v >= 0` —— 负数只可能来自时钟回拨，
+    回拨时的「时长」不是时长（BL-02 实测：旧写法 `v <= _STALE_AFTER` 对负数恒真）。
+
+    返回 `True`/`False`/`None`：`None` ＝ **不可判**（阈值读不到），由调用方归 `off`。
+    宁可不判「在岗」，也不许拿猜来的阈值判绿。
+    """
+    if stale is None:
+        return None
+    a, u = _num(age), _num(uptime)
+    if a is not None:
+        return a >= 0 and a <= stale
+    if u is not None:
+        return u >= 0 and u <= stale
+    return False                       # 两个读数都没有 ⇒ 证明不了在岗（D-02：两者都 None ⇒ off）
+
+
+def _over_half(age, stale):
+    """心跳是否已过「陈旧阈值的一半」（at-risk 的第二来路，N6-b）。"""
+    a = _num(age)
+    return stale is not None and a is not None and a > 0.5 * stale
+
+
+def _self_check_unbounded(facts):
+    """自检失败 ∧ 问题不在 dev 豁免里 ⇒ 无界无知。
+
+    ★ 三处不许默认：
+      · `self_check_ok is not False` ⇒ 不算失败（`None` 是「查不到」，由别的来路承担，
+        不在这里冒充失败）；
+      · `self_check_problems is None`（失败但清单没读到）⇒ **算非豁免**（fail-closed）；
+      · `dev_exempt is None` ⇒ 没有豁免可援引（同上）。
+      反过来若把 None 当「全部豁免」，`sound` 就会被一个读不到的清单骗出来。
+    """
+    if facts.get("self_check_ok") is not False:
+        return False
+    probs = facts.get("self_check_problems")
+    if probs is None:
+        return True
+    exempt = facts.get("dev_exempt")
+    exempt = set(exempt) if isinstance(exempt, (list, tuple, set)) else set()
+    return any(p not in exempt for p in probs)
+
+
+def _bounded(facts):
+    """有界无知的六条来路（D-03 §4.3 ＋ N7）。任一成立即 `bounded`。"""
+    if facts.get("probe_error") is not None:                  # ① 探针抛错
+        return True
+    if facts.get("heartbeat_age") is None and facts.get("heartbeat_source") is None:
+        return True                                           # ② 心跳链读不到（分支⑥）
+    if facts.get("clock_skewed") is True:                     # ③ 时钟回拨（BL-02）
+        return True
+    if facts.get("armed") is None:                            # ④ armed 读不到（D-03 明令）
+        return True
+    if facts.get("granary_level") is None:                    # ⑤ 非核心探针失败（D-14）
+        return True
+    if facts.get("partial_read") is not None:                 # ⑥ 受监管落点截断（N7／#56）
+        return True
+    return False
+
+
+def axes(facts):
+    """facts → 四轴（冻结件 §5.2 的 14 行映射表）。**只产四轴，不产灯**。
+
+    返回 `{"mode","duty","trust","harm"}` 四键，值域见 `AXIS_VALUES`。
+
+    ★ 纯函数：只读 `facts` 这一个 dict，不读文件、不看时钟、不调产品函数。
+      （两个阈值/级别表是模块常量，进程内恒定 ⇒ 同输入必同输出。）
+    ★ 禁静默默认：一律 `facts.get(k)`（缺键 ⇒ `None` ⇒ F1 的「查不到」），
+      **绝不**写 `facts.get(k, 默认)` —— 那正是 F1 明令禁止的静默默认。
+    ★ 顺序：mode → duty → trust → harm。harm 依赖 trust（裁定 R2），故必须最后算。
+
+    四轴各自的成立条件逐条见 §5.2；这里只标注**三处容易写错**的地方：
+      ① `armed is None` **不许**落 `unarmed`（那是「读不到」不是「没开」）；
+      ② `at-risk` 只在 `duty=on` 之内细分（off 就是 off，没有「off 且快没粮」）；
+      ③ `harm` 只收**缺口族**（`R0`），预告族（`credits_low`）只进 at-risk/徽标。
+    """
+    stale = _const("stale")
+
+    # ① mode —— armed 是链权威；is_dev 只用来区分 drill 与 armed
+    armed, is_dev = facts.get("armed"), facts.get("is_dev")
+    if armed is False:
+        mode = "unarmed"
+    elif armed is True and is_dev is True:
+        mode = "drill"
+    else:
+        # armed is True ∧ is_dev 为 False/None，或 armed is None（读不到）。
+        #   ★ 读不到 armed 不许落 unarmed —— 降级交给 duty（fresh 不可判 ⇒ off）
+        #     与 trust（armed is None ⇒ bounded）承担。
+        mode = "armed"
+
+    # ② duty
+    alive = facts.get("sentinel_alive")
+    fresh = _fresh(facts.get("heartbeat_age"), facts.get("sentinel_uptime"), stale)
+    duty = "on" if (alive is True and fresh is True) else "off"
+    if armed is None:
+        # §5.2 明列的一行：`armed is None` ⇒ duty=off。读不到「装没装」时，
+        #   值勤也证明不了（探针 exception 路径）—— 不许拿半份读数判在岗。
+        duty = "off"
+    elif duty == "on" and (
+            facts.get("granary_level") == "low"          # 粮将尽
+            or facts.get("credits_low_open") is True     # 未关的额度预警
+            or _over_half(facts.get("heartbeat_age"), stale)   # 心跳将断
+            or bool(facts.get("at_risk"))):              # 注册表登记的预告源（N6）
+        duty = "at-risk"
+
+    # ③ trust
+    lost = _num(facts.get("chain_write_lost"))
+    if (_self_check_unbounded(facts)
+            or facts.get("chain_integrity_ok") is False
+            or (lost is not None and lost > 0)           # BL-03／N4
+            or facts.get("chain_recon") == "lost_suspect"):   # N10
+        trust = "unbounded"
+    elif _bounded(facts):
+        trust = "bounded"
+    else:
+        trust = "sound"
+
+    # ④ harm —— 必须在 trust 之后（R2：unbounded ⇒ unknown）
+    if trust == "unbounded":
+        # 证明不了自己在守 ⇒ 后果也不可信（裁定 R2 把探针里的隐含规则升为明文）
+        harm = "unknown"
+    else:
+        gaps, levels = facts.get("gaps"), _kind_levels()
+        if gaps is None or levels is None:
+            # 防御分支（`gaps` 声明不可 None，正常走不到）：统计不出 ⇒ 报不出后果。
+            #   ★ 不许当 none —— 那会把「看不见」说成「没事」。
+            harm = "unknown"
+        else:
+            harmful = [g for g in gaps
+                       if isinstance(g, dict)
+                       and g.get("gap_state") in ("open", "acked")   # acked 不算修
+                       and levels.get(g.get("kind")) == GAP_LEVEL]   # 只收缺口族
+            harm = "some" if harmful else "none"
+
+    return {"mode": mode, "duty": duty, "trust": trust, "harm": harm}
+
+
+def check_axes(a):
+    """四轴结构自检。返回问题列表，空＝全绿。
+
+    验两条：① 恰好四键（不多不少 —— 多一个键就是「顺手把灯也算进来了」）；
+    ② 每轴的值在封闭集内。
+
+    ★ 不把「`sound|bounded ∧ unknown` 矛盾输入」算错：那是 R2 允许代码兜住的形状
+      （归 `blind`），`gaps` 读不到时正会走到这里。把它判红会让防御分支反过来咬人。
+    """
+    bad = []
+    if set(a) != set(AXIS_VALUES):
+        bad.append("① 四轴键集不对：多 %r / 少 %r"
+                   % (sorted(set(a) - set(AXIS_VALUES)),
+                      sorted(set(AXIS_VALUES) - set(a))))
+        return bad
+    for k, allowed in AXIS_VALUES.items():
+        if a[k] not in allowed:
+            bad.append("② %s=%r 不在封闭集 %r" % (k, a[k], allowed))
     return bad
