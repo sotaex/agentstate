@@ -746,6 +746,10 @@ at-risk·slash／off bar）＋lamp 四色参照，附记录表。
 
 ### 11.4 两处新规格矛盾：登记为第 48/49 号猜测点（0a 开工时撞出）
 
+> **★ 创始人已确认（2026-10-22 13:47）**：两条裁定均认可（「两条都认可」），
+> 0b 的 57 行夹具期望值照此落盘。这是 0b 开工的唯一前置（闸门①）。
+> **★ 创始人已确认**：闸门①验收条件满足（两处标注齐）。
+
 - **#48 drill 是不是成因**。矩阵 `CAUSES`（`output/_p_state_matrix.py:66-75`）与 F3
   枚举都是 8 键（无 drill）；但 §4.1 表有 drill 行、§5.3 N11-b 写「drill 成因行」、
   N11 八行又缺 `partial`。**裁定（四条结构证据）**：drill 是**模式层身份**不是成因——
@@ -770,4 +774,54 @@ at-risk·slash／off bar）＋lamp 四色参照，附记录表。
 - 句子与 §4.1 **逐字对拍 9/9 PASS**（`output/_p_registry_sentences.py`）。
 - 0a 验收四条全部满足：11 字段齐全／六旧键逐字保留／`legacy_of` 键集与值域闭合／
   `tense` 五值封闭且 `blind` 显式 `unknowable`。
+
+### 11.6 0b 已落盘（`ci/_situation_cases.py`，57 行）＋ 契约存在性判据 S58
+
+**夹具**：`ci/_situation_cases.py`，**纯数据、无断言、不 import 产品**（§5.1 纪律 5）。
+31 行（`D01-01`..`D01-31`）＋26 行（`N5-a`..`N12-c`）＝57；每行六键
+`id/feed/unit/overrides/expect/neg`。`feed` 四值显式分派输入形态（`axes`/`facts`/
+`registry`/`notice`）——见 #51。drill 的身份断言单列 `MODE_IDENTITY_CASES`，
+**不进 57 行**（#48：drill 不是成因，混进去会让「一行＝一个成因」失真）。
+
+**结构自证**（`output/_p_cases_probe.py`，设计期探针）：行数双尺子
+（`len(CASES)=57` 与 `ROW_COUNT=57` 一致）／id 唯一／六键封闭／`feed` 合法／
+`overrides` 形态与 `feed` 匹配／facts 行 overrides 键 ⊆ `BASE`／N11 八行与
+`state_registry.STATES` 的成因键**集合相等**／`cause` 不得为 `drill`／
+`MODE_IDENTITY_CASES` 恰好一条。**实测 57/57 全过，四条负控全部真红**
+（改 cause→drill／删一行 neg／删最后一行／N11 少 partial）。
+
+**契约存在性判据 S58**（落 `ci/inbox_guards_0372.py`，全仓 `S01–S57` 已占，故用
+`S58`）：F1 白名单 12 个符号逐个 `hasattr`；取不到的必须登记在 `_EXPECTED_MISSING`
+且带非空补齐计划，否则红；**登记了但实际已存在也红**（表过期＝实现了没销账）。
+反向腿：白名单每个名字必须在设计件里出现（防判据表与设计件各写各的）。
+设计件不在本树时反向腿走 **SKIP 并明说**，不静默记绿。
+`0372` 全套件实测 **28 绿 / 0 红**；反向腿另用 `output/_p_s58_reverse.py` 单独证有牙齿
+（塞一个「代码有、设计件无」的 `_granary_level` ⇒ 反向腿红；还原后回绿）。
+
+**同批修掉 0a 的一处判据互斥**：`state_registry.py` 曾有一张 `LEGACY_LABEL`
+（旧键→中文名），被 0372 **S08「灯态词全仓只有一份」当场判红**，而全仓对它零引用
+⇒ 删除（纯冗余副本）。★ 删的过程中撞出同型坑一次：我写的**注释里**含那张字典的
+字面量，S08 的 `_decl_scan` 走文本扫描，把注释也当成第二份声明 ⇒ 注释改为
+「描述性文字、不写出字面量」。与 0364 记载的「判据在自己解释 bug 的注释里写了
+触发串而假红」完全同型。
+
+### 11.7 0b／S58 撞出的四条新猜测点（#50–#53）
+
+- **#50 `BASE` 缺 `egress_free_bytes`**。§5.3 的 N6-c 在 overrides 里引用它，但
+  §5.2 的 `BASE` 代码块没有该字段。裁定：补 `None` 入基线（「读不到」的合法表示，
+  与 F1 三态一致），并登记此处。
+- **#51 57 行的输入形态不统一**。31 行是四轴、N5–N10 是 facts overrides、N11 是
+  态注册表行、N12 是通知场景，而 §5.3 的 `overrides` 列在 N11 行写的是描述性文字
+  （「unarmed 成因行」）而非 dict。裁定：加第六个必需键 `feed` 显式分派；
+  N11 的 `overrides` 为 `None`，N12 为 dict（场景参数）。
+- **#52 N9-b 把 `period_line` 写进 overrides**，但「期间行」是渲染层概念、facts 里
+  没有该字段。裁定：移入 `expect["period_line_text"]`。留在 overrides 会让
+  「overrides 键 ⊆ `BASE`」这条判据红，而那不是缺陷、是形态错位。
+- **#53 `write_health` 的模块名，同一份设计件自相矛盾**。§F1（第 93 行）写
+  `host_shield.write_health()`；§10.1（同件、带行号实证）写
+  `audit_chain.write_health()`（`:215`）。**实测在 `audit_chain`**
+  （`output/_p_whitelist_probe.py` 全树搜索，`host_shield` 无此符号）。
+  裁定：**以 §10.1 为准**（它是有实证的那条），判据表写 `audit_chain.write_health`；
+  §F1 第 93 行那处属早期抄写笔误，建议下一版修订时更正。
+  ⇒ 这条正是 S58 要抓的形状：**「设计写了」与「代码有」不是同一件事**。
 
