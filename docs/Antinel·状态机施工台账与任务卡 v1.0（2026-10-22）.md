@@ -383,3 +383,66 @@ Z 步把探针迁进 `ci/` 后，本文件应退化为「调 `delivery_gate.py -
    闸门红了才算必跑。**这条只能靠开套件解决，要动共享的 `delivery_gate.SUITES`。**
 2. **归属表**：B1 那次重复施工（整轮构建＋撤销）的根因是**没有一张「哪个文件归哪条线」的表**。
    `_verify.py` 管不了这个。**这是下一个效率杠杆，比把 66s 压到 50s 值钱得多。**
+
+---
+
+## 7. 交界文件归属表（2026-10-22 18:4x，按 git 事实落，不是约定）
+
+> 由来：B1 我按台账把「形状编码」做了并提交 `dc2c8dd`，而 B 线 `ed527d6` 早已落盘同一件事。
+> **整轮构建＋撤销的代价，根因只有一条：没有一张表说清「这个文件归谁」。** 本节补上。
+
+### 7.1 证据（`git` 事实，可复核）
+
+    $ git merge-base impl-state-machine b-presentation
+    469393f  feat(A4): situation.py —— 灯/成因/句子/徽标/期间行（F2 冻结形状）
+    $ git diff --name-only 469393f..b-presentation          # B 线 9 个文件
+    $ git diff --name-only 469393f..impl-state-machine      # A 线 1 个文件
+
+★ **分叉点就是 A4 落地那一刻** ⇒ A0–A4 的全部产物（`facts.py`／`situation.py`／
+`ci/_situation_cases.py`／`ci/_state_matrix_ref.py`）**两线共有**，谁都别再当它是自己的新作。
+
+### 7.2 归属表
+
+| 文件 | 归属 | 证据 | 越界的后果（已发生过） |
+|---|---|---|---|
+| `situation.py` | **A 线独占** | 分叉后 A 线改了它（A5/A6/审核补漏）；B 线零改动 | — |
+| `ci/_situation_cases.py` | **A 线独占** | A0/A4 落盘 | — |
+| `ci/_state_matrix_ref.py` | **A 线独占** | A0 落盘 | — |
+| `state_registry.py` | **B 线独占** | B1 `ed527d6`（分叉后） | **B1 重复施工**（我改了同一段，`da4415b` 撤销） |
+| `tools/mk_icons.py` | **B 线独占** | B1 `ed527d6` | 同上 |
+| `inbox_notify.py` | **B 线独占** | B2 `debd7b0` | — |
+| `sidecar.py` | **B 线独占** | B3 `a54da38` | — |
+| `psl/manifest.json`／`server.json` | **B 线（派生数据）** | B1 | 合并**绝不选边**，一律重生成 |
+| `docs/AUDIT_SCHEMA.md` | **B 线** | B1 | — |
+| `ci/delivery_gate.py`／`ci/defect_types.py` | **共享，改动前先声明** | 闸门注册表，两线都要登记 | 静默加套件 ⇒ 常驻套件数超限／判据 ID 撞号 |
+| `glossary.py` | **共享（产品件）** | #59a 要补 7 个词条 | 未签发不动产品 |
+
+### 7.3 三条规矩
+
+1. **A 线的手只伸进三个文件**：`situation.py`／`ci/_situation_cases.py`／`ci/_state_matrix_ref.py`。
+   要动 `state_registry.py` 或 `tools/mk_icons.py` ⇒ **先声明，再动手**。
+2. **共享文件改动前必须说清「加什么、占哪个编号」**（`delivery_gate.SUITES` 的 `RESIDENT_SUITE_CAP=29`、
+   `defect_types.py` 的判据 ID 全仓唯一）。**编号是共享资源，撞号不报错、只是丢一条判据。**
+3. **派生数据合并绝不选边**：`psl/manifest.json`／`server.json` 冲突时两边都丢，重跑生成器。
+
+### 7.4 待交接 B 线两条（带精确补法，不是「请修一下」）
+
+**(1) `tools/mk_icons.py` 的 `COLORS`／`SPEC` 缺灰** —— 已核实（`b-presentation` 上两表各 5 键：
+`L0/L1/L2/Ls/R0`，无 `grey`）。B4 重生成资产时会 KeyError。
+
+    色值：COLORS["grey"] = (0x5f, 0x5e, 0x5a)      # = SHIELD_MARKS["off"]["color"]，同源不新造
+    几何：SPEC["grey"]   = dict(SPEC["L0"])        # T1 决议「灰借 L0 空环」
+
+★ **为什么灰可以借 L0 的几何**：B1 探针算过 31 行可达格，`(shape, mark)` 只落 **8 组、无跨灯碰撞**；
+`(L0, off)` 灰＋bar 与 `(L0, None)` 绿＋无角标**靠角标分开** —— **同几何 ≠ 同格**。
+★ 角标：at-risk 用 `dot`（借 `SHIELD_MARKS["unknown"]`，蓝 `0x2a5db0`）—— T1 决议，别用 `unposted`。
+
+**(2) B2 已实现（`debd7b0`），但不在本树** ⇒ A4 的 `N12-a/b/c` 三个 SKIP 只能等合分支才解。
+合分支后 `_verify.py` 会报 `~ 预期 SKIP 消失`（提示，不是失败）—— 那时把 `TARGETS["A4"]["known_skip"]`
+清空即可，**别顺手把整条 A4 的预期放宽**。
+
+### 7.5 顺带记一条卫生问题
+
+`_p_badge_probe.py` 落在**仓库根目录**（B 线 `b-presentation`）。本仓惯例是探针落 `output/`
+（`.gitignore` 侧不管，但根目录多一个 `_p_*` 会让人以为它是产品件）。建议 B 线挪走。
+
