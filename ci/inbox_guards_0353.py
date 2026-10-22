@@ -5084,6 +5084,13 @@ def _eg_env():
     E.ledger_dir = lambda: d
     E._LOST.update({"n": 0, "first": None, "last": None})
     E._ROT_NOTE.clear()
+    # ★ 0.54.0：`_DISK_DIRTY` 与 `_ASK` 是进程级状态（A13 的性能优化）。
+    #   不重置它们，前一条判据跑出来的"盘上已清零"会让这一条**不查盘**
+    #   ⇒ 夹具明明造了待补的 lost，判据却看不到（本条实测踩到过一次）。
+    if hasattr(E, "_DISK_DIRTY"):
+        E._DISK_DIRTY["v"] = True
+    if hasattr(E, "_ASK"):
+        E._ASK["tick"] = 0
     return E, d, orig
 
 
@@ -5622,6 +5629,473 @@ def n_perm_unknown_not_allowed():
         HS.deny_state = orig
 
 
+# ============================================ 40 格 · 复审补判据（0.54.0）====
+# ★★ 这一批全部来自《本轮改动全面审核报告 v1.0》的 A1–A6。
+#   它们的共同点不是"忘了测"，而是**测的位置在生产路径的上游**：
+#   P29 打 `S.set_state`，缺陷在 `/action`；P24 夹具恒造今天那份，生产走的是
+#   "今天不存在"；P25 只测单腿，不测"两腿加起来"。
+#   ⇒ 每条新判据都换到**生产真正走的那个入口**，并在负控里换掉同一份实现。
+
+def c_auto_read_keeps_gap():
+    """P34：「点开即已读」不许改缺口态；用户的「重开」必须还能改。
+
+    ★★ 为什么必须打 HTTP（A1 实测形状）：`S.set_state` 本身没错，错的是
+      `/action` 这一层"没人问这条现在是什么状态"。P29 直接调模型函数 ⇒
+      对这个缺陷天生失明（假绿族④：判据走注入参数、生产走默认参数）。
+      实测过的后果：`ignored → read` 得 `('read','open',False)` ——
+      ack 撤销、`closed_at` 被清、复核计时归零，**看一眼就把缺口重新打开**。
+    """
+    hub = G.new_hub()
+    G.put_chain(hub, [G.breach(ts="2026-10-05T20:00:0%d+08:00" % i,
+                               reason="p34-%d" % i) for i in (1, 2, 3)])
+    its = S.load_items(root=hub)
+    if len(its) < 3:
+        return "夹具只造出 %d 条记录，摆不出「忽略／处置／未读」三种状态" % len(its)
+    ack, done, fresh = its[0], its[1], its[2]
+    S.set_state(ack.id, "ignored", note="先不管", level=ack.level, root=hub)
+    S.set_state(done.id, "done", level=done.level, root=hub)
+    srv = G.Server(hub, token="p34tok")
+    try:
+        # ① 自动已读（带 X-Antinel-Read）对已忽略/已处置都不许动
+        for it in (ack, done):
+            code, _h, _b = G.req(srv.port, "/action", token=srv.token, method="POST",
+                                 body="op=read&id=%s" % it.id,
+                                 ctype="application/x-www-form-urlencoded",
+                                 hdrs={"X-Antinel-Read": "1"})
+            if code != 200:
+                return ("自动已读返回 %s（期望 200：这次本来就不该写盘，"
+                        "回 409 会被页面记成写入失败）" % code)
+        cur = {it.id: it for it in S.load_items(root=hub)}
+        if cur[ack.id].state != "ignored":
+            return ("已忽略的记录被「点开即已读」改成 %s ⇒ 看一眼缺口就活了"
+                    % cur[ack.id].state)
+        if cur[ack.id].gap_state != M.GAP_ACKED:
+            return ("已忽略记录的缺口态被改成 %s（closed_at=%r）⇒ ack 被撤销"
+                    % (cur[ack.id].gap_state, cur[ack.id].closed_at))
+        if not cur[ack.id].closed_at:
+            return "已忽略记录的 closed_at 被清掉了 ⇒ 复核期永远算不出来"
+        if cur[done.id].state != "done":
+            return ("已处置的记录被「点开即已读」改成 %s ⇒ 修好的缺口又变回未修"
+                    % cur[done.id].state)
+        if cur[done.id].gap_state != M.GAP_CLOSED:
+            return "已处置记录的缺口态被改成 %s" % cur[done.id].gap_state
+        # ② 页面侧：非未读项必须自带 data-readed；未读项**不许**带
+        #    ★ 必须在"把未读项点成已读"之前做 —— 否则读到的 fresh 已经是 read，
+        #      反向断言会假红（本条实测踩到：顺序错了，红的是判据不是产品）。
+        #    ★ 打 `_item_html`（生产渲染函数），不打 `render_page`：
+        #      已处置项落归档档，`view="inbox"` 根本不渲染它 ⇒ 用 render_page
+        #      测这一条会得到"没渲染所以没属性"的假红。
+        row_done = SV._item_html(cur[done.id], "t")
+        row_fresh = SV._item_html(cur[fresh.id], "t")
+        if 'data-readed="1"' not in row_done:
+            return ("已处置的记录在页面上没有 data-readed ⇒ 每次展开都会发一次 read"
+                    "（服务端门禁能兜住，但每次白写一次盘）")
+        if 'data-readed="1"' in row_fresh:
+            return "未读项也标了 data-readed ⇒ 点开永远不发请求，「已读」功能被关掉"
+        # ③ 未读项必须照样记已读（否则这条判据退化成"什么都不许写"）
+        G.req(srv.port, "/action", token=srv.token, method="POST",
+              body="op=read&id=%s" % fresh.id,
+              ctype="application/x-www-form-urlencoded",
+              hdrs={"X-Antinel-Read": "1"})
+        cur = {it.id: it for it in S.load_items(root=hub)}
+        if cur[fresh.id].state != "read":
+            return "未读项点开后没记已读 ⇒ 「点开即已读」被整条关掉了"
+        # ④ 显式「重开」（不带该头）必须还能改回去
+        G.req(srv.port, "/action", token=srv.token, method="POST",
+              body="op=read&id=%s" % ack.id,
+              ctype="application/x-www-form-urlencoded")
+        cur = {it.id: it for it in S.load_items(root=hub)}
+        if cur[ack.id].state != "read" or cur[ack.id].gap_state != M.GAP_OPEN:
+            return ("用户的「重开」被门禁挡住（state=%s, gap=%s）—— "
+                    "重开按钮变成了死按钮"
+                    % (cur[ack.id].state, cur[ack.id].gap_state))
+        return True
+    finally:
+        srv.stop()
+
+
+def n_auto_read_keeps_gap():
+    """负控：把唯一判据点换成「永远允许」⇒ P34 必须红。
+
+    ★ 换的是**同一份实现**（`SV._auto_read_allowed`），不是复制一份 handler
+      来测副本 —— 副本红了不代表线上红。
+    """
+    orig = SV._auto_read_allowed
+    SV._auto_read_allowed = lambda auto, cur: True
+    try:
+        r = c_auto_read_keeps_gap()
+        if r is True:
+            return "负控失效：门禁全放行后 P34 仍然绿"
+        return True
+    finally:
+        SV._auto_read_allowed = orig
+
+
+def c_space_keepdays_two_shapes():
+    """P24b：今天那份**还没落盘**时，保留天数必须与"已经落盘"时是同一个数。
+
+    ★ 为什么单立一条：P24 的夹具恒造今天那份，而 `tick()`／`run()` 都在
+      **当天第一次写之前**跑保留策略 ⇒ 每天早晨走的都是"今天不存在"那条腿。
+      夹具形状 ≠ 生产形状 ⇒ P24 对这个抖动天生绿（假绿族②）。
+    """
+    import datetime as _dt
+    E, d, orig = _eg_env()
+    try:
+        today = _dt.date.today()
+        got = {}
+        for have in (True, False):
+            for name in os.listdir(d):
+                os.remove(os.path.join(d, name))
+            for i in range(20):
+                day = today - _dt.timedelta(days=i + (0 if have else 1))
+                _eg_touch(d, day.isoformat())
+            E.enforce_retention()
+            got[have] = len([x for x in os.listdir(d) if x.startswith("events-")])
+        if got[True] != E.KEEP_DAYS:
+            return "今天那份已落盘时留了 %d 天（期望 %d）" % (got[True], E.KEEP_DAYS)
+        if got[False] != E.KEEP_DAYS:
+            return ("今天那份还没落盘时留了 %d 天（期望 %d）—— 每天早晨都会多留一天，"
+                    "两个形状必须是同一个数" % (got[False], E.KEEP_DAYS))
+        return True
+    finally:
+        _eg_close(E, (d,), orig)
+
+
+def n_space_keepdays_two_shapes():
+    """负控：把"今天那一格预留"撤掉 ⇒ P24b 必须红。"""
+    import egress as E
+    real = E._keep_target
+    E._keep_target = lambda n, h, keep=E.KEEP_DAYS: keep
+    try:
+        r = c_space_keepdays_two_shapes()
+        if r is True:
+            return "负控失效：不给今天预留位置后 P24b 仍然绿"
+        return True
+    finally:
+        E._keep_target = real
+
+
+def c_space_lost_two_legs():
+    """P25b：丢失计数必须把「盘上」与「内存」两边加起来。
+
+    ★ 实测过的后果（A3）：磁盘满期丢 3 条、恢复后再丢 1 条，
+      `lost_pending()` 报 **1**（真值 4），连"最早起点"都退成最晚那条。
+      而丢失记账是"那段时间没记上"的唯一证据 —— 少记等于替一次丢失撒谎。
+    """
+    E, d, orig = _eg_env()
+    try:
+        real = E._write_json
+        E._write_json = lambda name, obj: False       # 磁盘满：落盘必失败
+        try:
+            for _ in range(3):
+                E._note_lost(1000.0)
+            n_mid = E.lost_pending()[0]
+        finally:
+            E._write_json = real
+        if n_mid != 3:
+            return "磁盘满期间 lost_pending 报 %d（期望 3）" % n_mid
+        E._note_lost(2000.0)                          # 磁盘恢复后又失败一条
+        n, first, _last = E.lost_pending()
+        if n != 4:
+            return ("磁盘恢复后再丢一条，lost_pending 报 %d（真值 4）"
+                    "—— 内存里那 3 条被写盘抹掉了" % n)
+        if int(first or 0) != 1000:
+            return "最早起点退成了 %r（应是第一条的 1000.0）" % (first,)
+        disk = E._read_json("lost.json", {}) or {}
+        if int(disk.get("n") or 0) != 4:
+            return "盘上 lost.json 记的是 %r（应是 4）" % (disk.get("n"),)
+        return True
+    finally:
+        _eg_close(E, (d,), orig)
+
+
+def n_space_lost_two_legs():
+    """负控：合并退回「盘上 + 1」⇒ P25b 必须红。"""
+    import egress as E
+    real = E._merge_lost
+    E._merge_lost = lambda disk_n, mem_n: int(disk_n) + 1
+    try:
+        r = c_space_lost_two_legs()
+        if r is True:
+            return "负控失效：只写一边之后 P25b 仍然绿"
+        return True
+    finally:
+        E._merge_lost = real
+
+
+def c_space_unreadable_not_zero():
+    """P26b：账本目录读不到时，不许把「没量到」渲染成「0 个日文件」。
+
+    ★ 夹具是**真实形状**，不是打桩：把 `ledger_dir` 指向一个**文件**。
+      `shutil.disk_usage(文件)` 在 Windows 上照常返回所在卷的用量（实测），
+      而 `os.listdir(文件)` 抛 NotADirectoryError ⇒ `readable=False`
+      但 `capacity()` 不是 None。这正好是"磁盘量得到、账本目录读不到"那一格。
+    """
+    E, _d, orig = _eg_env()
+    bad = None
+    try:
+        bad = tempfile.mkdtemp(prefix="antinel_egfile_")
+        f = os.path.join(bad, "not_a_dir")
+        with open(f, "w", encoding="utf-8") as fh:
+            fh.write("x")
+        E.ledger_dir = lambda: f
+        cap = E.capacity()
+        if not cap:
+            return "capacity() 返回 None —— 这个形状下磁盘用量是量得到的（夹具不成立）"
+        if cap.get("readable") is not False:
+            return "目录读不到却报 readable=%r ⇒ 下游没有可用的可读性字段" % (
+                cap.get("readable"),)
+        out = E.render({"ts": 0, "idle": 0.0, "conns": []}, [], 1, True, 0, cap=cap)
+        # ★ 中文断言必须走 `PC.body()`（S48）：`render()` 的产物含 style 与注释，
+        #   裸查字符串会在"别处也出现同名字"时天然满足（本仓踩过多次）。
+        body = PC.body(out)
+        if "0 个日文件" in body:
+            return "目录读不到却上屏「0 个日文件」⇒ 把「没量到」说成了「没有」"
+        if "读不到" not in body:
+            return "目录读不到却什么都没说 ⇒ 用户会以为账本是空的"
+        # 反向：读得到时不许说"读不到"（否则这条判据退化成"永远报警"）
+        E.ledger_dir = orig
+        cap2 = E.capacity()
+        out2 = E.render({"ts": 0, "idle": 0.0, "conns": []}, [], 1, True, 0, cap=cap2)
+        body2 = PC.body(out2)
+        if "账本目录读不到" in body2 or "磁盘：读不到容量" in body2:
+            return "目录明明读得到却说读不到 ⇒ 这条判据会变成天天报警"
+        return True
+    finally:
+        E.ledger_dir = orig
+        if bad:
+            import shutil as _sh
+            _sh.rmtree(bad, ignore_errors=True)
+
+
+def n_space_unreadable_not_zero():
+    """负控：删掉 `readable` 分支（退回"照报 0 个文件"）⇒ P26b 必须红。
+
+    ★ 按结构摘腿：把 cap 的 `readable` 一律改成 True，等价于 render 从不看这个字段。
+    """
+    import egress as E
+    real = E.render
+
+    def blind(snap, findings, days_with, sentinel_on, sample_failed, **kw):
+        cap = kw.get("cap")
+        if cap:
+            cap = dict(cap)
+            cap["readable"] = True
+        kw["cap"] = cap
+        return real(snap, findings, days_with, sentinel_on, sample_failed, **kw)
+
+    E.render = blind
+    try:
+        r = c_space_unreadable_not_zero()
+        if r is True:
+            return "负控失效：不看 readable 之后 P26b 仍然绿"
+        return True
+    finally:
+        E.render = real
+
+
+def c_env_heredoc_pipe_kept():
+    """P30b：heredoc 正文的去向要看**整行**，不是只看 `<<` 左边。
+
+    ★ 实测过的漏放（A2）：`cat <<'EOF' | bash`、`| sh`、`tee f <<'EOF' | bash`
+      三例正文被剥掉，而下游解释器照样执行它。剥掉的是"危险内容"的扫描面
+      ⇒ **漏放方向**：把真删除放行。
+    ★ 反向必须仍然成立：`cat <<'EOF'`（正文是数据）照旧剥，否则每条 heredoc
+      都把正文推进扫描面 ⇒ 误拦，钩子会被卸载。
+    """
+    H = _import_pre_tool_use()
+    D = "r" + "m" + " -" + "rf" + " /tmp/x"          # 拼出来：本文件也会被扫
+    cases = [
+        ("cat <<'EOF'\n%s\nEOF\n" % D,               False, "纯数据给 cat"),
+        ("bash <<'EOF'\n%s\nEOF\n" % D,              True,  "解释器直接吃"),
+        ("cat <<'EOF' | bash\n%s\nEOF\n" % D,        True,  "管道给 bash"),
+        ("cat <<'EOF' | sh\n%s\nEOF\n" % D,          True,  "管道给 sh"),
+        ("tee /tmp/a <<'EOF' | bash\n%s\nEOF\n" % D, True,  "tee 管道给 bash"),
+        ("sudo bash <<'EOF'\n%s\nEOF\n" % D,         True,  "sudo bash"),
+        ("cat <<'EOF'  # 不是 bash\n%s\nEOF\n" % D,  False, "注释里的解释器词不该算"),
+    ]
+    for cmd, keep, label in cases:
+        out = H.strip_heredoc_bodies(cmd)
+        leaked = (" -" + "rf") in out
+        if leaked != keep:
+            return "%s：正文%s（期望%s）" % (
+                label, "仍在扫描面" if leaked else "被剥掉了",
+                "留在扫描面" if keep else "被剥掉")
+    return True
+
+
+def n_env_heredoc_pipe_kept():
+    """负控：把判定退回只看 `<<` 左边 ⇒ P30b 必须红。"""
+    import importlib.util as _u
+    H = _import_pre_tool_use()
+    # ★ 源码路径从**已加载模块自己的 `__file__`** 取，不用仓根常量拼：
+    #   拼路径的写法在 worktree／打包布局下会指错，而这里要读的正是"跑起来的那份"。
+    src_path = getattr(H, "__file__", None)
+    if not src_path or not os.path.isfile(src_path):
+        return "找不到钩子源码（%r），负控无法成立" % (src_path,)
+    with open(src_path, "r", encoding="utf-8") as f:
+        src = f.read()
+    old = "exec_re.search(_strip_line_comment(line))"
+    new = "exec_re.search(line[:m.start()])"
+    if src.count(old) != 1:
+        return "负控锚点命中 %d 次（应为 1）—— 判定已换写法，需同步" % src.count(old)
+    tmp = os.path.join(tempfile.mkdtemp(prefix="antinel_p30b_"), "hook_old.py")
+    with open(tmp, "w", encoding="utf-8", newline="") as f:
+        f.write(src.replace(old, new))
+    spec = _u.spec_from_file_location("hook_old_p30b", tmp)
+    m = _u.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    D = "r" + "m" + " -" + "rf" + " /tmp/x"
+    bad = []
+    for cmd, label in (("cat <<'EOF' | bash\n%s\nEOF\n" % D, "管道给 bash"),
+                       ("cat <<'EOF' | sh\n%s\nEOF\n" % D, "管道给 sh"),
+                       ("tee /tmp/a <<'EOF' | bash\n%s\nEOF\n" % D, "tee 管道给 bash")):
+        if (" -" + "rf") not in m.strip_heredoc_bodies(cmd):
+            bad.append(label)
+    if not bad:
+        return "负控失效：退回旧判定后，%s 的正文仍在扫描面 ⇒ 抓不住原缺陷" % (
+            "、".join(bad) or "三个形状")
+    return True
+
+
+def c_env_existing_blocks_intact():
+    """P30c：**既有保护的连带对照**（九维第 4 维）。
+
+    ★ 九维第 4 条的原始要求：改了一处判据，必须证明它没有削弱**别的**保护。
+      本轮改了命令扫描面的两处（黑洞重定向、heredoc 剥离），所以必须回头证明
+      **与这两个改造无关的老形状**照样按原样判：该拦的还拦、该放的还放。
+    ★ 为什么单立一条：只跑新形状（P30／P30b）永远发现不了"顺手把老形状放行了"——
+      那正是"既有保护被削弱"的形态，而它的受害者在改动之外。
+    """
+    H = _import_pre_tool_use()
+    # 该拦的（不许因为改了扫描面而变成豁免）
+    must_block = [
+        ("rm -rf build", "裸删除命令"),
+        ("grep -n x a.md | xargs rm -f", "管道给 xargs 再删除"),
+        ("echo hi > out.txt", "真的写文件"),
+        ('VAR="dist"; rm -rf "$VAR"', "变量间接的删除（赋值表不许用于匹配豁免）"),
+        ("cat > n.md <<'EOF'\n用 rm -rf 清掉\nEOF", "heredoc 同时写文件"),
+        ("bash <<'EOF'\n%s\nEOF" % ("r" + "m" + " -" + "rf" + " /tmp/x"),
+         "解释器吃 heredoc"),
+    ]
+    for cmd, label in must_block:
+        if H.readonly_command_context(cmd) is not False:
+            return "%s 被豁免了 ⇒ 改扫描面时削弱了既有拦截（%r）" % (label, cmd)
+    # 该放的（不许因为改扫描面而变成误拦 —— 误拦会让钩子被卸载）
+    must_pass = [
+        ("grep -n \"rm -rf\" notes.md", "在文档里搜删除字样"),
+        ("cat notes.md", "纯读文件"),
+        ("cd src && grep -n x f.py", "只读链"),
+    ]
+    for cmd, label in must_pass:
+        if H.readonly_command_context(cmd) is not True:
+            return "%s 被拦住了 ⇒ 改扫描面引入了误拦（%r）" % (label, cmd)
+    return True
+
+
+def n_env_existing_blocks_intact():
+    """负控：把只读豁免改成"一律放行" ⇒ P30c 必须红。
+
+    ★ 这复现的正是"削弱既有保护"的形态：改造顺手把豁免条件放松了。
+    """
+    H = _import_pre_tool_use()
+    real = H.readonly_command_context
+    H.readonly_command_context = lambda cmd: True
+    try:
+        r = c_env_existing_blocks_intact()
+        if r is True:
+            return "负控失效：豁免一律放行后 P30c 仍然绿"
+        return True
+    finally:
+        H.readonly_command_context = real
+
+
+def c_concurrency_unreadable_not_zero():
+    """P32b：存在但读不到 ⇒ `checked=False`；文件不存在 ⇒ 空账本（查到了、0 次）。
+
+    ★ 旧实现在末尾写了 `if os.path.isdir(dirname): checked = True` ——
+      它只证明目录在，却把"文件存在但读失败"一起置成 True，**把自己的契约作废**。
+    ★ 夹具用**目录冒充事件文件**：`open()` 抛 IsADirectoryError（OSError 子类）。
+      这是真实的"存在但读不到"，不靠权限、跨平台。
+    """
+    import audit_chain as AC
+    d = tempfile.mkdtemp(prefix="antinel_lp_")
+    try:
+        p = os.path.join(d, "lock_events.jsonl")
+        r0 = AC.lock_pressure(path=p)
+        if not r0.get("checked"):
+            return "事件文件不存在（空账本）却报 checked=False ⇒ 会把「没竞争」说成「没查成」"
+        if r0.get("timeouts") or r0.get("steals"):
+            return "空账本报出了竞争次数（%r/%r）" % (r0.get("timeouts"), r0.get("steals"))
+        os.mkdir(p)
+        r1 = AC.lock_pressure(path=p)
+        if r1.get("checked"):
+            return "文件读不到却报 checked=True ⇒ 页面会把「不知道」说成「没竞争」"
+        if not r1.get("unreadable"):
+            return "读不到却没登记 unreadable ⇒ 上层说不清是哪个文件没读到"
+        return True
+    finally:
+        import shutil
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def n_concurrency_unreadable_not_zero():
+    """负控：把 `checked` 退回"目录在就算查到了" ⇒ P32b 必须红。"""
+    import audit_chain as AC
+    real = AC._checked_from
+    AC._checked_from = lambda unreadable: True
+    try:
+        r = c_concurrency_unreadable_not_zero()
+        if r is True:
+            return "负控失效：退回旧口径后 P32b 仍然绿"
+        return True
+    finally:
+        AC._checked_from = real
+
+
+def c_gap_two_ages_named():
+    """P31b：两个基准的「天前」必须各自具名；页面只用与复核期同基准的那个。
+
+    ★ 问题形状（A7）：一句话里 `n=5, 最早 30 天前, 其中 4 条已过 14 天复核期`——
+      30 是**记录年龄**（`ts`），14 是**搁置年龄**（`closed_at`），两个数不在同一条轴上，
+      并排放着会被读成"30 天前忽略的，早该复核了"。
+    """
+    acked = _gap_item("ignored", M.GAP_ACKED,
+                      closed_h=M.ACK_REVIEW_DAYS * 24 + 48, ts_h=24)
+    u = M.unrepaired_count([acked])
+    want_ack = M.ACK_REVIEW_DAYS + 2
+    if u.get("oldest_ack_days") != want_ack:
+        return "oldest_ack_days=%r（应是 %d，基准 closed_at）" % (
+            u.get("oldest_ack_days"), want_ack)
+    if u.get("oldest_record_days") != 1:
+        return "oldest_record_days=%r（应是 1，基准 ts）" % (u.get("oldest_record_days"),)
+    txt = re.sub(r"<[^>]+>", "", SV._unrepaired_line([acked]))
+    if "%d 天" % want_ack not in txt:
+        return "页面没用搁置年龄（读到的是记录年龄？）：%s" % txt
+    if "1 天" in txt:
+        return "页面把记录年龄当成了「多久没管」：%s" % txt
+    return True
+
+
+def n_gap_two_ages_named():
+    """负控：台账不再给 ack 基准的天数 ⇒ P31b 必须红（页面就无从取对的那个）。"""
+    orig = M.unrepaired_count
+
+    def only_record(items, now=None, hours=None):
+        u = orig(items, now=now, hours=hours)
+        u.pop("oldest_ack_days", None)
+        return u
+
+    M.unrepaired_count = only_record
+    try:
+        r = c_gap_two_ages_named()
+        if r is True:
+            return "负控失效：拿掉 ack 基准后 P31b 仍然绿"
+        return True
+    finally:
+        M.unrepaired_count = orig
+
+
 CHECKS_0353 = [
     # ---- 十、TAB 切换卡顿根治·方案 B（2026-10-21 创始人拍板）----
     ("TP-B1 self_check 指纹缓存：不变零重散／沙盒变异必失效必报",
@@ -5872,6 +6346,23 @@ CHECKS_0353 = [
      c_concurrency_visible, n_concurrency_visible),
     ("P33 权限三态：ACL 读不到＝不知道；「确认放行」不因量不到而作废",
      c_perm_unknown_not_allowed, n_perm_unknown_not_allowed),
+    # ---- 十二·补、复审 0.54.0：A1–A7 的七条 + 九维第 4 维 ----
+    ("P34 点开即已读不许改缺口态；显式重开仍能改回（打 HTTP 真实路径）",
+     c_auto_read_keeps_gap, n_auto_read_keeps_gap),
+    ("P24b 今天那份还没落盘时，保留天数与已落盘时同一个数",
+     c_space_keepdays_two_shapes, n_space_keepdays_two_shapes),
+    ("P25b 丢失计数＝盘上＋内存；最早起点不许退成最晚那条",
+     c_space_lost_two_legs, n_space_lost_two_legs),
+    ("P26b 账本目录读不到时不许上屏「0 个日文件」",
+     c_space_unreadable_not_zero, n_space_unreadable_not_zero),
+    ("P30b heredoc 正文去往要看整行：管道给解释器不许剥，纯数据仍剥",
+     c_env_heredoc_pipe_kept, n_env_heredoc_pipe_kept),
+    ("P30c 既有保护连带对照：改了扫描面，老形状该拦还拦、该放还放",
+     c_env_existing_blocks_intact, n_env_existing_blocks_intact),
+    ("P32b 锁记录存在但读不到 ⇒ 不知道；文件不存在 ⇒ 空账本",
+     c_concurrency_unreadable_not_zero, n_concurrency_unreadable_not_zero),
+    ("P31b 两个基准的「天前」各自具名；页面只用与复核期同基准的那个",
+     c_gap_two_ages_named, n_gap_two_ages_named),
 ]
 
 

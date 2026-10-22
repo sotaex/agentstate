@@ -119,8 +119,14 @@ def item(level="L2", state="unread", i=1, ts=None):
     return M.Item(alert=a, state=state)
 
 
-def req(port, path, token=None, method="GET", body=None, host=None, ctype=None):
-    """发一个 HTTP 请求，返回 (status, headers, body_text)。"""
+def req(port, path, token=None, method="GET", body=None, host=None, ctype=None,
+        hdrs=None):
+    """发一个 HTTP 请求，返回 (status, headers, body_text)。
+
+    ★ `hdrs`（0.54.0 加）：额外的请求头。用途只有一个 —— 让判据能**区分**
+      "页面自动发的请求"与"用户点按钮发的请求"（`X-Antinel-Read`）。
+      不带它时行为与本函数历史上完全一致。
+    """
     c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
     headers = {}
     if host:
@@ -129,6 +135,8 @@ def req(port, path, token=None, method="GET", body=None, host=None, ctype=None):
         headers["X-Antinel-Token"] = token
     if ctype:
         headers["Content-Type"] = ctype
+    if hdrs:
+        headers.update(hdrs)
     try:
         c.request(method, path, body=body, headers=headers)
         r = c.getresponse()
