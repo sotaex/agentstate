@@ -25,6 +25,10 @@
 
 用法：`python ci/verify_promises_guard.py`
 """
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import tmpreg as _TMP   # 0.55.0 (F3): temp dir registry
 import glob
 import importlib.util
 import os
@@ -56,7 +60,7 @@ def load_antinel(root):
 
 def negative_control(m):
     """负控：`_HERE` 指到空目录 ⇒ 承诺必须**全部**解析不出来。"""
-    empty = tempfile.mkdtemp(prefix="antinel_nopromise_")
+    empty = _TMP.tmpdir(prefix="antinel_nopromise_")
     old = m._HERE
     try:
         m._HERE = empty
@@ -81,7 +85,7 @@ def main():
     print("被检出件：%s" % os.path.basename(whl))
     print("=" * 78)
 
-    ex = tempfile.mkdtemp(prefix="antinel_wheel_x_")
+    ex = _TMP.tmpdir(prefix="antinel_wheel_x_")
     with zipfile.ZipFile(whl) as z:
         z.extractall(ex)
     m = load_antinel(ex)

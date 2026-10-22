@@ -37,6 +37,10 @@
 """
 from __future__ import annotations
 
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import tmpreg as _TMP   # 0.55.0 (F3): temp dir registry
 import glob
 import io
 import json
@@ -65,7 +69,7 @@ class Sandbox:
 
     def __init__(self, root=None):
         self.real = os.path.abspath(root or ROOT)
-        self.path = tempfile.mkdtemp(prefix="antinel_pkgsb_")
+        self.path = _TMP.tmpdir(prefix="antinel_pkgsb_")
         self._patched = []
         for rel in _FILES:
             self._copy(rel)

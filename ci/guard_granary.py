@@ -26,6 +26,10 @@
 """
 from __future__ import annotations
 
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import tmpreg as _TMP   # 0.55.0 (F3): temp dir registry
 import inspect
 import os
 import subprocess
@@ -242,7 +246,7 @@ def g4():
     if p:
         return _raise(p)
     env = dict(os.environ)
-    env["ANTINEL_HUB_DIR"] = tempfile.mkdtemp(prefix="granary_guard_")
+    env["ANTINEL_HUB_DIR"] = _TMP.tmpdir(prefix="granary_guard_")
     for args, must in ((["粮"], "粮"), (["粮", "规则"], "邀请好友")):
         r = subprocess.run([sys.executable, os.path.join(ROOT, "antinel.py")] + args,
                            cwd=ROOT, env=env, capture_output=True, timeout=90)

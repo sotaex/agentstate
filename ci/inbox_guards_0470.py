@@ -38,6 +38,12 @@ import types
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
+# 0.55.0 (F3): 临时目录登记处
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+import tmpreg as _TMPREG                                              # noqa: E402
+
 
 # ★ 渲染产物断言的**统一口径**（C2，`ci/page_caliber.py`）：`body(...)` 剥
 #   `<style>`/HTML 注释；`note_text(...)` 归一口径行里的**实时载入时刻**
@@ -47,7 +53,7 @@ import page_caliber as PC                                        # noqa: E402
 
 # ★★ 必须在 import 产品模块**之前**把中枢换到临时目录 —— 否则本判据会写脏
 #    真实中枢的 `notify_state.json`（那正是 0.40.0 分出来的展示层账本）。
-_HUB = tempfile.mkdtemp(prefix="g0470_hub_")
+_HUB = _TMPREG.tmpdir(prefix="g0470_hub_")
 os.environ["ANTINEL_HUB_DIR"] = _HUB
 
 RESULTS = []
@@ -124,7 +130,7 @@ def _hs():
 
 def _fresh_hub(tag):
     """每个判据一份**独立**账本 —— 否则判据之间会互相污染计数。"""
-    d = tempfile.mkdtemp(prefix="g0470_ledger_%s_" % tag)
+    d = _TMPREG.tmpdir(prefix="g0470_ledger_%s_" % tag)
     m = _load(_src(_HS_REL), "hs0470_%s" % tag)
     m.notify_ledger_path = lambda _d=d: os.path.join(_d, "notify_state.json")
     return m, d
@@ -132,8 +138,8 @@ def _fresh_hub(tag):
 
 def _fresh_hook(tag, cwd=None):
     """独立的钩子实例（账本 + 链都落临时目录）。"""
-    d = tempfile.mkdtemp(prefix="g0470_hook_%s_" % tag)
-    c = cwd or tempfile.mkdtemp(prefix="g0470_cwd_%s_" % tag)
+    d = _TMPREG.tmpdir(prefix="g0470_hook_%s_" % tag)
+    c = cwd or _TMPREG.tmpdir(prefix="g0470_cwd_%s_" % tag)
     os.environ["ANTINEL_HUB_DIR"] = d
     m = _load(_src(_HOOK_REL), "ptu0470_%s" % tag)
     m._hs_module = lambda _d=d: _hs_with_ledger(_d, tag)
@@ -196,7 +202,7 @@ def n_s90():
     if anchor not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
     mut = _load(src.replace(anchor, "        elif True:"), "hs0470_ns90")
-    d = tempfile.mkdtemp(prefix="g0470_ns90_")
+    d = _TMPREG.tmpdir(prefix="g0470_ns90_")
     mut.notify_ledger_path = lambda: os.path.join(d, "notify_state.json")
     q = int(mut.NOTICE_BUDGET_MAX)
     # 夹具前提：真实现下这条**确实**被预算挡住 —— 否则负控无分辨力。
@@ -244,8 +250,8 @@ def n_s91():
     if anchor not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
     mut = _load(src.replace(anchor, "    pass"), "ptu0470_ns91")
-    d = tempfile.mkdtemp(prefix="g0470_ns91_")
-    cwd = tempfile.mkdtemp(prefix="g0470_ns91c_")
+    d = _TMPREG.tmpdir(prefix="g0470_ns91_")
+    cwd = _TMPREG.tmpdir(prefix="g0470_ns91c_")
     os.environ["ANTINEL_HUB_DIR"] = d
     mut._hs_module = lambda: _hs_with_ledger(d, "ns91")
     old = os.getcwd()
@@ -306,7 +312,7 @@ def n_s92():
     if mut_src == src:
         return "变异锚点 2 未找到（源码已变）—— 负控自身失效，不算通过"
     mut = _load(mut_src, "hs0470_ns92")
-    d = tempfile.mkdtemp(prefix="g0470_ns92_")
+    d = _TMPREG.tmpdir(prefix="g0470_ns92_")
     mut.notify_ledger_path = lambda: os.path.join(d, "notify_state.json")
     q = int(mut.NOTICE_BUDGET_MAX)
     for i in range(q + 5):
@@ -531,13 +537,13 @@ def s95():
     #      （满载单页渲染实测可达秒级）。⇒ 两侧先归一刻时刻（`PC.note_text`）
     #      再比静态文案；顺带按 C2 走 `PC.body(...)`（正文层，剥 style/注释）。
     #      断言强度未降：静态文案仍须逐字来自唯一实现（0490 N-U01c 反证）。
-    page = SV.render_page(view="inbox", root=tempfile.mkdtemp(prefix="g0470_s95_"),
+    page = SV.render_page(view="inbox", root=_TMPREG.tmpdir(prefix="g0470_s95_"),
                           token="T", items=items)
     if PC.note_text(M.reading_note()) not in PC.note_text(PC.body(page)):
         return "收件箱页缺口径行（应有 %r）" % M.reading_note()
 
     # ③ 托盘：`total`（分母）必须落盘，tip 必须带窗口与分母
-    root = tempfile.mkdtemp(prefix="g0470_s95t_")
+    root = _TMPREG.tmpdir(prefix="g0470_s95t_")
     st = T.sync_from_items(items, root=root)
     if st.get("total") != total:
         return "托盘状态缺分母字段（total=%r，应为 %d）" % (st.get("total"), total)
@@ -595,7 +601,7 @@ def n_s96():
     if anchor not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
     mut = _load(src.replace(anchor, "                pass"), "hs0470_ns96")
-    d = tempfile.mkdtemp(prefix="g0470_ns96_")
+    d = _TMPREG.tmpdir(prefix="g0470_ns96_")
     mut.notify_ledger_path = lambda: os.path.join(d, "notify_state.json")
     q = int(mut.NOTICE_BUDGET_MAX)
     for i in range(q + 4):
@@ -751,7 +757,7 @@ def s98():
     **判定口径一个字没改**（守恒式与配额式都不变）。
     """
     import race_amp
-    d = tempfile.mkdtemp(prefix="g0470_conc_")
+    d = _TMPREG.tmpdir(prefix="g0470_conc_")
     body = _conc_body("host_shield", _NS98_ITERS)
     rcs, d = race_amp.run_race(body, _NS98_PROCS, workdir=d, timeout=300)
     if race_amp.join_failed(rcs):
@@ -841,7 +847,7 @@ def _race_arm(src, tag, modname):
     「夹具失效」，**绝不**把"没跑起来"读成"没撞上"或"通过了"。
     """
     import race_amp
-    d = tempfile.mkdtemp(prefix="g0470_ns98_%s_" % tag)
+    d = _TMPREG.tmpdir(prefix="g0470_ns98_%s_" % tag)
     # ★ 变异源码落盘成模块文件，让子进程 import 它 ——
     #   内存里的变异模块传不进子进程（落临时目录，不碰产品文件）。
     with io.open(os.path.join(d, modname + ".py"), "w", encoding="utf-8") as f:

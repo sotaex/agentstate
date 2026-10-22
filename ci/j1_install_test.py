@@ -5,6 +5,10 @@
 pip install <包路径> → antinel --host zcode 可用 → 沙箱出第一条审计记录
 计时并输出每步耗时。退出码 0 = 全部通过。
 """
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import tmpreg as _TMP   # 0.55.0 (F3): temp dir registry
 import io, sys, os, time, subprocess, tempfile, shutil, json, venv, hashlib
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
@@ -18,8 +22,8 @@ def step(msg, fn):
     print("[%5.1fs] %s" % (time.time() - t0, msg))
     return r
 
-venv_dir = tempfile.mkdtemp(prefix="j1venv_")
-work = tempfile.mkdtemp(prefix="j1proj_")
+venv_dir = _TMP.tmpdir(prefix="j1venv_")
+work = _TMP.tmpdir(prefix="j1proj_")
 proj = os.path.join(work, "proj")
 os.makedirs(proj)
 

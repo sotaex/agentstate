@@ -571,12 +571,12 @@ def c_spawn_not_blocked_in_dev_but_blocked_when_shipped():
         缺陷是"某时刻会发生的事"，判据必须能**当场造出来**。
     """
     import os as _os
-    import tempfile as _tf
+    import tmpreg as _tf    # 0.55.0 (F3): 临时目录处
     import host_shield as H
     root = H._pkg_root()
     oi, oc, ohub = H._installed_version, H._code_version, _os.environ.get("ANTINEL_HUB_DIR")
     osc = H.self_check
-    tmp = _tf.mkdtemp()
+    tmp = _tf.tmpdir()
     try:
         _os.environ["ANTINEL_HUB_DIR"] = tmp
         H.save_state({"enabled": True, "workspaces": {}, "zones": [],

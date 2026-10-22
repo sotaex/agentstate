@@ -1814,6 +1814,17 @@ def _auto_read_allowed(auto, cur_state):
     return (not auto) or cur_state == "unread"
 
 
+def _reopen_label(gap_state):
+    """非未读项那个按钮叫什么叫（0.55.0，复核 F9）。
+
+    ★ 一个标签原来承担两种意图：在 `ignored` 上是"我开始管了"，
+      在 `done` 上是"我撤回『修好了』"。同一个按钮给两种承诺，
+      点之前没法预判会发生什么（与「按钮是可执行承诺」直接冲突）。
+    ★ 抽成函数：负控要换掉**同一份实现**（把它改成恒返回同一个字面 ⇒ P38 必须红）。
+    """
+    return "重新打开" if gap_state == M.GAP_CLOSED else "重新管起来"
+
+
 def _item_html(it, token, posture=None, show_host=False):
     """一条记录：★ 收起时**一个按钮都没有**，点开才给两个动作。
 
@@ -1828,7 +1839,8 @@ def _item_html(it, token, posture=None, show_host=False):
         acts = (_form(token, "done", it.id, label="知道了", cls="ok")
                 + _form(token, "ignored", it.id, note="判断无需动作", label="忽略"))
     else:
-        acts = _form(token, "read", it.id, label="重开")
+        # ★★ 0.55.0（复核 F9）：两种意图两个标签（见 `_reopen_label`）。
+        acts = _form(token, "read", it.id, label=_reopen_label(it.gap_state))
     dot = "<span class=\"unread-dot\"></span>" if it.state == "unread" else ""
     # ★★ 0.51.2 **第二轮**（创始人 2026-10-17 四张截图，裁定见
     #   docs/Antinel·界面文案问题清单 v1.0）：
@@ -3727,13 +3739,37 @@ def _unrepaired_line(items, now=None):
     # ★ 只用 `oldest_ack_days`（A7）：它与下面那句"已过复核期"同基准（何时搁下），
     #   两个数才能并排读。`oldest_record_days`（记录本身的年龄）是另一件事，
     #   并排出现会把两个不同基准说成一句话。
-    if u.get("oldest_ack_days") is not None:
-        txt += "（最早的一条已经 %d 天没管）" % u["oldest_ack_days"]
+    _ack = u.get("oldest_ack_days")
+    if _ack is not None:
+        txt += "（最早的一条已经 %d 天没管）" % _ack
     txt += "。"
     if u.get("due"):
         txt += "其中 %d 条已过 %d 天复核期，需要重新决定。" % (
             u["due"], M.ACK_REVIEW_DAYS)
-    return ("<div class=\"note\" style=\"margin:0 0 8px\">%s</div>" % _esc(txt))
+    # ★★ 0.55.0（复核 F5）：把天数**同时**写成结构属性。
+    #   判据从此断言 `data-ack-days`（结构），不断言「N 天」这几个字（文案）——
+    #   否则 STE100 一改词（"十六天"），判据就假红。
+    _ack_attr = (' data-ack-days="%d"' % _ack) if _ack is not None \
+        else ' data-ack-days=""'
+    return ("<div class=\"note\" style=\"margin:0 0 8px\"%s>%s</div>"
+            % (_ack_attr, _esc(txt)))
+
+
+def _lock_say(text):
+    """页面上一条"注意"行（并发/竞争那一路只用这一种外框）。"""
+    return '<div class="note" style="margin:0 0 8px">%s</div>' % _esc(text)
+
+
+def _lock_unknown(why):
+    """「竞争读数取不到」的**唯一出口**。
+
+    ★★ 0.55.0（复核 F2）：旧版整个取数段套一个 `except: return ""`，
+      于是「没拿到读数」与「今天没有竞争」在屏幕上逐字相同。
+      现在三种坏法都走这里；**判据 P36 的负控换的就是这一行**
+      （把它改成 `return ""` ⇒ P36 必须红）。
+    """
+    return _lock_say("记录连写的竞争读数取不到（%s）。这一格没有读数，"
+                     "竞争次数无从得知。" % why)
 
 
 def _lock_line():
@@ -3745,21 +3781,31 @@ def _lock_line():
     ★ 只在**有**竞争时出现（正常机器一天 0 次）⇒ 不占屏、不制造焦虑。
     ★ 读数与写入同源（`audit_chain.lock_pressure`），不在页面另数一遍。
     """
+    # ★★ 0.55.0（复核 F2/P36）：**"取不到读数"只有这一个出口**（见模块级
+    #   `_lock_unknown`）。三种坏法（取数入口不可用／读取抛错／返回缺 checked）
+    #   都走它 —— 负控换掉它，P36 必须变红。
+    # ★ 拆成三段，各给各的话；**空串只允许表示"查到了，是 0 次"**。
     try:
         import audit_chain as AC
         import host_shield as _hs
         d = _hs._shield_audit_dir()
-        pr = AC.lock_pressure(path=AC.lock_events_path(d))
-    except Exception:
-        return ""
+        _p = AC.lock_events_path(d)
+    except Exception as e:                          # noqa: BLE001
+        return _lock_unknown("取数失败：%s" % type(e).__name__)
+    try:
+        pr = AC.lock_pressure(path=_p)
+    except Exception as e:                          # noqa: BLE001
+        return _lock_unknown("读取出错：%s" % type(e).__name__)
+    if not isinstance(pr, dict) or "checked" not in pr:
+        # 键漂移也是"取不到"：`checked` 不在 ⇒ 下一句 `is False` 恒假 ⇒ 静默。
+        return _lock_unknown("返回格式里没有 checked")
     # ★ 没查成 ≠ 没竞争（A5）：读不到时**必须出声**。沉默的默认解释是
     #   "没有竞争"，而真实情况是"不知道" —— 这正是本仓第 ④ 条判据。
     #   ★ 文案避开双重否定（STE100 D8）：写"无从得知、可能发生过"，不写"不等于没有"。
     if pr.get("checked") is False:
-        return ('<div class="note" style="margin:0 0 8px">%s</div>'
-                % _esc("记录连写的竞争读数读不到（%d 个文件）。"
-                       "竞争次数暂时无从得知，当时可能发生过竞争。"
-                       % len(pr.get("unreadable") or [])))
+        return _lock_say("记录连写的竞争读数读不到（%d 个文件）。"
+                         "竞争次数暂时无从得知，当时可能发生过竞争。"
+                         % len(pr.get("unreadable") or []))
     if not (pr.get("timeouts") or pr.get("steals")):
         return ""
     parts = []
@@ -4123,6 +4169,11 @@ def _make_handler(token, root):
                     if op == "remediation_ack":
                         # 只在用户明确说"不处理"时把它标记已读，不直接关掉 ——
                         # 关掉会让这条失守从视野消失，那正是「只能看」的另一种形式。
+                        # ★★ 0.55.0（复核 F1）：这里**不传 `intent`** ⇒ 取默认的"知情"
+                        #   ⇒ 缺口态与 `closed_at` 一个字节都不动。
+                        #   旧版它直调 `set_state(...,"read")`，而那时 read 自带"重开"语义
+                        #   ⇒ 陈旧页面（按钮渲染在前、记录被改成已忽略在后）点一下就能
+                        #   把 ack 撤销、复核计时归零。**侧门由此关闭，且不需要在这里再加一道门。**
                         try:
                             S.set_state(_iid, "read", root=root)
                         except M.InboxError:
@@ -4240,6 +4291,11 @@ def _make_handler(token, root):
                     #   `read`+`open`（ack 撤销、`closed_at` 被清）—— 实测确认：
                     #   「看一眼就把缺口重新打开」，直接抵消了缺口态拆分。
                     _auto = (self.headers.get("X-Antinel-Read") or "") == "1"
+                    # ★★ 0.55.0（复核 F1）：意图在这一层**翻译**，语义在 `set_state` 那层**决定**。
+                    #   自动已读＝知情（不动缺口态）；不带该头＝用户点的「重新打开」＝重开。
+                    #   把"是不是重开"交给模型层，是因为门禁装在 HTTP 层时，
+                    #   任何**别的**写 read 的入口都会绕过它（`remediation_ack` 就是）。
+                    _intent = "read" if _auto else "reopen"
                     if ids:
                         # 「点开即已读」对归并行同样生效（整组记已读）。
                         _cur = {it.id: it for it in S.load_items(root=root)}
@@ -4251,7 +4307,7 @@ def _make_handler(token, root):
                                 continue        # 自动已读不许改别人的状态
                             try:
                                 S.set_state(_i, op, note=note, root=root,
-                                            level=_it.level)
+                                            level=_it.level, intent=_intent)
                             except M.InboxError:
                                 pass
                     else:
@@ -4263,7 +4319,7 @@ def _make_handler(token, root):
                                 # 本来就没有未读点。回 409 会被记成"写入失败"，
                                 # 而事实是"不需要写"。
                                 return self._json({"ok": True, "skipped": "not-unread"})
-                        S.set_state(iid, op, note=note, root=root)
+                        S.set_state(iid, op, note=note, root=root, intent=_intent)
                 if op in ("fix", "guard_fix"):
                     _page = render_page(view="inbox", filt=M.BUCKET_ACTION,
                                         root=root, token=token,

@@ -30,10 +30,14 @@
   ★ 编写纪律（沿用 `inbox_guards_0420.py` 头部）：
     · 每条判据配负控，且负控**真的会红**（内存变异源码后重载）；
     · 判据**只查行为/结构**，不查文案 —— 按源码字面查的一律走 AST；
-    · **不写任何产品文件**：合成 dist 全在 `tempfile.mkdtemp()` 里。
+    · **不写任何产品文件**：合成 dist 全在 `_TMP.tmpdir()` 里。
 """
 from __future__ import annotations
 
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import tmpreg as _TMP   # 0.55.0 (F3): temp dir registry
 import ast
 import io
 import os

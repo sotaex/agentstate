@@ -53,6 +53,10 @@
 """
 from __future__ import annotations
 
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import tmpreg as _TMP   # 0.55.0 (F3): temp dir registry
 import io
 import os
 import subprocess
@@ -147,7 +151,7 @@ def run_race(body, nproc, argv=(), workdir=None, timeout=240.0,
       · `rcs` 是各子进程退出码（顺序与启动顺序一致）；
       · **任一 `rc == RZ_TIMEOUT_RC` ⇒ 会合失败**，调用方必须报「夹具失效」。
     """
-    d = workdir or tempfile.mkdtemp(prefix="race_amp_")
+    d = workdir or _TMP.tmpdir(prefix="race_amp_")
     if not os.path.isdir(d):
         os.makedirs(d, exist_ok=True)
     with io.open(os.path.join(d, RZ_NAME + ".py"), "w", encoding="utf-8") as f:

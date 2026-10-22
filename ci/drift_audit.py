@@ -11,6 +11,10 @@ r"""Antinel 漂移审计 v1.0：需求文件 → 盘上行为，逐条机械化�
   · PKG 改为可用环境变量覆盖。写死一个绝对路径等于"只有这台机器能跑"——既无法审计
     暂存构建，换台机器就废。与 D-5（antinel.py 硬编码作者机解释器路径）同族。
 """
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import tmpreg as _TMP   # 0.55.0 (F3): temp dir registry
 import io, sys, os, json, re, subprocess, tempfile, shutil, hashlib, glob
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
@@ -90,7 +94,7 @@ def _chk_env(name, ok, evidence=""):
     else:
         check(name, ok, evidence)
 
-base = tempfile.mkdtemp(prefix="drift_")
+base = _TMP.tmpdir(prefix="drift_")
 proj = os.path.join(base, "proj")
 os.makedirs(os.path.join(proj, ".psl", "rules"))
 shutil.copy(os.path.join(PKG, "rules", "default.json"), os.path.join(proj, ".psl", "rules", "default.json"))
@@ -512,7 +516,7 @@ for f in hosts_reg:
 check("E2 外传路径登记表逐条带 evidence（§10.1）", ev_ok and bool(hosts_reg), f"{len(hosts_reg)} 个宿主档案")
 
 # E3 卸载零残留（临时安装目录上做一遍）
-tmp2 = tempfile.mkdtemp(prefix="drift_un_")
+tmp2 = _TMP.tmpdir(prefix="drift_un_")
 p2 = os.path.join(tmp2, "proj")
 os.makedirs(os.path.join(p2, ".zcode"))
 json.dump({"model": "t"}, open(os.path.join(p2, ".zcode", "config.json"), "w"))
@@ -672,7 +676,7 @@ pend = os.path.join(d, "pending")
 os.makedirs(pend, exist_ok=True)
 for fn in json.loads(files):
     open(os.path.join(pend, fn), "w").write("x")
-audit = tempfile.mkdtemp(prefix="hsaudit_")
+audit = _TMP.tmpdir(prefix="hsaudit_")
 # ★ 审计探针的两条"不许碰真实状态"，都必须显式声明：
 #   ① save_state 会写 ~/.antinel/host_shield.json，而**监理在岗**——探针用的是假 state，
 #      一旦落盘就把监理的 sentinel_pid/last_task_check 冲掉（护卫自己被自己人打死）。
@@ -725,7 +729,7 @@ def _hs_probe(gate, files=()):
       「探针有没有跑完」的判据是**它有没有打出自己的收尾行** ——
       正常路径必然先打 `LOCKED=`；只有异常路径才会连它都没有。
     """
-    d = tempfile.mkdtemp(prefix="hslock_")
+    d = _TMP.tmpdir(prefix="hslock_")
     r = subprocess.run([PY, _HS_PROBE_PY, PKG, d, gate, json.dumps(list(files))],
                        capture_output=True, timeout=120)
     out = r.stdout.decode("utf-8", "replace")
@@ -837,7 +841,7 @@ if _sp is None:
           "host_shield 缺 is_self_protected ⇒ 自保护不存在（'没锁到自己'只是巧合）")
 else:
     _self_hit = _sp(os.path.join(os.path.expanduser("~"), ".antinel"))
-    _self_miss = _sp(tempfile.mkdtemp(prefix="hsrand_"))
+    _self_miss = _sp(_TMP.tmpdir(prefix="hsrand_"))
     check("A15 自保护生效（自身根 True、无关路径 False）",
           _self_hit is True and _self_miss is False,
           "is_self_protected(~/.antinel)=%r，随机路径=%r" % (_self_hit, _self_miss))
@@ -845,7 +849,7 @@ else:
 # A16 —— 解锁必须真解锁（F-0 那个病：用户点了放行却还拦着；此处盯反方向的同一处）
 _a16 = ""
 try:
-    _d16 = tempfile.mkdtemp(prefix="hsunlock_")
+    _d16 = _TMP.tmpdir(prefix="hsunlock_")
     _r16 = subprocess.run(
         [PY, "-c",
          "import sys;sys.path.insert(0,%r);import host_shield as h;"

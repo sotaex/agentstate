@@ -2,13 +2,17 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """A5 终版：白名单路径在项目外 → DST-02 释放 + 留痕"""
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import tmpreg as _TMP   # 0.55.0 (F3): temp dir registry
 import io, sys, os, json, subprocess, tempfile, shutil, hashlib
 from datetime import datetime
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 PKG = r"D:\psl\poc\antinel-security"
 PY = sys.executable
-base = tempfile.mkdtemp(prefix="drift3_")
+base = _TMP.tmpdir(prefix="drift3_")
 proj = os.path.join(base, "proj")
 keys_out = os.path.join(base, "keys")          # 项目外
 os.makedirs(os.path.join(proj, ".psl", "rules"))

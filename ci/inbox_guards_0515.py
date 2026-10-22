@@ -39,6 +39,10 @@
 """
 from __future__ import annotations
 
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import tmpreg as _TMP   # 0.55.0 (F3): temp dir registry
 import ast
 import io
 import json
@@ -163,7 +167,7 @@ def _mis_split_signals(stderr_bytes):
 
 def _run_fixture(body_bytes):
     """fixture 落临时目录后跑 `cmd /c`（新控制台＝系统代码页场景）。"""
-    d = tempfile.mkdtemp(prefix="g0515_cmd_")
+    d = _TMP.tmpdir(prefix="g0515_cmd_")
     p = os.path.join(d, "fx.cmd")
     with io.open(p, "wb") as f:
         f.write(body_bytes)
@@ -505,7 +509,7 @@ def c_dsk15c():
     except Exception as e:                                       # noqa: BLE001
         raise Skip("SKIP: antinel 模块加载失败（%s）—— 环境测不出" %
                    type(e).__name__)
-    tmp = tempfile.mkdtemp(prefix="antinel_dsk15_")
+    tmp = _TMP.tmpdir(prefix="antinel_dsk15_")
     lnk = os.path.join(tmp, "Antinel 监理.lnk")
     got = A._create_desktop_lnk(lnk_path=lnk)
     if not got:
@@ -1136,7 +1140,7 @@ def _hostname_core(root):
 def _bad_root(mutator):
     """造一份**坏宿主表**的临时 root（只复制 json，不碰真表）。"""
     import shutil
-    tmp = tempfile.mkdtemp(prefix="g0515_hn15_")
+    tmp = _TMP.tmpdir(prefix="g0515_hn15_")
     dst = os.path.join(tmp, "rules", "hosts")
     os.makedirs(dst)
     src = os.path.join(ROOT, "rules", "hosts")

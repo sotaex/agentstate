@@ -32,6 +32,10 @@
 """
 from __future__ import annotations
 
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import tmpreg as _TMP   # 0.55.0 (F3): temp dir registry
 import io
 import json
 import os
@@ -120,7 +124,7 @@ def _temp_git_repo():
     动作后可能不再存在；而这条判据守的是**语义**（忽略声明优先于追踪事实），
     必须**永远**可测，所以夹具自己造。
     """
-    d = tempfile.mkdtemp(prefix="g0460_git_")
+    d = _TMP.tmpdir(prefix="g0460_git_")
     run = lambda *a: subprocess.run(list(a), cwd=d, stdout=subprocess.DEVNULL,
                                     stderr=subprocess.DEVNULL, timeout=60)  # noqa: E731
     run("git", "init", "-q")
@@ -144,7 +148,7 @@ def _allowed_fixture():
       S80/S81 当场红。判据测的是**两票逻辑**，不是「本仓此刻恰好有哪些目录」，
       所以夹具自己造一个稳定的现场（与 `_temp_git_repo` 同族）。
     """
-    d = tempfile.mkdtemp(prefix="g0460_allow_")
+    d = _TMP.tmpdir(prefix="g0460_allow_")
     run = lambda *a: subprocess.run(list(a), cwd=d, stdout=subprocess.DEVNULL,
                                     stderr=subprocess.DEVNULL, timeout=60)  # noqa: E731
     run("git", "init", "-q")
@@ -638,11 +642,11 @@ def n_s86():
 @check("S87 ★ 第二票：上层有构建描述文件 ⇒ 可再生；没有 ⇒ 不可再生；文件 ⇒ 不可再生")
 def s87():
     m = _hook()
-    with_desc = tempfile.mkdtemp(prefix="g0460_v2a_")
+    with_desc = _TMP.tmpdir(prefix="g0460_v2a_")
     os.makedirs(os.path.join(with_desc, "sub"))
     with io.open(os.path.join(with_desc, _ROOT_DESCRIPTOR), "w", encoding="utf-8") as f:
         f.write("")
-    no_desc = tempfile.mkdtemp(prefix="g0460_v2b_")
+    no_desc = _TMP.tmpdir(prefix="g0460_v2b_")
     os.makedirs(os.path.join(no_desc, "sub"))
     ok1, _ = m._vct_vote2(os.path.join(with_desc, "sub"))
     ok2, _ = m._vct_vote2(os.path.join(no_desc, "sub"))
@@ -663,7 +667,7 @@ def n_s87():
     if anchor not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
     mut = _load(src.replace(anchor, "if not abs_target:"), "ptu0460_ns87")
-    d = tempfile.mkdtemp(prefix="g0460_v2c_")
+    d = _TMP.tmpdir(prefix="g0460_v2c_")
     with io.open(os.path.join(d, _ROOT_DESCRIPTOR), "w", encoding="utf-8") as f:
         f.write("")
     ok, _ = mut._vct_vote2(os.path.join(d, _ROOT_DESCRIPTOR))
@@ -684,7 +688,7 @@ def s88():
         if "DST-01" not in blocks:
             return "既有保护被放宽：`%s` 不再拦（blocks=%s）" % (cmd, blocks)
     # ② 兜底名单在「两票取不到信号」时仍是最后退路（非 git 根 ⇒ 出口丙）
-    nogit = tempfile.mkdtemp(prefix="g0460_nogit_")
+    nogit = _TMP.tmpdir(prefix="g0460_nogit_")
     blocks, vct, _e = _hits(m, "rm -rf node_modules", project_root=nogit, rules=rules)
     if blocks:
         return "取不到版本信号时，兜底名单没接住（%s 被拦）⇒ 最后退路失效" % blocks
@@ -708,7 +712,7 @@ def n_s88():
     if anchor not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
     mut = _load(src.replace(anchor, anchor[:-len("continue")] + "pass"), "ptu0460_ns88")
-    nogit = tempfile.mkdtemp(prefix="g0460_ns88_")
+    nogit = _TMP.tmpdir(prefix="g0460_ns88_")
     # 夹具前提：真实现下这条命令**确实**被兜底名单放行 —— 否则负控无分辨力。
     live_blocks, live_vct, _le = _hits(_hook(), "rm -rf node_modules", project_root=nogit)
     if live_blocks or not any(v.get("subkind") == "fallback_allow" for v in live_vct):

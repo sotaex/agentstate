@@ -38,6 +38,10 @@
 """
 from __future__ import annotations
 
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import tmpreg as _TMP   # 0.55.0 (F3): temp dir registry
 import os
 import re
 import sys
@@ -1178,7 +1182,7 @@ def s19():
         return _raise("_register_sentinel_start 返回了 %r（拒写没透出）" % (ok,))
 
     # ── ② 心跳目录解析：注册值优先（真跑：造一条刚写的链） ──
-    tmp = tempfile.mkdtemp(prefix="antinel-s19-")
+    tmp = _TMP.tmpdir(prefix="antinel-s19-")
     try:
         with open(_os.path.join(tmp, "chain.jsonl"), "w", encoding="utf-8") as f:
             f.write(_json.dumps({"type": "host_shield_heartbeat", "decision": "allow",

@@ -32,6 +32,10 @@
 """
 from __future__ import annotations
 
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import tmpreg as _TMP   # 0.55.0 (F3): temp dir registry
 import ast
 import io
 import json
@@ -119,7 +123,7 @@ def _load_hs(tag, hub=None):
 
 
 def _tmp_hub(prefix):
-    d = tempfile.mkdtemp(prefix=prefix)
+    d = _TMP.tmpdir(prefix=prefix)
     return d
 
 
@@ -237,7 +241,7 @@ def _run_race(mode, nproc=6):
       「夹具失效」处理 —— **绝不**把"没会合上"读成"没撞上"或"通过了"。
     """
     import race_amp
-    d = tempfile.mkdtemp(prefix="g0450_race_")
+    d = _TMP.tmpdir(prefix="g0450_race_")
     lockbase = os.path.join(d, "crit")
     counter = os.path.join(d, "counter")
     with io.open(counter, "w", encoding="utf-8") as f:
@@ -440,7 +444,7 @@ def _run_rw(mode, iters=200):
     返回 {"bad", "seen", "werr"}：bad=读者撞见半截/读不出的次数；seen=成功读到的次数；
     werr=写者异常串（写者崩了 ⇒ 读者保护再漂亮也无意义，调用方必须当红）。
     """
-    d = tempfile.mkdtemp(prefix="g0450_rw_")
+    d = _TMP.tmpdir(prefix="g0450_rw_")
     child = os.path.join(d, "rw.py")
     with io.open(child, "w", encoding="utf-8") as f:
         f.write(_RW_CHILD)

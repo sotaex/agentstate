@@ -61,10 +61,16 @@ from datetime import datetime, timedelta
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
+# 0.55.0 (F3): temp dir registry
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+import tmpreg as _TMPREG                                              # noqa: E402
+
 
 # ★★ 必须在 import 产品模块**之前**把中枢换到临时目录（0470 同款教训）：
 #   否则渲染路径上的 posture_now / 账本读取会碰真实中枢的 notify_state.json。
-_HUB = tempfile.mkdtemp(prefix="g0490_hub_")
+_HUB = _TMPREG.tmpdir(prefix="g0490_hub_")
 os.environ["ANTINEL_HUB_DIR"] = _HUB
 os.environ.pop("ANTINEL_AUDIT_DIRS", None)
 
@@ -228,7 +234,7 @@ _TABS = (M.BUCKET_ACTION, M.BUCKET_INFO, M.BUCKET_ARCHIVE, "all")
 def _page(view, filt=None, mod=SV, items=None, rep=None):
     """渲染一整页（items/rep/posture 全注入，不依赖真实中枢与真实时间）。"""
     return mod.render_page(view=view, filt=filt,
-                           root=tempfile.mkdtemp(prefix="g0490_r_"),
+                           root=_TMPREG.tmpdir(prefix="g0490_r_"),
                            token="T", items=_items() if items is None else items,
                            rep=_REP if rep is None else rep,
                            posture=_POSTURE)
@@ -374,7 +380,7 @@ def n_u01():
         '                      % (M.WINDOW_HOURS, n_all)))'),
         "is0490_nu01", _SERVER_REL,
                              view="inbox", filt=M.BUCKET_ACTION,
-                           root=tempfile.mkdtemp(prefix="g0490_nu01_"),
+                           root=_TMPREG.tmpdir(prefix="g0490_nu01_"),
                            token="T", items=_items(), posture=_POSTURE)
     if _why:
         return _why
@@ -533,7 +539,7 @@ def n_u03a():
                             '                        % (hrs, _win_total)))'),
                 "is0490_nu03a", _SERVER_REL,
                              view="report",
-                           root=tempfile.mkdtemp(prefix="g0490_nu03a_"),
+                           root=_TMPREG.tmpdir(prefix="g0490_nu03a_"),
                            token="T", items=_items(), rep=_REP,
                            posture=_POSTURE)
     if _why:
@@ -563,7 +569,7 @@ def n_u03b():
     page, _why = _mut_render(src.replace(anchor, '" ｜ 分母 %d"'),
                 "is0490_nu03b", _SERVER_REL,
                              view="report",
-                           root=tempfile.mkdtemp(prefix="g0490_nu03b_"),
+                           root=_TMPREG.tmpdir(prefix="g0490_nu03b_"),
                            token="T", items=_items(), rep=_REP,
                            posture=_POSTURE)
     if _why:
@@ -622,7 +628,7 @@ def n_u08():
                             '                % (v, cls, _esc(tip), _esc(label), n))'),
                 "is0490_nu08", _SERVER_REL,
                              view="inbox", filt=M.BUCKET_ACTION,
-                           root=tempfile.mkdtemp(prefix="g0490_nu08_"),
+                           root=_TMPREG.tmpdir(prefix="g0490_nu08_"),
                            token="T", items=_items(), posture=_POSTURE)
     if _why:
         return _why
@@ -795,7 +801,7 @@ def n_u11():
                     '件数，点进去看全部明细\\" aria-label=\\"收缩成漂浮哨标\\">%s"'),
         "is0490_nu11", _SERVER_REL,
         view="inbox", filt=M.BUCKET_ACTION,
-        root=tempfile.mkdtemp(prefix="g0490_nu11_"),
+        root=_TMPREG.tmpdir(prefix="g0490_nu11_"),
         token="T", items=_items(), posture=_POSTURE)
     if _why:
         return _why
@@ -850,7 +856,7 @@ def n_u05():
         '                     % (hrs, _revived, _win_total))'),
         "is0490_nu05", _SERVER_REL,
                              view="report",
-                           root=tempfile.mkdtemp(prefix="g0490_nu05_"),
+                           root=_TMPREG.tmpdir(prefix="g0490_nu05_"),
                            token="T", items=_items(), rep=_REP,
                            posture=_POSTURE)
     if _why:
@@ -940,7 +946,7 @@ def n_u04():
     page, _why = _mut_render(src.replace(anchor, 'label, "", suffix,'),
                 "is0490_nu04", _SERVER_REL,
                              view="inbox", filt=M.BUCKET_ACTION,
-                           root=tempfile.mkdtemp(prefix="g0490_nu04_"),
+                           root=_TMPREG.tmpdir(prefix="g0490_nu04_"),
                            token="T", items=_items(), posture=_POSTURE)
     if _why:
         return _why
@@ -1011,7 +1017,7 @@ def n_u19():
     try:
         page, _why = _mut_render(src + patch, "is0490_nu19", _SERVER_REL,
                                  view="inbox",
-                                 root=tempfile.mkdtemp(prefix="g0490_nu19_"),
+                                 root=_TMPREG.tmpdir(prefix="g0490_nu19_"),
                                  token="T", items=_items(), posture=_POSTURE)
         if _why:
             return _why
@@ -1060,7 +1066,7 @@ def n_u06():
     page, _why = _mut_render(src.replace(anchor, "    head = (\"\"\n"),
                 "is0490_nu06", _SERVER_REL,
                              view="inbox", filt=M.BUCKET_ACTION,
-                           root=tempfile.mkdtemp(prefix="g0490_nu06_"),
+                           root=_TMPREG.tmpdir(prefix="g0490_nu06_"),
                            token="T", items=_items(), posture=_POSTURE)
     if _why:
         return _why
@@ -1190,7 +1196,7 @@ def n_u15():
                             ".state span{font-size:12px;color:var(--muted)}"),
                 "is0490_nu15", _SERVER_REL,
                              view="inbox", filt=M.BUCKET_ACTION,
-                           root=tempfile.mkdtemp(prefix="g0490_nu15_"),
+                           root=_TMPREG.tmpdir(prefix="g0490_nu15_"),
                            token="T", items=_items(), posture=_POSTURE)
     if _why:
         return _why
@@ -1303,7 +1309,7 @@ def n_w02():
     )
     page, _why = _mut_render(src + patch, "is0490_nw02", _SERVER_REL,
                              view="inbox", filt=M.BUCKET_ACTION,
-                             root=tempfile.mkdtemp(prefix="g0490_nw02_"),
+                             root=_TMPREG.tmpdir(prefix="g0490_nw02_"),
                              token="T", items=_items(), posture=_POSTURE)
     if _why:
         return _why
@@ -1366,7 +1372,7 @@ def _w03_assert():
          "注意", "值守中", 1, 1, "L1"),
     ]
     for name, items, want_word, banned, want_count, want_total, want_st in cases:
-        hub = tempfile.mkdtemp(prefix="g0490_w03_")
+        hub = _TMPREG.tmpdir(prefix="g0490_w03_")
         # ① 页面侧：状态词＝页面**自己**算出来的（render_page 内部同一调用）
         #   ★ 0.51.1 反转（W-01 退休、FZ-002 冻结）：标题不再带状态词
         #     （整串恒为「Antinel 监理#<6hex>」）⇒ 状态词同源的观测点
@@ -1479,7 +1485,7 @@ def _w04_serve_inline(token, port=0):
 def _w04_status_ok():
     """① `console_status()` 两轴判活：pid 活着 **且** 端口在听。"""
     import inbox_server as SV
-    hub = tempfile.mkdtemp(prefix="g0490_w04a_")
+    hub = _TMPREG.tmpdir(prefix="g0490_w04a_")
     alive, rec, why = SV.console_status(root=hub)
     if alive:
         return "没有落盘记录却判成「在跑」"
@@ -1510,7 +1516,7 @@ def _w04_status_ok():
 def _w04_ensure_ok():
     """② `ensure_console()` 重拉时**沿用记录里的端口与口令**（URL 不变）＋ ③ 幂等。"""
     import inbox_server as SV
-    hub = tempfile.mkdtemp(prefix="g0490_w04b_")
+    hub = _TMPREG.tmpdir(prefix="g0490_w04b_")
     # 借一个真空闲端口号（绑完立刻放掉），保证记录里的端口可用且可被占
     probe, _ = SV.make_server(port=0)
     free_port = probe.server_address[1]
@@ -1554,7 +1560,7 @@ def _w04_ensure_ok():
 def _w04_daemon_ok():
     """④ 守护进程监督开关（默认关；开了到点去 ensure）＋ ⑤ 单例 ＋ 一键入口在位。"""
     import inbox_daemon as DM
-    hub = tempfile.mkdtemp(prefix="g0490_w04c_")
+    hub = _TMPREG.tmpdir(prefix="g0490_w04c_")
     calls = []
     n = DM.Daemon(root=hub).run(max_ticks=1, interval=0, supervise=True,
                                 ensure=lambda *a, **k: calls.append(a),
@@ -1642,7 +1648,7 @@ def n_w04():
     saved3 = (DM.daemon_alive, DM.run_daemon)
     DM.daemon_alive, DM.run_daemon = dmut.daemon_alive, dmut.run_daemon
     try:
-        hub = tempfile.mkdtemp(prefix="g0490_nw04_")
+        hub = _TMPREG.tmpdir(prefix="g0490_nw04_")
         ticks, why = DM.run_daemon(root=hub, max_ticks=1, supervise=False)
         if ticks == 0 and why == "already-running":
             return "去掉单例判定后仍拦住了第二份 ⇒ 变异没生效"
@@ -1764,7 +1770,7 @@ def _w05_assert():
     import contextlib
     import inbox_server as SV
     import inbox_tray as TR
-    hub = tempfile.mkdtemp(prefix="g0490_w05_")
+    hub = _TMPREG.tmpdir(prefix="g0490_w05_")
     holder, held = _w04_serve_inline("tok-holder")      # 本进程占住 held
     try:
         # ① 漂移必须被**报出来**（不是静默换掉）
@@ -1827,7 +1833,7 @@ def _w05_assert():
         if "8799" not in (payload.get("tip") or ""):
             return "托盘提示没带实际端口：%r" % (payload.get("tip") or "")
         # 没有落盘记录 ⇒ **不编**一个端口
-        hub2 = tempfile.mkdtemp(prefix="g0490_w05b_")
+        hub2 = _TMPREG.tmpdir(prefix="g0490_w05b_")
         payload2 = TR.sync_from_items([_mk("R0", "unread", 1, 1.0)], root=hub2,
                                       posture=_POSTURE)
         if "端口" in (payload2.get("tip") or ""):
@@ -2330,7 +2336,7 @@ def n_u16():
     if anchor not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
     kw = dict(view="inbox", filt=M.BUCKET_ACTION,
-              root=tempfile.mkdtemp(prefix="g0490_nu16_"),
+              root=_TMPREG.tmpdir(prefix="g0490_nu16_"),
               token="T", items=_items(), posture=_POSTURE)
     # ① C5 原貌：把徽章关掉（content:none + display:none 原样加回）
     arms = [
@@ -2415,7 +2421,8 @@ ROOT, MODE, WAIT = sys.argv[1], sys.argv[2], float(sys.argv[3])
 URL = sys.argv[4]
 sys.path.insert(0, ROOT)
 os.environ.pop("ANTINEL_AUDIT_DIRS", None)
-os.environ["ANTINEL_HUB_DIR"] = tempfile.mkdtemp(prefix="w07hub_")
+if not os.environ.get("ANTINEL_HUB_DIR"):
+    os.environ["ANTINEL_HUB_DIR"] = tempfile.mkdtemp(prefix="w07hub_")
 
 RECT = (100, 100, 520, 640)
 APPEAR_AFTER = 2.5
@@ -2542,7 +2549,7 @@ def _run_w07_child(mode, wait):
     if mode != "never" and wait <= _W07_APPEAR + 0.5:
         return {"err": "预算 %.1fs 不够（窗口 %.1fs 才出现）—— 判据自己把量表设小了"
                 % (wait, _W07_APPEAR)}
-    d = tempfile.mkdtemp(prefix="g0490_w07_")
+    d = _TMPREG.tmpdir(prefix="g0490_w07_")
     child = os.path.join(d, "w07_child.py")
     with io.open(child, "w", encoding="utf-8") as f:
         f.write(_W07_CHILD)
@@ -3076,7 +3083,7 @@ def n_t03():
         src.replace(anchor, '               _esc(r.get("zh") or r["rule_id"]),'),
         "is0490_nt03", _SERVER_REL, view="report",
         rep=dict(_REP, rules=_RANK_ROWS),
-        root=tempfile.mkdtemp(prefix="g0490_nt03_"),
+        root=_TMPREG.tmpdir(prefix="g0490_nt03_"),
         token="T", items=_items(), posture=_POSTURE)
     if _why:
         return _why
@@ -3149,7 +3156,7 @@ def _ledger_rep(items=None):
 
 def _ledger_page(mod=SV, items=None, rep=None):
     items = _ledger_items() if items is None else items
-    return mod.render_page(view="ledger", root=tempfile.mkdtemp(prefix="g0490_l_"),
+    return mod.render_page(view="ledger", root=_TMPREG.tmpdir(prefix="g0490_l_"),
                            token="T", items=items,
                            rep=_ledger_rep(items) if rep is None else rep,
                            posture=_POSTURE)
@@ -3296,7 +3303,7 @@ def n_t04():
     page, _why = _mut_render(
         src.replace(anchor, "拦截 0 ｜ 注意 0 ｜ 失守 0 ｜ 已处理 0"),
         "is0490_nt04", _SERVER_REL, view="ledger",
-        root=tempfile.mkdtemp(prefix="g0490_nt04_"), token="T", items=items,
+        root=_TMPREG.tmpdir(prefix="g0490_nt04_"), token="T", items=items,
         rep=_ledger_rep(items), posture=_POSTURE)
     if _why:
         return _why
@@ -3339,7 +3346,7 @@ def t04e():
     pages = []
     for view in ("inbox", "report", "health", "ledger", "health_exam"):
         try:
-            p = SV.render_page(view=view, root=tempfile.mkdtemp(prefix="g0490_t04d_"),
+            p = SV.render_page(view=view, root=_TMPREG.tmpdir(prefix="g0490_t04d_"),
                                token="T", items=_items(), rep=_REP, posture=_POSTURE)
         except Exception as e:                                  # noqa: BLE001
             return ("渲染 %s 失败：%s: %s —— 量具故障，不算通过"
@@ -3394,7 +3401,7 @@ def _voice_render_pages():
     pages = []
     for view in ("inbox", "report", "health", "ledger", "health_exam"):
         try:
-            p = SV.render_page(view=view, root=tempfile.mkdtemp(prefix="g0490_t04f_"),
+            p = SV.render_page(view=view, root=_TMPREG.tmpdir(prefix="g0490_t04f_"),
                                token="T", items=_items(), rep=_REP, posture=_POSTURE)
         except Exception as e:                                  # noqa: BLE001
             return None, ("渲染 %s 失败：%s: %s —— 量具故障，不算通过"
@@ -3516,7 +3523,7 @@ def n_t04b():
     page, _why = _mut_render(
         src.replace(anchor, '<details class=\\"month\\" open>'),
         "is0490_nt04b", _SERVER_REL, view="ledger",
-        root=tempfile.mkdtemp(prefix="g0490_nt04b_"), token="T", items=items,
+        root=_TMPREG.tmpdir(prefix="g0490_nt04b_"), token="T", items=items,
         rep=_ledger_rep(items), posture=_POSTURE)
     if _why:
         return _why
@@ -3688,7 +3695,7 @@ def n_t04d():
                     '    _meta = ("<p class=\\"note\\">下列四个数：%s 有记录 '
                     '<b>%d</b> 天 · %s %s</p>"'),
         "is0490_nt04d", _SERVER_REL, view="ledger",
-        root=tempfile.mkdtemp(prefix="g0490_nt04d_"), token="T", items=items,
+        root=_TMPREG.tmpdir(prefix="g0490_nt04d_"), token="T", items=items,
         rep=_ledger_rep(items), posture=_POSTURE)
     if _why:
         return _why
@@ -3713,7 +3720,7 @@ def n_t04d_b():
         src.replace(anchor,
                     '% (GL.chip("days"), _n_days + 1, GL.chip("streak"), _streak_txt))'),
         "is0490_nt04db", _SERVER_REL, view="ledger",
-        root=tempfile.mkdtemp(prefix="g0490_nt04db_"), token="T", items=items,
+        root=_TMPREG.tmpdir(prefix="g0490_nt04db_"), token="T", items=items,
         rep=_ledger_rep(items), posture=_POSTURE)
     if _why:
         return _why
@@ -4101,7 +4108,7 @@ def _exam_mut(src, tag, res=None):
     old = _exam_inject(mod, res)
     try:
         return mod.render_page(view="health_exam", token="T",
-                               root=tempfile.mkdtemp(prefix="g0490_%s_" % tag),
+                               root=_TMPREG.tmpdir(prefix="g0490_%s_" % tag),
                                items=[], posture=_POSTURE), None
     except Exception as e:                                     # noqa: BLE001
         return None, ("负控自身失效：变异模块**渲染抛** %s: %s —— "
@@ -4113,7 +4120,7 @@ def _exam_mut(src, tag, res=None):
 
 def _fresh_hub():
     """换一个临时中枢，返回 (dir, 旧值) —— 判据动环境必须 try/finally 还原。"""
-    d = tempfile.mkdtemp(prefix="g0490_exam_")
+    d = _TMPREG.tmpdir(prefix="g0490_exam_")
     old = os.environ.get("ANTINEL_HUB_DIR")
     os.environ["ANTINEL_HUB_DIR"] = d
     return d, old
@@ -4782,7 +4789,7 @@ def c_x9():
     #   给不够时间时**不许**报「等到了」（证明它不是无条件 True）。
     import threading as _th
     import time as _t
-    d = tempfile.mkdtemp(prefix="g0490_pdf_")
+    d = _TMPREG.tmpdir(prefix="g0490_pdf_")
     p = os.path.join(d, "late.pdf")
     base_t = _t.time() - 1
 
@@ -5006,7 +5013,7 @@ def n_u20():
     page, why = _mut_render(src.replace(anchor, pills + anchor),
                             "is0490_nu20", _SERVER_REL,
                             view="inbox", filt=M.BUCKET_ACTION,
-                            root=tempfile.mkdtemp(prefix="g0490_nu20_"),
+                            root=_TMPREG.tmpdir(prefix="g0490_nu20_"),
                             token="T", items=_items(), posture=_POSTURE)
     if why:
         return why
@@ -5047,7 +5054,7 @@ def _u21_core(render):
     """
     def _r(items, filt):
         return render(view="inbox", filt=filt,
-                      root=tempfile.mkdtemp(prefix="g0490_u21_"),
+                      root=_TMPREG.tmpdir(prefix="g0490_u21_"),
                       token="T", items=items, rep=_REP, posture=_POSTURE)
 
     # ① 双工具归并行（workbuddy 2 条 ＋ qoder 1 条：条数必须算对，不只列名字）
@@ -5140,7 +5147,7 @@ def _u22_items(rows):
 
 def _u22_row(render, rows):
     """渲染运行状态页，返回 `(css 类, 值文本)`；这一行不存在 ⇒ `(None, None)`。"""
-    page = render(view="health", root=tempfile.mkdtemp(prefix="g0490_u22_"),
+    page = render(view="health", root=_TMPREG.tmpdir(prefix="g0490_u22_"),
                   token="T", items=_u22_items(rows), rep=_REP, posture=_POSTURE)
     m = _U22_ROW.search(page)
     return (m.group(1), m.group(2)) if m else (None, None)
@@ -5313,7 +5320,7 @@ def _u23_rep(status, files, records=0):
 
 
 def _u23_page(view, status, files, records=0):
-    return SV.render_page(view=view, root=tempfile.mkdtemp(prefix="g0490_u23_"),
+    return SV.render_page(view=view, root=_TMPREG.tmpdir(prefix="g0490_u23_"),
                           token="T", items=_items(),
                           rep=_u23_rep(status, files, records), posture=_POSTURE)
 
@@ -5373,7 +5380,7 @@ def n_u23():
     #   才算"量具没问题"；否则量具故障会被读成产品问题。
     h, why = _mut_render(src.replace(anchor, '    return "未能核验"'),
                          "is0490_nu23", _SERVER_REL,
-                         view="health", root=tempfile.mkdtemp(prefix="g0490_nu23_"),
+                         view="health", root=_TMPREG.tmpdir(prefix="g0490_nu23_"),
                          token="T", items=_items(),
                          rep=_u23_rep("unknown", 0), posture=_POSTURE)
     if why:
@@ -5413,7 +5420,7 @@ _L01_ANCIENT_DAY = "2020-01-01"
 
 def _l01_root():
     """临时 hub：rollup 里放一个远古链文件 ＋ 一个今天的。不写任何产品文件。"""
-    root = tempfile.mkdtemp(prefix="g0490_l01_")
+    root = _TMPREG.tmpdir(prefix="g0490_l01_")
     roll = os.path.join(root, "rollup")
     os.makedirs(roll, exist_ok=True)
     today = datetime.now().astimezone().date().isoformat()
@@ -5479,7 +5486,7 @@ def c_l01_all_entry_uses_no_window():
 
     S.discover_chain_files = spy
     try:
-        S.load_items_all(root=tempfile.mkdtemp(prefix="g0490_l01b_"))
+        S.load_items_all(root=_TMPREG.tmpdir(prefix="g0490_l01b_"))
     finally:
         S.discover_chain_files = orig
     if "days" not in seen:
@@ -5512,7 +5519,7 @@ def n_l01_all_entry_uses_no_window():
         S.discover_chain_files = spy
         S.load_items_all = (lambda root=None, kinds=None:
                             S.load_items(root=root, kinds=kinds))
-        S.load_items_all(root=tempfile.mkdtemp(prefix="g0490_nl01b_"))
+        S.load_items_all(root=_TMPREG.tmpdir(prefix="g0490_nl01b_"))
     finally:
         S.discover_chain_files = saved_find
         S.load_items_all = saved_all
@@ -5584,7 +5591,7 @@ _L02_FIXTURE_N = 200
 
 def _l02_root(n):
     """临时 hub：连续 n 天的链文件（内容与本判据无关，发现只按文件名日期）。"""
-    root = tempfile.mkdtemp(prefix="g0490_l02_")
+    root = _TMPREG.tmpdir(prefix="g0490_l02_")
     roll = os.path.join(root, "rollup")
     os.makedirs(roll, exist_ok=True)
     today = datetime.now().astimezone().date()

@@ -10,6 +10,10 @@
 """
 from __future__ import annotations
 
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import tmpreg as _TMP   # 0.55.0 (F3): temp dir registry
 import json
 import os
 import re
@@ -34,7 +38,7 @@ _SCRATCH = []
 
 # --------------------------------------------------------------- 脚手架 ----
 def _tmpdir():
-    d = tempfile.mkdtemp(prefix="antinel-0353-")
+    d = G.tmpdir("antinel-0353-")
     _SCRATCH.append(d)                       # 只建不删（宿主 safe-delete shim 会硬杀删除）
     return d
 
@@ -2829,7 +2833,7 @@ def n_cli_export_json_scope_is_not_faked():
     import tempfile
     hub = G.new_hub()
     G.put_chain(hub, [G.breach(ts="2026-10-05T09:00:00+08:00", reason="a")])
-    fn = os.path.join(tempfile.mkdtemp(prefix="antinel-exp-"), "out.json")
+    fn = os.path.join(G.tmpdir("antinel-exp-"), "out.json")
     _SCRATCH.append(os.path.dirname(fn))
     rc, _out = G._cli(["export", "--format", "json", "--out", fn])
     if rc == 0 and os.path.exists(fn):
@@ -3066,7 +3070,7 @@ def c_notify_gate_is_cwd_independent():
     import os
     import tempfile
     P = _import_pre_tool_use()
-    hub = tempfile.mkdtemp(prefix="antinel-ngate-")
+    hub = G.tmpdir("antinel-ngate-")
     _SCRATCH.append(hub)
     old_env = os.environ.get("ANTINEL_HUB_DIR")
     old_cwd = os.getcwd()
@@ -3104,7 +3108,7 @@ def n_notify_gate_is_not_permanently_muted():
     import os
     import tempfile
     P = _import_pre_tool_use()
-    hub = tempfile.mkdtemp(prefix="antinel-ngate2-")
+    hub = G.tmpdir("antinel-ngate2-")
     _SCRATCH.append(hub)
     old_env = os.environ.get("ANTINEL_HUB_DIR")
     os.environ["ANTINEL_HUB_DIR"] = hub
@@ -3148,7 +3152,7 @@ def n_probe_failure_gate_is_not_permanent():
     import os
     import tempfile
     P = _import_pre_tool_use()
-    hub = tempfile.mkdtemp(prefix="antinel-ngate3-")
+    hub = G.tmpdir("antinel-ngate3-")
     _SCRATCH.append(hub)
     old_env = os.environ.get("ANTINEL_HUB_DIR")
     os.environ["ANTINEL_HUB_DIR"] = hub
@@ -3198,7 +3202,7 @@ def n_self_check_chain_catch_is_not_vacuous():
     live = os.path.join(root, rel.replace("/", os.sep))
     if not os.path.isfile(live):
         return False
-    bak = tempfile.mkdtemp(prefix="antinel-sc-")
+    bak = G.tmpdir("antinel-sc-")
     _SCRATCH.append(bak)
     copy = os.path.join(bak, os.path.basename(rel))
     shutil.copy2(live, copy)
@@ -5079,7 +5083,7 @@ def _eg_touch(d, day, size=1024):
 def _eg_env():
     """把 `egress` 的账本目录指到临时目录，并清掉进程内丢失计数。"""
     import egress as E
-    d = tempfile.mkdtemp(prefix="antinel_eg_")
+    d = G.tmpdir("antinel_eg_")
     orig = E.ledger_dir
     E.ledger_dir = lambda: d
     E._LOST.update({"n": 0, "first": None, "last": None})
@@ -5090,7 +5094,9 @@ def _eg_env():
     if hasattr(E, "_DISK_DIRTY"):
         E._DISK_DIRTY["v"] = True
     if hasattr(E, "_ASK"):
-        E._ASK["tick"] = 0
+        # 0.55.0：探测从"每 N 次写"改成"每 N 秒"，键从 `tick` 变 `t`（时刻）。
+        # 复位成 0 ⇒ 下一次写必然查盘，夹具造出来的 lost 当拍就能看见。
+        E._ASK["t"] = 0.0
     return E, d, orig
 
 
@@ -5129,7 +5135,7 @@ def c_space_retention():
             if '"rotated"' not in f.read():
                 return "删了却没留账（rotated 事件）—— 证据变少这件事本身没有证据"
         # ② 只超总量（天数合规）：删够就停，不许删过头
-        d2 = tempfile.mkdtemp(prefix="antinel_eg2_")
+        d2 = G.tmpdir("antinel_eg2_")
         E.ledger_dir = lambda: d2
         for i in range(10):
             _eg_touch(d2, _eg_day(i), 8 * 1024 * 1024)
@@ -5357,7 +5363,7 @@ def n_gap_acked_not_closed():
 
 def c_gap_write_and_line():
     """P29：忽略/重开/处置要**写进**缺口态并读得回来；页面那一行有账才出现。"""
-    root = tempfile.mkdtemp(prefix="antinel_gap_")
+    root = G.tmpdir("antinel_gap_")
     try:
         iid = "p29-real"
         st = S.load_state(root)
@@ -5368,7 +5374,10 @@ def c_gap_write_and_line():
             return "忽略只改了 state、没改缺口态 ⇒ 分档只能一刀切"
         if not e.get("closed_at"):
             return "忽略没记时刻 ⇒ 复核期算不出来（只能永不回访）"
-        if S.set_state(iid, "read", level="L1", root=root).get("gap_state") != M.GAP_OPEN:
+        # ★ 0.55.0：`read` 不再自带"重开"语义（见 P35）—— 这一条测的正是**重开**，
+        #   所以必须显式声明意图。不声明就变成"只记已读"，缺口态按设计不许动。
+        if S.set_state(iid, "read", level="L1", root=root,
+                       intent="reopen").get("gap_state") != M.GAP_OPEN:
             return "重开没把缺口态改回 open"
         if S.set_state(iid, "done", level="L1", root=root).get("gap_state") != M.GAP_CLOSED:
             return "处置没把缺口态改成 closed"
@@ -5508,7 +5517,7 @@ def c_concurrency_visible():
     """P32：抢锁超时/回收死锁要**落成用户读得到的数**，而不只在诊断开关里。"""
     import audit_chain as AC
     import host_shield as HS
-    d = tempfile.mkdtemp(prefix="antinel_lock_")
+    d = G.tmpdir("antinel_lock_")
     orig_dir = HS._shield_audit_dir
     try:
         p = AC.lock_events_path(d)
@@ -5553,7 +5562,7 @@ def n_concurrency_visible():
       （否则"数不到"可能只是"整体读不到"，那就什么都没证明）。
     """
     import audit_chain as AC
-    d = tempfile.mkdtemp(prefix="antinel_lock2_")
+    d = G.tmpdir("antinel_lock2_")
     try:
         p = AC.lock_events_path(d)
         old = {"t": time.time() - 3 * 86400, "pid": 1, "evt": "acq_timeout",
@@ -5834,7 +5843,7 @@ def c_space_unreadable_not_zero():
     E, _d, orig = _eg_env()
     bad = None
     try:
-        bad = tempfile.mkdtemp(prefix="antinel_egfile_")
+        bad = G.tmpdir("antinel_egfile_")
         f = os.path.join(bad, "not_a_dir")
         with open(f, "w", encoding="utf-8") as fh:
             fh.write("x")
@@ -5849,16 +5858,19 @@ def c_space_unreadable_not_zero():
         # ★ 中文断言必须走 `PC.body()`（S48）：`render()` 的产物含 style 与注释，
         #   裸查字符串会在"别处也出现同名字"时天然满足（本仓踩过多次）。
         body = PC.body(out)
-        if "0 个日文件" in body:
-            return "目录读不到却上屏「0 个日文件」⇒ 把「没量到」说成了「没有」"
-        if "读不到" not in body:
+        # ★ 0.55.0（F5）：期望值从**产品常量**取，判据里不出现文案字面。
+        #   否则 STE100 一改词（"无法读取"），红的是尺子而不是产品。
+        _zero = E.SPACE_READABLE_HEAD % 0
+        if _zero in body:
+            return "目录读不到却报了「%s」⇒ 把「没量到」说成了「没有」" % _zero
+        if E.SPACE_UNREADABLE not in body:
             return "目录读不到却什么都没说 ⇒ 用户会以为账本是空的"
         # 反向：读得到时不许说"读不到"（否则这条判据退化成"永远报警"）
         E.ledger_dir = orig
         cap2 = E.capacity()
         out2 = E.render({"ts": 0, "idle": 0.0, "conns": []}, [], 1, True, 0, cap=cap2)
         body2 = PC.body(out2)
-        if "账本目录读不到" in body2 or "磁盘：读不到容量" in body2:
+        if E.SPACE_UNREADABLE in body2:
             return "目录明明读得到却说读不到 ⇒ 这条判据会变成天天报警"
         return True
     finally:
@@ -5939,7 +5951,7 @@ def n_env_heredoc_pipe_kept():
     new = "exec_re.search(line[:m.start()])"
     if src.count(old) != 1:
         return "负控锚点命中 %d 次（应为 1）—— 判定已换写法，需同步" % src.count(old)
-    tmp = os.path.join(tempfile.mkdtemp(prefix="antinel_p30b_"), "hook_old.py")
+    tmp = os.path.join(G.tmpdir("antinel_p30b_"), "hook_old.py")
     with open(tmp, "w", encoding="utf-8", newline="") as f:
         f.write(src.replace(old, new))
     spec = _u.spec_from_file_location("hook_old_p30b", tmp)
@@ -5994,17 +6006,23 @@ def c_env_existing_blocks_intact():
 
 
 def n_env_existing_blocks_intact():
-    """负控：把只读豁免改成"一律放行" ⇒ P30c 必须红。
+    """负控：**两个方向各来一次** —— 只做一边等于半条负控。
 
-    ★ 这复现的正是"削弱既有保护"的形态：改造顺手把豁免条件放松了。
+    ★ 0.55.0（复核 F6）：旧版只做"一律放行"，那只证明"该拦还拦"这半边；
+      P30c 另外半边（3 个 must_pass，"该放还放"）**从来没被负控验证过** ——
+      写法上"每条判据都有负控"成立，实际上有一半断言没人试过它会不会红。
+      ★ 这复现的两种形态都是"改扫描面时的真事故"：豁免放松（放行）与收紧过头（误拦）。
     """
     H = _import_pre_tool_use()
     real = H.readonly_command_context
-    H.readonly_command_context = lambda cmd: True
+    legs = (("豁免一律放行", lambda cmd: True),
+            ("一律拦住", lambda cmd: False))
     try:
-        r = c_env_existing_blocks_intact()
-        if r is True:
-            return "负控失效：豁免一律放行后 P30c 仍然绿"
+        for label, fake in legs:
+            H.readonly_command_context = fake
+            r = c_env_existing_blocks_intact()
+            if r is True:
+                return "负控失效：%s 之后 P30c 仍然绿（那一半断言不承重）" % label
         return True
     finally:
         H.readonly_command_context = real
@@ -6019,7 +6037,7 @@ def c_concurrency_unreadable_not_zero():
       这是真实的"存在但读不到"，不靠权限、跨平台。
     """
     import audit_chain as AC
-    d = tempfile.mkdtemp(prefix="antinel_lp_")
+    d = G.tmpdir("antinel_lp_")
     try:
         p = os.path.join(d, "lock_events.jsonl")
         r0 = AC.lock_pressure(path=p)
@@ -6069,11 +6087,17 @@ def c_gap_two_ages_named():
             u.get("oldest_ack_days"), want_ack)
     if u.get("oldest_record_days") != 1:
         return "oldest_record_days=%r（应是 1，基准 ts）" % (u.get("oldest_record_days"),)
-    txt = re.sub(r"<[^>]+>", "", SV._unrepaired_line([acked]))
-    if "%d 天" % want_ack not in txt:
-        return "页面没用搁置年龄（读到的是记录年龄？）：%s" % txt
-    if "1 天" in txt:
-        return "页面把记录年龄当成了「多久没管」：%s" % txt
+    # ★ 0.55.0（F5）：断言**结构属性**，不再查「N 天」这几个字。
+    #   文案归 0490 管；这里只问"页面拿的是哪个基准"。
+    line = SV._unrepaired_line([acked])
+    m = re.search(r'data-ack-days="(\d*)"', line)
+    if not m:
+        return ("页面那一行没有 data-ack-days 结构标记（判据只能退回去绑文案）：%s"
+                % line[:120])
+    got = int(m.group(1)) if m.group(1) else None
+    if got != want_ack:
+        return ("页面那一行标的是 %r（应是 %d，基准 closed_at；记录年龄那头是 %r）"
+                % (got, want_ack, u.get("oldest_record_days")))
     return True
 
 
@@ -6094,6 +6118,264 @@ def n_gap_two_ages_named():
         return True
     finally:
         M.unrepaired_count = orig
+
+
+def c_read_keeps_gap_state():
+    """P35：`read` 只是"知情"，**不许**改缺口态；只有显式"重开"才改。
+
+    ★★ 0.55.0（复核 F1）：A1 把门禁装在 `/action` 这一层，于是
+      `remediation_ack`（`inbox_server.py` 里那处直调）就绕过去了 ——
+      实测 `ignored → read` 得 `read/open/closed_at=None`：ack 撤销、复核计时归零。
+      **入口会长，语义只能钉在模型层。**
+    """
+    hub = G.new_hub()
+    G.put_chain(hub, [G.breach(ts="2026-10-05T20:00:0%d+08:00" % i,
+                               reason="p35-%d" % i) for i in (1, 2, 3, 4, 5)])
+    its = S.load_items(root=hub)
+    if len(its) < 5:
+        return "夹具只造出 %d 条记录，摆不下五种走法" % len(its)
+    a, b, c, d, e = its[:5]
+    # ① 已忽略 → 知情：状态记已读，缺口态与 closed_at 一个字节都不许动
+    S.set_state(a.id, "ignored", note="先不管", level=a.level, root=hub)
+    r = S.set_state(a.id, "read", level=a.level, root=hub)
+    if r.get("state") != "read":
+        return "知情没把状态记成已读（%r）" % (r.get("state"),)
+    if r.get("gap_state") != M.GAP_ACKED:
+        return "看一眼就把 ack 撤销了（gap=%r）⇒ 缺口又活了" % (r.get("gap_state"),)
+    if not r.get("closed_at"):
+        return "看一眼就把 closed_at 清了 ⇒ 复核期计时归零"
+    # ② 已处置 → 知情
+    S.set_state(b.id, "done", level=b.level, root=hub)
+    r = S.set_state(b.id, "read", level=b.level, root=hub)
+    if r.get("gap_state") != M.GAP_CLOSED:
+        return "看一眼就把「修好了」改回未修（gap=%r）" % (r.get("gap_state"),)
+    if not r.get("closed_at"):
+        return "看一眼就把处置时刻清了"
+    # ③ 显式重开必须还能改（否则这条判据退化成"什么都不许改"）
+    S.set_state(c.id, "ignored", note="先不管", level=c.level, root=hub)
+    r = S.set_state(c.id, "read", level=c.level, root=hub, intent="reopen")
+    if r.get("gap_state") != M.GAP_OPEN or r.get("closed_at"):
+        return "显式重开没把缺口打回 open（gap=%r, closed_at=%r）" % (
+            r.get("gap_state"), r.get("closed_at"))
+    # ④ 未读项必须照样记已读
+    r = S.set_state(d.id, "read", level=d.level, root=hub)
+    if r.get("state") != "read":
+        return "未读项记已读被整条关掉了"
+    # ⑤ 侧门：陈旧页面上的「我不处理，我担着」打到一条**已忽略**的记录上
+    S.set_state(e.id, "ignored", note="先不管", level=e.level, root=hub)
+    srv = G.Server(hub, token="p35tok")
+    try:
+        code, _h, _b = G.req(srv.port, "/action", token=srv.token, method="POST",
+                             body="op=remediation_ack&id=%s" % e.id,
+                             ctype="application/x-www-form-urlencoded")
+        if code not in (200, 303):
+            return "侧门返回 %s（期望 200/303：它本来就只该记一笔决定）" % code
+        cur = {it.id: it for it in S.load_items(root=hub)}
+        if cur[e.id].gap_state != M.GAP_ACKED or not cur[e.id].closed_at:
+            return ("陈旧页面点一下就把 ack 撤销了（gap=%r, closed_at=%r）"
+                    "—— A1 的侧门还在"
+                    % (cur[e.id].gap_state, cur[e.id].closed_at))
+        return True
+    finally:
+        srv.stop()
+
+
+def n_read_keeps_gap_state():
+    """负控：把模型层的意图判断换成"恒重开"（＝旧版行为）⇒ P35 必须红。
+
+    ★ 换的是 `inbox_store._reopens` 这份**唯一的**意图判断，不复制 handler。
+    """
+    real = S._reopens
+    S._reopens = lambda dst, intent: True
+    try:
+        r = c_read_keeps_gap_state()
+        if r is True:
+            return "负控失效：意图一律当重开之后 P35 仍然绿"
+        return True
+    finally:
+        S._reopens = real
+
+
+def c_lock_unreadable_speaks():
+    """P36：竞争读数**取不到**时必须出声；空串只允许表示「查到了，是 0 次」。
+
+    ★★ 0.55.0（复核 F2）：A5 修的是"返回了 `checked=False` 要出声"，
+      而取数这一步本身的外层 `except: return ""` 还在 ⇒
+      「没拿到读数」与「今天没有竞争」在屏幕上逐字相同。
+    """
+    import audit_chain as AC
+    import host_shield as HS
+    real_p, real_dir = AC.lock_pressure, HS._shield_audit_dir
+    d = G.tmpdir("antinel_p36_")
+    try:
+        # ① 取数入口不可用
+        HS._shield_audit_dir = lambda: (_ for _ in ()).throw(OSError("no dir"))
+        t0 = SV._lock_line()
+        if not t0:
+            return "取数入口不可用时页面一声不响 ⇒ 与「今天没有竞争」逐字相同"
+        HS._shield_audit_dir = lambda: d
+        # ② 读取抛错
+        AC.lock_pressure = lambda *a, **k: (_ for _ in ()).throw(OSError("boom"))
+        t1 = SV._lock_line()
+        if not t1:
+            return "读取抛异常时页面一声不响 ⇒ 与「今天没有竞争」逐字相同"
+        # ③ 返回缺 checked（键漂移）
+        AC.lock_pressure = lambda *a, **k: {"timeouts": 0, "steals": 0}
+        t2 = SV._lock_line()
+        if not t2:
+            return "返回里没有 checked 时页面一声不响（键漂移被当成没事）"
+        # ④ 正常空账本 ⇒ 必须空串（否则这条判据退化成永远报警）
+        AC.lock_pressure = lambda *a, **k: {"checked": True, "timeouts": 0,
+                                            "steals": 0, "unreadable": []}
+        t3 = SV._lock_line()
+        if t3 != "":
+            return "没有竞争时也上屏了（这条判据会变成天天报警）：%r" % (t3,)
+        return True
+    finally:
+        AC.lock_pressure, HS._shield_audit_dir = real_p, real_dir
+
+
+def n_lock_unreadable_speaks():
+    """负控：把「取不到读数」的唯一出口改成返回空串 ⇒ P36 必须红。"""
+    real = SV._lock_unknown
+    SV._lock_unknown = lambda why: ""
+    try:
+        r = c_lock_unreadable_speaks()
+        if r is True:
+            return "负控失效：取不到读数也沉默之后 P36 仍然绿"
+        return True
+    finally:
+        SV._lock_unknown = real
+
+
+def _bare_mkdtemp_offenders(srcs):
+    """静态腿：`ci/*.py` 里除了登记处自己，不许再**直接调用** mkdtemp。
+
+    ★ 用 `ast` 看调用节点，不做文本匹配 —— 文本匹配会把注释、文档、甚至
+      判据自己举的样本串当成违规（这一版第一稿正是这么假红的）。
+    ★ 只认 `xxx.mkdtemp(...)` 与裸 `mkdtemp(...)` 两种调用形状。
+    """
+    import ast as _ast
+    bad = []
+    for name, text in srcs.items():
+        if name.endswith("tmpreg.py"):
+            continue
+        try:
+            tree = _ast.parse(text)
+        except SyntaxError:
+            bad.append(name + "（语法错误）")
+            continue
+        for node in _ast.walk(tree):
+            if not isinstance(node, _ast.Call):
+                continue
+            fn = node.func
+            if isinstance(fn, _ast.Attribute) and fn.attr == "mkdtemp":
+                bad.append(name)
+                break
+            if isinstance(fn, _ast.Name) and fn.id == "mkdtemp":
+                bad.append(name)
+                break
+    return bad
+
+
+def c_tmp_dirs_registered_and_swept():
+    """P37：判据建的临时目录必须登记，退出时收得掉。
+
+    ★★ 0.55.0（复核 F3）：`D:/_antmp` 顶层实测 70,312 项（几乎全空），
+      `du -sm` 跑不完（120 秒超时）、单次 `scandir` 冷扫 64.8 秒 ——
+      而那目录是**全局 TMP**：产品自己的 `tempfile` 也走这里。
+      判据把"量产品"的劲用完了，却从没量过"自己造了多少垃圾"。
+    """
+    import tmpreg
+    before = tmpreg.registered()
+    d = G.tmpdir("antinel_p37_")
+    if not os.path.isdir(d):
+        return "tmpdir() 没建出目录"
+    if tmpreg.registered() != before + 1:
+        return "建了却没登记 ⇒ 退出时不会被收（这次就多一个垃圾目录）"
+    try:
+        tmpreg._DIRS.remove(d)
+    except ValueError:
+        return "登记表里找不到刚建的那个目录（登记的不是同一个对象）"
+    import shutil as _sh
+    _sh.rmtree(d, ignore_errors=True)
+    if os.path.exists(d):
+        return "登记了但收不掉：%s 还在" % d
+    # 静态腿：不许再有裸 mkdtemp（漏一处的代价是永远漏）
+    ci = os.path.join(os.path.dirname(os.path.abspath(__file__)))
+    srcs = {}
+    for name in sorted(os.listdir(ci)):
+        if name.endswith(".py"):
+            with open(os.path.join(ci, name), encoding="utf-8") as f:
+                srcs[name] = f.read()
+    bad = _bare_mkdtemp_offenders(srcs)
+    if bad:
+        return "还有裸 tempfile.mkdtemp（应走 tmpreg.tmpdir）：%s" % "、".join(bad)
+    return True
+
+
+def n_tmp_dirs_registered_and_swept():
+    """负控：① 登记入口换成"建了不登记"；② 喂一个含裸 mkdtemp 的样本。两者都必须红。"""
+    import shutil as _sh
+    import tmpreg as _T
+    made = []
+
+    def _unregistered(prefix):
+        d = _T.bare(prefix)          # 走登记处的「不登记」逃生门（判据文件自己不许调 mkdtemp）
+        made.append(d)
+        return d
+
+    real = G.tmpdir
+    G.tmpdir = _unregistered
+    try:
+        r = c_tmp_dirs_registered_and_swept()
+        if r is True:
+            return "负控失效①：建了不登记之后 P37 仍然绿"
+    finally:
+        G.tmpdir = real
+        for d in made:
+            _sh.rmtree(d, ignore_errors=True)
+    sample = {"x_ok.py": "import os\n",
+              # ★ 样本必须是**真调用**（ast 只认调用节点），且拼出来写，
+              #   免得被"全仓统一换入口"的批量脚本顺带换掉（踩过一次）
+              "x_bad.py": "d = __import__('tempfile')." + "mkdtemp(prefix='a')\n"}
+    if not _bare_mkdtemp_offenders(sample):
+        return "负控失效②：静态腿对裸 mkdtemp 样本视而不见"
+    return True
+
+
+def _button_labels(html):
+    return re.findall(r"<button[^>]*>([^<]*)</button>", html or "")
+
+
+def c_reopen_label_two_intents():
+    """P38：`done` 与 `ignored` 上那个按钮必须是两句话。
+
+    ★ 0.55.0（复核 F9）：同一个标签在 `ignored` 上是"我开始管了"，
+      在 `done` 上是"我撤回『修好了』"。一个按钮两种承诺，点之前没法预判，
+      与「按钮是可执行承诺」那条直接冲突。
+    """
+    h_done = SV._item_html(_gap_item("done", M.GAP_CLOSED), "t")
+    h_ign = SV._item_html(_gap_item("ignored", M.GAP_ACKED), "t")
+    l_done, l_ign = _button_labels(h_done), _button_labels(h_ign)
+    if len(l_done) != 1 or len(l_ign) != 1:
+        return "按钮数量不对（已处置 %d 个、已忽略 %d 个）" % (len(l_done), len(l_ign))
+    if l_done[0] == l_ign[0]:
+        return "两种意图共用同一个标签「%s」" % l_done[0]
+    return True
+
+
+def n_reopen_label_two_intents():
+    """负控：把标签判断改成恒返回同一个字面 ⇒ P38 必须红。"""
+    real = SV._reopen_label
+    SV._reopen_label = lambda gap_state: "重开"
+    try:
+        r = c_reopen_label_two_intents()
+        if r is True:
+            return "负控失效：两个意图给了同一个标签之后 P38 仍然绿"
+        return True
+    finally:
+        SV._reopen_label = real
 
 
 CHECKS_0353 = [
@@ -6363,6 +6645,15 @@ CHECKS_0353 = [
      c_concurrency_unreadable_not_zero, n_concurrency_unreadable_not_zero),
     ("P31b 两个基准的「天前」各自具名；页面只用与复核期同基准的那个",
      c_gap_two_ages_named, n_gap_two_ages_named),
+    # ---- 十三、复核 F1–F9（0.55.0）：语义钉在模型层 · 沉默必须出声 · 量自己的垃圾 ----
+    ("P35 已读只记知情，不改缺口态；显式重开才改；侧门同样受管",
+     c_read_keeps_gap_state, n_read_keeps_gap_state),
+    ("P36 竞争读数取不到必须出声；空串只表示「查到了，是 0 次」",
+     c_lock_unreadable_speaks, n_lock_unreadable_speaks),
+    ("P37 判据的临时目录必须登记并收掉；ci 下不许有裸 mkdtemp",
+     c_tmp_dirs_registered_and_swept, n_tmp_dirs_registered_and_swept),
+    ("P38 已处置与已忽略的按钮不许共用一个标签",
+     c_reopen_label_two_intents, n_reopen_label_two_intents),
 ]
 
 

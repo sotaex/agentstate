@@ -69,6 +69,10 @@
 """
 from __future__ import annotations
 
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import tmpreg as _TMP   # 0.55.0 (F3): temp dir registry
 import ast
 import contextlib
 import hashlib
@@ -346,7 +350,7 @@ def n_pkg16a():
     if not py:
         raise Skip("找不到 setuptools>=68 的解释器 —— 夹具构建跑不起来（不判绿）")
     version = _version()
-    work = tempfile.mkdtemp(prefix="g0516_fix_")
+    work = _TMP.tmpdir(prefix="g0516_fix_")
     tree = os.path.join(work, "tree")
     fdist = os.path.join(work, "dist")
     os.makedirs(fdist, exist_ok=True)
@@ -379,7 +383,7 @@ def n_pkg16a():
 def n_pkg16b():
     version = _version()
     whl = _wheel_path(os.path.join(ROOT, "dist"), version)
-    work = tempfile.mkdtemp(prefix="g0516_neg_")
+    work = _TMP.tmpdir(prefix="g0516_neg_")
     fdist = os.path.join(work, "dist")
     os.makedirs(fdist, exist_ok=True)
     fwhl = os.path.join(fdist, "antinel-%s-py3-none-any.whl" % version)
