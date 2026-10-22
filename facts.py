@@ -661,8 +661,8 @@ def axes(facts):
         mode = "drill"
     else:
         # armed is True ∧ is_dev 为 False/None，或 armed is None（读不到）。
-        #   ★ 读不到 armed 不许落 unarmed —— 降级交给 duty（fresh 不可判 ⇒ off）
-        #     与 trust（armed is None ⇒ bounded）承担。
+        #   ★ 读不到 armed 不许落 unarmed —— 降级由下面两处显式承担：
+        #     ② `armed is None ⇒ duty=off`，③ `_bounded()` 的 `armed is None ⇒ bounded`。
         mode = "armed"
 
     # ② duty
