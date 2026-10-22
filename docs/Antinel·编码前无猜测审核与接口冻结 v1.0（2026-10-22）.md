@@ -843,3 +843,35 @@ at-risk·slash／off bar）＋lamp 四色参照，附记录表。
   ⇒ 连带一条实现约束：`collect()` 对未注入的字段给 **`None` 而不是让键缺席** ——
   键不在场会让投影层的 `facts.get(k, 默认)` 悄悄生效，那正是 F1 明令禁止的「静默默认」。
 
+- **#55 F1 白名单不闭合，且有 4 处签名与实际不符（A2 开工时实测）**。
+  `output/_p_probe_sources.py` 在 impl 树逐个真调，结果：
+
+  | 白名单写法 | 实测 | 影响 |
+  |---|---|---|
+  | `host_shield.armed_state()` | 需 `(audit_dir, state)` 两个必填参数 | 无参调用即 TypeError |
+  | `inbox_model.day_counts()` | 需 `(items, days=None)` | 同上 |
+  | `inbox_model.unrepaired_count()` | 需 `(items, now=None, hours=None)` | 同上 |
+  | `inbox_model.ledger_rows()` | 需 `(items, days=7, today=None)` | 同上 |
+  | D-02 说 `scope_device` 来源 `machine_id` | `host_shield` **没有这个符号** | 字段无来源 |
+
+  另有 6 个 D-02 点名要用、但**不在白名单**的函数（实测都存在）：
+  `is_dev_build`／`_sentinel_uptime`／`_sentinel_heartbeat_chain`／
+  `_outage_consequences`／`_dev_exempt_problems`／`_clock_skewed`；
+  账本的**读取入口**（`load_items_all`）也不在白名单 ⇒ `gaps`/`counts`/`credits_low_open`
+  三个字段无法产出。
+
+  **裁定（A2 已按此实现）**：
+  ① `armed_state`/`sentinel_heartbeat_age`/`self_check` **不单独调** ——
+     `guard_posture()` 的 `evidence` 已含它们的全部结果（armed/sentinel_alive/
+     heartbeat_age/heartbeat_ts/heartbeat_source/sentinel_uptime/self_check_ok/
+     self_check_problems 共 8 项）。聚合入口优先，签名问题自然消失。
+  ② 需要 `items` 的三个账本函数**A2 不接**，登记 `EXPECTED_MISSING`，待裁定白名单是否扩
+     `load_items_all`。
+  ③ **`is_dev_build` 必须扩白名单**（只读、无参、实测存在）—— 否则真实运行时
+     `mode` 轴永远分不出 `drill` 与 `armed`。
+     ★ 注意：**它不阻塞 A3**（81 格反查用夹具的 `is_dev`），但**阻塞上线**。
+  ④ `scope_device` 的真实来源需重新指定（`machine_id` 不存在）。
+
+  ⇒ A2 实测结果：**14 个字段接上、16 个登记未接**（`facts.EXPECTED_MISSING`），
+  双向对账通过（少登记 ⇒ 红；登记了却接上 ⇒ 红）。
+
