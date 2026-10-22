@@ -397,11 +397,34 @@ def save_state(st, root=None):
         pass
 
 
-def set_state(item_id, dst, note="", actor="owner", now=None, level=None, root=None):
+def _reopens(dst, intent):
+    """这次置位算不算「重开」。
+
+    ★★ 0.55.0（复核 F1）：抽成函数不是为了好看 —— 负控要换掉**同一份实现**
+      （`_reopens = lambda dst, intent: True` 就复现了旧行为），
+      规则写两处的话，负控只能复制代码去测副本。
+    """
+    return dst not in M.CLOSED_STATES and intent == "reopen"
+
+
+def set_state(item_id, dst, note="", actor="owner", now=None, level=None, root=None,
+              intent="read"):
     """置状态。**校验迁移**；忽略 R0 必须写备注。返回置位后的状态条目。
 
     `level` 不传 ⇒ 自动从链里查这条告警的级别（CLI 用；测试可直接传）。
+
+    ★★ 0.55.0（复核 F1）`intent`：**`read` 这个目标态不再自动等于"重开"**。
+      旧实现只要 `dst="read"` 就把 `gap_state` 打回 `open`、把 `closed_at` 删掉
+      ⇒ **任何**写 `read` 的调用点都会把已忽略/已处置的缺口重新打开。
+      门禁当时装在 HTTP 层（`/action` 的 `_auto_read_allowed`），
+      于是 `remediation_ack`（`inbox_server.py:4127`）这个侧门直接绕过去了。
+      ⇒ 权威放在这一层：`intent="read"`（知情，默认）**不动**缺口态与 `closed_at`；
+        `intent="reopen"`（重开）才把缺口打回 `open`。
+      ★ 默认值取安全侧：不传参的旧调用点行为变成"只记已读"，而"只看一眼就把缺口
+        重新打开"正是 A1 实测过的伤害。
     """
+    if intent not in ("read", "reopen"):
+        raise M.BadState("未知意图 %s（合法：read, reopen）" % (intent,))
     if level is None:
         found = [it for it in load_items(root=root) if it.id == item_id]
         if not found:
@@ -427,7 +450,9 @@ def set_state(item_id, dst, note="", actor="owner", now=None, level=None, root=N
         #   done ⇒ "处置时刻"；ignored ⇒ "你说先不管的时刻"（`ack_expired` 用它算复核期）。
         ent["closed_at"] = t
         ent["note"] = note or ""
-    else:
+    elif _reopens(dst, intent):
+        # ★ 0.55.0：只有**重开**才清 `closed_at`。知情（read）必须把"什么时候搁下的"
+        #   留着 —— 那是复核期的唯一基准，看一眼就清掉等于把计时归零。
         ent.pop("closed_at", None)
     # ---------------------------------------------------------------- 缺口态
     # ★★ 40 格 · 人·判：`ignored` **不等于**修好了。
@@ -438,8 +463,12 @@ def set_state(item_id, dst, note="", actor="owner", now=None, level=None, root=N
         ent["gap_state"] = M.GAP_CLOSED
     elif dst == "ignored":
         ent["gap_state"] = M.GAP_ACKED
-    else:                                     # read / unread ＝ 重开
+    elif _reopens(dst, intent):
         ent["gap_state"] = M.GAP_OPEN
+    # ★ 0.55.0（F1）：其余情况是 `read`/`unread` 且这次只是"知情"
+    #   ⇒ 缺口态**一个字节都不动**。旧实现在这里无条件写 `GAP_OPEN`，
+    #   于是"点开看一眼"就足以撤销 ack（实测：`ignored → read` 得
+    #   `('read','open',False)`，`closed_at` 被清、复核计时归零）。
     st[item_id] = ent
     save_state(st, root)
     return ent

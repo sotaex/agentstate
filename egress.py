@@ -86,6 +86,12 @@ EVENT_PREFIX = "events-"
 EVENT_SUFFIX = ".jsonl"
 _EVENT_DAY_RE = re.compile(r"^events-(\d{4}-\d{2}-\d{2})\.jsonl$")
 
+# ★★ 0.55.0（复核 F5）：空间这一行的两句"结论"抽成常量 —— **判据从产品真源取期望值**。
+#   原来判据直接查「读不到」「0 个日文件」这些字面：STE100 一改词（"无法读取"），
+#   判据就假红，而红的是尺子不是产品。尺子不许绑在文案上。
+SPACE_UNREADABLE = "账本目录读不到"
+SPACE_READABLE_HEAD = "账本 %d 个日文件"
+
 # 对象存储型目的地（判据③）。★ 这是**特征**不是白名单：命中只标"值得看"，不说"这是偷"
 OBJECT_STORE_SUFFIX = (
     ".aliyuncs.com", ".amazonaws.com", ".r2.cloudflarestorage.com", ".r2.dev",
@@ -432,9 +438,14 @@ _LOST = {"n": 0, "first": None, "last": None}
 #: 下一次能写的时候由 `_flush_lost` 补出去 —— 删账这件事**也必须**有账。
 _ROT_NOTE = []
 
-#: `_append` 多久查一次盘上的 `lost.json`（A13）。见 `_append` 里的说明。
-_PROBE_EVERY = 32
-_ASK = {"tick": 0}
+#: 多久查一次盘上的 `lost.json`（A13）。见 `_append` 里的说明。
+#: ★★ 0.55.0（复核 F8）：从"每 32 **次写**"改成"每 60 **秒**"。
+#:   次数阈值要乘上写频率才有意义，而写频率随连接数变化 —— 安静机器上一天也写不了几次，
+#:   那个阈值在安静期等于**永不触发**，跨进程遗留的丢失就一直藏着。
+#:   按秒探测与写频率无关；60 秒 = 心跳周期（600 秒）的 1/10，是一句能写进文档的承诺：
+#:   **遗留的丢失最多藏一分钟。**
+PROBE_SEC = 60.0
+_ASK = {"t": 0.0}
 #: 盘上的 `lost.json` 是否**可能**非零。
 #: ★★ 为什么不能只看内存（P25 当场抓到的真 bug）：
 #:   磁盘满时 `_note_lost` 会**落盘成功**（`lost.json` 只有几十字节，通常还写得进）
@@ -497,13 +508,17 @@ def _note_lost(now=None):
 
 
 def lost_pending():
-    """还没补记的丢失条数 `(n, first, last)`。盘上一份＋内存一份。"""
+    """还没补记的丢失条数 `(n, first, last)`。盘上一份＋内存一份。
+
+    ★ 0.55.0（复核 F4）：这里原来自己又写了一遍 `dn + _LOST["n"]`，于是"唯一合并点"
+      名不副实 —— 负控只换 `_merge_lost`，对这一行失明。现在两条路径共用同一个函数。
+    """
     disk = _read_json("lost.json", {}) or {}
     try:
         dn = int(disk.get("n") or 0)
     except (TypeError, ValueError):
         dn = 0
-    return (dn + _LOST["n"],
+    return (_merge_lost(dn, _LOST["n"]),
             disk.get("first") or _LOST["first"],
             disk.get("last") or _LOST["last"])
 
@@ -584,9 +599,10 @@ def _append(ev):
     #   才发现，永不查 ⇒ 永不补（那才是真的把丢失藏起来）。所以内存之外还要看
     #   `_DISK_DIRTY`（盘上可能非零）与周期探测 —— 这一条是 P25 当场抓出来的：
     #   第一版只看内存，磁盘满时"落盘成功、内存清零"⇒ 那一条丢失再也没补上。
-    if _ROT_NOTE or _LOST["n"] or _DISK_DIRTY["v"] or _ASK["tick"] <= 0:
+    if (_ROT_NOTE or _LOST["n"] or _DISK_DIRTY["v"]
+            or (time.time() - _ASK["t"]) >= PROBE_SEC):
         _flush_lost(p)
-    _ASK["tick"] = _PROBE_EVERY if _ASK["tick"] <= 0 else _ASK["tick"] - 1
+        _ASK["t"] = time.time()
     if _write_line(p, ev):
         return True
     # ② 腾空间：按天/按总量清最老的文件（今天的不动），再试一次
@@ -940,13 +956,15 @@ def render(snap, findings, days_with, sentinel_on, sample_failed, ai_only=True,
         # ★★ 目录读不到时不许报"0 个文件"（A6）：`readable=False` 下的 0 是
         #   **没量到**，渲染成"没有"正是本仓反复踩的那一类（null ≠ 0 ≠ []）。
         if cap.get("readable") is False:
-            L.append(_disk + " ｜ 账本目录读不到（不是「0 个文件」，是「没量到」）")
+            L.append(_disk + " ｜ " + SPACE_UNREADABLE
+                     + "（不是「0 个文件」，是「没量到」）")
         else:
             # ★ 只数日文件（A9）：`dir_files` 含 lost.json/current.json/disk_warn.json
             #   与残留 .tmp，把它当"账本文件数"就是口径混装。
             #   `default` 只为兼容手工构造的 cap（判据夹具）—— 生产真源 `capacity()`
             #   必带此键，且它来自 `dir_stats().event_files`。
-            L.append(_disk + " ｜ 账本 %d 个日文件 %.1f MB（上限 %d MB，保留 %d 天）"
+            L.append(_disk + " ｜ "
+                     + (SPACE_READABLE_HEAD + " %.1f MB（上限 %d MB，保留 %d 天）")
                      % (cap.get("dir_event_files", cap.get("dir_files", 0)),
                         cap["dir_bytes"] / 1048576.0,
                         MAX_DIR_BYTES // 1048576, KEEP_DAYS))

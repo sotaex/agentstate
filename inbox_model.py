@@ -534,6 +534,11 @@ def unrepaired_count(items, now=None, hours=None):
       `n=5, due=0` 是"都还在你设定的宽限里"，`n=5, due=5` 是"你不管了但它还在"。
     ★ 口径与 `bucket_of` 同源（都调 `gap_state_of` / `ack_expired`），
       **不许在本函数里另写一套"算不算未修"的规则**。
+
+    ★★ 0.55.0（复核 F7）：`oldest_record_days` 是**给判据用的第二基准**，
+      **生产侧没有任何消费点**（页面只用 `oldest_ack_days`，见 `inbox_server._unrepaired_line`）。
+      留着它的唯一理由：让 `P31b` 能证明"两个基准确实不同"，从而守住
+      "页面不许把记录年龄当成搁置年龄"。**不要因为"没人读"删掉它** —— 删了那条判据就失明。
     """
     now = now or datetime.now().astimezone()
     acked = [it for it in items if gap_state_of(it) == GAP_ACKED]
