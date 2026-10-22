@@ -875,3 +875,41 @@ at-risk·slash／off bar）＋lamp 四色参照，附记录表。
   ⇒ A2 实测结果：**14 个字段接上、16 个登记未接**（`facts.EXPECTED_MISSING`），
   双向对账通过（少登记 ⇒ 红；登记了却接上 ⇒ 红）。
 
+- **#56 三处「§5.2 映射表按字面实现会静默失效」（A3 开工时实测）**。
+
+  **(a) 缺口族的 7 个名字混装 kind 与 subkind，两个名字根本不存在。**
+  §5.2 的族界列了 7 个名字，实测它们是 4 个 kind ＋ 3 个 subkind，且其中两个
+  与真实 kind 名不同：
+
+  | §5.2 写法 | 真实落点 | 实测出处 |
+  |---|---|---|
+  | `spawn_failed` | subkind ⊂ `host_shield_spawn_failed` | `host_shield.py:3413` |
+  | `autostart_missing` | subkind ⊂ `host_shield_breach` | `host_shield.py:4141` |
+  | `zone_lock_failed` | subkind ⊂ `host_shield_zone_locked` | `host_shield.py:4184` |
+  | `code_drift`／`state_drift` | subkind ⊂ `host_shield_tamper` | `host_shield.py:4498/4514` |
+
+  ⇒ 按字面写 `kind in {...}`，**永远匹配不上**，`harm` 恒为 `none` —— F1 假绿的根因
+  原样保留，而且这次是「看起来已经实现了族界」的假绿，比没实现更危险。
+
+  **裁定**：族界取在 **kind 层**，判据是 `inbox_model.LEVEL_OF_KIND[kind] == "R0"`
+  （该表自述「唯一真源」）。7 个族名因此**全部被覆盖**，且不写死任何一个名字。
+  副产品：`credits_low`（`Ls`）自然被排除，预告族不进 harm 的冻结随之自动成立。
+
+  **(b) `partial_read` 缺「落点」判别字段 ⇒ N7-a 与 N7-b 在 facts 层不可区分。**
+  §5.3 的 N7-a（受监管落点 ⇒ 黄/partial）与 N7-b（非核心面 ⇒ **绿**/ok）两份
+  `partial_read` 的键完全一样 `{seen, total, why}`，唯一差别是 `why` 的文字
+  （「预算内未完成」vs「宿主探测预算」）。按文案分流＝判据查文案（铁律 3 禁止）。
+  ⇒ **A3 取保守口径**：任何非 `None` 的 `partial_read` ⇒ `trust=bounded`。
+  A4 跑 57 行夹具时 N7-b 必然红 —— 那时要补的是**冻结形状**（如 `partial_read["surface"]`），
+  不是把判据改成读 `why`。**本条不阻塞 A3**（81 格不使用 `partial_read`），阻塞 A4 的 N7-b。
+
+  **(c) `gaps` 未接的后果升级：从「少一个字段」变成「灯恒红」。**
+  活体实测（A3 冒烟）：`gaps=None` ⇒ 按「统计不出 ⇒ 报不出后果」归 `harm=unknown`
+  ⇒ R2 之下 `unknown` 走红。这是**正确的 fail-closed**（不许把看不见说成没事），
+  但意味着：在账本读取入口（`load_items_all`）扩进白名单之前，**每台机器都是红的**。
+  ⇒ `#55 裁定②` 的优先级从「A2 不接、登记待裁定」升为 **阻塞上线**（与 `is_dev_build`
+  同级）。二者合起来是「新状态机上线前必须闭合的两个白名单缺口」。
+
+  **A3 实测结果**：81 格反查 **63 格逐格相等 ＋ 18 格被 R2 强制成 `unknown`（恰好 18）**；
+  31 行夹具的灯／成因／动作与参照实现**逐行 0 diff**；边界 15 条全过；五条负控全真红。
+
