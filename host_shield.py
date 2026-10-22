@@ -767,6 +767,36 @@ def _write_probe_denied(path):
             pass
 
 
+#: 三态：ACL 读不到时**不许**与"确认没锁"混成一个布尔（40 格 · 权限·判 / N4）。
+DENY_YES, DENY_NO, DENY_UNKNOWN = "denied", "not-denied", "unknown"
+
+
+def deny_state(path):
+    """「这个目录被拒写了吗」的**唯一实现**：返回三态。
+
+    ★★ 2026-10-22（N4：`acl_read_deny` 的消费点到底怎么处理 None）：
+      逐点核完全仓 —— 真实消费点只有 `is_denied()` 一个（其余是自检探针），
+      而它把 `None` 折成 `False`："不知道"与"确认没锁"在布尔里长得一样。
+      逐个调用点核方向（`allow_always` / 放行窗 / 窗口到期 / 持锁留痕 / 补锁）：
+        · 窗口到期、持锁留痕、补锁 → `False` 只会**多做一次**（偏严，安全）；
+        · `allow_always` 与放行窗 → 用户**明确说要放行**，却因为 ACL 读不到而
+          不解锁（F-0 那一族"确认放行必须真的放行"的残余）。
+      ⇒ 布尔接口保持原样（其余调用点行为逐字不变），另给这个三态实现，
+        让"用户意愿优先"的两处能在 `unknown` 时也解锁。
+
+    ★ 为什么不用行为判据证明这一步：非提权环境里那条分支根本不进，
+      跑不出差别 —— 与 `_is_denied_elevation_problems` 同一个理由（结构判据）。
+    """
+    if _write_probe_denied(path):
+        return DENY_YES
+    if process_elevation()[0] is True:
+        r = acl_read_deny(path)
+        if r is not None:
+            return DENY_YES if r else DENY_NO
+        return DENY_UNKNOWN
+    return DENY_NO
+
+
 def is_denied(path):
     """探测：本目录是否**已被拒写**（哨兵/门闸的"锁有没有上"判据）。
 
@@ -779,14 +809,11 @@ def is_denied(path):
         （锁有没有上的**直接证据**，与"本进程能不能写"无关）。
     ★ **非提权路径行为与旧版逐字一致**（只把写探针拆成 `_write_probe_denied`）。
     ★ fail-closed：ACL 读不出来（None）⇒ **不**声称已上锁，返回 False。
+    ★★ 2026-10-22：判断逻辑整体移到 `deny_state()`（三态）。本函数只做
+      「是不是 denied」的布尔投影 —— **语义与 0.41.0 逐字一致**（unknown ⇒ False）。
+      要区分"不知道"的调用点请用 `deny_state()`。
     """
-    if _write_probe_denied(path):
-        return True
-    if process_elevation()[0] is True:
-        r = acl_read_deny(path)
-        if r is not None:
-            return bool(r)
-    return False
+    return deny_state(path) == DENY_YES
 
 
 # --------------------------------------- H 批次：闸门合理化（0.29.0）----
@@ -2717,6 +2744,15 @@ def spawn_sentinel(pkg_root, python_exe=None):
     st = load_state()
     if sentinel_alive(st):
         age, _ts = sentinel_heartbeat_age()
+        # ★★ 2026-10-22（40 格 · 时间·挡 / N1）：`age` 可能是**负数**
+        #   （墙钟被回拨、或启动时刻在未来）。旧写法 `age <= _STALE_AFTER` 对负数
+        #   天然成立 ⇒ 判「已经跑着」⇒ 一个已经僵死的哨兵会永远挡住「马上修复」。
+        #   这正是 BL-02 那一族的 fail-open 在**第三条腿上**的复制品（前两条已修）。
+        #   ★ 但也不许反过来"按陈旧处理"去杀它：时钟坏的时候，活着的进程与死掉的
+        #     进程看起来一模一样，杀了会进「起了就被杀」的循环（比 fail-open 更糟）。
+        #   ⇒ 唯一正确动作：**不动进程，如实说"算不出"**，由调用方显示原因。
+        if age is not None and not _elapsed_ok(age):
+            return False, st.get("sentinel_pid"), "clock-skew"
         if age is not None and age <= _STALE_AFTER:
             return True, st.get("sentinel_pid"), "already-running"
         # 进程在、心跳断了 ⇒ 它已经不算在岗。清掉登记并结束它，
@@ -4255,7 +4291,10 @@ def _lock_pending_tree(base, lock_dirs, state, audit_dir, now,
             mode = (state.get("workspaces") or {}).get(key)
             if mode == "allow_always":
                 # ★ F-0：确认放行必须真的放行 —— 已上锁的要解开，不能只 continue。
-                if is_denied(target):
+                # ★ 2026-10-22（N4）：`unknown`（ACL 读不到）也照用户意愿解锁 ——
+                #   "你说永远放行"是比"这条 ACL 没读到"更强的事实；否则就是
+                #   因为量不到而拒绝执行用户的决定。
+                if deny_state(target) != DENY_NO:
                     acl_allow(target)
                     record(audit_dir, "host_shield_changed",
                            decision="allow", severity="warning",
@@ -4265,7 +4304,9 @@ def _lock_pending_tree(base, lock_dirs, state, audit_dir, now,
                 continue
             win = (state.get("windows") or {}).get(key) or 0
             if win and now < win:
-                if is_denied(target):       # 放行窗内：开窗一次
+                # ★ 同上（N4）：放行窗内，"窗是开的"这件事已经成立，
+                #   不因为 ACL 读不到而把用户关在门外。
+                if deny_state(target) != DENY_NO:   # 放行窗内：开窗一次
                     acl_allow(target)
                     touched = True
                 continue

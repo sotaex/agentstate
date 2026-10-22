@@ -836,6 +836,69 @@ def _dst_command_pats():
 # survive the substitution: `grep -n rm f > out.txt` writes, so it is not read-only.
 _FD_REDIRECT_RE = re.compile(r"\d*>&\d*|&>")                # 2>&1, &>file: not a chain
 
+# ★★ 2026-10-22（40 格 · 环境·判 / N6）：判据从「含不含危险词」换成
+#    「这段文本**有没有能力**让那个词被执行」。
+#
+#    两处实测误拦（BL-01 现场，都是"我在写一条关于删除的命令"）：
+#      ① `grep -n "rm -rf" notes.md 2>/dev/null`
+#         —— 丢弃输出没有任何副作用能力，但 `>` 被当成写入 ⇒ 只读豁免失效 ⇒ 拦。
+#      ② `git commit -F - <<'EOF' … 用 os.remove 清掉 … EOF`
+#         —— heredoc 正文是**喂给 stdin 的数据**，不会执行，却被当成命令文本。
+#    ⇒ 两条都是"词在那里，但它没有被执行的能力"。把它们剥掉**不放松任何真实拦截**：
+#      · 重定向到黑洞（/dev/null、nul）写不出任何东西；
+#      · heredoc 正文只进 stdin，且**接收方是解释器时不剥**（`bash <<EOF` 会执行正文）。
+#    ★ 边界：只认带定界符、定界符顶格结束的 heredoc；任何不确定 ⇒ 原样返回（宁可多拦）。
+_NULL_SINK_RE = re.compile(r"\d*>>?\s*(?:/dev/null|nul)(?![A-Za-z0-9_])", re.I)
+_HEREDOC_TAG_RE = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+#: 这些动词会把 heredoc 正文**当脚本执行** ⇒ 正文一个字节都不许剥。
+_HEREDOC_EXECUTORS = (
+    "bash", "sh", "zsh", "dash", "ksh", "python", "python3", "py", "node",
+    "nodejs", "perl", "ruby", "php", "pwsh", "powershell", "cmd", "eval",
+    "exec", "source", "iex", "Invoke-Expression",
+)
+
+
+def strip_heredoc_bodies(cmd):
+    """把 heredoc 的**正文**删掉（保留起始行），返回净化后的命令文本。
+
+    ★ 只在"接收方不是解释器"时剥：`cat <<EOF` 的正文是数据，
+      `bash <<EOF` 的正文是脚本 —— 后者剥了就是把真删除放行（漏放方向）。
+    ★ 找不到结束定界符 ⇒ 原样返回。**剥错比不剥危险**。
+    """
+    if "<<" not in cmd or "\n" not in cmd:
+        return cmd
+    lines = cmd.splitlines(keepends=True)
+    out, i, n = [], 0, len(lines)
+    exec_re = re.compile(r"\b(?:%s)\b" % "|".join(_HEREDOC_EXECUTORS), re.I)
+    while i < n:
+        line = lines[i]
+        m = _HEREDOC_TAG_RE.search(line)
+        if not m:
+            out.append(line)
+            i += 1
+            continue
+        if exec_re.search(line[:m.start()]):
+            out.append(line)                 # 正文会被执行 ⇒ 一块都不剥
+            i += 1
+            continue
+        tag = m.group(2)
+        dash = line[m.start():m.start() + 3] == "<<-"
+        j, found = i + 1, None
+        while j < n:
+            s = lines[j].rstrip("\r\n")
+            if (s.lstrip("\t") if dash else s) == tag:
+                found = j
+                break
+            j += 1
+        if found is None:                    # 没有结束行 ⇒ 不剥（宁可多拦）
+            out.append(line)
+            i += 1
+            continue
+        out.append(line)                     # 只留起始行（`… <<'EOF'`）
+        i = found + 1                        # 正文与结束行一起丢掉
+    return "".join(out)
+
+
 
 def _scan_command(cmd):
     """Split a command on shell operators that appear OUTSIDE quotes.
@@ -845,7 +908,12 @@ def _scan_command(cmd):
     `>` writes. Quote awareness is what makes `grep -E "rm|del" f` read-only while
     `grep x | rm -rf` is not. fd plumbing (2>&1, &>file) is stripped first so it is
     not mistaken for a chain."""
-    s = _FD_REDIRECT_RE.sub(" ", cmd)
+    # ★ 40 格 · 环境·判：先按"有没有执行能力"剥两处**明确没有能力**的文本，
+    #   再走引号感知的分段。顺序即安全：剥 heredoc 在主文本上做（它可能跨行），
+    #   剥 /dev/null 在它之后（heredoc 起始行里也可能带重定向）。
+    s = strip_heredoc_bodies(cmd)
+    s = _NULL_SINK_RE.sub(" ", s)
+    s = _FD_REDIRECT_RE.sub(" ", s)
     segs, cur, q, i, n = [], [], None, 0, len(s)
     danger = False
     while i < n:

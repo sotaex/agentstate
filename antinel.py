@@ -1997,6 +1997,21 @@ def _brand_icon():
         return None
 
 
+def _spawn_mode_text(mode, ok):
+    """把 `spawn_sentinel` 的模式翻译成用户读得懂的一句话（★ 唯一实现）。
+
+    ★ 40 格 · 时间·挡：时钟被改过时模式是 `clock-skew` —— 它既不是"已在岗"，
+      也不是"拉起失败"。以前两种情形共用一句"拉起失败，由它自动复活"，
+      于是用户看到的是"失败了但会自己好"，而事实是"**没人动过它，先校准时钟**"。
+    """
+    if mode == "clock-skew":
+        return "系统时钟被改过，这次没动它（先校准时钟再看）"
+    if ok:
+        return {"already-running": "已在岗（心跳新鲜）", "detached": "已拉起（独立进程）",
+                "detached-breakaway": "已拉起（脱离会话）"}.get(mode) or str(mode)
+    return "拉起失败，由它自动复活"
+
+
 def _create_desktop_lnk(lnk_path=None):
     """建桌面入口 `.lnk`（pythonw 无窗口＋品牌图标）。成功返回路径，失败返回 None。
 
@@ -2233,10 +2248,15 @@ def cmd_host_shield(args):
         # 会话结束不再连带被杀；失败也如实上报（不再无条件宣布成功）。
         # 幂等：哨兵已在岗则不重复拉起（重复拉起会立刻被唯一性守卫退出，
         # 却把 state 的 pid 改写成这个短命进程，造成记账抖动）。
-        if hs.sentinel_alive(st):
-            ok, pid, mode = True, st.get("sentinel_pid"), "already-running"
-        else:
-            ok, pid, mode = hs.spawn_sentinel(os.path.dirname(_sibling("antinel.py")))
+        # ★★ 2026-10-22（40 格 · 时间·挡）：**删掉这道捷径**。
+        #   0.35.3 已把 `spawn_sentinel` 的幂等收紧成「进程活 **且** 心跳新鲜」
+        #   （进程活但心跳断了 ⇒ 杀掉重拉）。而这里先判 `sentinel_alive(st)`
+        #   就直接宣布成功 ⇒ 那条收紧**在这条路径上从来没生效过**：
+        #   一个僵死的哨兵占着 pid，用户点「布防」得到的是"已在跑"。
+        #   `spawn_sentinel` 本身就是幂等的（already-running），不必在外面先拦一遍。
+        #   ★ 顺带修掉时钟坏时的 fail-open：模式可能是 `clock-skew`（算不出在不在岗），
+        #     由 `spawn_sentinel` 统一给出，不再在这里被"进程在"覆盖成成功。
+        ok, pid, mode = hs.spawn_sentinel(os.path.dirname(_sibling("antinel.py")))
         # ★ 0.52.0：桌面入口 —— 默认放（创始人 2026-10-17「用户下载安装之后，
         #   是否也默认在用户桌面放上呢，用户体验一定要照顾周全」）。与自启同形态
         #   （pythonw 无窗口＋品牌图标）；`--no-desktop` 可关；建不成就地如实说，
@@ -2252,7 +2272,8 @@ def cmd_host_shield(args):
                   autostart=autostart, spawn=("ok" if ok else "failed"),
                   invoked_by=_invoked_by(),
                   reason="宿主审计门闸已布防（自启=%s；监理=%s）"
-                         % (autostart, ("pid %s %s" % (pid, mode)) if ok else "拉起失败，由它自动复活"))
+                         % (autostart, ("pid %s %s" % (pid, _spawn_mode_text(mode, ok)))
+                            if ok else _spawn_mode_text(mode, ok)))
         print("✓ 护盾已布防：%s" % SHIELD_STATE_ON)
         if autostart == "schtasks":
             print("  自启：计划任务 AntinelHostShield（登录触发）")
@@ -2270,7 +2291,9 @@ def cmd_host_shield(args):
         else:
             print("  ⚠ 桌面入口未能创建——补建：antinel host-shield desktop")
         if ok:
-            print("  监理：已在岗（pid %s，%s）" % (pid, mode))
+            print("  监理：%s（pid %s）" % (_spawn_mode_text(mode, ok), pid))
+        elif mode == "clock-skew":
+            print("  ⚠ 监理：%s" % _spawn_mode_text(mode, ok))
         else:
             print("  ⚠ 监理本次未能拉起——下次 Agent 活动时 paramedic 会自动重试；"
                   "antinel host-shield status 查看在岗状态")

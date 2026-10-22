@@ -63,6 +63,93 @@ def chaos():
         time.sleep(ms / 1000.0)
 
 
+# ------------------------------------------------------- 并发读数（N5）----
+#: ★★ 2026-10-22（40 格 · 并发·报）：抢锁超时与回收死锁**有计数、没有出口**。
+#:   `tlog()` 只在 `ANTINEL_LOCK_TELEMETRY=1` 时才写，而那个开关是给诊断用的
+#:   —— 等于"用户不看诊断就永远看不到"。一次"两个守卫同时起来"在界面上
+#:   完全不可见，而它恰好是"记录写得慢/写丢"的常见原因。
+#: ⇒ 竞争事件单独落一个 append-only 小文件（正常一天 0 行），由页面读回。
+#: ★ 为什么不用主链：这类事件每分钟可能几十条，进链会把真信号淹掉
+#:   （与 `egress` 不进主链同一条理由）。它记的是**运行状况**，不是失守。
+LOCK_EVENTS = "lock_events.jsonl"
+_LOCK_EVENTS_MAX = 1024 * 1024        # 1 MB 一代；超了把上一代挪成 .1（有界 2 MB）
+
+
+def lock_events_path(audit_dir=None):
+    """竞争事件的落点。`audit_dir` 缺省＝cwd 下的 `.psl/audit`（与 tlog 同源）。"""
+    d = audit_dir or os.path.join(os.getcwd(), ".psl", "audit")
+    return os.path.join(d, LOCK_EVENTS)
+
+
+def _note_lock(lock, evt, **kw):
+    """记一次竞争。**best-effort**：读数十毫秒的锁不值得为写日志崩掉。"""
+    try:
+        p = os.path.join(os.path.dirname(lock) or ".", LOCK_EVENTS)
+        try:
+            if os.path.getsize(p) > _LOCK_EVENTS_MAX:
+                os.replace(p, p + ".1")     # 只留一代 ⇒ 占用有上界
+        except OSError:
+            pass
+        with open(p, "a", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps({"t": round(time.time(), 3), "pid": os.getpid(),
+                                "evt": evt, "file": os.path.basename(lock), **kw},
+                               ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def lock_pressure(hours=24.0, path=None):
+    """读回并发读数（★ 唯一实现：页面/CLI 都调它，不许各数一遍）。
+
+    返回 `{"timeouts":n, "steals":n, "last":ts|None, "files":[...], "checked":bool}`。
+
+    ★★ `checked` 必须与 0 分开：`timeouts=0, checked=True` 是"查了，没竞争"；
+      `checked=False` 是"这个文件读不到/不存在"—— 后者不是"没问题"，
+      正好是本仓第 ④ 条判据（没查 ≠ 没发现）。
+    """
+    p = path or lock_events_path()
+    out = {"timeouts": 0, "steals": 0, "last": None, "files": [], "checked": False}
+    files = [p, p + ".1"]
+    now = time.time()
+    seen = set()
+    for fp in files:
+        try:
+            with open(fp, "r", encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        e = json.loads(line)
+                    except ValueError:
+                        continue
+                    t = e.get("t")
+                    if not isinstance(t, (int, float)) or now - t > hours * 3600:
+                        continue
+                    out["checked"] = True
+                    evt = e.get("evt")
+                    if evt == "acq_timeout":
+                        out["timeouts"] += 1
+                    elif evt == "steal":
+                        out["steals"] += 1
+                    else:
+                        continue
+                    fn = e.get("file") or ""
+                    if fn and fn not in seen:
+                        seen.add(fn)
+                        out["files"].append(fn)
+                    if out["last"] is None or t > out["last"]:
+                        out["last"] = t
+        except FileNotFoundError:
+            continue
+        except OSError:
+            continue
+    if os.path.isdir(os.path.dirname(p) or "."):
+        out["checked"] = True
+    return out
+
+
+
 # ------------------------------------------------------- C-2 锁所有权 ----
 def read_lock(lock):
     """读锁内容 {pid, ts, token}；空/残缺返回 None。"""
@@ -121,6 +208,9 @@ def acquire_lock(fn):
                         os.remove(lock)             # holder is really gone; a
                         tlog("steal", age_s=round(age, 1),
                              pid=(c or {}).get("pid"))   # live holder keeps it.
+                        # ★ 40 格 · 并发·报：回收死锁也要让用户看得见（不只在 tlog 里）
+                        _note_lock(lock, "steal", age_s=round(age, 1),
+                                   holder=(c or {}).get("pid"))
             except Exception:
                 # ★ 0.34.1 修：原为 `except OSError`。宿主删除守卫会抛出**非 OSError**
                 #   的异常（实测 `SAFE_DELETE_BULK_CONFIRM_REQUIRED`）⇒ 穿透 ⇒ 抢锁
@@ -140,6 +230,9 @@ def acquire_lock(fn):
             time.sleep(delay)
             delay = min(delay * 1.25, 0.025)
     tlog("acq_timeout", waited_ms=round((time.time() - t0) * 1000))
+    # ★ 40 格 · 并发·报：预算耗尽 ⇒ 落 sidecar（记录不丢）**且**留一行可见读数。
+    #   否则"两个守卫同时起来"只存在于一个默认关闭的诊断开关里。
+    _note_lock(lock, "acq_timeout", waited_ms=round((time.time() - t0) * 1000))
     return None
 
 
