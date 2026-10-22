@@ -286,7 +286,10 @@ py-modules = ["antinel", "audit_chain", "session_dna", "strings",
               "inbox_window", "remediation",
               # ★ 0.38.0 粮（哨兵口粮）＋ 机器唯一码（两个新模块，
               #   与 build() 里的 root_mod 复制清单逐字一致）
-              "granary", "machine_id"]
+              "granary", "machine_id",
+              # ★ 0.55.0 状态机改造（A/B 双线汇合）：四个新模块。
+              #   与仓库 pyproject.toml 及 build() 的 root_mod 清单逐字一致。
+              "facts", "situation", "state_registry", "sidecar"]
 packages = ["hooks", "scripts", "tools", "rules", "psl", "assets", "challenge"]
 
 [tool.setuptools.package-data]
@@ -2645,7 +2648,12 @@ def build(out_root, verify=False):
                      # ★ 0.36.0：窗口几何（唯一几何实现）+ 失守归因引擎
                      "inbox_window.py", "remediation.py",
                      # ★ 0.38.0：粮（哨兵口粮，0.38.0 新增真源）＋ 机器唯一码
-                     "granary.py", "machine_id.py"):
+                     "granary.py", "machine_id.py",
+                     # ★ 0.55.0 状态机改造（A/B 双线汇合）：四个新模块。
+                     #   三处清单（本元组／模板 py-modules／仓库 pyproject.toml）
+                     #   必须逐字一致 —— D-20 就是这三处不一致长出来的。
+                     "facts.py", "situation.py", "state_registry.py",
+                     "sidecar.py"):
         # 2026-09-24 (G7): antinel_mcp.py was declared in pyproject.toml's
         # py-modules and shipped in the repo, but this list never copied it --
         # so a rebuild deleted it while pyproject kept declaring it. Same class

@@ -69,7 +69,12 @@ py-modules = ["antinel", "audit_chain", "session_dna", "strings",
               "inbox_window", "remediation",
               # ★ 0.38.0 粮（哨兵口粮）＋ 机器唯一码（两个新模块，
               #   与 build() 里的 root_mod 复制清单逐字一致）
-              "granary", "machine_id"]
+              "granary", "machine_id",
+              # ★ 0.55.0 状态机改造（A/B 双线汇合）：四轴事实／成因投影／
+              #   表现登记／观察 sidecar —— 四个新模块。D-20 实测它们被 import
+              #   却不在本清单里（(present & imported) - declared）。
+              #   与 build() 里的 root_mod 复制清单逐字一致。
+              "facts", "situation", "state_registry", "sidecar"]
 packages = ["hooks", "scripts", "tools", "rules", "psl", "assets", "challenge"]
 
 [tool.setuptools.package-data]

@@ -125,7 +125,7 @@
   "rules/hosts/zcode.json": "sha256:b6be75e0e16189afe4e15bd196b14f1820ff97b7eaeadd9907ab0beb558efe51",
   "rules/pricing.json": "sha256:e299e7afa07a97128ce00c13706379c79368c747cd4303c488f1c53c5339e253",
   "rules/typosquat_top.json": "sha256:0c699af6ba05d7675055be29b8c1e379714d9fbf44c4369a1717cade424190ad",
-  "scripts/build_package.py": "sha256:2a4cbc88be43a9465f82b7eadb6517219b32bccf63e9930897ca8ae575241527",
+  "scripts/build_package.py": "sha256:4377c0686f948393ede00932cc3a47940b4b46783dc2d9054cb49c88f1d76332",
   "scripts/check_github_license.py": "sha256:3c7a500a1d30f019a0aa149efc2aff844ec02593fa2c8c39ed51170e447be125",
   "scripts/cleanup_staging_once.py": "sha256:8245dc52b4a8dc77e7c2a907751564c81502dc3ba15f9c98757c509edc26117c",
   "scripts/install.py": "sha256:f6a2a6dccf9539bb0ef2f573d7712418ff850eee14ec0b564119761749405545",
