@@ -825,3 +825,21 @@ at-risk·slash／off bar）＋lamp 四色参照，附记录表。
   §F1 第 93 行那处属早期抄写笔误，建议下一版修订时更正。
   ⇒ 这条正是 S58 要抓的形状：**「设计写了」与「代码有」不是同一件事**。
 
+- **#54 三份「冻结」的字段表互不一致（A1 开工时撞出）**。实测三组键集：
+  ① 地基件 §3.1（D-02）＝ **23** 字段；
+  ② 本件 §F1 第 96 行＝「23 ＋ 4 新 ＝ **27**」；
+  ③ 本件 §5.2 的 `BASE`（夹具基线）＝ **24** 个键。
+  三方**双向都有缺**：`BASE` 比「D-02 ∪ 新增4」**多 3 个**
+  （`granary_balance_hours`／`counts`／`egress_free_bytes`）、**少 6 个**
+  （`heartbeat_ts`／`self_check_problems`／`dev_exempt`／`published_version`／
+  `code_version`／`heartbeat_slices`）。
+  **裁定：取并集 30**。理由——少字段 ⇒ 投影要用时没有 ⇒ 又变成猜（比多字段危险得多）；
+  而多出的 3 个每一个都有硬出处：`granary_balance_hours` 是本件 G4 的**异质单位特冻**
+  （单位小时，源自 `granary.HOURS_PER_DAY=24`）、`counts` 是 N9 同屏互斥用、
+  `egress_free_bytes` 是 N6-c 磁盘 at-risk 用。少掉的 6 个全是诊断/徽标/证据字段，
+  投影不读但 D-02 要求产出。
+  ⇒ **验收口径相应改为 `BASE` ⊆ `FIELDS`**（不是相等）：夹具的 24 键必须都能喂进
+  facts；facts 另有 6 个夹具不喂的诊断字段，值为 `None`（走 F1 缺失语义）。
+  ⇒ 连带一条实现约束：`collect()` 对未注入的字段给 **`None` 而不是让键缺席** ——
+  键不在场会让投影层的 `facts.get(k, 默认)` 悄悄生效，那正是 F1 明令禁止的「静默默认」。
+
