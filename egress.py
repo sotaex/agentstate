@@ -31,6 +31,7 @@ import ctypes
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import time
@@ -68,6 +69,22 @@ LONG_CONN_RATIO = 6.0            # 判据②：且 ≥ 该进程自身时长中�
 MIN_SAMPLES_FOR_MEDIAN = 5       # 判据②：样本 < 5 条不下结论（不许拿 2 条数据判人）
 LEDGER_DAYS = 7                  # 报告默认回看天数
 RESOLVE_TIMEOUT = 1.5            # 反解超时（秒）；反解本身会发 DNS 查询，要能关
+
+# ---------------------------------------------------------------- 保留策略
+# ★★ 2026-10-22（40 格 · 空间·挡）：**这一格是唯一随时间必然恶化的一格**。
+#   实测：`~/.antinel/egress` 25 天 84 MB（最坏一天 20 MB / 22237 条事件），
+#   而当时**零保留策略**。没有上界 ⇒ 迟早写满 ⇒ 写失败 ⇒ 账本静默断档
+#   ⇒ 其余所有判定都跟着失去证据。所以本组常量不是"优化参数"，是**上界**：
+#     ① 按天保留：够覆盖报告窗口（7 天）的两倍，多出来的天数没有消费方；
+#     ② 按总量保留：一天就能到 20 MB，只按天数留会到 280 MB ⇒ 必须还有字节闸；
+#     ③ 磁盘剩余闸：账本不能把宿主的盘吃掉 —— 这是"观测者不许成为事故"。
+KEEP_DAYS = 14                              # 事件文件按天保留上限
+MAX_DIR_BYTES = 48 * 1024 * 1024            # 账本目录总量上限（48 MB）
+MIN_FREE_BYTES = 64 * 1024 * 1024           # 磁盘剩余低于 64 MB ⇒ 写前先腾
+DISK_WARN_PCT = 0.85                        # 磁盘占用 ≥ 85% ⇒ 记一条 disk_pressure
+EVENT_PREFIX = "events-"
+EVENT_SUFFIX = ".jsonl"
+_EVENT_DAY_RE = re.compile(r"^events-(\d{4}-\d{2}-\d{2})\.jsonl$")
 
 # 对象存储型目的地（判据③）。★ 这是**特征**不是白名单：命中只标"值得看"，不说"这是偷"
 OBJECT_STORE_SUFFIX = (
@@ -245,18 +262,267 @@ def _events_path(day=None):
     return os.path.join(d, "events-%s.jsonl" % day)
 
 
-def _append(ev):
-    """append-only 写一条事件。★ 采样失败也要写（`e:"sample_failed"`）——
-    否则"没采样"会被当成"没问题"（仓库第 ④ 条判据："没查"不许伪装成"没发现"）。"""
-    p = _events_path()
-    if not p:
+def _day_of(name):
+    """`events-2026-10-08.jsonl` → `2026-10-08`；不是事件文件 ⇒ None。"""
+    m = _EVENT_DAY_RE.match(name or "")
+    return m.group(1) if m else None
+
+
+def dir_stats():
+    """账本目录的**实测**占用：`{"bytes":…, "files":…, "days":[(day, name, size)]}`。
+
+    ★ 只数真的在盘上的字节（`st_size`），不按"记录了多久"估 ——
+      估出来的体积正是"必然恶化"那种格子最容易骗自己的地方。
+    ★ 目录不存在/读不到 ⇒ `bytes=0, files=0, days=[], readable=False`。
+      **可读性是独立字段**：0 字节和"读不到"是两件事（同仓 null≠0≠[] 纪律）。
+    """
+    d = ledger_dir()
+    out = {"bytes": 0, "files": 0, "days": [], "readable": False}
+    if not d:
+        return out
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return out
+    out["readable"] = True
+    for name in names:
+        p = os.path.join(d, name)
+        try:
+            sz = os.path.getsize(p)
+        except OSError:
+            continue
+        out["files"] += 1
+        out["bytes"] += sz
+        day = _day_of(name)
+        if day:
+            out["days"].append((day, name, sz))
+    out["days"].sort()                     # 最老在前（删除顺序＝这个顺序）
+    return out
+
+
+def capacity():
+    """磁盘与账本目录的现状。**拿不到就说拿不到**（返回 None，不猜 100%）。"""
+    d = ledger_dir()
+    if not d:
+        return None
+    try:
+        u = shutil.disk_usage(d)
+    except OSError:
+        return None
+    ds = dir_stats()
+    used_pct = (float(u.used) / u.total) if u.total else None
+    return {
+        "total": u.total, "free": u.free, "used_pct": used_pct,
+        "low_free": u.free < MIN_FREE_BYTES,
+        "dir_bytes": ds["bytes"], "dir_files": ds["files"],
+        "dir_full": ds["bytes"] >= MAX_DIR_BYTES,
+        "readable": ds["readable"],
+    }
+
+
+def enforce_retention(today=None, force=False):
+    """按「天数」与「总量」两条上界清掉最老的事件文件。**幂等**。
+
+    返回 `{"removed":[names], "bytes":n, "why":"days|bytes|", "failed":[names]}`。
+
+    ★★ 三条纪律（这张表是安全产品的证据账本，不是日志）：
+      ① **先记账，后删除**：留一条 `rotated` 事件（删了哪几个、多少字节、为什么），
+         否则"证据变少了"这件事本身没有证据。
+      ② **今天这个文件永不删**：正在追加的文件被删/被改名，会把当前采样写丢。
+      ③ **删不掉不静默**：`failed` 如实返回，由调用方决定要不要上屏。
+    ★ 为什么不用"把老文件挪去 archive/"：那只是把同一个字节数换个目录放，
+      不解决"必然恶化"，还会让体积统计看不到它 —— 假减法。
+
+    ★★ `force` 的唯一用途：**写已经失败了**（`_append` 第②段）。
+      那种时刻"先记账"会变成死锁 —— 账写不进 ⇒ 不删 ⇒ 永远腾不出空间。
+      磁盘满时**删是唯一能救活的动作**，账让路：记账落到内存 `_ROT_NOTE`，
+      下一次写成功时补（`_flush_lost` 负责）。平时（`force=False`）账写不进就不删。
+    """
+    d = ledger_dir()
+    if not d:
+        return {"removed": [], "bytes": 0, "why": "", "failed": []}
+    today = today or time.strftime("%Y-%m-%d")
+    ds = dir_stats()
+    days = [x for x in ds["days"] if x[0] != today]
+    n_days = len(ds["days"])
+    # ★ 预算要把**非事件文件**（current.json/lost.json/disk_warn.json…）和
+    #   **即将写的那条 rotated 账**先扣掉。不扣的话实测会"删完仍超 123 字节"——
+    #   上限是硬的，账本身也在吃预算（这是本轮实测踩到的，不是假想）。
+    total = sum(x[2] for x in ds["days"])
+    budget = MAX_DIR_BYTES - (ds["bytes"] - total) - 512
+    victims, why = [], ""
+    # ① 天数上界
+    # ★ 每删一个必须同步扣 `total` —— 否则第二段会拿**没扣过的**总量再判一次，
+    #   同一批文件被算两遍，实测多删 7 天（2026-10-22 在真实账本上踩到：
+    #   应删 10 天，实删 17 天）。两条腿是"任一超限就删"，不是"两条各删一遍"。
+    while n_days > KEEP_DAYS and days:
+        item = days.pop(0)
+        victims.append(item)
+        total -= item[2]
+        n_days -= 1
+        why = "days"
+    # ② 总量上界（天数已合规但体积仍超 ⇒ 继续从最老的删）
+    for item in list(days):
+        if total <= budget:
+            break
+        victims.append(item)
+        total -= item[2]
+        why = why or "bytes"
+    if not victims:
+        return {"removed": [], "bytes": 0, "why": "", "failed": []}
+    # ① 先记账（写在今天的文件里）；平时刻写不进就不删
+    note = {"t": time.time(), "e": "rotated",
+            "n": len(victims), "bytes": sum(v[2] for v in victims),
+            "why": why, "days": [v[0] for v in victims][:64]}
+    if not _write_line(_events_path(today), note):
+        if not force:
+            return {"removed": [], "bytes": 0, "why": why,
+                    "failed": [v[1] for v in victims]}
+        _ROT_NOTE.append(note)          # 账让路：删完继续救火，账下次补
+    removed, failed, freed = [], [], 0
+    for day, name, sz in victims:
+        try:
+            os.remove(os.path.join(d, name))
+            removed.append(name)
+            freed += sz
+        except OSError:
+            failed.append(name)
+    return {"removed": removed, "bytes": freed, "why": why, "failed": failed}
+
+
+
+# ---------------------------------------------------------------- 写失败记账
+#: ★★ N3（空间·报）：写失败**跨进程不可见** —— 磁盘满时盘上当然没有痕迹，
+#:   另一个进程（甚至自己重启后）无从得知"那段时间丢了几条"。
+#:   唯一出路是**下一次写成功时补一条**：「此前有 N 条没能写入（首条 ts=…）」。
+#:   ⇒ 两条腿：能落盘就落盘（`lost.json`，几十字节，通常还写得进），
+#:     落盘也失败就记在内存（进程内仍能补）。两处都在时取**和**。
+#: ★ 允许重复补：清零那一步若也失败，下次会再补一遍（数字偏大）。
+#:   口径：**宁可多记，不许少记** —— 少记等于替一次丢失撒谎。
+_LOST = {"n": 0, "first": None, "last": None}
+
+#: 磁盘满时"删了但账没写进"的 rotated 事件（见 `enforce_retention(force=True)`）。
+#: 下一次能写的时候由 `_flush_lost` 补出去 —— 删账这件事**也必须**有账。
+_ROT_NOTE = []
+
+
+def _write_line(path, obj):
+    """append 一行 JSON。返回 True/False（不抛）。**这是唯一真正的写入口。**"""
+    if not path:
         return False
     try:
-        with open(p, "a", encoding="utf-8", newline="\n") as f:
-            f.write(json.dumps(ev, ensure_ascii=False, sort_keys=True) + "\n")
+        with open(path, "a", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps(obj, ensure_ascii=False, sort_keys=True) + "\n")
         return True
     except OSError:
         return False
+
+
+def _note_lost(now=None):
+    """记一次写失败。落盘优先，落不了记内存。"""
+    now = now or time.time()
+    _LOST["n"] += 1
+    _LOST["first"] = _LOST["first"] or now
+    _LOST["last"] = now
+    cur = _read_json("lost.json", {}) or {}
+    try:
+        n = int(cur.get("n") or 0)
+    except (TypeError, ValueError):
+        n = 0
+    if _write_json("lost.json", {"n": n + 1,
+                                 "first": cur.get("first") or now,
+                                 "last": now}):
+        _LOST["n"], _LOST["first"], _LOST["last"] = 0, None, None
+
+
+def lost_pending():
+    """还没补记的丢失条数 `(n, first, last)`。盘上一份＋内存一份。"""
+    disk = _read_json("lost.json", {}) or {}
+    try:
+        dn = int(disk.get("n") or 0)
+    except (TypeError, ValueError):
+        dn = 0
+    return (dn + _LOST["n"],
+            disk.get("first") or _LOST["first"],
+            disk.get("last") or _LOST["last"])
+
+
+def _flush_lost(path):
+    """把待补的丢失补成一条 `lost` 事件。成功才清零（失败 ⇒ 留着下次再补）。
+
+    ★ 顺序：先补 `rotated`（"删了什么"），再补 `lost`（"丢了几条"）。
+      反过来会让读者以为"先丢了 N 条，后来才轮转"，因果颠倒。
+    """
+    while _ROT_NOTE:
+        if not _write_line(path, _ROT_NOTE[0]):
+            return False
+        _ROT_NOTE.pop(0)
+    n, first, last = lost_pending()
+    if n <= 0:
+        return True
+    if not _write_line(path, {"t": time.time(), "e": "lost", "n": int(n),
+                              "first": first, "last": last}):
+        return False
+    _LOST["n"], _LOST["first"], _LOST["last"] = 0, None, None
+    if not _write_json("lost.json", {"n": 0}):
+        # 清零失败 ⇒ 下次会重复补一遍（见 _LOST 上方的口径）
+        return True
+    return True
+
+
+def _disk_pressure_once(cap):
+    """磁盘/账本接近上限时记一条 `disk_pressure`。**一天最多一条**（否则就是噪音）。"""
+    if not cap:
+        return False
+    hit_disk = cap.get("used_pct") is not None and cap["used_pct"] >= DISK_WARN_PCT
+    hit_dir = bool(cap.get("dir_full"))
+    if not (hit_disk or hit_dir):
+        return False
+    day = time.strftime("%Y-%m-%d")
+    mark = _read_json("disk_warn.json", {}) or {}
+    if mark.get("day") == day:
+        return False
+    rec = {"t": time.time(), "e": "disk_pressure", "day": day,
+           "used_pct": round(cap["used_pct"], 4) if cap.get("used_pct") is not None else None,
+           "free_mb": round(cap["free"] / 1048576.0, 1),
+           "dir_mb": round(cap["dir_bytes"] / 1048576.0, 1),
+           "dir_full": bool(cap.get("dir_full"))}
+    if not _write_line(_events_path(day), rec):
+        return False
+    _write_json("disk_warn.json", {"day": day})
+    return True
+
+
+
+def _append(ev):
+    """append-only 写一条事件。★ 采样失败也要写（`e:"sample_failed"`）——
+    否则"没采样"会被当成"没问题"（仓库第 ④ 条判据："没查"不许伪装成"没发现"）。
+
+    ★★ 2026-10-22（空间·挡）：这里从"打开-写-失败就 False"改成三段：
+      ① **先补旧账**：把上一轮没写进去的条数补成一条 `lost`（写成功才补事件，见 `_flush_lost`）；
+      ② **写**：真失败（磁盘满/被拒）⇒ **当场腾空间再试一次** —— 这才是"挡在后果之前"，
+         "等下次采样"时那一次的事实已经没了；
+      ③ **仍失败** ⇒ 记账（`_note_lost`）并返回 False。**绝不在失败时返回 True**
+         （BL-02 的方向错就是"写失败报成功"）。
+    """
+    p = _events_path()
+    if not p:
+        return False
+    _flush_lost(p)
+    if _write_line(p, ev):
+        return True
+    # ② 腾空间：按天/按总量清最老的文件（今天的不动），再试一次
+    #    `force=True`：此刻写已经失败，"先记账再删"会死锁（账也写不进）。
+    try:
+        enforce_retention(force=True)
+    except Exception:
+        pass
+    if _write_line(p, ev):
+        return True
+    # ③ 记账：这一次的事实没进账本，必须能被下一次写成功时看见
+    _note_lost(ev.get("t") or time.time())
+    return False
+
 
 
 def _read_json(name, default):
@@ -283,12 +549,36 @@ def _write_json(name, obj):
         return False
 
 
+def housekeep():
+    """每次采样前的一次自维护：保留策略 + 容量观测。返回实测结果（便于判据）。
+
+    ★ 为什么必须有这一步（40 格 · 空间·挡/看）：账本是**一直在长**的东西，
+      而它的上界只有在有人执行时才存在。以前没有任何调用方 ⇒ 84 MB 无上界。
+    ★ 顺序：先轮转（腾出空间），再观测（看到的是轮转后的真实值）。
+    ★ 全部失败都不抛：维护动作绝不能拖死哨兵；失败由 `capacity()` 的字段与
+      `_append` 的 lost 记账两条腿暴露，不靠异常。
+    """
+    rot = {"removed": [], "bytes": 0, "why": "", "failed": []}
+    try:
+        rot = enforce_retention()
+    except Exception:
+        pass
+    cap = None
+    try:
+        cap = capacity()
+        _disk_pressure_once(cap)
+    except Exception:
+        cap = None
+    return {"rotation": rot, "capacity": cap}
+
+
 def tick():
     """哨兵每 N 拍调一次：采样 → 与上一拍比对 → 记 new/gone → 覆盖写当前表。
 
     ★ 返回的 bool 只表示"这一步自己跑完没有"，不代表"有没有可疑"。
     ★ 调用方必须 try 包住 —— 采样绝不能拖死哨兵。
     """
+    housekeep()
     s = sample()
     if not s.get("ok"):
         _append({"t": s["ts"], "e": "sample_failed", "idle": s.get("idle")})
@@ -409,10 +699,13 @@ def _proc_longest(spans, now=None):
     return by
 
 
-def analyze(evs, current, days_with, do_resolve=True):
+def analyze(evs, current, days_with, do_resolve=True, pending_lost=0):
     """三条判据。全部**只标"值得看"**，每条附原样证据 + 一句可自行否掉的话。
 
     返回 list[dict]：`{"kind":…, "lines":[…]}`。
+
+    ★ 2026-10-22 加了 ④账本断档 ⑤磁盘吃紧 —— 它们是**账本自己**的异常。
+      观测者出问题时最容易被漏掉：数据还在、只是少了，看起来一切正常。
     """
     out = []
     now = time.time()
@@ -476,11 +769,42 @@ def analyze(evs, current, days_with, do_resolve=True):
                     "%s 反解命中 %s（对象存储）" % ("、".join(sorted(procs))[:60], h),
                     "→ 数据直传存储桶是已知外传手法；也可能是它正常的资源存放，需你自行判断。",
                 ]})
+    # ④ 账本自己断过档（N3 的消费侧：补记的那条要有人读）
+    # ★ 为什么这条必须进「值得看」：`lost` 事件是写失败留下的唯一痕迹。
+    #   记了没人读 ⇒ 与 0.42.0 那次「89 条 hook_slow 被匿名计数吸收」同一形状：
+    #   空档会被读成"那段时间没有外传"，而事实是"那段时间没记上"。
+    lost_n = sum(int(e.get("n") or 0) for e in evs if e.get("e") == "lost")
+    lost_n += int(pending_lost or 0)
+    if lost_n:
+        firsts = [e.get("first") for e in evs if e.get("e") == "lost" and e.get("first")]
+        head = ("，最早从 %s 开始" % time.strftime("%m-%d %H:%M", time.localtime(min(firsts)))
+                if firsts else "")
+        out.append({
+            "kind": "账本断档",
+            "lines": [
+                "有 %d 条记录没能写进账本%s" % (lost_n, head),
+                "→ 磁盘满或写入被拒时会发生。这段空档不等于「那段时间没有外传」，",
+                "  只等于「那段时间没记上」。",
+            ]})
+    # ⑤ 磁盘/账本接近上限（N2 的消费侧）
+    dp = [e for e in evs if e.get("e") == "disk_pressure"]
+    if dp:
+        last = dp[-1]
+        pct = last.get("used_pct")
+        out.append({
+            "kind": "磁盘吃紧",
+            "lines": [
+                "磁盘已用 %s，账本目录 %s MB（上限 %d MB）"
+                % ("%.0f%%" % (pct * 100) if isinstance(pct, (int, float)) else "未知",
+                   last.get("dir_mb"), MAX_DIR_BYTES // 1048576),
+                "→ 账本会先清掉最老的日期让路。清到最新一天仍写不进，就开始记断档。",
+            ]})
     try:
         _write_json("resolve.json", cache)
     except Exception:
         pass
     return out
+
 
 
 def _fmt_dur(sec):
@@ -501,7 +825,7 @@ BOUNDARY = """── 边界（本账本记的是连接事实，不是外传结�
 
 
 def render(snap, findings, days_with, sentinel_on, sample_failed, ai_only=True,
-           longest_by_proc=None, cov_seconds=None):
+           longest_by_proc=None, cov_seconds=None, cap=None):
     L = []
     idle = snap.get("idle")
     L.append("== 外传账本 · 出口连接（%s）"
@@ -515,8 +839,23 @@ def render(snap, findings, days_with, sentinel_on, sample_failed, ai_only=True,
              % (_fmt_dur(idle) if idle is not None else "未知",
                 "在岗（约 30 秒/次）" if sentinel_on else "未运行 ⇒ 无历史采样",
                 LEDGER_DAYS, _cov))
+    # ★ 空间这一格必须自己报数（40 格 · 空间·看/挡）：
+    #   只写"上限 48 MB"而从不写"现在多少"，等于没有上限 —— 用户无法预判哪天开始丢。
+    if cap:
+        _free_mb = cap["free"] / 1048576.0
+        _pct = cap.get("used_pct")
+        L.append("   磁盘剩 %.1f GB%s ｜ 账本 %d 个文件 %.1f MB（上限 %d MB，保留 %d 天）"
+                 % (_free_mb / 1024.0,
+                    ("（已用 %.0f%%）" % (_pct * 100)) if isinstance(_pct, (int, float)) else "",
+                    cap["dir_files"], cap["dir_bytes"] / 1048576.0,
+                    MAX_DIR_BYTES // 1048576, KEEP_DAYS))
+        if cap.get("low_free") or cap.get("dir_full"):
+            L.append("   ⚠ 空间已到闸线：会先清掉最老的日期再写")
+    elif cap is None:
+        L.append("   磁盘：读不到容量（这一项不是「没问题」，是「没量到」）")
     if sample_failed:
         L.append("   ⚠ 本窗口有 %d 次采样失败（未采到 ≠ 没问题）" % sample_failed)
+
 
     L.append("")
     L.append("── 此刻 · %s的外部连接 ──────────────"
@@ -557,6 +896,7 @@ def run(days=LEDGER_DAYS, all_proc=False, do_resolve=True, as_json=False):
         return ("外传账本：当前仅支持 Windows。"
                 "取数靠 netstat、tasklist、GetLastInputInfo。")
     s = sample(ai_only=not all_proc)
+    housekeep()                     # 保留策略 + 容量观测（与 tick 同一实现，不另写一遍）
     evs, days_with = load_events(days)
     cur = _read_json("current.json", {})
     sentinel_on = bool(evs) or bool(cur)
@@ -566,7 +906,12 @@ def run(days=LEDGER_DAYS, all_proc=False, do_resolve=True, as_json=False):
     else:
         _append({"t": s["ts"], "e": "sample_failed", "idle": s.get("idle")})
         failed += 1
-    findings = analyze(evs, cur, days_with, do_resolve=do_resolve)
+    # ★ 补记一条（若上一轮有写失败）之后要**重新读**，否则刚补的那条看不见。
+    evs, days_with = load_events(days)
+    _pending_n, _pfirst, _plast = lost_pending()
+    findings = analyze(evs, cur, days_with, do_resolve=do_resolve,
+                       pending_lost=_pending_n)
+    cap = capacity()
     # 「最长」列的真值：与判据②共用 `_spans()`（单一实现，不许另算一遍）。
     spans, _now = _spans(evs, cur)
     longest_by_proc = _proc_longest(spans, _now)
@@ -577,8 +922,9 @@ def run(days=LEDGER_DAYS, all_proc=False, do_resolve=True, as_json=False):
         return json.dumps({"snapshot": s, "findings": findings,
                            "days_with_data": days_with, "sample_failed": failed,
                            "longest_by_proc": longest_by_proc,
-                           "coverage_seconds": cov_seconds},
+                           "coverage_seconds": cov_seconds,
+                           "capacity": cap, "lost_pending": _pending_n},
                           ensure_ascii=False, indent=2)
     return render(s, findings, days_with, sentinel_on, failed,
                   ai_only=not all_proc, longest_by_proc=longest_by_proc,
-                  cov_seconds=cov_seconds)
+                  cov_seconds=cov_seconds, cap=cap)
