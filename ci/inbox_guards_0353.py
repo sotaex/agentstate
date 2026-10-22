@@ -5049,6 +5049,577 @@ def n_clock_skew_is_a_blind_spot():
         restore()
 
 
+# ======================================================== 40 格 · 空间 ----
+# ★★ 2026-10-22（P24–P27）：`~/.antinel/egress` 实测 25 天 84 MB、**零保留策略**。
+#   40 格里它是**唯一随时间必然恶化**的一格：没有上界 ⇒ 迟早写满 ⇒ 写失败 ⇒
+#   账本静默断档 ⇒ 其余所有判定一起失去证据。
+#   ★ 这一族判据的第一版**漏了组合失效**：天数腿与总量腿同时超时，总量没随
+#     删除递减 ⇒ 同一批文件被算两遍 ⇒ 在真实账本上多删了 7 天（应删 10、实删 17）。
+#     所以 P24 必须同时有"两条腿同时超"的夹具（见下）。
+
+
+def _eg_day(n):
+    return time.strftime("%Y-%m-%d", time.localtime(time.time() - n * 86400))
+
+
+#: 夹具行：**必须是合法 JSON 行**。第一版用 `truncate()` 造体积，结果文件里
+#: 长出 2000 多个 NUL 字节、把 disk_pressure 那一行粘在了同一行上 ——
+#: `load_events` 解析失败就吞掉，于是 P26 在"文件里明明有"的情况下判红。
+#: ⇒ 夹具形状必须与真实文件同形（本仓假绿族②：合成形状骗过判据）。
+_EG_LINE = '{"e":"new","t":1,"pad":"' + "x" * 1000 + '"}\n'
+
+
+def _eg_touch(d, day, size=1024):
+    p = os.path.join(d, "events-%s.jsonl" % day)
+    n = max(1, int(size // len(_EG_LINE)))
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(_EG_LINE * n)
+
+
+def _eg_env():
+    """把 `egress` 的账本目录指到临时目录，并清掉进程内丢失计数。"""
+    import egress as E
+    d = tempfile.mkdtemp(prefix="antinel_eg_")
+    orig = E.ledger_dir
+    E.ledger_dir = lambda: d
+    E._LOST.update({"n": 0, "first": None, "last": None})
+    E._ROT_NOTE.clear()
+    return E, d, orig
+
+
+def _eg_close(E, dirs, orig):
+    import shutil
+    E.ledger_dir = orig
+    for d in dirs:
+        if d:
+            shutil.rmtree(d, ignore_errors=True)
+
+
+def c_space_retention():
+    """P24：事件文件有上界（天数＋总量），删够即停，今天不删，删了留账。"""
+    E, d, orig = _eg_env()
+    d2 = None
+    try:
+        # ① 两条腿同时超：20 天 × 3 MB（20>14 且 60>48）⇒ 删 6 天整好
+        for i in range(20):
+            _eg_touch(d, _eg_day(i), 3 * 1024 * 1024)
+        r = E.enforce_retention(today=_eg_day(0))
+        st = E.dir_stats()
+        if len(r["removed"]) != 6:
+            return ("应删 6 天（20 天留 14 天，且删完已低于总量上限），"
+                    "实际删 %d 天 —— 两条腿不许把同一批文件各删一遍：%s"
+                    % (len(r["removed"]), r["removed"]))
+        if len(st["days"]) != E.KEEP_DAYS:
+            return "应剩 %d 天，实际 %d 天" % (E.KEEP_DAYS, len(st["days"]))
+        if st["bytes"] > E.MAX_DIR_BYTES:
+            return "删完仍超总量上限：%d > %d" % (st["bytes"], E.MAX_DIR_BYTES)
+        if _eg_day(0) not in [x[0] for x in st["days"]]:
+            return "今天那个文件被删了 —— 正在追加的文件不许动"
+        if E.enforce_retention(today=_eg_day(0))["removed"]:
+            return "同一状态跑第二次还删东西 ⇒ 不幂等"
+        p = os.path.join(d, "events-%s.jsonl" % _eg_day(0))
+        with open(p, encoding="utf-8") as f:
+            if '"rotated"' not in f.read():
+                return "删了却没留账（rotated 事件）—— 证据变少这件事本身没有证据"
+        # ② 只超总量（天数合规）：删够就停，不许删过头
+        d2 = tempfile.mkdtemp(prefix="antinel_eg2_")
+        E.ledger_dir = lambda: d2
+        for i in range(10):
+            _eg_touch(d2, _eg_day(i), 8 * 1024 * 1024)
+        r2 = E.enforce_retention(today=_eg_day(0))
+        st2 = E.dir_stats()
+        if not r2["removed"]:
+            return "总量超限却一天都没删"
+        if st2["bytes"] > E.MAX_DIR_BYTES:
+            return "只按总量时仍超上限：%d > %d" % (st2["bytes"], E.MAX_DIR_BYTES)
+        if st2["bytes"] <= E.MAX_DIR_BYTES - 8 * 1024 * 1024:
+            return ("删过头了：剩 %d 字节（上限 %d、单个文件 8 MB）⇒ 本可少删一天"
+                    % (st2["bytes"], E.MAX_DIR_BYTES))
+        return True
+    finally:
+        _eg_close(E, (d, d2), orig)
+
+
+def n_space_retention():
+    """负控：把保留策略整个短路 ⇒ P24 必须红（证明它真的在承重）。"""
+    import egress as E
+    orig = E.enforce_retention
+    E.enforce_retention = lambda *a, **kw: {"removed": [], "bytes": 0,
+                                            "why": "", "failed": []}
+    try:
+        r = c_space_retention()
+        if r is True:
+            return "负控失效：删文件的动作被短路了，P24 仍然绿"
+        return True
+    finally:
+        E.enforce_retention = orig
+
+
+def c_space_write_fail():
+    """P25：写失败不许报成功；丢了要记账；恢复后补一条；补过不重复。"""
+    E, d, orig = _eg_env()
+    try:
+        today = time.strftime("%Y-%m-%d")
+        blocked = os.path.join(d, "events-%s.jsonl" % today)
+        os.makedirs(blocked)                # 让 open(..., "a") 必然失败
+        if E._append({"t": time.time(), "e": "new"}) is not False:
+            return "写失败却返回成功 —— BL-02 那个方向错的重演"
+        n, _f, _l = E.lost_pending()
+        if n != 1:
+            return "写失败没记账：lost_pending=%r（跨进程就永远查不出这段空档）" % (n,)
+        os.rmdir(blocked)
+        if E._append({"t": time.time(), "e": "new"}) is not True:
+            return "恢复可写后仍然写不进"
+        with open(blocked, encoding="utf-8") as f:
+            txt = f.read()
+        if '"e": "lost"' not in txt:
+            return "没补记丢失 —— 空档会永远消失（磁盘满时盘上当然没有痕迹）"
+        if E.lost_pending()[0] != 0:
+            return "补记后没归零 ⇒ 下次会重复补"
+        E._append({"t": time.time(), "e": "new"})
+        with open(blocked, encoding="utf-8") as f:
+            if f.read().count('"e": "lost"') != 1:
+                return "重复补记 ⇒ 丢失数会被越补越大"
+        return True
+    finally:
+        _eg_close(E, (d,), orig)
+
+
+def n_space_write_fail():
+    """负控：记账那一步被摘掉 ⇒ P25 必须红。"""
+    import egress as E
+    orig = E._note_lost
+    E._note_lost = lambda *a, **kw: None
+    try:
+        r = c_space_write_fail()
+        if r is True:
+            return "负控失效：写失败不记账，P25 仍然绿"
+        return True
+    finally:
+        E._note_lost = orig
+
+
+def c_space_capacity():
+    """P26：容量是**量出来**的；吃紧时一天只记一条（不制造噪音）。"""
+    E, d, orig = _eg_env()
+    try:
+        _eg_touch(d, _eg_day(0), 2048)
+        cap = E.capacity()
+        if not cap:
+            return "capacity() 返回 None —— 目录可写却量不到容量"
+        if cap.get("dir_bytes", 0) <= 0:
+            return "dir_bytes=%r ⇒ 看不见自己占了多少" % (cap.get("dir_bytes"),)
+        if cap.get("used_pct") is None:
+            return "used_pct=None ⇒ 磁盘占用这一项是空的"
+        fake = dict(cap)
+        fake["used_pct"] = 0.99
+        fake["dir_full"] = True
+        if not E._disk_pressure_once(fake):
+            return "吃紧却没记 disk_pressure —— 80% 不提醒，100% 才失败"
+        if E._disk_pressure_once(fake):
+            return "同一天记了第二条 ⇒ 会变成噪音（用户会开始无视它）"
+        evs, _ = E.load_events(1)
+        n = sum(1 for e in evs if e.get("e") == "disk_pressure")
+        if n != 1:
+            return "disk_pressure 条数 %d（应 1）" % n
+        return True
+    finally:
+        _eg_close(E, (d,), orig)
+
+
+def n_space_capacity():
+    """负控：把"一天一条"的节流摘掉 ⇒ 同一天会写两条 ⇒ P26 必须红。"""
+    import egress as E
+    orig = E._read_json
+
+    def no_mark(name, default):
+        if name == "disk_warn.json":
+            return {}
+        return orig(name, default)
+
+    E._read_json = no_mark
+    try:
+        r = c_space_capacity()
+        if r is True:
+            return "负控失效：去掉节流标记后同一天仍只写一条"
+        return True
+    finally:
+        E._read_json = orig
+
+
+def c_space_report():
+    """P27：账本自己的异常（断档/磁盘吃紧）要进「值得看」，并出现在渲染里。"""
+    import egress as E
+    now = time.time()
+    evs = [{"t": now, "e": "lost", "n": 3, "first": now - 600},
+           {"t": now, "e": "disk_pressure", "used_pct": 0.9, "dir_mb": 40.0}]
+    fs = E.analyze(evs, {}, 1, do_resolve=False, pending_lost=2)
+    kinds = [f["kind"] for f in fs]
+    if "账本断档" not in kinds:
+        return "写了 lost 事件却没人读 —— 记了不等于看得见"
+    if "磁盘吃紧" not in kinds:
+        return "disk_pressure 没有消费侧"
+    body = "\n".join("\n".join(f["lines"]) for f in fs)
+    if "5 条" not in body:
+        return ("断档条数没算上还没补记的那部分（3 已补 + 2 待补应为 5）：%r"
+                % body[:200])
+    cap = {"total": 1, "free": 1, "used_pct": 0.5, "low_free": False,
+           "dir_bytes": 2 * 1024 * 1024, "dir_files": 2, "dir_full": False,
+           "readable": True}
+    out = E.render({"ts": now, "idle": 0.0, "conns": []}, fs, 1, True, 0, cap=cap)
+    if "上限" not in out:
+        return "渲染里没有上限 ⇒ 用户无法预判哪天开始丢"
+    return True
+
+
+def n_space_report():
+    """负控：换一批**不是** lost/disk_pressure 的事件 ⇒ 一条都不许报（分辨力）。"""
+    import egress as E
+    now = time.time()
+    evs = [{"t": now, "e": "new", "n": 3}, {"t": now, "e": "gone", "n": 3}]
+    fs = E.analyze(evs, {}, 1, do_resolve=False, pending_lost=0)
+    if [f["kind"] for f in fs]:
+        return "非 lost/disk_pressure 的事件也被报 ⇒ 判据没有分辨力"
+    return True
+
+
+# ======================================================== 40 格 · 人 ----
+# ★★ 2026-10-22（P28–P29）：「点一下忽略，一个没修的真实缺口就从待办里消失」。
+#   病根不是文案，是 `Item.state` 兼职两件事（你知不知道 / 缺口还在不在）。
+#   ⇒ 拆出 `gap_state`：忽略＝acked（退出待办但进台账、到期回访），
+#      处置＝closed。判据必须同时钉住"退出待办"和"没从账面消失"，
+#      只钉前者会得到一个把缺陷当特性的假绿。
+
+
+def _gap_item(state, gap="", closed_h=1.0, ts_h=1.0, kind="self_check_mismatch"):
+    nowdt = datetime.now().astimezone()
+    ts = (nowdt - timedelta(hours=ts_h)).isoformat(timespec="seconds")
+    a = M.Alert(id="gap-%s-%s-%s-%s" % (state, gap, closed_h, ts_h),
+                ts=ts, level="L1", kind=kind)
+    cl = ((nowdt - timedelta(hours=closed_h)).isoformat(timespec="seconds")
+          if closed_h is not None else "")
+    return M.Item(alert=a, state=state, gap_state=gap, closed_at=cl)
+
+
+def c_gap_acked_not_closed():
+    """P28：忽略退出待办，但未修必须留在账面上；到期必须自己回来说一次。"""
+    acked = _gap_item("ignored", M.GAP_ACKED, closed_h=24)
+    if M.bucket_of(acked) != M.BUCKET_ARCHIVE:
+        return "刚忽略就还在待办里 ⇒ 「尽可能少让人处理」被破坏"
+    u = M.unrepaired_count([acked])
+    if u["n"] != 1:
+        return "忽略后从账面上彻底消失（未修台账 n=%d）—— 这一格的病" % u["n"]
+    if u["due"] != 0:
+        return "复核期未到却算进 due"
+    old = _gap_item("ignored", M.GAP_ACKED, closed_h=M.ACK_REVIEW_DAYS * 24 + 2)
+    if M.bucket_of(old) != M.BUCKET_ACTION:
+        return "过了 %d 天仍不回到待办 ⇒ 忽略＝永久黑洞" % M.ACK_REVIEW_DAYS
+    if M.unrepaired_count([old])["due"] != 1:
+        return "过期的没算进 due（'我不管了但它还在'与'还在宽限里'必须分开看）"
+    far = _gap_item("ignored", M.GAP_ACKED, closed_h=M.ACK_REVIEW_DAYS * 24 + 2,
+                    ts_h=24 * 40)
+    if M.bucket_of(far) != M.BUCKET_ARCHIVE:
+        return "窗口外的历史记录被翻回首页 ⇒ 会把待办重新淹掉"
+    legacy = _gap_item("ignored", "")
+    if M.gap_state_of(legacy) != M.GAP_ACKED:
+        return "旧数据的 ignored 被读成已修 —— 等于替用户宣布一个他没做过的结论"
+    if M.unrepaired_count([legacy])["n"] != 1:
+        return "旧数据的 ignored 数不出来 ⇒ 历史缺口全部隐形"
+    if M.gap_state_of(_gap_item("done", "")) != M.GAP_CLOSED:
+        return "旧数据的 done 没读成已修（会把所有历史处置重新顶上待办）"
+    if M.gap_state_of(_gap_item("ignored", M.GAP_CLOSED)) != M.GAP_CLOSED:
+        return "显式声明的 closed 被旧口径覆盖 ⇒ 用户明确说过'好了'却被反悔"
+    return True
+
+
+def n_gap_acked_not_closed():
+    """负控：缺口态退回"四态一刀切"⇒ P28 必须红。"""
+    orig = M.gap_state_of
+    M.gap_state_of = lambda it: (M.GAP_CLOSED if it.state in M.CLOSED_STATES
+                                 else M.GAP_OPEN)
+    try:
+        r = c_gap_acked_not_closed()
+        if r is True:
+            return "负控失效：退回四态一刀切后 P28 仍然绿"
+        return True
+    finally:
+        M.gap_state_of = orig
+
+
+def c_gap_write_and_line():
+    """P29：忽略/重开/处置要**写进**缺口态并读得回来；页面那一行有账才出现。"""
+    root = tempfile.mkdtemp(prefix="antinel_gap_")
+    try:
+        iid = "p29-real"
+        st = S.load_state(root)
+        st[iid] = {"state": "read"}
+        S.save_state(st, root)
+        e = S.set_state(iid, "ignored", note="先不管", level="L1", root=root)
+        if e.get("gap_state") != M.GAP_ACKED:
+            return "忽略只改了 state、没改缺口态 ⇒ 分档只能一刀切"
+        if not e.get("closed_at"):
+            return "忽略没记时刻 ⇒ 复核期算不出来（只能永不回访）"
+        if S.set_state(iid, "read", level="L1", root=root).get("gap_state") != M.GAP_OPEN:
+            return "重开没把缺口态改回 open"
+        if S.set_state(iid, "done", level="L1", root=root).get("gap_state") != M.GAP_CLOSED:
+            return "处置没把缺口态改成 closed"
+        line = SV._unrepaired_line([_gap_item("ignored", M.GAP_ACKED, closed_h=24)])
+        if "还没修好" not in line:
+            return "页面没有「已知未修」这一行 ⇒ 缺口在界面上仍然消失"
+        if SV._unrepaired_line([_gap_item("done", M.GAP_CLOSED)]) != "":
+            return "没有未修记录却也渲染了一行 ⇒ 会变成噪音"
+        txt = re.sub(r"<[^>]+>", "", line)
+        for sent in [s for s in txt.split("。") if s.strip()]:
+            w = sum(1.0 if ord(c) > 127 else 0.5 for c in sent)
+            if w > 40 or len(sent) > 42:
+                return "文案超宽（宽度 %.1f / 字符 %d）：%s" % (w, len(sent), sent)
+        return True
+    finally:
+        import shutil
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def n_gap_write_and_line():
+    """负控：写入侧只改 state、不回填缺口态 ⇒ P29 必须红。"""
+    orig = S.set_state
+
+    def bare(item_id, dst, note="", actor="owner", now=None, level=None, root=None):
+        st = S.load_state(root)
+        ent = st.get(item_id) or {}
+        ent["state"] = dst
+        st[item_id] = ent
+        S.save_state(st, root)
+        return ent
+
+    S.set_state = bare
+    try:
+        r = c_gap_write_and_line()
+        if r is True:
+            return "负控失效：写入侧不回填缺口态，P29 仍然绿"
+        return True
+    finally:
+        S.set_state = orig
+
+
+# ==================================================== 40 格 · 环境/时间/并发 ----
+# ★★ 2026-10-22（P30–P32）：三格各有一条"判据在问错的问题"的共同点 ——
+#   环境问"含不含危险词"（该问"这个词有没有被执行的能力"）、
+#   时间问"负数小于阈值吗"（该问"这个时间差能不能用"）、
+#   并发有计数但只在默认关闭的诊断开关里（该问"用户看得见吗"）。
+
+
+def c_env_capability():
+    """P30：判据换成「这段文本有没有执行能力」，而不是「含不含危险词」。"""
+    H = _import_pre_tool_use()
+    # ① 丢弃输出没有副作用能力 ⇒ 只读豁免必须生效（BL-01 现场第一条）
+    if H.readonly_command_context('grep -n "rm -rf" notes.md 2>/dev/null') is not True:
+        return "`2>/dev/null` 被当成写入 ⇒ 查文档里的删除字样仍会被拦（BL-01 原样）"
+    if H.readonly_command_context("echo hi >nul") is not True:
+        return "`>nul` 被当成写入"
+    # ② 真写文件仍然不许放行（否则修法就是"放松拦截"）
+    if H.readonly_command_context('grep -n "rm -rf" notes.md > out.txt') is not False:
+        return "真写文件被放行了 —— 那是漏放，比误拦危险"
+    if H.readonly_command_context("rm -rf dist 2>/dev/null") is not False:
+        return ("真删除被放行了 —— 黑洞重定向只该让「数据」通过，"
+                "不该让「动作」通过")
+    # ③ heredoc 正文是数据；但接收方是解释器时正文会被执行 ⇒ 不许剥
+    if H.readonly_command_context("cat > n.md <<'EOF'\n用 rm -rf 清掉\nEOF") is not False:
+        return "`cat > 文件 <<EOF` 被放行 —— 它同时在写文件，不该只读"
+    if H.readonly_command_context("bash <<'EOF'\nrm -rf /\nEOF") is not False:
+        return "`bash <<EOF` 的正文被剥掉了 ⇒ 真删除被放行（漏放方向）"
+    return True
+
+
+def n_env_capability():
+    """负控：把能力剥离整段摘掉（回到纯文本判定）⇒ P30 必须红。"""
+    H = _import_pre_tool_use()
+    orig = H.strip_heredoc_bodies
+    orig_null = H._NULL_SINK_RE
+    H.strip_heredoc_bodies = lambda s: s
+    H._NULL_SINK_RE = re.compile(r"(?!x)x")          # 永不匹配
+    try:
+        if H.readonly_command_context('grep -n "rm -rf" notes.md 2>/dev/null') is True:
+            return "负控失效：摘掉黑洞重定向识别后仍判只读"
+        return True
+    finally:
+        H.strip_heredoc_bodies = orig
+        H._NULL_SINK_RE = orig_null
+
+
+def c_time_clock_blocks_revive():
+    """P31：时钟被改过时，拉起路径**不许** fail-open（判"已在跑"）。"""
+    import host_shield as HS
+    saved = {}
+
+    def put(name, val):
+        saved[name] = getattr(HS, name)
+        setattr(HS, name, val)
+
+    future = datetime.now().astimezone() + timedelta(hours=24)
+    put("load_state", lambda: {"armed": True, "sentinel_pid": 424242,
+                               "sentinel_started_at": future.isoformat(
+                                   timespec="seconds")})
+    put("sentinel_alive", lambda st=None: True)
+    put("sentinel_heartbeat_age", lambda: (-86400.0, None))
+    try:
+        ok, pid, why = HS.spawn_sentinel(pkg_root=os.getcwd())
+        if why == "already-running":
+            return ("心跳时长是负数（时钟被改过）却判「已在跑」⇒ 僵死的哨兵可以"
+                    "永远挡住「马上修复」（BL-02 的第三条腿）")
+        if why != "clock-skew":
+            return "应如实返回 clock-skew（算不出在不在岗），实际 %r" % (why,)
+        if ok:
+            return "clock-skew 不该被报成成功"
+        # 对照组：正常心跳 ⇒ 仍判已在跑（不许为了修这条把幂等搞坏）
+        HS.sentinel_heartbeat_age = lambda: (5.0, None)
+        ok2, _pid2, why2 = HS.spawn_sentinel(pkg_root=os.getcwd())
+        if why2 != "already-running":
+            return "正常心跳（5 秒）却没判已在跑 ⇒ 幂等坏了，会重复拉起"
+        return True
+    finally:
+        for k, v in saved.items():
+            setattr(HS, k, v)
+
+
+def n_time_clock_blocks_revive():
+    """负控：把 `_elapsed_ok` 退回"有值就算新鲜" ⇒ P31 必须红。"""
+    import host_shield as HS
+    orig = HS._elapsed_ok
+    HS._elapsed_ok = lambda v: v is not None
+    try:
+        r = c_time_clock_blocks_revive()
+        if r is True:
+            return "负控失效：退回旧口径后 P31 仍然绿"
+        return True
+    finally:
+        HS._elapsed_ok = orig
+
+
+def c_concurrency_visible():
+    """P32：抢锁超时/回收死锁要**落成用户读得到的数**，而不只在诊断开关里。"""
+    import audit_chain as AC
+    import host_shield as HS
+    d = tempfile.mkdtemp(prefix="antinel_lock_")
+    orig_dir = HS._shield_audit_dir
+    try:
+        p = AC.lock_events_path(d)
+        _c0 = AC.lock_pressure(path=p)
+        # 目录在、文件还没建 ⇒ "查了，今天没有竞争"（0 与"没查"必须是两件事）
+        if _c0["checked"] is not True or _c0["timeouts"] or _c0["steals"]:
+            return "空目录读数不对：checked=%r timeouts=%r（应为 True / 0）" % (
+                _c0["checked"], _c0["timeouts"])
+        lock = os.path.join(d, "x.jsonl.lock")
+        AC._note_lock(lock, "acq_timeout", waited_ms=1600)
+        AC._note_lock(lock, "acq_timeout", waited_ms=1500)
+        AC._note_lock(lock, "steal", age_s=31.0, holder=999)
+        pr = AC.lock_pressure(path=p)
+        if pr["timeouts"] != 2 or pr["steals"] != 1:
+            return "读数不对：timeouts=%d steals=%d（应 2 / 1）" % (
+                pr["timeouts"], pr["steals"])
+        if "x.jsonl.lock" not in pr["files"]:
+            return "没说清是哪个文件的锁"
+        # 页面那一行：有竞争才出现（读的是同一份读数，不另数一遍）
+        HS._shield_audit_dir = lambda pkg=None: d
+        line = SV._lock_line()
+        if "抢锁超时 2 次" not in line:
+            return "页面没有把并发竞争说出来：%r" % (line[:120],)
+        # 对照组：清空后必须不出现（否则每个用户都会看到一条无意义的警告）
+        for f in os.listdir(d):
+            os.rename(os.path.join(d, f), os.path.join(d, f + ".away"))
+        if SV._lock_line() != "":
+            return "没有竞争却仍渲染了一行 ⇒ 会变成每天都被无视的噪音"
+        return True
+    finally:
+        HS._shield_audit_dir = orig_dir
+        import shutil
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def n_concurrency_visible():
+    """负控：一条 3 天前的事件**不许**被算进「最近 24 小时」（窗口要在承重）。
+
+    ★ 第一版用 `hours=0` 来证明窗口：Windows 上 `time.time()` 只有约 15.6 ms
+      的粒度，写入与读取可能落在同一个时间刻度上 ⇒ `now - t == 0` ⇒ 判据不稳。
+      ⇒ 换成一个**明确落在窗口外**的旧事件，并配一条"更大窗口数得到"的对照组
+      （否则"数不到"可能只是"整体读不到"，那就什么都没证明）。
+    """
+    import audit_chain as AC
+    d = tempfile.mkdtemp(prefix="antinel_lock2_")
+    try:
+        p = AC.lock_events_path(d)
+        old = {"t": time.time() - 3 * 86400, "pid": 1, "evt": "acq_timeout",
+               "file": "old.jsonl.lock", "waited_ms": 1600}
+        with open(p, "w", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps(old, ensure_ascii=False) + "\n")
+        if AC.lock_pressure(path=p, hours=24)["timeouts"]:
+            return "3 天前的抢锁超时被算进「最近 24 小时」⇒ 时间窗口没在承重"
+        if AC.lock_pressure(path=p, hours=24 * 5)["timeouts"] != 1:
+            return "旧事件在更大窗口里也数不到 ⇒ 是整体读不到，不是窗口在过滤"
+        orig = AC._note_lock
+        AC._note_lock = lambda *a, **kw: None
+        try:
+            AC._note_lock(os.path.join(d, "z.lock"), "acq_timeout")
+            if AC.lock_pressure(path=p, hours=24 * 5)["timeouts"] != 1:
+                return "负控失效：写入被摘掉后读数仍在变"
+        finally:
+            AC._note_lock = orig
+        return True
+    finally:
+        import shutil
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def c_perm_unknown_not_allowed():
+    """P33：ACL 读不到＝「不知道」，不许与「确认没锁」混成一个布尔（N4 逐点核）。"""
+    import host_shield as HS
+    saved = {}
+
+    def put(name, val):
+        saved[name] = getattr(HS, name)
+        setattr(HS, name, val)
+
+    put("_write_probe_denied", lambda p: False)     # 写探针说"能写"
+    put("process_elevation", lambda: (True, ""))    # 提权 ⇒ 只能看 ACL
+    put("acl_read_deny", lambda p: None)            # ACL 读不到
+    try:
+        if HS.deny_state("/x") != HS.DENY_UNKNOWN:
+            return "ACL 读不到却给了确定答案：%r" % (HS.deny_state("/x"),)
+        if HS.is_denied("/x") is not False:
+            return "布尔接口语义被改了（旧口径 unknown ⇒ False，其余调用点依赖它）"
+        HS.acl_read_deny = lambda p: True
+        if HS.deny_state("/x") != HS.DENY_YES or HS.is_denied("/x") is not True:
+            return "ACL 说被拒写，却没判成 denied"
+        HS.acl_read_deny = lambda p: False
+        if HS.deny_state("/x") != HS.DENY_NO:
+            return "ACL 说没拒写，却判成 %r" % (HS.deny_state("/x"),)
+        # ★ 结构腿：两个"用户明确放行"的点必须用三态。退回布尔 ⇒ ACL 一读不到，
+        #   用户说过的"永远放行"就作废（F-0 那一族）。
+        with open(os.path.join(G.PKG, "host_shield.py"), encoding="utf-8") as f:
+            src = f.read()
+        n3 = src.count("deny_state(target) != DENY_NO")
+        if n3 < 2:
+            return ("「确认放行 / 放行窗」只有 %d 处用三态 ⇒ 另一处仍会在 ACL "
+                    "读不到时把用户关在门外" % n3)
+        return True
+    finally:
+        for k, v in saved.items():
+            setattr(HS, k, v)
+
+
+def n_perm_unknown_not_allowed():
+    """负控：把三态折回布尔（unknown ⇒ not-denied）⇒ P33 必须红。"""
+    import host_shield as HS
+    orig = HS.deny_state
+    HS.deny_state = lambda p: (HS.DENY_YES if orig(p) == HS.DENY_YES else HS.DENY_NO)
+    try:
+        r = c_perm_unknown_not_allowed()
+        if r is True:
+            return "负控失效：三态被折回布尔后 P33 仍然绿"
+        return True
+    finally:
+        HS.deny_state = orig
+
+
 CHECKS_0353 = [
     # ---- 十、TAB 切换卡顿根治·方案 B（2026-10-21 创始人拍板）----
     ("TP-B1 self_check 指纹缓存：不变零重散／沙盒变异必失效必报",
@@ -5278,6 +5849,27 @@ CHECKS_0353 = [
     # ★ 「负数比阈值小」曾把"算不出"读成"刚刚启动"：死哨兵可被读成活着一整天。
     ("P23 时钟被改过归盲区（不是值守中、也不误杀）；刚起来仍判在岗",
      c_clock_skew_is_a_blind_spot, n_clock_skew_is_a_blind_spot),
+    # ---- 十二、40 格：空间 / 人 / 环境 / 时间 / 并发（2026-10-22）----
+    ("P24 账本有上界（天数＋总量）：删够即停、今天不删、删了留账、幂等",
+     c_space_retention, n_space_retention),
+    ("P25 写失败不报成功：记账、腾空间重试、恢复后补一条、不重复补",
+     c_space_write_fail, n_space_write_fail),
+    ("P26 容量是量出来的（dir_bytes/used_pct）；吃紧一天只记一条",
+     c_space_capacity, n_space_capacity),
+    ("P27 账本自己的异常（断档/磁盘吃紧）进「值得看」并上屏",
+     c_space_report, n_space_report),
+    ("P28 忽略退出待办但留在未修台账；%d 天复核期到期自己回来说一次"
+     % M.ACK_REVIEW_DAYS, c_gap_acked_not_closed, n_gap_acked_not_closed),
+    ("P29 忽略/重开/处置写进缺口态并读得回来；页面那一行有账才出现",
+     c_gap_write_and_line, n_gap_write_and_line),
+    ("P30 判据问「有没有执行能力」：黑洞重定向放行、真写/真删除仍拦、"
+     "解释器收 heredoc 不剥", c_env_capability, n_env_capability),
+    ("P31 时钟被改过时拉起路径不 fail-open（返回 clock-skew，不动进程）",
+     c_time_clock_blocks_revive, n_time_clock_blocks_revive),
+    ("P32 抢锁超时/回收死锁落成用户读得到的数（不只在诊断开关里）",
+     c_concurrency_visible, n_concurrency_visible),
+    ("P33 权限三态：ACL 读不到＝不知道；「确认放行」不因量不到而作废",
+     c_perm_unknown_not_allowed, n_perm_unknown_not_allowed),
 ]
 
 

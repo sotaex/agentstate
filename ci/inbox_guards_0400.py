@@ -976,18 +976,8 @@ def n_s32b():
 
 
 # ══════════ S33 · `is_denied()` 必须提权感知（根因修复的防复发）══════════════
-def _is_denied_elevation_problems(hs_src):
-    """`is_denied()` 的函数体必须**同时**引用 `process_elevation` 与 `acl_read_deny`。
-
-    ★ 为什么查这两处、而不是查行为：行为判据在**非提权**环境里必然绿
-      （那条分支根本不进），跑不出差别；而"提权下把已上锁读成上锁失败"这个根因
-      一旦被回退，只有**恰好运行在提权终端**才看得出来 —— 也就是说，
-      它会在最不该被发现的地方悄悄复发。⇒ 只能查**结构**：
-      提权分支在、且它用的是 ACL 读取（而不是又一次写探针）。
-    """
-    node = _func_tree(hs_src, "is_denied")
-    if node is None:
-        return ["host_shield.py 里找不到 is_denied()"]
+def _names_in(node):
+    """函数体里出现过的所有名字（调用名／属性／标识符）。"""
     seen = set()
     for n in ast.walk(node):
         if isinstance(n, ast.Call):
@@ -998,10 +988,35 @@ def _is_denied_elevation_problems(hs_src):
             seen.add(n.attr)
         if isinstance(n, ast.Name):
             seen.add(n.id)
+    return seen
+
+
+def _is_denied_elevation_problems(hs_src):
+    """`is_denied()` 的实现必须**同时**引用 `process_elevation` 与 `acl_read_deny`。
+
+    ★ 为什么查这两处、而不是查行为：行为判据在**非提权**环境里必然绿
+      （那条分支根本不进），跑不出差别；而"提权下把已上锁读成上锁失败"这个根因
+      一旦被回退，只有**恰好运行在提权终端**才看得出来 —— 也就是说，
+      它会在最不该被发现的地方悄悄复发。⇒ 只能查**结构**：
+      提权分支在、且它用的是 ACL 读取（而不是又一次写探针）。
+
+    ★★ 2026-10-22：`is_denied()` 改成**委托**给三态实现 `deny_state()`（N4）。
+      判据的意图是"提权感知分支不许被回退"，而它现在落在**真正做判断的那个函数**里。
+      ⇒ 若 `is_denied` 只是委托，检查点跟着走；不跟随就等于要求"必须写在老位置上"
+        —— 那是拿实现位置冒充判据，也正是这轮 S33 差点变成假红的原因。
+    """
+    node = _func_tree(hs_src, "is_denied")
+    if node is None:
+        return ["host_shield.py 里找不到 is_denied()"]
+    if "deny_state" in _names_in(node):
+        node = _func_tree(hs_src, "deny_state")
+        if node is None:
+            return ["is_denied() 已委托给 deny_state()，但后者不存在 ⇒ 提权感知无处安放"]
+    seen = _names_in(node)
     probs = []
     for need in ("process_elevation", "acl_read_deny"):
         if need not in seen:
-            probs.append("`is_denied()` 的函数体不再引用 `%s` ⇒ 提权感知被回退"
+            probs.append("`is_denied()` 的实现不再引用 `%s` ⇒ 提权感知被回退"
                          "（提权令牌下会把'已上锁'读成'上锁失败'，并再写出那句冤枉文案）"
                          % need)
     return probs
@@ -1016,17 +1031,18 @@ def s33():
 @check("N-S33 负控：把提权分支从 is_denied() 摘掉 ⇒ S33 必须报红")
 def n_s33():
     hs = _src("host_shield.py")
-    old = ("    if process_elevation()[0] is True:\n"
-           "        r = acl_read_deny(path)\n"
-           "        if r is not None:\n"
-           "            return bool(r)\n"
-           "    return False")
-    if old not in hs:
-        return "负控无效：host_shield.py 里找不到 is_denied() 的提权分支原文"
-    mut = hs.replace(old, "    return False")
+    # ★★ 2026-10-22：**不写死"提权分支原文"**。那段代码在这一轮从 `is_denied()`
+    #   搬进了 `deny_state()`，写死字面量的负控会当场失效并报"找不到原文"
+    #   —— 与本仓复发三次的那个形状（负控夹具写死旧文案）一模一样。
+    #   ⇒ 按**结构**摘腿：把实现里读 ACL 的那一句换成常量。
+    #   这样无论代码搬到哪个函数，只要它还在、这条负控就有分辨力。
+    old_call = "r = acl_read_deny(path)"
+    if old_call not in hs:
+        return "负控无效：host_shield.py 里找不到 `%s`" % old_call
+    mut = hs.replace(old_call, "r = False", 1)
     if _is_denied_elevation_problems(mut):
         return True
-    return "负控失效：提权分支被摘掉，S33 仍然绿"
+    return "负控失效：ACL 读取被摘掉，S33 仍然绿"
 
 
 # ══════════ S34 · 文案不许冤枉人（zone_locked 不得断言"有人对抗"）══════════════

@@ -138,7 +138,7 @@ def _c2_scan_all(surface=None):
     return bad, len(files)
 
 
-@check("C2 默认分支具名：域外输入不许被静默映射成『正常』")
+@check("C2-0372 默认分支具名：域外输入不许被静默映射成『正常』")
 def c2():
     bad, n = _c2_scan_all()
     if bad:
@@ -147,7 +147,7 @@ def c2():
     return "扫描面 %d 模块（派生自 py-modules），0 处默认落到「值守中」" % n
 
 
-@check("N-C2 负控：三元/ get 两形状各必红、具名不安全与显式分支必绿")
+@check("N-C2-0372 负控：三元/ get 两形状各必红、具名不安全与显式分支必绿")
 def n_c2():
     import inbox_model as M
     keys, words = _c2_normal_tokens(M)
@@ -259,7 +259,7 @@ def _c3_sources(mods=None):
     return out
 
 
-@check("C3 吞咽登记：未登记即红 ＋ 死登记即红 ＋ 面不许无声扩大")
+@check("C3-0372 吞咽登记：未登记即红 ＋ 死登记即红 ＋ 面不许无声扩大")
 def c3():
     L = _c3_ledger()
     srcs = _c3_sources()
@@ -290,7 +290,7 @@ def c3():
             % (len(L.LEDGER), n_sites, len(L.TODO)))
 
 
-@check("N-C3 负控：新加一处吞掉必红、簿里留一条死登记必红")
+@check("N-C3-0372 负控：新加一处吞掉必红、簿里留一条死登记必红")
 def n_c3():
     L = _c3_ledger()
     srcs = _c3_sources()
@@ -300,7 +300,12 @@ def n_c3():
     inj = srcs[0][1] + ("\n\ndef _probe_c3_unregistered():\n"
                         "    try:\n        pass\n"
                         "    except Exception:\n        pass\n")
-    unreg, dead = _c3_audit([(srcs[0][0], inj)], keys)
+    # ★★ 2026-10-22：`SCOPE` 从 1 个模块扩到 2 个（加入 `egress.py`）时，
+    #   这条负控**当场失效** —— 它只审计 `srcs[0]`，而 `keys` 是全部登记，
+    #   于是另一个模块的 14 条全变成"死登记"（实际 1/14，报错说负控①失效）。
+    #   这不是负控写错，是**判据假设了"面只有一个模块"**。
+    #   ⇒ 注入只改第一个模块，审计仍走**全部**源码。
+    unreg, dead = _c3_audit([(srcs[0][0], inj)] + srcs[1:], keys)
     if len(unreg) != 1 or dead:
         _raise("负控①失效：注入一处未登记吞掉，应得 1 未登记 0 死登记，实际 %d/%d"
                % (len(unreg), len(dead)))
