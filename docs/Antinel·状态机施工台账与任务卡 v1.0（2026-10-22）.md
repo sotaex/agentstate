@@ -253,7 +253,14 @@
 | A | A5 | `77796f2` | `python output/_p_presence.py` | ①-⑨ 全过；四负控全真红（8h 空档 96/144＋480 分钟；1 片只列不判；3 片进 unknown） | **A6**（或 B1 并行） |
 | A | A6 | `a5fa214` | `python output/_p_disclosure.py` | 九组检查：A/B/C/D/E/F/G2/G3/G4/I 全绿＋两负控真红；29 句过三把尺（最宽 37）＋文档 9 行宽度全等；红只剩 G1（#59a 词网缺口）／H（#59h 账句形态），退出码 3。**新发现 #59 九处** | B1（已开） |
 | B | ~~B1~~ | ~~`dc2c8dd`~~ → **撤销 `da4415b`** | ~~`python output/_p_shape_parity.py`~~（探针已失效） | **重复施工，已撤销。** B 线 `ed527d6` 早已落盘同一件事，且其 `MARK_OF` 多一个 `unknown` 别名更完整。A 线侧只保留 `situation.py` 的 S08 修复（A 线自有）。探针结论仍有效：31 行可达格只落 **8 组 (shape,mark)、无跨灯碰撞** ⇒ 形状＋角标足以定「灯」与「duty」两维，颜色是冗余第三维。**新发现 #60 五处** | —（B 线负责） |
-| A | 审核 | `8ef84da` | `python output/_p_cases_run.py` / `_p_disclosure.py` / `ci/inbox_guards_0372.py` | A 线全面复审：A0–A6 七步全走完、每步可重跑。**但「走完」≠「可用」**——16 字段填不出／1 冻结函数漏实现／**2 处同族口径错**／1 处归因错。修四处：`_fmt_days` 分母（#61a）／`gaps()`＋`gap_coverage()`（#61b）／`at_risk_unregistered()`（#61c）／`_is_guard_mode` 改读 `granary.tier()`（#61g）。回归：A3 PASS、A5 PASS、A4 只 N7-b、A6 只 G1/H、0372 **28 绿/0 红**、0364 **24 绿/0 红**、0353 215 绿/1 红（**非本线** #62）。**新发现 #61 八处＋#62 一处** | §5.1 夹具消费者进 `ci/` |
+| A | 审核 | `8ef84da` | `python output/_p_cases_run.py` / `_p_disclosure.py` / `ci/inbox_guards_0372.py` | A 线全面复审：A0–A6 七步全走完、每步可重跑。**但「走完」≠「可用」**——16 字段填不出／1 冻结函数漏实现／**2 处同族口径错**／1 处归因错。修四处：`_fmt_days` 分母（#61a）／`gaps()`＋`gap_coverage()`（#61b）／`at_risk_unregistered()`（#61c）／`_is_guard_mode` 改读 `granary.tier()`（#61g）。回归：A3 PASS、A5 PASS、A4 只 N7-b、A6 只 G1/H、0372 **28 绿/0 红**、0364 **24 绿/0 红**、0353 215 绿/1 红（**非本线** #62）。**新发现 #61 八处＋#62 一处** | B | B1 | `ed527d6` | `python output/_p_shape_parity.py` | 8 正绿／7 负控真红／1 量具绿；25 格像素基线对拍（20 格逐字节不变、`at-risk` 五格→dot 蓝） | B3 |
+| B | B3 | `a54da38`／`c496384` | `python output/_p_sidecar_twice.py` | 16 正绿／9 负控真红；行形状照 §F8；**徽标键族修正**（`dev`／`granary`／`disk` 不是八成因键） | B2 |
+| B | B2 | `debd7b0` | `python output/_p_notice_three.py` ＋ `python tools/verify_event_types.py` | 19 正绿／10 负控真红；schema 升 **v1.22** 登记 `delivery_unknown`；改前 `verify_event_types` 当场红 1（F-10 现场复现） | B4 |
+| B | B4 | `e01dbfc` | `python output/_p_asset_names.py` | 14 正绿／9 负控真红／2 量具绿；**资产零 diff**（只给「名字」立法）；立 `FILE_KEYS`／`asset_key_of()` | X |
+| 合并 | 汇合 | `295e0cc` | `python output/_p_cases_run.py` | A＋B 两线并入 main 0.55.0：预演零冲突；解 2 处（`AUDIT_SCHEMA` 取 v1.22 内容＋0.55.0 版本跟随；`manifest` 按「绝不选边」重签，实测纠正 1 条错哈希） | 设计真源 |
+| 合并 | 设计 | `409f6aa` | `python output/_p_disclosure.py` | design 分支 12 份设计件＋本台账＋`_verify.py` 并入。依据：合并前 `_p_disclosure` 因冻结件不在本树而 `FileNotFoundError` | 调试 |
+| 调试 | N12 | 探针改动（`output/` 不入库） | `python output/_p_cases_run.py` | **PASS 55／FAIL 1／SKIP 0／待接线 1**（原 53／1／3）。根因两条：`SKIP_REASON` 是**常量**（合了分支也不会解）＋A 线六个探针 `IMPL` 写死 impl 树（合并后仍测旧树）。负控 M7 真红 | 全量闸门 |
+| 修复 | D-20 | `8ca0acd` | `python ci/regression_gate.py` | D-20 转 **PASS**（守卫在位·真树无问题·内建负控会红）；四个模块补进三处清单。剩红仅 D-22／D-23（worktree 固有） | 出包待创始人确认 |
 ---
 
 ## 5. 当前状态（2026-10-22 复审后）
@@ -445,4 +452,81 @@ Z 步把探针迁进 `ci/` 后，本文件应退化为「调 `delivery_gate.py -
 
 `_p_badge_probe.py` 落在**仓库根目录**（B 线 `b-presentation`）。本仓惯例是探针落 `output/`
 （`.gitignore` 侧不管，但根目录多一个 `_p_*` 会让人以为它是产品件）。建议 B 线挪走。
+
+---
+
+## 8. 双线汇合结果（2026-10-22 19:0x，全部实测）
+
+### 8.1 三线汇合路径：先合线、后合主干，只解一次冲突
+
+| 次序 | 合并 | 冲突 | 处置 |
+|---|---|---|---|
+| 1 | `b-presentation` ← `impl-state-machine` | **零** | `merge-tree` 预演 rc=0；`dc2c8dd`＋`da4415b` 对 `state_registry`／`mk_icons` 净效应为零，仅 `situation.py` 466+/31- |
+| 2 | `b-presentation` ← `main`（0.55.0） | **2 处** | 见 8.2 |
+| 3 | `b-presentation` ← `design-5state-detail` | **零** | 12 份设计件＋本台账＋`_verify.py` |
+
+**为什么第三块必须合**：这些不是"参考资料"，是判据的依据文档。
+合并前 `_p_disclosure.py` 直接 `FileNotFoundError` —— 它读冻结件。台账是换 AI 接手的唯一入口（§3）。
+
+**「绝不选边」这条规则值回了本**：删 `manifest` 冲突标记时我取的是 HEAD 侧，
+而磁盘上 `inbox_model.py` 是 main 侧的内容 —— 重签纠正了这 1 条（133 条里唯一变动）。
+若按"选边"解，会留一条错哈希，而且全量闸门不查 per-file hash，会一路积下去。
+
+### 8.2 两处冲突的解法（都不是选边）
+
+| 文件 | 冲突形态 | 解法与理由 |
+|---|---|---|
+| `docs/AUDIT_SCHEMA.md` | 只有标题一行：HEAD `v1.22（随 v0.54.0）` vs main `v1.21（随 v0.55.0）` | **取 v1.22 内容 ＋ 0.55.0 版本跟随**。schema 版本由内容决定（本批新增 `delivery_unknown` 与两节），产品版本由主干决定。两者不是同一件事，不构成选边 |
+| `psl/manifest.json` | 一处哈希块（`inbox_model.py`／`inbox_notify.py`） | 只删标记，随后 `_resign_manifest.py --adopt-dev` 整体重算 |
+
+### 8.3 合并才暴露的两件事（都不是代码错，是「证据不成立」）
+
+**① A 线六个探针把 `IMPL` 写死成 `.worktrees\impl`，且放在 `sys.path` 第一优先。**
+合并后产品在 `bstate`，探针仍 `import` 另一棵树 ⇒ **绿得毫无意义**。
+现场表现是一句"错话"：`notice_ready()` 报「inbox_notify 缺 settle」，
+而本树 459 行就有它 —— **这句错话是唯一线索**。
+已改为从 `__file__` 上溯两级派生，并**每次打印产品根**（`[probe] 产品根 = …`），
+让"测的是哪棵树"上屏，不靠记忆。这属「假绿第二族」的变体：**夹具没变，被测对象悄悄换了**。
+
+**② `SKIP_REASON` 是常量表**：`{"notice": "B2（inbox_notify 三态）未实现"}`。
+§5 那句「合 `b-presentation` 可解 N12×3 SKIP」**是错的** —— 合了也不会解，
+因为跳过条件是写死的事实断言，依赖落地后它不会自己变绿。
+已改为运行时 `notice_ready()` 探测；`chain_kind`／`chain_fields` 由 `settle()` 真验，
+`tray_badge`／`banner` 属 X 的表现层，**如实记「待接线」，不混进 PASS**。
+
+### 8.4 N12 从"跳过"到"验过"
+
+| 行 | 合并前 | 合并后 | 说明 |
+|---|---|---|---|
+| N12-a | SKIP | **待接线** | 链证据已验（降级成功不写链）；`tray_badge`／`banner` 待 X |
+| N12-b | SKIP | **PASS** | `delivery_unknown` 落链，`ts`／`kind`／`downgrade`／`minutes_overdue` 四字段齐 |
+| N12-c | SKIP | **PASS** | 无头 ⇒ 不写链、不算 unknown。★ 探针补了默认时长 45 分钟（夹具未给），已在 notes 上屏 |
+
+总计：**PASS 55／FAIL 1／SKIP 0／待接线 1**（原 53／1／3），唯一红仍是 N7-b（#56b 已知设计缺口）。
+负控 **M7**（降级成功也记 `delivery_unknown`）**真红** ⇒ 接上的判据是承重的。
+
+### 8.5 全量闸门与剩余红
+
+`python ci/delivery_gate.py`：34 套 **全绿 32／变红 2**（修 D-20 前）。
+变红两类均为 worktree 固有、非本次引入：
+
+- **D-22**：`built_from` 指向主树 `D:\psl\poc\antinel-security`，不是本 worktree 的产物仓。
+- **D-23**：`release.pypi.wheel` 不存在 —— 0.55.0 尚未构建，`artifacts=[]` 是事实。
+
+**D-20（`facts`／`sidecar`／`situation`／`state_registry` 未进 `py-modules`）已修**
+（`8ca0acd`，三处清单同步：仓库 `pyproject.toml`／`build_package.py` 模板／`build()` 的 `root_mod` 元组），
+转 **PASS**，且其内建负控（`foo_mod`）仍会红 ⇒ 判据承重。
+
+### 8.6 仍未做（要创始人点头）
+
+1. **X**（六点渲染接线）：前置 A4＋B1 已齐。B 线四个接线点全停在这里 ——
+   `inbox_tray:183`／`:227` 两处判域外、`settle()` **零生产调用点**、`sidecar` **零消费者**
+   （`grep` 除本体与探针外零命中）。
+2. **Z**（判据迁移＋负控）：前置 A6＋B4＋X，现满足两项。
+   已知待迁：`0360` 的 `c_all_icon_combinations_exist` 是死判据（走 `icon_file` 自带回落）。
+3. **出包**：0.55.0 未构建；`published_version` 仍是 0.48.4（PyPI 实查事实，不由愿望推导）。
+4. **T1 复看页人眼确认**：三种视觉下 16px 的可辨率，**不由 AI 宣布**。
+5. **探针零入库**：`git ls-files output/` 为空 ⇒ 台账要求的"验收命令可直接粘"在别的机器上跑不了。
+   这是"探针落 `output/`"与"命令可跑"两条纪律的真实矛盾，须裁定。
+
 
