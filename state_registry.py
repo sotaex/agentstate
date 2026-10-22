@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# SPDX-License-Identifier: CC-BY-SA-4.0
+# SPDX-License-Identifier: Apache-2.0
 """态注册表（实现 DAG 0a）—— 新模型八成因的唯一真源。
 
 来源（逐条可回源，不临场发明）：
@@ -51,44 +51,109 @@ LAMP_RGB = {"grey": (0x5F, 0x5E, 0x5A), "green": (0x22, 0x6B, 0x4A),
 #: 灯 → 图标几何（mk_icons.SPEC 键；grey 借 L0 空环，不造新形状）
 SHAPE = {"grey": "L0", "green": "L0", "yellow": "L2", "red": "R0"}
 
+# --- 值勤轴与角标几何（B1，2026-10-22）------------------------------------------
+#: 值勤轴（duty）：四轴之一（模式／值勤／可信／后果）。
+#: ★ **与 `shield`（监理态）不是同一根轴**，虽然两轴都有 `on` / `off` 两个词：
+#:   值勤说「他今天该不该在岗」，监理态说「他此刻在不在岗」。把两轴的键
+#:   混进同一张「键 → 图案」表，`on` 与 `off` 立刻成为同一个键的两个含义。
+DUTY = ("on", "at-risk", "off")
+
+#: ★ 角标几何（形状＋颜色）的**唯一真源**。
+#:   为什么不在 `tools/mk_icons.py` 里再写一行：T1 决议（创始人 13:05）把
+#:   at-risk 定成 dot 蓝 `0x2a5db0`，而 mk_icons 里已有一枚**同形状同色**的
+#:   `unknown`。若在那边加一行 `"at-risk": {"kind": "dot", ...}`，同一枚角标
+#:   就有了两处字面量 —— 本仓复发最多的事故族（一个事实两个变量）。
+#:   ⇒ 几何只在这里写一次，`MARK_OF` 只负责「哪个名字借哪一枚」。
+#:   `None` 是**显式登记**「这一档不画角标」，不是「查不到」。
+DUTY_MARK = {
+    "on": None,
+    "at-risk": {"kind": "dot", "color": (0x2A, 0x5D, 0xB0)},
+    "off": {"kind": "bar", "color": (0x5F, 0x5E, 0x5A)},
+}
+
+#: 名字 → 角标几何。**两条轴共用一张查表**，但每个键的来历必须分得清：
+#:   值勤轴（新）：`on` / `at-risk` / `off`
+#:   监理态轴（旧）：`on` / `unposted` / `unknown` / `off`
+#:     ——这四键就是 `inbox_tray.SHIELD_SUFFIX`、`tools/tray.ps1`、
+#:     `tools/logo.ps1` 与 `assets/icons/*.ico` 的文件名后缀，**一个都不许增减**。
+#: `unknown`（盲区）与 `at-risk`（在岗但将断粮）**共用同一枚 dot**：这是 T1 的
+#:   裁决（角标只有一枚，改成不共享就要造第二种形状），是有意耦合 ——
+#:   改 at-risk 的几何，那 5 个 `-unknown.ico` 跟着变，必须同批重生成（B4）。
+#: `unposted`（slash 红）保留为**旧键能力**，不再用于 at-risk。
+MARK_OF = {
+    "on": DUTY_MARK["on"],
+    "at-risk": DUTY_MARK["at-risk"],
+    "off": DUTY_MARK["off"],
+    "unknown": DUTY_MARK["at-risk"],
+    "unposted": {"kind": "slash", "color": (0x9B, 0x22, 0x26)},
+}
+
+#: 角标图案的封闭集（画得出来的三种＋不画）。
+MARK_KINDS = ("dot", "slash", "bar")
+
+
+def mark_of(name):
+    """名字 → 角标几何。`None` 有确切含义：**查到了，这一档不画角标**。
+
+    ★ 查不到时**抛 KeyError**，不返回 `None`。理由是本仓 0.55.0 修 F2 的那条：
+      一个空值只许表示一件事。若查不到也返回 `None`，「我不认识这个名字」
+      与「在岗」画出来**逐像素相同**，且没有任何地方会出声。
+      （实测：改前 `build_ico(..., shield="at-risk")` 与 `shield=None` 的
+       sha256 完全相同，25 格里 5 格如此。）
+    """
+    try:
+        return MARK_OF[name]
+    except KeyError:
+        raise KeyError("没有名为 %r 的角标（合法：%s）"
+                       % (name, "、".join(sorted(MARK_OF))))
+
+
 #: 八成因条目（顺序＝矩阵 CAUSES 顺序；`cause` 与 `key` 同值：本表就是成因表）
 STATES = [
     {"key": "unarmed", "lamp": "grey", "cause": "unarmed",
      "label": "未启用", "def_sentence": "还没开启，现在不拦也不记账。",
-     "shape": "L0", "color_var": "--lgrey", "icon": "L0", "badge": [],
+     "shape": "L0", "color_var": "--lgrey", "badge": [],
      "action": "arm", "tense": "never"},
     {"key": "absent", "lamp": "red", "cause": "absent",
      "label": "失守", "def_sentence": "监理不在岗，且这段时间有东西没被挡。",
-     "shape": "R0", "color_var": "--r0", "icon": "R0", "badge": [],
+     "shape": "R0", "color_var": "--r0", "badge": [],
      "action": "revive+assess", "tense": "now"},
     {"key": "breach", "lamp": "red", "cause": "breach",
      "label": "有缺口", "def_sentence": "监理在岗，但有该挡的没挡住，到现在没修。",
-     "shape": "R0", "color_var": "--r0", "icon": "R0", "badge": [],
+     "shape": "R0", "color_var": "--r0", "badge": [],
      "action": "fix-listed", "tense": "now"},
     {"key": "blind", "lamp": "red", "cause": "blind",
      "label": "看不清",
      "def_sentence": "监理认不出自己是不是在守，说得出缺什么就只报那一项。",
-     "shape": "R0", "color_var": "--r0", "icon": "R0", "badge": [],
+     "shape": "R0", "color_var": "--r0", "badge": [],
      "action": "verify-reinstall", "tense": "unknowable"},
     {"key": "partial", "lamp": "yellow", "cause": "partial",
      "label": "有一项没查到", "def_sentence": "有一项没查到，已按有问题算。",
-     "shape": "L2", "color_var": "--l2", "icon": "L2", "badge": [],
+     "shape": "L2", "color_var": "--l2", "badge": [],
      "action": "check-item", "tense": "now"},        # #48：tense 派生
     {"key": "paused", "lamp": "yellow", "cause": "paused",
      "label": "暂停中", "def_sentence": "监理不在岗，但这段时间没有要管的东西。",
-     "shape": "L2", "color_var": "--l2", "icon": "L2", "badge": [],
+     "shape": "L2", "color_var": "--l2", "badge": [],
      "action": "revive", "tense": "past"},
     {"key": "draining", "lamp": "yellow", "cause": "draining",
      "label": "快没粮了", "def_sentence": "监理在岗，但哨兵的口粮快用完。",
-     "shape": "L2", "color_var": "--l2", "icon": "L2",
+     "shape": "L2", "color_var": "--l2",
      # N6-a/b/c 三源全落 draining（夹具 §5.3），故与成因固定绑定的徽标键在此时
      "badge": ["granary_low", "heartbeat_will_stall", "disk_write_full"],
      "action": "topup", "tense": "future"},
     {"key": "ok", "lamp": "green", "cause": "ok",
      "label": "值守中", "def_sentence": "监理在岗，这段时间没查出缺口。",
-     "shape": "L0", "color_var": "--l0", "icon": "L0", "badge": [],
+     "shape": "L0", "color_var": "--l0", "badge": [],
      "action": "none", "tense": "now"},
 ]
+
+#: ★ `icon` 不手写，派生自 `SHAPE[lamp]`（B1）。
+#:   改前：8 条里 `shape` 与 `icon` 各写一遍、8 条值逐条相同。两处一旦漂，
+#:   画出来的是 A、判据读的是 B，**两边都不报错**。派生之后"写第二份"在
+#:   源码里不再存在——探针用 AST 查"有没有 icon 的字典字面量"来守这一点
+#:   （走结构不走文本：本注释里就写着这个词，文本数法会把自己判成违规）。
+for _e in STATES:
+    _e["icon"] = SHAPE[_e["lamp"]]
 
 STATES_BY_KEY = {e["key"]: e for e in STATES}
 CAUSE_KEYS = tuple(e["key"] for e in STATES)
@@ -161,9 +226,10 @@ LEGACY_OF = {
 def selfcheck():
     """结构自检（0a 验收的可执行版）。返回问题列表，空＝全绿。
 
-    验六条：① 11 字段齐全；② tense 五值封闭且 blind 显式 unknowable；
+    验七条：① 11 字段齐全；② tense 五值封闭且 blind 显式 unknowable；
     ③ 旧六键逐字保留；④ legacy_of 键集＝旧六键、值⊆成因键、全仓唯一；
-    ⑤ 灯/成因单射与动作单射（I4）；⑥ 四灯的色与几何覆盖完整。
+    ⑤ 灯/成因单射与动作单射（I4）；⑥ 四灯的色与几何覆盖完整；
+    ⑦ 角标几何（两条轴的键都在、图案在封闭集、值勤三档全覆盖）。
     """
     bad = []
     for e in STATES:
@@ -203,6 +269,25 @@ def selfcheck():
     for key, e in STATES_BY_KEY.items():
         if e["action"] not in ACTION_SENTENCE:
             bad.append("动作类 %r 无动作句" % (e["action"],))
+    # ⑦ 角标几何（B1）：值勤三档必须都查得到；图案只许三种＋不画
+    for d in DUTY:
+        if d not in MARK_OF:
+            bad.append("⑦ 值勤 %r 在 MARK_OF 里取不到" % (d,))
+    for name, mk in MARK_OF.items():
+        if mk is None:
+            continue                      # 显式登记「不画角标」
+        if mk.get("kind") not in MARK_KINDS:
+            bad.append("⑦ %r 的角标形状 %r 不在封闭集 %r"
+                       % (name, mk.get("kind"), MARK_KINDS))
+        col = mk.get("color")
+        if not (isinstance(col, tuple) and len(col) == 3
+                and all(isinstance(c, int) and 0 <= c <= 255 for c in col)):
+            bad.append("⑦ %r 的角标颜色 %r 不是 RGB 三元组" % (name, col))
+    # 旧四键不许因为新增值勤轴而丢：`SHIELD_SUFFIX`／`tray.ps1`／`logo.ps1`
+    # 与 `assets/icons/*.ico` 的文件名后缀全按这四个键走（0360 会逐格查产物）。
+    for k in ("on", "unposted", "unknown", "off"):
+        if k not in MARK_OF:
+            bad.append("⑦ 旧监理态键 %r 在 MARK_OF 里丢了" % (k,))
     return bad
 
 

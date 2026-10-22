@@ -26,6 +26,19 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "tools"))
 
 import mk_icons as M          # noqa: E402
+import state_registry as R    # noqa: E402
+
+
+def _mark(name):
+    """名字 → 角标几何。
+
+    ★ B1（2026-10-22）起 `_alpha_at()` 要**已解析的几何**，不要名字串：
+      解析只在入口做一次。这里也**不许**写 `SHIELD_MARKS.get(name)` ——
+      取不到会返回 None，而 None 的语义是「不画角标」，于是本探针会拿
+      「on 那块空白」去和其他态比，比出来"全都不一样"⇒ 假绿。
+      走 `R.mark_of()`：不认识的名字当场抛，探针直接报错而不是悄悄通过。
+    """
+    return R.mark_of(name)
 
 SIZE = 32
 STATES = ("on", "unposted", "unknown", "off")
@@ -52,7 +65,7 @@ CORNER = [(x, y) for y in range(SIZE) for x in range(SIZE) if _in_corner(x, y)]
 def corner_pixels(state, event="L0"):
     return frozenset(
         (x, y) for (x, y) in CORNER
-        if M._alpha_at(event, x, y, SIZE, state) > 0.5)
+        if M._alpha_at(event, x, y, SIZE, _mark(state)) > 0.5)
 
 
 def body_pixels(state, event="L0"):
@@ -61,13 +74,13 @@ def body_pixels(state, event="L0"):
     return frozenset(
         (x, y) for y in range(SIZE) for x in range(SIZE)
         if ((((x - cx) ** 2 + (y - cy) ** 2) ** 0.5) / SIZE) <= BODY_R
-        and M._alpha_at(event, x, y, SIZE, state) > 0.5)
+        and M._alpha_at(event, x, y, SIZE, _mark(state)) > 0.5)
 
 
 def left_pixels(state, event="L0"):
     return frozenset(
         (x, y) for y in range(SIZE) for x in range(SIZE // 2)
-        if M._alpha_at(event, x, y, SIZE, state) > 0.5)
+        if M._alpha_at(event, x, y, SIZE, _mark(state)) > 0.5)
 
 
 def ascii_art(state, event="L0", rows=14):
@@ -75,7 +88,7 @@ def ascii_art(state, event="L0", rows=14):
     for y in range(rows):
         line = ""
         for x in range(SIZE):
-            a = M._alpha_at(event, x, y, SIZE, state)
+            a = M._alpha_at(event, x, y, SIZE, _mark(state))
             line += "#" if a > 0.5 else ("+" if a > 0.05 else ".")
         out.append("%2d %s" % (y, line))
     return "\n".join(out)
