@@ -39,15 +39,30 @@
     (b) **睡眠证据当前拿不到**（`_sentinel_uptime()` 只用墙钟）⇒ 长空档一律
         `unknown`（判缺席但原因算不清），**不判 `absent`**。
         补取数的施工单见设计件 §11.9（未签发，前置是 T2 三钟实测）。
+
+## 披露句（A6）与「同一屏一句只说一次」
+
+披露句（`DISCLOSURES`）与主行是**两件事**：主行答「现在是什么状态」，披露句答
+「所以你看不见什么」。因此披露句**不与主行抢位**，而是：
+
+    · 主行已经说了同一句 ⇒ 披露位**不再重复**（同一屏一句说两次＝用户以为出了两件事）；
+    · 主行被更紧急的成因占了（停摆 ＋ 缺口 ⇒ 主行是 `absent` 句）⇒ 停摆句
+      **必须**由披露位补上 —— 这是 §5-N8-c「叠加只加停摆句不变」的落点。
+
+状态词条（`state_word`）**从 `state_registry` 取，本模块不写第二份**；停摆格
+返回 `None`（#59b）：`paused` 的定义句含 N8-c 的 `forbid_text`「没有要管的东西」，
+在「口粮用完了」旁边挂这个词条＝正面打脸，**宁可不给词条**。
 """
 
 import facts as _facts
 
 __all__ = [
     "SENTENCES", "ACTION_SENTENCE", "DEFAULT_SCOPE",
+    "DISCLOSURES", "DISCLOSURE_WHERE", "MIGRATION_NOTICES",
     "lamp", "cause", "sentence", "sentence_key", "badges", "detail",
     "period_line", "spend_today", "recon_report",
     "presence", "period_presence",
+    "disclosure", "state_word",
 ]
 
 #: 默认 scope（F2 冻结形状）。`window` 的第二位是窗口起点（ISO8601 或 None）。
@@ -119,6 +134,53 @@ BADGE_ACTION = {"dev": "none", "granary": "topup", "disk": "clean-ledger"}
 
 #: 成因的优先级（F2：`others` 按动作优先级排）。
 CAUSE_PRIORITY = ("absent", "breach", "blind", "paused", "draining", "ok")
+
+#: 披露句的去处（封闭集）。取值逐字对得上 §4.3 表的「去处」列：
+#:   `badge`＝徽标／`status_page`＝运行状态页／`inbox`＝收件箱／`period`＝期间行
+#:   `once`＝一次性提示（迁移用，没有常驻渲染点）
+DISCLOSURE_WHERE = ("inbox", "period", "badge", "status_page", "once")
+
+#: 披露句表 —— 逐字取自冻结件 §4.3 与深化件（出处逐条写在 `source` 里）。
+#: ★ 与 `SENTENCES` 分开的理由：`SENTENCES` 是「这一格说什么」，本表是
+#:   「这一格还欠用户一句什么」。混在一张表里，`sentence_key` 会开始返回
+#:   两类语义不同的键，判据就没法只认一个键了（F2 的 `sentence_key` 单值性）。
+DISCLOSURES = {
+    # N8-b：守备档生效 ⇒ 必须说出「少了什么」（设计审计件 :239 降档披露义务）
+    "guard_mode": {
+        "text": "现在只看基础目录，钩子停了。",
+        "where": ("badge", "status_page"),
+        "source": "冻结件 §4.3（宽度 14）",
+    },
+    # N8-c：停摆 ⇒ 主行换成这句；**不许出现「没有要管的东西」**
+    "stopped": {
+        "text": "口粮用完了，这段时间没在守。",
+        "where": ("inbox", "period"),
+        "source": "冻结件 §4.3 ＋ §5-N8-c（宽度 14）",
+    },
+    # 深化件 :365「partial 句式强制带披露」—— 时钟坏 ⇒ 时长读数全废，
+    # 但 duty 仍可判「在岗」；不说这句就等于把「算不出在岗多久」瞒下来。
+    "clock_skew": {
+        "text": "有一项没查到：系统时钟被改过，算不出它在岗多久。",
+        "where": ("inbox", "status_page"),
+        "source": "深化件 :365（**去处未冻结**，按 partial 句落点取；宽度 24 实算）",
+    },
+    # D-06 原句，逐字不改（迁移一次性）
+    "migrate_first_red": {
+        "text": "这些是升级前留下的问题，那时候报不出来。现在报给你了。",
+        "where": ("once",),
+        "source": "冻结件 §4.3（D-06 原句；宽度 27）",
+    },
+    "migrate_legacy_word": {
+        "text": "以前的『失守』，现在按三种说法讲。",
+        "where": ("once",),
+        "source": "冻结件 §4.3（D-06 原句；宽度 17）",
+    },
+}
+
+#: 迁移提示两条（一次性）。★ **当前没有 facts 触发源**（F1 无 migration 字段），
+#: 故**不进** `disclosure()` 的输出 —— 编一个 `migration_pending` 字段出来就是
+#: 造事实层（#59c）。接线期由迁移流程直接读本表，不经投影层。
+MIGRATION_NOTICES = ("migrate_first_red", "migrate_legacy_word")
 
 
 def _scope(scope):
@@ -349,7 +411,12 @@ def _fill(key, facts, scope=None):
     if key == "absent.main":
         cons = facts.get("outage_consequences")
         n = len(cons) if isinstance(cons, list) else None
-        return tpl.replace("{N}", str(n)) if n is not None else None
+        # ★ #59f：`n == 0` 与红灯**不相容**（harm=some 才轮到 absent，说「有 0 件
+        #   没被挡」等于在红屏上报平安）。0 件不是「一件都没有」，是「这个数填不出」
+        #   —— 与 #57e 同一条纪律：数字位不可用就降级，不写 0。
+        if not n:
+            return None
+        return tpl.replace("{N}", str(n))
     if key == "partial.main":
         return tpl.replace("{N}", "1")
     if key == "partial.detail":
@@ -386,14 +453,45 @@ def _days_since_earliest(facts, scope=None):
         return None
 
 
+def _head(key, facts, scope=None):
+    """数字位填不出时的降级句 —— **从本格原句里切掉数字分句**（逐字，不另造）。
+
+    ★ 只许切标点，不许改措辞：切出来的每个字都来自 `SENTENCES` 原句。
+      新增一条降级就要在这里显式写一行 —— 通用切法（见 `。` 就切）会把
+      「有 {N} 处没修」切成带占位符的半句，占位符漏屏比说错话更糟（#57e）。
+    """
+    if key == "absent.main":
+        return SENTENCES[key].split("。")[0] + "。"
+    if key == "breach.main":
+        n = len(_harmful_gaps(facts))
+        return SENTENCES[key].split("，")[0].replace("{N}", str(n)) + "。"
+    return None
+
+
+def _def_sentence(cause_key):
+    """最后一级兜底：该成因的**定义句**（冻结件 §4.1 定义列，无数字位）。
+
+    ★ 宁可降到定义层，也不许主行留空 —— 空主行是「屏幕上没有结论」，
+      比一句不够亲切的实话坏得多。`drill` 的定义句在 `MODE_IDENTITY` 里。
+    """
+    try:
+        import state_registry as _SR
+    except Exception:                                        # noqa: BLE001
+        return None
+    e = _SR.STATES_BY_KEY.get(cause_key)
+    if e is not None:
+        return e["def_sentence"]
+    return (_SR.MODE_IDENTITY.get(cause_key) or {}).get("def_sentence")
+
+
 def sentence(cause_key, facts, scope=None):
-    """显示句 ＋ 动作句（F2 冻结的两键）。句子**逐字取**自 `SENTENCES`。"""
+    """显示句 ＋ 动作句（F2 冻结的两键）。句子**逐字取**自 `SENTENCES`。
+
+    主行的三级降级（**永不为空**）：数字位填全 → 切掉数字分句 → 该成因定义句。
+    """
     key = sentence_key(cause_key, facts, scope)
-    main = _fill(key, facts, scope)
-    if main is None:
-        # 数字位填不出 ⇒ 退回该成因的主句（仍不写 None、不编数字）
-        main = (_fill("%s.main" % cause_key, facts, scope)
-                if cause_key != "ok" else SENTENCES["ok.main"])
+    main = _fill(key, facts, scope) or _head(key, facts, scope) \
+        or _def_sentence(cause_key)
     return {"main": main or "",
             "action": ACTION_BY_KEY.get(key) or ACTION_SENTENCE.get(cause_key, "")}
 
@@ -436,6 +534,69 @@ def period_line(facts, scope=None):
         return {"kind": "info",
                 "text": SENTENCES["account.info"].replace("{N}", str(info_n))}
     return {"kind": "none", "text": ""}
+
+
+# ───────────────────── 三·五、披露句与状态词条（A6） ─────────────────────
+def _dlg(key):
+    """披露句的 F2 形状（`{"key","text","where"}`）。**只许从表里取**。"""
+    d = DISCLOSURES[key]
+    return {"key": key, "text": d["text"], "where": d["where"]}
+
+
+def disclosure(facts, scope=None):
+    """本格要**额外**说出口的话（list of `{"key","text","where"}`）。
+
+    三条规矩：
+
+      1. **与主行逐字相同的披露句不上屏**。同一屏一句说两次，用户会以为出了
+         两件事。停摆格的停摆句已经是主行（§5-N8-c 强制），此处不再重复；
+         但主行被更紧急的成因占了（停摆 ＋ 缺口 ⇒ 主行是 `absent` 句）时，
+         停摆句**必须**由这里补上 —— 那是「叠加只加停摆句不变」的落点。
+      2. **每句都有出处**（`DISCLOSURES[key]["source"]`），禁临场写。
+      3. 只由 `facts` 判，不看时钟、不读文件（F2 铁律 1）。
+
+    ★ 守备档披露要求 `granary_level == "low"` 两条腿同时成立：余额落在
+      `[0, 一天)` 但**档位读不到**时，说「现在只看基础目录」是替产品断言
+      一次它没确认的降档（#59e）。
+    """
+    out = []
+    if _is_guard_mode(facts) and facts.get("granary_level") == "low":
+        out.append(_dlg("guard_mode"))
+    if _is_stop_by_granary(facts):
+        out.append(_dlg("stopped"))
+    if facts.get("clock_skewed") is True:
+        out.append(_dlg("clock_skew"))
+    main = sentence(cause(facts, scope)["key"], facts, scope)["main"]
+    return [d for d in out if d["text"] != main]
+
+
+def state_word(facts, scope=None):
+    """本格的状态词条（`{"key","label","def"}`）；**本格不该挂词条时返回 `None`**。
+
+    ★ 词条一律从 `state_registry` 取（F3 的唯一真源），本模块**不写第二份**
+      中文名 —— 全仓「灯态词只有一份」这条已被 0372 S08 判红过一次
+      （`state_registry` 的注释里记着那次教训）。
+
+    ★ 停摆格返回 `None`（#59b）：`paused` 的定义句是「监理不在岗，但这段时间
+      **没有要管的东西**。」—— 它含 N8-c 的 `forbid_text`。在「口粮用完了，
+      这段时间没在守」旁边挂这个词条，等于同一屏自己打自己。**宁可不给词条，
+      不给说反话的词条**（补法＝给停摆单独一个词条，属产品改动，未签发不动）。
+
+    ★ `drill` 不出现在词条里：§4.2 已签收第 2 条让 drill 身份**退徽标**
+      （`BADGE_WORD["dev"]`），词条跟着**成因**走；把 `演练中` 再塞进词条位
+      就是同一个身份两个落点，用户会问「到底哪个算数」。
+    """
+    ck = cause(facts, scope)["key"]
+    if ck == "paused" and _is_stop_by_granary(facts):
+        return None
+    try:
+        import state_registry as _SR
+    except Exception:                                        # noqa: BLE001
+        return None                                          # 取不到就不挂，不编
+    e = _SR.STATES_BY_KEY.get(ck)
+    if e is None:
+        return None
+    return {"key": ck, "label": e["label"], "def": e["def_sentence"]}
 
 
 # ───────────────────────── 四、在场证明（A5：presence） ─────────────────────────
