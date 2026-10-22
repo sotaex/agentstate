@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import os
 import subprocess
@@ -30,6 +31,11 @@ MIN_INTERVAL = 1800          # 同类通知最小间隔（秒），与 host_shie
 
 class Backend:
     name = "base"
+    #: 这个后端**走哪条通道**（`notice_log` 的 `channel` 字段就取它）。
+    #: ★ 它是「有没有通道」这一维的承载：`NullBackend.channel="file"` 表示
+    #:   **本机没有弹窗通道**，改写通知账 —— 不是「通道坏了」。两者后果完全不同
+    #:   （无头不算送达未知，坏通道才算），见 `settle()`。
+    channel = "toast"
 
     def toast(self, title, body, level):
         raise NotImplementedError
@@ -38,6 +44,7 @@ class Backend:
 class NullBackend(Backend):
     """什么都不做（无 GUI 环境 / 用户关掉了通知）。"""
     name = "null"
+    channel = "file"
 
     def toast(self, title, body, level):
         return False
@@ -137,6 +144,387 @@ def default_backend():
     return NullBackend()
 
 
+# ------------------------------------------- 通知三态与送达兜底（N12）----
+#
+# ★★ 要解决的问题（BL-05）：通知只有「发出」没有「送达」。
+#   Windows 免打扰／通知中心关闭／专注助手 ⇒ 报了、用户没看到、产品不知道。
+#
+# F7 冻的三态（`docs/Antinel·编码前无猜测审核与接口冻结 v1.0` §2-F7）：
+#   `notice_sent`       发出即记（进程内＋`notice_log.jsonl`，**不进链**
+#                       —— 发了什么不是审计事实）
+#   `notice_seen`       **只靠用户动作**（点开／确认），不许猜 —— 猜＝假绿
+#   `delivery_unknown`  sent 且超 `NOTICE_WINDOW` 未见、且降级也失败 ⇒ **进链**（L1）
+#
+# ★★ 三态的分界不是"多久没响应"，每一条都有它否掉的反面：
+#   · 降级成功 ⇒ 不记 unknown（成功不是未知）
+#   · 无头（没有通道）⇒ 不记 unknown（没有通道不是通道坏了）
+#   · 已见过 ⇒ 不记 unknown（最硬的证据，先于一切推断）
+#   · 时钟倒退 ⇒ 记 undecidable（负数时间差＝算不出，不是"很小"）
+#   · 没有降级执行器 ⇒ 记 undecidable（不知道能不能降 ≠ 降级失败）
+#   后两条**都不许落到 unknown**：unknown 是"确知没送达"，不是"不知道"。
+
+#: sent 之后多久未见算逾期（秒）。N12 原设计＝30 分钟；是冻结值，不从别处派生。
+NOTICE_WINDOW = 1800.0
+
+#: `notice_log` 的通道取值域。`file` ＝ 无头走文件账（**不是坏通道**）。
+CHANNELS = ("toast", "bubble", "file")
+
+#: 用户动作的两种来源。别的值一律抛错 —— 用户动作不许猜。
+SEEN_HOW = ("open", "ack")
+
+#: 降级链的取值域。`none` ＝ 没有可用的降级通道（有通道但失败记最后尝试的那道）。
+DOWNGRADES = ("tray", "banner", "none")
+
+#: 无头的通道名。抽成常量是为了让负控能换掉**同一份判定**去证明它承重。
+HEADLESS_CHANNEL = "file"
+
+#: 没有降级执行器时报这个。★ 不许写 `"unknown"` —— "不知道能不能降级"不是"降级失败"。
+NO_DOWNGRADER_STATE = "undecidable"
+
+
+def notice_log_path(root=None):
+    """通知账的落点（F7：`~/.antinel/console/notice_log.jsonl`，**不进链**）。
+
+    ★ 复用 `inbox_config.console_dir()`，不另拼家目录 —— 设了 `ANTINEL_HUB_DIR`
+      沙箱就必须跟着走，否则判据会静默读到真机账（0.35.3 收口过的老路）。
+    """
+    return os.path.join(C.console_dir(root), "notice_log.jsonl")
+
+
+def _append_line(path, line):
+    """把一行追加进账。**二进制**：不换行尾、不加 BOM。
+
+    文本模式的 `open(..., "a")` 在 Windows 上会把 `"\\n"` 写成 `"\\r\\n"`，
+    本仓在 0490 上踩过整文件假 diff。抽成函数，负控才能换掉它证明这条守得住。
+    """
+    with open(path, "ab") as f:
+        f.write(line.encode("utf-8"))
+
+
+def _iso(epoch):
+    """epoch → 本地时区 ISO，**秒精度**（与链记录的 ts 同一口径）。"""
+    return _dt.datetime.fromtimestamp(float(epoch)).astimezone().isoformat(
+        timespec="seconds")
+
+
+def _parse_ts(s):
+    """ISO 串 → 带时区的 datetime。解不开返回 None（由调用方记坏行）。"""
+    if not isinstance(s, str) or not s.strip():
+        return None
+    try:
+        t = _dt.datetime.fromisoformat(s.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return t if t.tzinfo is not None else t.astimezone()
+
+
+def _row_problem(row):
+    """只看形状与取值域。合格返回 None，否则返回原因串（英文稳定前缀）。
+
+    ★ `channel` 与 `how` **同现即坏行**：一行要么是「发出」，要么是「见过」。
+      两个都有说明写侧把两件事混成了一条，读侧**不许挑一个当真**。
+    """
+    if not isinstance(row, dict):
+        return "notice.row.shape: not an object"
+    kind = row.get("kind")
+    if not isinstance(kind, str) or not kind.strip():
+        return "notice.row.kind: missing or empty"
+    if _parse_ts(row.get("ts")) is None:
+        return "notice.row.ts: unparsable %r" % (row.get("ts"),)
+    has_ch, has_how = "channel" in row, "how" in row
+    if has_ch and has_how:
+        return "notice.row.mixed: channel and how on the same line"
+    if not has_ch and not has_how:
+        return "notice.row.kind_of_line: neither channel nor how"
+    if has_ch:
+        if set(row) != {"ts", "kind", "channel"}:
+            return "notice.row.sent_fields: %r" % sorted(row)
+        if row["channel"] not in CHANNELS:
+            return "notice.row.channel: %r not in %r" % (row["channel"], CHANNELS)
+    else:
+        if set(row) != {"ts", "kind", "how"}:
+            return "notice.row.seen_fields: %r" % sorted(row)
+        if row["how"] not in SEEN_HOW:
+            return "notice.row.how: %r not in %r" % (row["how"], SEEN_HOW)
+    return None
+
+
+def _iter_rows_raw(root=None):
+    """读全部原始行。返回 `(rows, bad)`：`rows=[(lineno, dict)]`、`bad=[{line,why,raw}]`。
+
+    ★ 坏行**不跳过、不修补、不补默认值**：进 `bad` 并带行号。静默丢弃会让
+      「账里 300 行读不懂」表现成「这个月没有通知」—— 空值与零混同。
+    ★ 文件不存在 ⇒ `([], [])`。「还没发过」和「发过但读不出」必须分得开：
+      后者由 `OSError` 抛出，**不许**吞成空。
+    """
+    p = notice_log_path(root)
+    try:
+        with open(p, "rb") as f:
+            raw = f.read()
+    except FileNotFoundError:
+        return [], []
+    text = raw.decode("utf-8", "replace")        # 半个汉字也不丢行号
+    rows, bad = [], []
+    for i, line in enumerate(text.splitlines(), 1):
+        if not line.strip():
+            continue                              # 空行不是数据，也不是坏行
+        try:
+            got = json.loads(line)
+        except ValueError as e:
+            bad.append({"line": i, "why": "notice.row.json: %s" % e, "raw": line[:80]})
+            continue
+        why = _row_problem(got)
+        if why:
+            bad.append({"line": i, "why": why, "raw": line[:80]})
+            continue
+        rows.append((i, got))
+    return rows, bad
+
+
+def iter_rows(root=None):
+    """公开入口（负控要能换掉它）。"""
+    return _iter_rows_raw(root=root)
+
+
+def _checked_how(how):
+    if not isinstance(how, str) or how not in SEEN_HOW:
+        raise ValueError("notice.seen.how: %r not in %r" % (how, SEEN_HOW))
+    return how
+
+
+def _checked_channel(channel):
+    if not isinstance(channel, str) or channel not in CHANNELS:
+        raise ValueError("notice.sent.channel: %r not in %r" % (channel, CHANNELS))
+    return channel
+
+
+def _checked_kind(kind):
+    if not isinstance(kind, str) or not kind.strip():
+        raise ValueError("notice.kind: not a non-empty string: %r" % (kind,))
+    return kind
+
+
+def record_sent(kind, channel, now=None, root=None):
+    """记一条 `notice_sent` 并返回落盘的那一行。
+
+    写失败**抛 OSError**（由调用方决定怎么报），不假装"已经记上了"。
+    """
+    k = _checked_kind(kind)
+    ch = _checked_channel(channel)
+    row = {"ts": _iso(time.time() if now is None else now), "kind": k, "channel": ch}
+    p = notice_log_path(root)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    _append_line(p, json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+    return row
+
+
+def record_seen(kind, how, now=None, root=None):
+    """记一条 `notice_seen`。**只能由用户动作调用**（点开＝open／确认＝ack）。
+
+    ★ 这个函数没有"默认 how"。任何上游想"顺手记一条见过"都是猜 —— 抛错。
+    """
+    k = _checked_kind(kind)
+    h = _checked_how(how)
+    row = {"ts": _iso(time.time() if now is None else now), "kind": k, "how": h}
+    p = notice_log_path(root)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    _append_line(p, json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+    return row
+
+
+def _age_seconds(sec):
+    """发出到现在的秒数。**不钳负数** —— 负数＝时钟回拨／未来时间，是要报出去的事实。
+
+    ★ 钳成 0 会让「算不出」长得像「刚到」，于是永远判 pending、永远不告警。
+      抽成函数是为了让负控能换掉同一份实现去证明它承重。
+    """
+    return float(sec)
+
+
+def _outcome_strict(kind, now=None, root=None):
+    """`kind` 的当前结局。返回 dict（内部真实现，负控不可替换的那一份）。
+
+    `state ∈ absent / unseen / seen`：
+      · `absent`  账里没有这个 kind 的发出行（没发过 ⇒ 谈不上送达）
+      · `seen`    **最后一个 sent 之后**有 seen 行（见了之后又发一次，第二次仍未见）
+      · `unseen`  有 sent，其后没有 seen
+    """
+    rows, bad = iter_rows(root=root)
+    mine = [(n, r) for n, r in rows if r.get("kind") == kind]
+    sent = [(n, r) for n, r in mine if "channel" in r]
+    if not sent:
+        return {"state": "absent", "sent_ts": None, "channel": "", "age": None,
+                "sent_line": None, "seen_line": None, "bad": bad}
+    n_sent, r_sent = sent[-1]
+    seen = [(n, r) for n, r in mine if "how" in r and n > n_sent]
+    t = _parse_ts(r_sent["ts"])
+    now_t = _dt.datetime.fromtimestamp(
+        float(time.time() if now is None else now)).astimezone()
+    age = _age_seconds((now_t - t).total_seconds()) if t is not None else None
+    return {"state": "seen" if seen else "unseen",
+            "sent_ts": r_sent["ts"], "channel": r_sent.get("channel", ""),
+            "age": age, "sent_line": n_sent,
+            "seen_line": (seen[-1][0] if seen else None), "bad": bad}
+
+
+def outcome_of(kind, now=None, root=None):
+    """公开入口（负控要能换掉它）。"""
+    return _outcome_strict(kind, now=now, root=root)
+
+
+def chain_scan(kind, audit_dir, now=None):
+    """当日链里是否已有同 kind 的 `delivery_unknown`。
+
+    返回三值，**不是两值**：
+      `True`  已记过 ⇒ 不重复记（daemon 每 10 分钟一拍，不去重就是每天几十条脏账）
+      `False` 确知没记过
+      `None`  **读不到**（目录不存在／读失败／有读不懂的行）⇒ 调用方必须报
+              undecidable，**不许当成"没记过"** —— 那会重复写。
+    """
+    if not audit_dir or not os.path.isdir(audit_dir):
+        return None
+    names = sorted(n for n in os.listdir(audit_dir) if n.endswith(".jsonl"))[-2:]
+    broken = False
+    try:
+        for name in names:
+            with open(os.path.join(audit_dir, name), "rb") as f:
+                for line in f.read().decode("utf-8", "replace").splitlines():
+                    if not line.strip():
+                        continue
+                    try:
+                        r = json.loads(line)
+                    except ValueError:
+                        broken = True
+                        continue
+                    if isinstance(r, dict) and r.get("type") == "delivery_unknown" \
+                            and r.get("kind") == kind:
+                        return True
+    except OSError:
+        return None
+    return None if broken else False
+
+
+def _needs_unknown(headless, downgrade_ok):
+    """该不该记「送达未知」：**有通道 ∧ 降级失败**（"已见过"在上游就返回了）。
+
+    ★ 两个条件缺一不可：降级成功不是未知（成功）；无头不是通道坏了（没通道）。
+      抽成命名函数，是因为这条规则必须能被负控换掉 —— 内联在 `settle()` 里的话，
+      负控只能复制一份来测副本，而副本红 ≠ 线上红。
+    """
+    if headless:
+        return False
+    return not downgrade_ok
+
+
+def _default_audit_dir():
+    """本进程包根对应的链目录（引用 `host_shield` 的**唯一实现**，不另拼）。
+
+    取不到返回 `""` —— 下游 `chain_scan("")` 会返回 `None`，于是报 undecidable
+    而不是"没记过"。**取不到必须出声**。
+    """
+    try:
+        import host_shield as _hs
+        return _hs._shield_audit_dir(os.path.dirname(os.path.abspath(__file__)))
+    except Exception:                             # noqa: BLE001
+        return ""
+
+
+def _chain_record(audit_dir, rec):
+    """进链，返回四态字符串（`chain`/`sidecar`/`dropped`/`none`）。"""
+    try:
+        import session_dna
+        return session_dna.append_chained(audit_dir, rec)
+    except Exception:                             # noqa: BLE001
+        return "none"
+
+
+def _write_unknown(kind, downgrade, minutes, audit_dir=None, record=None):
+    """写一条 L1 的 `delivery_unknown`。返回 `(rec, written)`；没落盘时 rec 为 None。
+
+    ★ N12 明写「**不弹泡**」—— 这条记录本身就是"报不达"的证据，再弹一次会递归。
+      所以这里**不走** `host_shield.record`（它会进气泡判定），只直接进链。
+    """
+    rec = {"ts": _iso(time.time()), "type": "delivery_unknown",
+           "tool": "-", "session": "daemon", "host": "generic",
+           "decision": "allow", "severity": "warning", "reason": "",
+           "kind": kind, "downgrade": downgrade,
+           "minutes_overdue": int(minutes), "noticed": False}
+    d = audit_dir or _default_audit_dir()
+    written = record(d, rec) if record is not None else _chain_record(d, rec)
+    if written in ("chain", "sidecar"):
+        return rec, written
+    return None, (written or "none")
+
+
+def settle(kind, now=None, root=None, downgrade=None, audit_dir=None,
+           record=None, scan=None):
+    """判 `kind` 的送达结局：返回 `{state, minutes_overdue, downgrade, chain, why}`。
+
+    `state` 域：`absent` / `seen` / `pending` / `headless` / `downgraded` /
+    `unknown` / `undecidable` —— **两个"不知道"分开**（`unknown` 是确知没送达，
+    `undecidable` 是判不了）。
+
+    判定顺序本身是判据的一部分（先最硬的证据，再推断）：
+      没发过 → 已见过 → 时间算不出 → 未到期 → 无通道 → 降级 → 去重 → 记链
+    ★ 顺序错了会假绿：先判 headless 再判 seen，就会把"用户看过了的无头场景"
+      报成 headless，把最好的证据丢掉。
+    """
+    now = time.time() if now is None else float(now)
+    o = outcome_of(kind, now=now, root=root)
+    base = {"state": "", "minutes_overdue": None, "downgrade": None,
+            "chain": None, "why": "", "sent_line": o.get("sent_line"),
+            "seen_line": o.get("seen_line")}
+
+    if o["state"] == "absent":
+        return dict(base, state="absent", why="notice.settle.absent: no sent line")
+    if o["state"] == "seen":
+        return dict(base, state="seen")
+    age = o.get("age")
+    if age is None:
+        return dict(base, state="undecidable", why="notice.settle.ts: sent ts unreadable")
+    if age < 0:
+        return dict(base, state="undecidable",
+                    why="notice.settle.clock: sent in the future by %.0fs" % -age)
+    if age < NOTICE_WINDOW:
+        return dict(base, state="pending", minutes_overdue=0)
+
+    minutes = int(age // 60)
+    base["minutes_overdue"] = minutes
+    headless = o.get("channel") == HEADLESS_CHANNEL
+    if headless:
+        return dict(base, state="headless",
+                    why="notice.settle.headless: no channel, file ledger only")
+    if downgrade is None:
+        return dict(base, state=NO_DOWNGRADER_STATE,
+                    why="notice.settle.downgrade: no downgrader wired")
+    try:
+        ok, ch = downgrade(kind)
+    except Exception as e:                        # noqa: BLE001
+        return dict(base, state="undecidable",
+                    why="notice.settle.downgrade: %s: %s" % (type(e).__name__, e))
+    if ch not in DOWNGRADES:
+        return dict(base, state="undecidable",
+                    why="notice.settle.downgrade: %r not in %r" % (ch, DOWNGRADES))
+    base["downgrade"] = ch
+    if not _needs_unknown(headless, bool(ok)):
+        return dict(base, state="downgraded")
+
+    seen_already = (scan or chain_scan)(kind, audit_dir or _default_audit_dir(),
+                                        now=now)
+    if seen_already is None:
+        return dict(base, state="undecidable",
+                    why="notice.settle.chain: chain unreadable, dedup undecided")
+    if seen_already:
+        return dict(base, state="unknown",
+                    why="notice.settle.dedup: already recorded today")
+    rec, written = _write_unknown(kind, ch, minutes,
+                                  audit_dir=audit_dir, record=record)
+    if rec is None:
+        return dict(base, state="unknown",
+                    why="notice.settle.write: not persisted (%s)" % written)
+    return dict(base, state="unknown", chain=rec)
+
+
 # --------------------------------------------------------------- 节流 ----
 def _throttle_path(root=None):
     return os.path.join(C.console_dir(root), "notify_state.json")
@@ -178,7 +566,17 @@ def toast(level, title, body, root=None, backend=None, cfg=None,
     _save_throttle(th, root)
 
     ok = backend.toast(title, body, level)
-    return bool(ok), "" if ok else getattr(backend, "last_error", "发送失败")
+    if not ok:
+        return False, getattr(backend, "last_error", "发送失败")
+    # ★ N12：发出即记 `notice_sent`（进程内＋通知账，**不进链**）。
+    #   记账失败**不假装成功**：`sent` 仍为 True（确实弹出去了），但把
+    #   「账没记上」说进第二返回值 —— 否则送达链对这条通知永久失明。
+    note = ""
+    try:
+        record_sent(key, getattr(backend, "channel", "toast"), now=now, root=root)
+    except OSError as e:
+        note = "notice.sent.ledger: %s: %s" % (type(e).__name__, e)
+    return True, note
 
 
 # ------------------------------------------------- 节流账本（公开两面）----
