@@ -304,7 +304,7 @@ op.addEventListener("click", function(){
         "<span class=\"bub-note\">会一直留着，直到你处理完</span>"
         "</div></div></div>%s%s</body></html>"
         % (SV._esc(full_title), SV.FAVICON_LINK, css, SV._esc(token),
-           SV._esc(kind), SV._logo_mark(st), M.STATE_VAR[st],
+           SV._esc(kind), SV._logo_mark(st), M.state_var(st),
            SV._esc(M.state_label(st)), SV._esc(title), SV._esc(body_txt),
            act_open, SV._LOGO_JS, js))
 

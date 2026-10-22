@@ -251,17 +251,12 @@ MODE_IDENTITY = {
     },
 }
 
-#: 显示句（§4.1 逐字；不占 11 字段，与 def_sentence 同源同文件——句子只许一处写）
-DISPLAY_SENTENCE = {
-    "unarmed": "还没开启，现在没有任何东西在替你看门。",
-    "ok": "今天没什么要拦的。它在盯着。",
-    "paused": "监理暂停了一会儿，这会儿没有要管的东西。",
-    "draining": "粮还够 N 天，用完监理会停。",
-    "breach": "有 N 处没修，最早一处是 D 天前。",
-    "absent": "监理不在岗。这段时间有 N 件没被挡。",
-    "blind": "我证明不了自己在守。按最坏算，先核对一次。",
-    "partial": "有 N 项没查到，先按有问题算。",
-}
+#: ★★ 这里**不再有**显示句表的第二份副本（X 步删）。
+#:   删之前本模块有一张 `DISPLAY_SENTENCE`，与 `situation.SENTENCES` 逐字重复，
+#:   自检只比了**键集**、没比文本 ⇒ 实测已经漂了：那边写「最早一**件**」，
+#:   这边写「最早一**处**」，两处都不报错。句子是用户读到的那一行，第二份
+#:   副本＝下一次静默漂移的入口。真源只有 `situation.SENTENCES`。
+#:   自检 ⑦' 反过来守「它有没有被抄回来」——见 `selfcheck()`。
 
 #: 动作句（§4.1 逐字；键＝动作等价类，I4 保证与成因单射）
 ACTION_SENTENCE = {
@@ -303,6 +298,37 @@ LEGACY_OF = {
 #:   ★ 另注：本条注释**故意不写出那张字典的字面量** —— S08 的扫描器走文本
 #:     （`_decl_scan`），注释里的字典同样会被当成「第二份声明」。本仓已有同型
 #:     前科（0364 的判据在自己解释 bug 的注释里写了触发串而假红）。
+
+
+#: 成因 → 出场用的**旧键**（X 步接线用；`LEGACY_OF` 的反查，方向唯一）。
+#: ★ 为什么不直接反查 `LEGACY_OF`：它是**一对多**的（`ok` 同时来自 `L2` 与 `L0`），
+#:   反查会撞上两个候选。这里把消歧结果写下来，并由 `selfcheck()` ⑨ 用
+#:   `LEGACY_OF` **正向校验**（每个值必须真的能到它）—— 表是新的，语义不新增。
+#: ★ 为什么出场仍用旧键，而不是注册表里的新词：「有缺口／看不清／暂停中」这一族
+#:   目前**没有术语表条目**（`glossary.TERMS` 只登记了六个旧词）。屏幕上出现一个
+#:   点不开解释的词，比用旧词更糟。旧词表的 `R0` 词条原话是
+#:   「防线没起作用，或者根本没人守着」—— 在岗但有缺口这一档它本来就盖得住。
+#:   新词的术语表迁移属于「旧屏句子迁移」，单独一步做，不在接线里顺手改词。
+CAUSE_LEGACY = {
+    "unarmed": "L0",
+    "drill": "dev",
+    "ok": "L0",
+    "paused": "L1",
+    "draining": "Ls",
+    "breach": "R0",
+    "absent": "R0",
+    "blind": "R0",
+    "partial": "L1",
+}
+
+
+def legacy_key_of(cause):
+    """成因键 → 出场用的旧键。**认不出就炸**（不编一个默认态）。"""
+    key = cause.get("key") if isinstance(cause, dict) else cause
+    if key not in CAUSE_LEGACY:
+        raise KeyError("成因 %r 没有出场用的旧键（合法：%s）"
+                       % (key, "、".join(sorted(CAUSE_LEGACY))))
+    return CAUSE_LEGACY[key]
 
 
 def selfcheck():
@@ -347,9 +373,23 @@ def selfcheck():
             bad.append("⑥ 灯 %r 缺色/几何" % (lamp,))
     if not any(e["lamp"] == "grey" for e in STATES):
         bad.append("⑥ 灰灯无成因（unarmed 必须落灰）")
-    for key, disp in DISPLAY_SENTENCE.items():
-        if key not in CAUSE_KEYS:
-            bad.append("句子表键 %r 不是成因键" % (key,))
+    # ⑦' 句子单源（X 步）：句子表的**唯一**一处在 `situation.SENTENCES`。
+    #   这一条不查文本（文本由 situation 自检），只查两件结构事：
+    #     ① 本模块有没有人把副本抄回来（上面那句常量一旦重现，这里就红）；
+    #     ② 每个成因在真源里**真的**有一句 main（不是靠"表里有 8 个键"自证）。
+    if "DISPLAY_SENTENCE" in globals():
+        bad.append("⑦' 句子表出现第二份（DISPLAY_SENTENCE）—— "
+                   "单源在 situation.SENTENCES")
+    try:
+        import situation as _sit
+        for _k in CAUSE_KEYS:
+            if not (_sit.SENTENCES.get(_k + ".main") or "").strip():
+                bad.append("⑦' 成因 %r 在 situation.SENTENCES 里没有 main 句"
+                           % (_k,))
+    except Exception as e:                                   # noqa: BLE001
+        # 读不到真源 = 这条腿没在守 ⇒ 响亮失败（不许当成"没问题"）
+        bad.append("⑦' 读不到 situation.SENTENCES：%s: %s"
+                   % (type(e).__name__, e))
     for key, e in STATES_BY_KEY.items():
         if e["action"] not in ACTION_SENTENCE:
             bad.append("动作类 %r 无动作句" % (e["action"],))
@@ -372,6 +412,18 @@ def selfcheck():
     # ★ 这个集合现在有了名字＝`FILE_KEYS`，由 ⑧ 的守卫统一查，
     #   这里不再写第二份字面量。
     bad.extend(_asset_guard_problems())
+    # ⑨ 出场映射（X 步）：键集＝成因键＋模式身份；每个值必须真能由该成因到达
+    #   （用 `LEGACY_OF` 正向校验）—— 表是新的，语义不新增。
+    want = set(CAUSE_KEYS) | set(MODE_IDENTITY)
+    if set(CAUSE_LEGACY) != want:
+        bad.append("⑨ CAUSE_LEGACY 键集≠成因键＋模式身份（差 %s）"
+                   % (sorted(want ^ set(CAUSE_LEGACY)),))
+    for cause, legacy in CAUSE_LEGACY.items():
+        if legacy not in LEGACY_KEYS:
+            bad.append("⑨ %s → %r 不是旧键" % (cause, legacy))
+        elif cause not in LEGACY_OF.get(legacy, ()):
+            bad.append("⑨ %s → %s 与 LEGACY_OF 正向不一致（%s 到不了 %s）"
+                       % (cause, legacy, legacy, cause))
     return bad
 
 

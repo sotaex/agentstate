@@ -25,6 +25,7 @@ from datetime import datetime
 
 import inbox_config as C
 import inbox_model as M
+import state_registry as R
 
 
 def state_path(root=None):
@@ -190,10 +191,18 @@ def icon_file(state, shield=None, root=None):
     """
     base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icons")
     s = _icon_state(state)
-    if shield and shield in SHIELD_SUFFIX:
-        cand = os.path.join(base, "%s%s.ico" % (s, SHIELD_SUFFIX[shield]))
-        if os.path.exists(cand):
-            return cand
+    if shield:
+        # ★★ X（2026-10-23，B 线 §13.8 移交的两处之一）：域外的监理态名
+        #   一律**响亮失败**。旧写法 `shield in SHIELD_SUFFIX` 让不认识的
+        #   名字静默退回**基础态图标**（＝「在岗」）—— 用户看到的是「它在守」，
+        #   而真值是「这个名字我根本不认识」。静默错误比崩溃难发现。
+        #   ★ `None` 是**合法答案**（`on` 这一档不画角标，复用基础文件），
+        #     与「查不到」不是一回事：查不到会抛，见 `asset_key_of` 的注释。
+        key = R.asset_key_of(shield)
+        if key is not None:
+            cand = os.path.join(base, "%s%s.ico" % (s, SHIELD_SUFFIX[key]))
+            if os.path.exists(cand):
+                return cand
     return os.path.join(base, "%s.ico" % s)
 
 
@@ -234,7 +243,13 @@ def write_state(state, count=0, tip="", root=None, shield=None, total=None,
                # ★ 分母：这条数来自多少条记录。取不到 ⇒ `None`（**不编 0**，
                #   "不知道分母" ≠ "分母是 0"，后者会让一个真告警看起来是百分之百）。
                "total": None if total is None else int(total),
-               "shield": shield if shield in SHIELD_SUFFIX else SHIELD_UNKNOWN,
+               # ★★ X（2026-10-23，§13.8 两处之二）：与 `icon_file()` 同一把尺子
+               #   —— 不认识的监理态当场抛，不再静默写 `unknown`。旧写法让
+               #   「名字写错」与「确实探不到」在 `tray.json` 里逐字节相同。
+               #   `asset_key_of('on')` 返 `None`（这一档不画角标）⇒ 落 `on`，
+               #   这是**答出来的**，与「查不到」不同。
+               "shield": ((R.asset_key_of(shield) or SHIELD_ONPOSTURE)
+                          if shield else SHIELD_UNKNOWN),
                "ts": time.time()}
     # ★★ 0.53.1：多写一个 `logo` 块 ＝ **漂浮哨标的动效规格**（从
     #   `inbox_server.logo_motion_spec()` 单一真源派生）。哨标
@@ -563,7 +578,10 @@ def sync_from_items(items, root=None, tip=None, posture=None):
     """
     if posture is None:
         posture = probe_posture()
-    ex = M.light_explain(posture, items, granary=M.granary_now())
+    # ★★ X（2026-10-23）：托盘与页面**同一个取数点**（`M.render_view`）。
+    #   此前这里写 `light_explain`，而页面写 `render_view` ⇒ 两个界面会说两套词
+    #   （W-03 逐字断言正是为此存在）。改一处不够，两处都得跟随。
+    ex = M.render_view(posture, items, granary=M.granary_now())
     st = ex["state"]
     act = [it for it in items if M.bucket_of(it) == M.BUCKET_ACTION]
     n = M.count_groups(act)

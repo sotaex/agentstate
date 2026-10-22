@@ -123,7 +123,7 @@ LEVEL_NAME = {k: M.state_short(k) for k in ("R0", "L2", "L1", "Ls", "L0")}
 CSS = """
 :root{--bg:#fff;--panel:#f6f8fa;--fg:#14212b;--muted:#465866;--line:#d6dee4;
 --brand:#145a72;--brand-dark:#0f4559;--r0:#9b2226;--l2:#c2410c;--l1:#8a6100;
---ls:#2a5db0;--l0:#226b4a;
+--ls:#2a5db0;--l0:#226b4a;--lgrey:#5f5e5a;
 --sans:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
 --mono:ui-monospace,SFMono-Regular,Consolas,monospace}
 @media (prefers-color-scheme:dark){:root{--bg:#0f1417;--panel:#161d21;--fg:#e7edf1;
@@ -435,7 +435,7 @@ details.month>.rows{border:0;border-radius:0}
 .rem .seg{margin:10px 0 0;padding:9px 11px;border-radius:8px;background:var(--bg);
   border-left:3px solid var(--line)}
 .rem .seg.root{border-left-color:var(--r0)}
-.rem .seg.sev{border-left-color:var(--r1)}
+.rem .seg.sev{border-left-color:var(--l2)}
 .rem .seg.act{border-left-color:var(--brand)}
 .rem .seg h4{margin:0 0 4px;font-size:12px;color:var(--muted);font-weight:700;
   text-transform:none}
@@ -893,7 +893,9 @@ def _bar(items, token, posture=None, now=None, view="inbox", ex=None):
     # ★ 0.48.5（交接件 §5.5 W-01）：`ex` 由 `render_page` 传入 —— 标题要用
     #   **同一个**状态词，两次 `light_explain()` 可能读到不同时刻的姿态
     #   ⇒ 标题与头部说两个词。不传 ⇒ 自己算（老调用方行为不变）。
-    ex = ex or M.light_explain(p, items, now=now, granary=M.granary_now())
+    # ★★ X（2026-10-23）：与 `render_page()` 同一取数点（`render_view`）——
+    #   两处各写 `light_explain` 就会出现"标题一套词、顶部条另一套词"。
+    ex = ex or M.render_view(p, items, now=now, granary=M.granary_now())
     st = ex["state"]
     label = _esc(ex["label"])
     state_reason = _esc(ex["reason"])
@@ -1044,7 +1046,7 @@ def _bar(items, token, posture=None, now=None, view="inbox", ex=None):
         #   ★ 0.53.0（T3.2）：原第 9 个实参 `nums`（24h 计数排）随药丸整排
         #   撤掉，格式串里的 `"%s%s"` 同步收成 `"%s"`（占位符与实参一对多
         #   少 ⇒ `not all arguments converted`，本仓踩过）。
-        % (_logo_mark(st), M.STATE_VAR[st], M.STATE_VAR[st],
+        % (_logo_mark(st), M.state_var(st), M.state_var(st),
            label, GL.chip("light", mk=True), suffix, badge_html,
            state_reason, fix))
 
@@ -3881,7 +3883,11 @@ def render_page(view="inbox", filt=None, root=None, token="", items=None, rep=No
     #   页面名（人话可读、不假造标题）。旧形态断言随退休走 D-38 冻结
     #   执法（`window_title_format`）。
     p = posture or posture_now()
-    ex = M.light_explain(p, items, now=now, granary=M.granary_now())
+    # ★★ X（2026-10-23）：本页的灯与主行走 `M.render_view()` —— 它内部先调
+    #   `light_explain()`（几何/计数/徽标一字不变），再把「态的词与句话」换成
+    #   新投影（`situation` 四轴）给的那一套。**旧函数保持原样**：判据与探针仍
+    #   走 `light_explain()`，所以本次接线不会把 300+ 条既有断言变成对空。
+    ex = M.render_view(p, items, now=now, granary=M.granary_now())
     title = PAGE_TITLES.get(view, "收件箱")
     if view in ("report", "health", "ledger"):
         # ★ 2026-10-21（TAB 切换卡顿根治·方案 A，创始人拍板）：旧版

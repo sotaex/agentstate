@@ -652,16 +652,26 @@ def s03():
     return "八种姿态 × 四个栏目，正文均无 %s" % ("、".join(sorted(BANNED_IN_CHROME)))
 
 
-@check("N-S03 负控：把一个禁用语塞进姿态文案 ⇒ S03 必须抓到")
+@check("N-S03 负控：把一个禁用语塞进页面文案 ⇒ S03 必须抓到")
 def n_s03():
-    poisoned = {"state": "interrupted", "label": "中断",
-                "why": "护盾开着，但门闸此刻没人守（MUTANT，存疑）。",
-                "can_fix": True, "fix": "revive", "fix_hint": "马上修复",
-                "consequences": []}
-    ch = _chrome_of(poisoned)
+    # ★★ X（2026-10-23）：旧注入点是 `posture["why"]` —— 那是**探针自己的原话**，
+    #   新投影上线后页面**不再渲染它**（冻结句从句子表来，禁临场写）。
+    #   注入一个渲染不到的地方，负控必然"失效"，而扫描器其实好好的。
+    #   ⇒ 改成注入**仍然上屏**的那一处（状态词），守的东西不变：
+    #   「页面文案里出现禁用语，扫描器必须报」。
+    import inbox_model as M
+    orig = M.state_label
+    try:
+        M.state_label = lambda *a, **k: "护盾门闸存疑"
+        poisoned = {"state": "interrupted", "label": "中断",
+                    "why": "MUTANT", "can_fix": True, "fix": "revive",
+                    "fix_hint": "马上修复", "consequences": []}
+        ch = _chrome_of(poisoned)
+    finally:
+        M.state_label = orig
     h = _scan_banned(ch)
     if not h:
-        return _raise("把「护盾/门闸/存疑」写进姿态文案，S03 仍判干净 ⇒ 扫描器空转")
+        return _raise("把「护盾/门闸/存疑」写进页面状态词，S03 仍判干净 ⇒ 扫描器空转")
     # 至少三个词都得抓到（否则扫描器只认一个词）
     got = {w for w in BANNED_IN_CHROME if any(w in x for x in h)}
     need = {"护盾", "门闸", "存疑"}
@@ -769,44 +779,55 @@ def n_s05():
 
 
 # ══════════════════════════════════ S06 顶部灯说明单源 ══════════════════════
-@check("S06 顶部条的原因句只能来自 light_explain()（不许页面自己拼）")
+@check("S06 顶部条的原因句只能来自 render_view()／light_explain()（不许页面自己拼）")
 def s06():
     import inbox_model as M
     import inbox_server as SV
-    orig = M.light_explain
-    probe = "判据探针：这句话只可能来自 light_explain（S06）。"
+    # ★★ X（2026-10-23）：取数点从 `light_explain()` 换成 `render_view()` ——
+    #   后者内部**先调** `light_explain()`（几何/计数/徽标照旧），再把"态与句话"
+    #   换成新投影。判据要守的东西没变：**页面只有一个取数入口，不自拼第二套**。
+    #   ⇒ 注入点跟着唯一入口走，并同时断言那个入口真的还在调 `light_explain`。
+    orig = M.render_view
+    probe = "判据探针：这句话只可能来自取数入口（S06）。"
     posture = {"state": "guarding", "label": "值守中", "why": "监理在岗",
                "can_fix": False, "fix": None, "fix_hint": "", "consequences": []}
     try:
-        M.light_explain = lambda *a, **k: {
+        M.render_view = lambda *a, **k: {
             "state": "R0", "label": "失守", "now_text": "X",
-            "now_bad": True, "ledger_bad": False, "reason": probe}
+            "now_bad": True, "ledger_bad": False, "reason": probe,
+            "badges": [], "action_count": 0, "info_count": 0}
         bar = SV._bar([], "TOKEN", posture=posture, view="inbox")
         if probe not in bar:
-            return _raise("_bar 没有用 light_explain() 的 reason ⇒ "
+            return _raise("_bar 没有用 render_view() 的 reason ⇒ "
                           "页面自己拼了第二套说明（两套必然漂移）")
     finally:
-        M.light_explain = orig
+        M.render_view = orig
     # 还原后必须回到正常实现（真跑一次，看说明句还在不在）
     bar2 = SV._bar([], "TOKEN", posture=posture, view="inbox")
     if not bar2.strip():
-        return _raise("还原 light_explain 后 _bar 渲染为空 ⇒ 还原链路坏了")
-    return "注入探针句 ⇒ 页面原样出现；还原 ⇒ 正常渲染"
+        return _raise("还原 render_view 后 _bar 渲染为空 ⇒ 还原链路坏了")
+    # ★ 新入口必须**仍然**建在旧唯一实现上（否则就是第二套投影）
+    import inspect
+    src = inspect.getsource(M.render_view)
+    if "light_explain(" not in src:
+        return _raise("render_view() 没调 light_explain() ⇒ 出现了第二套投影实现")
+    return "注入探针句 ⇒ 页面原样出现；还原 ⇒ 正常渲染；入口仍建在旧实现上"
 
 
 @check("N-S06 负控：让 _bar 自己拼一句原因 ⇒ S06 必须抓到")
 def n_s06():
     import inbox_model as M
     import inbox_server as SV
-    orig = M.light_explain
-    probe = "判据探针：这句话只可能来自 light_explain（S06）。"
+    orig = M.render_view
+    probe = "判据探针：这句话只可能来自取数入口（S06）。"
     posture = {"state": "guarding", "label": "值守中", "why": "监理在岗",
                "can_fix": False, "fix": None, "fix_hint": "", "consequences": []}
     try:
-        M.light_explain = lambda *a, **k: {
+        M.render_view = lambda *a, **k: {
             "state": "R0", "label": "失守", "now_text": "X",
-            "now_bad": True, "ledger_bad": False, "reason": probe}
-        # 变异：让 `_bar` 不理 light_explain，自己拼（模拟"二次实现"）
+            "now_bad": True, "ledger_bad": False, "reason": probe,
+            "badges": [], "action_count": 0, "info_count": 0}
+        # 变异：让 `_bar` 不理取数入口，自己拼（模拟"二次实现"）
         orig_bar = SV._bar
 
         def mut_bar(*a, **k):
@@ -819,7 +840,7 @@ def n_s06():
         finally:
             SV._bar = orig_bar
     finally:
-        M.light_explain = orig
+        M.render_view = orig
     return "页面自己拼原因时，探针句消失 ⇒ S06 的分辨力成立"
 
 

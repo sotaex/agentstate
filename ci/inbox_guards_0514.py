@@ -1337,9 +1337,17 @@ def c_u17b():
         return "没有 rAF 驱动 —— 静态图套了个壳，还是不动"
     if "<noscript>" not in html or "logo.svg" not in html:
         return "没有 noscript 静态退回 —— 关 JS 的用户看到一块空白"
-    if 'data-mode="%s"' % SV.LOGO_MODE.get("guarding", "L0") not in html and \
-            'data-mode="L0"' not in html:
+    # ★★ X（2026-10-23）：旧写法断言**具体值**（`data-mode="L0"`，即"此刻恰好在
+    #   值守中"）。那是把**本机现状**抄成了期望值 —— 机器一旦不是绿态，
+    #   这条判断就红，而哨标演得好好的。判据要守的是「状态机知道该演哪一态」，
+    #   不是「此刻那一态恰好是什么」。⇒ 改成结构断言：值必须在合法模式集里。
+    _m = re.search(r'data-mode="([^"]*)"', html)
+    if not _m:
         return "渲染出的哨标没带 data-mode，状态机不知道当前该演哪态"
+    _legal = set(SV.LOGO_MODE.values()) | {SV.LOGO_MODE_FALLBACK}
+    if _m.group(1) not in _legal:
+        return "data-mode=%r 不在合法模式集 %s 里 —— 状态机认不出这一态" % (
+            _m.group(1), "/".join(sorted(_legal)))
     js = SV._LOGO_JS
     if str(_SPEC_RIPPLE_SEC) not in js:
         return "状态机里找不到涟漪周期 %s —— 频次通道漂了" % _SPEC_RIPPLE_SEC

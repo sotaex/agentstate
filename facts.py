@@ -256,7 +256,7 @@ def empty_trace():
     return {"missing": [], "sources": {}}
 
 
-def _live_values():
+def _live_values(posture=None, items=None):
     """真实采集：**每个来源只调一次**，返回 `(values, sources, errors)`。
 
     ★★ 为什么是「一次采集」而不是「每字段一个 reader」：
@@ -299,16 +299,23 @@ def _live_values():
     }
 
     # ① 聚合入口：guard_posture() —— 8 个字段 + probe_error + clock_skewed 派生
+    #   ★★ X（2026-10-23）：`posture` 已探过就**不再探第二遍**。一页渲染里
+    #     `render_page()` 已经探过一次（TP-A1 守的就是「同一事实一个变量」），
+    #     采集层再探一次 = 同一个事实两遍算，满载实测每遍 ~1.2s。
+    #     ★ 注入的是**同一份探针结论**（`gp`），不是我自己重算的字段值 ——
+    #       派生逻辑（8 键映射／clock_skewed）仍只有下面这一份实现。
     try:
         import host_shield as HS
-        gp = HS.guard_posture()
+        gp = posture if posture is not None else HS.guard_posture()
+        _src = ("posture（调用方已探，本次不重探）" if posture is not None
+                else "host_shield.guard_posture()")
         ev = gp.get("evidence") or {}
         for k in ("armed", "sentinel_alive", "heartbeat_age", "heartbeat_ts",
                   "heartbeat_source", "sentinel_uptime",
                   "self_check_ok", "self_check_problems"):
             if k in ev:
                 vals[k] = ev[k]
-                srcs[k] = "host_shield.guard_posture().evidence"
+                srcs[k] = _src + ".evidence"
         # probe_error：只有 exception 分支的 evidence 才带 `error` 键
         #   （规则⑥「读不到心跳链」也给 unknown，但**没有** error —— 那不是探针故障）
         # ★ 正常时显式写 None：D-02 说「None 为真值」——「没有探针错误」是一个
@@ -383,7 +390,11 @@ def _live_values():
     try:
         import inbox_store as _S
         import inbox_model as _M
-        _items = _S.load_items_all()
+        # ★★ X（2026-10-23）：`items` 可由调用方注入 —— **页面渲染的就是这份账**。
+        #   生产侧 `render_page()` 已经把账读出来了，采集层再读一遍＝同一份账
+        #   读两遍（本机实测 0.9s/次；更糟的是两遍之间账变了，灯与列表会不一致）。
+        #   判据侧注入夹具账，才能控制"账里有什么"而不必去改真实账本。
+        _items = items if items is not None else _S.load_items_all()
         # ★★ 族界取**记录级**定档 `it.level`，**不取** `LEVEL_OF_KIND[it.kind]`。
         #   理由（0.55.0 实测）：`level_of_record()` 已按 `recovered=True` 与
         #   「上锁成功」降档（AUDIT_SCHEMA v1.14 收窄为强制），而 `LEVEL_OF_KIND`
@@ -478,7 +489,7 @@ def _live_values():
     return vals, srcs, errs
 
 
-def collect(_offline=False, **injected):
+def collect(_offline=False, posture=None, items=None, **injected):
     """采集一份 facts 快照。返回 `(facts, trace)`。
 
     · `facts` —— 30 个键**全在**（缺的值为 `None`，**不是不出现**）
@@ -497,7 +508,7 @@ def collect(_offline=False, **injected):
       而是把失败写进 `sources[字段] = "error: <repr>"`，同时该字段进 `missing`。
       这样「读不到」与「没接」在 sources 里可区分，而 trace 结构不变。
     """
-    vals, srcs, errs = ({}, {}, {}) if _offline else _live_values()
+    vals, srcs, errs = ({}, {}, {}) if _offline else _live_values(posture, items)
 
     facts = {}
     missing = []

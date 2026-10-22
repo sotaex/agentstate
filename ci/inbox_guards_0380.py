@@ -290,30 +290,37 @@ def n_s13():
 
 # ═══════════════════════════════════════════ S14 接线 ═══════════════════════
 def _bar_with_label(label):
-    """把 `light_explain` 换成一个只改 `label` 的替身，渲染顶部条并剥详情。"""
+    """把取数入口换成一个只改 `label` 的替身，渲染顶部条并剥详情。
+
+    ★★ X（2026-10-23）：注入点从 `light_explain()` 换成 `render_view()` ——
+      后者是**新的唯一取数入口**（内部先调旧实现，再换态与句话）。
+      判据要守的东西不变：**顶部条确实读那个入口的 label**，不自拼。
+    """
     import inbox_model as M
     import inbox_server as SV
     G = _g()
-    orig = M.light_explain
+    orig = M.render_view
 
-    def fake(p, items, now=None, hours=None, granary=None):
+    def fake(p, items, now=None, hours=None, granary=None, versions=None,
+             facts_obj=None):
         return {"state": M.STATE_L0, "label": label, "now_text": "x",
-                "now_bad": False, "ledger_bad": False, "reason": "r"}
+                "now_bad": False, "ledger_bad": False, "reason": "r",
+                "badges": [], "action_count": 0, "info_count": 0}
 
-    M.light_explain = fake
+    M.render_view = fake
     try:
         h = SV._bar([], "TOKEN", posture={"state": "guarding", "why": "x"},
                     now=None, view="inbox")
     finally:
-        M.light_explain = orig
+        M.render_view = orig
     return G._strip_details(h)
 
 
-@check("S14 接线：顶部条确实读 light_explain 的 label（此刻在岗 ⇒ 说「值守中」）")
+@check("S14 接线：顶部条确实读取数入口的 label（此刻在岗 ⇒ 说「值守中」）")
 def s14():
     txt = _bar_with_label("值守中")
     if "值守中" not in txt:
-        return "顶部条没有采用 light_explain 的 label"
+        return "顶部条没有采用取数入口的 label"
     return True
 
 
@@ -322,7 +329,7 @@ def n_s14():
     word = "ZZZ-独有词-9f3a"
     txt = _bar_with_label(word)
     if word not in txt:
-        return "负控失效：顶部条没读 light_explain.label"
+        return "负控失效：顶部条没读取数入口的 label"
     return True
 
 

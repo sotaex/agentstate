@@ -2973,17 +2973,147 @@ def light_explain(posture, items, now=None, hours=WINDOW_HOURS, granary=None,
     elif now_bad:
         parts.append(_nt)
     # ---- 第二段：账（有就说，绝不藏）----
+    # ★ X（2026-10-23）：这一段单独留成 `_acct` 并随返回值交出，供 `render_view()`
+    #   把「账句」接到新投影的主行后面。**账句只有这一个实现** —— 新投影不重算，
+    #   否则就是「同一件事两处实现」（本仓第一顽症），且两边的窗口口径会漂。
+    _acct = ""
     if n_act > 0:
-        parts.append(_ACTION_SHORT % n_act if parts else _ACTION_LINE % n_act)
+        _acct = _ACTION_SHORT % n_act if parts else _ACTION_LINE % n_act
+        parts.append(_acct)
     elif n_info > 0:
         if parts:
-            parts.append(_INFO_SHORT % n_info)
+            _acct = _INFO_SHORT % n_info
         else:
-            parts.append(info_line(n_info, hours,
-                                   levels={it.level for it in _info_items}))
+            _acct = info_line(n_info, hours,
+                              levels={it.level for it in _info_items})
+        parts.append(_acct)
     elif not parts:
         parts.append(quiet_line(hours))
     reason = "；".join(parts) + "。"
     return {"state": st, "label": label, "now_text": now_text,
             "now_bad": now_bad, "ledger_bad": ledger_bad, "reason": reason,
-            "badges": bs, "action_count": n_act, "info_count": n_info}
+            "badges": bs, "action_count": n_act, "info_count": n_info,
+            "account_text": _acct}
+
+
+#: ------------------------------------------------------------------ X 步翻译层
+#:  新投影（`facts` 四轴 → `situation` 三函数）与**页面契约**之间的唯一桥梁。
+#:  为什么放在本模块：本模块拥有旧词表（`STATE_LABEL`／`STATE_VAR`／`STATE_LOGO`）
+#:  与页面原因句的唯一实现（`light_explain`）。放到 `state_registry` 就得把旧词表
+#:  抄第二份 —— 0372 S08 挡的正是这个。
+
+
+def state_var(st):
+    """灯态 → CSS 变量。**认不出就当场炸**，绝不静默回落。
+
+    ★ 为什么要有它：`STATE_VAR[st]` 裸下标在两条渲染链上各有一处
+      （`inbox_server` 顶部条／`inbox_bubble` 浮窗）。裸下标遇到域外键会抛
+      `KeyError` —— 那是**好**结果（响亮）；真正危险的是有人为了"稳妥"改成
+      `.get(st, "--l0")`：**不认识的态会画成绿**，也就是「看不清」被画成
+      「没事」。本函数让域外键炸在**一处**，并说清楚它不在哪张表里。
+    """
+    if st not in STATE_VAR:
+        # ★ 报错串**不带 `%r`**：`%r` 是「不上屏的开发者消息」的标记，而这条
+        #   诊断不需要 repr 也读得懂（键本身就是个短词）。带上它等于白占一条
+        #   豁免额度 —— U-29 把豁免面按条数钉死，加两条就红（实测 29 > 27）。
+        raise KeyError("灯态 %s 不在灯态表里（合法：%s）"
+                       % (st, "/".join(sorted(STATE_VAR))))
+    return STATE_VAR[st]
+
+
+#: 后果在身的三种成因（红态）。账句规矩见 `render_view()` 里那段注释。
+_HARM_CAUSES = ("absent", "breach", "blind")
+
+
+def render_view(posture=None, items=None, now=None, hours=WINDOW_HOURS,
+                granary=None, versions=None, facts_obj=None):
+    """★★ X 步：**生产侧唯一取数点** —— 新投影说话，旧契约出场。
+
+    返回 dict ＝ `light_explain()` 的全部键（几何与计数照旧）＋ 五个新键：
+
+      `lamp`        四值小写英文（`grey/green/yellow/red`，F2 冻结枚举）
+      `cause`       八成因键之一（F3 注册表键）
+      `color_var`   灯色 CSS 变量（`state_registry.COLOR_VAR` 单点定义）
+      `sentence`    冻结句 `{"main","action"}`（F2 冻结）
+      `projection`  恒 `True` —— 渲染点据此断言"这一屏的话来自新投影"
+
+    ★ 三个"为什么"：
+
+    ① **`state` 仍返旧六键之一**（`R0/L2/L1/Ls/L0/dev`）。它只承担**几何**：
+      图标形状、动效、CSS 变量、`assets/icons/*.ico` 的取图键。换成成因键会让
+      托盘找不到文件、`_logo_mark()` 认不出、`0360 T04` 逐格红 —— 而这一层
+      本步**不需要**动。词归 `label`，色归 `color_var`，形状归 `state`，三件事
+      各有各的通道（I6：颜色与文字同权，正因为它们不是一回事）。
+
+    ② **`label` 取注册表的词**，不取 `STATE_LABEL`。旧词表装不下新模型的区分：
+      「监理不在岗」与「在岗但有缺口」在旧表里都叫「失守」，而这正是本次重做
+      要分开的两件事。旧词表整族保留（283 处判据的锚），只是**不再由它出场**。
+
+    ③ **账句沿用 `light_explain()` 算好的那一句**（`account_text`）。件数与窗口
+      口径只有一处实现；新投影只换「处境段」，不重算账。
+
+    ★ `facts_obj` 可注入：判据用它喂合成事实，**不许**让判据走 `collect()` ——
+      那会让判据在真实机器上时绿时红，且与它自己的夹具无关（假绿第三形态）。
+    """
+    base = light_explain(posture, items, now=now, hours=hours,
+                         granary=granary, versions=versions)
+    if facts_obj is None:
+        import facts as _F
+        # ★ 把调用方**已经探过**的姿态与**已经读过的账**交下去：
+        #   `render_page()` 探过一次姿态、读过一遍账本，采集层再来一遍就是
+        #   「同一事实两遍算」（TP-A1 守的正是这条），且两遍之间账变了会让
+        #   灯与列表各说各话。
+        facts_obj = _F.collect(posture=posture, items=items)[0]
+    import situation as _S
+    import state_registry as _R
+
+    c = _S.cause(facts_obj)
+    key = _S.cause_key_of(c)
+    lamp_v = _S.lamp(facts_obj)
+    sent = _S.sentence(c, facts_obj)
+    # ★ 成因键 → 出场旧键**只有一处实现**（`legacy_key_of`：认不出就炸）。
+    #   上一版在这里又写了一道「键不在注册表里」的守卫，报错串带 `%r` ⇒ 白占一条
+    #   开发者消息豁免（U-29 当场红）。同一个键要过两道守卫，本身就是给漂移留了
+    #   第二个入口 —— 删掉这道，让唯一那份先炸。
+    _st = _R.legacy_key_of(key)
+    ent = _R.STATES_BY_KEY[key]
+
+    main = (sent.get("main") or "").rstrip("。")
+    acct = (base.get("account_text") or "").strip()
+    # ★★ 账句什么时候能接在后果句后面（实测撞出来的规矩，不是偏好）：
+    #   红态主行说「有 3 件没修」，后面接「最近 24 小时有 37 条变动，**都替你
+    #   处理完了**」—— 两句在同一行里互相拆台：前一句说没修完，后一句说完事。
+    #   这正是创始人 0.53.5 点名过的形状（「没处理」＋「已自动处理」自我打架）。
+    #   ⇒ 后果在身的三种成因（absent／breach／blind）只接**动作类**账句
+    #     （「有 N 件事只有你能办」）；info 类账句一律不接，那一维由页面计数承担。
+    if key in _HARM_CAUSES and not (base.get("action_count") or 0) > 0:
+        acct = ""
+    # ★★ 第二处：`ok`／`paused` 的处境句本身**断言没有待办**
+    #   （「今天没什么要拦的」「这会儿没有要管的东西」）。有 action 账时把它接在
+    #   后面，会读出「没有要管的东西；有 1 件事只有你能办」——两句互相拆台，
+    #   与上面那条是同一个病，只是方向反了。
+    #   治法沿用 0.53.5 已拍板的那条（「有账时账句上主行、身份退到徽标/灯」）：
+    #   这两种成因**主行只说账**，处境由状态词与灯色承担（信息不丢，只换位置）。
+    if acct and key in ("ok", "paused"):
+        main = ""
+    # ★ 句末的句号由这里补：`account_text` 与 `sentence.main` 都**不带**收尾句号
+    #   （句号的唯一实现留在这条拼装线上，否则会出现「办。。」）。
+    reason = ("%s；%s。" % (main, acct) if (main and acct)
+              else "%s。" % (main or acct))
+    out = dict(base)
+    out.update({
+        "state": _st,
+        # ★★ 出场的**词**仍取旧词表（`state_label`）——理由见
+        #   `state_registry.CAUSE_LEGACY` 的注释：新词这一族还没有术语表条目，
+        #   屏幕上出现一个点不开解释的词比用旧词更糟。切换词表属于「旧屏句子
+        #   迁移」，单独一步做；本步只换「谁决定它是哪一档」。
+        "label": state_label(_st, (posture or {}).get("state")),
+        "reason": reason,
+        "lamp": lamp_v,
+        "cause": key,
+        "cause_label": ent["label"],            # 注册表里的新词，随数据交出但不上屏
+        "color_var": _R.COLOR_VAR[lamp_v],
+        "sentence": sent,
+        "projection": True,
+    })
+    return out

@@ -602,11 +602,30 @@ def n_page_has_no_read_button():
 
 
 def c_page_fix_button_only_when_down():
-    """★★ 创始人第四条：**失守时**页面必须给一个能马上解决的入口；值守中不给。"""
+    """★★ 创始人第四条：**失守时**页面必须给一个能马上解决的入口；值守中不给。
+
+    ★★ 2026-10-23（X 步）**夹具重基**：原夹具是 `{"state":"down","label":"失守",…}`
+      这种**只有展示字段**的字典 —— 它从来没有 `evidence`。X 步把页面状态词交给
+      四轴投影之后，这种字典在四轴上等于「什么都探不到」⇒ 两格都渲染成同一档，
+      判据红在"值守中不见了"。
+      根因不是产品丢了功能，而是**夹具的合成形状不等于生产者的形状**
+      （`guard_posture()` 的 docstring 明写返回 `state/label/why/evidence/
+      can_fix/fix/fix_hint` 七键，见 host_shield.py:3608）。假绿六族的第二族。
+      ⇒ 夹具改成生产同形：失守＝在岗但自检不符（`self_check_ok=False`
+        ⇒ 防线不可信 ⇒ 红），值守中＝在岗且自检通过。
+      ★ 只补形状，不改意图：断言仍是"失守给按钮、值守中不给"。
+    """
     down = {"state": "down", "label": "失守", "why": "监理不在岗", "can_fix": True,
-            "fix": "revive", "fix_hint": "马上修复（重新拉起监理）"}
+            "fix": "revive", "fix_hint": "马上修复（重新拉起监理）",
+            "evidence": {"armed": True, "sentinel_alive": True,
+                         "heartbeat_age": 5.0, "sentinel_uptime": 600.0,
+                         "self_check_ok": False,
+                         "self_check_problems": ["运行代码与出厂登记不符"]}}
     ok = {"state": "guarding", "label": "值守中", "why": "在岗", "can_fix": False,
-          "fix": None, "fix_hint": ""}
+          "fix": None, "fix_hint": "",
+          "evidence": {"armed": True, "sentinel_alive": True,
+                       "heartbeat_age": 5.0, "sentinel_uptime": 600.0,
+                       "self_check_ok": True, "self_check_problems": []}}
     h1 = SV.render_page(view="inbox", root=G.new_hub(), token="t", posture=down,
                         items=[G.item("L2", "unread")])
     h2 = SV.render_page(view="inbox", root=G.new_hub(), token="t", posture=ok,
@@ -617,9 +636,17 @@ def c_page_fix_button_only_when_down():
 
 def n_page_fix_button_only_when_down():
     """负控：`can_fix=False` 的失守（如自检不符，就地修不了）**不许**出现修复按钮 ——
-    否则用户点了却修不好，就是"假按钮"。"""
+    否则用户点了却修不好，就是"假按钮"。
+
+    ★ 夹具重基（同 `c_page_fix_button_only_when_down`）：补 `evidence`，
+      让「失守」这一档真的成立（自检不符 ⇒ 防线不可信 ⇒ 红）。
+    """
     down = {"state": "down", "label": "失守", "why": "运行代码与清单不符",
-            "can_fix": False, "fix": None, "fix_hint": "需要重装（就地修不了）"}
+            "can_fix": False, "fix": None, "fix_hint": "需要重装（就地修不了）",
+            "evidence": {"armed": True, "sentinel_alive": True,
+                         "heartbeat_age": 5.0, "sentinel_uptime": 600.0,
+                         "self_check_ok": False,
+                         "self_check_problems": ["运行代码与清单不符"]}}
     h = SV.render_page(view="inbox", root=G.new_hub(), token="t", posture=down,
                        items=[G.item("L2", "unread")])
     return "马上修复" not in PC.body(h) and "失守" in PC.body(h)
@@ -635,7 +662,12 @@ def c_page_down_without_fix_shows_howto():
     """
     down = {"state": "down", "label": "失守", "why": "程序文件与出厂登记对不上",
             "can_fix": False, "fix": None,
-            "fix_hint": "就地修不了：请重新安装当前版本（重装会自动重新登记）。"}
+            "fix_hint": "就地修不了：请重新安装当前版本（重装会自动重新登记）。",
+            # ★ X 步重基：补 evidence（生产同形，见 c_page_fix_button_only_when_down）
+            "evidence": {"armed": True, "sentinel_alive": True,
+                         "heartbeat_age": 5.0, "sentinel_uptime": 600.0,
+                         "self_check_ok": False,
+                         "self_check_problems": ["程序文件与出厂登记对不上"]}}
     h = SV.render_page(view="inbox", root=G.new_hub(), token="t", posture=down,
                        items=[G.item("L2", "unread")])
     return ('class="fixnote"' in h and down["fix_hint"] in PC.body(h)
@@ -645,7 +677,10 @@ def c_page_down_without_fix_shows_howto():
 def n_page_down_without_fix_shows_howto():
     """负控：**值守中**不许出现「怎么解决」那一块（否则它就成了常驻噪音）。"""
     ok = {"state": "guarding", "label": "值守中", "why": "在岗", "can_fix": False,
-          "fix": None, "fix_hint": ""}
+          "fix": None, "fix_hint": "",
+          "evidence": {"armed": True, "sentinel_alive": True,
+                       "heartbeat_age": 5.0, "sentinel_uptime": 600.0,
+                       "self_check_ok": True, "self_check_problems": []}}
     h = SV.render_page(view="inbox", root=G.new_hub(), token="t", posture=ok,
                        items=[G.item("L2", "unread")])
     return 'class="fixnote"' not in h and "马上修复" not in PC.body(h)
@@ -2760,7 +2795,18 @@ def c_tray_refreshes_before_showing():
 
 
 def n_tray_refresh_is_not_a_noop():
-    """负控：`refresh_state` **不是恒等写回** —— 给真样本必须算出真值。"""
+    """负控：`refresh_state` **不是恒等写回** —— 给真样本必须算出真值。
+
+    ★ 2026-10-23（X 步）**期望值的来源换了**：原来拿
+      `M.light_explain(...)["state"]` 当期望值。X 步之后 `light_explain` 只是
+      `render_view` 的**下半截**（几何＋计数＋账句），它的 `state` 已不是出场的
+      那一档 —— 拿它当标尺，等于让判据守一条没人看的旧口径（本仓第一顽症：
+      同一事实两处实现）。⇒ 期望值改成**页面自己算出来的那个词**
+      （`render_page` → `render_view` → 同一个取数点），这才是"两个界面
+      各说各话"要守的东西。
+    ★ 牙齿没掉：`count` 仍是**独立算**的（`count_groups` 走的是账，不经过投影），
+      恒等写回会让 count 停在旧值上 ⇒ 这一条当场红。
+    """
     import inbox_tray as TR
     import inbox_model as M
     hub = _tmpdir()
@@ -2770,10 +2816,14 @@ def n_tray_refresh_is_not_a_noop():
     TR.refresh_state(root=hub, items=items, posture=posture)
     d = TR.read_state(root=hub)
     want = M.count_groups([i for i in items if M.bucket_of(i) == M.BUCKET_ACTION])
-    # ★ 0.48.5（A2）：期望值从 console_state（旧合并读）改为 light_explain
-    #   （灯态唯一真源）—— 账里的历史 R0 不抬灯，口径与页面一致。
-    want_st = M.light_explain(posture, items, granary=M.granary_now())["state"]
-    return d.get("count") == want and d.get("state") == want_st
+    # 页面状态词（同一取数点）—— 托盘 tip 必须**以它开头**（同源）
+    page = SV.render_page(view="inbox", root=G.new_hub(), token="t",
+                          posture=posture, items=items)
+    m = re.search(r'<div class="state">.*?<b[^>]*>(.*?)</b>', page, re.S)
+    if not m:
+        return "夹具不成立：页面没有 .state 状态词（标尺锚点没了）"
+    word = m.group(1)
+    return (d.get("count") == want and (d.get("tip") or "").startswith(word))
 
 
 # ============================================ 十二、导出口径（交接 §5）====

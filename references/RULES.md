@@ -1,5 +1,5 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
-# Antinel detection rules (generated from rules/default.json v0.53.2 - do not edit by hand)
+# Antinel detection rules (generated from rules/default.json v0.55.0 - do not edit by hand)
 
 Category order = match priority: secrets > destructive > network > injection > context > metadata.
 Severity to action: critical = block, warning = alert (logged, allowed). All hits are collected; highest severity decides.
@@ -9,7 +9,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - purpose: Prevents an agent reading .env files (live-blocked in ZCode on 09-10; the founding interception)
 - description: Agent attempted to read a .env file which may contain API keys and secrets
 - 说明: 读取 .env 文件可能泄露 API 密钥与机密配置
-- 处理建议: 把 .env 移出 Agent 可读范围；确需变量时手动复制具体几行；测试夹具路径可在 policy.json 白名单登记
+- 处理建议: 把 .env 移出 Agent 可读范围。确需变量时，手动复制具体几行。测试目录可在设置里登记
 - file_patterns:
     - `\.env$`
     - `\.env\.`
@@ -81,7 +81,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - purpose: Surfaces shell egress to non-whitelisted domains (first-generation C2 / exfil channel)
 - description: Agent made an external network request via shell command to a non-whitelisted domain
 - 说明: 通过 Shell 向白名单外域名发起网络请求
-- 处理建议: 核对目标域名；常用下载源放行：antinel domains add <域名>（进审计链）
+- 处理建议: 核对目标域名。常用下载源放行：antinel domains add <域名>（进审计链）
 - command_patterns:
     - `\b(curl|wget|fetch)\b.*https?://`
     - `https?://(?!registry\.npmjs\.org|pypi\.org|github\.com)`
@@ -158,7 +158,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - purpose: Blocks writes outside the project root (the workspace is the trust boundary)
 - description: Agent attempted to write to a file outside the project root directory
 - 说明: 试图写入项目根目录之外；或用 tar 解包越权覆盖系统文件
-- 处理建议: 放行：antinel paths add <目录前缀>（进审计链）；确需更大范围用 antinel roots add <路径>；或把文件写进项目内
+- 处理建议: 放行：antinel paths add <目录前缀>（进审计链）。确需更大范围用 antinel roots add <路径>。或把文件写进项目内
 - command_patterns:
     - `\btar\b[^\n]{0,120}-C\s+/(?:\s|$)`
     - `\btar\b[^\n]{0,120}\s-C\s+/(?:etc|usr|bin|sbin|var|lib|boot|srv|opt|home|root)(?:\s|$)`
@@ -347,7 +347,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - category: destructive | severity: critical | dynamic (hook only) | tools: Write, Edit
 - purpose: Blocks alternate-data-stream writes from a file tool (Windows-only: path:stream is a legal POSIX filename)
 - description: Agent attempted to write an NTFS alternate data stream (path:stream) -- invisible to dir/ls and carried along by a plain file copy
-- 说明: 写入 NTFS 备用数据流（path:stream）——dir/ls 看不到，随文件复制一起走，是评审盲区
+- 说明: 写入 NTFS 备用数据流（path:stream）。dir/ls 看不到，随文件复制一起走，是评审盲区
 - 处理建议: ADS 在常规列表中不可见，且复制文件时随行，等于绕开评审；请改写为普通文件以便审查
 - file_patterns:
     - `\.[^\\/:\s]{1,32}:(?!Zone\.Identifier\b)`
@@ -358,7 +358,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - category: destructive | severity: critical | dynamic (hook only) | tools: Bash
 - purpose: Blocks alternate-data-stream writes from a shell (redirect / -Stream / copy / open -- the command half of DST-09)
 - description: Agent attempted to write an NTFS alternate data stream from a shell (redirect / -Stream / copy / open) -- the command-line half of DST-09
-- 说明: 从命令行写入 NTFS 备用数据流（重定向 / -Stream / copy / open 等命令通道）
+- 说明: 从命令行写入 NTFS 备用数据流。重定向 / -Stream / copy / open 等命令通道都能做到。
 - 处理建议: 与 DST-09 同一通道的命令行写法，产物同样逃过审查；请改用普通文件
 - command_patterns:
     - `>\s*[^\s|;&\"'<>]*\.[^\\/:\s]{1,32}:(?!Zone\.Identifier\b)`
@@ -468,7 +468,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - purpose: unknown (generator table missing an entry)
 - description: Agent wrote into a cloud-drive sync folder: the sync client will upload the file automatically
 - 说明: 写进云盘同步目录 —— 同步客户端会自动把它传上云
-- 处理建议: 确需放行：antinel paths add <目录前缀>（进审计链）；否则写进项目内
+- 处理建议: 确需放行：antinel paths add <目录前缀>（进审计链）。否则写进项目内
 - check: path_in_cloud_sync_dir
 - remediation: Allow deliberately with `antinel paths add <prefix>` (audited), or write inside the project.
 
@@ -492,7 +492,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - purpose: unknown (generator table missing an entry)
 - description: MCP configuration file written/modified -- verify the new server's source, command and url (malicious MCP servers are an active 2025-2026 supply-chain channel)
 - 说明: MCP 配置文件被写入或修改
-- 处理建议: 核对新增 server 的来源与 command/url；不认识的一律移除并轮换相关凭据
+- 处理建议: 核对新增 server 的来源。不认识的一律移除，并轮换相关凭据
 - file_patterns:
     - `(^|[\\/])\.cursor[\\/]mcp\.json$`
     - `(^|[\\/])\.mcp\.json$`
@@ -564,7 +564,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - purpose: unknown (generator table missing an entry)
 - description: Agent read a canary file -- if its marker (CANARY-*) appears in any external channel, that proves exfiltration of project content
 - 说明: Agent 读取了诱饵文件
-- 处理建议: 记录并观察：诱饵文件被读取本身不是泄露，标记出现在外部通道才是证据（report 的 canaries 统计）
+- 处理建议: 记录并观察：诱饵文件被读取本身不是泄露。标记出现在外部通道才是证据（日报的诱饵文件统计）
 - file_patterns:
     - `(^|[\\/])\.canary[\\/]CANARY-`
 - content_patterns:

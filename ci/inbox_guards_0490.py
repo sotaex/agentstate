@@ -184,7 +184,32 @@ def _ago(hours=1.0):
 
 
 #: 姿态一律显式注入：守卫不许依赖真实中枢的当前 posture（否则判据时红时绿）。
+#: ★ 本常量是**历史夹具形状**（只有展示字段，没有 `evidence`）。四轴投影读不到
+#:   `evidence` 时按「探不到」处理（mode=armed、duty=off）—— 对旧判据无害，
+#:   因为那些判据量的是**版式与计数**，不量四轴。要量四轴的判据用 `_POSTURE_FULL`。
 _POSTURE = {"state": "guarding", "label": "值守中", "why": "在岗"}
+
+#: ★★ X 步：与 `host_shield.guard_posture()` **同形**的姿态（字段见它的
+#:   docstring：state/label/why/evidence/can_fix/fix/fix_hint）。
+#:   夹具合成形状必须等于生产者形状 —— 少了 `evidence`，四轴只会读出
+#:   「探不到」，于是**任何**姿态在页面上都变成同一档：那正是「假绿六族」的
+#:   第二族（夹具合成形状），判据会绿得毫无意义。
+#:   ★ 这里只给「武装＋在岗＋自检通过」这一种：W-03 需要的是**一个确定的
+#:     在岗姿态**，不是「随便哪种都行」。
+_POSTURE_FULL = {
+    "state": "guarding", "label": "值守中", "why": "监理在岗",
+    "evidence": {"armed": True, "sentinel_alive": True,
+                 "heartbeat_age": 5.0, "heartbeat_ts": None,
+                 "heartbeat_source": "registered", "sentinel_uptime": 600.0,
+                 "sentinel_pid": 4321, "self_check_ok": True,
+                 "self_check_problems": []},
+    "can_fix": False, "fix": None, "fix_hint": "",
+}
+
+
+def _body(page):
+    """页面正文（统一剥除口径 C2）—— 断言「人读到的字」时一律走它。"""
+    return PC.body(page)
 
 
 def _mk(level="R0", state="unread", i=0, hours_ago=1.0,
@@ -231,13 +256,19 @@ _VIEWS = ("inbox", "report", "health", "ledger")
 _TABS = (M.BUCKET_ACTION, M.BUCKET_INFO, M.BUCKET_ARCHIVE, "all")
 
 
-def _page(view, filt=None, mod=SV, items=None, rep=None):
-    """渲染一整页（items/rep/posture 全注入，不依赖真实中枢与真实时间）。"""
+def _page(view, filt=None, mod=SV, items=None, rep=None, posture=None):
+    """渲染一整页（items/rep/posture 全注入，不依赖真实中枢与真实时间）。
+
+    ★ `posture` 可指定：默认仍是 `_POSTURE`（历史夹具，**只有展示字段**）。
+      W-03 起需要「与生产者同形」的姿态（带 `evidence`）——那由 `_POSTURE_FULL`
+      给。两个常量并存是**故意的**：换掉默认值会连带改动几十条与本步无关的
+      判据，那是另一件事。谁需要四轴，谁显式要。
+    """
     return mod.render_page(view=view, filt=filt,
                            root=_TMPREG.tmpdir(prefix="g0490_r_"),
                            token="T", items=_items() if items is None else items,
                            rep=_REP if rep is None else rep,
-                           posture=_POSTURE)
+                           posture=_POSTURE if posture is None else posture)
 
 
 #: ★★ C2（2026-10-13）：剥除口径**不再在这里各写一份** —— 统一走
@@ -1334,44 +1365,58 @@ def n_w02():
 def _w03_assert():
     """W-03 正判据的纯判断（正/负控共用）。返回 None＝过，否则说明串。
 
-    五个现场（都注入 guarding 姿态），三个维度都盯：
-      ① 账内 R0 × 2 条（同因一件） ⇒ 页面「值守中」（0.39.0：历史 R0 不抬灯），
-         旧合并读会给「失守」—— A2 实测的就是这一对；
-      ②③④ 账内 L2 三条（info 桶：刚发生未读／过保持期／已读）⇒ 页面一律
-         「值守中」—— ★★ 2026-10-21 口径反转（创始人「它一直是拦截，现在
-         还是。这是个问题吧」）：规格 v1.1 §B（上策）落地后 **info 桶一律
-         不抬灯**（拦截是**事件**、天然过去时，不是"此刻"）。旧版第②条
-         断的是"保持期内 ⇒ 拦截"，现改为"「拦截」是**禁用词**"：谁把
-         `INFO_LAMP_LIFT` 打开（退回旧口径），这三条当场红。
-      ⑤ 账内 L1 一条（**action 桶**：`exam_reminder` 只有你能办）⇒ 页面
-         「注意」—— ★ "灯不许永远不亮"这条腿**改由本条承担**（action 桶
-         是待办、不是新闻 ⇒ 窗口内持续抬灯）。少了它，②③④ 三条可以靠
-         "干脆全不抬灯"混过去。
+    ★★★ 2026-10-23（X 步）**判据重基**，先说清为什么改、凭什么改：
+      旧表把「账内 R0 × 2 条 ⇒ 页面『值守中』」钉成期望值 —— 那是 0.39.0
+      「历史 R0 一律不抬灯」的时间窗口径。该口径已被创始人 2026-10-21 拍板
+      推翻，F1 写明 **后果只看「是否已恢复」**（`recovered`／`CLOSED_STATES`），
+      不看 24 小时窗。未恢复的 R0 缺口**就是**当下的后果 ⇒ 页面说「失守」是对的，
+      旧期望值才是错的那一边。
+      **重基的边界**（防止「把实现现状抄成期望」）：期望值不是从实现读出来的，
+      而是从四轴推的 ——
+        · 夹具里两条 R0、state=unread、**没有 recovered 标记** ⇒ harm=some；
+        · 同一夹具的姿态是**在岗且自检通过**（见 `_POSTURE_FULL`）⇒ duty=on、
+          trust=sound；mode=armed ⇒ 灯必红、成因必 breach ⇒ 「失守」。
+      任何一条前提变了（夹具加了 recovered 标记／姿态不自检），这条期望值就该
+      跟着变 —— 所以它是**推论**，不是录像。
+      ★ 另有两条腿守「灯不许被账绑死」，方向相反、缺一不可：
+        ① info 桶三条（工具调用已拦下）⇒ 一律「值守中」，「拦截」是**禁用词**
+           （创始人「它一直是拦截，现在还是」的落点）；
+        ② action 桶一条（只有你能办）⇒ 也「值守中」，但**账不许被藏**：
+           主行必须说得出「只有你能办」，且**不许**同时说「没什么要拦的」
+           （两句同屏＝互相拆台，实测撞出来的形状）。
+      灯在 action 桶不再抬 —— 这是四轴模型的定义（灯只答"守得住吗"，
+      不答"你有几件待办"），待办由账句与计数承担。
+
+    五个现场都注入同一种姿态，三个维度都盯：
+      ① 页面状态词 ＝ 该夹具算出来的；② 托盘 label/tip 与之逐字同源；
+      ③ 件数/分母/哨兵态/图标态不受本批影响。
 
     ★ 五个现场的 `count`/`total` 一律不变（0/1 或 1/2）：本条判据只管**状态词
       同源**，件数/分母口径由 W-01/U-06 等另管 —— 不许一条判据同时改两个口径。
     """
     import inbox_tray as TR
-    posture = _POSTURE                   # guarding：哨兵在岗
+    posture = _POSTURE_FULL               # guarding：哨兵在岗且自检通过
     cases = [
+        # (名, 夹具, 应得状态词, 禁用词, count, total, 旧键, 主行必须有, 主行不许有)
         ("账内 R0", [_mk("R0", "unread", 1, 1.0), _mk("R0", "unread", 2, 2.0)],
-         "值守中", "失守", 1, 2, "L0"),
+         "失守", "值守中", 1, 2, "R0", ("没修",), ()),
         # ★★ 2026-10-21 口径反转：info 桶三条一律「值守中」，「拦截」列为禁用词。
         ("账内 L2（info 桶·刚发生未读）",
          [_mk("L2", "unread", 4, 0.1, kind="tool_call_blocked")],
-         "值守中", "拦截", 0, 1, "L0"),
+         "值守中", "拦截", 0, 1, "L0", ("都替你处理完了",), ("没什么要拦",)),
         ("账内 L2（info 桶·过保持期）",
          [_mk("L2", "unread", 5, 1.0, kind="tool_call_blocked")],
-         "值守中", "拦截", 0, 1, "L0"),
+         "值守中", "拦截", 0, 1, "L0", ("都替你处理完了",), ("没什么要拦",)),
         ("账内 L2（info 桶·已读）",
          [_mk("L2", "read", 6, 0.1, kind="tool_call_blocked")],
-         "值守中", "拦截", 0, 1, "L0"),
-        # ★ 灯**必须还能亮**：action 桶（只有你能办）⇒ L1「注意」，且托盘同源。
+         "值守中", "拦截", 0, 1, "L0", ("都替你处理完了",), ("没什么要拦",)),
+        # ★ action 桶（只有你能办）：灯不抬，但账必须上主行（账不许被藏）。
         ("账内 L1（action 桶·只有你能办）",
          [_mk("L1", "unread", 7, 0.1, kind="exam_reminder")],
-         "注意", "值守中", 1, 1, "L1"),
+         "值守中", "拦截", 1, 1, "L0", ("只有你能办",), ("没什么要拦",)),
     ]
-    for name, items, want_word, banned, want_count, want_total, want_st in cases:
+    for (name, items, want_word, banned, want_count, want_total, want_st,
+         must_have, must_not) in cases:
         hub = _TMPREG.tmpdir(prefix="g0490_w03_")
         # ① 页面侧：状态词＝页面**自己**算出来的（render_page 内部同一调用）
         #   ★ 0.51.1 反转（W-01 退休、FZ-002 冻结）：标题不再带状态词
@@ -1379,17 +1424,25 @@ def _w03_assert():
         #     从 <title> 迁移到顶部条 .state 块内首个 <b>（ex["label"]
         #     的唯一可见位；w01 旧 ② 的"标题与头部同词"断言已随 W-01
         #     退休）。**意图不变**：页面状态词必须＝该 items 算出来的。
-        page = _page("inbox", items=items, rep=_REP)
+        page = _page("inbox", items=items, rep=_REP, posture=posture)
         st = re.search(r'<div class="state">.*?<b[^>]*>(.*?)</b>', page, re.S)
         if not st:
             return "%s：页面没有 .state 状态词（判据扫的锚点没了）" % name
         page_word = st.group(1)
-        # ② 夹具自检（把 0.39.0 铁律钉进来：R0 绝不由账给）
+        # ② 夹具自检：状态词必须由四轴推出来的那一档
         if page_word != want_word:
-            return ("%s：页面状态词应 %r，实得 %r —— current_state 口径变了"
+            return ("%s：页面状态词应 %r，实得 %r —— 四轴算出来的不是这一档"
                     % (name, want_word, page_word))
         if banned is not None and page_word == banned:
-            return "%s：页面把历史 R0 抬成了 %r（假失守复发）" % (name, banned)
+            return "%s：该档被读成了 %r（旧口径复发）" % (name, banned)
+        # ②' 账不许被藏／不许与处境句打架（主行是这个夹具唯一的账出口）
+        body = _body(page)
+        for w in must_have:
+            if w not in body:
+                return "%s：主行没说 %r（账被藏了）" % (name, w)
+        for w in must_not:
+            if w in body:
+                return ("%s：主行同时说了 %r 与账句 —— 两句拆台" % (name, w))
         # ③ 托盘侧：同夹具、同姿态
         payload = TR.sync_from_items(items, root=hub, posture=posture)
         if payload.get("label") != page_word:
@@ -1427,6 +1480,17 @@ def n_w03():
     变异体＝A2 缺陷本身（console_state 抬历史 R0 ⇒ label「失守」）——
     不是随便改坏：必须让**那个真缺陷**重新现形，再被 W-03 抓到。
     还原后必须回绿（还原链路坏掉比负控失效更险）。
+
+    ★ 2026-10-23（X 步）：变异点从 `light_explain` 改到 `render_view`。
+      生产取数点搬到 `render_view` 之后，还去改 `light_explain` 就**打不到**
+      托盘了（`render_view` 内部调的是模块内函数，不走属性查找）——
+      负控会"因为变异不生效"而读成"判据没在看同源性"，那是假的负控。
+      ⇒ 变异必须落在生产真正打开的那道门上。
+    ★ 咬的位置也改了：旧断言要求红在「账内 R0」那一格。现在 R0 那一格
+      **新旧口径同值**（未恢复的 R0 两边都说失守），分歧搬到了 info 桶
+      （旧：拦截／新：值守中）。⇒ 断言改成"必须红在**同源**那条腿上"
+      （`托盘 label ≠ 页面状态词`），这和"红了"是两件事：
+      计数腿、哨兵腿、图标腿坏了也会红，但那证明不了它看的是同源。
     """
     import inbox_tray as TR
     import inbox_model as M
@@ -1438,20 +1502,21 @@ def n_w03():
         def __getattr__(self, k):
             return getattr(self._real, k)
 
-        def light_explain(self, posture, items, **kw):
-            st = self._real.console_state(items)        # ← MUTANT
+        def render_view(self, posture=None, items=None, **kw):   # ← MUTANT
+            st = self._real.console_state(items)      # 旧合并读：历史 R0 抬灯
             return {"state": st, "label": self._real.state_label(st),
-                    "now_text": "", "reason": "",
-                    "ledger_bad": True, "now_bad": True}
+                    "badges": [], "action_count": 0, "info_count": 0,
+                    "account_text": "", "reason": "", "projection": False}
+
     saved = TR.M
     TR.M = _OldM(M)
     try:
         r = _w03_assert()
         if r is None:
             return "托盘改回旧合并读，W-03 仍判通过 ⇒ 判据没在看同源性"
-        if "账内 R0" not in r:
-            return ("负控咬错了地方：红的应是「账内 R0」现场（A2 那一对），"
-                    "实得 %r" % r[:60])
+        if "托盘 label" not in r:
+            return ("负控咬错了地方：红的应是「同源」那条腿（托盘 label ≠ "
+                    "页面状态词），实得 %r" % r[:60])
     finally:
         TR.M = saved
     if _w03_assert() is not None:

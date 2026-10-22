@@ -44,8 +44,8 @@
     ],
     "_version_files_note": "★★ 0.43.1（2026-10-10）：`psl/manifest.json` **已从本清单摘出** —— 它是**构建产物**（由 build_package.py 在打包时写入），语义上允许落后于源码，**不再**是『逐字一致』的版本承载件（见 ci/version_check.py 判据 7）。此处只列**手工维护**的两处。",
     "dist_dir": "D:\\psl\\poc\\antinel-security\\dist",
-    "artifacts": [],
-    "_artifacts_note": "★★ 0.55.0（2026-10-22）：0.54.0 从未构建，其产物不存在；0.55.0 亦未构建（出包待创始人确认）⇒ 本清单为空是**事实**，不是漏登记。构建后立即回填两件文件名，并同步 pypi.wheel。",
+    "artifacts": ["antinel-0.55.0-py3-none-any.whl", "antinel-0.55.0.tar.gz"],
+    "_artifacts_note": "★★ 0.55.0（2026-10-23）：两件已于本机 dist/ 产出（wheel 1856162 字节 03:38／sdist 4096477 字节 03:39）。★ 这里登记的是**本地产物事实**，不是 PyPI 事实 —— 上架与否只看 `pypi.published_version`（仍是实查值 0.48.4），两栏不许混。",
     "pypi": {
       "published_version": "0.48.4",
       "wheel": "D:/psl/poc/antinel-security/dist/antinel-0.55.0-py3-none-any.whl",

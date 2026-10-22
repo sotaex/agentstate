@@ -106,7 +106,7 @@ SENTENCES = {
     "draining.heartbeat": "监理 {N} 分钟没动静了（平时 10 分钟一次）。",
     "draining.disk": "账本快写不下了，写不下就不能记账。",
     "draining.guard_mode": "粮还够 {N} 天，用完监理会停。",
-    "breach.main": "有 {N} 处没修，最早一处是 {D} 天前。",
+    "breach.main": "有 {N} 件没修，最早一件是 {D} 天前。",
     "absent.main": "监理不在岗。这段时间有 {N} 件没被挡。",
     "blind.main": "我证明不了自己在守。按最坏算，先核对一次。",
     "partial.main": "有 {N} 项没查到，先按有问题算。",
