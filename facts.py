@@ -212,6 +212,10 @@ FIELDS = {
 #: **已登记「尚未接上」的字段** —— A2 的诚实清单。
 #: 每项必须带「为什么现在接不上」＋「哪一步接」；理由为空 ⇒ 判据红（不是豁免）。
 #: 双向对账（同 S58）：登记了但实际已接上 ⇒ 也红（表过期＝接了没销账）。
+#: ★ 2026-10-22 销账四条目：`gaps`（主线 94d61ef 接了账本派生）、`at_risk`／
+#:   `code_version`／`published_version`（本批 A1–A3 接上）。
+#:   ⚠️ `gaps` 那条**躺了一轮**：94d61ef 把值接上了却没销账 —— 本表的双向对账
+#:   只有 docstring 在说，**没有任何判据执行它**（已登记为待补）。
 EXPECTED_MISSING = {
     "is_dev": "F1 白名单未列 `is_dev_build()`（实测存在、只读，但不在九类里）"
               "⇒ #55 待扩白名单；**不扩则 mode 轴永远分不出 drill 与 armed**",
@@ -220,20 +224,14 @@ EXPECTED_MISSING = {
     "scope_host": "宿主归因字段（现有 host 复用），来源未指定 ⇒ #55",
     "credits_low_open": "来自账本 `credits_low` 记录；白名单列了消费函数却没列"
                         "账本读取入口（`load_items_all`）⇒ #55",
-    "gaps": "同上：需要账本 items 才能派生缺口族；白名单不闭合 ⇒ #55",
     "counts": "同上：`day_counts(items)` 需要 items ⇒ #55",
     "outage_consequences": "D-02 写 `_outage_consequences()`，但它是 host_shield 私有"
                            "函数、不在白名单；`guard_posture()` 的 `consequences`"
                            "只在非异常分支给 ⇒ 待 A3 决定取哪个",
     "partial_read": "N7 未实现（`partial_read` 的产出在扫描器改造后）",
-    "at_risk": "N6 注册表未实现（预告源三成分）",
     "chain_recon": "N10 对账未实现（依赖 `chain_link_ok`，§10.1 待补）",
-    "notice_state": "N12 通知三态未实现",
-    "heartbeat_slices": "presence（D-07）未实现，属 A5",
-    "published_version": "来自 `workspace_facts.json` 登记位（非白名单函数）"
-                        "⇒ 待 A6 徽标接线时接",
-    "code_version": "来自 `antinel.VERSION` 模块常量（非白名单函数）"
-                 "⇒ 待 A6 徽标接线时接",
+    "notice_state": "N12 通知三态未实现（**本批 A4 受阻**：见报告 §A4）",
+    "heartbeat_slices": "presence（D-07）未实现（**本批 A5 因超预算暂缓**：见报告 §A5）",
     "dev_exempt": "D-02 写 `_dev_exempt_problems()`，私有函数不在白名单 ⇒ #55",
     "chain_integrity_ok": "`chain_link_ok` 不存在（§10.1 已冻结落点、待实现）"
                           "⇒ 按 §7.2 走 trace.missing 记名",
@@ -277,6 +275,10 @@ def _live_values():
       · `granary.state()` → {state, balance, threshold, days_left, why}
       · `egress.capacity()` → {free, total, low_free, dir_full, readable, …}
       · `audit_chain.write_health()` → {lost, last_error, last_ts}
+      · `inbox_store.load_items_all()` ＋ `inbox_model.gap_state_of()` → gaps
+      · `antinel.VERSION`（模块常量）→ code_version
+      · `psl/workspace_facts.json` 的 `release.pypi.published_version` → published_version
+      · `at_risk` 由本模块 `at_risk_sources()` **派生**（不新增 IO，故排在最后）
     """
     vals, srcs, errs = {}, {}, {}
 
@@ -292,6 +294,8 @@ def _live_values():
         "egress": ("egress_free_bytes",),
         "audit_chain": ("chain_write_lost",),
         "ledger": ("gaps",),
+        "antinel": ("code_version",),
+        "workspace_facts": ("published_version",),
     }
 
     # ① 聚合入口：guard_posture() —— 8 个字段 + probe_error + clock_skewed 派生
@@ -380,17 +384,96 @@ def _live_values():
         import inbox_store as _S
         import inbox_model as _M
         _items = _S.load_items_all()
-        _levels = _M.LEVEL_OF_KIND
+        # ★★ 族界取**记录级**定档 `it.level`，**不取** `LEVEL_OF_KIND[it.kind]`。
+        #   理由（0.55.0 实测）：`level_of_record()` 已按 `recovered=True` 与
+        #   「上锁成功」降档（AUDIT_SCHEMA v1.14 收窄为强制），而 `LEVEL_OF_KIND`
+        #   是**类型级一刀切**。用 kind 表得 887 条、用记录级得 730 条 ——
+        #   差的 157 条标题写着「已自动恢复」「安全区已上锁」，那是告知，不是缺口。
+        #   这也是「同一事实两处实现」族：`level_of_record` 是唯一实现，不许绕过。
+        _gap_items = [it for it in _items if it.level == GAP_LEVEL]
+        # 复核期：一件（`condition`＝`kind`）最后一次出现距今 ≤ REVIEW_DAYS ⇒ 活跃。
+        #   ★ 在**采集时**算好并写进每条记录，`axes()` 才能保持纯函数（不看时钟）。
+        _last = {}
+        for it in _gap_items:
+            _t = _parse_ts(it.ts)
+            if _t is not None and (_last.get(it.kind) is None
+                                   or _t > _last[it.kind]):
+                _last[it.kind] = _t
+        _now = _utcnow()
         vals["gaps"] = [
             {"id": it.id, "kind": it.kind, "opened_at": it.ts,
-             "gap_state": _M.gap_state_of(it)}
-            for it in _items if _levels.get(it.kind) == GAP_LEVEL]
+             "level": it.level,          # 记录级定档（含 recovered 降档）
+             "gap_state": _M.gap_state_of(it),
+             "condition": it.kind,
+             "active": _is_recent(_last.get(it.kind), _now)}
+            for it in _gap_items]
         srcs["gaps"] = ("inbox_store.load_items_all() ＋ "
-                        "inbox_model.gap_state_of()（族界取 LEVEL_OF_KIND）")
+                        "inbox_model.gap_state_of()（族界取**记录级** level；"
+                        "active 按 REVIEW_DAYS=%d 复核）" % REVIEW_DAYS)
     except Exception as e:                                   # noqa: BLE001
         errs["ledger"] = repr(e)
         for _k in owned["ledger"]:
             srcs[_k] = "error[ledger]: %r" % (e,)
+
+    # ⑥ antinel.VERSION —— code_version（徽标要的「登记版 vs 代码版」落差）
+    #   ★ 懒加载：`antinel` 的模块体有 2600 行，实测 import 263ms／拉进 100 个模块。
+    #     只想要字段表的调用方不该为它付钱；真正采集的人每个进程只付一次
+    #     （`sys.modules` 缓存），稳态边际成本≈0。
+    #   ★ 取不到 ⇒ **不设值**（让它进 `missing`），不许写 `""` 或 `"unknown"` ——
+    #     那两个是「查过了，如此」，而这里是「查不到」，F1 三态分得开。
+    try:
+        import antinel as _AN
+        _v = _AN.VERSION
+        if isinstance(_v, str) and _v.strip():
+            vals["code_version"] = _v
+            srcs["code_version"] = "antinel.VERSION"
+        else:
+            srcs["code_version"] = ("antinel.VERSION 取到 %r（空/非 str ⇒ 按缺失办，"
+                                    "不写 unknown）" % (_v,))
+    except Exception as e:                                   # noqa: BLE001
+        errs["antinel"] = repr(e)
+        srcs["code_version"] = "error[antinel]: %r" % (e,)
+
+    # ⑦ psl/workspace_facts.json 的登记位 —— published_version
+    #   ★ 键路径是 `release.pypi.published_version`（**不是**顶层同名键：归档副本
+    #     `antinel-0.48.2/psl/` 里那个才是顶层，本树已挪到 release/pypi 下 ——
+    #     按顶层找会静默取到 None，正是「猜键名」的典型形态）。
+    #   ★ 两档「读不到」分开记：文件读不到 ⇒ `sources` 落 `error[...]`（故障）；
+    #     文件读到了但没有该键 ⇒ 只说明「登记位为空」，那不是故障。
+    #   ★ 只读、不写：该文件是环境事实真源（D-23），采集侧一个字都不改。
+    try:
+        import json as _json
+        import os as _os
+        _p = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                           "psl", "workspace_facts.json")
+        with open(_p, "rb") as _f:
+            _d = _json.loads(_f.read().decode("utf-8"))
+        _rel = _d.get("release") if isinstance(_d, dict) else None
+        _pypi = _rel.get("pypi") if isinstance(_rel, dict) else None
+        _v = _pypi.get("published_version") if isinstance(_pypi, dict) else None
+        if isinstance(_v, str) and _v.strip():
+            vals["published_version"] = _v
+            srcs["published_version"] = ("psl/workspace_facts.json → "
+                                         "release.pypi.published_version")
+        else:
+            srcs["published_version"] = ("psl/workspace_facts.json 读到了，但 "
+                                         "release.pypi.published_version ＝ %r"
+                                         "（按缺失办）" % (_v,))
+    except Exception as e:                                   # noqa: BLE001
+        errs["workspace_facts"] = repr(e)
+        srcs["published_version"] = "error[workspace_facts]: %r" % (e,)
+
+    # ⑧ at_risk 派生（N6 预告源三成分）—— **必须在上游字段全部填完之后算**：
+    #   三个成分分别读 `granary_level`／`heartbeat_age`／`egress_free_bytes`，
+    #   早一步算就会把「还没采到」当成「没有预告源」（假绿，且不报错）。
+    #   ★ 口径不在这里重写：三成分的成立条件、以及「拿不到一律不算预告」
+    #     （宁可少报一个黄，不许把「不知道」说成「快满了」）全在
+    #     `at_risk_sources()` 里，连它的负控一起。这里只做「填进快照」。
+    #   ★ 空表 `[]` 是**真值**（查过了，没有预告源），与 `None`（查不到）是两件事，
+    #     所以这里无条件设值。#57a：缺了它，`axes()` 的 at-risk 来路永远为假，
+    #     磁盘将满（N6-c）会静默假绿。
+    vals["at_risk"] = at_risk_sources(vals)
+    srcs["at_risk"] = "derived: at_risk_sources(vals)（N6：粮/心跳/磁盘三成分）"
 
     return vals, srcs, errs
 
@@ -536,6 +619,45 @@ AXIS_VALUES = {
 
 #: 缺口族 ⇔ 事件级别 `R0`（**派生，不写死族名** —— 见 `_kind_levels()` 的 #56 说明）。
 GAP_LEVEL = "R0"
+
+#: 复核期（天）。一件缺口**最后一次出现**距今超过这个数 ⇒ 退出 harm，
+#: 但记录仍留在 `facts["gaps"]` 里（`active=False`）—— **减法留账**。
+#: ★ 取值依据是实测，不是感觉：0.55.0 主机上四件缺口的沉寂时长为
+#:   3.1／3.1／5.1／13.7 天。7 天正好把「一周内又出现过」与「确实停了」分开；
+#:   1 天会让「停两天又复发」的缺口中途变绿（漏报），14 天等于把沉寂 13.7 天的
+#:   那件也算活着（永不销账，狼来了）。
+REVIEW_DAYS = 7
+
+
+def _utcnow():
+    """当前时刻（aware UTC）。**只在 `collect()` 里用** —— `axes()` 不看时钟。"""
+    import datetime as _dt
+    return _dt.datetime.now(_dt.timezone.utc)
+
+
+def _parse_ts(ts):
+    """时间戳 → aware datetime。解析不了 ⇒ `None`（**不猜**）。"""
+    import datetime as _dt
+    try:
+        t = _dt.datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=_dt.timezone.utc)
+
+
+def _is_recent(last_seen, now=None):
+    """`last_seen` 是否落在复核期内（含边界）。**算不出 ⇒ 活跃**（方向收紧）。"""
+    if last_seen is None:
+        return True
+    if now is None:
+        now = _utcnow()
+    age = (now - last_seen).total_seconds()
+    if age < 0:
+        # 负数时间差＝**算不出**，不是「很小」：时钟回拨或未来戳。
+        #   按活跃处理是方向收紧 —— 判沉寂才是误杀。
+        return True
+    return age <= REVIEW_DAYS * 86400
+
 
 #: 预告源（at-risk）的三个键 —— 与 `state_registry.STATES["draining"]["badge"]` 同集。
 #: ★ #57a（A4 撞出）：`at_risk` 在 F1 里是**字段**，但它此前没有任何生产者 ——
@@ -700,6 +822,41 @@ def at_risk_sources(facts):
     return out
 
 
+def harmful_gaps(facts):
+    """算作 harm 的缺口记录 —— **唯一实现**（族界＋未修复＋复核期三条腿）。
+
+    ★ 为什么抽成函数：`axes()` 与 `situation._harmful_gaps()` 都要用这三条腿。
+      写两遍就一定会漂，而漂的方向必然是「一处判活跃、一处判沉寂」
+      ⇒ 灯与话不同源（F2：灯黄而话说没问题）。
+    ★ `active is not False` 而不是 `not g.get("active")`：只有**显式**标了 False
+      才排除。夹具与旧数据没有这个键时按活跃算 —— 「没标」不许读成「已沉寂」，
+      那个方向会把真缺口悄悄放走。
+    """
+    gaps, levels = facts.get("gaps"), _kind_levels()
+    if not isinstance(gaps, list) or levels is None:
+        return []
+    return [g for g in gaps
+            if isinstance(g, dict)
+            and g.get("gap_state") in ("open", "acked")     # acked 不算修
+            and levels.get(g.get("kind")) == GAP_LEVEL       # 只收缺口族
+            and g.get("active") is not False]                # 复核期内
+
+
+def gap_conditions(facts):
+    """活跃缺口**按件去重**后的清单（屏幕上的「几件事」）。
+
+    ★ 为什么说件不说条：0.55.0 实测 575 条 open+acked 只对应 4 件事。
+      「有 575 处没修」既不可核对，也把同一 condition 的历史流水重复计数
+      —— 那是把「记录条数」当「缺口件数」，本仓 F40 同族。
+    """
+    out = []
+    for g in harmful_gaps(facts):
+        c = g.get("condition") or g.get("kind")
+        if c and c not in out:
+            out.append(c)
+    return out
+
+
 def axes(facts):
     """facts → 四轴（冻结件 §5.2 的 14 行映射表）。**只产四轴，不产灯**。
 
@@ -767,11 +924,10 @@ def axes(facts):
             #   ★ 不许当 none —— 那会把「看不见」说成「没事」。
             harm = "unknown"
         else:
-            harmful = [g for g in gaps
-                       if isinstance(g, dict)
-                       and g.get("gap_state") in ("open", "acked")   # acked 不算修
-                       and levels.get(g.get("kind")) == GAP_LEVEL]   # 只收缺口族
-            harm = "some" if harmful else "none"
+            # ★ 三条腿（族界／未修复／复核期）在 `harmful_gaps()` 一处实现。
+            #   0.55.0 之前这里内联着前两条腿，与 `situation._harmful_gaps()`
+            #   是两份副本 —— 加复核期时正是那句「加一处忘了另一处」的高危点。
+            harm = "some" if harmful_gaps(facts) else "none"
 
     return {"mode": mode, "duty": duty, "trust": trust, "harm": harm}
 

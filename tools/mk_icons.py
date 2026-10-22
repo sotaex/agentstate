@@ -67,7 +67,10 @@ SS = 4                      # 每像素 4x4 超采样（抗锯齿）
 #:   文件名键只认 `SHIELD_SUFFIX`（下方），两者不可互相替代。
 SHIELD_MARKS = R.MARK_OF
 #: 角标后缀（文件名用）与 `inbox_tray.SHIELD_SUFFIX` **必须一致**
-SHIELD_SUFFIX = {"on": "", "unposted": "-unposted",
+#: ★ 0.55.0：加 `at-risk` —— 它不再借 `unknown` 那份文件（角标改空心环，
+#:   与 unknown 的实心点成对）。于是 `assets/icons/` 从 20 份变 25 份，
+#:   `0360` 的 T04 遍历本表，格子自动跟着长。
+SHIELD_SUFFIX = {"on": "", "at-risk": "-at-risk", "unposted": "-unposted",
                  "unknown": "-unknown", "off": "-off"}
 
 
@@ -132,6 +135,16 @@ def _alpha_at_shield(mark, x, y, size):
         return 0.0
     if kind == "bar":
         if abs(py - cy) <= half * 0.38 and abs(px - cx) <= half * 0.46:
+            return 1.0
+        return 0.0
+    if kind == "ring":
+        # 0.55.0：at-risk 的专属角标 —— **空心环**（与 unknown 的实心 dot 成对）。
+        #   ★ 为什么加形状而不是换颜色：角标区 16px 时只有 5×4 像素、
+        #     32px 时 9×9，dot 的半径在 16px 上不足 1px、高亮像素只有 1–2 个，
+        #     颜色在那点面积上承载不了信息（抗锯齿一稀释就没了）。
+        #     形状差在 ≥32px 才成立；16px 的通道是 tooltip（见 `inbox_tray`）。
+        d = ((px - cx) ** 2 + (py - cy) ** 2) ** 0.5
+        if half * 0.28 <= d <= half * 0.66:
             return 1.0
         return 0.0
     return 0.0

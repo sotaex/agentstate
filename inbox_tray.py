@@ -51,10 +51,16 @@ SHIELD_ONPOSTURE = "on"        # 哨兵在岗且自检通过
 SHIELD_UNPOSTURE = "unposted"  # 哨兵不在岗／心跳陈旧／自检不符
 SHIELD_UNKNOWN = "unknown"     # 探不到（盲区）——≠"没事"
 SHIELD_OFF = "off"             # 未启用：哨兵默认没在值守（产品第一原则：默认全关）
+#: ★ 0.55.0：值勤轴第三档（在岗但将断粮）。它**不是** `guard_posture()` 的档位
+#:   ——前面那段「六档直接用 guard_posture，不另立一套」说的是**监理态**，
+#:   at-risk 属于**值勤轴**，两轴正交。它原来借 `unknown` 的图与角标，
+#:   结果是「在险」与「探不到」在托盘上逐像素相同（F2 的视觉版）。
+SHIELD_AT_RISK = "at-risk"
 
 #: 哨兵态 → 图标后缀。与 `assets/icons/` 下的 `{事件态}{后缀}.ico` 对应。
 SHIELD_SUFFIX = {
     SHIELD_ONPOSTURE: "",
+    SHIELD_AT_RISK: "-at-risk",
     SHIELD_UNPOSTURE: "-unposted",
     SHIELD_UNKNOWN: "-unknown",
     SHIELD_OFF: "-off",
@@ -71,14 +77,18 @@ SHIELD_SUFFIX = {
 #:   后缀不动（内部标识冻结）。
 SHIELD_TIP = {
     SHIELD_ONPOSTURE: "监理在岗",
+    SHIELD_AT_RISK: "监理在岗，但储备将尽",
     SHIELD_UNPOSTURE: "监理不在岗",
     SHIELD_UNKNOWN: "监理状态探不到",
     SHIELD_OFF: "监理未启用",
 }
 
 #: 哨兵态配色（与 `mk_icons.py` 同源；形状也区分，不只靠颜色）
+#: ★ at-risk 与 unknown 同色（蓝）是**有意**的：两者都是「没出事但有事」的蓝区，
+#:   区别交给形状（ring vs dot）。16px 托盘上形状分不开 ⇒ 那一档靠 tooltip。
 SHIELD_COLOR = {
     SHIELD_ONPOSTURE: (0x22, 0x6b, 0x4a),     # 绿＝在岗
+    SHIELD_AT_RISK: (0x2a, 0x5d, 0xb0),       # 蓝＝在岗但将断粮
     SHIELD_UNPOSTURE: (0x9b, 0x22, 0x26),     # 红＝不在岗
     SHIELD_UNKNOWN: (0x2a, 0x5d, 0xb0),# 蓝＝盲区
     SHIELD_OFF: (0x5f, 0x5e, 0x5a),                # 灰＝未启用

@@ -402,14 +402,22 @@ def _is_guard_mode(facts):
 
 
 def _harmful_gaps(facts):
-    """算作 harm 的缺口记录（族界＋状态两条腿，与 `facts.axes` 同一口径）。"""
-    gaps, levels = facts.get("gaps"), _facts._kind_levels()
-    if not isinstance(gaps, list) or levels is None:
-        return []
-    return [g for g in gaps
-            if isinstance(g, dict)
-            and g.get("gap_state") in ("open", "acked")
-            and levels.get(g.get("kind")) == _facts.GAP_LEVEL]
+    """算作 harm 的缺口记录 —— **委托 `facts.harmful_gaps()`**（唯一实现）。
+
+    ★ 0.55.0 之前这里自己写了一遍「族界＋未修复」两条腿，与 `facts.axes()`
+      内联的那份是两份副本。加复核期（第三条腿）时正是「改一处忘另一处」的
+      高危点 ⇒ 收进 facts，本函数只做转发，保证灯与话同源（F2）。
+    """
+    return _facts.harmful_gaps(facts)
+
+
+def _breach_count(facts):
+    """`breach.main` 的 `{N}`：**件数**，不是记录条数。
+
+    ★ 两处入口（`sentence()` 与 `_head()`）都调这里 —— 同一个数字有两个
+      计算点，迟早一处改了另一处没改。（实测：575 条记录只对应 4 件事。）
+    """
+    return len(_facts.gap_conditions(facts))
 
 
 def _at_risk(facts):
@@ -516,7 +524,7 @@ def _fill(key, facts, scope=None):
         n = _fmt_minutes(facts.get("heartbeat_age"))
         return tpl.replace("{N}", n) if n is not None else None
     if key == "breach.main":
-        n = len(_harmful_gaps(facts))
+        n = _breach_count(facts)
         d = _days_since_earliest(facts, scope)
         if d is None:
             # ★ #57e：D 位不可得 ⇒ **只留前半句**（逐字取自同一句，不另造句）。
@@ -578,7 +586,7 @@ def _head(key, facts, scope=None):
     if key == "absent.main":
         return SENTENCES[key].split("。")[0] + "。"
     if key == "breach.main":
-        n = len(_harmful_gaps(facts))
+        n = _breach_count(facts)
         return SENTENCES[key].split("，")[0].replace("{N}", str(n)) + "。"
     return None
 
@@ -628,7 +636,8 @@ def gaps(facts, scope=None):
 
     ★ 本函数**只投影**：`facts["gaps"]` 已经是账本派生的缺口记录，这里**不重判**
       「算不算缺口」—— 那会把族界口径写第二遍（铁律 6：判据不二次实现产品口径）。
-      `level` 一律从 `inbox_model.LEVEL_OF_KIND` 取，与 `axes()` 同一真源。
+      `level` **记录级优先**（`facts` 带上来的已过 `level_of_record()` 降档），
+      只有夹具／旧数据没有该键时才回落到 `LEVEL_OF_KIND` 的类型级值。
     ★ 记录缺字段 ⇒ 给 `None`，**不编**：编出来的 `id` 会被下游当锚点用，
       而它不属于任何一条真实记录；`cons` 缺失也是 `None` 而不是 `[]`
       —— `[]` 与 `None` 在 F1 三态里是「查过了没有」与「查不到」两件事。
@@ -644,10 +653,12 @@ def gaps(facts, scope=None):
         if not isinstance(g, dict):
             continue
         kind = g.get("kind")
+        lvl = g.get("level")
         out.append({
             "id": g.get("id"),
             "kind": kind,
-            "level": levels.get(kind) if levels is not None else None,
+            "level": (lvl if lvl is not None
+                      else (levels.get(kind) if levels is not None else None)),
             "opened_at": g.get("opened_at"),
             "gap_state": g.get("gap_state"),
             "cons": g.get("cons"),

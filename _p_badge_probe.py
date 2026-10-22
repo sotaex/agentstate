@@ -41,7 +41,12 @@ def _mark(name):
     return R.mark_of(name)
 
 SIZE = 32
-STATES = ("on", "unposted", "unknown", "off")
+#: ★ 0.55.0 加 `at-risk`（值勤轴第三档）—— 它原来借 `unknown` 的角标与文件，
+#:   于是托盘上「在险」与「探不到」**逐像素相同**。加进来之后，两两比较
+#:   才会真的把这一对摆在一起比。
+STATES = ("on", "at-risk", "unposted", "unknown", "off")
+#: 除 `on` 之外的全部态（`on` 是「不画角标」的基准，不参与两两比较）。
+MARKED = tuple(s for s in STATES if s != "on")
 
 # ★ 判据区域＝**角标独占区**，不是"右上象限"。
 #   实测踩到的坑：第一版判据取"右上象限"，而主体环半径 0.46·size
@@ -105,10 +110,10 @@ def main():
     lefts = {st: left_pixels(st) for st in STATES}
     reds = []
 
-    # ① on 态右上角必须为空；其余三态必须有像素
+    # ① on 态右上角必须为空；其余各态必须有像素
     if corners["on"]:
         reds.append("on 态右上角不该有像素，实测 %d 个" % len(corners["on"]))
-    for st in ("unposted", "unknown", "off"):
+    for st in MARKED:
         if not corners[st]:
             reds.append("%s 态右上角一个像素都没有（角标没画上）" % st)
 
@@ -117,8 +122,8 @@ def main():
         print("%-10s %4d" % (st, len(corners[st])))
 
     print()
-    print("### 三态两两像素集合必须不同 ###")
-    for a, b in itertools.combinations(("unposted", "unknown", "off"), 2):
+    print("### 各态两两像素集合必须不同 ###")
+    for a, b in itertools.combinations(MARKED, 2):
         same = corners[a] == corners[b]
         inter = len(corners[a] & corners[b])
         print("%-10s vs %-10s identical=%-5s shared=%d" % (a, b, same, inter))
@@ -127,7 +132,7 @@ def main():
 
     print()
     print("### 主体中心不得被角标扰动（左半应与 on 态逐点一致） ###")
-    for st in ("unposted", "unknown", "off"):
+    for st in MARKED:
         same = lefts[st] == lefts["on"]
         print("%-10s left-identical=%s" % (st, same))
         if not same:

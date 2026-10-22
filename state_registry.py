@@ -67,29 +67,41 @@ DUTY = ("on", "at-risk", "off")
 #:   `None` 是**显式登记**「这一档不画角标」，不是「查不到」。
 DUTY_MARK = {
     "on": None,
-    "at-risk": {"kind": "dot", "color": (0x2A, 0x5D, 0xB0)},
+    "at-risk": {"kind": "ring", "color": (0x2A, 0x5D, 0xB0)},
     "off": {"kind": "bar", "color": (0x5F, 0x5E, 0x5A)},
 }
 
 #: 名字 → 角标几何。**两条轴共用一张查表**，但每个键的来历必须分得清：
 #:   值勤轴（新）：`on` / `at-risk` / `off`
 #:   监理态轴（旧）：`on` / `unposted` / `unknown` / `off`
-#:     ——这四键就是 `inbox_tray.SHIELD_SUFFIX`、`tools/tray.ps1`、
-#:     `tools/logo.ps1` 与 `assets/icons/*.ico` 的文件名后缀，**一个都不许增减**。
-#: `unknown`（盲区）与 `at-risk`（在岗但将断粮）**共用同一枚 dot**：这是 T1 的
-#:   裁决（角标只有一枚，改成不共享就要造第二种形状），是有意耦合 ——
-#:   改 at-risk 的几何，那 5 个 `-unknown.ico` 跟着变，必须同批重生成（B4）。
+#:     ——这四键就是 `tools/tray.ps1`、`tools/logo.ps1` 与
+#:     `assets/icons/*.ico` 沿用至今的文件名后缀。
+#:   ★ 0.55.0：`at-risk` 挣到了自己的后缀 `-at-risk`（第五个文件字键），
+#:     于是本表的键集与 `inbox_tray.SHIELD_SUFFIX` **不再相同** ——
+#:     `at-risk` 在旧轴里没有对应，`unposted` 在值勤轴里没有对应。
+#:     两边都变五键不是巧合，但**交集不是全部**，别拿一张表当另一张用。
 #: `unposted`（slash 红）保留为**旧键能力**，不再用于 at-risk。
 MARK_OF = {
     "on": DUTY_MARK["on"],
     "at-risk": DUTY_MARK["at-risk"],
     "off": DUTY_MARK["off"],
-    "unknown": DUTY_MARK["at-risk"],
+    # ★ 0.55.0 改判：`unknown`（盲区）与 `at-risk`（在岗但将断粮）**不再共用一枚角标**。
+    #   旧裁决（T1）的理由是「角标只有一枚，改成不共享就要造第二种形状」——
+    #   实测把这条理由拆了一半：造形状的成本只是 `_alpha_at_shield` 里一个 `if`
+    #   分支，而共享的代价是托盘上「在险」与「探不到」**逐像素相同**（F2 的视觉版：
+    #   两种不同处境，同一个输出）。
+    #   现在：unknown＝实心 dot（看不见），at-risk＝空心 ring（看得到、但快断）。
+    #   ⚠️ 诚实标注：16px 托盘上角标区只有 5×4 像素，dot 与任何形状都分不开
+    #   （实测 dot 与 bar 差 0 像素）⇒ **16px 的通道是 tooltip，不是图标**。
+    #   本改动兑现的是 ≥32px（高分屏托盘、页面、哨标）的可辨性。
+    "unknown": {"kind": "dot", "color": (0x2A, 0x5D, 0xB0)},
     "unposted": {"kind": "slash", "color": (0x9B, 0x22, 0x26)},
 }
 
-#: 角标图案的封闭集（画得出来的三种＋不画）。
-MARK_KINDS = ("dot", "slash", "bar")
+#: 角标图案的封闭集（画得出来的四种＋不画）。
+#: 0.55.0 加 `ring`（at-risk 的空心环）—— 它同时是「四种图案」这个数字的来源，
+#: 判据里凡是写「三种」的地方都要跟着数一遍（`MARK_KINDS` 是唯一真源）。
+MARK_KINDS = ("dot", "slash", "bar", "ring")
 
 
 def mark_of(name):
@@ -109,11 +121,15 @@ def mark_of(name):
 
 
 #: 资产文件字键（**文件名那一族**，与值勤名分开）。
-#: 这四个名字各对应一份 `{灯}{后缀}.ico`，是 `assets/icons/` 的命名依据。
+#: 这五个名字各对应一份 `{灯}{后缀}.ico`，是 `assets/icons/` 的命名依据。
 #: ★ 与 `inbox_tray.SHIELD_SUFFIX` 的键集必须逐字相同 —— 那份是运行期读图用的。
 #:   本模块是纯数据、零 import，不能反向依赖它 ⇒ **两处存在是事实**，
 #:   由判据钉死（`output/_p_asset_names.py` C①），不靠人记得同步。
-FILE_KEYS = ("on", "unposted", "unknown", "off")
+#: ★ 0.55.0 加 `at-risk`：它原来借 `unknown` 的文件，于是托盘上「在险」与
+#:   「探不到」不但图形相同、连文件名都相同 —— 那条路上**没有任何一处**
+#:   能区分两者。给它一份自己的文件是让 `asset_key_of` 有正确答案可返回，
+#:   而不是继续在「借谁的」这件事上做隐式推断。
+FILE_KEYS = ("on", "at-risk", "unposted", "unknown", "off")
 
 
 def asset_key_of(name):
@@ -125,10 +141,14 @@ def asset_key_of(name):
       并静默回落：图标回落成无角标（与 `on` 逐字节相同），`tray.json`
       回落成 `unknown`（＝盲区）。两件事互不相同，且都不出声。
 
-    ★ 方向不可反：磁盘上那份文件叫 `-unknown.ico` ⇒ **`unknown` 是主人、
-      `at-risk` 是借用者**。反过来让 `unknown` 去借 `at-risk`，一旦 `at-risk`
-      换成独立几何，`unknown` 的文件就会跟着改名 —— 而 `-unknown.ico`
-      已经在托盘／哨标／favicon 等渲染点上。
+    ★ 0.55.0 之前 `at-risk` 借 `unknown` 的几何与文件，本函数的任务就是
+      把「借谁的」这件事答出来。实测发现那条路有两个哑口：
+      `inbox_tray` 的两处入口（`icon_file`、`write_state`）都用
+      `name in SHIELD_SUFFIX` 判域外并**静默回落**：图标回落成无角标
+      （与 `on` 逐字节相同），`tray.json` 回落成 `unknown`（＝盲区）。
+      两件事互不相同，且都不出声。
+      ⇒ 0.55.0 给 `at-risk` 一份自己的资产（`-at-risk`，空心环角标），
+      于是本函数对值勤三档都能答出一份**它自己的**文件，不再借。
 
     ★ 查不到抛 `KeyError`（与 `mark_of` 同一条理由）：返回 `None` 会让
       「我不认识这个名字」与「这一档不画角标」走同一条路。
