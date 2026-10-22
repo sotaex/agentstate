@@ -127,7 +127,36 @@ SENTENCES = {
 }
 
 #: 徽标的短词（D-10 登记表）。★ 与长句分开：短词上角标，长句进 tooltip／主行。
-BADGE_WORD = {"dev": "研发中", "granary": "缺粮", "disk": "磁盘"}
+#: ★★ **这里只许放「徽标专有词」**：`disk` 是唯一一个不是态名的徽标词。
+#:   `dev`／`granary` 两格**必须派生**（见 `BADGE_STATE`）—— 那两个中文名的唯一真源
+#:   是 `inbox_model.STATE_LABEL`。A4 第一版在这里把 `dev` 那格的中文名手写了一份，
+#:   B1 跑到 0372 S08（全仓扫第二份态名声明）时被当场抓红（28 绿 → 26 绿 / 2 红）。
+#:   教训：**新模块顺手抄一个中文名，就是漂移的入口** —— S08 挡的正是这个入口。
+#: ★ 本条注释**故意不写出那个键值对的字面量**：S08 的扫描器走文本（`_decl_scan`），
+#:   注释里写出「态键: 中文名」同样会被当成第二份声明。本仓已有同型前科
+#:   （0364 的判据在自己解释 bug 的注释里写了触发串而假红）。第一次改这里时
+#:   我正好又踩了一次：注释里引用了那个字面量，S08 照红不误（:132）。
+BADGE_WORD = {"disk": "磁盘"}
+
+#: 徽标键 → 真源态键（`inbox_model.STATE_LABEL` 的键）。**不写第二份中文名。**
+BADGE_STATE = {"dev": "dev", "granary": "Ls"}
+
+
+def _badge_word(key):
+    """徽标短词：专有词取 `BADGE_WORD`，其余从 `state_short()` 派生。
+
+    取不到 ⇒ 返回 `None`，调用方**不挂这枚徽标**（不编一个词出来）。
+    """
+    if key in BADGE_WORD:
+        return BADGE_WORD[key]
+    src = BADGE_STATE.get(key)
+    if src is None:
+        return None
+    try:
+        import inbox_model as _M
+        return _M.state_short(src)
+    except Exception:                                        # noqa: BLE001
+        return None
 
 #: 徽标动作（D-10 规则：每枚必须带动作，否则就是装饰）。
 BADGE_ACTION = {"dev": "none", "granary": "topup", "disk": "clean-ledger"}
@@ -510,14 +539,17 @@ def badges(facts, scope=None):
     """
     out = []
     if facts.get("is_dev") is True:
-        out.append({"key": "dev", "text": BADGE_WORD["dev"],
-                    "action": BADGE_ACTION["dev"]})
+        w = _badge_word("dev")
+        if w:
+            out.append({"key": "dev", "text": w, "action": BADGE_ACTION["dev"]})
     if facts.get("granary_level") == "low" or facts.get("credits_low_open") is True:
-        out.append({"key": "granary", "text": BADGE_WORD["granary"],
-                    "action": BADGE_ACTION["granary"]})
+        w = _badge_word("granary")
+        if w:
+            out.append({"key": "granary", "text": w, "action": BADGE_ACTION["granary"]})
     if "disk_write_full" in _at_risk(facts):
-        out.append({"key": "disk", "text": BADGE_WORD["disk"],
-                    "action": BADGE_ACTION["disk"]})
+        w = _badge_word("disk")
+        if w:
+            out.append({"key": "disk", "text": w, "action": BADGE_ACTION["disk"]})
     return out
 
 
