@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
+
 # Antinel · 盲区生成器与完备性方法 v1.0
 
 **日期**：2026-10-22

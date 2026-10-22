@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
+
 # Antinel · 40 格完备矩阵 v1.1（2026-10-22）
 
 > **上一版**：v1.0（同日首版，接 `Antinel·盲区生成器与完备性方法 v1.0` 的 §3）。
