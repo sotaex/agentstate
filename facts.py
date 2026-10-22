@@ -50,7 +50,7 @@ facts 可以另有夹具不喂的诊断字段（值为 `None`，走 F1 的缺失
 """
 
 __all__ = [
-    "FIELDS", "GROUPS", "BASE_TYPES", "PROJECTION_KEYS",
+    "FIELDS", "GROUPS", "BASE_TYPES", "PROJECTION_KEYS", "EXPECTED_MISSING",
     "collect", "empty_trace", "check_types", "selfcheck",
 ]
 
@@ -197,6 +197,36 @@ FIELDS = {
     },
 }
 
+#: **已登记「尚未接上」的字段** —— A2 的诚实清单。
+#: 每项必须带「为什么现在接不上」＋「哪一步接」；理由为空 ⇒ 判据红（不是豁免）。
+#: 双向对账（同 S58）：登记了但实际已接上 ⇒ 也红（表过期＝接了没销账）。
+EXPECTED_MISSING = {
+    "is_dev": "F1 白名单未列 `is_dev_build()`（实测存在、只读，但不在九类里）"
+              "⇒ #55 待扩白名单；**不扩则 mode 轴永远分不出 drill 与 armed**",
+    "scope_device": "D-02 写来源 `machine_id`，实测 host_shield **没有这个符号**"
+                    "⇒ #55 待指定真实来源",
+    "scope_host": "宿主归因字段（现有 host 复用），来源未指定 ⇒ #55",
+    "credits_low_open": "来自账本 `credits_low` 记录；白名单列了消费函数却没列"
+                        "账本读取入口（`load_items_all`）⇒ #55",
+    "gaps": "同上：需要账本 items 才能派生缺口族；白名单不闭合 ⇒ #55",
+    "counts": "同上：`day_counts(items)` 需要 items ⇒ #55",
+    "outage_consequences": "D-02 写 `_outage_consequences()`，但它是 host_shield 私有"
+                           "函数、不在白名单；`guard_posture()` 的 `consequences`"
+                           "只在非异常分支给 ⇒ 待 A3 决定取哪个",
+    "partial_read": "N7 未实现（`partial_read` 的产出在扫描器改造后）",
+    "at_risk": "N6 注册表未实现（预告源三成分）",
+    "chain_recon": "N10 对账未实现（依赖 `chain_link_ok`，§10.1 待补）",
+    "notice_state": "N12 通知三态未实现",
+    "heartbeat_slices": "presence（D-07）未实现，属 A5",
+    "published_version": "来自 `workspace_facts.json` 登记位（非白名单函数）"
+                        "⇒ 待 A6 徽标接线时接",
+    "code_version": "来自 `antinel.VERSION` 模块常量（非白名单函数）"
+                 "⇒ 待 A6 徽标接线时接",
+    "dev_exempt": "D-02 写 `_dev_exempt_problems()`，私有函数不在白名单 ⇒ #55",
+    "chain_integrity_ok": "`chain_link_ok` 不存在（§10.1 已冻结落点、待实现）"
+                          "⇒ 按 §7.2 走 trace.missing 记名",
+}
+
 #: 投影必需键 —— 即 `ci/_situation_cases.BASE` 的 24 个键。
 #: 这 24 个必须全部在 `FIELDS` 里（否则夹具喂不进来）；
 #: `FIELDS` 另有 6 个诊断/徽标/证据字段，夹具不喂，值为 None。
@@ -210,26 +240,146 @@ PROJECTION_KEYS = (
 )
 
 
-# ───────────────────────────── 二、采集入口（A1 骨架） ─────────────────────────────
+# ───────────────────────────── 二、采集入口 ─────────────────────────────
 def empty_trace():
     """空的 trace —— F1 冻结的两键结构：`missing`（缺字段名）与 `sources`（来源）。"""
     return {"missing": [], "sources": {}}
 
 
-def collect(**injected):
-    """采集一份 facts 快照。**A1 阶段不读任何外部来源，全部由调用方注入。**
+def _live_values():
+    """真实采集：**每个来源只调一次**，返回 `(values, sources, errors)`。
 
-    返回 `(facts, trace)`：
-      · `facts`  —— 30 个键全在（缺的值为 `None`，**不是不出现**）
-      · `trace`  —— `missing` 列出值为 None 的字段名，`sources` 记每个字段的来源
+    ★★ 为什么是「一次采集」而不是「每字段一个 reader」：
+      `guard_posture()` 会跑心跳链读取 ＋ `self_check()`（含 manifest 哈希），
+      一次几百毫秒。30 个字段各调一次＝几十秒，而且**同一时刻的两次探测可能
+      给出不同的值**（心跳在走）—— 那会让 facts 自相矛盾。
+      ⇒ 先采一个上下文，再从它派生。
+
+    ★ 白名单（F1）只允许调这些；本函数**不调任何私有函数**。
+      白名单给不出的字段就留空（进 `trace.missing`），由后续步接 —— 不许自己探。
+
+    实测（2026-10-22，impl 树）：
+      · `guard_posture()` → evidence 含 10 键（armed/sentinel_alive/heartbeat_age/
+        heartbeat_ts/heartbeat_source/sentinel_uptime/sentinel_pid/self_check_ok/
+        self_check_problems/heartbeat_dir）—— 一个入口覆盖 8 个 facts 字段
+      · `granary.state()` → {state, balance, threshold, days_left, why}
+      · `egress.capacity()` → {free, total, low_free, dir_full, readable, …}
+      · `audit_chain.write_health()` → {lost, last_error, last_ts}
+    """
+    vals, srcs, errs = {}, {}, {}
+
+    #: 每个来源「负责」哪些字段 —— 失败时按这张表把 error 精确落到字段上。
+    #: ★ 不用「source 字符串前缀匹配」猜归属：那会把 `is_dev`（来源是
+    #:   `is_dev_build()`）错标成 guard_posture 的错，误导读日志的人。
+    owned = {
+        "guard_posture": ("armed", "sentinel_alive", "heartbeat_age",
+                          "heartbeat_ts", "heartbeat_source", "sentinel_uptime",
+                          "self_check_ok", "self_check_problems",
+                          "probe_error", "clock_skewed"),
+        "granary": ("granary_level", "granary_balance_hours"),
+        "egress": ("egress_free_bytes",),
+        "audit_chain": ("chain_write_lost",),
+    }
+
+    # ① 聚合入口：guard_posture() —— 8 个字段 + probe_error + clock_skewed 派生
+    try:
+        import host_shield as HS
+        gp = HS.guard_posture()
+        ev = gp.get("evidence") or {}
+        for k in ("armed", "sentinel_alive", "heartbeat_age", "heartbeat_ts",
+                  "heartbeat_source", "sentinel_uptime",
+                  "self_check_ok", "self_check_problems"):
+            if k in ev:
+                vals[k] = ev[k]
+                srcs[k] = "host_shield.guard_posture().evidence"
+        # probe_error：只有 exception 分支的 evidence 才带 `error` 键
+        #   （规则⑥「读不到心跳链」也给 unknown，但**没有** error —— 那不是探针故障）
+        # ★ 正常时显式写 None：D-02 说「None 为真值」——「没有探针错误」是一个
+        #   **结论**，不是「没接上」。若让它留空进 missing，就会永远挂着一条假缺口。
+        if "error" in ev:
+            vals["probe_error"] = ev["error"]
+            srcs["probe_error"] = "host_shield.guard_posture().evidence.error"
+        else:
+            vals["probe_error"] = None
+            srcs["probe_error"] = ("host_shield.guard_posture()（无 exception ⇒ "
+                                   "None 为真值）")
+        # clock_skewed 派生（BL-02：age<0 ∨ uptime<0）。纯计算，不算「自己探」——
+        #   用的是白名单刚给的两个读数。
+        age, up = ev.get("heartbeat_age"), ev.get("sentinel_uptime")
+        vals["clock_skewed"] = bool(
+            (isinstance(age, (int, float)) and age < 0)
+            or (isinstance(up, (int, float)) and up < 0))
+        srcs["clock_skewed"] = "derived: heartbeat_age<0 ∨ sentinel_uptime<0 (BL-02)"
+    except Exception as e:                                   # noqa: BLE001
+        errs["guard_posture"] = repr(e)
+        for _k in owned["guard_posture"]:
+            srcs[_k] = "error[guard_posture]: %r" % (e,)
+
+    # ② granary.state() —— granary_level / granary_balance_hours
+    try:
+        import granary as G
+        g = G.state()
+        if isinstance(g, dict):
+            if "state" in g:
+                vals["granary_level"] = g.get("state")
+                srcs["granary_level"] = "granary.state().state"
+            if "balance" in g:
+                # balance 的单位**就是小时**（granary.HOURS_PER_DAY=24）
+                vals["granary_balance_hours"] = g.get("balance")
+                srcs["granary_balance_hours"] = "granary.state().balance（单位小时）"
+    except Exception as e:                                   # noqa: BLE001
+        errs["granary"] = repr(e)
+        for _k in owned["granary"]:
+            srcs[_k] = "error[granary]: %r" % (e,)
+
+    # ③ egress.capacity() —— egress_free_bytes
+    try:
+        import egress as E
+        cap = E.capacity()
+        if isinstance(cap, dict) and "free" in cap:
+            vals["egress_free_bytes"] = cap.get("free")
+            srcs["egress_free_bytes"] = "egress.capacity().free"
+    except Exception as e:                                   # noqa: BLE001
+        errs["egress"] = repr(e)
+        for _k in owned["egress"]:
+            srcs[_k] = "error[egress]: %r" % (e,)
+
+    # ④ audit_chain.write_health() —— chain_write_lost
+    try:
+        import audit_chain as A
+        wh = A.write_health()
+        if isinstance(wh, dict) and "lost" in wh:
+            vals["chain_write_lost"] = wh.get("lost")
+            srcs["chain_write_lost"] = "audit_chain.write_health().lost"
+    except Exception as e:                                   # noqa: BLE001
+        errs["audit_chain"] = repr(e)
+        for _k in owned["audit_chain"]:
+            srcs[_k] = "error[audit_chain]: %r" % (e,)
+
+    return vals, srcs, errs
+
+
+def collect(_offline=False, **injected):
+    """采集一份 facts 快照。返回 `(facts, trace)`。
+
+    · `facts` —— 30 个键**全在**（缺的值为 `None`，**不是不出现**）
+    · `trace` —— 只有 `missing` 与 `sources` 两键（F1 冻结，不许加第三键）
+
+    三种取值优先级（高→低）：**注入** ＞ **真实采集** ＞ `None`。
+
+    `_offline=True` ⇒ 完全不读外部（A1 骨架模式／单元测试用）：
+    每个来源只调一次的成本在这里是零，探针可以在无环境依赖下反复跑。
 
     ★ 为什么缺字段也要出现在 facts 里（值为 None）而不是干脆不放这个键：
-      「键不存在」与「键在但值为 None」在 Python 里差别很大 —— 前者会让投影层
-      的 `facts.get(k, 默认)` 悄悄生效，那正是 F1 禁止的「静默默认」。
-      全键在场 ＋ None ⇒ 投影层必须显式处理 None，躲不掉。
+      「键不存在」与「键在且为 None」差别很大 —— 前者会让投影层的
+      `facts.get(k, 默认)` 悄悄生效，那正是 F1 禁止的「静默默认」。
 
-    ★ A2 接真实读取时**只改本函数内部**，签名与返回结构不变。
+    ★ 读取失败怎么表达：F1 只给了 `missing`/`sources` 两键，所以**不加 errors 键**，
+      而是把失败写进 `sources[字段] = "error: <repr>"`，同时该字段进 `missing`。
+      这样「读不到」与「没接」在 sources 里可区分，而 trace 结构不变。
     """
+    vals, srcs, errs = ({}, {}, {}) if _offline else _live_values()
+
     facts = {}
     missing = []
     sources = {}
@@ -237,10 +387,14 @@ def collect(**injected):
         if name in injected:
             facts[name] = injected[name]
             sources[name] = "injected"
+        elif name in vals:
+            facts[name] = vals[name]
+            sources[name] = srcs.get(name, "live")
         else:
             facts[name] = None
             missing.append(name)
-            sources[name] = spec["source"]
+            # `_live_values()` 已经把「读失败」精确落到 srcs；没落的才是「没接」
+            sources[name] = srcs.get(name) or spec["source"]
     return facts, {"missing": missing, "sources": sources}
 
 
