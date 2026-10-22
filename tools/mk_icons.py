@@ -241,11 +241,38 @@ def build_ico(state, out_path, sizes=SIZES, shield=None):
     return out_path
 
 
+def plan():
+    """要生成哪些资产：返回**文件字键**列表，同形只生成一份。
+
+    ★ 为什么不直接遍历 `SHIELD_SUFFIX`（B1 曾这么写）：那张表只说
+      「有哪四种文件」，不说「值勤轴的每一档归哪一份」。B1 之后
+      `at-risk` 是第五个**名字**、却只能读第四份**文件** —— 直接遍历
+      `SHIELD_SUFFIX` 会让它静静地没有自己的名字。
+
+      走 `asset_key_of` 一遍的好处：往 `DUTY_MARK` 加一格却忘了给它
+      找文件承载时，这里**当场抛 KeyError**，而不是少画一个文件。
+
+    ★ `on` 是 `None`（显式登记「不画角标」）⇒ 复用基础图标，
+      不重复生成一份（省 5×32KB）。
+    """
+    keys = []
+    for n in sorted(set(SHIELD_SUFFIX) | set(R.DUTY)):
+        k = R.asset_key_of(n)
+        if k is None or k in keys:
+            continue
+        keys.append(k)
+    return keys
+
+
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
     out_dir = os.path.join(os.path.dirname(here), "assets", "icons")
     os.makedirs(out_dir, exist_ok=True)
     made = []
+    # ★ 态清单**必须留在循环里写成字面量**：`0514` 的 `FLO-15c` 用
+    #   `for\s+st\s+in\s*\(([^)]*)\)` 从源码读出「真正画出来的是哪几个」，
+    #   并比对本文件里多处清单是否一致。抽成模块常量会让那条判据失去锚点
+    #   （B4 实测：抽成 `STATES` 后 FLO-15c + 其负控当场双红）。
     for st in ("L0", "L1", "L2", "Ls", "R0"):
         p = os.path.join(out_dir, "%s.ico" % st)
         build_ico(st, p)
@@ -253,19 +280,19 @@ def main():
     for st, sz in made:
         print("  %s.ico  %d bytes" % (st, sz))
     # ★ 0.36.0：哨兵态组合图标（事件态 × 哨兵态）。
-    #   `on` 不画角标 ⇒ **复用基础文件，不重复生成一份**（省 5×32KB）。
-    # ★ B1：循环改用 `SHIELD_SUFFIX`（**资产名键**，恰 4 个），不遍历
-    #   `SHIELD_MARKS`。两者职责不同：前者说"要画哪些文件"，后者说"每个名字
-    #   怎么画"。`MARK_OF` 现在含值勤轴的 `at-risk`，拿它做循环会
-    #   `SHIELD_SUFFIX["at-risk"]` KeyError —— 而不是少画一个文件。
-    for sh in SHIELD_SUFFIX:
-        if R.mark_of(sh) is None:
-            print("  %-14s (复用基础图标，on 态不画角标)" % sh)
-            continue
+    # ★ B1：循环不再遍历 `mark_of` 的全键（含值勤轴的 `at-risk`，会让
+    #   `SHIELD_SUFFIX["at-risk"]` KeyError）。
+    # ★ B4：改走 `plan()` —— 名字集合 ＝ 文件字键 ∪ 值勤档，按**文件字键**
+    #   去重后生成。`at-risk` 因此有名字（借 `unknown` 那份），
+    #   且 `unposted` 那 5 份不会被漏掉（0360 会逐格查产物）。
+    for key in plan():
         for st in ("L0", "L1", "L2", "Ls", "R0"):
-            p = os.path.join(out_dir, "%s%s.ico" % (st, SHIELD_SUFFIX[sh]))
-            build_ico(st, p, shield=sh)
+            p = os.path.join(out_dir, "%s%s.ico" % (st, SHIELD_SUFFIX[key]))
+            build_ico(st, p, shield=key)
             print("  %-14s %d bytes" % (os.path.basename(p), os.path.getsize(p)))
+    for n in sorted(set(SHIELD_SUFFIX) | set(R.DUTY)):
+        if R.asset_key_of(n) is None:
+            print("  %-14s (复用基础图标，不画角标)" % n)
     print("OK -> %s" % out_dir)
     return 0
 

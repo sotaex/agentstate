@@ -108,6 +108,68 @@ def mark_of(name):
                        % (name, "、".join(sorted(MARK_OF))))
 
 
+#: 资产文件字键（**文件名那一族**，与值勤名分开）。
+#: 这四个名字各对应一份 `{灯}{后缀}.ico`，是 `assets/icons/` 的命名依据。
+#: ★ 与 `inbox_tray.SHIELD_SUFFIX` 的键集必须逐字相同 —— 那份是运行期读图用的。
+#:   本模块是纯数据、零 import，不能反向依赖它 ⇒ **两处存在是事实**，
+#:   由判据钉死（`output/_p_asset_names.py` C①），不靠人记得同步。
+FILE_KEYS = ("on", "unposted", "unknown", "off")
+
+
+def asset_key_of(name):
+    """名字 → **读哪一份资产**。返回文件字键；`None`＝复用基础图标。
+
+    ★ 为什么需要这一层：B1 之后 `at-risk` 画得出来（借 `unknown` 那枚 dot），
+      但**没有一处回答它读哪份 `.ico`**。`inbox_tray` 的两处入口
+      （`icon_file`、`write_state`）都拿 `in shield in SHIELD_SUFFIX` 判域外
+      并静默回落：图标回落成无角标（与 `on` 逐字节相同），`tray.json`
+      回落成 `unknown`（＝盲区）。两件事互不相同，且都不出声。
+
+    ★ 方向不可反：磁盘上那份文件叫 `-unknown.ico` ⇒ **`unknown` 是主人、
+      `at-risk` 是借用者**。反过来让 `unknown` 去借 `at-risk`，一旦 `at-risk`
+      换成独立几何，`unknown` 的文件就会跟着改名 —— 而 `-unknown.ico`
+      已经在托盘／哨标／favicon 等渲染点上。
+
+    ★ 查不到抛 `KeyError`（与 `mark_of` 同一条理由）：返回 `None` 会让
+      「我不认识这个名字」与「这一档不画角标」走同一条路。
+    """
+    if name in DUTY_MARK:                   # 值勤三档（含 on）
+        mk = DUTY_MARK[name]
+        if mk is None:
+            return None
+        for k in FILE_KEYS:
+            if MARK_OF[k] is mk:
+                return k
+        raise KeyError("值勤档 %r 有几何，但没有哪份资产承载它"
+                       "（%s 里没有同形的一份）" % (name, "、".join(FILE_KEYS)))
+    if name in MARK_OF:                     # 监理态旧键本身就是文件字键
+        return None if MARK_OF[name] is None else name
+    raise KeyError("没有名为 %r 的资产（合法：%s）"
+                   % (name, "、".join(sorted(set(MARK_OF) | set(DUTY_MARK)))))
+
+
+def _asset_guard_problems():
+    """**「画得出来 ⇒ 必须有文件承载」**——B1 那个洞的类层面守卫。
+
+    守的不是 `at-risk` 这一个实例，而是它的形状：谁往 `DUTY_MARK` 里加一格、
+    却没让它在 `FILE_KEYS` 里找到同形的一份，这里就红。抽成命名函数是
+    为让负控能换掉同一份实现（`_p_asset_names.py` N④）。
+    """
+    bad = []
+    for d in DUTY:
+        try:
+            k = asset_key_of(d)
+        except KeyError as exc:
+            bad.append("⑧ %s" % (exc,))
+            continue
+        if k is not None and k not in FILE_KEYS:
+            bad.append("⑧ %s → %r 不在 FILE_KEYS" % (d, k))
+    for k in FILE_KEYS:
+        if k not in MARK_OF:
+            bad.append("⑧ 文件字键 %r 在 MARK_OF 里没有几何" % (k,))
+    return bad
+
+
 #: 八成因条目（顺序＝矩阵 CAUSES 顺序；`cause` 与 `key` 同值：本表就是成因表）
 STATES = [
     {"key": "unarmed", "lamp": "grey", "cause": "unarmed",
@@ -226,10 +288,12 @@ LEGACY_OF = {
 def selfcheck():
     """结构自检（0a 验收的可执行版）。返回问题列表，空＝全绿。
 
-    验七条：① 11 字段齐全；② tense 五值封闭且 blind 显式 unknowable；
+    验八条：① 11 字段齐全；② tense 五值封闭且 blind 显式 unknowable；
     ③ 旧六键逐字保留；④ legacy_of 键集＝旧六键、值⊆成因键、全仓唯一；
     ⑤ 灯/成因单射与动作单射（I4）；⑥ 四灯的色与几何覆盖完整；
-    ⑦ 角标几何（两条轴的键都在、图案在封闭集、值勤三档全覆盖）。
+    ⑦ 角标几何（两条轴的键都在、图案在封闭集、值勤三档全覆盖）；
+    ⑧ **画得出来 ⇒ 必须有资产文件承载**（值勤每档都能在 `FILE_KEYS`
+    里找到同形的一份，见 `_asset_guard_problems`）。
     """
     bad = []
     for e in STATES:
@@ -285,9 +349,9 @@ def selfcheck():
             bad.append("⑦ %r 的角标颜色 %r 不是 RGB 三元组" % (name, col))
     # 旧四键不许因为新增值勤轴而丢：`SHIELD_SUFFIX`／`tray.ps1`／`logo.ps1`
     # 与 `assets/icons/*.ico` 的文件名后缀全按这四个键走（0360 会逐格查产物）。
-    for k in ("on", "unposted", "unknown", "off"):
-        if k not in MARK_OF:
-            bad.append("⑦ 旧监理态键 %r 在 MARK_OF 里丢了" % (k,))
+    # ★ 这个集合现在有了名字＝`FILE_KEYS`，由 ⑧ 的守卫统一查，
+    #   这里不再写第二份字面量。
+    bad.extend(_asset_guard_problems())
     return bad
 
 
