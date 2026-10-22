@@ -31,6 +31,14 @@
         （「今天没什么要拦的」），N8-c 的 `forbid_text` 正是抓这个。
     (e) 数字位不可得时的渲染形态（`breach` 的 D 位、`absent` 的 N 位）未冻结。
     (f) 期间行的「混合」形态需要比 `counts{action,info}` 更细的分桶，P2。
+
+## 在场证明（A5）的两条硬约束（#58）
+
+    (a) F2 的四键（`holes`/`asleep` 并列）与 D-07 的四元组（`asleep?` 塞进空档）
+        互相冲突 ⇒ 以 F2 四键为基，**加第五键 `unknown`**，三态才齐备。
+    (b) **睡眠证据当前拿不到**（`_sentinel_uptime()` 只用墙钟）⇒ 长空档一律
+        `unknown`（判缺席但原因算不清），**不判 `absent`**。
+        补取数的施工单见设计件 §11.9（未签发，前置是 T2 三钟实测）。
 """
 
 import facts as _facts
