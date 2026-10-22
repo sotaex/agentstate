@@ -2169,6 +2169,16 @@ def _view_inbox(items, token, filt, now=None, posture=None, root=None):
             #   与 `posture_now()` 等同款既有形态）。
             + ("<div class=\"note\" style=\"margin:0 0 8px\">%s</div>"
                % _esc(BB.bubble_health(root=root)["text"]))
+            # ★★ 2026-10-22（40 格 · 人·判）：**「已知未修」台账行**。
+            #   为什么必须有：点「忽略」以后，这条记录从待办消失是对的
+            #   （尊重你的决定），但从**账面**也一起消失就是错的 ——
+            #   那等于"我点了一下，缺口就好了"。
+            #   ⇒ 一条弱化注记，把"你说过先不管、它其实还坏着"的条数摆在
+            #     待办旁边；不带按钮、不顶灯、可以一直不管。
+            #   复核期（`ACK_REVIEW_DAYS`）过了会自己回到「要处理」，
+            #   所以这行同时是那个回访的**可见理由**。
+            + _unrepaired_line(items, now)
+            + _lock_line()
             # ★★ 0.50.4（Q-25 ＋ Q-11，2026-10-15 品质扫描，创始人点头）：
             #   原先这里挂了一整块折叠入口「页面上的词都是什么意思（点开看）」，
             #   **本版删掉**。三条理由，都可复核：
@@ -3677,6 +3687,59 @@ def _maybe_record_day(items=None, root=None, now=None):
         return None
     _RECORD_DAY_STATE["t"] = t
     return _DM.record_day(items=items, root=root)
+
+
+def _unrepaired_line(items, now=None):
+    """「已知未修」台账行（★ 唯一实现）。没有 ⇒ 空串（不占屏）。
+
+    ★ 40 格 · 人·判：点"忽略"以后记录退出待办是对的，但它**没有修好**这件事
+      必须在账面上留着。这一行就是那个"留着"。
+    ★ 不顶灯、不带按钮、可以一直不管 —— 它只回答"我不管的有几条、最早多久了"；
+      真正的回访由 `ACK_REVIEW_DAYS` 到期后自己把它送回「要处理」。
+    """
+    try:
+        u = M.unrepaired_count(items, now=now)
+    except Exception:
+        return ""
+    if not u.get("n"):
+        return ""
+    txt = "你说过先不管、其实还没修好的：%d 条" % u["n"]
+    if u.get("oldest_days") is not None:
+        txt += "（最早 %d 天前）" % u["oldest_days"]
+    txt += "。"
+    if u.get("due"):
+        txt += "其中 %d 条已过 %d 天复核期，需要重新决定。" % (
+            u["due"], M.ACK_REVIEW_DAYS)
+    return ("<div class=\"note\" style=\"margin:0 0 8px\">%s</div>" % _esc(txt))
+
+
+def _lock_line():
+    """并发读数一行（★ 40 格 · 并发·报）。没有竞争 ⇒ 空串。
+
+    ★ 为什么必须有：抢锁超时与回收死锁以前只写 `tlog()`，而 `tlog` 要
+      `ANTINEL_LOCK_TELEMETRY=1` 才开 —— 用户不看诊断就永远看不到。
+      一次"两个守卫同时起来"在界面上完全不可见，而它正是"记录写得慢"的常见原因。
+    ★ 只在**有**竞争时出现（正常机器一天 0 次）⇒ 不占屏、不制造焦虑。
+    ★ 读数与写入同源（`audit_chain.lock_pressure`），不在页面另数一遍。
+    """
+    try:
+        import audit_chain as AC
+        import host_shield as _hs
+        d = _hs._shield_audit_dir()
+        pr = AC.lock_pressure(path=AC.lock_events_path(d))
+    except Exception:
+        return ""
+    if not (pr.get("timeouts") or pr.get("steals")):
+        return ""
+    parts = []
+    if pr.get("timeouts"):
+        parts.append("抢锁超时 %d 次" % pr["timeouts"])
+    if pr.get("steals"):
+        parts.append("回收死锁锁 %d 次" % pr["steals"])
+    txt = "记录连写：最近 24 小时" + "、".join(parts) + "。"
+    if pr.get("timeouts"):
+        txt += "偶尔一次正常；一直涨说明有进程卡在写记录上。"
+    return ("<div class=\"note\" style=\"margin:0 0 8px\">%s</div>" % _esc(txt))
 
 
 def render_page(view="inbox", filt=None, root=None, token="", items=None, rep=None,

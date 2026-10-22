@@ -53,6 +53,33 @@ _TRANSITIONS = {
     "ignored": {"read"},
 }
 
+# ---------------------------------------------------------------- 缺口态 ----
+# ★★ 2026-10-22（40 格 · 人·判）：`state` 原来**兼职两件事** ——
+#   ① 你知不知道（unread/read）；② 这件事还在不在（done/ignored）。
+#   兼职的后果不是"显示难看"，是**一个没修的真实缺口会从待办里彻底消失**：
+#   点一下"忽略"⇒ `bucket_of → ARCHIVE` ⇒ 它既不在待办、也不在任何计数里。
+#   而"我决定先不管"和"这件事已经好了"是两句完全不同的话。
+#
+#   ⇒ 拆出 `gap_state`（缺口态），与 `state`（知情态）各管一件事：
+#     · open   缺口没修，也没人说要不管 ⇒ 按原口径进待办/看一眼
+#     · acked  缺口没修，**你声明过先不管** ⇒ 退出待办，但进"已知未修"台账，
+#              并且**复核期一到会回来说一次**（不许变成永久黑洞）
+#     · closed 已处置 ⇒ 归档
+#     · ""     未声明（旧数据）⇒ 按四态派生：done→closed，ignored→acked，其余→open
+#
+#   ★ 为什么 `ignored` 派生为 `acked` 而不是 `closed`：历史"忽略"动作的语义
+#     本来就是"我知道、我暂时不管"，从来没有说过"它好了"。把它读成 closed，
+#     等于替用户宣布一个他没做过的结论。
+#   ★ 为什么 acked 还要有复核期：没有复核期，忽略就是永久黑洞 ——
+#     与"缺口不许消失"是同一句话的两面。14 天 = 一个迭代周期，
+#     短到能记住，长到不打扰。
+GAP_OPEN = "open"
+GAP_ACKED = "acked"
+GAP_CLOSED = "closed"
+GAP_STATES = (GAP_OPEN, GAP_ACKED, GAP_CLOSED)
+ACK_REVIEW_DAYS = 14
+
+
 
 class InboxError(Exception):
     """Antinel 监理数据层的统一异常基类。"""
@@ -440,16 +467,90 @@ def bucket_of(item, now=None, hours=WINDOW_HOURS):
       其中绝大多数是 7 天前已经过期的拦截 —— 那就又回到"次要信息霸屏"。
       ★ 窗口外的有后果记录**不丢**，进"归档"，随时可翻。
     ★ 页面按 `group_key()` **按事由归并**显示（14 条同因记录 = 1 件事）。
+
+    ★★ 2026-10-22（40 格 · 人·判）：分档由**缺口态**决定，不再由四态一刀切。
+      `ignored` 以前等同于"归档"，于是"我看了但没修"和"已经修好"在账面上
+      长得一模一样 —— 一个真实缺口就这样从待办消失（且任何计数都数不到）。
+      现在：`acked` 退出待办但进 `unrepaired_count()` 台账，复核期一到回待办。
     """
-    if not within_hours(item.ts, hours, now):
+    gs = gap_state_of(item)
+    if gs == GAP_CLOSED:
         return BUCKET_ARCHIVE
-    if item.state in CLOSED_STATES:
+    if gs == GAP_ACKED:
+        # 你声明过"先不管" ⇒ 退出待办；但缺口没修，复核期一到回来说一次。
+        # ★ 复核期只对"本来就在待办里"的记录有意义：窗口外/无后果/不用本人动手的，
+        #   到期也不需要打扰（否则会把一堆历史归档重新翻上来）。
+        if ack_expired(item, now) and within_hours(item.ts, hours, now) \
+                and has_consequence(item) and needs_owner(item):
+            return BUCKET_ACTION
+        return BUCKET_ARCHIVE
+    if not within_hours(item.ts, hours, now):
         return BUCKET_ARCHIVE
     if not has_consequence(item):
         return BUCKET_INFO
     if not needs_owner(item):
         return BUCKET_INFO
     return BUCKET_ACTION
+
+
+def gap_state_of(item):
+    """一条记录的**缺口态**（★ 唯一实现：分档、台账、页面都调它）。
+
+    · `open`   没修、也没人说要不管
+    · `acked`  没修，你说过先不管（有复核期）
+    · `closed` 已处置
+    · 字段为空（旧数据）⇒ 从四态派生，见上方 `GAP_*` 那段注释。
+    """
+    g = getattr(item, "gap_state", "") or ""
+    if g in GAP_STATES:
+        return g
+    st = getattr(item, "state", "") or ""
+    if st == "done":
+        return GAP_CLOSED
+    if st == "ignored":
+        return GAP_ACKED
+    return GAP_OPEN
+
+
+def ack_expired(item, now=None, days=ACK_REVIEW_DAYS):
+    """"先不管"是否已过复核期。**不知道什么时候忽略的 ⇒ 不催**（宁可少打扰）。"""
+    d = _parse_ts(getattr(item, "closed_at", "") or "")
+    if d is None:
+        return False
+    now = now or datetime.now().astimezone()
+    return (now - d).total_seconds() >= days * 86400
+
+
+def unrepaired_count(items, now=None, hours=None):
+    """「已知未修」台账：你说过先不管、但它其实还坏着的条数。
+
+    返回 `{"n":…, "due":…, "oldest_days":…|None, "kinds":[(kind, n)…]}`。
+
+    ★★ 为什么要有它（40 格 · 人·判）：忽略之后记录从待办消失，是对的
+      （尊重你的决定）；但**从账面上也消失，是错的** —— 那就等于
+      "我点了一下，缺口就好了"。这条台账是那句话的反面证据。
+    ★ `due` ＝ 已过复核期、本该重新进待办的条数。它必须能和 `n` 分开看：
+      `n=5, due=0` 是"都还在你设定的宽限里"，`n=5, due=5` 是"你不管了但它还在"。
+    ★ 口径与 `bucket_of` 同源（都调 `gap_state_of` / `ack_expired`），
+      **不许在本函数里另写一套"算不算未修"的规则**。
+    """
+    now = now or datetime.now().astimezone()
+    acked = [it for it in items if gap_state_of(it) == GAP_ACKED]
+    if hours is not None:
+        acked = [it for it in acked if within_hours(it.ts, hours, now)]
+    due = sum(1 for it in acked if ack_expired(it, now))
+    ages = []
+    for it in acked:
+        d = _parse_ts(it.ts)
+        if d is not None:
+            ages.append(max(0.0, (now - d).total_seconds()) / 86400.0)
+    by = {}
+    for it in acked:
+        by[it.kind] = by.get(it.kind, 0) + 1
+    return {"n": len(acked), "due": due,
+            "oldest_days": int(max(ages)) if ages else None,
+            "kinds": sorted(by.items(), key=lambda kv: -kv[1])}
+
 
 
 def counts_by_bucket(items, now=None, hours=WINDOW_HOURS):
@@ -1411,6 +1512,9 @@ class Item:
     closed_at: str = ""
     note: str = ""
     actor: str = "owner"
+    #: 缺口态（open/acked/closed/""）—— 与 `state`（知情态）**各管一件事**。
+    #: 空串＝旧数据，由 `gap_state_of()` 从 `state` 派生（见 GAP_* 那段）。
+    gap_state: str = ""
 
     # --- 便捷透传（页面/托盘只认这几个） ---
     @property
@@ -1488,7 +1592,8 @@ class Item:
     def to_dict(self):
         d = self.alert.to_dict()
         d.update(state=self.state, read_at=self.read_at, closed_at=self.closed_at,
-                 note=self.note, actor=self.actor)
+                 note=self.note, actor=self.actor,
+                 gap_state=gap_state_of(self))
         return d
 
 

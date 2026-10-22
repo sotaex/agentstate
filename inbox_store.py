@@ -423,10 +423,23 @@ def set_state(item_id, dst, note="", actor="owner", now=None, level=None, root=N
     if dst == "read" and not ent.get("read_at"):
         ent["read_at"] = t
     if dst in M.CLOSED_STATES:
+        # ★ `closed_at` 从 2026-10-22 起有两个含义，按 `gap_state` 读：
+        #   done ⇒ "处置时刻"；ignored ⇒ "你说先不管的时刻"（`ack_expired` 用它算复核期）。
         ent["closed_at"] = t
         ent["note"] = note or ""
     else:
         ent.pop("closed_at", None)
+    # ---------------------------------------------------------------- 缺口态
+    # ★★ 40 格 · 人·判：`ignored` **不等于**修好了。
+    #   以前这里只写 state，于是"我决定先不管"与"已经好了"在账面上无法区分，
+    #   分档只能一刀切归档 ⇒ 未修的缺口从待办和计数里一起消失。
+    #   ⇒ 现在把两件事分开写：state 答"你知不知道"，gap_state 答"缺口还在不在"。
+    if dst == "done":
+        ent["gap_state"] = M.GAP_CLOSED
+    elif dst == "ignored":
+        ent["gap_state"] = M.GAP_ACKED
+    else:                                     # read / unread ＝ 重开
+        ent["gap_state"] = M.GAP_OPEN
     st[item_id] = ent
     save_state(st, root)
     return ent
@@ -514,7 +527,9 @@ def load_items(chain_files=None, root=None, kinds=None):
                               read_at=e.get("read_at") or "",
                               closed_at=e.get("closed_at") or "",
                               note=e.get("note") or "",
-                              actor=e.get("actor") or "owner"))
+                              actor=e.get("actor") or "owner",
+                              gap_state=(e.get("gap_state")
+                                         if e.get("gap_state") in M.GAP_STATES else "")))
     out.sort(key=lambda it: (it.ts, it.id), reverse=True)
     return out
 
