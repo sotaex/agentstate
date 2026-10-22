@@ -118,14 +118,23 @@ def _check_cause(cause):
 
 
 def _check_badge(badge):
+    """徽标键：只校**形状**，**不校枚举**。
+
+    ★ 为什么这里与 `cause` 处置不同（这不是疏忽，是分层）：
+      `cause` 的枚举是 `state_registry.STATES` 的封闭八成因键，有唯一权威；
+      而徽标键的权威在 `situation.BADGE_WORD`（当前 `dev` / `granary` / `disk`，
+      会随徽标种类增加而变）。§F8 只写「`badge`: [键…]」，**没说是哪一族的键** ——
+      在 sidecar 里写死一份枚举，就是给那张表造第二份真源。
+    ★ 实测代价（第一版踩的）：按八成因校验 ⇒ `situation.badges()` 一喂就抛
+      （dev/granary/disk 全不在八成因里）⇒ **接线即坏，而且坏在每一拍**。
+      合成值永远不会暴露它，只有拿真实生产者喂一次才会。
+    """
     if isinstance(badge, (str, bytes)):
         raise ValueError("badge 是数组，不是字符串（收到 %r）——单个也要包成 [x]" % (badge,))
-    keys = _cause_keys()
     out = []
     for k in badge:
-        if k not in keys:
-            raise ValueError("badge 里有不认得的成因键 %r（合法：%s）"
-                             % (k, "/".join(keys)))
+        if not isinstance(k, str) or not k.strip():
+            raise ValueError("badge 的元素必须是非空字符串，收到 %r" % (k,))
         out.append(k)
     return out
 
