@@ -2973,6 +2973,14 @@ def build(out_root, verify=False):
         if _ln.split()[1] not in _seen_dirs:
             _repo_lines.append(_ln)
             _seen_dirs.add(_ln.split()[1])
+    # ★ 0.55.3（2026-10-23）：退役件（`.away-<ts>`）按「减法留账」留在树里可查，
+    #   但**不进发布物**。实测：0.55.1 的 sdist 里有 17 份内部旧稿（独立复核报告、
+    #   旧版架构方案，未压缩 1,263 KB），0.55.2 仍有 4 份 —— 根因是 `.gitignore`
+    #   的 `*.away-*` 对**已被跟踪**的文件无效，而 `recursive-include docs *` 照收。
+    #   ★★ 这一行必须写在这里，不能手改 MANIFEST.in：那个文件是本段生成的，
+    #   装配时逐字节覆盖（第一版就是手改 ⇒ 装配日志打「旧 MANIFEST 规则已退役」，
+    #   修复等于没做）。规则只留一个源 —— 这一段。
+    _repo_lines.append("global-exclude *.away-*")
     _blob = "\n".join(_repo_lines) + "\n"
     (pkg / "MANIFEST.in").write_text(_blob, encoding="utf-8", newline="\n")
     if final.is_dir():
