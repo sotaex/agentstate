@@ -2541,24 +2541,48 @@ def log_event(rec, mirror=False):
         fn = os.path.join(d, datetime.now().strftime("%Y-%m-%d") + ".jsonl")
         # 0.19.1 (TN-09)：读 prev 与 append 必须在同一把锁内 —— 见 _append_chained。
         rec = _append_chained(fn, rec)
-        line = json.dumps(rec, ensure_ascii=False) + "\n"
-        # 0.28.0 (C-4): verify by PRESENCE among the last lines, not by "still
-        # the last line" -- a concurrent append right after ours used to read
-        # as a false loss. Windows text mode stores \r\n; compare normalized.
-        with open(fn, "rb") as f:
-            f.seek(max(0, os.path.getsize(fn) - 262144))
-            tail = f.read().decode("utf-8", errors="replace").replace("\r\n", "\n")
-        mine = line.rstrip("\n")
-        ok = False
-        for recent in [l for l in tail.split("\n") if l.strip()][-8:]:
-            if recent == mine:
+        # ★ 0.55.0 (BL-04)：回读校验**只认 hash 在场**，不再重算「期望的那一行」。
+        #   为什么（2026-10-23 实测：随包 harness 5–8 条红、装了包的用户跑
+        #   `python -m scripts.run_harness` 必 FAIL）：
+        #     `audit_chain.append_chained` 是在**写完之后**才往 rec 上补
+        #     `written` / `write_error` 的（元数据，刻意不进盘 —— 进了盘就进哈希，
+        #     链就不自洽）。旧实现拿返回的 rec 重新 `json.dumps` 当作「文件里
+        #     该有的那一行」⇒ 比盘上的行多两个键 ⇒ **永远不相等** ⇒ 每一条审计
+        #     都报 AUDIT_WRITE_FAILED（假警报），且 `_touch_day_manifest` 永不执行
+        #     ⇒ R-20 的「尾部删除检出」整条失效：**真能力缺失，而界面照绿**。
+        #   ★ 为什么用 hash 而不是「把元数据键剔掉再比」：剔键要在这层维护一份
+        #     「哪些字段算元数据」的名单，那份名单迟早与 audit_chain 漂开（本仓
+        #     第一顽症）；`hash` 是**写入前**就算好的、盘上那一行里必有，比对它
+        #     不受任何后加字段影响。
+        #   ★ 保留 0.28.0 (C-4) 的「在场」语义：不要求自己是最后一行（并发追加
+        #     会把它顶走），只在最后 8 行里找。
+        written = rec.get("written") or "none"
+        if written == "chain":
+            want = rec.get("hash") or ""
+            with open(fn, "rb") as f:
+                f.seek(max(0, os.path.getsize(fn) - 262144))
+                tail = f.read().decode("utf-8", errors="replace")
+            ok = False
+            for recent in [l for l in tail.replace("\r\n", "\n").split("\n")
+                           if l.strip()][-8:]:
                 try:
-                    ok = isinstance(json.loads(recent), dict)
+                    got = json.loads(recent)
                 except Exception:
-                    ok = False
-                break
-        if ok:
-            _touch_day_manifest(fn)
+                    continue
+                if want and isinstance(got, dict) and got.get("hash") == want:
+                    ok = True
+                    break
+            if ok:
+                _touch_day_manifest(fn)
+        elif written == "sidecar":
+            # 记录没丢，只是不在主链（锁预算耗尽／单文件被占单独一支落进 sidecar）。
+            # 算写成；但**不动**主文件的日锚 —— 日锚描述的是主链那一天的字节数
+            # 与末行 hash，拿旁路副本去更新它等于给主链盖一个假的"这天写到这"。
+            ok = True
+        else:
+            # "dropped"（按策略不落盘）／"none"（一个字节都没落：磁盘满、权限坏、
+            # 读不到 prev）。这两种都算丢 —— 这正是 BL-03 要区分开的那一半。
+            ok = False
     except Exception:
         ok = False
     if not ok:
