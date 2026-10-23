@@ -130,6 +130,30 @@ def extract():
     return out
 
 
+def _content_hash(rel, p):
+    """内容哈希 —— 必须用**产品那把尺子**，不许在本判据里另写一把。
+
+    ★★ 为什么（2026-10-23 实测）：`judgment.digests` 里存的不是裸 sha256。
+      `build_package._manifest_hash_of()` 对**版本承载件**先过
+      `norm_version_bytes()`（把版本号抹成占位符再算）。本函数此前用的是裸
+      `hashlib.sha256(p.read_bytes())` ⇒ 版本承载件两侧**天然不等** ⇒
+      **每改一次版本号，判据 5 就把一份新鲜判定读成「陈旧」**，报红
+      「拿旧判定当新代码的验证」。
+      当日实测 `hooks/pre_tool_use.py`：裸 93e52ee3…／归一 20922050…，
+      而 judgment 里记的正是归一值 —— 判据在拿两把尺子比。
+      ⇒ 一律调产品函数。（记忆里那条「判据必须调产品函数」的第三形态：
+      不是判据读错了对象，而是**判据自己造了第二个哈希口径**。）
+    """
+    try:
+        import build_package as _bp
+    except ImportError:  # 只在非仓内布局时兜底（正常路径走不到）
+        for cand in (PKG / "scripts", PKG):
+            if str(cand) not in sys.path:
+                sys.path.insert(0, str(cand))
+        import build_package as _bp
+    return _bp._manifest_hash_of(rel, str(p))
+
+
 def _judgment_covers(j):
     """judgment.digests 是否仍覆盖**当前**代码（内容哈希逐文件比）。
 
@@ -156,7 +180,7 @@ def _judgment_covers(j):
             stale.append(rel)
             continue
         try:
-            got = "sha256:" + hashlib.sha256(p.read_bytes()).hexdigest()
+            got = _content_hash(rel, p)
         except OSError:
             stale.append(rel)
             continue

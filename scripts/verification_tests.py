@@ -938,7 +938,11 @@ def main():
     h = (WORK / "r.html").read_text(encoding="utf-8")
     record("report html single-file (C-03)", rc == 0 and "<script" not in h and "#dc3545" in h and "AgentState" in h)
     rc, out, err, _ = run("report.py", ["--root", str(gen)])
-    record("report no data -> exit 1 (A-10)", rc == 1)
+    # ★ 0.55.1：原先断的是 `rc == 1`（「没有数据＝失败」）。企业第一天实测撞上：
+    #   刚装好、当天没有调用，敲 `antinel report` 拿到失败退出码。空态要说话，但不该报失败。
+    #   本判据改断「退出码 0 ＋ 有话说」，仍能红：若哪天退回「静默返回 0」，stdout 为空即红。
+    record("report no data -> exit 0 with a sentence (A-10)",
+           rc == 0 and bool(out.strip()), "rc=%s out=%r" % (rc, out.strip()[:40]))
     old = proj / ".psl" / "audit" / "2026-01-01.jsonl"
     old.write_text('{"type":"pre_tool_use","tool":"Bash","rules_hit":[],"decision":"allow"}\n', encoding="utf-8")
     rc, out, err, _ = run("report.py", ["--root", str(proj), "--archive", "--format", "json"])
@@ -963,8 +967,29 @@ def main():
         record("US-05 sarif 2.1.0 export", False, str(e)[:80])
     rc, out, err, _ = run("report.py", ["--root", str(proj), "--days", "1", "--format", "json"])
     rep1 = json.loads(out) if rc == 0 else {}
-    rc2, out2, err2, _ = run("report.py", ["--root", str(proj), "--since", "2099-01-01"])
-    record("F-04 period filter (--days 1 ok, --since future -> exit 1)", rc == 0 and rep1.get("period", {}).get("days") == 1 and rep1["stats"]["pre"] > 0 and rc2 == 1)
+    rc2, out2, err2, _ = run("report.py", ["--root", str(proj), "--since", "2099-01-01", "--format", "json"])
+    # ★ 0.55.1：这里原先断的是 `rc2 == 1` —— 把「空窗口＝失败」钉成了判据。
+    #   企业第一天实测撞上：新装、当天还没有调用，任何窗口查询都拿失败退出码。
+    #   本判据的**意图**是「period 过滤生效」，那就该断「筛掉之后计数为零」，
+    #   而不是断退出码。若过滤失效（未来事件混进来），pre 会 > 0 ⇒ 照样红。
+    try:
+        rep2 = json.loads(out2)
+    except Exception:
+        rep2 = {}
+    record("F-04 period filter (--days 1 ok；--since 未来＝空窗口：退出码 0 ＋ 计数为零 ＋ empty)",
+           rc == 0 and rep1.get("period", {}).get("days") == 1 and rep1["stats"]["pre"] > 0
+           and rc2 == 0 and rep2.get("empty") is True
+           and (rep2.get("stats") or {}).get("pre") == 0,
+           "rc2=%s empty=%r pre=%s" % (rc2, rep2.get("empty"), (rep2.get("stats") or {}).get("pre")))
+    # 0.55.1：`antinel report` 的**默认路径**（不传 --days ⇒ 走会话）在空项目里必须退出码 0。
+    #   为什么要这条：人与 Agent 敲的就是 `antinel report`，而空态判定在 report.py 里有**两处**
+    #   （会话路径 / 按天路径）。只修一处，最常见的那一处不生效。
+    _ep = WORK / "rep-empty-session"
+    (_ep / ".psl" / "audit").mkdir(parents=True, exist_ok=True)
+    rcE, outE, errE, _ = run("report.py", ["--root", str(_ep)])
+    record("0.55.1 空项目 report（默认走会话）：退出码 0 ＋ 话说在 stdout",
+           rcE == 0 and bool(outE.strip()),
+           "rc=%s out=%r err=%r" % (rcE, outE.strip()[:40], errE.strip()[:40]))
     fut = proj / ".psl" / "audit" / ((datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d") + ".jsonl")
     fut.write_text(json.dumps({"ts": (datetime.now() + timedelta(days=1)).isoformat(timespec="seconds"),
                                "type": "pre_tool_use", "tool": "Bash", "session": "c6-future",
@@ -1695,6 +1720,17 @@ def main():
     rc, out, err, _ = run("verify_chain.py", [str(proj / ".psl" / "audit")])
     record("0.18.0 R-20 deleting the WHOLE day file is detected (manifest-driven)",
            rc == 2 and "MISSING" in out, out.strip()[-110:])
+
+    # ★ 0.55.1（2026-10-23，企业首日实测）：空链有两个形状 —— 「一个文件都没有」
+    #   与「有文件但零记录」。后者一直 rc=4 并写明「查不到 ≠ 查出来是好的」，
+    #   前者却 rc=1，而 1 在码表里是「有无法解释的差异」⇒ 新装企业的第一条
+    #   `antinel verify` 被读成「校验不通过」。本判据钉住两形状同码。
+    #   负控＝上面那条 rc==0（真干净的链）、下面那条 rc==2（真篡改），空链不该落到它们。
+    _vc_empty = WORK / "vc-empty-chain"
+    _vc_empty.mkdir(parents=True, exist_ok=True)
+    rcV, outV, errV, _ = run("verify_chain.py", [str(_vc_empty)])
+    record("0.55.1 空链两次出现同码：无文件 ＝ 零记录 ＝ rc=4（不是 1、也不是 0）",
+           rcV == 4 and "NO RECORDS" in outV, "rc=%s out=%r" % (rcV, outV.strip()[:60]))
 
     # R-21: ledger dry-run -- idempotency without side effects (pkg layout only).
     if (PKG / "psl" / "judgment.json").is_file():

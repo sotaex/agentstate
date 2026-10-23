@@ -711,7 +711,12 @@ def j_docstring_paths_exist():
     ★★ 2026-10-15 修一处**量具假红**（假红不是缺陷、是盲区）：原扩展交替表
       缺 `jsonl` 且无结尾边界 ⇒ 把 `.jsonl` 后缀截成 `.json` 去查存在性 ⇒
       对写着正确 jsonl 路径的 docstring 报「不存在」。修法：扩展表补 `jsonl`
-      （放在 `json` 前，长配优先）＋ 结尾负向预查 `(?![\w./-])`。
+      （放在 `json` 前，长配优先）＋ 结尾负向预查 `(?![\\w./-])`。
+      ★ 2026-10-23：本行原先写的是单反斜杠 —— 非 raw docstring 里的反斜杠加 w
+        是 invalid escape，Python 每编译一次就吐一条 SyntaxWarning，而这段
+        语料会被 6 套以上的兄弟守卫 exec 到 ⇒ 闸门输出里那条
+        `<unknown>:714: invalid escape sequence` 就是它。写成双反斜杠
+        在文档里仍显示为单反斜杠加 w，警告消失（判据语义不变）。
     """
     pat = re.compile(r"(?:ci|scripts|tools|hooks|_tools_\d+)/[\w./-]+\.(?:jsonl|json|py|md|ps1|yml)(?![\w./-])")
     bad = []
@@ -1250,6 +1255,108 @@ def j_freeze_zones_intact():
                   " ＋ %s ＋ %s ＋ %s ＋ 退休通道合成夹具三腿）%s"
                   % (n_frozen, len(cands), "/".join(cands) or "无",
                      lamp_note, bd_note, rb_note, tail))
+
+
+def j_audit_readback_same_source():
+    """★★★ D-39（2026-10-23，BL-04）：审计回读校验必须与**盘上那一行**同源。
+
+    实测缺陷（0.55.0 出包后由随包 harness 撞出，5–8 条断言红且条数每次不同）：
+      `audit_chain.append_chained` 是在**写完之后**才往 rec 上补两个元数据键
+      （`written` / `write_error` —— 刻意不进盘：进了盘就进哈希，链就不自洽）。
+      而 `pre_tool_use.log_event` 拿返回的 rec 重新 `json.dumps` 当作
+      「文件里该有的那一行」⇒ 比盘上的行多两个键 ⇒ **永远不相等**。
+      净效果三条：① 每一条审计都报 `AUDIT_WRITE_FAILED`（假警报）；
+      ② `_touch_day_manifest` 永不执行 ⇒ **R-20 的尾部删除检出整条失效**；
+      ③ 界面全绿。安全产品最坏的失效形态是"报成功"，这是它的近亲 ——
+      报的是失败，但**该做的事没做**，而且报得太频繁以至于没人在看它。
+
+    ★ 为什么闸门里原来一条都没有：34 套判据**没有一套 import 到这条写链**
+      （只有随包 harness 的 P-A5 守它，而闸门不跑 harness）⇒ 全绿是假绿。
+      这正是闸门自己在"改动文件不在任何判据的 import 图里"那行提示里说的形态。
+
+    判据（三条，行为级；不读源码字面、不比对实现的字段名）：
+      ① 正控：干净目录写一条 ⇒ 返回 True ＋ 日锚文件出现（少了日锚 = R-20 死）；
+      ② **复发负控**：给返回的 rec 额外注入一个未知键 ⇒ 仍须 True。
+         旧实现在这里必红 —— 它证明"回读判定不依赖 rec 的字段集合"，
+         而不是"某几个键被特判剔掉了"；
+      ③ 真丢负控：`written = "none"`（一个字节都没落）⇒ **必须 False**。
+         防"修成恒真"——那比原缺陷更坏（真丢会静默）。
+    """
+    import io as _io
+    from contextlib import redirect_stderr
+
+    hook = PKG / "hooks" / "pre_tool_use.py"
+    if not hook.is_file():
+        return None                      # 产物仓没有这个 hook ⇒ 不可判（不是通过）
+    spec = importlib.util.spec_from_file_location("_bl04_hook", str(hook))
+    mod = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)
+    except Exception as e:                # noqa: BLE001
+        return None, "加载 hook 失败（%s）—— 不可判" % type(e).__name__
+    orig_append = mod._append_chained
+    cwd0 = os.getcwd()
+    quiet = _io.StringIO()                # ③ 会真打印 AUDIT_WRITE_FAILED，别污染闸门输出
+    try:
+        # ---- ① 正控 ----
+        t1 = _TMP.tmpdir(prefix="bl04_ok_")
+        os.chdir(t1)
+        with redirect_stderr(quiet):
+            ok1 = mod.log_event({"type": "bl04", "leg": 1})
+        anchor = os.path.isfile(os.path.join(
+            t1, ".psl", "audit", "day_manifest.json"))
+        if not ok1:
+            return False, ("① 正常写入被判失败 —— AUDIT_WRITE_FAILED 假警报回来了"
+                           "（回读比对与盘上那一行不同源）")
+        if not anchor:
+            return False, ("① 写成功但日锚未生成 ⇒ R-20 尾部删除检出失效"
+                           "（`_touch_day_manifest` 没被调到）")
+
+        # ---- ② 复发负控：元数据键不得影响回读判定 ----
+        t2 = _TMP.tmpdir(prefix="bl04_noise_")
+        os.chdir(t2)
+
+        def _noisy(fn, rec):
+            r = dict(orig_append(fn, rec))
+            r["zz_bl04_unknown"] = "x"    # 模拟"以后又给 rec 加了一个字段"
+            return r
+
+        mod._append_chained = _noisy
+        try:
+            with redirect_stderr(quiet):
+                ok2 = mod.log_event({"type": "bl04", "leg": 2})
+        finally:
+            mod._append_chained = orig_append
+        if not ok2:
+            return False, ("② 给记录加一个未知字段就让回读判失败 ⇒ 回读仍与 "
+                           "rec 的字段集合同源（BL-04 复发形态）")
+
+        # ---- ③ 真丢负控 ----
+        t3 = _TMP.tmpdir(prefix="bl04_lost_")
+        os.chdir(t3)
+
+        def _lost(fn, rec):
+            r = dict(orig_append(fn, rec))
+            r["written"] = "none"
+            return r
+
+        mod._append_chained = _lost
+        try:
+            with redirect_stderr(quiet):
+                ok3 = mod.log_event({"type": "bl04", "leg": 3})
+        finally:
+            mod._append_chained = orig_append
+        if ok3:
+            return False, ("③ 一个字节都没落却判成功 ⇒ 修成了恒真"
+                           "（比原缺陷更坏：真丢会静默）")
+        return True, ("三段都成立：写成功判真 ＋ 未知字段仍判真 ＋ 写丢了必判假"
+                      "（回读只认盘上那条记录的 hash，不认 rec 的字段集合）")
+    finally:
+        mod._append_chained = orig_append
+        try:
+            os.chdir(cwd0)
+        except Exception:                 # noqa: BLE001
+            pass
 
 
 def j_window_title_format():
@@ -3538,6 +3645,9 @@ def _checks(m):
         # ── 2026-10-16 冻结区（创始人提议：AI 不得擅动已定型代码）──
         ("D-38 冻结区完整：frozen 条目契约未被擅改（触碰即红）",
          j_freeze_zones_intact),
+        # ── 2026-10-23 BL-04：审计写链的回读校验（此前 34 套无一覆盖）──
+        ("D-39 审计回读与盘上那一行同源（假警报 ＋ R-20 日锚失效）",
+         j_audit_readback_same_source),
     ]
 
 

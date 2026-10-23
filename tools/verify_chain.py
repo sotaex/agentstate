@@ -172,9 +172,16 @@ def main():
         except Exception:
             manifest = {}
     if not files and not manifest:
-        msg = "no audit files under " + target
-        print(msg)
-        return 1
+        # ★ 0.55.1（2026-10-23，企业首日实测）：空链有两个形状 ——
+        #   ① 一个文件都没有（这里，早退）② 有文件但零条记录（下方 NO RECORDS）。
+        #   ② 一直老老实实返回 4 并写明「查不到 ≠ 查出来是好的」，
+        #   而 ① 此前 return 1 —— 而 1 在本工具的码表里是「有无法解释的差异」。
+        #   ⇒ 新装企业第一条 `antinel verify` 拿到 rc=1，被读成「校验不通过／被篡改」。
+        #   现在两个形状同码同话。
+        print("no audit files under " + target)
+        print("verdict: NO RECORDS —— 这条链里 0 条记录，**没有可验的东西**（这不是 clean）")
+        print("⇒ rc=4 (nothing to verify：查不到 ≠ 查出来是好的)")
+        return 4
 
     days = sorted(set(list(manifest.keys()) + [os.path.basename(f) for f in files]))
     current_day = days[-1] if days else None

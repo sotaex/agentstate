@@ -36,7 +36,7 @@ if _HERE not in sys.path:
 
 from strings import detect_lang, get_string
 
-VERSION = "0.55.0"
+VERSION = "0.55.1"
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
@@ -3390,6 +3390,19 @@ def cmd_host_scan(args):
     #   取法用 getattr 兜底：别的调用方（如 ui_server）可能传不带 deep 的命名空间。
     deep = bool(getattr(args, "deep", False))
 
+    # ★ 0.55.1（2026-10-23，企业首日实测）：本命令**扫完才一次性出结果**，
+    #   而企业机器上这一趟要几分钟到十几分钟。实测一处问题：
+    #     试用第一天按 host-audit 的提示跑 `antinel host-scan`，屏幕上十分钟
+    #     一个字都不出 ⇒ 人判定「卡死」、IT 直接杀进程，然后写进评估报告。
+    #   改法只加**进度**，不动任何判定与口径（报告仍在 stdout，进度走 stderr，
+    #   脚本读 stdout 不受影响）。
+    import time as _time
+    _t_scan0 = _time.time()
+    sys.stderr.write(
+        "正在扫描：~ ／ %APPDATA% ／ %LOCALAPPDATA%（只读）。\n"
+        "  这一趟可能要几分钟：每看一个落点报一行，全部看完才出报告。\n")
+    sys.stderr.flush()
+
     rows, seen = [], set()
     for label, base in _scan_roots():
         if not base or not os.path.isdir(base):
@@ -3415,6 +3428,8 @@ def cmd_host_scan(args):
                              "excl": ex, "ev": [], "size": 0, "files": 0,
                              "trunc": False, "src": "目录名", "mt": ""})
                 continue
+            sys.stderr.write("  · 正在看 %-24s %s\n" % (name, label))
+            sys.stderr.flush()
             size, nf, trunc_s = _scan_size(p, deep=deep)
             ev, trunc_e, detail = _scan_evidence(p, with_detail=True)
             tier = "T1" if (ev and name.lower().lstrip(".") in t1_hosts) else (
@@ -3513,6 +3528,8 @@ def cmd_host_scan(args):
     _win = {k.lower(): v for k, v in (_st.get("windows") or {}).items()}
 
     print("== Antinel 体检：扫你电脑上的 AI 工具（只读）")
+    sys.stderr.write("  · 扫描完成，用时 %.1f 秒，下面出报告。\n" % (_time.time() - _t_scan0))
+    sys.stderr.flush()
     print("扫描根：~ ／ %APPDATA% ／ %LOCALAPPDATA%")
     print("生成时刻：%s" % datetime.now().astimezone().isoformat(timespec="seconds"))
     print("判据：工具自己写下的外传自认（不看目录名——目录名启发式误报率约 85%）")
@@ -3636,6 +3653,11 @@ def cmd_host_scan(args):
     #   判据：观察项陈述事实；把"有 10 个内存镜像"说成"被偷了"就是自我安慰的反面
     #   —— 那是吓人，同样是不可信的检查器。
     obs_roots = [r["path"] for r in rows]
+    # ★ 0.55.1：观察项是**第二段慢活**（云盘同步／IM 库／索引／崩溃转储都是大目录），
+    #   没有这一行的话，前面 50 多行进度走完之后又会静默几分钟。
+    sys.stderr.write("  · 已看完 %d 个落点，正在看观察项（云盘同步／IM 库／索引／崩溃转储）…\n"
+                     % len(rows))
+    sys.stderr.flush()
     residue = _residue_obs(obs_roots)
     crash_dirs = [p for (p, lbl, _n, _t, _tr) in residue if "崩溃上报" in lbl]
     dumps = _crash_dump_obs(crash_dirs)

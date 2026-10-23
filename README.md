@@ -93,6 +93,8 @@ python -m scripts.install --root <项目根>   # 不一致时重跑安装，自�
 
 `antinel install --check` 的退出码：`0`＝一致 / `1`＝未安装 / `3`＝有漂移。
 `python -m scripts.scan` 的退出码：`0`＝扫描完成（**有发现也是 0**，发现数看报告或 `--json`）。
+`antinel report` 的退出码：`0`＝报告已产出（**这一窗口里没有任何事件也是 0**，报告里 `empty: true`、各计数为零）/ `2`＝参数或读取错误。空态不是错误——刚装好、当天还没有调用时，第一条查询照样给你一份结构完整的零值报告。
+`antinel verify`（**链**校验）的退出码：`0`＝干净 / `2`＝有无法解释的差异 / `3`＝差异已解释 / `4`＝**没有可验的东西**（空链）。`4` 不是通过：查不到 ≠ 查出来是好的。它和 `antinel_verify`（**文件哈希**校验，0＝current / 1＝superseded / 2＝无法校验）是两套码，别混读。
 
 ## 信任 / Trust (don't trust us - verify)
 

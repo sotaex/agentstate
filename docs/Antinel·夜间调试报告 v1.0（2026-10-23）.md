@@ -467,3 +467,96 @@ rc=0
 `N-L1`（无头与错标都必须红）改后仍绿。
 
 
+
+---
+
+## §10 交付审计（2026-10-23 09:40–12:00）：0.55.0 **当时不能发布**，一条 P0 已修
+
+### 10.1 一句话
+
+| 问题 | 结论 |
+|---|---|
+| 代码层（灯、账、闸门） | **可以交付**：灯绿、496 条旧账结清、34 套闸门全绿 |
+| 产物层 | **不可以**：`dist/` 里那两个件是 **03:38** 的，早于 `c16f094`（B 接线）⇒ 少了整条"恢复即结案" |
+| 随包自证（harness 315 条） | **当时不通过（307–310/315）**，根因是一条 P0 回归，**已修**，现 **315/315 PASS** |
+| 上传 PyPI | 产物齐备后**只差凭证**：本机没有 `~/.pypirc`、没有 `TWINE_PASSWORD`、没有 keyring |
+
+### 10.2 P0：审计回读校验与「盘上那一行」不同源（BL-04）
+
+**症状**（随包 harness，三次跑分别 308／310／307 条通过，条数每次不同）：
+
+```
+[Antinel] AUDIT_WRITE_FAILED: this event's audit record could not be
+written/read back; the action proceeded (fail-open).
+```
+
+**复现**（一行探针，100% 稳定）：临时目录里 `log_event({"type": "p3"})`
+⇒ 返回 `False`，**而文件其实写成功了**。
+
+**根因**：`audit_chain.append_chained` 在**写完之后**才往 `rec` 上补两个元数据键
+（`written` / `write_error`，刻意不进盘 —— 进了盘就进哈希，链就不自洽）。
+而 `pre_tool_use.log_event` 拿返回的 `rec` 重新 `json.dumps` 当作
+「文件里该有的那一行」⇒ 比盘上的行多两个键 ⇒ **永远不相等**：
+
+```
+期望行  {..., "hash": "0d5cc5cf…", "written": "chain"}
+盘上行  {..., "hash": "0d5cc5cf…"}
+```
+
+**净效果三条**（第 ② 条最严重）：
+
+1. 每一条审计都报 `AUDIT_WRITE_FAILED` —— 假警报，频繁到没人再看它；
+2. `_touch_day_manifest` **永不执行** ⇒ R-20 的「尾部删除检出」整条失效
+   —— 删掉一天里最后几条记录，`antinel verify` 会报 `0 anomalies`；
+3. `fail_closed_on_audit_loss = true` 的用户（正是最在意审计完整性的那批）
+   **每一次工具调用都会被拦死**。
+
+**为什么 34 套闸门没抓到**：没有任何一套判据 import 到这条写链。
+闸门自己在输出里已经说了这个形态 ——「改动文件不在任何判据的 import 图里，
+**这不是「不需要复验」，而是判据没覆盖它**」。
+
+**修法**（`hooks/pre_tool_use.py`）：回读校验改成**只认 `hash` 在场**，
+并按 `written` 四态分流（`chain` 验主链回读 ＋ 更新日锚；`sidecar` 算写成但不碰主链日锚；
+`dropped`/`none` 算丢）。**不用「剔掉元数据键再比」**：那要在这层维护一份
+「哪些字段算元数据」的名单，名单迟早与 `audit_chain` 漂开（本仓第一顽症）。
+`hash` 是写入前就算好的、盘上那一行必有，比对它免疫任何后加字段。
+
+**新增判据 `D-39`（`ci/regression_gate.py`）**，三段，行为级：
+
+- ① 正控：干净目录写一条 ⇒ 返回 True **且**日锚文件出现；
+- ② **复发负控**：给返回的 `rec` 注入一个未知键 ⇒ 仍须 True
+  （旧实现必红 —— 它证明"回读不依赖 rec 的字段集合"，而不是"某几个键被特判剔掉了"）；
+- ③ 真丢负控：`written = "none"` ⇒ **必须 False**（防修成恒真，那比原缺陷更坏）。
+
+### 10.3 顺带：`dist/` 陈旧这件事，只有把包拆开看才会发现
+
+`dist/antinel-0.55.0-py3-none-any.whl` 与 `.tar.gz` 里
+`close_recovered` / `_reconcile_once` / `recovery_evidence` **三个都是 False**。
+文件名与版本号都对，**只有内容比源码旧**。⇒ 上架前必须重出包，且以后
+「版本号对得上」不能当作「产物是新的」的证据。
+
+### 10.4 我这个审核者自己踩的坑（写下来，免得下次再踩）
+
+拿裸 `sha256` 比对 `psl/manifest.json`，得到 `hooks/pre_tool_use.py` 不符 ⇒
+差点报成一个"清单不一致"的缺陷。**假警报**：版本承载件的哈希过
+`norm_version_bytes`（把版本号抹平成占位符再算）。
+用产品自己的 `python -m tools.antinel_verify --manifest` ⇒ **143 个文件全 OK**。
+**判据必须调产品函数，不许自己另写一把尺子。**
+
+### 10.5 不阻断 PyPI、但发布前该知道的三件
+
+1. `server.json` 的 `websiteUrl` = `https://antinel.com/agentstate/` **实测 404**
+   （首页 200、`/agentstate/limits/` 200）。这条只影响 MCP 注册表，不影响 PyPI
+   （PyPI 那 5 个链接实测全 200）。
+2. `server.json` 写 `"license": "MIT"`，而 `pyproject.toml` 是
+   Apache-2.0 主体 ＋ MIT 引流件（`challenge/` 等）。两处对外声明不同，需裁决。
+3. `psl/judgment.json` 的旧口径：`build_package` 跑 `--verify` 时，
+   `REC_J_CURRENT` 会拿**上一次**的 digest 集去验 —— 所以「改了源码之后第一次跑 harness」
+   必红两条（`antinel_verify derives current` ＋ `P-B1 …out of scope`），
+   **第二次才准**。这不是缺陷，是基线重建；但别把它读成"修了又坏了"。
+
+### 10.6 复核用的一条命令
+
+```bash
+python -m scripts.run_harness     # 315 条，本轮 PASS 315/315（rc=0，19m26s）
+```

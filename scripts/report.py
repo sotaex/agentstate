@@ -681,8 +681,15 @@ def _session_dna_main(args, root, log_path):
         sd0 = sd
         latest = sd0.find_latest_session(audit_dir)
         if not latest:
-            sys.stderr.write("审计里还没有真实会话（心跳与 CLI 不算）\n")
-            return 1
+            # ★ 0.55.1（2026-10-23，企业首日实测）：这是 `antinel report` 的
+            #   **默认路径**（不传 --days 就走会话；而人敲的就是 `antinel report`）。
+            #   旧版在这里 return 1 ⇒ 新装企业第一天拿到失败退出码，被读成「查询失败」。
+            #   与 --days 路径同口径：空态不是错，照实说，退出码 0。
+            sys.stdout.write(
+                "这个项目还没有可统计的会话（心跳与 CLI 不算）。\n"
+                "这表示这一窗口里没有东西可算，不是「一切正常」的结论。\n"
+                "装好钩子之后，下一次 Agent 调用就会被记进来。\n")
+            return 0
         session_q = latest
     # 0.23.0 (A3/A4): pricing lookup -- project rules first, then the package's
     # own rules/. Missing table => facts-only DNA (no cost_estimate block).
@@ -842,12 +849,19 @@ def main(argv=None):
         events, files = load_events(log_path, since)
         scan = None if (args.no_scan or since) else load_json(root / ".psl" / "scan_last.json")
         manifest = load_json(root / ".psl" / "manifest.json")
-        if not events and not scan:
-            sys.stderr.write("no audit events found under %s%s\n" % (
-                log_path, (" since " + since) if since else ""))
-            return 1
+        # 0.55.1：空态不是错。旧版在这里 return 1，于是「刚装好、当天还没有
+        #   任何调用」的人跑第一条查询，拿到的是退出码 1 —— 把「还没有东西可看」
+        #   报成了「查询失败」。现在仍走同一条产出路径（零值报告，结构与有数据时
+        #   一致），退出码 0，并在报告里标 empty，让机器读者能区分「零」与「坏」。
+        empty = not events and not scan
+        if empty:
+            sys.stderr.write("no audit events under %s%s — empty window, "
+                             "reporting zeros\n" % (
+                                 log_path, (" since " + since) if since else ""))
         rep = build_report(events, scan, manifest, root=root)
         rep["period"] = {"since": since, "days": args.days}
+        if empty:
+            rep["empty"] = True
         label = str(log_path) if len(files) != 1 else files[0]
         if args.format == "json":
             out = json.dumps(rep, ensure_ascii=False, indent=1)
