@@ -849,7 +849,7 @@ def _batch(args):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="AgentState installer")
+    ap = argparse.ArgumentParser(description="Antinel installer")
     ap.add_argument("--root", default=os.getcwd(), help="project root (default: cwd)")
     ap.add_argument("--host", choices=["claude-code", "zcode", "qoder", "generic"],
                     help="force host type (TEST ONLY; refused when it contradicts detected markers unless --force)")

@@ -36,7 +36,7 @@ if _HERE not in sys.path:
 
 from strings import detect_lang, get_string
 
-VERSION = "0.55.2"
+VERSION = "0.55.3"
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
@@ -1637,14 +1637,25 @@ def cmd_hub(args):
 
 
 # ------------------------------------------------------------ help ----
-HELP_HOSTLINE = "AgentState v%s ｜ 宿主: %s（记账方式: %s）"
+# ★ 0.55.3（2026-10-23）：这里原来是一个 `HELP_HOSTLINE` 常量，而 strings.py 的
+#   `help_header` 里存着同一条文案的 11 个语言版本、却**没有任何使用点** ——
+#   改 strings 那边等于没改（实测：11 语言全改成 Antinel 之后，`antinel help`
+#   首行仍打 AgentState；切 `ANTINEL_LANG=en` 也仍打中文）。
+#   品牌名只留一个源：strings.help_header。
+def _help_hostline(version, host, unit):
+    try:
+        import strings as _st
+        return _st.get_string(_st.detect_lang(), "help_header",
+                              V=version, H=host, U=unit)
+    except Exception:
+        return "Antinel 监理 v%s ｜ 宿主: %s（记账方式: %s）" % (version, host, unit)
 
 
 def cmd_help(_args=None):
     host = detect_host()
     prof = load_economics(host)
     _unit = prof.get("unit", "?")
-    print(HELP_HOSTLINE % (VERSION, host, _unit))
+    print(_help_hostline(VERSION, host, _unit))
     # 0.29.0（C-5/D3）：credits 子命令只在 unit=credits 的宿主存在（见本文件抬头 §经济画像）。
     # 此前 help 无条件把三条 `antinel credits …` 印出来，而 zcode/qoder/generic 的 unit 是
     # tokens、claude-code 是 USD ⇒ 印出来的命令一跑就 _die（cmd_credits 会拒绝）。
@@ -3931,7 +3942,7 @@ def _agent_state_json():
         steps.append({"do": "python -m scripts.scan --json", "why": "静态扫描，机器可读"})
         steps.append({"do": "antinel verify", "why": "审计链有没有被动过"})
     return {
-        "product": "AgentState (by Antinel)",
+        "product": "Antinel",
         "pypi_package": "antinel",
         "install_command": "pip install antinel",
         "package_version": VERSION,
@@ -3967,7 +3978,7 @@ def cmd_agent(args):
     if getattr(args, "json", False):
         print(json.dumps(d, ensure_ascii=False, indent=1))
         return 0
-    print("AgentState %s ｜ 宿主 %s ｜ 项目根 %s"
+    print("Antinel %s ｜ 宿主 %s ｜ 项目根 %s"
           % (d["package_version"], d["host_detected"], d["project_root"]))
     print("已装钩子：%s" % ("是" if d["installed"] else "否 —— 先跑 antinel install"))
     print("下一步：")

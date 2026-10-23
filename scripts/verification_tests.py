@@ -936,7 +936,7 @@ def main():
            and all(f["count"] >= 1 for f in rep["findings"]), "score=%d crit=%d warn=%d" % (rep["score"], rep["summary"]["critical"], rep["summary"]["warning"]))
     rc, out, err, _ = run("report.py", ["--root", str(proj), "--format", "html", "--out", str(WORK / "r.html")])
     h = (WORK / "r.html").read_text(encoding="utf-8")
-    record("report html single-file (C-03)", rc == 0 and "<script" not in h and "#dc3545" in h and "AgentState" in h)
+    record("report html single-file (C-03)", rc == 0 and "<script" not in h and "#dc3545" in h and "Antinel" in h)
     rc, out, err, _ = run("report.py", ["--root", str(gen)])
     # ★ 0.55.1：原先断的是 `rc == 1`（「没有数据＝失败」）。企业第一天实测撞上：
     #   刚装好、当天没有调用，敲 `antinel report` 拿到失败退出码。空态要说话，但不该报失败。
@@ -1002,6 +1002,48 @@ def main():
            rcS == 0 and repS.get("empty") is True and repS.get("score") is None
            and repS.get("grade") == "no_data",
            "rc=%s score=%r grade=%r" % (rcS, repS.get("score"), repS.get("grade")))
+    # ★ 0.55.3（2026-10-23）：同一个 score 字段有两种分母。有静态扫描、无 Agent 调用时，
+    #   分数只覆盖「文件里有没有已知的坏模式」，不覆盖运行期行为 —— 此时必须
+    #   basis=scan_only，且**不许说 secure**（实测：全新项目 events=0，README 教的
+    #   导出命令打出 score=100 / grade="secure"，企业接看板会把假安全写进自己的报表）。
+    _sp = WORK / "rep-scan-only"
+    (_sp / ".psl" / "audit").mkdir(parents=True, exist_ok=True)
+    (_sp / ".psl" / "scan_last.json").write_text(
+        json.dumps({"schema": "antinel-scan-v1",
+                    "generated_at": "2026-01-01T00:00:00+08:00", "root": str(_sp),
+                    "findings": [], "summary": {}, "score": 100,
+                    "grade": "A (secure)"}), encoding="utf-8")
+    rcB, outB, errB, _ = run("report.py", ["--root", str(_sp), "--format", "json"])
+    try:
+        repB = json.loads(outB)
+    except Exception:
+        repB = {}
+    record("0.55.3 只有静态扫描 ⇒ basis=scan_only 且 grade 不许是 secure",
+           rcB == 0 and repB.get("basis") == "scan_only"
+           and repB.get("grade") not in (None, "secure") and repB.get("score") is not None,
+           "rc=%s basis=%r grade=%r score=%r" % (
+               rcB, repB.get("basis"), repB.get("grade"), repB.get("score")))
+    # 负控（同一条判据的另一半）：把扫描结果拿走 ⇒ 必须退回「不出分」。
+    #   守的是「basis 是从数据派生的」而不是「给 100 分贴个标签」。
+    (_sp / ".psl" / "scan_last.json").rename(_sp / ".psl" / "scan_last.json.hidden")
+    rcC, outC, errC, _ = run("report.py", ["--root", str(_sp), "--format", "json"])
+    try:
+        repC = json.loads(outC)
+    except Exception:
+        repC = {}
+    record("0.55.3 负控：无扫描也无调用 ⇒ basis=none / score=None（不出分）",
+           rcC == 0 and repC.get("basis") == "none" and repC.get("score") is None
+           and repC.get("empty") is True,
+           "rc=%s basis=%r score=%r empty=%r" % (
+               rcC, repC.get("basis"), repC.get("score"), repC.get("empty")))
+    # ★ 0.55.3：品牌名只许一个。实测过：`antinel --version` 说 antinel、紧接着
+    #   `antinel help` 说 AgentState —— 因为 strings.help_header（11 语言）**没有使用点**，
+    #   真正打印的是 antinel.py 里的硬编码常量。改一处等于没改，所以这条判据测**真输出**。
+    rcH, outH, errH, _ = run("antinel.py", ["help"])
+    _first = (outH.splitlines() or [""])[0]
+    record("0.55.3 help 首行品牌是 Antinel（不是 AgentState，且多语言表真的接上了）",
+           rcH == 0 and "Antinel" in _first and "AgentState" not in outH,
+           "rc=%s first=%r" % (rcH, _first[:60]))
     fut = proj / ".psl" / "audit" / ((datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d") + ".jsonl")
     fut.write_text(json.dumps({"ts": (datetime.now() + timedelta(days=1)).isoformat(timespec="seconds"),
                                "type": "pre_tool_use", "tool": "Bash", "session": "c6-future",

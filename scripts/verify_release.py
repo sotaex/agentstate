@@ -87,7 +87,7 @@ def _py_with(module):
 
 
 def check_dist_layout(dist, version):
-    """A：dist 里正好两件本版发布件。"""
+    """A：dist 里正好两件本版发布件；sdist 里 0 份 `.away-*` 退役稿。"""
     print("[A] dist 布局（正好两件、都是本版）")
     if not os.path.isdir(dist):
         return _fail("dist 目录不存在：%s" % dist)
@@ -96,6 +96,19 @@ def check_dist_layout(dist, version):
     if names != want:
         return _fail("dist 内容 = %r（应正好是 %r）—— 混入旧版件或本版件缺失" % (names, want))
     print("  ✅ %s" % " ＋ ".join(names))
+    # ★ 0.55.3（2026-10-23）：sdist 里混进过 17 份 `.away-<ts>` 退役旧稿（0.55.1），
+    #   0.55.2 仍有 4 份。它们是内部迭代史（独立复核报告、旧版架构方案），
+    #   不该出现在对外发布物里。`.gitignore` 的 `*.away-*` 挡不住**已被跟踪**的
+    #   退役件 ⇒ 这道闸必须由发布验收来守，且必须能对任意 sdist 复核，
+    #   不依赖「这次构建恰好在仓外」。判据是结构性的：退役稿必须为 0 份。
+    tgz = os.path.join(dist, "antinel-%s.tar.gz" % version)
+    with tarfile.open(tgz) as _t:
+        retired = [m.name for m in _t.getmembers()
+                   if m.isfile() and ".away-" in os.path.basename(m.name)]
+    if retired:
+        return _fail("sdist 里有 %d 份退役稿（应为 0，MANIFEST.in 的 global-exclude 失效？）："
+                     "%s" % (len(retired), retired[:3]))
+    print("  ✅ sdist 无退役稿（.away-* = 0）")
     return True
 
 

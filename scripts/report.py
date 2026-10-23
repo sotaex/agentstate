@@ -121,8 +121,10 @@ MAX_AUDIT_BYTES = 100 * 1024 * 1024
 SEVERITY_WEIGHT = {"critical": 20, "warning": 5, "info": 0}
 BAR = "\u2501" * 34
 COLORS = {"critical": "#dc3545", "warning": "#ffc107", "ok": "#28a745", "neutral": "#6c757d"}
-FOOTER = ("本报告由 AgentState 生成。验证方式：安装 psl-watch 技能后运行 "
-          "python -m scripts.scan。")
+# ★ 0.55.3（2026-10-23）：原句是「安装 psl-watch 技能后运行 python -m scripts.scan」——
+#   `psl-watch` 在产品里**不存在**（全仓 grep 零命中），也就是说这条指引的前置条件
+#   是个死物；而正文尾行已经给过同一条命令。品牌同时从 AgentState 收回 Antinel。
+FOOTER = ("本报告由 Antinel 监理生成。复扫方式：python -m scripts.scan --root .")
 
 
 # --------------------------------------------------------------- loading ----
@@ -324,8 +326,20 @@ def build_report(events, scan, manifest, host_label="", root=None):
         summary[f["severity"]] = summary.get(f["severity"], 0) + 1
         score -= SEVERITY_WEIGHT.get(f["severity"], 0)
     score = max(0, min(100, score))
+    # ★ 0.55.3（2026-10-23，企业首日复核）：同一个 score 字段有两种分母。
+    #   没有 Agent 调用、只有 .psl/scan_last.json 时，这个分只覆盖「文件里有没有
+    #   已知模式」，不覆盖运行期行为 —— 此时说 secure 与「环境安全」都是假话
+    #   （实测：全新项目 events=0，`python -m scripts.report --format json`
+    #   打出 score=100 / grade="secure"）。三态，机器可读：
+    #     observed  = 有会话/调用事件，分数覆盖运行期
+    #     scan_only = 只有静态扫描，运行期未被观测
+    #     none      = 两者皆无（主流程会把 score 置 None、grade 置 no_data）
+    basis = "observed" if events else ("scan_only" if scan else "none")
     grade = ("secure" if score >= 90 else "needs attention" if score >= 70
              else "at risk" if score >= 50 else "unsafe")
+    if basis == "scan_only":
+        # secure 是「观测到没有问题」的断言；没有观测就没有这个资格。
+        grade = "scan_only"
     # 0.30.0 (E-3): enforcement status -- is the deny signal still honored?
     # Facts only, straight from the chain: synthetic probe results
     # (enforcement_probe), real-traffic gaps (enforcement_gap = a call the
@@ -358,6 +372,7 @@ def build_report(events, scan, manifest, host_label="", root=None):
         "summary": summary,
         "score": score,
         "grade": grade,
+        "basis": basis,
         "score_basis": {"base": 100, "critical_weight": 20, "warning_weight": 5,
                         "critical": summary.get("critical", 0), "warning": summary.get("warning", 0),
                         "raw": 100 - 20 * summary.get("critical", 0) - 5 * summary.get("warning", 0),
@@ -509,19 +524,34 @@ def render_text(rep, log_label):
         L += ["", BAR, " Security Score: %d/100 (%s)" % (rep["score"], rep["grade"]),
               " Score basis: 100 - 20 x %d critical - 5 x %d warning = %d (clamped to %d); dedupe on (rule, target)" % (
                   sb.get("critical", 0), sb.get("warning", 0), sb.get("raw", rep["score"]), rep["score"])]
+        if rep.get("basis") == "scan_only":
+            # ★ 0.55.3：分数在，但分母只有一半。不说这句，读者会把 100 分读成
+            #   「跑了一周没有风险行为」——那正是这一版要止住的误读。
+            L.append(" 依据：这一窗口没有 Agent 调用记录。这个分只来自静态扫描"
+                     "（.psl/scan_last.json），说的是「文件里没扫出已知的坏模式」，"
+                     "不是「运行期没有风险行为」。")
     nfind = len(rep["findings"])
     lang = _lang()
     if rep.get("empty"):
         L.append(" 结论：这一窗口没有可统计的记录 —— 既不能说安全，也不能说不安全。"
                  "装好钩子之后，下一次 Agent 调用就会被记进来。")
     elif lang == "zh":
-        if nfind:
+        if rep.get("basis") == "scan_only":
+            # ★ 0.55.3：这行原来是「观察期内未发现风险行为，环境安全」—— 同一句假话的
+            #   第二处实现（第一处是 score 行）。只改分数不改这句，等于没改。
+            L.append(" 结论：静态扫描未发现问题；运行期行为尚未被观测，"
+                     "所以这里不下「环境安全」的结论。"
+                     "装好钩子之后，下一次 Agent 调用就会被记进来。")
+        elif nfind:
             L.append(" 结论：发现 %d 项问题（CRITICAL %d / WARNING %d），建议优先处理 CRITICAL 项；完整轨迹见审计日志。" % (
                 nfind, rep["summary"].get("critical", 0), rep["summary"].get("warning", 0)))
         else:
             L.append(" 结论：观察期内未发现风险行为，环境安全。")
     else:
-        if nfind:
+        if rep.get("basis") == "scan_only":
+            L.append(" Conclusion: static scan found nothing; runtime behaviour was NOT observed, "
+                     "so this is not a statement that the environment is safe.")
+        elif nfind:
             L.append(" Conclusion: %d finding(s) found (CRITICAL %d / WARNING %d). Address CRITICAL items first." % (
                 nfind, rep["summary"].get("critical", 0), rep["summary"].get("warning", 0)))
         else:
@@ -570,8 +600,10 @@ def render_sarif(rep):
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
         "runs": [{
-            "tool": {"driver": {"name": "AgentState", "version": TOOL_VERSION,
-                                "informationUri": "https://github.com/antinel/security-suite",
+            "tool": {"driver": {"name": "Antinel", "version": TOOL_VERSION,
+                                # ★ 0.55.3：原值 github.com/antinel/security-suite 实测
+                                #   HTTP 404 —— 灌进 GitHub Code Scanning 后工具链接是死链。
+                                "informationUri": "https://antinel.com/",
                                 "rules": list(rules.values())}},
             "results": results,
             "properties": {"score": rep["score"], "grade": rep["grade"], "host": rep["host"],
@@ -602,6 +634,11 @@ def render_html(rep, log_label):
     if rep.get("score") is None:
         score_color = COLORS["neutral"]
         score_txt = "&mdash;"
+    elif rep.get("basis") == "scan_only":
+        # ★ 0.55.3：分数只来自静态扫描 ⇒ 不上绿色。「绿 + 100/100」是这一版之前
+        #   企业截图里最容易误读的一张图。中性色 + grade=scan_only 说清证据等级。
+        score_color = COLORS["neutral"]
+        score_txt = "%d/100" % rep["score"]
     else:
         score_color = COLORS["ok"] if rep["score"] >= 90 else (
             COLORS["warning"] if rep["score"] >= 70 else COLORS["critical"])

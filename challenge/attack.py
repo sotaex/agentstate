@@ -54,7 +54,7 @@ def pick_line(lines, prompt="选行号"):
 def main():
     fn, lines = load_chain()
     print("=" * 56)
-    print("  AgentState 篡改挑战 · 攻击台")
+    print("  Antinel 篡改挑战 · 攻击台")
     print("=" * 56)
     while True:
         show(lines)

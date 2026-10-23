@@ -2,7 +2,7 @@
 
 # 篡改挑战 · Try to fool the auditor
 
-> **这是一条真实的 AgentState 审计链：14 条记录，其中 3 条是当场拦截的危险操作。**
+> **这是一条真实的 Antinel 审计链：14 条记录，其中 3 条是当场拦截的危险操作。**
 > 规则很简单——**想怎么改就怎么改，骗过验证器，就算你赢。**
 
 ## 开始攻击（一条命令，攻击台全程中文引导）
@@ -40,7 +40,7 @@ python attack.py
 
 ## 这条链怎么来的
 
-`generate_challenge.py` 在一次性沙箱里用**真实的 AgentState 钩子**跑了 7 个事件
+`generate_challenge.py` 在一次性沙箱里用**真实的 Antinel 钩子**跑了 7 个事件
 （含 `rm -rf`、读 SSH 私钥、读带提示注入的 SKILL.md——3 个被当场拦截）。
 不是示例数据，是真实运行的产物。
 
@@ -51,4 +51,4 @@ python attack.py
 
 ---
 
-*AgentState —— 你的 Agent 昨晚干了什么、花了多少、拦了什么。本地运行，零上云，逐条可复算。*
+*Antinel —— 你的 Agent 昨晚干了什么、花了多少、拦了什么。本地运行，零上云，逐条可复算。*

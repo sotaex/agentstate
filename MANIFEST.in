@@ -5,3 +5,9 @@ recursive-include docs *
 recursive-include references *
 recursive-include challenge *.py *.md
 recursive-include demo *.py *.txt
+
+# ★ 0.55.3（2026-10-23）：退役件按「减法留账」留在树里可查，但**不进发布物**。
+#   实测：0.55.1 的 sdist 里混着 17 份 `.away-<ts>` 旧稿（含内部复核报告、旧版
+#   架构方案），0.55.2 仍有 4 份 —— 因为 `.gitignore` 的 `*.away-*` 对**已被
+#   跟踪**的文件无效。发布侧的闸只能在这里，外加 verify_release 的 [A] 关复核。
+global-exclude *.away-*
