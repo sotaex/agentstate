@@ -6428,7 +6428,211 @@ def n_reopen_label_two_intents():
         SV._reopen_label = real
 
 
+# ============================================= 十二、恢复即结案（B，2026-10-23）====
+# ★ 为什么要有这一组（创始人 2026-10-23 点名必做）：
+#   本机实测 —— 三件事（breach 108／spawn_failed 264／tamper 124）在账上留了
+#   496 条 open 记录，而机器此刻 `self_check()` 通过、哨兵在岗。
+#   根因是「自愈只降当次那一条（recovered ⇒ R0→L1），从不回补历史」⇒
+#   同一件事复发 N 次就在账上留 N 条欠账，页面读成「有 3 件没修」，永不消失。
+def _gap_items(spec):
+    """造一组缺口记录。`spec`：[（事由, 距今天数, 初始状态）]。"""
+    now = datetime.now().astimezone()
+    out = []
+    for i, (kind, days, state) in enumerate(spec):
+        ts = (now - timedelta(days=days)).isoformat(timespec="seconds")
+        out.append(M.Item(M.Alert.build(ts, kind, reason="b%d" % i), state=state))
+    return out
+
+
+def _state_bytes(root):
+    try:
+        with open(S.state_path(root), "rb") as f:
+            return f.read()
+    except OSError:
+        return b""
+
+
+def c_reconcile_closes_recovered():
+    """★★ 有恢复证据 ⇒ 那一类**此前没结案的记录**全部结案，别的类一条不动。"""
+    import facts as F
+    hub = _tmpdir()
+    items = _gap_items([("host_shield_breach", 3, "unread"),
+                        ("host_shield_breach", 5, "unread"),
+                        ("host_shield_tamper", 3, "unread"),
+                        ("host_shield_spawn_failed", 3, "ignored")])
+    want = [it.id for it in items if it.kind in ("host_shield_breach",
+                                                 "host_shield_tamper")]
+    other = [it.id for it in items if it.kind == "host_shield_spawn_failed"]
+    rep = S.close_recovered({"host_shield_breach": "自检通过",
+                             "host_shield_tamper": "自检通过"}, items=items, root=hub)
+    st = S.load_state(hub)
+    if sorted(rep["closed"]) != sorted(want):
+        return "结案范围不对：应 %d 条，实得 %d 条" % (len(want), len(rep["closed"]))
+    if rep["by_kind"].get("host_shield_breach") != 2:
+        return "按事由计数不对：%r" % (rep["by_kind"],)
+    for i in want:
+        e = st.get(i) or {}
+        if e.get("gap_state") != M.GAP_CLOSED or not e.get("closed_at"):
+            return "账上没真写成已结案：%r" % (e,)
+        if "自检通过" not in (e.get("note") or ""):
+            return "结案说明没写证据原文：%r" % (e.get("note"),)
+    if other[0] in rep["closed"] or other[0] in st:
+        return "没证据的那一类被连带结案了（应保持先不管）"
+    if F.harmful_gaps({"gaps": [{"kind": "host_shield_breach",
+                                 "gap_state": st[want[0]]["gap_state"],
+                                 "level": "R0", "active": True,
+                                 "id": "x", "opened_at": ""}]}):
+        return "结案之后这条仍算 harm（灯不会跟着变）"
+    return True
+
+
+def n_reconcile_closes_recovered():
+    """负控：**改了不落盘** ⇒ 正控必须红（否则它只是在看返回值）。"""
+    real = S.save_state
+    S.save_state = lambda st, root=None: None
+    try:
+        r = c_reconcile_closes_recovered()
+        if r is True:
+            return "save_state 打桩成空操作后仍绿 ⇒ 判据没在看盘上"
+        return True
+    finally:
+        S.save_state = real
+
+
+def c_reconcile_refuses_without_evidence():
+    """★★ 没有恢复证据 ⇒ **一条都不关、一个字节都不写**（它是结案器，不是清账器）。"""
+    hub = _tmpdir()
+    items = _gap_items([("host_shield_breach", 2, "unread"),
+                        ("host_shield_spawn_failed", 2, "unread")])
+    S.set_state(items[0].id, "read", level="R0", root=hub)   # 先让状态文件存在
+    before = _state_bytes(hub)
+    if not before:
+        return "夹具没造出状态文件（判据自身坏了）"
+    rep = S.close_recovered({}, items=items, root=hub)
+    if rep["closed"]:
+        return "空证据仍关了 %d 条" % len(rep["closed"])
+    if _state_bytes(hub) != before:
+        return "空证据时状态文件被改写（不是零写）"
+    rep2 = S.close_recovered({"host_shield_breach": "   "}, items=items, root=hub)
+    if rep2["closed"] or _state_bytes(hub) != before:
+        return "空白串被当成证据（关了 %d 条）" % len(rep2["closed"])
+    zl = _gap_items([("host_shield_zone_locked", 2, "unread")])
+    rep3 = S.close_recovered({"host_shield_zone_locked": "自检通过"}, items=zl, root=hub)
+    if rep3["closed"]:
+        return ("给一个**没有恢复判据**的事由也照关（%d 条）⇒ 第二个调用点"
+                "只要手写一份证据就能清账" % len(rep3["closed"]))
+    return True
+
+
+def n_reconcile_refuses_without_evidence():
+    """负控：证据为空时**fail-open**（拿一个默认证据顶上）⇒ 正控必须红。"""
+    real = S.close_recovered
+
+    def failopen(evidence, **kw):
+        ev = dict(evidence or {})
+        if not any(str(v).strip() for v in ev.values()):
+            ev = {"host_shield_breach": "自检通过"}          # ← MUTANT：空证据当有
+        return real(ev, **kw)
+
+    S.close_recovered = failopen
+    try:
+        r = c_reconcile_refuses_without_evidence()
+        if r is True:
+            return "空证据改成 fail-open 之后仍绿 ⇒ 判据没在看'零写'"
+        return True
+    finally:
+        S.close_recovered = real
+
+
+def _recon_callsite_ok(cls, tick_src=None):
+    """调用点断言（正/负控共用的纯判断）：tick 调了它、它走的是唯一实现。"""
+    import inspect
+    if "self._reconcile_once(items)" not in (tick_src or inspect.getsource(cls.tick)):
+        return "tick 里没有调用 `_reconcile_once(items)` —— 机制没有生产调用点"
+    src = inspect.getsource(cls._reconcile_once)
+    for need in ("S.close_recovered(", "_F.recovery_evidence(", "S.load_items_all("):
+        if need not in src:
+            return "_reconcile_once 没走 %s（另起一套实现）" % need
+    if "guard_posture" not in src:
+        return "_reconcile_once 没取姿态证据"
+    return True
+
+
+def c_daemon_tick_reconciles():
+    """★★ **机制必须有生产调用点**：守护进程的每一拍都要跑恢复即结案。
+
+    ★ 为什么单列（本仓最贵的一课）：`settle()` 与 `sidecar` 写了、判据也有，
+      就是**零生产调用点** —— 于是它们等于不存在。结案同理：只写一个函数、
+      只跑探针，等于"研发机上一个演示"。
+    ★ 行为腿：**没欠账时一次探测都不做、一个字节都不写**。否则每 2 秒拍一次
+      就去读心跳文件、写状态表，账会被踩烂。
+    """
+    import types
+    import inbox_daemon as DM
+    r = _recon_callsite_ok(DM.Daemon)
+    if r is not True:
+        return r
+    hub = _tmpdir()
+    calls = []
+    real_gp = None
+    try:
+        import host_shield as HS
+        real_gp = HS.guard_posture
+        HS.guard_posture = lambda *a, **k: calls.append(1) or {"evidence": {}}
+    except Exception:                       # noqa: BLE001
+        pass
+    try:
+        stub = types.SimpleNamespace(root=hub, clock=lambda: 1000.0,
+                                     RECONCILE_EVERY=600.0,
+                                     _recon_done=True,       # 模拟"不是首拍"
+                                     _recon_at=0.0)          # 且早过了节流窗口
+        idle = [M.Item(M.Alert.build("2026-10-23T00:00:00+08:00",
+                                     "tool_call_blocked", reason="ok1"))]
+        before = _state_bytes(hub)
+        rep = DM.Daemon._reconcile_once(stub, idle)
+        if not (rep or {}).get("skipped"):
+            return "没有欠账时仍判为要动手：%r" % (rep,)
+        if calls:
+            return "没有欠账时仍去探姿态证据（每拍一次，代价太大）"
+        if _state_bytes(hub) != before:
+            return "没有欠账时仍写了状态文件"
+    finally:
+        if real_gp is not None:
+            import host_shield as HS
+            HS.guard_posture = real_gp
+    return True
+
+
+def n_daemon_tick_reconciles():
+    """负控：把 tick 里那一行**删掉**（源码变异）⇒ 正控必须红。"""
+    import inspect
+    import textwrap
+    import inbox_daemon as DM
+
+    src0 = textwrap.dedent(inspect.getsource(DM.Daemon.tick))
+    mut = src0.replace('    out["reconcile"] = self._reconcile_once(items)',
+                       '    out["reconcile"] = {"skipped": True}')
+    if mut == src0:
+        return "负控自身失效：源码里找不到那一行（锚点漂了）"
+
+    class _NoCall:
+        pass
+
+    _NoCall._reconcile_once = DM.Daemon._reconcile_once
+    r = _recon_callsite_ok(_NoCall, tick_src=mut)
+    if r is True:
+        return "删掉调用点之后仍绿 ⇒ 判据没在看'tick 到底调没调'"
+    return True
+
+
 CHECKS_0353 = [
+    # ---- 十二、恢复即结案（B，2026-10-23 创始人点名必做）----
+    ("P39 恢复即结案：有证据的那一类全部结案／说明带证据／别的类不动",
+     c_reconcile_closes_recovered, n_reconcile_closes_recovered),
+    ("P40 无证据零关零写：空证据不结案／空白串不算证据／无判据的事由不结案",
+     c_reconcile_refuses_without_evidence, n_reconcile_refuses_without_evidence),
+    ("P41 机制必须有生产调用点：daemon 每拍跑结案／没欠账时零探测零写",
+     c_daemon_tick_reconciles, n_daemon_tick_reconciles),
     # ---- 十、TAB 切换卡顿根治·方案 B（2026-10-21 创始人拍板）----
     ("TP-B1 self_check 指纹缓存：不变零重散／沙盒变异必失效必报",
      c_tp_b1_self_check_cache, n_tp_b1_self_check_cache),

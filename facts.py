@@ -631,6 +631,53 @@ AXIS_VALUES = {
 #: 缺口族 ⇔ 事件级别 `R0`（**派生，不写死族名** —— 见 `_kind_levels()` 的 #56 说明）。
 GAP_LEVEL = "R0"
 
+#: 事由 → 恢复判据的种类。**只收"能凭当前实测判定已恢复"的事由**；
+#: 不在表里的事由＝判不了 ⇒ 永远不自动结案（fail-closed，见 `recovery_evidence`）。
+#: ★ 为什么按事由分而不是一个总开关：本机三件事的恢复条件不同 ——
+#:   文件类（breach/tamper）看自检，进程类（spawn_failed）看哨兵心跳。
+#:   一个总开关会让"哨兵起来了"顺手把"文件与登记不符"也结掉。
+RECOVERY_OF = {
+    "host_shield_breach": "self_check",
+    "host_shield_tamper": "self_check",
+    "host_shield_spawn_failed": "sentinel",
+}
+
+#: 证据句（**上屏/上账的最短说法**）。★ 不写成"已自动恢复"：那会与记录自己的
+#: `recovered` 字段混成一件事 —— 这里的证据是**此刻**实测出来的，不是记录带的。
+RECOVERY_WORDS = {
+    "self_check": "自检通过",
+    "sentinel": "哨兵在岗",
+}
+
+
+def recovery_evidence(evidence, now=None):
+    """事由 → 「已恢复」证据句（短句）。**判不了 ⇒ 不给这个键**。
+
+    `evidence` ＝ `host_shield.guard_posture()["evidence"]`（8 字段那份），
+    必须是**调用方刚探到的**，本函数不看时钟、不读文件 —— 纯函数，可注入。
+
+    ★★ 三条不许松（每一条都对应一次实测过的假绿）：
+      ① `armed is not True` ⇒ **一条证据都不给**。没布防时"文件与登记一致"
+         只能证明"没人改过"，不能证明"有人在守"。
+      ② `self_check_ok` 只有 **`is True`** 才算通过；`None`（查不到）不算 ——
+         F1 明令禁止把"读不到"当"没问题"。
+      ③ 心跳用 `_fresh()`（同一个阈值真源）：负数时间差＝算不出，不算新鲜。
+    """
+    ev = evidence if isinstance(evidence, dict) else {}
+    if ev.get("armed") is not True:
+        return {}
+    stale = _const("stale")
+    healthy = ev.get("self_check_ok") is True
+    sentinel = (ev.get("sentinel_alive") is True
+                and _fresh(ev.get("heartbeat_age"), ev.get("sentinel_uptime"),
+                           stale) is True)
+    out = {}
+    for kind, need in RECOVERY_OF.items():
+        ok = healthy if need == "self_check" else sentinel
+        if ok:
+            out[kind] = RECOVERY_WORDS[need]
+    return out
+
 #: 复核期（天）。一件缺口**最后一次出现**距今超过这个数 ⇒ 退出 harm，
 #: 但记录仍留在 `facts["gaps"]` 里（`active=False`）—— **减法留账**。
 #: ★ 取值依据是实测，不是感觉：0.55.0 主机上四件缺口的沉寂时长为

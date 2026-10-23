@@ -86,7 +86,13 @@ _WALK_EXCLUDE_PREFIX = ("antinel-0.", "_backup.away-", "antinel_mcp.away",
 SPDX_RE = re.compile(r"SPDX-License-Identifier:\s*([A-Za-z0-9\-.]+)")
 
 #: 这些目录里的 py/md/html **不要求** SPDX 头（理由登记在 license-map.spdx_exempt_reason）
-EXEMPT_PREFIX = ("rules/", "demo/", ".workbuddy/")
+#: ★★ 2026-10-23：补 `.workbuddy-ai/`。它与 `.workbuddy/` 是同一类东西（Agent 工作日志），
+#:   而且 `.gitignore:28` 明写 `.workbuddy-ai/` —— 按本判据自己写下的那条口径
+#:   （"凡是 git 都不收的，就不是本仓归属对象"）它**本来就不该被算进来**。
+#:   实测漏了它：另一条线在 08:xx 写了一份不带头的日志 ⇒ 闸门 32/34，
+#:   而那个文件永远不会进包。**判据的口径必须与 .gitignore 同一份**，
+#:   否则每个写日志的 Agent 都会给下一次提交制造一次假红。
+EXEMPT_PREFIX = ("rules/", "demo/", ".workbuddy/", ".workbuddy-ai/")
 
 
 # --------------------------------------------------------------- 工具 ----

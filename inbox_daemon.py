@@ -426,6 +426,45 @@ class Daemon:
         return {"sent": True, "ok": bool(ok), "why": str(why), "tries": tries}
 
     # ---------------------------------------------------------------- #
+    #: 复核结案的最小间隔（秒）。与心跳同量级：账不是新闻，慢一拍没关系。
+    RECONCILE_EVERY = 600.0
+
+    def _reconcile_once(self, items):
+        """**恢复即结案**（B）的唯一生产调用点。返回本轮结果（判据要断言它）。
+
+        ★ 为什么在这里：渲染是**纯投影**（灯不写盘），结案是**写账** ——
+          写账只能发生在后台节拍里，不能发生在"有人在看页面"这条路径上。
+        ★ 为什么先判欠账再探证据：没欠账时 `unrepaired_gap_items()` 只是**内存
+          过滤**，零探测、零落盘；有欠账才去读姿态（`guard_posture` 要读心跳文件）。
+        ★ 为什么全量取数：结案要覆盖**所有**没结案的记录，而 `tick` 手里那份是
+          窗口内的。窗口外的老账只能靠每轮一次全量扫（首次约 5 s，之后走
+          文件指纹缓存 ≈ 0.02 s）。
+        """
+        first = not getattr(self, "_recon_done", False)
+        if not first and not S.unrepaired_gap_items(items):
+            return {"skipped": True, "why": "没有没结案的缺口"}
+        clock = self.clock()
+        if not first and clock - float(getattr(self, "_recon_at", 0.0)) < self.RECONCILE_EVERY:
+            return {"skipped": True, "why": "距上次复核不足 %d 秒" % int(self.RECONCILE_EVERY)}
+        self._recon_at = clock
+        self._recon_done = True
+        try:
+            import facts as _F
+            import host_shield as _HS
+            ev = _F.recovery_evidence(_HS.guard_posture().get("evidence"))
+        except Exception as e:                      # noqa: BLE001
+            return {"skipped": True, "why": "证据取不到：%s" % e}
+        if not ev:
+            # 没布防、自检没过、或证据读不到 ⇒ 一条都不结。**这不是异常。**
+            return {"closed": [], "evidence": {}, "why": "没有可用的恢复证据"}
+        try:
+            rep = S.close_recovered(ev, items=S.load_items_all(root=self.root),
+                                    root=self.root)
+        except Exception as e:                      # noqa: BLE001
+            return {"skipped": True, "why": "结案失败：%s" % e}
+        rep["evidence"] = ev
+        return rep
+
     def tick(self, notify=True):
         """跑一轮。返回本轮结果 dict（便于判据与调试）。"""
         cfg = self.cfg or CFG.load(self.root)
@@ -449,6 +488,15 @@ class Daemon:
         except Exception as e:          # noqa: BLE001
             out["errors"].append("exam-reminder: %s" % e)
             out["exam_reminder"] = {"fired": False, "why": "异常：%s" % e}
+
+        # ①c 恢复即结案（B，2026-10-23 创始人点名必做）。
+        #   当前实测证明某类事已恢复 ⇒ 把这类此前**没结案的记录**一并结案。
+        #   为什么必须有它（本机实测）：同一件事复发 124 次、每次自愈，却因为
+        #   "自愈只降当次那一条"而在账上留成 124 条欠账 ⇒ 页面写「有 3 件没修」，
+        #   而机器此刻半点毛病没有 —— 灯说的是假话，且这句假话永远消不掉。
+        out["reconcile"] = self._reconcile_once(items)
+        if (out["reconcile"] or {}).get("closed"):
+            out["reconcile_affected"] = len(out["reconcile"]["closed"])
 
         # ② 新告警 → 通知 / 强调 / 兜底
         #   ★★ 0.49.0（创始人 2026-10-14）：**急事走紧急提醒、普通事走 toast**。

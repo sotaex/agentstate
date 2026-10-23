@@ -1766,6 +1766,37 @@ _W05_TRIES = 3
 _W05_OWNER_MARK = "占用方进程号"
 #: 「夹具失效」的识别串：`_w05_assert()` 报夹具故障时用它开头。
 _W05_FIXTURE_DEAD = "夹具失效"
+#: **天气哨兵**：stderr 那条腿这一轮**测不出**（与「过了」的 `None` 严格区分）。
+_W05_WEATHER = object()
+
+
+def _w05_stderr_check(msg, held, got2, drift2):
+    """stderr 那句话的三项内容判据（正/负控共用同一份实现）。
+
+    返回 `None` ＝ 过；`_W05_WEATHER` ＝ **测不出**（仪表这轮没读到占用方，
+    可重试）；其余字符串 ＝ 真缺陷说明。
+
+    ★★ 2026-10-23 实测（闸门连跑 34 套房时）：`_port_owner()` 偶发读不到占用方，
+      产品于是走它**自己那条诚实的**「占用方进程号没查到」分支，而旧判据
+      「再探一次仪表」分辨不出来 —— 负载高时紧接着的那一次往往成功，于是把
+      **天气说成产品缺陷**（单独复现 3/3 正常，闸门里 1/1 假红）。
+      正解是读**产品自己记下的** `drift2["owner"]`：
+        · 它为 `None` ⇒ 产品当时确实没读到 ⇒ 只能测「两个端口有没有说全」；
+        · 它有值却没出现在话里 ⇒ **真缺陷**（负控 ② 变异的就是这一支）。
+      这样「天气」与「缺陷」用**同一个数据字段**分开，不靠再探一次运气、也不靠
+      匹配那句文案（尺子不许绑文案）。
+    """
+    if not drift2:
+        return "`_serve_setup` 没把漂移传出来（判据拿不到观测点）"
+    for need in (str(held), str(got2)):
+        if need not in msg:
+            return "端口被占时 stderr 那句话没说全（缺 %r）：%r" % (need, msg)
+    owner = (drift2 or {}).get("owner")
+    if owner is None:
+        return _W05_WEATHER
+    if str(owner) not in msg:
+        return "端口被占时 stderr 那句话没说全（缺 %r）：%r" % (str(owner), msg)
+    return None
 
 
 def _w05_owner_probe(port, tries=2, gap=0.15):
@@ -1862,35 +1893,31 @@ def _w05_assert():
                         % (_W05_FIXTURE_DEAD, held, _W05_TRIES))
             return why
         # ② 出声（stderr）＋ 落盘（url.json 带 want_port）
-        buf = io.StringIO()
-        with contextlib.redirect_stderr(buf):
-            h2, _t2, got2, drift2 = SV._serve_setup(held, hub, token="T2")
-        try:
-            if not drift2:
-                return "`_serve_setup` 没把漂移传出来（判据拿不到观测点）"
-            msg = buf.getvalue()
-            for need in (str(held), str(got2), str(os.getpid())):
-                if need not in msg:
-                    # ★★ X-019：三项里**只有「占用方 pid」**可能是**仪表失效**
-                    #   （`console_drift_note` 查不到占用方时会明说「进程号没查到」）。
-                    #   此刻仪表不通 ⇒ 报「夹具失效」，**不许**算产品缺陷。
-                    if need == str(os.getpid()):
-                        live, _p = _w05_owner_probe(held)
-                        if not live:
-                            return ("%s：`_port_owner(%d)` 此刻取不到占用方 ⇒ "
-                                    "stderr 那句话里没有 pid **不能算产品缺陷**"
-                                    "（量具失效，本条测不出，请重跑）"
-                                    % (_W05_FIXTURE_DEAD, held))
-                    return ("端口被占时 stderr 那句话没说全（缺 %r）：%r"
-                            % (need, msg))
-            rec = SV.read_console_record(hub)
-            if (rec or {}).get("port") != got2:
-                return "落盘记录里的端口不是实际端口：%r" % (rec,)
-            if (rec or {}).get("want_port") != held:
-                return ("落盘记录没留下「想要哪个端口」（want_port=%r）—— "
-                        "漂移在盘上没痕迹" % ((rec or {}).get("want_port"),))
-        finally:
-            h2.server_close()
+        #   ★ 天气（仪表这轮没读到占用方）⇒ 重试；`_w05_stderr_check()` 一处判。
+        why, got2 = None, None
+        for _try in range(_W05_TRIES):
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                h2, _t2, got2, drift2 = SV._serve_setup(held, hub, token="T2")
+            try:
+                why = _w05_stderr_check(buf.getvalue(), held, got2, drift2)
+            finally:
+                h2.server_close()
+            if why is None:
+                break
+            if why is not _W05_WEATHER:
+                return why
+        if why is not None:
+            return ("%s：连 %d 轮都没读到占用方（`_port_owner` 走外部子进程"
+                    "`netstat -ano`／`lsof`，高负载下会取不到）—— "
+                    "**这是量具失效，不是产品缺陷**；本条**测不出**，不许报通过，"
+                    "请重跑。" % (_W05_FIXTURE_DEAD, _W05_TRIES))
+        rec = SV.read_console_record(hub)
+        if (rec or {}).get("port") != got2:
+            return "落盘记录里的端口不是实际端口：%r" % (rec,)
+        if (rec or {}).get("want_port") != held:
+            return ("落盘记录没留下「想要哪个端口」（want_port=%r）—— "
+                    "漂移在盘上没痕迹" % ((rec or {}).get("want_port"),))
         # ③ 托盘提示带实际端口（读同一份落盘）
         SV.write_console_record(8799, "tok-tip", pid=os.getpid(), root=hub)
         payload = TR.sync_from_items([_mk("R0", "unread", 1, 1.0)], root=hub,

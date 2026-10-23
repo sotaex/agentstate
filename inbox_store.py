@@ -407,31 +407,15 @@ def _reopens(dst, intent):
     return dst not in M.CLOSED_STATES and intent == "reopen"
 
 
-def set_state(item_id, dst, note="", actor="owner", now=None, level=None, root=None,
-              intent="read"):
-    """置状态。**校验迁移**；忽略 R0 必须写备注。返回置位后的状态条目。
+def _apply(st, item_id, dst, note="", actor="owner", t=None, level=None,
+           intent="read"):
+    """把一次置位**应用到内存里的状态表**（**不落盘**）。返回该条目。
 
-    `level` 不传 ⇒ 自动从链里查这条告警的级别（CLI 用；测试可直接传）。
-
-    ★★ 0.55.0（复核 F1）`intent`：**`read` 这个目标态不再自动等于"重开"**。
-      旧实现只要 `dst="read"` 就把 `gap_state` 打回 `open`、把 `closed_at` 删掉
-      ⇒ **任何**写 `read` 的调用点都会把已忽略/已处置的缺口重新打开。
-      门禁当时装在 HTTP 层（`/action` 的 `_auto_read_allowed`），
-      于是 `remediation_ack`（`inbox_server.py:4127`）这个侧门直接绕过去了。
-      ⇒ 权威放在这一层：`intent="read"`（知情，默认）**不动**缺口态与 `closed_at`；
-        `intent="reopen"`（重开）才把缺口打回 `open`。
-      ★ 默认值取安全侧：不传参的旧调用点行为变成"只记已读"，而"只看一眼就把缺口
-        重新打开"正是 A1 实测过的伤害。
+    ★★ 唯一实现：`set_state()`（单条）、`set_state_many()`（批量）、
+      `close_recovered()`（复核结案）都走这里。写第二遍就一定会漂，
+      而漂的方向必然是**批量漏了一格** —— 比如忘了写 `gap_state`，
+      于是 496 条"已结案"在账上仍算缺口（灯照样红，且查不出为什么）。
     """
-    if intent not in ("read", "reopen"):
-        raise M.BadState("未知意图 %s（合法：read, reopen）" % (intent,))
-    if level is None:
-        found = [it for it in load_items(root=root) if it.id == item_id]
-        if not found:
-            raise M.InboxError("找不到告警 %s" % item_id)
-        level = found[0].level
-
-    st = load_state(root)
     cur = (st.get(item_id) or {}).get("state", "unread")
     if not M.can_transition(cur, dst):
         raise M.BadState("不允许从 %s 迁到 %s" % (cur, dst))
@@ -439,7 +423,7 @@ def set_state(item_id, dst, note="", actor="owner", now=None, level=None, root=N
     if dst == "ignored":
         M.check_ignore_note(level, note)
 
-    t = now or _now()
+    t = t or _now()
     ent = st.get(item_id) or {}
     ent["state"] = dst
     ent["actor"] = actor
@@ -470,8 +454,171 @@ def set_state(item_id, dst, note="", actor="owner", now=None, level=None, root=N
     #   于是"点开看一眼"就足以撤销 ack（实测：`ignored → read` 得
     #   `('read','open',False)`，`closed_at` 被清、复核计时归零）。
     st[item_id] = ent
+    return ent
+
+
+def set_state(item_id, dst, note="", actor="owner", now=None, level=None, root=None,
+              intent="read"):
+    """置状态。**校验迁移**；忽略 R0 必须写备注。返回置位后的状态条目。
+
+    `level` 不传 ⇒ 自动从链里查这条告警的级别（CLI 用；测试可直接传）。
+
+    ★★ 0.55.0（复核 F1）`intent`：**`read` 这个目标态不再自动等于"重开"**。
+      旧实现只要 `dst="read"` 就把 `gap_state` 打回 `open`、把 `closed_at` 删掉
+      ⇒ **任何**写 `read` 的调用点都会把已忽略/已处置的缺口重新打开。
+      门禁当时装在 HTTP 层（`/action` 的 `_auto_read_allowed`），
+      于是 `remediation_ack`（`inbox_server.py:4127`）这个侧门直接绕过去了。
+      ⇒ 权威放在这一层：`intent="read"`（知情，默认）**不动**缺口态与 `closed_at`；
+        `intent="reopen"`（重开）才把缺口打回 `open`。
+      ★ 默认值取安全侧：不传参的旧调用点行为变成"只记已读"，而"只看一眼就把缺口
+        重新打开"正是 A1 实测过的伤害。
+    """
+    if intent not in ("read", "reopen"):
+        raise M.BadState("未知意图 %s（合法：read, reopen）" % (intent,))
+    if level is None:
+        found = [it for it in load_items(root=root) if it.id == item_id]
+        if not found:
+            raise M.InboxError("找不到告警 %s" % item_id)
+        level = found[0].level
+
+    st = load_state(root)
+    ent = _apply(st, item_id, dst, note=note, actor=actor, t=now or _now(),
+                 level=level, intent=intent)
     save_state(st, root)
     return ent
+
+
+def set_state_many(item_ids, dst, note="", actor="owner", now=None, levels=None,
+                   root=None, intent="read"):
+    """同一目标态批量置位：**一次读、一次写**。返回 `(done, skipped)`。
+
+    ★ 为什么要它（实测，不是估）：本机状态表 766 条 / 121 KB，
+      `save_state()` 单次 **141 ms**（Windows 上 `os.replace`＋`chmod` 占大头）
+      ⇒ 496 条逐条走 `set_state()` 光写盘就要 **70 秒**，且中途每一条都要
+      重写整份状态（任一次失败都留一个半成品账）。
+    ★ 迁移规则**不复制**：逐条走 `_apply()`（唯一实现），只是把读写各收成一次。
+    ★ 单条失败**不拖垮整批**（已是终态、目标非法都只跳过），与 `done_all` 同语义。
+    """
+    if intent not in ("read", "reopen"):
+        raise M.BadState("未知意图 %s（合法：read, reopen）" % (intent,))
+    levels = levels or {}
+    st = load_state(root)
+    t = now or _now()
+    done, skipped = [], []
+    for iid in item_ids:
+        try:
+            _apply(st, iid, dst, note=note, actor=actor, t=t,
+                   level=levels.get(iid), intent=intent)
+        except (M.BadState, M.InboxError) as e:
+            skipped.append((iid, str(e)))
+            continue
+        done.append(iid)
+    if done:
+        save_state(st, root)
+    return done, skipped
+
+
+def _gap_level():
+    """缺口族的事件级别（本机现为 `R0`）。**真源在 `facts.GAP_LEVEL`**，这里只懒读。
+
+    ★ 为什么不在此处再写一个 `"R0"`：族别是**产品口径**，写在两处必然漂
+      （一处说 R0、一处说 R1 时，灯与结案会各算各的）。也不在模块顶层 import ——
+      `facts` 会懒加载本模块，顶层互相 import 会成环。
+    """
+    import facts as _F
+    return _F.GAP_LEVEL
+
+
+def unrepaired_gap_items(items=None, root=None):
+    """**没结案的缺口记录**（`open` 或 `acked`、记录级 `R0`）。返回 Item 列表。
+
+    ★ 与 `facts.harmful_gaps()` **故意不同**，且只差一处：这里**不看**事由级复档
+      （`LEVEL_OF_KIND`）与复核期（`active`），只认**记录级** `R0` 与"结没结案"。
+      理由：复核期管的是"还算不算此刻的后果"，**不管**"这笔账结没结"——
+      老账哪怕沉寂半年，结案也是对的；而件数/灯由 `harmful_gaps()` 那边管。
+    """
+    items = load_items(root=root) if items is None else items
+    lv = _gap_level()
+    return [it for it in items
+            if it.level == lv
+            and M.gap_state_of(it) in (M.GAP_OPEN, M.GAP_ACKED)]
+
+
+def _recovery_kinds():
+    """**有恢复判据**的事由集合（真源：`facts.RECOVERY_OF`）。懒读，理由同上。
+
+    ★ 为什么要在这里再挡一道：证据句是调用方传进来的 dict，一个手写的
+      `{"host_shield_zone_locked": "..."}` 就能把一件**根本没有恢复判据**的事
+      结掉。判据放在证据生成处（`facts.recovery_evidence`）只挡住了生产路径，
+      挡不住第二个调用点 —— 而"第二个调用点"正是本仓反复出事的形状。
+    """
+    import facts as _F
+    return set(_F.RECOVERY_OF)
+
+
+def close_recovered(evidence, items=None, root=None, now=None, actor="reconcile",
+                    note_fmt="复核结案：%s"):
+    """把「已有恢复证据」的事由，此前**没结案的记录**一次性结案。返回统计。
+
+    ★★ 这是 B（恢复即结案）的**唯一实现**。为什么要有它（本机实测）：
+      反复发生的同一件事，每次自愈只把**当次那一条**降档（`recovered=True`
+      ⇒ R0→L1），**不回补**历史 ⇒ 「同一件事复发 124 次、每次都自愈」在账上
+      留成 124 条欠账；页面读出来是「有 3 件没修」，而机器此刻半点毛病没有。
+
+    ★ 三条不许松：
+      ① `evidence` 为空（`{}`／全是空串）⇒ **一条都不关**（fail-closed）。
+         否则它就是一把"清账器"——把真缺口一起抹平，而抹平之后页面全绿，
+         再没有任何东西能发现它被抹平过。
+      ② 只关**证据覆盖到的那个事由**（`kind` 精确匹配），绝不因为 A 事恢复了
+         就连带关 B 事（本机三件事的恢复条件各不相同）。
+      ③ 关掉的每一条都写**结案说明**（`note`）与时刻（`closed_at`）——
+         账要能回答"谁在什么时候凭什么关的"。
+    """
+    if not isinstance(evidence, dict):
+        raise M.InboxError("恢复证据必须是 dict：事由 → 证据句")
+    kinds_ok = _recovery_kinds()
+    ev = {k: v.strip() for k, v in evidence.items()
+          if isinstance(v, str) and v.strip() and k in kinds_ok}
+    out = {"closed": [], "skipped": [], "by_kind": {}, "no_evidence": True}
+    if not ev:
+        return out
+    out["no_evidence"] = False
+    items = load_items(root=root) if items is None else items
+    st = load_state(root)
+    # ★★ 目标选取**以状态文件为准**，不以外面的 Item 对象为准：
+    #   `Item` 只是投影（`load_items` 用它，判据也会拿它注入夹具）；而"关不关"
+    #   是写账动作，必须看账上此刻的真值。否则同一条会被关第二次 ——
+    #   第二次会把 `closed_at` 与"当初为什么关"的说明一起盖掉。
+    targets = []
+    for it in items:
+        if it.kind not in ev or it.level != _gap_level():
+            continue
+        e = st.get(it.id) or {}
+        gap = e.get("gap_state") or M.gap_state_of(it)
+        if gap in (M.GAP_OPEN, M.GAP_ACKED):
+            targets.append((it, gap))
+    if not targets:
+        return out
+    t = now or _now()
+    for it, gap in targets:
+        note = note_fmt % ev[it.kind]
+        try:
+            if gap == M.GAP_ACKED:
+                # ★ 「先不管」不能一步跳到「已处置」—— 迁移表没有这条边，
+                #   而绕过去（直接 `_apply(...,"done")` 或改表）就是侧门。
+                #   合法走法：先标「知道了」（`intent="read"` 不动缺口态），再结案。
+                #   两步都走唯一实现，同一次落盘，账上看不到中间态。
+                _apply(st, it.id, "read", actor=actor, t=t, level=it.level,
+                       intent="read")
+            _apply(st, it.id, "done", note=note, actor=actor, t=t, level=it.level)
+        except (M.BadState, M.InboxError) as e:
+            out["skipped"].append((it.id, str(e)))
+            continue
+        out["closed"].append(it.id)
+        out["by_kind"][it.kind] = out["by_kind"].get(it.kind, 0) + 1
+    if out["closed"]:
+        save_state(st, root)
+    return out
 
 
 # ★★ 0.35.3：`mark_all_read()`（批量「全部已读」）**已整体下线**。
