@@ -680,6 +680,17 @@ def _check_bind(addr):
 #:   地址栏 / 截图 都干净）。旧 URL（`/?t=…`）**继续可用**（维八：不破旧账）。
 _COOKIE = "antinel_t"
 
+#: ★ 0.55.0（2026-10-23）：`/assets/favicon.ico` **免鉴权**开关 —— 全服务
+#:   唯一的口令例外路径。为什么它可以是例外（别的 assets 都不行）：
+#:   ① favicon 是**品牌图标**，恒定不变、不泄态势；姿态灯（L0.ico 等）与
+#:      mp4 会泄"当前 L0/R0"，必须继续守门；
+#:   ② 品牌文件在用户本机产品目录里本来就可读，免鉴权不扩大泄密面；
+#:   ③ favicon 由**浏览器容器**自动请求，在 cookie 被禁用／被清／隐身窗／
+#:      恢复会话等真实形状下**不带任何凭证** ⇒ 守门就是 403 ⇒ Edge 落默认球
+#:      （创始人 2026-10-23 截图「死灰复燃成浏览器 LOGO」的现场根因）。
+#:   负控 N-B15d 把这个常量翻成 False，同一把尺必须判红。
+_FAVICON_OPEN = True
+
 
 def _cookie_token(cookie_header):
     """从 `Cookie:` 头里取口令。
@@ -785,8 +796,22 @@ def posture_now():
 #:     的内容从姿态灯换成品牌 LOGO 之后，Edge 仍然渲染旧图 —— 产品改了、
 #:     用户看到没改，于是被当成"死灰复燃"。URL 随内容变，缓存自然失效，
 #:     不依赖用户手动清缓存，也不指望 Ctrl+F5。
+#: ★★ 0.55.0（2026-10-23 创始人再截图「状态栏的 LOGO 死灰复燃成浏览器 LOGO」）：
+#:   内容指纹治的是「换文件」，治不了「换服务实例」。实测抓到的新一轮复发：
+#:   favicon 路由走统一 `_guard`（query/头/cookie 三源口令），而浏览器在
+#:   **cookie 被禁用／被清／隐身窗／恢复会话**这些真实形状下拉子资源是
+#:   **不带任何凭证**的 ⇒ 403 ⇒ Edge 落默认球。默认球被 Edge 按 URL 缓存
+#:   下来后，`?v=` 只随**品牌文件内容**变 —— 服务重启、端口漂移、口令更换
+#:   都不会动它 ⇒ 同一枚坏图标可以一直显示到天荒地老。这就是"以前出现过、
+#:   又死灰复燃"的完整机制，两处都要修（见下）。
+#:   ① 路由免鉴权：`_FAVICON_OPEN` —— 品牌标恒定不变、不泄态势（与姿态灯
+#:      mp4/ico 的本质区别：那些泄"当前 L0/R0"），且在用户本机产品目录里
+#:     本就可读 ⇒ 免鉴权不扩大泄密面，只把"浏览器拿不到"这一条根除；
+#:   ② 指纹加**实例段**：`?v=<内容 sha8>.<实例 sha8>`，实例段由
+#:      `os.getpid()` 派生（模块 import 时定，服务进程内恒定，重启即变）
+#:      ⇒ 服务每次重启 URL 必变 ⇒ Edge 缓存强制失效 ⇒ 旧坏结果不可能复用。
 def _favicon_href():
-    """favicon 的 href：`/assets/favicon.ico?v=<内容 sha8>`。
+    """favicon 的 href：`/assets/favicon.ico?v=<内容 sha8>.<实例 sha8>`。
 
     取不到品牌文件 ⇒ 退回不带指纹的裸 URL（仍是同一个文件，只是缓存不刷新）；
     **不编造一个指纹** —— 编出来的指纹会让缓存永远命中错内容。
@@ -794,10 +819,13 @@ def _favicon_href():
     try:
         p = os.path.join(ASSETS_DIR, _brand_favicon_rel())
         with open(p, "rb") as f:
-            return "/assets/favicon.ico?v=%s" % hashlib.sha256(
-                f.read()).hexdigest()[:8]
+            content_fp = hashlib.sha256(f.read()).hexdigest()[:8]
     except OSError:
         return "/assets/favicon.ico"
+    # 实例段：serve 进程的 pid 派生（sha8）。**不是内容**的一部分 ——
+    # 它只回答"这次是哪个服务实例在答"，让 Edge 在服务重启后必须重取。
+    inst_fp = hashlib.sha256(str(os.getpid()).encode("ascii")).hexdigest()[:8]
+    return "/assets/favicon.ico?v=%s.%s" % (content_fp, inst_fp)
 
 
 FAVICON_LINK = '<link rel="icon" href="%s">' % _favicon_href()
@@ -4012,6 +4040,11 @@ def _make_handler(token, root):
             if not _allowed_host(self.headers.get("Host"), port):
                 self._deny("Host 不被允许")
                 return False
+            # ★ 0.55.0：favicon 免鉴权（唯一例外路径，理由见 `_FAVICON_OPEN`）。
+            #   Host 检查之后、口令比对之前 —— Host 是每个请求都该过的闸，
+            #   免的只是"这一枚恒定品牌图标要口令"。
+            if _FAVICON_OPEN and urlparse(self.path).path == "/assets/favicon.ico":
+                return True
             # ★ 0.48.6（B3）：口令来源按**优先级**排 —— query `?t=`（首字节那次）
             #   → 请求头（测试/CLI 用）→ **cookie**（此后所有站内导航与子资源）。
             #   比对仍然只有下面那一处（维一 · 入口唯一）。

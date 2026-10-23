@@ -2155,8 +2155,9 @@ def _b15c_core(server_src, link_html, brand_path):
     ★ 四条腿，少一条就会被绕过：
       ① **形状**：href 里必须有 `?v=`（裸 URL 一律红）—— 裸 URL 就是"换内容不换
          URL"，容器的缓存不失效，用户看到的还是旧图标；
-      ② **真值**：`?v=` 的值必须等于品牌文件的 sha256 前 8 位 —— 写死的常量
-         （哪怕当前恰好等于真值）在这条上红；
+      ② **真值**：`?v=` 的**内容段**（第一个 `.` 前的 8 位）必须等于品牌文件的
+         sha256 前 8 位 —— 写死的常量（哪怕当前恰好等于真值）在这条上红。
+         （0.55.0 起指纹是两段式 `<内容8>.<实例8>`；实例段由 B-15d 守，这里只比内容段。）
       ③ **派生**：`_favicon_href` 函数体内必须真读文件、真算 sha —— 防止有人把
          ② 的实现换成"从别处抄一个值"，那样 ② 会永远绿而内容换了它不变；
       ④ **能取到**：`_asset()` 必须剥掉查询串再查白名单 —— 不剥的话带指纹的请求
@@ -2173,10 +2174,10 @@ def _b15c_core(server_src, link_html, brand_path):
         return ("favicon 的 href 是裸 URL（%r）—— 换内容不换 URL ⇒ 容器的缓存"
                 "不失效 ⇒ 改了没效果，用户看到的还是旧图标" % href[:60])
 
-    got_fp = href.split("?v=", 1)[1]
+    got_fp = href.split("?v=", 1)[1].split(".", 1)[0]                    # ②
     want_fp = _b15c_expected_fp(brand_path)                            # ②
     if got_fp != want_fp:
-        return ("favicon 的指纹 %r 不是品牌文件内容的 sha8（现算为 %r）—— 写死的"
+        return ("favicon 指纹的内容段 %r 不是品牌文件内容的 sha8（现算为 %r）—— 写死的"
                 "常量会让缓存永远命中错内容" % (got_fp[:24], want_fp))
 
     body = re.search(r"def _favicon_href\(\):(.*?)(?=\n\S)", server_src, re.S)  # ③
@@ -2208,7 +2209,7 @@ def n_b15c():
         return "负控前置失败：当前生产实现没通过 B-15c（%r）" % (base,)
 
     # ① 裸 URL：把指纹摘掉（这是"死灰复燃"会以原样复发的那个形状）
-    bare = re.sub(r"\?v=[0-9a-f]+", "", link)
+    bare = re.sub(r"\?v=[0-9a-f.]+", "", link)
     if bare == link:
         return "负控夹具不成立：href 里没有可摘的指纹"
     r1 = _b15c_core(src, bare, brand)
@@ -2226,9 +2227,18 @@ def n_b15c():
         return "方向不对：写死指纹报的红不是真值那条（%s）" % str(r2)[:120]
 
     # ③ 指纹不再从内容派生（把读文件算 sha 换成抄值）
-    mut3 = src.replace("hashlib.sha256(", "_noop_hash(", 1)
-    if mut3 == src:
+    #    ★ 0.55.0：_favicon_href 里现在有**两处** hashlib.sha256（内容段＋
+    #    实例段）—— 只换第一处会留下第二处，③ 的检查仍过 ⇒ 负控假失效。
+    #    变异必须落在**函数体内**且换干净。
+    m3 = re.search(r"def _favicon_href\(\):(.*?)(?=\n\S)", src, re.S)
+    if not m3:
+        return "负控夹具不成立：切不出 _favicon_href 函数体"
+    mut3_body = m3.group(1).replace("hashlib.sha256(", "_noop_hash(")
+    if "hashlib.sha256(" in mut3_body:
+        return "负控夹具不成立：函数体内还有没换掉的 hashlib.sha256("
+    if mut3_body == m3.group(1):
         return "负控夹具不成立：没找到 hashlib.sha256( 锚点"
+    mut3 = src.replace(m3.group(1), mut3_body, 1)
     r3 = _b15c_core(mut3, link, brand)
     if r3 is True:
         return "负控失效：指纹不再从文件内容派生仍判合格"
@@ -2245,6 +2255,152 @@ def n_b15c():
     r4 = _b15c_core(mut4, link, brand)
     if r4 is True:
         return "负控失效：_asset() 不剥查询串仍判合格（favicon 会 404）"
+    return True
+
+
+# ══════════════════════════════════════════════════════ B-15d（0.55.0）══
+#: ★★ 为什么 B-15/b/c 全绿了还要这一条（2026-10-23 创始人截图「状态栏的 LOGO
+#:   死灰复燃成浏览器 LOGO」）：
+#:     B-15 守「链接在 HTML 里」，B-15b 守「解析到品牌文件的字节」，B-15c 守
+#:     「换内容就换 URL」—— 三条合起来只证明**服务器愿意给对**，**完全不证明
+#:     浏览器那次请求拿得回来**。本机活体实测（端口 50078）：
+#:       无凭证 GET /assets/favicon.ico ⇒ **403**。
+#:     favicon 由**浏览器容器**自动请求：cookie 被禁用／被清／隐身窗／Edge
+#:     恢复会话时，那个请求不带任何凭证 ⇒ 403 ⇒ Edge 落默认球。默认球被 Edge
+#:     按 URL 缓存后，`?v=` 只随**品牌文件内容**变 —— 服务重启、端口漂移、
+#:     口令更换都不动它 ⇒ 同一枚坏图标可以显示到天荒地老。「以前出现过、又
+#:     死灰复燃」＝这个机制本身，**不是**有人又改回去了。
+#:   两条腿（0.55.0 修法：产品侧 favicon 免鉴权 ＋ 指纹加实例段）：
+#:     ① **无凭证可达**：真起服务，一个凭证都不带地请求 favicon ⇒ 200 且
+#:        字节等于品牌文件（浏览器真实请求形状 —— B-15/b/c 都没走过它）；
+#:     ② **实例指纹**：href 的 `?v=<内容8>.<实例8>` 实例段必须由 `os.getpid()`
+#:        现算（服务重启 ⇒ URL 必变 ⇒ Edge 缓存强制失效，治「缓存了坏结果
+#:        而 URL 永不变」）。写死的实例段在这条上红。
+
+
+def _b15d_href_parts(link_html):
+    """从 FAVICON_LINK 里取 (内容段, 实例段)；形状不对 ⇒ None。"""
+    m = re.search(r'href="([^"]+)"', link_html or "")
+    if not m:
+        return None
+    href = m.group(1)
+    if "?v=" not in href:
+        return None
+    parts = href.split("?v=", 1)[1].split(".")
+    if len(parts) != 2:
+        return None
+    return parts[0], parts[1]
+
+
+def _b15d_reach():
+    """腿①：无凭证请求 favicon ⇒ 200 且字节＝品牌文件。返回 (ok, why)。"""
+    import http.client
+    hub = _TMPREG.tmpdir(prefix="g0514_b15d_")
+    try:
+        httpd, _tok = SV.make_server(port=0, root=hub, token="tok-b15d")
+    except Exception as e:                                      # noqa: BLE001
+        return False, "起不了测试服务：%s: %s" % (type(e).__name__, e)
+    port = httpd.server_address[1]
+    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t.start()
+    try:
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        try:
+            # 一个凭证都不带：无 query token、无 X-Antinel-Token 头、无 cookie
+            # —— 浏览器容器在 cookie 不可用时的真实请求形状。
+            c.request("GET", "/assets/favicon.ico")
+            r = c.getresponse()
+            body = r.read()
+            ct = r.getheader("Content-Type") or ""
+            st = r.status
+        finally:
+            c.close()
+    except Exception as e:                                      # noqa: BLE001
+        return False, "请求 favicon 失败：%s: %s" % (type(e).__name__, e)
+    finally:
+        try:
+            httpd.shutdown()
+        except Exception:                                       # noqa: BLE001
+            pass
+    if st != 200:
+        return False, ("无凭证请求 favicon 得到 HTTP %s —— 浏览器容器（cookie 被"
+                       "禁用／清除／隐身窗／恢复会话）就是这个形状，403 就会落"
+                       "默认球（2026-10-23 复发轮现场）" % st)
+    if "icon" not in ct:
+        return False, "Content-Type 是 %r，不是图标" % ct
+    brand = WIN.brand_icon_path()
+    if not brand or not os.path.isfile(brand):
+        return False, "拿不到品牌图标本体（brand_icon_path() 返回 %r）" % (brand,)
+    with io.open(brand, "rb") as f:
+        want = f.read()
+    if body != want:
+        return False, ("favicon 字节与品牌文件不一致（got %d B，want %d B）—— "
+                       "浏览器拿到的是别的东西" % (len(body), len(want)))
+    return True, ""
+
+
+def _b15d_core(server_src, link_html):
+    if not server_src or not server_src.strip():
+        return "读不到 inbox_server.py 源码 —— 判据锚点失效"
+    parts = _b15d_href_parts(link_html)
+    if parts is None:
+        return ("favicon 的 href 不是 `?v=<内容8>.<实例8>` 两段式 —— 实例段缺失"
+                " ⇒ 服务重启后 URL 不变 ⇒ Edge 缓存不失效（本轮复发机制）")
+    _content_fp, inst_fp = parts
+    if not re.fullmatch(r"[0-9a-f]{8}", inst_fp or ""):
+        return "实例段 %r 不是 8 位十六进制" % (inst_fp or "")[:24]
+    body = re.search(r"def _favicon_href\(\):(.*?)(?=\n\S)", server_src, re.S)
+    if not body:
+        return "找不到 `_favicon_href` 定义 —— 判据锚点失效（改名了？）"
+    if "os.getpid()" not in body.group(1):
+        return ("`_favicon_href` 里没有 os.getpid() —— 实例段不是从进程派生的，"
+                "服务重启后 URL 可能不变（写死的常量）")
+    # 现算：FAVICON_LINK 由**本进程** import 时算出 ⇒ 实例段应等于本进程 pid 的 sha8
+    want_inst = hashlib.sha256(str(os.getpid()).encode("ascii")).hexdigest()[:8]
+    if inst_fp != want_inst:
+        return ("实例段 %r 不是本进程 pid 的 sha8（现算 %r）—— 写死的常量在这条"
+                "上红" % (inst_fp[:24], want_inst))
+    ok, why = _b15d_reach()
+    if not ok:
+        return why
+    return True
+
+
+@check("B-15d favicon 无凭证可达＋实例指纹：浏览器容器拿得到，重启必换 URL")
+def c_b15d():
+    return _b15d_core(_src(_SERVER_REL), SV.FAVICON_LINK)
+
+
+@check("N-B15d 负控：收回免鉴权／实例段写死 ⇒ 各自必须红")
+def n_b15d():
+    src = _src(_SERVER_REL)
+    link = SV.FAVICON_LINK
+    base = _b15d_core(src, link)
+    if base is not True:
+        return "负控前置失败：当前生产实现没通过 B-15d（%r）" % (base,)
+
+    # ① favicon 收回鉴权（单点变异：模块级开关 _FAVICON_OPEN）
+    with _Patch(SV, _FAVICON_OPEN=False):
+        ok, why = _b15d_reach()
+        if ok:
+            return ("负控失效：favicon 收回鉴权后，无凭证请求仍拿到 200 —— "
+                    "404/403 那条腿是假的")
+        if "HTTP" not in str(why):
+            return "方向不对：收回鉴权报的红不是 HTTP 状态那条（%s）" % str(why)[:120]
+
+    # ② 实例段写死（只变异 _favicon_href 函数体内的第一处 os.getpid()）
+    body = re.search(r"def _favicon_href\(\):(.*?)(?=\n\S)", src, re.S)
+    if not body:
+        return "负控夹具不成立：切不出 _favicon_href 函数体"
+    mut_body = body.group(1).replace("os.getpid()", '"0"', 1)
+    if mut_body == body.group(1):
+        return "负控夹具不成立：函数体里没有 os.getpid() 可变异"
+    mut = src.replace(body.group(1), mut_body, 1)
+    r2 = _b15d_core(mut, link)
+    if r2 is True:
+        return "负控失效：实例段写死仍判合格"
+    if "os.getpid" not in str(r2) and "实例段" not in str(r2):
+        return "方向不对：写死实例段报的红不是实例那条（%s）" % str(r2)[:120]
     return True
 
 
@@ -8969,6 +9125,8 @@ def main(argv=None):
           "哨标出生即退 3 天隐形；红里带编译器首行）")
     print("＋ FLO-19a…c 品牌底板不丢（0.55.0：四副本同源／真渲染像素满幅／"
           "整窗可点＋无底板规格判废回落）")
+    print("＋ B-15d favicon 无凭证可达＋实例指纹（0.55.0：浏览器容器拿得到／"
+          "服务重启必换 URL —— 治 Edge 缓存坏图后 URL 永不变的死灰复燃）")
     print("＋ J1–J5「五条违和」同类可抓（原 0518，2026-10-16 按 A2/P5 并入）")
     print("（负控全部内存/临时目录变异，不写任何产品文件；node 缺失 ⇒ SKIP，不假绿）")
     if only:
