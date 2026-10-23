@@ -990,6 +990,18 @@ def main():
     record("0.55.1 空项目 report（默认走会话）：退出码 0 ＋ 话说在 stdout",
            rcE == 0 and bool(outE.strip()),
            "rc=%s out=%r err=%r" % (rcE, outE.strip()[:40], errE.strip()[:40]))
+    # ★ 0.55.1：空窗口**不许出分**。实测过一版：空态照样打「Security Score: 100/100
+    #   (secure) ＋ 环境安全」——分母为零，100 分与「安全」是同一种假话。
+    #   负控＝下面 T2 里「report json score/dedupe」仍要求有数据时 0≤score≤100，两向都锁。
+    rcS, outS, errS, _ = run("report.py", ["--root", str(_ep), "--format", "json"])
+    try:
+        repS = json.loads(outS)
+    except Exception:
+        repS = {}
+    record("0.55.1 空窗口不出分（empty=true / score=None / grade=no_data）",
+           rcS == 0 and repS.get("empty") is True and repS.get("score") is None
+           and repS.get("grade") == "no_data",
+           "rc=%s score=%r grade=%r" % (rcS, repS.get("score"), repS.get("grade")))
     fut = proj / ".psl" / "audit" / ((datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d") + ".jsonl")
     fut.write_text(json.dumps({"ts": (datetime.now() + timedelta(days=1)).isoformat(timespec="seconds"),
                                "type": "pre_tool_use", "tool": "Bash", "session": "c6-future",

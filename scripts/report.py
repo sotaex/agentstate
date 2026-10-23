@@ -473,12 +473,24 @@ def render_text(rep, log_label):
     L.append("  whitelist-released secrets reads (caught, then let through): %d%s" % (
         _sw, "   <-- review these: they are NOT in the findings above" if _sw else ""))
     sb = rep.get("score_basis", {})
-    L += ["", BAR, " Security Score: %d/100 (%s)" % (rep["score"], rep["grade"]),
-          " Score basis: 100 - 20 x %d critical - 5 x %d warning = %d (clamped to %d); dedupe on (rule, target)" % (
-              sb.get("critical", 0), sb.get("warning", 0), sb.get("raw", rep["score"]), rep["score"])]
+    if rep.get("empty"):
+        # ★ 0.55.1（2026-10-23）：空窗口最危险的不是「没话说」，是**给了分数**。
+        #   实测：新装项目第一次 report 打出「Security Score: 100/100 (secure) ＋
+        #   环境安全」——分母为零，100 分与「安全」都是假话。企业会截图这句话，
+        #   要么信错，要么发现没数据后不再信任何结论。空态一律不出分。
+        L += ["", BAR,
+              " Security Score: ——（这一窗口没有任何被记录的调用，不出分）",
+              " 为什么不出分：分数是「问题占多少」；分母为零时，100 分和「环境安全」是同一种假话。"]
+    else:
+        L += ["", BAR, " Security Score: %d/100 (%s)" % (rep["score"], rep["grade"]),
+              " Score basis: 100 - 20 x %d critical - 5 x %d warning = %d (clamped to %d); dedupe on (rule, target)" % (
+                  sb.get("critical", 0), sb.get("warning", 0), sb.get("raw", rep["score"]), rep["score"])]
     nfind = len(rep["findings"])
     lang = _lang()
-    if lang == "zh":
+    if rep.get("empty"):
+        L.append(" 结论：这一窗口没有可统计的记录 —— 既不能说安全，也不能说不安全。"
+                 "装好钩子之后，下一次 Agent 调用就会被记进来。")
+    elif lang == "zh":
         if nfind:
             L.append(" 结论：发现 %d 项问题（CRITICAL %d / WARNING %d），建议优先处理 CRITICAL 项；完整轨迹见审计日志。" % (
                 nfind, rep["summary"].get("critical", 0), rep["summary"].get("warning", 0)))
@@ -561,8 +573,15 @@ def render_html(rep, log_label):
         width = int(300 * cnt / top)
         bars.append("<div class='bar'><span class='lbl'>%s</span>"
                     "<span class='fill' style='width:%dpx'></span> %d</div>" % (e(tool), width, cnt))
-    score_color = COLORS["ok"] if rep["score"] >= 90 else (
-        COLORS["warning"] if rep["score"] >= 70 else COLORS["critical"])
+    # ★ 0.55.1：空窗口 rep["score"] 是 None（不出分）。HTML 仍然要能打开，
+    #   不能因为「没有分数」就 500 —— 空态页面比崩溃页诚实得多。
+    if rep.get("score") is None:
+        score_color = COLORS["neutral"]
+        score_txt = "&mdash;"
+    else:
+        score_color = COLORS["ok"] if rep["score"] >= 90 else (
+            COLORS["warning"] if rep["score"] >= 70 else COLORS["critical"])
+        score_txt = "%d/100" % rep["score"]
     tamper = ("<p class='tamper'>%s</p>" % e(rep["self_tamper"])) if rep.get("self_tamper") else ""
     # 0.42.0 (P5-1): hook_slow gets the same treatment as the text report --
     # its own line, because a host timeout is an ALLOW and these verdicts may
@@ -589,7 +608,7 @@ th{background:#f8f9fa}
 </style></head><body>
 <h1>Antinel Security Audit Report</h1>
 <div class="meta">%(when)s | host: %(host)s | sessions: %(sessions)d | log: %(log)s</div>
-<div class="score">%(score)d/100</div><div>%(grade)s</div>
+<div class="score">%(score_txt)s</div><div>%(grade)s</div>
 %(tamper)s
 <h2>Findings (critical: %(crit)d, warning: %(warn)d)</h2>
 <table><tr><th>Severity</th><th>Rule</th><th>Description</th><th>Target</th><th>Decision</th><th>Remediation</th></tr>
@@ -603,7 +622,7 @@ th{background:#f8f9fa}
         "neutral": COLORS["neutral"], "ok": COLORS["ok"], "critical": COLORS["critical"],
         "score_color": score_color, "when": e(rep["generated_at"][:16].replace("T", " ")),
         "host": e(rep["host"]), "sessions": len(rep["sessions"]), "log": e(log_label),
-        "score": rep["score"], "grade": e(rep["grade"]), "tamper": tamper,
+        "score_txt": score_txt, "grade": e(rep["grade"]), "tamper": tamper,
         "crit": rep["summary"].get("critical", 0), "warn": rep["summary"].get("warning", 0),
         "rows": "\n".join(rows) or "<tr><td colspan='6'>No findings</td></tr>",
         "post": st["post"], "pre": st["pre"], "blocked": st["blocked"], "alerted": st["alerted"],
@@ -685,10 +704,23 @@ def _session_dna_main(args, root, log_path):
             #   **默认路径**（不传 --days 就走会话；而人敲的就是 `antinel report`）。
             #   旧版在这里 return 1 ⇒ 新装企业第一天拿到失败退出码，被读成「查询失败」。
             #   与 --days 路径同口径：空态不是错，照实说，退出码 0。
-            sys.stdout.write(
-                "这个项目还没有可统计的会话（心跳与 CLI 不算）。\n"
-                "这表示这一窗口里没有东西可算，不是「一切正常」的结论。\n"
-                "装好钩子之后，下一次 Agent 调用就会被记进来。\n")
+            # ★ 同一处还要分格式：`python -m scripts.report --format json` 是
+            #   README 教的导出命令，空态若在 stdout 印中文，`--format json` 的调用方
+            #   会拿到「rc=0 但不是 JSON」—— 这比原来的 rc=1 更坏（失败被伪装成成功）。
+            _why = "这个项目还没有可统计的会话（心跳与 CLI 不算）"
+            if args.format == "json":
+                sys.stdout.write(json.dumps(
+                    {"empty": True, "session": None, "reason": _why,
+                     "note": "这不是「一切正常」的结论：这一窗口里没有东西可算。"},
+                    ensure_ascii=False) + "\n")
+            else:
+                # html / csv / sarif 在空态下**不编造**空文档结构（编出来的表头
+                # 会让下游以为「这一版有这个格式的空表示例」）；一律回退成这句话，
+                # 退出码仍为 0。README 已写明非 json 格式的空态长这样。
+                sys.stdout.write(
+                    _why + "。\n"
+                    "这表示这一窗口里没有东西可算，不是「一切正常」的结论。\n"
+                    "装好钩子之后，下一次 Agent 调用就会被记进来。\n")
             return 0
         session_q = latest
     # 0.23.0 (A3/A4): pricing lookup -- project rules first, then the package's
@@ -862,6 +894,9 @@ def main(argv=None):
         rep["period"] = {"since": since, "days": args.days}
         if empty:
             rep["empty"] = True
+            # ★ 0.55.1：空窗口不出分。见 text 渲染处的长注释（分母为零时 100 分是假话）。
+            rep["score"] = None
+            rep["grade"] = "no_data"
         label = str(log_path) if len(files) != 1 else files[0]
         if args.format == "json":
             out = json.dumps(rep, ensure_ascii=False, indent=1)
