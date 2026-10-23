@@ -137,6 +137,16 @@
      ★ 缺粮「暂未启用」（J7）做**双向断言**：`granary.state()=="off"` ⇒
        必须写；非 off ⇒ **不许**写。只判"必须有"的话，粮账一开那句就成了假话。
 
+  ⑲ FLO-18a/b logo.ps1 内嵌 C# **真编译**（**0.55.0，2026-10-23**）：
+     0.53.2 T4 给 LogoForm 加的 `DpiChanged` 字段撞上 .NET 4.7+ 基类同名
+     **事件** ⇒ CS0108「隐藏继承成员」，而 PS 5.1 的 Add-Type 把警告当
+     错误 ⇒ logo.ps1 进程出生即退（退出码 1，任何窗都不存在）⇒ 收缩
+     只报「哨标进程起了但窗口 5.0s 内没出现」，矛头指向负载/预算，真因
+     是编译失败。两个 03:54 起的**旧代码**常驻哨标把回归遮了 3 天；全仓
+     没有一条判据真编译过这段 C#（FLO-10/13/14 只切纯函数真跑）。修法＝
+     字段加 `new`（有意隐藏）；判据把 here-string **原文**切出来真编译，
+     红里带编译器第一行；负控删掉 new ⇒ 必须红。详见「FLO-18 族」段头。
+
 ★ 规格真源（U-17 的唯一依据，不许凭记忆）：
     `D:\\2026\\PSL\\Antinel品牌动效报警语法v1.2（2026-09-27）.md`
     速度 12→8→5.5→3.5 s/圈；波幅 +45/70/105px @.30/.45/.65；
@@ -8291,6 +8301,128 @@ def n_tp_e2():
     return True
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# FLO-18 族 —— logo.ps1 内嵌 C# 真编译（0.55.0，2026-10-23）
+#
+# 病（创始人 2026-10-23 09:54 截图「收缩失败：哨标没起来（哨标进程起了
+# 但窗口 5.0s 内没出现）」）：0.53.2 T4 给 LogoForm 加了字段
+# `public System.Action<int> DpiChanged;`（处理 WM_DPICHANGED）。.NET 4.7+
+# 的 System.Windows.Forms.Form **本来就有一个 DpiChanged 事件**，同名字段
+# ＝CS0108「隐藏继承成员」；PowerShell 5.1 的 Add-Type 把警告当错误
+# （"视为错误的警告"）⇒ 整个 Add-Type 抛异常 ⇒ logo.ps1 进程出生即退
+# （退出码 1，任何窗都不存在）⇒ 收缩路径只看到「窗口 5.0s 内没出现」，
+# 矛头指向负载/预算，真因是编译失败。
+# 为什么 3 天没人发现（10-20 06:47 落地 → 10-23 09:54 创始人撞上）：
+# 03:54 起的两个**旧代码**常驻哨标一直好使，把新冷启全崩遮住了；而全仓
+# 没有一条判据真编译过这段 C#（FLO-10/13/14 只切纯函数真跑，FLO-01 只做
+# 静态契约）——「不起真进程就永远绿」正是这类回归的温床。
+# 修法：字段加 `new`（有意隐藏，语义不变）。
+# 判据：把 Add-Type 那个 here-string **原文**切出来真编译（Add-Type
+# -Path，与产品同一编译器、同一 warnings-as-errors）；编译不过 ⇒ 红，且
+# 红里带编译器第一行（下一个同类回归直接说人话，不用再活体复现）。
+# 负控：把 `new` 删回去 ⇒ 同一把尺子必须判红。
+# ═══════════════════════════════════════════════════════════════════════
+
+#: here-string 的起止锚点（收尾行还带着 -ReferencedAssemblies）
+_FL18_START = "Add-Type -TypeDefinition @'"
+_FL18_END = "'@ -ReferencedAssemblies"
+
+
+def _fl18_slice():
+    """切出 logo.ps1 里 Add-Type 的 C# 块与引用程序集（原文，不重写）。"""
+    src = io.open(IL.script_path(), encoding="utf-8").read()
+    i = src.find(_FL18_START)
+    if i < 0:
+        raise RuntimeError("logo.ps1 里找不到 Add-Type here-string 起点"
+                           "（源码已变，需更新判据锚点）")
+    j = src.find(_FL18_END, i)
+    if j < 0:
+        raise RuntimeError("Add-Type here-string 收尾行找不到"
+                           "（源码已变，需更新判据锚点）")
+    cs = src[i + len(_FL18_START):j].strip("\n")
+    refs = src[j + len(_FL18_END):].split("\n", 1)[0].replace(",", " ").split()
+    if "class LogoForm" not in cs:
+        raise RuntimeError("切出来的块里没有 class LogoForm —— 提取窗口漂了")
+    # 机制层断言：C# 块必须 ASCII。PS 5.1 无 BOM 按 GBK 读 .ps1，非 ASCII
+    # 字节（哪怕只在注释里）会静默劣化行为（与 FLO-10 驱动同一纪律）。
+    try:
+        cs.encode("ascii")
+    except UnicodeEncodeError as e:
+        raise RuntimeError("内嵌 C# 含非 ASCII 字节（%s）—— PS 5.1 会按 GBK "
+                           "误解码，行为静默劣化" % e)
+    return cs, refs
+
+
+def _fl18_compile(cs, refs):
+    """真编译（`Add-Type -Path`，与产品同一编译器）。返回 (ok, 首行输出)。"""
+    ps = _ps_path()
+    if not ps:
+        raise Skip("PATH 上没有 powershell/pwsh —— 内嵌 C# 无法真编译")
+    import subprocess
+    d = _TMPREG.tmpdir(prefix="g0514_flo18_")
+    csf = os.path.join(d, "logo_form.cs")
+    with io.open(csf, "w", encoding="ascii", newline="\n") as f:
+        f.write(cs)
+    drv = os.path.join(d, "compile.ps1")
+    # ★ 引用程序集走**单个逗号串**、驱动内拆分：`-Refs A B` 这种多值传法
+    #   在 -File 调用里只绑第一个值、其余被静默吞掉（2026-10-23 实测：
+    #   RefsCount=1 且不报错）⇒ 编译少一个引用，红因会指向完全错误的地方。
+    body = (
+        "param([string]$Cs, [string]$Refs)\n"
+        "$ErrorActionPreference = 'Stop'\n"
+        "$arr = @()\n"
+        "if ($Refs) { $arr = @($Refs -split ',' | "
+        "ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }) }\n"
+        "try {\n"
+        "  if ($arr.Count -gt 0) {\n"
+        "    Add-Type -Path $Cs -ReferencedAssemblies $arr -ErrorAction Stop\n"
+        "  } else {\n"
+        "    Add-Type -Path $Cs -ErrorAction Stop\n"
+        "  }\n"
+        "  Write-Output 'COMPILED-OK'\n"
+        "} catch {\n"
+        "  $first = (($_.Exception.Message -split \"`n\")[0])\n"
+        "  Write-Output ('COMPILE-FAIL: ' + $first)\n"
+        "  exit 1\n"
+        "}\n")
+    body.encode("ascii")
+    with io.open(drv, "w", encoding="ascii", newline="\n") as f:
+        f.write(body)
+    p = subprocess.run([ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                        drv, "-Cs", csf, "-Refs", ",".join(refs)],
+                       capture_output=True, timeout=180)
+    out = (p.stdout or b"").decode("utf-8", "replace").strip()
+    ok = (p.returncode == 0 and "COMPILED-OK" in out)
+    return ok, out or ("rc=%r" % p.returncode)
+
+
+@check("FLO-18 logo.ps1 内嵌 C# 真编译：Add-Type 那个 here-string 原样编译通过")
+def c_flo18():
+    cs, refs = _fl18_slice()
+    ok, out = _fl18_compile(cs, refs)
+    if not ok:
+        return ("内嵌 C# 编译不过：%s —— 哨标进程会出生即退（任何窗都不"
+                "存在），收缩只看到「窗口没出现」；真因在这里" % out[:300])
+    return True
+
+
+@check("N-FLO18 负控：删掉 DpiChanged 字段的 new ⇒ 同一把尺子必须判红")
+def n_flo18():
+    if c_flo18() is not True:
+        return "夹具不成立：未变异时 FLO-18 就不合格，负控无分辨力"
+    cs, refs = _fl18_slice()
+    mutant = cs.replace("public new System.Action<int> DpiChanged;",
+                        "public System.Action<int> DpiChanged;")
+    if mutant == cs:
+        return ("夹具不成立：DpiChanged 字段行找不到或已不带 new —— "
+                "负控锚点漂了（判据要跟着源码更新）")
+    ok, out = _fl18_compile(mutant, refs)
+    if ok:
+        return ("负控失效：删掉 new 之后仍然编译通过 —— 这条尺子抓不到"
+                "「隐藏继承成员」这一类回归")
+    return True
+
+
 def main(argv=None):
     # ★ 2026-10-20 加：`--only <前缀>` 单跑一族（可给多个）。
     #   为什么需要：判据套件跑到中段阻塞时，全量重跑一次要十几分钟，
@@ -8316,6 +8448,8 @@ def main(argv=None):
     print("＋ B-17a…b 关窗确认消失（0.53.2：投出去了≠没了／陈旧冒泡死灰复燃）")
     print("＋ B-18/B-18b 气泡通道健康可见面（0.53.6：总账 §3.4 —— "
           "「为什么没弹」不再只活在 tick 返回里）")
+    print("＋ FLO-18 内嵌 C# 真编译（0.55.0：CS0108 warnings-as-errors ⇒ "
+          "哨标出生即退 3 天隐形；红里带编译器首行）")
     print("＋ J1–J5「五条违和」同类可抓（原 0518，2026-10-16 按 A2/P5 并入）")
     print("（负控全部内存/临时目录变异，不写任何产品文件；node 缺失 ⇒ SKIP，不假绿）")
     if only:

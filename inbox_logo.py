@@ -94,6 +94,14 @@ SHOW_WAIT_SEC = 5.0
 
 #: 起的等待预算（秒）：哨标是 PowerShell 冷启，比 Edge 快，但也要预算。
 OPEN_WAIT_SEC = 5.0
+#: ★ 0.55.0（2026-10-23）：**进程活着就等**的硬上限（秒）。旧形状用同一个
+#:   墙钟预算判「起没起来」：负载下 PowerShell 冷启实测 6.67s 才就位
+#:   （闸门全速跑时），5s 预算把「慢」误判成「死」——用户点一下收缩，
+#:   面板没关、哨标也没出现（0.52.0 起两次只加数字：2s→5s，形状没动）。
+#:   现在的判定：进程退了 ⇒ 立刻收场并把它的输出带进 why；进程还活着
+#:   ⇒ 它只是慢，等到这个上限（只有真僵尸——活着不出窗——才被截住）。
+#:   与 `prewarm` 的 20s 同一笔账（那边早就写明「冷启可超 5s 假失败」）。
+ALIVE_WAIT_SEC = 20.0
 
 #: 退役等待预算（秒）：哨标 40ms 轮询一次标志，0.75s 足够；给到 2s 是余量。
 RETIRE_WAIT_SEC = 2.0
@@ -527,6 +535,42 @@ def prewarm(root=None, launcher=None, killer=None, wait_sec=20.0,
     return out
 
 
+def _rm_quiet(path):
+    """安静删临时文件（哨标输出留痕）。删不掉不抛——它只是证据副本。"""
+    if not path:
+        return
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _tail_err(path, limit=400):
+    """读哨标进程输出里**带得出原因**的那几行（失败时 why 的下一步）。
+
+    PS 5.1 重定向流按 GBK 写（中文 Windows）；解不动就 replace，留片段
+    也比什么都没有强。Add-Type 编译失败的金句在输出的**前部**（编译器
+    第一行），PowerShell 的堆栈在后部 —— 只取尾巴会把金句丢掉
+    （2026-10-23 实测：尾巴全是"所在位置…CategoryInfo"）。所以先挑带
+    错误字样的行，挑不到再退回开头。文件不在/读不出 ⇒ 空串。
+    """
+    if not path or not os.path.exists(path):
+        return ""
+    try:
+        with open(path, "rb") as f:
+            raw = f.read()
+    except OSError:
+        return ""
+    txt = raw.decode("gbk", "replace").strip()
+    if not txt:
+        return ""
+    keys = ("Add-Type", "rror", "错误", "异常", "Exception", "失败")
+    hits = [ln.strip() for ln in txt.splitlines()
+            if any(k in ln for k in keys)]
+    out = " | ".join(hits[:3]) if hits else txt[:limit]
+    return out[:limit]
+
+
 def open_floating(root=None, launcher=None, finder=None, killer=None,
                   wait_sec=OPEN_WAIT_SEC, size=46, x=-1, y=-1, topmost=None,
                   verbose=True):
@@ -536,6 +580,11 @@ def open_floating(root=None, launcher=None, finder=None, killer=None,
     ★ 谁起窗谁等它就位（C4 纪律）：一次性调用方（服务 POST 是长命进程，
       但这条路径的目标用户是"点了就收缩"，不等到位=假成功）。
     ★ 起不来 ⇒ `ok=False` + why 说清原因，**不关任何东西**（调用方决定）。
+    ★★ 0.55.0（2026-10-23）：等的判据从「墙钟」换成「进程活不活」——
+      进程退了 ⇒ 立刻收场，why 带它的输出尾巴（编译失败/脚本语法错从
+      这里现形，不再只说「窗口没出现」）；进程还活着 ⇒ 它只是慢（负载
+      下冷启实测 6.67s），等到 `ALIVE_WAIT_SEC` 硬上限。5s 墙钟把「慢」
+      误判成「死」，正是创始人截图那个「收缩失败」的另一半病灶。
     ★ 置顶失败**不是致命的**：WinForms 那侧 `$form.TopMost=$true` 才是主机制
       （服务端再设一次只是加固），所以置顶没成照样算"就位"，但在 `why` 里
       如实留下 `topmost=False` —— 不把"没置顶"说成"置顶了"。
@@ -553,15 +602,25 @@ def open_floating(root=None, launcher=None, finder=None, killer=None,
         return out
     # 2) 起
     cmd = logo_cmd(size=size, x=x, y=y, root=root)
+    proc = None          # 只有真起进程时才有句柄（判据注入 launcher 时没有）
+    errp = None          # 同上：真起进程时才接它的输出（失败时 why 要带得出原因）
     if launcher is None:
         if os.name != "nt":
             out["why"] = "非 Windows：起不了 WinForms 哨标（如实降级，不假装起了）"
             return out
+        import tempfile
         try:
-            subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             creationflags=0x08000000 if os.name == "nt" else 0)
+            # 0.55.0：输出接进临时文件而不是 DEVNULL —— 进程起了又死了
+            # （编译失败/脚本语法错）时，why 里能带上它自己的遗言。
+            errf = tempfile.NamedTemporaryFile(
+                prefix="antinel-logo-", suffix=".log", delete=False)
+            errp = errf.name
+            proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
+                                    stdout=errf, stderr=subprocess.STDOUT,
+                                    creationflags=0x08000000 if os.name == "nt" else 0)
+            errf.close()      # 父进程让开 fd；子进程继承的那份继续写
         except Exception as e:                              # noqa: BLE001
+            _rm_quiet(errp)
             out["why"] = "起哨标进程失败：%s: %s" % (type(e).__name__, e)
             return out
     else:
@@ -571,10 +630,16 @@ def open_floating(root=None, launcher=None, finder=None, killer=None,
             out["why"] = "注入的 launcher 失败：%s: %s" % (type(e).__name__, e)
             return out
     # 3) 等窗就位 + 回读 + 置顶
+    #    ★ 0.55.0：limit 分两种口径。注入 launcher（判据假桌面）没有进程
+    #      句柄，仍按调用方给的 wait_sec（假桌面没有"活着但慢"的形状）；
+    #      真起了进程 ⇒ 进程活着就等到 ALIVE_WAIT_SEC（见常量处的账）。
     t0 = time.time()
+    limit = float(wait_sec) if proc is None else max(float(wait_sec),
+                                                     ALIVE_WAIT_SEC)
     hs = []
     why_wait = ""
-    while time.time() - t0 < float(wait_sec):
+    dead = None
+    while time.time() - t0 < limit:
         time.sleep(0.15)
         try:
             hs = list(find())
@@ -583,11 +648,21 @@ def open_floating(root=None, launcher=None, finder=None, killer=None,
             why_wait = "%s: %s" % (type(e).__name__, e)
         if hs:
             break
+        if proc is not None and proc.poll() is not None:
+            dead = proc.returncode      # 进程退了 ⇒ 不是"慢"，是"死了"
+            break
     out["windows"] = hs
+    if not hs and dead is not None:
+        out["why"] = "哨标进程 %.1fs 时就退了（退出码 %s），窗口不可能再来：%s" % (
+            time.time() - t0, dead, _tail_err(errp) or "（没有输出）")
+        _rm_quiet(errp)
+        return out
     if not hs:
         out["why"] = "哨标进程起了但窗口 %.1fs 内没出现%s" % (
-            float(wait_sec), ("（%s）" % why_wait) if why_wait else "")
+            limit, ("（%s）" % why_wait) if why_wait else "")
+        _rm_quiet(errp)
         return out
+    _rm_quiet(errp)
     try:
         if topmost is not None:
             topmost(hs)

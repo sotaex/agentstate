@@ -185,7 +185,15 @@ public class LogoLayered {
 public class LogoForm : System.Windows.Forms.Form {
   public Func<int, int, int> NcHitTest;      // client (x,y) -> HTCLIENT(1)/HTTRANSPARENT(-1)
   public System.Action FramePaint;           // WM_PAINT: push one layered frame
-  public System.Action<int> DpiChanged;      // WM_DPICHANGED: new DPI (T4)
+  // `new` below is REQUIRED, not cosmetic: System.Windows.Forms.Form has
+  // carried a DpiChanged EVENT since .NET 4.7. A same-named plain field is
+  // CS0108 ("hides inherited member"), and PowerShell 5.1 Add-Type compiles
+  // warnings-as-errors -- so the whole Add-Type throws, the badge process
+  // exits (code 1) before any window exists, and collapse reports the
+  // misleading "sentinel process started but no window in 5.0s". Measured
+  // 2026-10-23 on this machine (.NET 4.8.1, PS 5.1.26100). Do not drop it;
+  // the compile guard (FLO-17/N-FLO17) fails if this block stops compiling.
+  public new System.Action<int> DpiChanged;   // WM_DPICHANGED: new DPI (T4)
   protected override CreateParams CreateParams {
     get { CreateParams cp = base.CreateParams; cp.ExStyle |= 0x00080000; return cp; } }
   protected override void WndProc(ref System.Windows.Forms.Message m) {
