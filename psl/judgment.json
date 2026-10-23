@@ -2,13 +2,13 @@
  "spec": "psl-vs-0.1",
  "card_id": "antinel-security-suite",
  "skill": "antinel-security",
- "skill_version": "0.55.1",
+ "skill_version": "0.55.2",
  "verdict": "PASS",
  "status": {
   "value": "current",
   "derivation": "auto",
   "reason": null,
-  "checkedAt": "2026-10-23T19:45:40+08:00",
+  "checkedAt": "2026-10-23T21:58:37+08:00",
   "note": "re-derive any time: python -m tools.antinel_verify (--manifest for all 24 shipped files); which assertions failed: discrimination.failed[]"
  },
  "scope": {
@@ -51,8 +51,8 @@
    "op": "black-box subprocess assertions (stdin JSON in, exit code + stdout/stderr out)"
   },
   "assertions": {
-   "passed": 318,
-   "total": 318
+   "passed": 320,
+   "total": 320
   },
   "failed": [],
   "by_kind": {
@@ -97,8 +97,8 @@
  "platformSpec": true,
  "objectOwnership": "self",
  "objectOwnershipBasis": "subject github.com/sotaex is in the signed namespace list",
- "assertions_total": 318,
- "assertions_passed": 318,
+ "assertions_total": 320,
+ "assertions_passed": 320,
  "criteria_independence": "Assertions exercise the hook protocol, rule matching, scanner, installer and reporter as black boxes through subprocesses (stdin JSON in, exit code and stdout/stderr out); they were authored from the design specification ANT-SEC-SPEC-001 v1.1, not from the implementation; third-party re-run supported.",
  "environment": {
   "python": "3.13.14",
@@ -108,7 +108,7 @@
  },
  "digests": {
   "psl/antinel-namespaces.json": "sha256:2db67f32a5b803560f458c4589bd4bb4678cc17bc16625f6b6b3ad20f9b202d2",
-  "rules/default.json": "sha256:707aba9b0d1c5d2d868b948372e4a34e995fa9bd910e85b6de8c67178abd99f2",
+  "rules/default.json": "sha256:b2e4c47b0eb2d839c2a067814b89b87c5fc8a01a1c392e902315e6784572a9e6",
   "rules/pricing.json": "sha256:e299e7afa07a97128ce00c13706379c79368c747cd4303c488f1c53c5339e253",
   "rules/typosquat_top.json": "sha256:0c699af6ba05d7675055be29b8c1e379714d9fbf44c4369a1717cade424190ad",
   "rules/economics/workbuddy.json": "sha256:7d570a0d8cb09f803695a4af147269620acdd5da5f403e2534a0c418c202c6a6",
@@ -118,20 +118,20 @@
   "rules/economics/generic.json": "sha256:4849374b3d2443dd77329b09d348dec03794863aa8f991d98ea5380a9849b82f",
   "hooks/pre_tool_use.py": "sha256:2092205056528385cffef95228fd0d32b9bdc95dfc7501aff2b432f7e2a7f426",
   "hooks/post_tool_use.py": "sha256:60965e54079bb2a3abc92a133d0400a60e4456a7d00527f6c7248170ba95f57d",
-  "scripts/scan.py": "sha256:029e3dd67d0fa7ede2b8d9300df5e52f0e497b781be853117b0bb2cc3fee2cc1",
+  "scripts/scan.py": "sha256:1f8b1e4da5134128966b46efdc07340ea67d8e6a8350a41f94510e12c92a5bfa",
   "scripts/install.py": "sha256:f6a2a6dccf9539bb0ef2f573d7712418ff850eee14ec0b564119761749405545",
-  "scripts/report.py": "sha256:5ad46960e396c4b28cf11682f7d8f2f35230c461212c816d51fa901b17d58bcd",
-  "scripts/verification_tests.py": "sha256:a219c891f6e54ee2f74888d86aa1fc2179f830ab557359ea25c4485590ce3e23",
+  "scripts/report.py": "sha256:f45e19bc17d2deae0dda3106ac3693341a59d2822d9f76f6d46818f250d9ce78",
+  "scripts/verification_tests.py": "sha256:a113e992390d929e2d57d6a7fb68faa4500ae0cadd3399fa2bf8cceb00b399df",
   "session_dna.py": "sha256:38b2bd765fdf2308fa698eb507e53c4ba7fbe2bf11c94216d95ad5dd116fb205",
   "transcript_reader.py": "sha256:c0ce99c5bdfb255f170ca744c011ae64ceb9569d1c9dd8efc1a2c096ff89dc1c",
   "audit_chain.py": "sha256:a501da7b3bb7b65e9fb2da0515175a5a2e547540d73c4b331b292300e712ba56",
-  "antinel.py": "sha256:5228bf234e586caa79440b34737be11c05f0069170a3581d9d9edb3c8c1d560b",
+  "antinel.py": "sha256:02dd9dd1f8dd8906ad320aad1d2f4d3fa03a60d5f78c94f864da42f1da2cd94d",
   "hub.py": "sha256:edcb1b94194e551d5b0023749ae5417e67729b22eb391198fcae74a906668c08",
   "tools/enforce_probe.py": "sha256:c82cb457481a5e5a70c932b66c8c909f8050024f700f88b454bbea66992349ad"
  },
  "run": {
-  "started_at": "2026-10-23T19:39:02+0800",
-  "duration_ms": 398762,
+  "started_at": "2026-10-23T21:48:21+0800",
+  "duration_ms": 617413,
   "duration_note": "wall-clock of a subprocess fan-out suite; machine- and load-dependent, not comparable across environments",
   "executor": "scripts/run_harness.py",
   "exit_code": 0,
