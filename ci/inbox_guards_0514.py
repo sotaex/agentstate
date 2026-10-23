@@ -147,6 +147,18 @@
      字段加 `new`（有意隐藏）；判据把 here-string **原文**切出来真编译，
      红里带编译器第一行；负控删掉 new ⇒ 必须红。详见「FLO-18 族」段头。
 
+  ⑳ FLO-19a…c 品牌底板不丢（**0.55.0，2026-10-23**）：创始人截图「收缩后
+     的图标原来是一个同状态、有方块背景的 LOGO，现在好像死灰复燃成以前的
+     样子」。病根：0.53.1 起哨标走动效态，底板（logo.svg 的 rect）从来没有
+     一条渲染路径画它；0.53.2 T1 只把底板加进**静态回落**路径 ⇒ 回落态有
+     底板、动效态没有 ⇒ daemon 换新代码后规格下发，底板当场消失。修法四层：
+     底板色四副本同源（常量/svg/CSS/规格）→ Get-Frame 输出底板几何 →
+     Draw-Canvas 第一笔画底板 → Import-Spec 把 plate 列必填（旧规格自动判废
+     回落带底板的品牌图标 ⇒ 底板永不丢）＋ NcHitTest 整窗可点。判据三条腿：
+     四副本同源、**真渲染像素**（产品绘制函数原文切片真跑：内缩点精确底板色、
+     边框不透明、中心是徽标色；无底板规格的诚实话腿）、命中测试行为＋判废。
+     三条各配负控（删绘制/漂常量/删分支 ⇒ 必须红）。详见「FLO-19 族」段头。
+
 ★ 规格真源（U-17 的唯一依据，不许凭记忆）：
     `D:\\2026\\PSL\\Antinel品牌动效报警语法v1.2（2026-09-27）.md`
     速度 12→8→5.5→3.5 s/圈；波幅 +45/70/105px @.30/.45/.65；
@@ -3091,6 +3103,12 @@ def n_b18():
 #:      也是它）。WndProc 自答 WM_NCHITTEST：**整个内切圆内**可点，四角
 #:      HTTRANSPARENT 让位给背后的窗口。命中半径从规格推导（Get-HitRadius），
 #:      不写死（FLO-10a 拿独立推导的 oracle 对数值）。
+#:      ★ 0.55.0 口径更新：动效态起哨标也画**品牌底板**（spec 的 colors.plate，
+#:        见 FLO-19 族），底板铺满窗口 ⇒ 命中区是**整窗**（「区域内都能点」）；
+#:        内切圆降为**无底板时的防御路径**（Import-Spec 判废无底板规格，今天
+#:        到不了屏幕上，但 handler 自己站住：不偷四角的点击）。FLO-10a 锁的
+#:        仍是内切圆数学（那条防御路径的尺子），整窗可点由 FLO-19c 的行为
+#:        驱动锁（handler 原文切片真跑）。
 #:   ③ 「LOGO 应该跟主窗口一样保持动态」⇒ 帧泵＝**线程池定时器投递到窗体线程**
 #:      （System.Timers.Timer＋SynchronizingObject，AutoReset=$false，finally
 #:      带 quitting 闸重启，add_Load 起泵，读盘有 LastWriteTimeUtc 守卫）。
@@ -3347,7 +3365,8 @@ def n_flo01():
 # ═══════════════════════════════════════════════ FLO-10 族（0.53.1）══
 #: ★★★ 创始人 2026-10-19 截图（最小化后的哨标）三句话，四条判据腿：
 #:   「出现的居然是圆圈，不是标准 LOGO」     ⇒ FLO-10c/d 锁动效规格单一真源与下发
-#:   「点圆圈中间没反应，只有点线上才切得回」 ⇒ FLO-10a 锁命中区（规格推导的内切圆）
+#:   「点圆圈中间没反应，只有点线上才切得回」 ⇒ FLO-10a 锁命中区（规格推导的内切圆；
+#:     0.55.0 起有底板时命中区是整窗，由 FLO-19c 锁，内切圆退为防御路径）
 #:   「LOGO 应该跟主窗口一样保持动态」        ⇒ FLO-10b 锁帧随时间推进（五态各对规格）
 #:   ＋ FLO-10e：减少动效的静态帧取**目标态**（R0 不许演成启动态的一枚绿环）。
 #: ★ 方法纪律（本族的心脏）：帧数学的判据**不二次实现**。写一个 ASCII-only 的
@@ -3512,7 +3531,7 @@ def _flo10_hit_raw(spec, size):
     return _flo10_hit_extent(spec) * float(size) / (2.0 * half)
 
 
-@check("FLO-10a 命中区＝规格推导的内切圆：整个 LOGO 边界内可点，四角让位")
+@check("FLO-10a 内切圆数学与规格一致（无底板防御路径；有底板⇒整窗可点见 FLO-19c）")
 def c_flo10a(frame_path=None):
     root, tray, payload = _flo10_tray()
     spec = payload.get("logo")
@@ -8423,6 +8442,504 @@ def n_flo18():
     return True
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# FLO-19 族 —— 品牌底板不丢（0.55.0，2026-10-23）
+#
+# 病（创始人 2026-10-23 截图：「收缩后的图标原来是一个同状态、有方块背景的
+# LOGO，现在好像死灰复燃成以前的了」）：0.53.1 起哨标走动效态，
+# `Draw-Frame-Bitmaps` 只画内切圆、圆外全透 —— 底板（logo.svg 的 rect）
+# 从来没有一条渲染路径画它（`git log -S "Draw-Image-Plate"` 历史上不存在，
+# `logo_frame.ps1` 连 `boxRatio` 都不消费）。0.53.2 T1 只把底板加进**静态
+# 回落**路径 ⇒ 创始人 10-20 看见的是回落态的底板版；daemon 换新代码后
+# tray.json 带上规格 ⇒ 哨标走动效态 ⇒ 底板消失。**为什么 3 天没人发现**：
+# 两个 03:54 起的旧代码常驻哨标一直好使，把回归遮了 —— 与 FLO-18 同一族病：
+# 没有一条判据真渲染过动效路径的像素。
+# 修法（产品侧四层）：① `LOGO_PLATE_FILL` 常量 ＝ logo.svg rect fill ＝
+# 页面 `.logo` 背景 ＝ 规格 `colors.plate`（四副本同源）；② Get-Frame 输出
+# 底板几何（half 派生）；③ Draw-Canvas 第一笔画底板，Import-Spec 把 plate
+# 列为必填 ⇒ 旧规格自动判废回落**带底板的品牌图标** ⇒ 底板永不丢；④ 底板
+# 铺满窗口 ⇒ NcHitTest 整窗可点（0.53.1 内切圆降为无底板防御路径）。
+# 判据三条腿：19a 四副本同源；19b **真渲染像素**（产品绘制函数原文切片真跑
+# —— 四角/边不透明且等于底板色、中心是徽标色；另有无底板规格的诚实话腿）；
+# 19c 命中测试行为（handler 原文切片真跑）＋ Import-Spec 判废。三条各配负控。
+# ═══════════════════════════════════════════════════════════════════════
+
+#: logo.svg 相对路径（底板色的品牌媒体真源）
+_FL19_SVG_REL = "assets/logo/logo.svg"
+
+
+def _fl19_hex(rgb):
+    """(r, g, b) → "#rrggbb"（小写）。"""
+    return "#%02x%02x%02x" % tuple(int(c) for c in rgb)
+
+
+def _fl19_logo_src():
+    """产品 logo.ps1 全文（判据切片的唯一来源，与 FLO-13/14/18 同一纪律）。"""
+    return io.open(IL.script_path(), encoding="utf-8").read()
+
+
+def _fl19_svg_plate():
+    """logo.svg 的底板 rect fill（品牌媒体，单一真源）。"""
+    with io.open(os.path.join(ROOT, _FL19_SVG_REL), encoding="utf-8") as f:
+        src = f.read()
+    m = re.search(r'<rect[^>]*\bfill="(#[0-9a-fA-F]{6})"', src)
+    if not m:
+        raise RuntimeError("logo.svg 里找不到底板 rect（fill=#RRGGBB）—— "
+                           "品牌媒体的底板真源没了，判据锚点需更新")
+    return m.group(1).lower()
+
+
+def _fl19_css_plate():
+    """页面 .logo 容器背景（inbox_server.py 样式表文本里的那一份）。"""
+    with io.open(os.path.join(ROOT, _SERVER_REL), encoding="utf-8") as f:
+        src = f.read()
+    m = re.search(r'\.logo\{[^}]*?background:\s*(#[0-9a-fA-F]{6})', src)
+    if not m:
+        raise RuntimeError("CSS 里找不到 .logo 的 background —— 页面的底板"
+                           "真源没了，判据锚点需更新")
+    return m.group(1).lower()
+
+
+@check("FLO-19a 底板色四副本同源：常量 ＝ logo.svg rect ＝ 页面 .logo 背景 ＝ 哨标规格")
+def c_flo19a():
+    const = str(SV.LOGO_PLATE_FILL).lower()
+    if not re.match(r"^#[0-9a-f]{6}$", const):
+        return "LOGO_PLATE_FILL 不是 #rrggbb 小写十六进制：%r" % (const,)
+    spec = SV.logo_motion_spec()
+    plate = (spec.get("colors") or {}).get("plate")
+    if not isinstance(plate, list) or len(plate) != 3:
+        return "规格 colors.plate 不是三分量列表：%r" % (plate,)
+    for c in plate:
+        if not isinstance(c, int) or not (0 <= c <= 255):
+            return "规格 colors.plate 分量越界（要 0..255 的整数）：%r" % (plate,)
+    copies = {"LOGO_PLATE_FILL 常量": const,
+              "logo.svg rect fill": _fl19_svg_plate(),
+              "页面 .logo 背景": _fl19_css_plate(),
+              "哨标规格 colors.plate": _fl19_hex(plate)}
+    bad = ["%s=%s" % (k, v) for k, v in copies.items() if v != const]
+    if bad:
+        return ("底板色漂移（%s）—— 四副本必须同一个 %s，否则页面／回落态／"
+                "动效态会各画一个底板色" % ("、".join(bad), const))
+    return True
+
+
+@check("N-FLO19a 负控：底板色常量漂一个值 ⇒ 同源判据必须判红")
+def n_flo19a():
+    if c_flo19a() is not True:
+        return "夹具不成立：未变异时 FLO-19a 就不合格，负控无分辨力"
+    with _Patch(SV, LOGO_PLATE_FILL="#0b1a13"):
+        why = c_flo19a()
+        if why is True:
+            return ("负控失效：常量漂成 #0b1a13 之后同源判据仍然绿 —— "
+                    "svg 与 CSS 那两本账没人守")
+    return True
+
+
+#: 画一帧所需的产品函数族切片起止（Map-X..Push-Frame ＝ Map-X/Map-Y/Get-Pen/
+#: Draw-Canvas/Draw-Frame-Bitmaps；与 FLO-14 同一手法：切原文，不重写逻辑）
+_FL19_CHUNK_START = "function Map-X"
+_FL19_CHUNK_END = "function Push-Frame"
+
+
+def _fl19_chunk(src=None):
+    """切出产品 logo.ps1 里画一帧的函数族（原文）。"""
+    src = _fl19_logo_src() if src is None else src
+    i = src.find(_FL19_CHUNK_START)
+    if i < 0:
+        raise RuntimeError("logo.ps1 里找不到 %r（源码已变，需更新判据）"
+                           % _FL19_CHUNK_START)
+    j = src.find(_FL19_CHUNK_END, i)
+    if j < 0:
+        raise RuntimeError("logo.ps1 里找不到 %r（源码已变，需更新判据）"
+                           % _FL19_CHUNK_END)
+    chunk = src[i:j]
+    for need in ("function Draw-Canvas", "function Draw-Frame-Bitmaps"):
+        if need not in chunk:
+            raise RuntimeError("切片里缺 %s —— 提取窗口漂了" % need)
+    try:
+        chunk.encode("ascii")
+    except UnicodeEncodeError as e:
+        raise RuntimeError("切片含非 ASCII 字节（%s）—— PS 5.1 会按 GBK "
+                           "误解码，行为静默劣化" % e)
+    return chunk
+
+
+# ---- 驱动：真渲染一帧（ASCII-only；PS 5.1 无 BOM 会按 GBK 读 .ps1）----
+# ★ 变量名严禁与参数名大小写碰撞（FLO-10 驱动同款坑：`$Spec` 参数吃掉
+#   `$script:spec`，整个 Hashtable 被 [string] 强制转成路径串 ⇒ half=0
+#   ⇒ scale=Inf ⇒ GDI+ OverflowException，红因指向完全错误的地方）。
+# ★ 为什么跑 Draw-Frame-Bitmaps 而不是只跑 Draw-Canvas：2x 渲染＋bicubic
+#   降采样是产品真实管线的一部分（底板色在最外圈的行为由它决定），只跑
+#   Draw-Canvas 会漏掉这一层。
+_FL19_RENDER_DRIVER = r"""
+param(
+  [Parameter(Mandatory=$true)][string]$Frame,
+  [Parameter(Mandatory=$true)][string]$Chunk,
+  [Parameter(Mandatory=$true)][string]$Tray,
+  [int]$Size = 46,
+  [string]$Points = ""
+)
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Drawing
+. $Frame
+. $Chunk
+$j = Get-Content -LiteralPath $Tray -Raw -Encoding UTF8 | ConvertFrom-Json
+$sp = ConvertTo-Hashtable $j.logo
+$sizePhys = $Size
+$script:bmpLo = New-Object System.Drawing.Bitmap($Size, $Size, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+$script:bmpHi = New-Object System.Drawing.Bitmap((2 * $Size), (2 * $Size), [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+$script:spec = $sp
+$snap = New-Visual $sp
+$f = Get-Frame -Spec $sp -Mode "L0" -Mt 0.6 -Snap $snap
+Draw-Frame-Bitmaps $f
+$res = @()
+foreach ($p in ($Points -split ';')) {
+  if ($p -eq "") { continue }
+  $xy = $p -split ','
+  $px = $script:bmpLo.GetPixel([int]$xy[0], [int]$xy[1])
+  $res += @{ x = [int]$xy[0]; y = [int]$xy[1]
+             a = [int]$px.A; r = [int]$px.R; g = [int]$px.G; b = [int]$px.B }
+}
+$pl = $null
+if ($null -ne $f.plate) {
+  $pl = @{ x = [double]$f.plate.x; y = [double]$f.plate.y
+           w = [double]$f.plate.w; h = [double]$f.plate.h
+           r = [int]$f.plate.rgb[0]; g = [int]$f.plate.rgb[1]; b = [int]$f.plate.rgb[2] }
+}
+Write-Output (ConvertTo-Json @{ plate = $pl; px = $res } -Compress -Depth 6)
+"""
+
+
+def _fl19_write_tray(spec, path):
+    """写一份 {"logo": 规格} 的 tray.json（判据专用临时件，不碰产品状态）。"""
+    with io.open(path, "w", encoding="utf-8", newline="\n") as f:
+        json.dump({"logo": spec}, f, ensure_ascii=False)
+
+
+def _fl19_points(size):
+    """取样点（三类）：内缩 2px（期望精确底板色）、最外圈（期望不透明）、
+    中心（期望徽标色）。内缩点避开 bicubic 降采样的边界振铃区（实测最外
+    两圈有 ±1..2 的通道漂移与 alpha 238，那是重采样固有行为，不是缺陷）。"""
+    m = size // 2
+    inset = [(2, 2), (size - 3, 2), (2, size - 3), (size - 3, size - 3),
+             (m, 2), (2, m), (size - 3, m), (m, size - 3)]
+    border = [(0, 0), (size - 1, 0), (0, size - 1), (size - 1, size - 1),
+              (m, 0), (0, m), (size - 1, m), (m, size - 1)]
+    return inset, border, [(m, m)]
+
+
+def _fl19_render(size, tray_path, points, chunk=None):
+    """真渲染一帧（产品代码原文切片），返回 (plate 几何 or None, [像素行])。
+
+    `chunk` 不给 = 产品原文；给 = 变异副本（负控用，只落临时目录）。
+    """
+    ps = _ps_path()
+    if not ps:
+        raise Skip("PATH 上没有 powershell/pwsh —— 底板渲染无法真跑")
+    import subprocess
+    try:
+        _FL19_RENDER_DRIVER.encode("ascii")
+    except UnicodeEncodeError as e:
+        raise RuntimeError("渲染驱动含非 ASCII 字节（%s）—— PS 5.1 会按 GBK "
+                           "误解码，行为静默劣化" % e)
+    chunk = _fl19_chunk() if chunk is None else chunk
+    d = _TMPREG.tmpdir(prefix="g0514_flo19r_")
+    cf = os.path.join(d, "chunk.ps1")
+    with io.open(cf, "w", encoding="ascii", newline="\n") as f:
+        f.write(chunk)
+    drv = os.path.join(d, "render.ps1")
+    with io.open(drv, "w", encoding="ascii", newline="\n") as f:
+        f.write(_FL19_RENDER_DRIVER)
+    p = subprocess.run([ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                        drv, "-Frame", IL.frame_script_path(), "-Chunk", cf,
+                        "-Tray", tray_path, "-Size", str(int(size)),
+                        "-Points", points],
+                       capture_output=True, timeout=300)
+    out = (p.stdout or b"").decode("utf-8", "replace").strip()
+    if p.returncode != 0 or not out:
+        raise RuntimeError("底板渲染驱动失败 rc=%r out=%r err=%r" % (
+            p.returncode, out[:200],
+            (p.stderr or b"").decode("utf-8", "replace")[:300]))
+    d2 = json.loads(out)
+    return d2.get("plate"), (d2.get("px") or [])
+
+
+@check("FLO-19b 真渲染像素：动效态底板满幅不透明（内缩点=底板色，中心=徽标）")
+def c_flo19b(chunk=None):
+    spec = SV.logo_motion_spec()
+    plate = tuple(int(c) for c in spec["colors"]["plate"])
+    g = spec["geom"]
+    want_geom = (g["cx"] - g["half"], g["cy"] - g["half"],
+                 2.0 * g["half"], 2.0 * g["half"])
+    d = _TMPREG.tmpdir(prefix="g0514_flo19b_")
+    tray = os.path.join(d, "tray.json")
+    _fl19_write_tray(spec, tray)
+    for size in (46, 92):
+        inset, border, center = _fl19_points(size)
+        pts = ";".join("%d,%d" % (x, y) for x, y in inset + border + center)
+        geom, rows = _fl19_render(size, tray, pts, chunk=chunk)
+        if len(rows) != 17:
+            return "%dpx 取样返回 %d 行 ≠ 17 —— 量具缺腿" % (size, len(rows))
+        # ① 帧数据的底板几何必须由规格派生（oracle，不二次实现产品公式）
+        if geom is None:
+            return ("%dpx 帧数据没有 plate —— 规格带了 colors.plate，Get-Frame "
+                    "却没输出底板几何" % size)
+        got_geom = (geom["x"], geom["y"], geom["w"], geom["h"])
+        if any(abs(a - b) > 1e-6 for a, b in zip(got_geom, want_geom)):
+            return ("%dpx 底板几何 %r ≠ 规格派生 %r —— 几何不是从 half 算的"
+                    % (size, got_geom, want_geom))
+        if (geom["r"], geom["g"], geom["b"]) != plate:
+            return ("%dpx 底板色 %r ≠ 规格 %r" % (
+                size, (geom["r"], geom["g"], geom["b"]), plate))
+        # ② 像素：内缩点精确底板色且不透明
+        for row in rows[0:8]:
+            if row["a"] != 255 or (row["r"], row["g"], row["b"]) != plate:
+                return ("%dpx 内缩点 (%d,%d) = (%d,%d,%d,a=%d) ≠ 底板 %r —— "
+                        "动效态没有满幅底板（2026-10-23 回归）"
+                        % (size, row["x"], row["y"], row["r"], row["g"],
+                           row["b"], row["a"], plate))
+        # ③ 最外圈：不透明（无透明缺口）且颜色贴近底板（容 bicubic 振铃）
+        for row in rows[8:16]:
+            near = all(abs(row[k] - plate[i]) <= 8
+                       for i, k in enumerate(("r", "g", "b")))
+            if row["a"] < 128 or not near:
+                return ("%dpx 边框点 (%d,%d) = (%d,%d,%d,a=%d) —— 底板没铺到"
+                        "窗沿或颜色不对" % (size, row["x"], row["y"], row["r"],
+                                          row["g"], row["b"], row["a"]))
+        # ④ 中心：徽标画在底板上（非底板色、不透明）
+        c0 = rows[16]
+        if c0["a"] != 255 or max(abs(c0[k] - plate[i])
+                                 for i, k in enumerate(("r", "g", "b"))) < 10:
+            return ("%dpx 中心点 (%d,%d,%d,a=%d) 不像画在底板上的徽标"
+                    % (size, c0["r"], c0["g"], c0["b"], c0["a"]))
+    # ⑤ 诚实话腿：删掉 colors.plate 的规格 ⇒ 帧数据无底板、画面无底板
+    #    （不假装有；这种规格会被 Import-Spec 判废，见 FLO-19c）
+    spec2 = json.loads(json.dumps(spec))
+    del spec2["colors"]["plate"]
+    tray2 = os.path.join(d, "tray_noplate.json")
+    _fl19_write_tray(spec2, tray2)
+    inset, border, center = _fl19_points(46)
+    pts = ";".join("%d,%d" % (x, y) for x, y in inset + border + center)
+    geom2, rows2 = _fl19_render(46, tray2, pts, chunk=chunk)
+    if geom2 is not None:
+        return "删掉 colors.plate 后帧数据仍有底板几何 —— 底板不再由规格决定"
+    for row in rows2[0:8]:
+        if row["a"] != 0:
+            return ("无底板规格下 (%d,%d) alpha=%d ≠ 0 —— 画了规格里没有的"
+                    "底板" % (row["x"], row["y"], row["a"]))
+    if rows2[16]["a"] <= 0:
+        return "无底板规格下中心点全透 —— 连徽标都没画（应是只有徽标）"
+    return True
+
+
+@check("N-FLO19b 负控：拔掉底板绘制（plate 填充恒不执行）⇒ 像素判据必须判红")
+def n_flo19b():
+    if c_flo19b() is not True:
+        return "夹具不成立：未变异时 FLO-19b 就不合格，负控无分辨力"
+    chunk = _fl19_chunk()
+    anchor = "if ($null -ne $f.plate) {"
+    if chunk.count(anchor) != 1:
+        return ("夹具不成立：底板填充锚点在切片里出现 %d 次（要恰好 1 次）—— "
+                "尺子跟源码形状漂了，负控自身失效，不算通过" % chunk.count(anchor))
+    mutant = chunk.replace(anchor, "if ($false) {")
+    why = c_flo19b(chunk=mutant)
+    if why is True:
+        return ("负控失效：拔掉底板绘制后像素判据仍然绿 —— 这条尺子抓不到"
+                "「动效态丢底板」这一类回归")
+    return True
+
+
+#: NcHitTest handler 的锚点（0.55.0 起底板分支在它里面）
+_FL19_HIT_ANCHOR = "$form.NcHitTest = {"
+
+#: 命中测试取样点（size 46）：中心 + 四边中点 + 两角
+_FL19_HIT_PTS = "23,23;23,1;1,23;45,23;23,45;2,2;44,44"
+
+
+def _fl19_handler_body(src=None):
+    """切出产品 logo.ps1 里 `$form.NcHitTest = { ... }` 的 scriptblock 体。"""
+    src = _fl19_logo_src() if src is None else src
+    i = src.find(_FL19_HIT_ANCHOR)
+    if i < 0:
+        raise RuntimeError("logo.ps1 里找不到 %r（源码已变，需更新判据）"
+                           % _FL19_HIT_ANCHOR)
+    b = src.find("{", i)
+    if b < 0:
+        raise RuntimeError("NcHitTest 赋值行的 { 找不到（源码已变，需更新判据）")
+    e = src.find("\n}\n", b)
+    if e < 0:
+        raise RuntimeError("NcHitTest scriptblock 收尾找不到（源码已变，需更新判据）")
+    body = src[b + 1:e]
+    for pat in ("param($x, $y)", "Test-Hit", "return -1"):
+        if pat not in body:
+            raise RuntimeError("切出的 handler 体缺 %r —— 提取窗口漂了" % pat)
+    return body
+
+
+# ---- 驱动：真跑 handler（ASCII-only）----
+# ★ 与渲染驱动同一条纪律：变量名不与参数名大小写碰撞；`$script:spec` 由
+#   驱动设置后，scriptblock（[ScriptBlock]::Create 后 & 调用）沿调用点
+#   作用域链找到它 —— 与产品里 WndProc 调它的同一份代码文本。
+_FL19_HIT_DRIVER = r"""
+param(
+  [Parameter(Mandatory=$true)][string]$Frame,
+  [Parameter(Mandatory=$true)][string]$Handler,
+  [Parameter(Mandatory=$true)][string]$Tray,
+  [int]$Size = 46,
+  [string]$Points = ""
+)
+$ErrorActionPreference = 'Stop'
+. $Frame
+$hb = Get-Content -LiteralPath $Handler -Raw -Encoding UTF8
+$sb = [ScriptBlock]::Create($hb)
+$j = Get-Content -LiteralPath $Tray -Raw -Encoding UTF8 | ConvertFrom-Json
+$sp = ConvertTo-Hashtable $j.logo
+$script:spec = $sp
+$script:frameOk = $true
+$sizePhys = $Size
+$script:hitRadius = Get-HitRadius $sizePhys $sp
+$res = @()
+foreach ($p in ($Points -split ';')) {
+  if ($p -eq "") { continue }
+  $xy = $p -split ','
+  $res += @{ x = [int]$xy[0]; y = [int]$xy[1]
+             v = [int](& $sb ([int]$xy[0]) ([int]$xy[1])) }
+}
+Write-Output (ConvertTo-Json @{ px = $res } -Compress -Depth 5)
+"""
+
+
+def _fl19_hit(size, tray_path, body, points):
+    """真跑产品 NcHitTest handler（原文切片），返回 [{x, y, v}]。"""
+    ps = _ps_path()
+    if not ps:
+        raise Skip("PATH 上没有 powershell/pwsh —— 命中测试无法真跑")
+    import subprocess
+    try:
+        _FL19_HIT_DRIVER.encode("ascii")
+        body.encode("ascii")
+    except UnicodeEncodeError as e:
+        raise RuntimeError("命中测试驱动/handler 含非 ASCII 字节（%s）" % e)
+    d = _TMPREG.tmpdir(prefix="g0514_flo19h_")
+    bf = os.path.join(d, "handler.txt")
+    with io.open(bf, "w", encoding="ascii", newline="\n") as f:
+        f.write(body)
+    drv = os.path.join(d, "hit.ps1")
+    with io.open(drv, "w", encoding="ascii", newline="\n") as f:
+        f.write(_FL19_HIT_DRIVER)
+    p = subprocess.run([ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                        drv, "-Frame", IL.frame_script_path(), "-Handler", bf,
+                        "-Tray", tray_path, "-Size", str(int(size)),
+                        "-Points", points],
+                       capture_output=True, timeout=300)
+    out = (p.stdout or b"").decode("utf-8", "replace").strip()
+    if p.returncode != 0 or not out:
+        raise RuntimeError("命中测试驱动失败 rc=%r out=%r err=%r" % (
+            p.returncode, out[:200],
+            (p.stderr or b"").decode("utf-8", "replace")[:300]))
+    return json.loads(out).get("px") or []
+
+
+def _fl19_import_spec(tray_path):
+    """真跑产品 Import-Spec（原文切片 dot-source），返回 True=接受。"""
+    ps = _ps_path()
+    if not ps:
+        raise Skip("PATH 上没有 powershell/pwsh —— Import-Spec 无法真跑")
+    import subprocess
+    src = _fl19_logo_src()
+    i = src.find("function Import-Spec")
+    if i < 0:
+        raise RuntimeError("logo.ps1 里找不到 Import-Spec（源码已变，需更新判据）")
+    j = src.find("\n}\n", i)
+    if j < 0:
+        raise RuntimeError("Import-Spec 函数体边界找不到（源码已变，需更新判据）")
+    fn = src[i:j + 3]
+    fn.encode("ascii")
+    d = _TMPREG.tmpdir(prefix="g0514_flo19i_")
+    drv = os.path.join(d, "imp.ps1")
+    body = (
+        "param([string]$Frame, [string]$Fn, [string]$Tray)\n"
+        "$ErrorActionPreference = 'Stop'\n"
+        ". $Frame\n"
+        "Invoke-Expression $Fn\n"
+        "$script:frameOk = $true\n"
+        "$j = Get-Content -LiteralPath $Tray -Raw -Encoding UTF8 | ConvertFrom-Json\n"
+        "$sp = ConvertTo-Hashtable $j.logo\n"
+        "$r = Import-Spec $sp\n"
+        "if ($null -eq $r) { Write-Output 'REJECT' } else { Write-Output 'ACCEPT' }\n")
+    body.encode("ascii")
+    with io.open(drv, "w", encoding="ascii", newline="\n") as f:
+        f.write(body)
+    p = subprocess.run([ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                        drv, "-Frame", IL.frame_script_path(), "-Fn", fn,
+                        "-Tray", tray_path], capture_output=True, timeout=300)
+    out = (p.stdout or b"").decode("utf-8", "replace").strip()
+    if p.returncode != 0 or out not in ("ACCEPT", "REJECT"):
+        raise RuntimeError("Import-Spec 驱动失败 rc=%r out=%r err=%r" % (
+            p.returncode, out[:120],
+            (p.stderr or b"").decode("utf-8", "replace")[:300]))
+    return out == "ACCEPT"
+
+
+@check("FLO-19c 命中与像素一致：有底板⇒整窗可点；无底板规格必须判废回落")
+def c_flo19c(body=None):
+    src = _fl19_logo_src()
+    body = _fl19_handler_body(src) if body is None else body
+    spec = SV.logo_motion_spec()
+    d = _TMPREG.tmpdir(prefix="g0514_flo19c_")
+    tray = os.path.join(d, "tray.json")
+    _fl19_write_tray(spec, tray)
+    # ① 行为（先行为后结构：负控要靠行为腿判红，结构腿只给更好的红因）：
+    #    有底板 ⇒ 七个点全部 HTCLIENT（底板铺满窗口，「区域内都能点」）
+    for row in _fl19_hit(46, tray, body, _FL19_HIT_PTS):
+        if row["v"] != 1:
+            return ("有底板时 (%d,%d) 返回 %d ≠ 1 —— 底板铺满窗口，整窗都该"
+                    "可点（创始人 2026-10-20：anywhere in the area is clickable）"
+                    % (row["x"], row["y"], row["v"]))
+    # ② 无底板规格（Import-Spec 会判废的那个形状）：handler 自己站住 ——
+    #    内切圆可点、四角让位，不偷背后窗口的点击
+    spec2 = json.loads(json.dumps(spec))
+    del spec2["colors"]["plate"]
+    tray2 = os.path.join(d, "tray_noplate.json")
+    _fl19_write_tray(spec2, tray2)
+    want = {"23,23": 1, "23,1": 1, "1,23": 1, "45,23": 1, "23,45": 1,
+            "2,2": -1, "44,44": -1}
+    for row in _fl19_hit(46, tray2, body, _FL19_HIT_PTS):
+        key = "%d,%d" % (row["x"], row["y"])
+        if row["v"] != want[key]:
+            return ("无底板防御路径 (%s) 返回 %d ≠ %d —— 内切圆可点/四角让位"
+                    "这条旧承诺坏了" % (key, row["v"], want[key]))
+    # ③ Import-Spec：无底板色的旧规格必须判废（回落带底板的品牌图标）
+    if not _fl19_import_spec(tray):
+        return "Import-Spec 拒绝了带底板的现行规格 —— 必填集把 plate 漏了或写错"
+    if _fl19_import_spec(tray2):
+        return ("Import-Spec 接受了无底板色的旧规格 —— 哨标会画无底板的动效态，"
+                "正是 2026-10-23 那个回归；必须判废回落品牌图标")
+    # ④ 结构（防御纵深，红因更准）：底板分支必须排在 Test-Hit 之前
+    i_plate = body.find("colors.plate")
+    i_hit = body.find("Test-Hit")
+    if i_plate > i_hit:
+        return "底板分支排在 Test-Hit 之后 —— 有底板时四角仍走内切圆，整窗承诺落空"
+    return True
+
+
+@check("N-FLO19c 负控：删掉 handler 的底板分支 ⇒ 同一把尺子必须判红")
+def n_flo19c():
+    if c_flo19c() is not True:
+        return "夹具不成立：未变异时 FLO-19c 就不合格，负控无分辨力"
+    body = _fl19_handler_body()
+    anchor = "if ($null -ne $script:spec.colors.plate) { return 1 }"
+    if body.count(anchor) != 1:
+        return ("夹具不成立：底板分支锚点出现 %d 次（要恰好 1 次）—— 尺子跟"
+                "源码形状漂了，负控自身失效，不算通过" % body.count(anchor))
+    mutant = body.replace(anchor, "# mutated: plate branch removed")
+    why = c_flo19c(body=mutant)
+    if why is True:
+        return ("负控失效：删掉底板分支后仍判合格 —— 整窗可点这条尺子抓不到"
+                "回归")
+    return True
+
+
 def main(argv=None):
     # ★ 2026-10-20 加：`--only <前缀>` 单跑一族（可给多个）。
     #   为什么需要：判据套件跑到中段阻塞时，全量重跑一次要十几分钟，
@@ -8450,6 +8967,8 @@ def main(argv=None):
           "「为什么没弹」不再只活在 tick 返回里）")
     print("＋ FLO-18 内嵌 C# 真编译（0.55.0：CS0108 warnings-as-errors ⇒ "
           "哨标出生即退 3 天隐形；红里带编译器首行）")
+    print("＋ FLO-19a…c 品牌底板不丢（0.55.0：四副本同源／真渲染像素满幅／"
+          "整窗可点＋无底板规格判废回落）")
     print("＋ J1–J5「五条违和」同类可抓（原 0518，2026-10-16 按 A2/P5 并入）")
     print("（负控全部内存/临时目录变异，不写任何产品文件；node 缺失 ⇒ SKIP，不假绿）")
     if only:

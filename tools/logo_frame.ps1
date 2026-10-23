@@ -170,6 +170,25 @@ function Get-Frame {
       opa = [double]$st.waveO * (1 - $ph) * (1 - $ph)
     }
   }
+  # ** 0.55.0: the brand plate as frame data. The colour is the spec's
+  #    colors.plate (single source: logo.svg's rect fill == the page's
+  #    .logo background == this spec, FLO-19a pins the four copies); the
+  #    geometry is the BOX itself (half), so the plate covers the window
+  #    edge to edge -- which is also why the hit test is the whole window
+  #    once a plate is drawn (see $form.NcHitTest in logo.ps1).
+  #    Missing colour => $null => the renderer draws no plate; Import-Spec
+  #    rejects such a spec anyway, so the badge falls back to the brand
+  #    icon (which carries the plate) instead of losing it silently.
+  $plate = $null
+  if ($null -ne $Spec.colors.plate) {
+    $plate = @{
+      x = [double]$g.cx - [double]$g.half
+      y = [double]$g.cy - [double]$g.half
+      w = 2.0 * [double]$g.half
+      h = 2.0 * [double]$g.half
+      rgb = $Spec.colors.plate
+    }
+  }
   return @{
     mode = $Mode; mt = $Mt; theta = $theta; beamC = $beamC
     ringO = $ringO; amberO = $amberO; ringRed = $ringRed
@@ -179,6 +198,7 @@ function Get-Frame {
     amber = @{ cx = $amberPt[0]; cy = $amberPt[1]; r = [double]$g.amberR }
     trail = $trail
     waves = $waves
+    plate = $plate
   }
 }
 

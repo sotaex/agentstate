@@ -463,6 +463,14 @@ function Import-Spec($logo) {
     foreach ($k in @("ringGreen","ringDarkRed","amber","trail")) {
       if ($null -eq $h.colors[$k]) { return $null }
     }
+    # ** 0.55.0: the brand plate colour is REQUIRED. A spec without it
+    #    (every spec written before 0.55.0) is rejected here on purpose:
+    #    the badge then falls back to the static brand icon, which carries
+    #    the plate -- so "plate lost" can never reach the screen the way
+    #    it did on 2026-10-23 (animated state, no plate). The alternative
+    #    (drawing the animated mark plate-less) is exactly the regression
+    #    the founder reported.
+    if ($null -eq $h.colors["plate"]) { return $null }
     if ($null -eq $h.modes) { return $null }
     return $h
   } catch { return $null }
@@ -582,6 +590,39 @@ function Draw-Canvas {
   $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
   $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::Half
   $geom = $spec.geom
+  # ** 0.55.0: the brand plate FIRST, under everything. logo.svg's rect is
+  #    the brand truth; the spec carries its colour (colors.plate -- the
+  #    same #0a1a12 as the page's .logo background) and Get-Frame turns it
+  #    into the box geometry (half), so this rectangle covers the window
+  #    edge to edge. Without it the animated state shows a bare ring with
+  #    transparent corners -- the 2026-10-23 regression ("came back as the
+  #    old look"). No plate in the frame => nothing is filled (honest), and
+  #    Import-Spec rejects a spec without the plate colour anyway.
+  #    The fill runs with PixelOffsetMode/SmoothingMode None (restored
+  #    after): the plate is an axis-aligned FULL-BLEED rectangle, so AA and
+  #    the half-pixel offset can only cost edge coverage -- the same
+  #    principle 0.53.2 (T1) applied to the brand-icon path. Measured on
+  #    this machine: the 2x source bitmap is pixel-exact (10,26,18,255) on
+  #    every edge under both modes; what remains is the bicubic downscale's
+  #    boundary handling, which leaves the outermost row/column of the
+  #    final bitmap ~93% opaque (alpha 238) -- imperceptible, and the hit
+  #    test answers WM_NCHITTEST per point, not per pixel alpha.
+  if ($null -ne $f.plate) {
+    $pr = $f.plate
+    $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::None
+    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::None
+    $brush = New-Object System.Drawing.SolidBrush(
+      [System.Drawing.Color]::FromArgb(255, [int]$pr.rgb[0], [int]$pr.rgb[1], [int]$pr.rgb[2]))
+    try {
+      $g.FillRectangle($brush, [float](Map-X $pr.x $s $off $geom),
+                                [float](Map-Y $pr.y $s $off $geom),
+                                [float]($pr.w * $s), [float]($pr.h * $s))
+    } finally {
+      $brush.Dispose()
+      $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::Half
+      $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    }
+  }
   $tw = [double]$geom.beamW * $s
   foreach ($t in $f.trail) {
     if ($t.opa -le 0) { continue }
@@ -690,16 +731,28 @@ function Push-Frame {
 # ** 0.53.2 (T1): the brand-plate fallback is a FULL OPAQUE SQUARE, so the
 #    founder's "anywhere in the area is clickable" holds literally there --
 #    the hit test returns HTCLIENT for the whole window in that mode.
-#    In the animated-mark mode the drawn area is still the inscribed circle
-#    (the frame is transparent outside it), so the corners keep passing
-#    clicks through to whatever is behind: claiming a clickable corner there
-#    would be a promise the picture does not keep.
+# ** 0.55.0: the animated mark now ALSO draws the spec's plate (colors.plate
+#    -> Get-Frame's plate rect -> Draw-Canvas fills it first), and that rect
+#    covers the window edge to edge (half == the box half-width, and the
+#    window IS the box). So the corners are picture now -- the 0.53.1
+#    inscribed-circle rule (corners click-through) died with the plate, and
+#    "anywhere in the area is clickable" covers the corners too. The page's
+#    .logo shows the same #0a1a12 plate under the same mark.
+#    The circle path below stays as the DEFENSIVE branch: if a spec without
+#    a plate colour ever reaches here (Import-Spec rejects those today), the
+#    drawn area is the inscribed circle again and the corners keep passing
+#    clicks through to whatever is behind.
 $form.NcHitTest = {
   param($x, $y)
-  # plate mode (no motion spec): the brand mark fills the window edge to edge
-  # -- every pixel is part of the drawn picture, so every pixel is clickable.
+  # plate mode (no motion spec, or frame math unavailable): the brand mark
+  # fills the window edge to edge -- every pixel is part of the drawn
+  # picture, so every pixel is clickable.
   if ($script:spec -eq $null -or -not $script:frameOk) { return 1 }
-  # animated mark: only the inscribed circle is drawn; corners stay
+  # ** 0.55.0: animated mark WITH the plate: the plate covers the window
+  #    edge to edge, so the whole window is the drawn area.
+  if ($null -ne $script:spec.colors.plate) { return 1 }
+  # animated mark without a plate (defensive; unreachable while Import-Spec
+  # requires colors.plate): only the inscribed circle is drawn; corners stay
   # click-through so the badge never steals clicks from what is behind.
   if (Test-Hit $x $y $sizePhys $script:hitRadius) { return 1 }
   return -1

@@ -1084,6 +1084,25 @@ LOGO_MOTION = {
 LOGO_RING_GREEN = (91, 130, 101)
 LOGO_RING_DARKRED = (74, 38, 38)
 
+#: ★★ 0.55.0（2026-10-23，创始人截图「死灰复燃成以前的样子」）：**底板色**。
+#:   四副本必须同一个值（判据 FLO-19a 逐字节锁）：
+#:     ① 定稿 `assets/logo/logo.svg` 的 `<rect fill="#0a1a12">`（品牌媒体，
+#:        底板改直角的依据与可取证几何写在该文件注释里）；
+#:     ② 本常量；
+#:     ③ 页面 `.logo` 容器背景（CSS，见本文件样式表 `background:#0a1a12`）
+#:        —— 页面的动效徽标一直坐在这个底板上（0.53.1 起）；
+#:     ④ 哨标规格 `logo_motion_spec()["colors"]["plate"]`（经 tray.json
+#:        下发，0.55.0 新增）。
+#:   ★ 为什么必须进规格（病根，可核）：0.53.1 起哨标走动效态，
+#:     `Draw-Frame-Bitmaps` 只画内切圆、圆外全透 —— 底板从来没有一条渲染
+#:     路径画它（`git log -S "Draw-Image-Plate"` 历史上不存在，
+#:     `logo_frame.ps1` 连 `boxRatio` 都不消费）。0.53.2 T1 只把底板加进
+#:     **静态回落**路径 ⇒ 创始人 10-20 看见的是回落态的底板版；daemon
+#:     换新代码后 tray.json 带上规格 ⇒ 哨标走动效态 ⇒ 底板消失，
+#:     就是这次「死灰复燃成以前的样子」。修法：底板色随规格下发，
+#:     帧数学输出底板几何，渲染层第一笔就画底板（FLO-19b 真渲染像素断言）。
+LOGO_PLATE_FILL = "#0a1a12"
+
 #: 灯态 → 动法键（`dev` → `L0`，见上注）
 LOGO_MODE = {"L0": "L0", "L1": "L1", "L2": "L2", "Ls": "LD", "R0": "R0",
              "dev": "L0"}
@@ -1242,6 +1261,10 @@ def logo_motion_spec():
     ★ 波幅用**渲染表** `LOGO_MOTION_RENDER`（规格 × 归一系数）：哨标窗与
       页面方框同几何（`half`），照抄规格表的 45/70/105 会伸出框外 ——
       0.50.3「冒泡的 LOGO 不完整」那条缺陷在 46px 哨标上一样会发生。
+    ★ 0.55.0：`colors.plate` ＝ 品牌底板色（与 logo.svg rect fill、页面
+      `.logo` 背景同源，FLO-19a 锁四副本相等）。哨标照它画底板，才与
+      页面「动效徽标坐在深色方板上」同源；没有这个键的规格会被判废回落
+      （回落态的品牌图标自带底板）⇒ 底板在任何规格形状下都不丢。
     ★ 判据 FLO-10c 拿它对着 `LOGO_MOTION_RENDER` 与几何常量逐项锁；负控
       把一份手写的未归一一波幅塞进来必须红（与 U-18c 同一族）。
     """
@@ -1255,7 +1278,11 @@ def logo_motion_spec():
         "colors": {"ringGreen": list(LOGO_RING_GREEN),
                    "ringDarkRed": list(LOGO_RING_DARKRED),
                    "amber": list(_hex_rgb(LOGO_AMBER_FILL)),
-                   "trail": list(_hex_rgb(LOGO_TRAIL_COLOR))},
+                   "trail": list(_hex_rgb(LOGO_TRAIL_COLOR)),
+                   # 0.55.0：品牌底板色（logo.svg rect fill，四副本同源，
+                   # FLO-19a 锁）。缺这个键的规格会被哨标 `Import-Spec`
+                   # 判废回落静态品牌图标（带底板）⇒ 底板永不丢。
+                   "plate": list(_hex_rgb(LOGO_PLATE_FILL))},
         "anim": {"trailN": LOGO_TRAIL_N, "trailStep": LOGO_TRAIL_STEP,
                  "trailOpa": list(LOGO_TRAIL_OPA),
                  "trailFrac": LOGO_TRAIL_FRAC, "trailInset": LOGO_TRAIL_INSET,
