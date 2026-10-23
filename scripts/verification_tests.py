@@ -1744,6 +1744,36 @@ def main():
     record("0.55.1 空链两次出现同码：无文件 ＝ 零记录 ＝ rc=4（不是 1、也不是 0）",
            rcV == 4 and "NO RECORDS" in outV, "rc=%s out=%r" % (rcV, outV.strip()[:60]))
 
+    # ★ 0.55.2（2026-10-23，pip 真装 0.55.1 实测）：`.psl/rules` 与 `.psl/audit`
+    #   的排除表**从来没生效过**。过滤写的是 `(rel_dir + "/" + d).lstrip("./")`，
+    #   而 lstrip 剥的是**字符集合**不是前缀：".psl/rules" → "psl/rules"，永远命中
+    #   不了表里的 ".psl/rules"。后果：全新目录 install 完，第一次报告就是
+    #   SEC-06 CRITICAL，命中的是 `.psl/rules/default.json` 里那条规则测试夹具，
+    #   Score 80/100 needs attention —— 企业第一眼看到的「你有严重问题」，
+    #   来源是我们自己写进去的文件。0.48.4 的注释与修复都在，只有这把尺子错。
+    #   四条腿：① 两处排除必须真的排掉；② **负控** 项目自己的 `rules/` 必须照报
+    #   （防「凡是 rules 都排」蒙对）；③ `.psl/` 根下的普通文件仍要扫
+    #   （防「整个 .psl 一律排掉」蒙对）。
+    _sc = WORK / "sc-excl"
+    _sc_key = "AKIA" + "IOSFODNN7EXAMPLE"        # 夹具密钥分片拼接，不落明文
+    for _rel in ("rules/secret.json", ".psl/rules/default.json",
+                 ".psl/audit/chain.jsonl", ".psl/notes.json", "plain.py"):
+        _pf = _sc / _rel
+        _pf.parent.mkdir(parents=True, exist_ok=True)
+        _pf.write_text('{"k": "%s"}' % _sc_key, encoding="utf-8")
+    rcS, outS, errS, _ = run("scan.py", ["--root", str(_sc), "--json"])
+    try:
+        _hit = {f.get("file") for f in json.loads(outS).get("findings", [])}
+    except Exception:
+        _hit = set()
+    record("0.55.2 扫描面：.psl/rules 与 .psl/audit 排除真的生效（不再自报 CRITICAL）",
+           rcS == 0 and not ({".psl/rules/default.json",
+                              ".psl/audit/chain.jsonl"} & _hit),
+           "rc=%s hit=%r" % (rcS, sorted(_hit)[:4]))
+    record("0.55.2 负控：项目自己的 rules/ 与 .psl 根下普通文件仍被扫到",
+           {"rules/secret.json", ".psl/notes.json", "plain.py"} <= _hit,
+           "hit=%r" % sorted(_hit)[:4])
+
     # R-21: ledger dry-run -- idempotency without side effects (pkg layout only).
     if (PKG / "psl" / "judgment.json").is_file():
         led18 = PKG / "psl" / "verdict-ledger.jsonl"

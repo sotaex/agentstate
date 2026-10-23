@@ -48,7 +48,31 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 PKG_DIR = Path(__file__).resolve().parent
-TOOL_VERSION = "0.33.1"
+
+
+def _tool_version():
+    """产品版本号。唯一真源是发行元数据，源码态退回 pyproject。
+
+    0.55.2：这里原来钉着 "0.33.1" 一个字面量，于是 `antinel -V` 说 0.55.1、
+    report --format json 的 tool_version 却说 0.33.1 —— 同一个产品在同一台机器上
+    报两个版本。按「同一事实多处实现」处理：改成取发行元数据，不再手写。
+    """
+    try:
+        from importlib.metadata import version
+        return version("antinel")
+    except Exception:
+        pass
+    try:
+        for line in (PKG_DIR.parent / "pyproject.toml").read_text(
+                encoding="utf-8").splitlines():
+            if line.startswith("version ="):
+                return line.split("=", 1)[1].strip().strip("\"'")
+    except Exception:
+        pass
+    return "unknown"
+
+
+TOOL_VERSION = _tool_version()
 RETENTION_DAYS_DEFAULT = 30
 SCRIPT_FILES = ("pre_tool_use.py", "post_tool_use.py", "scan.py", "install.py", "report.py")
 

@@ -94,6 +94,23 @@ EXCLUDED_REL_PATHS = {".psl/audit", ".psl/rules", ".psl/state"}
 # 文件级（目录过滤管不到 .psl/ 根下散落的那几个）
 EXCLUDED_FILE_RELS = {".psl/manifest.json", ".psl/scan_last.json",
                       ".psl/hooks.json", ".psl/policy.json"}
+
+
+def _rel_from_root(root_str, path):
+    """相对路径规范成 posix 形，供 EXCLUDED_* 两张表共用同一把尺子。
+
+    0.55.2：这里原来是 (rel_dir + "/" + d).lstrip("./")。str.lstrip 剥的是
+    **字符集合**而不是前缀，".psl/rules" 会被剥成 "psl/rules"，于是上面那张
+    排除表里的 ".psl/rules" 永远命中不了 —— 0.48.4 承诺的「首印象归零」从落地
+    那天起就没生效过。实测（2026-10-23，pip 真装 0.55.1）：全新目录 install 完，
+    第一次 report 就是 SEC-06 CRITICAL，命中 .psl/rules/default.json:686 的
+    "AKIAIOSFODNN7EXAMPLE"（规则自己的测试夹具），Score 80/100 needs attention。
+    企业第一眼看到的「你有严重问题」，来源是我们自己写进去的文件。
+    """
+    p = os.path.relpath(path, root_str).replace("\\", "/")
+    while p.startswith("./"):
+        p = p[2:]
+    return p
 TEXT_SUFFIXES = {".md", ".mdc", ".txt", ".json", ".yaml", ".yml", ".toml", ".py", ".js",
                  ".ts", ".sh", ".bash", ".zsh"}
 MAX_DEPTH = 15
@@ -313,7 +330,8 @@ def scan_directory(root, rules, quick=False, path_whitelist=None):
             dirnames[:] = []
         dirnames[:] = sorted(d for d in dirnames
                              if d not in EXCLUDED_DIRS
-                             and (rel_dir + "/" + d).lstrip("./") not in EXCLUDED_REL_PATHS)
+                             and _rel_from_root(root_str, os.path.join(dirpath, d))
+                             not in EXCLUDED_REL_PATHS)
         dir_name = os.path.basename(dirpath)
         for fn in sorted(filenames):
             stats["files_seen"] += 1
@@ -323,8 +341,7 @@ def scan_directory(root, rules, quick=False, path_whitelist=None):
             #   .psl/audit 已在上面被 dirnames 过滤；这里是散落在 .psl/ 根的文件）。
             #   理由见 EXCLUDED_REL_PATHS 处注释：它们的"密钥"是规则测试夹具，
             #   扫出来就是自己给自己报 CRITICAL。
-            _rl = (os.path.relpath(os.path.join(dirpath, fn), root_str)
-                   .replace("\\", "/"))
+            _rl = _rel_from_root(root_str, os.path.join(dirpath, fn))
             if _rl in EXCLUDED_FILE_RELS:
                 continue
             full = os.path.join(dirpath, fn)
