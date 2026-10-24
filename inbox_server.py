@@ -680,6 +680,17 @@ def _check_bind(addr):
 #:   地址栏 / 截图 都干净）。旧 URL（`/?t=…`）**继续可用**（维八：不破旧账）。
 _COOKIE = "antinel_t"
 
+#: ★ 0.55.0（2026-10-23）：`/assets/favicon.ico` **免鉴权**开关 —— 全服务
+#:   唯一的口令例外路径。为什么它可以是例外（别的 assets 都不行）：
+#:   ① favicon 是**品牌图标**，恒定不变、不泄态势；姿态灯（L0.ico 等）与
+#:      mp4 会泄"当前 L0/R0"，必须继续守门；
+#:   ② 品牌文件在用户本机产品目录里本来就可读，免鉴权不扩大泄密面；
+#:   ③ favicon 由**浏览器容器**自动请求，在 cookie 被禁用／被清／隐身窗／
+#:      恢复会话等真实形状下**不带任何凭证** ⇒ 守门就是 403 ⇒ Edge 落默认球
+#:      （创始人 2026-10-23 截图「死灰复燃成浏览器 LOGO」的现场根因）。
+#:   负控 N-B15d 把这个常量翻成 False，同一把尺必须判红。
+_FAVICON_OPEN = True
+
 
 def _cookie_token(cookie_header):
     """从 `Cookie:` 头里取口令。
@@ -785,8 +796,22 @@ def posture_now():
 #:     的内容从姿态灯换成品牌 LOGO 之后，Edge 仍然渲染旧图 —— 产品改了、
 #:     用户看到没改，于是被当成"死灰复燃"。URL 随内容变，缓存自然失效，
 #:     不依赖用户手动清缓存，也不指望 Ctrl+F5。
+#: ★★ 0.55.0（2026-10-23 创始人再截图「状态栏的 LOGO 死灰复燃成浏览器 LOGO」）：
+#:   内容指纹治的是「换文件」，治不了「换服务实例」。实测抓到的新一轮复发：
+#:   favicon 路由走统一 `_guard`（query/头/cookie 三源口令），而浏览器在
+#:   **cookie 被禁用／被清／隐身窗／恢复会话**这些真实形状下拉子资源是
+#:   **不带任何凭证**的 ⇒ 403 ⇒ Edge 落默认球。默认球被 Edge 按 URL 缓存
+#:   下来后，`?v=` 只随**品牌文件内容**变 —— 服务重启、端口漂移、口令更换
+#:   都不会动它 ⇒ 同一枚坏图标可以一直显示到天荒地老。这就是"以前出现过、
+#:   又死灰复燃"的完整机制，两处都要修（见下）。
+#:   ① 路由免鉴权：`_FAVICON_OPEN` —— 品牌标恒定不变、不泄态势（与姿态灯
+#:      mp4/ico 的本质区别：那些泄"当前 L0/R0"），且在用户本机产品目录里
+#:     本就可读 ⇒ 免鉴权不扩大泄密面，只把"浏览器拿不到"这一条根除；
+#:   ② 指纹加**实例段**：`?v=<内容 sha8>.<实例 sha8>`，实例段由
+#:      `os.getpid()` 派生（模块 import 时定，服务进程内恒定，重启即变）
+#:      ⇒ 服务每次重启 URL 必变 ⇒ Edge 缓存强制失效 ⇒ 旧坏结果不可能复用。
 def _favicon_href():
-    """favicon 的 href：`/assets/favicon.ico?v=<内容 sha8>`。
+    """favicon 的 href：`/assets/favicon.ico?v=<内容 sha8>.<实例 sha8>`。
 
     取不到品牌文件 ⇒ 退回不带指纹的裸 URL（仍是同一个文件，只是缓存不刷新）；
     **不编造一个指纹** —— 编出来的指纹会让缓存永远命中错内容。
@@ -794,10 +819,13 @@ def _favicon_href():
     try:
         p = os.path.join(ASSETS_DIR, _brand_favicon_rel())
         with open(p, "rb") as f:
-            return "/assets/favicon.ico?v=%s" % hashlib.sha256(
-                f.read()).hexdigest()[:8]
+            content_fp = hashlib.sha256(f.read()).hexdigest()[:8]
     except OSError:
         return "/assets/favicon.ico"
+    # 实例段：serve 进程的 pid 派生（sha8）。**不是内容**的一部分 ——
+    # 它只回答"这次是哪个服务实例在答"，让 Edge 在服务重启后必须重取。
+    inst_fp = hashlib.sha256(str(os.getpid()).encode("ascii")).hexdigest()[:8]
+    return "/assets/favicon.ico?v=%s.%s" % (content_fp, inst_fp)
 
 
 FAVICON_LINK = '<link rel="icon" href="%s">' % _favicon_href()
@@ -1084,6 +1112,25 @@ LOGO_MOTION = {
 LOGO_RING_GREEN = (91, 130, 101)
 LOGO_RING_DARKRED = (74, 38, 38)
 
+#: ★★ 0.55.0（2026-10-23，创始人截图「死灰复燃成以前的样子」）：**底板色**。
+#:   四副本必须同一个值（判据 FLO-19a 逐字节锁）：
+#:     ① 定稿 `assets/logo/logo.svg` 的 `<rect fill="#0a1a12">`（品牌媒体，
+#:        底板改直角的依据与可取证几何写在该文件注释里）；
+#:     ② 本常量；
+#:     ③ 页面 `.logo` 容器背景（CSS，见本文件样式表 `background:#0a1a12`）
+#:        —— 页面的动效徽标一直坐在这个底板上（0.53.1 起）；
+#:     ④ 哨标规格 `logo_motion_spec()["colors"]["plate"]`（经 tray.json
+#:        下发，0.55.0 新增）。
+#:   ★ 为什么必须进规格（病根，可核）：0.53.1 起哨标走动效态，
+#:     `Draw-Frame-Bitmaps` 只画内切圆、圆外全透 —— 底板从来没有一条渲染
+#:     路径画它（`git log -S "Draw-Image-Plate"` 历史上不存在，
+#:     `logo_frame.ps1` 连 `boxRatio` 都不消费）。0.53.2 T1 只把底板加进
+#:     **静态回落**路径 ⇒ 创始人 10-20 看见的是回落态的底板版；daemon
+#:     换新代码后 tray.json 带上规格 ⇒ 哨标走动效态 ⇒ 底板消失，
+#:     就是这次「死灰复燃成以前的样子」。修法：底板色随规格下发，
+#:     帧数学输出底板几何，渲染层第一笔就画底板（FLO-19b 真渲染像素断言）。
+LOGO_PLATE_FILL = "#0a1a12"
+
 #: 灯态 → 动法键（`dev` → `L0`，见上注）
 LOGO_MODE = {"L0": "L0", "L1": "L1", "L2": "L2", "Ls": "LD", "R0": "R0",
              "dev": "L0"}
@@ -1242,6 +1289,10 @@ def logo_motion_spec():
     ★ 波幅用**渲染表** `LOGO_MOTION_RENDER`（规格 × 归一系数）：哨标窗与
       页面方框同几何（`half`），照抄规格表的 45/70/105 会伸出框外 ——
       0.50.3「冒泡的 LOGO 不完整」那条缺陷在 46px 哨标上一样会发生。
+    ★ 0.55.0：`colors.plate` ＝ 品牌底板色（与 logo.svg rect fill、页面
+      `.logo` 背景同源，FLO-19a 锁四副本相等）。哨标照它画底板，才与
+      页面「动效徽标坐在深色方板上」同源；没有这个键的规格会被判废回落
+      （回落态的品牌图标自带底板）⇒ 底板在任何规格形状下都不丢。
     ★ 判据 FLO-10c 拿它对着 `LOGO_MOTION_RENDER` 与几何常量逐项锁；负控
       把一份手写的未归一一波幅塞进来必须红（与 U-18c 同一族）。
     """
@@ -1255,7 +1306,11 @@ def logo_motion_spec():
         "colors": {"ringGreen": list(LOGO_RING_GREEN),
                    "ringDarkRed": list(LOGO_RING_DARKRED),
                    "amber": list(_hex_rgb(LOGO_AMBER_FILL)),
-                   "trail": list(_hex_rgb(LOGO_TRAIL_COLOR))},
+                   "trail": list(_hex_rgb(LOGO_TRAIL_COLOR)),
+                   # 0.55.0：品牌底板色（logo.svg rect fill，四副本同源，
+                   # FLO-19a 锁）。缺这个键的规格会被哨标 `Import-Spec`
+                   # 判废回落静态品牌图标（带底板）⇒ 底板永不丢。
+                   "plate": list(_hex_rgb(LOGO_PLATE_FILL))},
         "anim": {"trailN": LOGO_TRAIL_N, "trailStep": LOGO_TRAIL_STEP,
                  "trailOpa": list(LOGO_TRAIL_OPA),
                  "trailFrac": LOGO_TRAIL_FRAC, "trailInset": LOGO_TRAIL_INSET,
@@ -3985,6 +4040,11 @@ def _make_handler(token, root):
             if not _allowed_host(self.headers.get("Host"), port):
                 self._deny("Host 不被允许")
                 return False
+            # ★ 0.55.0：favicon 免鉴权（唯一例外路径，理由见 `_FAVICON_OPEN`）。
+            #   Host 检查之后、口令比对之前 —— Host 是每个请求都该过的闸，
+            #   免的只是"这一枚恒定品牌图标要口令"。
+            if _FAVICON_OPEN and urlparse(self.path).path == "/assets/favicon.ico":
+                return True
             # ★ 0.48.6（B3）：口令来源按**优先级**排 —— query `?t=`（首字节那次）
             #   → 请求头（测试/CLI 用）→ **cookie**（此后所有站内导航与子资源）。
             #   比对仍然只有下面那一处（维一 · 入口唯一）。
