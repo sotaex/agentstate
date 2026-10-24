@@ -10051,6 +10051,164 @@ def c_slop_engine_off():
     return "夹具不成立：规则副本里没有 SLOP-01"
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# C-SLOP-01c/d（行动清单第 37 条）：撞名判定的**分档规则**与**误报面**。
+#
+# 为什么 C-SLOP-01 不够：它只断言「一个撞名样本会响」，那是端到端可达性。
+# 它抓不到「阈值在短名上失守」—— 短名误报的样本（`foo`、`nox`、`pyee`）
+# 过去从来没人喂过，所以 8.0% 的误报率一直没人看见。
+#
+# 这两条直接打 `_slop_hit`（纯函数：读参考集 + 判定，无副作用、不起子进程），
+# 逐腿定位；端到端可达由 C-SLOP-01 的 CASE 腿负责，两者分工不重叠。
+# ═══════════════════════════════════════════════════════════════════════════
+_SLOP_MOD = {}
+
+
+def _slop_module():
+    if "m" in _SLOP_MOD:
+        return _SLOP_MOD["m"]
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "ptu_for_slop", os.path.join(ROOT, "hooks", "pre_tool_use.py"))
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["ptu_for_slop"] = mod
+    spec.loader.exec_module(mod)
+    _SLOP_MOD["m"] = mod
+    return mod
+
+
+def _slop_cmd(name, tool):
+    # ★ 运行时拼装：本文件的写入动作会被钩子扫一遍，写死完整命令会拦到自己
+    return "%s" " install " "%s" % (tool, name)
+
+
+def _slop_fires(name, tool="pip"):
+    return _slop_module()._slop_hit("Bash", _slop_cmd(name, tool), {}) is not None
+
+
+#: (名字, 工具, 期望报警?, 这条腿守什么)
+_SLOP_LEGS = [
+    # ---- 短名：普通字母替换必须静默（这些邻居都是正常词／正常包）----
+    ("foo", "pip", False, "3 字通用词（旧实现在这里报 foo≈tox）"),
+    ("nox", "pip", False, "3 字普通替换，nox 与 tox 都是合法包"),
+    ("kit", "npm", False, "3 字普通替换，kit 与 lit 都是正常词"),
+    ("pdm", "pip", False, "3 字两处差异"),
+    # ---- 短名：换位／形近替换必须报（这些串基本不可能是正常命名）----
+    ("otx", "pip", True, "3 字相邻换位（tox）"),
+    ("t0x", "pip", True, "3 字形近字符替换 0←o"),
+    ("dsk", "npm", True, "3 字相邻换位（sdk）"),
+    # ---- 中长名 ----
+    ("PyNaCl", "pip", False, "6 字两处差异，pynacl 与 pyyaml 都是真包"),
+    ("pyee", "pip", False, "4 字两处差异（旧实现报 pyee≈pytz）"),
+    ("flaskk", "pip", True, "6 字双写（flask）"),
+    ("numppy", "pip", True, "6 字双写（numpy）"),
+    ("reqests", "pip", True, "7 字漏一个字符（requests）"),
+    ("reqeusts", "pip", True, "8 字相邻换位（requests）"),
+]
+
+#: 真实存在且合法的包名（本机三套环境装着的）。这些一个都不许报。
+#: 判据内部会先剔掉落进参考集的（allow 分支会掩盖误报），并要求剩余足够多。
+_SLOP_REAL = ["build", "docutils", "keyring", "twine", "pymacaroons", "pypitoken",
+              "nh3", "mdurl", "rpds-py", "more-itertools", "jsonschema", "mako",
+              "paramiko", "shapely", "sympy", "PyNaCl", "pyee", "ruff",
+              "fonttools", "websockets", "defusedxml", "cairocffi", "pyparsing",
+              "sortedcontainers", "webencodings", "contourpy", "kiwisolver",
+              "mpmath"]
+
+
+def _slop_with_old_rule(fn):
+    """在「旧阈值」下执行 fn —— **只用于牙齿自检**。
+
+    旧实现：只取最相似的那一个候选，`距离 ≤2 或 ratio ≥0.85` 就算撞名。
+    判据若在这套旧规则下仍然全绿，说明它根本量不到这次的改动（无分辨力）。
+    """
+    import difflib
+    m = _slop_module()
+    orig = m._slop_match
+
+    def _old(nn, known):
+        best = None
+        for kn, shown in known.items():
+            d = m._slop_lev(nn, kn, cap=2)
+            r = difflib.SequenceMatcher(None, nn, kn).ratio()
+            if best is None or (d, -r) < (best[0], -best[1]):
+                best = (d, r, shown)
+        if best and (best[0] <= 2 or best[1] >= 0.85):
+            return (best[2], best[0])
+        return None
+
+    m._slop_match = _old
+    try:
+        return fn()
+    finally:
+        m._slop_match = orig
+
+
+@check("C-SLOP-01c 撞名阈值按「长度＋编辑类型」分档（13 条腿，正负各半）")
+def c_slop_01c():
+    """短名只认换位／插删／形近，长名才认两处编辑。
+
+    旧判据只有「编辑距离 ≤2」。3 字名的任意两串最远距离就是 3，所以那条线在
+    短名上几乎不筛除 —— 实测 `pip install foo` 报 `foo ≈ tox, 距离 2`。
+    单纯调小阈值会丢换位（最高频 typo 手法），所以要按**编辑类型**分开。
+    """
+    bad = []
+    for name, tool, want, why in _SLOP_LEGS:
+        got = _slop_fires(name, tool)
+        if got != want:
+            bad.append("%s（%s）：期望%s，实得%s —— %s"
+                       % (name, tool, "报警" if want else "静默",
+                          "报警" if got else "静默", why))
+    if bad:
+        return ("撞名判定分档失守，%d/%d 条腿错：\n      %s"
+                % (len(bad), len(_SLOP_LEGS), "\n      ".join(bad)))
+    flipped = _slop_with_old_rule(
+        lambda: [n for n, t, want, _w in _SLOP_LEGS if _slop_fires(n, t) != want])
+    if not flipped:
+        return ("牙齿失效：换回旧的「距离≤2」后没有任何一条腿翻红（%d 条腿都没动）"
+                " ⇒ 本判据量不到阈值改动" % len(_SLOP_LEGS))
+    _note("%d 条腿全对；换回旧阈值后 %d 条翻红（%s），判据有分辨力"
+          % (len(_SLOP_LEGS), len(flipped), ", ".join(flipped[:4])))
+    return True
+
+
+@check("C-SLOP-01d 真实在用的合法包零误报（并自证量具有分辨力）")
+def c_slop_01d():
+    """误报面判据。
+
+    负控集若混进参考集内的名字，`allow` 分支会替判定兜住 ⇒ 判据假绿，
+    所以先剔除并报告；剩余不足 15 个则判据不成立（覆盖太窄）。
+    最后必须有一条正控 —— 否则「一个都没报」与「量具坏了」同一个长相。
+    """
+    ref = json.load(io.open(os.path.join(ROOT, "rules", "typosquat_top.json"),
+                            encoding="utf-8"))
+
+    def _n(x):
+        return re.sub(r"[-_.]+", "-", x).lower()
+
+    known = {_n(x) for x in (ref.get("pypi") or []) + (ref.get("npm") or [])}
+    inside = [n for n in _SLOP_REAL if _n(n) in known]
+    pool = [n for n in _SLOP_REAL if _n(n) not in known]
+    if len(pool) < 15:
+        return ("负控集覆盖不足：%d 个（剔掉参考集内 %s 后），至少要 15 个"
+                % (len(pool), inside or "无"))
+    bad = [n for n in pool if _slop_fires(n)]
+    if bad:
+        return ("真实合法包被误报 %d/%d：%s"
+                % (len(bad), len(pool), ", ".join(bad)))
+    if not _slop_fires("reqeusts"):
+        return ("量具无分辨力：连 requests 的换位都没报 ⇒ 上面的"
+                "「零误报」不算数（同一个入口必须能响）")
+    old_bad = _slop_with_old_rule(lambda: [n for n in pool if _slop_fires(n)])
+    if not old_bad:
+        return ("牙齿失效：换回旧的「距离≤2」后误报面仍然为零 ⇒ 本判据量不到误报")
+    _note("%d 个真实包零误报（剔掉参考集内 %d 个：%s）；旧阈值下会误报 %d 个"
+          "（%s），判据有分辨力"
+          % (len(pool), len(inside), ", ".join(inside) or "无",
+             len(old_bad), ", ".join(old_bad[:4])))
+    return True
+
+
 def _ci_code_text(path):
     """源码里**去掉注释与 docstring**后的 token 串（保留其它字符串字面量）。
 

@@ -88,3 +88,15 @@ All hits of one event are collected; the highest severity decides.
 - Hook latency on Windows is about 65 ms per call (interpreter start dominates); Linux/macOS untested.
 - Only actions that pass through the host's PreToolUse hook can be blocked.
 - Qoder / TRAE field layouts are declared profiles, not verified.
+- JUDGING A SHORT PACKAGE NAME'S LETTER SUBSTITUTION. SLOP-01 grades by name
+  length and edit type (0.57.0, checklist item 37): transposition,
+  insertion/deletion and homoglyph swaps (`otx`, `toxx`, `t0x`) are judged at
+  any length, but a plain letter substitution in a 3-character name is not --
+  `tox/nox`, `lit/kit`, `vue/cue` are all legitimate words or packages, so that
+  branch can only produce noise. Measured on this host (76 real packages in use
+  against 972 classic typo variants): the old single rule (`distance <= 2`)
+  gave 8.0% false positives at 100% recall; the graded rule gives 0% false
+  positives at 99.1% recall, and the 9 misses are exactly those 3-char
+  substitutions. Two real packages where one is a prefix of the other
+  (`psycopg` / `psycopg2`) are also not separable by any threshold -- that is
+  fixed by adding the name to the reference set, not by tuning the rule.

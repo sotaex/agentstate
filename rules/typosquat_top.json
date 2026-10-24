@@ -1,6 +1,6 @@
 {
- "version": "2026.09",
- "updated": "2026-09-27",
+ "version": "2026.10",
+ "updated": "2026-10-25",
  "note": "常见包参考集（撞名检测用，非完整榜单）。静态随包、有时效：名单日期之后新发布的包不在 SLOP-01 判据内——报告会显示本日期。更新方式：替换本文件。",
  "pypi": [
   "accelerate",
@@ -88,6 +88,7 @@
   "prometheus-client",
   "protobuf",
   "psychopg2",
+  "psycopg",
   "psycopg2",
   "pydantic",
   "pydantic-settings",

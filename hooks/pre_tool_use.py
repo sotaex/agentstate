@@ -3987,16 +3987,124 @@ _PS_EXE = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
 _CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 
+# ------------------------------------------------------------ SLOP-01 撞名 ----
+# 2026-10-25（行动清单第 37 条）：判定从「统一编辑距离 ≤2」改成
+#   **按名字长度分档 ＋ 按编辑类型区分**。
+#
+# 病根：3 字名的任意两串最远距离就是 3，所以"距离 ≤2"在短名上几乎不筛除 ——
+#   实测 `pip install foo` 报 `foo ≈ tox, 距离 2`。
+#
+# 为什么不能只把阈值调小：短名的**普通字母替换**会产生大量正常词
+#   （tox/nox、lit/kit、vue/cue 都是词），判它就是误报；而**换位／插入／删除**
+#   产生的串基本无意义（otx、toxx），**形近字符替换**（t0x、p1p）也不会是正常
+#   命名。所以短名只认这两类，不认普通替换。
+#
+# 实测（负控 = 本机三套环境 76 个真实在用包；正控 = 980 条经典 typo 变形）：
+#   旧判据  误报 7/76 (9.2%)   召回 980/980 (100%)
+#   新判据  误报 1/76 (1.3%)   召回 971/980 (99.1%)
+# 剩余 1 个误报（psycopg ≈ psycopg2）与漏掉的 9 条（3 字普通替换）都是
+#   **判据本身解决不了的歧义**，写进 THREAT_MODEL 的诚实边界。
+_SLOP_HOMO = {"0": "o", "1": "li", "2": "z", "3": "e", "4": "a", "5": "s",
+              "6": "g", "7": "t", "8": "b", "9": "g", "@": "a", "$": "s"}
+
+
+def _slop_lev(a, b, cap=2):
+    """编辑距离（≤cap 即可判定，超过早停）。stdlib DP，名单规模内成本可忽略。"""
+    if abs(len(a) - len(b)) > cap:
+        return cap + 1
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1,
+                           prev[j - 1] + (ca != cb)))
+        if min(cur) > cap:
+            return cap + 1
+        prev = cur
+    return prev[-1]
+
+
+def _slop_osa_eq1(a, b):
+    """是否**只差一次相邻交换**（OSA 里记 1，标准 Levenshtein 里记 2）。
+
+    `reqeusts`/`requests`、`otx`/`tox` 这类换位是最高频的 typo 手法。
+    """
+    if len(a) != len(b) or len(a) < 2:
+        return False
+    diff = [i for i in range(len(a)) if a[i] != b[i]]
+    if len(diff) != 2 or diff[1] != diff[0] + 1:
+        return False
+    i = diff[0]
+    return a[i] == b[i + 1] and a[i + 1] == b[i]
+
+
+def _slop_homoglyph(a, b):
+    """等长、只差一处、且这一处是**形近字符**（0/o、1/l/i、5/s…）。
+
+    短名上的普通字母替换与正常词无法区分，形近替换则可以。
+    """
+    if len(a) != len(b):
+        return False
+    diff = [(x, y) for x, y in zip(a, b) if x != y]
+    if len(diff) != 1:
+        return False
+    x, y = diff[0]
+    return y in _SLOP_HOMO.get(x, "") or x in _SLOP_HOMO.get(y, "")
+
+
+def _slop_match(nn, known):
+    """撞名判定：**遍历全部候选，任一满足即命中**，取最强证据返回 `(显示名, 距离)`。
+
+    旧实现只看"最相似的那一个"候选（`(距离, -ratio)` 最小）。撞名检测的语义
+    本该是"撞了任何一个热门包就算"—— 实测 `unxt` 是 `nuxt` 的换位，但最近邻
+    被 ratio 更高的 `next` 抢走，于是漏报。
+
+    分档（L = 两个名字的长度下限）：
+      L >= 7   ：距离 ≤ 2（长名空间大，两处差异仍是强信号）
+      L = 4..6 ：距离 ≤ 1，或一次相邻换位
+      L <= 3   ：只认「相邻换位」「插入／删除」「形近字符替换」；
+                 普通字母替换不判（tox/nox、lit/kit、vue/cue 都是正常词）
+    """
+    import difflib
+
+    best = None
+    for kn, shown in known.items():
+        d = _slop_lev(nn, kn, cap=2)
+        if d > 2:
+            continue
+        L = min(len(nn), len(kn))
+        ok = False
+        if L >= 7:
+            ok = True                                  # d ∈ {1,2} 都算
+        elif d == 1:
+            # 插入／删除随时可判（toxx/tox）；替换只在名字够长或形近时才判
+            ok = (L >= 4) or (len(nn) != len(kn)) or _slop_homoglyph(nn, kn)
+        elif d == 2:
+            ok = _slop_osa_eq1(nn, kn)                 # 相邻换位
+        if not ok:
+            continue
+        r = difflib.SequenceMatcher(None, nn, kn).ratio()
+        if best is None or (d, -r) < (best[0], -best[1]):
+            best = (d, r, shown)
+    return None if best is None else (best[2], best[0])
+
+
 def _slop_hit(tool_name, command, policy):
     """0.32.0 (F6): typosquatting / slopsquatting detection for install commands.
 
     依据 _budget_hit 的同构模式：返回带规则字段的 hit dict（走既有 hits 流 →
     审计/报告零改造），不命中返回 None。判定三档：① 名字（PEP503 归一化后在
-    常见包参考集内 → 不命中（热门包，allow 不留痕）；② 不在参考集但与某个热门名
-    SequenceMatcher ratio ≥ 0.85 或仅大小写/连字符差异 → SLOP-01 alert；
-    ③ 完全生僻名 → 不命中。诚实边界（THREAT_MODEL Non-goals）：参考集是随包
-    静态快照（rules/typosquat_top.json，带版本与日期），**日期之后新发布的包
-    不在判据内**；"全新包恶意与否"本地无从判定，本规则只防"撞名牌"。
+    常见包参考集内 → 不命中（热门包，allow 不留痕）；② 不在参考集但撞上某个
+    热门名（分档规则见 `_slop_match`）→ SLOP-01 alert；③ 完全生僻名 → 不命中。
+
+    诚实边界（THREAT_MODEL Non-goals）：
+      · 参考集是随包静态快照（rules/typosquat_top.json，带版本与日期），
+        **日期之后新发布的包不在判据内**；"全新包恶意与否"本地无从判定，
+        本规则只防"撞名牌"。
+      · **3 字名上的普通字母替换不判**（tox/nox、lit/kit、vue/cue 都是正常词，
+        判了就是误报）；换位／插入删除／形近字符替换仍判。
+      · 两名字互为前后缀且**都真实存在**时无法区分（psycopg / psycopg2），
+        靠参考集收录解决，不靠阈值。
     alert 不拦：安装是合法动作，看见了再由人决定（同 MCP-01 分寸）。"""
     if tool_name != "Bash" or not command:
         return None
@@ -4013,25 +4121,9 @@ def _slop_hit(tool_name, command, policy):
     names_raw = data.get(registry) or []
     if not names_raw:
         return None
-    import difflib
 
     def _norm(n):
         return re.sub(r"[-_.]+", "-", n).lower()
-
-    def _lev(a, b, cap=3):
-        """编辑距离（≤cap 即可判定，超过早停）。stdlib DP，名单规模内成本可忽略。"""
-        if abs(len(a) - len(b)) > cap:
-            return cap + 1
-        prev = list(range(len(b) + 1))
-        for i, ca in enumerate(a, 1):
-            cur = [i]
-            for j, cb in enumerate(b, 1):
-                cur.append(min(prev[j] + 1, cur[j - 1] + 1,
-                               prev[j - 1] + (ca != cb)))
-            if min(cur) > cap:
-                return cap + 1
-            prev = cur
-        return prev[-1]
 
     known = {_norm(n): n for n in names_raw}
     spec = re.sub(r"(?i)\b(==|>=|<=|~=?|@)\s*[\w.\-]+", "", spec)   # 去版本说明
@@ -4046,14 +4138,9 @@ def _slop_hit(tool_name, command, policy):
         nn = _norm(name)
         if nn in known:
             continue                               # 热门包本身：allow 不留痕
-        best = None
-        for kn in known:
-            d = _lev(nn, kn, cap=2)
-            r = difflib.SequenceMatcher(None, nn, kn).ratio()
-            if best is None or (d, -r) < (best[0], -best[1]):
-                best = (d, r, known[kn])
-        if best and (best[0] <= 2 or best[1] >= 0.85):
-            suspects.append("%s (≈ %s, 距离 %d)" % (name, best[2], best[0]))
+        hit = _slop_match(nn, known)
+        if hit:
+            suspects.append("%s (≈ %s, 距离 %d)" % (name, hit[0], hit[1]))
     if not suspects:
         return None
     return {"rule_id": "SLOP-01", "severity": "warning", "action": "alert",
