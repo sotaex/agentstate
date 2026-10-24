@@ -8,7 +8,7 @@
   "value": "current",
   "derivation": "auto",
   "reason": null,
-  "checkedAt": "2026-10-24T14:12:57+08:00",
+  "checkedAt": "2026-10-24T22:59:52+08:00",
   "note": "re-derive any time: python -m tools.antinel_verify (--manifest for all 24 shipped files); which assertions failed: discrimination.failed[]"
  },
  "scope": {
@@ -116,12 +116,12 @@
   "rules/economics/claude-code.json": "sha256:e5ce954672baa42ffc220fddde2b691566f4644ec05ba6887c5ccc1c9dae30ba",
   "rules/economics/qoder.json": "sha256:5f51a86cbe0625f44519ce1308e562286c9d3410d0b7284006ac26b068396a3d",
   "rules/economics/generic.json": "sha256:4849374b3d2443dd77329b09d348dec03794863aa8f991d98ea5380a9849b82f",
-  "hooks/pre_tool_use.py": "sha256:2092205056528385cffef95228fd0d32b9bdc95dfc7501aff2b432f7e2a7f426",
+  "hooks/pre_tool_use.py": "sha256:571241968f3aab6d79e4478274446583a8bcb5d6c1fa91bb6bbafd920337c4ec",
   "hooks/post_tool_use.py": "sha256:60965e54079bb2a3abc92a133d0400a60e4456a7d00527f6c7248170ba95f57d",
   "scripts/scan.py": "sha256:1f8b1e4da5134128966b46efdc07340ea67d8e6a8350a41f94510e12c92a5bfa",
   "scripts/install.py": "sha256:afb93d6fc76191555a48437b6fd4fe414ba7248feb4a23a867d198bb3c2b1ca5",
   "scripts/report.py": "sha256:78620c3730c57f46eb04f7e321a66a760fcb55c575c17d7558da9d201670828b",
-  "scripts/verification_tests.py": "sha256:8a2c4abd2e81baf7e954db32976a789a16977eb6752cc62557cebe3bbd5ef97b",
+  "scripts/verification_tests.py": "sha256:4e9c3f774c374093080c3b70b994c4ce7a0099e35960ab35e1a5a87012f02344",
   "session_dna.py": "sha256:38b2bd765fdf2308fa698eb507e53c4ba7fbe2bf11c94216d95ad5dd116fb205",
   "transcript_reader.py": "sha256:c0ce99c5bdfb255f170ca744c011ae64ceb9569d1c9dd8efc1a2c096ff89dc1c",
   "audit_chain.py": "sha256:a501da7b3bb7b65e9fb2da0515175a5a2e547540d73c4b331b292300e712ba56",
@@ -130,8 +130,8 @@
   "tools/enforce_probe.py": "sha256:c82cb457481a5e5a70c932b66c8c909f8050024f700f88b454bbea66992349ad"
  },
  "run": {
-  "started_at": "2026-10-24T13:54:00+0800",
-  "duration_ms": 1140218,
+  "started_at": "2026-10-24T22:52:17+0800",
+  "duration_ms": 456031,
   "duration_note": "wall-clock of a subprocess fan-out suite; machine- and load-dependent, not comparable across environments",
   "executor": "scripts/run_harness.py",
   "exit_code": 0,

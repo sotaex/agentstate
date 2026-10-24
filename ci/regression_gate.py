@@ -2010,20 +2010,73 @@ def html_lib_unescape(s):
 _FREEZE_OUTPUT_CHECKS["reason_line_budget"] = j_reason_line_budget
 
 
-def j_fallback_has_no_dst10(m):
-    """兜底集的事实：_FALLBACK 只有 17 条且无 DST-10。
-    ★ 这本身不是缺陷，但**降级时必须能看见**（否则把盲区当清白）。"""
-    fb = getattr(m, "_FALLBACK", None)
+def _fallback_mismatch(fb, live):
+    """纯函数：兜底集与主表的不等之处（空串＝全等）。**正控与牙齿共用这一实现**。
+
+    ★ 为什么抽成纯函数：牙齿必须能"换掉同一份实现喂坏数据"，否则就成了
+      "另写一套判断来证明第一套对"（假绿族⑨：探针自带第二套模型）。
+    """
     if fb is None:
-        return False, "缺 _FALLBACK"
-    ids = [r.get("id") for r in fb]
-    n = len(ids)
-    has_dst10 = "DST-10" in ids
-    if has_dst10:
-        return False, "兜底集竟含 DST-10（与已查明事实不符，需重新核实）"
-    if n != 17:
-        return False, "兜底集 %d 条（期望 17）—— 事实基线变了，需重新核实" % n
-    return True, "兜底集 %d 条、无 DST-10（与事实一致）" % n
+        return "缺 _FALLBACK"
+    fi = [r.get("id") for r in fb]
+    li = [r.get("id") for r in live]
+    missing = [i for i in li if i not in fi]
+    if missing:
+        return "兜底缺 %d 条：%s" % (len(missing), missing[:8])
+    extra = [i for i in fi if i not in li]
+    if extra:
+        return "兜底多出主表已无的 %s" % extra[:8]
+    by = {r.get("id"): r for r in live}
+    for r in fb:
+        rid = r.get("id")
+        L = by[rid]
+        if r != L:
+            ks = [k for k in (set(r) | set(L)) if r.get(k) != L.get(k)]
+            return ("%s 与主表不等（%d 个字段）：%s ｜ 兜底=%r 主表=%r"
+                    % (rid, len(ks), ks[:4],
+                       [r.get(k) for k in ks[:2]], [L.get(k) for k in ks[:2]]))
+    return ""
+
+
+def j_fallback_matches_rules(m):
+    """兜底集必须与主表**全等**：同 id 集合 ＋ 每字段逐字相等，且自带牙齿。
+
+    ★★ 前身是 `j_fallback_has_no_dst10`，它断言「兜底只有 17 条且无 DST-10」，
+      把**缺陷**钉成了通过条件（docstring 还写「这本身不是缺陷」）。实测后果：
+        · 少 20 条规则（含 SEC-04 钱包、SEC-06 密钥、CTX-07 base64 执行、DST-06 远程管道）
+        · 已在那 17 条里的也缩水 —— DST-01 缺 mkfs / dd of=/dev/ 共 13 条、
+          DST-04 缺 10 条、CTX-02 缺 6 条并丢掉 compound_nonprimary 门槛
+        · 共缺 **47 个 pattern** ＋ 6 处语义字段不等
+      ⇒ 「规则文件被篡改」这个最需要防的时刻，保护恰好腰斩，而判据天天绿。
+      这是「期望值禁从实现现状抄」的教科书实例。
+
+    ★ 为什么必须全等而不是子集：`scripts/verification_tests.py` 的 P-B5 已经守了
+      单向子集（兜底不得比主表**宽**）。它守不住反方向（不得比主表**窄**）
+      —— 缺陷就长在那个方向的空白里。
+    """
+    fb = getattr(m, "_FALLBACK", None)
+    live_p = PKG / "rules" / "default.json"
+    if not live_p.is_file():
+        return None                      # 无真表 ⇒ 不可判（不是通过）
+    try:
+        live = json.loads(live_p.read_text(encoding="utf-8")).get("rules") or []
+    except Exception as e:                # noqa: BLE001
+        return False, "真表读不出：%s: %s" % (type(e).__name__, e)
+    if not live:
+        return False, "真表 0 条（空集比较不算通过）"
+
+    why = _fallback_mismatch(fb, live)
+    if why:
+        return False, why
+
+    # 牙齿：同一实现喂一个只改了一个值的副本，必须报。不报 ⇒ 这条判据不可能红。
+    import copy as _copy
+    bite = _copy.deepcopy(fb)
+    bite[0]["severity"] = "__tampered__"
+    if not _fallback_mismatch(bite, live):
+        return False, "牙齿失效：篡改一条 severity 后仍判全等 ⇒ 判据不可能红"
+
+    return True, "兜底 %d 条与主表全等；牙齿有效" % len(fb)
 
 
 def j_builder_mechanisms_present():
@@ -3839,7 +3892,7 @@ def _checks(m):
         ("A2  加载与比对同源（行为级：篡改必报）", j_a2_load_compare_same_source),
         ("D-3 纯文本提及仍放行（无假阳性）", lambda: j_mention_not_regressed(m)),
         ("—   DST-01 真表 21 条未损坏（对照）", lambda: j_dst01_still_works(m)),
-        ("—   兜底集事实未变（17 条、无 DST-10）", lambda: j_fallback_has_no_dst10(m)),
+        ("—   兜底集与主表全等（逐字段 ＋ 内建牙齿）", lambda: j_fallback_matches_rules(m)),
         ("D-6 九处版本号一致（原 A5，此前无守卫）", j_version_consistent),
         ("D-11 构建器三件机制在位（布局表/同步守卫/对账）", j_builder_mechanisms_present),
         ("D-17 构建顺序：验产物 final ＋ 家务最后做", j_build_harness_order),
