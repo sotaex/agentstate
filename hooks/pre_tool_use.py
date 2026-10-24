@@ -3543,19 +3543,31 @@ def _basic_hit(rule, command, file_path, content, url, bash_extra, file_targets,
                    command_variants(command) + [url])
     if r:
         return (r[1], "command")
-    r = _first_hit(_patterns(rule, "file_patterns"), [file_path] + bash_extra)
-    if r:
-        return (r[1], "path")
+    _fp_pats = _patterns(rule, "file_patterns")
+    _c_pats = _patterns(rule, "content_patterns")
+    r = _first_hit(_fp_pats, [file_path] + bash_extra)
+    _path_hit = r[1] if r else None
+    # ★★ 0.57.0 (B-1)：路径命中**不再一律定案**。
+    #   只有「带 content_patterns 且类型是 file_content」的规则，路径才是**准入资格**，
+    #   真正命中取决于内容面 —— 否则 content_patterns 是**死代码**。
+    #   改前实测（output/tests/0.57.0/mcp-content-before.json）：MCP-02/03/04 的
+    #   正控 6/6「命中」但 `file_content` 通道 **0** 次、全是 `path` ⇒ 等价于
+    #   「碰 .mcp.json 就响三条」，而干净配置同样响（负控误命中 6/8）。
+    #   ★ 为什么 tool_call 三条（SEC-01 / MCP-01 / SEC-11）**不改**：它们的语义就是
+    #     「这个文件被碰了」（MCP-01 的标题就是「配置文件被写入或修改」），内容面只是
+    #     覆盖「拿不到 file_path 的 Bash 场景」的补充 ⇒ 路径命中即命中是对的。
+    _content_gate = bool(_c_pats) and rtype == "file_content"
+    if _path_hit and not _content_gate:
+        return (_path_hit, "path")
+    if _path_hit is None and _content_gate and _fp_pats:
+        # 内容类规则只审其 file_patterns 指向的文件（MCP-02/03/04 只审 MCP 配置）；
+        # 不带 file_patterns 的（CTX-02/04）由下面的 target 限定审哪类文件。
+        # ★ 用同一个 `_path_hit`，不再二次 `_first_hit` —— 上一版这里重算了一遍
+        #   且只比 `[file_path]`（漏 bash_extra），是同一事实的第三份实现。
+        return None
     if detection is None:
-        pats = _patterns(rule, "content_patterns")
+        pats = _c_pats
         if rtype == "file_content":
-            # 0.31.0 (F2): a file_content rule carrying file_patterns only
-            # inspects files whose path matches them (MCP-02/03/04 target MCP
-            # config files; without this guard every text file on disk would be
-            # content-scanned for their patterns).
-            _fp_pats = _patterns(rule, "file_patterns")
-            if _fp_pats and not (file_path and _first_hit(_fp_pats, [file_path])):
-                return None
             target = rule.get("target")
             # 0.31.0 (F1): target semantics -- "instruction_files" matches SKILL.md
             # plus the instruction set; "all_text_files" stays a superset of
@@ -3563,9 +3575,20 @@ def _basic_hit(rule, command, file_path, content, url, bash_extra, file_targets,
             compound = bool(rule.get("compound_nonprimary"))
             sf = int(rule.get("specific_from") or 0)
             for spec, text in file_targets:
-                spec_ok = (target is None or target == spec or target == "all_text_files"
-                           or (target == "instruction_files"
-                               and spec in ("SKILL.md", "instruction_file")))
+                # ★★ 0.57.0 (B-2)：**有 file_patterns 时 target 不再二次限定**。
+                #   路径准入已由 file_patterns 精确完成，再叠一层 target 就是第二把尺子，
+                #   且必然漂移 —— 实测 target="mcp_config" 既不等于 spec 的任何取值，
+                #   也不在旧白名单里 ⇒ MCP-02/03/04 **即使走到内容面也恒不命中**
+                #   （这是 MCP 三条的第二道死门，此前从未被记录）。
+                #   scan.py 侧用的是黑名单式（只拦 SKILL.md / instruction_files），
+                #   hook 侧用白名单式 ⇒ 同一件事两把尺子。统一为：
+                #   target 只为「没有 file_patterns、需要按文件类别限定」的规则服务。
+                if _fp_pats:
+                    spec_ok = True
+                else:
+                    spec_ok = (target is None or target == spec or target == "all_text_files"
+                               or (target == "instruction_files"
+                                   and spec in ("SKILL.md", "instruction_file")))
                 if not spec_ok:
                     continue
                 # 0.31.0 (F1): compound criterion for NON-SKILL.md instruction

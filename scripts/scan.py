@@ -407,13 +407,24 @@ def scan_directory(root, rules, quick=False, path_whitelist=None):
                     # inspects files whose path matches them (MCP-02/03/04 target
                     # MCP config files; the guard keeps their patterns from
                     # content-scanning every text file in the tree).
+                    # ★★ 0.57.0 (B-2)：file_patterns 匹配 = **准入资格**，而不是命中本身。
                     if rule.file_patterns and not any(rx.search(rel) or rx.search(fn)
                                                       for rx in rule.file_patterns):
                         continue
-                    if rule.target == "SKILL.md" and fn != "SKILL.md":
-                        continue
-                    if rule.target == "instruction_files" and _spec not in ("SKILL.md", "instruction_file"):
-                        continue
+                    # ★★ 0.57.0 (B-2)：**有 file_patterns 时 target 不再二次限定** ——
+                    #   与 hooks/pre_tool_use.py 的 `_basic_hit` 同源。旧写法这里是
+                    #   黑名单式（只拦 SKILL.md / instruction_files 两种 target），
+                    #   hook 那边是白名单式（mcp_config 不在名单里 ⇒ 恒不命中），
+                    #   同一件事两把尺子。统一后：target 只为「没有 file_patterns、
+                    #   需要按文件类别限定」的规则服务。
+                    #   ⚠ 前提（有判据守）：file_patterns 非空的 file_content 规则，
+                    #     target 只能是 mcp_config 或 None；出现别的取值必须人工确认，
+                    #     否则这里会**静默放松**（原本该被 target 挡住的文件不再被挡）。
+                    if not rule.file_patterns:
+                        if rule.target == "SKILL.md" and fn != "SKILL.md":
+                            continue
+                        if rule.target == "instruction_files" and _spec not in ("SKILL.md", "instruction_file"):
+                            continue
                     if rule.excluded(rel, fn):
                         continue
                     if rule.raw.get("compound_nonprimary") and _spec == "instruction_file":

@@ -372,3 +372,78 @@ sdist  antinel-0.56.0.tar.gz（扫描文本成员 246 个）：三处同样齐
 修复后复跑（`--only 0431,0481,regression`）：**0431 17 绿 / 0481 12 绿 / regression 全绿**。补齐后再跑全量第二遍，日志 `gate_full_after_fix.log`。
 
 
+
+---
+
+## 7. 第四阶段执行记录 · 步骤 A 与 B（0.57.0，2026-10-24／25）
+
+### 7.1 步骤 A：兜底集 17 → 37（已提交 `d29a127`）
+
+**做之前不知道的三件事，都改变了做法**：
+
+| 未知 | 实测 |
+|---|---|
+| 兜底表能否改成运行时生成 | **不能**。`verification_tests.py` 用正则抠 `^_FALLBACK = \[…^\]` 再 `eval`；`fallback_rule_ids()` 还要求**双引号** ⇒ 生成器必须用 `json.dumps`，用 `repr` 会产出单引号 ⇒ id 抠成空集 ⇒ A4 判据静默失效 |
+| 那 17 条本身是否完整 | **不完整**。与主表逐字段对账：缺 **47 个 pattern**（DST-01 命令面 8/21、DST-01 豁免面 9/19、DST-04 文件面 3/13…）＋ **6 处语义字段**（CTX-02 的 `target` 退成 `SKILL.md`、丢了 `compound_nonprimary`）⇒ 降级模式不是「少 20 条规则」，而是「17 条里有 6 条残废」 |
+| 有没有别的判据钉着 17 | 有，`j_fallback_has_no_dst10` 断言 `n != 17` 即红，docstring 还写「这本身不是缺陷」⇒ **补齐反而红**。已改为 `j_fallback_matches_rules`（id 全等 ＋ 每字段逐字 ＋ 五个牙齿） |
+
+**三个连锁陷阱**（都不是「小心点就能避开」）：
+
+1. 生成器 `repr` ⇒ 单引号 ⇒ A4 判据静默失效（改用 `json.dumps`）。
+2. A4 的判别子原来是「只在真表、不在兜底」的差集，全等后恒空 ⇒ 它**自带的守门断言当场变红把我拦住**（按设计工作）。判别子改为观测审计事件 `rules_integrity_fallback`。
+3. X13-a 连撞两个坑：① 我写成 `rc == 2`，但 MCP-02 是 `warning` ⇒ `alert` ⇒ rc 本来就是 0；② 用真实 `USERPROFILE` 时 `notice_gate` 去重（同路径同一天一次）让这条判据**每天第一次绿、之后全红**。已隔离 home 并按 pid 唯一。
+   ⇒ ②顺带挖出真缺陷，已记为下一批第 **35、36** 条。
+
+**读数**：降级 A/B 对照 3 条差异全部「旧漏 → 新拦」（格式化类命令、块设备覆写、解包到根目录各一条），零放松；harness **323/323**；regression **31/31**；0490 **138 绿 / 0 红**；manifest 重签 2 条（精确命中改动的两文件）。
+
+### 7.2 步骤 B：MCP 内容面（本轮）
+
+**改动性质与预判不同**：不是「两边都坏」，而是**静态侧对、实时侧错**。
+
+| 侧 | 改前实况 |
+|---|---|
+| `hooks/pre_tool_use.py` | **坏死**。`_basic_hit` 里 `file_patterns` 命中就直接 `return (..., "path")` ⇒ `content_patterns` 是死代码 |
+| 第二道死门（**此前从未被记录**） | 即使走到内容面，`target="mcp_config"` 既不在白名单里、也不等于 `spec` 任何取值 ⇒ `spec_ok` 恒 False |
+| `scripts/scan.py` | **本来就是对的**：有专用 `scan_mcp_configs()` 通道直接按内容匹配 |
+| 后果 | 同一个 `.mcp.json`：**静态扫描报、实时拦截不响** —— 同一件事两个结论 |
+
+**改前基线**（`output/tests/0.57.0/mcp-content-before.json`）：6 条正控「全部命中」，但 `match_kind` **全是 `path`**、`file_content` 通道 **0 次**；干净配置同样报三条（负控误命中 6/8）。这正是假绿第十一族——**正控通过但通道不对**，只看「命中」会以为它一直是好的。
+
+**改动三处**：
+
+| 文件 | 改法 | 行为变化 |
+|---|---|---|
+| `hooks/pre_tool_use.py` | ① 路径命中不再一律定案：仅「带 `content_patterns` 且 `type=file_content`」时路径是**准入资格**；② `spec_ok` 里**有 `file_patterns` 时 target 不再二次限定**；③ 删掉重复的第二次 `_first_hit`（同一事实的第三份实现） | **精确限于 MCP-02/03/04** |
+| `scripts/scan.py` | 同样加「有 `file_patterns` ⇒ target 不二次限定」，与 hook 同形 | **零行为变化**（旧黑名单式本就不拦 `mcp_config`）——改的是形态，避免两把尺子。诚实标注在此 |
+| `ci/inbox_guards_0514.py` | 并入 **B57 族 14 条**（P5 扩展优先：与 SEC-05 族同域，判据全在进程内、秒级） | — |
+
+**B57 族构成**（ID 前缀 `B57-`，跨套件唯一）：
+
+| 组 | 条数 | 守什么 |
+|---|---|---|
+| P1–P3 | 3 | 三条 MCP 规则内容面可达，且**通道必须是 `file_content`** |
+| P4 | 1 | 干净配置不再误报（误报归零） |
+| P5 | 1 | 没有变成「全盘扫内容」（同样的注入/密钥放在 `notes.txt` 里不命中） |
+| P6 | 1 | 不串规则（注入不触发 MCP-03、密钥不触发 MCP-02） |
+| P7 | 1 | 未误伤 tool_call 三条（SEC-01/MCP-01/SEC-11 路径即命中、通道仍为 `path`） |
+| P8 | 1 | CTX-02 的 compound 阈值未被改坏（SKILL.md 单条即中／CLAUDE.md 需 2 通用或 1 特定） |
+| S1 | 1 | **双路径同源**：同一份配置 hook 与 scan.py 命中的规则集合相等 |
+| S2 | 1 | `scan_mcp_configs` 的候选集与规则表 `file_patterns` 同集（防第三把尺子静默分叉） |
+| S3 | 1 | 前提断言：`file_patterns` 非空的 `file_content` 规则，`target` 只能是 `mcp_config`/`None`（否则 B-2 会**静默放松**） |
+| N1–N3 | 3 | 牙齿：改回路径即定案 / 改回 target 白名单 / 换掉规则表 `file_patterns` —— P1 必须红 |
+
+**P8 第一版为什么红**（记下来，因为这类错很容易复发）：我用「注入 + 外传」那句当「单条通用」样本，可它后半截同时命中 `content_patterns[5]`（在 `specific_from=5` 之后 ⇒ **特定**）⇒ 一条特定本来就该命中，我的断言把**正确行为**判成了 bug。改用只命中 `[0]` 的那半句后转绿。**样本错了不能报成规则失效**。
+
+**读数**：
+
+| 项 | 结果 |
+|---|---|
+| 改后基线 | 正控 6/6，通道**全为 `file_content`**；负控+边界误命中 1/8（剩下那条是 MCP-01，其语义就是「配置被碰就报」，**设计内**） |
+| B57 单跑 `--only B57` | **14 绿 / 0 红** |
+| 0514 全量 | **241 绿 / 0 红 / 0 跳过**（AST 实数 241 ＝ 旧 227 ＋ B57 14） |
+| 0490 | **138 绿 / 0 红** |
+| regression | **31 / 31 PASS** |
+| harness | 第一遍 321/323（judgment 自指）→ 第二遍 **323/323 PASS** |
+| manifest | 重签 2 条，精确命中 `hooks/pre_tool_use.py` 与 `scripts/scan.py` |
+
+证据全在 `output/tests/0.57.0/`：`mcp-content-before.json`、`mcp-content-after.json`、`b57_only2.log`、`gate0514_after_B.log`、`gate0490_after_B.log`、`regression_after_B2.log`、`harness_after_B_{1,2}.log`。
