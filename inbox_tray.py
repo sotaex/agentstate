@@ -374,16 +374,21 @@ def _chain_record(root, rec):
       `session_dna.append_chained`（C-1 唯一链实现）＋ day manifest。
     ★ root 给了 ⇒ 项目链（`<root>/.psl/audit`，registry 消费点会读到）；
       没给 ⇒ 中枢 rollup（host_shield `record(None, ...)` 的同一口径）。
-    ★ 任何失败都吞掉并返回 False —— 记账是旁路，不许把主业搞崩
+    ★ 任何失败都吞掉并返回 `"none"` —— 记账是旁路，不许把主业搞崩
       （调用方 `write_state` / daemon tick 都已各自 try 住）。
+    ★★ 0.56.0（D-40）：**返回四态串**（`chain` / `sidecar` / `dropped` / `none`），
+      原样透出 `session_dna.append_chained` 的结果，不再折成布尔。折布尔的代价
+      是 `bool("none") == True` —— 记录丢了也报成功，而这里**没有**任何 stderr
+      提示。`antinel.py` 的同名函数折布尔是**有意的**（它对 `none` 会写 stderr
+      让用户看见）；托盘这处是静默折，这才是缺陷。两者差异是设计，不是漂移。
     """
     try:
         import session_dna as sd
         audit_dir = (os.path.join(root, ".psl", "audit")
                      if root else os.path.join(C.hub_dir(), "rollup"))
-        return bool(sd.append_chained(audit_dir, rec))
+        return sd.append_chained(audit_dir, rec)
     except Exception:                                           # noqa: BLE001
-        return False
+        return "none"
 
 
 # ---------------------------------------------------------------- 徽标痕迹 --
@@ -432,7 +437,10 @@ def drain_logo_events(root=None):
         rec = _logo_event_record(ln)
         if rec is None:
             continue
-        if _chain_record(root, rec):
+        # ★ 0.56.0（D-40）：四态里只有 `chain` / `sidecar` 算「记录还在」。
+        #   `sidecar` 是落到了旁路文件 —— 记录仍可取证 ⇒ 消费掉；
+        #   `dropped` / `none` 才算失败 ⇒ 留给下 tick 重试。
+        if _chain_record(root, rec) in ("chain", "sidecar"):
             done.append(rec)
         else:
             break                       # 进链失败 ⇒ 整体不消费，下 tick 重试

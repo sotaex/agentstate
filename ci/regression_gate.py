@@ -1359,6 +1359,244 @@ def j_audit_readback_same_source():
             pass
 
 
+#: ★ 0.55.3（2026-10-24）形状契约扫描的**排除集**。
+#:   实测：仓内有 4 类**不入 git** 却占着磁盘的完整代码副本
+#:   （`antinel-0.48.2/` 126 文件、`antinel-0.48.4/` 108、`antinel-0.55.1/` 299、
+#:   `build/bdist.win-amd64/wheel/`）＋ `out/` 的旧树 ＋ `.worktrees/` 的并行树。
+#:   `git ls-files | grep -c ^antinel-0.` = 0 **不跟踪**，但任何按目录 walk 的扫描
+#:   都会把它们当成「当前代码」数进去 ⇒ 扫描面必须显式排除并自证。
+_APPEND_SHAPE_EXCLUDE = frozenset({
+    "antinel-0.48.2", "antinel-0.48.4", "antinel-0.55.1",
+    "build", "dist", "out", ".worktrees", "output", "ci", ".git",
+    "__pycache__", ".workbuddy", ".psl", "challenge", "docs", "psl",
+    "references", "scripts", "tools", "console", "server",
+})
+
+
+def _product_module_names(root):
+    """产品模块名（真源：`pyproject.toml` 的 `tool.setuptools.py-modules`）。
+
+    ★ 为什么不用 `glob("*.py")`（v1.7 实测）：仓根有 **250 个 `_p_*.py` 探针残留**，
+      它们被 `.gitignore` 挡住（`_p_*` / `_probe_*.py`）⇒ `git status` 看不见，
+      但 `glob` 全看得见。原实现因此把 **298 个文件**当扫描面，其中 **83% 是探针**，
+      而「扫到 298 个文件」给人的规模感完全是假的。
+    ★ 用正则读 `pyproject.toml` 而不 import tomllib：判据要在 3.9+ 都能跑。
+    """
+    p = Path(root) / "pyproject.toml"
+    try:
+        txt = p.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    m = re.search(r"py-modules\s*=\s*\[(.*?)\]", txt, re.S)
+    if not m:
+        return []
+    return re.findall(r"[\"']([A-Za-z0-9_]+)[\"']", m.group(1))
+
+
+def _append_shape_files(root):
+    """D-40 的**唯一**遍历实现：产品模块 ＋ hooks/。
+
+    返回 `[(Path, label)]`，label 用于报错时给出人读位置。
+
+    ★ 抽成命名函数的原因（v1.7 C23）：此前判据内部两段遍历、探针各自另写一套模型，
+      探针因此报出「只扫仓根、覆盖 7/16」的**过期结论**——判据后来已补 hooks 腿，
+      探针不知道。**同一件事两处实现，是本院第一顽症的第一形态**：
+      换实现只改一处，另一处照样绿。
+    ★ 面内不含 `scripts/` 与 `tools/`：那是 `_APPEND_SHAPE_EXCLUDE` 里的**有意排除**
+      （历史上按「安装脚本不属产品模块」划的）。实测该决定让 3 个调用点不在面内
+      （`scripts/install.py:724`、`scripts/report.py:808`、`tools/enforce_probe.py:85`），
+      已登记为待裁决，不擅自扩大面。
+    """
+    root = Path(root)
+    out = []
+    for name in _product_module_names(root):
+        if name in _APPEND_SHAPE_EXCLUDE:
+            continue
+        f = root / (name + ".py")
+        if f.is_file():
+            out.append((f, f.name))
+    hooks = root / "hooks"
+    if hooks.is_dir():
+        for f in sorted(hooks.glob("*.py")):
+            if f.name in _APPEND_SHAPE_EXCLUDE:
+                continue
+            out.append((f, "hooks/" + f.name))
+    return out
+
+
+def _append_chained_wraps(py_src):
+    """扫一段源码里**所有** `X.append_chained(...)` 调用点的**包裹方式**。
+
+    返回 `[(lineno, kind, owner, snippet)]`，`kind` ∈
+    `bool` / `tuple` / `single` / `subscript` / `return` / `bare`。
+
+    ★ 为什么要知道包裹方式：两个同名 `append_chained` 的**返回形状相反**
+      （`audit_chain` 版返 `(rec, ok)` 元组，`session_dna` 版返四态字符串），
+      而 `bool(...)` 对**两种形状都是信息塌缩** ——
+      `bool("none") == True`（记录彻底丢了却报成功），
+      `bool((rec, False)) == True`（同理）。
+      ⇒ 判据不必区分调的是哪个模块：**`bool` 包裹一律是反模式**。
+
+    ★ 抽成命名函数的理由（与 `egress._merge_lost`／`_keep_target` 同）：
+      负控要用**同一份实现**去扫一段合成的坏源码。副本红 ≠ 线上红 ——
+      扫描器自己恒绿的话，这条判据就是一条死判据。
+    """
+    import ast as _ast
+    out = []
+    try:
+        tree = _ast.parse(py_src)
+    except SyntaxError:
+        return out
+    parents = {}
+    for _n in _ast.walk(tree):
+        for _c in _ast.iter_child_nodes(_n):
+            parents[_c] = _n
+    for node in _ast.walk(tree):
+        if not isinstance(node, _ast.Call):
+            continue
+        _fn = node.func
+        if not (isinstance(_fn, _ast.Attribute) and _fn.attr == "append_chained"):
+            continue
+        owner = getattr(_fn.value, "id", "?")
+        p = parents.get(node)
+        kind = "bare"
+        if isinstance(p, _ast.Call) and isinstance(p.func, _ast.Name) \
+                and p.func.id == "bool":
+            kind = "bool"
+        elif isinstance(p, _ast.Assign):
+            _t = p.targets[0] if p.targets else None
+            kind = "tuple" if isinstance(_t, _ast.Tuple) else (
+                "single" if isinstance(_t, _ast.Name) else "bare")
+        elif isinstance(p, _ast.Subscript):
+            kind = "subscript"
+        elif isinstance(p, _ast.Return):
+            kind = "return"
+        try:
+            _seg = _ast.get_source_segment(py_src, p if p is not None else node) or ""
+        except Exception:                                 # noqa: BLE001
+            _seg = ""
+        out.append((getattr(node, "lineno", -1), kind, owner,
+                    " ".join(_seg.split())[:90]))
+    return out
+
+
+def j_append_chained_shape_contract():
+    """★★★ D-40（2026-10-24）：两个 `append_chained` 的形状契约 ＋ 消费点同源。
+
+    实测缺陷（本轮挖出，此前 34 套无一覆盖）：
+      · 两个同名函数**返回形状相反**：
+          `audit_chain.append_chained(文件路径) -> (rec, ok)`
+          `session_dna.append_chained(目录)     -> "chain"/"sidecar"/"dropped"/"none"`
+        —— 参数语义也相反（一个要文件路径、一个要目录），且 `session_dna` 版
+        `except Exception: return "none"`：**传错参数与磁盘满同形**，静默。
+      · `inbox_tray._chain_record`（与 `antinel._chain_record` **同名**，却各写一份）
+        把四态压回布尔：`return bool(sd.append_chained(audit_dir, rec))`。
+        实测 `bool("none") == True` ⇒ **记录一个字节都没落，也返回成功**。
+        这正是 BL-03（2026-10-22 把布尔拆成四态）要消灭的形态，而它**漏改了这一处**。
+
+    ★ 为什么必须机制化：`bool()` 对两种形状都是静默塌缩，人眼读代码不会发现；
+      而它的后果是「安全产品报成功」—— 最坏的失效形态。
+
+    三腿：① 形状腿（真调两个函数）② 扫描腿（主仓零 `bool` 包裹）
+    ③ 负控腿（扫描器对合成坏源码必须红 ＋ 改形状后形状腿必须红）。
+    """
+    import ast as _ast
+    root = Path(__file__).resolve().parent.parent
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+
+    # ---- ① 形状腿：真调，不读注释 ----
+    _t = _TMP.tmpdir(prefix="d40_shape_")
+    try:
+        import audit_chain as _ac
+        import session_dna as _sd
+        _f = str(Path(_t) / "chain.jsonl")
+        with open(_f, "w", encoding="utf-8") as _fh:
+            _fh.write("")
+        _r1 = _ac.append_chained(_f, {"type": "d40", "leg": 1})
+        _d1 = str(Path(_t) / "d1")
+        Path(_d1).mkdir(exist_ok=True)
+        _r2 = _sd.append_chained(_d1, {"type": "d40", "leg": 2})
+    except Exception as _e:                               # noqa: BLE001
+        return False, ("① 形状腿连真调都跑不起来（%s: %s）—— 判据自身失配，"
+                       "不许按通过算" % (type(_e).__name__, str(_e)[:90]))
+
+    _ok_tuple = isinstance(_r1, tuple) and len(_r1) == 2 and isinstance(_r1[1], bool)
+    if not _ok_tuple:
+        return False, ("① `audit_chain.append_chained` 应返 `(rec, ok)` 元组，"
+                       "实测 %s ⇒ 消费点 `_rec, _ok = ...` 会解包错"
+                       % type(_r1).__name__)
+    _four = ("chain", "sidecar", "dropped", "none")
+    if not (isinstance(_r2, str) and _r2 in _four):
+        return False, ("① `session_dna.append_chained` 应返四态字符串，实测 %r "
+                       "（不在 %s 中）⇒ 消费点 `written == \"none\"` 会恒假"
+                       % (_r2, "/".join(_four)))
+
+    # ---- ② 扫描腿：产品模块 ＋ hooks/，零 `bool(...)` 包裹 ----
+    # 遍历走**唯一实现** `_append_shape_files()`（v1.7）：此前这里两段手写遍历，
+    # 探针另写一套，两边口径分叉过。
+    _bad, _seen = [], 0
+    _files = _append_shape_files(root)
+    for _p, _label in _files:
+        try:
+            _src = _p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for _ln, _kind, _owner, _seg in _append_chained_wraps(_src):
+            _seen += 1
+            if _kind == "bool":
+                _bad.append("%s:%d  %s" % (_label, _ln, _seg))
+    if _bad:
+        return False, ("② 存在 `bool(...append_chained(...))` 包裹 %d 处 —— "
+                       "`bool(\"none\") == True`，记录丢了也报成功（BL-03 漏改形态）："
+                       "%s ｜ 修法：`w = X.append_chained(...)` 后判 "
+                       "`w in (\"chain\", \"sidecar\")`" % (len(_bad), "；".join(_bad)))
+    if _seen == 0:
+        return False, ("② 一个调用点都没扫到 ⇒ 扫描面错了（排除集或路径口径），"
+                       "不许按通过算")
+    if not _files:
+        return False, ("② 扫描面为 0 个文件 ⇒ `pyproject` 的 py-modules 读不到，"
+                       "判据在空面上恒绿")
+
+    # ---- ③ 负控腿（三条，缺一条即判据自身失效）----
+    # ③a 扫描器对合成坏源码必须检出
+    _synth = "\n".join([
+        "def _chain_record(root, rec):",
+        "    import session_dna as sd",
+        "    return bool(sd.append_chained(audit_dir, rec))",
+        "def _ok_call(fn, rec):",
+        "    _rec, _ok = _ac().append_chained(fn, rec)",
+        "    return _ok",
+    ])
+    _hits = [h for h in _append_chained_wraps(_synth) if h[1] == "bool"]
+    if len(_hits) != 1:
+        return False, ("③a 扫描器对合成坏源码应检出 1 处 bool 包裹，实测 %d 处 "
+                       "⇒ 扫描器恒绿，整条判据作废" % len(_hits))
+    # ③b 把 session_dna 的形状改成元组 ⇒ 形状腿必须报红
+    _orig = _sd.append_chained
+    _sd.append_chained = lambda *_a, **_k: ({"written": "chain"}, True)
+    try:
+        _r3 = _sd.append_chained(_d1, {"type": "d40", "leg": 3})
+        _caught = not (isinstance(_r3, str) and _r3 in _four)
+    finally:
+        _sd.append_chained = _orig
+    if not _caught:
+        return False, ("③b 把返回改成元组后形状腿没抓住 ⇒ 形状腿是死的"
+                       "（只比了字符串字面量，没比类型）")
+    # ③c 扫描器对**干净**源码不得误报（负控换腿不许删断言）
+    _clean = "\n".join([
+        "def _a():",
+        "    w = sd.append_chained(d, r)",
+        "    return w in ('chain', 'sidecar')",
+    ])
+    if [h for h in _append_chained_wraps(_clean) if h[1] == "bool"]:
+        return False, "③c 扫描器对干净源码误报 bool 包裹 ⇒ 判据会假红"
+
+    return True, ("三腿成立：形状（元组/四态串各就位）＋ 扫描面 %d 文件 %d 个调用点"
+                  "零 bool 包裹 ＋ 扫描器对合成坏源码检出 1 处且对干净源码不误报"
+                  % (len(_files), _seen))
+
+
 def j_window_title_format():
     """★★ FZ-002（2026-10-16）：窗口标题形态契约（output 类冻结执法）。
 
@@ -3648,6 +3886,9 @@ def _checks(m):
         # ── 2026-10-23 BL-04：审计写链的回读校验（此前 34 套无一覆盖）──
         ("D-39 审计回读与盘上那一行同源（假警报 ＋ R-20 日锚失效）",
          j_audit_readback_same_source),
+        # ── 2026-10-24 D-40：两个 append_chained 形状相反 ＋ bool 包裹塌缩 ──
+        ("D-40 append_chained 形状契约与消费点同源（bool 包裹 ⇒ 丢了报成功）",
+         j_append_chained_shape_contract),
     ]
 
 

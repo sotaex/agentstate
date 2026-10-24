@@ -1,5 +1,5 @@
 {
-  "version": "0.55.3",
+  "version": "0.56.0",
   "description": "Antinel Security Suite default detection rules (37 rules, 4 gates + canary/supply-chain families; flat layout: patterns at rule top level)",
   "gates": {
     "secrets": "Gate 2 sensitive surface",
@@ -152,10 +152,15 @@
         "Bash"
       ],
       "file_patterns": [
-        "Cookies",
-        "Login\\s+Data",
-        "Local\\s+Storage",
-        "Web\\s+Data"
+        "(?:^|[\\\\/])(?:Cookies(?:-journal)?|Login\\s+Data|Local\\s+Storage|Web\\s+Data)(?![\\w.-])",
+        "(?:^|[\\\\/])cookies\\.sqlite(?:-wal|-shm)?",
+        "(?:^|[\\\\/])Cookies\\.binarycookies",
+        "(?:^|[\\\\/])Google[\\\\/]Chrome[\\\\/]User Data[\\\\/]",
+        "(?:^|[\\\\/])Microsoft[\\\\/]Edge[\\\\/]User Data[\\\\/]",
+        "(?:^|[\\\\/])BraveSoftware[\\\\/]Brave-Browser[\\\\/]User Data[\\\\/]",
+        "(?:^|[\\\\/])\\.mozilla[\\\\/]firefox[\\\\/](?:Profiles|[^\\\\/]+\\.default)",
+        "(?:^|[\\\\/])\\.config[\\\\/](?:google-chrome|chromium|BraveSoftware|vivaldi)[\\\\/](?:Default|Profile)",
+        "(?:^|[\\\\/])Library[\\\\/]Application Support[\\\\/](?:Google[\\\\/]Chrome|Firefox)[\\\\/]"
       ],
       "exclude_patterns": [],
       "apply_to_tools": [

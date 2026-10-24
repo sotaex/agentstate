@@ -4463,7 +4463,7 @@ def c_flo17b():
         f.write(json.dumps({"ts": "2026-10-19T18:00:02.000Z",
                             "type": "logo_mode_missing",
                             "reason": "modes key missing", "state": "L1"}) + "\n")
-    with _Patch(TR, _chain_record=lambda r, rec: False):
+    with _Patch(TR, _chain_record=lambda r, rec: "none"):
         kept = TR.drain_logo_events(root)
     if kept or not os.path.exists(ev):
         return ("进链失败时文件被消费掉（或假报成功）—— 审计证据不可再生，"
@@ -9158,6 +9158,244 @@ def main(argv=None):
     print("  %d 绿 / %d 红 / %d 跳过%s" % (ok, fail, skip,
                                           "（非全量）" if only else ""))
     return 0 if fail == 0 else 1
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SEC-05 族 —— 浏览器数据规则的**路径语义**（0.56.0，2026-10-24）
+#
+# 为什么必须有这一族：`ci/` 下 34 套里**没有任何一套**引用 SEC-05（全库 grep 为 0）。
+# 规则层「按路径匹配」的语义从来没有判据守过 —— 这正是 13 条误拦能在全绿下活下来
+# 的原因：裸子串 `Cookies` 会把 `./cookies.txt`、`my_cookies.json`、`Cookies.test.js`、
+# `git log --grep="Cookies"`、`pip install cookies` 全按 critical 拦下，
+# 而提示语说的是「读取浏览器数据（Cookie、密码、会话）」。企业做爬虫／E2E 用例
+# 每次读都被拦，理由不实。
+#
+# 三条通道纪律（缺一条这一族就是假的）：
+#   ① 一律走**真 hook 子进程**（stdin JSON、cwd=临时项目、临时 USERPROFILE），
+#      不 import 内部匹配函数 —— 副本红 ≠ 线上红（假绿第六族）；
+#   ② 正控要断言 `match_kind == "path"`（假绿第十一族：正控"通过"但通道不对。
+#      SEC-05 只有 file_patterns，若哪天它靠 content 命中，说明引擎语义已经变了，
+#      这时绿是假的）；
+#   ③ 负控要有**牙齿**：改坏规则（项目内副本第 1 条换回裸子串）后，同一条负控
+#      必须立刻被拦，且走**同一入口**（假绿第七族：负控绕过遍历）。
+#      ★ 改坏后必须**同步 `manifest.rules_hash`**，否则 hook 判 SELF-TAMPERED
+#        回落内嵌兜底集（里面没有 SEC-05），牙齿会"看起来失效" —— 本轮实测过。
+#        而"只改内容不改 hash 就必须判 SELF-TAMPERED"本身就是 A4 的正面行为，
+#        所以它也在同一条判据里被断言，不浪费这一次 install。
+# ═══════════════════════════════════════════════════════════════════════════
+
+#: 正控 27 条（真实浏览器数据，必须拦）。kind 写什么工具就发什么事件。
+_SEC05_POS = [
+    ("Read", r"C:\Users\x\AppData\Local\Google\Chrome\User Data\Default\Cookies"),
+    ("Read", r"C:\Users\x\AppData\Local\Google\Chrome\User Data\Default\Network\Cookies"),
+    ("Read", r"C:\Users\x\AppData\Local\Google\Chrome\User Data\Default\Login Data"),
+    ("Read", r"C:\Users\x\AppData\Local\Google\Chrome\User Data\Default\Local Storage\leveldb\000005.log"),
+    ("Read", r"C:\Users\x\AppData\Local\Google\Chrome\User Data\Default\Web Data"),
+    ("Read", r"C:\Users\x\AppData\Local\Google\Chrome\User Data\Default\History"),
+    ("Read", r"C:\Users\x\AppData\Local\Microsoft\Edge\User Data\Profile 1\Login Data"),
+    ("Read", r"C:\Users\x\AppData\Local\BraveSoftware\Brave-Browser\User Data\Default\Cookies"),
+    ("Read", r"C:\Users\x\AppData\Roaming\Mozilla\Firefox\Profiles\ab12.default-release\cookies.sqlite"),
+    ("Read", r"C:\Users\x\AppData\Roaming\Mozilla\Firefox\Profiles\ab12.default-release\cookies.sqlite-wal"),
+    ("Read", "/home/u/.config/google-chrome/Default/Cookies"),
+    ("Read", "/home/u/.config/chromium/Profile 2/Login Data"),
+    ("Read", "/home/u/.mozilla/firefox/xy12.default/cookies.sqlite"),
+    ("Read", "/Users/u/Library/Application Support/Google/Chrome/Default/Cookies"),
+    ("Read", "/Users/u/Library/Safari/Cookies.binarycookies"),
+    ("Read", "/Users/u/Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies"),
+    ("Read", r"C:/Users/x/AppData/Local/Google/Chrome/User Data/Default/Cookies"),
+    ("Read", r"D:\proj\fixtures\Chrome\User Data\Default\Cookies"),
+    ("Read", r"\\fileserver\share\Google\Chrome\User Data\Default\Cookies"),
+    ("Read", r"D:\Portable\Firefox\Profiles\zz.default\cookies.sqlite"),
+    ("Read", "/tmp/prof/Default/Cookies"),
+    ("Bash", r'cp "$LOCALAPPDATA/Google/Chrome/User Data/Default/Cookies" /tmp/c'),
+    ("Bash", 'sqlite3 ~/.config/google-chrome/Default/Cookies '
+             '"select host_key, encrypted_value from cookies"'),
+    ("Bash", r'cat "/c/Users/x/AppData/Local/Microsoft/Edge/User Data/Default/Login Data" > /tmp/l.txt'),
+    ("Bash", "tar czf /tmp/p.tgz ~/.config/google-chrome/Default"),
+    ("Bash", r"strings ~/.config/chromium/Default/Local\ Storage/leveldb/000003.log | grep -i token"),
+    ("Bash", r"copy %LOCALAPPDATA%\Google\Chrome\User Data\Default\Cookies %TEMP%\c"),
+]
+
+#: 负控 20 条（**必须放行**）。带 ★ 的三条是本次的核心回归点，
+#: 也是最容易被"优化"掉的三条：它们的共同点是「文本里提到那个词，但不是那个文件」。
+_SEC05_NEG = [
+    ("Read", "./cookies.txt"),                                   # ★
+    ("Read", "./my_cookies.json"),
+    ("Read", "./Cookies.test.js"),
+    ("Read", "./src/utils/cookies.ts"),
+    ("Read", "./docs/Login Data.md"),
+    ("Read", "./data/Web Data.csv"),
+    ("Read", "./cookies_policy.py"),
+    ("Read", "./frontend/src/api/cookieStore.ts"),
+    ("Read", "./User Data/report.csv"),
+    ("Read", "./library/safari/birds.json"),
+    ("Read", r"D:\proj\node_modules\puppeteer-core\.local-chromium\chrome-win\chrome.exe"),
+    ("Read", "/root/.cache/puppeteer/chrome/linux-121/chrome-linux64/chrome"),
+    ("Read", "/home/u/.config/Code/User/globalStorage/state.vscdb"),
+    ("Bash", 'git log --grep="Cookies" -3'),                     # ★
+    ("Bash", "pip install cookies"),                             # ★
+    ("Bash", "npm i js-cookie"),
+    ("Bash", 'grep -rn "Login Data" ./docs'),
+    ("Bash", 'echo "Local Storage is a Chrome dir"'),
+    ("Bash", "node -e \"require('js-cookie')\""),
+    ("Bash", 'grep -r "cookies.txt" ./src'),
+]
+
+
+def _sec05_project(tag):
+    """建临时项目并 install。返回 (proj, env)。临时目录走登记处（P37）。"""
+    import subprocess
+    base = _TMPREG.tmpdir("g0514_sec05%s_" % tag)
+    proj = os.path.join(base, "proj")
+    home = os.path.join(base, "home")
+    os.makedirs(proj)
+    os.makedirs(home)
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env.update({"USERPROFILE": home, "HOME": home,
+                "ANTINEL_HUB_DIR": os.path.join(home, ".antinel"),
+                "TMP": base, "TEMP": base, "TMPDIR": base,
+                "PYTHONIOENCODING": "utf-8"})
+    r = subprocess.run([sys.executable, "-E", "-X", "utf8",
+                        os.path.join(ROOT, "antinel.py"), "install",
+                        "--root", proj, "--host", "generic", "--skip-scan"],
+                       env=dict(env, PYTHONPATH=ROOT), cwd=proj,
+                       capture_output=True, text=True, encoding="utf-8",
+                       errors="replace")
+    if r.returncode != 0:
+        raise Skip("install 失败 rc=%d：%s"
+                   % (r.returncode, (r.stdout + r.stderr)[-200:]))
+    return proj, env
+
+
+def _sec05_fire(proj, env, tool, text, sid):
+    """跑真 hook 子进程，返回合并后的输出文本。"""
+    import subprocess
+    ti = {"file_path": text} if tool == "Read" else {"command": text}
+    ev = {"session_id": sid, "tool_name": tool, "tool_input": ti}
+    p = subprocess.run([sys.executable, "-E", "-X", "utf8",
+                        os.path.join(ROOT, "hooks", "pre_tool_use.py")],
+                       env=env, cwd=proj,
+                       input=json.dumps(ev, ensure_ascii=False),
+                       capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", timeout=120)
+    return (p.stdout or "") + (p.stderr or "")
+
+
+def _sec05_audit(proj, sid):
+    """本项目链里该 session 的 (rule_ids, match_kinds)。
+
+    ★ 释放记录不算命中（`exclude_patterns_allow` 等的语义是「本来会中、被放行」）。
+    """
+    import io
+    d = os.path.join(proj, ".psl", "audit")
+    ids, kinds = set(), set()
+    if not os.path.isdir(d):
+        return ids, kinds
+    for fn in os.listdir(d):
+        if not fn.endswith(".jsonl"):
+            continue
+        try:
+            body = io.open(os.path.join(d, fn), encoding="utf-8",
+                           errors="replace").read()
+        except OSError:
+            continue
+        for ln in body.splitlines():
+            ln = ln.strip()
+            if not ln:
+                continue
+            try:
+                rec = json.loads(ln)
+            except ValueError:
+                continue
+            if rec.get("session") != sid:
+                continue
+            if rec.get("type") in ("exclude_patterns_allow", "whitelist_allow",
+                                   "path_whitelist_allow"):
+                continue
+            if rec.get("rule_id"):
+                ids.add(rec["rule_id"])
+            if rec.get("match_kind"):
+                kinds.add(rec["match_kind"])
+    return ids, kinds
+
+
+@check("SEC-05a 正控 27：真实浏览器数据必须拦，且命中通道必须是 path")
+def sec05a():
+    proj, env = _sec05_project("a")
+    miss, chan = [], []
+    for i, (tool, text) in enumerate(_SEC05_POS, 1):
+        sid = "sec05a-%02d" % i
+        out = _sec05_fire(proj, env, tool, text, sid)
+        ids, kinds = _sec05_audit(proj, sid)
+        if "Antinel 拦截 [SEC-05]" not in out and "SEC-05" not in ids:
+            miss.append("[%s] %s" % (tool, text[:62]))
+        elif "path" not in kinds:
+            chan.append("[%s] %s -> %s" % (tool, text[:50], sorted(kinds)))
+    if miss:
+        return "正控漏拦 %d/%d：%s" % (len(miss), len(_SEC05_POS),
+                                    "；".join(miss[:4]))
+    if chan:
+        return ("命中通道不是 path 的有 %d 条（SEC-05 只有 file_patterns，"
+                "内容通道被误用说明引擎语义变了）：%s"
+                % (len(chan), "；".join(chan[:3])))
+    _note("27 条真实浏览器数据全部拦下，match_kind 全为 path")
+    return True
+
+
+@check("SEC-05b 负控 20：提到那个词但不是那个文件，必须放行")
+def sec05b():
+    proj, env = _sec05_project("b")
+    bad = []
+    for i, (tool, text) in enumerate(_SEC05_NEG, 1):
+        sid = "sec05b-%02d" % i
+        out = _sec05_fire(proj, env, tool, text, sid)
+        if "[SEC-05]" in out:
+            bad.append("[%s] %s" % (tool, text[:62]))
+    if bad:
+        return ("负控误拦 %d/%d（企业做爬虫／E2E／写文档时会真撞上）：%s"
+                % (len(bad), len(_SEC05_NEG), "；".join(bad[:5])))
+    _note("20 条全部放行；其中 3 条是核心回归点（读 cookies.txt／git log 提及／pip 装包名）")
+    return True
+
+
+@check("SEC-05c 负控牙齿：改坏规则必须红 ＋ 只改内容不改 hash 必须判 SELF-TAMPERED")
+def sec05c():
+    import hashlib
+    import io
+    proj, env = _sec05_project("c")
+    rp = os.path.join(proj, ".psl", "rules", "default.json")
+    mp = os.path.join(proj, ".psl", "manifest.json")
+    probe = 'git log --grep="Cookies" -3'
+    if not os.path.isfile(rp) or not os.path.isfile(mp):
+        return "夹具不成立：项目里没有规则副本或 manifest"
+    if "[SEC-05]" in _sec05_fire(proj, env, "Bash", probe, "sec05c-0"):
+        return "夹具污染：干净规则下这条负控已经被拦"
+    data = json.load(io.open(rp, encoding="utf-8"))
+    hit = False
+    for r in data["rules"]:
+        if r.get("id") == "SEC-05":
+            r["file_patterns"][0] = "Cookies"
+            hit = True
+    if not hit:
+        return "夹具不成立：项目规则副本里没有 SEC-05"
+    with io.open(rp, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, ensure_ascii=False, indent=2)
+    out1 = _sec05_fire(proj, env, "Bash", probe, "sec05c-1")
+    if "SELF-TAMPERED" not in out1:
+        return "改规则不改 hash，hook 没报 SELF-TAMPERED —— 规则完整性防线是空的"
+    if "[SEC-05]" in out1:
+        return "已判 SELF-TAMPERED 却仍按被改的规则拦下（回落没生效）"
+    raw = io.open(rp, "rb").read()
+    man = json.load(io.open(mp, encoding="utf-8"))
+    man["rules_hash"] = "sha256:" + hashlib.sha256(raw).hexdigest()
+    with io.open(mp, "w", encoding="utf-8") as fh:
+        json.dump(man, fh, ensure_ascii=False, indent=2)
+    out2 = _sec05_fire(proj, env, "Bash", probe, "sec05c-2")
+    if "[SEC-05]" not in out2:
+        return ("牙齿失效：规则已改回裸子串（hash 已同步），这条负控仍放行 "
+                "⇒ SEC-05b 的「零误拦」没有分辨力")
+    _note("裸子串下被拦（牙齿有效）＋ 只改内容不改 hash 时判 SELF-TAMPERED 并回落")
+    return True
 
 
 if __name__ == "__main__":

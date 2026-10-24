@@ -23,6 +23,9 @@ _t_*
 _uxtest/
 _uxtest2/
 _ux_fix_*.py
+# ★ 0.56.0：锁路径解析异常留下的两个待查证据，不许被误提交，也不许删（见行动清单第 27 条）
+NUL.lock
+console/
 antinel-*/
 _archive_dist/
 .workbuddy-ai/

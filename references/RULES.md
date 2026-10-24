@@ -1,5 +1,5 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
-# Antinel detection rules (generated from rules/default.json v0.55.3 - do not edit by hand)
+# Antinel detection rules (generated from rules/default.json v0.56.0 - do not edit by hand)
 
 Category order = match priority: secrets > destructive > network > injection > context > metadata.
 Severity to action: critical = block, warning = alert (logged, allowed). All hits are collected; highest severity decides.
@@ -70,10 +70,15 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - 说明: 读取浏览器数据（Cookie、密码、会话）
 - 处理建议: 浏览器配置目录包含登录态，应完全禁止 Agent 访问
 - file_patterns:
-    - `Cookies`
-    - `Login\s+Data`
-    - `Local\s+Storage`
-    - `Web\s+Data`
+    - `(?:^|[\\/])(?:Cookies(?:-journal)?|Login\s+Data|Local\s+Storage|Web\s+Data)(?![\w.-])`
+    - `(?:^|[\\/])cookies\.sqlite(?:-wal|-shm)?`
+    - `(?:^|[\\/])Cookies\.binarycookies`
+    - `(?:^|[\\/])Google[\\/]Chrome[\\/]User Data[\\/]`
+    - `(?:^|[\\/])Microsoft[\\/]Edge[\\/]User Data[\\/]`
+    - `(?:^|[\\/])BraveSoftware[\\/]Brave-Browser[\\/]User Data[\\/]`
+    - `(?:^|[\\/])\.mozilla[\\/]firefox[\\/](?:Profiles|[^\\/]+\.default)`
+    - `(?:^|[\\/])\.config[\\/](?:google-chrome|chromium|BraveSoftware|vivaldi)[\\/](?:Default|Profile)`
+    - `(?:^|[\\/])Library[\\/]Application Support[\\/](?:Google[\\/]Chrome|Firefox)[\\/]`
 - remediation: Browser profiles contain live sessions; deny all agent access to profile directories.
 
 ## NET-01  Shell network request
