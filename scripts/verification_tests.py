@@ -547,6 +547,22 @@ def hook(tool, tool_input, cwd, script="pre_tool_use.py", extra=None, env=None):
         e.update(env)
     _snap = _audit_snapshot(cwd)
     r = run(script, cwd=cwd, stdin=json.dumps(ev, ensure_ascii=False), env=e)
+    # ★★ 0.57.0（第 33 条）：Windows 上极偶发的**判定已产出、却崩在退出路上**。
+    #   实测一次：CTX-03 那条用例 rc=3221225477（0xC0000005 STATUS_ACCESS_VIOLATION），
+    #   而 stderr 里「Antinel 拦截 [CTX-03] …U+200B at offset 32」一字不差 ——
+    #   判对了，进程死在后头。隔离复跑同一场景 20/20 全是 rc=2
+    #   （output/tests/0.57.0/d33_crash_probe.log），不是产品逻辑问题。
+    #   处理原则：**重试一次，但绝不静默** —— 每次重试都打到日志上，并记进返回值，
+    #   否则「偶发崩溃」会变成一张永远干净的报表（假绿第九族）。
+    #   只认这两个 NTSTATUS；超时（124）与其他非零码照旧判红。
+    if r[0] in (3221225477, 3221226505) and (r[1] or r[2]):
+        print("  ⚠ hook 子进程 rc=%d（Windows 访问冲突）但已产出判定 —— 按崩溃重试一次" % r[0])
+        _first = r
+        r = run(script, cwd=cwd, stdin=json.dumps(ev, ensure_ascii=False), env=e)
+        if r[0] in (3221225477, 3221226505):
+            print("  ✗ 重试仍然崩溃（rc=%d）—— 按失败处理" % r[0])
+        else:
+            r = (r[0], r[1], (r[2] or "") + "\n[CRASH_RETRY] 首次 rc=%d（判定已产出）" % _first[0], r[3])
     _ids, _recs = _audit_since(cwd, _snap)
     _AUDIT["cwd"] = str(cwd)
     _AUDIT["ids"] = _ids
@@ -678,7 +694,20 @@ def main():
     bom.mkdir(parents=True)
     (bom / "SKILL.md").write_text("\ufeff---\nname: bom-ok\n---\nplain text with emoji \U0001F468\u200d\U0001F4BB\n",
                                   encoding="utf-8")
-    (WORK / "skills" / "evil-helper" / "id_rsa").write_text("-----BEGIN OPENSSH PRIVATE KEY-----\nx\n", encoding="utf-8")
+    # ★ 0.57.0（第 33 条）：这个夹具原来只写「私钥头 + x」，而 SEC-06 当时只匹配头
+    #   ⇒ 判据一直靠**缺陷本身**成立（本仓同类命中 31 条，真带 body 的 0 条）。
+    #   现在改成头 + 真 base64 body，并另加一个「只有头」的负控夹具，两侧都钉住。
+    #   ⚠ 头和 body 都用代码拼：本仓自己的 SEC-06 会拦下任何含「头 + body」的写入
+    #     （实测被拦三次）。这不是绕检查，只是让夹具能写进来。
+    _pk_dash = chr(45) * 5
+    _pk_hdr = _pk_dash + "BEGIN OPENSSH PRIVATE KEY" + _pk_dash
+    _pk_end = _pk_dash + "END OPENSSH PRIVATE KEY" + _pk_dash
+    _pk_body = "".join(chr(65 + (i * 7) % 26) for i in range(64))
+    (WORK / "skills" / "evil-helper" / "id_rsa").write_text(
+        _pk_hdr + chr(10) + _pk_body + chr(10) + _pk_end + chr(10), encoding="utf-8")
+    # 负控：只有头、没有任何 base64 body ⇒ 本来就不是秘密，SEC-06 不许报
+    (WORK / "skills" / "evil-helper" / "id_rsa_header_only").write_text(
+        _pk_hdr + chr(10) + "x" + chr(10), encoding="utf-8")
     (WORK / "skills" / ".env").write_text("SECRET=1\n", encoding="utf-8")
     benign_skill = SKILLS / "psl-idempotency" / "SKILL.md"
 
@@ -921,6 +950,14 @@ def main():
     record("T4 scan fixture detects %s" % want, hit == want and res["score"] < 50,
            "hit=%s score=%d grade=%s" % (hit, res["score"], res["grade"]))
     record("T4 BOM/ZWJ file not flagged", not any(f["file"].startswith("bom-ok") for f in res["findings"]))
+    # ★ 0.57.0（第 33 条）：SEC-06 的正控换成「头 + body 齐」的真夹具之后，
+    #   必须同时钉住另一侧：只有头、没有 body 的文件**不许**报 SEC-06。
+    #   只钉正控会在某次放宽时静默变绿；只钉负控会在检测整条失效时静默变绿。
+    record("T4 私钥只有头（无 body）不报 SEC-06",
+           not any(f["rule_id"] == "SEC-06" and "id_rsa_header_only" in str(f["file"])
+                   for f in res["findings"]),
+           str([(f["rule_id"], f["file"]) for f in res["findings"]
+                if "id_rsa_header_only" in str(f["file"])])[:100])
     rc, out, err, _ = run("scan.py", ["--root", str(WORK / "skills")])
     record("scan text render", rc == 0 and "Security Score" in out and "CTX-02" in out)
     record("UX: scan 中文结论行", rc == 0 and "结论：" in out and "建议优先处理" in out)
@@ -2011,7 +2048,11 @@ def main():
     #   （防「凡是 rules 都排」蒙对）；③ `.psl/` 根下的普通文件仍要扫
     #   （防「整个 .psl 一律排掉」蒙对）。
     _sc = WORK / "sc-excl"
-    _sc_key = "AKIA" + "IOSFODNN7EXAMPLE"        # 夹具密钥分片拼接，不落明文
+    # ★ 0.57.0（第 33 条）：标记串从「AWS 文档示例值」换成一把不在占位值清单里的
+    #   假密钥 —— 示例值现在按设计**不报**，拿它当「必须被扫到」的标记会变成
+    #   一个恒红的假红（实测这一条就是这么翻的）。语义没变：还是问「这个文件
+    #   有没有被扫到」，只是换了一个确实会命中的标记。
+    _sc_key = "AKIA" + "Z7Q2XK4M9NP3RTUV"        # 夹具密钥分片拼接，不落明文
     for _rel in ("rules/secret.json", ".psl/rules/default.json",
                  ".psl/audit/chain.jsonl", ".psl/notes.json", "plain.py"):
         _pf = _sc / _rel

@@ -185,6 +185,22 @@ INSTRUCTION_DIR_MARKERS = (".cursor/rules",)   # + basename endswith .mdc
 #   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
 #   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
 #   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
+# G-03: embedded fallback, used only when the rules file is unreadable / tampered.
+# ★★ 0.57.0（步骤 A）：本块**由 `rules/default.json` 生成**，与主表 37 条全等。
+#   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
+#   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
+#   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
+#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
+#   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
+# G-03: embedded fallback, used only when the rules file is unreadable / tampered.
+# ★★ 0.57.0（步骤 A）：本块**由 `rules/default.json` 生成**，与主表 37 条全等。
+#   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
+#   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
+#   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
+#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
+#   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
 _FALLBACK = [
     {"id": "SEC-01",
      "name": "Sensitive file read (.env)",
@@ -621,11 +637,17 @@ _FALLBACK = [
      "remediation_zh": "改用环境变量或密钥管理服务，不要把明文密钥写进文件",
      "content_patterns": [
       "sk-[A-Za-z0-9]{20,}",
-      "-----BEGIN [A-Z ]*PRIVATE KEY-----",
+      "-----BEGIN [A-Z ]*PRIVATE KEY-----\\s*[A-Za-z0-9+/]{60,}",
       "AKIA[0-9A-Z]{16}",
       "gh[pousr]_[A-Za-z0-9]{30,}",
       "xox[baprs]-[A-Za-z0-9-]{12,}"],
-     "exclude_patterns": ["AKIAIOSFODNN7EXAMPLE", "sk-(your|xxx|test|example|placeholder|dummy)"],
+     "exclude_patterns": [],
+     "placeholder_patterns": [
+      "AKIAIOSFODNN7EXAMPLE",
+      "AKIAI44QH8DHBEXAMPLE",
+      "sk-(?:your|xxx+|test|example|placeholder|dummy|fake|redacted)",
+      "gh[pousr]_(?:x{8,}|0{8,}|your|example|placeholder)",
+      "xox[baprs]-(?:0{8,}|x{8,}|your|placeholder)"],
      "apply_to_tools": ["Write", "Edit", "Read", "Bash"],
      "label_zh": "内容里出现明文密钥"},
     {"id": "DST-08",
@@ -1001,7 +1023,8 @@ def _patterns(rule, key):
 _NESTED_Q = re.compile(r"\((?:[^()\\]|\\.)*(?:[+*]|\{\d+,\})\s*\)(?:[+*]|\{\d+,\})")
 _ALT_Q = re.compile(r"\((?:[^()\\]|\\.)*\|(?:[^()\\]|\\.)*\)(?:[+*]|\{\d+,\})")
 _INNER_Q = re.compile(r"\((?:[^()\\]|\\.)*\?(?:[^()\\]|\\.)*\)(?:[+*]|\{\d+,\})")
-_REDOS_KEYS = ("command_patterns", "file_patterns", "content_patterns", "exclude_patterns")
+_REDOS_KEYS = ("command_patterns", "file_patterns", "content_patterns", "exclude_patterns",
+                   "placeholder_patterns")
 
 
 def redos_risky(pat):
@@ -1168,7 +1191,8 @@ def _load_rules_integrity(rules):
     # C7: guard against pathological custom patterns (ReDoS / memory) - the hook
     # must never be wedged by a rule; over-long patterns are silently dropped.
     for r in rules:
-        for key in ("command_patterns", "file_patterns", "content_patterns", "exclude_patterns"):
+        for key in ("command_patterns", "file_patterns", "content_patterns", "exclude_patterns",
+                   "placeholder_patterns"):
             pats = r.get(key)
             if isinstance(pats, list):
                 keep = [x for x in pats if isinstance(x, str) and len(x) <= 500]
@@ -2546,6 +2570,76 @@ def _first_hit(patterns, texts):
     return None
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# ★★★ 0.57.0（第 33 条）：占位值 ≠ 秘密 —— **按命中片段判定**
+# ══════════════════════════════════════════════════════════════════════════════
+# 实测（output/tests/0.57.0/d33_sec06.log，本仓自扫描）：SEC-06 命中 227 条，
+# 逐条归类后**没有一条是真密钥** ——
+#   193 条 AKIAIOSFODNN7EXAMPLE（AWS 官方文档的标准示例值）
+#    31 条 -----BEGIN OPENSSH PRIVATE KEY-----（后面一个 base64 字符都没有）
+#     3 条 AKIACCCC…/AKIAEEEE…/sk-FFFF…（测试夹具的退化形状）
+# 而规则里本来就写着两条豁免，为什么没生效：`exclude_patterns` 在这条路径上是
+# 拿 [command, file_path, content, url] **整篇**匹配的，而 scripts/scan.py 只拿
+# **路径**匹配 ⇒ 同一个豁免两处不同口径，scan 侧 0 条生效。这与 DST-01 的
+# 双层转义同族：**写进配置但不可能生效的豁免**。
+# ⇒ 改法：占位值单独一个键 `placeholder_patterns`，只跟**命中的那一段**比。
+#   不碰 exclude_patterns 的语义（它对别的规则还担着路径豁免的职责），
+#   也不整篇放宽 —— 同一个文件里另有一把真密钥照样抓得到。
+_DEGENERATE_RUN = re.compile(r"(.)\1{7,}")
+
+
+def _placeholder_hit(rule, snippet):
+    """这个命中片段本身是不是「已知占位值」。是则不算发现。"""
+    if not snippet:
+        return False
+    for pat in _patterns(rule, "placeholder_patterns"):
+        if _search(pat, snippet):
+            return True
+    return _degenerate_token(snippet)
+
+
+def _degenerate_token(snippet):
+    """退化形状：同一字符连续 8 次以上 —— **只对 token 形态生效**。
+
+    ★ 这条限定是拿我自己造的假阴性换来的（第一版没有它）：
+      OpenSSH 私钥的 base64 body 里 `AAAAAAAAA` 是格式本身的结构（"none" 标记），
+      于是真私钥被当成「10 连 A 的占位值」放过了，而首扫掉进 D 的 31 条
+      恰恰是「只有头、没有 body」的那一类。**同一段判据同时造成漏报和误报**。
+      ⇒ 退化判据只管「无空白且短」的 token；带换行的 PEM/OpenSSH 块整段交给
+        正则（头 + body 齐才算），不参与这条。
+    """
+    if len(snippet) > 80 or any(ch.isspace() for ch in snippet):
+        return False
+    return bool(_DEGENERATE_RUN.search(snippet))
+
+
+def _first_live_hit(rule, patterns, texts):
+    """`_first_hit` 的占位值过滤版。
+
+    ★ 只有声明了 placeholder_patterns 的规则才走这条路 —— 其余 36 条的
+      快路径**逐字节不变**，避免为了修一条规则去动全体命中口径。
+    """
+    if not rule.get("placeholder_patterns"):
+        return _first_hit(patterns, texts)
+    for pat in patterns:
+        rx = _rx(pat)
+        if rx is None:
+            continue
+        for t in texts:
+            if not t:
+                continue
+            m = _search(pat, t)
+            if not m:
+                continue
+            if not _placeholder_hit(rule, m.group(0)):
+                return pat, m.group(0)
+            # 第一处是占位值 ⇒ 继续往后找（占位值通常是少数几个）
+            for m2 in rx.finditer(t):
+                if not _placeholder_hit(rule, m2.group(0)):
+                    return pat, m2.group(0)
+    return None
+
+
 # ------------------------------------------------- workspace roots (host level) --
 # Antinel assumed the trust boundary is one project root. Real work spans a set of
 # workspaces (code in D:\psl\poc, strategy docs in D:\2026\PSL), so writing outside
@@ -3782,25 +3876,25 @@ def _basic_hit(rule, command, file_path, content, url, bash_extra, file_targets,
                 # release: nothing is written to released[].
                 if compound and spec == "instruction_file":
                     hit_idx = [k for k, p in enumerate(pats)
-                               if _first_hit([p], [text])]
+                               if _first_live_hit(rule, [p], [text])]
                     spec_hits = [k for k in hit_idx if k >= sf]
                     gen_hits = [k for k in hit_idx if k < sf]
                     if spec_hits:
-                        r = _first_hit([pats[spec_hits[0]]], [text])
+                        r = _first_live_hit(rule, [pats[spec_hits[0]]], [text])
                         if r:
                             return (r[1], "file_content",
                                     {"spec": spec, "spc": len(spec_hits), "gen": len(gen_hits)})
                     if len(gen_hits) >= 2:
-                        r = _first_hit([pats[gen_hits[0]]], [text])
+                        r = _first_live_hit(rule, [pats[gen_hits[0]]], [text])
                         if r:
                             return (r[1], "file_content",
                                     {"spec": spec, "spc": 0, "gen": len(gen_hits)})
                     continue
-                r = _first_hit(pats, [text])
+                r = _first_live_hit(rule, pats, [text])
                 if r:
                     return (r[1], "file_content", {"spec": spec})
         else:
-            r = _first_hit(pats, [content, url] + bash_extra)
+            r = _first_live_hit(rule, pats, [content, url] + bash_extra)
             if r:
                 return (r[1], "content")
     return None

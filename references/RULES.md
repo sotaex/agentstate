@@ -342,11 +342,11 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - 处理建议: 改用环境变量或密钥管理服务，不要把明文密钥写进文件
 - content_patterns:
     - `sk-[A-Za-z0-9]{20,}`
-    - `-----BEGIN [A-Z ]*PRIVATE KEY-----`
+    - `-----BEGIN [A-Z ]*PRIVATE KEY-----\s*[A-Za-z0-9+/]{60,}`
     - `AKIA[0-9A-Z]{16}`
     - `gh[pousr]_[A-Za-z0-9]{30,}`
     - `xox[baprs]-[A-Za-z0-9-]{12,}`
-- exclude_patterns: `AKIAIOSFODNN7EXAMPLE`, `sk-(your|xxx|test|example|placeholder|dummy)`
+- placeholder_patterns（命中片段是已知占位值 ⇒ 不算发现）: `AKIAIOSFODNN7EXAMPLE`, `AKIAI44QH8DHBEXAMPLE`, `sk-(?:your|xxx+|test|example|placeholder|dummy|fake|redacted)`, `gh[pousr]_(?:x{8,}|0{8,}|your|example|placeholder)`, `xox[baprs]-(?:0{8,}|x{8,}|your|placeholder)`
 - remediation: Use environment variables or a secrets manager; never paste plaintext keys into files.
 
 ## DST-08  Permission/ownership destruction

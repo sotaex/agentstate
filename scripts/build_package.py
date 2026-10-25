@@ -1109,6 +1109,11 @@ def rules_md(rules_path):
             L.append("- whitelist_domains: %s" % ", ".join(r["whitelist_domains"]))
         if r.get("exclude_patterns"):
             L.append("- exclude_patterns: " + ", ".join("`%s`" % p for p in r["exclude_patterns"]))
+        if r.get("placeholder_patterns"):
+            # 0.57.0（第 33 条）：占位值清单必须印出来 —— 用户看到「文档里的示例
+            # 密钥没报警」时，得能查到这个决定是哪里做的、依据是什么。
+            L.append("- placeholder_patterns（命中片段是已知占位值 ⇒ 不算发现）: "
+                     + ", ".join("`%s`" % p for p in r["placeholder_patterns"]))
         if r.get("remediation"):
             L.append("- remediation: %s" % r["remediation"])
         L.append("")

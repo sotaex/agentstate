@@ -127,6 +127,21 @@ SEVERITY_WEIGHT = {"critical": 20, "warning": 5, "info": 0}
 #   文件名，而 hook 看得见：同一件事两把尺子）。常量已删，唯一真源是规则里的
 #   codepoints，见 _ctx03_codepoints()。
 _SURFACES = ("path", "command", "instruction", "content")
+# 0.57.0（第 33 条）：退化形状 —— 同一字符连续 8 次以上即视为占位/构造值。
+# 真密钥是随机 base32/base64，8 连号概率约 1e-12；测试夹具写 AKIA CCCC… 是常事。
+_DEGENERATE_RUN = re.compile(r"(.)\1{7,}")
+
+
+def _degenerate_token(snippet):
+    """退化形状只对「无空白且短」的 token 生效（与 hook 同名同口径）。
+
+    ★ 第一版没有这条限定，实测造出一个假阴性：OpenSSH 私钥的 base64 body 里
+      `AAAAAAAAA` 是格式自身的结构（"none" 标记），真私钥因此被当成占位值放过。
+      同一段判据同时造成漏报（真私钥）和误报（测试夹具），限定后两边都对。
+    """
+    if len(snippet) > 80 or any(ch.isspace() for ch in snippet):
+        return False
+    return bool(_DEGENERATE_RUN.search(snippet))
 
 
 # ---------------------------------------------------------------- rules ----
@@ -150,7 +165,8 @@ def load_rules(path, project_root):
             pass
     # C7: drop over-long custom patterns (ReDoS / memory guard)
     for r in rules:
-        for key in ("command_patterns", "file_patterns", "content_patterns", "exclude_patterns"):
+        for key in ("command_patterns", "file_patterns", "content_patterns", "exclude_patterns",
+                    "placeholder_patterns"):
             pats = r.get(key)
             if isinstance(pats, list):
                 keep = [x for x in pats if isinstance(x, str) and len(x) <= 500]
@@ -178,6 +194,8 @@ class CompiledRule:
         self.file_patterns = _compile_all(rule.get("file_patterns") or legacy.get("file_patterns"), flags)
         self.content_patterns = _compile_all(rule.get("content_patterns") or legacy.get("content_patterns"), flags)
         self.exclude_patterns = _compile_all(rule.get("exclude_patterns"), flags)
+        # 0.57.0（第 33 条）：占位值清单，按**命中片段**判定，不按整篇内容
+        self.placeholder_patterns = _compile_all(rule.get("placeholder_patterns"), flags)
         self.codepoints = _ctx03_codepoints(rule)
 
     def is_static(self):
@@ -201,6 +219,21 @@ class CompiledRule:
                 if t and rx.search(t):
                     return True
         return False
+
+    def is_placeholder(self, snippet):
+        """0.57.0（第 33 条）：这个命中片段是不是「已知占位值」。
+
+        实测本仓 227 条 SEC-06 命中里没有一条是真密钥（193 条 AWS 文档示例值、
+        31 条只有头没有 body 的私钥、3 条测试夹具的退化形状）。
+        占位值必须**按命中片段**判，不能按整篇内容判 —— 否则同一文件里另有一把
+        真密钥也会被一起放行。与 hooks/pre_tool_use.py 的 _placeholder_hit 同口径。
+        """
+        if not snippet:
+            return False
+        for rx in self.placeholder_patterns:
+            if rx.search(snippet):
+                return True
+        return _degenerate_token(snippet)
 
 
 def _compile_all(patterns, flags):
@@ -517,6 +550,8 @@ def scan_directory(root, rules, quick=False, path_whitelist=None):
                     else:
                         for rx in rule.content_patterns:
                             for m in rx.finditer(text):
+                                if rule.is_placeholder(m.group(0)):
+                                    continue        # 占位值（文档示例/退化形状）不算发现
                                 snippet = m.group(0)
                                 if len(snippet) > 60:
                                     snippet = snippet[:40] + "...(" + str(len(m.group(0))) + " chars)"
@@ -532,6 +567,8 @@ def scan_directory(root, rules, quick=False, path_whitelist=None):
                         continue
                     for rx in rule.content_patterns:
                         for m in rx.finditer(text):
+                            if rule.is_placeholder(m.group(0)):
+                                continue    # 占位值（文档示例/退化形状）不算发现
                             snippet = m.group(0)
                             if len(snippet) > 60:
                                 snippet = snippet[:40] + "...(" + str(len(m.group(0))) + " chars)"

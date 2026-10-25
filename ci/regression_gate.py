@@ -5166,6 +5166,133 @@ def j_ctx03_single_source():
                   % (len(t_hook), cells, cells, filled))
 
 
+def j_secret_placeholders_are_not_findings():
+    """★★★ D-50（2026-10-26，第 33 条）：占位值不算秘密，但真密钥必须还抓得到。
+
+    实测缺陷（`output/tests/0.57.0/d33_sec06.log`）：本仓自扫描 SEC-06 命中 227 条，
+    逐条归类后**没有一条是真密钥** ——
+        193 条 AWS 官方文档的标准示例值
+         31 条 只有私钥头、后面一个 base64 字符都没有
+          3 条 测试夹具的退化形状（AKIA 后 16 个 C / sk- 后 32 个 F 等）
+    规则里本来写着两条豁免，为什么没生效：`exclude_patterns` 在 hook 上是拿
+    [command, file_path, content, url] **整篇**匹配，而 scan 只拿**路径**匹配 ——
+    同一个豁免两处不同口径，scan 侧 0 条生效。与 D-48 的双层转义同族：
+    **写进配置但不可能生效的豁免**。
+
+    改法：占位值单独一个键 `placeholder_patterns`，只跟**命中的那一段**比。
+    不整篇放宽 —— 同一文件里另有一把真密钥照样抓得到（这也是第 ④ 腿要证的）。
+
+    四腿：
+      ① 结构：两个引擎都有占位值入口（hook _placeholder_hit / scan is_placeholder），
+         且 SEC-06 真的声明了 placeholder_patterns；
+      ② 行为（正控）：5 种真密钥形态两个引擎都必须报；
+      ③ 行为（负控）：文档示例值、只有头的私钥、退化形状两个引擎都必须不报；
+      ④ 负控的负控：把 placeholder_patterns 清空后 ③ 的文档示例值必须**变红**
+         —— 否则 ③ 的绿与本判据无关（可能是正则压根没匹配上）。
+
+    ★ 本函数里不出现任何密钥字面量：样本全部运行时拼装。判据文件本身会被
+      本仓的钩子扫；把「看起来像真密钥」的串固化进闸门源码，等于在仓库里
+      放了一把假钥匙。
+    """
+    hook = _load_module_file("hooks/pre_tool_use.py", "_hook_d50")
+    scan = _load_module_file("scripts/scan.py", "_scan_d50")
+    if hook is None or scan is None:
+        return False, "产品模块加载失败"
+    for nm, mod, fn in (("hook", hook, "_placeholder_hit"), ("hook", hook, "collect_hits"),
+                        ("scan", scan, "CompiledRule"), ("scan", scan, "scan_directory")):
+        if not hasattr(mod, fn):
+            return False, "① %s 里没有 %s()（入口被改名/删了）" % (nm, fn)
+    # scan 的占位值入口是 CompiledRule 上的方法，不是模块级函数 —— 分开放，
+    # 免得把「方法在哪一层」也写成断言（那是实现细节，判据只该问「在不在」）。
+    if not hasattr(scan.CompiledRule, "is_placeholder"):
+        return False, "① scan.CompiledRule 上没有 is_placeholder()（占位值入口被改名/删了）"
+    rules_file = PKG / "rules" / "default.json"
+    if not rules_file.is_file():
+        return None, "缺 rules/default.json（不可判）"
+    doc = json.loads(rules_file.read_text(encoding="utf-8"))
+    sec = next((r for r in (doc.get("rules") or []) if r.get("id") == "SEC-06"), None)
+    if sec is None:
+        return False, "① 规则集里没有 SEC-06"
+    if not sec.get("placeholder_patterns"):
+        return False, "① SEC-06 没有 placeholder_patterns（占位值清单被删了）"
+
+    # ---- 样本全部运行时拼装 ----
+    D5 = chr(45) * 5
+    hdr = D5 + "BEGIN OPENSSH PRIVATE KEY" + D5
+    body = "".join(chr(65 + (i * 7) % 26) for i in range(64))
+    rand = "".join("ABCDEFGHIJKLMNOPQRSTUVWXYZ"[i % 26] for i in (0, 13, 5, 21, 8, 17, 2, 24))
+    pos = [
+        ("AWS access key", "AKIA" + rand + rand[:8]),
+        ("私钥（头 + body 齐）", hdr + chr(10) + body),
+        ("sk- 密钥", "sk-" + (rand * 4)),
+        ("GitHub token", "ghp_" + (rand * 5)),
+        ("Slack token", "xoxb-" + (rand * 2) + "-" + rand),
+    ]
+    neg = [
+        ("文档示例值", "AKIA" + "IOSFODNN7EXAMPLE"),
+        ("私钥只有头", hdr + chr(10) + "x"),
+        ("AWS 退化形状", "AKIA" + "C" * 16),
+        ("sk- 退化形状", "sk-" + "F" * 32),
+        ("占位词 sk-your", "sk-" + "your-key-goes-here-please"),
+    ]
+
+    import shutil as _sh
+    root = Path(_TMP.tmpdir(prefix="d50_"))
+    try:
+        def hook_hit(text):
+            texts = {"command": "", "file_path": str(root / "app.py"),
+                     "content": text, "url": ""}
+            try:
+                hits = hook.collect_hits(doc.get("rules") or [], "Write", texts, str(root), []) or []
+            except Exception as e:                                  # noqa: BLE001
+                return "ERR:%s" % type(e).__name__
+            return [h.get("rule_id") for h in hits if h.get("rule_id") == "SEC-06"]
+
+        def scan_hit(name, text, ruleset=None):
+            d = root / ("c" + str(abs(hash(name)) % 99999))
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "app.py").write_text(text, encoding="utf-8")
+            found, _s, _i, _g = scan.scan_directory(str(d), ruleset or (doc.get("rules") or []))
+            return [f["rule_id"] for f in found if f.get("rule_id") == "SEC-06"]
+
+        # ② 正控
+        miss = [nm for nm, t in pos if not hook_hit(t) or not scan_hit(nm, t)]
+        if miss:
+            return False, "② 真密钥没被抓到（检测被关掉了）：%s" % miss
+
+        # ③ 负控
+        bad = [nm for nm, t in neg if hook_hit(t) or scan_hit(nm, t)]
+        if bad:
+            return False, "③ 占位值被当成密钥（首扫会因此掉到 D）：%s" % bad
+
+        # ④ 负控的负控：清空占位值清单后，文档示例值必须变红
+        hollow = json.loads(json.dumps(sec))
+        hollow["placeholder_patterns"] = []
+        nm0, t0 = neg[0]
+        if not hook_hit_with(hook, [hollow], t0, root):
+            return False, ("④ 清空占位值清单后 hook 仍不报示例值 ⇒ ③ 的绿不是这张表给的"
+                           "（正则可能压根没匹配上）")
+        if not scan_hit("hollow", t0, [hollow]):
+            return False, "④ 清空占位值清单后 scan 仍不报示例值 ⇒ ③ 的绿不是这张表给的"
+    finally:
+        _sh.rmtree(str(root), ignore_errors=True)
+
+    return True, ("① 两引擎占位入口在位、SEC-06 声明 %d 条占位值 ② 真密钥 %d 种全被抓到 "
+                  "③ 占位值 %d 种全不报 ④ 清空清单后示例值立刻变红"
+                  % (len(sec["placeholder_patterns"]), len(pos), len(neg)))
+
+
+def hook_hit_with(hook, ruleset, text, root):
+    """D-50 内部用：把一份规则集直接喂给 hook 的内容通道。"""
+    texts = {"command": "", "file_path": str(Path(str(root)) / "app.py"),
+             "content": text, "url": ""}
+    try:
+        hits = hook.collect_hits(ruleset, "Write", texts, str(root), []) or []
+    except Exception:                                              # noqa: BLE001
+        return None
+    return [h.get("rule_id") for h in hits if h.get("rule_id") == "SEC-06"]
+
+
 def _checks(m):
     """判据清单（**唯一真源**）。返回 `[(判据 ID 串, 可调用)]`。
 
@@ -5255,6 +5382,9 @@ def _checks(m):
         # ── 2026-10-26 D-49：CTX-03 的码点表只许有一份（第 32 条）──
         ("D-49 CTX-03 两个引擎同源同结论（三份区间表各写一份，scan 看不见 RLO 文件名）",
          j_ctx03_single_source),
+        # ── 2026-10-26 D-50：占位值不算秘密，真密钥还得抓得住（第 33 条）──
+        ("D-50 密钥占位值不报、真密钥照报（227 条 SEC-06 全是文档示例/空私钥）",
+         j_secret_placeholders_are_not_findings),
     ]
 
 
