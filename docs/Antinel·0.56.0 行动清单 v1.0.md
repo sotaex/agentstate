@@ -240,6 +240,8 @@ git add -- <5 件>                     # 索引对齐，status 归零
 **20.** 推送 origin（292 个提交）。**建议排在出包之前**，理由见 §1.3；若排在之后，至少要有一个异地副本。
 **21.** MCP-02/03/04：`content_patterns` 从不执行（待裁决 10）—— 干净 `.mcp.json` 产生 4 条告警，MCP-04 会谎称「env 块存在明文密钥」。
 **22.** SEC-04 裸子串（`wallet` / `keystore`），与 SEC-05 同一缺陷形状，本轮实测被它拦了 1 次。
+
+> **已修（0.57.0 第 22 条，见 §7.8）**：4 条裸子串 → 9 条路径段锚定（含挂扩展名的前缀族）。实测基线：20 条负控 **16 条误拦** → **0 条**；判据 `SEC-04a/b/c`。
 **23.** CTX-07 只认 `exec(base64.b64decode(`，`echo <b64> | base64 -d | sh` 不中（待裁决 3）。
 **24.** 锁三处无痕 ＋ 等待越长越危险（待裁决 11）：`acq_timeout` 82 次、`steal` 0 次、最大等待 14432ms > 宿主 10s 超时。
 **25.** `report` 零事件 rc=1 与真失败同码（待裁决 8）。
@@ -719,3 +721,49 @@ sdist  antinel-0.56.0.tar.gz（扫描文本成员 246 个）：三处同样齐
 2. **第一遍 harness 必红**：`321/324`，其中 2 条是 judgment 自指（改了 COVERED 文件，`0.16.0 antinel_verify derives current` 报「1 of 21 covered files differ: scripts/verification_tests.py」；`0.17.0 P-B1 …` 是它的连带），另 1 条是 `C9` 的 hook 超时（120s，同一命令单跑约 2 秒）。第二遍 `324/324`。
 
 证据：`output/tests/0.57.0/`（`f3334_evidence.json`、`g0514_v2_s{0,1,2}.log`、`g0481_f3334.log`、`harness_v2_{1,2}_sh*.log`、`regression_f3334_{,b,c}.log`）；探针 `output/_f3334_probe.py`（先红后绿，双段取证）、`output/_lk0514_guard.py`（单实例运行器，两版：TOCTOU 版与原子版）。
+
+## 7.8 第 22 条：SEC-04 的裸子串（本轮）
+
+### 问题（先量，不先改）
+
+SEC-04 的 `file_patterns` 是四个**裸子串**：`wallet`、`keystore`、`metamask`、`\.ethereum`。而 `_basic_hit` 匹配的是 `file_path` ＋ **整条 Bash 命令文本** ⇒「文本里出现这个词」＝按 critical 拦下，提示语却是「读取加密货币钱包或密钥库文件」——**对客户是不实陈述**。
+
+**基线实测（真 hook 子进程，20 条负控）：16 条被误拦**，例如 `pip install walletconnect`、`git log --grep=wallet -3`、`git commit -m "fix wallet connect bug"`、`src/components/WalletButton.tsx`、`app/keystore_store.py`、`node scripts/check-keystore.js --dry-run`。做爬虫／写文档／装包都会真撞上。
+
+### 修法
+
+4 条裸子串 → **9 条路径段锚定**：`<段>` 或 `<段>.已知扩展`（`wallet.dat`/`keystore.json`），外加**挂扩展名的前缀族** `wallet[_-]*.json` 这类。前缀族必须挂扩展名，否则 `ls ~/projects/wallet-integration` 会被重新误拦（语料里就有这条负控）。
+
+**为什么不改那条 C 族正控**：`/proj/data/wallet_mainnet.json` 严格按段锚定是放行的，但它**确实该拦**（文件名就是钱包数据）。此时若把正控样本改成 `/proj/data/wallet/mainnet.json` 去迁就实现，就是「期望值从实现现状抄」——所以改的是模式，不是样本。
+
+### 本轮撞到的两件事（都不在原计划里）
+
+1. **转义层数**。`[\\w.-]` 在正则里是「反斜杠、字母 w、点、横线」四个字符，**不是**「词字符／点／横线」。后果是双向的：以 `\` 结尾的段（所有 Windows 路径）被 lookahead 判不合格 ⇒ **漏拦**；而 `WalletButton`／`keystore_store` 里的字母不在这个集合里 ⇒ **误拦**。B 腿第一次给我的读数正是「漏 2 误 2」，纸面上四条全该是反的——回源码量 `_rx`/`_basic_hit` 才定位到这一个字符类。
+2. **探针改「项目内规则副本」必须同步 `manifest.rules_hash`**。不同步 ⇒ hook 判 `SELF-TAMPERED` 并**退回内置兜底集** ⇒ 探针量的是兜底集，不是候选模式。第一次跑出来的现象是：基线 16 误、候选也 16 误、逐条一模一样（我差点读成「候选无效」）。这是「假绿」的一个新形态，已写进判据注释与记忆。
+
+### 判据（3 条，全部真入口）
+
+`SEC-04a` 正控 22（含 Windows 反斜杠路径，专门钉住上面那个转义坑）＋ 断言 `match_kind == "path"`；`SEC-04b` 负控 20；`SEC-04c` 牙齿：把副本改回单条裸 `wallet` ⇒ 同一条负控必须被拦（hash 已同步），而**只改内容不改 hash**时必须判 `SELF-TAMPERED` 并回落。辅助函数复用 SEC-05 族那三个，不新开第二份实现。
+
+### 读数
+
+| 项 | 读数 |
+|---|---|
+| 探针 A 腿（裸子串，22 正控／20 负控） | 漏 **2** ／ 误 **16** |
+| 探针 B 腿（候选 9 条，同一批样本、同一入口） | 漏 **0** ／ 误 **0** ／ 牙齿有效 |
+| 0514（3 片） | **91 ＋ 91 ＋ 91 ＝ 273 绿 / 0 红 / 0 跳过**（270 ＋ 新增 3） |
+| 0481 | **14 绿 / 0 红** |
+| regression | **31 / 31**（第一遍 D-6 红＝judgment 自指，harness 第二遍后回绿） |
+| harness | 第一遍 **322/324**（2 条 judgment 自指）→ 第二遍 **324/324 PASS** |
+| `tools/antinel_verify.py --manifest` | current（**143** 条全对） |
+| manifest 重签 | 2 条（`hooks/pre_tool_use.py`、`rules/default.json`） |
+
+**必须同步生成的两件**（少一件就红）：
+1. `hooks/pre_tool_use.py` 的内置兜底块 `_FALLBACK` —— 由 `output/_gen_fallback.py` 从 `rules/default.json` 重生成，自校验「eval(新块) == 主表」通过（37 条全等）。
+2. `references/RULES.md` —— 由 `build_package.rules_md()` 重生成；**SPDX 头要自己补**（builder 是写盘时才加那一行，手工重生成漏了会掉 `L1`）。本轮第一次重生成就漏了，diff 里立刻看见。
+
+### 已知残留（记账，本轮不改）
+
+- `curl https://api.example.com/wallets?limit=10` 仍会被拦：URL 的路径段与文件路径段在这一层无法区分。
+- `/opt/WalletApp/bin/run` 放行（`WalletApp` 是应用名、不是钱包数据；若该目录真的存密钥则会漏）。
+- 顺带量到 SEC-05 的同类残留：`node_modules/cookies/index.js` 现行就会拦（`cookies` 是常见 npm 包名）。与本条同源，但换规则面，留待下一批。

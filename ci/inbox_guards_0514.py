@@ -9787,7 +9787,154 @@ def sec05c():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# C 族 —— 15 条「ci/ 里没有任何可执行代码提到」的规则，补正控（0.57.0，10-25）
+# SEC-04 族 —— 钱包/密钥库规则的**路径语义**（0.57.0 第 22 条，2026-10-25）
+#
+# 与 SEC-05 族同域、同病、同修法：`wallet`/`keystore`/`metamask`/`\.ethereum`
+# 四个**裸子串**在 `_basic_hit` 里既匹配 `file_path` 又匹配**整条 Bash 命令文本**
+# ⇒ 「文本里出现这个词」＝critical 拦截。实测基线（本节语料的 A 腿）：20 条负控
+# **16 条被误拦** —— `pip install walletconnect`、`git log --grep=wallet`、
+# `git commit -m "fix wallet connect bug"`、`WalletButton.tsx`、`keystore_store.py`
+# 全按「读取钱包或密钥库」拦下，提示语对客户是**不实陈述**。
+#
+# 修法：路径**段锚定**（`<段>` 或 `<段>.已知扩展` 或 `wallet_xxx.json` 这类挂扩展名
+# 的前缀族），并在字符类里只写**一层**转义 —— `[\w.-]` 是「词字符/点/横线」，
+# 写成 `[\\w.-]` 会变成「反斜杠/字母 w/点/横线」：以 `\` 结尾的段（Windows 路径）
+# 全部漏拦，而 `WalletButton` 里的字母不在集合内反而**误拦**。一个转义错误同时
+# 造出漏与误两个方向 —— 本轮实测就是这么撞出来的（B 腿先给我「漏 2 误 2」）。
+#
+# 三条纪律沿用 SEC-05 族（同一批辅助函数，不新开第二份实现）：
+#   ① 真 hook 子进程；② 正控断言 `match_kind == "path"`；③ 负控要有牙齿。
+# ═══════════════════════════════════════════════════════════════════════════
+
+#: 正控 22 条：真在碰钱包/密钥库（含 Windows 反斜杠路径，专防上面那个转义坑）。
+_SEC04_POS = [
+    ("Read", r"C:\Users\ge\AppData\Roaming\Ethereum\keystore\UTC--2021-03-04T10-11-12.345Z--abc"),
+    ("Read", "/home/ge/.ethereum/keystore/UTC--2019-05-01T00-00-00.000Z--deadbeef"),
+    ("Read", "/home/ge/.config/Exodus/wallet/seed.seco"),
+    ("Read", r"C:\Users\ge\AppData\Roaming\MetaMask\000001.log"),
+    ("Read", "/home/ge/.electrum/wallets/default_wallet"),
+    ("Read", "/mnt/usb/backup/wallet.dat"),
+    ("Read", "/home/ge/Documents/keystore.json"),
+    ("Read", r"D:\crypto\Wallets\main.key"),
+    ("Read", "/home/ge/wallet/"),
+    ("Read", "/home/ge/.bitmonero/wallets/foo.keys"),
+    ("Read", "/home/ge/.ethereum"),
+    ("Read", "/proj/data/wallet_mainnet.json"),
+    ("Read", "/proj/backup/keystore_dump.json"),
+    ("Bash", "cat ~/.ethereum/keystore/UTC--2019-*"),
+    ("Bash", "cp -r ~/.ethereum/keystore /tmp/leak"),
+    ("Bash", "tar czf /tmp/w.tgz /home/ge/.config/Exodus/wallet"),
+    ("Bash", "python -c \"import json;print(json.load(open('/home/ge/.ethereum/keystore/k.json')))\""),
+    ("Bash", r"type C:\Users\ge\wallets\main.dat"),
+    ("Bash", "scp ge@host:~/.ethereum/keystore/* ."),
+    ("Bash", r'Get-ChildItem "C:\Users\ge\AppData\Roaming\MetaMask" -Recurse'),
+    ("Bash", "geth account list --keystore ~/.ethereum/keystore"),
+    ("Bash", "rsync -a /home/ge/keystore/ /tmp/k/"),
+]
+
+#: 负控 20 条：词出现了，但碰的不是钱包数据（改回裸子串时这 16 条立刻翻红）。
+_SEC04_NEG = [
+    ("Read", r"C:\proj\src\components\WalletButton.tsx"),
+    ("Read", "/home/ge/proj/docs/keystore-design.md"),
+    ("Read", "/home/ge/proj/tests/mock_wallet.json"),
+    ("Read", "/home/ge/proj/node_modules/@metamask/providers/dist/index.js"),
+    ("Read", "/home/ge/proj/src/ethereum/client.py"),
+    ("Read", "/home/ge/proj/wallet.ts"),
+    ("Read", "/home/ge/proj/app/keystore_store.py"),
+    ("Bash", "pip install walletconnect"),
+    ("Bash", "npm i @walletconnect/web3-provider"),
+    ("Bash", "git log --grep=wallet -3"),
+    ("Bash", 'rg -n "keystore" docs/'),
+    ("Bash", 'git commit -m "fix wallet connect bug"'),
+    ("Bash", "echo wallet"),
+    ("Bash", "mkdir -p /tmp/keystore-test"),
+    ("Bash", "grep -rn ethereum src/"),
+    ("Bash", "git show HEAD:src/keystore.py"),
+    ("Bash", "pytest tests/test_wallet.py -q"),
+    ("Bash", "ls ~/projects/wallet-integration"),
+    ("Bash", "node scripts/check-keystore.js --dry-run"),
+    ("Bash", "git diff --stat -- '*wallet*'"),
+]
+
+
+@check("SEC-04a 正控 22：真实钱包/密钥库路径必须拦，且命中通道必须是 path")
+def sec04a():
+    proj, env = _sec05_project("04a")
+    miss, chan = [], []
+    for i, (tool, text) in enumerate(_SEC04_POS, 1):
+        sid = "sec04a-%02d" % i
+        out = _sec05_fire(proj, env, tool, text, sid)
+        ids, kinds = _sec05_audit(proj, sid)
+        if "Antinel 拦截 [SEC-04]" not in out or "SEC-04" not in ids:
+            miss.append("[%s] %s" % (tool, text[:62]))
+        elif "path" not in kinds:
+            chan.append("[%s] %s -> %s" % (tool, text[:50], sorted(kinds)))
+    if miss:
+        return ("正控漏拦 %d/%d（Windows 反斜杠那几条漏 ⇒ 多半是 lookahead 的转义层数"
+                "又写成两层了）：%s" % (len(miss), len(_SEC04_POS), "；".join(miss[:4])))
+    if chan:
+        return ("命中通道不是 path 的有 %d 条（SEC-04 只有 file_patterns）：%s"
+                % (len(chan), "；".join(chan[:3])))
+    _note("22 条真实钱包/密钥库路径全部拦下，match_kind 全为 path")
+    return True
+
+
+@check("SEC-04b 负控 20：提到那个词但不是那个文件，必须放行")
+def sec04b():
+    proj, env = _sec05_project("04b")
+    bad = []
+    for i, (tool, text) in enumerate(_SEC04_NEG, 1):
+        sid = "sec04b-%02d" % i
+        out = _sec05_fire(proj, env, tool, text, sid)
+        if "[SEC-04]" in out:
+            bad.append("[%s] %s" % (tool, text[:62]))
+    if bad:
+        return ("负控误拦 %d/%d（裸子串时代是 16/20，把词当文件就是这一步退回去的）：%s"
+                % (len(bad), len(_SEC04_NEG), "；".join(bad[:5])))
+    _note("20 条全部放行；核心回归点＝装包名／git log 提及／源码里的同名标识符")
+    return True
+
+
+@check("SEC-04c 负控牙齿：改回裸子串必须翻红 ＋ 只改内容不改 hash 必须判 SELF-TAMPERED")
+def sec04c():
+    import hashlib
+    import io
+    proj, env = _sec05_project("04c")
+    rp = os.path.join(proj, ".psl", "rules", "default.json")
+    mp = os.path.join(proj, ".psl", "manifest.json")
+    probe = "git log --grep=wallet -3"
+    if not os.path.isfile(rp) or not os.path.isfile(mp):
+        return "夹具不成立：项目里没有规则副本或 manifest"
+    if "[SEC-04]" in _sec05_fire(proj, env, "Bash", probe, "sec04c-0"):
+        return "夹具污染：干净规则下这条负控已经被拦"
+    data = json.load(io.open(rp, encoding="utf-8"))
+    hit = False
+    for r in data["rules"]:
+        if r.get("id") == "SEC-04":
+            r["file_patterns"] = ["wallet"]
+            hit = True
+    if not hit:
+        return "夹具不成立：项目规则副本里没有 SEC-04"
+    with io.open(rp, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, ensure_ascii=False, indent=2)
+    out1 = _sec05_fire(proj, env, "Bash", probe, "sec04c-1")
+    if "SELF-TAMPERED" not in out1:
+        return "改规则不改 hash，hook 没报 SELF-TAMPERED —— 规则完整性防线是空的"
+    if "[SEC-04]" in out1:
+        return "已判 SELF-TAMPERED 却仍按被改的规则拦下（回落没生效）"
+    man = json.load(io.open(mp, encoding="utf-8"))
+    man["rules_hash"] = "sha256:" + hashlib.sha256(io.open(rp, "rb").read()).hexdigest()
+    with io.open(mp, "w", encoding="utf-8") as fh:
+        json.dump(man, fh, ensure_ascii=False, indent=2)
+    out2 = _sec05_fire(proj, env, "Bash", probe, "sec04c-2")
+    if "[SEC-04]" not in out2:
+        return ("牙齿失效：规则已改回裸子串（hash 已同步），这条负控仍放行 "
+                "⇒ SEC-04b 的「零误拦」没有分辨力")
+    _note("裸子串下被拦（牙齿有效）＋ 只改内容不改 hash 时判 SELF-TAMPERED 并回落")
+    return True
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 #
 # 起点是一次**测量**，不是一次阅读：把 `ci/*.py` 去掉注释与 docstring 后，逐条查
 # `rules/default.json` 的 37 个 id 是否在可执行代码里出现过 —— 15 条一次都没出现：

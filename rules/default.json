@@ -122,10 +122,15 @@
         "Bash"
       ],
       "file_patterns": [
-        "wallet",
-        "keystore",
-        "metamask",
-        "\\.ethereum"
+        "(?:^|[\\\\/])wallets?(?![\\w.-])",
+        "(?:^|[\\\\/])keystores?(?![\\w.-])",
+        "(?:^|[\\\\/])\\.ethereum(?![\\w.-])",
+        "(?:^|[\\\\/])metamask(?![\\w.-])",
+        "(?:^|[\\\\/])(?:electrum|exodus|bitmonero|monero)(?![\\w.-])",
+        "(?:^|[\\\\/])wallet\\.(?:dat|json|key|keys|dump|db|sqlite)(?![\\w.-])",
+        "(?:^|[\\\\/])keystore\\.(?:json|db|sqlite)(?![\\w.-])",
+        "(?:^|[\\\\/])wallet[_-][\\w-]*\\.(?:dat|json|key|keys|dump|db|sqlite|txt|seed)(?![\\w.-])",
+        "(?:^|[\\\\/])keystore[_-][\\w-]*\\.(?:dat|json|key|db|sqlite)(?![\\w.-])"
       ],
       "exclude_patterns": [
         "test_wallet",

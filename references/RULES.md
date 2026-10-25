@@ -56,10 +56,15 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - 说明: 读取加密货币钱包或密钥库文件
 - 处理建议: 钱包目录永远不要交给编码 Agent；必要时移入加密保管
 - file_patterns:
-    - `wallet`
-    - `keystore`
-    - `metamask`
-    - `\.ethereum`
+    - `(?:^|[\\/])wallets?(?![\w.-])`
+    - `(?:^|[\\/])keystores?(?![\w.-])`
+    - `(?:^|[\\/])\.ethereum(?![\w.-])`
+    - `(?:^|[\\/])metamask(?![\w.-])`
+    - `(?:^|[\\/])(?:electrum|exodus|bitmonero|monero)(?![\w.-])`
+    - `(?:^|[\\/])wallet\.(?:dat|json|key|keys|dump|db|sqlite)(?![\w.-])`
+    - `(?:^|[\\/])keystore\.(?:json|db|sqlite)(?![\w.-])`
+    - `(?:^|[\\/])wallet[_-][\w-]*\.(?:dat|json|key|keys|dump|db|sqlite|txt|seed)(?![\w.-])`
+    - `(?:^|[\\/])keystore[_-][\w-]*\.(?:dat|json|key|db|sqlite)(?![\w.-])`
 - exclude_patterns: `test_wallet`, `mock_wallet`
 - remediation: Never let a coding agent touch wallet directories; move keystores to an encrypted vault.
 

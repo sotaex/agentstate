@@ -131,6 +131,22 @@ INSTRUCTION_DIR_MARKERS = (".cursor/rules",)   # + basename endswith .mdc
 #   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
 #   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
 #   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
+# G-03: embedded fallback, used only when the rules file is unreadable / tampered.
+# ★★ 0.57.0（步骤 A）：本块**由 `rules/default.json` 生成**，与主表 37 条全等。
+#   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
+#   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
+#   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
+#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
+#   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
+# G-03: embedded fallback, used only when the rules file is unreadable / tampered.
+# ★★ 0.57.0（步骤 A）：本块**由 `rules/default.json` 生成**，与主表 37 条全等。
+#   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
+#   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
+#   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
+#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
+#   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
 _FALLBACK = [
     {"id": "SEC-01",
      "name": "Sensitive file read (.env)",
@@ -192,7 +208,16 @@ _FALLBACK = [
      "severity": "critical",
      "type": "tool_call",
      "tool_names": ["Read", "Bash"],
-     "file_patterns": ["wallet", "keystore", "metamask", "\\.ethereum"],
+     "file_patterns": [
+      "(?:^|[\\\\/])wallets?(?![\\w.-])",
+      "(?:^|[\\\\/])keystores?(?![\\w.-])",
+      "(?:^|[\\\\/])\\.ethereum(?![\\w.-])",
+      "(?:^|[\\\\/])metamask(?![\\w.-])",
+      "(?:^|[\\\\/])(?:electrum|exodus|bitmonero|monero)(?![\\w.-])",
+      "(?:^|[\\\\/])wallet\\.(?:dat|json|key|keys|dump|db|sqlite)(?![\\w.-])",
+      "(?:^|[\\\\/])keystore\\.(?:json|db|sqlite)(?![\\w.-])",
+      "(?:^|[\\\\/])wallet[_-][\\w-]*\\.(?:dat|json|key|keys|dump|db|sqlite|txt|seed)(?![\\w.-])",
+      "(?:^|[\\\\/])keystore[_-][\\w-]*\\.(?:dat|json|key|db|sqlite)(?![\\w.-])"],
      "exclude_patterns": ["test_wallet", "mock_wallet"],
      "apply_to_tools": ["Read", "Bash"],
      "description": "Agent attempted to read cryptocurrency wallet or keystore file",
