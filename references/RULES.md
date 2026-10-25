@@ -161,7 +161,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
     - `array_map\(\s*["']unlink["']`
     - `\bosascript\b[^\n]{0,200}\bdelete\b`
     - `\bfind\b[^\n]{0,200}\s-delete\b`
-- exclude_patterns: `rm -rf node_modules`, `rm -rf \.git`, `rm -rf __pycache__`, `rm -rf \.psl`, `remove-item node_modules`, `remove-item -recurse.*node_modules`, `\brm\s+-rf\s+(dist|build|target|venv|\.tox|\.mypy_cache|\.ruff_cache|\.pytest_cache|htmlcov|coverage|out|bin|obj)(\s|$|;)`, `\brm\s+-rf\s+\S*\.(egg-info|pyc)(\s|$|;)`, `\brm\s+-rf\s+\.nox\b`, `\\bgrep\\b`, `\\bfind\\b`, `\\bcat\\b`, `\\bhead\\b`, `\\btail\\b`, `\\btype\\b`, `\\bselect\\-string\\b`, `\\bdef\\s+\\w*(remove|unlink|delete)\\w*\\(`, `\\bos\\.remove\\b.*\\#`, `\\b#.*\\b(unlink|rm|del)\\b`
+- exclude_patterns: `rm -rf node_modules`, `rm -rf \.git`, `rm -rf __pycache__`, `rm -rf \.psl`, `remove-item node_modules`, `remove-item -recurse.*node_modules`, `\brm\s+(?:-[a-zA-Z]+\s+)*(?:\./)?(?:dist|build|target|venv|\.venv|node_modules|__pycache__|\.tox|\.nox|\.mypy_cache|\.ruff_cache|\.pytest_cache|\.cache|\.next|\.nuxt|\.svelte\-kit|\.turbo|\.parcel\-cache|\.gradle|htmlcov|coverage|out|bin|obj|Debug|Release)(?:[/\\][^\s;&|]*)?(?:\s|$|;|&|\|)`, `\brm\s+-rf\s+\S*\.(egg-info|pyc)(\s|$|;)`, `\brm\s+-rf\s+\.nox\b`, `^\s*(?:#|::|rem\s)`, `\bdef\s+\w*(?:remove|unlink|delete)\w*\(`
 - remediation: Confirm the deletion target; prefer moving to trash over rm -rf outside build artifacts.
 
 ## DST-02  Write outside project root

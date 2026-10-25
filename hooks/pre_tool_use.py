@@ -163,6 +163,22 @@ INSTRUCTION_DIR_MARKERS = (".cursor/rules",)   # + basename endswith .mdc
 #   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
 #   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
 #   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
+# G-03: embedded fallback, used only when the rules file is unreadable / tampered.
+# ★★ 0.57.0（步骤 A）：本块**由 `rules/default.json` 生成**，与主表 37 条全等。
+#   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
+#   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
+#   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
+#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
+#   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
+# G-03: embedded fallback, used only when the rules file is unreadable / tampered.
+# ★★ 0.57.0（步骤 A）：本块**由 `rules/default.json` 生成**，与主表 37 条全等。
+#   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
+#   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
+#   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
+#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
+#   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
 _FALLBACK = [
     {"id": "SEC-01",
      "name": "Sensitive file read (.env)",
@@ -372,19 +388,11 @@ _FALLBACK = [
       "rm -rf \\.psl",
       "remove-item node_modules",
       "remove-item -recurse.*node_modules",
-      "\\brm\\s+-rf\\s+(dist|build|target|venv|\\.tox|\\.mypy_cache|\\.ruff_cache|\\.pytest_cache|htmlcov|coverage|out|bin|obj)(\\s|$|;)",
+      "\\brm\\s+(?:-[a-zA-Z]+\\s+)*(?:\\./)?(?:dist|build|target|venv|\\.venv|node_modules|__pycache__|\\.tox|\\.nox|\\.mypy_cache|\\.ruff_cache|\\.pytest_cache|\\.cache|\\.next|\\.nuxt|\\.svelte\\-kit|\\.turbo|\\.parcel\\-cache|\\.gradle|htmlcov|coverage|out|bin|obj|Debug|Release)(?:[/\\\\][^\\s;&|]*)?(?:\\s|$|;|&|\\|)",
       "\\brm\\s+-rf\\s+\\S*\\.(egg-info|pyc)(\\s|$|;)",
       "\\brm\\s+-rf\\s+\\.nox\\b",
-      "\\\\bgrep\\\\b",
-      "\\\\bfind\\\\b",
-      "\\\\bcat\\\\b",
-      "\\\\bhead\\\\b",
-      "\\\\btail\\\\b",
-      "\\\\btype\\\\b",
-      "\\\\bselect\\\\-string\\\\b",
-      "\\\\bdef\\\\s+\\\\w*(remove|unlink|delete)\\\\w*\\\\(",
-      "\\\\bos\\\\.remove\\\\b.*\\\\#",
-      "\\\\b#.*\\\\b(unlink|rm|del)\\\\b"],
+      "^\\s*(?:#|::|rem\\s)",
+      "\\bdef\\s+\\w*(?:remove|unlink|delete)\\w*\\("],
      "apply_to_tools": ["Bash"],
      "description": "Agent executed a file or directory deletion command",
      "remediation": "Confirm the deletion target; prefer moving to trash over rm -rf outside build artifacts.",
@@ -1448,6 +1456,11 @@ cut tr sort uniq join paste expand unexpand split
 md5sum sha1sum sha256sum shasum
 select-string get-content get-childitem get-item get-acl
 cd pwd
+type                              # 0.57.0（第 31 条）：`type f` 是 Windows 的 cat。
+                                  # 走本名单而不是靠 DST-01 的 exclude：名单这条路径带
+                                  # `$()`／`-delete`／`| xargs`／`sudo`／重定向 五项检查，
+                                  # 单写一条 `^type` 的 exclude 会把这些一起绕过（本轮实测
+                                  # `grep -r $(rm -rf x) .` 与 `find … -delete` 就是这样翻红的）。
 """.split())
 # find -i is not a thing; sed -i is a write. Scoped per verb to avoid the
 # `grep -i` vs `sed -i` collision a single global "-i" check would create.

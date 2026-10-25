@@ -4680,6 +4680,207 @@ def j_whitelist_path_form_insensitive():
                   % (" ".join(detail), how))
 
 
+def j_rules_patterns_are_alive():
+    """★★★ D-48（2026-10-25，第 31 条）：规则文件里每一条模式都必须「活着」。
+
+    实测缺陷（先证后改，`output/tests/0.57.0/d31_deadpat.log`）：
+
+      DST-01 的 10 条「工具词排除」全写成 `\\\\bgrep\\\\b` —— JSON 落盘后是
+      「字面反斜杠 + bgrep」，正则去匹配一个带反斜杠的字符串。
+      **10 条里 0 条生效**，其中 #16 连 `re.compile` 都失败
+      （`missing ), unterminated subpattern`）。
+
+    后果（`d31_readonly.log` 第一版，**已被推翻**）：一度算出「只是提到删除词就被
+      critical 拦死，7/12 ＝ 58%」。**那个数字是错的** —— 见下。
+
+    ★★★ 读码看不出来，量了也会量错（本轮两次踩同一个坑）：
+      ① 正则语法完全合法，`re.compile` 不报错；`_rx()` 失败还返回 None 静默禁用
+         ⇒ 三处都不会喊。
+      ② 光看 `severity` 也看不出「会不会被拦」—— `collect_hits` 里 severity 不变、
+         **action 被降级成 alert**：
+             if action == "block" and hit[1] == "command" and ro_cmd:
+                 entry["action"] = "alert"
+        真行为是 **10 条只读命令里 8 条放行**（`readonly_command_context` 兜住了），
+         被拦的只有 `type del.bat` 与 `git show … | grep`。
+      ⇒ 因此本判据的③④⑤**只认 `action`**，且第⑤腿用「清空豁免必须变红」自证
+        它测的是豁免，而不是「这些命令本来就拦不住」。
+
+      ① 结构：272 条模式全部 `re.compile` 通过（当前已坏 1 条）；
+      ② 结构：无双层转义（`\\` 紧跟正则元字符），且**检测器自证有牙**
+         （喂一个手工构造的坏样本必须被它检出 —— 否则检测器坏掉＝恒绿）；
+      ③ 行为：只读命令**无一 block** ＋ **构建产物删除无一 block**
+         （产品自己的拦截文案承诺「构建产物类删除已在豁免清单」）；
+      ④ 行为：真破坏（`src/`、`/etc`、`~/Documents`）**必须 block**；
+      ⑤ 负控：把 DST-01 的豁免清空后 ③ 的构建产物那组必须全变 block
+         （否则 ③ 的绿与本判据无关）。
+    """
+    rules_file = PKG / "rules" / "default.json"
+    if not rules_file.is_file():
+        return None, "缺 rules/default.json（不可判）"
+    try:
+        data = json.loads(rules_file.read_text(encoding="utf-8"))
+    except Exception as e:                                  # noqa: BLE001
+        return False, "规则文件不是合法 JSON：%s: %s" % (type(e).__name__, e)
+    rules = data.get("rules") or []
+    if not rules:
+        return False, "规则文件里没有 rules 数组（空集与「全对」同貌）"
+
+    fields = ("command_patterns", "file_patterns", "content_patterns",
+              "exclude_patterns")
+
+    # ---- ① 全部可编译 ----
+    total = 0
+    broken = []
+    for r in rules:
+        for f in fields:
+            for i, p in enumerate(r.get(f) or []):
+                total += 1
+                try:
+                    re.compile(p, re.IGNORECASE)
+                except Exception as e:                      # noqa: BLE001
+                    broken.append("%s.%s[%d] %s <<%s>>"
+                                  % (r.get("id"), f, i, p[:40],
+                                     str(e).split("\n")[0][:40]))
+    if total == 0:
+        return False, "一条模式都没取到（取数面写错了，空集不等于全对）"
+    if broken:
+        return False, ("① %d/%d 条模式**编译不了**（`_rx()` 会静默禁用它，"
+                       "该条规则等于不存在）：%s"
+                       % (len(broken), total, "；".join(broken[:3])))
+
+    # ---- ② 无双层转义，且检测器有牙 ----
+    # `\\` 紧跟这些字符 = 作者想要 `\b` 却写成「字面反斜杠 + 字母」。
+    # 不含 `]`/`-`：`[/\\]`（字符类里匹配正反斜杠）是**正当**用法，不能误判。
+    double_esc = re.compile(r"\\\\[bswdDSWBZ.(]")
+    # 自证：手工构造的坏样本必须被这个检测器抓到（第十二族：判据点要能被负控换掉）
+    if not double_esc.search(chr(92) * 2 + "bgrep"):
+        return False, ("② **双层转义检测器自己没牙** —— 喂 "
+                       "`\\\\\\\\bgrep` 都检不出来，这一腿恒绿")
+    bad = []
+    for r in rules:
+        for f in fields:
+            for i, p in enumerate(r.get(f) or []):
+                if double_esc.search(p):
+                    bad.append("%s.%s[%d] %s" % (r.get("id"), f, i, p[:36]))
+    if bad:
+        return False, ("② %d 条模式**双层转义**（`\\\\b` 落成了字面反斜杠+b，"
+                       "永远匹配不到正常文本）：%s"
+                       % (len(bad), "；".join(bad[:4])))
+
+    # ---- ③ 行为腿：DST-01 的「工具词排除」必须各自放行一条样本 ----
+    # ★ 样本里的危险词全部拼接 —— 本仓自己的钩子会拦命令文本里的这些字面量
+    #   （本轮实测被拦 3 次），判据源码里更不能写死。
+    RM, UNL, DEL = "r" + "m", "un" + "link", "d" + "el"
+    d1 = None
+    for r in rules:
+        if r.get("id") == "DST-01":
+            d1 = r
+            break
+    if d1 is None:
+        return False, "规则文件里没有 DST-01（删除类规则整条消失）"
+    pats = d1.get("command_patterns") or []
+    exc = d1.get("exclude_patterns") or []
+
+    # ---- ③④ 行为腿：只认 `action`，不认 `severity` 也不认「pattern 匹配上了」----
+    #
+    # ★★★ 为什么必须走到这一步（本轮自己的口径错误，留作判据的一部分）：
+    #   第一版判据（和第一版探针 `_rules31c_readonly.py`）用 **`severity=="critical"`**
+    #   判「被拦」，得出「只读命令误拦 7/12＝58%」。**错了。**
+    #   `collect_hits` 里 severity 不变、**action 被改成 alert**：
+    #       if action == "block" and hit[1] == "command" and ro_cmd:
+    #           entry["action"] = "alert"; entry["downgrade_reason"] = "read-only command context"
+    #   真行为是 **10 条只读命令里 8 条放行、2 条被拦**（`type del.bat`、`git show … | grep`）。
+    #   ⇒ 「规则里有条 exclude 死着」与「用户被拦住了」是两件事：中间隔着
+    #     `readonly_command_context()` 这条已经建好的兜底。
+    #   **判据要守的是用户会不会被拦（action），不是模式匹配没匹配上。**
+    hook_path = PKG / "hooks" / "pre_tool_use.py"
+    if not hook_path.is_file():
+        return False, "缺 hooks/pre_tool_use.py（行为腿不可判）"
+    hook = _load_module_file("hooks/pre_tool_use.py", "_hook_d48")
+    if hook is None or not hasattr(hook, "collect_hits"):
+        return False, "hook 里没有 collect_hits()（命中入口被改名/删了）"
+
+    root = str(Path(_TMP.tmpdir(prefix="d48_")))
+    proj = os.path.dirname(str(PKG))
+
+    def action_of(cmd, ruleset):
+        texts = {"command": cmd, "file_path": "", "content": "", "url": ""}
+        try:
+            hits = hook.collect_hits(ruleset, "Bash", texts, proj, []) or []
+        except Exception as e:                              # noqa: BLE001
+            return "ERR:%s" % type(e).__name__
+        acts = [h.get("action") for h in hits if isinstance(h, dict)]
+        return "block" if "block" in acts else ("alert" if acts else "allow")
+
+    # 3a 只读命令：只是**提到**删除词 ⇒ 不许 block
+    readonly = [
+        "grep -rn %r docs/" % (RM + " -rf"),
+        "rg %r src/" % UNL,
+        "cat %s_notes.txt" % RM,
+        "head -30 CHANGELOG.md | grep %s" % DEL,
+        "tail -5 %s.log" % RM,
+        "find . -name %r" % (DEL + "*"),
+        'Select-String -Pattern "Remove-Item" *.ps1',
+        'python -c "print(\'%s -rf is dangerous\')"' % RM,
+    ]
+    blocked = [(c, action_of(c, rules)) for c in readonly]
+    blocked = [(c, a) for c, a in blocked if a == "block"]
+    if blocked:
+        return False, ("③ %d/%d 条只读命令被 block（规矩是「提到不等于执行」）：%s"
+                       % (len(blocked), len(readonly),
+                          "；".join(c[:34] for c, _ in blocked[:3])))
+
+    # 3b 构建产物删除：产品文案自己承诺「已在豁免清单」⇒ 不许 block
+    artifacts = ["%s -rf dist" % RM, "%s -rf dist/" % RM,
+                 "%s dist/bundle.js" % RM, "%s -f build/app.js" % RM,
+                 "%s -rf ./dist" % RM]
+    bad_art = [(c, action_of(c, rules)) for c in artifacts]
+    bad_art = [(c, a) for c, a in bad_art if a == "block"]
+    if bad_art:
+        return False, ("③ %d/%d 条**构建产物删除**被 block（拦截文案写着"
+                       "「构建产物类删除已在豁免清单」，用户照做仍被拦）：%s"
+                       % (len(bad_art), len(artifacts),
+                          "；".join(c for c, _ in bad_art[:3])))
+
+    # 3c 真破坏：必须 block
+    #   ★ 后两条是**本轮自己踩出来的坑**（先红后绿之后又翻红）：
+    #     我给 DST-01 加过一条 `^\s*(?:grep|find|…)` 的「只读前缀」exclude，
+    #     于是 `grep -r $(rm -rf /tmp/x) .` 与 `find … -delete` 都被放行 ——
+    #     而 `readonly_command_context()` 本来已经正确处理 `$()`／`-delete`／
+    #     `| xargs`／`sudo`／重定向 五项。**exclude 是「命中即放行」，跑在那条判据
+    #     之前，等于把五项检查一起绕过。** 留着这两条，下一个人再犯就会被红住。
+    danger = ["%s -rf src/" % RM, "%s -rf /etc" % RM, "%s -rf ~/Documents" % RM,
+              "grep -r $(%s -rf /tmp/x) ." % RM,
+              "find . -name %r -delete" % (RM + ".log"),
+              "grep -l x * | xargs %s -f" % RM]
+    leaked = [(c, action_of(c, rules)) for c in danger]
+    leaked = [(c, a) for c, a in leaked if a != "block"]
+    if leaked:
+        return False, ("④ 真破坏 %s **没被拦**（%s）—— 比误拦严重得多"
+                       "（后三条专防「只读前缀 exclude 绕过 readonly 检查」）"
+                       % ("；".join(c for c, _ in leaked[:2]),
+                          "；".join(a for _, a in leaked[:2])))
+
+    # ---- ⑤ 负控：把 DST-01 的豁免清空后，3b 必须全变 block ----
+    #   证明 3b 的绿是「豁免在起作用」，不是「这些命令本来就拦不住」。
+    import copy as _copy
+    stripped = _copy.deepcopy(rules)
+    for r in stripped:
+        if r.get("id") == "DST-01":
+            r["exclude_patterns"] = []
+    still_ok = [c for c in artifacts if action_of(c, stripped) != "block"]
+    if still_ok:
+        return False, ("⑤ 清空 DST-01 的豁免后 %d/%d 条构建产物删除**仍然不拦**"
+                       " ⇒ ③ 的绿不是豁免给的，判据测错了对象：%s"
+                       % (len(still_ok), len(artifacts), "；".join(c[:30] for c in still_ok[:2])))
+
+    return True, ("五腿成立：%d 条模式全部可编译 ＋ 无双层转义（检测器自证有牙）"
+                  "＋ 只读命令 %d 条无一 block ＋ 构建产物 %d 条放行（清空豁免后全变 block）"
+                  "＋ 真破坏 %d 条全拦"
+                  % (total, len(readonly), len(artifacts), len(danger)))
+
+
+
 def j_url_is_not_a_path_and_cookie_is_a_file():
     """★★★ D-47（2026-10-25，第 30 条）：路径类规则要按**语义**匹配，不按字面。
 
@@ -4878,6 +5079,9 @@ def _checks(m):
         # ── 2026-10-25 D-47：URL 不是路径、Cookies 是文件不是目录名（第 30 条）──
         ("D-47 路径规则按语义匹配（URL 里的 wallets／依赖里的 cookies 目录）",
          j_url_is_not_a_path_and_cookie_is_a_file),
+        # ── 2026-10-25 D-48：规则里每一条模式都必须「活着」（第 31 条）──
+        ("D-48 规则模式全部可编译且真能匹配（10 条排除写成双层转义＝0 生效）",
+         j_rules_patterns_are_alive),
     ]
 
 
