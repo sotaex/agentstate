@@ -74,6 +74,18 @@ def chaos():
 LOCK_EVENTS = "lock_events.jsonl"
 _LOCK_EVENTS_MAX = 1024 * 1024        # 1 MB 一代；超了把上一代挪成 .1（有界 2 MB）
 
+#: 抢锁的**时间**预算（秒）。★ 0.57.0（第 24 条）：
+#:   原实现按「次数」算（`for i in range(100)`，注释写"~1.6s budget"），
+#:   但**单次尝试的耗时不受控** —— 宿主删除守卫、杀软扫描会让 `os.open` /
+#:   `os.path.getmtime` 慢到每次数百毫秒。实测最坏 `waited_ms=14432`，
+#:   而宿主超时是 zcode 10s / claude 15s，且**超时＝allow**（A-08）：
+#:   抢锁越慢，保护越可能被整个跳过。这不是概率问题，是「慢到被宿主杀掉
+#:   就等于没装」——所以预算必须按时间封顶，不能按次数。
+#:   1.6s 取的是原注释自己声明的值，给 `SLOW_BUDGET_MS=8000` 的钩子整体
+#:   预算留足余量。超预算的后果是落 sidecar（记录不丢，只是标 `unlocked`），
+#:   那远比「钩子被杀、直接放行」好。
+LOCK_BUDGET_S = 1.6
+
 
 def lock_events_path(audit_dir=None):
     """竞争事件的落点。`audit_dir` 缺省＝cwd 下的 `.psl/audit`（与 tlog 同源）。"""
@@ -200,12 +212,36 @@ def pid_alive(pid):
         return True
 
 
+def _sleep_bounded(deadline, delay):
+    """睡到 `delay`，但**绝不越过 deadline**。
+
+    为什么单独抽出来：`time.sleep(0.025)` 看起来无害，可一旦单次尝试已经很慢，
+    这个尾巴就会把总等待推出预算之外（第 24 条的 14.4s 里有一部分正是这些尾巴）。
+    """
+    left = deadline - time.time()
+    if left <= 0:
+        return
+    time.sleep(min(delay, left))
+
+
 def acquire_lock(fn):
-    """O_EXCL 锁文件 + 身份牌；拿到返回锁路径，预算耗尽返回 None。"""
+    """O_EXCL 锁文件 + 身份牌；拿到返回锁路径，预算耗尽返回 None。
+
+    ★ 0.57.0（第 24 条）：预算是**时间**（`LOCK_BUDGET_S`），不是尝试次数。
+      循环条件写成 `while time.time() < deadline`，并把每次 `sleep` 也夹在
+      deadline 内 —— 两处都做才能真的封顶。
+    """
     lock = fn + ".lock"
     delay = 0.005
     t0 = time.time()
-    for i in range(100):                            # ~1.6s budget, backoff-capped:
+    deadline = t0 + LOCK_BUDGET_S
+    tries = 0
+    # ★ 0.57.0：`steal_err` **只记第一次**。删不掉的锁会在整个预算里反复重试，
+    #   逐次留痕会在 1.6s 内刷出几十行，把 `lock_events.jsonl`（1MB 一代）
+    #   填满 —— 留痕是为了被看见，刷屏等于看不见。次数写进事件里，足够定位。
+    steal_err_noted = False
+    while time.time() < deadline:
+        tries += 1
         try:                                        # a 16-way burst queues <=300ms
             fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             try:
@@ -214,7 +250,7 @@ def acquire_lock(fn):
                                          "token": LOCK_TOKEN}).encode("utf-8"))
             finally:
                 os.close(fd)
-            tlog("acq_ok", waited_ms=round((time.time() - t0) * 1000), tries=i + 1)
+            tlog("acq_ok", waited_ms=round((time.time() - t0) * 1000), tries=tries)
             return lock
         except (FileExistsError, PermissionError):
             # PermissionError: O_EXCL on a delete-pending lockfile — contended,
@@ -224,19 +260,31 @@ def acquire_lock(fn):
                 if age > 30:                        # is a DEAD-LOCK candidate --
                     c = read_lock(lock)             # C-2: steal only when the
                     if c is None or not pid_alive(c.get("pid", -1)):
-                        os.remove(lock)             # holder is really gone; a
-                        tlog("steal", age_s=round(age, 1),
-                             pid=(c or {}).get("pid"))   # live holder keeps it.
-                        # ★ 40 格 · 并发·报：回收死锁也要让用户看得见（不只在 tlog 里）
-                        _note_lock(lock, "steal", age_s=round(age, 1),
-                                   holder=(c or {}).get("pid"))
+                        # ★ 0.57.0（第 24 条）：删得掉与删不掉**都要留痕**。
+                        #   原实现把 `_note_lock("steal")` 放在 `os.remove()` 之后，
+                        #   宿主的删除守卫一抛异常（`SAFE_DELETE_BULK_CONFIRM_REQUIRED`
+                        #   之类，非 OSError），整段 except 就把它吞了 ⇒
+                        #   「锁永远偷不掉、每次调用都白等 1.6s」在界面上完全查不到。
+                        try:
+                            os.remove(lock)
+                            tlog("steal", age_s=round(age, 1),
+                                 pid=(c or {}).get("pid"))
+                            # ★ 40 格 · 并发·报：回收死锁也要让用户看得见
+                            _note_lock(lock, "steal", age_s=round(age, 1),
+                                       holder=(c or {}).get("pid"))
+                        except Exception as e:      # noqa: BLE001
+                            if not steal_err_noted:
+                                steal_err_noted = True
+                                _note_lock(lock, "steal_err", age_s=round(age, 1),
+                                           holder=(c or {}).get("pid"),
+                                           err=type(e).__name__, at_try=tries)
             except Exception:
                 # ★ 0.34.1 修：原为 `except OSError`。宿主删除守卫会抛出**非 OSError**
                 #   的异常（实测 `SAFE_DELETE_BULK_CONFIRM_REQUIRED`）⇒ 穿透 ⇒ 抢锁
                 #   路径当场崩。抢锁失败本来就该退化成"拿不到锁"（下面继续重试），
                 #   不该崩 —— 放宽到 Exception 与下方 release_lock 同一纪律。
                 pass
-            time.sleep(delay)
+            _sleep_bounded(deadline, delay)
             delay = min(delay * 1.25, 0.025)
         except Exception:
             # ★ 0.34.1 修（与 release_lock 同一纪律）：抢锁**失败必须退化成"拿不到锁"**，
@@ -244,14 +292,15 @@ def acquire_lock(fn):
             #   实测（本机宿主删除守卫）：`os.open(lock, O_EXCL)` 抛的是**非
             #   FileExistsError/PermissionError** ⇒ 穿透上面的窄 except ⇒
             #   `append_chained` 整个抛出去 ⇒ 钩子 rc=1（记录没写成）。
-            #   放宽后的语义：**继续重试**；100 次用尽 ⇒ 返回 None ⇒
+            #   放宽后的语义：**继续重试**；预算用尽 ⇒ 返回 None ⇒
             #   `append_chained` 落 sidecar（记录不丢，只是标 `chain:"unlocked"`）。
-            time.sleep(delay)
+            _sleep_bounded(deadline, delay)
             delay = min(delay * 1.25, 0.025)
-    tlog("acq_timeout", waited_ms=round((time.time() - t0) * 1000))
+    tlog("acq_timeout", waited_ms=round((time.time() - t0) * 1000), tries=tries)
     # ★ 40 格 · 并发·报：预算耗尽 ⇒ 落 sidecar（记录不丢）**且**留一行可见读数。
     #   否则"两个守卫同时起来"只存在于一个默认关闭的诊断开关里。
-    _note_lock(lock, "acq_timeout", waited_ms=round((time.time() - t0) * 1000))
+    _note_lock(lock, "acq_timeout", waited_ms=round((time.time() - t0) * 1000),
+               tries=tries)
     return None
 
 
@@ -276,8 +325,12 @@ def release_lock(lock):
     if c and c.get("token") == LOCK_TOKEN:
         try:
             os.remove(lock)
-        except Exception:
+        except Exception as e:                      # noqa: BLE001
             tlog("remove_err")
+            # ★ 0.57.0（第 24 条）：`tlog` 默认关（`ANTINEL_LOCK_TELEMETRY=1` 才写）
+            #   ⇒ 「锁删不掉」在界面上永远不可见，而它的症状正是「接下来每一次
+            #   调用都白等到预算耗尽」。改走 `lock_events.jsonl`（用户可见）。
+            _note_lock(lock, "release_err", err=type(e).__name__)
     else:
         tlog("release_skip")                        # 锁已易主：留给它的主人
 

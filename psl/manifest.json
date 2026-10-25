@@ -57,7 +57,7 @@
   "assets/logo/antinel.ico": "sha256:0322ec8b3c72f49a61739d4b25785a8bf9ed0ba66fe692ff173a6d9019ed1e1a",
   "assets/logo/logo.svg": "sha256:bc4cae713958470983db5df1aac7f93f4e29ad245a6abbfc0570959405a8e63e",
   "assets/sounds/alert.wav": "sha256:f5e300918c4d5c8108d62a0de7e10a0a4c8b328dbab3324c43cc484ff7f3ffaa",
-  "audit_chain.py": "sha256:a501da7b3bb7b65e9fb2da0515175a5a2e547540d73c4b331b292300e712ba56",
+  "audit_chain.py": "sha256:f3c664394aa9c491da0b0f761f3fa0b3861b489e028f7cee0540510462ba040b",
   "challenge/LICENSE": "sha256:daf815707d3efcea917980e270edc57152da8ac3a7a3418e5c1d8982ccad79c7",
   "challenge/README.md": "sha256:298396eabc50aef0de8a68ee1dc4cf2bb036365c5e32d8f4164e6baf29176bd4",
   "challenge/attack.py": "sha256:1880888865cad299508661bff4ddf4314ef3bf13c9b2d49a96e8199232fa56d2",

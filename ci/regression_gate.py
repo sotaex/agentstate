@@ -1899,6 +1899,201 @@ def j_rules_snapshot_drift():
                   "包内 version=%s" % pkg_ver)
 
 
+def j_lock_budget_is_wallclock():
+    """★★ D-43（2026-10-25）：抢锁预算必须是**时间**，不许按次数（行动清单第 24 条）。
+
+    事故（实测读数，不是推演）：`acquire_lock` 原本是 `for i in range(100)`，
+    注释写「~1.6s budget」。但**单次尝试的耗时不受控** —— 宿主删除守卫、
+    杀软扫描会让 `os.open` / `os.path.getmtime` 慢到每次数百毫秒。
+    实测最坏 `waited_ms=14432`，而宿主超时是 zcode 10s / claude 15s，
+    且**超时＝allow**（A-08）：钩子慢到被宿主杀掉 ＝ 保护没装，账本上还看不出来。
+
+    行为腿（真调用，不纸面推理）：把 `LOCK_BUDGET_S` 改成 0.25s 与 0.6s，
+    占住锁（持有者是自己 ⇒ 活锁，偷不走），实测耗时必须跟着预算走。
+      · 旧实现没有 `LOCK_BUDGET_S` ⇒ 显式判红（AttributeError 在闸门里**不算红**，
+        不能让它以崩溃蒙过去）；
+      · 耗时明显超出预算 ⇒ 预算没生效；
+      · 耗时远小于预算 ⇒ 它根本没在重试（另一种假绿）。
+    """
+    import tempfile
+    import time
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ac_path = os.path.join(root, "audit_chain.py")
+    if not os.path.isfile(ac_path):
+        return False, "① 缺文件：audit_chain.py"
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    try:
+        import audit_chain as ac
+    except Exception as exc:                                   # noqa: BLE001
+        return False, "① audit_chain 导入失败：%s" % exc
+
+    if not hasattr(ac, "LOCK_BUDGET_S"):
+        return False, ("① audit_chain 没有 LOCK_BUDGET_S —— 预算还是按尝试次数算的"
+                       "（次数不是时间：单次多慢都能把总等待推过宿主超时）")
+    budget = ac.LOCK_BUDGET_S
+    if not (0 < budget <= 8):
+        return False, ("① LOCK_BUDGET_S=%r 不在 (0, 8] —— 超过钩子整体预算 "
+                       "SLOW_BUDGET_MS=8000 就没有余量了" % (budget,))
+    src = open(ac_path, encoding="utf-8").read()
+    body = src.split("def acquire_lock")[1].split("\ndef ")[0]
+    if "range(100)" in body:
+        return False, "① acquire_lock 里仍有 range(100) 次数上界 —— 时间判断被次数夹住了"
+
+    old = ac.LOCK_BUDGET_S
+    tmp = tempfile.mkdtemp(prefix="d43_")
+    try:
+        fn = os.path.join(tmp, "x.jsonl")
+        lock = fn + ".lock"
+        # 占住锁：pid 是**自己**（活着）⇒ pid_alive 为真 ⇒ 不会被当死锁偷走；
+        # mtime 是刚写的 ⇒ age < 30 ⇒ 连 steal 分支都不进。
+        with open(lock, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"pid": os.getpid(), "ts": 0, "token": "other"}))
+
+        seen = []
+        for b in (0.25, 0.6):
+            ac.LOCK_BUDGET_S = b
+            t0 = time.time()
+            got = ac.acquire_lock(fn)
+            el = time.time() - t0
+            seen.append((b, el))
+            if got is not None:
+                return False, ("② 预算 %.2fs：锁被占着却拿到了（%r）—— 行为腿前提不成立"
+                               % (b, got))
+            if el > b + 0.9:
+                return False, ("② 预算 %.2fs 却等了 %.2fs —— 预算没封顶"
+                               % (b, el))
+            if el < b * 0.5:
+                return False, ("② 预算 %.2fs 只等了 %.2fs —— 它没有真的在重试"
+                               % (b, el))
+
+        # 两档必须**不同**：只测一档的话，「恰好 sleep 0.25s」也能过。
+        if seen[1][1] - seen[0][1] < 0.15:
+            return False, ("② 预算 0.25→0.6 耗时只差 %.2fs（%.2f vs %.2f）—— "
+                           "耗时不是跟着预算走的" % (seen[1][1] - seen[0][1],
+                                                      seen[0][1], seen[1][1]))
+    finally:
+        ac.LOCK_BUDGET_S = old
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    return True, ("两腿成立：LOCK_BUDGET_S=%.2fs 且 ≤8s ＋ 行为（预算 0.25s→耗时 %.2fs、"
+                  "0.6s→耗时 %.2fs，两档分开走）"
+                  % (budget, seen[0][1], seen[1][1]))
+
+
+def j_lock_failures_leave_trace():
+    """★★ D-44（2026-10-25）：锁的三个失败点必须留痕，且不能只写在诊断开关后面。
+
+    原状（行动清单第 24 条）：
+      · `steal` 的留痕写在 `os.remove()` **之后** —— 宿主的删除守卫一抛异常
+        （`SAFE_DELETE_BULK_CONFIRM_REQUIRED` 之类，非 OSError），整段被 `except`
+        吞掉，于是「锁永远偷不掉、每次调用都白等一整份预算」零痕迹；
+      · `release_err` 只走 `tlog()`，而 `tlog` 要 `ANTINEL_LOCK_TELEMETRY=1` 才写。
+
+    三腿：
+      ① `release_err`：token 匹配但删不掉 ⇒ `lock_events.jsonl` 里必须有；
+      ② `steal_err`：锁老、持有者已死、删不掉 ⇒ 必须有；
+      ③ 对照：不注入失败时**不许**出现这两类事件（否则「写就响」，读数没意义）。
+    """
+    import tempfile
+    import time
+    from unittest import mock
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    try:
+        import audit_chain as ac
+    except Exception as exc:                                   # noqa: BLE001
+        return False, "① audit_chain 导入失败：%s" % exc
+
+    def _events(d):
+        p = os.path.join(d, ac.LOCK_EVENTS)
+        if not os.path.isfile(p):
+            return []
+        out = []
+        for ln in open(p, encoding="utf-8", errors="replace"):
+            ln = ln.strip()
+            if not ln:
+                continue
+            try:
+                out.append(json.loads(ln))
+            except Exception:                                  # noqa: BLE001
+                continue
+        return out
+
+    tmp = tempfile.mkdtemp(prefix="d44_")
+    old_budget = getattr(ac, "LOCK_BUDGET_S", None)
+    try:
+        # ── ① release_err ────────────────────────────────────────────────
+        d1 = os.path.join(tmp, "release")
+        os.makedirs(d1)
+        fn1 = os.path.join(d1, "x.jsonl")
+        lock1 = fn1 + ".lock"
+        with open(lock1, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"pid": os.getpid(), "ts": time.time(),
+                                 "token": ac.LOCK_TOKEN}))
+        with mock.patch("os.remove", side_effect=PermissionError("guard")):
+            ac.release_lock(lock1)
+        ev1 = [e.get("evt") for e in _events(d1)]
+        if "release_err" not in ev1:
+            return False, ("① 锁删不掉（宿主删除守卫）却没有 release_err —— "
+                           "事件实际是 %r；症状将是「之后每次都白等预算」而界面零痕迹"
+                           % (ev1,))
+
+        # ── ② steal_err ──────────────────────────────────────────────────
+        d2 = os.path.join(tmp, "steal")
+        os.makedirs(d2)
+        fn2 = os.path.join(d2, "x.jsonl")
+        lock2 = fn2 + ".lock"
+        with open(lock2, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"pid": 999999, "ts": 0, "token": "dead"}))
+        old_time = time.time() - 120            # age > 30 ⇒ 死锁候选
+        os.utime(lock2, (old_time, old_time))
+        if old_budget is not None:
+            ac.LOCK_BUDGET_S = 0.2
+        with mock.patch("os.remove", side_effect=PermissionError("guard")):
+            ac.acquire_lock(fn2)
+        ev2 = [e.get("evt") for e in _events(d2)]
+        if "steal_err" not in ev2:
+            return False, ("② 死锁删不掉却没有 steal_err —— 事件实际是 %r；"
+                           "原实现把留痕写在 remove 之后，正好被吞在这里" % (ev2,))
+        # 留痕 ≠ 刷屏：删不掉的锁会在整个预算里反复重试，逐次记会把 1MB 的
+        # lock_events.jsonl 填满，于是「真信号」被自己的噪音淹掉。
+        n_steal_err = ev2.count("steal_err")
+        if n_steal_err > 2:
+            return False, ("② 一次抢锁写了 %d 条 steal_err —— 留痕要节流"
+                           "（只记第一次，次数写进事件里），否则会刷满事件文件"
+                           % n_steal_err)
+
+        # ── ③ 对照：不注入失败时不许出现这两类事件 ──────────────────────
+        d3 = os.path.join(tmp, "clean")
+        os.makedirs(d3)
+        fn3 = os.path.join(d3, "x.jsonl")
+        lock3 = fn3 + ".lock"
+        with open(lock3, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"pid": os.getpid(), "ts": time.time(),
+                                 "token": ac.LOCK_TOKEN}))
+        ac.release_lock(lock3)                  # 正常释放，应成功
+        ev3 = [e.get("evt") for e in _events(d3)]
+        bad = [e for e in ev3 if e in ("release_err", "steal_err")]
+        if bad:
+            return False, ("③ 没有注入失败却报了 %r —— 那是「写就响」，"
+                           "上面两条红起来就分不清真假" % (bad,))
+        if os.path.exists(lock3):
+            return False, "③ 正常释放后锁文件还在 —— 对照腿本身不成立"
+    finally:
+        if old_budget is not None:
+            ac.LOCK_BUDGET_S = old_budget
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    return True, ("三腿成立：release_err 与 steal_err 各留一行 ＋ 无注入时不误报"
+                  "（事件落在 lock_events.jsonl，不看诊断开关）")
+
+
 def j_window_title_format():
     """★★ FZ-002（2026-10-16）：窗口标题形态契约（output 类冻结执法）。
 
@@ -4265,6 +4460,11 @@ def _checks(m):
         # ── 2026-10-25 D-42：规则快照旧了却零提示（行动清单第 32 条）──
         ("D-42 规则快照落差必须说出来（副本落后 ⇒ 规则修正在机上不生效）",
          j_rules_snapshot_drift),
+        # ── 2026-10-25 D-43／D-44：锁预算按时间 ＋ 三个失败点留痕（第 24 条）──
+        ("D-43 抢锁预算按时间封顶（按次数 ⇒ 单次慢就能把钩子推出宿主超时）",
+         j_lock_budget_is_wallclock),
+        ("D-44 锁的 steal/release 失败必须留痕（不许只写在诊断开关后面）",
+         j_lock_failures_leave_trace),
     ]
 
 

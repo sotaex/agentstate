@@ -8,7 +8,7 @@
   "value": "current",
   "derivation": "auto",
   "reason": null,
-  "checkedAt": "2026-10-25T20:03:47+08:00",
+  "checkedAt": "2026-10-25T20:45:27+08:00",
   "note": "re-derive any time: python -m tools.antinel_verify (--manifest for all 24 shipped files); which assertions failed: discrimination.failed[]"
  },
  "scope": {
@@ -124,14 +124,14 @@
   "scripts/verification_tests.py": "sha256:36042dcf20298f53d36fc2c8dfa5e9fa872acad2ec4c00d115cf584d858b2d30",
   "session_dna.py": "sha256:38b2bd765fdf2308fa698eb507e53c4ba7fbe2bf11c94216d95ad5dd116fb205",
   "transcript_reader.py": "sha256:c0ce99c5bdfb255f170ca744c011ae64ceb9569d1c9dd8efc1a2c096ff89dc1c",
-  "audit_chain.py": "sha256:a501da7b3bb7b65e9fb2da0515175a5a2e547540d73c4b331b292300e712ba56",
+  "audit_chain.py": "sha256:f3c664394aa9c491da0b0f761f3fa0b3861b489e028f7cee0540510462ba040b",
   "antinel.py": "sha256:5a7eee7463076afe34940c41458b22b3f4ac3b7a592e29a05fa858c2e5686e42",
   "hub.py": "sha256:edcb1b94194e551d5b0023749ae5417e67729b22eb391198fcae74a906668c08",
   "tools/enforce_probe.py": "sha256:c82cb457481a5e5a70c932b66c8c909f8050024f700f88b454bbea66992349ad"
  },
  "run": {
-  "started_at": "2026-10-25T19:54:20+0800",
-  "duration_ms": 567953,
+  "started_at": "2026-10-25T20:38:08+0800",
+  "duration_ms": 439221,
   "duration_note": "wall-clock of a subprocess fan-out suite; machine- and load-dependent, not comparable across environments",
   "executor": "scripts/run_harness.py",
   "exit_code": 0,
