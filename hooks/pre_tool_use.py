@@ -1327,12 +1327,33 @@ def path_whitelisted(file_path, project_root, prefixes):
     # Primary: lexical (normalize both sides, then startswith)
     norm_prefixes = [_norm_prefix(x) for x in prefixes]
     cands = [file_path.replace("\\", "/").lower()]
-    try:
-        rel = os.path.relpath(os.path.abspath(file_path), project_root).replace("\\", "/").lower()
-        if not rel.startswith("../"):
-            cands.append(rel)
-    except Exception:
-        pass
+    # ★★ 2026-10-25（第 29 条）：**同一条路径的不同写法都必须能算出相对路径**。
+    #   原来只算 `relpath(abspath(file_path), project_root)` 一次 —— 于是当
+    #   file_path 与 cwd 用的是"同一个目录的两种写法"时，relpath 会一路 `../`
+    #   从而被上面那条 `not rel.startswith("../")` 丢弃，词法匹配随之失败。
+    #   这不是理论风险：macOS 上 `/var/folders/...`（tempfile 给的未解析形式）
+    #   与 `os.getcwd()` 返回的 `/private/var/folders/...`（已解析）正是这种关系
+    #   ⇒ 远端 CI 的 macos py3.11 / py3.12 **各红一条 F-06**（248/249），
+    #   而 Windows 全绿 —— 所以这条缺陷在本机跑一百遍也看不见。
+    #   Windows 上的等价触发 = 8.3 短名／目录联接，实测四种写法：
+    #     cwd=长  fp=长 → 放行 ｜ cwd=短 fp=短 → 放行（两边同形）
+    #     cwd=短  fp=长 → **拦** ｜ cwd=长 fp=短 → **拦**（两边异形）
+    #   （探针 output/_f06_form_probe.py，真钩子子进程，非进程内自测）
+    #   ⇒ 候选改成 (file 的两种写法) × (root 的两种写法) 四种组合。
+    #   ★ 安全方向：这些候选只是**同一对路径的等价拼写**，不是新的可达范围；
+    #     放行之后仍然要过下面的 realpath 否决 —— 否决口径一个字节都没放松。
+    _rp_f = _safe_realpath(file_path)
+    _rp_root = _safe_realpath(project_root)
+    for _f in (file_path, _rp_f):
+        for _r in (project_root, _rp_root):
+            if not _f or not _r:
+                continue
+            try:
+                rel = os.path.relpath(os.path.abspath(_f), _r).replace("\\", "/").lower()
+            except Exception:
+                continue
+            if rel != ".." and not rel.startswith("../") and rel not in cands:
+                cands.append(rel)
     released = any(c.startswith(np) for c in cands for np in norm_prefixes if np)
     if released:
         # 0.22.0 (R-19, reopened when the load_policy NameError fix brought the
@@ -1348,7 +1369,7 @@ def path_whitelisted(file_path, project_root, prefixes):
         # promise is being made. A veto simply falls through to the normal
         # DST-02 block, which is audited like any other block -- recorded,
         # never silent.
-        rp = _safe_realpath(file_path)
+        rp = _rp_f
         if rp and rp.replace("\\", "/").lower() != file_path.replace("\\", "/").lower():
             rp_n = rp.replace("\\", "/").lower().rstrip("/") + "/"
             for x in prefixes:

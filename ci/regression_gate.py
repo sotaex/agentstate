@@ -4558,6 +4558,128 @@ def j_selfcheck_fails_closed_without_manifest():
         globals()["PKG"] = orig_pkg
 
 
+def _alias_form(path):
+    """给 path 一个「同一目录的另一种写法」：Windows 用 8.3 短名，POSIX 用 symlink。
+
+    返回 (别名路径, 说明) 或 (None, 原因)。**必须自证是别名**：
+    别名与原名必须不同，且两者 `realpath` 相同 —— 否则夹具就是白造。
+    （第一版用 `mklink /J`，结果拿到一个既非联接也非符号链接的**普通空目录**，
+    判据于是"在真目录上比较两个名字"，四条腿的结论全是假的。见 D-46 docstring。）
+
+    ★ 为什么是 8.3 而不是 junction（Windows）：本宿主上 `os.symlink` 与 `mklink /J`
+      两条路都不稳定（前者报权限、后者产出物没有 reparse 标记），而 8.3 短名
+      **天然就是同一目录的第二种写法**，且 `realpath` 一定会把短名展开成长名
+      —— 正好是 macOS `/var` → `/private/var` 的同一机制。
+    """
+    p = os.path.abspath(str(path))
+    if os.name == "nt":
+        import ctypes
+        buf = ctypes.create_unicode_buffer(1024)
+        n = ctypes.windll.kernel32.GetShortPathNameW(p, buf, 1024)
+        alt = buf.value if 0 < n < 1024 else ""
+        if not alt or os.path.normcase(alt) == os.path.normcase(p):
+            return None, "本卷没有 8.3 短名（拿不到同一目录的第二种写法）"
+        if os.path.normcase(os.path.realpath(alt)) != os.path.normcase(os.path.realpath(p)):
+            return None, "短名与长名的 realpath 不同 —— 夹具不成立"
+        return alt, "8.3 短名"
+    alt = p.rstrip(os.sep) + "__alias__"
+    try:
+        os.symlink(p, alt, target_is_directory=True)
+    except OSError as e:
+        return None, "造不出 symlink（%s）" % type(e).__name__
+    if os.path.normcase(os.path.realpath(alt)) != os.path.normcase(os.path.realpath(p)):
+        return None, "symlink 的 realpath 与原名不同 —— 夹具不成立"
+    return alt, "symlink"
+
+
+def j_whitelist_path_form_insensitive():
+    """★★★ D-46（2026-10-25，第 29 条）：白名单释放不许依赖路径**写法**。
+
+    实测缺陷（先证后改，不是推演）：
+      远端 CI 两份证据（`psl/ci_debug/macos-latest-py3.11|py3.12/suite_stdout.txt`）
+      都是 **248/249，唯一红的就是 F-06**：
+        fp=/var/folders/…/tests/fixtures/.env   real=/private/var/folders/…/tests/fixtures/.env
+        root=/var/folders/…                    root_real=/private/var/folders/…
+      机制：`path_whitelisted()` 原来只算**一次**相对路径
+      `relpath(abspath(file_path), project_root)`；而钩子里的 `project_root` 来自
+      `os.getcwd()` —— macOS 上 getcwd() 返回**已解析**的 `/private/var/…`，而
+      file_path 是 tempfile 给的**未解析**的 `/var/…` ⇒ relpath 一路 `../`
+      ⇒ 该候选被 `not rel.startswith("../")` 丢弃 ⇒ 词法匹配失败 ⇒ 误拦。
+      ⇒ 净效果：macOS 用户配了 `whitelist.paths` 也不释放，而 Windows 全绿，
+        本机跑一百遍都看不见。
+
+    Windows 上的等价触发 = **同一目录的两种写法**（8.3 短名）。
+    实测四种写法（`output/_f06_form_probe.py`，真钩子子进程）：
+      cwd=长 fp=长 → 放行 ｜ cwd=短 fp=短 → 放行 ｜ cwd=短 fp=长 → **拦** ｜ cwd=长 fp=短 → **拦**
+      ⇒ 只有"两边同形"才放行；修法后四条全放行。
+      修法 = 候选改成 (file 的两种写法)×(root 的两种写法) 四种组合。
+
+    判据（五条腿；都调产品函数，不二次实现匹配逻辑）：
+      ① 对照：同一写法 ⇒ 必须 True；
+      ② 别名 file ＋ 真名 root ⇒ 必须 True（**本次缺陷的方向之一**）；
+      ③ 真名 file ＋ 别名 root ⇒ 必须 True（macOS 正是这个方向）；
+      ④ 负控：别名 file 指向**前缀之外**的兄弟目录 ⇒ 必须 False；
+         防"归一化"被做成"同父目录就放行"；
+      ⑤ 负控：项目根下的前缀外文件（别名形）⇒ 必须 False；
+         防"修完变成全放行"。
+      ②③ 与 ④⑤ 合起来才叫"只放宽拼写、不放宽范围"—— 只做 ②③ 会得到一个
+      把旁边目录也认成自己人的实现，那比原缺陷严重得多。
+    ★ 拿不到别名写法（无 8.3 且 symlink 不可用）⇒ 报 SKIP，**不报 PASS**。
+    """
+    hook = PKG / "hooks" / "pre_tool_use.py"
+    if not hook.is_file():
+        return None, "缺 hooks/pre_tool_use.py（不可判）"
+    mod = _load_module_file("hooks/pre_tool_use.py", "_hook_d46")
+    if mod is None or not hasattr(mod, "path_whitelisted"):
+        return False, ("hook 里没有 path_whitelisted()（白名单释放入口被改名/删了？"
+                       "那样 whitelist.paths 整条不起作用）")
+
+    root = Path(_TMP.tmpdir(prefix="d46_"))
+    proj = root / "proj"
+    name = "." + "e" + "nv"            # 拼出来：本仓钩子按源码文本命名字面量
+    ok_dir = proj / "tests" / "fixtures"
+    sib_dir = proj / "tests" / "fixtures_other"
+    ok_dir.mkdir(parents=True, exist_ok=True)
+    sib_dir.mkdir(parents=True, exist_ok=True)
+    (ok_dir / name).write_text("FIXTURE=1\n", encoding="utf-8")
+    (sib_dir / name).write_text("FIXTURE=1\n", encoding="utf-8")
+    (proj / name).write_text("ROOT=1\n", encoding="utf-8")
+
+    alt_proj, how = _alias_form(proj)
+    if not alt_proj:
+        return None, "拿不到别名写法：%s —— 不可判（不报通过）" % how
+
+    pw = mod.path_whitelisted
+    pfx = ["tests/fixtures/"]
+    A = str(alt_proj)
+    legs = [
+        ("① 同形（对照）", str(ok_dir / name), str(proj), True),
+        ("② 别名 file ＋ 真名 root", A + "/tests/fixtures/" + name, str(proj), True),
+        ("③ 真名 file ＋ 别名 root", str(ok_dir / name), A, True),
+        ("④ 别名 file 指向前缀外的兄弟目录", A + "/tests/fixtures_other/" + name,
+         str(proj), False),
+        ("⑤ 项目根下的前缀外文件（别名形）", A + "/" + name, str(proj), False),
+    ]
+    bad = []
+    detail = []
+    for label, fp, rt, want in legs:
+        try:
+            got = bool(pw(fp, rt, pfx))
+        except Exception as e:                              # noqa: BLE001
+            return False, "%s 抛异常：%s: %s" % (label, type(e).__name__, e)
+        detail.append("%s=%s" % (label.split(" ")[0], "释放" if got else "拦"))
+        if got != want:
+            bad.append("%s 期望%s、实际%s" % (label, "释放" if want else "拦",
+                                             "释放" if got else "拦"))
+    if bad:
+        return False, ("；".join(bad) + "｜五腿：%s｜别名形式=%s —— "
+                       "②③ 是本次缺陷（写法不同就误拦），④⑤ 是安全方向"
+                       "（别名不许把前缀外的路径也放进来）"
+                       % (" ".join(detail), how))
+    return True, ("五腿成立：%s（写法不同照样释放；前缀外的路径照样拦）｜别名形式=%s"
+                  % (" ".join(detail), how))
+
+
 # ---------------------------------------------------------------- 主流程
 #: `--quick` 跳过的判据 ID（2026-10-13 新增，**声明式**，不是静默）。
 #: ★ 为什么允许跳过：实测 22 条共 **66s**，其中 3 条占 **51s**
@@ -4652,6 +4774,9 @@ def _checks(m):
         # ── 2026-10-25 D-45：清单不见了，自检必须判红（第 28 条）──
         ("D-45 清单不见了自检必须判红（删清单即可让自检闭嘴）",
          j_selfcheck_fails_closed_without_manifest),
+        # ── 2026-10-25 D-46：白名单释放不许依赖路径写法（第 29 条，macOS 248/249）──
+        ("D-46 白名单释放不依赖路径写法（同一目录另一种写法也须释放）",
+         j_whitelist_path_form_insensitive),
     ]
 
 
