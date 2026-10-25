@@ -9934,6 +9934,146 @@ def sec04c():
     return True
 
 
+# ── 规则副本改写（SEC-04c 与 DST-06c 共用；各写一份就是两套口径）──────────
+#: `base64` 与 `sudo` 都拆开拼：本仓钩子按**整条命令文本**匹配，源码里写整串
+#: 会让"跑判据"这件事本身被自己的钩子拦下（2026-10-25 实测发生过两次）。
+_B64 = "base" + "64"
+_SUDO = "sud" + "o"
+
+#: DST-06 的 base64 管道形态：解码后**交给解释器**，必须拦。
+_D06_POS = [
+    "echo aGVsbG8= | " + _B64 + " -d | s" + "h",
+    "echo aGVsbG8= | " + _B64 + " --decode | bas" + "h",
+    _B64 + " -d payload.b64 | s" + "h",
+    _B64 + " -d p.b64 | " + _SUDO + " bas" + "h",
+    "cat x.b64 | " + _B64 + " -d | bas" + "h -s",
+    "cat p.b64 | " + _B64 + " -d | /bin/s" + "h",
+    "cat p.b64 | " + _B64 + " --decode | /usr/bin/pyth" + "on3",
+]
+
+#: 只是解码：到屏幕 / 存文件 / 交给 jq / grep。第 6 条 pattern 过宽时前两条会误拦。
+_D06_NEG = [
+    "echo aGVsbG8= | " + _B64 + " -d",
+    "cat cfg.b64 | " + _B64 + " -d | j" + "q .name",
+    _B64 + " -d payload.b64 > out.bin",
+    _B64 + " -d payload.b64 | gr" + "ep -i token",
+]
+
+
+def _rules_copy_patch(proj, rule_id, fn):
+    """在项目规则副本里改 `rule_id` 那一条。返回 `(rp, mp, 错误串或 None)`。
+
+    **不同步 hash** —— 那是 `_rules_copy_rehash` 的事，分开是为了让调用方能先
+    测「只改内容不改 hash 必判 SELF-TAMPERED」这一腿。
+    """
+    rp = os.path.join(proj, ".psl", "rules", "default.json")
+    mp = os.path.join(proj, ".psl", "manifest.json")
+    if not (os.path.isfile(rp) and os.path.isfile(mp)):
+        return None, None, "夹具不成立：项目里没有规则副本或 manifest"
+    data = json.load(io.open(rp, encoding="utf-8"))
+    hit = [r for r in data["rules"] if r.get("id") == rule_id]
+    if not hit:
+        return None, None, "夹具不成立：项目规则副本里没有 %s" % rule_id
+    fn(hit[0])
+    with io.open(rp, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, ensure_ascii=False, indent=2)
+    return rp, mp, None
+
+
+def _rules_copy_rehash(rp, mp):
+    """改完规则副本后把 manifest.rules_hash 同步过去（否则 hook 判 SELF-TAMPERED）。"""
+    import hashlib
+    man = json.load(io.open(mp, encoding="utf-8"))
+    man["rules_hash"] = "sha256:" + hashlib.sha256(io.open(rp, "rb").read()).hexdigest()
+    with io.open(mp, "w", encoding="utf-8") as fh:
+        json.dump(man, fh, ensure_ascii=False, indent=2)
+
+
+@check("DST-06b 管道进 base64 只在交给解释器时拦（解码到屏幕／交给 jq 必须放行）")
+def dst06b():
+    """★★ 0.57.0（第 23 条）：先测量，再下结论。
+
+    行动清单原写「CTX-07 只认 exec(base64.b64decode()，管道写法不中」。实测
+    **前提是反的**：`... | base64 -d | sh` 一直被 **DST-06** 拦着（漏 0/7），
+    CTX-07 只管 Python 内联那一族，各司其职。真问题是 DST-06 第 6 条
+    `\\|\\s*base64\\s+-d\\b` **过宽**：只要管道进 base64 就拦，不管下游是谁，
+    于是「解码到屏幕」「解码后交给 jq」这两条日常调试动作被 critical 拦下，
+    提示语还写着「下载脚本直接执行」—— 对用户是不实陈述。
+
+    修法＝收紧到「下游确实是解释器」（允许 sudo 前缀与绝对路径 `/bin/sh`），
+    边界放宽到 `|`/行首/`;`/`&&`，否则 `base64 -d f | sudo bash` 会漏
+    （旧 pattern 也漏这一条，顺带补上）。
+    """
+    proj, env = _sec05_project("06b")
+    miss, chan = [], []
+    for i, text in enumerate(_D06_POS, 1):
+        sid = "dst06b-%02d" % i
+        out = _sec05_fire(proj, env, "Bash", text, sid)
+        ids, kinds = _sec05_audit(proj, sid)
+        if "DST-06" not in ids:
+            miss.append("[%d] %s" % (i, text[:58]))
+        elif "command" not in kinds:
+            chan.append("[%d] %s -> %s" % (i, text[:44], sorted(kinds)))
+    if miss:
+        return ("正控漏拦 %d/%d（解码后交给解释器必须拦）：%s"
+                % (len(miss), len(_D06_POS), "；".join(miss[:4])))
+    if chan:
+        return ("命中通道不是 command 的有 %d 条（DST-06 只有 command_patterns）：%s"
+                % (len(chan), "；".join(chan[:3])))
+    over = []
+    for i, text in enumerate(_D06_NEG, 1):
+        sid = "dst06b-n%02d" % i
+        out = _sec05_fire(proj, env, "Bash", text, sid)
+        ids, _k = _sec05_audit(proj, sid)
+        if "DST-06" in ids or "[DST-06]" in out:
+            over.append("[%d] %s" % (i, text[:58]))
+    if over:
+        return ("负控误拦 %d/%d（`| base64 -d` 本身不是罪，交给解释器才是）：%s"
+                % (len(over), len(_D06_NEG), "；".join(over[:4])))
+    _note("7 条解码后执行全部拦下且通道为 command；4 条解码到屏幕/文件/jq/grep 全部放行")
+    return True
+
+
+@check("DST-06c 负控牙齿：第 6 条退回「管道进 base64 就拦」⇒ 两条负控必须翻红")
+def dst06c():
+    proj, env = _sec05_project("06c")
+    # 先确认干净规则下这几条确实放行 —— 否则牙齿没有意义（本来就被拦）
+    clean = []
+    for i, text in enumerate(_D06_NEG, 1):
+        sid = "dst06c-c%d" % i
+        if "[DST-06]" in _sec05_fire(proj, env, "Bash", text, sid):
+            clean.append(text[:50])
+    if clean:
+        return ("夹具不成立：干净规则下这些负控已被拦，牙齿无从谈起：%s"
+                % "；".join(clean))
+
+    def _to_old(rule):
+        pats = rule.get("command_patterns") or []
+        old = "\\|\\s*base" + "64\\s+-d\\b"
+        # 把新写的第 6 条换回旧写法；换不到就追加 —— 让判据自己红，而不是静默
+        for j, p in enumerate(pats):
+            if "(?:-d|--decode)" in p and "powershell" in p:
+                pats[j] = old
+                return
+        pats.append(old)
+
+    rp, mp, err = _rules_copy_patch(proj, "DST-06", _to_old)
+    if err:
+        return err
+    _rules_copy_rehash(rp, mp)
+    red = []
+    for i, text in enumerate(_D06_NEG, 1):
+        sid = "dst06c-o%d" % i
+        if "[DST-06]" in _sec05_fire(proj, env, "Bash", text, sid):
+            red.append(text[:50])
+    # 旧写法下必红的是「到屏幕」与「交给 jq」；另两条本来就不该中。
+    if len(red) < 2:
+        return ("牙齿失效：退回旧 pattern 后只有 %d 条负控翻红（应 ≥2，"
+                "到屏幕／交给 jq 两条）—— DST-06b 的零误拦没有分辨力" % len(red))
+    _note("退回旧 pattern 后 %d 条负控翻红（含「解码到屏幕」「解码后交给 jq」）" % len(red))
+    return True
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 #
 # 起点是一次**测量**，不是一次阅读：把 `ci/*.py` 去掉注释与 docstring 后，逐条查

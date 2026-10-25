@@ -308,7 +308,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
     - `\bbash\s+<\s*\(curl`
     - `\bcurl\b[^\n]{0,200}\b(-o|\-\-output)\s+[^\n]{0,80}\.(sh|ps1)\b[^\n]{0,80}[;&|]\s*(sh|bash|\.)`
     - `\bbase64\b[^\n]{0,60}(-d|--decode)[^\n]{0,80}\|\s*(sh|bash|python)`
-    - `\|\s*base64\s+-d\b`
+    - `(?:\||^|;|&&)\s*base64\s+(?:-d|--decode)\b[^\n]{0,80}\|\s*(?:sudo\s+)?(?:[\w./\\-]*[\\/])?(?:sh|bash|zsh|dash|python[0-9.]*|powershell)\b`
     - `(?:\[char\]\d+\+){2,}`
 - exclude_patterns: `localhost`, `127\.0\.0\.1`
 - remediation: Download and inspect the script first; confirm the source is trusted before executing.
