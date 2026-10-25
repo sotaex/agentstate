@@ -82,7 +82,21 @@ def _locate(*rel):
 DEFAULT_RULES = _locate("rules", "default.json")
 
 EXCLUDED_DIRS = {"node_modules", ".git", "venv", ".venv", "__pycache__", ".tox",
-                 "dist", "build", "vendor", "third_party"}
+                 "dist", "build", "vendor", "third_party",
+                 # ★ 0.57.0（第 35 条）：git worktree 的落脚目录。它不是源码树的一部分，
+                 #   而是同一份历史的另一个检出版本 —— 扫它等于把同一个文件按份数重复计数。
+                 #   实测本仓 178 条命中里 65 条来自 `.worktrees/`。
+                 ".worktrees"}
+
+
+def _is_build_artifact_dir(name):
+    """打包/安装过程生成的目录：`*.egg-info`、`*.dist-info`。
+
+    实测本仓剩下的 metadata 命中里有一批来自 `antinel.egg-info/`（SOURCES.txt 里
+    逐行列着文件名，规则看着像目录清单）。它由构建器生成，用户改不了，报它没有意义。
+    """
+    low = (name or "").lower()
+    return low.endswith(".egg-info") or low.endswith(".dist-info")
 # ★ 0.48.4：**首印象归零**。此前只排除了 `.psl/audit`，而 install 会把规则快照
 #   写进 `.psl/rules/default.json`——那份快照里带 SEC-06 的**示例密钥字面量**
 #   （AKIAIOSFODNN7EXAMPLE，规则的测试夹具，不是真密钥）。于是：
@@ -425,8 +439,117 @@ def load_path_whitelist(project_root):
         return []
 
 
+# ----------------------------------------------------------------- ignore ----
+# ★ 0.57.0（第 35 条）：扫描面必须由用户可配，但**次数必须留账**。
+#   此前 scan 一个可配忽略机制都没有，能改的只有源码里的 EXCLUDED_DIRS ——
+#   于是用户拿它扫自己的工程，产物目录、构建脚本输出、git worktree 全在面里，
+#   首扫一片红；而用户唯一能做的就是「不看报告」。这是把工具变成噪声的典型路径。
+#
+#   同时必须防住它的反面：用户写一行 `*` 就能得到 "0 findings / 100 分 A"。
+#   空集与「确实没问题」在报告上长得一模一样（假绿第十三族的老形状）。
+#   ⇒ 三件事一起做：①忽略清单 ②跳过数进 stats ③扫描面被清空时**显著说出来**。
+IGNORE_FILE = ".antinelignore"
+
+
+def _glob_to_re(pat):
+    """gitignore 风格的 glob → 正则片段。只支持 `*` `**` `?`，其余按字面。"""
+    out, i, n = [], 0, len(pat)
+    while i < n:
+        c = pat[i]
+        if c == "*":
+            if i + 1 < n and pat[i + 1] == "*":
+                out.append(".*")
+                i += 2
+                if i < n and pat[i] == "/":
+                    i += 1          # `**/` 连同斜杠一起吃掉：`**/x` 也匹配裸 `x`
+                continue
+            out.append("[^/]*")
+        elif c == "?":
+            out.append("[^/]")
+        elif c in "\\^$.|+()[]{}":
+            out.append("\\" + c)
+        else:
+            out.append(c)
+        i += 1
+    return "".join(out)
+
+
+class _IgnoreList:
+    """`.antinelignore` 的最小实现（gitignore 语义的子集）。
+
+    一行一个模式：
+      `#` 开头        注释
+      `!` 开头        重新纳入（覆盖前面的排除）
+      尾 `/`          只匹配目录
+      含 `/` 或以 `/` 开头   锚定扫描根；否则按 basename 在任意层级匹配
+      `*` 不跨目录，`**` 跨目录
+
+    匹配取**最后一个命中的模式**（与 gitignore 一致）。
+    目录被忽略即整棵剪枝、不再深入 —— 也与 git 一致：忽略目录内部的 `!` 救不回来。
+    """
+
+    def __init__(self, root, text=None):
+        self.rules = []          # [(regex, negate, dir_only)]
+        self.patterns = []       # 原文，供报告展示
+        self.error = ""
+        if text is None:
+            _p = Path(root) / IGNORE_FILE
+            # ★ 「查不到」与「有但读不了」必须分开（D-32 同族）：前者是正常态，
+            #   后者是**清单没生效** —— 静默退回空的忽略表，用户会以为自己在用的
+            #   清单一直有效。实测：把 .antinelignore 建成目录即可复现。
+            if not _p.exists():
+                return
+            try:
+                raw = _p.read_text(encoding="utf-8", errors="replace")
+            except Exception as e:                              # noqa: BLE001
+                self.error = type(e).__name__
+                return
+        else:
+            raw = text          # 内嵌清单（测试与调用方自备清单用，不再读盘）
+        for line in raw.splitlines():
+            s = line.strip()
+            if not s or s.startswith("#"):
+                continue
+            negate = s.startswith("!")
+            if negate:
+                s = s[1:].strip()
+            dir_only = s.endswith("/")
+            s = s.rstrip("/")
+            if not s:
+                continue
+            anchored = s.startswith("/") or "/" in s
+            s = s.lstrip("/")
+            body = _glob_to_re(s)
+            rx = (re.compile("^" + body + "$") if anchored
+                  else re.compile("(^|/)" + body + "$"))
+            self.rules.append((rx, negate, dir_only))
+            self.patterns.append(line.strip())
+
+    def match(self, rel, is_dir=False):
+        """rel 是否被忽略。
+
+        ★ 目录规则必须能命中「目录里的文件」：遍历通道靠剪枝天然做到，但
+          `scan_mcp_configs` 拿的是文件路径、不经过遍历 —— 第一版因此出现
+          「写了 `.cursor/` 却不生效」。同一张表在两处不同口径，正是第一顽症。
+          ⇒ 判定搬进这里：目录规则逐级比父目录，任何调用点都不会漏。
+        """
+        hit = False
+        _parents = None
+        for rx, negate, dir_only in self.rules:
+            if dir_only:
+                if _parents is None:
+                    parts = rel.split("/")
+                    _parents = ["/".join(parts[:i + 1]) for i in range(len(parts))]
+                target = _parents if is_dir else _parents[:-1]
+                if target and any(rx.search(c) for c in target):
+                    hit = not negate
+            elif rx.search(rel):
+                hit = not negate
+        return hit
+
+
 # ---------------------------------------------------------------- engine ----
-def scan_directory(root, rules, quick=False, path_whitelist=None):
+def scan_directory(root, rules, quick=False, path_whitelist=None, ignore=None):
     """One os.walk(); each file checked against all applicable static rules.
     Returns (findings, stats). Dedup key: (file, rule_id, line)."""
     path_whitelist = path_whitelist or []
@@ -434,7 +557,15 @@ def scan_directory(root, rules, quick=False, path_whitelist=None):
     static = [c for c in compiled if c.is_static()]
     findings = {}
     stats = {"files_seen": 0, "files_scanned": 0, "files_skipped": 0,
-             "read_errors": 0, "symlinks_outside": 0, "truncated": 0}
+             "read_errors": 0, "symlinks_outside": 0, "truncated": 0,
+             # ★ 0.57.0（第 35 条）：扫描面被拿掉了多少，必须能数出来。
+             #   数不出来 = 用户无法判断"0 条发现"是真的干净还是没扫。
+             "ignored_files": 0, "ignored_dirs": 0, "build_dirs_skipped": 0,
+             "ignored_patterns": [], "ignored_samples": []}
+    _ign = ignore if ignore is not None else _IgnoreList(root)
+    stats["ignored_patterns"] = list(_ign.patterns)
+    if _ign.error:
+        stats["ignored_error"] = _ign.error
     digests = []                                           # P0-6: subject digest inputs
     root = Path(root)
     root_str = str(root)
@@ -456,10 +587,21 @@ def scan_directory(root, rules, quick=False, path_whitelist=None):
         depth = 0 if rel_dir == "." else rel_dir.count("/") + 1
         if depth >= MAX_DEPTH:
             dirnames[:] = []
-        dirnames[:] = sorted(d for d in dirnames
-                             if d not in EXCLUDED_DIRS
-                             and _rel_from_root(root_str, os.path.join(dirpath, d))
-                             not in EXCLUDED_REL_PATHS)
+        _keep = []
+        for _d in sorted(dirnames):
+            _rp = _rel_from_root(root_str, os.path.join(dirpath, _d))
+            if _d in EXCLUDED_DIRS or _rp in EXCLUDED_REL_PATHS:
+                continue
+            if _is_build_artifact_dir(_d):
+                stats["build_dirs_skipped"] += 1
+                continue
+            if _ign.match(_rp, True):
+                stats["ignored_dirs"] += 1
+                if len(stats["ignored_samples"]) < 20:
+                    stats["ignored_samples"].append(_rp + "/")
+                continue
+            _keep.append(_d)
+        dirnames[:] = _keep
         dir_name = os.path.basename(dirpath)
         for fn in sorted(filenames):
             stats["files_seen"] += 1
@@ -471,6 +613,11 @@ def scan_directory(root, rules, quick=False, path_whitelist=None):
             #   扫出来就是自己给自己报 CRITICAL。
             _rl = _rel_from_root(root_str, os.path.join(dirpath, fn))
             if _rl in EXCLUDED_FILE_RELS:
+                continue
+            if _ign.match(_rl, False):
+                stats["ignored_files"] += 1
+                if len(stats["ignored_samples"]) < 20:
+                    stats["ignored_samples"].append(_rl)
                 continue
             full = os.path.join(dirpath, fn)
             rel = os.path.relpath(full, root_str).replace("\\", "/")
@@ -665,6 +812,28 @@ def render_text(result):
                  result["stats"]["files_scanned"], result["stats"]["files_skipped"],
                  len(result["rules_applied"])),
              BAR, ""]
+    # ★ 0.57.0（第 35 条）：扫描面被拿掉了多少、按什么拿掉的 —— 必须印在报告上。
+    #   "0 条发现"有两种长相完全一样的来源：真干净，和压根没扫。不写这一行，
+    #   用户没法分辨，也就没法相信这个分数（假绿第十三族的老形状）。
+    _st = result.get("stats") or {}
+    _igf, _igd = _st.get("ignored_files") or 0, _st.get("ignored_dirs") or 0
+    if _igf or _igd:
+        lines.append(" ignored: %d files / %d dirs by %s (%d pattern%s)"
+                     % (_igf, _igd, IGNORE_FILE, len(_st.get("ignored_patterns") or []),
+                        "" if len(_st.get("ignored_patterns") or []) == 1 else "s"))
+        for _p in (_st.get("ignored_samples") or [])[:5]:
+            lines.append("   - %s" % _p)
+        if _igf + _igd > len(_st.get("ignored_samples") or []):
+            lines.append("   … and %d more (full list: .psl/scan_last.json)"
+                         % (_igf + _igd - len(_st.get("ignored_samples") or [])))
+        if not _st.get("files_scanned"):
+            lines.append(" \u2605 扫描面被 %s 清空 —— 0 条发现**不代表没有风险**，"
+                         "先看忽略清单写对没有" % IGNORE_FILE)
+        lines.append("")
+    if _st.get("ignored_error"):
+        lines.append(" \u2605 %s 读不了（%s）—— 忽略清单本次**未生效**"
+                     % (IGNORE_FILE, _st["ignored_error"]))
+        lines.append("")
     order = {"critical": 0, "warning": 1, "info": 2}
     fs = sorted(result["findings"], key=lambda f: (order.get(f["severity"], 9), f["file"], f["line"]))
     n = 0
@@ -713,21 +882,33 @@ def render_text(result):
     return "\n".join(lines)
 
 
-def scan_mcp_configs(root, rules):
+def scan_mcp_configs(root, rules, ignore=None, stats=None):
     """0.31.0 (F2): scan MCP configuration files for tool-description injection
     (MCP-02), unaudited remote servers (MCP-03) and plaintext secrets in env
     blocks (MCP-04). Text-level on purpose: the patterns work on raw JSON (and
     even on JSON5-with-comments), so a parse failure can never silently skip a
     config. Candidates: .cursor/mcp.json, .mcp.json, claude_desktop_config.json,
-    .vscode/mcp.json. Returns findings in the same shape as scan_directory."""
+    .vscode/mcp.json. Returns findings in the same shape as scan_directory.
+
+    ★ 0.57.0（第 35 条）：`.antinelignore` 对这条专项通道同样生效 ——
+      否则「我明明在忽略清单里写了 .cursor/mcp.json」却不生效，是最难解释的那种。
+      被忽略的候选记进 stats，与遍历通道同一本账。
+    """
     out = []
     cands = [".cursor/mcp.json", ".mcp.json", "claude_desktop_config.json", ".vscode/mcp.json"]
     compiled = {r.id: r for r in (CompiledRule(x) for x in rules) if r.id in ("MCP-02", "MCP-03", "MCP-04")}
     if not compiled:
         return out
+    ign = ignore if ignore is not None else _IgnoreList(root)
     for rel in cands:
         path = os.path.join(str(root), rel.replace("/", os.sep))
         if not os.path.isfile(path):
+            continue
+        if ign.match(rel, False):
+            if stats is not None:
+                stats["ignored_files"] += 1
+                if len(stats["ignored_samples"]) < 20:
+                    stats["ignored_samples"].append(rel)
             continue
         try:
             with open(path, "rb") as f:
@@ -755,7 +936,13 @@ def scan_mcp_configs(root, rules):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Antinel static security scan")
+    ap = argparse.ArgumentParser(
+        description="Antinel static security scan",
+        epilog="Scan scope can be narrowed with a `.antinelignore` file at the project root "
+               "(one pattern per line, `#` comments, `!` to re-include, trailing `/` for "
+               "directories, `*` does not cross `/`, `**` does). Ignored counts are always "
+               "printed, because 'no findings' and 'nothing was scanned' must not look alike.",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--root", help="project root (default: git toplevel or cwd)")
     ap.add_argument("--rules", default=str(DEFAULT_RULES), help="rules JSON path")
     ap.add_argument("--json", action="store_true", help="print JSON instead of text")
@@ -779,8 +966,9 @@ def main(argv=None):
         sys.stderr.write("FATAL: cannot load rules: %s\n" % e)
         return 2
 
+    _ign = _IgnoreList(root)
     findings, stats, applied, subject_digest = scan_directory(
-        root, rules, quick=args.quick, path_whitelist=load_path_whitelist(root))
+        root, rules, quick=args.quick, path_whitelist=load_path_whitelist(root), ignore=_ign)
     # 0.31.0 (F2): MCP config files get a dedicated pass (text-level; see
     # scan_mcp_configs) -- the walk-based file_content scan would miss files
     # whose only trigger is their ROLE (mcp config), not their extension.
@@ -788,7 +976,7 @@ def main(argv=None):
     # a config file it walked past, and the dedicated pass must not double-count.
     _seen_keys = set()
     _merged = []
-    for f in list(findings) + scan_mcp_configs(root, rules):
+    for f in list(findings) + scan_mcp_configs(root, rules, ignore=_ign, stats=stats):
         k = (f.get("rule_id"), str(f.get("file", "")).replace("\\", "/"), f.get("line"))
         if k in _seen_keys:
             continue

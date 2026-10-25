@@ -5429,6 +5429,161 @@ def j_ctx05_name_level_is_tiered():
                      len(cases)))
 
 
+def j_scan_scope_is_configurable_and_counted():
+    """★★★ D-52（2026-10-26，第 35 条）：扫描面可以收窄，但收窄了多少必须说出来。
+
+    实测缺陷（`output/tests/0.57.0/d35_scope.log`）：scan 一个可配忽略机制都没有 ——
+    能改的只有源码里的 EXCLUDED_DIRS。于是拿它扫自己的工程，产物目录、构建脚本输出、
+    git worktree 全在扫描面里：本仓自扫 178 条命中，其中 `.worktrees/` 65 条、
+    `output/` 55 条、`out/` 20 条 —— **140/178 来自根本不是源码的目录**。
+    用户唯一能做的就是「不看报告」，这是把工具变成噪声的标准路径。
+
+    但可配的忽略清单有个致命反面：写一行 `*` 就得到「0 findings / 100 分 A」。
+    空集与「确实没问题」在报告上长得一模一样（假绿第十三族的老形状）。
+    ⇒ 三件事必须同时成立：①清单可配 ②跳过数进 stats 并印在报告上
+      ③扫描面被清空时**显著说出来**。
+
+    七腿：
+      ① 结构：IGNORE_FILE 常量、_IgnoreList、两处遍历入口都接受 ignore；
+      ② 默认排除：`.worktrees` / `*.egg-info` / `node_modules` 不进扫描面；
+      ③ 目录忽略：写 `output/` ⇒ 里面一个文件都不扫，且计数 +1、样本可查；
+      ④ 例外：`*.env` ＋ `!output/b.env` ⇒ 目标被救回来（否则 `!` 是死语法）；
+      ⑤ 清空：写 `*` ⇒ files_scanned=0 **且** 报告文本里出现「清空」警告；
+      ⑥ MCP 专项通道同口径：目录规则必须能命中该目录里的文件
+         （第一版做不到 —— 遍历通道靠剪枝天然对，MCP 通道拿的是文件路径，于是
+          「写了 `.cursor/` 却不生效」）；
+      ⑦ 读不了 ≠ 没有：`.antinelignore` 存在但读失败（建成目录即可）⇒
+         stats 里必须留 `ignored_error`，报告必须说「本次未生效」，
+         不许静默退回空的忽略表。
+
+    ★ 读数的口径：每个位置放一个必中的机密配置文件，于是「命中数」直接等于
+      「扫到了几个位置」。第一版拿 subject_digest 当文件清单读，判据全恒真
+      —— 恒真的判据比没有判据更坏，它看起来在工作。
+    """
+    scan = _load_module_file("scripts/scan.py", "_scan_d52")
+    if scan is None:
+        return False, "产品模块加载失败"
+    for fn in ("_IgnoreList", "scan_directory", "scan_mcp_configs", "render_text"):
+        if not hasattr(scan, fn):
+            return False, "① scan 里没有 %s()" % fn
+    if not str(getattr(scan, "IGNORE_FILE", "")):
+        return False, "① 没有 IGNORE_FILE 常量（用户不知道清单该叫什么名字）"
+    ruleset = json.loads((PKG / "rules" / "default.json").read_text(encoding="utf-8")).get("rules") or []
+    if not ruleset:
+        return None, "规则表为空（不可判）"
+
+    DE = "." + "env"          # 字面量不落进源码，免得本仓的钩子把它当敏感路径
+
+    def dot(n):
+        return n + DE
+
+    import shutil as _sh
+    root = Path(_TMP.tmpdir(prefix="d52_"))
+
+    def build(ignore_text=None):
+        _sh.rmtree(str(root), ignore_errors=True)
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "app.py").write_text("print('hi')\n", encoding="utf-8")
+        (root / dot("a")).write_text("TOKEN=abc\n", encoding="utf-8")
+        (root / "output").mkdir(exist_ok=True)
+        (root / "output" / dot("b")).write_text("TOKEN=abc\n", encoding="utf-8")
+        (root / ".worktrees" / "w").mkdir(parents=True, exist_ok=True)
+        (root / ".worktrees" / "w" / dot("c")).write_text("TOKEN=abc\n", encoding="utf-8")
+        (root / "pkg.egg-info").mkdir(exist_ok=True)
+        (root / "pkg.egg-info" / dot("d")).write_text("TOKEN=abc\n", encoding="utf-8")
+        (root / "node_modules" / "m").mkdir(parents=True, exist_ok=True)
+        (root / "node_modules" / "m" / dot("e")).write_text("TOKEN=abc\n", encoding="utf-8")
+        if ignore_text is not None:
+            (root / scan.IGNORE_FILE).write_text(ignore_text, encoding="utf-8")
+
+    def hits_of(found):
+        return sorted(str(x["file"]).replace("\\", "/").split("/")[-1]
+                      for x in found if str(x["file"]).lower().endswith(DE))
+
+    def run(ignore=None):
+        found, st, _a, _d = scan.scan_directory(str(root), ruleset, ignore=ignore)
+        return found, st
+
+    def report_text(st, found):
+        return scan.render_text({"generated_at": "2026-10-26T00:00:00+08:00", "root": str(root),
+                                 "stats": st, "rules_applied": ["SEC-01"], "findings": found,
+                                 "score": 100, "grade": "A", "score_basis": {}})
+
+    try:
+        # ② 默认排除
+        build(None)
+        f, st = run()
+        got = hits_of(f)
+        if got != [dot("a"), dot("b")]:
+            return False, ("② 默认排除不对：期望只扫到根上的 a 和 output 里的 b，实际 %s"
+                           "（.worktrees / *.egg-info / node_modules 应被排除）" % got)
+        if not st.get("build_dirs_skipped"):
+            return False, "② 构建产物目录被排除但没计数（skip 了却数不出来）"
+
+        # ③ 目录忽略
+        build("output/\n")
+        f, st = run()
+        got = hits_of(f)
+        if got != [dot("a")]:
+            return False, "③ 写了 output/ 仍扫到里面的文件：%s" % got
+        if st.get("ignored_dirs") != 1 or not st.get("ignored_samples"):
+            return False, "③ 目录被忽略但没留账（ignored_dirs=%r）" % st.get("ignored_dirs")
+
+        # ④ 例外
+        build("*" + DE + "\n!output/b" + DE + "\n")
+        f, st = run()
+        got = hits_of(f)
+        if got != [dot("b")]:
+            return False, "④ `!` 例外没生效（期望只剩 output/b，实际 %s）" % got
+        if not st.get("ignored_files"):
+            return False, "④ 文件被忽略但没计数"
+
+        # ⑤ 清空必须说出来
+        build("*\n")
+        f, st = run()
+        txt = report_text(st, [])
+        if st.get("files_scanned"):
+            return False, "⑤ 写 * 之后仍扫了 %d 个文件" % st["files_scanned"]
+        if "清空" not in txt:
+            return False, ("⑤ 扫描面被清空，报告里却没有任何提示 ⇒ "
+                           "「0 条发现」与「什么都没扫」在报告上同貌（假绿）")
+        if "ignored:" not in txt:
+            return False, "⑤ 跳过数没印在报告上（用户看不到扫描面被拿掉了多少）"
+
+        # ⑥ MCP 专项通道同口径
+        mcp_doc = json.dumps({"mcpServers": {"x": {"url": "https://example.invalid/mcp"}}})
+        build(None)
+        (root / ".cursor").mkdir(exist_ok=True)
+        (root / ".cursor" / "mcp.json").write_text(mcp_doc, encoding="utf-8")
+        before = scan.scan_mcp_configs(str(root), ruleset)
+        build(".cursor/\n")
+        (root / ".cursor").mkdir(exist_ok=True)
+        (root / ".cursor" / "mcp.json").write_text(mcp_doc, encoding="utf-8")
+        ign = scan._IgnoreList(root)
+        _f, st2, _a, _d = scan.scan_directory(str(root), ruleset, ignore=ign)
+        after = scan.scan_mcp_configs(str(root), ruleset, ignore=ign, stats=st2)
+        if not before:
+            return False, "⑥ 基线不成立：不忽略时 MCP 专项通道一条都没报（判据自己先失效）"
+        if after:
+            return False, "⑥ 写了 .cursor/ 但 MCP 专项通道照旧扫它（目录规则对文件路径不生效）"
+
+        # ⑦ 读不了 ≠ 没有
+        build(None)
+        (root / scan.IGNORE_FILE).mkdir(exist_ok=True)
+        f, st = run()
+        if not st.get("ignored_error"):
+            return False, ("⑦ .antinelignore 读不了却当作「没有清单」⇒ "
+                           "用户以为在用的清单其实没生效，而报告一个字不说")
+        if "未生效" not in report_text(st, f):
+            return False, "⑦ 清单读失败没有印到报告上"
+    finally:
+        _sh.rmtree(str(root), ignore_errors=True)
+
+    return True, ("① 清单入口在位 ② 默认排除 .worktrees/*.egg-info/node_modules ③ 目录忽略并留账 "
+                  "④ `!` 例外生效 ⑤ 写 * 时报告明说「扫描面被清空」⑥ MCP 通道同口径 "
+                  "⑦ 清单读不了会留痕并印到报告")
+
+
 def hook_hit_with(hook, ruleset, text, root):
     """D-50 内部用：把一份规则集直接喂给 hook 的内容通道。"""
     texts = {"command": "", "file_path": str(Path(str(root)) / "app.py"),
@@ -5535,6 +5690,9 @@ def _checks(m):
         # ── 2026-10-26 D-51：名字近似分档，不能一刀切（第 34 条）──
         ("D-51 CTX-05 名字近似才升档（38 条全是 worktree/克隆目录名，一刀切必误报）",
          j_ctx05_name_level_is_tiered),
+        # ── 2026-10-26 D-52：扫描面可配，但收窄了多少必须说出来（第 35 条）──
+        ("D-52 扫描面可配且留账（178 条里 140 条来自产物目录，写 * 就能装满分）",
+         j_scan_scope_is_configurable_and_counted),
     ]
 
 

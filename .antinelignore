@@ -1,0 +1,21 @@
+# Antinel 自己的扫描面：构建产物、临时工作区、旧版本解包目录、一次性工具。
+#
+# 这些目录不是产品源码。实测本仓 178 条命中里 140 条来自这里
+# （.worktrees 65 / output 55 / out 20），真问题被淹在后面。
+#
+# 语法：一行一个模式；# 注释；! 重新纳入；尾 / 只匹配目录；
+#      * 不跨目录，** 跨目录。
+# 用 .antinelignore 而不是 .gitignore：两者语义不同，把工程的 git 忽略规则
+# 直接当扫描面会让"没进版本库的东西"顺带失去安全检查。
+
+output/
+out/
+logs/
+night/
+.workbuddy/
+_archive_dist/
+_uxtest/
+_uxtest2/
+antinel-0.*/
+pip/
+~/
