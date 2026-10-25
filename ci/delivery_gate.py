@@ -391,7 +391,16 @@ REQUIRED = [rel for _k, rel, _d in SUITES] + REQUIRED_EXTRA
 #:     ⇒ 避免「判据换了却拿旧快照比」的假差分。
 #:   · **保留上一次**（`.prev`）⇒ 连续红两次时能看出「这次是同一红还是新红」。
 
-_SNAP_DIR = os.path.join(PKG, ".psl", "gate")
+#: ★★ 0.57.0（第 26 条）：闸门**自身状态**的落点，允许重定向。
+#:   为什么需要（实测撞出来的，不是预防性设计）：判据 D-41 必须**真跑一次闸门**
+#:   才能证明它不会把"0 套"报成绿，而提交钩子此刻正持有
+#:   `PKG/.psl/gate/run.lock` ⇒ 判据的子进程抢不到锁 ⇒ rc=3
+#:   （`★ 闸门未启动：…`）⇒ 判据在钩子里**必然红** ⇒ 提交被自己拦下。
+#:   另外子进程还会覆盖真仓的 `last_run.json`，把"这次到底谁跑的"读乱。
+#:   ⇒ 给这类**只读排查**一个独立状态目录：锁不冲突、基线不串、读数不脏。
+#:   生产路径**不变**：不设这个变量就是 `PKG/.psl/gate`。
+_SNAP_DIR = (os.environ.get("ANTINEL_GATE_STATE_DIR")
+             or os.path.join(PKG, ".psl", "gate"))
 _SNAP = os.path.join(_SNAP_DIR, "baseline.json")
 _SNAP_PREV = os.path.join(_SNAP_DIR, "baseline.prev.json")
 
@@ -1086,6 +1095,78 @@ def _touch_files():
             or p.replace("\\", "/") in _GATE_SELF_FILES}
 
 
+def resolve_only(only_arg, suites=None):
+    """★★ 0.57.0（行动清单第 26 条）：把 `--only` 解析成 `(选中的套件, 未登记的键)`。
+
+    **唯一实现**：`main()` 与判据 D-41 共用，判据不二次实现。
+
+    为什么要有这个函数 —— 实测复现出来的那段假绿：
+
+        python ci/delivery_gate.py --only inbox_guards_0514
+        （`SUITES` 的键是 `0514`，写文件名就是拼错）
+
+      ⇒ 旧代码 `[s for s in SUITES if s[0] in only]` 过滤成**空表**
+      ⇒ `for` 循环空转，`RESULTS == []`，四个计数器全是 0
+      ⇒ 落进 else 分支，打印
+        「★ 闸门全绿：所有已登记判据均通过（**本次实际执行 0 套**）」
+      ⇒ **rc=0**。
+
+    同一份输出里「全绿」与「0 套」并存。人会只读前半句；CI **只看退出码**，
+    于是**一次拼写错误＝一次静默放行**。
+
+    这不是边界情况：它恰好发生在我「用闸门排查问题」的时候，也就是我最依赖
+    这个判断的时刻。判断工具自己会说谎时，之后所有结论都不可信。
+
+    返回空集**永远**不等于通过 —— 由 `main()` 里的空集守卫落成 rc=2。
+    """
+    want = {x.strip() for x in (only_arg or "").split(",") if x.strip()}
+    table = list(SUITES if suites is None else suites)
+    if not want:
+        return [], []
+    known = [s for s in table if s[0] in want]
+    unknown = sorted(want - {s[0] for s in table})
+    return known, unknown
+
+
+def empty_selection_verdict(unknown, suites):
+    """★★ 0.57.0（行动清单第 26 条）：**0 套 ≠ 通过** —— 唯一判定入口。
+
+    返回 `(退出码, 要打印的行列表)`；`(0, [])` 表示可以继续跑。
+
+    两种"没有东西可跑"的形态，同一处判、同一个码：
+
+      ① `--only` 里有**未登记**的键 —— 用户想要的套件一套都没选中。
+         诊断要点名那个键并列出合法键，否则下一个人只会再拼错一次。
+      ② 选出来的套件是**空表** —— 不论是 `--only` 拼错、`--affected`
+         推不出、`--hook` 预算为 0，还是判据清单本身空了。
+
+    为什么要收成一处：这两条守卫曾经分别写在 `main()` 的两段里，于是
+    「负控单点注入」只能拆掉其中一条、另一条兜住 ⇒ 看起来"拆不坏"，
+    而"拆不坏"会被误读成"判据没有牙"。收成一处之后，注入这一个函数
+    就能同时废掉两条守卫 ⇒ 负控能咬住，且**恰好**咬在它该咬的地方。
+
+    ★ 旧的失败形态（实测复现过，见 `resolve_only` 的 docstring）：
+      `--only inbox_guards_0514` ⇒ 空表 ⇒ 空循环 ⇒ 四个计数器全是 0
+      ⇒ 打印「闸门全绿…（本次实际执行 0 套）」且 **rc=0**。
+    """
+    if unknown:
+        return 2, [
+            "",
+            "★ `--only` 里有**未登记**的键：%s" % "、".join(unknown),
+            "  合法键（%d 个）：%s" % (len(SUITES), "、".join(s[0] for s in SUITES)),
+            "  ⚠ 键名写错时旧行为是「跑 0 套却打印全绿、rc=0」—— 现在直接拒绝。",
+            "  规则：**0 套不等于通过**（判据 D-41）。",
+        ]
+    if not suites:
+        return 2, [
+            "",
+            "★ 没有任何套件要跑 —— **0 套不等于通过**。",
+            "  可能原因：--only 没选中任何键 / 影响面推不出套件 / 判据清单为空。",
+            "  规则：判据 D-41；空集一律 rc=2，不当通过。",
+        ]
+    return 0, []
+
+
 def _select_suites(changed, touched, hook):
     """纯函数：由「改动集」决定跑哪几套。返回 `(suites, mode, notes)`。
 
@@ -1426,10 +1507,17 @@ def main():
               % ("判据清单与磁盘一致", len(SUITES),
                  resident_suite_count(), RESIDENT_SUITE_CAP))
 
-    only = {x.strip() for x in a.only.split(",") if x.strip()}
+    # ★★ 0.57.0（第 26 条）：`--only` 一律走 `resolve_only()`，**未登记的键直接拒绝**。
+    #   旧写法 `[s for s in SUITES if s[0] in only]` 在拼错时静默给出空表，
+    #   而空表的运行结果与"全绿"在退出码上不可区分（见 resolve_only 的 docstring）。
+    #   ★ 部分匹配也拒：`--only 0514,typo` 里的 typo 没跑 ⇒ 意图未被完整执行，
+    #     那次的结论不能当"0514 这一族都过了"用。
+    only, _unknown = resolve_only(a.only)
     suites = SUITES
-    if only:
-        suites = [s for s in SUITES if s[0] in only]
+    if a.only.strip():
+        # 给了 --only 就**只**用它的结果 —— 可能是空表，交给下面那道唯一守卫；
+        # 绝不在"拼错"时悄悄退回全量（那会跑 25 分钟还让人以为只跑了想跑的那套）。
+        suites = only
     elif a.affected or a.hook:
         # ★★ 0.48.5 快道（2026-10-13）：复用**现成**的 import 图（`impacted_suites`）。
         #   它原来只"打印"受影响范围，于是每次改动要么全量 19 分钟、要么人肉挑——
@@ -1447,6 +1535,16 @@ def main():
                                                a.hook)
         for _ln in _notes:
             print(_ln)
+
+    # ★★ 0.57.0（第 26 条）：**0 套 ≠ 通过** —— 唯一判定入口（见 `empty_selection_verdict`）。
+    #   这一处兜住所有"选不出套件"的路径（--only 拼错 / --affected 推不出 /
+    #   --hook 预算为 0 / 清单为空）。放在 `_env_warn()` **之前**：没有东西要跑时
+    #   连环境预检都不必做，且报错要出现在任何"看起来在干活"的输出之前。
+    _rc, _lines = empty_selection_verdict(_unknown, suites)
+    if _rc:
+        for _ln in _lines:
+            print(_ln)
+        return _rc
 
     # ★★ M-A：全量开跑前先做**环境预检**（只预警、不阻断）—— 见 `_env_warn`。
     if not a.hook:

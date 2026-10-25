@@ -1597,6 +1597,169 @@ def j_append_chained_shape_contract():
                   % (len(_files), _seen))
 
 
+def j_only_never_green_on_empty():
+    """★★ D-41（2026-10-25）：**0 套 ≠ 通过** —— 闸门不许把"什么都没跑"报成绿。
+
+    实测缺陷（行动清单第 26 条，2026-10-25 17:20 亲手复现）：
+
+        python ci/delivery_gate.py --only inbox_guards_0514
+        （`SUITES` 的键是 `0514`，写文件名就是拼错）
+
+      ⇒ 旧代码把 `SUITES` 过滤成**空表** ⇒ `for` 循环空转 ⇒ 四个计数器全 0
+      ⇒ 打印「★ 闸门全绿：所有已登记判据均通过（**本次实际执行 0 套**）」
+      ⇒ **rc=0**。
+
+    危害不在产品里，在**判断工具自己**：它恰好发生在我用闸门排查问题的时刻；
+    而 CI 只看退出码 ⇒ **一次拼写错误等于一次静默放行**。同一份输出里
+    「全绿」与「0 套」并存，人会只读前半句。
+
+    三条腿，全部真入口（不二次实现）：
+
+      ① **纯函数边界** —— 直接 import `delivery_gate.resolve_only` /
+         `empty_selection_verdict`（它们是**唯一实现**，`main()` 与判据共用）。
+         特别防「只有空格/只有逗号」被当成"给了参数"而走进空集分支。
+      ② **行为** —— 真子进程跑闸门：未知键 ⇒ rc=2 且点名；
+         **混合键（已知＋未知）⇒ 仍 rc=2**（意图未被完整执行，那次的结论
+         不能当"已知那族都过了"用）；并从输出里抽出点名集合，断言**只有**
+         那个未知键被点名（证明已知键没被误判）。
+      ③ **牙齿** —— 造一份**真能跑**的变异副本：把 `empty_selection_verdict`
+         改成恒返 `(0, [])`（＝两条守卫同时失效的原貌），跑它必须真的打印
+         「本次实际执行 0 套」并 rc=0。★ 必须是能跑的变异件而不是"假源码"：
+         假源码测不到行为腿（第十五族），只会给自己发奖。
+    """
+    import importlib.util
+    import re as _re
+    import subprocess
+    import tempfile
+
+    gate = PKG / "ci" / "delivery_gate.py"
+    if not gate.is_file():
+        return False, "找不到 %s —— 判不了（缺失不许报通过）" % gate
+
+    spec = importlib.util.spec_from_file_location("_d41_gate", str(gate))
+    dg = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(dg)
+    except Exception as exc:                                   # noqa: BLE001
+        return False, "闸门导入失败（%s: %s）—— 判据读不到被判者" % (
+            type(exc).__name__, exc)
+
+    if not getattr(dg, "SUITES", None):
+        return False, "SUITES 为空 —— 判据无法取合法键"
+
+    # 结构腿：判决入口必须**存在**（0.57.0 之前它根本不存在，两条守卫各写一段）
+    _absent = [n for n in ("resolve_only", "empty_selection_verdict")
+               if not hasattr(dg, n)]
+    if _absent:
+        return False, ("闸门缺 %s —— 判决入口还没收拢，"
+                       "「跑了 0 套」仍会被报成全绿" % "、".join(_absent))
+
+    known = dg.SUITES[0][0]
+    bad = "__no_such_suite_d41__"
+
+    # ── ① 纯函数边界 ────────────────────────────────────────────────────
+    want = [
+        ("", 0, []),                    # 没给参数
+        ("   ", 0, []),                 # 只有空格
+        (",", 0, []),                   # 只有逗号 —— 给了参数但零键
+        (known, 1, []),                 # 合法键
+        (bad, 0, [bad]),                # 未知键
+        (known + "," + bad, 1, [bad]),   # 混合
+        ("  %s , %s  " % (known, bad), 1, [bad]),   # 首尾空格要 trim
+    ]
+    for arg, want_n, want_unknown in want:
+        got_n, got_unknown = dg.resolve_only(arg)
+        if len(got_n) != want_n or got_unknown != want_unknown:
+            return False, ("① resolve_only(%r) = (%d, %r)，期望 (%d, %r)"
+                           % (arg, len(got_n), got_unknown, want_n, want_unknown))
+
+    # 判定映射：未知键优先于空集；两者都 ⇒ rc=2；有套件且无未知 ⇒ rc=0
+    for unk, suts, want_rc in (([bad], [], 2), ([], [], 2), ([], dg.SUITES, 0)):
+        rc, lines = dg.empty_selection_verdict(unk, suts)
+        if rc != want_rc:
+            return False, ("① empty_selection_verdict(%r, %d 套) = rc %d，期望 %d"
+                           % (unk, len(suts), rc, want_rc))
+        if (rc != 0) and not lines:
+            return False, "① 判 rc=2 却不打印任何理由 —— 下一个人只会再拼错一次"
+
+    # ── ② 行为：真子进程 ────────────────────────────────────────────────
+    # ★★ 子进程必须**不参与运行锁竞争**（0.57.0 实测：提交钩子自己正持着
+    #   `PKG/.psl/gate/run.lock`，子进程抢不到 ⇒ rc=3「闸门未启动」⇒ 判据在
+    #   钩子里必然红 ⇒ 提交被自己拦下）。用 `ANTINEL_GATE_STATE_DIR` 把闸门的
+    #   状态（锁／基线／last_run／耗时）整体挪到独立目录：锁不冲突，也**不再
+    #   覆盖真仓的 last_run.json**（那会让"这次到底谁跑的"读错）。
+    _state = os.path.join(tempfile.gettempdir(), "antinel_d41_gate_state")
+
+    def _run(extra, prog=None):
+        _env = {**os.environ, "PYTHONPATH": "", "PYTHONDONTWRITEBYTECODE": "1",
+                "ANTINEL_GATE_STATE_DIR": _state}
+        r = subprocess.run(
+            [sys.executable, str(prog or gate)] + list(extra),
+            cwd=str(PKG), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=180, env=_env)
+        return r.returncode, (r.stdout or "") + (r.stderr or "")
+
+    def _tail(out, n=3):
+        return " ／ ".join(x.strip()[:70] for x in out.splitlines()[-n:] if x.strip())
+
+    rc, out = _run(["--only", bad])
+    if rc != 2:
+        return False, ("② 未知键 `--only %s` 得 rc=%d，期望 2（0 就是那次假绿）"
+                       "｜输出尾：%s" % (bad, rc, _tail(out)))
+    if bad not in out:
+        return False, "② rc=2 但输出里没点名那个未知键 —— 报了也修不了"
+
+    rc2, out2 = _run(["--only", known + "," + bad])
+    if rc2 != 2:
+        return False, ("② 混合键 `--only %s,%s` 得 rc=%d，期望 2"
+                       "（部分匹配必须整次拒绝：没跑的键不能当跑过）｜输出尾：%s"
+                       % (known, bad, rc2, _tail(out2)))
+    m = _re.search(r"未登记\*?\*?的键：(.+)", out2)
+    named = {x.strip() for x in (m.group(1).split("、") if m else [])}
+    if named != {bad}:
+        return False, ("② 混合键点名集合 = %r，期望只含 %r（已知键被误判成未知）"
+                       % (sorted(named), bad))
+
+    # ── ③ 牙齿：真能跑的变异副本 ────────────────────────────────────────
+    src = gate.read_text(encoding="utf-8")
+    # 注入点＝唯一判定的那一处；改坏它 ⇒ 两条守卫同时失效 ＝ 旧写法原貌
+    anchor = ("    if unknown:\n"
+              "        return 2, [\n")
+    if src.count(anchor) != 1:
+        return False, ("③ 注入点命中 %d 次（期望 1）—— 变异方案失效，"
+                       "不许静默跳过" % src.count(anchor))
+    mutant_src = src.replace(
+        anchor,
+        "    return 0, []   # NEGCTL D-41：两条守卫同时失效（旧写法原貌）\n" + anchor)
+
+    # ★ 变异件必须落在**仓根的直接子目录**里：`delivery_gate.py` 自己用
+    #   `PKG = dirname(dirname(__file__))` 定位仓根与 `.psl/gate`。
+    #   第一版放进系统 TEMP ⇒ 它把 `%LOCALAPPDATA%` 当成仓根 ⇒ 报「读不到 ci/ 目录」
+    #   rc=1，而且在用户目录下真的建了 `.psl/gate/`（实测踩到）。
+    #   放 `output/`（仓根子目录）⇒ 派生仍指向真仓根；`output/` 在 .gitignore 里、
+    #   不在任何判据的扫描面内，且**宿主禁删**仓内文件 ⇒ 固定名覆盖写，
+    #   不 unlink（每跑一次只留一个，不会累积）。
+    mpath = PKG / "output" / "_d41_mutant_gate.py"
+    try:
+        mpath.parent.mkdir(parents=True, exist_ok=True)
+        with open(str(mpath), "wb") as fh:
+            fh.write(mutant_src.encode("utf-8"))
+    except OSError as exc:                                     # noqa: BLE001
+        return False, "③ 变异件写不出来（%s）—— 牙齿这一腿跑不了，不许报通过" % exc
+
+    mrc, mout = _run(["--only", bad], prog=str(mpath))
+    if mrc != 0:
+        return False, ("③ 变异件（守卫失效）竟然 rc=%d —— 它本该复现假绿 rc=0，"
+                       "说明腿②测的不是这条守卫" % mrc)
+    if "本次实际执行 0 套" not in mout:
+        return False, ("③ 变异件 rc=0，但输出里没有「本次实际执行 0 套」"
+                       "—— 假绿的证据形态变了，先看它到底打印了什么")
+
+    return True, ("三腿成立：纯函数 %d 个边界 ＋ 未知键 rc=2 且只点名它 ＋ "
+                  "混合键整次拒绝 ＋ 变异件（守卫失效）复现「0 套全绿 rc=0」"
+                  % len(want))
+
+
 def j_window_title_format():
     """★★ FZ-002（2026-10-16）：窗口标题形态契约（output 类冻结执法）。
 
@@ -3686,6 +3849,21 @@ def selfcheck():
          '                           capture_output=True, text=True, timeout=30,\n'
          '                           env=None)',
          "D-23"),
+        # ★★ D-41 负控（2026-10-25，行动清单第 26 条）：把唯一判定入口
+        #   `empty_selection_verdict` 改成恒返 `(0, [])` ＝ 两条守卫同时失效
+        #   ＝ 旧写法原貌。此时 `--only <拼错的键>` 必须重新变成
+        #   「打印全绿 ＋ rc=0」，D-41 的腿② 于是变红。
+        #   ★ 为什么注入这一个函数就够：先前两条守卫分别写在 main() 的两段里，
+        #     单拆任一条另一条会兜住 ⇒ 「拆不坏」被误读成「判据没牙」。
+        #     0.57.0 把判定收成唯一实现，正是为了让负控能咬住（见该函数 docstring）。
+        #   ★ 注入串取 `if unknown:` 与紧接着的 `return 2, [`（grep -c 实测唯一），
+        #     插在它**之前** ⇒ 后面的分支不可达但语法有效。
+        ("D-41 缺陷：空集当成通过（--only 拼错时曾是假绿 rc=0）",
+         "ci/delivery_gate.py",
+         '    if unknown:\n        return 2, [',
+         '    return 0, []   # NEGCTL D-41 两条守卫同时失效\n'
+         '    if unknown:\n        return 2, [',
+         "D-41"),
     ]
 
     ok_all = True
@@ -3942,6 +4120,9 @@ def _checks(m):
         # ── 2026-10-24 D-40：两个 append_chained 形状相反 ＋ bool 包裹塌缩 ──
         ("D-40 append_chained 形状契约与消费点同源（bool 包裹 ⇒ 丢了报成功）",
          j_append_chained_shape_contract),
+        # ── 2026-10-25 D-41：闸门把「什么都没跑」报成绿（行动清单第 26 条）──
+        ("D-41 0 套不等于通过（--only 键名拼错曾是假绿 rc=0）",
+         j_only_never_green_on_empty),
     ]
 
 
