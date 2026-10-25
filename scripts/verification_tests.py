@@ -70,7 +70,24 @@ if os.environ.get("ANTINEL_WORK_UNIQUE") == "1" and _WORK_ENV:
 else:
     WORK = Path(_WORK_ENV or (Path(tempfile.gettempdir()) / "antinel_verify_work"))
 # 0.23.1: 套件全程把个人中枢指到沙箱——install/hub 的任何登记都不会污染真实 ~/.antinel
-os.environ["ANTINEL_HUB_DIR"] = str(WORK / "hub")
+#
+# ★★ 第 38 条（2026-10-25，**实测**抓到的定时炸弹）：hub 还必须**每次运行唯一**。
+#   两个机制叠在一起，让「告警出声」这件事天生有状态：
+#     ① `notice_gate` 按 `(rule_id, snippet[:60])` **一天只出声一次**；
+#     ② `notice_budget_gate` 给单条规则**一小时内 3 次**配额
+#        （`host_shield.NOTICE_BUDGET_MAX = 3`）。
+#   原先把 hub 挂在固定的 WORK 下 ⇒ 状态**跨运行累积**。实测沙箱账本：
+#       MCP-01  total=9  used=0  dup=9   ← 9 次请求，0 次出声
+#       MCP-02  total=1  used=0  dup=1
+#       NET-01  total=1  used=0  dup=1
+#       SLOP-01 total=1  used=0  dup=1
+#   ⇒ 凡是断言 `rc == 0 and "X" in err` 的判据，都变成
+#     「同一小时前几次绿、之后全红」——而且红的时候看不出是规则坏了还是话被省了。
+#   hub 唯一之后，每次运行从空账开始，告警可见性不再取决于「今天跑过几次」。
+#   ★ 这只治「跨运行」；「运行内」同一规则仍会静默，所以读 stderr 的判据
+#     仍在逐条改成读审计链（`audit_ids()`，无状态）。
+os.environ["ANTINEL_HUB_DIR"] = str(WORK / ("hub-%d-%d" % (
+    os.getpid(), int(time.time() * 1000) % 1000000)))
 os.environ["ANTINEL_SHIELD_NOTIFY"] = "0"
 os.environ["ANTINEL_SHIELD_MIRROR"] = "0"
 # 0.28.2: 套件运行期间关闭门闸气泡（F-15 在摘除开关的沙箱里单独断言）
@@ -357,6 +374,98 @@ def run(script, argv=(), cwd=None, stdin=None, env=None):
     return p.returncode, p.stdout, p.stderr, (time.perf_counter() - t0) * 1000
 
 
+# ── 第 38 条 · 审计链读数：alert 级命中的**无状态真源** ────────────────────
+#
+# 为什么需要它（2026-10-25 实测，不是推断）：
+#   · `notice_gate` 对 `(rule_id, snippet[:60])` **一天只出声一次** ——
+#     同一路径连跑 4 次，第 1 次 stderr 可见、第 2–4 次**全空**；
+#     换一天/换个临时目录又可见。于是 `rc == 0 and "X" in err` 这类断言是
+#     「今天第一次绿、之后全红」，而红的时候看不出是规则坏了还是话被省了。
+#   · 同样的 4 次调用，审计链 `rules_hit` **4/4 全记**（无状态）。
+#   ⇒ alert 级判据的证据源一律取审计链，不取 stderr。
+#
+# ★ 两个字段都要读：主判定写 `rules_hit: [...]`、summary 写 `hits[].rule_id`。
+#   只读一个会得到**恒空集**（`ci/inbox_guards_0514.py::_sec05_audit` 曾只读
+#   `rule_id`，长期读不到，靠 stdout 文案兜着 —— 0.57.0 步骤 C 修）。
+_AUDIT = {"cwd": None, "ids": frozenset(), "recs": (), "seq": 0}
+
+
+def _audit_snapshot(cwd):
+    """记下审计链各文件当前字节数 —— 用来只读「这一次调用新增了什么」。"""
+    d = os.path.join(str(cwd), ".psl", "audit")
+    snap = {}
+    if os.path.isdir(d):
+        for fn in os.listdir(d):
+            if fn.endswith(".jsonl"):
+                try:
+                    snap[fn] = os.path.getsize(os.path.join(d, fn))
+                except OSError:
+                    pass
+    return snap
+
+
+def _audit_since(cwd, snap):
+    """snapshot 之后新增的审计记录里出现过的规则 id（**唯一实现**）。
+
+    ★ 遍历的是**当前目录**的文件，不是 snapshot 的键：首次调用时审计目录
+      可能还不存在（snap 为空），而这次调用恰好**新建**了今天的 jsonl ——
+      只看 snapshot 就永远读不到首次那条（实测：第 1 次恒空、第 2 次起才有）。
+      对 snapshot 里没有的文件按 `off=0` 从头读。
+    ★ 返回 `(ids, recs)`：`ids` 给「命中了哪条规则」，`recs` 给「记录里还写了什么」
+      （如 post_tool_use 的 `canaries_observed`、`downgraded_from` —— 这些
+      只有读整条记录才看得到，只看 id 会把判据写成「名不副实」）。
+    """
+    d = os.path.join(str(cwd), ".psl", "audit")
+    ids = set()
+    recs = []
+    if not os.path.isdir(d):
+        return frozenset(), ()
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return frozenset(), ()
+    for fn in names:
+        if not fn.endswith(".jsonl"):
+            continue
+        off = snap.get(fn, 0)
+        p = os.path.join(d, fn)
+        try:
+            if os.path.getsize(p) <= off:
+                continue
+            with open(p, "rb") as f:
+                f.seek(off)
+                body = f.read().decode("utf-8", "replace")
+        except OSError:
+            continue
+        for ln in body.splitlines():
+            ln = ln.strip()
+            if not ln:
+                continue
+            try:
+                rec = json.loads(ln)
+            except ValueError:
+                continue
+            if isinstance(rec, dict):
+                recs.append(rec)
+            for rid in (rec.get("rules_hit") or []):
+                if isinstance(rid, str) and rid:
+                    ids.add(rid)
+            for h in (rec.get("hits") or []):
+                if isinstance(h, dict) and h.get("rule_id"):
+                    ids.add(str(h["rule_id"]))
+    return frozenset(ids), tuple(recs)
+
+
+def audit_ids():
+    """最近一次 `hook()` 调用在审计链里留下的规则 id 集合（**只读，不缓存**）。"""
+    return _AUDIT["ids"]
+
+
+def audit_records():
+    """最近一次 `hook()` 调用新增的**整条**审计记录（tuple of dict）。"""
+    return _AUDIT["recs"]
+
+
 def hook(tool, tool_input, cwd, script="pre_tool_use.py", extra=None, env=None):
     ev = {"session_id": "test-sess-0001", "transcript_path": str(cwd / "t.jsonl"),
           "tool_name": tool, "tool_input": tool_input}
@@ -373,7 +482,14 @@ def hook(tool, tool_input, cwd, script="pre_tool_use.py", extra=None, env=None):
     e = {"ANTINEL_CONFIG": str(iso), "ANTINEL_HOST_MIRROR": "0"}
     if env:
         e.update(env)
-    return run(script, cwd=cwd, stdin=json.dumps(ev, ensure_ascii=False), env=e)
+    _snap = _audit_snapshot(cwd)
+    r = run(script, cwd=cwd, stdin=json.dumps(ev, ensure_ascii=False), env=e)
+    _ids, _recs = _audit_since(cwd, _snap)
+    _AUDIT["cwd"] = str(cwd)
+    _AUDIT["ids"] = _ids
+    _AUDIT["recs"] = _recs
+    _AUDIT["seq"] += 1
+    return r
 
 
 def block_id(stdout, stderr):
@@ -652,10 +768,19 @@ def main():
     print("== T1 post_tool_use ==")
     rc, out, err, _ = hook("Bash", {"command": "cat cfg"}, proj, script="post_tool_use.py",
                             extra={"tool_response": {"stdout": "AWS_KEY=AKIAIOSFODNN7EXAMPLE\n"}})
-    record("OUT-01 secret in output -> alert, exit 0", rc == 0 and "[OUT-01]" in err, err.strip()[:80])
+    record("OUT-01 secret in output -> alert, exit 0", rc == 0 and "OUT-01" in audit_ids(),
+           "ids=%s err=%s" % (sorted(audit_ids()), err.strip()[:60]))
     rc, out, err, _ = hook("Read", {"file_path": "x"}, proj, script="post_tool_use.py",
                             extra={"tool_response": "content CANARY-sec01-a3f8b2c1 ok"})
-    record("C-01 canary observed, exit 0", rc == 0 and "WARNING" not in err)
+    # ★ 第 38 条：原断言只有 `"WARNING" not in err` —— 名字说「canary observed」，
+    #   实际只断言「没出 WARNING」，是**名不副实的弱负控**（stderr 空就恒绿）。
+    #   真证据在审计记录的 `canaries_observed` 字段里（post_tool_use 明写该键），
+    #   所以现在正控腿读它，WARNING 腿保留（守「canary 不应被升级成告警级」）。
+    _c01_seen = [c for _r in audit_records()
+                 for c in (_r.get("canaries_observed") or [])]
+    record("C-01 canary observed, exit 0",
+           rc == 0 and "CANARY-sec01-a3f8b2c1" in _c01_seen and "WARNING" not in err,
+           "canaries=%s ids=%s" % (_c01_seen, sorted(audit_ids())))
     rc, out, err, _ = hook("Bash", {"command": "ls"}, proj, script="post_tool_use.py",
                             extra={"tool_response": {"stdout": "a b c"}})
     record("post normal record", rc == 0 and err.strip() == "")
@@ -752,7 +877,8 @@ def main():
     ddeep = [f["file"] for f in json.loads(out)["findings"] if "deep" in f["file"]]
     record("C3 depth boundary: deeper-than-15 not scanned, no crash", rc == 0 and len(ddeep) == 0, str(ddeep)[:80])
     rc, out, err, _ = hook("Read", {"file_path": str(cok / "SKILL.md")}, proj)
-    record("A6 CTX-05 case-only not flagged (hook)", rc == 0 and "CTX-05" not in err)
+    record("A6 CTX-05 case-only not flagged (hook)", rc == 0 and "CTX-05" not in audit_ids(),
+           "ids=%s" % sorted(audit_ids()))
 
     print("== T2/T7 install / uninstall ==")
     cc = WORK / "cc_proj"
@@ -1175,7 +1301,8 @@ def main():
                  *hook("Bash", {"command": "python -c \"p = r'D:\\proj\\x.txt'; print(p)\""}, proj)[:3])
     rc, out, err, _ = hook("Bash", {"command": "curl https://t.co/rd/abc123"}, proj)
     record("0.16.0 DST-01 URL /rd/ segment is not a delete (NET-01 warns, no block)",
-           rc == 0 and "DST-01" not in err and "NET-01" in err, err.strip()[:80])
+           rc == 0 and "DST-01" not in audit_ids() and "NET-01" in audit_ids(),
+           "ids=%s" % sorted(audit_ids()))
 
     # --- C7 (ported): the length guard (>500 chars) drops the pattern --------
     c7 = WORK / "probe_c7"
@@ -1212,7 +1339,8 @@ def main():
     rc, out, err, _ = hook("Bash", {"command": "echo secret-marker"}, c7)
     logged = any('"CUSTOM-OK"' in l for f_ in c7.glob(".psl/audit/*.jsonl") for l in open(f_, encoding="utf-8"))
     record("C9 benign custom rule still loads and fires (read-only downgrade to alert)",
-           rc == 0 and "CUSTOM-OK" in err and logged, err.strip()[:60])
+           rc == 0 and "CUSTOM-OK" in audit_ids() and logged,
+           "ids=%s err=%s" % (sorted(audit_ids()), err.strip()[:50]))
     _discard(c7)
 
     # --- 0.33.1: G-6/G-7/G-8/G-9/G-11/G-12 观察项的存在性守卫 ---------------
@@ -2794,7 +2922,8 @@ def main():
     _dg = any('"downgraded_from"' in l for f in (_f1 / ".psl" / "audit").glob("*.jsonl")
               for l in open(f, encoding="utf-8", errors="replace"))
     record("W1-e specific-only：双泛化降级 alert + downgraded_from 留痕",
-           rc == 0 and "CTX-02" in err and _dg, "rc=%d err=%s" % (rc, err.strip()[:70]))
+           rc == 0 and "CTX-02" in audit_ids() and _dg,
+           "rc=%d ids=%s" % (rc, sorted(audit_ids())))
     rc, out, err = hook("Read", {"file_path": str(_f1 / ".cursorrules")}, _f1)[:3]
     record("E1-3 .cursorrules 高特异性单命中 → CTX-02 block",
            rc == 2 and "CTX-02" in (out + err), "rc=%d err=%s" % (rc, err.strip()[:70]))
@@ -2803,7 +2932,7 @@ def main():
            rc == 0 and out.strip() == "", "rc=%d out=%s" % (rc, out.strip()[:70]))
     rc, out, err = hook("Read", {"file_path": str(_f1 / ".cursor" / "rules" / "style.mdc")}, _f1)[:3]
     record("E1-5 .cursor/rules/*.mdc 长编码 → CTX-04 命中（.mdc 进指令面）",
-           rc == 0 and "CTX-04" in err, "rc=%d err=%s" % (rc, err.strip()[:70]))
+           rc == 0 and "CTX-04" in audit_ids(), "rc=%d ids=%s" % (rc, sorted(audit_ids())))
 
     # E1-7/E1-8：scan 侧同语义 + 指令集 parity
     _scan = subprocess.run([PY, str(PKG / "scripts" / "scan.py"), "--root", str(_f1), "--json",
@@ -2848,10 +2977,10 @@ def main():
                                  "env": {"API_KEY": "sk-probe-abcdefghijklmnop1234"}}},
     }, ensure_ascii=False, indent=1), encoding="utf-8")
     rc, out, err = hook("Write", {"file_path": str(_f1 / ".mcp.json"), "content": "{}"}, _f1)[:3]
-    record("M2-1 写 .mcp.json → MCP-01 alert", rc == 0 and "MCP-01" in err,
+    record("M2-1 写 .mcp.json → MCP-01 alert", rc == 0 and "MCP-01" in audit_ids(),
            "rc=%d err=%s" % (rc, err.strip()[:70]))
     rc, out, err = hook("Read", {"file_path": str(_f1 / ".cursor" / "mcp.json")}, _f1)[:3]
-    record("M2-2 读含投毒描述的 mcp.json → MCP-02 命中", rc == 0 and "MCP-02" in err,
+    record("M2-2 读含投毒描述的 mcp.json → MCP-02 命中", rc == 0 and "MCP-02" in audit_ids(),
            "rc=%d err=%s" % (rc, err.strip()[:70]))
     _mcpscan = subprocess.run([PY, str(PKG / "scripts" / "scan.py"), "--root", str(_f1), "--json"],
                               capture_output=True, text=True, encoding="utf-8",
@@ -2872,7 +3001,7 @@ def main():
            "ids=%s" % _mf_ids)
     rc, out, err = hook("Bash", {"command": "echo '{}' > .mcp.json"}, _f1)[:3]
     record("M2-5 Bash 重定向写 .mcp.json → MCP-01（command 通道）",
-           rc == 0 and "MCP-01" in err, "rc=%d err=%s" % (rc, err.strip()[:70]))
+           rc == 0 and "MCP-01" in audit_ids(), "rc=%d err=%s" % (rc, err.strip()[:70]))
     (_f1 / "claude_desktop_config.json").write_text("// comment, not strict JSON\n{\"mcpServers\": {}}",
                                                     encoding="utf-8")
     _mcpscan2 = subprocess.run([PY, str(PKG / "scripts" / "scan.py"), "--root", str(_f1), "--json"],
@@ -2909,10 +3038,10 @@ def main():
     _mk = _markers[0] if _markers else "CANARY-x-00000000"
     rc, out, err = hook("Read", {"file_path": str(_cdir / _mk)}, _c1)[:3]
     record("C1-2 读金丝雀 → SEC-11 alert（故意不拦）",
-           rc == 0 and "SEC-11" in err, "rc=%d err=%s" % (rc, err.strip()[:70]))
+           rc == 0 and "SEC-11" in audit_ids(), "rc=%d err=%s" % (rc, err.strip()[:70]))
     rc, out, err = hook("Bash", {"command": "type .canary\\%s" % _mk}, _c1)[:3]
     record("C1-3 Bash 读金丝雀 → SEC-11（command 通道）",
-           rc == 0 and "SEC-11" in err, "rc=%d err=%s" % (rc, err.strip()[:70]))
+           rc == 0 and "SEC-11" in audit_ids(), "rc=%d err=%s" % (rc, err.strip()[:70]))
     _pl2 = subprocess.run([PY, str(PKG / "antinel.py"), "canary", "plant"], cwd=str(_c1),
                           capture_output=True, text=True, encoding="utf-8",
                           errors="replace", timeout=120,
@@ -3026,13 +3155,13 @@ def main():
     (_s1 / ".psl" / "audit").mkdir(parents=True, exist_ok=True)
     rc, out, err = hook("Bash", {"command": "pip install reqests"}, _s1)[:3]
     record("S1-1 pip install 撞名包（reqests≈requests）→ SLOP-01 alert",
-           rc == 0 and "SLOP-01" in err, "rc=%d err=%s" % (rc, err.strip()[:80]))
+           rc == 0 and "SLOP-01" in audit_ids(), "rc=%d err=%s" % (rc, err.strip()[:80]))
     rc, out, err = hook("Bash", {"command": "pip install requests"}, _s1)[:3]
     record("S1-2 热门包本身 → allow 不留痕（负例）",
-           rc == 0 and "SLOP-01" not in (out + err), "rc=%d out=%s" % (rc, out.strip()[:50]))
+           rc == 0 and "SLOP-01" not in audit_ids(), "rc=%d ids=%s" % (rc, sorted(audit_ids())))
     rc, out, err = hook("Bash", {"command": "pip install some-totally-new-pkg-xyz-abc"}, _s1)[:3]
     record("S1-3 全新生僻包 → 不判（诚实边界：只防撞名牌，不预言新包）",
-           rc == 0 and "SLOP-01" not in (out + err), "rc=%d out=%s" % (rc, out.strip()[:50]))
+           rc == 0 and "SLOP-01" not in audit_ids(), "rc=%d ids=%s" % (rc, sorted(audit_ids())))
 
     # ============ 0.32.1 对抗性边界：只打自家实现的软肋，不做 happy-path 巡游 ==========
     import datetime as _dt
@@ -3079,11 +3208,11 @@ def main():
 
     # ---- X3：MCP-01 收紧后的读写判据 ----
     rc, out, err = hook("Bash", {"command": "cat .cursor/mcp.json"}, _f1)[:3]
-    record("X3-a MCP-01 负例：cat（纯读取）不再命中写形态", rc == 0 and "MCP-01" not in (out + err),
-           "rc=%d outerr=%s" % (rc, (out + err).strip()[:80]))
+    record("X3-a MCP-01 负例：cat（纯读取）不再命中写形态", rc == 0 and "MCP-01" not in audit_ids(),
+           "rc=%d ids=%s" % (rc, sorted(audit_ids())))
     rc, out, err = hook("Bash", {"command": "echo x > .cursor/mcp.json"}, _f1)[:3]
-    record("X3-b MCP-01 正例：重定向写仍命中", rc == 0 and "MCP-01" in err,
-           "rc=%d err=%s" % (rc, err.strip()[:80]))
+    record("X3-b MCP-01 正例：重定向写仍命中", rc == 0 and "MCP-01" in audit_ids(),
+           "rc=%d ids=%s err=%s" % (rc, sorted(audit_ids()), err.strip()[:60]))
 
     # ---- X4：SKILL.md 单泛化命中回归（compound 不得削弱既有 SKILL.md 行为） ----
     (_f1 / "skills" / "demo").mkdir(parents=True, exist_ok=True)

@@ -261,6 +261,11 @@ git add -- <5 件>                     # 索引对齐，status 归零
 注意：去重本身是**设计**，不是缺陷；错的是判据把「可见性」当成无状态的常量来断言。修法优先在判据侧（每个用例独立 home，与 35 同一修法）；**不建议**给产品加 `ANTINEL_NOTICE_NODEDUP` 这类测试专用开闸口——那是为测试给生产开口子。
 判法：同一用例连跑 3 次，结论必须完全一致；跑一次不算。
 
+> **已修（0.57.0 步骤 E，提交见 §7.5）**。修法比原计划更省：不是「每个用例独立 home」，而是**每次运行中枢目录唯一**（`ANTINEL_HUB_DIR` 带 pid+毫秒后缀）。
+> **实测证据比原来更硬**：沙箱账本里抓到 `MCP-01 total=9 used=0 dup=9` —— 9 次请求 **0 次出声**；`MCP-02`/`NET-01`/`SLOP-01` 同样 `used=0`。那一刻起 harness 里 6 条读 stderr 的 alert 判据**必红**，而它们上一轮还是绿的。
+> **同时发现第二条机制**（原条目没写到）：除「同片段一天一次」之外，`notice_budget_gate` 还给单条规则**一小时 3 次**配额（`host_shield.NOTICE_BUDGET_MAX = 3`）。所以光隔离也不够——一次 harness 里 `MCP-01` 出现 3 次，**刚好用尽，加一条判据就红**。⇒ 判据侧必须改读审计链（第 38 条）。
+> **诚实标注**：本次只修了「跨运行」；「运行内」的去重仍在（那是设计），所以判据不许再依赖 stderr。
+
 **37.** **`_slop_hit` 的「编辑距离 ≤2」对短名过宽，产生误报**（0.57.0 步骤 C 实测）：`pip install foo` 报 `foo ≈ tox, 距离 2`；`pip install bar` 同类。3 字名的距离 2 实际上把整个短名空间都算作可疑。**这是误报，不是漏报**，而 `SLOP-01` 是 `alert` 级（不拦），所以危害是噪声而非阻断 —— 但"会误报的检查器用两次就没人信"这条对它是成立的。
 判法（两条腿都要）：① 一组**短名正常包**（`foo`/`bar`/`uv`/`aws`/`x`/`six`）必须**不响**；② 一组**真撞名**（`reqeusts`/`numppy`/`flaskk`/`reacct`）必须响。修法方向：字号 ≤4 时要求距离 ≤1 或相似度 ≥0.9，短名不参与"距离 2"判定。**注意**：改这条会改运行时行为（报警集合变化）⇒ 按规矩单独一步、单独出判据、单独升版。
 证据：`output/_a9_notebook_repro.py` 同目录下的 `_slop` 实测输出（本清单 §7.3）。
@@ -274,6 +279,13 @@ git add -- <5 件>                     # 索引对齐，status 归零
 > 顺带补参考集：`psycopg`（真实包，此前只收了 `psycopg2`，导致 `psycopg ≈ psycopg2` 这条任何阈值都挡不住的误报），参考集升 `2026.10`。
 
 **38.** **判据拿有状态的 stderr 当证据（同类普查未做）**（0.57.0 步骤 C 实测并修了一条）：A9 三条原本断言 `"CTX-02" in err`，而 stderr 受「同规则同命中一天一次」的提醒合并影响、内容会变 ⇒ 判据时红时绿，且红了分不清是 `rc` 不对还是文案没出现。已改走 `expect_block`（id 取 stdout 的 `{"decision":"block"}`）。**但同类还有多少条没数过** —— 判法：`grep -n 'in err' scripts/verification_tests.py` 逐条判断是否依赖"告警可见性"，依赖的一律改走结构化输出。**不许用"跑一遍是绿的"结案**（这正是 36 条说的时红时绿）。
+
+> **已结案（0.57.0 步骤 E，提交见 §7.5）。** 普查结果：`ci/ + scripts/` 共 **46 处**把 `err` 放进断言，按 `rc` 分三类——
+> **block 11 处（安全）**：`emit_block()` 无条件写 stderr 并 `sys.exit(2)`，gate 只挡气泡不挡 stderr，所以 `rc == 2 and "X" in err` 站得住（实测连跑 3 次全可见）；
+> **alert 正向 17 处 / 负向 10 处（有状态）**：走 `if notice_gate(...): continue`，整条 stderr 被跳过。
+> 处置：**16 条改读审计链**（`audit_ids()` / `audit_records()`），2 条本来就是测去重（A12，保留），其余按 `loop`（审计写不进去，用它做证据是循环依赖）/`subject`（被测对象就是提醒行为）/`precheck`（规则未加载、无命中可读）三类登记。
+> 顺带把一条**名不副实的弱判据**改成真判据：`C-01 canary observed` 原本只断言 `"WARNING" not in err`（stderr 空就恒绿），现在读审计记录的 `canaries_observed` 字段。
+> 新增四条守卫 `C-S38a/b/c/d`（形态白名单双向校验 / 中枢唯一 / 读数无状态自证 / 牙齿）。
 
 **39.** **`_sec05_audit` 只读一个键，导致 `ids` 长期恒空**（0.57.0 步骤 C 实测并修）：主判定记录写 `rules_hit: ["SEC-02"]`、summary 写 `hits[].rule_id`，旧读数只认 `rule_id` ⇒ 空集。SEC-05a 之所以"过"，是因为它还有一条 stdout 文案腿兜着 —— **巧合，不是同源**。已改为三处读齐、一处实现。
 留一条教训而不是留一条待办：**"读数返回空集"与"确实没有命中"长得一模一样**。任何按 id 判断的判据，必须自带一腿证明读数读得到东西（与 `C-M1` 的分辨率自证同法）。
@@ -547,3 +559,61 @@ sdist  antinel-0.56.0.tar.gz（扫描文本成员 246 个）：三处同样齐
 **读数**：0514 **262 绿 / 0 红 / 0 跳过**（260 ＋ 2）；0490 **138 / 0**；regression **31/31**；harness 第一遍 321/323（judgment 陈旧，且**判据自己点名了** `hooks/pre_tool_use.py` 与 `rules/typosquat_top.json` 两个文件）、第二遍 **323/323 PASS**；manifest 重签 2 条。
 
 证据：`output/tests/0.57.0/slop_policy_matrix.json`（四方案对照 ＋ 真入口交叉验证）、`slop_threshold_matrix.json`、`gate_slop.log`、`regression_slop.log`、`harness_slop_{1,2}.log`、`slop_chain.txt`；探针 `output/_slop_matrix2.py`、`output/_slop_matrix.py`、`output/_slop_ab.py`。
+
+### 7.5 步骤 E：第 38 条 —— 判据不再把有状态的 stderr 当证据（本轮）
+
+**起点也是一个数。** 老条目写的是「A9 那三条已改成结构化输出，但同类还有多少条没数过」。数出来：`ci/` + `scripts/` 共 **46 处**把 `err` 放进断言。
+
+**分三类，不是一刀切。** 关键在读清 `pre_tool_use.py` 的两条 stderr 通路：
+
+| 通路 | 代码位置 | 是否受 gate 影响 | 判据能不能读 |
+|---|---|---|---|
+| block | `emit_block()` → 无条件 `sys.stderr.write(reason)` + `sys.exit(2)` | **否**（gate 只挡主人气泡，不挡 stderr） | 能 |
+| alert | `if notice_gate(...): continue` → 整条 stderr 被跳过 | **是** | 不能 |
+
+⇒ **block 11 处安全，alert 27 处有状态。**
+
+**三组实测，把「理论风险」变成「已发生的事故」：**
+
+1. **同一路径连跑 4 次**：stderr 第 1 次可见、第 2–4 次**全空**；审计链 `rules_hit` **4/4 全记**。
+2. **沙箱账本现场取证**：`MCP-01 total=9 used=0 dup=9`、`MCP-02/NET-01/SLOP-01` 全部 `used=0`。也就是说**那一刻起，harness 里 6 条 alert 判据必红**，而上一轮它们还是绿的。
+3. **原条目没写到的第二条机制**：`notice_budget_gate` 还给单条规则**一小时 3 次**配额（`NOTICE_BUDGET_MAX = 3`）。一次 harness 里 `MCP-01` 出现 3 次——**刚好用尽，再添一条判据就红**。所以光靠隔离不够。
+
+**处置两层，缺一不可：**
+
+| 层 | 改动 | 治什么 |
+|---|---|---|
+| ① 隔离 | `scripts/verification_tests.py` 顶部 `ANTINEL_HUB_DIR` 加 pid+毫秒唯一后缀 | 治**跨运行**累积（原来 hub 挂在固定 WORK 下，账本越跑越满） |
+| ② 换源 | 16 条判据改读 `audit_ids()` / `audit_records()`（审计链，无状态） | 治**运行内**静默（配额 3 次，同一个 id 出现第 4 次就空） |
+
+**白名单 11 条，每条必须有理由**（不是「先放过去」）：
+
+| 类别 | 含义 | 条数 |
+|---|---|---|
+| `loop` | 审计写失败——用它做证据是**循环依赖** | 4 |
+| `subject` | **被测对象就是提醒行为本身**（A12 报一次/不重复、F-06 抑制、C-01 不升级） | 4 |
+| `precheck` | 规则未加载 / 输入无效，审计链无命中可读 | 3 |
+
+**顺带修掉一条名不副实的判据。** `C-01 canary observed` 原本只断言 `"WARNING" not in err` —— 名字说「canary observed」，实际只断言「没出 WARNING」，而 stderr 空它就恒绿。真证据在 `post_tool_use` 写的 `canaries_observed` 字段里，现在正控腿读它，WARNING 腿保留。
+
+**四条守卫（并入 0514）：**
+
+| 判据 | 守什么 |
+|---|---|
+| `C-S38a` | 形态扫描：`rc == 0` 且断言依赖 stderr 的地方必须逐条登记，**且登记了但代码里已没有 ⇒ 也要摘掉**（双向，否则白名单会长成免死金牌） |
+| `C-S38b` | `ANTINEL_HUB_DIR` 必须带唯一后缀（防把定时炸弹装回去）；`audit_ids/audit_records/_audit_since` 必须在位 |
+| `C-S38c` | 读数**无状态自证**：三次连读 3/3 有 MCP-01，且干净输入读不到（有分辨力） |
+| `C-S38d` | 牙齿：未登记的 stderr 断言 / 固定中枢路径 / 缺读数辅助 —— 三种退化各塞一个，同一实现必须报出来 |
+
+**两个自我纠错（都发生在写守卫的时候）：**
+
+1. **`C-S38c` 第一次红是量具的错**：`_fire()` 读的是**全部**审计记录，于是第 4 次写普通文件也读到前 3 次的 MCP-01 ⇒ 判成「无分辨力」。改成**只读增量**（先记字节位置）。这和第 38 条本身是同一个病：**读数不隔离，就会把历史当成现在**。
+2. **`C-S38b` 第一次红是正则只抓一行**：`getpid()` 在赋值语句的下一行，`(.+)` 抓不到。改成跨行抓取。
+
+还有一处**先踩后认**：`_audit_since` 第一版只遍历 snapshot 里已有的文件，而首次调用时审计目录还不存在（snap 为空）⇒ **第 1 次恒空、第 2 次起才有**。改成遍历当前目录、对 snap 里没有的文件按 `off=0` 从头读。如果没做那三条腿的探针就直接改 16 处，会得到「第一遍红、第二遍绿」的假象，然后被误判成 judgment 陈旧。
+
+**读数**：0514 **266 绿 / 0 红 / 0 跳过**（262 ＋ 4）；0490 **138 / 0**；regression **31/31**；harness 第一遍 1 条红（judgment 陈旧，`verification_tests.py` 被改过）、第二遍 **323/323 PASS**；manifest 重签 1 条。
+
+**未修（诚实标注）**：第 35 条的 `USERPROFILE` 仍未隔离——本轮只隔离了 `ANTINEL_HUB_DIR`（`notice_gate` 用它，够解决第 36/38 条），但 `expanduser("~")` 还有别的消费者。那条仍是空的。
+
+证据：`output/tests/0.57.0/`（`s38_chain.txt`、`harness_s38_{1,2}.log`、`gate_s38.log`、`regression_s38.log`）；探针 `output/_stderr_gate_probe.py`（衰减实测）、`output/_s38_audit_source.py`（审计链 vs stderr 对照）、`output/_s38_audit_ids_probe.py`（三条腿）、`output/_s38_precheck.py`（改前 13 腿预验证）、`output/_s38_apply.py`（精确片段替换）。

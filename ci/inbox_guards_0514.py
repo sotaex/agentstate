@@ -10275,5 +10275,280 @@ def c_m1():
     return True
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+#  C-S38 · 告警可见性有状态：判据不许把 stderr 当证据（第 38 条）
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# 病灶（2026-10-25 实测，不是推断）：
+#   `notice_gate` 按 `(rule_id, snippet[:60])` **一天只出声一次**；
+#   `notice_budget_gate` 又给单条规则**一小时 3 次**配额
+#   （`host_shield.NOTICE_BUDGET_MAX = 3`）。
+#   于是 `rc == 0 and "X" in err` 这类断言，实际测的是
+#   「今天/这一小时内这条规则**还没**被提醒过」——与规则本身好不好无关。
+#
+#   实测证据（同一路径连跑 4 次）：stderr 第 1 次可见、第 2–4 次**全空**；
+#   而在沙箱账本里抓到 `MCP-01 total=9 used=0 dup=9`（9 次请求 0 次出声）、
+#   `MCP-02/NET-01/SLOP-01` 同样 `used=0`。那一刻起，
+#   harness 里 6 条读 stderr 的 alert 判据**必红**，而它们上一轮还是绿的。
+#
+# 处置（两层，缺一不可）：
+#   ① 每次运行中枢唯一 ⇒ 跨运行不累积（`scripts/verification_tests.py` 顶部）；
+#   ② 判据改读**审计链**（`audit_ids()` / `audit_records()`，无状态）。
+#   ② 才是根治：同一次运行内同一条规则仍会静默（配额 3 次，而 `MCP-01`
+#   在一次 harness 里出现 3 次 —— 刚好用尽，加一条就红）。
+#
+# 本族守的就是「别退回去」：
+#   C-S38a  形态扫描：`rc == 0` 且断言依赖 stderr 的地方，**必须逐条登记**，
+#           且登记的理由必须是上面三类之一；登记了但代码里已经没有 ⇒ 也要
+#           摘掉（双向校验，否则白名单会长成免死金牌）。
+#   C-S38b  中枢唯一性：`ANTINEL_HUB_DIR` 必须带唯一后缀（防止有人改回固定路径，
+#           那等于把定时炸弹装回去）。
+#   C-S38c  量具有分辨率：审计链读数在「该命中」时读得到、「干净输入」时读不到，
+#           且**连跑两次都读得到**（无状态自证 —— 若它也衰减，它就不比 stderr 好）。
+
+#: 允许继续依赖 stderr 的判据 —— 判据名 : 理由类别
+#: 三类理由：`loop`（审计链写不进去，用它做证据是循环依赖）、
+#:          `subject`（**被测对象就是提醒行为本身**）、`precheck`（规则未加载/输入无效，无命中可读）
+_S38_ALLOW = {
+    "0.17.0 P-A5 audit loss says AUDIT_WRITE_FAILED and stays fail-open": "loop",
+    "0.17.0 P-A5 baseline write is verified (no AUDIT_WRITE_FAILED)": "loop",
+    "0.18.0 R-18 writable audit + fail_closed=true -> normal allow": "loop",
+    "A-08 invalid JSON -> allow": "precheck",
+    "A12 policy.json edited out of band is reported once": "subject",
+    "A12 the same policy change is not repeated on every call": "subject",
+    "C-01 canary observed, exit 0": "subject",
+    "C7 pathological custom pattern rejected loudly (length guard + quantifier screen)": "precheck",
+    "C9 %s ReDoS pattern %r rejected, hook not wedged": "precheck",
+    "F-06 alert_threshold=critical suppresses stderr notice but still logs": "subject",
+    "X13-a 完整性回退：保护不缩水（MCP-02 仍告警）且降级被声明": "loop",
+}
+
+_S38_VT = "scripts/verification_tests.py"
+
+
+def _s38_sterr_asserts(src):
+    """返回 `rc == 0` 且断言里拿 stderr 当证据的判据名列表（AST 口径）。
+
+    ★ 用 AST 而不是正则：注释里出现 `in err` 不算（本仓「去注释才算」纪律）。
+    """
+    tree = ast.parse(src)
+    out = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        nm = getattr(node.func, "id", getattr(node.func, "attr", ""))
+        if nm not in ("record", "expect_block", "expect_allow"):
+            continue
+        seg = ast.get_source_segment(src, node) or ""
+        if "rc == 0" not in seg:
+            continue
+        if not re.search(r"(\bin|\bnot\s+in)\s+\(?\s*(out\s*\+\s*)?err\b", seg):
+            continue
+        m = re.match(r"\w+\(\s*\"([^\"]*)\"", seg)
+        if m:
+            out.append(m.group(1))
+    return out
+
+
+@check("C-S38a 判据不得把有状态的 stderr 当证据（双向白名单）")
+def c_s38a():
+    p = os.path.join(ROOT, _S38_VT)
+    if not os.path.isfile(p):
+        return "夹具不成立：%s 不存在" % _S38_VT
+    src = io.open(p, encoding="utf-8").read()
+    try:
+        found = _s38_sterr_asserts(src)
+    except SyntaxError as e:
+        return "%s 语法错误，扫不了：%s" % (_S38_VT, e)
+
+    unregistered = [n for n in found if n not in _S38_ALLOW]
+    stale = [n for n in _S38_ALLOW if n not in found]
+
+    if unregistered:
+        return ("%d 条判据把 stderr 当证据且未登记。alert 级提醒**有状态**："
+                "同一片段一天只出声一次、单规则一小时 3 次配额 ⇒ 这类断言"
+                "「前几次绿、之后全红」，红的时候还看不出是谁的错。"
+                "改法：读审计链 `audit_ids()` / `audit_records()`（无状态）。"
+                "确属以下三类才可登记进 `_S38_ALLOW`：loop（审计写不进去）、"
+                "subject（被测对象就是提醒行为）、precheck（无命中可读）。\n      %s"
+                % (len(unregistered), "\n      ".join(unregistered)))
+    if stale:
+        return ("白名单里有 %d 条已经不再是那个形态（判据改名/已改读审计链），"
+                "必须摘掉 —— 否则白名单会长成免死金牌：\n      %s"
+                % (len(stale), "\n      ".join(stale)))
+    _note("依赖 stderr 的 %d 条全部有登记理由（loop/subject/precheck），无未登记项"
+          % len(found))
+    return True
+
+
+def _s38_hub_problem(body):
+    """`verification_tests.py` 源码里「中枢唯一」是否成立。返回问题描述或 None。
+
+    ★ 抽成纯函数是为了**牙齿**（C-S38d）：负控要能换掉同一实现，
+      而不是另写一份判定 —— 否则牙齿测的是副本，不是真判据。
+    """
+    hits = []
+    for m in re.finditer(r'os\.environ\["ANTINEL_HUB_DIR"\]\s*=\s*(.{0,160})', body, re.S):
+        hits.append(m.group(1))
+    if not hits:
+        return "找不到 `os.environ[\"ANTINEL_HUB_DIR\"]` 的赋值 —— 套件没有隔离中枢"
+    first = hits[0].split("\n\n")[0]
+    if "getpid()" not in first or "%d" not in first:
+        return ("中枢目录**不再唯一**：%s\n"
+                "      ⇒ 状态会跨运行累积，读 stderr 的判据会变成"
+                "「同一小时前几次绿、之后全红」的定时炸弹（实测 MCP-01 dup=9）。"
+                % " ".join(first.split())[:120])
+    for fn in ("def audit_ids(", "def audit_records(", "def _audit_since("):
+        if fn not in body:
+            return "缺少 `%s` —— alert 级判据没有无状态证据源" % fn.strip()
+    return None
+
+
+@check("C-S38b 中枢每次运行唯一（防把定时炸弹装回去）")
+def c_s38b():
+    p = os.path.join(ROOT, _S38_VT)
+    if not os.path.isfile(p):
+        return "夹具不成立：%s 不存在" % _S38_VT
+    bad = _s38_hub_problem(io.open(p, encoding="utf-8").read())
+    if bad:
+        return bad
+    _note("中枢目录带 pid+毫秒唯一后缀；audit_ids/audit_records 均在位")
+    return True
+
+
+@check("C-S38c 审计链读数有分辨力且无状态（三次连读，同一入口）")
+def c_s38c():
+    """★ 这条是 C-S38a/b 的**前提**：如果审计链也衰减，那换过去等于没换。
+
+    腿① 该命中时读得到（MCP-01 alert —— 正是 stderr 会静默的那一类）
+    腿② 干净输入时读不到（同一入口，证明不是「凡调用都算命中」）
+    腿③ 连跑三次都读得到（无状态；stderr 在第 2 次起就空了）
+    """
+    import subprocess
+    base = _TMPREG.tmpdir(prefix="g0514_s38c_")
+    proj = os.path.join(base, "proj")
+    os.makedirs(os.path.join(proj, ".vscode"), exist_ok=True)
+    iso = os.path.join(proj, ".psl", "antinel_isolated.json")
+    os.makedirs(os.path.dirname(iso), exist_ok=True)
+    with io.open(iso, "w", encoding="utf-8") as f:
+        json.dump({"workspace_roots": []}, f)
+    hook = os.path.join(ROOT, "hooks", "pre_tool_use.py")
+
+    def _fire(tool, ti):
+        ev = {"session_id": "s38c", "transcript_path": os.path.join(proj, "t.jsonl"),
+              "tool_name": tool, "tool_input": ti}
+        env = dict(os.environ, ANTINEL_CONFIG=iso, ANTINEL_HOST_MIRROR="0")
+        env.pop("PYTHONPATH", None)
+        # ★ 必须读**增量**：读全量会把前几次的 MCP-01 一起读进来，
+        #   于是「第 4 次写普通文件」也报 MCP-01 —— 那是量具的错，不是规则错。
+        ad = os.path.join(proj, ".psl", "audit")
+        snap = {}
+        if os.path.isdir(ad):
+            for fn in os.listdir(ad):
+                if fn.endswith(".jsonl"):
+                    try:
+                        snap[fn] = os.path.getsize(os.path.join(ad, fn))
+                    except OSError:
+                        pass
+        p = subprocess.run([sys.executable, "-E", "-X", "utf8", hook], cwd=proj,
+                           env=env, input=json.dumps(ev, ensure_ascii=False),
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=180)
+        ids = set()
+        if os.path.isdir(ad):
+            for fn in os.listdir(ad):
+                if not fn.endswith(".jsonl"):
+                    continue
+                fp = os.path.join(ad, fn)
+                off = snap.get(fn, 0)
+                try:
+                    if os.path.getsize(fp) <= off:
+                        continue
+                    with io.open(fp, "rb") as f:
+                        f.seek(off)
+                        body = f.read().decode("utf-8", "replace")
+                except OSError:
+                    continue
+                for ln in body.splitlines():
+                    ln = ln.strip()
+                    if not ln:
+                        continue
+                    try:
+                        rec = json.loads(ln)
+                    except ValueError:
+                        continue
+                    for x in (rec.get("rules_hit") or []):
+                        if isinstance(x, str):
+                            ids.add(x)
+                    for h in (rec.get("hits") or []):
+                        if isinstance(h, dict) and h.get("rule_id"):
+                            ids.add(str(h["rule_id"]))
+        return p.returncode, p.stderr, ids
+
+    seen = []
+    for _ in range(3):
+        rc, err, ids = _fire("Write", {"file_path": os.path.join(proj, ".mcp.json"),
+                                       "content": "{}"})
+        seen.append(("MCP-01" in ids, "MCP-01" in (err or "")))
+    rc, err, ids = _fire("Write", {"file_path": os.path.join(proj, "notes.txt"),
+                                   "content": "hello"})
+
+    audit_all = all(a for a, _ in seen)
+    stderr_any = any(s for _, s in seen)
+    clean = "MCP-01" not in ids
+    if not audit_all:
+        return ("审计链读数衰减了：三次连读实得 %s —— 它不比 stderr 好，"
+                "C-S38a 的改法失去依据" % [a for a, _ in seen])
+    if not clean:
+        return ("审计链读数没有分辨力：写一个普通文件也报 MCP-01（实得 %s）"
+                " ⇒ 它不能当证据" % sorted(ids))
+    _note("三次连读审计链 3/3 有 MCP-01（同期 stderr 可见 %d/3）；"
+          "干净输入读不到 ⇒ 无状态且有分辨力" % (3 if stderr_any else 0))
+    return True
+
+
+@check("C-S38d 牙齿：把这两种退化各塞一个，同一判据必须翻红")
+def c_s38d():
+    """改坏**同一实现**，看它会不会说话 —— 换一份副本去测等于没测。
+
+    三颗牙：
+      ① 新增一条 `rc == 0 and "X" in err` 且不登记 ⇒ C-S38a 口径必须报出来
+      ② 把中枢改回固定路径 ⇒ `_s38_hub_problem` 必须报出来
+      ③ 把 `audit_ids()` 删掉 ⇒ `_s38_hub_problem` 必须报出来
+    """
+    silent = []
+
+    # ① 未登记的新形态
+    fake_src = (
+        "def x():\n"
+        "    record(\"ZZZ 新判据\", rc == 0 and \"SEC-09\" in err, \"\")\n"
+    )
+    got = _s38_sterr_asserts(fake_src)
+    if "ZZZ 新判据" not in got:
+        silent.append("① 扫描器看不见新增的 `rc == 0 and \"X\" in err`（实得 %r）" % got)
+    elif "ZZZ 新判据" in _S38_ALLOW:
+        silent.append("① 白名单莫名其妙收录了假判据名")
+
+    # ② 中枢改回固定路径（**这是本次修复的东西**）
+    fixed_hub = 'os.environ["ANTINEL_HUB_DIR"] = str(WORK / "hub")\n' \
+                "def audit_ids(:\n"
+    p2 = _s38_hub_problem('os.environ["ANTINEL_HUB_DIR"] = str(WORK / "hub")\n'
+                          'def audit_ids():\ndef audit_records():\ndef _audit_since():')
+    if p2 is None:
+        silent.append("② 中枢写成固定路径（%s）却没被报出来" % fixed_hub.split("=")[-1].strip())
+
+    # ③ 读数辅助消失
+    p3 = _s38_hub_problem('os.environ["ANTINEL_HUB_DIR"] = str(WORK / ("hub-%d" % '
+                          'os.getpid()))\n')
+    if p3 is None:
+        silent.append("③ 删掉 audit_ids 等辅助后仍判通过 ⇒ 那条腿没有真的在查")
+
+    if silent:
+        return ("牙齿失效 —— 改坏了却仍然绿，说明这几条判据没有分辨力：\n      "
+                + "\n      ".join(silent))
+    _note("三颗牙全部咬住：未登记的 stderr 断言 / 固定中枢路径 / 缺读数辅助")
+    return True
+
+
 if __name__ == "__main__":
     sys.exit(main())
