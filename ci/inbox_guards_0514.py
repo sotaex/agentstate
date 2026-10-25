@@ -9476,8 +9476,27 @@ def main(argv=None):
     if only:
         print("⚠ 非全量：只跑前缀 %s —— 这几条的绿**不能**当交付证据" % ("／".join(only)))
     print("=" * 78)
+    # ★★ 2026-10-25：`ANTINEL_SLICE=k/n` —— **只为本机的单次运行时限**分片
+    #   （本机前台命令 10 分钟被 SIGTERM；本套件实测 9.5–10.5 分钟，卡在线上）。
+    #   ★ 这不是放宽判定：分片只决定"这一次跑哪些"，每条判据本身一字不改；
+    #     分片时必须**手工把各片的绿/红/跳过相加并与总部数对账**（否则就是
+    #     假绿第十三族⑧「累计条数不数」）。不设这个变量 ⇒ 行为与以前完全一致。
+    _slice = os.environ.get("ANTINEL_SLICE")
+    _k = _n = None
+    if _slice:
+        try:
+            _k, _n = [int(x) for x in _slice.split("/")]
+            if not (0 <= _k < _n):
+                raise ValueError(_slice)
+        except Exception:                                       # noqa: BLE001
+            print("ANTINEL_SLICE 形如 0/3（实得 %r）" % (_slice,), file=sys.stderr)
+            return 2
+        print("⚠ 分片：本次只跑第 %d/%d 片（其余不跑，**不能**单独当交付证据）"
+              % (_k, _n))
     ok = fail = skip = 0
-    for name, fn in RESULTS:
+    for _idx, (name, fn) in enumerate(RESULTS):
+        if _n is not None and _idx % _n != _k:
+            continue
         if only and not any(name.startswith(p) for p in only):
             continue
         try:
@@ -9499,8 +9518,10 @@ def main(argv=None):
             print("  💥 %-62s %r" % (name, e), flush=True)
             fail += 1
     print("-" * 78)
-    print("  %d 绿 / %d 红 / %d 跳过%s" % (ok, fail, skip,
-                                          "（非全量）" if only else ""))
+    print("  %d 绿 / %d 红 / %d 跳过%s%s" % (
+        ok, fail, skip,
+        "（非全量）" if only else "",
+        "（第 %d/%d 片）" % (_k, _n) if _n is not None else ""))
     return 0 if fail == 0 else 1
 
 
@@ -10411,7 +10432,7 @@ def _s38_hub_problem(body):
     return None
 
 
-#: 子进程探针：按文件路径导入套件模块，打印它给自己设的中枢路径。
+#: 子进程探针：按文件路径导入套件模块，打印它给自己设的**中枢**与**工作目录**。
 #: ★ 用 importlib 而不是 `import verification_tests`：负控要对**变异副本**跑同一入口，
 #:   副本不在 sys.path 上。`ANTINEL_PKG` 指真仓，因为套件会校验包根结构。
 _S38_HUB_PROBE = (
@@ -10420,47 +10441,79 @@ _S38_HUB_PROBE = (
     "m=importlib.util.module_from_spec(spec)\n"
     "spec.loader.exec_module(m)\n"
     "print('HUBPATH=' + os.environ.get('ANTINEL_HUB_DIR',''))\n"
+    "print('WORKPATH=' + str(getattr(m, 'WORK', '')))\n"
 )
 
 
-def _s38_hub_of(vt_path):
-    """跑一个**独立进程**导入 `vt_path`，返回它给自己设的中枢路径（失败返 ""）。"""
+def _s38_paths_of(vt_path, work_env):
+    """跑一个**独立进程**导入 `vt_path`，返回 `(中枢, WORK)`（失败返 `("", "")`）。
+
+    ★ 两个进程**故意给同一个** `ANTINEL_WORK`：这模拟的正是实测那一幕 ——
+      本机后台启动会把同一条命令再拉起一次，第二个套件进程继承同一个
+      `ANTINEL_WORK`。若 WORK 只在"每次 run"粒度唯一，两进程就共用一份
+      `proj/` 夹具 ⇒ 实测 `0.23.1 credits snapshot chained` 数到 2 条而假红。
+    """
     import subprocess
     env = dict(os.environ)
     env["ANTINEL_PKG"] = ROOT
-    env.pop("ANTINEL_WORK", None)          # 不吃调用者的 WORK：每次自己算
+    env["ANTINEL_WORK"] = work_env
     try:
         r = subprocess.run([sys.executable, "-E", "-X", "utf8",
                             "-c", _S38_HUB_PROBE % str(vt_path)],
                            capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=300, env=env, cwd=ROOT,
                            creationflags=(0x08000000 if os.name == "nt" else 0))
-    except Exception as exc:                                     # noqa: BLE001
-        return ""
+    except Exception:                                           # noqa: BLE001
+        return "", ""
+    hub = work = ""
     for line in (r.stdout or "").splitlines():
         if line.startswith("HUBPATH="):
-            return line[len("HUBPATH="):].strip()
-    return ""
+            hub = line[len("HUBPATH="):].strip()
+        elif line.startswith("WORKPATH="):
+            work = line[len("WORKPATH="):].strip()
+    return hub, work
+
+
+def _s38_hub_of(vt_path):
+    """兼容旧调用：只要中枢。"""
+    return _s38_paths_of(vt_path, os.path.join(
+        _TMPREG.tmpdir(prefix="g0514_s38w_"), "work"))[0]
 
 
 def _s38_hub_unique(vt_path):
-    """**行为腿**：两次独立运行必须拿到**不同**中枢，且都不落在真实家目录。
+    """**行为腿**：同一份 `ANTINEL_WORK` 下，两次独立运行必须拿到**不同**的
+    中枢**和不同**的 WORK，且都不落在真实家目录。
 
     返回问题描述或 None。
 
     ★ 为什么必须真跑：唯一性是个**运行期性质**（`pid`+毫秒），
       静态文本再怎么读都只能读到「像唯一」。而同进程 reload 不行 ——
       同 pid 下毫秒可能不同，那证明的是「每次求值都变」，不是「跨运行唯一」。
+    ★ 为什么连 WORK 一起验：中枢唯一只解决"提醒账不串"，WORK 唯一才解决
+      "两进程不共用夹具"。实测（第 39 条）先只隔离了枢纽，结果
+      `credits snapshot` 判据数到 2 条 —— 症状是"每次红的项都不同"。
     """
-    hubs = [_s38_hub_of(vt_path) for _ in range(2)]
-    if not all(hubs):
-        return ("读不出中枢路径（两次实得 %r）—— 探针没能导入套件模块，"
-                "**这不是通过，是盲区**" % (hubs,))
+    same_work = os.path.join(_TMPREG.tmpdir(prefix="g0514_s38w_"), "work")
+    got = [_s38_paths_of(vt_path, same_work) for _ in range(2)]
+    hubs = [g[0] for g in got]
+    works = [g[1] for g in got]
+    if not all(hubs) or not all(works):
+        return ("读不出中枢/WORK（两次实得 %r）—— 探针没能导入套件模块，"
+                "**这不是通过，是盲区**" % (got,))
     if hubs[0] == hubs[1]:
         return ("中枢目录**不再唯一**：两次运行都得到 %s\n"
                 "      ⇒ 状态会跨运行累积，读 stderr 的判据会变成"
                 "「同一小时前几次绿、之后全红」的定时炸弹（实测 MCP-01 dup=9）。"
                 % hubs[0])
+    if works[0] == works[1]:
+        return ("WORK **不再唯一**：两个进程共用 %s\n"
+                "      ⇒ 它们写同一份 proj 夹具，判据会数到对方写下的记录"
+                "（实测 `0.23.1 credits snapshot chained` 数到 2 条而假红，"
+                "而且每次红的项都不同）。" % works[0])
+    norm = lambda p: os.path.normcase(os.path.abspath(p))         # noqa: E731
+    if norm(works[0]) == norm(same_work) or norm(works[1]) == norm(same_work):
+        return ("`ANTINEL_WORK` 被**原样**当成 WORK 用（%s）—— 那等于没做唯一化，"
+                "这条腿也就没在验任何东西" % same_work)
     real = os.path.join(os.path.expanduser("~"), ".antinel")
     for h in hubs:
         if os.path.normcase(os.path.abspath(h)) == os.path.normcase(os.path.abspath(real)):
@@ -10575,25 +10628,31 @@ def c_s38c():
 
 
 def _s38_mutant_fixed_hub():
-    """造负控输入：把真实套件里「沙箱家目录」那行改成**固定名**，写到临时文件。
+    """造负控输入：把真实套件里**所有**唯一性来源一起改成固定值，写到临时文件。
 
     ★ 为什么不写假源码：`_s38_hub_problem` 现在只管**结构**，假源码测的是结构腿；
       要测**行为腿**（`_s38_hub_unique`）就必须给它一个真能导入的模块。
-      变异点选 `_HOST_ISO = …` 那一行 —— 它正是第 35 条引入的唯一性来源。
-      （`_s38_hub_of` 会 `pop` 掉 `ANTINEL_WORK` 且不设 `ANTINEL_WORK_UNIQUE`，
-        所以 `WORK` 在副本里是**固定**的 ⇒ 只有 `_ISO_TAG` 撑着唯一性。）
+
+    ★★ 第 39 条（2026-10-25）之后唯一性的源头**有两个**，变异必须同时拆掉：
+        · `_HOST_ISO = WORK / ("home-" + _ISO_TAG)`  ← 中枢靠它
+        · `WORK = Path("%s-%d-%d" % (_WORK_BASE, getpid, ms))` ← 夹具靠它
+      只拆第一个 ⇒ 中枢仍是 `WORK/"home"/.antinel`，而 WORK 自己是 per-process
+      唯一的 ⇒ 两次运行照样得到不同中枢，**牙齿就咬不住了**（本轮实测：
+      变异体两次都得到 `<work-<pid>-<ms>>/home/.antinel` 却判「没报出来」）。
     """
     src_path = os.path.join(ROOT, _S38_VT)
     src = io.open(src_path, encoding="utf-8").read()
-    pat = re.compile(r'^_HOST_ISO = .*$', re.M)
-    if not pat.search(src):
-        return None
-    mut = pat.sub('_HOST_ISO = WORK / "home"', src, count=1)
+    mut = re.sub(r'^_HOST_ISO = .*$', '_HOST_ISO = WORK / "home"', src,
+                 count=1, flags=re.M)
     if mut == src:
+        return None
+    mut2 = re.sub(r'^WORK = Path\(.*\)$', 'WORK = Path(_WORK_BASE)', mut,
+                  count=1, flags=re.M)
+    if mut2 == mut:
         return None
     d = str(_TMPREG.tmpdir(prefix="g0514_s38d_"))
     dst = os.path.join(d, "vt_mutant.py")
-    io.open(dst, "w", encoding="utf-8", newline="\n").write(mut)
+    io.open(dst, "w", encoding="utf-8", newline="\n").write(mut2)
     return dst
 
 
@@ -10648,6 +10707,224 @@ def c_s38d():
         return ("牙齿失效 —— 改坏了却仍然绿，说明这几条判据没有分辨力：\n      "
                 + "\n      ".join(silent))
     _note("三颗牙全部咬住：未登记的 stderr 断言 / 固定中枢（行为腿）/ 缺读数辅助")
+    return True
+
+
+# ==================================== 第 34 条：「该登记的登记了没」一把尺子 ====
+#   病灶（2026-10-25 实测，0.56.0 出包当场撞上）：同一件事有两把尺子 ——
+#     · `host_shield.self_check()`（D-36 的锚）查「**该登记的登记了没**」
+#     · 配套修法工具 `_tools_034/_resign_manifest.py --dry` 只比
+#       「**已登记**条目变没变」
+#   ⇒ 工具报「manifest 条目 143 ｜ 需重签 0」（看着一切正常），
+#     而 `regression D-36` 红：`ci/freeze_zones.json` 在研发树专属名单里却没登记。
+#   修法：`host_shield.unregistered_chain_files(root)` 作**唯一实现**，两边都调。
+#   判据因此必须打在**两个入口给出同一读数**上，而不是各查各的字符串。
+_C34_GUARDED = ("hooks/pre_tool_use.py", "hooks/post_tool_use.py",
+                "tools/enforce_probe.py", "egress.py")
+_C34_DEV = "ci/freeze_zones.json"
+_C34_TOOL = "_tools_034/_resign_manifest.py"
+
+
+def _c34_write(dst, data):
+    d = os.path.dirname(dst)
+    if d and not os.path.isdir(d):
+        os.makedirs(d)
+    with open(dst, "wb") as f:          # 二进制写：清单里的哈希是**字节级**的
+        f.write(data)
+
+
+def _c34_tree(drop=(), mutate_tool=None):
+    """在系统 TEMP 造一棵**最小可运行树**。返回 `(root, 问题串或 None)`。
+
+    树里放什么（缺一样夹具就不成立，所以逐条给理由）：
+      · 5 个受保护件的**字节副本** —— 清单条目直接取真 manifest 的值，
+        副本逐字节相同 ⇒ 哈希天然对得上，夹具的变量只剩「登记/不登记」；
+      · `host_shield.py` 副本 —— 工具真的要 import 它取归一化口径；
+      · `_tools_034/_resign_manifest.py` 副本 —— **必须跑真入口**（见下）；
+      · 只含这 5 条的极简 `psl/manifest.json` —— 否则 138 个「文件不存在」
+        会把读数淹掉（那是另一个语境，不是本条要量的）。
+
+    ★ 为什么是**子进程跑真脚本**而不是 import 它的函数：这个工具是**脚本**
+      （顶层即执行），它的**读数与退出码本身就是被测对象**。改成 import
+      等于照着它另写一份 —— 测到的不是用户会看到的那一幕（假绿第九族）。
+    """
+    import subprocess  # noqa: F401  （子进程在 `_c34_run`，此处仅示口径）
+    real_man = os.path.join(ROOT, "psl", "manifest.json")
+    try:
+        real_files = (json.load(io.open(real_man, encoding="utf-8")).get("files") or {})
+    except Exception as e:                                      # noqa: BLE001
+        return None, "夹具不成立：真 manifest 读不出（%r）" % (e,)
+    need = list(_C34_GUARDED) + [_C34_DEV]
+    absent = [r for r in need if r not in real_files]
+    if absent:
+        return None, ("夹具不成立：%s 没登记在真 manifest 里 —— 那是另一条缺陷，"
+                      "本夹具要先拿到基准哈希" % "、".join(absent))
+    root = _TMPREG.tmpdir(prefix="g0514_c34_")
+    for rel in need + ["host_shield.py", _C34_TOOL]:
+        src = os.path.join(ROOT, rel.replace("/", os.sep))
+        if not os.path.isfile(src):
+            return None, "夹具不成立：%s 不在盘上" % rel
+        with open(src, "rb") as f:
+            _c34_write(os.path.join(root, rel.replace("/", os.sep)), f.read())
+    if mutate_tool is not None:
+        p = os.path.join(root, _C34_TOOL.replace("/", os.sep))
+        with open(p, "rb") as f:
+            src = f.read().decode("utf-8")
+        mut = mutate_tool(src)
+        if mut is None:
+            return None, "变异体造不出（工具源码里找不到锚点）—— 负控没有输入"
+        _c34_write(p, mut.encode("utf-8"))
+    files = {rel: real_files[rel] for rel in need if rel not in drop}
+    _c34_write(os.path.join(root, "psl", "manifest.json"),
+               json.dumps({"name": "c34-fixture", "files": files},
+                          ensure_ascii=False, indent=1).encode("utf-8"))
+    return root, None
+
+
+def _c34_run(root):
+    """跑真入口 `--dry`。返回 `(rc, 输出)`。"""
+    import subprocess
+    env = dict(os.environ)
+    env.pop("PYTHONPATH", None)
+    env["TMPDIR"] = env["TMP"] = env["TEMP"] = tempfile.gettempdir()
+    p = subprocess.run(
+        [sys.executable, "-E", "-X", "utf8",
+         os.path.join(root, _C34_TOOL.replace("/", os.sep)), "--dry"],
+        cwd=root, capture_output=True, text=True, encoding="utf-8",
+        errors="replace", timeout=180, env=env)
+    return p.returncode, (p.stdout or "") + (p.stderr or "")
+
+
+def _c34_selfcheck(root):
+    """在夹具里 import **那份** host_shield 跑 `self_check()`（D-36 的锚）。"""
+    import importlib.util
+    p = os.path.join(root, "host_shield.py")
+    spec = importlib.util.spec_from_file_location("hs_c34_fixture", p)
+    mod = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)
+    except Exception as e:                                      # noqa: BLE001
+        return None, "夹具 host_shield 导入失败（%r）" % (e,)
+    try:
+        return mod.self_check(), None
+    except Exception as e:                                      # noqa: BLE001
+        return None, "self_check() 抛异常（%r）" % (e,)
+
+
+@check("C-34a 重签工具与 D-36 同一把尺子：未登记必须出声、点名、非零退出")
+def c_34a():
+    """两条腿，覆盖两类受保护件（修法不同 ⇒ 点错方向等于红而无出路）：
+
+    ① 随包告警链路件（`tools/enforce_probe.py`）没登记 ⇒ 修法是构建器
+    ② 研发树专属件（`ci/freeze_zones.json`）没登记 ⇒ 修法是 `--adopt-dev`
+    """
+    bad = []
+    for drop, fix_hint in ((("tools/enforce_probe.py",), "build_package"),
+                           ((_C34_DEV,), "--adopt-dev")):
+        root, why = _c34_tree(drop=drop)
+        if why:
+            return why
+        rc, out = _c34_run(root)
+        if rc == 0:
+            bad.append("删掉 `%s` 的登记后工具仍 rc=0 —— 正是旧口径的病灶"
+                       "（只比已登记条目，D-36 却会红）" % drop[0])
+            continue
+        if ("UNREGISTERED %s" % drop[0]) not in out:
+            bad.append("rc=%d 但输出里没点名 `%s`（说不清是哪条）" % (rc, drop[0]))
+            continue
+        if fix_hint not in out:
+            bad.append("点名了 `%s` 却没给修法 `%s`（T-04 红而无出路）"
+                       % (drop[0], fix_hint))
+    if bad:
+        return "；".join(bad)
+    _note("两条腿都非零退出并点名；随包件给构建器、研发件给 --adopt-dev")
+    return True
+
+
+@check("C-34b 同一夹具上两个入口读数一致：工具点名的 == self_check 报的")
+def c_34b():
+    """★ 这条才是第 34 条的**正题**：不是"工具也能报"，而是"两边报的是同一件事"。
+
+    同一棵夹具（删掉 `tools/enforce_probe.py` 的登记）：
+      · 真入口工具 ⇒ 非零 ＋ 点名该文件 ＋ 归类为「告警链路保护名单」
+      · `host_shield.self_check()`（D-36 的锚）⇒ `ok is False` 且问题串里
+        **同一文件**出现「没登记」
+    两边任一不同 ⇒ 「该登记的登记了没」又变成两套口径。
+    """
+    root, why = _c34_tree(drop=("tools/enforce_probe.py",))
+    if why:
+        return why
+    rc, out = _c34_run(root)
+    got, why2 = _c34_selfcheck(root)
+    if why2:
+        return why2
+    ok, problems = got
+    sc_hit = [p for p in (problems or [])
+              if "tools/enforce_probe.py" in p and "没登记" in p]
+    bad = []
+    if rc == 0:
+        bad.append("重签工具 rc=0（应非零）")
+    if not sc_hit:
+        bad.append("self_check 没报「tools/enforce_probe.py 没登记」（实际 %d 条：%s）"
+                   % (len(problems or []), "；".join((problems or [])[:3])[:120]))
+    if ok is not False:
+        bad.append("self_check 仍判 ok=%r ⇒ 监理会被放行（该拦的没拦）" % (ok,))
+    if bad:
+        return "两个入口读数不一致：\n      " + "\n      ".join(bad)
+    _note("同一夹具：工具 rc=%d 点名该件；self_check 报 %d 条且含同一件（ok=False）"
+          % (rc, len(problems or [])))
+    return True
+
+
+@check("C-N34 负控：登记齐全时必须零退出（否则上两条只会恒红）")
+def c_n34():
+    """没有这一条，`C-34a/b` 的绿可能只是"工具永远非零"或"self_check 永远红"。
+
+    ★ 这正是空集/恒红型假绿的解药：**同一夹具，只改一个变量**（登记在不在）。
+    """
+    root, why = _c34_tree()
+    if why:
+        return why
+    rc, out = _c34_run(root)
+    if rc != 0:
+        return ("登记齐全的夹具里工具 rc=%d（应为 0）⇒ 上两条的红没有分辨力：%s"
+                % (rc, out.strip()[-200:]))
+    if "该登记却没登记 0" not in out:
+        return "读不到「该登记却没登记 0」这一行 ⇒ 这条读数没真的在打（形状变了？）"
+    got, why2 = _c34_selfcheck(root)
+    if why2:
+        return why2
+    ok, problems = got
+    if ok is not True:
+        return ("登记齐全时 self_check 仍报红（%s）⇒ 上一条的「同一件」可能是巧合"
+                % "；".join((problems or [])[:3])[:160])
+    _note("对照腿：登记齐全 ⇒ 工具 rc=0 且「未登记 0」，self_check ok=True")
+    return True
+
+
+@check("C-N34b 牙齿：把工具改回「只比已登记」的旧口径 ⇒ C-34a 必须咬住")
+def c_n34b():
+    """★ 变异体必须是**真能跑的副本**（假源码测不到行为腿）。
+
+    做法：把 `_unregistered = _hs_hash.unregistered_chain_files(ROOT)` 这一行
+    换成 `= []`（＝修复前的口径），其余一字不动 ⇒ 跑同一棵夹具。
+    若这样它仍非零退出并点名，说明 `C-34a` 的红来自别的东西，不是这条修复。
+    """
+    def _old_caliber(src):
+        anchor = "_unregistered = _hs_hash.unregistered_chain_files(ROOT)"
+        if anchor not in src:
+            return None
+        return src.replace(anchor, "_unregistered = []   # ← 旧口径变异体（只比已登记）")
+
+    root, why = _c34_tree(drop=("tools/enforce_probe.py",),
+                          mutate_tool=_old_caliber)
+    if why:
+        return why
+    rc, out = _c34_run(root)
+    if rc != 0 and "UNREGISTERED" in out:
+        return ("变异体（旧口径）竟然也报出来了 ⇒ 这几条腿不是靠新读数在判，"
+                "牙齿没咬住：%s" % out.strip()[-160:])
+    _note("牙齿咬住：旧口径变异体 rc=0 且不报「未登记」（正是 0.56.0 出包时那一幕）")
     return True
 
 

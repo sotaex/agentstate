@@ -668,3 +668,54 @@ sdist  antinel-0.56.0.tar.gz（扫描文本成员 246 个）：三处同样齐
 前四次全量依次是 318/323、321/324、323/324、324/324 —— 前面几次的红项已逐条查过：两条是 judgment 自指（改了 COVERED 文件，第一遍必红），两条 `rc=124` 是上面那个双开噪声，三条 `roots`/`credits` 是本节修掉的真问题。
 
 证据：`output/tests/0.57.0/f35_summary.json`、`f35_home_iso_v2.json`、`harness_run9.log`、`gate_f35_2.log`、`regression_f35.log`、`s38_only.log`、`procs_f35_4b.log`（双开进程表）；探针 `output/_f35_home_probe.py`（v1，被自己推翻）、`output/_f35_home_probe2.py`（v2，按 pid 归属）、`output/_f35_a2.py`（A2 三次计时）、`output/_f35_summarize.py`（读数脚本，数字不手抄）。
+
+---
+
+## 7.7 第 33/34 条 ＋ 顺带抓到的第 39 条（本轮）
+
+### 第 33 条：扫描面按「目录族」排除，不按精确名
+
+**问题**：`ci/inbox_guards_0481.py` 的 `_WALK_EXCLUDE` 只认**精确目录名**（`build`/`dist`/`out`/`output`…）。而本仓「让开」的做法是把目录改名成 `build.away-20261024-142306`（同盘 rename，不删 —— 宿主禁删）。⇒ **让开这个动作本身**把 44 个文件送进了 `L1` 的扫描面，一次正常出包 ＝ 44 条「缺 SPDX 头」假红；看起来像「有人忘了写头」，其实是判据把让开件当成了本仓文件。
+
+**修法**：把口径提成命名函数 `_dir_excluded(rel_dir, name)`（`L1`/`L6` 共用一份）。三条同时成立才排除：① 精确名命中；② 同族让开件 `<名字>.away-<时间戳>`；③ 前缀族（`antinel-0.*`、`_p_*`…）。**刻意不写成 `name.startswith(name_in_EX)`** —— 那会把 `build_tools/`、`outbox/`、`output2/` 一起排掉，等于把真文件放过关。`_walk_files(root=None)` 新增可选根，供判据把同一份遍历指向 TEMP 里的合成树（判据不往仓里塞垃圾文件）。
+
+**判据**：`L1b`（合成树：让开件 0 件进面 ＋ 4 个真目录照旧进面）＋ `N-L1b`（两颗牙：拆掉 `.away-` 族匹配 ⇒ 让开件必须回面；把前缀族放宽到 `build` ⇒ 真目录必须被误排）。
+
+**先红后绿（用修前的真源码，不是手搓变异体）**：同一棵合成树，修前的 `_walk_files` 逐字复刻 ⇒ 让开件 **3/3 全部进面**；修后 ⇒ **0/3**。两次都保留了 4 个真目录。证据见 `output/_f3334_probe.py` 的 `B` 段。
+
+### 第 34 条：同一件事不许有两把尺子
+
+**问题**（0.56.0 出包当场撞上）：`host_shield.self_check()`（D-36 的锚）查「**该登记的登记了没**」，而配套修法工具 `_tools_034/_resign_manifest.py --dry` 只比「**已登记**条目变没变」。于是这一幕发生了：工具报「manifest 条目 143 ｜ 需重签 0」（看着一切正常），`regression D-36` 却红在「`ci/freeze_zones.json` 在研发树专属名单里却没登记」。
+
+**修法**：`host_shield.unregistered_chain_files(root)` 作**唯一实现**，两个消费者共用 —— `self_check()` 用它判红（问题串文案一字未动，既有判据按这些串定位修法命令），重签工具用它出声（`--dry` 也报，**存在即非零退出**，并按 `chain`/`dev` 分别给修法：构建器 / `--adopt-dev`）。
+
+**判据**（4 条，全部跑**真入口**）：
+`C-34a` 两条腿（随包件删登记 ⇒ 点名 ＋ 给构建器修法；研发件删登记 ⇒ 点名 ＋ 给 `--adopt-dev`）；`C-34b` **同一夹具上两个入口读数一致**（工具 rc≠0 且点名 == `self_check` 报的同一件、`ok=False`）——这条才是正题，不是「工具也能报」；`C-N34` 对照腿（登记齐全 ⇒ 工具 rc=0 且「未登记 0」、`self_check ok=True`），没有它前两条的绿可能只是「永远非零」。`C-N34b` 牙齿（把工具改回 `_unregistered = []` 的旧口径，其余一字不动 ⇒ 必须抓不到）。
+
+**先红后绿**：`git show HEAD:_tools_034/_resign_manifest.py` 放进夹具 ⇒ rc=**0**、「需重签 0」、不报未登记（正是出包那一幕）；修后 ⇒ rc=**1**、点名 `tools/enforce_probe.py`、给出 `build_package` 修法。
+
+### 第 39 条（顺带抓到，写进本轮）：WORK 必须**每进程**唯一
+
+**问题**：`run_harness` 给的 WORK 是 per-run 唯一（`mkdtemp`），但本机后台启动会**把同一条命令再拉起一次**，进程表直采到四层 `run_harness → run_harness → verification_tests → verification_tests`。第二个套件进程**继承同一个 `ANTINEL_WORK`** ⇒ 两个套件写**同一份** `proj/` 夹具。后果实测（在失败那次的工作目录里数）：`0.23.1 credits snapshot chained` 读到 **2 条** `credits_snapshot`（一条带 `buckets.reward`、一条空桶），而产品行为完全正常 ⇒ 判据红，且**每次红的项都不同**。
+
+**修法**：`WORK` 一律追加 `pid+毫秒`；`ANTINEL_WORK_UNIQUE` 开关**退役**（留着它就等于留着"可以关掉隔离"这条路）。
+
+**判据**：`C-S38b` 的行为腿扩成**同一份 `ANTINEL_WORK` 下起两个进程**，要求中枢**和 WORK** 都不同，且不许把 `ANTINEL_WORK` 原样当 WORK 用（否则那条腿等于没验）。`C-S38d` 牙齿的变异体随之拆**两个**唯一性来源（`_HOST_ISO` 与 `WORK`）—— 只拆第一个的话，中枢仍随 WORK 变，牙齿咬不住（本轮实测撞到，已修）。
+
+### 读数与证据
+
+| 项 | 读数 |
+|---|---|
+| harness（第二遍，单实例） | **324 / 324 PASS** |
+| 0514（3 片：`ANTINEL_SLICE=0/3,1/3,2/3`） | **90 ＋ 90 ＋ 90 ＝ 270 绿 / 0 红 / 0 跳过** |
+| 0481（含新 L1b / N-L1b） | **14 绿 / 0 红** |
+| regression | **31 / 31 PASS** |
+| `antinel_verify --manifest` | current（143 条全对） |
+| manifest 重签 | 2 次共 2 条（`host_shield.py`、`scripts/verification_tests.py`） |
+| 新增判据 | 8 条（`L1b`/`N-L1b`、`C-34a`/`C-34b`/`C-N34`/`C-N34b`，另 `C-S38b`/`C-S38d` 扩腿） |
+
+**两处必须说清的环境事实**（否则读数不可信）：
+1. **本机后台启动会把命令跑两遍**，且两实例是**父子链**（所以按"杀后启动的那个"清理无效——杀子进程会连父一起带走，实测两次 remaining=0）。前台启动不重复，但本机前台 10 分钟被 SIGTERM。⇒ 0514 加 `ANTINEL_SLICE=k/n` 分片（**只决定这一次跑哪些，判据本身一字不改**），三片相加与总部数对账。
+2. **第一遍 harness 必红**：`321/324`，其中 2 条是 judgment 自指（改了 COVERED 文件，`0.16.0 antinel_verify derives current` 报「1 of 21 covered files differ: scripts/verification_tests.py」；`0.17.0 P-B1 …` 是它的连带），另 1 条是 `C9` 的 hook 超时（120s，同一命令单跑约 2 秒）。第二遍 `324/324`。
+
+证据：`output/tests/0.57.0/`（`f3334_evidence.json`、`g0514_v2_s{0,1,2}.log`、`g0481_f3334.log`、`harness_v2_{1,2}_sh*.log`、`regression_f3334_{,b,c}.log`）；探针 `output/_f3334_probe.py`（先红后绿，双段取证）、`output/_lk0514_guard.py`（单实例运行器，两版：TOCTOU 版与原子版）。

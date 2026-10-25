@@ -2321,6 +2321,53 @@ def _self_check_fingerprint(root):
     return tuple(out)
 
 
+def unregistered_chain_files(root=None):
+    """保护名单里「**该登记、却没登记进 manifest**」的条目。返回 `[(rel, kind)]`。
+
+    `kind` 取值 `"chain"`（随包告警链路件）或 `"dev"`（研发树专属件）。
+
+    ★★ 第 34 条（2026-10-25，实测撞上，不是推演）：**同一件事不许有两把尺子**。
+      原先「该登记的登记了没」只在 `self_check()` 里判，而它的配套修法工具
+      `_tools_034/_resign_manifest.py --dry` 只比「**已登记**条目变没变」——
+      于是出现这一幕（0.56.0 出包时真实发生）：
+        重签工具报「manifest 条目 143 ｜ 需重签 0」（看着一切正常），
+        而 `regression D-36` 红：`ci/freeze_zones.json` 在研发树专属名单里
+        却没登记 —— 只能靠另一个工具的另一种口径 announce 出来。
+      ⇒ 本函数是**唯一实现**，两个消费者共用：
+        · `self_check()` —— 判红（红即 `spawn_sentinel()` 硬拦）
+        · `_resign_manifest.py` —— 出声（`--dry` 也报；存在即非零退出）
+      改名单/改口径只改这里，两边不会分叉。
+
+    ★ 口径三条（与 `self_check()` 逐条同源，**不是**另写一套）：
+      ① 判据是 **manifest 的 `files` 字典里有没有这个键**，不是「磁盘上有没有」；
+      ② `chain`（随包件）**不看在不在场**：没登记就是问题（fail-closed ——
+         清单缺了它本身就是不完整，且这份清单要在别的机器上被信任）；
+      ③ `dev`（研发树专属件，`ci/` 不进 wheel）**在场才校验**：出包产品里没有
+         这个文件，报它就是误报（会把产品里的监理**锁死**：`self_check` 红 ⇒
+         `spawn_sentinel()` 硬拦）。
+      ★ manifest 读不出 ⇒ 视为「全部未登记」（与 `self_check()` 现行行为一致：
+        宁可报红，不把「清单没了」读成「全对」）。
+    """
+    root = _pkg_root() if root is None else root
+    man = {}
+    try:
+        with open(os.path.join(root, "psl", "manifest.json"), encoding="utf-8") as f:
+            man = json.load(f).get("files") or {}
+    except Exception:                                          # noqa: BLE001
+        man = {}
+    out = []
+    for kind, names in (("chain", _GUARDED_CHAIN_FILES),
+                        ("dev", _DEV_GUARDED_CHAIN_FILES)):
+        for rel in names:
+            if rel in man:
+                continue
+            if kind == "dev" and not os.path.isfile(
+                    os.path.join(root, rel.replace("/", os.sep))):
+                continue                     # 不在场 ⇒ 不适用（出包语境）
+            out.append((rel, kind))
+    return out
+
+
 def self_check():
     """0.28.3（B4e/B4f）：自身脚本与登记表对 psl/manifest.json 哈希。
     返回 (ok, problems)。manifest 缺失 → (True, [])（无法校验，如实不谎报）。
@@ -2380,11 +2427,20 @@ def self_check():
     #   ★ 问题串里**必须带** `DEV_NEVER_EXEMPT_MARKS` 的标记 ——
     #     否则这条"没登记"会被研发态当代码迭代产物豁免掉（那等于把
     #     "自检对自己失明"重新藏起来，正是 0.36.3 那个洞的同型）。
-    for rel in _GUARDED_CHAIN_FILES:
-        if not _manifest_hash(rel):
+    #   ★★ 第 34 条（2026-10-25）：「该登记的登记了没」改成调**唯一实现**
+    #     `unregistered_chain_files()` —— 重签工具的 `--dry` 也读它。
+    #     两处曾各写一套 ⇒ 工具说「需重签 0」而本条红（实测于 0.56.0 出包）。
+    #     问题串**文案一字未动**：既有判据/文档按这些串定位修法命令。
+    for _rel, _kind in unregistered_chain_files(root):
+        if _kind == "chain":
             problems.append(
                 "%s 在告警链路保护名单里，却没登记进 manifest。"
-                "这些文件被改可能查不出，重新打包即可补上。" % rel)
+                "这些文件被改可能查不出，重新打包即可补上。" % _rel)
+        else:
+            problems.append(
+                "%s 在研发树专属保护名单里，却没登记进 manifest。"
+                "登记簿被改可能查不出。"
+                "修法：python _tools_034/_resign_manifest.py --adopt-dev" % _rel)
     gdir = os.path.join(root, "rules", "hosts")
     try:
         names = sorted(os.listdir(gdir))
@@ -2419,11 +2475,7 @@ def self_check():
             continue                        # 不在场 ⇒ 不适用（出包语境）
         mh = _manifest_hash(rel)
         if not mh:
-            problems.append(
-                "%s 在研发树专属保护名单里，却没登记进 manifest。"
-                "登记簿被改可能查不出。"
-                "修法：python _tools_034/_resign_manifest.py --adopt-dev" % rel)
-            continue
+            continue                        # 「没登记」已由上面统一报过（唯一实现）
         lv = file_digest(p, rel)
         if mh and lv and mh != lv:
             problems.append(

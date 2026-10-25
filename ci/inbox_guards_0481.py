@@ -42,6 +42,11 @@ if ROOT not in sys.path:
 
 RESULTS = []
 
+
+def _note(*a):
+    """判据的说明行（与 0514 同款输出形状）。"""
+    print("      · %s" % " ".join(str(x) for x in a))
+
 _WALK_EXCLUDE = {".git", ".workbuddy", "__pycache__", "build", "dist", "node_modules",
                  ".github", ".psl", ".vscode", ".idea",
                  # ★ 0.48.2：模拟/验证的证据区（内含第三方 venv 与临时文件）不属于
@@ -74,6 +79,15 @@ _WALK_EXCLUDE = {".git", ".workbuddy", "__pycache__", "build", "dist", "node_mod
                  #     **待创始人复核**：若要连 worktree 一起管，正确做法是给
                  #     worktree 自己的 license-map，而不是在本仓判据里混算。
                  ".worktrees"}
+# ★★ 第 33 条（2026-10-25）：**「让开」的目录必须按族排除**。
+#   原实现只认**精确目录名**（`build`/`dist`/`out`…），而本仓"让开"的做法是把
+#   目录改名成 `build.away-20261024-142306`（同盘 rename 让出位置，不删——宿主禁删）。
+#   于是**让开这个动作本身**把 44 个文件送进了扫描面：一次正常出包 ＝ 44 条
+#   `L1` 假红（实测 `build.away-20261024-142306/bdist…/`）。
+#   ⇒ 排除规则按**族**匹配：`<名字>` 或 `<名字>.away-<时间戳>`。
+#   ★ 反向要求（`N-L1b` 守）：**不许退化成裸前缀** —— `build_tools/`、`outbox/`、
+#     `output2/` 都不是让开目录，必须照旧进入扫描面（放宽＝把真文件放过关）。
+_AWAY_SUFFIX = ".away-"
 _WALK_EXCLUDE_PREFIX = ("antinel-0.", "_backup.away-", "antinel_mcp.away",
                         # ★★ 0.53.0：探针/补丁脚本（`.gitignore` 里已有
                         #   `_p_*` / `_t_*` / `_probe_*.py` / `_patch_*.py`）
@@ -96,16 +110,42 @@ EXEMPT_PREFIX = ("rules/", "demo/", ".workbuddy/", ".workbuddy-ai/")
 
 
 # --------------------------------------------------------------- 工具 ----
-def _walk_files():
-    """仓内全部 py/md/html/json（排除构建产物与归档目录）。返回相对 posix 路径。"""
+def _dir_excluded(rel_dir, name):
+    """目录是否**不属**本仓归属扫描面。**唯一实现**（`L1`/`L6` 共用一份口径）。
+
+    ★★ 第 33 条（2026-10-25，实测 44 条假红逼出来的）：让开目录按**族**匹配，
+      不按精确名。三个判据（缺一条都会出事）：
+        ① 精确名命中 `_WALK_EXCLUDE`（`build`/`dist`/`out`/`output`/`.git`…）
+        ② 同族让开件：`<名字>.away-<时间戳>`（本仓唯一的让开形态）
+        ③ 前缀族：`antinel-0.*`、`_p_*`、`_t_*`… —— 既查目录基名也查相对路径
+           （原实现是 `(rel_base + "/" + d).startswith(p) or d.startswith(p)`）
+    ★ 刻意**不**写成 `name.startswith(p)` for p in `_WALK_EXCLUDE`：那会把
+      `build_tools/`、`dist_notes/`、`outbox/` 一起排掉 —— 它们是**真本仓目录**，
+      排掉＝把真文件放过关（负控 `N-L1b` 的第二颗牙守这条）。
+    """
+    if name in _WALK_EXCLUDE or name in _WALK_EXCLUDE_PREFIX:
+        return True
+    if any(name.startswith(n + _AWAY_SUFFIX) for n in _WALK_EXCLUDE):
+        return True
+    rel = (rel_dir + "/" + name) if rel_dir else name
+    return any(rel.startswith(p) or name.startswith(p) for p in _WALK_EXCLUDE_PREFIX)
+
+
+def _walk_files(root=None):
+    """仓内全部 py/md/html/json（排除构建产物与归档目录）。返回相对 posix 路径。
+
+    ★ `root` 可传**别的根**：判据 `L1b` 用它把同一份遍历逻辑指向系统 TEMP 里的
+      合成树（"扫描面"这件事只能这么测——不能往真仓里塞垃圾文件）。
+    """
+    root = ROOT if root is None else root
     out = []
-    for base, dirs, files in os.walk(ROOT):
-        rel_base = os.path.relpath(base, ROOT).replace("\\", "/")
-        dirs[:] = [d for d in dirs if d not in _WALK_EXCLUDE
-                   and not any((rel_base + "/" + d).startswith(p) or d.startswith(p)
-                               for p in _WALK_EXCLUDE_PREFIX)]
+    for base, dirs, files in os.walk(root):
+        rel_base = os.path.relpath(base, root).replace("\\", "/")
+        if rel_base == ".":
+            rel_base = ""
+        dirs[:] = [d for d in dirs if not _dir_excluded(rel_base, d)]
         for f in files:
-            rel = (rel_base + "/" + f) if rel_base != "." else f
+            rel = (rel_base + "/" + f) if rel_base else f
             if rel.startswith(_WALK_EXCLUDE_PREFIX):
                 continue
             if f.rsplit(".", 1)[-1].lower() in ("py", "md", "html", "json"):
@@ -242,6 +282,104 @@ def n_l1():
         return "判据失效：缺头的文件没被红"
     if _spdx_issue("strings.py", "# SPDX-License-Identifier: Apache-2.0\n", mp) is None:
         return "判据失效：错标（MIT 件标成 Apache）没被红"
+    return True
+
+
+# ------------------------------------------------ 第 33 条：扫描面本身 ----
+_L1B_KEEP_IN = (
+    "mypkg/mod.py",                     # 正常件
+    "build_tools/tool.py",              # ★ 真本仓目录：名字以 build 打头，但**不是**让开件
+    "outbox/note.md",                   # ★ 同上
+    "output2/data.json",                # ★ 同上
+)
+_L1B_AWAY = (
+    "build.away-20260101-000000/bdist/x.py",
+    "dist.away-20260101-000000/y.py",
+    "out.away-20260101-000000/z.py",
+)
+_L1B_EXACT = ("build/b.py", "dist/d.py", "output/o.py", ".git/g.json")
+
+
+def _l1b_forest():
+    """造一棵合成树（系统 TEMP，**只建不删** —— 宿主禁删，与 `inbox_guards.py`
+    同一条环境纪律）。返回 (root, 全部文件相对路径)。
+
+    为什么不往真仓里塞：判据**不写产品文件**（本套件贯例）；而"扫描面"这件事
+    只能对着真遍历函数、真目录树测 —— 所以用**同一个** `_walk_files(root)`，
+    只换根。
+    """
+    import tempfile
+    import time as _t
+    root = os.path.join(tempfile.gettempdir(),
+                        "l1b_forest_%d_%d" % (os.getpid(), int(_t.time() * 1000) % 1000000))
+    made = []
+    for rel in _L1B_KEEP_IN + _L1B_AWAY + _L1B_EXACT:
+        p = os.path.join(root, rel.replace("/", os.sep))
+        d = os.path.dirname(p)
+        if d and not os.path.isdir(d):
+            os.makedirs(d)
+        with io.open(p, "w", encoding="utf-8", newline="\n") as f:
+            f.write("# SPDX-License-Identifier: Apache-2.0\n")
+        made.append(rel)
+    return root, made
+
+
+@check("L1b 扫描面按目录族排除：`build.away-<ts>` 让开件不算本仓归属（第 33 条）")
+def l1b():
+    """★ 为什么必须有这一条：`L1` 自己永远测不到"扫描面"。
+
+    `L1` 判的是"进面文件的 SPDX 头对不对"；而让开件**恰恰是不该进面的**。
+    让开件里没有头 ⇒ 只要它进面，`L1` 就红；可它红的时候，`L1` 的报错是
+    「共 44 处：build.away-…/bdist…: 缺 SPDX 头」—— 看起来像"有人忘了写头"，
+    其实是**判据把让开件当成了本仓文件**。两者要分开量，否则每次出包都会
+    教人恨这条判据（而正确的处置是修判据，不是给 bdist 里的第三方文件补头）。
+    """
+    root, made = _l1b_forest()
+    got = set(_walk_files(root))
+    miss = [r for r in _L1B_KEEP_IN if r not in got]
+    if miss:
+        return ("扫描面**过分收窄**：%d 个正常件没进面（%s）⇒ 它们不会被告知缺头，"
+                "而它们真的会进包" % (len(miss), "、".join(miss[:4])))
+    leaked = [r for r in _L1B_AWAY + _L1B_EXACT if r in got]
+    if leaked:
+        return ("扫描面**混进非本仓件**：%d 个让开/构建目录下的文件被当成本仓归属"
+                "（%s）⇒ 每次出包都产生假红（第 33 条）" % (len(leaked), "、".join(leaked[:4])))
+    _note("合成树 %d 件：让开件 0 件进面；`build_tools/`、`outbox/`、`output2/` 照旧进面"
+          % len(made))
+    return True
+
+
+@check("N-L1b 牙齿：拆掉族匹配必红；按裸前缀误排必红")
+def n_l1b():
+    """两颗牙，都咬在**同一个** `_walk_files` 上（换副本去测等于没测）：
+
+    ① 把 `_AWAY_SUFFIX` 改成一个永不匹配的串 ⇒ 让开件必须**回到面里**
+       （若仍不在面里，说明"复现不到"——那正控就是空跑，`L1b` 的绿不算数）。
+    ② 把前缀族塞进 `build` ⇒ 以 `build` 打头的**真目录**里那个 py 件必须**从面里消失**
+       （若仍在，说明"过宽"这条路没被看着 —— 那 `L1b` 只能抓漏抓不到误排）。
+    """
+    root, _made = _l1b_forest()
+    silent = []
+    global _AWAY_SUFFIX, _WALK_EXCLUDE_PREFIX
+    saved_away, saved_pre = _AWAY_SUFFIX, _WALK_EXCLUDE_PREFIX
+    try:
+        _AWAY_SUFFIX = ".AWAY-NEVER-MATCHES-"
+        got1 = set(_walk_files(root))
+        if not any(r in got1 for r in _L1B_AWAY):
+            silent.append("① 族匹配关掉后让开件**仍在面外** ⇒ 这条腿不是族匹配在起作用，"
+                          "`L1b` 的绿是空跑")
+        _AWAY_SUFFIX = saved_away
+        _WALK_EXCLUDE_PREFIX = tuple(saved_pre) + ("build",)
+        got2 = set(_walk_files(root))
+        if "build_tools/tool.py" in got2:
+            silent.append("② 前缀族放宽到 `build` 后，`build_tools/tool.py` **没被排掉** ⇒ "
+                          "「过宽误排」这条没有分辨力")
+    finally:
+        _AWAY_SUFFIX = saved_away
+        _WALK_EXCLUDE_PREFIX = saved_pre
+    if silent:
+        return "牙齿失效：\n      " + "\n      ".join(silent)
+    _note("两颗牙都咬住：拆掉 `.away-` 族匹配 ⇒ 让开件回面；放宽成裸前缀 ⇒ 真目录被误排")
     return True
 
 

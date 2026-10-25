@@ -129,6 +129,16 @@ if args.adopt_dev:
         adopted.append(rel)
         print("  ADOPT  %s（研发树专属名单缺登记，已按主循环同口径补入）" % rel)
 
+# ★★ 第 34 条（2026-10-25，实测撞上）：本工具的读数必须与 **D-36 同一把尺子**。
+#   病灶：本工具只比「**已登记**条目变没变」，而 `host_shield.self_check()`
+#   （D-36 的锚）还查「**该登记的登记了没**」。两把尺子 ⇒ 实测这一幕：
+#     0.56.0 出包时本工具报「需重签 0」（看着一切正常），
+#     而 `regression D-36` 红：`ci/freeze_zones.json` 在研发树专属名单里却没登记。
+#   修法不是"在工具里再写一遍"（那就是第三把尺子），而是**调唯一实现**：
+#   `host_shield.unregistered_chain_files()`。改口径只改那一处。
+#   ★ 必须在 `--adopt-dev` **之后**算：补登过的就不该再报。
+_unregistered = _hs_hash.unregistered_chain_files(ROOT)
+
 # ★★ 量具先自检（维七：防量具假红假绿）—— 2026-10-12 由一次真实破坏逼出来。
 #   本轮我跑本工具（旧口径）把 hooks/pre_tool_use.py "重签"成裸哈希，
 #   而 `--manifest` 用归一化口径 ⇒ 校验立刻从绿变红。**量具自己错了，
@@ -214,10 +224,18 @@ if missing and args.roll:
 
 print("manifest 条目 %d ｜ 未变 %d ｜ 需重签 %d ｜ 文件不存在 %d ｜ 补登记 %d"
       % (len(files), same, len(changed), len(missing), len(adopted)))
+print("该登记却没登记 %d" % len(_unregistered))
 for r in changed:
     print("  RESIGN  %s" % r)
 for r in missing:
     print("  MISSING %s  （不写入 —— 清单与磁盘不一致，需构建器处理）" % r)
+for rel, kind in _unregistered:
+    if kind == "chain":
+        print("  UNREGISTERED %s（告警链路保护名单）—— 本工具修不好："
+              "清单增删是构建器职责，跑 `python scripts/build_package.py`" % rel)
+    else:
+        print("  UNREGISTERED %s（研发树专属保护名单）—— 本工具修不好："
+              "跑本工具加 `--adopt-dev`" % rel)
 for old, new in rolled:
     print("  ROLL    %s\n       -> %s" % (old, new))
 
@@ -236,6 +254,11 @@ if missing and not args.roll:
 
 if args.dry:
     print("\n预览（未写）。")
+    if _unregistered:
+        print("★ 上面的「该登记却没登记」%d 条**不会**因重签而消失 ⇒ "
+              "D-36 / self_check() 仍会红（红而无出路不是出路，所以这里直接失败）。"
+              % len(_unregistered))
+        sys.exit(1)
     sys.exit(0)
 
 if changed or rolled or adopted:
@@ -253,3 +276,10 @@ if changed or rolled or adopted:
           % (len(changed), len(rolled), len(adopted)))
 else:
     print("\n无需重签。")
+
+if _unregistered:
+    print("\n★ 仍有 %d 条「该登记却没登记」⇒ `self_check()` 会红、D-36 会红。"
+          "\n  本工具**刻意不越权**新增普通条目（清单增删是构建器职责）；"
+          "只有研发树专属件能用 `--adopt-dev` 补。修法见上面的 UNREGISTERED 行。"
+          % len(_unregistered))
+    sys.exit(1)

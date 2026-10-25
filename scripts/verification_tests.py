@@ -64,11 +64,23 @@ SKILLS = Path(os.environ.get("ANTINEL_SKILLS_DIR") or r"D:\psl\skills")
 #: ★ 仍然不是绕过守卫：没有任何删除动作，阈值没动，策略没改；
 #:   套件断言一条都没放松。变的只是"工作目录从哪来"。
 _WORK_ENV = os.environ.get("ANTINEL_WORK")
-if os.environ.get("ANTINEL_WORK_UNIQUE") == "1" and _WORK_ENV:
-    WORK = Path("%s-%d-%d" % (_WORK_ENV, os.getpid(), int(time.time() * 1000) % 1000000))
-    os.environ["ANTINEL_WORK"] = str(WORK)
-else:
-    WORK = Path(_WORK_ENV or (Path(tempfile.gettempdir()) / "antinel_verify_work"))
+_WORK_BASE = Path(_WORK_ENV) if _WORK_ENV else (Path(tempfile.gettempdir()) / "antinel_verify_work")
+# ★★ 第 39 条（2026-10-25，实测读数逼出来的）：WORK 必须**每个进程**唯一，
+#   不只是"每次 run"唯一。
+#
+#   实测现场：`run_harness` 本来给的就是 per-run 唯一目录（`mkdtemp`），但本机
+#   后台启动会**把同一条命令再拉起一次**，进程表直采到四层
+#   `run_harness → run_harness → verification_tests → verification_tests`；
+#   第二个 verification_tests **继承同一个 `ANTINEL_WORK`** ⇒ 两个套件进程写
+#   **同一份** `proj/` 夹具。后果实测：
+#     · `0.23.1 credits snapshot chained` 数到 **2 条** credits_snapshot
+#       （另一进程写的那条）⇒ 产品没问题、判据却红；
+#     · 每次红的项还不同（谁先写谁后写决定撞哪条）。
+#   ⇒ WORK 一律追加 `pid+毫秒`。`ANTINEL_WORK_UNIQUE` 开关随之退役
+#     （留着它就等于留着"可以关掉隔离"这条路）。
+#   ★ 不是放宽、也不是绕过删除守卫：依然零删除，只是每个进程各用一棵新树。
+WORK = Path("%s-%d-%d" % (_WORK_BASE, os.getpid(), int(time.time() * 1000) % 1000000))
+os.environ["ANTINEL_WORK"] = str(WORK)
 # ★★ 第 35 条（2026-10-25）：**家目录也必须隔离**，而且必须与 `ANTINEL_HUB_DIR` 同源。
 #
 # 为什么只隔离 hub 不够（静态事实）：全仓有 15 处硬拼 `os.path.expanduser("~")`
