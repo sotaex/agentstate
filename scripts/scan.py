@@ -309,6 +309,43 @@ def frontmatter_name(text):
     return nm.group(1).strip() if nm else None
 
 
+# ------------------------------ CTX-05: skill 名与目录名 ----------------------
+def _edit_distance(a, b):
+    """Levenshtein。只用于「名字近似但不相等」，名字很短，不需要优化。"""
+    if a == b:
+        return 0
+    if not a or not b:
+        return len(a) or len(b)
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+def _name_mismatch_level(name, dname, rule=None):
+    """CTX-05 的级别看「差多少」；相等返回空串（不报）。与 hook 同一口径。
+
+    实测本仓 38 条 CTX-05 全部是同一形态：`name: antinel-security` 而目录叫
+    `b` / `psl` / `dai-std`（git worktree、克隆目录、解压目录）。
+    这条规则的本意是抓「拼写近似 = 身份伪装 / 打错包」，不是抓「目录名随便起」。
+    """
+    a, b = (name or "").lower(), (dname or "").lower()
+    if not a or not b or a == b:
+        return ""
+    rule = rule or {}
+    try:
+        far = int(rule.get("name_near_miss_max_distance", 2))
+        minlen = int(rule.get("name_min_len_for_distance", 4))
+    except (TypeError, ValueError):
+        far, minlen = 2, 4
+    if max(len(a), len(b)) >= minlen and _edit_distance(a, b) <= far:
+        return str(rule.get("severity") or "warning")
+    return "info"
+
+
 _INVIS_RE_CACHE = {}
 
 
@@ -557,9 +594,11 @@ def scan_directory(root, rules, quick=False, path_whitelist=None):
                                     snippet = snippet[:40] + "...(" + str(len(m.group(0))) + " chars)"
                                 add(rule, rel, line_of(text, m.start()), snippet)
                 elif rule.type == "metadata_check" and fn == "SKILL.md":
+                    # ★ 0.57.0（第 34 条）：级别按「差多少」分档（与 hook 同一实现口径）。
                     name = frontmatter_name(text)
-                    if name is not None and name.lower() != dir_name.lower():
-                        add(rule, rel, 1, name + " != " + dir_name, "metadata")
+                    _lvl05 = _name_mismatch_level(name, dir_name, rule.raw) if name is not None else ""
+                    if _lvl05 and name.lower() != dir_name.lower():
+                        add(rule, rel, 1, name + " != " + dir_name, "metadata", _lvl05)
                 elif rule.content_patterns and not rule.file_patterns:
                     # 0.16.0: static content rules typed tool_call (SEC-06). The
                     # hook still guards Write/Edit live; this is the offline pass.

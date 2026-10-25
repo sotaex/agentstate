@@ -5282,6 +5282,153 @@ def j_secret_placeholders_are_not_findings():
                   % (len(sec["placeholder_patterns"]), len(pos), len(neg)))
 
 
+def j_ctx05_name_level_is_tiered():
+    """★★★ D-51（2026-10-26，第 34 条）：CTX-05 的级别要看「差多少」，不能一刀切。
+
+    实测缺陷（`output/tests/0.57.0/d34_realworld.log` 与 `_d34b_ctx05.py`）：
+    本仓 CTX-05 命中 38 条，**全部**是同一形态 —— 文件里写着 `name: antinel-security`，
+    而所在目录叫 `b` / `psl` / `dai-std`。那是 git worktree、克隆目录、解压出来的目录名。
+    规则拿「目录名 == name」当判据，于是**每次克隆或解压别人的 skill 都报一次**。
+
+    这条规则的本意是抓「拼写近似 = 身份伪装 / 打错包」（`openai-tools` 写成
+    `0penai-tools`）。所以级别该按差多少分三档：
+        相等（含只差大小写） → 不报
+        近似（编辑距离 ≤ 2 且名字够长） → 规则自己的级别
+        毫不相干 → info（照样列出来、照样能点开，但不扣分）
+
+    ★ 分档只有一处真源：`rules/default.json` 的 `name_near_miss_max_distance` /
+      `name_min_len_for_distance`。两个引擎各有一份实现（物理上无法合一），
+      所以本判据的重点就是**逐格比对两个真入口** —— 这是第一顽症（同一事实多处实现）
+      唯一能自动发现的办法。
+
+    四腿：
+      ① 结构：两个引擎都有 `_edit_distance` / `_name_mismatch_level`，规则里两个阈值键都在；
+      ② 逐格：7 个样本 × 两个真入口，级别必须全等且等于期望；
+      ③ 配置驱动：阈值关到 0 ⇒ 近似样本必降 info；阈值放到 99 且 minlen=1 ⇒
+         毫不相干必升 warning。**否则 ② 的绿可能来自写死的判定，与规则里的两个键无关**；
+      ④ 负控的负控（把距离函数换掉，看 ② 的结论是否跟着变）：
+         `_edit_distance` 恒返 0 ⇒ 毫不相干样本必须升 warning；
+         恒返 999 ⇒ 近似样本必须降 info。
+         —— 证明 ② 里的 info / warning 是**算出来的**，不是碰巧。
+
+    ★ 短名样本（`ab` vs `cd` 距离 2 但长度 2 < 4）在 ④ 的两种突变下都必须仍是 info：
+      这是 minlen 门槛独立于距离的证明，防「把门槛删掉后照样全绿」。
+    """
+    hook = _load_module_file("hooks/pre_tool_use.py", "_hook_d51")
+    scan = _load_module_file("scripts/scan.py", "_scan_d51")
+    if hook is None or scan is None:
+        return False, "产品模块加载失败"
+    for nm, mod in (("hook", hook), ("scan", scan)):
+        for fn in ("_edit_distance", "_name_mismatch_level"):
+            if not hasattr(mod, fn):
+                return False, "① %s 里没有 %s()（分档实现被改名/删了）" % (nm, fn)
+    rules_file = PKG / "rules" / "default.json"
+    if not rules_file.is_file():
+        return None, "缺 rules/default.json（不可判）"
+    ruleset = json.loads(rules_file.read_text(encoding="utf-8")).get("rules") or []
+    ctx = next((r for r in ruleset if r.get("id") == "CTX-05"), None)
+    if ctx is None:
+        return False, "① 规则集里没有 CTX-05"
+    for k in ("name_near_miss_max_distance", "name_min_len_for_distance"):
+        if k not in ctx:
+            return False, "① CTX-05 缺 %s（阈值被删 ⇒ 分档退回写死）" % k
+
+    # (标签, 目录名, frontmatter name, 期望级别, 类别)
+    cases = [
+        ("名字完全相同",         "antinel-security", "antinel-security", "",        "eq"),
+        ("只差大小写",           "antinel-security", "Antinel-Security", "",        "eq"),
+        ("近似：少一个字母",     "antinel-securty",  "antinel-security", "warning", "near"),
+        ("近似：拼写伪装",       "0penai-tools",     "openai-tools",     "warning", "near"),
+        ("毫不相干：单字母目录", "b",                "antinel-security", "info",    "far"),
+        ("毫不相干：psl",        "psl",              "antinel-security", "info",    "far"),
+        ("短名不适用距离",       "ab",               "cd",               "info",    "short"),
+    ]
+
+    def skmd(name):
+        return ("---\nname: %s\ndescription: fixture for CTX-05 level check\n---\n\n# body\n"
+                % name)
+
+    import shutil as _sh
+    root = Path(_TMP.tmpdir(prefix="d51_"))
+    try:
+        for _lab, d, nm, _w, _c in cases:
+            (root / d).mkdir(parents=True, exist_ok=True)
+            (root / d / "SKILL.md").write_text(skmd(nm), encoding="utf-8")
+
+        def run(rules_list):
+            """一次跑两个真入口，返回 {目录名: (hook 级别, scan 级别)}。"""
+            found, _s, _i, _g = scan.scan_directory(str(root), rules_list)
+            s_by = {f["file"].split("/")[0]: f.get("severity")
+                    for f in found if f.get("rule_id") == "CTX-05"}
+            out = {}
+            for _lab, d, _nm, _w, _c in cases:
+                p = root / d / "SKILL.md"
+                tgt = hook.file_text_targets("Read", str(p), "")
+                texts = {"command": "", "file_path": str(p), "content": "", "url": ""}
+                hits = hook.collect_hits(rules_list, "Read", texts, str(root), tgt) or []
+                hv = next((h.get("severity") for h in hits if h.get("rule_id") == "CTX-05"), "")
+                out[d] = (hv, s_by.get(d, ""))
+            return out
+
+        # ② 逐格
+        got = run(ruleset)
+        bad = []
+        for lab, d, _nm, want, _c in cases:
+            hv, sv = got[d]
+            if hv != want or sv != want:
+                bad.append("%s（期望 %s，hook=%s scan=%s）"
+                           % (lab, want or "不报", hv or "不报", sv or "不报"))
+        if bad:
+            return False, "② 分档与预期不符：%s" % "；".join(bad)
+
+        def mutated(**kw):
+            m = json.loads(json.dumps(ruleset))
+            for r in m:
+                if r.get("id") == "CTX-05":
+                    r.update(kw)
+            return m
+
+        # ③ 配置驱动
+        g0 = run(mutated(name_near_miss_max_distance=0))
+        near = [d for _l, d, _n, w, c in cases if c == "near"]
+        if any(g0[d][0] == "warning" or g0[d][1] == "warning" for d in near):
+            return False, "③ 近似阈值关到 0 后仍报 warning ⇒ 档位写死，不读规则"
+        if any(g0[d][0] != "info" or g0[d][1] != "info" for d in near):
+            return False, "③ 近似阈值关到 0 后近似样本没有降成 info"
+        g1 = run(mutated(name_near_miss_max_distance=99, name_min_len_for_distance=1))
+        far = [d for _l, d, _n, w, c in cases if c == "far"]
+        if any(g1[d][0] != "warning" or g1[d][1] != "warning" for d in far):
+            return False, "③ 阈值放大后毫不相干仍不升 warning ⇒ 档位不看配置"
+
+        # ④ 负控：换掉距离函数（同一入口），看 ② 的结论是否跟着变
+        o_h, o_s = hook._edit_distance, scan._edit_distance
+        try:
+            hook._edit_distance = lambda a, b: 0
+            scan._edit_distance = lambda a, b: 0
+            g2 = run(ruleset)
+            hook._edit_distance = lambda a, b: 999
+            scan._edit_distance = lambda a, b: 999
+            g3 = run(ruleset)
+        finally:
+            hook._edit_distance = o_h
+            scan._edit_distance = o_s
+        if any(g2[d][0] != "warning" or g2[d][1] != "warning" for d in far):
+            return False, "④ 距离恒为 0 时毫不相干仍不升 warning ⇒ ② 的 info 不是算出来的"
+        if any(g3[d][0] != "info" or g3[d][1] != "info" for d in near):
+            return False, "④ 距离恒为 999 时近似样本仍报 warning ⇒ ② 的 warning 不是算出来的"
+        short = [d for _l, d, _n, w, c in cases if c == "short"]
+        if any(g2[d][0] != "info" or g3[d][0] != "info" for d in short):
+            return False, ("④ 短名样本在距离突变下变了档 ⇒ minlen 门槛失效"
+                           "（长度不够时不该进入距离判定）")
+    finally:
+        _sh.rmtree(str(root), ignore_errors=True)
+
+    return True, ("① 两引擎分档入口在位、CTX-05 阈值 %d/%d ② %d 格全等 "
+                  "③ 阈值关 0 即降档、放大即升档 ④ 换掉距离函数后结论跟着变、短名不受距离影响"
+                  % (ctx["name_near_miss_max_distance"], ctx["name_min_len_for_distance"],
+                     len(cases)))
+
+
 def hook_hit_with(hook, ruleset, text, root):
     """D-50 内部用：把一份规则集直接喂给 hook 的内容通道。"""
     texts = {"command": "", "file_path": str(Path(str(root)) / "app.py"),
@@ -5385,6 +5532,9 @@ def _checks(m):
         # ── 2026-10-26 D-50：占位值不算秘密，真密钥还得抓得住（第 33 条）──
         ("D-50 密钥占位值不报、真密钥照报（227 条 SEC-06 全是文档示例/空私钥）",
          j_secret_placeholders_are_not_findings),
+        # ── 2026-10-26 D-51：名字近似分档，不能一刀切（第 34 条）──
+        ("D-51 CTX-05 名字近似才升档（38 条全是 worktree/克隆目录名，一刀切必误报）",
+         j_ctx05_name_level_is_tiered),
     ]
 
 

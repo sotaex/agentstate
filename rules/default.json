@@ -591,6 +591,8 @@
       "severity": "warning",
       "type": "metadata_check",
       "check": "frontmatter.name == directory_name",
+      "name_near_miss_max_distance": 2,
+      "name_min_len_for_distance": 4,
       "exclude_patterns": [],
       "apply_to_tools": [
         "Read"

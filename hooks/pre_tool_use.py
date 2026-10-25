@@ -201,6 +201,14 @@ INSTRUCTION_DIR_MARKERS = (".cursor/rules",)   # + basename endswith .mdc
 #   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
 #   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
 #   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
+# G-03: embedded fallback, used only when the rules file is unreadable / tampered.
+# ★★ 0.57.0（步骤 A）：本块**由 `rules/default.json` 生成**，与主表 37 条全等。
+#   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
+#   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
+#   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
+#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
+#   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
 _FALLBACK = [
     {"id": "SEC-01",
      "name": "Sensitive file read (.env)",
@@ -583,6 +591,8 @@ _FALLBACK = [
      "severity": "warning",
      "type": "metadata_check",
      "check": "frontmatter.name == directory_name",
+     "name_near_miss_max_distance": 2,
+     "name_min_len_for_distance": 4,
      "exclude_patterns": [],
      "apply_to_tools": ["Read"],
      "description": "SKILL.md frontmatter name field does not match parent directory name",
@@ -3024,6 +3034,47 @@ def _ctx03_surface(file_path):
     return "instruction" if _is_instruction_file(file_path) else "content"
 
 
+# ------------------------------ CTX-05: skill 名与目录名 ----------------------
+def _edit_distance(a, b):
+    """Levenshtein。只用于「名字近似但不相等」，名字很短，不需要优化。"""
+    if a == b:
+        return 0
+    if not a or not b:
+        return len(a) or len(b)
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+def _name_mismatch_level(name, dname, rule=None):
+    """CTX-05 的级别看「差多少」；相等返回空串（不报）。
+
+    ★★ 0.57.0（第 34 条）：实测本仓 38 条 CTX-05 **全部**是同一形态 ——
+       `name: antinel-security` 而目录叫 `b` / `psl` / `dai-std`，
+       那是 git worktree、克隆目录、解压目录的名字。
+       拿「目录名 == name」一律判可疑，等于**每次解压/克隆别人的 skill 都报一次**，
+       而这条规则的本意是抓「拼写近似 = 身份伪装 / 打错包」。
+    ⇒ 近似但不等（编辑距离 ≤ rule.name_near_miss_max_distance，且名字够长）
+      报规则自己的级别；毫不相干只报 info —— 照样列出来、照样能点开，但不扣分。
+    """
+    a, b = (name or "").lower(), (dname or "").lower()
+    if not a or not b or a == b:
+        return ""
+    rule = rule or {}
+    try:
+        far = int(rule.get("name_near_miss_max_distance", 2))
+        minlen = int(rule.get("name_min_len_for_distance", 4))
+    except (TypeError, ValueError):
+        far, minlen = 2, 4
+    if max(len(a), len(b)) >= minlen and _edit_distance(a, b) <= far:
+        return str(rule.get("severity") or "warning")
+    return "info"
+
+
 # ------------------------------------------------------------ NET-03 domains --
 def check_domains(cmd, whitelist):
     hosts = []
@@ -4113,14 +4164,16 @@ def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=Non
                     hit = (found[0], "invisible_" + surface, {"level": found[1]})
                     break
         # 6. metadata (CTX-05): SKILL.md frontmatter name == directory name
+        #    ★ 0.57.0（第 34 条）：级别按「差多少」分档，见 _name_mismatch_level。
         if hit is None and rtype == "metadata_check":
             for spec, text in file_targets:
                 if spec != "SKILL.md":
                     continue
                 name = frontmatter_name(text)
                 dname = os.path.basename(os.path.dirname(os.path.abspath(file_path))) if file_path else ""
-                if name is not None and dname and name.lower() != dname.lower():
-                    hit = (name + " != " + dname, "metadata")
+                _lvl05 = _name_mismatch_level(name, dname, rule) if name is not None else ""
+                if _lvl05:
+                    hit = (name + " != " + dname, "metadata", {"level": _lvl05})
                     break
 
         if hit is None:

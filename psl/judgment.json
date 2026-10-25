@@ -8,7 +8,7 @@
   "value": "current",
   "derivation": "auto",
   "reason": null,
-  "checkedAt": "2026-10-26T03:29:52+08:00",
+  "checkedAt": "2026-10-26T04:32:48+08:00",
   "note": "re-derive any time: python -m tools.antinel_verify (--manifest for all 24 shipped files); which assertions failed: discrimination.failed[]"
  },
  "scope": {
@@ -108,7 +108,7 @@
  },
  "digests": {
   "psl/antinel-namespaces.json": "sha256:2db67f32a5b803560f458c4589bd4bb4678cc17bc16625f6b6b3ad20f9b202d2",
-  "rules/default.json": "sha256:2d278099c246e823e08759a358932515d4f04cf380d7d86400333e2b2625a384",
+  "rules/default.json": "sha256:5d84129be4404bdaf234c86c48caae78968be782d8dbc90a8cfdde0131ac36ee",
   "rules/pricing.json": "sha256:e299e7afa07a97128ce00c13706379c79368c747cd4303c488f1c53c5339e253",
   "rules/typosquat_top.json": "sha256:c251fc477ac9d6a11795fc0a88a3fd149e74bca0407a3f99013d1ce8eee1e4be",
   "rules/economics/workbuddy.json": "sha256:7d570a0d8cb09f803695a4af147269620acdd5da5f403e2534a0c418c202c6a6",
@@ -116,9 +116,9 @@
   "rules/economics/claude-code.json": "sha256:e5ce954672baa42ffc220fddde2b691566f4644ec05ba6887c5ccc1c9dae30ba",
   "rules/economics/qoder.json": "sha256:5f51a86cbe0625f44519ce1308e562286c9d3410d0b7284006ac26b068396a3d",
   "rules/economics/generic.json": "sha256:4849374b3d2443dd77329b09d348dec03794863aa8f991d98ea5380a9849b82f",
-  "hooks/pre_tool_use.py": "sha256:afbd6ec12e3399d7cd965a37a0603fbe719a018d21f8e336c4ff1b75cd3f1351",
+  "hooks/pre_tool_use.py": "sha256:4ac57541e89d412b1b2ef3b434bcfc11223163f2ce613fc9efb0bea88ec955c6",
   "hooks/post_tool_use.py": "sha256:60965e54079bb2a3abc92a133d0400a60e4456a7d00527f6c7248170ba95f57d",
-  "scripts/scan.py": "sha256:633e050e8bd96a2d58540fbdcc50140c3c6c61999b3bdf939a699d1ce9023ca7",
+  "scripts/scan.py": "sha256:16abdfbb1a05425eb6a9b8c953031a1790474fda77f9c6897d5e9e1b76ac0f76",
   "scripts/install.py": "sha256:afb93d6fc76191555a48437b6fd4fe414ba7248feb4a23a867d198bb3c2b1ca5",
   "scripts/report.py": "sha256:d267783b87f8cd6e6f11966db5ed19394213cc8f58ed205fae29ef338841fbbd",
   "scripts/verification_tests.py": "sha256:e3540272db6942b12866907db5653cff0d1bbe4b08972470bab25bd63d00e574",
@@ -130,8 +130,8 @@
   "tools/enforce_probe.py": "sha256:c82cb457481a5e5a70c932b66c8c909f8050024f700f88b454bbea66992349ad"
  },
  "run": {
-  "started_at": "2026-10-26T03:17:11+0800",
-  "duration_ms": 761165,
+  "started_at": "2026-10-26T04:22:15+0800",
+  "duration_ms": 633300,
   "duration_note": "wall-clock of a subprocess fan-out suite; machine- and load-dependent, not comparable across environments",
   "executor": "scripts/run_harness.py",
   "exit_code": 0,
