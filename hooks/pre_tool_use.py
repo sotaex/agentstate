@@ -103,13 +103,11 @@ def _rx(pat):
         rx = None                       # a bad pattern disables that one rule, not the hook
     _RX_CACHE[pat] = rx
     return rx
-INVISIBLE_RANGES = [(917504, 917631), (8203, 8207), (8288, 8292), (65279, 65279),
-                    # E-F01 (2026-09-10): U+202D LRO / U+202E RLO —— 文件名伪装扩展名的
-                    # 经典手法（resume<RLO>cod.exe 显示为 resumexe.exe）。此前不在检测
-                    # 范围，实测 `Write` 到含 RLO 的路径直接放行。只收 override 两个
-                    # 控制符，不收 U+202A..U+202C 嵌入符与 U+2066..2069 隔离符——后两者
-                    # 在正常的希伯来/阿拉伯混排文本里出现，收进来会误伤。
-                    (8237, 8238)]
+# ★★ 0.57.0（第 32 条）：这里原来有一个手写的 INVISIBLE_RANGES 常量，
+#   scripts/scan.py 里还有一个 DEFAULT_RANGES，rules/default.json 里还有第三份
+#   ranges —— 三份内容各不相同（rules 有 U+2028..202E 一段、hook 只有 U+202D/E、
+#   scan 一段都没有），同一件事三把尺子。三处手写常量已全部删除：
+#   唯一真源是 rules/default.json 里 CTX-03 的 codepoints，见 _ctx03_table()。
 SEV_RANK = {"critical": 0, "warning": 1, "info": 2}
 CAT_ORDER = {"secrets": 0, "destructive": 1, "network": 2, "injection": 3, "context": 4, "metadata": 5}
 TOOL_ALIASES = {"MultiEdit": "Edit", "ApplyPatch": "Edit", "NotebookEdit": "Write",
@@ -123,6 +121,14 @@ INSTRUCTION_BASENAMES = ("AGENTS.md", "AGENTS.local.md", "CLAUDE.md",
 INSTRUCTION_DIR_MARKERS = (".cursor/rules",)   # + basename endswith .mdc
 
 # G-03: embedded fallback, used only when the rules file is unreadable (flat layout).
+# G-03: embedded fallback, used only when the rules file is unreadable / tampered.
+# ★★ 0.57.0（步骤 A）：本块**由 `rules/default.json` 生成**，与主表 37 条全等。
+#   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
+#   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
+#   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
+#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
+#   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
 # G-03: embedded fallback, used only when the rules file is unreadable / tampered.
 # ★★ 0.57.0（步骤 A）：本块**由 `rules/default.json` 生成**，与主表 37 条全等。
 #   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
@@ -533,8 +539,7 @@ _FALLBACK = [
      "type": "file_content",
      "target": "all_text_files",
      "detection": "character_code_scan",
-     "ranges": [{"start": 917504, "end": 917631}, {"start": 8203, "end": 8207}, {"start": 8288, "end": 8292}, {"start": 65279, "end": 65279}, {"start": 8232, "end": 8238}],
-     "whitelist_chars": ["‍"],
+     "codepoints": [{"start": 917504, "end": 917631, "kind": "tag", "levels": {"path": "critical", "command": "critical", "instruction": "critical", "content": "critical"}}, {"start": 8234, "end": 8238, "kind": "bidi_override", "levels": {"path": "critical", "command": "critical", "instruction": "critical", "content": "info"}}, {"start": 8294, "end": 8297, "kind": "bidi_isolate", "levels": {"path": "critical", "command": "critical", "instruction": "critical", "content": "info"}}, {"start": 65279, "end": 65279, "kind": "mid_bom", "levels": {"path": "warning", "command": "warning", "instruction": "warning", "content": "info"}}, {"start": 8203, "end": 8203, "kind": "zero_width", "levels": {"path": "warning", "command": "warning", "instruction": "critical", "content": "info"}}, {"start": 8288, "end": 8292, "kind": "word_joiner", "levels": {"path": "warning", "command": "warning", "instruction": "critical", "content": "info"}}, {"start": 173, "end": 173, "kind": "soft_hyphen", "levels": {"path": "warning", "command": "warning", "instruction": "warning", "content": "info"}}],
      "exclude_patterns": [],
      "apply_to_tools": ["Read", "Write", "Edit", "Bash"],
      "description": "Invisible Unicode character detected (tag characters, zero-width, word joiner, BOM in middle of file)",
@@ -2811,10 +2816,69 @@ def _bash_absolute_paths(command):
 
 
 # --------------------------------------------- G-05/G-09: invisible Unicode ----
+# ★★ 0.57.0（第 32 条）：级别不再是规则级的一个 critical，而是
+#   **逐码点类 × 逐出现面**。四个面：
+#     path        文件名/路径      —— 伪装扩展名（resume<RLO>cod.exe）
+#     command     命令行           —— 伪装命令行
+#     instruction 指令面（SKILL.md / AGENTS.md / .cursor/rules）
+#                                 —— 「人看不见、模型看得见」在这里就是攻击本身
+#     content     普通正文         —— 多语元数据、压缩包、AUTHORS 里本来就合法
+#   定档依据是实测，不是印象：13,508 个真实文本文件（site-packages 2,567 ＋
+#   Python 3.11 标准库 ＋ npm 随附模块 9,988）里，隐形码点只出现 4 处 ——
+#   ZWNJ 6 次（docutils 波斯语 fa.py，正字法必需）、ZWSP 18 次（pip AUTHORS.txt、
+#   vite 压缩包）、RLO 3 次（pip AUTHORS.txt 的人名）、行首 BOM 6 次；
+#   TAG 字符 0 次。旧口径把前三种全判 critical ⇒ docutils 首扫 0 分 D、
+#   pip 从 A 掉到 B，罚的全是合法文本。
+#   ⇒ 普通正文里只有「零正当用途」的那一类保持 critical（TAG 字符，Unicode 5.0
+#     起废弃、不渲染），其余降为 info（计 0 分，但仍然报出来，不静默吞掉）。
+#   ⇒ 刻意不报的码点：U+200C ZWNJ / U+200D ZWJ（正字法必需）、U+200E/F LRM/RLM
+#     （双向文本标记）、U+2028/2029（真换行，不是隐形）。
+_SURFACES = ("path", "command", "instruction", "content")
 _INVIS_RE_CACHE = {}
 
 
-def _invisible_re(ranges):
+def _ctx03_from_codepoints(cps):
+    """rules 里的 codepoints（[{start,end,kind,levels}]）→ 可哈希的判定表。"""
+    out = []
+    for c in cps:
+        lv = c.get("levels") or {}
+        out.append((int(c["start"]), int(c["end"]), str(c.get("kind") or "custom"),
+                    tuple(str(lv.get(s) or "") for s in _SURFACES)))
+    return tuple(out)
+
+
+def _ctx03_table(rule=None):
+    """CTX-03 码点表的**唯一来源**。
+
+    规则里写了 codepoints 就用它；只写了 ranges 的旧自定义规则按「一律 critical」
+    翻译成同一张表（仍然只走一条判定路径，不另开分支）；两者都没有（规则集不是
+    我们的默认集）就退到 _FALLBACK 里那条 CTX-03 —— 那份是与主表全等的生成副本，
+    由回归闸门的 D-49 守着。
+    """
+    if rule:
+        cps = rule.get("codepoints")
+        if cps:
+            return _ctx03_from_codepoints(cps)
+        rg = rule.get("ranges")
+        if rg:
+            return tuple((int(r["start"]), int(r["end"]), "legacy",
+                          ("critical",) * 4) for r in rg)
+    for r in _FALLBACK:
+        if r.get("detection") == "character_code_scan" and r.get("codepoints"):
+            return _ctx03_from_codepoints(r["codepoints"])
+    return ()
+
+
+def _ctx03_level(cp, surface, table):
+    """这个码点在当前出现面上的级别；空串 = 不报。"""
+    idx = _SURFACES.index(surface)
+    for lo, hi, _kind, levels in table:
+        if lo <= cp <= hi:
+            return levels[idx]
+    return ""
+
+
+def _invisible_re(table):
     """A13: compile the invisible-codepoint class once; matching then runs in C.
     Built with chr() rather than a \\uXXXX escape: the first range is
     U+E0000-U+E007F (TAG characters), a supplementary-plane range whose hex form
@@ -2822,32 +2886,48 @@ def _invisible_re(ranges):
     U+E000 followed by a literal '0', turning the class into '0-\\ue007' and
     matching nearly every ASCII character. Every path with a drive letter was
     then reported as an invisible-character attack."""
-    key = tuple(ranges)
-    rx = _INVIS_RE_CACHE.get(key)
+    rx = _INVIS_RE_CACHE.get(table)
     if rx is None:
         parts = []
-        for lo, hi in ranges:
+        for lo, hi, _kind, _levels in table:
             parts.append(re.escape(chr(lo)) if lo == hi
                          else re.escape(chr(lo)) + "-" + re.escape(chr(hi)))
-        rx = re.compile("[" + "".join(parts) + "]")
-        _INVIS_RE_CACHE[key] = rx
-    return rx
+        rx = re.compile("[" + "".join(parts) + "]") if parts else False
+        _INVIS_RE_CACHE[table] = rx
+    return rx or None
 
 
-def scan_invisible(text, ranges=None, whitelist=None):
-    """CTX-03. Whitelist (B-02): ZWJ U+200D anywhere; BOM U+FEFF only at offset 0.
+def scan_invisible(text, table=None, surface="content"):
+    """CTX-03. 返回 (说明, 级别) 或 None。
+
     A13: was a per-character Python loop -- 5MB of content cost 6.9s here alone,
     which is most of the 10s hook budget (and a timeout means the tool runs).
-    Now a single C-level regex pass; content is also capped before we get here."""
-    ranges = ranges or INVISIBLE_RANGES
-    wl = set(whitelist or []) | {"\u200d"}
-    for m in _invisible_re(ranges).finditer(text or ""):
+    Now a single C-level regex pass; content is also capped before we get here.
+
+    行首 BOM 一律放行（编辑器写的，不是藏字）；表里没列的面返回空串＝不报。
+    """
+    table = _ctx03_table() if table is None else table
+    rx = _invisible_re(table)
+    if rx is None:
+        return None
+    for m in rx.finditer(text or ""):
         i = m.start()
         ch = m.group(0)
-        if ch in wl or (ch == "\ufeff" and i == 0):
+        if ch == "\ufeff" and i == 0:
             continue
-        return "U+%04X at offset %d" % (ord(ch), i)
+        lvl = _ctx03_level(ord(ch), surface, table)
+        if not lvl:
+            continue
+        return "U+%04X at offset %d" % (ord(ch), i), lvl
     return None
+
+
+def _ctx03_surface(file_path):
+    """正文面还是指令面。指令面另算一档：SKILL.md 与指令文件集合。"""
+    base = os.path.basename(file_path or "")
+    if base == "SKILL.md":
+        return "instruction"
+    return "instruction" if _is_instruction_file(file_path) else "content"
 
 
 # ------------------------------------------------------------ NET-03 domains --
@@ -3925,16 +4005,18 @@ def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=Non
                     continue        # 用户显式放行 → 记录，不拦
                 hit = (_sync, "path_in_cloud_sync_dir")
                 break
-        # 5. invisible Unicode (CTX-03): command / path / content / file text
+        # 5. invisible Unicode (CTX-03): command / path / instruction / content
+        #    ★ 0.57.0（第 32 条）：级别逐码点逐面，全部来自规则里的 codepoints 表；
+        #    这里不再传 ranges / whitelist_chars（旧自定义规则由 _ctx03_table 统一翻译）。
         if hit is None and detection == "character_code_scan":
-            ranges = [(int(x["start"]), int(x["end"])) for x in rule.get("ranges", [])] or None
-            wl = rule.get("whitelist_chars") or []
-            probe = [(command, "command"), (file_path, "path"), (content, "content")] + \
-                    [(t, "file_content") for _, t in file_targets]
-            for text, kind in probe:
-                found = scan_invisible(text, ranges, wl)
+            _tbl = _ctx03_table(rule)
+            _body = _ctx03_surface(file_path)
+            probe = [(command, "command"), (file_path, "path"),
+                     (content, _body)] + [(t, _body) for _, t in file_targets]
+            for text, surface in probe:
+                found = scan_invisible(text, _tbl, surface)
                 if found:
-                    hit = (found, "invisible_" + kind)
+                    hit = (found[0], "invisible_" + surface, {"level": found[1]})
                     break
         # 6. metadata (CTX-05): SKILL.md frontmatter name == directory name
         if hit is None and rtype == "metadata_check":
@@ -3950,6 +4032,12 @@ def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=Non
         if hit is None:
             continue
         sev = (rule.get("severity") or "warning").lower()
+        # ★ 0.57.0（第 32 条）：逐命中级别可以覆盖规则级 severity —— CTX-03 用它把
+        #   同一个 U+202E 在普通正文/指令面/路径上分成不同档。覆写要能被看出来，
+        #   否则报告里「规则写着 critical 却只 alert」会被当成漏判去查。
+        _lvl = hit[2].get("level") if len(hit) > 2 and isinstance(hit[2], dict) else None
+        if _lvl:
+            sev = _lvl
         action = (rule.get("action") or ("block" if sev == "critical" else "alert")).lower()
         entry = {"rule_id": rule.get("id", "?"),
                  "severity": sev,

@@ -274,7 +274,14 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - description: Invisible Unicode character detected (tag characters, zero-width, word joiner, BOM in middle of file)
 - 说明: 检出隐形 Unicode 字符（标签字符/零宽字符等）
 - 处理建议: 清除隐形字符；出现在指令文件中默认按恶意处理
-- detection: character_code_scan (ranges [{'start': 917504, 'end': 917631}, {'start': 8203, 'end': 8207}, {'start': 8288, 'end': 8292}, {'start': 65279, 'end': 65279}, {'start': 8232, 'end': 8238}], whitelist ['\u200d'])
+- detection: character_code_scan（7 类码点，按出现面分档：path / command / instruction / content）
+    - U+E0000–U+E007F tag: path=critical, command=critical, instruction=critical, content=critical
+    - U+202A–U+202E bidi_override: path=critical, command=critical, instruction=critical, content=info
+    - U+2066–U+2069 bidi_isolate: path=critical, command=critical, instruction=critical, content=info
+    - U+FEFF–U+FEFF mid_bom: path=warning, command=warning, instruction=warning, content=info
+    - U+200B–U+200B zero_width: path=warning, command=warning, instruction=critical, content=info
+    - U+2060–U+2064 word_joiner: path=warning, command=warning, instruction=critical, content=info
+    - U+00AD–U+00AD soft_hyphen: path=warning, command=warning, instruction=warning, content=info
 - remediation: Strip invisible characters; treat any occurrence in instructions as hostile until proven otherwise.
 
 ## CTX-04  Encoded payload

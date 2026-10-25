@@ -121,7 +121,12 @@ QUICK_MAX_CHARSCAN = 256 * 1024
 
 STATIC_CATEGORIES = {"secrets", "injection", "metadata"}
 SEVERITY_WEIGHT = {"critical": 20, "warning": 5, "info": 0}
-DEFAULT_RANGES = [(917504, 917631), (8203, 8207), (8288, 8292), (65279, 65279)]
+# ★★ 0.57.0（第 32 条）：这里原来有一个手写的 DEFAULT_RANGES，只用于「规则没写
+#   ranges 时兜底」，而且与 rules/default.json 的 5 段、hooks/pre_tool_use.py 的
+#   5 段三份各不相同（这一段连 U+2028..202E 都没有 ⇒ scan 完全看不见 RLO 伪装
+#   文件名，而 hook 看得见：同一件事两把尺子）。常量已删，唯一真源是规则里的
+#   codepoints，见 _ctx03_codepoints()。
+_SURFACES = ("path", "command", "instruction", "content")
 
 
 # ---------------------------------------------------------------- rules ----
@@ -173,8 +178,7 @@ class CompiledRule:
         self.file_patterns = _compile_all(rule.get("file_patterns") or legacy.get("file_patterns"), flags)
         self.content_patterns = _compile_all(rule.get("content_patterns") or legacy.get("content_patterns"), flags)
         self.exclude_patterns = _compile_all(rule.get("exclude_patterns"), flags)
-        self.ranges = [(int(r["start"]), int(r["end"])) for r in rule.get("ranges", [])] \
-            if rule.get("ranges") else DEFAULT_RANGES
+        self.codepoints = _ctx03_codepoints(rule)
 
     def is_static(self):
         if self.raw.get("enabled") is False:
@@ -272,18 +276,72 @@ def frontmatter_name(text):
     return nm.group(1).strip() if nm else None
 
 
-def scan_invisible(text, ranges):
-    """CTX-03: returns list of (line, codepoint_label). ZWJ U+200D and a BOM at
-    offset 0 are whitelisted (spec B-02)."""
+_INVIS_RE_CACHE = {}
+
+
+def _ctx03_codepoints(rule):
+    """CTX-03 码点表的唯一来源（与 hooks/pre_tool_use.py 的 _ctx03_table 同口径）。
+
+    规则写了 codepoints 就用它；只写了 ranges 的旧自定义规则按「一律 critical」
+    翻译成同一张表；两者都没有就不是一条字符扫描规则，返回空表（不报）。
+    """
+    cps = rule.get("codepoints")
+    if cps:
+        out = []
+        for c in cps:
+            lv = c.get("levels") or {}
+            out.append((int(c["start"]), int(c["end"]), str(c.get("kind") or "custom"),
+                        tuple(str(lv.get(s) or "") for s in _SURFACES)))
+        return tuple(out)
+    rg = rule.get("ranges")
+    if rg:
+        return tuple((int(r["start"]), int(r["end"]), "legacy", ("critical",) * 4) for r in rg)
+    return ()
+
+
+def _ctx03_level(cp, surface, table):
+    """这个码点在当前出现面上的级别；空串 = 不报。"""
+    idx = _SURFACES.index(surface)
+    for lo, hi, _kind, levels in table:
+        if lo <= cp <= hi:
+            return levels[idx]
+    return ""
+
+
+def _invisible_re(table):
+    """Compile the codepoint class once（与 hook 同一构造：chr() 而非 \\uXXXX，
+    因为 U+E0000 是 5 位十六进制，%04x 会造出 U+E000+'0' 这种错类）。"""
+    rx = _INVIS_RE_CACHE.get(table)
+    if rx is None:
+        parts = []
+        for lo, hi, _kind, _levels in table:
+            parts.append(re.escape(chr(lo)) if lo == hi
+                         else re.escape(chr(lo)) + "-" + re.escape(chr(hi)))
+        rx = re.compile("[" + "".join(parts) + "]") if parts else False
+        _INVIS_RE_CACHE[table] = rx
+    return rx or None
+
+
+def scan_invisible(text, table, surface="content"):
+    """CTX-03：返回 [(行号, 码点标签, 级别)]。
+
+    级别逐码点逐面（0.57.0 第 32 条），与 hooks/pre_tool_use.py 的 scan_invisible
+    同一张表、同一套判定；差异只在返回形态 —— 这边要一次报全，那边命中第一条就停。
+    行首 BOM 放行；表里没列的面返回空串＝不报。
+    """
     hits = []
-    for i, ch in enumerate(text):
-        cp = ord(ch)
-        if cp == 0x200D or (cp == 0xFEFF and i == 0):
+    rx = _invisible_re(table)
+    if rx is None:
+        return hits
+    for m in rx.finditer(text or ""):
+        i = m.start()
+        ch = m.group(0)
+        if ch == "\ufeff" and i == 0:
             continue
-        for lo, hi in ranges:
-            if lo <= cp <= hi:
-                hits.append((line_of(text, i), "U+%04X" % cp))
-                break
+        lvl = _ctx03_level(ord(ch), surface, table)
+        if not lvl:
+            continue
+        hits.append((line_of(text, i), "U+%04X" % ord(ch), lvl))
     return hits
 
 
@@ -311,12 +369,12 @@ def scan_directory(root, rules, quick=False, path_whitelist=None):
     root = Path(root)
     root_str = str(root)
 
-    def add(rule, rel, line, match, extra=None):
+    def add(rule, rel, line, match, extra=None, sev=None):
         key = (rel, rule.id, line)
         if key in findings:
             return
         findings[key] = {
-            "rule_id": rule.id, "severity": rule.severity, "category": rule.category,
+            "rule_id": rule.id, "severity": sev or rule.severity, "category": rule.category,
             "file": rel, "line": line, "target": "%s:%d" % (rel, line),
             "match": (match or "")[:120],
             "description": rule.description, "remediation": rule.remediation,
@@ -441,10 +499,21 @@ def scan_directory(root, rules, quick=False, path_whitelist=None):
                             add(rule, rel, line_of(text, _m.start()), _m.group(0)[:60])
                         continue
                     if rule.detection == "character_code_scan":
+                        # ★ 0.57.0（第 32 条）：**路径也是一个出现面**。原来只扫正文，
+                        #   于是 RLO 伪装扩展名（resume<RLO>cod.exe）在 hook 里拦得住、
+                        #   在批量扫描里一条都报不出来 —— 同一件事两把尺子。
+                        #   行号记 0：命中的是文件名，不是某一行（也避免与正文
+                        #   第 1 行的命中在 (rel, rule_id, line) 上去重时互相吞掉）。
+                        for _ln, _lb, _lv in scan_invisible(rel, rule.codepoints, "path"):
+                            add(rule, rel, 0, _lb, "invisible_path", _lv)
                         if quick and len(text) > QUICK_MAX_CHARSCAN:
                             continue
-                        for line, label in scan_invisible(text, rule.ranges):
-                            add(rule, rel, line, label, "invisible_char")
+                        # 指令面（SKILL.md / AGENTS.md / .cursor/rules）另算一档：
+                        # 「人看不见、模型看得见」在那里就是攻击本身。
+                        _surf = ("instruction" if _spec in ("SKILL.md", "instruction_file")
+                                 else "content")
+                        for line, label, lvl in scan_invisible(text, rule.codepoints, _surf):
+                            add(rule, rel, line, label, "invisible_char", lvl)
                     else:
                         for rx in rule.content_patterns:
                             for m in rx.finditer(text):

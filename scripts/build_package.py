@@ -1090,7 +1090,21 @@ def rules_md(rules_path):
         if r.get("check"):
             L.append("- check: %s" % r["check"])
         if r.get("detection"):
-            L.append("- detection: %s (ranges %s, whitelist %s)" % (r["detection"], r.get("ranges"), r.get("whitelist_chars")))
+            # ★ 0.57.0（第 32 条）：CTX-03 从「一条 ranges 全判 critical」改成
+            #   「码点类 × 出现面」分档，文档必须把分档写出来 —— 用户看到
+            #   「规则写着 critical 却只 alert」时需要能对上这张表。
+            if r.get("codepoints"):
+                L.append("- detection: %s（%d 类码点，按出现面分档：path / command / "
+                         "instruction / content）" % (r["detection"], len(r["codepoints"])))
+                for c in r["codepoints"]:
+                    lv = c.get("levels") or {}
+                    L.append("    - U+%04X–U+%04X %s: %s" % (
+                        c["start"], c["end"], c.get("kind") or "?",
+                        ", ".join("%s=%s" % (k, lv.get(k) or "不报")
+                                  for k in ("path", "command", "instruction", "content"))))
+            else:
+                L.append("- detection: %s (ranges %s, whitelist %s)" % (
+                    r["detection"], r.get("ranges"), r.get("whitelist_chars")))
         if r.get("whitelist_domains"):
             L.append("- whitelist_domains: %s" % ", ".join(r["whitelist_domains"]))
         if r.get("exclude_patterns"):

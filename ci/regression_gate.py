@@ -4996,6 +4996,176 @@ def _quick_skip(cid):
     return cid.split()[0] in _QUICK_SKIP_IDS
 
 
+def j_ctx03_single_source():
+    """★★★ D-49（2026-10-26，第 32 条）：CTX-03 的码点表只许有一份，两个引擎结论必须一致。
+
+    实测缺陷（`output/tests/0.57.0/d32_parity.log`）：同一个「隐形字符」概念，
+    三处各写一份，**三份内容都不一样** ——
+      rules/default.json  5 段，含 U+2028..U+202E
+      hooks/pre_tool_use.py INVISIBLE_RANGES  5 段，只含 U+202D..U+202E
+      scripts/scan.py      DEFAULT_RANGES     4 段，连 RLO 都没有
+    更糟的不是常量不同，是**能力不同**：scan 只扫正文 ⇒ RLO 伪装扩展名
+    （resume<RLO>cod.exe）在 hook 里拦得住、在批量扫描里一条都报不出来。
+
+    另一半缺陷是分档：一条 ranges 全判 critical，把 ZWNJ（波斯语正字法必需）、
+    LRM/RLM、U+2028/2029（真换行）一并罚。实测 13,508 个真实文本文件里，
+    隐形码点只出现 4 处：ZWNJ 6 次（docutils 波斯语 fa.py）、ZWSP 18 次
+    （pip AUTHORS.txt、vite 压缩包）、RLO 3 次（pip AUTHORS.txt 的人名）、
+    行首 BOM 6 次；TAG 字符 0 次。后果是 docutils 首扫 0 分 D、
+    pip 从 A 掉到 B —— **罚的全是合法文本，而唯一零正当用途的那一类一次没出现**。
+
+    ⇒ 改法：唯一真源放进 rules/default.json 的 `codepoints`（码点类 × 出现面：
+      path / command / instruction / content），两处手写常量全删。普通正文里
+      只有 TAG 字符保持 critical，其余降 info（计 0 分但仍报出来）。
+
+    五腿（先红后绿，红的是「1/3 条：scan 里没有 codepoints 这个概念」）：
+      ① 结构：两个引擎对**同一条规则**必须得出**同一张表**；
+      ② 结构：每类四个出现面都写死（空面＝静默不报，等于悄悄关掉一个面）；
+      ③ 结构：因合法而删掉的 6 个码点不许被加回表里（加了就重新误伤多语文本）；
+      ④ 行为：16 码点 × 3 个可比面（path/instruction/content）逐格比对，
+         hook 与 scan 的「级别/动作」必须全等；且非空格数有下限（防空集凑绿）；
+      ⑤ 负控：把 codepoints 清空后 hook 必须一条都不报 —— 证明 ④ 考的是这张表，
+         不是「两边都不报」这种天生相等。
+    注：command 面 scan 结构性没有（批量扫描器不接收命令行），不计入比对，
+        也不拿它凑一致。
+    """
+    rules_file = PKG / "rules" / "default.json"
+    if not rules_file.is_file():
+        return None, "缺 rules/default.json（不可判）"
+    doc = json.loads(rules_file.read_text(encoding="utf-8"))
+    rule = next((r for r in (doc.get("rules") or []) if r.get("id") == "CTX-03"), None)
+    if rule is None:
+        return False, "规则集里没有 CTX-03（判据对象不在）"
+    hook = _load_module_file("hooks/pre_tool_use.py", "_hook_d49")
+    scan = _load_module_file("scripts/scan.py", "_scan_d49")
+    if hook is None or scan is None:
+        return False, "产品模块加载失败"
+    for nm, mod, fn in (("hook", hook, "_ctx03_table"), ("hook", hook, "collect_hits"),
+                        ("scan", scan, "_ctx03_codepoints"), ("scan", scan, "scan_directory")):
+        if not hasattr(mod, fn):
+            return False, "%s 里没有 %s()（入口被改名/删了，判据会假绿）" % (nm, fn)
+
+    # ---- ① 同一份规则，两个引擎必须出同一张表 ----
+    t_hook = hook._ctx03_table(rule)
+    t_scan = scan._ctx03_codepoints(rule)
+    if not t_hook or not t_scan:
+        return False, "① 码点表是空的（hook=%d 类 / scan=%d 类）" % (len(t_hook or ()), len(t_scan or ()))
+    if tuple(t_hook) != tuple(t_scan):
+        return False, ("① 同一份规则出两张表：hook %d 类 / scan %d 类（同一件事两把尺子）"
+                       % (len(t_hook), len(t_scan)))
+
+    # ---- ② 每类四个面都要写死 ----
+    empty = [r[2] for r in t_hook if any(not lv for lv in r[3])]
+    if empty:
+        return False, "② 这些码点类有空的出现面（＝静默不报）：%s" % empty
+
+    # ---- ③ 合法码点不许被加回表里 ----
+    silent = (0x200C, 0x200D, 0x200E, 0x200F, 0x2028, 0x2029)
+    back = [cp for cp in silent if any(lo <= cp <= hi for lo, hi, _k, _l in t_hook)]
+    if back:
+        return False, ("③ 合法码点被加回表里（会重新把多语文本判成攻击）：%s"
+                       % ["U+%04X" % c for c in back])
+
+    # ---- ④ 行为：16 码点 × 3 面，两个真入口逐格比对 ----
+    import shutil as _sh
+    root = Path(_TMP.tmpdir(prefix="d49_"))
+    cases = [0xE0001, 0x202D, 0x202E, 0x202A, 0x2067, 0xFEFF, 0x200B,
+             0x2060, 0x2063, 0x00AD, 0x200C, 0x200D, 0x200E, 0x200F, 0x2028, 0x2029]
+    try:
+        proj = str(root)
+        cells = 0
+        filled = 0
+        diff = []
+        for cp in cases:
+            ch = chr(cp)
+            d = root / ("s%04x" % cp)
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "plain.py").write_text("a" + ch + "b", encoding="utf-8")
+            (d / "SKILL.md").write_text("a" + ch + "b", encoding="utf-8")
+            name_ok = True
+            try:
+                (d / ("a" + ch + "b.py")).write_text("x", encoding="utf-8")
+            except OSError:
+                name_ok = False
+            found, _st, _ids, _dg = scan.scan_directory(str(d), doc.get("rules") or [])
+            for surface, rel, kind in (("path", "a" + ch + "b.py", "invisible_path"),
+                                       ("instruction", "SKILL.md", "invisible_char"),
+                                       ("content", "plain.py", "invisible_char")):
+                if surface == "path" and not name_ok:
+                    continue                    # 该文件系统建不出这个名字 ⇒ 不计入
+                cells += 1
+                rows = [f for f in found if f.get("rule_id") == "CTX-03"
+                        and str(f.get("file")) == rel and f.get("kind") == kind]
+                s = (rows[0]["severity"], "block" if rows[0]["severity"] == "critical"
+                     else "alert") if rows else ("", "无")
+                if surface == "path":
+                    texts = {"command": "", "file_path": str(d / ("a" + ch + "b.py")),
+                             "content": "x", "url": ""}
+                    tool = "Write"
+                elif surface == "instruction":
+                    texts = {"command": "", "file_path": str(d / "SKILL.md"),
+                             "content": "a" + ch + "b", "url": ""}
+                    tool = "Write"
+                else:
+                    texts = {"command": "", "file_path": str(d / "plain.py"),
+                             "content": "a" + ch + "b", "url": ""}
+                    tool = "Write"
+                hits = [h for h in (hook.collect_hits(doc.get("rules") or [], tool, texts,
+                                                      proj, []) or [])
+                        if h.get("rule_id") == "CTX-03"]
+                h = (hits[0].get("severity"), "block" if hits[0].get("action") == "block"
+                     else "alert") if hits else ("", "无")
+                if s[0]:
+                    filled += 1
+                if h != s:
+                    diff.append("U+%04X/%s hook=%s scan=%s" % (cp, surface, h, s))
+        if diff:
+            return False, "④ %d/%d 格两引擎结论不同：%s" % (len(diff), cells, "; ".join(diff[:4]))
+        if filled < cells * 6 // 10:
+            return False, ("④ 只有 %d/%d 格真报出东西 —— 空集不能证明一致"
+                           "（两边都懒得报也全等）" % (filled, cells))
+
+        # ---- ⑤ 负控：改掉一类的**一个面**，两个引擎都必须跟着不报 ----
+        #   ★ 第一版写的是「把 codepoints 整块删掉，hook 必须一条都不报」——它红了，
+        #   而且红得对：规则里没有码点表时 _ctx03_table() 会退到 _FALLBACK，
+        #   那是**降级兜底**（规则文件坏了也得能扫），不是缺陷。
+        #   ⇒ 负控改成「只清空 tag 类的 content 面」，要求两件事同时成立：
+        #     content 面必须不报（证明级别表真被读）、path 面必须照报（证明不是把整类关掉）。
+        #     单边走「全不报」的负控测不到分档，只会测到「有没有开关」。
+        hollow = json.loads(json.dumps(rule))
+        for _c in hollow.get("codepoints") or []:
+            if int(_c["start"]) == 0xE0000:
+                (_c.setdefault("levels", {}))["content"] = ""
+        one = chr(0xE0001)
+        texts = {"command": "", "file_path": str(root / "plain.py"),
+                 "content": "a" + one + "b", "url": ""}
+        neg = [x for x in (hook.collect_hits([hollow], "Write", texts, proj, []) or [])
+               if x.get("rule_id") == "CTX-03"]
+        if neg:
+            return False, "⑤ 清空 tag 类的 content 面后 hook 仍按正文报出 ⇒ 级别表没被读"
+        d5 = root / "neg"
+        d5.mkdir(parents=True, exist_ok=True)
+        (d5 / "plain.py").write_text("a" + one + "b", encoding="utf-8")
+        try:
+            (d5 / ("a" + one + "b.py")).write_text("x", encoding="utf-8")
+            _path_ok = True
+        except OSError:
+            _path_ok = False
+        nf, _s5, _i5, _d5d = scan.scan_directory(str(d5), [hollow])
+        n_ct = [f for f in nf if f.get("rule_id") == "CTX-03" and f.get("file") == "plain.py"]
+        n_pa = [f for f in nf if f.get("rule_id") == "CTX-03" and f.get("file") != "plain.py"]
+        if n_ct:
+            return False, "⑤ 清空 content 面后 scan 仍按正文报出 ⇒ 级别表没被读"
+        if _path_ok and not n_pa:
+            return False, "⑤ 只清空 content 面，path 面却也不报了（负控过度 ＝ 关掉整类）"
+    finally:
+        _sh.rmtree(str(root), ignore_errors=True)
+
+    return True, ("① 两个引擎同一张表 %d 类 ② 四面临全 ③ 6 个合法码点未回表 "
+                  "④ %d/%d 格全等（其中 %d 格真报出）⑤ 清一个面即单边不报、另一面照报"
+                  % (len(t_hook), cells, cells, filled))
+
+
 def _checks(m):
     """判据清单（**唯一真源**）。返回 `[(判据 ID 串, 可调用)]`。
 
@@ -5082,6 +5252,9 @@ def _checks(m):
         # ── 2026-10-25 D-48：规则里每一条模式都必须「活着」（第 31 条）──
         ("D-48 规则模式全部可编译且真能匹配（10 条排除写成双层转义＝0 生效）",
          j_rules_patterns_are_alive),
+        # ── 2026-10-26 D-49：CTX-03 的码点表只许有一份（第 32 条）──
+        ("D-49 CTX-03 两个引擎同源同结论（三份区间表各写一份，scan 看不见 RLO 文件名）",
+         j_ctx03_single_source),
     ]
 
 

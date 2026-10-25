@@ -539,30 +539,14 @@
       "type": "file_content",
       "target": "all_text_files",
       "detection": "character_code_scan",
-      "ranges": [
-        {
-          "start": 917504,
-          "end": 917631
-        },
-        {
-          "start": 8203,
-          "end": 8207
-        },
-        {
-          "start": 8288,
-          "end": 8292
-        },
-        {
-          "start": 65279,
-          "end": 65279
-        },
-        {
-          "start": 8232,
-          "end": 8238
-        }
-      ],
-      "whitelist_chars": [
-        "‍"
+      "codepoints": [
+        {"start": 917504, "end": 917631, "kind": "tag", "levels": {"path": "critical", "command": "critical", "instruction": "critical", "content": "critical"}},
+        {"start": 8234, "end": 8238, "kind": "bidi_override", "levels": {"path": "critical", "command": "critical", "instruction": "critical", "content": "info"}},
+        {"start": 8294, "end": 8297, "kind": "bidi_isolate", "levels": {"path": "critical", "command": "critical", "instruction": "critical", "content": "info"}},
+        {"start": 65279, "end": 65279, "kind": "mid_bom", "levels": {"path": "warning", "command": "warning", "instruction": "warning", "content": "info"}},
+        {"start": 8203, "end": 8203, "kind": "zero_width", "levels": {"path": "warning", "command": "warning", "instruction": "critical", "content": "info"}},
+        {"start": 8288, "end": 8292, "kind": "word_joiner", "levels": {"path": "warning", "command": "warning", "instruction": "critical", "content": "info"}},
+        {"start": 173, "end": 173, "kind": "soft_hyphen", "levels": {"path": "warning", "command": "warning", "instruction": "warning", "content": "info"}}
       ],
       "exclude_patterns": [],
       "apply_to_tools": [
