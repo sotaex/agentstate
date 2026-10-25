@@ -83,6 +83,13 @@ DEFAULT_RULES = _locate("rules", "default.json")
 
 EXCLUDED_DIRS = {"node_modules", ".git", "venv", ".venv", "__pycache__", ".tox",
                  "dist", "build", "vendor", "third_party",
+                 # ★ 0.57.0（第 36 条）：依赖包的安装目录。此前只排除了 venv / .venv
+                 #   这两个**目录名**，于是用 `env/`、`myenv/`、`conda/` 之类名字建的
+                 #   虚拟环境，整个 site-packages 都会进扫描面。实测 Python3.11 的 Lib
+                 #   下 19 条 SEC-06 critical 全部来自 Cryptodome 的 SelfTest 测试密钥
+                 #   —— 密码学库的测试套件里必然有真格式的私钥样本。用户改不了这些
+                 #   代码，报它只会让"依赖装得多"变成"分数低"。
+                 "site-packages", "dist-packages",
                  # ★ 0.57.0（第 35 条）：git worktree 的落脚目录。它不是源码树的一部分，
                  #   而是同一份历史的另一个检出版本 —— 扫它等于把同一个文件按份数重复计数。
                  #   实测本仓 178 条命中里 65 条来自 `.worktrees/`。

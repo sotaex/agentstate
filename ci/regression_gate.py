@@ -5493,6 +5493,11 @@ def j_scan_scope_is_configurable_and_counted():
         (root / "pkg.egg-info" / dot("d")).write_text("TOKEN=abc\n", encoding="utf-8")
         (root / "node_modules" / "m").mkdir(parents=True, exist_ok=True)
         (root / "node_modules" / "m" / dot("e")).write_text("TOKEN=abc\n", encoding="utf-8")
+        # 依赖包目录：虚拟环境叫什么名字都可能（env / myenv / conda / .direnv），
+        # 只按 venv / .venv 两个目录名排除是不够的。
+        (root / "myenv" / "site-packages").mkdir(parents=True, exist_ok=True)
+        (root / "myenv" / "site-packages" / dot("f")).write_text("TOKEN=abc\n",
+                                                                  encoding="utf-8")
         if ignore_text is not None:
             (root / scan.IGNORE_FILE).write_text(ignore_text, encoding="utf-8")
 
@@ -5516,7 +5521,8 @@ def j_scan_scope_is_configurable_and_counted():
         got = hits_of(f)
         if got != [dot("a"), dot("b")]:
             return False, ("② 默认排除不对：期望只扫到根上的 a 和 output 里的 b，实际 %s"
-                           "（.worktrees / *.egg-info / node_modules 应被排除）" % got)
+                           "（.worktrees / *.egg-info / node_modules / "
+                           "site-packages 应被排除）" % got)
         if not st.get("build_dirs_skipped"):
             return False, "② 构建产物目录被排除但没计数（skip 了却数不出来）"
 
@@ -5579,9 +5585,9 @@ def j_scan_scope_is_configurable_and_counted():
     finally:
         _sh.rmtree(str(root), ignore_errors=True)
 
-    return True, ("① 清单入口在位 ② 默认排除 .worktrees/*.egg-info/node_modules ③ 目录忽略并留账 "
-                  "④ `!` 例外生效 ⑤ 写 * 时报告明说「扫描面被清空」⑥ MCP 通道同口径 "
-                  "⑦ 清单读不了会留痕并印到报告")
+    return True, ("① 清单入口在位 ② 默认排除 .worktrees/*.egg-info/node_modules/site-packages "
+                  "③ 目录忽略并留账 ④ `!` 例外生效 ⑤ 写 * 时报告明说「扫描面被清空」"
+                  "⑥ MCP 通道同口径 ⑦ 清单读不了会留痕并印到报告")
 
 
 def hook_hit_with(hook, ruleset, text, root):
