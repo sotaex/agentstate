@@ -2507,7 +2507,22 @@ def rules_drift_lines(root, package_rules=None):
 
 def self_check():
     """0.28.3（B4e/B4f）：自身脚本与登记表对 psl/manifest.json 哈希。
-    返回 (ok, problems)。manifest 缺失 → (True, [])（无法校验，如实不谎报）。
+    返回 (ok, problems)。
+
+    ★★★ 2026-10-25（第 28 条）：此处原写「manifest 缺失 → (True, [])（无法校验，
+      如实不谎报）」—— **说反了，实测是 fail-closed**。实测方式见
+      `output/_d28_selfcheck_nomanifest.py`：把产品件复制进临时树、**不复制**
+      `psl/manifest.json`，在那棵树上调本函数 ⇒ `(False, 5 条)`，
+      每条都是「……在告警链路保护名单里，却没登记进 manifest」。
+      机制是 0.36.4 那层：`unregistered_chain_files()` 先跑在哈希比对之前，
+      清单没了 ⇒ 所有保护件都"没登记" ⇒ 全红。
+    ★ 为什么必须把这句话改对而不是把代码改成承诺的样子：**删掉一份清单，
+      比伪造一份清单容易得多**。若按旧文档改成缺失即放行，那么一个拿到写权限
+      的 Agent 只要删清单，整个自检就说"一切正常"——而且完全符合文档。
+      这句话曾被当成"如实不谎报"的好设计写着，实际是一句**给未来回归
+      铺路的说明**（方向最坏那种：不是多报，是静默）。
+      本方向由 `regression D-45` 三腿守着（无清单必红／同批件带清单必绿／
+      空清单 files={} 仍红）。
 
     ★★ 0.35.3 修（结构性缺口，本轮实测发现）：
       原实现**只校验自己（host_shield.py）与 rules/hosts 登记表**——

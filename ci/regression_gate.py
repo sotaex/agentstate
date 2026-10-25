@@ -4416,6 +4416,148 @@ def selfcheck():
     return 0 if ok_all else 1
 
 
+def j_selfcheck_fails_closed_without_manifest():
+    """★★★ D-45（2026-10-25，第 28 条）：`psl/manifest.json` 不见了，自检必须**判红**。
+
+    为什么这条比"哈希不符"更该守 —— 它是自检的**失效形态**，而且方向最坏：
+      `self_check()` 的 docstring 第 2510 行原话是
+        「manifest 缺失 → (True, [])（无法校验，如实不谎报）」
+      ⇒ 文档承诺的是**放行**。而删掉一份清单，比伪造一份清单容易得多；
+      于是一个只要拿到写权限的 Agent，**删清单**就能让整个自检说"一切正常"
+      —— 而且看起来完全符合文档。
+
+    实测（`output/_d28_selfcheck_nomanifest.py`，2026-10-25）：
+      把产品件复制进临时树、**不复制** `psl/manifest.json`，从那儿加载
+      `host_shield.py`（`_pkg_root()` 取 `__file__` 的目录 ⇒ 自动指向临时树）
+      ⇒ `ok=False`，5 条红（4 个告警链路件 ＋ `ci/freeze_zones.json` 各一条
+      「没登记进 manifest」）。**代码是 fail-closed 的，是 docstring 说反了。**
+      根因：`unregistered_chain_files()` 是 0.36.4 加的那层 fail-closed
+      （"在保护名单里却没登记"＝红），它在 `self_check()` 里跑在哈希比对**之前**
+      ⇒ 清单没了 ⇒ 所有保护件都"没登记" ⇒ 全红。0.36.4 之后没人回头改那句
+      docstring（承诺与行为各说一套，本仓第一顽症）。
+
+    判据（三条腿，行为级；直接调产品函数，不二次实现校验逻辑）：
+      ① **被测腿**：同一批产品件、**无清单** ⇒ `ok` 必须为 False，
+         且红项里必须**说得出**「没登记进 manifest」（不许只是笼统 False）。
+      ② **对照腿**：同一批件、**有清单** ⇒ `ok` 必须为 True。
+         ★ 没有这条，① 在"这棵树永远红"的实现下也绿（空集比较的反面：
+           「不变红」要先证明「本来能绿」）。
+      ③ **空清单腿**：清单文件在，但 `files` 是 `{}` ⇒ 仍须 False。
+         防"只看文件在不在"的实现（那等于把 ① 的绿买通了）。
+
+    与 D-36 的分工：D-36 守**真仓自洽**（改了被钉住的源码必须重签）；
+      本条守**清单本身缺席时的方向**。两条都调 `self_check()`，判两件事。
+    """
+    import shutil
+
+    if not (PKG / "host_shield.py").is_file():
+        return None, "缺 host_shield.py（不可判）"
+    want = ["host_shield.py", "egress.py",
+            "hooks/pre_tool_use.py", "hooks/post_tool_use.py",
+            "tools/enforce_probe.py", "ci/freeze_zones.json"]
+    present = [r for r in want if (PKG / r).is_file()]
+    if "host_shield.py" not in present:
+        return None, "缺 host_shield.py（不可判）"
+
+    # ★★ 清单里的哈希必须**现算**，不许照抄真 manifest ——
+    #   这是 2026-10-25 现成的教训（写本条时第一版就踩了）：
+    #   第一版把 `psl/manifest.json` 逐字复制进对照树，于是**只要当前源码
+    #   与已注册的清单有落差**（比如刚改完 host_shield.py 还没重签），
+    #   对照腿就假红，判据变成"测仓库此刻有没有重签"——那是 D-36 的活。
+    #   夹具依赖被测树现状 ⇒ 源码一改夹具就塌（同 `_c34_tree` 那次的病）。
+    #   ⇒ 口径取构建器唯一实现，不自己算裸 sha256（版本承载件要先归一化，
+    #     裸算会得"全部不一致"，量具自造第二套口径 = 第一顽症）。
+    def _builder_hasher():
+        import importlib.util as _ilu
+        p = PKG / "scripts" / "build_package.py"
+        if not p.is_file():
+            return None
+        spec = _ilu.spec_from_file_location("_bp_regression_d45", str(p))
+        m = _ilu.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(m)
+        except SystemExit:
+            pass
+        return getattr(m, "_manifest_hash_of", None)
+
+    orig_pkg = globals()["PKG"]
+
+    def _stage(with_manifest, empty_manifest=False):
+        """造一棵只含产品件的最小树；返回 (root, 加载到的 host_shield 模块)。"""
+        root = Path(_TMP.tmpdir(prefix="d45_"))
+        rels = list(present)
+        for rel in present:
+            dst = root / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(str(PKG / rel), str(dst))
+        if (PKG / "rules" / "hosts").is_dir():
+            (root / "rules" / "hosts").mkdir(parents=True, exist_ok=True)
+            for f in sorted((PKG / "rules" / "hosts").glob("*.json")):
+                shutil.copyfile(str(f), str(root / "rules" / "hosts" / f.name))
+                rels.append("rules/hosts/" + f.name)
+        if with_manifest:
+            (root / "psl").mkdir(parents=True, exist_ok=True)
+            if empty_manifest:
+                body = {"files": {}}
+            else:
+                hasher = _builder_hasher()
+                if hasher is None:
+                    return None, None          # 拿不到口径 ⇒ 不可判，不拿裸 sha 兜底
+                body = {"skill_version": "0.0.0-d45",
+                        "files": {rel: hasher(rel, str(root / rel)) for rel in rels}}
+            (root / "psl" / "manifest.json").write_text(
+                json.dumps(body), encoding="utf-8")
+        globals()["PKG"] = root
+        try:
+            mod = _load_module_file("host_shield.py", "_hs_d45_%s"
+                                    % ("m" if with_manifest else "n")
+                                    + ("e" if empty_manifest else ""))
+        finally:
+            globals()["PKG"] = orig_pkg
+        return root, mod
+
+    try:
+        if not (PKG / "psl" / "manifest.json").is_file():
+            return None, "真仓缺 psl/manifest.json —— 对照腿无从造（不可判）"
+
+        # ---- ① 被测腿：无清单必须红，且红得有名有姓 ----
+        _r1, m1 = _stage(with_manifest=False)
+        if m1 is None:
+            return False, "① 从临时树加载 host_shield 失败（不可判）"
+        ok1, pr1 = m1.self_check()
+        if ok1:
+            return False, ("① **清单不见了自检说一切正常** —— 删清单即可让自检"
+                           "闭嘴（docstring 承诺的 fail-open 回来了）")
+        if not any("没登记进 manifest" in str(x) for x in pr1):
+            return False, ("① 判红了，但红项说不出「没登记进 manifest」（%d 条：%s）"
+                           " —— 用户照着修不了（T-04 红而无出路）"
+                           % (len(pr1), "；".join(str(x)[:30] for x in pr1[:2])))
+
+        # ---- ② 对照腿：同样的件 ＋ 现算哈希的清单 ⇒ 必须绿 ----
+        _r2, m2 = _stage(with_manifest=True)
+        if m2 is None:
+            return None, "② 拿不到构建器哈希口径（build_package._manifest_hash_of）—— 不可判"
+        ok2, pr2 = m2.self_check()
+        if not ok2:
+            return False, ("② 同一批产品件**带上现算哈希的清单却判红**（%d 条：%s）"
+                           " ⇒ ① 的绿是「这棵树永远红」换来的，不是被清单驱动的"
+                           % (len(pr2), "；".join(str(x)[:30] for x in pr2[:2])))
+
+        # ---- ③ 空清单腿：文件在但 files 为空 ⇒ 仍须 False ----
+        _r3, m3 = _stage(with_manifest=True, empty_manifest=True)
+        ok3, pr3 = m3.self_check()
+        if ok3:
+            return False, ("③ 清单在但 `files` 是空表却判成功 ⇒ 实现只看文件在不在"
+                           "（空清单与好清单同貌）")
+
+        return True, ("三腿成立：无清单必红且点名「没登记」＋ 同批件带清单必绿"
+                      "＋ 空清单（files={}）仍红")
+    except Exception as e:                                  # noqa: BLE001
+        return False, "判据自身抛异常：%s: %s" % (type(e).__name__, e)
+    finally:
+        globals()["PKG"] = orig_pkg
+
+
 # ---------------------------------------------------------------- 主流程
 #: `--quick` 跳过的判据 ID（2026-10-13 新增，**声明式**，不是静默）。
 #: ★ 为什么允许跳过：实测 22 条共 **66s**，其中 3 条占 **51s**
@@ -4507,6 +4649,9 @@ def _checks(m):
          j_lock_budget_is_wallclock),
         ("D-44 锁的 steal/release 失败必须留痕（不许只写在诊断开关后面）",
          j_lock_failures_leave_trace),
+        # ── 2026-10-25 D-45：清单不见了，自检必须判红（第 28 条）──
+        ("D-45 清单不见了自检必须判红（删清单即可让自检闭嘴）",
+         j_selfcheck_fails_closed_without_manifest),
     ]
 
 
