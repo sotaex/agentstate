@@ -140,7 +140,7 @@
   "scripts/run_harness.py": "sha256:125bbbcd5d659283ef5bb1cbf8d20f4e22d9ecc561a0cfa8540dfe12d3fdf6e9",
   "scripts/scan.py": "sha256:e44199c8a755cfc83c8d91b97c7738348d07f118dd832fdadc4c88f550f6d7ee",
   "scripts/tmp_sweep.py": "sha256:6a62d058c11b8feab89621e079831b39c6ab2a3582a2c6daeefc0f322240d753",
-  "scripts/verification_tests.py": "sha256:45b1b0653f314bdd2c9a500c6b6791b37481701ad82b1e3eef2bf4b14ae513ae",
+  "scripts/verification_tests.py": "sha256:d3b7d98da159a82bdb1a9b25c96c2b2cc605d92a1ebf9fd77494523ad72df5ed",
   "scripts/verify_release.py": "sha256:c0848c534ad953f1e2141435e4f27f8a6f838652168fcc4e49e1a45c5aff40c0",
   "session_dna.py": "sha256:38b2bd765fdf2308fa698eb507e53c4ba7fbe2bf11c94216d95ad5dd116fb205",
   "sidecar.py": "sha256:df171a7ae53c0d75c542b00d533aedd099d702355c19a7e18a7c607d5b802ca2",

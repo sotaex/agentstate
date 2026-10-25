@@ -10382,37 +10382,104 @@ def c_s38a():
 
 
 def _s38_hub_problem(body):
-    """`verification_tests.py` 源码里「中枢唯一」是否成立。返回问题描述或 None。
+    """**静态腿**：`verification_tests.py` 里中枢隔离的**结构**是否在位。
 
-    ★ 抽成纯函数是为了**牙齿**（C-S38d）：负控要能换掉同一实现，
-      而不是另写一份判定 —— 否则牙齿测的是副本，不是真判据。
+    ★ 2026-10-25（第 35 条）拆腿，原因是这条判据先前的口径错了 ——
+      它要求 `os.environ["ANTINEL_HUB_DIR"] = …` 的**同一行**里同时出现
+      `getpid()` 与 `%d`。第 35 条把 hub 改成与家目录**同源**
+      （`= str(_HOST_ISO / ".antinel")`，好让「认 hub 变量」和「硬拼 `~`」
+      两条路落进同一棵树），唯一性于是搬到了 `_ISO_TAG` 的定义里 ——
+      **性质没变，写法变了，判据就翻红了**。
+      这就是「量的是代码长相，不是代码性质」：字面判据会把重构当成缺陷，
+      同时也会把「长得像但没做到」当成通过。
+
+    ⇒ 现在分两层：
+      · 本函数只管**结构**（有赋值、有 `audit_ids/audit_records/_audit_since`）；
+      · **唯一性交给行为判据** `_s38_hub_unique()` —— 真起两个进程导入本套件，
+        比对它们各自给自己设的中枢路径。这个口径既不认写法、也无法被
+        「换个变量名」骗过。
+
+    抽成纯函数是为了**牙齿**（C-S38d）：负控要能换掉同一实现，
+    而不是另写一份判定 —— 否则牙齿测的是副本，不是真判据。
     """
-    hits = []
-    for m in re.finditer(r'os\.environ\["ANTINEL_HUB_DIR"\]\s*=\s*(.{0,160})', body, re.S):
-        hits.append(m.group(1))
-    if not hits:
-        return "找不到 `os.environ[\"ANTINEL_HUB_DIR\"]` 的赋值 —— 套件没有隔离中枢"
-    first = hits[0].split("\n\n")[0]
-    if "getpid()" not in first or "%d" not in first:
-        return ("中枢目录**不再唯一**：%s\n"
-                "      ⇒ 状态会跨运行累积，读 stderr 的判据会变成"
-                "「同一小时前几次绿、之后全红」的定时炸弹（实测 MCP-01 dup=9）。"
-                % " ".join(first.split())[:120])
+    if not re.search(r'os\.environ\["ANTINEL_HUB_DIR"\]\s*=', body):
+        return ("找不到 `os.environ[\"ANTINEL_HUB_DIR\"]` 的赋值 —— 套件没有隔离中枢"
+                "（install/hub 的登记会写进真实 ~/.antinel）")
     for fn in ("def audit_ids(", "def audit_records(", "def _audit_since("):
         if fn not in body:
             return "缺少 `%s` —— alert 级判据没有无状态证据源" % fn.strip()
     return None
 
 
+#: 子进程探针：按文件路径导入套件模块，打印它给自己设的中枢路径。
+#: ★ 用 importlib 而不是 `import verification_tests`：负控要对**变异副本**跑同一入口，
+#:   副本不在 sys.path 上。`ANTINEL_PKG` 指真仓，因为套件会校验包根结构。
+_S38_HUB_PROBE = (
+    "import importlib.util,sys,os\n"
+    "spec=importlib.util.spec_from_file_location('vt_probe',%r)\n"
+    "m=importlib.util.module_from_spec(spec)\n"
+    "spec.loader.exec_module(m)\n"
+    "print('HUBPATH=' + os.environ.get('ANTINEL_HUB_DIR',''))\n"
+)
+
+
+def _s38_hub_of(vt_path):
+    """跑一个**独立进程**导入 `vt_path`，返回它给自己设的中枢路径（失败返 ""）。"""
+    import subprocess
+    env = dict(os.environ)
+    env["ANTINEL_PKG"] = ROOT
+    env.pop("ANTINEL_WORK", None)          # 不吃调用者的 WORK：每次自己算
+    try:
+        r = subprocess.run([sys.executable, "-E", "-X", "utf8",
+                            "-c", _S38_HUB_PROBE % str(vt_path)],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=300, env=env, cwd=ROOT,
+                           creationflags=(0x08000000 if os.name == "nt" else 0))
+    except Exception as exc:                                     # noqa: BLE001
+        return ""
+    for line in (r.stdout or "").splitlines():
+        if line.startswith("HUBPATH="):
+            return line[len("HUBPATH="):].strip()
+    return ""
+
+
+def _s38_hub_unique(vt_path):
+    """**行为腿**：两次独立运行必须拿到**不同**中枢，且都不落在真实家目录。
+
+    返回问题描述或 None。
+
+    ★ 为什么必须真跑：唯一性是个**运行期性质**（`pid`+毫秒），
+      静态文本再怎么读都只能读到「像唯一」。而同进程 reload 不行 ——
+      同 pid 下毫秒可能不同，那证明的是「每次求值都变」，不是「跨运行唯一」。
+    """
+    hubs = [_s38_hub_of(vt_path) for _ in range(2)]
+    if not all(hubs):
+        return ("读不出中枢路径（两次实得 %r）—— 探针没能导入套件模块，"
+                "**这不是通过，是盲区**" % (hubs,))
+    if hubs[0] == hubs[1]:
+        return ("中枢目录**不再唯一**：两次运行都得到 %s\n"
+                "      ⇒ 状态会跨运行累积，读 stderr 的判据会变成"
+                "「同一小时前几次绿、之后全红」的定时炸弹（实测 MCP-01 dup=9）。"
+                % hubs[0])
+    real = os.path.join(os.path.expanduser("~"), ".antinel")
+    for h in hubs:
+        if os.path.normcase(os.path.abspath(h)) == os.path.normcase(os.path.abspath(real)):
+            return ("中枢仍落在**真实家目录**（%s）—— 套件会往创始人的 ~/.antinel 写账" % h)
+    return None
+
+
 @check("C-S38b 中枢每次运行唯一（防把定时炸弹装回去）")
 def c_s38b():
-    p = os.path.join(ROOT, _S38_VT)
-    if not os.path.isfile(p):
+    vt = os.path.join(ROOT, _S38_VT)
+    if not os.path.isfile(vt):
         return "夹具不成立：%s 不存在" % _S38_VT
-    bad = _s38_hub_problem(io.open(p, encoding="utf-8").read())
+    bad = _s38_hub_problem(io.open(vt, encoding="utf-8").read())
     if bad:
         return bad
-    _note("中枢目录带 pid+毫秒唯一后缀；audit_ids/audit_records 均在位")
+    bad = _s38_hub_unique(vt)
+    if bad:
+        return bad
+    _note("中枢两次独立运行落在不同目录、且都不在真实家目录；audit_ids/audit_records 均在位")
     return True
 
 
@@ -10507,14 +10574,42 @@ def c_s38c():
     return True
 
 
+def _s38_mutant_fixed_hub():
+    """造负控输入：把真实套件里「沙箱家目录」那行改成**固定名**，写到临时文件。
+
+    ★ 为什么不写假源码：`_s38_hub_problem` 现在只管**结构**，假源码测的是结构腿；
+      要测**行为腿**（`_s38_hub_unique`）就必须给它一个真能导入的模块。
+      变异点选 `_HOST_ISO = …` 那一行 —— 它正是第 35 条引入的唯一性来源。
+      （`_s38_hub_of` 会 `pop` 掉 `ANTINEL_WORK` 且不设 `ANTINEL_WORK_UNIQUE`，
+        所以 `WORK` 在副本里是**固定**的 ⇒ 只有 `_ISO_TAG` 撑着唯一性。）
+    """
+    src_path = os.path.join(ROOT, _S38_VT)
+    src = io.open(src_path, encoding="utf-8").read()
+    pat = re.compile(r'^_HOST_ISO = .*$', re.M)
+    if not pat.search(src):
+        return None
+    mut = pat.sub('_HOST_ISO = WORK / "home"', src, count=1)
+    if mut == src:
+        return None
+    d = str(_TMPREG.tmpdir(prefix="g0514_s38d_"))
+    dst = os.path.join(d, "vt_mutant.py")
+    io.open(dst, "w", encoding="utf-8", newline="\n").write(mut)
+    return dst
+
+
 @check("C-S38d 牙齿：把这两种退化各塞一个，同一判据必须翻红")
 def c_s38d():
     """改坏**同一实现**，看它会不会说话 —— 换一份副本去测等于没测。
 
     三颗牙：
       ① 新增一条 `rc == 0 and "X" in err` 且不登记 ⇒ C-S38a 口径必须报出来
-      ② 把中枢改回固定路径 ⇒ `_s38_hub_problem` 必须报出来
+      ② 把中枢改回固定路径（**对真实源码的变异副本跑行为腿**）⇒ 必须报出来
       ③ 把 `audit_ids()` 删掉 ⇒ `_s38_hub_problem` 必须报出来
+
+    ★ ② 在 2026-10-25（第 35 条）换过输入：原来拿一段**假源码**喂纯函数，
+      而那时纯函数自己就在做字面判断，所以假源码够用。现在唯一性由行为腿负责，
+      假源码测不到它 —— 只能喂一个**真能导入的变异副本**。
+      这不是把牙齿放松，而是把牙齿挪到它该咬的地方上。
     """
     silent = []
 
@@ -10530,23 +10625,29 @@ def c_s38d():
         silent.append("① 白名单莫名其妙收录了假判据名")
 
     # ② 中枢改回固定路径（**这是本次修复的东西**）
-    fixed_hub = 'os.environ["ANTINEL_HUB_DIR"] = str(WORK / "hub")\n' \
-                "def audit_ids(:\n"
-    p2 = _s38_hub_problem('os.environ["ANTINEL_HUB_DIR"] = str(WORK / "hub")\n'
-                          'def audit_ids():\ndef audit_records():\ndef _audit_since():')
-    if p2 is None:
-        silent.append("② 中枢写成固定路径（%s）却没被报出来" % fixed_hub.split("=")[-1].strip())
+    mut = _s38_mutant_fixed_hub()
+    if mut is None:
+        silent.append("② 造不出变异副本（源码里找不到 `_HOST_ISO = …` 那一行）"
+                      " ⇒ 这条负控**没有输入**，不等于它通过")
+    else:
+        hubs = [_s38_hub_of(mut) for _ in range(2)]
+        if not all(hubs):
+            silent.append("② 变异副本导入失败（实得 %r）⇒ 负控没跑成，不是咬住了" % (hubs,))
+        else:
+            bad = _s38_hub_unique(mut)
+            if bad is None:
+                silent.append("② 中枢改成固定路径（两次都得到 %s）"
+                              "却没被行为腿报出来" % hubs[0])
 
     # ③ 读数辅助消失
-    p3 = _s38_hub_problem('os.environ["ANTINEL_HUB_DIR"] = str(WORK / ("hub-%d" % '
-                          'os.getpid()))\n')
+    p3 = _s38_hub_problem('os.environ["ANTINEL_HUB_DIR"] = str(WORK / "hub")\n')
     if p3 is None:
         silent.append("③ 删掉 audit_ids 等辅助后仍判通过 ⇒ 那条腿没有真的在查")
 
     if silent:
         return ("牙齿失效 —— 改坏了却仍然绿，说明这几条判据没有分辨力：\n      "
                 + "\n      ".join(silent))
-    _note("三颗牙全部咬住：未登记的 stderr 断言 / 固定中枢路径 / 缺读数辅助")
+    _note("三颗牙全部咬住：未登记的 stderr 断言 / 固定中枢（行为腿）/ 缺读数辅助")
     return True
 
 

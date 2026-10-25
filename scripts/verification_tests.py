@@ -69,6 +69,58 @@ if os.environ.get("ANTINEL_WORK_UNIQUE") == "1" and _WORK_ENV:
     os.environ["ANTINEL_WORK"] = str(WORK)
 else:
     WORK = Path(_WORK_ENV or (Path(tempfile.gettempdir()) / "antinel_verify_work"))
+# ★★ 第 35 条（2026-10-25）：**家目录也必须隔离**，而且必须与 `ANTINEL_HUB_DIR` 同源。
+#
+# 为什么只隔离 hub 不够（静态事实）：全仓有 15 处硬拼 `os.path.expanduser("~")`
+#   而不看 `ANTINEL_HUB_DIR` —— `~/.antinel/user_economics.json`、
+#   `~/.antinel/last-error.txt`、`~/.antinel/antinel-shield.cmd`、`~/.antinel/egress`、
+#   `~/.antinel/logs`、`~/Desktop`、`~/AppData/Roaming`、
+#   `~/.workbuddy/<workspace>.json`、`~/.antinel.json` …（清单见
+#   `output/tests/0.57.0/f35_home_iso_v2.json` 与 `output/_f35_home_probe2.py`）。
+#   只要有一条被套件触达，就会写进**创始人的真实家目录**；而它们都不认 hub 变量，
+#   所以「设了 ANTINEL_HUB_DIR 就安全」这个信念本身是错的。
+#   ⇒ `USERPROFILE` 是所有 `~` 的**唯一上游**，隔离它一次兜住全部 15 处。
+#
+# ★ 本机实测的 `expanduser("~")` 行为矩阵（Windows／Python 3.13，不是推断）：
+#     env 原样                        → C:\Users\大马          （真实家目录）
+#     USERPROFILE=<iso> + HOME=<iso>  → <iso>                 ✅
+#     **只设 USERPROFILE**=<iso>      → <iso>                 ✅（Windows 认它）
+#     **只设 HOME**=<iso>（删 USERPROFILE）→ C:\Users\大马     ❌ HOME 在 Windows 不参与
+#     **USERPROFILE=""（空串）**      → **"" 空串**            ⚠⚠ 陷阱
+#     USERPROFILE=<iso> + HOME=""     → <iso>                 ✅（HOME 为空无害）
+#   ⇒ 两个硬结论：
+#     ① Windows 上隔离只看 `USERPROFILE`；`HOME` 设了无害、但没有作用（POSIX 才认），
+#        所以两边都设（跨平台一份代码）。
+#     ② **绝不能把它设成空串**：`expanduser("~")` 会返回 `""`，于是
+#        `os.path.join("", ".antinel")` 变成**相对路径** `.antinel` —— 落在 cwd 下，
+#        比不设更危险（路径会随 cwd 漂移，且看起来"隔离了"）。要给就给真目录。
+#
+# ★ 与 hub **同源**是关键，不是洁癖：`~/.antinel` 与 `ANTINEL_HUB_DIR` 若指向
+#   两个不同目录，就出现了**两个中枢** —— 走 hub 变量的写入与硬拼 `~` 的写入
+#   各记各的账，读的人永远只看得到一半。（本仓第一顽症：同一事实多处实现。）
+#   同源之后：`ANTINEL_HUB_DIR == <沙箱home>/.antinel == expanduser("~")/.antinel`，
+#   三条路落在同一处，读得到、也删得干净（且本机禁删，靠 WORK 唯一后缀自然规避）。
+#
+# ★★ 探针的自我纠错（写在这里，因为下一个人一定会想用同一个错量具）：
+#   第 35 条的第一版探针（`output/_f35_home_probe.py`）用「真实家目录
+#   mtime 快照前后对比」判定污染，结果在**完全隔离**的腿里也报出
+#   `~/.antinel/pending_decisions.json` 变化 ⇒ 一度得出「隔离无效」的结论。
+#   回查发现本机常驻三只进程：`host_shield.py sentinel`（pid 47792，**每 5 分钟**
+#   一拍）、`antinel.py inbox serve --port 2559`、`tools/logo.ps1 -State …tray.json`。
+#   决定性证据：`state_writes.jsonl` **每条都带 pid**，最近三条全是 47792、
+#   间隔恰好 300s；而 v2 探针按 pid 归属后，fire 子进程的写入数为 **0**。
+#   ⇒ 量具自带了第二个写入者 = 噪声当信号。**判定写入必须按 pid/会话归属，
+#     不能拿 mtime diff 当证据**（与「流水条数 ≠ 件数」同族）。
+#   对照腿（Q0，12 秒不 fire 任何东西）实测确实自己变了两个文件 —— 这就是噪声底。
+_REAL_HOME = Path(os.path.expanduser("~"))   # 必须在改 env 之前捕获：第 35 条的守卫判据要用它做对照
+_ISO_TAG = "%d-%d" % (os.getpid(), int(time.time() * 1000) % 1000000)
+_HOST_ISO = WORK / ("home-" + _ISO_TAG)
+try:
+    _HOST_ISO.mkdir(parents=True, exist_ok=True)
+except OSError:
+    pass
+os.environ["USERPROFILE"] = str(_HOST_ISO)
+os.environ["HOME"] = str(_HOST_ISO)
 # 0.23.1: 套件全程把个人中枢指到沙箱——install/hub 的任何登记都不会污染真实 ~/.antinel
 #
 # ★★ 第 38 条（2026-10-25，**实测**抓到的定时炸弹）：hub 还必须**每次运行唯一**。
@@ -86,8 +138,7 @@ else:
 #   hub 唯一之后，每次运行从空账开始，告警可见性不再取决于「今天跑过几次」。
 #   ★ 这只治「跨运行」；「运行内」同一规则仍会静默，所以读 stderr 的判据
 #     仍在逐条改成读审计链（`audit_ids()`，无状态）。
-os.environ["ANTINEL_HUB_DIR"] = str(WORK / ("hub-%d-%d" % (
-    os.getpid(), int(time.time() * 1000) % 1000000)))
+os.environ["ANTINEL_HUB_DIR"] = str(_HOST_ISO / ".antinel")
 os.environ["ANTINEL_SHIELD_NOTIFY"] = "0"
 os.environ["ANTINEL_SHIELD_MIRROR"] = "0"
 # 0.28.2: 套件运行期间关闭门闸气泡（F-15 在摘除开关的沙箱里单独断言）
@@ -2235,8 +2286,45 @@ def main():
     # 0.23.1 capabilities (定稿方案 v1.1/v1.2: antinel 单入口 + 中枢 + 快照预测)
     # ================================================================
     print("\n-- 0.23.1 capabilities --")
-    host_ready = (Path.home() / ".zcode").is_dir()   # 能力测试需宿主已装（CI 裸机跳过）
+    # ★ 第 35 条：这里**不再有 `host_ready`**。
+    #
+    #   原来的写法是 `host_ready = (Path.home() / ".zcode").is_dir()`，
+    #   然后三条宿主特定命令「不 ready 就 record(True, "skipped")」。两个病：
+    #     ① **尺子与产品不一致**：harness 用「`.zcode` 目录存在」判宿主，产品自己
+    #        用的是 `hooks/_host_detect.py`（env 优先＋目录标记）。实测本机
+    #        `.zcode` 目录在、但产品识别成 **workbuddy**（`~/.workbuddy` 存在）
+    #        ⇒ 两把尺子量同一件事（本仓第一顽症）。
+    #     ② **跳过条件被环境无声改写**：家目录一隔离，`Path.home()` 变成空沙箱目录
+    #        ⇒ `host_ready` 恒 False ⇒ 三条**永远跳过**，还记成通过。
+    #        那不是隔离的收益，是分母缩水（跳过条件不许写成事实断言）。
+    #
+    #   ⇒ 改成**无条件真跑**：给这一段一个局部「宿主夹具 home」，
+    #     里面只放一个 workbuddy 安装标记（`~/.workbuddy/antinel.json`）。
+    #     为什么是 workbuddy：它是 `rules/economics/*.json` 里**唯一 unit=credits**
+    #     的宿主（claude-code=USD、generic/qoder/zcode=tokens），而 credits 子命令
+    #     只在 unit=credits 的宿主存在。真机上它之所以可用，正是因为产品在那里
+    #     识别成 workbuddy —— 夹具复刻的是这个**条件**，不是把期望值抄过来。
+    #     夹具 home 与夹具 hub **同源**（`<fixture>/.antinel`），避免又造出两个中枢。
+    #   实测（`output/_f35_home_probe2.py` 之后的手工验证）：
+    #     `roots add C:\`      → rc=2，err 含「盘根不放行（C://）——根路径等于关闭边界」
+    #     `credits snapshot …` → rc=0，「✓ 快照已进链：余额 5755.35（你报于 …）」
+    _host_fix = WORK / ("hostfix-" + _ISO_TAG)
+    (_host_fix / ".workbuddy").mkdir(parents=True, exist_ok=True)
+    (_host_fix / ".workbuddy" / "antinel.json").write_text("{}", encoding="utf-8")
     hub_env = {"ANTINEL_HUB_DIR": str(WORK / "hub")}
+    hosted_env = {"ANTINEL_HUB_DIR": str(_host_fix / ".antinel"),
+                  "USERPROFILE": str(_host_fix), "HOME": str(_host_fix)}
+    # 守卫：隔离**真的**生效（防止未来有人把顶部那三行 env 删掉、或把 USERPROFILE 设成空）。
+    #   断言的是**设计意图**（套件不许碰真实家目录），不是从现状抄来的期望值。
+    #   负控（手跑，见探针 Q1 矩阵）：把 USERPROFILE 删掉 ⇒ 第一条红；
+    #     设成 `""` ⇒ `expanduser("~")` 返回空串、`Path("")` 落到 cwd ⇒ 第二条红；
+    #     把 HUB_DIR 指向别处 ⇒ 第二条红。三种退化都拦得住，不是只拦一种。
+    _hu = Path(os.path.expanduser("~"))
+    _hub_at = Path(os.environ["ANTINEL_HUB_DIR"])
+    record("第 35 条 套件不碰真实家目录（隔离生效且与 hub 同源）",
+           _hu.resolve() != _REAL_HOME.resolve()
+           and _hub_at.resolve() == (_hu / ".antinel").resolve(),
+           "home=%s hub=%s real=%s" % (_hu, _hub_at, _REAL_HOME))
     rc, out, err, _ = run("antinel.py", [], cwd=proj, env=hub_env, stdin="")
     record("0.23.1 help shows host line, dialogue routes, commands",
            rc == 0 and "你可以对 Agent 说" in out and "宿主" in out and "antinel digest" in out,
@@ -2255,32 +2343,32 @@ def main():
            len(pc231) == 1 and pc231[0].get("invoked_by") == "agent"
            and str(pc231[0].get("new_sha256", "")).startswith("sha256:")
            and pc231[0].get("field") == "whitelist.domains", str(pc231)[:90])
-    if not host_ready:
-        record("0.23.1 roots add drive-root rejected (fail-closed)", True,
-               "skipped: no host installed")
-    elif os.name == "nt":
-        rc, out, err, _ = run("antinel.py", ["roots", "add", "C:\\"], cwd=proj, env=hub_env, stdin="")
+    # ★ 第 35 条：三条宿主特定命令**无条件真跑**（改用 hosted_env 夹具，见上）。
+    #   原来这里是 `if not host_ready: record(True, "skipped")` —— 那既让分母随环境变，
+    #   又在隔离之后变成永久跳过。夹具把「宿主可用」这个前提**造出来**，
+    #   于是这里不再需要任何跳过分支（也不许再加回来）。
+    if os.name == "nt":
+        rc, out, err, _ = run("antinel.py", ["roots", "add", "C:\\"], cwd=proj, env=hosted_env, stdin="")
         record("0.23.1 roots add drive-root rejected (fail-closed)",
                rc == 2 and "盘根" in err, err.strip()[:60])
     else:
-        rc, out, err, _ = run("antinel.py", ["roots", "add", "/"], cwd=proj, env=hub_env, stdin="")
+        rc, out, err, _ = run("antinel.py", ["roots", "add", "/"], cwd=proj, env=hosted_env, stdin="")
         record("0.23.1 roots add filesystem-root rejected (fail-closed)",
                rc == 2, err.strip()[:60])
     rc, out, err, _ = run("antinel.py", ["credits", "snapshot", "5755.35",
                                       "--reward", "1900@2026-09-29",
-                                      "--cycle", "2026-09-30"], cwd=proj, env=hub_env, stdin="")
+                                      "--cycle", "2026-09-30"], cwd=proj, env=hosted_env, stdin="")
     snaps231 = [r for r in _recs22() if r.get("type") == "credits_snapshot"]
     record("0.23.1 credits snapshot chained (user_reported)",
            (rc == 0 and len(snaps231) == 1 and snaps231[0].get("user_reported") is True
-            and (snaps231[0].get("buckets") or {}).get("reward", {}).get("expires") == "2026-09-29")
-           if host_ready else True,
-           "skipped: no host installed" if not host_ready else (out + err).strip()[:70])
+            and (snaps231[0].get("buckets") or {}).get("reward", {}).get("expires") == "2026-09-29"),
+           (out + err).strip()[:70])
     rc, out, err, _ = run("antinel.py", ["credits", "snapshot", "5600",
-                                      "--cycle", "2026-09-30"], cwd=proj, env=hub_env, stdin="")
-    rc, out, err, _ = run("antinel.py", ["credits", "forecast"], cwd=proj, env=hub_env, stdin="")
+                                      "--cycle", "2026-09-30"], cwd=proj, env=hosted_env, stdin="")
+    rc, out, err, _ = run("antinel.py", ["credits", "forecast"], cwd=proj, env=hosted_env, stdin="")
     record("0.23.1 credits forecast with 2 snapshots",
-           (rc == 0 and "余额" in out and "周期至" in out) if host_ready else True,
-           "skipped: no host installed" if not host_ready else (out + err).strip()[:80])
+           rc == 0 and "余额" in out and "周期至" in out,
+           (out + err).strip()[:80])
     rc, out, err, _ = run("antinel.py", ["hub", "register", str(proj), "--host", "workbuddy"],
                        cwd=proj, env=hub_env)
     rc, out, err, _ = run("antinel.py", ["digest", "--scope", "all"], cwd=proj, env=hub_env, stdin="")

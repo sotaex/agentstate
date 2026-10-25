@@ -614,6 +614,57 @@ sdist  antinel-0.56.0.tar.gz（扫描文本成员 246 个）：三处同样齐
 
 **读数**：0514 **266 绿 / 0 红 / 0 跳过**（262 ＋ 4）；0490 **138 / 0**；regression **31/31**；harness 第一遍 1 条红（judgment 陈旧，`verification_tests.py` 被改过）、第二遍 **323/323 PASS**；manifest 重签 1 条。
 
-**未修（诚实标注）**：第 35 条的 `USERPROFILE` 仍未隔离——本轮只隔离了 `ANTINEL_HUB_DIR`（`notice_gate` 用它，够解决第 36/38 条），但 `expanduser("~")` 还有别的消费者。那条仍是空的。
+**当时未修（已由 §7.6 补齐）**：第 35 条的 `USERPROFILE` 当初仍未隔离——步骤 E 只隔离了 `ANTINEL_HUB_DIR`（`notice_gate` 用它，够解决第 36/38 条），但 `expanduser("~")` 还有别的消费者。
 
 证据：`output/tests/0.57.0/`（`s38_chain.txt`、`harness_s38_{1,2}.log`、`gate_s38.log`、`regression_s38.log`）；探针 `output/_stderr_gate_probe.py`（衰减实测）、`output/_s38_audit_source.py`（审计链 vs stderr 对照）、`output/_s38_audit_ids_probe.py`（三条腿）、`output/_s38_precheck.py`（改前 13 腿预验证）、`output/_s38_apply.py`（精确片段替换）。
+
+---
+
+## 7.6 第 35 条：套件不再碰真实家目录（本轮）
+
+**问题**：步骤 E 只隔离了 `ANTINEL_HUB_DIR`。但全仓有 15 处硬拼 `os.path.expanduser("~")` 且**不看**这个变量 —— `~/.antinel/user_economics.json`、`~/.antinel/last-error.txt`、`~/.antinel/antinel-shield.cmd`、`~/.antinel/egress`、`~/.antinel/logs`、`~/Desktop`、`~/AppData/Roaming`、`~/.workbuddy/<workspace>.json`、`~/.antinel.json`。只要有一条被套件触达，就写进真实家目录；而它们都不认 hub 变量，所以「设了 `ANTINEL_HUB_DIR` 就安全」这个信念本身是错的。
+
+**修法**：隔离 `USERPROFILE`，一次兜住全部 15 处 —— 它是所有 `~` 的唯一上游。
+
+`expanduser("~")` 在本机（Windows / Python 3.13）实测六种写法：
+
+| 环境 | `expanduser("~")` 返回 |
+|---|---|
+| 原样 | `C:\Users\大马` |
+| `USERPROFILE=<iso>` ＋ `HOME=<iso>` | `<iso>` |
+| **只设 `USERPROFILE`** | `<iso>`（Windows 认它） |
+| **只设 `HOME`**（删掉 `USERPROFILE`） | `C:\Users\大马`（HOME 在 Windows 不参与） |
+| **`USERPROFILE=""`（空串）** | **空串** ← 陷阱 |
+| `USERPROFILE=<iso>` ＋ `HOME=""` | `<iso>`（HOME 为空无害） |
+
+两个硬结论：① Windows 上隔离只看 `USERPROFILE`，`HOME` 设了无害但无用（POSIX 才认），所以两边都设；② **绝不能设成空串** —— `expanduser` 会返回 `""`，`os.path.join("", ".antinel")` 就成了相对路径，落在 cwd 下，比不设更危险（看起来"隔离了"，实际随 cwd 漂移）。
+
+**同源是关键，不是洁癖**：`ANTINEL_HUB_DIR` 与 `~/.antinel` 若指向两个目录，就出现两个中枢 —— 走 hub 变量的写入与硬拼 `~` 的写入各记各的账。现在三条路落在同一处：`ANTINEL_HUB_DIR == <沙箱home>/.antinel == expanduser("~")/.antinel`。
+
+**顺带修掉一个「跳过条件被环境改写」**。原代码 `host_ready = (Path.home() / ".zcode").is_dir()`，家目录一隔离就恒 `False`，于是 `roots` / `credits` 三条**永远跳过、还记成通过**。而且这把尺子与产品自己的判据（`hooks/_host_detect.py`：env 优先＋目录标记）本来就不一致 —— 本机 `.zcode` 目录在、产品却识别成 **workbuddy**。
+
+改法：给这一段一个**局部宿主夹具 home**（只放 `~/.workbuddy/antinel.json` 一个安装标记），三条无条件真跑。为什么是 workbuddy：`rules/economics/*.json` 里**唯一 `unit=credits`** 的宿主（claude-code=USD、generic/qoder/zcode=tokens），而 `credits` 子命令只在 credits 型宿主存在。夹具复刻的是那个**条件**，不是把期望值抄过来。
+
+**两次自我纠错（都值得记下来）**：
+
+1. **第一版探针把噪声当信号**。它用「真实家目录 mtime 快照前后对比」判定污染，结果在**完全隔离**的腿里也报出 `~/.antinel/pending_decisions.json` 变化，一度得出"隔离无效"。回查发现本机常驻三只进程（`host_shield.py sentinel` pid 47792 每 5 分钟一拍、`antinel.py inbox serve`、`tools/logo.ps1`），而 `state_writes.jsonl` **每条都带 pid** —— 最近三条全是 47792、间隔恰好 300s。第二版探针改为**按 pid 归属**：三条 fire 调用在真实 hub 的写入数 **0**。同时加了对照腿（12 秒不 fire 任何东西）实测确实自己变了两个文件，证明噪声底存在。⇒ **判定写入必须按 pid／会话归属，不能拿 mtime diff 当证据。**
+
+2. **闸门红不是缺陷，是判据在量写法**。`C-S38b` 要求 `ANTINEL_HUB_DIR` 赋值语句的**同一行**出现 `getpid()` 与 `%d`。把 hub 改成 `str(_HOST_ISO / ".antinel")` 后唯一性搬进了 `_ISO_TAG` 的定义 —— 性质没变、写法变了，判据就翻红。改成两层：静态腿只管结构（有赋值、`audit_ids/audit_records/_audit_since` 在位），**唯一性交给行为腿** —— 真起两个进程导入本套件，比对它们各自给自己设的中枢路径，且都不许落在真实家目录。牙齿 `C-S38d` ② 随之换输入：从"喂假源码给纯函数"改成"对**真实源码的变异副本**（`_HOST_ISO` 改固定名）跑行为腿"，必须报红。
+
+**一个环境噪声，必须写清（否则读数不可信）**：本会话用后台方式启动 `run_harness.py` 时，同一条命令会被**启动两遍**（实测两组 `run_harness` ＋ 两组 `verification_tests` 并发，进程表直采），两个实例互相抢审计锁 ⇒ 偶发单条 `rc=124`（120s 超时），且每次不同（一次 `A2 DST-04`、一次 `F-08`）。单独复现 `A2` 三次都是 rc=2、约 2 秒，证明不是产品缺陷。最终读数取**单实例**那一次。
+
+**读数**（每一条都可复现，见 `output/tests/0.57.0/f35_summary.json`）：
+
+| 项 | 读数 |
+|---|---|
+| 全量 harness（单实例） | **324 / 324 PASS** |
+| 0514 | **266 绿 / 0 红 / 0 跳过** |
+| 0490 | 138 绿 / 0 红 |
+| regression | 31 / 31 PASS |
+| `antinel_verify --manifest` | current（143 条全对） |
+| manifest 重签 | 1 条（`scripts/verification_tests.py`） |
+| 新增判据 | 1 条（第 35 条守卫：隔离生效且与 hub 同源） |
+
+前四次全量依次是 318/323、321/324、323/324、324/324 —— 前面几次的红项已逐条查过：两条是 judgment 自指（改了 COVERED 文件，第一遍必红），两条 `rc=124` 是上面那个双开噪声，三条 `roots`/`credits` 是本节修掉的真问题。
+
+证据：`output/tests/0.57.0/f35_summary.json`、`f35_home_iso_v2.json`、`harness_run9.log`、`gate_f35_2.log`、`regression_f35.log`、`s38_only.log`、`procs_f35_4b.log`（双开进程表）；探针 `output/_f35_home_probe.py`（v1，被自己推翻）、`output/_f35_home_probe2.py`（v2，按 pid 归属）、`output/_f35_a2.py`（A2 三次计时）、`output/_f35_summarize.py`（读数脚本，数字不手抄）。
