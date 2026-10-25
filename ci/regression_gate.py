@@ -1281,6 +1281,9 @@ def j_audit_readback_same_source():
          而不是"某几个键被特判剔掉了"；
       ③ 真丢负控：`written = "none"`（一个字节都没落）⇒ **必须 False**。
          防"修成恒真"——那比原缺陷更坏（真丢会静默）。
+      ④ 谎报负控：`written = "chain"` 但盘上没有这一行（设备/顶号）⇒ **必须 False**。
+         ①②③ 全部抓不到这一形态（把回读段删掉、只判 `written` 依旧三条全绿），
+         补于 2026-10-25 第 27 条溯源 —— 见下方该段的注释。
     """
     import io as _io
     from contextlib import redirect_stderr
@@ -1349,8 +1352,47 @@ def j_audit_readback_same_source():
         if ok3:
             return False, ("③ 一个字节都没落却判成功 ⇒ 修成了恒真"
                            "（比原缺陷更坏：真丢会静默）")
-        return True, ("三段都成立：写成功判真 ＋ 未知字段仍判真 ＋ 写丢了必判假"
-                      "（回读只认盘上那条记录的 hash，不认 rec 的字段集合）")
+
+        # ---- ④ 谎报 chain 负控：写调用"没报错"，但盘上没有这一行 ----
+        # ★ 为什么非有不可（2026-10-25，第 27 条溯源）：
+        #   `written == "chain"` 的含义是**open/write 没抛异常**，不是"字节落了盘"。
+        #   目标路径若是设备（`NUL` / `/dev/null`）、或写进去之后被别的进程顶掉，
+        #   `write()` 照样返回成功 ⇒ `written="chain"` 而盘上无此行。
+        #   ★★ 而 ①②③ 三条**都抓不到这个形态**：把整个回读段删掉、只留
+        #     `ok = written in ("chain", "sidecar")` —— ① 日锚照生成（ok 为真）、
+        #     ② 未知字段本就无关、③ `written="none"` 本来就判假 ⇒ **三条全绿**。
+        #     这正是本判据自己的「死判据」缺口（假绿第一族：删掉要守的再跑）。
+        #   为什么用合成而不真喂设备：Windows 保留名不能当文件名，且产品侧
+        #   `fn` 恒为 `.psl/audit/<日期>.jsonl`（`_append_chained` 唯一调用点就是
+        #   `log_event`）⇒ 设备在生产路径上走不到，只能在同一道缝上模拟。
+        #   判据强度：诱饵行让文件**非空**，所以连"只看文件变没变长"的实现也会被抓到；
+        #   诱饵 hash 与本次 rec 的 hash 不同，所以"只要文件里有 hash 就算成功"也会被抓到。
+        t4 = _TMP.tmpdir(prefix="bl04_liar_")
+        os.chdir(t4)
+
+        def _liar(fn, rec):
+            r = dict(orig_append(fn, rec))     # 先真写一次，拿到真 hash
+            r["written"] = "chain"             # 然后谎称"已进主链"
+            try:                               # 再把那行换成诱饵（文件非空，但没这条）
+                os.makedirs(os.path.dirname(fn), exist_ok=True)
+                with open(fn, "w", encoding="utf-8") as f:
+                    f.write(json.dumps({"hash": "0" * 64, "type": "bl04-decoy"},
+                                       ensure_ascii=False) + "\n")
+            except OSError:
+                pass
+            return r
+
+        mod._append_chained = _liar
+        try:
+            with redirect_stderr(quiet):
+                ok4 = mod.log_event({"type": "bl04", "leg": 4})
+        finally:
+            mod._append_chained = orig_append
+        if ok4:
+            return False, ("④ 写调用没报错就判成功 ⇒ 回读校验被绕过了"
+                           "（设备/顶号这两种「写了但没落盘」会静默成绿）")
+        return True, ("四段都成立：写成功判真 ＋ 未知字段仍判真 ＋ 写丢了必判假"
+                      " ＋ 谎报进链必判假（回读只认盘上那条记录的 hash）")
     finally:
         mod._append_chained = orig_append
         try:
