@@ -157,9 +157,10 @@
         "Bash"
       ],
       "file_patterns": [
-        "(?:^|[\\\\/])(?:Cookies(?:-journal)?|Login\\s+Data|Local\\s+Storage|Web\\s+Data)(?![\\w.-])",
-        "(?:^|[\\\\/])cookies\\.sqlite(?:-wal|-shm)?",
-        "(?:^|[\\\\/])Cookies\\.binarycookies",
+        "(?:^|[\\\\/])(?:Cookies(?:-journal)?|Login\\s+Data|Web\\s+Data)(?![\\\\/\\w.-])",
+        "(?:^|[\\\\/])Local\\s+Storage(?![\\w.-])",
+        "(?:^|[\\\\/])cookies\\.sqlite(?:-wal|-shm)?(?!\\w)",
+        "(?:^|[\\\\/])Cookies\\.binarycookies(?!\\w)",
         "(?:^|[\\\\/])Google[\\\\/]Chrome[\\\\/]User Data[\\\\/]",
         "(?:^|[\\\\/])Microsoft[\\\\/]Edge[\\\\/]User Data[\\\\/]",
         "(?:^|[\\\\/])BraveSoftware[\\\\/]Brave-Browser[\\\\/]User Data[\\\\/]",

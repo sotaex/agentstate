@@ -4680,6 +4680,104 @@ def j_whitelist_path_form_insensitive():
                   % (" ".join(detail), how))
 
 
+def j_url_is_not_a_path_and_cookie_is_a_file():
+    """★★★ D-47（2026-10-25，第 30 条）：路径类规则要按**语义**匹配，不按字面。
+
+    实测两条（`output/_sec45_corpus.py`，10 条 POS ＋ 10 条 NEG，真 `collect_hits`）：
+
+    ① **URL 的路径段被当成文件路径**（SEC-04 误拦 4/10）
+       `_basic_hit` 在 Bash 通道上把 `file_patterns` 拿去匹配**整条命令文本**，
+       于是 `curl -s https://api.example.com/wallets?limit=10` 被
+       「钱包/密钥库**文件读取**」拦下。规则标题写的是 file read，URL 不是文件。
+       修法：file_patterns 这一支先把网络 URL 换成空格（`_strip_net_urls`），
+       **只剥 http/https/ftp/ws** —— `file:///home/u/.ethereum/x` 指向真实路径，
+       剥掉就是漏；content_patterns 仍看原文（`?api_key=…` 还可能带凭据）。
+
+    ② **`cookies` 当目录名也命中**（SEC-05 误拦 3/10）
+       第 1 条模式 `(?:^|[\\\\/])(?:Cookies|Login Data|Local Storage|Web Data)(?![\\w.-])`
+       里 `(?![\\w.-])` 允许后面跟 `/`，而 `_rx` 硬编码 IGNORECASE（Python 3.10
+       没有 `(?-i:)`）⇒ `node_modules/cookies/index.js` 里的**目录名**也命中。
+       修法：把「是文件的」（Cookies／Cookies-journal／Login Data／Web Data）
+       与「是目录的」（Local Storage）拆开 —— 文件型必须**到此为止**
+       （`(?![\\\\/\\w.-])`），目录型仍允许后面还有层级。
+
+    判据八腿（全部真入口；用的是产品自己的 `collect_hits`，不重写正则）：
+      ①② URL 里的 `/wallets`、`/wallets/0xabc` ⇒ SEC-04 不得命中；
+      ③ 对照 `cat ~/.ethereum/keystore/x` ⇒ SEC-04 必须命中；
+      ④ 对照 `curl -o wallets/x https://…` ⇒ 必须命中（剥 URL 不许伤到真路径参数）；
+      ⑤ 对照 `file:///home/u/.ethereum/x` ⇒ 必须命中（只剥网络 scheme）；
+      ⑥ `node_modules/cookies/index.js` ⇒ SEC-05 不得命中；
+      ⑦ 对照 Chrome `…/Default/Cookies` ⇒ 必须命中；
+      ⑧ 对照 Chrome `…/Default/Local Storage/leveldb/x` ⇒ 必须命中（目录型不误伤）。
+      ①②⑤ 是本次两条修复，③④⑦⑧ 是"别为了少误拦把规则松掉"的那一半 ——
+      只做前半会得到一个不拦钱包的产品，那比误拦严重得多。
+
+    ★ 已知缺口（**故意不在这条里断言**，登记待定）：目录名/裸文件名前面是空格时
+      不命中 —— `cp wallet.dat /tmp/x`、`-o wallets/out.bin` 都不拦，因为目录型
+      模式要求前面是 `^` 或路径分隔符。放宽到"空格也算词边界"能补上这个漏，
+      但同时会把 `grep -rn wallet.dat docs/` 这类**提及**也拦掉（新增误拦族）。
+      取舍需要单独定，故 ④ 用带 `./` 的写法只验"剥 URL 不伤真路径参数"这一件事。
+    """
+    hook = PKG / "hooks" / "pre_tool_use.py"
+    rules_f = PKG / "rules" / "default.json"
+    if not hook.is_file() or not rules_f.is_file():
+        return None, "缺 hook 或 rules/default.json（不可判）"
+    mod = _load_module_file("hooks/pre_tool_use.py", "_hook_d47")
+    if mod is None or not hasattr(mod, "collect_hits"):
+        return False, "hook 里没有 collect_hits()（命中入口被改名/删了？）"
+    try:
+        rules = json.loads(rules_f.read_text(encoding="utf-8"))["rules"]
+    except Exception as e:                                  # noqa: BLE001
+        return False, "rules/default.json 读不出：%s: %s" % (type(e).__name__, e)
+
+    HOME = "/home/u"
+    CHROME = HOME + "/.config/google-chrome/Default"
+    legs = [
+        ("① URL 里的钱包路径段", "Bash",
+         {"command": "curl -s https://api.example.com/wallets?limit=10"}, "SEC-04", False),
+        ("② 区块浏览器 URL", "Bash",
+         {"command": "curl https://explorer.example.com/api/v1/wallets/0xabc"},
+         "SEC-04", False),
+        ("③ 对照：真 keystore", "Bash",
+         {"command": "cat %s/.ethereum/keystore/UTC--x" % HOME}, "SEC-04", True),
+        ("④ 对照：URL 旁边的真路径参数", "Bash",
+         {"command": "curl -s -o ./wallets/out.bin https://example.com/a"}, "SEC-04", True),
+        ("⑤ 对照：file:// 指向真钱包", "Bash",
+         {"command": "cat file://%s/.ethereum/keystore/x" % HOME}, "SEC-04", True),
+        ("⑥ 依赖里的 cookies 包", "Read",
+         {"file_path": "node_modules/cookies/index.js"}, "SEC-05", False),
+        ("⑦ 对照：Chrome 的 Cookies 文件", "Read",
+         {"file_path": CHROME + "/Cookies"}, "SEC-05", True),
+        ("⑧ 对照：Local Storage 目录下的文件", "Read",
+         {"file_path": CHROME + "/Local Storage/leveldb/000003.log"}, "SEC-05", True),
+    ]
+    bad, detail = [], []
+    for label, tool, payload, rid, want in legs:
+        try:
+            hits = mod.collect_hits(rules, tool, payload, str(PKG), [])
+        except Exception as e:                              # noqa: BLE001
+            return False, "%s 抛异常：%s: %s" % (label, type(e).__name__, e)
+        got = False
+        for h in hits:
+            if isinstance(h, dict):
+                cur = h.get("rule_id") or h.get("id")
+            elif isinstance(h, (list, tuple)) and h:
+                cur = h[0]
+            else:
+                continue
+            if cur == rid:
+                got = True
+                break
+        detail.append("%s=%s" % (label.split(" ")[0], "命中" if got else "未命中"))
+        if got != want:
+            bad.append("%s：期望 %s 命中、实际 %s"
+                       % (label, rid if want else "不" + rid,
+                          "命中" if got else "未命中"))
+    if bad:
+        return False, ("；".join(bad) + "｜八腿：%s" % " ".join(detail))
+    return True, "八腿成立：%s（URL 不当路径 ＋ 文件型不按目录判）" % " ".join(detail)
+
+
 # ---------------------------------------------------------------- 主流程
 #: `--quick` 跳过的判据 ID（2026-10-13 新增，**声明式**，不是静默）。
 #: ★ 为什么允许跳过：实测 22 条共 **66s**，其中 3 条占 **51s**
@@ -4777,6 +4875,9 @@ def _checks(m):
         # ── 2026-10-25 D-46：白名单释放不许依赖路径写法（第 29 条，macOS 248/249）──
         ("D-46 白名单释放不依赖路径写法（同一目录另一种写法也须释放）",
          j_whitelist_path_form_insensitive),
+        # ── 2026-10-25 D-47：URL 不是路径、Cookies 是文件不是目录名（第 30 条）──
+        ("D-47 路径规则按语义匹配（URL 里的 wallets／依赖里的 cookies 目录）",
+         j_url_is_not_a_path_and_cookie_is_a_file),
     ]
 
 

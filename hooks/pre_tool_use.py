@@ -155,6 +155,14 @@ INSTRUCTION_DIR_MARKERS = (".cursor/rules",)   # + basename endswith .mdc
 #   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
 #   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
 #   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
+# G-03: embedded fallback, used only when the rules file is unreadable / tampered.
+# ★★ 0.57.0（步骤 A）：本块**由 `rules/default.json` 生成**，与主表 37 条全等。
+#   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
+#   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
+#   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
+#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
+#   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
 _FALLBACK = [
     {"id": "SEC-01",
      "name": "Sensitive file read (.env)",
@@ -240,9 +248,10 @@ _FALLBACK = [
      "type": "tool_call",
      "tool_names": ["Read", "Bash"],
      "file_patterns": [
-      "(?:^|[\\\\/])(?:Cookies(?:-journal)?|Login\\s+Data|Local\\s+Storage|Web\\s+Data)(?![\\w.-])",
-      "(?:^|[\\\\/])cookies\\.sqlite(?:-wal|-shm)?",
-      "(?:^|[\\\\/])Cookies\\.binarycookies",
+      "(?:^|[\\\\/])(?:Cookies(?:-journal)?|Login\\s+Data|Web\\s+Data)(?![\\\\/\\w.-])",
+      "(?:^|[\\\\/])Local\\s+Storage(?![\\w.-])",
+      "(?:^|[\\\\/])cookies\\.sqlite(?:-wal|-shm)?(?!\\w)",
+      "(?:^|[\\\\/])Cookies\\.binarycookies(?!\\w)",
       "(?:^|[\\\\/])Google[\\\\/]Chrome[\\\\/]User Data[\\\\/]",
       "(?:^|[\\\\/])Microsoft[\\\\/]Edge[\\\\/]User Data[\\\\/]",
       "(?:^|[\\\\/])BraveSoftware[\\\\/]Brave-Browser[\\\\/]User Data[\\\\/]",
@@ -3580,6 +3589,27 @@ def cloud_sync_dir_of(path):
     return None
 
 
+#: 只剥「网络 URL」，**不剥 file://** —— 后者指向真实路径，剥掉就是漏命中。
+_URL_TOK = re.compile(r"\b(?:https?|ftps?|wss?)://[^\s'\"`<>|;)]+", re.IGNORECASE)
+
+
+def _strip_net_urls(s):
+    """把命令文本里的网络 URL 换成空格。**URL 不是文件路径。**
+
+    ★ 为什么非有不可（第 30 条实测）：`_basic_hit` 在 Bash 通道上把
+      `file_patterns` 拿去匹配**整条命令文本**，于是
+      `curl -s https://api.example.com/wallets?limit=10`
+      被 SEC-04「钱包/密钥库**文件读取**」拦下 —— URL 里的路径段被当成了文件路径。
+      `curl https://explorer.example.com/api/v1/wallets/0xabc`、
+      `python -c "requests.get('https://x/wallets')"` 同理。
+    ★ 已知边界：URL 出现在**引号内的路径参数**（`curl -o "https://x/y"`）也会被剥，
+      但那种写法本来就不是本地路径，剥掉不产生漏。
+    """
+    if not s:
+        return s
+    return _URL_TOK.sub(" ", s)
+
+
 def _basic_hit(rule, command, file_path, content, url, bash_extra, file_targets,
                rtype, detection):
     """0.29.0 (E-1)：command / file / content 三通道命中判定 —— **本仓唯一实现**。
@@ -3596,7 +3626,15 @@ def _basic_hit(rule, command, file_path, content, url, bash_extra, file_targets,
         return (r[1], "command")
     _fp_pats = _patterns(rule, "file_patterns")
     _c_pats = _patterns(rule, "content_patterns")
-    r = _first_hit(_fp_pats, [file_path] + bash_extra)
+    # ★★ 2026-10-25（第 30 条）：Bash 通道上 **URL 不是文件路径**。
+    #   `file_patterns` 在 Bash 上是对**整条命令文本**匹配的（`bash_extra`），
+    #   于是 `curl -s https://api.example.com/wallets?limit=10` 被 SEC-04
+    #   「钱包/密钥库**文件读取**」拦下 —— URL 的路径段被当成了文件路径。
+    #   实测语料（output/_sec45_corpus.py）10 条 NEG 里 4 条是这个原因。
+    #   ★ 只剥网络 scheme：`file:///home/u/.ethereum/x` 指向真实路径，剥掉就是漏。
+    #   ★ 只作用于 file_patterns；下面 content_patterns 仍看原文 —— URL 查询串里
+    #     确实可能带凭据（`?api_key=…`），那一支不能跟着失明。
+    r = _first_hit(_fp_pats, [file_path] + [_strip_net_urls(t) for t in bash_extra])
     _path_hit = r[1] if r else None
     # ★★ 0.57.0 (B-1)：路径命中**不再一律定案**。
     #   只有「带 content_patterns 且类型是 file_content」的规则，路径才是**准入资格**，

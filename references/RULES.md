@@ -75,9 +75,10 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - 说明: 读取浏览器数据（Cookie、密码、会话）
 - 处理建议: 浏览器配置目录包含登录态，应完全禁止 Agent 访问
 - file_patterns:
-    - `(?:^|[\\/])(?:Cookies(?:-journal)?|Login\s+Data|Local\s+Storage|Web\s+Data)(?![\w.-])`
-    - `(?:^|[\\/])cookies\.sqlite(?:-wal|-shm)?`
-    - `(?:^|[\\/])Cookies\.binarycookies`
+    - `(?:^|[\\/])(?:Cookies(?:-journal)?|Login\s+Data|Web\s+Data)(?![\\/\w.-])`
+    - `(?:^|[\\/])Local\s+Storage(?![\w.-])`
+    - `(?:^|[\\/])cookies\.sqlite(?:-wal|-shm)?(?!\w)`
+    - `(?:^|[\\/])Cookies\.binarycookies(?!\w)`
     - `(?:^|[\\/])Google[\\/]Chrome[\\/]User Data[\\/]`
     - `(?:^|[\\/])Microsoft[\\/]Edge[\\/]User Data[\\/]`
     - `(?:^|[\\/])BraveSoftware[\\/]Brave-Browser[\\/]User Data[\\/]`
