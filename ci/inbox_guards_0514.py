@@ -10880,16 +10880,45 @@ def _c34_write(dst, data):
         f.write(data)
 
 
+def _c34_hasher():
+    """取**构建器**的哈希口径（`build_package._manifest_hash_of`）。拿不到返回 None。
+
+    ★ 为什么不拿裸 sha256 兜底：`hooks/pre_tool_use.py` 是版本承载件，构建器对
+      它走 `host_shield.norm_version_bytes` 归一（版本行不进哈希），裸 sha 与清单
+      永远对不上。兜底成裸 sha 等于把「口径漂移」伪装成「文件变更」—— 那正是
+      被测工具拒绝写回时要防的事，判据不能自己先犯（假绿第十三族：探针自带
+      第二套模型）。
+    """
+    import importlib.util
+    bp = os.path.join(ROOT, "scripts", "build_package.py")
+    if not os.path.isfile(bp):
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location("_bp_c34", bp)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+    except Exception:                                          # noqa: BLE001
+        return None
+    return getattr(m, "_manifest_hash_of", None)
+
+
 def _c34_tree(drop=(), mutate_tool=None):
     """在系统 TEMP 造一棵**最小可运行树**。返回 `(root, 问题串或 None)`。
 
     树里放什么（缺一样夹具就不成立，所以逐条给理由）：
-      · 5 个受保护件的**字节副本** —— 清单条目直接取真 manifest 的值，
-        副本逐字节相同 ⇒ 哈希天然对得上，夹具的变量只剩「登记/不登记」；
+      · 5 个受保护件的**字节副本** —— 清单条目**由当前盘上内容现算**（见下），
+        副本与清单天然对得上，夹具的变量只剩「登记/不登记」；
       · `host_shield.py` 副本 —— 工具真的要 import 它取归一化口径；
       · `_tools_034/_resign_manifest.py` 副本 —— **必须跑真入口**（见下）；
       · 只含这 5 条的极简 `psl/manifest.json` —— 否则 138 个「文件不存在」
         会把读数淹掉（那是另一个语境，不是本条要量的）。
+
+    ★★ 清单值**不许抄真 manifest 的旧值**（2026-10-25 修正，实测撞上）：
+      第一版写的是 `files = {rel: real_files[rel] ...}`，于是「文件取当前内容、
+      清单取旧值」——源码没改时两者天然一致，一改源码夹具就塌。当日改了
+      `hooks/pre_tool_use.py` 之后 `C-N34` 立刻红，红的原因是「量具自检失败、
+      拒绝写回」，与「登记补全」毫无关系。**夹具依赖被测树的现状，就是一条
+      会随无关改动翻红的判据**（环境依赖）。现在改用构建器同一口径现算。
 
     ★ 为什么是**子进程跑真脚本**而不是 import 它的函数：这个工具是**脚本**
       （顶层即执行），它的**读数与退出码本身就是被测对象**。改成 import
@@ -10906,6 +10935,10 @@ def _c34_tree(drop=(), mutate_tool=None):
     if absent:
         return None, ("夹具不成立：%s 没登记在真 manifest 里 —— 那是另一条缺陷，"
                       "本夹具要先拿到基准哈希" % "、".join(absent))
+    hasher = _c34_hasher()
+    if hasher is None:
+        return None, ("夹具不成立：拿不到构建器哈希口径（scripts/build_package.py）"
+                      "—— 裸 sha 兜底会把「口径漂移」伪装成「文件变更」")
     root = _TMPREG.tmpdir(prefix="g0514_c34_")
     for rel in need + ["host_shield.py", _C34_TOOL]:
         src = os.path.join(ROOT, rel.replace("/", os.sep))
@@ -10921,7 +10954,11 @@ def _c34_tree(drop=(), mutate_tool=None):
         if mut is None:
             return None, "变异体造不出（工具源码里找不到锚点）—— 负控没有输入"
         _c34_write(p, mut.encode("utf-8"))
-    files = {rel: real_files[rel] for rel in need if rel not in drop}
+    files = {}
+    for rel in need:
+        if rel in drop:
+            continue
+        files[rel] = hasher(rel, os.path.join(root, rel.replace("/", os.sep)))
     _c34_write(os.path.join(root, "psl", "manifest.json"),
                json.dumps({"name": "c34-fixture", "files": files},
                           ensure_ascii=False, indent=1).encode("utf-8"))

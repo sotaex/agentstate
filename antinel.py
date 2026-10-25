@@ -1288,6 +1288,14 @@ def cmd_verify(args):
     root = find_project_root()
     if root is None:
         _die("未找到项目")
+    # ★ 0.57.0（第 32 条）：先报规则快照落差。否则「链上 0 条异常 / 干净」
+    #   会被读成「保护到位」——而实际跑的可能是几十个版本之前的规则。
+    #   文案与 report 同源（`host_shield.rules_drift_lines`），不另写一份。
+    _drift = hs.rules_drift_lines(root)
+    if _drift:
+        for _ln in _drift:
+            print(_ln)
+        print("")
     adir = _audit_dir(root)
     n_rec = _chain_record_count(adir)
     # ★ 0.35.2：**先说出我验的是哪条链、有多少条记录**。

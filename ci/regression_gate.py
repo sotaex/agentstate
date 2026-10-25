@@ -1760,6 +1760,145 @@ def j_only_never_green_on_empty():
                   % len(want))
 
 
+def j_rules_snapshot_drift():
+    """★★ D-42（2026-10-25）：规则快照的版本落差必须**说出来**（行动清单第 32 条）。
+
+    事故（实测撞上，不是推演）：hook 加载规则读的**不是**包内 `rules/default.json`，
+    而是 install 拷进项目的 `<root>/.psl/rules/default.json`（`manifest.rules_file`
+    指路）。而 `pip install -U` 只换包、不跑 install ⇒ 项目副本永久停在首次安装的
+    版本，**零提示**。实测本仓副本 0.34.0 / 包内 0.56.0，落后 22 个版本号 ——
+    这期间所有规则修正（含 SEC-04 那 16 条误拦归零）对新装用户成立、对这台机器
+    零生效。
+
+    这条判据测的是「**说出来了没**」，不是「版本对不对」：版本对不对是 install 的事。
+    两条方向都被咬住 ——
+      · 实现若「永远不打印」⇒ A/C 腿红（该说的没说）；
+      · 实现若「永远打印」  ⇒ B/D 腿红（没落差也在喊，喊久了没人看）。
+    所以不需要再另做变异件：正控与静默对照互为牙齿。
+
+    ★ 四个腿全用**合成项目**，不读本仓 `.psl` 的现状。依赖「本仓副本恰好是旧的」
+      的判据会在某次 `install` 之后自己变绿或变红 —— 那是环境依赖，不是判据。
+    """
+    import json as _json
+    import shutil
+    import tempfile
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    hs_path = os.path.join(root, "host_shield.py")
+    hook_path = os.path.join(root, "hooks", "pre_tool_use.py")
+    report_path = os.path.join(root, "scripts", "report.py")
+    pkg_rules = os.path.join(root, "rules", "default.json")
+
+    # ── ① 结构腿：唯一实现存在，hook 不再内联那份解析 ─────────────────────
+    #    入口不存在时必须**显式返回 False**，不能让它以 AttributeError 崩掉 ——
+    #    CRASH 在闸门里不算红，那会把「没有这个功能」静默放过去。
+    for p in (hs_path, hook_path, report_path, pkg_rules):
+        if not os.path.isfile(p):
+            return False, "① 缺文件：%s" % p
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    try:
+        import host_shield as _hsd42
+    except Exception as exc:                                   # noqa: BLE001
+        return False, "① host_shield 导入失败：%s" % exc
+    if not hasattr(_hsd42, "resolve_rules_file"):
+        return False, "① host_shield.resolve_rules_file 不存在（加载与提示又会各算一份）"
+    if not hasattr(_hsd42, "rules_drift"):
+        return False, "① host_shield.rules_drift 不存在 —— 落差判断没有实现"
+    if not hasattr(_hsd42, "rules_drift_lines"):
+        return False, "① host_shield.rules_drift_lines 不存在 —— 文案没有唯一来源"
+
+    hook_src = open(hook_path, encoding="utf-8").read()
+    if 'get("rules_file")' in hook_src:
+        return False, ("① hook 里仍有内联的 `manifest.get(\"rules_file\")` —— "
+                       "这就是 0.33.2「加载读 A、比对读 B」那处错位的原型，"
+                       "必须改调 host_shield.resolve_rules_file")
+    if "resolve_rules_file(" not in hook_src:
+        return False, "① hook 没有调 resolve_rules_file —— 结构腿等于没接上"
+
+    # ── ② 行为腿：真入口 report.py，四个合成项目 ─────────────────────────
+    pkg_ver = _json.load(open(pkg_rules, encoding="utf-8")).get("version")
+    if not pkg_ver:
+        return False, "② 包内 rules/default.json 没有 version 字段 —— 无从比较"
+    base_doc = _json.load(open(pkg_rules, encoding="utf-8"))
+
+    def _mkproj(where, version, with_manifest=True):
+        proj = os.path.join(where, "proj")
+        os.makedirs(os.path.join(proj, ".psl", "rules"))
+        doc = dict(base_doc)
+        doc["version"] = version
+        with open(os.path.join(proj, ".psl", "rules", "default.json"), "w",
+                  encoding="utf-8") as fh:
+            _json.dump(doc, fh, ensure_ascii=False)
+        if with_manifest:
+            with open(os.path.join(proj, ".psl", "manifest.json"), "w",
+                      encoding="utf-8") as fh:
+                _json.dump({"rules_file": ".psl/rules/default.json",
+                            "skill_version": "0.0.0"}, fh)
+        else:
+            os.makedirs(os.path.join(proj, ".psl", "audit"), exist_ok=True)
+        return proj
+
+    def _report(proj):
+        import subprocess as _sp
+        r = _sp.run(
+            [sys.executable, "-E", "-X", "utf8", report_path, "--root", proj],
+            cwd=root, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=180,
+            env={**os.environ, "PYTHONPATH": "", "PYTHONIOENCODING": "utf-8"})
+        return r.returncode, (r.stdout or "") + (r.stderr or "")
+
+    tmp = tempfile.mkdtemp(prefix="d42_")
+    try:
+        legs = [
+            ("A 副本落后", _mkproj(os.path.join(tmp, "a"), "0.0.1"), True, "落后"),
+            ("B 同版本",   _mkproj(os.path.join(tmp, "b"), pkg_ver), False, None),
+            ("C 比包新",   _mkproj(os.path.join(tmp, "c"), "9.9.9"), True, "新于"),
+            ("D 未安装",   _mkproj(os.path.join(tmp, "d"), pkg_ver, False), False, None),
+        ]
+        for name, proj, want, direction in legs:
+            rc, out = _report(proj)
+            got = "规则快照" in out
+            if got != want:
+                return False, ("② %s：提示=%s，期望=%s（rc=%d）—— %s"
+                               % (name, got, want, rc,
+                                  "该说的没说" if want else "没落差也在喊，喊久了没人看"))
+            if direction and direction not in out:
+                return False, ("② %s：提示出现了，但方向词「%s」不在 —— "
+                               "版本比较方向反了会比不报更坏" % (name, direction))
+            if rc != 0:
+                return False, ("② %s：report 的 rc=%d —— 提示不该改变退出码"
+                               "（空态本来就该是 0）" % (name, rc))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    # ── ③ 参数腿：package_rules 真的被用（不是写死读包内）────────────────
+    #    没有这一腿，「拿同一个文件比同一个文件」也能让 A/B 两腿看起来成立。
+    probe = tempfile.mkdtemp(prefix="d42p_")
+    try:
+        proj = _mkproj(os.path.join(probe, "p"), "0.0.1")
+        same = os.path.join(probe, "same.json")
+        other = os.path.join(probe, "other.json")
+        with open(same, "w", encoding="utf-8") as fh:
+            _json.dump({"version": "0.0.1"}, fh)
+        with open(other, "w", encoding="utf-8") as fh:
+            _json.dump({"version": "7.7.7"}, fh)
+        if _hsd42.rules_drift(proj, package_rules=same) is not None:
+            return False, "③ 两边同版本仍报落差 —— 比较没生效"
+        d = _hsd42.rules_drift(proj, package_rules=other)
+        if not d or d.get("behind") is not True:
+            return False, ("③ 副本 0.0.1 vs 7.7.7 应判 behind，实得 %r" % (d,))
+        if hs_path and _hsd42.rules_drift(proj) is None:
+            # 不给 package_rules 时读包内真件：0.0.1 一定旧于包内任何正式版本
+            return False, "③ 缺省 package_rules 时没有回落读包内规则"
+    finally:
+        shutil.rmtree(probe, ignore_errors=True)
+
+    return True, ("三腿成立：结构（唯一实现 ＋ hook 无内联副本）＋ 行为（落后/同版本/"
+                  "更新/未安装 四态各就位，rc 不变）＋ 参数（package_rules 真的改变结论）｜"
+                  "包内 version=%s" % pkg_ver)
+
+
 def j_window_title_format():
     """★★ FZ-002（2026-10-16）：窗口标题形态契约（output 类冻结执法）。
 
@@ -4123,6 +4262,9 @@ def _checks(m):
         # ── 2026-10-25 D-41：闸门把「什么都没跑」报成绿（行动清单第 26 条）──
         ("D-41 0 套不等于通过（--only 键名拼错曾是假绿 rc=0）",
          j_only_never_green_on_empty),
+        # ── 2026-10-25 D-42：规则快照旧了却零提示（行动清单第 32 条）──
+        ("D-42 规则快照落差必须说出来（副本落后 ⇒ 规则修正在机上不生效）",
+         j_rules_snapshot_drift),
     ]
 
 

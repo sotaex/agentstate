@@ -1018,21 +1018,18 @@ def _load_rules_integrity(rules):
     #       （保持"未安装时也能跑"的既有行为）。
     _rules_path = RULES_PATH
     _manifest = None
-    for base in (os.getcwd(), os.path.dirname(os.getcwd())):
-        mp = os.path.join(base, ".psl", "manifest.json")
-        if os.path.isfile(mp):
-            try:
-                with open(mp, encoding="utf-8") as f:
-                    _manifest = json.load(f) or {}
-            except Exception:
-                _manifest = None
-            if _manifest is not None:
-                _rf = _manifest.get("rules_file")
-                if _rf:
-                    _cand = _rf if os.path.isabs(_rf) else os.path.join(base, _rf)
-                    if os.path.isfile(_cand):
-                        _rules_path = _cand        # ← 加载与比对同源
-                break
+    # ★ 0.57.0（第 32 条）：这段解析的**唯一实现**搬到 `host_shield.resolve_rules_file`。
+    #   为什么必须搬：CLI 侧要报「项目里的规则副本落后于包内」的落差，它必须看
+    #   **同一个文件**；两边各写一份内联循环，就是 0.33.2 那次事故的原型——
+    #   加载读 A、比对读 B，于是无条件判 SELF-TAMPERED、静默退回 11 条兜底。
+    #   拿不到 host_shield（安装残缺）时退回 RULES_PATH：与「找不到 manifest 也
+    #   退回包内规则」是同一套降级语义，不是新增分支。
+    _hs = _hs_module()
+    if _hs is not None:
+        _found, _manifest = _hs.resolve_rules_file(
+            (os.getcwd(), os.path.dirname(os.getcwd())))
+        if _found:
+            _rules_path = _found        # ← 加载与比对同源
     try:
         with open(_rules_path, "r", encoding="utf-8") as f:
             rules = list(json.load(f).get("rules", []))

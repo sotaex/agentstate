@@ -729,22 +729,48 @@ def archive_logs(audit_dir, retention_days=RETENTION_DAYS_DEFAULT):
 
 
 # ------------------------------------------------------------------ main ----
-def _import_session_dna():
-    """session_dna lives at the package root; report.py may run from the source
-    tree (same dir) or an installed layout (<pkg>/scripts). Try the parent dir
-    first, then the plain path."""
+def _root_module(name):
+    """包根模块的导入兜底（`host_shield` / `session_dna` …）。
+
+    本文件在 `scripts/`，源仓布局与随包布局下包根都是上一级目录。
+    ★ 归口：**只留这一份** sys.path 兜底，`_import_session_dna` 复用它 ——
+      「同一件事两份实现」是本仓第一顽症，别在这里再添一处。
+    """
     try:
         parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         if parent not in sys.path:
             sys.path.insert(0, parent)
-        import session_dna
-        return session_dna
-    except Exception:
-        try:
-            import session_dna
-            return session_dna
-        except Exception:
-            return None
+        return __import__(name)
+    except Exception:                                          # noqa: BLE001
+        return None
+
+
+def _import_session_dna():
+    """session_dna lives at the package root; report.py may run from the source
+    tree (same dir) or an installed layout (<pkg>/scripts)."""
+    return _root_module("session_dna")
+
+
+def _emit_rules_drift(root):
+    """★ 0.57.0（第 32 条）：规则快照落差，**在任何数字之前**说出来。
+
+    为什么位置这么靠前：下面 `--session latest` 的空态分支会直接 return，
+    而「刚升级完、项目里规则还是旧的」恰恰最常发生在刚装好、还没有会话的时候。
+    提示若挂在汇总块上，就永远打不出来。文案由 `host_shield.rules_drift_lines`
+    唯一提供（别在这里另写一份）。
+    """
+    hs = _root_module("host_shield")
+    if hs is None:
+        return
+    try:
+        lines = hs.rules_drift_lines(str(root))
+    except Exception:                                          # noqa: BLE001
+        return
+    if not lines:
+        return
+    for ln in lines:
+        print(ln)
+    print("")
 
 
 def _session_dna_main(args, root, log_path):
@@ -903,6 +929,9 @@ def main(argv=None):
 
     root = Path(args.root).resolve()
     log_path = Path(args.log) if args.log else root / ".psl" / "audit"
+
+    # ★ 0.57.0（第 32 条）：先报规则快照落差，再谈任何数字。
+    _emit_rules_drift(root)
 
     # ★ 0.34.0 (E5)：`--audience exec` 派发到 `antinel brief`。
     #   ★ 派发而不是复制实现：`brief` 在 antinel.py 里，本文件不 import 它

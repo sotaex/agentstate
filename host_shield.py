@@ -2368,6 +2368,143 @@ def unregistered_chain_files(root=None):
     return out
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# 规则快照落差（0.57.0，第 32 条，2026-10-25 实测）
+#
+# 背景（这一层曾经被自己的取证方式掩盖，务必读完再改）：
+#   hook 加载规则时读的**不是**包内 `rules/default.json`，而是 install 时拷进
+#   项目的 `<root>/.psl/rules/default.json`（由 `manifest.rules_file` 指路）。
+#   而 `pip install -U` 只换包、不跑 install ⇒ 项目副本永久停在首次安装的版本，
+#   且**没有任何提示**。
+#   实测（本仓，2026-10-25）：项目副本 version 0.34.0、manifest.skill_version
+#   0.33.1、包内 0.56.0 —— 落后 22 个版本号。这期间所有规则修复（含 SEC-04
+#   把 16 条误拦归零）对新装用户成立、对这台机器**零生效**。
+#
+# 为什么不做「自动刷新」：副本的 hash 就是 manifest 完整性比对的基准
+#   （`rules_hash`）。擅自覆盖它会让 SELF-TAMPERED 判定失去依据，也抹掉
+#   「是谁改的」——那是把「静默陈旧」换成「静默篡改」，更坏。
+#   所以这里只做两件事：**说出来**、**给出可执行修法**。
+# ═══════════════════════════════════════════════════════════════════════════
+
+def package_rules_path():
+    """包内 `rules/default.json` 的绝对路径。
+
+    `host_shield.py` 在包根，`rules/` 与它同级 —— 平铺布局与技能包布局都是这个关系
+    （技能包里 hook 在 `hooks/`，但本模块仍在根）。hook 侧的 `_locate()` 是
+    「hook 进程给自己找资源」，两种布局下解析到同一个物理文件，故不再是第二份口径。
+    """
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "rules", "default.json")
+
+
+def resolve_rules_file(bases):
+    """按 `manifest.rules_file` 解析「这套安装**真正在用**的规则文件」。
+
+    返回 `(path, manifest)`：
+      · manifest 在且 `rules_file` 指的文件存在 ⇒ `(该文件, manifest)`
+      · manifest 在但文件不在             ⇒ `(None, manifest)`
+      · 没找到 manifest                    ⇒ `(None, None)`
+
+    `bases` 按优先级排列。hook 传 `(cwd, dirname(cwd))`——宿主可能从项目子目录
+    启钩子，所以要往上找一级；CLI 传 `(root,)`。
+
+    ★ 唯一实现。0.33.2 那次事故的根因就是「加载读 A、比对读 B」：加载读包内
+      `rules/default.json`，却拿 `manifest.rules_hash`（针对项目副本算的）去比，
+      于是**无条件**判 SELF-TAMPERED、退回 11 条内置兜底。加载与比对必须同源，
+      现在 CLI 的落差提示也必须同源——否则「提示看的文件」与「运行时读的文件」
+      会第二次错位。
+    """
+    for base in bases:
+        if not base:
+            continue
+        mp = os.path.join(base, ".psl", "manifest.json")
+        if not os.path.isfile(mp):
+            continue
+        try:
+            with open(mp, encoding="utf-8") as f:
+                man = json.load(f) or {}
+        except Exception:                                      # noqa: BLE001
+            return None, None
+        rf = man.get("rules_file")
+        if rf:
+            cand = rf if os.path.isabs(rf) else os.path.join(base, rf)
+            if os.path.isfile(cand):
+                return cand, man
+        return None, man
+    return None, None
+
+
+def _ver_key(v):
+    """`"0.34.0"` → `(0, 34, 0)`；非数字段按 0（不抛异常，版本串是外部输入）。"""
+    out = []
+    for seg in str(v).split("."):
+        digits = "".join(ch for ch in seg if ch.isdigit())
+        out.append(int(digits) if digits else 0)
+    return tuple(out)
+
+
+def _rules_version(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+        v = d.get("version") if isinstance(d, dict) else None
+        return str(v) if v not in (None, "") else None
+    except Exception:                                          # noqa: BLE001
+        return None
+
+
+def rules_drift(root, package_rules=None):
+    """项目规则快照 vs 包内规则的版本落差。无落差 / 读不到 ⇒ `None`。
+
+    返回 dict：
+      `project` / `package`        两边的 version 串
+      `project_path` / `package_path`
+      `behind`                     True 表示项目副本**旧于**包内（要提示的那种）
+      `ahead`                      True 表示项目副本**新于**包内（本地改过，同样要说）
+
+    为什么 `ahead` 也要报：项目副本比包新，说明有人手工刷过或装了别的版本，
+    下游再升级会被这个更旧的包覆盖 —— 沉默地丢掉修复。
+
+    为什么不报「读不到」：manifest 缺失 = 未安装，那是另一条路径（install 负责），
+    在这里报只会让没装过的目录每次都喊一句，把真落差淹掉。
+    """
+    proj_path, _man = resolve_rules_file([root] if root else [])
+    pkg_path = package_rules or package_rules_path()
+    if not proj_path or not os.path.isfile(pkg_path):
+        return None
+    pv, kv = _rules_version(proj_path), _rules_version(pkg_path)
+    if not pv or not kv or pv == kv:
+        return None
+    return {"project": pv, "package": kv,
+            "project_path": proj_path, "package_path": pkg_path,
+            "behind": _ver_key(pv) < _ver_key(kv),
+            "ahead": _ver_key(pv) > _ver_key(kv)}
+
+
+def rules_drift_lines(root, package_rules=None):
+    """把落差写成给人看的几行（无落差 ⇒ `[]`）。
+
+    ★ 三个入口（`report` / `verify` / `install --check` 之外的新增提示）都调这里，
+      不各写一份文案 —— 文案分叉会让同一件事在两张屏上说成两个样子。
+    """
+    d = rules_drift(root, package_rules)
+    if not d:
+        return []
+    arrow = "落后于" if d["behind"] else "新于"
+    head = (" ⚠ 规则快照%s包内版本：项目内 %s / 包内 %s"
+            % (arrow, d["project"], d["package"]))
+    tail = [
+        "   钩子读的是项目内的规则副本（%s），不是包里那份；升级包不会自动更新它。"
+        % os.path.basename(d["project_path"]),
+        "   所以从 %s 到 %s 之间的规则修正，在这台机器上都还没有生效"
+        % (d["project"], d["package"]),
+        "   （包括那些「某个词一出现就拦」的误拦修复）。",
+        "   修法：在项目根重跑安装 —— antinel install",
+        "   注意：重装会重写 .psl/manifest.json 的规则哈希，这是预期行为。",
+    ]
+    return [head] + tail
+
+
 def self_check():
     """0.28.3（B4e/B4f）：自身脚本与登记表对 psl/manifest.json 哈希。
     返回 (ok, problems)。manifest 缺失 → (True, [])（无法校验，如实不谎报）。
