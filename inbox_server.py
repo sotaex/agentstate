@@ -3272,14 +3272,23 @@ def _exam_run_kept(group):
 
 
 def _exam_history():
-    """历次**体检**（**倒序**，最近在前）。每项 `{"path","base","when","ok"}`。
+    """历次**体检**（**倒序**，最近在前）。每项
+    `{"path","base","when","dt","kind","ok","brief"}`。
 
     ★★ 0.53.0（T2 追加，设计 §38.5）：**同一趟里的重跑只算一次**。
       体检要跑几分钟，跑完看结果、再跑一遍是同一件事 —— 列三条就是把一次
       体检冒充成三次（创始人 2026-10-19 原话：「实际上这就是一次」）。
       合并窗口＝`EXAM_SAME_RUN_MIN`，一趟里列**最新那份**（定稿）。
-    ★ `ok`＝**能回看**（存档里带明细）。旧存档 `ok=False` ⇒ 列表里标「没存明细」，
-      **不生成链接**（点进去也没东西，那是骗点击）。
+    ★★ 0.57.2（第 41 条，2026-10-26 夜实测）：**两种体检都要列**。
+      旧版 `doc.get("source") != "console-exam"` 就 `continue` ⇒ 命令行体检
+      （`host-audit`）整类从列表里消失。后果不是「少一条」而是**同一页两句话
+      互相打脸**：页头读 `health_reports()[-1]` 说「上次体检：3 天前」，
+      而列表中根本没有那一次（本机实测：页头 10-23，列表最新 10-21）。
+      现在 `kind` 区分两种来源，页头与列表**共用本函数**（同一口径）。
+    ★ `ok`＝**能回看**：控制台体检要有 `report`（明细），命令行体检有 `hosts`；
+      早期的控制台存档只有汇总（`tools`/`verdicts`/`conns`）⇒ `ok` 仍为 False，
+      但**不是不可看** —— 它们由 `_exam_brief_html` 渲染成汇总卡，
+      brief 字段就是给列表用的那一行摘要。
     ★ 只读，不写、不改：被并掉的那几份字节仍在磁盘上（零删除），只是不再
       单列 —— 合并是**列表口径**，不是销毁。
     """
@@ -3291,33 +3300,68 @@ def _exam_history():
                 doc = json.load(f)
         except Exception:                                     # noqa: BLE001
             continue
-        # ★ 只认控制台体检：命令行体检（host-audit）形状不同，喂给体检页的
-        #   渲染函数会渲染出别的页面 —— 合并逻辑也不许把它并进同一趟。
-        if not isinstance(doc, dict) or doc.get("source") != "console-exam":
+        if not isinstance(doc, dict):
+            continue
+        src = doc.get("source")
+        if src not in ("console-exam", "host-audit"):
             continue
         _rel, _abs = _exam_when_doc(doc)
+        rep = doc.get("report")
         items.append({"path": p, "base": os.path.basename(p),
                       "when": _abs or _rel, "dt": _exam_dt(doc),
-                      "ok": bool(isinstance(doc.get("report"), dict)
-                                 and doc.get("report"))})
-    groups = _exam_group_runs(items)
-    return [_exam_run_kept(g) for g in reversed(groups)]
+                      "kind": src,
+                      "ok": bool(src == "console-exam" and isinstance(rep, dict) and rep),
+                      "brief": _exam_brief_of(doc, src)})
+    # ★ 两种来源分别合并：形状不同、语义不同，混在一起合并会把
+    #   「命令行巡检」并进「控制台体检」那一趟（它们本来就不是一件事）。
+    _con = [x for x in items if x["kind"] == "console-exam"]
+    _hst = [x for x in items if x["kind"] == "host-audit"]
+    kept = [_exam_run_kept(g) for g in _exam_group_runs(_con)] + _hst
+    kept.sort(key=lambda x: x["dt"] or datetime.min.replace(tzinfo=datetime.now().astimezone().tzinfo))
+    return list(reversed(kept))
+
+
+def _exam_brief_of(doc, src):
+    """历次列表里那行摘要（**不猜**：只报存档里真有的计数）。
+
+    ★ 为什么需要：旧列表对「没存明细」的存档只写四个字，读者既不知道那次
+      查了什么，也不知道它和别的几次有什么不同 —— 那和「没做过体检」在
+      屏幕上几乎一样。
+    """
+    try:
+        if src == "host-audit":
+            h = doc.get("hosts") or []
+            w = doc.get("workspaces") or []
+            return "命令行巡检：%d 个宿主 · %d 个工作区" % (len(h), len(w))
+        rep = doc.get("report")
+        if isinstance(rep, dict) and rep:
+            return ""
+        n_tools, n_conn = doc.get("tools"), doc.get("conns")
+        bits = []
+        if n_tools not in (None, ""):
+            bits.append("%s 个工具" % n_tools)
+        if n_conn not in (None, ""):
+            bits.append("%s 个连接" % n_conn)
+        return ("只有汇总：" + " · ".join(bits)) if bits else "只有汇总"
+    except Exception:                                         # noqa: BLE001
+        return ""
 
 
 def _exam_pick(hist, pick):
-    """从历次里挑出要看的那一次；挑不出 ⇒ 最近一次**能回看**的。
+    """从历次里挑出要看的那一次；挑不出 ⇒ 最近那一次。
 
     ★★ `pick` 只认**档案自己的文件名**，绝不拿它拼路径：它来自 URL 查询串，
       任何拼路径的写法都是路径穿越。挑不到就退回默认（不报错、不渲染空页）。
+    ★★ 0.57.2：**不再要求 `ok`**。旧口径只挑「有明细」的那份，于是命令行体检
+      与早期只有汇总的存档即使出现在列表里也点不开 —— 链接点下去落在「最近一次」，
+      读者以为自己看的是那一次。现在每份存档都有渲染路径（见 `_view_exam` 分派），
+      `ok` 只用来决定「列表里怎么标」。
     """
     if pick:
         for h in hist:
-            if h["base"] == pick and h["ok"]:
+            if h["base"] == pick:
                 return h
-    for h in hist:
-        if h["ok"]:
-            return h
-    return None
+    return hist[0] if hist else None
 
 
 def _exam_doc_by_base(base):
@@ -3355,7 +3399,12 @@ def _exam_export_base(_arch, chosen, st):
       （没有可导出的东西却画一个下载按钮，就是「点了没反应」的源头）。
     """
     if _arch:
-        return os.path.basename(_arch)
+        # ★★ 0.57.2：只有「控制台明细」才导得出 PDF/HTML。命令行巡检与旧汇总
+        #   没有 `report`，喂给明细渲染器会得到一份空壳 —— 与 §10.3「选错文件＝
+        #   静默给错版本」同族。宁可没链接，也不给一个点下去拿到空文件的按钮。
+        if (chosen or {}).get("kind") == "console-exam" and (chosen or {}).get("ok"):
+            return os.path.basename(_arch)
+        return ""
     if chosen and chosen.get("ok"):
         return str(chosen.get("base") or "")
     saved = (st or {}).get("saved") or ""
@@ -3508,23 +3557,132 @@ def _exam_pdf_fail_html(base, why):
             % (_esc(why), _esc(base)))
 
 
+def _exam_rules_drift_html(root=None):
+    """规则快照落差（0.57.2，第 40 条）：**体检页也要说这件事**。
+
+    ★ 为什么放在体检页：`pip install -U` 只换包、不跑 install ⇒ 项目里的规则副本
+      永久停在首次安装的版本，而 hook 读的正是那份。本机实测：副本 0.34.0（10-03）
+      ／包内 0.57.1（10-26），中间 **9 条规则的 15 处修复一条都没生效**。
+      0.57.0 第 32 条把提示挂在 `verify` 与 `report` 上 —— 但那两条命令用户
+      平时不跑，等于提示写在抽屉里。体检页是他**真会打开**的地方。
+    ★ 文案**不另写**：`host_shield.rules_drift_lines` 是唯一实现（`verify` /
+      `report` / 本页共用）。分叉过一次就再也对不上了。
+    ★ 无落差 ⇒ 返回空串（不占位置）。读不到 ⇒ 也返回空串（未安装是另一条路径，
+      在这里喊只会天天噪音）。
+    """
+    try:
+        import host_shield as _hs
+        lines = _hs.rules_drift_lines(root or os.getcwd())
+    except Exception:                                         # noqa: BLE001
+        return ""
+    if not lines:
+        return ""
+    body = "<br>".join(_esc(x.strip()) for x in lines if str(x).strip())
+    # ★ 修法**不在这里写**：`rules_drift_lines` 的末尾三行就是修法与退路。
+    #   本函数再补一句「跑 --refresh-rules」＝同一屏两个修法（第一顽症）。
+    return ("<div class=\"warn\"><b>这台机器上的规则不是包里那一版</b><br>%s</div>"
+            % body)
+
+
+def _exam_brief_html(doc, kind):
+    """回看一份**没有明细**的存档：把它当时真的存下来的东西摆出来。
+
+    ★ 两种形态（0.57.2）：
+      · `host-audit`（命令行巡检）：每个宿主的路径/在不在/占用，每个工作区的
+        条目计数与是否已接受 —— 这些就是那次体检的**全部**结论，不是残缺品。
+      · 早期 `console-exam`（0.53.0 之前）：只存了 `tools`/`verdicts`/`conns`
+        汇总，明细那次没落盘。**如实说**，不补、不猜、不拿今天的数冒充。
+    ★ 为什么不重跑一遍再显示：那不是「那一次的结果」，是把旧记录换成新记录 ——
+      与「回看」二字相反（`_exam_replay_note` 已经先说清这是旧的）。
+    """
+    k = kind or ""
+    if k == "host-audit":
+        hosts = doc.get("hosts") or []
+        wss = doc.get("workspaces") or []
+        rows = []
+        for h in hosts:
+            if not isinstance(h, dict):
+                continue
+            rows.append("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
+                _esc(str(h.get("host") or "?")),
+                _esc(str(h.get("root") or "")),
+                "在" if h.get("present") else "不在",
+                _esc(str(h.get("workspaces") if h.get("workspaces") is not None else "-"))))
+        out = ["<h3>这次是命令行巡检（扫宿主目录，不扫工具）</h3>",
+               "<p class=\"muted small\">它查的是 AI 工具留在磁盘上的检查点与工作区，"
+               "不检查工具本身，也没有逐条结论。要看工具层面的结果，得跑一次控制台体检。</p>"]
+        if rows:
+            out.append("<table class=\"t\"><tr><th>宿主</th><th>目录</th><th>在不在</th>"
+                       "<th>工作区数</th></tr>%s</table>" % "".join(rows))
+        if wss:
+            w = []
+            for x in wss:
+                if not isinstance(x, dict):
+                    continue
+                w.append("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
+                    _esc(str(x.get("host") or "?")),
+                    _esc(str(x.get("path") or "")),
+                    _esc(str(x.get("entries") if x.get("entries") is not None else "-")),
+                    _esc(str(x.get("sensitive_entries")
+                             if x.get("sensitive_entries") is not None else "-")),
+                    "已接受" if x.get("accepted") else "待定"))
+            out.append("<table class=\"t\"><tr><th>宿主</th><th>工作区</th><th>条目</th>"
+                       "<th>其中有敏感项</th><th>状态</th></tr>%s</table>" % "".join(w))
+        if not rows and not wss:
+            out.append("<p class=\"muted\">这份存档里没有宿主记录。</p>")
+        return "".join(out)
+
+    # 早期控制台体检：只有汇总
+    v = doc.get("verdicts") or {}
+    bits = []
+    if doc.get("tools") not in (None, ""):
+        bits.append("<li>扫到的工具：%s 个</li>" % _esc(str(doc.get("tools"))))
+    if doc.get("conns") not in (None, ""):
+        bits.append("<li>发现的连接：%s 个</li>" % _esc(str(doc.get("conns"))))
+    if isinstance(v, dict) and v:
+        for kk in ("PACK", "SENT", "SYNC", "CLEAN", "BLIND", "NA"):
+            if kk in v:
+                bits.append("<li>%s：%s</li>" % (_esc(kk), _esc(str(v.get(kk)))))
+    # ★ 0.57.2 第三稿（0490 U-25 当场判红，2026-10-27）：
+    #   第一稿写的是「这份存档来自 0.53.0 **之前**：当时的实现只把数字写进档案，
+    #   每个工具的具体结论没有存。下面这些就是它当时真的写下的内容，不多不少。
+    #   要看明细得重跑一次。」—— 命中两个维度：
+    #     D1「之前」是相对时间词（这句讲的是版本，不是"多久以前"）；
+    #     D7 一句话 70 字（上限 42）。
+    #   改法不是登记豁免（簿只减不增），是**把话说短**：一个意思一句。
+    return ("<h3>那次只存了汇总</h3>"
+            "<p class=\"muted small\">那一版的实现只把数字写进档案。"
+            "每个工具的具体结论没有存下来。"
+            "下面是它当时真的写下的内容，不多不少。"
+            "要看明细，得重跑一次。</p>"
+            "<ul class=\"exam-brief\">%s</ul>" % ("".join(bits) or "<li>（这份存档没有可读的字段）</li>"))
+
+
 def _exam_history_html(hist, chosen):
-    """「历次体检」一行：能回看的给链接，不能回看的**只给字、不给链接**。
+    """「历次体检」一行：**每一次都列出来**，并且每一次都点得开。
 
     ★ 只有一次时不显示（品质性：不啰嗦 —— 一行只有一个选项的列表是噪音）。
     ★ 当前那一次加粗、**不给链接**（它已经是这一页）。
+    ★★ 0.57.2（第 41 条）：旧版对 `ok=False` 的条目只写「（没存明细）」且不给
+      链接 —— 读者点不进去，也就分不清「那次查了但没存明细」与「没查过」。
+      现在三种形态都点得开：控制台明细 / 控制台汇总 / 命令行巡检，
+      摘要写在括号里（`brief`），来源写在前面（命令行那份标出来）。
     """
     if len(hist) < 2:
         return ""
     items = []
     for h in hist:
-        if not h["ok"]:
-            items.append("<span class=\"muted\">%s（没存明细）</span>" % _esc(h["when"]))
-        elif chosen and h["base"] == chosen["base"]:
-            items.append("<b>%s</b>" % _esc(h["when"]))
+        label = _esc(h["when"])
+        note = h.get("brief") or ""
+        if note:
+            label += '<span class="muted">（%s）</span>' % _esc(note)
+        elif not h["ok"]:
+            label += '<span class="muted">（那次只存了汇总）</span>'
+        if chosen and h["base"] == chosen["base"]:
+            items.append("<b>%s</b>" % label)
         else:
-            items.append("<a href=\"/?v=health_exam&e=%s\">%s</a>"
-                         % (h["base"], _esc(h["when"])))
+            items.append("<a href=\"/?v=health_exam&amp;e=%s\">%s</a>"
+                         % (h["base"], label))
     return "<div class=\"note\">历次体检：%s</div>" % " ｜ ".join(items)
 
 
@@ -3660,16 +3818,24 @@ def _view_exam(token="", pick=None):
     #   「上次体检：1 天前」、正文写着「还没跑过」，同一页两句相反的话
     #   （创始人 2026-10-19 实测）。存档是回看的唯一来源，不是装饰。
     _arch = ""
+    _doc_view = None
     if res is None and st.get("state") not in ("running", "error"):
         if chosen is not None:
             try:
                 with open(chosen["path"], encoding="utf-8") as f:
-                    res = (json.load(f) or {}).get("report") or None
+                    _doc_view = json.load(f) or {}
+                # ★ 只有控制台体检的明细在 `report` 里；命令行巡检没有这个字段，
+                #   由 `_exam_brief_html` 按它自己的形状渲染（不硬塞进明细渲染器）。
+                if chosen.get("kind") == "console-exam":
+                    res = _doc_view.get("report") or None
                 _arch = chosen["path"]
             except Exception:                                 # noqa: BLE001
-                res, _arch = None, ""
+                res, _arch, _doc_view = None, "", None
     # ---- 页头：标题 ＋「上次体检」一行（§20.4；空态不显示那一行，§21.3）----
-    _last = _exam_ago(reports[-1]) if reports else ""
+    # ★★ 0.57.2：页头与历次列表**同源**（都来自 `hist`）。旧版页头读
+    #   `health_reports()[-1]`（含被列表过滤掉的命令行体检）⇒ 页头说「3 天前」，
+    #   列表里却没有那一次（本机实测 10-23 / 10-21）。
+    _last = _exam_ago(hist[0]["path"]) if hist else ""
     if _last:
         out.append("<h2>%s · 上次体检：%s</h2>"
                    % (PAGE_TITLES["health_exam"], _last))
@@ -3681,6 +3847,8 @@ def _view_exam(token="", pick=None):
         out.append("<div class=\"guide\"><b>%s</b></div>" % _EXAM_GUIDE)
     # ---- 边界（§20.2：TPL 原文逐字保留 ＋ 局部边界新增，写在首屏）----
     out.append(_EXAM_BOUND)
+    # ---- 规则快照落差（0.57.2）：先于结果说，因为它决定「这次结果算不算数」----
+    out.append(_exam_rules_drift_html())
     # ---- 触发／进行中／结果 ----
     if st.get("state") == "running":
         out.append("<div class=\"note\">体检正在进行：%s"
@@ -3716,6 +3884,14 @@ def _view_exam(token="", pick=None):
         elif not st.get("saved"):
             out.append("<div class=\"note\">这次体检的结果没能存成本机档案"
                        "（目录不可写？）——下次打开还会提醒你做一次。</div>")
+        out.append(_form(token, "exam", label="重新体检"))
+    elif _doc_view is not None:
+        # ★★ 0.57.2（第 41 条）：拿到了存档、但它没有「控制台明细」——
+        #   两种情形都在这里：命令行巡检（host-audit）与 0.53.0 之前的控制台汇总。
+        #   旧版把它们送进下面的 else ⇒ 屏幕上只有一句「那次只存了汇总」，
+        #   而那份存档里明明有宿主、工作区、工具数、连接数 —— **有证据却报没证据**。
+        out.append("<div class=\"note\">%s</div>" % _exam_replay_note(_arch))
+        out.append(_exam_brief_html(_doc_view, (chosen or {}).get("kind") or ""))
         out.append(_form(token, "exam", label="重新体检"))
     else:
         # ★ 有旧存档（没明细）⇒ **如实说它没明细**，不许说「还没跑过体检」——

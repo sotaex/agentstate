@@ -4351,13 +4351,18 @@ def n_h10():
       「不要当成"没问题"」（§20.2 TPL 原文），全页扫会把**正确的页面**判红
       （「文案自带禁词把尺子废掉」同族：2026-10-17 `_OBS_NOT_CONFIGURED`）。"""
     src = _src(_SERVER_REL)
-    a1 = 'if reports else ""'
+    # ★ 0.57.2：锚点跟着源变 —— 页头从
+    #   `_exam_ago(_hs.health_reports()[-1]) if reports else ""`（页头自己取数）
+    #   改成 `_exam_ago(hist[0]["path"]) if hist else ""`（与历次列表同源）。
+    #   ★ 这正是负控该有的样子：源码变了、锚点找不到就必须**判红**要求更新，
+    #     而不是悄悄跳过 —— 跳过等于这条负控从今往后再也不证明任何事。
+    a1 = 'if hist else ""'
     if a1 not in src:
         return ("变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，"
                 "不算通过：%r" % a1)
     hub, old = _fresh_hub()
     try:
-        page, why = _exam_mut(src.replace(a1, 'if reports else "0 天前"'),
+        page, why = _exam_mut(src.replace(a1, 'if hist else "0 天前"'),
                               "is0490_nh10a")
     finally:
         _restore_hub(old)

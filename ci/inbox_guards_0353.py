@@ -4349,7 +4349,15 @@ def n_exam_shown_run_is_the_final_one():
         SV._exam_run_kept = orig
     if why is True:
         return "负控失效：留最旧那份后仍绿 —— 页面其实没在按定稿显示"
-    if "ExamTool2" not in str(why) and "没存明细" not in str(why):
+    # ★ 0.57.2（2026-10-26 夜，实测撞上）：这里原来只认两个字面串
+    #   （`ExamTool2`／`没存明细`），而本轮 `_exam_pick()` 不再要求 `ok`
+    #   ⇒ 没明细那份现在会**照常被列出来**，页面显示成 `10-19 03:58`，
+    #   于是负控撞上尺子的**第一条**断言（"页面上还留着最旧那个时刻"）——
+    #   方向其实是对的（那正是没明细那份），却被判成"量具打偏"。
+    #   ⇒ 第三种红因从夹具常量**算出来**（不写死文案字面）：最旧那趟的
+    #     月-日 时:分。三串都指向同一件事「页面显示的不是定稿那次」。
+    _oldest = _EXAM_ONE_RUN[0][0][5:16].replace("T", " ")      # 例：10-19 03:58
+    if not any(k in str(why) for k in ("ExamTool2", "没存明细", _oldest)):
         return "方向不对：红因不是「显示成了没明细那次」（%s）—— 量具打偏" % str(why)[:60]
     _note("留最旧那份 ⇒ 页面渲染不出定稿 ⇒ 尺子红")
     return True
@@ -6625,6 +6633,373 @@ def n_daemon_tick_reconciles():
     return True
 
 
+# ============ 二十、体检历史三种形态 ＋ 规则副本刷新（0.57.2 · 第 41/40 条）
+# ★ 为什么这一族必须存在 —— 创始人 2026-10-26 夜原话：「我前几次体检的结果都看不到」。
+#   盘出来是**三个缺陷叠在一起**，每一个单独都足以让人看不到：
+#     ① `_exam_history()` 第一句就是 `if doc.get("source") != "console-exam": continue`
+#        ⇒ 命令行体检（host-audit）**整类**从「历次体检」里消失；
+#     ② `_exam_pick()` 要求 `ok`（＝有控制台明细）⇒ 早期只有汇总的存档虽在列表里，
+#        点下去落回「最近一次」，读者以为自己在看那一次；
+#     ③ 页头读 `health_reports()[-1]`、列表读 `_exam_history()` ⇒ **两条取数路径**。
+#        实测后果不是「少一条」，是同一页两句话互相打脸：页头 10-23，列表最新 10-21。
+#   这不是「加个功能」，是把**同一件事的两把尺子**收回一把（第一顽症）。
+_EXAM40_HOSTS = [{"host": "workbuddy", "root": "C:/Users/me/.workbuddy",
+                  "present": True, "workspaces": 4},
+                 {"host": "cursor", "root": "C:/Users/me/.cursor",
+                  "present": False, "workspaces": 0}]
+_EXAM40_WS = [{"host": "workbuddy", "path": "C:/Users/me/.workbuddy/x",
+               "entries": 12, "sensitive_entries": 1, "accepted": False}]
+
+
+def _exam40_hub(with_unknown=True):
+    """造三种形态的体检存档（＋一份**非体检来源**，用来证明页头不读「最新那个文件」）。
+
+    ★ 第四份（`source="legacy-scan"`，日期最新）是这条判据的**分辨力来源**：
+      旧页头读 `health_reports()[-1]` 就会取到它 —— 于是页头说「刚刚」，
+      而列表里最新一条是 3 天前。没有这一份，新旧两种口径读数相同，判据测不出东西。
+    """
+    hub = G.new_hub()
+    d = os.path.join(hub, "health")
+    os.makedirs(d, exist_ok=True)
+
+    def _put(stamp, doc):
+        p = os.path.join(d, "audit-%s-000.json" % stamp)
+        with open(p, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(doc, f, ensure_ascii=False)
+        return p
+
+    paths = {
+        "host-audit": _put("20261023-090000", {
+            "schema": "antinel.host/1", "source": "host-audit",
+            "generated_at": "2026-10-23T09:00:00+08:00",
+            "hosts": _EXAM40_HOSTS, "workspaces": _EXAM40_WS}),
+        "full": _put("20261021-090000", {
+            "schema": "antinel.health/1", "source": "console-exam",
+            "generated_at": "2026-10-21T09:00:00+08:00",
+            "tools": 2, "verdicts": {"PACK": 2}, "conns": 1,
+            "report": {"scan": {"tools": [{"name": "a"}, {"name": "b"}],
+                                "counts_by_verdict": {"PACK": 2}},
+                       "egress": {"snapshot": {"conns": [{"x": 1}]}}}}),
+        "early": _put("20261018-090000", {
+            "schema": "antinel.health/1", "source": "console-exam",
+            "generated_at": "2026-10-18T09:00:00+08:00",
+            "tools": 59, "verdicts": {"PACK": 12, "BLIND": 3}, "conns": 25}),
+        "unknown": "",
+    }
+    if with_unknown:
+        paths["unknown"] = _put("20261026-090000", {
+            "schema": "x", "source": "legacy-scan",
+            "generated_at": "2026-10-26T09:00:00+08:00"})
+    return hub, paths
+
+
+def _exam40_render(pick):
+    """渲染体检页（**内存态先按「刚启动」压住**，否则会走 running 分支）。
+
+    ★ 进程级可变状态必须能复位（本仓 Lesson）：`_EXAM` 是模块级 dict，
+      前序判据若把它留在 running，这条就会读到另一条路 —— 假红假绿都由此而来。
+    """
+    with SV._EXAM_LOCK:
+        saved = dict(SV._EXAM)
+        SV._EXAM.update({"state": "idle", "stage": "", "error": "",
+                         "result": None, "saved": ""})
+    try:
+        return SV._view_exam("", pick=pick)
+    finally:
+        with SV._EXAM_LOCK:
+            SV._EXAM.clear()
+            SV._EXAM.update(saved)
+
+
+def _exam40_doc(path):
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _exam40_sv_mutated(old, new):
+    """加载一份**内存变异**的 `inbox_server`（锚点须恰好出现 1 次，否则负控无效）。"""
+    import types
+    p = os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                     "inbox_server.py")
+    with open(p, encoding="utf-8") as f:
+        src = f.read()
+    n = src.count(old)
+    if n != 1:
+        raise AssertionError("变异锚点出现 %d 次（应为 1）⇒ 负控无效：%r"
+                             % (n, old[:70]))
+    mod = types.ModuleType("inbox_server_mut40")
+    mod.__file__ = p
+    exec(compile(src.replace(old, new, 1), p, "exec"), mod.__dict__)
+    return mod
+
+
+def c_exam40_history_has_both_kinds():
+    """EX-40a：命令行体检与早期汇总都进「历次体检」，非体检来源不进。
+
+    ★ 四个方向都要断（少一个就能被「把所有东西都列进去」蒙过）：
+      两种来源都在 ／ 未知来源不在 ／ `ok` 只表示「能走控制台明细渲染」
+      ／ 摘要说的是存档里真有的数。
+    """
+    hub, paths = _exam40_hub()
+    hist = SV._exam_history()
+    bases = [h["base"] for h in hist]
+    bad = []
+    kinds = [h.get("kind") for h in hist]
+    if kinds.count("host-audit") != 1:
+        bad.append("命令行体检在历次里出现 %d 次（应 1）—— 整类被过滤就是 0"
+                   % kinds.count("host-audit"))
+    if kinds.count("console-exam") != 2:
+        bad.append("控制台体检 %d 条（应 2：一份带明细、一份只有汇总）"
+                   % kinds.count("console-exam"))
+    unk = os.path.basename(paths["unknown"]) if paths["unknown"] else ""
+    if unk and unk in bases:
+        bad.append("非体检来源（%s）也进了历次体检" % unk)
+    for h in hist:
+        for k in ("path", "base", "when", "dt", "kind", "ok", "brief"):
+            if k not in h:
+                bad.append("历次条目缺字段 %s" % k)
+                break
+    by_kind = {os.path.basename(h["path"]): h for h in hist}
+    ha = by_kind.get(os.path.basename(paths["host-audit"]))
+    if ha:
+        if ha.get("ok"):
+            bad.append("命令行体检被标成「能走控制台明细渲染」（ok=True）")
+        if "命令行巡检" not in (ha.get("brief") or ""):
+            bad.append("命令行体检的摘要没说是命令行巡检（%r）" % (ha.get("brief"),))
+    ea = by_kind.get(os.path.basename(paths["early"]))
+    if ea:
+        if ea.get("ok"):
+            bad.append("只有汇总的存档被标成 ok=True（点开会是空壳）")
+        if "只有汇总" not in (ea.get("brief") or ""):
+            bad.append("只有汇总的存档没在摘要里说出来（%r）" % (ea.get("brief"),))
+        if "59" not in (ea.get("brief") or ""):
+            bad.append("摘要没报当时真存的数字（应为 59 个工具）")
+    fu = by_kind.get(os.path.basename(paths["full"]))
+    if fu and not fu.get("ok"):
+        bad.append("带明细的控制台体检没被标成 ok=True ⇒ 导出/明细那条路会断")
+    if bad:
+        return "历次体检的清单不对：\n      " + "\n      ".join(bad)
+    return True
+
+
+def n_exam40_history_filtered():
+    """N-EX-40a 负控：把旧口径的过滤装回去 ⇒ EX-40a 必须咬住。"""
+    mod = _exam40_sv_mutated(
+        '        if src not in ("console-exam", "host-audit"):',
+        '        if src != "console-exam":   # ← 0.57.2 之前的旧口径')
+    hub, paths = _exam40_hub()
+    hist = mod._exam_history()
+    kinds = [h.get("kind") for h in hist]
+    if kinds.count("host-audit") == 1:
+        return ("变异体（旧口径）里命令行体检**仍然在历次里** ⇒ EX-40a 的绿不来自"
+                "这个修复，牙齿没咬住")
+    return True
+
+
+def c_exam40_header_same_source():
+    """EX-40b：页头那句「上次体检」与历次列表**同源**（同一份取数）。"""
+    hub, paths = _exam40_hub()
+    hist = SV._exam_history()
+    if not hist:
+        return "历次体检为空 ⇒ 这条判据没有分母"
+    newest = SV._exam_ago(hist[0]["path"])
+    other = SV._exam_ago(paths["unknown"]) if paths["unknown"] else ""
+    if not other or other == newest:
+        return ("第四份存档与最新一份体检的「天前」读数相同（%r／%r）⇒ "
+                "两种取数口径读数一样，这条判据测不出东西" % (newest, other))
+    html = PC.body(_exam40_render(None))
+    bad = []
+    if ("上次体检：%s" % newest) not in html:
+        bad.append("页头没写「上次体检：%s」（历次首项的原话）" % newest)
+    if ("上次体检：%s" % other) in html:
+        bad.append("页头写成了「%s」= 非体检来源那份 ⇒ 仍在读 health_reports()[-1]"
+                   % other)
+    if bad:
+        return "页头与列表不同源：\n      " + "\n      ".join(bad)
+    return True
+
+
+def c_exam40_early_archive_openable():
+    """EX-40c：只有汇总的老存档**点得开**，且如实说「那次只存了汇总」。"""
+    hub, paths = _exam40_hub()
+    doc = _exam40_doc(paths["early"])
+    base = os.path.basename(paths["early"])
+    brief = SV._exam_brief_html(doc, "console-exam")
+    page = PC.body(_exam40_render(base))
+    bad = []
+    if "只存了汇总" not in brief:
+        bad.append("明细卡里没写「那次只存了汇总」")
+    if "59" not in brief:
+        bad.append("明细卡没摆出当时真存的数字（59 个工具）")
+    if "59" not in page:
+        bad.append("点开这份存档，页面上没有它当时真存的数字")
+    if "还没跑过体检" in page:
+        bad.append("点开老存档却显示「还没跑过体检」⇒ 有证据报没证据")
+    if bad:
+        return "早期汇总存档回看不合格：\n      " + "\n      ".join(bad)
+    return True
+
+
+def c_exam40_host_audit_openable():
+    """EX-40d：命令行巡检存档**点得开**，摆出它自己的形状（宿主／工作区）。"""
+    hub, paths = _exam40_hub()
+    doc = _exam40_doc(paths["host-audit"])
+    base = os.path.basename(paths["host-audit"])
+    brief = SV._exam_brief_html(doc, "host-audit")
+    page = PC.body(_exam40_render(base))
+    bad = []
+    if "命令行巡检" not in brief:
+        bad.append("明细卡没说这是命令行巡检（读者会以为是工具体检）")
+    if "workbuddy" not in brief:
+        bad.append("明细卡没列出宿主名")
+    if "C:/Users/me/.workbuddy/x" not in brief:
+        bad.append("明细卡没列出工作区路径")
+    if "workbuddy" not in page:
+        bad.append("点开命令行巡检存档，页面上没有宿主表")
+    if "还没跑过体检" in page:
+        bad.append("点开命令行巡检存档却显示「还没跑过体检」")
+    if bad:
+        return "命令行巡检存档回看不合格：\n      " + "\n      ".join(bad)
+    return True
+
+
+def c_exam40_rules_drift_on_page():
+    """EX-40e：规则副本落后时，体检页必须说出来；没落后／没装过则闭嘴。
+
+    ★ 三条腿缺一不可：落后要喊 ／ 一致要静 ／ 没装过也要静（否则未安装目录
+      天天喊一句，把真落差淹掉 —— 与 `rules_drift` 的既有边界同源）。
+    """
+    import host_shield as H
+    bad = []
+    # ① 落后 ⇒ 页面出现提示，且**修法**来自唯一实现（含 --refresh-rules）
+    f1 = _tmpdir()
+    proj = os.path.join(f1, "proj")
+    os.makedirs(os.path.join(proj, ".psl", "rules"), exist_ok=True)
+    with open(os.path.join(proj, ".psl", "manifest.json"), "w",
+              encoding="utf-8", newline="\n") as f:
+        json.dump({"rules_file": ".psl/rules/default.json"}, f)
+    with open(os.path.join(proj, ".psl", "rules", "default.json"), "w",
+              encoding="utf-8", newline="\n") as f:
+        json.dump({"version": "0.0.1", "rules": []}, f)
+    got = SV._exam_rules_drift_html(proj)
+    if not got:
+        bad.append("项目规则副本是 0.0.1（远落后于包内）却没提示")
+    elif "--refresh-rules" not in got:
+        bad.append("提示里没有可执行的最小修法（--refresh-rules）")
+    elif "0.0.1" not in got:
+        bad.append("提示里没报出版本落差的两个数")
+    # ② 与包内一致 ⇒ 闭嘴
+    f2 = _tmpdir()
+    proj2 = os.path.join(f2, "proj")
+    os.makedirs(os.path.join(proj2, ".psl", "rules"), exist_ok=True)
+    with open(os.path.join(proj2, ".psl", "manifest.json"), "w",
+              encoding="utf-8", newline="\n") as f:
+        json.dump({"rules_file": ".psl/rules/default.json"}, f)
+    with open(H.package_rules_path(), "rb") as s:
+        blob = s.read()
+    with open(os.path.join(proj2, ".psl", "rules", "default.json"), "wb") as f:
+        f.write(blob)
+    if SV._exam_rules_drift_html(proj2):
+        bad.append("规则副本与包内一致却仍在页面上报警（假警报）")
+    # ③ 没装过 ⇒ 闭嘴
+    f3 = _tmpdir()
+    if SV._exam_rules_drift_html(f3):
+        bad.append("没安装过的目录也在喊规则落差（噪音）")
+    if bad:
+        return "规则落差的可见面不对：\n      " + "\n      ".join(bad)
+    return True
+
+
+def c_refresh_rules_syncs_hash():
+    """RF-40f：`--refresh-rules` 真的换掉副本、同步 `rules_hash`、且幂等。
+
+    ★ `rules_hash` 是 SELF-TAMPERED 判定的基准：**只换文件不换 hash** 会被判篡改
+      并退回内嵌兜底（比不修更坏）。所以这条判据必须同时断「文件换了」与
+      「hash 跟着换了，且是 hook 认的那种写法 `sha256:…`」。
+    """
+    import importlib.util
+    p = os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                     "scripts", "install.py")
+    spec = importlib.util.spec_from_file_location("install_mut40", p)
+    ins = importlib.util.module_from_spec(spec)
+    _sys.modules["install_mut40"] = ins
+    spec.loader.exec_module(ins)
+
+    hub = G.new_hub()
+    root = os.path.join(_tmpdir(), "proj")
+    psl = os.path.join(root, ".psl")
+    os.makedirs(os.path.join(psl, "rules"), exist_ok=True)
+    dst = os.path.join(psl, "rules", "default.json")
+    with open(dst, "w", encoding="utf-8", newline="\n") as f:
+        json.dump({"version": "0.0.1", "rules": []}, f)
+    man_p = os.path.join(psl, "manifest.json")
+    with open(man_p, "w", encoding="utf-8", newline="\n") as f:
+        json.dump({"rules_file": ".psl/rules/default.json",
+                   "rules_hash": "sha256:" + "0" * 64,
+                   "skill_version": "0.0.1"}, f)
+
+    bad = []
+    rc = ins.refresh_rules(root)
+    if rc != 0:
+        bad.append("rc=%d（应为 0）" % rc)
+    with open(dst, "rb") as f1_:
+        live = f1_.read()
+    with open(ins._locate("rules", "default.json"), "rb") as f2_:
+        want = f2_.read()
+    if live != want:
+        bad.append("规则副本没变成包内那一版（%d vs %d 字节）" % (len(live), len(want)))
+    with open(man_p, encoding="utf-8") as f:
+        man = json.load(f)
+    if man.get("rules_hash") != ins.sha256_file(dst):
+        bad.append("manifest 的 rules_hash 没跟着换（只换文件会被判 SELF-TAMPERED）")
+    if not str(man.get("rules_hash") or "").startswith("sha256:"):
+        bad.append("rules_hash 不是 `sha256:…` 写法（hook 比对的就是这个形状）")
+    if not man.get("rules_refreshed_at"):
+        bad.append("没记 rules_refreshed_at（改了防护依据不留痕）")
+    # 幂等：第二次不重写
+    before = os.stat(man_p).st_mtime_ns
+    rc2 = ins.refresh_rules(root)
+    if rc2 != 0:
+        bad.append("第二次 rc=%d（幂等失败）" % rc2)
+    if os.stat(man_p).st_mtime_ns != before:
+        bad.append("第二次仍然重写了 manifest（不是幂等，白改用户文件）")
+    # 自证：审计链里有这一笔
+    trail = []
+    for d in (hub, os.path.join(psl, "audit")):
+        for dirpath, _dn, fns in os.walk(d):
+            for fn in fns:
+                try:
+                    with open(os.path.join(dirpath, fn), encoding="utf-8") as f:
+                        if "rules_snapshot_refreshed" in f.read():
+                            trail.append(fn)
+                except Exception:                             # noqa: BLE001
+                    pass
+    if not trail:
+        bad.append("审计链里没有 rules_snapshot_refreshed（改了规则却没留痕）")
+    if bad:
+        return "刷新入口不合格：\n      " + "\n      ".join(bad)
+    return True
+
+
+def n_refresh_rules_needs_install():
+    """N-RF-40f 负控：没安装过的目录 ⇒ 必须拒绝（否则这条入口能凭空造 .psl）。"""
+    import importlib.util
+    p = os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                     "scripts", "install.py")
+    spec = importlib.util.spec_from_file_location("install_mut40b", p)
+    ins = importlib.util.module_from_spec(spec)
+    _sys.modules["install_mut40b"] = ins
+    spec.loader.exec_module(ins)
+    root = os.path.join(_tmpdir(), "bare")
+    os.makedirs(root, exist_ok=True)
+    rc = ins.refresh_rules(root)
+    if rc == 0:
+        return "没装过的目录里 rc=0 ⇒ 它凭空造了 .psl，且用户以为刷成功了"
+    if os.path.exists(os.path.join(root, ".psl")):
+        return "没装过的目录里它还是建出了 .psl"
+    return True
+
+
 CHECKS_0353 = [
     # ---- 十二、恢复即结案（B，2026-10-23 创始人点名必做）----
     ("P39 恢复即结案：有证据的那一类全部结案／说明带证据／别的类不动",
@@ -6908,6 +7283,18 @@ CHECKS_0353 = [
      c_tmp_dirs_registered_and_swept, n_tmp_dirs_registered_and_swept),
     ("P38 已处置与已忽略的按钮不许共用一个标签",
      c_reopen_label_two_intents, n_reopen_label_two_intents),
+    # ---- 二十、体检历史三种形态 ＋ 规则副本刷新（0.57.2 · 第 41/40 条）----
+    ("P42 历次体检含两种来源、非体检来源不进、摘要报真数",
+     c_exam40_history_has_both_kinds, n_exam40_history_filtered),
+    ("P42b 页头「上次体检」与历次列表同源", c_exam40_header_same_source, None),
+    ("P42c 只有汇总的老存档点得开且如实说没明细",
+     c_exam40_early_archive_openable, None),
+    ("P42d 命令行巡检存档点得开且摆自己的形状",
+     c_exam40_host_audit_openable, None),
+    ("P42e 规则副本落差在体检页上说得出，没落差/没装过则闭嘴",
+     c_exam40_rules_drift_on_page, None),
+    ("P43 --refresh-rules 换副本＋同步 rules_hash＋幂等＋留痕",
+     c_refresh_rules_syncs_hash, n_refresh_rules_needs_install),
 ]
 
 

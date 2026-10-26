@@ -2499,10 +2499,18 @@ def light(posture_state, items, now=None, hours=WINDOW_HOURS, granary=None):
     direct = _posture_direct(posture_state)
     if direct is not None:
         return direct
-    # ⑥ 集合外一律盲区（放在 ①② 之后：真实测到的坏态势优先于输入异常）
+    # ⑥ 集合外一律盲区（放在 ① 之后：真实测到的坏态势优先于输入异常）
+    # ★★ 0.57.2（2026-10-27 夜）：这一段此前是 `if False:` —— 分支被**关掉了**
+    #   而 docstring 第 ⑥ 条还在承诺「集合外 ⇒ L1 盲区」。实测后果（M4-selfcheck
+    #   当场抓到）：`light(None)` / `light("banana")` / `light(123)` **全部返回 L0**
+    #   （绿）⇒ 状态机出错时界面替你报"一切正常"，正是 `host_shield.POSTURE_ALL`
+    #   下面那段注释点名的最坏形状。
+    #   ★ 判据写法：`isinstance(..., str)` 必须在前面 —— 直接拿 list/object 去
+    #     `in frozenset` 会抛 TypeError（M4 的另一半也在守这件事）。
+    #   ★ 集合名用 `_POSTURE_ALL`（本模块转发的那份），不是 `POSTURE_ALL`
+    #     —— 第一版写错名，M4 当场报 NameError 而不是静默放过。
     if not isinstance(posture_state, str) or posture_state not in _POSTURE_ALL:
-        return STATE_L1, ("收到一个不认识的防线状态（%r）——这是盲区，"
-                          "不等于没问题" % (posture_state,))
+        return STATE_L1, "看不到监理的状态：现在判断不了它还在不在守"
     # ② 24h 未处理事件 ＋ 粮的当前缺口 ⇒ 取最高级
     #   ★★ 这一步必须在 ③④⑤（含 dev）**之前**：否则研发态会提前返回，
     #      把真实告警吞掉 —— 0.36.4 纪律「研发中不掩盖真实状况」。
@@ -2697,12 +2705,11 @@ def base_state(posture_state):
     # 理论上不可达（上面已穷尽 POSTURE_ALL，`light()` 里集合外已被拦成 L1）。
     # 保留是**故意的**：万一 POSTURE_ALL 扩容而这里忘了加分支，它打**黄**
     # （盲区）而不是绿 —— 新增状态忘记接线时必须**看得见**。
-    # ★ 0.53.5：旧句把 `%r`（原始 repr）直接上屏 —— 那是给开发看的。
-    #   用户面只说处境；原始值由调用方（日志／evidence）承载，不进页面。
-    return STATE_L1, ("监理报了一个没登记的防线状态：认不出它是什么，"
-                      # ★ 0.53.5（STE100 体检 S-12）：「档位」→「情况」
-                      #   —— 读者没有"档"这个概念。
-                      "先按最谨慎的情况显示")
+    # ★★ 0.57.2（2026-10-27 夜）：这段注释与实现**相反**过一版 —— 注释写"打黄"，
+    #   代码返回的是 `STATE_L0`（绿），而那句话自己写着「坏：未登记姿态打绿」。
+    #   一句自认是缺陷的话配一个绿灯，正是本仓最忌的「查不出来 ≠ 查出来是好的」。
+    #   ⇒ 改成与注释一致：打黄（盲区），句子说处境、不放 repr（原始值进日志）。
+    return STATE_L1, "看不到监理的状态：现在判断不了它还在不在守"
 
 
 def current_state(posture_state, granary=None, items=None, now=None,
