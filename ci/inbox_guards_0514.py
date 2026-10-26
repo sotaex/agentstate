@@ -10311,8 +10311,13 @@ def c_t1():
     legs = [
         ("SEC-02", "正控", "路径面",
          lambda r: r.__setitem__("file_patterns", ["ZZZ-never-matches-ZZZ"])),
-        ("SEC-06", "负控", "内容面排除",
-         lambda r: r.__setitem__("exclude_patterns", [])),
+        # ★ 0.57.0（第 33/36 条）：这一腿原来改坏的是 `exclude_patterns`，
+        #   而 SEC-06 的 exclude_patterns 现在是空表 ⇒ **改坏等于没改**，
+        #   负控自然还绿 ⇒ 判据报"牙齿失效"。这不是产品退步，是判据的
+        #   改坏动作停在旧机制上（死判据的第一形态：删掉要守的东西再跑）。
+        #   SEC-06 现在的"不报示例值"由 placeholder_patterns 负责 ⇒ 改坏它。
+        ("SEC-06", "负控", "内容面的占位值豁免",
+         lambda r: r.__setitem__("placeholder_patterns", [])),
         ("DST-06", "负控", "命令面排除",
          lambda r: r.__setitem__("exclude_patterns", [])),
     ]
@@ -10329,7 +10334,7 @@ def c_t1():
     if silent:
         return ("牙齿失效：改坏规则后这些腿仍然绿 ⇒ C-族没有分辨力：%s"
                 % "；".join(silent))
-    _note("三条腿改坏后全部翻红：SEC-02 删路径 pattern / SEC-06 清空内容排除 / "
+    _note("三条腿改坏后全部翻红：SEC-02 删路径 pattern / SEC-06 清空占位值清单 / "
           "DST-06 清空命令排除")
     return True
 

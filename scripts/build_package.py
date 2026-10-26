@@ -200,7 +200,7 @@ HARNESS_SRC = SRC / "scripts" / "verification_tests.py"
 if not HARNESS_SRC.is_file():
     raise SystemExit("★ 构建器找不到套件：%s\n  （产物仓构建必须用本仓的套件）" % HARNESS_SRC)
 NAME = "antinel-security"
-VERSION = "0.56.0"
+VERSION = "0.57.0"
 # P-A3: the namespace this build declares itself under. derive_object_ownership()
 # reads git remote first, then THIS field; fail-closed unattributed when neither
 # resolves. Kept beside the hashes so a third party can see what was declared.
@@ -435,6 +435,19 @@ GITIGNORE_TEMPLATE = (
     #   那份、没改模板** ⇒ JDG-05 当场抓到（"模板 28 行／仓内 29 行"）——
     #   这正是本模板注释里第三次同一教训，修法照旧：改模板才是修法。
     ".worktrees/\n"
+    # ★★ 2026-10-26（0.57.0）：两个本机待查证据件 —— `NUL.lock`（锁路径解析异常时
+    #   Windows 保留设备名被当成路径留下的残件）与 `console/`（值守台运行态输出）。
+    #   两者都不是仓库内容，但**不许删**（行动清单第 27 条：留证待查）。
+    #   ★ 这是同一教训的**第四次**：这三行先只补进仓里那份 ⇒ 07:02 那次构建整文件
+    #     覆盖，三行无声蒸发（`git diff .gitignore` 可见）。写进模板才是修法。
+    "NUL.lock\nconsole/\n"
+    # ★★ 2026-10-26（0.57.0）：代理/本机会话的**工作产物区** ——
+    #   `analysis-tmp/`（1024 参赛与融资视角的分析稿、会议 CFP 抓取素材）、
+    #   `.zwork/`（代理运行目录：attachments / background / runs）。
+    #   与 `output/`、`_p_*`、`_t_*` 同性质：**不入库、不进包、不是本仓归属对象**。
+    #   实测：不忽略 ⇒ 交付闸门的 L1（SPDX 归属）多报 4 处「缺 SPDX 头」假红，
+    #   而这 4 个文件本来就不会进任何发布件 —— 假红会掩盖真红，必须收进口径。
+    "analysis-tmp/\n.zwork/\n"
 )
 
 # ★★ 2026-10-11（0.48.1，策略 v1.1 落地）：主许可 MIT → Apache-2.0。
@@ -1032,6 +1045,18 @@ All hits of one event are collected; the highest severity decides.
 - Hook latency on Windows is about 65 ms per call (interpreter start dominates); Linux/macOS untested.
 - Only actions that pass through the host's PreToolUse hook can be blocked.
 - Qoder / TRAE field layouts are declared profiles, not verified.
+- JUDGING A SHORT PACKAGE NAME'S LETTER SUBSTITUTION. SLOP-01 grades by name
+  length and edit type (0.57.0, checklist item 37): transposition,
+  insertion/deletion and homoglyph swaps (`otx`, `toxx`, `t0x`) are judged at
+  any length, but a plain letter substitution in a 3-character name is not --
+  `tox/nox`, `lit/kit`, `vue/cue` are all legitimate words or packages, so that
+  branch can only produce noise. Measured on this host (76 real packages in use
+  against 972 classic typo variants): the old single rule (`distance <= 2`)
+  gave 8.0%% false positives at 100%% recall; the graded rule gives 0%% false
+  positives at 99.1%% recall, and the 9 misses are exactly those 3-char
+  substitutions. Two real packages where one is a prefix of the other
+  (`psycopg` / `psycopg2`) are also not separable by any threshold -- that is
+  fixed by adding the name to the reference set, not by tuning the rule.
 """
 
 # ---------------------------------------------------------------- RUN_HARNESS

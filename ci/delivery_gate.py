@@ -1247,6 +1247,17 @@ def _looks_like_noop(out):
     return len((out or "").strip()) < _NOOP_MIN_CHARS
 
 
+#: 单套的**时间预算**（秒）。默认 900s。
+#:
+#: ★ 0.57.0：`0514` 需要单独一档。实测同一台机、同一份代码：519s（空载）／
+#:   847s（常驻哨兵 + 审计锁争抢时）。900s 上限只有 6% 余量 ⇒ 全量闸门会**随机**
+#:   报「超时 > 900s（判据卡住…）」——而「时间不够」与「判据真的卡住」在这一行
+#:   文本上是同形的，读的人无法分辨（本轮实测：run5 报超时，单跑 847s 全绿）。
+#:   ⇒ 按既定纪律（wall-clock 不入 pass/fail 分母）把这一套提到 1800s。
+#:   **只放宽时间、不放宽判据**：它红的条件一条没改，红照旧红。
+_SLOW_BUDGET = {"0514": 1800}
+
+
 def _run(rel, timeout=900, extra=None):
     """跑一套判据。返回 `(状态, 明细)`，状态 ∈ PASS / RED / CRASH / MISSING / NOOP。
 
@@ -1265,6 +1276,12 @@ def _run(rel, timeout=900, extra=None):
         return "MISSING", "判据文件不存在：%s" % rel
     env = dict(os.environ)
     env["ANTINEL_PKG"] = PKG          # 让判据认准主仓，不被上级陈旧 manifest 干扰
+    # ★ 0.57.0 实测教训：这里 `rel` 是**文件路径**（`ci/inbox_guards_0514.py`），
+    #   不是套件键（`0514`）—— 用键去查表会**静默不生效**，而症状是
+    #   "配置明明加了，日志还是印 900s"。⇒ 从文件名里取四位数字。
+    _km = re.search(r"(\d{4})\.py$", rel)
+    if _km:
+        timeout = _SLOW_BUDGET.get(_km.group(1), timeout)
     t0 = time.time()
     try:
         r = subprocess.run([sys.executable, p] + list(extra or []),

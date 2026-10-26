@@ -78,7 +78,15 @@ _WALK_EXCLUDE = {".git", ".workbuddy", "__pycache__", "build", "dist", "node_mod
                  #     worktree 里的文件一个都没被改写，只是不再冒充本仓文件）。
                  #     **待创始人复核**：若要连 worktree 一起管，正确做法是给
                  #     worktree 自己的 license-map，而不是在本仓判据里混算。
-                 ".worktrees"}
+                 ".worktrees",
+                 # ★★ 0.57.0（同一口径）：代理与本机会话的**工作产物区** ——
+                 #   `analysis-tmp/`（1024 参赛/融资分析稿、会议 CFP 抓取素材）、
+                 #   `.zwork/`（代理运行目录 attachments/background/runs）。
+                 #   它们**不入库、不进包**（已同步写进 .gitignore 模板），
+                 #   因此不是"本仓归属对象"。实测：不排除 ⇒ L1 多报 4 处
+                 #   「缺 SPDX 头」假红 —— 而**假红会掩盖真红**（真有一条缺头
+                 #   时，它会被这 4 条噪声淹没），所以按上一条的同一口径收进来。
+                 "analysis-tmp", ".zwork"}
 # ★★ 第 33 条（2026-10-25）：**「让开」的目录必须按族排除**。
 #   原实现只认**精确目录名**（`build`/`dist`/`out`…），而本仓"让开"的做法是把
 #   目录改名成 `build.away-20261024-142306`（同盘 rename 让出位置，不删——宿主禁删）。

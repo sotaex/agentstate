@@ -1890,7 +1890,7 @@ def j_rules_snapshot_drift():
             env={**os.environ, "PYTHONPATH": "", "PYTHONIOENCODING": "utf-8"})
         return r.returncode, (r.stdout or "") + (r.stderr or "")
 
-    tmp = tempfile.mkdtemp(prefix="d42_")
+    tmp = _TMP.tmpdir(prefix="d42_")
     try:
         legs = [
             ("A 副本落后", _mkproj(os.path.join(tmp, "a"), "0.0.1"), True, "落后"),
@@ -1916,7 +1916,7 @@ def j_rules_snapshot_drift():
 
     # ── ③ 参数腿：package_rules 真的被用（不是写死读包内）────────────────
     #    没有这一腿，「拿同一个文件比同一个文件」也能让 A/B 两腿看起来成立。
-    probe = tempfile.mkdtemp(prefix="d42p_")
+    probe = _TMP.tmpdir(prefix="d42p_")
     try:
         proj = _mkproj(os.path.join(probe, "p"), "0.0.1")
         same = os.path.join(probe, "same.json")
@@ -1984,7 +1984,7 @@ def j_lock_budget_is_wallclock():
         return False, "① acquire_lock 里仍有 range(100) 次数上界 —— 时间判断被次数夹住了"
 
     old = ac.LOCK_BUDGET_S
-    tmp = tempfile.mkdtemp(prefix="d43_")
+    tmp = _TMP.tmpdir(prefix="d43_")
     try:
         fn = os.path.join(tmp, "x.jsonl")
         lock = fn + ".lock"
@@ -2066,7 +2066,7 @@ def j_lock_failures_leave_trace():
                 continue
         return out
 
-    tmp = tempfile.mkdtemp(prefix="d44_")
+    tmp = _TMP.tmpdir(prefix="d44_")
     old_budget = getattr(ac, "LOCK_BUDGET_S", None)
     try:
         # ── ① release_err ────────────────────────────────────────────────
@@ -5480,9 +5480,20 @@ def j_scan_scope_is_configurable_and_counted():
     import shutil as _sh
     root = Path(_TMP.tmpdir(prefix="d52_"))
 
+    # ★ 2026-10-26（0.57.0 提交时实测）：原实现把清单**写到盘上**再让产品默认读它。
+    #   在本宿主上「写一个名叫 .antinelignore 的隐藏文件」会被外层守卫拒绝
+    #   （`PermissionError: [Errno 13]`：`git commit` → pre-commit 钩子 → 本判据，
+    #   这一条链上的写盘配额与直接跑不同），于是**同一份判据直接跑绿、钩子里跑红**。
+    #   ⇒ 清单文本改为**注入** `_IgnoreList(root, text=...)`：走的仍是同一套解析与
+    #   匹配实现，只是不落盘。**默认读盘那条路**没有丢 —— ⑦ 用的就是
+    #   `build(None)` ＋ `run()`（不注入 ⇒ 产品自己去读盘），它同时守住
+    #   「真实文件名」与「读失败要留痕」两件事。
+    _pending = {"text": None}
+
     def build(ignore_text=None):
         _sh.rmtree(str(root), ignore_errors=True)
         root.mkdir(parents=True, exist_ok=True)
+        _pending["text"] = ignore_text
         (root / "app.py").write_text("print('hi')\n", encoding="utf-8")
         (root / dot("a")).write_text("TOKEN=abc\n", encoding="utf-8")
         (root / "output").mkdir(exist_ok=True)
@@ -5499,13 +5510,16 @@ def j_scan_scope_is_configurable_and_counted():
         (root / "myenv" / "site-packages" / dot("f")).write_text("TOKEN=abc\n",
                                                                   encoding="utf-8")
         if ignore_text is not None:
-            (root / scan.IGNORE_FILE).write_text(ignore_text, encoding="utf-8")
+            # ★ 不落盘（见上方 _pending 的说明）：注入文本，走同一套解析实现。
+            pass
 
     def hits_of(found):
         return sorted(str(x["file"]).replace("\\", "/").split("/")[-1]
                       for x in found if str(x["file"]).lower().endswith(DE))
 
     def run(ignore=None):
+        if ignore is None and _pending["text"] is not None:
+            ignore = scan._IgnoreList(root, text=_pending["text"])
         found, st, _a, _d = scan.scan_directory(str(root), ruleset, ignore=ignore)
         return found, st
 
@@ -5565,7 +5579,7 @@ def j_scan_scope_is_configurable_and_counted():
         build(".cursor/\n")
         (root / ".cursor").mkdir(exist_ok=True)
         (root / ".cursor" / "mcp.json").write_text(mcp_doc, encoding="utf-8")
-        ign = scan._IgnoreList(root)
+        ign = scan._IgnoreList(root, text=_pending["text"])
         _f, st2, _a, _d = scan.scan_directory(str(root), ruleset, ignore=ign)
         after = scan.scan_mcp_configs(str(root), ruleset, ignore=ign, stats=st2)
         if not before:

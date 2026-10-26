@@ -25,7 +25,7 @@
 
     同族七次，前六次都没上升为机制。本文件把它变成机器检查。
 
-★★★ 六条判据（都是**可机械执行**的不变式，不是纪律口号）：
+★★★ 七条判据（都是**可机械执行**的不变式，不是纪律口号）：
 
     JDG-01  状态路径一致性
             **测试重置的状态路径，必须等于产品实际读取的状态路径。**
@@ -49,6 +49,15 @@
 
     JDG-05  构建器拥有的文件不许手工改（0.36.9）
             **仓内 .gitignore 必须与构建器 GITIGNORE_TEMPLATE 逐字节相同。**
+
+    JDG-05b 构建器拥有的文档不许手工改（0.57.0）
+            **仓内 references/THREAT_MODEL.md 必须与构建器
+            THREAT_MODEL_MD % _TPL_CTX() 逐字节相同。**
+            来历：同一教训的第四次，代价最重 —— 0.57.0 筹备时把 SLOP-01 的
+            实测结论（误报 8.0% → 0%、召回 99.1% 的取舍说明）补进了**仓里那份
+            md**，而它是 build_package 整文件生成的 ⇒ 一次装配整段消失，且
+            **没有任何判据会红**（.gitignore 同类事故有 JDG-05 当场暴露）。
+            守卫的存在与否，决定同一类错误是"当场暴露"还是"静默发布"。
 
     JDG-06  产件自洽（0.37.0）
             **dist/ 里最新的 wheel 必须：只含一个 dist-info 目录、目录版本
@@ -858,7 +867,74 @@ def n_gitignore_drift_is_red():
     except AssertionError as e:
         return "不一致" in str(e)
     finally:
+        # ★ 0.57.0：原实现**没有 finally** ⇒ 负控把模块级模板永久污染成
+        #   `real + canary`，同一进程里后续任何检查再比对 .gitignore 都会
+        #   撞上那条金丝雀。判据互相污染＝判据不可信。
         bp.GITIGNORE_TEMPLATE = real
+
+
+# ═══════════════ JDG-05b 构建器拥有的文档不许手工改（THREAT_MODEL == 模板） ═══════════════
+#
+# ★ 0.57.0 新增。同一教训的第四次，这次代价最重：
+#   `references/THREAT_MODEL.md` 与 `.gitignore` 一样是**构建器整文件生成**
+#   （build_package.py `THREAT_MODEL_MD % _TPL_CTX()`），但它**没有任何守卫**。
+#   0.57.0 筹备时把 SLOP-01 的实测结论直接补进了**仓里那份 md**，07:02 一次
+#   装配就整段消失 —— 而 `.gitignore` 因为 JDG-05 有逐字节守卫，同类事故会
+#   当场红。**守卫的存在与否，决定同一类错误是"当场暴露"还是"静默发布"。**
+#
+#   机械判据：仓内 `references/THREAT_MODEL.md` 必须逐字节等于
+#   `HEADER + THREAT_MODEL_MD % _TPL_CTX()`；不一致就红，并点名方向
+#   （只有模板有／只有仓里有）与首个差异行号。
+
+def jdg05b_body():
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    try:
+        import build_package as bp
+    except Exception as e:                                # noqa: BLE001
+        raise AssertionError("导不进构建器（%r）—— 无法比对模板" % (e,))
+    tpl_md = getattr(bp, "THREAT_MODEL_MD", None)
+    ctx_fn = getattr(bp, "_TPL_CTX", None)
+    if not isinstance(tpl_md, str) or not tpl_md.strip() or not callable(ctx_fn):
+        raise AssertionError("构建器没有 THREAT_MODEL_MD 常量或 _TPL_CTX() —— "
+                             "模板没被提出来，本判据无从比对（量具自失效）")
+    want = "<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->\n" + tpl_md % ctx_fn()
+    disk_p = os.path.join(ROOT, "references", "THREAT_MODEL.md")
+    if not os.path.isfile(disk_p):
+        raise AssertionError("references/THREAT_MODEL.md 不在仓里")
+    disk = io.open(disk_p, encoding="utf-8", newline="").read()
+    if disk != want:
+        t, d = want.splitlines(), disk.splitlines()
+        only_tpl = [x for x in t if x not in d]
+        only_disk = [x for x in d if x not in t]
+        first = next((i for i, (a, b) in enumerate(zip(t, d), 1) if a != b),
+                     min(len(t), len(d)) + 1)
+        raise AssertionError(
+            "仓内 THREAT_MODEL.md 与构建器模板不一致（模板 %d 行／仓内 %d 行，"
+            "首个差异在第 %d 行）—— 手工改的内容会被下次构建静默回退。"
+            "只有模板有: %s；只有仓里有: %s"
+            % (len(t), len(d), first, only_tpl[:3] or "无", only_disk[:3] or "无"))
+    return "仓内 THREAT_MODEL.md 与模板逐字节相同（%d 行）" % len(want.splitlines())
+
+
+@check("JDG-05b 构建器拥有的文档不许手工改（THREAT_MODEL == 模板）",
+       "n_threat_model_drift_is_red")
+def jdg05b():
+    return jdg05b_body()
+
+
+def n_threat_model_drift_is_red():
+    """负控：往模板里塞一段仓内没有的结论 ⇒ 判据必须报红，且方向要对。"""
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import build_package as bp
+    real = bp.THREAT_MODEL_MD
+    try:
+        bp.THREAT_MODEL_MD = real + "- jdg05b-canary\n"
+        jdg05b_body()
+        return False
+    except AssertionError as e:
+        return "只有模板有" in str(e)
+    finally:
+        bp.THREAT_MODEL_MD = real
 
 
 # ═══════════════════ JDG-06 产件自洽：wheel 单 dist-info ＋ RECORD 对得上 ═══════════════════
