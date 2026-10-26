@@ -56,7 +56,7 @@ _T0 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段起点（性能
 
 # ---------------------------------------------------------------- constants --
 PKG_DIR = os.path.dirname(os.path.abspath(__file__))
-_ANTINEL_VERSION = "0.57.1"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
+_ANTINEL_VERSION = "0.57.2"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
 _T1 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段终点（性能插桩）
 
 
@@ -225,6 +225,30 @@ INSTRUCTION_DIR_MARKERS = (".cursor/rules",)   # + basename endswith .mdc
 #   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
 #   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
 #   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
+# G-03: embedded fallback, used only when the rules file is unreadable / tampered.
+# ★★ 0.57.0（步骤 A）：本块**由 `rules/default.json` 生成**，与主表 37 条全等。
+#   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
+#   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
+#   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
+#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
+#   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
+# G-03: embedded fallback, used only when the rules file is unreadable / tampered.
+# ★★ 0.57.0（步骤 A）：本块**由 `rules/default.json` 生成**，与主表 37 条全等。
+#   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
+#   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
+#   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
+#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
+#   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
+# G-03: embedded fallback, used only when the rules file is unreadable / tampered.
+# ★★ 0.57.0（步骤 A）：本块**由 `rules/default.json` 生成**，与主表 37 条全等。
+#   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
+#   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
+#   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
+#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
+#   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
 _FALLBACK = [
     {"id": "SEC-01",
      "name": "Sensitive file read (.env)",
@@ -248,12 +272,12 @@ _FALLBACK = [
      "type": "tool_call",
      "tool_names": ["Read", "Bash"],
      "file_patterns": [
+      "(?:^|[\\s/\\\\\\\"'])id_rsa(?:$|[\\s\\\"',;:)\\]])",
+      "(?:^|[\\s/\\\\\\\"'])id_ed25519(?:$|[\\s\\\"',;:)\\]])",
+      "(?:^|[\\s/\\\\\\\"'])id_ecdsa(?:$|[\\s\\\"',;:)\\]])",
+      "(?:^|[\\s/\\\\\\\"'])authorized_keys(?:$|[\\s\\\"',;:)\\]])",
       "\\.ssh[/\\\\]id_",
-      "\\.ssh[/\\\\]authorized_keys",
-      "id_rsa",
-      "id_ed25519",
-      "id_ecdsa",
-      "authorized_keys"],
+      "\\.ssh[/\\\\]authorized_keys"],
      "exclude_patterns": [],
      "apply_to_tools": ["Read", "Bash"],
      "description": "Agent attempted to read SSH private key or authorized_keys file",
@@ -268,11 +292,11 @@ _FALLBACK = [
      "type": "tool_call",
      "tool_names": ["Read", "Bash"],
      "file_patterns": [
+      "(?:^|[\\s/\\\\\\\"'])credentials\\.json(?:$|[\\s\\\"',;:)\\]])",
+      "(?:^|[\\s/\\\\\\\"'])application_default_credentials(?:$|[\\s\\\"',;:)\\]])",
       "\\.aws[/\\\\]credentials",
       "\\.kube[/\\\\]config",
-      "credentials\\.json",
-      "\\.netrc",
-      "application_default_credentials"],
+      "\\.netrc"],
      "exclude_patterns": [],
      "apply_to_tools": ["Read", "Bash"],
      "description": "Agent attempted to read cloud provider credentials",
@@ -486,6 +510,7 @@ _FALLBACK = [
      "type": "tool_call",
      "tool_names": ["Write", "Edit", "Bash"],
      "command_patterns": [
+      "(?<![./\\w])crontab(?![\\w.])",
       "crontab\\s+-[el]",
       "systemctl\\s+enable",
       "launchctl\\s+load",
@@ -496,7 +521,6 @@ _FALLBACK = [
       "(?i)\\bat\\s+\\d{1,2}:\\d{2}\\s+/\\w+",
       "\\bpowershell\\b[^\\n]{0,80}\\-(enc|encodedcommand)\\b"],
      "file_patterns": [
-      "crontab",
       "systemd[/\\\\]system",
       "LaunchAgents",
       "rc\\.local",
@@ -537,7 +561,7 @@ _FALLBACK = [
      "type": "tool_call",
      "tool_names": ["Bash"],
      "command_patterns": [
-      "\\benv\\b(?!\\s*=)",
+      "(?<![.\\w/-])env(?![.\\w-])(?!\\s*=)",
       "\\bprintenv\\b",
       "os\\.environ",
       "process\\.env"],
@@ -3847,6 +3871,123 @@ def cloud_sync_dir_of(path):
 _URL_TOK = re.compile(r"\b(?:https?|ftps?|wss?)://[^\s'\"`<>|;)]+", re.IGNORECASE)
 
 
+# ══════════════════════════════════════════════════════════════════
+# ★★★ 0.57.2（第 39 条）：Bash 通道上，**被引号包住的文字**与**文件路径**不是一回事
+# ══════════════════════════════════════════════════════════════════
+# 实测（output/_rules_fp2.py，2026-10-26 夜里）：21 条日常命令里
+#   **12 条被 critical 拦下**，全是同一个形状 —— 文件名出现在「说话的地方」：
+#     `git commit -m "docs: add crontab guide"`      → DST-04 block
+#     `grep -rn "credentials.json" docs/`            → SEC-03 block
+#     `cat docs/id_rsa_rotation.md`                  → SEC-02 block
+#     `sed -n '1,20p' docs/crontab.md`               → DST-04 block
+#   根因：`_basic_hit` 在 Bash 通道上把 `file_patterns` 与 `content_patterns`
+#   拿去匹配**整条命令文本**。于是「提到这个词」＝「读了那个文件」。
+#   ★ 这不是新发现：同型的修法在 0.57.0（第 30 条 `_strip_net_urls`）已经用过一次
+#     —— 网络 URL 的路径段不是本地路径。本条把同一把尺子用到「引号里的文字」。
+#
+# 三件事，缺一不可：
+#   ① 遮蔽文本参数：提交说明 / echo 输出 / 搜索模式 —— 这些是给人看的字，
+#      不会因为里面有个文件名就去读那个文件。
+#   ② 归一化空引号对：`.e""nv` 在 shell 里就是 `.e` + `nv`（拼接），
+#      而正则看到的是两个引号。不归一化 ⇒ **攻击者用它绕过全部路径规则**
+#      （实测 `cat .e""nv` 漏报，而同一条命令在有归一化时命中）。
+#   ③ 反制：命令里出现命令替换 / 管道给解释器 / eval 时，①②**一律不做** ——
+#      那时被包住的文字真的会被执行（`git commit -m "$(cat .e..)"`）。
+#      宁可误报，不许开一条绕过通道。
+_EXEC_SIGNS = re.compile(
+    r"\$\(|`|\|\s*(?:sh|bash|zsh|dash|ksh|pwsh|powershell|python\d?|node|perl|ruby)\b"
+    r"|\beval\b|\bInvoke-Expression\b|\biex\b|\bxargs\b", re.I)
+
+#: 文本参数（给人看的字）—— 只列**确定**不是路径的三种：
+#:   ① 提交/标注消息：git commit|tag|notes|merge|revert 的 -m / -am / --message
+#:   ② 输出命令：echo / printf 的引号串
+#:   ③ 搜索模式：grep / rg / ag 的位置参数
+#: ★ 为什么不把所有引号串都遮蔽：`cat ".e.."`、`cp "a" "b"` 的引号串**就是路径**，
+#:   遮蔽它们等于把 SEC 族整体关掉。
+_TEXT_ARG_PATTERNS = (
+    re.compile(r"""(?:\bgit\s+(?:commit|tag|notes|merge|revert)\b[^|;&\n]*?\s-a?m\s*"""
+               r"""|\s--message=|\s--message\s*)"""
+               r"""(?:"((?:[^"\\]|\\.)*)"|'([^']*)')"""),
+    re.compile(r"""\becho\b[^|;&\n]*?(?:"((?:[^"\\]|\\.)*)"|'([^']*)')"""),
+    re.compile(r"""\bprintf\b\s*(?:"((?:[^"\\]|\\.)*)"|'([^']*)')"""),
+    re.compile(r"""\b(?:grep|rg|ag)\b(?:\s+-{1,2}[\w-]+)*\s+"""
+               r"""(?:"((?:[^"\\]|\\.)*)"|'([^']*)')"""),
+    # ★ 只查路径、**不打开文件**的 git 子命令：`check-ignore` 比对 gitignore 规则，
+    #   `ls-files` 读索引。它们拿到 `.e..` 也只是在比对名字，没有读取内容。
+    #   （`git add` **不在**这里：它会把内容写进索引，那是真读。）
+    re.compile(r"""\bgit\s+(?:check-ignore|ls-files)\b[^|;&\n]*"""),
+)
+
+
+def _mask_text_args(command):
+    """把「确定是给人看的字」换成等长空格；命令带执行迹象时原样返回。
+
+    ★ 等长替换而不是删除：命中位置与片段在报告里要能对上原文。
+    """
+    if not command or _EXEC_SIGNS.search(command):
+        return command
+    out = command
+    # ★ 组数必须先看：最后一条 pattern（git check-ignore / ls-files）没有捕获组，
+    #   直接 `m.group(1)` 会 IndexError，整条净化就哑了（假绿）。
+    for rx in _TEXT_ARG_PATTERNS:
+        for m in rx.finditer(out):
+            if (rx.groups or 0) >= 2:
+                span = m.span(1) if m.group(1) is not None else m.span(2)
+            else:
+                span = m.span(0)
+            if span[0] < 0:
+                continue
+            out = out[:span[0]] + " " * (span[1] - span[0]) + out[span[1]:]
+    return out
+
+
+def _collapse_empty_quotes(s):
+    """删掉空引号对 —— shell 里 `x""y` 与 `x''y` 就是 `xy`。
+
+    ★ 这条同时治两个方向（实测同一条命令两个方向都在）：
+      漏报：`cat .e""nv` 绕过 SEC-01；误报：`git check-ignore .e""nv` 也不命中。
+    ★ 只删**成对且紧邻**的空引号，不碰有内容的引号串（那可能真是路径）。
+    """
+    if not s:
+        return s
+    prev = None
+    while prev != s:
+        prev = s
+        s = s.replace(chr(34) * 2, "").replace(chr(39) * 2, "")
+    return s
+
+
+#: 遮蔽的**长度上限**。超过就不遮蔽（只折叠空引号）。
+#:
+#: ★★ 为什么必须有（2026-10-27 夜，出包时 A5 判据当场抓到 120 秒）：
+#:   `_TEXT_ARG_PATTERNS` 里那几条用了 `[^|;&\n]*?` 惰性量词，在超长文本上会
+#:   **逐位置回溯**。实测（`output/_probe_maskperf.py`）：
+#:     1 万字符 16.6ms ／ 10 万 205ms ／ 100 万 1.9s ／ **500 万 11.2 秒**
+#:   而 `_basic_hit` 是**逐规则**调用的（37 条 ⇒ 一次工具调用就乘 37）。
+#:   于是「一条 5MB 的命令」从"几毫秒处理完"变成"两分钟"—— 那不只是慢：
+#:   宿主超时＝放行（A-08），**慢到被宿主杀掉就等于保护没装**。
+#: ★ 为什么不干脆删掉遮蔽：它是这轮 12 条误拦的修法。上限只影响**超长命令**，
+#:   而超长命令本来就落进「机械截断后再匹配」那条路。
+#: ★ 方向是**故意的**：超长 ⇒ 不遮蔽 ⇒ 规则看到**更多**文本 ⇒ 只会多报，
+#:   不会漏报。漏报才是绕过。
+_MASK_MAX_CHARS = 4096
+
+
+def _bash_channel_text(text):
+    """Bash 通道上，file_patterns / content_patterns 该看的那份文本。
+
+    ★ 唯一实现：两条通道共用一次净化，不各写一份（同一事实多处实现＝第一顽症）。
+    ★ 折叠**永远做**（它是防绕过的、O(n) 且廉价：`.e""nv` 藏在 5KB 噪声后面
+      也照样要认出来）；遮蔽有长度上限（见 `_MASK_MAX_CHARS`）。
+    """
+    if not text:
+        return text
+    text = _collapse_empty_quotes(text)
+    if len(text) > _MASK_MAX_CHARS:
+        return text
+    return _mask_text_args(text)
+
+
 def _strip_net_urls(s):
     """把命令文本里的网络 URL 换成空格。**URL 不是文件路径。**
 
@@ -3874,8 +4015,12 @@ def _basic_hit(rule, command, file_path, content, url, bash_extra, file_targets,
     SEC-01（靠 content_patterns 命中）被路径白名单放行却**零留痕**，静默后门没堵死。
     **重复实现必然漂移**，故抽成唯一实现，两边共用。
     """
+    # ★ 0.57.2：command_patterns 同样看**净化后**的文本 ——「提交说明里提到 crontab」
+    #   不是「要执行 crontab」。命令带执行迹象时 `_bash_channel_text` 原样返回
+    #   （`echo "cat x" | sh` / `$(…)` / `eval` / `xargs`），所以绕过通道没被打开。
+    _cmd_clean = _bash_channel_text(command) if command else command
     r = _first_hit(_patterns(rule, "command_patterns"),
-                   command_variants(command) + [url])
+                   command_variants(_cmd_clean) + [url])
     if r:
         return (r[1], "command")
     _fp_pats = _patterns(rule, "file_patterns")
@@ -3888,7 +4033,10 @@ def _basic_hit(rule, command, file_path, content, url, bash_extra, file_targets,
     #   ★ 只剥网络 scheme：`file:///home/u/.ethereum/x` 指向真实路径，剥掉就是漏。
     #   ★ 只作用于 file_patterns；下面 content_patterns 仍看原文 —— URL 查询串里
     #     确实可能带凭据（`?api_key=…`），那一支不能跟着失明。
-    r = _first_hit(_fp_pats, [file_path] + [_strip_net_urls(t) for t in bash_extra])
+    # ★ 0.57.2：Bash 通道先净化（遮蔽文本参数＋归一化空引号对），
+    #   再剥网络 URL。净化是**唯一实现**（`_bash_channel_text`）。
+    _bx = [_bash_channel_text(t) for t in bash_extra]
+    r = _first_hit(_fp_pats, [file_path] + [_strip_net_urls(t) for t in _bx])
     _path_hit = r[1] if r else None
     # ★★ 0.57.0 (B-1)：路径命中**不再一律定案**。
     #   只有「带 content_patterns 且类型是 file_content」的规则，路径才是**准入资格**，
@@ -3961,7 +4109,7 @@ def _basic_hit(rule, command, file_path, content, url, bash_extra, file_targets,
                 if r:
                     return (r[1], "file_content", {"spec": spec})
         else:
-            r = _first_live_hit(rule, pats, [content, url] + bash_extra)
+            r = _first_live_hit(rule, pats, [content, url] + _bx)
             if r:
                 return (r[1], "content")
     return None

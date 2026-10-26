@@ -1,6 +1,16 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
-# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.22（随 v0.57.1）
+# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.23（随 v0.57.2）
+
+> v1.23（0.57.2）：**补登记 1 类** —— `rules_snapshot_refreshed`
+> （见下文「降级与配置变更类」）。由 `python scripts/install.py --refresh-rules`
+> 写入：把项目里的规则副本刷成包内那一版，**同时**更新 manifest 的 `rules_hash`。
+> ★ 必须登记的理由（不是形式）：这条记录改的是**门闸判定所依据的那份规则**——
+> 改了防护依据却不留痕，等于给自己开一条静默后门；而不登记则第三方复核时
+> 认不出这笔记录，与"压根没发生"逐字段相同。
+> ★ 抓到它的判据：`scripts/verification_tests.py` 的 **F-10**（代码里的事件类型
+> 50 类 vs 本文登记表，缺一个就红）。本次是**先写代码后补登记**，F-10 当场咬住。
+> **不改**已有字段名、**不改**已有取值域、**不改** append-only 契约。
 
 > v1.22（0.54.0）：**补登记 2 类** —— `delivery_unknown`（见下文「通知送达类」）
 > 与 `gap_fixed`（见下文「缺口生命周期类」）。
@@ -250,6 +260,7 @@
 |---|---|---|---|
 | `rules_integrity_fallback` | pre | `expected`, `live`, `rules_loaded` | `rules/default.json` 与 manifest 的 `rules_hash` 不符 ⇒ 判定为篡改，**退回内置兜底规则集**并大声记账（A4）。`expected`/`live` 是两侧哈希，供复核 |
 | `rules_unreadable_fallback` | pre | `error`, `rules_loaded` | 规则文件**读不出来**（缺失/坏 JSON/无权限）⇒ 退回内置兜底集。与上一条**分开命名**：`tampered` 与 `unreadable` 是两种不同的失败，不能合并成一条 |
+| `rules_snapshot_refreshed` | antinel CLI（`install.py --refresh-rules`） | `rules_file`, `version_from`, `version_to`, `hash_from`, `hash_to` | **v1.23（0.57.2）补登记**：项目里的规则副本被刷成包内那一版。★ 为什么单独立账：hook 读的是 `<项目>/.psl/rules/default.json`（install 时拷的那份），`pip install -U` **只换包不跑 install** ⇒ 副本会永久停在首次安装的版本（本机实测：副本 0.34.0／包内 0.57.1，中间 9 条规则的 15 处修复一条都没生效）。刷新副本＝**改门闸的判据依据**，所以必须留痕：`hash_from`/`hash_to` 就是这次判定换了哪把尺子 |
 | `policy_changed` | antinel CLI | `change`, `field`, `old_sha256`, `new_sha256`, `invoked_by` | `.psl/policy.json` 被 CLI 改写（白名单/阈值/档位）。每一次都记，因为**放行范围因此改变**。**v1.10 补登记 `field` 取值域**：`zones` / `workspaces` / `windows` / `roots` / `paths` / `domains` / 预算与限额项 …。★ 门闸的**链背书判定**按 `field` 取字段（`host_shield._backing_field()`）——`field=zones` 的记录才替 `host_shield.json` 的 `zones` 变化背书。**改这个取值域＝改门闸的判据**，必须同步改 `_BACKING_TYPES` 的守卫 |
 | `credits_snapshot` | antinel CLI | 余额快照 | 用户登记的积分余额事实（`antinel credits snapshot`）。**是事实记录，不是估算** |
 | `credits_low` | （暂无生产者） | `reason` | **v1.19（0.51.2）补登记**：缺粮事件——积分余额偏低。0.51.0 起在 `inbox_model.LEVEL_OF_KIND`（**Ls** 级）与 `TITLE_OF_KIND`（「缺粮：积分余额偏低」）登记，并是徽标「缺粮」的**第二个来源**（存在未关闭的 `credits_low` 记录即亮徽标）。★ **当前无生产者** —— 链上暂无此类型记录；本条登记的是**类型存在性与字段语义**。★ 与 `credits_snapshot` 是两件事：一个是**告警态**，一个是**事实快照** |

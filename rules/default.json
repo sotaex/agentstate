@@ -1,5 +1,5 @@
 {
-  "version": "0.57.1",
+  "version": "0.57.2",
   "description": "Antinel Security Suite default detection rules (37 rules, 4 gates + canary/supply-chain families; flat layout: patterns at rule top level)",
   "gates": {
     "secrets": "Gate 2 sensitive surface",
@@ -65,12 +65,12 @@
         "Bash"
       ],
       "file_patterns": [
+        "(?:^|[\\s/\\\\\\\"'])id_rsa(?:$|[\\s\\\"',;:)\\]])",
+        "(?:^|[\\s/\\\\\\\"'])id_ed25519(?:$|[\\s\\\"',;:)\\]])",
+        "(?:^|[\\s/\\\\\\\"'])id_ecdsa(?:$|[\\s\\\"',;:)\\]])",
+        "(?:^|[\\s/\\\\\\\"'])authorized_keys(?:$|[\\s\\\"',;:)\\]])",
         "\\.ssh[/\\\\]id_",
-        "\\.ssh[/\\\\]authorized_keys",
-        "id_rsa",
-        "id_ed25519",
-        "id_ecdsa",
-        "authorized_keys"
+        "\\.ssh[/\\\\]authorized_keys"
       ],
       "exclude_patterns": [],
       "apply_to_tools": [
@@ -94,11 +94,11 @@
         "Bash"
       ],
       "file_patterns": [
+        "(?:^|[\\s/\\\\\\\"'])credentials\\.json(?:$|[\\s\\\"',;:)\\]])",
+        "(?:^|[\\s/\\\\\\\"'])application_default_credentials(?:$|[\\s\\\"',;:)\\]])",
         "\\.aws[/\\\\]credentials",
         "\\.kube[/\\\\]config",
-        "credentials\\.json",
-        "\\.netrc",
-        "application_default_credentials"
+        "\\.netrc"
       ],
       "exclude_patterns": [],
       "apply_to_tools": [
@@ -410,6 +410,7 @@
         "Bash"
       ],
       "command_patterns": [
+        "(?<![./\\w])crontab(?![\\w.])",
         "crontab\\s+-[el]",
         "systemctl\\s+enable",
         "launchctl\\s+load",
@@ -421,7 +422,6 @@
         "\\bpowershell\\b[^\\n]{0,80}\\-(enc|encodedcommand)\\b"
       ],
       "file_patterns": [
-        "crontab",
         "systemd[/\\\\]system",
         "LaunchAgents",
         "rc\\.local",
@@ -485,7 +485,7 @@
         "Bash"
       ],
       "command_patterns": [
-        "\\benv\\b(?!\\s*=)",
+        "(?<![.\\w/-])env(?![.\\w-])(?!\\s*=)",
         "\\bprintenv\\b",
         "os\\.environ",
         "process\\.env"
@@ -540,13 +540,83 @@
       "target": "all_text_files",
       "detection": "character_code_scan",
       "codepoints": [
-        {"start": 917504, "end": 917631, "kind": "tag", "levels": {"path": "critical", "command": "critical", "instruction": "critical", "content": "critical"}},
-        {"start": 8234, "end": 8238, "kind": "bidi_override", "levels": {"path": "critical", "command": "critical", "instruction": "critical", "content": "info"}},
-        {"start": 8294, "end": 8297, "kind": "bidi_isolate", "levels": {"path": "critical", "command": "critical", "instruction": "critical", "content": "info"}},
-        {"start": 65279, "end": 65279, "kind": "mid_bom", "levels": {"path": "warning", "command": "warning", "instruction": "warning", "content": "info"}},
-        {"start": 8203, "end": 8203, "kind": "zero_width", "levels": {"path": "warning", "command": "warning", "instruction": "critical", "content": "info"}},
-        {"start": 8288, "end": 8292, "kind": "word_joiner", "levels": {"path": "warning", "command": "warning", "instruction": "critical", "content": "info"}},
-        {"start": 173, "end": 173, "kind": "soft_hyphen", "levels": {"path": "warning", "command": "warning", "instruction": "warning", "content": "info"}}
+        {
+          "start": 917504,
+          "end": 917631,
+          "kind": "tag",
+          "levels": {
+            "path": "critical",
+            "command": "critical",
+            "instruction": "critical",
+            "content": "critical"
+          }
+        },
+        {
+          "start": 8234,
+          "end": 8238,
+          "kind": "bidi_override",
+          "levels": {
+            "path": "critical",
+            "command": "critical",
+            "instruction": "critical",
+            "content": "info"
+          }
+        },
+        {
+          "start": 8294,
+          "end": 8297,
+          "kind": "bidi_isolate",
+          "levels": {
+            "path": "critical",
+            "command": "critical",
+            "instruction": "critical",
+            "content": "info"
+          }
+        },
+        {
+          "start": 65279,
+          "end": 65279,
+          "kind": "mid_bom",
+          "levels": {
+            "path": "warning",
+            "command": "warning",
+            "instruction": "warning",
+            "content": "info"
+          }
+        },
+        {
+          "start": 8203,
+          "end": 8203,
+          "kind": "zero_width",
+          "levels": {
+            "path": "warning",
+            "command": "warning",
+            "instruction": "critical",
+            "content": "info"
+          }
+        },
+        {
+          "start": 8288,
+          "end": 8292,
+          "kind": "word_joiner",
+          "levels": {
+            "path": "warning",
+            "command": "warning",
+            "instruction": "critical",
+            "content": "info"
+          }
+        },
+        {
+          "start": 173,
+          "end": 173,
+          "kind": "soft_hyphen",
+          "levels": {
+            "path": "warning",
+            "command": "warning",
+            "instruction": "warning",
+            "content": "info"
+          }
+        }
       ],
       "exclude_patterns": [],
       "apply_to_tools": [
@@ -664,7 +734,7 @@
       "remediation": "Use environment variables or a secrets manager; never paste plaintext keys into files.",
       "description_zh": "写入或编辑的内容中出现密钥字面量",
       "remediation_zh": "改用环境变量或密钥管理服务，不要把明文密钥写进文件",
-            "content_patterns": [
+      "content_patterns": [
         "sk-[A-Za-z0-9]{20,}",
         "-----BEGIN [A-Z ]*PRIVATE KEY-----\\s*[A-Za-z0-9+/]{60,}",
         "AKIA[0-9A-Z]{16}",
@@ -679,7 +749,7 @@
         "gh[pousr]_(?:x{8,}|0{8,}|your|example|placeholder)",
         "xox[baprs]-(?:0{8,}|x{8,}|your|placeholder)"
       ],
-"apply_to_tools": [
+      "apply_to_tools": [
         "Write",
         "Edit",
         "Read",

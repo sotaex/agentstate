@@ -1,5 +1,5 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
-# Antinel detection rules (generated from rules/default.json v0.57.1 - do not edit by hand)
+# Antinel detection rules (generated from rules/default.json v0.57.2 - do not edit by hand)
 
 Category order = match priority: secrets > destructive > network > injection > context > metadata.
 Severity to action: critical = block, warning = alert (logged, allowed). All hits are collected; highest severity decides.
@@ -27,12 +27,12 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - 说明: 读取 SSH 私钥或 authorized_keys
 - 处理建议: SSH 密钥不要放进 Agent 工作范围；改用 ssh-agent 转发
 - file_patterns:
+    - `(?:^|[\s/\\\"'])id_rsa(?:$|[\s\"',;:)\]])`
+    - `(?:^|[\s/\\\"'])id_ed25519(?:$|[\s\"',;:)\]])`
+    - `(?:^|[\s/\\\"'])id_ecdsa(?:$|[\s\"',;:)\]])`
+    - `(?:^|[\s/\\\"'])authorized_keys(?:$|[\s\"',;:)\]])`
     - `\.ssh[/\\]id_`
     - `\.ssh[/\\]authorized_keys`
-    - `id_rsa`
-    - `id_ed25519`
-    - `id_ecdsa`
-    - `authorized_keys`
 - remediation: Keep SSH keys outside agent working scope; use ssh-agent forwarding instead of key files.
 
 ## SEC-03  Cloud credential file read
@@ -42,11 +42,11 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - 说明: 读取云厂商凭证文件
 - 处理建议: 改用云厂商 CLI 的短期令牌；确需操作时请手动执行
 - file_patterns:
+    - `(?:^|[\s/\\\"'])credentials\.json(?:$|[\s\"',;:)\]])`
+    - `(?:^|[\s/\\\"'])application_default_credentials(?:$|[\s\"',;:)\]])`
     - `\.aws[/\\]credentials`
     - `\.kube[/\\]config`
-    - `credentials\.json`
     - `\.netrc`
-    - `application_default_credentials`
 - remediation: Use short-lived tokens via the provider CLI instead of exposing credential files to the agent.
 
 ## SEC-04  Wallet/keystore file read
@@ -199,6 +199,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - 说明: 建立持久化机制（计划任务/系统服务/启动项/注册表 Run 键）
 - 处理建议: 持久化会在会话结束后反复执行，必须由你本人确认后手动操作
 - command_patterns:
+    - `(?<![./\w])crontab(?![\w.])`
     - `crontab\s+-[el]`
     - `systemctl\s+enable`
     - `launchctl\s+load`
@@ -209,7 +210,6 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
     - `(?i)\bat\s+\d{1,2}:\d{2}\s+/\w+`
     - `\bpowershell\b[^\n]{0,80}\-(enc|encodedcommand)\b`
 - file_patterns:
-    - `crontab`
     - `systemd[/\\]system`
     - `LaunchAgents`
     - `rc\.local`
@@ -245,7 +245,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - 说明: 枚举全部环境变量（可能暴露密钥）
 - 处理建议: 让 Agent 只打印它需要的具体变量名
 - command_patterns:
-    - `\benv\b(?!\s*=)`
+    - `(?<![.\w/-])env(?![.\w-])(?!\s*=)`
     - `\bprintenv\b`
     - `os\.environ`
     - `process\.env`

@@ -488,6 +488,138 @@ def init_psl(root, host, settings_path, registered, global_hooks=False):
     return manifest
 
 
+def refresh_rules(root):
+    """把包内规则快照刷进项目（`--refresh-rules`）。返回退出码。
+
+    ★ 为什么需要这个入口（2026-10-26 实测，第 40 条）：
+      hook 加载的是 `<root>/.psl/rules/default.json`（install 时拷的那份），
+      `pip install -U` 只换包**不跑 install** ⇒ 项目副本永久停在首次安装的版本。
+      本仓实测：项目副本 version 0.34.0（10-03）／包内 0.57.1（10-26），
+      中间 9 条规则的全部修复（SEC-04/05/06、DST-01/04/06、CTX-01/03/05 共 15 处
+      字段差异）在这台机器上**一条都没生效**。
+      0.57.0 第 32 条只做到「说出来 + 给修法」，没给「一键修」—— 用户看到提示
+      也照样只能重跑 install，而 install 会重写 settings、重扫全盘。
+
+    ★ 只动三样：规则副本、manifest 的 rules_hash 与 skill_version。
+      policy 不碰（那是用户的），settings 不碰（那是宿主的），审计不碰。
+    ★ `rules_hash` 必须与副本**同时**更新：它是 SELF-TAMPERED 判定的基准，
+      只换文件不换 hash ⇒ 立刻被判篡改并退回内嵌兜底（比不修更坏）。
+    ★ 刷新这件事本身进审计链：改了防护依据却不留痕，等于给自己开静默后门。
+    """
+    psl = Path(root) / ".psl"
+    man_path = psl / "manifest.json"
+    if not man_path.is_file():
+        print("这个目录没有安装过：%s 不存在。先用 install.py 装一次。" % man_path)
+        return 2
+    src = _locate("rules", "default.json")
+    if not src.is_file():
+        print("包内规则文件找不到：%s" % src)
+        return 2
+    dst = psl / "rules" / "default.json"
+    dst.parent.mkdir(parents=True, exist_ok=True)
+
+    def _ver(p):
+        try:
+            with open(p, encoding="utf-8") as f:
+                return str(json.load(f).get("version") or "")
+        except Exception:                                     # noqa: BLE001
+            return ""
+
+    old_ver, new_ver = _ver(dst) if dst.is_file() else "(无)", _ver(src)
+    old_hash = sha256_file(dst) if dst.is_file() else "(无)"
+    new_hash = sha256_file(src)
+    if old_hash == new_hash:
+        print("规则快照已是包内这一版（%s），什么都没做。" % (new_ver or "?"))
+        return 0
+
+    shutil.copy2(src, dst)
+    try:
+        man = json.loads(man_path.read_text(encoding="utf-8"))
+    except Exception as e:                                    # noqa: BLE001
+        print("manifest 读不出来（%s），规则副本已更新但哈希没登记 —— "
+              "下次 hook 会判 SELF-TAMPERED。请重跑 install.py。" % type(e).__name__)
+        return 2
+    man["rules_hash"] = new_hash
+    man["skill_version"] = SKILL_VERSION
+    man["rules_refreshed_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    man_path.write_text(json.dumps(man, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    print("规则快照已刷新：%s → %s" % (old_ver or "?", new_ver or "?"))
+    print("  %s" % dst)
+    print("  hash %s → %s" % (old_hash[:22] + "…", new_hash[:22] + "…"))
+    _wrote, _err = _audit_append(root, {
+        "ts": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
+        "type": "rules_snapshot_refreshed", "tool": "-", "session": "antinel-cli",
+        "rule_id": "A4", "decision": "config_refresh", "severity": "info",
+        "action": "allow",
+        "reason": "project rules snapshot refreshed from the package",
+        "rules_file": str(dst),
+        "version_from": old_ver, "version_to": new_ver,
+        "hash_from": old_hash, "hash_to": new_hash})
+    # ★ 只说自己做得到的事：写成功才说「已写进审计链」。
+    #   0.57.2 之前这里印的是无条件那句，而真正调用的 `host_shield.log_event`
+    #   **从来没有存在过**（AttributeError 被 except 吞掉）⇒ 屏幕说留痕了，
+    #   链上一个字都没有。判据 RF-40f 的「留痕」那条腿 2026-10-26 夜当场抓出。
+    if _wrote:
+        print("  这条记录已写进审计链（type=rules_snapshot_refreshed）：%s" % _wrote[0])
+    else:
+        print("  ⚠ 留痕没写成（%s）—— 规则已刷新，但链上没有这一笔。" % (_err or "无可用链"))
+    return 0
+
+
+def _audit_append(root, rec, mirror_dirs=None):
+    """把一条记录写进项目链＋宿主级镜像。返回 `(写成功的文件, 首个错误)`。
+
+    ★ **唯一实现**：`uninstall` 与 `--refresh-rules` 都走这里。
+      两条 CLI 路径各写一遍「8 行链追加」，正是本仓第一顽症（同一事实多处实现）；
+      而这次更糟：写 `refresh_rules` 时我调了一个**不存在的函数**
+      （`host_shield.log_event`），异常被 `except: pass` 吃掉，屏幕上照样印
+      「已写进审计链」。判据只断言「屏幕上那句话」是抓不到的 —— 必须断言
+      **链里真的有这条 type**（RF-40f 的第四腿）。
+    ★ 项目链用 `append_chained`（带哈希链），镜像用 `append_locked`
+      （跨目录单副本，不参与本项目链），与 `uninstall` 原写法逐字一致。
+    ★ `mirror_dirs` 缺省＝`host_shield._mirror_dir()`（套件沙箱里自动落在 hub 内）；
+      卸载那条路径传自己的宿主目录，行为与 0.57.1 逐字一致。
+    """
+    wrote, err = [], None
+    try:
+        try:
+            import audit_chain as _acm
+        except ImportError:
+            sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+            import audit_chain as _acm
+    except Exception as e:                                    # noqa: BLE001
+        return wrote, repr(e)
+    day = datetime.now().strftime("%Y-%m-%d")
+    ad = Path(root) / ".psl" / "audit"
+    if ad.is_dir():
+        fn = ad / (day + ".jsonl")
+        try:
+            _acm.append_chained(str(fn), rec)
+            _acm.touch_day_manifest(str(fn))
+            wrote.append(str(fn))
+        except Exception as e:                                # noqa: BLE001
+            err = err or repr(e)
+    dirs = mirror_dirs
+    if dirs is None:
+        try:
+            import host_shield as _hs
+            dirs = [Path(_hs._mirror_dir())]
+        except Exception as e:                                # noqa: BLE001
+            return wrote, err or repr(e)
+    for md in dirs:
+        try:
+            md = Path(md)
+            md.mkdir(parents=True, exist_ok=True)
+            fn = md / (day + ".jsonl")
+            _acm.append_locked(str(fn), json.dumps(rec, ensure_ascii=False) + "\n")
+            _acm.touch_day_manifest(str(fn))
+            wrote.append(str(fn))
+        except Exception as e:                                # noqa: BLE001
+            err = err or repr(e)
+    return wrote, err
+
+
 def first_scan(root):
     cmd = [sys.executable, str(_locate("scan.py")), "--root", str(root), "--quick"]
     try:
@@ -704,11 +836,6 @@ def uninstall(root, purge=False):
     # 失败而拒绝（fail-open）；purge 会删掉项目副本，宿主级镜像保证证据仍在。
     # 这是"闸门被拔线必须大声说"的另一半：E-3 管信号失效，这里管钩子被整体拔掉。
     try:
-        try:
-            import audit_chain as _acm
-        except ImportError:
-            sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-            import audit_chain as _acm
         _rec = {"ts": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
                 "type": "antinel_uninstall", "tool": "-", "session": "antinel-cli",
                 "host": detect_host(root)[0] if isinstance(detect_host(root), tuple) else str(detect_host(root)),
@@ -718,17 +845,14 @@ def uninstall(root, purge=False):
                 "reason": "guardrail self-removal requested -- recorded BEFORE removal; "
                           "purge deletes the project copy, the host-level mirror keeps "
                           "the evidence"}
-        _ad = root / ".psl" / "audit"
-        if _ad.is_dir():
-            _fn = _ad / (datetime.now().strftime("%Y-%m-%d") + ".jsonl")
-            _acm.append_chained(str(_fn), _rec)
-            _acm.touch_day_manifest(str(_fn))
+        # ★ 0.57.2：这一段原先是内联的 8 行链追加；现在与 `--refresh-rules`
+        #   共用 `_audit_append`（同一事实一处实现）。镜像目录仍指宿主级那棵，
+        #   与 0.57.1 的行为逐字一致。
         _mad = Path(os.path.expanduser(os.environ.get("WORKBUDDY_CONFIG_DIR")
                                        or "~/.workbuddy")) / "antinel-audit"
-        _mad.mkdir(parents=True, exist_ok=True)
-        _mfn = _mad / (datetime.now().strftime("%Y-%m-%d") + ".jsonl")
-        _acm.append_locked(str(_mfn), json.dumps(_rec, ensure_ascii=False) + "\n")
-        _acm.touch_day_manifest(str(_mfn))
+        _wrote, _err = _audit_append(root, _rec, mirror_dirs=[_mad])
+        if not _wrote:
+            raise RuntimeError(_err or "没有可写的链")
     except Exception as e:
         print("[Antinel] 卸载留痕失败（继续卸载；不影响本操作）：%r" % (e,))
     if purge and (root / ".psl").is_dir():
@@ -874,6 +998,8 @@ def main(argv=None):
                     help="批量：非交互（每次安装都按默认值应答，**不逐项确认**）")
     ap.add_argument("--dry-run", action="store_true",
                     help="批量：只打印将要做什么，不改任何文件（**上线前必跑一次**）")
+    ap.add_argument("--refresh-rules", action="store_true",
+                    help="只把包内的规则快照刷进本项目（不动 settings / policy / 审计）")
     args = ap.parse_args(argv)
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -884,6 +1010,8 @@ def main(argv=None):
             return _batch(args)
         if args.check:
             return check_installed(args.root)
+        if args.refresh_rules:
+            return refresh_rules(args.root)
         if args.uninstall:
             return uninstall(args.root, purge=args.purge)
         return install(args.root, host_override=args.host, redetect=args.redetect,

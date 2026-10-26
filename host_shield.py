@@ -2321,10 +2321,21 @@ def _self_check_fingerprint(root):
     return tuple(out)
 
 
-def unregistered_chain_files(root=None):
+def unregistered_chain_files(root=None, manifest_files=None):
     """保护名单里「**该登记、却没登记进 manifest**」的条目。返回 `[(rel, kind)]`。
 
     `kind` 取值 `"chain"`（随包告警链路件）或 `"dev"`（研发树专属件）。
+
+    ★★ 0.57.2（2026-10-26 夜，实测撞上）：`manifest_files` 参数专治一类
+       **「刚补登、却仍报未登记」的假红**。病灶是读数源与写入源不是同一份：
+       重签工具的 `--adopt-dev` 是往**内存里的 files 字典**补登记（磁盘要等
+       写回那一步），而本函数原先只读**磁盘上的** `psl/manifest.json` ⇒
+       补登记当场成功、同一份输出里却仍印「该登记却没登记 1」，并 `rc=1`。
+       实测代价：本工具修好了问题却宣告「修不好」，下一步只能靠人再跑一遍
+       才发现已经绿了（一次典型的「修好了但读数说没好」）。
+       ⇒ **判据一字不改，只让调用方把「马上就写下去的那份清单」交进来**，
+       避免在本函数里另写一套比对（那才是第二把尺子）。
+       `None`（默认）＝照旧读磁盘，`self_check()` 用的就是这条口径。
 
     ★★ 第 34 条（2026-10-25，实测撞上，不是推演）：**同一件事不许有两把尺子**。
       原先「该登记的登记了没」只在 `self_check()` 里判，而它的配套修法工具
@@ -2350,11 +2361,17 @@ def unregistered_chain_files(root=None):
     """
     root = _pkg_root() if root is None else root
     man = {}
-    try:
-        with open(os.path.join(root, "psl", "manifest.json"), encoding="utf-8") as f:
-            man = json.load(f).get("files") or {}
-    except Exception:                                          # noqa: BLE001
-        man = {}
+    if manifest_files is not None:
+        try:
+            man = dict(manifest_files) or {}
+        except Exception:                                      # noqa: BLE001
+            man = {}
+    else:
+        try:
+            with open(os.path.join(root, "psl", "manifest.json"), encoding="utf-8") as f:
+                man = json.load(f).get("files") or {}
+        except Exception:                                      # noqa: BLE001
+            man = {}
     out = []
     for kind, names in (("chain", _GUARDED_CHAIN_FILES),
                         ("dev", _DEV_GUARDED_CHAIN_FILES)):
@@ -2499,8 +2516,13 @@ def rules_drift_lines(root, package_rules=None):
         "   所以从 %s 到 %s 之间的规则修正，在这台机器上都还没有生效"
         % (d["project"], d["package"]),
         "   （包括那些「某个词一出现就拦」的误拦修复）。",
-        "   修法：在项目根重跑安装 —— antinel install",
-        "   注意：重装会重写 .psl/manifest.json 的规则哈希，这是预期行为。",
+        # ★ 0.57.2（第 40 条）：修法**只在这里写一份**。0.57.0 写的是「重跑安装」，
+        #   而安装会重写 settings、重扫全盘 —— 用户看到一个更重的手段，就干脆不动。
+        #   现在给出最小修法（只刷规则副本），重装作为退路一并说明；
+        #   体检页/verify/report 三处都读这几行，不各写一份（否则同一屏两个修法）。
+        "   修法：在项目根跑 python scripts/install.py --refresh-rules",
+        "         （只把规则副本刷成包里这一版，不动设置、策略与审计记录）",
+        "   退路：antinel install 也能达到同样效果，但会重写设置并重扫全盘。",
     ]
     return [head] + tail
 
@@ -3669,6 +3691,13 @@ POSTURE_UNKNOWN = "unknown"     # 查不到（★ 必须与"没问题"长得不�
 #:     这是最坏的形状：**状态机出错时，界面替你撒谎。**
 #:   ⇒ 现在改成：**集合外一律落到 `POSTURE_UNKNOWN`（黄灯·盲区）**，
 #:     绝不打绿。判据 `c_light_rejects_unknown_posture` 真跑验这条。
+#:   ★★ 0.57.2（2026-10-27 夜）更正：上面点名的 `c_light_rejects_unknown_posture`
+#:     **从来没有被写出来**（全仓 0 命中），而 `light()` 里那段兜底被改成了
+#:     `if False:` —— 于是这条承诺在 0.57.x 上是**双重落空**：
+#:     写着的判据不存在，写着的行为被关掉，`light(None)` 真的回到了绿灯。
+#:     实测由 `ci/_p_delivery_selfcheck.py` 的 `M4-selfcheck` 当场抓到（它是
+#:     现成的、真跑的那一条）。⇒ 承诺改成指向**真存在的那条判据**，
+#:     不再新立一个同义判据（同一事实两把尺子＝第一顽症）。
 POSTURE_ALL = frozenset((
     POSTURE_OFF, POSTURE_GUARDING, POSTURE_DOWN,
     POSTURE_INTERRUPTED, POSTURE_WARN, POSTURE_DEV, POSTURE_UNKNOWN,

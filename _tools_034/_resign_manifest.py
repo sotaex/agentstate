@@ -137,7 +137,13 @@ if args.adopt_dev:
 #   修法不是"在工具里再写一遍"（那就是第三把尺子），而是**调唯一实现**：
 #   `host_shield.unregistered_chain_files()`。改口径只改那一处。
 #   ★ 必须在 `--adopt-dev` **之后**算：补登过的就不该再报。
-_unregistered = _hs_hash.unregistered_chain_files(ROOT)
+#   ★★ 0.57.2（2026-10-26 夜，实测撞上）：**"之后算"这句原先不成立** ——
+#     `--adopt-dev` 改的是内存里的 `files`，磁盘要等本文件末尾才写；而
+#     `unregistered_chain_files()` 那时只读磁盘 ⇒ 补登记当场成功（打印
+#     「补登记 1 条」），同一份输出里紧接着仍印「该登记却没登记 1」并 rc=1。
+#     表现是「刚补好就宣告修不好」，只能靠人再跑一遍才发现已经绿了。
+#     ⇒ 把**即将写下去的这份清单**显式交进去（判据仍是那唯一实现）。
+_unregistered = _hs_hash.unregistered_chain_files(ROOT, manifest_files=files)
 
 # ★★ 量具先自检（维七：防量具假红假绿）—— 2026-10-12 由一次真实破坏逼出来。
 #   本轮我跑本工具（旧口径）把 hooks/pre_tool_use.py "重签"成裸哈希，
