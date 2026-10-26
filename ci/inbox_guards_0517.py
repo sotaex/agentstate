@@ -627,6 +627,259 @@ def n_w17d():
     return True
 
 
+# ---------------------------------------------------------------------------
+# 0.57.3 —— **改了代码就换血**（2026-10-27 创始人「体检修好了吗，还是老样子」）
+# ---------------------------------------------------------------------------
+# ★ 这一族为什么必须常驻守：那天代码 06:19 落盘、服务是**前一晚 21:32** 起的，
+#   页面永远是旧的，而**页面不会说自己旧**。出包闸门 34 套全绿也救不了 ——
+#   闸门验的是**文件**，不是**活体**；用户唯一的读数就是屏幕。
+# ★ 每条都配负控，因为这个族最危险的两种退法都很"安静"：
+#   ① 戳里混进会自己变的量（模块件数）⇒ 每 20–30 秒自我重启。**这不是假想**：
+#      2026-10-27 07:08 我自己的第一版就这么写，本机实测连换 3 次后触发限流才停手。
+#   ② 修法文案退回「重启一次即可：antinel inbox window」—— 那条命令是**幂等**的，
+#      服务活着就只说「已在跑」，**永远不换血**。用户照着做，看到的老样子不变。
+#      （与 0.53.2 同族：那次给的是**不存在的命令**，这次是**存在但无效的命令**。）
+
+
+class _FakeHTTPD(object):
+    """只看"有没有被叫去关" —— 判据不对真 httpd 下手。"""
+
+    def __init__(self):
+        self.down = 0
+
+    def shutdown(self):
+        self.down += 1
+
+
+#: 夹具模块名计数 —— 每次造夹具用一个**从没用过**的名字。
+#   ★★ 为什么必须唯一：`importlib.import_module("ar_mod")` 命中 `sys.modules`
+#      就直接返回**上一个 tmpdir 里的那个**，新目录的 sys.modules 腿因此恒为空
+#      ⇒ 判据要么报"空集"、要么在空集上打转（看起来像夹具没生效，其实是缓存在骗人）。
+_AR_SEQ = {"n": 0}
+
+
+def _ar_tree():
+    """造一个"假包根"：一个**已 import** 的模块 ＋ hooks/ ＋ rules/。
+
+    ★ 模块必须真的进 `sys.modules`：`_code_files` 的面就是 sys.modules，
+      拿 `spec_from_file_location` 造一个不进 sys.modules 的实例，那条腿恒为空集
+      ⇒ 判据会在"什么都没测到"的情况下判绿（假绿第三族）。
+    返回 `(目录, 模块文件, 模块名)`。
+    """
+    _AR_SEQ["n"] += 1
+    mod = "ar_mod_%d" % _AR_SEQ["n"]
+    d = _TMP.tmpdir("antinel-ar-")
+    foo = os.path.join(d, mod + ".py")
+    with open(foo, "w", encoding="utf-8", newline="\n") as f:
+        f.write("X = 1\n")
+    if d not in sys.path:
+        sys.path.insert(0, d)
+    importlib.import_module(mod)
+    os.makedirs(os.path.join(d, "hooks"), exist_ok=True)
+    os.makedirs(os.path.join(d, "rules"), exist_ok=True)
+    return d, foo, mod
+
+
+def _ar_daemon(d):
+    """把 daemon.pid 写成**本进程 pid**：`daemon_alive` 见 pid==自己 ⇒ 真。
+
+    ★ 不用假 patch：`_supervisor_present` 走的是真 `inbox_daemon.daemon_alive`，
+      判据必须喂它真输入，否则测的是判据自己的模型（假绿第九族）。
+    """
+    cdir = os.path.join(d, "console")
+    os.makedirs(cdir, exist_ok=True)
+    with open(os.path.join(cdir, "daemon.pid"), "w", encoding="utf-8") as f:
+        f.write(str(os.getpid()))
+
+
+def _ar_sleep(foo, base):
+    """第一次"睡"就把模块弄新 —— 模拟"人刚改了代码"。"""
+    box = {"n": 0}
+
+    def _s(_sec):
+        box["n"] += 1
+        if box["n"] == 1:
+            os.utime(foo, (base + 1000, base + 1000))
+    return _s
+
+
+def _r57a_body():
+    """R-57a 的**判据体**（抽成命名函数：负控要能换掉同一实现）。
+
+    ★ 这里**不许**对戳做数值运算（`s1 > 0` 之类）：负控喂进来的变异体返回的是
+      二元组，一比较就 TypeError ⇒ 判据"红"了，但红的原因是**崩了**，不是
+      "抓住件数混进比较口径"。那种红是**假的分辨力**（红的理由不对＝量具打偏）。
+      所以只用两种与类型无关的判据：**非空**（真读到文件了）＋ **两次相等**。
+    """
+    d, foo, mod = _ar_tree()
+    t0 = os.path.getmtime(foo)
+    files1 = SV._code_files(d)
+    s1 = SV._code_stamp(d)
+    if not files1:
+        return "空集：一个文件都没读进来 —— 这条判据什么也没测到"
+    bar_mod = mod + "_bar"
+    bar = os.path.join(d, bar_mod + ".py")
+    with open(bar, "w", encoding="utf-8", newline="\n") as f:
+        f.write("Y = 2\n")
+    os.utime(bar, (t0, t0))            # 故意更旧：件数变、最新 mtime 不变
+    n1 = len(SV._code_files(d))
+    importlib.import_module(bar_mod)
+    n2 = len(SV._code_files(d))
+    s2 = SV._code_stamp(d)
+    _note("files %d -> %d，stamp %s -> %s" % (n1, n2, s1, s2))
+    if n2 != n1 + 1:
+        return "夹具没生效：件数没变（%d -> %d）—— 判据在测空气" % (n1, n2)
+    if s2 != s1:
+        return ("懒加载多一件就把戳弄脏了（%s → %s）—— 服务会因此每 20 秒自我"
+                "重启，连换几次后触发限流停手" % (s1, s2))
+    return True
+
+
+@check("R-57a 戳只认 mtime：懒加载多一件不许弄脏戳")
+def r57a():
+    return _r57a_body()
+
+
+@check("N-57a 负控：戳里混回件数 ⇒ R-57a 必红")
+def n57a():
+    import inspect as _insp
+    import textwrap as _tw
+    real = SV._code_stamp
+    src = _tw.dedent(_insp.getsource(real))
+    anchor = "    return round(newest, 6)"
+    if anchor not in src:
+        return ("SKIP 变异锚点不在了（源码改过）—— 先更新本判据锚点：`%s`"
+                % anchor.strip())
+    mut = src.replace(
+        anchor,
+        "    return (round(newest, 6), len(_code_files(root)))")
+    ns = {}
+    exec(compile(mut, "<mutant:_code_stamp>", "exec"), SV.__dict__, ns)
+    SV._code_stamp = ns["_code_stamp"]
+    try:
+        r = _r57a_body()
+    finally:
+        SV._code_stamp = real
+    if r is True:
+        return ("负控失效：把件数混回戳以后 R-57a 仍然绿 —— 防循环那条腿是假的"
+                "（这正是 07:08 真实发生过的那次自我重启）")
+    _note("变异体被判红：%s" % str(r)[:70])
+    return True
+
+
+@check("R-57b 没人拉我起来 ⇒ 绝不自退（宁可看旧页面）")
+def r57b():
+    d, foo, mod = _ar_tree()
+    h = _FakeHTTPD()
+    base = SV._code_stamp(d)
+    out = SV._auto_reload_loop(h, base, root=d, interval=0,
+                               sleep=_ar_sleep(foo, base))
+    if h.down:
+        return ("没有守护进程时它仍然退出了 —— 前台跑 antinel inbox serve 的"
+                "用户会得到一张空页面，比看到旧页面糟得多")
+    if out != "no-supervisor":
+        return "结局不对：%r（应为 no-supervisor）" % (out,)
+    return True
+
+
+@check("R-57c 有守护进程 ⇒ 优雅退恰一次（端口口令由它沿用）")
+def r57c():
+    d, foo, mod = _ar_tree()
+    _ar_daemon(d)
+    ok, why = SV._supervisor_present(d)
+    if not ok:
+        return "夹具没生效：写了 daemon.pid 仍判没人管（%s）" % (why,)
+    h = _FakeHTTPD()
+    base = SV._code_stamp(d)
+    out = SV._auto_reload_loop(h, base, root=d, interval=0,
+                               sleep=_ar_sleep(foo, base))
+    if out != "reload":
+        return "结局不对：%r（应为 reload）" % (out,)
+    if h.down != 1:
+        return "shutdown 被调了 %d 次（应恰 1 次）" % h.down
+    return True
+
+
+@check("R-57d 换太勤 ⇒ 停手（不把机器拖进循环）")
+def r57d():
+    d, foo, mod = _ar_tree()
+    _ar_daemon(d)
+    for _i in range(SV.RELOAD_MAX_IN_WINDOW):
+        SV._reload_record(d, SV._code_stamp(d), kind="reload")
+    ok, why = SV._reload_budget(d)
+    if ok:
+        return "限流没生效：已记 %d 次仍说能换" % SV.RELOAD_MAX_IN_WINDOW
+    _note("限流理由：%s" % why)
+    h = _FakeHTTPD()
+    base = SV._code_stamp(d)
+    out = SV._auto_reload_loop(h, base, root=d, interval=0,
+                               sleep=_ar_sleep(foo, base))
+    if out != "throttled" or h.down:
+        return "限流后仍在动：out=%r down=%d" % (out, h.down)
+    return True
+
+
+@check("R-57e 代码没变 ⇒ 不退（对照腿：不是「必然退」）")
+def r57e():
+    import threading as _th
+    d, foo, mod = _ar_tree()
+    _ar_daemon(d)
+    h = _FakeHTTPD()
+    stop = _th.Event()
+    base = SV._code_stamp(d)
+    out = SV._auto_reload_loop(h, base, root=d, interval=0,
+                               sleep=lambda _s: stop.set(), stop=stop)
+    if out != "stopped" or h.down:
+        return "代码没变却退了：out=%r down=%d" % (out, h.down)
+    return True
+
+
+def _r57f_body():
+    """R-57f 的判据体。返回 True 或问题串。"""
+    hint = SV._restart_hint({"port": 2559,
+                             "url": "http://127.0.0.1:2559/?t=x",
+                             "pid": 4242})
+    txt = hint[1]
+    bad = []
+    if "结束" not in txt:
+        bad.append("没说要先结束旧进程")
+    if "4242" not in txt:
+        bad.append("没给出要结束的那个 pid")
+    if "重启一次即可" in txt:
+        bad.append("退回了「重启一次即可：antinel inbox window」—— 那条命令是幂等的")
+    if "已在跑" not in txt:
+        bad.append("没警告「不先结束，第②步只会说已在跑」")
+    if bad:
+        return "；".join(bad)
+    return True
+
+
+@check("R-57f 换血清单必须写「先结束、再开」两步")
+def r57f():
+    return _r57f_body()
+
+
+@check("N-57f 负控：文案退回旧版 ⇒ R-57f 必红")
+def n57f():
+    real = SV._restart_hint
+
+    def _old(rec, pid=None):
+        if isinstance(rec, dict) and ("port" in rec or "url" in rec):
+            return ("监理服务", "重启一次即可：antinel inbox window")
+        return real(rec, pid)
+
+    SV._restart_hint = _old
+    try:
+        r = _r57f_body()
+    finally:
+        SV._restart_hint = real
+    if r is True:
+        return ("负控失效：退回旧文案后 R-57f 仍然绿 —— 文案腿是假的"
+                "（旧文案照做不会换血，用户会认定整个自检是坏的）")
+    _note("变异体被判红：%s" % str(r)[:70])
+    return True
+
+
 def main():
     print("=" * 78)
     print("0517 判据 —— Antinel 监理窗口寿命：daemon 委托开窗（起得来，更要活得久）")

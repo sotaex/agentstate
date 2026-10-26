@@ -5712,10 +5712,24 @@ def _restart_hint(rec, pid=None):
       这种叠字）。
     """
     keys = set(rec or {})
-    if "port" in keys or "url" in keys:
-        return ("监理服务", "重启一次即可：antinel inbox window")
     _pid = pid if pid is not None else (
         rec.get("pid") if isinstance(rec, dict) else None)
+    if "port" in keys or "url" in keys:
+        # ★★ 0.57.3（2026-10-27 创始人「体检还是老样子」）—— 这条文案原来是
+        #   「重启一次即可：antinel inbox window」，**而那条命令不换血**：
+        #   `cmd_window` → `ensure_console` 是幂等的（`console_status` 活着就
+        #   `return rec, False`，印「已在跑」）⇒ 用户照着做，下次看到的仍是旧页面，
+        #   然后会认定整个自检是坏的。
+        #   与 0.53.2 那次**同族**：那次给的是**不存在的命令**，这次是**存在但无效的命令**。
+        #   两种都比"请重启"更坏：前者报 invalid choice，后者报"已完成"而其实没做。
+        #   ⇒ 文案必须写「先结束、再开」两步，并把"跳过第一步会怎样"说出来
+        #     （不说 ⇒ 用户一定会跳过，因为第②步看起来就够了）。
+        return ("监理服务",
+                "它是常驻进程，不会自己换血。换血两步，顺序不能反："
+                "① 先在任务管理器结束 %s；② 再跑 antinel inbox window"
+                "（会按原端口、原口令重新拉起，链接不变）。"
+                "不先结束旧的，第②步只会说「已在跑」，什么都不做。"
+                % (("pid %s" % _pid) if _pid else "那个进程"))
     # ★ 顺序不可交换：`run_daemon` 是**单例**（`daemon_alive` 为真就返回
     #   `already-running` 直接退出）⇒ 不先结束旧的，跑 `daemon` 是空操作，
     #   用户会以为重启过了。所以文案把顺序写死：**先结束 → 再拉**。
@@ -5727,6 +5741,219 @@ def _restart_hint(rec, pid=None):
             % (("pid %s" % _pid) if _pid else "这个进程"))
 
 
+
+
+# ---------------------------------------------------------------------------
+# 代码换血（0.57.3）—— 改了磁盘上的代码，活的服务自己退出、由守护进程拉起新的
+# ---------------------------------------------------------------------------
+# ★ 为什么要做（2026-10-27 创始人实测「体检修好了吗，我重新打开看，还是老样子」）：
+#   代码 06:19 落盘，服务是前一晚 21:32 起的 —— 活体进程**不会**自己重新加载代码，
+#   于是页面永远是旧的，而**页面不会说自己旧**。出包闸门 34 套全绿也救不了这件事：
+#   闸门验的是**文件**，不是**活体**。用户唯一的读数就是屏幕，屏幕不换 ⇒ 一切白干。
+#
+# ★★ 三条硬约束，少一条都不能上（每条都是"没它就更糟"）：
+#   ① **没人会拉起我，就不许退**。只有守护进程活着才换血。否则用户改一行代码、页面
+#      就彻底没了 —— 比"看到旧页面"糟得多。护栏在 `_supervisor_present()`。
+#   ② **同一份磁盘戳不重复触发**：新进程起来后 baseline 就是新戳 ⇒ 天然收敛；
+#      而 `__pycache__` 这类"每次 import 都变"的东西**必须排除**在戳外（见 `_code_stamp`）。
+#   ③ **限流**：一个窗口内换太多次 ⇒ 停手并出声。那是代码起不来／起来就崩，
+#      再换也换不好，只会把机器拖进循环（`_reload_budget`）。
+#
+# ★ 不新建第三份状态文件：次数记在 `<console>/reload.json` —— 那是"这个进程是谁"
+#   的落盘处（`url.json`／`daemon.pid` 同目录），不另立门户。
+# ★ 换血是**优雅退出**：`httpd.shutdown()` → `serve()` 返回 → 进程正常退出 →
+#   守护进程按**原端口原口令**重拉（`ensure_console` 读记录）⇒ 用户手上的链接不变。
+
+#: 多久看一眼磁盘（秒）。20 秒＝改完代码最多等这么久，代价是每 20 秒一次 stat 扫描。
+RELOAD_CHECK_SEC = 20.0
+#: 限流窗口（秒）与窗口内允许的换血次数。
+RELOAD_WINDOW_SEC = 300.0
+RELOAD_MAX_IN_WINDOW = 3
+
+#: 除"我加载过的模块"之外还要盯的目录 —— hook 是**别的进程**跑的，
+#: 规则副本改了必须生效，两者都算"产品行为变了"。
+_CODE_WATCH_SUBDIRS = (("hooks", ".py"), ("rules", ".json"))
+
+
+def _code_files(root=None):
+    """被我依赖的磁盘文件：`[(绝对路径, mtime)]`。**遍历的唯一实现**（别处不许再写一套）。
+
+    口径三条：
+      · `sys.modules` 里 `__file__` **直接位于包根**的 `.py` —— 「我加载过什么」
+        是唯一有行为依据的面（改一个没加载的模块不影响我，不该把我弄重启）；
+      · 包根 `hooks/*.py`（hook 由宿主进程跑，但改它等于改产品行为）；
+      · 包根 `rules/*.json`（规则副本，改了必须生效）。
+    ★★ **必须跳过 `__pycache__`**：`.pyc` 由 import 过程自己重写，算进来就是
+      "自己把自己弄脏" ⇒ 换血循环了。
+    ★ 不看 `root` 的**递归**：`ci/`、`output/`、`build/` 里写文件不该把服务弄重启。
+    """
+    base = os.path.dirname(os.path.abspath(__file__)) if root is None \
+        else os.path.abspath(root)
+    out = []
+    for m in list(sys.modules.values()):
+        f = getattr(m, "__file__", None)
+        if not f:
+            continue
+        try:
+            p = os.path.abspath(f)
+        except Exception:                                  # noqa: BLE001
+            continue
+        if not p.endswith(".py"):
+            continue
+        if os.path.dirname(p) != base:                     # 只看包根直属
+            continue
+        if "__pycache__" in p:                             # 显式排除，见 docstring
+            continue
+        try:
+            out.append((p, os.path.getmtime(p)))
+        except OSError:
+            continue
+    for sub, ext in _CODE_WATCH_SUBDIRS:
+        d = os.path.join(base, sub)
+        try:
+            names = os.listdir(d)
+        except OSError:
+            continue
+        for n in names:
+            if not n.endswith(ext):
+                continue
+            try:
+                out.append((os.path.join(d, n), os.path.getmtime(os.path.join(d, n))))
+            except OSError:
+                continue
+    return out
+
+
+def _code_stamp(root=None):
+    """这一进程依赖的磁盘代码的新鲜度戳 —— **就是一个数**（最新 mtime）。
+
+    ★★ 为什么**不许**把"计了几件"并进返回值（2026-10-27 07:08 实测抓到的自造缺陷）：
+      模块是**懒加载**的。服务跑起来之后（第一次请求、第一次体检、第一次开窗）才
+      `import` 的模块会让"件数"从 31 变 32 —— 与 mtime 无关，戳却变了 ⇒ 进程认定
+      "代码动了" ⇒ 自我退出 ⇒ 新进程再懒加载、再变 ⇒ **每 20–30 秒换一次**。
+      本机实测连续换 3 次后触发限流才停手（`reload.json` 留下 3 条）。
+      一个"诊断用的数"混进比较口径，就是**同一件事两把尺子**的第五形态：
+      量的性质变了，判据还在按结构比。
+      ⇒ 戳只留 mtime 一个量；件数与明细要看就调 `_code_files()`，**不许参与比较**。
+    """
+    newest = 0.0
+    for _p, mt in _code_files(root):
+        if mt > newest:
+            newest = mt
+    return round(newest, 6)
+
+
+def _reload_state_path(root=None):
+    import inbox_config as _C
+    return os.path.join(_C.console_dir(root), "reload.json")
+
+
+def _reload_read(root=None):
+    try:
+        with open(_reload_state_path(root), encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:                                      # noqa: BLE001
+        return {}
+
+
+def _reload_budget(root=None, now=None):
+    """窗口内还能不能换。返回 `(能, 人话原因)`。★ 判据可注入 `now`，不去睡。"""
+    now = time.time() if now is None else float(now)
+    hist = [t for t in (_reload_read(root).get("history") or [])
+            if isinstance(t, (int, float))]
+    recent = [t for t in hist if 0 <= now - t <= RELOAD_WINDOW_SEC]
+    if len(recent) >= RELOAD_MAX_IN_WINDOW:
+        return False, "近 %d 分钟内已经换了 %d 次" % (
+            int(RELOAD_WINDOW_SEC // 60), len(recent))
+    return True, ""
+
+
+def _reload_record(root=None, stamp=None, kind="reload", now=None):
+    """记一次换血（`kind="reload"`）或一次停手（`kind="throttled"`）。写不成返回 False。"""
+    now = time.time() if now is None else float(now)
+    st = _reload_read(root)
+    hist = [t for t in (st.get("history") or [])
+            if isinstance(t, (int, float))]
+    hist = [t for t in hist if 0 <= now - t <= RELOAD_WINDOW_SEC * 4]
+    if kind == "reload":
+        hist.append(now)
+    st["history"] = hist
+    st["last_kind"] = kind
+    st["last_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+    if stamp is not None:
+        # 戳是**一个数**（`_code_stamp` 的返回）。旧版是二元组，这里顺手兼容读旧记录。
+        st["last_stamp"] = stamp if isinstance(stamp, (int, float)) else list(stamp)
+    p = _reload_state_path(root)
+    try:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        tmp = p + ".tmp"
+        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(st, f, ensure_ascii=False, indent=1, sort_keys=True)
+        os.replace(tmp, p)
+        return True
+    except Exception:                                      # noqa: BLE001
+        return False
+
+
+def _supervisor_present(root=None):
+    """**谁会把我重新拉起来**。返回 `(在, 人话)`。
+
+    ★ 这是换血的**安全闸**，不是诊断：没有它，`serve` 一改代码就自杀，
+      而前台跑 `antinel inbox serve` 的用户会得到"页面彻底没了"。
+      宁可这一次不换血（如实说出来），也不许把服务弄丢。
+    """
+    try:
+        import inbox_daemon as _D
+        alive, pid = _D.daemon_alive(root)
+    except Exception as e:                                 # noqa: BLE001
+        return False, "判不出守护进程在不在（%r）" % (e,)
+    if alive:
+        return True, "守护进程 %s 在" % (pid,)
+    return False, "守护进程没在跑"
+
+
+def _auto_reload_loop(httpd, baseline, root=None, interval=RELOAD_CHECK_SEC,
+                      sleep=None, stop=None):
+    """看一眼磁盘 → 变了就优雅退出。返回结局串（判据直接断言它，不去猜）。"""
+    _sleep = sleep or time.sleep
+    while stop is None or not stop.is_set():
+        _sleep(interval)
+        cur = _code_stamp(root)
+        if cur == baseline:
+            continue
+        ok, why = _supervisor_present(root)
+        if not ok:
+            print("!! 磁盘上的代码变了，但%s —— 这一次不换血。"
+                  "手动换血两步：先结束 pid %d，再跑 antinel inbox window。"
+                  % (why, os.getpid()), file=sys.stderr)
+            return "no-supervisor"
+        ok, why = _reload_budget(root)
+        if not ok:
+            print("!! 代码变动太频繁（%s）—— 自动换血先停手，"
+                  "避免把机器拖进反复重启。" % why, file=sys.stderr)
+            _reload_record(root, cur, kind="throttled")
+            return "throttled"
+        _reload_record(root, cur, kind="reload")
+        print("代码变了（%s → %s），这个服务退出去，让守护进程拉起新的。"
+              % (baseline, cur), file=sys.stderr)
+        try:
+            httpd.shutdown()
+        except Exception:                                  # noqa: BLE001
+            pass
+        return "reload"
+    return "stopped"
+
+
+def start_auto_reload(httpd, root=None, interval=None, sleep=None, stop=None):
+    """装好换血线程。返回 `(baseline, thread)` —— 判据要 baseline 去喂变异。"""
+    base = _code_stamp(root)
+    iv = RELOAD_CHECK_SEC if interval is None else float(interval)
+    t = threading.Thread(target=_auto_reload_loop, daemon=True,
+                         kwargs={"httpd": httpd, "baseline": base, "root": root,
+                                 "interval": iv, "sleep": sleep, "stop": stop})
+    t.start()
+    return base, t
 
 
 def stamp_runtime(rec, current=None):
@@ -5975,6 +6202,10 @@ def serve(port=DEFAULT_PORT, root=None, open_browser=False, token=None, record=T
     # ★ 0.52.0 ②：预埋哨标（后台线程 —— PowerShell 冷启不该拖住开服）
     threading.Thread(target=_prewarm_logo_once, daemon=True,
                      kwargs={"root": root}).start()
+    # ★ 0.57.3：装上换血 —— 从此"改了磁盘上的代码就生效"，不再需要人记得重启。
+    #   护栏在 `_supervisor_present()`：没人会把它拉起来时**不退出**（宁可看旧页面，
+    #   也不许把服务弄丢）。这是 2026-10-27「体检还是老样子」那次事故的根治。
+    start_auto_reload(httpd, root=root)
     if open_browser:
         # ★ 0.35.2：开成**独立窗口**（app 模式），不再塞进浏览器标签页。
         threading.Timer(0.6, lambda: open_console(url)).start()
