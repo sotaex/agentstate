@@ -468,12 +468,12 @@ def n_s93b():
 def s94():
     import inbox_model as M
     t_dev = M.title_of_record("host_shield_dev_drift", "L1", "code_drift")
-    if "失守" in t_dev:
+    if "没守住" in t_dev:
         return ("自研迭代挂上了「失守」标题：%r —— 方向反了（把「我在改代码」"
                 "说成「防线失守」）" % t_dev)
     # ★ 反向：tamper 那侧**不许**被这道门误伤
     t_tam = M.title_of_record("host_shield_tamper", "R0", "code_drift")
-    if "失守" not in t_tam:
+    if "没守住" not in t_tam:
         return "疑似投毒反而丢了「失守」标题：%r ⇒ 门开反了" % t_tam
     # 连带：其它事由标题不受影响
     if "自启" not in M.title_of_record("host_shield_breach", "R0", "autostart_missing"):
@@ -491,7 +491,7 @@ def n_s94():
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
     mut = _load(src.replace(anchor, "    return True"), "im0470_ns94")
     t = mut.title_of_record("host_shield_dev_drift", "L1", "code_drift")
-    if "失守" not in t:
+    if "没守住" not in t:
         return "负控失效：摘掉归属门后仍不含「失守」⇒ 该门没在承重"
     return True
 

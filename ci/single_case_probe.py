@@ -174,7 +174,7 @@ def run_one(spec, idx):
         # 至少要有该规则被提及，且允许 rc=0（warn）或 2（block）
         got = (p.returncode in (0, 2)) and any(r in blob for r in rules)
     else:
-        got = (p.returncode == 0) and ("拦截" not in blob)
+        got = (p.returncode == 0) and ("挡下" not in blob)
     env_hit = "SAFE_DELETE_BULK_CONFIRM_REQUIRED" in blob
     return got, p.returncode, ",".join(rules), blob.strip()[:150], env_hit
 

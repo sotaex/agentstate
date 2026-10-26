@@ -1413,7 +1413,7 @@ def _w03_assert():
         # ★ action 桶（只有你能办）：灯不抬，但账必须上主行（账不许被藏）。
         ("账内 L1（action 桶·只有你能办）",
          [_mk("L1", "unread", 7, 0.1, kind="exam_reminder")],
-         "值守中", "拦截", 1, 1, "L0", ("只有你能办",), ("没什么要拦",)),
+         "值守中", "挡下", 1, 1, "L0", ("只有你能办",), ("没什么要拦",)),
     ]
     for (name, items, want_word, banned, want_count, want_total, want_st,
          must_have, must_not) in cases:

@@ -1998,7 +1998,7 @@ def c_glossary_avoids_bare_code_lists():
     t = GL.TERMS["L0"]["inc"]
     if re.search(r"[RLL][0-9s]", t):
         return "L0 的包含项仍写着代码速记：%s" % t
-    if "失守" not in t:
+    if "没守住" not in t:
         return "L0 的包含项没有用中文说明：%s" % t
     return True
 

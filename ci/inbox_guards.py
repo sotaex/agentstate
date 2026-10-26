@@ -827,7 +827,7 @@ def c_tray_roundtrip():
     hub = new_hub()
     TR.write_state("L2", 3, "拦截中 · 未处理 3", root=hub)
     got = TR.read_state(root=hub)
-    return got["state"] == "L2" and got["count"] == 3 and "拦截" in got["tip"]
+    return got["state"] == "L2" and got["count"] == 3 and "挡下" in got["tip"]
 
 
 def n_tray_roundtrip():

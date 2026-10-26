@@ -31,7 +31,7 @@
         本机没有 pip 安装，跑监理的就是源码检出 ⇒ 那条信号**恒真** ⇒
         "已出厂"作废 ⇒ **真篡改被读成"研发中"（R0→L1）**；
     S28 ★★ **全类型报告方向一致**：`LEVEL_OF_KIND` 里每一个 kind，其用户可见标题
-        的**方向**必须与级别一致（说"失守"⇒必须是 R0；R0 必须说"失守"），
+        的**方向**必须与级别一致（说"没守住"⇒必须是 R0；R0 必须说"没守住"），
         且**每个 kind 都必须有标题**（不许"未登记就按 kind 名显示"）——
         这条把 2026-10-09 的《全类型报告审计》从"跑一次的探针"变成"常驻机制"。
     S29 A6「旧 subkind 名对齐现行 topic」：`self_check`（旧名）与 `code_drift`（新名）
@@ -451,7 +451,7 @@ def _merge_problems():
         probs.append("新老口径的 `state_drift` 没落到同一组")
     # 标题方向：两条都得是**失守**（tamper 是 R0）
     for x in (a, c):
-        if "失守" not in x.title:
+        if "没守住" not in x.title:
             probs.append("tamper 的标题没有说「失守」：%r" % (x.title,))
     return probs
 
@@ -706,7 +706,7 @@ def _title_dir_problems(level_tbl, title_tbl):
         if not t:
             probs.append("`%s` 没有用户可见标题 ⇒ 界面会回落显示内部 kind 名" % k)
             continue
-        says_breach = "失守" in t
+        says_breach = "没守住" in t
         is_r0 = (lv == "R0")
         if says_breach != is_r0:
             probs.append("`%s`（%s）标题 %r 方向不一致 —— 说失守必须是 R0，"
@@ -722,7 +722,7 @@ def s28():
         return "；".join(probs[:4])
     # 反向对照：给一个 L1 挂上「失守」标题 ⇒ 必须被抓（证明这条**有分辨力**）
     tbl = dict(M.TITLE_OF_KIND)
-    tbl["host_shield_changed"] = "失守：防护设置被改动"
+    tbl["host_shield_changed"] = "没守住：防护设置被改动"
     if not _title_dir_problems(M.LEVEL_OF_KIND, tbl):
         return "反向对照失败：L1 挂「失守」标题却没被抓到 ⇒ 判据没有分辨力"
     return True
@@ -864,13 +864,13 @@ def _zone_grade_problems(store, model):
     ok = mk("warning", "安全区已上锁（区内防篡改；出网由 net_mode 把闸）：D:\\x\\zone")
     bad = mk("critical", "安全区【上锁失败】——有进程在对抗门闸，须人工介入：D:\\x\\zone")
     probs = []
-    if ok.level == "R0" or "失守" in ok.title:
+    if ok.level == "R0" or "没守住" in ok.title:
         probs.append("上锁成功被标成失守（level=%s title=%r）" % (ok.level, ok.title))
     if model.needs_owner(ok):
         probs.append("上锁成功进了「要处理」")
     if model.has_consequence(ok):
         probs.append("上锁成功被记成「有后果」")
-    if bad.level != "R0" or "失守" not in bad.title:
+    if bad.level != "R0" or "没守住" not in bad.title:
         probs.append("上锁失败没被标成失守（level=%s）" % bad.level)
     if not model.needs_owner(bad):
         probs.append("上锁失败没进「要处理」⇒ 唯一要人决策的那类反而看不见")

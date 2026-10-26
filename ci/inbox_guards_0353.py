@@ -604,7 +604,7 @@ def n_page_has_no_read_button():
 def c_page_fix_button_only_when_down():
     """★★ 创始人第四条：**失守时**页面必须给一个能马上解决的入口；值守中不给。
 
-    ★★ 2026-10-23（X 步）**夹具重基**：原夹具是 `{"state":"down","label":"失守",…}`
+    ★★ 2026-10-23（X 步）**夹具重基**：原夹具是 `{"state":"down","label":"没守住",…}`
       这种**只有展示字段**的字典 —— 它从来没有 `evidence`。X 步把页面状态词交给
       四轴投影之后，这种字典在四轴上等于「什么都探不到」⇒ 两格都渲染成同一档，
       判据红在"值守中不见了"。
@@ -615,7 +615,7 @@ def c_page_fix_button_only_when_down():
         ⇒ 防线不可信 ⇒ 红），值守中＝在岗且自检通过。
       ★ 只补形状，不改意图：断言仍是"失守给按钮、值守中不给"。
     """
-    down = {"state": "down", "label": "失守", "why": "监理不在岗", "can_fix": True,
+    down = {"state": "down", "label": "没守住", "why": "监理不在岗", "can_fix": True,
             "fix": "revive", "fix_hint": "马上修复（重新拉起监理）",
             "evidence": {"armed": True, "sentinel_alive": True,
                          "heartbeat_age": 5.0, "sentinel_uptime": 600.0,
@@ -641,7 +641,7 @@ def n_page_fix_button_only_when_down():
     ★ 夹具重基（同 `c_page_fix_button_only_when_down`）：补 `evidence`，
       让「失守」这一档真的成立（自检不符 ⇒ 防线不可信 ⇒ 红）。
     """
-    down = {"state": "down", "label": "失守", "why": "运行代码与清单不符",
+    down = {"state": "down", "label": "没守住", "why": "运行代码与清单不符",
             "can_fix": False, "fix": None, "fix_hint": "需要重装（就地修不了）",
             "evidence": {"armed": True, "sentinel_alive": True,
                          "heartbeat_age": 5.0, "sentinel_uptime": 600.0,
@@ -649,7 +649,7 @@ def n_page_fix_button_only_when_down():
                          "self_check_problems": ["运行代码与清单不符"]}}
     h = SV.render_page(view="inbox", root=G.new_hub(), token="t", posture=down,
                        items=[G.item("L2", "unread")])
-    return "马上修复" not in PC.body(h) and "失守" in PC.body(h)
+    return "马上修复" not in PC.body(h) and "没守住" in PC.body(h)
 
 
 def c_page_down_without_fix_shows_howto():
@@ -660,7 +660,7 @@ def c_page_down_without_fix_shows_howto():
       · 不能就地修（程序文件对不上出厂登记）⇒ 给一块「怎么解决」，写清去哪儿做。
     ★ **绝不留"点了没反应"的按钮** —— 那正是创始人最恨的形状。
     """
-    down = {"state": "down", "label": "失守", "why": "程序文件与出厂登记对不上",
+    down = {"state": "down", "label": "没守住", "why": "程序文件与出厂登记对不上",
             "can_fix": False, "fix": None,
             "fix_hint": "就地修不了：请重新安装当前版本（重装会自动重新登记）。",
             # ★ X 步重基：补 evidence（生产同形，见 c_page_fix_button_only_when_down）
@@ -671,7 +671,7 @@ def c_page_down_without_fix_shows_howto():
     h = SV.render_page(view="inbox", root=G.new_hub(), token="t", posture=down,
                        items=[G.item("L2", "unread")])
     return ('class="fixnote"' in h and down["fix_hint"] in PC.body(h)
-            and "马上修复" not in PC.body(h) and "失守" in PC.body(h))
+            and "马上修复" not in PC.body(h) and "没守住" in PC.body(h))
 
 
 def n_page_down_without_fix_shows_howto():
@@ -793,7 +793,7 @@ def c_page_action_grouped_not_hidden():
     for i in (1, 2, 3):
         it = G.item("L2", "unread", i)
         it.alert.kind = "host_shield_spawn_failed"
-        it.alert.title = "失守：看门狗没能启动"
+        it.alert.title = "没守住：看门狗没能启动"
         it.alert.detail = "监理进程不在岗（第 %d 次）" % i
         it.alert.topic = ""
         items.append(it)
@@ -820,7 +820,7 @@ def n_page_action_grouped_not_hidden():
     for i, tp in enumerate(("autostart_missing", "hook_pulled", "zone_dropped"), 1):
         it = G.item("L2", "unread", i)
         it.alert.kind = "host_shield_breach"
-        it.alert.title = "失守：%s" % tp
+        it.alert.title = "没守住：%s" % tp
         it.alert.detail = "原因 %s" % tp
         it.alert.topic = tp
         items.append(it)
@@ -1240,7 +1240,7 @@ def n_paramedic_uses_chain_authority():
 def c_outage_without_consequence_is_interrupted():
     """★★ 缺岗但**没有监管对象** ⇒ 只能叫「中断·无损失」，**不许**叫失守。
 
-    ★ 为什么（创始人 2026-10-06）：一个说不出损失的"失守"就是**假失守**。
+    ★ 为什么（创始人 2026-10-06）：一个说不出损失的"没守住"就是**假失守**。
       「中断」仍然黄灯、仍然给「马上修复」—— **不隐藏**，只是不冒称"防线失守"。
     """
     import host_shield as HS
@@ -1427,7 +1427,7 @@ def c_selfcheck_fail_is_warn_not_down():
     """★★ 在岗 + 自检不符 ⇒ **黄灯一档**（存疑或研发中），**绝不是失守（红）**。
 
     ★ 为什么：本仓铁律「查不出来 ≠ 查出来是坏的」——"我认不出守门的是不是出厂那份"
-      ≠ "此刻没在守"。把"认不出"渲染成"失守"就是创始人说的"跟假失守没区别"。
+      ≠ "此刻没在守"。把"认不出"渲染成"没守住"就是创始人说的"跟假失守没区别"。
     ★ **绝不放松自检**：自检照旧跑、照旧报（`evidence.self_check_problems` 留着），
       只是**换档位**；而且给得出下一步。
 
@@ -1460,7 +1460,7 @@ def c_selfcheck_fail_is_warn_not_down():
         #   （`light()` 对 warn 走 fail-closed 判 R0；姿态标签必须与灯色
         #   同一套词，否则同一时刻两个叫法）。见
         #   `host_shield.POSTURE_LABEL_ALLOWED`。
-        if p["label"] not in ("失守", "研发中"):
+        if p["label"] not in ("没守住", "研发中"):
             results.append("%s：标签不对 %r" % (note, p["label"]))
         if p["can_fix"] is not False or p["fix"] is not None:
             results.append("%s：给了修复动作（自检不符不该给）" % note)
@@ -1605,8 +1605,8 @@ def c_light_warn_is_down_and_interrupted_is_l1():
     """
     w, _ = M.light("warn", [])
     i, _ = M.light("interrupted", [])
-    return (w == M.STATE_R0 and M.STATE_LABEL[w] == "失守"
-            and i == M.STATE_L1 and M.STATE_LABEL[i] == "注意"
+    return (w == M.STATE_R0 and M.STATE_LABEL[w] == "没守住"
+            and i == M.STATE_L1 and M.STATE_LABEL[i] == "提醒"
             and M.STATE_VAR[i] == "--l1" and w != M.STATE_DEV)
 
 
@@ -1632,7 +1632,7 @@ def c_consequences_has_consumer():
       `c_consequences_has_action` 的行为臂覆盖，不再逐字钉（尺子钉字面 ⇒
       改文案就假红，本轮已第八次撞同一根钉子）。
     """
-    down = {"state": "down", "label": "失守", "why": "监理不在岗",
+    down = {"state": "down", "label": "没守住", "why": "监理不在岗",
             "can_fix": True, "fix": "revive", "fix_hint": "马上修复（重新拉起监理）",
             "consequences": [{"kind": "zone_unlocked",
                               "text": "有 1 个安全区还没上锁：D:\\secret"}]}
@@ -1676,7 +1676,7 @@ def c_consequences_has_action():
       本条守**渲染层**（只要有后果就必须有下一步）。源头修了，规矩仍在 ——
       换任何一条来路产出后果，都跑不掉这条。
     """
-    r = _cons_action_core({"state": "down", "label": "失守", "why": "监理不在岗",
+    r = _cons_action_core({"state": "down", "label": "没守住", "why": "监理不在岗",
                            "can_fix": True, "fix": "revive",
                            "fix_hint": "马上修复（重新拉起监理）",
                            "consequences": [{"kind": "zone_unlocked",
@@ -1692,7 +1692,7 @@ def n_consequences_has_action():
       **冗余保险**，与 0470 的 poison 门同型。保险的价值在于：
       谁再造一条"有后果却给不出动作"的来路，这条当场红。
     """
-    r = _cons_action_core({"state": "down", "label": "失守", "why": "监理不在岗",
+    r = _cons_action_core({"state": "down", "label": "没守住", "why": "监理不在岗",
                            "can_fix": False, "fix": "revive", "fix_hint": "",
                            "consequences": [{"kind": "zone_unlocked",
                                              "text": "有 1 个安全区还没上锁"}]})
@@ -2355,7 +2355,7 @@ def c_ledger_levels_match_meaning():
     """「拦截」只算真实拦下；`host_shield_breach` 是防护缺口，必须列失守。"""
     return (M.level_of("tool_call_blocked") == "L2"
             and M.level_of("host_shield_breach") == "R0"
-            and M.TITLE_OF_KIND["host_shield_breach"].startswith("失守："))
+            and M.TITLE_OF_KIND["host_shield_breach"].startswith("没守住："))
 
 
 def n_ledger_levels_match_meaning():
@@ -2418,7 +2418,7 @@ def c_ledger_page_populates_from_chain_snapshot():
             and len(lines_after_correction) == len(lines_after_same_correction) == 4
             and all(corrected.get(k) == 0 for k in ("blocked", "noticed", "breached", "acked"))
             and "账本尚无可核对记录" not in PC.body(page)
-            and "拦截危险操作" in PC.body(page) and "失守" in PC.body(page))
+            and "挡下危险操作" in PC.body(page) and "没守住" in PC.body(page))
 
 
 def c_ledger_backfill_fills_day_that_was_never_recorded():
