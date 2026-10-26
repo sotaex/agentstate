@@ -316,7 +316,7 @@ def daily_report(day=None, root=None, chain_files=None, items=None,
 
     # ★ 每个数字都带**钻取键**（页面据此生成链接，判定不写在页面里）
     # ★ 0.53.5（STE100 体检 S-03）：label 是**过去**的记录数 ⇒ 走
-    #   `event_short()`（出事/挡下/提醒），不用只认此刻的灯态词。
+    #   `event_short()`（没守住/挡下/提醒），不用只认此刻的灯态词。
     drill = [
         {"key": "L2", "label": M.event_short("L2"), "count": win_levels["L2"], "filt": "lv:L2"},
         {"key": "L1", "label": M.event_short("L1"), "count": win_levels["L1"], "filt": "lv:L1"},

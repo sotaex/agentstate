@@ -905,7 +905,7 @@ def n_s07():
 #:   是把"只认此刻"的词拿去数历史 —— 读者刚在灯上学会「失守＝现在」，
 #:   翻一页又看见它当过去用，两个语义在同一套界面里打架（术语表词条
 #:   「失守只认此刻」的下一行曾写着「昨天失守」，一个词条内自相矛盾）。
-#:   ⇒ 第二真源 `EVENT_LABEL`（出事/挡下/提醒），同样只许一份声明；
+#:   ⇒ 第二真源 `EVENT_LABEL`（没守住/挡下/提醒），同样只许一份声明；
 #:     R0/L2/L1 三个键两表的值**不许重叠**（重叠＝一词二义）。
 #:   ★ 老 S08 只保证"全仓一份真源"，没保证"一个词只对一个语义" ——
 #:     这正是「昨天失守」能天天绿着上屏的原因：词表本身没脏，脏的是
@@ -929,7 +929,9 @@ _STATE_NAME_TOKENS = frozenset(
 #:   两边取自同一个常量的话，"有人把产品表改坏"时判据会跟着变，等于没守）。
 #:   只列 R0/L2/L1 三个键：Ls/L0/dev 两表同值是有意的（见 inbox_model 注释），
 #:   它们不参与"此刻 vs 过去"的冲突。
-EVENT_LABELS_REF = {"R0": "出事", "L2": "挡下", "L1": "提醒"}
+#: ★★★ 0.57.1：R0 由「出事」改「**没守住**」（创始人：出事太重，预判了损失）。
+#:   改词必须同时改这一行 —— 这就是对照组的作用：谁想偷偷换词，这里就红。
+EVENT_LABELS_REF = {"R0": "没守住", "L2": "挡下", "L1": "提醒"}
 _EVENT_NAME_TOKENS = frozenset(EVENT_LABELS_REF.values())
 
 
@@ -945,7 +947,7 @@ def _decl_scan(files):
     ★ 纯函数（文本进、清单出）—— 这样负控可以喂**合成文本**来验分辨力，
       不必往盘上写一个假的源文件（本判据绝不写盘）。
     ★ 2026-10-21：**两份真源各扫一份第二声明**。第二份 EVENT_LABEL 的辨认方式是
-      "同键同值"—— 只有值正好是 出事/挡下/提醒 时才认；散文（「有过失守」）
+      "同键同值"—— 只有值正好是 没守住/挡下/提醒 时才认；散文（「有过失守」）
       与别处的合法同键表（填桶名/CSS 变量名）都不误报。
     """
     bad = []
@@ -983,6 +985,57 @@ def _two_sources_ok(event_tb):
     return True
 
 
+def _event_words_explained(event_tb, terms):
+    """**每个上屏的事件词必须在自己词条的正文里被写出来**。返回问题串或 True。
+
+    ★★ 为什么要这一条（0.57.1，创始人「出事这个词太重，显然感觉有问题」）：
+      事件词是**屏上的词**（数卡标题、筛选条、日报行、账本行），可此前三个
+      事件词**一个都没进术语表**。读者看到「出事」，点开首行却是「失守（R0）」
+      —— 屏上是 A、解释是 B，系统里没有一处解释 A。这条腿就是钉这个：**屏上
+      出现的词，必须在它自己词条的正文里被说出来**。
+    ★ 只认正文（one/inc/exc/unit），**不认 label**：label 是渲染时调用方传进去
+      的，拿它做断言等于拿结论证明前提（恒真＝死判据，假绿第一族）。
+    ★ 负控喂的是**真变异**（把表改回「出事」），不是合成文本 —— 这条腿的病根
+      恰恰是"表里的词与词条正文脱钩"，只有真的改表才能重现。
+    """
+    for k in EVENT_LABELS_REF:
+        ev = event_tb.get(k)
+        body = " ".join(str((terms.get(k) or {}).get(f) or "")
+                        for f in ("one", "inc", "exc", "unit"))
+        if ev and ev not in body:
+            return ("事件词「%s」（%s）不在术语表词条的正文里 —— 屏上有这个词，"
+                    "点开却只看到另一个词，等于系统没解释它" % (ev, k))
+    return True
+
+
+def _retired_words_absent(state_tb, event_tb, terms, retired):
+    """**已判死的词不许回到任何"词名位"**。返回问题串或 True。
+
+    ★★ 为什么要单独一张判死表（0.57.1）：对照样只守"现在是哪个词" —— 它挡得住
+      偷偷换，挡不住下一轮"有人觉得旧词更顺口、顺手加回去"，也挡不住给**别的
+      词条**起这个名字。判死的理由连同词一起登记在 `glossary.RETIRED_WORDS`，
+      这样下一个 AI 不必重新踩一遍才知道为什么不能用。
+    ★ 只扫**词名**（两表的值 ＋ `TERMS[*]["w"]`），**不扫词条正文**：正文里出现
+      旧词可能正是在解释"什么不算它"，一刀切会把正常句子判红 —— 假阳性最坏的
+      结局是有人为了让它绿而删掉判据。
+    """
+    hit_at = []
+    for w in (retired or {}):
+        where = []
+        if w in (state_tb or {}).values():
+            where.append("灯态词表")
+        if w in (event_tb or {}).values():
+            where.append("事件词表")
+        for k, t in (terms or {}).items():
+            v = str((t or {}).get("w") or "")
+            if v == w or v.startswith(w + "（"):
+                where.append("词条 %s 的本名" % k)
+        if where:
+            hit_at.append("已判死的词「%s」回到了%s（%s）"
+                          % (w, "、".join(where), (retired or {})[w][:70]))
+    return "；".join(hit_at) or True
+
+
 def _skip_dir(name):
     """构建产物/缓存/归档副本/点目录 —— 都不是"现行源码"，不该被单源扫描看见。
 
@@ -1014,21 +1067,30 @@ def _source_files():
 @check("S08 两个真源各一份（灯态词/事件词；第二份声明或一词二义即报红）")
 def s08():
     import inbox_model as M
+    import glossary as GL
     bad = _decl_scan(_source_files())
     if bad:
         return _raise("；".join(bad[:6]))
     r = _two_sources_ok(M.EVENT_LABEL)
     if r is not True:
         return _raise(r)
+    r2 = _event_words_explained(M.EVENT_LABEL, GL.TERMS)
+    if r2 is not True:
+        return _raise(r2)
+    r3 = _retired_words_absent(M.STATE_LABEL, M.EVENT_LABEL, GL.TERMS,
+                               getattr(GL, "RETIRED_WORDS", {}))
+    if r3 is not True:
+        return _raise(r3)
     return ("灯态词全仓只有 inbox_model.py 一份、事件词同样只有 "
-            "EVENT_LABEL 一份；R0/L2/L1 两表值零重叠")
+            "EVENT_LABEL 一份；R0/L2/L1 两表值零重叠；"
+            "三个事件词都在各自词条的正文里被解释；已判死的词没回来")
 
 
 @check("N-S08 负控：第二份事件名/一词二义/事件词漂移，各自必须被抓到")
 def n_s08():
     import inbox_model as M
     # ① 第二份事件名（往别的文件写一份 EVENT_LABEL）
-    fake = [("inbox_server.py", 'EVIL = {"R0": "出事", "L2": "挡下"}\n')]
+    fake = [("inbox_server.py", 'EVIL = {"R0": "没守住", "L2": "挡下"}\n')]
     if not _decl_scan(fake):
         return _raise("在别的文件里写第二份事件名，S08 仍判干净 ⇒ 扫描器空转")
     # 反向：散文不许被误判（假阳性会逼人关掉这条判据）
@@ -1060,7 +1122,49 @@ def n_s08():
     bad = _decl_scan(_source_files())
     if bad:
         return _raise("现行源码里仍有第二份声明：%s" % bad[:3])
-    return "第二份事件名/一词二义/事件词漂移都被抓到；散文不误报；现行源干净"
+    # ④ 上屏词必须被自己的词条解释（0.57.1）：
+    #    ★ 这一腿的**专属红样本不是"改词"** —— 改词已经被腿①的对照样抓到了。
+    #      它抓的是另一件事：**词没变、词条正文里却不再提它**（0.57.1 之前三个
+    #      事件词一个都不在术语表里，就是这个形态）。所以这里删正文那句，不动表。
+    #    ★ 在**副本**上删，不动产品模块（动真源要还原，还原链路自己也会坏）。
+    import glossary as GL
+    _terms = {k: dict(v) for k, v in GL.TERMS.items()}
+    if _event_words_explained(M.EVENT_LABEL, _terms) is not True:
+        return _raise("夹具不成立：现行词条本就解释不了事件词 ⇒ 负控无分辨力")
+    _r0 = dict(_terms["R0"])
+    # ★★ 0.57.1 第二稿：变异锚点**从产品自身取**，不许写死一句旧文案。
+    #   第一稿写的是 `.replace("数过去的事时，这一档写作「没守住」。", "")` ——
+    #   后来那句话因为 0514 T4-07 的句子预算被改写了，`replace` 变成空操作，
+    #   词条正文一个字没删 ⇒ 这一腿拿不到红样本，闸门里报「S08 仍判通过」。
+    #   （同族先例：`0514 N-T4-09` 的 docstring 明写"注入串从当前 one 派生，
+    #     不写死一句旧文案"—— 我这条腿没照它办。）
+    #   现在改成：把 R0 词条的四个正文字段里**该事件词本身**全部删掉。词改到
+    #   哪就去删哪个，锚点永远不会失效。
+    _ev = M.EVENT_LABEL["R0"]
+    for _f in ("one", "inc", "exc", "unit"):
+        _r0[_f] = str(_r0.get(_f) or "").replace(_ev, "")
+    if _r0 == dict(_terms["R0"]):
+        return _raise("夹具不成立：事件词「%s」并不在 R0 词条正文里 —— "
+                      "前面那条腿本该先报红，这里不该走到" % _ev)
+    _terms["R0"] = _r0
+    if _event_words_explained(M.EVENT_LABEL, _terms) is True:
+        return _raise("把词条正文里解释事件词的那句删掉，S08 仍判通过 "
+                      "⇒ 屏上出现一个系统没解释的词，没人守")
+    # ⑤ 已判死的词不许回来（0.57.1）：给一个**别的词条**起旧名 —— 对照样抓不到
+    #    （表没变），只有判死表能抓到。
+    _terms2 = {k: dict(v) for k, v in GL.TERMS.items()}
+    _terms2["_fake"] = {"w": "出事"}
+    if _retired_words_absent(M.STATE_LABEL, M.EVENT_LABEL, _terms2,
+                             getattr(GL, "RETIRED_WORDS", {})) is True:
+        return _raise("给一个词条起已判死的名「出事」，S08 仍判通过 "
+                      "⇒ 判死表没有分辨力")
+    if _retired_words_absent(M.STATE_LABEL, M.EVENT_LABEL, GL.TERMS,
+                             getattr(GL, "RETIRED_WORDS", {})) is not True:
+        return _raise("现行词表里就有已判死的词 ⇒ 判据与源码不一致")
+    if _event_words_explained(M.EVENT_LABEL, GL.TERMS) is not True:
+        return _raise("走完负控后现行源仍判红 ⇒ 夹具污染了产品模块")
+    return ("第二份事件名/一词二义/事件词漂移/上屏词无解释/判死词回来 "
+            "都被抓到；散文不误报；现行源干净")
 
 
 # ══════════════════════════════ S09 光梯次序＝离终结的距离 ═══════════════════

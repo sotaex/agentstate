@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
-# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.22（随 v0.57.0）
+# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.22（随 v0.57.1）
 
 > v1.22（0.54.0）：**补登记 2 类** —— `delivery_unknown`（见下文「通知送达类」）
 > 与 `gap_fixed`（见下文「缺口生命周期类」）。

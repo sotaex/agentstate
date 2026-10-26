@@ -2392,7 +2392,7 @@ def _view_report(rep, token, items=None):
         scoped_filter = "win:%d:%s" % (hrs, filt)
         # ★ 0.47.0（方案 §5 步三）：这个数是分子 ⇒ 同行带分母（窗口内总记录数）。
         # ★★ 0.53.5（STE100 体检 S-03）：卡片标题数的是**过去 24 小时**的事
-        #   ⇒ 显示词走 `event_short()`（出事/挡下/提醒），不再用只认此刻的
+        #   ⇒ 显示词走 `event_short()`（没守住/挡下/提醒），不再用只认此刻的
         #   灯态词（旧标题「失守（R0）」把状态词当事件词数，与术语表词条
         #   「失守只认此刻」自相矛盾）。词条本名与定义进展开体首行
         #   （`chip()` 的 head 机制，data-t 落点不变 ⇒ P13 照绿）。
@@ -2454,7 +2454,7 @@ def _view_report(rep, token, items=None):
     # ★ 0.47.0：当日三档各是分子 ⇒ 分母＝当日全部记录条数（当日 ＝ 24 小时窗口）。
     _day_total = sum(int(Lv.get(k, 0) or 0) for k in ("R0", "L2", "L1"))
     # ★★ 0.53.5（STE100 体检 S-02）：这里数的是**过去**的事 ⇒ 词走
-    #    `event_short()`（出事/挡下/提醒），不再用只认此刻的灯态词。
+    #    `event_short()`（没守住/挡下/提醒），不再用只认此刻的灯态词。
     #    旧写法「失守 3」把状态词当事件词数，与术语表词条自相矛盾。
     _today_levels = ("<a href=\"/?v=inbox&f=day:%s:lv:R0\">%s %d</a> ｜ "
                      "<a href=\"/?v=inbox&f=day:%s:lv:L2\">%s %d</a> ｜ "
@@ -3082,7 +3082,7 @@ def _view_ledger(rep, token, items=None):
                 "<details class=\"month\"><summary><span class=\"k\">%s</span>"
                 # ★ 0.53.1：月行的格子名同样从六态表派生（与日行同一份词源）。
                 # ★ 0.53.5（STE100 体检 S-02）：但**事件词**走第二真源
-                #   `event_short()`（出事/挡下/提醒）—— 月行数的全是过去的事。
+                #   `event_short()`（没守住/挡下/提醒）—— 月行数的全是过去的事。
                 "<span>%s %d · %s %d · %s %d · 已处理 %d ｜ 有记录 %d 天</span></summary>"
                 "<div class=\"rows\">%s</div></details>"
                 % (_mlabel(ym), M.event_short("L2"), tot["blocked"],
