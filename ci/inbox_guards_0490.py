@@ -1399,17 +1399,17 @@ def _w03_assert():
     cases = [
         # (名, 夹具, 应得状态词, 禁用词, count, total, 旧键, 主行必须有, 主行不许有)
         ("账内 R0", [_mk("R0", "unread", 1, 1.0), _mk("R0", "unread", 2, 2.0)],
-         "失守", "值守中", 1, 2, "R0", ("没修",), ()),
+         "没守住", "值守中", 1, 2, "R0", ("没修",), ()),
         # ★★ 2026-10-21 口径反转：info 桶三条一律「值守中」，「拦截」列为禁用词。
         ("账内 L2（info 桶·刚发生未读）",
          [_mk("L2", "unread", 4, 0.1, kind="tool_call_blocked")],
-         "值守中", "拦截", 0, 1, "L0", ("都替你处理完了",), ("没什么要拦",)),
+         "值守中", "挡下", 0, 1, "L0", ("都替你处理完了",), ("没什么要拦",)),
         ("账内 L2（info 桶·过保持期）",
          [_mk("L2", "unread", 5, 1.0, kind="tool_call_blocked")],
-         "值守中", "拦截", 0, 1, "L0", ("都替你处理完了",), ("没什么要拦",)),
+         "值守中", "挡下", 0, 1, "L0", ("都替你处理完了",), ("没什么要拦",)),
         ("账内 L2（info 桶·已读）",
          [_mk("L2", "read", 6, 0.1, kind="tool_call_blocked")],
-         "值守中", "拦截", 0, 1, "L0", ("都替你处理完了",), ("没什么要拦",)),
+         "值守中", "挡下", 0, 1, "L0", ("都替你处理完了",), ("没什么要拦",)),
         # ★ action 桶（只有你能办）：灯不抬，但账必须上主行（账不许被藏）。
         ("账内 L1（action 桶·只有你能办）",
          [_mk("L1", "unread", 7, 0.1, kind="exam_reminder")],
@@ -3393,7 +3393,7 @@ def n_t04():
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
     items = _ledger_items()
     page, _why = _mut_render(
-        src.replace(anchor, "拦截 0 ｜ 注意 0 ｜ 失守 0 ｜ 已处理 0"),
+        src.replace(anchor, "挡下 0 ｜ 提醒 0 ｜ 没守住 0 ｜ 已处理 0"),
         "is0490_nt04", _SERVER_REL, view="ledger",
         root=_TMPREG.tmpdir(prefix="g0490_nt04_"), token="T", items=items,
         rep=_ledger_rep(items), posture=_POSTURE)
@@ -3454,7 +3454,7 @@ def n_t04e():
         return "负控失效：退休态名「防护缺口」喂进去仍判绿（尺子没有分辨力）"
     if _retired_state_core([("月行", "拦截 115 · 注意 226 · 缺口 189")]) is True:
         return "负控失效：月行形态的「缺口」喂进去仍判绿"
-    if _retired_state_core([("账本", "拦截 1 ｜ 失守 2 ｜ 已处理 0")]) is not True:
+    if _retired_state_core([("账本", "挡下 1 ｜ 没守住 2 ｜ 已处理 0")]) is not True:
         return "负控方向异常：合法文本「失守」被判红 —— 尺子误伤真实现"
     return True
 
@@ -5064,7 +5064,7 @@ def _u20_offenders(page):
     # ② 药丸的链接形状：`f=win:24:lv:R0">失守 <b>`（日报四指标的链接
     #    后面跟的是裸数字，不是「失守 <b>」—— 两种形状分得开）。
     for m in re.finditer(
-            r'f=win:%d:lv:(R0|L2|L1)">(?:失守|拦截|注意) <b>' % M.WINDOW_HOURS,
+            r'f=win:%d:lv:(R0|L2|L1)">(?:没守住|挡下|提醒) <b>' % M.WINDOW_HOURS,
             page):
         out.append("药丸计数链接（%s）" % m.group(1))
     return out
@@ -5097,10 +5097,10 @@ def n_u20():
     if anchor not in src:
         return "变异锚点未找到（源码已变，需更新负控）—— 负控自身失效，不算通过"
     pills = ('        "<span class=\\"pill\\">最近 %d 小时：'
-             '<a href=\\"/?v=inbox&f=win:%d:lv:R0\\">失守 <b>9</b>'
+             '<a href=\\"/?v=inbox&f=win:%d:lv:R0\\">没守住 <b>9</b>'
              '（已归并为 1 件事）</a> · '
-             '<a href=\\"/?v=inbox&f=win:%d:lv:L2\\">拦截 <b>9</b></a> · '
-             '<a href=\\"/?v=inbox&f=win:%d:lv:L1\\">注意 <b>9</b></a></span>"\n'
+             '<a href=\\"/?v=inbox&f=win:%d:lv:L2\\">挡下 <b>9</b></a> · '
+             '<a href=\\"/?v=inbox&f=win:%d:lv:L1\\">提醒 <b>9</b></a></span>"\n'
              % (M.WINDOW_HOURS, M.WINDOW_HOURS, M.WINDOW_HOURS, M.WINDOW_HOURS))
     page, why = _mut_render(src.replace(anchor, pills + anchor),
                             "is0490_nu20", _SERVER_REL,
@@ -6440,7 +6440,13 @@ _STE_REL_TIME = re.compile(r"昨天|今天|明天|今晚|刚才|刚刚|目前|�
                            r"随后|不久前|之前|此前|日前|前一天")
 _STE_REL_RECENT = re.compile(r"最近(?![ ]*(%[sd]|[一二三四五六七八九十\d]+)"
                              r"[ ]*(小时|分钟|天|日))")
-_STE_STATE = "失守|值守中|缺粮|拦截|注意"
+#: ★★ 0.57.1 第二稿：D2 族（「时间词＋灯态词」＝红）的**前提变了**。
+#:   原前提是「灯态词只认此刻」⇒「昨天失守」自相矛盾。现在三个词既是灯态名
+#:   也是事件名 ⇒「最近 24 小时挡下 5 次」「昨天没守住 3 次」都是**正确说法**。
+#:   再拿 D2 扫它们就是尺子误伤真实现（实测 inbox_model L2612「最近 %d 小时
+#:   挡下 %d 次，都替你处理完了」被判红）。⇒ 只留纯灯态的两个词：
+#:   「值守中」「缺粮」永远只描述此刻，带时间词仍必红。
+_STE_STATE = "值守中|缺粮"
 _STE_D2A = re.compile(r"(昨天|今天|刚才|刚刚|之前|此前|日前|前一天)"
                       r"[^，。；]{0,6}(%s)" % _STE_STATE)
 _STE_D2B = re.compile(r"(?<![一二三四五六七八九十])(%s)[ ]*(%%d|\d+)"

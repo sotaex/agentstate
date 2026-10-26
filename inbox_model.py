@@ -147,14 +147,14 @@ LEVEL_OF_KIND = {
 # 人类可读标题（大白话，不许写成内部术语）。
 # ★ 消费点：收件箱列表、托盘提示、通知标题 —— 不是"登记了没人查"的字段。
 TITLE_OF_KIND = {
-    "host_shield_tamper": "失守：防护文件被改动",
+    "host_shield_tamper": "没守住：防护文件被改动",
     # ★ 0.37.1：标题里的「看门狗」改成「哨兵」—— 词表、托盘图标、归因文案
     #   都叫它「哨兵」，只有这两个标题还在说「看门狗」。
     #   后果不是"不好听"：同一条失守的**标题**写「看门狗没能启动」、
     #   紧挨着的**原因**却写「哨兵启动自检不符」⇒ 用户读到两个名字指同一个东西，
     #   只好停下判断它俩是不是一回事（创始人说的"违和感"）。
-    "host_shield_spawn_failed": "失守：监理没能启动",
-    "host_shield_zone_locked": "失守：安全区加锁失败",
+    "host_shield_spawn_failed": "没守住：监理没能启动",
+    "host_shield_zone_locked": "没守住：安全区加锁失败",
     # ★ 0.35.3 修（创始人 2026-10-06「要处理 37 条」复盘时发现）：
     #   旧标题是「**已拦截**：越界动作被挡下」—— 但 `host_shield_breach` 描述的
     #   根本不是"拦住了"，而是"**有东西没被挡住**"（自启缺失 / 落点没人巡检 /
@@ -163,12 +163,12 @@ TITLE_OF_KIND = {
     # ★ 0.53.1（创始人 2026-10-18）：去掉「防护有缺口」里的「缺口」—— 它不是态名，
     #   而账本曾把同一个 R0 叫「防护缺口／缺口」。标题已用「失守：」打头，后半句
     #   只需说清"是什么事"，不该再引入一个会被读成第四种态的词。
-    "host_shield_breach": "失守：有东西没被挡住",
-    "host_shield_revived": "注意：防护已恢复",
-    "host_shield_changed": "注意：防护设置被改动",
-    "host_shield_dev_drift": "注意：研发迭代中（代码与登记的那份不符）",
+    "host_shield_breach": "没守住：有东西没被挡住",
+    "host_shield_revived": "提醒：防护已恢复",
+    "host_shield_changed": "提醒：防护设置被改动",
+    "host_shield_dev_drift": "提醒：研发迭代中（代码与登记的那份不符）",
     "credits_low": "缺粮：积分余额偏低",
-    "tool_call_blocked": "拦截：危险操作被挡下",
+    "tool_call_blocked": "挡下：危险操作没有执行",
     # ★ 0.53.0（T1.3）：首检提醒标题。S1/S3 两种事由的**具体文案**走
     #   host_shield.record 的 reason（subkind=never/overdue 区分），
     #   这里只给默认标题（TITLE_OF_TOPIC 未登记 subkind 时的回落）。
@@ -180,20 +180,20 @@ TITLE_OF_KIND = {
 #:   「开机不会自动防护」和「有落点没人巡检」都是 `host_shield_breach`，
 #:   但用户该做的事完全不同（前者装自启，后者做裁决）。
 TITLE_OF_TOPIC = {
-    "autostart_missing": "失守：开机不会自动防护（要你装一次自启）",
-    "spawn_failed": "失守：监理没能启动",
+    "autostart_missing": "没守住：开机不会自动防护（要你装一次自启）",
+    "spawn_failed": "没守住：监理没能启动",
     # ★★ 0.40.0（A5）：按**病因**分，不再按"哪个字段"分 ——
     #   `self_check` / `registry` 都是「代码/登记表与 manifest 不符」⇒ **一件事**（code_drift）；
     #   `enabled` / `state` 都是「安全状态字段在运行期漂移、哨兵已回写恢复」⇒ **另一件事**（state_drift）。
     #   改前：前者被拆成两行、后者三因挤一行（归并键 `(kind, topic, level)`，后三者 topic 为空）。
     #   ★ 旧 `self_check` 词条**保留**：链 append-only，历史记录（实测 47 条）仍是那个 subkind。
-    "code_drift": "失守：防护文件被改动（代码与登记的那份不符）",
-    "state_drift": "失守：防护文件被改动（状态被改，已自动恢复）",
-    "self_check": "失守：防护文件被改动（要你核对/重装）",
+    "code_drift": "没守住：防护文件被改动（代码与登记的那份不符）",
+    "state_drift": "没守住：防护文件被改动（状态被改，已自动恢复）",
+    "self_check": "没守住：防护文件被改动（要你核对/重装）",
     # ★★ 0.40.0（A8）：`zone_locked` 兼表成败 —— **成功**那条不能借用 kind 标题
-    #   （kind 标题写着"失守：安全区加锁失败"），否则一条成功被读成失守。
-    "zone_ok": "注意：安全区已上锁（区内防篡改）",
-    "zone_lock_failed": "失守：安全区加锁失败",
+    #   （kind 标题写着"没守住：安全区加锁失败"），否则一条成功被读成失守。
+    "zone_ok": "提醒：安全区已上锁（区内防篡改）",
+    "zone_lock_failed": "没守住：安全区加锁失败",
 }
 
 #: 首检提醒判定常量（设计 v1.11 §29.1；判定本体见 `exam_state`）。
@@ -604,7 +604,7 @@ DEMOTE_RECOVERED_TO = "L1"
 
 #: 降档后的标题（★ 方向必须同向：降到 L1 就**不许**再挂「失守」二字）。
 TITLE_WHEN_DEMOTED = {
-    "host_shield_tamper": "注意：防护设置被改、已自动恢复",
+    "host_shield_tamper": "提醒：防护设置被改、已自动恢复",
 }
 
 
@@ -671,10 +671,10 @@ def title_of_record(kind, level, topic=""):
         return base                                  # 没改档 ⇒ 原标题
     if kind == "host_shield_zone_locked":
         # A8：成功 ⇒ 换成"已上锁"标题（借 R0 那条会把成功读成失守）。
-        return TITLE_OF_TOPIC.get("zone_ok") or "注意：安全区已上锁（区内防篡改）"
+        return TITLE_OF_TOPIC.get("zone_ok") or "提醒：安全区已上锁（区内防篡改）"
     # ★ 兜底（不许静默留着「失守」二字）：没登记专用文案 ⇒ 把方向改过来。
     return TITLE_WHEN_DEMOTED.get(kind) or (
-        "注意：" + base[len("失守："):] if base.startswith("失守：") else base)
+        "提醒：" + base[len("没守住："):] if base.startswith("没守住：") else base)
 
 
 #: ★★ 0.43.0：**用户可见文本**的去 markdown 化（**唯一实现**）。
@@ -2194,7 +2194,7 @@ STATE_DEV = "dev"        # 蓝：研发迭代中（在守，代码比登记的�
 #:   ⇒ 教训与 JDG-05 同型：**新增模块级常量必须先查占用**。
 LIGHT_STATES = (STATE_R0, STATE_L2, STATE_L1, STATE_Ls, STATE_L0, STATE_DEV)
 
-STATE_LABEL = {STATE_R0: "失守", STATE_L2: "拦截", STATE_L1: "注意",
+STATE_LABEL = {STATE_R0: "没守住", STATE_L2: "挡下", STATE_L1: "提醒",
                STATE_Ls: "缺粮", STATE_L0: "值守中", STATE_DEV: "研发中"}
 
 #: ★★★ 六态短名的**唯一真源**就是上面这张 `STATE_LABEL`（**只描述此刻**）。

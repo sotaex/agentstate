@@ -335,7 +335,7 @@ def n_c3():
 #:   那么"有人把 inbox_model 里的六态改成七态"时，判据会跟着变，等于没守。
 #:   写死在这里，两边不一致就报红。
 SIX_STATES = ("R0", "L2", "L1", "Ls", "L0", "dev")
-SIX_LABELS = {"R0": "失守", "L2": "拦截", "L1": "注意",
+SIX_LABELS = {"R0": "没守住", "L2": "挡下", "L1": "提醒",
               "Ls": "缺粮", "L0": "值守中", "dev": "研发中"}
 #: L0 的灰变体（未启用与值守中同属 L0，差别只在"有没有在守"）。
 L0_VARIANT = "未启用"
@@ -966,12 +966,23 @@ def _decl_scan(files):
     return bad
 
 
-def _two_sources_ok(event_tb):
-    """两个真源的**关系**检查（纯函数，判据与负控共用）。返回问题串或 True。
+def _two_sources_ok(event_tb, state_tb):
+    """灯态表与事件表的**关系**检查（纯函数，判据与负控共用）。返回问题串或 True。
 
     两条腿：
       ① 产品 EVENT_LABEL 与对照样逐字一致（词是**敲定**的，不是随手起的）；
-      ② R0/L2/L1 三个键的事件词不许掉进灯态词表（一词二义即红）。
+      ② 同一个键在两表里**必须同值**（一个概念一个词）。
+
+    ★★ 0.57.1 第二稿：第②腿**口径反转**。原文是「事件词不许掉进灯态词表」
+      —— 那是「灯上叫失守、账上叫出事」那套的补丁。2026-10-26 创始人第二次
+      拍桌子（截图：同一屏上「失守」和「没守住」并存）之后，三个概念各定一个
+      词：没守住／挡下／提醒。这三个词天然胜任两个语义（「现在没守住」／
+      「昨天没守住 3 次」），所以**两表同值是正确结果，不是违规**。
+      判据随之**升级**：从「不许重叠」改成「必须相同」—— 后者更强，
+      它挡的是「灯上叫 A、账上叫 B」这种要让用户记两套词的形状。
+      ★ 旧口径为何会被骗过：它只查「事件词是否出现在灯态词表的值里」，
+        「失守」在灯上、「没守住」在账上时两表零重叠 ⇒ 旧腿判绿。
+        用户却在同一屏上看到两个词 —— 这正是 0.57.1 漏掉的那一半。
     """
     for k, want in EVENT_LABELS_REF.items():
         got = event_tb.get(k)
@@ -979,10 +990,42 @@ def _two_sources_ok(event_tb):
             return ("事件名 %s 应是 %r，实际 %r —— 过去的事用什么词是 0.53.5 "
                     "敲定的，改它等于把那次裁定作废" % (k, want, got))
     for k in EVENT_LABELS_REF:
-        if event_tb.get(k) in SIX_LABELS.values():
-            return ("事件词 %r 掉进了灯态词表 —— 一个词同时描述'此刻'和'过去'，"
-                    "就是截图里「昨天失守」的根因" % event_tb.get(k))
+        sv = (state_tb or {}).get(k)
+        ev = event_tb.get(k)
+        if sv != ev:
+            return ("同一个概念在灯上与账上叫两个名（此刻「%s」／记录「%s」，键 %s）"
+                    "—— 用户得在屏上记两套词，点开还要再翻译一次；"
+                    "0.57.1 之前「失守」与「没守住」并存就是这么来的"
+                    % (sv, ev, k))
     return True
+
+
+def _retired_words_in_copy(kind_titles, topic_titles, terms, retired):
+    """**上屏文案里也不许出现判死词**。返回问题串或 True。
+
+    ★★ 为什么必须单独一条（0.57.1 第二稿，创始人第二次拍桌子）：
+      判死表原先只扫"词名位"（两张词表 ＋ 词条本名的 `w`）。可屏上还有个
+      **大得多**的面：每条记录的标题（`TITLE_OF_TOPIC` 里「失守：…」那种
+      前缀）、词条正文（`one/inc/exc/unit`）。
+      创始人两次截图指的正是这两处 —— 词名位改完了、标题前缀还是旧词，
+      用户一眼照样看到「失守」，而所有判据全绿。**扫描面漏了，全是假绿。**
+    ★ 只扫产品自己的文案字段；判死表本身不在扫（它必须留着旧词当键）。
+    ★ 正文里出现旧词**有没有正当理由**？没有 —— 想解释"什么不算它"应该
+      写正面的新词（「不是故障，也不是没守住」），不该把判死的词请回屏上。
+    """
+    hits = []
+    for name, table in (("事由标题", kind_titles), ("记录标题", topic_titles)):
+        for k, v in (table or {}).items():
+            for w in (retired or {}):
+                if w in str(v):
+                    hits.append("%s「%s…」里有判死词「%s」" % (name, str(v)[:18], w))
+    for k, t in (terms or {}).items():
+        for f in ("w", "one", "inc", "exc", "unit"):
+            body = str((t or {}).get(f) or "")
+            for w in (retired or {}):
+                if w in body:
+                    hits.append("词条 %s 的 %s 里有判死词「%s」" % (k, f, w))
+    return "；".join(hits[:6]) or True
 
 
 def _event_words_explained(event_tb, terms):
@@ -1071,7 +1114,7 @@ def s08():
     bad = _decl_scan(_source_files())
     if bad:
         return _raise("；".join(bad[:6]))
-    r = _two_sources_ok(M.EVENT_LABEL)
+    r = _two_sources_ok(M.EVENT_LABEL, M.STATE_LABEL)
     if r is not True:
         return _raise(r)
     r2 = _event_words_explained(M.EVENT_LABEL, GL.TERMS)
@@ -1081,8 +1124,12 @@ def s08():
                                getattr(GL, "RETIRED_WORDS", {}))
     if r3 is not True:
         return _raise(r3)
+    r4 = _retired_words_in_copy(M.TITLE_OF_KIND, M.TITLE_OF_TOPIC, GL.TERMS,
+                                getattr(GL, "RETIRED_WORDS", {}))
+    if r4 is not True:
+        return _raise(r4)
     return ("灯态词全仓只有 inbox_model.py 一份、事件词同样只有 "
-            "EVENT_LABEL 一份；R0/L2/L1 两表值零重叠；"
+            "EVENT_LABEL 一份；R0/L2/L1 两个表**逐字同值**（一个概念一个词）；"
             "三个事件词都在各自词条的正文里被解释；已判死的词没回来")
 
 
@@ -1097,22 +1144,25 @@ def n_s08():
     prose = [("inbox_tray.py", 'X = {"R0": "出过事"}\nY = {"L2": "挡住过"}\n')]
     if _decl_scan(prose):
         return _raise("把散文误判成事件名声明 ⇒ 扫描器有假阳性")
-    # ② 一词二义：把事件词改回灯态词（「昨天失守」的根因形态）
+    # ② 一个概念两个名：把**灯态表**的 R0 改回旧词（截图里「失守」与「没守住」
+    #    同屏的形态）。★ 必须变异灯态表、不能变异事件表：改事件表会先被腿①的
+    #    对照样抓到，那条红样本属于①，测不到②这条新口径（腿各有专属红样本）。
     orig = dict(M.EVENT_LABEL)
+    orig_st = dict(M.STATE_LABEL)
     try:
-        M.EVENT_LABEL["R0"] = "失守"                                # ← MUTANT
-        if _two_sources_ok(M.EVENT_LABEL) is True:
-            return _raise("事件词与灯态词重叠（一词二义），S08 仍判通过 "
-                          "⇒ 截图里「昨天失守」那个形态没人守")
+        M.STATE_LABEL["R0"] = "失守"                                # ← MUTANT
+        if _two_sources_ok(M.EVENT_LABEL, M.STATE_LABEL) is True:
+            return _raise("灯上叫「失守」、账上叫「没守住」，S08 仍判通过 "
+                          "⇒ 同一个数在屏上两个名字，没人守")
     finally:
-        M.EVENT_LABEL.clear()
-        M.EVENT_LABEL.update(orig)
-    if _two_sources_ok(M.EVENT_LABEL) is not True:
-        return _raise("还原 EVENT_LABEL 后仍判红 ⇒ 还原链路坏了")
+        M.STATE_LABEL.clear()
+        M.STATE_LABEL.update(orig_st)
+    if _two_sources_ok(M.EVENT_LABEL, M.STATE_LABEL) is not True:
+        return _raise("还原 STATE_LABEL 后仍判红 ⇒ 还原链路坏了")
     # ③ 事件词漂移：换一个同义字（「挡住」）也要红 —— 词是敲定的
     try:
         M.EVENT_LABEL["L2"] = "挡住"                                # ← MUTANT
-        if _two_sources_ok(M.EVENT_LABEL) is True:
+        if _two_sources_ok(M.EVENT_LABEL, M.STATE_LABEL) is True:
             return _raise("把「挡下」换成「挡住」，S08 仍判通过 "
                           "⇒ 一词多义族（0.53.4 拦下/挡下）会从这里复发")
     finally:
@@ -1161,6 +1211,19 @@ def n_s08():
     if _retired_words_absent(M.STATE_LABEL, M.EVENT_LABEL, GL.TERMS,
                              getattr(GL, "RETIRED_WORDS", {})) is not True:
         return _raise("现行词表里就有已判死的词 ⇒ 判据与源码不一致")
+    # ⑥ 文案面：往**记录标题**里塞判死词 ⇒ 必须红（0.57.1 第二稿）。
+    #    ★ 这一腿的专属红样本是"标题前缀"，不是"词名位" —— 创始人第二次
+    #      截图指的就是标题那一行（「失守：防护文件被改动」），而 ⑤ 只测
+    #      词名位；两条腿各守一个面，拿 ⑤ 的红样本测 ⑥ 会得假绿。
+    _topic = dict(M.TITLE_OF_TOPIC)
+    _topic["_fake"] = "失守：判据自造的标题"
+    if _retired_words_in_copy(M.TITLE_OF_KIND, _topic, GL.TERMS,
+                              getattr(GL, "RETIRED_WORDS", {})) is True:
+        return _raise("记录标题里出现判死词「失守」，S08 仍判通过 "
+                      "⇒ 屏上那行标题没人守")
+    if _retired_words_in_copy(M.TITLE_OF_KIND, M.TITLE_OF_TOPIC, GL.TERMS,
+                              getattr(GL, "RETIRED_WORDS", {})) is not True:
+        return _raise("现行标题里就有判死词 ⇒ 判据与源码不一致")
     if _event_words_explained(M.EVENT_LABEL, GL.TERMS) is not True:
         return _raise("走完负控后现行源仍判红 ⇒ 夹具污染了产品模块")
     return ("第二份事件名/一词二义/事件词漂移/上屏词无解释/判死词回来 "

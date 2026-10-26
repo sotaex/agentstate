@@ -735,7 +735,7 @@ def c_empty_copy():
         if filt != "action" and "没有要你处理的事" in h:
             return "%s 空页还在说「没有要你处理的事」—— 说的不是当前筛选结果" % filt
     h = _empty_view("kind:host_shield_revived")
-    if "当前筛选「注意：防护已恢复」没有匹配记录" not in h:
+    if "当前筛选「提醒：防护已恢复」没有匹配记录" not in h:
         return "类型钻取空页没有回显筛选对象（输出违和/用户不知道空在哪）"
     return True
 
@@ -2009,7 +2009,7 @@ def n_b14():
     if "认成监理窗" not in why:
         return "负控方向不对：红的原因不是「被认成监理窗」（实际：%s）" % why
     # ② 旧格式（事由开头、编号收尾）：与监理不同款
-    old = "<title>拦截：危险操作被挡下%s#abc123</title>" % WIN.BUBBLE_TITLE_MARK
+    old = "<title>挡下：危险操作没有执行%s#abc123</title>" % WIN.BUBBLE_TITLE_MARK
     why2 = _b14_core(html.replace(good, old), "abc123")
     if why2 is True:
         return "负控失效：旧格式标题仍判合格"
@@ -6526,7 +6526,7 @@ def n_j3():
         return "负控失效：注入带码 summary 后 J3 仍判绿（尺子没分辨力）"
     # ② 撤掉 R0 那枚（退回裸词）⇒ 枚数 4 ⇒ 必须红
     dead2 = re.sub(r'<span class="sixit"><details\b[^>]*data-t="R0".*?</details>'
-                   r'</span>', '<span class="sixit">失守</span>', h, flags=re.S)
+                   r'</span>', '<span class="sixit">没守住</span>', h, flags=re.S)
     if dead2 == h:
         return "夹具不成立：摘不到 R0 那枚芯片（结构已变）"
     if _light_order_summaries_ok(dead2) is True:
@@ -8013,7 +8013,7 @@ def n_t4_term_budget():
     orig = GL.TERMS["light"]["inc"]
     try:
         GL.TERMS["light"]["inc"] = (
-            "它按来源拼：失守只认此刻；拦截／注意看最近 24 小时的账，"
+            "它按来源拼：没守住只看此刻；挡下／提醒看最近 24 小时的账，"
             "但只有刚发生的才算数 —— 你看过、或放久了，就转成「待阅」里的一条，"
             "不再占着灯。")
         r = c_t4_term_budget()
