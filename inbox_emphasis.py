@@ -97,39 +97,16 @@ class RecordingOverlay(OverlayBackend):
         return True
 
 
-class WindowsOverlay(OverlayBackend):
-    """桌面右下角浮层（WinForms 无边框窗体，5 秒后自散）。"""
-    name = "windows"
-
-    def show(self, level, count, text):
-        if os.name != "nt":
-            return False
-        t = str(text).replace("'", "''")[:80]
-        ps = (
-            "Add-Type -AssemblyName System.Windows.Forms;"
-            "Add-Type -AssemblyName System.Drawing;"
-            "$f=New-Object System.Windows.Forms.Form;"
-            "$f.FormBorderStyle='None';$f.TopMost=$true;$f.ShowInTaskbar=$false;"
-            "$f.BackColor=[System.Drawing.Color]::FromArgb(20,26,18);"
-            "$f.Size=New-Object System.Drawing.Size(320,72);"
-            "$s=[System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea;"
-            "$f.Location=New-Object System.Drawing.Point(($s.Right-336),($s.Bottom-96));"
-            "$l=New-Object System.Windows.Forms.Label;$l.ForeColor='White';"
-            "$l.Font=New-Object System.Drawing.Font('Segoe UI',10);"
-            "$l.Text='%s';$l.Dock='Fill';$l.TextAlign='MiddleCenter';"
-            "$f.Controls.Add($l);$f.Show();"
-            "$t=New-Object System.Windows.Forms.Timer;$t.Interval=5000;"
-            "$t.add_Tick({$t.Stop();$f.Close()});$t.Start();"
-            "[System.Windows.Forms.Application]::Run($f)" % t)
-        try:
-            p = subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden",
-                                  "-Command", ps],
-                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                 stderr=subprocess.DEVNULL,
-                                 creationflags=0x08000000)
-            return p is not None
-        except Exception:                       # noqa: BLE001
-            return False
+# ── WindowsOverlay 已于 0.59.0 连根移除 ────────────────────────────────
+# 它曾经在这里拼一个 320×72 的深色 WinForms 无边框小窗（右下角、5 秒自散）。
+# ★ 删除理由（两条，各自都足够）：
+#   ① **外观不是主窗口的**：没有 Antinel 的 CSS，也没有官方 LOGO
+#      —— 创始人 2026-10-27 要求「新提醒跟主窗口差不多、都带 LOGO」；
+#   ② **它从未被接线**：全仓没有任何实例化点，是一段"随时可以被接上"的潜在实现。
+#      留一段死实现＝给下一次复发留入口，这与"两处实现"同罪。
+# ⇒ R0 的"把人叫醒"由品牌化浮窗承担（`inbox_bubble`，置顶、不自动消失）。
+# 保留 `OverlayBackend` / `NullOverlay` / `RecordingOverlay`：那是**注入点与夹具**，
+# 不产生任何像素，判据靠它们验"开关关着时零副作用"。
 
 
 def emphasize(level, count=0, text="", cfg=None, sound=None, overlay=None):

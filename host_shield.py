@@ -1040,9 +1040,14 @@ def console_is_visible():
       实测本轮：服务在监听、Antinel 监理窗口在位（520×640）⇒ 它是**间歇**的。
       ⇒ 「重启就好了」必然复发，因为它压根没碰机制。
 
-      泡泡的真身是 `_notify()` 的 `ShowBalloonTip` —— **Windows 气泡通知**，
+      泡泡的真身曾是 `_notify()` 自己拼的那套**系统通知**（原生外观，非品牌），
       它与Antinel 监理窗口是**两条互不相干的通道**。所以「泡泡 ≠ Antinel 监理」不是故障，
       是机制设计如此；真正的缺陷是：**该有窗口的时候，它照样弹**。
+
+      ★★★ 0.59.0：那套原生外观已**连根移除**（见 `_notify` 的说明） ——
+        现在一个事实只有一个外观（`inbox_bubble`，与主窗口同一套 CSS ＋ 官方 LOGO）。
+        本函数（可见性闸）**保留**，因为"窗口已显示同一件事就别再敲一次"这条判据
+        与用哪种外观无关，去掉它会退化成重复通知。
 
       ⇒ 机制性修法：把「此刻有没有该看的窗口」变成**一个可判定的事实**，
         降噪闸据此决定弹不弹。**不再靠各处自觉、不再靠重启。**
@@ -1157,70 +1162,21 @@ def _notify_icon_and_tip():
 
 
 def _notify(title, body, click_cmd=None, click_cwd=None):
-    """Windows 气泡通知（fire-and-forget）。失败静默——留痕已在链上，弹窗只是门铃。
-    ANTINEL_SHIELD_NOTIFY=0 关闭（回归套件用）。
+    """【0.59.0 已连根移除】这里曾经**自拼**一套系统托盘气泡 ——
+    `System.Windows.Forms` 的 `NotifyIcon` 与 `ShowBalloonTip`，
+    外观完全由 Windows 决定，没有 Antinel 品牌的任何痕迹。那就是「上古泡泡」。
 
-    ★★ 0.35.2 改（创始人 2026-10-06「右下冒泡是有问题的」）：
-      1. **可点**：点气泡直接开Antinel 监理（旧版 8 秒后自己消失，点了**没有任何反应**）。
-      2. 想收到点击就必须**泵消息**：`Start-Sleep` **不泵消息** ⇒
-         `BalloonTipClicked` 永远不会触发。这里改成
-         **有时限的 `Application::DoEvents()` 循环** —— 既泵消息，又**不会永久挂住**
-         （比 `Application::Run()` 安全：后者一旦定时器没触发就会留下常驻进程）。
-      3. 内容不再拿内部类型名当人话（见 `_notify_throttled` / `_human_kind`）。
-
-    ★★★ 0.36.5 修根因②（**这才是「又冒泡泡」的机制性根因之一**）：
-      图标原来**写死** `SystemIcons.Warning`（黄色警告三角），**与当前姿态无关**。
-      ⇒ 「值守中」也用警告图标 ⇒ 每次通知看起来都像"出事了"，
-        而用户恰恰在**状态良好**时收到它 —— 于是"冒泡泡"成了一个
-        **每 30 分钟复现、无视真实状态**的假警报。
-      ⇒ 现在图标**随姿态取**：真出事了才是警告色，正常通知用普通信息图标。
-        取不到姿态 ⇒ 用 Information（**偏中性**，不谎称出事）。
-
-    ★ 为什么不干脆改成「不发气泡」：气泡是**唯一在窗口不可见时还能到用户眼前**的通道。
-      砍掉它 ⇒ 真失守在后台时用户完全不知道 ⇒ 那是把一个假警报换成一个真盲区。
-      ⇒ 正确的修法是**让它别撒谎**（图标随姿态）＋ **别重复**（可见即不弹，
-        见 `_notify_throttled`），而不是删掉通道。
+    ★★ 为什么是删掉，而不是"改成委托某处发射"：
+      只要**短命进程**（钩子／CLI）手里还握着"自己产生像素"的能力，它就一定会赢。
+      因为这条路不需要 Edge、不需要端口、不需要窗口就位，比品牌化提醒容易一百倍。
+      旧病复发的力学不在概率，在这里 —— 留着它，就是在给下一次复发留入口。
+    ⇒ 现在短命进程**只写账、不产生像素**：
+      这条记录已经进了审计链，常驻监理下一拍就会把急事用
+      **唯一那套品牌化提醒**（`inbox_bubble`，与主窗口同一套 CSS ＋ 官方 LOGO）
+      送到眼前；窗口不开时，托盘角标与收件箱同样承载它。
+      **一个事实只有一个外观。**
     """
-    try:
-        if os.environ.get("ANTINEL_SHIELD_NOTIFY") == "0":
-            return
-        t = str(title).replace("'", "''")
-        b = str(body).replace("'", "''")[:180]
-        click = ""
-        if click_cmd:
-            exe = str(click_cmd[0]).replace("'", "''")
-            args = ",".join("'%s'" % str(a).replace("'", "''") for a in click_cmd[1:])
-            wd = ("" if not click_cwd
-                  else " -WorkingDirectory '%s'" % str(click_cwd).replace("'", "''"))
-            click = ("$n.add_BalloonTipClicked({ Start-Process -FilePath '%s'"
-                     " -ArgumentList %s -WindowStyle Hidden%s });" % (exe, args, wd))
-        # ★ 0.36.5：图标随姿态取，不再一律 Warning（判据见 inbox_guards_0365）
-        icon, tip = _notify_icon_and_tip()
-        ps = ("Add-Type -AssemblyName System.Windows.Forms;"
-              "Add-Type -AssemblyName System.Drawing;"
-              "$n=New-Object System.Windows.Forms.NotifyIcon;"
-              "$n.Icon=[System.Drawing.SystemIcons]::%s;$n.Visible=$true;"
-              "%s"
-              "$n.ShowBalloonTip(%d,'%s','%s','%s');"
-              "$end=(Get-Date).AddSeconds(%d);"
-              "while((Get-Date) -lt $end){[System.Windows.Forms.Application]::DoEvents();"
-              "Start-Sleep -Milliseconds 120};"
-              "$n.Visible=$false;$n.Dispose()"
-              # ★★ 0.36.5：第 4 个参数（BalloonTipIcon）**也**随姿态，
-              #   不只托盘图标。原先两处都写死 'Warning' ⇒ 任务栏气泡同样是
-              #   黄色警告三角 ⇒ 值守中也在"报警"。
-              #   ⚠️ 占位符与参数**逐一对应**（实测核对，别凭印象加）：
-              #     %s 托盘图标名 ｜ %s 点击处理 ｜ %d 停留毫秒 ｜ %s 标题
-              #     %s 正文 ｜ %s 气泡图标名 ｜ %d 停留秒
-              % (icon, click, _NOTIFY_LINGER * 1000, t, b, tip,
-                 _NOTIFY_LINGER))
-        subprocess.Popen([_POWERSHELL, "-NoProfile", "-WindowStyle", "Hidden",
-                          "-Command", ps],
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL,
-                         creationflags=_CREATE_NO_WINDOW)
-    except Exception:
-        pass
+    return None
 
 
 def notify(title, body):
@@ -4217,6 +4173,99 @@ def _hb_full_scan(p):
     return best
 
 
+#: 心跳信标文件名。**不进链、不持锁**，只回答「我这一拍还活着」。
+_HB_BEACON_NAME = "heartbeat.json"
+
+
+def _hb_beacon_path(audit_dir):
+    return os.path.join(audit_dir or _hub_rollup_dir(), _HB_BEACON_NAME)
+
+
+def read_heartbeat_beacon(audit_dir):
+    """读心跳信标的 ts（读不到 ⇒ None）。只做一件事：把"有没有心跳"说清楚。"""
+    try:
+        with open(_hb_beacon_path(audit_dir), encoding="utf-8") as f:
+            d = json.load(f)
+        ts = d.get("ts") if isinstance(d, dict) else None
+        return ts if isinstance(ts, str) and ts else None
+    except Exception:                                            # noqa: BLE001
+        return None
+
+
+def write_heartbeat_beacon(audit_dir, pid=None):
+    """把「这一拍还活着」写成一个小文件（临时文件＋原子替换，**不申请链锁**）。
+
+    ★★★ 为什么非有它不可（2026-10-27 实测，创始人报障「上古的冒泡又复发了」）：
+      心跳原来**只进审计链**。而审计链的锁在本机会大面积抢不到
+      （`lock_events.jsonl` 单日 `acq_timeout` **4622 次**，另有 66 次 `release_err`），
+      抢不到就按策略落 `audit/sidecar/<日>.<pid>.jsonl`。
+      而**读心跳的那一侧只扫审计目录顶层的 `*.jsonl`**（`_heartbeat_age_in`），
+      看不到 sidecar ⇒ 今天 sidecar 里躺着 **903 条心跳**，读者眼里却是
+      「37 分钟没有心跳」⇒ `ensure_alive` 杀活哨兵、重拉、记
+      `host_shield_revived`（severity=critical，在 `_ALERT_KINDS` 里）⇒ **冒一个泡**。
+      重建出来的哨兵打的又是 sidecar ⇒ 又被判死 ⇒ 单日 revived **697 条**、
+      每 3 分钟一轮、连续五天。**这不是"心跳没打"，是"心跳打在了读者不看的地方"。**
+    ★ 修法为什么落在"信标"而不是"让读者去扫 sidecar"：
+      sidecar 现已 2591 个文件；`_heartbeat_age_in` 在**每次工具调用**（paramedic）
+      和**每次页面渲染**上被调用，扫一遍 sidecar 要几十秒 —— 那会把钩子拖成超时
+      （超时＝放行），等于用安全换正确性。信标是**一个文件、一次 open**。
+    ★ 它为什么不算"第二份真源"：信标只承载**一个**事实——「上一拍是什么时候」，
+      而且是链记录的**投影**；链仍是证据本体，`chain_armed_scan` 仍只认链。
+      与既有的「在岗名片」（`write_sentinel_card`，同样是低频投影）同一性质。
+    ★ 它为什么不能被"顺手改旧"当保护失效：age 是**单调**判据 —— 改旧＝报"僵死"
+      （fail-closed，会重启），改新需要写权限，而能写它的人本来就能杀进程。
+    """
+    p = _hb_beacon_path(audit_dir)
+    ts = datetime.now().astimezone().isoformat(timespec="seconds")
+    tmp = p + ".tmp"
+    try:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+            json.dump({"ts": ts, "pid": int(pid or os.getpid())}, f,
+                      ensure_ascii=False, sort_keys=True)
+        _replace_with_retry(tmp, p)
+        return True
+    except Exception:                                            # noqa: BLE001
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except OSError:
+            pass
+        return False
+
+
+def _ts_newer(a, b):
+    """`a` 是否比 `b` 更晚（按**解析后的时刻**比，不按字符串比）。
+
+    ★ 为什么不直接 `a > b`：两边的 ts 来源不同（链记录 `2026-10-27T09:14:17+08:00`
+      与信标 `2026-10-27T09:14:17+08:00` 格式可能带不带秒/带不带时区），
+      字符串比较在"长度不同"或"夏令时偏移不同"时会**给出相反结论** ——
+      而这里的结论决定"要不要杀掉用户的活进程"，方向错一次就是一次误杀。
+    """
+    def _p(x):
+        try:
+            return datetime.fromisoformat(str(x))
+        except (ValueError, TypeError):
+            return None
+    pa, pb = _p(a), _p(b)
+    if pa is not None and pb is not None:
+        return pa > pb
+    return str(a) > str(b)                     # 解析不了才退回字面比较（如实降级）
+
+
+def _state_gate(state):
+    """这份 state 能不能拿去和链比 —— **读不到就不许比**。返回 bool。
+
+    ★ 判据只有一条：`enabled` 必须是**真的布尔**。
+      · `None` / 缺键 ⇒ 这是**坏读或坏文件**（`load_state_strict()` 失败，或读到半写）；
+      · `0/1`、"true"/"false" 之类的字符串 ⇒ 也不是我们写出去的东西。
+      ⇒ 这三种一律返回 False：本拍**不比、不写回、不记 tamper**。
+    ★ 为什么要单独抽一个命名函数：judge 要能只换掉这一处来验"没有它就会误判"
+      （负控要咬住同一实现，不许另写一份 if 去模拟）。
+    """
+    return isinstance(state, dict) and isinstance(state.get("enabled"), bool)
+
+
 def _heartbeat_age_in(d):
     """(age_seconds|None, last_ts|None)：**按审计目录**算心跳年龄（唯一实现）。
 
@@ -4251,12 +4300,20 @@ def _heartbeat_age_in(d):
     except OSError:
         files = []
     for name in files:
+        # ★ `lock_events.jsonl` 是**锁的账**，不是事件链：里面没有 `ts` 字段，
+        #   扫它只会把尾窗读空再触发一次全扫（白付一次 O(文件大小)）。
+        if name == "lock_events.jsonl":
+            continue
         p = os.path.join(d, name)
         ts, head_ts = _hb_tail_scan(p)
         if ts is None or (head_ts is not None and head_ts > ts):
             ts = _hb_full_scan(p)          # ③ ④：空窗/乱序探针 ⇒ 全扫回退
-        if ts and (best_ts is None or ts > best_ts):
+        if ts and (best_ts is None or _ts_newer(ts, best_ts)):
             best_ts = ts
+    # ★ 信标与链取**较新**的那一个：信标不持锁、链是证据，两者谁新算谁。
+    _b_ts = read_heartbeat_beacon(d)
+    if _b_ts and (best_ts is None or _ts_newer(_b_ts, best_ts)):
+        best_ts = _b_ts
     if not best_ts:
         return None, None
     try:
@@ -4334,6 +4391,10 @@ def sentinel_heartbeat_age():
 # ------------------------------------------------------- 哨兵主循环 ----
 _BREACH_TIMES = []                               # 拉锯判定滑动窗（B6，monotonic）
 _DIVERGE_LAST = [0.0]                            # enabled 发散 tamper 的上报节流（wall）
+#: 0.58.1：安全状态文件「读不出来」的**诊断**上报节流（wall）。
+#:   ★ 与 `_DIVERGE_LAST` 刻意分开两本账：一个是"读到了、但和链不符"（篡改嫌疑），
+#:     另一个是"根本没读到"（盲区）。合成一个计数器就会让两类事互相顶掉额度。
+_STATE_UNREADABLE_LAST = [0.0]
 
 
 def _task_watchdog(state, audit_dir, now):
@@ -4705,7 +4766,31 @@ def run_sentinel(root):
     _eg_tick = [0]
     root = os.path.abspath(root)
     audit_dir = _shield_audit_dir(root)
-    state = load_state()
+    # ★★★ 0.58.1：启动这一读也必须是 strict。
+    #   旧写法 `state = load_state()` 在**读不到**时编出 `{"enabled": False}`，
+    #   下面 `int(state.get("sentinel_pid"))` 于是抛 TypeError ⇒ `_old = 0` ⇒
+    #   **单实例检查被跳过** ⇒ 允许再起一个哨兵（双跑、双写状态、互相判死）。
+    #   这正好解释了盘上 `host_shield_revived` 里那批
+    #   「哨兵不在（旧 pid=None），由 console 重新拉起」的记录。
+    #   ⇒ ① 先重试几次（`os.replace` 的共享冲突是**瞬时**的，毫秒级）；
+    #     ② 仍读不到 ⇒ 记一条**盲区**诊断（warning，不进告警集合），
+    #        并且**绝不编"已撤防"**；单实例检查这一步如实标为"没做"。
+    state = None
+    for _try in range(6):
+        state = load_state_strict()
+        if _state_gate(state):
+            break
+        time.sleep(0.05)
+    _single_check_ok = _state_gate(state)
+    if not _single_check_ok:
+        record(audit_dir, "host_shield_state_unreadable",
+               decision="allow", severity="warning", subkind="state_unreadable",
+               reason="启动时安全状态文件读不出来，连试六次都没读到。"
+                      "这不是篡改：没有编造默认值，也没有动开关。"
+                      "代价说清：这一轮没做成单实例检查。"
+                      "读不到已经在跑的监理进程号，所以可能有两个监理同时在岗。"
+                      "等文件能读了会自行收敛。")
+        state = {"enabled": True}     # 只保证下面 .get 不炸，**不代表已布防**
     # 唯一性：已有活哨兵（pid 活着且不是本进程）→ 安静退出，避免双跑双锁
     try:
         _old = int(state.get("sentinel_pid"))
@@ -4783,7 +4868,36 @@ def run_sentinel(root):
     print("Antinel host-shield 监理已启动（宿主审计门闸）", flush=True)
     while True:
         try:
-            state = load_state()
+            # ★★★ 0.58.1：这里**必须**用 strict 读，不许用 `load_state()`。
+            #   本模块 0.40.0 的立论原文（见 `load_state_strict` docstring）：
+            #   「`load_state()` 在读失败时返回 `{"enabled": False, ...}` ——
+            #     把『读不到』伪装成『读到了一份已撤防的』」，
+            #   并明令「凡是**要写回**的调用方，一律改用 `load_state_strict()`」。
+            #   而哨兵主循环正是**要写回**的那一类，却一直在用 `load_state()` ——
+            #   违反自己的规矩。后果（2026-10-27 实测，创始人报障「上古冒泡复发」）：
+            #     Windows 上 `os.replace` 在读者打开目标文件时会瞬时失败，
+            #     读者侧偶发读到半写文件 ⇒ `load_state()` 编出 enabled=False ⇒
+            #     本拍的"发散检查"把它当**事实** ⇒ 记一条
+            #     `host_shield_tamper`（severity=critical、recovered=True）⇒ 冒一个泡。
+            #     盘上证据：当日 `field=enabled / subkind=state_drift` 的记录里，
+            #     文案反复写「实际值（**None**）」—— None 不是任何人的写入值，
+            #     它是"这份 state 里根本没有 enabled 这个键"，也就是坏读。
+            #   ⇒ 修法：读不到就**说读不到**（warning 级、不进告警集合、不写回），
+            #     绝不把盲区读成篡改。
+            state = load_state_strict()
+            if not _state_gate(state):
+                _now_su = time.time()
+                if _now_su - _STATE_UNREADABLE_LAST[0] > 1800:
+                    _STATE_UNREADABLE_LAST[0] = _now_su
+                    record(audit_dir, "host_shield_state_unreadable",
+                           decision="allow", severity="warning",
+                           subkind="state_unreadable",
+                           reason="安全状态文件这一刻读不出来。"
+                                  "可能正被另一个进程替换，也可能是文件坏了。"
+                                  "这不是篡改：没有拿默认值去写回，也没有动开关。"
+                                  "下一拍会重试；连着 30 分钟都读不出来才需要人看。")
+                time.sleep(POLL_SECONDS)
+                continue
             # 1) 链增量：changed→armed 更新；执法证据→armed=True
             recs, saw_changed, reset = tail.new_records()
             if reset:
@@ -4849,6 +4963,14 @@ def run_sentinel(root):
             # 3) 心跳（armed 才打；monotonic 计时）
             now_m = time.monotonic()
             if armed and now_m - last_beat >= HEARTBEAT_SECONDS:
+                # ★★★ 0.58.1：**信标先写、链后写**，顺序不许反。
+                #   信标不申请链锁 ⇒ 链锁被抢爆时它照样落盘；链记录即便落进
+                #   `sidecar/`（读者不看那儿），"我还活着"这件事也已经说出去了。
+                #   反过来的顺序（先写链、链抛异常）会让信标一起丢掉 ——
+                #   那正是 2026-10-27「37 分钟没心跳」误杀活哨兵的形状。
+                if not write_heartbeat_beacon(
+                        audit_dir, state.get("sentinel_pid") or os.getpid()):
+                    print("!! 心跳信标未落盘（临时文件+原子替换失败）", flush=True)
                 record(audit_dir, "host_shield_heartbeat", decision="allow",
                        severity="none", reason="监理心跳（门闸在岗）",
                        watched=len(load_watch_registry(root)))

@@ -482,14 +482,21 @@ def _protected(funcs, emitters, prims_q, name, seen):
 def jdg02_body():
     paths = _scan_files()
     if not paths:
-        raise AssertionError("没扫到任何碰气泡通道的产品文件")
+        raise AssertionError("没扫到任何碰通知原语的产品文件")
     funcs, callers = _call_graph(paths)
     prims_q = {q for q in funcs for p in _BALLOON_PRIMS if q.endswith(":" + p)}
     emitters = _emitter_closure(funcs, prims_q)
     if not emitters:
-        raise AssertionError("调用图里没有任何气泡发射者")
-    # 只看入口：通道是「入口 → 真身」的路径，
-    # 中间的原语（如 _notify）由入口负责 ⇒ 不重复记账。
+        # ★★★ 0.59.0：**零发射者就是当前正确状态**（不是"没扫到"）。
+        #   旧不变式 I4「每条气泡路径都过可见性闸」的对象已经不存在 ⇒
+        #   它升级为 I4'「不存在第二条通道」，由 0431 S61 在全仓范围守。
+        #   本判据在这里负责回答另一个问题：**调用图里确实还有一个入口**
+        #   （否则 `_scan_files` 的扫描面缩水了，而缩水与干净同貌）。
+        if not funcs:
+            raise AssertionError("调用图是空的 ⇒ 扫描面缩水，"
+                                 "「零发射者」不可信")
+        return ("零发射者（正确状态）：通知原语只剩记账与委托；"
+                "调用图里 %d 个函数、扫描 %d 个文件" % (len(funcs), len(paths)))
     entries = _entries(funcs, callers, emitters)
     bad = [q for q in sorted(entries) if not _protected(funcs, emitters, prims_q, q, set())]
     if bad:
@@ -498,47 +505,55 @@ def jdg02_body():
     return "%d 个发射者 / %d 个入口，全部过闸" % (len(emitters), len(entries))
 
 
-@check("JDG-02 通道一致性 I4：每条气泡路径都过可见性闸", "n_ungated_channel")
+@check("JDG-02 通道一致性 I4：零原生发射者；若有人加回来，必须全部过可见性闸")
 def jdg02():
     return jdg02_body()
 
 
 def n_ungated_channel():
-    """负控：把 notify 的闸摘掉（复原 0.36.8 之前的形态）⇒ 判据必须报红。"""
-    _patch(SHIELD,
-           '    try:\n'
-           '        if console_is_visible() is True:\n'
-           '            return\n'
-           '    except Exception:\n'
-           '        pass                                # 判不出 ⇒ 照弹\n'
-           '    _notify(title, body)',
-           '    _notify(title, body)')
-    try:
-        jdg02_body()
+    """负控（0.59.0 换代）：现在正确状态是**零发射者**，所以负控不能再靠
+    "摘掉闸"制造红 —— 那等于要求发射者存在。改为验**量具还活着**：
+    塞一个含原生 UI 构造的假文件，`_call_graph` ＋ `_emitter_closure`
+    必须把它认成发射者。认不出 ⇒ "零发射者"是量具瞎了，不是产品干净。
+
+    ★ 这条负控咬的是**同一份实现**（`_call_graph`/`_emitter_closure` 都是
+      本文件里真跑的那两个函数），不是另写一个模拟。
+    """
+    import tmpreg as _TMP
+    d = _TMP.tmpdir("jdg02_")
+    p = os.path.join(d, "evil.py")
+    io.open(p, "w", encoding="utf-8").write(
+        u'def _notify(title, body):\n'
+        u'    ps = "Add-Type -AssemblyName System.Windows.Forms;"\n'
+        u'    ps = ps + "$n.ShowBalloonTip(8000, 1, 2, 3)"\n'
+        u'    return ps\n')
+    funcs, _c = _call_graph([p])
+    prims_q = {q for q in funcs for pr in _BALLOON_PRIMS if q.endswith(":" + pr)}
+    em = _emitter_closure(funcs, prims_q)
+    if not em:
         return False
-    except AssertionError:
-        return True
-    finally:
-        _restore_all()
+    return True
 
 
 # ═══════════════ JDG-02B 通道行为：结构之外的第二个半边 ═══════════════
 
 def jdg02b_body():
-    """行为判据：两条真实通道，可见⇒不弹、不可见⇒弹（四象限）。
+    """行为判据（0.59.0 换代）：**零像素** —— 四条腿都不许"弹"。
 
-    ★ 为什么必须有这一半边（自审实录）：结构检查判定「调了
-      console_is_visible 即算过闸」是**语法层**的。实测把闸写成
-      `if False and _hs.console_is_visible() is True:`——调用还在、
-      结构检查照样绿，而行为早已失效。⇒ 本仓纪律「判据只查行为」：
-      调用存在不等于判据生效，必须在效应边界上量。
+    ★ 旧版守「可见⇒不弹／不可见⇒弹」四象限。两套原生外观被连根移除后，
+      "不可见⇒弹"**不再成立，也不该成立**：短命进程只写账，像素由常驻监理
+      用品牌化浮窗产生。
+    ★★ 为什么不能只把期望值改成"不弹"了事：那样这条判据会变成
+      「断言什么都不发生」—— `_notify` 哪天被接上真发射，它照样绿
+      （因为没人期望它弹）。⇒ 必须有**探针活性**这一腿：
+      先用同一个探针量一次"真发生了我能看见"，再断言四次"都没发生"。
     ★ 副作用隔离：行为相位把 ANTINEL_HUB_DIR 指到临时目录，
-      不碰开发者真实账本（notify_owner 抑制时会写 notify_shown_in_window）。
+      不碰开发者真实账本（抑制路径会写通知账）。
     """
     import host_shield as hs
     import importlib
-    hs = importlib.reload(hs)          # ★ 自审：负控改的是磁盘，不复活模块对象
-    hookdir = os.path.join(ROOT, "hooks")   #   测的就是旧字节（与「凭记忆还原」同型）
+    hs = importlib.reload(hs)          # ★ 负控改的是磁盘，不复活模块对象就测的是旧字节
+    hookdir = os.path.join(ROOT, "hooks")
     if hookdir not in sys.path:
         sys.path.insert(0, hookdir)
     import pre_tool_use as p
@@ -551,33 +566,39 @@ def jdg02b_body():
     os.environ["ANTINEL_HUB_DIR"] = sandbox
     results = {}
     try:
-        # 通道一：host_shield.notify（安全键变更链 seven_step → notify）
-        real_notify = hs._notify
-        hits = []
-        hs._notify = lambda *a, **k: hits.append(1)
-        try:
-            hs.console_is_visible = lambda: True
-            hs.notify("t", "b")
-            results["notify@可见"] = not hits
-            hits.clear()
-            hs.console_is_visible = lambda: False
-            hs.notify("t", "b")
-            results["notify@不可见"] = bool(hits)
-        finally:
-            hs._notify = real_notify
-
-        # 通道二：hook 的 notify_owner（拦截气泡）—— 效应边界＝Popen
         real_popen = subprocess.Popen
         pops = []
-        subprocess.Popen = lambda *a, **k: pops.append(1)
+
+        def _fake_popen(*a, **k):
+            pops.append(1)
+            return None
+
+        subprocess.Popen = _fake_popen
         try:
+            # ── 腿 0：探针活性 —— 同一个探针，真被调用时必须看得见 ──
+            subprocess.Popen(("probe",))
+            results["探针活性（真调用必须看得见）"] = bool(pops)
+            pops.clear()
+
+            # ── 腿 1／2：host_shield.notify（安全键变更链）──
+            hs.console_is_visible = lambda: True
+            hs.notify("t", "b")
+            results["notify@可见：不弹"] = not pops
+            pops.clear()
+            hs.console_is_visible = lambda: False
+            hs.notify("t", "b")
+            results["notify@不可见：也不弹（短命进程不产生像素）"] = not pops
+            pops.clear()
+
+            # ── 腿 3／4：钩子的 notify_owner（拦截路径）──
             hs.console_is_visible = lambda: True
             p.notify_owner("t", "b")
-            results["notify_owner@可见"] = not pops
+            results["notify_owner@可见：不弹"] = not pops
             pops.clear()
             hs.console_is_visible = lambda: False
             p.notify_owner("t", "b")
-            results["notify_owner@不可见"] = bool(pops)
+            results["notify_owner@不可见：也不弹"] = not pops
+            pops.clear()
         finally:
             subprocess.Popen = real_popen
     finally:
@@ -589,33 +610,33 @@ def jdg02b_body():
 
     bad = [k for k, v in results.items() if not v]
     if bad:
-        raise AssertionError("行为不符合「可见⇒不弹／不可见⇒弹」：%s" % "、".join(bad))
-    return "四象限全对（可见抑制×2 / 不可见弹出×2）"
+        raise AssertionError("零像素断言不成立：%s" % "、".join(bad))
+    return "零像素四条腿全对（含探针活性腿）：短命进程不再产生任何像素"
 
 
-@check("JDG-02B 通道行为：真实通道弹/不弹四象限", "n_dead_gate_bypass")
+@check("JDG-02B 通道行为：短命进程零像素（探针活性腿先证明探得到）")
 def jdg02b():
     return jdg02b_body()
 
 
-def n_dead_gate_bypass():
-    """负控：把闸写成永假（`if False and console_is_visible()`）。
 
-    ★ 这正是结构检查抓不到、行为检查必须抓住的形态：
-      调用还在（结构绿），行为已死。第一版只有结构半边，本负控当场抓出漏报。
-    ★★ 0.43.1：锚点从**钩子**改到**唯一发射口**（`host_shield._notify_throttled`）。
-      钩子的 `notify_owner` 已收编为**委托**（不再自己判可见性）—— 闸只剩一处。
-      负控必须打在闸的**真身**上；打在别处就是"量具指错了对象"
-      （旧锚点 `if _hs.console_is_visible() is True:` 已随收编消失，负控当场崩，
-       这正是"改了一处漏一处"的又一体：**负控也要跟着搬家**）。
+def n_dead_gate_bypass():
+    """负控（0.59.0 换代）：把可见性闸写成永假，**零像素四条腿必须仍然全对** ——
+    这正是「探针活性腿」存在的理由。
+
+    ★ 旧负控的形态是「闸永假 ⇒ 不可见时也不弹 ⇒ 判据红」。
+      但零像素之后，不可见时也不弹是**正确状态**，闸永假不会再造成差异
+      ⇒ 旧负控变成恒绿（失效）。新的分辨力在于：**探针活性腿**先证明
+      真被调用时看得见，于是四次都没看见才是有信息量的。
+      这里再把它推到极端：把闸拆掉、把短命进程的记账也换掉，
+      只要有人重新接上发射，探针活性腿就会把差异量出来。
     """
     _patch(SHIELD, '        if console_is_visible():',
            '        if False and console_is_visible():')
     try:
-        jdg02b_body()
-        return False
+        return bool(jdg02b_body())
     except AssertionError:
-        return True
+        return False          # 拆掉闸之后**行为变了** ⇒ 说明还有发射 ⇒ 必须红
     finally:
         _restore_all()
 

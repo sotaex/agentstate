@@ -333,6 +333,33 @@ def handle_actions(root=None, opener=None, console_url=None):
     return res
 
 
+def _should_knock(it):
+    """这一条记录该不该"敲门"（弹任何窗）—— **只问一把尺子**。
+
+    ★★★ 为什么要有它（2026-10-27 实测，创始人报障「上古的冒泡又复发了」）：
+      "该不该弹"本来有唯一真源 `host_shield.bubble_decision`，但它**只守着气泡通道**；
+      走 toast 的那一支（本函数的 `NT.toast`）从来没问过它，只问 `should_touch(level)`。
+      于是同一条 `host_shield_revived` 在气泡通道被明确压掉（规则③「能自己解决的不敲门」），
+      在 toast 通道却照样响 —— **同一件事两把尺子**，本仓第一顽症的第 N 次复发。
+      盘上读数：`notice_log.jsonl` 里 revived / tamper(recovered) 五天来每 30–45 分钟
+      一对，全是走的 toast 通道。
+    ★ 为什么只对 `_ALERT_KINDS` 里的类型问：那些才是"告警"；其余（心跳、用量、
+      研发迭代）本来就有自己的定档，不归这把尺子管 —— 否则会顺手把别的东西也静音，
+      那是**扩大改动面**。
+    ★ 返回值第二项要进账（`out["quiet"]` ＋ 压制计数）：压了多少、为什么压必须可查，
+      否则将来分不清"没弹是因为不该弹"还是"弹的机制坏了"。
+    """
+    try:
+        import host_shield as HS
+    except Exception:                        # noqa: BLE001
+        return True, ""
+    if it.kind not in getattr(HS, "_ALERT_KINDS", ()):
+        return True, ""
+    rec = {"recovered": bool(getattr(it.alert, "recovered", False)),
+           "severity": getattr(it.alert, "severity", "") or ""}
+    return HS.bubble_decision(it.kind, rec)
+
+
 class Daemon:
     def __init__(self, root=None, backend=None, sound=None, overlay=None,
                  sender=None, poster=None, clock=None, cfg=None, today=None,
@@ -473,7 +500,7 @@ class Daemon:
         out = {"items": len(items), "state": M.console_state(items),
                "unhandled": M.unhandled_count(items), "notified": [],
                "emphasis": [], "fallback": [], "actions": [], "errors": [],
-               "bubble": [],
+               "bubble": [], "quiet": [],
                "heartbeat": None}
 
         # ①b 首检提醒（T1.3，设计 v1.11 §29.1）：装好 ≥24h 仍没体检过 ⇒
@@ -516,10 +543,34 @@ class Daemon:
                             {"id": it.id, "ok": bool(_rep.get("ok")),
                              "why": _rep.get("why", "")})
                     else:
-                        ok, why = NT.toast(it.level, it.title, it.detail or it.title,
-                                           root=self.root, backend=self.backend, cfg=cfg,
-                                           now=self.clock(), kind=it.kind)
-                        out["notified"].append({"id": it.id, "ok": ok, "why": why})
+                        # ★★★ 0.59.0（连根去除旧外观）：这里过去调 `NT.toast`
+                        #   —— 那是**系统原生通知**，外观由 Windows 决定，没有
+                        #   Antinel 品牌的任何痕迹，正是创始人说的「上古的泡泡」。
+                        # ★ 为什么不改成"这里也弹品牌化浮窗"：
+                        #   L1 ＝「提醒」，不是「只有你能解决」。为一句话开一个窗口
+                        #   比系统气泡更打扰。**敲门只留给 R0/L2**；L1 由
+                        #   收件箱、托盘角标、台账三处承载，一像素不占屏幕。
+                        # ★ 仍然要问那把唯一的尺子：`bubble_decision` 说"不该弹"
+                        #   的（自愈、当事人已知情）连记账的理由都不一样，两者
+                        #   混在一起会让"为什么没响"永远查不清。
+                        _knock, _why_k = _should_knock(it)
+                        if not _knock:
+                            out["quiet"].append({"id": it.id, "why": _why_k})
+                            try:
+                                import host_shield as _HSq
+                                _HSq.note_bubble_suppressed(it.kind, _why_k)
+                            except Exception:        # noqa: BLE001
+                                pass                 # 记账失败不影响"不敲门"
+                        else:
+                            out["quiet"].append(
+                                {"id": it.id,
+                                 "why": "L1 提醒不敲门：进收件箱与托盘角标"})
+                            try:
+                                import host_shield as _HSq2
+                                _HSq2.note_bubble_suppressed(
+                                    it.kind, "L1 提醒不敲门（只进收件箱与角标）")
+                            except Exception:        # noqa: BLE001
+                                pass
                 except Exception as e:          # noqa: BLE001
                     out["errors"].append("notify: %s" % e)
             if M.PRIORITY.get(it.level, 0) >= M.PRIORITY["R0"]:

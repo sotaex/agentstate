@@ -880,6 +880,199 @@ def n57f():
     return True
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# R-58 族：**存活判定的三条根因**（0.59.0，2026-10-27 创始人「上古的冒泡又复发了」）
+#
+# 症状：右下角每 30–45 分钟冒一次泡，连续五天。链上读数：
+#   · `notice_log.jsonl` 里 `host_shield_tamper` / `host_shield_revived` 成对出现；
+#   · `sidecar/` 里躺着 903 条心跳、697 条 `host_shield_revived`；
+#   · `lock_events.jsonl` 单日 `acq_timeout` 4622 次。
+#
+# 根因三条（都不是"没打心跳"，是**读的人看错了地方 / 读坏了当成了事实**）：
+#   ① 心跳只进审计链；链锁抢不到就落 `sidecar/`，而读心跳只扫顶层
+#      ⇒ 活哨兵被判"37 分钟没心跳" ⇒ 杀掉重拉 ⇒ `revived`(critical) ⇒ 冒泡。
+#   ② 主循环用 `load_state()` 读状态，它在读失败时**编一个"已撤防"**
+#      ⇒ 那一拍被记成 `host_shield_tamper`（文案里的「实际值（None）」就是铁证：
+#      None 不是任何人的写入值，是"这份 state 里根本没有 enabled"）。
+#   ③ "该不该弹"有唯一真源 `bubble_decision`，但只守气泡通道；toast 通道
+#      从来没人问过它 ⇒ 同一条 `revived` 在气泡通道被压掉、在 toast 通道照响。
+#
+# 三条判据各配一条负控：把修法换回旧口径，这条判据**必须**变红。
+# ══════════════════════════════════════════════════════════════════════════
+
+
+def _r58_audit(tag):
+    """一个空审计目录（链里一条记录都没有）。"""
+    return _TMP.tmpdir("antinel-r58%s-" % tag)
+
+
+def _r58_hs_mut(old, new):
+    """把 host_shield.py 读进来、换掉一处，返回**变异后的模块对象**。
+
+    ★ 用真源码改，不用"照着写一份"：后者测的是判据作者的想象，不是产品行为
+      （假绿第九族）。锚点必须唯一，对不上就返回 None 由判据判红。
+    """
+    p = os.path.join(ROOT, "host_shield.py")
+    with io.open(p, encoding="utf-8") as f:
+        src = f.read()
+    if src.count(old) != 1:
+        return None
+    ns = {"__name__": "hs_r58_mut"}
+    exec(compile(src.replace(old, new), p, "exec"), ns)
+    return ns
+
+
+@check("R-58a 心跳信标：链里一条记录都没有，也要说得出「它还活着」")
+def r58a():
+    HS = _load("host_shield")
+    d = _r58_audit("a")
+    if [f for f in os.listdir(d) if f.endswith(".jsonl")]:
+        return "夹具不成立：这个目录里居然有链文件 —— 那这条判据可能在读链"
+    if not HS.write_heartbeat_beacon(d, 4242):
+        return "信标写不进去 ⇒ 链锁被抢时「还活着」这句话就说不出口了"
+    age, ts = HS._heartbeat_age_in(d)
+    if age is None:
+        return "信标已经写了，却读不到心跳（age=None）—— 修法等于没装"
+    if age > 60:
+        return "刚写的信标却报 %.0f 秒前，时钟口径不对" % age
+    _note("链 0 条 ＋ 只有信标 ⇒ age=%.1fs ts=%s" % (age, ts))
+    return True
+
+
+@check("N-58a 负控：读心跳若忽略信标 ⇒ R-58a 必红（不是信标恰好没用）")
+def n58a():
+    old = ("    _b_ts = read_heartbeat_beacon(d)\n"
+           "    if _b_ts and (best_ts is None or _ts_newer(_b_ts, best_ts)):\n"
+           "        best_ts = _b_ts\n")
+    ns = _r58_hs_mut(old, "")          # ← 拆掉信标那一支（＝修之前的读法）
+    if ns is None:
+        return "变异锚点没找到（唯一性不成立）—— 判据失明，不许判绿"
+    d = _r58_audit("na")
+    ns["write_heartbeat_beacon"](d, 4242)
+    age, _ = ns["_heartbeat_age_in"](d)
+    if age is not None:
+        return ("拆掉信标后仍读得到心跳（age=%r）⇒ 说明 R-58a 的绿与信标无关，"
+                "这条判据没有分辨力" % (age,))
+    _note("拆掉信标那一支后 age=None（正是五天里误杀活哨兵的那个读数）")
+    return True
+
+
+@check("R-58b 读不到≠被撤防：坏读一律不许拿去和链比")
+def r58b():
+    HS = _load("host_shield")
+    bad = [None, {}, {"enabled": None}, {"enabled": "true"}, {"workspaces": {}},
+           []]
+    for st in bad:
+        if HS._state_gate(st) is not False:
+            return "坏读被判成「可以比」：%r —— 它会被记成篡改" % (st,)
+    for st in ({"enabled": True}, {"enabled": False}):
+        if HS._state_gate(st) is not True:
+            return "正常状态被判成不可比：%r（真撤防也要比）" % (st,)
+    _note("坏读 6 种全 False；正常 2 种 True（含真撤防）")
+    return True
+
+
+@check("N-58b 负控：拆掉这道闸 ⇒ 同一份坏读立刻变成「发散」")
+def n58b():
+    old = ('return isinstance(state, dict) and isinstance(state.get("enabled"), bool)')
+    ns = _r58_hs_mut(old, "return True   # ← 旧口径变异体")
+    if ns is None:
+        return "变异锚点没找到（唯一性不成立）—— 判据失明"
+    forged = {"enabled": None}
+    diverged = (ns["_state_gate"](forged) is True) and (bool(forged.get("enabled")) is not True)
+    if not diverged:
+        return "拆掉闸之后没有出现「发散」—— 负控没咬住，R-58b 的绿是空的"
+    HS = _load("host_shield")
+    if HS._state_gate(forged) and bool(forged.get("enabled")) is not True:
+        return "新口径下同一份坏读仍进入发散分支"
+    _note("旧口径：坏读→发散→假 tamper；新口径：不进分支")
+    return True
+
+
+@check("R-58c 一把尺子：自愈事件不走 toast，真篡改照样走")
+def r58c():
+    M = _load("inbox_model")
+    D = _load("inbox_daemon")
+
+    def item(kind, recovered=False, severity="critical"):
+        return M.Item(alert=M.Alert(id="r58" + kind[-3:], ts="2026-10-27T10:00:00+08:00",
+                                    level="L1", kind=kind, recovered=recovered,
+                                    severity=severity))
+    cases = [
+        (item("host_shield_revived"), False, "自愈（已自动重启）"),
+        (item("host_shield_tamper", recovered=True), False, "已自愈"),
+        (item("host_shield_tamper", recovered=False), True, "真篡改必须敲门"),
+        (item("host_shield_zone_locked", severity="warning"), False, "常规执法"),
+        (item("host_shield_heartbeat", severity="none"), True, "非告警类不归它管"),
+    ]
+    for it, want, why in cases:
+        got, w = D._should_knock(it)
+        if bool(got) is not bool(want):
+            return "%s：期望敲门=%s，实际=%s（%s）" % (why, want, got, w)
+    _note("5 条路由全对（2 条不敲门、3 条敲门，含真篡改的对照腿）")
+    return True
+
+
+@check("N-58c 负控：把尺子拆掉（永远敲门）⇒ 同一张路由表必红")
+def n58c():
+    # ★ 负控必须**咬同一张表**：用真源码变异出一个"永远敲门"的 `_should_knock`，
+    #   再把 R-58c 那 5 条路由原样喂给它，至少有一条必须对不上。
+    #   （只断言"变异体返回 True"是自证 —— 那种负控不会红，等于没有。）
+    p = os.path.join(ROOT, "inbox_daemon.py")
+    with io.open(p, encoding="utf-8") as f:
+        src = f.read()
+    anchor = "    return HS.bubble_decision(it.kind, rec)"
+    if src.count(anchor) != 1:
+        return "变异锚点没找到（出现 %d 次）—— 判据失明" % src.count(anchor)
+    ns = {"__name__": "dm_r58_mut"}
+    exec(compile(src.replace(anchor, '    return True, ""   # ← 旧口径：永远敲门'),
+                 p, "exec"), ns)
+    M = _load("inbox_model")
+    D = _load("inbox_daemon")
+
+    def item(kind, recovered=False, severity="critical"):
+        return M.Item(alert=M.Alert(id="n58" + kind[-3:], ts="2026-10-27T10:00:00+08:00",
+                                    level="L1", kind=kind, recovered=recovered,
+                                    severity=severity))
+    cases = [
+        (item("host_shield_revived"), False),
+        (item("host_shield_tamper", recovered=True), False),
+        (item("host_shield_tamper", recovered=False), True),
+        (item("host_shield_zone_locked", severity="warning"), False),
+    ]
+    miss = []
+    for it, want in cases:
+        got, _w = ns["_should_knock"](it)
+        if bool(got) is not bool(want):
+            miss.append("%s→%s" % (it.kind, got))
+    if not miss:
+        return ("变异体（永远敲门）居然和修好的一样通过 ⇒ 这 4 条没有分辨力，"
+                "R-58c 的绿是空的")
+    for it, want in cases:                     # 修好的那份必须一条不差
+        got, _w = D._should_knock(it)
+        if bool(got) is not bool(want):
+            return "修好的版本在 %s 上就不对（got=%s）" % (it.kind, got)
+    _note("变异体在 %d/%d 条上与期望相反（%s）—— 负控咬住了"
+          % (len(miss), len(cases), "、".join(miss)))
+    return True
+
+
+@check("R-58d 新类型必须登记进 AUDIT_SCHEMA（防 F-10 复发）")
+def r58d():
+    tp = "host_shield_state_unreadable"
+    p = os.path.join(ROOT, "docs", "AUDIT_SCHEMA.md")
+    with io.open(p, encoding="utf-8") as f:
+        doc = f.read()
+    if ("`%s`" % tp) not in doc:
+        return "代码里写出的新类型 %s 没进 AUDIT_SCHEMA §4" % tp
+    with io.open(os.path.join(ROOT, "host_shield.py"), encoding="utf-8") as f:
+        src = f.read()
+    if tp not in src:
+        return "AUDIT_SCHEMA 登记了 %s，但代码里根本没有这个类型" % tp
+    _note("代码与模式表两侧都有 %s" % tp)
+    return True
+
+
 def main():
     print("=" * 78)
     print("0517 判据 —— Antinel 监理窗口寿命：daemon 委托开窗（起得来，更要活得久）")

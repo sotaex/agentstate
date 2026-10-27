@@ -961,36 +961,44 @@ def f3_icon_follows_posture():
     return "3 坏姿态→Warning；4 正常姿态＋2 判不出→Information（共 9 例实测）"
 
 
-@check("F4 通知脚本两处图标都取自同一决策（不许只改一处）")
+@check("F4 旧发射实现必须保持删除：`_notify` 里不许再出现任何原生 UI 构造")
 def f4_both_icon_slots_follow():
-    """根因③的完整性：托盘图标与气泡图标是**两个独立参数**，改一处不够。
+    """★ 0.59.0 **换代**（不是删判据，是换它守的性质）。
 
-    ★ 上一版我只改了 `$n.Icon`，`ShowBalloonTip` 的第 4 个参数仍写死 'Warning'
-      ⇒ 任务栏气泡**还是**黄色三角 ⇒ 看起来像改好了，用户照样觉得"又冒泡泡"。
-    ⇒ 判据：`ShowBalloonTip` 的图标参数**必须**是占位符，不得是字面量。
+    旧 F4 守的是「托盘图标与气泡图标两处都取自同一决策」—— 那时 `_notify`
+    还在自拼 `NotifyIcon` ＋ `ShowBalloonTip`，我上一版只改了 `$n.Icon`、
+    第 4 个参数仍写死 `'Warning'`，于是"看起来改好了"而气泡照样是黄三角。
+
+    ★★ 0.59.0 把那套发射实现**连根移除**后，这条判据守的对象**不存在了**。
+      照旧留着它会变成「要求那个发射实现存在」—— 也就是要求旧病回来。
+      ⇒ 现在它守同一条教训的反面：**不许把发射实现加回来**。
+        「改一处漏一处」这条教训已上升为 S61（全仓零原生发射口，见 0431）；
+        这里留一条针对 `_notify` 本体的贴身断言 —— 它红了就知道该看哪个函数，
+        不必从全仓扫描结果里倒推。
     """
+    import ast as _ast
+    import textwrap as _tw
     import host_shield as HS
     src = inspect.getsource(HS._notify)
-    # 找 ShowBalloonTip 那一行
-    line = [ln for ln in src.splitlines() if "ShowBalloonTip" in ln]
-    assert line, "找不到 ShowBalloonTip 调用"
-    assert "'Warning'" not in line[0], (
-        "ShowBalloonTip 的图标参数仍**写死 'Warning'** ⇒ 任务栏气泡恒为黄色警告，"
-        "只有托盘图标变了（改了一处漏一处，典型）。★ 实测本轮就漏了这一处。")
-    # ★★ 占位符计数：**只看这一行**，不是整条命令（第一版按整条 ps 数 6 个，
-    #   报红——那是**判据自己的错**：这条命令里 `%d`/`%s` 分布在多行，
-    #   跨行去数必然数错。★ 教训与本文件 P6 同源：**量具的错不能记成产品的错**。）
-    #   这一行的 3 个 %s ＝ 标题 / 正文 / 气泡图标名 —— 第三个必须是变量来源。
-    assert line[0].count("%s") == 3, (
-        "ShowBalloonTip 行的占位符应为 3 个（标题/正文/气泡图标），实际 %d 个"
-        " ⇒ 格式化会错位或抛异常，通知静默失败而不报错"
-        % line[0].count("%s"))
-    # 图标那个占位符必须**取自决策函数**，不是别处塞进来的常量
-    fsrc = inspect.getsource(HS._notify_icon_and_tip)
-    assert "Information" in fsrc and "Warning" in fsrc, (
-        "_notify_icon_and_tip 必须同时给出两种图标名（Warning/Information），"
-        "否则气泡图标那个占位符会拿到 None ⇒ 通知静默失败")
-    return "气泡图标与托盘图标同源，无字面量 Warning（占位符 3 个已核对）"
+    # ★★ 只断言**代码**，不断言散文：`_notify` 的新 docstring 里写着
+    #   "这里曾经自拼 ShowBalloonTip" —— 那是历史说明，不是发射实现。
+    #   子串搜索会把讲历史读成"加回来了" ⇒ 假红（量具的错，不能记成产品的错）。
+    _fn = _ast.parse(_tw.dedent(src)).body[0]
+    _body = _fn.body
+    if (_body and isinstance(_body[0], _ast.Expr)
+            and isinstance(_body[0].value, _ast.Constant)):
+        _body = _body[1:]                      # 去掉 docstring
+    code = "\n".join(_ast.unparse(n) for n in _body)
+    for tok in ("ShowBalloonTip", "NotifyIcon", "System.Windows.Forms",
+                "subprocess.Popen", "Add-Type"):
+        assert tok not in code, (
+            "`_notify` 的**代码**里又出现了 %r —— 旧外观的发射实现被加回来了。\n"
+            "短命进程不许产生像素：记录进审计链，由常驻监理用品牌化浮窗"
+            "（inbox_bubble，与主窗口同一套 CSS ＋ 官方 LOGO）提醒。" % tok)
+    assert "return None" in code, (
+        "`_notify` 应当是**明确的空实现**（结尾 return None）—— "
+        "空实现要一眼看得出是空的，不能是「忘了做」")
+    return "`_notify` 已是空实现，代码层无任何原生 UI 构造"
 
 
 # ══════════════════════════════════════════════ 0.36.5：统一闸门自身

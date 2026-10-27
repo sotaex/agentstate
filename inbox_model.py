@@ -129,6 +129,12 @@ LEVEL_OF_KIND = {
     # L1 注意：状态变化 / 放行
     "host_shield_revived": "L1",
     "host_shield_changed": "L1",
+    # ★★ 0.58.1：安全状态文件**这一刻读不出来**（盲区，不是篡改）。
+    #   为什么归 **L0**：它会自己恢复（下一拍重试），而且**必须不敲门** ——
+    #   2026-10-27 那场"上古冒泡"就是把它读成了 `host_shield_tamper`（R0）
+    #   才每 30 分钟弹一次。归 L0＝记进账、页面上看得见、不弹任何窗。
+    #   ★ 归 L0 不等于"健康"：它在页面上仍是**盲区**（⚫），不是清白（⚪）。
+    "host_shield_state_unreadable": "L0",
     # Ls 预算：额度/积分
     "credits_low": "Ls",
     # ★ 归一化类型：项目链里的"规则拦截"（`pre_tool_use` + decision=block）
@@ -166,6 +172,7 @@ TITLE_OF_KIND = {
     "host_shield_breach": "没守住：有东西没被挡住",
     "host_shield_revived": "提醒：防护已恢复",
     "host_shield_changed": "提醒：防护设置被改动",
+    "host_shield_state_unreadable": "看不见：安全状态这一拍读不出来",
     "host_shield_dev_drift": "提醒：研发迭代中（代码与登记的那份不符）",
     "credits_low": "缺粮：积分余额偏低",
     "tool_call_blocked": "挡下：危险操作没有执行",

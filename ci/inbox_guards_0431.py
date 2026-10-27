@@ -127,14 +127,25 @@ def n_s60():
 
 
 # ══════════════════ 维度二／三 · 通道唯一 ＋ 图标不撒谎 ══════════════════
-def _balloon_real_sources():
-    """真正**发射**气泡的产品文件（AST：非 docstring 的字符串常量含 `ShowBalloonTip(`）。
+def _native_ui_sources(root=None, tokens=None):
+    """真正**发射原生外观**的产品文件（AST：非 docstring 的字符串常量含任一 token）。
 
-    ★ 必须走 AST：`inbox_notify.py` 的 docstring 里**提到**了 `ShowBalloonTip(15000)`
-      （讲历史），子串搜索会把它误判成"第二个发射者"—— 量具的错不能记成产品的错。
+    ★ 走 AST 而不用子串搜索：docstring 里提到这些名字是**讲历史**，
+      子串搜索会把"讲历史"读成"还有一个发射者" —— 量具的错不能记成产品的错。
+    ★ 扫描面＝仓根全部 .py ＋ hooks/ 全部 .py：像素可以从任何随包模块产生，
+      只看一个目录等于给第二条通道留门（本仓复发过七次，全是"改一处漏一处"）。
     """
+    # ★ 口径只看**外观**，不看"响"：`System.Media.SystemSounds` 走的是
+    #   `System.Windows.Forms` 这个程序集名，但它不画任何像素（只是发声），
+    #   把它算成"又一个外观实现"会让判据过宽 ⇒ 假红，进而被人加豁免。
+    tokens = tokens or ("ShowBalloonTip(", "ToastNotificationManager",
+                        "BurntToast",
+                        "System.Windows.Forms.NotifyIcon",
+                        "System.Windows.Forms.Form",
+                        "New-Object System.Windows.Forms")
+    base_root = root or ROOT
     hits = []
-    for base in (ROOT, os.path.join(ROOT, "hooks")):
+    for base in (base_root, os.path.join(base_root, "hooks")):
         if not os.path.isdir(base):
             continue
         for name in sorted(os.listdir(base)):
@@ -153,73 +164,105 @@ def _balloon_real_sources():
                         and isinstance(n.body[0].value, ast.Constant) \
                         and isinstance(n.body[0].value.value, str):
                     # ★ 两个 id 都要登记：`Expr` 本身，**以及它的 `Constant` 子节点**
-                    #   —— ast.walk 走到的是后者；只登记前者等于没排除
-                    #   （第一版就栽在这：`inbox_notify` 的模块 docstring 被当成发射者）。
+                    #   —— ast.walk 走到的是后者；只登记前者等于没排除。
                     docs.add(id(n.body[0]))
                     docs.add(id(n.body[0].value))
             for n in ast.walk(tree):
                 if id(n) in docs:
                     continue
                 if isinstance(n, ast.Constant) and isinstance(n.value, str) \
-                        and "ShowBalloonTip(" in n.value:
-                    hits.append(os.path.relpath(p, ROOT).replace("\\", "/"))
+                        and any(t in n.value for t in tokens):
+                    hits.append(os.path.relpath(p, base_root).replace("\\", "/"))
                     break
     return sorted(set(hits))
 
 
-@check("S61 ★ 气泡发射口唯一：全仓只有 host_shield.py 真发射；hooks/ 必须委托")
+@check("S61 ★ 零原生发射口：全仓不许再自己拼系统托盘气泡／系统通知；像素只许由品牌化浮窗产生")
 def s61():
-    hits = _balloon_real_sources()
-    if hits != ["host_shield.py"]:
-        return ("气泡真身发射者 = %r（应只有 ['host_shield.py']）—— "
-                "第二条通道会各自一套去重与图标（本次复发的结构根因）" % (hits,))
+    hits = _native_ui_sources()
+    if hits:
+        return ("仍有原生外观发射实现 %r —— 这正是「上古泡泡」的真身：它不需要 Edge、"
+                "不需要端口、不需要窗口就位，比品牌化提醒容易赢；"
+                "留着它等于给下一次复发留入口（0.59.0 已连根去除，本条守的是"
+                "「别加回来」）" % (hits,))
+    bb = os.path.join(ROOT, "inbox_bubble.py")
+    if not os.path.exists(bb):
+        return "唯一像素出口不见了：inbox_bubble.py 不存在"
+    if "def pop(" not in io.open(bb, encoding="utf-8").read():
+        return "inbox_bubble.py 里没有 pop() —— 品牌化浮窗的唯一发射点没了"
+    # ★ 可读性正控：0 处命中必须能证明"真的扫过面"，否则"没有违规"与"没扫"同貌
+    if not os.path.exists(os.path.join(ROOT, "inbox_daemon.py")):
+        return "扫描面异常：inbox_daemon.py 不在 ⇒ 这次的 0 处不可信"
     return True
 
 
-def _balloon_literal_violations(src):
-    """含 `ShowBalloonTip(` 的行里，图标参数**写死为字面量**的（空列表＝合格）。
+@check("N-S61 负控：塞一个自己拼系统通知的文件 ⇒ 扫描必须抓到（不是恒绿）")
+def n_s61():
+    import shutil
+    import tmpreg as _TMP
+    d = _TMP.tmpdir("n61_")
+    try:
+        os.makedirs(os.path.join(d, "hooks"), exist_ok=True)
+        io.open(os.path.join(d, "evil.py"), "w", encoding="utf-8").write(
+            u'ps = "Add-Type -AssemblyName System.Windows.Forms;"\n'
+            u'"$n.ShowBalloonTip(8000, 1, 2, 3)"\n')
+        got = _native_ui_sources(root=d)
+        if got != ["evil.py"]:
+            return "负控失效：塞进去的自拼系统通知没被抓到（got=%r）" % (got,)
+        # 第三条腿：**只写在 docstring 里**不算发射（防过宽 ⇒ 把讲历史判成产品缺陷）
+        io.open(os.path.join(d, "hist.py"), "w", encoding="utf-8").write(
+            u'"""讲历史：当年用过 ShowBalloonTip(15000) 和 System.Windows.Forms。"""\n'
+            u'X = 1\n')
+        got2 = _native_ui_sources(root=d)
+        if got2 != ["evil.py"]:
+            return "过宽：docstring 里讲历史也被判成发射者（got=%r）" % (got2,)
+        return True
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
 
-    ★ 只查**那一行**的第 4 个参数 —— 不跨行数占位符（0364 第一版按整条命令数，
-      跨行必然数错，那是量具自己的错）。
-    """
-    bad = []
-    for i, ln in enumerate(src.split("\n"), 1):
-        if "ShowBalloonTip(" not in ln:
-            continue
-        m = re.search(r"ShowBalloonTip\([^)]*\)", ln)
-        if not m:
-            continue
-        args = m.group(0)[len("ShowBalloonTip("):-1]
-        parts = [p.strip() for p in args.split(",")]
-        if len(parts) >= 4 and parts[3].strip("'\"") in ("Warning", "Error", "Info"):
-            bad.append("第 %d 行气泡图标写死 %s" % (i, parts[3]))
-    return bad
+
+def _brand_ok(root=None):
+    """品牌化浮窗是否成立：官方 LOGO ＋ 与主窗口同源的样式。返回 `(ok, why)`。"""
+    root = root or ROOT
+    bb = os.path.join(root, "inbox_bubble.py")
+    if not os.path.exists(bb):
+        return False, "inbox_bubble.py 不存在"
+    src = io.open(bb, encoding="utf-8").read()
+    missing = [m for m in ("_logo_mark", "FAVICON_LINK") if m not in src]
+    if missing:
+        return False, ("品牌化浮窗缺 %r —— 创始人 2026-10-27 明确：新提醒要跟主窗口"
+                       "差不多、都带 Antinel 官方 LOGO" % (missing,))
+    if "inbox_server" not in src:
+        return False, "浮窗没有复用主窗口的样式与渲染（inbox_server）—— 那就是第二套外观"
+    return True, ""
 
 
-@check("S62 ★ 图标不撒谎：任何发射实现的 ShowBalloonTip 图标参数都不得是字面量")
+@check("S62 ★ 唯一像素出口必须是品牌化的：浮窗带官方 LOGO，且与主窗口同一套 CSS")
 def s62():
-    allbad = []
-    for rel in _balloon_real_sources():
-        v = _balloon_literal_violations(_src(rel))
-        allbad += ["%s: %s" % (rel, x) for x in v]
-    if allbad:
-        return ("气泡图标写死字面量（通知会与姿态无关地报警）—— " + "；".join(allbad))
-    return True
+    ok, why = _brand_ok()
+    return True if ok else why
 
 
-@check("N-S62 分辨力样本：把钩子的图标写回字面量 'Warning' ⇒ S62 的判据必须报红")
+@check("N-S62 负控：把官方 LOGO 从浮窗里抹掉 ⇒ S62 必须报红")
 def n_s62():
-    # 分辨力样本：**同一份文本里，图标是字面量**。它钉住"改了一处漏一处"这个方向。
-    sample = ('    ps = ("$n=New-Object System.Windows.Forms.NotifyIcon;"\n'
-              '          "$n.ShowBalloonTip(15000,\'%s\',\'%s\',\'Warning\');")\n')
-    v = _balloon_literal_violations(sample)
-    if not v:
-        return "分辨力样本失效：把图标写死成 'Warning' 竟然判不出 —— S62 抓不到这次复发"
-    # 反向：合格样本必须**零**违规（否则 S62 会把干净的判成脏 —— 假红）
-    ok_sample = '          "$n.ShowBalloonTip(%d,\'%s\',\'%s\',\'%s\');"'
-    if _balloon_literal_violations(ok_sample):
-        return "合格样本（图标为占位符 %s）被误判为违规 —— S62 有过宽豁免"
-    return True
+    import shutil
+    import tmpreg as _TMP
+    bb = os.path.join(ROOT, "inbox_bubble.py")
+    src = io.open(bb, encoding="utf-8").read()
+    if "_logo_mark" not in src:
+        return "负控夹具不成立：源码里根本没有 _logo_mark"
+    mut = src.replace("_logo_mark", "no_logo_here")
+    if "_logo_mark" in mut:
+        return "负控变异没生效"
+    d = _TMP.tmpdir("n62_")
+    try:
+        io.open(os.path.join(d, "inbox_bubble.py"), "w", encoding="utf-8").write(mut)
+        ok, _why = _brand_ok(root=d)
+        if ok:
+            return "负控失效：抹掉官方 LOGO 后仍判合格 —— S62 抓不到"
+        return True
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
 
 
 # ══════════════════ 维度四／五／六 · 去重口径与运行态 ══════════════════

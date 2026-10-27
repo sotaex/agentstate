@@ -1,16 +1,23 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: Apache-2.0
 
-"""Antinel 监理 · 通知层（第 1 层）：Toast 替掉"15 秒就没了"的气泡。
+"""Antinel 监理 · 通知层（第 1 层）：**记账与节流**，不再产生任何像素。
 
-★ 要解决的原问题：**告警会消失、会被漏掉**。
-  旧气泡 `ShowBalloonTip(15000)` 15 秒后不见、也不进通知中心；
-  本层用 **Windows Toast**，**落到操作中心**，错过还能回头看。
+★★★ 0.59.0 连根去除（创始人 2026-10-27「冒的还是上古时代的老旧泡泡」）：
+  本层原来有两代"自己能画的东西" —— 先是 15 秒就消失、也不进通知中心的气泡，
+  后来换成 **Windows Toast**（`toast_script` ＋ `WindowsToastBackend`）。
+  **两代都不是 Antinel 的外观**：Windows 决定长相，带不上主窗口那套 CSS 和官方 LOGO。
+  ⇒ 两者已从本文件**删除**，`default_backend()` 恒为 `NullBackend`。
+  提醒只剩两条路：① 品牌化浮窗（`inbox_bubble`，与主窗口同一套 CSS ＋ 官方 LOGO）；
+  ② 不占屏幕的痕迹（收件箱、托盘角标、台账）。
 
-★ 外部依赖全部做成**可注入后端**（创始人要求"先模拟解决"）：
-  生产＝`WindowsToastBackend`（PowerShell/WinRT）；测试＝`RecordingBackend`（零副作用）。
+★ 本文件**保留**的东西及其理由（不是残渣）：
+  · `toast()` 的**节流与台账**（`record_sent`／`settle`／`throttle_*`）——
+    那是"记账与去重"，与用哪种外观无关；判据注入 `RecordingBackend` 验路由，
+    删掉会把记账正确性一起扔掉。
+  · 后端仍是**可注入**的：`NullBackend`（生产默认）／`RecordingBackend`（夹具）。
 
-★ 节流只节**门铃**，不节**台账**：同类 30 分钟内不重复弹，但收件箱照记。
+★ 节流只节**门铃**，不节**台账**：同类 30 分钟内不重复，但收件箱照记。
   （这是 R8 的同一道理：门铃可节流，台账不可。）
 """
 from __future__ import annotations
@@ -42,9 +49,14 @@ class Backend:
 
 
 class NullBackend(Backend):
-    """什么都不做（无 GUI 环境 / 用户关掉了通知）。"""
+    """什么都不做（无 GUI 环境 / 用户关掉了通知 / **本版已移除系统通知**）。
+
+    ★ 0.59.0：`last_error` 说清"不是失败，是没有这条通道" —— 否则调用方
+      会把「本版不提供系统通知」读成「发出去了但失败了」，两种事后果不同。
+    """
     name = "null"
     channel = "file"
+    last_error = "本版没有系统通知通道：提醒只走品牌化浮窗与收件箱"
 
     def toast(self, title, body, level):
         return False
@@ -88,98 +100,20 @@ def register_aumid_script():
     )
 
 
-def toast_script(title, body, level):
-    """生成发一条 Toast 的 PowerShell（WinRT；失败退回气泡，但不静默失败）。"""
-    t, b = _ps_quote(title)[:120], _ps_quote(body)[:300]
-    return (
-        "$ErrorActionPreference='Stop';"
-        "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications,"
-        " ContentType=WindowsRuntime] > $null;"
-        "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument,"
-        " ContentType=WindowsRuntime] > $null;"
-        "$x=New-Object Windows.Data.Xml.Dom.XmlDocument;"
-        "$x.LoadXml('<toast duration=\"long\"><visual><binding template=\"ToastGeneric\">"
-        "<text>%s</text><text>%s</text></binding></visual></toast>');"
-        "$n=New-Object Windows.UI.Notifications.ToastNotification $x;"
-        "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('%s').Show($n);"
-        % (t, b, AUMID)
-    )
-
-
-class WindowsToastBackend(Backend):
-    """生产后端：PowerShell 发 WinRT Toast（落操作中心）。
-
-    ★ 失败**不静默**：返回 False 并记 `last_error`（调用方可显示"最近成功：N 天前"）。
-    """
-    name = "windows-toast"
-
-    def __init__(self, powershell="powershell"):
-        self.powershell = powershell
-        self.last_error = ""
-
-    def toast(self, title, body, level):
-        if os.name != "nt":
-            self.last_error = "非 Windows，无 Toast"
-            return False
-        try:
-            p = subprocess.run(
-                [self.powershell, "-NoProfile", "-WindowStyle", "Hidden",
-                 "-Command", toast_script(title, body, level)],
-                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE, timeout=20,
-                creationflags=0x08000000 if os.name == "nt" else 0)
-            if p.returncode != 0:
-                self.last_error = (p.stderr or b"").decode("utf-8", "replace")[:300]
-                return False
-            self.last_error = ""
-            return True
-        except Exception as e:                  # noqa: BLE001
-            self.last_error = "%s: %s" % (type(e).__name__, e)
-            return False
-
-
 def default_backend():
-    if os.name == "nt":
-        return WindowsToastBackend()
+    """【0.59.0 连根去除】默认后端**永远**是 `NullBackend` —— 本版不再有
+    系统通知（Windows Toast）这一能力。
+
+    ★ 为什么不是"看情况退回系统通知"：系统通知的外观由 Windows 决定，
+      带不上 Antinel 的 CSS 与官方 LOGO。创始人要的是**跟主窗口长得一样**的
+      提醒，那就不可能靠系统通道实现。于是只有两条路：
+        ① 品牌化浮窗（`inbox_bubble`，Edge --app 小窗）；
+        ② 不占屏幕的痕迹（收件箱、托盘角标、台账）。
+      **"系统通知"这第三条路已经不存在了。**
+    ★ `toast()` 与它的台账仍保留：那是"记账与节流"，与外观无关；
+      判据注入 `RecordingBackend` 验路由，删掉会把记账正确性一起扔掉。
+    """
     return NullBackend()
-
-
-# ------------------------------------------- 通知三态与送达兜底（N12）----
-#
-# ★★ 要解决的问题（BL-05）：通知只有「发出」没有「送达」。
-#   Windows 免打扰／通知中心关闭／专注助手 ⇒ 报了、用户没看到、产品不知道。
-#
-# F7 冻的三态（`docs/Antinel·编码前无猜测审核与接口冻结 v1.0` §2-F7）：
-#   `notice_sent`       发出即记（进程内＋`notice_log.jsonl`，**不进链**
-#                       —— 发了什么不是审计事实）
-#   `notice_seen`       **只靠用户动作**（点开／确认），不许猜 —— 猜＝假绿
-#   `delivery_unknown`  sent 且超 `NOTICE_WINDOW` 未见、且降级也失败 ⇒ **进链**（L1）
-#
-# ★★ 三态的分界不是"多久没响应"，每一条都有它否掉的反面：
-#   · 降级成功 ⇒ 不记 unknown（成功不是未知）
-#   · 无头（没有通道）⇒ 不记 unknown（没有通道不是通道坏了）
-#   · 已见过 ⇒ 不记 unknown（最硬的证据，先于一切推断）
-#   · 时钟倒退 ⇒ 记 undecidable（负数时间差＝算不出，不是"很小"）
-#   · 没有降级执行器 ⇒ 记 undecidable（不知道能不能降 ≠ 降级失败）
-#   后两条**都不许落到 unknown**：unknown 是"确知没送达"，不是"不知道"。
-
-#: sent 之后多久未见算逾期（秒）。N12 原设计＝30 分钟；是冻结值，不从别处派生。
-NOTICE_WINDOW = 1800.0
-
-#: `notice_log` 的通道取值域。`file` ＝ 无头走文件账（**不是坏通道**）。
-CHANNELS = ("toast", "bubble", "file")
-
-#: 用户动作的两种来源。别的值一律抛错 —— 用户动作不许猜。
-SEEN_HOW = ("open", "ack")
-
-#: 降级链的取值域。`none` ＝ 没有可用的降级通道（有通道但失败记最后尝试的那道）。
-DOWNGRADES = ("tray", "banner", "none")
-
-#: 无头的通道名。抽成常量是为了让负控能换掉**同一份判定**去证明它承重。
-HEADLESS_CHANNEL = "file"
-
-#: 没有降级执行器时报这个。★ 不许写 `"unknown"` —— "不知道能不能降级"不是"降级失败"。
-NO_DOWNGRADER_STATE = "undecidable"
 
 
 def notice_log_path(root=None):
