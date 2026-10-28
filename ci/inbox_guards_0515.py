@@ -440,8 +440,15 @@ def n_dsk15a():
     return True
 
 
-def _dsk_form_judge(src):
-    """.lnk 形态契约判定（两个入口共用品牌名＋条件挂图标）。问题串或 None。"""
+def _dsk_form_judge(src, hs_src=None):
+    """.lnk 形态契约判定（两个入口共用品牌名＋条件挂图标）。问题串或 None。
+
+    ★★ 0.60.0：**跟随委托**。`_create_startup_lnk` 已收敛成薄委托，真正的
+      `.lnk` 构建在 `host_shield.create_autostart_lnk`（一处实现，两条注册路径
+      共用）。旧判据死认 `antinel.py` 的函数体 ⇒ 实现一搬家就翻红，而窗口
+      并不会因此回来。修法是让判据跟着实现走，**但必须走到底** ——
+      委托目标也得真满足这三条，否则判据被架空（等于没守）。
+    """
     problems = []
     specs = (
         ("_create_desktop_lnk", (
@@ -464,6 +471,15 @@ def _dsk_form_judge(src):
         if not seg:
             problems.append("取不到 %s 函数段" % fn)
             continue
+        if (hs_src is not None and fn == "_create_startup_lnk"
+                and not all(m in seg for m, _w in markers)
+                and "create_autostart_lnk" in seg):
+            seg2 = _func_seg(hs_src, "create_autostart_lnk")
+            if not seg2:
+                problems.append("`_create_startup_lnk` 委托给 "
+                                "host_shield.create_autostart_lnk，但那个函数取不到")
+                continue
+            seg, fn = seg2, "host_shield.create_autostart_lnk"
         for marker, why in markers:
             if marker not in seg:
                 problems.append("%s：%s" % (fn, why))
@@ -472,7 +488,9 @@ def _dsk_form_judge(src):
 
 @check("DSK15-b ★ .lnk 形态契约：pythonw 无窗口＋中文品牌描述＋条件挂品牌图标（桌面/自启两处）")
 def c_dsk15b():
-    why = _dsk_form_judge(_antinel_src())
+    with io.open(os.path.join(_PKG, "host_shield.py"), encoding="utf-8") as f:
+        hs_src = f.read()
+    why = _dsk_form_judge(_antinel_src(), hs_src)
     return why or True
 
 
@@ -491,6 +509,20 @@ def n_dsk15b():
         return "负控失效：描述回英文后仍判合格 —— 形态尺子是装饰"
     if "描述" not in why:
         return "方向不对：报的红不是描述那一处（%s）—— 量具打偏" % why
+    # ★ 0.60.0 腿②：**委托目标**（`host_shield.create_autostart_lnk`）描述回英文
+    #   也必须判红。只测 `antinel.py` 那一侧等于没守"跟随委托"——
+    #   判据看着有负控，实际只验了「文件里没有那段」这一条（假绿族：负控没跑到那条腿）。
+    with io.open(os.path.join(_PKG, "host_shield.py"), encoding="utf-8") as f:
+        hs = f.read()
+    anchor2 = "$s.Description='Antinel 监理 登录自启';"
+    if anchor2 not in hs:
+        return "负控②自身失效：host_shield 里的自启描述串变了"
+    hs_bad = hs.replace(anchor2, "$s.Description='Antinel sentinel (no window)';", 1)
+    why2 = _dsk_form_judge(_antinel_src(), hs_bad)
+    if why2 is None:
+        return "负控②失效：委托目标描述回英文后仍判合格 —— 跟随委托没走到底"
+    if "描述" not in why2:
+        return "方向不对：负控②报的红不是描述那一处（%s）—— 量具打偏" % why2
     return True
 
 

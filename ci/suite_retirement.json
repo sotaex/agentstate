@@ -32,6 +32,16 @@
       "replacement": "regression_gate._FREEZE_OUTPUT_CHECKS['window_title_format']（FZ-002）＋ inbox_guards_0362.Q14 精确形态断言",
       "merged_on": null,
       "merge_note": null
+    },
+    {
+      "suite": "0600",
+      "date": "2026-10-27",
+      "status": "done",
+      "removed_from_suites_on": "2026-10-27",
+      "reason": "A2 超限来源：0.60.0 本拟新立 ci/inbox_guards_0600.py（14 条判据），登记时被 GOV-01 当场拦下（常驻 29 + 1 > 上限 29）。其 P5（扩展优先）自答为**不满足**：钩子解释器那条与本套件同域（都是「窗口这件事」——0517 守「起得来、活得久」，0600 守「根本不该出现」），规则自愈那条同属 daemon tick / 安装态。按 P5「不满足 ⇒ 并入现有套件」的正确动作＝并入 0517，不立新套件。",
+      "replacement": "0517",
+      "merged_on": "2026-10-27",
+      "merge_note": "RF-60a..h ＋ N-RF-60a ＋ HK-60a..d ＋ N-HK-60b（共 14 条，判据 ID 一字未改）已原样并入 ci/inbox_guards_0517.py 的「0.60.0 并入」段；0600 从未进 delivery_gate.SUITES，故常驻数始终为 29；原文件改名让开（ci/inbox_guards_0600.py.away-20261027，零删除纪律）。"
     }
   ]
 }

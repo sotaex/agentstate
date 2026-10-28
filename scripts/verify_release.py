@@ -34,6 +34,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
+
+# 0.60.0：起子进程一律带 CREATE_NO_WINDOW —— 父进程可能是**无控制台**的
+# pythonw（钩子）／DETACHED（哨兵）／GUI 宿主 ⇒ 不带就会给子进程新建控制台
+# ＝ 用户看到黑窗一闪。本文件不 import host_shield，就地定义同一常量。
+_CNW = 0x08000000 if os.name == "nt" else 0
 import subprocess
 import sys
 import tarfile
@@ -80,7 +85,7 @@ def _py_with(module):
         if not py or not os.path.isfile(py):
             continue
         probe = subprocess.run([py, "-c", "import %s" % module],
-                               capture_output=True)
+                               capture_output=True, creationflags=_CNW)
         if probe.returncode == 0:
             return py
     return sys.executable
@@ -177,7 +182,7 @@ def check_twine(dist, version):
     files = [os.path.join(dist, "antinel-%s-py3-none-any.whl" % version),
              os.path.join(dist, "antinel-%s.tar.gz" % version)]
     r = subprocess.run([py, "-m", "twine", "check"] + files,
-                       capture_output=True, text=True, encoding="utf-8", errors="replace")
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", creationflags=_CNW)
     out = (r.stdout or "") + (r.stderr or "")
     if r.returncode != 0 or "PASSED" not in out:
         return _fail("twine check 未全过（rc=%d）：%s" % (r.returncode, out.strip()[:300]))
@@ -221,12 +226,12 @@ def check_install(dist, version):
     whl = os.path.join(dist, "antinel-%s-py3-none-any.whl" % version)
     r = subprocess.run([sys.executable, "-m", "pip", "install", "--no-deps",
                         "--no-index", "--target", target, whl],
-                       capture_output=True, text=True, encoding="utf-8", errors="replace")
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", creationflags=_CNW)
     if r.returncode != 0:
         return _fail("pip install 失败：%s" % ((r.stderr or "")[-300:]))
     probe = _E2E_PROBE.format(target=target, version=version)
     r2 = subprocess.run([sys.executable, "-c", probe],
-                        capture_output=True, text=True, encoding="utf-8", errors="replace")
+                        capture_output=True, text=True, encoding="utf-8", errors="replace", creationflags=_CNW)
     if r2.returncode != 0 or "E2E-OK" not in (r2.stdout or ""):
         return _fail("安装态导入/运行失败：%s%s" % ((r2.stdout or "")[-200:], (r2.stderr or "")[-300:]))
     line = [l for l in (r2.stdout or "").splitlines() if l.startswith("E2E-OK")]

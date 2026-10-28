@@ -1,6 +1,21 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
-# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.24（随 v0.59.0）
+# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.25（随 v0.60.0）
+
+> v1.25（0.60.0）：**补登记 2 类** —— `rules_auto_refresh_skipped`、
+> `autostart_no_window_fixed`（均见下文「降级与配置变更类」），并把
+> `rules_snapshot_refreshed` 的**触发者**
+> 从「只由 CLI 写」扩到「钩子加载前 / 守护进程每 tick / CLI」三处同一实现。
+> ★ 起因（创始人 2026-10-27）：「既然系统更新，那肯定是全面更新，包括规则的更新。」
+> 以及「任何类型的闪出黑窗都是不可接受的」。
+>   实测：`pip install -U` 只换包、不跑 install ⇒ 项目内的规则副本永久停在首次
+>   安装那一版（包内 0.59.0 / 副本 0.58.0，一个版本区间的规则修正一条都没生效），
+>   而包与副本两侧都自认正常。现在副本落后就自动补齐。
+> ★ 为什么单独立 `rules_auto_refresh_skipped`：自动刷新有一条硬红线 ——
+>   **副本被手工改过（哈希 ≠ manifest 登记值）就不覆盖**。覆盖一份被改过的防护
+>   依据，等于把篡改证据连同问题一起抹掉，比不修更坏。所以"该刷而没刷"必须是
+>   一条**记录在案**的事件（`severity=critical`），而不是一次沉默的跳过。
+> **不改**已有字段名、**不改**已有取值域、**不改** append-only 契约。
 
 > v1.24（0.59.0）：**补登记 1 类** —— `host_shield_state_unreadable`
 > （见下文「门闸事件族」）。
@@ -272,7 +287,9 @@
 |---|---|---|---|
 | `rules_integrity_fallback` | pre | `expected`, `live`, `rules_loaded` | `rules/default.json` 与 manifest 的 `rules_hash` 不符 ⇒ 判定为篡改，**退回内置兜底规则集**并大声记账（A4）。`expected`/`live` 是两侧哈希，供复核 |
 | `rules_unreadable_fallback` | pre | `error`, `rules_loaded` | 规则文件**读不出来**（缺失/坏 JSON/无权限）⇒ 退回内置兜底集。与上一条**分开命名**：`tampered` 与 `unreadable` 是两种不同的失败，不能合并成一条 |
-| `rules_snapshot_refreshed` | antinel CLI（`install.py --refresh-rules`） | `rules_file`, `version_from`, `version_to`, `hash_from`, `hash_to` | **v1.23（0.57.2）补登记**：项目里的规则副本被刷成包内那一版。★ 为什么单独立账：hook 读的是 `<项目>/.psl/rules/default.json`（install 时拷的那份），`pip install -U` **只换包不跑 install** ⇒ 副本会永久停在首次安装的版本（本机实测：副本 0.34.0／包内 0.57.1，中间 9 条规则的 15 处修复一条都没生效）。刷新副本＝**改门闸的判据依据**，所以必须留痕：`hash_from`/`hash_to` 就是这次判定换了哪把尺子 |
+| `rules_snapshot_refreshed` | 钩子加载前 / 守护进程每 tick / antinel CLI（`install.py --refresh-rules`） | `rules_file`, `version_from`, `version_to`, `hash_from`, `hash_to`, `auto` | **v1.23（0.57.2）立目，v1.25（0.60.0）扩触发者**：项目里的规则副本被刷成包内那一版。★ 为什么单独立账：hook 读的是 `<项目>/.psl/rules/default.json`（install 时拷的那份），`pip install -U` **只换包不跑 install** ⇒ 副本会永久停在首次安装的版本（本机实测：副本 0.34.0／包内 0.57.1，中间 9 条规则的 15 处修复一条都没生效）。刷新副本＝**改门闸的判据依据**，所以必须留痕：`hash_from`/`hash_to` 就是这次判定换了哪把尺子。★ v1.25 起这条不再只由人手敲命令产生：`host_shield.ensure_rules_current()` 在**每次钩子加载前**与**守护进程每 tick** 都会判一次（幂等，正常路径只读两个 `version` 字段、不写盘），所以 `auto=true` 表示"包一换就自己补上的"，`auto=false`（缺省）表示"人明确要求的" |
+| `rules_auto_refresh_skipped` | 钩子加载前 / 守护进程每 tick | `rules_file`, `version_from`, `version_to`, `hash_from`, `hash_to`, `expected`, `auto` | **v1.25（0.60.0）新增**：**该刷而没刷**。自动刷新的硬红线是「副本被手工改过就不覆盖」——实算哈希与 manifest 登记的 `rules_hash` 不符 ⇒ 视为有人动过这份防护依据 ⇒ 保留原样、交给 A4 判 SELF-TAMPERED，只留这条 `severity=critical` 的记录。★ 为什么不是"静默跳过"：自动覆盖一份被改过的规则，等于把篡改证据连同问题一起抹掉，比不修更坏；而沉默的跳过会让"没刷"与"本来就不用刷"逐字段相同 |
+| `autostart_no_window_fixed` | 哨兵启动时 / `install.py --fix-hooks` | `action_taken`, `moved_count`, `task` | **v1.25（0.60.0）新增**：**把旧的自启方式换成了不弹窗的那一种**。本机老版本用 `schtasks /TR "…antinel-shield.cmd"` 注册登录自启，`.cmd` 只能由 `cmd.exe` 执行，而计划任务的服务进程**没有控制台** ⇒ Windows 每次登录必定新建一个控制台窗口（创始人 2026-10-27：「任何类型的闪出黑窗都不可接受」）。这条记录的是「老任务被改指 `.lnk`（pythonw）」与「启动文件夹里旧的 `.cmd`/`.away-*` 被搬进 `<hub>/archive/`」。★ 为什么必须留痕：这是**改开机行为**的动作，而且只做一次（按版本打标记），事后没人能凭现象反推它做过没有 |
 | `policy_changed` | antinel CLI | `change`, `field`, `old_sha256`, `new_sha256`, `invoked_by` | `.psl/policy.json` 被 CLI 改写（白名单/阈值/档位）。每一次都记，因为**放行范围因此改变**。**v1.10 补登记 `field` 取值域**：`zones` / `workspaces` / `windows` / `roots` / `paths` / `domains` / 预算与限额项 …。★ 门闸的**链背书判定**按 `field` 取字段（`host_shield._backing_field()`）——`field=zones` 的记录才替 `host_shield.json` 的 `zones` 变化背书。**改这个取值域＝改门闸的判据**，必须同步改 `_BACKING_TYPES` 的守卫 |
 | `credits_snapshot` | antinel CLI | 余额快照 | 用户登记的积分余额事实（`antinel credits snapshot`）。**是事实记录，不是估算** |
 | `credits_low` | （暂无生产者） | `reason` | **v1.19（0.51.2）补登记**：缺粮事件——积分余额偏低。0.51.0 起在 `inbox_model.LEVEL_OF_KIND`（**Ls** 级）与 `TITLE_OF_KIND`（「缺粮：积分余额偏低」）登记，并是徽标「缺粮」的**第二个来源**（存在未关闭的 `credits_low` 记录即亮徽标）。★ **当前无生产者** —— 链上暂无此类型记录；本条登记的是**类型存在性与字段语义**。★ 与 `credits_snapshot` 是两件事：一个是**告警态**，一个是**事实快照** |

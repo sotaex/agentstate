@@ -2034,6 +2034,46 @@ def _autostart_branch_order(src):
     return lnk, folder, None
 
 
+def _lnk_builder_uses_pythonw(antinel_src, hs_src):
+    """`.lnk` 构建链的**终点**是否用 pythonw。返回 True 或说明串。
+
+    ★ 为什么抽成命名函数：判据有三条腿，负控必须能**换掉同一实现**去咬每一条
+      （假绿族「负控没跑到那条腿」——只测第一条，另两条永远是绿的）。
+
+    ★★ 0.60.0「跟随委托」：性质没变、实现搬了家 ⇒ 判据跟着走，不是把代码改回去。
+      0.60.0 把 `.lnk` 的构建收敛成一处（`host_shield.create_autostart_lnk`），
+      `antinel._create_startup_lnk` 变成薄委托 ⇒ 旧的"函数体内必须有
+      `_pythonw_exe()`"必然翻红，而窗口并不会因此回来。
+      但**必须走到底** —— 委托目标也要真的用 pythonw，否则判据被架空。
+    """
+    import ast as _ast
+    fn = next((n for n in _ast.walk(_ast.parse(antinel_src))
+               if isinstance(n, _ast.FunctionDef) and n.name == "_create_startup_lnk"),
+              None)
+    if fn is None:
+        return "`antinel._create_startup_lnk` 不存在 ⇒ 无窗口自启能力缺失"
+    called = {x.func.id for x in _ast.walk(fn)
+              if isinstance(x, _ast.Call) and isinstance(x.func, _ast.Name)}
+    if "_pythonw_exe" in called:
+        return True
+    attrs = {x.func.attr for x in _ast.walk(fn)
+             if isinstance(x, _ast.Call) and isinstance(x.func, _ast.Attribute)}
+    if "create_autostart_lnk" not in attrs:
+        return ("`_create_startup_lnk` 既没走 `_pythonw_exe()`、也没委托给 "
+                "`host_shield.create_autostart_lnk` ⇒ 可能仍指向有控制台的 python.exe")
+    hs_fn = next((n for n in _ast.walk(_ast.parse(hs_src))
+                  if isinstance(n, _ast.FunctionDef)
+                  and n.name == "create_autostart_lnk"), None)
+    if hs_fn is None:
+        return "委托目标 `host_shield.create_autostart_lnk` 不存在（委托指向空气）"
+    hs_called = {x.func.id for x in _ast.walk(hs_fn)
+                 if isinstance(x, _ast.Call) and isinstance(x.func, _ast.Name)}
+    if "pythonw_exe" not in hs_called:
+        return ("`host_shield.create_autostart_lnk` 没走 `pythonw_exe()` ⇒ "
+                "`.lnk` 可能指向有控制台的 python.exe（窗口又回来了）")
+    return True
+
+
 def c_startup_autostart_prefers_windowless():
     """★★ 0.51.2：登录自启**首选无窗口形式**（`.lnk` → pythonw.exe），`.cmd` 只作兜底。
 
@@ -2041,11 +2081,9 @@ def c_startup_autostart_prefers_windowless():
       **甚至不一闪而过**？让用户感觉不到存在是最好的」——`.cmd` 由 cmd.exe
       执行 ⇒ **必然**有一个控制台窗口；前台跑常驻哨兵时它会一直开着。
       唯一**真无窗口**的入口是 `.lnk` → `pythonw.exe`（GUI 子系统）。
-    ★ 判法（AST 结构，非文本匹配）：① 两个分支都在；② `.lnk` 分支排在
-      `.cmd` 之前（**优先**）；③ `_create_startup_lnk` 经 `_pythonw_exe()`
-      取解释器（不许直接用有控制台的 `sys.executable`）。
+    ★ 判法：① 两个分支都在；② `.lnk` 分支排在 `.cmd` 之前（**优先**）；
+      ③ `.lnk` 构建链的终点用 pythonw（见 `_lnk_builder_uses_pythonw`）。
     """
-    import ast as _ast
     src = _read_antinel_src()
     lnk, folder, err = _autostart_branch_order(src)
     if err:
@@ -2057,17 +2095,9 @@ def c_startup_autostart_prefers_windowless():
     if lnk > folder:
         return ("`.cmd` 兜底排在前、`.lnk` 在后 ⇒ 自启仍会弹控制台窗口"
                 "（创始人 2026-10-17 黑窗口）")
-    fn = next((n for n in _ast.walk(_ast.parse(src))
-               if isinstance(n, _ast.FunctionDef) and n.name == "_create_startup_lnk"),
-              None)
-    if fn is None:
-        return "`antinel._create_startup_lnk` 不存在 ⇒ 无窗口自启能力缺失"
-    called = {x.func.id for x in _ast.walk(fn)
-              if isinstance(x, _ast.Call) and isinstance(x.func, _ast.Name)}
-    if "_pythonw_exe" not in called:
-        return ("`_create_startup_lnk` 没走 `_pythonw_exe()` ⇒ 可能仍指向有控制台的"
-                " python.exe（窗口又回来了）")
-    return True
+    with open(os.path.join(G.PKG, "host_shield.py"), encoding="utf-8") as f:
+        hs_src = f.read()
+    return _lnk_builder_uses_pythonw(src, hs_src)
 
 
 def n_startup_autostart_prefers_windowless():
@@ -2089,6 +2119,31 @@ def n_startup_autostart_prefers_windowless():
         return "负控脚手架失效：造的分支没被解析出来（检测逻辑是假的）"
     if lnk <= folder:
         return "负控失效：顺序反了却判成合格 ⇒ 判据没有分辨力"
+    # ---- 腿②③④：第三个判据点（`.lnk` 构建链终点用不用 pythonw）也必须被咬住 ----
+    #   ★ 为什么必须补：原来只有腿①有负控，另两条**永远绿**——「负控没跑到那条腿」
+    #     是假绿族里最容易被漏的一支（判据看着有负控，实际只验了三分之一）。
+    a_direct = ("def _create_startup_lnk(p):\n"
+                "    py = sys.executable\n"
+                "    return run(py, p)\n")
+    a_deleg = ("def _create_startup_lnk(p):\n"
+               "    return hs.create_autostart_lnk(p)\n")
+    h_bad = ("def create_autostart_lnk(p):\n"
+             "    py = sys.executable\n"
+             "    return run(py, p)\n")
+    h_ok = ("def create_autostart_lnk(p):\n"
+            "    py = pythonw_exe()\n"
+            "    return run(py, p)\n")
+    r2 = _lnk_builder_uses_pythonw(a_direct, h_ok)
+    if r2 is True:
+        return "腿②失效：`.lnk` 直接拿 sys.executable 也算合格 ⇒ 没咬住控制台解释器"
+    r3 = _lnk_builder_uses_pythonw(a_deleg, h_bad)
+    if r3 is True:
+        return "腿③失效：委托目标用 sys.executable 也判绿 ⇒ 跟随委托等于没跟"
+    # 腿④ 是**正控**：委托链终点确实用 pythonw 时必须判绿 ——
+    #   否则腿③的"红"可能只是"凡委托皆红"，证明不了它认得出 pythonw。
+    r4 = _lnk_builder_uses_pythonw(a_deleg, h_ok)
+    if r4 is not True:
+        return "腿④失效：正常的委托链（终点 pythonw_exe）被判红 —— %r" % (r4,)
     return True
 
 
@@ -2226,26 +2281,1130 @@ def n_notify_only_when_owner_needed():
 # ★ 判据形态：**静态扫**生产运行模块里每一个起子进程的调用，必须带 `creationflags`。
 #   `**kwargs` 展开（`**kw`）无法静态确认 ⇒ **也算未登记**（fail-loud，不许蒙混）。
 
-# 生产运行模块（常驻／热路径）：哨兵、钩子、MCP、Antinel 监理、CLI。
-_PROD_SPAWN_FILES = (
-    "host_shield.py", "egress.py", "antinel.py", "antinel_mcp.py",
-    "inbox_server.py", "inbox_notify.py", "inbox_emphasis.py",
-    "inbox_tray.py", "ui_server.py",
-    "hooks/pre_tool_use.py", "hooks/post_tool_use.py",
-    "tools/enforce_probe.py",
-    # ★★ 0.35.3（本轮实测抓到的闪窗真凶）：
-    #   本文件**不在**原清单里 ⇒ 守卫对自己没登记的文件不负责，
-    #   而它恰好有 **39 处 subprocess.run、0 处带 creationflags** ——
-    #   静态扫描因此报"28 个调用全绿"，运行时却还在弹窗。
-    #   **登记＝必须修**：进来就得一起绿。
-    "scripts/verification_tests.py",
-)
+# ★★ 0.60.0：**扫描面改为派生**（原来手写 13 个文件的清单）。
+#   为什么必须改：0.60.0 普查实测 —— 那份手写清单漏掉了 `scripts/scan.py` /
+#   `scripts/install.py` / `scripts/build_package.py` / `release.py` /
+#   `verify_release.py` / `run_harness.py` / `challenge/*` 共 **20 处**真实违规，
+#   它们一直处于「缺 creationflags」状态，而判据**从未看见**（清单里没有）。
+#   ⇒ 手写清单＝会漏；派生＝新模块自动纳入。这是「扫描面用 glob／手写清单」
+#     那个假绿族（第十族）在本文件里的实例。
+#   ★ 那份 13 个文件的手写清单（`_PROD_SPAWN_FILES`）**已删除**：留着它就是给
+#     后人留一条"改回手写"的路。现在唯一口径是 `_derive_surface()`。
 _SPAWN_ATTRS = ("run", "Popen", "call", "check_output", "check_call")
-# 实测下界：egress 2（netstat+tasklist）＋ host_shield 8（icacls×5+taskkill+schtasks+
-# powershell）＋ pre_tool_use 1 ＋ post_tool_use 1 ＋ antinel 6 ＋ mcp 1 ＋ 其余 ≥1。
-# ★ 0.35.3：`verification_tests.py` 一项就是 39 处 ⇒ 下界必须跟着抬，
-#   否则"扫到 28 个全绿"会被误读成"扫全了"。**下界是量具的活力证明。**
-_SPAWN_MIN_EXPECTED = 45
+
+
+def _derive_surface(pkg=None):
+    """从 `pyproject.toml` 派生扫描面：py-modules ＋ packages 下的 `*.py`。
+
+    返回**相对包根**的路径元组（用 `/` 分隔）。派生失败返回 `()` —— 调用方
+    必须把空集当**红**（空集与"全绿"同貌，这正是最危险的一种绿灯）。
+    """
+    import re
+    pkg = pkg or G.PKG
+    try:
+        with open(os.path.join(pkg, "pyproject.toml"), encoding="utf-8") as f:
+            txt = f.read()
+    except OSError:
+        return ()
+    out = []
+    m = re.search(r"py-modules\s*=\s*\[(.*?)\]", txt, re.S)
+    if m:
+        for mod in re.findall(r'"([\w.]+)"', m.group(1)):
+            rel = mod.replace(".", "/") + ".py"
+            if os.path.isfile(os.path.join(pkg, rel)):
+                out.append(rel)
+    m = re.search(r"^packages\s*=\s*\[(.*?)\]", txt, re.S | re.M)
+    if m:
+        for pkn in re.findall(r'"([\w.]+)"', m.group(1)):
+            d = os.path.join(pkg, pkn)
+            if not os.path.isdir(d):
+                continue
+            for fn in sorted(os.listdir(d)):
+                rel = "%s/%s" % (pkn, fn)
+                if fn.endswith(".py") and os.path.isfile(os.path.join(pkg, rel)):
+                    out.append(rel)
+    return tuple(out)
+
+
+def _scan_prod_spawns(files=None):
+    """扫扫描面：返回 `(总调用数, 文件数, [(相对路径, 行号, 属性名)])`。
+
+    ★ 文件**必须在**（读不到就抛 —— 改名/消失 ⇒ 红，不静默少查）。
+    """
+    rels = files if files is not None else _derive_surface()
+    inspected, bad = 0, []
+    for rel in rels:
+        p = os.path.join(G.PKG, rel.replace("/", os.sep))
+        with open(p, encoding="utf-8") as f:
+            src = f.read()
+        n, b = _spawn_calls(src, rel)
+        inspected += n
+        bad.extend((rel, ln, attr) for ln, attr in b)
+    return inspected, len(rels), bad
+
+
+def c_no_console_flash_on_spawn():
+    """★★ 起控制台程序必须显式 `CREATE_NO_WINDOW`，否则黑窗一闪（创始人报障）。
+
+    判据：**派生扫描面**（pyproject 的 py-modules ＋ packages）里**没有一个**
+    起子进程的调用漏掉 `creationflags`。
+    附活力：扫描面必须非空、且扫到的调用数 ≥ 扫描面文件数 —— 否则「零违规」
+    可能只是**根本没扫到东西**（全绿信号本身危险：它不区分「没问题」和「判据瞎了」）。
+    """
+    inspected, nfiles, bad = _scan_prod_spawns()
+    return (not bad) and nfiles > 0 and inspected >= nfiles
+
+
+def n_no_console_flash_on_spawn():
+    """负控：注入一个**裸** `subprocess.run(["netstat","-ano"])` ⇒ 必须当场点名。
+
+    证明上一条不是「瞎了」：真漏了 flag，扫描器必须抓出来（先红后绿的「红」）。
+    """
+    _n, bad = _spawn_calls('import subprocess\n'
+                           'subprocess.run(["netstat", "-ano"], capture_output=True)\n')
+    return len(bad) == 1 and bad[0][1] == "run"
+
+
+def c_spawn_surface_is_derived():
+    """扫描面必须**派生自 pyproject**，不许退回手写清单。
+
+    判据（三条腿，缺一即红）：
+      ① 派生结果非空，且**每个 py-module 都在**（少一个＝有人把它踢出扫描面）
+      ② 0.60.0 实测漏过的那批文件**逐一在面内**（这是本条判据存在的理由）
+      ③ `_derive_surface()` 的输入被改坏时**必须返回空集**（不许静默返回旧清单）
+    """
+    surf = set(_derive_surface())
+    if len(surf) < 40:
+        return "派生面只有 %d 个文件（py-modules 就该有 34 个）" % len(surf)
+    must = ("scripts/scan.py", "scripts/install.py", "scripts/build_package.py",
+            "scripts/release.py", "scripts/verify_release.py",
+            "scripts/run_harness.py", "challenge/attack.py",
+            "hooks/pre_tool_use.py", "host_shield.py", "antinel.py")
+    missing = [m for m in must if m not in surf]
+    if missing:
+        return "派生面缺：%s" % ", ".join(missing)
+    if _derive_surface(pkg=os.path.join(G.PKG, "no-such-dir")):
+        return "pyproject 读不到时仍返回了清单（派生没做到 fail-loud）"
+    return True
+
+
+def n_spawn_surface_is_derived():
+    """负控：把 pyproject 换成**只有一个模块**的版本 ⇒ 派生面必须缩到 1。
+
+    证明上一条量的是 pyproject 本身，不是某个写死的常量。
+    ★ 临时目录必须走登记表（`_tmpdir()`），不许裸 `tempfile.mkdtemp`
+      —— 否则判据自己成了"临时目录不收"的反例（P37 会当场抓）。
+    """
+    import shutil
+    d = _tmpdir()
+    try:
+        with open(os.path.join(d, "pyproject.toml"), "w", encoding="utf-8") as f:
+            f.write('[tool.setuptools]\npy-modules = ["only_one"]\n'
+                    'packages = []\n')
+        with open(os.path.join(d, "only_one.py"), "w", encoding="utf-8") as f:
+            f.write("x = 1\n")
+        got = _derive_surface(pkg=d)
+        return got == ("only_one.py",)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def _autostart_via_cmd_problem(src, ensures=2, callers=None):
+    """自启是否还有「经 .cmd」的路径。返回 `True` 或**问题说明串**。
+
+    ★ 抽成命名函数是为了负控能**换掉同一实现**喂变异源码 —— 负控必须走正判据
+      的同一条代码路径（假绿第七族：负控绕过遍历＝负控白做）。
+    """
+    if '"/TR", \'"%s"\' % shim' in src or '"%s"\' % shim, "/SC"' in src:
+        return "schtasks 的 /TR 还指着 .cmd shim（每次登录闪一个黑窗）"
+    if '"/TR", \'"%s"\' % target' not in src:
+        return "找不到 `\"/TR\", '\"%s\"' % target`（注册目标改名了？先确认再改判据）"
+    i = src.find("@echo off")
+    j = src.find("if not has_lnk:")
+    if i < 0:
+        return "`.cmd` 兜底连写法都没了（要么是好事，要么是被人整段删了——先确认）"
+    if j < 0 or i < j:
+        return "`@echo off` 出现在 `if not has_lnk:` 之前（.cmd 回到主路径了）"
+    if callers is not None and len(callers) < ensures:
+        return "调用点只有 %s（哨兵启动 ＋ install 两处都要）" % (callers or "无")
+    return True
+
+
+def _release_fallback_problem(src):
+    """`scripts/release.py` 的「出包兜底」是否完整。返回 True ＝合格，否则返回说明串。
+
+    ★★ 0.60.0 为什么要守这个（出包当场撞到，白跑 19 分钟）：
+      本宿主上 `python -m build --wheel` 在**仓根**跑必失败，两条独立死因 ——
+        ① 仓根 `build/` 是无 `__init__.py` 的 namespace 包 ⇒ 先 import 到它；
+        ② 禁删 ⇒ bdist 阶段 WinError 5。
+      旧代码的两条救回（产物在 dist ／ `wheel pack` 暂存树）**同时失效**，
+      而第三条路（在系统 %TEMP% 从 sdist 重建）一直是**手工**跑的
+      `output/_wheel_from_sdist.py` —— 正是 release.py 自己注释里骂的
+      「机制建了一半和没建一样」：一条命令走不完，就得靠人记得。
+      ⇒ 三条腿：① 第三条路有定义**且有调用**（有定义没人调＝死代码）
+                ② **sdist 必须在 wheel 之前**（第三条路的输入是 sdist）
+                ③ `_artifact_present` 在（"产物已落 dist、被拦的只是收尾清理"
+                   这种形态，旧逻辑认不出，会把成功的构建报成失败）
+    """
+    if "def _wheel_from_sdist(" not in src:
+        return "release.py 里没有 _wheel_from_sdist（第三条兜底没了）"
+    if "= _wheel_from_sdist(" not in src:
+        return "_wheel_from_sdist 有定义但**没有调用点**（死代码＝兜底形同没建）"
+    if "def _artifact_present(" not in src:
+        return "release.py 里没有 _artifact_present（认不出「产物已落 dist」这种形态）"
+    if "_artifact_present(dist, version," not in src:
+        return "_artifact_present 有定义但没有调用点"
+    i_s = src.find('"--no-isolation", "--sdist"')
+    i_w = src.find('"--no-isolation", "--wheel"')
+    if i_s < 0 or i_w < 0:
+        return "找不到 sdist／wheel 的构建调用（写法变了？先确认再改判据）"
+    if i_s > i_w:
+        return ("sdist 排在 wheel **之后** —— wheel 的第三条兜底拿不到输入，"
+                "这条路永远走不通")
+    return True
+
+
+def _staged_gate_problem(src):
+    """救回② （`wheel pack` 暂存树）之前必须有「暂存树 == 源码」的内容门。
+
+    ★★ 为什么（2026-10-28 实测发现，本轮新增这条判据）：
+
+      救回② 会把 `build/bdist.*/wheel/` **整棵树**重新打包。而这棵树是
+      setuptools 的**增量**产物 —— `build_py` 只按 **mtime** 决定要不要
+      把源码复制过去。0.60.0 从源码里删掉了 `_retire_old_startup_cmd()`，
+      但本机实测 `build/lib/antinel.py:1955` 与
+      `build/bdist.win-amd64/wheel/antinel.py:1955` **各还留着一份**。
+
+      于是存在一条闭合的复发路径：源码删了函数 → 但某次源文件 mtime 不比
+      暂存树新（`git checkout` 恢复、备份拷回、时钟回拨）→ setuptools 不复制
+      → 暂存树仍是退役代码 → 救回② 原样打进发布件。
+
+      症状是「源码全绿、发布件带病」—— 发布件核对判据（D-6 族）**能**抓到，
+      但不该让它来兜构建的底：两道不同的门，一道坏了另一道不该被指望。
+
+    三条腿：
+      ① `_staged_tree_matches_source` 存在；
+      ② **有调用点**（函数在但没人调＝死代码，门形同没建）；
+      ③ 调用点必须在 `wheel pack` **之前**（排在后面＝树已经打包完了才检查）。
+    """
+    if "def _staged_tree_matches_source(" not in src:
+        return "release.py 里没有 _staged_tree_matches_source（内容门没了）"
+    # ★ 必须按**调用形态**定位，不能用裸函数名 ——
+    #   `def _staged_tree_matches_source(tree):` 这行本身也含
+    #   `_staged_tree_matches_source(tree)`，`find` 会先命中**定义行**，
+    #   于是「门是否在 pack 之前」变成恒真（本判据第一版就这么假绿了，
+    #   是负控变异② 咬出来的 —— 负控不是形式，它救的就是这种）。
+    call = "= _staged_tree_matches_source(tree)"
+    if call not in src:
+        return ("_staged_tree_matches_source 有定义但**没有调用点**"
+                "（死代码＝门形同没建）")
+    i_gate = src.find(call)
+    i_pack = src.find('"-m", "wheel", "pack"')
+    if i_pack < 0:
+        return "找不到 `wheel pack` 调用（写法变了？先确认再改判据）"
+    if i_gate > i_pack:
+        return ("内容门排在 `wheel pack` **之后** —— 树都已经打包完了才检查，"
+                "等于没检查")
+    return True
+
+
+def _staged_gate_behaviour():
+    """行为腿：真造两棵树喂给**真实现**，一致的必须放行、差一字节的必须拒。
+
+    ★ 为什么结构腿不够（第十五族：判据量写法 ≠ 量性质）：
+      结构腿只能证明「函数在、调用在、顺序对」。把 `_staged_tree_matches_source`
+      改成 `return True, []` 它照样全绿 —— 而那正是最可能的退化（"比对太慢，
+      先关掉"）。性质只有真跑一次才知道。
+
+    ★ 与 `output/_probe_staged_gate_0600.py` 同一批样本（那边另有真实旧树正控）。
+    """
+    import importlib.util
+    import shutil
+    p = os.path.join(G.PKG, "scripts", "release.py")
+    spec = importlib.util.spec_from_file_location("_antinel_rel_under_test", p)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    if not hasattr(m, "_staged_tree_matches_source"):
+        return "行为腿：模块里没有 _staged_tree_matches_source"
+    base = _tmpdir()
+    t_ok = os.path.join(base, "ok")
+    os.makedirs(t_ok)
+    try:
+        shutil.copy2(os.path.join(G.PKG, "antinel.py"),
+                     os.path.join(t_ok, "antinel.py"))
+        same, why = m._staged_tree_matches_source(t_ok)
+        if not same:
+            return "行为腿：与源码**一致**的树被判不一致（%r）⇒ 救回② 永远用不上" % (why[:3],)
+        t_bad = os.path.join(base, "bad")
+        shutil.copytree(t_ok, t_bad)
+        with open(os.path.join(t_bad, "antinel.py"), "ab") as f:
+            f.write(b"\n# tampered\n")
+        same2, why2 = m._staged_tree_matches_source(t_bad)
+        if same2:
+            return "行为腿：**差一个字节**的树被判一致 ⇒ 内容门是个装饰"
+        if not any("antinel.py" in w for w in why2):
+            return "行为腿：不一致清单没点名改过的文件（%r）" % (why2[:3],)
+        # 空树不许当"一致"（空集比较是本仓老账）
+        t_empty = os.path.join(base, "empty")
+        os.makedirs(t_empty)
+        same3, _ = m._staged_tree_matches_source(t_empty)
+        if same3:
+            return "行为腿：空树被判一致 ⇒ 空集当合格（老账复发）"
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+    return True
+
+
+def c_staged_wheel_gate():
+    """救回② 必须过内容门：暂存树与源码逐字节一致才允许 `wheel pack`。"""
+    with open(os.path.join(G.PKG, "scripts", "release.py"), encoding="utf-8") as f:
+        r = _staged_gate_problem(f.read())
+    if r is not True:
+        return r
+    return _staged_gate_behaviour()
+
+
+def n_staged_wheel_gate():
+    """负控：三种**真能跑坏**的变异体都必须判红。
+
+    ★ 负控喂真源码变异体（不是自造小片段）—— 结构腿也要能咬住
+      "把门去掉""把门挪到事后"这两种真实的退化动作。
+    """
+    with open(os.path.join(G.PKG, "scripts", "release.py"), encoding="utf-8") as f:
+        good = f.read()
+    base = _staged_gate_problem(good)
+    if base is not True:
+        return "正控体本身就没过：%r" % (base,)
+    # 变异①：删掉调用点，只留定义（最典型的退化：'门太慢，先关掉'）
+    bad1 = good.replace("= _staged_tree_matches_source(tree)", "= _unused_gate(tree)")
+    if bad1 == good:
+        return "构造变异体①失败（调用点写法变了？先确认再改判据）"
+    if _staged_gate_problem(bad1) is True:
+        return "变异体①（门只剩定义、没有调用）被判绿 —— 死代码没守住"
+    # 变异②：把调用整段挪到 wheel pack **之后**（事后检查＝没检查）
+    lines = good.splitlines(True)
+    k_gate = next((k for k, ln in enumerate(lines)
+                   if "= _staged_tree_matches_source(tree)" in ln), None)
+    k_pack = next((k for k, ln in enumerate(lines)
+                   if '"-m", "wheel", "pack"' in ln), None)
+    if k_gate is None or k_pack is None or k_gate > k_pack:
+        return "构造变异体②失败（找不到门/pack 行，或门本来就在后面）"
+    moved = lines.pop(k_gate)
+    # 插到 pack 行之后（pack 行位置因 pop 前移一位）
+    lines.insert(k_pack, moved)
+    if _staged_gate_problem("".join(lines)) is True:
+        return "变异体②（门挪到 wheel pack 之后）被判绿 —— 顺序没守住"
+    # 变异③：把函数体改成恒真（'比对太慢，先放过'）—— 只有行为腿能咬住
+    bad3 = good.replace("    if not os.path.isdir(tree):\n        return False, "
+                        "[\"暂存树不存在：%s\" % tree]",
+                        "    return True, []\n    if not os.path.isdir(tree):\n"
+                        "        return False, [\"暂存树不存在：%s\" % tree]")
+    if bad3 == good:
+        return "构造变异体③失败（函数头写法变了？先确认再改判据）"
+    if _staged_gate_problem(bad3) is True:
+        # 结构腿咬不住恒真是**预期**的 —— 那正是行为腿存在的理由；
+        # 这里要断言行为腿确实咬住了（否则负控自己就是假绿）。
+        src_beh = _staged_gate_behaviour_of(bad3)
+        if src_beh is True:
+            return "变异体③（门恒真）被判绿 —— 结构腿和行为腿都没咬住"
+    return True
+
+
+def _staged_gate_behaviour_of(src):
+    """把给定源码**落盘成临时模块**再跑行为腿（负控要能换掉同一实现）。
+
+    ★ 只造最小结构（`scripts/release.py` ＋ 一棵供比对的 `antinel.py`）：
+      `release.ROOT` 由 `__file__` 派生成 `<pkg>`，被测函数只需要这个根。
+      直接复制整个产品树会让这条负控跑几十秒 —— 负控太慢就会被关掉，
+      而被关掉的负控等于没有。
+    """
+    import importlib.util
+    import shutil
+    base = _tmpdir()
+    try:
+        pkg = os.path.join(base, "pkg")
+        os.makedirs(os.path.join(pkg, "scripts"))
+        with open(os.path.join(pkg, "scripts", "release.py"), "w",
+                  encoding="utf-8", newline="\n") as f:
+            f.write(src)
+        shutil.copy2(os.path.join(G.PKG, "antinel.py"),
+                     os.path.join(pkg, "antinel.py"))
+        spec = importlib.util.spec_from_file_location(
+            "_antinel_rel_mut", os.path.join(pkg, "scripts", "release.py"))
+        m = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(m)
+        except Exception as e:                      # noqa: BLE001
+            return True                             # 变异体都 import 不了 ⇒ 咬住了
+        # 与源码一致的树：必须放行
+        t_ok = os.path.join(base, "ok")
+        os.makedirs(t_ok)
+        shutil.copy2(os.path.join(pkg, "antinel.py"),
+                     os.path.join(t_ok, "antinel.py"))
+        if not m._staged_tree_matches_source(t_ok)[0]:
+            return True                             # 恒真已破坏 ⇒ 咬住了
+        # 差一字节的树：必须拒
+        t_bad = os.path.join(base, "bad")
+        shutil.copytree(t_ok, t_bad)
+        with open(os.path.join(t_bad, "antinel.py"), "ab") as f:
+            f.write(b"\n# tampered\n")
+        return True if not m._staged_tree_matches_source(t_bad)[0] else False
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def _sentinel_spawn_interp_problem():
+    """行为腿：用假 `Popen` 抓 `spawn_sentinel` **真正传出去**的解释器。
+
+    ★ 为什么不用结构腿只看源码字符串（第十五族：判据量写法 ≠ 量性质）：
+      `py = python_exe or pythonw_exe()` 可以写在那儿却**不被用**（下面又
+      覆盖成 `sys.executable`），或者被某个分支绕开。只有抓 `argv[0]`
+      才知道真起的是谁。本判据第一版就是靠结构腿，负控变异体当场证明它咬不住。
+    """
+    import host_shield as HS
+    seen = {}
+
+    class _FakePopen(object):
+        def __init__(self, argv, **kw):
+            seen["argv"] = list(argv)
+            seen["kw"] = dict(kw)
+            self.pid = 424242
+
+    saved = {"sentinel_alive": HS.sentinel_alive,
+             "self_check": HS.self_check,
+             "load_state": HS.load_state,
+             "update_state_fields": HS.update_state_fields,
+             "Popen": HS.subprocess.Popen}
+    if hasattr(HS, "_consume_state_write"):
+        saved["_consume_state_write"] = HS._consume_state_write
+    try:
+        HS.sentinel_alive = lambda st=None: False
+        HS.self_check = lambda: (True, [])
+        HS.load_state = lambda *a, **k: {}
+        HS.update_state_fields = lambda **kw: {}
+        if hasattr(HS, "_consume_state_write"):
+            HS._consume_state_write = lambda r, *a, **k: None
+        HS.subprocess.Popen = _FakePopen
+        try:
+            ok, _pid, mode = HS.spawn_sentinel(os.path.abspath(G.PKG))
+        except Exception as e:                             # noqa: BLE001
+            return "spawn_sentinel 抛异常：%s: %s" % (type(e).__name__, e)
+    finally:
+        HS.sentinel_alive = saved["sentinel_alive"]
+        HS.self_check = saved["self_check"]
+        HS.load_state = saved["load_state"]
+        HS.update_state_fields = saved["update_state_fields"]
+        HS.subprocess.Popen = saved["Popen"]
+        if "_consume_state_write" in saved:
+            HS._consume_state_write = saved["_consume_state_write"]
+    if not ok:
+        return "spawn_sentinel 没走通（mode=%r）—— 行为腿没喂到 Popen" % (mode,)
+    argv = seen.get("argv") or []
+    if not argv:
+        return "假 Popen 没被调用（喂不到 argv）"
+    exe = os.path.basename(str(argv[0])).lower()
+    if exe != "pythonw.exe":
+        return ("拉起的解释器是 `%s` —— 控制台子系统程序在**无控制台**父进程下"
+                "会被 Windows 新建一个控制台（用户看到闪黑窗）；应为 pythonw.exe"
+                % (exe,))
+    return True
+
+
+def c_sentinel_spawns_windowless():
+    """拉起哨兵必须用 `pythonw.exe`（GUI 子系统），不许用 `sys.executable`。
+
+    ★★ 为什么（2026-10-28 实测发现的**收敛缺口**）：
+      原实现 `py = python_exe or sys.executable` —— 用的是**当前进程的解释器**。
+      于是：老的 `python.exe` 哨兵自愈时拉起新哨兵 ⇒ 新哨兵**还是** `python.exe`
+      ⇒ 永远不收敛到无窗口。改了代码也没用，因为**没有一次重启换过解释器**。
+
+      本机实测就是这个形状：pid 121556 是
+      `python.exe -I -S host_shield.py sentinel …`（启动于 10/27 14:04，
+      0.59.0 时代），全机 `pythonw.exe` 个数 = **0**。
+      用户看到的现象是「改了也照样闪」。
+
+      ⇒ 首选 `pythonw_exe()`（它自己会在找不到 pythonw 时退回本尊）；
+        显式传入 `python_exe` 的调用方仍然优先（判据/测试要能钉住解释器）。
+    """
+    import ast as _ast
+    with open(os.path.join(G.PKG, "host_shield.py"), encoding="utf-8") as f:
+        src = f.read()
+    try:
+        tree = _ast.parse(src)
+    except SyntaxError as e:
+        return "host_shield.py 语法坏了：%s" % e
+    fn = None
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.FunctionDef) and node.name == "spawn_sentinel":
+            fn = node
+            break
+    if fn is None:
+        return "找不到 spawn_sentinel（改名了？先确认再改判据）"
+    body = _ast.get_source_segment(src, fn) or ""
+    if "pythonw_exe(" not in body:
+        return ("spawn_sentinel 里没有调用 pythonw_exe() —— 会沿用当前进程的解释器，"
+                "老 python.exe 哨兵永远收敛不到无窗口")
+    # ★ 只认**真实引用**（AST 里的 `sys.executable` 属性访问），不认注释里
+    #   提到的那几个字 —— 本判据第一版就是被自己的解释性注释绊红的。
+    uses_exec = False
+    for node in _ast.walk(fn):
+        if (isinstance(node, _ast.Attribute) and node.attr == "executable"
+                and isinstance(node.value, _ast.Name) and node.value.id == "sys"):
+            uses_exec = True
+            break
+    if uses_exec:
+        return ("spawn_sentinel 里仍然直接用了 sys.executable —— 那正是收敛缺口的来源"
+                "（应为 `python_exe or pythonw_exe()`）")
+    return _sentinel_spawn_interp_problem()
+
+
+def n_sentinel_spawns_windowless():
+    """负控：退回 `sys.executable` 必须判红（行为腿要能咬住真改名/真退化）。"""
+    import ast as _ast
+    with open(os.path.join(G.PKG, "host_shield.py"), encoding="utf-8") as f:
+        good = f.read()
+    base = c_sentinel_spawns_windowless()
+    if base is not True:
+        return "正控体本身就没过：%r" % (base,)
+    # 变异：把 `python_exe or pythonw_exe()` 改回 `python_exe or sys.executable`
+    bad1 = good.replace("py = python_exe or pythonw_exe()",
+                        "py = python_exe or sys.executable")
+    if bad1 == good:
+        return "构造变异体①失败（那一行写法变了？先确认再改判据）"
+    # 用同一个检查函数跑变异体：落盘成临时模块再调行为腿
+    r1 = _spawn_interp_of_source(bad1)
+    if r1 is True:
+        return "变异体①（退回 sys.executable）被判绿 —— 收敛缺口没守住"
+    # 变异②：保留 pythonw_exe() 字样但**不用它**（上面写、下面覆盖）
+    bad2 = good.replace(
+        "py = python_exe or pythonw_exe()",
+        "py = python_exe or pythonw_exe()\n    py = sys.executable")
+    if bad2 == good:
+        return "构造变异体②失败"
+    r2 = _spawn_interp_of_source(bad2)
+    if r2 is True:
+        return "变异体②（写了 pythonw_exe() 又覆盖成 sys.executable）被判绿"
+    return True
+
+
+# =========================== 黑窗：机制级两条 ===========================
+# 背景（2026-10-28 实测取证，不是推演）：
+#   宿主用 `PYTHONPATH` 注入一份 `sitecustomize.py`，它把 `os.remove` 等删除动作
+#   改写成「走回收站」，而里面 `_check_bulk_delete_guard()` 会
+#   `subprocess.run([node, guard, "check", "--target", path])` ——
+#   **没有 creationflags**。node.exe 是控制台子系统程序，我们的守护进程／哨兵是
+#   无控制台父进程 ⇒ Windows 必须给 node 建一个新控制台 ⇒ Windows Terminal 弹窗。
+#   取证：`output/_catch_console_0600.jsonl`（node 的父进程与命令行）、
+#        `output/_watch_blackbox_0600.jsonl`（窗口事件，成对、约 62 秒一轮）。
+#   之前那次「起进程点 102 处、缺 flags 0 处」的静态审计**必然全绿**：
+#   违规的那个 Popen 在宿主里，不在本仓 —— 审计问的是「我们写没写 flags」，
+#   而事实是「那个值挡不住窗口，且根本不在我们手里」。
+#
+# 修法两条，各自一条判据，都带行为腿与负控：
+#   ① 长期子进程必须拿到**剥掉垫片**的环境（`host_shield.child_env()`）
+#   ② 稳态热路径不许出现删除动作（改「改名让开」，`audit_chain.retire_file()`）
+
+#: 垫片目录（本机实测值）。判据里只用来"构造脏环境"，不要求存在。
+_HOST_SHIM_DIR = r"D:\Application\WB\CN\resources\app.asar.unpacked\cli\vendor\shim"
+_HOST_SHIM_GUARD = os.path.join(_HOST_SHIM_DIR, "safe-delete-bulk-guard.cjs")
+
+
+def _dirty_env():
+    """构造一份「工具调用里的环境」——垫片注入路径 + 守卫自己的门都齐。"""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = _HOST_SHIM_DIR
+    env["CODEBUDDY_TOOL_CALL_ID"] = "0353-probe"
+    env["CODEBUDDY_SAFE_DELETE_BULK_GUARD"] = _HOST_SHIM_GUARD
+    env["CODEBUDDY_SAFE_DELETE_BULK_STATE_DIR"] = _tmpdir()
+    return env
+
+
+def _count_node_spawned(fn, timeout=8.0):
+    """跑 `fn()` 期间，全机新出现的 `node.exe` 条数。
+
+    ★ 为什么按名字数、不按 ppid 归属：实测守卫那次 node 的父进程**不是**发起
+      删除的那个进程（垫片把 `check` 委托给了常驻 broker）。强求归属会把
+      「真的有」判成「没有」—— 那才是真正的假绿。
+    ★ 为什么只数 node.exe、不数 conhost：conhost 是本机任何控制台程序都会拉一个
+      的环境噪声，算进来三条腿都一样，读数失去分辨力（第一版就这么误判过）。
+    """
+    import ctypes
+    import ctypes.wintypes as _wt
+    k32 = ctypes.windll.kernel32
+    TH32CS_SNAPPROCESS = 0x00000002
+
+    class _PE(ctypes.Structure):
+        _fields_ = [("dwSize", _wt.DWORD), ("cntUsage", _wt.DWORD),
+                    ("th32ProcessID", _wt.DWORD),
+                    ("th32DefaultHeapID", ctypes.POINTER(ctypes.c_ulong)),
+                    ("th32ModuleID", _wt.DWORD), ("cntThreads", _wt.DWORD),
+                    ("th32ParentProcessID", _wt.DWORD),
+                    ("pcPriClassBase", ctypes.c_long), ("dwFlags", _wt.DWORD),
+                    ("szExeFile", ctypes.c_char * 260)]
+
+    def snap():
+        h = k32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+        if h in (-1, None):
+            return {}
+        out = {}
+        try:
+            e = _PE()
+            e.dwSize = ctypes.sizeof(_PE)
+            ok = k32.Process32First(h, ctypes.byref(e))
+            while ok:
+                out[int(e.th32ProcessID)] = e.szExeFile.decode("mbcs", "replace")
+                ok = k32.Process32Next(h, ctypes.byref(e))
+        finally:
+            k32.CloseHandle(h)
+        return out
+
+    if os.name != "nt":
+        return 0
+    before = set(snap().keys())
+    # ★★ 被测量必须**并发**跑：第一版写的是「先 `fn()` 再轮询」，而 `fn()` 里是
+    #   `subprocess.run`（阻塞到子进程退出）。node.exe 只活几十毫秒，等 fn()
+    #   返回时它早死了 ⇒ 永远读 0 ⇒ **正控的 0 是假绿**。
+    #   这一条是负控咬出来的：负控（退回删除）也读到 0，才暴露量具是瞎的。
+    import threading
+    done = {"n": 0}
+
+    def _wrap():
+        try:
+            fn()
+        finally:
+            done["n"] = 1
+
+    th = threading.Thread(target=_wrap, daemon=True)
+    th.start()
+    hits = 0
+    while th.is_alive():
+        time.sleep(0.02)
+        cur = snap()
+        for pid in set(cur.keys()) - before:
+            if (cur.get(pid) or "").lower() == "node.exe":
+                hits += 1
+        before |= set(cur.keys())
+    th.join(timeout=5)
+    # 收尾再扫一遍（子进程退出瞬间出生的也算）
+    deadline = time.time() + timeout
+    while time.time() < deadline and hits == 0:
+        time.sleep(0.03)
+        cur = snap()
+        for pid in set(cur.keys()) - before:
+            if (cur.get(pid) or "").lower() == "node.exe":
+                hits += 1
+        before |= set(cur.keys())
+        break
+    return hits
+
+
+def _child_env_of_source(src):
+    """把给定 host_shield 源码落盘成临时包，取它的 `child_env()` 行为。
+
+    返回 `(env_dict, err)`。用**新进程**跑，避免本进程已经加载的模块干扰
+    （判据必须量到源码当前的行为，不是量到内存里那份旧对象）。
+    """
+    import subprocess                                    # 本模块顶部没 import 它
+    base = _tmpdir()
+    pkg = os.path.join(base, "pkg")
+    try:
+        os.makedirs(pkg, exist_ok=True)
+        with open(os.path.join(pkg, "host_shield.py"), "w",
+                  encoding="utf-8", newline="\n") as f:
+            f.write(src)
+        probe = os.path.join(base, "probe_child_env.py")
+        with open(probe, "w", encoding="utf-8", newline="\n") as f:
+            f.write(
+                "import json, os, sys\n"
+                "sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))\n"
+                "sys.path.insert(0, os.path.join(os.path.dirname("
+                "os.path.abspath(__file__)), 'pkg'))\n"
+                "import host_shield as HS\n"
+                "base = {'PYTHONPATH': 'x', 'PYTHONSTARTUP': 'y',"
+                " 'PYTHONHOME': 'z', 'CODEBUDDY_TOOL_CALL_ID': 't',"
+                " 'CODEBUDDY_SAFE_DELETE_BULK_STATE_DIR': 's',"
+                " 'CODEBUDDY_CONFIG_DIR': 'keepme', 'PATH': os.environ.get('PATH','')}\n"
+                "print(json.dumps(HS.child_env(base), ensure_ascii=False))\n")
+        r = subprocess.run([sys.executable, "-X", "utf8", probe],
+                           capture_output=True, text=True, timeout=60,
+                           creationflags=(0x08000000 if os.name == "nt" else 0))
+        if r.returncode != 0:
+            return None, "探针 rc=%d：%s" % (r.returncode, (r.stderr or "")[-300:])
+        import json as _json
+        return _json.loads(r.stdout.strip().splitlines()[-1]), None
+    except Exception as e:                                    # noqa: BLE001
+        return None, "%s: %s" % (type(e).__name__, e)
+
+
+def c_child_env_hermetic():
+    """长期子进程必须拿到**剥掉宿主垫片**的环境（黑窗机制修法之一）。
+
+    结构腿三条：
+      ① `host_shield.child_env()` 存在，且从环境里摘掉垫片注入键；
+      ② `spawn_sentinel` 传了 `env=child_env()`；
+      ③ `inbox_server._popen_detached` 传了 `env=...child_env()` —— 它是
+         `spawn_console` / `spawn_daemon` 的**唯一收口点**，改一处就够。
+    行为腿一条：真的调一遍 `child_env()`，看 `PYTHONPATH`/`TOOL_CALL_ID` 没了、
+    `CODEBUDDY_CONFIG_DIR` **还在**（宿主识别不能一起剥坏）。
+    """
+    import ast as _ast
+    hs_path = os.path.join(G.PKG, "host_shield.py")
+    sv_path = os.path.join(G.PKG, "inbox_server.py")
+    with open(hs_path, encoding="utf-8") as f:
+        hs_src = f.read()
+    try:
+        hs_tree = _ast.parse(hs_src)
+    except SyntaxError as e:
+        return "host_shield.py 语法坏了：%s" % e
+
+    fn = None
+    for node in _ast.walk(hs_tree):
+        if isinstance(node, _ast.FunctionDef) and node.name == "child_env":
+            fn = node
+            break
+    if fn is None:
+        return ("host_shield.py 里没有 child_env()（剥环境的唯一实现丢了）—— "
+                "长期进程会继承宿主垫片，每次删除都拉起 node.exe 闪黑窗")
+
+    # ① 结构：必须真的摘键（AST 里要能看到 pop/ del）
+    body = _ast.get_source_segment(hs_src, fn) or ""
+    if "pop(" not in body and " del " not in body:
+        return "child_env() 里没有摘键动作（pop/del）—— 它现在什么都没剥"
+    for k in ("PYTHONPATH", "CODEBUDDY_TOOL_CALL_ID"):
+        if k not in hs_src:
+            return "child_env 的剥键清单里没有 %s" % k
+
+    # ② 结构：spawn_sentinel 必须传 env=child_env()
+    sent = None
+    for node in _ast.walk(hs_tree):
+        if isinstance(node, _ast.FunctionDef) and node.name == "spawn_sentinel":
+            sent = node
+            break
+    if sent is None:
+        return "找不到 spawn_sentinel"
+    sent_body = _ast.get_source_segment(hs_src, sent) or ""
+    if "env=child_env()" not in sent_body:
+        return "spawn_sentinel 没传 env=child_env() —— 哨兵会继承宿主垫片"
+
+    # ③ 结构：收口点必须传（下标里 `setdefault("env", _child_env())`）
+    with open(sv_path, encoding="utf-8") as f:
+        sv_src = f.read()
+    if "_popen_detached" not in sv_src:
+        return "inbox_server 里没有 _popen_detached（收口点改名了？先确认再改判据）"
+    if 'setdefault("env"' not in sv_src and "env=_child_env()" not in sv_src:
+        return ("_popen_detached 没给子进程设 env —— spawn_console/spawn_daemon "
+                "会继承宿主垫片")
+
+    # ④ 结构：钩子里的起进程也必须剥环境（钩子**天生**跑在工具调用的环境里，
+    #    它是垫片最容易进来的地方；`enforce_probe` 会删东西 ⇒ 一次删除一个黑窗）
+    hook_p = os.path.join(G.PKG, "hooks", "post_tool_use.py")
+    if os.path.isfile(hook_p):
+        with open(hook_p, encoding="utf-8") as f:
+            hook_src = f.read()
+        try:
+            hook_tree = _ast.parse(hook_src)
+        except SyntaxError as e:
+            return "hooks/post_tool_use.py 语法坏了：%s" % e
+        found_spawn = False
+        # 先收集「被 child_env() 赋过值的变量名」—— 写成 `_env = hs.child_env()`
+        # 再用 `env=_env` 传，是**正确**的写法；判据要认得出它，
+        # 否则会逼着代码把 import 塞进调用行里（那是为了过判据而写坏代码）。
+        env_vars = set()
+        for node in _ast.walk(hook_tree):
+            if not isinstance(node, _ast.Assign) or len(node.targets) != 1:
+                continue
+            t = node.targets[0]
+            v = node.value
+            if not (isinstance(t, _ast.Name) and isinstance(v, _ast.Call)):
+                continue
+            f = v.func
+            if ((isinstance(f, _ast.Name) and f.id.endswith("child_env"))
+                    or (isinstance(f, _ast.Attribute) and f.attr.endswith("child_env"))):
+                env_vars.add(t.id)
+        for node in _ast.walk(hook_tree):
+            if not (isinstance(node, _ast.Call)
+                    and isinstance(node.func, _ast.Attribute)
+                    and node.func.attr == "Popen"
+                    and isinstance(node.func.value, _ast.Name)
+                    and node.func.value.id == "subprocess"):
+                continue
+            found_spawn = True
+            kw = {k.arg: k.value for k in node.keywords if k.arg}
+            env = kw.get("env")
+            ok_env = False
+            if isinstance(env, _ast.Call):
+                fe = env.func
+                ok_env = ((isinstance(fe, _ast.Name) and fe.id.endswith("child_env"))
+                          or (isinstance(fe, _ast.Attribute)
+                              and fe.attr.endswith("child_env")))
+            elif isinstance(env, _ast.Name) and env.id in env_vars:
+                ok_env = True
+            if not ok_env:
+                return ("hooks/post_tool_use.py 第 %d 行的 Popen 没传 env=…child_env() "
+                        "—— 钩子跑在工具调用的环境里，它会继承宿主垫片，"
+                        "里面的删除会拉起 node.exe 闪黑窗" % node.lineno)
+        if not found_spawn:
+            return ("hooks/post_tool_use.py 里找不到 subprocess.Popen（改名了？"
+                    "先确认再改判据）")
+
+    # 行为腿：真跑一遍 child_env()
+    env, err = _child_env_of_source(hs_src)
+    if err:
+        return "行为腿跑不起来：%s" % err
+    for k in ("PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME",
+              "CODEBUDDY_TOOL_CALL_ID", "CODEBUDDY_SAFE_DELETE_BULK_STATE_DIR"):
+        if k in env:
+            return "child_env() 没摘掉 %s（剥了等于没剥）" % k
+    if env.get("CODEBUDDY_CONFIG_DIR") != "keepme":
+        return ("child_env() 把 CODEBUDDY_CONFIG_DIR 也剥了 —— 宿主动探要靠它，"
+                "剥掉会把「认得出宿主」一起弄坏")
+    return True
+
+
+def n_child_env_hermetic():
+    """负控：三种退化都必须判红。
+
+    ① `child_env` 变成直接 `return dict(os.environ)`（什么都不剥）
+    ② 只剥 PYTHONPATH、留着 `CODEBUDDY_TOOL_CALL_ID`（守卫的门还开着）
+    ③ 顺手把 `CODEBUDDY_CONFIG_DIR` 也剥了（把宿主识别弄坏）
+    """
+    hs_path = os.path.join(G.PKG, "host_shield.py")
+    with open(hs_path, encoding="utf-8") as f:
+        good = f.read()
+    base = c_child_env_hermetic()
+    if base is not True:
+        return "正控体本身就没过：%r" % (base,)
+
+    # 变异①：剥键清单清空
+    bad1 = good.replace('_HOST_SHIM_ENV_KEYS = ("PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME",\n'
+                        '                       "CODEBUDDY_TOOL_CALL_ID",\n'
+                        '                       "CODEBUDDY_SAFE_DELETE_BULK_STATE_DIR")',
+                        '_HOST_SHIM_ENV_KEYS = ()')
+    if bad1 == good:
+        return "构造变异体①失败（常量写法变了？先确认再改判据）"
+    env1, err1 = _child_env_of_source(bad1)
+    if err1:
+        return "变异体①跑不起来：%s" % err1
+    if "PYTHONPATH" not in env1:
+        return "变异体①（剥键清单清空）被判绿 —— 剥环境这条门没守住"
+
+    # 变异②：只剥 PYTHONPATH，留着 TOOL_CALL_ID
+    bad2 = good.replace('"CODEBUDDY_TOOL_CALL_ID",\n                       ', '')
+    if bad2 == good:
+        return "构造变异体②失败"
+    env2, err2 = _child_env_of_source(bad2)
+    if err2:
+        return "变异体②跑不起来：%s" % err2
+    if "CODEBUDDY_TOOL_CALL_ID" not in env2:
+        return "变异体②（只剥 PYTHONPATH）被判绿 —— 守卫的门还开着"
+
+    # 变异③：把 CONFIG_DIR 也剥掉
+    bad3 = good.replace('"CODEBUDDY_SAFE_DELETE_BULK_STATE_DIR")',
+                        '"CODEBUDDY_SAFE_DELETE_BULK_STATE_DIR",\n'
+                        '                       "CODEBUDDY_CONFIG_DIR")')
+    if bad3 == good:
+        return "构造变异体③失败"
+    env3, err3 = _child_env_of_source(bad3)
+    if err3:
+        return "变异体③跑不起来：%s" % err3
+    if env3.get("CODEBUDDY_CONFIG_DIR") == "keepme":
+        return "变异体③（把宿主识别键一起剥了）被判绿 —— 剥过头没人拦"
+    return True
+
+
+#: 行为腿的探针源码：在**带脏环境的子进程**里偷一次死锁。
+#: ★ 为什么必须开子进程：整套是用 `PYTHONPATH=` 起的（本仓纪律），
+#:   所以垫片在本进程里**根本没加载** —— 进程内做删除永远不会拉 node，
+#:   负控必然读到 0（= 量具是瞎的）。要让 `node.exe` 真的出现，
+#:   必须让探针进程拿到「工具调用里那份环境」，再让它在里面删除。
+_STEAL_PROBE_SRC = '''\
+import json, os, sys, time
+root = sys.argv[1]
+mode = sys.argv[2]
+sys.path.insert(0, root)
+import audit_chain as AC
+if mode == "remove":                      # 变异：退回 0.59.0 的删除
+    AC.retire_file = lambda p: (os.remove(p), True)[1]
+d = sys.argv[3]
+target = os.path.join(d, "chain.jsonl")
+lockf = target + ".lock"
+with open(lockf, "w", encoding="utf-8") as f:
+    f.write('{"pid": 0, "ts": 0, "token": "stale"}')
+old = time.time() - 3600
+os.utime(lockf, (old, old))
+lk = AC.acquire_lock(target)
+out = {"lock": bool(lk),
+       "token": (AC.read_lock(lk) or {}).get("token") if lk else None,
+       "away": os.path.exists(lockf + ".away")}
+print(json.dumps(out))
+'''
+
+
+def _steal_probe(mode):
+    """在脏环境子进程里偷一次死锁，返回 `(node 出生数, 结果 dict, err)`。
+
+    ★★ 探针目录**不能放在系统 TEMP**：宿主垫片里
+      `_should_bypass_safe_delete()` 的第一条就是「在 OS 临时目录下 ⇒ 直接走原生
+      删除」，也就是说 TEMP 里的删除**永远到不了守卫**，也就永远不拉 node。
+      负控在 TEMP 里必然读 0 —— 那正好把「量具是瞎的」伪装成「没有闪窗」。
+      ⇒ 放在中枢目录下的固定子目录（`~/.antinel/zz_lockprobe`）：
+        它不在旁路清单里，与真实锁（`<hub>/notify_state.json.lock`）同域，
+        保真度最高；文件名固定 + `os.replace` 覆盖 ⇒ 占用恒定，不堆积。
+    """
+    import json as _json
+    import subprocess
+    d = os.path.join(os.path.expanduser("~"), ".antinel", "zz_lockprobe")
+    os.makedirs(d, exist_ok=True)
+    probe = os.path.join(d, "probe_steal.py")
+    with open(probe, "w", encoding="utf-8", newline="\n") as f:
+        f.write(_STEAL_PROBE_SRC)
+    env = _dirty_env()
+    # 垫片 + 本仓**同时**在路径里：垫片要靠 PYTHONPATH 才能 import，
+    # 仓库模块也要找得到。垫片自己会把自己的目录从 sys.path 摘掉，不冲突。
+    env["PYTHONPATH"] = _HOST_SHIM_DIR + os.pathsep + G.PKG
+    box = {}
+    err = None
+
+    def _run():
+        try:
+            box["r"] = subprocess.run(
+                [sys.executable, "-X", "utf8", probe, G.PKG, mode, d],
+                capture_output=True, text=True, timeout=60, env=env,
+                creationflags=(0x08000000 if os.name == "nt" else 0))
+        except Exception as e:                            # noqa: BLE001
+            box["err"] = "%s: %s" % (type(e).__name__, e)
+
+    node_n = _count_node_spawned(_run)
+    r = box.get("r")
+    err = box.get("err")
+    if err:
+        return node_n, {}, err
+    if r is None or r.returncode != 0:
+        return node_n, {}, "探针 rc=%s：%s" % (
+            None if r is None else r.returncode,
+            ((r.stderr if r else "") or "").strip()[-300:])
+    try:
+        return node_n, _json.loads((r.stdout or "").strip().splitlines()[-1]), None
+    except Exception as e:                                # noqa: BLE001
+        return node_n, {}, "探针输出解不动（%s）：%r" % (e, (r.stdout or "")[-200:])
+
+
+def c_no_delete_in_hot_path():
+    """稳态热路径不许出现删除动作（黑窗机制修法之二）。
+
+    为什么盯 `acquire_lock`/`release_lock`：这两处是**每一次写入**都会走的地方。
+    在这个宿主上，一次删除 = 一次 `node.exe ... check` = 一个黑窗。
+
+    结构腿：两个函数体里不许有 `os.remove`/`os.unlink`/`shutil.rmtree`；
+            `retire_file()` 必须存在且用 `os.replace`（改名让开，不是删除）。
+    行为腿：带**工具调用那份环境**（垫片会真的拉起 node）的子进程里偷一次死锁 ——
+            必须偷到、必须留下 `.away` 残骸、全程 `node.exe` 出生 **0** 次。
+    """
+    import ast as _ast
+    ac_path = os.path.join(G.PKG, "audit_chain.py")
+    with open(ac_path, encoding="utf-8") as f:
+        src = f.read()
+    try:
+        tree = _ast.parse(src)
+    except SyntaxError as e:
+        return "audit_chain.py 语法坏了：%s" % e
+
+    def _deletes_in(name):
+        fn = None
+        for node in _ast.walk(tree):
+            if isinstance(node, _ast.FunctionDef) and node.name == name:
+                fn = node
+                break
+        if fn is None:
+            return ["找不到 %s（改名了？先确认再改判据）" % name]
+        bad = []
+        for node in _ast.walk(fn):
+            if not isinstance(node, _ast.Call):
+                continue
+            f = node.func
+            if isinstance(f, _ast.Attribute) and isinstance(f.value, _ast.Name):
+                if f.value.id == "os" and f.attr in ("remove", "unlink", "rmdir"):
+                    bad.append("%s 里还有 os.%s" % (name, f.attr))
+                if f.value.id == "shutil" and f.attr == "rmtree":
+                    bad.append("%s 里还有 shutil.rmtree" % name)
+            if isinstance(f, _ast.Attribute) and f.attr == "unlink":
+                bad.append("%s 里还有 .unlink()" % name)
+        return bad
+
+    problems = _deletes_in("acquire_lock") + _deletes_in("release_lock")
+    if problems:
+        return "；".join(problems) + "（每次写入都会拉起 node.exe ⇒ 闪黑窗）"
+
+    rf = None
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.FunctionDef) and node.name == "retire_file":
+            rf = node
+            break
+    if rf is None:
+        return "audit_chain 里没有 retire_file()（改名让开的唯一实现丢了）"
+    rf_body = _ast.get_source_segment(src, rf) or ""
+    if "os.replace(" not in rf_body:
+        return "retire_file() 没用 os.replace —— 改名让开这条修法退化了"
+
+    node_n, out, err = _steal_probe("retire")
+    if err:
+        return "行为腿跑不起来：%s" % err
+    if node_n:
+        return ("行为腿：偷一次死锁就拉起了 %d 个 node.exe —— "
+                "稳态热路径仍在删除（每个都是一次黑窗）" % node_n)
+    if not out.get("lock"):
+        return ("行为腿：死锁没被偷掉（acquire_lock 返回 None）—— "
+                "锁会永远卡住，调用方只能退化成 sidecar")
+    if out.get("token") != "antinel-lock-v1" and not out.get("token"):
+        return "行为腿：偷到手的锁没有 token（身份牌丢了）"
+    if not out.get("away"):
+        return ("行为腿：没留下 `.away` 残骸 —— 陈年锁是被**删掉**的"
+                "（删除＝黑窗），不是改名让开的")
+    return True
+
+
+def n_no_delete_in_hot_path():
+    """负控：把 `retire_file` 退回 `os.remove` 必须判红。
+
+    这条负控是**必须真的能看见 node 出生**的 —— 如果连它都读到 0，
+    说明量具（`_count_node_spawned`）是瞎的，正控的 0 就不算证据。
+    """
+    base = c_no_delete_in_hot_path()
+    if base is not True:
+        return "正控体本身就没过：%r" % (base,)
+    node_n, out, err = _steal_probe("remove")
+    if err:
+        return "负控跑不起来：%s" % err
+    if node_n == 0:
+        return ("负控（退回 os.remove）也被读成 0 个 node.exe —— 量具是瞎的，"
+                "正控的「0 次」不能当证据")
+    return True
+
+
+def _spawn_interp_of_source(src):
+    """把给定 host_shield 源码落盘成临时模块，跑行为腿。返回 True 或说明串。"""
+    import importlib.util
+    import shutil
+    base = _tmpdir()
+    pkg = os.path.join(base, "pkg")
+    try:
+        os.makedirs(pkg, exist_ok=True)
+        with open(os.path.join(pkg, "host_shield.py"), "w",
+                  encoding="utf-8", newline="\n") as f:
+            f.write(src)
+        spec = importlib.util.spec_from_file_location(
+            "_antinel_hs_mut", os.path.join(pkg, "host_shield.py"))
+        m = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(m)
+        except Exception as e:                             # noqa: BLE001
+            return True                                    # 变异体跑不起来也算咬住
+        seen = {}
+
+        class _FP(object):
+            def __init__(self, argv, **kw):
+                seen["argv"] = list(argv)
+                self.pid = 7
+        saved = (m.sentinel_alive, m.self_check, m.load_state,
+                 m.update_state_fields, m.subprocess.Popen)
+        try:
+            m.sentinel_alive = lambda st=None: False
+            m.self_check = lambda: (True, [])
+            m.load_state = lambda *a, **k: {}
+            m.update_state_fields = lambda **kw: {}
+            m.subprocess.Popen = _FP
+            ok, _p, _mode = m.spawn_sentinel(pkg)
+        finally:
+            (m.sentinel_alive, m.self_check, m.load_state,
+             m.update_state_fields, m.subprocess.Popen) = saved
+        argv = seen.get("argv") or []
+        if not ok or not argv:
+            return True                                    # 起不来＝变异体已被破坏
+        return os.path.basename(str(argv[0])).lower() == "pythonw.exe"
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def c_release_wheel_fallback_complete():
+    """出包的三条兜底必须齐：产物在 dist／wheel pack／从 sdist 重建。"""
+    with open(os.path.join(G.PKG, "scripts", "release.py"), encoding="utf-8") as f:
+        return _release_fallback_problem(f.read())
+
+
+def n_release_wheel_fallback_complete():
+    """负控：两种**真能跑坏**的变异体都必须判红（不许只测一种）。
+
+    ★ 负控喂**真源码变异体**（不是自造的小片段）：结构腿也要能咬住
+      "把顺序改回去""把调用删掉"这两种真实的退化动作。
+    """
+    with open(os.path.join(G.PKG, "scripts", "release.py"), encoding="utf-8") as f:
+        good = f.read()
+    base = _release_fallback_problem(good)
+    if base is not True:
+        return "正控体本身就没过：%r" % (base,)
+    # 变异①：把 sdist 那一行整体挪到 wheel 那一行**之后**（顺序依赖被破坏）
+    lines = good.splitlines(True)
+    k_s = next((k for k, ln in enumerate(lines)
+                if '"--no-isolation", "--sdist"' in ln), None)
+    k_w = next((k for k, ln in enumerate(lines)
+                if '"--no-isolation", "--wheel"' in ln), None)
+    if k_s is None or k_w is None or k_s > k_w:
+        return "构造变异体①失败（找不到 sdist/wheel 行，或它本来就不在前面）"
+    swapped = list(lines)
+    moved = swapped.pop(k_s)
+    swapped.insert(k_w, moved)              # 插在原 wheel 行位置之后
+    bad1 = "".join(swapped)
+    r1 = _release_fallback_problem(bad1)
+    if r1 is True:
+        return "变异体①（sdist 挪到 wheel 之后）被判绿 —— 顺序依赖没守住"
+    # 变异②：删掉第三条路的**调用点**，只留函数定义（典型死代码形态）
+    bad2 = good.replace("ok = _wheel_from_sdist(py, dist, version)", "ok = False")
+    if bad2 == good:
+        return "构造变异体②失败（调用点写法变了？先确认再改判据）"
+    if _release_fallback_problem(bad2) is True:
+        return "变异体②（第三条路只剩定义、没有调用）被判绿"
+    return True
+
+
+def c_autostart_never_via_cmd():
+    """自启**不许**经 `.cmd`（创始人 2026-10-27「任何类型的闪出黑窗都不可接受」）。
+
+    判据（三条腿）：
+      ① `antinel.py` 里 schtasks 的 `/TR` 目标变量是 `target`（＝ .lnk 优先），
+         **不是** `shim`；`'"%s"' % shim` 不许再出现在注册命令里
+      ② `.cmd` 的写入痕迹 `@echo off` 只许出现在「最后兜底」分支里 ——
+         位置上必须在 `if not has_lnk:` 之后（否则就是主路径）
+      ③ `ensure_autostart_quiet` 存在**且真有两个调用点**（函数在但没人调＝死代码）
+    """
+    with open(os.path.join(G.PKG, "antinel.py"), encoding="utf-8") as f:
+        src = f.read()
+    with open(os.path.join(G.PKG, "host_shield.py"), encoding="utf-8") as f:
+        hsrc = f.read()
+    if "def ensure_autostart_quiet(" not in hsrc:
+        return "host_shield 里没有 ensure_autostart_quiet"
+    callers = [rel for rel in ("host_shield.py", "scripts/install.py")
+               if "ensure_autostart_quiet(" in
+               open(os.path.join(G.PKG, rel), encoding="utf-8").read()]
+    return _autostart_via_cmd_problem(src, 2, callers)
+
+
+def n_autostart_never_via_cmd():
+    """负控：同一实现喂**变异源码**（`% target` 改回 `% shim`）⇒ 必须判红。"""
+    with open(os.path.join(G.PKG, "antinel.py"), encoding="utf-8") as f:
+        good = f.read()
+    if _autostart_via_cmd_problem(good, 2, ["a", "b"]) is not True:
+        return "正样本被判红（判据自己坏了，负控无从谈起）"
+    bad = good.replace('"/TR", \'"%s"\' % target', '"/TR", \'"%s"\' % shim')
+    got = _autostart_via_cmd_problem(bad, 2, ["a", "b"])
+    if got is True:
+        return "变异体（/TR 指回 shim）被判绿 —— 负控没咬住"
+    # ★ 第二条变异腿：把 `.cmd` 写入挪到**主路径**（`if not has_lnk:` 之前）。
+    #   用「在文件最前面塞一句 `@echo off`」来构造 —— 一定能生效，不像替换
+    #   某段带缩进的代码那样可能无声空转（负控空转＝假绿第九族）。
+    bad2 = '@echo off\n' + good
+    if _autostart_via_cmd_problem(bad2, 2, ["a", "b"]) is True:
+        return "变异体（.cmd 回到主路径）被判绿 —— 第二条腿没咬住"
+    return True
 
 
 def _spawn_calls(src, fname="<src>"):
@@ -2272,43 +3431,6 @@ def _spawn_calls(src, fname="<src>"):
             continue
         bad.append((node.lineno, f.attr))
     return inspected, bad
-
-
-def _scan_prod_spawns():
-    """扫 `_PROD_SPAWN_FILES`：返回 `(总调用数, [(相对路径, 行号, 属性名)])`。
-
-    ★ 登记的文件**必须在**（读不到就抛 —— 改名/消失 ⇒ 红，不静默少查）。
-    """
-    inspected, bad = 0, []
-    for rel in _PROD_SPAWN_FILES:
-        p = os.path.join(G.PKG, rel.replace("/", os.sep))
-        with open(p, encoding="utf-8") as f:
-            src = f.read()
-        n, b = _spawn_calls(src, rel)
-        inspected += n
-        bad.extend((rel, ln, attr) for ln, attr in b)
-    return inspected, bad
-
-
-def c_no_console_flash_on_spawn():
-    """★★ 起控制台程序必须显式 `CREATE_NO_WINDOW`，否则黑窗一闪（创始人报障）。
-
-    判据：生产运行模块里**没有一个**起子进程的调用漏掉 `creationflags`。
-    附活力：扫到的调用数必须 ≥ `_SPAWN_MIN_EXPECTED` —— 否则「零违规」可能只是
-    **根本没扫到东西**（全绿信号本身危险：它不区分「没问题」和「判据瞎了」）。
-    """
-    inspected, bad = _scan_prod_spawns()
-    return (not bad) and inspected >= _SPAWN_MIN_EXPECTED
-
-
-def n_no_console_flash_on_spawn():
-    """负控：注入一个**裸** `subprocess.run(["netstat","-ano"])` ⇒ 必须当场点名。
-
-    证明上一条不是「瞎了」：真漏了 flag，扫描器必须抓出来（先红后绿的「红」）。
-    """
-    _n, bad = _spawn_calls('import subprocess\n'
-                           'subprocess.run(["netstat", "-ano"], capture_output=True)\n')
-    return len(bad) == 1 and bad[0][1] == "run"
 
 
 def c_spawn_scan_no_false_positive():
@@ -6933,9 +8055,15 @@ def c_refresh_rules_syncs_hash():
     with open(dst, "w", encoding="utf-8", newline="\n") as f:
         json.dump({"version": "0.0.1", "rules": []}, f)
     man_p = os.path.join(psl, "manifest.json")
+    # ★ 0.60.0：夹具从「hash 故意对不上」改成**正常安装态**（登记值＝副本实算值）。
+    #   为什么必须改：0.60.0 起刷新走 `host_shield.ensure_rules_current()`，它有一条
+    #   硬红线 ——「副本哈希 ≠ manifest 登记值」⇒ 视为被手工改过 ⇒ **不覆盖**
+    #   （覆盖等于把篡改证据一起抹掉）。旧夹具让两者天生不等，于是量到的是
+    #   「拒绝覆盖」这条正确行为，而不是「落后就该刷」。那条红线另有负控：
+    #   `ci/inbox_guards_0517.py` 的 **RF-60d**（tamper ⇒ modified 且内容原封不动）。
     with open(man_p, "w", encoding="utf-8", newline="\n") as f:
         json.dump({"rules_file": ".psl/rules/default.json",
-                   "rules_hash": "sha256:" + "0" * 64,
+                   "rules_hash": ins.sha256_file(dst),
                    "skill_version": "0.0.1"}, f)
 
     bad = []
@@ -7022,6 +8150,28 @@ CHECKS_0353 = [
      n_no_console_flash_on_spawn),
     ("P12 无窗扫描不误报", c_spawn_scan_no_false_positive,
      n_spawn_scan_no_false_positive),
+    # ★ 0.60.0：扫描面必须**派生自 pyproject**（手写清单漏过 20 处，见上方注释）
+    ("P12 无窗扫描面派生自 pyproject", c_spawn_surface_is_derived,
+     n_spawn_surface_is_derived),
+    # ★ 0.60.0：自启不许经 .cmd（cmd.exe 是控制台程序 ⇒ 登录必闪一个黑窗）
+    ("P12 自启不经 .cmd", c_autostart_never_via_cmd,
+     n_autostart_never_via_cmd),
+    # ★ 0.60.0：出包三条兜底必须齐（产物在 dist／wheel pack／从 sdist 重建）
+    ("P12 出包兜底三条齐", c_release_wheel_fallback_complete,
+     n_release_wheel_fallback_complete),
+    # ★ 0.60.0：救回②（wheel pack 暂存树）必须先过「树 == 源码」内容门 ——
+    #   暂存树是 setuptools 的**增量**产物，可能是上一版（含已退役代码）
+    ("P12 暂存树打包前比对源码", c_staged_wheel_gate, n_staged_wheel_gate),
+    # ★ 0.60.0：拉起哨兵必须用 pythonw —— 用 sys.executable 会让老 python.exe
+    #   哨兵永远收敛不到无窗口（实测：全机 pythonw 个数 = 0）
+    ("P12 哨兵拉起用无窗口解释器", c_sentinel_spawns_windowless,
+     n_sentinel_spawns_windowless),
+    # ★ 0.60.0：长期子进程必须剥掉宿主垫片 —— 垫片把删除改写成「走回收站」，
+    #   而它的 `node.exe ... check` 是控制台程序、且不带 CREATE_NO_WINDOW
+    #   ⇒ 无控制台父进程下必弹黑窗。剥环境是唯一在**我们手里**的杠杆。
+    ("P12 长期进程剥掉宿主垫片", c_child_env_hermetic, n_child_env_hermetic),
+    # ★ 0.60.0：稳态热路径不许删除 —— 一次删除 = 一次 node.exe = 一个黑窗
+    ("P12 热路径不删除", c_no_delete_in_hot_path, n_no_delete_in_hot_path),
     # ---- 一、链背书（R-1 上游真缺陷）----
     ("P12 链尾看得见 policy_changed", c_chain_tail_sees_policy_changed,
      n_chain_tail_sees_policy_changed),

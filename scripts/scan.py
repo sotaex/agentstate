@@ -29,6 +29,11 @@ Python 3.10+, stdlib only, no network.
 import argparse
 import json
 import os
+
+# 0.60.0：起子进程一律带 CREATE_NO_WINDOW —— 父进程可能是**无控制台**的
+# pythonw（钩子）／DETACHED（哨兵）／GUI 宿主 ⇒ 不带就会给子进程新建控制台
+# ＝ 用户看到黑窗一闪。本文件不 import host_shield，就地定义同一常量。
+_CNW = 0x08000000 if os.name == "nt" else 0
 import re
 import subprocess
 import sys
@@ -273,7 +278,7 @@ def resolve_root(explicit):
         return Path(explicit).resolve()
     try:
         out = subprocess.run(["git", "rev-parse", "--show-toplevel"],
-                             capture_output=True, text=True, timeout=5)
+                             capture_output=True, text=True, timeout=5, creationflags=_CNW)
         if out.returncode == 0 and out.stdout.strip():
             return Path(out.stdout.strip()).resolve()
     except Exception:

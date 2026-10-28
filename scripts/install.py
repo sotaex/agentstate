@@ -38,6 +38,11 @@ import argparse
 import hashlib
 import json
 import os
+
+# 0.60.0：起子进程一律带 CREATE_NO_WINDOW —— 父进程可能是**无控制台**的
+# pythonw（钩子）／DETACHED（哨兵）／GUI 宿主 ⇒ 不带就会给子进程新建控制台
+# ＝ 用户看到黑窗一闪。本文件若不走 host_shield，就地定义同一常量。
+_CNW = 0x08000000 if os.name == "nt" else 0
 import shutil
 import subprocess
 import sys
@@ -308,18 +313,39 @@ def detect_host(root):
 
 
 # ---------------------------------------------------------- hook config ----
+def hook_python():
+    """钩子该用哪个解释器：**`pythonw.exe` 优先**（0.60.0）。
+
+    ★ 创始人 2026-10-27：「屏幕上时不时闪出命令行窗口，停掉吧，应该都是 BUG，
+      干扰工作。」—— 实测（WinEvent `EVENT_OBJECT_SHOW` 监听，两轮 A/B）：
+      `python.exe` 是控制台子系统程序，宿主每跑一次钩子就分配一个控制台；
+      Windows 11 的默认终端是 Windows Terminal，于是**每一次工具调用都在屏幕上
+      弹一个终端窗口**。A/B 的对照腿：把项目级与用户级两处 settings 的 hooks 清空后，
+      同样的工具调用**一个窗口都不弹**（日志只剩 start 行）。
+    ★ 为什么换 pythonw 而不是 `conhost --headless`：后者实测**丢掉子进程退出码**
+      （rc 恒 0）且把 ANSI 转义塞进 stdout —— block 靠 rc=2、宿主靠 stdout 读 JSON，
+      两条都被它破坏。而 `pythonw.exe` 是 GUI 子系统、不分配控制台，实测
+      **决策能力完全等价**：block 样本 rc=2 + decision=block，allow 样本 rc=0，
+      stdout 走宿主管道照旧可读。
+    ★ 找不到 pythonw（极少见）时退回 `sys.executable`：宁可有窗口，不可无防护。
+    """
+    exe = sys.executable
+    cand = os.path.join(os.path.dirname(exe), "pythonw.exe")
+    return cand if os.path.isfile(cand) else exe
+
+
 def hook_command(script_name):
     """Claude Code contract (A-01): a shell command line. -I -S cut interpreter
     start-up by roughly 15-20 ms per call (NFR-03). ZCode uses type "process"
     (see zcode_hook_entry) so no shell quoting is needed there."""
-    return '"%s" -I -S "%s"' % (sys.executable, _locate(script_name))
+    return '"%s" -I -S "%s"' % (hook_python(), _locate(script_name))
 
 
 def zcode_hook_entry(script_name):
     """Real ZCode contract (verified against the client's diagnosing-hooks guide,
     smoke test 2026-09-10): hooks live in .zcode/config.json under hooks.events,
     must set hooks.enabled=true, and type "process" runs an argv without a shell."""
-    return {"type": "process", "command": sys.executable,
+    return {"type": "process", "command": hook_python(),
             "args": ["-I", "-S", str(_locate(script_name))], "timeoutMs": 10000}
 
 
@@ -488,143 +514,82 @@ def init_psl(root, host, settings_path, registered, global_hooks=False):
     return manifest
 
 
+def _hs_mod():
+    """把仓根放进 `sys.path` 再 import `host_shield`（本文件在 scripts/ 下）。"""
+    root = str(PKG_DIR.parent)
+    if root not in sys.path:
+        sys.path.append(root)
+    import host_shield
+    return host_shield
+
+
 def refresh_rules(root):
     """把包内规则快照刷进项目（`--refresh-rules`）。返回退出码。
 
-    ★ 为什么需要这个入口（2026-10-26 实测，第 40 条）：
-      hook 加载的是 `<root>/.psl/rules/default.json`（install 时拷的那份），
-      `pip install -U` 只换包**不跑 install** ⇒ 项目副本永久停在首次安装的版本。
-      本仓实测：项目副本 version 0.34.0（10-03）／包内 0.57.1（10-26），
-      中间 9 条规则的全部修复（SEC-04/05/06、DST-01/04/06、CTX-01/03/05 共 15 处
-      字段差异）在这台机器上**一条都没生效**。
-      0.57.0 第 32 条只做到「说出来 + 给修法」，没给「一键修」—— 用户看到提示
-      也照样只能重跑 install，而 install 会重写 settings、重扫全盘。
-
-    ★ 只动三样：规则副本、manifest 的 rules_hash 与 skill_version。
-      policy 不碰（那是用户的），settings 不碰（那是宿主的），审计不碰。
-    ★ `rules_hash` 必须与副本**同时**更新：它是 SELF-TAMPERED 判定的基准，
-      只换文件不换 hash ⇒ 立刻被判篡改并退回内嵌兜底（比不修更坏）。
-    ★ 刷新这件事本身进审计链：改了防护依据却不留痕，等于给自己开静默后门。
+    ★ 0.60.0 起本函数**不再自己拷贝** —— 拷贝、哈希同步、留痕全在
+      `host_shield.ensure_rules_current`（唯一实现）。同一件事的第二个实现迟早会漂：
+      0.57.2 那次就是在这里调了一个**不存在的函数**（`host_shield.log_event`），
+      异常被 `except: pass` 吃掉，屏幕上照样印「已写进审计链」。
+    ★ 幂等：副本已是包内这一版就一个字都不写。
+    ★ 为什么不覆盖「被改过的副本」：那份哈希对不上 manifest 登记值 ⇒ 覆盖等于
+      把篡改证据一起抹掉。交给人决定（打印恢复步骤），A4 那条会照旧报 SELF-TAMPERED。
     """
-    psl = Path(root) / ".psl"
-    man_path = psl / "manifest.json"
-    if not man_path.is_file():
-        print("这个目录没有安装过：%s 不存在。先用 install.py 装一次。" % man_path)
-        return 2
-    src = _locate("rules", "default.json")
-    if not src.is_file():
-        print("包内规则文件找不到：%s" % src)
-        return 2
-    dst = psl / "rules" / "default.json"
-    dst.parent.mkdir(parents=True, exist_ok=True)
-
-    def _ver(p):
-        try:
-            with open(p, encoding="utf-8") as f:
-                return str(json.load(f).get("version") or "")
-        except Exception:                                     # noqa: BLE001
-            return ""
-
-    old_ver, new_ver = _ver(dst) if dst.is_file() else "(无)", _ver(src)
-    old_hash = sha256_file(dst) if dst.is_file() else "(无)"
-    new_hash = sha256_file(src)
-    if old_hash == new_hash:
-        print("规则快照已是包内这一版（%s），什么都没做。" % (new_ver or "?"))
-        return 0
-
-    shutil.copy2(src, dst)
     try:
-        man = json.loads(man_path.read_text(encoding="utf-8"))
+        hs = _hs_mod()
     except Exception as e:                                    # noqa: BLE001
-        print("manifest 读不出来（%s），规则副本已更新但哈希没登记 —— "
-              "下次 hook 会判 SELF-TAMPERED。请重跑 install.py。" % type(e).__name__)
+        print("找不到 host_shield（安装残缺）：%s: %s" % (type(e).__name__, e))
         return 2
-    man["rules_hash"] = new_hash
-    man["skill_version"] = SKILL_VERSION
-    man["rules_refreshed_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    man_path.write_text(json.dumps(man, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    print("规则快照已刷新：%s → %s" % (old_ver or "?", new_ver or "?"))
-    print("  %s" % dst)
-    print("  hash %s → %s" % (old_hash[:22] + "…", new_hash[:22] + "…"))
-    _wrote, _err = _audit_append(root, {
-        "ts": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
-        "type": "rules_snapshot_refreshed", "tool": "-", "session": "antinel-cli",
-        "rule_id": "A4", "decision": "config_refresh", "severity": "info",
-        "action": "allow",
-        "reason": "project rules snapshot refreshed from the package",
-        "rules_file": str(dst),
-        "version_from": old_ver, "version_to": new_ver,
-        "hash_from": old_hash, "hash_to": new_hash})
-    # ★ 只说自己做得到的事：写成功才说「已写进审计链」。
-    #   0.57.2 之前这里印的是无条件那句，而真正调用的 `host_shield.log_event`
-    #   **从来没有存在过**（AttributeError 被 except 吞掉）⇒ 屏幕说留痕了，
-    #   链上一个字都没有。判据 RF-40f 的「留痕」那条腿 2026-10-26 夜当场抓出。
-    if _wrote:
-        print("  这条记录已写进审计链（type=rules_snapshot_refreshed）：%s" % _wrote[0])
+    # ★ force=True：这条路径是**人敲的**，不是自动自愈 —— 关闭阀管的是自动那一路。
+    r = hs.ensure_rules_current(root, force=True)
+    act = r.get("action")
+    if act == "no_project":
+        print("这个目录没有安装过：%s 不存在。先用 install.py 装一次。"
+              % (Path(root) / ".psl" / "manifest.json"))
+        return 2
+    if act == "current":
+        print("规则快照已是包内这一版（%s），什么都没做。" % (r.get("to") or "?"))
+        return 0
+    if act == "ahead":
+        print("规则快照（%s）比包内（%s）还新，不倒退，什么都没做。"
+              % (r.get("from"), r.get("to")))
+        return 0
+    if act == "modified":
+        print("规则副本被手工改过（哈希与安装时登记的不一致），**没有**覆盖 ——")
+        print("  覆盖会把篡改证据一起抹掉。要恢复包内这一版，删掉副本再跑一次 install：")
+        print("  %s" % r.get("path"))
+        return 3
+    if act == "disabled":
+        print("自动刷新被环境变量关掉了（ANTINEL_NO_AUTO_RULES=1）。")
+        return 2
+    if act == "error":
+        print("刷新失败：%s" % r.get("error"))
+        return 2
+    print("规则快照已刷新：%s → %s" % (r.get("from") or "?", r.get("to") or "?"))
+    print("  %s" % r.get("path"))
+    print("  hash → %s..." % str(r.get("hash"))[:29])
+    if r.get("trail"):
+        print("  这条记录已写进审计链（type=rules_snapshot_refreshed）：%s" % r["trail"][0])
     else:
-        print("  ⚠ 留痕没写成（%s）—— 规则已刷新，但链上没有这一笔。" % (_err or "无可用链"))
+        print("  ⚠ 留痕没写成（%s）—— 规则已刷新，但链上没有这一笔。"
+              % (r.get("trail_error") or "无可用链"))
     return 0
 
 
 def _audit_append(root, rec, mirror_dirs=None):
-    """把一条记录写进项目链＋宿主级镜像。返回 `(写成功的文件, 首个错误)`。
+    """薄委托：唯一实现在 `host_shield.audit_append`（卸载路径也走它）。
 
-    ★ **唯一实现**：`uninstall` 与 `--refresh-rules` 都走这里。
-      两条 CLI 路径各写一遍「8 行链追加」，正是本仓第一顽症（同一事实多处实现）；
-      而这次更糟：写 `refresh_rules` 时我调了一个**不存在的函数**
-      （`host_shield.log_event`），异常被 `except: pass` 吃掉，屏幕上照样印
-      「已写进审计链」。判据只断言「屏幕上那句话」是抓不到的 —— 必须断言
-      **链里真的有这条 type**（RF-40f 的第四腿）。
-    ★ 项目链用 `append_chained`（带哈希链），镜像用 `append_locked`
-      （跨目录单副本，不参与本项目链），与 `uninstall` 原写法逐字一致。
-    ★ `mirror_dirs` 缺省＝`host_shield._mirror_dir()`（套件沙箱里自动落在 hub 内）；
-      卸载那条路径传自己的宿主目录，行为与 0.57.1 逐字一致。
+    ★ 为什么不在这里留一份：它原来就是「8 行链追加」的第二个副本，
+      两个调用点各写一遍正是本仓第一顽症。
     """
-    wrote, err = [], None
-    try:
-        try:
-            import audit_chain as _acm
-        except ImportError:
-            sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-            import audit_chain as _acm
-    except Exception as e:                                    # noqa: BLE001
-        return wrote, repr(e)
-    day = datetime.now().strftime("%Y-%m-%d")
-    ad = Path(root) / ".psl" / "audit"
-    if ad.is_dir():
-        fn = ad / (day + ".jsonl")
-        try:
-            _acm.append_chained(str(fn), rec)
-            _acm.touch_day_manifest(str(fn))
-            wrote.append(str(fn))
-        except Exception as e:                                # noqa: BLE001
-            err = err or repr(e)
-    dirs = mirror_dirs
-    if dirs is None:
-        try:
-            import host_shield as _hs
-            dirs = [Path(_hs._mirror_dir())]
-        except Exception as e:                                # noqa: BLE001
-            return wrote, err or repr(e)
-    for md in dirs:
-        try:
-            md = Path(md)
-            md.mkdir(parents=True, exist_ok=True)
-            fn = md / (day + ".jsonl")
-            _acm.append_locked(str(fn), json.dumps(rec, ensure_ascii=False) + "\n")
-            _acm.touch_day_manifest(str(fn))
-            wrote.append(str(fn))
-        except Exception as e:                                # noqa: BLE001
-            err = err or repr(e)
-    return wrote, err
+    return _hs_mod().audit_append(root, rec, mirror_dirs=mirror_dirs)
+
 
 
 def first_scan(root):
     cmd = [sys.executable, str(_locate("scan.py")), "--root", str(root), "--quick"]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                              errors="replace", timeout=120)
+                              errors="replace", timeout=120, creationflags=_CNW)
         return proc.returncode, proc.stdout, proc.stderr
     except Exception as e:
         return 2, "", str(e)
@@ -972,6 +937,107 @@ def _batch(args):
     return 0
 
 
+def _our_hook_settings(root):
+    """列出**真的登记了我们钩子**的配置文件（含用户级）。
+
+    ★ 为什么要扫用户级：`--global` 装过的那次把钩子写进 `~/.workbuddy/settings.json`，
+      项目级那份只是另一次安装。只改项目级 = 实验假阴性（本机实测踩过：
+      清空项目级 hooks 后窗口照旧，因为用户级那份还在）。
+    """
+    cands = []
+    mp = Path(root) / ".psl" / "manifest.json"
+    if mp.is_file():
+        try:
+            man = json.loads(mp.read_text(encoding="utf-8"))
+            sf = man.get("settings_file")
+            if sf:
+                cands.append(Path(sf))
+        except Exception:                                     # noqa: BLE001
+            pass
+    home = Path(os.path.expanduser("~"))
+    for d, name in ((".qoder", "settings.json"), (".claude", "settings.json"),
+                    (".workbuddy", "settings.json"), (".codebuddy", "settings.json"),
+                    (".zcode", "config.json")):
+        cands.append(home / d / name)
+        cands.append(Path(root) / d / name)
+    seen, out = set(), []
+    for p in cands:
+        try:
+            key = str(p.resolve()).lower()
+        except Exception:                                     # noqa: BLE001
+            key = str(p).lower()
+        if key in seen or not p.is_file():
+            continue
+        seen.add(key)
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:                                     # noqa: BLE001
+            continue
+        hooks = data.get("hooks") if isinstance(data, dict) else None
+        if not isinstance(hooks, dict):
+            continue
+        events = hooks.get("events") if isinstance(hooks.get("events"), dict) else hooks
+        mine = any(isinstance(events.get(e), list)
+                   and any(_is_ours(x) for x in (events.get(e) or []))
+                   for e in events)
+        if mine:
+            out.append((p, "zcode" if isinstance(hooks.get("events"), dict) else "claude"))
+    return out
+
+
+def fix_hooks(root):
+    """把已登记钩子的解释器换掉（`--fix-hooks`）。返回退出码。
+
+    ★ 为什么需要这个入口（创始人 2026-10-27「屏幕时不时闪出命令行窗口」）：
+      钩子命令里的解释器是**安装那一刻**写死的。换了包、改了 `hook_python()`
+      并不会回头改已登记的 settings —— 和「规则副本」是同一个病：**装的时候是新的，
+      以后一直是旧的**。用户不会为了这个重跑一次 install（那会重写设置、重扫全盘）。
+    ★ 只动我们自己的条目：`register_hooks_*` 里 `_is_ours()` 过滤外来钩子并原样保留。
+    """
+    targets = _our_hook_settings(root)
+    if not targets:
+        print("没找到登记过 Antinel 钩子的配置文件（这台机器可能还没装）。")
+        return 0
+    want = hook_python()
+    print("钩子解释器应为：%s" % want)
+    changed = 0
+    for p, style in targets:
+        try:
+            before = p.read_text(encoding="utf-8")
+            register_hooks(p, style)
+            after = p.read_text(encoding="utf-8")
+        except Exception as e:                                # noqa: BLE001
+            print("  ⚠ %s 改不动：%s: %s" % (p, type(e).__name__, e))
+            continue
+        if before != after:
+            changed += 1
+            print("  已更新  %s" % p)
+        else:
+            print("  无变化  %s" % p)
+    print("共 %d 处，改了 %d 处。" % (len(targets), changed))
+    # ★ 0.60.0：顺手把**自启那条老路**也修掉（`schtasks → antinel-shield.cmd`
+    #   每次登录闪一个黑窗）。与钩子同一个病：装的时候是旧的，以后一直是旧的。
+    #   这里只是**多一个更早的触发点**（用户升级后跑一次 install 就修好），
+    #   哨兵启动时还会再做一次 —— 两边同一实现（`host_shield.ensure_autostart_quiet`）。
+    try:
+        r = _hs_mod().ensure_autostart_quiet(root)
+    except Exception as e:                                    # noqa: BLE001
+        print("  ⚠ 自启无窗口修整未完成：%s: %s" % (type(e).__name__, e))
+        return 0
+    act = r.get("action")
+    if act == "repaired":
+        print("  自启：已换成无窗口形态（%s）" % (r.get("task") or "旧件已搬走"))
+    elif act == "nothing":
+        print("  自启：无需修整（没有指向 .cmd 的计划任务）")
+    elif act == "unverifiable":
+        print("  自启：查不到计划任务（%s）——这一项**没验**，不是通过" % r.get("why"))
+    elif act == "error":
+        print("  ⚠ 自启修整失败：%s" % r.get("error"))
+    else:
+        print("  自启：%s" % act)
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Antinel installer")
     ap.add_argument("--root", default=os.getcwd(), help="project root (default: cwd)")
@@ -1000,6 +1066,8 @@ def main(argv=None):
                     help="批量：只打印将要做什么，不改任何文件（**上线前必跑一次**）")
     ap.add_argument("--refresh-rules", action="store_true",
                     help="只把包内的规则快照刷进本项目（不动 settings / policy / 审计）")
+    ap.add_argument("--fix-hooks", action="store_true",
+                    help="只把已登记钩子的解释器换成无窗口的那个（不动规则 / 策略 / 审计）")
     args = ap.parse_args(argv)
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -1012,6 +1080,8 @@ def main(argv=None):
             return check_installed(args.root)
         if args.refresh_rules:
             return refresh_rules(args.root)
+        if args.fix_hooks:
+            return fix_hooks(args.root)
         if args.uninstall:
             return uninstall(args.root, purge=args.purge)
         return install(args.root, host_override=args.host, redetect=args.redetect,

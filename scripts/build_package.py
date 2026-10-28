@@ -20,6 +20,11 @@ import argparse
 import hashlib
 import json
 import os
+
+# 0.60.0：起子进程一律带 CREATE_NO_WINDOW —— 父进程可能是**无控制台**的
+# pythonw（钩子）／DETACHED（哨兵）／GUI 宿主 ⇒ 不带就会给子进程新建控制台
+# ＝ 用户看到黑窗一闪。本文件不 import host_shield，就地定义同一常量。
+_CNW = 0x08000000 if os.name == "nt" else 0
 import shutil
 import subprocess
 import sys
@@ -200,7 +205,7 @@ HARNESS_SRC = SRC / "scripts" / "verification_tests.py"
 if not HARNESS_SRC.is_file():
     raise SystemExit("★ 构建器找不到套件：%s\n  （产物仓构建必须用本仓的套件）" % HARNESS_SRC)
 NAME = "antinel-security"
-VERSION = "0.59.0"
+VERSION = "0.60.0"
 # P-A3: the namespace this build declares itself under. derive_object_ownership()
 # reads git remote first, then THIS field; fail-closed unattributed when neither
 # resolves. Kept beside the hashes so a third party can see what was declared.
@@ -2282,7 +2287,7 @@ def _tracked_root_modules(pkg):
     try:
         import subprocess
         r = subprocess.run(["git", "ls-files", "--", "*.py"], cwd=str(pkg),
-                            capture_output=True, text=True, timeout=60)
+                            capture_output=True, text=True, timeout=60, creationflags=_CNW)
         if r.returncode == 0 and r.stdout.strip():
             out = set()
             for rel in r.stdout.split():
@@ -2785,7 +2790,7 @@ def build(out_root, verify=False):
     # 0.23.1: skill 路由件——与 antinel help 同源（ROUTES），构建期生成，永不手写
     try:
         out = subprocess.run([sys.executable, str(srcfile("antinel.py")), "routes", "--markdown"],
-                             capture_output=True, text=True, timeout=30)
+                             capture_output=True, text=True, timeout=30, creationflags=_CNW)
         if out.returncode == 0 and out.stdout.strip():
             (pkg / "references").mkdir(exist_ok=True)
             # 0.48.1：生成物不带源（subprocess 输出没有 SPDX 头）——不加头则每次
@@ -2923,7 +2928,7 @@ def build(out_root, verify=False):
         else:
             try:
                 subprocess.run([sys.executable, str(ns_tool), "--out", str(pkg / "psl")],
-                               check=True, capture_output=True, text=True)
+                               check=True, capture_output=True, text=True, creationflags=_CNW)
             except Exception as e:
                 print("WARN: namespaces list not generated: %s" % e)
     wf = (pkg / ".github" / "workflows")
@@ -3178,7 +3183,7 @@ def build(out_root, verify=False):
     led = final / "psl" / "verdict-ledger.jsonl"
     if not led.is_file():
         out = subprocess.run(["git", "-C", str(final), "show", "HEAD:psl/verdict-ledger.jsonl"],
-                             capture_output=True, text=True)
+                             capture_output=True, text=True, creationflags=_CNW)
         if out.returncode == 0 and out.stdout.strip():
             led.write_text(out.stdout, encoding="utf-8", newline="\n")
             print("ledger restored from git history (%d bytes)" % len(out.stdout.encode("utf-8")))
@@ -3314,10 +3319,10 @@ def build(out_root, verify=False):
             print("!! harness 不在产物里（%s）—— --verify 无法进行，产物已生成" % _harness_py)
             _reconcile_src(_SRC_WATCH)
             return 0
-        rc1 = subprocess.call([PY_HARNESS, _harness_py, "--bootstrap"])
+        rc1 = subprocess.call([PY_HARNESS, _harness_py, "--bootstrap"], creationflags=_CNW)
         print("harness(seed, bootstrap) exit: %s   -- non-zero/absent-record here is EXPECTED on a "
               "fresh tree (the record is an input to the run that writes it)" % rc1)
-        rc = subprocess.call([PY_HARNESS, _harness_py])
+        rc = subprocess.call([PY_HARNESS, _harness_py], creationflags=_CNW)
         print("harness(final, shipped record) exit:", rc)
         # ★★ 0.51.2：harness 跑完 ⇒ 恢复纯净 wheel 口径清单（用 merge 落盘的原
         #   字节，逐字节可复现）。随后 `python -m build` 打包带走它 —— 带研发

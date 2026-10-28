@@ -31,7 +31,13 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
+
+# 0.60.0：起子进程一律带 CREATE_NO_WINDOW —— 父进程可能是**无控制台**的
+# pythonw（钩子）／DETACHED（哨兵）／GUI 宿主 ⇒ 不带就会给子进程新建控制台
+# ＝ 用户看到黑窗一闪。本文件若不走 host_shield，就地定义同一常量。
+_CNW = 0x08000000 if os.name == "nt" else 0
 import re
 import shutil
 import subprocess
@@ -49,7 +55,7 @@ def _step(n, title):
 
 def _run(cmd, **kw):
     print("+ %s" % " ".join(cmd))
-    return subprocess.call(cmd, **kw)
+    return subprocess.call(cmd, creationflags=_CNW, **kw)
 
 
 def source_version():
@@ -85,7 +91,7 @@ def _pick_release_py(explicit):
         probe = subprocess.run(
             [py, "-c", "import setuptools,sys;v=tuple(int(x) for x in "
                        "setuptools.__version__.split('.')[:2]);sys.exit(0 if v>=(68,) else 3)"],
-            capture_output=True)
+            capture_output=True, creationflags=_CNW)
         if probe.returncode == 0:
             return py
     return None
@@ -129,6 +135,160 @@ def _sweep_stale_distinfo(tree, version):
     return moved
 
 
+def _artifact_present(dist, version, kind):
+    """dist 里是否已有**本版**产物（且非空）。`kind` = `"wheel"` / `"sdist"`。
+
+    ★★ 0.60.0 为什么需要这个判定（实测形态，与下面两条救回都不同）：
+      `python -m build --outdir dist` 是**先**把产物写进 dist、**后**做收尾清理。
+      本宿主禁删 ⇒ 收尾清理必失败 ⇒ 后端 rc=1，**但产物已经在 dist 里了**。
+      老的救回逻辑只去 `dist/.tmp-*/` 里捞，捞不到就报"无可救回产物" ——
+      于是**把已经成功的构建报成失败**（0.60.0 实测：`antinel-0.60.0.tar.gz`
+      3.6MB 已躺在 dist 里，程序却说失败）。
+      ⇒ 「先看东西在不在，再决定要不要救」。
+    """
+    name = ("antinel-%s-py3-none-any.whl" % version if kind == "wheel"
+            else "antinel-%s.tar.gz" % version)
+    p = os.path.join(dist, name)
+    try:
+        return os.path.isfile(p) and os.path.getsize(p) > 0
+    except OSError:
+        return False
+
+
+def _sha256_file(path):
+    """裸字节 sha256（**不做换行归一**）。
+
+    ★ 这里的比对对象是「暂存树里的文件」对「源码树里的同一文件」—— 两者都是
+      构建器**二进制复制**的产物，不存在 CRLF 归一问题。故**故意**不用
+      `host_shield.file_digest`（那个带版本串归一，用于 manifest 口径）：
+      混用两套口径正是本仓第一顽症。此处要的就是「一模一样」。
+    """
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+#: 暂存树里**需要**与源码比对的后缀（其余如 `*.dist-info/*` 是构建生成的，跳过）
+_STAGED_COMPARE_EXTS = (".py", ".json", ".md", ".txt", ".toml", ".yaml", ".yml")
+#: 暂存树里**跳过**的目录特征（构建元数据，不是源码的影子）
+_STAGED_SKIP_DIRS = (".dist-info", ".egg-info", "__pycache__")
+
+
+def _staged_tree_matches_source(tree):
+    """暂存树与源码**逐字节**一致吗？返回 `(ok, problems)`。
+
+    ★★ 为什么救回②必须先过这一关（2026-10-28 实测发现的复发路径，本轮新增）：
+
+      `build/lib/` 与 `build/bdist.*/wheel/` 是 setuptools 的**增量**产物 ——
+      `build_py` 只按 **mtime** 决定要不要把源码复制过去。0.60.0 把
+      `_retire_old_startup_cmd()` 从源码里删了，但暂存树里的旧副本**还在**
+      （本轮 `grep` 到 `build/lib/antinel.py:1955` 与
+      `build/bdist.win-amd64/wheel/antinel.py:1955` 各一份）。
+
+      如果某次出包时源文件 mtime 不比暂存树里的新（`git checkout` 恢复文件、
+      从备份拷回、时钟回拨都会这样），setuptools **不复制** ⇒ 暂存树里仍是
+      **退役代码** ⇒ 救回② `wheel pack` 把它**原样打进发布件**。
+
+      这是"活体修好了、发布件没修"最隐蔽的形态：源码 grep 全绿，
+      只有解包发布件才看得见。发布件核对判据（D-6 族）**能**抓到，
+      但不该让它来兜构建的底 —— 那是两道不同的门。
+
+      ⇒ 救回② 只在「暂存树 == 源码」时才允许；不一致就让路给救回③
+        （从**本轮现打的** sdist 重建，必然等于当前源码）。
+
+    ★ 判据用 **sha256** 不用 mtime：mtime 只能说明"复制过"，
+      不能说明"复制的是现在这份"。
+    """
+    if not os.path.isdir(tree):
+        return False, ["暂存树不存在：%s" % tree]
+    bad, n = [], 0
+    for dirpath, dirnames, filenames in os.walk(tree):
+        dirnames[:] = [d for d in dirnames
+                       if not any(k in d for k in _STAGED_SKIP_DIRS)]
+        for fn in filenames:
+            if not fn.lower().endswith(_STAGED_COMPARE_EXTS):
+                continue
+            p = os.path.join(dirpath, fn)
+            rel = os.path.relpath(p, tree)
+            src = os.path.join(ROOT, rel)
+            n += 1
+            if not os.path.isfile(src):
+                # 暂存树里有、源码里没有 ⇒ 退役文件残留（只对代码判不合格，
+                # 文档类可能由构建生成，记进清单但不算硬伤）
+                if fn.lower().endswith(".py"):
+                    bad.append("%s（源码里已无此文件 —— 退役残留）" % rel)
+                continue
+            try:
+                if _sha256_file(p) != _sha256_file(src):
+                    bad.append("%s（内容与源码不同）" % rel)
+            except OSError as e:
+                bad.append("%s（读不了：%s）" % (rel, e))
+    if n == 0:
+        return False, ["暂存树里一个可比对文件都没有：%s" % tree]
+    return (not bad), bad
+
+
+def _wheel_from_sdist(py, dist, version):
+    """第三条路：在**系统 %TEMP%** 里从**本版 sdist** 重建 wheel。返回 True/False。
+
+    ★★ 为什么必须有这条路（0.60.0 出包当场撞到，前两条救回同时失效）：
+      `python -m build --wheel` 在**仓根**跑有两条**互相独立**的死因 ——
+        ① 仓根 `build/` 是无 `__init__.py` 的 namespace 包 ⇒ `-m build` 先
+           import 到它 ⇒ `No module named build.__main__`（连后端都没进）；
+        ② 本宿主禁删 ⇒ bdist 阶段删不掉中间件 ⇒ `WinError 5`。
+      ①+② 一起，让「`wheel pack` 暂存树」这条救回**也**失效 ——
+      因为暂存树本身就是半成品（`Multiple .dist-info` / 缺 RECORD）。
+      ⇒ 唯一出路：**离开仓根**、到**唯一可删区**（系统 %TEMP%）去建。
+      0.57.0 起一直是**手工**跑 `output/_wheel_from_sdist.py` 补这一刀 ——
+      那正是本文件注释里骂过的"机制建了一半"：一条命令走不完，就得靠人记得。
+      现在把它焊进发布链路（判据 S40 只禁"自己实现检查逻辑"，构建兜底不在此列）。
+    """
+    sdist = os.path.join(dist, "antinel-%s.tar.gz" % version)
+    if not os.path.isfile(sdist):
+        print("   [从 sdist 建 wheel] 本版 sdist 不在（%s），这条路走不了"
+              % os.path.basename(sdist))
+        return False
+    import tarfile
+    import tempfile
+    base = tempfile.mkdtemp(prefix="w0600_")
+    print("   [从 sdist 建 wheel] 临时根 = %s" % base)
+    try:
+        with tarfile.open(sdist, "r:gz") as tf:
+            tf.extractall(base)
+        roots = [d for d in os.listdir(base)
+                 if d.startswith("antinel-") and os.path.isdir(os.path.join(base, d))]
+        if len(roots) != 1:
+            print("   [从 sdist 建 wheel] 解包后顶层目录不是恰好 1 个：%r" % roots)
+            return False
+        src = os.path.join(base, roots[0])
+        out = os.path.join(base, "wheelhouse")
+        env = dict(os.environ)
+        env["PYTHONPATH"] = ""
+        env["TMPDIR"] = env["TEMP"] = env["TMP"] = base
+        # ★ cwd **必须**离开仓根（死因①）；三个 TMP 变量一起指到 base（死因②）。
+        rc = subprocess.call([py, "-m", "build", "--wheel", "--no-isolation",
+                              "--outdir", out, src],
+                             env=env, cwd=base, creationflags=_CNW)
+        print("   [从 sdist 建 wheel] 后端 rc=%d" % rc)
+        want = "antinel-%s-py3-none-any.whl" % version
+        got = os.path.join(out, want)
+        if not (os.path.isfile(got) and os.path.getsize(got) > 0):
+            print("   [从 sdist 建 wheel] 没有产出 %s" % want)
+            return False
+        dst = os.path.join(dist, want)
+        if os.path.exists(dst):
+            dst += ".rebuilt"
+        shutil.move(got, dst)
+        print("   [从 sdist 建 wheel] 已搬到 %s（%d 字节）"
+              % (dst, os.path.getsize(dst)))
+        return True
+    except (OSError, tarfile.TarError) as e:
+        print("   [从 sdist 建 wheel] 失败：%s: %s" % (type(e).__name__, e))
+        return False
+
+
 def build_artifacts(py, dist, version):
     """步骤 2：wheel 与 sdist **分别**出，并带回救。
 
@@ -166,57 +326,93 @@ def build_artifacts(py, dist, version):
     sweep = _sweep_stale_distinfo(os.path.join(ROOT, "build", "bdist.win-amd64",
                                                "wheel"), version)
 
-    # ---- wheel ----
-    rc_w = _run([py, "-m", "build", "--no-isolation", "--wheel", "--outdir", dist], cwd=ROOT)
-    if rc_w != 0:
-        tree = os.path.join(ROOT, "build", "bdist.win-amd64", "wheel")
-        if os.path.isdir(tree):
-            print("   [救回 wheel] 后端 rc=%d，但暂存树在：%s —— 用官方 wheel pack 重打包"
-                  % (rc_w, tree))
-            if _run([py, "-m", "wheel", "pack", tree, "-d", dist], cwd=ROOT) == 0:
-                rescued.append("wheel")
-        if "wheel" not in rescued:
-            print("!! wheel 构建失败（rc=%d）且无可救回产物" % rc_w)
-            return rc_w
-        print("   [提示] wheel 后端报了 rc=%d，但已救回 —— 以 dist/ 实际内容为准" % rc_w)
+    # ---- ★★ 0.60.0：**先 sdist、后 wheel** ----
+    #   为什么要调这个顺序（原来 wheel 在前）：wheel 的第三条救回是"从本版 sdist
+    #   重建" ⇒ 它**需要 sdist 先存在**。顺序反了，那条路永远没有输入，
+    #   在"暂存树也救不回"的宿主上必然断链（0.60.0 实测就是这么断的）。
+    #   ★ 这不是"顺手改顺序"，是**依赖关系决定的**：兜底路径依赖的输入必须先产出。
 
     # ---- sdist ----
     rc_s = _run([py, "-m", "build", "--no-isolation", "--sdist", "--outdir", dist], cwd=ROOT)
     if rc_s != 0:
-        got = False
-        # ★★★ 2026-10-15（0.50.4 出包实测）：**救回必须校验版本** —— 只捞本版件。
-        #   病（真缺陷，本轮当场撞到）：原循环扫 dist 下**所有** `.tmp-*/`，
-        #   把**任何** `.tar.gz` 捞回 dist，**不校验版本号** ⇒ 上一轮残留的
-        #   `.tmp-_8b7mue4/antinel-0.50.3.tar.gz`（宿主删除守卫拦了收尾清理，
-        #   一直躺在 dist 里）被这轮**捞了回来** ⇒ dist 混入旧版件 ⇒
-        #   步骤 3 `verify_release` 判 `[A] dist 布局` 红（"混入旧版件或本版件缺失"）
-        #   ⇒ 白跑一轮 22 分钟构建。
-        #   ★ 这是本仓 T-09（同一事实两处副本）的又一变体：`_archive_stale_dist`
-        #     （build_package 侧）**按版本**归档旧件，而本救回循环**没有版本口径**
-        #     ⇒ 一个挪走、一个捞回，两把尺子打架。修法＝让救回也用**版本口径**。
-        #   ★ 为什么不是"也捞旧件、让后续判据去红"：那会把"混旧包"这个
-        #     D-23/JDG-06 专门要防的最危险一项，变成每次构建的必然产物
-        #     （tmp 残留不清 ⇒ 每轮都把旧版捞回来），机制自相矛盾。
-        _want = "antinel-%s.tar.gz" % version
-        for name in sorted(os.listdir(dist)):
-            tmpdir = os.path.join(dist, name)
-            if not (name.startswith(".tmp-") and os.path.isdir(tmpdir)):
-                continue
-            for f in sorted(os.listdir(tmpdir)):
-                if f != _want:                       # ★ 只认本版件（版本口径）
-                    continue
-                dst = os.path.join(dist, f)
-                if not os.path.exists(dst):
-                    shutil.move(os.path.join(tmpdir, f), dst)
-                    got = True
-                    print("   [救回 sdist] %s ← %s/%s（宿主守卫拦了收尾删除，tar 本身是好的）"
-                          % (f, name, f))
+        got = _artifact_present(dist, version, "sdist")
         if got:
-            rescued.append("sdist")
-            print("   [提示] sdist 后端报了 rc=%d，但已救回 —— 以 dist/ 实际内容为准" % rc_s)
+            # ★★ 0.60.0：产物已直接落在 dist（build 是"先写产物、后收尾清理"，
+            #   本宿主禁删 ⇒ 收尾必失败 ⇒ rc=1 但东西是好的）。
+            print("   [救回 sdist] 后端 rc=%d，但 dist 里已有本版件 —— "
+                  "被拦的只是收尾清理，产物本身是好的" % rc_s)
         else:
+            # ★★★ 2026-10-15（0.50.4 出包实测）：**救回必须校验版本** —— 只捞本版件。
+            #   病（真缺陷，本轮当场撞到）：原循环扫 dist 下**所有** `.tmp-*/`，
+            #   把**任何** `.tar.gz` 捞回 dist，**不校验版本号** ⇒ 上一轮残留的
+            #   `.tmp-_8b7mue4/antinel-0.50.3.tar.gz`（宿主删除守卫拦了收尾清理，
+            #   一直躺在 dist 里）被这轮**捞了回来** ⇒ dist 混入旧版件 ⇒
+            #   步骤 3 `verify_release` 判 `[A] dist 布局` 红（"混入旧版件或本版件缺失"）
+            #   ⇒ 白跑一轮 22 分钟构建。
+            #   ★ 这是本仓 T-09（同一事实两处副本）的又一变体：`_archive_stale_dist`
+            #     （build_package 侧）**按版本**归档旧件，而本救回循环**没有版本口径**
+            #     ⇒ 一个挪走、一个捞回，两把尺子打架。修法＝让救回也用**版本口径**。
+            #   ★ 为什么不是"也捞旧件、让后续判据去红"：那会把"混旧包"这个
+            #     D-23/JDG-06 专门要防的最危险一项，变成每次构建的必然产物
+            #     （tmp 残留不清 ⇒ 每轮都把旧版捞回来），机制自相矛盾。
+            _want = "antinel-%s.tar.gz" % version
+            for name in sorted(os.listdir(dist)):
+                tmpdir = os.path.join(dist, name)
+                if not (name.startswith(".tmp-") and os.path.isdir(tmpdir)):
+                    continue
+                for f in sorted(os.listdir(tmpdir)):
+                    if f != _want:                       # ★ 只认本版件（版本口径）
+                        continue
+                    dst = os.path.join(dist, f)
+                    if not os.path.exists(dst):
+                        shutil.move(os.path.join(tmpdir, f), dst)
+                        got = True
+                        print("   [救回 sdist] %s ← %s/%s（宿主守卫拦了收尾删除，"
+                              "tar 本身是好的）" % (f, name, f))
+        if not got:
             print("!! sdist 构建失败且无可救回产物（rc=%d）" % rc_s)
             return rc_s
+        rescued.append("sdist")
+        print("   [提示] sdist 后端报了 rc=%d，但已救回 —— 以 dist/ 实际内容为准" % rc_s)
+
+    # ---- wheel（三条救回，按代价从低到高）----
+    rc_w = _run([py, "-m", "build", "--no-isolation", "--wheel", "--outdir", dist], cwd=ROOT)
+    if rc_w != 0:
+        ok = _artifact_present(dist, version, "wheel")
+        if ok:
+            print("   [救回 wheel] 后端 rc=%d，但 dist 里已有本版件 —— "
+                  "被拦的只是收尾清理" % rc_w)
+        if not ok:
+            # 救回②：暂存树 `wheel pack`（只在"暂存树是完整的"宿主上有效）
+            tree = os.path.join(ROOT, "build", "bdist.win-amd64", "wheel")
+            if os.path.isdir(tree):
+                # ★★ 0.60.0：**先过内容门**，再决定要不要 pack 这棵树。
+                #   暂存树是 setuptools 的增量产物，可能是**上一版**留下的
+                #   （含已退役的代码）。pack 一棵旧树 = 把退役代码发出去，
+                #   而且症状是"活体全绿、发布件带病"，极难发现。
+                #   不一致就让路给救回③（从本轮现打的 sdist 重建）。
+                same, why = _staged_tree_matches_source(tree)
+                if not same:
+                    print("   [救回 wheel] 暂存树与源码**不一致**（%d 处）⇒ "
+                          "拒绝 pack 这棵树，改走 sdist 重建" % len(why))
+                    for w in why[:6]:
+                        print("      · %s" % w)
+                    if len(why) > 6:
+                        print("      · ……另 %d 处" % (len(why) - 6))
+                else:
+                    print("   [救回 wheel] 后端 rc=%d，暂存树在：%s（与源码逐字节一致）"
+                          " —— 用官方 wheel pack 重打包" % (rc_w, tree))
+                    if _run([py, "-m", "wheel", "pack", tree, "-d", dist], cwd=ROOT) == 0:
+                        ok = _artifact_present(dist, version, "wheel")
+        if not ok:
+            # 救回③：离开仓根、到系统 %TEMP% 从本版 sdist 重建（本宿主的唯一出路）
+            print("   [救回 wheel] 暂存树这条路走不通 —— 改在系统临时目录从 sdist 重建")
+            ok = _wheel_from_sdist(py, dist, version)
+        if not ok:
+            print("!! wheel 构建失败（rc=%d）且三条救回全不可用" % rc_w)
+            return rc_w
+        rescued.append("wheel")
+        print("   [提示] wheel 后端报了 rc=%d，但已救回 —— 以 dist/ 实际内容为准" % rc_w)
 
     if rescued:
         print("   本次救回：%s" % "、".join(rescued))

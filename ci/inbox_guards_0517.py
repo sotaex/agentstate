@@ -1073,6 +1073,411 @@ def r58d():
     return True
 
 
+
+# ══════════════════════════════════════════════════════════════════════════
+# ★★ 0.60.0 并入（原 ci/inbox_guards_0600.py）—— GOV-01 A2「常驻上限 29 已满，
+#    P5 正解是并站」，所以不立新站，直接并进本套件。
+#
+#    两件事都属于「**装的时候是新的、以后一直是旧的**」：
+#      ① 规则副本不跟着包走 —— `pip install -U` 只换包不跑 install，钩子读的
+#         `<root>/.psl/rules/default.json` 永久停在首次安装那一版（本仓实测
+#         包内 0.59.0 / 副本 0.58.0 ⇒ 一个版本区间的规则修正一条都没生效）。
+#      ② 钩子解释器写死在安装那一刻 —— `python.exe` 是控制台子系统程序 ⇒ 宿主
+#         每跑一次钩子就分配一个控制台，Win11 默认终端是 Windows Terminal ⇒
+#         **每一次工具调用都在屏幕上弹一个终端窗口**（WinEvent 实测：钩子在则
+#         每次必有一对 CASCADIA_HOSTING_WINDOW_CLASS；清空两处 settings 的 hooks
+#         后同样操作一个窗口都不弹）。修法：`pythonw.exe`（实测决策完全等价）。
+#
+#    为什么并进 0517 而不是别处：本套件已经在守「窗口这件事」（起得来、活得久），
+#    而 ② 正是「窗口不该出现」的另一面；① 与本套件同属 daemon tick / 安装态。
+# ══════════════════════════════════════════════════════════════════════════
+import hashlib as _hashlib
+import json
+import shutil as _shutil
+import subprocess as _subprocess
+
+_SCRIPTS_DIR = os.path.join(ROOT, "scripts")
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.append(_SCRIPTS_DIR)
+HS = _load("host_shield")
+INST = _load("install")
+
+PKG_RULES = HS.package_rules_path()
+PKG_VER = json.load(open(PKG_RULES, encoding="utf-8"))["version"]
+NO_WIN = 0x08000000
+HOOK_PRE = os.path.join(ROOT, "hooks", "pre_tool_use.py")
+
+
+def _isolated(fn):
+    """每条判据跑在自己的枢纽目录里 —— 不许把审计记录写进真实家目录。
+
+    ★ 同时**打开**规则自愈（清掉 `ANTINEL_NO_AUTO_RULES`）：闸门统一给所有套件
+      设了这个关闭阀（判据测「给定规则下的判定」，不该被自愈改掉夹具），
+      而本族的 RF-60* 恰恰是**唯一要测自愈本身**的地方 —— 不在这里打开，
+      它们就会在闸门里量到"关闭阀生效"，测不到真东西。
+    """
+    def w():
+        old = os.environ.get("ANTINEL_HUB_DIR")
+        old_off = os.environ.pop("ANTINEL_NO_AUTO_RULES", None)
+        os.environ["ANTINEL_HUB_DIR"] = _TMP.tmpdir(prefix="g0600_hub_")
+        try:
+            return fn()
+        finally:
+            if old is None:
+                os.environ.pop("ANTINEL_HUB_DIR", None)
+            else:
+                os.environ["ANTINEL_HUB_DIR"] = old
+            if old_off is not None:
+                os.environ["ANTINEL_NO_AUTO_RULES"] = old_off
+    w.__name__ = getattr(fn, "__name__", "w")
+    return w
+
+
+def _must_fail(fn):
+    """「必红」口径 —— 与 `check()` 的 wrapper 同一把尺子。
+
+    ★ 踩过的坑：负控直接调**原函数**时，原函数返回的是**错误说明串**而不是抛异常
+      （异常是 `check` 的 wrapper 转的）⇒ `try/except AssertionError` 抓不到
+      ⇒ 变异体被判成"绿"，负控自己假红。
+    """
+    try:
+        r = fn()
+    except AssertionError:
+        return True
+    except Exception:                                       # noqa: BLE001
+        return True
+    if r is True or r is None:
+        return False
+    return True
+
+
+def _mkproj(tag, ver, tamper=False):
+    """造一个「已安装」的项目：`.psl/manifest.json` + 规则副本（版本可控）。"""
+    d = _TMP.tmpdir(prefix="g0600_%s_" % tag)
+    psl = os.path.join(d, ".psl")
+    os.makedirs(os.path.join(psl, "rules"), exist_ok=True)
+    os.makedirs(os.path.join(psl, "audit"), exist_ok=True)
+    dst = os.path.join(psl, "rules", "default.json")
+    data = json.load(open(PKG_RULES, encoding="utf-8"))
+    data["version"] = ver
+    raw = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
+    open(dst, "wb").write(raw)
+    h = "sha256:" + _hashlib.sha256(raw).hexdigest()
+    man = {"created_by": "guards0517-rf60", "rules_file": ".psl/rules/default.json",
+           "rules_hash": ("sha256:" + "0" * 64) if tamper else h,
+           "skill_version": ver}
+    json.dump(man, open(os.path.join(psl, "manifest.json"), "w", encoding="utf-8"),
+              ensure_ascii=False, indent=2)
+    return d, dst, os.path.join(psl, "manifest.json")
+
+
+def _chain_types(root):
+    out = []
+    ad = os.path.join(root, ".psl", "audit")
+    if not os.path.isdir(ad):
+        return out
+    for fn in sorted(os.listdir(ad)):
+        if fn.endswith(".jsonl"):
+            for line in open(os.path.join(ad, fn), encoding="utf-8"):
+                line = line.strip()
+                if line:
+                    try:
+                        out.append(json.loads(line).get("type"))
+                    except Exception:                       # noqa: BLE001
+                        out.append("<bad>")
+    return out
+
+
+@check("RF-60a 规则副本落后 ⇒ 刷到包内这一版（内容全等 + manifest 同步 + 留痕）")
+@_isolated
+def rf60a():
+    d, dst, manp = _mkproj("a", "0.0.1")
+    before = open(dst, "rb").read()
+    rep = HS.ensure_rules_current(d)
+    after = open(dst, "rb").read()
+    if rep.get("action") != "refreshed":
+        return "action=%r（应为 refreshed）" % rep.get("action")
+    if after != open(PKG_RULES, "rb").read():
+        return "副本内容与包内不全等"
+    if before == after:
+        return "内容根本没变（夹具没起作用）"
+    man = json.load(open(manp, encoding="utf-8"))
+    if man.get("rules_hash") != "sha256:" + _hashlib.sha256(after).hexdigest():
+        return "manifest.rules_hash 没跟着更新（下一跳会判 SELF-TAMPERED）"
+    if man.get("skill_version") != PKG_VER:
+        return "manifest.skill_version=%r（应为 %r）" % (man.get("skill_version"), PKG_VER)
+    if "rules_snapshot_refreshed" not in _chain_types(d):
+        return "审计链上没有刷新记录（改了防护依据却不留痕）"
+    _note("0.0.1 -> %s；链上 %s" % (PKG_VER, _chain_types(d)))
+    return True
+
+
+@check("RF-60b 规则自愈幂等：已是包内这一版 ⇒ current 且 mtime 不变")
+@_isolated
+def rf60b():
+    d, dst, _m = _mkproj("b", "0.0.1")
+    HS.ensure_rules_current(d)
+    mt = os.stat(dst).st_mtime_ns
+    rep = HS.ensure_rules_current(d)
+    mt2 = os.stat(dst).st_mtime_ns
+    if rep.get("action") != "current":
+        return "action=%r" % rep.get("action")
+    if mt != mt2:
+        return "mtime 变了（幂等不成立，白写盘）"
+    return True
+
+
+@check("RF-60c 规则副本比包还新 ⇒ ahead，不倒退")
+@_isolated
+def rf60c():
+    d, dst, _m = _mkproj("c", "99.0.0")
+    before = open(dst, "rb").read()
+    rep = HS.ensure_rules_current(d)
+    if rep.get("action") != "ahead":
+        return "action=%r" % rep.get("action")
+    if open(dst, "rb").read() != before:
+        return "把更新的副本覆盖了（倒退）"
+    return True
+
+
+@check("RF-60d 规则副本被改过 ⇒ modified 且**不覆盖**，另留 skipped 痕")
+@_isolated
+def rf60d():
+    d, dst, _m = _mkproj("d", "0.0.1", tamper=True)
+    tampered = open(dst, "rb").read()
+    rep = HS.ensure_rules_current(d)
+    if rep.get("action") != "modified":
+        return "action=%r（应为 modified：哈希对不上登记值）" % rep.get("action")
+    if open(dst, "rb").read() != tampered:
+        return "覆盖了被改过的副本 —— 把篡改证据一起抹掉了"
+    if "rules_auto_refresh_skipped" not in _chain_types(d):
+        return "没有 skipped 留痕"
+    return True
+
+
+@check("RF-60e 未安装的目录 ⇒ no_project，且不凭空造 .psl")
+@_isolated
+def rf60e():
+    d = _TMP.tmpdir(prefix="g0600_none_")
+    rep = HS.ensure_rules_current(d)
+    if rep.get("action") != "no_project":
+        return "action=%r" % rep.get("action")
+    if os.path.exists(os.path.join(d, ".psl")):
+        return "凭空建了 .psl"
+    return True
+
+
+@check("RF-60f 包内规则读不到 ⇒ error（不假装成功）")
+@_isolated
+def rf60f():
+    d, _dst, _m = _mkproj("f", "0.0.1")
+    rep = HS.ensure_rules_current(d, package_rules=os.path.join(d, "nope.json"))
+    if rep.get("action") != "error":
+        return "action=%r" % rep.get("action")
+    return True
+
+
+@check("RF-60g 关闭阀管自动那一路：force=False ⇒ disabled 一字不写；force=True 照刷")
+@_isolated
+def rf60g():
+    d, dst, _m = _mkproj("g", "0.0.1")
+    before = open(dst, "rb").read()
+    os.environ["ANTINEL_NO_AUTO_RULES"] = "1"
+    try:
+        rep = HS.ensure_rules_current(d)
+    finally:
+        os.environ.pop("ANTINEL_NO_AUTO_RULES", None)
+    if rep.get("action") != "disabled":
+        return "自动那一路 action=%r（应为 disabled）" % rep.get("action")
+    if open(dst, "rb").read() != before:
+        return "关闭阀下仍然写了盘"
+
+    # ★ 第二腿（0.60.0）：`force=True` 是**人敲的**（`--refresh-rules`），阀门不该挡。
+    #   少这一腿就会出现「用户显式要求刷新，却被告知'被环境变量关掉了'」——
+    #   而那个变量是闸门为了保住夹具设的，跟用户的意图毫无关系。
+    os.environ["ANTINEL_NO_AUTO_RULES"] = "1"
+    try:
+        rep2 = HS.ensure_rules_current(d, force=True)
+    finally:
+        os.environ.pop("ANTINEL_NO_AUTO_RULES", None)
+    if rep2.get("action") != "refreshed":
+        return "force=True 时 action=%r（显式命令被阀门挡住了）" % rep2.get("action")
+    if open(dst, "rb").read() == before:
+        return "force=True 报 refreshed，但副本没变"
+    return True
+
+
+@check("RF-60h 三个入口同一实现：钩子 / daemon / CLI 都不许自己再写一份拷贝")
+def rf60h():
+    缺 = []
+    for rel in ("hooks/pre_tool_use.py", "inbox_daemon.py", "scripts/install.py"):
+        s = open(os.path.join(ROOT, rel), encoding="utf-8").read()
+        if "ensure_rules_current" not in s:
+            缺.append("%s 没有调用自愈" % rel)
+    # ★ 只查**刷新路径**那只函数：install 主流程首次安装时的 copy2 是「建立副本」，
+    #   不是「刷新副本」，那是合理的唯一一份（首次安装时还没有 manifest，
+    #   自愈函数按设计就不该在这条路上跑）。按全文判会误伤它。
+    inst = open(os.path.join(ROOT, "scripts", "install.py"), encoding="utf-8").read()
+    i = inst.find("def refresh_rules(")
+    j = inst.find("def fix_hooks(")
+    body = inst[i:j] if (i >= 0 and j > i) else ""
+    if not body:
+        缺.append("找不到 refresh_rules 的函数体（判不了）")
+    elif "shutil.copy2" in body:
+        缺.append("refresh_rules 还留着自己那份拷贝（第二实现）")
+    if 缺:
+        return "；".join(缺)
+    _note("钩子 / daemon / CLI 三处都指向 ensure_rules_current")
+    return True
+
+
+@check("N-RF-60a 负控：只换文件不换 rules_hash 的变异体必须判红")
+@_isolated
+def n_rf60a():
+    def 坏(root=None, package_rules=None, force=False):
+        p, _man = HS.resolve_rules_file([root])
+        HS._write_bytes_atomic(p, open(PKG_RULES, "rb").read())   # 只换文件
+        return {"action": "refreshed", "path": p}                 # hash 没登记
+
+    orig = HS.ensure_rules_current
+    try:
+        HS.ensure_rules_current = 坏
+        if _must_fail(rf60a):
+            return True
+        return "变异体（只换文件不登记 hash）被判绿 —— 判据量不到最坏的那种刷新"
+    finally:
+        HS.ensure_rules_current = orig
+
+
+@check("HK-60a 钩子解释器口径：pythonw 优先，两处入口都写进去")
+def hk60a():
+    exe = INST.hook_python()
+    if not os.path.basename(exe).lower().startswith("pythonw"):
+        return "hook_python()=%r（应为 pythonw.exe，否则每次工具调用都弹控制台窗口）" % exe
+    if not os.path.isfile(exe):
+        return "pythonw 路径不存在：%r" % exe
+    cmd = INST.hook_command("pre_tool_use.py")
+    if "pythonw" not in cmd.lower():
+        return "hook_command() 没把 pythonw 写进命令行：%r" % cmd[:90]
+    z = INST.zcode_hook_entry("pre_tool_use.py")
+    if "pythonw" not in str(z.get("command", "")).lower():
+        return "zcode 形态没跟着换：%r" % z.get("command")
+    _note("exe=%s" % exe)
+    return True
+
+
+def _run_hook(exe, payload):
+    r = _subprocess.run([exe, "-I", "-S", HOOK_PRE], input=json.dumps(payload),
+                        capture_output=True, text=True, encoding="utf-8",
+                        errors="replace", timeout=180, cwd=ROOT,
+                        creationflags=NO_WIN,
+                        env=dict(os.environ, ANTINEL_HOST_MIRROR="0"))
+    out = (r.stdout or "").strip()
+    try:
+        dec = json.loads(out).get("decision", "") if out else ""
+    except Exception:                                       # noqa: BLE001
+        dec = "<non-json>"
+    return r.returncode, dec
+
+
+@check("HK-60b 行为腿：用产品会给的解释器真起钩子，block 样本必须 rc=2 + block")
+@_isolated
+def hk60b():
+    exe = INST.hook_python()
+    if "pythonw" not in os.path.basename(exe).lower():
+        return "解释器不是 pythonw：%r" % exe
+    bad = "Remove-" + "Item -Recurse -Force C:\\data"
+    rc, dec = _run_hook(exe, {"session_id": "g0517rf", "tool_name": "Bash",
+                              "tool_input": {"command": bad}})
+    if rc != 2 or dec != "block":
+        return "pythonw 下决策变了：rc=%s decision=%r（最危险的失败方向）" % (rc, dec)
+    rc2, dec2 = _run_hook(exe, {"session_id": "g0517rf", "tool_name": "Bash",
+                                "tool_input": {"command": "echo hello"}})
+    if rc2 != 0 or dec2 not in ("", "allow"):
+        return "pythonw 下 allow 样本异常：rc=%s decision=%r" % (rc2, dec2)
+    _note("block rc=2/decision=block；allow rc=0")
+    return True
+
+
+@check("N-HK-60b 负控：换回 python.exe 时这条判据必须红（不然它量不到窗口）")
+def n_hk60b():
+    orig = INST.hook_python
+    try:
+        INST.hook_python = lambda: sys.executable
+        if _must_fail(hk60b):
+            return True
+        return "python.exe 也判绿 —— 判据只量了「决策对不对」，量不到「有没有窗口」"
+    finally:
+        INST.hook_python = orig
+
+
+@check("HK-60c 迁移入口：临时 USERPROFILE 下的旧 settings 被换掉，外来钩子保留")
+def hk60c():
+    home = _TMP.tmpdir(prefix="g0600_home_")
+    proj = _TMP.tmpdir(prefix="g0600_proj_")
+    os.makedirs(os.path.join(proj, ".psl"), exist_ok=True)
+    json.dump({"rules_file": ".psl/rules/default.json"},
+              open(os.path.join(proj, ".psl", "manifest.json"), "w", encoding="utf-8"))
+    d = os.path.join(home, ".workbuddy")
+    os.makedirs(d, exist_ok=True)
+    sp = os.path.join(d, "settings.json")
+    old_cmd = '"%s" -I -S "%s"' % (sys.executable, HOOK_PRE)
+    foreign = {"matcher": ".*", "hooks": [
+        {"type": "command", "command": "echo foreign-hook", "timeout": 5}]}
+    json.dump({"hooks": {"PreToolUse": [
+        {"matcher": ".*", "hooks": [{"type": "command", "command": old_cmd,
+                                     "timeout": 10}]},
+        foreign]}}, open(sp, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+
+    old_pe = os.environ.get("USERPROFILE")
+    os.environ["USERPROFILE"] = home
+    try:
+        rc = INST.fix_hooks(proj)
+    finally:
+        if old_pe is None:
+            os.environ.pop("USERPROFILE", None)
+        else:
+            os.environ["USERPROFILE"] = old_pe
+    if rc != 0:
+        return "fix_hooks 返回 %r" % rc
+    entries = json.load(open(sp, encoding="utf-8"))["hooks"]["PreToolUse"]
+    flat = json.dumps(entries, ensure_ascii=False)
+    if "pythonw" not in flat.lower():
+        return "临时用户级 settings 里的钩子没换成 pythonw：%s" % flat[:160]
+    if "foreign-hook" not in flat:
+        return "把外来钩子弄丢了（只许动我们自己的条目）"
+    if sum(1 for e in entries if "pre_tool_use.py" in json.dumps(e)) != 1:
+        return "我们的条目不是恰好 1 个"
+    _note("临时 USERPROFILE 下已换成 pythonw，外来钩子保留")
+    return True
+
+
+@check("HK-60d 扫描面：用户级 settings 也要被找到（不是只看项目级）")
+def hk60d():
+    home = _TMP.tmpdir(prefix="g0600_home2_")
+    proj = _TMP.tmpdir(prefix="g0600_proj2_")
+    d = os.path.join(home, ".workbuddy")
+    os.makedirs(d, exist_ok=True)
+    sp = os.path.join(d, "settings.json")
+    json.dump({"hooks": {"PreToolUse": [{"matcher": ".*", "hooks": [
+        {"type": "command", "command": 'pythonw.exe -I -S "%s"' % HOOK_PRE,
+         "timeout": 10}]}]}}, open(sp, "w", encoding="utf-8"), ensure_ascii=False)
+    old_pe = os.environ.get("USERPROFILE")
+    os.environ["USERPROFILE"] = home
+    try:
+        found = INST._our_hook_settings(proj)
+    finally:
+        if old_pe is None:
+            os.environ.pop("USERPROFILE", None)
+        else:
+            os.environ["USERPROFILE"] = old_pe
+    paths = [str(p) for p, _s in found]
+    if not any(os.path.join(home, ".workbuddy") in p for p in paths):
+        return "没扫到用户级 settings（只改项目级 = 本机实测过的假阴性）found=%r" % paths
+    _note("扫到 %d 处，含用户级" % len(paths))
+    return True
+
+
 def main():
     print("=" * 78)
     print("0517 判据 —— Antinel 监理窗口寿命：daemon 委托开窗（起得来，更要活得久）")

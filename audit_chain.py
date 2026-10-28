@@ -212,6 +212,60 @@ def pid_alive(pid):
         return True
 
 
+def pid_birth(pid):
+    """进程**出生时间**（epoch 秒，float）；拿不到返回 `None`。
+
+    ★★ 为什么必须能和 `pid_alive` 分开用（0.60.0，本机实测）：
+      pid 会被**回收**。实测取证：同一个 pid 号（132432）在 62 秒内被另一个
+      进程复用（`console/daemon.pid` 记的就是它，而它当时已经不是守护进程）。
+      只按 `pid_alive` 判「守护进程还在」⇒ 已死的登记被读成活着 ⇒ 新守护进程
+      判 `already-running` **当场退出** ⇒ 监理服务永远起不来，而且每次重拉都
+      要走一遍"删 pid 文件"（= 一个黑窗）。
+      ⇒ 判活的正解是「pid 活着 **且** 出生时间与登记时间对得上」。
+      这就是 `_DEV_GUARDED` 那一类"两把尺子"事故的同族：判据用的不是
+      它要守的那个事实。
+    """
+    try:
+        import ctypes
+        import ctypes.wintypes as wt
+        k = ctypes.windll.kernel32
+        h = k.OpenProcess(0x0400, 0, int(pid))      # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return None
+        try:
+            class _FT(ctypes.Structure):
+                _fields_ = [("lo", wt.DWORD), ("hi", wt.DWORD)]
+            c, e, kt, u = _FT(), _FT(), _FT(), _FT()
+            if not k.GetProcessTimes(h, ctypes.byref(c), ctypes.byref(e),
+                                     ctypes.byref(kt), ctypes.byref(u)):
+                return None
+            ticks = (c.hi << 32) | c.lo
+            # FILETIME：1601-01-01 起、单位 100ns
+            return ticks / 1e7 - 11644473600.0
+        finally:
+            k.CloseHandle(h)
+    except Exception:
+        return None
+
+
+def pid_matches_birth(pid, when, tol_s=180.0):
+    """`pid` 活着、且出生时间与 `when`（epoch 秒）相差不超过 `tol_s`？
+
+    读不到出生时间 ⇒ **判不匹配**（宁可多起一个，不可永远不起）。
+    与 `pid_alive` 的"读不到按活着"相反：那边防的是误偷活锁，这边防的是
+    「把回收后的 pid 当成自己人」而永远起不来。
+    """
+    if not pid_alive(pid):
+        return False
+    b = pid_birth(pid)
+    if b is None:
+        return False
+    try:
+        return abs(float(b) - float(when)) <= float(tol_s)
+    except Exception:
+        return False
+
+
 def _sleep_bounded(deadline, delay):
     """睡到 `delay`，但**绝不越过 deadline**。
 
@@ -222,6 +276,35 @@ def _sleep_bounded(deadline, delay):
     if left <= 0:
         return
     time.sleep(min(delay, left))
+
+
+def retire_file(path):
+    """把文件「改名让开」而不是删除。返回 True/False，**不抛**。
+
+    ★★ 为什么稳态里**一个删除动作都不能有**（0.60.0，实测取证不是推演）：
+      宿主用 `PYTHONPATH` 注入一份 `sitecustomize.py`（本机实测：
+      `D:\\Application\\WB\\CN\\resources\\app.asar.unpacked\\cli\\vendor\\shim`），
+      它把 `os.remove` 改写成「走回收站」，而回收站那条链路会起
+      `node.exe ... safe-delete-bulk-guard.cjs check`。
+      `node.exe` 是**控制台子系统**程序、那个 `Popen` 在宿主里且不带
+      `CREATE_NO_WINDOW` ⇒ 无控制台父进程（守护进程／哨兵）下 Windows 必须
+      给它新建控制台 ⇒ **Windows Terminal 弹窗一闪**。
+      取证：`output/_catch_console_0600.jsonl` —— 守护进程每轮删两处
+      （`notify_state.json.lock`、`console/daemon.pid`）⇒ 每轮两次 node 出生
+      ⇒ 用户 "时不时看到黑窗"（实测 5 分钟 10 个窗，成对、约 62 秒一轮）。
+      而 `acquire_lock`/`release_lock` 在**每一次写入**里都会走到 ⇒ 删除必须清零。
+
+    ★ 为什么改名可行而删除不行：rename 不进回收站、不起子进程；而且本机对 `D:`
+      全域禁 unlink（`WinError 5`）却允许 rename —— 这条路本来就是唯一可用的。
+
+    ★ 为什么后缀**固定**（不带时间戳）：`os.replace` 是覆盖语义，每个锁至多留
+      一份残骸，占用恒定。带 ts 的话死锁反复偷会无限堆积。
+    """
+    try:
+        os.replace(path, path + ".away")
+        return True
+    except Exception:                                   # noqa: BLE001
+        return False
 
 
 def acquire_lock(fn):
@@ -266,7 +349,11 @@ def acquire_lock(fn):
                         #   之类，非 OSError），整段 except 就把它吞了 ⇒
                         #   「锁永远偷不掉、每次调用都白等 1.6s」在界面上完全查不到。
                         try:
-                            os.remove(lock)
+                            # ★ 0.60.0：**改名让开**，不删除（见 `retire_file`）。
+                            #   删除会经宿主垫片走回收站 ⇒ 起控制台程序 ⇒ 闪黑窗；
+                            #   而抢锁是每次写入都走的热路径。
+                            if not retire_file(lock):
+                                raise OSError("retire-failed")
                             tlog("steal", age_s=round(age, 1),
                                  pid=(c or {}).get("pid"))
                             # ★ 40 格 · 并发·报：回收死锁也要让用户看得见
@@ -324,7 +411,11 @@ def release_lock(lock):
         return
     if c and c.get("token") == LOCK_TOKEN:
         try:
-            os.remove(lock)
+            # ★ 0.60.0：改名让开，不删除 —— 理由见 `retire_file()`。
+            #   这一处比偷锁更热：**每一次成功写入**都会走到，删除动作在这里
+            #   等于给每一次工具调用都挂一个黑窗。
+            if not retire_file(lock):
+                raise OSError("retire-failed")
         except Exception as e:                      # noqa: BLE001
             tlog("remove_err")
             # ★ 0.57.0（第 24 条）：`tlog` 默认关（`ANTINEL_LOCK_TELEMETRY=1` 才写）

@@ -56,7 +56,7 @@ _T0 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段起点（性能
 
 # ---------------------------------------------------------------- constants --
 PKG_DIR = os.path.dirname(os.path.abspath(__file__))
-_ANTINEL_VERSION = "0.59.0"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
+_ANTINEL_VERSION = "0.60.0"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
 _T1 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段终点（性能插桩）
 
 
@@ -1101,6 +1101,19 @@ def redos_risky(pat):
 
 
 def load_rules():
+    # ★★ 0.60.0（创始人 2026-10-27 裁定）：「既然系统更新，那肯定是全面更新，
+    #    包括规则的更新。」—— 此前 `pip install -U` 只换包，不跑 install
+    #    ⇒ 钩子读的项目副本永久停在首次安装那一版，一个版本区间里的规则修正
+    #    **一条都不生效**，而包与副本两侧都自认正常。
+    #    自愈放在加载**之前**：这样本次调用用的就是包内这一版，不是"下次才新"。
+    #    失败一律吞掉（自愈是优化，不是防护前置条件）：下面照旧按现有副本加载，
+    #    并仍走 A4 完整性比对 —— 少了自愈也不会多放行一条。
+    _hs_auto = _hs_module()
+    if _hs_auto is not None:
+        try:
+            _hs_auto.ensure_rules_current(os.getcwd())
+        except Exception:                                      # noqa: BLE001
+            pass
     rules = None
     for _retry in range(3):
         try:

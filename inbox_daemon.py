@@ -173,7 +173,16 @@ def _pid_alive(pid):
 
 
 def daemon_alive(root=None):
-    """(alive, pid|None)：中枢里登记的守护进程还在不在。读不到 ⇒ (False, None)。"""
+    """(alive, pid|None)：中枢里登记的守护进程还在不在。读不到 ⇒ (False, None)。
+
+    ★★ 0.60.0：判活**不能只看 pid**。本机实测 pid 回收极快 —— 同一个 pid 号
+      （132432）在 62 秒内就被另一个进程复用。旧实现 `return _pid_alive(pid), pid`
+      于是把「已经死掉的守护进程」读成活着 ⇒ 新守护进程判 `already-running`
+      **秒退** ⇒ 监理服务永远起不来，而且每次重拉都要删一次 pid 文件（一个黑窗）。
+      现在要求「pid 活着 **且** 出生时间与出生戳对得上」（`pid_matches_birth`）。
+    ★ 没有出生戳（0.53.2 之前写的登记）⇒ 退回只按 pid 判，行为与旧版一致：
+      那时没有更好的证据，不能凭空判死。
+    """
     try:
         with open(daemon_pid_path(root), encoding="utf-8") as f:
             pid = int(f.read().strip())
@@ -181,7 +190,39 @@ def daemon_alive(root=None):
         return False, None
     if pid == os.getpid():
         return True, pid                                # 自己（调用方按需区分）
-    return _pid_alive(pid), pid
+    if pid <= 0:
+        return False, pid or None                       # 0 = 已退出哨兵值
+    if not _pid_alive(pid):
+        return False, pid
+    when = _stamp_birth_epoch(root)
+    if when is None:
+        return True, pid
+    try:
+        import audit_chain as _AC
+        return (_AC.pid_matches_birth(pid, when), pid)
+    except Exception:                                   # noqa: BLE001
+        return True, pid
+
+
+def _stamp_birth_epoch(root=None):
+    """出生戳里的「登记时刻」（epoch 秒）；没有/读坏 ⇒ `None`。
+
+    优先用 `started_epoch`（0.60.0 起写入，精确）；老戳只有本地时间字符串，
+    按本地时区反解 —— 只用于「是不是同一个进程」判断，容差 180s，够用。
+    """
+    d = read_daemon_stamp(root)
+    if not d:
+        return None
+    v = d.get("started_epoch")
+    if isinstance(v, (int, float)) and v > 0:
+        return float(v)
+    s = d.get("started_at")
+    if not s:
+        return None
+    try:
+        return time.mktime(time.strptime(str(s), "%Y-%m-%dT%H:%M:%S"))
+    except Exception:                                   # noqa: BLE001
+        return None
 
 
 def write_daemon_pid(root=None, pid=None):
@@ -213,6 +254,10 @@ def write_daemon_stamp(root=None, current=None):
     import inbox_server as _SV
     cur = _SV.code_identity() if current is None else current
     rec = {"pid": int(os.getpid()),
+           # ★ 0.60.0：同时写**精确 epoch**。判活要拿它跟「进程出生时间」对账，
+           #   而 `started_at` 只有秒级且是本地时间字符串 —— pid 62 秒内就会被
+           #   回收（本机实测），对账需要的是"同一个进程"这件事，不是同一个秒。
+           "started_epoch": round(time.time(), 3),
            "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
            "code_version": cur.get("version"),
            "code_mtime": cur.get("mtime")}
@@ -257,10 +302,25 @@ def run_daemon(root=None, interval=2.0, max_ticks=None, supervise=True,
     finally:
         try:
             with open(daemon_pid_path(root), encoding="utf-8") as f:
-                if int(f.read().strip()) == os.getpid():
-                    os.remove(daemon_pid_path(root))
+                mine = int(f.read().strip()) == os.getpid()
         except Exception:                               # noqa: BLE001
-            pass
+            mine = False
+        if mine:
+            # ★ 0.60.0：退出时**不删** pid 文件，改写哨兵值 `0`（原子替换）。
+            #   为什么：
+            #   ① 删除会经宿主 sitecustomize 垫片走回收站 ⇒ 起 `node.exe`
+            #      （控制台程序）⇒ 无控制台父进程下弹黑窗。守护进程被反复重拉时
+            #      这一处就是"每分钟一个窗"的来源之一。
+            #   ② 删完文件就"不在"了，和"从没登记过"同貌，查不出是**谁**退的；
+            #      写 `0` 留下的是"登记过、已退出"这个事实（`_pid_alive(0)` 为假，
+            #      所有读 pid 的地方行为不变）。
+            try:
+                tmp = daemon_pid_path(root) + ".tmp"
+                with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+                    f.write("0")
+                os.replace(tmp, daemon_pid_path(root))
+            except Exception:                           # noqa: BLE001
+                pass
 
 
 def open_console_now(root=None, opener=None, console_url=None):
@@ -524,6 +584,16 @@ class Daemon:
         out["reconcile"] = self._reconcile_once(items)
         if (out["reconcile"] or {}).get("closed"):
             out["reconcile_affected"] = len(out["reconcile"]["closed"])
+
+        # ①d 规则副本随包自愈（0.60.0）。
+        #   ★ 为什么守护进程也要问一遍：钩子那条路只在「用户碰工具」时才走
+        #     ⇒ 一个人装完新版本早上不开工，规则就一直是旧的。这里每 tick 判一次，
+        #     幂等（正常情况只读两个 version 字段，不写盘、不留痕）。
+        try:
+            import host_shield as _HS_rules
+            out["rules_autorefresh"] = _HS_rules.ensure_rules_current(self.root)
+        except Exception as e:          # noqa: BLE001
+            out["errors"].append("rules-autorefresh: %s" % e)
 
         # ② 新告警 → 通知 / 强调 / 兜底
         #   ★★ 0.49.0（创始人 2026-10-14）：**急事走紧急提醒、普通事走 toast**。

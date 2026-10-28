@@ -5995,6 +5995,76 @@ def console_status(root=None, rec=None):
     return False, rec, "服务进程在，但端口 %d 没人在听" % port
 
 
+#: 分离起进程的 flags：DETACHED_PROCESS | CREATE_NO_WINDOW
+_SPAWN_SEP = 0x00000008 | _CREATE_NO_WINDOW
+#: 再加 CREATE_BREAKAWAY_FROM_JOB —— 父进程在 job object 里时也能活过父进程
+_SPAWN_SEP_BREAKAWAY = _SPAWN_SEP | 0x01000000
+
+
+def _popen_detached(argv, **kw):
+    """分离起进程：先试「带 BREAKAWAY」，被策略禁止再退回不带它的形态。
+
+    ★★ 为什么必须带 BREAKAWAY（2026-10-28 实测，不是推演）：
+
+      `spawn_console` / `spawn_daemon` 原来只有 `DETACHED_PROCESS |
+      CREATE_NO_WINDOW`。当**父进程属于某个 job object** 时（Agent 沙箱、CI、
+      部分终端都会把子进程放进 job），父进程一退，job 带着整个进程组一起走
+      ⇒ 刚起来的服务**跟着死**。
+
+      实测形态：`ensure_console()` 返回 `started=True`（端口真的开了，
+      回读也过了），几秒后端口又没了；`daemon.pid` 反复换号
+      （131860 → 117764）；`console.log` 里端口一路 5846 → 18622 → 50078
+      → 2559。表面症状是「监理服务起不起」，根因是**它活不过父进程**。
+
+      `host_shield.spawn_sentinel` 早就写了这套两档降级（那里从来没这个病），
+      这两个 spawn 是漏网 —— 同一件事两处实现，本仓第一顽症的老形状。
+      ⇒ 统一到这一处：先 BREAKAWAY，失败降级，绝不因为"策略禁止"就起不来。
+    """
+    if os.name != "nt":
+        kw.setdefault("start_new_session", True)
+        # `creationflags` 在 POSIX 上被忽略 —— 但**照样显式写出来**：
+        # 判据「起子进程必须无窗」是逐个 `Popen` 调用点看的，它不看
+        # `if os.name != "nt"` 这类分支。留一个裸 Popen 在那里，等于给
+        # 后来人示范"可以不写"，那道门迟早被绕过。
+        kw.setdefault("env", _child_env())
+        return subprocess.Popen(argv, creationflags=0, **kw)
+    kw.setdefault("env", _child_env())
+    last = None
+    for flags in (_SPAWN_SEP_BREAKAWAY, _SPAWN_SEP):
+        try:
+            return subprocess.Popen(argv, creationflags=flags, **kw)
+        except (OSError, ValueError) as e:
+            last = e
+            continue
+    raise last if last else OSError("分离起进程失败")
+
+
+def _child_env():
+    """起**长期子进程**用的环境（剥掉宿主 sitecustomize 垫片）。
+
+    唯一实现放在 `host_shield.child_env()` —— 那是最底层模块，本文件本来就
+    按需 `import host_shield`。这里只是把 import 收成一处，**不另写第二份**。
+
+    ★★ 为什么这一步就是黑窗的机制级修法（2026-10-28 实测取证）：
+      宿主用 `PYTHONPATH` 注入一份 `sitecustomize.py`，把 `os.remove` 改写成
+      「走回收站」，而回收站链路会起 `node.exe`（**控制台子系统**程序、不带
+      `CREATE_NO_WINDOW`）。我们的守护进程是**无控制台**父进程 ⇒ Windows 给
+      node 新建控制台 ⇒ Windows Terminal 弹窗一闪。
+      取证：`output/_catch_console_0600.jsonl` —— 守护进程每轮删两个目标
+      （`notify_state.json.lock`、`console/daemon.pid`）⇒ 每轮两次 node 出生
+      ⇒ 用户每分钟看见两次黑窗。剥掉之后删除回到普通 `os.remove`。
+    ★ 兜底：`host_shield` 万一导不进来，退化成「本进程环境去掉 PYTHONPATH」，
+      行为一致但实现只有那一条 —— 两侧都不许自己发明第三套口径。
+    """
+    try:
+        import host_shield as _hs
+        return _hs.child_env()
+    except Exception:                                   # noqa: BLE001
+        env = dict(os.environ)
+        env.pop("PYTHONPATH", None)
+        return env
+
+
 def _console_spawn_cmd(port, token, root=None):
     """重拉Antinel 监理要跑的命令（**唯一实现**：守护进程与判据都看它，不各拼一份）。"""
     entry = os.path.join(os.path.dirname(os.path.abspath(__file__)), "antinel.py")
@@ -6007,14 +6077,10 @@ def _console_spawn_cmd(port, token, root=None):
 
 def spawn_console(port, token, root=None):
     """按给定端口/口令**另起一个进程**跑Antinel 监理（分离、无窗）。返回 `Popen`。"""
-    flags = 0
-    if os.name == "nt":
-        flags = 0x00000008 | _CREATE_NO_WINDOW   # DETACHED_PROCESS | CREATE_NO_WINDOW
-    return subprocess.Popen(_console_spawn_cmd(port, token, root),
-                            stdin=subprocess.DEVNULL,
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                            creationflags=flags)
+    return _popen_detached(_console_spawn_cmd(port, token, root),
+                           stdin=subprocess.DEVNULL,
+                           stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL)
 
 
 def _daemon_spawn_cmd(root=None):
@@ -6031,14 +6097,10 @@ def _daemon_spawn_cmd(root=None):
 
 def spawn_daemon(root=None):
     """另起一个**守护进程**（分离、无窗）。返回 `Popen`。`root` 仅为签名一致。"""
-    flags = 0
-    if os.name == "nt":
-        flags = 0x00000008 | _CREATE_NO_WINDOW   # DETACHED_PROCESS | CREATE_NO_WINDOW
-    return subprocess.Popen(_daemon_spawn_cmd(root),
-                            stdin=subprocess.DEVNULL,
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                            creationflags=flags)
+    return _popen_detached(_daemon_spawn_cmd(root),
+                           stdin=subprocess.DEVNULL,
+                           stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL)
 
 
 def ensure_daemon(root=None, spawner=None, wait_sec=6.0):

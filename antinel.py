@@ -36,7 +36,7 @@ if _HERE not in sys.path:
 
 from strings import detect_lang, get_string
 
-VERSION = "0.59.0"
+VERSION = "0.60.0"
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
@@ -1935,48 +1935,40 @@ def _create_startup_lnk(lnk_path):
       宁可看得见，不可没有保护。
     """
     import host_shield as _hs                 # 与文件内其他处一致：延迟导入
-    pyw = _pythonw_exe()
-    hsp = _sibling("host_shield.py")
-    root = os.path.dirname(_sibling("antinel.py"))
-    if not (pyw and hsp and os.path.isfile(hsp)):
-        return False
-    args = '-I -S "%s" sentinel "%s"' % (hsp, root)
-    icon = _brand_icon()
-    ps = ("$w=New-Object -ComObject WScript.Shell;"
-          "$s=$w.CreateShortcut('%s');"
-          "$s.TargetPath='%s';$s.Arguments='%s';$s.WorkingDirectory='%s';"
-          "$s.Description='Antinel 监理 登录自启';"
-          % (lnk_path, pyw, args, root))
-    if icon:
-        ps += "$s.IconLocation='%s';" % icon
-    ps += "$s.Save()"
-    try:
-        r = subprocess.run([_hs._POWERSHELL, "-NoProfile", "-NonInteractive",
-                            "-ExecutionPolicy", "Bypass", "-Command", ps],
-                           capture_output=True, timeout=30,
-                           creationflags=_hs._CREATE_NO_WINDOW)
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return r.returncode == 0 and os.path.isfile(lnk_path)
+    # ★ 0.60.0：**薄委托** —— 实现在 `host_shield.create_autostart_lnk`。
+    #   为什么不能各留一份：哨兵（升级后自动修老任务）也要建同一个 `.lnk`，
+    #   两份实现必然漂（本仓第一顽症），而这次漂的代价是"一处改好、另一处照旧闪窗"。
+    return _hs.create_autostart_lnk(
+        lnk_path, script=_sibling("host_shield.py"),
+        root=os.path.dirname(_sibling("antinel.py")), icon=_brand_icon())
 
 
-def _retire_old_startup_cmd():
-    """把启动文件夹里旧的 `antinel-shield.cmd` **改名归档**（不删）。返回归档路径或 None。
+def _neutral_lnk():
+    """自启 `.lnk` 的**中立落点**（不在启动文件夹里）：`~/.antinel/antinel-shield.lnk`。
 
-    ★ 为什么必须归档（创始人 2026-10-17 黑窗口）：换成 `.lnk` 之后旧 `.cmd`
-      若还留着，下次登录会**两个都跑** —— 多一个控制台窗口（正是要消掉的
-      那个），哨兵的 singleton 守卫会拒掉第二个进程，但**窗口已经闪过了**。
-    ★ 零删除纪律：只改名（追加 `.away-<时间戳>`），随时可人工恢复。
+    ★ 0.60.0：为什么要有中立落点 —— `schtasks /TR` 与「启动文件夹」两条注册路径
+      必须指向**同一件东西**（一个 `.lnk`），否则又是"同一事实两处副本"。放在
+      启动文件夹里当 schtasks 成功时会**双份拉起**，所以落点必须在中立目录，
+      需要启动文件夹时再**复制**过去。
     """
-    old = _startup_folder_cmd()
-    if not os.path.isfile(old):
-        return None
-    away = old + ".away-" + datetime.now().strftime("%Y%m%d%H%M%S")
-    try:
-        os.replace(old, away)
-        return away
-    except OSError:
-        return None
+    import host_shield as _hs
+    return _hs.neutral_autostart_lnk()
+
+
+def _archive_legacy_startup():
+    """把启动文件夹里所有**会闪窗的旧自启件**移出（改名不删，零删除纪律）。
+
+    要移的三类（全部是 0.60.0 之前留下的）：
+      · `antinel-shield.cmd`         —— 活的 `.cmd`：登录必闪一个控制台
+      · `antinel-shield.cmd.away-*`  —— 已归档但仍躺在启动文件夹里（真源不清）
+      · `antinel-shield.lnk.away-*`  —— 同上（不闪，但属于"退役件没搬走"）
+    ★ 为什么不只是改名：`.away-` 后缀不参与启动，**不闪**；但它留在用户的启动
+      文件夹里，等于把退役件堆在人家门口 —— 换个名字回去就复原了。搬到
+      `~/.antinel/archive/` 才是"退役件离开现场"，且证据仍在、随时可恢复。
+    返回被搬走的路径列表。
+    """
+    import host_shield as _hs
+    return _hs.archive_legacy_startup()
 
 
 # ------------------------------------------------- 0.52.0：桌面入口 ----
@@ -2222,17 +2214,32 @@ def cmd_host_shield(args):
             hs.save_state(st)
         except Exception:
             pass
-        shim = os.path.join(os.path.expanduser("~"), ".antinel", "antinel-shield.cmd")
-        os.makedirs(os.path.dirname(shim), exist_ok=True)
-        # 0.28.1：编码必须容纳用户名里的非 ASCII 字符（本机 ~ = C:\Users\大马\...）。
-        # 旧版 encoding="ascii" 在这台机器上必抛 UnicodeEncodeError——enable 在
-        # save_state 之后、schtasks 之前死掉，留下 enabled=true 而什么都没做
-        # （这正是 09-19 那次"开了护盾却没有 shim、没有哨兵"的死因之一）。
-        # cmd 按 ANSI 代码页解析批处理（zh-CN = GBK/936），mbcs 恰好正确。
-        with open(shim, "w", encoding="mbcs", newline="\r\n") as f:
-            f.write('@echo off\r\n"%s" -I -S "%s" sentinel "%s"\r\n'
-                    % (sys.executable, _sibling("host_shield.py"),
-                       os.path.dirname(_sibling("antinel.py"))))
+        # ★★ 0.60.0：自启**不再经 `.cmd`**（创始人 2026-10-27：「对于用户来说，
+        #   任何类型的闪出黑窗都是不可接受的」）。
+        #   机制：`.cmd` 只能由 cmd.exe 执行，而 cmd.exe 是**控制台子系统**程序；
+        #   计划任务/启动文件夹的父进程都**没有控制台** ⇒ Windows 给 cmd.exe 新建
+        #   一个控制台 ⇒ 用户看到黑窗闪一下。这与钩子用 python.exe 是**同一个根因**
+        #   的另一个出口：**谁来执行它**决定了会不会闪。
+        #   0.51.2 只堵了「启动文件夹」那条（改 .lnk）；`schtasks` 那条一直指着
+        #   `~/.antinel/antinel-shield.cmd` ⇒ 每次登录闪一次，没人发现。
+        #   ⇒ 一条 `.lnk`（pythonw.exe、无窗口）同时服务两条注册路径（**同源**），
+        #     `.cmd` 降级为「PowerShell 完全不可用」时的最后兜底，并如实告知有窗。
+        lnk = _neutral_lnk()
+        os.makedirs(os.path.dirname(lnk), exist_ok=True)
+        has_lnk = _create_startup_lnk(lnk)
+        shim = None
+        if not has_lnk:
+            shim = os.path.join(os.path.expanduser("~"), ".antinel", "antinel-shield.cmd")
+            # 0.28.1：编码必须容纳用户名里的非 ASCII 字符（本机 ~ = C:\Users\大马\...）。
+            # 旧版 encoding="ascii" 在这台机器上必抛 UnicodeEncodeError——enable 在
+            # save_state 之后、schtasks 之前死掉，留下 enabled=true 而什么都没做
+            # （这正是 09-19 那次"开了护盾却没有 shim、没有哨兵"的死因之一）。
+            # cmd 按 ANSI 代码页解析批处理（zh-CN = GBK/936），mbcs 恰好正确。
+            with open(shim, "w", encoding="mbcs", newline="\r\n") as f:
+                f.write('@echo off\r\n"%s" -I -S "%s" sentinel "%s"\r\n'
+                        % (_pythonw_exe(), _sibling("host_shield.py"),
+                           os.path.dirname(_sibling("antinel.py"))))
+        target = lnk if has_lnk else shim
         # 0.28.1（死因 RC2）：schtasks /Create 的返回码必须查，失败要换道，不许假成功。
         # 0.28.3（B4i）：schtasks 走 System32 绝对路径（防应用目录/PATH 投毒）。
         # ★ 2026-09-26（A2）：**"返回码" ≠ "能启动"**。本机实测：schtasks.exe 被程序
@@ -2243,7 +2250,7 @@ def cmd_host_shield(args):
         autostart = "schtasks"
         try:
             r1 = subprocess.run([hs._SCHTASKS, "/Create", "/TN", "AntinelHostShield",
-                                 "/TR", '"%s"' % shim, "/SC", "ONLOGON", "/F"],
+                                 "/TR", '"%s"' % target, "/SC", "ONLOGON", "/F"],
                                 capture_output=True, timeout=30,
                                 creationflags=hs._CREATE_NO_WINDOW)
             _rc1 = r1.returncode
@@ -2254,15 +2261,26 @@ def cmd_host_shield(args):
             # ★ 0.51.2：回退位**优先 `.lnk`（无窗口）**，`.cmd` 只作 PowerShell
             #   不可用时的兜底 —— 见 `_create_startup_lnk` 的说明（创始人
             #   2026-10-17「重启时弹出的大黑窗口」）。
-            if _create_startup_lnk(_startup_folder_lnk()):
+            # ★ 0.60.0：`.lnk` 已在上方**无条件先建好**（schtasks 也要用它），
+            #   这里只需把它**复制**进启动文件夹；不再重复调用 PowerShell 建一遍。
+            _copied = False
+            if has_lnk:
+                try:
+                    shutil.copyfile(lnk, _startup_folder_lnk())
+                    _copied = True
+                except OSError:
+                    _copied = False
+            if _copied:
                 autostart = "startup-lnk"
-                _retire_old_startup_cmd()   # 旧 .cmd 归档（并存会多闪一次窗）
-            else:
+                _archive_legacy_startup()   # 旧 `.cmd` 归档（并存会多闪一次窗）
+            elif shim:
                 try:
                     shutil.copyfile(shim, _startup_folder_cmd())
                     autostart = "startup-folder"
                 except OSError:
                     autostart = "none"
+            else:
+                autostart = "none"
         # 0.28.1（死因 RC3）：哨兵由 spawn_sentinel 拉起——脱离会话/作业对象，
         # 会话结束不再连带被杀；失败也如实上报（不再无条件宣布成功）。
         # 幂等：哨兵已在岗则不重复拉起（重复拉起会立刻被唯一性守卫退出，

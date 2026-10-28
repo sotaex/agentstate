@@ -8,6 +8,11 @@
 import json, os, subprocess, shutil, hashlib, sys, tempfile
 from datetime import datetime
 
+# 0.60.0：起子进程一律带 CREATE_NO_WINDOW —— 父进程可能是**无控制台**的
+# pythonw（钩子）／DETACHED（哨兵）／GUI 宿主 ⇒ 不带就会给子进程新建控制台
+# ＝ 用户看到黑窗一闪。本文件不 import host_shield，就地定义同一常量。
+_CNW = 0x08000000 if os.name == "nt" else 0
+
 PKG = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # 仓库根
 PY = sys.executable
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -40,7 +45,7 @@ blocked = 0
 for tool, ti in EVENTS:
     ev = {"session_id": "challenge", "transcript_path": "", "tool_name": tool, "tool_input": ti}
     p = subprocess.run([PY, os.path.join(PKG, "hooks", "pre_tool_use.py")],
-                       cwd=proj, input=json.dumps(ev).encode(), capture_output=True, timeout=60)
+                       cwd=proj, input=json.dumps(ev).encode(), capture_output=True, timeout=60, creationflags=_CNW)
     if p.returncode == 2:
         blocked += 1
 

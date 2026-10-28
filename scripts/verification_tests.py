@@ -153,6 +153,12 @@ os.environ["HOME"] = str(_HOST_ISO)
 os.environ["ANTINEL_HUB_DIR"] = str(_HOST_ISO / ".antinel")
 os.environ["ANTINEL_SHIELD_NOTIFY"] = "0"
 os.environ["ANTINEL_SHIELD_MIRROR"] = "0"
+# ★★ 0.60.0：判据运行时关掉规则自愈。
+#   本文件大量夹具是「造一份旧规则 / 特定规则的安装态，再断言钩子的判定」。
+#   0.60.0 起钩子加载前会**自动把项目副本刷成包内那一版** ⇒ 夹具的输入被改掉，
+#   断言的不再是它自己设定的那套规则。判据要测的是「给定规则下的判定」，
+#   自愈本身由 `ci/inbox_guards_0517.py` 的 RF-60 族用关闭阀显式打开来测。
+os.environ["ANTINEL_NO_AUTO_RULES"] = "1"
 # 0.28.2: 套件运行期间关闭门闸气泡（F-15 在摘除开关的沙箱里单独断言）
 PY = sys.executable
 

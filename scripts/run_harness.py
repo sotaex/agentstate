@@ -17,6 +17,11 @@ import atexit, hashlib, json, os, platform, re, shutil, subprocess, sys, tempfil
 from datetime import datetime, timezone
 from pathlib import Path
 
+# 0.60.0：起子进程一律带 CREATE_NO_WINDOW —— 父进程可能是**无控制台**的
+# pythonw（钩子）／DETACHED（哨兵）／GUI 宿主 ⇒ 不带就会给子进程新建控制台
+# ＝ 用户看到黑窗一闪。本文件不 import host_shield，就地定义同一常量。
+_CNW = 0x08000000 if os.name == "nt" else 0
+
 PKG = Path(__file__).resolve().parent.parent      # run_harness lives in <pkg>/scripts/
 
 # ★★★ 0.39.2：版本行归一化 —— **唯一真源在 host_shield.py**，这里 import 它。
@@ -215,7 +220,7 @@ def repo_identity():
     namespace the builder wrote into psl/manifest.json, else None."""
     try:
         out = subprocess.run(["git", "remote", "get-url", "origin"], cwd=str(PKG),
-                             capture_output=True, text=True, timeout=5)
+                             capture_output=True, text=True, timeout=5, creationflags=_CNW)
         url = (out.stdout or "").strip()
         m = re.search(r"[:/]([\w.-]+)/([\w.-]+?)(?:\.git)?$", url)
         if m:
@@ -333,7 +338,7 @@ def main():
     env["ANTINEL_RESULTS"] = os.path.join(work, "last_results.json")
     t0 = time.time(); started = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     proc = subprocess.run([sys.executable, str(PKG / "scripts" / "verification_tests.py")],
-                          capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
+                          capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, creationflags=_CNW)
     res = Path(work) / "last_results.json"
     # CI 调试转储（ANTINEL_DEBUG_CI=1 时）：把套件输出与结构化结果留到仓内
     # psl/ci_debug/，让无日志权限的第三方也能定位失败。默认关。

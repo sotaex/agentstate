@@ -2034,9 +2034,17 @@ def j_lock_failures_leave_trace():
         吞掉，于是「锁永远偷不掉、每次调用都白等一整份预算」零痕迹；
       · `release_err` 只走 `tlog()`，而 `tlog` 要 `ANTINEL_LOCK_TELEMETRY=1` 才写。
 
+    ★ 0.60.0 机制变更（**施压点跟着变，不变量不变**）：
+      释放/偷锁不再「删除」，改「改名让开」（`retire_file` → `os.replace`）——
+      删除会经宿主垫片走回收站、拉起控制台程序 `node.exe` ⇒ 闪黑窗。
+      于是失败点从「删不掉」变成「改名让不开」。本判据要守的**不变量**仍是
+      「失败必须留一行用户可见的痕」，所以注入**两侧都打**：
+      `os.remove` 与 `os.replace` 同时抛错 —— 这样无论实现走哪条路都必然失败，
+      判据**不耦合实现选哪条路**（耦合了就等于「按实现现状抄期望值」）。
+
     三腿：
-      ① `release_err`：token 匹配但删不掉 ⇒ `lock_events.jsonl` 里必须有；
-      ② `steal_err`：锁老、持有者已死、删不掉 ⇒ 必须有；
+      ① `release_err`：token 匹配但让不开 ⇒ `lock_events.jsonl` 里必须有；
+      ② `steal_err`：锁老、持有者已死、让不开 ⇒ 必须有；
       ③ 对照：不注入失败时**不许**出现这两类事件（否则「写就响」，读数没意义）。
     """
     import tempfile
@@ -2077,11 +2085,15 @@ def j_lock_failures_leave_trace():
         with open(lock1, "w", encoding="utf-8") as fh:
             fh.write(json.dumps({"pid": os.getpid(), "ts": time.time(),
                                  "token": ac.LOCK_TOKEN}))
-        with mock.patch("os.remove", side_effect=PermissionError("guard")):
+        # ★ 两侧都打：0.60.0 起释放/偷锁改走 `os.replace`（改名让开）。
+        #   只打 `os.remove` 会「施压点落空 ⇒ 永不失败 ⇒ 判据恒红」，
+        #   那正是本判据 0.60.0 第一次跑红的原因（D-44 红项：事件实际是 []）。
+        with mock.patch("os.remove", side_effect=PermissionError("guard")), \
+                mock.patch("os.replace", side_effect=PermissionError("guard")):
             ac.release_lock(lock1)
         ev1 = [e.get("evt") for e in _events(d1)]
         if "release_err" not in ev1:
-            return False, ("① 锁删不掉（宿主删除守卫）却没有 release_err —— "
+            return False, ("① 锁让不开（宿主删除守卫）却没有 release_err —— "
                            "事件实际是 %r；症状将是「之后每次都白等预算」而界面零痕迹"
                            % (ev1,))
 
@@ -2096,11 +2108,12 @@ def j_lock_failures_leave_trace():
         os.utime(lock2, (old_time, old_time))
         if old_budget is not None:
             ac.LOCK_BUDGET_S = 0.2
-        with mock.patch("os.remove", side_effect=PermissionError("guard")):
+        with mock.patch("os.remove", side_effect=PermissionError("guard")), \
+                mock.patch("os.replace", side_effect=PermissionError("guard")):
             ac.acquire_lock(fn2)
         ev2 = [e.get("evt") for e in _events(d2)]
         if "steal_err" not in ev2:
-            return False, ("② 死锁删不掉却没有 steal_err —— 事件实际是 %r；"
+            return False, ("② 死锁让不开却没有 steal_err —— 事件实际是 %r；"
                            "原实现把留痕写在 remove 之后，正好被吞在这里" % (ev2,))
         # 留痕 ≠ 刷屏：删不掉的锁会在整个预算里反复重试，逐次记会把 1MB 的
         # lock_events.jsonl 填满，于是「真信号」被自己的噪音淹掉。

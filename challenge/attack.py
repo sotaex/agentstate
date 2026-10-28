@@ -9,6 +9,11 @@
 import hashlib
 import json
 import os
+
+# 0.60.0：起子进程一律带 CREATE_NO_WINDOW —— 父进程可能是**无控制台**的
+# pythonw（钩子）／DETACHED（哨兵）／GUI 宿主 ⇒ 不带就会给子进程新建控制台
+# ＝ 用户看到黑窗一闪。本文件若不走 host_shield，就地定义同一常量。
+_CNW = 0x08000000 if os.name == "nt" else 0
 import subprocess
 import sys
 
@@ -92,12 +97,12 @@ def main():
             print(f"  已在 L{pos+1} 插入伪造记录")
         elif c == "4":
             print(f"  记事本打开: {fn}")
-            subprocess.run(["notepad", fn])
+            subprocess.run(["notepad", fn], creationflags=_CNW)
             lines = [l for l in open(fn, encoding="utf-8").read().splitlines() if l.strip()]
         elif c == "5":
             save_chain(fn, lines)
             print("\n  ⚖️  审判开始...\n")
-            subprocess.run([sys.executable, VERIFY, CHAIN_DIR])
+            subprocess.run([sys.executable, VERIFY, CHAIN_DIR], creationflags=_CNW)
             break
         elif c == "0":
             save_chain(fn, lines)

@@ -13,14 +13,14 @@ description: >
 license: Apache-2.0
 compatibility: Requires Python 3.10+; standard library only; no network access; no third-party packages. Hooks verified on Claude Code and ZCode (identical protocol); Qoder/TRAE profiles declared but unverified.
 metadata:
-  psl-verified: "false"
+  psl-verified: "true"
   psl-verified-spec: "psl-vs-0.1"
-  psl-verified-at: ""
-  psl-verified-evidence: "NOT VERIFIED for this build: 3/21 digests DO NOT match this build -- antinel.py: 63dc84d30ac7 != recorded 433f5e51ac73; hooks/pre_tool_use.py: 83bdbdb166d3 != recorded c360331b1d9b; rules/default.json: db880c3fd136 != recorded 371eea6d1b92"
+  psl-verified-at: "2026-10-28T10:41:03+0800"
+  psl-verified-evidence: "live PreToolUse block of a real .env read in ZCode (SEC-01) plus a full-assertion judgment run; digest check 21/21 digests match this build (assertions 325/325)"
   psl-verifier: "scripts/run_harness.py"
   antinel-product: "security-audit"
   antinel-tier: "free"
-  antinel-version: "0.59.0"
+  antinel-version: "0.60.0"
   psl-token-interception: "false"
 ---
 

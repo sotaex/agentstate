@@ -63,8 +63,13 @@ _BREACH_FORCE_N = 5                     # 窗内第 N 条起=拉锯：critical+�
 #   一直冒泡」）。改为**状态转变时留痕**，持续期最多每 24h 再提醒一次（不隐藏，只降噪）。
 _TASK_MISSING_REANNOUNCE = 86400
 # Windows creationflags: DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB
-_SPAWN_FLAGS = 0x00000008 | 0x00000200 | 0x01000000
-_SPAWN_FLAGS_NO_BREAKAWAY = 0x00000008 | 0x00000200
+# ★ 0.60.0：补上 `CREATE_NO_WINDOW`（0x08000000）。`DETACHED_PROCESS` 单独用时
+#   本来就不建控制台，这一位是**冗余保险** —— 但它是可判定的那一位：
+#   静态判据只能问「这个值里有没有 CREATE_NO_WINDOW」，问不出「DETACHED 是否足够」。
+#   留一个"靠语义正确而不是靠某一位"的调用点，等于给后来人示范可以省掉那一位
+#   （本仓 0.35.3 就是这么闪回来的）。同 `inbox_server._SPAWN_SEP` 保持同形。
+_SPAWN_FLAGS = 0x00000008 | 0x00000200 | 0x01000000 | 0x08000000
+_SPAWN_FLAGS_NO_BREAKAWAY = 0x00000008 | 0x00000200 | 0x08000000
 # ★★ 0.35.3（创始人报障：窗口不停弹出又马上关掉）：哨兵自己由 DETACHED_PROCESS
 #   拉起 ⇒ **没有控制台**。它再去起**控制台程序**（icacls/taskkill/schtasks/
 #   netstat/tasklist/powershell）时，若不显式 `CREATE_NO_WINDOW`，Windows 会为子
@@ -2483,6 +2488,470 @@ def rules_drift_lines(root, package_rules=None):
     return [head] + tail
 
 
+# ────────────────── 规则副本随包自愈（0.60.0，创始人 2026-10-27 裁定）────────
+#
+# 创始人原话：「既然系统更新，那肯定是全面更新，包括规则的更新，你说呢。」
+#
+# 此前的事实（本仓实测，不是推演）：`pip install -U` 只换包，不跑 install
+# ⇒ 钩子读的 `<root>/.psl/rules/default.json` 永久停在首次安装那一版。
+# 本仓在 0.59.0 发布后，包内是 0.59.0、项目副本仍是 0.58.0 —— 也就是说
+# **一个版本区间里的全部规则修正，在这台机器上一条都没生效**，而两侧都自认正常。
+# 0.57.0 只做到「说出来」（rules_drift_lines），0.57.2 只做到「给个手敲的修法」；
+# 一个需要用户先知道、再记得、再去敲的修法，在机制上等于没有。
+#
+# 所以这里把「包一换，规则就跟着换」做成**自动动作**，三条纪律：
+#   ① **只前进不后退**：项目副本 version ≥ 包内 ⇒ 一个字都不写（`ahead` 也不写）。
+#   ② **不销毁篡改证据**：副本的实算哈希与 manifest 登记值不符 ⇒ 视为「有人改过」，
+#      **不覆盖**，只留一条 `rules_auto_refresh_skipped` 并交给 A4 判 SELF-TAMPERED。
+#      自动覆盖一份被改过的防护依据，等于把证据连同问题一起抹掉 —— 比不修更坏。
+#   ③ **副本与 rules_hash 同时更新**：只换文件不换 hash ⇒ 立刻判 SELF-TAMPERED
+#      并退回内嵌兜底集（比不修更坏）。所以两者必须同一笔动作里落盘。
+
+def _write_bytes_atomic(path, data):
+    """同目录临时文件 + `os.replace` 原子落盘（读方永远看不到半个文件）。"""
+    path = os.path.abspath(path)
+    d = os.path.dirname(path)
+    if d and not os.path.isdir(d):
+        os.makedirs(d, exist_ok=True)
+    tmp = os.path.join(d, ".%s.tmp-%d" % (os.path.basename(path), os.getpid()))
+    with open(tmp, "wb") as f:
+        f.write(data)
+        f.flush()
+        try:
+            os.fsync(f.fileno())
+        except Exception:                                      # noqa: BLE001
+            pass
+    os.replace(tmp, path)
+
+
+def _sha256_of(path):
+    try:
+        with open(path, "rb") as f:
+            return "sha256:" + hashlib.sha256(f.read()).hexdigest()
+    except Exception:                                          # noqa: BLE001
+        return None
+
+
+def audit_append(root, rec, mirror_dirs=None):
+    """把一条记录写进项目链 ＋ 宿主级镜像。返回 `(写成功的文件, 首个错误)`。
+
+    ★ **唯一实现**：`scripts/install.py` 的卸载路径与 `--refresh-rules` 都走这里，
+      规则自愈（`ensure_rules_current`）也走这里 —— 三处各写一遍「8 行链追加」
+      正是本仓第一顽症。0.57.2 那次事故就是活标本：写刷新函数时调了一个
+      **不存在的函数**，异常被 `except: pass` 吃掉，屏幕上照样印「已写进审计链」。
+    ★ 项目链用 `append_chained`（带哈希链），镜像用 `append_locked`
+      （跨目录单副本，不参与本项目链），与卸载路径原写法逐字一致。
+    """
+    wrote, err = [], None
+    try:
+        try:
+            import audit_chain as _acm
+        except ImportError:
+            _ensure_pkg_on_path()
+            import audit_chain as _acm
+    except Exception as e:                                     # noqa: BLE001
+        return wrote, repr(e)
+    day = datetime.now().strftime("%Y-%m-%d")
+    proj_audit = os.path.join(str(root), ".psl", "audit")
+    if os.path.isdir(proj_audit):
+        fn = os.path.join(proj_audit, day + ".jsonl")
+        try:
+            _acm.append_chained(fn, rec)
+            _acm.touch_day_manifest(fn)
+            wrote.append(fn)
+        except Exception as e:                                 # noqa: BLE001
+            err = err or repr(e)
+    dirs = mirror_dirs
+    if dirs is None:
+        dirs = [_mirror_dir()]
+    for md in dirs:
+        try:
+            md = str(md)
+            os.makedirs(md, exist_ok=True)
+            fn = os.path.join(md, day + ".jsonl")
+            _acm.append_locked(fn, json.dumps(rec, ensure_ascii=False) + "\n")
+            _acm.touch_day_manifest(fn)
+            wrote.append(fn)
+        except Exception as e:                                 # noqa: BLE001
+            err = err or repr(e)
+    return wrote, err
+
+
+def _manifest_base(root):
+    """解析「这套安装的 manifest 在哪」。返回 `(manifest_path, base_dir)` 或 `(None, None)`。"""
+    bases = [root] if root else [os.getcwd(), os.path.dirname(os.getcwd())]
+    for base in bases:
+        if not base:
+            continue
+        mp = os.path.join(base, ".psl", "manifest.json")
+        if os.path.isfile(mp):
+            return mp, base
+    return None, None
+
+
+def ensure_rules_current(root=None, package_rules=None, force=False):
+    """把项目规则副本升到包内这一版。返回 dict（**不抛异常**）。
+
+    `force=True` 表示「**人明确要求的**」（CLI `--refresh-rules`）：这时无视
+    `ANTINEL_NO_AUTO_RULES` 关闭阀。★ 阀门的语义是"**自动**自愈别动"——
+    判据跑夹具时靠它保住自己设定的规则（否则钩子一跑就把夹具刷成包内版）；
+    而用户手敲 `--refresh-rules` 是显式意志，不该被一个给自动化用的开关挡住。
+
+    `action` 取值与含义：
+      `no_project`  这个目录没安装过（没有 manifest）—— 什么都不做
+      `current`     副本已是包内这一版 —— 一个字都不写
+      `ahead`       副本比包还新（有人手工装过更新的）—— 不倒退，不写
+      `disabled`    `ANTINEL_NO_AUTO_RULES=1` 且 `force=False`（套件沙箱用）
+      `modified`    副本被改过（哈希 ≠ manifest 登记值）—— **不覆盖**，只留痕
+      `refreshed`   已刷到包内这一版（副本与 rules_hash 同一笔落盘，已留痕）
+      `error`       读不出 / 写不进，`error` 里带原因
+
+    ★ 调用点（同一实现，三个入口）：`hooks/pre_tool_use.load_rules()`（用户一用就补齐）、
+      守护进程的周期 tick（没人用工具时也会补齐）、`install --refresh-rules`（显式）。
+    ★ 幂等且廉价：正常路径只读两个 JSON 的 `version` 字段，不写任何文件。
+    """
+    if os.environ.get("ANTINEL_NO_AUTO_RULES") == "1" and not force:
+        return {"action": "disabled"}
+    man_path, base = _manifest_base(root)
+    if not man_path:
+        return {"action": "no_project"}
+    try:
+        with open(man_path, encoding="utf-8") as f:
+            man = json.load(f) or {}
+    except Exception as e:                                     # noqa: BLE001
+        return {"action": "error", "error": "manifest: %s: %s" % (type(e).__name__, e)}
+    rf = man.get("rules_file")
+    if not rf:
+        return {"action": "no_project"}
+    proj = rf if os.path.isabs(str(rf)) else os.path.join(base, str(rf))
+    pkg = package_rules or package_rules_path()
+    if not os.path.isfile(pkg):
+        return {"action": "error", "error": "包内规则文件找不到：%s" % pkg}
+
+    kv = _rules_version(pkg)
+    if not kv:
+        return {"action": "error", "error": "包内规则文件没有 version 字段：%s" % pkg}
+    pv = _rules_version(proj) if os.path.isfile(proj) else None
+
+    if pv and _ver_key(pv) > _ver_key(kv):
+        return {"action": "ahead", "from": pv, "to": kv, "path": proj}
+    if pv and _ver_key(pv) == _ver_key(kv):
+        return {"action": "current", "from": pv, "to": kv, "path": proj}
+
+    # 到这里：副本缺失，或副本版本低于包内 ⇒ 该刷。
+    new_hash = _sha256_of(pkg)
+    old_hash = _sha256_of(proj) if os.path.isfile(proj) else None
+    if not new_hash:
+        return {"action": "error", "error": "包内规则读不出：%s" % pkg}
+
+    # 纪律②：被改过就不覆盖（哈希与登记值不符 = 有人动过这份防护依据）。
+    recorded = man.get("rules_hash")
+    if old_hash and recorded and old_hash != recorded:
+        rec = {
+            "ts": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "type": "rules_auto_refresh_skipped", "tool": "-",
+            "session": "auto", "rule_id": "A4", "decision": "config_skip",
+            "severity": "critical", "action": "alert",
+            "reason": "project rules snapshot was modified by hand; NOT overwritten "
+                      "automatically (tamper evidence preserved for A4)",
+            "rules_file": proj, "version_from": pv or "(unreadable)", "version_to": kv,
+            "hash_from": old_hash, "hash_to": new_hash, "expected": recorded,
+            "auto": True,
+        }
+        audit_append(base, rec)
+        return {"action": "modified", "from": pv or "(unreadable)", "to": kv,
+                "path": proj}
+
+    try:
+        with open(pkg, "rb") as f:
+            raw = f.read()
+        _write_bytes_atomic(proj, raw)
+    except Exception as e:                                     # noqa: BLE001
+        return {"action": "error", "error": "写规则副本失败：%s: %s" % (type(e).__name__, e)}
+    if _sha256_of(proj) != new_hash:
+        return {"action": "error", "error": "规则副本回读哈希不符（写入未生效）"}
+
+    # 纪律③：副本与 rules_hash 同一笔动作里落盘，否则下一跳立刻判 SELF-TAMPERED。
+    try:
+        man["rules_hash"] = new_hash
+        man["skill_version"] = kv
+        man["rules_refreshed_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+        man["rules_auto_refreshed_from"] = pv or ""
+        _write_bytes_atomic(man_path,
+                            json.dumps(man, ensure_ascii=False, indent=2).encode("utf-8"))
+    except Exception as e:                                     # noqa: BLE001
+        # 文件换了、hash 没登记 ⇒ 必须说清楚：这是**退一步**的状态（会被判篡改），
+        # 不能报成 refreshed。
+        return {"action": "error",
+                "error": "规则副本已换；manifest 未写入（%s），下次判篡改"
+                         % type(e).__name__, "path": proj, "hash": new_hash}
+
+    rec = {
+        "ts": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "type": "rules_snapshot_refreshed", "tool": "-", "session": "auto",
+        "rule_id": "A4", "decision": "config_refresh", "severity": "info",
+        "action": "allow",
+        "reason": "project rules snapshot auto-refreshed to the package version "
+                  "(package upgrade carries rule updates)",
+        "rules_file": proj, "version_from": pv or "(none)", "version_to": kv,
+        "hash_from": old_hash or "(none)", "hash_to": new_hash, "auto": True,
+    }
+    wrote, err = audit_append(base, rec)
+    return {"action": "refreshed", "from": pv or "(none)", "to": kv, "path": proj,
+            "hash": new_hash, "trail": wrote, "trail_error": err}
+
+
+# ------------------------------------ 0.60.0：无窗口自启（消灭 .cmd 那条闪窗路）----
+# ★ 根因（与「钩子用 python.exe」是同一个根因的另一个出口）：
+#   会不会闪，取决于**谁来执行它**。`.cmd` 只能由 cmd.exe 执行，而 cmd.exe 是
+#   **控制台子系统**程序；计划任务与启动文件夹的父进程都**没有控制台**
+#   ⇒ Windows 给 cmd.exe 新建一个控制台 ⇒ 用户看到黑窗闪一下。
+#   ⇒ 自启本体必须是 `.lnk → pythonw.exe`（GUI 子系统，全程无 conhost）。
+# ★ 为什么这三件事收在 host_shield：`antinel.py`（enable/disable）与哨兵
+#   （升级后自动修）**必须用同一份实现** —— 否则又是"同一事实两处副本"，
+#   而这次副本的代价是"改了一处、另一处照旧闪窗"。
+
+def neutral_autostart_lnk():
+    """自启 `.lnk` 的中立落点：`<hub>/antinel-shield.lnk`（**唯一实现**）。
+
+    ★ 为什么不直接放启动文件夹：`schtasks` 与「启动文件夹」两条注册路径必须指向
+      **同一件东西**；放在启动文件夹里当 schtasks 成功时会**双份拉起**。
+      落点在中立目录，需要启动文件夹时再复制过去。
+    """
+    return os.path.join(_hub_dir(), "antinel-shield.lnk")
+
+
+def startup_folder_dir():
+    """当前用户的「启动」文件夹（取不到返回空串）。"""
+    appdata = os.environ.get("APPDATA") or os.path.join(
+        os.path.expanduser("~"), "AppData", "Roaming")
+    return os.path.join(appdata, "Microsoft", "Windows", "Start Menu",
+                        "Programs", "Startup")
+
+
+def pythonw_exe():
+    """与当前解释器同目录的 **pythonw.exe**（GUI 子系统，不分配控制台）。"""
+    exe = sys.executable or ""
+    d, _b = os.path.split(exe)
+    w = os.path.join(d, "pythonw.exe")
+    return w if os.path.isfile(w) else exe
+
+
+#: 宿主通过这两条环境变量把自己的 **sitecustomize 删除垫片**塞进子解释器。
+#: 实测值（本机 2026-10-28）：
+#:   `PYTHONPATH=D:\Application\WB\CN\resources\app.asar.unpacked\cli\vendor\shim`
+#: 该目录里有一份 `sitecustomize.py`，它把 `os.remove`/`shutil.rmtree` 改写成
+#: 「走回收站」，而回收站那条链路会起 `node.exe ... safe-delete-*.cjs`。
+#:
+#: ★★ 为什么长期进程必须把它剥掉（这是**黑窗**的机制级修法，不是洁癖）：
+#:   `node.exe` 是**控制台子系统**程序，那个 `Popen` 在宿主的垫片里、不带
+#:   `CREATE_NO_WINDOW`；而我们的守护进程／哨兵／监理服务都是**无控制台**父进程
+#:   ⇒ Windows 必须给 node 新建一个控制台 ⇒ Windows Terminal 弹窗一闪。
+#:   实测取证（output/_catch_console_0600.jsonl）：守护进程每轮删两个目标
+#:   （`notify_state.json.lock`、`console/daemon.pid`）⇒ 每轮两次 node 出生
+#:   ⇒ 用户每分钟看见两次黑窗。
+#:   剥掉之后删除回到普通 `os.remove`：无 node、无回收站、无窗。
+#: ★ 为什么不是「改那个 Popen 的 flags」：那行代码在宿主 app.asar 里，不归我们改；
+#:   我们能控制的是**自己起进程时传什么环境**。
+#: ★ 副作用是**正向**的：垫片在锁文件被占住时会 fail-closed
+#:   （实测 `[safe-delete][SAFE_DELETE_FAIL_CLOSED] ... trash-failed`），
+#:   正是「锁永远偷不掉」的帮凶之一。剥掉之后偷锁能真的成功。
+#: 长期子进程必须剥掉的环境变量。
+#: ★ 前三条是**垫片注入路径**（`sitecustomize` 靠 PYTHONPATH 才能被 import）。
+#: ★ 后两条是守卫自己的**门**：垫片里 `_check_bulk_delete_guard()` 开头就是
+#:   `if not STATE_DIR or not TOOL_CALL_ID: return` —— 也就是说，只要这两条还在，
+#:   哪怕垫片被换了注入方式，长期进程仍然会替一次早已结束的工具调用去"查守卫"。
+#:   一个常驻进程声称自己是某次工具调用，本来就是错的：它比那次调用活得久。
+#: ★ 刻意**不动** `CODEBUDDY_CONFIG_DIR`／`CODEBUDDY_SESSION_ID`：宿主动探
+#:   （`_host_detect.py`）要靠它认宿主，剥掉会把"认得出宿主"这件事一起弄坏。
+_HOST_SHIM_ENV_KEYS = ("PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME",
+                       "CODEBUDDY_TOOL_CALL_ID",
+                       "CODEBUDDY_SAFE_DELETE_BULK_STATE_DIR")
+
+
+def child_env(base=None):
+    """起**长期子进程**用的环境：剥掉宿主的 sitecustomize 垫片注入。
+
+    `base` 只给判据／测试用（要能钉住输入，不去读本进程的真实环境）。
+    返回的是**新字典**，改它不影响本进程。
+    """
+    env = dict(os.environ if base is None else base)
+    for k in _HOST_SHIM_ENV_KEYS:
+        env.pop(k, None)
+    return env
+
+
+def create_autostart_lnk(lnk_path, script=None, root=None, icon=None,
+                         min_window=False):
+    """建自启 `.lnk`（PowerShell + WScript.Shell，Windows 自带，不装依赖）。
+
+    `min_window=True` 时把 `WindowStyle` 设成 7（最小化）—— 用于**必须**看见
+    一个窗口的极端兜底（pythonw 也不可用时）；正常路径不需要它。
+    返回 True/False，**不抛异常**。
+    """
+    hsp = script or os.path.abspath(__file__)
+    rt = root or os.path.dirname(hsp)
+    pyw = pythonw_exe()
+    if not (pyw and os.path.isfile(hsp)):
+        return False
+    args = '-I -S "%s" sentinel "%s"' % (hsp, rt)
+    ps = ("$w=New-Object -ComObject WScript.Shell;"
+          "$s=$w.CreateShortcut('%s');"
+          "$s.TargetPath='%s';$s.Arguments='%s';$s.WorkingDirectory='%s';"
+          "$s.Description='Antinel 监理 登录自启';"
+          % (os.path.abspath(lnk_path), pyw, args, rt))
+    if icon:
+        ps += "$s.IconLocation='%s';" % icon
+    if min_window:
+        ps += "$s.WindowStyle=7;"
+    ps += "$s.Save()"
+    try:
+        r = subprocess.run([_POWERSHELL, "-NoProfile", "-NonInteractive",
+                            "-ExecutionPolicy", "Bypass", "-Command", ps],
+                           capture_output=True, timeout=30,
+                           creationflags=_CREATE_NO_WINDOW)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0 and os.path.isfile(lnk_path)
+
+
+def archive_legacy_startup():
+    """把「启动」文件夹里所有**旧自启件**搬到 `<hub>/archive/`（改名不删）。
+
+    搬三类：`antinel-shield.cmd`（活的 `.cmd` 必闪）／`*.cmd.away-*`／
+    `*.lnk.away-*`。**活的 `.lnk` 不动**（它就是现在要用的那个）。
+    返回被搬走的路径列表（**不抛异常**）。
+    """
+    src_dir = startup_folder_dir()
+    dst_dir = os.path.join(_hub_dir(), "archive")
+    moved = []
+    try:
+        names = os.listdir(src_dir)
+    except OSError:
+        return moved
+    for n in names:
+        low = n.lower()
+        if not low.startswith("antinel-shield"):
+            continue
+        alive_lnk = low.endswith(".lnk") and ".away-" not in low
+        if alive_lnk:
+            continue
+        if not (low.endswith(".cmd") or ".away-" in low):
+            continue
+        dst = os.path.join(dst_dir, "%s.%s"
+                           % (n, datetime.now().strftime("%Y%m%d%H%M%S")))
+        try:
+            os.makedirs(dst_dir, exist_ok=True)
+            os.replace(os.path.join(src_dir, n), dst)
+        except OSError:
+            continue
+        moved.append(dst)
+    return moved
+
+
+def _task_command_line():
+    """读计划任务 AntinelHostShield 的 XML。
+
+    返回 `(xml, why)`：
+      · `xml` 是字符串（可能是**空串**）—— 空串＝**确定没有这个任务**
+      · `xml is None` ＝**查不了**（schtasks 被策略拦/起不来）⇒ 调用方必须报
+        `unverifiable`，**不许**把"查不了"当成"没事"（那是本仓最常见的假绿形状）。
+    """
+    try:
+        r = subprocess.run([_SCHTASKS, "/Query", "/TN", "AntinelHostShield", "/XML"],
+                           capture_output=True, timeout=20,
+                           creationflags=_CREATE_NO_WINDOW)
+    except (OSError, subprocess.SubprocessError) as e:          # noqa: BLE001
+        return None, "schtasks 起不来：%s" % type(e).__name__
+    if r.returncode != 0:
+        return "", "任务不存在（rc=%d）" % r.returncode
+    return (r.stdout or b"").decode("utf-8", "replace"), ""
+
+
+def ensure_autostart_quiet(root=None):
+    """一次性把「会闪窗的旧自启」换成无窗口 `.lnk`。返回 dict（**不抛异常**）。
+
+    为什么必须有这一步：`pip install -U` 不会跑 `install.py`，老用户机器上那条
+    `schtasks → antinel-shield.cmd` 会**一直保留** ⇒ 每次登录闪一次黑窗，
+    而新代码里的修法对**已经存在的任务**毫无作用（它不在我们的注册路径上）。
+    ⇒ 升级后第一次有哨兵起来时，把老任务改成指向 `.lnk`。
+
+    `action`：
+      `no_project`   这个目录没装过（没有 manifest）—— 什么都不做
+      `done`         本版本已经做过（`cached=True`，**只读一个 json**）
+      `repaired`     已修（可能同时搬走了旧件）
+      `nothing`      没有需要修的（无任务 / 任务不指向 .cmd）
+      `unverifiable` 查不到任务（schtasks 被策略拦 / 未注册）—— 如实记，不当成功
+      `error`        读写失败
+    ★ 幂等且廉价：正常路径只读一个 json（`<hub>/autostart_quiet.json`）。
+    """
+    man_path, base = _manifest_base(root)
+    if not man_path:
+        return {"action": "no_project"}
+    try:
+        with open(man_path, encoding="utf-8") as f:
+            man = json.load(f) or {}
+    except Exception as e:                                     # noqa: BLE001
+        return {"action": "error", "error": "manifest: %s" % type(e).__name__}
+    ver = str(man.get("skill_version") or "")
+    mk = os.path.join(_hub_dir(), "autostart_quiet.json")
+    try:
+        with open(mk, encoding="utf-8") as f:
+            done = json.load(f) or {}
+    except Exception:                                          # noqa: BLE001
+        done = {}
+    if ver and done.get("for_version") == ver:
+        return {"action": "done", "version": ver, "cached": True}
+
+    moved = archive_legacy_startup()
+    xml, why = _task_command_line()
+    fixed = False
+    if xml is None:
+        # **查不了**：不许报成"没事"。这一项是没验，不是通过。
+        out = {"action": "unverifiable", "version": ver, "moved": moved, "why": why}
+    elif ".cmd" not in xml.lower():
+        out = {"action": "repaired" if moved else "nothing",
+               "version": ver, "moved": moved, "task": "ok"}
+    else:
+        # 任务指着 `.cmd` ⇒ 登录必闪。改指中立 `.lnk`（pythonw）。
+        lnk = neutral_autostart_lnk()
+        ok = os.path.isfile(lnk) or create_autostart_lnk(lnk)
+        if not ok:
+            out = {"action": "error", "version": ver, "moved": moved,
+                   "error": "自启快捷方式建不出来（PowerShell 不可用）"}
+        else:
+            try:
+                r = subprocess.run([_SCHTASKS, "/Create", "/TN", "AntinelHostShield",
+                                    "/TR", '"%s"' % lnk, "/SC", "ONLOGON", "/F"],
+                                   capture_output=True, timeout=30,
+                                   creationflags=_CREATE_NO_WINDOW)
+                fixed = r.returncode == 0
+            except (OSError, subprocess.SubprocessError):      # noqa: BLE001
+                fixed = False
+            out = {"action": "repaired" if fixed else "error", "version": ver,
+                   "moved": moved, "task": "repointed" if fixed else "still .cmd",
+                   "lnk": lnk}
+    try:
+        os.makedirs(_hub_dir(), exist_ok=True)   # ★ 中枢目录可能还不存在
+        with open(mk, "w", encoding="utf-8") as f:
+            json.dump(out, f, ensure_ascii=False, indent=2)
+    except OSError:
+        pass                     # 标记写不进去 ⇒ 下拍重做一遍（幂等，无副作用）
+    if moved or fixed:
+        rec = {
+            "ts": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "type": "autostart_no_window_fixed", "tool": "-", "session": "auto",
+            "rule_id": "A4", "decision": "config_refresh", "severity": "info",
+            "action": "allow",
+            "reason": "legacy .cmd autostart replaced by a windowless .lnk "
+                      "(cmd.exe would allocate a console window at logon)",
+            "action_taken": out.get("action"), "moved_count": len(moved),
+            "task": out.get("task", "-"),
+        }
+        audit_append(base, rec)
+    return out
+
+
 def self_check():
     """0.28.3（B4e/B4f）：自身脚本与登记表对 psl/manifest.json 哈希。
     返回 (ok, problems)。
@@ -2963,7 +3432,20 @@ def spawn_sentinel(pkg_root, python_exe=None):
             return False, 0, "self-check-failed: " + "；".join(problems)[:120]
         print("[spawn] 研发态：自检不符属迭代产物，仍启动监理（%s）" % _dev_why,
               file=sys.stderr)
-    py = python_exe or sys.executable
+    # ★★ 0.60.0（2026-10-28 实测发现的**收敛缺口**，不是推演）：
+    #   原来写 `python_exe or sys.executable` —— 用的是**当前进程的解释器**。
+    #   后果是一条闭合的复发路径：
+    #     老的 `python.exe` 哨兵（0.59.0 之前起的）自愈时拉起新哨兵
+    #     ⇒ 新哨兵**还是** `python.exe` ⇒ 永远不收敛到无窗口。
+    #   本机实测正是这样：pid 121556 是 `python.exe -I -S host_shield.py
+    #   sentinel …`，启动于 10/27 14:04（0.59.0 时代），全机 `pythonw.exe`
+    #   个数 = 0。用户看到的现象是「改了也照样闪」，因为**没有一次重启换过解释器**。
+    #   ⇒ 一律以 `pythonw_exe()` 为首选（它自己会在找不到 pythonw 时退回本尊）；
+    #     显式传入 `python_exe` 的调用方仍然优先（判据/测试要能钉住解释器）。
+    #   ★ 为什么 pythonw 在这里是安全的：`Popen` 已把三条标准流都指向 DEVNULL，
+    #     所以 `sys.stderr` 不是 None，哨兵里那些 `print(..., file=sys.stderr)`
+    #     照常可用（`pythonw` 只有在**未重定向**时才会让 sys.stderr 为 None）。
+    py = python_exe or pythonw_exe()
     script = os.path.join(_pkg_root(), "host_shield.py")
     if not os.path.isfile(script):
         return False, 0, "script-missing"
@@ -2973,7 +3455,10 @@ def spawn_sentinel(pkg_root, python_exe=None):
         try:
             p = subprocess.Popen(argv, creationflags=flags,
                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                 stderr=subprocess.DEVNULL, close_fds=True)
+                                 stderr=subprocess.DEVNULL, close_fds=True,
+                                 # ★ 0.60.0：剥掉宿主垫片（见 `child_env()` 的说明）
+                                 #   —— 否则哨兵每一次删除都会拉起控制台程序 ⇒ 闪黑窗。
+                                 env=child_env())
             # ★ 0.40.0：只写这两个字段（读不到就一个字都不写）
             # ★ 0.45.0：返回值**不许忽略**（`_consume_state_write`；拒写已进链留痕）。
             _consume_state_write(update_state_fields(
@@ -4866,6 +5351,22 @@ def run_sentinel(root):
     _REG_TAMPER_LAST = [0.0]
     last_beat = 0.0                                 # monotonic（C5：不受系统时钟回拨影响）
     print("Antinel host-shield 监理已启动（宿主审计门闸）", flush=True)
+    # ★★ 0.60.0：升级后**自动修老自启**。为什么必须放在哨兵启动处：
+    #   `pip install -U` 不跑 `install.py`，老用户机器上那条
+    #   `schtasks → antinel-shield.cmd` 会**原样保留** ⇒ 每次登录闪一个黑窗，
+    #   而新代码只影响"以后再注册的"，管不到"已经存在的任务"。
+    #   哨兵是登录后必然会起来的那一个 ⇒ 它起来时顺手把老账修掉，按版本只做一次
+    #   （标记在 `<hub>/autostart_quiet.json`，正常路径只读一个 json）。
+    try:
+        _aq = ensure_autostart_quiet(root)
+        if _aq.get("action") in ("repaired", "error"):
+            print("自启无窗口修整：%s %s" % (_aq.get("action"),
+                                             _aq.get("error") or _aq.get("task") or ""),
+                  flush=True)
+    except Exception as _e:                                    # noqa: BLE001
+        # 不许静默吞：修整失败不能拦住哨兵（拦了就是"看不见窗口，但也没了保护"）。
+        print("!! 自启无窗口修整未完成（%s）：下次登录可能仍闪一个黑窗" % _e,
+              flush=True)
     while True:
         try:
             # ★★★ 0.58.1：这里**必须**用 strict 读，不许用 `load_state()`。

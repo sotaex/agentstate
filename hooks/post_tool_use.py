@@ -454,12 +454,27 @@ def _maybe_enforce_probe(event):
         # ★ 0.35.3：`creationflags` 显式写在调用里（不再塞进 `**kw`）——
         #   一是可 grep、二是静态守卫能看见（守卫按「起控制台程序必须带
         #   CREATE_NO_WINDOW/DETACHED_PROCESS」扫全部 subprocess 调用）。
-        _flags = (0x00000008 | 0x00000200) if os.name == "nt" else 0
+        # ★★ 0.60.0：补 `CREATE_NO_WINDOW`（0x08000000），并**剥掉宿主垫片**。
+        #   这一处原来只有 `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`。
+        #   为什么会闪：本钩子跑在**工具调用的环境**里（`PYTHONPATH` 指向宿主
+        #   `sitecustomize` 垫片），而 `enforce_probe.py` 会删东西 —— 垫片把删除
+        #   改写成「走回收站」，并起 `node.exe ... check`；`node.exe` 是**控制台
+        #   子系统**程序、那个 `Popen` 在宿主里不带 CREATE_NO_WINDOW ⇒ Windows
+        #   给它新建控制台 ⇒ 黑窗一闪。钩子是**每次工具调用都跑**的地方，
+        #   所以这一处就是"时不时闪一下"最稳定的来源之一。
+        #   剥环境是唯一在我们手里的杠杆（`host_shield.child_env()`）。
+        _flags = (0x00000008 | 0x00000200 | 0x08000000) if os.name == "nt" else 0
         _extra = {} if os.name == "nt" else {"start_new_session": True}
+        try:
+            import host_shield as _hs0
+            _env = _hs0.child_env()
+        except Exception:                                   # noqa: BLE001
+            _env = dict(os.environ)
+            _env.pop("PYTHONPATH", None)
         subprocess.Popen([sys.executable, script, "--root", root],
                          cwd=root, stdin=subprocess.DEVNULL,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         creationflags=_flags, **_extra)
+                         creationflags=_flags, env=_env, **_extra)
     except Exception:
         pass
 
