@@ -3694,6 +3694,194 @@ def n_t17():
     return True
 
 
+#: 折叠入口的每个问法 ⇔ 折叠区里**那一格**（`T-17e` 的尺子）。
+#: ★ 词表与 `ui_server._FOLD_ASK` 一一对应；未登记的问法直接判红
+#:   ——「新词没配判据」正是本仓反复栽的那个形状。
+#: ★★ 只查「应有那一格」是不够的：底下的逐字表里也有 `workspacePath`，
+#:    拿整段 HTML 去找字符串，逐字表会把「只列了 1 个目录」喂成绿。
+#:    ⇒ 每个问法只在**它自己那一格**里查（`_ask_pool`）。
+_ASK_KEY = {
+    "什么时候": "时间",
+    "多大": "多大",
+    "在哪": "目录",
+}
+
+#: 数字卡的两副形状：`>=2` 项排成格子，`1` 项退化成一行（见 `_evidence_html`）。
+_T17E_NUM = re.compile(
+    r"<div class='num'><div class='k'>([^<]*)</div><div class='v'>([^<]*)</div></div>")
+_T17E_ONE = re.compile(r"<div class='one'><b>([^<]*)</b>　([^<]*)</div>")
+_T17E_FILE = re.compile(r"<div class='muted small'>·([^<]*)</div>")
+#: 多目录时的整行清单（一个目录一条）—— 0.60.2 起多目录不再进窄格子。
+_T17E_DIR = re.compile(r"<div class='d'>([^<]*)</div>")
+
+#: 折叠区的入口：`<summary>细看：…</summary>` 到 `</details>` 之间。
+_T17E = re.compile(
+    r"<details class='fold'><summary>细看：([^<]*)</summary>(.*?)</details>", re.S)
+
+
+def _ask_pool(inner, word):
+    """把某一问在折叠区里的**答案**取出来（取不到就是空集）。"""
+    if word == "哪些文件":
+        return [m.group(1) for m in _T17E_FILE.finditer(inner)]
+    tiles = {}
+    for m in _T17E_NUM.finditer(inner):
+        tiles[m.group(1)] = m.group(2)
+    for m in _T17E_ONE.finditer(inner):
+        tiles[m.group(1)] = m.group(2)
+    key = _ASK_KEY.get(word)
+    pool = [v for k, v in tiles.items() if key and key in k]
+    if word == "在哪":          # 多个目录走整行清单，不在数字卡里
+        pool += [m.group(1) for m in _T17E_DIR.finditer(inner)]
+    return pool
+
+
+def _t17e_core(cards):
+    """标签承诺 ↔ 折叠区内容，逐项对账（正判据与负控同一入口）。
+
+    cards: list[(说明, 页面片段, {问法: [该问答案里必须出现的片段]})]
+
+    四条腿：
+      ① 不得出现「为什么」—— 这产品读工具写下的字段，读不到动机，
+         写上去就是一句永远兑不了的承诺；
+      ② 标签里每个问法，**它自己那一格**必须存在（问法未登记也判红）；
+      ③ 要求了片段而标签没问这一项 ⇒ 红（该问的没问）；
+      ④ 要求的每个片段必须出现在**那一格**里（守「N 个目录要列 N 个」）。
+    """
+    for name, page, need in cards:
+        m = _T17E.search(page or "")
+        if not m:
+            return ("%s：找不到「细看：…」折叠入口 —— 渲染形状变了，先核验量具"
+                    % name)
+        asks, inner = m.group(1), m.group(2)
+        if "为什么" in asks:
+            return ("%s：标签又写上了「为什么」—— 动机读不到，这一问原理上兑现不了"
+                    % name)
+        parts = [x.strip() for x in asks.split("、") if x.strip()]
+        if not parts:
+            return "%s：标签是空的（「细看：」后面没有内容）" % name
+        for a in parts:
+            if a not in _ASK_KEY and a != "哪些文件":
+                return ("%s：标签里出现未登记的问法「%s」—— 新词没配判据＝没牙"
+                        % (name, a))
+            if not _ask_pool(inner, a):
+                return ("%s：标签承诺了「%s」，折叠区里那一格是空的 —— 承诺落空"
+                        % (name, a))
+        for a, frags in (need or {}).items():
+            if a not in parts:
+                return ("%s：夹具要求核对「%s」，但标签没问这一项（该问的没问）"
+                        % (name, a))
+            pool = "；".join(_ask_pool(inner, a))
+            for frag in frags:
+                if frag not in pool:
+                    return ("%s：「%s」那一格里缺 %r —— 该列的没列全"
+                            % (name, a, frag))
+    return True
+
+
+@check("T-17e ★ 折叠标签只承诺折叠区里真有的东西")
+def t17e():
+    """创始人 2026-10-28 批语「细看：多大、在哪、为什么」——**标签本身要审**。
+
+    ★ 病（0.60.1 实测，本机 60 个工具里 4 条有证据的记录）：
+      写死的标签承诺三问，`多大` 兑现 1/4、`在哪` 兑现 1/4、`为什么` 两答皆空；
+      `.zcode` 4 个目录只报 1 个（136.7 MB，真值 310.2 MB，44%）；
+      两条 SENT（53／41 个文件）一个字段都没有 ⇒ 53 个文件名一条不列。
+    ★ 修法：标签**由渲染时真有的东西现算**，于是承诺与兑现同源。
+    ★ 为什么用合成夹具而不读本机数据：本机没有 PACK 记录时，靠真数据取样的
+      判据会静默空转（假绿第六族）。夹具走**真入口** `_evidence_html`。
+    """
+    import ui_server as _U
+    dirs = ["C:\\a\\one", "C:\\a\\two", "C:\\a\\three", "C:\\a\\four"]
+    det_pack = [{"file": d + "\\manifest.json", "items": [
+        {"kpath": "workspacesize", "value": 1048576 * (i + 1), "kind": "mark",
+         "ts_ms": 1700000000000, "ts_text": "2026-10-28 10:00"},
+        {"kpath": "workspacepath", "value": d, "kind": "mark",
+         "ts_ms": 1700000000000, "ts_text": "2026-10-28 10:00"}]}
+        for i, d in enumerate(dirs)]
+    pack = _U._evidence_html({"ev": [("C:\\a\\one\\manifest.json", "mark")]},
+                             det_pack, {}, {}, "PACK")
+
+    det_sent = [{"file": "C:\\b\\p\\install-%d.json.reported" % i, "items": [],
+                 "mtime_ms": 1700000000000, "mtime_text": "2026-10-28 10:00"}
+                for i in (1, 2)]
+    sent = _U._evidence_html({"ev": [("C:\\b\\p\\install-1.json.reported", "mark")]},
+                             det_sent, {}, {}, "SENT")
+
+    det_sync = [{"file": "C:\\c\\s.json", "items": [
+        {"kpath": "lastSyncedAt", "value": 1700000000000, "kind": "mark",
+         "ts_ms": 1700000000000, "ts_text": "2026-10-28 10:00"}]}]
+    sync = _U._evidence_html({"ev": [("C:\\c\\s.json", "mark")]},
+                             det_sync, {}, {}, "SYNC")
+
+    return _t17e_core([
+        # 4 块必须在「在哪」那一格里列 4 个目录，体量必须是**合计**（1+2+3+4＝10.0 MB）
+        ("PACK 四块", pack, {"在哪": dirs, "多大": ["10.0 MB"],
+                             "什么时候": ["2026-10-28 10:00"]}),
+        ("SENT 只写标记", sent,
+         {"哪些文件": ["install-1.json.reported", "install-2.json.reported"]}),
+        ("SYNC 单块", sync, {"什么时候": ["2026-10-28 10:00"]}),
+    ])
+
+
+@check("N-T17e 负控：标签多许一问／内容漏列／空标签 ⇒ T-17e 必须红")
+def n_t17e():
+    """**六喂全跑，不许短路**。
+
+    ★ 短路是本仓栽过的形状：`return` 在第一个红处，后面几喂从没执行过，
+      于是「负控通过」只证明了一条腿有牙，另外几条是死的。
+    """
+    import ui_server as _U
+    det_sync = [{"file": "C:\\c\\s.json", "items": [
+        {"kpath": "lastSyncedAt", "value": 1700000000000, "kind": "mark",
+         "ts_ms": 1700000000000, "ts_text": "2026-10-28 10:00"}]}]
+    sync = _U._evidence_html({"ev": [("C:\\c\\s.json", "mark")]},
+                             det_sync, {}, {}, "SYNC")
+    if _t17e_core([("合法 SYNC", sync, {"什么时候": ["2026-10-28 10:00"]})]) is not True:
+        return "负控方向异常：合法的 SYNC 卡被判红 —— 尺子误伤真实现"
+    if "<summary>细看：" not in sync:
+        return "负控自身失效：合成卡里找不到 `<summary>细看：`"
+
+    dirs = ["C:\\a\\one", "C:\\a\\two"]
+    det2 = [{"file": d + "\\manifest.json", "items": [
+        {"kpath": "workspacesize", "value": 1048576, "kind": "mark",
+         "ts_ms": 1700000000000, "ts_text": "2026-10-28 10:00"},
+        {"kpath": "workspacepath", "value": d, "kind": "mark",
+         "ts_ms": 1700000000000, "ts_text": "2026-10-28 10:00"}]}
+        for d in dirs]
+    pack = _U._evidence_html({"ev": [("C:\\a\\one\\manifest.json", "mark")]},
+                             det2, {}, {}, "PACK")
+    if "C:\\a\\two" not in pack:
+        return "负控自身失效：合成 PACK 卡里本来就没有第二个目录"
+    # 只把「在哪」那一格改成只列第一个目录（逐字表里仍有两个 ⇒ 这正是
+    # 「拿整段 HTML 找字符串会被逐字表喂饱」那个坑，必须仍判红）
+    p_only1 = re.sub(r"<div class='d'>C:\\a\\two</div>", "", pack)
+    if p_only1 == pack:
+        return "负控自身失效：合成 PACK 卡的目录清单里找不到第二个目录"
+
+    cases = [
+        # ① 标签写回「为什么」（动机读不到，永远兑不了）
+        ("标签加「为什么」", sync.replace("<summary>细看：", "<summary>细看：为什么、"), {}),
+        # ② 标签多承诺一项「多大」，而这张卡里没有体量
+        ("标签多许「多大」", sync.replace("<summary>细看：", "<summary>细看：多大、"), {}),
+        # ③ 未登记的问法（以后加新词忘了配判据）
+        ("用了没登记的问法", sync.replace("<summary>细看：", "<summary>细看：值多少钱、"), {}),
+        # ④ 空标签
+        ("标签是空的", re.sub(r"(<summary>细看：)[^<]*", r"\1", sync), {}),
+        # ⑤ 两个目录只列一个（逐字表里仍有两个 —— 查整段会绿，查那一格才红）
+        ("两个目录只列一个", p_only1, {"在哪": dirs}),
+        # ⑥ 该问的没问：夹具要核对「在哪」，标签里没有这一项
+        ("该问的没问", sync, {"在哪": dirs}),
+    ]
+    dead = []
+    for name, page, need in cases:
+        if _t17e_core([(name, page, need)]) is True:
+            dead.append(name)
+    if dead:
+        return "负控失效（这几喂没牙）：%s" % "／".join(dead)
+    return True
+
+
+
 def _voice_render_pages():
     """用户可见文案的**全部渲染入口**：监理五页 ＋ `antinel ui` 索引页（TPL）。
 

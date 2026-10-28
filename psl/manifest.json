@@ -1,8 +1,8 @@
 {
  "name": "antinel-security",
- "version": "0.60.0",
+ "version": "0.50.5",
  "psl_spec": "psl-vs-0.1",
- "built_at": "2026-10-28T10:20:24Z",
+ "built_at": "2026-10-28T14:55:44Z",
  "built_from": "D:\\psl\\poc\\antinel-security",
  "spec_document": "ANT-SEC-SPEC-001-FULL-R v1.1-R",
  "namespace": {
@@ -22,8 +22,8 @@
  "rules": "rules/default.json",
  "verification": "scripts/run_harness.py -> psl/judgment.json",
  "files": {
-  "antinel.py": "sha256:81fea07c88a967844eaec3dac38a37f9c3c400e6ef7286582e5ea39dd0927fe8",
-  "antinel_mcp.py": "sha256:d43e41e24b91d551e440376f26a50d7a9b95cb68e5f4003dacafb01fef26813e",
+  "antinel.py": "sha256:8ab7bc95d6077defd90549af9169f3e04388ac77f5010017ef6a2b53e44074b2",
+  "antinel_mcp.py": "sha256:cd0c48a62e2da954343da318e220733f70b8e5006c641cf70477f8b348db28ca",
   "assets/icons/L0-at-risk.ico": "sha256:36460dac6de8d1f67c3088230a4efb9ab23a58a6bdbbf8a9ea60188fd032d82d",
   "assets/icons/L0-off.ico": "sha256:2449f27e6f9569928efb263ca2e427cf6fb4c0d1e32876efaa510b4deb63ba66",
   "assets/icons/L0-unknown.ico": "sha256:78a8b26e7a020a2de96266bad3d0c382c381b34953bab003c33d9f74d5d87ba8",
@@ -95,11 +95,11 @@
   "inbox_window.py": "sha256:f026a1d86d4597ef8929e784231da28ccbec822f9740727bbd93fc5987652d39",
   "ledger.py": "sha256:364634ebf7ad136db2b59340f490f176ff70fff0a8711effa357be086e3eed69",
   "machine_id.py": "sha256:a17381e06232d8a5b5ffbd97f003f78d237b3a92ef3061585bcd9545bfd3a41a",
-  "psl/SKILL.md": "sha256:afd43635f40b72f0f016fb2180e44f21dfb6221b41bc0ebcd79a8ce576a78187",
+  "psl/SKILL.md": "sha256:c40c804cff6f6fca4ebae7e4266e9e65b7a0fd04b2409815d0c2667681fc998b",
   "psl/antinel-namespaces.json": "sha256:2db67f32a5b803560f458c4589bd4bb4678cc17bc16625f6b6b3ad20f9b202d2",
-  "psl/workspace_facts.json": "sha256:43a9e2630ae05c8e68b4fb8e715f0b858b10d3768841cc310172bd4ead1981fd",
+  "psl/workspace_facts.json": "sha256:63b9d3c764fe4a2578be6857bd43419352f840d28dd56a3bf4e5286edc26dca8",
   "remediation.py": "sha256:eebef6fad4f9f89e946b77ceaf870ff747485266f216a77ab3984fd2f92caf7f",
-  "rules/default.json": "sha256:0021d7c7a58caff249c4fe1e340972aa14c32eb3ce959450a38a8a5b607c1d1b",
+  "rules/default.json": "sha256:18ac9885db1997a10c141889bf56f0f3cee82d65561c50be8946bf6537d81408",
   "rules/economics/claude-code.json": "sha256:e5ce954672baa42ffc220fddde2b691566f4644ec05ba6887c5ccc1c9dae30ba",
   "rules/economics/generic.json": "sha256:4849374b3d2443dd77329b09d348dec03794863aa8f991d98ea5380a9849b82f",
   "rules/economics/qoder.json": "sha256:5f51a86cbe0625f44519ce1308e562286c9d3410d0b7284006ac26b068396a3d",
@@ -131,7 +131,7 @@
   "rules/hosts/zcode.json": "sha256:b6be75e0e16189afe4e15bd196b14f1820ff97b7eaeadd9907ab0beb558efe51",
   "rules/pricing.json": "sha256:e299e7afa07a97128ce00c13706379c79368c747cd4303c488f1c53c5339e253",
   "rules/typosquat_top.json": "sha256:c251fc477ac9d6a11795fc0a88a3fd149e74bca0407a3f99013d1ce8eee1e4be",
-  "scripts/build_package.py": "sha256:076b014f38760a5744ee72323e64a9ad53f6beef6ae9307470ede46f9b674e6b",
+  "scripts/build_package.py": "sha256:71694a6e31aebc3ff819279cd1798c0e56d9f43eb7039b6f1136f5e7a905d01b",
   "scripts/check_github_license.py": "sha256:3c7a500a1d30f019a0aa149efc2aff844ec02593fa2c8c39ed51170e447be125",
   "scripts/cleanup_staging_once.py": "sha256:8245dc52b4a8dc77e7c2a907751564c81502dc3ba15f9c98757c509edc26117c",
   "scripts/install.py": "sha256:aae453f74a656e9954d16d4d2a60ecd1e81d261a4f9be5b1aba4cadc381827e4",
@@ -163,7 +163,7 @@
   "tools/verify_event_types.py": "sha256:ee8b611e2672ef6c7ca2c7468bdd7c3b902b06f0482b0cbd4de5da3cde48c4c2",
   "tools/verify_namespaces.py": "sha256:85d6ffb905dcf5abffb453ca5b1992f02b3aeb63f93aaad39bc6dcf3fb15e0b0",
   "transcript_reader.py": "sha256:c0ce99c5bdfb255f170ca744c011ae64ceb9569d1c9dd8efc1a2c096ff89dc1c",
-  "ui_server.py": "sha256:9a670e0b01cb4fcf1ac0ee7ec7e5039d35d32b7939fdc54dcb503dc502cad3f4",
+  "ui_server.py": "sha256:45edb0fab43424bcc280397dab236deff9f138642c792ae7c58992cea902b166",
   "ci/freeze_zones.json": "sha256:df13618075de425e6a3c3fb2f7023536b4b56355f9542e7e1aad0e12289cf2df"
  }
 }

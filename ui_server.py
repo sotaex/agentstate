@@ -215,6 +215,9 @@ code{background:#f2f4f7;border-radius:4px;padding:1px 5px;font-size:13px}
  padding:7px 10px}
 .num .k{font-size:11px;color:#6b7280}
 .num .v{font-size:14px;font-weight:500;margin-top:2px;word-break:break-all}
+.dlist{margin-top:8px}
+.dlist .k{font-size:11px;color:#6b7280}
+.dlist .d{font-size:13px;margin-top:2px;word-break:break-all}
 details.fold{margin-top:11px}
 details.fold>summary{cursor:pointer;font-size:13px;color:#1f6feb;user-select:none;
  padding:5px 0}
@@ -639,6 +642,28 @@ def _excl_why(raw):
     return "这个位置不属于工具本体（%s）" % k
 
 
+#: ★★★ 0.60.2（T-17 复核，创始人 2026-10-28：「细看：多大、在哪、为什么」）：
+#:   **折叠入口的标签只能由「折叠区里真有的东西」生成**，不许写死一句许诺。
+#:
+#:   病：0.60.1 把标签写成「细看：多大、在哪、为什么」，实测本机 4 条有证据的
+#:   记录，`多大` 兑现 1/4、`在哪` 兑现 1/4；`为什么` 更糟 —— 这产品读的是工具
+#:   自己写进磁盘的字段，**读不到动机**，所以那一问原理上永远答不出来，两条
+#:   SENT 记录点开只有一句指向空处的「下面能看到它自己写的记录」。
+#:   写一句做不到的许诺，比不写标签更坏：用户点开发现里面没有，就不再信这个入口。
+#:
+#:   修法：标签在渲染时按 `_asks` 现算（有体量才说「多大」，有目录才说「在哪」），
+#:   于是**承诺与兑现同源，结构上不可能撒谎**。判据 `T-17e` 守这条。
+#:   ★ 表里没有「为什么」这个词，且判据显式禁止它出现 —— 别再加回来。
+_FOLD_ASK = (
+    ("when", "什么时候"),
+    ("size", "多大"),
+    ("dir", "在哪"),
+    ("files", "哪些文件"),
+)
+#: 一样都没有时的兜底标签（此时折叠区里只有那张逐字抄下的字段表）。
+_FOLD_TAIL = "它写下的字段"
+
+
 def _evidence_html(r, detail, verdicts, ev_human, verdict):
     evs = r.get("ev") or []
     if r.get("excl"):
@@ -696,17 +721,43 @@ def _evidence_html(r, detail, verdicts, ev_human, verdict):
     # ---- ② 关键数字：打包多大 / 打了多少文件 / 传给谁 ----
     # ★ 排版的硬要求：**卡片要么都排齐、要么不出现**。一条证据如果只有 1 项，
     #   一列孤零零地漂着最难看 ⇒ 少于 2 项时改为**一行文字**，不摆卡片。
+    #
+    # ★★★ 0.60.2（T-17 复核）：**逐块取，再汇总**。
+    #   旧版把全部证据块拍平成一条 `items` 再取第一个命中值 ⇒ 4 个目录只报 1 个。
+    #   实测（本机 .zcode）：真值 4 个目录 310.2 MB，页面报 136.7 MB ——
+    #   **44%**。这不是精度问题，是一个数冒充了四个数的和（「一个数两个分母」同族）。
+    _ws, _enc, _wp, _blank = [], [], [], []
+    for _d in (detail or []):
+        _bi = _d.get("items") or []
+        if not _bi:                     # 只写下标记、没写字段的块（本机 SENT 全是这种）
+            if _d.get("file"):
+                _blank.append(str(_d["file"]))
+            continue
+        _v = _pick_value(_bi, "workspacesize")
+        if _v and isinstance(_v.get("value"), (int, float)):
+            _ws.append(_v["value"])
+        _v = _pick_value(_bi, "compressedsize", "encryptedsize")
+        if _v and isinstance(_v.get("value"), (int, float)):
+            _enc.append(_v["value"])
+        _v = _pick_value(_bi, "workspacepath", "workspacekey")
+        if _v and isinstance(_v.get("value"), str) and _v["value"] not in _wp:
+            _wp.append(_v["value"])
+
+    def _agg(lb, vals):
+        """多块时把标签写成「N 个合计」，让读的人知道这是个和、不是一个。"""
+        return (lb if len(vals) == 1 else "%s（%d 个合计）" % (lb, len(vals)),
+                _fmt_bytes(sum(vals)))
+
     nums = []
-    if _size_lb:
-        ws = _pick_value(items, "workspacesize")
-        if ws and isinstance(ws.get("value"), (int, float)):
-            nums.append((_size_lb, _fmt_bytes(ws["value"])))
-    enc = _pick_value(items, "compressedsize", "encryptedsize")
-    if enc and isinstance(enc.get("value"), (int, float)):
-        nums.append(("压缩加密后", _fmt_bytes(enc["value"])))
-    wp = _pick_value(items, "workspacepath", "workspacekey")
-    if wp and isinstance(wp.get("value"), str):
-        nums.append((_path_lb, wp["value"]))
+    if _size_lb and _ws:
+        nums.append(_agg(_size_lb, _ws))
+    if _enc:
+        nums.append(_agg("压缩加密后", _enc))
+    # ★ 多目录**不塞进数字卡**：`.num` 只有 ~108px 宽，`word-break:break-all`
+    #   会把 `D:\2026\PSL\硅基流动` 断成三行、每行断在词中间（实测 4 个目录要
+    #   12 行）。⇒ 一个目录仍走卡片；多个目录走下面的整行清单（`_dir_block`）。
+    if len(_wp) == 1:
+        nums.append((_path_lb, _wp[0]))
     # ★ T-17：`("服务器收下了吗", "收下了")` 这一项**已删** —— 结论已提到摘要行，
     #   留在这里就是同一事实两处实现（点开折叠的人会看见两遍）。
     if ts_txt:
@@ -723,10 +774,22 @@ def _evidence_html(r, detail, verdicts, ev_human, verdict):
     else:
         tiles = ""
 
+    # ★ 多个目录：整行清单，一行一个目录（窄格里 `break-all` 会断在词中间）。
+    if len(_wp) > 1:
+        _dl = _path_lb.replace("这个目录", "这些目录") + "（%d 个）" % len(_wp)
+        tiles += ("<div class='dlist'><div class='k'>%s</div>%s</div>"
+                  % (html.escape(_dl),
+                     "".join("<div class='d'>%s</div>" % html.escape(x)
+                             for x in _wp)))
+
     # ---- ③ 这意味着什么（老板看得懂的一句话） ----
+    # ★★★ 0.60.2（T-17 复核）：SENT 那句旧文案是「它发的是什么，**下面能看到**
+    #   它自己写的记录」—— 而本机两条 SENT（.workbuddy 53 个文件、.workbuddy-ai
+    #   41 个文件）**一个字段都没有**，下面只有一句「没有更细的字段记录」。
+    #   句子指向了不存在的东西 ⇒ 改成两句都真、都不指路的说法。
     meaning = {
         "PACK": "收下了，说明这包已经发出去过；没提，说明只在你电脑上打了包。",
-        "SENT": "它发的是什么，下面能看到它自己写的记录。",
+        "SENT": "这些标记是它自己写下的 —— 东西确实出去过。",
         "SYNC": "<b>同步不等于上传整个项目</b>，但说明你的数据有一条往外走的通道。",
     }.get(verdict, "")
 
@@ -749,13 +812,39 @@ def _evidence_html(r, detail, verdicts, ev_human, verdict):
                    html.escape(str(vs))[:300],
                    html.escape(it.get("ts_text") or "")))
     if not rows:
-        rows_html = ("<p class='muted small'>这一条没有更细的字段记录"
-                     "（工具只写下一个标记，没写内容）—— 这本身就是一项证据。</p>")
+        # ★★★ 0.60.2（T-17 复核）：**53 个文件不许只剩一句话**。
+        #   旧版这里只说「这一条没有更细的字段记录」，而 `rows` 是靠 `items` 生成的
+        #   ⇒ 只写下标记的文件（本机 SENT 全部 94 个）一个名字都不出现，
+        #   折叠区外只印前 3 个。「53 个文件报告了外传」被渲染成「一条没有字段的记录」。
+        #   ⇒ 名字必须列出来（列 12 个 ＋ 报出还有多少），文件名本身就是证据。
+        if _blank:
+            _show = _blank[:12]
+            rows_html = (
+                "<p class='muted small'>这些文件里没有更细的字段"
+                "（工具只写下标记，没写内容）—— 这本身就是一项证据。"
+                "它写下的 %d 个文件是：</p>%s%s"
+                % (len(_blank),
+                   "".join("<div class='muted small'>· %s</div>"
+                           % html.escape(x) for x in _show),
+                   ("<p class='muted small'>还有 %d 个没有列出。</p>"
+                    % (len(_blank) - len(_show)))
+                   if len(_blank) > len(_show) else ""))
+        else:
+            rows_html = ("<p class='muted small'>这一条没有更细的字段记录"
+                         "（工具只写下一个标记，没写内容）—— 这本身就是一项证据。</p>")
     else:
         rows_html = ("<table class='evo'><tr><th>类别</th><th>它写的字段</th>"
                      "<th>值（逐字抄下）</th><th>时间</th></tr>%s</table>"
                      "<p class='muted small'>这四列是从它自己的文件里<b>逐字抄下来的</b>，"
                      "没有加工。需要时可作为证据引用。</p>" % "".join(rows))
+
+    # ★★★ 0.60.2（T-17 复核）：**标签现算，不写死**。
+    #   有体量才说「多大」、有目录才说「在哪」、有只写下标记的文件才说「哪些文件」、
+    #   有时间才说「什么时候」。于是点开必有对应内容 —— 承诺与兑现同源。
+    _has = {"when": bool(ts_txt), "size": bool(_ws), "dir": bool(_wp),
+            "files": bool(_blank) and not rows}
+    _asks = [w for k, w in _FOLD_ASK if _has[k]]
+    _fold_lb = "细看：%s" % ("、".join(_asks) if _asks else _FOLD_TAIL)
 
     # ★★★ 0.60.1（T-17）：**摘要一行摊开，其余三项收进同一个折叠区**。
     #   收之前是"摘要 ＋ 数字卡 ＋ 这意味着什么 ＋ 折叠的原始记录"四段全摊，
@@ -764,11 +853,12 @@ def _evidence_html(r, detail, verdicts, ev_human, verdict):
     #     挂两个折叠，用户不知道点哪个才能看全。
     return ("<div class='ev'>"
             "<div class='l1'>%s</div>"
-            "<details class='fold'><summary>细看：多大、在哪、为什么</summary>"
+            "<details class='fold'><summary>%s</summary>"
             "%s%s%s</details>"
             "<div class='orig muted small'>从这些文件里读到：%s</div>"
             "</div>") % (
-        line1, tiles, ("<div class='mean'>%s</div>" % meaning) if meaning else "",
+        line1, html.escape(_fold_lb), tiles,
+        ("<div class='mean'>%s</div>" % meaning) if meaning else "",
         rows_html,
         "；".join(html.escape(str(d.get("file", ""))) for d in (detail or [])[:3])
         or "；".join(html.escape(str(fp)) for fp, _k in evs[:2]))
@@ -1305,6 +1395,9 @@ ul{padding-left:20px;margin:8px 0}li{margin:3px 0}
  padding:8px 10px}
 .num .k{font-size:11px;color:#5f6672}
 .num .v{font-size:14px;font-weight:500;margin-top:2px;word-break:break-all}
+.dlist{margin-top:8px}
+.dlist .k{font-size:11px;color:#5f6672}
+.dlist .d{font-size:13px;margin-top:2px;word-break:break-all}
 .row{border-top:1px solid #eef0f3;padding:10px 0}
 .row .nm{font-weight:600}
 .row .pt{font-size:12px;color:#6b7280;word-break:break-all;margin-top:2px}
