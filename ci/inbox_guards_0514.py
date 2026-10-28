@@ -187,6 +187,7 @@ import sys
 import tempfile
 import threading
 import time
+import time
 import inspect
 import contextlib
 from datetime import datetime, timedelta
@@ -3141,13 +3142,17 @@ def c_b18():
                 return "%s：文案缺 %r —— %r" % (name, w, r["text"])
         return None
 
+    # ★★★ 0.60.1（T-06）：六句文案重写，must 词同批改并要求**更强**——
+    #   旧 must 是 ("配置","不会弹窗")／("没在跑","不会弹窗")，只能证明"说了点什么"；
+    #   新 must 每档至少三个词，且**互斥**（"是关的"只出现在配置关、
+    #   "是开着的"只出现在没在跑）⇒ 三档文案互换了也会红。
     for name, r, want_ok, must in (
             ("配置关", _b18_health(hub, on=False, stamp=None),
-             False, ("配置", "不会弹窗")),
+             False, ("弹窗提醒", "是关的", "弹不出来")),
             ("守护进程没在跑", _b18_health(hub, alive=False, stamp=None),
-             False, ("没在跑", "不会弹窗")),
+             False, ("弹窗提醒", "是开着的", "没跑", "弹不出来")),
             ("健康", _b18_health(hub, stamp="cur", cur=cur),
-             True, ("在跑",)),
+             True, ("弹窗提醒", "开着", "在跑")),
             ("旧版本戳", _b18_health(hub, stamp="old", cur=cur),
              False, ("旧代码",)),
             ("在跑但没戳", _b18_health(hub, stamp=None),
@@ -6546,15 +6551,45 @@ def _bare_denom_ok(html, total, revived):
 
 
 def _unit_has_merge(k):
-    """纯判据：级词条 unit 含条→件事换算说明，并指向**仍活着的展示位**。
+    """纯判据：该词条的 unit 里有没有讲"条→件事换算"这句话。
 
     ★ 0.53.0（T3.2）重锚：旧锚点「已归并为」是顶部计数排括号的字面
       「（已归并为 N 件事）」—— 那排随 T3.2 撤掉 ⇒ 词条改指「要处理」
       后面的件数（收件箱筛选条／日报要处理指标）。锚点跟着展示位走，
       不跟着已删的字面走（判据守已不存在的东西＝死判据）。
+
+    ★★★ 0.60.1（T-15，五页文字复审）：**判定口径改了两处**。
+      ① 旧口径要求 unit 同时含「算一件事」与「要处理」—— 那是为
+         R0/L2/L1 设计的（它们要指向别处的档）。换算现在**只住在
+         `action` 词条里**，而它自己就是「要处理」，再写一次"要处理"
+         是自我指涉 ⇒ 改为认"同一件事 … 件"这个说法本身。
+      ② 判定**对象**从 R0/L2/L1 改成 `action`（见 `_j4_merge_ok`）。
     """
     u = GL.TERMS[k].get("unit") or ""
-    return "算一件事" in u and "要处理" in u
+    return ("同一件事" in u and "件" in u)
+
+
+def _j4_merge_ok():
+    """J4 腿②：条→件换算的**唯一落点**是 `action`，且不许散落到级词条。
+
+    ★★★ 0.60.1（T-15）：原先要求 R0/L2/L1 三档**各自**都写一遍换算。病在两处：
+      · **位置错**：那句话的原文是「「要处理」后面的件数报的就是这个」——
+        讲的是「要处理」这一档的口径，却挂在"挡下／提醒／没守住"下面；
+      · **重复**：同一句 64 字逐字出现三遍（合计 192 字），读者每点一次
+        问号就要重学一遍同一件事。
+      ⇒ 换算只在 `action` 讲一次；R0/L2/L1 **出现即红**（防回潮）。
+      ★ 强度不降：原判是"三处都要有"，新判是"唯一那处必须有 ＋ 其余三处
+        不许有"—— 后者更难过（任何一处抄回去都会红）。
+    """
+    if not _unit_has_merge("action"):
+        return ("「要处理」词条的 unit 没讲条→件换算 —— "
+                "件数又成了不会解释的数（#4 复发）")
+    dup = [k for k in ("R0", "L2", "L1") if _unit_has_merge(k)]
+    if dup:
+        return ("条→件换算散落在 %s —— 只许在「要处理」词条讲一次（T-15）："
+                "它讲的是「要处理」的件数，挂在别的档下是位置错，"
+                "且逐字重复会让读者每点一次问号重学一遍" % "、".join(dup))
+    return True
 
 
 @check("J4 ★ 拉起次数分子分母各自带单位（界面不许有裸分母）")
@@ -6582,12 +6617,10 @@ def j4():
     res = _bare_denom_ok(_health(), want_total, r["revived_window"])
     if res is not True:
         return res
-    miss = [k for k in ("R0", "L2", "L1") if not _unit_has_merge(k)]
-    if miss:
-        return ("这些级词条的 unit 没解释条→件事换算：%s —— "
-                "页面上「（已归并为 N 件事）」仍是不会解释的括号（#4 复发）"
-                % "、".join(miss))
-    _note("分母带单位＝同期记录 %d 条；级词条 unit 均含换算说明" % want_total)
+    res2 = _j4_merge_ok()
+    if res2 is not True:
+        return res2
+    _note("分母带单位＝同期记录 %d 条；条→件换算唯一落点在「要处理」词条" % want_total)
 
 
 @check("N-J4 负控：分母退回裸斜杠 / unit 退回无换算文本 ⇒ J4 必须判红")
@@ -6605,14 +6638,26 @@ def n_j4():
     r1 = _bare_denom_ok(dead, want_total, r["revived_window"])
     if r1 is True:
         return "负控失效：裸分母替换后 J4 腿① 仍判绿"
-    # 腿②：unit 退回无换算的旧文本
-    orig = GL.TERMS["L2"]["unit"]
+    # 腿②：条→件换算（同一入口 `_j4_merge_ok`，正控也走它）
+    if _j4_merge_ok() is not True:
+        return "夹具不成立：现行词条就判红 —— 负控无分辨力"
+    orig = GL.TERMS["action"]["unit"]
     try:
-        GL.TERMS["L2"]["unit"] = "单位是<b>条记录</b>，按最近 24 小时数。"
-        if _unit_has_merge("L2"):
-            return "负控失效：退回旧 unit 文本后 J4 腿② 仍判绿"
+        GL.TERMS["action"]["unit"] = "按件算；分母是最近 24 小时内还没关闭的记录。"
+        if _j4_merge_ok() is True:
+            return "负控失效②a：摘掉「要处理」的条→件换算后 J4 腿② 仍判绿"
     finally:
-        GL.TERMS["L2"]["unit"] = orig
+        GL.TERMS["action"]["unit"] = orig
+    orig2 = GL.TERMS["L2"]["unit"]
+    try:
+        GL.TERMS["L2"]["unit"] = orig + "同一件事的几条记录算一件事。"
+        if _j4_merge_ok() is True:
+            return ("负控失效②b：把换算抄回「挡下」词条后 J4 腿② 仍判绿 "
+                    "—— 「只许讲一次」这条没牙")
+    finally:
+        GL.TERMS["L2"]["unit"] = orig2
+    if _j4_merge_ok() is not True:
+        return "负控还原失败：跑完负控后 J4 腿② 自己红了（夹具污染）"
     return True
 
 
@@ -9494,11 +9539,13 @@ def main(argv=None):
         print("⚠ 分片：本次只跑第 %d/%d 片（其余不跑，**不能**单独当交付证据）"
               % (_k, _n))
     ok = fail = skip = 0
+    _secs = {}                      # ★ 2026-10-28 单条耗时（只加度量）
     for _idx, (name, fn) in enumerate(RESULTS):
         if _n is not None and _idx % _n != _k:
             continue
         if only and not any(name.startswith(p) for p in only):
             continue
+        _t0 = time.perf_counter()
         try:
             why = fn()
             if why is True or why is None:
@@ -9517,11 +9564,39 @@ def main(argv=None):
         except Exception as e:                                  # noqa: BLE001
             print("  💥 %-62s %r" % (name, e), flush=True)
             fail += 1
+        finally:
+            # ★ 2026-10-28：单条耗时记账（**只加度量，判定与输出格式一字未改**）。
+            #   理由：本轮 S1 实测推翻了我的估算 —— 分 3 片并行跑 641.8 秒，
+            #   单片单独跑 272 秒，即并行几乎零收益。要提速必须先知道
+            #   「286 条里哪几条吃掉了一半时间」，而仓里此前没有这个数据。
+            _secs[name] = round(time.perf_counter() - _t0, 2)
     print("-" * 78)
     print("  %d 绿 / %d 红 / %d 跳过%s%s" % (
         ok, fail, skip,
         "（非全量）" if only else "",
         "（第 %d/%d 片）" % (_k, _n) if _n is not None else ""))
+    # ★ 2026-10-28：单条耗时落盘（判据级，与主闸门同一本账的不同套件分片）。
+    #   合并写入、不清零：慢判据是「上次慢、这次还慢」的稳定现象，
+    #   清一次就只剩本次的部分读数。分片时只写本片跑到的那些。
+    try:
+        _p = os.path.join(ROOT, ".psl", "gate", "check_durations_0514.json")
+        _old = {}
+        if os.path.isfile(_p):
+            with io.open(_p, encoding="utf-8") as _f:
+                _old = json.load(_f) or {}
+        if _secs:
+            _old.update(_secs)
+            _d = os.path.dirname(_p)
+            if _d and not os.path.isdir(_d):
+                os.makedirs(_d)
+            with io.open(_p, "w", encoding="utf-8", newline="\n") as _f:
+                _f.write(json.dumps(_old, ensure_ascii=False, indent=1,
+                                    sort_keys=True))
+            _top = sorted(_secs.items(), key=lambda kv: -kv[1])[:5]
+            print("  ⏱ 本片最慢 5 条：%s"
+                  % "｜".join("%s %.1fs" % (k[:28], v) for k, v in _top))
+    except Exception as _e:                                 # noqa: BLE001
+        print("  !! 单条耗时账没写成（%r）—— 下次仍然只能靠猜哪一条慢" % (_e,))
     return 0 if fail == 0 else 1
 
 

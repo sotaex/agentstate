@@ -205,7 +205,7 @@ HARNESS_SRC = SRC / "scripts" / "verification_tests.py"
 if not HARNESS_SRC.is_file():
     raise SystemExit("★ 构建器找不到套件：%s\n  （产物仓构建必须用本仓的套件）" % HARNESS_SRC)
 NAME = "antinel-security"
-VERSION = "0.60.0"
+VERSION = "0.60.1"
 # P-A3: the namespace this build declares itself under. derive_object_ownership()
 # reads git remote first, then THIS field; fail-closed unattributed when neither
 # resolves. Kept beside the hashes so a third party can see what was declared.
@@ -1910,7 +1910,20 @@ NEVER_SHIP_PATTERNS = ("*.bak-*", "*.orig", "*.rej", "*~",
                        #   （幽灵条目：文件可能在下一轮已被清走，哈希对不上，
                        #   构建器只能声明自举豁免）。与 `.bak-*` 同族同策：
                        #   守卫产物**永不生成规则、永不进清单、永不进包**。
-                       "*.trash*")
+                       "*.trash*",
+                       # ★★★ 2026-10-28（0.60.1 出包实测）：**退役改名件**。
+                       #   本仓的零删除纪律是「退役件 `.away-<ts>`」（改名让开，
+                       #   不是删掉）。这些件**永远不该随包**，可垃圾政策一直
+                       #   不认它们 —— 实测代价：`challenge/chain/2026-10-11.jsonl`
+                       #   被改名成 `…jsonl.away-20261028113021` 之后，清单把**新
+                       #   名字连同哈希**钉了进去，而 wheel 里没有它 ⇒
+                       #   `verify_release.py` [E] 当场红：
+                       #   「清单覆盖了 1 个不随 wheel 分发的文件」，
+                       #   纯净安装下 `--manifest` 会报 superseded（狼来了）。
+                       #   ★ 为什么必须加在这一处：三个作用域共用这份名单
+                       #     （规则生成 / MANIFEST.in / 清单覆盖），加在一处
+                       #     三处同时收口；只改清单那处就是「同一事实两处实现」。
+                       "*.away-*")
 
 
 def _is_junk(rel):

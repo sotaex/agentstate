@@ -3792,12 +3792,19 @@ def n_ledger_page_claim_slot_is_not_clickable():
 #     第 3 条意见「看见疑问却无法点开得到答案」
 # ⇒ 定义必须有**唯一真源**（`glossary.py`），页面上**可点开**，且**未定义不许静默**。
 def c_glossary_all_terms_complete():
-    """术语表 24 条**字段齐全**（词/一句话/包含/不含/口径），且都能渲染出落点。"""
+    """术语表**必填字段齐全**（词/一句话/包含/口径），且都能渲染出落点。
+
+    ★★★ 0.60.1（T-03，五页文字复审）：**`exc`（不含）从必填改为可选**。
+      理由见 `glossary._REQUIRED` 处注释：强制每词条都写「不含」会逼作者
+      编否定句，而"否定从未存在的误解"是本仓 F49 第二形态。
+      ★ 强度未降的证明：负控抽的是 `unit`（数字口径）—— 真正的定义骨架；
+        `inc`（包含）仍必填 —— 真正的内容面。只有"补充说明"退成可选。
+    """
     import glossary as GL
     if not GL.TERMS:
         return False
     for k, t in GL.TERMS.items():
-        for f in ("w", "one", "inc", "exc", "unit"):
+        for f in ("w", "one", "inc", "unit"):
             if not (t.get(f) or "").strip():
                 return False
         html = GL.chip(k)
@@ -3827,9 +3834,32 @@ def n_glossary_incomplete_is_caught():
         GL.TERMS[k]["unit"] = orig
 
 
+#: ★★★ 0.60.1（**发布后必红的结构缺陷，不是某次改字引起的**）：
+#:   `dev`（研发中）这个词条只在「本机版本领先已发布版本」时出现在顶栏徽标上。
+#:   ⇒ 一旦发布（PyPI 版本 == 代码版本），徽标按设计消失，这个词条就没有
+#:   页面落点，而它**也不该出现** —— 用户看不到「研发中」，就无从查它。
+#:   这不是缺陷，是"条件词条"的正常形态；但 P13 原先按"术语表 100% 有落点"
+#:   硬判 ⇒ **每次发布后 P13 必红**。
+#:   ★ 实证（2026-10-28）：`version_pair()` 得 ('0.60.0','0.60.0') 时
+#:     `data-t="dev"` 在五页零命中；把它注入成 ('0.60.0','0.59.0') 后
+#:     徽标立刻出现、缺落点为空。改一行数据就翻绿，证明是条件而非破损。
+#:   ★ 白名单**不是免死金牌**：下面逐条断言它真有渲染分支（键在
+#:     `inbox_model.BADGE_STATE` 里 ⇒ 顶栏那个条件分支会把它渲染成芯片）。
+#:     把分支删掉而把键留在白名单 ⇒ 判据当场红。
+_CONDITIONAL_TERMS = ("dev",)
+
+
 def c_glossary_pages_are_clickable():
-    """四个栏目**都能点开定义**，且术语表**没有"定义了却没地方看"的死角**。"""
+    """四个栏目**都能点开定义**，且术语表**没有"定义了却没地方看"的死角**。
+
+    ★ 条件词条（`_CONDITIONAL_TERMS`）按设计可以当前无落点，但必须有渲染分支。
+    """
     import glossary as GL
+    import inbox_model as _M
+    cond = set(_CONDITIONAL_TERMS)
+    for k in cond:
+        if k not in (_M.BADGE_STATE or {}):
+            return False          # 白名单里的词条没有渲染分支 ⇒ 白名单作废
     hub = _tmpdir()
     _write_rec(_chain_dir(hub), {"ts": _iso(-1), "type": "host_shield_breach",
                                  "reason": "r", "hash": "h",
@@ -3846,15 +3876,43 @@ def c_glossary_pages_are_clickable():
         if not got:
             return False                      # 这个栏目**没有可点开的定义**
         seen |= set(got)
-    return set(GL.TERMS) <= seen              # 术语表 100% 有落点
+    return (set(GL.TERMS) - cond) <= seen     # 非条件词条仍要求 100% 有落点
 
 
 def n_glossary_pages_are_clickable():
-    """负控：`GL.unknown()` **不是恒返回空**（否则上一条就是瞎的）。"""
+    """负控：`GL.unknown()` 不恒空 ＋ **无落点词条必须被抓** ＋ 白名单有牙。
+
+    ★★ 0.60.1：旧负控**只测了 `GL.unknown()`** —— 那是另一个函数，
+      与 P13 本体不同入口（假绿⑦族：负控没走正控那条路）。
+      现在补两条**同一入口**的腿：
+        ① 往 `TERMS` 塞一个只有定义、没有落点的词条 ⇒ P13 必须红；
+        ② 往条件白名单塞一个**不在 `BADGE_STATE` 里**的键 ⇒ 也必须红
+           （证明白名单不是免死金牌）。
+    """
     import glossary as GL
     ghost = GL.unknown('<details class="term" data-t="ghost_term"></details>')
     clean = GL.unknown('<details class="term" data-t="L2"></details>')
-    return ghost == ["ghost_term"] and clean == []
+    if not (ghost == ["ghost_term"] and clean == []):
+        return "GL.unknown() 不分辨未定义词 —— P13 的眼睛是瞎的"
+    key = "__neg_no_such_term__"
+    try:
+        GL.TERMS[key] = {"w": "测试词", "one": "只有定义，没有任何页面落点。",
+                         "inc": "无。", "unit": "无。"}
+        if c_glossary_pages_are_clickable() is True:
+            return "负控失效①：塞了一个无落点词条，P13 仍绿"
+    finally:
+        GL.TERMS.pop(key, None)
+    g = globals()
+    orig = g.get("_CONDITIONAL_TERMS")
+    try:
+        g["_CONDITIONAL_TERMS"] = tuple(orig or ()) + ("__ghost__",)
+        if c_glossary_pages_are_clickable() is True:
+            return "负控失效②：白名单里塞了没有渲染分支的键，P13 仍绿"
+    finally:
+        g["_CONDITIONAL_TERMS"] = orig
+    if c_glossary_pages_are_clickable() is not True:
+        return "负控还原失败：跑完负控后 P13 自己红了（夹具污染）"
+    return True
 
 
 # ============================================ 十一、托盘陈旧（交接 §5）====

@@ -36,6 +36,7 @@ import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 PKG = Path(os.environ.get("ANTINEL_PKG") or Path(__file__).resolve().parent.parent)
@@ -98,8 +99,15 @@ class neutral_cwd:
         return False
 
 
-def rec(cid, ok, detail="", skipped=False):
-    RESULTS.append({"id": cid, "ok": ok, "skipped": skipped, "detail": detail})
+def rec(cid, ok, detail="", skipped=False, elapsed=None):
+    # ★ 2026-10-28：加 `elapsed`（单条耗时）。**只加度量，不改任何判定** ——
+    #   加它的理由：要提速却不知道慢在哪一条，只能靠猜（S2 就卡在这里：
+    #   本闸门实测 126.5 秒，但 40 条里各花多少秒，仓里一份记录都没有）。
+    #   落盘见文件末尾（`.psl/gate/check_durations.json`，与套件级耗时账同目录）。
+    row = {"id": cid, "ok": ok, "skipped": skipped, "detail": detail}
+    if elapsed is not None:
+        row["sec"] = round(elapsed, 2)
+    RESULTS.append(row)
     if skipped:
         tag = "SKIP"
     else:
@@ -5765,16 +5773,20 @@ def main():
                       % cid)
                 _n_quick_skip += 1
                 continue
+            # ★ 2026-10-28：单条计时（只加度量）。判据本体一字未改。
+            _t0 = time.perf_counter()
             try:
                 r = fn()
             except Exception as e:
-                rec(cid, False, "运行时异常：%s: %s" % (type(e).__name__, e))
+                rec(cid, False, "运行时异常：%s: %s" % (type(e).__name__, e),
+                    elapsed=time.perf_counter() - _t0)
                 continue
+            _el = time.perf_counter() - _t0
             if r is None:
-                rec(cid, False, "不可判", skipped=True)
+                rec(cid, False, "不可判", skipped=True, elapsed=_el)
             else:
                 ok, detail = r
-                rec(cid, ok, detail)
+                rec(cid, ok, detail, elapsed=_el)
 
     n_pass = sum(1 for r in RESULTS if r["ok"] and not r["skipped"])
     n_fail = sum(1 for r in RESULTS if not r["ok"] and not r["skipped"])
@@ -5792,6 +5804,31 @@ def main():
         print("▲ 有 %d 条不可判（SKIP）—— 这不是通过，是盲区，需人工确认" % n_skip)
     else:
         print("★ 回归！%d 条判据变红 —— 说明本次改动把已修好的缺陷弄回去了" % n_fail)
+
+    # ★★ 2026-10-28：单条耗时落盘（判据级）。**与套件级耗时账同目录、不同粒度** ——
+    #   套件级那本（`delivery_gate._DUR`）回答「该跑哪几套」，这一本回答
+    #   「这套里哪一条慢」。两本不许混：混了就变成同一事实两处实现。
+    #   ★ 只在**真跑过**的判据上写（快档跳过的没有 sec），合并写入，不清零
+    #     （清一次就丢了上一次的读数，而慢判据恰恰是"上次慢这次还慢"）。
+    try:
+        _durp = PKG / ".psl" / "gate" / "check_durations.json"
+        _old = {}
+        if _durp.is_file():
+            with open(_durp, encoding="utf-8") as f:
+                _old = json.load(f) or {}
+        _new = {r["id"]: r["sec"] for r in RESULTS if "sec" in r}
+        if _new:
+            _old.update(_new)
+            _durp.parent.mkdir(parents=True, exist_ok=True)
+            with open(_durp, "w", encoding="utf-8", newline="\n") as f:
+                json.dump(_old, f, ensure_ascii=False, indent=1, sort_keys=True)
+            _top = sorted(_new.items(), key=lambda kv: -kv[1])[:5]
+            print("  ⏱ 最慢 5 条：%s"
+                  % "｜".join("%s %.1fs" % (k, v) for k, v in _top))
+            print("  ⏱ 单条耗时账：%s（判据级；套件级那本在 suite_durations.json）"
+                  % _durp)
+    except Exception as e:                              # noqa: BLE001
+        print("  !! 单条耗时账没写成（%r）—— 下次仍然只能靠猜哪一条慢" % (e,))
 
     if a.json:
         print(json.dumps({"results": RESULTS, "pass": n_pass,

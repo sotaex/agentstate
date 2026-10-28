@@ -2302,11 +2302,20 @@ def _view_inbox(items, token, filt, now=None, posture=None, root=None):
             empty_title = "本次载入的记录为空。"
         else:
             empty_title = "当前筛选「%s」没有匹配记录。" % _esc(M.filter_label(filt))
+        # ★★ 0.60.1（T-16，五页文字复审）：空态三句压成一句，且**只在「要处理」
+        #   这一档给**。删掉的三句及其理由：
+        #     ①「只放只有你本人动手才能解决的事」= 档位定义。筛选条旁的「？」
+        #       里已经有，而且更全 —— 空态里重复三遍定义，是元叙述。
+        #     ②「更早的事项只会在其链文件仍被读取时显示在『归档』」同上。
+        #     ③「本页不是永久全历史清单」= 在"没有要处理的事"这一刻讲边界，
+        #       读者此刻要的是放心，不是免责。
+        #   其它四档的空态标题已经说清（「当前『归档』中没有记录」），不再补话。
+        _empty_note = ("挡下和自愈的事在「看一眼」。"
+                       if filt == M.BUCKET_ACTION else "")
         return head + (
-            "<div class=\"hint\"><b>%s</b>"
-            "<p class=\"note\">「要处理」只放只有你本人动手才能解决的事。"
-            "Antinel 自己已挡下或自愈的事项在「看一眼」。更早的事项只会在其链文件仍被读取时显示在「归档」；"
-            "本页不是永久全历史清单。</p></div>" % empty_title)
+            "<div class=\"hint\"><b>%s</b>%s</div>"
+            % (empty_title,
+               ("<p class=\"note\">%s</p>" % _empty_note) if _empty_note else ""))
     # ★ 「要处理」按**事由**归并（同因 14 条 = 1 件事）；
     #   "看一眼/归档"按类型归并；只有「全部」和钻取视图才一张一条。
     #   ★ 单条的分组**退回普通条目**：不藏原因、不藏按钮（真回退的修法）。
@@ -2366,6 +2375,32 @@ def _view_inbox(items, token, filt, now=None, posture=None, root=None):
                  "</div>" % (_esc(M.filter_label(filt)), len(rows), n_all))
     return head + "".join(_item_html(i, token, posture, show_host=_show_host)
                           for i in rows)
+
+
+def _rules_block():
+    """「挡下是怎么判的」独立一块：拦截规则全表（T-14）。
+
+    ★★★ 0.60.1（五页文字复审 T-14）：规则全表原先是 `L2` 词条展开体的
+      一部分 ⇒ 用户点「挡下？」想读"挡下是什么意思"，点开得到 74 行规则
+      清单。**一件是"灯为什么红"，另一件是"监理装着哪些规则"** —— 两件事
+      被压进同一个折叠块。现在词条只讲释义，全表在这里独立成块。
+    ★ 空表 ⇒ **整块不出**：`shield_rules_html()` 自己返空串，这里不再
+      渲染一个空标题（同 `_exam_export` 的「没有可导出的东西就不给链接」）。
+    ★ 为什么**只挂在运行状态一页**（0.60.1 复核，创始人批示「集中放在一处更好」）：
+      第一版在日报与运行状态各挂一块 ⇒ 同一份内容两个渲染点（第一顽症）。
+      日报是结论页，全表挂在结论下面等于用参考手册把结论埋掉；运行状态
+      本来就是「按什么规矩在跑」的检视页。判据 `T-14d` 守"全表只有一处"。
+    """
+    h = GL.shield_rules_html()
+    if not h:
+        return ""
+    # ★ 0.60.1：前后加**显式边界标记**。判据要能"整块剥掉"这块 ——
+    #   规则全表里带 `description_zh` 审计全文，那是学习场景的设计，
+    #   与「排行行不许把审计全文上屏」不冲突；但那两条判据原先靠
+    #   "它在词条里 ⇒ 被 `body_without_terms` 顺手剥掉"，搬出来后认不出来了。
+    #   ★ 用注释标记而不是正则剥 `<div>`：div 是嵌套的，正则配平不可靠。
+    return ("<!--rules-all--><div class=\"card\"><h2>挡下是怎么判的</h2>%s</div>"
+            "<!--/rules-all-->" % h)
 
 
 def _view_report(rep, token, items=None):
@@ -2555,6 +2590,15 @@ def _view_report(rep, token, items=None):
     # ★★ 0.51.0（品质审查拍板点 1，2026-10-16）：斜杠解释句随分母一起撤 ——
     #   「需要一整句话才能解释的显示，本身就是显示失败」（Q-02 补丁即自供状）；
     #   四卡只留绝对数＋单位，时间口径保留（W07：说一次，且不许整句删掉）。
+    # ★★★ 0.60.1（T-14 复核，创始人 2026-10-28）：「**集中放在一处**」。
+    #   第一版在两页（日报＋运行状态）各挂一块 —— 那是同一份内容两个渲染点，
+    #   正是本仓第一顽症。现在只留运行状态页一块，理由：
+    #     · 日报是**结论页**（四个数＋排行），用户在这儿问「今天怎么样」，
+    #       把 37 行规则全表挂在结论下面，等于用参考手册把结论埋掉；
+    #     · 运行状态本来就是「它按什么规矩在跑」的检视页，用户在那儿才是
+    #       「翻手册」的心态。
+    #   ★ 将来 help 建起来，全表整块搬进 help 的「规则」栏目，这一页只留一句
+    #     指针 —— 已登记为待办，不在本轮做（会牵动 tab 结构与多处「五页」断言）。
     return ("<h2>%s · %s</h2>"
             "<p class=\"note\">四个数都只数<b>最近 %d 小时</b>。</p>%s%s%s"
             % (PAGE_TITLES["report"], _esc(rep["day"]), hrs, m, pr, rules))
@@ -2819,13 +2863,23 @@ def _view_health(rep, token, items=None):
                 _who += " 等 %d 种" % len(_dist)
         else:
             _who = ""
+        # ★★ 0.60.1（T-07，五页文字复审）两处治，两处**不治**（回源码后撤回）：
+        #   治①「线索取」缺字 ⇒「线索来自」（判据 0490 锚点同批改）；
+        #   治② 尾句「说不清偏多——多半是记录太旧，或换过工具」是**猜**：
+        #        没有任何证据支持"太旧"，也没有证据支持"换过工具"，却写成结论。
+        #        删推测，只留「说不清偏多」这个判断标签（下面的 75% 就是依据）。
+        #   撤回①「112 出现两次」：两个数是**不同口径**（`attributed` 是认得出的
+        #     总数，`_conf` 是置信度分布「有直接证据 N 条」），不是重复。
+        #     判据 0490 分别锁着「3 条认得出」与「有直接证据 2 条」，删任一个都红。
+        #   撤回②「说不清」改「认不出」：判据锁着「1 条说不清（25%）」这个形状，
+        #     且"说不清"在本仓已是既有词（`unclear_ratio` 的唯一上屏说法）。
         _host_value = ("近 7 天 %d 条记录里，%d 条认得出是哪个工具%s，"
                        "%d 条说不清（%d%%）。"
-                       "线索取工具自己报的环境信息（%s）。"
+                       "线索来自工具自己写下的环境信息（%s）。"
                        % (_hs["total"], _hs["attributed"], _who,
                           _hs["unclear"], _pct, "、".join(_conf)))
         if _hs["unclear_ratio"] > 0.05:
-            _host_value += "说不清偏多——多半是记录太旧，或换过工具。"
+            _host_value += "说不清偏多。"
             _host_css = "warn"
         else:
             _host_css = "ok"
@@ -2913,9 +2967,9 @@ def _view_health(rep, token, items=None):
     #        这个问题原本不存在。
     #   ★ 减法留账：删的是**这句话**，不是"没查成必须告警"这条规矩 ——
     #     后者仍在 `_chain_value`，判据 J8 同时锁住"这句不许回来"。
-    return ("<h2>%s · %s</h2><div class=\"rows\">%s</div>%s%s"
+    return ("<h2>%s · %s</h2><div class=\"rows\">%s</div>%s%s%s"
             % (PAGE_TITLES["health"], _esc(rep.get("day") or ""), body,
-               _chain_card(ch), _lorder))
+               _chain_card(ch), _lorder, _rules_block()))
 
 
 def _view_ledger(rep, token, items=None):
@@ -2985,8 +3039,12 @@ def _view_ledger(rep, token, items=None):
     # ★★ 0.53.5（STE100 体检 S-05）：①「今天」换成**具体日期**（相对时间词
     #   会随阅读日期漂移——页面开着跨过午夜就指错天）；②「同一口径」换成
     #   「两边算法一样」（「口径」是工程词，读者没有这个概念）。
+    # ★★ 0.60.1（T-13，五页文字复审）：删「这里不重复」——它说的是假话。
+    #   页面下方「更早 · 按月」展开当月之后，第一行就是今天（代码注释写明
+    #   「宁重复 ≤7 行，不做边界算术」，那是已拍板的折中，结构不动）。
+    #   改成只陈述算法一致，不再承诺"没重复"。
     _today_line = ('<p class="note">%s 的数在 <a href="/?v=report">日报</a>'
-                   '（两边算法一样，这里不重复）；下面是已经过完的日子。</p>'
+                   '（算法一样）；下面是已经过完的日子。</p>'
                    % _esc(rep.get("day") or "")
                    if has_data else "")
     # ────────────────────────────────────────────────────────────────
@@ -3033,8 +3091,12 @@ def _view_ledger(rep, token, items=None):
     #   事件**的机器上这四个词就没有任何落点 —— 0353 P13（术语表 100% 有落点）
     #   会当场翻红（本批实测踩到一次；0.51.2 同型：`has_data` 变严把术语芯片
     #   一起弄没）。
-    _legend = ("<div class=\"note\">每天依次是：%s ｜ %s ｜ %s ｜ %s"
-               "（单位：条）。</div>"
+    # ★★ 0.60.1（T-04，五页文字复审）：删掉行尾「（单位：条）。」。
+    #   理由：四个词条各自的 one/unit 已经写明单位（「…的操作条数」「按当天算」），
+    #   单独补一个括号只让这一行显得像补丁 —— 而它是本页唯一的括号。
+    #   ★ 四个 chip 一个都不能删：它们是这四条词条在本页的唯一落点，
+    #     删了 0353 P13（术语表 100% 有落点）当场翻红。
+    _legend = ("<div class=\"note\">每天依次是：%s ｜ %s ｜ %s ｜ %s。</div>"
                % (GL.chip("ledger_blocked"), GL.chip("ledger_noticed"),
                   GL.chip("ledger_breached"), GL.chip("ledger_acked")))
     sections = ""
@@ -3434,8 +3496,10 @@ def _exam_export_links(base):
     # ★ 2026-10-21 活体实测：Edge 打印一次 3～20 秒（机器负载高时更久）⇒
     #   把预期写在句子裡，否则十几秒没反应会被当成坏了、还可能连点
     #   （每次连点都会再起一个 Edge，排在锁后面等）。
-    return ("<div class=\"note\">把这份结果存成一份文件"
-            "（PDF 要十几秒生成，别重复点）："
+    # ★ 0.60.1（T-09）：压到 22 字。「这份结果存成一份文件」→「结果存成文件」；
+    #   「别重复点」是口语命令 ⇒「请勿重复点」（STE：用请求，不用喝止）。
+    return ("<div class=\"note\">把结果存成文件"
+            "（PDF 需十几秒，请勿重复点）："
             "<a href=\"/exam-export?e=%s&amp;san=1&amp;fmt=pdf\">PDF（脱敏）</a> ｜ "
             "<a href=\"/exam-export?e=%s&amp;san=0&amp;fmt=pdf\">PDF（完整）</a> ｜ "
             "<a href=\"/exam-export?e=%s&amp;san=1\">HTML 原件</a></div>"
@@ -4000,9 +4064,34 @@ def _lock_unknown(why):
       于是「没拿到读数」与「今天没有竞争」在屏幕上逐字相同。
       现在三种坏法都走这里；**判据 P36 的负控换的就是这一行**
       （把它改成 `return ""` ⇒ P36 必须红）。
+
+    ★★★ 0.60.1（T-01，五页文字复审）两处病一起治：
+      ① **异常类名不许上屏**。旧调用点传的是 `"取数失败：%s" % type(e).__name__`
+         ⇒ 页面上印出 `TypeError`，读者只能读成"软件坏了"。异常细节走
+         `tlog()`（诊断要它，读者不要它），`why` 只收人话。
+      ② **同一件事只留一套话**。另一个出口（`checked` 为假）原本自己写了
+         一句「读不到（N 个文件）。竞争次数暂时无从得知…」—— 同一事实两处
+         实现，措辞必漂。现在它也走这里，差别只在括号里的原因。
+      ③ 旧句把「取不到」「没有读数」「无从得知」说了三遍；STE：一句一事。
     """
-    return _lock_say("记录连写的竞争读数取不到（%s）。这一格没有读数，"
-                     "竞争次数无从得知。" % why)
+    return _lock_say("记录连写的竞争读数这次没读到（%s）。当时可能发生过竞争。"
+                     % why)
+
+
+def _log_lock_miss(stage, exc):
+    """把「为什么取不到」写进诊断遥测（env 门控），**绝不上屏**。
+
+    ★★ 0.60.1（T-01，五页文字复审）：异常类名从页面搬到日志。
+      出口是 `audit_chain.tlog`（`ANTINEL_LOCK_TELEMETRY=1` 才真写）。
+      ★ 整段包 try：这条路径本身就在"取数失败"的分支里跑 —— 日志再失败
+        也不许把页面拖下水（错误处理里再抛错是最难查的形状）。
+    """
+    try:
+        import audit_chain as _AC
+        _AC.tlog("lock_line_unreadable", stage=stage,
+                 err="%s: %s" % (type(exc).__name__, exc))
+    except Exception:                               # noqa: BLE001
+        pass
 
 
 def _lock_line():
@@ -4024,21 +4113,23 @@ def _lock_line():
         d = _hs._shield_audit_dir()
         _p = AC.lock_events_path(d)
     except Exception as e:                          # noqa: BLE001
-        return _lock_unknown("取数失败：%s" % type(e).__name__)
+        _log_lock_miss("取数入口", e)
+        return _lock_unknown("取数入口没起来")
     try:
         pr = AC.lock_pressure(path=_p)
     except Exception as e:                          # noqa: BLE001
-        return _lock_unknown("读取出错：%s" % type(e).__name__)
+        _log_lock_miss("读取", e)
+        return _lock_unknown("读取时出错")
     if not isinstance(pr, dict) or "checked" not in pr:
         # 键漂移也是"取不到"：`checked` 不在 ⇒ 下一句 `is False` 恒假 ⇒ 静默。
-        return _lock_unknown("返回格式里没有 checked")
+        return _lock_unknown("返回的内容不完整")
     # ★ 没查成 ≠ 没竞争（A5）：读不到时**必须出声**。沉默的默认解释是
     #   "没有竞争"，而真实情况是"不知道" —— 这正是本仓第 ④ 条判据。
-    #   ★ 文案避开双重否定（STE100 D8）：写"无从得知、可能发生过"，不写"不等于没有"。
+    #   ★ 文案避开双重否定（STE100 D8）：写"当时可能发生过竞争"，不写"不等于没有"。
+    #   ★★ 0.60.1（T-01）：这一路原本自己写一句，与 `_lock_unknown` 措辞分叉
+    #     （同一件事两套话）⇒ 改成走同一出口，只把原因换掉。
     if pr.get("checked") is False:
-        return _lock_say("记录连写的竞争读数读不到（%d 个文件）。"
-                         "竞争次数暂时无从得知，当时可能发生过竞争。"
-                         % len(pr.get("unreadable") or []))
+        return _lock_unknown("%d 个文件读不出" % len(pr.get("unreadable") or []))
     if not (pr.get("timeouts") or pr.get("steals")):
         return ""
     parts = []

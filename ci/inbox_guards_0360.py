@@ -2773,7 +2773,7 @@ def _x_tools():
         {"name": "X-CLEAN-2", "path": "D:\\xwork\\xclean2", "verdict": "CLEAN",
          "size": 998, "files": 2, "trunc": True},
         {"name": "X-NA-1", "path": "D:\\xwork\\xna", "verdict": "NA",
-         "size": 1, "files": 1, "excl": "不适用：更新包"},
+         "size": 1, "files": 1, "excl": "-updater"},
     ]
 
 
@@ -2961,8 +2961,13 @@ def _x2_core(page):
     if "自认打包过" not in page or "自认往外发过" not in page:
         return "有事的行没带档位文案"
     # NA 仍逐行：「没检查」的事实不许折叠没了
-    if "未检查：不适用：更新包" not in page:
-        return "NA（不适用/未检查）行丢了 —— 那是「没查」的事实"
+    # ★★★ 0.60.1（T-12）：断言锚点从「未检查：不适用：更新包」改成**真实形状**。
+    #   旧夹具给 `"excl": "不适用：更新包"` 是**自己造的**值，而生产侧
+    #   `antinel._scan_excluded()` 返回的是匹配到的路径片段（`-updater`、
+    #   `node_modules`…）⇒ 这条判据从来没有用真实输入验证过（假绿③族：
+    #   夹具合成形状 ≠ 生产输入）。现在夹具给真实值，断言要的是**翻译后的人话**。
+    if "未检查：这是更新包，不是工具本体" not in page:
+        return "NA（不适用/未检查）行丢了或没翻成人话 —— 那是「没查」的事实"
     if "不适用／没检查的（1 个）" not in page:
         return "NA 没有自己的组"
     # 名单一个字不减（信息去哪了：折叠区，不是删了）
@@ -2979,6 +2984,62 @@ def c_x2():
     """X2 ★ CLEAN 分层：聚合成一个默认折叠的组；有事/NA 仍逐行；名单不减。"""
     page, why = _x_render()
     return why or _x2_core(page)
+
+
+def c_excl_reasons_cover_patterns():
+    """NA 行的「为什么不查」**每一句都是人话**，且覆盖率 100%。
+
+    ★★★ 0.60.1（T-12）**防复发**：T-12 的病是「内部后缀直接上屏」
+      （页面上印 `未检查：-updater`）。把映射表写对一次不够 ——
+      `antinel._SCAN_EXCLUDE_PAT` 是判定真源，它以后新增一个模式
+      （比如 `ollama`），页面就会立刻印出一个新的英文碎片，而**没有任何
+      判据会红**。这条把两者绑在一起：
+        ① 真源里每个模式，`ui_server._EXCL_WHY` 必须有对应说法；
+        ② 每条说法里不许出现 ASCII 字母连串（英文碎片不许再上屏）；
+        ③ 真值走 `_excl_why()`，产出必须与原样不同（等于没翻也算没做）。
+    """
+    import antinel as A
+    import ui_server as U
+    pats = list(A._SCAN_EXCLUDE_PAT)
+    why_map = U._EXCL_WHY
+    miss = [p for p in pats if p not in why_map]
+    if miss:
+        return "这些排除模式没有中文说法（页面会印出英文碎片）：%r" % (miss,)
+    for p, why in why_map.items():
+        if re.search(r"[A-Za-z]{2,}", why):
+            return "「%s」的说法里还有英文碎片：%r" % (p, why)
+    for p in pats:
+        got = U._excl_why(p)
+        if not got or got == p:
+            return "「%s」翻译后与原样相同 ⇒ 等于没翻" % p
+    if "更新包" not in U._excl_why("-updater"):
+        return "生产侧真实值 -updater 没翻成「更新包」"
+    return True
+
+
+def n_excl_reasons_cover_patterns():
+    """负控：真源加一个没翻译的模式 / 说法里塞英文碎片 ⇒ 必须红。"""
+    import antinel as A
+    import ui_server as U
+    pats = A._SCAN_EXCLUDE_PAT
+    extra = "zz-new-tool"
+    A._SCAN_EXCLUDE_PAT = tuple(pats) + (extra,)
+    try:
+        r = c_excl_reasons_cover_patterns()
+        if r is True:
+            return "负控失效①：真源加了未翻译的模式，判据仍绿"
+    finally:
+        A._SCAN_EXCLUDE_PAT = pats
+    try:
+        U._EXCL_WHY[extra] = "node_modules 目录"
+        r2 = c_excl_reasons_cover_patterns()
+        if r2 is True:
+            return "负控失效②：说法里带英文碎片，判据仍绿"
+    finally:
+        U._EXCL_WHY.pop(extra, None)
+    if c_excl_reasons_cover_patterns() is not True:
+        return "负控还原失败：跑完负控后真实现自己红了（夹具污染）"
+    return True
 
 
 def n_x2():
@@ -3312,6 +3373,10 @@ CHECKS = [
      c_x4, n_x4),
     ("X5 导出默认脱敏：全文 0 命中＋计数不变＋文件名带脱敏态",
      c_x5, n_x5),
+    # ★★★ 0.60.1（T-12 防复发）：NA 行的「为什么不查」必须全中文，
+    #   且覆盖 `antinel._SCAN_EXCLUDE_PAT` 的每一项 —— 真源加模式没翻译就红。
+    ("X6 NA 行的排除原因：覆盖率 100% ＋ 无英文碎片 ＋ 真值真被翻过",
+     c_excl_reasons_cover_patterns, n_excl_reasons_cover_patterns),
 ]
 
 

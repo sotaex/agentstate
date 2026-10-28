@@ -478,20 +478,23 @@ def n_u01c():
     """反向对照（维二）：证明「归一刻」没有把 U-01 变成纸糊的。
 
     ① 真渲染一页；② 把 `M.reading_note` 换成**静态文案**漂移版
-       （`本次载入时` → `本次载入前`，时刻形态不变）；③ `_note_matches()` **必须红**
+       （`不随页面停留刷新` → `不随页面停留查看`，时刻形态不变）；③ `_note_matches()` **必须红**
        —— 否则说明归一顺手把"页面自造/回潮旧串"这类真漂移也吞了（修法过宽）。
     ★ 与 N-U01 分工：N-U01 打**调用点**回潮（页面侧），本条打**静态文案**漂移
       （实现侧）；两面都不许被归一掩蔽。
+    ★ 0.60.1（T-05）：锚点跟着 0.60.1 的措辞换（旧锚是「本次载入时」）。
+      这本身就是本负控存在的意义 —— 它**检出**了产品改措辞，只是改的是
+      措辞而不是机制，所以同步注入点即可（判据自己报出了原因，不是静默失效）。
     """
     orig = M.reading_note
     body = PC.body(_page("inbox", filt=M.BUCKET_ACTION))
     live = orig()
     if not _note_matches(body):
         return "夹具不成立：真实现下 U-01 的比对不通过 ⇒ 负控无分辨力"
-    if "本次载入时" not in live:
-        return ("夹具不成立：唯一实现产物的静态文案里没有「本次载入时」"
+    if "不随页面停留刷新" not in live:
+        return ("夹具不成立：唯一实现产物的静态文案里没有「不随页面停留刷新」"
                 "（产品又改了措辞 ⇒ 本负控的注入点需同步）")
-    M.reading_note = lambda: live.replace("本次载入时", "本次载入前")
+    M.reading_note = lambda: live.replace("不随页面停留刷新", "不随页面停留查看")
     try:
         if _note_matches(body):
             return ("负控失效：静态文案漂移后 `_note_matches()` 仍通过 ⇒ "
@@ -3015,18 +3018,27 @@ def t_02():
     #   旧断言只查"这个数字出现在 inc 里"，那正好是"永不更新的真数字"的温床。
     if ("%d 条" % len(rows)) in inc or "条拦截规则" in inc:
         return "L2 释义里又报了规则统计（统计不是释义）：%r" % inc[:60]
-    lh = GL.TERMS["L2"]["list_html"] or ""
+    # ★★★ 0.60.1（T-14，五页文字复审）：规则全表已从 `L2` 词条搬到页面
+    #   独立块（`inbox_server._rules_block()`）。判据改两处：
+    #     ① 同源断言改测 `GL.shield_rules_html()`（产出仍只有一份实现）；
+    #     ② **新增一条反向断言**：`L2` 词条里不许再有 `list_html`
+    #        —— 防下一轮有人图省事把它塞回词条（那正是 T-14 的病）。
+    #   断言强度不降：条数同源、行数、编号、中文说明四条全保留。
+    if GL.TERMS["L2"].get("list_html"):
+        return ("L2 词条里又出现了 list_html —— 规则全表已搬成页面独立块"
+                "（T-14），塞回词条就是让「挡下是什么」变成 74 行清单")
+    lh = GL.shield_rules_html() or ""
     if ("展开看全部 %d 条规则" % len(rows)) not in lh:
-        return "L2 规则全表的标题条数与 rule_table() 不同源（写死数字？）：%r" % lh[:60]
+        return "规则全表的标题条数与 rule_table() 不同源（写死数字？）：%r" % lh[:60]
     n_rows = lh.count('class="rrow"')
     if n_rows != len(rows):
-        return "L2 全表行数(%d) != 规则表条数(%d)" % (n_rows, len(rows))
+        return "规则全表行数(%d) != 规则表条数(%d)" % (n_rows, len(rows))
     for r in rows:
         if (">%s</span>" % r["id"]) not in lh:
-            return "L2 全表缺规则 %s" % r["id"]
+            return "规则全表缺规则 %s" % r["id"]
         zh = r.get("description_zh")
         if zh and zh not in lh:
-            return "L2 全表规则 %s 的中文说明缺失（写死/漏译？）" % r["id"]
+            return "规则全表规则 %s 的中文说明缺失（写死/漏译？）" % r["id"]
     # ── ③ 类别中文名完备（fail-loud 的正向面）──
     for r in rows:
         try:
@@ -3114,6 +3126,31 @@ _RANK_ROWS = [
 ]
 
 
+def _strip_rules_all(page):
+    """剥掉「挡下是怎么判的」整块（规则全表）。
+
+    ★★★ 0.60.1（T-14）：规则全表已从 `L2` 词条搬到页面独立块
+      （`inbox_server._rules_block()`，前后带 `<!--rules-all-->` 标记）。
+      它装 `description_zh` 审计全文是**设计如此**（学习场景：用户点开
+      就是为了看全表），与「排行行不许把审计全文上屏」不冲突。
+      原先这块在词条里，被 `body_without_terms` 顺手剥掉；搬出来后
+      必须在这里**显式剥**，否则 T-03 会把整张规则表当成排行行
+      —— 本轮实测正是这样红的（真红，不是误报）。
+    ★ 按注释标记切，不用正则剥 `<div>`：div 是嵌套的，正则配平不可靠。
+    """
+    a_mark, b_mark = "<!--rules-all-->", "<!--/rules-all-->"
+    out, i = [], 0
+    while True:
+        a = page.find(a_mark, i)
+        if a < 0:
+            out.append(page[i:])
+            break
+        out.append(page[i:a])
+        b = page.find(b_mark, a)
+        i = len(page) if b < 0 else b + len(b_mark)
+    return "".join(out)
+
+
 def _t03_core(page):
     """排行行形态断言本体（T-03 与 N-T03 共用 —— 负控证明这把尺子会咬）。
 
@@ -3121,7 +3158,9 @@ def _t03_core(page):
       短名与 rid 保留；L2 问号全表（details 词条，同为 .rrow/.rid 形态）
       必须剥掉 —— 它装 description_zh 全文是**设计如此**（学习场景），
       不剥会跟排行行的「全文不许上屏」断言打架。
+    ★ 0.60.1：规则全表已搬出词条 ⇒ 先用 `_strip_rules_all()` 整块剥掉。
     """
+    page = _strip_rules_all(page)
     body = re.sub(r"\x00+", " ", re.sub(
         r"<[^>]+>", "\x00", PC.body_without_terms(page)))
     # ↑ 分层（剥 style/script/词条浮层）之后**再剥标签**取纯可见文本 ——
@@ -3435,15 +3474,9 @@ def t04e():
       现在产品与 T-04 都改成从 `M.STATE_LABEL` **派生**，这条闸负责堵住旧词
       从**任何别的渲染路径**回来（新增页面、历史文案、注释式复述都算）。
     """
-    pages = []
-    for view in ("inbox", "report", "health", "ledger", "health_exam"):
-        try:
-            p = SV.render_page(view=view, root=_TMPREG.tmpdir(prefix="g0490_t04d_"),
-                               token="T", items=_items(), rep=_REP, posture=_POSTURE)
-        except Exception as e:                                  # noqa: BLE001
-            return ("渲染 %s 失败：%s: %s —— 量具故障，不算通过"
-                    % (view, type(e).__name__, e))
-        pages.append((view, PC.body(p)))
+    pages, why = _five_pages("g0490_t04d_")
+    if why:
+        return why
     return _retired_state_core(pages)
 
 
@@ -3483,6 +3516,184 @@ def _voice_core(pages):
     return True
 
 
+def _five_pages(prefix="g0490_five_", layer=None):
+    """五页真渲染（`[(view, 层)]`）—— **唯一实现**：T-04d/T-04f/T-14d 共用。
+
+    ★ 为什么必须收成一处：渲染参数（root/token/items/rep/posture）一旦分叉，
+      几条判据量的就不是同一个产品了；而且新增一条"要看五页"的判据时，
+      几乎必然会再抄一遍这个循环 —— 抄第三遍的时候就没人记得改第一遍。
+    ★ `layer`：默认 `PC.body()`（正文层）。要看**HTML 注释标记**的判据必须
+      显式传 `PC.raw` —— `body()` 是剥注释的（`_HTML_COMMENT`），
+      拿正文层找 `<!--…-->` 会得到"五个页面都没有"，那是量具错，不是产品错。
+    """
+    layer = layer or PC.body
+    pages = []
+    for view in ("inbox", "report", "health", "ledger", "health_exam"):
+        try:
+            p = SV.render_page(view=view, root=_TMPREG.tmpdir(prefix=prefix),
+                               token="T", items=_items(), rep=_REP, posture=_POSTURE)
+        except Exception as e:                                  # noqa: BLE001
+            return None, ("渲染 %s 失败：%s: %s —— 量具故障，不算通过"
+                          % (view, type(e).__name__, e))
+        pages.append((view, layer(p)))
+    return pages, None
+
+
+#: 规则全表的边界标记（`inbox_server._rules_block()` 前后各一个）。
+_RULES_MARK = "<!--rules-all-->"
+#: 全表**唯一**允许的落点。将来 help 建起来、整块搬进「规则」栏目时，改这一行。
+_RULES_HOME = "health"
+
+
+def _rules_home_core(pages):
+    """规则全表落点数（正判据与负控共用同一入口）。
+
+    ★★★ 0.60.1（T-14 复核）：第一版把全表同时挂在日报与运行状态两页 ——
+      同一份内容两个渲染点，正是本仓第一顽症。创始人批示「集中放在一处」。
+      这条闸守的就是"只有一处"，所以它必须能对**两个落点**报红。
+    """
+    hit = [v for v, p in pages if _RULES_MARK in p]
+    if not hit:
+        return "五个页面里都没有规则全表 —— 被删了，或被藏到了页面之外"
+    if len(hit) > 1:
+        return ("规则全表有 %d 个渲染点（%s）—— 同一份内容多处实现"
+                % (len(hit), "/".join(hit)))
+    if hit[0] != _RULES_HOME:
+        return ("规则全表落在 %s，应在 %s —— 移位置请同时改 _RULES_HOME"
+                "（别让判据自己漂到新位置上去）" % (hit[0], _RULES_HOME))
+    return True
+
+
+@check("T-14d ★ 规则全表只有一个落点（运行状态页）")
+def t14d():
+    """「挡下是怎么判的」全表**只许出现一次**，且在运行状态页。
+
+    ★ 后半句（落点名称）不是形式主义：没有它，判据只数个数 ——
+      有人把整块搬到"收件箱"也会绿，而收件箱是要最小化的操作面。
+    """
+    pages, why = _five_pages("g0490_t14d_", layer=PC.raw)
+    if why:
+        return why
+    return _rules_home_core(pages)
+
+
+@check("N-T14d 负控：全表挂两页 / 挂错页 / 整块消失 ⇒ T-14d 必须红")
+def n_t14d():
+    """三喂：证明这尺子数个数、认位置、且"没有"也算红（不是只看有没有冲突）。"""
+    five = ("inbox", "report", "health", "ledger", "health_exam")
+
+    def mk(homes):
+        return [(v, (_RULES_MARK if v in homes else "")) for v in five]
+
+    if _rules_home_core(mk({"health"})) is not True:
+        return "负控方向异常：唯一落点在 health 上被判红 —— 尺子误伤真实现"
+    if _rules_home_core(mk({"health", "report"})) is True:
+        return "负控失效：全表挂在两页仍判绿（数个数这一腿没牙）"
+    if _rules_home_core(mk({"report"})) is True:
+        return "负控失效：全表挂在日报仍判绿（认位置这一腿没牙）"
+    if _rules_home_core(mk(set())) is True:
+        return "负控失效：全表整块消失仍判绿（把'删了'当成'没问题'）"
+    return True
+
+
+#: 证据行的摘要（`ui_server._evidence_html` 的 `.l1`）。
+_T17_L1 = re.compile(r"<div class='l1'>(.*?)</div>", re.S)
+
+#: 合成一张 PACK 卡用的证据项（含 `lastacceptedmanif`＝服务器真收下了）。
+_T17_PACK_ITEMS = [
+    {"kpath": "workspacesize", "value": 1048576, "kind": "mark",
+     "ts_ms": 1700000000000, "ts_text": "2026-10-28 10:00"},
+    {"kpath": "workspacepath", "value": "C:\\demo\\pkg", "kind": "mark",
+     "ts_ms": 1700000000000, "ts_text": "2026-10-28 10:00"},
+    {"kpath": "lastacceptedmanif", "value": "abc123", "kind": "mark",
+     "ts_ms": 1700000000000, "ts_text": "2026-10-28 10:00"},
+]
+
+
+#: 合成卡里的「从这些文件里读到」——真形状是 `(路径, 类别)` 元组，不是 dict。
+_T17_EVS = [("C:\\demo\\pkg\\manifest.json", "mark")]
+
+
+def _t17_core(page, pack_card=""):
+    """「摘要说全结论 ＋ 其余全折」断言本体（正判据与负控同一入口）。
+
+    两条腿，缺一条都会被绕过去：
+      ① **结构腿**：每个摘要行之后，到第一个 `<details` 之前必须是空的
+         —— 只要还有内容摊着，就是折叠回潮；
+      ② **内容腿**：PACK 的结论（服务器收下没收到）必须在**折叠外**。
+         只守①的话，把结论删掉也绿；只守②的话，摘要下面摊着五段也绿。
+    ★ ② 用合成卡走**真入口** `_evidence_html`，不读源码、不靠本机数据：
+      本机没有 PACK 记录时，靠真数据取样的判据会静默空转（假绿第六族）。
+    """
+    page = page or ""
+    if "<div class='l1'>" not in page:
+        return "体检页一行证据摘要都没有 —— 量具找不到对象（渲染路径变了？）"
+    for m in _T17_L1.finditer(page):
+        seg = page[m.end():]
+        cut = seg.find("<details")
+        if cut < 0:
+            return "摘要行后面没有折叠区 —— 详情又全摊开了（T-17 回潮）"
+        if seg[:cut].strip():
+            return ("摘要与折叠区之间又摊开了内容：%r"
+                    % re.sub(r"\s+", " ", seg[:cut]).strip()[:60])
+    m = _T17_L1.search(pack_card or "")
+    if not m:
+        return "合成 PACK 卡没有摘要行 —— 产出形状变了，先核验量具"
+    if "服务器收" not in m.group(1):
+        return ("PACK 摘要行没说「服务器收下了没」—— 结论被折进折叠区"
+                "（这是 T-17 的红线：折起来的不许是要紧的那句）")
+    return True
+
+
+@check("T-17 ★ 证据行：摘要说全结论，其余全折")
+def t17():
+    """创始人 2026-10-28：「除了摘要外，其他详情默认折叠更好一些」。
+
+    ★ 但折叠的边界不是"除了摘要"，而是**结论有没有说全**：PACK 的关键结论
+      「服务器收下没收到」原先住在数字卡里，连卡一起折就等于把判断依据藏起来。
+      ⇒ 结论提到摘要行，数字卡那一项删掉（同一事实不许两处）。
+    ★ 为什么量**单行**（`_row_html`）而不是整页体检页：夹具环境里体检页读的是
+      临时中枢的档案目录，那里一条档案都没有 ⇒ 页面渲染成「还没体检过」，
+      按页断言会变成**空集判绿**（假绿第六族）。`_row_html` 是页面的取数点，
+      它把 `_evidence_html` 委出去这一层也一并测到（否则改接别处也能绿）。
+    """
+    import ui_server as _U
+    det = {"C:\\demo\\pkg": [{"items": _T17_PACK_ITEMS}]}
+    row = _U._row_html({"verdict": "PACK", "name": "demo", "path": "C:\\demo\\pkg",
+                        "size": 1048576, "files": 3, "ev": _T17_EVS},
+                       {"PACK": {"icon": "P", "title": "打包过"}}, {}, det)
+    if "class='l1'" not in row:
+        return "单行模板里没有证据摘要 —— `_row_html` 不再走 `_evidence_html`（接别处了）"
+    card = _U._evidence_html({"ev": _T17_EVS}, det["C:\\demo\\pkg"], {}, {}, "PACK")
+    return _t17_core(row, card)
+
+
+@check("N-T17 负控：把结论折进去 / 把内容摊回摘要下 ⇒ T-17 必须红")
+def n_t17():
+    """两喂，各自打一条腿：②内容腿（删掉结论句）／①结构腿（摘要后塞内容）。"""
+    import ui_server as _U
+    card = _U._evidence_html({"ev": _T17_EVS},
+                             [{"items": _T17_PACK_ITEMS}], {}, {}, "PACK")
+    page = "<div class='ev'><div class='l1'>x</div><details>y</details></div>"
+
+    if _t17_core(page, card) is not True:
+        return "负控方向异常：合法的摘要＋折叠被判红 —— 尺子误伤真实现"
+
+    # ② 内容腿：把「服务器收下了」整句删掉（＝被折进折叠区看不见）
+    c2 = re.sub(r"\s*<b>服务器收下了。</b>", "", card)
+    if c2 == card:
+        return "负控自身失效：没能在合成卡里找到「服务器收下了」这句"
+    if _t17_core(page, c2) is True:
+        return "负控失效：PACK 结论被拿掉仍判绿（内容腿没牙）"
+
+    # ① 结构腿：摘要后面又摊一段数字卡
+    p2 = ("<div class='ev'><div class='l1'>x</div>"
+          "<div class='nums'>摊着的数字</div><details>y</details></div>")
+    if _t17_core(p2, card) is True:
+        return "负控失效：摘要与折叠区之间摊着内容仍判绿（结构腿没牙）"
+    return True
+
+
 def _voice_render_pages():
     """用户可见文案的**全部渲染入口**：监理五页 ＋ `antinel ui` 索引页（TPL）。
 
@@ -3490,15 +3701,9 @@ def _voice_render_pages():
       它既不在监理五页里，也不在「同一行成对引号」里 ⇒ 两条腿**都照不到**，
       只扫五页就是本仓最忌的那个形状：**查不到的那一半天然全绿**。
     """
-    pages = []
-    for view in ("inbox", "report", "health", "ledger", "health_exam"):
-        try:
-            p = SV.render_page(view=view, root=_TMPREG.tmpdir(prefix="g0490_t04f_"),
-                               token="T", items=_items(), rep=_REP, posture=_POSTURE)
-        except Exception as e:                                  # noqa: BLE001
-            return None, ("渲染 %s 失败：%s: %s —— 量具故障，不算通过"
-                          % (view, type(e).__name__, e))
-        pages.append((view, PC.body(p)))
+    pages, why = _five_pages("g0490_t04f_")
+    if why:
+        return None, why
     try:
         import ui_server as _U
         pages.append(("antinel ui 索引页", PC.body(_U._index_page("T"))))
@@ -4797,7 +5002,10 @@ def _x8_page():
 def _x8_core(page):
     """X8 尺子：结论卡必须排在「导出入口」「历次体检」**之前**。"""
     i_card = page.find("card sum")
-    i_exp = page.find("把这份结果存成一份文件")
+    # ★ 0.60.1（T-09）：产品文案压短成「把结果存成文件（PDF 需十几秒，
+    #   请勿重复点）」，锚点跟着换 —— 锚的必须是**产品真在说的那句**，
+    #   锚旧串等于这条判据从此找不到导出入口（本轮实测：X8 与它的负控双红）。
+    i_exp = page.find("把结果存成文件")
     i_hist = page.find("历次体检")
     if i_card < 0:
         return "页面上没有汇总卡（A1 置顶的结论卡）"
@@ -4941,7 +5149,7 @@ def _x10_render(scan, src=None, tag="is0490_x10"):
     """带导出插槽跑一次渲染（`after_card` 由本判据注入，与 `_view_exam` 同一契约）。"""
     import antinel                                                 # noqa: E402
     res = {"scan": scan, "egress": {}}
-    exp = ("<div class='note'>把这份结果存成一份文件："
+    exp = ("<div class='note'>把结果存成文件（PDF 需十几秒，请勿重复点）："
            "<a href='/exam-export?e=x&amp;fmt=pdf'>PDF</a></div>")
     try:
         if src is None:
@@ -4959,7 +5167,10 @@ def _x10_render(scan, src=None, tag="is0490_x10"):
 def _x10_core(page):
     """X10 尺子之一：导出入口必须落在**结论卡之后、① 组之前**（首屏文字区）。"""
     i_card = page.find("card sum")
-    i_exp = page.find("把这份结果存成一份文件")
+    # ★ 0.60.1（T-09）：产品文案压短成「把结果存成文件（PDF 需十几秒，
+    #   请勿重复点）」，锚点跟着换 —— 锚的必须是**产品真在说的那句**，
+    #   锚旧串等于这条判据从此找不到导出入口（本轮实测：X8 与它的负控双红）。
+    i_exp = page.find("把结果存成文件")
     i_tools = page.find("① 我电脑上有哪些 AI 工具")
     if i_card < 0:
         return "页面上没有结论卡（A1）"
@@ -5283,7 +5494,10 @@ def _u22_core(render):
                     "不给名字，读者永远看不到答案" % (_lb(_h), val[:90]))
     if "1 条说不清（25%）" not in val:
         return "说不清条数/占比不对：应为 1 条（25%）（实际 %r）" % val[:80]
-    if "线索取工具自己报的环境信息" not in val:
+    #    ★ 0.60.1（T-07）：「线索取」是缺字（应是「线索来自」），「工具自己报的」
+    #      带一点转述味 ⇒ 锚点跟着文案改成「线索来自工具自己写下的环境信息」。
+    #      强度不变：仍要求"判定方式"上屏。
+    if "线索来自工具自己写下的环境信息" not in val:
         return "缺「判定方式」—— 读者不知道这个数是怎么来的（实际 %r）" % val[:80]
     for en in ("high", "medium", "low", "none"):
         if en in val:

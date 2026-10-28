@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import time
 
 # 0.60.0：起子进程一律带 CREATE_NO_WINDOW —— 父进程可能是**无控制台**的
 # pythonw（钩子）／DETACHED（哨兵）／GUI 宿主 ⇒ 不带就会给子进程新建控制台
@@ -135,7 +136,7 @@ def _sweep_stale_distinfo(tree, version):
     return moved
 
 
-def _artifact_present(dist, version, kind):
+def _artifact_present(dist, version, kind, since=None):
     """dist 里是否已有**本版**产物（且非空）。`kind` = `"wheel"` / `"sdist"`。
 
     ★★ 0.60.0 为什么需要这个判定（实测形态，与下面两条救回都不同）：
@@ -145,12 +146,25 @@ def _artifact_present(dist, version, kind):
       于是**把已经成功的构建报成失败**（0.60.0 实测：`antinel-0.60.0.tar.gz`
       3.6MB 已躺在 dist 里，程序却说失败）。
       ⇒ 「先看东西在不在，再决定要不要救」。
+
+    ★★★ 2026-10-28（0.60.1 出包实测，**这条是那次事故的补丁**）：
+      上面那条口径有个致命漏洞 —— 「东西在」分不清**这次写的**还是**上次剩的**。
+      实测经过：第一轮构建出了 wheel，但清单里混进一个 `.away-*` 文件 ⇒
+      `verify_release.py [E]` 红。改完政策重跑，后端又因收尾清理 rc=1，
+      救回看到 dist 里"已有本版件"就宣布成功 —— **那个件是上一轮那个坏轮次的**。
+      于是验收读到的仍是旧清单，同一条红原样复现，白烧一轮 23 分钟。
+      ⇒ 加 `since`：只认**本次构建开始之后**写下的文件。
+        传 `None` 保持旧行为（只给不需要区分新旧的调用点用）。
     """
     name = ("antinel-%s-py3-none-any.whl" % version if kind == "wheel"
             else "antinel-%s.tar.gz" % version)
     p = os.path.join(dist, name)
     try:
-        return os.path.isfile(p) and os.path.getsize(p) > 0
+        if not (os.path.isfile(p) and os.path.getsize(p) > 0):
+            return False
+        if since is not None and os.path.getmtime(p) < since:
+            return False
+        return True
     except OSError:
         return False
 
@@ -333,9 +347,12 @@ def build_artifacts(py, dist, version):
     #   ★ 这不是"顺手改顺序"，是**依赖关系决定的**：兜底路径依赖的输入必须先产出。
 
     # ---- sdist ----
+    # ★ 2026-10-28：本次构建的起点。救回只认这之后写下的文件 ——
+    #   否则会把上一轮遗留的同名件当成本次产物（0.60.1 实测白烧一轮）。
+    _t_build = time.time()
     rc_s = _run([py, "-m", "build", "--no-isolation", "--sdist", "--outdir", dist], cwd=ROOT)
     if rc_s != 0:
-        got = _artifact_present(dist, version, "sdist")
+        got = _artifact_present(dist, version, "sdist", since=_t_build)
         if got:
             # ★★ 0.60.0：产物已直接落在 dist（build 是"先写产物、后收尾清理"，
             #   本宿主禁删 ⇒ 收尾必失败 ⇒ rc=1 但东西是好的）。
@@ -378,7 +395,7 @@ def build_artifacts(py, dist, version):
     # ---- wheel（三条救回，按代价从低到高）----
     rc_w = _run([py, "-m", "build", "--no-isolation", "--wheel", "--outdir", dist], cwd=ROOT)
     if rc_w != 0:
-        ok = _artifact_present(dist, version, "wheel")
+        ok = _artifact_present(dist, version, "wheel", since=_t_build)
         if ok:
             print("   [救回 wheel] 后端 rc=%d，但 dist 里已有本版件 —— "
                   "被拦的只是收尾清理" % rc_w)
@@ -403,7 +420,7 @@ def build_artifacts(py, dist, version):
                     print("   [救回 wheel] 后端 rc=%d，暂存树在：%s（与源码逐字节一致）"
                           " —— 用官方 wheel pack 重打包" % (rc_w, tree))
                     if _run([py, "-m", "wheel", "pack", tree, "-d", dist], cwd=ROOT) == 0:
-                        ok = _artifact_present(dist, version, "wheel")
+                        ok = _artifact_present(dist, version, "wheel", since=_t_build)
         if not ok:
             # 救回③：离开仓根、到系统 %TEMP% 从本版 sdist 重建（本宿主的唯一出路）
             print("   [救回 wheel] 暂存树这条路走不通 —— 改在系统临时目录从 sdist 重建")

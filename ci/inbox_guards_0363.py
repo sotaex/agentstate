@@ -172,6 +172,10 @@ def n_light_greens_on_unknown_is_caught():
     import importlib
     import inbox_model as M
     p = os.path.join(ROOT, "inbox_model.py")
+    # ★ 0.60.1：把**原始字节**留一份在内存里。还原之后要逐字节对账 ——
+    #   只验"light('banana') 回到黄灯"不够：换行被改、注释被吃掉都验不出来，
+    #   而 CRLF 化的文件会让后续每一次 `git diff` 变成 3165 行噪声。
+    _orig = open(p, "rb").read()
     _snapshot(p)
     try:
         src = open(p, encoding="utf-8").read()
@@ -206,8 +210,16 @@ def n_light_greens_on_unknown_is_caught():
             _lines[:_s]
             + ['    return STATE_L0, "坏：未登记姿态打绿（历史缺陷复现）"']
             + _lines[_e + 1:])
-        with open(p, "w", encoding="utf-8") as f:
-            f.write(mutated)
+        # ★★★ 0.60.1（本轮实测事故）：**必须二进制写**。
+        #   旧版用文本模式 `open(p, "w", encoding="utf-8")` —— 它在 Windows 上
+        #   把 `\n` 翻成 `\r\n`，于是整个 `inbox_model.py` 变成 CRLF
+        #   （`git diff` 报 3165 行改动，全是假 diff），更要命的是：
+        #   一旦 `_restore_all()` 没跑完（进程被杀、或两个实例并发同一个套件），
+        #   磁盘上就留下**变异体 ＋ 全文件换行**，之后每条判据量的都是一个
+        #   被改坏的产品。本轮实测正是如此：`if False:` 与 `STATE_L0` 两条变异
+        #   躺在工作树里，0363 R01 与 selfcheck M4 一起红，而产品代码是对的。
+        with open(p, "wb") as f:
+            f.write(mutated.encode("utf-8"))
         importlib.reload(M)
         got, _ = M.light("banana", [], now=None)
         assert got == M.STATE_L0, (
@@ -216,6 +228,15 @@ def n_light_greens_on_unknown_is_caught():
         return True
     finally:
         _restore_all()
+        # ★ 0.60.1：**逐字节对账**。还原链路坏掉比负控失效更险 ——
+        #   负控失效只是漏掉一个缺陷；还原失败是把缺陷写进产品，而且
+        #   后面所有判据都建在它上面（本轮实测：泄漏了一次，R01/M4 齐红）。
+        _now = open(p, "rb").read()
+        assert _now == _orig, (
+            "还原后字节不一致（原 %d 字节 / 现 %d 字节，CRLF 原 %d / 现 %d）"
+            "—— 负控把产品文件写坏了，必须人工修回"
+            % (len(_orig), len(_now),
+               _orig.count(b"\r\n"), _now.count(b"\r\n")))
         importlib.reload(M)
         got2, _ = M.light("banana", [], now=None)
         assert got2 == M.STATE_L1, (

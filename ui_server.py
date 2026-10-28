@@ -454,14 +454,26 @@ def _summary_card(res, verdicts):
     else:
         tile("别处观察到的东西", "没查到", "当空白读")
 
+    # ★★★ 0.60.1（T-10，五页文字复审）：**补上「不适用」这一档**。
+    #   病：旧句只列三档（有外传字样／查过没发现／没走到），漏了 NA
+    #   ⇒ 实测 4 + 52 + 0 = 56 ≠ 它自己说的 60。用户一算就发现对不上，
+    #   而且他算得对 —— 是我们漏了一档（NA 在页面下方单独成组，但汇总句
+    #   一个字没提）。凡「N 个 A，M 个 B」的句式，各项相加**必须**等于 N。
+    #   ★ n_na 取 `vc["NA"]`（与页面下方分组同一真源 `counts_by_verdict`），
+    #     不在这里另算第二个口径。
+    #   ★ 0.60.1 补：补一档会让句子变长，而 U-29（`_STE_SKEL_MAXLEN=60`）卡着
+    #     豁免行的行文长度 ⇒ 同批把「在自己写下的记录里」压成「有外传字样」
+    #     （那 7 个字的限定由下面那段 muted 承担：「监理只读到工具自己写下的
+    #     部分」）。加一档之后实测仍 ≤ 60。
+    n_na = int(vc.get("NA", 0))
     return ("<div class='card sum'><div class='sumh'>这次体检的结论</div>"
             "<div class='sumline'>查了 <b>%d</b> 个 AI 工具位置："
-            "<b>%d</b> 个在自己写下的记录里有外传字样，%d 个查过没发现，"
-            "%d 个没走到。</div><div class='nums'>%s</div>"
+            "<b>%d</b> 个有外传字样，%d 个查过没发现，"
+            "%d 个不适用，%d 个没走到。</div><div class='nums'>%s</div>"
             "<p class='muted small'>监理只读到工具<b>自己写下</b>的部分 —— "
             "会偷的工具不会写；所以「没发现」不是「没有问题」，"
             "「没查到」更不是。这一卡只做汇总，证据在下面四组里。</p></div>"
-            % (n, n_ev, n_clean, blind_n, "".join(tiles)))
+            % (n, n_ev, n_clean, n_na, blind_n, "".join(tiles)))
 
 
 def _row_html(r, verdicts, ev_human, details=None):
@@ -583,11 +595,55 @@ def _fmt_bytes(n):
     return "%d 字节" % int(n)
 
 
+#: 「这个落点为什么不查」⇒ 给用户的一句话原因。
+#:
+#: ★★★ 0.60.1（T-12，五页文字复审）：键必须**逐一覆盖**
+#:   `antinel._SCAN_EXCLUDE_PAT` 的每一项 —— 那条元组是判定真源（哪些路径
+#:   不算工具本体），这里是它的**中文说法**。两者的对应关系由判据
+#:   `ci/inbox_guards_0360.py::c_excl_reasons_cover_patterns` 守：
+#:   真源加了新模式而这里没翻 ⇒ 当场红（不然页面又会印出一个
+#:   `未检查：node_modules` 这样的英文碎片）。
+#:   ★ 为什么不在 `antinel.py` 里直接返回中文：`excl` 是**数据**（
+#:     `excluded_by` 也用它），翻译属于呈现层；数据层存机器值，呈现层出人话。
+_EXCL_WHY = {
+    "-updater": "这是更新包，不是工具本体",
+    "updater\\": "这是更新程序，不是工具本体",
+    "updater/": "这是更新程序，不是工具本体",
+    "node_modules": "这是依赖库目录，不是工具本体",
+    "\\.git\\": "这是版本库的元数据，不是工具本体",
+    "/.git/": "这是版本库的元数据，不是工具本体",
+    "user data": "这是工具的用户数据，不是程序本体",
+    "wechat": "这是微信的数据目录",
+    "weixin": "这是微信的数据目录",
+    "qqlive": "这是腾讯视频的数据目录",
+    "wemeet": "这是腾讯会议的数据目录",
+    "sogouime": "这是搜狗输入法的数据目录",
+}
+
+
+def _excl_why(raw):
+    """把 `_scan_excluded()` 的**匹配片段**翻成用户能读的原因。
+
+    ★★★ 0.60.1（T-12）：旧版把 `excl` 原样印在页面上 —— 用户读到
+      `未检查：-updater`，一个减号加一个英文单词，完全无法理解。
+      推断不出原因时**不许编**：回退成「不属于工具本体」并保留原片段
+      （括号里那一截是给我们自己排查用的，不是给用户看的解释）。
+    """
+    k = str(raw or "")
+    if k in _EXCL_WHY:
+        return _EXCL_WHY[k]
+    low = k.lower()
+    for pat, why in _EXCL_WHY.items():
+        if pat and pat.lower() in low:
+            return why
+    return "这个位置不属于工具本体（%s）" % k
+
+
 def _evidence_html(r, detail, verdicts, ev_human, verdict):
     evs = r.get("ev") or []
     if r.get("excl"):
-        return ("<div class='ev muted'>未检查：%s</div>"
-                % html.escape(str(r["excl"])))
+        return ("<div class='ev muted'>未检查：%s。</div>"
+                % html.escape(_excl_why(r["excl"])))
     if not evs:
         return ("<div class='ev muted'>扫过了，这次没找到它自己写下的外传记录"
                 " —— <b>不等于它没有</b>。</div>")
@@ -611,28 +667,50 @@ def _evidence_html(r, detail, verdicts, ev_human, verdict):
     what = {"PACK": "打包过你电脑上的文件",
             "SENT": "往外发送过东西",
             "SYNC": "在跟服务器同步"}.get(verdict, "留下了外传相关的记录")
+    # ★★★ 0.60.1（T-11，五页文字复审）：**标签按结论分档**。
+    #   病：旧版三档共用一份标签 —— 卡片上写着「它往外发送过东西」，
+    #   下面却标「打包时间」「打了多大」。这**不是措辞问题，是字段名与事实
+    #   不符**：用户会以为它既打包又发送，或者以为标签坏了。
+    #   ⇒ 三档各有一套词：(体量, 目录, 时间)。`SYNC` 的体量是 `None`
+    #     —— 同步不看体量，硬挂一个「送出去多大」就是编数字。
+    _lb = {"PACK": ("打了多大", "打包的是这个目录", "打包时间"),
+           "SENT": ("送出去多大", "发的是这个目录", "发送时间"),
+           "SYNC": (None, "同步的是这个目录", "同步时间"),
+           }.get(verdict, ("体量", "记录的目录", "记录时间"))
+    _size_lb, _path_lb, _time_lb = _lb
+    # ★★★ 0.60.1（T-17，创始人 2026-10-28「除了摘要外其他默认折叠」）：
+    #   **折叠的边界由"结论有没有说全"决定，不是由"除了摘要"决定**。
+    #   PACK 的关键结论是「服务器收下没收到」—— 它原本住在数字卡里，
+    #   把数字卡折进去就等于把「要不要紧」的判断依据藏起来，
+    #   用户得点开才知道这包到底发出去过没有。
+    #   ⇒ 结论先提到摘要行（不折），数字卡里那一项**删掉**（同一事实不许两处）。
+    _acc = _pick_value(items, "lastacceptedmanif")
     if ts_txt:
         line1 = "它自己记下：<b>%s</b> 它%s。" % (html.escape(ts_txt), what)
     else:
         line1 = "它自己记下：它%s（记录里没写具体时间）。" % what
+    if verdict == "PACK":
+        line1 += (" <b>服务器收下了。</b>" if _acc
+                  else " 服务器收没收到，它没写。")
 
     # ---- ② 关键数字：打包多大 / 打了多少文件 / 传给谁 ----
     # ★ 排版的硬要求：**卡片要么都排齐、要么不出现**。一条证据如果只有 1 项，
     #   一列孤零零地漂着最难看 ⇒ 少于 2 项时改为**一行文字**，不摆卡片。
     nums = []
-    ws = _pick_value(items, "workspacesize")
-    if ws and isinstance(ws.get("value"), (int, float)):
-        nums.append(("打了多大", _fmt_bytes(ws["value"])))
+    if _size_lb:
+        ws = _pick_value(items, "workspacesize")
+        if ws and isinstance(ws.get("value"), (int, float)):
+            nums.append((_size_lb, _fmt_bytes(ws["value"])))
     enc = _pick_value(items, "compressedsize", "encryptedsize")
     if enc and isinstance(enc.get("value"), (int, float)):
         nums.append(("压缩加密后", _fmt_bytes(enc["value"])))
     wp = _pick_value(items, "workspacepath", "workspacekey")
     if wp and isinstance(wp.get("value"), str):
-        nums.append(("打包的是这个目录", wp["value"]))
-    if _pick_value(items, "lastacceptedmanif"):
-        nums.append(("服务器收下了吗", "收下了"))
+        nums.append((_path_lb, wp["value"]))
+    # ★ T-17：`("服务器收下了吗", "收下了")` 这一项**已删** —— 结论已提到摘要行，
+    #   留在这里就是同一事实两处实现（点开折叠的人会看见两遍）。
     if ts_txt:
-        nums.append(("打包时间", ts_txt))
+        nums.append((_time_lb, ts_txt))
 
     if len(nums) >= 2:
         tiles = ("<div class='nums'>%s</div>"
@@ -647,9 +725,8 @@ def _evidence_html(r, detail, verdicts, ev_human, verdict):
 
     # ---- ③ 这意味着什么（老板看得懂的一句话） ----
     meaning = {
-        "PACK": "要不要紧，就看上面「服务器收下了吗」——<b>收下了，说明这包已经发出去过</b>；"
-                "没提，说明只在你电脑上打了包。",
-        "SENT": "它发的是什么，展开下面能看到它自己写的记录。",
+        "PACK": "收下了，说明这包已经发出去过；没提，说明只在你电脑上打了包。",
+        "SENT": "它发的是什么，下面能看到它自己写的记录。",
         "SYNC": "<b>同步不等于上传整个项目</b>，但说明你的数据有一条往外走的通道。",
     }.get(verdict, "")
 
@@ -680,10 +757,15 @@ def _evidence_html(r, detail, verdicts, ev_human, verdict):
                      "<p class='muted small'>这四列是从它自己的文件里<b>逐字抄下来的</b>，"
                      "没有加工。需要时可作为证据引用。</p>" % "".join(rows))
 
+    # ★★★ 0.60.1（T-17）：**摘要一行摊开，其余三项收进同一个折叠区**。
+    #   收之前是"摘要 ＋ 数字卡 ＋ 这意味着什么 ＋ 折叠的原始记录"四段全摊，
+    #   小窗口或工具多的时候每行占大半屏；现在一行摘要 → 想看再点开。
+    #   ★ 原来那个「看它的原始记录」的独立折叠**并进这一个**：同一行里
+    #     挂两个折叠，用户不知道点哪个才能看全。
     return ("<div class='ev'>"
-            "<div class='l1'>%s</div>%s%s"
-            "<details class='fold'><summary>看它的原始记录（技术细节，可作证据）"
-            "</summary>%s</details>"
+            "<div class='l1'>%s</div>"
+            "<details class='fold'><summary>细看：多大、在哪、为什么</summary>"
+            "%s%s%s</details>"
             "<div class='orig muted small'>从这些文件里读到：%s</div>"
             "</div>") % (
         line1, tiles, ("<div class='mean'>%s</div>" % meaning) if meaning else "",
@@ -1116,11 +1198,16 @@ def _result_html(res, verdicts, ev_human, after_card=""):
     #   只给一个 ⇒ 用户拿页面与终端对账时对不上，而两边都没说错。
     #   ⇒ 这里一句里同时给，是唯一不用读者自己折算的做法。
     if int(cov.get("registered_roots") or 0):
-        _walked = ("这次<b>全部走到了</b> —— 没查到 0 个。" if not blind_n
+        # ★★ 0.60.1（T-08，五页文字复审）：一句塞 4 个数＋括号＋分号＋破折号
+        #   ⇒ 拆两句，**数字一个不少**（0.53.0 T-8 创始人拍板「两个口径都要给」，
+        #   因为页面数与终端 `host-scan` 的数互不包含，只给一个会让人对账对不上）。
+        #   ★ 尾句不再说「没查到 0 个」—— 那句话与结论卡的「0 个没走到」重复，
+        #     而汇总句已经有这一格（T-10 同批发）。
+        _walked = ("这次<b>全部走到了</b>。" if not blind_n
                    else "这次<b>还有 %d 个没走到</b>。" % blind_n)
         head.append(
-            "<p>这次扫到 <b>%d</b> 个 AI 工具（其中 <b>%d</b> 个是靠登记表补上的）；"
-            "登记表里写的 <b>%d</b> 个位置，你电脑上存在 <b>%d</b> 个，%s</p>"
+            "<p>这次扫到 <b>%d</b> 个 AI 工具（其中 <b>%d</b> 个来自登记表）。</p>"
+            "<p>登记表写了 <b>%d</b> 个位置，本机存在 <b>%d</b> 个；%s</p>"
             % (len(tools), int(cov.get("added_by_registry") or 0),
                int(cov.get("registered_roots") or 0),
                int(cov.get("present") or 0), _walked))
@@ -1146,8 +1233,12 @@ def _result_html(res, verdicts, ev_human, after_card=""):
         "<button type='button' class='lnk' data-foldall='0'>全部收起</button></div>",
         "<h2 id='x-tools'>① 我电脑上有哪些 AI 工具（%d 个）</h2>" % len(tools),
         _tiles(vc, verdicts, blind_n, total=len(tools)),
-        "<p class='muted small'>六档是这么分的。🔴 自认打包过；🟠 自认往外发过；"
-        "🟡 自认在同步；⚪ 查过、没发现记录；⚫ 没查到；· 不适用。</p>",
+        # ★★ 0.60.1（T-02，五页文字复审）：删掉「六档是这么分的。🔴…」整句。
+        #   紧邻的 `_tiles` 已逐档给出图标＋档名＋一句说明（六档全在，
+        #   `_tiles` 遍历 `verdicts` 全表，不是只显示非零档），这句只是把
+        #   档名再念一遍；开头「六档是这么分的」还是元叙述（讲我们怎么排版，
+        #   不讲用户的事）。**页面与导出件都不许加回来** —— 同一份图例两处维护，
+        #   迟早漂。
         "<h3 class='gh'>逐个看（%d 个）</h3>" % len(tools),
         _rows_html(tools, verdicts, ev_human, scan.get("details")),
         "<h2 id='x-projs'>② 我的哪些项目被打包过（%d 个）</h2>" % len(_projs),
@@ -1348,8 +1439,12 @@ def _exam_export_html(res, verdicts, ev_human, meta=None):
         # 不冲突 —— 这是另一份文档，且两处的分区口径一致（同一个 _H_TITLES 尺子）。
         "<h2 id=\"x-tools\">① 我电脑上有哪些 AI 工具（%d 个）</h2>" % len(tools),
         _tiles(vc, verdicts, blind_n, total=len(tools)),
-        "<p class='muted small'>六档是这么分的。🔴 自认打包过；🟠 自认往外发过；"
-        "🟡 自认在同步；⚪ 查过、没发现记录；⚫ 没查到；· 不适用。</p>",
+        # ★★ 0.60.1（T-02，五页文字复审）：删掉「六档是这么分的。🔴…」整句。
+        #   紧邻的 `_tiles` 已逐档给出图标＋档名＋一句说明（六档全在，
+        #   `_tiles` 遍历 `verdicts` 全表，不是只显示非零档），这句只是把
+        #   档名再念一遍；开头「六档是这么分的」还是元叙述（讲我们怎么排版，
+        #   不讲用户的事）。**页面与导出件都不许加回来** —— 同一份图例两处维护，
+        #   迟早漂。
         _rows_html(tools, verdicts, ev_human, scan.get("details")),
         "<h2 id=\"x-projs\">② 我的哪些项目被打包过（%d 个）</h2>" % len(projs),
         _proj_html(projs),

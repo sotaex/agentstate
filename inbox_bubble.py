@@ -499,18 +499,27 @@ def bubble_health(root=None):
     rv = stamp.get("code_version") if isinstance(stamp, dict) else None
     cv = cur.get("version")
     drift = SV.version_drift(stamp, current=cur) if alive else None
+    # ★★★ 0.60.1（T-06，五页文字复审）：六句统一改，三处病一起治：
+    #   ① **去「紧急提醒：」前缀**。它读起来像"紧急提醒你一件事"，而
+    #      「紧急提醒」在别处是**窗口的名字**（`Antinel 监理#id · 紧急提醒`）
+    #      —— 同一个词两个身份，读者要猜。主词改成「弹窗提醒」，一句话说一件事。
+    #   ② **给主语**。旧句「开着的，但守护进程没在跑」—— 什么开着？
+    #      现在是「弹窗提醒是开着的」。
+    #   ③ **否定式退场**。「不会弹窗」否定的是"会不会弹"，而用户要问的是
+    #      "有没有人在守着" ⇒ 改成因果句「…所以弹不出来」。
+    #   ★ 判据 `0514.c_b18` 的 must 词同批改（见该处注释）。
     if not on:
-        text = "紧急提醒：配置里关掉了，不会弹窗。"
+        text = "弹窗提醒是关的，所以弹不出来。"
     elif not alive:
-        text = "紧急提醒：开着的，但守护进程没在跑，不会弹窗。"
+        text = "弹窗提醒是开着的，但守护进程没跑，所以弹不出来。"
     elif not rv:
-        text = ("紧急提醒：守护进程在跑，但没有版本戳。"
+        text = ("弹窗提醒：守护进程在跑，但没有版本戳。"
                 "重启它，才会用上新代码。")
     elif drift:
-        text = ("紧急提醒：守护进程跑的是旧代码（%s，本机 %s）。"
+        text = ("弹窗提醒：守护进程跑的是旧代码（%s，本机 %s）。"
                 "重启它，才会用上新代码。" % (rv, cv or "？"))
     else:
-        text = "紧急提醒：开着的，守护进程在跑。"
+        text = "弹窗提醒开着，守护进程在跑。"
     return {"on": bool(on), "alive": bool(alive), "pid": pid,
             "stamp": stamp, "code": cv, "drift": drift,
             "ok": bool(on and alive and rv and not drift), "text": text}
