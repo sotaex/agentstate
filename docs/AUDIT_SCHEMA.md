@@ -1,7 +1,17 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
-# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.25（随 v0.61.0）
+# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.26（随 v0.62.0）
 
+> v1.26（0.62.0）：**字段拆义，不新增记录类型** —— `notice_budget_window_closed`
+> 新增 `bucket`，`rule_id` 语义收紧为「只放真规则号」。此前 `rule_id` 直接写
+> `notice_gate()` 的第一个参数，而该参数既装真规则号（`SLOP-01`）又装**分桶 key**
+> （`DST-02-BASH` —— 同一规则 `DST-02` 的 Bash 提醒通道）⇒ 账本里出现 390 条
+> 「规则库里没有的规则号」，看起来像第 38 条规则，实际是分桶名占了字段名。
+> **不改**已有字段名（`rule_id` 保留）、**不改**已有取值域（新取值只会更窄）、
+> **不改** append-only 契约。**历史记录不追溯**：读旧记录按 `bucket` 取旧口径。
+> ★ 起因：37 条 × 新编号对照时把 `DST-02-BASH` 误判成「第 38 条幽灵规则」，
+> 读代码才发现是字段语义混装（铁律 44「同值不同义」）。
+>
 > v1.25（0.60.0）：**补登记 2 类** —— `rules_auto_refresh_skipped`、
 > `autostart_no_window_fixed`（均见下文「降级与配置变更类」），并把
 > `rules_snapshot_refreshed` 的**触发者**
@@ -337,7 +347,7 @@
 | type | 来源 | 关键字段 | 说明 |
 |---|---|---|---|
 | `notice_budget_merged` | 钩子 `notice_gate` | `rule_id`, `total`, `used`, `merged`, `quota`, `window_seconds`, `decision="allow"`, `severity="info"` | 某条规则**在本窗口内首次跨过配额**时写一条（每窗口每规则**最多一条**，不是每条提醒一条 —— 否则降噪机制自己把账本灌满）。语义："接下来不再逐条出声，改为合并"。★ 只记"进入合并态"这一次，不记后续每一次 |
-| `notice_budget_window_closed` | 钩子 `notice_gate` | `rule_id`, `total`, `used`, `dup`, `merged`, `window_seconds`, `decision="allow"`, `severity="info"` | 滚动窗口**结束时**的补记：`total` ＝ 本窗口该规则被请求提醒的**原始总条数**（＝ `used + dup + merged`）。★ 这是"原始条数不丢"的**可验真处** —— 三个分项之和必须等于 `total`，判据 `ci/inbox_guards_0470.py` 常驻核对 |
+| `notice_budget_window_closed` | 钩子 `notice_gate` | `rule_id`, `bucket`, `total`, `used`, `dup`, `merged`, `window_seconds`, `decision="allow"`, `severity="info"` | 滚动窗口**结束时**的补记：`total` ＝ 本窗口该规则被请求提醒的**原始总条数**（＝ `used + dup + merged`）。★ 这是"原始条数不丢"的**可验真处** —— 三个分项之和必须等于 `total`，判据 `ci/inbox_guards_0470.py` 常驻核对。<br>★★ 0.62.0（v1.21）：**新增 `bucket` 字段，`rule_id` 语义收紧**。此前 `rule_id` 直接写 `notice_gate()` 的第一个参数，而该参数既装真规则号（`SLOP-01`）又装**分桶 key**（`DST-02-BASH` —— 同一规则 `DST-02` 的 Bash 提醒通道）⇒ 账本里出现 390 条"规则库里没有的规则号"，看起来像第 38 条规则。现在：`rule_id` **只放真规则号**（正则 `^[A-Z]{2,5}-\d{2}` 取前缀，取不到填 `-`），`bucket` 放原始分桶名（与旧 `rule_id` 取值逐字相同）。**历史记录不追溯**（append-only），读账本时按 `bucket` 取旧口径、按 `rule_id` 取新口径 |
 
 ### 体检提醒类（0.53.0，v1.20 新增）
 

@@ -3690,6 +3690,19 @@ def _notice_budget_trace(res):
       只走 stderr（宿主可见）与链（可回看），不进气泡通道。
     """
     rid = str(res.get("rule_id") or "?")
+    # ★★ 0.62.0（2026-10-30）：**字段拆义**（铁律 44「同值不同义」）。
+    #   `notice_gate(rule_id, snippet)` 的第一个参数历史上既装真规则号
+    #   （SLOP-01 / CTX-01 …）又装**分桶 key**（`DST-02-BASH` —— 同一规则
+    #   DST-02 的 Bash 提醒通道，见下方 `notice_gate("DST-02-BASH", cand)`）。
+    #   直接把 raw 写进 `rule_id`，账本里就出现了 390 条「规则库里没有的规则号」，
+    #   看起来像第 38 条规则，**实际是分桶名占了字段名**。
+    #   ⇒ 写入侧拆成两个字段：`rule_id` 只放真规则号，`bucket` 放原始分桶名。
+    #   ★ 为什么不改 `notice_gate` 的签名：它有 38 个调用点，改签名是更大的
+    #     改动面；错的只是「写进账本时用了哪个字段名」，就地拆最省。
+    #   ★ 为什么不硬编码 `-BASH` 后缀：将来可能有 `-WRITE` 等其它通道。
+    #     规则号的格式是固定的「2–5 个大写字母 + 连字符 + 两位数字」，用它判。
+    _m = re.match(r"^([A-Z]{2,5}-\d{2})", rid)
+    _rule_id = _m.group(1) if _m else "-"
     try:
         if res.get("closed"):
             c = res["closed"]
@@ -3697,7 +3710,8 @@ def _notice_budget_trace(res):
                        "type": "notice_budget_window_closed", "tool": "-",
                        "session": "-", "host": "-", "decision": "allow",
                        "severity": "info", "action": "alert",
-                       "rule_id": rid,
+                       "rule_id": _rule_id,
+                       "bucket": rid,
                        "total": int(c.get("total") or 0),
                        "used": int(c.get("used") or 0),
                        "dup": int(c.get("dup") or 0),
