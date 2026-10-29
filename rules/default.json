@@ -809,17 +809,27 @@
       "command_patterns": [
         "\\bchmod\\s+000\\b",
         "\\bchmod\\b[^#\\n]{0,40}\\s-R\\b",
-        "\\bchown\\b[^#\\n]{0,40}\\s-R\\b"
+        "\\bchown\\b[^#\\n]{0,40}\\s-R\\b",
+        "\\bicacls\\b[^\\n]{0,120}\\s/deny\\b",
+        "\\bicacls\\b[^\\n]{0,120}\\s/t\\b[^\\n]{0,40}\\s/reset\\b",
+        "\\bicacls\\b[^\\n]{0,120}\\s/reset\\b[^\\n]{0,40}\\s/t\\b",
+        "\\btakeown\\b[^\\n]{0,120}\\s/r\\b"
       ],
-      "exclude_patterns": [],
+      "exclude_patterns": [
+        "^\\s*(?:grep|rg|egrep|fgrep|ag|ack)\\b[^;&|\\n]*$",
+        "^\\s*(?:cat|type|head|tail|less|more|bat|findstr|where)\\b[^;&|\\n]*$",
+        "^\\s*(?:echo|printf)\\b[^;&|\\n]*$",
+        "^\\s*git\\s+(?:log|show|diff|grep)\\b[^;&|\\n]*$"
+      ],
       "apply_to_tools": [
         "Bash"
       ],
-      "description": "Agent attempted to destroy permissions or ownership recursively (denial of service)",
-      "description_zh": "递归破坏权限或属主，可致服务不可用",
+      "description": "Agent attempted to destroy permissions or ownership recursively (denial of service); covers chmod/chown and Windows icacls/takeown",
+      "description_zh": "递归破坏权限或属主，可致服务不可用（含 Windows icacls/takeown）",
       "remediation": "Permission/ownership recursion is a sysadmin action; do it yourself after review",
       "remediation_zh": "递归改权限/属主属于系统管理操作，请人工审查后执行",
-      "label_zh": "破坏文件权限属主"
+      "label_zh": "破坏文件权限属主",
+      "note": "0.62.1 补 Windows 等价。原三条全是 Unix，而本条 severity=critical => block，故 Windows 上这条 block 规则从未生效过。Windows 侧按 Unix 侧同一口径收紧到「递归」：icacls /deny 直接拦（等价 chmod 000）；icacls /reset 必须同时带 /t 才拦（单文件重置继承是修权限的正当动作）；takeown 必须带 /r 才拦（单文件夺回属主是管理员日常）。exclude_patterns 四条只放行**单条**只读命令（末尾 [^;&|\\n]*$），链式命令不会被误放行 —— 起因是 _basic_hit 匹配「file_path ＋ 整条命令文本」，文档/日志里出现该词也会命中。"
     },
     {
       "id": "DST-09",

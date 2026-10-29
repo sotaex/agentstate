@@ -367,7 +367,7 @@ RULE_PURPOSE = {
     "DST-05": "Alerts on privilege escalation (sudo/chmod 777 -- sysadmin territory)",
     "DST-06": "Blocks remote-script-piped-to-interpreter (the classic supply-chain install)",
     "DST-07": "Blocks irreversible git discards (reset --hard / clean -fdx eat uncommitted work)",
-    "DST-08": "Blocks recursive permission/ownership destruction (denial-of-service class)",
+    "DST-08": "Blocks recursive permission/ownership destruction (denial-of-service class; POSIX chmod/chown and Windows icacls/takeown)",
     "DST-09": "Blocks alternate-data-stream writes from a file tool (Windows-only: path:stream is a legal POSIX filename)",
     "DST-10": "Blocks alternate-data-stream writes from a shell (redirect / -Stream / copy / open -- the command half of DST-09)",
     "CTX-01": "Alerts on environment enumeration (the precursor to secret exfiltration)",

@@ -10204,9 +10204,21 @@ _C_CASES = [
                 "content": "T='" + "sk-" + "Q7f" * 9 + "'\n"}), "content",
      ("Write", {"file_path": "/proj/README.md",
                 "content": "K=AKIA" + "IOSFODNN7EXAMPLE\n"})),
+    # ★★ 0.62.1：正控由 1 条变 4 条 —— DST-08 原来只有 Unix 三条 pattern，
+    #   补了 Windows 等价（icacls /deny、icacls /reset + /t、takeown /r）之后，
+    #   若仍只喂 `chmod -R`，新加的三条就是「改了没人会发现」。
+    #   负控同样由 1 条变 4 条：block 规则的大头成本是误拦，单文件 reset / grant /
+    #   单文件 takeown 都是管理员日常动作，**必须**逐条证明放行。
+    #   ★ 拼接写法（"ic"+"acls"）沿用本表既有风格：这个文件自己也在被扫范围内。
     ("DST-08", "权限/属主破坏",
-     ("Bash", {"command": "chm" + "od -R 755 /var/www"}), "command",
-     ("Bash", {"command": "chm" + "od 644 notes.txt"})),
+     [("Bash", {"command": "chm" + "od -R 755 /var/www"}),
+      ("Bash", {"command": "ic" + "acls C:\\data /deny Everyone:(F)"}),
+      ("Bash", {"command": "ic" + "acls C:\\data /reset /t"}),
+      ("Bash", {"command": "take" + "own /f C:\\Windows /r /d y"})], "command",
+     [("Bash", {"command": "chm" + "od 644 notes.txt"}),
+      ("Bash", {"command": "ic" + "acls C:\\data /reset"}),
+      ("Bash", {"command": "ic" + "acls C:\\data /grant dev:(F)"}),
+      ("Bash", {"command": "take" + "own /f C:\\mydir\\a.txt"})]),
     # ★★ 0.62.0：期望通道从 content 改为 command —— 这是**规则的形态被修对了**，
     #   不是判据被放宽。旧 CTX-07 把三条 Python 语法 pattern 放进 content_patterns，
     #   却挂在 `apply_to_tools: ["Bash"]` 上：Bash 通道没有 file_targets 可审，
@@ -10292,11 +10304,22 @@ def _c_fire(proj, env, tool, ti, sid):
 def _c_case_verdict(proj, env, case, tag):
     """一个用例的双腿判决。**C 族与 C-T1 共用这一份**（同一事实不许两套实现）。
 
-    返回 dict：pos_hit / kind / kinds / neg_clean。
+    返回 dict：pos_hit / kind / kinds / neg_clean / pos_miss / neg_bad。
     读数取自项目审计链（`_sec05_audit`，按 session 过滤），不看 stdout 文案 ——
     stdout 会因 notice_gate 去重而**同一路径同一天只提醒一次**（本轮实测过）。
+
+    ★★ 0.62.1：正控／负控允许**多形态**（`list of (tool, input)`）。
+      起因是 `DST-08` 补了 Windows 等价后，一条 Unix 正控 `chmod -R` 只覆盖
+      三条 pattern 中的一条 —— 另外三条 `icacls /deny`、`icacls /reset /t`、
+      `takeown /r` 就变成「改了没人会发现」的新一批（正是清单 §8 说的
+      「37 条规则里 8 条没有任何判据」的同一个病）。
+      **单形态（tuple）走原路径、原 session 名**，既有 36 条的读数逐字节不变；
+      多形态每条各用一个 session，因为 `_sec05_audit` 按 `session` **严格相等**过滤，
+      共用一个 session 会让「第一条命中」把后三条的漏拦掩盖掉。
     """
-    rid, _zh, (ptool, pinput), kind, neg = case
+    rid, _zh, pos, kind, neg = case
+    poses = pos if isinstance(pos, list) else [pos]
+    negs = (neg if isinstance(neg, list) else [neg]) if neg else []
     seed = _C_SEEDS.get(rid)
     if seed:
         seed(proj)
@@ -10305,29 +10328,41 @@ def _c_case_verdict(proj, env, case, tag):
         return {k: (v.replace("<proj>", proj) if isinstance(v, str) else v)
                 for k, v in ti.items()}
 
-    sid = "c-%s-%s" % (rid, tag)
-    _c_fire(proj, env, ptool, _abs(pinput), sid)
-    ids, kinds = _sec05_audit(proj, sid)
-    v = {"pos_hit": rid in ids, "kinds": sorted(kinds), "kind": kind,
-         "neg_clean": True}
-    if neg:
-        nt, ni = neg
-        nsid = "c-%s-%s-neg" % (rid, tag)
+    v = {"pos_hit": True, "kinds": set(), "kind": kind, "neg_clean": True,
+         "pos_miss": [], "neg_bad": []}
+    for i, (ptool, pinput) in enumerate(poses):
+        sid = ("c-%s-%s" % (rid, tag)) if len(poses) == 1 \
+            else ("c-%s-%s-p%d" % (rid, tag, i))
+        _c_fire(proj, env, ptool, _abs(pinput), sid)
+        ids, kinds = _sec05_audit(proj, sid)
+        if rid not in ids:
+            v["pos_hit"] = False
+            v["pos_miss"].append("%s:%s" % (ptool, str(pinput)[:70]))
+        v["kinds"] |= kinds
+    for j, (nt, ni) in enumerate(negs):
+        nsid = ("c-%s-%s-neg" % (rid, tag)) if len(negs) == 1 \
+            else ("c-%s-%s-neg%d" % (rid, tag, j))
         _c_fire(proj, env, nt, _abs(ni), nsid)
         nids, _nk = _sec05_audit(proj, nsid)
-        v["neg_clean"] = rid not in nids
+        if rid in nids:
+            v["neg_clean"] = False
+            v["neg_bad"].append("%s:%s" % (nt, str(ni)[:70]))
+    v["kinds"] = sorted(v["kinds"])
     return v
 
 
 def _c_case_problem(rid, v):
     """把判决翻成「红的话怎么说」。返回 None ＝ 绿。"""
     if not v["pos_hit"]:
-        return "%s 正控没命中（规则失效或正则被写松），通道=%s" % (rid, v["kinds"])
+        more = ("；漏拦：" + "；".join(v.get("pos_miss") or [])) if v.get("pos_miss") else ""
+        return ("%s 正控没命中（规则失效或正则被写松），通道=%s%s"
+                % (rid, v["kinds"], more))
     if v["kind"] not in v["kinds"]:
         return ("%s 命中通道是 %s，期望 %s —— 只断言'命中'会把通道漂移读成正常"
                 "（假绿第十一族）" % (rid, v["kinds"], v["kind"]))
     if not v["neg_clean"]:
-        return "%s 负控被误拦 —— 近似但不是那个东西的样本必须放行" % rid
+        more = ("；误拦：" + "；".join(v.get("neg_bad") or [])) if v.get("neg_bad") else ""
+        return ("%s 负控被误拦 —— 近似但不是那个东西的样本必须放行%s" % (rid, more))
     return None
 
 
@@ -10390,7 +10425,40 @@ def _c_break(proj, rid, mutate):
     return None
 
 
-@check("C-T1 牙齿：把规则改坏，同一入口必须立刻翻红（三条腿，各用独立夹具）")
+def _m_dst08_drop_win(r):
+    """牙齿腿①（正控）：只删 Windows 等价，保留 Unix 三条。
+
+    若 C-DST-08 真的在看每条 pattern，删掉 icacls/takeown 后必然报「漏拦」。
+    ★ 断言真的改了字节 —— 否则（锚点哪天被改名）过滤成空操作，判据会
+      把它读成「牙齿失效」，实际是量具打偏（负控变异锚点必须从产品自身取词）。
+    """
+    pats = list(r["command_patterns"])
+    drop = [p for p in pats if "icacls" in p or "takeown" in p]
+    # ★ 不锁死条数：规则演进会自然增删 pattern，写死 3/4 会让这条牙齿腿
+    #   在**产品变好**时误红（本轮第一版就写了 ==3，实得 4 —— 立刻被抓）。
+    #   要断言的是「锚点存在」＋「变异真的改了」，这两件与条数无关。
+    assert drop, ("变异锚点失效：command_patterns 里找不到 icacls/takeown 条目"
+                  "（锚点被改名？）")
+    r["command_patterns"] = [p for p in pats if p not in drop]
+    assert len(r["command_patterns"]) < len(pats), "变异未生效：过滤后条数没变"
+
+
+def _m_dst08_loose_reset(r):
+    """牙齿腿②（负控）：把「/reset 必须带 /t」放松成裸 /reset。
+
+    这条宽松写法正是《夜间升级启动清单》原方案给的 —— 它会把
+    `icacls C:\\data /reset`（单文件重置继承，管理员修权限的日常动作）误拦。
+    负控腿必须抓住它，否则「不误拦」这件事没有任何证据。
+    ★ 放松是**追加**更宽的模式，正控会仍然命中 ⇒ 红只能来自负控，定位干净。
+    """
+    pats = list(r["command_patterns"])
+    n = len(pats)
+    pats.append(r"\bicacls\b[^\n]{0,120}\s/reset\b")
+    assert len(pats) == n + 1, "变异未生效"
+    r["command_patterns"] = pats
+
+
+@check("C-T1 牙齿：把规则改坏，同一入口必须立刻翻红（五条腿，各用独立夹具）")
 def c_t1():
     legs = [
         ("SEC-02", "正控", "路径面",
@@ -10404,6 +10472,12 @@ def c_t1():
          lambda r: r.__setitem__("placeholder_patterns", [])),
         ("DST-06", "负控", "命令面排除",
          lambda r: r.__setitem__("exclude_patterns", [])),
+        # ★★ 0.62.1：DST-08 补了 Windows 等价后必须有两条腿 ——
+        #   一条守「新加的三条 pattern 删了就红」，一条守「放松成裸 /reset 就红」。
+        #   后者是对清单原方案的反向证明：原方案直接匹配 `/reset`，
+        #   会把单文件重置继承误拦，而负控腿就是量这件事的。
+        ("DST-08", "正控", "Windows 等价三条 pattern", _m_dst08_drop_win),
+        ("DST-08", "负控", "「/reset 必须带 /t」这条递归约束", _m_dst08_loose_reset),
     ]
     silent = []
     for rid, which, face, mutate in legs:
@@ -10418,8 +10492,8 @@ def c_t1():
     if silent:
         return ("牙齿失效：改坏规则后这些腿仍然绿 ⇒ C-族没有分辨力：%s"
                 % "；".join(silent))
-    _note("三条腿改坏后全部翻红：SEC-02 删路径 pattern / SEC-06 清空占位值清单 / "
-          "DST-06 清空命令排除")
+    _note("五条腿改坏后全部翻红：SEC-02 删路径 pattern / SEC-06 清空占位值清单 / "
+          "DST-06 清空命令排除 / DST-08 删 Windows 等价 / DST-08 放松成裸 /reset")
     return True
 
 

@@ -372,13 +372,18 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
 ## DST-08  Permission/ownership destruction
 - category: destructive | severity: critical | dynamic (hook only) | tools: Bash
 - purpose: Blocks recursive permission/ownership destruction (denial-of-service class)
-- description: Agent attempted to destroy permissions or ownership recursively (denial of service)
-- 说明: 递归破坏权限或属主，可致服务不可用
+- description: Agent attempted to destroy permissions or ownership recursively (denial of service); covers chmod/chown and Windows icacls/takeown
+- 说明: 递归破坏权限或属主，可致服务不可用（含 Windows icacls/takeown）
 - 处理建议: 递归改权限/属主属于系统管理操作，请人工审查后执行
 - command_patterns:
     - `\bchmod\s+000\b`
     - `\bchmod\b[^#\n]{0,40}\s-R\b`
     - `\bchown\b[^#\n]{0,40}\s-R\b`
+    - `\bicacls\b[^\n]{0,120}\s/deny\b`
+    - `\bicacls\b[^\n]{0,120}\s/t\b[^\n]{0,40}\s/reset\b`
+    - `\bicacls\b[^\n]{0,120}\s/reset\b[^\n]{0,40}\s/t\b`
+    - `\btakeown\b[^\n]{0,120}\s/r\b`
+- exclude_patterns: `^\s*(?:grep|rg|egrep|fgrep|ag|ack)\b[^;&|\n]*$`, `^\s*(?:cat|type|head|tail|less|more|bat|findstr|where)\b[^;&|\n]*$`, `^\s*(?:echo|printf)\b[^;&|\n]*$`, `^\s*git\s+(?:log|show|diff|grep)\b[^;&|\n]*$`
 - remediation: Permission/ownership recursion is a sysadmin action; do it yourself after review
 
 ## DST-09  Alternate data stream write (file path)
