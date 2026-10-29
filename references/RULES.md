@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # Antinel detection rules (generated from rules/default.json v0.62.0 - do not edit by hand)
 
-Category order = match priority: secrets > destructive > network > injection > context > metadata.
+Category order = match priority: secrets > destructive > network > injection > supply_chain > context > metadata > canary.
 Severity to action: critical = block, warning = alert (logged, allowed). All hits are collected; highest severity decides.
 
 ## SEC-01  Sensitive file read (.env)
@@ -231,10 +231,15 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - 说明: 尝试提权操作
 - 处理建议: 涉及提权的步骤建议你本人执行，不给 Agent 提权
 - command_patterns:
-    - `^\s*sudo\b`
-    - `^\s*su\b`
+    - `\bsudo\b`
+    - `\bsu\s+-`
     - `chmod\s+777`
     - `chown\s+root`
+    - `\brunas\b[^\n]{0,40}/user`
+    - `\bStart-Process\b[^\n]{0,80}-Verb\s+RunAs`
+    - `\bnet\s+localgroup\s+administrators\b[^\n]{0,80}/add`
+    - `\breg\s+add\b[^\n]{0,120}\\CurrentVersion\\Run`
+    - `\bNew-LocalUser\b|\bAdd-LocalGroupMember\b`
 - exclude_patterns: `sudo apt-get install`, `sudo pip install`
 - remediation: Run privileged steps yourself instead of letting the agent hold elevated shells.
 
@@ -392,10 +397,9 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
 - description: Inline base64-decode-then-exec/eval in a shell command (classic obfuscated payload carrier)
 - 说明: 命令行内联 base64 解码后 exec/eval 执行（经典混淆载荷载体）
 - 处理建议: 先解码审查内容；不要让解码后的代码直接执行
-- content_patterns:
-    - `\bexec\s*\(\s*(?:__import__\(['\"]base64['\"]\)\.)?base64\.b64decode\(`
-    - `\beval\s*\(\s*(?:__import__\(['\"]base64['\"]\)\.)?base64\.b64decode\(`
-    - `(?:exec|eval)\s*\([^;\n]{0,120}b64decode\s*\(`
+- command_patterns:
+    - `\bpython[23]?\s+-c\b[^\n]{0,200}b64decode[^\n]{0,120}\b(exec|eval)\b`
+    - `\bpython[23]?\s+-c\b[^\n]{0,200}\b(exec|eval)\b[^\n]{0,120}b64decode`
 - remediation: Decode and inspect the payload first; never let inline decoded code run directly.
 
 ## SEC-07  Clipboard read
@@ -516,6 +520,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
     - `(^|[\\/])\.mcp\.json$`
     - `(^|[\\/])claude_desktop_config\.json$`
     - `(^|[\\/])\.vscode[\\/]mcp\.json$`
+    - `(^|[\\/])mcp\.json$`
 - content_patterns:
     - `(?is)(?:>>|>|\btee\b|\bcp\b|\bmv\b|\bmove\b|\bcopy\b|\bset-content\b|\bout-file\b|\badd-content\b)[^\n]{0,120}\.mcp\.json`
     - `(?is)(?:>>|>|\btee\b|\bcp\b|\bmv\b|\bmove\b|\bcopy\b|\bset-content\b|\bout-file\b|\badd-content\b)[^\n]{0,120}mcp\.json`
@@ -533,6 +538,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
     - `(^|[\\/])\.mcp\.json$`
     - `(^|[\\/])claude_desktop_config\.json$`
     - `(^|[\\/])\.vscode[\\/]mcp\.json$`
+    - `(^|[\\/])mcp\.json$`
 - content_patterns:
     - `ignore\s+(all\s+)?(previous|prior|above)\s+instructions`
     - `exfiltrate|send\s+(the\s+)?(secrets?|credentials?|keys?|tokens?)\s+(to|via)`
@@ -552,6 +558,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
     - `(^|[\\/])\.mcp\.json$`
     - `(^|[\\/])claude_desktop_config\.json$`
     - `(^|[\\/])\.vscode[\\/]mcp\.json$`
+    - `(^|[\\/])mcp\.json$`
 - content_patterns:
     - `mcp-remote`
     - `"url"\s*:\s*"https?://`
@@ -568,6 +575,7 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
     - `(^|[\\/])\.mcp\.json$`
     - `(^|[\\/])claude_desktop_config\.json$`
     - `(^|[\\/])\.vscode[\\/]mcp\.json$`
+    - `(^|[\\/])mcp\.json$`
 - content_patterns:
     - `\bsk-[A-Za-z0-9_\-]{20,}\b`
     - `\bgh[pousr]_[A-Za-z0-9]{36,}\b`

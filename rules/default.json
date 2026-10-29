@@ -13,13 +13,13 @@
   },
   "category_order": [
     "secrets",
-    "canary",
     "destructive",
     "network",
     "injection",
     "supply_chain",
     "context",
-    "metadata"
+    "metadata",
+    "canary"
   ],
   "hardcoded_rules": {
     "_note": "判定由钩子内置实现（代码），**不读本文件的 enabled / disabled_rules**。用户关掉它们不会生效，关掉需要改代码。这两组必须分开：code_only 根本不在 rules 数组里（没有可关的条目），declared_but_code_driven 在 rules 里但判定走代码（enabled 字段对它无效）。",

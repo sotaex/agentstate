@@ -1098,8 +1098,17 @@ def _read_run_harness():
 def rules_md(rules_path):
     d = json.loads(Path(rules_path).read_text(encoding="utf-8"))
     static = {"secrets", "injection", "metadata"}
+    # ★★ 0.62.0：**从数据生成，不再硬编码**。
+    #   病灶：这一行原本写死「secrets > destructive > network > injection > context >
+    #   metadata」六类，而 `rules/default.json` 的 `category_order` 是同一事实的
+    #   第二份实现 —— 0.31 加了 supply_chain / canary 两个新 category 之后，
+    #   字段补了、这行没补，于是 RULES.md 长期对外声称只有 6 类。
+    #   ⇒ 修法是**消灭副本**（同源闸）：读 category_order 拼出来。
+    #   ★ 顺带：这让 `category_order` 第一次有了真实消费点 —— 此前全仓零引用，
+    #     一个 6 项枚举装 8 个取值，谁读它都会以为 supply_chain 不存在。
+    _cat = d.get("category_order") or []
     L = ["# Antinel detection rules (generated from rules/default.json v%s - do not edit by hand)" % d.get("version"),
-         "", "Category order = match priority: secrets > destructive > network > injection > context > metadata.",
+         "", "Category order = match priority: %s." % " > ".join(_cat),
          "Severity to action: critical = block, warning = alert (logged, allowed). All hits are collected; highest severity decides.", ""]
     for r in d["rules"]:
         kind = "static + dynamic" if r["category"] in static else "dynamic (hook only)"
