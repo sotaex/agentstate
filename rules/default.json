@@ -852,16 +852,17 @@
       "apply_to_tools": [
         "Bash"
       ],
-      "content_patterns": [
-        "\\bexec\\s*\\(\\s*(?:__import__\\(['\\\"]base64['\\\"]\\)\\.)?base64\\.b64decode\\(",
-        "\\beval\\s*\\(\\s*(?:__import__\\(['\\\"]base64['\\\"]\\)\\.)?base64\\.b64decode\\(",
-        "(?:exec|eval)\\s*\\([^;\\n]{0,120}b64decode\\s*\\("
+      "command_patterns": [
+        "\\bpython[23]?\\s+-c\\b[^\\n]{0,200}b64decode[^\\n]{0,120}\\b(exec|eval)\\b",
+        "\\bpython[23]?\\s+-c\\b[^\\n]{0,200}\\b(exec|eval)\\b[^\\n]{0,120}b64decode"
       ],
+      "content_patterns": [],
       "exclude_patterns": [],
       "description": "Inline base64-decode-then-exec/eval in a shell command (classic obfuscated payload carrier)",
       "description_zh": "命令行内联 base64 解码后 exec/eval 执行（经典混淆载荷载体）",
       "remediation": "Decode and inspect the payload first; never let inline decoded code run directly.",
       "remediation_zh": "先解码审查内容；不要让解码后的代码直接执行",
+      "note": "0.62.0：**形态错配修复**。旧版三条 pattern 全是 Python 语法（exec(...)/eval(...)），却挂在 apply_to_tools=[\"Bash\"] 上 —— 而 content_patterns 在 Bash 通道没有 file_targets 可审，**结构上恒不命中**（37 条里 15 条零命中，它是「形态错配」那一条）。改为 command_patterns 两条（双向覆盖 b64decode 与 exec/eval 的先后顺序）。★ 只保留「内联无管道」形态：`… | base64 -d | sh` 这类**管道**形态已由 DST-06 第 5/6 条 pattern 完整覆盖，本条不再重复 —— 两条都是 critical，重复只会让同一条命令被拦两次、报两个规则名。★ 必须 b64decode 与 exec/eval **同时出现**：`python -c \"print(base64.b64decode('aGk='))\"` 是正常解码，不该拦。",
       "label_zh": "解码后立即执行代码"
     },
     {
