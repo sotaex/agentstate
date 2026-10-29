@@ -21,6 +21,17 @@
     "context",
     "metadata"
   ],
+  "hardcoded_rules": {
+    "_note": "判定由钩子内置实现（代码），**不读本文件的 enabled / disabled_rules**。用户关掉它们不会生效，关掉需要改代码。这两组必须分开：code_only 根本不在 rules 数组里（没有可关的条目），declared_but_code_driven 在 rules 里但判定走代码（enabled 字段对它无效）。",
+    "code_only": {
+      "OUT-01": "输出面：私有密钥/凭据出现在工具输出里（hooks/pre_tool_use.py:3368 起，PostToolUse）",
+      "GOV-01": "套件治理：A1/A2 写入时刻拦截（_suite_gov_hit，同 ci/delivery_gate.py 双向同步）",
+      "BUDGET-01": "提醒预算：token 预算超阈值（_budget_hit）"
+    },
+    "declared_but_code_driven": {
+      "SLOP-01": "撞名/打字抢注检测（_slop_hit）。本文件里该条 enabled=false 是**设计**：它只承载描述与文档，判定走代码内置参考集（rules/typosquat_top.json），避免静态正则误报全部正常安装。详见该条 note。"
+    }
+  },
   "rules": [
     {
       "id": "SEC-01",
