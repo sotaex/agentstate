@@ -205,7 +205,7 @@ HARNESS_SRC = SRC / "scripts" / "verification_tests.py"
 if not HARNESS_SRC.is_file():
     raise SystemExit("★ 构建器找不到套件：%s\n  （产物仓构建必须用本仓的套件）" % HARNESS_SRC)
 NAME = "antinel-security"
-VERSION = "0.61.0"
+VERSION = "0.62.0"
 # P-A3: the namespace this build declares itself under. derive_object_ownership()
 # reads git remote first, then THIS field; fail-closed unattributed when neither
 # resolves. Kept beside the hashes so a third party can see what was declared.
@@ -453,6 +453,15 @@ GITIGNORE_TEMPLATE = (
     #   实测：不忽略 ⇒ 交付闸门的 L1（SPDX 归属）多报 4 处「缺 SPDX 头」假红，
     #   而这 4 个文件本来就不会进任何发布件 —— 假红会掩盖真红，必须收进口径。
     "analysis-tmp/\n.zwork/\n"
+    # ★★ 2026-10-30（0.62.0）：金丝雀诱饵目录 —— **绝不进版本库**。
+    #   理由不是「本机垃圾」，而是**机制性的**：诱饵的全部价值在于「只有本机知道
+    #   哪个文件是诱饵」；一旦进了仓库，攻击者先读 `.canary/` 就知道该绕开哪个
+    #   文件名、该忽略哪个 marker ⇒ 诱饵退化成普通文件，`SEC-11`（Canary file
+    #   read）观察的「外传链路」就断了。诱饵由 `antinel canary plant`
+    #   （安装末尾自动执行）在本机生成，每台机器 marker 不同。
+    #   ★ 这是同一教训的**第五次**：先只补进仓里那份 ⇒ JDG-05 当场红
+    #     （「模板 33 行／仓内 36 行」）。写进模板才是修法。
+    ".canary/\n"
 )
 
 # ★★ 2026-10-11（0.48.1，策略 v1.1 落地）：主许可 MIT → Apache-2.0。
@@ -1107,9 +1116,40 @@ def rules_md(rules_path):
     #   ★ 顺带：这让 `category_order` 第一次有了真实消费点 —— 此前全仓零引用，
     #     一个 6 项枚举装 8 个取值，谁读它都会以为 supply_chain 不存在。
     _cat = d.get("category_order") or []
+    # ★★ 0.62.0 补丁（同晚第二轮）：**SPDX 头由写出点加，不在本函数里**。
+    #   经过：把 RULES.md 改成从数据生成后，仓内那份被一个临时脚本用 `rules_md()`
+    #   直接写出，**漏了写出点那句 `"<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->\n"`**
+    #   ⇒ `ci/inbox_guards_0481.py` 的 L1（全仓 SPDX 头）当场红：
+    #   `references/RULES.md: 缺 SPDX 头`。
+    #   教训：`rules_md()` 只产出**正文**，头在写出点（build 里唯一一处，第 3050 行）；
+    #   手工重建产物必须**走同一个写出点**，不许自己拼 —— 否则拼接的两端各漂一半，
+    #   与 `.gitignore`／`THREAT_MODEL.md` 属同一族（构建器拥有的产物不许旁路生成）。
     L = ["# Antinel detection rules (generated from rules/default.json v%s - do not edit by hand)" % d.get("version"),
          "", "Category order = match priority: %s." % " > ".join(_cat),
          "Severity to action: critical = block, warning = alert (logged, allowed). All hits are collected; highest severity decides.", ""]
+    # ★★ 0.62.0（清单 P4-4 / DEC-22d）：**「关不掉」的规则必须写在用户看得见的地方**。
+    #   此前这四条散落在代码里（`_slop_hit` / `_budget_hit` / `_suite_gov_hit` / 输出面
+    #   扫描），口头说明只在内部文档出现过 ⇒ 用户以为把 `enabled: false` 写进配置就
+    #   关掉了，实际照响。产品承诺的边界不写清＝虚假承诺。
+    #   ★ 为什么不手写在文档里**而是从数据生成**：同一事实的第二份副本必然会漂
+    #     （本函数上面那条 category_order 就是活教材）。数据源是
+    #     `rules/default.json` 的 `hardcoded_rules`。
+    _hc = d.get("hardcoded_rules") or {}
+    if _hc:
+        L += ["## Rules that cannot be switched off by configuration", "",
+              "These judgements are implemented **in the hook code**, not in this table.",
+              "The only way to switch a rule off in this product is `enabled: false` on its"
+              " entry in `rules/default.json` (consumed by `_disabled()`); there is no"
+              " separate disable list. That field does **not** affect the entries below —"
+              " switching them off requires a code change.", ""]
+        for _grp, _title in (("code_only", "not present in this table at all"),
+                             ("declared_but_code_driven", "present below, but judged by code")):
+            _items = _hc.get(_grp) or {}
+            if not _items:
+                continue
+            L += ["### %s (%s)" % (_grp.replace("_", " "), _title), ""]
+            L += ["- `%s` — %s" % (k, v) for k, v in _items.items()]
+            L.append("")
     for r in d["rules"]:
         kind = "static + dynamic" if r["category"] in static else "dynamic (hook only)"
         deprecated = " | **status: deprecated (retired, never fires)**" if r.get("deprecated") else ""

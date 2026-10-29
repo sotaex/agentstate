@@ -22,7 +22,7 @@
     "canary"
   ],
   "hardcoded_rules": {
-    "_note": "判定由钩子内置实现（代码），**不读本文件的 enabled / disabled_rules**。用户关掉它们不会生效，关掉需要改代码。这两组必须分开：code_only 根本不在 rules 数组里（没有可关的条目），declared_but_code_driven 在 rules 里但判定走代码（enabled 字段对它无效）。",
+    "_note": "判定由钩子内置实现（代码），**不读本文件 rule 的 enabled 字段**（本产品**没有**独立的禁用清单：唯一的关法是规则文件里该条写 enabled:false，走 _disabled()）。用户关掉它们不会生效，要关只能改代码。两组必须分开：code_only 根本不在 rules 数组里（没有可关的条目，任何配置都碰不到它）；declared_but_code_driven 在 rules 里但判定走代码（enabled 字段对它无效，它写 false 只是为了不让通用正则接管）。",
     "code_only": {
       "OUT-01": "输出面：私有密钥/凭据出现在工具输出里（hooks/pre_tool_use.py:3368 起，PostToolUse）",
       "GOV-01": "套件治理：A1/A2 写入时刻拦截（_suite_gov_hit，同 ci/delivery_gate.py 双向同步）",
@@ -1114,8 +1114,7 @@
         "(^|[\\\\/])\\.cursor[\\\\/]mcp\\.json$",
         "(^|[\\\\/])\\.mcp\\.json$",
         "(^|[\\\\/])claude_desktop_config\\.json$",
-        "(^|[\\\\/])\\.vscode[\\\\/]mcp\\.json$",
-        "(^|[\\\\/])mcp\\.json$"
+        "(^|[\\\\/])\\.vscode[\\\\/]mcp\\.json$"
       ],
       "content_patterns": [
         "(?is)(?:>>|>|\\btee\\b|\\bcp\\b|\\bmv\\b|\\bmove\\b|\\bcopy\\b|\\bset-content\\b|\\bout-file\\b|\\badd-content\\b)[^\\n]{0,120}\\.mcp\\.json",
@@ -1132,7 +1131,7 @@
       "remediation": "Verify the new server's source, command and url; remove any you do not recognize and rotate the related credentials.",
       "description_zh": "MCP 配置文件被写入或修改",
       "remediation_zh": "核对新增 server 的来源。不认识的一律移除，并轮换相关凭据",
-      "note": "0.32.1：content_patterns 收紧为 Bash **写形态**（重定向/tee/cp/mv + 配置文件名）——旧版 `cat .mcp.json`（纯读取）也会命中，属于误报；读取可见性由 MCP-02（Read 通道）承担。",
+      "note": "0.32.1：content_patterns 收紧为 Bash **写形态**（重定向/tee/cp/mv + 配置文件名）——旧版 `cat .mcp.json`（纯读取）也会命中，属于误报；读取可见性由 MCP-02（Read 通道）承担。★★ 0.62.0：**裸文件名 pattern 不许进本条的 file_patterns**。`file_patterns` 在 Bash 上匹配的是**整条命令文本**，把 `mcp.json` 的裸名写进去，`cat .cursor/mcp.json` 这类**纯读取**就会命中「写入 MCP 配置」的告警（0.62.0 第一次提交就是这么错的，判据 X3-a 当场红：`rc=0 ids=['MCP-01']`）。裸名的**写入**形态本来已由第 2 条 content_pattern（写动词 + mcp.json）覆盖，读取可见性由 MCP-02（Read 通道）承担 ⇒ 本条只留 4 条带点/带目录的路径，补齐裸名是补在了错的地方。",
       "label_zh": "MCP 配置被改动"
     },
     {

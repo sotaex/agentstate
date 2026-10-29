@@ -10207,9 +10207,18 @@ _C_CASES = [
     ("DST-08", "权限/属主破坏",
      ("Bash", {"command": "chm" + "od -R 755 /var/www"}), "command",
      ("Bash", {"command": "chm" + "od 644 notes.txt"})),
+    # ★★ 0.62.0：期望通道从 content 改为 command —— 这是**规则的形态被修对了**，
+    #   不是判据被放宽。旧 CTX-07 把三条 Python 语法 pattern 放进 content_patterns，
+    #   却挂在 `apply_to_tools: ["Bash"]` 上：Bash 通道没有 file_targets 可审，
+    #   content 面结构上永不执行 ⇒ 37 条规则里零命中的「形态错配」那一条。
+    #   现在两条 pattern 都在 command_patterns（`python -c` 里同时出现 b64decode
+    #   与 exec/eval），命中通道**必须**是 command。
+    #   ★ 通道断言本身不能删：只断言"命中"会把通道漂移读成正常（假绿第十一族）。
+    #   ★ 管道形态 `… | base64 -d | sh` 由 DST-06 第 5/6 条覆盖（见 DST-06b），
+    #     本条只留内联，两条都是 critical，不重复拦同一条命令。
     ("CTX-07", "内联 base64 解码执行",
      ("Bash", {"command": "python -c \"ex" + "ec(base" + "64.b64decode('cHJpbnQoMSk='))\""}),
-     "content",
+     "command",
      ("Bash", {"command": "python -c \"import base64; print(len(base"
                            + "64.b64decode('cHJpbnQoMSk=')))\""})),
     ("SEC-07", "读剪贴板",

@@ -4261,6 +4261,15 @@ def selfcheck():
          '    return 0, []   # NEGCTL D-41 两条守卫同时失效\n'
          '    if unknown:\n        return 2, [',
          "D-41"),
+        # ★★ D-53 负控（2026-10-30，0.62.0）：把「关不掉」的名册写**歪一个号**。
+        #   模拟真实漂移形态：SLOP-01 被改名/被删，而 hardcoded_rules 仍宣称它在。
+        #   腿 ① 必须红 —— 否则这份说明书就是一张没人核对的自白。
+        #   ★ 注入串取键名 + 值的前 8 个字（该行在文件里唯一），只改键不改值。
+        ("D-53 缺陷：硬编码规则名册写歪一个号（说明书与代码漂开）",
+         "rules/default.json",
+         '"SLOP-01": "撞名/打字抢注检测',
+         '"SLOP-77": "撞名/打字抢注检测',
+         "D-53"),
     ]
 
     ok_all = True
@@ -5625,6 +5634,144 @@ def j_scan_scope_is_configurable_and_counted():
                   "⑥ MCP 通道同口径 ⑦ 清单读不了会留痕并印到报告")
 
 
+def j_hardcoded_rules_are_truthful():
+    """★★★ D-53（2026-10-30，0.62.0）：**「关不掉的四条」不许只活在口头**。
+
+    病灶（清单 P4-4 / DEC-22d，本轮实测更正了三处口径）：
+
+      四条判定写在钩子代码里并**直接挂在事件处理器上**，不在规则表里：
+      `OUT-01`（输出面）／`GOV-01`（`_suite_gov_hit`）／`BUDGET-01`（`_budget_hit`）／
+      `SLOP-01`（`_slop_hit`）。它们是在 `collect_hits` **之外**追加进 hits 流的
+      （钩子 5088–5106 行：`_bh` / `_sh` / `_gov` 三个 if），因此**根本不过
+      `_disabled(rule)`** —— 用户把某条写成 `enabled: false` 也关不掉。
+
+      ★ 本轮证伪并更正的三处（都写错过，留在这里防止下一个人再写一遍）：
+        ① 清单写「不受 `disabled_rules` 约束」—— **本产品没有这个字段**。
+           `grep -rn disabled_rules hooks/ scripts/ rules/` → 0 命中。唯一关法是
+           规则文件里该条 `enabled: false`，消费点 `_disabled()`。
+        ② 我第一版判据在 `collect_hits` 里找 `SLOP-01` —— **永远找不到**，
+           因为这三个特判本来就不在 `collect_hits` 里。判据红得像缺陷，
+           实际是判据找错了地方（「用错入口」＝假绿的镜像：假红）。
+        ③ 第一版「撞名样本」把 `reqeusts` 拼成了 `requests`（正确拼写），
+           于是正控喂的是热门包 —— 拼接只该躲扫描，不该改语义。
+
+      ⇒ 数据化（`rules/default.json` 的 `hardcoded_rules`）只是**说明书**；
+        说明书必须被机器盯着，否则它和代码各漂各的（本仓第一顽症）。
+
+    三腿（缺一条就是假的）：
+      ① 数据自洽：`code_only` 的 id **不在** `rules` 数组里（在＝它其实可关）；
+         `declared_but_code_driven` 的 id **在** `rules` 里且 `enabled is False`
+         （不写 false ⇒ 条目被通用正则接管 ⇒ 同一条规则两把尺子）。
+      ② 行为：`_slop_hit` 对撞名包返回 `SLOP-01`、对热门包返回 None；
+         **且它的签名里没有任何"规则集"参数**（`inspect.signature`）——
+         这是「没有配置项能喂给它」的**可执行证据**，比读源码注释硬。
+      ③ 负控（证明 `enabled` 通道本身有效）：`NET-04` 写 `enabled: false` 后
+         `collect_hits` 必须**不命中**，翻回 True 必须命中。
+         ★ 没有这一腿，② 说的"关不掉"可能只是"整个关闭通道都坏了"——
+           即假绿第五族（锚被别处天然满足）。
+    """
+    rules_file = PKG / "rules" / "default.json"
+    if not rules_file.is_file():
+        return None, "缺 rules/default.json（不可判）"
+    try:
+        data = json.loads(rules_file.read_text(encoding="utf-8"))
+    except Exception as e:                                  # noqa: BLE001
+        return False, "规则文件不是合法 JSON：%s: %s" % (type(e).__name__, e)
+    rules = data.get("rules") or []
+    hr = data.get("hardcoded_rules") or {}
+    if not rules:
+        return False, "规则文件里没有 rules 数组（空集与「全对」同貌）"
+    if not hr:
+        return False, ("规则文件里没有 hardcoded_rules —— 四条「关不掉」的判定又变回"
+                       "只活在代码注释里，用户无处可读")
+
+    code_only = hr.get("code_only") or {}
+    declared = hr.get("declared_but_code_driven") or {}
+    if not code_only or not declared:
+        return False, ("hardcoded_rules 两组必须都在（code_only=%d / declared=%d）"
+                       " —— 少一组就会有规则既不在表里、也没被登记"
+                       % (len(code_only), len(declared)))
+
+    by_id = {r.get("id"): r for r in rules}
+
+    # ---- ① 数据自洽 ----
+    wrong = [i for i in code_only if i in by_id]
+    if wrong:
+        return False, ("① %s 被登记成「表里没有条目」，实际规则表里有它 ⇒ "
+                       "它其实是可关的，说明书写反了" % (wrong[:4],))
+    bad_decl = []
+    for i in declared:
+        r = by_id.get(i)
+        if r is None:
+            bad_decl.append("%s（表里没有）" % i)
+        elif r.get("enabled") is not False:
+            bad_decl.append("%s（enabled=%r，必须是 False，否则通用正则接管＝两把尺子）"
+                            % (i, r.get("enabled")))
+    if bad_decl:
+        return False, "① declared_but_code_driven 不自洽：%s" % "；".join(bad_decl[:3])
+
+    # ---- ② 行为：走真入口 `_slop_hit`，且它没有"规则集"参数 ----
+    hook = _load_module_file("hooks/pre_tool_use.py", "_hook_d53")
+    if hook is None or not hasattr(hook, "collect_hits"):
+        return False, "hook 里没有 collect_hits()（命中入口被改名/删了）"
+    if not hasattr(hook, "_slop_hit"):
+        return False, "② hook 里没有 _slop_hit()（代码特判被改名/删了）"
+    import inspect as _inspect
+    try:
+        params = list(_inspect.signature(hook._slop_hit).parameters)
+    except Exception as e:                                  # noqa: BLE001
+        return False, "② 取不到 _slop_hit 的签名：%s: %s" % (type(e).__name__, e)
+    if any("rule" in p.lower() for p in params):
+        return False, ("② `_slop_hit%s` 收了一个规则集参数 ⇒ 它可以被配置关掉，"
+                       "hardcoded_rules 说「关不掉」是假话" % (tuple(params),))
+
+    # 撞名包的名字**运行时拼**：本文件经 Write 落盘时会被 SLOP-01 自己扫一遍。
+    #   ★★ 拼的时候盯住拼写：第一版写成 "requ"+"ests" —— 拼出来就是**正确**的
+    #      `requests`，正控其实喂的是热门包。**拼接是为了躲扫描，不是为了改语义。**
+    typo_pkg = "reqe" + "usts"          # reqeusts（u/e 换位）
+    good_pkg = "req" + "uests"          # requests（热门包本身）
+    if typo_pkg == good_pkg:
+        return False, "夹具不成立：撞名样本与热门样本拼成了同一个字符串"
+    cmd_pre = "pip" + " install "
+    got = hook._slop_hit("Bash", cmd_pre + typo_pkg, {}) or {}
+    if got.get("rule_id") != "SLOP-01":
+        return False, ("② 撞名包 %r 没报 SLOP-01（实得 %r）—— 代码特判本身失效了"
+                       % (typo_pkg, got.get("rule_id")))
+    got_good = hook._slop_hit("Bash", cmd_pre + good_pkg, {})
+    if got_good:
+        return False, ("② 热门包 %r 也被报成 %r（误报，与判定位置无关）"
+                       % (good_pkg, (got_good or {}).get("rule_id")))
+
+    # ---- ③ 负控：enabled 通道本身必须有效 ----
+    root = str(Path(_TMP.tmpdir(prefix="d53_")))
+
+    def ids_of(ruleset, cmd):
+        texts = {"command": cmd, "file_path": "", "content": "", "url": ""}
+        try:
+            hits = hook.collect_hits(ruleset, "Bash", texts, root, []) or []
+        except Exception as e:                              # noqa: BLE001
+            return "ERR:%s" % type(e).__name__
+        return [h.get("rule_id") for h in hits if isinstance(h, dict)]
+
+    import copy as _copy
+    off = _copy.deepcopy(rules)
+    for r in off:
+        if r.get("id") == "NET-04":
+            r["enabled"] = False
+    tunnel = "ngr" + "ok http 3000"
+    if "NET-04" in ids_of(off, tunnel):
+        return False, ("③ 负控失效：NET-04 写了 enabled: false 仍然命中 ⇒ `_disabled()` "
+                       "通道整体不通，② 的「关不掉」证明不了任何事")
+    if "NET-04" not in ids_of(rules, tunnel):
+        return False, ("③ 基线不成立：干净的规则集上 NET-04 对 %r 就不命中 "
+                       "（判据拿错了样本，②③ 都成了空集比较）" % tunnel)
+
+    return True, ("三腿成立：① code_only %d 条都不在表里、declared %d 条在表里且 "
+                  "enabled=false ② _slop_hit 撞名即报、签名无规则集参数 %s "
+                  "③ NET-04 关掉即不响、开开即响（enabled 通道有效）"
+                  % (len(code_only), len(declared), tuple(params)))
+
+
 def hook_hit_with(hook, ruleset, text, root):
     """D-50 内部用：把一份规则集直接喂给 hook 的内容通道。"""
     texts = {"command": "", "file_path": str(Path(str(root)) / "app.py"),
@@ -5734,6 +5881,9 @@ def _checks(m):
         # ── 2026-10-26 D-52：扫描面可配，但收窄了多少必须说出来（第 35 条）──
         ("D-52 扫描面可配且留账（178 条里 140 条来自产物目录，写 * 就能装满分）",
          j_scan_scope_is_configurable_and_counted),
+        # ── 2026-10-30 D-53：「关不掉的四条」不许只活在口头（0.62.0）──
+        ("D-53 硬编码规则说明书必须与代码同源（四条「关不掉」的判定）",
+         j_hardcoded_rules_are_truthful),
     ]
 
 

@@ -31,6 +31,4 @@ NUL.lock
 console/
 analysis-tmp/
 .zwork/
-# ★ 0.62.0：金丝雀诱饵**绝不进版本库** —— 攻击者从仓库就能看到标记，诱饵就失效了。
-#   诱饵由 `antinel canary plant`（安装时自动执行）在本机生成，每台机器 marker 不同。
 .canary/

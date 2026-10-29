@@ -4,6 +4,21 @@
 Category order = match priority: secrets > destructive > network > injection > supply_chain > context > metadata > canary.
 Severity to action: critical = block, warning = alert (logged, allowed). All hits are collected; highest severity decides.
 
+## Rules that cannot be switched off by configuration
+
+These judgements are implemented **in the hook code**, not in this table.
+The only way to switch a rule off in this product is `enabled: false` on its entry in `rules/default.json` (consumed by `_disabled()`); there is no separate disable list. That field does **not** affect the entries below — switching them off requires a code change.
+
+### code only (not present in this table at all)
+
+- `OUT-01` — 输出面：私有密钥/凭据出现在工具输出里（hooks/pre_tool_use.py:3368 起，PostToolUse）
+- `GOV-01` — 套件治理：A1/A2 写入时刻拦截（_suite_gov_hit，同 ci/delivery_gate.py 双向同步）
+- `BUDGET-01` — 提醒预算：token 预算超阈值（_budget_hit）
+
+### declared but code driven (present below, but judged by code)
+
+- `SLOP-01` — 撞名/打字抢注检测（_slop_hit）。本文件里该条 enabled=false 是**设计**：它只承载描述与文档，判定走代码内置参考集（rules/typosquat_top.json），避免静态正则误报全部正常安装。详见该条 note。
+
 ## SEC-01  Sensitive file read (.env)
 - category: secrets | severity: critical | static + dynamic | tools: Read, Bash
 - purpose: Prevents an agent reading .env files (live-blocked in ZCode on 09-10; the founding interception)
@@ -520,7 +535,6 @@ Severity to action: critical = block, warning = alert (logged, allowed). All hit
     - `(^|[\\/])\.mcp\.json$`
     - `(^|[\\/])claude_desktop_config\.json$`
     - `(^|[\\/])\.vscode[\\/]mcp\.json$`
-    - `(^|[\\/])mcp\.json$`
 - content_patterns:
     - `(?is)(?:>>|>|\btee\b|\bcp\b|\bmv\b|\bmove\b|\bcopy\b|\bset-content\b|\bout-file\b|\badd-content\b)[^\n]{0,120}\.mcp\.json`
     - `(?is)(?:>>|>|\btee\b|\bcp\b|\bmv\b|\bmove\b|\bcopy\b|\bset-content\b|\bout-file\b|\badd-content\b)[^\n]{0,120}mcp\.json`
