@@ -36,7 +36,7 @@ if _HERE not in sys.path:
 
 from strings import detect_lang, get_string
 
-VERSION = "0.60.2"
+VERSION = "0.61.0"
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
@@ -3976,11 +3976,14 @@ def _agent_state_json():
         "platform": sys.platform,
         "project_root": root,
         "installed": installed,
-        # ★ 键名必须说清它是什么。manifest 里那一份是**钩子协议版本**（0.33.1，
-        #   只在协议变化时 bump），与包版本（0.48.x）是两个不同的数。写成
-        #   `manifest_version` 会让 Agent 看到两个数打架却无从判断哪个是
-        #   "装了什么"—— 正是本次要消掉的那一类混淆。
-        "hook_protocol_version": m.get("version") or m.get("skill_version"),
+        # ★ 0.61.0：这个键原来叫 `hook_protocol_version`，取的是
+        #   `.psl/manifest.json` 的 `skill_version`。可全仓按「协议版本」分支的
+        #   代码是 **0 处**，而这个值实际是**装的那一刻登记的包版本** ⇒ 名字在骗人
+        #   （0.33.1 时代两个数长期不等，用户看到打架却无从判断哪个是"装了什么"）。
+        #   ⇒ 改名为 `installed_version`，与 `package_version` 并列。两个数同源：
+        #   装完即相等；不相等就是这台机器上的登记落后了，`antinel install --check`
+        #   会说出来并给出修法（那个修法现在真的能修好它自己）。
+        "installed_version": m.get("skill_version") or m.get("version"),
         "host_detected": host,
         "audit_dir": os.path.join(root, ".psl", "audit"),
         "skill_md": skill,

@@ -20,7 +20,7 @@ metadata:
   psl-verifier: "scripts/run_harness.py"
   antinel-product: "security-audit"
   antinel-tier: "free"
-  antinel-version: "0.60.2"
+  antinel-version: "0.61.0"
   psl-token-interception: "false"
 ---
 
@@ -100,7 +100,8 @@ python -m scripts.report --days 7
 - 你只需要正确运行脚本并转述结果。
 - 不要修改检测规则或审计日志。
 - 自定义白名单与阈值在 `.psl/policy.json`（安装时生成模板）。
-- 运行时零网络、无第三方依赖、无驻留进程。
+- 运行时零网络、无第三方依赖、**默认安装无驻留进程**。开启宿主拦截
+  （`antinel host-shield enable`）后会有一个本机常驻：登录触发、只在本机跑、不联网。
 - 它只匹配工具调用文本与文件内容，**不解析脚本语义**——把删除或外发写进一个
   `.py`/`.sh` 再执行，闸门不会拦。这是护栏，不是隔离层。
 - 已验证可拦截的宿主：Claude Code / ZCode / Qoder。其余宿主装完是**审计与扫描模式**，

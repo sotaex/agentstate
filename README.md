@@ -116,8 +116,9 @@ python -m scripts.install --root <项目根>   # 不一致时重跑安装，自�
 - 命名空间清单 `antinel-namespaces.json`：ed25519 签名，公钥指纹
   `sha256:b71e570c30ebcbf7`（钉死在本 README；轮换只允许追加新钥匙条目）；
   清单缺失或验签失败时对象归属一律落 `unattributed`（fail-closed）
-- 规则全部开源：`rules/default.json`（24 条，双语说明）；每条审计记录含 content_digest，判据可重算
-- 运行时零网络；仅标准库；无第三方依赖；无驻留进程
+- 规则全部开源：`rules/default.json`（37 条，双语说明）；每条审计记录含 content_digest，判据可重算
+- 运行时零网络；仅标准库；无第三方依赖；**默认安装无驻留进程**。开启宿主拦截
+  （`antinel host-shield enable`）后会有一个本机常驻：登录触发、只在本机跑、不联网
 - **拦截自检（0.30.0，E-3 关闭）**：`python -m tools.enforce_probe` —— 合成一个必拦事件跑真钩子，断言全部下发通道（stdout 契约 + legacy + exit 2）并上链 `enforcement_probe`；宿主若把"已拦截"的调用真的执行了，post 侧上链 `enforcement_gap`。晨报新增执法状态行（探针通过率 / 执法缺口 / 护栏在线天数）——**闸门死了必须大声说出来**，而不是让账本为假象背书
 - **指令面 + MCP + 金丝雀 + 撞名（0.31/0.32）**：CTX-02/04 扩展到 AGENTS.md/CLAUDE.md/.cursorrules/copilot-instructions.md（非 SKILL.md 需复合命中，压误报）；MCP-01..04 护住 MCP 配置（写配置/描述注入/远程 server/env 明文密钥）；`antinel canary plant` 布源码金丝雀（读→提醒、标记出现在输出→外传实证）；SLOP-01 对安装命令做撞名检测（参考集 rules/typosquat_top.json，静态有时效，报告中显性标注）
 - 收入边界声明见源码仓 `docs/A6收入边界声明.md`（该件随 sdist 分发，**不随 wheel**）：不收通过费、不出售排名、关联方无豁免

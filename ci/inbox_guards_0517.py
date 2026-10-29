@@ -1349,6 +1349,122 @@ def n_rf60a():
         HS.ensure_rules_current = orig
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# RF-61（0.61.0）安装登记版本：**一个事实一个数**
+#
+#   本轮实测（不是读代码推的）：`.psl/manifest.json` 的 `skill_version`
+#   有**三个写入点、两种含义** ——
+#     · `install.py` 写死常量 `0.33.1`（注释称「钩子协议版本」）
+#     · `host_shield.ensure_rules_current` 规则自愈时写**包版本**
+#     · `run_harness` 给自检夹具写包版本
+#   而 `--check` 又拿安装值去比 `0.33.1` ⇒ 本机长期报
+#   「installed 0.60.2 != package 0.33.1 (re-run install.py to refresh)」。
+#   **它提示的修法会把 0.33.1 写回去，下一跳再被自愈刷回包版本** ——
+#   这个提示永远修不好它自己提示的那件事。
+#   修法：删掉那个常量，三处共用 `_package_version()`；对外键名
+#   `hook_protocol_version` → `installed_version`（全仓按"协议版本"分支的
+#   代码是 0 处，那个名字在骗人）。
+# ══════════════════════════════════════════════════════════════════════════
+
+def _mkproj_rf61(ver):
+    """已安装项目夹具：规则副本与包内**逐字节全等**。
+
+    ★ 为什么必须逐字节：`--check` 里除了版本还查 rules_hash 与脚本哈希。
+      夹具若换个序列化方式，哈希那几项就会先红 ⇒ 版本这条被挡住、断言不过去
+      （同一形状的坑在 RF-60a 上踩过）。这里让哈希天然一致，漂移只可能来自版本。
+    """
+    d = _TMP.tmpdir(prefix="g0600_rf61_")
+    psl = os.path.join(d, ".psl")
+    os.makedirs(os.path.join(psl, "rules"), exist_ok=True)
+    dst = os.path.join(psl, "rules", "default.json")
+    _shutil.copyfile(PKG_RULES, dst)
+    raw = open(dst, "rb").read()
+    man = {"skill_version": ver, "rules_file": ".psl/rules/default.json",
+           "rules_hash": "sha256:" + _hashlib.sha256(raw).hexdigest()}
+    with io.open(os.path.join(psl, "manifest.json"), "w", encoding="utf-8") as f:
+        json.dump(man, f)
+    return d
+
+
+def _check_out(fn, proj):
+    """跑一次 `--check`，把它的**输出**也读回来 —— 判「报了哪一类漂移」必须
+    看得到那个字符串，只看 rc=3 会把「rules_hash 不符」当成「版本不符」。"""
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = fn(proj)
+    return rc, buf.getvalue()
+
+
+@check("RF-61a 安装登记版本一个来源：装着登记的就是包版本，--check 不再自相矛盾")
+def rf61a():
+    src = io.open(INST.__file__, encoding="utf-8").read()
+    # ① 第二个版本源（常量形态）不许回来。只看赋值形态：注释/文档里点名它不算。
+    for ln in src.splitlines():
+        if ln.strip().startswith("SKILL_VERSION") and "=" in ln:
+            return "install.py 里又出现 SKILL_VERSION 常量（第二个版本源）：%r" % ln.strip()[:60]
+    if '"skill_version": _pv,' not in src:
+        return "manifest 的 skill_version 不是取自 `_pv = _package_version()`"
+    pv = INST._package_version()
+    if not pv or pv == "unknown":
+        return "_package_version() 读不到（%r）—— 判据自己先瞎了" % pv
+    # ② 登记=包版本 ⇒ 必须 rc=0（旧实现在这里必红，见 N-RF-61a）
+    good = _mkproj_rf61(pv)
+    rc, out = _check_out(INST.check_installed, good)
+    if rc != 0:
+        return "登记的正是包版本 %s，--check 却说漂移（rc=%d）：%s" % (
+            pv, rc, out.strip().replace("\n", " ")[-180:])
+    # ③ 落后的登记必须被抓到 —— 不然「一致」是空话（空集与确实没有同貌）
+    old = _mkproj_rf61("0.0.1")
+    rc2, out2 = _check_out(INST.check_installed, old)
+    if rc2 != 3 or "version:" not in out2:
+        return "登记 0.0.1 时 --check 没报版本漂移（rc=%d）：%r" % (rc2, out2.strip()[:140])
+    # ④ 对外键名：installed_version 在、hook_protocol_version 不在、两数相等
+    r = _subprocess.run([sys.executable, os.path.join(ROOT, "antinel.py"),
+                         "agent", "--json"], cwd=good, capture_output=True,
+                        text=True, encoding="utf-8", errors="replace", timeout=180)
+    try:
+        d = json.loads(r.stdout)
+    except Exception:                                       # noqa: BLE001
+        return "agent --json 读不出（rc=%s）：%r" % (
+            r.returncode, (r.stdout or r.stderr or "")[:160])
+    if "hook_protocol_version" in d:
+        return "agent --json 还在报 hook_protocol_version（那个值不是协议版本）"
+    if d.get("installed_version") != d.get("package_version"):
+        return ("installed_version=%r 与 package_version=%r 不等 —— 两个数又分叉了"
+                % (d.get("installed_version"), d.get("package_version")))
+    _note("包版本 %s；登记 0.0.1 被抓到；agent --json 报 installed_version" % pv)
+    return True
+
+
+@check("N-RF-61a 负控：把写死的 0.33.1 塞回比较处，上面那条必须红")
+def n_rf61a():
+    """★ 变异体**真跑**（exec 进装脚本本体，`__file__` 指回真路径），
+      不是塞一句假源码去查字串 —— 缺陷在比较逻辑里，改字串测不到。
+
+    ★★ 同一批夹具同时喂给变异体与原版（第十四族）：变异体必须红、
+      原版必须绿。原版也红 ⇒ 先疑夹具，不给自己发奖。
+    """
+    src = io.open(INST.__file__, encoding="utf-8").read()
+    anchor = "    _pkg = _package_version()"
+    if src.count(anchor) != 1:
+        return "锚点 `%s` 出现 %d 次（应为 1）—— 负控失效，先修负控" % (anchor.strip(), src.count(anchor))
+    mut = src.replace(anchor, '    _pkg = "0.33.1"')
+    if mut == src:
+        return "变异没生效"
+    g = {"__name__": "install_rf61_mut", "__file__": INST.__file__}
+    exec(compile(mut, INST.__file__, "exec"), g)             # noqa: S102
+    pv = INST._package_version()
+    good = _mkproj_rf61(pv)
+    rc, out = _check_out(g["check_installed"], good)
+    if rc != 3 or "version:" not in out:
+        return "变异体在「登记=包版本」的项目上没报版本漂移（rc=%d）：%r" % (rc, out.strip()[:140])
+    rc0, _o0 = _check_out(INST.check_installed, good)
+    if rc0 != 0:
+        return "同一夹具上修好的版本也不是绿的（rc=%d）—— 先疑夹具" % rc0
+    _note("同一夹具：变异体 rc=3（报 version 漂移）／原版 rc=0")
+    return True
+
+
 @check("HK-60a 钩子解释器口径：pythonw 优先，两处入口都写进去")
 def hk60a():
     exe = INST.hook_python()

@@ -38,6 +38,7 @@ _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
 import tmpreg as _TMP   # 0.55.0 (F3): temp dir registry
 import io
 import json
+import time
 import os
 import subprocess
 import sys
@@ -224,19 +225,39 @@ def _fixture_live(m, fix, tries=4):
     ★★ 0.53.1 实测（出包前的那次红）：`tries=2` 在同一轮里连撞两次，而**紧随其
       后**的 N-S80/81/82/83/84/86/87/88 全绿 —— 说明那是抖动不是测不了。
       ⇒ 抬到 4 次。抬次数**不削弱**判据：真测不了时 4 次全空，仍报「夹具失效」。
+
+    ★★ 0.61.0：① **预热** —— 本机实测 git 冷启动 0.80–1.70s，而产品预算
+      `VCT_TIMEOUT = 2.0s`，冷启动本身就吃掉大半。预热是一次额外的同类调用、
+      结果丢弃，**不改变任何期望值**，只把冷启动成本从被测调用里拿掉。
+      ② **不再猜归因** —— 旧文案写死"多半是机器负载让 git 子进程撞了超时"，
+      而 0.61.0 实测发现另一种形状（`is_delete=False` 时 vote1/vote2 也是空的，
+      与超时**长得一模一样**）。⇒ 现在把每次尝试的耗时与 `exit/why` 原样打出来，
+      读的人不用信我的猜测。
     """
+    try:                                    # 预热：只丢掉一次同类调用的冷启动成本
+        subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=fix,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       timeout=30)
+    except Exception:                       # noqa: BLE001
+        pass                                # 预热失败不影响判定，按原路径重试
     last = None
-    for _ in range(tries):
+    tried = []
+    for i in range(tries):
+        t0 = time.time()
         d = m.deletion_permission("rm -rf build", fix)
+        dt = time.time() - t0
         if not _no_signal(d):
             if d.get("vote1") != "ignored":
                 return False, ("control probe 的 vote1=%r（期望 'ignored'）"
                                "—— 夹具的忽略声明没生效" % (d.get("vote1"),))
             return True, None
         last = d
-    return False, ("control probe 连续 %d 次**取不到任何信号**（vote1/vote2 都空，"
-                   "allow=%r）—— 多半是机器负载让 git 子进程撞了 `VCT_TIMEOUT`"
-                   % (tries, (last or {}).get("allow")))
+        tried.append("#%d %.2fs exit=%r why=%r vote1=%r"
+                     % (i + 1, dt, d.get("exit"), (d.get("why") or "")[:40],
+                        d.get("vote1")))
+    return False, ("control probe 连续 %d 次**取不到任何信号**（allow=%r）；"
+                   "逐次实测：%s —— 判据测不出，不算通过"
+                   % (tries, (last or {}).get("allow"), "；".join(tried)))
 
 
 # ══════════════ S80 · 两票**并且**运算 ══════════════

@@ -201,6 +201,13 @@ def n_s74():
 #:   实测代价：打包闸门里 N-S75 假红过一次（0450 12 绿 / 1 红），随后连跑 3 次
 #:   又是 13 绿 / 0 红 —— **时红时绿**，本仓铁律「一个时红时绿的量具比恒红的更坏」。
 #:   会合栅栏等的是**兄弟进程本身**（全部到齐才放行），错峰因此被消掉。
+#: ★★ 0.61.0：`lk is None` 的处理从「照样 bump」改为「不碰临界区、以 88 退出」。
+#:   旧版在拿不到锁时仍然进临界区 —— 那是**夹具自己造出来的形状**：
+#:   产品 `append_chained` 拿不到锁时落 sidecar 并标 `chain:"unlocked"`，
+#:   不会在主临界区上覆盖。于是「有 worker 等锁预算耗尽」被读成
+#:   「互斥没成立（有丢失更新）」，指向一个不存在的缺陷。
+#:   实测：闸门满载时 0450 报 S75 计数 5/6，单独跑 13 绿 / 0 红、探针 6 轮
+#:   6/6（最长等锁 0.556s，预算 1.6s）—— 时红时绿且误诊，必须拆开。
 _RACE_CHILD = r'''
 import os
 import sys
@@ -221,13 +228,18 @@ def bump():
         f.write(str(n + 1))
 
 
+if mode == "lock_forced_none":
+    # 强制**前置条件**（不是强制造结论）：让等锁预算恒耗尽。
+    audit_chain.acquire_lock = lambda fn: None
+    sys.exit(88)
 if mode == "lock":
     lk = audit_chain.acquire_lock(lockbase)
+    if lk is None:
+        sys.exit(88)                     # 拿不到锁 ⇒ 不进临界区（见上方 ★★）
     try:
         bump()
     finally:
-        if lk:
-            audit_chain.release_lock(lk)
+        audit_chain.release_lock(lk)
 else:
     bump()
 '''
@@ -252,6 +264,13 @@ def _run_race(mode, nproc=6):
     if race_amp.join_failed(rcs):
         raise AssertionError("会合失败（有 worker 超时未到齐）⇒ **夹具失效**：rcs=%r"
                              % (rcs,))
+    if any(r == 88 for r in rcs):
+        # ★★ 0.61.0：与「互斥没成立」分开报。两者都是计数 < N，但一个怪锁、
+        #   一个怪机器；混在一起就把环境问题变成了产品缺陷。
+        raise AssertionError(
+            "有 %d/%d 个 worker 等锁预算耗尽（rc=88，未进临界区）⇒ **夹具失效**："
+            "这是锁争用／机器负载，不是互斥失败；rcs=%r"
+            % (sum(1 for r in rcs if r == 88), nproc, rcs))
     if not race_amp.joined_ok(rcs):
         raise AssertionError("抢锁子进程非正常退出：rcs=%r ⇒ 夹具失效" % (rcs,))
     with io.open(counter, encoding="utf-8") as f:
@@ -284,6 +303,23 @@ def n_s75():
     return ("负控失效：%d 轮都没撞出竞态（每轮计数都 ≥ %d，末轮 %d）⇒ "
             "本测试这一次没测出无互斥（重跑一次；若恒绿则该分支没被依赖）"
             % (K, n, last))
+
+
+@check("N-S75b 负控：强制锁预算耗尽 ⇒ S75 必须报「夹具失效」而非「互斥没成立」")
+def n_s75b():
+    """牙齿：把 `acquire_lock` 打成恒返回 None（强制前置条件，不是强制造结论）。
+
+    旧实现在这种情况下会把「没拿到锁」写成计数 5 ⇒ 报「互斥没成立（有丢失更新）」。
+    本负控要求它必须报**夹具失效**并说出 rc=88；报错口径不对也算负控失效。
+    """
+    try:
+        _run_race("lock_forced_none", 6)
+    except AssertionError as e:
+        msg = str(e)
+        if "夹具失效" in msg and "88" in msg:
+            return True
+        return "负控失效：红是红了，但口径不是「夹具失效／rc=88」：%s" % msg
+    return "负控失效：强制拿不到锁时 S75 仍判绿 ⇒ 这条牙齿不存在"
 
 
 # ══════════════ 甲 · S76 没保住必须出声（拒写 / 乐观锁撞车） ══════════════

@@ -50,7 +50,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 PKG_DIR = Path(__file__).resolve().parent
-SKILL_VERSION = "0.33.1"
 
 
 def _os_locale():
@@ -86,21 +85,45 @@ def _os_locale():
 
 
 def _package_version():
-    """包版本（0.48.x），与 SKILL_VERSION（钩子协议版本 0.33.1）是两个不同的数。
+    """这个包装的是什么版本 —— 安装登记、规则自愈、`--check` 三处共用的**那一个数**。
 
-    ★ 0.48.4：这两个数在界面上长期混用——`--check` 印 SKILL_VERSION，而
-      `antinel -V` 印包版本，用户看到两个数打架却无从判断哪个是"装了什么"。
-      现在各报各的名字；取值优先用安装元数据（真实来源），失败再退回源码常量。"""
+    ★ 0.61.0：这里原本还有一个常量 `SKILL_VERSION = "0.33.1"`，注释说它是
+      「钩子协议版本」。实测它造成**三个写入点、两种含义**：
+        · 本文件安装时把 `0.33.1` 写进 `.psl/manifest.json` 的 `skill_version`；
+        · `host_shield.ensure_rules_current` 规则自愈时把**包版本**写进同一个键；
+        · `run_harness` 给自检夹具写包版本。
+      而 `--check` 又拿安装值去比 `0.33.1` ⇒ 本机实测长期报
+      「installed 0.60.2 != package 0.33.1 (re-run install.py to refresh)」。
+      它提示的修法是重跑安装，而重跑会把 `0.33.1` 写回去，下一跳又被自愈
+      刷成包版本 —— **这个提示永远修不好它自己提示的那件事**。
+      ⇒ 删掉那个常量。同一个事实只留一个数，就是本函数。
+    ★ 取数顺序改成「先读正在跑的代码，再读安装元数据」：在研发树上跑装脚本时，
+      安装元数据可能是上一个 wheel 的号，而用户手里是树里的代码 ⇒ 先读代码才
+      不会把旧号登记成"已安装"。
+    ★ 第三顺位读 `rules/default.json` 的 `version` 不算第二个真源：
+      `ci/version_check.py` 判它与 `antinel.py` 的 `VERSION` 逐字相同（九处承载件）。
+    """
+    try:
+        for line in (_locate("antinel.py")).read_text(encoding="utf-8",
+                                                      errors="replace").splitlines():
+            if line.startswith("VERSION = "):
+                v = line.split('"')[1] if '"' in line else ""
+                if v:
+                    return v
+    except Exception:
+        pass
     try:
         from importlib.metadata import version as _v
         return _v("antinel")
     except Exception:
         pass
     try:
-        for line in (_locate("antinel.py")).read_text(encoding="utf-8",
-                                                      errors="replace").splitlines():
-            if line.startswith("VERSION = "):
-                return line.split('"')[1]
+        import json as _json
+        p = _locate("rules", "default.json")
+        if p.is_file():
+            v = _json.loads(p.read_text(encoding="utf-8")).get("version")
+            if v:
+                return str(v)
     except Exception:
         pass
     return "unknown"
@@ -490,12 +513,17 @@ def init_psl(root, host, settings_path, registered, global_hooks=False):
                 "auto-seeded at install with agent-managed directories that exist on "
                 "this machine; delete any line to re-enable strict DST-02 for it")
         policy.write_text(json.dumps(tpl, ensure_ascii=False, indent=2), encoding="utf-8")
+    # ★ 0.61.0：这个值的来源只有一个 —— `_package_version()`。规则自愈
+    #   （`host_shield.ensure_rules_current`）写进同一个键的也是它，
+    #   于是"装的那一刻登记的版本"和"规则刷新后登记的版本"是同一个数，
+    #   `install --check` 拿它比包版本才比得平。判据：ci/inbox_guards_0517.py RF-61*。
+    _pv = _package_version()
     manifest = {
         "schema_version": "1.0",
         "installed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "host": host,
         "host_version": "unknown",
-        "skill_version": SKILL_VERSION,
+        "skill_version": _pv,
         "psl_spec": PSL_SPEC,
         "hooks_registered": registered,
         "rules_file": ".psl/rules/default.json",
@@ -503,7 +531,7 @@ def init_psl(root, host, settings_path, registered, global_hooks=False):
         "scripts_hash": {f: sha256_file(_locate(f)) for f in SCRIPT_FILES if _locate(f).is_file()},
         "policy_file": ".psl/policy.json",
         "audit_log_dir": ".psl/audit",
-        "created_by": "install.py v" + SKILL_VERSION,
+        "created_by": "install.py v" + _pv,
         "settings_file": str(settings_path),
         "scope": "user" if global_hooks else "project",
         "package_dir": str(PKG_DIR),
@@ -619,8 +647,9 @@ def install(root, host_override=None, redetect=False, skip_scan=False, strict=Fa
             old = json.loads(manifest_path.read_text(encoding="utf-8"))
             host, settings_path = old.get("host"), Path(old.get("settings_file", ""))
             old_ver = old.get("skill_version")
-            if old_ver and old_ver != SKILL_VERSION:
-                print("[upgrade] installed version %s != package %s" % (old_ver, SKILL_VERSION))
+            _pv = _package_version()
+            if old_ver and old_ver != _pv:
+                print("[upgrade] installed version %s != package %s" % (old_ver, _pv))
                 print("          refreshing rules snapshot + manifest hashes in this run "
                       "(the hook degrades to the embedded fallback set until you do)")
         except Exception:
@@ -756,9 +785,10 @@ def check_installed(root):
         return 3
     problems = []
     old_ver = old.get("skill_version")
-    if old_ver != SKILL_VERSION:
+    _pkg = _package_version()
+    if old_ver != _pkg:
         problems.append("version: installed %s != package %s (re-run install.py to refresh)"
-                        % (old_ver, SKILL_VERSION))
+                        % (old_ver, _pkg))
     want_rules = sha256_file(_locate("rules", "default.json"))
     if old.get("rules_hash") != want_rules:
         problems.append("rules_hash: installed %s != package %s" %
@@ -773,12 +803,11 @@ def check_installed(root):
             print("  - %s" % p)
         print("fix: python -m scripts.install --root %s" % root)
         return 3
-    # ★ 0.48.4：把「哪个版本」说清楚。旧文案只印 `version 0.33.1`，而
-    #   `antinel -V` 印的是 `0.48.3` ⇒ 用户/Agent 看到两个数打架，且无从判断
-    #   哪个才是"装了什么"。0.33.1 是**钩子协议版本**（只在协议变化时 bump），
-    #   0.48.3 是**包版本**；两者本来就不同步，但界面上必须各报各的名字。
-    _pkg = _package_version()
-    print("in sync: 钩子协议版本 %s ／ 包版本 %s；rules_hash 一致，%d 个脚本哈希一致"
+    # ★ 0.61.0：这两个数现在是**同一个量**（安装登记 = 包版本），所以照旧各报
+    #   一名、照旧并排印 —— 相等是常态，不相等就是登记落后了（上面已经判红）。
+    #   旧注释说「0.33.1 是钩子协议版本、与包版本本来就不同步」——那是把
+    #   一个从未存在的协议号说成了设计，见 `_package_version()` 的说明。
+    print("in sync: 已安装版本 %s ／ 包版本 %s；rules_hash 一致，%d 个脚本哈希一致"
           % (old_ver, _pkg, len(old.get("scripts_hash") or {})))
     return 0
 

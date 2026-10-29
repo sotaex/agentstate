@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
-# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.25（随 v0.60.2）
+# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.25（随 v0.61.0）
 
 > v1.25（0.60.0）：**补登记 2 类** —— `rules_auto_refresh_skipped`、
 > `autostart_no_window_fixed`（均见下文「降级与配置变更类」），并把
