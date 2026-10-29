@@ -35,6 +35,7 @@
   "rules": [
     {
       "id": "SEC-01",
+      "an": "AN-001",
       "name": "Sensitive file read (.env)",
       "category": "secrets",
       "severity": "critical",
@@ -69,6 +70,7 @@
     },
     {
       "id": "SEC-02",
+      "an": "AN-002",
       "name": "SSH key file read",
       "category": "secrets",
       "severity": "critical",
@@ -98,6 +100,7 @@
     },
     {
       "id": "SEC-03",
+      "an": "AN-003",
       "name": "Cloud credential file read",
       "category": "secrets",
       "severity": "critical",
@@ -126,6 +129,7 @@
     },
     {
       "id": "SEC-04",
+      "an": "AN-004",
       "name": "Wallet/keystore file read",
       "category": "secrets",
       "severity": "critical",
@@ -161,6 +165,7 @@
     },
     {
       "id": "SEC-05",
+      "an": "AN-005",
       "name": "Browser data read",
       "category": "secrets",
       "severity": "critical",
@@ -194,6 +199,7 @@
     },
     {
       "id": "NET-01",
+      "an": "AN-006",
       "name": "Shell network request",
       "category": "network",
       "severity": "warning",
@@ -234,6 +240,7 @@
     },
     {
       "id": "NET-02",
+      "an": "AN-007",
       "name": "Python network request",
       "category": "network",
       "severity": "warning",
@@ -267,6 +274,7 @@
     },
     {
       "id": "NET-03",
+      "an": "AN-008",
       "name": "Non-whitelisted domain connection",
       "category": "network",
       "severity": "warning",
@@ -299,6 +307,7 @@
     },
     {
       "id": "DST-01",
+      "an": "AN-009",
       "name": "File deletion",
       "category": "destructive",
       "severity": "critical",
@@ -353,6 +362,7 @@
     },
     {
       "id": "DST-02",
+      "an": "AN-010",
       "name": "Write outside project root",
       "category": "destructive",
       "severity": "critical",
@@ -380,6 +390,7 @@
     },
     {
       "id": "DST-03",
+      "an": "AN-011",
       "name": "Shell configuration modification",
       "category": "destructive",
       "severity": "critical",
@@ -413,6 +424,7 @@
     },
     {
       "id": "DST-04",
+      "an": "AN-012",
       "name": "Persistence mechanism",
       "category": "destructive",
       "severity": "critical",
@@ -462,6 +474,7 @@
     },
     {
       "id": "DST-05",
+      "an": "AN-013",
       "name": "Privilege escalation",
       "category": "destructive",
       "severity": "warning",
@@ -495,6 +508,7 @@
     },
     {
       "id": "CTX-01",
+      "an": "AN-014",
       "name": "Environment variable enumeration",
       "category": "context",
       "severity": "warning",
@@ -520,6 +534,7 @@
     },
     {
       "id": "CTX-02",
+      "an": "AN-015",
       "name": "Prompt injection pattern in instruction file",
       "category": "injection",
       "severity": "critical",
@@ -551,6 +566,7 @@
     },
     {
       "id": "CTX-03",
+      "an": "AN-016",
       "name": "Invisible Unicode characters",
       "category": "injection",
       "severity": "critical",
@@ -651,6 +667,7 @@
     },
     {
       "id": "CTX-04",
+      "an": "AN-017",
       "name": "Encoded payload",
       "category": "injection",
       "severity": "warning",
@@ -674,6 +691,7 @@
     },
     {
       "id": "CTX-05",
+      "an": "AN-018",
       "name": "Skill name mismatch",
       "category": "metadata",
       "severity": "warning",
@@ -693,6 +711,7 @@
     },
     {
       "id": "DST-06",
+      "an": "AN-019",
       "name": "Remote script piped to interpreter",
       "category": "destructive",
       "severity": "critical",
@@ -721,6 +740,7 @@
     },
     {
       "id": "DST-07",
+      "an": "AN-020",
       "name": "Irreversible git discard",
       "category": "destructive",
       "severity": "critical",
@@ -744,6 +764,7 @@
     },
     {
       "id": "SEC-06",
+      "an": "AN-021",
       "severity": "critical",
       "category": "secrets",
       "type": "tool_call",
@@ -777,6 +798,7 @@
     },
     {
       "id": "DST-08",
+      "an": "AN-022",
       "name": "Permission/ownership destruction",
       "category": "destructive",
       "severity": "critical",
@@ -801,6 +823,7 @@
     },
     {
       "id": "DST-09",
+      "an": "AN-023",
       "name": "Alternate data stream write (file path)",
       "category": "destructive",
       "severity": "critical",
@@ -828,6 +851,7 @@
     },
     {
       "id": "DST-10",
+      "an": "AN-024",
       "name": "Alternate data stream write (command)",
       "category": "destructive",
       "severity": "critical",
@@ -856,6 +880,7 @@
     },
     {
       "id": "CTX-07",
+      "an": "AN-025",
       "name": "Inline base64-decode exec",
       "category": "injection",
       "severity": "critical",
@@ -878,6 +903,7 @@
     },
     {
       "id": "SEC-07",
+      "an": "AN-026",
       "name": "Clipboard read",
       "category": "secrets",
       "severity": "critical",
@@ -910,6 +936,7 @@
     },
     {
       "id": "SEC-08",
+      "an": "AN-027",
       "name": "Screen capture",
       "category": "secrets",
       "severity": "warning",
@@ -943,6 +970,7 @@
     },
     {
       "id": "SEC-09",
+      "an": "AN-028",
       "name": "IM/mail local store read",
       "category": "secrets",
       "severity": "critical",
@@ -984,6 +1012,7 @@
     },
     {
       "id": "SEC-10",
+      "an": "AN-029",
       "name": "Input-method user dictionary read",
       "category": "secrets",
       "severity": "warning",
@@ -1019,6 +1048,7 @@
     },
     {
       "id": "DST-11",
+      "an": "AN-030",
       "name": "Write into cloud-sync directory",
       "category": "destructive",
       "severity": "critical",
@@ -1043,6 +1073,7 @@
     },
     {
       "id": "NET-04",
+      "an": "AN-031",
       "name": "Tunnel / covert channel",
       "category": "network",
       "severity": "warning",
@@ -1074,6 +1105,7 @@
     },
     {
       "id": "MCP-01",
+      "an": "AN-032",
       "name": "Write to MCP config file",
       "category": "supply_chain",
       "severity": "warning",
@@ -1105,6 +1137,7 @@
     },
     {
       "id": "MCP-02",
+      "an": "AN-033",
       "name": "Prompt injection in MCP tool description",
       "category": "supply_chain",
       "severity": "warning",
@@ -1138,6 +1171,7 @@
     },
     {
       "id": "MCP-03",
+      "an": "AN-034",
       "name": "Unaudited remote MCP server",
       "category": "supply_chain",
       "severity": "warning",
@@ -1168,6 +1202,7 @@
     },
     {
       "id": "MCP-04",
+      "an": "AN-035",
       "name": "Plaintext secret in MCP config env",
       "category": "supply_chain",
       "severity": "warning",
@@ -1202,6 +1237,7 @@
     },
     {
       "id": "SEC-11",
+      "an": "AN-036",
       "name": "Canary file read",
       "category": "canary",
       "severity": "warning",
@@ -1226,6 +1262,7 @@
     },
     {
       "id": "SLOP-01",
+      "an": "AN-037",
       "name": "Typosquatted package name in install command",
       "category": "supply_chain",
       "severity": "warning",
