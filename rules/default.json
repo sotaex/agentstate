@@ -13,9 +13,11 @@
   },
   "category_order": [
     "secrets",
+    "canary",
     "destructive",
     "network",
     "injection",
+    "supply_chain",
     "context",
     "metadata"
   ],
