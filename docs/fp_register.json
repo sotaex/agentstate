@@ -1,0 +1,66 @@
+{
+  "version": "1.0",
+  "updated": "2026-10-30",
+  "note": "误报登记簿。状态机 open -> triaged -> fixing -> fixed|wontfix，**不许跳级**；status=fixed 必须带 regression_test（一条在修复前会红的用例）。本文件**不进 wheel**（放 docs/ 而非 rules/：rules/*.json 会被 package-data 的 glob 打进去，而这份是开发过程资产，不是运行时数据）。",
+  "common_root_cause": {
+    "id": "FP-FAMILY-1",
+    "name": "文本通道被当成命令通道",
+    "statement": "command_patterns 匹配的是**整条命令字符串**。当命令本身是「写一段文本」的动作（git commit -m、printf、写 .md 文件、往日志追加），文本里出现的命令字面串会被当成「要执行的命令」。**判据无法区分「执行」与「描述」**——这是字符串匹配的固有边界，不是 pattern 写错了。",
+    "rule_of_thumb": "凡命令语义类规则都要问：**这个串是在命令位置，还是在文本位置？**",
+    "known_mitigation": "hooks/pre_tool_use.py:_bash_channel_text 会遮蔽「纯文本参数」（引号内容）——但只在命令**没有执行迹象**时生效（无 |sh / $() / eval / xargs）。带执行迹象时原样返回，这是刻意保留的绕过防线。",
+    "residual_risk": "git commit -m \"...\" 这类「合法命令 + 长文本参数」仍会误报：它不是纯文本写入，也不该被当作执行。目前无解，只能靠改写文案绕开。"
+  },
+  "records": [
+    {
+      "id": "FP-0001",
+      "status": "open",
+      "rule": "DST-01",
+      "family": "FP-FAMILY-1",
+      "summary": "拦下「print 里的删除命令字面串」（该串未被执行）",
+      "channel": "command_text",
+      "root_cause": "命令语义规则匹配字符串，无法区分「执行」与「描述」",
+      "found": "2026-10-22 之前",
+      "regression_test": null
+    },
+    {
+      "id": "FP-0002",
+      "status": "open",
+      "rule": "DST-01",
+      "family": "FP-FAMILY-1",
+      "summary": "往 memory 日记追加时，正文提到删除函数名，连续两次被拦",
+      "channel": "command_text",
+      "root_cause": "同上；误报在纯文档通道同样触发",
+      "found": "2026-10-22 之前",
+      "regression_test": null,
+      "note": "待定修法：对 .md/.json/.txt 目标整体豁免，或把阻断降级为提示"
+    },
+    {
+      "id": "FP-0003",
+      "status": "open",
+      "rule": "DST-04",
+      "family": "FP-FAMILY-1",
+      "summary": "git commit -m 的 message 里描述「注册表 Run 键新增」被当成持久化动作拦下",
+      "channel": "commit_message",
+      "root_cause": "commit message 是长文本参数，不是要执行的命令；DST-04 是 critical，直接 block",
+      "found": "2026-10-30",
+      "context": "夜间升级 P3-1 提交时撞到。改写 message（去掉命令字面串）后通过。",
+      "regression_test": null
+    },
+    {
+      "id": "FP-0004",
+      "status": "open",
+      "rule": "DST-06",
+      "family": "FP-FAMILY-1",
+      "summary": "git commit -m 的 message 里写「解码后管道交给 shell」的形态被当成远程脚本执行拦下",
+      "channel": "commit_message",
+      "root_cause": "同上",
+      "found": "2026-10-30",
+      "context": "夜间升级 P4-2 提交时撞到，与 FP-0003 相隔约 20 分钟。**同一晚两次 ⇒ 不是偶发：写规则说明的人一定会撞上自己的规则。**",
+      "regression_test": null
+    }
+  ],
+  "meta": {
+    "why_this_file_now": "2026-10-30 夜间升级时同一晚被自己拦两次，说明「误报只靠改写文案绕开」不是可持续的做法。此前 FP-0001/0002 只记在 DECISIONS.md 的散文里，没有状态机、没有 regression_test 字段 ⇒ 无法判断哪条修好了。",
+    "not_done": "四条全部 open，本轮**一条都没修**。建簿不等于修好——按铁律 31，这里必须写明「已登记，未修复」，不许让它看起来像已处理。"
+  }
+}
