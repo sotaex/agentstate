@@ -789,7 +789,7 @@ _FALLBACK = [
        "^\\s*(?:echo|printf)\\b[^;&|\\n]*$",
        "^\\s*git\\s+(?:log|show|diff|grep)\\b[^;&|\\n]*$"],
      "description": "Agent attempted to destroy permissions or ownership recursively (denial of service); covers chmod/chown and Windows icacls/takeown",
-     "description_zh": "递归破坏权限或属主，可致服务不可用（含 Windows icacls/takeown）",
+     "description_zh": "递归破坏权限或属主，可致服务不可用（含 Windows 访问控制）",
      "remediation": "Permission/ownership recursion is a sysadmin action; do it yourself after review",
      "remediation_zh": "递归改权限/属主属于系统管理操作，请人工审查后执行",
      "label_zh": "破坏文件权限属主",

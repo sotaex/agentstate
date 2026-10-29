@@ -371,9 +371,9 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
 
 ## DST-08  Permission/ownership destruction
 - category: destructive | severity: critical | dynamic (hook only) | tools: Bash
-- purpose: Blocks recursive permission/ownership destruction (denial-of-service class)
+- purpose: Blocks recursive permission/ownership destruction (denial-of-service class; POSIX chmod/chown and Windows icacls/takeown)
 - description: Agent attempted to destroy permissions or ownership recursively (denial of service); covers chmod/chown and Windows icacls/takeown
-- 说明: 递归破坏权限或属主，可致服务不可用（含 Windows icacls/takeown）
+- 说明: 递归破坏权限或属主，可致服务不可用（含 Windows 访问控制）
 - 处理建议: 递归改权限/属主属于系统管理操作，请人工审查后执行
 - command_patterns:
     - `\bchmod\s+000\b`
