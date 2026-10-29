@@ -4833,10 +4833,11 @@ def j_rules_patterns_are_alive():
     root = str(Path(_TMP.tmpdir(prefix="d48_")))
     proj = os.path.dirname(str(PKG))
 
-    def action_of(cmd, ruleset):
+    def action_of(cmd, ruleset, project_root=None):
         texts = {"command": cmd, "file_path": "", "content": "", "url": ""}
         try:
-            hits = hook.collect_hits(ruleset, "Bash", texts, proj, []) or []
+            hits = hook.collect_hits(ruleset, "Bash", texts,
+                                     project_root or proj, []) or []
         except Exception as e:                              # noqa: BLE001
             return "ERR:%s" % type(e).__name__
         acts = [h.get("action") for h in hits if isinstance(h, dict)]
@@ -4861,10 +4862,29 @@ def j_rules_patterns_are_alive():
                           "；".join(c[:34] for c, _ in blocked[:3])))
 
     # 3b 构建产物删除：产品文案自己承诺「已在豁免清单」⇒ 不许 block
+    #
+    # ★★ 0.62.1：这一腿此前**量的是环境，不是产品** —— 它把 `project_root` 设成
+    #   仓库根，而删除许可（VCT）第二票要求「目标是个现存目录、且上层有构建描述」。
+    #   实测同一份代码两个结论：worktree 里没有 `dist/` ⇒ 5/5 全被 block（这里红）；
+    #   主线有 `dist/` ⇒ 全放行（这里绿）。这不是产品退步，是夹具借了环境的运气
+    #   ——**借环境的判据会在下一个人的机器上给出第三种答案**。
+    #   改法：把「现存目录 + 构建描述」这两样自己造出来，`project_root` 指向它。
+    #   ★ 只对 3b／⑤ 换根；3a／3c 仍用仓库根（它们不该依赖豁免，换根等于换题目）。
+    art_root = os.path.join(root, "proj")
+    os.makedirs(os.path.join(art_root, "dist"), exist_ok=True)
+    os.makedirs(os.path.join(art_root, "build"), exist_ok=True)
+    for _p in (os.path.join(art_root, "dist", "bundle.js"),
+               os.path.join(art_root, "build", "app.js"),
+               os.path.join(art_root, "pyproject.toml")):
+        with open(_p, "w", encoding="utf-8") as _fh:
+            _fh.write("x\n")
+    if not os.path.isdir(os.path.join(art_root, "dist")):
+        return False, "夹具不成立：自造 dist/ 失败（这一腿会退回借环境）"
+
     artifacts = ["%s -rf dist" % RM, "%s -rf dist/" % RM,
                  "%s dist/bundle.js" % RM, "%s -f build/app.js" % RM,
                  "%s -rf ./dist" % RM]
-    bad_art = [(c, action_of(c, rules)) for c in artifacts]
+    bad_art = [(c, action_of(c, rules, art_root)) for c in artifacts]
     bad_art = [(c, a) for c, a in bad_art if a == "block"]
     if bad_art:
         return False, ("③ %d/%d 条**构建产物删除**被 block（拦截文案写着"
@@ -4898,7 +4918,7 @@ def j_rules_patterns_are_alive():
     for r in stripped:
         if r.get("id") == "DST-01":
             r["exclude_patterns"] = []
-    still_ok = [c for c in artifacts if action_of(c, stripped) != "block"]
+    still_ok = [c for c in artifacts if action_of(c, stripped, art_root) != "block"]
     if still_ok:
         return False, ("⑤ 清空 DST-01 的豁免后 %d/%d 条构建产物删除**仍然不拦**"
                        " ⇒ ③ 的绿不是豁免给的，判据测错了对象：%s"
