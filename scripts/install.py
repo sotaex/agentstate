@@ -746,6 +746,28 @@ def install(root, host_override=None, redetect=False, skip_scan=False, strict=Fa
             print("      shim: %s（把该目录加入 PATH 后任意终端可用 antinel）" % shim)
         except Exception as _e:
             print("      shim: skipped (%s)" % _e)
+    # ★★ 0.62.0（2026-10-30）：**自动布置金丝雀** —— 让 SEC-11 从「结构上不可能命中」变活。
+    #   病灶实测（2026-10-29）：37 条规则里 15 条零命中，`SEC-11` 是「作用对象不存在」的
+    #   4 条之一 —— 它的 file_patterns 是 `(^|[\\/])\.canary[\\/]CANARY-`，而 `.canary/`
+    #   **从来没被创建过**。`antinel canary plant` 早在 0.31.0 就实现了（幂等、自动上链
+    #   canary_planted），但**没有任何机制保证它被执行过** ⇒ 命令存在 ≠ 诱饵在岗。
+    #   ⇒ 修法是**在安装末尾直接执行它**，不是再打印一条建议：建议靠人记得，等于没有。
+    #   ★ 为什么用 subprocess 而不是 import：`cmd_canary` 是 antinel.py 的唯一实现，
+    #     复制一份进 install.py 就违反「同源闸（两份实现即红）」。cwd 必须是目标项目根，
+    #     否则 find_project_root() 会向上找到别处的 .psl/（worktree 场景已实测踩到）。
+    #   ★ 失败不阻塞安装（fail-open）：诱饵缺失只是少一条观察能力，不该让装机失败。
+    try:
+        import subprocess as _sp
+        _cy = _sp.run([sys.executable, str(_locate("antinel.py")), "canary", "plant"],
+                      cwd=str(root), capture_output=True, text=True,
+                      encoding="utf-8", errors="replace", timeout=60)
+        _out = (_cy.stdout or "").strip().splitlines()
+        if _cy.returncode == 0 and _out:
+            print("     " + _out[-1])
+        else:
+            print("     金丝雀: skipped（rc=%s）" % _cy.returncode)
+    except Exception as _e:                                    # noqa: BLE001
+        print("     金丝雀: skipped (%s)" % _e)
     # ★ 0.53.0（T1.4，设计 v1.11 §29.2 触点 1＋施工单 v1.4）：装好之后的
     #   收尾一句话 —— 创始人原话「装后建议用户先做一次体检……要有设计」。
     #   **只打印命令，不自动开浏览器**：Agent 环境自动弹窗会打断（设计原文）。
