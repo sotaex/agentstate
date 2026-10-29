@@ -457,10 +457,15 @@
         "Bash"
       ],
       "command_patterns": [
-        "^\\s*sudo\\b",
-        "^\\s*su\\b",
+        "\\bsudo\\b",
+        "\\bsu\\s+-",
         "chmod\\s+777",
-        "chown\\s+root"
+        "chown\\s+root",
+        "\\brunas\\b[^\\n]{0,40}/user",
+        "\\bStart-Process\\b[^\\n]{0,80}-Verb\\s+RunAs",
+        "\\bnet\\s+localgroup\\s+administrators\\b[^\\n]{0,80}/add",
+        "\\breg\\s+add\\b[^\\n]{0,120}\\\\CurrentVersion\\\\Run",
+        "\\bNew-LocalUser\\b|\\bAdd-LocalGroupMember\\b"
       ],
       "exclude_patterns": [
         "sudo apt-get install",
