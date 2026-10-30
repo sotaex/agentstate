@@ -23,14 +23,14 @@
   ],
   "hardcoded_rules": {
     "_note": "判定由钩子内置实现（代码），**不读本文件 rule 的 enabled 字段**（本产品**没有**独立的禁用清单：唯一的关法是规则文件里该条写 enabled:false，走 _disabled()）。用户关掉它们不会生效，要关只能改代码。两组必须分开：code_only 根本不在 rules 数组里（没有可关的条目，任何配置都碰不到它）；declared_but_code_driven 在 rules 里但判定走代码（enabled 字段对它无效，它写 false 只是为了不让通用正则接管）。",
-    "_note_0.63": "★ 0.63.0 改名后这四条**已不同质**，不再是一类，只是暂时还放在同一个字段里（拆分留给 v2，见设计文档 §6）：AN-037（原 SLOP-01）是**真规则**、在 rules 数组里、可读不可关；OUT-01 **保留旧号**（它走 PostToolUse 通道，表表达不了，等 channel 字段落地再收编 AN-038）；DEV-01（原 GOV-01）已**去号改名**，不再占用判据号段，改走 type:governance；notice_budget 已**去号**，有专属 type notice_budget_*，**永不回收**。",
+    "_note_0.63": "★ 0.63.0 改名后这四条**已不同质**，不再是一类，只是暂时还放在同一个字段里（拆分留给 v2，见设计文档 §6）：AN-037（原 AN-037）是**真规则**、在 rules 数组里、可读不可关；OUT-01 **保留旧号**（它走 PostToolUse 通道，表表达不了，等 channel 字段落地再收编 AN-038）；DEV-01（原 GOV-01）已**去号改名**，不再占用判据号段，改走 type:governance；notice_budget 已**去号**，有专属 type notice_budget_*，**永不回收**。",
     "code_only": {
       "OUT-01": "输出面：私有密钥/凭据出现在工具输出里（hooks/post_tool_use.py:605 起，PostToolUse）。★ 0.63.0：号未收编，保留旧号直到 channel 字段落地",
       "DEV-01": "套件治理：A1/A2 写入时刻拦截（_suite_gov_hit，同 ci/delivery_gate.py 双向同步）。★ 0.63.0 去号：原 GOV-01，不再占判据号段，改走 type:governance",
       "notice_budget": "提醒预算：token 预算超阈值（_budget_hit）。★ 0.63.0 去号：原 BUDGET-01，已有专属 type notice_budget_*，此号永不回收"
     },
     "declared_but_code_driven": {
-      "AN-037": "撞名/打字抢注检测（_slop_hit）。本文件里该条 enabled=false 是**设计**：它只承载描述与文档，判定走代码内置参考集（rules/typosquat_top.json），避免静态正则误报全部正常安装。详见该条 note。★ 0.63.0：原 SLOP-01"
+      "AN-037": "撞名/打字抢注检测（_slop_hit）。本文件里该条 enabled=false 是**设计**：它只承载描述与文档，判定走代码内置参考集（rules/typosquat_top.json），避免静态正则误报全部正常安装。详见该条 note。★ 0.63.0：原 AN-037"
     }
   },
   "rules": [
@@ -883,10 +883,10 @@
       "apply_to_tools": [
         "Bash"
       ],
-      "description": "Agent attempted to write an NTFS alternate data stream from a shell (redirect / -Stream / copy / open) -- the command-line half of DST-09",
-      "remediation": "Same channel as DST-09 reached from a shell; the file written this way survives review. Use a normal file.",
+      "description": "Agent attempted to write an NTFS alternate data stream from a shell (redirect / -Stream / copy / open) -- the command-line half of AN-023",
+      "remediation": "Same channel as AN-023 reached from a shell; the file written this way survives review. Use a normal file.",
       "description_zh": "从命令行写入 NTFS 备用数据流。重定向 / -Stream / copy / open 等命令通道都能做到。",
-      "remediation_zh": "与 DST-09 同一通道的命令行写法，产物同样逃过审查；请改用普通文件",
+      "remediation_zh": "与 AN-023 同一通道的命令行写法，产物同样逃过审查；请改用普通文件",
       "label_zh": "命令行写隐形数据流"
     },
     {
@@ -909,7 +909,7 @@
       "description_zh": "命令行内联 base64 解码后 exec/eval 执行（经典混淆载荷载体）",
       "remediation": "Decode and inspect the payload first; never let inline decoded code run directly.",
       "remediation_zh": "先解码审查内容；不要让解码后的代码直接执行",
-      "note": "0.62.0：**形态错配修复**。旧版三条 pattern 全是 Python 语法（exec(...)/eval(...)），却挂在 apply_to_tools=[\"Bash\"] 上 —— 而 content_patterns 在 Bash 通道没有 file_targets 可审，**结构上恒不命中**（37 条里 15 条零命中，它是「形态错配」那一条）。改为 command_patterns 两条（双向覆盖 b64decode 与 exec/eval 的先后顺序）。★ 只保留「内联无管道」形态：`… | base64 -d | sh` 这类**管道**形态已由 DST-06 第 5/6 条 pattern 完整覆盖，本条不再重复 —— 两条都是 critical，重复只会让同一条命令被拦两次、报两个规则名。★ 必须 b64decode 与 exec/eval **同时出现**：`python -c \"print(base64.b64decode('aGk='))\"` 是正常解码，不该拦。",
+      "note": "0.62.0：**形态错配修复**。旧版三条 pattern 全是 Python 语法（exec(...)/eval(...)），却挂在 apply_to_tools=[\"Bash\"] 上 —— 而 content_patterns 在 Bash 通道没有 file_targets 可审，**结构上恒不命中**（37 条里 15 条零命中，它是「形态错配」那一条）。改为 command_patterns 两条（双向覆盖 b64decode 与 exec/eval 的先后顺序）。★ 只保留「内联无管道」形态：`… | base64 -d | sh` 这类**管道**形态已由 AN-019 第 5/6 条 pattern 完整覆盖，本条不再重复 —— 两条都是 critical，重复只会让同一条命令被拦两次、报两个规则名。★ 必须 b64decode 与 exec/eval **同时出现**：`python -c \"print(base64.b64decode('aGk='))\"` 是正常解码，不该拦。",
       "label_zh": "解码后立即执行代码"
     },
     {
@@ -1111,7 +1111,7 @@
       "remediation": "Tunnels bypass ordinary egress checks; confirm the destination before allowing.",
       "description_zh": "建立隧道/隐蔽信道（反向隧道、代理、DNS/ICMP 载波）——绕过常规出网检查",
       "remediation_zh": "隧道会绕过常规出网检查；放行前先确认目标",
-      "note": "0.29.0 G-5：单开一条规则，**不并入 NET-01** —— NET-01 的 exclude 含 `localhost`，而 `ngrok http localhost:3000` 正是最经典的隧道形态，并进去等于没拦。",
+      "note": "0.29.0 G-5：单开一条规则，**不并入 AN-006** —— AN-006 的 exclude 含 `localhost`，而 `ngrok http localhost:3000` 正是最经典的隧道形态，并进去等于没拦。",
       "label_zh": "建立隐蔽出网通道"
     },
     {
@@ -1142,7 +1142,7 @@
       "remediation": "Verify the new server's source, command and url; remove any you do not recognize and rotate the related credentials.",
       "description_zh": "MCP 配置文件被写入或修改",
       "remediation_zh": "核对新增 server 的来源。不认识的一律移除，并轮换相关凭据",
-      "note": "0.32.1：content_patterns 收紧为 Bash **写形态**（重定向/tee/cp/mv + 配置文件名）——旧版 `cat .mcp.json`（纯读取）也会命中，属于误报；读取可见性由 MCP-02（Read 通道）承担。★★ 0.62.0：**裸文件名 pattern 不许进本条的 file_patterns**。`file_patterns` 在 Bash 上匹配的是**整条命令文本**，把 `mcp.json` 的裸名写进去，`cat .cursor/mcp.json` 这类**纯读取**就会命中「写入 MCP 配置」的告警（0.62.0 第一次提交就是这么错的，判据 X3-a 当场红：`rc=0 ids=['MCP-01']`）。裸名的**写入**形态本来已由第 2 条 content_pattern（写动词 + mcp.json）覆盖，读取可见性由 MCP-02（Read 通道）承担 ⇒ 本条只留 4 条带点/带目录的路径，补齐裸名是补在了错的地方。",
+      "note": "0.32.1：content_patterns 收紧为 Bash **写形态**（重定向/tee/cp/mv + 配置文件名）——旧版 `cat .mcp.json`（纯读取）也会命中，属于误报；读取可见性由 AN-033（Read 通道）承担。★★ 0.62.0：**裸文件名 pattern 不许进本条的 file_patterns**。`file_patterns` 在 Bash 上匹配的是**整条命令文本**，把 `mcp.json` 的裸名写进去，`cat .cursor/mcp.json` 这类**纯读取**就会命中「写入 MCP 配置」的告警（0.62.0 第一次提交就是这么错的，判据 X3-a 当场红：`rc=0 ids=['AN-032']`）。裸名的**写入**形态本来已由第 2 条 content_pattern（写动词 + mcp.json）覆盖，读取可见性由 AN-033（Read 通道）承担 ⇒ 本条只留 4 条带点/带目录的路径，补齐裸名是补在了错的地方。",
       "label_zh": "MCP 配置被改动"
     },
     {

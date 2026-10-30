@@ -14,7 +14,7 @@
 > | # | 变更 | 证据 |
 > |---|---|---|
 > | 1 | **T1 四件全部收口**：T1.1 诱饵状态／T1.2 归档不删（v1.4 已收）＋ T1.3 首检提醒／T1.4 install 收尾句（本版新收） | `output/build_0530c_t13_green.log`（0353：**74 绿/0 红**，P17×3 绿）；红基线 `build_0530c_t13_red.log`（13 红全可解释：P17×3 精确红＋10 条 stash 级联）；探针 `_p_0530c_t13_probe.py` 19 项全过 |
-> | 2 | **「金丝雀」页面词清零**（H6b 新判据）：活体闸整页抓到术语芯片里的「金丝雀布防」——H6 只渲染 `_result_html` 局部块，罩不到 console chrome ⇒ 补「页面文案派生源扫描」四路径（shield 概述句／规则全表／日报 label_zh／详情行大白话）。产品改**真源**四处：`glossary._CATEGORY_ZH["canary"]`＝「诱饵文件」、SEC-11 三字段、`references/RULES.md` 镜像 | 红基线 `build_0530c_h6b_red.log`（H6b 红因「shield 概述句 里有鸟语：金丝雀」）→ 转绿 `build_0530c_h6b_green.log`（0360：**57 绿/0 红**，负控 14 有效）；活体闸 `build_0530c_t1_live.log`（**33 项全过**，整页零「金丝雀」） |
+> | 2 | **「金丝雀」页面词清零**（H6b 新判据）：活体闸整页抓到术语芯片里的「金丝雀布防」——H6 只渲染 `_result_html` 局部块，罩不到 console chrome ⇒ 补「页面文案派生源扫描」四路径（shield 概述句／规则全表／日报 label_zh／详情行大白话）。产品改**真源**四处：`glossary._CATEGORY_ZH["canary"]`＝「诱饵文件」、AN-036 三字段、`references/RULES.md` 镜像 | 红基线 `build_0530c_h6b_red.log`（H6b 红因「shield 概述句 里有鸟语：金丝雀」）→ 转绿 `build_0530c_h6b_green.log`（0360：**57 绿/0 红**，负控 14 有效）；活体闸 `build_0530c_t1_live.log`（**33 项全过**，整页零「金丝雀」） |
 > | 3 | **T1.3 级别决策：L2 → L1**（待创始人复核）：施工单字面写 L2，但 L2 ＝ `inbox_bubble.URGENT_LEVELS` ＝置顶紧急窗（0514 判据钉死），「还没体检」弹紧急窗与设计 §29 意图冲突 ⇒ 归 L1「注意」（toast 知会、语义准确、分档仍落「要处理」）。改一行 `LEVEL_OF_KIND` 即可翻回，判据同源跟随 | `inbox_model.LEVEL_OF_KIND` 注释＋`host_shield.exam_reminder_check` docstring 双处记录 |
 > | 4 | T1 段状态更新；执行顺序段 T1 标「已完成（v1.5 收口）」，下一件＝T2 | 见下 |
 

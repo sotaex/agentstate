@@ -35,12 +35,12 @@ if HERE not in sys.path:
 #: ★ 0.37.1 补：本文件的负控此前**只在内存里算变异字符串**，从没写盘 ——
 #:   空转的负控比没有负控更坏（它给"已被守护"发勋章，见 0364 B4 同型修法）。
 #:   这里补上与 0364 同形的快照/还原机制（还原用 rename，避开 Antinel 自己
-#:   的 DST-01 删除拦截）。
+#:   的 AN-009 删除拦截）。
 _BACKUP = []          # [(path, backup)]
 
 
 def _snapshot(path):
-    """备份一个文件（还原用 rename，避开 Antinel 自己的 DST-01 删除拦截）。"""
+    """备份一个文件（还原用 rename，避开 Antinel 自己的 AN-009 删除拦截）。"""
     import shutil
     bk = path + ".g0363.bk"
     shutil.copy2(path, bk)

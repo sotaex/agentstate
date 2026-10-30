@@ -258,7 +258,7 @@ def project_record(rec, kinds):
             chain_ref=str(rec.get("hash") or ""),
             command=str(_inp.get("command") or ""),
             file_path=str(_inp.get("file_path") or ""),
-            # ★ 同一规则反复拦 ⇒ 归并成一件事（"规则 DST-01 拦了 6 次"）。
+            # ★ 同一规则反复拦 ⇒ 归并成一件事（"规则 AN-009 拦了 6 次"）。
             topic=rule,
             host=_host, host_confidence=_conf,
         )

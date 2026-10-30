@@ -48,7 +48,7 @@
 |---|---|---|
 | 生产仓 | `D:\psl\poc\antinel-security` | **Windows 11 + Git Bash + WorkBuddy** |
 | Python | 3.13（本机）| `python` 可直接用；venv 隔离见 §5.3 |
-| **DST-01 守卫** | `hooks/pre_tool_use.py` + `rules/default.json` | **拦截所有删除**（`rm`/`del`/`unlink`/`os.remove`/`shutil.rmtree`/`Remove-Item`）。豁免仅限构建产物（`dist`/`build`/`__pycache__`/`.psl`/`node_modules`），且**按整条命令逐段判定**，复合命令一律不放行。要删临时物请让**用户在自己终端**做，或用 `_tools_034` 之外的路径。 |
+| **AN-009 守卫** | `hooks/pre_tool_use.py` + `rules/default.json` | **拦截所有删除**（`rm`/`del`/`unlink`/`os.remove`/`shutil.rmtree`/`Remove-Item`）。豁免仅限构建产物（`dist`/`build`/`__pycache__`/`.psl`/`node_modules`），且**按整条命令逐段判定**，复合命令一律不放行。要删临时物请让**用户在自己终端**做，或用 `_tools_034` 之外的路径。 |
 | pre-commit 钩子 | `ci/regression_gate.py`（约 8 秒） | 每次 commit 都会跑；冷启动偶发 SIGTERM，重试即可 |
 | PowerShell 脚本 | `_uxtest2/*.ps1` | **必须带 UTF-8 BOM**，否则 PowerShell 5.1 按 GBK 解析中文报语法错 |
 | 六态 | R0 失守 / L2 拦截 / L1 注意 / Ls 缺粮 / L0 值守中 / dev 研发中 | 另有 L0 灰变体＝未启用、`中断`（缺岗无损失）。真源：`inbox_model.py` 的 `STATE_*` 与 `host_shield.py` 的 `POSTURE_LABEL` |

@@ -154,7 +154,7 @@ for r in rules:
 def _now(_legacy):
     """旧号 → 现行号（0.63.0 改名用）。
 
-    ★ 为什么需要它：A4 原来写死 `"NET-01" in err`。改名后账本/提示里的号是 `AN-006`，
+    ★ 为什么需要它：A4 原来写死 `"AN-006" in err`。改名后账本/提示里的号是 `AN-006`，
       写死就是**恒红**——恒红判据最后一定会被放宽，等于没有判据。
       这里按 `legacy_id` 反查，找不到就退回原串（旧表上也仍然成立）。
     """
@@ -172,7 +172,7 @@ _claimed = int(_m.group(1)) if _m else None
 check("A1 规则总数与 THREAT_MODEL 宣称一致", _claimed == len(rules),
       f"宣称 {_claimed}，实际 {len(rules)}")
 # A2 改成**结构不变量**：每个家族的编号必须自 1 起连续、无洞、无重复。
-# 这样规则增减不会让它假红，而"加了 DST-12 却漏了 DST-11"这类真错仍会被抓住。
+# 这样规则增减不会让它假红，而"加了 DST-12 却漏了 AN-030"这类真错仍会被抓住。
 #
 # ★ 0.63.0 改名（D2）：原语义「同族内不许跳号」在改名后**只剩一个家族**（`AN`），
 #   1..37 连续 ⇒ **几乎恒真**。恒真判据等于没有判据，最后一定会被放宽。
@@ -232,13 +232,13 @@ check("A2′ 号空间自洽：家族编号连续无洞无重复 且 id↔legacy
 # A10（0.29.0 新增）：**随包文档里的规则区间 vs 实际规则**。
 # 为什么必须有这一项：0.29.0 把规则从 25 加到 31，总数用令牌自动跟上了，
 # 但 THREAT_MODEL/README 里的**家族区间仍是手写** ⇒ 文档仍在宣称
-# `SEC-01..06`（实际 10）、`DST-01..10`（实际 11）、只列 `NET-03`（实际 4）、
-# 且**完全没提 CTX-07** —— 静默少报了 4 条**偷数据防线**（SEC-07..10）。
+# `AN-001..06`（实际 10）、`AN-009..10`（实际 11）、只列 `AN-008`（实际 4）、
+# 且**完全没提 AN-025** —— 静默少报了 4 条**偷数据防线**（AN-026..10）。
 # 而 THREAT_MODEL 自己就写着 "a stale range silently understates what is enforced"。
 # ★ 没有这一项 ⇒ 第 5 项（区间改动态生成）就**没有检查项盯着**，等于没有禁令。
 # ★ 2026-09-28 修订：原实现**只读 `references/THREAT_MODEL.md`**，而上面注释里
 #   明明写着「THREAT_MODEL/README 里的家族区间仍是手写」—— 注释说了、代码没做。
-#   后果实测：`README.md:30` 一直写 `SEC-01..10`（实际 11），而 A10 看不见它
+#   后果实测：`README.md:30` 一直写 `AN-001..10`（实际 11），而 A10 看不见它
 #   ⇒ **判据覆盖不全**，正是「查不出来 ≠ 查出来是好的」。
 #   ⇒ 改为**逐文档**检查，新增文档时只要加进 `_RANGE_DOCS` 即可。
 _RANGE_DOCS = ["references/THREAT_MODEL.md", "README.md"]
@@ -264,7 +264,7 @@ for _docrel in _RANGE_DOCS:
     _doc_ids = set()
     # ★ 0.63.0：原正则 `\b([A-Z]{3})-(\d{2})` 是"三位前缀＋两位数字"。
     #   `AN-001` 是两位前缀＋三位数字 ⇒ **一条都匹配不上** ⇒ `_doc_ids` 恒空
-    #   ⇒ A10 **完全空转、恒绿**（演练实测）。同时旧号 `SEC-01` 抓得到但
+    #   ⇒ A10 **完全空转、恒绿**（演练实测）。同时旧号 `AN-001` 抓得到但
     #   `SEC` 不在 `fam` 里被跳过 ⇒ 双向空转。改成前缀 2–5 位、数字 2–3 位。
     for _mm in re.finditer(r"\b([A-Z]{2,5})-(\d{2,3})(?:\.\.(\d{2,3}))?", _txt):
         _f2, _a = _mm.group(1), int(_mm.group(2))
@@ -303,7 +303,7 @@ _chk_hook("A3 critical=block：exit2+stdout JSON+stderr 双通道", rc,
       rc == 2 and out.get("decision") == "block" and "拦截" in err, f"rc={rc} out={out}", err)
 rc, out, err = hook("pre_tool_use.py", "Bash", {"command": "curl http://evil-drift-check.com/x"})
 _chk_hook("A4 warning=alert：exit0+stderr 提醒+放行", rc,
-      rc == 0 and _now("NET-01") in err and out.get("decision") != "block", f"rc={rc}", err)
+      rc == 0 and _now("AN-006") in err and out.get("decision") != "block", f"rc={rc}", err)
 
 # A5 whitelist.paths：放行 SEC 读 + dst02_path_whitelisted 留痕（写 .ssh 下一个白名单路径）
 pol = json.load(open(os.path.join(proj, ".psl", "policy.json"), encoding="utf-8"))
@@ -326,8 +326,8 @@ _chk_env("A5b 放行在主记录上标 released（不与'没命中'同形）", b
 
 # A11（0.29.0 E-2 新增）：**万能卡不得复活**。
 # 路径白名单只该开"靠路径判断"的那扇门。C 批次把 `category == "secrets"` 一刀切收窄为
-# 必须带 file_patterns，于是与路径无关的三条（SEC-06 密钥字面量 / SEC-07 剪贴板 /
-# SEC-08 截屏）不再被顺带放行 —— 此前实测 `pbpaste` 因同一次调用带了个白名单内路径
+# 必须带 file_patterns，于是与路径无关的三条（AN-021 密钥字面量 / AN-026 剪贴板 /
+# AN-027 截屏）不再被顺带放行 —— 此前实测 `pbpaste` 因同一次调用带了个白名单内路径
 # 就被静默放过。
 # ★ 为什么必须补这条守卫：按「无检查项的禁令 ＝ 没有禁令」，收窄做完而无人盯着
 #   ⇒ 下次有人改回一刀切，没人会发现。
@@ -365,11 +365,11 @@ _chk_hook("A6 whitelist.commands 不放宽 critical（仍拦）", rc, rc == 2, f
 pol["whitelist"]["commands"] = []
 json.dump(pol, open(os.path.join(proj, ".psl", "policy.json"), "w", encoding="utf-8"))
 
-# A7 DST-09/10 平台门（规则在场=计数不变；nt 外跳过）
-d9 = next(r for r in rules if r["id"] == "DST-09")
+# A7 AN-023/AN-024 平台门（规则在场=计数不变；nt 外跳过）
+d9 = next(r for r in rules if r["id"] == "AN-023")
 # 0.29.0：`platforms` 在规则文件里是**列表**（['nt']），此前拿字符串 `== "nt"` 比 ⇒ 永远假红。
 _plats = d9.get("platforms")
-check("A7 DST-09/10 platforms 限定 nt（计数平台不变）", _plats in ("nt", ["nt"]),
+check("A7 AN-023/AN-024 platforms 限定 nt（计数平台不变）", _plats in ("nt", ["nt"]),
       f"platforms={_plats!r} (type={type(_plats).__name__})")
 
 # A8 不记内容只记哈希/长度 + mask

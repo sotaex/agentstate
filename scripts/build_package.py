@@ -5,7 +5,7 @@
 """Assemble the publishable skill package from the flat PoC layout (spec 2.2 / table 10-1).
 
 Output: <out>/antinel-security/
-  SKILL.md                     agent entry (Agent Skills standard; name == directory name, CTX-05)
+  SKILL.md                     agent entry (Agent Skills standard; name == directory name, AN-018)
   scripts/install.py scan.py report.py verification_tests.py run_harness.py
   hooks/pre_tool_use.py post_tool_use.py
   rules/default.json
@@ -351,30 +351,30 @@ REPO_EXTRAS = ("server.json", "llms.txt", "challenge", "demo", "ci",
 # P-B7: one line per rule -- what real event it exists for. Single source in the
 # generator so references/RULES.md stays generated (never a second hand-written file).
 RULE_PURPOSE = {
-    "SEC-01": "Prevents an agent reading .env files (live-blocked in ZCode on 09-10; the founding interception)",
-    "SEC-02": "Prevents SSH private key / authorized_keys reads (the credential that outlives every session)",
-    "SEC-03": "Prevents cloud credential file reads (aws/kube/gcloud -- the keys that move cloud billings)",
-    "SEC-04": "Prevents wallet/keystore access (irreversible financial loss class)",
-    "SEC-05": "Prevents browser profile reads (live login sessions, not just passwords)",
-    "SEC-06": "Catches secret literals IN content (a key pasted into code outlives the file it was meant for)",
-    "NET-01": "Surfaces shell egress to non-whitelisted domains (first-generation C2 / exfil channel)",
-    "NET-02": "Surfaces inline-code network calls (the same egress hidden inside python -c)",
-    "NET-03": "Surfaces non-whitelisted domains named in commands (DNS-level comparison is v2)",
-    "DST-01": "Blocks deletion commands (rm/del/rd/Remove-Item and library calls -- measured 11 live blocks)",
-    "DST-02": "Blocks writes outside the project root (the workspace is the trust boundary)",
-    "DST-03": "Blocks shell-startup edits (persistence that re-executes on every terminal)",
-    "DST-04": "Blocks persistence installs (cron/systemd/registry Run/schtasks -- survives the session)",
-    "DST-05": "Alerts on privilege escalation (sudo/chmod 777 -- sysadmin territory)",
-    "DST-06": "Blocks remote-script-piped-to-interpreter (the classic supply-chain install)",
-    "DST-07": "Blocks irreversible git discards (reset --hard / clean -fdx eat uncommitted work)",
-    "DST-08": "Blocks recursive permission/ownership destruction (denial-of-service class; POSIX chmod/chown and Windows icacls/takeown)",
-    "DST-09": "Blocks alternate-data-stream writes from a file tool (Windows-only: path:stream is a legal POSIX filename)",
-    "DST-10": "Blocks alternate-data-stream writes from a shell (redirect / -Stream / copy / open -- the command half of DST-09)",
-    "CTX-01": "Alerts on environment enumeration (the precursor to secret exfiltration)",
-    "CTX-02": "Blocks prompt injection in skill instructions (the skill-poisoning payload core)",
-    "CTX-03": "Blocks invisible Unicode (tag/zero-width/RLO -- the human-eye bypass, live-blocked 3x)",
-    "CTX-04": "Alerts on long encoded blobs in skills (the payload behind base64/hex laundering)",
-    "CTX-05": "Detects SKILL.md identity mismatch (name spoofing / packaging slip)",
+    "AN-001": "Prevents an agent reading .env files (live-blocked in ZCode on 09-10; the founding interception)",
+    "AN-002": "Prevents SSH private key / authorized_keys reads (the credential that outlives every session)",
+    "AN-003": "Prevents cloud credential file reads (aws/kube/gcloud -- the keys that move cloud billings)",
+    "AN-004": "Prevents wallet/keystore access (irreversible financial loss class)",
+    "AN-005": "Prevents browser profile reads (live login sessions, not just passwords)",
+    "AN-021": "Catches secret literals IN content (a key pasted into code outlives the file it was meant for)",
+    "AN-006": "Surfaces shell egress to non-whitelisted domains (first-generation C2 / exfil channel)",
+    "AN-007": "Surfaces inline-code network calls (the same egress hidden inside python -c)",
+    "AN-008": "Surfaces non-whitelisted domains named in commands (DNS-level comparison is v2)",
+    "AN-009": "Blocks deletion commands (rm/del/rd/Remove-Item and library calls -- measured 11 live blocks)",
+    "AN-010": "Blocks writes outside the project root (the workspace is the trust boundary)",
+    "AN-011": "Blocks shell-startup edits (persistence that re-executes on every terminal)",
+    "AN-012": "Blocks persistence installs (cron/systemd/registry Run/schtasks -- survives the session)",
+    "AN-013": "Alerts on privilege escalation (sudo/chmod 777 -- sysadmin territory)",
+    "AN-019": "Blocks remote-script-piped-to-interpreter (the classic supply-chain install)",
+    "AN-020": "Blocks irreversible git discards (reset --hard / clean -fdx eat uncommitted work)",
+    "AN-022": "Blocks recursive permission/ownership destruction (denial-of-service class; POSIX chmod/chown and Windows icacls/takeown)",
+    "AN-023": "Blocks alternate-data-stream writes from a file tool (Windows-only: path:stream is a legal POSIX filename)",
+    "AN-024": "Blocks alternate-data-stream writes from a shell (redirect / -Stream / copy / open -- the command half of AN-023)",
+    "AN-014": "Alerts on environment enumeration (the precursor to secret exfiltration)",
+    "AN-015": "Blocks prompt injection in skill instructions (the skill-poisoning payload core)",
+    "AN-016": "Blocks invisible Unicode (tag/zero-width/RLO -- the human-eye bypass, live-blocked 3x)",
+    "AN-017": "Alerts on long encoded blobs in skills (the payload behind base64/hex laundering)",
+    "AN-018": "Detects SKILL.md identity mismatch (name spoofing / packaging slip)",
 }
 
 #: ★★ 2026-10-08（0.36.9）：`.gitignore` 由**本模板整文件生成**，仓里那份是它的
@@ -456,7 +456,7 @@ GITIGNORE_TEMPLATE = (
     # ★★ 2026-10-30（0.62.0）：金丝雀诱饵目录 —— **绝不进版本库**。
     #   理由不是「本机垃圾」，而是**机制性的**：诱饵的全部价值在于「只有本机知道
     #   哪个文件是诱饵」；一旦进了仓库，攻击者先读 `.canary/` 就知道该绕开哪个
-    #   文件名、该忽略哪个 marker ⇒ 诱饵退化成普通文件，`SEC-11`（Canary file
+    #   文件名、该忽略哪个 marker ⇒ 诱饵退化成普通文件，`AN-036`（Canary file
     #   read）观察的「外传链路」就断了。诱饵由 `antinel canary plant`
     #   （安装末尾自动执行）在本机生成，每台机器 marker 不同。
     #   ★ 这是同一教训的**第五次**：先只补进仓里那份 ⇒ JDG-05 当场红
@@ -722,9 +722,9 @@ A6 收入边界声明（对项目自身的政策约束，不构成对本许可�
 RULES_N = len(json.loads((SRC / "rules" / "default.json").read_text(encoding="utf-8"))["rules"])
 
 # 0.29.0（第二批）：**家族区间也一律现算** —— 与 RULES_N 同病、同类修法。
-# 前车之鉴：总数用 %(rules)d 令牌修好了，但 `SEC-01..06` / `DST-01..10` 这类区间
+# 前车之鉴：总数用 %(rules)d 令牌修好了，但 `AN-001..06` / `AN-009..10` 这类区间
 # 仍是手写 ⇒ 规则加到 31 条后，随包文档还在宣称 25 条时代的区间，**静默少报了
-# SEC-07..10 / DST-11 / NET-04 / CTX-07**（其中前四条正是偷数据防线）。
+# AN-026..10 / AN-030 / AN-031 / AN-025**（其中前四条正是偷数据防线）。
 # 最刺眼的是 THREAT_MODEL 自己就写着 "a stale range silently understates
 # what is enforced" —— 它警告了这个失效模式，然后自己犯了。
 # 修法：闸门归属由 category 派生（＋ 极少数显式例外），区间串由实际编号压缩生成。
@@ -735,7 +735,7 @@ RULES_N = len(json.loads((SRC / "rules" / "default.json").read_text(encoding="ut
 #     · `%(gate1..4)s` 只出现在**文档模板**里（README 的威胁表、THREAT_MODEL、
 #       SKILL.md 的 `--help` 正文），没有任何代码用它做分派；
 #     · 钩子里 grep 不到任何 "gate 1..4" 的判定分支；审计事件只带 `rule_id`
-#       （如 `DST-01`），**不带闸门号**；
+#       （如 `AN-009`），**不带闸门号**；
 #     · `rules/default.json` 顶层那个 `gates` 字段**零消费点** —— 全仓没有一行代码
 #       读它。按本项目既定纪律：**没有消费点的字段不是登记表，是注释。**
 #   ⇒ 所以这里**不需要**"闸门真源"。需要的是两件小事：
@@ -744,8 +744,8 @@ RULES_N = len(json.loads((SRC / "rules" / "default.json").read_text(encoding="ut
 #          "文件归位了却没验能不能跑"，让构建器静默崩在模块级。
 #
 #   ★ 另一条实测结论：`category` 粒度**不足以**表达闸门归属 ——
-#     `supply_chain` 这 5 条横跨闸门 1/2/3（MCP-02 工具描述投毒→1、
-#     MCP-04 明文密钥→2、MCP-01/03 配置与出联→3），规则表自己也只写了
+#     `supply_chain` 这 5 条横跨闸门 1/2/3（AN-033 工具描述投毒→1、
+#     AN-035 明文密钥→2、AN-032/AN-034 配置与出联→3），规则表自己也只写了
 #     "Gate 2/3"（作者当时也说不清）。因为闸门只是叙事，**多归属是诚实的表达**，
 #     强行压成一个数才是撒谎。故本表的值允许是 tuple。
 _GATE_OF_CATEGORY = {
@@ -757,18 +757,18 @@ _GATE_OF_CATEGORY = {
     "destructive": 4,   # 闸门4 行为：删除/越界写/持久化
     # 0.31 新增两类（2026-09-28 补齐 —— 此前缺失，导致构建器在模块级直接崩）
     "supply_chain": (1, 2, 3),   # MCP 供应链：投毒(1)/密钥(2)/配置与出联(3)
-    "canary": 2,                 # 金丝雀：与 SEC-01..11 同属敏感面（README 已如此呈现）
+    "canary": 2,                 # 金丝雀：与 AN-001..11 同属敏感面（README 已如此呈现）
 }
-# 显式例外：NET-01/02 是"命令里发了网络请求"（属闸门4 行为），
-# NET-03/04 才是"出联策略"（域名白名单、隐蔽信道，属闸门3）。两者 category 都是
+# 显式例外：AN-006/AN-007 是"命令里发了网络请求"（属闸门4 行为），
+# AN-008/AN-031 才是"出联策略"（域名白名单、隐蔽信道，属闸门3）。两者 category 都是
 # network，靠 category 分不开，只能显式点名。
-_GATE_OVERRIDE = {"NET-01": 4, "NET-02": 4}
+_GATE_OVERRIDE = {"AN-006": 4, "AN-007": 4}
 
 
 def _compress_ids(ids):
     """['AN-001',...,'AN-010'] → 'AN-001..010'；离散的 → 'AN-002..004, AN-007'。
 
-    ★ 0.63.0 改名：位宽从 `%02d` 改成**取自 id 本身**。写死两位 ⇒ 三位号被压成
+    ★ 0.63.0 改名：位宽从"写死两位"改成**取自 id 本身**。写死两位 ⇒ 三位号被压成
       `AN-01..37`，随包文档里那个区间串反查全部落空，而且**不报错**。
       用 max(len(num)) 而不是写死 3：将来若出现 `AN-1000` 或回退两位号，
       这个函数仍然自洽（写死位宽是同一个错误的另一种形态）。
@@ -798,7 +798,7 @@ def _compress_ids(ids):
 
 
 def _gate_ranges():
-    """{闸口号: 'SEC-01..10, ...'}。★ 任何规则都必须能算出闸门，否则**构建失败**。
+    """{闸口号: 'AN-001..10, ...'}。★ 任何规则都必须能算出闸门，否则**构建失败**。
 
     ★ 2026-09-28：支持一个类别映射到**多个**闸门（见 _GATE_OF_CATEGORY 上方说明）。
       此前只支持单值 ⇒ `supply_chain` 这类横跨闸门的类别只能二选一（等于撒谎），
@@ -1019,7 +1019,7 @@ All hits of one event are collected; the highest severity decides.
 ## Known limits (documented, not hidden)
 - Guardrail, NOT a sandbox: rules match TOOL-CALL TEXT only. A deletion or an
   out-of-root write placed inside a .py/.sh that the agent later executes is NOT
-  intercepted (measured: the Bash channel has no file_path, so DST-02 never
+  intercepted (measured: the Bash channel has no file_path, so AN-010 never
   fires there). Since 0.17.0 such commands are SURFACED as
   dst02_bash_path_suspect alert records, never blocked.
 - The deny signal is still the LEGACY shape (0.29.0, E-3). `emit_block` prints a
@@ -1039,11 +1039,11 @@ All hits of one event are collected; the highest severity decides.
   operations would be a sandbox promise this layer cannot keep (and an
   avalanche of false positives -- test fixtures contain dangerous words by
   design). Isolation belongs to containers/VMs, not to a PreToolUse hook.
-- Alternate-data-stream CONTENT. DST-09/DST-10 block the WRITE PATH on Windows
+- Alternate-data-stream CONTENT. AN-023/AN-024 block the WRITE PATH on Windows
   (`echo x > f.txt:stream`, `Set-Content -Stream`, `copy`, `open(...,"w")`), but
   the PAYLOAD inside a stream cannot be read back through the tool-call layer, so
   contents already written into an ADS are invisible to review. The write is
-  intercepted; the contents are not inspected. Measured scope: DST-09/DST-10 are
+  intercepted; the contents are not inspected. Measured scope: AN-023/AN-024 are
   Windows-gated (`path:stream` is a legal POSIX filename) and `Zone.Identifier`
   is exempt by design -- it is written by browsers and downloaders on every save.
 - Stopping everything. Severity decides: critical blocks, warnings alert and
@@ -1053,7 +1053,7 @@ All hits of one event are collected; the highest severity decides.
   boundary) lives at host level and is read by the hook. Until 0.19.1 a write to
   it was blocked on the Write/Edit channel only; measured 2026-09-14 the Bash
   channel reached the same file via a script that builds the path internally,
-  with NO DST-02 signal at all (audit: decision=allow, rules_hit=[]). So the
+  with NO AN-010 signal at all (audit: decision=allow, rules_hit=[]). So the
   block stopped the user's own delegated maintenance -- including creating
   skills -- without stopping anyone else. Since 0.19.2 both channels do the same
   thing: RELEASE the exact config file (not its parent directory) and RECORD it
@@ -1070,7 +1070,7 @@ All hits of one event are collected; the highest severity decides.
 - Hook latency on Windows is about 65 ms per call (interpreter start dominates); Linux/macOS untested.
 - Only actions that pass through the host's PreToolUse hook can be blocked.
 - Qoder / TRAE field layouts are declared profiles, not verified.
-- JUDGING A SHORT PACKAGE NAME'S LETTER SUBSTITUTION. SLOP-01 grades by name
+- JUDGING A SHORT PACKAGE NAME'S LETTER SUBSTITUTION. AN-037 grades by name
   length and edit type (0.57.0, checklist item 37): transposition,
   insertion/deletion and homoglyph swaps (`otx`, `toxx`, `t0x`) are judged at
   any length, but a plain letter substitution in a 3-character name is not --
@@ -1180,7 +1180,7 @@ def rules_md(rules_path):
         if r.get("check"):
             L.append("- check: %s" % r["check"])
         if r.get("detection"):
-            # ★ 0.57.0（第 32 条）：CTX-03 从「一条 ranges 全判 critical」改成
+            # ★ 0.57.0（第 32 条）：AN-016 从「一条 ranges 全判 critical」改成
             #   「码点类 × 出现面」分档，文档必须把分档写出来 —— 用户看到
             #   「规则写着 critical 却只 alert」时需要能对上这张表。
             if r.get("codepoints"):
@@ -1209,8 +1209,8 @@ def rules_md(rules_path):
         L.append("")
     L += ["## Policy file (.psl/policy.json, spec C-05)", "",
           "| field | semantics |", "|---|---|",
-          "| whitelist.domains | relaxes NETWORK rules only (NET-01/02 excludes, NET-03 whitelist, subdomains included) |",
-          "| whitelist.paths | path prefixes exempt from SECRETS rules and releasing DST-02 (each DST-02 release is audit-logged as dst02_path_whitelisted); install seeds agent-managed dirs that exist on the machine |",
+          "| whitelist.domains | relaxes NETWORK rules only (AN-006/AN-007 excludes, AN-008 whitelist, subdomains included) |",
+          "| whitelist.paths | path prefixes exempt from SECRETS rules and releasing AN-010 (each AN-010 release is audit-logged as dst02_path_whitelisted); install seeds agent-managed dirs that exist on the machine |",
           "| whitelist.commands | command prefixes exempt from WARNING-level rules only; critical rules are never relaxed |",
           "| global_settings.alert_threshold | warning (default) or critical: suppresses stderr notices below it; logging and blocking unchanged |",
           "| global_settings.log_retention_days | archive age for report.py --archive (default 30) |",
@@ -1332,7 +1332,7 @@ python -m scripts.install --check # 校验已安装实例与包是否一致（�
 真实拦截样例（来自 ZCode 真机）：
 
 ```
-[SEC-01] Antinel 拦截 [SEC-01] 读取 .env 文件可能泄露 API 密钥与机密配置 | 命中: .env |
+[AN-001] Antinel 拦截 [AN-001] 读取 .env 文件可能泄露 API 密钥与机密配置 | 命中: .env |
 放行/处理: 把 .env 移出 Agent 可读范围；确需变量时手动复制具体几行
 ```
 
@@ -1396,11 +1396,11 @@ python -m scripts.install --root <项目根>   # 不一致时重跑安装，自�
 
 ## 已知边界 / Known limits（诚实声明）
 
-- **规则只匹配工具调用文本，不解析脚本内容**：把删除或越界写入写进一个 `.py`/`.sh` 再执行，四道闸门都不会拦截（实测：Bash 通道没有 `file_path`，DST-02 在该通道上恒不触发；0.17.0 起此类命令中的**显式绝对路径**会以 `dst02_bash_path_suspect` 事件留痕并告警，但**不拦截**）。这是**护栏**的设计边界，不是隔离层；需要隔离请用容器或沙箱
+- **规则只匹配工具调用文本，不解析脚本内容**：把删除或越界写入写进一个 `.py`/`.sh` 再执行，四道闸门都不会拦截（实测：Bash 通道没有 `file_path`，AN-010 在该通道上恒不触发；0.17.0 起此类命令中的**显式绝对路径**会以 `dst02_bash_path_suspect` 事件留痕并告警，但**不拦截**）。这是**护栏**的设计边界，不是隔离层；需要隔离请用容器或沙箱
 - Hook 拦截仅覆盖宿主支持 PreToolUse/PostToolUse 的工具与动作；当前在 Windows + ZCode 实测，macOS/Linux 由 CI 矩阵持续验证
 - 只读命令上下文（echo/grep 等提及而非执行的危险词）中的 critical 命中会降级为 alert 并照常记录——这是刻意设计，防止"grep 危险词"被误拦；真正的执行形态仍会拦截
-- **备用数据流（ADS）拆成两半看**（0.19.0）：**写入路径已拦**——`echo x > f.txt:stream`、`Set-Content -Stream`、`copy`、`open(...,"w")` 在 Windows 上命中 DST-09/DST-10，退 2（该规则按 `platforms: nt` 只在 Windows 生效，因为 `path:stream` 在 POSIX 上是合法文件名；`Zone.Identifier` 由浏览器/下载器写入，按设计豁免）；但**流里的内容读不回来**——已写进 ADS 的载荷在工具调用层不可见，属结构性非目标（见 `references/THREAT_MODEL.md` 的 Non-goals）
-- **安防自身的 host 级配置可被 Agent 改写（0.19.2 起，刻意且留痕）**：`~/.workbuddy/antinel.json` 的 `workspace_roots` 就是信任边界本身。0.19.1 及以前 Write/Edit 写它会被 DST-02 拦截，但**同一目标经 Bash 通道（脚本内部用 `expanduser` 拼路径）可以零命中到达**——实测该次写入在审计里是 `decision=allow, rules_hit=[]`。**拦一半等于没拦，却确实挡住了用户自己的正常维护**（审计实证：DST-02 拦下的 `~/.workbuddy` 目标共 4 次，其中 3 次是创建 skill）。0.19.2 起两个通道统一为**放行 + 留痕**：放行精确到该配置文件本身（**不含**其父目录），每次放行写 `dst02_host_config_self_maintenance` 事件，并在 report.py 单列"信任边界编辑次数"。⇒ 这是**从"阻止"降级为"记录"**：需要边界不可改，请用只读挂载或容器
+- **备用数据流（ADS）拆成两半看**（0.19.0）：**写入路径已拦**——`echo x > f.txt:stream`、`Set-Content -Stream`、`copy`、`open(...,"w")` 在 Windows 上命中 AN-023/AN-024，退 2（该规则按 `platforms: nt` 只在 Windows 生效，因为 `path:stream` 在 POSIX 上是合法文件名；`Zone.Identifier` 由浏览器/下载器写入，按设计豁免）；但**流里的内容读不回来**——已写进 ADS 的载荷在工具调用层不可见，属结构性非目标（见 `references/THREAT_MODEL.md` 的 Non-goals）
+- **安防自身的 host 级配置可被 Agent 改写（0.19.2 起，刻意且留痕）**：`~/.workbuddy/antinel.json` 的 `workspace_roots` 就是信任边界本身。0.19.1 及以前 Write/Edit 写它会被 AN-010 拦截，但**同一目标经 Bash 通道（脚本内部用 `expanduser` 拼路径）可以零命中到达**——实测该次写入在审计里是 `decision=allow, rules_hit=[]`。**拦一半等于没拦，却确实挡住了用户自己的正常维护**（审计实证：AN-010 拦下的 `~/.workbuddy` 目标共 4 次，其中 3 次是创建 skill）。0.19.2 起两个通道统一为**放行 + 留痕**：放行精确到该配置文件本身（**不含**其父目录），每次放行写 `dst02_host_config_self_maintenance` 事件，并在 report.py 单列"信任边界编辑次数"。⇒ 这是**从"阻止"降级为"记录"**：需要边界不可改，请用只读挂载或容器
 - `rd`（Windows 删除命令）按"命令位置＋参数语境"匹配：`rd /s /q X` 拦截；Python 代码里的 `rd = 3`、raw 字符串 `r'D:\\...'` 放行（0.16.0 修复了旧版对后两者的 critical 误报）
 - 行为语料（含负例）不随包分发；该读数无法仅凭本包复现（见 `psl/judgment.json` 的 `scope.notCovered`）
 - Qoder/TRAE 的字段布局为声明式适配（未实测）
@@ -2222,7 +2222,7 @@ def _refresh_skill_selfcert(pkg, final, harness_rc, plug=None):
     ok, at, detail = _verification_evidence(pkg, final)
     new_verified = "true" if ok else "false"
     new_at = at if ok else ""
-    new_ev = (("live PreToolUse block of a real .env read in ZCode (SEC-01) plus a full-assertion "
+    new_ev = (("live PreToolUse block of a real .env read in ZCode (AN-001) plus a full-assertion "
                "judgment run; digest check %s" % detail) if ok
               else ("NOT VERIFIED for this build: %s" % detail))
     changed = []
@@ -3040,7 +3040,7 @@ def build(out_root, verify=False):
     _vok, _vat, _vdetail = _verification_evidence(pkg, final)
     if not _vok:
         print("!! SKILL.md: NOT claiming psl-verified -- %s" % _vdetail)
-    _vev = (("live PreToolUse block of a real .env read in ZCode (SEC-01) plus a full-assertion "
+    _vev = (("live PreToolUse block of a real .env read in ZCode (AN-001) plus a full-assertion "
              "judgment run; digest check %s" % _vdetail) if _vok
             else ("NOT VERIFIED for this build: %s" % _vdetail))
     _skill_txt = SKILL_MD % dict(_TPL_CTX(),

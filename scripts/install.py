@@ -136,8 +136,8 @@ SCRIPT_FILES = ("pre_tool_use.py", "post_tool_use.py", "session_dna.py",
 # 0.16.0 (P1-7): agent-managed directories that legitimately live OUTSIDE any
 # project root. When one of these exists at first install, the policy template
 # is seeded with it so a legitimate write (e.g. updating your own skill) does
-# not collide with DST-02 on day one. Seeded paths are visible and removable in
-# .psl/policy.json; every DST-02 release through them is audit-logged
+# not collide with AN-010 on day one. Seeded paths are visible and removable in
+# .psl/policy.json; every AN-010 release through them is audit-logged
 # (dst02_path_whitelisted), so the relaxation is traceable, never silent.
 AGENT_MANAGED_DIRS = (".workbuddy/skills", ".claude/skills", ".zcode/skills",
                       ".qoder/skills", ".trae/skills")
@@ -170,7 +170,7 @@ POLICY_TEMPLATE = {
                         # chains an enforcement_probe record.
                         "probe_interval_hours": 24,
                         # 0.32.2 (C1): 误报税控制——非 SKILL.md 指令文件上，
-                        # "双泛化命中"的 CTX-02 降级为 alert（SPECIFIC 仍 block）。
+                        # "双泛化命中"的 AN-015 降级为 alert（SPECIFIC 仍 block）。
                         # full = 恢复全部 block（误报风险自担）。
                         "instruction_block_mode": "specific-only",
                         # 0.33.0 (B3/D4): performance_mode = "hook"（默认，每次调用
@@ -179,9 +179,9 @@ POLICY_TEMPLATE = {
                         "performance_mode": "hook"},
     "whitelist": {"domains": [], "paths": [], "commands": []},
     "_semantics": {
-        "whitelist.domains": "relaxes NETWORK rules only (NET-01/02 excludes, NET-03 whitelist)",
-        "whitelist.paths": "path prefixes exempt from SECRETS rules; also releases DST-02 "
-                           "(write-outside-root) for these prefixes -- every DST-02 release "
+        "whitelist.domains": "relaxes NETWORK rules only (AN-006/AN-007 excludes, AN-008 whitelist)",
+        "whitelist.paths": "path prefixes exempt from SECRETS rules; also releases AN-010 "
+                           "(write-outside-root) for these prefixes -- every AN-010 release "
                            "is audit-logged as dst02_path_whitelisted (0.16.0)",
         "whitelist.commands": "command prefixes exempt from WARNING-level rules only; critical never relaxed",
         "alert_threshold": "warning (default) or critical: suppresses stderr notices below it; logging/blocking unchanged",
@@ -194,7 +194,7 @@ POLICY_TEMPLATE = {
 def seeded_policy_paths():
     """P1-7: agent-managed directories that exist on this machine get pre-seeded
     into whitelist.paths at FIRST policy creation only (policy.json is never
-    overwritten on re-install). Visible, removable, and every DST-02 release
+    overwritten on re-install). Visible, removable, and every AN-010 release
     through them leaves an audit record."""
     out = []
     home = Path.home()
@@ -511,7 +511,7 @@ def init_psl(root, host, settings_path, registered, global_hooks=False):
             tpl["whitelist"]["paths"] = seeded
             tpl["_semantics"]["_seeded_paths"] = (
                 "auto-seeded at install with agent-managed directories that exist on "
-                "this machine; delete any line to re-enable strict DST-02 for it")
+                "this machine; delete any line to re-enable strict AN-010 for it")
         policy.write_text(json.dumps(tpl, ensure_ascii=False, indent=2), encoding="utf-8")
     # ★ 0.61.0：这个值的来源只有一个 —— `_package_version()`。规则自愈
     #   （`host_shield.ensure_rules_current`）写进同一个键的也是它，
@@ -746,8 +746,8 @@ def install(root, host_override=None, redetect=False, skip_scan=False, strict=Fa
             print("      shim: %s（把该目录加入 PATH 后任意终端可用 antinel）" % shim)
         except Exception as _e:
             print("      shim: skipped (%s)" % _e)
-    # ★★ 0.62.0（2026-10-30）：**自动布置金丝雀** —— 让 SEC-11 从「结构上不可能命中」变活。
-    #   病灶实测（2026-10-29）：37 条规则里 15 条零命中，`SEC-11` 是「作用对象不存在」的
+    # ★★ 0.62.0（2026-10-30）：**自动布置金丝雀** —— 让 AN-036 从「结构上不可能命中」变活。
+    #   病灶实测（2026-10-29）：37 条规则里 15 条零命中，`AN-036` 是「作用对象不存在」的
     #   4 条之一 —— 它的 file_patterns 是 `(^|[\\/])\.canary[\\/]CANARY-`，而 `.canary/`
     #   **从来没被创建过**。`antinel canary plant` 早在 0.31.0 就实现了（幂等、自动上链
     #   canary_planted），但**没有任何机制保证它被执行过** ⇒ 命令存在 ≠ 诱饵在岗。

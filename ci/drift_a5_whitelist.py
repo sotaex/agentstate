@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: Apache-2.0
 
-"""A5 终版：白名单路径在项目外 → DST-02 释放 + 留痕"""
+"""A5 终版：白名单路径在项目外 → AN-010 释放 + 留痕"""
 import os as _os
 import sys as _sys
 _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
@@ -29,7 +29,7 @@ def hook(tool, ti):
     return subprocess.run([PY, os.path.join(PKG, "hooks", "pre_tool_use.py")], cwd=proj,
                           input=json.dumps(ev).encode(), capture_output=True, timeout=60)
 
-# 1) 白名单前：项目外写 → 应被 DST-02 拦
+# 1) 白名单前：项目外写 → 应被 AN-010 拦
 p1 = hook("Write", {"file_path": os.path.join(keys_out, "id_rsa"), "content": "x"})
 # 2) 加白名单：antinel paths add（七步流程，非 TTY → 宿主批准流，需喂 y）
 ANT = os.path.join(PKG, "antinel.py")

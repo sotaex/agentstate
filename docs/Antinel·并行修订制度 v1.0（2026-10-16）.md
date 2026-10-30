@@ -35,7 +35,7 @@
 | 1 | 哨兵签名 manifest 按代码文件位置解析，每棵树各签各的 | `host_shield._pkg_root()` = `dirname(abspath(__file__))`（host_shield.py:1579-1580） |
 | 2 | 闸门运行时状态（lock/last_run/durations）按仓相对路径存 | `_SNAP_DIR = os.path.join(PKG, ".psl", "gate")`（delivery_gate.py:394） |
 | 3 | 策略白名单是前缀式，`d:/psl/poc/antinel-security/` 覆盖全部子目录 | `.psl/policy.json` whitelist.paths（_semantics 明言前缀豁免） |
-| 4 | 删除守卫按全词边界锚定，`git worktree remove` 不命中 DST-01 | rules/default.json:277-287（`\brm\b` 等）⇒ 拆流有安全通道 |
+| 4 | 删除守卫按全词边界锚定，`git worktree remove` 不命中 AN-009 | rules/default.json:277-287（`\brm\b` 等）⇒ 拆流有安全通道 |
 | 5 | 闸门支持按套件子集验证 | `--only <键,键>`（delivery_gate.py:1364）、`--affected` 经 `impacted_suites()` 纯函数推套件（:1365，`_select_suites()` :1084） |
 | 6 | 退休额度账本按 ci/ 目录相对 | `_RETIREMENT_LEDGER = os.path.join(_HERE, "suite_retirement.json")`（:504） |
 | 7 | 仓内已有 worktree 先例 | `_uxtest2/base0483` |
@@ -189,7 +189,7 @@ python ci/delivery_gate.py --only 0372
 # 4. 开工：只动流简报登记过的文件
 #    （闸门常用姿势：--only <键,键> 子集验证；--affected 让机器推套件）
 
-# 5. 收工拆流（DST-01 不拦，安全）
+# 5. 收工拆流（AN-009 不拦，安全）
 cd ..
 git worktree remove .worktrees/b      # 合并后再拆，别急着拆
 ```

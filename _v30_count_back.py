@@ -187,7 +187,7 @@ ck("按字段更新调用处数", grep_count(hs, r"^\s*update_state_fields\("), 
 rules = json.load(io.open(os.path.join(ROOT, "rules", "default.json"), encoding="utf-8"))
 dst01 = None
 for r in rules if isinstance(rules, list) else rules.get("rules", []):
-    if r.get("id") == "DST-01" or "DST-01" in json.dumps(r)[:200]:
+    if r.get("id") == "AN-009" or "AN-009" in json.dumps(r)[:200]:
         dst01 = r; break
 if dst01:
     ck("删除规则命令模式条数", len(dst01.get("command_patterns") or []), "21")

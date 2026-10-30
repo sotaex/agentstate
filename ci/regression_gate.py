@@ -79,7 +79,7 @@ class neutral_cwd:
     的 `(cwd, dirname(cwd))` 搜索**找不到任何 `.psl/manifest.json`** ⇒ 用包内真表。
 
     为什么必须有：产物仓的**上级** `D:\\psl\\poc\\.psl\\manifest.json` 是 09-18 陈旧件，
-    会让闸门静默降级到 17 条兜底集（无 DST-10）⇒ DST-10 判据假红、DST-01 判据假绿。
+    会让闸门静默降级到 17 条兜底集（无 AN-024）⇒ AN-024 判据假红、AN-009 判据假绿。
     **两种方向都会骗人**，所以这不是可选项。
     """
 
@@ -120,7 +120,7 @@ def rec(cid, ok, detail="", skipped=False, elapsed=None):
 
 
 def j_dst10_stream(m):
-    """缺陷 A1：解释器分支用窄判据 ⇒ DST-10 的 block 被降级为 alert。
+    """缺陷 A1：解释器分支用窄判据 ⇒ AN-024 的 block 被降级为 alert。
 
     ★ 判据不许二次实现：直接调产品的 readonly_command_context ＋ _search。
     """
@@ -147,17 +147,17 @@ def j_dst10_stream(m):
         if got_block != want_block or downgraded:
             bad.append("%s ro=%s hit_crit=%s" % (label, ro, hit_crit))
     if bad:
-        return False, "DST-10 被降级/漏拦: " + "; ".join(bad)
+        return False, "AN-024 被降级/漏拦: " + "; ".join(bad)
     return True, "2 例 powershell -Stream 仍为 block（ro=False）"
 
 
 def j_dst01_still_works(m):
-    """对照：DST-01 本体的 21 条真表模式没被改坏。"""
+    """对照：AN-009 本体的 21 条真表模式没被改坏。"""
     m._DST_PATS_CACHE.clear()
     disk = json.loads(RULES.read_text(encoding="utf-8")).get("rules", [])
-    real = [p for r in disk if r.get("id") == "DST-01" for p in (r.get("command_patterns") or [])]
+    real = [p for r in disk if r.get("id") == "AN-009" for p in (r.get("command_patterns") or [])]
     if len(real) != 21:
-        return False, "DST-01 真表模式数 = %d（期望 21）" % len(real)
+        return False, "AN-009 真表模式数 = %d（期望 21）" % len(real)
     must_block = [
         DEL + " -rf /tmp/x",
         "python -c \"import os; os.remove('/x')\"",
@@ -1817,7 +1817,7 @@ def j_rules_snapshot_drift():
     而是 install 拷进项目的 `<root>/.psl/rules/default.json`（`manifest.rules_file`
     指路）。而 `pip install -U` 只换包、不跑 install ⇒ 项目副本永久停在首次安装的
     版本，**零提示**。实测本仓副本 0.34.0 / 包内 0.56.0，落后 22 个版本号 ——
-    这期间所有规则修正（含 SEC-04 那 16 条误拦归零）对新装用户成立、对这台机器
+    这期间所有规则修正（含 AN-004 那 16 条误拦归零）对新装用户成立、对这台机器
     零生效。
 
     这条判据测的是「**说出来了没**」，不是「版本对不对」：版本对不对是 install 的事。
@@ -2220,7 +2220,7 @@ def j_window_title_format():
             "buckets": {"action": 2, "info": 2, "archive": 1},
             "action_groups": 2, "revived_window": 0,
             "posture": dict(_POSTURE),
-            "rules": [{"rule_id": "DST-01", "count": 2}],
+            "rules": [{"rule_id": "AN-009", "count": 2}],
             "chain": {"status": "ok", "files": 1, "records": 2, "broken": 0,
                       "unchained": 0, "reason": ""},
             "ledger": {"days": 0, "streak_days": 0, "blocked": 0,
@@ -2601,11 +2601,11 @@ def _fallback_mismatch(fb, live):
 def j_fallback_matches_rules(m):
     """兜底集必须与主表**全等**：同 id 集合 ＋ 每字段逐字相等，且自带牙齿。
 
-    ★★ 前身是 `j_fallback_has_no_dst10`，它断言「兜底只有 17 条且无 DST-10」，
+    ★★ 前身是 `j_fallback_has_no_dst10`，它断言「兜底只有 17 条且无 AN-024」，
       把**缺陷**钉成了通过条件（docstring 还写「这本身不是缺陷」）。实测后果：
-        · 少 20 条规则（含 SEC-04 钱包、SEC-06 密钥、CTX-07 base64 执行、DST-06 远程管道）
-        · 已在那 17 条里的也缩水 —— DST-01 缺 mkfs / dd of=/dev/ 共 13 条、
-          DST-04 缺 10 条、CTX-02 缺 6 条并丢掉 compound_nonprimary 门槛
+        · 少 20 条规则（含 AN-004 钱包、AN-021 密钥、AN-025 base64 执行、AN-019 远程管道）
+        · 已在那 17 条里的也缩水 —— AN-009 缺 mkfs / dd of=/dev/ 共 13 条、
+          AN-012 缺 10 条、AN-015 缺 6 条并丢掉 compound_nonprimary 门槛
         · 共缺 **47 个 pattern** ＋ 6 处语义字段不等
       ⇒ 「规则文件被篡改」这个最需要防的时刻，保护恰好腰斩，而判据天天绿。
       这是「期望值禁从实现现状抄」的教科书实例。
@@ -3232,8 +3232,8 @@ def j_running_on_real_table(m):
     """★★ 闸门自身的守卫：确认当前加载的是**包内真表**，不是降级兜底集。
 
     为什么要这条：本闸门测的是「真表下的行为」。若因环境里存在陈旧
-    `.psl/manifest.json` 而静默降级到 17 条兜底集，DST-10 类判据会**假红**，
-    而 DST-01 类判据会**假绿**（兜底集里也有 DST-01）——
+    `.psl/manifest.json` 而静默降级到 17 条兜底集，AN-024 类判据会**假红**，
+    而 AN-009 类判据会**假绿**（兜底集里也有 AN-009）——
     **两种方向都会骗人**。⇒ 必须显式声明"我现在跑在哪张表上"。
     """
     disk = json.loads(RULES.read_text(encoding="utf-8")).get("rules", [])
@@ -3241,12 +3241,12 @@ def j_running_on_real_table(m):
     n_disk, n_live = len(disk), len(live)
     if n_live != n_disk:
         return False, ("★闸门跑在降级表上：load_rules()=%d，磁盘真表=%d。"
-                       "DST-10 类判据会假红、DST-01 类会假绿 —— 需检查环境的 .psl/manifest.json"
+                       "AN-024 类判据会假红、AN-009 类会假绿 —— 需检查环境的 .psl/manifest.json"
                        % (n_live, n_disk))
-    has10 = any(r.get("id") == "DST-10" for r in live)
+    has10 = any(r.get("id") == "AN-024" for r in live)
     if not has10:
-        return False, "真表里没有 DST-10（规则表被改坏了？）"
-    return True, "真表 %d 条，含 DST-10（未被降级）" % n_live
+        return False, "真表里没有 AN-024（规则表被改坏了？）"
+    return True, "真表 %d 条，含 AN-024（未被降级）" % n_live
 
 
 # ================================================================ 闸门自身（D-32/33/34）
@@ -3948,7 +3948,7 @@ def selfcheck():
          "hooks/pre_tool_use.py",
          'if residue is None:\n                return False               # 判不了 ⇒ 不放过',
          'if residue is None:\n                residue = seg',
-         "A1  DST-10"),
+         "A1  AN-024"),
         ("A1 回退：非 python 也当可判（真降级）",
          "hooks/pre_tool_use.py",
          'if not tok.startswith(("python", "py")):\n        return None',
@@ -3959,9 +3959,9 @@ def selfcheck():
          "_rules_path = _cand",
          "_rules_path = RULES_PATH",
          "A2  加载与比对同源"),
-        ("DST-10 从规则表里删掉",
+        ("AN-024 从规则表里删掉",
          "rules/default.json",
-         '"id": "DST-10"',
+         '"id": "AN-024"',
          '"id": "DST-99"',
          "SELF 闸门运行在真表上"),
         ("D-6 回退：版本号写歪一处",
@@ -4262,12 +4262,12 @@ def selfcheck():
          '    if unknown:\n        return 2, [',
          "D-41"),
         # ★★ D-53 负控（2026-10-30，0.62.0）：把「关不掉」的名册写**歪一个号**。
-        #   模拟真实漂移形态：SLOP-01 被改名/被删，而 hardcoded_rules 仍宣称它在。
+        #   模拟真实漂移形态：AN-037 被改名/被删，而 hardcoded_rules 仍宣称它在。
         #   腿 ① 必须红 —— 否则这份说明书就是一张没人核对的自白。
         #   ★ 注入串取键名 + 值的前 8 个字（该行在文件里唯一），只改键不改值。
         ("D-53 缺陷：硬编码规则名册写歪一个号（说明书与代码漂开）",
          "rules/default.json",
-         '"SLOP-01": "撞名/打字抢注检测',
+         '"AN-037": "撞名/打字抢注检测',
          '"SLOP-77": "撞名/打字抢注检测',
          "D-53"),
     ]
@@ -4715,7 +4715,7 @@ def j_rules_patterns_are_alive():
 
     实测缺陷（先证后改，`output/tests/0.57.0/d31_deadpat.log`）：
 
-      DST-01 的 10 条「工具词排除」全写成 `\\\\bgrep\\\\b` —— JSON 落盘后是
+      AN-009 的 10 条「工具词排除」全写成 `\\\\bgrep\\\\b` —— JSON 落盘后是
       「字面反斜杠 + bgrep」，正则去匹配一个带反斜杠的字符串。
       **10 条里 0 条生效**，其中 #16 连 `re.compile` 都失败
       （`missing ), unterminated subpattern`）。
@@ -4741,7 +4741,7 @@ def j_rules_patterns_are_alive():
       ③ 行为：只读命令**无一 block** ＋ **构建产物删除无一 block**
          （产品自己的拦截文案承诺「构建产物类删除已在豁免清单」）；
       ④ 行为：真破坏（`src/`、`/etc`、`~/Documents`）**必须 block**；
-      ⑤ 负控：把 DST-01 的豁免清空后 ③ 的构建产物那组必须全变 block
+      ⑤ 负控：把 AN-009 的豁免清空后 ③ 的构建产物那组必须全变 block
          （否则 ③ 的绿与本判据无关）。
     """
     rules_file = PKG / "rules" / "default.json"
@@ -4797,17 +4797,17 @@ def j_rules_patterns_are_alive():
                        "永远匹配不到正常文本）：%s"
                        % (len(bad), "；".join(bad[:4])))
 
-    # ---- ③ 行为腿：DST-01 的「工具词排除」必须各自放行一条样本 ----
+    # ---- ③ 行为腿：AN-009 的「工具词排除」必须各自放行一条样本 ----
     # ★ 样本里的危险词全部拼接 —— 本仓自己的钩子会拦命令文本里的这些字面量
     #   （本轮实测被拦 3 次），判据源码里更不能写死。
     RM, UNL, DEL = "r" + "m", "un" + "link", "d" + "el"
     d1 = None
     for r in rules:
-        if r.get("id") == "DST-01":
+        if r.get("id") == "AN-009":
             d1 = r
             break
     if d1 is None:
-        return False, "规则文件里没有 DST-01（删除类规则整条消失）"
+        return False, "规则文件里没有 AN-009（删除类规则整条消失）"
     pats = d1.get("command_patterns") or []
     exc = d1.get("exclude_patterns") or []
 
@@ -4894,7 +4894,7 @@ def j_rules_patterns_are_alive():
 
     # 3c 真破坏：必须 block
     #   ★ 后两条是**本轮自己踩出来的坑**（先红后绿之后又翻红）：
-    #     我给 DST-01 加过一条 `^\s*(?:grep|find|…)` 的「只读前缀」exclude，
+    #     我给 AN-009 加过一条 `^\s*(?:grep|find|…)` 的「只读前缀」exclude，
     #     于是 `grep -r $(rm -rf /tmp/x) .` 与 `find … -delete` 都被放行 ——
     #     而 `readonly_command_context()` 本来已经正确处理 `$()`／`-delete`／
     #     `| xargs`／`sudo`／重定向 五项。**exclude 是「命中即放行」，跑在那条判据
@@ -4911,16 +4911,16 @@ def j_rules_patterns_are_alive():
                        % ("；".join(c for c, _ in leaked[:2]),
                           "；".join(a for _, a in leaked[:2])))
 
-    # ---- ⑤ 负控：把 DST-01 的豁免清空后，3b 必须全变 block ----
+    # ---- ⑤ 负控：把 AN-009 的豁免清空后，3b 必须全变 block ----
     #   证明 3b 的绿是「豁免在起作用」，不是「这些命令本来就拦不住」。
     import copy as _copy
     stripped = _copy.deepcopy(rules)
     for r in stripped:
-        if r.get("id") == "DST-01":
+        if r.get("id") == "AN-009":
             r["exclude_patterns"] = []
     still_ok = [c for c in artifacts if action_of(c, stripped, art_root) != "block"]
     if still_ok:
-        return False, ("⑤ 清空 DST-01 的豁免后 %d/%d 条构建产物删除**仍然不拦**"
+        return False, ("⑤ 清空 AN-009 的豁免后 %d/%d 条构建产物删除**仍然不拦**"
                        " ⇒ ③ 的绿不是豁免给的，判据测错了对象：%s"
                        % (len(still_ok), len(artifacts), "；".join(c[:30] for c in still_ok[:2])))
 
@@ -4936,7 +4936,7 @@ def j_url_is_not_a_path_and_cookie_is_a_file():
 
     实测两条（`output/_sec45_corpus.py`，10 条 POS ＋ 10 条 NEG，真 `collect_hits`）：
 
-    ① **URL 的路径段被当成文件路径**（SEC-04 误拦 4/10）
+    ① **URL 的路径段被当成文件路径**（AN-004 误拦 4/10）
        `_basic_hit` 在 Bash 通道上把 `file_patterns` 拿去匹配**整条命令文本**，
        于是 `curl -s https://api.example.com/wallets?limit=10` 被
        「钱包/密钥库**文件读取**」拦下。规则标题写的是 file read，URL 不是文件。
@@ -4944,7 +4944,7 @@ def j_url_is_not_a_path_and_cookie_is_a_file():
        **只剥 http/https/ftp/ws** —— `file:///home/u/.ethereum/x` 指向真实路径，
        剥掉就是漏；content_patterns 仍看原文（`?api_key=…` 还可能带凭据）。
 
-    ② **`cookies` 当目录名也命中**（SEC-05 误拦 3/10）
+    ② **`cookies` 当目录名也命中**（AN-005 误拦 3/10）
        第 1 条模式 `(?:^|[\\\\/])(?:Cookies|Login Data|Local Storage|Web Data)(?![\\w.-])`
        里 `(?![\\w.-])` 允许后面跟 `/`，而 `_rx` 硬编码 IGNORECASE（Python 3.10
        没有 `(?-i:)`）⇒ `node_modules/cookies/index.js` 里的**目录名**也命中。
@@ -4953,11 +4953,11 @@ def j_url_is_not_a_path_and_cookie_is_a_file():
        （`(?![\\\\/\\w.-])`），目录型仍允许后面还有层级。
 
     判据八腿（全部真入口；用的是产品自己的 `collect_hits`，不重写正则）：
-      ①② URL 里的 `/wallets`、`/wallets/0xabc` ⇒ SEC-04 不得命中；
-      ③ 对照 `cat ~/.ethereum/keystore/x` ⇒ SEC-04 必须命中；
+      ①② URL 里的 `/wallets`、`/wallets/0xabc` ⇒ AN-004 不得命中；
+      ③ 对照 `cat ~/.ethereum/keystore/x` ⇒ AN-004 必须命中；
       ④ 对照 `curl -o wallets/x https://…` ⇒ 必须命中（剥 URL 不许伤到真路径参数）；
       ⑤ 对照 `file:///home/u/.ethereum/x` ⇒ 必须命中（只剥网络 scheme）；
-      ⑥ `node_modules/cookies/index.js` ⇒ SEC-05 不得命中；
+      ⑥ `node_modules/cookies/index.js` ⇒ AN-005 不得命中；
       ⑦ 对照 Chrome `…/Default/Cookies` ⇒ 必须命中；
       ⑧ 对照 Chrome `…/Default/Local Storage/leveldb/x` ⇒ 必须命中（目录型不误伤）。
       ①②⑤ 是本次两条修复，③④⑦⑧ 是"别为了少误拦把规则松掉"的那一半 ——
@@ -4985,22 +4985,22 @@ def j_url_is_not_a_path_and_cookie_is_a_file():
     CHROME = HOME + "/.config/google-chrome/Default"
     legs = [
         ("① URL 里的钱包路径段", "Bash",
-         {"command": "curl -s https://api.example.com/wallets?limit=10"}, "SEC-04", False),
+         {"command": "curl -s https://api.example.com/wallets?limit=10"}, "AN-004", False),
         ("② 区块浏览器 URL", "Bash",
          {"command": "curl https://explorer.example.com/api/v1/wallets/0xabc"},
-         "SEC-04", False),
+         "AN-004", False),
         ("③ 对照：真 keystore", "Bash",
-         {"command": "cat %s/.ethereum/keystore/UTC--x" % HOME}, "SEC-04", True),
+         {"command": "cat %s/.ethereum/keystore/UTC--x" % HOME}, "AN-004", True),
         ("④ 对照：URL 旁边的真路径参数", "Bash",
-         {"command": "curl -s -o ./wallets/out.bin https://example.com/a"}, "SEC-04", True),
+         {"command": "curl -s -o ./wallets/out.bin https://example.com/a"}, "AN-004", True),
         ("⑤ 对照：file:// 指向真钱包", "Bash",
-         {"command": "cat file://%s/.ethereum/keystore/x" % HOME}, "SEC-04", True),
+         {"command": "cat file://%s/.ethereum/keystore/x" % HOME}, "AN-004", True),
         ("⑥ 依赖里的 cookies 包", "Read",
-         {"file_path": "node_modules/cookies/index.js"}, "SEC-05", False),
+         {"file_path": "node_modules/cookies/index.js"}, "AN-005", False),
         ("⑦ 对照：Chrome 的 Cookies 文件", "Read",
-         {"file_path": CHROME + "/Cookies"}, "SEC-05", True),
+         {"file_path": CHROME + "/Cookies"}, "AN-005", True),
         ("⑧ 对照：Local Storage 目录下的文件", "Read",
-         {"file_path": CHROME + "/Local Storage/leveldb/000003.log"}, "SEC-05", True),
+         {"file_path": CHROME + "/Local Storage/leveldb/000003.log"}, "AN-005", True),
     ]
     bad, detail = [], []
     for label, tool, payload, rid, want in legs:
@@ -5047,7 +5047,7 @@ def _quick_skip(cid):
 
 
 def j_ctx03_single_source():
-    """★★★ D-49（2026-10-26，第 32 条）：CTX-03 的码点表只许有一份，两个引擎结论必须一致。
+    """★★★ D-49（2026-10-26，第 32 条）：AN-016 的码点表只许有一份，两个引擎结论必须一致。
 
     实测缺陷（`output/tests/0.57.0/d32_parity.log`）：同一个「隐形字符」概念，
     三处各写一份，**三份内容都不一样** ——
@@ -5083,9 +5083,9 @@ def j_ctx03_single_source():
     if not rules_file.is_file():
         return None, "缺 rules/default.json（不可判）"
     doc = json.loads(rules_file.read_text(encoding="utf-8"))
-    rule = next((r for r in (doc.get("rules") or []) if r.get("id") == "CTX-03"), None)
+    rule = next((r for r in (doc.get("rules") or []) if r.get("id") == "AN-016"), None)
     if rule is None:
-        return False, "规则集里没有 CTX-03（判据对象不在）"
+        return False, "规则集里没有 AN-016（判据对象不在）"
     hook = _load_module_file("hooks/pre_tool_use.py", "_hook_d49")
     scan = _load_module_file("scripts/scan.py", "_scan_d49")
     if hook is None or scan is None:
@@ -5144,7 +5144,7 @@ def j_ctx03_single_source():
                 if surface == "path" and not name_ok:
                     continue                    # 该文件系统建不出这个名字 ⇒ 不计入
                 cells += 1
-                rows = [f for f in found if f.get("rule_id") == "CTX-03"
+                rows = [f for f in found if f.get("rule_id") == "AN-016"
                         and str(f.get("file")) == rel and f.get("kind") == kind]
                 s = (rows[0]["severity"], "block" if rows[0]["severity"] == "critical"
                      else "alert") if rows else ("", "无")
@@ -5162,7 +5162,7 @@ def j_ctx03_single_source():
                     tool = "Write"
                 hits = [h for h in (hook.collect_hits(doc.get("rules") or [], tool, texts,
                                                       proj, []) or [])
-                        if h.get("rule_id") == "CTX-03"]
+                        if h.get("rule_id") == "AN-016"]
                 h = (hits[0].get("severity"), "block" if hits[0].get("action") == "block"
                      else "alert") if hits else ("", "无")
                 if s[0]:
@@ -5190,7 +5190,7 @@ def j_ctx03_single_source():
         texts = {"command": "", "file_path": str(root / "plain.py"),
                  "content": "a" + one + "b", "url": ""}
         neg = [x for x in (hook.collect_hits([hollow], "Write", texts, proj, []) or [])
-               if x.get("rule_id") == "CTX-03"]
+               if x.get("rule_id") == "AN-016"]
         if neg:
             return False, "⑤ 清空 tag 类的 content 面后 hook 仍按正文报出 ⇒ 级别表没被读"
         d5 = root / "neg"
@@ -5202,8 +5202,8 @@ def j_ctx03_single_source():
         except OSError:
             _path_ok = False
         nf, _s5, _i5, _d5d = scan.scan_directory(str(d5), [hollow])
-        n_ct = [f for f in nf if f.get("rule_id") == "CTX-03" and f.get("file") == "plain.py"]
-        n_pa = [f for f in nf if f.get("rule_id") == "CTX-03" and f.get("file") != "plain.py"]
+        n_ct = [f for f in nf if f.get("rule_id") == "AN-016" and f.get("file") == "plain.py"]
+        n_pa = [f for f in nf if f.get("rule_id") == "AN-016" and f.get("file") != "plain.py"]
         if n_ct:
             return False, "⑤ 清空 content 面后 scan 仍按正文报出 ⇒ 级别表没被读"
         if _path_ok and not n_pa:
@@ -5219,7 +5219,7 @@ def j_ctx03_single_source():
 def j_secret_placeholders_are_not_findings():
     """★★★ D-50（2026-10-26，第 33 条）：占位值不算秘密，但真密钥必须还抓得到。
 
-    实测缺陷（`output/tests/0.57.0/d33_sec06.log`）：本仓自扫描 SEC-06 命中 227 条，
+    实测缺陷（`output/tests/0.57.0/d33_sec06.log`）：本仓自扫描 AN-021 命中 227 条，
     逐条归类后**没有一条是真密钥** ——
         193 条 AWS 官方文档的标准示例值
          31 条 只有私钥头、后面一个 base64 字符都没有
@@ -5234,7 +5234,7 @@ def j_secret_placeholders_are_not_findings():
 
     四腿：
       ① 结构：两个引擎都有占位值入口（hook _placeholder_hit / scan is_placeholder），
-         且 SEC-06 真的声明了 placeholder_patterns；
+         且 AN-021 真的声明了 placeholder_patterns；
       ② 行为（正控）：5 种真密钥形态两个引擎都必须报；
       ③ 行为（负控）：文档示例值、只有头的私钥、退化形状两个引擎都必须不报；
       ④ 负控的负控：把 placeholder_patterns 清空后 ③ 的文档示例值必须**变红**
@@ -5260,11 +5260,11 @@ def j_secret_placeholders_are_not_findings():
     if not rules_file.is_file():
         return None, "缺 rules/default.json（不可判）"
     doc = json.loads(rules_file.read_text(encoding="utf-8"))
-    sec = next((r for r in (doc.get("rules") or []) if r.get("id") == "SEC-06"), None)
+    sec = next((r for r in (doc.get("rules") or []) if r.get("id") == "AN-021"), None)
     if sec is None:
-        return False, "① 规则集里没有 SEC-06"
+        return False, "① 规则集里没有 AN-021"
     if not sec.get("placeholder_patterns"):
-        return False, "① SEC-06 没有 placeholder_patterns（占位值清单被删了）"
+        return False, "① AN-021 没有 placeholder_patterns（占位值清单被删了）"
 
     # ---- 样本全部运行时拼装 ----
     D5 = chr(45) * 5
@@ -5296,14 +5296,14 @@ def j_secret_placeholders_are_not_findings():
                 hits = hook.collect_hits(doc.get("rules") or [], "Write", texts, str(root), []) or []
             except Exception as e:                                  # noqa: BLE001
                 return "ERR:%s" % type(e).__name__
-            return [h.get("rule_id") for h in hits if h.get("rule_id") == "SEC-06"]
+            return [h.get("rule_id") for h in hits if h.get("rule_id") == "AN-021"]
 
         def scan_hit(name, text, ruleset=None):
             d = root / ("c" + str(abs(hash(name)) % 99999))
             d.mkdir(parents=True, exist_ok=True)
             (d / "app.py").write_text(text, encoding="utf-8")
             found, _s, _i, _g = scan.scan_directory(str(d), ruleset or (doc.get("rules") or []))
-            return [f["rule_id"] for f in found if f.get("rule_id") == "SEC-06"]
+            return [f["rule_id"] for f in found if f.get("rule_id") == "AN-021"]
 
         # ② 正控
         miss = [nm for nm, t in pos if not hook_hit(t) or not scan_hit(nm, t)]
@@ -5327,16 +5327,16 @@ def j_secret_placeholders_are_not_findings():
     finally:
         _sh.rmtree(str(root), ignore_errors=True)
 
-    return True, ("① 两引擎占位入口在位、SEC-06 声明 %d 条占位值 ② 真密钥 %d 种全被抓到 "
+    return True, ("① 两引擎占位入口在位、AN-021 声明 %d 条占位值 ② 真密钥 %d 种全被抓到 "
                   "③ 占位值 %d 种全不报 ④ 清空清单后示例值立刻变红"
                   % (len(sec["placeholder_patterns"]), len(pos), len(neg)))
 
 
 def j_ctx05_name_level_is_tiered():
-    """★★★ D-51（2026-10-26，第 34 条）：CTX-05 的级别要看「差多少」，不能一刀切。
+    """★★★ D-51（2026-10-26，第 34 条）：AN-018 的级别要看「差多少」，不能一刀切。
 
     实测缺陷（`output/tests/0.57.0/d34_realworld.log` 与 `_d34b_ctx05.py`）：
-    本仓 CTX-05 命中 38 条，**全部**是同一形态 —— 文件里写着 `name: antinel-security`，
+    本仓 AN-018 命中 38 条，**全部**是同一形态 —— 文件里写着 `name: antinel-security`，
     而所在目录叫 `b` / `psl` / `dai-std`。那是 git worktree、克隆目录、解压出来的目录名。
     规则拿「目录名 == name」当判据，于是**每次克隆或解压别人的 skill 都报一次**。
 
@@ -5376,12 +5376,12 @@ def j_ctx05_name_level_is_tiered():
     if not rules_file.is_file():
         return None, "缺 rules/default.json（不可判）"
     ruleset = json.loads(rules_file.read_text(encoding="utf-8")).get("rules") or []
-    ctx = next((r for r in ruleset if r.get("id") == "CTX-05"), None)
+    ctx = next((r for r in ruleset if r.get("id") == "AN-018"), None)
     if ctx is None:
-        return False, "① 规则集里没有 CTX-05"
+        return False, "① 规则集里没有 AN-018"
     for k in ("name_near_miss_max_distance", "name_min_len_for_distance"):
         if k not in ctx:
-            return False, "① CTX-05 缺 %s（阈值被删 ⇒ 分档退回写死）" % k
+            return False, "① AN-018 缺 %s（阈值被删 ⇒ 分档退回写死）" % k
 
     # (标签, 目录名, frontmatter name, 期望级别, 类别)
     cases = [
@@ -5395,7 +5395,7 @@ def j_ctx05_name_level_is_tiered():
     ]
 
     def skmd(name):
-        return ("---\nname: %s\ndescription: fixture for CTX-05 level check\n---\n\n# body\n"
+        return ("---\nname: %s\ndescription: fixture for AN-018 level check\n---\n\n# body\n"
                 % name)
 
     import shutil as _sh
@@ -5409,14 +5409,14 @@ def j_ctx05_name_level_is_tiered():
             """一次跑两个真入口，返回 {目录名: (hook 级别, scan 级别)}。"""
             found, _s, _i, _g = scan.scan_directory(str(root), rules_list)
             s_by = {f["file"].split("/")[0]: f.get("severity")
-                    for f in found if f.get("rule_id") == "CTX-05"}
+                    for f in found if f.get("rule_id") == "AN-018"}
             out = {}
             for _lab, d, _nm, _w, _c in cases:
                 p = root / d / "SKILL.md"
                 tgt = hook.file_text_targets("Read", str(p), "")
                 texts = {"command": "", "file_path": str(p), "content": "", "url": ""}
                 hits = hook.collect_hits(rules_list, "Read", texts, str(root), tgt) or []
-                hv = next((h.get("severity") for h in hits if h.get("rule_id") == "CTX-05"), "")
+                hv = next((h.get("severity") for h in hits if h.get("rule_id") == "AN-018"), "")
                 out[d] = (hv, s_by.get(d, ""))
             return out
 
@@ -5434,7 +5434,7 @@ def j_ctx05_name_level_is_tiered():
         def mutated(**kw):
             m = json.loads(json.dumps(ruleset))
             for r in m:
-                if r.get("id") == "CTX-05":
+                if r.get("id") == "AN-018":
                     r.update(kw)
             return m
 
@@ -5473,7 +5473,7 @@ def j_ctx05_name_level_is_tiered():
     finally:
         _sh.rmtree(str(root), ignore_errors=True)
 
-    return True, ("① 两引擎分档入口在位、CTX-05 阈值 %d/%d ② %d 格全等 "
+    return True, ("① 两引擎分档入口在位、AN-018 阈值 %d/%d ② %d 格全等 "
                   "③ 阈值关 0 即降档、放大即升档 ④ 换掉距离函数后结论跟着变、短名不受距离影响"
                   % (ctx["name_near_miss_max_distance"], ctx["name_min_len_for_distance"],
                      len(cases)))
@@ -5575,7 +5575,7 @@ def j_scan_scope_is_configurable_and_counted():
 
     def report_text(st, found):
         return scan.render_text({"generated_at": "2026-10-26T00:00:00+08:00", "root": str(root),
-                                 "stats": st, "rules_applied": ["SEC-01"], "findings": found,
+                                 "stats": st, "rules_applied": ["AN-001"], "findings": found,
                                  "score": 100, "grade": "A", "score_basis": {}})
 
     try:
@@ -5660,8 +5660,8 @@ def j_hardcoded_rules_are_truthful():
     病灶（清单 P4-4 / DEC-22d，本轮实测更正了三处口径）：
 
       四条判定写在钩子代码里并**直接挂在事件处理器上**，不在规则表里：
-      `OUT-01`（输出面）／`GOV-01`（`_suite_gov_hit`）／`BUDGET-01`（`_budget_hit`）／
-      `SLOP-01`（`_slop_hit`）。它们是在 `collect_hits` **之外**追加进 hits 流的
+      `OUT-01`（输出面）／`DEV-01`（`_suite_gov_hit`）／`notice_budget`（`_budget_hit`）／
+      `AN-037`（`_slop_hit`）。它们是在 `collect_hits` **之外**追加进 hits 流的
       （钩子 5088–5106 行：`_bh` / `_sh` / `_gov` 三个 if），因此**根本不过
       `_disabled(rule)`** —— 用户把某条写成 `enabled: false` 也关不掉。
 
@@ -5669,7 +5669,7 @@ def j_hardcoded_rules_are_truthful():
         ① 清单写「不受 `disabled_rules` 约束」—— **本产品没有这个字段**。
            `grep -rn disabled_rules hooks/ scripts/ rules/` → 0 命中。唯一关法是
            规则文件里该条 `enabled: false`，消费点 `_disabled()`。
-        ② 我第一版判据在 `collect_hits` 里找 `SLOP-01` —— **永远找不到**，
+        ② 我第一版判据在 `collect_hits` 里找 `AN-037` —— **永远找不到**，
            因为这三个特判本来就不在 `collect_hits` 里。判据红得像缺陷，
            实际是判据找错了地方（「用错入口」＝假绿的镜像：假红）。
         ③ 第一版「撞名样本」把 `reqeusts` 拼成了 `requests`（正确拼写），
@@ -5682,10 +5682,10 @@ def j_hardcoded_rules_are_truthful():
       ① 数据自洽：`code_only` 的 id **不在** `rules` 数组里（在＝它其实可关）；
          `declared_but_code_driven` 的 id **在** `rules` 里且 `enabled is False`
          （不写 false ⇒ 条目被通用正则接管 ⇒ 同一条规则两把尺子）。
-      ② 行为：`_slop_hit` 对撞名包返回 `SLOP-01`、对热门包返回 None；
+      ② 行为：`_slop_hit` 对撞名包返回 `AN-037`、对热门包返回 None；
          **且它的签名里没有任何"规则集"参数**（`inspect.signature`）——
          这是「没有配置项能喂给它」的**可执行证据**，比读源码注释硬。
-      ③ 负控（证明 `enabled` 通道本身有效）：`NET-04` 写 `enabled: false` 后
+      ③ 负控（证明 `enabled` 通道本身有效）：`AN-031` 写 `enabled: false` 后
          `collect_hits` 必须**不命中**，翻回 True 必须命中。
          ★ 没有这一腿，② 说的"关不掉"可能只是"整个关闭通道都坏了"——
            即假绿第五族（锚被别处天然满足）。
@@ -5745,7 +5745,7 @@ def j_hardcoded_rules_are_truthful():
         return False, ("② `_slop_hit%s` 收了一个规则集参数 ⇒ 它可以被配置关掉，"
                        "hardcoded_rules 说「关不掉」是假话" % (tuple(params),))
 
-    # 撞名包的名字**运行时拼**：本文件经 Write 落盘时会被 SLOP-01 自己扫一遍。
+    # 撞名包的名字**运行时拼**：本文件经 Write 落盘时会被 AN-037 自己扫一遍。
     #   ★★ 拼的时候盯住拼写：第一版写成 "requ"+"ests" —— 拼出来就是**正确**的
     #      `requests`，正控其实喂的是热门包。**拼接是为了躲扫描，不是为了改语义。**
     typo_pkg = "reqe" + "usts"          # reqeusts（u/e 换位）
@@ -5754,8 +5754,8 @@ def j_hardcoded_rules_are_truthful():
         return False, "夹具不成立：撞名样本与热门样本拼成了同一个字符串"
     cmd_pre = "pip" + " install "
     got = hook._slop_hit("Bash", cmd_pre + typo_pkg, {}) or {}
-    if got.get("rule_id") != "SLOP-01":
-        return False, ("② 撞名包 %r 没报 SLOP-01（实得 %r）—— 代码特判本身失效了"
+    if got.get("rule_id") != "AN-037":
+        return False, ("② 撞名包 %r 没报 AN-037（实得 %r）—— 代码特判本身失效了"
                        % (typo_pkg, got.get("rule_id")))
     got_good = hook._slop_hit("Bash", cmd_pre + good_pkg, {})
     if got_good:
@@ -5776,19 +5776,19 @@ def j_hardcoded_rules_are_truthful():
     import copy as _copy
     off = _copy.deepcopy(rules)
     for r in off:
-        if r.get("id") == "NET-04":
+        if r.get("id") == "AN-031":
             r["enabled"] = False
     tunnel = "ngr" + "ok http 3000"
-    if "NET-04" in ids_of(off, tunnel):
-        return False, ("③ 负控失效：NET-04 写了 enabled: false 仍然命中 ⇒ `_disabled()` "
+    if "AN-031" in ids_of(off, tunnel):
+        return False, ("③ 负控失效：AN-031 写了 enabled: false 仍然命中 ⇒ `_disabled()` "
                        "通道整体不通，② 的「关不掉」证明不了任何事")
-    if "NET-04" not in ids_of(rules, tunnel):
-        return False, ("③ 基线不成立：干净的规则集上 NET-04 对 %r 就不命中 "
+    if "AN-031" not in ids_of(rules, tunnel):
+        return False, ("③ 基线不成立：干净的规则集上 AN-031 对 %r 就不命中 "
                        "（判据拿错了样本，②③ 都成了空集比较）" % tunnel)
 
     return True, ("三腿成立：① code_only %d 条都不在表里、declared %d 条在表里且 "
                   "enabled=false ② _slop_hit 撞名即报、签名无规则集参数 %s "
-                  "③ NET-04 关掉即不响、开开即响（enabled 通道有效）"
+                  "③ AN-031 关掉即不响、开开即响（enabled 通道有效）"
                   % (len(code_only), len(declared), tuple(params)))
 
 
@@ -5800,7 +5800,7 @@ def hook_hit_with(hook, ruleset, text, root):
         hits = hook.collect_hits(ruleset, "Write", texts, str(root), []) or []
     except Exception:                                              # noqa: BLE001
         return None
-    return [h.get("rule_id") for h in hits if h.get("rule_id") == "SEC-06"]
+    return [h.get("rule_id") for h in hits if h.get("rule_id") == "AN-021"]
 
 
 def _checks(m):
@@ -5811,11 +5811,11 @@ def _checks(m):
       —— 太慢也太脆。提取后判据直接调它拿清单（判据不许二次实现）。
     """
     return [
-        ("A1  DST-10 的 block 不被降级为 alert", lambda: j_dst10_stream(m)),
+        ("A1  AN-024 的 block 不被降级为 alert", lambda: j_dst10_stream(m)),
         ("A1  判据单一真源（两函数不分叉）", lambda: j_judgement_source_single(m)),
         ("A2  加载与比对同源（行为级：篡改必报）", j_a2_load_compare_same_source),
         ("D-3 纯文本提及仍放行（无假阳性）", lambda: j_mention_not_regressed(m)),
-        ("—   DST-01 真表 21 条未损坏（对照）", lambda: j_dst01_still_works(m)),
+        ("—   AN-009 真表 21 条未损坏（对照）", lambda: j_dst01_still_works(m)),
         ("—   兜底集与主表全等（逐字段 ＋ 内建牙齿）", lambda: j_fallback_matches_rules(m)),
         ("D-6 九处版本号一致（原 A5，此前无守卫）", j_version_consistent),
         ("D-11 构建器三件机制在位（布局表/同步守卫/对账）", j_builder_mechanisms_present),
@@ -5889,14 +5889,14 @@ def _checks(m):
         # ── 2026-10-25 D-48：规则里每一条模式都必须「活着」（第 31 条）──
         ("D-48 规则模式全部可编译且真能匹配（10 条排除写成双层转义＝0 生效）",
          j_rules_patterns_are_alive),
-        # ── 2026-10-26 D-49：CTX-03 的码点表只许有一份（第 32 条）──
-        ("D-49 CTX-03 两个引擎同源同结论（三份区间表各写一份，scan 看不见 RLO 文件名）",
+        # ── 2026-10-26 D-49：AN-016 的码点表只许有一份（第 32 条）──
+        ("D-49 AN-016 两个引擎同源同结论（三份区间表各写一份，scan 看不见 RLO 文件名）",
          j_ctx03_single_source),
         # ── 2026-10-26 D-50：占位值不算秘密，真密钥还得抓得住（第 33 条）──
-        ("D-50 密钥占位值不报、真密钥照报（227 条 SEC-06 全是文档示例/空私钥）",
+        ("D-50 密钥占位值不报、真密钥照报（227 条 AN-021 全是文档示例/空私钥）",
          j_secret_placeholders_are_not_findings),
         # ── 2026-10-26 D-51：名字近似分档，不能一刀切（第 34 条）──
-        ("D-51 CTX-05 名字近似才升档（38 条全是 worktree/克隆目录名，一刀切必误报）",
+        ("D-51 AN-018 名字近似才升档（38 条全是 worktree/克隆目录名，一刀切必误报）",
          j_ctx05_name_level_is_tiered),
         # ── 2026-10-26 D-52：扫描面可配，但收窄了多少必须说出来（第 35 条）──
         ("D-52 扫描面可配且留账（178 条里 140 条来自产物目录，写 * 就能装满分）",

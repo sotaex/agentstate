@@ -11,7 +11,7 @@ chain would keep recording antinel's DECISION, not the world's OUTCOME. This
 probe closes the signaling half of that hole:
 
   1. runs hooks/pre_tool_use.py (the REAL hook) with a synthetic event that
-     must be blocked (Read of a *.env path -- SEC-01, critical),
+     must be blocked (Read of a *.env path -- AN-001, critical),
   2. asserts the deny on every channel the host contract expects: exit code 2,
      stdout deny contract (hookSpecificOutput.permissionDecision="deny") and/or
      legacy {"decision":"block"} -- per the armed deny_stdout policy mode and
@@ -174,7 +174,7 @@ def main():
         if deny_mode not in ("dual", "legacy", "quiet"):
             deny_mode = "dual"
 
-        # Synthetic event that MUST be blocked: SEC-01 (critical) fires on any
+        # Synthetic event that MUST be blocked: AN-001 (critical) fires on any
         # Read of a *.env path. The file does not exist and needs not exist --
         # the block happens at the tool-call layer, before any filesystem read.
         ev = {"session_id": "antinel-probe", "transcript_path": "",

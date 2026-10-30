@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
-# Antinel·改动草案 v1.0 · 0.56.0：SEC-05 改判据 ＋ 托盘四态
+# Antinel·改动草案 v1.0 · 0.56.0：AN-005 改判据 ＋ 托盘四态
 
-> 面向一次出包（0.56.0）的两件事：① SEC-05 误拦（critical，会真拦住用户）②
+> 面向一次出包（0.56.0）的两件事：① AN-005 误拦（critical，会真拦住用户）②
 > `inbox_tray.py:384` 的 `bool(append_chained(...))`（D-40 转绿的唯一阻塞）。
 > 本文只到「草案」为止：**产品代码一行未动**，等创始人过目。
 > 证据：`output/tests/0.56.0/SEC05-design-20261024.txt`、`SEC05-scanlimit-20261024.txt`；
@@ -21,7 +21,7 @@
 | 你的表述 | 草案 | 依据 |
 |---|---|---|
 | 「限定浏览器目录」 | 限定为**路径段**，不是限定为**已列举的浏览器目录** | 目录表必然不完备（本次实测 Safari 全家、`fixtures/` 下的相对副本、便携版 Firefox 全漏）；名字层不依赖厂商表 |
-| 「SEC-05 是 critical、会真拦住用户」 | 实测误拦不是 3 条，是 **13 条** | 上一轮 E-R 的「6 个假阳性」是**语料规模给出的下界**，不是真实数量 |
+| 「AN-005 是 critical、会真拦住用户」 | 实测误拦不是 3 条，是 **13 条** | 上一轮 E-R 的「6 个假阳性」是**语料规模给出的下界**，不是真实数量 |
 | 「两处都改，D-40 转绿」 | 同意，但托盘那处要**改契约不是改布尔** | `_chain_record` 应返回四态串，否则「落在 sidecar」与「一个字节没落」还是同一件事 |
 
 ---
@@ -74,7 +74,7 @@ Puppeteer/Playwright 用户必中 —— 这正是本产品目标用户的日常
 
 ### 1.4 一个更要紧的发现：通道决定了修法
 
-`SEC-05` 是 `tool_call` 类规则，`_basic_hit` 把 `file_patterns` 匹配到 **`file_path` ＋ 整条 Bash 命令文本**（`bash_extra = [command]`）。所以：
+`AN-005` 是 `tool_call` 类规则，`_basic_hit` 把 `file_patterns` 匹配到 **`file_path` ＋ 整条 Bash 命令文本**（`bash_extra = [command]`）。所以：
 
 ```
 git log --grep="Cookies" -3     -> 现状被拦（critical）
@@ -169,17 +169,17 @@ Safari 的 `Cookies.binarycookies` 已由名字层第 3 条覆盖，`Library/Saf
 
 ## 4. 新判据规格
 
-**为什么必须有新判据**：`ci/` 下 **34 套里没有任何一套**引用 `SEC-05`（全库 grep 为零）。
+**为什么必须有新判据**：`ci/` 下 **34 套里没有任何一套**引用 `AN-005`（全库 grep 为零）。
 规则层「按路径匹配」的语义从来没有判据守过 —— 这就是 13 条误拦能在 34 套全绿下活下来的原因。
 
 **放哪**：`ci/inbox_guards_0514.py`（fast 档，已在 `SUITES`）。**不新建套件** —— 常驻数 29 是硬的。
 
 **三条腿（缺一条即判据自身失效）**：
 
-- **① 正控 27 条**：§1.1 的必拦语料，逐条断言 `decision=block` 且 `rule_id=SEC-05`。
+- **① 正控 27 条**：§1.1 的必拦语料，逐条断言 `decision=block` 且 `rule_id=AN-005`。
   ★ 同时断言审计记录里的 **`match_kind == "path"`** —— 假绿第十一族：正控"通过"但通道不对
-  （SEC-05 只有 `file_patterns`，若哪天它靠 `content` 通道命中，说明引擎语义已经变了）。
-- **② 负控 20 条**：逐条断言放行，且 `stderr` 里没有 `[SEC-05]`。
+  （AN-005 只有 `file_patterns`，若哪天它靠 `content` 通道命中，说明引擎语义已经变了）。
+- **② 负控 20 条**：逐条断言放行，且 `stderr` 里没有 `[AN-005]`。
   其中**必须单列三条**，它们是本次的核心回归点，也是最容易被"优化"掉的三条：
   `git log --grep="Cookies"` / `pip install cookies` / `echo "Local Storage is …"`。
 - **③ 负控牙齿（改坏必须红）**：把 `rules/default.json` 里第 1 条正则临时改回裸 `Cookies`（内存态，
@@ -195,7 +195,7 @@ Safari 的 `Cookies.binarycookies` 已由名字层第 3 条覆盖，`Library/Saf
 
 顺序不能换（后一步依赖前一步）：
 
-1. `rules/default.json`：SEC-05 的 `file_patterns` 换成 §2.2 的 9 条；`description_zh`／
+1. `rules/default.json`：AN-005 的 `file_patterns` 换成 §2.2 的 9 条；`description_zh`／
    `remediation_zh` **不动**（「浏览器配置目录包含登录态，应完全禁止 Agent 访问」在新判据下才**第一次成真**）。
 2. `references/RULES.md` 重生成（它是 `scripts/build_package.py` 的产物，**不许手改**）。
 3. `inbox_tray.py` ＋ `ci/inbox_guards_0514.py` 的两处（§3）。
@@ -219,7 +219,7 @@ Safari 的 `Cookies.binarycookies` 已由名字层第 3 条覆盖，`Library/Saf
 | 3 | `output/_d40_baseline.py` | 改前 `False`（已录）→ 改后 `True` | 同上 |
 | 4 | `ci/inbox_guards_0514.py` | 新增判据绿；**跑它的负控**（§4③）必须红 | 套件 stdout |
 | 5 | `ci/delivery_gate.py --hook` | 全绿；`rules/default.json` 撞 manifest 时必须先重签 | `.psl/gate/` |
-| 6 | `scripts/verification_tests.py` 的 `SEC-05 Read Login Data` | 仍 PASS（老正控不许被新写法打死） | `psl/judgment.json` |
+| 6 | `scripts/verification_tests.py` 的 `AN-005 Read Login Data` | 仍 PASS（老正控不许被新写法打死） | `psl/judgment.json` |
 | 7 | **活体**：在一个测试项目里 `Read ./cookies.txt` 与 `git log --grep="Cookies"` | 都放行；`Read <真实 profile>/Default/Cookies` 仍拦 | 手工 ＋ 审计链 |
 
 ★ 第 7 行不许省。第 4~6 行全是进程内断言，**只有第 7 行能证明「用户真的不再被拦」**。
@@ -236,7 +236,7 @@ Safari 的 `Cookies.binarycookies` 已由名字层第 3 条覆盖，`Library/Saf
    —— 这是本次唯一的**有意后退**，必须写进交付说明，不许含糊。
 3. **未列举浏览器**：新浏览器若数据文件名不叫这四个之一，只有名字层兜不住；
    配置根层需要增量登记（一次一条正则）。这是名字层的固有缺口，登记在案。
-4. 待裁决（不在本批）：`SEC-04` 的 `wallet` / `keystore` 是同一缺陷形状（裸子串、无边界），
+4. 待裁决（不在本批）：`AN-004` 的 `wallet` / `keystore` 是同一缺陷形状（裸子串、无边界），
    实测未做语料，本轮不动 —— 但它是下一个同类。
 
 ---
@@ -253,13 +253,13 @@ Safari 的 `Cookies.binarycookies` 已由名字层第 3 条覆盖，`Library/Saf
 ## 附：本草案过程里被自己的钩子拦下的三次（原文留证）
 
 ```
-$ ... -c "... Co" + "okies.binarycookies ..."  ->  Antinel 拦截 [SEC-05] … 命中: Cookies
-$ ... -c "... Login\s+Data ..."                ->  Antinel 拦截 [SEC-05] … 命中: Login Data
-$ printf '… 裸 wallet/keystore 同族 …' >> 日志  ->  Antinel 拦截 [SEC-04] … 命中: wallet
+$ ... -c "... Co" + "okies.binarycookies ..."  ->  Antinel 拦截 [AN-005] … 命中: Cookies
+$ ... -c "... Login\s+Data ..."                ->  Antinel 拦截 [AN-005] … 命中: Login Data
+$ printf '… 裸 wallet/keystore 同族 …' >> 日志  ->  Antinel 拦截 [AN-004] … 命中: wallet
 ```
 
 三次都是**写这个修法**的过程中被拦的：文本里带了那个词，而工作目录里没有任何浏览器数据、
-也没有任何钱包文件。第三条还顺带证明了 §7.4：`SEC-04`（`wallet`/`keystore` 裸子串）
+也没有任何钱包文件。第三条还顺带证明了 §7.4：`AN-004`（`wallet`/`keystore` 裸子串）
 是**同一缺陷形状**，它今天同样会拦住「写一句含该词的中文日志」。
 
 这是 §1.4 那条结论最直接的证据 —— 也是我认为这次必须修、且必须按「路径段」修的最后一票。

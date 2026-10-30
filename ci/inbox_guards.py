@@ -109,7 +109,7 @@ def put_chain(hub, recs, name=None):
     return p
 
 
-def breach(ts=None, reason="规则 SEC-09 命中", **kw):
+def breach(ts=None, reason="规则 AN-028 命中", **kw):
     ts = ts or _ago(1)
     r = {"ts": ts, "type": "host_shield_breach", "tool": "-", "session": "host-shield",
          "host": "generic", "decision": "allow", "severity": "warning",
@@ -118,7 +118,7 @@ def breach(ts=None, reason="规则 SEC-09 命中", **kw):
     return r
 
 
-def block_rec(ts=None, rule="SEC-01", snip=".env", **kw):
+def block_rec(ts=None, rule="AN-001", snip=".env", **kw):
     ts = ts or _ago(1)
     r = {"ts": ts, "type": "pre_tool_use", "tool": "Bash", "session": "s1",
          "host": "workbuddy", "decision": "block", "severity": "critical",
@@ -296,7 +296,7 @@ def c_project_block_projected():
     hub = new_hub()
     put_chain(hub, [block_rec()])
     hit = [it for it in S.load_items() if it.kind == "tool_call_blocked"]
-    return len(hit) == 1 and hit[0].level == "L2" and hit[0].rule_id == "SEC-01"
+    return len(hit) == 1 and hit[0].level == "L2" and hit[0].rule_id == "AN-001"
 
 
 def n_project_block():
@@ -1199,7 +1199,7 @@ def n_daemon_tick_notifies_once():
 def c_daemon_r0_emphasis_only():
     """★ 强调层只对 R0 生效：L2 不响、R0 才响（即使开关都开着）。"""
     hub = new_hub()
-    put_chain(hub, [block_rec(ts=_ago(1), rule="SEC-01")])
+    put_chain(hub, [block_rec(ts=_ago(1), rule="AN-001")])
     cfg = CFG.load(root=hub)
     cfg["sound"] = True
     cfg["overlay"] = True
@@ -1208,7 +1208,7 @@ def c_daemon_r0_emphasis_only():
     d = DM.Daemon(root=hub, backend=NT.RecordingBackend(), sound=s, overlay=o)
     d.tick()
     l2_quiet = (s.calls == [] and o.calls == [])
-    put_chain(hub, [block_rec(ts=_ago(1), rule="SEC-01"),
+    put_chain(hub, [block_rec(ts=_ago(1), rule="AN-001"),
                     {"ts": _ago(0.5), "type": "host_shield_tamper",
                      "reason": "t", "hash": "h2"}])
     d.tick()

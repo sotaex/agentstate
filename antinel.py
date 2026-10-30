@@ -327,7 +327,7 @@ def cmd_roots(args):
             return "workspace_roots + %s" % norm
         seven_step("roots add %s" % norm, cfg,
                    lambda: _load_json(cfg), mut,
-                   "信任边界扩大：该目录内的写入将不再被 DST-02 拦截",
+                   "信任边界扩大：该目录内的写入将不再被 AN-010 拦截",
                    "antinel roots remove %s" % norm, "workspace_roots",
                    find_project_root() or os.getcwd(), sensitive=(args.sub == "add"))
     elif args.sub == "remove":
@@ -398,7 +398,7 @@ def _wl(kind, sub, args):
         data["whitelist"][key] = keep
         return "whitelist.%s - %s" % (key, val)
 
-    impact = {"paths": "该前缀下的写入将不再被 DST-02 拦截（每次放行都留审计痕）",
+    impact = {"paths": "该前缀下的写入将不再被 AN-010 拦截（每次放行都留审计痕）",
               "domains": "该域名的网络请求不再触发 NET 提醒/拦截",
               "commands": "该前缀命令不再触发 warning 级提醒（critical 规则不受影响）"}[kind]
     seven_step("%s %s %s" % (kind, sub, val), pol_path,
@@ -685,7 +685,7 @@ def _agg_audit(audit_dir, days):
                 post_ts[_dg] = rec.get("ts")
             # ★★ 0.34.0（E2）：**数据外发**进日常视图。
             #   为什么加：canary 是本产品唯一能给出"内容真的出去了"的**主动证据**
-            #   （SEC-11 埋的蜜饵标记一旦出现在工具输出里 ⇒ 读过 ＋ 带出去过）。
+            #   （AN-036 埋的蜜饵标记一旦出现在工具输出里 ⇒ 读过 ＋ 带出去过）。
             #   而它此前**只**在 `report` 的 canaries 统计里，`digest`/`morning`
             #   这两个用户最常看的视图**完全没有这个数字** ——
             #   也就是"最该被看到的风险"在"最常被看到的界面"上缺席。
@@ -717,8 +717,8 @@ def canary_summary():
     `session_dna._rows/_iter_day_files`，禁第二份链读法），聚合三件**已经
     发生**的事：
       · planted  —— 链上 `canary_planted` 按 marker 去重 ⇒ 放了几枚
-      · read     —— SEC-11 提醒次数（工具**读过**诱饵文件；规则故意只 alert
-                    不拦——拦下就观察不到外传链路，见 rules/default.json SEC-11 note）
+      · read     —— AN-036 提醒次数（工具**读过**诱饵文件；规则故意只 alert
+                    不拦——拦下就观察不到外传链路，见 rules/default.json AN-036 note）
       · observed —— `canaries_observed` 次数＋涉及哪些 marker（标记出现在工具
                     **输出里**＝读过**且**带出去过，唯一强证据）
 
@@ -747,7 +747,7 @@ def canary_summary():
                     if mk and mk not in planted:
                         planted[mk] = rec.get("ts") or ""
                 elif t == "pre_tool_use":
-                    if "SEC-11" in (rec.get("rules_hit") or []):
+                    if "AN-036" in (rec.get("rules_hit") or []):
                         read += 1
                 elif t == "post_tool_use":
                     for c in (rec.get("canaries_observed") or []):
@@ -823,9 +823,9 @@ def cmd_canary(args):
                 "host": host, "marker": marker,
                 "path": os.path.join(".canary", marker), "note": note,
                 "decision": "allow", "severity": "none",
-                "reason": "canary %s（读取 → SEC-11 提醒；标记出现在输出 → report canaries 统计）"
+                "reason": "canary %s（读取 → AN-036 提醒；标记出现在输出 → report canaries 统计）"
                           % ("已存在，复用" if note == "already" else "已布置")})
-        print("✓ 金丝雀在岗：%s（读取 → SEC-11 提醒；标记出现在输出即外传证据）"
+        print("✓ 金丝雀在岗：%s（读取 → AN-036 提醒；标记出现在输出即外传证据）"
               % os.path.join(".canary", marker))
         return
     if sub == "list":
@@ -850,7 +850,7 @@ def cmd_canary(args):
         print("【金丝雀】在岗 %d 个：%s" % (len(planted), ", ".join(planted) or "（无）"))
         for ts, marker, note in seen[-8:]:
             print("  %s  %s（%s）" % (ts, marker, note))
-        print("  读取 → SEC-11 提醒；标记出现在工具输出 → report 的 canaries 统计。")
+        print("  读取 → AN-036 提醒；标记出现在工具输出 → report 的 canaries 统计。")
         return
     _die("未知子命令")
 
@@ -3758,7 +3758,7 @@ def cmd_host_scan(args):
     else:
         print("  [IM/邮件的本地库] 0 处")
     if sync:
-        print("  [云盘同步目录] %d 处 —— 写进去＝客户端自动上传（DST-11 已盯）" % len(sync))
+        print("  [云盘同步目录] %d 处 —— 写进去＝客户端自动上传（AN-030 已盯）" % len(sync))
         for (q, n, b, tr) in sync[:8]:
             print("       %s  条目 %d ／ %.1f MB" % (q, n, _m(b)))
     else:

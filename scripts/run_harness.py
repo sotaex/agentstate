@@ -109,11 +109,11 @@ _BY_KIND_OVERRIDES = {
     "UX: 同类提醒当天只提示一次（第二次静默记录）": ("instrument",
         "套件 539-541 行重置 proj/.psl/notify_state.json，而 0.35.3 起产品读 "
         "~/.antinel/notify_state.json ⇒ 重置指向死路径；且 522 行 chmod 777 script.sh "
-        "与 UX 断言命中同一键 DST-05|chmod 777（键=规则+片段，不含文件名）⇒ 同轮内"
+        "与 UX 断言命中同一键 AN-013|chmod 777（键=规则+片段，不含文件名）⇒ 同轮内"
         "键已被消费。0.36.8 已修（重置改为 Path(os.environ[ANTINEL_HUB_DIR])/"
         "notify_state.json）并原样复现实测转绿。"),
-    "0.16.0 DST-01 URL /rd/ segment is not a delete (NET-01 warns, no block)": ("instrument",
-        "断言期望 err 含 NET-01，实际命中的是后增的白名单域规则 [NET-03]；被测"
+    "0.16.0 AN-009 URL /rd/ segment is not a delete (AN-006 warns, no block)": ("instrument",
+        "断言期望 err 含 AN-006，实际命中的是后增的白名单域规则 [AN-008]；被测"
         "代码并未重新触发放行 —— 断言口径与规则演进脱节。"),
     "0.16.0 antinel_verify derives current on an intact package": ("process-stale",
         "digests 定格于上一版 harness 写入态，此间的合法编辑未刷新记录 ⇒ 自书失真；"

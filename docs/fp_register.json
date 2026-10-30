@@ -14,7 +14,7 @@
     {
       "id": "FP-0001",
       "status": "open",
-      "rule": "DST-01",
+      "rule": "AN-009",
       "family": "FP-FAMILY-1",
       "summary": "拦下「print 里的删除命令字面串」（该串未被执行）",
       "channel": "command_text",
@@ -25,7 +25,7 @@
     {
       "id": "FP-0002",
       "status": "open",
-      "rule": "DST-01",
+      "rule": "AN-009",
       "family": "FP-FAMILY-1",
       "summary": "往 memory 日记追加时，正文提到删除函数名，连续两次被拦",
       "channel": "command_text",
@@ -37,11 +37,11 @@
     {
       "id": "FP-0003",
       "status": "open",
-      "rule": "DST-04",
+      "rule": "AN-012",
       "family": "FP-FAMILY-1",
       "summary": "git commit -m 的 message 里描述「注册表 Run 键新增」被当成持久化动作拦下",
       "channel": "commit_message",
-      "root_cause": "commit message 是长文本参数，不是要执行的命令；DST-04 是 critical，直接 block",
+      "root_cause": "commit message 是长文本参数，不是要执行的命令；AN-012 是 critical，直接 block",
       "found": "2026-10-30",
       "context": "夜间升级 P3-1 提交时撞到。改写 message（去掉命令字面串）后通过。",
       "regression_test": null
@@ -49,7 +49,7 @@
     {
       "id": "FP-0004",
       "status": "open",
-      "rule": "DST-06",
+      "rule": "AN-019",
       "family": "FP-FAMILY-1",
       "summary": "git commit -m 的 message 里写「解码后管道交给 shell」的形态被当成远程脚本执行拦下",
       "channel": "commit_message",

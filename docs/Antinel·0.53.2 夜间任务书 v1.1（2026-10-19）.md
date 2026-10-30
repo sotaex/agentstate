@@ -111,7 +111,7 @@ Get-CimInstance Win32_Process | Where-Object { $_.Name -like "*python*" -and $_.
 - 页面首字节下发 httpOnly cookie `antinel_t`；`/assets/*` 必须带它，裸 curl 403。
 - 现成模板：`output\_fav_probe.py`（取页面 → 取资源 → 比对字节）。
 - ⚠️ **探针必须写成文件再执行**：命令行里出现 `cookies` 字样会被产品自己的
-  SEC-05 规则误拦（它按**字面量**匹配，包括变量名与注释）。
+  AN-005 规则误拦（它按**字面量**匹配，包括变量名与注释）。
 
 ---
 
@@ -547,7 +547,7 @@ if ($changed -or ($hasSpec -ne $script:hadSpec)) {
 | `0460 S80` 报"夹具失效" | 本机进程启动 0.6–1.9s vs 产品 `VCT_TIMEOUT=2.0` | 空载重跑；**不许**调大产品超时 |
 | `0515` 超时 | `host-scan --json` 单跑 49s，负载下翻倍 | 空载重跑，别并发 |
 | 回读 403 | 端口漂移／用了仓内旧 `url.json` | 只读 `~/.antinel/console/url.json` |
-| 命令行被 SEC-05 拦 | 命令文本含 `cookies` 等字面量 | 探针写成 `output/_xxx.py` 再执行；**变量名与注释也避开该词** |
+| 命令行被 AN-005 拦 | 命令文本含 `cookies` 等字面量 | 探针写成 `output/_xxx.py` 再执行；**变量名与注释也避开该词** |
 | `/assets/*` 403 | 缺 httpOnly cookie | 先取页面拿 `antinel_t` |
 | 截图取不到哨标 | 分层窗不走屏幕合成 | 用 §6.4 的帧摘要／`PrintWindow`；别指望 `CopyFromScreen` |
 | `.ps1` 行为诡异 | 文件含非 ASCII（按 GBK 解析） | 纯 ASCII 化；`0514` FLO-01 会扫出来 |

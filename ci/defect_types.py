@@ -1108,7 +1108,7 @@ INSTANCES = [
                 "inbox_logo；package-data assets +sounds/*.wav；root_mod +两个 "
                 ".py；_LAYOUT/_TOOL_FALLBACK +logo.ps1）；② 口径归位 —— "
                 "sanctioned 流程 final＝仓根本身（release.py 默认 --out 父目录），"
-                "本机 stage 在区外被 DST-02 拦，故以仓根完整副本种子化 out/antinel-"
+                "本机 stage 在区外被 AN-010 拦，故以仓根完整副本种子化 out/antinel-"
                 "security 再装配，清单走 `_wheel_payload(final)` 口径 ⇒ 实测 129 项"
                 "与 wheel 载荷 131 项减 2 项按设计排除严格集合相等。连带修：仓根 "
                 "psl/SKILL.md 与根 SKILL.md 分家（根件手改后未再构建，清单哈希算于 "

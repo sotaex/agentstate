@@ -4,12 +4,12 @@
 
 > v1.26（0.62.0）：**字段拆义，不新增记录类型** —— `notice_budget_window_closed`
 > 新增 `bucket`，`rule_id` 语义收紧为「只放真规则号」。此前 `rule_id` 直接写
-> `notice_gate()` 的第一个参数，而该参数既装真规则号（`SLOP-01`）又装**分桶 key**
-> （`DST-02-BASH` —— 同一规则 `DST-02` 的 Bash 提醒通道）⇒ 账本里出现 390 条
+> `notice_gate()` 的第一个参数，而该参数既装真规则号（`AN-037`）又装**分桶 key**
+> （`AN-010-BASH` —— 同一规则 `AN-010` 的 Bash 提醒通道）⇒ 账本里出现 390 条
 > 「规则库里没有的规则号」，看起来像第 38 条规则，实际是分桶名占了字段名。
 > **不改**已有字段名（`rule_id` 保留）、**不改**已有取值域（新取值只会更窄）、
 > **不改** append-only 契约。**历史记录不追溯**：读旧记录按 `bucket` 取旧口径。
-> ★ 起因：37 条 × 新编号对照时把 `DST-02-BASH` 误判成「第 38 条幽灵规则」，
+> ★ 起因：37 条 × 新编号对照时把 `AN-010-BASH` 误判成「第 38 条幽灵规则」，
 > 读代码才发现是字段语义混装（铁律 44「同值不同义」）。
 >
 > v1.25（0.60.0）：**补登记 2 类** —— `rules_auto_refresh_skipped`、
@@ -198,7 +198,7 @@
 > v1.6（0.29.0）：**补登记 6 个早已写入同一条链、但本文从未登记的事件类型** —— `dst11_syncdir_released`（新增）、`rules_integrity_fallback`、`rules_unreadable_fallback`、`policy_changed`、`credits_snapshot`、`digest_rollup`。同时把抬头版本从 v1.3 修正到 v1.6（抬头落后两版：v1.4/v1.5 的变更说明已写在正文，标题却一直没改）。
 > v1.6a（0.29.0，同日）：**门闸族再补登记 2 类** —— `host_shield_lock_held`、`host_shield_contested`（见 §4）。这两类是 v1.3 补登记门闸族时**漏掉的**：v1.3 的变更说明自称"共 6 类"，而代码里实际有 13 类，两处一直没有对齐。**发现方式＝同一道 INV-6**（严格测试的 257 条断言里，`F-10 门闸事件类型全部登记于 AUDIT_SCHEMA.md（11 类）` 报 `未登记: ['host_shield_contested', 'host_shield_lock_held']`）。
 > v1.7（0.30.0）：**E-3 关闭的两半上链** —— 新增 `enforcement_gap`（post：宿主把"已拦截"的调用真的执行了＝deny 信号未被尊重的**真实流量证据**）与 `enforcement_probe`（tools/enforce_probe.py：合成必拦事件、验证全部下发通道的**主动自检**）。同时 `hook_alive` 与 `pre_tool_use_summary` 增补三个可选字段：`antinel_version`、`host_version`（宿主在事件里带 version 才有值，**缺失不造假**）、`deny_mode`（当前武装的 deny 契约：dual/legacy/quiet）。依据：THREAT_MODEL E-3——"拦截"必须拥有自己的证据，而不是只在钩子的决定里存在。
-> v1.8（0.31.0）：**指令面/供应链/金丝雀/自移除** —— 新增 `canary_planted`（antinel canary plant：金丝雀布置/复用的事实记录，标记本身由 post 侧 canaries_observed 观察半边接管）与 `antinel_uninstall`（install.py --uninstall：**护栏自我移除在删除动作之前**的 critical 留痕，宿主级镜像强制；purge 会删项目副本、镜像保证据）。配套规则族：MCP-01..04（MCP 供应链，命中走既有 pre_tool_use 记录，不新增类型）、SEC-11（读金丝雀 → alert，故意不拦——拦下就看不到外传链路）。
+> v1.8（0.31.0）：**指令面/供应链/金丝雀/自移除** —— 新增 `canary_planted`（antinel canary plant：金丝雀布置/复用的事实记录，标记本身由 post 侧 canaries_observed 观察半边接管）与 `antinel_uninstall`（install.py --uninstall：**护栏自我移除在删除动作之前**的 critical 留痕，宿主级镜像强制；purge 会删项目副本、镜像保证据）。配套规则族：AN-032..04（MCP 供应链，命中走既有 pre_tool_use 记录，不新增类型）、AN-036（读金丝雀 → alert，故意不拦——拦下就看不到外传链路）。
 > ★ **教训（第三次同一类）**："补登记"如果只按**手写清单**补，就会漏；只有**扫代码写出的 type**才对得上。v1.3 是手写清单补的，所以漏了 2 个；v1.6 的另外 6 个是 INV-6 扫出来的，所以齐了。**没对象的检查项＝假守卫；有对象的检查项才补得齐。**
 > **依据（本条的来源就是一次自查）**：`antinel_verify.py --invariants` 的 INV-6 用正则扫出"代码写入的 type ∉ 本文登记"，一次跑出 7 个未登记项。**这正是本项目的契约纪律：「没登记 ≠ 不存在」**——链上写着一个类型，而随包契约里没有它，第三方复核时就无从知道那个字段是什么意思。**现在 INV-6 是一道会红的守卫**，不是一句口号。
 
@@ -251,7 +251,7 @@
 | `pre_tool_use_summary` | pre | `rules_hit`, `decision`, `antinel_version`, `host_version` | 决策摘要行（各决策记录之外的一条汇总）。**0.30.0 (E-3)**：`antinel_version`＝钩子包版本；`host_version`＝宿主事件自带的 version 字段（缺失为 null，**缺失不造假**） |
 | `post_tool_use` | post | `response_digest`, `response_chars`, `rules_hit`(OUT-01), `sensitive_output[]`, `canaries_observed[]`, `exit_code`, `file_state_after` | `exit_code` 为 **0.22.0 (B1)**：宿主暴露的数字退出码，取不到为 `null`（**缺失不造假**）；`file_state_after` 为 **0.22.0 (C1)**：写后状态，与 `file_state_before` 经 `content_digest` 配对。**时长 = post.ts − pre.ts，由 report 层派生，钩子不记** |
 | `enforcement_gap` | post | `content_digest`, `rule_ids[]`, `blocked_at` | **0.30.0 (E-3)：执法缺口——真实流量证据**。本条存在即说明：pre 侧对同一 `content_digest` 写过 `decision=block`，而宿主**还是把这次调用执行了**（post 记录存在本身就是执行证据）⇒ deny 信号（exit 2 / stdout 契约）未被尊重。配对取**最近一条**同 digest 的 pre 记录且限 1 小时窗口（旧拦不缠新放）。`rule_ids` 为被拦时的规则；`blocked_at` 为原 pre.ts。这是"闸门已死"的显式证据，晨报必现 |
-| `enforcement_probe` | tools/enforce_probe.py | `probe`, `expected`, `got`, `exit_code`, `stdout_channel`, `deny_mode`, `ok`, `antinel_version`, `duration_ms` | **0.30.0 (E-3)：主动自检——信号半边的关闭**。合成一个必拦事件（Read `__antinel_probe__.env` → SEC-01）跑**真钩子**，断言全部下发通道：exit 2、stdout 契约（`hookSpecificOutput.permissionDecision="deny"`）与/或 legacy 键（按宿主与 `deny_stdout` 模式；ZCode 严格 stdout 模式下断言 stdout 为空）。探针模式钩子**零副作用**（不写普通审计、不通知主人、绕过策略白名单——探针测的是引擎与通道，不是用户的放行配置）。`ok=false`＝信号半边失效，晨报必现并通知主人。★ **它证明不了宿主会尊重信号**——那一半由 `enforcement_gap` 的真实流量检测覆盖；两半合起来才是 E-3 的闭合 |
+| `enforcement_probe` | tools/enforce_probe.py | `probe`, `expected`, `got`, `exit_code`, `stdout_channel`, `deny_mode`, `ok`, `antinel_version`, `duration_ms` | **0.30.0 (E-3)：主动自检——信号半边的关闭**。合成一个必拦事件（Read `__antinel_probe__.env` → AN-001）跑**真钩子**，断言全部下发通道：exit 2、stdout 契约（`hookSpecificOutput.permissionDecision="deny"`）与/或 legacy 键（按宿主与 `deny_stdout` 模式；ZCode 严格 stdout 模式下断言 stdout 为空）。探针模式钩子**零副作用**（不写普通审计、不通知主人、绕过策略白名单——探针测的是引擎与通道，不是用户的放行配置）。`ok=false`＝信号半边失效，晨报必现并通知主人。★ **它证明不了宿主会尊重信号**——那一半由 `enforcement_gap` 的真实流量检测覆盖；两半合起来才是 E-3 的闭合 |
 
 ### 会话与心跳
 
@@ -281,7 +281,7 @@
 | `workspace_root_allow` | pre | 因 `workspace_roots` 而放行的本应拦截项（记 `matched_root`、`config_source`） |
 | `exclude_patterns_allow` | pre | 因规则 `exclude_patterns` 放行的 critical 命中（宿主级镜像） |
 | `command_deletion_permission` | pre | **0.46.0 (v1.17)**：删除许可（VCT）两票裁决的**每一次**结论（宿主级镜像）。关键字段：`subkind`（取值域见下）、`exit`（退出口 `甲`/`乙`/`丙`/`丁`，非退出口为空串）、`vote1`（第一票 `ignored`/`protected`/`outside`/`unavailable`）、`vote2`（第二票 `regenerable`/`not_regenerable`）、`targets[]`（命令里取到的**字面**目标）、`reason`（"为什么走到这里"）。★ `subkind` 取值域：`vct_allow`（两票都同意⇒放行）/ `vct_deny`（有明确结论且否决⇒拦）/ `fallback_allow`（取不到信号⇒兜底名单接住并放行）/ `exit_乙`·`exit_丙`（取不到信号且兜底名单**也没接住**⇒按默认拦）。★ 为什么必须独立命名（不并入 `exclude_patterns_allow`）：两者是**不同判据**放的行——混在一处，读者分不清这次是"两票裁决"生效还是"名单兜底"生效，而这正是本仓最忌的形状（"分不清是哪条路生效"）。★ 为什么四个退出口都要写：设计 §3.5 明写「不许静默——任何一条静默分支，将来都会被当成正常路径」 |
-| `dst02_path_whitelisted` | pre | 因 `whitelist.paths` 放行的 DST-02 |
+| `dst02_path_whitelisted` | pre | 因 `whitelist.paths` 放行的 AN-010 |
 | `dst02_host_config_self_maintenance` | pre | Antinel 自身宿主级配置的自我维护写入 |
 | `dst02_bash_path_suspect` | pre | Bash 命令文本中出现根外绝对路径（**提醒不拦截**） |
 | `dst11_syncdir_released` | pre | **0.29.0 (G-8)**：写进云盘同步目录、被 `whitelist.paths` 放行。单独命名（不并入 `dst02_path_whitelisted`），因为"放行了一次写进同步文件夹"与"放行了一次写项目外"是两件不同的事——同步客户端**仍然会把文件传上云**。记 `input.file_path` |
@@ -315,7 +315,7 @@
 
 | type | 来源 | 关键字段 | 说明 |
 |---|---|---|---|
-| `canary_planted` | antinel CLI | `marker`, `path`, `note` | **0.31.0 (F3)**：金丝雀布置/复用的事实记录（`antinel canary plant`；`note` ∈ planted/already）。蜜饵文件在 `<root>/.canary/CANARY-<slug>-<8hex>`；**观察半边不在本记录**——agent 读取金丝雀由 SEC-11 alert 留痕，标记出现在工具输出由 post 侧 `canaries_observed` 接管并进 report 统计 |
+| `canary_planted` | antinel CLI | `marker`, `path`, `note` | **0.31.0 (F3)**：金丝雀布置/复用的事实记录（`antinel canary plant`；`note` ∈ planted/already）。蜜饵文件在 `<root>/.canary/CANARY-<slug>-<8hex>`；**观察半边不在本记录**——agent 读取金丝雀由 AN-036 alert 留痕，标记出现在工具输出由 post 侧 `canaries_observed` 接管并进 report 统计 |
 | `antinel_uninstall` | install CLI | `removed_hooks`, `purge`, `settings_file` | **0.31.0 (F4)：护栏自我移除的 critical 留痕**（`install.py --uninstall`）。在任何删除动作**之前**写入；purge 会删掉项目侧副本，**宿主级镜像强制**（证据不随 purge 消失）。卸载是用户权利——留痕失败不拒绝卸载（fail-open），stderr 可见 |
 
 ### 错误类
@@ -347,7 +347,7 @@
 | type | 来源 | 关键字段 | 说明 |
 |---|---|---|---|
 | `notice_budget_merged` | 钩子 `notice_gate` | `rule_id`, `total`, `used`, `merged`, `quota`, `window_seconds`, `decision="allow"`, `severity="info"` | 某条规则**在本窗口内首次跨过配额**时写一条（每窗口每规则**最多一条**，不是每条提醒一条 —— 否则降噪机制自己把账本灌满）。语义："接下来不再逐条出声，改为合并"。★ 只记"进入合并态"这一次，不记后续每一次 |
-| `notice_budget_window_closed` | 钩子 `notice_gate` | `rule_id`, `bucket`, `total`, `used`, `dup`, `merged`, `window_seconds`, `decision="allow"`, `severity="info"` | 滚动窗口**结束时**的补记：`total` ＝ 本窗口该规则被请求提醒的**原始总条数**（＝ `used + dup + merged`）。★ 这是"原始条数不丢"的**可验真处** —— 三个分项之和必须等于 `total`，判据 `ci/inbox_guards_0470.py` 常驻核对。<br>★★ 0.62.0（v1.21）：**新增 `bucket` 字段，`rule_id` 语义收紧**。此前 `rule_id` 直接写 `notice_gate()` 的第一个参数，而该参数既装真规则号（`SLOP-01`）又装**分桶 key**（`DST-02-BASH` —— 同一规则 `DST-02` 的 Bash 提醒通道）⇒ 账本里出现 390 条"规则库里没有的规则号"，看起来像第 38 条规则。现在：`rule_id` **只放真规则号**（正则 `^[A-Z]{2,5}-\d{2}` 取前缀，取不到填 `-`），`bucket` 放原始分桶名（与旧 `rule_id` 取值逐字相同）。**历史记录不追溯**（append-only），读账本时按 `bucket` 取旧口径、按 `rule_id` 取新口径 |
+| `notice_budget_window_closed` | 钩子 `notice_gate` | `rule_id`, `bucket`, `total`, `used`, `dup`, `merged`, `window_seconds`, `decision="allow"`, `severity="info"` | 滚动窗口**结束时**的补记：`total` ＝ 本窗口该规则被请求提醒的**原始总条数**（＝ `used + dup + merged`）。★ 这是"原始条数不丢"的**可验真处** —— 三个分项之和必须等于 `total`，判据 `ci/inbox_guards_0470.py` 常驻核对。<br>★★ 0.62.0（v1.21）：**新增 `bucket` 字段，`rule_id` 语义收紧**。此前 `rule_id` 直接写 `notice_gate()` 的第一个参数，而该参数既装真规则号（`AN-037`）又装**分桶 key**（`AN-010-BASH` —— 同一规则 `AN-010` 的 Bash 提醒通道）⇒ 账本里出现 390 条"规则库里没有的规则号"，看起来像第 38 条规则。现在：`rule_id` **只放真规则号**（正则 `^[A-Z]{2,5}-\d{2}` 取前缀，取不到填 `-`），`bucket` 放原始分桶名（与旧 `rule_id` 取值逐字相同）。**历史记录不追溯**（append-only），读账本时按 `bucket` 取旧口径、按 `rule_id` 取新口径 |
 
 ### 体检提醒类（0.53.0，v1.20 新增）
 
@@ -430,5 +430,5 @@
 
 - 不记文件内容、不记 diff——只有 sha256 与字节数（C1 亦然）。
 - 命令文本脱敏（密钥/token 掩码）后截断 500 字符。
-- 不记网络出站字节（钩子看不见；DST-02 类同，见 THREAT_MODEL Non-goals）。
+- 不记网络出站字节（钩子看不见；AN-010 类同，见 THREAT_MODEL Non-goals）。
 - 成本/token 消耗（三问三答 A 族）**尚未进入账本**——`transcript_path` 已随事件到达但 v0.22.0 未使用，属 v0.23.0 范围。

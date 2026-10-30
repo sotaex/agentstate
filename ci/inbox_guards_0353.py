@@ -876,7 +876,7 @@ def c_report_drill_links():
         "window_levels": {"R0": 1, "L2": 2, "L1": 3, "Ls": 0}, "window_hours": 24,
         "buckets": {"action": 3, "info": 3, "archive": 0}, "revived_window": 0,
         "posture": {"state": "guarding", "label": "值守中", "why": "在岗"},
-        "rules": [{"rule_id": "DST-01", "count": 2}],
+        "rules": [{"rule_id": "AN-009", "count": 2}],
         # 传入旧版 hourly 数据也必须忽略：逐小时报告已由奥卡姆审查移除。
         "hourly": [{"hour": "09:00", "level": "L2"}],
         "chain": {"status": "ok", "files": 1, "records": 2, "broken": 0,
@@ -885,7 +885,7 @@ def c_report_drill_links():
     h = SV.render_page(view="report", root=G.new_hub(), token="t", rep=rep,
                        items=[G.item("L2", "unread")])
     return ("f=win:24:lv:R0" in h and "f=win:24:lv:L2" in h
-            and "f=day:2026-10-06:rule:DST-01" in h and "f=action" in h
+            and "f=day:2026-10-06:rule:AN-009" in h and "f=action" in h
             and "今天逐小时" not in PC.body(h) and "f=today:" not in h
             and not M.known_filter("today:09"))
 
@@ -918,11 +918,11 @@ def c_daily_rule_drill_is_date_scoped():
     """日报按所选日期统计的规则命中，钻取也必须限制在同一天。"""
     day, _items = _ledger_test_items()
     a = M.Item(M.Alert.build(day + "T09:00:00+08:00", "tool_call_blocked",
-                             reason="today", rule_id="DST-01"))
+                             reason="today", rule_id="AN-009"))
     prev = (datetime.fromisoformat(day) - timedelta(days=1)).strftime("%Y-%m-%d")
     b = M.Item(M.Alert.build(prev + "T09:00:00+08:00", "tool_call_blocked",
-                             reason="yesterday", rule_id="DST-01"))
-    got = M.filter_items([a, b], "day:%s:rule:DST-01" % day)
+                             reason="yesterday", rule_id="AN-009"))
+    got = M.filter_items([a, b], "day:%s:rule:AN-009" % day)
     return len(got) == 1 and got[0].id == a.id
 
 
@@ -930,11 +930,11 @@ def n_daily_rule_drill_is_date_scoped():
     """负控：普通规则筛选会返回多个日期，证明新增日期范围并非恒真。"""
     day = time.strftime("%Y-%m-%d")
     a = M.Item(M.Alert.build(day + "T09:00:00+08:00", "tool_call_blocked",
-                             reason="today", rule_id="DST-01"))
+                             reason="today", rule_id="AN-009"))
     prev = (datetime.fromisoformat(day) - timedelta(days=1)).strftime("%Y-%m-%d")
     b = M.Item(M.Alert.build(prev + "T09:00:00+08:00",
-                             "tool_call_blocked", reason="yesterday", rule_id="DST-01"))
-    return len(M.filter_items([a, b], "rule:DST-01")) == 2
+                             "tool_call_blocked", reason="yesterday", rule_id="AN-009"))
+    return len(M.filter_items([a, b], "rule:AN-009")) == 2
 
 
 def c_window_size_set():
@@ -5049,7 +5049,7 @@ def _p18_transmission(store):
     #    ★ 为什么单列一条腿：这是 host 字段**最该亮**的一类 ——
     #      用户看到「拦截：危险操作被挡下」却不知道是哪个客户端触发的，
     #      「哪个工具想干危险事」这个信息只有这一条路能亮出来。
-    b = G.block_rec(rule="DST-01", snip="rm -rf",
+    b = G.block_rec(rule="AN-009", snip="rm -rf",
                     host="zcode", host_confidence="medium")
     its5 = _p18_project(store, [b])
     if len(its5) != 1:

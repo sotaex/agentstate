@@ -36,7 +36,7 @@ def chain_lines():
         return []
     return [json.loads(l) for l in open(fn, encoding="utf-8") if l.strip()]
 
-print("=== A5'（修正）：whitelist.paths 释放 DST-02 → 允许 + dst02_path_whitelisted 留痕 ===")
+print("=== A5'（修正）：whitelist.paths 释放 AN-010 → 允许 + dst02_path_whitelisted 留痕 ===")
 pol = json.load(open(os.path.join(proj, ".psl", "policy.json"), encoding="utf-8"))
 pol["whitelist"]["paths"] = [(proj + "\\keys\\").replace("\\", "/")]
 json.dump(pol, open(os.path.join(proj, ".psl", "policy.json"), "w", encoding="utf-8"))
@@ -48,8 +48,8 @@ print(("PASS" if p.returncode == 0 and logged else "FAIL"),
 
 print("\n=== A7'（修正）：platforms 是列表 ===")
 rules = json.load(open(os.path.join(PKG, "rules", "default.json"), encoding="utf-8"))["rules"]
-d9 = next(r for r in rules if r["id"] == "DST-09")
-d10 = next(r for r in rules if r["id"] == "DST-10")
+d9 = next(r for r in rules if r["id"] == "AN-023")
+d10 = next(r for r in rules if r["id"] == "AN-024")
 ok = "nt" in d9.get("platforms", []) and "nt" in d10.get("platforms", [])
 print(("PASS" if ok else "FAIL"), d9.get("platforms"), d10.get("platforms"))
 

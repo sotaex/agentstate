@@ -441,7 +441,7 @@
 <rect x="186" y="66" width="434" height="44" rx="4" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
 <text x="403" y="88" font-size="12" fill="#633806" text-anchor="middle" dominant-baseline="central">L1 × 38（自愈 18 · 已自愈投毒 14 · 上锁成功 6）</text>
 </g>
-<text x="60" y="128" font-size="12" fill="#5F5E5A">24h 窗口内未处理（unread/read）共 49 条；左边 11 条是监理拦下的危险操作（DST-07 拦 git checkout 等），右边 38 条是自愈与状态留痕</text>
+<text x="60" y="128" font-size="12" fill="#5F5E5A">24h 窗口内未处理（unread/read）共 49 条；左边 11 条是监理拦下的危险操作（AN-020 拦 git checkout 等），右边 38 条是自愈与状态留痕</text>
 <g>
 <rect x="60" y="142" width="560" height="32" rx="8" fill="#EAF3DE" stroke="#3B6D11" stroke-width="0.5"/>
 <text x="340" y="158" font-size="12" font-weight="500" fill="#27500A" text-anchor="middle" dominant-baseline="central">桶口径：要处理 0 · 看一眼 49 · 归档 654 ⇒ 49 条全部「知情即可」</text>

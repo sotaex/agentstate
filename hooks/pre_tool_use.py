@@ -107,14 +107,14 @@ def _rx(pat):
 #   scripts/scan.py 里还有一个 DEFAULT_RANGES，rules/default.json 里还有第三份
 #   ranges —— 三份内容各不相同（rules 有 U+2028..202E 一段、hook 只有 U+202D/E、
 #   scan 一段都没有），同一件事三把尺子。三处手写常量已全部删除：
-#   唯一真源是 rules/default.json 里 CTX-03 的 codepoints，见 _ctx03_table()。
+#   唯一真源是 rules/default.json 里 AN-016 的 codepoints，见 _ctx03_table()。
 SEV_RANK = {"critical": 0, "warning": 1, "info": 2}
 CAT_ORDER = {"secrets": 0, "destructive": 1, "network": 2, "injection": 3, "context": 4, "metadata": 5}
 TOOL_ALIASES = {"MultiEdit": "Edit", "ApplyPatch": "Edit", "NotebookEdit": "Write",
                 "Task": "Agent"}          # A9: rules apply to the canonical tool name
 TEXT_EXTS = (".md", ".mdc", ".txt", ".json", ".yaml", ".yml", ".toml", ".py", ".js", ".ts", ".sh", ".bash", ".zsh")
 # 0.31.0 (F1): the instruction surface -- files an agent reads AS INSTRUCTIONS.
-# CTX-02/04 target "instruction_files" = SKILL.md + this set. Keep in sync with
+# AN-015/AN-017 target "instruction_files" = SKILL.md + this set. Keep in sync with
 # scripts/scan.py (parity is asserted in verification_tests, E1-8).
 INSTRUCTION_BASENAMES = ("AGENTS.md", "AGENTS.local.md", "CLAUDE.md",
                          "CLAUDE.local.md", ".cursorrules", "copilot-instructions.md")
@@ -126,7 +126,7 @@ INSTRUCTION_DIR_MARKERS = (".cursor/rules",)   # + basename endswith .mdc
 #   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
 #   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
 #   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
-#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   AN-009 缺 mkfs / dd of=/dev/（13 条）、AN-012 缺 10 条、AN-015 缺 6 条并丢了
 #   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
 #   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
 # G-03: embedded fallback, used only when the rules file is unreadable / tampered.
@@ -134,7 +134,7 @@ INSTRUCTION_DIR_MARKERS = (".cursor/rules",)   # + basename endswith .mdc
 #   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
 #   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
 #   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
-#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   AN-009 缺 mkfs / dd of=/dev/（13 条）、AN-012 缺 10 条、AN-015 缺 6 条并丢了
 #   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
 #   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
 # G-03: embedded fallback, used only when the rules file is unreadable / tampered.
@@ -142,7 +142,7 @@ INSTRUCTION_DIR_MARKERS = (".cursor/rules",)   # + basename endswith .mdc
 #   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
 #   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
 #   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
-#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   AN-009 缺 mkfs / dd of=/dev/（13 条）、AN-012 缺 10 条、AN-015 缺 6 条并丢了
 #   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
 #   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
 # G-03: embedded fallback, used only when the rules file is unreadable / tampered.
@@ -150,7 +150,7 @@ INSTRUCTION_DIR_MARKERS = (".cursor/rules",)   # + basename endswith .mdc
 #   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
 #   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
 #   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
-#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   AN-009 缺 mkfs / dd of=/dev/（13 条）、AN-012 缺 10 条、AN-015 缺 6 条并丢了
 #   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
 #   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
 # G-03: embedded fallback, used only when the rules file is unreadable / tampered.
@@ -158,7 +158,7 @@ INSTRUCTION_DIR_MARKERS = (".cursor/rules",)   # + basename endswith .mdc
 #   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
 #   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
 #   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
-#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   AN-009 缺 mkfs / dd of=/dev/（13 条）、AN-012 缺 10 条、AN-015 缺 6 条并丢了
 #   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
 #   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
 # G-03: embedded fallback, used only when the rules file is unreadable / tampered.
@@ -166,7 +166,7 @@ INSTRUCTION_DIR_MARKERS = (".cursor/rules",)   # + basename endswith .mdc
 #   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
 #   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
 #   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
-#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   AN-009 缺 mkfs / dd of=/dev/（13 条）、AN-012 缺 10 条、AN-015 缺 6 条并丢了
 #   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
 #   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
 # G-03: embedded fallback, used only when the rules file is unreadable / tampered.
@@ -174,7 +174,7 @@ INSTRUCTION_DIR_MARKERS = (".cursor/rules",)   # + basename endswith .mdc
 #   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
 #   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
 #   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
-#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   AN-009 缺 mkfs / dd of=/dev/（13 条）、AN-012 缺 10 条、AN-015 缺 6 条并丢了
 #   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
 #   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
 # G-03: embedded fallback, used only when the rules file is unreadable / tampered.
@@ -182,7 +182,7 @@ INSTRUCTION_DIR_MARKERS = (".cursor/rules",)   # + basename endswith .mdc
 #   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
 #   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
 #   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
-#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   AN-009 缺 mkfs / dd of=/dev/（13 条）、AN-012 缺 10 条、AN-015 缺 6 条并丢了
 #   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
 #   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
 # G-03: embedded fallback, used only when the rules file is unreadable / tampered.
@@ -190,7 +190,7 @@ INSTRUCTION_DIR_MARKERS = (".cursor/rules",)   # + basename endswith .mdc
 #   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
 #   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
 #   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
-#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   AN-009 缺 mkfs / dd of=/dev/（13 条）、AN-012 缺 10 条、AN-015 缺 6 条并丢了
 #   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
 #   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
 # G-03: embedded fallback, used only when the rules file is unreadable / tampered.
@@ -198,7 +198,7 @@ INSTRUCTION_DIR_MARKERS = (".cursor/rules",)   # + basename endswith .mdc
 #   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
 #   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
 #   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
-#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   AN-009 缺 mkfs / dd of=/dev/（13 条）、AN-012 缺 10 条、AN-015 缺 6 条并丢了
 #   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
 #   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
 # G-03: embedded fallback, used only when the rules file is unreadable / tampered.
@@ -206,7 +206,7 @@ INSTRUCTION_DIR_MARKERS = (".cursor/rules",)   # + basename endswith .mdc
 #   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
 #   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
 #   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
-#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   AN-009 缺 mkfs / dd of=/dev/（13 条）、AN-012 缺 10 条、AN-015 缺 6 条并丢了
 #   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
 #   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
 # G-03: embedded fallback, used only when the rules file is unreadable / tampered.
@@ -214,7 +214,7 @@ INSTRUCTION_DIR_MARKERS = (".cursor/rules",)   # + basename endswith .mdc
 #   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
 #   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
 #   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
-#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   AN-009 缺 mkfs / dd of=/dev/（13 条）、AN-012 缺 10 条、AN-015 缺 6 条并丢了
 #   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
 #   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
 # G-03: embedded fallback, used only when the rules file is unreadable / tampered.
@@ -222,7 +222,7 @@ INSTRUCTION_DIR_MARKERS = (".cursor/rules",)   # + basename endswith .mdc
 #   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
 #   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
 #   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
-#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   AN-009 缺 mkfs / dd of=/dev/（13 条）、AN-012 缺 10 条、AN-015 缺 6 条并丢了
 #   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
 #   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
 # G-03: embedded fallback, used only when the rules file is unreadable / tampered.
@@ -230,7 +230,7 @@ INSTRUCTION_DIR_MARKERS = (".cursor/rules",)   # + basename endswith .mdc
 #   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
 #   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
 #   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
-#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   AN-009 缺 mkfs / dd of=/dev/（13 条）、AN-012 缺 10 条、AN-015 缺 6 条并丢了
 #   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
 #   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
 # G-03: embedded fallback, used only when the rules file is unreadable / tampered.
@@ -238,7 +238,7 @@ INSTRUCTION_DIR_MARKERS = (".cursor/rules",)   # + basename endswith .mdc
 #   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
 #   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
 #   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
-#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   AN-009 缺 mkfs / dd of=/dev/（13 条）、AN-012 缺 10 条、AN-015 缺 6 条并丢了
 #   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
 #   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
 # G-03: embedded fallback, used only when the rules file is unreadable / tampered.
@@ -246,7 +246,7 @@ INSTRUCTION_DIR_MARKERS = (".cursor/rules",)   # + basename endswith .mdc
 #   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
 #   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
 #   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
-#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   AN-009 缺 mkfs / dd of=/dev/（13 条）、AN-012 缺 10 条、AN-015 缺 6 条并丢了
 #   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
 #   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
 # G-03: embedded fallback, used only when the rules file is unreadable / tampered.
@@ -254,7 +254,7 @@ INSTRUCTION_DIR_MARKERS = (".cursor/rules",)   # + basename endswith .mdc
 #   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
 #   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
 #   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
-#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   AN-009 缺 mkfs / dd of=/dev/（13 条）、AN-012 缺 10 条、AN-015 缺 6 条并丢了
 #   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
 #   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
 # G-03: embedded fallback, used only when the rules file is unreadable / tampered.
@@ -262,12 +262,12 @@ INSTRUCTION_DIR_MARKERS = (".cursor/rules",)   # + basename endswith .mdc
 #   生成器：`output/_gen_fallback.py`；同步由 `ci/regression_gate.py` 的
 #   `j_fallback_matches_rules` 守着（只改主表不改这里 ⇒ 立刻红）。
 #   历史教训：此前这里是 17 条手工副本，不但少 20 条，连已在那 17 条里也缩水 ——
-#   DST-01 缺 mkfs / dd of=/dev/（13 条）、DST-04 缺 10 条、CTX-02 缺 6 条并丢了
+#   AN-009 缺 mkfs / dd of=/dev/（13 条）、AN-012 缺 10 条、AN-015 缺 6 条并丢了
 #   compound_nonprimary 门槛 ⇒ **降级那一刻保护腰斩，且判据只查单向子集所以天天绿**。
 #   要查某条 pattern 的来历：git log -S'<pattern>' -- hooks/pre_tool_use.py
 _FALLBACK = [
-    {"id": "SEC-01",
-     "an": "AN-001",
+    {"id": "AN-001",
+     "legacy_id": "SEC-01",
      "name": "Sensitive file read (.env)",
      "category": "secrets",
      "severity": "critical",
@@ -283,8 +283,8 @@ _FALLBACK = [
      "remediation_zh": "把 .env 移出 Agent 可读范围。确需变量时，手动复制具体几行。测试目录可在设置里登记",
      "label_zh": "读取密钥配置文件"
      },
-    {"id": "SEC-02",
-     "an": "AN-002",
+    {"id": "AN-002",
+     "legacy_id": "SEC-02",
      "name": "SSH key file read",
      "category": "secrets",
      "severity": "critical",
@@ -305,8 +305,8 @@ _FALLBACK = [
      "remediation_zh": "SSH 密钥不要放进 Agent 工作范围；改用 ssh-agent 转发",
      "label_zh": "读取 SSH 私钥"
      },
-    {"id": "SEC-03",
-     "an": "AN-003",
+    {"id": "AN-003",
+     "legacy_id": "SEC-03",
      "name": "Cloud credential file read",
      "category": "secrets",
      "severity": "critical",
@@ -326,8 +326,8 @@ _FALLBACK = [
      "remediation_zh": "改用云厂商 CLI 的短期令牌；确需操作时请手动执行",
      "label_zh": "读取云服务凭证文件"
      },
-    {"id": "SEC-04",
-     "an": "AN-004",
+    {"id": "AN-004",
+     "legacy_id": "SEC-04",
      "name": "Wallet/keystore file read",
      "category": "secrets",
      "severity": "critical",
@@ -351,8 +351,8 @@ _FALLBACK = [
      "remediation_zh": "钱包目录永远不要交给编码 Agent；必要时移入加密保管",
      "label_zh": "读取钱包或密钥库文件"
      },
-    {"id": "SEC-05",
-     "an": "AN-005",
+    {"id": "AN-005",
+     "legacy_id": "SEC-05",
      "name": "Browser data read",
      "category": "secrets",
      "severity": "critical",
@@ -377,8 +377,8 @@ _FALLBACK = [
      "remediation_zh": "浏览器配置目录包含登录态，应完全禁止 Agent 访问",
      "label_zh": "读取浏览器密码数据"
      },
-    {"id": "NET-01",
-     "an": "AN-006",
+    {"id": "AN-006",
+     "legacy_id": "NET-01",
      "name": "Shell network request",
      "category": "network",
      "severity": "warning",
@@ -408,8 +408,8 @@ _FALLBACK = [
      "remediation_zh": "核对目标域名。常用下载源放行：antinel domains add <域名>（进审计链）",
      "label_zh": "访问白名单外的域名"
      },
-    {"id": "NET-02",
-     "an": "AN-007",
+    {"id": "AN-007",
+     "legacy_id": "NET-02",
      "name": "Python network request",
      "category": "network",
      "severity": "warning",
@@ -433,8 +433,8 @@ _FALLBACK = [
      "remediation_zh": "核对请求目标地址后再放行",
      "label_zh": "代码里内置联网调用"
      },
-    {"id": "NET-03",
-     "an": "AN-008",
+    {"id": "AN-008",
+     "legacy_id": "NET-03",
      "name": "Non-whitelisted domain connection",
      "category": "network",
      "severity": "warning",
@@ -450,8 +450,8 @@ _FALLBACK = [
      "remediation_zh": "确认域名无害后放行：antinel domains add <域名>（进审计链）",
      "label_zh": "命令里出现陌生域名"
      },
-    {"id": "DST-01",
-     "an": "AN-009",
+    {"id": "AN-009",
+     "legacy_id": "DST-01",
      "name": "File deletion",
      "category": "destructive",
      "severity": "critical",
@@ -498,8 +498,8 @@ _FALLBACK = [
      "remediation_zh": "确认删除目标无误；构建产物类删除（如 node_modules）已在豁免清单",
      "label_zh": "删除文件或目录"
      },
-    {"id": "DST-02",
-     "an": "AN-010",
+    {"id": "AN-010",
+     "legacy_id": "DST-02",
      "name": "Write outside project root",
      "category": "destructive",
      "severity": "critical",
@@ -517,8 +517,8 @@ _FALLBACK = [
      "remediation_zh": "放行：antinel paths add <目录前缀>（进审计链）。确需更大范围用 antinel roots add <路径>。或把文件写进项目内",
      "label_zh": "写到项目目录之外"
      },
-    {"id": "DST-03",
-     "an": "AN-011",
+    {"id": "AN-011",
+     "legacy_id": "DST-03",
      "name": "Shell configuration modification",
      "category": "destructive",
      "severity": "critical",
@@ -534,8 +534,8 @@ _FALLBACK = [
      "remediation_zh": "启动脚本每次开终端都会执行，不要让 Agent 追加内容；确需修改请手动审查后进行",
      "label_zh": "修改终端启动配置"
      },
-    {"id": "DST-04",
-     "an": "AN-012",
+    {"id": "AN-012",
+     "legacy_id": "DST-04",
      "name": "Persistence mechanism",
      "category": "destructive",
      "severity": "critical",
@@ -573,8 +573,8 @@ _FALLBACK = [
      "remediation_zh": "持久化会在会话结束后反复执行，必须由你本人确认后手动操作",
      "label_zh": "设置开机自动启动"
      },
-    {"id": "DST-05",
-     "an": "AN-013",
+    {"id": "AN-013",
+     "legacy_id": "DST-05",
      "name": "Privilege escalation",
      "category": "destructive",
      "severity": "warning",
@@ -598,8 +598,8 @@ _FALLBACK = [
      "remediation_zh": "涉及提权的步骤建议你本人执行，不给 Agent 提权",
      "label_zh": "尝试提权操作"
      },
-    {"id": "CTX-01",
-     "an": "AN-014",
+    {"id": "AN-014",
+     "legacy_id": "CTX-01",
      "name": "Environment variable enumeration",
      "category": "context",
      "severity": "warning",
@@ -618,8 +618,8 @@ _FALLBACK = [
      "remediation_zh": "让 Agent 只打印它需要的具体变量名",
      "label_zh": "枚举全部环境变量"
      },
-    {"id": "CTX-02",
-     "an": "AN-015",
+    {"id": "AN-015",
+     "legacy_id": "CTX-02",
      "name": "Prompt injection pattern in instruction file",
      "category": "injection",
      "severity": "critical",
@@ -644,8 +644,8 @@ _FALLBACK = [
      "remediation_zh": "移除该技能并核查来源；不要运行其中的指令",
      "label_zh": "技能文件藏注入指令"
      },
-    {"id": "CTX-03",
-     "an": "AN-016",
+    {"id": "AN-016",
+     "legacy_id": "CTX-03",
      "name": "Invisible Unicode characters",
      "category": "injection",
      "severity": "critical",
@@ -668,8 +668,8 @@ _FALLBACK = [
      "remediation_zh": "清除隐形字符；出现在指令文件中默认按恶意处理",
      "label_zh": "检出隐形特殊字符"
      },
-    {"id": "CTX-04",
-     "an": "AN-017",
+    {"id": "AN-017",
+     "legacy_id": "CTX-04",
      "name": "Encoded payload",
      "category": "injection",
      "severity": "warning",
@@ -684,8 +684,8 @@ _FALLBACK = [
      "remediation_zh": "先解码审查再决定；正常说明文档极少内嵌长编码",
      "label_zh": "检出超长编码载荷"
      },
-    {"id": "CTX-05",
-     "an": "AN-018",
+    {"id": "AN-018",
+     "legacy_id": "CTX-05",
      "name": "Skill name mismatch",
      "category": "metadata",
      "severity": "warning",
@@ -701,8 +701,8 @@ _FALLBACK = [
      "remediation_zh": "改名保持一致；不一致通常意味着身份伪装或打包疏漏",
      "label_zh": "技能名与目录不符"
      },
-    {"id": "DST-06",
-     "an": "AN-019",
+    {"id": "AN-019",
+     "legacy_id": "DST-06",
      "name": "Remote script piped to interpreter",
      "category": "destructive",
      "severity": "critical",
@@ -723,8 +723,8 @@ _FALLBACK = [
      "remediation_zh": "先落盘查看内容再执行；确认来源可信",
      "label_zh": "下载脚本直接执行"
      },
-    {"id": "DST-07",
-     "an": "AN-020",
+    {"id": "AN-020",
+     "legacy_id": "DST-07",
      "name": "Irreversible git discard",
      "category": "destructive",
      "severity": "critical",
@@ -741,8 +741,8 @@ _FALLBACK = [
      "remediation_zh": "先 git stash 或提交，再执行",
      "label_zh": "丢弃工作区改动"
      },
-    {"id": "SEC-06",
-     "an": "AN-021",
+    {"id": "AN-021",
+     "legacy_id": "SEC-06",
      "name": "Secret literal in content",
      "category": "secrets",
      "severity": "critical",
@@ -767,8 +767,8 @@ _FALLBACK = [
      "remediation_zh": "改用环境变量或密钥管理服务，不要把明文密钥写进文件",
      "label_zh": "内容里出现明文密钥"
      },
-    {"id": "DST-08",
-     "an": "AN-022",
+    {"id": "AN-022",
+     "legacy_id": "DST-08",
      "name": "Permission/ownership destruction",
      "category": "destructive",
      "severity": "critical",
@@ -795,8 +795,8 @@ _FALLBACK = [
      "label_zh": "破坏文件权限属主",
      "note": "0.62.1 补 Windows 等价。原三条全是 Unix，而本条 severity=critical => block，故 Windows 上这条 block 规则从未生效过。Windows 侧按 Unix 侧同一口径收紧到「递归」：icacls /deny 直接拦（等价 chmod 000）；icacls /reset 必须同时带 /t 才拦（单文件重置继承是修权限的正当动作）；takeown 必须带 /r 才拦（单文件夺回属主是管理员日常）。exclude_patterns 四条只放行**单条**只读命令（末尾 [^;&|\\n]*$），链式命令不会被误放行 —— 起因是 _basic_hit 匹配「file_path ＋ 整条命令文本」，文档/日志里出现该词也会命中。"
      },
-    {"id": "DST-09",
-     "an": "AN-023",
+    {"id": "AN-023",
+     "legacy_id": "DST-09",
      "name": "Alternate data stream write (file path)",
      "category": "destructive",
      "severity": "critical",
@@ -812,8 +812,8 @@ _FALLBACK = [
      "remediation_zh": "ADS 在常规列表中不可见，且复制文件时随行，等于绕开评审；请改写为普通文件以便审查",
      "label_zh": "写入隐形备用数据流"
      },
-    {"id": "DST-10",
-     "an": "AN-024",
+    {"id": "AN-024",
+     "legacy_id": "DST-10",
      "name": "Alternate data stream write (command)",
      "category": "destructive",
      "severity": "critical",
@@ -827,14 +827,14 @@ _FALLBACK = [
        "\\bopen\\s*\\([^\\n)]{0,200}\\.[^\\\\/:\\s\\\"']{1,32}:(?!Zone\\.Identifier)[^\\\"'\\n]{0,200}[\\\"']\\s*,\\s*[\\\"'][wa]"],
      "exclude_patterns": [],
      "platforms": ["nt"],
-     "description": "Agent attempted to write an NTFS alternate data stream from a shell (redirect / -Stream / copy / open) -- the command-line half of DST-09",
+     "description": "Agent attempted to write an NTFS alternate data stream from a shell (redirect / -Stream / copy / open) -- the command-line half of AN-023",
      "description_zh": "从命令行写入 NTFS 备用数据流。重定向 / -Stream / copy / open 等命令通道都能做到。",
-     "remediation": "Same channel as DST-09 reached from a shell; the file written this way survives review. Use a normal file.",
-     "remediation_zh": "与 DST-09 同一通道的命令行写法，产物同样逃过审查；请改用普通文件",
+     "remediation": "Same channel as AN-023 reached from a shell; the file written this way survives review. Use a normal file.",
+     "remediation_zh": "与 AN-023 同一通道的命令行写法，产物同样逃过审查；请改用普通文件",
      "label_zh": "命令行写隐形数据流"
      },
-    {"id": "CTX-07",
-     "an": "AN-025",
+    {"id": "AN-025",
+     "legacy_id": "CTX-07",
      "name": "Inline base64-decode exec",
      "category": "injection",
      "severity": "critical",
@@ -850,10 +850,10 @@ _FALLBACK = [
      "remediation": "Decode and inspect the payload first; never let inline decoded code run directly.",
      "remediation_zh": "先解码审查内容；不要让解码后的代码直接执行",
      "label_zh": "解码后立即执行代码",
-     "note": "0.62.0：**形态错配修复**。旧版三条 pattern 全是 Python 语法（exec(...)/eval(...)），却挂在 apply_to_tools=[\"Bash\"] 上 —— 而 content_patterns 在 Bash 通道没有 file_targets 可审，**结构上恒不命中**（37 条里 15 条零命中，它是「形态错配」那一条）。改为 command_patterns 两条（双向覆盖 b64decode 与 exec/eval 的先后顺序）。★ 只保留「内联无管道」形态：`… | base64 -d | sh` 这类**管道**形态已由 DST-06 第 5/6 条 pattern 完整覆盖，本条不再重复 —— 两条都是 critical，重复只会让同一条命令被拦两次、报两个规则名。★ 必须 b64decode 与 exec/eval **同时出现**：`python -c \"print(base64.b64decode('aGk='))\"` 是正常解码，不该拦。"
+     "note": "0.62.0：**形态错配修复**。旧版三条 pattern 全是 Python 语法（exec(...)/eval(...)），却挂在 apply_to_tools=[\"Bash\"] 上 —— 而 content_patterns 在 Bash 通道没有 file_targets 可审，**结构上恒不命中**（37 条里 15 条零命中，它是「形态错配」那一条）。改为 command_patterns 两条（双向覆盖 b64decode 与 exec/eval 的先后顺序）。★ 只保留「内联无管道」形态：`… | base64 -d | sh` 这类**管道**形态已由 AN-019 第 5/6 条 pattern 完整覆盖，本条不再重复 —— 两条都是 critical，重复只会让同一条命令被拦两次、报两个规则名。★ 必须 b64decode 与 exec/eval **同时出现**：`python -c \"print(base64.b64decode('aGk='))\"` 是正常解码，不该拦。"
      },
-    {"id": "SEC-07",
-     "an": "AN-026",
+    {"id": "AN-026",
+     "legacy_id": "SEC-07",
      "name": "Clipboard read",
      "category": "secrets",
      "severity": "critical",
@@ -879,8 +879,8 @@ _FALLBACK = [
      "label_zh": "读取系统剪贴板",
      "note": "0.29.0 G-2：剪贴板此前 0 覆盖（实测 grep clipboard = 0 命中）。"
      },
-    {"id": "SEC-08",
-     "an": "AN-027",
+    {"id": "AN-027",
+     "legacy_id": "SEC-08",
      "name": "Screen capture",
      "category": "secrets",
      "severity": "warning",
@@ -907,8 +907,8 @@ _FALLBACK = [
      "label_zh": "截屏或录屏",
      "note": "0.29.0 G-3：截屏此前 0 覆盖。severity=warning —— 文档截图等正当用途存在，只提醒不拦。"
      },
-    {"id": "SEC-09",
-     "an": "AN-028",
+    {"id": "AN-028",
+     "legacy_id": "SEC-09",
      "name": "IM/mail local store read",
      "category": "secrets",
      "severity": "critical",
@@ -940,8 +940,8 @@ _FALLBACK = [
      "label_zh": "读取聊天邮件记录",
      "note": "0.29.0 G-7：此前 0 覆盖，且 _SCAN_EXCLUDE_PAT 反而把 wechat/weixin 排除。 ★0.29.0 收紧：裸 MSG\\d*\\.db 等改为要求路径分隔符前缀，避免命中项目里恰好同名的文件。 ★0.29.0 二次收紧：删除所有裸 DB 名（nt_msg/media_msg/MSG\\d* 等），改为 IM 产品目录锚定 —— 判据是「在 IM 客户端目录里」，不是「名字像 IM 的文件」；实测裸名会命中项目里恰好叫 MSG.db 的文件。"
      },
-    {"id": "SEC-10",
-     "an": "AN-029",
+    {"id": "AN-029",
+     "legacy_id": "SEC-10",
      "name": "Input-method user dictionary read",
      "category": "secrets",
      "severity": "warning",
@@ -967,8 +967,8 @@ _FALLBACK = [
      "label_zh": "读取输入法词库",
      "note": "0.29.0 G-11：此前 0 覆盖（本机实测 SogouPY 存在且仍在写）。 ★0.29.0 收紧：删除 `\\buserdict\\b`/`\\bUserDict\\b` —— UserDict 是 Python 标准库类名，读代码会误报。"
      },
-    {"id": "DST-11",
-     "an": "AN-030",
+    {"id": "AN-030",
+     "legacy_id": "DST-11",
      "name": "Write into cloud-sync directory",
      "category": "destructive",
      "severity": "critical",
@@ -984,8 +984,8 @@ _FALLBACK = [
      "label_zh": "写进云盘同步目录",
      "note": "0.29.0 G-8：新增 check `path_in_cloud_sync_dir`（在同步目录内 **且** 在项目外）。★ 为什么必须带'项目外'：项目本身放在 OneDrive 是常见配置，只看目录名会把全部正常写入都拦掉 —— 那正是「会误报的检查器用两次就没人信了」。"
      },
-    {"id": "NET-04",
-     "an": "AN-031",
+    {"id": "AN-031",
+     "legacy_id": "NET-04",
      "name": "Tunnel / covert channel",
      "category": "network",
      "severity": "warning",
@@ -1005,10 +1005,10 @@ _FALLBACK = [
      "remediation": "Tunnels bypass ordinary egress checks; confirm the destination before allowing.",
      "remediation_zh": "隧道会绕过常规出网检查；放行前先确认目标",
      "label_zh": "建立隐蔽出网通道",
-     "note": "0.29.0 G-5：单开一条规则，**不并入 NET-01** —— NET-01 的 exclude 含 `localhost`，而 `ngrok http localhost:3000` 正是最经典的隧道形态，并进去等于没拦。"
+     "note": "0.29.0 G-5：单开一条规则，**不并入 AN-006** —— AN-006 的 exclude 含 `localhost`，而 `ngrok http localhost:3000` 正是最经典的隧道形态，并进去等于没拦。"
      },
-    {"id": "MCP-01",
-     "an": "AN-032",
+    {"id": "AN-032",
+     "legacy_id": "MCP-01",
      "name": "Write to MCP config file",
      "category": "supply_chain",
      "severity": "warning",
@@ -1029,10 +1029,10 @@ _FALLBACK = [
      "remediation": "Verify the new server's source, command and url; remove any you do not recognize and rotate the related credentials.",
      "remediation_zh": "核对新增 server 的来源。不认识的一律移除，并轮换相关凭据",
      "label_zh": "MCP 配置被改动",
-     "note": "0.32.1：content_patterns 收紧为 Bash **写形态**（重定向/tee/cp/mv + 配置文件名）——旧版 `cat .mcp.json`（纯读取）也会命中，属于误报；读取可见性由 MCP-02（Read 通道）承担。★★ 0.62.0：**裸文件名 pattern 不许进本条的 file_patterns**。`file_patterns` 在 Bash 上匹配的是**整条命令文本**，把 `mcp.json` 的裸名写进去，`cat .cursor/mcp.json` 这类**纯读取**就会命中「写入 MCP 配置」的告警（0.62.0 第一次提交就是这么错的，判据 X3-a 当场红：`rc=0 ids=['MCP-01']`）。裸名的**写入**形态本来已由第 2 条 content_pattern（写动词 + mcp.json）覆盖，读取可见性由 MCP-02（Read 通道）承担 ⇒ 本条只留 4 条带点/带目录的路径，补齐裸名是补在了错的地方。"
+     "note": "0.32.1：content_patterns 收紧为 Bash **写形态**（重定向/tee/cp/mv + 配置文件名）——旧版 `cat .mcp.json`（纯读取）也会命中，属于误报；读取可见性由 AN-033（Read 通道）承担。★★ 0.62.0：**裸文件名 pattern 不许进本条的 file_patterns**。`file_patterns` 在 Bash 上匹配的是**整条命令文本**，把 `mcp.json` 的裸名写进去，`cat .cursor/mcp.json` 这类**纯读取**就会命中「写入 MCP 配置」的告警（0.62.0 第一次提交就是这么错的，判据 X3-a 当场红：`rc=0 ids=['AN-032']`）。裸名的**写入**形态本来已由第 2 条 content_pattern（写动词 + mcp.json）覆盖，读取可见性由 AN-033（Read 通道）承担 ⇒ 本条只留 4 条带点/带目录的路径，补齐裸名是补在了错的地方。"
      },
-    {"id": "MCP-02",
-     "an": "AN-033",
+    {"id": "AN-033",
+     "legacy_id": "MCP-02",
      "name": "Prompt injection in MCP tool description",
      "category": "supply_chain",
      "severity": "warning",
@@ -1058,8 +1058,8 @@ _FALLBACK = [
      "remediation_zh": "移除该 MCP 服务器并核查其来源；工具描述里的指令会在每次工具调用时进入模型上下文",
      "label_zh": "MCP 工具描述投毒"
      },
-    {"id": "MCP-03",
-     "an": "AN-034",
+    {"id": "AN-034",
+     "legacy_id": "MCP-03",
      "name": "Unaudited remote MCP server",
      "category": "supply_chain",
      "severity": "warning",
@@ -1080,8 +1080,8 @@ _FALLBACK = [
      "remediation_zh": "确认远程端点可信；优先本地 stdio server；远程定义变更不受你控制",
      "label_zh": "MCP 指向远程服务器"
      },
-    {"id": "MCP-04",
-     "an": "AN-035",
+    {"id": "AN-035",
+     "legacy_id": "MCP-04",
      "name": "Plaintext secret in MCP config env",
      "category": "supply_chain",
      "severity": "warning",
@@ -1108,8 +1108,8 @@ _FALLBACK = [
      "remediation_zh": "改用凭据引用/环境注入；已写入的密钥视为已泄露并轮换",
      "label_zh": "MCP 配置含明文密钥"
      },
-    {"id": "SEC-11",
-     "an": "AN-036",
+    {"id": "AN-036",
+     "legacy_id": "SEC-11",
      "name": "Canary file read",
      "category": "canary",
      "severity": "warning",
@@ -1125,8 +1125,8 @@ _FALLBACK = [
      "label_zh": "读取诱饵文件",
      "note": "0.31.0 F3：**故意只 alert 不拦** —— 拦下就观察不到外传链路；输出中出现 CANARY 标记由 post_tool_use 的 canaries_observed 既有机制接管。"
      },
-    {"id": "SLOP-01",
-     "an": "AN-037",
+    {"id": "AN-037",
+     "legacy_id": "SLOP-01",
      "name": "Typosquatted package name in install command",
      "category": "supply_chain",
      "severity": "warning",
@@ -1439,9 +1439,9 @@ def _policy_integrity(raw):
 
 def load_policy():
     """.psl/policy.json (cwd, then parent). Consumed fields (v1.2 semantics):
-      whitelist.domains   -> relax NETWORK rules only (NET-01/02 excludes, NET-03 whitelist)
+      whitelist.domains   -> relax NETWORK rules only (AN-006/AN-007 excludes, AN-008 whitelist)
       whitelist.paths     -> path prefixes that skip SECRETS rules (SEC-*), and since
-                             0.16.0 also release DST-02 (each release is audit-logged)
+                             0.16.0 also release AN-010 (each release is audit-logged)
       whitelist.commands  -> command prefixes that skip WARNING-level rules only
       global_settings.alert_threshold -> 'warning' (default) or 'critical': stderr notices
                              below the threshold are suppressed; logging and blocking unchanged
@@ -1479,7 +1479,7 @@ def load_policy():
                     # dir); when True, an audit write failure BLOCKS the call.
                     "fail_closed_on_audit_loss":
                         str((gs.get("fail_closed_on_audit_loss", False))).lower() == "true",
-                    # 0.24.0 (BUDGET-01): 预算键随 global_settings 原样透传
+                    # 0.24.0 (notice_budget): 预算键随 global_settings 原样透传
                     "settings": gs}
         except Exception:
             return dict(EMPTY_POLICY)
@@ -1538,7 +1538,7 @@ def path_whitelisted(file_path, project_root, prefixes):
     hook process and the host process (temp dirs, subst drives, etc.).
 
     0.20.1: the 0.20.0 version used realpath-ONLY which broke 5 tests (the
-    whitelist.paths release chain: F-06 + three DST-02 tests) because Windows
+    whitelist.paths release chain: F-06 + three AN-010 tests) because Windows
     symlink resolution in temp dirs didn't match between prefix and file.
     Reverted to lexical as the release criterion; realpath remains as a
     tool-level check in verify_chain.py."""
@@ -1585,10 +1585,10 @@ def path_whitelisted(file_path, project_root, prefixes):
         # 0.20.0 failure mode (8.3 short-name temp dirs breaking a realpath
         # PRIMARY) cannot recur: we still return True on any lexical or
         # realpath-form prefix match, and veto only when the file exists under
-        # a concrete realpath matching NEITHER form. The DST-02 boundary check
+        # a concrete realpath matching NEITHER form. The AN-010 boundary check
         # already resolves realpath for the same path, so no new sandbox
         # promise is being made. A veto simply falls through to the normal
-        # DST-02 block, which is audited like any other block -- recorded,
+        # AN-010 block, which is audited like any other block -- recorded,
         # never silent.
         rp = _rp_f
         if rp and rp.replace("\\", "/").lower() != file_path.replace("\\", "/").lower():
@@ -1620,7 +1620,7 @@ def command_whitelisted(command, prefixes):
 
 # ------------------------------------------------------ read-only command ctx --
 # A false positive we hit twice in one day: `grep 'Remove-Item' hooks/pre_tool_use.py`
-# was blocked by DST-01 and `grep 'schtasks' ...` by DST-04. The hook matches the
+# was blocked by AN-009 and `grep 'schtasks' ...` by AN-012. The hook matches the
 # command *text*, so merely MENTIONING a dangerous word inside a read-only command
 # is indistinguishable from executing it. Developers grep for these words constantly
 # -- including the people who build this -- so a hook that cannot tell mention from
@@ -1632,7 +1632,7 @@ def command_whitelisted(command, prefixes):
 # a *command_patterns* hit is downgraded from block to alert (still logged, still
 # counted in report.py). Everything else is untouched:
 #   * file/content/check/detection families still block. `grep -r sk- .env` is still
-#     blocked by SEC-01's file_patterns, not by this rule.
+#     blocked by AN-001's file_patterns, not by this rule.
 #   * file_patterns on Bash still see the command text (bash_extra), so reading a
 #     secret path is never downgraded.
 # Deliberate exclusions -- these are exactly how a mention becomes an execution:
@@ -1661,7 +1661,7 @@ md5sum sha1sum sha256sum shasum
 select-string get-content get-childitem get-item get-acl
 cd pwd
 type                              # 0.57.0（第 31 条）：`type f` 是 Windows 的 cat。
-                                  # 走本名单而不是靠 DST-01 的 exclude：名单这条路径带
+                                  # 走本名单而不是靠 AN-009 的 exclude：名单这条路径带
                                   # `$()`／`-delete`／`| xargs`／`sudo`／重定向 五项检查，
                                   # 单写一条 `^type` 的 exclude 会把这些一起绕过（本轮实测
                                   # `grep -r $(rm -rf x) .` 与 `find … -delete` 就是这样翻红的）。
@@ -1676,12 +1676,12 @@ _WRITE_FLAGS_BY_CMD = {
 # 判据仍以「引号外残留代码」为准（见 _strip_interpreter_code_literals），
 # 所以这里放宽的是**数据位置**，不是**执行位置**。
 _INTERPRETERS = frozenset("python python3 python3.13 python3.12 python3.11 py node nodejs perl ruby php bash sh zsh pwsh powershell".split())
-# ★ 判据不二次实现：删除类模式从 DST-01 的**同一真源**取。
-#   `_rules` / `_FALLBACK_RULES` 的 DST-01 条目在模块加载后即可用；
+# ★ 判据不二次实现：删除类模式从 AN-009 的**同一真源**取。
+#   `_rules` / `_FALLBACK_RULES` 的 AN-009 条目在模块加载后即可用；
 #   取不到时退回空集 —— 空集只会让 `readonly_command_context` 更保守（返回 False），
 #   方向安全，且 NOT_HARDCODED 检查项会盯住这个引用。
 def _dst_command_patterns():
-    """DST-01 的 command_patterns，取自规则表本身（唯一真源）。
+    """AN-009 的 command_patterns，取自规则表本身（唯一真源）。
 
     优先用磁盘规则表（load_rules 的结果），失败时退回内嵌兜底表 `_FALLBACK`。
     两条路都取不到时返回空集 —— 空集只让调用方更保守（见 readonly_command_context），
@@ -1690,7 +1690,7 @@ def _dst_command_patterns():
     out = []
     try:
         for r in load_rules():
-            if r.get("id") == "DST-01":
+            if r.get("id") == "AN-009":
                 out.extend(_patterns(r, "command_patterns"))
                 if out:
                     return out
@@ -1698,7 +1698,7 @@ def _dst_command_patterns():
         pass
     try:
         for r in _FALLBACK:
-            if r.get("id") == "DST-01":
+            if r.get("id") == "AN-009":
                 out.extend(_patterns(r, "command_patterns"))
                 if out:
                     return out
@@ -1995,7 +1995,7 @@ def _interp_mention_residue(seg):
 
     # ★★ 2026-09-28 负控发现的交互风险（必须写下来，否则下一个人会踩）：
     #    `python -c "from shutil import rmtree; rmtree('/x')"` —— `rmtree` 作为**裸函数名**
-    #    出现，而 DST-01 的模式是 `\bshutil\.rmtree\b`（要求带前缀）⇒ hit=False ⇒ 本条
+    #    出现，而 AN-009 的模式是 `\bshutil\.rmtree\b`（要求带前缀）⇒ hit=False ⇒ 本条
     #    本来就漏（**既有漏洞，非 D-3 引入**，已用对照实验证实）。
     #    但 D-3 会把 ro 从 False 变 True ⇒ **一旦将来把 `\brmtree\b` 补进模式表，
     #    本条会因 ro=True 而被降级放行** —— 修复一个漏洞却打开另一个。
@@ -2060,11 +2060,11 @@ def readonly_command_context(command):
             # ★★★ 0.33.2 (D-3a，2026-09-28 实测修正)：解释器分支**先问"能不能判"，
             # 再问"是不是提及"**。只有 python 系列可以判"提及"。
             #
-            # 原实现拿 `_dst_command_pats()`（**只含 DST-01 模式**）去回答"危险词还在不在"，
+            # 原实现拿 `_dst_command_pats()`（**只含 AN-009 模式**）去回答"危险词还在不在"，
             # 而这个问题**需要覆盖全部规则的 command_patterns**。实测反例：
             #     powershell -c "Set-Content -Path .\data.txt -Stream evil -Value x"
-            #   · 真正命中的是 **DST-10**（`Set-Content … -Stream`）
-            #   · 但 DST-01 模式在残留里命中 0 ⇒ 被误判为"只读提及" ⇒ 上层把 DST-10 的
+            #   · 真正命中的是 **AN-024**（`Set-Content … -Stream`）
+            #   · 但 AN-009 模式在残留里命中 0 ⇒ 被误判为"只读提及" ⇒ 上层把 AN-024 的
             #     block 降级成 alert（`and ro_cmd` 那一句）⇒ 套件 FAIL
             # ⇒ **窄判据被用来裁决宽问题**。这是"判据不许二次实现"的镜像错误。
             #
@@ -2096,7 +2096,7 @@ def _normalize_path(p):
     """Windows 解析路径时会剥掉每个分段的尾部空格与点。
 
     于是 `Read .env `（尾部一个空格）在规则眼里是 `.env `、`\\.env$` 匹配不上，
-    但操作系统真正打开的是 `.env`——实测一个空格就绕过了 SEC-01（2026-09-10）。
+    但操作系统真正打开的是 `.env`——实测一个空格就绕过了 AN-001（2026-09-10）。
     匹配前按同一规则剥掉，让规则看到的就是系统将要打开的那个路径。
 
     POSIX 下尾随空格是合法文件名，不做剥离（os.name != "nt" 直接返回原值）。
@@ -2305,7 +2305,7 @@ def _literals(pat):
     #   1. character classes -- `[A-Za-z0-9+/=]{200,}` tokenises to {'z0','za'}, so a
     #      base64 blob containing neither is never tested by the base64 rule at all;
     #   2. escape sequences -- `\brm\b` tokenises to {'brm'} (the \b is read as a
-    #      letter), which made DST-01 miss on every command.
+    #      letter), which made AN-009 miss on every command.
     # Both are *under*-approximations of what could match. Strip them and what is left
     # is a conservative literal set: a miss here costs speed, never detection.
     s = _CLASS_RE.sub(" ", pat)
@@ -2374,7 +2374,7 @@ def _applies(rule, tool):
 # Motive: an NTFS alternate data stream (path:stream) is ordinary text on POSIX,
 # where "file.txt:stream" is a LEGAL FILENAME. An ungated rule would turn the
 # Linux/macOS CI cells into a false-positive machine (measured: this is the
-# reason DST-09/DST-10 are nt-only rather than pattern-narrowed).
+# reason AN-023/AN-024 are nt-only rather than pattern-narrowed).
 _HOST_PLATFORM = "nt" if os.name == "nt" else "posix"
 
 
@@ -2664,10 +2664,10 @@ def _is_delete_rule(rule):
     """这条规则是不是**文件删除**类 —— 只有它才走删除许可两票。
 
     ★ 判据取自**数据**、不硬编码 id：本仓的「删除类命令模式」只有一个真源
-      （`_dst_command_patterns()`：DST-01 的 `command_patterns`）。谁的
+      （`_dst_command_patterns()`：AN-009 的 `command_patterns`）。谁的
       `command_patterns` 与它逐条相同，谁就是那条删除规则。
     ★★ 为什么**不能**用 `category == "destructive"` 一刀切（设计期抓到的真坑）：
-      DST-02…DST-11 全是 destructive 类，但它们管的是「写项目外 / 云盘同步 /
+      AN-010…AN-030 全是 destructive 类，但它们管的是「写项目外 / 云盘同步 /
       持久化 / 提权 / git 丢弃」，**与文件删除无关**。若一并门控，
       `rm -rf dist && echo x > ~/OneDrive/y` 会因为「删除产物」拿到删除许可，
       ⇒ **顺手把云盘写入规则也放行了** —— 一个许可开两扇门，正是本仓最忌的形状。
@@ -2748,14 +2748,14 @@ def _first_hit(patterns, texts):
 # ══════════════════════════════════════════════════════════════════════════════
 # ★★★ 0.57.0（第 33 条）：占位值 ≠ 秘密 —— **按命中片段判定**
 # ══════════════════════════════════════════════════════════════════════════════
-# 实测（output/tests/0.57.0/d33_sec06.log，本仓自扫描）：SEC-06 命中 227 条，
+# 实测（output/tests/0.57.0/d33_sec06.log，本仓自扫描）：AN-021 命中 227 条，
 # 逐条归类后**没有一条是真密钥** ——
 #   193 条 AKIAIOSFODNN7EXAMPLE（AWS 官方文档的标准示例值）
 #    31 条 -----BEGIN OPENSSH PRIVATE KEY-----（后面一个 base64 字符都没有）
 #     3 条 AKIACCCC…/AKIAEEEE…/sk-FFFF…（测试夹具的退化形状）
 # 而规则里本来就写着两条豁免，为什么没生效：`exclude_patterns` 在这条路径上是
 # 拿 [command, file_path, content, url] **整篇**匹配的，而 scripts/scan.py 只拿
-# **路径**匹配 ⇒ 同一个豁免两处不同口径，scan 侧 0 条生效。这与 DST-01 的
+# **路径**匹配 ⇒ 同一个豁免两处不同口径，scan 侧 0 条生效。这与 AN-009 的
 # 双层转义同族：**写进配置但不可能生效的豁免**。
 # ⇒ 改法：占位值单独一个键 `placeholder_patterns`，只跟**命中的那一段**比。
 #   不碰 exclude_patterns 的语义（它对别的规则还担着路径豁免的职责），
@@ -2821,13 +2821,13 @@ def _first_live_hit(rule, patterns, texts):
 # the project root was blocked even for the user's own second workspace -- and the
 # only escape was uninstalling the hooks, which is worse than any false positive.
 #
-# workspace_roots widens the boundary, not the rule: DST-02 still blocks every
+# workspace_roots widens the boundary, not the rule: AN-010 still blocks every
 # write outside the declared set. Three constraints make it safe:
 #   1. the file lives at host level (~/.workbuddy/antinel.json), NOT under .psl/ --
 #      so an agent that wants to widen it must reach outside the project, and that
 #      reach is always recorded (0.19.2: recorded is all it ever was -- see
 #      is_host_config_path() for the measurement that falsified the older claim
-#      that DST-02 *blocks* this file; it only ever blocked one of the two
+#      that AN-010 *blocks* this file; it only ever blocked one of the two
 #      channels, while also blocking the user's own delegated maintenance);
 #   2. root-like, relative, ".." and wildcard entries are rejected at load time --
 #      otherwise one entry ("C:\") re-creates the A12 failure mode where a single
@@ -2927,7 +2927,7 @@ def _safe_realpath(p):
 
 def _host_config_files():
     """Realpaths of the host-level config files Antinel itself reads. NOT their
-    parent directories -- only these exact files are released by DST-02.
+    parent directories -- only these exact files are released by AN-010.
     Relative entries are skipped so a malformed ANTINEL_CONFIG cannot point the
     release at whatever the hook's cwd happens to be."""
     out = []
@@ -2946,16 +2946,16 @@ def _host_config_files():
 def is_host_config_path(path):
     """True when `path` IS one of the host-level config files Antinel reads.
 
-    0.19.2. DST-02 used to block Write/Edit on this file, on the theory recorded
+    0.19.2. AN-010 used to block Write/Edit on this file, on the theory recorded
     above: "an agent that wants to widen it must write outside the project, which
-    DST-02 itself blocks, so the config is protected by the rule it configures".
+    AN-010 itself blocks, so the config is protected by the rule it configures".
     Measured 2026-09-14, that theory did not hold:
 
       - the Bash channel never blocks an out-of-root path (dst02_bash_path_suspect
         is alert-only, by design), so the block was one-sided;
       - the Bash channel only scans *literal* absolute paths in the command text,
         so `python -c "...expanduser('~')..."` reached the same file with no
-        DST-02 signal at all (audit: decision=allow, rules_hit=[]).
+        AN-010 signal at all (audit: decision=allow, rules_hit=[]).
 
     Net effect: the block stopped the user's own delegated maintenance (the host
     config is not writable by the tool that is supposed to maintain it) while
@@ -3025,7 +3025,7 @@ def check_outside_root(path, root, extra_roots=()):
         return False
 
 
-# 0.17.0 (P-A4): the Bash channel has no file_path, so DST-02's check never
+# 0.17.0 (P-A4): the Bash channel has no file_path, so AN-010's check never
 # fires there -- a script that writes/deletes outside the root is invisible to
 # the boundary check (measured 2026-09-11: six shapes, all through). We do NOT
 # parse script contents (that would be a sandbox promise we cannot keep -- see
@@ -3117,11 +3117,11 @@ def _ctx03_from_codepoints(cps):
 
 
 def _ctx03_table(rule=None):
-    """CTX-03 码点表的**唯一来源**。
+    """AN-016 码点表的**唯一来源**。
 
     规则里写了 codepoints 就用它；只写了 ranges 的旧自定义规则按「一律 critical」
     翻译成同一张表（仍然只走一条判定路径，不另开分支）；两者都没有（规则集不是
-    我们的默认集）就退到 _FALLBACK 里那条 CTX-03 —— 那份是与主表全等的生成副本，
+    我们的默认集）就退到 _FALLBACK 里那条 AN-016 —— 那份是与主表全等的生成副本，
     由回归闸门的 D-49 守着。
     """
     if rule:
@@ -3167,7 +3167,7 @@ def _invisible_re(table):
 
 
 def scan_invisible(text, table=None, surface="content"):
-    """CTX-03. 返回 (说明, 级别) 或 None。
+    """AN-016. 返回 (说明, 级别) 或 None。
 
     A13: was a per-character Python loop -- 5MB of content cost 6.9s here alone,
     which is most of the 10s hook budget (and a timeout means the tool runs).
@@ -3199,7 +3199,7 @@ def _ctx03_surface(file_path):
     return "instruction" if _is_instruction_file(file_path) else "content"
 
 
-# ------------------------------ CTX-05: skill 名与目录名 ----------------------
+# ------------------------------ AN-018: skill 名与目录名 ----------------------
 def _edit_distance(a, b):
     """Levenshtein。只用于「名字近似但不相等」，名字很短，不需要优化。"""
     if a == b:
@@ -3216,9 +3216,9 @@ def _edit_distance(a, b):
 
 
 def _name_mismatch_level(name, dname, rule=None):
-    """CTX-05 的级别看「差多少」；相等返回空串（不报）。
+    """AN-018 的级别看「差多少」；相等返回空串（不报）。
 
-    ★★ 0.57.0（第 34 条）：实测本仓 38 条 CTX-05 **全部**是同一形态 ——
+    ★★ 0.57.0（第 34 条）：实测本仓 38 条 AN-018 **全部**是同一形态 ——
        `name: antinel-security` 而目录叫 `b` / `psl` / `dai-std`，
        那是 git worktree、克隆目录、解压目录的名字。
        拿「目录名 == name」一律判可疑，等于**每次解压/克隆别人的 skill 都报一次**，
@@ -3240,7 +3240,7 @@ def _name_mismatch_level(name, dname, rule=None):
     return "info"
 
 
-# ------------------------------------------------------------ NET-03 domains --
+# ------------------------------------------------------------ AN-008 domains --
 def check_domains(cmd, whitelist):
     hosts = []
     text = cmd or ""
@@ -3258,7 +3258,7 @@ def check_domains(cmd, whitelist):
     return hosts
 
 
-# ------------------------------------------------------------ CTX-05 metadata --
+# ------------------------------------------------------------ AN-018 metadata --
 def frontmatter_name(text):
     m = re.search(r"^---\s*\n(.*?)\n---", text or "", re.DOTALL)
     if not m:
@@ -3663,9 +3663,9 @@ def log_event(rec, mirror=False):
         except Exception:
             pass
     # A15: `.psl/audit/` is inside the project, so `rm -rf .psl` -- whitelisted by
-    # DST-01 -- erases the record that says it happened. The mirror lives at host
+    # AN-009 -- erases the record that says it happened. The mirror lives at host
     # level, outside every project; an agent cannot write there without tripping
-    # DST-02. Not a duplicate for report.py: report reads .psl/audit only, so this
+    # AN-010. Not a duplicate for report.py: report reads .psl/audit only, so this
     # is forensics, not a second source of truth. ANTINEL_HOST_MIRROR=0 opts out
     # (regression suite must not write to the developer's home).
     if not mirror:
@@ -3788,7 +3788,7 @@ def _notice_budget_trace(res):
     rid = str(res.get("rule_id") or "?")
     # ★★ 0.62.0（2026-10-30）：**字段拆义**（铁律 44「同值不同义」）。
     #   `notice_gate(rule_id, snippet)` 的第一个参数历史上既装真规则号
-    #   （SLOP-01 / CTX-01 …）又装**分桶 key**（`AN-010-BASH` —— 同一规则
+    #   （AN-037 / AN-014 …）又装**分桶 key**（`AN-010-BASH` —— 同一规则
     #   AN-010 的 Bash 提醒通道，见下方 `notice_gate("AN-010-BASH", cand)`）。
     #   直接把 raw 写进 `rule_id`，账本里就出现了 390 条「规则库里没有的规则号」，
     #   看起来像第 38 条规则，**实际是分桶名占了字段名**。
@@ -3940,11 +3940,11 @@ def emit_block(rule_id, reason, host_tag="generic", deny_mode="dual", timing=Non
 # ------------------------------------------------- G-06: multi-hit collection --
 # ------------------------------------- 0.29.0 (G-8): cloud-sync directories ----
 # 威胁：把文件写进云盘同步目录，**同步客户端会替你把文件传上云** —— 这一步
-# 不经钩子、不经命令行、不需要任何网络命令，常规出网检测（NET-01/02）看不见。
+# 不经钩子、不经命令行、不需要任何网络命令，常规出网检测（AN-006/AN-007）看不见。
 #
-# ★ 为什么必须有这条规则，而不是靠 DST-02：DST-02 拦的是"写项目外"。用户把
-#   `whitelist.paths` 一开（放行某个前缀），DST-02 就被释放了，写进云盘目录也
-#   照样放行、且只有一条笼统的 allow 记录。DST-11 把"写进云盘"这件事**单独命名**，
+# ★ 为什么必须有这条规则，而不是靠 AN-010：AN-010 拦的是"写项目外"。用户把
+#   `whitelist.paths` 一开（放行某个前缀），AN-010 就被释放了，写进云盘目录也
+#   照样放行、且只有一条笼统的 allow 记录。AN-030 把"写进云盘"这件事**单独命名**，
 #   于是无论路径是否在白名单里，这个动作都有名字、有理由。
 #
 # ★ 为什么必须带"项目外"这个条件：把项目放在 OneDrive 是极常见的配置。
@@ -4017,10 +4017,10 @@ _URL_TOK = re.compile(r"\b(?:https?|ftps?|wss?)://[^\s'\"`<>|;)]+", re.IGNORECAS
 # ══════════════════════════════════════════════════════════════════
 # 实测（output/_rules_fp2.py，2026-10-26 夜里）：21 条日常命令里
 #   **12 条被 critical 拦下**，全是同一个形状 —— 文件名出现在「说话的地方」：
-#     `git commit -m "docs: add crontab guide"`      → DST-04 block
-#     `grep -rn "credentials.json" docs/`            → SEC-03 block
-#     `cat docs/id_rsa_rotation.md`                  → SEC-02 block
-#     `sed -n '1,20p' docs/crontab.md`               → DST-04 block
+#     `git commit -m "docs: add crontab guide"`      → AN-012 block
+#     `grep -rn "credentials.json" docs/`            → AN-003 block
+#     `cat docs/id_rsa_rotation.md`                  → AN-002 block
+#     `sed -n '1,20p' docs/crontab.md`               → AN-012 block
 #   根因：`_basic_hit` 在 Bash 通道上把 `file_patterns` 与 `content_patterns`
 #   拿去匹配**整条命令文本**。于是「提到这个词」＝「读了那个文件」。
 #   ★ 这不是新发现：同型的修法在 0.57.0（第 30 条 `_strip_net_urls`）已经用过一次
@@ -4086,7 +4086,7 @@ def _collapse_empty_quotes(s):
     """删掉空引号对 —— shell 里 `x""y` 与 `x''y` 就是 `xy`。
 
     ★ 这条同时治两个方向（实测同一条命令两个方向都在）：
-      漏报：`cat .e""nv` 绕过 SEC-01；误报：`git check-ignore .e""nv` 也不命中。
+      漏报：`cat .e""nv` 绕过 AN-001；误报：`git check-ignore .e""nv` 也不命中。
     ★ 只删**成对且紧邻**的空引号，不碰有内容的引号串（那可能真是路径）。
     """
     if not s:
@@ -4135,7 +4135,7 @@ def _strip_net_urls(s):
     ★ 为什么非有不可（第 30 条实测）：`_basic_hit` 在 Bash 通道上把
       `file_patterns` 拿去匹配**整条命令文本**，于是
       `curl -s https://api.example.com/wallets?limit=10`
-      被 SEC-04「钱包/密钥库**文件读取**」拦下 —— URL 里的路径段被当成了文件路径。
+      被 AN-004「钱包/密钥库**文件读取**」拦下 —— URL 里的路径段被当成了文件路径。
       `curl https://explorer.example.com/api/v1/wallets/0xabc`、
       `python -c "requests.get('https://x/wallets')"` 同理。
     ★ 已知边界：URL 出现在**引号内的路径参数**（`curl -o "https://x/y"`）也会被剥，
@@ -4152,8 +4152,8 @@ def _basic_hit(rule, command, file_path, content, url, bash_extra, file_targets,
 
     ★ 为什么必须抽出来：放行留痕（sec_wl_log）与主命中判定问的是同一个问题
     ——"这条规则本来会不会命中"。E-1 之前两处各写一遍，留痕只查 file_patterns、
-    主判定查三通道 ⇒ 不同源 ⇒ SEC-09/10（靠 command_patterns 命中）与
-    SEC-01（靠 content_patterns 命中）被路径白名单放行却**零留痕**，静默后门没堵死。
+    主判定查三通道 ⇒ 不同源 ⇒ AN-028/AN-029（靠 command_patterns 命中）与
+    AN-001（靠 content_patterns 命中）被路径白名单放行却**零留痕**，静默后门没堵死。
     **重复实现必然漂移**，故抽成唯一实现，两边共用。
     """
     # ★ 0.57.2：command_patterns 同样看**净化后**的文本 ——「提交说明里提到 crontab」
@@ -4168,7 +4168,7 @@ def _basic_hit(rule, command, file_path, content, url, bash_extra, file_targets,
     _c_pats = _patterns(rule, "content_patterns")
     # ★★ 2026-10-25（第 30 条）：Bash 通道上 **URL 不是文件路径**。
     #   `file_patterns` 在 Bash 上是对**整条命令文本**匹配的（`bash_extra`），
-    #   于是 `curl -s https://api.example.com/wallets?limit=10` 被 SEC-04
+    #   于是 `curl -s https://api.example.com/wallets?limit=10` 被 AN-004
     #   「钱包/密钥库**文件读取**」拦下 —— URL 的路径段被当成了文件路径。
     #   实测语料（output/_sec45_corpus.py）10 条 NEG 里 4 条是这个原因。
     #   ★ 只剥网络 scheme：`file:///home/u/.ethereum/x` 指向真实路径，剥掉就是漏。
@@ -4182,18 +4182,18 @@ def _basic_hit(rule, command, file_path, content, url, bash_extra, file_targets,
     # ★★ 0.57.0 (B-1)：路径命中**不再一律定案**。
     #   只有「带 content_patterns 且类型是 file_content」的规则，路径才是**准入资格**，
     #   真正命中取决于内容面 —— 否则 content_patterns 是**死代码**。
-    #   改前实测（output/tests/0.57.0/mcp-content-before.json）：MCP-02/03/04 的
+    #   改前实测（output/tests/0.57.0/mcp-content-before.json）：AN-033/AN-034/AN-035 的
     #   正控 6/6「命中」但 `file_content` 通道 **0** 次、全是 `path` ⇒ 等价于
     #   「碰 .mcp.json 就响三条」，而干净配置同样响（负控误命中 6/8）。
-    #   ★ 为什么 tool_call 三条（SEC-01 / MCP-01 / SEC-11）**不改**：它们的语义就是
-    #     「这个文件被碰了」（MCP-01 的标题就是「配置文件被写入或修改」），内容面只是
+    #   ★ 为什么 tool_call 三条（AN-001 / AN-032 / AN-036）**不改**：它们的语义就是
+    #     「这个文件被碰了」（AN-032 的标题就是「配置文件被写入或修改」），内容面只是
     #     覆盖「拿不到 file_path 的 Bash 场景」的补充 ⇒ 路径命中即命中是对的。
     _content_gate = bool(_c_pats) and rtype == "file_content"
     if _path_hit and not _content_gate:
         return (_path_hit, "path")
     if _path_hit is None and _content_gate and _fp_pats:
-        # 内容类规则只审其 file_patterns 指向的文件（MCP-02/03/04 只审 MCP 配置）；
-        # 不带 file_patterns 的（CTX-02/04）由下面的 target 限定审哪类文件。
+        # 内容类规则只审其 file_patterns 指向的文件（AN-033/AN-034/AN-035 只审 MCP 配置）；
+        # 不带 file_patterns 的（AN-015/AN-017）由下面的 target 限定审哪类文件。
         # ★ 用同一个 `_path_hit`，不再二次 `_first_hit` —— 上一版这里重算了一遍
         #   且只比 `[file_path]`（漏 bash_extra），是同一事实的第三份实现。
         return None
@@ -4203,14 +4203,14 @@ def _basic_hit(rule, command, file_path, content, url, bash_extra, file_targets,
             target = rule.get("target")
             # 0.31.0 (F1): target semantics -- "instruction_files" matches SKILL.md
             # plus the instruction set; "all_text_files" stays a superset of
-            # everything (CTX-03 keeps covering instruction files).
+            # everything (AN-016 keeps covering instruction files).
             compound = bool(rule.get("compound_nonprimary"))
             sf = int(rule.get("specific_from") or 0)
             for spec, text in file_targets:
                 # ★★ 0.57.0 (B-2)：**有 file_patterns 时 target 不再二次限定**。
                 #   路径准入已由 file_patterns 精确完成，再叠一层 target 就是第二把尺子，
                 #   且必然漂移 —— 实测 target="mcp_config" 既不等于 spec 的任何取值，
-                #   也不在旧白名单里 ⇒ MCP-02/03/04 **即使走到内容面也恒不命中**
+                #   也不在旧白名单里 ⇒ AN-033/AN-034/AN-035 **即使走到内容面也恒不命中**
                 #   （这是 MCP 三条的第二道死门，此前从未被记录）。
                 #   scan.py 侧用的是黑名单式（只拦 SKILL.md / instruction_files），
                 #   hook 侧用白名单式 ⇒ 同一件事两把尺子。统一为：
@@ -4266,16 +4266,16 @@ def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=Non
       command_patterns  -> command, url
       file_patterns     -> file_path, plus command for Bash (cat .env, cat ~/.ssh/id_rsa)
       content_patterns  -> tool_call rules: content, command, url
-                           file_content rules (CTX-02/04): text of target files
-      check             -> path_outside_project_root (DST-02) | domain_whitelist (NET-03)
-                           | path_in_cloud_sync_dir (DST-11, 0.29.0 G-8)
-      detection         -> character_code_scan (CTX-03): command, path, content, file text
-      type metadata_check (CTX-05): SKILL.md frontmatter name vs directory name
+                           file_content rules (AN-015/AN-017): text of target files
+      check             -> path_outside_project_root (AN-010) | domain_whitelist (AN-008)
+                           | path_in_cloud_sync_dir (AN-030, 0.29.0 G-8)
+      detection         -> character_code_scan (AN-016): command, path, content, file text
+      type metadata_check (AN-018): SKILL.md frontmatter name vs directory name
     Policy (F-06, spec C-05): whitelist.paths skips SECRETS rules for matching paths
-    and, since 0.16.0, also releases DST-02 for matching paths (a legitimate write
+    and, since 0.16.0, also releases AN-010 for matching paths (a legitimate write
     to the platform's own agent directory must be reachable without editing the
-    policy first) -- but a policy-released DST-02 is recorded via path_wl_log, so
-    the allow is traceable in report.py, never silent. Since 0.19.2 DST-02 also
+    policy first) -- but a policy-released AN-010 is recorded via path_wl_log, so
+    the allow is traceable in report.py, never silent. Since 0.19.2 AN-010 also
     releases Antinel's own host-level config files, for the same reason and under
     the same obligation: recorded via host_cfg_log. See is_host_config_path().
     whitelist.commands skips WARNING-level rules for matching command prefixes;
@@ -4305,12 +4305,12 @@ def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=Non
         detection = rule.get("detection") or ("character_code_scan" if rtype == "invisible_unicode" else None)
         if path_wl and rule.get("category") == "secrets" and rule.get("file_patterns"):
             # 0.29.0 (D-2)：**路径白名单只开"靠路径判断"的那扇门**。
-            # 旧写法是 `category == "secrets"` 一刀切 ⇒ 读剪贴板(SEC-07)、截屏(SEC-08)、
-            # 内容里的密钥字面量(SEC-06) 这三条**与路径毫无关系**的规则，只因同一次调用
+            # 旧写法是 `category == "secrets"` 一刀切 ⇒ 读剪贴板(AN-026)、截屏(AN-027)、
+            # 内容里的密钥字面量(AN-021) 这三条**与路径毫无关系**的规则，只因同一次调用
             # 顺带带了一个白名单内的 file_path 就被一并放行 —— 实测 `pbpaste` 因此静默通过。
             # 通行证不该是万能卡：它只能开它真正对应的那扇门。
             # 0.29.0 (D-1)：放行**必须留痕**。此处是全仓最后一个静默放行通道 ——
-            # 同文件另五处释放路径（DST-02 / DST-11 / exclude_patterns / workspace_roots /
+            # 同文件另五处释放路径（AN-010 / AN-030 / exclude_patterns / workspace_roots /
             # host_cfg）各有专门事件类型并镜像到宿主级，只有这一处什么都不写，
             # 于是账本把它记成了"压根没命中"（rules_hit=[], severity="none"）。
             # ★ 不是新增规矩：ci/drift_audit.py 的 A5 早就判"放行成功 且 留痕"，长期红。
@@ -4320,8 +4320,8 @@ def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=Non
                 # 而实际只有 1 条命中 —— 那就是用一个假数字换另一个假数字，
                 # 与本次要修的毛病（账本不诚实）是同一回事。
                 # ★★ 0.29.0 (E-1)：判据必须与主判定**同源**（同一 `_basic_hit`）。
-                # 旧写法只查 file_patterns ⇒ SEC-09/10（靠 command_patterns 命中）、
-                # SEC-01（靠 content_patterns 命中）被放行却**零留痕** ⇒ 静默后门没堵死。
+                # 旧写法只查 file_patterns ⇒ AN-028/AN-029（靠 command_patterns 命中）、
+                # AN-001（靠 content_patterns 命中）被放行却**零留痕** ⇒ 静默后门没堵死。
                 # 这是「改了一半」第四次复发；根治办法是不重写判据，而是共用它。
                 if _basic_hit(rule, command, file_path, content, url, bash_extra,
                               file_targets, rtype, detection):
@@ -4405,7 +4405,7 @@ def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=Non
                     if path_wl_log is not None:
                         path_wl_log.append(file_path)
                 elif path_wl and file_path:
-                    # 0.16.0 (P1-7): whitelist.paths releases DST-02 for the
+                    # 0.16.0 (P1-7): whitelist.paths releases AN-010 for the
                     # listed prefixes (e.g. the platform's own agent directory).
                     # Deliberate: recorded, never silent.
                     if path_wl_log is not None:
@@ -4434,11 +4434,11 @@ def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=Non
             bad = check_domains((command + " " + url).strip(), _field(rule, "whitelist_domains", []) or [])
             if bad:
                 hit = (", ".join(bad), "domain_whitelist")
-        # 4b. 0.29.0 (G-8, DST-11): 写进云盘同步目录（且项目外）。
+        # 4b. 0.29.0 (G-8, AN-030): 写进云盘同步目录（且项目外）。
         #     三个条件同时成立才算：①路径命中已知同步目录名 ②在项目根之外
         #     ③未被 whitelist.paths 显式放行（放行也留痕，不静默）。
         #     Bash 通道没有 file_path，用 _bash_absolute_paths 从命令文本里取显式绝对路径
-        #     —— 与 DST-02 的 Bash 分支同一套提取，避免"Bash 走空"。
+        #     —— 与 AN-010 的 Bash 分支同一套提取，避免"Bash 走空"。
         if hit is None and check == "path_in_cloud_sync_dir":
             _cands = [file_path] if file_path else []
             if tool_name == "Bash" and command:
@@ -4455,7 +4455,7 @@ def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=Non
                     continue        # 用户显式放行 → 记录，不拦
                 hit = (_sync, "path_in_cloud_sync_dir")
                 break
-        # 5. invisible Unicode (CTX-03): command / path / instruction / content
+        # 5. invisible Unicode (AN-016): command / path / instruction / content
         #    ★ 0.57.0（第 32 条）：级别逐码点逐面，全部来自规则里的 codepoints 表；
         #    这里不再传 ranges / whitelist_chars（旧自定义规则由 _ctx03_table 统一翻译）。
         if hit is None and detection == "character_code_scan":
@@ -4468,7 +4468,7 @@ def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=Non
                 if found:
                     hit = (found[0], "invisible_" + surface, {"level": found[1]})
                     break
-        # 6. metadata (CTX-05): SKILL.md frontmatter name == directory name
+        # 6. metadata (AN-018): SKILL.md frontmatter name == directory name
         #    ★ 0.57.0（第 34 条）：级别按「差多少」分档，见 _name_mismatch_level。
         if hit is None and rtype == "metadata_check":
             for spec, text in file_targets:
@@ -4484,7 +4484,7 @@ def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=Non
         if hit is None:
             continue
         sev = (rule.get("severity") or "warning").lower()
-        # ★ 0.57.0（第 32 条）：逐命中级别可以覆盖规则级 severity —— CTX-03 用它把
+        # ★ 0.57.0（第 32 条）：逐命中级别可以覆盖规则级 severity —— AN-016 用它把
         #   同一个 U+202E 在普通正文/指令面/路径上分成不同档。覆写要能被看出来，
         #   否则报告里「规则写着 critical 却只 alert」会被当成漏判去查。
         _lvl = hit[2].get("level") if len(hit) > 2 and isinstance(hit[2], dict) else None
@@ -4493,7 +4493,7 @@ def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=Non
         action = (rule.get("action") or ("block" if sev == "critical" else "alert")).lower()
         entry = {"rule_id": rule.get("id", "?"),
                  # 0.63.0 改名：号不再承载语义。`net_mode=block` 的升级判定原来靠
-                 # `rule_id.startswith("NET")`，改名后一律是 `AN-`，那样判会**静默失效**
+                 # 「规则号以 NET 开头」，改名后一律是 `AN-`，那样判会**静默失效**
                  # ⇒ 把 category 带进命中字典，让升级判定读字段而不是读号。
                  "category": rule.get("category", ""),
                  "severity": sev,
@@ -4556,7 +4556,7 @@ def file_state_snapshot(path):
         return {"hash": "unreadable"}
 
 
-# ------------------------------------------------------------ BUDGET-01 ----
+# ------------------------------------------------------------ notice_budget ----
 def _budget_hit(tool_name, session_id, policy):
     """0.24.0 (三问三答第三步: 成本即策略). 预算执法基于 post 钩子维护的
     token 累计事实（.psl/state/session_usage.json）；状态缺失即不执法
@@ -4592,7 +4592,7 @@ def _budget_hit(tool_name, session_id, policy):
     block_mode = str(gs.get("budget_block", "false")).lower() == "true"
     write_channel = tool_name in WRITE_TOOLS or tool_name == "Bash"
     snippet = "%s tokens %d/%d (%.0f%%)" % (name, used_n, budget, p)
-    base_hit = {"rule_id": "BUDGET-01", "match_kind": "budget",
+    base_hit = {"rule_id": "notice_budget", "match_kind": "budget",
                 "match_snippet": snippet, "snippet": snippet}
     if block_mode and tier >= 100 and write_channel:
         return dict(base_hit, severity="critical", action="block",
@@ -4602,14 +4602,14 @@ def _budget_hit(tool_name, session_id, policy):
                                 % name,
                     remediation_zh="调整预算：antinel settings set budget_tokens_per_%s <N>；"
                                    "或等待周期重置" % name)
-    if not notice_gate("BUDGET-01", "%s|%s|%d" % (session_id, name, tier)):
+    if not notice_gate("notice_budget", "%s|%s|%d" % (session_id, name, tier)):
         lang = _lang()
         if lang == "zh":
-            msg = ("[BUDGET-01] 提醒: %s token 预算已用 %.0f%%（%d/%d）"
+            msg = ("[notice_budget] 提醒: %s token 预算已用 %.0f%%（%d/%d）"
                    "——调整：antinel settings set budget_tokens_per_%s <N>\n"
                    % (name, p, used_n, budget, name))
         else:
-            msg = ("[BUDGET-01] notice: %s token budget at %.0f%% (%d/%d)"
+            msg = ("[notice_budget] notice: %s token budget at %.0f%% (%d/%d)"
                    " -- adjust: antinel settings set budget_tokens_per_%s <N>\n"
                    % (name, p, used_n, budget, name))
         try:
@@ -4633,7 +4633,7 @@ _PS_EXE = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
 _CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 
-# ------------------------------------------------------------ SLOP-01 撞名 ----
+# ------------------------------------------------------------ AN-037 撞名 ----
 # 2026-10-25（行动清单第 37 条）：判定从「统一编辑距离 ≤2」改成
 #   **按名字长度分档 ＋ 按编辑类型区分**。
 #
@@ -4741,7 +4741,7 @@ def _slop_hit(tool_name, command, policy):
     依据 _budget_hit 的同构模式：返回带规则字段的 hit dict（走既有 hits 流 →
     审计/报告零改造），不命中返回 None。判定三档：① 名字（PEP503 归一化后在
     常见包参考集内 → 不命中（热门包，allow 不留痕）；② 不在参考集但撞上某个
-    热门名（分档规则见 `_slop_match`）→ SLOP-01 alert；③ 完全生僻名 → 不命中。
+    热门名（分档规则见 `_slop_match`）→ AN-037 alert；③ 完全生僻名 → 不命中。
 
     诚实边界（THREAT_MODEL Non-goals）：
       · 参考集是随包静态快照（rules/typosquat_top.json，带版本与日期），
@@ -4751,7 +4751,7 @@ def _slop_hit(tool_name, command, policy):
         判了就是误报）；换位／插入删除／形近字符替换仍判。
       · 两名字互为前后缀且**都真实存在**时无法区分（psycopg / psycopg2），
         靠参考集收录解决，不靠阈值。
-    alert 不拦：安装是合法动作，看见了再由人决定（同 MCP-01 分寸）。"""
+    alert 不拦：安装是合法动作，看见了再由人决定（同 AN-032 分寸）。"""
     if tool_name != "Bash" or not command:
         return None
     m = re.search(r"(?i)\b(pip3?|uv\s+pip|npm|pnpm|yarn|bun)\s+(?:install|add|i)\s+(.{1,300})$", command)
@@ -4789,7 +4789,7 @@ def _slop_hit(tool_name, command, policy):
             suspects.append("%s (≈ %s, 距离 %d)" % (name, hit[0], hit[1]))
     if not suspects:
         return None
-    return {"rule_id": "SLOP-01", "severity": "warning", "action": "alert",
+    return {"rule_id": "AN-037", "severity": "warning", "action": "alert",
             "match_kind": "command", "match_snippet": ", ".join(suspects)[:120],
             "description": "Install command references a package name suspiciously close to a "
                            "popular package (typosquatting/slopsquatting class; reference set "
@@ -4802,7 +4802,7 @@ def _slop_hit(tool_name, command, policy):
             "remediation_zh": "核对包名拼写与官方文档；确认后再安装；已安装的立即移除并轮换凭据"}
 
 
-# -------------------------------------------------------------- GOV-01 ----
+# -------------------------------------------------------------- DEV-01 ----
 # 2026-10-16（机制层方案 v1.0 §3）：套件治理（A1/A2）前移到**写入时刻**。
 # 病灶：0518 当天「先登记、闸门才发现缺 P1-P5 ＋ 常驻超限」——检查在提交时刻，
 # 登记在写入时刻，违规状态已经存在了半天。本函数把检查搬 到登记动作发生的那一刻。
@@ -4848,14 +4848,14 @@ def _gov_resident_count(project_root):
 
 
 def _gov_hit_payload(action, snippet, zh, en, rem_zh, rem_en):
-    return {"rule_id": "GOV-01", "severity": "critical" if action == "block" else "warning",
+    return {"rule_id": "DEV-01", "severity": "critical" if action == "block" else "warning",
             "action": action, "match_kind": "file", "match_snippet": snippet[:120],
             "description": en, "remediation": rem_en,
             "description_zh": zh, "remediation_zh": rem_zh}
 
 
 def _suite_gov_hit(tool_name, file_path, tool_input, project_root):
-    """GOV-01：A1/A2 写入时刻拦截（照 _budget_hit/_slop_hit 同构模式返回 hit dict）。
+    """DEV-01：A1/A2 写入时刻拦截（照 _budget_hit/_slop_hit 同构模式返回 hit dict）。
 
     口径（方案 v1.0 §3）：
       · Write 新常驻套件（ci/inbox_guards_*.py / ci/guard_*.py）：
@@ -5102,7 +5102,7 @@ def main():
                         host_cfg_log=host_cfg_log, sync_wl_log=sync_wl_log,
                         sec_wl_log=sec_wl_log, vct_log=vct_log)
     hits.sort(key=lambda h: SEV_RANK.get(h["severity"], 9))       # stable: keeps category order
-    # 0.24.0 (BUDGET-01): 预算档位命中与规则命中同构（rules_hit 记录、report 可见）
+    # 0.24.0 (notice_budget): 预算档位命中与规则命中同构（rules_hit 记录、report 可见）
     _bh = _budget_hit(tool_name, session_id, policy)
     if _bh:
         hits.append(_bh)
@@ -5112,7 +5112,7 @@ def main():
     if _sh:
         hits.append(_sh)
         hits.sort(key=lambda h: SEV_RANK.get(h["severity"], 9))
-    # 2026-10-16 (GOV-01): 套件治理前移到写入时刻——A1/A2 违规在「登记动作」发生的
+    # 2026-10-16 (DEV-01): 套件治理前移到写入时刻——A1/A2 违规在「登记动作」发生的
     # 那一刻就拦下，而不是等闸门跑时才发现已经登记进去了（0518 事故原样）。
     _gov = _suite_gov_hit(tool_name, fpath, tool_input, project_root)
     if _gov:
@@ -5121,7 +5121,7 @@ def main():
     t_match_done = time.perf_counter()           # 0.32.2 (B1)
     # 0.26.0 (对抗分析 v1.0): net_mode=block —— 网络外传从"提醒"升级为"拦截"。
     # 仅在策略显式 block 时升级 NET 命中；默认 warn 保持不变（分寸：不静默加严）。
-    # ★ 0.63.0 改名：原判据是 `rule_id.startswith("NET")`——**用规则号承载语义**。
+    # ★ 0.63.0 改名：原判据是「规则号以 NET 开头」——**用规则号承载语义**。
     #   改名后所有规则都是 `AN-NNN`，这个 startswith 恒假 ⇒ `net_mode=block`
     #   **静默失效**（演练实测：基线绿 → 改名版红）。改读命中字典的 `category`。
     if str((policy.get("settings") or {}).get("net_mode", "warn")).lower() == "block":
@@ -5235,7 +5235,7 @@ def main():
     # Constraint 3: an allow caused by workspace_roots is recorded, never silent.
     for r in ws_allow_log:
         log_event({"ts": ts, "type": "workspace_root_allow", "tool": raw_tool, "session": session_id,
-                   "host": host_tag, "rule_id": "DST-02", "decision": "allow",
+                   "host": host_tag, "rule_id": "AN-010", "decision": "allow",
                    "reason": "path inside a declared workspace root",
                    "matched_root": r, "config_source": ws_source,
                    "input": {"file_path": mask_secrets(fpath)}}, mirror=True)
@@ -5270,28 +5270,28 @@ def main():
                    "targets": _v.get("targets", []),
                    "reason": _v.get("why", ""),
                    "input": {"command": mask_secrets(cmd)[:300]}}, mirror=True)
-    # 0.16.0 (P1-7): an allow caused by whitelist.paths on DST-02 is also recorded
+    # 0.16.0 (P1-7): an allow caused by whitelist.paths on AN-010 is also recorded
     # -- a released block must leave a trace, exactly like exclude_patterns_allow.
     for wp in path_wl_log:
         log_event({"ts": ts, "type": "dst02_path_whitelisted", "tool": raw_tool,
-                   "session": session_id, "host": host_tag, "rule_id": "DST-02",
+                   "session": session_id, "host": host_tag, "rule_id": "AN-010",
                    "decision": "allow", "severity": "critical", "action": "allow",
                    "reason": "path outside the project root but inside policy whitelist.paths",
                    "input": {"file_path": mask_secrets(wp)}}, mirror=True)
-    # 0.19.2: DST-02 released its own host-level config file. Recorded for exactly
+    # 0.19.2: AN-010 released its own host-level config file. Recorded for exactly
     # the same reason path_wl_log is -- widening the trust boundary must be
     # visible after the fact, and this is the one path whose widening is itself
     # the boundary change. severity=warning so it shows up in report.py's
     # config-health line rather than blending into the allow stream.
     for hc in host_cfg_log:
         log_event({"ts": ts, "type": "dst02_host_config_self_maintenance", "tool": raw_tool,
-                   "session": session_id, "host": host_tag, "rule_id": "DST-02",
+                   "session": session_id, "host": host_tag, "rule_id": "AN-010",
                    "decision": "allow", "severity": "warning", "action": "alert",
-                   "reason": "DST-02 released on Antinel's own host-level config file "
+                   "reason": "AN-010 released on Antinel's own host-level config file "
                              "(the tool that maintains the config must be able to reach it); "
                              "this allows the trust boundary itself to be edited",
                    "input": {"file_path": mask_secrets(hc)}}, mirror=True)
-    # 0.29.0 (G-8, DST-11): a write into a cloud-sync directory released by
+    # 0.29.0 (G-8, AN-030): a write into a cloud-sync directory released by
     # whitelist.paths. Same obligation as every other release in this file:
     # widening the trust boundary must be visible after the fact. Separate event
     # type (not dst02_path_whitelisted) so a report can tell "released a write
@@ -5299,7 +5299,7 @@ def main():
     # ★ 契约纪律：本事件类型已登记在随包 AUDIT_SCHEMA.md（没登记 ≠ 不存在）。
     for sc in sync_wl_log:
         log_event({"ts": ts, "type": "dst11_syncdir_released", "tool": raw_tool,
-                   "session": session_id, "host": host_tag, "rule_id": "DST-11",
+                   "session": session_id, "host": host_tag, "rule_id": "AN-030",
                    "decision": "allow", "severity": "critical", "action": "allow",
                    "reason": "write into a cloud-sync directory was released by "
                              "policy whitelist.paths -- the sync client will still "
@@ -5337,15 +5337,15 @@ def main():
             continue
         seen_suspects.add(cand)
         log_event({"ts": ts, "type": "dst02_bash_path_suspect", "tool": raw_tool,
-                   "session": session_id, "host": host_tag, "rule_id": "DST-02",
+                   "session": session_id, "host": host_tag, "rule_id": "AN-010",
                    "decision": "alert", "severity": "warning", "action": "alert",
                    "reason": "command text references an explicit absolute path outside the "
                              "project root; scripts are not parsed (THREAT_MODEL Non-goals)",
                    "input": {"command": mask_secrets(cmd)[:300], "path": mask_secrets(cand)}},
                   mirror=True)
-        if not notice_gate("DST-02-BASH", cand):
+        if not notice_gate("AN-010-BASH", cand):
             try:
-                sys.stderr.write("[DST-02] 提醒: 命令文本中出现项目根之外的显式绝对路径（已记录；脚本内容不解析，"
+                sys.stderr.write("[AN-010] 提醒: 命令文本中出现项目根之外的显式绝对路径（已记录；脚本内容不解析，"
                                  "详见 THREAT_MODEL Non-goals）: %s\n" % mask_secrets(cand))
             except Exception:
                 pass
@@ -5372,7 +5372,7 @@ def main():
     # consequence is, not just what was rejected.
     for bad in ws_rejected:
         log_event({"ts": ts, "type": "workspace_config_rejected", "tool": raw_tool,
-                   "session": session_id, "host": host_tag, "rule_id": "DST-02",
+                   "session": session_id, "host": host_tag, "rule_id": "AN-010",
                    "decision": "config_rejected", "severity": "warning", "action": "alert",
                    "config_source": ws_source, "input": {"entry": str(bad)[:200]},
                    "reason": "workspace_roots entry rejected: root/relative/'..'/wildcard"},
@@ -5381,7 +5381,7 @@ def main():
             sys.stderr.write(
                 "[Antinel][配置错误] workspace_roots 条目被拒绝，**该条目不生效**（不是告警，是没配上）：%r\n"
                 "          拒绝类型：根路径 / 相对路径 / 含 '..' / 含通配符\n"
-                "          后果：向该路径写入仍会被 DST-02 拦截\n"
+                "          后果：向该路径写入仍会被 AN-010 拦截\n"
                 "          来源: %s\n"
                 "          修法: 编辑该配置的 workspace_roots 字段，填入绝对路径（或删除该条目）\n"
                 % (bad, ws_source))

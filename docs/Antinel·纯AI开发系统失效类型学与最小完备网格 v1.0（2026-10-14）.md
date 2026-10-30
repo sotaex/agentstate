@@ -254,7 +254,7 @@
 | 进程 | 进程树／job object 清理；句柄继承；CREATE_NO_WINDOW≠DETACHED；cmd start 语义 |
 | 时序 | 兜底落位覆盖手搬；tick 周期（2s）vs 建窗时长；启动顺序竞态 |
 | 文件 | 文件锁；长路径；大小写；只读位；.gitattributes（* -text 使 CRLF 对照失效） |
-| 权限 | 沙箱白名单（DST-02）外写失败；UAC；防火墙首弹 |
+| 权限 | 沙箱白名单（AN-010）外写失败；UAC；防火墙首弹 |
 | 解释器 | PATH 解析；多版本 python；venv 与系统混用 |
 | 外部世界 | PyPI 名被占（agentstate）；网络可达性；第三方仓库变更 |
 

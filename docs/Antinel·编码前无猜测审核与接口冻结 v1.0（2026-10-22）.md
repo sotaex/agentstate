@@ -709,7 +709,7 @@ at-risk·slash／off bar）＋lamp 四色参照，附记录表。
 
 | 项 | 批准内容 | 落地动作 |
 |---|---|---|
-| T2 睡眠轮 | 从阻塞项降为**零操作确认项**；N10 公式立即按「扣睡眠时段」落地 | 探针 `output/_p_sleep_probe.py` 常驻（60s 五钟）；跨重启续记待创始人手动建 schtasks（DST-04 拦我代建） |
+| T2 睡眠轮 | 从阻塞项降为**零操作确认项**；N10 公式立即按「扣睡眠时段」落地 | 探针 `output/_p_sleep_probe.py` 常驻（60s 五钟）；跨重启续记待创始人手动建 schtasks（AN-012 拦我代建） |
 | 开工落点 | **新开 `.worktrees/impl`** ＋三纪律（判据与活体验收在主树／只 add 显式路径＋`--no-verify` 注明理由／动 `inbox_model`/`host_shield` 前先查 b18） | 已建（`impl-state-machine`，基点 main@4d19a6a；**b18 已合入 main**，纪律检查通过） |
 | 跨线两推进 | N1 走「判据即契约」；N10 合并件搭 S54-release 的 D 批车 | 判据在 6 步落；合并件交代码线批次 |
 

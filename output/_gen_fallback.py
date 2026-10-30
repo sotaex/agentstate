@@ -32,8 +32,11 @@ HOOK = os.path.join(ROOT, "hooks", "pre_tool_use.py")
 # 改这里必须同步那边 —— 两处不一致会出现「生成器说对了、判据说没对」。
 EXTRACT = re.compile(r"^_FALLBACK = \[(.*?)^\]", re.S | re.M)
 
-# 字段输出顺序：照主表出现顺序走，`an` 紧跟在 `id` 之后（它是身份的一部分）。
-ORDER_HEAD = ["id", "an"]
+# 字段输出顺序：照主表出现顺序走，`legacy_id` 紧跟在 `id` 之后（它是身份的一部分）。
+# ★ 0.63.0 改名：原来是 `["id", "an"]`。改名后 `an` 已删、旧号搬进 `legacy_id`。
+#   不同步改 ⇒ 兜底集缺 `legacy_id`，而 `j_fallback_matches_rules` 要求与主表
+#   **逐字段全等** ⇒ 必红，**且红在"数据"上**（0.62.0 就这么被误读过一次）。
+ORDER_HEAD = ["id", "legacy_id"]
 ORDER_TAIL = ["name", "category", "severity", "type", "enabled",
               "tool_names", "apply_to_tools", "target",
               "file_patterns", "command_patterns", "content_patterns",

@@ -261,8 +261,8 @@ def _find(*rels):
 def inv1_fallback_sync(ok_list, bad_list):
     """INV-1（G-1）：内置兜底规则表**不得比主规则表窄**。
 
-    ★ 这条不变量是 0.28.4 一个真缺陷的直接产物：`_FALLBACK` 的 NET-01 是
-      `["Bash"]`，而 `rules/default.json` 的 NET-01 是
+    ★ 这条不变量是 0.28.4 一个真缺陷的直接产物：`_FALLBACK` 的 AN-006 是
+      `["Bash"]`，而 `rules/default.json` 的 AN-006 是
       `["Bash","WebFetch","WebSearch","MCP"]`。规则文件一读不到，网络外传检测就
       **静默退化**成只认 Bash —— WebFetch/WebSearch/MCP 三条通道当场失守，零报错。
     """
@@ -307,7 +307,7 @@ def inv1_fallback_sync(ok_list, bad_list):
         #     为什么：兜底集启用的时刻（规则文件被判篡改／读不到）**正是最需要人看懂的时刻**，
         #     而它原本只有英文 `description`，没有 `description_zh`/`remediation_zh` ⇒
         #     钩子拼出的理由里这两个字段取 `""`，用户看到的是
-        #         `[NET-01] 提醒: `     ← 冒号后面是空的
+        #         `[AN-006] 提醒: `     ← 冒号后面是空的
         #     实测：`_strict_test/repro_a4.py`（篡改 rules_hash 后跑 PreToolUse）。
         #     「报出来≠出事了」不适用于这里 —— 这里是**该报的没报出来**，而且是降级态。
         for key in ("description_zh", "remediation_zh"):

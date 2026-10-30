@@ -12,8 +12,8 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
 ### code only (not present in this table at all)
 
 - `OUT-01` — 输出面：私有密钥/凭据出现在工具输出里（hooks/pre_tool_use.py:3368 起，PostToolUse）
-- `GOV-01` — 套件治理：A1/A2 写入时刻拦截（_suite_gov_hit，同 ci/delivery_gate.py 双向同步）
-- `BUDGET-01` — 提醒预算：token 预算超阈值（_budget_hit）
+- `DEV-01` — 套件治理：A1/A2 写入时刻拦截（_suite_gov_hit，同 ci/delivery_gate.py 双向同步）
+- `notice_budget` — 提醒预算：token 预算超阈值（_budget_hit）
 
 ### declared but code driven (present below, but judged by code)
 

@@ -91,7 +91,7 @@ EXCLUDED_DIRS = {"node_modules", ".git", "venv", ".venv", "__pycache__", ".tox",
                  # ★ 0.57.0（第 36 条）：依赖包的安装目录。此前只排除了 venv / .venv
                  #   这两个**目录名**，于是用 `env/`、`myenv/`、`conda/` 之类名字建的
                  #   虚拟环境，整个 site-packages 都会进扫描面。实测 Python3.11 的 Lib
-                 #   下 19 条 SEC-06 critical 全部来自 Cryptodome 的 SelfTest 测试密钥
+                 #   下 19 条 AN-021 critical 全部来自 Cryptodome 的 SelfTest 测试密钥
                  #   —— 密码学库的测试套件里必然有真格式的私钥样本。用户改不了这些
                  #   代码，报它只会让"依赖装得多"变成"分数低"。
                  "site-packages", "dist-packages",
@@ -110,7 +110,7 @@ def _is_build_artifact_dir(name):
     low = (name or "").lower()
     return low.endswith(".egg-info") or low.endswith(".dist-info")
 # ★ 0.48.4：**首印象归零**。此前只排除了 `.psl/audit`，而 install 会把规则快照
-#   写进 `.psl/rules/default.json`——那份快照里带 SEC-06 的**示例密钥字面量**
+#   写进 `.psl/rules/default.json`——那份快照里带 AN-021 的**示例密钥字面量**
 #   （AKIAIOSFODNN7EXAMPLE，规则的测试夹具，不是真密钥）。于是：
 #     全新空目录 → pip 装完 → 第一次扫描 → 🔴 CRITICAL 1 条，Score 80/100 B
 #   而那条 CRITICAL 是**Antinel 自己写进去的**（实测 2026-10-11，100% 复现）。
@@ -129,7 +129,7 @@ def _rel_from_root(root_str, path):
     **字符集合**而不是前缀，".psl/rules" 会被剥成 "psl/rules"，于是上面那张
     排除表里的 ".psl/rules" 永远命中不了 —— 0.48.4 承诺的「首印象归零」从落地
     那天起就没生效过。实测（2026-10-23，pip 真装 0.55.1）：全新目录 install 完，
-    第一次 report 就是 SEC-06 CRITICAL，命中 .psl/rules/default.json:686 的
+    第一次 report 就是 AN-021 CRITICAL，命中 .psl/rules/default.json:686 的
     "AKIAIOSFODNN7EXAMPLE"（规则自己的测试夹具），Score 80/100 needs attention。
     企业第一眼看到的「你有严重问题」，来源是我们自己写进去的文件。
     """
@@ -232,7 +232,7 @@ class CompiledRule:
         if self.category == "secrets" and bool(self.file_patterns):
             return True
         # 0.16.0 (gap-report D-05): a tool_call rule that matches ONLY on
-        # content_patterns (SEC-06) is static too -- the scanner owns file
+        # content_patterns (AN-021) is static too -- the scanner owns file
         # contents just as much as the hook does. Previously it fell through to
         # False, so the static report ran 9 rules while RULES.md claimed 10.
         return bool(self.content_patterns) and not self.file_patterns
@@ -249,7 +249,7 @@ class CompiledRule:
     def is_placeholder(self, snippet):
         """0.57.0（第 33 条）：这个命中片段是不是「已知占位值」。
 
-        实测本仓 227 条 SEC-06 命中里没有一条是真密钥（193 条 AWS 文档示例值、
+        实测本仓 227 条 AN-021 命中里没有一条是真密钥（193 条 AWS 文档示例值、
         31 条只有头没有 body 的私钥、3 条测试夹具的退化形状）。
         占位值必须**按命中片段**判，不能按整篇内容判 —— 否则同一文件里另有一把
         真密钥也会被一起放行。与 hooks/pre_tool_use.py 的 _placeholder_hit 同口径。
@@ -335,7 +335,7 @@ def frontmatter_name(text):
     return nm.group(1).strip() if nm else None
 
 
-# ------------------------------ CTX-05: skill 名与目录名 ----------------------
+# ------------------------------ AN-018: skill 名与目录名 ----------------------
 def _edit_distance(a, b):
     """Levenshtein。只用于「名字近似但不相等」，名字很短，不需要优化。"""
     if a == b:
@@ -352,9 +352,9 @@ def _edit_distance(a, b):
 
 
 def _name_mismatch_level(name, dname, rule=None):
-    """CTX-05 的级别看「差多少」；相等返回空串（不报）。与 hook 同一口径。
+    """AN-018 的级别看「差多少」；相等返回空串（不报）。与 hook 同一口径。
 
-    实测本仓 38 条 CTX-05 全部是同一形态：`name: antinel-security` 而目录叫
+    实测本仓 38 条 AN-018 全部是同一形态：`name: antinel-security` 而目录叫
     `b` / `psl` / `dai-std`（git worktree、克隆目录、解压目录）。
     这条规则的本意是抓「拼写近似 = 身份伪装 / 打错包」，不是抓「目录名随便起」。
     """
@@ -376,7 +376,7 @@ _INVIS_RE_CACHE = {}
 
 
 def _ctx03_codepoints(rule):
-    """CTX-03 码点表的唯一来源（与 hooks/pre_tool_use.py 的 _ctx03_table 同口径）。
+    """AN-016 码点表的唯一来源（与 hooks/pre_tool_use.py 的 _ctx03_table 同口径）。
 
     规则写了 codepoints 就用它；只写了 ranges 的旧自定义规则按「一律 critical」
     翻译成同一张表；两者都没有就不是一条字符扫描规则，返回空表（不报）。
@@ -419,7 +419,7 @@ def _invisible_re(table):
 
 
 def scan_invisible(text, table, surface="content"):
-    """CTX-03：返回 [(行号, 码点标签, 级别)]。
+    """AN-016：返回 [(行号, 码点标签, 级别)]。
 
     级别逐码点逐面（0.57.0 第 32 条），与 hooks/pre_tool_use.py 的 scan_invisible
     同一张表、同一套判定；差异只在返回形态 —— 这边要一次报全，那边命中第一条就停。
@@ -691,7 +691,7 @@ def scan_directory(root, rules, quick=False, path_whitelist=None, ignore=None):
                              else "instruction_file" if _is_instruction_file(fn, rel)
                              else "all_text_files")
                     # 0.31.0 (F2): a file_content rule carrying file_patterns only
-                    # inspects files whose path matches them (MCP-02/03/04 target
+                    # inspects files whose path matches them (AN-033/AN-034/AN-035 target
                     # MCP config files; the guard keeps their patterns from
                     # content-scanning every text file in the tree).
                     # ★★ 0.57.0 (B-2)：file_patterns 匹配 = **准入资格**，而不是命中本身。
@@ -759,7 +759,7 @@ def scan_directory(root, rules, quick=False, path_whitelist=None, ignore=None):
                     if _lvl05 and name.lower() != dir_name.lower():
                         add(rule, rel, 1, name + " != " + dir_name, "metadata", _lvl05)
                 elif rule.content_patterns and not rule.file_patterns:
-                    # 0.16.0: static content rules typed tool_call (SEC-06). The
+                    # 0.16.0: static content rules typed tool_call (AN-021). The
                     # hook still guards Write/Edit live; this is the offline pass.
                     if rule.excluded(rel, fn):
                         continue
@@ -896,8 +896,8 @@ def render_text(result):
 
 def scan_mcp_configs(root, rules, ignore=None, stats=None):
     """0.31.0 (F2): scan MCP configuration files for tool-description injection
-    (MCP-02), unaudited remote servers (MCP-03) and plaintext secrets in env
-    blocks (MCP-04). Text-level on purpose: the patterns work on raw JSON (and
+    (AN-033), unaudited remote servers (AN-034) and plaintext secrets in env
+    blocks (AN-035). Text-level on purpose: the patterns work on raw JSON (and
     even on JSON5-with-comments), so a parse failure can never silently skip a
     config. Candidates: .cursor/mcp.json, .mcp.json, claude_desktop_config.json,
     .vscode/mcp.json. Returns findings in the same shape as scan_directory.
@@ -908,7 +908,7 @@ def scan_mcp_configs(root, rules, ignore=None, stats=None):
     """
     out = []
     cands = [".cursor/mcp.json", ".mcp.json", "claude_desktop_config.json", ".vscode/mcp.json"]
-    compiled = {r.id: r for r in (CompiledRule(x) for x in rules) if r.id in ("MCP-02", "MCP-03", "MCP-04")}
+    compiled = {r.id: r for r in (CompiledRule(x) for x in rules) if r.id in ("AN-033", "AN-034", "AN-035")}
     if not compiled:
         return out
     ign = ignore if ignore is not None else _IgnoreList(root)
@@ -931,7 +931,7 @@ def scan_mcp_configs(root, rules, ignore=None, stats=None):
         except Exception:
             continue
         relf = rel.replace("/", os.sep)
-        for rid in ("MCP-02", "MCP-03", "MCP-04"):
+        for rid in ("AN-033", "AN-034", "AN-035"):
             rule = compiled[rid]
             for rx in rule.content_patterns:
                 for m in rx.finditer(text):

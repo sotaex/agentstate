@@ -19,7 +19,7 @@
 > **先停下来说明，不要边改边扩**。
 >
 > **本版与 v1.0 的关系**：v1.1 **取代** v1.0 为唯一现行版；v1.0 文件保留在 `docs/` 备查
-> （删除被 DST-01 守卫拦截，也不删——版本痕迹本身是证据）。v1.0 已发现 **8 处事实误差**
+> （删除被 AN-009 守卫拦截，也不删——版本痕迹本身是证据）。v1.0 已发现 **8 处事实误差**
 > 并全部修正，另新增 **6 大块**内容，见 §0 变更记录。
 
 ---
@@ -86,7 +86,7 @@ v1.0 正是栽在这一条上（C1）。实况一律以 `git log --oneline -1` �
 |---|---|---|
 | 生产仓 | `D:\psl\poc\antinel-security` | **Windows 11 + Git Bash + WorkBuddy** |
 | Python | 3.13（本机）| `python` 可直接用；venv 隔离见 §7.3 |
-| **DST-01 守卫** | `hooks/pre_tool_use.py` + `rules/default.json` | **拦截所有删除**（`rm`/`del`/`unlink`/`os.remove`/`shutil.rmtree`/`Remove-Item`）。豁免仅限构建产物（`dist`/`build`/`__pycache__`/`.psl`/`node_modules`），且**按整条命令逐段判定**，复合命令一律不放行。要删临时物请让**用户在自己终端**做。 |
+| **AN-009 守卫** | `hooks/pre_tool_use.py` + `rules/default.json` | **拦截所有删除**（`rm`/`del`/`unlink`/`os.remove`/`shutil.rmtree`/`Remove-Item`）。豁免仅限构建产物（`dist`/`build`/`__pycache__`/`.psl`/`node_modules`），且**按整条命令逐段判定**，复合命令一律不放行。要删临时物请让**用户在自己终端**做。 |
 | pre-commit 钩子 | `ci/regression_gate.py`（**实测 13.2 秒**，16 条判据） | 每次 commit 都会跑；冷启动偶发 SIGTERM，重试即可 |
 | PowerShell 脚本 | `_uxtest2/*.ps1` | **必须带 UTF-8 BOM**，否则 PowerShell 5.1 按 GBK 解析中文报语法错 |
 | 六态 | R0 失守 / L2 拦截 / L1 注意 / Ls 缺粮 / L0 值守中 / dev 研发中 | 另有 L0 灰变体＝未启用、`中断`（缺岗无损失）。真源：`inbox_model.STATE_LABEL`（910 行）与 `host_shield.POSTURE_LABEL`（3030 行） |

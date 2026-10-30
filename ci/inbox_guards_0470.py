@@ -638,7 +638,7 @@ def s97():
             if x.get("action") == "block"]
         # 把这条规则的提醒预算**彻底用光**（远超配额）之后再判一次
         for i in range(int(_hs().NOTICE_BUDGET_MAX) + 12):
-            m.notice_gate("DST-01", "rm -rf hooks")
+            m.notice_gate("AN-009", "rm -rf hooks")
         blocks_after = [x.get("rule_id") for x in m.collect_hits(
             rules, "Bash", {"command": "rm -rf hooks", "file_path": "",
                             "content": "", "url": ""}, ROOT, [], m.EMPTY_POLICY,
@@ -646,7 +646,7 @@ def s97():
             if x.get("action") == "block"]
     finally:
         os.chdir(old)
-    if "DST-01" not in blocks_before:
+    if "AN-009" not in blocks_before:
         return "夹具不成立：`rm -rf hooks` 本就不拦 ⇒ 判据无分辨力"
     if blocks_after != blocks_before:
         return ("预算用光后判定结论变了（%s → %s）⇒ 预算越界动到了判定"

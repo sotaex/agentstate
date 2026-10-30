@@ -216,10 +216,10 @@ h2{font-size:15px;margin:0 0 12px}
    单位可见（U-08 立意），但不与数字抢 26px 的视觉权重。 */
 .metric .unit{font-size:13px;font-weight:600;color:var(--muted)}
 /* ★ 0.51.0（拍板点 3）：排行行规则号**上屏**（索引位）—— 与问号全表
-   `.tdef .rrow .rid` 同一视觉语言；收件箱记录「规则 SEC-01」能对号入座。
+   `.tdef .rrow .rid` 同一视觉语言；收件箱记录「规则 AN-001」能对号入座。
    ★★ 0.53.4（创始人 2026-10-20 截图：「规则代号是否放在前边更好？不要那么小，
    字号大一些，跟旁边一样大」）：规则号**移到短名之前**（前缀位，与收件箱
-   「规则 SEC-01」同序），字号 11px→13px（＝`.row` 正文字号，不再淡小），
+   「规则 AN-001」同序），字号 11px→13px（＝`.row` 正文字号，不再淡小），
    颜色收回正文色（放前面就是主显示的一部分，不是脚注）。
    间距 margin-left→margin-right：它在前面，后面跟文字。 */
 .rows .rid{display:inline-block;min-width:52px;margin-right:8px;
@@ -326,7 +326,7 @@ h2{font-size:15px;margin:0 0 12px}
 /* ★ 0.51.0（四态问号小窗）：拦截词条内的规则全表（嵌套折叠）。**不带
    name 属性** —— 不是术语芯片，不进 name="term" 互斥组；展开体自带限高
    滚动，外层小窗不被 37 行撑爆。规则编号淡显等宽，供与收件箱记录上的
-   「规则 SEC-01」对号入座（索引位；0.50.4 Q-04 退编号的是日报排行主显示位，
+   「规则 AN-001」对号入座（索引位；0.50.4 Q-04 退编号的是日报排行主显示位，
    职责不同）。 */
 .tdef .rlist{margin:6px 0 0 0;font-size:12px}
 .tdef .rlist>summary{cursor:pointer;list-style:none;color:var(--muted);user-select:none}
@@ -1904,7 +1904,7 @@ def _item_html(it, token, posture=None, show_host=False):
     #   第一轮改完仍是鸟语——规则编号写两遍、「（哪条防护规则拦下它的）」看不懂、
     #   「命中「os.remove」」不告诉用户删什么、裸 ISO 时间、64 位核对号。
     #   ⇒ 详情行（第二行）**整体重做**，唯一实现是 `M.record_meta(it)`：
-    #     「执行文件或目录删除命令，目标 _dbg_logo.txt · 规则 DST-01 · 北京时间 10-17 09:23」
+    #     「执行文件或目录删除命令，目标 _dbg_logo.txt · 规则 AN-009 · 北京时间 10-17 09:23」
     #   规则编号只出现一次；时间走时区命名（海外机器显示美西/美东时间）。
     #   行内时间（`.when`）保持 MM-DD HH:MM 短式（全站唯一短式 `_ts_hm`）。
     meta = M.record_meta(it)
@@ -2539,14 +2539,14 @@ def _view_report(rep, token, items=None):
             # ★ 0.50.4（Q-04）：显示规则**人话名**；规则号退到 hover —— 工程串
             #   不上主界面。★★ 0.51.0（品质审查拍板点 3/4，2026-10-16）：Q-04 的
             #   替代品 description_zh 是审计受众的全文（最长 60 字）⇒ 挤成三四行，
-            #   且 DST-10 的 zh 自带「——DST-09」内部自引用（编号从数据后门回来）。
+            #   且 AN-024 的 zh 自带「——AN-023」内部自引用（编号从数据后门回来）。
             #   ⇒ 主显示改**上屏短名**（`label_zh`，≤14 字，INV-4 强制），
             #   规则号**上屏**（`.rid`，与问号全表同一视觉语言 —— 收件箱记录
-            #   「规则 SEC-01」能对号入座），全文 zh 退到 hover title。
+            #   「规则 AN-001」能对号入座），全文 zh 退到 hover title。
             #   退链 label → zh → 规则号（不编造、不用英文 `name` 充数）。
             # ★★ 0.53.4（创始人 2026-10-20 截图）：「规则代号放在前边、字号跟
             #   旁边一样大」—— 规则号移到短名**之前**（前缀位，与收件箱
-            #   「规则 SEC-01」同序），字号收到正文 13px、颜色收回正文色。
+            #   「规则 AN-001」同序），字号收到正文 13px、颜色收回正文色。
             "<div class=\"row\"><span class=\"k\">"
             "<a href=\"/?v=inbox&f=day:%s:rule:%s\" title=\"%s\">"
             "<span class=\"rid\">%s</span>%s</a></span>"

@@ -73,7 +73,7 @@ Agent 不读网页；网页不给 Agent 看。但双方必须读**同一份事�
 | ① 同一底座、两种渲染 | 页面渲染给人；`--json`／MCP 渲染给 Agent。共用 glossary／规则表／宿主表真源，不许第三份实现 | glossary 已是唯一真源 ✅ |
 | ② CLI 人话＝Agent 转述底稿 | Agent 替人跑命令后**转述**给人——所以 CLI 文案与页面同一套用词、同一套人话纪律；`--help` 的 Agent 话术表就是用户话术表 | 已具雏形，随 §5 机制统一 |
 | ③ 页面能说的，命令都能给 | 可验证性的机器侧：每个页面事实都有 CLI/JSON 出口（反 packed：命令能给的页面都该能看） | host-scan --json 等已有；补缺口 |
-| ④ 被监理的 Agent 也是用户 | 钩子拒绝消息是 Agent 的"界面"：必须人话＋可行动（"改用 xx 路径／见规则 DST-04 的大白话"） | post_tool_use 已人话化，纳入同一套判据 |
+| ④ 被监理的 Agent 也是用户 | 钩子拒绝消息是 Agent 的"界面"：必须人话＋可行动（"改用 xx 路径／见规则 AN-012 的大白话"） | post_tool_use 已人话化，纳入同一套判据 |
 | ⑤ SKILL.md 是 Agent 的"首页" | Agent 的装机说明书；与控制台同一套术语真源 | 已随包 ✅ |
 
 ---
@@ -227,7 +227,7 @@ Agent 不读网页；网页不给 Agent 看。但双方必须读**同一份事�
 ### 11.1 实查事实（回源文件＋产品实测，三条）
 
 1. **文档记录过**：`AUDIT_SCHEMA.md:315` 自认——「成本/token 消耗（三问三答 A 族）尚未进入账本——`transcript_path` 已随事件到达但 v0.22.0 未使用，属 v0.23.0 范围」。
-2. **产品实况比文档更进一步：token 采集已在跑**——`post_tool_use.record_usage_delta`（`hooks/post_tool_use.py:240`）从 transcript 割取 token 事实、追加链式 `usage_delta` 记录（带 `usage_collect` 总开关，fail-open）；`_accumulate_budget_state`（v0.27.0 BUDGET-01）按会话/项目日累计到 `.psl/state/session_usage.json`——**本机实测 9 个会话、进出 token 均在记**。文档落后于产品。
+2. **产品实况比文档更进一步：token 采集已在跑**——`post_tool_use.record_usage_delta`（`hooks/post_tool_use.py:240`）从 transcript 割取 token 事实、追加链式 `usage_delta` 记录（带 `usage_collect` 总开关，fail-open）；`_accumulate_budget_state`（v0.27.0 notice_budget）按会话/项目日累计到 `.psl/state/session_usage.json`——**本机实测 9 个会话、进出 token 均在记**。文档落后于产品。
 3. **真正的缺口不是「记」而是「看」**：全库检索，日报/账本/运行状态/CLI **没有任何一处消费** `usage_delta`——数据躺在链上，用户看不见。另两处小缺口：`usage_delta.host` 恒空串（工具归因没接上）；问答数/使用时长可从链上 session 首/末 `ts` 与 transcript 派生但未派生。
 
 ### 11.2 归置原则（三条）
@@ -269,7 +269,7 @@ Agent 不读网页；网页不给 Agent 看。但双方必须读**同一份事�
 | B 信息架构 | 五页、时间窗纪律、双受众渲染 | 🟡 本批做（§4/§5） |
 | C 归因与用量 | host、token/时长/问答数 | 🟡 数据已埋、展示缺（§11） |
 | D 信任与留证 | verify、六档裁决、体检留存、导出一页纸 | 🟡 verify/六档在；留存/导出缺 |
-| E 经济账 | credits/granary 两本账、预算执法 | 🟡 底座在（BUDGET-01）；UI 缺 |
+| E 经济账 | credits/granary 两本账、预算执法 | 🟡 底座在（notice_budget）；UI 缺 |
 | F 生态与协议 | MCP、SKILL 首页、ERC-8004、跨机 | 🟡 `antinel_mcp` v0.1 已暴露 5 工具；注册表/跨机未动 |
 
 ### 12.3 四阶段表

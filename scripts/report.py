@@ -234,7 +234,7 @@ def build_report(events, scan, manifest, host_label="", root=None):
     # unreadable file) and workspace_roots entries were rejected.
     cfg = {"rules_integrity_fallback": 0, "rules_unreadable_fallback": 0,
            "workspace_config_rejected": 0,
-           # 0.19.2: DST-02 released its own host-level config file. Counted here
+           # 0.19.2: AN-010 released its own host-level config file. Counted here
            # because it is a boundary change, not an ordinary allow: the report
            # must show that the trust boundary was edited, and by what.
            "dst02_host_config_self_maintenance": 0,
@@ -455,7 +455,7 @@ def render_text(rep, log_label):
         ch.get("rules_unreadable_fallback", 0)))
     # 0.19.2: the trust boundary is editable from inside the project by design,
     # so the count of boundary edits is part of reading the numbers above.
-    L.append("  trust-boundary edits (DST-02 released on Antinel's own config): %d" % (
+    L.append("  trust-boundary edits (AN-010 released on Antinel's own config): %d" % (
         ch.get("dst02_host_config_self_maintenance", 0)))
     # 0.18.0 (HP-47): hook health -- a crash count > 0 means at least one call
     # was allowed by the HOST (fail-open) with no verdict recorded at all.

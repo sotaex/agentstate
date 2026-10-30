@@ -54,7 +54,7 @@ def check(name):
 
 
 def _snapshot(path):
-    """备份一个文件（还原用 rename，避开 Antinel 自己的 DST-01 删除拦截）。"""
+    """备份一个文件（还原用 rename，避开 Antinel 自己的 AN-009 删除拦截）。"""
     bk = path + ".g0364.bk"
     shutil.copy2(path, bk)
     _BACKUP.append((path, bk))

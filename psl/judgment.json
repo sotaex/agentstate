@@ -77,7 +77,7 @@
    "per_failure": [],
    "stale_entries": [
     "UX: 同类提醒当天只提示一次（第二次静默记录）",
-    "0.16.0 DST-01 URL /rd/ segment is not a delete (NET-01 warns, no block)",
+    "0.16.0 AN-009 URL /rd/ segment is not a delete (AN-006 warns, no block)",
     "0.16.0 antinel_verify derives current on an intact package",
     "0.17.0 P-B1 without --manifest, a shipped file outside the digest set is out of scope (documented)",
     "F-09 host-shield 自检查不出来时不谎报已安装（三态：None != True）",

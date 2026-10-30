@@ -51,7 +51,7 @@
 ## 2. 硬阻断与禁令（接手后立刻生效）
 
 1. **禁止运行全量交付闸门 `python ci/delivery_gate.py`、`--quick`、`--selfcheck`**。原因（已只读核验）：`ci/inbox_guards_0364.py`（B4 写 `inbox_model.py`、C2 写 `psl/manifest.json`、C3 写 manifest+`host_shield.py`、D2 写 hook/规则登记表/`host_shield.py`、F5N 写 `inbox_window.py`）、`ci/inbox_guards_0363.py`（写 `inbox_model.py`）、JDG-0368（`_patch()` 写 `host_shield.py`）会**改写产品真树**；0364 注册为 fast ⇒ `--quick` 也可能触发。「有备份＋finally 还原」不算隔离——曾实测测试窗口期内姿态从 `guarding→warn→guarding` 假失守（`_p_poll_out.txt` 留证）。**先完成 P0-1 隔离，再解禁。**
-2. **不改 `psl/manifest.json`**（除非走真实构建流程，见 P1-1）；**不清理/删除任何探针与 `.g036*.trash` 残留**（项目 DST-01 拦删除，且这些是取证件）；临时文件只建不删。
+2. **不改 `psl/manifest.json`**（除非走真实构建流程，见 P1-1）；**不清理/删除任何探针与 `.g036*.trash` 残留**（项目 AN-009 拦删除，且这些是取证件）；临时文件只建不删。
 3. **不提交、不 `git add`、不把用户/前序改动归功于本任务**。
 4. **改被 manifest 钉住的源码（`host_shield.py`／`_GUARDED_CHAIN_FILES`／`rules/hosts/*.json`）必须重签 manifest**：`python _tools_034/_resign_manifest.py`（D-36；否则哨兵拉不起来）。构建器对这种漂移有「自举豁免」⇒ 提交侧必须另有一道。
 5. **不把历史数字当当前结果**：17/0、74/0/0、28/28、31 套/39 路径等均须按当前证据逐项复核后才能引用。
@@ -151,7 +151,7 @@ byte 级实测（会话历史）：CRLF=0、裸 LF=36 ⇒ `cmd.exe` 按字节错
 
 **本轮完成（2026-10-14，[本轮实测]）—— 缺口比卡片大两件，根因比卡片深一层**：
 - **实测差集 5 件（非卡片三件）**：`inbox_bubble.py`、`inbox_logo.py`、`assets/sounds/alert.wav` ＋ `tools/logo.ps1`、`tools/mk_sound.py` —— **正是全部未跟踪新件**（`git status` 实证五件均 `??`）；旧清单 0.48.4/124 项＝跟踪件全集。四处登记全部到位：pyproject `py-modules`＋`package-data assets`（+`sounds/*.wav`）、`build()` root_mod 复制清单、`_LAYOUT`/`_TOOL_FALLBACK`（+logo.ps1）。
-- **根因修正（按事实改写，F58）**：本轮进行中曾诊断「mk_sound.py 因 `_LAYOUT` 漏登记而不在装配包内」—— 那只是症状。实测真根因是**清单口径**：sanctioned 流程 `--out D:/psl/poc`（release.py 默认值）使 final＝**仓根本身**，清单由 `_wheel_payload(final, final/MANIFEST.in)` 生成，天然覆盖 wheel 载荷；工作区变体用了**新建的** out 目录 ⇒ 装配时 final 不存在 ⇒ 构建器写不进 final/MANIFEST.in ⇒ 清单生成退化成「暂存包内容」fallback（那条带 `!!` 警告的分支）⇒ 实测 128 项**双向错配**：混入 14 个只进 sdist 的件（README/LICENSE/docs/references/.github/ci…）、漏掉 15 个真进 wheel 的件（tools/host_matrix.py、scripts/run_harness.py…）—— **同步那份 128 项清单，[E] 会从 5 未覆盖恶化成 15 未覆盖**。修法：以仓根工作树完整副本种子化 `out/antinel-security` 再装配（stage 在工作区外被 DST-02 拦，此为 sanctioned 形态的等效复现）⇒ 新清单 **129 项**与 wheel 载荷 131 项减 2 项按设计排除**严格集合相等**（双向空差集）。
+- **根因修正（按事实改写，F58）**：本轮进行中曾诊断「mk_sound.py 因 `_LAYOUT` 漏登记而不在装配包内」—— 那只是症状。实测真根因是**清单口径**：sanctioned 流程 `--out D:/psl/poc`（release.py 默认值）使 final＝**仓根本身**，清单由 `_wheel_payload(final, final/MANIFEST.in)` 生成，天然覆盖 wheel 载荷；工作区变体用了**新建的** out 目录 ⇒ 装配时 final 不存在 ⇒ 构建器写不进 final/MANIFEST.in ⇒ 清单生成退化成「暂存包内容」fallback（那条带 `!!` 警告的分支）⇒ 实测 128 项**双向错配**：混入 14 个只进 sdist 的件（README/LICENSE/docs/references/.github/ci…）、漏掉 15 个真进 wheel 的件（tools/host_matrix.py、scripts/run_harness.py…）—— **同步那份 128 项清单，[E] 会从 5 未覆盖恶化成 15 未覆盖**。修法：以仓根工作树完整副本种子化 `out/antinel-security` 再装配（stage 在工作区外被 AN-010 拦，此为 sanctioned 形态的等效复现）⇒ 新清单 **129 项**与 wheel 载荷 131 项减 2 项按设计排除**严格集合相等**（双向空差集）。
 - **连带修**：仓根 `psl/SKILL.md` 与根 `SKILL.md` 分家（根件手改后未再构建）⇒ 清单哈希算于 merge **之前**的旧件、插件/wheel 用的是合并后新件 ⇒ 插件自检当场 `drifted ['psl/SKILL.md']`。按 merge 的既定语义预同步两件再重装 ⇒ 插件自检「清单 129 项哈希全中 + 3 个 psl 产物在位 + 无多出文件」。
 - **四件套**（`ci/inbox_guards_0516.py`，5 绿/0 红/0 跳过，两个负控均实测判红）：PKG16-a 正判据（真实 wheel 131 成员/sdist 184 成员含焦点五件＋四处登记在位＋产品 [E] 集合相等）；N-PKG16-a 反向对照（安全夹具移除 py-modules 一条声明、真构建出 wheel ⇒ **同一把尺子**判红且归因纯——其余四件仍在）；N-PKG16-b 反向对照（真 wheel 副本的清单少一条 mk_sound.py ⇒ 产品 [E] 判红并点名）；PKG16-b 连带（30 个 py-modules 全在 wheel；`inbox_bubble.sound_path()`→assets/sounds/alert.wav、`inbox_logo.script_path()`→tools/logo.ps1 运行时资源路径可解析；判据 ID 无重名）；PKG16-c 观测（验收日志 [A][B][C][E][D] 五标头留存、产物大小/哈希与清单版本/条目数入册）。
 - 登记 **X-048**（T-09 同一事实两套口径），实例总数 47→48；`duplicate_gate_ids()=[]`。发布验收 **[A][B][C][E][D] 全部通过**（[E]：清单 129 项 == wheel 载荷 131 项 − 按设计排除 2 项）。
@@ -189,8 +189,8 @@ byte 级实测（会话历史）：CRLF=0、裸 LF=36 ⇒ `cmd.exe` 按字节错
 
 ## 6. 工具与环境避坑手册（前序实测踩过，别再踩）
 
-1. **Write/Edit 必须用 Windows 风格绝对路径**（`D:\psl\poc\antinel-security\...`）。POSIX 风格 `/d/...` 会被 Antinel DST-02 拦（白名单前缀 `d:/psl/poc/antinel-security/`），重试无效。
-2. **删除被 DST-01 拦**：临时文件只建不删。
+1. **Write/Edit 必须用 Windows 风格绝对路径**（`D:\psl\poc\antinel-security\...`）。POSIX 风格 `/d/...` 会被 Antinel AN-010 拦（白名单前缀 `d:/psl/poc/antinel-security/`），重试无效。
+2. **删除被 AN-009 拦**：临时文件只建不删。
 3. **新建文件必须带 SPDX 头**（0481 L1 扫全工作区含 `.workbuddy-ai/` 与 `_p_*.py`）：`.py` ⇒ `# SPDX-License-Identifier: Apache-2.0`（前 6 行内）；`.md` ⇒ `<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->`。本文件已带头。
 4. **Bash heredoc 会把 `\n` 变 `/n`** ⇒ 探针/脚本一律用 Write 落文件再跑（`_p_*.py`，已被 gitignore，勿提交）。
 5. **解释器一律用托管版**：`C:/Users/大马/.workbuddy-ai/binaries/python/versions/3.13.12/python.exe`；Node：`C:/Users/大马/.workbuddy-ai/binaries/node/versions/22.22.2-6/node.exe`（本机无 playwright/puppeteer）。

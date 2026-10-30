@@ -491,10 +491,10 @@ def n_s81():
 def s82():
     m = _hook()
     rules = _rules()
-    # ① 夹具前提：`_archive_dist` **确实不在** DST-01 的兜底名单里 —— 否则本判据无分辨力。
-    dst01 = [r for r in rules if r.get("id") == "DST-01"]
+    # ① 夹具前提：`_archive_dist` **确实不在** AN-009 的兜底名单里 —— 否则本判据无分辨力。
+    dst01 = [r for r in rules if r.get("id") == "AN-009"]
     if not dst01:
-        return "找不到 DST-01 规则 ⇒ 判据前提不成立"
+        return "找不到 AN-009 规则 ⇒ 判据前提不成立"
     excl = " ".join(dst01[0].get("exclude_patterns") or [])
     if "_archive_dist" in excl:
         return ("夹具失效：`_archive_dist` 已在兜底名单里 ⇒ 本判据测不出"
@@ -620,32 +620,32 @@ def s85():
 
 
 # ══════════════ S86 · 一个许可只开一扇门 ══════════════
-@check("S86 ★ 删除许可只门控**删除**规则：DST-02…DST-11（同属 destructive）不受它管辖")
+@check("S86 ★ 删除许可只门控**删除**规则：AN-010…AN-030（同属 destructive）不受它管辖")
 def s86():
     m = _hook()
     rules = _rules()
     got = [r.get("id") for r in rules if m._is_delete_rule(r)]
-    if got != ["DST-01"]:
-        return ("删除类规则集合为 %s（应恰为 ['DST-01']）—— 门控范围过宽会把"
+    if got != ["AN-009"]:
+        return ("删除类规则集合为 %s（应恰为 ['AN-009']）—— 门控范围过宽会把"
                 "「写项目外／云盘同步／提权」也一并放行（一个许可开多扇门）" % (got,))
     return True
 
 
-@check("N-S86 负控：把门控放宽成 category==destructive ⇒ 删除许可被顺带套到 DST-07 上 ⇒ 必须红")
+@check("N-S86 负控：把门控放宽成 category==destructive ⇒ 删除许可被顺带套到 AN-020 上 ⇒ 必须红")
 def n_s86():
-    gc = "git " + "clean" + " -fd"          # 拆开写，免得本文件自身被 DST-07 命中
+    gc = "git " + "clean" + " -fd"          # 拆开写，免得本文件自身被 AN-020 命中
     cmd = "rm -rf dist && " + gc
     live = _hook()
     blocks, vct, _e = _hits(live, cmd)
-    if "DST-07" not in blocks:
-        return ("夹具不成立：真实现下 `%s` 的 DST-07 本就没拦 ⇒ 负控无分辨力" % cmd)
-    # ★ 观察点不是「拦不拦」，是**删除许可有没有套到 DST-07 头上**。
-    #   2026-10-20 实测（本仓）：放宽门控后 DST-07 依然「被拦」，但那是因为
+    if "AN-020" not in blocks:
+        return ("夹具不成立：真实现下 `%s` 的 AN-020 本就没拦 ⇒ 负控无分辨力" % cmd)
+    # ★ 观察点不是「拦不拦」，是**删除许可有没有套到 AN-020 头上**。
+    #   2026-10-20 实测（本仓）：放宽门控后 AN-020 依然「被拦」，但那是因为
     #   dist 被 10 条 destructive 规则同时判 deny —— 「仍被拦」是**遮蔽**，
     #   不是「没被门控影响」。旧写法把遮蔽读成空转，于是负控恒假红。
     live_owners = {v.get("rule_id") for v in (vct or []) if v.get("rule_id")}
-    if "DST-07" in live_owners:
-        return ("夹具不成立：真实现下删除许可就套到 DST-07 上了 —— "
+    if "AN-020" in live_owners:
+        return ("夹具不成立：真实现下删除许可就套到 AN-020 上了 —— "
                 "S86 的『只管删除规则』本就没成立")
     mut = _hook()
     mut._is_delete_rule = lambda r: bool(r) and (
@@ -653,8 +653,8 @@ def n_s86():
         or str(r.get("id") or "").startswith("DST-"))
     _b2, vct2, _e2 = _hits(mut, cmd)
     mut_owners = {v.get("rule_id") for v in (vct2 or []) if v.get("rule_id")}
-    if "DST-07" not in mut_owners:
-        return ("负控失效：放宽门控后删除许可仍没套到 DST-07 上 —— "
+    if "AN-020" not in mut_owners:
+        return ("负控失效：放宽门控后删除许可仍没套到 AN-020 上 —— "
                 "说明 S86 那条『一个许可只开一扇门』根本没人守得住")
     return True
 
@@ -706,7 +706,7 @@ def s88():
     for cmd in ("rm -rf hooks", "rm -rf old-config", "rm -rf " + _OUTSIDE,
                 "rm -rf dist && rm -rf hooks"):
         blocks, _v, _e = _hits(m, cmd, rules=rules)
-        if "DST-01" not in blocks:
+        if "AN-009" not in blocks:
             return "既有保护被放宽：`%s` 不再拦（blocks=%s）" % (cmd, blocks)
     # ② 兜底名单在「两票取不到信号」时仍是最后退路（非 git 根 ⇒ 出口丙）
     nogit = _TMP.tmpdir(prefix="g0460_nogit_")

@@ -245,7 +245,7 @@ _REP = {
     "buckets": {"action": 2, "info": 2, "archive": 1},
     "action_groups": 2, "revived_window": 0,
     "posture": dict(_POSTURE),
-    "rules": [{"rule_id": "DST-01", "count": 2}],
+    "rules": [{"rule_id": "AN-009", "count": 2}],
     "chain": {"status": "ok", "files": 1, "records": 2, "broken": 0,
               "unchained": 0, "reason": ""},
     "ledger": {"days": 0, "streak_days": 0, "blocked": 0, "noticed": 0,
@@ -3117,10 +3117,10 @@ def n_t02():
 
 # ══════════════ T-03 · 排行行形态（0.51.0 日报页品质审查，拍板点 3/4）══════════════
 _RANK_ROWS = [
-    {"rule_id": "DST-04", "count": 2,
+    {"rule_id": "AN-012", "count": 2,
      "zh": "建立持久化机制（计划任务/系统服务/启动项/注册表 Run 键）",
      "label": "设置开机自动启动"},
-    {"rule_id": "SEC-01", "count": 1,
+    {"rule_id": "AN-001", "count": 1,
      "zh": "读取 .env 文件可能泄露 API 密钥与机密配置",
      "label": "读取密钥配置文件"},
 ]
@@ -3177,7 +3177,7 @@ def _t03_core(page):
     #    剥掉 rid 后可见文本不许再有任何规则号（裸 rule_id 兜底回潮即红 ——
     #    Q-04 自违反形态，2026-10-16 查证实锤过）。
     if not re.search(r'<span class="rid">[A-Z]{2,4}-\d{2}</span>', page):
-        return "排行行缺淡显编号（.rid）—— 收件箱记录「规则 SEC-01」对不上号"
+        return "排行行缺淡显编号（.rid）—— 收件箱记录「规则 AN-001」对不上号"
     bare = re.sub(r"\x00+", " ", re.sub(r"<[^>]+>", "\x00", PC.body_without_terms(
         re.sub(r'<span class="rid">[A-Za-z0-9-]*</span>', " ", page))))
     if re.search(r"[A-Z]{2,4}-\d{2}", bare):
@@ -3191,10 +3191,10 @@ def _t03_core(page):
 @check("T-03 ★ 排行行形态：短名主显示＋编号淡显＋审计全文退 hover")
 def t03():
     """0.51.0（品质审查拍板点 3/4，创始人 2026-10-16 截图指认）：Q-04 退编号
-    方向没错，但替代品 description_zh 是审计受众全文（最长 60 字、DST-10 内嵌
-    「——DST-09」自引用）⇒ 上屏挤成三四行、编号从数据后门回来。
+    方向没错，但替代品 description_zh 是审计受众全文（最长 60 字、AN-024 内嵌
+    「——AN-023」自引用）⇒ 上屏挤成三四行、编号从数据后门回来。
     新形态锁三件事：① 主显示＝label_zh（≤14 字，品质由 0360 W15/INV-4 锁）；
-    ② 规则号淡显 .rid（与问号全表同视觉语言，收件箱「规则 SEC-01」可对号）；
+    ② 规则号淡显 .rid（与问号全表同视觉语言，收件箱「规则 AN-001」可对号）；
     ③ rid 是可见文本里**唯一**的编号形态（zh 全文退 hover、裸 rule_id 兜底
     不许上主显示）。
     """
@@ -6198,7 +6198,7 @@ def _rid_prefix_problem(page):
     return None
 
 
-@check("T-05 规则号前缀位：rid 在短名之前（与收件箱「规则 SEC-01」同序）")
+@check("T-05 规则号前缀位：rid 在短名之前（与收件箱「规则 AN-001」同序）")
 def t05():
     return _rid_prefix_problem(_page("report", rep=_REP_0534))
 
@@ -6209,8 +6209,8 @@ def n_t05():
     if _rid_prefix_problem(page) is not None:
         return "夹具不成立：现行渲染就判红 —— 负控无分辨力"
     dead = page.replace(
-        '<span class="rid">DST-04</span>设置开机自动启动',
-        '设置开机自动启动<span class="rid">DST-04</span>')
+        '<span class="rid">AN-012</span>设置开机自动启动',
+        '设置开机自动启动<span class="rid">AN-012</span>')
     if dead == page:
         return "夹具不成立：摘不到规则行的 rid＋短名（结构已变）"
     if _rid_prefix_problem(dead) is None:

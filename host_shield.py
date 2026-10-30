@@ -2355,7 +2355,7 @@ def unregistered_chain_files(root=None, manifest_files=None):
 #   而 `pip install -U` 只换包、不跑 install ⇒ 项目副本永久停在首次安装的版本，
 #   且**没有任何提示**。
 #   实测（本仓，2026-10-25）：项目副本 version 0.34.0、manifest.skill_version
-#   0.33.1、包内 0.56.0 —— 落后 22 个版本号。这期间所有规则修复（含 SEC-04
+#   0.33.1、包内 0.56.0 —— 落后 22 个版本号。这期间所有规则修复（含 AN-004
 #   把 16 条误拦归零）对新装用户成立、对这台机器**零生效**。
 #
 # 为什么不做「自动刷新」：副本的 hash 就是 manifest 完整性比对的基准

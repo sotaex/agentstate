@@ -288,7 +288,7 @@ def record_usage_delta(event, session_id):
 
 
 def _accumulate_budget_state(session_id, entries):
-    """v0.27.0 (BUDGET-01 数据底座): 会话/项目日 两档 token 累计，供
+    """v0.27.0 (notice_budget 数据底座): 会话/项目日 两档 token 累计，供
     PreToolUse 预算执法读取。best-effort：预算执法基于已记录的事实，
     状态缺失时 PreToolUse fail-open（不执法也不谎报）。"""
     try:

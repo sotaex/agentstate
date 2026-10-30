@@ -176,7 +176,7 @@ action/info/all 的 unit 必含「分母」二字、`0360` 要求 `ledger` 词�
 仍然写盘**（`raw.find()` 返回 -1，切片 `raw[:N-1]` 从文件头截断）⇒ JSON 损坏
 （`_why` 值里的「2026-09-29」被插入 note 截断）。恢复过程：字节级定位 note 块
 起止剥除 → 剥离点裸 `\n` → `git diff` 验证与 HEAD 差异仅 release.version 一行
-（git checkout 被 Antinel DST-07 钩子拦下——**拦得对**，当时工作区还有别的改动）。
+（git checkout 被 Antinel AN-020 钩子拦下——**拦得对**，当时工作区还有别的改动）。
 **教训**：写盘类脚本必须**先验锚点再写**（`assert idx >= 0` 在 open() 之前），
 本次 assert 在写盘之后 ⇒ 形同虚设。
 
