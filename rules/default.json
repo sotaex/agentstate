@@ -23,19 +23,20 @@
   ],
   "hardcoded_rules": {
     "_note": "判定由钩子内置实现（代码），**不读本文件 rule 的 enabled 字段**（本产品**没有**独立的禁用清单：唯一的关法是规则文件里该条写 enabled:false，走 _disabled()）。用户关掉它们不会生效，要关只能改代码。两组必须分开：code_only 根本不在 rules 数组里（没有可关的条目，任何配置都碰不到它）；declared_but_code_driven 在 rules 里但判定走代码（enabled 字段对它无效，它写 false 只是为了不让通用正则接管）。",
+    "_note_0.63": "★ 0.63.0 改名后这四条**已不同质**，不再是一类，只是暂时还放在同一个字段里（拆分留给 v2，见设计文档 §6）：AN-037（原 SLOP-01）是**真规则**、在 rules 数组里、可读不可关；OUT-01 **保留旧号**（它走 PostToolUse 通道，表表达不了，等 channel 字段落地再收编 AN-038）；DEV-01（原 GOV-01）已**去号改名**，不再占用判据号段，改走 type:governance；notice_budget 已**去号**，有专属 type notice_budget_*，**永不回收**。",
     "code_only": {
-      "OUT-01": "输出面：私有密钥/凭据出现在工具输出里（hooks/pre_tool_use.py:3368 起，PostToolUse）",
-      "GOV-01": "套件治理：A1/A2 写入时刻拦截（_suite_gov_hit，同 ci/delivery_gate.py 双向同步）",
-      "BUDGET-01": "提醒预算：token 预算超阈值（_budget_hit）"
+      "OUT-01": "输出面：私有密钥/凭据出现在工具输出里（hooks/post_tool_use.py:605 起，PostToolUse）。★ 0.63.0：号未收编，保留旧号直到 channel 字段落地",
+      "DEV-01": "套件治理：A1/A2 写入时刻拦截（_suite_gov_hit，同 ci/delivery_gate.py 双向同步）。★ 0.63.0 去号：原 GOV-01，不再占判据号段，改走 type:governance",
+      "notice_budget": "提醒预算：token 预算超阈值（_budget_hit）。★ 0.63.0 去号：原 BUDGET-01，已有专属 type notice_budget_*，此号永不回收"
     },
     "declared_but_code_driven": {
-      "SLOP-01": "撞名/打字抢注检测（_slop_hit）。本文件里该条 enabled=false 是**设计**：它只承载描述与文档，判定走代码内置参考集（rules/typosquat_top.json），避免静态正则误报全部正常安装。详见该条 note。"
+      "AN-037": "撞名/打字抢注检测（_slop_hit）。本文件里该条 enabled=false 是**设计**：它只承载描述与文档，判定走代码内置参考集（rules/typosquat_top.json），避免静态正则误报全部正常安装。详见该条 note。★ 0.63.0：原 SLOP-01"
     }
   },
   "rules": [
     {
-      "id": "SEC-01",
-      "an": "AN-001",
+      "id": "AN-001",
+      "legacy_id": "SEC-01",
       "name": "Sensitive file read (.env)",
       "category": "secrets",
       "severity": "critical",
@@ -69,8 +70,8 @@
       "label_zh": "读取密钥配置文件"
     },
     {
-      "id": "SEC-02",
-      "an": "AN-002",
+      "id": "AN-002",
+      "legacy_id": "SEC-02",
       "name": "SSH key file read",
       "category": "secrets",
       "severity": "critical",
@@ -99,8 +100,8 @@
       "label_zh": "读取 SSH 私钥"
     },
     {
-      "id": "SEC-03",
-      "an": "AN-003",
+      "id": "AN-003",
+      "legacy_id": "SEC-03",
       "name": "Cloud credential file read",
       "category": "secrets",
       "severity": "critical",
@@ -128,8 +129,8 @@
       "label_zh": "读取云服务凭证文件"
     },
     {
-      "id": "SEC-04",
-      "an": "AN-004",
+      "id": "AN-004",
+      "legacy_id": "SEC-04",
       "name": "Wallet/keystore file read",
       "category": "secrets",
       "severity": "critical",
@@ -164,8 +165,8 @@
       "label_zh": "读取钱包或密钥库文件"
     },
     {
-      "id": "SEC-05",
-      "an": "AN-005",
+      "id": "AN-005",
+      "legacy_id": "SEC-05",
       "name": "Browser data read",
       "category": "secrets",
       "severity": "critical",
@@ -198,8 +199,8 @@
       "label_zh": "读取浏览器密码数据"
     },
     {
-      "id": "NET-01",
-      "an": "AN-006",
+      "id": "AN-006",
+      "legacy_id": "NET-01",
       "name": "Shell network request",
       "category": "network",
       "severity": "warning",
@@ -239,8 +240,8 @@
       "label_zh": "访问白名单外的域名"
     },
     {
-      "id": "NET-02",
-      "an": "AN-007",
+      "id": "AN-007",
+      "legacy_id": "NET-02",
       "name": "Python network request",
       "category": "network",
       "severity": "warning",
@@ -273,8 +274,8 @@
       "label_zh": "代码里内置联网调用"
     },
     {
-      "id": "NET-03",
-      "an": "AN-008",
+      "id": "AN-008",
+      "legacy_id": "NET-03",
       "name": "Non-whitelisted domain connection",
       "category": "network",
       "severity": "warning",
@@ -306,8 +307,8 @@
       "label_zh": "命令里出现陌生域名"
     },
     {
-      "id": "DST-01",
-      "an": "AN-009",
+      "id": "AN-009",
+      "legacy_id": "DST-01",
       "name": "File deletion",
       "category": "destructive",
       "severity": "critical",
@@ -361,8 +362,8 @@
       "label_zh": "删除文件或目录"
     },
     {
-      "id": "DST-02",
-      "an": "AN-010",
+      "id": "AN-010",
+      "legacy_id": "DST-02",
       "name": "Write outside project root",
       "category": "destructive",
       "severity": "critical",
@@ -389,8 +390,8 @@
       "label_zh": "写到项目目录之外"
     },
     {
-      "id": "DST-03",
-      "an": "AN-011",
+      "id": "AN-011",
+      "legacy_id": "DST-03",
       "name": "Shell configuration modification",
       "category": "destructive",
       "severity": "critical",
@@ -423,8 +424,8 @@
       "label_zh": "修改终端启动配置"
     },
     {
-      "id": "DST-04",
-      "an": "AN-012",
+      "id": "AN-012",
+      "legacy_id": "DST-04",
       "name": "Persistence mechanism",
       "category": "destructive",
       "severity": "critical",
@@ -473,8 +474,8 @@
       "label_zh": "设置开机自动启动"
     },
     {
-      "id": "DST-05",
-      "an": "AN-013",
+      "id": "AN-013",
+      "legacy_id": "DST-05",
       "name": "Privilege escalation",
       "category": "destructive",
       "severity": "warning",
@@ -507,8 +508,8 @@
       "label_zh": "尝试提权操作"
     },
     {
-      "id": "CTX-01",
-      "an": "AN-014",
+      "id": "AN-014",
+      "legacy_id": "CTX-01",
       "name": "Environment variable enumeration",
       "category": "context",
       "severity": "warning",
@@ -533,8 +534,8 @@
       "label_zh": "枚举全部环境变量"
     },
     {
-      "id": "CTX-02",
-      "an": "AN-015",
+      "id": "AN-015",
+      "legacy_id": "CTX-02",
       "name": "Prompt injection pattern in instruction file",
       "category": "injection",
       "severity": "critical",
@@ -565,8 +566,8 @@
       "label_zh": "技能文件藏注入指令"
     },
     {
-      "id": "CTX-03",
-      "an": "AN-016",
+      "id": "AN-016",
+      "legacy_id": "CTX-03",
       "name": "Invisible Unicode characters",
       "category": "injection",
       "severity": "critical",
@@ -666,8 +667,8 @@
       "label_zh": "检出隐形特殊字符"
     },
     {
-      "id": "CTX-04",
-      "an": "AN-017",
+      "id": "AN-017",
+      "legacy_id": "CTX-04",
       "name": "Encoded payload",
       "category": "injection",
       "severity": "warning",
@@ -690,8 +691,8 @@
       "label_zh": "检出超长编码载荷"
     },
     {
-      "id": "CTX-05",
-      "an": "AN-018",
+      "id": "AN-018",
+      "legacy_id": "CTX-05",
       "name": "Skill name mismatch",
       "category": "metadata",
       "severity": "warning",
@@ -710,8 +711,8 @@
       "label_zh": "技能名与目录不符"
     },
     {
-      "id": "DST-06",
-      "an": "AN-019",
+      "id": "AN-019",
+      "legacy_id": "DST-06",
       "name": "Remote script piped to interpreter",
       "category": "destructive",
       "severity": "critical",
@@ -739,8 +740,8 @@
       "label_zh": "下载脚本直接执行"
     },
     {
-      "id": "DST-07",
-      "an": "AN-020",
+      "id": "AN-020",
+      "legacy_id": "DST-07",
       "name": "Irreversible git discard",
       "category": "destructive",
       "severity": "critical",
@@ -763,8 +764,8 @@
       "label_zh": "丢弃工作区改动"
     },
     {
-      "id": "SEC-06",
-      "an": "AN-021",
+      "id": "AN-021",
+      "legacy_id": "SEC-06",
       "severity": "critical",
       "category": "secrets",
       "type": "tool_call",
@@ -797,8 +798,8 @@
       "label_zh": "内容里出现明文密钥"
     },
     {
-      "id": "DST-08",
-      "an": "AN-022",
+      "id": "AN-022",
+      "legacy_id": "DST-08",
       "name": "Permission/ownership destruction",
       "category": "destructive",
       "severity": "critical",
@@ -832,8 +833,8 @@
       "note": "0.62.1 补 Windows 等价。原三条全是 Unix，而本条 severity=critical => block，故 Windows 上这条 block 规则从未生效过。Windows 侧按 Unix 侧同一口径收紧到「递归」：icacls /deny 直接拦（等价 chmod 000）；icacls /reset 必须同时带 /t 才拦（单文件重置继承是修权限的正当动作）；takeown 必须带 /r 才拦（单文件夺回属主是管理员日常）。exclude_patterns 四条只放行**单条**只读命令（末尾 [^;&|\\n]*$），链式命令不会被误放行 —— 起因是 _basic_hit 匹配「file_path ＋ 整条命令文本」，文档/日志里出现该词也会命中。"
     },
     {
-      "id": "DST-09",
-      "an": "AN-023",
+      "id": "AN-023",
+      "legacy_id": "DST-09",
       "name": "Alternate data stream write (file path)",
       "category": "destructive",
       "severity": "critical",
@@ -860,8 +861,8 @@
       "label_zh": "写入隐形备用数据流"
     },
     {
-      "id": "DST-10",
-      "an": "AN-024",
+      "id": "AN-024",
+      "legacy_id": "DST-10",
       "name": "Alternate data stream write (command)",
       "category": "destructive",
       "severity": "critical",
@@ -889,8 +890,8 @@
       "label_zh": "命令行写隐形数据流"
     },
     {
-      "id": "CTX-07",
-      "an": "AN-025",
+      "id": "AN-025",
+      "legacy_id": "CTX-07",
       "name": "Inline base64-decode exec",
       "category": "injection",
       "severity": "critical",
@@ -912,8 +913,8 @@
       "label_zh": "解码后立即执行代码"
     },
     {
-      "id": "SEC-07",
-      "an": "AN-026",
+      "id": "AN-026",
+      "legacy_id": "SEC-07",
       "name": "Clipboard read",
       "category": "secrets",
       "severity": "critical",
@@ -945,8 +946,8 @@
       "label_zh": "读取系统剪贴板"
     },
     {
-      "id": "SEC-08",
-      "an": "AN-027",
+      "id": "AN-027",
+      "legacy_id": "SEC-08",
       "name": "Screen capture",
       "category": "secrets",
       "severity": "warning",
@@ -979,8 +980,8 @@
       "label_zh": "截屏或录屏"
     },
     {
-      "id": "SEC-09",
-      "an": "AN-028",
+      "id": "AN-028",
+      "legacy_id": "SEC-09",
       "name": "IM/mail local store read",
       "category": "secrets",
       "severity": "critical",
@@ -1021,8 +1022,8 @@
       "label_zh": "读取聊天邮件记录"
     },
     {
-      "id": "SEC-10",
-      "an": "AN-029",
+      "id": "AN-029",
+      "legacy_id": "SEC-10",
       "name": "Input-method user dictionary read",
       "category": "secrets",
       "severity": "warning",
@@ -1057,8 +1058,8 @@
       "label_zh": "读取输入法词库"
     },
     {
-      "id": "DST-11",
-      "an": "AN-030",
+      "id": "AN-030",
+      "legacy_id": "DST-11",
       "name": "Write into cloud-sync directory",
       "category": "destructive",
       "severity": "critical",
@@ -1082,8 +1083,8 @@
       "label_zh": "写进云盘同步目录"
     },
     {
-      "id": "NET-04",
-      "an": "AN-031",
+      "id": "AN-031",
+      "legacy_id": "NET-04",
       "name": "Tunnel / covert channel",
       "category": "network",
       "severity": "warning",
@@ -1114,8 +1115,8 @@
       "label_zh": "建立隐蔽出网通道"
     },
     {
-      "id": "MCP-01",
-      "an": "AN-032",
+      "id": "AN-032",
+      "legacy_id": "MCP-01",
       "name": "Write to MCP config file",
       "category": "supply_chain",
       "severity": "warning",
@@ -1145,8 +1146,8 @@
       "label_zh": "MCP 配置被改动"
     },
     {
-      "id": "MCP-02",
-      "an": "AN-033",
+      "id": "AN-033",
+      "legacy_id": "MCP-02",
       "name": "Prompt injection in MCP tool description",
       "category": "supply_chain",
       "severity": "warning",
@@ -1179,8 +1180,8 @@
       "label_zh": "MCP 工具描述投毒"
     },
     {
-      "id": "MCP-03",
-      "an": "AN-034",
+      "id": "AN-034",
+      "legacy_id": "MCP-03",
       "name": "Unaudited remote MCP server",
       "category": "supply_chain",
       "severity": "warning",
@@ -1210,8 +1211,8 @@
       "label_zh": "MCP 指向远程服务器"
     },
     {
-      "id": "MCP-04",
-      "an": "AN-035",
+      "id": "AN-035",
+      "legacy_id": "MCP-04",
       "name": "Plaintext secret in MCP config env",
       "category": "supply_chain",
       "severity": "warning",
@@ -1245,8 +1246,8 @@
       "label_zh": "MCP 配置含明文密钥"
     },
     {
-      "id": "SEC-11",
-      "an": "AN-036",
+      "id": "AN-036",
+      "legacy_id": "SEC-11",
       "name": "Canary file read",
       "category": "canary",
       "severity": "warning",
@@ -1270,8 +1271,8 @@
       "label_zh": "读取诱饵文件"
     },
     {
-      "id": "SLOP-01",
-      "an": "AN-037",
+      "id": "AN-037",
+      "legacy_id": "SLOP-01",
       "name": "Typosquatted package name in install command",
       "category": "supply_chain",
       "severity": "warning",

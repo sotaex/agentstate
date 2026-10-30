@@ -3142,9 +3142,14 @@ def main():
     record("M2-3 scan 的 MCP 专项通道：MCP-02/03/04 全部现身",
            "MCP-02" in _mf_ids and "MCP-03" in _mf_ids and "MCP-04" in _mf_ids,
            "ids=%s" % _mf_ids)
-    _mf_only = [i for i in _mf_ids if i.startswith("MCP")]
+    # ★ 0.63.0 改名：原写 `i.startswith("MCP")`——**用规则号前缀承载"这是哪一类"**。
+    #   改名后一律 `AN-NNN`，前缀不再区分家族 ⇒ 那个 startswith 恒假，判据变成
+    #   "空集全在集合里"＝**恒真**（假绿）。改成显式集合（旧号见 references/ID_MAP.md：
+    #   MCP-02/03/04 → AN-033/034/035）。
+    _MCP_NOW = ("AN-033", "AN-034", "AN-035")
+    _mf_only = [i for i in _mf_ids if i in _MCP_NOW]
     record("M2-4 良性 server 不误报（fs server 无告警，负例）",
-           all(i in ("MCP-02", "MCP-03", "MCP-04") for i in _mf_only) and _mf_only.count("MCP-02") == 1,
+           all(i in _MCP_NOW for i in _mf_only) and _mf_only.count("AN-033") == 1,
            "ids=%s" % _mf_ids)
     rc, out, err = hook("Bash", {"command": "echo '{}' > .mcp.json"}, _f1)[:3]
     record("M2-5 Bash 重定向写 .mcp.json → MCP-01（command 通道）",

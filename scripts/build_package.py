@@ -766,14 +766,22 @@ _GATE_OVERRIDE = {"NET-01": 4, "NET-02": 4}
 
 
 def _compress_ids(ids):
-    """['SEC-01',...,'SEC-10'] → 'SEC-01..10'；离散的 → 'CTX-02..04, CTX-07'。"""
+    """['AN-001',...,'AN-010'] → 'AN-001..010'；离散的 → 'AN-002..004, AN-007'。
+
+    ★ 0.63.0 改名：位宽从 `%02d` 改成**取自 id 本身**。写死两位 ⇒ 三位号被压成
+      `AN-01..37`，随包文档里那个区间串反查全部落空，而且**不报错**。
+      用 max(len(num)) 而不是写死 3：将来若出现 `AN-1000` 或回退两位号，
+      这个函数仍然自洽（写死位宽是同一个错误的另一种形态）。
+    """
     fams = {}
-    for i in ids:                                   # 'SEC-01' -> ('SEC', 1)
+    for i in ids:                                   # 'AN-001' -> ('AN', 1, 3)
         fam, num = i.rsplit("-", 1)
-        fams.setdefault(fam, []).append(int(num))
+        fams.setdefault(fam, []).append((int(num), len(num)))
     parts = []
     for fam in sorted(fams):
-        nums = sorted(fams[fam])
+        pairs = sorted(fams[fam])
+        width = max(w for _, w in pairs)
+        nums = [n for n, _ in pairs]
         runs, start, prev = [], nums[0], nums[0]
         for n in nums[1:] + [None]:
             if n is not None and n == prev + 1:
@@ -782,7 +790,10 @@ def _compress_ids(ids):
             runs.append((start, prev))
             start, prev = n, n
         for a, b in runs:
-            parts.append("%s-%02d..%02d" % (fam, a, b) if b > a else "%s-%02d" % (fam, a))
+            if b > a:
+                parts.append("%s-%0*d..%0*d" % (fam, width, a, width, b))
+            else:
+                parts.append("%s-%0*d" % (fam, width, a))
     return ", ".join(parts)
 
 

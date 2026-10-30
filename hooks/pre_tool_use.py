@@ -3788,16 +3788,18 @@ def _notice_budget_trace(res):
     rid = str(res.get("rule_id") or "?")
     # ★★ 0.62.0（2026-10-30）：**字段拆义**（铁律 44「同值不同义」）。
     #   `notice_gate(rule_id, snippet)` 的第一个参数历史上既装真规则号
-    #   （SLOP-01 / CTX-01 …）又装**分桶 key**（`DST-02-BASH` —— 同一规则
-    #   DST-02 的 Bash 提醒通道，见下方 `notice_gate("DST-02-BASH", cand)`）。
+    #   （SLOP-01 / CTX-01 …）又装**分桶 key**（`AN-010-BASH` —— 同一规则
+    #   AN-010 的 Bash 提醒通道，见下方 `notice_gate("AN-010-BASH", cand)`）。
     #   直接把 raw 写进 `rule_id`，账本里就出现了 390 条「规则库里没有的规则号」，
     #   看起来像第 38 条规则，**实际是分桶名占了字段名**。
     #   ⇒ 写入侧拆成两个字段：`rule_id` 只放真规则号，`bucket` 放原始分桶名。
     #   ★ 为什么不改 `notice_gate` 的签名：它有 38 个调用点，改签名是更大的
     #     改动面；错的只是「写进账本时用了哪个字段名」，就地拆最省。
     #   ★ 为什么不硬编码 `-BASH` 后缀：将来可能有 `-WRITE` 等其它通道。
-    #     规则号的格式是固定的「2–5 个大写字母 + 连字符 + 两位数字」，用它判。
-    _m = re.match(r"^([A-Z]{2,5}-\d{2})", rid)
+    #     规则号的格式是固定的「2–5 个大写字母 + 连字符 + 2–3 位数字」，用它判。
+    #     ★ 0.63.0 改名：号段统一成 `AN-001`（三位）⇒ `\d{2}` → `\d{2,3}`。
+    #       不改 ⇒ `AN-010-BASH` 被截成 `AN-01`，账本里写进一个不存在的规则号。
+    _m = re.match(r"^([A-Z]{2,5}-\d{2,3})", rid)
     _rule_id = _m.group(1) if _m else "-"
     try:
         if res.get("closed"):
@@ -4490,6 +4492,10 @@ def collect_hits(rules, tool_name, texts, project_root, file_targets, policy=Non
             sev = _lvl
         action = (rule.get("action") or ("block" if sev == "critical" else "alert")).lower()
         entry = {"rule_id": rule.get("id", "?"),
+                 # 0.63.0 改名：号不再承载语义。`net_mode=block` 的升级判定原来靠
+                 # `rule_id.startswith("NET")`，改名后一律是 `AN-`，那样判会**静默失效**
+                 # ⇒ 把 category 带进命中字典，让升级判定读字段而不是读号。
+                 "category": rule.get("category", ""),
                  "severity": sev,
                  "action": action,
                  "match_kind": hit[1],
@@ -5115,9 +5121,12 @@ def main():
     t_match_done = time.perf_counter()           # 0.32.2 (B1)
     # 0.26.0 (对抗分析 v1.0): net_mode=block —— 网络外传从"提醒"升级为"拦截"。
     # 仅在策略显式 block 时升级 NET 命中；默认 warn 保持不变（分寸：不静默加严）。
+    # ★ 0.63.0 改名：原判据是 `rule_id.startswith("NET")`——**用规则号承载语义**。
+    #   改名后所有规则都是 `AN-NNN`，这个 startswith 恒假 ⇒ `net_mode=block`
+    #   **静默失效**（演练实测：基线绿 → 改名版红）。改读命中字典的 `category`。
     if str((policy.get("settings") or {}).get("net_mode", "warn")).lower() == "block":
         for h in hits:
-            if h.get("action") == "alert" and str(h.get("rule_id") or "").startswith("NET"):
+            if h.get("action") == "alert" and str(h.get("category") or "") == "network":
                 h["severity"] = "critical"
                 h["action"] = "block"
     blocking = [h for h in hits if h["action"] == "block"]

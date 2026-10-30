@@ -149,6 +149,20 @@ rules = json.load(open(os.path.join(PKG, "rules", "default.json"), encoding="utf
 fam = {}
 for r in rules:
     fam.setdefault(r["id"].split("-")[0], []).append(r["id"])
+
+
+def _now(_legacy):
+    """旧号 → 现行号（0.63.0 改名用）。
+
+    ★ 为什么需要它：A4 原来写死 `"NET-01" in err`。改名后账本/提示里的号是 `AN-006`，
+      写死就是**恒红**——恒红判据最后一定会被放宽，等于没有判据。
+      这里按 `legacy_id` 反查，找不到就退回原串（旧表上也仍然成立）。
+    """
+    for _r in rules:
+        if _r.get("legacy_id") == _legacy or _r.get("id") == _legacy:
+            return _r["id"]
+    return _legacy
+
 # 0.29.0：**不再硬编码条数**。此前 A1 写死 `len(rules) == 24`、A2 写死家族计数
 # （SEC6/NET3/DST10/CTX5）。规则集一变（25→31）这两个守卫就变成**假红**：rules 与文档
 # 其实一致，只是守卫自己过期了。**守卫过期 = 没有守卫。** 正确判据是"文档 vs 数据"：
@@ -159,6 +173,14 @@ check("A1 规则总数与 THREAT_MODEL 宣称一致", _claimed == len(rules),
       f"宣称 {_claimed}，实际 {len(rules)}")
 # A2 改成**结构不变量**：每个家族的编号必须自 1 起连续、无洞、无重复。
 # 这样规则增减不会让它假红，而"加了 DST-12 却漏了 DST-11"这类真错仍会被抓住。
+#
+# ★ 0.63.0 改名（D2）：原语义「同族内不许跳号」在改名后**只剩一个家族**（`AN`），
+#   1..37 连续 ⇒ **几乎恒真**。恒真判据等于没有判据，最后一定会被放宽。
+#   ⇒ 换成 A2′：号空间自洽 = `AN` 连续无洞无重复 **且** `id` ↔ `legacy_id` 双向单射。
+#   后半条才是改名后真正能红的：手工删一条规则、两条写同一个 `legacy_id`、
+#   或把 `legacy_id` 误写成新号（映射表被自己销毁，旧账一条都读不出来）。
+#   ★ 不能改成"按 category 查连续性"——`an` 的分配不按 category 分组（跨族交叉），
+#     硬按 category 查会造出一条**时红时绿**的假判据，比恒真更坏。
 #
 # 0.29.0 增补：**已知编号洞显式声明**。CTX-06 经查在两仓（源/产物）均不存在、
 # 全仓零引用、0.29.0 之前的备份里也没有 ⇒ 是**从未存在过的历史遗留**，不是被删掉的。
@@ -178,10 +200,34 @@ for _f, _ids in sorted(fam.items()):
     if _dup or _missing or _stale:
         _gaps.append({"家族": _f, "实际": _n, "重复": _dup,
                       "新出现的洞": _missing, "声明过期(洞已补上)": _stale})
-check("A2 家族编号自 1 起连续（已知洞 %s 除外）、无重复" % (
+
+# A2′ 的第二半：id ↔ legacy_id 双向单射（0.63.0 新增）
+_bi = []
+_ids_all = [r.get("id") for r in rules]
+_leg_all = [r.get("legacy_id") for r in rules]
+_noleg = [a for a, b in zip(_ids_all, _leg_all) if not b]
+_dup_id = sorted(set(x for x in _ids_all if _ids_all.count(x) > 1))
+_dup_leg = sorted(set(x for x in _leg_all if x and _leg_all.count(x) > 1))
+_overlap = sorted(set(_ids_all) & set(b for b in _leg_all if b))
+if _noleg:
+    _bi.append("没有 legacy_id 的规则 %s（旧账将读不出来）" % _noleg)
+if _dup_id:
+    _bi.append("id 重复 %s" % _dup_id)
+if _dup_leg:
+    _bi.append("legacy_id 重复 %s（映射退化成一对多）" % _dup_leg)
+if _overlap:
+    _bi.append("同一字符串同时出现在 id 与 legacy_id %s（映射表被自己销毁）" % _overlap)
+if len(set(b for b in _leg_all if b)) != len(set(_ids_all)):
+    _bi.append("旧号集合与新号集合大小不等 %d vs %d" % (
+        len(set(b for b in _leg_all if b)), len(set(_ids_all))))
+
+check("A2′ 号空间自洽：家族编号连续无洞无重复 且 id↔legacy_id 双向单射"
+      "（已知洞 %s 除外）" % (
           "、".join("%s-%02d" % (f, n) for f, s in sorted(KNOWN_HOLES.items()) for n in sorted(s)) or "无"),
-      not _gaps,
-      f"异常 {_gaps}；实际计数 {json.dumps({k: len(v) for k, v in fam.items()})}")
+      not _gaps and not _bi,
+      (f"编号异常 {_gaps}；" if _gaps else "")
+      + (f"映射异常 {_bi}；" if _bi else "")
+      + f"实际计数 {json.dumps({k: len(v) for k, v in fam.items()})}")
 
 # A10（0.29.0 新增）：**随包文档里的规则区间 vs 实际规则**。
 # 为什么必须有这一项：0.29.0 把规则从 25 加到 31，总数用令牌自动跟上了，
@@ -197,6 +243,17 @@ check("A2 家族编号自 1 起连续（已知洞 %s 除外）、无重复" % (
 #   ⇒ 改为**逐文档**检查，新增文档时只要加进 `_RANGE_DOCS` 即可。
 _RANGE_DOCS = ["references/THREAT_MODEL.md", "README.md"]
 _live_ids = set((_f2, int(i.split("-")[1])) for _f2, _ids2 in fam.items() for i in _ids2)
+# ★ 0.63.0：号从两位变三位。写死 `%02d` ⇒ 报错信息里出现 `AN-1`，读者认不出是哪个号。
+#   位宽一律取自规则表本身（同 `build_package._compress_ids` 的做法）。
+_wid = {}
+for _f2, _ids2 in fam.items():
+    _wid[_f2] = max(len(i.split("-")[1]) for i in _ids2)
+
+
+def _fmt(_f2, _n2):
+    return "%s-%0*d" % (_f2, _wid.get(_f2, 3), _n2)
+
+
 _ghost, _short = [], []
 for _docrel in _RANGE_DOCS:
     _dp = os.path.join(PKG, _docrel)
@@ -205,14 +262,18 @@ for _docrel in _RANGE_DOCS:
         continue
     _txt = open(_dp, encoding="utf-8").read()
     _doc_ids = set()
-    for _mm in re.finditer(r"\b([A-Z]{3})-(\d{2})(?:\.\.(\d{2}))?", _txt):
+    # ★ 0.63.0：原正则 `\b([A-Z]{3})-(\d{2})` 是"三位前缀＋两位数字"。
+    #   `AN-001` 是两位前缀＋三位数字 ⇒ **一条都匹配不上** ⇒ `_doc_ids` 恒空
+    #   ⇒ A10 **完全空转、恒绿**（演练实测）。同时旧号 `SEC-01` 抓得到但
+    #   `SEC` 不在 `fam` 里被跳过 ⇒ 双向空转。改成前缀 2–5 位、数字 2–3 位。
+    for _mm in re.finditer(r"\b([A-Z]{2,5})-(\d{2,3})(?:\.\.(\d{2,3}))?", _txt):
         _f2, _a = _mm.group(1), int(_mm.group(2))
         _b = int(_mm.group(3)) if _mm.group(3) else _a
         if _f2 not in fam:
             continue                               # 不是规则家族的缩写，不参与
         for _k in range(_a, min(_b, _a + 200) + 1):   # 上限防呆，避免文档笔误炸掉
             _doc_ids.add((_f2, _k))
-    for _x in sorted("%s-%02d" % y for y in (_doc_ids - _live_ids)):
+    for _x in sorted(_fmt(*y) for y in (_doc_ids - _live_ids)):
         _ghost.append("%s:%s" % (_docrel, _x))     # 文档提了但不存在
     _byfam = {}
     for _f2, _n2 in _doc_ids:
@@ -226,12 +287,12 @@ for _docrel in _RANGE_DOCS:
         _miss = [x for x in range(max(_docn) + 1, max(_liven) + 1)
                  if x not in set(KNOWN_HOLES.get(_f2, ()))]
         if _miss:
-            _short.append("%s: %s 止于 %02d、实际止于 %02d（少报 %s）" % (
-                _docrel, _f2, max(_docn), max(_liven),
-                "、".join("%s-%02d" % (_f2, x) for x in _miss)))
+            _short.append("%s: %s 止于 %s、实际止于 %s（少报 %s）" % (
+                _docrel, _f2, _fmt(_f2, max(_docn)), _fmt(_f2, max(_liven)),
+                "、".join(_fmt(_f2, x) for x in _miss)))
         if min(_docn) != min(_liven):
-            _short.append("%s: %s 起于 %02d、实际起于 %02d" % (
-                _docrel, _f2, min(_docn), min(_liven)))
+            _short.append("%s: %s 起于 %s、实际起于 %s" % (
+                _docrel, _f2, _fmt(_f2, min(_docn)), _fmt(_f2, min(_liven))))
 check("A10 随包文档（THREAT_MODEL + README）规则区间与实际一致（不多报、不少报）",
       not _ghost and not _short,
       ("文档提到但不存在的规则 %s；" % _ghost if _ghost else "")
@@ -242,7 +303,7 @@ _chk_hook("A3 critical=block：exit2+stdout JSON+stderr 双通道", rc,
       rc == 2 and out.get("decision") == "block" and "拦截" in err, f"rc={rc} out={out}", err)
 rc, out, err = hook("pre_tool_use.py", "Bash", {"command": "curl http://evil-drift-check.com/x"})
 _chk_hook("A4 warning=alert：exit0+stderr 提醒+放行", rc,
-      rc == 0 and "NET-01" in err and out.get("decision") != "block", f"rc={rc}", err)
+      rc == 0 and _now("NET-01") in err and out.get("decision") != "block", f"rc={rc}", err)
 
 # A5 whitelist.paths：放行 SEC 读 + dst02_path_whitelisted 留痕（写 .ssh 下一个白名单路径）
 pol = json.load(open(os.path.join(proj, ".psl", "policy.json"), encoding="utf-8"))
