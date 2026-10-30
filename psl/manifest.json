@@ -62,9 +62,8 @@
   "challenge/README.md": "sha256:298396eabc50aef0de8a68ee1dc4cf2bb036365c5e32d8f4164e6baf29176bd4",
   "challenge/attack.py": "sha256:18e41a6fff35e6a284b76126addf96575356e36dd8a555f6679b850dd85d51df",
   "challenge/chain/2026-10-28.jsonl": "sha256:89e86dc00b0c9f13fb9d066743d5888e88cb99868830ff6730bb35df427d2359",
-  "challenge/chain/2026-10-29.jsonl": "sha256:f766ff22cd700db09288c02c489a99bbc30dff8a942b5628dc78737153fdbba7",
-  "challenge/chain/day_manifest.json": "sha256:c58d9422331764b12d8a55ad89c7dc26aca58e92f12462d453e362d220a555c6",
-  "challenge/chain/meta.json": "sha256:44ecf04c89947ca00a7e88a24199b373cf9afe47df8c78d8d3560beab8d24c7b",
+  "challenge/chain/day_manifest.json": "sha256:e879e0096c44d987580b91371bb8511535eb6fdeeb5d78d5857b3db6fa788684",
+  "challenge/chain/meta.json": "sha256:69ec6254f4367b5e7c85606017eb5276e952a06025e0fedb2ff0d1d402388b06",
   "challenge/generate_challenge.py": "sha256:6bf9465d8c222cf03e05e23ebd29d5d3f2d4e1fa6448e54d6b33cc4f73751757",
   "challenge/tamper-lab.html": "sha256:66a4e3d35142916a3338aeb9d92b54aa35b3633ee3198a0929a1d54aae2acdfa",
   "challenge/tamper.py": "sha256:0a08b82ccbf1afaa1342be6fbc07306b3356b254fbaaada90c2b21e3d0768227",
@@ -165,6 +164,7 @@
   "tools/verify_namespaces.py": "sha256:85d6ffb905dcf5abffb453ca5b1992f02b3aeb63f93aaad39bc6dcf3fb15e0b0",
   "transcript_reader.py": "sha256:c0ce99c5bdfb255f170ca744c011ae64ceb9569d1c9dd8efc1a2c096ff89dc1c",
   "ui_server.py": "sha256:45edb0fab43424bcc280397dab236deff9f138642c792ae7c58992cea902b166",
-  "ci/freeze_zones.json": "sha256:df13618075de425e6a3c3fb2f7023536b4b56355f9542e7e1aad0e12289cf2df"
+  "ci/freeze_zones.json": "sha256:df13618075de425e6a3c3fb2f7023536b4b56355f9542e7e1aad0e12289cf2df",
+  "challenge/chain/2026-10-30.jsonl": "sha256:3c37645d330bfffdcb3f495613710fd56346f567e3e31fe0be989d16ee670248"
  }
 }
