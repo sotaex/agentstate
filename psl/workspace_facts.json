@@ -62,6 +62,26 @@
       "published_at": "2026-10-30T07:10:08Z",
       "_note_0580": "2026-10-27（0.58.0 出包收口）：artifacts / pypi.target_version / pypi.wheel 由 0.57.2 前进到 0.58.0。published_version 仍为 0.57.0（PyPI 实查事实，**未上传** ⇒ 不得改动）。0.57.2 两件已按零删除挪进 _archive_dist/。"
     },
+    "publish_hold": {
+      "hold_version": "0.62.1",
+      "decided_at": "2026-10-30T16:40:00+08:00",
+      "decided_by": "founder",
+      "scope": "pypi_upload",
+      "reason": "创始人 2026-10-30 裁定：0.62.1 为冻结版，此后不再向 PyPI 上传，直至下一个大版本稳定后再上。冻结期内测试用户统一使用 PyPI 上的 0.62.1。",
+      "code_freeze": "同时冻结功能：main 不接新功能，只接修复；补丁上限 3 个，且补丁线只允许「拦截集合单调不增」。功能开发另开 worktree，版本从 0.63.0.dev0 起。",
+      "resume_condition": "满足两条才解除：① 0.63.0 达到稳定判据（14 天零 P0）；② 创始人明确批准上传。本字段带 hold_version，版本一前进判据即红 ⇒ 迫使在动版本时重新复核本决定。",
+      "baseline": {
+        "published_version": "0.62.1",
+        "artifacts": [
+          "antinel-0.62.1-py3-none-any.whl",
+          "antinel-0.62.1.tar.gz"
+        ],
+        "wheel_sha256": "03e339df20c54289910456767f725570d31efb0f65a273f46386aa70698148ce",
+        "sdist_sha256": "a7c4183604ececda25e83b9612aaf76f57dfdb3d6e4eb06c9bba19af10c731a1",
+        "git_tag": "v0.62.1",
+        "backup": "D:\\psl\\backup\\antinel-security_full_20261030_1618"
+      }
+    },
     "_note_0431": "0.43.0 -> 0.43.1（patch：修错、不改运行时对外行为档位）。两件事，同一根：① **冒泡根治**（创始人 2026-10-10「旧病复发……要从机制上彻底解决」）—— 全仓曾有**三条互不协调的发射路径**（钩子内联 PowerShell / 值守台 / 哨兵），同一条 `recovered=true` 的自愈记录会在『值守中』时弹窗 ⇒ 通知与事实相反。收口为**单一发射漏斗**（host_shield.notify_owner → _notify_throttled）＋**单一决策源**（bubble_decision）＋**可见性闸**（console_is_visible），钩子改为委托。② **研发态结构性失效**（创始人同日「目前状态是失守，这是不对的……是不是机制上有欠缺」）—— 根因是 `ci/version_check.py` 把**构建产物** `psl/manifest.json` 当成『10 处逐字一致』的手工承载件 ⇒ 每次升版被迫刷平 ⇒ `is_dev_build()` 的版本落差**永远为 0** ⇒ 研发态判不出、自检一漂移就假失守。修法：把它**摘出**逐字一致集（判据 7：≤ 代码版本、不许超前）＋ `tools/antinel_verify.py` INV-3 侧同步移入 INFO；`is_dev_build()` 恢复『只认版本落差』（**不用**哈希漂移——那会让『已发版后改 host_shield.py』也判研发态，违反 B1 撤回与 0363 R06 / 0364 C3）。为什么是 **patch 不是 minor**：本轮改的是**判据/机制口径与告警通道**，`host_shield` 的**判定档位**（六态与 R0/L1 定义）一字未改（冒泡收口改的是『谁发、什么时候发』，不是『发什么档』）。published_version=0.34.1 **仍未动**（该位只能由 PyPI 实查改写）。",
     "_note_0400": "★ 2026-10-09（0.40.0 收口）：release.version / artifacts / target_version / pypi.wheel 由 0.39.2 更新到 0.40.0 —— 本轮是创始人 2026-10-09 交办的「四行失守」根因修复（A1–A5 ＋ B2 ＋ B1 撤回）＋ 随后同一交办的全类型报告审计（A6–A8）。★ 为什么升 minor（不是 patch）：**运行时行为改变** —— 研发态自检不符由 R0 降 L1（新类型 `host_shield_dev_drift`）、`host_shield_zone_locked` 由「按 kind 一刀切 R0」改为「按记录分档（成功⇒L1/不管/无后果）」。依 0.34.0→0.34.1 那条判据（新增默认生效的运行时行为 ⇒ 升 minor）。★ 本轮同时把 dist 里 0.39.2 的两件产件改名让开（→ `_archive_dist/*.old`，零删除）。published_version=0.34.1 **仍未动**（该位只能由 PyPI 实查改写）。",
     "_note_0401": "★ 2026-10-09（0.40.0 → 0.40.1，patch）收口：release.version / artifacts / target_version / pypi.wheel 由 0.40.0 更新到 0.40.1。为什么**必须**前进版本号（三条，都是实测逼出来的）：① 0.40.0 打包之后，**两个随包文件被改过** —— `docs/AUDIT_SCHEMA.md`（补 `host_shield_dev_drift` 的 §4 表行，修 F-10）与 `scripts/verification_tests.py`（修 F-15 陈旧探针、加 `_process_elevation`）⇒ dist 里 0.40.0 的两件**与源码不一致**，属『同名不同证据』，正面撞『证据不可篡改』不变式（沿用 0.35.0→0.35.1 那条判据）。② `SKILL.md` 的自证卡此前写着 `NOT VERIFIED for this build: judgment verdict is FAIL`，而那份判定记录是 **0.37.1 时代的陈旧件**（312/315）；重跑后记录已更新为 0.40.1 源码的当前件（314/315，唯一失败项 0.26 是**提权令牌下的量具失真**，不是产品缺陷）⇒ 自证卡的**证据文字必须跟着改**，否则一个自证字段长期说反话（正是 0.34.0 那轮实测过的病）。③ 为什么是 **patch 不是 minor**：本轮改的是**判据与文档**，`host_shield` / 钩子 / 规则的**运行时行为一字未改**（A/B 两组行为变更已在 0.40.0 里升过 minor）⇒ 依 0.35.0→0.35.1 的判据（默认关的能力/不含行为变更者，patch 位装得下）。★ dist 里 0.40.0 的两件**改名让开**（零删除），避免人手上传时选错文件。published_version=0.34.1 **仍未动**（该位只能由 PyPI 实查改写）。",

@@ -97,7 +97,7 @@
   "machine_id.py": "sha256:a17381e06232d8a5b5ffbd97f003f78d237b3a92ef3061585bcd9545bfd3a41a",
   "psl/SKILL.md": "sha256:4fd29f679ee32eff06210a641835bbfec23e7f48b8af2342185b480b40ff5ca8",
   "psl/antinel-namespaces.json": "sha256:2db67f32a5b803560f458c4589bd4bb4678cc17bc16625f6b6b3ad20f9b202d2",
-  "psl/workspace_facts.json": "sha256:d047290a95b320433f74fb6de9e1935c95b58c19c24c70f21602a7beed556797",
+  "psl/workspace_facts.json": "sha256:8c82255a5ea4c3574a266357e1cf8f37d77a504c30858f47decc02b0e380d5d8",
   "remediation.py": "sha256:eebef6fad4f9f89e946b77ceaf870ff747485266f216a77ab3984fd2f92caf7f",
   "rules/default.json": "sha256:46334e724ddd9c64c771b63362a02b9ff9afd7cace402ba612d2c68805e1a975",
   "rules/economics/claude-code.json": "sha256:e5ce954672baa42ffc220fddde2b691566f4644ec05ba6887c5ccc1c9dae30ba",
