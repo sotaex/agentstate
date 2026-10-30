@@ -8,7 +8,7 @@
   "value": "current",
   "derivation": "auto",
   "reason": null,
-  "checkedAt": "2026-10-30T06:43:35+08:00",
+  "checkedAt": "2026-10-30T07:59:39+08:00",
   "note": "re-derive any time: python -m tools.antinel_verify (--manifest for all 24 shipped files); which assertions failed: discrimination.failed[]"
  },
  "scope": {
@@ -57,7 +57,7 @@
   "failed": [
    {
     "name": "uninstall removes ours, keeps foreign (F-08)",
-    "detail": "rc3=1 foreign_first=True pre_len=True no_post=True manifest_gone=False out=hooks removed: 3 (C:\\Users\\大马\\AppData\\Local\\Temp\\antinel_harness_swut8kzc-19744-885249\\cc_proj\\.claude\\setting"
+    "detail": "rc3=1 foreign_first=True pre_len=True no_post=True manifest_gone=False out=hooks removed: 3 (C:\\Users\\大马\\AppData\\Local\\Temp\\antinel_harness_mhnj0y2e-2512-312527\\cc_proj\\.claude\\settings"
    },
    {
     "name": "F-08 uninstall cleans zcode config.json (enabled bool not misread as event list)",
@@ -89,7 +89,7 @@
    },
    {
     "name": "U3-1 审计不可写 → 卸载仍成功，宿主镜像兜底接住证据（fail-open 不挡用户权利）",
-    "detail": "rc=1 mirror=True out=hooks removed: 0 (C:\\Users\\大马\\AppData\\Local\\Temp\\antinel_harness_swut8"
+    "detail": "rc=1 mirror=True out=hooks removed: 0 (C:\\Users\\大马\\AppData\\Local\\Temp\\antinel_harness_mhnj0"
    }
   ],
   "by_kind": {
@@ -190,7 +190,7 @@
  },
  "digests": {
   "psl/antinel-namespaces.json": "sha256:2db67f32a5b803560f458c4589bd4bb4678cc17bc16625f6b6b3ad20f9b202d2",
-  "rules/default.json": "sha256:11b7aa8e5f8e8fa2bbb1f6cc4c555e242bc46146160d73da191c90347bf51d50",
+  "rules/default.json": "sha256:edde78111b8a56232a0374c9ec694c29664c72b83c498454ec1f8ec6a8931e36",
   "rules/pricing.json": "sha256:e299e7afa07a97128ce00c13706379c79368c747cd4303c488f1c53c5339e253",
   "rules/typosquat_top.json": "sha256:c251fc477ac9d6a11795fc0a88a3fd149e74bca0407a3f99013d1ce8eee1e4be",
   "rules/economics/workbuddy.json": "sha256:7d570a0d8cb09f803695a4af147269620acdd5da5f403e2534a0c418c202c6a6",
@@ -198,7 +198,7 @@
   "rules/economics/claude-code.json": "sha256:e5ce954672baa42ffc220fddde2b691566f4644ec05ba6887c5ccc1c9dae30ba",
   "rules/economics/qoder.json": "sha256:5f51a86cbe0625f44519ce1308e562286c9d3410d0b7284006ac26b068396a3d",
   "rules/economics/generic.json": "sha256:4849374b3d2443dd77329b09d348dec03794863aa8f991d98ea5380a9849b82f",
-  "hooks/pre_tool_use.py": "sha256:384f3ddcebbdc6cdf26236f85fad78f8c28d2547a7dc0687c938aaf281b0adc1",
+  "hooks/pre_tool_use.py": "sha256:2edb8a56750a03fbad02c67024c2b5b9acd42ae8f6fdd3220940e428bc691a55",
   "hooks/post_tool_use.py": "sha256:5a6d6b2583c2e09da3168a18e98a2f6d3e92ac3ed2ff3bad1053218146176459",
   "scripts/scan.py": "sha256:c9a0915700b91c6183eca158054e41b109393c1332b91b87e8a6e9205a711bf1",
   "scripts/install.py": "sha256:8b3b97d5e3ec57d9e5238f70114d7b42b4f3b0dcd6fc274242c850c101ff439e",
@@ -212,8 +212,8 @@
   "tools/enforce_probe.py": "sha256:c82cb457481a5e5a70c932b66c8c909f8050024f700f88b454bbea66992349ad"
  },
  "run": {
-  "started_at": "2026-10-30T06:28:02+0800",
-  "duration_ms": 933427,
+  "started_at": "2026-10-30T07:41:50+0800",
+  "duration_ms": 1069573,
   "duration_note": "wall-clock of a subprocess fan-out suite; machine- and load-dependent, not comparable across environments",
   "executor": "scripts/run_harness.py",
   "exit_code": 1,
