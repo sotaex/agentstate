@@ -15,12 +15,12 @@ compatibility: Requires Python 3.10+; standard library only; no network access; 
 metadata:
   psl-verified: "true"
   psl-verified-spec: "psl-vs-0.1"
-  psl-verified-at: "2026-10-30T13:44:30+08:00"
-  psl-verified-evidence: "judgment 325/325 PASS. Two independent re-runs returned the same result. The 9 earlier failures were traced to a stale lock file of the host bulk-delete guard; with the lock moved aside the same code is green, so it was environment, not a code regression. Detection surface unchanged: a 27,162-command replay shows zero added and zero lost blocks versus 0.61.0. Note: the 0.62.0 wheel already on PyPI still carries 'false' in this field, because it was built before the lock was cleared; this card describes the source tree, not the shipped artifact."
+  psl-verified-at: "2026-10-30T14:53:48+0800"
+  psl-verified-evidence: "live PreToolUse block of a real .env read in ZCode (SEC-01) plus a full-assertion judgment run; digest check 21/21 digests match this build (assertions 325/325)"
   psl-verifier: "scripts/run_harness.py"
   antinel-product: "security-audit"
   antinel-tier: "free"
-  antinel-version: "0.62.0"
+  antinel-version: "0.62.1"
   psl-token-interception: "false"
 ---
 

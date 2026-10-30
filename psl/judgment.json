@@ -2,13 +2,13 @@
  "spec": "psl-vs-0.1",
  "card_id": "antinel-security-suite",
  "skill": "antinel-security",
- "skill_version": "0.62.0",
+ "skill_version": "0.62.1",
  "verdict": "PASS",
  "status": {
   "value": "current",
   "derivation": "auto",
   "reason": null,
-  "checkedAt": "2026-10-30T13:44:30+08:00",
+  "checkedAt": "2026-10-30T15:01:18+08:00",
   "note": "re-derive any time: python -m tools.antinel_verify (--manifest for all 24 shipped files); which assertions failed: discrimination.failed[]"
  },
  "scope": {
@@ -84,15 +84,7 @@
     "F-13 paramedic 复活死亡监理并留痕（死因 RC5 回归）",
     "F-15 门闸高危事件实时推送＋同类 30 分钟节流（0.28.2 报警 v1）",
     "F-17 心跳判死：无心跳/心跳陈旧的监理会被强制重启（B2）",
-    "0.26 SafeZone registered + tamper-locked",
-    "F-08 uninstall cleans zcode config.json (enabled bool not misread as event list)",
-    "U1-1 uninstall → 删除动作之前上链 antinel_uninstall（宿主镜像强制）",
-    "U2-1 uninstall --purge：项目 .psl 消失、镜像证据仍在",
-    "U3-1 审计不可写 → 卸载仍成功，宿主镜像兜底接住证据（fail-open 不挡用户权利）",
-    "report --archive gzips >30d (B-05)",
-    "F-03 retention from policy.json (365 keeps, policy=1 archives 3-day-old)",
-    "F-06 auto_archive=true archives on plain report run",
-    "uninstall removes ours, keeps foreign (F-08)"
+    "0.26 SafeZone registered + tamper-locked"
    ],
    "stale_digests_at_run_time": {
     "count": 0,
@@ -116,7 +108,7 @@
  },
  "digests": {
   "psl/antinel-namespaces.json": "sha256:2db67f32a5b803560f458c4589bd4bb4678cc17bc16625f6b6b3ad20f9b202d2",
-  "rules/default.json": "sha256:edde78111b8a56232a0374c9ec694c29664c72b83c498454ec1f8ec6a8931e36",
+  "rules/default.json": "sha256:46334e724ddd9c64c771b63362a02b9ff9afd7cace402ba612d2c68805e1a975",
   "rules/pricing.json": "sha256:e299e7afa07a97128ce00c13706379c79368c747cd4303c488f1c53c5339e253",
   "rules/typosquat_top.json": "sha256:c251fc477ac9d6a11795fc0a88a3fd149e74bca0407a3f99013d1ce8eee1e4be",
   "rules/economics/workbuddy.json": "sha256:7d570a0d8cb09f803695a4af147269620acdd5da5f403e2534a0c418c202c6a6",
@@ -133,13 +125,13 @@
   "session_dna.py": "sha256:38b2bd765fdf2308fa698eb507e53c4ba7fbe2bf11c94216d95ad5dd116fb205",
   "transcript_reader.py": "sha256:c0ce99c5bdfb255f170ca744c011ae64ceb9569d1c9dd8efc1a2c096ff89dc1c",
   "audit_chain.py": "sha256:9a4438cbb65d20e8c7e1482c455a5a2a198aaaba6c1ded3eea1154b867d6f634",
-  "antinel.py": "sha256:c73f82813ff7343bbf06b60575ced05201d61139b4c10bfd53a8544e12af50fd",
+  "antinel.py": "sha256:157537cbfafa1769d9160f02ffb04a42e29c58b0e7994e8ae9961f06b70eeab1",
   "hub.py": "sha256:edcb1b94194e551d5b0023749ae5417e67729b22eb391198fcae74a906668c08",
   "tools/enforce_probe.py": "sha256:c82cb457481a5e5a70c932b66c8c909f8050024f700f88b454bbea66992349ad"
  },
  "run": {
-  "started_at": "2026-10-30T13:36:57+0800",
-  "duration_ms": 453397,
+  "started_at": "2026-10-30T14:53:48+0800",
+  "duration_ms": 450073,
   "duration_note": "wall-clock of a subprocess fan-out suite; machine- and load-dependent, not comparable across environments",
   "executor": "scripts/run_harness.py",
   "exit_code": 0,
