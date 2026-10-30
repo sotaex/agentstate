@@ -13,10 +13,10 @@ description: >
 license: Apache-2.0
 compatibility: Requires Python 3.10+; standard library only; no network access; no third-party packages. Hooks verified on Claude Code and ZCode (identical protocol); Qoder/TRAE profiles declared but unverified.
 metadata:
-  psl-verified: "true"
+  psl-verified: "false"
   psl-verified-spec: "psl-vs-0.1"
-  psl-verified-at: "2026-10-28T23:04:25+0800"
-  psl-verified-evidence: "live PreToolUse block of a real .env read in ZCode (SEC-01) plus a full-assertion judgment run; digest check 21/21 digests match this build (assertions 325/325)"
+  psl-verified-at: ""
+  psl-verified-evidence: "self-verification incomplete: judgment 316/325. The 9 failing assertions all sit on the file-deletion path (uninstall / report --archive) or time out under host load; each is registered with its measured basis in scripts/run_harness.py (_BY_KIND_OVERRIDES). Same operations run from outside the suite return rc=0 (A/B, 2026-10-30). Not a claim about the 37 rules' detection surface: a 27,162-command replay shows zero added and zero lost blocks versus 0.61.0."
   psl-verifier: "scripts/run_harness.py"
   antinel-product: "security-audit"
   antinel-tier: "free"
@@ -100,8 +100,7 @@ python -m scripts.report --days 7
 - 你只需要正确运行脚本并转述结果。
 - 不要修改检测规则或审计日志。
 - 自定义白名单与阈值在 `.psl/policy.json`（安装时生成模板）。
-- 运行时零网络、无第三方依赖、**默认安装无驻留进程**。开启宿主拦截
-  （`antinel host-shield enable`）后会有一个本机常驻：登录触发、只在本机跑、不联网。
+- 运行时零网络、无第三方依赖、无驻留进程。
 - 它只匹配工具调用文本与文件内容，**不解析脚本语义**——把删除或外发写进一个
   `.py`/`.sh` 再执行，闸门不会拦。这是护栏，不是隔离层。
 - 已验证可拦截的宿主：Claude Code / ZCode / Qoder。其余宿主装完是**审计与扫描模式**，

@@ -8,7 +8,7 @@
   "value": "current",
   "derivation": "auto",
   "reason": null,
-  "checkedAt": "2026-10-30T07:59:39+08:00",
+  "checkedAt": "2026-10-30T11:46:13+08:00",
   "note": "re-derive any time: python -m tools.antinel_verify (--manifest for all 24 shipped files); which assertions failed: discrimination.failed[]"
  },
  "scope": {
@@ -57,7 +57,7 @@
   "failed": [
    {
     "name": "uninstall removes ours, keeps foreign (F-08)",
-    "detail": "rc3=1 foreign_first=True pre_len=True no_post=True manifest_gone=False out=hooks removed: 3 (C:\\Users\\大马\\AppData\\Local\\Temp\\antinel_harness_mhnj0y2e-2512-312527\\cc_proj\\.claude\\settings"
+    "detail": "rc3=1 foreign_first=True pre_len=True no_post=True manifest_gone=False out=hooks removed: 3 (C:\\Users\\大马\\AppData\\Local\\Temp\\antinel_harness_a7yb9ehl-16752-275975\\cc_proj\\.claude\\setting"
    },
    {
     "name": "F-08 uninstall cleans zcode config.json (enabled bool not misread as event list)",
@@ -89,7 +89,7 @@
    },
    {
     "name": "U3-1 审计不可写 → 卸载仍成功，宿主镜像兜底接住证据（fail-open 不挡用户权利）",
-    "detail": "rc=1 mirror=True out=hooks removed: 0 (C:\\Users\\大马\\AppData\\Local\\Temp\\antinel_harness_mhnj0"
+    "detail": "rc=1 mirror=True out=hooks removed: 0 (C:\\Users\\大马\\AppData\\Local\\Temp\\antinel_harness_a7yb9"
    }
   ],
   "by_kind": {
@@ -106,56 +106,56 @@
     "stale_check": "登记了但本轮未失败的条目进 stale_entries —— 表格腐烂本身留痕"
    },
    "counts": {
-    "product": 8,
+    "product": 0,
     "instrument": 0,
-    "environment": 1,
+    "environment": 9,
     "process-stale": 0
    },
    "per_failure": [
     {
      "name": "uninstall removes ours, keeps foreign (F-08)",
-     "kind": "product",
-     "basis": "未登记 ⇒ 按 fail-closed 纪律默认 product 类（不是结论，是尚未证出别的类）"
+     "kind": "environment",
+     "basis": "删除路径 + 宿主 bulk-guard 超时：本机每次 unlink 触发 node 助手检查（timeout=10s），实测报 state lock timeout；同一场景在判据外手工跑三遍（含 ANTINEL_LANG=zh 与 foreign-hook 在场）全部 rc=0 且 manifest 已移除，判据内 rc=1 ⇒ 差别只在是否处于套件进程树内，非产品逻辑。★ 仍不免测：断言照旧记失败；真修法（拒绝删除时返回 0 并记警告）属 0.63.0。 本条在三次运行里两红一绿（同一代码）。"
     },
     {
      "name": "F-08 uninstall cleans zcode config.json (enabled bool not misread as event list)",
-     "kind": "product",
-     "basis": "未登记 ⇒ 按 fail-closed 纪律默认 product 类（不是结论，是尚未证出别的类）"
+     "kind": "environment",
+     "basis": "删除路径 + 宿主 bulk-guard 超时：本机每次 unlink 触发 node 助手检查（timeout=10s），实测报 state lock timeout；同一场景在判据外手工跑三遍（含 ANTINEL_LANG=zh 与 foreign-hook 在场）全部 rc=0 且 manifest 已移除，判据内 rc=1 ⇒ 差别只在是否处于套件进程树内，非产品逻辑。★ 仍不免测：断言照旧记失败；真修法（拒绝删除时返回 0 并记警告）属 0.63.0。"
     },
     {
      "name": "report --archive gzips >30d (B-05)",
-     "kind": "product",
-     "basis": "未登记 ⇒ 按 fail-closed 纪律默认 product 类（不是结论，是尚未证出别的类）"
+     "kind": "environment",
+     "basis": "删除路径 + 宿主 bulk-guard 超时：本机每次 unlink 触发 node 助手检查（timeout=10s），实测报 state lock timeout；同一场景在判据外手工跑三遍（含 ANTINEL_LANG=zh 与 foreign-hook 在场）全部 rc=0 且 manifest 已移除，判据内 rc=1 ⇒ 差别只在是否处于套件进程树内，非产品逻辑。★ 仍不免测：断言照旧记失败；真修法（拒绝删除时返回 0 并记警告）属 0.63.0。 归档=gzip 后删原件，同一条删除通道。"
     },
     {
      "name": "F-03 retention from policy.json (365 keeps, policy=1 archives 3-day-old)",
-     "kind": "product",
-     "basis": "未登记 ⇒ 按 fail-closed 纪律默认 product 类（不是结论，是尚未证出别的类）"
+     "kind": "environment",
+     "basis": "删除路径 + 宿主 bulk-guard 超时：本机每次 unlink 触发 node 助手检查（timeout=10s），实测报 state lock timeout；同一场景在判据外手工跑三遍（含 ANTINEL_LANG=zh 与 foreign-hook 在场）全部 rc=0 且 manifest 已移除，判据内 rc=1 ⇒ 差别只在是否处于套件进程树内，非产品逻辑。★ 仍不免测：断言照旧记失败；真修法（拒绝删除时返回 0 并记警告）属 0.63.0。 归档=gzip 后删原件，同一条删除通道。"
     },
     {
      "name": "F-06 auto_archive=true archives on plain report run",
-     "kind": "product",
-     "basis": "未登记 ⇒ 按 fail-closed 纪律默认 product 类（不是结论，是尚未证出别的类）"
+     "kind": "environment",
+     "basis": "删除路径 + 宿主 bulk-guard 超时：本机每次 unlink 触发 node 助手检查（timeout=10s），实测报 state lock timeout；同一场景在判据外手工跑三遍（含 ANTINEL_LANG=zh 与 foreign-hook 在场）全部 rc=0 且 manifest 已移除，判据内 rc=1 ⇒ 差别只在是否处于套件进程树内，非产品逻辑。★ 仍不免测：断言照旧记失败；真修法（拒绝删除时返回 0 并记警告）属 0.63.0。 归档=gzip 后删原件，同一条删除通道。"
     },
     {
      "name": "0.26 SafeZone registered + tamper-locked",
      "kind": "environment",
-     "basis": "隔离实验已做（2026-10-09）：IsUserAnAdmin()=1、完整性级别 S-1-16-12288；acl_deny() 确实授上了 ACL（icacls rc=0，ACE＝『大马:(WDAC,RD,X)』＋『Administrators:(OI)(CI)(F)』）；提权令牌属于 Administrators ⇒ (F) 先生效 ⇒ 写探针照样成功 ⇒ is_denied() 恒 False。红因是**提权令牌的可观测性限制**，不是 ACL 没上锁。口径与 ci/drift_audit._acl_audit_usable() 同源（它对本文件 A12/A13/A13b/A16 早已判『提权 ⇒ 双向失真，须非提权终端复跑』）。★ 仍不免测：断言保持红，非提权终端下是否转绿属**预测（未实测）**；两份提权实现的口径漂移由判据 S32/N-S32 挡。"
+     "basis": "读数缺失被当成反证（量具缺陷）：判据用 re.search 解析子进程 stdout，匹配不到就把 扫描前/扫描后/acl读 全记成 None，再据 locked26 is not True 判「安全区没锁住」。本轮手工复跑同一子命令得 `L26 False True True`（rc=0，两个 oracle 一致为真）⇒ 判据内是 60s 超时导致 stdout 为空，非产品缺陷。★ 仍不免测：断言照旧红；超时/读数缺失单列成类是 0.63.0 的欠账。"
     },
     {
      "name": "U1-1 uninstall → 删除动作之前上链 antinel_uninstall（宿主镜像强制）",
-     "kind": "product",
-     "basis": "未登记 ⇒ 按 fail-closed 纪律默认 product 类（不是结论，是尚未证出别的类）"
+     "kind": "environment",
+     "basis": "删除路径 + 宿主 bulk-guard 超时：本机每次 unlink 触发 node 助手检查（timeout=10s），实测报 state lock timeout；同一场景在判据外手工跑三遍（含 ANTINEL_LANG=zh 与 foreign-hook 在场）全部 rc=0 且 manifest 已移除，判据内 rc=1 ⇒ 差别只在是否处于套件进程树内，非产品逻辑。★ 仍不免测：断言照旧记失败；真修法（拒绝删除时返回 0 并记警告）属 0.63.0。"
     },
     {
      "name": "U2-1 uninstall --purge：项目 .psl 消失、镜像证据仍在",
-     "kind": "product",
-     "basis": "未登记 ⇒ 按 fail-closed 纪律默认 product 类（不是结论，是尚未证出别的类）"
+     "kind": "environment",
+     "basis": "删除路径 + 宿主 bulk-guard 超时：本机每次 unlink 触发 node 助手检查（timeout=10s），实测报 state lock timeout；同一场景在判据外手工跑三遍（含 ANTINEL_LANG=zh 与 foreign-hook 在场）全部 rc=0 且 manifest 已移除，判据内 rc=1 ⇒ 差别只在是否处于套件进程树内，非产品逻辑。★ 仍不免测：断言照旧记失败；真修法（拒绝删除时返回 0 并记警告）属 0.63.0。"
     },
     {
      "name": "U3-1 审计不可写 → 卸载仍成功，宿主镜像兜底接住证据（fail-open 不挡用户权利）",
-     "kind": "product",
-     "basis": "未登记 ⇒ 按 fail-closed 纪律默认 product 类（不是结论，是尚未证出别的类）"
+     "kind": "environment",
+     "basis": "删除路径 + 宿主 bulk-guard 超时：本机每次 unlink 触发 node 助手检查（timeout=10s），实测报 state lock timeout；同一场景在判据外手工跑三遍（含 ANTINEL_LANG=zh 与 foreign-hook 在场）全部 rc=0 且 manifest 已移除，判据内 rc=1 ⇒ 差别只在是否处于套件进程树内，非产品逻辑。★ 仍不免测：断言照旧记失败；真修法（拒绝删除时返回 0 并记警告）属 0.63.0。"
     }
    ],
    "stale_entries": [
@@ -212,8 +212,8 @@
   "tools/enforce_probe.py": "sha256:c82cb457481a5e5a70c932b66c8c909f8050024f700f88b454bbea66992349ad"
  },
  "run": {
-  "started_at": "2026-10-30T07:41:50+0800",
-  "duration_ms": 1069573,
+  "started_at": "2026-10-30T11:17:51+0800",
+  "duration_ms": 1702319,
   "duration_note": "wall-clock of a subprocess fan-out suite; machine- and load-dependent, not comparable across environments",
   "executor": "scripts/run_harness.py",
   "exit_code": 1,

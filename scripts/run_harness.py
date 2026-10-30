@@ -168,6 +168,62 @@ _BY_KIND_OVERRIDES = {
     # 它与上一条登记无关，属"判据自身不可复现"，另行单列，不在这里消化。
 }
 
+# ★★ 2026-10-30 登记：7 项「全部落在删除路径上」的失败 → environment
+#
+# 依据（三重，都是本轮实测，不是推测）：
+#   ① 共同机理：7 项全部要删文件才能通过——uninstall 删 manifest/hooks，
+#      report --archive 在 gzip 之后删原件。没有一项靠"不删"能过。
+#   ② 宿主删除守卫的失败形态已直接测到：本机 `sitecustomize`（WorkBuddy CLI
+#      垫片）对每次 unlink 起 node 助手做 bulk-guard 检查，`timeout=10`；
+#      实测报 `[safe-delete][SAFE_DELETE_BULK_GUARD_ERROR] state lock timeout`
+#      （10:12 一次，状态目录残留 0 字节锁文件，改名让开后删除立刻成功）。
+#   ③ A/B 对照（关键）：同一场景 `install ×2 → install --uninstall` 在判据**外**
+#      手工跑三遍（10:45 / 10:52 / 10:55，其中一遍带 `ANTINEL_LANG=zh` 与
+#      "foreign hook 在场"两个判据内条件），三遍全部 `rc=0` 且 manifest 已移除；
+#      判据**内**同一操作 `rc=1`。同一代码、同一参数、同一目录形态，差别只在
+#      "是否处于套件进程树内" ⇒ 不是产品逻辑。
+#   ★ 不因此免测：断言照旧记失败（不改判、不跳过），登记只改**归类**；
+#     归类只影响 verdict 的分母（environment 不进 pass/fail 分母）。
+#   ★ 欠账（不许当成已解决）：真修法是让 uninstall/archive 在宿主拒绝删除时
+#     仍返回 0 并把"删不掉"记成警告——那是产品变更，属 0.63.0，不在本版夹带。
+_ENV_DELETE_BASIS = (
+    "删除路径 + 宿主 bulk-guard 超时：本机每次 unlink 触发 node 助手检查"
+    "（timeout=10s），实测报 state lock timeout；同一场景在判据外手工跑三遍"
+    "（含 ANTINEL_LANG=zh 与 foreign-hook 在场）全部 rc=0 且 manifest 已移除，"
+    "判据内 rc=1 ⇒ 差别只在是否处于套件进程树内，非产品逻辑。"
+    "★ 仍不免测：断言照旧记失败；真修法（拒绝删除时返回 0 并记警告）属 0.63.0。"
+)
+_BY_KIND_OVERRIDES.update({
+    "F-08 uninstall cleans zcode config.json (enabled bool not misread as event list)":
+        ("environment", _ENV_DELETE_BASIS),
+    "U1-1 uninstall → 删除动作之前上链 antinel_uninstall（宿主镜像强制）":
+        ("environment", _ENV_DELETE_BASIS),
+    "U2-1 uninstall --purge：项目 .psl 消失、镜像证据仍在":
+        ("environment", _ENV_DELETE_BASIS),
+    "U3-1 审计不可写 → 卸载仍成功，宿主镜像兜底接住证据（fail-open 不挡用户权利）":
+        ("environment", _ENV_DELETE_BASIS),
+    "report --archive gzips >30d (B-05)":
+        ("environment", _ENV_DELETE_BASIS + " 归档=gzip 后删原件，同一条删除通道。"),
+    "F-03 retention from policy.json (365 keeps, policy=1 archives 3-day-old)":
+        ("environment", _ENV_DELETE_BASIS + " 归档=gzip 后删原件，同一条删除通道。"),
+    "F-06 auto_archive=true archives on plain report run":
+        ("environment", _ENV_DELETE_BASIS + " 归档=gzip 后删原件，同一条删除通道。"),
+    # 这一类还包含「同一条断言时红时绿」：三次运行里它两次红一次绿，
+    # 且本轮手工复跑它内部的子命令得 `L26 False True True`（rc=0，读数齐全），
+    # 而判据里 stdout 为空 ⇒ 子进程 60s 超时（判据用 re.search 取数，
+    # 匹配不到就把三个值都记成 None，再据此判「安全区没锁住」）。
+    # ★ 这是量具缺陷：**没有读数时不得判成反证**。修法在 0.63.0（超时/读数缺失要单独成一类）。
+    "uninstall removes ours, keeps foreign (F-08)":
+        ("environment", _ENV_DELETE_BASIS + " 本条在三次运行里两红一绿（同一代码）。"),
+    "0.26 SafeZone registered + tamper-locked":
+        ("environment",
+         "读数缺失被当成反证（量具缺陷）：判据用 re.search 解析子进程 stdout，"
+         "匹配不到就把 扫描前/扫描后/acl读 全记成 None，再据 locked26 is not True "
+         "判「安全区没锁住」。本轮手工复跑同一子命令得 `L26 False True True`"
+         "（rc=0，两个 oracle 一致为真）⇒ 判据内是 60s 超时导致 stdout 为空，非产品缺陷。"
+         "★ 仍不免测：断言照旧红；超时/读数缺失单列成类是 0.63.0 的欠账。"),
+})
+
 
 def classify_failures(failed, stale_digests):
     """0-b：失败四分类账。返回可直接写进 judgment 的 dict。

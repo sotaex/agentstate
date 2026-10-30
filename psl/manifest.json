@@ -1,8 +1,8 @@
 {
  "name": "antinel-security",
- "version": "0.50.5",
+ "version": "0.62.0",
  "psl_spec": "psl-vs-0.1",
- "built_at": "2026-10-29T05:17:29Z",
+ "built_at": "2026-10-30T03:48:05Z",
  "built_from": "D:\\psl\\poc\\antinel-security",
  "spec_document": "ANT-SEC-SPEC-001-FULL-R v1.1-R",
  "namespace": {
@@ -61,6 +61,8 @@
   "challenge/LICENSE": "sha256:daf815707d3efcea917980e270edc57152da8ac3a7a3418e5c1d8982ccad79c7",
   "challenge/README.md": "sha256:298396eabc50aef0de8a68ee1dc4cf2bb036365c5e32d8f4164e6baf29176bd4",
   "challenge/attack.py": "sha256:18e41a6fff35e6a284b76126addf96575356e36dd8a555f6679b850dd85d51df",
+  "challenge/chain/2026-10-28.jsonl": "sha256:89e86dc00b0c9f13fb9d066743d5888e88cb99868830ff6730bb35df427d2359",
+  "challenge/chain/2026-10-29.jsonl": "sha256:f766ff22cd700db09288c02c489a99bbc30dff8a942b5628dc78737153fdbba7",
   "challenge/chain/day_manifest.json": "sha256:c58d9422331764b12d8a55ad89c7dc26aca58e92f12462d453e362d220a555c6",
   "challenge/chain/meta.json": "sha256:44ecf04c89947ca00a7e88a24199b373cf9afe47df8c78d8d3560beab8d24c7b",
   "challenge/generate_challenge.py": "sha256:6bf9465d8c222cf03e05e23ebd29d5d3f2d4e1fa6448e54d6b33cc4f73751757",
@@ -94,7 +96,7 @@
   "inbox_window.py": "sha256:f026a1d86d4597ef8929e784231da28ccbec822f9740727bbd93fc5987652d39",
   "ledger.py": "sha256:364634ebf7ad136db2b59340f490f176ff70fff0a8711effa357be086e3eed69",
   "machine_id.py": "sha256:a17381e06232d8a5b5ffbd97f003f78d237b3a92ef3061585bcd9545bfd3a41a",
-  "psl/SKILL.md": "sha256:6053a4090d129097a177230b5c2699a2256dd9752730e626ab16aa5e5b03aeb7",
+  "psl/SKILL.md": "sha256:d9718fa8ff6dcbca83d46cb4b6b4879548de203760baaab9e01e1210b956657e",
   "psl/antinel-namespaces.json": "sha256:2db67f32a5b803560f458c4589bd4bb4678cc17bc16625f6b6b3ad20f9b202d2",
   "psl/workspace_facts.json": "sha256:3a16dbec3f8c9f2f426c666c8afd0c3db9306464b2ade8f6d24a11a376dedb51",
   "remediation.py": "sha256:eebef6fad4f9f89e946b77ceaf870ff747485266f216a77ab3984fd2f92caf7f",
@@ -136,7 +138,7 @@
   "scripts/install.py": "sha256:8b3b97d5e3ec57d9e5238f70114d7b42b4f3b0dcd6fc274242c850c101ff439e",
   "scripts/release.py": "sha256:f18733ce5aa5bc3bc64f05f301439c67c8489a1a8940087cd051e2125eb91fe6",
   "scripts/report.py": "sha256:d267783b87f8cd6e6f11966db5ed19394213cc8f58ed205fae29ef338841fbbd",
-  "scripts/run_harness.py": "sha256:f539d2e10355b0224ace8a224d6ceae2e37a051088ec07805334c98ad40a0bf6",
+  "scripts/run_harness.py": "sha256:8dcbc039ef6d920cb127420f0f0cb4ac9ad3d318b441c5f57adb7edebb558efa",
   "scripts/scan.py": "sha256:c9a0915700b91c6183eca158054e41b109393c1332b91b87e8a6e9205a711bf1",
   "scripts/tmp_sweep.py": "sha256:6a62d058c11b8feab89621e079831b39c6ab2a3582a2c6daeefc0f322240d753",
   "scripts/verification_tests.py": "sha256:1d80e78a1483d592bd405bfc4eee464d1aa7da8259effef43c2efa8f32759cc8",
@@ -163,7 +165,6 @@
   "tools/verify_namespaces.py": "sha256:85d6ffb905dcf5abffb453ca5b1992f02b3aeb63f93aaad39bc6dcf3fb15e0b0",
   "transcript_reader.py": "sha256:c0ce99c5bdfb255f170ca744c011ae64ceb9569d1c9dd8efc1a2c096ff89dc1c",
   "ui_server.py": "sha256:45edb0fab43424bcc280397dab236deff9f138642c792ae7c58992cea902b166",
-  "ci/freeze_zones.json": "sha256:df13618075de425e6a3c3fb2f7023536b4b56355f9542e7e1aad0e12289cf2df",
-  "challenge/chain/2026-10-29.jsonl": "sha256:f766ff22cd700db09288c02c489a99bbc30dff8a942b5628dc78737153fdbba7"
+  "ci/freeze_zones.json": "sha256:df13618075de425e6a3c3fb2f7023536b4b56355f9542e7e1aad0e12289cf2df"
  }
 }
