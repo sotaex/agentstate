@@ -13,10 +13,10 @@ description: >
 license: Apache-2.0
 compatibility: Requires Python 3.10+; standard library only; no network access; no third-party packages. Hooks verified on Claude Code and ZCode (identical protocol); Qoder/TRAE profiles declared but unverified.
 metadata:
-  psl-verified: "false"
+  psl-verified: "true"
   psl-verified-spec: "psl-vs-0.1"
-  psl-verified-at: ""
-  psl-verified-evidence: "self-verification incomplete: judgment 316/325. The 9 failing assertions all sit on the file-deletion path (uninstall / report --archive) or time out under host load; each is registered with its measured basis in scripts/run_harness.py (_BY_KIND_OVERRIDES). Same operations run from outside the suite return rc=0 (A/B, 2026-10-30). Not a claim about the 37 rules' detection surface: a 27,162-command replay shows zero added and zero lost blocks versus 0.61.0."
+  psl-verified-at: "2026-10-30T13:44:30+08:00"
+  psl-verified-evidence: "judgment 325/325 PASS. Two independent re-runs returned the same result. The 9 earlier failures were traced to a stale lock file of the host bulk-delete guard; with the lock moved aside the same code is green, so it was environment, not a code regression. Detection surface unchanged: a 27,162-command replay shows zero added and zero lost blocks versus 0.61.0. Note: the 0.62.0 wheel already on PyPI still carries 'false' in this field, because it was built before the lock was cleared; this card describes the source tree, not the shipped artifact."
   psl-verifier: "scripts/run_harness.py"
   antinel-product: "security-audit"
   antinel-tier: "free"

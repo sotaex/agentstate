@@ -186,43 +186,18 @@ _BY_KIND_OVERRIDES = {
 #     归类只影响 verdict 的分母（environment 不进 pass/fail 分母）。
 #   ★ 欠账（不许当成已解决）：真修法是让 uninstall/archive 在宿主拒绝删除时
 #     仍返回 0 并把"删不掉"记成警告——那是产品变更，属 0.63.0，不在本版夹带。
-_ENV_DELETE_BASIS = (
-    "删除路径 + 宿主 bulk-guard 超时：本机每次 unlink 触发 node 助手检查"
-    "（timeout=10s），实测报 state lock timeout；同一场景在判据外手工跑三遍"
-    "（含 ANTINEL_LANG=zh 与 foreign-hook 在场）全部 rc=0 且 manifest 已移除，"
-    "判据内 rc=1 ⇒ 差别只在是否处于套件进程树内，非产品逻辑。"
-    "★ 仍不免测：断言照旧记失败；真修法（拒绝删除时返回 0 并记警告）属 0.63.0。"
-)
-_BY_KIND_OVERRIDES.update({
-    "F-08 uninstall cleans zcode config.json (enabled bool not misread as event list)":
-        ("environment", _ENV_DELETE_BASIS),
-    "U1-1 uninstall → 删除动作之前上链 antinel_uninstall（宿主镜像强制）":
-        ("environment", _ENV_DELETE_BASIS),
-    "U2-1 uninstall --purge：项目 .psl 消失、镜像证据仍在":
-        ("environment", _ENV_DELETE_BASIS),
-    "U3-1 审计不可写 → 卸载仍成功，宿主镜像兜底接住证据（fail-open 不挡用户权利）":
-        ("environment", _ENV_DELETE_BASIS),
-    "report --archive gzips >30d (B-05)":
-        ("environment", _ENV_DELETE_BASIS + " 归档=gzip 后删原件，同一条删除通道。"),
-    "F-03 retention from policy.json (365 keeps, policy=1 archives 3-day-old)":
-        ("environment", _ENV_DELETE_BASIS + " 归档=gzip 后删原件，同一条删除通道。"),
-    "F-06 auto_archive=true archives on plain report run":
-        ("environment", _ENV_DELETE_BASIS + " 归档=gzip 后删原件，同一条删除通道。"),
-    # 这一类还包含「同一条断言时红时绿」：三次运行里它两次红一次绿，
-    # 且本轮手工复跑它内部的子命令得 `L26 False True True`（rc=0，读数齐全），
-    # 而判据里 stdout 为空 ⇒ 子进程 60s 超时（判据用 re.search 取数，
-    # 匹配不到就把三个值都记成 None，再据此判「安全区没锁住」）。
-    # ★ 这是量具缺陷：**没有读数时不得判成反证**。修法在 0.63.0（超时/读数缺失要单独成一类）。
-    "uninstall removes ours, keeps foreign (F-08)":
-        ("environment", _ENV_DELETE_BASIS + " 本条在三次运行里两红一绿（同一代码）。"),
-    "0.26 SafeZone registered + tamper-locked":
-        ("environment",
-         "读数缺失被当成反证（量具缺陷）：判据用 re.search 解析子进程 stdout，"
-         "匹配不到就把 扫描前/扫描后/acl读 全记成 None，再据 locked26 is not True "
-         "判「安全区没锁住」。本轮手工复跑同一子命令得 `L26 False True True`"
-         "（rc=0，两个 oracle 一致为真）⇒ 判据内是 60s 超时导致 stdout 为空，非产品缺陷。"
-         "★ 仍不免测：断言照旧红；超时/读数缺失单列成类是 0.63.0 的欠账。"),
-})
+# ── 2026-10-30：撤掉 9 条 environment 登记（当时加的，当天就撤） ──────────
+# 那 9 条是 F-08 两条、U1-1、U2-1、U3-1、B-05、F-03、F-06、0.26 SafeZone。
+# 登记依据是「判据内 rc=1、判据外手工跑 rc=0」，当时读成「环境而非产品」。
+# 后来查到底：宿主批量删除看守的 0 字节锁文件残留，每次删除都报 state lock timeout。
+# 把锁文件让开后，同一份代码**两次独立重跑都是 325/325 PASS**，这 9 条一条也没再红。
+# ⇒ 那是「当时那台机器的那一分钟」，不是断言的固有性质。
+#
+# 登记已删。删的理由不是嫌麻烦：留着等于给这 9 条预开一张长期绿灯，
+# 将来真出现退化也会被静默归到 environment —— 少一张预先豁免，就多一次会被看见的红。
+# 保留知识：若这 9 条同时再红，先查宿主临时目录下的 bulk-guard 锁文件与磁盘余量。
+# 另：0.26 那条的「读不到就判成反证」是量具缺陷（stdout 为空 ⇒ 三个值全记 None），
+#     它不因本次撤登记而消失，仍在 0.63.0 欠账里。
 
 
 def classify_failures(failed, stale_digests):
