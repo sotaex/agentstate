@@ -119,3 +119,55 @@ icacls … /deny … / icacls … /t … /reset / icacls … /reset … /t / tak
 - 判定口径、`_BY_KIND_OVERRIDES` 登记表、`ci/freeze_zones.json` 在冻结期内**不动**。
   - 已发生的唯一例外，方向写明：撤掉 9 条 `environment` 登记是**收紧**（少 9 张预先豁免，这 9 条重新暴露在会红之下），属冻结期允许的方向；增加登记则需要理由与新证据，不在本轮发生。
 - `main` 不开分支跑功能；功能工作另开 worktree，版本号从 `0.63.0.dev0` 起。
+
+---
+
+## 七、同日补丁 0.62.1：自证卡 `false` → `true`（零规则变更）
+
+### 起因是一次误读，而误读本身是证据
+
+创始人读到「`pip install` 装到的包里自证卡写 false」，第一反应是**「是不是装不上」**。实测不是（见下），但这个反应本身就是结论：**如果做这个产品的人都这么读，测试用户会读得更糟。**
+
+### 先证伪「装不上」
+
+全新 venv、从 PyPI 现取、与仓库无关的空目录里跑：
+
+| 步骤 | 0.62.0 | 0.62.1 |
+|---|---|---|
+| `pip install antinel==<ver>` | rc=0，30.8 s | rc=0，43.0 s |
+| 归属 | `site-packages\antinel.py` | 同 |
+| `metadata.version` | 0.62.0 | 0.62.1 |
+| `tools.antinel_verify --manifest` | `[OK] all 143 covered files…` | 同 |
+| 包内自证卡 | `false` | `true` |
+
+★ 第一版探针把 cwd 留在仓库里 ⇒ `import antinel` 命中的是仓库代码、`-m` 跑的是仓库工具（还报 144 条＝仓库那份清单）。**把子进程 cwd 挪到空目录重测，才是安装态。** 这条错误与「读数归属」同源，写在这里当反面样例。
+
+### 改了什么（逐条点名，没有第四条）
+
+1. 九处版本承载件 → `0.62.1`；
+2. 自证卡由构建器重写：`psl-verified: true`、`at` 取判定运行时刻 `2026-10-30T14:53:48+0800`、`evidence` 写 `digest check 21/21 digests match this build (assertions 325/325)`；
+3. 判定重跑为 `0.62.1`：**PASS 325/325**，失败 0，四类计数 0。
+
+规则条数、拦截集合、判定口径、登记表，一概未动 ⇒ 符合冻结期「拦截不增」＋补丁名额 1/3。
+
+### 判定为什么跑了两遍
+
+第一遍 **FAIL 323/325**，两条都是 `process-stale`：`antinel.py` 与 `rules/default.json` 换了字节，旧指纹不再覆盖新代码。第一遍跑完指纹刷新，第二遍 325/325。这不是缺陷，是「改过覆盖文件 ⇒ 第一遍必红」那条纪律在起作用；把它写成缺陷就会去改判据。
+
+### 产物
+
+| 件 | 字节 | sha256 |
+|---|---|---|
+| `antinel-0.62.1-py3-none-any.whl` | 1,988,890 | `03e339df…8148ce` |
+| `antinel-0.62.1.tar.gz` | 3,669,368 | `a7c41836…731a1` |
+
+`verify_release` 五步全通（两件齐／单一 dist-info／RECORD 153==成员 153／twine 两件 PASSED／清单 143 == 载荷 145 − 2／E2E-OK）。上传后实查版本 JSON：两件 sha 与本地**逐字节一致**；`simple` 索引当时未刷新（CDN 滞后，已知，**不重传**）。
+
+### 今天踩到的一个坑，记下来
+
+`SKILL.md` 是**构建器整文件生成**的，根部与 `psl/` 两份都由它写、并且逐字相同。我手改过两次（改 `evidence` 文案、改 `at`），装配一次就全被覆盖 —— 白跑一轮装配加出包。
+⇒ **下次要改那张卡，只能改 `scripts/build_package.py` 的模板或 `_verification_evidence()`，不能改产物文件。** 这与「构建器拥有 `.gitignore`／`THREAT_MODEL.md`／`RULES.md`」是同一条。
+
+### 由此新增的 0.63.0 欠账
+
+- 自证卡的 `evidence` 文案里有一句固定话术（`live PreToolUse block of a real .env read in ZCode`），它是否每次都有对应断言支撑，**没有判据守**。要么让断言反查出这句话的每个成分，要么把话术改成纯数据（`digests 21/21 / assertions 325/325`）。
