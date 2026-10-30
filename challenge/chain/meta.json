@@ -1,6 +1,6 @@
 {
- "generated_at": "2026-10-29T07:08:58",
- "records": 21,
+ "generated_at": "2026-10-30T07:10:15",
+ "records": 23,
  "blocked_events": 3,
  "generator": "real pre_tool_use.py events in a disposable sandbox",
  "how_to_regen": "python generate_challenge.py"
