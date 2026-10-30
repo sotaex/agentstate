@@ -445,7 +445,7 @@ _HOOK_BUDGET = 12.0
 #:   才允许建机制），缺一条的作答块等于没有作答。
 _P1P5_HEADER_LINES = 60
 # ★ 双向同步：此正则在 hooks/pre_tool_use.py 有**自包含副本**（_GOV_P1P5，
-#   GOV-01 写入时刻拦截）——钩子在安装态运行、ci/ 不保证在旁，故复制。
+#   DEV-01 写入时刻拦截）——钩子在安装态运行、ci/ 不保证在旁，故复制。
 #   改这里必须同步那里，反之亦然。
 _P1P5_LINE = re.compile(r"^\s*P([1-5])\s*[:：]\s*\S")
 
@@ -514,7 +514,7 @@ def suites_missing_p1p5(suites=None, grandfathered=None):
 #:   · 超额且额度不足 ⇒ struct_bad ⇒ 闸门红。
 RESIDENT_SUITE_CAP = 29
 # ★ 双向同步：29 这个数在 hooks/pre_tool_use.py 有自包含副本（_GOV_CAP，
-#   GOV-01 写入时刻拦截）——改这里必须同步那里，反之亦然。
+#   DEV-01 写入时刻拦截）——改这里必须同步那里，反之亦然。
 _RETIREMENT_LEDGER = os.path.join(_HERE, "suite_retirement.json")
 _RETIREMENT_GRACE_DAYS = 30
 

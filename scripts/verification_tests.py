@@ -337,7 +337,37 @@ def full_rule_ids():
     return {r.get("id") for r in json.loads(p.read_text(encoding="utf-8")).get("rules", [])}
 
 
+#: 2026-10-31：`record()` 收到非 bool 时的登记簿（口径唯一化的证据面）。
+#   每条 = (判据名, 实际类型名, 值的 repr 前 80 字符)。
+#   期末由 `main()` 统一记成一条 FAIL —— 见 `record()` 里的长注释。
+_OK_NOT_BOOL = []
+
+
 def record(name, ok, detail=""):
+    # ★★ 2026-10-31（口径唯一化）：`ok` **必须**是 bool。
+    #
+    #   病灶（实测，不是推测）：本函数收过一个 **19 元素的列表**。调用点写成
+    #       record("US-05 sarif 2.1.0 export",
+    #              ver == "2.1.0" and res and any(...) and sarif[...]["rules"])
+    #   `and` 返回的是**最后一个被求值的操作数**，不是布尔值 ⇒ `ok` 是那个 rules 列表。
+    #
+    #   后果：**同一次运行、同一份结果文件，两个口径两个数。**
+    #       `sum(1 for _, ok, _ in results if ok)`  → 320
+    #       `sum(1 for _, ok, _ in results if ok is True)` → 319
+    #   而读的人无法从文件本身知道该用哪套 —— 这就是 F40（口径混装）的作案现场。
+    #   历史基线「316/325」是哪个口径数的，已经查不出来了。
+    #
+    #   修法：**入口归一化成 bool**，非 bool 登记入册，期末记一条 FAIL。
+    #   为什么归一化而不是直接 raise：
+    #     一条类型错 raise 出去，后面 200 多条全部变成「没跑」⇒ **分母缩水**。
+    #     分母缩水比类型错本身更贵（TN-06：断言条数不许是对象状态的函数）。
+    #   为什么还要记 FAIL：
+    #     归一化只解决「读法不一」，不解决「写法是错的」。
+    #     静默归一化等于把病灶藏起来 —— 那就是又一个「降级为提示」（F58）。
+    #     ⇒ 必须留下一条红，红的名字就叫「有 N 条判据的 ok 不是 bool」。
+    if not isinstance(ok, bool):
+        _OK_NOT_BOOL.append((name, type(ok).__name__, repr(ok)[:80]))
+        ok = bool(ok)
     results.append((name, ok, detail))
     # ★ 2026-10-03：在每条前面加**序号**。
     #   为什么：套件在第 257 条被外部杀掉时，`last_results.json` 只留下 249 条、
@@ -953,7 +983,14 @@ def main():
     res = json.loads(out)
     hit = sorted(set(f["rule_id"] for f in res["findings"]))
     want = ["AN-015", "AN-016", "AN-017", "AN-018", "AN-001", "AN-002", "AN-021"]
-    record("T4 scan fixture detects %s" % want, hit == want and res["score"] < 50,
+    # ★ 2026-10-31：原为 `hit == want` —— 比的是**两个列表**，顺序敏感。
+    #   改名（旧家族号 → AN-NNN）改变了检出顺序，于是集合完全相同、只是排序不同 ⇒ 红。
+    #   判据的**意图**是「这 7 条规则都被检出」，与顺序无关。
+    #   ⇒ 改比排序后的列表。
+    #   ★ 为什么不用 `set(hit) == set(want)`：set 会掩盖「同一条被检出两次」；
+    #     `sorted()` 同时守住集合与数量，比 set 更严，且不引入新的容忍度。
+    record("T4 scan fixture detects %s" % want,
+           sorted(hit) == sorted(want) and res["score"] < 50,
            "hit=%s score=%d grade=%s" % (hit, res["score"], res["grade"]))
     record("T4 BOM/ZWJ file not flagged", not any(f["file"].startswith("bom-ok") for f in res["findings"]))
     # ★ 0.57.0（第 33 条）：AN-021 的正控换成「头 + body 齐」的真夹具之后，
@@ -1207,8 +1244,16 @@ def main():
     try:
         sarif = json.loads(out)
         res = sarif["runs"][0]["results"]
-        record("US-05 sarif 2.1.0 export", sarif["version"] == "2.1.0" and res and any(r["ruleId"] == "AN-001" and r["level"] == "error" for r in res)
-               and sarif["runs"][0]["tool"]["driver"]["rules"], "results=%d" % len(res))
+        # ★ 2026-10-31：原来的写法是
+        #     record(name, ver == "2.1.0" and res and any(...) and sarif[...]["rules"])
+        #   最后一个操作数是**列表**，`and` 就返回它 ⇒ ok 成了列表，见 record() 长注释。
+        #   这里把每个容器型操作数都显式 bool() 一遍：断言的是「非空」，不是「是什么」。
+        record("US-05 sarif 2.1.0 export",
+               sarif["version"] == "2.1.0"
+               and bool(res)
+               and any(r["ruleId"] == "AN-001" and r["level"] == "error" for r in res)
+               and bool(sarif["runs"][0]["tool"]["driver"]["rules"]),
+               "results=%d" % len(res))
     except Exception as e:
         record("US-05 sarif 2.1.0 export", False, str(e)[:80])
     rc, out, err, _ = run("report.py", ["--root", str(proj), "--days", "1", "--format", "json"])
@@ -3609,7 +3654,21 @@ def main():
            _hc_txt2.count('"host_changed"') == _n_before,
            "before=%d after=%s" % (_n_before, _hc_txt2.count('"host_changed"')))
 
-    passed = sum(1 for _, ok, _ in results if ok)
+    # ★ 2026-10-31：把「非 bool 的 ok」记成一条**普通 FAIL**，放在汇总之前。
+    #   为什么放在汇总前：要让这条进分母、进 passed 统计，与其它判据同权。
+    #   放在汇总后就成了「附属说明」—— 读 SUMMARY 的人看不见它，等于没记。
+    if _OK_NOT_BOOL:
+        record("套件自检：record() 的 ok 必须为 bool（实测找到 %d 条非 bool）"
+               % len(_OK_NOT_BOOL),
+               False,
+               "前几条：" + "；".join("%s=%s" % (n, t) for n, t, _ in _OK_NOT_BOOL[:5])
+               + " —— 调用点把 `and` 链的末项或容器当成了判定结果")
+
+    # 口径钉死：`ok is True`，不是 `if ok`。
+    #   归一化之后两者等价；但把写法钉死，是为了将来有人绕过 record() 直接往
+    #   results 里塞值时，那个值**一定**被算成失败（保守方向），而不是靠真值
+    #   判定默默通过 —— 320/319 那件事就是这么来的。
+    passed = sum(1 for _, ok, _ in results if ok is True)
     print("\n== SUMMARY: %d/%d passed ==" % (passed, len(results)))
     for name, ok, detail in results:
         if not ok:

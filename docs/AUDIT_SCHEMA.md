@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
-# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.26（随 v0.62.1）
+# AUDIT_SCHEMA.md — Antinel 审计记录模式 v1.26（随 v0.63.0）
 
 > v1.26（0.62.0）：**字段拆义，不新增记录类型** —— `notice_budget_window_closed`
 > 新增 `bucket`，`rule_id` 语义收紧为「只放真规则号」。此前 `rule_id` 直接写

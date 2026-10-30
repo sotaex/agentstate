@@ -205,7 +205,7 @@ HARNESS_SRC = SRC / "scripts" / "verification_tests.py"
 if not HARNESS_SRC.is_file():
     raise SystemExit("★ 构建器找不到套件：%s\n  （产物仓构建必须用本仓的套件）" % HARNESS_SRC)
 NAME = "antinel-security"
-VERSION = "0.62.1"
+VERSION = "0.63.0"
 # P-A3: the namespace this build declares itself under. derive_object_ownership()
 # reads git remote first, then THIS field; fail-closed unattributed when neither
 # resolves. Kept beside the hashes so a third party can see what was declared.
@@ -1115,6 +1115,33 @@ def _read_run_harness():
     return p.read_text(encoding="utf-8")
 
 
+#: 生成型 Markdown 的 SPDX 头。**只在本文件出现一次**，见 `_write_generated_md()`。
+_GENERATED_MD_SPDX = "<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->\n"
+
+
+def _write_generated_md(dest, body):
+    """生成型 Markdown 的**唯一写出点**（0.63.0）。
+
+    ★★ 为什么必须把它做成唯一入口，而不是在各处记得加头：
+
+      0.62.0 把 `references/RULES.md` 改成从数据生成之后，一个临时脚本直接调
+      `rules_md()` 写盘，**漏了 SPDX 头** —— 因为头不在生成函数里，在写出点里。
+      当场 `ci/inbox_guards_0481.py` 的 L1（全仓 SPDX 头）红：
+      `references/RULES.md: 缺 SPDX 头`。
+
+      当时的修法是「在生成函数注释里写清楚头在写出点」。**那是靠记忆。**
+      记忆的失效方式是静默的：下一个写生成物的人（或下一个自己）不会读到那句
+      注释，而且漏头只在 CI 跑 0481 时才暴露。
+
+      所以这里改成**物理上没有第二个拼接口**：头 + newline 都在本函数，
+      生成函数只产出正文。要漏头就得绕过本函数 —— 而绕过本函数意味着
+      自己写 `write_text`，那是显式行为，看得见。
+
+    ★ 参数 `body` 是**正文**（不含头）。返回 None。
+    """
+    Path(dest).write_text(_GENERATED_MD_SPDX + body, encoding="utf-8", newline="\n")
+
+
 def rules_md(rules_path):
     d = json.loads(Path(rules_path).read_text(encoding="utf-8"))
     static = {"secrets", "injection", "metadata"}
@@ -1216,6 +1243,112 @@ def rules_md(rules_path):
           "| global_settings.log_retention_days | archive age for report.py --archive (default 30) |",
           "| global_settings.auto_archive | true: report.py applies retention on every run |",
           "| global_settings.desktop_notify | ignored in v1 (spec B-04) |", ""]
+    return "\n".join(L)
+
+
+def id_map_md(rules_path):
+    """规则号新旧对照表（0.63.0 新增）—— **从 `rules/default.json` 生成，不许手写**。
+
+    ★ 为什么必须有这张表：
+      0.63.0 把 37 条规则的 id 从「家族名＋两位数字」那一类改成 `AN-001..AN-037`。
+      这是**纯恒等变换** —— 同一批规则、同一批 pattern、同样的裁决，只有字符串变了
+      （验收方式就是「新号翻译回旧号 == 旧号」，可逐条复核）。但 0.63.0 之前写下的
+      审计记录、证据链、历史文档里全是旧号。
+      ⇒ 没有对照表，那些记录就不是「变旧了」，而是**变成不可读的字节**。
+        **改名把可读性当成了代价，这张表是把代价还回去的方式。**
+
+    ★ 为什么由构建器生成而不是手写：
+      旧号的唯一真源是每条规则的 `legacy_id` 字段。手写一份表就是同一事实的
+      第二份副本，而副本必然漂 —— 本文件上方 `rules_md()` 的 `category_order`
+      注释记的就是这个病灶的活教材（数据补了两类，文档那一行没补，对外长期少说两类）。
+
+    ★ 为什么缺 `legacy_id` 要 **raise** 而不是跳过：
+      对照表的价值**全在完整性**。缺一行不会让表看起来坏，只会让一批记录
+      永远翻译不回去，而且**没有任何迹象**。所以宁可让构建停下。
+    """
+    import re   # 本文件的约定：re 按需函数内导入（见 :1945 / :1970 / :2510 / :2703）
+    d = json.loads(Path(rules_path).read_text(encoding="utf-8"))
+    rules = d.get("rules") or []
+    _missing = [r.get("id") or "?" for r in rules if not r.get("legacy_id")]
+    if _missing:
+        raise SystemExit(
+            "id_map_md：以下规则没有 `legacy_id` ⇒ 对照表会缺行，拒绝生成。\n  %s\n"
+            "  对照表的价值全在完整性：缺一行，就有一批旧记录永远翻译不回去，"
+            "而且不会有任何迹象。" % ", ".join(_missing))
+
+    def _cell(v):
+        """Markdown 表格单元格转义：竖线会把一格切成两格。"""
+        return str(v if v is not None else "").replace("|", "\\|").strip()
+
+    L = ["# Antinel rule id map (generated from rules/default.json v%s - do not edit by hand)"
+         % d.get("version"), "",
+         "0.63.0 renamed every rule id. **The rename was an identity transformation.**",
+         "Same rules, same patterns, same severity, same decisions on the same input --",
+         "only the identifier strings changed. Each rule carries its old id in the",
+         "`legacy_id` field, and this table is generated from that field.", "",
+         "Old ids still appear in audit logs, evidence chains and documents written",
+         "before 0.63.0. Use this table to read them; nothing was invalidated by the",
+         "rename, but nothing was rewritten retroactively either.", "",
+         "## Translation table (%d rules)" % len(rules), "",
+         "| current id | legacy id | name | category | severity |",
+         "|---|---|---|---|---|"]
+    for r in rules:
+        L.append("| `%s` | `%s` | %s | %s | %s |" % (
+            r["id"], r.get("legacy_id"), _cell(r.get("name")),
+            _cell(r.get("category")), _cell(r.get("severity"))))
+    L += ["",
+          "## How to read an old record", "",
+          "- **old id -> current id**: look the old id up in the `legacy id` column, read the",
+          "  `current id` on the same row. That is the rule the product reports today.",
+          "- **current id -> old id**: read the `legacy id` column on the current id's row.",
+          "  This is what you need when comparing today's findings with a record written",
+          "  before 0.63.0.",
+          "- The mapping is **one-to-one in both directions**. If you find an old id that is",
+          "  not in the `legacy id` column, or a current id with no legacy id, that is a",
+          "  defect in this table -- not a rule that was retired.", "",
+          "  (A few judgements live outside the number space entirely: see the next section.)"]
+
+    # ★ 不在 rules 数组里的判定必须单列。
+    #   为什么：它们不占号段，混进上表会让人数出「37 条之外还有几条」。
+    #   ★ 而 `declared_but_code_driven`（AN-037）**在**表里 —— 它只是判定由代码做，
+    #     不是号不在表里。两者是不同的事实，不能进同一张表（第一顽症的形状）。
+    _hc = d.get("hardcoded_rules") or {}
+    _co = _hc.get("code_only") or {}
+    _dc = _hc.get("declared_but_code_driven") or {}
+    if _co or _dc:
+        L += ["", "## Judgements outside the number space", "",
+              "These are implemented in hook code and are **not** part of `AN-NNN`.",
+              "The rename could not reach them; they do not appear in the table above.",
+              "Listed so that someone grepping for an old id finds an answer, not nothing.", "",
+              "| id | in rule table? | 0.63.0 treatment | note |", "|---|---|---|---|"]
+        for _k, _v in _co.items():
+            # 前身号从描述文本里**取**，不硬编码：文案是数据，不是我记的东西。
+            #   取不到「原 X」时**不能**写成 "no change recorded" —— 那会把两种
+            #   不同的事实压成一句：`OUT-01` 是**故意保留**旧号（等 channel 字段），
+            #   而「去号」那几条是**真的没有号了**。前者是有号不用，后者是无号。
+            _m = re.search(r"原\s*([A-Z][A-Z0-9]*-\d+)", str(_v))
+            _prev = (("de-numbered (was `%s`)" % _m.group(1)) if _m
+                     else ("id kept as `%s` (deliberately not collected)" % _k))
+            L.append("| `%s` | no | %s | %s |" % (_k, _prev, _cell(str(_v)[:200])))
+        # ★ `declared_but_code_driven` **不进这张表** —— 它已经在上面那张表里了。
+        #   放进来会让「数一下有几条」这件事出现第二个答案（38 != 37），
+        #   而「一条规则在两张表里出现两次」正是第一顽症的最小形状。
+        #   它需要的只是一句脚注：号在表里，判定不在表里。
+        if _dc:
+            L += ["",
+                  "Not a table-outside judgement, but worth knowing: "
+                  + "、".join("`%s`" % _k for _k in _dc)
+                  + " **is** in the table above (its id and legacy id are ordinary),"
+                    " but its verdict is decided by code rather than by the patterns"
+                    " listed for it. The row is still correct; do not read an empty"
+                    " pattern list as \"never fires\"."]
+        L += ["",
+              "`in rule table? = no` means the judgement still runs and still lands in the",
+              "ledger's `rules_hit`, but its identifier is not one of the `AN-NNN` rules.",
+              "Why that happened: `DEV-01` and `notice_budget` had been borrowing a rule",
+              "number while not being rules, which made every count of \"rules that fired\"",
+              "quietly wrong. `OUT-01` is the other case -- its number is genuinely its own,",
+              "it just has not been collected into a shared range yet, so it keeps it."]
     return "\n".join(L)
 
 
@@ -3058,9 +3191,13 @@ def build(out_root, verify=False):
         _sl.insert(1, "# SPDX-License-Identifier: CC-BY-SA-4.0")
         _skill_txt = "\n".join(_sl)
     (pkg / "SKILL.md").write_text(_skill_txt, encoding="utf-8", newline="\n")
-    (pkg / "references" / "RULES.md").write_text(
-        "<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->\n" + rules_md(pkg / "rules" / "default.json"),
-        encoding="utf-8", newline="\n")
+    # ★ 2026-10-31（0.63.0）：两个生成物走**同一个写出点**（`_write_generated_md`）。
+    #   此前 SPDX 头是在这里手拼的，于是「另一个地方也得记得拼」就成了必然。
+    #   现在头只有一个来源，见 `_write_generated_md()` 的注释。
+    _write_generated_md(pkg / "references" / "RULES.md",
+                        rules_md(pkg / "rules" / "default.json"))
+    _write_generated_md(pkg / "references" / "ID_MAP.md",
+                        id_map_md(pkg / "rules" / "default.json"))
     # 2026-09-24 (G7): README.md is REPO-OWNED, not a builder output. The builder
     # regenerating it from README_MD silently reverted 116 lines of hand-maintained
     # landing-page copy (the G4-era rewrite) back to the old technical template --

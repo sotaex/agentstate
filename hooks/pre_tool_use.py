@@ -56,7 +56,7 @@ _T0 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段起点（性能
 
 # ---------------------------------------------------------------- constants --
 PKG_DIR = os.path.dirname(os.path.abspath(__file__))
-_ANTINEL_VERSION = "0.62.1"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
+_ANTINEL_VERSION = "0.63.0"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
 _T1 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段终点（性能插桩）
 
 
@@ -5194,6 +5194,38 @@ def main():
         sys.exit(0)
 
     ts = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    # ★★ 2026-10-31（0.63.0，P-A5 真缺陷修复）：心跳必须在**本进程写第一条记录之前**落。
+    #
+    #   病灶（实测，不是推测）：原块在函数尾部，条件是
+    #       if not os.path.isfile(今天的日志文件): 写 hook_alive
+    #   它想表达「今天第一次调用」，测的却是「今天还没有任何一条记录」。
+    #   而本函数走到那个位置之前，早就写过别的记录（host_tag_uncertain /
+    #   workspace_root_allow / exclude_patterns_allow / command_deletion_permission /
+    #   dst02_bash_path_suspect …）⇒ 文件已经存在 ⇒ **心跳永远不写**。
+    #
+    #   后果不是「少一条记录」，而是产品最核心的那句承诺失效：
+    #   「监理今天到底跑没跑」与「监理跑了、但这通调用丢了」本应可分辨；
+    #   缺了心跳，这两件事在账本上一模一样。实测测试夹具里 0 条心跳，
+    #   与「监理静默死掉好几天」那个真实故障的表征完全一致 —— 同一种沉默。
+    #
+    #   修法：把判断挪到**最早时机**（拿到 ts 之后、任何 log_event 之前）。
+    #   语义仍是「文件不存在 ⇒ 今天第一次调用」，但此时它才是真的第一次。
+    #
+    #   ★ 为什么不改成「扫当天文件找 hook_alive 记录」：
+    #     账本一天可能上万行，热路径上每通调用读一遍文件不可接受（§3.6 绝不进热路径）。
+    #     也不新增标记文件：多一种文件就多一处要对齐的生命周期。
+    try:
+        _today_log = os.path.join(os.getcwd(), ".psl", "audit",
+                                  datetime.now().strftime("%Y-%m-%d") + ".jsonl")
+        if not os.path.isfile(_today_log):
+            log_event({"ts": ts, "type": "hook_alive", "tool": raw_tool, "session": session_id,
+                       "host": host_tag, "decision": "allow", "severity": "none",
+                       "antinel_version": _ANTINEL_VERSION,
+                       "host_version": (event.get("version") or None),
+                       "deny_mode": deny_mode,
+                       "reason": "first hook invocation of the day"}, mirror=True)
+    except Exception:
+        pass
     base = {"ts": ts, "type": "pre_tool_use", "tool": raw_tool, "session": session_id, "host": host_tag,
             "input": {"command": mask_secrets(cmd)[:500],
                       # A14: file_path used to be persisted verbatim, so a key like
@@ -5349,22 +5381,9 @@ def main():
                                  "详见 THREAT_MODEL Non-goals）: %s\n" % mask_secrets(cand))
             except Exception:
                 pass
-    # 0.17.0 (P-A5): heartbeat -- the day's first record proves the hook ran at
-    # all. N5 measured a tool call that left NO trace in any log; a per-day
-    # alive-marker makes "the hook never ran today" distinguishable from "the
-    # hook ran and this call was lost".
-    try:
-        _today_log = os.path.join(os.getcwd(), ".psl", "audit",
-                                  datetime.now().strftime("%Y-%m-%d") + ".jsonl")
-        if not os.path.isfile(_today_log):
-            log_event({"ts": ts, "type": "hook_alive", "tool": raw_tool, "session": session_id,
-                       "host": host_tag, "decision": "allow", "severity": "none",
-                       "antinel_version": _ANTINEL_VERSION,
-                       "host_version": (event.get("version") or None),
-                       "deny_mode": deny_mode,
-                       "reason": "first hook invocation of the day"}, mirror=True)
-    except Exception:
-        pass
+    # 0.17.0 (P-A5) 的心跳块**已上移**到本函数开头（ts 之后、任何 log_event 之前）。
+    #   为什么挪：放在这里时，前面任何一条记录都已经把当天的文件建出来了，
+    #   `if not os.path.isfile(...)` 恒假 ⇒ 心跳永不写。详见上移处的长注释。
     # WS-2/WS-3: a malformed entry used to be visible once a day on stderr and
     # nowhere else -- `report.py` showed no sign of it, so a config that silently
     # stopped widening the boundary could not be diagnosed after the fact. It is now

