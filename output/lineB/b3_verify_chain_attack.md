@@ -28,7 +28,7 @@ L3 与 L4 **只差 `last_hash` 一个字段**；两腿结果相同 ⇒ 那个字
 
 L5 同一份被截断的数据，**两个通道两个结论**：人读 `rc=2` 并打出 `TAIL-TAMPERED`，机读 `rc=0`、`tail_failures=0`。
 
-根因（读码可核）：`tools/verify_chain.py` 的 `--json` 分支在`if json_mode: report[...]; continue` 里早退，其后的 `if not tok: tail_fail += 1` **在 json 模式下从不执行**；结尾 `report[rc] = 2 if unexplained else (3 if explained else 0)` 也不含 `tail_fail`。
+根因（读码可核）：`tools/verify_chain.py` 的 `--json` 分支在`if json_mode: report[...]; continue` 里早退，其后的 `if not tok: tail_fail += 1` **在 json 模式下从不执行**；结尾 `report["rc"] = 2 if unexplained else (3 if explained else 0)` 也不含 `tail_fail`。
 
 ⇒ 危害：**机器接口正是自动化的入口**。任何用 `--json` 判成败的流水线，对「账本被截断」这件事会拿到 `rc=0`。人读通道看得见，机器看不见。
 
