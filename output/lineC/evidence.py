@@ -513,11 +513,19 @@ def collect(root: str, *, watch_args: Optional[List[str]] = None) -> Bundle:
         evs, notes = from_audit(audit, read_at)
         bundle.evidence += evs
         bundle.undecidable += notes
-        meta = audit.get("meta") or {}
+        # ★ 字段在**顶层**，不在 `meta` 里。第一版读 meta.get("files")，于是页脚
+        #   长期显示「日文件 ? 个｜记录 ? 条」——报数不带分母，等于没报。
+        #   不可解析条数 auditor 只写进 detail 文字、没有独立字段，所以这里不编一个。
         bundle.denominators["账本"] = (
-            f"日文件 {meta.get('files', '?')} 个｜记录 {meta.get('records', '?')} 条"
-            f"｜不可解析 {meta.get('unparsed', '?')} 条"
+            f"日文件 {audit.get('files', '?')} 个｜记录 {audit.get('records', '?')} 条"
         )
+        # auditor 的盲区随 JSON 一起回来，并进「这份报告看不见什么」。
+        # **盲区不并进来，读者就会以为没说的地方是没问题的地方。**
+        for b in audit.get("blind_spots") or ():
+            if isinstance(b, dict) and b.get("title"):
+                bundle.blind += ("%s —— %s" % (b["title"], b.get("detail", "")),)
+            elif isinstance(b, (list, tuple)) and len(b) >= 2:
+                bundle.blind += (f"{b[0]} —— {b[1]}",)
     if watch:
         read_at = read_at or watch.get("read_at") or (watch.get("meta") or {}).get("read_at", "")
         evs, notes = from_watch(watch, read_at)

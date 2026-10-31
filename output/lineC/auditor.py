@@ -323,6 +323,34 @@ def check_total(s: Snapshot, declare: Optional[int]) -> Finding:
     return Finding("A5 总量", PASS, f"{total} 条与声明一致")
 
 
+#: 本工具**结构性**看不见什么。每条都有一条可执行的最小复现（`redteam.py`）。
+#:
+#: ★ 写在这里而不是只写在文档里：文档会被读者跳过，常量会被代码引用、被报告印出、
+#:   被 evidence 并进「这份报告看不见什么」那一节。**盲区必须自己说出来**，
+#:   因为读者不会去猜「你没说的地方是不是没有」。
+#:
+#: ★ 这些不是待修的 bug，是「内部自洽检查」这个定位的必然边界。修不掉，
+#:   只能标清楚。谁要说「防篡改」，先让他回答这里的第一条。
+BLIND_SPOTS = (
+    ("A1/A2 不抗整链重算",
+     "A1 是自己算的 hash 跟自己比、A2 是 prev 跟上一条 hash 比。改完内容把整条链"
+     "重算一遍，两个都必然通过。redteam.py R1 复现：改一条记录＋重算链＋重算清单"
+     "⇒ A1/A2/A3 全 PASS。"),
+    ("A3 可以被删掉而不是伪造",
+     "day_manifest.json 不存在时 A3 返回 SKIP（不适用），而 SKIP 不进退出码。"
+     "redteam.py R4 复现：删掉清单 ⇒ A3=SKIP、rc=0 ——「删了证据」与「本来就没有」同貌。"),
+    ("A4 能被「修好」掩盖",
+     "A4 在真账本上天天 WARN（实测 493 处倒序，属并发排队）。把 ts 排成递增就能让它"
+     "变 PASS —— **让报告变绿与抹掉真实性质偏离是同一个动作**。redteam.py R3 复现。"),
+    ("A5 依赖账本之外的声明",
+     "删记录只有 A5 能抓，但 A5 要 --declare。不给声明时 A5=SKIP，删记录不可见。"
+     "redteam.py R2b/R2c 复现：无声明红队赢、有声明被抓住。"),
+    ("没有 L2 外部锚",
+     "以上四条的共同根因：本工具只做内部自洽（L0）。要排除整链重写需要外部锚，"
+     "今天没有（铁律 42：L0 ✅／L1 ⚠️／L2 ❌）。"),
+)
+
+
 def render(findings: List[Finding], s: Snapshot, census: Dict[str, int] | None = None) -> str:
     lines: List[str] = []
     lines.append(f"对账报告 · {s.root}")
@@ -362,10 +390,12 @@ def render(findings: List[Finding], s: Snapshot, census: Dict[str, int] | None =
         lines.append("结论：**内部自洽**。")
 
     lines.append(
-        "      这只说明「这份账本自己跟自己对得上」，**不说明它没有被整链重写**——"
-        "整链重写后重算全部 hash 与清单，本工具仍会报内部自洽。"
-        "要排除这一种，需要 L2 外部锚，今天还没有。"
+        "      这只说明「这份账本自己跟自己对得上」，**不说明它没有被整链重写**。"
     )
+    lines.append("")
+    lines.append("这份报告看不见什么（每条都有一条可执行的最小复现，见 redteam.py）：")
+    for _title, _detail in BLIND_SPOTS:
+        lines.append(f"  · {_title} —— {_detail}")
     lines.append("")
     lines.append("本报告不含任何判断：不评价记录内容对不对，只验它有没有被改过。")
     return "\n".join(lines)
@@ -414,6 +444,9 @@ def main(argv: List[str] | None = None) -> int:
                         {"dim": f.dim, "status": f.status, "detail": f.detail, "evidence": f.evidence}
                         for f in findings
                     ],
+                    # 盲区随 JSON 一起出去：下游（evidence → 报告）要把它并进
+                    # 「这份报告看不见什么」那一节，而不是只印在文本报告里。
+                    "blind_spots": [{"title": t, "detail": d} for t, d in BLIND_SPOTS],
                 },
                 ensure_ascii=False,
                 indent=1,
