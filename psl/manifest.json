@@ -68,7 +68,7 @@
   "challenge/generate_challenge.py": "sha256:fe0b87178e9e833bb975f14ac19d38e51f8a2978c4e474e5467a9dcef415c532",
   "challenge/tamper-lab.html": "sha256:886755d8f5a65bfb071e70e7c5704df0c9fe24278ab6d4f07786076fb6a18a4f",
   "challenge/tamper.py": "sha256:0a08b82ccbf1afaa1342be6fbc07306b3356b254fbaaada90c2b21e3d0768227",
-  "challenge/verify.py": "sha256:09dad42fd22b3cbe77abfcf6042cbd71f8c9a19b7a6e78302962121e55b70ee1",
+  "challenge/verify.py": "sha256:e4f9258bc63c05180d9b9a34885a9bae79b384764d5c862894f359eb44b307e8",
   "egress.py": "sha256:57563ad077e966ce8ebce8ce1b4ed52c66c805730a0dd91fb023e1875f4dca2e",
   "facts.py": "sha256:05c3d1ac53cee3448a5139e81108cdf5c169e278282d7b93bef6702057051659",
   "glossary.py": "sha256:6e2cd37a13907375e65df3c257395e3d28ba2bb5149b303489f1486c9f9e8510",
