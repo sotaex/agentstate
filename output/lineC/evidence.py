@@ -260,6 +260,23 @@ def _fmt_evidence(ev: Any) -> Tuple[Cite, ...]:
     return tuple(out)
 
 
+def plain(text: str) -> str:
+    """去掉**我们自己写的散文**里的 `**强调**` 星号。
+
+    来源：auditor／watchman 的 `detail`／`subject`／盲区文案是我们**自己写的散文**，
+    写的时候用了 Markdown 的 `**强调**`，进 HTML 和纯文本就变成两个多余字符
+    （实测报告里印出「这是**无界**盲区」）。
+
+    ★ **已知代价，写在这里而不是藏着**：`subject` 里可能嵌着账本原文
+      （命令、路径）。如果某条命令本身就是 `ls **/*.py` 这种 glob，
+      这两个星号会被一起去掉。概率极低，但代价是真的。
+      真出现时的正确修法是**让上游散文别写 `**`**，不是在这里加白名单 ——
+      加白名单就等于承认「我们分不清散文和原文」，那才是更贵的问题。
+    ★ watchman.py 里也有一个同名函数，处理的是纯文本报告，同一个作者错误的两处出口。
+    """
+    return text.replace("**", "")
+
+
 def _stable_id(prefix: str, claim: str, cites: Tuple[Cite, ...]) -> str:
     """证据 id 由**内容**决定，不由数组下标决定。
 
@@ -298,7 +315,7 @@ def from_audit(res: Dict[str, Any], read_at: str) -> Tuple[List[Evidence], List[
     for i, f in enumerate(findings):
         status = f.get("status")
         dim = f.get("dim") or f"维度{i + 1}"
-        detail = f.get("detail") or ""
+        detail = plain(f.get("detail") or "")
         if status == "PASS":
             continue
         if status == "SKIP":
@@ -377,7 +394,7 @@ def from_watch(res: Dict[str, Any], read_at: str) -> Tuple[List[Evidence], List[
         strength, blind = _CLUE_META.get(kind, (K_LOG_ONLY, "未知线索类型，本工具未声明它看不见什么"))
         if kind not in _CLUE_META:
             notes.append(f"线索类型 {kind!r} 未在本模块登记 —— 已按「已记录未判定」装，但盲区声明是缺的")
-        subject = c.get("subject") or kind
+        subject = plain(c.get("subject") or kind)
         note = c.get("note") or ""
         evs.append(
             Evidence(
@@ -523,9 +540,10 @@ def collect(root: str, *, watch_args: Optional[List[str]] = None) -> Bundle:
         # **盲区不并进来，读者就会以为没说的地方是没问题的地方。**
         for b in audit.get("blind_spots") or ():
             if isinstance(b, dict) and b.get("title"):
-                bundle.blind += ("%s —— %s" % (b["title"], b.get("detail", "")),)
+                bundle.blind += ("%s —— %s" % (plain(b["title"]),
+                                               plain(b.get("detail", ""))),)
             elif isinstance(b, (list, tuple)) and len(b) >= 2:
-                bundle.blind += (f"{b[0]} —— {b[1]}",)
+                bundle.blind += (plain(f"{b[0]} —— {b[1]}"),)
     if watch:
         read_at = read_at or watch.get("read_at") or (watch.get("meta") or {}).get("read_at", "")
         evs, notes = from_watch(watch, read_at)
@@ -538,7 +556,7 @@ def collect(root: str, *, watch_args: Optional[List[str]] = None) -> Bundle:
         )
         for b in watch.get("blind_spots") or ():
             if isinstance(b, (list, tuple)) and len(b) >= 2:
-                bundle.blind += (f"{b[0]} —— {b[1]}",)
+                bundle.blind += (plain(f"{b[0]} —— {b[1]}"),)
             elif isinstance(b, str):
                 bundle.blind += (b,)
 
@@ -590,11 +608,19 @@ def _selfcheck() -> int:
     except ValueError:
         pass
 
+    # ⑤ 散文里的 `**` 不许外泄到产物；**账本原文里没有星号的普通内容也不许被改**
+    if plain("这是**无界**盲区") != "这是无界盲区":
+        fails.append("散文里的 `**` 没有去掉 —— 报告里会印出「这是**无界**盲区」")
+    if plain("ls -la /tmp && echo ok") != "ls -la /tmp && echo ok":
+        fails.append("不含星号的普通命令被改动了 —— 清洗过头比不清洗更危险")
+    if plain("") != "":
+        fails.append("空串处理出问题")
+
     for f in fails:
         print(f"[自检失败] {f}", file=sys.stderr)
     if fails:
         return 1
-    print("[自检] 四条硬约束全部生效（空出处／无号挡下／合法挡下／词表外）")
+    print("[自检] 五条硬约束全部生效（空出处／无号挡下／合法挡下／词表外／散文星号不外泄）")
     return 0
 
 
