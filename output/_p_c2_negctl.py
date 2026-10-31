@@ -413,73 +413,72 @@ def m_absent(path: str) -> str:
     return f"删除当日全部 post_tool_use 共 {dropped} 行"
 
 
-def _pick_gap(day: str, path: str):
-    """从当天**实际记录**里挑一段有数据的窗口，返回 `(lo, hi)`（19 位 ts）。
+def _day_records(day: str, path: str):
+    """当天所有带 ts 的记录：`[(ts19, lineno)]`，按时间排序。lineno 从 1 起。
+
+    ★ 按**行号**定位，不按字符串区间定位。上一版是
+      `lo <= ts[:19] <= hi` 删中间，而 lo/hi 取自原始 ts（25 位，带 `+08:00`）、
+      左边却被截成 19 位——**长度不同的字符串比较在「秒相同」处会反向**：
+      `"…00:18:46+08:00" <= "…00:18:46"` 是 False。于是边界该留的被删、
+      该删的留下，**洞被删没了**（实测：删 2546 行后当天只剩两条、相距 10 分钟）。
+    """
+    pat = re.compile(r'"ts":\s*"([^"]+)"')
+    recs = []
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        for lineno, line in enumerate(fh, 1):
+            m = pat.search(line)
+            if m and m.group(1)[:10] == day:
+                recs.append((m.group(1)[:19], lineno))
+    recs.sort()
+    return recs
+
+
+def m_gap(path: str, day: str) -> str:
+    """把当天中间一段记录整段挖掉，**保留首尾两条当边界** ⇒ 断层＝首末跨度。
 
     ★ 为什么不能硬编码时段：账本是一个正在长的东西，任何写死的时间窗都会在
       某个时刻落在「还没发生」或「已经滚掉」的位置。那时负控会崩，
       而崩的表现是「脚本挂了」，不是「检测器坏了」——**两种红长得一样**。
     """
-    pat = re.compile(r'"ts":\s*"([^"]+)"')
-    ts: List[str] = []
-    with open(path, "r", encoding="utf-8", errors="replace") as fh:
-        for line in fh:
-            m = pat.search(line)
-            if m and m.group(1)[:10] == day:
-                ts.append(m.group(1)[:19])
-    if len(ts) < 5:
-        raise RuntimeError(
-            f"{day} 只有 {len(ts)} 条带 ts 的记录，挖不出洞（夹具不足，非产品缺陷）")
-    ts.sort()
-    # ★ 窗口必须**足够宽**：删完之后留下的断层要大于断言阈值，否则负控自己
-    #   构造不出足够长的洞，而它会被读成「检测器瞎了」。
-    #   实测教训：按分位数取 35%~65% 时窗口只有 24 分钟，删掉 573 行后
-    #   最长断层仍是 0 分钟（< 阈值 90）——**看起来像检测器失效，其实是夹具太窄**。
-    span = (datetime.strptime(ts[-1], "%Y-%m-%dT%H:%M:%S")
-            - datetime.strptime(ts[0], "%Y-%m-%dT%H:%M:%S")).total_seconds() / 60.0
+    recs = _day_records(day, path)
+    if len(recs) < 5:
+        raise FixtureError(f"{day} 只有 {len(recs)} 条带 ts 的记录，挖不出洞")
+    t0 = datetime.strptime(recs[0][0], "%Y-%m-%dT%H:%M:%S")
+    t1 = datetime.strptime(recs[-1][0], "%Y-%m-%dT%H:%M:%S")
+    span = (t1 - t0).total_seconds() / 60.0
     if span <= GAP_ASSERT_MIN * 1.2:
-        raise RuntimeError(
+        raise FixtureError(
             f"{day} 全天跨度只有 {span:.0f} 分钟，不足阈值 {GAP_ASSERT_MIN:g} 的 1.2 倍，"
-            f"造不出足够长的断层（夹具不足，非产品缺陷）")
-    # 保留首尾各一条，删中间全部 ⇒ 断层 = 全天跨度
-    return ts[1], ts[-2]
+            f"造不出足够长的断层")
 
-
-def m_gap(path: str, day: str) -> str:
-    lo, hi = _pick_gap(day, path)
-    pat = re.compile(r'"ts":\s*"([^"]+)"')
+    drop = {ln for _, ln in recs[1:-1]}
     kept: List[str] = []
-    dropped = 0
     with open(path, "r", encoding="utf-8", errors="replace") as fh:
-        for line in fh:
-            m = pat.search(line)
-            if m and lo <= m.group(1)[:19] <= hi:
-                dropped += 1
+        for lineno, line in enumerate(fh, 1):
+            if lineno in drop:
                 continue
             kept.append(line)
-    if dropped == 0:
-        raise FixtureError(f"{day} 在窗口 {lo}~{hi} 里一条都没挖到")
     with open(path, "w", encoding="utf-8", newline="\n") as fh:
         fh.writelines(kept)
 
-    # ★ 自检：删完之后**实际**最大间隔够不够阈值。
-    #   不做这一步，「删了 2150 行但断层仍是 0 分钟」会被读成「检测器瞎了」，
-    #   而实际是夹具没造出「够长的洞」——两种结论天差地别。
-    rest: List[str] = []
-    with open(path, "r", encoding="utf-8", errors="replace") as fh:
-        for line in fh:
-            m = pat.search(line)
-            if m and m.group(1)[:10] == day:
-                rest.append(m.group(1)[:19])
-    if len(rest) >= 2:
-        rest.sort()
-        real = (datetime.strptime(rest[-1], "%Y-%m-%dT%H:%M:%S")
-                - datetime.strptime(rest[0], "%Y-%m-%dT%H:%M:%S")).total_seconds() / 60.0
-        if real <= GAP_ASSERT_MIN:
-            raise FixtureError(
-                f"删完 {dropped} 行后实际最大间隔只有 {real:.0f} 分钟 "
-                f"≤ 阈值 {GAP_ASSERT_MIN:g}，本臂造不出足够长的断层")
-    return f"删除 {lo}~{hi} 之间的 {dropped} 行"
+    # ★ 自检必须量**最大相邻间隔**，不是「首末跨度」。
+    #   上一版量的是首末跨度：删完之后首末两条恰好都被删掉时，跨度只剩 10 分钟，
+    #   而它被拿去跟 90 分钟比 —— 那一步本可以拦住，但当时比的是删前算出的窗口，
+    #   于是「夹具没造出洞」被读成了「检测器瞎了」。**量具自证量错了对象。**
+    rest = _day_records(day, path)
+    if len(rest) < 2:
+        raise FixtureError(f"删完只剩 {len(rest)} 条，构不成一对边界")
+    gaps = []
+    for (a, _), (b, _) in zip(rest, rest[1:]):
+        gaps.append((datetime.strptime(b, "%Y-%m-%dT%H:%M:%S")
+                     - datetime.strptime(a, "%Y-%m-%dT%H:%M:%S")).total_seconds() / 60.0)
+    best = max(gaps)
+    if best <= GAP_ASSERT_MIN:
+        raise FixtureError(
+            f"删掉 {len(drop)} 行后实际最大相邻间隔只有 {best:.0f} 分钟 "
+            f"≤ 阈值 {GAP_ASSERT_MIN:g}，本臂造不出足够长的断层")
+    return (f"删除 {day} 中间 {len(drop)} 行，保留边界 {rest[0][0]} 与 {rest[-1][0]}，"
+            f"实际断层 {best:.0f} 分钟")
 
 
 # --------------------------------------------------------------------- 主流程
@@ -704,15 +703,18 @@ def main() -> int:
             if v > best:
                 best, best_s = float(v), c["subject"]
         if best < GAP_ASSERT_MIN:
-            # ★ 这里**不许直接判产品失败**。已知事实三条同时成立：
-            #   ① 夹具自检通过（删完实际最大间隔 > 阈值）；
-            #   ② watchman 正常退出（rc≠0 的话 run() 会抛，走不到这里）；
-            #   ③ 但一条 gap 线索都没有。
-            #   三条不能同时为真 ⇒ 这是**未定位**，既不是「检测器对」，也不是
-            #   「检测器瞎」。硬判任何一边都是拿猜测当结论（铁律 1／45）。
-            return None, (
-                f"最长断层 {best:g} 分钟 < 阈值 {GAP_ASSERT_MIN:g} —— 夹具自检已通过、"
-                f"watchman 正常退出，但 gap 线索为空 ⇒ **未定位**（待查）")
+            # 走到这里，**洞是真的存在**：m_gap 已经量过「实际最大相邻间隔」
+            # 并且不过阈值就抛 FixtureError（抛了就到不了这一行）。
+            # 所以「夹具没造出洞」这条解释已经被排除了 —— 没报就是没报。
+            #
+            # ★ 上一版这里写的是「未定位」，理由是「夹具自检通过、watchman 正常
+            #   退出、gap 为空，三条不能同时为真」。三条确实不能同时为真——
+            #   而第四条解释我当时没想到：**夹具自检量错了对象**（量首末跨度、
+            #   不量最大相邻间隔，而删的时候又把两条边界一起删掉了）。
+            #   「三条不能同时为真」不等于「产品有问题」，它只说明**还有第四条没找到**。
+            return False, (
+                f"最长断层 {best:g} 分钟 < 阈值 {GAP_ASSERT_MIN:g} —— 洞已由夹具"
+                f"实测确认存在，gap 线索为空 ⇒ 漏报")
         return True, f"最长断层 {best:g} 分钟：{best_s}"
 
     def a_gap_clean(_res, _dst):
