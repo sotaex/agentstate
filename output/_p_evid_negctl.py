@@ -18,6 +18,7 @@
 
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -271,40 +272,145 @@ def a_evidence_has_no_held():
         b.count(), {k: len(v) for k, v in b.by_strength().items()})
 
 
-def a_evidence_ids_stable_across_runs():
-    """★ 整链 id 稳定性：同一份账本连跑两次，eid 集合必须完全相同。
+def _frozen_copy(n_days=3):
+    """把最近 n 个**已封盘**日文件复制到临时目录。返回 (TemporaryDirectory, 天列表)。
 
-    这条与 a_stable_id_* 是两层：那两条测纯函数，这条测真实数据。
-    真账本正在被写（当天文件在长），所以**只比「已封盘日」的证据** ——
-    当天的证据数量会变，比它等于测账本增长，不是测 id 稳定性。
+    ★ 为什么要副本：这条臂测的是**确定性**（同一份输入 → 同一组 id），
+      不是**不变性**（账本长了 id 还得一样）。第一版直接拿活账本连跑两次，
+      两次的输入本来就不同 —— 它测的是账本增长速度，不是 id 稳定性。
+      表现是「单独跑 18/18、放进总闸门 17/18」，同一份代码两个结果。
+      那正是铁律 22 的现场：先怀疑量具。
+
+    ★ 复制用 copy2 保字节（账本是 CRLF，通用换行读写会让每个文件小一点点）。
+    ★ 清理交给 TemporaryDirectory，且带 ignore_cleanup_errors：中文 Windows 上
+      临时目录清理会被拒（`WinError 5`），那会让「清理失败」被读成「自检崩了」——
+      工具失败被读成结论失败，正是本项目最忌的那种（codeid.py 现场）。
+    """
+    root_real = os.path.join(os.path.dirname(HERE), ".psl", "audit")
+    if not os.path.isdir(root_real):
+        return None, None
+    today = time.strftime("%Y-%m-%d")
+    # ★ 必须按**日文件正则**筛，不能只判 `.jsonl` 结尾：账本目录里还有
+    #   `lock_events.jsonl`，它会被当成一天 —— 实测消息里印出
+    #   「3 天：2026-10-30、2026-10-31、lock_events」。auditor 用正则忽略它，
+    #   所以结果不受影响，但**标签在说谎**，而这条臂的输出是要给人读的。
+    #   「结果对但话不对」正是本项目一直在修的那一类。
+    day_re = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+    days = sorted(f[:-6] for f in os.listdir(root_real)
+                  if f.endswith(".jsonl") and day_re.match(f[:-6])
+                  and f[:-6] != today)
+    if len(days) < 2:
+        return None, None
+    pick = days[-n_days:]
+    tmpdir = tempfile.TemporaryDirectory(prefix="antinel-id-",
+                                         ignore_cleanup_errors=True)
+    tmp = tmpdir.name
+    for d in pick:
+        shutil.copy2(os.path.join(root_real, d + ".jsonl"),
+                     os.path.join(tmp, d + ".jsonl"))
+    man_src = os.path.join(root_real, "day_manifest.json")
+    if os.path.isfile(man_src):
+        try:
+            with open(man_src, "r", encoding="utf-8") as fh:
+                man = json.load(fh)
+            sub = {k: v for k, v in man.items()
+                   if isinstance(k, str) and k.endswith(".jsonl") and k[:-6] in pick}
+            with open(os.path.join(tmp, "day_manifest.json"), "w",
+                      encoding="utf-8", newline="") as fh:
+                json.dump(sub, fh, ensure_ascii=False)
+        except (ValueError, OSError):
+            pass
+    return tmpdir, pick
+
+
+def a_evidence_ids_stable_across_runs():
+    """★ id 确定性：同一份**冻结副本**连跑两次，eid 集合必须完全相同。
+
+    ★ 与 a_stable_id_* 是两层：那两条测纯函数，这条测真实数据走完整条链。
+    ★ 判据方向（2026-11-01 第四轮改）：拿副本，不拿活账本。
+    """
+    tmpdir, pick = _frozen_copy(3)
+    if tmpdir is None:
+        return None, "真账本不在或已封盘日不足 2 天 —— SKIP，不是通过"
+    try:
+        b1 = E.collect(tmpdir.name)
+        b2 = E.collect(tmpdir.name)
+    finally:
+        tmpdir.cleanup()
+
+    if not b1.evidence:
+        return None, "冻结副本上一条证据都没有 —— 夹具失效，SKIP 不是通过"
+    s1 = {e.eid for e in b1.evidence}
+    s2 = {e.eid for e in b2.evidence}
+    if s1 != s2:
+        return False, "同一份冻结副本连跑两次，id 不一致：仅首次 %s／仅二次 %s" % (
+            sorted(s1 - s2)[:3], sorted(s2 - s1)[:3])
+    return True, "冻结副本（%d 天：%s）连跑两次，%d 条证据 id 完全相同" % (
+        len(pick), "、".join(pick), len(s1))
+
+
+def a_blind_not_dropped():
+    """★ 外部计数：两个工具各自申报的盲区，必须一条不少地进 Bundle。
+
+    ★ 为什么这条必须存在（2026-11-01 第四轮）：`watchman.py` 的 JSON 第一版
+      **根本没有 blind_spots 键**，于是 evidence.collect 里那段
+      `for b in watch.get("blind_spots")` **从未执行过一次** —— 8 条盲区
+      一条没进过报告，而报告那一节仍然有 auditor 的 5 条，读起来毫无异样。
+      这类缺陷「读代码」看不出来：每一段都有注释解释为什么，坏的是它们
+      **没有接上**。只有从外面数才能发现。
+
+    ★ 分母来自工具自己的 JSON **原始键**，不来自 blind_of，也不来自 Bundle：
+      用 Bundle 数 Bundle 必然自洽 —— 那正是「A5 依赖账本之外的声明」的形状。
+
+    ★ 本臂自带**反向对照**（第三段）：把 blind_of 换成「永远返回空」，
+      同一套判据必须变红。没有这一段，「它绿着」与「它根本没在测」同貌。
     """
     root = os.path.join(os.path.dirname(HERE), ".psl", "audit")
     if not os.path.isdir(root):
         return None, "真账本不在 —— SKIP，不是通过"
-    b1 = E.collect(root)
-    b2 = E.collect(root)
 
-    # ★ 只比**已封盘日**。上面那句注释早就是这么写的，但代码原来比的是全部——
-    #   注释说一套、代码做一套，于是这条臂**依赖实时数据**：产品正在写当天的
-    #   文件，两次 collect 之间多进一条记录，`_stable_id` 的 claim 变了，
-    #   eid 就变了，这条臂就红。红的是量具，不是被测对象（实测：单独跑 18/18，
-    #   放进总闸门跑 17/18——同一份代码两个结果，本身就是铁律 22 的现场）。
-    today = time.strftime("%Y-%m-%d")
+    total, per, payloads = 0, {}, {}
+    for script in ("auditor.py", "watchman.py"):
+        got, err = E._run_json(script, root)
+        if err:
+            return None, "%s 没跑成（%s）—— SKIP 不是通过" % (script, err)
+        # 直接数**原始键**，不经过 blind_of：分母不许依赖被测的那段解析
+        n = len(got.get("blind_spots") or ())
+        per[script] = n
+        payloads[script] = got
+        total += n
+    if total == 0:
+        return None, "两个工具都没申报盲区 —— 夹具失效，SKIP 不是通过"
 
-    def closed_eids(b):
-        return {e.eid for e in b.evidence
-                if e.cites and all(c.day != today for c in e.cites)}
+    # 第一段：正向
+    b = E.collect(root)
+    if len(b.blind) < total:
+        return False, ("工具申报了 %d 条盲区 %s，Bundle 里只有 %d 条 ⇒ 有 %d 条被静默丢弃"
+                       % (total, per, len(b.blind), total - len(b.blind)))
 
-    s1, s2 = closed_eids(b1), closed_eids(b2)
-    n_open = len(b1.evidence) - len(s1)
-    if not s1 and not s2:
-        return None, ("已封盘日的证据为 0 条（今天 %s 的 %d 条不计）—— "
-                      "没有可比的样本，SKIP 不是通过" % (today, n_open))
-    only1, only2 = s1 - s2, s2 - s1
-    if only1 or only2:
-        return False, "两次跑出不同 id：仅首次 %s／仅二次 %s" % (
-            sorted(only1)[:3], sorted(only2)[:3])
-    return True, "两次跑出同一组 id（已封盘 %d 条；今天 %d 条不计）" % (len(s1), n_open)
+    # 第二段：反向对照 —— 让 blind_of 永远返回空，必须红。
+    # ★ 在**冻结副本**上做，不在全账本上做：同一套接线（collect 里那两处
+    #   blind_of 调用）在小数据上一样被走到，而成本从 ~60s 降到 ~2s。
+    #   实测全账本版让 selfproof 从 364s 涨到 652s，逼近 780s 上限 ——
+    #   闸门跑不完就等于没有闸门。
+    tmpdir, pick = _frozen_copy(2)
+    if tmpdir is None:
+        return None, "已封盘日不足，反向对照做不了 —— SKIP 不是通过"
+    real = E.blind_of
+    try:
+        E.blind_of = lambda _p: ()
+        b2 = E.collect(tmpdir.name)
+    finally:
+        E.blind_of = real
+        tmpdir.cleanup()
+    if len(b2.blind) >= total:
+        return False, ("把 blind_of 换成空实现之后，Bundle 里仍有 %d 条盲区"
+                       "（工具申报 %d）⇒ 本臂的判据根本没在数这件事"
+                       % (len(b2.blind), total))
+
+    return True, ("工具申报 %d 条 %s，Bundle 收进 %d 条（多出 %d 条是结构性前提）；"
+                  "反向对照：屏蔽解析后只剩 %d 条 ⇒ 判据会红"
+                  % (total, per, len(b.blind), len(b.blind) - total, len(b2.blind)))
 
 
 def a_undecidable_separated():
@@ -345,6 +451,7 @@ def main():
         ("nc16_no_held_in_real", a_evidence_has_no_held),
         ("nc17_ids_stable_real", a_evidence_ids_stable_across_runs),
         ("nc18_undecidable", a_undecidable_separated),
+        ("nc19_blind_not_dropped", a_blind_not_dropped),
     ]:
         arm(name, fn)
 

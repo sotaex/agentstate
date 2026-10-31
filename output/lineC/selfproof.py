@@ -64,7 +64,7 @@ CHECKS: List[Tuple[str, List[str], int]] = [
     ("onepager --selfcheck", [os.path.join(LINE_C, "onepager.py"), "--selfcheck"], 0),
     ("corrections --selfcheck", [os.path.join(LINE_C, "corrections.py"), "--selfcheck"], 0),
     ("report --selfcheck", [os.path.join(LINE_C, "report.py"), "--selfcheck"], 0),
-    ("负控 evidence 18 臂", [os.path.join(OUTPUT, "_p_evid_negctl.py")], 0),
+    ("负控 evidence 19 臂", [os.path.join(OUTPUT, "_p_evid_negctl.py")], 0),
     ("负控 C-2 30 臂", [os.path.join(OUTPUT, "_p_c2_negctl.py")], 0),
     ("负控 更正端到端 11 臂", [os.path.join(OUTPUT, "_p_corr_e2e.py")], 0),
     ("红队 C-1 6 臂", [os.path.join(LINE_C, "redteam.py")], 0),
@@ -116,7 +116,7 @@ def main() -> int:
         tail = lines[-1] if lines else ""
         print("  [%s] %-26s %5.1fs  %s" % ("OK" if ok else "XX", name, dt, tail[:60]))
         if not ok:
-            # ★ 红的时候只留最后一行是不够的：负控的「合计 18 臂 17 通过」
+            # ★ 红的时候只留最后一行是不够的：负控的「合计 19 臂 18 通过」
             #   说不出是哪一臂红的，于是「去修」变成「去猜」。红项要留尾巴。
             fails.append((name, rc, tail, lines[-12:]))
 
