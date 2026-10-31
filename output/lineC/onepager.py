@@ -119,6 +119,8 @@ font-weight:700;color:#fff;white-space:nowrap}
 border-bottom:1px dotted var(--brand)}
 .daylevel{font-family:var(--mono);font-size:12px;color:var(--muted);font-style:italic}
 details{margin:6px 0}
+details.folded{border:1px solid var(--line);border-radius:10px;padding:6px 12px;margin-top:12px}
+details.folded summary{font-size:13px}
 summary{cursor:pointer;font-size:12.5px;color:var(--brand)}
 pre.raw{background:var(--bg);border:1px solid var(--line);border-radius:6px;
 padding:8px 10px;font-family:var(--mono);font-size:11.5px;overflow-x:auto;
@@ -257,14 +259,26 @@ def _ev_html(e: E.Evidence, corr: Optional["C.Correction"] = None) -> str:
 
 
 def _folded_html(folded: Sequence[E.Evidence]) -> str:
-    """折叠的条目：**显示但不占主视觉**。不许藏起来。"""
+    """折叠的条目：**显示但不占主视觉**。不许藏起来，也不许丢掉出处。
+
+    ★ 第一版把折叠条目渲染成「只有徽标词 ＋ 结论」的行，**没有 data-cites**。
+      后果不是排版问题，是报告直接出不来：`report.produce` 把**上游条数**
+      当分母传给 citecheck，而 citecheck 只认 class="ev" 的条目 ——
+      6 条证据里折叠 1 条，它就报「渲染丢了 1 条」并拒绝落盘。
+      **只要某天真账本产出 6 条证据，报告就再也写不出来了**，而这件事在
+      5 条以内永远看不到。实测 2026-11-01：端到端负控 e2／e3 两条臂同时红。
+
+    ★ 修法不是改分母，是让折叠条目**照样带出处**：折叠用原生 <details>
+      （本来就是这个设计），里面仍是完整的 .ev 条目。首屏还是 5 条，
+      但每一条被折叠的结论照样能回指（§5.7：回指不到 ⇒ 不许写）。
+      改分母等于承认「折叠的结论不需要出处」—— 那是把预算问题说成口径问题。
+    """
     if not folded:
         return ""
-    items = "".join(
-        '<div class="row"><span class="k">%s</span><span>%s</span></div>'
-        % (_e(e.word()), _e(e.claim)) for e in folded)
-    return ('<h2>另有 %d 条（未在本页展开）</h2>'
-            '<div class="rows">%s</div>' % (len(folded), items))
+    items = "".join(_ev_html(e) for e in folded)
+    return ('<details class="folded"><summary>另有 %d 条'
+            '（展开看全部，每条都带出处）</summary>%s</details>'
+            % (len(folded), items))
 
 
 def render(bundle: E.Bundle, *, cap: int = DEFAULT_CAP,
@@ -525,6 +539,16 @@ def _selfcheck() -> int:
     if "折叠 7 条" not in hm or "排序规则" not in hm:
         fails.append("折叠了却没自报「砍了哪些、按什么砍」")
 
+    # 折叠的条目**也必须带齐契约属性** —— 否则 report.produce 会以
+    # 「渲染丢了 N 条」拒绝落盘（真账本一旦超过 cap 就再也出不来报告）。
+    # 实测 2026-11-01：端到端负控 e2／e3 同时红才撞出来，5 条以内永远看不到。
+    if hm.count('data-eid="') != 12:
+        fails.append("折叠的条目没带 data-eid（抽出 %d 条，应为 12）—— "
+                     "超过 cap 时报告会被自己的回指校验拒收"
+                     % hm.count('data-eid="'))
+    if "details" not in hm:
+        fails.append("折叠没用 <details>（零 JS 的原生折叠）")
+
     # ---- 更正（设计 §6 验收 1／2／6）----
     bc = E.Bundle(read_at="2026-11-01 03:00:00", root="")
     bc.evidence.append(E.Evidence(
@@ -644,10 +668,10 @@ def _selfcheck() -> int:
         print("[自检失败] %s" % f, file=sys.stderr)
     if fails:
         return 1
-    print("[自检] 十六条全部生效（契约属性／零与不可判／首屏／盲区不折叠／转义／"
-          "裁量自报／被更正条目仍在／作废横幅在首屏／反向指认／指纹在页脚／"
-          "指纹值真等于现算／残缺即明说不完整／WARN 不印成通过／不适用≠没跑成／"
-          "0 条必须自己解释／产物无星号）")
+    print("[自检] 十七条全部生效（契约属性／零与不可判／首屏／盲区不折叠／转义／"
+          "裁量自报／折叠条目也带出处／被更正条目仍在／作废横幅在首屏／反向指认／"
+          "指纹在页脚／指纹值真等于现算／残缺即明说不完整／WARN 不印成通过／"
+          "不适用≠没跑成／0 条必须自己解释／产物无星号）")
     return 0
 
 
