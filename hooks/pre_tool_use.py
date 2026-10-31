@@ -56,7 +56,7 @@ _T0 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段起点（性能
 
 # ---------------------------------------------------------------- constants --
 PKG_DIR = os.path.dirname(os.path.abspath(__file__))
-_ANTINEL_VERSION = "0.63.1"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
+_ANTINEL_VERSION = "0.63.2"   # 0.30.0 (E-3): recorded in hook_alive / summary / probe records
 _T1 = _time_mod.perf_counter()          # 0.32.2 (B1): import 段终点（性能插桩）
 
 
@@ -1324,6 +1324,26 @@ def _load_rules_integrity(rules):
         except Exception:
             pass
     by_id = {r["id"]: r for r in rules if r.get("id")}
+    # ★★ 0.63.2 (U3-1, 2026-10-31)：**旧号也必须指向同一条规则**。
+    #
+    #   0.63.0 改名（`DST-08` → `AN-022` 等 37 条）之后，用户
+    #   `<root>/.psl/rules/custom.json` 里写的仍是改名前在页面上看到的号。
+    #   原实现只认 `id`：旧号查不到 ⇒ 落进下面 `elif rid:` 分支，被当成一条
+    #   **自定义规则 append 进表里**。实测（`output/_probe_custom_legacy_0631.py`
+    #   三条腿）：旧号 `DST-08` + `enabled:false` ⇒ 条数 37→38、目标规则
+    #   `AN-022.enabled` 仍为 `None`；同一配置改用新号则 `False`。
+    #   后果比"静默失效"更具体：**用户明确关掉的规则照旧生效**（拦截集合相对
+    #   其配置变大，违反冻结期补丁纪律「拦截不增」），且多出一条无 pattern 的
+    #   幽灵规则 —— 加载"成功"、账本无痕、条数 +1。
+    #
+    #   修法只是给查找多接一个索引：不改任何 pattern、不改裁决、不改
+    #   severity 语义。**真正未知的 id 仍走原分支**，自定义规则能力不变。
+    #   `legacy_id` 全表唯一且不与任何新号冲突（37/37 有值，实测无重复无互撞）。
+    by_legacy = {}
+    for _r in rules:
+        _lg = _r.get("legacy_id")
+        if _lg and _lg not in by_id:
+            by_legacy.setdefault(_lg, _r)
     # B-03 / G-11: custom.json appended; same id overrides severity/action/enabled only
     for base in (os.getcwd(), os.path.dirname(os.getcwd())):
         p = os.path.join(base, ".psl", "rules", "custom.json")
@@ -1334,10 +1354,13 @@ def _load_rules_integrity(rules):
                 data = json.load(f)
             for r in data.get("rules", []):
                 rid = r.get("id")
-                if rid and rid in by_id:
+                # 旧号与新号指向同一条规则（见上方 by_legacy 的说明）；两者都不中
+                # 才算"真正未知的 id"，仍按原逻辑当自定义规则 append。
+                _tgt = (by_id.get(rid) or by_legacy.get(rid)) if rid else None
+                if _tgt is not None:
                     for k in ("severity", "action", "enabled", "deprecated"):
                         if k in r:
-                            by_id[rid][k] = r[k]
+                            _tgt[k] = r[k]
                 elif rid:
                     # C9: a custom rule whose patterns can wedge the hook is dropped
                     # before it ever reaches the matcher. Silent loading here is what

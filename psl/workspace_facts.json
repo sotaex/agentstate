@@ -37,7 +37,7 @@
     "_note": "★ 站点构建器**不在任何 git 仓里**（D:\\2026\\PSL 非 git）—— 这是事实，不是缺陷；但它意味着改站点没有版本历史，要改就改构建器源码，别改 _antinel_site 里的生成物（下次构建会被覆盖）。"
   },
   "release": {
-    "version": "0.63.1",
+    "version": "0.63.2",
     "version_files": [
       "pyproject.toml",
       "server.json"
@@ -45,26 +45,28 @@
     "_version_files_note": "★★ 0.43.1（2026-10-10）：`psl/manifest.json` **已从本清单摘出** —— 它是**构建产物**（由 build_package.py 在打包时写入），语义上允许落后于源码，**不再**是『逐字一致』的版本承载件（见 ci/version_check.py 判据 7）。此处只列**手工维护**的两处。",
     "dist_dir": "D:\\psl\\poc\\antinel-security\\dist",
     "artifacts": [
-      "antinel-0.63.1-py3-none-any.whl",
-      "antinel-0.63.1.tar.gz"
+      "antinel-0.63.2-py3-none-any.whl",
+      "antinel-0.63.2.tar.gz"
     ],
+    "_artifacts_note_0632": "★★ 2026-10-31（0.63.2 出包实测，本机）：两件已在 dist/ 产出并过发布验收 A/B/C/E/D 五步全绿 —— wheel 2,000,281 字节 sha256:56efba1d…43e9c947；sdist 3,682,724 字节 sha256:b07d0509…79da1884a；验收日志 output/p12_verify_release_v0632.log（抬头 version=0.63.2）。★ 本轮踩到一条**流程缺陷**（第一次构建的 wheel 因此作废，两件重出）：`_resign_manifest.py --adopt-dev` 把研发树专属件 `ci/freeze_zones.json` 补进仓根清单（144 条），而构建器**原样复制**这份清单进 wheel —— `ci/` 从不进 wheel ⇒ 纯净安装下 `--manifest` 报 superseded，发布验收 [E] 红（实测：「清单覆盖了 1 个不随 wheel 分发的文件」）。正确态是构建器自己写的**纯随包 143 条**；出包前必须让仓根清单回到 pure，出包后再 `--adopt-dev` 补回 144。★ 仍不是 PyPI 事实：published_version 仍是实查值 0.62.1，按 publish_hold 冻结，0.63.2 不上传。",
     "_artifacts_note_0631": "★★ 2026-10-31（0.63.1 出包实测，本机）：两件已在 dist/ 产出并过发布验收 A/B/C/E/D 五步全绿 —— wheel 1,999,451 字节 sha256:7f1bdacb…74ecb90；sdist 3,683,445 字节 sha256:dd353a54…120ccee6；验收日志留在 output/p12_verify_release.log（抬头 version=0.63.1）。此前本字段停在 0.62.1，是**登记值落后于磁盘事实**（0.62.1 两件在本轮出包时已由 _archive_stale_dist 挪进 _archive_dist/）。★ 仍不是 PyPI 事实：published_version 仍是实查值 0.62.1，按 publish_hold 冻结，0.63.1 不上传。",
     "_note_0560": "★★ 2026-10-24（0.55.3 → **0.56.0**，minor：**规则命中集变了** —— 同一批 Agent 行为在 0.55.3 与 0.56.0 上得到不同裁决）。四件事同批：① SEC-05 从 4 条裸子串改为 **9 条路径段锚定**（名字层 3 ＋ 配置根层 6）：实测 47 条语料 0 漏 0 误（旧规则 3 漏 13 误），新判据 SEC-05a/b/c 守着；② `inbox_tray._chain_record` 返四态串（D-40 转绿，`bool('none')` 不再把丢记录报成成功）；③ **0.55.0 的三处修复首次进入发布链** —— CS0108 加 `new`／品牌底板四层同源／favicon 实例指纹，它们此前只在 `fix/logo-cs-compile` 分支上，0.55.0–0.55.3 四版 whl 解包实测都不含；④ 新判据落 `ci/inbox_guards_0514.py`（正控 27／负控 20／负控牙齿＋SELF-TAMPERED 防线）。",
     "_artifacts_note": "★★ 0.55.0（2026-10-23）：两件已于本机 dist/ 产出（wheel 1856162 字节 03:38／sdist 4096477 字节 03:39）。★ 这里登记的是**本地产物事实**，不是 PyPI 事实 —— 上架与否只看 `pypi.published_version`（仍是实查值 0.48.4），两栏不许混。",
     "pypi": {
       "published_version": "0.62.1",
-      "wheel": "D:/psl/poc/antinel-security/dist/antinel-0.63.1-py3-none-any.whl",
+      "wheel": "D:/psl/poc/antinel-security/dist/antinel-0.63.2-py3-none-any.whl",
       "host_audit_fixture": "D:\\2026\\PSL\\_strict_test\\ux_0332.txt",
       "_note": "★★ 2026-10-03 修订（据《Antinel（C14）版本登记不符·发现备忘 v1.0》§3 建议 1）：此前本文件把「已定稿、待上传的**目标态**」与「PyPI 上**事实**」**混在一个字段**里（published_version 写 0.33.2，而实查 PyPI 是 0.28.0）⇒ 任何「用户能装到的版本」类判据读到 0.33.2，用户实际装到 0.28.0。现在**两栏分开**：published_version＝PyPI 事实（只能由实查改写）；target_version＝本次待发版。★ 规则：published_version **只能用 pypi.org/pypi/antinel/json 的实查结果改写**，不得由「打算发什么」推导 —— 否则又回到「登记值跑在事实前面」。 ★★ 2026-10-05 实查更新：0.34.1 已于 2026-10-05T10:46:17Z 上传 PyPI 成功（实查 pypi.org/pypi/antinel/json：info.version=0.34.1，版本集 [0.28.0, 0.34.1]，两件 sha 与本地 dist 一致）；published_version 由 0.28.0 改为 0.34.1，published_at 同步。 ★★ 2026-10-11 实查更新：**0.35.1** 已于 2026-10-06T03:41:51Z 上传 PyPI 成功（实查 pypi.org/pypi/antinel/json：info.version=0.35.1，版本集 [0.28.0, 0.34.1, 0.35.1]）；published_version 由 0.34.1 改为 **0.35.1**，published_at 同步为 2026-10-06T03:41:51Z。此前登记停在 0.34.1，是「事实位」落后于真事实（0.35.1 上传后未回填）—— 本轮按同一规则（只由实查改写）据实补正，不由「打算发什么」推导。 ★★★ 2026-10-22 实查更新（第二次同一族复发）：**0.48.4** 已于 2026-10-12T02:06:28Z（wheel）／02:06:30Z（sdist）上传 PyPI 成功（实查 pypi.org/pypi/antinel/json：info.version=0.48.4，版本集 [0.28.0, 0.34.1, 0.35.1, 0.48.4]，无 0.49 及以上任何版本）；published_version 由 0.35.1 改为 0.48.4，published_at 同步为 0.48.4 的 wheel 上传时刻。此前登记停在 0.35.1，是「事实位」又一次落后于真事实（0.48.4 于 2026-10-12 上传后未回填；2026-10-18 的 0.53.0 报告仍照抄登记值写「PyPI 实查仍 0.35.1」）。★ 本次只是**事实位补正，不是发布动作**：target_version=0.53.2 与 pypi.wheel 均未动；0.53.2 的构建／tag／上传仍待创始人确认（PyPI 最新 0.48.4 与代码 0.53.2 之间差 0.49.0／0.50.3／0.51.1／0.52.0／0.53.2 五轮，均未打 tag、均未上传）。  ★★★ 2026-10-26 实查更新：**0.57.0** 已于 2026-10-26T04:34:19Z（wheel）／04:34:21Z（sdist）上传 PyPI 成功（实查 pypi.org/pypi/antinel/json：info.version=0.57.0；两件下载回来 sha256 与本地 dist 逐字节一致；pip download antinel==0.57.0 可解析）。published_version 由 0.55.3 改为 **0.57.0**，published_at 同步。★ 本次是**事实位回填，不是发布动作**：此前的 0.55.0／0.55.1／0.55.2／0.55.3 四版均已在 PyPI 上（实查版本集可见），登记值停在 0.55.3 是「事实位落后于真事实」这一族的第三次复发 —— 0.57.0 这次上传后立即回填，不留缺口。",
-      "target_version": "0.63.1",
+      "target_version": "0.63.2",
       "_note_0620": "★★ 2026-10-30（0.61.0 -> **0.62.0**，minor：**规则命中集变了** —— 同一批 Agent 行为在 0.61.0 与 0.62.0 上得到不同裁决，这是本仓既定的 minor 判据）。本轮来自《夜间升级启动清单（2026-10-29）》：37 条规则里 15 条零命中，其中 **6 条是结构上不可能命中**，全部救活 —— ① `MCP-02/03/04` 的 `file_patterns` 补一条裸名匹配（本机真实路径是 `~/.workbuddy-ai/mcp.json`，文件名**不带前导点**；此前 `MCP-01` 报警、另三条看不见）；② `SEC-11` 的诱饵目录 `.canary/` 从未被创建过 => 改为由**安装末尾自动执行** `antinel canary plant`（命令存在 != 诱饵在岗）；③ `DST-05` 去掉 `^` 锚并补 5 条 Windows 提权等价（runas / Start-Process -Verb RunAs / localgroup administrators 追加 / 注册表 Run 键写入 / New-LocalUser 与 Add-LocalGroupMember）；④ `CTX-07` 形态错配修复（三条 Python 语法 pattern 挂在 apply_to_tools:[Bash] 上，content 面结构上永不执行）改为 command_patterns 内联形态，管道形态仍归 `DST-06`；⑤ `category_order` 补全 8 类（原 6 类漏 supply_chain / canary），且 `references/RULES.md` 改为**从数据生成**（消灭第二份实现）；⑥ 账本字段拆义：`notice_budget_window_closed` 新增 `bucket`，`rule_id` 只放真规则号（历史 390 条 `DST-02-BASH` 不再看起来像第 38 条规则）；⑦ 发 `AN-001..037` 稳定号（只进字段，不动 787 处引用的 id）；⑧ 四条「关不掉」的规则数据化为 `hardcoded_rules`；⑨ 兜底集 `_FALLBACK` 由主表**重新生成**（0.61.0 时它与主表差 37 个 an 字段 + MCP/CTX-07 的 pattern 陈旧 —— 判据红得对）。★ `DST-08`（block 规则补 Windows 等价）**本轮已补做**（0.62.0 未发布，并入同版，不重复升号）：`icacls … /deny` 直接拦（等价 chmod 000）；`icacls … /reset` **必须同时带 /t** 才拦（单文件重置继承是管理员修权限的日常）；`takeown … /r` 才拦（单文件夺回属主是日常）—— 一律收紧到「递归」，与 Unix 侧 chmod -R／chown -R 同一口径。清单原方案给的是 `/reset` 与 `takeown /f` 裸匹配，会在 block 档上误拦；已改并留证。另加四条只读命令排除（末尾 [^;&|\\n]*$ ⇒ 链式真命令不被误放行）。判据同步：`C-DST-08` 正控 1→4（chmod -R／icacls /deny／icacls /reset /t／takeown /r）、负控 1→4（chmod 644／icacls /reset 无 /t／icacls /grant／takeown 无 /r）；`C-T1` 由三腿增至五腿，新增「删掉 Windows 等价即红」「放松成裸 /reset 即红」两条分辨力腿。★ **本版已上传 PyPI**（2026-10-30 创始人点头后执行，此前的「未上传」口径据实改写）：实查 pypi.org/pypi/antinel/0.62.0/json ＋ simple 索引，两件 sha256 与本地 dist/ 逐字节一致 —— wheel 84718c2c37a15bae…e11bc7cd／1990065 字节／2026-10-30T04:39:22Z，sdist 6a5229087a95323…fda215a／3660224 字节／04:39:29Z；`published_version` 由 0.61.0 改为 **0.62.0**，`published_at` 同步。上传命令 rc=0 并印出 `View at: https://pypi.org/project/antinel/0.62.0/`；聚合 `/json` 的 `info.version` 当时仍缓存为 0.61.0（CDN 滞后，已知现象，**不重传**）。",
       "_note_0602": "2026-10-28（0.60.1 → 0.60.2，patch）：创始人一句「细看：多大、在哪、为什么」把 0.60.1 的折叠标签审了出来 —— 写死的标签承诺三问，本机 4 条有证据的记录里 `多大` 兑现 1/4、`在哪` 兑现 1/4，`为什么` 原理上答不出（产品读的是工具写下的字段，读不到动机）。同一条还拖着三处：`.zcode` 4 个目录只报 1 个（136.7 MB，真值 310.2 MB，44%）；两条 SENT（53／41 个文件）一个字段都没有 ⇒ 53 个文件名一条不列；SENT 那句「下面能看到它自己写的记录」指向空处。修法：标签改由渲染时真有的东西**现算**（承诺与兑现同源）＋逐块汇总 ＋ 空块列文件名 ＋ 删那句空指针。判据 T-17e／N-T17e 守着（六喂全跑、不短路；并用 HEAD 里的旧 ui_server 同表对照过，三腿都咬住）。为什么 patch：不改规则命中集、不改判定档位，只改渲染与文案。published_version 仍为 0.60.0（PyPI 实查事实，未上传 ⇒ 不得改动）。",
       "_note_0600": "★★★ 2026-10-28（PyPI 上传 0.60.0 成功）：实查 pypi.org/pypi/antinel/json 得 info.version=0.60.0；两件下载回来 sha256 与本地 dist/ 逐字节一致（wheel 03:29:17Z／sdist 03:29:26Z）。published_version 由 0.59.0 改为 0.60.0，published_at 同步。上传前跑过 scripts/verify_release.py（A/B/C/D/E 五步全通）；安装态实测 --version / -h / console script 三条全通。",
       "published_at": "2026-10-30T07:10:08Z",
-      "_note_0580": "2026-10-27（0.58.0 出包收口）：artifacts / pypi.target_version / pypi.wheel 由 0.57.2 前进到 0.58.0。published_version 仍为 0.57.0（PyPI 实查事实，**未上传** ⇒ 不得改动）。0.57.2 两件已按零删除挪进 _archive_dist/。"
+      "_note_0580": "2026-10-27（0.58.0 出包收口）：artifacts / pypi.target_version / pypi.wheel 由 0.57.2 前进到 0.58.0。published_version 仍为 0.57.0（PyPI 实查事实，**未上传** ⇒ 不得改动）。0.57.2 两件已按零删除挪进 _archive_dist/。",
+      "_target_note_0632": "★ 2026-10-31：target_version 0.63.1 -> 0.63.2（本次待发版＝U3-1 修复）。published_version **不动**，仍是实查值 0.62.1 —— 冻结期内 0.63.2 不上 PyPI，二者分家是设计状态，不是登记错。pypi.wheel 待本轮出包后改写。"
     },
     "publish_hold": {
-      "hold_version": "0.63.1",
+      "hold_version": "0.63.2",
       "decided_at": "2026-10-30T16:40:00+08:00",
       "decided_by": "founder",
       "scope": "pypi_upload",
@@ -83,11 +85,18 @@
           "verdict": "维持冻结，不解冻；0.63.1 只进代码与本地 judgment，不上 PyPI",
           "why": "① 补丁线纪律要求「拦截集合单调不增」——本补丁只改 `--purge` 的清目录失败路径（重试 → `retire_file` 改名让开 → 如实说），**不动任何规则的匹配面**，命中集逐条不变；② 冻结只冻上传（scope=pypi_upload），不冻合并，所以补丁可以进 main；③ 稳定判据的 14 天计时随版本前进重置到 0.63.1，这是设计意图，不是副作用。",
           "note": "★ 为什么作 patch 而不是 minor：先例是 0.34.1 —— 同一类「卸载不该因为一次删不掉就报失败」的修复，当时也作 patch。判据：改的是**失败路径的返回码**，不是裁决，也不是命中集。"
+        },
+        {
+          "reviewed_at": "2026-10-31T20:3x+08:00",
+          "trigger": "release.version 0.63.1 -> 0.63.2（**patch**：修 U3-1 —— 0.63.0 改名后旧号 custom.json 不再命中 by_id，被当成新规则 append；见 hooks/pre_tool_use.py 的 by_legacy 段）⇒ resume_condition 第三次按设计触发",
+          "verdict": "维持冻结，不解冻；0.63.2 只进代码与本地 judgment，不上 PyPI、不打 tag",
+          "why": "① 补丁线纪律「拦截集合单调不增」：本补丁把用户**已经声明为关闭**的规则真正关掉 ⇒ 相对该用户配置，拦截集合**严格变小**，方向合规；② 冻结只冻上传（scope=pypi_upload），不冻合并；③ 稳定判据 14 天计时随版本前进重置到 0.63.2。",
+          "note": "★★ 这是补丁线的**第 3 个**（上限 3，见 code_freeze）。下一次「修」不再走补丁线：必须另开 worktree 的功能线，版本从 0.63.2.dev0 起。本条是提前把上限写死，避免第 4 个补丁出现时才有人发现已经越界。★ 为什么是 patch 不是 minor：改的是**查找口径**（同一事实多一个别名索引），不改裁决、不改命中集、不改 schema。"
         }
       ],
-      "hold_version_note": "★ 2026-10-31：由 0.62.1 前进到 0.63.0（改名批次），同日前移到 **0.63.1**（U2-1 修复）—— 两次依据都在 review_log，结论都是维持冻结。",
+      "hold_version_note": "★ 2026-10-31：由 0.62.1 → 0.63.0（改名批次）→ 0.63.1（U2-1）→ **0.63.2**（U3-1 旧号覆盖）；三次依据都在 review_log，结论都是维持冻结。补丁额度用尽（3/3）。",
       "code_freeze": "同时冻结功能：main 不接新功能，只接修复；补丁上限 3 个，且补丁线只允许「拦截集合单调不增」。功能开发另开 worktree，版本从 0.63.0.dev0 起。",
-      "resume_condition": "满足两条才解除：① 0.63.1 达到稳定判据（14 天零 P0）；② 创始人明确批准上传。本字段带 hold_version，版本一前进判据即红 ⇒ 迫使在动版本时重新复核本决定。",
+      "resume_condition": "满足两条才解除：① 0.63.2 达到稳定判据（14 天零 P0）；② 创始人明确批准上传。本字段带 hold_version，版本一前进判据即红 ⇒ 迫使在动版本时重新复核本决定。",
       "baseline": {
         "published_version": "0.62.1",
         "artifacts": [

@@ -1,5 +1,5 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
-# Antinel rule id map (generated from rules/default.json v0.63.1 - do not edit by hand)
+# Antinel rule id map (generated from rules/default.json v0.63.2 - do not edit by hand)
 
 0.63.0 renamed every rule id. **The rename was an identity transformation.**
 Same rules, same patterns, same severity, same decisions on the same input --

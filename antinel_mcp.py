@@ -92,7 +92,7 @@ def main():
             resp = {"jsonrpc": "2.0", "id": rid, "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "antinel", "version": "0.63.1"}}}
+                "serverInfo": {"name": "antinel", "version": "0.63.2"}}}
         elif method == "tools/list":
             resp = {"jsonrpc": "2.0", "id": rid, "result": {"tools": TOOLS}}
         elif method == "tools/call":

@@ -8186,7 +8186,196 @@ def n_refresh_rules_needs_install():
     return True
 
 
+# ══════════════════════════════════════════════ R 族：规则覆盖契约（0.63.2）
+# ★★ 为什么必须有（2026-10-31 实测，不是推演）：
+#   0.63.0 把 37 条规则从 `PREFIX-NN` 改成 `AN-NNN` 之后，用户在 0.62.x 写的
+#   `custom.json`（`{"id": "DST-08", "enabled": false}`）不再命中 `by_id`，
+#   于是走 `elif rid:` 分支被当成**新规则 append**。实测（探针
+#   `output/_probe_custom_legacy_0631.py` 三腿）：
+#       旧号 ⇒ 条数 37→38、`AN-022` 仍 enabled、多出一条**无 pattern 的幽灵规则**
+#       新号 ⇒ 37 条、`AN-022.enabled=False`（正确）
+#   ⇒ 用户以为关掉的规则**照旧生效**，而加载"成功"、账本无痕、界面无提示。
+#   方向还违反冻结期唯一的补丁纪律「拦截集合单调不增」：关掉的规则复活＝相对
+#   用户配置，拦截**变多**了。
+# ★ 修法：`load_rules()` 的覆盖查找同时接 `legacy_id` 索引。旧号与新号是**同一条
+#   规则的两个名字**，指向同一个 dict ⇒ 改一处两边同时生效，不需要第二处同步
+#   （这正是本仓头号顽症「同一事实多处实现」的反面做法）。
+# ★ 判据一律 import 产品模块直接调 `load_rules()`，**不二次实现**覆盖逻辑；
+#   负控喂**真能运行的变异副本**，不吃"纸上推演"。
+
+
+def _rovr_project(root, custom_body):
+    """建一个只含 `custom.json` 的临时项目 —— cwd 是唯一被隔离的变量。"""
+    proj = os.path.join(root, "proj")
+    os.makedirs(os.path.join(proj, ".psl", "rules"), exist_ok=True)
+    if custom_body is not None:
+        with open(os.path.join(proj, ".psl", "rules", "custom.json"), "w",
+                  encoding="utf-8", newline="\n") as f:
+            json.dump(custom_body, f)
+    return proj
+
+
+def _rovr_rules_from(P, proj):
+    """切 cwd 到 proj 调 `load_rules()`，`finally` 切回来。
+
+    `RULES_PATH` 是**模块级常量**（`_locate("rules","default.json")` ⇒ 包内那份），
+    不随 cwd 变 ⇒ 换 cwd 只影响 `custom.json` 的查找，正是要隔离的那一个变量。
+    """
+    old = os.getcwd()
+    try:
+        os.chdir(proj)
+        return P.load_rules()
+    finally:
+        os.chdir(old)
+
+
+def _rovr_check(P):
+    """覆盖契约的核心判定。**正控传真模块，负控传变异副本 —— 同一条判据。**
+
+    全部期望值现算：基线条数、目标规则的新旧号都不写死（写死＝把当前实现钉成
+    判据，实现一变判据就假红，或者反过来永远绿）。
+    """
+    tmp = _tmpdir()
+    base = _rovr_rules_from(P, _rovr_project(os.path.join(tmp, "base"), None))
+    if not base:
+        return "基线加载不到规则表（0 条）—— 判据无从比较"
+    n_base = len(base)
+    # 自证读得到：带 legacy_id 的条数必须 > 0。
+    # =0 ⇒ 读到的是内嵌兜底集（`_FALLBACK` 没有 legacy_id），量到的是兜底不是产品。
+    with_legacy = [r for r in base if r.get("legacy_id")]
+    if not with_legacy:
+        return "加载到的是内嵌兜底集（无 legacy_id）—— 判据会量错对象，先查环境"
+    target = with_legacy[0]
+    new_id, old_id = target["id"], target["legacy_id"]
+    bad = []
+
+    # ① 旧号必须照样关掉目标规则（这是本次修复的全部意义）
+    rules_old = _rovr_rules_from(P, _rovr_project(
+        os.path.join(tmp, "old"), {"rules": [{"id": old_id, "enabled": False}]}))
+    cur = {r.get("id"): r for r in rules_old}.get(new_id)
+    if cur is None:
+        bad.append("旧号 %s 覆盖后 %s 不在表里" % (old_id, new_id))
+    elif not P._disabled(cur):
+        bad.append("旧号 %s 没能关掉 %s —— 用户以为关了，实际照旧生效" % (old_id, new_id))
+
+    # ② 不许产生幽灵规则：旧号是别名，不是新规则
+    if len(rules_old) != n_base:
+        bad.append("旧号覆盖后条数 %d → %d（多出来的是幽灵规则：旧号被当成新规则 append）"
+                   % (n_base, len(rules_old)))
+    if any(r.get("id") == old_id for r in rules_old):
+        bad.append("表里出现了以旧号 %s 为 id 的条目（幽灵规则）" % old_id)
+
+    # ③ 对照腿：新号必须同样有效 —— 修旧号不许把新号改坏
+    rules_new = _rovr_rules_from(P, _rovr_project(
+        os.path.join(tmp, "new"), {"rules": [{"id": new_id, "enabled": False}]}))
+    cur2 = {r.get("id"): r for r in rules_new}.get(new_id)
+    if cur2 is None or not P._disabled(cur2):
+        bad.append("新号 %s 覆盖失效 —— 修旧号时把新号改坏了" % new_id)
+    if len(rules_new) != n_base:
+        bad.append("新号覆盖后条数 %d → %d" % (n_base, len(rules_new)))
+
+    return True if not bad else "旧号覆盖不合格：\n      " + "\n      ".join(bad)
+
+
+def c_rovr_legacy_override():
+    """R-OVR-1：用户 0.62.x 写的旧号 `custom.json`，在 0.63.x 上必须仍然算数。
+
+    三条断言同在一处，缺一条就漏一种后果：关掉了没／有没有多出幽灵规则／
+    新号有没有被改坏。
+    """
+    return _rovr_check(_import_pre_tool_use())
+
+
+def c_rovr_unknown_id_appends():
+    """R-OVR-2（不回归）：真未知 id 仍按原逻辑 append。
+
+    ★ 为什么这条必须单独在：修旧号最省事的做法是"凡是 `by_id` 里没有的一律忽略"，
+      那会把**自定义规则**这个既有能力悄悄收窄 —— 用一个缺陷换另一个缺陷。
+      这条守的就是"只让别名命中，别把新规则入口也关了"。
+    """
+    P = _import_pre_tool_use()
+    tmp = _tmpdir()
+    base = _rovr_rules_from(P, _rovr_project(os.path.join(tmp, "b"), None))
+    if not base:
+        return "基线加载不到规则表（0 条）"
+    n_base = len(base)
+    alien = "ZZ-999"
+    if any(r.get("id") == alien or r.get("legacy_id") == alien for r in base):
+        return "基线里已经有 %s —— 夹具选错了，换一个不成号的" % alien
+    rules = _rovr_rules_from(P, _rovr_project(
+        os.path.join(tmp, "a"), {"rules": [{"id": alien}]}))
+    if len(rules) != n_base + 1:
+        return ("未知 id 没能 append（%d → %d）—— 修旧号时把自定义规则这条既有能力"
+                "一起收窄了" % (n_base, len(rules)))
+    if not any(r.get("id") == alien for r in rules):
+        return "未知 id %s 不在表里（append 了别的什么东西）" % alien
+    return True
+
+
+def n_rovr_legacy_override():
+    """N-R-OVR 负控牙齿：把 `by_legacy` 索引去掉 ⇒ 同一条判据必须红。
+
+    三件必须自证，缺一件负控就可能是假绿：
+      ① 锚点在源码里出现**恰好 1 次**（锚点漂了就变异不到真地方）；
+      ② 替换后字节**真的变了**（防止 replace 没生效却以为改了）；
+      ③ 副本读到的仍是**真规则表**（legacy 数 > 0），不是内嵌兜底。
+    """
+    src_p = os.path.join(G.PKG, "hooks", "pre_tool_use.py")
+    src = open(src_p, encoding="utf-8").read()
+    anchor = "            by_legacy.setdefault(_lg, _r)"
+    n_anchor = src.count(anchor)
+    if n_anchor != 1:
+        return "变异锚点出现 %d 次（应为 1）—— 负控不可靠，先对齐锚点" % n_anchor
+    mut_src = src.replace(anchor, "            pass  # mutated: legacy index removed")
+    if mut_src == src:
+        return "替换后字节未变 —— 变异没生效（不许当成负控通过）"
+
+    tmp = _tmpdir()
+    import shutil
+    hooks = os.path.join(tmp, "hooks")
+    os.makedirs(hooks, exist_ok=True)
+    os.makedirs(os.path.join(tmp, "rules"), exist_ok=True)
+    # 同相对布局：副本的 `_locate("rules","default.json")` 必须落到真规则表上，
+    # 否则它退回 37 条内嵌兜底，量到的不是产品逻辑（那是假绿）。
+    shutil.copyfile(os.path.join(G.PKG, "rules", "default.json"),
+                    os.path.join(tmp, "rules", "default.json"))
+    mut_p = os.path.join(hooks, "pre_tool_use.py")
+    with open(mut_p, "w", encoding="utf-8", newline="\n") as f:
+        f.write(mut_src)
+    if open(mut_p, encoding="utf-8").read() == src:
+        return "写出去的副本与原文件相同 —— 变异丢失"
+
+    if hooks not in sys.path:
+        sys.path.insert(0, hooks)
+    sys.modules.pop("pre_tool_use", None)
+    try:
+        import importlib
+        Pm = importlib.import_module("pre_tool_use")
+        if os.path.abspath(Pm.PKG_DIR) != os.path.abspath(hooks):
+            return "副本没被优先导入（PKG_DIR=%s）—— 量到的是真模块，负控无效" % Pm.PKG_DIR
+        probe = _rovr_rules_from(Pm, _rovr_project(os.path.join(tmp, "p"), None))
+        if not any(r.get("legacy_id") for r in probe):
+            return "副本读到的是内嵌兜底集（无 legacy_id）—— 负控会量错对象"
+        r = _rovr_check(Pm)
+    finally:
+        sys.path.remove(hooks)
+        sys.modules.pop("pre_tool_use", None)
+
+    if r is True:
+        return "去掉 legacy 索引后判据仍然绿 —— 负控没有牙齿（修了也证明不了）"
+    # ★ 只要求"变红"不够：副本 import 失败、读不到真表、被别的模块抢先导入……
+    #   都会让它"恰好变红"，看着有牙实际瞎。必须红在**缺索引这一条**上。
+    if "没能关掉" not in str(r):
+        return "负控红了，但不是红在缺 legacy 索引上：\n      %s" % str(r)[:300]
+    return True
+
+
 CHECKS_0353 = [
+    # ---- 十三、规则覆盖契约（0.63.2 U3-1：改名后旧号 custom.json 必须仍算数）----
+    ("R-OVR-1 旧号 custom.json 仍算数：关掉了／无幽灵规则／新号没被改坏",
+     c_rovr_legacy_override, n_rovr_legacy_override),
+    ("R-OVR-2 真未知 id 仍 append：自定义规则这条既有能力不被收窄",
+     c_rovr_unknown_id_appends, None),
     # ---- 十二、恢复即结案（B，2026-10-23 创始人点名必做）----
     ("P39 恢复即结案：有证据的那一类全部结案／说明带证据／别的类不动",
      c_reconcile_closes_recovered, n_reconcile_closes_recovered),

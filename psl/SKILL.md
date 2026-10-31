@@ -15,12 +15,12 @@ compatibility: Requires Python 3.10+; standard library only; no network access; 
 metadata:
   psl-verified: "true"
   psl-verified-spec: "psl-vs-0.1"
-  psl-verified-at: "2026-10-31T15:40:34+0800"
+  psl-verified-at: "2026-10-31T20:48:28+0800"
   psl-verified-evidence: "live PreToolUse block of a real .env read in ZCode (AN-001) plus a full-assertion judgment run; digest check 21/21 digests match this build (assertions 325/325)"
   psl-verifier: "scripts/run_harness.py"
   antinel-product: "security-audit"
   antinel-tier: "free"
-  antinel-version: "0.63.1"
+  antinel-version: "0.63.2"
   psl-token-interception: "false"
 ---
 

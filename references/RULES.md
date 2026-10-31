@@ -1,5 +1,5 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
-# Antinel detection rules (generated from rules/default.json v0.63.1 - do not edit by hand)
+# Antinel detection rules (generated from rules/default.json v0.63.2 - do not edit by hand)
 
 Category order = match priority: secrets > destructive > network > injection > supply_chain > context > metadata > canary.
 Severity to action: critical = block, warning = alert (logged, allowed). All hits are collected; highest severity decides.
