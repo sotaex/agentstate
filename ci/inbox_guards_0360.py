@@ -2213,7 +2213,10 @@ def c_ranking_label_zh_clean():
             return "%s：缺 label_zh（上屏短名，排行主显示位用）" % rid
         if len(lb) > 14:
             return "%s：label_zh 长 %d 字（>14，窄列必折行）%r" % (rid, len(lb), lb)
-        if re.search(r"[A-Z]{2,4}-\d{2}", lb):
+        # ★ 0.63.1：编号位数从两位放宽到 2–3 位 —— 0.63.0 起规则号是 `AN-001`
+        #   （三位），旧口径 `\d{2}` 对新号**恒不命中** ⇒ 本条自 0.63.0 起空转
+        #   （判据还在跑、永远绿）。放宽的是**位数**，不是「内嵌自引用」这条判定。
+        if re.search(r"[A-Z]{2,4}-\d{2,3}", lb):
             return "%s：label_zh 内嵌规则号自引用 %r（Q-04 退编号不许从数据后门回来）" % (rid, lb)
         bad = [w for w in re.findall(r"[A-Za-z][A-Za-z0-9-]*", lb)
                if w not in ("SSH", "MCP")]

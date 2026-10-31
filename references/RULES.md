@@ -1,5 +1,5 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
-# Antinel detection rules (generated from rules/default.json v0.62.1 - do not edit by hand)
+# Antinel detection rules (generated from rules/default.json v0.63.1 - do not edit by hand)
 
 Category order = match priority: secrets > destructive > network > injection > supply_chain > context > metadata > canary.
 Severity to action: critical = block, warning = alert (logged, allowed). All hits are collected; highest severity decides.
@@ -11,15 +11,15 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
 
 ### code only (not present in this table at all)
 
-- `OUT-01` — 输出面：私有密钥/凭据出现在工具输出里（hooks/pre_tool_use.py:3368 起，PostToolUse）
-- `DEV-01` — 套件治理：A1/A2 写入时刻拦截（_suite_gov_hit，同 ci/delivery_gate.py 双向同步）
-- `notice_budget` — 提醒预算：token 预算超阈值（_budget_hit）
+- `OUT-01` — 输出面：私有密钥/凭据出现在工具输出里（hooks/post_tool_use.py:605 起，PostToolUse）。★ 0.63.0：号未收编，保留旧号直到 channel 字段落地
+- `DEV-01` — 套件治理：A1/A2 写入时刻拦截（_suite_gov_hit，同 ci/delivery_gate.py 双向同步）。★ 0.63.0 去号：原 GOV-01，不再占判据号段，改走 type:governance
+- `notice_budget` — 提醒预算：token 预算超阈值（_budget_hit）。★ 0.63.0 去号：原 BUDGET-01，已有专属 type notice_budget_*，此号永不回收
 
 ### declared but code driven (present below, but judged by code)
 
-- `SLOP-01` — 撞名/打字抢注检测（_slop_hit）。本文件里该条 enabled=false 是**设计**：它只承载描述与文档，判定走代码内置参考集（rules/typosquat_top.json），避免静态正则误报全部正常安装。详见该条 note。
+- `AN-037` — 撞名/打字抢注检测（_slop_hit）。本文件里该条 enabled=false 是**设计**：它只承载描述与文档，判定走代码内置参考集（rules/typosquat_top.json），避免静态正则误报全部正常安装。详见该条 note。★ 0.63.0：原 AN-037
 
-## SEC-01  Sensitive file read (.env)
+## AN-001  Sensitive file read (.env)
 - category: secrets | severity: critical | static + dynamic | tools: Read, Bash
 - purpose: Prevents an agent reading .env files (live-blocked in ZCode on 09-10; the founding interception)
 - description: Agent attempted to read a .env file which may contain API keys and secrets
@@ -35,7 +35,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
 - exclude_patterns: `\.env\.example`, `\.env\.template`, `\.env\.sample`
 - remediation: Remove .env from agent-readable scope or add to deny list. Use environment variable injection instead.
 
-## SEC-02  SSH key file read
+## AN-002  SSH key file read
 - category: secrets | severity: critical | static + dynamic | tools: Read, Bash
 - purpose: Prevents SSH private key / authorized_keys reads (the credential that outlives every session)
 - description: Agent attempted to read SSH private key or authorized_keys file
@@ -50,7 +50,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
     - `\.ssh[/\\]authorized_keys`
 - remediation: Keep SSH keys outside agent working scope; use ssh-agent forwarding instead of key files.
 
-## SEC-03  Cloud credential file read
+## AN-003  Cloud credential file read
 - category: secrets | severity: critical | static + dynamic | tools: Read, Bash
 - purpose: Prevents cloud credential file reads (aws/kube/gcloud -- the keys that move cloud billings)
 - description: Agent attempted to read cloud provider credentials
@@ -64,7 +64,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
     - `\.netrc`
 - remediation: Use short-lived tokens via the provider CLI instead of exposing credential files to the agent.
 
-## SEC-04  Wallet/keystore file read
+## AN-004  Wallet/keystore file read
 - category: secrets | severity: critical | static + dynamic | tools: Read, Bash
 - purpose: Prevents wallet/keystore access (irreversible financial loss class)
 - description: Agent attempted to read cryptocurrency wallet or keystore file
@@ -83,7 +83,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
 - exclude_patterns: `test_wallet`, `mock_wallet`
 - remediation: Never let a coding agent touch wallet directories; move keystores to an encrypted vault.
 
-## SEC-05  Browser data read
+## AN-005  Browser data read
 - category: secrets | severity: critical | static + dynamic | tools: Read, Bash
 - purpose: Prevents browser profile reads (live login sessions, not just passwords)
 - description: Agent attempted to read browser stored data (cookies, passwords, sessions)
@@ -102,7 +102,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
     - `(?:^|[\\/])Library[\\/]Application Support[\\/](?:Google[\\/]Chrome|Firefox)[\\/]`
 - remediation: Browser profiles contain live sessions; deny all agent access to profile directories.
 
-## NET-01  Shell network request
+## AN-006  Shell network request
 - category: network | severity: warning | dynamic (hook only) | tools: Bash, WebFetch, WebSearch, MCP
 - purpose: Surfaces shell egress to non-whitelisted domains (first-generation C2 / exfil channel)
 - description: Agent made an external network request via shell command to a non-whitelisted domain
@@ -119,7 +119,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
 - exclude_patterns: `localhost`, `127\.0\.0\.1`, `registry\.npmjs\.org`, `pypi\.org`, `files\.pythonhosted\.org`, `github\.com`, `api\.github\.com`, `objects\.githubusercontent\.com`
 - remediation: Pin downloads to whitelisted registries (npmjs/pypi/github) or review the destination.
 
-## NET-02  Python network request
+## AN-007  Python network request
 - category: network | severity: warning | dynamic (hook only) | tools: Bash, WebFetch, WebSearch, MCP
 - purpose: Surfaces inline-code network calls (the same egress hidden inside python -c)
 - description: Agent code contains Python network request calls
@@ -137,7 +137,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
     - `require\(['"]https?['"]\)`
 - remediation: Review the endpoints used by inline Python network code before allowing egress.
 
-## NET-03  Non-whitelisted domain connection
+## AN-008  Non-whitelisted domain connection
 - category: network | severity: warning | dynamic (hook only) | tools: Bash, WebFetch, WebSearch, MCP
 - purpose: Surfaces non-whitelisted domains named in commands (DNS-level comparison is v2)
 - description: Agent command references a domain outside the whitelist (v1 compares command-line domains; DNS-level comparison is a v2 kernel-layer capability)
@@ -148,7 +148,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
 - exclude_patterns: `127\.0\.0\.1`
 - remediation: Add the domain to the whitelist only after verifying it is the intended destination.
 
-## DST-01  File deletion
+## AN-009  File deletion
 - category: destructive | severity: critical | dynamic (hook only) | tools: Bash
 - purpose: Blocks deletion commands (rm/del/rd/Remove-Item and library calls -- measured 11 live blocks)
 - description: Agent executed a file or directory deletion command
@@ -179,7 +179,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
 - exclude_patterns: `rm -rf node_modules`, `rm -rf \.git`, `rm -rf __pycache__`, `rm -rf \.psl`, `remove-item node_modules`, `remove-item -recurse.*node_modules`, `\brm\s+(?:-[a-zA-Z]+\s+)*(?:\./)?(?:dist|build|target|venv|\.venv|node_modules|__pycache__|\.tox|\.nox|\.mypy_cache|\.ruff_cache|\.pytest_cache|\.cache|\.next|\.nuxt|\.svelte\-kit|\.turbo|\.parcel\-cache|\.gradle|htmlcov|coverage|out|bin|obj|Debug|Release)(?:[/\\][^\s;&|]*)?(?:\s|$|;|&|\|)`, `\brm\s+-rf\s+\S*\.(egg-info|pyc)(\s|$|;)`, `\brm\s+-rf\s+\.nox\b`, `^\s*(?:#|::|rem\s)`, `\bdef\s+\w*(?:remove|unlink|delete)\w*\(`
 - remediation: Confirm the deletion target; prefer moving to trash over rm -rf outside build artifacts.
 
-## DST-02  Write outside project root
+## AN-010  Write outside project root
 - category: destructive | severity: critical | dynamic (hook only) | tools: Write, Edit, Bash
 - purpose: Blocks writes outside the project root (the workspace is the trust boundary)
 - description: Agent attempted to write to a file outside the project root directory
@@ -191,7 +191,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
 - check: path_outside_project_root
 - remediation: Allow: run `antinel paths add <prefix>` (audited) or `antinel roots add <dir>`; or keep agent writes inside the project.
 
-## DST-03  Shell configuration modification
+## AN-011  Shell configuration modification
 - category: destructive | severity: critical | dynamic (hook only) | tools: Write, Edit, Bash
 - purpose: Blocks shell-startup edits (persistence that re-executes on every terminal)
 - description: Agent attempted to modify shell startup configuration (persistence mechanism)
@@ -207,7 +207,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
     - `\.bash_profile`
 - remediation: Shell startup files execute on every terminal; never let an agent append to them unreviewed.
 
-## DST-04  Persistence mechanism
+## AN-012  Persistence mechanism
 - category: destructive | severity: critical | dynamic (hook only) | tools: Write, Edit, Bash
 - purpose: Blocks persistence installs (cron/systemd/registry Run/schtasks -- survives the session)
 - description: Agent attempted to establish persistence (cron job, systemd service, startup item, scheduled task, registry Run key)
@@ -239,7 +239,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
     - `(?i)currentversion[/\\]winlogon`
 - remediation: Persistence entries survive the session and re-execute code; require explicit human approval.
 
-## DST-05  Privilege escalation
+## AN-013  Privilege escalation
 - category: destructive | severity: warning | dynamic (hook only) | tools: Bash
 - purpose: Alerts on privilege escalation (sudo/chmod 777 -- sysadmin territory)
 - description: Agent attempted to escalate privileges
@@ -258,7 +258,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
 - exclude_patterns: `sudo apt-get install`, `sudo pip install`
 - remediation: Run privileged steps yourself instead of letting the agent hold elevated shells.
 
-## CTX-01  Environment variable enumeration
+## AN-014  Environment variable enumeration
 - category: context | severity: warning | dynamic (hook only) | tools: Bash
 - purpose: Alerts on environment enumeration (the precursor to secret exfiltration)
 - description: Agent attempted to enumerate all environment variables (may expose API keys and secrets)
@@ -271,7 +271,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
     - `process\.env`
 - remediation: Print only the specific variables needed instead of dumping the whole environment.
 
-## CTX-02  Prompt injection pattern in instruction file
+## AN-015  Prompt injection pattern in instruction file
 - category: injection | severity: critical | static + dynamic | tools: Read, Write, Edit
 - purpose: Blocks prompt injection in skill instructions (the skill-poisoning payload core)
 - description: Potential prompt injection payload in an instruction file (SKILL.md/AGENTS.md/CLAUDE.md/.cursorrules; non-SKILL.md needs 2 generic or 1 specific hit)
@@ -288,7 +288,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
     - `print\s+(the\s+)?(system\s+prompt|api\s+keys?)`
 - remediation: Remove the skill; audit its source; report the pattern to the skill marketplace.
 
-## CTX-03  Invisible Unicode characters
+## AN-016  Invisible Unicode characters
 - category: injection | severity: critical | static + dynamic | tools: Read, Write, Edit, Bash
 - purpose: Blocks invisible Unicode (tag/zero-width/RLO -- the human-eye bypass, live-blocked 3x)
 - description: Invisible Unicode character detected (tag characters, zero-width, word joiner, BOM in middle of file)
@@ -304,7 +304,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
     - U+00AD–U+00AD soft_hyphen: path=warning, command=warning, instruction=warning, content=info
 - remediation: Strip invisible characters; treat any occurrence in instructions as hostile until proven otherwise.
 
-## CTX-04  Encoded payload
+## AN-017  Encoded payload
 - category: injection | severity: warning | static + dynamic | tools: Read, Write, Edit
 - purpose: Alerts on long encoded blobs in skills (the payload behind base64/hex laundering)
 - description: Long base64 or hex string detected (potential encoded payload)
@@ -315,7 +315,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
     - `[0-9a-fA-F]{400,}`
 - remediation: Decode and review the payload; legitimate instructions rarely embed long encoded blobs.
 
-## CTX-05  Skill name mismatch
+## AN-018  Skill name mismatch
 - category: metadata | severity: warning | static + dynamic | tools: Read
 - purpose: Detects SKILL.md identity mismatch (name spoofing / packaging slip)
 - description: SKILL.md frontmatter name field does not match parent directory name
@@ -324,7 +324,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
 - check: frontmatter.name == directory_name
 - remediation: Rename the directory or fix the frontmatter; mismatches hide a skill's real identity.
 
-## DST-06  Remote script piped to interpreter
+## AN-019  Remote script piped to interpreter
 - category: destructive | severity: critical | dynamic (hook only) | tools: Bash
 - purpose: Blocks remote-script-piped-to-interpreter (the classic supply-chain install)
 - description: Agent downloaded a remote script and piped it straight into a shell or interpreter
@@ -341,7 +341,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
 - exclude_patterns: `localhost`, `127\.0\.0\.1`
 - remediation: Download and inspect the script first; confirm the source is trusted before executing.
 
-## DST-07  Irreversible git discard
+## AN-020  Irreversible git discard
 - category: destructive | severity: critical | dynamic (hook only) | tools: Bash
 - purpose: Blocks irreversible git discards (reset --hard / clean -fdx eat uncommitted work)
 - description: Agent ran a git command that irreversibly discards working-tree changes or untracked files
@@ -354,7 +354,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
 - exclude_patterns: `git\s+clean\s+-n(\s|$)`
 - remediation: Stash or commit first; only then discard, and prefer dry-run forms.
 
-## SEC-06  Secret literal in content
+## AN-021  Secret literal in content
 - category: secrets | severity: critical | static + dynamic | tools: Write, Edit, Read, Bash
 - purpose: Catches secret literals IN content (a key pasted into code outlives the file it was meant for)
 - description: Secret-looking literal (API key, private key, token) appeared in written or edited content
@@ -369,7 +369,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
 - placeholder_patterns（命中片段是已知占位值 ⇒ 不算发现）: `AKIAIOSFODNN7EXAMPLE`, `AKIAI44QH8DHBEXAMPLE`, `sk-(?:your|xxx+|test|example|placeholder|dummy|fake|redacted)`, `gh[pousr]_(?:x{8,}|0{8,}|your|example|placeholder)`, `xox[baprs]-(?:0{8,}|x{8,}|your|placeholder)`
 - remediation: Use environment variables or a secrets manager; never paste plaintext keys into files.
 
-## DST-08  Permission/ownership destruction
+## AN-022  Permission/ownership destruction
 - category: destructive | severity: critical | dynamic (hook only) | tools: Bash
 - purpose: Blocks recursive permission/ownership destruction (denial-of-service class; POSIX chmod/chown and Windows icacls/takeown)
 - description: Agent attempted to destroy permissions or ownership recursively (denial of service); covers chmod/chown and Windows icacls/takeown
@@ -386,7 +386,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
 - exclude_patterns: `^\s*(?:grep|rg|egrep|fgrep|ag|ack)\b[^;&|\n]*$`, `^\s*(?:cat|type|head|tail|less|more|bat|findstr|where)\b[^;&|\n]*$`, `^\s*(?:echo|printf)\b[^;&|\n]*$`, `^\s*git\s+(?:log|show|diff|grep)\b[^;&|\n]*$`
 - remediation: Permission/ownership recursion is a sysadmin action; do it yourself after review
 
-## DST-09  Alternate data stream write (file path)
+## AN-023  Alternate data stream write (file path)
 - category: destructive | severity: critical | dynamic (hook only) | tools: Write, Edit
 - purpose: Blocks alternate-data-stream writes from a file tool (Windows-only: path:stream is a legal POSIX filename)
 - description: Agent attempted to write an NTFS alternate data stream (path:stream) -- invisible to dir/ls and carried along by a plain file copy
@@ -397,21 +397,21 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
 - platforms: nt (rule is skipped on other hosts; it stays in the loaded set so rule counts are platform-invariant)
 - remediation: Stored in the file's own stream table, an ADS does not show up in normal listings or in the copy that gets reviewed. Write the bytes as a normal file instead.
 
-## DST-10  Alternate data stream write (command)
+## AN-024  Alternate data stream write (command)
 - category: destructive | severity: critical | dynamic (hook only) | tools: Bash
-- purpose: Blocks alternate-data-stream writes from a shell (redirect / -Stream / copy / open -- the command half of DST-09)
-- description: Agent attempted to write an NTFS alternate data stream from a shell (redirect / -Stream / copy / open) -- the command-line half of DST-09
+- purpose: Blocks alternate-data-stream writes from a shell (redirect / -Stream / copy / open -- the command half of AN-023)
+- description: Agent attempted to write an NTFS alternate data stream from a shell (redirect / -Stream / copy / open) -- the command-line half of AN-023
 - 说明: 从命令行写入 NTFS 备用数据流。重定向 / -Stream / copy / open 等命令通道都能做到。
-- 处理建议: 与 DST-09 同一通道的命令行写法，产物同样逃过审查；请改用普通文件
+- 处理建议: 与 AN-023 同一通道的命令行写法，产物同样逃过审查；请改用普通文件
 - command_patterns:
     - `>\s*[^\s|;&\"'<>]*\.[^\\/:\s]{1,32}:(?!Zone\.Identifier\b)`
     - `\b(?:Set-Content|Add-Content|Clear-Content)\b[^\n]{0,160}?-Stream\b(?![\s\"']*Zone\.Identifier)`
     - `\b(?:copy|xcopy|robocopy)\b[^\n]{0,120}?\.[^\\/:\s]{1,32}:(?!Zone\.Identifier\b)`
     - `\bopen\s*\([^\n)]{0,200}\.[^\\/:\s\"']{1,32}:(?!Zone\.Identifier)[^\"'\n]{0,200}[\"']\s*,\s*[\"'][wa]`
 - platforms: nt (rule is skipped on other hosts; it stays in the loaded set so rule counts are platform-invariant)
-- remediation: Same channel as DST-09 reached from a shell; the file written this way survives review. Use a normal file.
+- remediation: Same channel as AN-023 reached from a shell; the file written this way survives review. Use a normal file.
 
-## CTX-07  Inline base64-decode exec
+## AN-025  Inline base64-decode exec
 - category: injection | severity: critical | static + dynamic | tools: Bash
 - purpose: unknown (generator table missing an entry)
 - description: Inline base64-decode-then-exec/eval in a shell command (classic obfuscated payload carrier)
@@ -422,7 +422,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
     - `\bpython[23]?\s+-c\b[^\n]{0,200}\b(exec|eval)\b[^\n]{0,120}b64decode`
 - remediation: Decode and inspect the payload first; never let inline decoded code run directly.
 
-## SEC-07  Clipboard read
+## AN-026  Clipboard read
 - category: secrets | severity: critical | static + dynamic | tools: Bash
 - purpose: unknown (generator table missing an entry)
 - description: Agent read the system clipboard, which may hold passwords, tokens or private text the user copied
@@ -441,7 +441,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
     - `(?i)\[Windows\.ApplicationData\]::Current\.GetClipboardContent`
 - remediation: Do not read the clipboard from an agent command; ask the user to paste the value instead.
 
-## SEC-08  Screen capture
+## AN-027  Screen capture
 - category: secrets | severity: warning | static + dynamic | tools: Bash
 - purpose: unknown (generator table missing an entry)
 - description: Agent captured the screen (screenshot/record), which can carry whatever is displayed
@@ -461,7 +461,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
     - `(?i)\bGet-CimInstance\b[^\n]{0,80}Win32_VideoController`
 - remediation: Screen capture from an agent is almost never needed; if it is, do it manually.
 
-## SEC-09  IM/mail local store read
+## AN-028  IM/mail local store read
 - category: secrets | severity: critical | static + dynamic | tools: Read, Bash
 - purpose: unknown (generator table missing an entry)
 - description: Agent read an instant-messaging or mail client's local store (full message history)
@@ -486,7 +486,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
     - `(?i)\bDingTalk\b`
 - remediation: These stores are the user's private correspondence; deny agent access entirely.
 
-## SEC-10  Input-method user dictionary read
+## AN-029  Input-method user dictionary read
 - category: secrets | severity: warning | static + dynamic | tools: Read, Bash
 - purpose: unknown (generator table missing an entry)
 - description: Agent read the input-method user dictionary, which records what the user has typed
@@ -505,7 +505,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
     - `(?i)\.scel$`
 - remediation: Typing history is private; do not let an agent read IME dictionaries.
 
-## DST-11  Write into cloud-sync directory
+## AN-030  Write into cloud-sync directory
 - category: destructive | severity: critical | dynamic (hook only) | tools: Write, Edit, Bash
 - purpose: unknown (generator table missing an entry)
 - description: Agent wrote into a cloud-drive sync folder: the sync client will upload the file automatically
@@ -514,7 +514,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
 - check: path_in_cloud_sync_dir
 - remediation: Allow deliberately with `antinel paths add <prefix>` (audited), or write inside the project.
 
-## NET-04  Tunnel / covert channel
+## AN-031  Tunnel / covert channel
 - category: network | severity: warning | dynamic (hook only) | tools: Bash, WebFetch, WebSearch, MCP
 - purpose: unknown (generator table missing an entry)
 - description: Agent opened a tunnel / covert channel (reverse tunnel, proxy, DNS-ICMP carrier) to move data out
@@ -529,7 +529,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
     - `(?i)\b(ngrok(-free)?\.(io|app)|trycloudflare\.com|serveo\.net|localtunnel\.me|localhost\.run|pinggy\.(io|link)|bore\.pub|lhr\.life|tunnel\.to)\b`
 - remediation: Tunnels bypass ordinary egress checks; confirm the destination before allowing.
 
-## MCP-01  Write to MCP config file
+## AN-032  Write to MCP config file
 - category: supply_chain | severity: warning | dynamic (hook only) | tools: Write, Edit, Bash
 - purpose: unknown (generator table missing an entry)
 - description: MCP configuration file written/modified -- verify the new server's source, command and url (malicious MCP servers are an active 2025-2026 supply-chain channel)
@@ -546,7 +546,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
     - `(?is)(?:>>|>|\btee\b|\bcp\b|\bmv\b|\bmove\b|\bcopy\b|\bset-content\b|\bout-file\b|\badd-content\b)[^\n]{0,120}claude_desktop_config\.json`
 - remediation: Verify the new server's source, command and url; remove any you do not recognize and rotate the related credentials.
 
-## MCP-02  Prompt injection in MCP tool description
+## AN-033  Prompt injection in MCP tool description
 - category: supply_chain | severity: warning | dynamic (hook only) | tools: Read, Write, Edit
 - purpose: unknown (generator table missing an entry)
 - description: MCP tool description/config contains prompt-injection patterns (tool-poisoning class; postmark-mcp case)
@@ -566,7 +566,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
     - `curl\s+[^\s]*\$\{?[A-Z_]*(KEY|TOKEN|SECRET)`
 - remediation: Remove that MCP server and check where it came from; instructions in a tool description enter the model context on every tool call.
 
-## MCP-03  Unaudited remote MCP server
+## AN-034  Unaudited remote MCP server
 - category: supply_chain | severity: warning | dynamic (hook only) | tools: Read, Write, Edit
 - purpose: unknown (generator table missing an entry)
 - description: MCP config references a remote server (http url or mcp-remote bridge) -- remote tool definitions can change silently after approval
@@ -583,7 +583,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
     - `"url"\s*:\s*"https?://`
 - remediation: Confirm the remote endpoint is trustworthy; prefer a local stdio server -- remote tool definitions can change without your control.
 
-## MCP-04  Plaintext secret in MCP config env
+## AN-035  Plaintext secret in MCP config env
 - category: supply_chain | severity: warning | dynamic (hook only) | tools: Read, Write, Edit
 - purpose: unknown (generator table missing an entry)
 - description: Plaintext API key/token inside MCP config env block (config files get synced, shared and committed far more often than .env)
@@ -604,7 +604,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
     - `-----BEGIN [A-Z ]*PRIVATE KEY-----`
 - remediation: Use credential references or environment injection instead; treat any key already written as leaked and rotate it.
 
-## SEC-11  Canary file read
+## AN-036  Canary file read
 - category: canary | severity: warning | dynamic (hook only) | tools: Read, Bash
 - purpose: unknown (generator table missing an entry)
 - description: Agent read a canary file -- if its marker (CANARY-*) appears in any external channel, that proves exfiltration of project content
@@ -616,7 +616,7 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
     - `\.canary[\\/]CANARY-`
 - remediation: Record and observe: reading a canary is not itself a leak -- the marker appearing in an external channel is the evidence (see the canaries count in `report`).
 
-## SLOP-01  Typosquatted package name in install command
+## AN-037  Typosquatted package name in install command
 - category: supply_chain | severity: warning | dynamic (hook only) | tools: Bash
 - purpose: unknown (generator table missing an entry)
 - description: Install command references a package name suspiciously close to a popular package (typosquatting / slopsquatting class). Determined by the hook's built-in reference set (rules/typosquat_top.json, static, dated) -- new packages published after the set date are not judged.
@@ -630,8 +630,8 @@ The only way to switch a rule off in this product is `enabled: false` on its ent
 
 | field | semantics |
 |---|---|
-| whitelist.domains | relaxes NETWORK rules only (NET-01/02 excludes, NET-03 whitelist, subdomains included) |
-| whitelist.paths | path prefixes exempt from SECRETS rules and releasing DST-02 (each DST-02 release is audit-logged as dst02_path_whitelisted); install seeds agent-managed dirs that exist on the machine |
+| whitelist.domains | relaxes NETWORK rules only (AN-006/AN-007 excludes, AN-008 whitelist, subdomains included) |
+| whitelist.paths | path prefixes exempt from SECRETS rules and releasing AN-010 (each AN-010 release is audit-logged as dst02_path_whitelisted); install seeds agent-managed dirs that exist on the machine |
 | whitelist.commands | command prefixes exempt from WARNING-level rules only; critical rules are never relaxed |
 | global_settings.alert_threshold | warning (default) or critical: suppresses stderr notices below it; logging and blocking unchanged |
 | global_settings.log_retention_days | archive age for report.py --archive (default 30) |

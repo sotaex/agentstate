@@ -3176,11 +3176,15 @@ def _t03_core(page):
     # ② 规则号淡显索引位在（.rid），且是**唯一**的编号出现形态：
     #    剥掉 rid 后可见文本不许再有任何规则号（裸 rule_id 兜底回潮即红 ——
     #    Q-04 自违反形态，2026-10-16 查证实锤过）。
-    if not re.search(r'<span class="rid">[A-Z]{2,4}-\d{2}</span>', page):
+    # ★ 0.63.1：位数 2–3 位。0.63.0 起规则号是 `AN-001`（三位），旧口径 `\d{2}`
+    #   与**本文件自己的夹具**（下面 T-05 用 `AN-012`）互相打脸 ⇒ T-03 结构性必红、
+    #   N-T03 负控「真实现本身就红 ⇒ 无分辨力」。放宽的是位数，不是「必须有 rid」
+    #   与「剥掉 rid 后不许再出现编号」这两条判定。
+    if not re.search(r'<span class="rid">[A-Z]{2,4}-\d{2,3}</span>', page):
         return "排行行缺淡显编号（.rid）—— 收件箱记录「规则 AN-001」对不上号"
     bare = re.sub(r"\x00+", " ", re.sub(r"<[^>]+>", "\x00", PC.body_without_terms(
         re.sub(r'<span class="rid">[A-Za-z0-9-]*</span>', " ", page))))
-    if re.search(r"[A-Z]{2,4}-\d{2}", bare):
+    if re.search(r"[A-Z]{2,4}-\d{2,3}", bare):
         return "剥掉 .rid 后可见文本仍有规则号（裸 rule_id 兜底上了主显示）"
     # ③ 命中次数在（排行卡的数）
     if "命中 2 次" not in body:

@@ -118,7 +118,12 @@ def _call_order(build_fn):
 # ══════════ S38 · 行为：旧版挪走、本版留着、更新版硬失败、垃圾不碰 ══════════
 @check("S38 ★ 旧版发布件自动挪走（零删除）｜本版不动｜垃圾不动")
 def s38():
-    with tempfile.TemporaryDirectory() as tmp:
+    # ★ 0.63.1：`ignore_cleanup_errors=True` —— 夹具的**收尾**不许掩盖判定结果。
+    #   2026-10-31 本机实测：宿主 trash 服务拒一切目录清理（原生 rmdir 报
+    #   WinError 5，关掉垫片同样），`TemporaryDirectory.__exit__` 于是抛
+    #   PermissionError ⇒ 这条判据报「💥 崩」，读起来像产品有缺陷，其实与产品无关。
+    #   断言一条没动；「临时目录该不该收掉」由 0353 的 P37 单独守，不在这里兼职。
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         dist, arch = _mk_dist(tmp, [
             "antinel-0.41.0-py3-none-any.whl",          # 旧 ⇒ 必须挪
             "antinel-0.41.0.tar.gz",                     # 旧 ⇒ 必须挪
@@ -166,7 +171,7 @@ def n_s38():
     if old not in src:
         return "负控无效：找不到 `_shutil.move(...)` ＋ `moved.append(...)` 块可供变异"
     mut = src.replace(old, "        pass  # mutated: no move, no bookkeeping")
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         dist, arch = _mk_dist(tmp, ["antinel-0.41.0-py3-none-any.whl",
                                     "antinel-0.41.0.tar.gz",
                                     "antinel-0.42.0-py3-none-any.whl"])

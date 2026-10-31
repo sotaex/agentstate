@@ -2,13 +2,13 @@
  "spec": "psl-vs-0.1",
  "card_id": "antinel-security-suite",
  "skill": "antinel-security",
- "skill_version": "0.63.0",
- "verdict": "FAIL",
+ "skill_version": "0.63.1",
+ "verdict": "PASS",
  "status": {
   "value": "current",
   "derivation": "auto",
   "reason": null,
-  "checkedAt": "2026-10-31T09:39:29+08:00",
+  "checkedAt": "2026-10-31T15:46:17+08:00",
   "note": "re-derive any time: python -m tools.antinel_verify (--manifest for all 24 shipped files); which assertions failed: discrimination.failed[]"
  },
  "scope": {
@@ -51,15 +51,10 @@
    "op": "black-box subprocess assertions (stdin JSON in, exit code + stdout/stderr out)"
   },
   "assertions": {
-   "passed": 324,
+   "passed": 325,
    "total": 325
   },
-  "failed": [
-   {
-    "name": "U2-1 uninstall --purge：项目 .psl 消失、镜像证据仍在",
-    "detail": "rc=2 mirror=True"
-   }
-  ],
+  "failed": [],
   "by_kind": {
    "taxonomy": {
     "product": "产品缺陷：代码行为不符合声言（默认类，fail-closed）",
@@ -74,18 +69,12 @@
     "stale_check": "登记了但本轮未失败的条目进 stale_entries —— 表格腐烂本身留痕"
    },
    "counts": {
-    "product": 1,
+    "product": 0,
     "instrument": 0,
     "environment": 0,
     "process-stale": 0
    },
-   "per_failure": [
-    {
-     "name": "U2-1 uninstall --purge：项目 .psl 消失、镜像证据仍在",
-     "kind": "product",
-     "basis": "未登记 ⇒ 按 fail-closed 纪律默认 product 类（不是结论，是尚未证出别的类）"
-    }
-   ],
+   "per_failure": [],
    "stale_entries": [
     "UX: 同类提醒当天只提示一次（第二次静默记录）",
     "0.16.0 AN-009 URL /rd/ segment is not a delete (AN-006 warns, no block)",
@@ -101,7 +90,7 @@
     "count": 0,
     "files": []
    },
-   "invariant": "sum(counts.values()) == len(failed) == 1"
+   "invariant": "sum(counts.values()) == len(failed) == 0"
   },
   "partial": false
  },
@@ -109,7 +98,7 @@
  "objectOwnership": "self",
  "objectOwnershipBasis": "subject github.com/sotaex is in the signed namespace list",
  "assertions_total": 325,
- "assertions_passed": 324,
+ "assertions_passed": 325,
  "criteria_independence": "Assertions exercise the hook protocol, rule matching, scanner, installer and reporter as black boxes through subprocesses (stdin JSON in, exit code and stdout/stderr out); they were authored from the design specification ANT-SEC-SPEC-001 v1.1, not from the implementation; third-party re-run supported.",
  "environment": {
   "python": "3.13.14",
@@ -119,7 +108,7 @@
  },
  "digests": {
   "psl/antinel-namespaces.json": "sha256:2db67f32a5b803560f458c4589bd4bb4678cc17bc16625f6b6b3ad20f9b202d2",
-  "rules/default.json": "sha256:377571204c1362de302b92cfe695013fe212d68c3b9ff936f2e2ae590f0eaa62",
+  "rules/default.json": "sha256:831280124beb1545767652c66326bcef47cf4554b2f0f884af41f92df5831db2",
   "rules/pricing.json": "sha256:e299e7afa07a97128ce00c13706379c79368c747cd4303c488f1c53c5339e253",
   "rules/typosquat_top.json": "sha256:ef3559a10fbf7e7f59086717154814a36849441bda6a5d5662cd240174ffa671",
   "rules/economics/workbuddy.json": "sha256:7d570a0d8cb09f803695a4af147269620acdd5da5f403e2534a0c418c202c6a6",
@@ -130,22 +119,22 @@
   "hooks/pre_tool_use.py": "sha256:12601521edee466d689e7eb5f06def4633d05d931684897df7b4baf178230658",
   "hooks/post_tool_use.py": "sha256:066d6c5dc4bda900d2931cd999e691751051ab23169e416e417507ff20fe3481",
   "scripts/scan.py": "sha256:e27ce9ae619422b990d8b0d48e94e0403ee9f57e87d9a7f51365c54c01342154",
-  "scripts/install.py": "sha256:8d78378af8325e103b6f3905fda4dd9b807dcd738a484771ea2965fd9f078293",
+  "scripts/install.py": "sha256:0a5b21e2792e69f2aaedaa28ad6c2872eb56fb56e2509c510d7f6d5ccd2b5df8",
   "scripts/report.py": "sha256:3fd77adacff60323e431491a7f17df360a45169165b002a4f8aa20a03ec07a88",
   "scripts/verification_tests.py": "sha256:e92526588e9ac05452cf67ba910129211eb3ad4aa127c56c8323bddae1736995",
   "session_dna.py": "sha256:38b2bd765fdf2308fa698eb507e53c4ba7fbe2bf11c94216d95ad5dd116fb205",
   "transcript_reader.py": "sha256:c0ce99c5bdfb255f170ca744c011ae64ceb9569d1c9dd8efc1a2c096ff89dc1c",
   "audit_chain.py": "sha256:9a4438cbb65d20e8c7e1482c455a5a2a198aaaba6c1ded3eea1154b867d6f634",
-  "antinel.py": "sha256:481eff62cd11e3c7096f6e96ead8da4ab0c74511ba6fe02d53a88dfe1765fbe6",
+  "antinel.py": "sha256:f30b76ec3cc70700d761de7ecf67873cf6bf535e72b6d0705a0fc5dd0f2bdedb",
   "hub.py": "sha256:edcb1b94194e551d5b0023749ae5417e67729b22eb391198fcae74a906668c08",
   "tools/enforce_probe.py": "sha256:d264539a6d5f7faf791a3e1e16042c36ae535ab81787161e827939fa4e11fb5d"
  },
  "run": {
-  "started_at": "2026-10-31T09:24:25+0800",
-  "duration_ms": 904100,
+  "started_at": "2026-10-31T15:40:34+0800",
+  "duration_ms": 343138,
   "duration_note": "wall-clock of a subprocess fan-out suite; machine- and load-dependent, not comparable across environments",
   "executor": "scripts/run_harness.py",
-  "exit_code": 1,
+  "exit_code": 0,
   "bootstrap": false
  },
  "re_run": "python -m scripts.run_harness",
