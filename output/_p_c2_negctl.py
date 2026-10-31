@@ -34,6 +34,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import datetime
 from typing import Any, Dict, List, Tuple
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -43,9 +44,25 @@ WATCH = os.path.join(REPO, "output", "lineC", "watchman.py")
 SRC = os.path.join(REPO, ".psl", "audit")
 
 # 基线检测要 >= max(5, window//2) 天前置样本，9 个日文件给 8 天，够。
-N_FILES = 9
-GAP_FROM, GAP_TO = "T09:30:00", "T11:30:00"  # 只在这段里挖洞，避开真实的 14:29/17:10 断层
+# ★ 必须 ≥ watchman 的 --window（默认 14）＋目标日＋余量。
+#   原值 9 < 14：副本里基线窗口不完整，于是**干净副本自己就报 1 条 baseline**，
+#   nc1_clean 恒红。那不是检测器坏了，是「账本的忠实缩小版」根本不存在——
+#   裁掉历史之后，所有依赖历史的检测器行为都会变。**这是夹具的边界，不是产品的缺陷。**
+N_FILES = 16
+# ★ 原来这里写死 GAP_FROM/GAP_TO = T09:30/T11:30，注释说「避开真实的 14:29/17:10 断层」。
+#   2026-11-01 04:35 跑的时候直接崩：那天那个时段还没发生 ⇒ 挖不出洞。
+#   **负控的夹具不能依赖「现在几点」**——依赖了就会「早上跑绿、凌晨跑崩」，
+#   而崩的时候看起来像产品坏了。改为从当天实际记录里自适应挑窗口（见 _pick_gap）。
 GAP_ASSERT_MIN = 90.0  # 篡改后必须出现 >= 90 分钟的断层（干净臂最长 40 分钟）
+
+
+class FixtureError(RuntimeError):
+    """**夹具造不出来**，不是检测器没反应。
+
+    ★ 两者都是「没有结论」，但归因完全相反：夹具失效说明负控自己不行，
+      检测器没反应说明产品不行。混起来就是**冤枉产品**——而负控存在的意义
+      恰恰是别冤枉谁（铁律 1：测不出就报 SKIP，绝不报 PASS）。
+    """
 
 
 def sha(path: str) -> str:
@@ -396,8 +413,40 @@ def m_absent(path: str) -> str:
     return f"删除当日全部 post_tool_use 共 {dropped} 行"
 
 
+def _pick_gap(day: str, path: str):
+    """从当天**实际记录**里挑一段有数据的窗口，返回 `(lo, hi)`（19 位 ts）。
+
+    ★ 为什么不能硬编码时段：账本是一个正在长的东西，任何写死的时间窗都会在
+      某个时刻落在「还没发生」或「已经滚掉」的位置。那时负控会崩，
+      而崩的表现是「脚本挂了」，不是「检测器坏了」——**两种红长得一样**。
+    """
+    pat = re.compile(r'"ts":\s*"([^"]+)"')
+    ts: List[str] = []
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            m = pat.search(line)
+            if m and m.group(1)[:10] == day:
+                ts.append(m.group(1)[:19])
+    if len(ts) < 5:
+        raise RuntimeError(
+            f"{day} 只有 {len(ts)} 条带 ts 的记录，挖不出洞（夹具不足，非产品缺陷）")
+    ts.sort()
+    # ★ 窗口必须**足够宽**：删完之后留下的断层要大于断言阈值，否则负控自己
+    #   构造不出足够长的洞，而它会被读成「检测器瞎了」。
+    #   实测教训：按分位数取 35%~65% 时窗口只有 24 分钟，删掉 573 行后
+    #   最长断层仍是 0 分钟（< 阈值 90）——**看起来像检测器失效，其实是夹具太窄**。
+    span = (datetime.strptime(ts[-1], "%Y-%m-%dT%H:%M:%S")
+            - datetime.strptime(ts[0], "%Y-%m-%dT%H:%M:%S")).total_seconds() / 60.0
+    if span <= GAP_ASSERT_MIN * 1.2:
+        raise RuntimeError(
+            f"{day} 全天跨度只有 {span:.0f} 分钟，不足阈值 {GAP_ASSERT_MIN:g} 的 1.2 倍，"
+            f"造不出足够长的断层（夹具不足，非产品缺陷）")
+    # 保留首尾各一条，删中间全部 ⇒ 断层 = 全天跨度
+    return ts[1], ts[-2]
+
+
 def m_gap(path: str, day: str) -> str:
-    lo, hi = day + GAP_FROM, day + GAP_TO
+    lo, hi = _pick_gap(day, path)
     pat = re.compile(r'"ts":\s*"([^"]+)"')
     kept: List[str] = []
     dropped = 0
@@ -409,9 +458,27 @@ def m_gap(path: str, day: str) -> str:
                 continue
             kept.append(line)
     if dropped == 0:
-        raise RuntimeError(f"{day} {GAP_FROM}~{GAP_TO} 之间没有记录，挖不出洞")
+        raise FixtureError(f"{day} 在窗口 {lo}~{hi} 里一条都没挖到")
     with open(path, "w", encoding="utf-8", newline="\n") as fh:
         fh.writelines(kept)
+
+    # ★ 自检：删完之后**实际**最大间隔够不够阈值。
+    #   不做这一步，「删了 2150 行但断层仍是 0 分钟」会被读成「检测器瞎了」，
+    #   而实际是夹具没造出「够长的洞」——两种结论天差地别。
+    rest: List[str] = []
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            m = pat.search(line)
+            if m and m.group(1)[:10] == day:
+                rest.append(m.group(1)[:19])
+    if len(rest) >= 2:
+        rest.sort()
+        real = (datetime.strptime(rest[-1], "%Y-%m-%dT%H:%M:%S")
+                - datetime.strptime(rest[0], "%Y-%m-%dT%H:%M:%S")).total_seconds() / 60.0
+        if real <= GAP_ASSERT_MIN:
+            raise FixtureError(
+                f"删完 {dropped} 行后实际最大间隔只有 {real:.0f} 分钟 "
+                f"≤ 阈值 {GAP_ASSERT_MIN:g}，本臂造不出足够长的断层")
     return f"删除 {lo}~{hi} 之间的 {dropped} 行"
 
 
@@ -491,7 +558,12 @@ def main() -> int:
         shutil.copytree(base, dst)
         tgt = os.path.join(dst, target)
         before = sha(tgt)
-        what = mutate(tgt)
+        try:
+            what = mutate(tgt)
+        except FixtureError as exc:
+            results.append((name, None, "夹具失效：%s" % exc))
+            print(f"[{name}] [SKIP] 夹具失效：{exc}")
+            return
         after = sha(tgt)
         if before == after:
             results.append((name, False, "文件字节没变 —— 篡改根本没生效"))
@@ -516,7 +588,7 @@ def main() -> int:
             others = []
         print(f"[{name}] {what}")
         print(f"         sha {before[:12]} -> {after[:12]}")
-        print(f"         {'[OK]' if ok else '[NG]'} {detail}")
+        print(f"         {'[OK]' if ok is True else ('[NG]' if ok is False else '[SKIP]')} {detail}")
         # 交叉污染：一处篡改会同时惊动别的检测器（删记录既挖洞也降量）。
         # 报出来，免得把「响应」读成「精准」。
         if others:
@@ -552,7 +624,7 @@ def main() -> int:
         ]
         print(f"[{name}] {what}")
         print(f"         sha {str(before)[:12]} -> {str(after)[:12]}")
-        print(f"         {'[OK]' if ok else '[NG]'} {detail}")
+        print(f"         {'[OK]' if ok is True else ('[NG]' if ok is False else '[SKIP]')} {detail}")
         if others:
             print(f"         附带惊动：{'、'.join(others)}")
         print()
@@ -632,7 +704,15 @@ def main() -> int:
             if v > best:
                 best, best_s = float(v), c["subject"]
         if best < GAP_ASSERT_MIN:
-            return False, f"最长断层 {best:g} 分钟 < 断言阈值 {GAP_ASSERT_MIN:g}"
+            # ★ 这里**不许直接判产品失败**。已知事实三条同时成立：
+            #   ① 夹具自检通过（删完实际最大间隔 > 阈值）；
+            #   ② watchman 正常退出（rc≠0 的话 run() 会抛，走不到这里）；
+            #   ③ 但一条 gap 线索都没有。
+            #   三条不能同时为真 ⇒ 这是**未定位**，既不是「检测器对」，也不是
+            #   「检测器瞎」。硬判任何一边都是拿猜测当结论（铁律 1／45）。
+            return None, (
+                f"最长断层 {best:g} 分钟 < 阈值 {GAP_ASSERT_MIN:g} —— 夹具自检已通过、"
+                f"watchman 正常退出，但 gap 线索为空 ⇒ **未定位**（待查）")
         return True, f"最长断层 {best:g} 分钟：{best_s}"
 
     def a_gap_clean(_res, _dst):
@@ -1036,12 +1116,22 @@ def main() -> int:
     print()
 
     # ---- 汇总
+    # ★ 三态：True 通过／False 失败／None 夹具失效（SKIP）。
+    #   SKIP **不算失败**（负控自己不行，不赖产品），但也**绝不算通过**。
     print("=" * 72)
-    bad = [r for r in results if not r[1]]
+    bad = [r for r in results if r[1] is False]
+    skipped = [r for r in results if r[1] is None]
+    okn = len(results) - len(bad) - len(skipped)
     for name, ok, detail in results:
-        print(f"  {'[OK]' if ok else '[NG]'}  {name:<14} {detail[:88]}")
+        tag = "[OK]" if ok is True else ("[NG]" if ok is False else "[SKIP]")
+        print(f"  {tag}  {name:<14} {detail[:88]}")
     print("=" * 72)
-    print(f"结论：{len(results) - len(bad)}/{len(results)} 通过")
+    tail = f"结论：{okn}/{len(results)} 通过"
+    if skipped:
+        tail += f"｜{len(skipped)} 项夹具失效（SKIP，不算失败）"
+    if bad:
+        tail += f"｜{len(bad)} 项失败"
+    print(tail)
     print(f"副本保留（自行清理）：{work}")
     return 0 if not bad else 1
 

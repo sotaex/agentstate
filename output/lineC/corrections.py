@@ -51,7 +51,7 @@ import json
 import os
 import sys
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -68,6 +68,15 @@ KINDS = (K_SUPERSEDE, K_VOID, K_NOTE)
 CORR_FILE = "corrections.jsonl"
 #: 只追加的旁路指纹。文件本身不许含自己的 hash（否则改一个字节要全量重算）。
 CORR_SEAL = ".corrections.sha256"
+
+#: 记录 schema 版本（九维八：数据版本迁移）。
+#:
+#: ★ 为什么现在就要有：`corrections.jsonl` 是**只追加**的，写进去的记录改不掉。
+#:   将来加字段／加 kind，旧代码会读到新记录——那时候它必须**报「我读不了」**，
+#:   而不是用 `d.get("x")` 猜一个默认值。猜出来的默认值会让「新版本的更正」
+#:   在旧代码眼里变成「一条没有理由的更正」，而它照样能渲染、照样能通过自检。
+#:   不写 `v` 的历史记录一律按 v1 读（本版本之前的记录确实就是 v1 的形状）。
+SCHEMA_VERSION = 1
 
 
 # --------------------------------------------------------------------------- 报告标识
@@ -177,8 +186,9 @@ class Correction:
             if not self.new_report.strip():
                 raise ValueError("void 必须指明「请以哪份为准」（new_report）")
 
-    def to_json(self) -> Dict[str, str]:
+    def to_json(self) -> Dict[str, Any]:
         return {
+            "v": SCHEMA_VERSION,
             "at": self.at, "by": self.by, "kind": self.kind,
             "target_report": self.target_report, "reason": self.reason,
             "target_eid": self.target_eid,
@@ -186,7 +196,18 @@ class Correction:
         }
 
     @classmethod
-    def from_json(cls, d: Dict[str, str]) -> "Correction":
+    def from_json(cls, d: Dict[str, Any]) -> "Correction":
+        # 九维八：版本不认就报，不许用 get 猜默认值。见 SCHEMA_VERSION 的注释。
+        raw_v = d.get("v")
+        if raw_v is not None:
+            try:
+                v = int(raw_v)
+            except (TypeError, ValueError):
+                raise ValueError("更正记录的 v 字段不是整数：%r" % (raw_v,))
+            if v > SCHEMA_VERSION:
+                raise ValueError(
+                    "这条记录是 schema v%d 写的，本代码只认到 v%d —— "
+                    "不许猜它缺的字段是什么意思。请升级读侧。" % (v, SCHEMA_VERSION))
         return cls(
             at=str(d.get("at") or ""), by=str(d.get("by") or ""),
             kind=str(d.get("kind") or ""),
@@ -481,12 +502,24 @@ def _selfcheck() -> int:
     if not rr.warnings:
         fails.append("重复作废没有报出来")
 
+    # 12 九维八：未来版本的记录必须报「读不了」，不许用 get 猜默认值
+    future = dict(ok.to_json())
+    future["v"] = SCHEMA_VERSION + 1
+    try:
+        Correction.from_json(future)
+        fails.append(
+            "v%d 的记录被当成 v%d 读了 —— 猜出来的默认值会伪装成一条合法更正"
+            % (SCHEMA_VERSION + 1, SCHEMA_VERSION))
+    except ValueError:
+        pass
+
     for f in fails:
         print("[自检失败] %s" % f, file=sys.stderr)
     if fails:
         return 1
-    print("[自检] 十一条全部生效（id 稳定／幽灵更正／未知报告／合法写入／"
-          "重复取代／改动即拒／note 不误伤／void 形状／结算／反向指认／重复作废）")
+    print("[自检] 十二条全部生效（id 稳定／幽灵更正／未知报告／合法写入／"
+          "重复取代／改动即拒／note 不误伤／void 形状／结算／反向指认／"
+          "重复作废／版本不认就报）")
     return 0
 
 
