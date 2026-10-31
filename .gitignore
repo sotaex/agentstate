@@ -19,6 +19,9 @@ _suite_probe.py
 .zcode/
 *.trash*
 _p_*
+# 口径脚本（出包前必须回 pure 等一次性流程件）：放 output/ 不进随包面，
+# 但必须进版本库 —— 否则每次出包都要重写一遍，同一事实出现第二套实现。
+!output/_p_*.py
 _t_*
 _uxtest/
 _uxtest2/
