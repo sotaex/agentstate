@@ -38,7 +38,7 @@ B 线是**只读的审计线**：读账本、出证据、写测量工具。它�
 |---|---|
 | 产品代码（`hooks/*.py`、`audit_chain.py`、`state_registry.py` 等） | 补丁额度 3/3 已满，任何产品改动只能排队进 0.64 |
 | 版本号、`psl/manifest.json`、`psl/workspace_facts.json` | 这是 A 线的独占面，改一个字节就要重签清单 |
-| 全量闸门 `ci/delivery_gate.py` | **闸门是独占资源**：实测它跑着的时候，其它会话的 Bash／Write 会被拖到 15 秒超时 |
+| 全量闸门 `ci/delivery_gate.py` | **不要直接调用它**。闸门是独占资源，且它的锁按「工作区根」算 ⇒ 各线各建一把锁、互不可见 ⇒ 并发。**唯一入口见 §4.5** |
 | `.workbuddy/memory/` | 并行约定 v1.2 §4.1 记着的 git 够不到的死角，三线各写各的必冲突 |
 
 **发现产品缺陷怎么办：写证据卡，不改代码。** B-6 已经撞到一个真实缺陷
@@ -146,6 +146,52 @@ git rev-parse --abbrev-ref HEAD        # 应为 main
 Python 用 `/c/Users/大马/.workbuddy/binaries/python/versions/3.13.12/python -E -X utf8`。
 **不要用裸 `python`**：默认解释器不带 `setuptools`；而 `python` 若解析到 Windows Store 占位符，
 会静默返回 `rc=0` 且零输出。
+
+---
+
+## 4.5 全量闸门：**三条线只有一条入口**（这是"不一起卡死"的唯一硬机制）
+
+**不要**直接 `python ci/delivery_gate.py`。原因不是纪律，是缺陷：
+
+闸门自己**有锁**（`_acquire_lock()`：`O_CREAT|O_EXCL`、三态判活、"拿不准按占用"、
+陈旧锁改名让开——实现是完整的），但锁路径是
+
+```
+_SNAP_DIR = ANTINEL_GATE_STATE_DIR or <工作区根>/.psl/gate
+```
+
+而 `.psl/` 在 `.gitignore` 里 ⇒ **worktree 里没有 `.psl`** ⇒ 主树锁在
+`D:/psl/poc/antinel-security/.psl/gate/run.lock`，a064 树锁在
+`.../.worktrees/a064/.psl/gate/run.lock`，**两把锁互不可见**，于是两个闸门可以同时跑。
+
+后果不是慢，是**读数被污染**：2026-10-13 实测两个闸门并发，日志被交错写成一行
+"0481 RED"，追了 20 分钟幽灵红，最后靠基线快照才证明那次其实是 30/30 全绿。
+
+**修法：不另造一把锁，三条线指向同一个状态目录，用闸门自带的锁互斥。**
+
+```bash
+# 唯一入口（在主树或任意 worktree 里都行，脚本自己算路径）
+bash /d/psl/poc/antinel-security/output/tools/gate_all.sh --status   # 先看谁在跑
+bash /d/psl/poc/antinel-security/output/tools/gate_all.sh            # 全量 34 套
+bash /d/psl/poc/antinel-security/output/tools/gate_all.sh --only 0431 # 单套（秒级）
+```
+
+脚本只做三件事：把 `ANTINEL_GATE_STATE_DIR` 固定到**主仓根**的 `.psl/gate`、
+设好本机的 `TMP/TEMP/TMPDIR` 硬约束、原地跑闸门。
+
+**已实测三条腿**（不是设计意图）：
+
+| 腿 | 做法 | 结果 |
+|---|---|---|
+| 跨树互斥 | 主树造空锁，**从 a064 树**跑闸门 | `★ 闸门未启动：另有一次闸门正在跑…**不许并发**`，rc=3 |
+| 不被误挡 | 清锁后从 a064 树跑 `--only 0431` | 18 绿 / 0 红，4.2s，rc=0 |
+| 状态共享 | 上一条的结果落点 | 写进 **主树** `.psl/gate/last_run.json`，证明 state dir 真的共享 |
+
+**空锁也要当占用**：写 pid 与创建文件之间有空窗，闸门把「空内容」按占用处理。
+所以看到 `run.lock` 存在就先等，不要去删它 —— 陈旧锁闸门自己会改名让开。
+
+**B 线本身不该跑全量闸门**（这是 A 线出包前的事）。这条写在这里，是为了万一你要跑，
+别用错的调用方式把另外两条线带进坑。
 
 ---
 
