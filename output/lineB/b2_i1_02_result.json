@@ -1,0 +1,2172 @@
+{
+ "meta": {
+  "audit_dir": "D:\\psl\\poc\\antinel-security\\.psl\\audit",
+  "read_at": "2026-10-31T22:46:04+08:00",
+  "files": 33,
+  "records": 164049,
+  "bad_lines": 0,
+  "skipped_files": [
+   "lock_events.jsonl"
+  ],
+  "file_list": [
+   {
+    "name": "2026-09-25.jsonl",
+    "bytes": 198
+   },
+   {
+    "name": "2026-09-26.jsonl",
+    "bytes": 3066
+   },
+   {
+    "name": "2026-09-27.jsonl",
+    "bytes": 29208
+   },
+   {
+    "name": "2026-09-28.jsonl",
+    "bytes": 37413
+   },
+   {
+    "name": "2026-09-29.jsonl",
+    "bytes": 39878
+   },
+   {
+    "name": "2026-10-03.jsonl",
+    "bytes": 21988
+   },
+   {
+    "name": "2026-10-05.jsonl",
+    "bytes": 442
+   },
+   {
+    "name": "2026-10-06.jsonl",
+    "bytes": 48449
+   },
+   {
+    "name": "2026-10-07.jsonl",
+    "bytes": 108293
+   },
+   {
+    "name": "2026-10-08.jsonl",
+    "bytes": 592953
+   },
+   {
+    "name": "2026-10-09.jsonl",
+    "bytes": 377020
+   },
+   {
+    "name": "2026-10-10.jsonl",
+    "bytes": 4172728
+   },
+   {
+    "name": "2026-10-11.jsonl",
+    "bytes": 2452036
+   },
+   {
+    "name": "2026-10-12.jsonl",
+    "bytes": 3198255
+   },
+   {
+    "name": "2026-10-13.jsonl",
+    "bytes": 5531388
+   },
+   {
+    "name": "2026-10-14.jsonl",
+    "bytes": 6144242
+   },
+   {
+    "name": "2026-10-15.jsonl",
+    "bytes": 5506372
+   },
+   {
+    "name": "2026-10-16.jsonl",
+    "bytes": 8711377
+   },
+   {
+    "name": "2026-10-17.jsonl",
+    "bytes": 9740317
+   },
+   {
+    "name": "2026-10-18.jsonl",
+    "bytes": 5664553
+   },
+   {
+    "name": "2026-10-19.jsonl",
+    "bytes": 5037915
+   },
+   {
+    "name": "2026-10-20.jsonl",
+    "bytes": 5841884
+   },
+   {
+    "name": "2026-10-21.jsonl",
+    "bytes": 7477124
+   },
+   {
+    "name": "2026-10-22.jsonl",
+    "bytes": 13169846
+   },
+   {
+    "name": "2026-10-23.jsonl",
+    "bytes": 6521034
+   },
+   {
+    "name": "2026-10-24.jsonl",
+    "bytes": 2966003
+   },
+   {
+    "name": "2026-10-25.jsonl",
+    "bytes": 4391343
+   },
+   {
+    "name": "2026-10-26.jsonl",
+    "bytes": 3439948
+   },
+   {
+    "name": "2026-10-27.jsonl",
+    "bytes": 5587496
+   },
+   {
+    "name": "2026-10-28.jsonl",
+    "bytes": 5335563
+   },
+   {
+    "name": "2026-10-29.jsonl",
+    "bytes": 8480127
+   },
+   {
+    "name": "2026-10-30.jsonl",
+    "bytes": 5423687
+   },
+   {
+    "name": "2026-10-31.jsonl",
+    "bytes": 7744522
+   }
+  ]
+ },
+ "result": {
+  "totals": {
+   "calls": 47596,
+   "posts": 45928,
+   "blocked": 347,
+   "matched": 45887,
+   "calls_minus_posts": 1668,
+   "calls_minus_posts_minus_blocked": 1321
+  },
+  "exits": {
+   "blocked_stopped": 301,
+   "deny_not_honored": 0,
+   "duplicate_pre": 616,
+   "orphan_post": 41,
+   "alert_no_post": 23,
+   "session_tail": 3,
+   "session_continued": 574,
+   "dup_pre_unprovable": 164,
+   "surplus_pre_ambiguous": 28
+  },
+  "extra_by_decision": {
+   "block": 85,
+   "allow": 70,
+   "alert": 9
+  },
+  "buckets": {
+   "Bash": {
+    "calls": 25996,
+    "posts": 25299,
+    "blocked": 283,
+    "matched": 25278,
+    "exits": {
+     "blocked_stopped": 237,
+     "deny_not_honored": 0,
+     "duplicate_pre": 104,
+     "orphan_post": 21,
+     "alert_no_post": 16,
+     "session_tail": 3,
+     "session_continued": 212,
+     "dup_pre_unprovable": 142,
+     "surplus_pre_ambiguous": 4
+    }
+   },
+   "Read": {
+    "calls": 5503,
+    "posts": 5482,
+    "blocked": 1,
+    "matched": 5482,
+    "exits": {
+     "blocked_stopped": 1,
+     "deny_not_honored": 0,
+     "duplicate_pre": 3,
+     "orphan_post": 0,
+     "alert_no_post": 0,
+     "session_tail": 0,
+     "session_continued": 11,
+     "dup_pre_unprovable": 5,
+     "surplus_pre_ambiguous": 1
+    }
+   },
+   "TaskCreate": {
+    "calls": 369,
+    "posts": 369,
+    "blocked": 0,
+    "matched": 369,
+    "exits": {
+     "blocked_stopped": 0,
+     "deny_not_honored": 0,
+     "duplicate_pre": 0,
+     "orphan_post": 0,
+     "alert_no_post": 0,
+     "session_tail": 0,
+     "session_continued": 0,
+     "dup_pre_unprovable": 0,
+     "surplus_pre_ambiguous": 0
+    }
+   },
+   "TaskUpdate": {
+    "calls": 447,
+    "posts": 447,
+    "blocked": 0,
+    "matched": 446,
+    "exits": {
+     "blocked_stopped": 0,
+     "deny_not_honored": 0,
+     "duplicate_pre": 0,
+     "orphan_post": 1,
+     "alert_no_post": 0,
+     "session_tail": 0,
+     "session_continued": 1,
+     "dup_pre_unprovable": 0,
+     "surplus_pre_ambiguous": 0
+    }
+   },
+   "Write": {
+    "calls": 1900,
+    "posts": 1795,
+    "blocked": 55,
+    "matched": 1795,
+    "exits": {
+     "blocked_stopped": 55,
+     "deny_not_honored": 0,
+     "duplicate_pre": 7,
+     "orphan_post": 0,
+     "alert_no_post": 0,
+     "session_tail": 0,
+     "session_continued": 38,
+     "dup_pre_unprovable": 3,
+     "surplus_pre_ambiguous": 2
+    }
+   },
+   "PowerShell": {
+    "calls": 772,
+    "posts": 759,
+    "blocked": 0,
+    "matched": 758,
+    "exits": {
+     "blocked_stopped": 0,
+     "deny_not_honored": 0,
+     "duplicate_pre": 0,
+     "orphan_post": 1,
+     "alert_no_post": 0,
+     "session_tail": 0,
+     "session_continued": 14,
+     "dup_pre_unprovable": 0,
+     "surplus_pre_ambiguous": 0
+    }
+   },
+   "Grep": {
+    "calls": 1712,
+    "posts": 1658,
+    "blocked": 0,
+    "matched": 1658,
+    "exits": {
+     "blocked_stopped": 0,
+     "deny_not_honored": 0,
+     "duplicate_pre": 0,
+     "orphan_post": 0,
+     "alert_no_post": 0,
+     "session_tail": 0,
+     "session_continued": 54,
+     "dup_pre_unprovable": 0,
+     "surplus_pre_ambiguous": 0
+    }
+   },
+   "Edit": {
+    "calls": 7797,
+    "posts": 7584,
+    "blocked": 8,
+    "matched": 7583,
+    "exits": {
+     "blocked_stopped": 8,
+     "deny_not_honored": 0,
+     "duplicate_pre": 5,
+     "orphan_post": 1,
+     "alert_no_post": 1,
+     "session_tail": 0,
+     "session_continued": 194,
+     "dup_pre_unprovable": 6,
+     "surplus_pre_ambiguous": 0
+    }
+   },
+   "TaskOutput": {
+    "calls": 1521,
+    "posts": 1497,
+    "blocked": 0,
+    "matched": 1486,
+    "exits": {
+     "blocked_stopped": 0,
+     "deny_not_honored": 0,
+     "duplicate_pre": 3,
+     "orphan_post": 11,
+     "alert_no_post": 0,
+     "session_tail": 0,
+     "session_continued": 20,
+     "dup_pre_unprovable": 1,
+     "surplus_pre_ambiguous": 11
+    }
+   },
+   "TaskStop": {
+    "calls": 48,
+    "posts": 49,
+    "blocked": 0,
+    "matched": 48,
+    "exits": {
+     "blocked_stopped": 0,
+     "deny_not_honored": 0,
+     "duplicate_pre": 0,
+     "orphan_post": 1,
+     "alert_no_post": 0,
+     "session_tail": 0,
+     "session_continued": 0,
+     "dup_pre_unprovable": 0,
+     "surplus_pre_ambiguous": 0
+    }
+   },
+   "AskUserQuestion": {
+    "calls": 42,
+    "posts": 42,
+    "blocked": 0,
+    "matched": 42,
+    "exits": {
+     "blocked_stopped": 0,
+     "deny_not_honored": 0,
+     "duplicate_pre": 0,
+     "orphan_post": 0,
+     "alert_no_post": 0,
+     "session_tail": 0,
+     "session_continued": 0,
+     "dup_pre_unprovable": 0,
+     "surplus_pre_ambiguous": 0
+    }
+   },
+   "present_files": {
+    "calls": 730,
+    "posts": 363,
+    "blocked": 0,
+    "matched": 363,
+    "exits": {
+     "blocked_stopped": 0,
+     "deny_not_honored": 0,
+     "duplicate_pre": 363,
+     "orphan_post": 0,
+     "alert_no_post": 0,
+     "session_tail": 0,
+     "session_continued": 2,
+     "dup_pre_unprovable": 2,
+     "surplus_pre_ambiguous": 0
+    }
+   },
+   "TaskList": {
+    "calls": 27,
+    "posts": 27,
+    "blocked": 0,
+    "matched": 27,
+    "exits": {
+     "blocked_stopped": 0,
+     "deny_not_honored": 0,
+     "duplicate_pre": 0,
+     "orphan_post": 0,
+     "alert_no_post": 0,
+     "session_tail": 0,
+     "session_continued": 0,
+     "dup_pre_unprovable": 0,
+     "surplus_pre_ambiguous": 0
+    }
+   },
+   "Agent": {
+    "calls": 10,
+    "posts": 10,
+    "blocked": 0,
+    "matched": 10,
+    "exits": {
+     "blocked_stopped": 0,
+     "deny_not_honored": 0,
+     "duplicate_pre": 0,
+     "orphan_post": 0,
+     "alert_no_post": 0,
+     "session_tail": 0,
+     "session_continued": 0,
+     "dup_pre_unprovable": 0,
+     "surplus_pre_ambiguous": 0
+    }
+   },
+   "Skill": {
+    "calls": 24,
+    "posts": 24,
+    "blocked": 0,
+    "matched": 24,
+    "exits": {
+     "blocked_stopped": 0,
+     "deny_not_honored": 0,
+     "duplicate_pre": 0,
+     "orphan_post": 0,
+     "alert_no_post": 0,
+     "session_tail": 0,
+     "session_continued": 0,
+     "dup_pre_unprovable": 0,
+     "surplus_pre_ambiguous": 0
+    }
+   },
+   "ToolSearch": {
+    "calls": 18,
+    "posts": 17,
+    "blocked": 0,
+    "matched": 17,
+    "exits": {
+     "blocked_stopped": 0,
+     "deny_not_honored": 0,
+     "duplicate_pre": 1,
+     "orphan_post": 0,
+     "alert_no_post": 0,
+     "session_tail": 0,
+     "session_continued": 0,
+     "dup_pre_unprovable": 0,
+     "surplus_pre_ambiguous": 0
+    }
+   },
+   "DeferExecuteTool": {
+    "calls": 19,
+    "posts": 20,
+    "blocked": 0,
+    "matched": 19,
+    "exits": {
+     "blocked_stopped": 0,
+     "deny_not_honored": 0,
+     "duplicate_pre": 0,
+     "orphan_post": 1,
+     "alert_no_post": 0,
+     "session_tail": 0,
+     "session_continued": 0,
+     "dup_pre_unprovable": 0,
+     "surplus_pre_ambiguous": 0
+    }
+   },
+   "search_plugins": {
+    "calls": 2,
+    "posts": 2,
+    "blocked": 0,
+    "matched": 2,
+    "exits": {
+     "blocked_stopped": 0,
+     "deny_not_honored": 0,
+     "duplicate_pre": 0,
+     "orphan_post": 0,
+     "alert_no_post": 0,
+     "session_tail": 0,
+     "session_continued": 0,
+     "dup_pre_unprovable": 0,
+     "surplus_pre_ambiguous": 0
+    }
+   },
+   "conversation_search": {
+    "calls": 3,
+    "posts": 3,
+    "blocked": 0,
+    "matched": 3,
+    "exits": {
+     "blocked_stopped": 0,
+     "deny_not_honored": 0,
+     "duplicate_pre": 0,
+     "orphan_post": 0,
+     "alert_no_post": 0,
+     "session_tail": 0,
+     "session_continued": 0,
+     "dup_pre_unprovable": 0,
+     "surplus_pre_ambiguous": 0
+    }
+   },
+   "Glob": {
+    "calls": 165,
+    "posts": 146,
+    "blocked": 0,
+    "matched": 146,
+    "exits": {
+     "blocked_stopped": 0,
+     "deny_not_honored": 0,
+     "duplicate_pre": 0,
+     "orphan_post": 0,
+     "alert_no_post": 0,
+     "session_tail": 0,
+     "session_continued": 19,
+     "dup_pre_unprovable": 0,
+     "surplus_pre_ambiguous": 0
+    }
+   },
+   "WebFetch": {
+    "calls": 138,
+    "posts": 71,
+    "blocked": 0,
+    "matched": 71,
+    "exits": {
+     "blocked_stopped": 0,
+     "deny_not_honored": 0,
+     "duplicate_pre": 57,
+     "orphan_post": 0,
+     "alert_no_post": 5,
+     "session_tail": 0,
+     "session_continued": 0,
+     "dup_pre_unprovable": 5,
+     "surplus_pre_ambiguous": 0
+    }
+   },
+   "widget_guidelines": {
+    "calls": 50,
+    "posts": 25,
+    "blocked": 0,
+    "matched": 25,
+    "exits": {
+     "blocked_stopped": 0,
+     "deny_not_honored": 0,
+     "duplicate_pre": 15,
+     "orphan_post": 0,
+     "alert_no_post": 0,
+     "session_tail": 0,
+     "session_continued": 0,
+     "dup_pre_unprovable": 0,
+     "surplus_pre_ambiguous": 10
+    }
+   },
+   "show_widget": {
+    "calls": 115,
+    "posts": 58,
+    "blocked": 0,
+    "matched": 58,
+    "exits": {
+     "blocked_stopped": 0,
+     "deny_not_honored": 0,
+     "duplicate_pre": 57,
+     "orphan_post": 0,
+     "alert_no_post": 0,
+     "session_tail": 0,
+     "session_continued": 0,
+     "dup_pre_unprovable": 0,
+     "surplus_pre_ambiguous": 0
+    }
+   },
+   "WebSearch": {
+    "calls": 156,
+    "posts": 153,
+    "blocked": 0,
+    "matched": 153,
+    "exits": {
+     "blocked_stopped": 0,
+     "deny_not_honored": 0,
+     "duplicate_pre": 0,
+     "orphan_post": 0,
+     "alert_no_post": 1,
+     "session_tail": 0,
+     "session_continued": 2,
+     "dup_pre_unprovable": 0,
+     "surplus_pre_ambiguous": 0
+    }
+   },
+   "TaskGet": {
+    "calls": 3,
+    "posts": 3,
+    "blocked": 0,
+    "matched": 3,
+    "exits": {
+     "blocked_stopped": 0,
+     "deny_not_honored": 0,
+     "duplicate_pre": 0,
+     "orphan_post": 0,
+     "alert_no_post": 0,
+     "session_tail": 0,
+     "session_continued": 0,
+     "dup_pre_unprovable": 0,
+     "surplus_pre_ambiguous": 0
+    }
+   },
+   "automation_update": {
+    "calls": 2,
+    "posts": 1,
+    "blocked": 0,
+    "matched": 1,
+    "exits": {
+     "blocked_stopped": 0,
+     "deny_not_honored": 0,
+     "duplicate_pre": 1,
+     "orphan_post": 0,
+     "alert_no_post": 0,
+     "session_tail": 0,
+     "session_continued": 0,
+     "dup_pre_unprovable": 0,
+     "surplus_pre_ambiguous": 0
+    }
+   },
+   "MultiEdit": {
+    "calls": 6,
+    "posts": 4,
+    "blocked": 0,
+    "matched": 0,
+    "exits": {
+     "blocked_stopped": 0,
+     "deny_not_honored": 0,
+     "duplicate_pre": 0,
+     "orphan_post": 4,
+     "alert_no_post": 0,
+     "session_tail": 0,
+     "session_continued": 6,
+     "dup_pre_unprovable": 0,
+     "surplus_pre_ambiguous": 0
+    }
+   },
+   "<none>": {
+    "calls": 1,
+    "posts": 0,
+    "blocked": 0,
+    "matched": 0,
+    "exits": {
+     "blocked_stopped": 0,
+     "deny_not_honored": 0,
+     "duplicate_pre": 0,
+     "orphan_post": 0,
+     "alert_no_post": 0,
+     "session_tail": 0,
+     "session_continued": 1,
+     "dup_pre_unprovable": 0,
+     "surplus_pre_ambiguous": 0
+    }
+   },
+   "ViewImage": {
+    "calls": 20,
+    "posts": 20,
+    "blocked": 0,
+    "matched": 20,
+    "exits": {
+     "blocked_stopped": 0,
+     "deny_not_honored": 0,
+     "duplicate_pre": 0,
+     "orphan_post": 0,
+     "alert_no_post": 0,
+     "session_tail": 0,
+     "session_continued": 0,
+     "dup_pre_unprovable": 0,
+     "surplus_pre_ambiguous": 0
+    }
+   }
+  },
+  "by_decision": {
+   "allow": 46209,
+   "block": 347,
+   "alert": 1040
+  },
+  "dup_window": 60.0,
+  "posts_nonzero_exit": 1051,
+  "daysess": [
+   {
+    "day": "2026-09-28",
+    "session": "diag",
+    "calls": 1,
+    "posts": 0,
+    "blocked": 0
+   },
+   {
+    "day": "2026-10-03",
+    "session": "<none>",
+    "calls": 1,
+    "posts": 0,
+    "blocked": 1
+   },
+   {
+    "day": "2026-10-10",
+    "session": "000f3dc1-964a-4609-9031-3f4a57460b49",
+    "calls": 1489,
+    "posts": 1464,
+    "blocked": 8
+   },
+   {
+    "day": "2026-10-10",
+    "session": "<none>",
+    "calls": 3,
+    "posts": 0,
+    "blocked": 0
+   },
+   {
+    "day": "2026-10-10",
+    "session": "93d391c4-eccb-4b02-b11b-0f03106d8c82",
+    "calls": 109,
+    "posts": 109,
+    "blocked": 0
+   },
+   {
+    "day": "2026-10-11",
+    "session": "93d391c4-eccb-4b02-b11b-0f03106d8c82",
+    "calls": 194,
+    "posts": 187,
+    "blocked": 6
+   },
+   {
+    "day": "2026-10-11",
+    "session": "000f3dc1-964a-4609-9031-3f4a57460b49",
+    "calls": 579,
+    "posts": 570,
+    "blocked": 2
+   },
+   {
+    "day": "2026-10-11",
+    "session": "33dc8e25-a0e5-454f-bbf4-3ba7e911437d",
+    "calls": 119,
+    "posts": 118,
+    "blocked": 0
+   },
+   {
+    "day": "2026-10-12",
+    "session": "33dc8e25-a0e5-454f-bbf4-3ba7e911437d",
+    "calls": 957,
+    "posts": 917,
+    "blocked": 8
+   },
+   {
+    "day": "2026-10-12",
+    "session": "b47e9cd8-cbe2-40ab-a36b-84f4af8f9a2c",
+    "calls": 195,
+    "posts": 180,
+    "blocked": 3
+   },
+   {
+    "day": "2026-10-12",
+    "session": "d",
+    "calls": 4,
+    "posts": 0,
+    "blocked": 0
+   },
+   {
+    "day": "2026-10-13",
+    "session": "b47e9cd8-cbe2-40ab-a36b-84f4af8f9a2c",
+    "calls": 2036,
+    "posts": 1995,
+    "blocked": 7
+   },
+   {
+    "day": "2026-10-14",
+    "session": "b47e9cd8-cbe2-40ab-a36b-84f4af8f9a2c",
+    "calls": 1831,
+    "posts": 1796,
+    "blocked": 11
+   },
+   {
+    "day": "2026-10-14",
+    "session": "3fc41e55-4113-4f7d-a9e8-31e5458e1c7e",
+    "calls": 487,
+    "posts": 473,
+    "blocked": 1
+   },
+   {
+    "day": "2026-10-14",
+    "session": "adff7fce-188e-4c0f-96c8-21752ceb6d8b",
+    "calls": 47,
+    "posts": 47,
+    "blocked": 0
+   },
+   {
+    "day": "2026-10-15",
+    "session": "adff7fce-188e-4c0f-96c8-21752ceb6d8b",
+    "calls": 800,
+    "posts": 771,
+    "blocked": 4
+   },
+   {
+    "day": "2026-10-15",
+    "session": "5902ba20-1216-4f78-a2fe-dae69ec2d4e3",
+    "calls": 1290,
+    "posts": 1249,
+    "blocked": 7
+   },
+   {
+    "day": "2026-10-16",
+    "session": "5902ba20-1216-4f78-a2fe-dae69ec2d4e3",
+    "calls": 693,
+    "posts": 681,
+    "blocked": 0
+   },
+   {
+    "day": "2026-10-16",
+    "session": "adff7fce-188e-4c0f-96c8-21752ceb6d8b",
+    "calls": 1788,
+    "posts": 1736,
+    "blocked": 6
+   },
+   {
+    "day": "2026-10-16",
+    "session": "161df785-1f6b-460c-9cdc-15fbaa1701fa",
+    "calls": 954,
+    "posts": 928,
+    "blocked": 6
+   },
+   {
+    "day": "2026-10-17",
+    "session": "adff7fce-188e-4c0f-96c8-21752ceb6d8b",
+    "calls": 1895,
+    "posts": 1819,
+    "blocked": 22
+   },
+   {
+    "day": "2026-10-17",
+    "session": "161df785-1f6b-460c-9cdc-15fbaa1701fa",
+    "calls": 1295,
+    "posts": 1274,
+    "blocked": 9
+   },
+   {
+    "day": "2026-10-17",
+    "session": "3244f25e-8d76-4841-a460-b7b868a5e109",
+    "calls": 161,
+    "posts": 156,
+    "blocked": 2
+   },
+   {
+    "day": "2026-10-18",
+    "session": "adff7fce-188e-4c0f-96c8-21752ceb6d8b",
+    "calls": 2097,
+    "posts": 2066,
+    "blocked": 8
+   },
+   {
+    "day": "2026-10-19",
+    "session": "adff7fce-188e-4c0f-96c8-21752ceb6d8b",
+    "calls": 1678,
+    "posts": 1643,
+    "blocked": 9
+   },
+   {
+    "day": "2026-10-19",
+    "session": "0394ae21-6a7b-4e64-9ae8-fcbf48c7ffac",
+    "calls": 52,
+    "posts": 40,
+    "blocked": 0
+   },
+   {
+    "day": "2026-10-19",
+    "session": "fadefdb5-d9ef-4c65-9ff8-137b8b9b8e58",
+    "calls": 113,
+    "posts": 113,
+    "blocked": 0
+   },
+   {
+    "day": "2026-10-20",
+    "session": "fadefdb5-d9ef-4c65-9ff8-137b8b9b8e58",
+    "calls": 1112,
+    "posts": 1094,
+    "blocked": 3
+   },
+   {
+    "day": "2026-10-20",
+    "session": "adff7fce-188e-4c0f-96c8-21752ceb6d8b",
+    "calls": 878,
+    "posts": 845,
+    "blocked": 5
+   },
+   {
+    "day": "2026-10-20",
+    "session": "3244f25e-8d76-4841-a460-b7b868a5e109",
+    "calls": 27,
+    "posts": 27,
+    "blocked": 0
+   },
+   {
+    "day": "2026-10-21",
+    "session": "adff7fce-188e-4c0f-96c8-21752ceb6d8b",
+    "calls": 236,
+    "posts": 227,
+    "blocked": 5
+   },
+   {
+    "day": "2026-10-21",
+    "session": "fadefdb5-d9ef-4c65-9ff8-137b8b9b8e58",
+    "calls": 1374,
+    "posts": 1350,
+    "blocked": 1
+   },
+   {
+    "day": "2026-10-21",
+    "session": "51063b09-396e-4c9b-81cb-b8ff75e52fc6",
+    "calls": 890,
+    "posts": 874,
+    "blocked": 6
+   },
+   {
+    "day": "2026-10-22",
+    "session": "fadefdb5-d9ef-4c65-9ff8-137b8b9b8e58",
+    "calls": 453,
+    "posts": 449,
+    "blocked": 0
+   },
+   {
+    "day": "2026-10-22",
+    "session": "51063b09-396e-4c9b-81cb-b8ff75e52fc6",
+    "calls": 2867,
+    "posts": 2814,
+    "blocked": 19
+   },
+   {
+    "day": "2026-10-22",
+    "session": "38786d55-a300-4485-8769-3b27a4899c85",
+    "calls": 1164,
+    "posts": 1117,
+    "blocked": 11
+   },
+   {
+    "day": "2026-10-23",
+    "session": "51063b09-396e-4c9b-81cb-b8ff75e52fc6",
+    "calls": 1437,
+    "posts": 1372,
+    "blocked": 11
+   },
+   {
+    "day": "2026-10-23",
+    "session": "97f16a20-d9f2-4785-b582-d7e842de7f07",
+    "calls": 218,
+    "posts": 209,
+    "blocked": 1
+   },
+   {
+    "day": "2026-10-23",
+    "session": "d3dd3da3-e21c-4789-926a-6142746ddfff",
+    "calls": 508,
+    "posts": 457,
+    "blocked": 4
+   },
+   {
+    "day": "2026-10-24",
+    "session": "51063b09-396e-4c9b-81cb-b8ff75e52fc6",
+    "calls": 1025,
+    "posts": 993,
+    "blocked": 15
+   },
+   {
+    "day": "2026-10-24",
+    "session": "d3dd3da3-e21c-4789-926a-6142746ddfff",
+    "calls": 26,
+    "posts": 26,
+    "blocked": 0
+   },
+   {
+    "day": "2026-10-25",
+    "session": "51063b09-396e-4c9b-81cb-b8ff75e52fc6",
+    "calls": 1640,
+    "posts": 1601,
+    "blocked": 15
+   },
+   {
+    "day": "2026-10-26",
+    "session": "51063b09-396e-4c9b-81cb-b8ff75e52fc6",
+    "calls": 787,
+    "posts": 754,
+    "blocked": 0
+   },
+   {
+    "day": "2026-10-26",
+    "session": "f4cc7ffa-f78f-40ea-bf7d-108aca1124bb",
+    "calls": 463,
+    "posts": 419,
+    "blocked": 1
+   },
+   {
+    "day": "2026-10-27",
+    "session": "51063b09-396e-4c9b-81cb-b8ff75e52fc6",
+    "calls": 1472,
+    "posts": 1436,
+    "blocked": 13
+   },
+   {
+    "day": "2026-10-27",
+    "session": "f4cc7ffa-f78f-40ea-bf7d-108aca1124bb",
+    "calls": 497,
+    "posts": 477,
+    "blocked": 1
+   },
+   {
+    "day": "2026-10-27",
+    "session": "ab-test",
+    "calls": 1,
+    "posts": 0,
+    "blocked": 0
+   },
+   {
+    "day": "2026-10-27",
+    "session": "<none>",
+    "calls": 1,
+    "posts": 0,
+    "blocked": 0
+   },
+   {
+    "day": "2026-10-28",
+    "session": "51063b09-396e-4c9b-81cb-b8ff75e52fc6",
+    "calls": 1578,
+    "posts": 1554,
+    "blocked": 9
+   },
+   {
+    "day": "2026-10-28",
+    "session": "diag-timing",
+    "calls": 1,
+    "posts": 0,
+    "blocked": 0
+   },
+   {
+    "day": "2026-10-28",
+    "session": "g0517rf",
+    "calls": 22,
+    "posts": 0,
+    "blocked": 11
+   },
+   {
+    "day": "2026-10-28",
+    "session": "f4cc7ffa-f78f-40ea-bf7d-108aca1124bb",
+    "calls": 309,
+    "posts": 298,
+    "blocked": 1
+   },
+   {
+    "day": "2026-10-29",
+    "session": "51063b09-396e-4c9b-81cb-b8ff75e52fc6",
+    "calls": 1427,
+    "posts": 1319,
+    "blocked": 5
+   },
+   {
+    "day": "2026-10-29",
+    "session": "f4cc7ffa-f78f-40ea-bf7d-108aca1124bb",
+    "calls": 1540,
+    "posts": 1417,
+    "blocked": 7
+   },
+   {
+    "day": "2026-10-29",
+    "session": "g0517rf",
+    "calls": 10,
+    "posts": 0,
+    "blocked": 5
+   },
+   {
+    "day": "2026-10-30",
+    "session": "f4cc7ffa-f78f-40ea-bf7d-108aca1124bb",
+    "calls": 38,
+    "posts": 38,
+    "blocked": 0
+   },
+   {
+    "day": "2026-10-30",
+    "session": "5e5d8095-3ea7-4ac8-8229-38dfa48367ae",
+    "calls": 1934,
+    "posts": 1841,
+    "blocked": 36
+   },
+   {
+    "day": "2026-10-30",
+    "session": "g0517rf",
+    "calls": 8,
+    "posts": 0,
+    "blocked": 4
+   },
+   {
+    "day": "2026-10-30",
+    "session": "<none>",
+    "calls": 37,
+    "posts": 0,
+    "blocked": 2
+   },
+   {
+    "day": "2026-10-30",
+    "session": "acb9f60a-e980-4d67-b875-06a40efd48a7",
+    "calls": 31,
+    "posts": 30,
+    "blocked": 0
+   },
+   {
+    "day": "2026-10-31",
+    "session": "5e5d8095-3ea7-4ac8-8229-38dfa48367ae",
+    "calls": 549,
+    "posts": 516,
+    "blocked": 12
+   },
+   {
+    "day": "2026-10-31",
+    "session": "acb9f60a-e980-4d67-b875-06a40efd48a7",
+    "calls": 114,
+    "posts": 111,
+    "blocked": 1
+   },
+   {
+    "day": "2026-10-31",
+    "session": "e9450804-3862-488b-915c-fc65ba2e5e0e",
+    "calls": 1312,
+    "posts": 1235,
+    "blocked": 6
+   },
+   {
+    "day": "2026-10-31",
+    "session": "probe",
+    "calls": 4,
+    "posts": 0,
+    "blocked": 2
+   },
+   {
+    "day": "2026-10-31",
+    "session": "lat",
+    "calls": 6,
+    "posts": 0,
+    "blocked": 0
+   },
+   {
+    "day": "2026-10-31",
+    "session": "b58c0542-da61-4130-ae3a-a5a718f1faaf",
+    "calls": 646,
+    "posts": 631,
+    "blocked": 5
+   },
+   {
+    "day": "2026-10-31",
+    "session": "g0517rf",
+    "calls": 18,
+    "posts": 0,
+    "blocked": 9
+   },
+   {
+    "day": "2026-10-31",
+    "session": "e830f8aa-d10d-4587-93e6-5db559ecc0ac",
+    "calls": 68,
+    "posts": 65,
+    "blocked": 1
+   }
+  ],
+  "cross": [
+   {
+    "type": "pre_tool_use",
+    "decision": "allow",
+    "action": "allow",
+    "n": 46209
+   },
+   {
+    "type": "post_tool_use",
+    "decision": null,
+    "action": "record",
+    "n": 45917
+   },
+   {
+    "type": "usage_delta",
+    "decision": null,
+    "action": null,
+    "n": 40826
+   },
+   {
+    "type": "dst02_bash_path_suspect",
+    "decision": "alert",
+    "action": "alert",
+    "n": 10580
+   },
+   {
+    "type": "host_changed",
+    "decision": "alert",
+    "action": null,
+    "n": 7631
+   },
+   {
+    "type": "host_shield_heartbeat",
+    "decision": "allow",
+    "action": null,
+    "n": 6303
+   },
+   {
+    "type": "pre_tool_use",
+    "decision": "alert",
+    "action": "alert",
+    "n": 1040
+   },
+   {
+    "type": "pre_tool_use_summary",
+    "decision": "alert",
+    "action": null,
+    "n": 832
+   },
+   {
+    "type": "notice_budget_window_closed",
+    "decision": "allow",
+    "action": "alert",
+    "n": 757
+   },
+   {
+    "type": "host_shield_revived",
+    "decision": "allow",
+    "action": null,
+    "n": 576
+   },
+   {
+    "type": "workspace_root_allow",
+    "decision": "allow",
+    "action": null,
+    "n": 454
+   },
+   {
+    "type": "pre_tool_use",
+    "decision": "block",
+    "action": "block",
+    "n": 347
+   },
+   {
+    "type": "pre_tool_use_summary",
+    "decision": "block",
+    "action": null,
+    "n": 329
+   },
+   {
+    "type": "exclude_patterns_allow",
+    "decision": "allow",
+    "action": "allow",
+    "n": 318
+   },
+   {
+    "type": "session_start",
+    "decision": "allow",
+    "action": null,
+    "n": 311
+   },
+   {
+    "type": "host_shield_spawn_failed",
+    "decision": "deny",
+    "action": null,
+    "n": 301
+   },
+   {
+    "type": "host_shield_tamper",
+    "decision": "deny",
+    "action": null,
+    "n": 273
+   },
+   {
+    "type": "host_shield_zone_locked",
+    "decision": "deny",
+    "action": null,
+    "n": 208
+   },
+   {
+    "type": "command_deletion_permission",
+    "decision": "deny",
+    "action": "block",
+    "n": 176
+   },
+   {
+    "type": "host_shield_breach",
+    "decision": "deny",
+    "action": null,
+    "n": 170
+   },
+   {
+    "type": "notice_budget_merged",
+    "decision": "allow",
+    "action": "alert",
+    "n": 151
+   },
+   {
+    "type": "host_shield_state_unreadable",
+    "decision": "allow",
+    "action": null,
+    "n": 77
+   },
+   {
+    "type": "host_shield_dev_drift",
+    "decision": "deny",
+    "action": null,
+    "n": 68
+   },
+   {
+    "type": "hook_slow",
+    "decision": "allow",
+    "action": "alert",
+    "n": 38
+   },
+   {
+    "type": "session_dna",
+    "decision": null,
+    "action": null,
+    "n": 33
+   },
+   {
+    "type": "host_shield_task_unknown",
+    "decision": "alert",
+    "action": null,
+    "n": 26
+   },
+   {
+    "type": "enforcement_probe",
+    "decision": "alert",
+    "action": null,
+    "n": 22
+   },
+   {
+    "type": "command_deletion_permission",
+    "decision": "allow",
+    "action": "allow",
+    "n": 14
+   },
+   {
+    "type": "rules_snapshot_refreshed",
+    "decision": "config_refresh",
+    "action": "allow",
+    "n": 13
+   },
+   {
+    "type": "host_shield_changed",
+    "decision": "allow",
+    "action": null,
+    "n": 12
+   },
+   {
+    "type": "post_tool_use",
+    "decision": null,
+    "action": "alert",
+    "n": 11
+   },
+   {
+    "type": "rules_integrity_fallback",
+    "decision": "config_fallback",
+    "action": "alert",
+    "n": 10
+   },
+   {
+    "type": "hook_alive",
+    "decision": "allow",
+    "action": null,
+    "n": 7
+   },
+   {
+    "type": "policy_changed",
+    "decision": "allow",
+    "action": null,
+    "n": 3
+   },
+   {
+    "type": "autostart_no_window_fixed",
+    "decision": "config_refresh",
+    "action": "allow",
+    "n": 2
+   },
+   {
+    "type": "dst02_path_whitelisted",
+    "decision": "allow",
+    "action": "allow",
+    "n": 1
+   },
+   {
+    "type": "credits_snapshot",
+    "decision": "allow",
+    "action": null,
+    "n": 1
+   },
+   {
+    "type": "hook_error",
+    "decision": "allow",
+    "action": "alert",
+    "n": 1
+   },
+   {
+    "type": "canary_planted",
+    "decision": "allow",
+    "action": null,
+    "n": 1
+   }
+  ],
+  "block_words": [
+   {
+    "type": "pre_tool_use",
+    "decision": "block",
+    "action": "block",
+    "n": 347
+   },
+   {
+    "type": "pre_tool_use_summary",
+    "decision": "block",
+    "action": null,
+    "n": 329
+   },
+   {
+    "type": "host_shield_spawn_failed",
+    "decision": "deny",
+    "action": null,
+    "n": 301
+   },
+   {
+    "type": "host_shield_tamper",
+    "decision": "deny",
+    "action": null,
+    "n": 273
+   },
+   {
+    "type": "host_shield_zone_locked",
+    "decision": "deny",
+    "action": null,
+    "n": 208
+   },
+   {
+    "type": "command_deletion_permission",
+    "decision": "deny",
+    "action": "block",
+    "n": 176
+   },
+   {
+    "type": "host_shield_breach",
+    "decision": "deny",
+    "action": null,
+    "n": 170
+   },
+   {
+    "type": "host_shield_dev_drift",
+    "decision": "deny",
+    "action": null,
+    "n": 68
+   }
+  ],
+  "samples": {
+   "session_tail": {
+    "ts": "2026-09-28T18:50:28+08:00",
+    "type": "pre_tool_use",
+    "tool": "Bash",
+    "session": "diag",
+    "decision": "allow",
+    "action": "allow",
+    "digest": "sha256:972021700e8e6",
+    "file": "2026-09-28.jsonl"
+   },
+   "blocked_stopped": {
+    "ts": "2026-10-03T16:22:16+08:00",
+    "type": "pre_tool_use",
+    "tool": "Bash",
+    "session": "",
+    "decision": "block",
+    "action": "block",
+    "digest": "sha256:ba950beadfcff",
+    "file": "2026-10-03.jsonl"
+   },
+   "session_continued": {
+    "ts": "2026-10-10T11:20:25+08:00",
+    "type": "pre_tool_use",
+    "tool": "Bash",
+    "session": "000f3dc1",
+    "decision": "allow",
+    "action": "allow",
+    "digest": "sha256:fc1e23cb08fdb",
+    "file": "2026-10-10.jsonl"
+   },
+   "orphan_post": {
+    "ts": "2026-10-10T11:47:31+08:00",
+    "type": "post_tool_use",
+    "tool": "TaskOutput",
+    "session": "000f3dc1",
+    "decision": null,
+    "action": "record",
+    "digest": "sha256:d20a71c29faad",
+    "file": "2026-10-10.jsonl"
+   },
+   "duplicate_pre": {
+    "ts": "2026-10-10T16:34:35+08:00",
+    "type": "pre_tool_use",
+    "tool": "present_files",
+    "session": "000f3dc1",
+    "decision": "allow",
+    "action": "allow",
+    "digest": "sha256:99fb935ee8a41",
+    "file": "2026-10-10.jsonl"
+   },
+   "dup_pre_unprovable": {
+    "ts": "2026-10-10T18:38:44+08:00",
+    "type": "pre_tool_use",
+    "tool": "Bash",
+    "session": "000f3dc1",
+    "decision": "alert",
+    "action": "alert",
+    "digest": "sha256:b6ae4ea5fb21b",
+    "file": "2026-10-10.jsonl"
+   },
+   "alert_no_post": {
+    "ts": "2026-10-11T14:56:59+08:00",
+    "type": "pre_tool_use",
+    "tool": "Bash",
+    "session": "000f3dc1",
+    "decision": "alert",
+    "action": "alert",
+    "digest": "sha256:04e4738a0d60d",
+    "file": "2026-10-11.jsonl"
+   },
+   "surplus_pre_ambiguous": {
+    "ts": "2026-10-12T02:48:54+08:00",
+    "type": "pre_tool_use",
+    "tool": "TaskOutput",
+    "session": "33dc8e25",
+    "decision": "allow",
+    "action": "allow",
+    "digest": "sha256:34f17ef2cf00c",
+    "file": "2026-10-12.jsonl"
+   }
+  },
+  "dup_deltas": [
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   1.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   2.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   3.0,
+   4.0,
+   4.0,
+   4.0,
+   4.0,
+   4.0,
+   4.0,
+   4.0,
+   4.0,
+   4.0,
+   4.0,
+   4.0,
+   4.0,
+   4.0,
+   4.0,
+   4.0,
+   4.0,
+   4.0,
+   4.0,
+   4.0,
+   4.0,
+   5.0,
+   5.0,
+   5.0,
+   5.0,
+   5.0,
+   5.0,
+   5.0,
+   5.0,
+   5.0,
+   5.0,
+   5.0,
+   5.0,
+   5.0,
+   6.0,
+   6.0,
+   6.0,
+   6.0,
+   6.0,
+   6.0,
+   6.0,
+   6.0,
+   6.0,
+   6.0,
+   7.0,
+   7.0,
+   7.0,
+   7.0,
+   7.0,
+   7.0,
+   8.0,
+   8.0,
+   8.0,
+   8.0,
+   9.0,
+   9.0,
+   9.0,
+   9.0,
+   9.0,
+   9.0,
+   9.0,
+   10.0,
+   10.0,
+   10.0,
+   10.0,
+   11.0,
+   11.0,
+   11.0,
+   12.0,
+   13.0,
+   21.0,
+   21.0,
+   22.0,
+   22.0,
+   23.0,
+   23.0,
+   25.0,
+   26.0,
+   27.0,
+   28.0,
+   28.0,
+   33.0,
+   33.0,
+   44.0,
+   44.0,
+   47.0,
+   52.0,
+   99.0,
+   280.0,
+   470.0,
+   548.0,
+   581.0,
+   606.0,
+   607.0,
+   668.0,
+   713.0,
+   727.0,
+   903.0,
+   932.0,
+   1498.0,
+   1854.0,
+   3331.0,
+   3537.0,
+   4317.0,
+   4318.0,
+   5493.0,
+   5914.0,
+   11204.0,
+   11205.0,
+   33642.0,
+   33643.0,
+   238452.0,
+   238455.0,
+   740229.0,
+   740230.0
+  ],
+  "violations": []
+ },
+ "reds": [],
+ "notes": [
+  "calls−posts−blocked = 1321：**这个减法不该等于 0**，它把 E3/E5/E6b/E7/E8 全当成「被拦」了；正确口径是 `calls − posts` = 1668",
+  "E6b session_continued = 574（硬残差：放行、会话继续、就是没有后记录）"
+ ]
+}
