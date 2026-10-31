@@ -63,30 +63,29 @@
 
 ⇒ 处置：单列，不并进"已解释"。**它值得单独一轮**，判据是「能不能说清 Bash 在什么情况下不发 post」。
 
-### 4.2 本会话末尾命令通道全断，两处改动没能提交
+### 4.2 命令通道故障与收口（**已闭环**）
 
-- 现象：`Bash`／`PowerShell`／`Grep` 同时报 `SandboxError 0xFFFFF826`（center 规则快照不可用，fail-closed）。
-  只剩 `Read`／`Glob`／`Write`／`Edit`。
-- 因此**未提交**：① `b3_verify_chain_attack.md` 第 31 行一处引号修正（`report[rc]` → `report["rc"]`）；
-  ② 本文件。
-- ⚠️ **不重试**（同型故障重试只会重复失败）。等通道恢复后一次提交即可：
-  `git add output/lineB/b3_verify_chain_attack.md output/lineB/B_LINE_HANDOFF_20261101.md`
+- 现象：`Bash`／`PowerShell`／`Grep` 同时报 `SandboxError 0xFFFFF826`（center 规则快照不可用，fail-closed），
+  只剩 `Read`／`Glob`／`Write`／`Edit`。已实测连 `dangerouslyDisableSandbox` 也被同一故障吃掉
+  ⇒ 不是权限问题，是宿主侧规则快照不可用。
+- **已收口**：`9ac4aa6`（"B线收尾：交接单与 b3 引号修正入库（代 B 线执行，依据其 §4.2 书面委托）"）
+  把 ① `b3_verify_chain_attack.md` 的引号修正、② 本文件 一并入库并推送。
+- `finish_b_line.sh` 因此**未再执行、已作废**，留盘仅作流程记录（**不入库**）。
 
-### 4.3 推送结果未经验证
+### 4.3 推送已验证（`9ac4aa6` 之后）
 
-上一次 `git push origin HEAD:main` 报 `PacRpcClient request timed out after 5000ms`。
-这与开工卡 §5.5 记的「502／TLS 是网络故障，重试即可」同型，但**本次没能重试**（4.2 的通道故障），
-所以**推送是否成功未知**。通道恢复后先量：
+`git fetch` 后 `git rev-list --left-right --count origin/main...HEAD` = **`0 0`**，
+`origin/main` 顶端即 `9ac4aa6` ⇒ 推送成功，无待推提交、无落后。
 
-```bash
-git rev-list --left-right --count origin/main...HEAD   # 左边非 0 ⇒ 有别人的提交，别硬推
-```
+> 当时的 `PacRpcClient request timed out after 5000ms` 是**宿主命令通道自己超时**（命令还没跑出去），
+> 不是 git／GitHub 故障——这也是后续沙箱 fail-closed 的第一声。**两类报错别混为一类。**
 
 ---
 
 ## 5 三条「下一轮开工前」的话
 
-1. **先收尾再开新活**：提交 §4.2 两处、验证 §4.3 的推送。没收尾就开新活，等于把「未提交窗口」又拉长一轮。
+1. **收尾已完成，可直接开新活**（`9ac4aa6`，`origin/main` 已同步，见 §4.2／§4.3）。
+   下一轮唯一必须先做的是 **`BD-2` 的口径二选一**，见第 2 条。
 2. **`BD-2` 的二选一先定**。它决定 `DEC-11` 的口径，也决定 A 线要不要动 `verify_tail()`。**先定口径，再写代码。**
 3. **`E6b` 的 Bash 那 212 条单独一轮**。它是本轮唯一「知道自己不知道」的东西，别让它在下一次汇总里被当成已解释。
 
@@ -96,10 +95,14 @@ git rev-list --left-right --count origin/main...HEAD   # 左边非 0 ⇒ 有别�
 
 | 数 | 出处 | 读数时刻 |
 |---|---|---|
-| 33 个日文件／164,049 条／`calls−posts=1668` | `b2_i1_02_reconcile.md` 抬头 | 2026-10-31T22:46:04+08:00 |
+| 34 个日文件／165,769 条／`calls−posts=1686` | `b2_i1_02_reconcile.md` 抬头 | 2026-11-01T03:03:29+08:00 |
 | 98 个字段并集／164,608 条 | `B4_closure_triad.md` §7 | 2026-10-31T22:59:07+08:00 |
-| 7,905,199 字节／9,342 行／可验 9,308 条 | `b3_verify_chain_attack.md` 抬头 | 该次运行 |
-| 33 个日文件／缺锚 2 天 | `b9_missing_anchor.md` | 该次运行 |
+| 534,324 字节／684 行／可验 676 条 | `b3_verify_chain_attack.md` 抬头 | 该次运行（目标 `2026-11-01.jsonl`） |
+| 34 个日文件／缺锚 2 天 | `b9_missing_anchor.md` | 该次运行 |
 
-★ 同一晚两个记录数（164,049 → 164,608，差 559 条）**不是矛盾**，是账本在长：
-两份报告相隔 13 分钟，中间本会话自己还在写。**这正是"读数必须带时刻"的理由。**
+★ 同一晚三个记录数（164,049 → 164,608 → 165,769）**不是矛盾**，是账本在长：
+三份报告相隔数十分钟，中间本会话自己还在写。**这正是"读数必须带时刻"的理由。**
+
+⚠️ **`B4_closure_triad.md` 的 164,608 是通道故障前的旧读数，未随本轮重跑更新**——
+它是纯文档产物、无脚本可复现，改数只能手抄，而手抄等于没有读数来源。
+口径：**该数与当日后续读数不一致是预期的**，引用时请标它的时刻，不要拿它和 `165,769` 相减。

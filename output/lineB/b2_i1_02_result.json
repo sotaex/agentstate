@@ -1,9 +1,9 @@
 {
  "meta": {
   "audit_dir": "D:\\psl\\poc\\antinel-security\\.psl\\audit",
-  "read_at": "2026-10-31T22:46:04+08:00",
-  "files": 33,
-  "records": 164049,
+  "read_at": "2026-11-01T03:03:29+08:00",
+  "files": 34,
+  "records": 165769,
   "bad_lines": 0,
   "skipped_files": [
    "lock_events.jsonl"
@@ -139,58 +139,62 @@
    },
    {
     "name": "2026-10-31.jsonl",
-    "bytes": 7744522
+    "bytes": 8602842
+   },
+   {
+    "name": "2026-11-01.jsonl",
+    "bytes": 544033
    }
   ]
  },
  "result": {
   "totals": {
-   "calls": 47596,
-   "posts": 45928,
-   "blocked": 347,
-   "matched": 45887,
-   "calls_minus_posts": 1668,
-   "calls_minus_posts_minus_blocked": 1321
+   "calls": 48092,
+   "posts": 46406,
+   "blocked": 349,
+   "matched": 46365,
+   "calls_minus_posts": 1686,
+   "calls_minus_posts_minus_blocked": 1337
   },
   "exits": {
-   "blocked_stopped": 301,
+   "blocked_stopped": 303,
    "deny_not_honored": 0,
-   "duplicate_pre": 616,
+   "duplicate_pre": 621,
    "orphan_post": 41,
    "alert_no_post": 23,
-   "session_tail": 3,
-   "session_continued": 574,
-   "dup_pre_unprovable": 164,
-   "surplus_pre_ambiguous": 28
+   "session_tail": 4,
+   "session_continued": 581,
+   "dup_pre_unprovable": 165,
+   "surplus_pre_ambiguous": 30
   },
   "extra_by_decision": {
-   "block": 85,
+   "block": 86,
    "allow": 70,
    "alert": 9
   },
   "buckets": {
    "Bash": {
-    "calls": 25996,
-    "posts": 25299,
-    "blocked": 283,
-    "matched": 25278,
+    "calls": 26254,
+    "posts": 25554,
+    "blocked": 284,
+    "matched": 25533,
     "exits": {
-     "blocked_stopped": 237,
+     "blocked_stopped": 238,
      "deny_not_honored": 0,
      "duplicate_pre": 104,
      "orphan_post": 21,
      "alert_no_post": 16,
-     "session_tail": 3,
+     "session_tail": 4,
      "session_continued": 212,
-     "dup_pre_unprovable": 142,
+     "dup_pre_unprovable": 143,
      "surplus_pre_ambiguous": 4
     }
    },
    "Read": {
-    "calls": 5503,
-    "posts": 5482,
+    "calls": 5576,
+    "posts": 5555,
     "blocked": 1,
-    "matched": 5482,
+    "matched": 5555,
     "exits": {
      "blocked_stopped": 1,
      "deny_not_honored": 0,
@@ -204,10 +208,10 @@
     }
    },
    "TaskCreate": {
-    "calls": 369,
-    "posts": 369,
+    "calls": 375,
+    "posts": 375,
     "blocked": 0,
-    "matched": 369,
+    "matched": 375,
     "exits": {
      "blocked_stopped": 0,
      "deny_not_honored": 0,
@@ -221,10 +225,10 @@
     }
    },
    "TaskUpdate": {
-    "calls": 447,
-    "posts": 447,
+    "calls": 451,
+    "posts": 451,
     "blocked": 0,
-    "matched": 446,
+    "matched": 450,
     "exits": {
      "blocked_stopped": 0,
      "deny_not_honored": 0,
@@ -238,12 +242,12 @@
     }
    },
    "Write": {
-    "calls": 1900,
-    "posts": 1795,
-    "blocked": 55,
-    "matched": 1795,
+    "calls": 1932,
+    "posts": 1826,
+    "blocked": 56,
+    "matched": 1826,
     "exits": {
-     "blocked_stopped": 55,
+     "blocked_stopped": 56,
      "deny_not_honored": 0,
      "duplicate_pre": 7,
      "orphan_post": 0,
@@ -255,10 +259,10 @@
     }
    },
    "PowerShell": {
-    "calls": 772,
-    "posts": 759,
+    "calls": 775,
+    "posts": 762,
     "blocked": 0,
-    "matched": 758,
+    "matched": 761,
     "exits": {
      "blocked_stopped": 0,
      "deny_not_honored": 0,
@@ -272,7 +276,7 @@
     }
    },
    "Grep": {
-    "calls": 1712,
+    "calls": 1715,
     "posts": 1658,
     "blocked": 0,
     "matched": 1658,
@@ -283,16 +287,16 @@
      "orphan_post": 0,
      "alert_no_post": 0,
      "session_tail": 0,
-     "session_continued": 54,
+     "session_continued": 57,
      "dup_pre_unprovable": 0,
      "surplus_pre_ambiguous": 0
     }
    },
    "Edit": {
-    "calls": 7797,
-    "posts": 7584,
+    "calls": 7878,
+    "posts": 7664,
     "blocked": 8,
-    "matched": 7583,
+    "matched": 7663,
     "exits": {
      "blocked_stopped": 8,
      "deny_not_honored": 0,
@@ -300,7 +304,7 @@
      "orphan_post": 1,
      "alert_no_post": 1,
      "session_tail": 0,
-     "session_continued": 194,
+     "session_continued": 195,
      "dup_pre_unprovable": 6,
      "surplus_pre_ambiguous": 0
     }
@@ -340,10 +344,10 @@
     }
    },
    "AskUserQuestion": {
-    "calls": 42,
-    "posts": 42,
+    "calls": 44,
+    "posts": 44,
     "blocked": 0,
-    "matched": 42,
+    "matched": 44,
     "exits": {
      "blocked_stopped": 0,
      "deny_not_honored": 0,
@@ -357,14 +361,14 @@
     }
    },
    "present_files": {
-    "calls": 730,
-    "posts": 363,
+    "calls": 738,
+    "posts": 367,
     "blocked": 0,
-    "matched": 363,
+    "matched": 367,
     "exits": {
      "blocked_stopped": 0,
      "deny_not_honored": 0,
-     "duplicate_pre": 363,
+     "duplicate_pre": 367,
      "orphan_post": 0,
      "alert_no_post": 0,
      "session_tail": 0,
@@ -493,10 +497,10 @@
     }
    },
    "Glob": {
-    "calls": 165,
-    "posts": 146,
+    "calls": 185,
+    "posts": 163,
     "blocked": 0,
-    "matched": 146,
+    "matched": 163,
     "exits": {
      "blocked_stopped": 0,
      "deny_not_honored": 0,
@@ -504,20 +508,20 @@
      "orphan_post": 0,
      "alert_no_post": 0,
      "session_tail": 0,
-     "session_continued": 19,
+     "session_continued": 22,
      "dup_pre_unprovable": 0,
      "surplus_pre_ambiguous": 0
     }
    },
    "WebFetch": {
-    "calls": 138,
-    "posts": 71,
+    "calls": 140,
+    "posts": 72,
     "blocked": 0,
-    "matched": 71,
+    "matched": 72,
     "exits": {
      "blocked_stopped": 0,
      "deny_not_honored": 0,
-     "duplicate_pre": 57,
+     "duplicate_pre": 58,
      "orphan_post": 0,
      "alert_no_post": 5,
      "session_tail": 0,
@@ -527,31 +531,31 @@
     }
    },
    "widget_guidelines": {
-    "calls": 50,
-    "posts": 25,
+    "calls": 52,
+    "posts": 26,
     "blocked": 0,
-    "matched": 25,
+    "matched": 26,
     "exits": {
      "blocked_stopped": 0,
      "deny_not_honored": 0,
-     "duplicate_pre": 15,
+     "duplicate_pre": 14,
      "orphan_post": 0,
      "alert_no_post": 0,
      "session_tail": 0,
      "session_continued": 0,
      "dup_pre_unprovable": 0,
-     "surplus_pre_ambiguous": 10
+     "surplus_pre_ambiguous": 12
     }
    },
    "show_widget": {
-    "calls": 115,
-    "posts": 58,
+    "calls": 117,
+    "posts": 59,
     "blocked": 0,
-    "matched": 58,
+    "matched": 59,
     "exits": {
      "blocked_stopped": 0,
      "deny_not_honored": 0,
-     "duplicate_pre": 57,
+     "duplicate_pre": 58,
      "orphan_post": 0,
      "alert_no_post": 0,
      "session_tail": 0,
@@ -664,12 +668,12 @@
    }
   },
   "by_decision": {
-   "allow": 46209,
-   "block": 347,
-   "alert": 1040
+   "allow": 46696,
+   "block": 349,
+   "alert": 1047
   },
   "dup_window": 60.0,
-  "posts_nonzero_exit": 1051,
+  "posts_nonzero_exit": 1055,
   "daysess": [
    {
     "day": "2026-09-28",
@@ -1108,8 +1112,8 @@
    {
     "day": "2026-10-31",
     "session": "e9450804-3862-488b-915c-fc65ba2e5e0e",
-    "calls": 1312,
-    "posts": 1235,
+    "calls": 1442,
+    "posts": 1365,
     "blocked": 6
    },
    {
@@ -1129,8 +1133,8 @@
    {
     "day": "2026-10-31",
     "session": "b58c0542-da61-4130-ae3a-a5a718f1faaf",
-    "calls": 646,
-    "posts": 631,
+    "calls": 723,
+    "posts": 708,
     "blocked": 5
    },
    {
@@ -1143,9 +1147,30 @@
    {
     "day": "2026-10-31",
     "session": "e830f8aa-d10d-4587-93e6-5db559ecc0ac",
-    "calls": 68,
-    "posts": 65,
-    "blocked": 1
+    "calls": 141,
+    "posts": 136,
+    "blocked": 3
+   },
+   {
+    "day": "2026-11-01",
+    "session": "b58c0542-da61-4130-ae3a-a5a718f1faaf",
+    "calls": 34,
+    "posts": 31,
+    "blocked": 0
+   },
+   {
+    "day": "2026-11-01",
+    "session": "e830f8aa-d10d-4587-93e6-5db559ecc0ac",
+    "calls": 77,
+    "posts": 69,
+    "blocked": 0
+   },
+   {
+    "day": "2026-11-01",
+    "session": "e9450804-3862-488b-915c-fc65ba2e5e0e",
+    "calls": 105,
+    "posts": 100,
+    "blocked": 0
    }
   ],
   "cross": [
@@ -1153,61 +1178,61 @@
     "type": "pre_tool_use",
     "decision": "allow",
     "action": "allow",
-    "n": 46209
+    "n": 46696
    },
    {
     "type": "post_tool_use",
     "decision": null,
     "action": "record",
-    "n": 45917
+    "n": 46395
    },
    {
     "type": "usage_delta",
     "decision": null,
     "action": null,
-    "n": 40826
+    "n": 41267
    },
    {
     "type": "dst02_bash_path_suspect",
     "decision": "alert",
     "action": "alert",
-    "n": 10580
+    "n": 10688
    },
    {
     "type": "host_changed",
     "decision": "alert",
     "action": null,
-    "n": 7631
+    "n": 7769
    },
    {
     "type": "host_shield_heartbeat",
     "decision": "allow",
     "action": null,
-    "n": 6303
+    "n": 6330
    },
    {
     "type": "pre_tool_use",
     "decision": "alert",
     "action": "alert",
-    "n": 1040
+    "n": 1047
    },
    {
     "type": "pre_tool_use_summary",
     "decision": "alert",
     "action": null,
-    "n": 832
+    "n": 837
    },
    {
     "type": "notice_budget_window_closed",
     "decision": "allow",
     "action": "alert",
-    "n": 757
+    "n": 764
    },
    {
     "type": "host_shield_revived",
     "decision": "allow",
     "action": null,
-    "n": 576
+    "n": 580
    },
    {
     "type": "workspace_root_allow",
@@ -1219,25 +1244,25 @@
     "type": "pre_tool_use",
     "decision": "block",
     "action": "block",
-    "n": 347
+    "n": 349
    },
    {
     "type": "pre_tool_use_summary",
     "decision": "block",
     "action": null,
-    "n": 329
-   },
-   {
-    "type": "exclude_patterns_allow",
-    "decision": "allow",
-    "action": "allow",
-    "n": 318
+    "n": 331
    },
    {
     "type": "session_start",
     "decision": "allow",
     "action": null,
-    "n": 311
+    "n": 322
+   },
+   {
+    "type": "exclude_patterns_allow",
+    "decision": "allow",
+    "action": "allow",
+    "n": 320
    },
    {
     "type": "host_shield_spawn_failed",
@@ -1261,7 +1286,7 @@
     "type": "command_deletion_permission",
     "decision": "deny",
     "action": "block",
-    "n": 176
+    "n": 177
    },
    {
     "type": "host_shield_breach",
@@ -1389,13 +1414,13 @@
     "type": "pre_tool_use",
     "decision": "block",
     "action": "block",
-    "n": 347
+    "n": 349
    },
    {
     "type": "pre_tool_use_summary",
     "decision": "block",
     "action": null,
-    "n": 329
+    "n": 331
    },
    {
     "type": "host_shield_spawn_failed",
@@ -1419,7 +1444,7 @@
     "type": "command_deletion_permission",
     "decision": "deny",
     "action": "block",
-    "n": 176
+    "n": 177
    },
    {
     "type": "host_shield_breach",
@@ -1719,6 +1744,11 @@
    0.0,
    0.0,
    0.0,
+   0.0,
+   0.0,
+   1.0,
+   1.0,
+   1.0,
    1.0,
    1.0,
    1.0,
@@ -2155,6 +2185,8 @@
    5914.0,
    11204.0,
    11205.0,
+   22773.0,
+   22774.0,
    33642.0,
    33643.0,
    238452.0,
@@ -2166,7 +2198,7 @@
  },
  "reds": [],
  "notes": [
-  "calls−posts−blocked = 1321：**这个减法不该等于 0**，它把 E3/E5/E6b/E7/E8 全当成「被拦」了；正确口径是 `calls − posts` = 1668",
-  "E6b session_continued = 574（硬残差：放行、会话继续、就是没有后记录）"
+  "calls−posts−blocked = 1337：**这个减法不该等于 0**，它把 E3/E5/E6b/E7/E8 全当成「被拦」了；正确口径是 `calls − posts` = 1686",
+  "E6b session_continued = 581（硬残差：放行、会话继续、就是没有后记录）"
  ]
 }
