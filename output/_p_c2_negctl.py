@@ -1,0 +1,685 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+"""C 线负控总表：巡检 6 个检测器 ＋ 对账 A4 ＋ 规则 id 归一，各自「改对了会响、没改不响」。
+
+负控的判据不是「结果不同」，是「**真的改了字节、且只改了这一处**」：
+
+  · 正向臂：篡改副本 -> 指定 kind 必须出现，且 subject 里必须能看见被改的那个值；
+  · 负向臂：同一份副本不动 -> 同一 kind 必须**不**出现。
+
+只做正向臂，检测器写成 `return [Clue(...)]` 也照样通过；
+只做负向臂，「永远返回 []」也照样通过。两条臂缺一不可。
+
+另一条负向臂（防「首次出现」退化成「今天出现过的都算」）：
+  往副本里注入一个**历史上已有**的命令（git），它不许被报成首次出现。
+
+四件套（铁律 9）在这里的落法：
+  ①正判据   = 篡改后指定 kind / 字段必须出现；
+  ②反向对照 = 同一份副本不动时必须不出现；
+  ③连带对照 = 既有维度（A1/A2/A3/A5、其它检测器）不许被静默改动；
+  ④自报活跃 = 每个检测器必须在 coverage 里申报状态，缺一个当场抛。
+
+一次性量具，不进发布包、不进 ci/。
+用法：python output/_p_c2_negctl.py
+"""
+
+from __future__ import annotations
+
+import glob
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from typing import Any, Dict, List, Tuple
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(REPO, "output", "lineC"))
+import watchman as W  # noqa: E402  配对候选/覆盖键都从这里取，不另写一套
+WATCH = os.path.join(REPO, "output", "lineC", "watchman.py")
+SRC = os.path.join(REPO, ".psl", "audit")
+
+# 基线检测要 >= max(5, window//2) 天前置样本，9 个日文件给 8 天，够。
+N_FILES = 9
+GAP_FROM, GAP_TO = "T09:30:00", "T11:30:00"  # 只在这段里挖洞，避开真实的 14:29/17:10 断层
+GAP_ASSERT_MIN = 90.0  # 篡改后必须出现 >= 90 分钟的断层（干净臂最长 40 分钟）
+
+
+def sha(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for blk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(blk)
+    return h.hexdigest()
+
+
+def run(root: str, recent: int = 1) -> Dict[str, Any]:
+    p = subprocess.run(
+        [sys.executable, WATCH, "--root", root, "--json", "--recent", str(recent)],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if p.returncode != 0:
+        raise RuntimeError(f"watchman 退出 {p.returncode}: {(p.stderr or '')[:400]}")
+    return json.loads(p.stdout)
+
+
+AUDIT = os.path.join(REPO, "output", "lineC", "auditor.py")
+
+
+def run_audit(root: str) -> Dict[str, Any]:
+    p = subprocess.run(
+        [sys.executable, AUDIT, "--root", root, "--json"],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    # 有 FAIL 时 auditor 退出码 1，属正常，不是崩溃
+    if p.returncode not in (0, 1):
+        raise RuntimeError(f"auditor 退出 {p.returncode}: {(p.stderr or '')[:400]}")
+    return json.loads(p.stdout)
+
+
+def dim(res: Dict[str, Any], name: str) -> Dict[str, Any]:
+    for f in res["findings"]:
+        if f["dim"].startswith(name):
+            return f
+    raise KeyError(name)
+
+
+def a4_count(res: Dict[str, Any]) -> int:
+    d = dim(res, "A4")
+    m = re.match(r"^(\d+) 处", d["detail"])
+    return int(m.group(1)) if m else 0
+
+
+def kinds(res: Dict[str, Any], kind: str) -> List[Dict[str, Any]]:
+    return [c for c in res["clues"] if c["kind"] == kind]
+
+
+def prepend_nl(path: str) -> None:
+    """原文件末尾没换行时补一个，否则追加的第一行会粘在最后一条记录上。"""
+    with open(path, "rb") as fh:
+        fh.seek(0, os.SEEK_END)
+        if fh.tell() == 0:
+            return
+        fh.seek(-1, os.SEEK_END)
+        last = fh.read(1)
+    if last != b"\n":
+        with open(path, "ab") as fh:
+            fh.write(b"\n")
+
+
+def max_ts(path: str, day: str) -> str:
+    pat = re.compile(r'"ts":\s*"([^"]+)"')
+    best = f"{day}T00:00:00+08:00"
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            m = pat.search(line)
+            if m and m.group(1) > best:
+                best = m.group(1)
+    return best
+
+
+def bump_ts(ts: str, sec: int) -> str:
+    """不引 datetime —— 只把 HH:MM:SS 抬 sec 秒，跨零点在负控里不会发生。"""
+    m = re.match(r"^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(.*)$", ts)
+    if not m:
+        return ts
+    h, mi, s = int(m.group(2)), int(m.group(3)), int(m.group(4)) + sec
+    mi += s // 60
+    s %= 60
+    h += mi // 60
+    mi %= 60
+    return f"{m.group(1)}T{h:02d}:{mi:02d}:{s:02d}{m.group(5)}"
+
+
+def append_rec(path: str, rec: Dict[str, Any]) -> None:
+    prepend_nl(path)
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
+# --------------------------------------------------------------------- 三处篡改
+
+
+def m_baseline(path: str) -> str:
+    lines = [ln for ln in open(path, "r", encoding="utf-8", errors="replace") if '"pre_tool_use"' in ln]
+    n = len(lines)
+    if n == 0:
+        raise RuntimeError("目标日没有 pre_tool_use 记录，基线负控无从下手")
+    prepend_nl(path)
+    with open(path, "a", encoding="utf-8") as fh:
+        for i in range(n * 9):
+            fh.write(lines[i % n])
+    return f"pre_tool_use {n} -> {n * 10} 条（追加 {n * 9} 行）"
+
+
+def m_first_seen_new(path: str, day: str) -> str:
+    ts = bump_ts(max_ts(path, day), 1)
+    append_rec(
+        path,
+        {
+            "ts": ts,
+            "type": "pre_tool_use",
+            "tool": "Bash",
+            "session": "nc-probe",
+            "host": "workbuddy",
+            "input": {"command": "zzz_probe_nc --flag", "content_len": 0},
+            "content_digest": "sha256:" + "0" * 64,
+        },
+    )
+    return "注入 1 条 command=zzz_probe_nc"
+
+
+def m_first_seen_old(path: str, day: str) -> str:
+    ts = bump_ts(max_ts(path, day), 2)
+    append_rec(
+        path,
+        {
+            "ts": ts,
+            "type": "pre_tool_use",
+            "tool": "Bash",
+            "session": "nc-probe",
+            "host": "workbuddy",
+            "input": {"command": "git status", "content_len": 0},
+            "content_digest": "sha256:" + "0" * 64,
+        },
+    )
+    return "注入 1 条 command=git（历史已有，不许报首次出现）"
+
+
+def m_absent(path: str) -> str:
+    """删掉当日全部 post_tool_use —— 模拟「后半个钩子挂了」。"""
+    kept, dropped = [], 0
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            if '"post_tool_use"' in line and '"pre_tool_use"' not in line:
+                dropped += 1
+                continue
+            kept.append(line)
+    if dropped == 0:
+        raise RuntimeError("当日没有 post_tool_use 记录，缺席负控无从下手")
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.writelines(kept)
+    return f"删除当日全部 post_tool_use 共 {dropped} 行"
+
+
+def m_gap(path: str, day: str) -> str:
+    lo, hi = day + GAP_FROM, day + GAP_TO
+    pat = re.compile(r'"ts":\s*"([^"]+)"')
+    kept: List[str] = []
+    dropped = 0
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            m = pat.search(line)
+            if m and lo <= m.group(1)[:19] <= hi:
+                dropped += 1
+                continue
+            kept.append(line)
+    if dropped == 0:
+        raise RuntimeError(f"{day} {GAP_FROM}~{GAP_TO} 之间没有记录，挖不出洞")
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.writelines(kept)
+    return f"删除 {lo}~{hi} 之间的 {dropped} 行"
+
+
+# --------------------------------------------------------------------- 主流程
+
+
+def main() -> int:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+    for p in (WATCH, SRC):
+        if not os.path.exists(p):
+            print(f"[停] 缺 {p}", file=sys.stderr)
+            return 2
+
+    files = sorted(glob.glob(os.path.join(SRC, "2026-*.jsonl")))[-N_FILES:]
+    if len(files) < N_FILES:
+        print(f"[停] 日文件只有 {len(files)} 个，不够 {N_FILES} 天前置样本", file=sys.stderr)
+        return 2
+    target = os.path.basename(files[-1])
+    day = target[:10]
+
+    work = tempfile.mkdtemp(prefix="antinel-nc-")
+    base = os.path.join(work, "base")
+    os.makedirs(base)
+    for f in files:
+        shutil.copy2(f, os.path.join(base, os.path.basename(f)))
+
+    print("=" * 72)
+    print("C-2 巡检负控（watchman.py）")
+    print("=" * 72)
+    print(f"源     {SRC}")
+    print(f"副本   {base}（{len(files)} 个日文件，目标日 {target}）")
+    print()
+
+    clean = run(base)
+    ck = {k: kinds(clean, k) for k in ("absent", "baseline", "repeat", "first_seen", "rule_pair", "gap")}
+    print(f"干净臂 clues 分布：absent {len(ck['absent'])}｜baseline {len(ck['baseline'])}｜"
+          f"repeat {len(ck['repeat'])}｜first_seen {len(ck['first_seen'])}｜"
+          f"rule_pair {len(ck['rule_pair'])}｜gap {len(ck['gap'])}")
+    clean_max_gap = 0.0
+    for c in ck["gap"]:
+        m = re.search(r"有 (\d+) 小时 (\d+) 分|有 (\d+) 分", c["subject"])
+        if m:
+            v = (int(m.group(1)) * 60 + int(m.group(2))) if m.group(1) else int(m.group(3))
+            clean_max_gap = max(clean_max_gap, float(v))
+    print(f"干净臂最长断层 {clean_max_gap:g} 分钟")
+    print()
+
+    results: List[Tuple[str, bool, str]] = []
+
+    def arm(name: str, expect_kind: str, mutate, assert_fn, runner=None) -> None:
+        dst = os.path.join(work, name)
+        shutil.copytree(base, dst)
+        tgt = os.path.join(dst, target)
+        before = sha(tgt)
+        what = mutate(tgt)
+        after = sha(tgt)
+        if before == after:
+            results.append((name, False, "文件字节没变 —— 篡改根本没生效"))
+            print(f"[{name}] 篡改无效：{what}")
+            return
+        res = (runner or run)(dst)
+        ok, detail = assert_fn(res, dst)
+        results.append((name, ok, detail))
+        # 交叉污染：一处篡改会同时惊动别的检测器（删记录既挖洞也降量）。
+        # 只报**相对干净臂新增**的 kind，不报「干净臂本来就有」的 ——
+        # 后者会把「一直存在的线索」写成「被这次篡改惊动的」，那是虚报。
+        # 交叉污染只在同一个工具内可比：对账的 findings 没有 kind，
+        # 拿巡检的基线去比会造出一堆假的「惊动」。
+        if runner is None:
+            base_n = {k: len(v) for k, v in ck.items()}
+            others = [
+                f"{k} {base_n.get(k, 0)}->{len(kinds(res, k))}"
+                for k in ("absent", "baseline", "repeat", "first_seen", "rule_pair", "gap")
+                if k != expect_kind and len(kinds(res, k)) != base_n.get(k, 0)
+            ]
+        else:
+            others = []
+        print(f"[{name}] {what}")
+        print(f"         sha {before[:12]} -> {after[:12]}")
+        print(f"         {'[OK]' if ok else '[NG]'} {detail}")
+        # 交叉污染：一处篡改会同时惊动别的检测器（删记录既挖洞也降量）。
+        # 报出来，免得把「响应」读成「精准」。
+        if others:
+            print(f"         附带惊动：{'、'.join(others)}")
+        print()
+        shutil.rmtree(dst, ignore_errors=True)
+
+    # ---- NC-1 基线偏离：正向臂 + 负向臂（干净副本）
+    def a_baseline(res, _dst):
+        hit = kinds(res, "baseline")
+        if not hit:
+            return False, "篡改后 baseline 仍为 0 条 —— 检测器对 10 倍量变化无反应"
+        s = hit[0]["subject"]
+        if "偏离" not in s and "全部为" not in s:
+            return False, f"baseline 出现了但措辞不对：{s}"
+        return True, f"baseline {len(hit)} 条：{s}"
+
+    def a_baseline_clean(_res, _dst):
+        n = len(ck["baseline"])
+        return (n == 0), (f"干净副本 baseline {n} 条（须为 0）")
+
+    n0 = len(ck["baseline"])
+    results.append(("nc1_clean", n0 == 0, f"干净副本 baseline {n0} 条（须为 0）"))
+    print(f"[nc1_clean] 负向臂：{'[OK]' if n0 == 0 else '[NG]'} 干净副本 baseline {n0} 条（须为 0）")
+    print()
+    arm("nc1_tampered", "baseline", m_baseline, a_baseline)
+
+    # ---- NC-2 首次出现：新词必须报，旧词不许报
+    def a_fs_new(res, _dst):
+        # 断言走 items，不走 subject：subject 是截断过的一句话，
+        # 注入项若排在 8 个之后就会被「其余 N 个」吞掉 —— 那是渲染的预算，
+        # 不是检测器的结论，负控要判的是后者。
+        owner = next(
+            (c for c in kinds(res, "first_seen") if "zzz_probe_nc" in (c.get("items") or [])),
+            None,
+        )
+        if owner is None:
+            return False, "注入的新命令没有被报成首次出现（items 里找不到）"
+        return True, f"报出了：{owner['subject']}"
+
+    def a_fs_old(res, _dst):
+        names = [n for c in kinds(res, "first_seen") for n in (c.get("items") or [])]
+        if "git" in names:
+            return False, "历史已有的命令 git 被误报成首次出现"
+        return True, f"git 未被误报（本次首次出现共 {len(names)} 项）"
+
+    # 这一条不写进 results：zzz_probe_nc 在干净副本里必然不存在，是恒真的，
+    # 把恒真的检查计进通过率，就是让分母看起来比实际大（铁律 22 同族）。
+    clean_names = [n for c in kinds(clean, "first_seen") for n in (c.get("items") or [])]
+    print(f"[nc2_clean] 负向臂（不计入判定）：干净副本首次出现 {len(clean_names)} 项，"
+          f"zzz_probe_nc {'在' if 'zzz_probe_nc' in clean_names else '不在'}其中")
+    print()
+    arm("nc2_new", "first_seen", lambda p: m_first_seen_new(p, day), a_fs_new)
+    arm("nc2_old", "first_seen", lambda p: m_first_seen_old(p, day), a_fs_old)
+
+    # ---- NC-4 预期缺席：后半个钩子挂了
+    def a_absent(res, _dst):
+        hit = kinds(res, "absent")
+        if not hit:
+            return False, "删光了 post_tool_use 却没报缺席"
+        if not any("post_tool_use" in c["subject"] for c in hit):
+            return False, f"报了缺席但不是 post_tool_use：{hit[0]['subject']}"
+        return True, hit[0]["subject"]
+
+    n_abs = len(ck["absent"])
+    results.append(("nc4_clean", n_abs == 0, f"干净副本 absent {n_abs} 条（须为 0）"))
+    print(f"[nc4_clean] 负向臂：{'[OK]' if n_abs == 0 else '[NG]'} 干净副本 absent {n_abs} 条（须为 0）")
+    print()
+    arm("nc4_tampered", "absent", m_absent, a_absent)
+
+    # ---- NC-3 日内断层：挖 2 小时洞，须报出 >= 90 分钟
+    def a_gap(res, _dst):
+        best, best_s = 0.0, ""
+        for c in kinds(res, "gap"):
+            m = re.search(r"有 (\d+) 小时 (\d+) 分|有 (\d+) 分", c["subject"])
+            if not m:
+                continue
+            v = (int(m.group(1)) * 60 + int(m.group(2))) if m.group(1) else int(m.group(3))
+            if v > best:
+                best, best_s = float(v), c["subject"]
+        if best < GAP_ASSERT_MIN:
+            return False, f"最长断层 {best:g} 分钟 < 断言阈值 {GAP_ASSERT_MIN:g}"
+        return True, f"最长断层 {best:g} 分钟：{best_s}"
+
+    def a_gap_clean(_res, _dst):
+        ok = clean_max_gap < GAP_ASSERT_MIN
+        return ok, f"干净副本最长断层 {clean_max_gap:g} 分钟（须 < {GAP_ASSERT_MIN:g}）"
+
+    results.append(("nc3_clean", clean_max_gap < GAP_ASSERT_MIN,
+                    f"干净副本最长断层 {clean_max_gap:g} 分钟（须 < {GAP_ASSERT_MIN:g}）"))
+    print(f"[nc3_clean] 负向臂：{'[OK]' if clean_max_gap < GAP_ASSERT_MIN else '[NG]'} "
+          f"干净副本最长断层 {clean_max_gap:g} 分钟（须 < {GAP_ASSERT_MIN:g}）")
+    print()
+    arm("nc3_tampered", "gap", lambda p: m_gap(p, day), a_gap)
+
+    # ================= NC-5 A4：同格式真倒序仍红、非倒序改动不红 =================
+    clean_a4 = a4_count(run_audit(base))
+
+    def m_a4_inv(path, day):
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            lines = fh.readlines()
+        for k in range(len(lines) // 2, len(lines)):
+            if '"ts": "' in lines[k]:
+                lines[k] = re.sub(
+                    r'"ts": "[^"]+"', f'"ts": "{day}T00:00:01+08:00"', lines[k], count=1
+                )
+                break
+        else:
+            raise RuntimeError("找不到可改的 ts")
+        with open(path, "w", encoding="utf-8", newline="\n") as fh:
+            fh.writelines(lines)
+        return "把中段一条记录的 ts 改到当日 00:00:01（**同格式**，保留 +08:00）"
+
+    def m_a4_same(path, day):
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            lines = fh.readlines()
+        prev_ts = None
+        for k in range(len(lines) // 2, len(lines)):
+            m = re.search(r'"ts": "([^"]+)"', lines[k])
+            if not m:
+                continue
+            if prev_ts is None:
+                prev_ts = m.group(1)
+                continue
+            lines[k] = lines[k].replace(m.group(1), prev_ts, 1)
+            break
+        with open(path, "w", encoding="utf-8", newline="\n") as fh:
+            fh.writelines(lines)
+        return "把一条记录的 ts 改成与**前一条完全相同**（字节变了，但不构成倒序）"
+
+    def a_a4_inv(res, _d):
+        c = a4_count(res)
+        if c <= clean_a4:
+            return False, f"A4 倒序数没增加（{clean_a4} -> {c}）—— 同格式真倒序漏报"
+        return True, f"A4 {clean_a4} -> {c} 处（同格式真倒序，仍红）"
+
+    def a_a4_same(res, _d):
+        c = a4_count(res)
+        if c != clean_a4:
+            return False, f"非倒序改动把 A4 从 {clean_a4} 推到了 {c} —— 判据过敏"
+        return True, f"A4 仍为 {clean_a4} 处（非倒序改动不触发）"
+
+    results.append(("nc5_clean", True, f"干净副本（9 个日文件）A4 基线 {clean_a4} 处（WARN，非 PASS）"))
+    print(f"[nc5_clean] 副本口径（9 个日文件）A4 基线 {clean_a4} 处，状态 {dim(run_audit(base), 'A4')['status']}")
+    print()
+    arm("nc5_inv", "A4", lambda p: m_a4_inv(p, day), a_a4_inv, runner=run_audit)
+    arm("nc5_same", "A4", lambda p: m_a4_same(p, day), a_a4_same, runner=run_audit)
+
+    # ================= NC-6/7 规则 id 归一：旧号收敛、非规则号浮现 =================
+    cen0 = clean["meta"]["rule_census"]
+    _recs = list(W.iter_records(base))
+    _alias, _cur = W.load_rule_ids()
+    _rawset = {k for _, _, r in _recs for k in W._rules_raw(r)}
+    _touched = {_alias.get(k, k) for k in _rawset} & _cur
+    # 必须挑「副本里还没出现过」的旧号，否则注入它不会改变「原样 id 数」——
+    # 首版固定用 SEC-01，而 SEC-01 本就在这 9 个日文件里，于是断言必然假 NG。
+    _legacy_cand = [k for k, v in _alias.items() if k not in _rawset and v in _touched]
+    LEGACY = _legacy_cand[0] if _legacy_cand else None
+
+    def _cen(res):
+        return res["meta"]["rule_census"]
+
+    def m_id_legacy(path, day):
+        append_rec(
+            path,
+            {
+                "ts": bump_ts(max_ts(path, day), 3),
+                "type": "pre_tool_use",
+                "tool": "Bash",
+                "session": "nc-probe",
+                "host": "workbuddy",
+                "input": {"command": "git status", "content_len": 0},
+                "content_digest": "sha256:" + "0" * 64,
+                "rules_hit": [LEGACY],
+            },
+        )
+        return f"注入 1 条 rules_hit={LEGACY}（旧号，应归一到 {_alias.get(LEGACY)}）"
+
+    def m_id_unknown(path, day):
+        append_rec(
+            path,
+            {
+                "ts": bump_ts(max_ts(path, day), 4),
+                "type": "pre_tool_use",
+                "tool": "Bash",
+                "session": "nc-probe",
+                "host": "workbuddy",
+                "input": {"command": "git status", "content_len": 0},
+                "content_digest": "sha256:" + "0" * 64,
+                "rules_hit": ["ZZZ-99"],
+            },
+        )
+        return "注入 1 条 rules_hit=ZZZ-99（映射不到、也不在规则库里）"
+
+    def a_id_legacy(res, _d):
+        c = _cen(res)
+        if c["n_ids_raw"] != cen0["n_ids_raw"] + 1:
+            return False, f"原样 id 数应 +1，实际 {cen0['n_ids_raw']} -> {c['n_ids_raw']}"
+        if c["n_rules_touched"] != cen0["n_rules_touched"]:
+            return False, (
+                f"旧号没有收敛：涉及规则数 {cen0['n_rules_touched']} -> {c['n_rules_touched']}"
+                "（说明归一没生效，同一条规则被数成两条）"
+            )
+        return True, (
+            f"原样 id {cen0['n_ids_raw']}->{c['n_ids_raw']}，"
+            f"涉及规则仍 {c['n_rules_touched']} 条（旧号已收敛）"
+        )
+
+    def a_id_unknown(res, _d):
+        c = _cen(res)
+        if "ZZZ-99" not in c["non_rule"]:
+            return False, f"未知号没有浮现为非规则号：{c['non_rule']}"
+        if c["n_rules_touched"] != cen0["n_rules_touched"]:
+            return False, f"未知号被并进了规则分母：{cen0['n_rules_touched']} -> {c['n_rules_touched']}"
+        return True, f"非规则号 {c['non_rule']}（未并入规则分母 {c['n_rules_touched']} 条）"
+
+    arm("nc6_legacy", "id", lambda p: m_id_legacy(p, day), a_id_legacy)
+    arm("nc7_unknown", "id", lambda p: m_id_unknown(p, day), a_id_unknown)
+
+    # ================= NC-8/9 repeat：一次不报、三次才报 =================
+    def _add_cmd(path, day, cmd, n, offset):
+        for i in range(n):
+            append_rec(
+                path,
+                {
+                    "ts": bump_ts(max_ts(path, day), offset + i),
+                    "type": "pre_tool_use",
+                    "tool": "Bash",
+                    "session": "nc-probe",
+                    "host": "workbuddy",
+                    "input": {"command": cmd, "content_len": 0},
+                    "content_digest": "sha256:" + "0" * 64,
+                },
+            )
+
+    def a_rep_once(res, _d):
+        rep = [c for c in kinds(res, "repeat") if "zzz_rep_probe" in (c.get("items") or [])]
+        fs = [c for c in kinds(res, "first_seen") if "zzz_rep_probe" in (c.get("items") or [])]
+        if rep:
+            return False, "只出现 1 次就被报成 repeat —— 门槛失效"
+        if not fs:
+            return False, "只出现 1 次却既没报 repeat 也没报 first_seen —— 漏报"
+        return True, "1 次不报 repeat，仍归 first_seen"
+
+    def a_rep_thrice(res, _d):
+        rep = [c for c in kinds(res, "repeat") if "zzz_rep_probe" in (c.get("items") or [])]
+        fs = [c for c in kinds(res, "first_seen") if "zzz_rep_probe" in (c.get("items") or [])]
+        if not rep:
+            return False, "出现 3 次却没报 repeat"
+        if fs:
+            return False, "同一条同时占了 repeat 和 first_seen 两份注意力预算"
+        return True, rep[0]["subject"]
+
+    arm("nc8_once", "repeat", lambda p: (_add_cmd(p, day, "zzz_rep_probe", 1, 10), "注入 1 次 zzz_rep_probe")[1], a_rep_once)
+    arm("nc9_thrice", "repeat", lambda p: (_add_cmd(p, day, "zzz_rep_probe", 3, 20), "注入 3 次 zzz_rep_probe")[1], a_rep_thrice)
+
+    # ================= NC-10/11/12 rule_pair：顺序成立报、自配不报、超窗不报 =================
+    _pd, _pe, _solo, _ = W.rule_pair_index(_recs)
+    _cand = [
+        (a, b)
+        for a in _solo
+        for b in _solo
+        if a != b and _solo[a] >= 3 and _solo[b] >= 3 and (a, b) not in _pd
+    ]
+    if not _cand:
+        results.append(("nc10_pair", False, "找不到从未共现过的规则对，本臂不可判定"))
+        print("[nc10_pair] 找不到候选规则对 —— 本臂不可判定（不是通过）")
+        cand_a = cand_b = None
+    else:
+        cand_a, cand_b = _cand[0]
+
+    def _add_rule(path, day, rule, offset, session):
+        append_rec(
+            path,
+            {
+                "ts": bump_ts(max_ts(path, day), offset),
+                "type": "pre_tool_use",
+                "tool": "Bash",
+                "session": session,
+                "host": "workbuddy",
+                "input": {"command": "git status", "content_len": 0},
+                "content_digest": "sha256:" + "0" * 64,
+                "rules_hit": [rule],
+            },
+        )
+
+    def a_pair(res, _d):
+        hit = [c for c in kinds(res, "rule_pair") if list(c.get("items") or []) == [cand_a, cand_b]]
+        if not hit:
+            return False, f"注入了 {cand_a} -> {cand_b}（1 分钟内）却没报组合"
+        return True, hit[0]["subject"]
+
+    def a_pair_self(res, _d):
+        hit = [c for c in kinds(res, "rule_pair") if list(c.get("items") or []) == [cand_a, cand_a]]
+        if hit:
+            return False, "同一规则自己配自己也被报成了组合"
+        return True, "A->A 不报（自配不是组合）"
+
+    def a_pair_far(res, _d):
+        hit = [c for c in kinds(res, "rule_pair") if list(c.get("items") or []) == [cand_a, cand_b]]
+        if hit:
+            return False, "间隔 30 分钟的 A->B 被当成组合 —— 时间窗失效"
+        return True, "间隔 30 分钟不报（窗口 5 分钟）"
+
+    if cand_a and cand_b:
+        arm(
+            "nc10_pair",
+            "rule_pair",
+            lambda p: (
+                _add_rule(p, day, cand_a, 30, "nc-sess-1"),
+                _add_rule(p, day, cand_b, 31, "nc-sess-1"),
+                f"注入 {cand_a} -> {cand_b}，同 session 间隔 1 秒",
+            )[2],
+            a_pair,
+        )
+        arm(
+            "nc11_self",
+            "rule_pair",
+            lambda p: (
+                _add_rule(p, day, cand_a, 40, "nc-sess-2"),
+                _add_rule(p, day, cand_a, 41, "nc-sess-2"),
+                f"注入 {cand_a} -> {cand_a}，同 session 间隔 1 秒",
+            )[2],
+            a_pair_self,
+        )
+        arm(
+            "nc12_far",
+            "rule_pair",
+            lambda p: (
+                _add_rule(p, day, cand_a, 50, "nc-sess-3"),
+                _add_rule(p, day, cand_b, 50 + 1800, "nc-sess-3"),
+                f"注入 {cand_a} -> {cand_b}，同 session 间隔 30 分钟",
+            )[2],
+            a_pair_far,
+        )
+
+    # ================= NC-13 盲区自述自检：漏报一个检测器必须抛 =================
+    try:
+        W._coverage_selfcheck(
+            {k: {"status": W.RAN} for k in W.COVERAGE_KEYS if k != "gap"}
+        )
+        ok_missing = False
+        msg_missing = "漏报 gap 的覆盖状态却没有抛 —— 盲区自述会说谎"
+    except ValueError as e:
+        ok_missing = True
+        msg_missing = f"漏报即抛：{e}"
+    try:
+        W._coverage_selfcheck({k: {"status": W.RAN} for k in W.COVERAGE_KEYS})
+        ok_valid = True
+        msg_valid = "完整申报通过"
+    except Exception as e:  # noqa: BLE001
+        ok_valid = False
+        msg_valid = f"完整申报反而抛了：{e}"
+    results.append(("nc13_cov", ok_missing and ok_valid, msg_missing + "｜" + msg_valid))
+    print(f"[nc13_cov] {'[OK]' if ok_missing and ok_valid else '[NG]'} {msg_missing}｜{msg_valid}")
+    print()
+
+    # ---- 汇总
+    print("=" * 72)
+    bad = [r for r in results if not r[1]]
+    for name, ok, detail in results:
+        print(f"  {'[OK]' if ok else '[NG]'}  {name:<14} {detail[:88]}")
+    print("=" * 72)
+    print(f"结论：{len(results) - len(bad)}/{len(results)} 通过")
+    print(f"副本保留（自行清理）：{work}")
+    return 0 if not bad else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
