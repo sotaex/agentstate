@@ -563,7 +563,18 @@ def detect_rule_pairs(
     pair_days, pair_ev, solo, n_sess = rule_pair_index(recs, gap_min)
     days = sorted({d for per in pair_days.values() for d in per})
     if not days:
-        days = sorted({d for _, d, _, _ in recs})
+        # ★ 这条回退分支是**没有任何配对**时才会走的：新装机、空账本、
+        #   规则字段被抹掉、或者一天里根本没触发过规则。
+        #   它原来写的是 `for _, d, _, _ in recs` —— 而 recs 的元素是
+        #   `(day, lineno, rec)` **三元组**。于是只要走到这里就
+        #   `ValueError: not enough values to unpack (expected 4, got 3)`，
+        #   整个巡检 rc=1、**一条输出都没有**。
+        #
+        #   为什么一直没被发现：干净账本永远有配对（实测 11 组），
+        #   这条分支**一次都没被执行过**。红队 R5（把 ts 全抹成空串）
+        #   第一次把它踩出来 —— 而「新装的机器上第一次跑」会踩到同一个地方，
+        #   只是没人把它和红队联系起来。
+        days = sorted({d for d, _ln, _r in recs})
     tail = set(days[-recent:]) if recent > 0 else set(days)
 
     clues: List[Clue] = []
@@ -616,17 +627,18 @@ def detect_rule_pairs(
     return clues, stats
 
 
-def detect_gap(
-    recs: List[Tuple[str, int, Dict[str, Any]]],
-    threshold_min: float = 30.0,
-    recent: int = 3,
-) -> List[Clue]:
-    """Q3：哪段时间是空的 —— 同一天内两条记录间隔超过阈值。
+def _gap_series(
+    recs: List[Tuple[str, int, Dict[str, Any]]]
+) -> Tuple[Dict[str, List[Tuple[datetime, int]]], int]:
+    """把记录按天摊成 `(时间, 行号)`，并回报**有多少条真的带可解析 ts**。
 
-    与 B-1「缺日」分工：B-1 是**跨天**（哪天整个日文件不存在），
-    这里是**日内**（那天中间断了两小时）。不同粒度，不重叠。
+    ★ 第二个返回值不是装饰：`detect_gap` 用「没有线索」判断「查了，没有」，
+      而「一条 ts 都不可解析」和「ts 都在、只是间隔不够」在返回值上**长得一样**。
+      没有这个分母，检测器就会把「没查成」报成「查了没有」。
+      所以摊平逻辑与分母统计放在同一处（R4），不许各写一份。
     """
     per_day: Dict[str, List[Tuple[datetime, int]]] = collections.defaultdict(list)
+    with_ts = 0
     for day, lineno, rec in recs:
         if rec.get("__unparsed__"):
             continue
@@ -643,6 +655,27 @@ def detect_gap(
         if dt.tzinfo is not None:
             dt = dt.replace(tzinfo=None)
         per_day[day].append((dt, lineno))
+        with_ts += 1
+    return per_day, with_ts
+
+
+def gap_census(recs: List[Tuple[str, int, Dict[str, Any]]]) -> Dict[str, int]:
+    """gap 检测的分母：`with_ts` 为 0 ⇒ 这一项只能报「判不了」，不能报「没有」。"""
+    per_day, with_ts = _gap_series(recs)
+    return {"with_ts": with_ts, "total": len(recs), "days": len(per_day)}
+
+
+def detect_gap(
+    recs: List[Tuple[str, int, Dict[str, Any]]],
+    threshold_min: float = 30.0,
+    recent: int = 3,
+) -> List[Clue]:
+    """Q3：哪段时间是空的 —— 同一天内两条记录间隔超过阈值。
+
+    与 B-1「缺日」分工：B-1 是**跨天**（哪天整个日文件不存在），
+    这里是**日内**（那天中间断了两小时）。不同粒度，不重叠。
+    """
+    per_day, _with_ts = _gap_series(recs)
 
     days = sorted(per_day)
     tail = set(days[-recent:]) if recent > 0 else set(days)
@@ -1056,6 +1089,33 @@ BLIND_SPOTS = (
         "账本是否被整体替换",
         "换掉整天文件并同步改 day_manifest 的 size 与 hash，本工具看不出来",
     ),
+    (
+        "absent 的基线来自账本本身",
+        "「某个钩子应该出现」这条判断，用的是**前 7 天的账本**算出来的中位数。"
+        "删得比窗口更长，基线就跟着挪 —— 那个钩子「曾经存在」这件事从数据里"
+        "消失，于是没有任何东西能发现它消失。这是**无界**盲区：删 3 天没事，"
+        "删 8 天就干净了。redteam_c2.py R6 复现（对照 R7：不重算锚时 anchor 立刻报）。",
+    ),
+    (
+        "锚只钉 size 与末条 hash",
+        "anchor 比的是「文件字节数」和「最后一条记录的 hash」。改中间记录、"
+        "长度不变、hash 字段没动 ⇒ anchor 零线索。redteam_c2.py R8 复现"
+        "（平移 5 万行 ts，anchor 一声不响）。这一条 C-1 的 A1 能抓，"
+        "所以是「C-2 单独看不见，整体不瞎」—— 两句话不许互换。",
+    ),
+    (
+        "连链带锚一起重算就没有检测点",
+        "redteam_c2.py R9 实测：删掉某 type 全期记录 ＋ 按文件重算链 ＋ 重算日锚 "
+        "⇒ C-1 的 A1/A2/A3 全 PASS、C-2 的 anchor/absent 全静。"
+        "这是实测不是推断。补法只有一条：账本之外的第二份记录（L2 外部锚），"
+        "今天没有。任何说「防篡改」的话在这里被证伪。",
+    ),
+    (
+        "删掉一整天在 A1/A2 上天生无痕",
+        "链是按文件的（auditor.check_content 每个文件 prev_full 重起），"
+        "所以整天文件消失时剩下的文件链一点都没断。只有 A3 的日清单管得着 —— "
+        "那是 A3 存在的唯一理由，也是它的单点。",
+    ),
 )
 
 
@@ -1091,6 +1151,17 @@ def render_coverage(coverage: Dict[str, Dict[str, str]] | None) -> List[str]:
         lines.append(f"  {k}：{mark}{('（' + note + '）') if note else ''}")
     lines.append("")
     return lines
+
+
+def plain(text: str) -> str:
+    """去掉 `**强调**` 的星号。
+
+    ★ 这些字符串同时在三个地方被读：终端纯文本、JSON、以及被别的脚本摘走。
+      写 `**` 只对 Markdown 有效，进纯文本就是两个多余字符 ——
+      实测报告里印出过「这是**无界**盲区」，读起来像排版事故。
+      同一个字符串被多个消费者读，就得挑**每个消费者都成立**的字面。
+    """
+    return text.replace("**", "")
 
 
 def render(
@@ -1342,7 +1413,19 @@ def main(argv: List[str] | None = None) -> int:
 
     got = detect_gap(recs, threshold_min=args.gap_min, recent=args.recent)
     clues += got
-    coverage["gap"] = {"status": RAN if got else EMPTY, "note": f"阈值 {args.gap_min:g} 分钟"}
+    # ★ 覆盖状态不能只看「有没有线索」。一条 ts 都不可解析时，
+    #   报「查了，没有」是把**没查成**说成了**查了没有** —— 零与不可判同貌。
+    #   红队 R5 现场：把 ts 全抹成空串，修完崩溃之后 gap 报的正是「查了，没有」。
+    gc = gap_census(recs)
+    coverage["gap"] = {
+        "status": (
+            UNDECIDABLE if gc["with_ts"] == 0 else (RAN if got else EMPTY)
+        ),
+        "note": (
+            f"阈值 {args.gap_min:g} 分钟；带可解析 ts 的记录 {gc['with_ts']:,} 条"
+            f"／共 {gc['total']:,} 条"
+        ),
+    }
 
     rp_clues, pair_stats = detect_rule_pairs(
         recs,
@@ -1409,7 +1492,7 @@ def main(argv: List[str] | None = None) -> int:
         )
         return 0
 
-    print(render(clues, meta, args.recent, cap=args.cap, coverage=coverage))
+    print(plain(render(clues, meta, args.recent, cap=args.cap, coverage=coverage)))
 
     print(
         f"[分母] 记录 {len(recs)}｜不可解析 {unparsed}｜"

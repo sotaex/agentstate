@@ -67,6 +67,7 @@ SOURCES: List[str] = [
     os.path.join(LINE_C, "onepager.py"),
     os.path.join(LINE_C, "corrections.py"),
     os.path.join(LINE_C, "redteam.py"),
+    os.path.join(LINE_C, "redteam_c2.py"),
 ]
 
 

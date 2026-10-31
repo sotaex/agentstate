@@ -66,7 +66,8 @@ CHECKS: List[Tuple[str, List[str], int]] = [
     ("负控 evidence 18 臂", [os.path.join(OUTPUT, "_p_evid_negctl.py")], 0),
     ("负控 C-2 30 臂", [os.path.join(OUTPUT, "_p_c2_negctl.py")], 0),
     ("负控 更正端到端 11 臂", [os.path.join(OUTPUT, "_p_corr_e2e.py")], 0),
-    ("红队 6 臂", [os.path.join(LINE_C, "redteam.py")], 0),
+    ("红队 C-1 6 臂", [os.path.join(LINE_C, "redteam.py")], 0),
+    ("红队 C-2 5 臂", [os.path.join(LINE_C, "redteam_c2.py")], 0),
 ]
 
 
