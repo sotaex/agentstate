@@ -160,7 +160,7 @@
   "tools/mk_sound.py": "sha256:333edfaa17a96f3fe12be3fc9dddd2adf6e442914566fef32072438c1459c2d6",
   "tools/probe_host.py": "sha256:5cfbb646e1af7528809b6c64b722561ce80ab3fbf04d73c5163eab722145a165",
   "tools/tray.ps1": "sha256:deac9b6e7d006b3b2cbd991e15892781349241cfcf333c97a4e2f014a5e4ad1c",
-  "tools/verify_chain.py": "sha256:aedb234437dca17d6f8a04fc29c0d5871c50648759fb69c50ab53355cab3a2bd",
+  "tools/verify_chain.py": "sha256:e46f3ffd9079446fa9c20cbc26a5880680cc8b568198d1a9bf636a11be82ec91",
   "tools/verify_event_types.py": "sha256:ee8b611e2672ef6c7ca2c7468bdd7c3b902b06f0482b0cbd4de5da3cde48c4c2",
   "tools/verify_namespaces.py": "sha256:85d6ffb905dcf5abffb453ca5b1992f02b3aeb63f93aaad39bc6dcf3fb15e0b0",
   "transcript_reader.py": "sha256:c0ce99c5bdfb255f170ca744c011ae64ceb9569d1c9dd8efc1a2c096ff89dc1c",

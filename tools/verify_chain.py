@@ -204,6 +204,13 @@ def main():
         total_records += total
         tok, tmsg = verify_tail(fp)
 
+        # ★ 0.64（BD-1）：`tail_fail` 的累加点**必须在 `json_mode` 的早退之前**。
+        #   此前它写在下面人读分支里，机读通道 `continue` 一跳过去就再也不加——
+        #   于是同一份被截断的账本，人读 rc=2、机读 rc=0。两条通道各算一遍同一个事实，
+        #   就是本项目的第一顽症；这里只留**一个累加点**。
+        if not tok:
+            tail_fail += 1
+
         for label, count in by_class.items():
             total_by_class[label] += count
         unexplained += by_class.get("TAMPERED", 0) + by_class.get("EDITED", 0) + by_class.get("MISLINKED", 0)
@@ -231,7 +238,6 @@ def main():
             print("    %s L%d [%s] %s %s %s" % (tag, ln, tool, ts, note, ""))
 
         if not tok:
-            tail_fail += 1
             print("    TAIL-TAMPERED: %s" % tmsg)
 
         if not is_current and not full_history:
@@ -241,13 +247,19 @@ def main():
                 history_notes.append("%s: %d unexplained (legacy/transition — not gated)" % (day, has_unexp))
 
     # manifest-driven deletion check
+    # ★ 0.64（BD-1 第二面）：这一段的 `print` 此前**在机读模式下也照样输出**，
+    #   于是 `--json` 的 stdout 里混进一行人话 ⇒ 调用方 `json.loads(stdout)` 直接抛。
+    #   机器通道只能有一个出口：文字进 `missing_days`，打印机只服务人读通道。
+    missing_days = []
     for day in sorted(manifest):
         f = os.path.join(str(target), day)
         gz = os.path.join(str(target), os.path.splitext(day)[0] + ".jsonl.gz")
         if not os.path.isfile(f) and not os.path.isfile(gz):
-            print("TAIL-TAMPERED  %s  day file MISSING" % day)
+            missing_days.append(day)
             tail_fail += 1
             unexplained += 1
+            if not json_mode:
+                print("TAIL-TAMPERED  %s  day file MISSING" % day)
 
     # ★ 0.35.2：**空链不许报 clean**。
     #   为什么（2026-10-06 真实用户验收实测）：`antinel verify` 只验**当前目录**
@@ -264,6 +276,7 @@ def main():
             report["unexplained_count"] = unexplained
             report["explained_count"] = explained
             report["tail_failures"] = tail_fail
+            report["missing_days"] = missing_days
             report["rc"] = 4
             print(json.dumps(report, ensure_ascii=False, indent=1, default=dict))
             return 4
@@ -277,7 +290,11 @@ def main():
         report["unexplained_count"] = unexplained
         report["explained_count"] = explained
         report["tail_failures"] = tail_fail
-        report["rc"] = 2 if unexplained else (3 if explained else 0)
+        report["missing_days"] = missing_days
+        # ★ 0.64（BD-1 第三面）：出口码只算一处。此前这里漏了 `tail_fail`
+        #   ⇒ 「账本被截断」在机读通道上是 rc=0（机器看不见，人看得见）。
+        #   人读分支的 `rc = max(rc, 2)` 与本行现在是同一个判据的两个出口。
+        report["rc"] = 2 if (unexplained or tail_fail) else (3 if explained else 0)
         print(json.dumps(report, ensure_ascii=False, indent=1, default=dict))
         return report["rc"]
 
