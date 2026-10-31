@@ -280,19 +280,32 @@ def check_monotonic(s: Snapshot) -> Finding:
     bad: List[Tuple[str, int]] = []
     checked = 0
     unparsed = 0
+    # ★ 根本没有 ts 字段的记录。第一版它**既不计入 checked，也不计入 unparsed**
+    #   —— 于是「共验 N 条」与页脚的「记录 M 条」差了一个没人解释的数
+    #   （真账本实测 167548 vs 167581，差 33）。报数必须能对账：
+    #   差额本身就是一个数，得说出来，否则读者只能猜那 33 条去哪了。
+    #   ★ 不可解析的 JSON 行也没有 ts，所以它们落在这一档 —— 这是对的：
+    #     「这行没有 ts」是事实，不管它是因为没有这个字段还是因为整行读不出来。
+    no_ts = 0
     for path in s.files:
         last = None
         for ln, rec in s.recs[path]:
             dt = tsnorm.parse_ts(rec.get("ts"))
             if dt is None:
-                if rec.get("ts") is not None:
+                if rec.get("ts") is None:
+                    no_ts += 1
+                else:
                     unparsed += 1
                 continue
             checked += 1
             if last is not None and dt < last:
                 bad.append((_day(path), ln))
             last = dt
-    tail = f"（{unparsed} 条 ts 不可解析，未参与）" if unparsed else ""
+    tail = ""
+    if unparsed:
+        tail += f"（{unparsed} 条 ts 不可解析，未参与）"
+    if no_ts:
+        tail += f"（{no_ts} 条没有 ts 字段，未参与）"
     if bad:
         return Finding(
             "A4 时间单调",
@@ -331,6 +344,12 @@ def check_total(s: Snapshot, declare: Optional[int]) -> Finding:
 #:
 #: ★ 这些不是待修的 bug，是「内部自洽检查」这个定位的必然边界。修不掉，
 #:   只能标清楚。谁要说「防篡改」，先让他回答这里的第一条。
+#: ★ 这一段里**不许写具体数字**。第一版写的是「实测 493 处倒序」，而同一个
+#:   数字在同一份报告里还有另一处（A4 那一行，实时算的，当天是 495）——
+#:   读者看到两个数对不上，只会得出一个结论：这份报告自己都没核过。
+#:   更贵的是它会天天漂：明天 A4 算出来是 497，常量还写着 493，
+#:   而它恰好在「我看不见什么」这一节 —— 那一节的**唯一价值就是准确**。
+#:   要数字就写「当日实测值见 A4 那一行」，让报告里只有一处真源。
 BLIND_SPOTS = (
     ("A1/A2 不抗整链重算",
      "A1 是自己算的 hash 跟自己比、A2 是 prev 跟上一条 hash 比。改完内容把整条链"
@@ -340,7 +359,8 @@ BLIND_SPOTS = (
      "day_manifest.json 不存在时 A3 返回 SKIP（不适用），而 SKIP 不进退出码。"
      "redteam.py R4 复现：删掉清单 ⇒ A3=SKIP、rc=0 ——「删了证据」与「本来就没有」同貌。"),
     ("A4 能被「修好」掩盖",
-     "A4 在真账本上天天 WARN（实测 493 处倒序，属并发排队）。把 ts 排成递增就能让它"
+     "A4 在真账本上天天 WARN（属并发排队；当日实测值见 A4 那一行，这里不写死数字）。"
+     "把 ts 排成递增就能让它"
      "变 PASS —— **让报告变绿与抹掉真实性质偏离是同一个动作**。redteam.py R3 复现。"),
     ("A5 依赖账本之外的声明",
      "删记录只有 A5 能抓，但 A5 要 --declare。不给声明时 A5=SKIP，删记录不可见。"

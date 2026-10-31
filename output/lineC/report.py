@@ -123,6 +123,11 @@ def produce(root: str, out_path: str, *,
         "read_at": b.read_at,
         "evidence": b.count(),
         "undecidable": b.undecidable,
+        # ★ 「不适用」必须单独出一个键。它和 undecidable 是两件事：
+        #   没跑成＝不知道有没有；不适用＝问了，这把尺子量不到。
+        #   侧车是**机器通道** —— 页面上分了两块、机器通道里合成一个键，
+        #   等于在唯一能被程序读的地方重新犯一次「零与不可判同貌」。
+        "not_applicable": b.not_applicable,
         "blind": list(b.blind),
         "denominators": dict(b.denominators),
         "citecheck_rc": info["citecheck_rc"],
@@ -212,6 +217,28 @@ def _selfcheck() -> int:
                 bad("sidecar 的 report_id 在报告里找不到 —— 两者对不上就核不了")
             if man.get("code_fp_short") not in html:
                 bad("sidecar 的代码组指纹与页脚不一致")
+
+        # ---- 「不适用」必须单独出现在 sidecar 里 ----
+        # 侧车是唯一能被程序读的通道。页面上把「不适用」和「没跑成」分成两块，
+        # 机器通道里却只有一个 undecidable 键 —— 那等于在最不该同貌的地方
+        # 重新犯一次「零与不可判同貌」，而且没人会看见（没有读者）。
+        b3 = E.Bundle(read_at="2026-10-12 12:00:00", root=root)
+        b3.evidence.append(E.Evidence(
+            eid="OK-0002", claim="照常一条", strength=E.K_LOG_ONLY,
+            cites=(E.Cite("2026-10-12", 1),), source="t",
+            read_at="2026-10-12 12:00:00"))
+        b3.not_applicable.append("A5 总量 不适用：未给 --declare")
+        out_na = os.path.join(work, "na.html")
+        ok3, _i3 = produce(root, out_na, bundle=b3)
+        if not ok3:
+            bad("带「不适用」的合法报告没落盘：%s" % _i3.get("error"))
+        else:
+            with open(out_na + ".manifest.json", "r", encoding="utf-8") as fh:
+                man3 = json.load(fh)
+            if "not_applicable" not in man3:
+                bad("sidecar 没有 not_applicable 键 —— 机器通道里「不适用」消失了")
+            elif not man3["not_applicable"]:
+                bad("sidecar 的 not_applicable 是空的 —— 这条事实被丢了")
     finally:
         import shutil
         shutil.rmtree(work, ignore_errors=True)
@@ -220,8 +247,8 @@ def _selfcheck() -> int:
         print("[自检失败] %s" % f, file=sys.stderr)
     if fails:
         return 1
-    print("[自检] 四条全部生效（回指越界不落盘／不留残文件／合法即落盘／"
-          "sidecar 与页脚对得上）")
+    print("[自检] 五条全部生效（回指越界不落盘／不留残文件／合法即落盘／"
+          "sidecar 与页脚对得上／不适用进 sidecar）")
     return 0
 
 

@@ -47,6 +47,10 @@ A_EID = "data-eid"
 A_STRENGTH = "data-strength"
 A_CITES = "data-cites"
 A_RULE = "data-rule"
+#: 上游判定状态（PASS／WARN／FAIL）。**不是强度档**：强度档说「这条结论有多硬」，
+#: 状态说「上游核它的结果是什么」。两者必须分开 —— auditor 的 PASS 与 WARN
+#: 在强度词表里是同一个词（「已核对」），只有状态能把它们分开。
+A_STATUS = "data-status"
 
 #: 证据条目的容器 class。渲染层必须给它。
 CLS_EV = "ev"
@@ -58,15 +62,16 @@ CLS_BADGE = "badge"
 class Claim:
     """一条从产物里抽出来的断言。"""
 
-    __slots__ = ("eid", "strength", "cites", "rule_id", "text")
+    __slots__ = ("eid", "strength", "cites", "rule_id", "text", "status")
 
     def __init__(self, eid: str, strength: str, cites: List[Tuple[str, int]],
-                 rule_id: str = "", text: str = "") -> None:
+                 rule_id: str = "", text: str = "", status: str = "") -> None:
         self.eid = eid
         self.strength = strength
         self.cites = cites
         self.rule_id = rule_id
         self.text = text
+        self.status = status
 
     def __repr__(self) -> str:
         return "Claim(%s, %s, %d cites)" % (self.eid, self.strength, len(self.cites))
@@ -128,6 +133,7 @@ class _Extractor(HTMLParser):
             strength = (a.get(A_STRENGTH) or "").strip()
             cites_raw = (a.get(A_CITES) or "").strip()
             rule_id = (a.get(A_RULE) or "").strip()
+            status = (a.get(A_STATUS) or "").strip()
             missing = [n for n, v in ((A_EID, eid), (A_STRENGTH, strength),
                                       (A_CITES, cites_raw)) if not v]
             if missing:
@@ -140,7 +146,7 @@ class _Extractor(HTMLParser):
             for e in errs:
                 self.contract.append("证据 %s 的 %s" % (eid, e))
             self._cur = {"eid": eid, "strength": strength, "cites": cites,
-                         "rule": rule_id, "broken": False}
+                         "rule": rule_id, "status": status, "broken": False}
 
         if CLS_BADGE in cls:
             self._in_badge += 1
@@ -159,7 +165,8 @@ class _Extractor(HTMLParser):
                 if not self._cur.get("broken"):
                     self.claims.append(Claim(
                         eid=self._cur["eid"], strength=self._cur["strength"],
-                        cites=self._cur["cites"], rule_id=self._cur["rule"]))
+                        cites=self._cur["cites"], rule_id=self._cur["rule"],
+                        status=self._cur.get("status", "")))
                 self._cur = None
         if self._in_badge and tag in ("span", "div"):
             self._in_badge -= 1
@@ -221,6 +228,21 @@ def check(html_text: str, root: str, expect_n: Optional[int] = None
             "页面上出现 %d 个「%s」徽标，但只有 %d 条证据标了 held ⇒ 有一条是"
             "手写的、背后没有证据" % (n_held_word, E.WORD[E.K_HELD], n_held_claim))
 
+    # 行为判据：上游判 WARN 的条目，页面上必须有同样多个带「偏离」的徽标。
+    # 防的是「性质偏离被印成通过」—— PASS 与 WARN 在强度词表里是同一个词
+    # （「已核对」），只有徽标能把它们分开。真账本上 A3（历史缺锚）与
+    # A4（495 处倒序）都是 WARN，第一版两条都印成绿色「已核对」。
+    # ★ 这条判据的边界，写出来而不是藏着：它只数个数，不建「哪条对应哪个徽标」
+    #   的映射（那要靠文档顺序，而 HTMLParser 给出的顺序不保证等于渲染顺序）。
+    #   所以它能抓「一条都没标」，抓不到「两条标反了」。
+    n_warn_word = sum(1 for b in badges if "偏离" in b)
+    n_warn_claim = sum(1 for c in claims if c.status == "WARN")
+    if n_warn_word != n_warn_claim:
+        bad.append(
+            "上游判 WARN 的有 %d 条，页面上带「偏离」的徽标只有 %d 个 ⇒ "
+            "性质偏离被印成了通过（两者在强度词表里是同一个词，只能靠徽标分开）"
+            % (n_warn_claim, n_warn_word))
+
     if expect_n is not None and len(claims) != expect_n:
         bad.append(
             "产物里抽出 %d 条证据，上游有 %d 条 ⇒ 渲染丢了 %d 条"
@@ -232,6 +254,8 @@ def check(html_text: str, root: str, expect_n: Optional[int] = None
         "n_badges": len(badges),
         "n_held_word": n_held_word,
         "n_held_claim": n_held_claim,
+        "n_warn_word": n_warn_word,
+        "n_warn_claim": n_warn_claim,
         "by_strength": _by_strength(claims),
     }
     return bad, notes, stats
@@ -247,8 +271,9 @@ def _by_strength(claims: List[Claim]) -> Dict[str, int]:
 def _selfcheck() -> int:
     """量具自检：**先证明这把尺子会红，再拿它量报告。**
 
-    五条：①合规产物通过 ②越界回指必红 ③缺契约属性必报（不是通过）
-          ④缺 rule 的 held 必红 ⑤手写的「挡下」必红
+    七条：①合规产物通过 ②越界回指必红 ③缺契约属性必报（不是通过）
+          ④缺 rule 的 held 必红 ⑤手写的「挡下」必红 ⑥空产物必报不可判
+          ⑦WARN 不许印成和 PASS 一样的徽标（正反两向都验）
     """
     import tempfile
     fails: List[str] = []
@@ -287,6 +312,22 @@ def _selfcheck() -> int:
         if not any("手写" in x for x in bad):
             fails.append("手写的「挡下」徽标没被报错")
 
+        # ⑦ WARN 被印成通过（与 PASS 同徽标）必须报错。
+        #    这条是**反向对照**：正向的「WARN 有标」也要过，否则修法是「全标偏离」。
+        warn_ok = ('<div class="ev" data-eid="A1" data-strength="checked" '
+                   'data-status="WARN" data-cites="2026-11-01:1">'
+                   '<span class="badge">已核对·有偏离</span></div>')
+        bad, _, _ = check(warn_ok, d)
+        if any("偏离" in x for x in bad):
+            fails.append("WARN 已正确标注却被报错：%s" % bad)
+        warn_flat = ('<div class="ev" data-eid="A1" data-strength="checked" '
+                     'data-status="WARN" data-cites="2026-11-01:1">'
+                     '<span class="badge">已核对</span></div>')
+        bad, _, _ = check(warn_flat, d)
+        if not any("偏离" in x for x in bad):
+            fails.append("WARN 被印成和 PASS 一样的徽标却没被报错"
+                         "—— 性质偏离会被读成通过")
+
         empty = "<html><body><p>本次未发现异常</p></body></html>"
         bad, notes, _ = check(empty, d, expect_n=3)
         if bad:
@@ -301,7 +342,8 @@ def _selfcheck() -> int:
         print("[自检失败] %s" % f, file=sys.stderr)
     if fails:
         return 1
-    print("[自检] 六条全部生效（合规／越界／缺契约／缺rule／手写挡下／空产物不可判）")
+    print("[自检] 七条全部生效（合规／越界／缺契约／缺rule／手写挡下／空产物不可判／"
+          "WARN 不许印成通过）")
     return 0
 
 

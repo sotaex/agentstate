@@ -144,6 +144,14 @@ class Evidence:
     rule_id: str = ""
     blind: str = ""
     items: Tuple[str, ...] = ()
+    #: 上游判定的原始状态（auditor 的 PASS／WARN／FAIL／SKIP）。
+    #:
+    #: ★ 为什么必须有这个字段：强度词表里 PASS 与 WARN 是**同一个词**（「已核对」），
+    #:   但它们对读者的意思相反 —— 一个是「核过了，一致」，一个是「核过了，
+    #:   有性质偏离，只是不算篡改」。真账本上 A3（历史缺锚）与 A4（495 处倒序）
+    #:   都是 WARN，第一版把两条都印成绿色「已核对」——读者一眼扫过去，
+    #:   而那正是最该停一下的两条。**把偏离印成通过，是把一个已知事实抹掉。**
+    status: str = ""
 
     def __post_init__(self) -> None:
         if not self.claim.strip():
@@ -187,6 +195,12 @@ class Bundle:
     evidence: List[Evidence] = field(default_factory=list)
     #: 算不出来的部分。**必须与「没有」分开**：这是盲区，不是结论。
     undecidable: List[str] = field(default_factory=list)
+    #: 「不适用」（工具明确判了 SKIP）。**与 undecidable 分开**：
+    #:   没跑成   ＝ 不知道有没有（工具坏了／起不来／超时）
+    #:   不适用   ＝ 问了，但这把尺子量不到这件事（例如没给 --declare）
+    #: 合成一句「没有跑成」，就把一条**已知的适用边界**说成了**未知的故障**——
+    #: 方向正好相反：把确定性说成了不确定性。真账本上 A5 就是这样被误述的。
+    not_applicable: List[str] = field(default_factory=list)
     #: 分母：每个数字怎么算出来的。报数不带分母等于报了个没法核的数。
     denominators: Dict[str, str] = field(default_factory=dict)
     #: 结构性盲区：这批证据整体看不见什么。
@@ -299,18 +313,25 @@ def _stable_id(prefix: str, claim: str, cites: Tuple[Cite, ...]) -> str:
     return "%s-%s" % (prefix, hashlib.sha256(basis.encode("utf-8")).hexdigest()[:8])
 
 
-def from_audit(res: Dict[str, Any], read_at: str) -> Tuple[List[Evidence], List[str]]:
+def from_audit(res: Dict[str, Any], read_at: str
+               ) -> Tuple[List[Evidence], List[str], List[str]]:
     """auditor 的四个维度 → 证据。**只把不 PASS 的变成证据。**
 
     PASS 的维度不产生证据：它的结论是「这一维没有问题」，属于分母，不是结论。
     但 PASS 的**计数**要进 denominators —— 「核了 N 条」是这份报告的底气。
+
+    ★ 返回**三样**：`(证据, 没跑成, 不适用)`。第一版把后两样并成一个 notes 列表，
+      于是渲染层只能给它们写一句共同解释 ——「这些项目没有跑成」。而 SKIP 的
+      真实含义是「问了，这把尺子量不到这件事」，不是「没跑成」。一句话把
+      一条已知的适用边界说成了未知的故障，方向正好相反。
     """
     evs: List[Evidence] = []
     notes: List[str] = []
+    na: List[str] = []
     findings = res.get("findings") or []
     if not findings:
         notes.append("auditor 返回了 0 个维度 —— 这不该发生（至少应有 A1–A4）")
-        return evs, notes
+        return evs, notes, na
 
     for i, f in enumerate(findings):
         status = f.get("status")
@@ -319,9 +340,9 @@ def from_audit(res: Dict[str, Any], read_at: str) -> Tuple[List[Evidence], List[
         if status == "PASS":
             continue
         if status == "SKIP":
-            # 「不适用」不是「失败」，也不是「通过」（铁律 45）。进不可判清单，
-            # 但不进证据 —— 它没有可出示的结论。
-            notes.append(f"{dim} 不适用：{detail}")
+            # 「不适用」不是「失败」，也不是「通过」（铁律 45）。它**不能**与
+            # 「没跑成」并进同一张清单 —— 进 na，不进 notes。
+            na.append(f"{dim} 不适用：{detail}")
             continue
         cites = _fmt_evidence(f.get("evidence"))
         if not cites:
@@ -332,16 +353,29 @@ def from_audit(res: Dict[str, Any], read_at: str) -> Tuple[List[Evidence], List[
         claim = f"{dim}：{detail}"
         evs.append(
             Evidence(
-                eid=_stable_id("AUD", claim, cites),
+                # ★ 指纹基用 `dim`，不用 `claim`。claim 里嵌着**实时数字**
+                #   （「495 处 ts 比前一条早（共验 167827 条）」），账本每长一条它就变，
+                #   于是同一条结论每次跑都换一个 id —— 负控 nc17 现场抓到
+                #   （AUD-2c0abc2c vs AUD-3ee74610）。
+                #   「同一个字符串在两个时刻指两个东西」与「同一个东西在两个时刻
+                #   有两个字符串」一样坏：后者让「用这个号指名」永远指不中，
+                #   而且它不像前者那样会在对照两份报告时露馅 —— 两份各自都自洽。
+                #   `dim` 是这条结论的**身份**（A3 日清单），数字是它的**读数**；
+                #   身份稳定、读数每天变，这才是对的。
+                #   ★ 为什么改成稳定 id 不会串更正：`corrections.resolve` 先按
+                #     `target_report == rid` 筛（corrections.py:349），eid 只需在
+                #     一份报告内唯一 —— 每个 dim 在一份报告里只出现一次。
+                eid=_stable_id("AUD", dim, ()),
                 claim=claim,
                 strength=K_CHECKED,
                 cites=cites,
                 source="auditor",
                 read_at=read_at,
                 blind="本维度只核账本自身是否自洽，不判断记录内容是否危险",
+                status=status,
             )
         )
-    return evs, notes
+    return evs, notes, na
 
 
 #: watchman 线索类型 → (强度档, 一句「这类线索看不到什么」)
@@ -398,7 +432,10 @@ def from_watch(res: Dict[str, Any], read_at: str) -> Tuple[List[Evidence], List[
         note = c.get("note") or ""
         evs.append(
             Evidence(
-                eid=_stable_id("WCH", subject, cites),
+                # 同上：subject 里也嵌着会变的数字（「已经重复 3 次以上」、
+                # 「首次出现域名：A、B、C」——新域名出现就变）。用 kind ＋ 首个
+                # 出处做指纹：同一种线索靠**第一次出现的位置**区分，位置不会漂。
+                eid=_stable_id("WCH", kind, cites),
                 claim=subject,
                 strength=strength,
                 cites=cites,
@@ -512,10 +549,74 @@ def verify_cites(bundle: Bundle, root: str) -> Tuple[List[str], List[str]]:
 # --------------------------------------------------------------------------- 主入口
 
 
+def blind_of(payload: Dict[str, Any]) -> Tuple[str, ...]:
+    """把一份工具 JSON 里的 `blind_spots` 变成一行行文字。**只有这一处实现。**
+
+    ★ 第一版是两段各写一份：auditor 那段认 dict、watchman 那段认二元组与 str，
+      两边**各自缺一种形态**。于是 watchman 的 JSON 根本没有这个键时，
+      它的 8 条盲区**静默消失**，而报告那一节仍然有内容（另一个工具的 5 条），
+      读起来毫无异样 —— 少了几行盲区不会报错，它只会把「我不知道」变成「我知道」。
+
+    ★ 认不出来的形态**报出来**，不许 `continue`。盲区解析失败与「没有盲区」
+      长得一样，而这两件事的含义正好相反（铁律 45）。
+    """
+    out: List[str] = []
+    for b in payload.get("blind_spots") or ():
+        if isinstance(b, dict):
+            title = str(b.get("title") or "").strip()
+            detail = str(b.get("detail") or "").strip()
+            if title:
+                out.append(plain("%s —— %s" % (title, detail)) if detail
+                           else plain(title))
+            else:
+                out.append("（一条盲区没有标题，形态是 %r —— 它没有说出口）" % (b,))
+        elif isinstance(b, (list, tuple)) and len(b) >= 2:
+            out.append(plain("%s —— %s" % (b[0], b[1])))
+        elif isinstance(b, str) and b.strip():
+            out.append(plain(b))
+        else:
+            out.append("（一条盲区的形态无法解析：%r —— 这条盲区没有说出口）" % (b,))
+    return tuple(out)
+
+
+def need_zero_note() -> str:
+    """「需要你看一眼 0 条」这句话的**唯一解释**。渲染层只许调这里。
+
+    ★ 为什么必须是机制而不是渲染层的文案：0 至少有三种来源（真的没有危险／
+      这一层的判据还没接上／工具根本没跑），而页面上只有一个「0」。
+      交给渲染层自由发挥，三份报告会说三种话，而且都会说成最好听的那种。
+
+    ★ 今天 C 线只有一种来源：读账本、不读规则库。所以这里写死一种解释。
+      将来接了规则库，这个函数要按**实际来源**返回不同的话 —— 那时它会需要参数，
+      而那时也正是它最容易被人改成一句「一切正常」的时候。
+
+    ★ 文案里不许出现 `**`：它会被 `_e()` 原样印进 HTML（同一个字符串有两个消费者，
+      就得挑两边都成立的字面）。
+    """
+    return ("「需要你看一眼」为 0，是因为本报告只读账本、不读规则库："
+            "「挡下」「提醒」这两档只能由规则命中产生，所以今天结构上产不出来。"
+            "这个 0 不是「查了没有危险」，是「这一层的判据还没接上」。")
+
+
 def collect(root: str, *, watch_args: Optional[List[str]] = None) -> Bundle:
     """跑两条腿，装成一份 Bundle。**任何一条腿崩，都进 undecidable 而不是消失。**"""
     read_at = ""  # 由 auditor / watchman 各自记；这里取二者之一作为整份报告的读数时刻
     bundle = Bundle(read_at="", root=root)
+
+    # ★ 结构性前提，**不是某次发现**：账本里混着本项目自己造的测试数据。
+    #   负控与红队往真账本里写过假命令、假域名 —— 实测 2026-10-31 那条
+    #   「首次出现域名」证据里，`evil.example.com` 和百度、几个政府网站并列，
+    #   读起来像「我们发现了一个恶意域名」，而它其实是我自己造的夹具。
+    #   账本没有「这是夹具」这个字段 ⇒ 本工具**无法区分**。不说这一句，
+    #   读者会把一条夹具读成一条发现，而两者在页面上长得一模一样。
+    #   ★ 无条件加，不按路径判断：换成别人的账本时这句话同样成立（只是答案变成
+    #     「大概没有」），而「按路径猜」会让这条盲区在别人的账本上静默消失。
+    bundle.blind += (
+        "账本里是否混有本项目自己的测试数据 —— 负控与红队曾往真账本写过假命令、"
+        "假域名（evil.example.com 就在 2026-10-31 的「首次出现域名」里，与百度、"
+        "几个政府网站并列）。账本没有「这是夹具」字段，本报告无法区分夹具与真实"
+        "事件；线索里出现的每一项都要按「可能是夹具」再复核一遍",
+    )
 
     audit, err_a = _run_json("auditor.py", root)
     watch, err_w = _run_json("watchman.py", root, watch_args)
@@ -527,9 +628,10 @@ def collect(root: str, *, watch_args: Optional[List[str]] = None) -> Bundle:
 
     if audit:
         read_at = audit.get("read_at") or read_at
-        evs, notes = from_audit(audit, read_at)
+        evs, notes, na = from_audit(audit, read_at)
         bundle.evidence += evs
         bundle.undecidable += notes
+        bundle.not_applicable += na
         # ★ 字段在**顶层**，不在 `meta` 里。第一版读 meta.get("files")，于是页脚
         #   长期显示「日文件 ? 个｜记录 ? 条」——报数不带分母，等于没报。
         #   不可解析条数 auditor 只写进 detail 文字、没有独立字段，所以这里不编一个。
@@ -538,12 +640,7 @@ def collect(root: str, *, watch_args: Optional[List[str]] = None) -> Bundle:
         )
         # auditor 的盲区随 JSON 一起回来，并进「这份报告看不见什么」。
         # **盲区不并进来，读者就会以为没说的地方是没问题的地方。**
-        for b in audit.get("blind_spots") or ():
-            if isinstance(b, dict) and b.get("title"):
-                bundle.blind += ("%s —— %s" % (plain(b["title"]),
-                                               plain(b.get("detail", ""))),)
-            elif isinstance(b, (list, tuple)) and len(b) >= 2:
-                bundle.blind += (plain(f"{b[0]} —— {b[1]}"),)
+        bundle.blind += blind_of(audit)
     if watch:
         read_at = read_at or watch.get("read_at") or (watch.get("meta") or {}).get("read_at", "")
         evs, notes = from_watch(watch, read_at)
@@ -554,11 +651,7 @@ def collect(root: str, *, watch_args: Optional[List[str]] = None) -> Bundle:
             f"基线 {meta.get('window', '?')} 天｜今天 {meta.get('today', '?')}"
             f"｜今日记录 {meta.get('today_records', '?')} 条"
         )
-        for b in watch.get("blind_spots") or ():
-            if isinstance(b, (list, tuple)) and len(b) >= 2:
-                bundle.blind += (plain(f"{b[0]} —— {b[1]}"),)
-            elif isinstance(b, str):
-                bundle.blind += (b,)
+        bundle.blind += blind_of(watch)
 
     bundle.read_at = read_at or "（未取到读数时刻）"
     if not bundle.read_at.startswith("20"):
@@ -616,11 +709,42 @@ def _selfcheck() -> int:
     if plain("") != "":
         fails.append("空串处理出问题")
 
+    # ⑥ 盲区解析：**三种形态都必须被收进来**。
+    #    第一版是两段各写一份：auditor 那段认 dict、watchman 那段认二元组与 str，
+    #    各自缺一种形态。watchman 的 JSON 用 dict ⇒ 它的 8 条盲区被静默丢弃，
+    #    而报告那一节仍然有 auditor 的 5 条，读起来毫无异样。
+    got = blind_of({"blind_spots": [{"title": "T1", "detail": "D1"}]})
+    if got != ("T1 —— D1",):
+        fails.append("dict 形态的盲区没有被收进来：%r —— watchman 的盲区会静默消失"
+                     % (got,))
+    got2 = blind_of({"blind_spots": [("T2", "D2"), "裸字符串"]})
+    if got2 != ("T2 —— D2", "裸字符串"):
+        fails.append("二元组／字符串形态的盲区没有被收进来：%r" % (got2,))
+    if not blind_of({"blind_spots": [{"detail": "没有标题"}]})[0].startswith("（"):
+        fails.append("没有标题的盲区被静默丢弃了 —— 它应该被报出来，不是被丢掉")
+
+    # ⑦ SKIP 必须进 not_applicable，**不许**进 undecidable。
+    #    合成一处就等于把「这把尺子量不到这件事」说成「工具坏了」——
+    #    真账本上 A5 就是这样被误述成「没有跑成」的。
+    _evs, _notes, _na = from_audit(
+        {"findings": [{"dim": "A5 总量", "status": "SKIP",
+                       "detail": "未给 --declare"}]}, "t")
+    if _notes:
+        fails.append("SKIP 进了「没跑成」：%r —— 把已知的适用边界说成了未知的故障"
+                     % (_notes,))
+    if not _na or "A5" not in _na[0]:
+        fails.append("SKIP 没有进「不适用」：%r" % (_na,))
+
+    # ⑧ 0 条的解释里不许有 `**`（它会被原样印进 HTML）
+    if "**" in need_zero_note():
+        fails.append("need_zero_note 里有 `**` —— 会原样印进 HTML")
+
     for f in fails:
         print(f"[自检失败] {f}", file=sys.stderr)
     if fails:
         return 1
-    print("[自检] 五条硬约束全部生效（空出处／无号挡下／合法挡下／词表外／散文星号不外泄）")
+    print("[自检] 八条硬约束全部生效（空出处／无号挡下／合法挡下／词表外／散文星号不外泄／"
+          "盲区三形态／SKIP 进不适用／0 的解释无星号）")
     return 0
 
 

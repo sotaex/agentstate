@@ -140,7 +140,7 @@ background:var(--panel);border-radius:10px;padding:12px 16px;margin-bottom:16px}
 .void .t{font-weight:700;margin-bottom:4px}
 .supersedes{border:1px dashed var(--line);border-radius:10px;padding:8px 14px;
 font-size:12.5px;color:var(--muted);margin-bottom:14px}
-/* 被取代的条目：整条加删除线 + 左侧灰边，但**仍在原位置、不折叠、不隐藏** */
+/* 被取代的条目：整条加删除线 + 左侧灰边，但仍在原位置、不折叠、不隐藏 */
 .ev.superseded{border-left-color:var(--lgrey)}
 .ev.superseded .claim{text-decoration:line-through;
 text-decoration-color:var(--muted);text-decoration-thickness:1.5px;opacity:.75}
@@ -148,7 +148,7 @@ text-decoration-color:var(--muted);text-decoration-thickness:1.5px;opacity:.75}
 font-size:12.5px;color:var(--muted);background:var(--bg);border-radius:0 6px 6px 0}
 .footer{color:var(--muted);font-size:12px;margin-top:28px;
 border-top:1px solid var(--line);padding-top:8px}
-/* 代码组指纹：页脚里唯一一个**跨版本可比**的字段，所以给它等宽字体 + 加粗，
+/* 代码组指纹：页脚里唯一一个跨版本可比的字段，所以给它等宽字体 + 加粗，
    让「两份报告是不是同一份代码算的」可以靠眼睛扫出来 */
 .fp{font-family:var(--mono);font-weight:700;color:var(--brand);
 letter-spacing:.5px;user-select:all}
@@ -223,9 +223,26 @@ def _ev_html(e: E.Evidence, corr: Optional["C.Correction"] = None) -> str:
         cls, _e(e.eid), _e(e.strength), _e(_cites_attr(e.cites)), sup_attr)
     if e.rule_id:
         attrs += ' data-rule="%s"' % _e(e.rule_id)
+    if e.status:
+        # 上游状态随契约出去：citecheck 靠它做一条行为判据
+        # （标了 WARN 的条目，页面上必须有「偏离」两个字）。
+        attrs += ' data-status="%s"' % _e(e.status)
     cite_s = " ".join(_cite_html(c) for c in e.cites[:4])
     more = " 等 %d 处" % len(e.cites) if len(e.cites) > 4 else ""
     blind = ('<div class="note">这条看不见什么：%s</div>' % _e(e.blind)) if e.blind else ""
+
+    # ★ WARN 不许印成和 PASS 一样的绿徽标。auditor 的四档里，PASS 与 WARN 在
+    #   强度词表里是**同一个词**（「已核对」），但它们对读者的意思相反：
+    #   一个是「核过了，一致」，一个是「核过了，有性质偏离，只是不算篡改」。
+    #   真账本上 A3（历史缺锚）与 A4（495 处倒序）都是 WARN，第一版把两条都印成
+    #   绿色「已核对」—— 读者一眼扫过去，而那正是最该停一下的两条。
+    #   强度档不动（对外强度不变，铁律 21），只把「偏离」这个事实显式化。
+    word = e.word()
+    badge_var = BADGE_VAR.get(e.strength, "var(--muted)")
+    if e.status == "WARN":
+        word = "%s·有偏离" % word
+        badge_var = "var(--l1)"
+
     return (
         '<div %s>'
         '%s'
@@ -235,7 +252,7 @@ def _ev_html(e: E.Evidence, corr: Optional["C.Correction"] = None) -> str:
         '%s'
         '<div class="note">%s%s</div>'
         '</div>'
-    ) % (attrs, sup_note, BADGE_VAR.get(e.strength, "var(--muted)"), _e(e.word()),
+    ) % (attrs, sup_note, badge_var, _e(word),
          _e(e.claim), _e(e.strength_note()), blind, cite_s, more)
 
 
@@ -311,6 +328,17 @@ def render(bundle: E.Bundle, *, cap: int = DEFAULT_CAP,
                      % (_e(label), val, _e(unit)))
     parts.append("</div>")
 
+    # ★ 「需要你看一眼 0 条」必须自己解释这个 0。
+    #   四个数字排在一起，0 会被读成「没事」——而 C 线读的是**账本**、不是规则库，
+    #   所以「挡下」「提醒」这两档今天**结构上就产不出来**（见 evidence 模块头）。
+    #   这个 0 不是「查了没有危险」，是「这一层的判据还没接上」。
+    #   ★ 自检里那条「不许出现『未发现异常』」守的是**字面**，守不住**读起来一个意思**：
+    #     字面没写那四个字，效果一样。这是本轮实测撞出来的第一类盲区。
+    #   ★ 解释来自 evidence.need_zero_note()，不由本层自己编 —— 0 至少有三种来源
+    #     （真没有／判据没接上／工具没跑），页面上只有一个 0。
+    if n_need == 0 and bundle.evidence:
+        parts.append('<div class="zero">%s</div>' % _e(E.need_zero_note()))
+
     # ---- 正文 ----
     if shown:
         parts.append("<h2>这次看见了什么</h2>")
@@ -338,6 +366,20 @@ def render(bundle: E.Bundle, *, cap: int = DEFAULT_CAP,
             parts.append('<div class="undecide">%s</div>' % _e(u))
         parts.append('<div class="note">这些项目<b>没有跑成</b>。'
                      '它们既不是「通过」，也不是「没有异常」。</div>')
+
+    # ---- 不适用（与「没跑成」分成两块，理由见下）----
+    # ★ 合成一块的代价：真账本上 A5（未给 --declare）被印在「不可判」里，
+    #   紧跟着一句「这些项目没有跑成」。而 A5 不是没跑成 —— 它跑了，明确判了
+    #   「本维度不适用」。把一条**已知的适用边界**说成**未知的故障**，方向正好相反。
+    #   更贵的是：A5 是唯一能抓「删记录」的量具，它不适用＝删记录不可见，
+    #   这是这份报告最重要的一条盲区，却被写成了一句故障脚注。
+    if bundle.not_applicable:
+        parts.append("<h2>不适用（%d 项）</h2>" % len(bundle.not_applicable))
+        for u in bundle.not_applicable:
+            parts.append('<div class="undecide">%s</div>' % _e(u))
+        parts.append('<div class="note">这些项目<b>问了，但这把尺子量不到这件事</b>。'
+                     '它既不是故障，也不是「通过」——它是一条<b>已知的适用边界</b>：'
+                     '这里没有结论，不等于这里没有问题。</div>')
 
     # ---- 盲区（默认展开，不许折叠）----
     if bundle.blind:
@@ -563,13 +605,49 @@ def _selfcheck() -> int:
     if 'data-codefp="' in h12:
         fails.append("指纹残缺却仍打出了 data-codefp —— 机器会读到一个假指纹")
 
+    # ---- 性质偏离不许印成通过（WARN 与 PASS 在强度词表里是同一个词）----
+    bw = E.Bundle(read_at="t", root="")
+    bw.evidence.append(E.Evidence(
+        eid="AUD-warn01", claim="A3 日清单：有历史缺锚", strength=E.K_CHECKED,
+        cites=(E.Cite("2026-11-01", 1),), source="auditor", read_at="t",
+        status="WARN"))
+    hw = render(bw)
+    if "偏离" not in hw:
+        fails.append("WARN 的徽标没有「偏离」—— 性质偏离被印成了通过")
+    if 'data-status="WARN"' not in hw:
+        fails.append("WARN 没有随契约出去（缺 data-status）—— citecheck 的判据会瞎")
+
+    # ---- 「不适用」不许被说成「没有跑成」----
+    bn2 = E.Bundle(read_at="t", root="")
+    bn2.evidence.append(ev)
+    bn2.not_applicable.append("A5 总量 不适用：未给 --declare")
+    hn2 = render(bn2)
+    if "不适用（1 项）" not in hn2:
+        fails.append("有不适用项却没有「不适用」区块")
+    if "没有跑成" in hn2:
+        fails.append("只有「不适用」却说了「没有跑成」—— 把已知的适用边界说成了未知故障")
+
+    # ---- 「需要你看一眼 0 条」必须自己解释这个 0 ----
+    # b 里只有一条 log_only ⇒ n_need == 0。字面没写「未发现异常」，
+    # 但读者看到的仍然是一个 0 —— 自检守字面，守不住「读起来一个意思」。
+    if "结构上产不出来" not in h:
+        fails.append("「需要你看一眼」为 0 却没解释这个 0 —— 读者会读成「没事」")
+
+    # ---- 产物里不许出现 `**` ----
+    # 注意范围：**含 CSS 注释**。第一版只想到「正文里别写星号」，实测产物里
+    # 四处 `**` 全在 CSS 注释里 —— 读者看不见，但它确实随文件出去了，
+    # 而这份文件是要被归档、被转发的。「看不见」不等于「不在产物里」。
+    if "**" in h:
+        fails.append("产物里出现了 `**` —— 散文的 Markdown 强调外泄到了产物（含 CSS 注释）")
+
     for f in fails:
         print("[自检失败] %s" % f, file=sys.stderr)
     if fails:
         return 1
-    print("[自检] 十二条全部生效（契约属性／零与不可判／首屏／盲区不折叠／转义／"
+    print("[自检] 十六条全部生效（契约属性／零与不可判／首屏／盲区不折叠／转义／"
           "裁量自报／被更正条目仍在／作废横幅在首屏／反向指认／指纹在页脚／"
-          "指纹值真等于现算／残缺即明说不完整）")
+          "指纹值真等于现算／残缺即明说不完整／WARN 不印成通过／不适用≠没跑成／"
+          "0 条必须自己解释／产物无星号）")
     return 0
 
 

@@ -1474,6 +1474,14 @@ def main(argv: List[str] | None = None) -> int:
                 {
                     "meta": meta,
                     "coverage": coverage,
+                    # ★★ 盲区必须随 JSON 出去。第一版**没有这个键**，于是
+                    #    `evidence.collect` 里那段 `for b in watch.get("blind_spots")`
+                    #    从来没有执行过一次 —— 本文件写下的 8 条盲区一条都没进过报告，
+                    #    而报告那一节照样有内容（auditor 的 5 条），读起来毫无异样。
+                    #    这正是本项目刚学到的：**「从没被执行过的分支」与「写对了的
+                    #    分支」在代码里长得一模一样**，区别只在有没有人从外面数一遍。
+                    #    自检抓不到它，因为自检跑的是 render()，不是 JSON 出口。
+                    "blind_spots": [{"title": t, "detail": d} for t, d in BLIND_SPOTS],
                     "clues": [
                         {
                             "kind": c.kind,
