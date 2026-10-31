@@ -21,6 +21,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LINEC = os.path.join(HERE, "lineC")
@@ -282,13 +283,28 @@ def a_evidence_ids_stable_across_runs():
         return None, "真账本不在 —— SKIP，不是通过"
     b1 = E.collect(root)
     b2 = E.collect(root)
-    s1 = {e.eid for e in b1.evidence}
-    s2 = {e.eid for e in b2.evidence}
+
+    # ★ 只比**已封盘日**。上面那句注释早就是这么写的，但代码原来比的是全部——
+    #   注释说一套、代码做一套，于是这条臂**依赖实时数据**：产品正在写当天的
+    #   文件，两次 collect 之间多进一条记录，`_stable_id` 的 claim 变了，
+    #   eid 就变了，这条臂就红。红的是量具，不是被测对象（实测：单独跑 18/18，
+    #   放进总闸门跑 17/18——同一份代码两个结果，本身就是铁律 22 的现场）。
+    today = time.strftime("%Y-%m-%d")
+
+    def closed_eids(b):
+        return {e.eid for e in b.evidence
+                if e.cites and all(c.day != today for c in e.cites)}
+
+    s1, s2 = closed_eids(b1), closed_eids(b2)
+    n_open = len(b1.evidence) - len(s1)
+    if not s1 and not s2:
+        return None, ("已封盘日的证据为 0 条（今天 %s 的 %d 条不计）—— "
+                      "没有可比的样本，SKIP 不是通过" % (today, n_open))
     only1, only2 = s1 - s2, s2 - s1
     if only1 or only2:
         return False, "两次跑出不同 id：仅首次 %s／仅二次 %s" % (
             sorted(only1)[:3], sorted(only2)[:3])
-    return True, "两次跑出同一组 id（%d 条）" % len(s1)
+    return True, "两次跑出同一组 id（已封盘 %d 条；今天 %d 条不计）" % (len(s1), n_open)
 
 
 def a_undecidable_separated():

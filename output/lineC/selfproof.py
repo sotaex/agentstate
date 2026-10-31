@@ -35,7 +35,6 @@
 不写任何文件。不改任何账本。
 """
 
-import hashlib
 import os
 import subprocess
 import sys
@@ -48,23 +47,18 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 #: 两次都是「凭直觉拼路径」而不是「看一眼 HERE 到底是什么」。
 LINE_C = HERE if os.path.basename(HERE) == "lineC" else os.path.join(HERE, "lineC")
 OUTPUT = os.path.dirname(LINE_C)
+sys.path.insert(0, LINE_C)
 
-#: 参与计算的源文件（顺序即报告里的显示顺序）。
-#: ★ 只列**会进入结论**的文件。把测试脚本也算进来会让指纹随测试变动而漂，
-#:   那指纹就不再是「结论的来源」了。
-SOURCES = [
-    os.path.join(LINE_C, "tsnorm.py"),
-    os.path.join(LINE_C, "auditor.py"),
-    os.path.join(LINE_C, "watchman.py"),
-    os.path.join(LINE_C, "evidence.py"),
-    os.path.join(LINE_C, "citecheck.py"),
-    os.path.join(LINE_C, "onepager.py"),
-    os.path.join(LINE_C, "corrections.py"),
-    os.path.join(LINE_C, "redteam.py"),
-]
+#: ★ 源文件清单与指纹算法**只有一处真源**：`codeid.py`。
+#: 报告页脚（onepager）与本闸门都从那里取。两份清单一定会漂，而漂了以后
+#: 两个指纹仍然都是「看起来正常」的十六进制串——错的东西长得和正确的东西一样。
+import codeid as CID  # noqa: E402
+
+SOURCES = CID.SOURCES
 
 #: 检查项：(名字, 命令, 期望退出码)
 CHECKS: List[Tuple[str, List[str], int]] = [
+    ("codeid --selfcheck", [os.path.join(LINE_C, "codeid.py"), "--selfcheck"], 0),
     ("evidence --selfcheck", [os.path.join(LINE_C, "evidence.py"), "--selfcheck"], 0),
     ("citecheck --selfcheck", [os.path.join(LINE_C, "citecheck.py"), "--selfcheck"], 0),
     ("onepager --selfcheck", [os.path.join(LINE_C, "onepager.py"), "--selfcheck"], 0),
@@ -76,26 +70,6 @@ CHECKS: List[Tuple[str, List[str], int]] = [
 ]
 
 
-def sha_file(path: str) -> str:
-    if not os.path.isfile(path):
-        return ""
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
-def group_fingerprint(items: List[Tuple[str, str]]) -> str:
-    """组指纹：`名字:sha256` 排序后拼接再哈希。
-
-    ★ 用**名字 + 内容**而不是只有内容：否则「两个文件互换内容」算出的组指纹
-      不变，而那是两套不同的代码。
-    """
-    basis = "\n".join("%s:%s" % (n, h) for n, h in sorted(items))
-    return hashlib.sha256(basis.encode("utf-8")).hexdigest()
-
-
 def main() -> int:
     t0 = time.time()
     print("=" * 78)
@@ -104,29 +78,24 @@ def main() -> int:
 
     # ---- 1 代码指纹 ----
     print("\n[代码指纹] 参与计算的源文件：")
-    items: List[Tuple[str, str]] = []
-    missing: List[str] = []
-    for p in SOURCES:
-        name = os.path.basename(p)
-        h = sha_file(p)
-        if not h:
-            missing.append(name)
-            print("  %-18s 缺失" % name)
-            continue
-        items.append((name, h))
+    fp = CID.compute()
+    for name, h in fp.items:
+        p = os.path.join(LINE_C, name)
         mtime = time.strftime("%m-%d %H:%M", time.localtime(os.path.getmtime(p)))
         print("  %-18s sha256:%s  %7d B  %s"
               % (name, h[:12], os.path.getsize(p), mtime))
-    if missing:
-        print("\n[停] 有源文件缺失：%s ⇒ 指纹不完整，不许当凭据用。" % "、".join(missing))
+    if not fp.ok:
+        print("\n[停] 有源文件缺失：%s ⇒ 指纹不完整，不许当凭据用。"
+              % "、".join(fp.missing))
         return 2
-    gid = group_fingerprint(items)
-    print("\n  组指纹 **%s**" % gid[:16])
-    print("  ⇒ 把它写进报告页脚，就能回答「这份报告是哪份代码算的」。")
+    gid = fp.gid
+    print("\n  组指纹 **%s**" % fp.short)
+    print("  ⇒ 报告页脚印的就是这个值（同一处真源：codeid.py）。")
+    print("  ⇒ 它回答「这份结论是哪份代码算的」，**不回答「结论对不对」**。")
 
     # ---- 2 全部检查 ----
     print("\n[检查] 逐项跑（全部跑完再报，不中途停）：")
-    fails: List[Tuple[str, int, str]] = []
+    fails: List[Tuple[str, int, str, List[str]]] = []
     for name, cmd, want in CHECKS:
         full = [sys.executable, "-E", "-X", "utf8"] + cmd
         t = time.time()
@@ -141,14 +110,13 @@ def main() -> int:
         dt = time.time() - t
         ok = rc == want
         # 取最后一行有内容的结果当摘要
-        tail = ""
-        for ln in reversed((out + "\n" + err).splitlines()):
-            if ln.strip():
-                tail = ln.strip()
-                break
+        lines = [ln.strip() for ln in (out + "\n" + err).splitlines() if ln.strip()]
+        tail = lines[-1] if lines else ""
         print("  [%s] %-26s %5.1fs  %s" % ("OK" if ok else "XX", name, dt, tail[:60]))
         if not ok:
-            fails.append((name, rc, tail))
+            # ★ 红的时候只留最后一行是不够的：负控的「合计 18 臂 17 通过」
+            #   说不出是哪一臂红的，于是「去修」变成「去猜」。红项要留尾巴。
+            fails.append((name, rc, tail, lines[-12:]))
 
     # ---- 3 汇总 ----
     print("\n" + "-" * 78)
@@ -157,8 +125,10 @@ def main() -> int:
           % (len(CHECKS), n_ok, len(fails), time.time() - t0, gid[:16]))
     if fails:
         print("\n失败项（修完再跑，不要只跑红的那一项——红可能互相掩盖）：")
-        for name, rc, tail in fails:
-            print("  · %s（退出码 %d）：%s" % (name, rc, tail))
+        for name, rc, tail, tail_lines in fails:
+            print("\n  · %s（退出码 %d）：%s" % (name, rc, tail))
+            for ln in tail_lines:
+                print("      | %s" % ln[:160])
         return 1
 
     print("\n全绿。**这只说明「这份代码自洽」，不说明「它算出来的结论是对的」**——")

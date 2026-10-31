@@ -53,6 +53,7 @@ sys.path.insert(0, HERE)
 
 import evidence as E  # noqa: E402
 import corrections as C  # noqa: E402
+import codeid as CID  # noqa: E402
 
 #: 强度排序：越小越靠前。**这是产品判断，不是格式**。
 #:   挡下      —— 动作真的没执行，用户最该先知道
@@ -147,6 +148,13 @@ text-decoration-color:var(--muted);text-decoration-thickness:1.5px;opacity:.75}
 font-size:12.5px;color:var(--muted);background:var(--bg);border-radius:0 6px 6px 0}
 .footer{color:var(--muted);font-size:12px;margin-top:28px;
 border-top:1px solid var(--line);padding-top:8px}
+/* 代码组指纹：页脚里唯一一个**跨版本可比**的字段，所以给它等宽字体 + 加粗，
+   让「两份报告是不是同一份代码算的」可以靠眼睛扫出来 */
+.fp{font-family:var(--mono);font-weight:700;color:var(--brand);
+letter-spacing:.5px;user-select:all}
+.fppairs{font-family:var(--mono);font-size:11px;word-break:break-all}
+.fpbad{border:1px solid var(--r0);border-radius:8px;padding:7px 10px;margin:6px 0;
+color:var(--r0);font-size:12px}
 @media print{body{margin:0}.ev,.undecide,.zero{break-inside:avoid}}
 """
 
@@ -243,8 +251,13 @@ def _folded_html(folded: Sequence[E.Evidence]) -> str:
 
 
 def render(bundle: E.Bundle, *, cap: int = DEFAULT_CAP,
-           resolved: Optional["C.Resolved"] = None) -> str:
-    """渲染一页纸。**首屏必须是「这次看见了什么」，不是「未发现异常」。**"""
+           resolved: Optional["C.Resolved"] = None,
+           code_fp: Optional[CID.Fingerprint] = None) -> str:
+    """渲染一页纸。**首屏必须是「这次看见了什么」，不是「未发现异常」。**
+
+    `code_fp` 不给就现算（`codeid.compute()`）。自检要能注入一个**残缺**指纹，
+    才能验出「不完整时页脚会明说」——否则那条分支永远是没跑过的代码。
+    """
     by = bundle.by_strength()
     n_need = sum(len(by.get(k, [])) for k in (E.K_HELD, E.K_ALERT, E.K_NO_RESPONSE))
     n_log = len(by.get(E.K_LOG_ONLY, []))
@@ -367,6 +380,27 @@ def render(bundle: E.Bundle, *, cap: int = DEFAULT_CAP,
         parts.append("%s：%s<br>" % (_e(k), _e(v)))
     parts.append("本报告由 Antinel 监理生成 ｜ 读数时刻 %s ｜ "
                  "回指以该时刻为准（当天文件的行号在此之后仍会变）" % _e(bundle.read_at))
+
+    # ---- 代码组指纹：这份报告是哪份代码算的（九维六在报告层的落地）----
+    #
+    # ★ 报告编号回答「要更正哪一份」，指纹回答「它当时是被哪份代码算出来的」。
+    #   两者**不能合并**：编号要稳定（更正靠它指名），而指纹必须随代码变——
+    #   一份归档报告如果只能回答前者，事后就无法区分「账本变了」与「代码变了」。
+    fp = code_fp if code_fp is not None else CID.compute()
+    if fp.ok:
+        parts.append("<br>代码组指纹 <b class=\"fp\" data-codefp=\"%s\">%s</b>"
+                     "（%d 个源文件）<br>"
+                     % (_e(fp.gid), _e(fp.short), len(fp.items)))
+        parts.append("<span class=\"fppairs\">%s</span><br>" % _e(fp.pairs()))
+        parts.append("核对办法：跑 <code>python output/lineC/selfproof.py</code>，"
+                     "它打出的组指纹必须与上面一致；不一致 ⇒ 这份报告不是当前代码"
+                     "算的，结论要重算。<br>%s" % _e(fp.note()))
+    else:
+        # 缺文件时**不许**打一个残缺指纹。残缺指纹看起来是完整的 64 位串，
+        # 而它证明不了任何事——这就是「零与不可判同貌」在指纹上的形态。
+        parts.append('<div class="fpbad">代码组指纹 <b>不完整</b>（缺 %d 个：%s）'
+                     '—— 这份报告的出处无法核对，<b>不该被当作归档凭据</b>。%s</div>'
+                     % (len(fp.missing), _e("、".join(fp.missing)), _e(fp.note())))
     parts.append("</div>")
 
     parts.append("</main></body></html>")
@@ -499,12 +533,43 @@ def _selfcheck() -> int:
     if rid_c not in hn:
         fails.append("新报告没有反向指认旧报告 —— 旧报告归档后读者找不到新结论")
 
+    # ---- 代码组指纹（九维六在报告层）----
+    # 验收 10：页脚必须印出**当前这份代码**的指纹，且值必须真等于现算的结果
+    # （只检查「有个十六进制串」是不够的——那可能是个写死的常量）
+    cur = CID.compute()
+    h10 = render(b)
+    if not cur.ok:
+        fails.append("自检环境本身算不出代码指纹：缺 %s" % "、".join(cur.missing))
+    if 'data-codefp="%s"' % cur.gid not in h10:
+        fails.append("页脚没有印出当前代码组指纹 —— 归档报告无法回答「哪份代码算的」")
+    # 验收 11：指纹必须在页脚里（正文里出现＝读者在读到结论前就被编号干扰；
+    # 页脚之后出现＝它可能被当成另一份文档的）
+    i_fp = h10.find('data-codefp=')
+    i_foot2 = h10.find('<div class="footer">')
+    i_end = h10.rfind("</div>")
+    if i_fp < 0 or i_foot2 < 0:
+        fails.append("指纹定位失败（找不到 data-codefp 或页脚）")
+    elif not (i_foot2 < i_fp < i_end):
+        fails.append("代码指纹不在页脚内（页脚 %d／指纹 %d／末尾 %d）"
+                     % (i_foot2, i_fp, i_end))
+    # 验收 12：残缺指纹必须**明说不完整**，且不许冒出一个 data-codefp
+    broken = CID.compute([os.path.join(HERE, "codeid.py"),
+                          os.path.join(HERE, "__nope__.py")])
+    if broken.ok:
+        fails.append("自检构造的残缺指纹竟然 ok —— 夹具失效，验不到这条分支")
+    h12 = render(b, code_fp=broken)
+    if "fpbad" not in h12 or "不完整" not in h12:
+        fails.append("指纹残缺却没说「不完整」—— 残缺值会被当成完整值用")
+    if 'data-codefp="' in h12:
+        fails.append("指纹残缺却仍打出了 data-codefp —— 机器会读到一个假指纹")
+
     for f in fails:
         print("[自检失败] %s" % f, file=sys.stderr)
     if fails:
         return 1
-    print("[自检] 九条全部生效（契约属性／零与不可判／首屏／盲区不折叠／转义／"
-          "裁量自报／被更正条目仍在／作废横幅在首屏／反向指认）")
+    print("[自检] 十二条全部生效（契约属性／零与不可判／首屏／盲区不折叠／转义／"
+          "裁量自报／被更正条目仍在／作废横幅在首屏／反向指认／指纹在页脚／"
+          "指纹值真等于现算／残缺即明说不完整）")
     return 0
 
 
@@ -540,12 +605,22 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
     res = C.resolve(b, items)
 
+    # 代码指纹：算一次、传下去，别在 render 里各算一遍（两次之间文件可能被改，
+    # 那就会出现「页脚印的指纹」与「实际渲染的代码」不是同一份）。
+    fp = CID.compute()
+
     if args.out:
-        write(b, args.out, cap=args.cap, resolved=res)
-        print("已写出：%s（%d 条证据，报告编号 %s）"
-              % (args.out, b.count(), res.report_id))
+        if not fp.ok:
+            # ★ 不写盘。一份出处无法核对的一页纸，看起来和正常报告一模一样——
+            #   它会被归档、被转发、被当成凭据。宁可不出，也不出一份假凭据。
+            print("[停] 代码指纹不完整（缺 %s），不写报告：出处无法核对的报告"
+                  "不该存在。" % "、".join(fp.missing), file=sys.stderr)
+            return 2
+        write(b, args.out, cap=args.cap, resolved=res, code_fp=fp)
+        print("已写出：%s（%d 条证据，报告编号 %s，代码组指纹 %s）"
+              % (args.out, b.count(), res.report_id, fp.short))
     else:
-        sys.stdout.write(render(b, cap=args.cap, resolved=res))
+        sys.stdout.write(render(b, cap=args.cap, resolved=res, code_fp=fp))
     return 0
 
 
