@@ -62,9 +62,8 @@
   "challenge/README.md": "sha256:298396eabc50aef0de8a68ee1dc4cf2bb036365c5e32d8f4164e6baf29176bd4",
   "challenge/attack.py": "sha256:18e41a6fff35e6a284b76126addf96575356e36dd8a555f6679b850dd85d51df",
   "challenge/chain/2026-10-28.jsonl": "sha256:89e86dc00b0c9f13fb9d066743d5888e88cb99868830ff6730bb35df427d2359",
-  "challenge/chain/2026-10-30.jsonl": "sha256:3c37645d330bfffdcb3f495613710fd56346f567e3e31fe0be989d16ee670248",
-  "challenge/chain/day_manifest.json": "sha256:e879e0096c44d987580b91371bb8511535eb6fdeeb5d78d5857b3db6fa788684",
-  "challenge/chain/meta.json": "sha256:69ec6254f4367b5e7c85606017eb5276e952a06025e0fedb2ff0d1d402388b06",
+  "challenge/chain/day_manifest.json": "sha256:9bb21431140697f68f3a31071884ea354d444c1892cb95c3909855d82ed9b358",
+  "challenge/chain/meta.json": "sha256:c9a44ed1804144ad27038a695f1db3b99c9860a05a5cd220e87584642ce560f5",
   "challenge/generate_challenge.py": "sha256:fe0b87178e9e833bb975f14ac19d38e51f8a2978c4e474e5467a9dcef415c532",
   "challenge/tamper-lab.html": "sha256:886755d8f5a65bfb071e70e7c5704df0c9fe24278ab6d4f07786076fb6a18a4f",
   "challenge/tamper.py": "sha256:0a08b82ccbf1afaa1342be6fbc07306b3356b254fbaaada90c2b21e3d0768227",
@@ -98,7 +97,7 @@
   "machine_id.py": "sha256:a17381e06232d8a5b5ffbd97f003f78d237b3a92ef3061585bcd9545bfd3a41a",
   "psl/SKILL.md": "sha256:dd5a190574fd953223423a1e104834962f44798b1bd6b969b938439d0c018fa2",
   "psl/antinel-namespaces.json": "sha256:2db67f32a5b803560f458c4589bd4bb4678cc17bc16625f6b6b3ad20f9b202d2",
-  "psl/workspace_facts.json": "sha256:7cc049ad769df5a82228df67ba6b38f997edbe9c9100e3970d607f961f7c20fe",
+  "psl/workspace_facts.json": "sha256:12f5eca3f2b2aebf2a299ff1538ced669d655bfa56b9e8e30be696d3275310d5",
   "remediation.py": "sha256:eebef6fad4f9f89e946b77ceaf870ff747485266f216a77ab3984fd2f92caf7f",
   "rules/default.json": "sha256:831280124beb1545767652c66326bcef47cf4554b2f0f884af41f92df5831db2",
   "rules/economics/claude-code.json": "sha256:e5ce954672baa42ffc220fddde2b691566f4644ec05ba6887c5ccc1c9dae30ba",
@@ -165,6 +164,7 @@
   "tools/verify_namespaces.py": "sha256:85d6ffb905dcf5abffb453ca5b1992f02b3aeb63f93aaad39bc6dcf3fb15e0b0",
   "transcript_reader.py": "sha256:c0ce99c5bdfb255f170ca744c011ae64ceb9569d1c9dd8efc1a2c096ff89dc1c",
   "ui_server.py": "sha256:45edb0fab43424bcc280397dab236deff9f138642c792ae7c58992cea902b166",
-  "ci/freeze_zones.json": "sha256:df13618075de425e6a3c3fb2f7023536b4b56355f9542e7e1aad0e12289cf2df"
+  "ci/freeze_zones.json": "sha256:df13618075de425e6a3c3fb2f7023536b4b56355f9542e7e1aad0e12289cf2df",
+  "challenge/chain/2026-10-31.jsonl": "sha256:df1e5fff9fc302fdf3d90528bdad167f776e1660f6d5d9294a55ed857505d5db"
  }
 }
