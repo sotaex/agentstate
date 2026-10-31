@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Antinel 证据包 · 界面设计稿 v2.0（对齐产品视觉，待拍板）</title>
+<style>
+/* ============================================================
+   ★★ v2.0 的实质改动：v1.0 抄错了对象。
+      v1.0 抄的是 scripts/report.py 的 bootstrap 色（#dc3545/#ffc107/#28a745），
+      那是**静态审计报告**的样式。真正的产品界面是 inbox_server.py 的本机页面。
+      本版逐字抄 inbox_server.py:124-131 的 :root，含暗色模式。
+
+      下面这些变量名、色值、圆角、字号，全部来自 inbox_server.py，未自行取色。
+   ============================================================ */
+:root{--bg:#fff;--panel:#f6f8fa;--fg:#14212b;--muted:#465866;--line:#d6dee4;
+--brand:#145a72;--brand-dark:#0f4559;--r0:#9b2226;--l2:#c2410c;--l1:#8a6100;
+--ls:#2a5db0;--l0:#226b4a;--lgrey:#5f5e5a;
+--sans:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+--mono:ui-monospace,SFMono-Regular,Consolas,monospace}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1417;--panel:#161d21;--fg:#e7edf1;
+--muted:#9fb0bb;--line:#2a353b;--brand:#5fb4cf;--brand-dark:#8fd0e4}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.6 var(--sans)}
+a{color:var(--brand)}
+main{max-width:1000px;margin:0 auto;padding:20px}
+
+/* ---- 以下组件逐条对应 inbox_server.py 的行号 ---- */
+.bar{display:flex;align-items:center;gap:16px;padding:9px 20px;border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap}
+.tabs{display:flex;gap:4px;padding:10px 20px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.tabs a{padding:9px 14px;color:var(--muted);font-weight:600;text-decoration:none;border-bottom:2px solid transparent;font-size:14px}
+.tabs a.on{color:var(--brand);border-bottom-color:var(--brand)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 16px;margin-bottom:9px}
+h2{font-size:15px;margin:0 0 12px}
+.rows{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.row{display:flex;gap:12px;padding:8px 15px;border-bottom:1px solid var(--line);font-size:13px}
+.row:last-child{border-bottom:0}
+.row .k{flex:none;width:150px;color:var(--muted)}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:16px}
+.metric{background:var(--panel);border-radius:10px;padding:11px}
+.metric .k{font-size:12px;color:var(--muted)}
+.metric .v{font-size:26px;font-weight:700}
+.metric .unit{font-size:13px;font-weight:600;color:var(--muted)}
+.badge{flex:none;width:44px;text-align:center;font-family:var(--mono);font-size:12px;font-weight:700;padding:4px 0;border-radius:6px;color:#fff}
+.badge.r0{background:var(--r0)}.badge.l2{background:var(--l2)}
+.badge.l1{background:var(--l1)}.badge.ls{background:var(--ls)}
+.badge.grey{background:var(--lgrey)}.badge.ok{background:var(--l0)}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid var(--line)}
+.dot{width:8px;height:8px;border-radius:50%}
+.item{border:1px solid var(--line);border-left-width:4px;border-radius:10px;margin-bottom:10px;background:transparent}
+.item.r0{border-left-color:var(--r0)}.item.l2{border-left-color:var(--l2)}
+.item.l1{border-left-color:var(--l1)}.item.ls{border-left-color:var(--ls)}
+.item.ok{border-left-color:var(--l0)}.item.grey{border-left-color:var(--lgrey)}
+.item{padding:10px 14px}
+.muted{color:var(--muted)}
+.small{font-size:12px}
+.mono{font-family:var(--mono)}
+.cite{font-family:var(--mono);font-size:12px;color:var(--brand);text-decoration:none;border-bottom:1px dotted var(--brand);cursor:pointer}
+.cite:hover{background:var(--panel)}
+.daylevel{font-family:var(--mono);font-size:12px;color:var(--muted);font-style:italic}
+details{margin:6px 0}
+summary{cursor:pointer;font-size:12.5px;color:var(--brand);padding:3px 0}
+pre.raw{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px;
+        font-family:var(--mono);font-size:11.5px;overflow-x:auto;margin:6px 0;white-space:pre-wrap;word-break:break-all}
+
+/* ---- 设计稿自己的标注层：与产品视觉刻意区分（虚线 + 斜纹边），
+        免得有人把"说明"当成"产品长这样" ---- */
+.docnote{border:1px dashed var(--line);border-radius:10px;padding:11px 16px;margin:0 0 14px;
+  background:repeating-linear-gradient(135deg,transparent,transparent 9px,rgba(20,90,114,.04) 9px,rgba(20,90,114,.04) 18px)}
+.docnote b{color:var(--brand)}
+.docnote p{margin:6px 0 0;font-size:13px;color:var(--muted);line-height:1.7}
+.stage{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:16px;background:var(--bg)}
+.stagebar{padding:6px 14px;font-size:11.5px;color:var(--muted);border-bottom:1px solid var(--line);background:var(--panel)}
+table.cmp{border-collapse:collapse;width:100%;margin:10px 0;font-size:13px}
+table.cmp th,table.cmp td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top}
+table.cmp th{background:var(--panel);font-weight:600}
+.yes{color:var(--l0);font-weight:600}
+.no{color:var(--r0);font-weight:600}
+.footer{color:var(--muted);font-size:12px;margin-top:28px;border-top:1px solid var(--line);padding-top:8px}
+@media print{.docnote{display:none}.stage{border:0}}
+</style></head><body>
+
+<div class="bar">
+  <span style="font-weight:700;color:var(--brand)">Antinel 监理</span>
+  <span class="pill"><span class="dot" style="background:var(--l0)"></span>值守中</span>
+  <span class="muted small">设计稿 v2.0 ｜ 2026-11-01 02:42 ｜ 待拍板</span>
+</div>
+<nav class="tabs">
+  <a>收件箱</a><a class="on">日报</a><a>运行状态</a><a>账本</a><a>体检</a>
+</nav>
+
+<main>
+
+<div class="docnote">
+  <b>上面这条页签栏是照 <code>inbox_server.py:888-892</code> 复刻的，五个页签，一个不多。</b>
+  <p>本页演示的是「从日报页点导出，拿到一份证据包」这条路径 ——
+  <b>不是第六个页签</b>。页签只负责「去哪儿」（<code>_tabs()</code> 的 docstring 原话），
+  而证据包是「同一批数据的另一种出法」，属于导出，不属于导航。</p>
+</div>
+
+<h2>一、导出入口长在哪（这是唯一要动产品的地方）</h2>
+
+<div class="docnote">
+  <b>产品已有先例，照抄即可</b>
+  <p>体检页现在就有三个导出链接（<code>_exam_export_links</code>，3476 行）：
+  PDF（脱敏）／PDF（完整）／HTML 原件，而且有条纪律「<b>没有可导出的东西就不给链接</b>」。
+  证据包用同一个模式，放在日报页和账本页各一行。</p>
+</div>
+
+<div class="stage">
+  <div class="stagebar">模拟：日报页底部，新增这一行（约 10 行代码，A 线落地）</div>
+  <div class="card">
+    <h2>导出</h2>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:13px">
+      <a href="#">证据包（HTML）</a>
+      <span class="muted">｜</span>
+      <a href="#">证据包（PDF · 脱敏）</a>
+      <span class="muted">｜</span>
+      <a href="#">证据包（PDF · 完整）</a>
+    </div>
+    <p class="small muted" style="margin:10px 0 0">
+      三个链接只在「有证据可导出」时出现 —— 没有却画一个按钮，就是「点了没反应」的源头。
+    </p>
+  </div>
+</div>
+
+<h2>二、导出的证据包长什么样</h2>
+
+<div class="docnote">
+  <b>以下整块就是导出件本体</b>
+  <p>视觉与产品页面同源：同一套 <code>:root</code> 变量、同一个 <code>.card</code>／<code>.rows</code>／<code>.metric</code>／<code>.badge</code>，
+  连暗色模式都跟着走。它能被归档、被邮件转发、被打印签字，且<b>不依赖任何 JS</b>。</p>
+</div>
+
+<div class="stage">
+  <div class="stagebar">导出件：evidence.html（离线可看，零外部资源）</div>
+  <div style="padding:16px 18px">
+
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap">
+      <div>
+        <div style="font-size:17px;font-weight:700">Antinel 监理 · 证据包</div>
+        <div class="small muted">读数时刻 2026-11-01 02:24 ｜ 主机：本机 ｜ 账本 33 个日文件 / 165,070 条</div>
+      </div>
+      <span class="pill"><span class="dot" style="background:var(--l0)"></span>账本自洽</span>
+    </div>
+
+    <div class="metrics" style="margin-top:16px">
+      <div class="metric"><div class="k">结论</div><div class="v">5<span class="unit">条</span></div></div>
+      <div class="metric"><div class="k">需要你看一眼</div><div class="v">2<span class="unit">条</span></div></div>
+      <div class="metric"><div class="k">只是记录</div><div class="v">3<span class="unit">条</span></div></div>
+      <div class="metric"><div class="k">已声明的盲区</div><div class="v">4<span class="unit">项</span></div></div>
+    </div>
+
+    <h2 style="margin-top:18px">这次看见了什么</h2>
+
+    <div class="item ok">
+      <div style="display:flex;gap:10px;align-items:baseline">
+        <span class="badge ok" style="width:auto;padding:2px 8px">已核对</span>
+        <div style="flex:1">
+          <div>账本 33 个日文件里 <b>31 个与清单对得上</b>（size 与末条 hash 全对）；1 天记录里没有 hash 字段，锚无处可挂；1 天有 hash 却无清单条目。</div>
+          <div class="small muted" style="margin-top:4px">这是账本自洽性检查，<b>不是</b>拦截结论。</div>
+          <div class="small" style="margin-top:6px">
+            <a class="cite">2026-10-05</a><span class="daylevel">（整天 · 该日无清单条目，无行号可指）</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="item ok">
+      <div style="display:flex;gap:10px;align-items:baseline">
+        <span class="badge ok" style="width:auto;padding:2px 8px">已核对</span>
+        <div style="flex:1">
+          <div>165,070 条记录里 <b>491 处时间戳比前一条早</b>。链没断、内容没变；抢锁日志显示等待时长与倒序幅度同量级 ⇒ 属并发排队，不是篡改。</div>
+          <div class="small muted" style="margin-top:4px">口径：datetime 归一后比较，无时区按本地墙钟（UTC+8）解释。</div>
+          <div class="small" style="margin-top:6px">
+            <a class="cite">2026-10-08:215</a> <a class="cite">:218</a> <a class="cite">:250</a> <a class="cite">:255</a>
+            <span class="muted">…共 5 处</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="item grey">
+      <div style="display:flex;gap:10px;align-items:baseline">
+        <span class="badge grey" style="width:auto;padding:2px 8px">已记录未判定</span>
+        <div style="flex:1">
+          <div>10-31 <b>首次出现 4 条命令</b>：<span class="mono small">chmod</span>、<span class="mono small">Get-Location</span>、<span class="mono small">probe</span>、<span class="mono small">printf</span></div>
+          <div class="small muted" style="margin-top:4px">只知道「以前没见过」，不知道是否危险。</div>
+          <div class="small" style="margin-top:6px">
+            <a class="cite">2026-10-31:3469</a> <a class="cite">:4448</a> <a class="cite">:4511</a> <a class="cite">:6307</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="item grey">
+      <div style="display:flex;gap:10px;align-items:baseline">
+        <span class="badge grey" style="width:auto;padding:2px 8px">已记录未判定</span>
+        <div style="flex:1">
+          <div>10-31 <b>首次出现 8 个域名</b>，其中 <span class="mono small">evil.example.com</span> 与 7 个政务站点混在一起</div>
+          <div class="small muted" style="margin-top:4px">域名首次出现不等于恶意；这里只报「新」。</div>
+          <div class="small" style="margin-top:6px">
+            <a class="cite">2026-10-31:900</a> <a class="cite">:6296</a> <a class="cite">:6307</a> <span class="muted">…共 5 处</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="item grey">
+      <div style="display:flex;gap:10px;align-items:baseline">
+        <span class="badge grey" style="width:auto;padding:2px 8px">已记录未判定</span>
+        <div style="flex:1">
+          <div>同一会话里 <span class="mono small">AN-010</span> 之后 5 分钟内又命中 <span class="mono small">AN-014</span>（当天 1 次）</div>
+          <div class="small muted" style="margin-top:4px">只报「这两个同时出现过」，不做因果推断。</div>
+          <div class="small" style="margin-top:6px"><a class="cite">2026-10-31:9318</a></div>
+        </div>
+      </div>
+    </div>
+
+    <h2 style="margin-top:20px">出处怎么核（点开就是那一行）</h2>
+    <details>
+      <summary>2026-10-31 第 3469 行 · 点开看原文与该行 hash</summary>
+      <pre class="raw">{"ts":"2026-10-31T14:22:07.913+08:00","type":"pre_tool_use","tool":"Bash",
+ "rule_id":"AN-010","decision":"allow","action":"alert",
+ "cmd":"chmod +x /tmp/probe","session":"…"}
+… 本行共 412 字符，此处显示前 300 字符
+行 hash（sha256 前 16 位）： 9f3c1a77b0e4d215</pre>
+      <p class="small muted" style="margin:4px 0 0">
+        抄原文的同时抄 hash —— 只抄原文的话，账本后来被改了，这里还是旧的，
+        那份报告就成了「看起来能核对、其实核对的是副本」。
+      </p>
+    </details>
+
+    <h2 style="margin-top:20px">这份报告看不见什么</h2>
+    <div class="rows">
+      <div class="row"><span class="k">账本以外</span><span>没被钩子拦到的动作不进账本，本报告只看得见账本</span></div>
+      <div class="row"><span class="k">记录内容对不对</span><span>只报「什么变了」，不判断是否危险、是否合规</span></div>
+      <div class="row"><span class="k">是否被整链重写</span><span>换掉整天文件并同步改清单，本报告仍报内部自洽</span></div>
+      <div class="row"><span class="k">当天文件的回指</span><span>行号在本次读取之后仍会变，以顶部读数时刻为准</span></div>
+    </div>
+
+    <h2 style="margin-top:20px">不可判（1 项）</h2>
+    <div class="item l1" style="border-left-style:dashed">
+      <div style="font-size:13px"><b>A5 总量</b> —— 未给 <span class="mono small">--declare</span>，本维度<b>没有跑</b>。</div>
+      <div class="small muted" style="margin-top:4px">这不是「通过」，也不是「没有异常」，是<b>没查成</b>。</div>
+    </div>
+
+    <div class="footer">
+      本报告由 Antinel 监理生成 ｜ 读数时刻 2026-11-01 02:24 ｜ 复扫方式：python -m scripts.scan --root .
+    </div>
+  </div>
+</div>
+
+<h2>三、四档强度怎么落到产品色板上</h2>
+
+<div class="docnote">
+  <b>不用新色。产品六态灯已经有一整套，直接借色值、不借形状。</b>
+  <p>灯是<b>圆点</b>（表示「此刻态势」），证据档是<b>方形徽标</b>（表示「结论强度」）。
+  形状不同 + 旁边永远带文字 ⇒ 不会有人把「已记录未判定」误读成灯灭了。</p>
+</div>
+
+<table class="cmp">
+<tr><th style="width:150px">档</th><th style="width:96px">用的变量</th><th>限定语（必带，不许省）</th><th style="width:200px">什么时候才许用</th></tr>
+<tr><td><span class="badge r0" style="width:auto;padding:2px 8px">没守住</span></td><td class="mono small">--r0</td>
+    <td>本该拦住但没有</td><td>账本显示防线没生效</td></tr>
+<tr><td><span class="badge l2" style="width:auto;padding:2px 8px">挡下</span></td><td class="mono small">--l2</td>
+    <td>已由规则拦下（有规则号，可查规则库）</td>
+    <td><b>必须有 rule_id</b>。<span class="no">C 线今天一条都不许产出</span>——它读的是账本，不是规则</td></tr>
+<tr><td><span class="badge l1" style="width:auto;padding:2px 8px">提醒</span></td><td class="mono small">--l1</td>
+    <td>有规则命中并告警，但动作仍然执行了</td><td>规则判了 alert（产品主力，63.4%）</td></tr>
+<tr><td><span class="badge ls" style="width:auto;padding:2px 8px">已发现无法处置</span></td><td class="mono small">--ls</td>
+    <td>已发现，但没有可执行的处置手段</td><td>规则库标了 <code>response_capability: missing</code></td></tr>
+<tr><td><span class="badge grey" style="width:auto;padding:2px 8px">已记录未判定</span></td><td class="mono small">--lgrey</td>
+    <td>已记录，未作判定（不知道是否危险，只知道它变了）</td><td>只有记录点、没有判据的（C 线绝大多数）</td></tr>
+<tr><td><span class="badge ok" style="width:auto;padding:2px 8px">已核对</span></td><td class="mono small">--l0</td>
+    <td>已核对（账本自洽性检查，不是拦截结论）</td><td>账本自检结果（A1–A5）</td></tr>
+</table>
+
+<h2>四、这一版相对 v1.0 改了什么</h2>
+
+<table class="cmp">
+<tr><th style="width:170px">项</th><th>v1.0（错）</th><th>v2.0（本版）</th></tr>
+<tr><td>视觉基线</td><td>抄 <code>scripts/report.py</code> 的 bootstrap 色</td><td class="yes">抄 <code>inbox_server.py:124-131</code> 的 <code>:root</code></td></tr>
+<tr><td>暗色模式</td><td>无</td><td class="yes">跟随 <code>prefers-color-scheme</code>，与产品一致</td></tr>
+<tr><td>四档配色</td><td>自造 <code>#dc3545</code> 等</td><td class="yes">借产品六态变量，只借色值不借形状</td></tr>
+<tr><td>定位</td><td>含糊（像一份独立报告）</td><td class="yes">明确是<b>导出件</b>，不是第六个页签</td></tr>
+<tr><td>回指</td><td>只抄原文</td><td class="yes">原文 + <b>该行 hash</b> + 截断（300 字符）</td></tr>
+<tr><td>天粒度</td><td>显示 <code>2026-10-05:0</code>（像坏行号）</td><td class="yes">显示 <code>（整天 · 无行号可指）</code></td></tr>
+</table>
+
+<h2>五、四条红线（不写下来就会被人改掉）</h2>
+
+<div class="rows">
+  <div class="row"><span class="k">首屏不许是「未发现异常」</span><span>方案书 §5.4：第一份报告大概率是「未发现异常」，而它在用户眼里等于「没用」。首屏必须是「这次看见了什么」，全绿也要有 3–5 条。</span></div>
+  <div class="row"><span class="k">「不可判」不许与「0 条」同貌</span><span>两者都是「没有东西」，但一个是结论、一个是盲区。A 线 <code>report.py</code> 同一条纪律：拿不到策略时印 <code>None</code>，不印三个 0。</span></div>
+  <div class="row"><span class="k">盲区不许折叠</span><span>可以放页脚上方、可以用中性色，但必须默认展开。折叠盲区＝隐藏「我不知道」。</span></div>
+  <div class="row"><span class="k">每条结论必须有可点出处</span><span>方案书 §5.7：回指不到 ⇒ 不许写。这条由 <code>citecheck</code> 程序拦，不靠人记。</span></div>
+</div>
+
+<h2>六、还要你拍的三件</h2>
+
+<div class="docnote">
+  <p style="margin:0">
+  <b>① 导出件放哪个目录？</b> 建议与主报告同目录（<code>.psl/report/</code>），文件名带读数时刻，便于归档时排序。<br>
+  <b>② PDF 走哪条路？</b> 产品已有「本机 Edge 无头打印」（<code>_exam_export</code>，3561 行）。建议复用，不另装依赖。<br>
+  <b>③ 「脱敏」版要脱什么？</b> 体检页已有脱敏开关，但证据包里含<b>命令原文与域名</b> —— 这两类最敏感。建议脱敏版只留「首次出现 N 条命令（内容已隐去）」。
+  </p>
+</div>
+
+<div class="footer">
+本报告由 Antinel 监理生成。复扫方式：python -m scripts.scan --root .
+｜ 设计稿 v2.0 ｜ 2026-11-01 02:42 ｜ 待拍板，未写实现
+</div>
+
+</main>
+</body></html>

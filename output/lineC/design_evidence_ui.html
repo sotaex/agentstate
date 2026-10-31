@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>Antinel 证据包 · 界面设计稿 v1.0（待拍板）</title>
+<style>
+/* ============================================================
+   ★ 本页样式全部抄自 scripts/report.py 的 render_html（现有报告）。
+     不是"风格相近"，是**同一组色值与同一套表格规则**：
+       COLORS = critical #dc3545 / warning #ffc107 / ok #28a745 / neutral #6c757d
+       字体   Segoe UI, Arial
+       表格   border-collapse / #dee2e6 / th #f8f9fa
+     设计稿必须长得像"同一份报告的另一页"，而不是另一个产品。
+   ============================================================ */
+body{font-family:Segoe UI,Arial,sans-serif;margin:32px;color:#212529;max-width:1180px}
+h1{margin:0 0 4px 0;font-size:26px}
+h2{margin:34px 0 10px 0;font-size:19px;border-bottom:1px solid #dee2e6;padding-bottom:6px}
+h3{margin:22px 0 8px 0;font-size:15px}
+.meta{color:#6c757d;margin-bottom:20px;font-size:14px}
+.note{color:#6c757d;font-size:13px;line-height:1.65}
+table{border-collapse:collapse;width:100%;margin:12px 0}
+th,td{border:1px solid #dee2e6;padding:7px 9px;text-align:left;font-size:14px;vertical-align:top}
+th{background:#f8f9fa;font-weight:600}
+code{background:#f4f4f4;padding:1px 4px;border-radius:3px;font-size:12.5px}
+.tag{display:inline-block;padding:1px 7px;border-radius:3px;font-size:12.5px;font-weight:600;
+     white-space:nowrap;border:1px solid transparent}
+/* 四档强度的视觉语言：颜色 + 符号 + 文字，三者同时给。
+   只用颜色不行 —— 色盲看不出，黑白打印全灰。 */
+.s-held{background:#dc3545;color:#fff}
+.s-alert{background:#ffc107;color:#212529}
+.s-log{background:#eef1f4;color:#495057;border-color:#ced4da}
+.s-noresp{background:#fff;color:#b35c00;border-color:#e0a458}
+.s-check{background:#e8f5e9;color:#1b5e20;border-color:#a5d6a7}
+.box{border:1px solid #dee2e6;border-radius:4px;padding:14px 16px;margin:12px 0;background:#fff}
+.box.decide{border-left:4px solid #dc3545}
+.box.rec{border-left:4px solid #28a745}
+.box.warn{border-left:4px solid #ffc107}
+.kpi{display:flex;gap:28px;flex-wrap:wrap;margin:14px 0 6px 0}
+.kpi div{font-size:13px;color:#6c757d}
+.kpi b{display:block;font-size:26px;color:#212529;font-weight:600;line-height:1.2}
+.cite{font-family:Consolas,Menlo,monospace;font-size:12.5px;color:#0b5ed7;
+      text-decoration:none;border-bottom:1px dotted #0b5ed7;cursor:pointer}
+.cite:hover{background:#e7f1ff}
+.daylevel{color:#6c757d;font-style:italic;border-bottom:none;cursor:help}
+.blind{border:1px dashed #adb5bd;background:#fbfbfb;border-radius:4px;padding:10px 14px;margin:10px 0}
+.blind h4{margin:0 0 6px 0;font-size:13.5px;color:#495057}
+.blind ul{margin:4px 0 0 18px;padding:0;font-size:13px;color:#6c757d;line-height:1.7}
+.undecide{border:1px dashed #e0a458;background:#fffdf7;border-radius:4px;padding:10px 14px;margin:10px 0;font-size:13.5px;color:#8a5200}
+.undecide b{color:#b35c00}
+.zero{border:1px solid #dee2e6;background:#f8f9fa;border-radius:4px;padding:10px 14px;margin:10px 0;font-size:13.5px;color:#495057}
+.footer{color:#6c757d;font-size:12px;margin-top:36px;border-top:1px solid #dee2e6;padding-top:8px}
+.score{font-size:40px;font-weight:bold;color:#6c757d}
+.cmp td:first-child{font-weight:600;white-space:nowrap}
+.rule{color:#6c757d;font-size:12.5px}
+.yes{color:#1b5e20;font-weight:600}
+.no{color:#dc3545;font-weight:600}
+.dim{color:#6c757d}
+details{margin:8px 0}
+summary{cursor:pointer;font-size:14px;color:#0b5ed7;padding:4px 0}
+pre.raw{background:#f8f9fa;border:1px solid #dee2e6;border-radius:3px;padding:8px 10px;
+        font-size:12px;overflow-x:auto;margin:6px 0;white-space:pre-wrap;word-break:break-all}
+/* 打印：监理报告要能签。去掉悬停色、保留边框、不出现只有颜色才看得出的信息 */
+@media print{
+  body{margin:14mm;max-width:none}
+  .cite{color:#000;border-bottom:none;text-decoration:none}
+  .box,.blind,.undecide,.zero{break-inside:avoid}
+  h2{break-after:avoid}
+}
+</style></head><body>
+
+<h1>Antinel 证据包 · 界面设计稿 v1.0</h1>
+<div class="meta">待拍板 ｜ 2026-11-01 02:25 ｜ C 线 C-3 取证 Agent 的前端部分 ｜ 本文只是设计，未写一行实现</div>
+
+<div class="box decide">
+  <b>这份稿子要你拍三件事</b>
+  <ol style="margin:8px 0 0 18px;padding:0;line-height:1.9;font-size:14px">
+    <li><b>对接方式</b>：独立文件同套样式（A）／嵌进现有报告（B）／另起站点（C）—— 我推荐 <b>A，并把 B 留作 A 线落地后再定</b></li>
+    <li><b>四档强度用词</b>：按产品词表（挡下／提醒／已记录未判定／已发现无法处置／已核对），还是按方案书 §5.3 的旧词 —— 我推荐<b>产品词表</b></li>
+    <li><b>「不可判」的显眼程度</b>：放在页脚上方中性色（推荐）／置顶红框／折叠收起</li>
+  </ol>
+</div>
+
+<h2>一、先说清楚：现有界面是什么</h2>
+
+<p class="note">
+产品今天<b>没有 Web 前端</b>。唯一的"界面"是 <code>scripts/report.py</code> 的
+<code>render_html()</code> 渲染出来的一份<b>静态 HTML 审计报告</b>（外加
+<code>challenge/tamper-lab.html</code> 一个演示页）。
+所以"跟现有界面对接"这句话，落到具体就是一件事：<b>跟那份 HTML 报告长得是同一份东西</b>。
+</p>
+
+<table class="cmp">
+<tr><th style="width:150px">维度</th><th>现有报告（<code>render_html</code>）</th><th>本设计稿</th></tr>
+<tr><td>字体</td><td>Segoe UI, Arial</td><td class="yes">同</td></tr>
+<tr><td>主色</td><td>critical <code>#dc3545</code>／warning <code>#ffc107</code>／ok <code>#28a745</code>／neutral <code>#6c757d</code></td><td class="yes">同（逐字复制，不重新取色）</td></tr>
+<tr><td>表格</td><td><code>border-collapse</code>／<code>#dee2e6</code>／表头 <code>#f8f9fa</code>／13–14px</td><td class="yes">同</td></tr>
+<tr><td>页脚</td><td>12px <code>#6c757d</code> + 上边框</td><td class="yes">同</td></tr>
+<tr><td>布局</td><td>单列、<code>margin:32px</code>、无导航、无 JS</td><td class="yes">同（仍然零 JS 依赖）</td></tr>
+<tr><td>新增</td><td>—</td><td>①四档强度标签 ②可点回指 ③盲区框 ④不可判框</td></tr>
+</table>
+
+<p class="note">
+<b>为什么坚持零 JS：</b>这份报告要能被归档、被邮件转发、被企业微信预览、被打印签字。
+任何依赖 JS 的交互在那些场景里都会静默失效，而<b>失效的报告比没有报告更危险</b>——
+它看起来是完整的。所以回指用 <code>&lt;details&gt;</code>（原生折叠），不用脚本。
+</p>
+
+<h2>二、页面上有什么（按读者分三级）</h2>
+
+<p class="note">方案书 §5.2：<b>三种读者＝三种报告，不是一份的三种长度</b>。默认读者是用户自己。</p>
+
+<h3>级别 1 · 一页纸（默认，用户自己）</h3>
+
+<div class="box">
+  <div class="meta" style="margin-bottom:8px">Antinel 监理报告 ｜ 2026-11-01 02:24 ｜ 主机：本机 ｜ 账本 33 个日文件 / 165,070 条</div>
+
+  <div class="kpi">
+    <div><b>5</b>条结论</div>
+    <div><b>2</b>条需要你看一眼</div>
+    <div><b>3</b>条只是记录</div>
+    <div><b>1</b>处盲区已声明</div>
+  </div>
+
+  <h3 style="margin-top:16px">这次看见了什么</h3>
+  <table>
+    <tr><th style="width:118px">结论强度</th><th>看见了什么</th><th style="width:210px">凭什么这么说</th></tr>
+
+    <tr>
+      <td><span class="tag s-check">已核对</span></td>
+      <td>账本 33 个日文件里，31 个与清单对得上（size 与末条 hash 全对）；
+          1 天记录里没有 hash 字段，锚无处可挂；1 天有 hash 却无清单条目。
+          <div class="rule">这是"账本自洽性检查"，<b>不是</b>拦截结论。</div></td>
+      <td><a class="cite">2026-10-05<span class="dim">（整天）</span></a></td>
+    </tr>
+
+    <tr>
+      <td><span class="tag s-check">已核对</span></td>
+      <td>165,070 条记录里 491 处时间戳比前一条早。链没断、内容没变；
+          抢锁日志显示等待时长与倒序幅度同量级 ⇒ 属并发排队，不是篡改。
+          <div class="rule">口径：datetime 归一后比较，无时区按本地墙钟（UTC+8）解释。</div></td>
+      <td><a class="cite">2026-10-08:215</a> 等 5 处</td>
+    </tr>
+
+    <tr>
+      <td><span class="tag s-log">已记录未判定</span></td>
+      <td>10-31 首次出现 4 条命令：<code>chmod</code>、<code>Get-Location</code>、<code>probe</code>、<code>printf</code>
+          <div class="rule">只知道"以前没见过"，不知道是否危险。</div></td>
+      <td><a class="cite">2026-10-31:3469</a> 等 4 处</td>
+    </tr>
+
+    <tr>
+      <td><span class="tag s-log">已记录未判定</span></td>
+      <td>10-31 首次出现 8 个域名，其中 <code>evil.example.com</code> 与 7 个政务站点混在一起
+          <div class="rule">域名首次出现不等于恶意；这里只报"新"。</div></td>
+      <td><a class="cite">2026-10-31:900</a> 等 5 处</td>
+    </tr>
+
+    <tr>
+      <td><span class="tag s-log">已记录未判定</span></td>
+      <td>同一会话里 <code>AN-010</code> 之后 5 分钟内又命中 <code>AN-014</code>（当天 1 次）
+          <div class="rule">只报"这两个同时出现过"，不做因果推断。</div></td>
+      <td><a class="cite">2026-10-31:9318</a></td>
+    </tr>
+  </table>
+
+  <div class="blind">
+    <h4>这份报告看不见什么（固定声明，不是免责套话）</h4>
+    <ul>
+      <li>账本以外的一切 —— 没被钩子拦到的动作不进账本，本报告只看得见账本</li>
+      <li>记录内容对不对 —— 只报"什么变了"，不判断是否危险、是否合规</li>
+      <li>账本是否被整体替换 —— 换掉整天文件并同步改清单，本报告仍报内部自洽</li>
+      <li>当天文件的回指 —— 行号在本次读取之后仍会变，以页脚读数时刻为准</li>
+    </ul>
+  </div>
+</div>
+
+<h3>级别 2 · 证据包（客户的管理者，另收费）</h3>
+<p class="note">同一批证据，增加：每条结论的<b>完整出处列表</b>、<b>强度档的判定依据</b>、<b>分母与算式</b>、<b>更正记录</b>。</p>
+
+<div class="box">
+  <table>
+    <tr><th style="width:70px">编号</th><th>结论</th><th style="width:96px">强度</th><th style="width:150px">来源</th><th>全部出处</th></tr>
+    <tr><td><code>AUD-03</code></td><td>A3 日清单</td><td><span class="tag s-check">已核对</span></td><td>auditor</td>
+        <td><a class="cite">2026-10-05<span class="dim">（整天）</span></a></td></tr>
+    <tr><td><code>AUD-04</code></td><td>A4 时间单调</td><td><span class="tag s-check">已核对</span></td><td>auditor</td>
+        <td><a class="cite">2026-10-08:215</a> <a class="cite">:218</a> <a class="cite">:250</a> <a class="cite">:255</a> <span class="dim">…共 5 处</span></td></tr>
+    <tr><td><code>WCH-01</code></td><td>首次出现命令</td><td><span class="tag s-log">已记录未判定</span></td><td>watchman/first_seen</td>
+        <td><a class="cite">2026-10-31:3469</a> <a class="cite">:4448</a> <a class="cite">:4511</a> <a class="cite">:6307</a></td></tr>
+  </table>
+
+  <p class="note" style="margin-top:12px"><b>每条出处都可展开看原文</b>（原生 <code>&lt;details&gt;</code>，无 JS）：</p>
+  <details>
+    <summary>2026-10-31 第 3469 行 —— 点开看这一行原文</summary>
+    <pre class="raw">{"ts":"2026-10-31T14:22:07.913+08:00","type":"pre_tool_use","tool":"Bash",
+ "rule_id":"AN-010","decision":"allow","action":"alert",
+ "cmd":"chmod +x /tmp/probe","session":"…"}</pre>
+  </details>
+
+  <div class="undecide">
+    <b>不可判（1 项）：</b>A5 总量 —— 未给 <code>--declare</code>，本维度<b>没有跑</b>。
+    <div class="rule">这不是"通过"，也不是"没有异常"，是<b>没查成</b>。</div>
+  </div>
+</div>
+
+<h3>级别 3 · 全量流水（监管／审计／司法，另收费）</h3>
+<p class="note">不加任何加工：证据 → 原始行 → 行号 → 该行 hash。可被第三方独立复算。</p>
+
+<h2>三、四档强度怎么在视觉上分开</h2>
+
+<p class="note">
+<b>只用颜色不行。</b>三条理由：色盲用户看不出、黑白打印全变灰、截图转灰度后全同色。
+所以每一档同时给<b>颜色 + 文字 + 一句限定语</b>，三者缺一不可。
+</p>
+
+<table>
+  <tr><th style="width:170px">档</th><th style="width:110px">标签</th><th>限定语（必带，不许省）</th><th style="width:230px">什么时候才许用</th></tr>
+  <tr><td><span class="tag s-held">挡下</span></td><td>红／实心</td>
+      <td>已由规则拦下（有规则号，可查规则库）</td>
+      <td><b>必须有 rule_id，且账本显示动作确实没执行</b>。<span class="no">C 线今天一条都不许产出</span>——它读的是账本，不是规则。</td></tr>
+  <tr><td><span class="tag s-alert">提醒</span></td><td>黄</td>
+      <td>有规则命中并告警，但动作仍然执行了</td>
+      <td>规则判了 alert。这一类是产品的主力（63.4%），不是缺陷。</td></tr>
+  <tr><td><span class="tag s-noresp">已发现无法处置</span></td><td>白底橙边</td>
+      <td>已发现，但没有可执行的处置手段</td>
+      <td>规则库标了 <code>response_capability: missing</code>。</td></tr>
+  <tr><td><span class="tag s-log">已记录未判定</span></td><td>灰蓝</td>
+      <td>已记录，未作判定（不知道是否危险，只知道它变了）</td>
+      <td>只有记录点、没有判据的那些。C 线绝大多数结论在这一档。</td></tr>
+  <tr><td><span class="tag s-check">已核对</span></td><td>绿（浅）</td>
+      <td>已核对（这是账本自洽性检查，不是拦截结论）</td>
+      <td>账本自检结果（A1–A5）。<b>说成"已拦截"就是造谣</b>——没有任何东西被拦。</td></tr>
+</table>
+
+<div class="box warn">
+  <b>一处必须让你知道的冲突</b>
+  <p class="note" style="margin:8px 0 0 0">
+  方案书 §5.3 写的三档是「<b>已拦截</b>／已发现无法处置／已记录未判定」。
+  但「已拦截」是产品<b>已经判死的错名</b>——<code>inbox_model.py:165</code> 原文：
+  「旧标题是『已拦截：越界动作被挡下』—— 但 <code>host_shield_breach</code> 描述的……」
+  现词表（<code>inbox_model.py:156-179</code>）是<b>没守住／挡下／提醒</b>。
+  </p>
+  <p class="note" style="margin:6px 0 0 0">
+  同一件事在收件箱叫「挡下」、在报告里叫「已拦截」，就是我们刚量出来的「同义两词」病
+  （<code>deny</code>+<code>block</code> 177 条命名未收敛）。<b>本设计稿用产品词表</b>，
+  方案书 §5.3 的纠偏会同步改。这就是要你拍的第二件事。
+  </p>
+</div>
+
+<h2>四、怎么跟现有界面对接（三个方案）</h2>
+
+<table class="cmp">
+<tr><th style="width:120px">方案</th><th>做法</th><th style="width:190px">好处</th><th style="width:230px">代价</th><th style="width:70px">建议</th></tr>
+
+<tr><td>A · 独立文件同套样式</td>
+    <td>生成 <code>evidence.html</code>，与 <code>report.html</code> 并列放在同一目录。
+        样式常量从 <code>report.py</code> 复制一份（<b>不是</b>重新取色）。</td>
+    <td>零改动 A 线代码，不撞车；可独立归档；出问题不影响主报告</td>
+    <td>用户要开两个文件；样式常量有两处副本，将来改色要改两遍</td>
+    <td class="yes">推荐<br><span class="rule">先做这个</span></td></tr>
+
+<tr><td>B · 嵌进现有报告</td>
+    <td>在 <code>report.py</code> 的 <code>render_html</code> 里加一个
+        <code>&lt;details&gt;</code> 折叠区，把证据包塞进去。</td>
+    <td>真正的"一份报告"；用户只开一个文件</td>
+    <td><b>A 线此刻正在改 <code>report.py</code></b>（83 行未提交）；样式常量只剩一处但要动它的代码</td>
+    <td class="dim">A 线落地后再定</td></tr>
+
+<tr><td>C · 另起站点</td>
+    <td>做一个多页面的 Web 应用，带导航、搜索、筛选。</td>
+    <td>体验最好</td>
+    <td>造第二套视觉；引入 JS 依赖 ⇒ 归档／邮件／打印场景静默失效</td>
+    <td class="no">不推荐</td></tr>
+</table>
+
+<p class="note">
+<b>为什么推荐 A 而不是 B：</b>不是技术原因，是<b>撞车原因</b>。A 线此刻正在
+<code>scripts/report.py</code> 里加通知面三档（83 行未提交）。我去动同一个文件，
+两个人的改动会互相盖。而 A 与 B 的差别只是"折叠区放哪"，<b>先做 A、A 线落地后
+再决定要不要并进 B</b>，成本几乎为零，风险为零。
+</p>
+
+<h2>五、四条设计红线（不写进文档就会被人改掉）</h2>
+
+<table>
+<tr><th style="width:34px">#</th><th>红线</th><th>违反的后果</th></tr>
+<tr><td>1</td><td><b>首屏不许是"未发现异常"</b></td>
+    <td>方案书 §5.4：第一份报告大概率是"未发现异常"，而"未发现异常"在用户眼里等于"没用"。
+        首屏必须是「这次看见了什么」——即使全绿也要有 3–5 条。</td></tr>
+<tr><td>2</td><td><b>"不可判"不许与"0 条"同貌</b></td>
+    <td>两者都是"没有东西"，但一个是结论、一个是盲区。A 线 <code>report.py</code>
+        同一条纪律：拿不到策略时印 <code>None</code>，不印三个 0。</td></tr>
+<tr><td>3</td><td><b>盲区不许折叠、不许置灰到看不见</b></td>
+    <td>可以放在页脚上方、可以用中性色，但必须默认展开。折叠盲区＝隐藏"我不知道"。</td></tr>
+<tr><td>4</td><td><b>每条结论旁边必须有可点的出处</b></td>
+    <td>方案书 §5.7：回指不到 ⇒ 不许写。这条由 <code>citecheck</code> 程序拦，不靠人记。</td></tr>
+</table>
+
+<h2>六、我还需要你确认的一处取舍</h2>
+
+<div class="box">
+  <p class="note" style="margin:0">
+  <b>回指到底能点多远？</b>浏览器不能跳到本地文件的第 N 行。三种做法：
+  </p>
+  <table style="margin-top:10px">
+    <tr><th style="width:150px">做法</th><th>效果</th><th style="width:80px">建议</th></tr>
+    <tr><td>只显示行号</td><td><code>2026-10-31:3469</code> 纯文本，用户自己去文件里搜</td><td class="dim">最保守</td></tr>
+    <tr><td>显示行号 + 可展开原文</td><td>点开就地看到那一行 JSON（如上面级别 2 的示例）</td><td class="yes">推荐</td></tr>
+    <tr><td>行号 + 原文 + 文件链接</td><td>再加一个 <code>file://</code> 链接打开整个日文件</td><td class="dim">可选</td></tr>
+  </table>
+  <p class="note" style="margin:8px 0 0 0">
+  <b>为什么推荐中间那档：</b>「可展开原文」让复核者不用离开报告就能判断"找对地方了没有"；
+  而 <code>file://</code> 链接在别人的机器上一定失效（路径不同），放进去只会让人误以为能点。
+  </p>
+</div>
+
+<div class="footer">
+本报告由 Antinel 监理生成。复扫方式：python -m scripts.scan --root .
+｜ 设计稿 v1.0 ｜ 2026-11-01 02:25 ｜ 待拍板，未写实现
+</div>
+
+</body></html>
