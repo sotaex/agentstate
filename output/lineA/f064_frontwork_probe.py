@@ -21,18 +21,39 @@ import sys
 import tokenize
 
 ROOTS = ["hooks", "ci", "scripts"]
-SKIP_DIRS = {"__pycache__", ".git", "_archive_dist"}
+# ★ 2026-10-31 第三关修正：第一版只扫 hooks/ci/scripts，漏掉一整类写入者。
+#   实证：账本里出现的 `config_refresh` 在 hooks/ci/scripts 里 0 命中，
+#   真正写它的是根目录的 `host_shield.py:2692/2944`。
+#   漏掉根目录模块的后果不是"少算几处"，是**整类写入者不可见** —— 回退表会漏掉整整一类记录。
+ROOT_LEVEL_PY = True
+SKIP_DIRS = {"__pycache__", ".git", "_archive_dist", "build", ".worktrees", "_uxtest2"} | set()
+SKIP_NAME_PARTS = (".away-", ".bak-")
 
 
 def iter_py(roots):
+    seen = set()
+    # 1) 子目录递归
     for root in roots:
         if not os.path.isdir(root):
             continue
         for dirpath, dirnames, filenames in os.walk(root):
             dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
             for fn in filenames:
-                if fn.endswith(".py"):
-                    yield os.path.join(dirpath, fn)
+                if fn.endswith(".py") and not any(s in fn for s in SKIP_NAME_PARTS):
+                    p = os.path.join(dirpath, fn)
+                    if p not in seen:
+                        seen.add(p)
+                        yield p
+    # 2) 根目录下的产品模块（antinel.py / host_shield.py / inbox_*.py …）
+    if ROOT_LEVEL_PY:
+        for fn in sorted(os.listdir(".")):
+            if not fn.endswith(".py"):
+                continue
+            if any(s in fn for s in SKIP_NAME_PARTS):
+                continue
+            if os.path.isfile(fn) and fn not in seen:
+                seen.add(fn)
+                yield fn
 
 
 class DecisionVisitor(ast.NodeVisitor):
@@ -190,19 +211,37 @@ def main():
             all_others += [(p, l, d) for l, d in v.others]
 
     print("[L1 真读到了吗]")
-    print("  扫描目录: %s" % ", ".join(ROOTS))
+    print("  扫描目录: 根目录 *.py + %s" % ", ".join(ROOTS))
     print("  .py 文件: %d 个，合计 %d 行" % (len(files), total_lines))
     print("  命中 decision 的文件: %d 个" % len(per_file))
     print()
 
     # ---- F1: decision 的取值集合 ----
-    print("[F1] decision 出现过的取值（字面量）")
-    vals = {}
+    # ★ 取值有两个来源，必须合并：
+    #   ① 写入点的字面量（dict-literal value=...）—— 账本里真实落地的值
+    #   ② 比较时的字面量（compare-literal）—— 代码会判的值
+    # 第一版只数了 ②，于是报「4 个取值」，漏掉 deny / config_refresh 等只写不判的值。
+    print("[F1] decision 出现过的取值（写入值 ∪ 比较值）")
+    write_vals, cmp_vals = {}, {}
+    for p, l, d in all_writes:
+        if "value=" in d:
+            v = d.split("value=", 1)[1]
+            write_vals.setdefault(v, []).append("%s:%d" % (p, l))
     for p, l, d in all_others:
-        vals.setdefault(d.split()[-1], []).append("%s:%d" % (p, l))
-    for k, loc in sorted(vals.items()):
-        print("  %-10s %3d 处  例: %s" % (k, len(loc), loc[0]))
-    print("  ⇒ 代码里参与比较的取值共 %d 个" % len(vals))
+        if "compare-literal" in d:
+            v = d.split()[-1]
+            cmp_vals.setdefault(v, []).append("%s:%d" % (p, l))
+    allvals = sorted(set(write_vals) | set(cmp_vals))
+    print("  %-20s %6s %6s   %s" % ("取值", "写入", "比较", "样例"))
+    for v in allvals:
+        w = len(write_vals.get(v, []))
+        c = len(cmp_vals.get(v, []))
+        sample = (write_vals.get(v) or cmp_vals.get(v))[0]
+        print("  %-20s %6d %6d   %s" % (v, w, c, sample))
+    only_write = [v for v in allvals if v in write_vals and v not in cmp_vals]
+    print("  ⇒ 取值共 %d 个；其中「只写不判」%d 个：%s"
+          % (len(allvals), len(only_write), ", ".join(only_write) or "无"))
+    print("     只写不判的值最危险：账本里存在，但代码里没有任何分支处理它。")
     print()
 
     # ---- F2: 写入点 ----

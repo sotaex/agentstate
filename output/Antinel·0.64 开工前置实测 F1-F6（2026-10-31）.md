@@ -2,7 +2,11 @@
 # 0.64 开工前置实测：F1–F6 六项全部补齐（2026-10-31 21:5x）
 
 **一句话：《0.64 契约草案 v0.1》§5 列的六件"今晚确认不了、必须明早用 grep 补"的事实已全部量出，
-其中三项读数**推翻**该草案的既有假设，契约需升 v0.2 才能开工。**
+其中四项读数**推翻**该草案的既有假设。**
+
+> **三关状态（2026-10-31 22:0x）**：① 契约已升 **v0.2**；② A 线新树已建
+> （`.worktrees/a064`，分支 `feat/0.64-dev`，基于 `9390218`，0/0 与 main 同步）；
+> ③ 扫描面已扩到根目录全部产品模块（文件数 72 → 127）。**三关全过。**
 
 > 全部读数来自本机实跑，只读、未改任何产品文件。
 > 重算命令：`python output/lineA/f064_frontwork_probe.py`（F1–F4/F6）、
@@ -13,44 +17,52 @@
 
 ## 1 六项事实（按契约草案 §5 的编号）
 
-### F1 `decision` 一共有几个取值 —— **不是 3 个，是 9 个**
+### F1 `decision` 一共有几个取值 —— **不是 3 个，是 11 个**
 
-代码里（`hooks/`+`ci/`+`scripts/`，72 个 .py、90,078 行，19 个文件命中）：
+> 本节数字在**第三关（扫描面修正）之后**重算过：第一版只扫 `hooks/`+`ci/`+`scripts/`（72 个 .py、90,078 行），
+> 报"9 个取值"；扩到根目录产品模块后为 **127 个 .py、129,264 行**，取值 **11 个**。
+> 明细随代码变化，不在此固化 —— 重算命令见卡首。
 
-| 取值 | 出现形态 | 样例 |
-|---|---|---|
-| `allow` | 字面量比较 + 写入 | `hooks/pre_tool_use.py:5321` |
-| `block` | 字面量比较（31 处，最多） | `ci/drift_audit.py:303` |
-| `alert` | 字面量比较 + 写入 | `hooks/pre_tool_use.py:5152` |
-| `warn` | 字面量比较 | `ci/inbox_guards_0490.py:5697` |
-| `deny` | **只在写入点出现** | `ci/inbox_guards_0400.py:429` |
-| `config_fallback` | 只在写入点 | `hooks/pre_tool_use.py:1289` |
-| `config_rejected` | 只在写入点 | `hooks/pre_tool_use.py:5416` |
-| `finding` | 只在写入点 | `scripts/report.py:315` |
-| `None` | 写入点直接给 None | `hooks/pre_tool_use.py:5316` |
+代码里（`根目录 *.py` + `hooks/` + `ci/` + `scripts/`）：
 
-**契约草案 §3 的回退表只覆盖 `alert`/`block`/`allow` 三种。**
-剩下 6 种没有归属 ⇒ 按现表推导，`deny` 与 `block` 会落到表外（行为未定义）、
-`config_*` 会落到表外、`None` 会落到表外。
+| 取值 | 写点 | 比较点 | 样例 |
+|---|---|---|---|
+| `allow` | 47 | 1 | `antinel.py:278` |
+| `block` | 5 | 38 | `ci/inbox_guards.py:123` |
+| `alert` | 4 | 9 | `hooks/post_tool_use.py:391` |
+| `deny` | 2 | **0** | `ci/inbox_guards_0400.py:429` |
+| `config_fallback` | 2 | **0** | `hooks/pre_tool_use.py:1289` |
+| `config_refresh` | 2 | **0** | `host_shield.py:2689` |
+| `config_rejected` | 1 | **0** | `hooks/pre_tool_use.py:5416` |
+| `config_skip` | 1 | **0** | `host_shield.py:2650` |
+| `finding` | 1 | **0** | `scripts/report.py:315` |
+| `None` | 5 | 0 | `hooks/pre_tool_use.py:5316` |
+| `warn` | **0** | 4 | `ci/inbox_guards_0490.py:5697` |
 
-### F2 有几处**写** `decision` —— **60+ 处，8 个文件**
+**11 个取值里有 7 个是「只写不判」**（`deny`/`config_fallback`/`config_refresh`/`config_rejected`/`config_skip`/`finding`/`None`）：
+账本里存在，代码里**没有任何分支处理它们**。其中 `deny` 在账本里有 1,195 条。
 
-`ci/inbox_guards_0353.py` 16 处、`hooks/pre_tool_use.py` 19 处、`scripts/verification_tests.py` 10 处、
-`ci/inbox_guards_0420.py` 3 处、`ci/inbox_guards_0400.py` 2 处、`ci/inbox_guards.py` 2 处、
-`hooks/post_tool_use.py` 2 处、`scripts/report.py` 3 处、`scripts/install.py` 1 处、
-`hooks/session_start_banner.py` 1 处、`ci/inbox_guards_0372.py` 1 处。
+反过来 `warn` 是**只判不写**：0.64 打算引入的目标取值，今天一条都没写过 ——
+**新取值上线时必须同时给出第一个写入者，否则上线即空转。**
 
-**契约草案 §6 说 0.64「只碰写入点与读侧」，隐含"写入点不多"。实际写入点是 60+ 处。**
-这是头号顽症「同一事实多处实现」的标准形状 —— 若 `notify` 逐个写在这 60 处，
-0.64 会新增 60 处同类实现，问题从 1 个字段变成 2 个字段 × 60 处。
+**契约草案 §3 的回退表只覆盖 `alert`/`block`/`allow` 三种**，剩下 8 种没有归属。
 
-### F3 有几处**读** `decision` 做判断 —— **16 处，6 个文件**
+### F2 有几处**写** `decision` —— **70 处，15 个文件**
 
-`scripts/report.py` 7 处（含 4 处下标取值）、`scripts/verification_tests.py` 3 处、
-`ci/drift_audit.py` 2 处、`hooks/pre_tool_use.py` 2 处、`hooks/post_tool_use.py` 1 处、
-`ci/inbox_guards_0517.py` 1 处。
+（第三关扩面后重算；第一版只扫三个子目录时报"60+ 处、8 个文件"，漏了根目录 5 个模块的写入者。）
+按文件分布不由本卡固化 —— 代码一变就过期，看探针输出。
 
-⇒ `_notify_of(rec)` 若要「读侧唯一」，这 16 处必须全部改道。**漏一处回退就没有唯一性。**
+**契约草案 §6 说 0.64「只碰写入点与读侧」，隐含"写入点不多"。实际写入点是 70 处。**
+这是头号顽症「同一事实多处实现」的标准形状 —— 若 `notify` 逐个写在这 70 处，
+0.64 会新增 70 处同类实现，问题从 1 个字段变成 2 个字段 × 70 处。
+**这正是契约 v0.2 §5 建议「`notify` 不落盘、纯读侧推导」的唯一理由。**
+
+### F3 有几处**读** `decision` 做判断 —— **30 处，11 个文件**
+
+（第三关扩面后重算；第一版报"16 处、6 个文件"，漏了近一半 —— 因为 `inbox_*.py`、`antinel.py`、
+`host_shield.py` 都在根目录，不在原来的扫描面里。）
+
+⇒ `_notify_of(rec)` 若要「读侧唯一」，这 30 处必须全部改道。**漏一处回退就没有唯一性。**
 
 ### F4 `emit_block` / `notice_gate` 是否同一出口 —— **不是，是两个出口**
 
@@ -93,8 +105,9 @@ N4（规则不能自行把 `gate` 降 `silent`）的强制点只能在 `notice_g
    是一个**必须拍板**的问题，不是实现细节。
 3. **`warn` 在账本里 0 条。** 契约 §2 要把 `decision` 收窄成 `allow/block/warn`，
    但账本里从来没有 `warn`；反过来账本里有 `deny`、`config_refresh`，
-   而 F1 的代码取值集合里**没有 `config_refresh`** ⇒ 该值由本次扫描面之外的写入点产生，
-   说明**扫描面没覆盖全部写入者**（`hooks/`+`ci/`+`scripts/` 之外的模块也在写账本）。
+   而第一版扫描面里**没有 `config_refresh`** ⇒ 该值由扫描面之外的写入点产生。
+   **第三关已定位并修正**：写它的是根目录 `host_shield.py:2689`，同理 `config_skip` 在 `:2650`。
+   扫描面扩到根目录全部产品模块后，文件数 72 → 127、取值 9 → 11。
 
 ### F6 值守台读的是哪个面 —— **第三个面，两个账本都不是**
 
@@ -116,7 +129,8 @@ N4（规则不能自行把 `gate` 降 `silent`）的强制点只能在 `notice_g
 
 **失败一：漏了一种读取形态。** 第一版只把 `.get("decision")` 当读，
 `d = rec["decision"]`（下标取值）没被算作读 ⇒ 正控样本断言失败。
-补 `visit_Subscript` 的 Load 分支后通过。**产品代码里下标取值占 F3 的 4/16，漏了就少算四分之一。**
+补 `visit_Subscript` 的 Load 分支后通过。**「读」至少三种形态：`get()`/`pop()`、下标取值、比较里的下标；
+只认第一种就会漏掉整类读点，而漏掉的读点不会报错，只会让「读侧唯一」这句话变成假话。**
 
 **失败二：拿一个面的尺子去量另一个面。** 第一版用「必须是 `YYYY-MM-DD.jsonl`」筛面 A，
 结果 `daily.jsonl` 被判成非日文件，**整个面读成 0 条**。
@@ -133,13 +147,15 @@ N4（规则不能自行把 `gate` 降 `silent`）的强制点只能在 `notice_g
 | # | 草案原话 | 实测 | 建议 |
 |---|---|---|---|
 | R1 | §4 校准命令读 `~/.antinel/ledger/daily.jsonl` | 该面无 `decision` | 改读 `.psl/audit/*.jsonl`，并注明"面 A 是日汇总，不是审计账" |
-| R2 | §3 回退表覆盖 3 种取值 | 实际 9 种（代码）/ 7 种（账本） | 回退表补 `deny→gate`、`config_*→toast`、`None→`（待拍），并把 `None` 单列 |
+| R2 | §3 回退表覆盖 3 种取值 | 实际 **11 种**（代码）/ 7 种（账本），其中 7 种「只写不判」 | 回退表补 `deny→gate`、`config_*` 分档、`finding→toast`、`None→`（待拍），并把 `None` 单列 |
 | R3 | §5 F4 假设有"合流出口" | 两个出口，无合流 | N2 落 `emit_block`、N4 落 `notice_gate`，分别写判据 |
 
-**另有一条不在草案里、但实测撞出来的：**
-`config_refresh` 出现在账本里但不在 F1 的代码取值集合里 ⇒
-**0.64 开工前必须先把「谁在写账本」的扫描面扩大**（至少覆盖根目录的 `inbox_*.py`、
-`state_registry.py`、`ledger.py`），否则会漏掉一整类写入者。
+**另有一条不在草案里、但实测撞出来的（第三关，已完成）：**
+第一版扫描面只有 `hooks/`+`ci/`+`scripts/`，于是 `config_refresh` / `config_skip` 在账本里存在、
+在扫描结果里却"不存在"——**漏掉的不是几处，是整类写入者**。
+第三关把扫描面扩到根目录全部产品模块（`antinel.py` 15 处、`inbox_*.py` 20 处、`host_shield.py` 5 处都在这里），
+文件数 72 → 127、写入点 60+ → 70、读点 16 → 30。
+**教训：扫描面本身就是判据的一部分，写进结论时必须同时写扫描面。**
 
 ---
 
