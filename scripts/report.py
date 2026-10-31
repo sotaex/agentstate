@@ -226,8 +226,19 @@ def self_tamper_check(manifest):
 def build_report(events, scan, manifest, host_label="", root=None):
     rules = rules_descriptions(root)
     findings = {}
+    # 0.64：取一次（内部有缓存）。拿不到就是 None ⇒ `notify` 置 **None 而不是全 0**。
+    # ★ 「算不出来」与「三档都是 0」必须可区分：全 0 会被读成「这一窗口没有任何
+    #   通知」，而真相是「这一版根本没法判断」—— 正是本项目最忌的「零与不可判同貌」。
+    _np_mod = _notify_policy()
     stats = {"events": len(events), "pre": 0, "post": 0, "blocked": 0, "alerted": 0,
-             "post_alerts": 0, "by_tool": {}, "canaries": set(), "sessions": set()}
+             "post_alerts": 0, "by_tool": {}, "canaries": set(), "sessions": set(),
+             # 0.64：通知面三档（gate / toast / none）—— 由 hooks/notify_policy.py
+             # 的**唯一实现**判定，本函数只做计数。三档互斥且穷尽：每条记录恰好
+             # 落在其中一档，所以三数之和恒等于 len(events)（验收腿之一）。
+             # ★ 刻意**不**改写上面的 blocked/alerted：那两个数有多年消费方，
+             # 换了口径会让历史报告与本期报告不可比。
+             "notify": ({"gate": 0, "toast": 0, "none": 0}
+                        if _np_mod is not None else None)}
     # 0.16.0 (P0-7 / WS-3): degraded-config events must be visible in the report,
     # not only in the raw audit log. Three families, counted separately because
     # they mean different things (T1): rules fell back (integrity mismatch or
@@ -257,8 +268,14 @@ def build_report(events, scan, manifest, host_label="", root=None):
            # is the whole point: a timeout is treated as ALLOW by the host,
            # so the verdict may never have reached the host at all.
            "hook_slow": 0, "hook_slow_max_ms": 0}
+    # 0.64：整块分档只在拿到唯一实现时才有意义；拿不到时 `stats["notify"]` 是 None，
+    # 这里一句不数，渲染处改说「算不出来」—— 不印三个 0（零与不可判同貌）。
     for ev in events:
         typ = ev.get("type", "")
+        if _np_mod is not None:
+            _nv = _np_mod.notify_of(ev)
+            _bucket = stats["notify"]
+            _bucket[_nv] = _bucket.get(_nv, 0) + 1
         if typ in cfg:
             cfg[typ] += 1
         # 0.42.0 (P5-1): the count alone understates it -- 89 records with a
@@ -444,6 +461,20 @@ def render_text(rep, log_label):
     if st["by_tool"]:
         L.append("  " + " | ".join("%s: %d" % (k, v) for k, v in sorted(st["by_tool"].items())))
     L.append("  blocked: %d | alerts: %d | pre-checks: %d" % (st["blocked"], st["alerted"], st["pre"]))
+    # 0.64：通知面三档（gate / toast / none）。为什么**单独一行**而不是并进上面那行：
+    #   上面 blocked / alerted 是「动作」口径，其中 `elif action == "alert"` 是
+    #   type-blind 的（`hook_slow` 这类记录会被同一个匿名计数吞掉，89 条实测）；
+    #   这一行才是「要不要打扰人」的直接读数，且三档之和必然等于记录数 ——
+    #   读者可以当场核对，不必信这句话。
+    _nv = st.get("notify")
+    if isinstance(_nv, dict):
+        L.append("  notify: gate %d | toast %d | none %d  (sum %d = %d records)" % (
+            _nv.get("gate", 0), _nv.get("toast", 0), _nv.get("none", 0),
+            _nv.get("gate", 0) + _nv.get("toast", 0) + _nv.get("none", 0),
+            st.get("events", 0)))
+    else:
+        # 刻意不与「全 0」同貌：算不出来就说算不出来。
+        L.append("  notify: not computable (hooks/notify_policy.py not found next to this report)")
     if st["canaries"]:
         L.append("  canaries observed: %s" % ", ".join(st["canaries"]))
     # 0.16.0: degraded-config visibility (WS-3 / P0-7). A workspace_roots entry
@@ -653,6 +684,17 @@ def render_html(rep, log_label):
                 "%s</p>" % (_hs_n, _ch.get("hook_slow_max_ms", 0),
                             " &mdash; these verdicts may never have reached the host"
                             if _hs_n else ""))
+    # 0.64：与文本报告同一行口径（三档之和 = 记录数）。拿不到唯一实现时
+    # 说「算不出来」，绝不印三个 0 —— 那会被截进企业周报当成「无通知」。
+    _nv = st.get("notify")
+    if isinstance(_nv, dict):
+        notify = ("<p>notify: gate %d | toast %d | none %d (sum %d = %d records)</p>"
+                  % (_nv.get("gate", 0), _nv.get("toast", 0), _nv.get("none", 0),
+                     _nv.get("gate", 0) + _nv.get("toast", 0) + _nv.get("none", 0),
+                     st.get("events", 0)))
+    else:
+        notify = ("<p>notify: not computable (hooks/notify_policy.py not found "
+                  "next to this report)</p>")
     return """<!doctype html><html><head><meta charset="utf-8">
 <title>Antinel Security Audit Report</title>
 <style>
@@ -676,6 +718,7 @@ th{background:#f8f9fa}
 %(rows)s</table>
 <h2>Operations</h2>
 <p>post-tool records: %(post)d | pre-checks: %(pre)d | blocked: %(blocked)d | alerts: %(alerted)d</p>
+%(notify)s
 %(hookslow)s
 %(bars)s
 <div class="footer">%(footer)s</div>
@@ -687,6 +730,7 @@ th{background:#f8f9fa}
         "crit": rep["summary"].get("critical", 0), "warn": rep["summary"].get("warning", 0),
         "rows": "\n".join(rows) or "<tr><td colspan='6'>No findings</td></tr>",
         "post": st["post"], "pre": st["pre"], "blocked": st["blocked"], "alerted": st["alerted"],
+        "notify": notify,
         "hookslow": hookslow,
         "bars": "\n".join(bars), "footer": e(FOOTER),
     }
@@ -729,6 +773,44 @@ def archive_logs(audit_dir, retention_days=RETENTION_DAYS_DEFAULT):
 
 
 # ------------------------------------------------------------------ main ----
+#: `_notify_policy()` 的加载缓存。空列表＝还没加载过；`[None]`＝加载过但失败。
+#: 两者必须可区分 —— 否则「没试过」与「试过拿不到」会被同一个假值抹平，
+#: 下一次调用就会反复重试（或更糟：把失败当成成功）。
+_NOTIFY_POLICY_CACHE = []
+
+
+def _notify_policy():
+    """0.64：加载 `hooks/notify_policy.py`（notify 三档的唯一实现）。
+
+    ★ 为什么用 importlib 而不是 `import`
+      `hooks/` 不是包（没有 `__init__.py`）；而钩子以 `python -I -S` 启动，
+      `-I` 隐含「不把脚本目录加进 sys.path」。`hooks/pre_tool_use.py` 里
+      `_load_host_detect()` 用的是同一手法 —— 但那边是相邻兄弟模块，
+      这边跨目录（`scripts/` → `hooks/`），所以要显式从包根算路径。
+
+    ★ 加载失败返回 None，**不抛**：报告不能因为一个可选分档整体失败。
+      但 None 与「全 0」必须区分 —— 拿不到时那一行**不输出**，
+      而不是输出 `gate 0 | toast 0 | none 0`（全 0 会被读成「没有通知」，
+      而真相是「没法判断」。这正是本项目最忌的「零与不可判同貌」）。
+    """
+    if _NOTIFY_POLICY_CACHE:
+        return _NOTIFY_POLICY_CACHE[0]
+    mod = None
+    try:
+        import importlib.util
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        p = os.path.join(root, "hooks", "notify_policy.py")
+        if os.path.isfile(p):
+            spec = importlib.util.spec_from_file_location("_notify_policy", p)
+            m = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(m)
+            mod = m
+    except Exception:                                          # noqa: BLE001
+        mod = None
+    _NOTIFY_POLICY_CACHE.append(mod)
+    return mod
+
+
 def _root_module(name):
     """包根模块的导入兜底（`host_shield` / `session_dna` …）。
 

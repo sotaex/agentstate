@@ -1,0 +1,31 @@
+0.64 S4：报告接上 notify 三档，并区分「零」与「不可判」
+
+- scripts/report.py：build_report 用 hooks/notify_policy.py 的唯一实现逐条分档；
+  文本与 HTML 各印一行 gate/toast/none 及 (sum N = M records)，让读者当场核对，
+  不必信这句话。三档互斥且穷尽，所以和恒等于记录数 —— 这是结构性验收腿。
+- scripts/report.py：新增 _notify_policy()，用 importlib 从包根加载
+  hooks/notify_policy.py；装载失败返回 None 不抛异常（报告不能因为一个可选分档
+  整体失败）。
+- 关键取舍：拿不到唯一实现时 stats["notify"] 置 None、报告上印 not computable；
+  不印三个 0。三个 0 会被读成「这一窗口没有任何通知」，而真相是「没法判断」——
+  零与不可判同貌，是本项目反复吃亏的同一个形状。
+- 刻意不改 blocked / alerted 的口径：那两个数有多年消费方，换口径会让历史报告
+  与本期报告不可比。
+- output/lineA/test_report_notify.py：18 项。五条腿 —— 读得到、穷尽（三档之和
+  == 记录数）、牙齿（假策略被逐条调用，证明不是抽样）、负控（拿不到 ⇒ None 且
+  渲染说算不出来）、空窗口。
+- output/Antinel·A线长程结果（2026-11-01）.md：整夜结果、早上 runbook、逐条风险。
+
+实测（真账本，--days 7，2026-11-01 03:10）：
+  notify gate 343 / toast 5427 / none 39518，和 45288 = 45288 条
+全账本 171,934 条回放：alert+allow 只剩 958 条，其中 919 条是通知预算的账务流水
+（window_closed 767 + merged 152，结构上不是事件），39 条是真事件（hook_slow 38 +
+hook_error 1）—— 详见契约 v0.4。
+
+同步动作（改了这个文件就躲不掉的两件）：
+  · psl/manifest.json 重签（`_tools_034/_resign_manifest.py`，只重算已有条目，
+    未变 143 / 重签 1；不碰 name/version/built_at）
+  · psl/judgment.json 重跑（`python -m scripts.run_harness`，第一遍 323/325 因
+    manifest 落后，重签后第二遍 325/325 PASS —— 判据 D-6／0.16.0 的鸡生蛋）
+单测：test_notify_policy 54/54；test_report_notify 18/18。
+全量闸门：本提交未跑，下一条命令补。
