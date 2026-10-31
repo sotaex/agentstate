@@ -63,6 +63,7 @@ CHECKS: List[Tuple[str, List[str], int]] = [
     ("citecheck --selfcheck", [os.path.join(LINE_C, "citecheck.py"), "--selfcheck"], 0),
     ("onepager --selfcheck", [os.path.join(LINE_C, "onepager.py"), "--selfcheck"], 0),
     ("corrections --selfcheck", [os.path.join(LINE_C, "corrections.py"), "--selfcheck"], 0),
+    ("report --selfcheck", [os.path.join(LINE_C, "report.py"), "--selfcheck"], 0),
     ("负控 evidence 18 臂", [os.path.join(OUTPUT, "_p_evid_negctl.py")], 0),
     ("负控 C-2 30 臂", [os.path.join(OUTPUT, "_p_c2_negctl.py")], 0),
     ("负控 更正端到端 11 臂", [os.path.join(OUTPUT, "_p_corr_e2e.py")], 0),
