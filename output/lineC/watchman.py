@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import collections
 import glob
+import json
 import os
 import re
 import statistics
@@ -702,20 +703,323 @@ def rule_id_census(root: str) -> Dict[str, Any]:
     }
 
 
+# --------------------------------------------------------------------------- 裁决口径
+
+# `decision` 与 `action` 是**两套字段并存**，不是一套（协同说明坑 1）。
+# 实测 2026-10-31 22:54：164,304 条里 action 出现 105,749 次、decision 77,388 次。
+# 差额主要是 post_tool_use —— 它**没有 decision**，裁决记在 action=record 里。
+# ⇒ 只按 decision 分桶会把执行侧整类漏掉（28.0% 的记录）。
+DECISION_DOMAIN = (
+    "allow", "deny", "alert", "block", "config_refresh", "config_fallback", None,
+)
+ACTION_DOMAIN = ("allow", "record", "alert", "block", None)
+
+# decision 字段里混着**非裁决值**：配置刷新/回退借用了同一个字段。
+# 它们不是裁决，但也不能算表外 —— 必须显式登记，否则每天都报红，
+# 而每天都红的规则等于没有规则（铁律 26）。
+NON_VERDICT_DECISION = {
+    "config_refresh": "配置刷新",
+    "config_fallback": "配置回退",
+}
+
+# 组合的合法性由**关系**判，不逐条列。
+# 逐条列的话，表会随 type 增长无限膨胀，「表外」就退化成「我还没抄到」——
+# 那正是铁律 28 说的「兜底让没分类看起来像分类完了」。
+REL_AGREE = "一致"          # decision == action
+REL_EXEC = "执行侧"         # 无 decision，裁决记在 action（post_tool_use 那类）
+REL_NONE = "无裁决"         # 两个都没有（计量／摘要记录）
+REL_ALLOW_ALERT = "放行但告警"  # allow × alert —— **不是矛盾**
+REL_SYNONYM = "同义两词"     # deny × block —— 命名未收敛
+REL_DEC_ONLY = "只有裁决"    # 有 decision 无 action（哨兵／汇总那类）
+REL_NON_VERDICT = "非裁决值"  # decision 里装了 config_*
+REL_OUT = "表外"            # 兜底：新组合，必须人看
+
+REL_ORDER = (
+    REL_AGREE, REL_EXEC, REL_NONE, REL_DEC_ONLY,
+    REL_ALLOW_ALERT, REL_SYNONYM, REL_NON_VERDICT, REL_OUT,
+)
+
+
+def classify_verdict(decision: Any, action: Any) -> str:
+    """把 (decision, action) 判进八档之一。纯函数，负控直接打它。"""
+    if decision in NON_VERDICT_DECISION:
+        return REL_NON_VERDICT
+    if decision is None:
+        # 没有 decision 但有 action ⇒ 裁决记在 action（执行侧）。
+        # 这一档**必须存在**：把它并进「无裁决」就等于把 45,988 条执行记录
+        # 说成「没有裁决」，而它们恰恰是有裁决的，只是记在另一个字段里。
+        return REL_NONE if action is None else REL_EXEC
+    if action is None:
+        return REL_DEC_ONLY
+    if decision == action:
+        return REL_AGREE
+    if decision == "allow" and action == "alert":
+        return REL_ALLOW_ALERT
+    if decision == "deny" and action == "block":
+        return REL_SYNONYM
+    return REL_OUT
+
+
+def verdict_census(recs: List[Tuple[str, int, Dict[str, Any]]]) -> Dict[str, Any]:
+    """裁决口径统计。**同时**验值域与关系，两件事分开报。
+
+    只验关系的话，一个新取值（`decision="quarantine"`）会落进「表外」——
+    报出来了，但报成「组合不认识」，而真正的问题是「值域变了」。
+    两件事混报，读的人就分不清是产品加了新裁决，还是写错了字段。
+    """
+    rel: collections.Counter = collections.Counter()
+    out: collections.Counter = collections.Counter()
+    bad_val: collections.Counter = collections.Counter()
+    n_dec = n_act = n = 0
+    for _, _, r in recs:
+        if r.get("__unparsed__"):
+            continue
+        n += 1
+        d, a = r.get("decision"), r.get("action")
+        if d is not None:
+            n_dec += 1
+        if a is not None:
+            n_act += 1
+        if d not in DECISION_DOMAIN:
+            bad_val[f"decision={d!r}"] += 1
+        if a not in ACTION_DOMAIN:
+            bad_val[f"action={a!r}"] += 1
+        k = classify_verdict(d, a)
+        rel[k] += 1
+        if k == REL_OUT:
+            out[(str(r.get("type")), str(d), str(a))] += 1
+    return {
+        "records": n,
+        "n_decision": n_dec,
+        "n_action": n_act,
+        "rel": {k: rel.get(k, 0) for k in REL_ORDER},
+        "out": out,
+        "bad_value": bad_val,
+    }
+
+
+def detect_verdict(vc: Dict[str, Any], today: str, today_lines: int) -> List[Clue]:
+    """表外组合与值域外的取值，各报一条。
+
+    这条**只在非空时报**：它恒为空是正常的（实测 40 种组合全部落进八档）。
+    恒绿的判据不许进人的清单（铁律 41），所以空的时候只出现在「盲区」那一行。
+    """
+    clues: List[Clue] = []
+    out, bad_val = vc["out"], vc["bad_value"]
+    if out:
+        items = tuple(f"{t}｜decision={d}｜action={a}" for (t, d, a) in sorted(out))
+        clues.append(
+            Clue(
+                kind="verdict",
+                day=today,
+                subject=(
+                    f"裁决口径出现 {len(out)} 种**表外组合**（共 {sum(out.values())} 条）"
+                ),
+                # 表外组合散布在多个 type 上，回指不了单一位置；
+                # 指向「今天读到末尾」是诚实的边界，假装指到某一行是造假。
+                evidence=((today, today_lines),),
+                note="表外＝(decision, action) 的关系不在这八档里，需人确认是新增裁决还是写错字段",
+                items=items,
+            )
+        )
+    if bad_val:
+        items = tuple(f"{k}×{v}" for k, v in sorted(bad_val.items()))
+        clues.append(
+            Clue(
+                kind="verdict",
+                day=today,
+                subject=(
+                    f"裁决字段出现 {len(bad_val)} 个**值域外取值**（共 {sum(bad_val.values())} 条）"
+                ),
+                evidence=((today, today_lines),),
+                note="值域变了 ⇒ 要么产品加了新裁决，要么字段被写坏；两者都要人看",
+                items=items,
+            )
+        )
+    return clues
+
+
+# --------------------------------------------------------------------------- 日锚
+
+# 日锚 = `day_manifest.json` 里逐日的 {size, last_hash, updated_at}。
+# 它比「日文件存在」强，因为它记的是**写入那一刻的指纹**：
+#   size 不符 -> 锚写完之后文件又被写过（追加／截断）
+#   hash 不符 -> 末条记录被换掉了
+#  有锚无文件 -> 文件被删了而锚还在 —— 这是**删除证据**，不是缺失。
+#
+# ★ 但它只是 L0，不是 L2（铁律 42）：锚与账本由**同一个进程**写。
+#   整链重写会连锚一起重算，那时本工具仍报内部自洽。
+#   能抓的只有「改完没重算」，所以措辞里不许出现「防篡改」。
+ANCHOR_NO_HASH = "(无hash字段)"   # 记录连 hash 都没有，锚无处可挂（旧 schema）
+ANCHOR_MISSING = "(有hash但无锚)"  # 有 hash 却没有清单条目 —— 事实，**不是**判定
+
+
+def anchor_census(
+    root: str, recs: List[Tuple[str, int, Dict[str, Any]]]
+) -> Dict[str, Any]:
+    """逐日核对日锚。**只读**，零写入。
+
+    末条 hash 从已经读进内存的 `recs` 里取（取该日最后一条带 hash 的记录），
+    不再读一遍盘 —— 33 个日文件最大 13MB，重读是白花。
+    """
+    man_path = os.path.join(root, "day_manifest.json")
+    man: Dict[str, Any] = {}
+    if os.path.exists(man_path):
+        try:
+            with open(man_path, "r", encoding="utf-8") as f:
+                got = json.load(f)
+            if isinstance(got, dict):
+                man = got
+        except Exception:
+            man = {}
+
+    # 该日最后一条带 hash 的记录
+    last_hash: Dict[str, str] = {}
+    lines_of: Dict[str, int] = collections.Counter()
+    for day, _ln, r in recs:
+        lines_of[day] += 1
+        if r.get("__unparsed__"):
+            continue
+        h = r.get("hash")
+        if isinstance(h, str) and h:
+            last_hash[day] = h
+
+    size_bad: List[Tuple[str, Any, int]] = []
+    hash_bad: List[Tuple[str, str, str]] = []
+    missing: List[Tuple[str, int, str]] = []
+    anchored = 0
+    # 当天文件还在写：**追加是正常的**，只有变短才是截断。
+    # 不区分的话，报告每次都会把今天报成「被动过」—— 而每天都红的规则等于没有规则。
+    # （产品侧 `verify_tail()` 对**所有**日子都只抓 `size < anchored`，见 tools/verify_chain.py:155；
+    #  这里对已封盘的日子更严：要求**严格相等**，因为封盘后不该再长。）
+    live = max(lines_of) if lines_of else ""
+    for day in sorted(lines_of):
+        name = f"{day}.jsonl"
+        path = os.path.join(root, name)
+        try:
+            sz = os.path.getsize(path)
+        except OSError:
+            continue
+        e = man.get(name)
+        if not isinstance(e, dict):
+            # 缺锚分两档：记录里有没有 hash，决定这是「无处可挂」还是「有 hash 却无锚」
+            missing.append(
+                (day, lines_of[day], ANCHOR_NO_HASH if day not in last_hash else ANCHOR_MISSING)
+            )
+            continue
+        anchored += 1
+        asz = e.get("size")
+        if day == live:
+            if isinstance(asz, int) and sz < asz:
+                size_bad.append((day, asz, sz))
+        elif asz != sz:
+            size_bad.append((day, asz, sz))
+        # 当天末条随时在变，比 hash 只会得到噪声 —— 只对已封盘的日子比。
+        if day == live:
+            continue
+        ah, lh = e.get("last_hash"), last_hash.get(day)
+        if isinstance(ah, str) and isinstance(lh, str) and ah != lh:
+            hash_bad.append((day, ah[:12], lh[:12]))
+
+    orphan = sorted(set(man) - {f"{d}.jsonl" for d in lines_of})
+    return {
+        "n_days": len(lines_of),
+        "n_anchored": anchored,
+        "n_manifest": len(man),
+        "size_bad": size_bad,
+        "hash_bad": hash_bad,
+        "missing": missing,
+        "orphan": orphan,
+        "has_manifest": bool(man),
+    }
+
+
+def detect_anchor(
+    ac: Dict[str, Any], today: str, today_lines: int, recent_days: set | None = None
+) -> List[Clue]:
+    """锚不符／锚孤儿／**新**缺锚，各报一条。缺锚两档分开说，不合报。
+
+    ★ 缺锚只报**最近 N 天**的：旧缺锚（如 2026-10-05）是**状态**，不是事件 ——
+    历史不会变，天天报就是恒红，而恒红的规则会稀释注意力（铁律 26／41）。
+    旧缺锚仍进覆盖状态那一行（`anchor：… 缺锚 2 天 …`），只是不占每日清单的位置。
+    """
+    clues: List[Clue] = []
+    ev = ((today, today_lines),)
+
+    if ac["size_bad"] or ac["hash_bad"]:
+        n = len(ac["size_bad"]) + len(ac["hash_bad"])
+        parts = [f"{d} size {a}→{b}" for d, a, b in ac["size_bad"]]
+        parts += [f"{d} 末条 hash {a}→{b}" for d, a, b in ac["hash_bad"]]
+        clues.append(
+            Clue(
+                kind="anchor",
+                day=today,
+                subject=f"{n} 天的账本与日锚对不上（锚写完之后文件被改过）",
+                evidence=ev,
+                note=(
+                    "只抓「改完没重算」，不是防篡改（锚与账本同一个进程写）；"
+                    "但它是目前唯一能指出「哪一天被动过」的证据"
+                ),
+                items=tuple(parts),
+            )
+        )
+
+    if ac["orphan"]:
+        clues.append(
+            Clue(
+                kind="anchor",
+                day=today,
+                subject=f"日锚里有 {len(ac['orphan'])} 天的账本文件不见了",
+                evidence=ev,
+                note="锚在、文件没了 ⇒ 删除证据（不是「那天没有记录」）",
+                items=tuple(ac["orphan"]),
+            )
+        )
+
+    # 缺锚两档：只有「有 hash 却没挂」才算线索；「无 hash 字段」是数据形态不支持，
+    # 报出来就是拿不可判定的东西当失败（铁律 45）。
+    # 再加一道「只看最近 N 天」：旧缺锚是状态不是事件，天天报就变成恒红。
+    real_miss = [
+        (d, n)
+        for d, n, kind in ac["missing"]
+        if kind == ANCHOR_MISSING and (recent_days is None or d in recent_days)
+    ]
+    if real_miss:
+        clues.append(
+            Clue(
+                kind="anchor",
+                day=today,
+                subject=f"{len(real_miss)} 天有 hash 却没有日锚",
+                evidence=ev,
+                note=(
+                    "**事实，不是判定**：有 hash 只说明这条记录能挂锚，"
+                    "没挂上是「漏了」还是「当时还没有调锚这个动作」，要看当日代码 —— "
+                    "本工具读不到代码历史，所以只记事实（B 线 b9 已定性 2026-10-05 属后者）"
+                ),
+                items=tuple(f"{d}（{n} 行）" for d, n in real_miss),
+            )
+        )
+    return clues
+
+
 # --------------------------------------------------------------------------- 渲染
 
 
 # 排序即产品判断，不是格式。
-#   absent 第一：它多半意味着**产品自己坏了**（钩子挂了、规则被静默关掉），不是用户干了什么；
+#   anchor 第一：账本与日锚对不上 ⇒ **下游一切读数都不可信**，先别看别的；
+#   absent 第二：它多半意味着**产品自己坏了**（钩子挂了、规则被静默关掉），不是用户干了什么；
+#   verdict 第三：口径变了（新增裁决／写错字段），要人确认，但通常不是事故；
 #   gap    最低：日内断层大多只是「你去吃饭了」，它无法区分「停手」与「钩子断了」，
 #          而这件事已经由 absent 用更准的方式问了 —— 同样的现象，更好的问句排在前面。
 PRIORITY = {
-    "absent": 0,
-    "baseline": 1,
-    "repeat": 2,
-    "first_seen": 3,
-    "rule_pair": 4,
-    "gap": 5,
+    "anchor": 0,
+    "absent": 1,
+    "verdict": 2,
+    "baseline": 3,
+    "repeat": 4,
+    "first_seen": 5,
+    "rule_pair": 6,
+    "gap": 7,
 }
 
 
@@ -726,7 +1030,9 @@ PRIORITY = {
 # 加了新检测器、忘了改文案，报告就会继续说「我只查了这五件事」。
 # 所以：键必须齐，缺一个就抛（见 `_coverage_selfcheck`），
 # 且状态只能从下面这四种里取，不许自由发挥。
-COVERAGE_KEYS = ("absent", "baseline", "repeat", "first_seen", "gap", "rule_pair")
+COVERAGE_KEYS = (
+    "anchor", "absent", "verdict", "baseline", "repeat", "first_seen", "gap", "rule_pair",
+)
 
 RAN, EMPTY, UNDECIDABLE, SKIPPED = "ran", "empty", "undecidable", "skipped"
 COV_MARK = {
@@ -741,7 +1047,15 @@ COV_MARK = {
 BLIND_SPOTS = (
     ("账本以外的一切", "没被钩子拦到的动作不进账本；本工具只看得见账本"),
     ("记录内容对不对", "本工具只报「什么变了」，不判断是否危险、是否合规"),
-    ("是否被整链重写", "整链重写后重算全部 hash 与清单，本工具仍报内部自洽（需 L2 外部锚）"),
+    (
+        "是否被整链重写",
+        "日锚与账本由同一个进程写，整链重写会连锚一起重算 ⇒ 仍报内部自洽"
+        "（要系统外的锚才算 L2；目前没有）",
+    ),
+    (
+        "账本是否被整体替换",
+        "换掉整天文件并同步改 day_manifest 的 size 与 hash，本工具看不出来",
+    ),
 )
 
 
@@ -848,10 +1162,45 @@ def render(
     )
     lines.append(
         "—— 分母 ——"
-        f" 日文件 {meta['files']}｜记录 {meta['records']:,}｜不可解析 {meta['unparsed']}｜"
+        f" 读数 {meta.get('read_at', '—')}｜"
+        f"日文件 {meta['files']}｜记录 {meta['records']:,}｜不可解析 {meta['unparsed']}｜"
         f"基线窗口 {meta['window']} 天｜首次出现窗口 {recent} 天｜规则配对 {rp_state}"
     )
     lines.append("")
+
+    # —— 裁决口径 ——
+    # 这一行不是装饰：协同说明坑 1 的代价，就是有人拿「52.9% 的记录没有 decision」
+    # 当结论报出去。真实原因是**两套字段并存** —— 执行侧把裁决记在 action 里。
+    # 所以这里每次都把两个字段的条数并排印出来，让读者不必自己推。
+    vd = meta.get("verdict") or {}
+    if vd.get("rel"):
+        ac_ = meta.get("anchor") or {}
+        rel_txt = "／".join(f"{k} {v:,}" for k, v in vd["rel"].items() if v)
+        lines.append(f"—— 裁决口径 —— {rel_txt}")
+        lines.append(
+            f"   decision 有值 {vd.get('n_decision', 0):,}｜action 有值 "
+            f"{vd.get('n_action', 0):,}｜表外 {vd.get('n_out', 0)}｜"
+            f"值域外 {vd.get('n_bad_value', 0)}"
+        )
+        lines.append(
+            "   两套字段并存：post_tool_use 没有 decision，裁决记在 action=record 里 ⇒"
+            " 只按 decision 分桶会把执行侧整类漏掉。「放行但告警」不是矛盾，是"
+            "「放行但又告警」；「同义两词」是 deny 与 block 命名未收敛。"
+        )
+        n_no_dec = meta.get("records", 0) - vd.get("n_decision", 0)
+        n_all = meta.get("records", 0)
+        lines.append(
+            f"   没有 decision 的 {n_no_dec:,} 条 = 执行侧 {vd['rel'].get(REL_EXEC, 0):,}"
+            f"（裁决在 action 里）+ 无裁决 {vd['rel'].get(REL_NONE, 0):,}"
+            f"（usage_delta／session_dna 本来就没有裁决）⇒ 这是**适用面不同**，不是字段缺失；"
+            f"报成「{n_no_dec / n_all * 100:.1f}% 的记录没有 decision」是错的。"
+        )
+        if ac_.get("n_days"):
+            lines.append(
+                f"   日锚 {ac_.get('n_anchored', 0)}/{ac_.get('n_days', 0)} 天"
+                f"（size 与末条 hash 都对得上）；锚只抓「改完没重算」，不是防篡改。"
+            )
+        lines.append("")
     lines.extend(render_coverage(coverage))
     lines.append("本报告只陈述「什么变了」，不判断是否危险。")
     return "\n".join(lines)
@@ -884,6 +1233,9 @@ def main(argv: List[str] | None = None) -> int:
     if not recs:
         print(f"[停] {args.root} 里没有任何日文件记录", file=sys.stderr)
         return 2
+    # 报数规矩（协同说明 §七）：任何条数必须带读取时刻 —— 账本 30 天滚动，
+    # 明天必不同。这里记的是**读完那一刻**，不是报告生成那一刻，两者差几秒也是差。
+    read_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     unparsed = sum(1 for _, _, r in recs if r.get("__unparsed__"))
     daily: Dict[str, int] = collections.defaultdict(int)
@@ -922,11 +1274,48 @@ def main(argv: List[str] | None = None) -> int:
     scope = f"截至 {cutoff[:5]}" if cutoff else "全天"
 
     today_lines = sum(1 for d, _, _ in recs if d == today)
+
+    # 锚先算：它决定「下游读数可不可信」。锚坏了而先报别的，等于在坏尺子上量东西。
+    ac = anchor_census(args.root, recs)
+    all_days = sorted(per_type)
+    recent_days = set(all_days[-args.recent:]) if args.recent > 0 else set(all_days)
+    got = detect_anchor(ac, today, today_lines, recent_days)
+    clues += got
+    n_miss_nohash = sum(1 for _d, _n, k in ac["missing"] if k == ANCHOR_NO_HASH)
+    n_miss_real = sum(1 for _d, _n, k in ac["missing"] if k == ANCHOR_MISSING)
+    n_miss_old = sum(
+        1 for d, _n, k in ac["missing"] if k == ANCHOR_MISSING and d not in recent_days
+    )
+    coverage["anchor"] = {
+        "status": RAN if got else EMPTY,
+        "note": (
+            f"{ac['n_anchored']}/{ac['n_days']} 天有锚；缺锚 {len(ac['missing'])} 天"
+            f"（无 hash 字段 {n_miss_nohash}／有 hash 无锚 {n_miss_real}"
+            + (f"，其中 {n_miss_old} 天不在最近 {args.recent} 天 ⇒ 只计数不上报" if n_miss_old else "")
+            + f"）；size 不符 {len(ac['size_bad'])}、末条 hash 不符 {len(ac['hash_bad'])}、"
+            f"锚孤儿 {len(ac['orphan'])}"
+        ),
+    }
+
     got = detect_absent(per_type, today, cutoff, today_lines)
     clues += got
     coverage["absent"] = {
         "status": RAN if got else EMPTY,
         "note": f"前 7 天里 >=5 天出现且中位数 >=3 的 type；口径 {scope}",
+    }
+
+    vc = verdict_census(recs)
+    got = detect_verdict(vc, today, today_lines)
+    clues += got
+    n_rel = {k: v for k, v in vc["rel"].items() if v}
+    coverage["verdict"] = {
+        "status": RAN if got else EMPTY,
+        "note": (
+            f"{vc['records']:,} 条按 (type, decision, action) 分档，"
+            f"{len(n_rel)} 档有数、表外 {vc['rel'][REL_OUT]}；"
+            f"decision 有值 {vc['n_decision']:,}／action 有值 {vc['n_action']:,}"
+            f"（差额是执行侧：裁决记在 action 里）"
+        ),
     }
 
     got = detect_baseline(daily_cut, window=args.window, recent=args.recent, cutoff=cutoff)
@@ -977,6 +1366,7 @@ def main(argv: List[str] | None = None) -> int:
     meta = {
         "today": today,
         "today_records": today_records,
+        "read_at": read_at,
         "files": len(day_files(args.root)),
         "records": len(recs),
         "unparsed": unparsed,
@@ -984,6 +1374,14 @@ def main(argv: List[str] | None = None) -> int:
         "baseline_cutoff": cutoff,
         "pair_stats": pair_stats,
         "rule_census": rule_id_census(args.root),
+        "anchor": ac,
+        "verdict": {
+            "rel": vc["rel"],
+            "n_decision": vc["n_decision"],
+            "n_action": vc["n_action"],
+            "n_out": vc["rel"][REL_OUT],
+            "n_bad_value": sum(vc["bad_value"].values()),
+        },
     }
     if args.json:
         import json as _json

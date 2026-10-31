@@ -207,7 +207,20 @@ def check_manifest(s: Snapshot) -> Finding:
     live = s.files[-1] if s.files else None
 
     bad: List[Tuple[str, int]] = []
-    not_in_manifest: List[str] = []
+    # 「不在清单里」有两种，混起来就是**拿新日子给旧缺口打掩护**：
+    #   晚于清单末条 -> 真·新增日（清单还没写到它），不算失败；
+    #   早于清单末条 -> 历史缺锚，**不是新增日**，必须点名。
+    # 再按记录里有没有 hash 分两档（与 watchman 的日锚检测器同一条规则）：
+    #   有 hash -> 有 hash 却没有清单条目。**这是事实，不是判定**：
+    #             「漏了」还是「当时还没有调锚这个动作」，要看当日代码。
+    #             B 线 b9 已定性：2026-10-05 属后者（0.60.0 才补 touch_day_manifest）。
+    #             所以这里只降 WARN 并点名，不写「本该挂上」。
+    #   无 hash -> 旧 schema，锚无处可挂，属「不适用」，不算失败（铁律 45）。
+    man_days = [n[:10] for n in s.manifest if len(n) >= 10]
+    last_man_day = max(man_days) if man_days else ""
+    new_days: List[str] = []
+    gap_hash: List[str] = []
+    gap_nohash: List[str] = []
     checked = 0
     for path in s.files:
         if path == live:
@@ -215,7 +228,13 @@ def check_manifest(s: Snapshot) -> Finding:
         name = os.path.basename(path)
         ent = s.manifest.get(name)
         if not isinstance(ent, dict):
-            not_in_manifest.append(name)
+            day = name[:10]
+            if last_man_day and day > last_man_day:
+                new_days.append(name)
+                continue
+            rs = s.recs[path]
+            has_hash = any(r[1].get("hash") for r in rs)
+            (gap_hash if has_hash else gap_nohash).append(name)
             continue
         checked += 1
         if "size" in ent and ent["size"] != os.path.getsize(path):
@@ -235,8 +254,24 @@ def check_manifest(s: Snapshot) -> Finding:
             tuple(bad[:5]),
         )
     note = f"{checked} 个日文件与清单一致；当日文件（{_day(live)}）正在写，未参与比对"
-    if not_in_manifest:
-        note += f"；{len(not_in_manifest)} 个不在清单里（新增日，不算失败）"
+    if new_days:
+        note += f"；{len(new_days)} 个晚于清单末条（{last_man_day}）⇒ 真·新增日，不算失败"
+    if gap_nohash:
+        note += (
+            f"；{len(gap_nohash)} 个早于清单末条但记录无 hash ⇒ 锚无处可挂（不适用）："
+            f"{'、'.join(n[:10] for n in gap_nohash)}"
+        )
+    if gap_hash:
+        # 能核的都一致，但有几天**没得核** —— 说 PASS 是「全部一致」，那是假的；
+        # 说 FAIL 是「清单不符」，那也是假的。中间那一档才是事实。
+        return Finding(
+            "A3 日清单",
+            WARN,
+            note
+            + f"；**{len(gap_hash)} 个早于清单末条却有 hash ⇒ 历史缺锚（有 hash 却无清单条目）**："
+            + "、".join(n[:10] for n in gap_hash),
+            tuple((n, 0) for n in gap_hash),
+        )
     return Finding("A3 日清单", PASS, note)
 
 
@@ -309,8 +344,11 @@ def render(findings: List[Finding], s: Snapshot, census: Dict[str, int] | None =
 
     for f in findings:
         lines.append(f"[{MARK[f.status]}] {f.dim} —— {f.detail}")
+        # FAIL 叫「断点」（链真的断了）；WARN 叫「位置」——
+        # 缺锚是**没得核**，不是断了，用「断点」会把「从没写过」说成「写到一半断了」。
+        label = "断点" if f.status == FAIL else "位置"
         for name, ln in f.evidence:
-            lines.append(f"        断点：{name}:{ln}" if ln else f"        断点：{name}")
+            lines.append(f"        {label}：{name}:{ln}" if ln else f"        {label}：{name}")
     lines.append("")
 
     fails = [f for f in findings if f.status == FAIL]

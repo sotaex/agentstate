@@ -148,6 +148,189 @@ def append_rec(path: str, rec: Dict[str, Any]) -> None:
         fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
+def resync_manifest(root: str, day: str) -> str:
+    """把日锚重算到与实际文件一致 —— 让负控只改**一处**。
+
+    不重算的话，往目标日追加一条记录会顺带把 anchor 的 size/hash 打红。
+    那正是 anchor 该做的事；但作为 verdict 臂的伴随噪声，它会掩盖
+    「verdict 到底响没响」。所以：改完账本就把锚同步，只留一个变量。
+    """
+    man_path = os.path.join(root, "day_manifest.json")
+    day_path = os.path.join(root, f"{day}.jsonl")
+    with open(man_path, "r", encoding="utf-8") as fh:
+        man = json.load(fh)
+    last_hash = None
+    with open(day_path, "r", encoding="utf-8", errors="replace") as fh:
+        for ln in fh:
+            ln = ln.strip()
+            if not ln:
+                continue
+            try:
+                r = json.loads(ln)
+            except Exception:
+                continue
+            if isinstance(r, dict) and isinstance(r.get("hash"), str) and r["hash"]:
+                last_hash = r["hash"]
+    e = man.setdefault(f"{day}.jsonl", {})
+    e["size"] = os.path.getsize(day_path)
+    if last_hash:
+        e["last_hash"] = last_hash
+    with open(man_path, "w", encoding="utf-8") as fh:
+        json.dump(man, fh, ensure_ascii=False, indent=1)
+    return f"锚已同步（size={e['size']}）"
+
+
+def m_verdict_out(path: str, day: str) -> str:
+    ts = bump_ts(max_ts(path, day), 3)
+    append_rec(
+        path,
+        {
+            "ts": ts,
+            "type": "pre_tool_use",
+            "tool": "Bash",
+            "session": "nc-verdict",
+            "decision": "allow",
+            "action": "block",
+            "input": {"command": "nc_verdict_probe", "content_len": 0},
+        },
+    )
+    return "注入 decision=allow + action=block（表外组合）｜" + resync_manifest(
+        os.path.dirname(path), day
+    )
+
+
+def m_verdict_badval(path: str, day: str) -> str:
+    ts = bump_ts(max_ts(path, day), 4)
+    append_rec(
+        path,
+        {
+            "ts": ts,
+            "type": "pre_tool_use",
+            "tool": "Bash",
+            "session": "nc-verdict",
+            "decision": "quarantine",
+            "action": "alert",
+            "input": {"command": "nc_verdict_badval", "content_len": 0},
+        },
+    )
+    return "注入 decision=quarantine（值域外）｜" + resync_manifest(os.path.dirname(path), day)
+
+
+def m_verdict_legal(path: str, day: str) -> str:
+    """合法组合：allow + alert = 「放行但又告警」，**不许**报成矛盾。"""
+    ts = bump_ts(max_ts(path, day), 5)
+    append_rec(
+        path,
+        {
+            "ts": ts,
+            "type": "notice_budget_merged",
+            "tool": "-",
+            "session": "nc-verdict",
+            "decision": "allow",
+            "action": "alert",
+            "reason": "nc 合法组合探针",
+        },
+    )
+    return "注入 decision=allow + action=alert（合法：放行但告警）｜" + resync_manifest(
+        os.path.dirname(path), day
+    )
+
+
+def _anchor_bump(path: str, which: int, field: str) -> str:
+    """改锚里的 size 或 last_hash。which=-1 当天，-2 最近一个已封盘日。
+
+    当天与封盘日**语义不同**，必须分开测：
+      封盘日 size 要求严格相等（封盘后不该再长）；
+      当天 size 只抓变短（追加是正常的）。
+      当天末条 hash 随时在变 ⇒ 根本不比。
+    """
+    with open(path, "r", encoding="utf-8") as fh:
+        man = json.load(fh)
+    k = sorted(man)[which]
+    e = man[k]
+    if field == "size":
+        old = e.get("size")
+        e["size"] = (old or 0) + 1
+        desc = f"{k} 的锚 size {old} -> {e['size']}（文件没动）"
+    else:
+        old = e.get("last_hash")
+        e["last_hash"] = "0" * 64
+        desc = f"{k} 的锚 last_hash 改成 000…（原 {str(old)[:8]} 起）"
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(man, fh, ensure_ascii=False, indent=1)
+    return desc
+
+
+def m_anchor_size_closed(path: str) -> str:
+    return _anchor_bump(path, -2, "size")
+
+
+def m_anchor_size_live(path: str) -> str:
+    return _anchor_bump(path, -1, "size")
+
+
+def m_anchor_hash_closed(path: str) -> str:
+    return _anchor_bump(path, -2, "last_hash")
+
+
+def m_anchor_hash_live(path: str) -> str:
+    return _anchor_bump(path, -1, "last_hash")
+
+
+def m_anchor_orphan(path: str) -> str:
+    with open(path, "r", encoding="utf-8") as fh:
+        man = json.load(fh)
+    man["2026-01-01.jsonl"] = {"size": 1, "last_hash": "f" * 64, "updated_at": "2026-01-01T00:00:00"}
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(man, fh, ensure_ascii=False, indent=1)
+    return "给不存在的 2026-01-01.jsonl 加一条锚（模拟账本被删）"
+
+
+def m_anchor_missing(path: str) -> str:
+    with open(path, "r", encoding="utf-8") as fh:
+        man = json.load(fh)
+    k = sorted(man)[-1]
+    del man[k]
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(man, fh, ensure_ascii=False, indent=1)
+    return f"删掉 {k} 的锚条目（该日记录**有** hash ⇒ 本该挂上）"
+
+
+def m_anchor_nohash(path: str) -> str:
+    """删锚 **且** 把该日记录的 hash 全抹掉 ⇒ 应判「锚无处可挂」，不是「漏了」。
+
+    这一臂守的是铁律 45：「没有的东西不能报成失败」。
+    只删锚不抹 hash，这个检测器就会把「数据形态不支持」报成「产品漏了」。
+    """
+    day = sorted(json.load(open(path, "r", encoding="utf-8")))[-1][:10]
+    with open(path, "r", encoding="utf-8") as fh:
+        man = json.load(fh)
+    man.pop(f"{day}.jsonl", None)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(man, fh, ensure_ascii=False, indent=1)
+
+    day_path = os.path.join(os.path.dirname(path), f"{day}.jsonl")
+    out = []
+    stripped = 0
+    with open(day_path, "r", encoding="utf-8", errors="replace") as fh:
+        for ln in fh:
+            ln = ln.rstrip("\n")
+            if not ln.strip():
+                continue
+            try:
+                r = json.loads(ln)
+            except Exception:
+                out.append(ln)
+                continue
+            if isinstance(r, dict) and "hash" in r:
+                r.pop("hash", None)
+                stripped += 1
+            out.append(json.dumps(r, ensure_ascii=False))
+    with open(day_path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(out) + "\n")
+    return f"删 {day} 的锚 + 抹掉该日 {stripped} 条记录的 hash（模拟旧 schema）"
+
+
 # --------------------------------------------------------------------- 三处篡改
 
 
@@ -259,6 +442,21 @@ def main() -> int:
     for f in files:
         shutil.copy2(f, os.path.join(base, os.path.basename(f)))
 
+    # 日锚必须进副本，否则副本里「缺锚」恒为满盘（9 天全缺），
+    # 负控就测不出「有锚／没锚」的区别。
+    # 同时**子集化**到被复制的这 9 天：不子集的话，「锚孤儿」会把副本外的
+    # 24 天全算成「文件被删了」，干净臂先红，负控就没有基线段可谈了。
+    man_src = os.path.join(SRC, "day_manifest.json")
+    n_man = 0
+    if os.path.exists(man_src):
+        with open(man_src, "r", encoding="utf-8") as fh:
+            full = json.load(fh)
+        keep = {os.path.basename(f) for f in files}
+        sub = {k: v for k, v in full.items() if k in keep}
+        n_man = len(sub)
+        with open(os.path.join(base, "day_manifest.json"), "w", encoding="utf-8") as fh:
+            json.dump(sub, fh, ensure_ascii=False, indent=1)
+
     print("=" * 72)
     print("C-2 巡检负控（watchman.py）")
     print("=" * 72)
@@ -267,10 +465,16 @@ def main() -> int:
     print()
 
     clean = run(base)
-    ck = {k: kinds(clean, k) for k in ("absent", "baseline", "repeat", "first_seen", "rule_pair", "gap")}
-    print(f"干净臂 clues 分布：absent {len(ck['absent'])}｜baseline {len(ck['baseline'])}｜"
+    ck = {
+        k: kinds(clean, k)
+        for k in ("anchor", "absent", "verdict", "baseline", "repeat", "first_seen", "rule_pair", "gap")
+    }
+    print(f"干净臂 clues 分布：anchor {len(ck['anchor'])}｜absent {len(ck['absent'])}｜"
+          f"verdict {len(ck['verdict'])}｜baseline {len(ck['baseline'])}｜"
           f"repeat {len(ck['repeat'])}｜first_seen {len(ck['first_seen'])}｜"
           f"rule_pair {len(ck['rule_pair'])}｜gap {len(ck['gap'])}")
+    print(f"干净臂日锚：副本内 {n_man}/{len(files)} 天有条目"
+          f"｜{clean['coverage']['anchor']['note']}")
     clean_max_gap = 0.0
     for c in ck["gap"]:
         m = re.search(r"有 (\d+) 小时 (\d+) 分|有 (\d+) 分", c["subject"])
@@ -305,7 +509,7 @@ def main() -> int:
             base_n = {k: len(v) for k, v in ck.items()}
             others = [
                 f"{k} {base_n.get(k, 0)}->{len(kinds(res, k))}"
-                for k in ("absent", "baseline", "repeat", "first_seen", "rule_pair", "gap")
+                for k in ("anchor", "absent", "verdict", "baseline", "repeat", "first_seen", "rule_pair", "gap")
                 if k != expect_kind and len(kinds(res, k)) != base_n.get(k, 0)
             ]
         else:
@@ -315,6 +519,40 @@ def main() -> int:
         print(f"         {'[OK]' if ok else '[NG]'} {detail}")
         # 交叉污染：一处篡改会同时惊动别的检测器（删记录既挖洞也降量）。
         # 报出来，免得把「响应」读成「精准」。
+        if others:
+            print(f"         附带惊动：{'、'.join(others)}")
+        print()
+        shutil.rmtree(dst, ignore_errors=True)
+
+    def arm_file(name: str, expect_kind: str, rel: str, mutate, assert_fn) -> None:
+        """篡改**非日文件**（日锚清单）。
+
+        `arm()` 的字节校验盯的是目标日文件，对清单无效 —— 用 arm() 跑清单臂
+        会得到「篡改根本没生效」的假 NG，而不是真的 NG。
+        """
+        dst = os.path.join(work, name)
+        shutil.copytree(base, dst)
+        path = os.path.join(dst, rel)
+        before = sha(path) if os.path.exists(path) else "缺失"
+        what = mutate(path)
+        after = sha(path) if os.path.exists(path) else "缺失"
+        if before == after:
+            results.append((name, False, "文件字节没变 —— 篡改根本没生效"))
+            print(f"[{name}] 篡改无效：{what}")
+            shutil.rmtree(dst, ignore_errors=True)
+            return
+        res = run(dst)
+        ok, detail = assert_fn(res, dst)
+        results.append((name, ok, detail))
+        base_n = {k: len(v) for k, v in ck.items()}
+        others = [
+            f"{k} {base_n.get(k, 0)}->{len(kinds(res, k))}"
+            for k in ("anchor", "absent", "verdict", "baseline", "repeat", "first_seen", "rule_pair", "gap")
+            if k != expect_kind and len(kinds(res, k)) != base_n.get(k, 0)
+        ]
+        print(f"[{name}] {what}")
+        print(f"         sha {str(before)[:12]} -> {str(after)[:12]}")
+        print(f"         {'[OK]' if ok else '[NG]'} {detail}")
         if others:
             print(f"         附带惊动：{'、'.join(others)}")
         print()
@@ -668,6 +906,133 @@ def main() -> int:
         msg_valid = f"完整申报反而抛了：{e}"
     results.append(("nc13_cov", ok_missing and ok_valid, msg_missing + "｜" + msg_valid))
     print(f"[nc13_cov] {'[OK]' if ok_missing and ok_valid else '[NG]'} {msg_missing}｜{msg_valid}")
+    print()
+
+    # ================= NC-14..18 日锚：锚改了必须响，没改必须不响 =================
+    def _anchor_txt(res) -> str:
+        return " ｜ ".join(
+            c["subject"] + "｜" + "；".join(c.get("items") or []) for c in kinds(res, "anchor")
+        )
+
+    def a_anchor_size(res, _d):
+        t = _anchor_txt(res)
+        if "对不上" not in t:
+            return False, f"改了锚的 size 却没报「对不上」：{t or '（无 anchor 线索）'}"
+        if "size" not in t:
+            return False, f"报了对不上，但没说是 size 的问题：{t}"
+        return True, t
+
+    def a_anchor_hash(res, _d):
+        t = _anchor_txt(res)
+        if "对不上" not in t or "hash" not in t:
+            return False, f"改了锚的 last_hash 却没报 hash 对不上：{t or '（无 anchor 线索）'}"
+        return True, t
+
+    def a_anchor_hash_live(res, _d):
+        """当天末条 hash 随时在变 ⇒ 比它只会得到噪声，必须**不报**。"""
+        hit = kinds(res, "anchor")
+        if hit:
+            return False, (
+                "当天（还在写）的末条 hash 被报成锚不符 —— 这会让报告每天都红："
+                + _anchor_txt(res)
+            )
+        return True, "当天不比末条 hash（末条随时在变，比它只是噪声）"
+
+    def a_anchor_orphan(res, _d):
+        t = _anchor_txt(res)
+        if "不见了" not in t:
+            return False, f"锚在文件没了却没报删除证据：{t or '（无 anchor 线索）'}"
+        return True, t
+
+    def a_anchor_missing(res, _d):
+        t = _anchor_txt(res)
+        if "却没有日锚" not in t:
+            return False, f"删了锚（该日有 hash）却没报缺锚：{t or '（无 anchor 线索）'}"
+        return True, t
+
+    def a_anchor_nohash(res, _d):
+        hit = kinds(res, "anchor")
+        if hit:
+            return False, (
+                "记录连 hash 都没有（旧 schema）却被报成缺锚 —— "
+                "拿不可判定的东西当失败：" + _anchor_txt(res)
+            )
+        return True, "无 hash 字段的缺锚不报（锚无处可挂，不是漏）"
+
+    if n_man:
+        arm_file("nc14_size_closed", "anchor", "day_manifest.json", m_anchor_size_closed, a_anchor_size)
+        arm_file("nc15_hash_closed", "anchor", "day_manifest.json", m_anchor_hash_closed, a_anchor_hash)
+        arm_file("nc16_size_live", "anchor", "day_manifest.json", m_anchor_size_live, a_anchor_size)
+        arm_file("nc17_hash_live", "anchor", "day_manifest.json", m_anchor_hash_live, a_anchor_hash_live)
+        arm_file("nc18_orphan", "anchor", "day_manifest.json", m_anchor_orphan, a_anchor_orphan)
+        arm_file("nc19_missing", "anchor", "day_manifest.json", m_anchor_missing, a_anchor_missing)
+        arm_file("nc20_nohash", "anchor", "day_manifest.json", m_anchor_nohash, a_anchor_nohash)
+    else:
+        results.append(("nc14..20_anchor", False, "副本里没有 day_manifest.json，日锚臂无法执行"))
+
+    # ================= NC-21..23 裁决口径：表外必响、合法必不响 =================
+    def a_verdict_out(res, _d):
+        hit = kinds(res, "verdict")
+        if not any("表外组合" in c["subject"] for c in hit):
+            return False, f"注入了 allow+block（表外）却没报表外组合：{[c['subject'] for c in hit]}"
+        if res["meta"]["verdict"]["n_out"] < 1:
+            return False, "表外组合报了，但 meta 里的 n_out 仍是 0（口径与线索不一致）"
+        return True, f"表外 {res['meta']['verdict']['n_out']} 条：" + "；".join(
+            c["subject"] for c in hit
+        )
+
+    def a_verdict_badval(res, _d):
+        hit = kinds(res, "verdict")
+        if not any("值域外取值" in c["subject"] for c in hit):
+            return False, f"注入了 decision=quarantine 却没报值域外取值：{[c['subject'] for c in hit]}"
+        if res["meta"]["verdict"]["n_bad_value"] < 1:
+            return False, "值域外报了，但 meta 里的 n_bad_value 仍是 0"
+        return True, f"值域外 {res['meta']['verdict']['n_bad_value']} 条：" + "；".join(
+            c["subject"] for c in hit
+        )
+
+    def a_verdict_legal(res, _d):
+        hit = kinds(res, "verdict")
+        if hit:
+            return False, "allow+alert（放行但又告警）被报成了异常：" + "；".join(
+                c["subject"] for c in hit
+            )
+        rel = res["meta"]["verdict"]["rel"]
+        base_rel = clean["meta"]["verdict"]["rel"]
+        got = rel.get(W.REL_ALLOW_ALERT, 0)
+        want = base_rel.get(W.REL_ALLOW_ALERT, 0) + 1
+        if got != want:
+            return False, f"放行但告警计数 {base_rel.get(W.REL_ALLOW_ALERT, 0)}->{got}，应为 {want}"
+        return True, f"不报异常，且「放行但告警」计数 {base_rel.get(W.REL_ALLOW_ALERT, 0)}->{got}"
+
+    arm("nc21_verdict_out", "verdict", lambda p: m_verdict_out(p, day), a_verdict_out)
+    arm("nc22_verdict_badval", "verdict", lambda p: m_verdict_badval(p, day), a_verdict_badval)
+    arm("nc23_verdict_legal", "verdict", lambda p: m_verdict_legal(p, day), a_verdict_legal)
+
+    # ================= NC-24 八档分类纯函数：逐档点名，不许有一档落错 =================
+    CASES = [
+        (("allow", "allow"), W.REL_AGREE),
+        ((None, "record"), W.REL_EXEC),          # post_tool_use：裁决记在 action
+        ((None, None), W.REL_NONE),
+        ((None, "alert"), W.REL_EXEC),           # 执行侧告警也是执行侧
+        (("alert", None), W.REL_DEC_ONLY),
+        (("allow", "alert"), W.REL_ALLOW_ALERT),  # 不是矛盾
+        (("deny", "block"), W.REL_SYNONYM),       # 命名未收敛
+        (("config_refresh", "allow"), W.REL_NON_VERDICT),
+        (("config_fallback", "alert"), W.REL_NON_VERDICT),
+        (("allow", "block"), W.REL_OUT),          # 真表外
+        (("deny", "alert"), W.REL_OUT),
+        (("block", "allow"), W.REL_OUT),
+    ]
+    wrong = [(k, W.classify_verdict(*k), want) for k, want in CASES if W.classify_verdict(*k) != want]
+    ok24 = not wrong
+    results.append((
+        "nc24_classify",
+        ok24,
+        "八档全对（12 例）" if ok24 else f"分错 {len(wrong)} 例：{wrong}",
+    ))
+    print(f"[nc24_classify] {'[OK]' if ok24 else '[NG]'} "
+          f"{'八档全对（12 例）' if ok24 else f'分错 {len(wrong)} 例：{wrong}'}")
     print()
 
     # ---- 汇总

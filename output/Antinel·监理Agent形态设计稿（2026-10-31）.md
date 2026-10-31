@@ -46,6 +46,16 @@
 | 适配 | **个人开发者（最需要，没人帮他看）**；团队（周报素材） |
 | 红线 | 只能说「这里对不上，去看」，不能说「这是违规」 |
 
+**原型现状**（`output/lineC/watchman.py`，2026-10-31 23:11 实测）：八个检测器已落地 ——
+`anchor`（日锚）／`absent`（预期缺席）／`verdict`（裁决口径八档）／`baseline`（同期基线偏离）／
+`repeat`（第二次才算数）／`first_seen`（首次出现）／`gap`（日内断层）／`rule_pair`（同会话新组合）。
+负控 **30/30**。两条口径已机制化进报告，不再靠人记：
+
+- **两套裁决字段并存**：`decision` 与 `action` 是两套字段。`post_tool_use` 没有 `decision`，
+  裁决记在 `action=record` 里 ⇒ 只按 `decision` 分桶会把执行侧整类漏掉。
+- **日锚是 L0 不是 L2**：`day_manifest.json` 的 size／last_hash 只抓「改完没重算」，
+  锚与账本同一个进程写 ⇒ 整链重写仍报自洽。措辞里不许出现「防篡改」。
+
 ### 2.2 取证 Agent（Examiner）
 
 | 项 | 内容 |
