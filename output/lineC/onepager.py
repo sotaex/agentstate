@@ -52,6 +52,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import evidence as E  # noqa: E402
+import corrections as C  # noqa: E402
 
 #: 强度排序：越小越靠前。**这是产品判断，不是格式**。
 #:   挡下      —— 动作真的没执行，用户最该先知道
@@ -130,6 +131,20 @@ font-size:13px}
 padding:10px 14px;margin-bottom:9px;font-size:13px}
 .zero{border:1px solid var(--line);background:var(--panel);border-radius:10px;
 padding:10px 14px;font-size:13px;color:var(--muted)}
+/* ---- 更正（设计 §4）：作废用中性色，不用红 ---- */
+/* 作废不等于「出事了」，它是「这一版不再有效」。红色会让读者以为发现了安全问题，
+   而实际可能只是口径修正。颜色的含义必须稳定，否则同一个红在两种意思之间摇摆。 */
+.void{border:1px solid var(--line);border-left:5px solid var(--lgrey);
+background:var(--panel);border-radius:10px;padding:12px 16px;margin-bottom:16px}
+.void .t{font-weight:700;margin-bottom:4px}
+.supersedes{border:1px dashed var(--line);border-radius:10px;padding:8px 14px;
+font-size:12.5px;color:var(--muted);margin-bottom:14px}
+/* 被取代的条目：整条加删除线 + 左侧灰边，但**仍在原位置、不折叠、不隐藏** */
+.ev.superseded{border-left-color:var(--lgrey)}
+.ev.superseded .claim{text-decoration:line-through;
+text-decoration-color:var(--muted);text-decoration-thickness:1.5px;opacity:.75}
+.supnote{border-left:3px solid var(--lgrey);padding:6px 10px;margin:0 0 7px;
+font-size:12.5px;color:var(--muted);background:var(--bg);border-radius:0 6px 6px 0}
 .footer{color:var(--muted);font-size:12px;margin-top:28px;
 border-top:1px solid var(--line);padding-top:8px}
 @media print{body{margin:0}.ev,.undecide,.zero{break-inside:avoid}}
@@ -179,10 +194,25 @@ def pick(evs: Sequence[E.Evidence], cap: int = DEFAULT_CAP
     return shown, folded, rule
 
 
-def _ev_html(e: E.Evidence) -> str:
-    """一条证据的 HTML。**必须带齐四个 data-* 契约属性。**"""
-    attrs = 'class="ev st-%s" data-eid="%s" data-strength="%s" data-cites="%s"' % (
-        _e(e.strength), _e(e.eid), _e(e.strength), _e(_cites_attr(e.cites)))
+def _ev_html(e: E.Evidence, corr: Optional["C.Correction"] = None) -> str:
+    """一条证据的 HTML。**必须带齐四个 data-* 契约属性。**
+
+    `corr` 非空表示这条**已被取代**：整条加删除线 + 前置一行说明，
+    但 `data-eid` / `data-strength` 保持原值——被取代的是「结论的效力」，
+    不是「当时说过什么」。改掉原强度等于篡改历史。
+    """
+    cls = "ev st-%s" % _e(e.strength)
+    sup_attr = ""
+    sup_note = ""
+    if corr is not None:
+        cls += " superseded"
+        sup_attr = ' data-superseded="%s"' % _e(corr.new_eid or corr.new_report)
+        sup_note = ('<div class="supnote">此条已被 %s 的报告取代：%s'
+                    '（请以 %s 为准）</div>'
+                    % (_e(corr.at[:10]), _e(corr.reason),
+                       _e(corr.new_eid or corr.new_report)))
+    attrs = 'class="%s" data-eid="%s" data-strength="%s" data-cites="%s"%s' % (
+        cls, _e(e.eid), _e(e.strength), _e(_cites_attr(e.cites)), sup_attr)
     if e.rule_id:
         attrs += ' data-rule="%s"' % _e(e.rule_id)
     cite_s = " ".join(_cite_html(c) for c in e.cites[:4])
@@ -190,13 +220,14 @@ def _ev_html(e: E.Evidence) -> str:
     blind = ('<div class="note">这条看不见什么：%s</div>' % _e(e.blind)) if e.blind else ""
     return (
         '<div %s>'
+        '%s'
         '<span class="badge" style="background:%s">%s</span>'
         '<div class="claim">%s</div>'
         '<div class="note">%s</div>'
         '%s'
         '<div class="note">%s%s</div>'
         '</div>'
-    ) % (attrs, BADGE_VAR.get(e.strength, "var(--muted)"), _e(e.word()),
+    ) % (attrs, sup_note, BADGE_VAR.get(e.strength, "var(--muted)"), _e(e.word()),
          _e(e.claim), _e(e.strength_note()), blind, cite_s, more)
 
 
@@ -212,7 +243,7 @@ def _folded_html(folded: Sequence[E.Evidence]) -> str:
 
 
 def render(bundle: E.Bundle, *, cap: int = DEFAULT_CAP,
-           corrections: Optional[Sequence[Dict[str, str]]] = None) -> str:
+           resolved: Optional["C.Resolved"] = None) -> str:
     """渲染一页纸。**首屏必须是「这次看见了什么」，不是「未发现异常」。**"""
     by = bundle.by_strength()
     n_need = sum(len(by.get(k, [])) for k in (E.K_HELD, E.K_ALERT, E.K_NO_RESPONSE))
@@ -232,6 +263,28 @@ def render(bundle: E.Bundle, *, cap: int = DEFAULT_CAP,
                  % (_e(bundle.read_at),
                     _e(bundle.denominators.get("账本", "（未取到）"))))
 
+    # ---- 作废横幅：**必须在首屏**（设计 §4.2 红线 2），不许挪到页脚 ----
+    # 第三方拿到一份作废报告而没看到横幅，等于被误导。所以它排在标题之后、
+    # 一切正文之前，且用中性色——作废不等于「出事了」。
+    if resolved is not None and resolved.void is not None:
+        v = resolved.void
+        parts.append(
+            '<div class="void"><div class="t">本报告已于 %s 作废</div>'
+            '原因：%s<br>请以 <b>%s</b> 为准。</div>'
+            % (_e(v.at[:10]), _e(v.reason), _e(v.new_report)))
+
+    # ---- 反向指认（设计 §4.2 红线 3）：只单向会让读者在旧报告里找不到新结论 ----
+    if resolved is not None and resolved.supersedes:
+        parts.append(
+            '<div class="supersedes">本报告取代了 %s。'
+            '被取代的报告仍然可查——它们说的是「当时判断的是什么」，'
+            '不是「现在的结论」。</div>'
+            % _e("、".join(resolved.supersedes)))
+
+    if resolved is not None:
+        for w in resolved.warnings:
+            parts.append('<div class="undecide">%s</div>' % _e(w))
+
     # ---- 四个数字（不写分数：C 线不出「安全分」，那是判定侧的事）----
     parts.append('<div class="metrics">')
     for label, val, unit in (
@@ -249,7 +302,9 @@ def render(bundle: E.Bundle, *, cap: int = DEFAULT_CAP,
     if shown:
         parts.append("<h2>这次看见了什么</h2>")
         parts.append('<div class="note" style="margin-bottom:10px">%s</div>' % _e(rule))
-        parts.extend(_ev_html(e) for e in shown)
+        parts.extend(
+            _ev_html(e, resolved.superseded.get(e.eid) if resolved else None)
+            for e in shown)
         parts.append(_folded_html(folded))
     else:
         # 没有证据 ≠ 一切正常。要说清是「查了没有」还是「没查成」。
@@ -282,20 +337,32 @@ def render(bundle: E.Bundle, *, cap: int = DEFAULT_CAP,
         parts.append("</div>")
 
     # ---- 更正（若有）----
-    if corrections:
-        parts.append("<h2>更正记录（%d 条）</h2>" % len(corrections))
+    if resolved is not None and (resolved.superseded or resolved.void is not None):
+        n = len(resolved.superseded) + (1 if resolved.void else 0)
+        parts.append("<h2>更正记录（%d 条）</h2>" % n)
         parts.append('<div class="rows">')
-        for c in corrections:
-            parts.append(
-                '<div class="row"><span class="k">%s</span><span>%s → %s：%s</span></div>'
-                % (_e(c.get("at", "")), _e(c.get("target_eid", "")),
-                   _e(c.get("new_eid", "（作废）")), _e(c.get("reason", ""))))
+        if resolved.void is not None:
+            v = resolved.void
+            parts.append('<div class="row"><span class="k">%s</span>'
+                         '<span>整份作废 → %s：%s</span></div>'
+                         % (_e(v.at[:10]), _e(v.new_report), _e(v.reason)))
+        for eid in sorted(resolved.superseded):
+            c = resolved.superseded[eid]
+            parts.append('<div class="row"><span class="k">%s</span>'
+                         '<span>%s → %s：%s</span></div>'
+                         % (_e(c.at[:10]), _e(eid), _e(c.new_eid), _e(c.reason)))
         parts.append("</div>")
         parts.append('<div class="note">被更正的条目<b>仍然显示在上文</b>，'
-                     '只加了标注。报告不改旧内容——改过的错会让人怀疑全部记录。</div>')
+                     '只加了删除线与说明。报告不改旧内容——'
+                     '改过的错会让人怀疑全部记录。</div>')
 
     # ---- 页脚 ----
     parts.append('<div class="footer">')
+    rid = resolved.report_id if resolved is not None else C.report_id(bundle)
+    parts.append("报告编号 <b>%s</b>（要更正它，就用这个号指名）<br>" % _e(rid))
+    id_note = C.report_id_note(bundle)
+    if id_note:
+        parts.append("%s<br>" % _e(id_note))
     for k, v in sorted(bundle.denominators.items()):
         parts.append("%s：%s<br>" % (_e(k), _e(v)))
     parts.append("本报告由 Antinel 监理生成 ｜ 读数时刻 %s ｜ "
@@ -382,11 +449,62 @@ def _selfcheck() -> int:
     if "折叠 7 条" not in hm or "排序规则" not in hm:
         fails.append("折叠了却没自报「砍了哪些、按什么砍」")
 
+    # ---- 更正（设计 §6 验收 1／2／6）----
+    bc = E.Bundle(read_at="2026-11-01 03:00:00", root="")
+    bc.evidence.append(E.Evidence(
+        eid="AUD-corr01", claim="原来那条结论", strength=E.K_LOG_ONLY,
+        cites=(E.Cite("2026-11-01", 5),), source="t",
+        read_at="2026-11-01 03:00:00"))
+    rid_c = C.report_id(bc)
+    corr = C.Correction(at="2026-11-01T04:00:00+08:00", by="C-3",
+                        kind=C.K_SUPERSEDE, target_report=rid_c,
+                        target_eid="AUD-corr01", reason="该日机制当时不存在",
+                        new_eid="AUD-new001")
+    hc = render(bc, resolved=C.resolve(bc, [corr]))
+    # 验收 1：被更正的条目**仍然出现在产物里**（不许隐藏、不许折叠、不许移出原位）
+    if 'data-eid="AUD-corr01"' not in hc:
+        fails.append("被更正的条目从产物里消失了 —— 藏起来等于事后没人知道这里错过")
+    if "superseded" not in hc or "此条已被" not in hc:
+        fails.append("被更正的条目没有换长相（删除线／说明行）")
+
+    # 验收 2：作废横幅必须在**首屏**（正文之前、页脚之前）
+    void = C.Correction(at="2026-11-01T05:00:00+08:00", by="C-3",
+                        kind=C.K_VOID, target_report=rid_c,
+                        reason="整份基于错误读数", new_report="R-new000000001")
+    hv = render(bc, resolved=C.resolve(bc, [void]))
+    if "本报告已于" not in hv:
+        fails.append("整份作废却没有横幅")
+    else:
+        i_banner = hv.find("本报告已于")
+        i_body = hv.find("这次看见了什么")
+        i_foot = hv.find('<div class="footer">')
+        if i_body < 0 or i_foot < 0:
+            fails.append("作废横幅定位失败（找不到正文或页脚）")
+        elif not (i_banner < i_body < i_foot):
+            fails.append("作废横幅不在首屏（横幅 %d／正文 %d／页脚 %d）"
+                         % (i_banner, i_body, i_foot))
+
+    # 验收 6：新报告**反向指认**旧报告
+    bn = E.Bundle(read_at="2026-11-01 05:00:00", root="")
+    bn.evidence.append(E.Evidence(
+        eid="AUD-new001", claim="新结论", strength=E.K_LOG_ONLY,
+        cites=(E.Cite("2026-11-01", 6),), source="t",
+        read_at="2026-11-01 05:00:00"))
+    rid_n = C.report_id(bn)
+    c2 = C.Correction(at="2026-11-01T06:00:00+08:00", by="C-3",
+                      kind=C.K_SUPERSEDE, target_report=rid_c,
+                      target_eid="AUD-corr01", reason="r",
+                      new_report=rid_n, new_eid="AUD-new001")
+    hn = render(bn, resolved=C.resolve(bn, [c2]))
+    if rid_c not in hn:
+        fails.append("新报告没有反向指认旧报告 —— 旧报告归档后读者找不到新结论")
+
     for f in fails:
         print("[自检失败] %s" % f, file=sys.stderr)
     if fails:
         return 1
-    print("[自检] 六条全部生效（契约属性／零与不可判／首屏／盲区不折叠／转义／裁量自报）")
+    print("[自检] 九条全部生效（契约属性／零与不可判／首屏／盲区不折叠／转义／"
+          "裁量自报／被更正条目仍在／作废横幅在首屏／反向指认）")
     return 0
 
 
@@ -412,11 +530,22 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
 
     b = E.collect(args.root)
+
+    # 更正记录：**读不出来要停**，不许静默当成「没有更正」。
+    # 「没有更正」与「不知道有没有更正」是两件事——这就是零与不可判同貌。
+    try:
+        items = C.Ledger(args.root).load()
+    except (ValueError, OSError) as exc:
+        print("[停] 更正记录读不出来：%s" % exc, file=sys.stderr)
+        return 2
+    res = C.resolve(b, items)
+
     if args.out:
-        write(b, args.out, cap=args.cap)
-        print("已写出：%s（%d 条证据）" % (args.out, b.count()))
+        write(b, args.out, cap=args.cap, resolved=res)
+        print("已写出：%s（%d 条证据，报告编号 %s）"
+              % (args.out, b.count(), res.report_id))
     else:
-        sys.stdout.write(render(b, cap=args.cap))
+        sys.stdout.write(render(b, cap=args.cap, resolved=res))
     return 0
 
 
