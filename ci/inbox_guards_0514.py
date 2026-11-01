@@ -9716,11 +9716,26 @@ def _hook_project(prefix):
 
 
 def _sec05_fire(proj, env, tool, text, sid):
-    """跑真 hook 子进程，返回合并后的输出文本。"""
+    """跑真 hook 子进程，返回合并后的输出文本。
+
+    ★★ 2026-11-01（通道一致性审计）：`-E` → `-I -S`，与**生产位**对齐。
+
+    生产由 `scripts/install.py:365` 写成 `"<pythonw.exe>" -I -S "<abs>/pre_tool_use.py"`。
+    `-E` 只忽略 `PYTHON*` 环境变量，**仍然加载 user site** —— 本机 user site 里那份
+    0.28.0 旧 `host_shield.py` 正是从这条路进来的（实测 `-E` 下 `no_user_site=0`，
+    且 `PYTHONNOUSERSITE=1` 被 `-E` 忽略）。于是钩子首次调用抛
+    `AttributeError: no attribute 'resolve_rules_file'` → `HOOK_ERROR (allow)` →
+    正控全漏拦、负控假绿、SELF-TAMPERED 不报，三条红同一根因。
+    `-I`（隐含 `-E -s -P`）＋`-S` 才是生产实际在跑的形态。
+
+    保留 `-X utf8` 是**量具需要**、不是生产有：生产用 `pythonw.exe`、不读 stdout，
+    而这里要按 stdout/stderr 判定，所以必须钉死编码。这一处差异已在
+    `output/Antinel·通道一致性审计 v1.0（2026-11-01）.md` 里登记为「已知且必要」。
+    """
     import subprocess
     ti = {"file_path": text} if tool == "Read" else {"command": text}
     ev = {"session_id": sid, "tool_name": tool, "tool_input": ti}
-    p = subprocess.run([sys.executable, "-E", "-X", "utf8",
+    p = subprocess.run([sys.executable, "-I", "-S", "-X", "utf8",
                         os.path.join(ROOT, "hooks", "pre_tool_use.py")],
                        env=env, cwd=proj,
                        input=json.dumps(ev, ensure_ascii=False),
@@ -10289,10 +10304,14 @@ _C_SEEDS = {"AN-018": _c_seed_ctx05}
 
 
 def _c_fire(proj, env, tool, ti, sid):
-    """跑真 hook 子进程（C 族唯一入口；C-T1 的牙齿也必须走这里）。"""
+    """跑真 hook 子进程（C 族唯一入口；C-T1 的牙齿也必须走这里）。
+
+    ★★ 2026-11-01（通道一致性审计）：`-E` → `-I -S`，与生产位对齐。
+    理由同 `_sec05_fire`：`-E` 仍加载 user site，生产 `-I -S` 不加载。
+    """
     import subprocess
     ev = {"session_id": sid, "tool_name": tool, "tool_input": ti}
-    p = subprocess.run([sys.executable, "-E", "-X", "utf8",
+    p = subprocess.run([sys.executable, "-I", "-S", "-X", "utf8",
                         os.path.join(ROOT, "hooks", "pre_tool_use.py")],
                        env=env, cwd=proj,
                        input=json.dumps(ev, ensure_ascii=False),
@@ -11020,7 +11039,8 @@ def c_s38c():
                         snap[fn] = os.path.getsize(os.path.join(ad, fn))
                     except OSError:
                         pass
-        p = subprocess.run([sys.executable, "-E", "-X", "utf8", hook], cwd=proj,
+        # ★★ 2026-11-01（通道一致性审计）：`-E` → `-I -S`，与生产位对齐。
+        p = subprocess.run([sys.executable, "-I", "-S", "-X", "utf8", hook], cwd=proj,
                            env=env, input=json.dumps(ev, ensure_ascii=False),
                            capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=180)

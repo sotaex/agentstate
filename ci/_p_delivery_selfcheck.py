@@ -452,6 +452,229 @@ def p8_guards_test_the_real_thing():
         behavioral, len(offenders))
 
 
+# ══════════════════════════════════ 组 4：通道一致性（2026-11-01 实测驱动）
+#
+# ★ 事故（不是推演）：`ci/inbox_guards_0514.py` 单跑曾 **263 绿 / 23 红**，
+#   根因不在规则，而在**钩子是怎么被起起来的**：
+#     套件用 `-E` 起钩子，而 `-E` 只忽略 `PYTHON*` 环境变量，**仍然加载 user site**。
+#     本机 user site 里有一份 0.28.0 旧 `host_shield.py`（缺 `resolve_rules_file`），
+#     于是钩子首次调用抛 AttributeError ⇒ `HOOK_ERROR (allow)` ⇒ 正控全漏拦、
+#     负控假绿、SELF-TAMPERED 不报 —— **三张面孔，一个根因**。
+#   生产由 `scripts/install.py:365` 写成 `"<pythonw.exe>" -I -S "<abs>/hook.py"`：
+#   `-I` 隐含 `-E -s -P`、`-S` 不加载 site ⇒ 那个旧模块永远进不来。
+#   ⇒ **量具通道 ≠ 生产通道**。这个差异在无干扰时完全不显形，只在有干扰时静默失真，
+#     所以它必须由判据守，不能靠人记。
+#
+# ★ 修好之后的实测（同一夹具，同一事件）：
+#   263 绿/23 红 → **289 绿/0 红**；再把 0514 三处钩子调用从 `-E` 收紧到 `-I -S`，
+#   仍 **289 绿/0 红** ⇒ 收紧不改变任何结论，只把量具挪到生产位。
+#
+# ★ 为什么允许登记豁免，而不是一律判红：
+#   有些偏离是**故意的**，而且去掉就变成空转。最典型的是 HSI-01：
+#   它要造「user site 里有同名旧模块」的遮蔽场景，而 `-I -S` 恰恰屏蔽 user site
+#   ⇒ 带上就造不出遮蔽，判据自己失效。这类必须留，但要显形、要有对照腿。
+#   ⇒ 登记表带 `kind`：`adversarial`（故意偏离，须有生产腿对照）
+#     / `pending`（已知债，必有到期版本，到期不修则本条红）。
+
+_CHANNEL_EXEMPT = {
+    ("ci/inbox_guards_0514.py", "_hsid_fire"): {
+        "kind": "adversarial",
+        "until": None,
+        "why": "HSI-01 要造「user site 里有同名旧模块」的遮蔽，-I/-S 会把它屏蔽掉 ⇒ "
+               "带上就造不出遮蔽、判据空转。同文件 _sec05_fire/_c_fire/_fire 三处走 "
+               "-I -S 的生产模拟腿，两条腿互为对照（敌对通道测加固，生产通道测真实行为）。",
+    },
+    ("ci/drift_a5_whitelist.py", "hook"): {
+        "kind": "pending", "until": "0.64.0",
+        "why": "历史诊断件，裸 PY 起钩子；2026-11-01 审计发现，未验是否影响其结论。",
+    },
+    ("ci/single_case_probe.py", "run_one"): {
+        "kind": "pending", "until": "0.64.0",
+        "why": "单例排查工具，裸 PY 起钩子；同上。",
+    },
+    ("ci/drift_audit.py", "hook"): {
+        "kind": "pending", "until": "0.64.0",
+        "why": "漂移审计的取数腿，裸 PY 起钩子；审计结论可能因此偏离生产通道。",
+    },
+    ("ci/regression_gate.py", "j_baseline_tag_reminder_in_place"): {
+        "kind": "pending", "until": "0.64.0",
+        "why": "该判据内裸 PY 起钩子，与同文件 call_hook（已 -I -S）不一致 —— 同一文件两把尺子。",
+    },
+    ("scripts/build_package.py", "build"): {
+        "kind": "pending", "until": "0.64.0",
+        "why": "构建期调子进程；经间接追一层被判进表。待核是否真起钩子（若只是跑 "
+               "setup.py 则本条应从表内剔除，而不是给它加 -I -S）。",
+    },
+    ("scripts/verification_tests.py", "run"): {
+        "kind": "pending", "until": "0.64.0",
+        "why": "★★ 面最大的一处：270 条断言、190 处 hook() 全部经此函数起钩子，"
+               "而它是裸 PY（既无 -I 也无 -E）。改它要重录判定（跑两遍），"
+               "故单列一个窗口做，不在审计轮夹带。",
+    },
+    ("scripts/verification_tests.py", "main"): {
+        "kind": "pending", "until": "0.64.0",
+        "why": "同 run()：main 里 5 处直接起 post_tool_use/session_start_banner，裸 PY。",
+    },
+}
+
+#: 非空集下界（口径见 ci/channel_scan.py）。取当前实测值的约八成，
+#: 低了不许 —— 扫描面一旦缩水（比如把 ci/ 漏出 SCAN_DIRS），就不许再报绿。
+_CHANNEL_MIN_GROUPS = 10
+_CHANNEL_MIN_POINTS = 40
+
+
+def _channel_scan():
+    sys.path.insert(0, CI)
+    import channel_scan as CS
+    return CS
+
+
+def _current_version():
+    """读当前版本，供「登记到期」判。读不到 ⇒ None（上层按 fail-closed 判红）。"""
+    try:
+        sys.path.insert(0, HERE)
+        import antinel as A
+        return str(A.VERSION)
+    except Exception:                                        # noqa: BLE001
+        return None
+
+
+@check("CH-1 起钩子的子进程须与生产同旗标（-I -S），偏离必须登记")
+def ch1_hook_channel_matches_production():
+    """守「量具通道 = 生产通道」这一件事。
+
+    ★ 三个必答（缺一条就会变成假绿）：
+      ① **非空集**：强制组数与点数不得低于下界 —— 否则扫描面缩水也照样绿。
+      ② **真入口在同一张表**：`scripts/install.py` 里写命令行的那个函数必须被扫到
+         并判为合规（记忆里的第十四族：对照实验必须把真入口放进同一张表）。
+      ③ **登记不腐烂**：登记了但已经合规的条目 ⇒ 红（修好了要删登记）；
+         `pending` 到期不修 ⇒ 红。
+    """
+    CS = _channel_scan()
+    sys.path.insert(0, os.path.join(HERE, "scripts"))
+    import install as I
+    import host_shield as HS
+
+    recs, errors, stats = CS.scan(HERE)
+    assert not errors, (
+        "通道扫描有文件解析失败：%s ⇒ 那些文件里的调用点全在表外，本条会假绿。"
+        % [e["file"] for e in errors])
+
+    groups = CS.group(recs)
+    enforced = {k: v for k, v in groups.items()
+                if all(r["cls"] in ("direct", "indirect", "shell") for r in v)}
+    assert len(enforced) >= _CHANNEL_MIN_GROUPS and stats["enforced"] >= _CHANNEL_MIN_POINTS, (
+        "★ 非空集下界未达：强制组 %d（< %d）／点数 %d（< %d）。"
+        "扫描面缩水时本条必须红，不许因为「没扫到东西」而变绿。"
+        % (len(enforced), _CHANNEL_MIN_GROUPS, stats["enforced"], _CHANNEL_MIN_POINTS))
+
+    # ② 真入口在同一张表（且必须是**行为**，不是查源码字样）
+    #    生产基准不是一个 spawn，而是 install.py 造出来的命令行模板 ——
+    #    直接调用它，拿真值来比，避免「判据自己另写一套基准」（第一顽症）。
+    shell_cmd = I.hook_command("pre_tool_use.py")
+    process_entry = I.zcode_hook_entry("pre_tool_use.py")
+    assert "-I" in shell_cmd and "-S" in shell_cmd, (
+        "★ 生产基准变了：install.hook_command 不再输出 -I -S ⇒ 本判据的基准失效，"
+        "必须先改基准再谈别处合规。实测输出：%r" % shell_cmd)
+    args = process_entry.get("args") or []
+    assert "-I" in args and "-S" in args, (
+        "★ 生产基准变了：install.zcode_hook_entry 的 args 不含 -I -S。实测：%r" % args)
+
+    # ③ 逐组判定
+    bad, stale, expired = [], [], []
+    for (f, fn), rows in sorted(enforced.items()):
+        ok = all(CS.is_production(r) for r in rows)
+        key = (f, fn)
+        if not ok:
+            if key not in _CHANNEL_EXEMPT:
+                flags = sorted(set(tuple(r["flags"]) for r in rows))
+                lines = ", ".join(str(r["line"]) for r in rows[:6])
+                bad.append("%s:%s（%d 点在 %s）flags=%s"
+                           % (f, fn, len(rows), lines, [list(x) for x in flags]))
+        else:
+            if key in _CHANNEL_EXEMPT:
+                stale.append("%s:%s 已合规但登记还在" % (f, fn))
+
+    cur = _current_version()
+    for key, meta in _CHANNEL_EXEMPT.items():
+        if meta["kind"] == "pending":
+            until = meta.get("until")
+            if not until:
+                expired.append("%s:%s 登记为 pending 却没有到期版本 ⇒ 永久绿灯"
+                               % key)
+            elif cur is None:
+                expired.append("%s:%s 到期检查读不到当前版本 ⇒ fail-closed 判红"
+                               % key)
+            else:
+                if not HS._ver_lt(cur, until):
+                    expired.append("%s:%s 到期未修（当前 %s ≥ 登记 %s）"
+                                   % (key[0], key[1], cur, until))
+
+    problems = []
+    if bad:
+        problems.append(
+            "起钩子未与生产同旗标（%d 组），且未登记：\n      %s\n"
+            "  ⇒ 生产是 `pythonw -I -S`（install.py:365），`-E` 仍加载 user site ⇒ "
+            "旧同名模块可劫持整道防线并静默 fail-open（实测过 263/23）。"
+            % (len(bad), "\n      ".join(bad)))
+    if stale:
+        problems.append("登记未清（修好了就要删登记，否则登记表本身腐烂）：%s" % stale)
+    if expired:
+        problems.append("登记到期：%s" % expired)
+    assert not problems, "\n  ".join(problems)
+
+    adv = [k for k, m in _CHANNEL_EXEMPT.items() if m["kind"] == "adversarial"]
+    return ("强制 %d 组 / %d 点全部与生产同旗标；登记 %d 条（其中敌对通道 %d 条：%s）"
+            % (len(enforced), stats["enforced"], len(_CHANNEL_EXEMPT), len(adv),
+               ", ".join("%s:%s" % k for k in adv) or "无"))
+
+
+@check("CH-2 负控：把 -I -S 拿掉后 CH-1 的判据必须咬住")
+def ch2_channel_negctl():
+    """★ 没有这条，CH-1 可能是恒绿：它数的是「有没有偏离」，
+    而如果扫描器坏了（比如永远读不到 flags），偏离数恒为 0，CH-1 照样绿。
+
+    ⇒ 变异体：把 `ci/inbox_guards_0514.py` 里所有 `"-I", "-S", `
+    从源码里删掉（**先断言字节真的变了**），落成临时文件后用**同一个**扫描器重扫，
+    断言那几处从合规翻成不合规。
+    """
+    CS = _channel_scan()
+    src_p = os.path.join(CI, "inbox_guards_0514.py")
+    is_p = os.path.join(CI, "single_case_probe.py")
+    victim = src_p if os.path.isfile(src_p) else is_p
+    raw = io.open(victim, encoding="utf-8").read()
+    mut = raw.replace('"-I", "-S", ', "")
+    assert mut != raw, (
+        "★ 变异没有改到任何字节 ⇒ 负控是空转的（假绿第八族）。"
+        "要么源码里已经没有 `\"-I\", \"-S\", ` 了，要么替换串写错了。")
+    assert len(mut) < len(raw), "变异后反而变长，替换方向错了"
+
+    # 变异体必须落在系统 TEMP（D 盘整盘禁 unlink；仓内落点还会污染扫描面）
+    import tempfile
+    fd, tmp = tempfile.mkstemp(suffix=".py", prefix="ch_negctl_")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            f.write(mut)
+        rows, err = CS.scan_file(tmp, HERE)
+        assert err is None, "变异体解析失败：%s ⇒ 负控没测到东西" % err
+        # 原文件里合规的组，在变异后必须出现不合规的
+        orig_rows, _ = CS.scan_file(victim, HERE)
+        orig_bad = [r for r in orig_rows
+                    if r["cls"] in ("direct", "indirect") and not CS.is_production(r)]
+        mut_bad = [r for r in rows
+                   if r["cls"] in ("direct", "indirect") and not CS.is_production(r)]
+        assert len(mut_bad) > len(orig_bad), (
+            "★ 去掉 -I -S 之后不合规点数没有增加（原 %d → 变异 %d）⇒ "
+            "扫描器对旗标失明，CH-1 的绿是假的。" % (len(orig_bad), len(mut_bad)))
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+    return ("变异体（%s 去掉 -I -S）不合规点 %d → %d，判据咬住"
+            % (os.path.basename(victim), len(orig_bad), len(mut_bad)))
+
+
 # ══════════════════════════════════════════════ 运行
 def main():
     print("=" * 74)
