@@ -65,7 +65,7 @@ CHECKS: List[Tuple[str, List[str], int]] = [
     ("corrections --selfcheck", [os.path.join(LINE_C, "corrections.py"), "--selfcheck"], 0),
     ("report --selfcheck", [os.path.join(LINE_C, "report.py"), "--selfcheck"], 0),
     ("负控 evidence 19 臂", [os.path.join(OUTPUT, "_p_evid_negctl.py")], 0),
-    ("端到端负控 6 臂", [os.path.join(OUTPUT, "_p_e2e_negctl.py")], 0),
+    ("端到端负控 7 臂", [os.path.join(OUTPUT, "_p_e2e_negctl.py")], 0),
     ("负控 C-2 30 臂", [os.path.join(OUTPUT, "_p_c2_negctl.py")], 0),
     ("负控 更正端到端 11 臂", [os.path.join(OUTPUT, "_p_corr_e2e.py")], 0),
     ("红队 C-1 6 臂", [os.path.join(LINE_C, "redteam.py")], 0),

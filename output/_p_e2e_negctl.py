@@ -222,6 +222,33 @@ def e6_na_not_lumped():
     return True, "不适用 %d 项、不可判 %d 项，两者分开" % (len(na), len(un))
 
 
+def e7_folded_still_citable():
+    """证据超过 cap 时，**折叠的条目也必须能回指**，且报告仍要落盘。
+
+    这条臂对应一个真实事故（2026-11-01）：折叠条目原本只渲染「词 ＋ 结论」，
+    没有 data-cites，于是 citecheck 报「渲染丢了 N 条」并**拒绝落盘** ——
+    真账本一旦产出 6 条证据，报告就再也写不出来。
+    真账本今天正好 5 条，这条分支从没被走过；靠 `--cap 3` 才暴露。
+    """
+    root, _ds = fresh()
+    tmp = tempfile.mkdtemp(prefix="antinel-e2e-out-")
+    out = os.path.join(tmp, "cap.html")
+    ok, info = R.produce(root, out, cap=2)      # 强制折叠
+    if not ok:
+        return False, "折叠时报告没落盘：%s" % info.get("error")
+    with open(out, "r", encoding="utf-8") as fh:
+        html = fh.read()
+    n_eid = html.count('data-eid="')
+    n_ev = info.get("evidence", -1)
+    if n_eid != n_ev:
+        return False, "折叠后有 %d 条带 data-eid，上游 %d 条 ⇒ 折叠的条目丢了出处" % (n_eid, n_ev)
+    if "<details" not in html:
+        return False, "折叠没用 <details>（零 JS 的原生折叠）"
+    if "**" in html:
+        return False, "折叠样本里出现 `**` —— 只在折叠时渲染的文案没被清洗"
+    return True, "cap=2 强制折叠：%d 条全带出处，details 折叠，无星号" % n_eid
+
+
 def main():
     print("=" * 72)
     print("C 线端到端负控：有缺陷的账本，报告说不说得出来")
@@ -233,6 +260,7 @@ def main():
         ("e4_rewrite_silent_declared", e4_rewrite_silent_declared),
         ("e5_cites_resolvable", e5_cites_resolvable),
         ("e6_na_not_lumped", e6_na_not_lumped),
+        ("e7_folded_still_citable", e7_folded_still_citable),
     ]:
         arm(name, fn)
     print("-" * 72)

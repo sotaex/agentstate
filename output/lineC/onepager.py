@@ -198,7 +198,7 @@ def pick(evs: Sequence[E.Evidence], cap: int = DEFAULT_CAP
         rule = (
             "共 %d 条，这里显示 %d 条、折叠 %d 条。排序规则：按结论强度"
             "（挡下 → 提醒 → 已发现无法处置 → 已记录未判定 → 已核对），"
-            "同强度按证据 id 字典序。**折叠的不代表不重要，只代表这一页放不下。**"
+            "同强度按证据 id 字典序。折叠的不代表不重要，只代表这一页放不下。"
             % (len(evs), len(shown), len(folded))
         )
     return shown, folded, rule
@@ -663,6 +663,12 @@ def _selfcheck() -> int:
     # 而这份文件是要被归档、被转发的。「看不见」不等于「不在产物里」。
     if "**" in h:
         fails.append("产物里出现了 `**` —— 散文的 Markdown 强调外泄到了产物（含 CSS 注释）")
+    # ★ 只查 h 是不够的：h 里只有 1 条证据，**永远不折叠**，于是只在折叠时才
+    #   出现的那段文案从未被检查过 —— 实测真账本 `--cap 3` 才撞出 pick() 的
+    #   「折叠的不代表不重要」带着 `**` 印进了页面。同一类错第二次：
+    #   **测的是不折叠的那一份**。所以折叠样本也要查。
+    if "**" in hm:
+        fails.append("折叠样本里出现了 `**` —— 只在折叠时渲染的文案没有被检查过")
 
     for f in fails:
         print("[自检失败] %s" % f, file=sys.stderr)
