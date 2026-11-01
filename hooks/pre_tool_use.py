@@ -3632,6 +3632,11 @@ def log_event(rec, mirror=False):
         os.makedirs(d, exist_ok=True)
         fn = os.path.join(d, datetime.now().strftime("%Y-%m-%d") + ".jsonl")
         # 0.19.1 (TN-09)：读 prev 与 append 必须在同一把锁内 —— 见 _append_chained。
+        # ★ 0.63.3：降级态随**每一条**判定落盘（不另造记录）。挂在 hash 计算之前，
+        #   于是它进链、不可事后补写；没有降级时不写这个键（空键会让"没降级"和
+        #   "老记录"不可区分）。
+        if _HS_DEGRADED and "hs" not in rec:
+            rec["hs"] = dict(_HS_DEGRADED)
         rec = _append_chained(fn, rec)
         # ★ 0.55.0 (BL-04)：回读校验**只认 hash 在场**，不再重算「期望的那一行」。
         #   为什么（2026-10-23 实测：随包 harness 5–8 条红、装了包的用户跑
@@ -3741,25 +3746,124 @@ def notice_state_path():
     #   两者**必须算出同一个路径** —— 由 `ci/inbox_guards_0400.py` 的 S23 钉死。
 
 
+# ★★★ 0.63.3（2026-11-01）：**import 成功 ≠ 拿对了模块**。
+#
+# 实测缺陷（全量闸门 34 套里 0514 是 263 绿 / 23 红）：本机 user site
+# （`%APPDATA%\Python\Python311\site-packages`）躺着一份 0.28.0 时代的旧
+# `host_shield.py`，没有 `resolve_rules_file`。钩子 `import host_shield` **成功**
+# ⇒ 旧版静默胜出 ⇒ 首次调用 `_hs.resolve_rules_file` 抛 AttributeError
+# ⇒ `__main__` 兜底写 `HOOK_ERROR (allow)` ⇒ **整道防线 fail-open**。
+# 外在表现是三条同源：正控全漏拦、负控假绿（规则失效时它本来就"通过"）、
+# SELF-TAMPERED 不报。
+#
+# 为什么原来的兜底救不回来（**双重失效，两处都必错**）：
+#   ① 它只在 `import` **抛异常**时才走；旧模块 import 成功、只是缺属性 ⇒ 不进兜底。
+#   ② 就算进了兜底也没用：`sys.path.insert` 之后 `import host_shield` 命中
+#      `sys.modules` 里**同一个旧对象**（import 先查缓存）⇒ 兜底是死代码。
+#   ⇒ 必须 ①按**属性面**判身份 ②按**文件路径**加载并给独立模块名绕开缓存。
+#
+# 为什么不改 fail-closed：宿主对钩子的一切异常（含 10 s 超时）契约都是放行；
+#   单点改成拒放行，会让"包装坏了"变成"整台机器用不了"——2026-11-01 钩子卡死
+#   那次就是现成教训（连 `echo` 都发不出去，无法自诊断）。**降级留痕 > 降级拦死**。
+_HS_REQUIRED = ("resolve_rules_file", "ensure_rules_current",
+                "notice_budget_gate", "notify_owner")
+
+# 非 None ⇒ 本进程处于降级态。不另造审计记录（会把审计量翻倍），
+# 由 `log_event` 挂到**每一条**记录上，于是"当时用的是哪个模块"随判定一起留痕。
+_HS_DEGRADED = None
+
+
+def _hs_usable(mod):
+    """模块身份判据：`_HS_REQUIRED` 四个属性**都要在**。
+
+    只判"能不能 import"就是 0.63.2 之前的错。这四个是本文件真正调用到的全部面
+    （`grep -o '_hs\\.[A-Za-z_]*'` 可复核：resolve_rules_file / notice_budget_gate /
+    notify_owner，加 `_hs_auto.ensure_rules_current`）。**不判多余属性**——
+    判多了会在 host_shield 正常演进时误报降级。
+    """
+    if mod is None:
+        return False
+    return all(hasattr(mod, _a) for _a in _HS_REQUIRED)
+
+
+def _hs_load_pinned():
+    """按**文件路径**加载包内那一份，独立模块名绕开 `sys.modules` 缓存。
+
+    用 `antinel_host_shield_pinned` 而不是 `host_shield`：后者已在缓存里，
+    再 import 拿到的还是旧对象（正是原兜底失效的原因 ②）。
+    `host_shield.py` 只在 `if __name__ == "__main__"` 用到 `__name__`（已核），
+    换名加载不影响模块级行为。
+    """
+    parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(parent, "host_shield.py")
+    if not os.path.isfile(path):
+        return None
+    import importlib.util as _ilu
+    spec = _ilu.spec_from_file_location("antinel_host_shield_pinned", path)
+    if spec is None or spec.loader is None:
+        return None
+    mod = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def _hs_module():
-    """取 `host_shield` 模块（带"把包根塞进 sys.path"的兜底）。拿不到 ⇒ None。
+    """取 `host_shield` 模块（带身份校验与按路径兜底）。拿不到 ⇒ None。
 
     ★ 归口：本文件里所有对 host_shield 的 import 都走这里（**消灭副本**）——
       过去 `notify_owner` 自己内联了一份同样的兜底 import。
+
+    ★ 0.63.3：校验四属性；不合格就按路径强制加载包内那份。
+
+    ★★ 降级标记的**判据**（这一条决定它有没有区分力）：
+       - `import host_shield` **直接失败** ⇒ **不打标记**。这是生产常态：
+         钩子以脚本方式启动，`sys.path[0]` 是 `hooks/`，包根本来就不在路径上。
+         若把它也算降级，"降级"会变成每条记录恒有的噪声（实测踩过：第一版
+         判据的 B 腿就是这么假红的）。
+       - `import` 成功但**不合格** ⇒ 打标记（`missing` 列出缺的属性）。这才是
+         要抓的那件事：有个同名旧模块挡住了真模块。
+       - 两条路都拿不到合格模块 ⇒ 返回 None，**并且照样打标记**（`used: None`）
+         —— 上层会 fail-open，这里再不留痕就真静默了。
     """
+    global _HS_DEGRADED
+    shadow = None
     try:
         import host_shield as _hs
-        return _hs
+        if _hs_usable(_hs):
+            return _hs
+        shadow = {"rejected": str(getattr(_hs, "__file__", "?")),
+                  "missing": [_a for _a in _HS_REQUIRED if not hasattr(_hs, _a)]}
+    except Exception:                                            # noqa: BLE001
+        shadow = None                    # 生产常态：包根不在 sys.path，无需留痕
+    try:
+        _pinned = _hs_load_pinned()
+    except Exception as _e:                                      # noqa: BLE001
+        _pinned = None
+        if shadow:
+            shadow["load_error"] = type(_e).__name__
+    if _hs_usable(_pinned):
+        _used = str(getattr(_pinned, "__file__", "?"))
+        if shadow:
+            _hs_degraded(shadow["rejected"], shadow["missing"], _used)
+        return _pinned
+    # 兜底也不成：真降级，必须留痕（上层会 fail-open，不留痕就真静默）
+    _hs_degraded((shadow or {}).get("rejected", "(无任何可用的 host_shield)"),
+                 (shadow or {}).get("missing", []), None)
+    return None
+
+
+def _hs_degraded(rejected, missing, used):
+    """记一次降级：stderr 一行（人看得见）＋ 挂到每一条审计记录上（链上可查）。"""
+    global _HS_DEGRADED
+    _HS_DEGRADED = {"rejected": str(rejected), "missing": list(missing),
+                    "used": used}
+    try:
+        sys.stderr.write("[Antinel] host_shield degraded: rejected %s (missing %s); "
+                         "using %s\n" % (_HS_DEGRADED["rejected"],
+                                         ",".join(missing) or "(none)",
+                                         used or "NOTHING -> fail-open"))
     except Exception:                                            # noqa: BLE001
         pass
-    try:
-        parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        if parent not in sys.path:
-            sys.path.insert(0, parent)
-        import host_shield as _hs
-        return _hs
-    except Exception:                                            # noqa: BLE001
-        return None
 
 
 def notice_gate(rule_id, snippet):

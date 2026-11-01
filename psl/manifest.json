@@ -76,7 +76,7 @@
   "heartbeat.py": "sha256:5baafdb799379fe820a4dda2c0d73d0f737b66496abf17d7f630eef0c7d2cc72",
   "hooks/_host_detect.py": "sha256:3c445590179cc9927fb9e4adab896f43636524c7f4002285138058a8beda78ee",
   "hooks/post_tool_use.py": "sha256:066d6c5dc4bda900d2931cd999e691751051ab23169e416e417507ff20fe3481",
-  "hooks/pre_tool_use.py": "sha256:e7441d8d8682234b039e388294ae297df8a2725aa46ba81a880c8037ef8aee8c",
+  "hooks/pre_tool_use.py": "sha256:085ae6ddc80f921bf556bafcfa229a8e8a269880b5530ed399986893cbb08ef0",
   "hooks/session_start_banner.py": "sha256:d06d9b072ba27000161863adee7cea913e84bc9d89db9ac6d1f25e16df41d5d8",
   "host_shield.py": "sha256:0aeba7f77768d285906bbe1c76234e8336439ebe07396ce914349ce340e13488",
   "hub.py": "sha256:edcb1b94194e551d5b0023749ae5417e67729b22eb391198fcae74a906668c08",

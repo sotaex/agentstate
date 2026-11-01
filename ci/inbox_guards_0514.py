@@ -11792,5 +11792,172 @@ def c_nfn39b():
     return True
 
 
+# ═════════════ HSI 族（0.63.3，2026-11-01）：host_shield 模块身份 ═════════════
+#
+# 被测缺陷（本轮实测：本套件单跑 263 绿 / 23 红）：user site 里一份 0.28.0 时代的
+# 旧 `host_shield.py`（无 `resolve_rules_file`）被 `import host_shield` **静默选中**
+# ⇒ 钩子抛 AttributeError ⇒ `HOOK_ERROR (allow)` ⇒ **整道防线 fail-open**。
+# 23 条红是同一个根因的三张面孔：正控全漏拦、负控假绿（规则失效时它本来就"通过"）、
+# SELF-TAMPERED 不报。修后本套件 286 绿 / 0 红。
+#
+# ★ 为什么原有兜底救不回来（**双重失效**）：①它只在 import **抛异常**时才走，
+#   而旧模块 import 成功、只是缺属性 ⇒ 不进兜底；②就算进了，`sys.path.insert`
+#   之后再次 `import host_shield` 命中的仍是 `sys.modules` 里**同一个旧对象**
+#   ⇒ 兜底是死代码。
+# ★ 为什么不是 fail-closed：宿主对钩子的一切异常（含 10 s 超时）契约都是放行；
+#   单点改成拒放行，会让"包装坏了"变成"整台机器用不了"（2026-11-01 钩子卡死那次
+#   就是现成教训）。**降级要留痕，不要拦死**。
+
+_HSI_FAKE = '''"""旧版 host_shield 的最小复刻（0.28.0 形态：没有 resolve_rules_file）。"""
+
+
+def ensure_rules_current(proj, *a, **k):
+    return {"action": "noop"}
+
+
+def notify_owner(*a, **k):
+    return None
+
+
+def notice_budget_gate(*a, **k):
+    return (True, None)
+'''
+
+
+def _hsid_env(env, userbase=None, nousersite=False):
+    """HSI 族专用 env。**必须显式处理 `PYTHONNOUSERSITE`**：
+
+    本套件自己就是以 `PYTHONNOUSERSITE=1` 跑的（隔离本机 user site 里的旧模块），
+    而 `_hook_project` 从 `os.environ` 原样继承 —— 不摘掉它，`PYTHONUSERBASE`
+    造的假 user site 会被**静默关掉**，遮蔽根本不存在，HSI-01 于是"拦下了但没报
+    降级"（实测踩过：这是夹具漏洞，不是产品缺陷）。**同一类错误在判据里和在产品里
+    长得一样**，所以这行注释必须留下。
+    """
+    e = dict(env)
+    e.pop("PYTHONNOUSERSITE", None)
+    if userbase:
+        e["PYTHONUSERBASE"] = userbase
+    if nousersite:
+        e["PYTHONNOUSERSITE"] = "1"
+    return e
+
+
+def _hsid_fire(proj, env, sid, path):
+    """跑真 hook。**故意不带 `-E`**：要让 `PYTHONUSERBASE` 生效，才能造出
+    "user site 里有个旧模块"这个真实形态（生产上 `-E` 并不阻止 user site）。"""
+    import subprocess
+    ev = {"session_id": sid, "tool_name": "Read", "tool_input": {"file_path": path}}
+    p = subprocess.run([sys.executable, "-X", "utf8",
+                        os.path.join(ROOT, "hooks", "pre_tool_use.py")],
+                       env=env, cwd=proj,
+                       input=json.dumps(ev, ensure_ascii=False),
+                       capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", timeout=180)
+    return ((p.stdout or "") + (p.stderr or "")), p.returncode
+
+
+def _hsid_records(proj, sid):
+    d = os.path.join(proj, ".psl", "audit")
+    out = []
+    if not os.path.isdir(d):
+        return out
+    for fn in sorted(os.listdir(d)):
+        if not fn.endswith(".jsonl"):
+            continue
+        try:
+            body = io.open(os.path.join(d, fn), encoding="utf-8",
+                           errors="replace").read()
+        except OSError:
+            continue
+        for ln in body.splitlines():
+            if not ln.strip():
+                continue
+            try:
+                rec = json.loads(ln)
+            except ValueError:
+                continue
+            if rec.get("session") == sid:
+                out.append(rec)
+    return out
+
+
+@check("HSI-01 正控：同名旧模块挡在前面时仍必须拦，且降级随审计留痕")
+def c_hsi01():
+    proj, env = _hook_project("g0514_hsi01_")
+    base = os.path.dirname(proj)
+    us = os.path.join(base, "ub", "Python311", "site-packages")
+    os.makedirs(us, exist_ok=True)
+    with io.open(os.path.join(us, "host_shield.py"), "w", encoding="utf-8") as f:
+        f.write(_HSI_FAKE)
+    out, rc = _hsid_fire(proj, _hsid_env(env, userbase=os.path.join(base, "ub")),
+                         "hsi01", _SEC05_POS[0][1])
+    if "Antinel 拦截" not in out:
+        return ("遮蔽在时没拦下 ⇒ 旧模块仍能把整道防线打哑（rc=%d，尾部 %r）"
+                % (rc, out[-220:]))
+    if "host_shield degraded" not in out:
+        return "拦下了但没报降级 ⇒ 事后查不出当时用的是哪个模块"
+    marked = [r for r in _hsid_records(proj, "hsi01") if isinstance(r.get("hs"), dict)]
+    if not marked:
+        return "拦截成立，但审计记录里没有 hs 标记 ⇒ 链上查不到这次降级"
+    miss = marked[0]["hs"].get("missing") or []
+    if "resolve_rules_file" not in miss:
+        return "hs 标记没指名缺的属性：%r" % (marked[0]["hs"],)
+    used = str(marked[0]["hs"].get("used") or "")
+    if not used.replace("\\", "/").lower().endswith("/antinel-security/host_shield.py"):
+        return "hs.used 没指向包内那一份：%r" % (used,)
+    _note("拦截成立；rejected=%s" % marked[0]["hs"].get("rejected"))
+    return True
+
+
+@check("HSI-02 反证：无遮蔽时不得报降级（否则标记恒真，HSI-01 就成了假绿）")
+def c_hsi02():
+    proj, env = _hook_project("g0514_hsi02_")
+    out, rc = _hsid_fire(proj, _hsid_env(env, nousersite=True),
+                         "hsi02", _SEC05_POS[0][1])
+    if "Antinel 拦截" not in out:
+        return "无遮蔽时反而没拦下（rc=%d）：%r" % (rc, out[-220:])
+    if "host_shield degraded" in out:
+        return ("无遮蔽也报降级 ⇒ 标记恒真，HSI-01 的绿不来自身份校验"
+                "（生产常态是包根不在 sys.path，import 本来就失败）")
+    if [r for r in _hsid_records(proj, "hsi02") if "hs" in r]:
+        return "无遮蔽时审计记录仍带 hs ⇒ 把常态误判成降级"
+    return True
+
+
+@check("HSI-03 负控：兜底也拿不到时不得假装成功（否则兜底恒成功，HSI-01 同样假绿）")
+def c_hsi03():
+    import types
+    mod = _b57_hook()
+    saved_mod = sys.modules.get("host_shield")
+    saved_load = mod._hs_load_pinned
+    saved_degraded = mod._HS_DEGRADED
+    sys.modules["host_shield"] = types.ModuleType("host_shield")   # 缺全部四属性
+    try:
+        mod._HS_DEGRADED = None
+        got = mod._hs_module()
+        got_file = str(getattr(got, "__file__", "") or "")
+        if not got_file.replace("\\", "/").lower().endswith("/antinel-security/host_shield.py"):
+            return "_hs_module 没走到包内那一份，返回 %r" % (got,)
+        if not mod._HS_DEGRADED:
+            return "拿到了包内那份却没记降级 ⇒ 静默降级"
+        mod._hs_load_pinned = lambda: None                 # 把兜底也打断
+        mod._HS_DEGRADED = None
+        got2 = mod._hs_module()
+        if got2 is not None:
+            return "兜底断了仍返回模块 ⇒ 返回的不是它真拿到的：%r" % (got2,)
+        mark = mod._HS_DEGRADED or {}
+        if mark.get("used", "missing-key") is not None:
+            return "两条路都断时没留痕（%r）" % (mark,)
+        _note("兜底断后 used=None，留痕仍在：%r" % (mark.get("missing"),))
+    finally:
+        mod._hs_load_pinned = saved_load
+        mod._HS_DEGRADED = saved_degraded
+        if saved_mod is None:
+            sys.modules.pop("host_shield", None)
+        else:
+            sys.modules["host_shield"] = saved_mod
+    return True
+
+
 if __name__ == "__main__":
     sys.exit(main())
