@@ -423,6 +423,24 @@ REC_T_BLOCK = (
 #   （探针打在 A 上，名字说 B），本仓对「假守卫」的纪律与「没有守卫」同等。
 (REC_T_NS, REC_T_GAP_MANIFEST,
  REC_T_GAP_SCOPE, REC_T_OWNERSHIP) = REC_T_BLOCK
+
+
+def _gap_detail(rc, out):
+    """P-B1 缺口断言的 detail —— 空 detail 的 FAIL 无法定位（本仓已有此教训）。
+
+    ★ 2026-11-01：这条断言的前提是「除缺口件外，树本身是 current」。
+      实测红了一次却看不出原因：我改过 `hooks/pre_tool_use.py`、manifest 未重签
+      ⇒ 裸 `--json` 必然报 superseded ⇒ rc=1 ⇒ 断言红。
+      红的是**另一个事实**（包不是 current），不是「缺口件检不出」——
+      两者对读者意味着完全不同的下一步。detail 写清 rc/status/reason 才分得开。
+    """
+    st = reason = None
+    try:
+        j = json.loads(out) if (out or "").strip() else {}
+        st, reason = j.get("status"), j.get("reason")
+    except Exception:
+        pass
+    return "rc=%s status=%r reason=%r" % (rc, st, (reason or "")[:70])
 REC_L_BLOCK = (
     "0.18.0 R-21 --check-ledger executes (dry-run)",
     "0.18.0 R-21 pending row detected after a covered file changes",
@@ -1980,7 +1998,7 @@ def main():
                 gap.write_bytes(gap_bak + b"\n# tamper probe (P-B1 gap file)\n")
                 # ① 裸 --json：digest 集不含它 ⇒ 检不出（这就是「缺口」本身）
                 rc2, out2, err2, _ = run("antinel_verify.py", ["--json"])
-                record(REC_T_GAP_SCOPE, rc2 == 0, "")
+                record(REC_T_GAP_SCOPE, rc2 == 0, _gap_detail(rc2, out2))
                 # ② --manifest：清单含它 ⇒ 必须报 superseded（缺口被兜住）
                 rc, out, err, _ = run("antinel_verify.py", ["--manifest", "--json"])
                 vj = json.loads(out) if out.strip() else {}

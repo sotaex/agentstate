@@ -79,7 +79,24 @@ def _read_stdin_bounded(budget=0.4):
     try:
         try:
             os.set_blocking(0, False)
-        except Exception:
+        except AttributeError:
+            # ★★ 2026-11-01（本机实测，Windows + CPython 3.11.9）：
+            #   `os.set_blocking` **在 Windows 上是 3.12 才有的**。3.10/3.11 上
+            #   它根本不存在 ⇒ 抛 AttributeError。而原实现把「任何异常」都导向
+            #   `sys.stdin.buffer.read()`（阻塞到 EOF）—— 管道 stdin 永远不会 EOF
+            #   ⇒ **挂住**。实测：`_banner_hang.py` 对照两组，唯一变量是解释器：
+            #       3.11.9  → set_blocking AttributeError → 挂住（8s 探针打满，
+            #                 套件里是 120s 上限）
+            #       3.13.12 → set_blocking OK          → 0.41s 正常返回
+            #   而这恰好是产品声明支持的版本区间（Python 3.10+）。
+            #   ⇒ 「函数不存在」不能退向阻塞读：那是唯一会挂住的方向。
+            #     session_id 读不到是可接受的降级（本函数本来就是 best-effort）；
+            #     把会话卡住不是。
+            return b""
+        except OSError:
+            # 函数在、但这个 fd 不支持非阻塞（`/dev/null` 一类，WinError 87）。
+            # 这类 stdin 本来就立刻 EOF，退回普通 read 不会挂 —— 这一支保持原样，
+            # 与上面 AttributeError 分支的区别正是「会不会阻塞」。
             try:
                 return sys.stdin.buffer.read()
             except Exception:

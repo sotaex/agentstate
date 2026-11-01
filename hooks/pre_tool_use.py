@@ -5190,7 +5190,22 @@ def main():
                     ensure_ascii=False) + "\n")
         except Exception:
             pass
-        _probe_policy = {k: v for k, v in policy.items() if k != "whitelist"}
+        # ★★ 2026-11-01（探针恒 allow，实测 22 天）：**剥错了键**。
+        #   上面的意图（5169-5171）写得很清楚：probe tests the ENGINE's deny path,
+        #   not the user's release configuration ⇒ 必须绕过用户白名单。
+        #   旧写法剥 `whitelist` —— 而 policy 走到这里**已经扁平化**：顶层就是
+        #   `paths` / `commands` / `domains`（`apply_policy` 之后），根本没有
+        #   `whitelist` 这个键 ⇒ **剥了个不存在的东西**，白名单照常生效。
+        #   而合成事件是 `<项目根>/__antinel_probe__.env`，本项目根又恰好被用户
+        #   加进了 `whitelist.paths` ⇒ `path_whitelisted()` 命中 ⇒ AN-001
+        #   （secrets ＋ file_patterns）被 `continue` 放行 ⇒ `blocking` 为空 ⇒
+        #   `decision=allow` ⇒ `ok=False`。
+        #   取证：`.psl/audit` 里 2026-10-10 ~ 10-31 共 22 条 enforcement_probe，
+        #   **全部** `got=allow(rc=0)`、`decided=allow`、`contract=False legacy=False`，
+        #   一条 ok=True 都没有 —— 探针从上线第一天起测的就不是它以为的那件事。
+        #   ⇒ 清空三个白名单面（不是通道，是**用户配置**）；其余设置照旧。
+        _probe_policy = {k: v for k, v in policy.items()
+                         if k not in ("whitelist", "paths", "commands", "domains")}
         hits = collect_hits(effective_rules, tool_name, texts, project_root,
                             file_targets, _probe_policy,
                             workspace_roots=workspace_roots)

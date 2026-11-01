@@ -203,7 +203,17 @@ def main():
             rc, out, err = -1, "", "probe subprocess error: %r" % (e,)
         dur = int((time.time() - t0) * 1000)
 
-        decided = "block"
+        # ★★ 2026-11-01：初值原本是 `"block"` —— 一个**假信号源**。
+        #   没打出 `ANTINEL_PROBE decision=` 行（钩子崩了 / 早退 / 换了实现）时，
+        #   `decided` 保持初值 "block"，而 `ok = (rc == 2 and decided == "block" and want)`
+        #   ⇒ 只要 rc=2 就"看起来判了 block"。实测反例（本机用户级 site-packages
+        #   里有 0.28.0 的旧 host_shield，`_hs_module()` 拿到它 ⇒ `load_rules()`
+        #   抛 AttributeError ⇒ HOOK_ERROR fail-open ⇒ rc=0）：
+        #       reason 打出 `rc=0 decided=block contract=False legacy=False`
+        #   钩子**一个字都没判**，报告却说它判了 block。换成 `<no-line>` 之后，
+        #   同一场景读作 `decided=<no-line>`，"没走到判定"与"判了 block"再也混不了。
+        #   —— 这与 0.55.0 那条「读数必须自证读得到」是同一件事：没读到 ≠ 读到默认值。
+        decided = "<no-line>"
         for ln in err.splitlines():
             if ln.startswith("ANTINEL_PROBE decision="):
                 decided = ln.split("=", 1)[1].strip()
