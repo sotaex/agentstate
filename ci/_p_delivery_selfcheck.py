@@ -492,14 +492,13 @@ _CHANNEL_EXEMPT = {
         "kind": "pending", "until": "0.64.0",
         "why": "单例排查工具，裸 PY 起钩子；同上。",
     },
-    ("ci/drift_audit.py", "hook"): {
-        "kind": "pending", "until": "0.64.0",
-        "why": "漂移审计的取数腿，裸 PY 起钩子；审计结论可能因此偏离生产通道。",
-    },
-    ("ci/regression_gate.py", "j_baseline_tag_reminder_in_place"): {
-        "kind": "pending", "until": "0.64.0",
-        "why": "该判据内裸 PY 起钩子，与同文件 call_hook（已 -I -S）不一致 —— 同一文件两把尺子。",
-    },
+    # ★ 2026-11-02（N-07）：`("ci/drift_audit.py", "hook")` 已删除 —— 三处起钩子
+    #   （117 / 493 / 497）全部挪到 PY_FLAGS。
+    # ★ 同日删除 `("ci/regression_gate.py", "j_baseline_tag_reminder_in_place")`：
+    #   该判据函数里**已经没有 spawn 了**（它走同文件的 `call_hook()`，后者本就是
+    #   `-I -S`）。这条登记从删除之日起就是**幽灵**——它豁免不存在的对象，
+    #   却让人读表时以为"这里有一笔已知债"。幽灵登记比漏登记更难发现：
+    #   漏登记会红，幽灵登记在任何一条判据下都不红。
     ("scripts/build_package.py", "build"): {
         "kind": "pending", "until": "0.64.0",
         "why": "构建期调子进程；经间接追一层被判进表。待核是否真起钩子（若只是跑 "
@@ -514,8 +513,13 @@ _CHANNEL_EXEMPT = {
 #:   量出来的（按裸名把本地 `run()` 辅助函数当成 subprocess.run、把 main() 里全部
 #:   spawn 当成起钩子），强制项 53 点里有 41 点是假的。修正后实测 9 组 / 12 点全为
 #:   真调用点。下界随口径变，但「非空」这条不许松：空集与缩水照样判红。
-_CHANNEL_MIN_GROUPS = 8
-_CHANNEL_MIN_POINTS = 10
+#: ★ 2026-11-02 再次上调为 10 组 / 13 点（实测 12 组 / 16 点，取八成）。这一次是
+#:   **分母变大**：常量名穿透（`[PY, HOOK_PRE]`）带回 5 个点，按点过滤（aux 不再
+#:   连带淘汰同组）带回 `drift_audit.py:<module>`、`drift_audit_round2.py:<module>`
+#:   与 `verification_tests.py:main`。下界上调的方向是好事——它把这次的收窄钉住，
+#:   谁把穿透改回去，`enforced` 掉到 12 点以下立刻红。
+_CHANNEL_MIN_GROUPS = 10
+_CHANNEL_MIN_POINTS = 13
 
 
 def _channel_scan():
@@ -556,8 +560,18 @@ def ch1_hook_channel_matches_production():
         % [e["file"] for e in errors])
 
     groups = CS.group(recs)
-    enforced = {k: v for k, v in groups.items()
-                if all(r["cls"] in ("direct", "indirect", "shell") for r in v)}
+    # ★ 2026-11-02（N-07）：此前是
+    #     `enforced = {k: v for k, v in groups.items() if all(r["cls"] in ENFORCED)}`
+    #   —— **整组全为强制类**才进分母。而 `ci/*.py` 大多是模块级脚本（没有 main
+    #   函数），全部点都落在同一个 `(文件, "<module>")` 组里。于是只要顶层多写一条
+    #   不起钩子的 spawn（`-c` 探针、`antinel.py --help` 之类），同文件里**真起钩子**
+    #   的点就被连带踢出强制面。实测：`ci/drift_audit.py:<module>` 13 个点里 2 个是
+    #   真起钩子、11 个是 aux ⇒ 整组淘汰 ⇒ 把那 2 处改成裸 `PY` 也不会有任何红项。
+    #   ⇒ 分母污染的方向是**越写越安全**，这比"有偏离"危险得多（假绿第十四族：
+    #     对照实验的分母缩水）。
+    #   ⇒ 改为**按点过滤**：aux 点根本不进组。组内一致性检查保留（同函数多点仍须同旗标）。
+    ENFORCED_CLS = ("direct", "indirect", "shell")
+    enforced = CS.group([r for r in recs if r["cls"] in ENFORCED_CLS])
     assert len(enforced) >= _CHANNEL_MIN_GROUPS and stats["enforced"] >= _CHANNEL_MIN_POINTS, (
         "★ 非空集下界未达：强制组 %d（< %d）／点数 %d（< %d）。"
         "扫描面缩水时本条必须红，不许因为「没扫到东西」而变绿。"
@@ -577,6 +591,23 @@ def ch1_hook_channel_matches_production():
 
     # ③ 逐组判定
     bad, stale, expired = [], [], []
+
+    # ④ 结构调整的正控腿（2026-11-02，N-07）。
+    #   ★ 为什么非有不可：本次把 `enforced` 从「整组全强制」改成「按点过滤」，
+    #     而**旧口径会漏掉的点恰好只有 3 个**（drift_audit:<module> 2 个、
+    #     round2:<module> 1 个）⇒ 旧口径下强制面是 10 组 / 13 点，正好等于按八成
+    #     设的下界 10/13 ⇒ **下界咬不住这次退化**。下界只能防塌方，防不住退一格。
+    #   ★ 这条腿钉的是结构，不是数字：本仓 `ci/*.py` 绝大多数是模块级脚本
+    #     （没有 main 函数），所以「按点过滤生效」的**可观测形态**就是
+    #     `enforced` 里必然出现 `<module>` 组。退回按组过滤时它会全部消失。
+    assert any(fn == "<module>" for (_f, fn) in enforced), (
+        "★ 强制面里一个 `<module>` 组都没有 ⇒ 按点过滤退化回了按组过滤："
+        "模块级脚本里只要有一条不起钩子的 spawn（`-c` 探针、CLI 自检），"
+        "同文件里真起钩子的点就被连带踢出分母。实测形态：`ci/drift_audit.py:<module>` "
+        "13 个点里 2 个真起钩子、11 个 aux。")
+    assert not any(r["cls"] == "aux" for v in enforced.values() for r in v), (
+        "★ `enforced` 里混进了 aux 点 ⇒ 分母被污染")
+
     for (f, fn), rows in sorted(enforced.items()):
         ok = all(CS.is_production(r) for r in rows)
         key = (f, fn)
@@ -591,6 +622,15 @@ def ch1_hook_channel_matches_production():
                 stale.append("%s:%s 已合规但登记还在" % (f, fn))
 
     cur = _current_version()
+    # ★ 2026-11-02（N-07）：**幽灵登记**检测。
+    #   上面两类腐烂（已合规 = stale、到期 = expired）都假定登记项还有对象。
+    #   但登记项可以**整体失去对象**：函数被重构掉、或被改成调 `call_hook()` 这类
+    #   已合规的辅助函数。此时它既不在 `enforced` 里（不进逐组判定）、也不触发 stale
+    #   ⇒ 在任何判据下都不红，读表的人却以为"这里有一笔已知债"。
+    #   实测：`ci/regression_gate.py:j_baseline_tag_reminder_in_place` 就是这样一条
+    #   —— 它自己的函数体里一条 spawn 都没有。
+    present = {(r["file"], r["func"]) for r in recs}
+    ghosts = ["%s:%s（扫描面无此对象）" % k for k in _CHANNEL_EXEMPT if k not in present]
     for key, meta in _CHANNEL_EXEMPT.items():
         if meta["kind"] == "pending":
             until = meta.get("until")
@@ -616,11 +656,16 @@ def ch1_hook_channel_matches_production():
         problems.append("登记未清（修好了就要删登记，否则登记表本身腐烂）：%s" % stale)
     if expired:
         problems.append("登记到期：%s" % expired)
+    if ghosts:
+        problems.append(
+            "幽灵登记（登记的对象在扫描面里根本不存在 ⇒ 它豁免不了任何东西，"
+            "却让人误以为有一笔已知债）：%s" % ghosts)
     assert not problems, "\n  ".join(problems)
 
     adv = [k for k, m in _CHANNEL_EXEMPT.items() if m["kind"] == "adversarial"]
     return ("强制 %d 组 / %d 点全部与生产同旗标；登记 %d 条（其中敌对通道 %d 条：%s）"
-            % (len(enforced), stats["enforced"], len(_CHANNEL_EXEMPT), len(adv),
+            % (len(enforced), sum(len(v) for v in enforced.values()),
+               len(_CHANNEL_EXEMPT), len(adv),
                ", ".join("%s:%s" % k for k in adv) or "无"))
 
 
@@ -666,8 +711,45 @@ def ch2_channel_negctl():
             os.unlink(tmp)
         except OSError:
             pass
-    return ("变异体（%s 去掉 -I -S）不合规点 %d → %d，判据咬住"
-            % (os.path.basename(victim), len(orig_bad), len(mut_bad)))
+
+    # ② 第二个变异腿（2026-11-02，N-07）：**常量名穿透**那一路。
+    #   ★ 为什么不能只断言"不合规变多"：点从表里**消失**也会让不合规变少，
+    #     但对"消失"没有任何断言时，一次误删扫描面也能让判据看起来更干净。
+    #     ⇒ 这里同时断言两件事：**仍是 direct**（没从表里消失）＋ **全部翻红**。
+    #   ★ 钉的对象选 `ci/drift_audit.py` 而不是随便一个文件：它正是本次新增
+    #     `[PY, HOOK_PRE]` 常量穿透才被看见的那类写法；改回去必须立刻红。
+    d_p = os.path.join(CI, "drift_audit.py")
+    d_raw = io.open(d_p, encoding="utf-8").read()
+    d_mut = d_raw.replace("*PY_FLAGS, ", "")
+    assert d_mut != d_raw, (
+        "★ 变异没有改到任何字节 ⇒ `ci/drift_audit.py` 里已经没有 `*PY_FLAGS, ` 了，"
+        "负控空转（假绿第八族）。")
+    fd2, tmp2 = tempfile.mkstemp(suffix=".py", prefix="ch_negctl2_")
+    try:
+        with os.fdopen(fd2, "w", encoding="utf-8", newline="\n") as f:
+            f.write(d_mut)
+        rows2, err2 = CS.scan_file(tmp2, HERE)
+        assert err2 is None, "变异体解析失败：%s ⇒ 负控没测到东西" % err2
+        orig2, _ = CS.scan_file(d_p, HERE)
+        od = [r for r in orig2 if r["cls"] == "direct"]
+        md = [r for r in rows2 if r["cls"] == "direct"]
+        bad2 = [r for r in md if not CS.is_production(r)]
+        assert len(od) >= 2 and len(md) == len(od), (
+            "★ 去掉 `*PY_FLAGS` 后起钩子点从表里**消失**了（原 %d → 变异 %d）。"
+            "这不是「判红」，是「看不见」——两者必须分清。"
+            % (len(od), len(md)))
+        assert len(bad2) == len(md), (
+            "★ 剥掉 `*PY_FLAGS` 之后仍有 %d/%d 个点被判合规 ⇒ 扫描器实际没读到旗标，"
+            "CH-1 在 `drift_audit.py` 上的绿是假的。" % (len(md) - len(bad2), len(md)))
+    finally:
+        try:
+            os.unlink(tmp2)
+        except OSError:
+            pass
+
+    return ("变异一（%s 去掉 -I -S）不合规点 %d → %d；变异二（drift_audit.py 去掉 "
+            "*PY_FLAGS）direct 点 %d 个全翻红、无一消失 —— 两条都咬住"
+            % (os.path.basename(victim), len(orig_bad), len(mut_bad), len(md)))
 
 
 # ══════════════════════════════════════════════ 运行

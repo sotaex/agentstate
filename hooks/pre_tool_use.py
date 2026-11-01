@@ -3786,6 +3786,48 @@ def _hs_usable(mod):
     return all(hasattr(mod, _a) for _a in _HS_REQUIRED)
 
 
+def _hs_provenance(mod):
+    """被判废的那个模块**到底是什么** —— 尽量给出一条能照着去查的线索。
+
+    ★ 为什么不能只记 `__file__`（2026-11-02，N-08）：
+      实测出现过 `rejected ?`。假模块（宿主注入的、`types.ModuleType` 造的、
+      namespace 包）没有 `__file__`，于是**最需要诊断的时候，留痕字段正好是空的**。
+      这与「报出来 ≠ 出事了」是同一件事的反面：**留痕字段存在，内容为零**。
+      零内容比没字段更难发现 —— 没字段会让人去找，`?` 会让人以为已经记了。
+
+    ★ 只用 `os.path.isfile`，**绝不为了诊断再 import 一次同名模块**：
+      那等于把要排查的对象重新拉进进程，且可能触发它自己的模块级副作用。
+    """
+    if mod is None:
+        return "(无模块)"
+    bits = []
+    fp = getattr(mod, "__file__", None)
+    if fp:
+        bits.append(str(fp))
+    spec = getattr(mod, "__spec__", None)
+    origin = getattr(spec, "origin", None) if spec is not None else None
+    if origin and str(origin) != str(fp):
+        bits.append("origin=%s" % origin)
+    name = getattr(mod, "__name__", None)
+    if name:
+        bits.append("name=%s" % name)
+    if not fp and not origin:
+        # 两样都没有 ⇒ 只能从 sys.path 里**stat**出同名候选，让用户知道去哪看
+        cands = []
+        for d in list(sys.path or ()):
+            for rel in ("host_shield.py", os.path.join("host_shield", "__init__.py")):
+                try:
+                    p = os.path.join(d, rel) if d else rel
+                    if os.path.isfile(p):
+                        cands.append(p)
+                except Exception:                                # noqa: BLE001
+                    continue
+        bits.append("sys.path 候选=%s" % (cands or "(无)"))
+        keys = sorted(k for k in getattr(mod, "__dict__", {}) if not k.startswith("__"))
+        bits.append("属性=%s" % (keys[:8] or "(空)"))
+    return " | ".join(bits) or "?"
+
+
 def _hs_load_pinned():
     """按**文件路径**加载包内那一份，独立模块名绕开 `sys.modules` 缓存。
 
@@ -3831,7 +3873,7 @@ def _hs_module():
         import host_shield as _hs
         if _hs_usable(_hs):
             return _hs
-        shadow = {"rejected": str(getattr(_hs, "__file__", "?")),
+        shadow = {"rejected": _hs_provenance(_hs),
                   "missing": [_a for _a in _HS_REQUIRED if not hasattr(_hs, _a)]}
     except Exception:                                            # noqa: BLE001
         shadow = None                    # 生产常态：包根不在 sys.path，无需留痕
@@ -3841,22 +3883,35 @@ def _hs_module():
         _pinned = None
         if shadow:
             shadow["load_error"] = type(_e).__name__
+    extra = None
+    if shadow and shadow.get("load_error"):
+        # ★ 2026-11-02（N-08）：原来这个字段**记了但从不传出** ——
+        #   兜底加载也失败时，"为什么连包内那份都加载不了"这条信息当场丢失，
+        #   只剩一句 `used: NOTHING -> fail-open`。记了不传等于没记。
+        extra = {"load_error": shadow["load_error"]}
     if _hs_usable(_pinned):
-        _used = str(getattr(_pinned, "__file__", "?"))
+        # ★ `used` 只记**路径**：它的消费方（HSI-01 与 `report`）判的是
+        #   「用的是不是包内那一份」，比的是路径结尾。2026-11-02 我一度把它也换成
+        #   `_hs_provenance()`，多出来的 `| name=...` 后缀立刻让 HSI-01 判红 ——
+        #   判据咬住了，但这说明「留痕字段的格式」本身是契约，不是自由文本。
+        #   没有 `__file__` 才退到 provenance（从文件加载的模块必有，这路是兜底）。
+        _used = str(getattr(_pinned, "__file__", "") or "") or _hs_provenance(_pinned)
         if shadow:
-            _hs_degraded(shadow["rejected"], shadow["missing"], _used)
+            _hs_degraded(shadow["rejected"], shadow["missing"], _used, extra)
         return _pinned
     # 兜底也不成：真降级，必须留痕（上层会 fail-open，不留痕就真静默）
     _hs_degraded((shadow or {}).get("rejected", "(无任何可用的 host_shield)"),
-                 (shadow or {}).get("missing", []), None)
+                 (shadow or {}).get("missing", []), None, extra)
     return None
 
 
-def _hs_degraded(rejected, missing, used):
+def _hs_degraded(rejected, missing, used, extra=None):
     """记一次降级：stderr 一行（人看得见）＋ 挂到每一条审计记录上（链上可查）。"""
     global _HS_DEGRADED
     _HS_DEGRADED = {"rejected": str(rejected), "missing": list(missing),
                     "used": used}
+    if extra:
+        _HS_DEGRADED.update(extra)
     try:
         sys.stderr.write("[Antinel] host_shield degraded: rejected %s (missing %s); "
                          "using %s\n" % (_HS_DEGRADED["rejected"],

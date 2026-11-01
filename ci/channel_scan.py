@@ -104,8 +104,18 @@ def _collect_consts(tree):
       展开。只扫字面量的实现在这种写法下读到的是**空旗标**——正确改动被判不合规，
       而把元组清空成 `()` 反而谁也看不见。这是假绿第九族（探针自带第二套模型）的近亲：
       判据认的形态比语言能表达的形态窄。
+
+    ★ 为什么还要收 `strs`（2026-11-02，N-07 实测驱动）：
+      `HOOK_PRE = os.path.join(PKG, "hooks", "pre_tool_use.py")` 之后写
+      `subprocess.run([PY, HOOK_PRE], ...)` —— 这是本仓最常见的起钩子写法，
+      而原口径只认 `ast.Constant` 字面量 ⇒ **看不到 `HOOK_PRE` 里有什么** ⇒
+      这些点全被判成 `aux`（不进强制组）。
+      后果不是"少报几条"，而是**改与不改在 CH-1 的表里长得一模一样**：
+      实测修口径前 `ci/drift_audit.py:484/:488` 与 `ci/drift_audit_round2.py:29/:57`
+      四处在强制组外，把它们的 `-I -S` 删掉，CH-1 仍是绿的。
+      量具看不见的地方，改与不改等价 —— 这是比"有偏离"更严重的一类失效。
     """
-    consts, tuples = {}, {}
+    consts, tuples, strs = {}, {}, {}
     for node in tree.body:
         if not isinstance(node, ast.Assign) or len(node.targets) != 1:
             continue
@@ -122,7 +132,27 @@ def _collect_consts(tree):
             if v.elts and all(isinstance(e, ast.Constant) and isinstance(e.value, str)
                               for e in v.elts):
                 tuples[t.id] = [e.value for e in v.elts]
-    return consts, tuples
+        if isinstance(v, (ast.Call, ast.BinOp, ast.JoinedStr, ast.Attribute)):
+            # 表达式型常量：把里面**所有**字符串字面量记在该名字下，
+            # 供 `[PY, HOOK_PRE]` 这种「实参是名字」的 spawn 反查。
+            _lits = _all_lits(v)
+            if _lits:
+                strs[t.id] = _lits
+    return consts, tuples, strs
+
+
+def _name_lits(node, strs):
+    """实参里出现的模块级常量名 → 它们指向的字面量（口径 ② 的第二半）。
+
+    口径 ② 原文只写了「`os.path.join(...)` 这种嵌套要能穿透」，穿的是
+    **一个表达式内部**；这里穿的是 **名字 → 模块级常量值**。
+    两半缺一，`[PY, HOOK_PRE]` 就仍然是黑的。
+    """
+    out = []
+    for n in ast.walk(node):
+        if isinstance(n, ast.Name) and n.id in strs:
+            out.extend(strs[n.id])
+    return out
 
 
 def _starred_lits(node, tuples):
@@ -198,12 +228,13 @@ def _owner(spans, line):
     return best[1] if best else "<module>"
 
 
-def _hook_owner_funcs(tree, spans):
+def _hook_owner_funcs(tree, spans, strs=None):
     """口径 ③：哪些本文件函数「经实参拿到过钩子脚本名」。迭代到不动点。
 
     起点：`run("pre_tool_use.py", ...)` —— 被调函数 id 进集合。
     传递：`hook()` 里调 `run()`，而 run 已在集合里 ⇒ hook 也进。
     """
+    strs = strs or {}
     defs = {n for _a, _b, n in spans}
     owners = set()
     calls = []
@@ -215,7 +246,7 @@ def _hook_owner_funcs(tree, spans):
             continue
         lits = []
         for a in list(node.args) + [k.value for k in node.keywords]:
-            lits += _all_lits(a)
+            lits += _all_lits(a) + _name_lits(a, strs)
         calls.append((f.id, any(h in s for h in HOOK_SCRIPTS for s in lits)))
     changed = True
     while changed:
@@ -257,10 +288,10 @@ def scan_file(path, root):
     except SyntaxError as e:
         return [], {"file": _rel(path, root),
                     "error": "SyntaxError: %s" % e}
-    consts, tuples = _collect_consts(tree)
+    consts, tuples, strs = _collect_consts(tree)
     sub_names = _spawn_names(tree)
     spans = _func_spans(tree)
-    hook_funcs = _hook_owner_funcs(tree, spans)
+    hook_funcs = _hook_owner_funcs(tree, spans, strs)
     params = _func_params(tree)
     rel = _rel(path, root)
     file_mentions = any(h in s for h in HOOK_SCRIPTS for s in _all_lits(tree))
@@ -278,7 +309,7 @@ def scan_file(path, root):
                     argv = kw.value
         if argv is None:
             continue
-        lits = _all_lits(argv) + _starred_lits(argv, tuples)
+        lits = _all_lits(argv) + _starred_lits(argv, tuples) + _name_lits(argv, strs)
         hits = [s for s in lits if any(h in s for h in HOOK_SCRIPTS)]
         host = _owner(spans, node.lineno)
         if isinstance(argv, (ast.List, ast.Tuple)):

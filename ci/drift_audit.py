@@ -20,6 +20,15 @@ import io, sys, os, json, re, subprocess, tempfile, shutil, hashlib, glob
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 PKG = os.environ.get("ANTINEL_PKG", r"D:\psl\poc\antinel-security")
 PY = sys.executable
+# ★ 2026-11-02（N-07）：起钩子的子进程必须与生产同旗标。
+#   生产由 `scripts/install.py:365` 写成 `"<pythonw.exe>" -I -S "<abs>/hook.py"`
+#   —— `-I` 隐含 `-E -s -P`、`-S` 不加载 site。裸 `PY` 起钩子时**仍加载 user site**，
+#   本机 user site 里若有一份旧同名 `host_shield.py`，钩子会 AttributeError 后
+#   `HOOK_ERROR (allow)` 静默 fail-open —— 审计因此测到的不是生产行为（实测过 263 绿/23 红）。
+#   `-X utf8`：`-I` 会忽略 `PYTHONUTF8=1`，不加则本机中文输出走 gbk 被读成乱码。
+#   同一份口径见 `scripts/verification_tests.py:PY_FLAGS`；由 `ci/channel_scan.py` 的
+#   CH-1 守（本文件 3 处起钩子点现已进强制组，改动会被判红）。
+PY_FLAGS = ("-I", "-S", "-X", "utf8")
 HOOK_PRE = os.path.join(PKG, "hooks", "pre_tool_use.py")
 HOOK_POST = os.path.join(PKG, "hooks", "post_tool_use.py")
 
@@ -114,7 +123,7 @@ def hook(script, tool, ti, sid="d"):
     #   `rc=124` 不是"放行"也不是"拦下" ⇒ `_hook_env_dead` 不立旗、`_chk_hook` 记 FAIL，
     #   即「这次没测到」不会被读成「这次通过了」。
     try:
-        p = subprocess.run([PY, os.path.join(PKG, "hooks", script)], cwd=proj,
+        p = subprocess.run([PY, *PY_FLAGS, os.path.join(PKG, "hooks", script)], cwd=proj,
                            input=json.dumps(ev).encode(), capture_output=True, timeout=60)
         _rc, _so, _se = p.returncode, p.stdout, p.stderr
     except subprocess.TimeoutExpired as e:
@@ -481,11 +490,11 @@ check("B5 链文件无覆写打开（append-only）", not bad_writes, str(bad_wr
 
 # ---- C. 失败语义 ----
 # C1 畸形输入 fail-open
-p = subprocess.run([PY, HOOK_PRE], cwd=proj, input=b"not-json{{", capture_output=True, timeout=30)
+p = subprocess.run([PY, *PY_FLAGS, HOOK_PRE], cwd=proj, input=b"not-json{{", capture_output=True, timeout=30)
 check("C1 畸形 stdin → exit0 fail-open + HOOK_ERROR 留痕",
       p.returncode == 0 and b"HOOK_ERROR" in p.stderr, f"rc={p.returncode}")
 # C2 坏 transcript → usage_source 降级不崩
-p = subprocess.run([PY, HOOK_POST], cwd=proj,
+p = subprocess.run([PY, *PY_FLAGS, HOOK_POST], cwd=proj,
                    input=json.dumps({"session_id": "d", "transcript_path": "Z:/nope.jsonl",
                                      "tool_name": "Write",
                                      "tool_input": {"file_path": os.path.join(proj, "x.txt"), "content": "y"},

@@ -11960,6 +11960,29 @@ def c_hsi03():
             return "_hs_module 没走到包内那一份，返回 %r" % (got,)
         if not mod._HS_DEGRADED:
             return "拿到了包内那份却没记降级 ⇒ 静默降级"
+        # ★ N-08（2026-11-02）：**留痕字段有内容才算留痕**。
+        #   假模块（`types.ModuleType` 造的、宿主注入的）没有 `__file__`，
+        #   旧实现记成 `"?"` —— 最需要诊断的时候字段为零。零内容比没字段更难发现：
+        #   没字段会让人去找，`?` 会让人以为已经记了。
+        _rej = str((mod._HS_DEGRADED or {}).get("rejected") or "")
+        if _rej in ("", "?", "None"):
+            return ("降级留痕的 rejected 为空（%r）⇒ 最需要诊断时字段为零；"
+                    "没有 __file__ 时必须退到 name / sys.path 候选" % (_rej,))
+        if "host_shield" not in _rej:
+            return "rejected 没给出可查线索（%r）" % (_rej,)
+        # ── 反向腿：把取法退回「只记 __file__」，必须重新变成 "?"
+        #   没有这一腿，上面那条「非空」断言可能只是被别的字段撑住的，
+        #   读不出它到底在守什么（假绿第十三族：切片串用例）。
+        _m = _b57_hook(mut=(
+            'shadow = {"rejected": _hs_provenance(_hs),',
+            'shadow = {"rejected": str(getattr(_hs, "__file__", "?")),'))
+        _m._HS_DEGRADED = None
+        _m._hs_module()
+        _r2 = str((_m._HS_DEGRADED or {}).get("rejected") or "")
+        if _r2 not in ("?", ""):
+            return ("把 rejected 退回只记 __file__ 后仍然非空（%r）⇒ "
+                    "上面的非空断言不来自「__file__ 缺失」这一路，它守的不是它声称的东西"
+                    % (_r2,))
         mod._hs_load_pinned = lambda: None                 # 把兜底也打断
         mod._HS_DEGRADED = None
         got2 = mod._hs_module()

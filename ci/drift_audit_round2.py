@@ -11,6 +11,10 @@ import io, sys, os, json, re, subprocess, tempfile, shutil, hashlib, glob
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 PKG = r"D:\psl\poc\antinel-security"
 PY = sys.executable
+# ★ 2026-11-02（N-07）：起钩子与生产同旗标（`install.py:365` 的 `-I -S`）。
+#   本文件是历史一次性诊断件（硬编码 PKG），但它的两处 spawn 是真起钩子，
+#   裸 PY 会加载 user site ⇒ 测到的不是生产行为。口径同 `ci/drift_audit.py:PY_FLAGS`。
+PY_FLAGS = ("-I", "-S", "-X", "utf8")
 HOOK_PRE = os.path.join(PKG, "hooks", "pre_tool_use.py")
 
 base = _TMP.tmpdir(prefix="drift2_")
@@ -26,7 +30,7 @@ json.dump(pol, open(os.path.join(proj, ".psl", "policy.json"), "w", encoding="ut
 
 def hook(tool, ti, sid="d2"):
     ev = {"session_id": sid, "transcript_path": "", "tool_name": tool, "tool_input": ti}
-    return subprocess.run([PY, HOOK_PRE], cwd=proj, input=json.dumps(ev).encode(),
+    return subprocess.run([PY, *PY_FLAGS, HOOK_PRE], cwd=proj, input=json.dumps(ev).encode(),
                           capture_output=True, timeout=60)
 
 def chain_lines():
@@ -54,7 +58,7 @@ ok = "nt" in d9.get("platforms", []) and "nt" in d10.get("platforms", [])
 print(("PASS" if ok else "FAIL"), d9.get("platforms"), d10.get("platforms"))
 
 print("\n=== C1'（修正）：畸形 stdin 实际 stderr ===")
-p = subprocess.run([PY, HOOK_PRE], cwd=proj, input=b"not-json{{", capture_output=True, timeout=30)
+p = subprocess.run([PY, *PY_FLAGS, HOOK_PRE], cwd=proj, input=b"not-json{{", capture_output=True, timeout=30)
 print("rc:", p.returncode, "stderr:", repr(p.stderr.decode('utf-8', 'replace')[:200]))
 ok = p.returncode == 0  # fail-open 本体；留痕形态按实现
 print(("PASS" if ok else "FAIL"), "exit0 fail-open（留痕形态见上）")
