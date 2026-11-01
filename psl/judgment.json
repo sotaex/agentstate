@@ -8,7 +8,7 @@
   "value": "current",
   "derivation": "auto",
   "reason": null,
-  "checkedAt": "2026-11-01T17:35:25+08:00",
+  "checkedAt": "2026-11-01T20:58:33+08:00",
   "note": "re-derive any time: python -m tools.antinel_verify (--manifest for all 24 shipped files); which assertions failed: discrimination.failed[]"
  },
  "scope": {
@@ -121,7 +121,7 @@
   "scripts/scan.py": "sha256:e27ce9ae619422b990d8b0d48e94e0403ee9f57e87d9a7f51365c54c01342154",
   "scripts/install.py": "sha256:0a5b21e2792e69f2aaedaa28ad6c2872eb56fb56e2509c510d7f6d5ccd2b5df8",
   "scripts/report.py": "sha256:adfecd5a3de5e677b1781a4d557739c3196f7b8c54136cbc9559710db07cbdae",
-  "scripts/verification_tests.py": "sha256:e22397acc2ac850fa287dbf7c5fbefb0827097426ea2ce62da13735cffb0a702",
+  "scripts/verification_tests.py": "sha256:0361be4ebeed0a981539bf981303528e50db5121620cd5041a54232121c49f3f",
   "session_dna.py": "sha256:38b2bd765fdf2308fa698eb507e53c4ba7fbe2bf11c94216d95ad5dd116fb205",
   "transcript_reader.py": "sha256:c0ce99c5bdfb255f170ca744c011ae64ceb9569d1c9dd8efc1a2c096ff89dc1c",
   "audit_chain.py": "sha256:9a4438cbb65d20e8c7e1482c455a5a2a198aaaba6c1ded3eea1154b867d6f634",
@@ -130,8 +130,8 @@
   "tools/enforce_probe.py": "sha256:4b9b6b429caf92bd63b5ddd94b7c6b5b750c2351f01259e53b641a963f4c0f0f"
  },
  "run": {
-  "started_at": "2026-11-01T17:30:24+0800",
-  "duration_ms": 301142,
+  "started_at": "2026-11-01T20:54:29+0800",
+  "duration_ms": 244002,
   "duration_note": "wall-clock of a subprocess fan-out suite; machine- and load-dependent, not comparable across environments",
   "executor": "scripts/run_harness.py",
   "exit_code": 0,

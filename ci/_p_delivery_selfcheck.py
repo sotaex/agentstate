@@ -505,22 +505,17 @@ _CHANNEL_EXEMPT = {
         "why": "构建期调子进程；经间接追一层被判进表。待核是否真起钩子（若只是跑 "
                "setup.py 则本条应从表内剔除，而不是给它加 -I -S）。",
     },
-    ("scripts/verification_tests.py", "run"): {
-        "kind": "pending", "until": "0.64.0",
-        "why": "★★ 面最大的一处：270 条断言、190 处 hook() 全部经此函数起钩子，"
-               "而它是裸 PY（既无 -I 也无 -E）。改它要重录判定（跑两遍），"
-               "故单列一个窗口做，不在审计轮夹带。",
-    },
-    ("scripts/verification_tests.py", "main"): {
-        "kind": "pending", "until": "0.64.0",
-        "why": "同 run()：main 里 5 处直接起 post_tool_use/session_start_banner，裸 PY。",
-    },
 }
+
 
 #: 非空集下界（口径见 ci/channel_scan.py）。取当前实测值的约八成，
 #: 低了不许 —— 扫描面一旦缩水（比如把 ci/ 漏出 SCAN_DIRS），就不许再报绿。
-_CHANNEL_MIN_GROUPS = 10
-_CHANNEL_MIN_POINTS = 40
+#: ★ 2026-11-01 口径修正后由 10 组 / 40 点改为 8 组 / 10 点：原值是在**误判口径**下
+#:   量出来的（按裸名把本地 `run()` 辅助函数当成 subprocess.run、把 main() 里全部
+#:   spawn 当成起钩子），强制项 53 点里有 41 点是假的。修正后实测 9 组 / 12 点全为
+#:   真调用点。下界随口径变，但「非空」这条不许松：空集与缩水照样判红。
+_CHANNEL_MIN_GROUPS = 8
+_CHANNEL_MIN_POINTS = 10
 
 
 def _channel_scan():

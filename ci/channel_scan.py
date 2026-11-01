@@ -39,6 +39,26 @@ FLAG_TOKENS = ("-I", "-S", "-E", "-s", "-P", "-X", "-B", "-u")
 SCAN_DIRS = ("ci", "scripts", "tools", "hooks")
 
 
+def _spawn_names(tree):
+    """本文件里**真的等于 subprocess API** 的裸名集合。
+
+    ★ 为什么不能直接按名字匹配：`scripts/verification_tests.py` 自己有一个
+      `run(script, argv, ...)` 辅助函数，名字与 `subprocess.run` 撞车。按裸名
+      匹配会把 `run("pre_tool_use.py", cwd=...)` 读成「shell 起子进程、flags=[]」
+      ⇒ 凭空造出 7 条不合规，逼人去给一个纯 Python 调用加 `-I -S`。
+      **为了变绿去改无关代码，是假绿的另一种长相**（判据按 ID 猜语义，第十二族）。
+      所以：裸名只在 `from subprocess import ...` 明确导入时才算数。
+    """
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "subprocess":
+            for a in node.names:
+                if a.name in SPAWN_FUNCS:
+                    names.add(a.asname or a.name)
+    return names
+
+
+
 def repo_root(start=None):
     here = start or os.path.dirname(os.path.abspath(__file__))
     return os.path.dirname(here)
@@ -78,7 +98,14 @@ def _is_interp(node, consts):
 
 
 def _collect_consts(tree):
-    consts = {}
+    """模块级常量：名字 → ("python" 解释器) / 字符串元组（供 `*NAME` 解包解析）。
+
+    ★ 为什么要收元组：旗标可以写成 `PY_FLAGS = ("-I", "-S")` 再用 `*PY_FLAGS`
+      展开。只扫字面量的实现在这种写法下读到的是**空旗标**——正确改动被判不合规，
+      而把元组清空成 `()` 反而谁也看不见。这是假绿第九族（探针自带第二套模型）的近亲：
+      判据认的形态比语言能表达的形态窄。
+    """
+    consts, tuples = {}, {}
     for node in tree.body:
         if not isinstance(node, ast.Assign) or len(node.targets) != 1:
             continue
@@ -91,16 +118,65 @@ def _collect_consts(tree):
         elif isinstance(v, ast.Constant) and isinstance(v.value, str) \
                 and "python" in v.value.lower():
             consts[t.id] = "python"
-    return consts
+        elif isinstance(v, (ast.Tuple, ast.List)):
+            if v.elts and all(isinstance(e, ast.Constant) and isinstance(e.value, str)
+                              for e in v.elts):
+                tuples[t.id] = [e.value for e in v.elts]
+    return consts, tuples
 
 
-def _spawn_name(call):
+def _starred_lits(node, tuples):
+    """`*PY_FLAGS` 星号解包：把该常量的字符串元素补进字面量集。"""
+    out = []
+    for n in ast.walk(node):
+        if isinstance(n, ast.Starred) and isinstance(n.value, ast.Name):
+            out.extend(tuples.get(n.value.id, []))
+    return out
+
+
+def _spawn_name(call, sub_names=()):
+    """判断这个调用是不是起子进程，返回 API 名或 None。
+
+    ★ `ast.Attribute` 也要限定命名空间：`foo.run(...)`（比如某个对象的方法）
+      同样不是 `subprocess.run`。只认 `subprocess.X` 与显式裸导入的名字。
+    """
     f = call.func
     if isinstance(f, ast.Attribute) and f.attr in SPAWN_FUNCS:
-        return f.attr
-    if isinstance(f, ast.Name) and f.id in SPAWN_FUNCS:
+        if isinstance(f.value, ast.Name) and f.value.id == "subprocess":
+            return f.attr
+        return None
+    if isinstance(f, ast.Name) and f.id in sub_names:
         return f.id
     return None
+
+
+def _func_params(tree):
+    """函数名 → 形参名集合。用于判「这个 spawn 的脚本名是不是从实参来的」。
+
+    ★ 为什么需要它：原口径是「宿主函数在 hook_funcs 里 ⇒ indirect」，而
+      `main()` 是包含全部用例的巨型函数，只要它调过一次钩子，函数体内**每一个**
+      spawn 都被当成起钩子（实测 18 条假不合规：`-c` 探针、`enforce_probe.py`、
+      `scan.py`）。判据于是要求给这些无关调用加 `-I -S` —— 为绿而改。
+      真口径：脚本名由**实参**传进来（`run(script, ...)` 里的 `script`），
+      才存在「调用方传的是不是钩子」这个待追究的问题。
+    """
+    out = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            ps = {a.arg for a in list(node.args.args) + list(node.args.kwonlyargs)}
+            ps |= {a.arg for a in (node.args.vararg, node.args.kwarg) if a is not None}
+            out[node.name] = ps
+    return out
+
+
+def _uses_param(node, params):
+    """表达式里是否出现了该函数的形参名（脚本名来自实参）。"""
+    if not params:
+        return False
+    for n in ast.walk(node):
+        if isinstance(n, ast.Name) and n.id in params:
+            return True
+    return False
 
 
 def _func_spans(tree):
@@ -181,16 +257,18 @@ def scan_file(path, root):
     except SyntaxError as e:
         return [], {"file": _rel(path, root),
                     "error": "SyntaxError: %s" % e}
-    consts = _collect_consts(tree)
+    consts, tuples = _collect_consts(tree)
+    sub_names = _spawn_names(tree)
     spans = _func_spans(tree)
     hook_funcs = _hook_owner_funcs(tree, spans)
+    params = _func_params(tree)
     rel = _rel(path, root)
     file_mentions = any(h in s for h in HOOK_SCRIPTS for s in _all_lits(tree))
     out = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        kind = _spawn_name(node)
+        kind = _spawn_name(node, sub_names)
         if kind is None:
             continue
         argv = node.args[0] if node.args else None
@@ -200,7 +278,7 @@ def scan_file(path, root):
                     argv = kw.value
         if argv is None:
             continue
-        lits = _all_lits(argv)
+        lits = _all_lits(argv) + _starred_lits(argv, tuples)
         hits = [s for s in lits if any(h in s for h in HOOK_SCRIPTS)]
         host = _owner(spans, node.lineno)
         if isinstance(argv, (ast.List, ast.Tuple)):
@@ -210,7 +288,9 @@ def scan_file(path, root):
             flags = [s for s in lits if s in FLAG_TOKENS]
             if hits:
                 cls = "direct"
-            elif host in hook_funcs:
+            elif host in hook_funcs and _uses_param(argv, params.get(host, set())):
+                # 脚本名来自形参 ⇒ 待追究「调用方传的是不是钩子」；否则本处 spawn
+                # 与钩子无关（如 main() 里的 -c 探针），不许拉进强制项。
                 cls = "indirect"
             elif file_mentions:
                 cls = "aux"

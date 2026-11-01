@@ -162,6 +162,20 @@ os.environ["ANTINEL_NO_AUTO_RULES"] = "1"
 # 0.28.2: 套件运行期间关闭门闸气泡（F-15 在摘除开关的沙箱里单独断言）
 PY = sys.executable
 
+# ★★ 0.63.3（2026-11-01）：量具通道必须与生产同旗标。
+#   生产钩子由 `scripts/install.py:365 hook_command()` 写成 `<pythonw> -I -S <hook>`。
+#   本文件此前是**裸 PY**（`[PY, script, *argv]`，一个旗标都没有），差别是能不能
+#   加载 user site：本机 `AppData\Roaming\Python\Python311\site-packages` 里那份
+#   0.28.0 旧 `host_shield.py`（无 `resolve_rules_file`）正是这样进来的，把钩子顶崩
+#   成 fail-open（`ci/inbox_guards_0514.py` 曾因此报 263 绿 / 23 红）。判据在非生产
+#   通道上取证 = 把要抓的东西藏起来；`ci/_p_delivery_selfcheck.py` 的 CH-1 现在会盯住这条。
+#   ★ `-X utf8` 不是放宽，是**补回被 `-I` 屏蔽掉的行为**：本机环境有 `PYTHONUTF8=1`，
+#     裸 PY 走 UTF-8；`-I` 忽略它之后 `sys.stdout.encoding` 变 locale（实测 gbk，
+#     `print("中文")` = 字节 `326 320 316 304`），而 `run()` 用 utf-8 解码 ⇒ 乱码。
+#     钩子与 `antinel.py`/`post_tool_use.py` 自己 `reconfigure(encoding="utf-8")`，
+#     但 `report.py`/`install.py`/`scan.py` **没有**，套件还要 grep 它们的中文输出。
+PY_FLAGS = ("-I", "-S", "-X", "utf8")
+
 # ★★ 0.35.3（本机实测抓到的闪窗**真凶**，不是推演）：
 #   本文件原有 **39 处 `subprocess.run`（0 处带 creationflags）**，
 #   而它是 `antinel verify` / harness 的执行体 —— 运行一次要起几十个
@@ -471,7 +485,8 @@ def run(script, argv=(), cwd=None, stdin=None, env=None):
     if env:
         full_env.update(env)
     try:
-        p = subprocess.run([PY, str(script_path(script)), *argv], cwd=str(cwd) if cwd else None,
+        p = subprocess.run([PY, *PY_FLAGS, str(script_path(script)), *argv],
+                           cwd=str(cwd) if cwd else None,
                            input=stdin, capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=120, env=full_env, creationflags=_CREATE_NO_WINDOW)
     except subprocess.TimeoutExpired as e:
@@ -938,7 +953,7 @@ def main():
     stf.write_text(json.dumps(old), encoding="utf-8")
     ev0 = json.dumps({"session_id": "a", "transcript_path": "", "tool_name": "Bash",
                       "tool_input": {"command": "ls prune"}}).encode("utf-8")
-    subprocess.run([PY, str(script_path("post_tool_use.py"))], cwd=str(proj), input=ev0, capture_output=True, creationflags=_CREATE_NO_WINDOW)
+    subprocess.run([PY, *PY_FLAGS, str(script_path("post_tool_use.py"))], cwd=str(proj), input=ev0, capture_output=True, creationflags=_CREATE_NO_WINDOW)
     days = len(json.loads(stf.read_text(encoding="utf-8")))
     record("A7 stats.json pruned to 90 days", days <= 90, "days=%d" % days)
     sec = "Bearer sk-proj-AAAAAAAAAAAAAAAAAAAAAA"
@@ -950,7 +965,7 @@ def main():
     for i in range(8):
         evx = json.dumps({"session_id": "a8-%d" % i, "transcript_path": "", "tool_name": "Bash",
                           "tool_input": {"command": "echo a8-%d" % i}}).encode("utf-8")
-        procs.append((subprocess.Popen([PY, str(script_path("post_tool_use.py"))], cwd=str(proj),
+        procs.append((subprocess.Popen([PY, *PY_FLAGS, str(script_path("post_tool_use.py"))], cwd=str(proj),
                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                        stderr=subprocess.PIPE, creationflags=_CREATE_NO_WINDOW), evx))
     for pp, evx in procs:
@@ -3470,7 +3485,7 @@ def main():
     if _st_e3.exists():
         _discard(_st_e3)
     rc, out, err = hook("Read", {"file_path": str(_e3 / ".env")}, _e3)[:3]   # post 不跑；用 pre 只做噪音
-    _post1 = subprocess.run([PY, str(PKG / "hooks" / "post_tool_use.py")], cwd=str(_e3),
+    _post1 = subprocess.run([PY, *PY_FLAGS, str(PKG / "hooks" / "post_tool_use.py")], cwd=str(_e3),
                             input=json.dumps({"session_id": "sched", "transcript_path": "",
                                               "tool_name": "Read",
                                               "tool_input": {"file_path": "x.txt"},
@@ -3479,7 +3494,7 @@ def main():
                             errors="replace", timeout=60,
                             env=dict(os.environ, ANTINEL_HOST_MIRROR="0"), creationflags=_CREATE_NO_WINDOW)
     _run1 = json.loads(_st_e3.read_text(encoding="utf-8")).get("last_run") if _st_e3.exists() else None
-    _post2 = subprocess.run([PY, str(PKG / "hooks" / "post_tool_use.py")], cwd=str(_e3),
+    _post2 = subprocess.run([PY, *PY_FLAGS, str(PKG / "hooks" / "post_tool_use.py")], cwd=str(_e3),
                             input=json.dumps({"session_id": "sched", "transcript_path": "",
                                               "tool_name": "Read",
                                               "tool_input": {"file_path": "x.txt"},
