@@ -47,6 +47,7 @@ RULES = PKG / "rules" / "default.json"
 DEL = "r" + "m"
 
 RESULTS = []
+_SLOTS_MOD = None      # D-54：scripts/slots.py 只加载一次
 
 
 def load_hook(isolate=False):
@@ -5803,6 +5804,151 @@ def hook_hit_with(hook, ruleset, text, root):
     return [h.get("rule_id") for h in hits if h.get("rule_id") == "AN-021"]
 
 
+def load_slots():
+    """加载 `scripts/slots.py`（82 个槽位的唯一求值器）。
+
+    ★ 判据一律调它，**不在这里写第二份求值逻辑**（铁律 8）。这里只加载，
+      连「四态是哪四个」都不复述 —— 常量也从它那儿取。
+    """
+    global _SLOTS_MOD
+    if _SLOTS_MOD is not None:
+        return _SLOTS_MOD
+    p = PKG / "scripts" / "slots.py"
+    spec = importlib.util.spec_from_file_location("antinel_slots_gate", str(p))
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["antinel_slots_gate"] = mod
+    spec.loader.exec_module(mod)
+    _SLOTS_MOD = mod
+    return mod
+
+
+def j_slots_registry_and_evaluator():
+    """D-54 槽位登记表与求值器的四个必答题（2026-11-01）。
+
+    ★ 签名必须**无参**：`_checks()` 里带参判据一律写成 `lambda: j_x(m)`，
+      直接放函数对象会让 `main()` 的 `fn()` 抛 TypeError ⇒ 这条判据永远红，
+      而且是「红得看不出原因」的红。本函数不读 hook，故不需要 `m`。
+
+
+    为什么这条判据本身值得存在：46 个槽位一旦接线，读数会变成报告与页面的
+    唯一事实来源。**求值器出一处静默错，整份报告就变成精装修的假话**，而它
+    不会红、不会报错、只是安静地多算一个「清白」。所以先锁求值器，再谈读数。
+
+    四条腿（缺一条这条判据就是装饰）：
+      ① 正控：真登记表必须过自己的校验，且分母/条数/四态和自洽
+      ② 负控（撤销即红）：把真表变异 5 种，校验器必须**全部**判红
+      ③ 空窗口腿：审计目录为空时，窗口型 probe 的槽位**一个都不许**给定论
+      ④ 生产者缺席腿：「代码里没这个写入点」必须报 no_producer；
+         「有写入点但从未触发」必须与普通 0 区分开
+    """
+    S = load_slots()
+
+    # ── ① 正控 ──
+    try:
+        reg = S.load_registry(PKG)
+    except Exception as e:                                       # noqa: BLE001
+        return False, ("① 正控失败：真登记表过不了自己的校验 —— %s: %s"
+                       % (type(e).__name__, e))
+    slots = reg["slots"]
+    declared_reg = sum(1 for s in slots if s.get("status") != "unregistered")
+    if reg.get("denominator") != len(slots):
+        return False, ("① 分母与清单不符：denominator=%r 但 %d 条"
+                       % (reg.get("denominator"), len(slots)))
+    if (reg.get("counts") or {}).get("registered") != declared_reg:
+        return False, ("① counts.registered=%r 与实际登记 %d 条不符"
+                       % ((reg.get("counts") or {}).get("registered"), declared_reg))
+
+    # ── ② 负控：五种变异必须全部判红（撤销即红）──
+    import copy as _copy
+    muts = []
+
+    def _first_j_reg():
+        for s in slots:
+            if s.get("form") == "judged" and s.get("status") != "unregistered":
+                return s
+        return None
+
+    x = _copy.deepcopy(reg)
+    x["denominator"] = int(reg["denominator"]) + 1
+    muts.append(("分母 +1", x))
+    x = _copy.deepcopy(reg)
+    t = _first_j_reg()
+    if t is not None:
+        for s in x["slots"]:
+            if s["id"] == t["id"]:
+                s["probe"] = None
+    muts.append(("已登记判据丢了 probe", x))
+    x = _copy.deepcopy(reg)
+    for s in x["slots"]:
+        if (s.get("predicate") or {}).get("op"):
+            s["predicate"]["op"] = "made_up_op"
+            break
+    muts.append(("未实现的算子", x))
+    x = _copy.deepcopy(reg)
+    x["counts"]["registered"] = declared_reg + 7
+    muts.append(("自报条数撒谎", x))
+    x = _copy.deepcopy(reg)
+    x["slots"][1]["seq"] = 999
+    muts.append(("seq 断号", x))
+
+    survivors = [name for name, mut in muts if not S.validate_registry(mut)]
+    if survivors:
+        return False, ("② 负控失效：%d 种变异里有 %d 种没被判红（%s）⇒ 校验器"
+                       "看不出登记表被改坏，① 的通过也就是空的"
+                       % (len(muts), len(survivors), survivors))
+
+    # ── ③ 空窗口腿：空集不许被读成「没事」──
+    windowed = {"LEDGER_TYPES", "LEDGER_ACTIONS", "LEDGER_TS", "LEDGER_SEQ",
+                "EXIT_CODE", "ARTIFACT_PATH", "WRITE_SET", "CMD_TEXT",
+                "SELF_PID", "SELF_PROBE", "DAY_ANCHOR"}
+    empty = _TMP.tmpdir(prefix="d54_")
+    ctx0 = S.Context(str(PKG), audit_dir=str(empty), max_days=7,
+                     read_history=False)
+    if ctx0.records:
+        return False, "③ 夹具不成立：空审计目录里读到了 %d 条记录" % len(ctx0.records)
+    res0 = S.evaluate_all(reg, ctx0)
+    bad = [("%s/%s=%s" % (r["slot"], r["ext"], r["state"]))
+           for r, s in zip(res0, slots)
+           if s.get("status") != "unregistered"
+           and s.get("probe") in windowed
+           and r["state"] in (S.HIT, S.CLEAN)]
+    if bad:
+        return False, ("③ 空窗口腿失效：审计目录为空时仍有 %d 条给出定论（%s）"
+                       "⇒ 空集被读成「没事」，第十四族假绿"
+                       % (len(bad), bad[:3]))
+
+    # ── ⑤ 四态互斥穷尽（用的是刚算出来的同一批结果，零额外成本）──
+    states = S.ALL_STATES
+    for r in res0:
+        if r.get("state") not in states:
+            return False, "⑤ %s 的状态 %r 不在四态里" % (r.get("slot"), r.get("state"))
+    n_reg = sum(1 for r, s in zip(res0, slots)
+                if s.get("status") != "unregistered")
+    if n_reg != declared_reg:
+        return False, ("⑤ 四态覆盖面与已登记数不符：%d vs %d"
+                       % (n_reg, declared_reg))
+
+    # ── ④ 生产者缺席腿 ──
+    ghost = S._extract({"type_counts": {}, "declared_types": {"其他东西"},
+                        "history_types": {}}, "ghost_type", "count", {})
+    if ghost is not S.NO_PRODUCER:
+        return False, ("④ 死代码没被认出来：代码里根本没有 ghost_type 的写入点，"
+                       "_extract 却给了 %r（会被当成普通 0 ⇒ 报清白）" % (ghost,))
+    silent = S._extract({"type_counts": {}, "declared_types": {"silent_type"},
+                         "history_types": {}}, "silent_type", "count", {})
+    if type(silent) is not S._NeverFired:
+        return False, ("④ 「有写入点但从未触发」没被区分开：拿到 %r（%s）⇒ "
+                       "它和真的 0 长得一样，报告里就说不出「这条防线从没被验证过」"
+                       % (silent, type(silent).__name__))
+    if int(silent) != 0:
+        return False, "④ 「从未触发」的值不是 0：%r" % (silent,)
+
+    return True, ("五腿成立：① 真表 %d 条/%d 登记，分母自洽 ② %d 种变异全部判红 "
+                  "③ 空窗口下 %d 条窗口型槽位一律不定论 ④ 死代码报 no_producer、"
+                  "从未触发与普通 0 区分开 ⑤ 四态互斥穷尽"
+                  % (len(slots), declared_reg, len(muts), len(windowed)))
+
+
 def _checks(m):
     """判据清单（**唯一真源**）。返回 `[(判据 ID 串, 可调用)]`。
 
@@ -5904,6 +6050,9 @@ def _checks(m):
         # ── 2026-10-30 D-53：「关不掉的四条」不许只活在口头（0.62.0）──
         ("D-53 硬编码规则说明书必须与代码同源（四条「关不掉」的判定）",
          j_hardcoded_rules_are_truthful),
+        # ── 2026-11-01 D-54：46 个槽位接线前，先锁住求值器本身 ──
+        ("D-54 槽位登记表与求值器：正控/负控/空窗口/生产者缺席/四态穷尽",
+         j_slots_registry_and_evaluator),
     ]
 
 
