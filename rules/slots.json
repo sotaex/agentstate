@@ -67,6 +67,12 @@
     "match": "true"
    },
    "status": "partial",
+   "triage": {
+    "class": "real",
+    "state": "open",
+    "env": "dev",
+    "note": "本轮多次改源码后构建"
+   },
    "why_partial": "exit_code 已在 post 记录里；但当前 37 条规则不区分「构建命令」，需要一张构建命令识别表，否则会把任意非零退出都算构建失败"
   },
   {
@@ -147,6 +153,12 @@
     "match": "true"
    },
    "status": "partial",
+   "triage": {
+    "class": "real",
+    "state": "open",
+    "env": "dev",
+    "note": "同上"
+   },
    "why_partial": "路径存在性可以判；但「声明」这件事要读 Agent 的输出文本，而账本只存 response_chars 不存正文 ⇒ 先只能判「本会话写过的文件里有没有一个后来被删/为空」"
   },
   {
@@ -171,6 +183,12 @@
     "match": "nonempty"
    },
    "status": "partial",
+   "triage": {
+    "class": "real",
+    "state": "open",
+    "env": "dev",
+    "note": "diff 全落在 ci/ 与 rules/、scripts/ —— 本机改判据文件"
+   },
    "why_partial": "写集合在账本里有（input.file_path）；缺的是一张「哪些路径算验收标准」的表（test_*/pytest.ini/ci/*.yml/lint 配置）"
   },
   {
@@ -214,6 +232,12 @@
     "window": "session"
    },
    "status": "partial",
+   "triage": {
+    "class": "calibration",
+    "state": "open",
+    "env": "any",
+    "note": "max_repeat=5 恰等于阈值 5，边界命中；5 次轮询是否算死循环未定义"
+   },
    "why_partial": "序列在账本里有；但 hook 热路径要在「本次调用」判，需要 session 内已发生序列的轻量读取，尚未接线"
   },
   {
@@ -257,6 +281,12 @@
     "direction": "higher_worse"
    },
    "status": "partial",
+   "triage": {
+    "class": "real",
+    "state": "open",
+    "env": "dev",
+    "note": "长程任务 4477 个动作，2.2 倍阈值"
+   },
    "why_partial": "已有通知预算之类机制，但「会话步数」这条预算没有独立承载；要先定阈值来源（不许拍）",
    "note": "预算 2000 步/会话：本机实测最大会话 5264 步，取 2000 作护栏，是**配置值不是推导值**。"
   },
@@ -381,6 +411,12 @@
     "match": "true"
    },
    "status": "implemented",
+   "triage": {
+    "class": "real",
+    "state": "open",
+    "env": "dev",
+    "note": "跑过 chmod -R 等正控样本"
+   },
    "existing": "AN-009/012/019/020/022/023/024/025 八条规则已在拦（软阻断：只看命令字符串）",
    "upgrade": "本次不改判据，只标 action_cap=block 与 evidence_class=observed 的口径；升级点是「记账侧要把它们拆成三个不同事实」（方案书 §4.3）"
   },
@@ -586,6 +622,12 @@
     "match": "nonempty"
    },
    "status": "partial",
+   "triage": {
+    "class": "real",
+    "state": "open",
+    "env": "dev",
+    "note": "105 条中 90 条落 D:/2026/PSL，本机多项目 + 夹具"
+   },
    "why_partial": "写集合有；「声明范围」今天没有承载处（账本不记任务声明）⇒ 先只能判「写到了工作区根之外」这个弱代理"
   },
   {
@@ -672,6 +714,12 @@
     "match": "nonempty"
    },
    "status": "partial",
+   "triage": {
+    "class": "real",
+    "state": "open",
+    "env": "dev",
+    "note": "5 条 pre 无配对 post，全在会话起始段（0.03%）"
+   },
    "why_partial": "「动作」的独立观测面只有 hook 自己 ⇒ 今天只能做「pre 有、post 无」这种配对缺口，判不了「hook 根本没被调到」",
    "note": "只算「有结果无决策」（post 侧多出来的）方向；与 I1-02 的配对缺口是两个问题。"
   },
@@ -794,6 +842,12 @@
     "threshold": 5
    },
    "status": "partial",
+   "triage": {
+    "class": "real",
+    "state": "open",
+    "env": "dev",
+    "note": "本轮多次改规则表与配置"
+   },
    "why_partial": "policy_changed 记录了每次改写，但「会话内」的边界要按 session 切；跨会话的配置变更不该算漂移",
    "note": "7 天窗内配置变更 >5 次即算漂移；5 是配置值。"
   },
@@ -1096,6 +1150,12 @@
     "match": "true"
    },
    "status": "partial",
+   "triage": {
+    "class": "defect",
+    "state": "open",
+    "env": "any",
+    "note": "revived 123 条 cause 全为 hook-paramedic（自愈），被读成「终止没应验」"
+   },
    "why_partial": "终止动作今天很少（我们主要 deny 不 kill）；判据要先有「终止」事件的独立记录，否则恒 clean ＝ 假绿（第十四族）"
   },
   {
@@ -1252,7 +1312,13 @@
     "direction": "higher_worse"
    },
    "status": "partial",
-   "why_partial": "2026-11-02 改计数口径：原 p95 判据结构性恒真（写入线 8000 > 阈值 2000），且 n=0 时字段缺失 ⇒ 只有 hit/undecidable 两态、永无 clean。改用条数后可判三态；语料腿在 ci/guard_slots.py 补齐后升 implemented。",
+   "triage": {
+    "class": "defect",
+    "state": "fixed",
+    "env": "any",
+    "note": "p95 阈值 2000 vs 写入线 8000 ⇒ 恒命中且永无 clean；已改判 hook_slow_n"
+   },
+   "why_partial": "2026-11-02 改计数口径：原 p95 判据结构性恒真（写入线 8000 > 阈值 2000），且 n=0 时字段缺失 ⇒ 只有 hit/undecidable 两态、永无 clean。改用条数后可判三态；语料腿已并入 ci/regression_gate.py 的 D-54 ⑧⑨（常驻套件已满 29，不起新文件）。",
    "note": "hook_slow 只在钩子端到端 ≥ SLOW_BUDGET_MS(8000ms) 时写入，故 p95 永远 ≥8000；拿它比 2000 是结构性恒真，不是「延迟超标」。本槽改判条数：n>0 ＝ 窗口内至少有一次裁决可能没送达宿主（宿主 10–15s 杀钩子，超时=ALLOW）；n=0 且链读得到 ＝ 本窗口没有慢钩子（clean）；链读不到 ＝ undecidable。若将来把 SLOW_BUDGET_MS 降到 2000 以下，才可改回 p95 口径。"
   },
   {
@@ -1384,6 +1450,12 @@
     "match": "nonempty"
    },
    "status": "partial",
+   "triage": {
+    "class": "real",
+    "state": "open",
+    "env": "dev",
+    "note": "85 条中 59 条落 D:/2026/PSL；与 K1-01 同一探针"
+   },
    "why_partial": "「我们读了什么」今天没有独立自报（我们只记 Agent 的动作）；要判自己，得先给自己加一份读取留痕——否则这条恒 clean，正是「机制层不守自己」（品质五条 3）"
   },
   {
@@ -1456,6 +1528,12 @@
     "direction": "lower_worse"
    },
    "status": "implemented",
+   "triage": {
+    "class": "defect",
+    "state": "open",
+    "env": "any",
+    "note": "120 条无 hash 全为 session_start，schema 明文无链直写"
+   },
    "existing": "AUDIT_SCHEMA §2：每条链上记录必有 prev/hash；无 hash 的只有 session_start（历史遗留，明写例外）"
   },
   {

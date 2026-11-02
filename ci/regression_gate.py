@@ -5931,6 +5931,9 @@ def j_slots_registry_and_evaluator():
          （thr 推到 1e9 时它确实会变 clean）。所以单列登记：谓词字段不得
          回退成 p95；`_hook_latency` 在无记录时必须给出 `hook_slow_n=0`
          而不是空 dict，且**不得**给 p95=0（那是「延迟 0ms」的假 0）。
+      ⑩ 报告消费腿（2026-11-02）：槽位读数必须真的出现在报告产物里。
+         一套没人读的判据等于不存在 —— 这条腿断言的是**渲染出来的那一行**，
+         不是「函数被调用了」。
     """
     S = load_slots()
 
@@ -6164,13 +6167,47 @@ def j_slots_registry_and_evaluator():
         return False, ("⑨ 无记录时给了 hook_slow_p95_ms=0 ⇒ 会被读成「延迟 0ms」，"
                        "而真相是「本窗口没有慢钩子」。假 0 比字段不存在更糟")
 
-    return True, ("九腿成立：① 真表 %d 条/%d 登记，分母自洽 ② %d 种变异全部判红 "
+    # ── ⑩ 报告消费腿（2026-11-02）──
+    # 46 槽的读数必须真的出现在报告里。为什么这条腿不能省：
+    #   槽位从 11-01 起就有结论，但没有任何消费方（report/ui_server/inbox 全仓
+    #   零命中）—— 一套算得再准的判据，没人读等于不存在。接线之后要有人守，
+    #   否则下一次重构删掉那三行，没有任何东西会红。
+    # ★ 断言的是**渲染产物里的一整行**，不是「函数返回 True」——
+    #   九维 3 的原话：量「报告里出现了这句话」，不量「我把它接上了」。
+    import importlib.util as _ilu10
+    _rp10 = PKG / "scripts" / "report.py"
+    try:
+        _sp10 = _ilu10.spec_from_file_location("antinel_report_gate", str(_rp10))
+        _r10 = _ilu10.module_from_spec(_sp10)
+        _sp10.loader.exec_module(_r10)
+    except Exception as e:                                       # noqa: BLE001
+        return False, "⑩ 加载 report.py 失败：%r" % (e,)
+    try:
+        _rep10 = _r10.build_report([], None, None, root=PKG)
+        _rep10["stats"]["slots"] = {
+            "registered": 46, "covered_hit": 13, "covered_clean": 23,
+            "undecidable": ["x"] * 5, "not_collected": ["y"] * 5,
+            "by_triage": {"real": 9, "defect": 3, "calibration": 1,
+                          "unclassified": 0}}
+        _txt10 = _r10.render_text(_rep10, "fixture")
+    except Exception as e:                                       # noqa: BLE001
+        return False, "⑩ 渲染失败：%r" % (e,)
+    _lines10 = [ln.strip() for ln in _txt10.splitlines()]
+    if not any(ln.startswith("slots: 46 registered | 13 hit") for ln in _lines10):
+        return False, ("⑩ 报告里没有槽位四态那一行 ⇒ 接线被摘掉了"
+                       "（46 个槽位又变成「算了没人看」）")
+    if not any(ln.startswith("hit nature: 9 real / 3 ruler-defect") for ln in _lines10):
+        return False, ("⑩ 报告里没有「命中性质」那一行 ⇒ 命中数会重新被读成"
+                       "「13 个产品缺陷」，而其中 3 条是尺子自己的问题")
+
+    return True, ("十腿成立：① 真表 %d 条/%d 登记，分母自洽 ② %d 种变异全部判红 "
                   "③ 空窗口下 %d 条窗口型槽位一律不定论 ④ 死代码报 no_producer、"
                   "从未触发与普通 0 区分开 ⑤ 四态互斥穷尽 "
                   "⑥ 哈希口径与 manifest 同源（版本行归一化，裸哈希必失配）"
                   " ⑦ 执法探针：旧版本/混杂/未接通道一律不定论，一致成功仍给结论"
                   " ⑧ 谓词可翻转（互换正负输入即红）"
                   " ⑨ MS1-01 未回退 p95、无记录时给 n=0 且不给假 p95"
+                  " ⑩ 报告里真出现槽位四态与命中性质两行"
                   % (len(slots), declared_reg, len(muts), len(windowed)))
 
 
@@ -6276,7 +6313,7 @@ def _checks(m):
         ("D-53 硬编码规则说明书必须与代码同源（四条「关不掉」的判定）",
          j_hardcoded_rules_are_truthful),
         # ── 2026-11-01 D-54：46 个槽位接线前，先锁住求值器本身 ──
-        ("D-54 槽位登记表与求值器：正控/负控/空窗口/生产者缺席/四态穷尽/哈希口径/探针口径/谓词翻转/恒真陷阱",
+        ("D-54 槽位登记表与求值器：正控/负控/空窗口/生产者缺席/四态穷尽/哈希口径/探针口径/谓词翻转/恒真陷阱/报告消费",
          j_slots_registry_and_evaluator),
     ]
 

@@ -137,7 +137,7 @@
   "scripts/cleanup_staging_once.py": "sha256:8245dc52b4a8dc77e7c2a907751564c81502dc3ba15f9c98757c509edc26117c",
   "scripts/install.py": "sha256:0a5b21e2792e69f2aaedaa28ad6c2872eb56fb56e2509c510d7f6d5ccd2b5df8",
   "scripts/release.py": "sha256:f18733ce5aa5bc3bc64f05f301439c67c8489a1a8940087cd051e2125eb91fe6",
-  "scripts/report.py": "sha256:adfecd5a3de5e677b1781a4d557739c3196f7b8c54136cbc9559710db07cbdae",
+  "scripts/report.py": "sha256:936fa8a4c7816a12d5045363d070d3cb0bf5817fd6cc6a5e1a2eba5a2969fd54",
   "scripts/run_harness.py": "sha256:896e3f22ac2bd5c085176cabc5a47541009a4696c8b2d5995f7b944f1f267568",
   "scripts/scan.py": "sha256:e27ce9ae619422b990d8b0d48e94e0403ee9f57e87d9a7f51365c54c01342154",
   "scripts/tmp_sweep.py": "sha256:6a62d058c11b8feab89621e079831b39c6ab2a3582a2c6daeefc0f322240d753",

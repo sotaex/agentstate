@@ -89,6 +89,23 @@ def validate_registry(reg):
             problems.append("%s 的 form=%r 不在四形态内" % (s["id"], s["form"]))
         if s["status"] not in allowed_status:
             problems.append("%s 的 status=%r 不在三态内" % (s["id"], s["status"]))
+        # 分诊结论（2026-11-02）：只有命中的槽位需要它，但它一旦写了就必须合规 ——
+        # 报告要按这个字段把「真现象」与「尺子问题」分开，拼错一个字母就会
+        # 静默落进 unclassified，读者以为那条没分诊。
+        _tr = s.get("triage")
+        if _tr is not None:
+            if not isinstance(_tr, dict):
+                problems.append("%s 的 triage 不是对象" % (s["id"],))
+            else:
+                if _tr.get("class") not in ("real", "defect", "calibration"):
+                    problems.append("%s 的 triage.class=%r 不在 real/defect/calibration 内"
+                                    % (s["id"], _tr.get("class")))
+                if _tr.get("state") not in ("open", "fixed"):
+                    problems.append("%s 的 triage.state=%r 不在 open/fixed 内"
+                                    % (s["id"], _tr.get("state")))
+                if _tr.get("env") not in ("any", "dev", "user"):
+                    problems.append("%s 的 triage.env=%r 不在 any/dev/user 内"
+                                    % (s["id"], _tr.get("env")))
         # 判据型必须声明取数通道（否则「判」这件事无从谈起）。
         # ★ 必须带 status 维度：status="unregistered" 的槽位本轮**明确不接线**，
         #   probe=null 是设计如此。漏判状态位会把「按计划留白」读成「违规」，
@@ -1490,11 +1507,23 @@ def summarize(results, reg):
     for r in judged:
         by_reader.setdefault(r["reader"], {}).setdefault(r["state"], 0)
         by_reader[r["reader"]][r["state"]] += 1
+    # 命中的**性质**（2026-11-02）：命中不等于缺陷。分诊结论写在登记表的
+    # `triage.class` 里（数据，不是这里的判断）——本函数只做计数。
+    # ★ 三个数分开：真现象 / 尺子缺陷 / 阈值标定。合并成一个「命中」数会让
+    #   读者把「我们的判据写错了」也算成「产品出事了」，这正是分诊要防的。
+    _hit_ids = {r["slot"] for r in judged if r["state"] == HIT}
+    by_triage = {"real": 0, "defect": 0, "calibration": 0, "unclassified": 0}
+    for s in reg["slots"]:
+        if s["id"] not in _hit_ids:
+            continue
+        _cls = (s.get("triage") or {}).get("class")
+        by_triage[_cls if _cls in ("real", "defect", "calibration") else "unclassified"] += 1
     return {
         "denominator": reg["denominator"],
         "registered": len(reg_ids),
         "covered_hit": by_state.get(HIT, 0),
         "covered_clean": by_state.get(CLEAN, 0),
+        "by_triage": by_triage,
         # 清白里有一部分是「有写入点但从未触发」——单列，别混进已验证
         "never_fired": [r["ext"] for r in judged if r.get("never_fired")],
         "undecidable": [r["ext"] for r in judged if r["state"] == UNDECIDABLE],

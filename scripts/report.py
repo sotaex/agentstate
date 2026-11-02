@@ -223,7 +223,34 @@ def self_tamper_check(manifest):
 
 
 # -------------------------------------------------------------- analysis ----
-def build_report(events, scan, manifest, host_label="", root=None):
+def _slot_summary(root, audit_dir):
+    """46 槽的四态与分诊汇总。返回 `(summary|None, error|None)`。
+
+    ★ 唯一求值器在 `scripts/slots.py`，本函数只调用、不重算（铁律 8）。
+    ★ 为什么现算而不是读快照：快照会过期，而过期的快照在报告上与新鲜的
+      长得一模一样。现算约 9 秒（读 7 日 + 35 日历史），比一份「不知道是
+      什么时候的」读数便宜。
+    ★ 算不出来就返回 None，调用方必须印「not computable」—— 印 0 会把
+      「这一版没有这个能力」说成「扫了，没有问题」。
+    """
+    try:
+        import importlib.util as _ilu
+        _p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "slots.py")
+        if not os.path.isfile(_p):
+            return None, "scripts/slots.py not found"
+        _spec = _ilu.spec_from_file_location("antinel_slots_in_report", _p)
+        _mod = _ilu.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _reg = _mod.load_registry(str(root))
+        _ctx = _mod.Context(str(root), audit_dir=str(audit_dir),
+                            max_days=7, history_days=0, read_history=True)
+        return _mod.summarize(_mod.evaluate_all(_reg, _ctx), _reg), None
+    except Exception as e:                                       # noqa: BLE001
+        return None, "%s: %s" % (type(e).__name__, e)
+
+
+def build_report(events, scan, manifest, host_label="", root=None,
+                 audit_dir=None, include_slots=False):
     rules = rules_descriptions(root)
     findings = {}
     # 0.64：取一次（内部有缓存）。拿不到就是 None ⇒ `notify` 置 **None 而不是全 0**。
@@ -268,6 +295,16 @@ def build_report(events, scan, manifest, host_label="", root=None):
            # is the whole point: a timeout is treated as ALLOW by the host,
            # so the verdict may never have reached the host at all.
            "hook_slow": 0, "hook_slow_max_ms": 0}
+    # 0.64 (B3)：46 个槽位的四态与分诊。为什么放进 stats 而不是在渲染时算：
+    #   渲染函数拿不到 root/audit_dir，且 json 输出也该带上这三个数。
+    #   只在 text/html 里算 —— csv/sarif 的消费方是机器，不需要多花 9 秒。
+    if include_slots:
+        _sl, _sl_err = _slot_summary(
+            root if root is not None else ".",
+            audit_dir if audit_dir is not None
+            else os.path.join(str(root), ".psl", "audit"))
+        stats["slots"] = _sl
+        stats["slots_error"] = _sl_err
     # 0.64：整块分档只在拿到唯一实现时才有意义；拿不到时 `stats["notify"]` 是 None，
     # 这里一句不数，渲染处改说「算不出来」—— 不印三个 0（零与不可判同貌）。
     for ev in events:
@@ -502,6 +539,24 @@ def render_text(rep, log_label):
     L.append("  hook slow (>= budget; host timeout = ALLOW): %d | worst %d ms%s" % (
         _hs_n, ch.get("hook_slow_max_ms", 0),
         "   <-- these verdicts may never have reached the host" if _hs_n else ""))
+    # 0.64 (B3)：46 个槽位的四态。★ 分三行而不是一行，因为「命中」这个词
+    #   会被读成「产品出事了」——而其中一部分是**我们自己的尺子写错了**。
+    #   把 real / ruler-defect / calibration 分开，读者才知道该修哪边。
+    _sl = st.get("slots")
+    if isinstance(_sl, dict):
+        L.append("  slots: %d registered | %d hit | %d clean | %d undecidable | %d not collected"
+                 % (_sl.get("registered", 0), _sl.get("covered_hit", 0),
+                    _sl.get("covered_clean", 0),
+                    len(_sl.get("undecidable") or []),
+                    len(_sl.get("not_collected") or [])))
+        _t = _sl.get("by_triage") or {}
+        L.append("    hit nature: %d real / %d ruler-defect / %d calibration / %d unclassified"
+                 % (_t.get("real", 0), _t.get("defect", 0),
+                    _t.get("calibration", 0), _t.get("unclassified", 0)))
+        L.append("    (a hit = the phenomenon occurred; ruler-defect = our measurement was wrong,"
+                 " not the product)")
+    elif "slots" in st:
+        L.append("  slots: not computable (%s)" % (st.get("slots_error") or "unknown"))
     # 0.33.1 (P4-1)：宿主标签可信度（读侧标注，不改链）
     ht = rep.get("host_trust") or {}
     if ht.get("records"):
@@ -684,6 +739,25 @@ def render_html(rep, log_label):
                 "%s</p>" % (_hs_n, _ch.get("hook_slow_max_ms", 0),
                             " &mdash; these verdicts may never have reached the host"
                             if _hs_n else ""))
+    # 0.64 (B3)：46 个槽位的四态（与文本报告同一口径）。命中分三性质，
+    # 因为这三种「命中」要修的东西完全不同：产品 / 尺子 / 阈值。
+    _sl = st.get("slots")
+    if isinstance(_sl, dict):
+        _t = _sl.get("by_triage") or {}
+        slothtml = ("<p>slots: %d registered | %d hit | %d clean | %d undecidable | %d not collected"
+                    "<br>hit nature: %d real / %d ruler-defect / %d calibration / %d unclassified"
+                    "<br><span class='muted'>a hit = the phenomenon occurred; ruler-defect = our"
+                    " measurement was wrong, not the product</span></p>"
+                    % (_sl.get("registered", 0), _sl.get("covered_hit", 0),
+                       _sl.get("covered_clean", 0),
+                       len(_sl.get("undecidable") or []),
+                       len(_sl.get("not_collected") or []),
+                       _t.get("real", 0), _t.get("defect", 0),
+                       _t.get("calibration", 0), _t.get("unclassified", 0)))
+    elif "slots" in st:
+        slothtml = "<p>slots: not computable (%s)</p>" % e(st.get("slots_error") or "unknown")
+    else:
+        slothtml = ""
     # 0.64：与文本报告同一行口径（三档之和 = 记录数）。拿不到唯一实现时
     # 说「算不出来」，绝不印三个 0 —— 那会被截进企业周报当成「无通知」。
     _nv = st.get("notify")
@@ -720,6 +794,7 @@ th{background:#f8f9fa}
 <p>post-tool records: %(post)d | pre-checks: %(pre)d | blocked: %(blocked)d | alerts: %(alerted)d</p>
 %(notify)s
 %(hookslow)s
+%(slothtml)s
 %(bars)s
 <div class="footer">%(footer)s</div>
 </body></html>""" % {
@@ -732,6 +807,7 @@ th{background:#f8f9fa}
         "post": st["post"], "pre": st["pre"], "blocked": st["blocked"], "alerted": st["alerted"],
         "notify": notify,
         "hookslow": hookslow,
+        "slothtml": slothtml,
         "bars": "\n".join(bars), "footer": e(FOOTER),
     }
 
@@ -1062,7 +1138,9 @@ def main(argv=None):
             sys.stderr.write("no audit events under %s%s — empty window, "
                              "reporting zeros\n" % (
                                  log_path, (" since " + since) if since else ""))
-        rep = build_report(events, scan, manifest, root=root)
+        rep = build_report(events, scan, manifest, root=root,
+                           audit_dir=(log_path if log_path.is_dir() else log_path.parent),
+                           include_slots=(args.format in ("text", "html")))
         rep["period"] = {"since": since, "days": args.days}
         if empty:
             rep["empty"] = True
