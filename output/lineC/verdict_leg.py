@@ -28,6 +28,28 @@
         —— 这一档必须显式区分，否则会把它读成「规则挡住了」，强度被读强。
 
 ★ 守恒：每一条账本裁决记录都要落到**恰好一个**桶里，不许丢、不许重。
+
+★★ 2026-11-03：**本腿从「只读 gate 带」扩到读整张通知面（gate ＋ toast）**
+  上一版这里写着一句老实的话：「`alert` 不在 PRODUCES 里，是事实不是遗漏」——
+  它承认了「提醒」这一档**没有任何一条腿去读**，所以一页纸上那一格永远是 0，
+  而这个 0 与「今天真的没有提醒」长得一模一样（铁律 45）。
+  现在补上：本腿读 toast 带里 `alert`／`warn` 这两个取值，产出 `alert` 档。
+
+  ★ 为什么是「扩本腿」而不是「加第五个模块」：
+    「哪些该通知人」已经是产品侧一张表（`notify_policy`），gate／toast 是**同一张表
+    的两半**。拆成两个模块，就要把「记录去重键怎么取」「哪些 type 是非事件」
+    「簇怎么聚合」各写两遍 —— 那正是本仓第一顽症（同一事实多处实现）。
+    拆开还有一个更贵的代价：**两半各记一份「我没读什么」**，于是
+    「提醒这一档没腿读」这句话会同时由两处维护，一处改了另一处不改，页面就会
+    一边说「有腿读」一边说「没腿读」——两个都是断言，其中必有一个在撒谎。
+
+  ★ 但扩进来会撞上一个新问题，必须显式处理：**同一簇里不能混两档**。
+    带规则号的 alert（「AN-010 提醒 288 次」）与同规则同会话的 block（「AN-010 挡下 9 次」）
+    聚合键完全相同。若不把「带」放进键里，它们会被并成一簇，簇的 `strength()`
+    只能二选一 ⇒ 要么把 288 次提醒说成「挡下」，要么把 9 次挡下说成「提醒」。
+    **一次动作说成两次比漏掉一次更难发现，而一档说成另一档比两者都难**——
+    因为两个数都真、页面也自洽，只有把「带」写进键里，两个数才会分开出现。
+    ⇒ 聚合键变成 (规则号, 会话, 带)。这是本版**唯一**改口径的地方。
 """
 from __future__ import annotations
 
@@ -72,16 +94,22 @@ K_HELD = "held"
 K_ALERT = "alert"
 K_NO_RESPONSE = "no_response"
 
+#: 通知面的两条「带」。**这是产品侧那张回退表的两半，不是本模块发明的分法**：
+#: `notify_of()` 把每条记录判成 gate（停下等人）或 toast（提醒但不停）。
+#: ★ 它同时是**聚合键的第三段**：同规则、同会话、不同带的两批记录绝不许并成一簇。
+BAND_GATE = "gate"
+BAND_ALERT = "alert"
+
 #: 这条腿**能产出**的强度档。由 `Cluster.strength()` 的返回域决定。
 #:
 #: ★ 为什么要在 JSON 里报出去：消费方（`evidence.need_zero_note`）要回答
 #:   「这一档的 0 是查了没有，还是压根没腿去读」。它**不许自己猜**——
 #:   猜出来的答案是「三档都查了」，而真答案是「只有两档查了」。
 #:   声明写在这里、自检把它和 `strength()` 钉在一起，消费方只读声明。
-#: ★ `alert` 不在里面，是**事实不是遗漏**：本腿只读 `VERDICT_DECISIONS`
-#:   （block/deny），而 `alert` 侧（11-02 当天 441 条）一条不读。
-#:   「提醒」这一档今天**没有任何一条腿供给** —— 这句话必须能被机器读出来。
-PRODUCES: Tuple[str, ...] = (K_HELD, K_NO_RESPONSE)
+#: ★ 2026-11-03：`alert` 从「不在里面（是事实不是遗漏）」改成**在里面**。
+#:   改这一行的理由只有一个：本腿真的开始读 toast 带了。声明必须跟着实现变，
+#:   否则它会变成一句「昨天的事实」——而那比没有声明更危险（它看起来是权威的）。
+PRODUCES: Tuple[str, ...] = (K_HELD, K_ALERT, K_NO_RESPONSE)
 
 #: 日文件名。**与 watchman／auditor 同一条正则**（不许各写一份）。
 #: ★ 为什么必须校验：`glob("*.jsonl")` 会把 `lock_events.jsonl` 一起捞进来。
@@ -94,12 +122,30 @@ _DAY_FILE = re.compile(r"^(\d{4}-\d{2}-\d{2})\.jsonl$")
 #: 产品侧判为 **TOAST（出声）** 的 decision 取值。**从产品侧派生，不抄表**。
 #:
 #: ★ 这是「提醒」这一档的原料：`alert` ＝ 告警但放行 ＝ 产品词表的 L1「提醒」。
-#:   本腿只读 `VERDICT_DECISIONS`（block/deny），所以这一类**一条不读**。
-#:   不数出来，报告上那个「提醒 0 条」就无法与「提醒真的没有」区分
-#:   —— 而这两件事的处理方式完全相反（一个是结论，一个是盲区）。
 _TOAST_DECISIONS: frozenset = frozenset(
     d for d in NP.decision_values() if NP.notify_of({"decision": d}) == NP.TOAST
 )
+
+#: 其中**本腿读**、并落进 `alert` 档的那两个取值。
+#:
+#: ★ `warn` 在产品侧是「0.64 引入的目标值，尚未有写入者」（`notify_policy.py:96`）。
+#:   它与 `alert` 在同一档（`_RANK` 里都算 2）⇒ 一旦有写入者开始用 `warn`，
+#:   它必须**当场落进同一档**，而不是变成一条新的「没腿读」。
+#:   「今天没有写入者」不等于「以后没有」——漏报不可逆。
+ALERT_DECISIONS: Tuple[str, ...] = ("alert", "warn")
+
+#: 出声档里**语义不属于任何一档**的取值。**必须逐个登记**（见自检 ⑩）。
+#:
+#: ★ 为什么要有这张表：`notify_policy` 的回退表会加键（它是产品侧在改的表），
+#:   而本腿按「取值 → 档」映射。新键出现时若没有登记，它会被静默跳过 ——
+#:   页面不说、分母不说、盲区不说，表现和「这一档今天真的没有」完全一样。
+#:   ⇒ 登记表 + 「未登记即红」的自检，是本模块对「清单式真源的固有风险」
+#:     （漏登记不报错）唯一有效的防守。**不许用「其他一律跳过」兜底。**
+TOAST_NOT_A_TIER: Dict[str, str] = {
+    "config_fallback": "配置失效：不是规则命中，也不是动作被放行，语义不属任何一档",
+    "config_rejected": "配置被拒：同上",
+    "finding": "报告类结论：没有说话人、没有动作，本腿读不出它该落哪一档",
+}
 
 
 @dataclass
@@ -132,12 +178,18 @@ class Cluster:
         `n_actions` 17 次（拦截口径，一次动作算一次）
     """
 
-    #: 聚合键：规则号（或「无规则号」）＋ 会话前 8 位。
+    #: 聚合键：规则号（或「无规则号」）＋ 会话前 8 位 ＋ **带**。
     #: ★ **不含 `decision`** —— 见类注释：block 与 deny 是同义，放进去会把
     #:   同一次动作拆成两簇。decision 改成簇内的**取值集合**记录。
+    #: ★ 2026-11-03 加第三段 `band`：同规则同会话的 block（挡下）与 alert（提醒）
+    #:   必须分开。不加这一段，`strength()` 只能二选一 ⇒ 288 次提醒被印成
+    #:   「挡下 288 次」，或者 9 次挡下被印成「提醒」。**一档说成另一档，
+    #:   两个数都真、页面也自洽**，只有把带写进键里才会分开出现。
     rule_id: str
     session: str
     severity: str
+    #: 这条簇属于通知面的哪一带（`gate` 停下等人／`alert` 提醒但放行）。
+    band: str = BAND_GATE
     #: 该簇的原始记录条数（**原始条数不丢**，铁律 39）
     n_records: int = 0
     #: 该簇覆盖的**真实动作数**（按 会话+时刻+工具+命令 去重）。
@@ -159,19 +211,28 @@ class Cluster:
     #: 是否属宿主盾自检事件
     is_shield: bool = False
 
-    def key(self) -> Tuple[str, str]:
-        return (self.rule_id, self.session)
+    def key(self) -> Tuple[str, str, str]:
+        return (self.rule_id, self.session, self.band)
 
     def strength(self) -> str:
         """这一簇该落哪一档。
 
-        ★ 判定顺序很重要：**带规则号优先**。
+        ★ 判定顺序很重要（gate 带内）：**带规则号优先**。
           一条记录可能既是宿主盾事件、又带规则号（`host_shield_dev_drift`
           在实测里就带 `rule_id`）——那种情况它仍然是「规则/机制挡住了」，
           因为动作确实没执行，且能指到是谁挡的。
         ⇒ 顺序：带规则号 ⇒ held（动作没执行且能指到出处）；
                  不带规则号 ⇒ no_response（动作没执行，但守卫自己异常）。
+
+        ★ alert 带：**一律 `alert`，且这一带里没有「无规则号」的簇。**
+          理由在 `survey()`：不带规则号的 alert 记录（实测 11-02 有 302 条
+          `host_changed`）会被数进 `untiered_alert`，**不进簇**。
+          因为「提醒」这个词的定义是「有规则命中并告警」（`evidence.py` 的
+          `strength_note`）——没有规则号却印成「提醒」，是拿一个我们核不了的
+          结论去顶替一个词。**词的适用范围比词好听更重要。**
         """
+        if self.band == BAND_ALERT:
+            return K_ALERT
         if self.has_rule:
             return K_HELD
         return K_NO_RESPONSE
@@ -186,13 +247,30 @@ class Cluster:
           —— 实测当天 29 条记录只对应 17 次动作，虚高 12 次。
           **一次动作说成两次，是把「挡住了」说成了「挡住了两次」。**
           两个数都真，所以两个都印，且各自带单位。
+
+        ★ 2026-11-03：alert 带的话必须**从自己这一带的事实出发**。
+          「提醒」的完整意思是「告警了，但动作仍然执行了」——后半句不能省：
+          省掉之后，「提醒 288 次」会被读成「挡下了 288 次」的软说法，
+          而真实情况是**这 288 次命令全都执行了**。省掉那五个字，
+          是把「没挡住」说成了「挡住了但语气轻一点」。
+
+        ★★ 2026-11-03 第二处改：**这句话里不许出现档名**（「挡下」「提醒」）。
+          理由不是文风，是单一真源（R4）：档名的中文词只在
+          `evidence.WORD` 里声明一次（从产品侧 `STATE_LABEL` 派生）。
+          这里手写一份，产品侧改词时就会出现「徽标是『提醒』、正文写着『挡下』」
+          —— 同一页上两个词指一件事，读者只能二选一，而他没有任何依据选。
+          ⇒ 本函数只说**事实**（动作未执行／仍然执行／监理自身异常），
+            档名由渲染层从 `WORD` 取。判据见 `jchecks.py` 的 J6：
+            把 `WORD` 的中文全换成哨兵值，页面上不许再出现任何一个旧档名。
         """
         unit = "%d 次" % self.n_actions
         if self.n_records != self.n_actions:
             # 记录多于动作 ⇒ 必须说清差额从哪来，否则读者以为我们重复计数。
             unit += "（账本 %d 条记录，同一次动作被多个钩子各记一遍）" % self.n_records
-        if self.has_rule:
-            base = "%s 挡下 %s" % (self.rule_id, unit)
+        if self.band == BAND_ALERT:
+            base = "%s：动作仍然执行了 %s" % (self.rule_id, unit)
+        elif self.has_rule:
+            base = "%s：动作未执行 %s" % (self.rule_id, unit)
         else:
             base = "监理自身异常，动作未执行 %s" % unit
         if self.severity and self.severity != "none":
@@ -221,14 +299,53 @@ class Survey:
     #: 通知面分流结果：gate / toast 的记录数
     n_gate: int = 0
     n_toast: int = 0
+    #: ★ 2026-11-03：alert 带的三个数。**分母必须与 gate 带分开记**（F40）。
+    #:   `n_alert_raw`     按 decision 取值数（alert+warn）的原始条数
+    #:   `n_alert_non_event` 其中产品侧判为非事件的（实测 11-02：10 条
+    #:                     `pre_tool_use_summary`，与逐条记录覆盖同一批调用）
+    #:   `n_alert_bucketed` 落进 alert 档的记录数
+    n_alert_raw: int = 0
+    n_alert_non_event: int = 0
+    n_alert_bucketed: int = 0
+    #: ★ 读到了、但**现有各档都装不进去**的 alert 记录（按 type 分开数）。
+    #:
+    #:   实测 11-02：302 条 `host_changed`（severity=warning，
+    #:   reason「宿主版本变化——钩子协议可能漂移」）。它们是出声档，**但没有规则号**，
+    #:   而「提醒」这个词的定义是「有规则命中并告警」（`Evidence.strength_note`）
+    #:   ⇒ 印成「提醒」就是拿一个核不了的说法顶替一个词。
+    #:   也不能塞进「已发现无法处置」（那是「发现了、没手段」，与「主机变了、
+    #:   没有规则可指」不是一件事），更不能丢。
+    #:   ⇒ **只计数、不装档**，并在归因句与盲区里说出来。要给它一个档，
+    #:     得创始人拍板（D-5）——分档就是替人做产品判断。
+    untiered_alert: Dict[str, int] = field(default_factory=dict)
+    #: ★ 账本里的「漏读面」：raw decision 不在本腿读的那几个取值上、    #:   但产品侧会把它派生/升级成 alert 的记录数。
+    #:
+    #:   ★ 为什么必须数它：本腿按账本里的 `decision` **字段取值**筛记录，
+    #:     而产品侧的 `decision_of()` 会拿 `action`+`severity` **重新派生**
+    #:     （实测规则：`allow` + warning/critical ⇒ 升级成 alert，
+    #:     见 `notify_policy._SEVERITY_ESCALATE`）。两条口径不一致的那一小块，
+    #:     就是本腿看不见的地方。**不数它，它就会表现为「提醒比实际少」**，
+    #:     而「少」在页面上看起来和「没有」一样。
+    n_escalated_unread: int = 0
+    #: ★ 宿主盾自检事件（守卫自己不在岗／状态异常）的**独立计数**，按带分开。
+    #:
+    #:   为什么必须独立计（判据 J5／L2-3）：这类事件写的是 `decision=block`，
+    #:   与规则命中**在账本字段上长得一模一样**。实测 11-02：3 条 `host_shield_*`
+    #:   并进「挡下」之后，页面上只有一个「挡下 3 次」，读者分不出
+    #:   「规则挡住了」与「守卫当时根本不在岗」—— 而后者比前者严重得多。
+    #:   ⇒ 单独计数、单独上屏。但**不新增强度档**：新增一档 = 新增一个对外强度词，
+    #:     属产品词表，须创始人拍板（DEC-27 的 D-3）。计数不是档。
+    n_shield_gate: int = 0
+    n_shield_alert: int = 0
     #: **本腿没读**的「出声」档记录数，按 decision 取值分开记。
     #:
     #: ★ 为什么必须有这个字段：C 线一页纸有一格叫「提醒」。它由 `alert`
-    #:   （告警但放行）这类记录产生，而本腿只读 block/deny ⇒ 这一格**永远是 0**。
-    #:   不把这个 0 的来源数出来，它就和「今天真的没有提醒」长得一模一样
-    #:   —— 一个是结论，一个是盲区，而页面上只有一个 0（铁律 45）。
-    #:   按 decision 取值分记而不是合成一个数：`alert` 才是「提醒」的原料，
-    #:   `config_fallback` 是配置失效，两者不能共用一个分母（F40）。
+    #:   （告警但放行）这类记录产生。
+    #:   ★ 2026-11-03 之后本腿**读** `alert` 了 ⇒ 本字段里不再有 `alert`，
+    #:     只剩 `TOAST_NOT_A_TIER` 登记的那几个取值（配置失效／报告类结论）。
+    #:     它们仍然要说出来：不说，读者会以为「出声档都读过了」。
+    #:   按 decision 取值分记而不是合成一个数：`config_fallback` 是配置失效，
+    #:   与「提醒」不能共用一个分母（F40）。
     unread_toast: Dict[str, int] = field(default_factory=dict)
     #: 按规则号聚合后的簇
     clusters: List[Cluster] = field(default_factory=list)
@@ -247,6 +364,98 @@ class Survey:
 
     def n_clusters(self) -> int:
         return len(self.clusters)
+
+    def clusters_of(self, band: str) -> List[Cluster]:
+        return [c for c in self.clusters if c.band == band]
+
+    def shield_counted(self) -> int:
+        """守不住的事件一共几条（两条带相加）。
+
+        ★ 这是**一个计数，不是一档**（见 `n_shield_gate` 的注释）。
+          它与「挡下」共用同一批记录 ⇒ 两个数**不许相加**，
+          也不许拿它去和簇数相除（分母不同）。
+        """
+        return self.n_shield_gate + self.n_shield_alert
+
+    def balance(self) -> Dict[str, Any]:
+        """守恒账：**每条读到的记录都要在等号右边出现一次，不许有黑洞。**
+
+        ★ 为什么需要它（判据 `J3`／`L2-2`，2026-11-03）：
+          上一版能说出「43 条」「29 条」「17 次」，但**说不出**「29 条里有多少条
+          变成结论、多少条被合进同一簇、多少条被产品侧判为不适用」。
+          三个数各自都对，加不起来 —— 而**加不起来的分母不是分母，是一句注释**。
+          产品侧早就有同款式子（`host_shield.py:1494-1501` 的
+          `total == used + dup + merged`），C 线这边一直只是「砍掉 + 印一句另有 N 条」。
+
+        ★ 两条式子**分开写、不许合并**（F40：一个数承担两个分母）：
+            gate 带：原始条数 == 不适用 ＋ 落桶
+            alert 带：原始条数 == 不适用 ＋ 落桶 ＋ **无档可落**
+          两边各有一个「落桶 == 簇数 ＋ 合并」。
+          ★ 「合并」在同一条带内为正（一次会话里同规则命中 18 次 ⇒ 1 簇），
+            跨带**不许**合并 —— 见 `Cluster` 的 `band` 注释。
+
+        ★ 返回值里 `broken` 非空 ⇒ 有记录被吞或被重。**它不许被当成 warning**：
+          守恒破了就等于这张表的每一个数都可能是错的。
+        """
+        rows: List[Dict[str, Any]] = []
+        broken: List[str] = []
+
+        for band, name in ((BAND_GATE, "裁决面（停下等人）"),
+                           (BAND_ALERT, "提醒面（告警但放行）")):
+            cls = self.clusters_of(band)
+            n_bucketed = (self.n_bucketed if band == BAND_GATE
+                          else self.n_alert_bucketed)
+            n_raw = (self.n_verdicts if band == BAND_GATE else self.n_alert_raw)
+            n_na = (self.n_non_event if band == BAND_GATE
+                    else self.n_alert_non_event)
+            n_untiered = sum(self.untiered_alert.values()) if band == BAND_ALERT else 0
+            merged = n_bucketed - len(cls)
+            rows.append({
+                "band": band,
+                "name": name,
+                "candidates": n_raw,
+                "into_evidence": len(cls),
+                "merged": merged,
+                "not_applicable": n_na,
+                "untiered": n_untiered,
+            })
+            if n_raw != n_na + n_bucketed + n_untiered:
+                broken.append(
+                    "%s：原始 %d 条 ≠ 不适用 %d ＋ 落桶 %d ＋ 无档可落 %d"
+                    % (name, n_raw, n_na, n_bucketed, n_untiered))
+            if merged < 0:
+                broken.append("%s：簇数 %d 大于落桶 %d —— 一条记录被算进了两簇"
+                              % (name, len(cls), n_bucketed))
+            if n_bucketed != sum(c.n_records for c in cls):
+                broken.append(
+                    "%s：落桶 %d 条 ≠ 该带各簇条数之和 %d 条"
+                    % (name, n_bucketed, sum(c.n_records for c in cls)))
+            # ★ 提醒带里**不许**有无规则号的簇：那种记录必须落 `untiered_alert`。
+            #   允许它进簇就等于允许印「提醒」，而「提醒」的定义是「有规则命中」
+            #   —— 一条核不了的结论借一个词的壳上了首屏。
+            if band == BAND_ALERT:
+                _nr = [c for c in cls if not c.has_rule]
+                if _nr:
+                    broken.append(
+                        "%s：有 %d 簇没有规则号却进了簇（应落「无档可落」）"
+                        % (name, len(_nr)))
+
+        return {"rows": rows, "broken": broken}
+
+    def balance_line(self) -> str:
+        """守恒账的一行人话。**报数必须带式子**，否则读者只能相信。"""
+        b = self.balance()
+        parts = []
+        for r in b["rows"]:
+            s = ("%s 候选 %d 条 ＝ 进证据 %d 簇 ＋ 合并 %d ＋ 不适用 %d"
+                 % (r["name"], r["candidates"], r["into_evidence"],
+                    r["merged"], r["not_applicable"]))
+            if r["untiered"]:
+                s += " ＋ 无档可落 %d" % r["untiered"]
+            parts.append(s)
+        if b["broken"]:
+            parts.append("守恒破裂：" + "；".join(b["broken"]))
+        return "｜".join(parts)
 
 
 def rule_ids_of(rec: Dict[str, Any]) -> List[str]:
@@ -348,7 +557,7 @@ def survey(root: str, *, day: str = "", as_of: str = "",
         s.undecidable.append(
             "没找到账本日文件（目录 %s）—— 这是「没跑成」，不是「没有裁决」" % root
         )
-        s.denominators["裁决面"] = "读不到日文件 ⇒ 分母未知"
+        s.denominators["停下等人"] = "读不到日文件 ⇒ 分母未知"
         return s
 
     by_key: Dict[Tuple[str, str, str], Cluster] = {}
@@ -357,6 +566,14 @@ def survey(root: str, *, day: str = "", as_of: str = "",
     n_gate = 0
     n_toast = 0
     n_bucketed = 0
+    n_alert_raw = 0
+    n_alert_non_event = 0
+    n_alert_bucketed = 0
+    n_alert_misfit = 0
+    n_escalated_unread = 0
+    n_shield_gate = 0
+    n_shield_alert = 0
+    untiered_alert: Dict[str, int] = {}
     unread_toast: Dict[str, int] = {}
     seen_days: List[str] = []
 
@@ -375,40 +592,83 @@ def survey(root: str, *, day: str = "", as_of: str = "",
                 if not isinstance(rec, dict):
                     continue
                 dec = rec.get("decision")
-                if dec not in VERDICT_DECISIONS:
-                    # ★ 不读它，但**必须数它**。这一类里有「提醒」的原料（alert）：
-                    #   本腿不读 ⇒ 一页纸上「提醒」恒为 0。若连数都不数，
-                    #   那个 0 就永远说不清是「没有」还是「没读」（铁律 45）。
+                # ★ 2026-11-03：读两面。**选面只看账本字段取值，分档才问产品侧**。
+                #   两面各有自己的原始条数分母 —— 合成一个数就是 F40。
+                if dec in VERDICT_DECISIONS:
+                    band = BAND_GATE
+                elif dec in ALERT_DECISIONS:
+                    band = BAND_ALERT
+                else:
+                    # ★ 不读它，但**必须数它**，而且要分清它属于哪一种「不读」：
+                    #   ① 出声档里登记过「不属任何一档」的（配置失效／报告结论）
+                    #      ⇒ 进 `unread_toast`，按取值分记；
+                    #   ② 账本字段说「放行」，而产品侧会**升级**成 alert 的
+                    #      （`allow` + warning/critical，见 `_SEVERITY_ESCALATE`）
+                    #      ⇒ 进 `n_escalated_unread`。这一类最容易被漏掉：
+                    #        它在字段上不是 alert，在本腿的筛选条件上被跳过，
+                    #        而产品侧认为它该吵 —— 页面上表现为「提醒比实际少」。
                     if dec in _TOAST_DECISIONS:
                         unread_toast[str(dec)] = unread_toast.get(str(dec), 0) + 1
+                    else:
+                        _face, _derived, _ = NP.explain(rec)
+                        if _face == NP.TOAST and _derived in ALERT_DECISIONS:
+                            n_escalated_unread += 1
                     continue
-                n_verdicts += 1
+                if band == BAND_GATE:
+                    n_verdicts += 1
+                else:
+                    n_alert_raw += 1
                 # ★ 通知面分流用**产品侧实现**（不抄表）。
                 face, _d, _why = NP.explain(rec)
                 if face == NP.NONE:
                     # 产品侧已判「结构上不是事件」（如 pre_tool_use_summary：
                     # 与逐条 pre_tool_use 覆盖同一批调用，同时通知会提醒两次）。
                     # ★ 这不是「静音」，是「不适用」——两者必须分开记。
-                    n_non_event += 1
+                    if band == BAND_GATE:
+                        n_non_event += 1
+                    else:
+                        n_alert_non_event += 1
                     continue
-                if face == NP.GATE:
+                if band == BAND_ALERT and face != NP.TOAST:
+                    # ★ 账本字段说「告警放行」，产品侧按 action／severity 重新派生
+                    #   却判成「停下等人」。**两条口径打架时不许挑一个**：
+                    #   挑 gate ⇒ 印「挡下」，而动作其实执行了（强度读强）；
+                    #   挑 toast ⇒ 印「提醒」，而产品侧认为该停下（强度读低）。
+                    #   两种都是拿一个我们核不了的说法顶替一个词 ⇒ 只计数、报出来。
+                    #   （实测 11-02 全天 0 条，但「今天没有」不等于「不会发生」。）
+                    n_alert_misfit += 1
+                    continue
+                if band == BAND_GATE:
                     n_gate += 1
-                elif face == NP.TOAST:
+                    n_bucketed += 1
+                else:
+                    rids0 = rule_ids_of(rec)
+                    if not rids0:
+                        # ★ 出声、但没有规则号 ⇒ **不进任何档**（理由见 `strength()`）。
+                        #   只按 type 计数：322 条「无档可落」与「302 条 host_changed」
+                        #   在页面上差别很大 —— 前者像是我们没做完，后者才说得清是什么。
+                        #   ★ 它**不是「落桶」**：落桶意味着「被装进某一档」。
+                        t0 = str(rec.get("type") or "（无 type）")
+                        untiered_alert[t0] = untiered_alert.get(t0, 0) + 1
+                        continue
                     n_toast += 1
-                n_bucketed += 1
+                    n_alert_bucketed += 1
 
                 rids = rule_ids_of(rec)
                 rule = rids[0] if rids else ""
                 sess = str(rec.get("session") or "")[:8]
                 # ★ 聚合键**不含 decision**（block 与 deny 同义，放进去会把
                 #   同一次动作拆成两簇）。decision 改成簇内的取值集合。
-                key = (rule, sess)
+                # ★ 但**必须含 band**：同规则同会话的「挡下」与「提醒」是两件事，
+                #   并成一簇就只能二选一。
+                key = (rule, sess, band)
                 cl = by_key.get(key)
                 if cl is None:
                     cl = Cluster(
                         rule_id=rule or "（无规则号）",
                         session=sess,
                         severity=str(rec.get("severity") or "none"),
+                        band=band,
                         n_records=0,
                         has_rule=bool(rids),
                         is_shield=str(rec.get("type") or "") in SHIELD_TYPES,
@@ -432,6 +692,13 @@ def survey(root: str, *, day: str = "", as_of: str = "",
                 t = str(rec.get("type") or "")
                 if t and t not in cl.types:
                     cl.types.append(t)
+                # ★ 守不住的那一类**逐条计**，与簇的 is_shield 是两条独立的路
+                #   （簇上的 is_shield 只看第一条记录 ⇒ 混簇时它不是全貌）。
+                if t in SHIELD_TYPES:
+                    if band == BAND_GATE:
+                        n_shield_gate += 1
+                    else:
+                        n_shield_alert += 1
                 rsn = str(rec.get("reason") or "")
                 if rsn and rsn not in cl.reasons and len(cl.reasons) < 4:
                     cl.reasons.append(rsn)
@@ -444,12 +711,22 @@ def survey(root: str, *, day: str = "", as_of: str = "",
         n_bucketed=n_bucketed,
         n_gate=n_gate,
         n_toast=n_toast,
+        n_alert_raw=n_alert_raw,
+        n_alert_non_event=n_alert_non_event,
+        n_alert_bucketed=n_alert_bucketed,
+        untiered_alert=dict(untiered_alert),
+        n_escalated_unread=n_escalated_unread,
+        n_shield_gate=n_shield_gate,
+        n_shield_alert=n_shield_alert,
         unread_toast=dict(unread_toast),
         clusters=list(by_key.values()),
     )
 
     # ★ 分母：三个数分列，**不许合成一个**（F40）。
-    s.denominators["裁决面"] = (
+    # ★ 2026-11-03：键名改成**不带「面」字的短名**。原来叫「裁决面」，而本腿现在
+    #   读两面 ⇒ 消费方加前缀后会出现「裁决面·提醒面」这种读起来像口吃的东西。
+    #   短名 + 前缀 = 「裁决面·告警放行」，一眼能读懂说的是哪一带。
+    s.denominators["停下等人"] = (
         "按 decision 值数（block+deny）%d 条｜其中产品侧判为非事件 %d 条"
         "（不适用，非静音）｜落桶 %d 条"
         % (n_verdicts, n_non_event, n_bucketed)
@@ -459,42 +736,73 @@ def survey(root: str, *, day: str = "", as_of: str = "",
     #   ★ 这两个数都是真的，且都能被核（前者可逐行回指，后者可按
     #     会话+时刻+工具+命令 复算）。合成一个数就会让「一次动作」被读成「两次」。
     n_actions_total = sum(c.n_actions for c in s.clusters)
+    n_actions_gate = sum(c.n_actions for c in s.clusters_of(BAND_GATE))
+    n_actions_alert = sum(c.n_actions for c in s.clusters_of(BAND_ALERT))
     s.denominators["动作数"] = (
         "按（会话+时刻+工具+命令）去重后 %d 次动作｜对应 %d 条记录"
         "｜差额 %d 条是「同一次动作被多个钩子各记一遍」"
         "（block 与 deny 同义，见 notify_policy 回退表）"
-        % (n_actions_total, n_bucketed, n_bucketed - n_actions_total)
+        "｜其中挡下 %d 次、提醒 %d 次"
+        % (n_actions_total, n_bucketed + n_alert_bucketed,
+           (n_bucketed + n_alert_bucketed) - n_actions_total,
+           n_actions_gate, n_actions_alert)
     )
     s.denominators["通知面"] = (
-        "gate %d 条｜toast %d 条｜聚合后 %d 簇（规则×会话）"
+        "gate %d 条｜toast %d 条｜聚合后 %d 簇（规则×会话×带）"
         % (n_gate, n_toast, len(by_key))
     )
-    s.denominators["账本"] = (
+    # ★ 2026-11-03：**提醒面单独一条分母**，不许并进「裁决面」。
+    #   它的原始条数、不适用、落桶、无档可落四个数各自成立，合成一个数就是 F40。
+    s.denominators["告警放行"] = (
+        "按 decision 值数（alert+warn）%d 条｜其中产品侧判为非事件 %d 条"
+        "（不适用，非静音）｜落桶 %d 条｜无档可落 %d 条"
+        % (n_alert_raw, n_alert_non_event, n_alert_bucketed,
+           sum(untiered_alert.values()))
+        + ("（%s）" % "、".join("%s %d" % (k, v)
+                             for k, v in sorted(untiered_alert.items()))
+           if untiered_alert else "")
+    )
+    # ★ 守不住单独一条分母（J5／L2-3）：**不是新增一档，是新增一个计数**。
+    #   它与「挡下」共用同一批记录，所以两个数相加没有任何意义 ——
+    #   写在这里就是为了让读者知道它们**不许相加**。
+    s.denominators["守不住"] = (
+        "宿主盾自检事件（守卫自己不在岗／状态异常）gate %d 条｜alert %d 条"
+        "｜这类记录与「有规则号的命中」共用同一批账本记录，两个数不许相加"
+        % (n_shield_gate, n_shield_alert)
+    )
+    s.denominators["账本日文件"] = (
         "日文件 %d 个（%s .. %s）"
         % (len(files), seen_days[0] if seen_days else "?",
            seen_days[-1] if seen_days else "?")
     )
+    # ★ 守恒账（判据 J3／L2-2）：上面几块分母各自成立，这一条把它们加起来核对。
+    #   **它是唯一会自己喊「对不上」的地方** —— 其余分母只是陈述。
+    s.denominators["守恒"] = s.balance_line()
     # ★ 「没读的那一档」也要有分母，且**分 decision 取值列**。
-    #   合成一个「另有 N 条」会把「提醒」和「配置失效」混成一个数（F40）。
+    #   合成一个「另有 N 条」会把「配置失效」和「报告结论」混成一个数（F40）。
     if unread_toast:
         s.denominators["本腿没读的出声档"] = (
             "｜".join("%s %d 条" % (k, v) for k, v in sorted(unread_toast.items()))
-            + "（本腿只读 block/deny，这一档今天没有腿读）"
+            + "（这些取值不属任何一档，见 verdict_leg.TOAST_NOT_A_TIER）"
         )
 
     # ★ 守恒自检：落桶数必须等于各簇条数之和。不等就是有记录被吞了。
     n_sum = sum(c.n_records for c in s.clusters)
-    if n_sum != n_bucketed:
+    if n_sum != n_bucketed + n_alert_bucketed:
         s.undecidable.append(
-            "守恒对不上：落桶 %d 条，各簇条数之和 %d 条 —— 有记录被吞或被重"
-            % (n_bucketed, n_sum)
+            "守恒对不上：落桶 %d 条（挡下 %d ＋ 提醒 %d），各簇条数之和 %d 条"
+            " —— 有记录被吞或被重"
+            % (n_bucketed + n_alert_bucketed, n_bucketed, n_alert_bucketed, n_sum)
         )
     # ★ 第二重守恒：动作数必须 ≤ 记录数。反过来就是去重键把两个动作并了。
-    if n_actions_total > n_bucketed:
+    if n_actions_total > n_bucketed + n_alert_bucketed:
         s.undecidable.append(
             "动作数 %d 大于记录数 %d —— 去重键失效（把不同动作算成了同一个）"
-            % (n_actions_total, n_bucketed)
+            % (n_actions_total, n_bucketed + n_alert_bucketed)
         )
+    # ★ 第三重守恒：两条带各自的式子。**破了就必须报，不许只印着**。
+    for _msg in s.balance()["broken"]:
+        s.undecidable.append("守恒账破裂：" + _msg)
 
     s.blind = (
         "账本里是否混有本项目自己的测试数据 —— 负控与红队曾往真账本写过"
@@ -515,13 +823,52 @@ def survey(root: str, *, day: str = "", as_of: str = "",
     #     不是在渲染层加白名单（加白名单等于承认分不清散文和原文）。
     if unread_toast:
         s.blind += (
-            "本腿只读 block/deny（动作没执行的裁决）。产品侧判为出声（toast）"
-            "的其它 decision 取值，本腿一条不读 —— 本次读到的有：%s。"
-            "所以「提醒」这一档在任何报告里都是 0，而这个 0 是「没腿读」，"
-            "不是「今天没有提醒」。要让它有值，必须再加一条腿读这一档"
+            "本腿读 block／deny（停下等人）与 alert／warn（提醒但放行）这两类决策取值。"
+            "出声档里还有%s不属任何一档，本腿一条不读"
+            "（它们既不在「停下等人」这一带，也不在「告警放行」这一带；"
+            "硬塞进任何一档，就是拿一个我们核不了的说法顶替一个词）"
             % "、".join("%s %d 条" % (k, v) for k, v in sorted(unread_toast.items())),
         )
+    # ★ 2026-11-03 新增两条盲区，都是本版**扩面时撞出来的**，不是设想的：
+    if untiered_alert:
+        s.blind += (
+            "出声档里有 %d 条记录没有规则号，本模块读到了但没有装进任何一档"
+            "（%s）。需要规则号的那一档，其定义要求「有规则命中并告警」；"
+            "没有规则号就印不出那一档 ⇒ 它们只在分母里出现，不进首屏。"
+            "要不要给它们一档，"
+            "属产品词表，须创始人拍板（DEC-27 的 D-5）"
+            % (sum(untiered_alert.values()),
+               "、".join("%s %d 条" % (k, v) for k, v in sorted(untiered_alert.items()))),
+        )
+    if n_escalated_unread:
+        s.blind += (
+            "账本里还有 %d 条记录的 decision 写的是「放行」，但产品侧会按"
+            " action 与 severity 把它升级成提醒（notify_policy 的 _SEVERITY_ESCALATE："
+            "allow 加 warning 或 critical）。本模块按账本字段取值筛记录 ⇒ 不读它们，"
+            "所以真实的提醒次数会多于本报告里的数。这是口径差，不是漏报检查"
+            % n_escalated_unread,
+        )
+    if n_alert_misfit:
+        s.undecidable.append(
+            "有 %d 条记录 decision 写着告警放行，而产品侧按 action 与 severity "
+            "重新派生却判成「停下等人」—— 两条口径打架，本模块不替它们选边："
+            "挑一边就是拿一个我们核不了的说法顶替一个词。这些记录未进任何一档"
+            % n_alert_misfit
+        )
     return s
+
+
+def _unregistered_toast(decisions: Iterable[str]) -> Tuple[str, ...]:
+    """出声档取值里**没登记归属**的那些。
+
+    ★ 存在的理由：本腿按「取值 → 档」映射。产品侧那张回退表会加键，
+      而新键出现时若没有登记，它会被静默跳过 —— 页面不说、分母不说、
+      盲区不说，表现得和「这一档今天真的没有」一模一样（铁律 45）。
+      ⇒ 判据不是「映射表写全了没有」（那是自律），而是「有没有一个函数
+        能把没登记的点出来，并且自检真的拿一个没登记的取值喂过它」。
+    """
+    known = set(ALERT_DECISIONS) | set(TOAST_NOT_A_TIER)
+    return tuple(sorted(d for d in decisions if d not in known))
 
 
 def _selfcheck() -> int:
@@ -565,10 +912,24 @@ def _selfcheck() -> int:
 
     # ── 4. 负控：**故意让强度被读强**，判据必须能发现 ──────────────
     #  这条是本模块最容易出的错：把「守卫自己异常」印成「规则挡住了」。
-    #  负控 = 反过来构造：给无规则号的簇挂一个 claim，验它的措辞里
-    #  **没有**「挡下」两个字（不许把强度读强）。
-    ck("挡下" not in c2.claim(), "无规则号的簇不许说「挡下」（强度读强）")
-    ck("挡下" in c1.claim(), "带规则号的簇应当说「挡下」")
+    #  ★ 2026-11-03 改锚点：原来断言「无规则号的簇不许出现『挡下』两个字」。
+    #    现在 claim 里**根本不许出现档名**（档名只在 evidence.WORD 一处声明），
+    #    所以那句话变成了永远成立的死判据 —— 而**永远成立的判据与真判据同貌**。
+    #    ⇒ 改成断言事实面的差：带回指 ⇒ 说的是「某个规则让动作没执行」；
+    #      不带回指 ⇒ 说的是「监理自己异常」。两者用的词必须不同。
+    ck("动作未执行" in c1.claim(), "带规则号的簇应当说清「动作未执行」")
+    ck("监理自身异常" in c2.claim(),
+       "无规则号的簇必须说成「监理自身异常」，不许说成规则挡住了：%r"
+       % (c2.claim(),))
+    ck("AN-" not in c2.claim(),
+       "无规则号的簇点了一个规则号 —— 它没有规则号，点出来就是编的：%r"
+       % (c2.claim(),))
+    # ★ 档名不许出现在 claim 里（单一真源）：出现一次，改词就要改两处。
+    for _c in (c1, c2):
+        for _w in ("挡下", "提醒"):
+            ck(_w not in _c.claim(),
+               "claim 里出现了档名「%s」：%r —— 档名只许在 evidence.WORD 里声明一次"
+               % (_w, _c.claim()))
 
     # ── 4b. 负控：**记录数不许被当成动作数**（2026-11-02 深夜新增）──────
     #  ★ 这是本轮自己撞出来的真错：同一次工具调用被 pre_tool_use(block) 与
@@ -634,12 +995,103 @@ def _selfcheck() -> int:
     ck(len(_empty.undecidable) > 0, "空账本必须报「没跑成」")
     ck(_empty.n_verdicts == 0, "空账本裁决数必须为 0")
 
+    # ── 10. alert 带：一档说成另一档，判据必须能发现（2026-11-03 新增）───
+    #  ★ 这一组守的是本版**新开的那一面**里最容易出、且最难发现的一个错：
+    #    同规则同会话的「挡下」与「提醒」若并成一簇，`strength()` 只能二选一
+    #    ⇒ 要么 288 次「提醒」被印成「挡下 288 次」（强度读强），
+    #       要么 9 次「挡下」被印成「提醒」（强度读弱）。
+    #    **两个数都真、页面也自洽**，只有把带写进聚合键才会分开出现。
+    ca = Cluster(rule_id="AN-010", session="s", severity="warning",
+                 band=BAND_ALERT, n_records=3, n_actions=3, has_rule=True)
+    ck(ca.strength() == K_ALERT, "alert 带的簇必须落 alert 档，实际 %r"
+       % (ca.strength(),))
+    _ca = ca.claim()
+    ck("AN-010" in _ca, "alert 带的簇丢了规则号：%r" % (_ca,))
+    ck("挡下" not in _ca, "alert 带的簇说了「挡下」（把提醒说成挡下）：%r" % (_ca,))
+    # ★ 「动作仍然执行了」这半句不许省：省掉之后「提醒 N 次」会被读成
+    #   「挡下了 N 次」的软说法，而真实情况是这 N 次**全都执行了**。
+    ck("动作仍然执行了" in _ca,
+       "alert 带的簇没说「动作仍然执行了」—— 读者会把提醒读成挡住：%r" % (_ca,))
+    # ★ 档名（「提醒」）不许由本模块写：它只在 evidence.WORD 里声明一次。
+    ck("提醒" not in _ca,
+       "alert 带的簇里出现了档名「提醒」：%r —— 改词就要改两处" % (_ca,))
+    # 负控：同规则、同会话、不同带 ⇒ **必须是两个不同的聚合键**
+    cg = Cluster(rule_id="AN-010", session="s", severity="critical",
+                 band=BAND_GATE, n_records=9, n_actions=9, has_rule=True)
+    ck(ca.key() != cg.key(),
+       "同规则同会话的挡下与提醒聚合键相同 —— 它们会被并成一簇，"
+       "然后只能二选一")
+    ck(cg.strength() == K_HELD, "gate 带的规则命中必须仍落 held")
+
+    # ── 11. 出声档的取值必须**全部登记**，未登记即报（清单式真源的防守）──
+    _unreg = _unregistered_toast(_TOAST_DECISIONS)
+    ck(not _unreg,
+       "产品侧出声档里有取值没登记归属：%s —— 它会被静默跳过，"
+       "而静默跳过与「这一档今天没有」完全同貌" % ("、".join(_unreg),))
+    # ★ 负控：**必须证明这个检查能红**。永远为空的检查与恒真的检查一样没用。
+    ck(_unregistered_toast(set(_TOAST_DECISIONS) | {"brand_new_decision"})
+       == ("brand_new_decision",),
+       "未登记检查不会报 —— 它对任何输入都放行，等于没有检查")
+    ck(set(ALERT_DECISIONS) <= set(_TOAST_DECISIONS),
+       "ALERT_DECISIONS 里有产品侧并不判为出声的取值 —— 档与表脱钩了")
+
+    # ── 12. `PRODUCES` 必须等于 `strength()` 的值域（声明钉在实现上）────
+    #  ★ 声明写死在常数里、实现另写一套 ⇒ 两边一定会漂。这一条把它们钉在一起：
+    #    两个带 × 有无规则号 的四种组合，跑一遍 `strength()`，取到的档必须
+    #    恰好等于 `PRODUCES`。多一个档 ⇒ 声明少写了（消费方会以为没腿读）；
+    #    少一个档 ⇒ 声明多写了（消费方会以为有腿读，而实际产不出来）。
+    _realized = set()
+    for _band in (BAND_GATE, BAND_ALERT):
+        for _has in (True, False):
+            _realized.add(Cluster(rule_id="X" if _has else "（无规则号）",
+                                  session="s", severity="none", band=_band,
+                                  n_records=1, n_actions=1,
+                                  has_rule=_has).strength())
+    ck(_realized == set(PRODUCES),
+       "PRODUCES %r 与 strength() 实际值域 %r 不一致 —— "
+       "声明与实现已经脱钩" % (list(PRODUCES), sorted(_realized)))
+
+    # ── 13. 守恒账：闭合、且破裂必须报（判据 J3／L2-2）───────────────
+    _ok = Survey(read_at="x", day="d", n_verdicts=4, n_non_event=1, n_bucketed=3,
+                 n_gate=3, n_toast=2, n_alert_raw=2, n_alert_non_event=0,
+                 n_alert_bucketed=2)
+    _ok.clusters = [
+        Cluster(rule_id="A", session="s1", severity="none", band=BAND_GATE,
+                n_records=3, n_actions=2, has_rule=True),
+        Cluster(rule_id="B", session="s1", severity="none", band=BAND_ALERT,
+                n_records=2, n_actions=2, has_rule=True),
+    ]
+    ck(not _ok.balance()["broken"],
+       "闭合的守恒账被判成破裂：%r" % (_ok.balance()["broken"],))
+    # 负控①：吞掉一条 alert 记录（落桶比原始少一条，且没进任何一项）
+    _bad1 = Survey(read_at="x", day="d", n_alert_raw=3, n_alert_non_event=0,
+                   n_alert_bucketed=2)
+    _bad1.clusters = [_ok.clusters[1]]
+    ck(any("提醒面" in b for b in _bad1.balance()["broken"]),
+       "吞掉一条提醒记录，守恒账没报 —— 黑洞又回来了")
+    # 负控②：把同一条记录算进两簇（簇条数之和 > 落桶）
+    _bad2 = Survey(read_at="x", day="d", n_verdicts=2, n_bucketed=2, n_gate=2)
+    _bad2.clusters = [_ok.clusters[0],
+                      Cluster(rule_id="A2", session="s1", severity="none",
+                              band=BAND_GATE, n_records=2, n_actions=1,
+                              has_rule=True)]
+    ck(_bad2.balance()["broken"],
+       "一条记录被算进两簇，守恒账没报 —— 重算比漏算更难发现")
+    # 负控③：alert 带里出现无规则号的簇（它本该落 untiered，不许进簇）
+    _bad3 = Survey(read_at="x", day="d", n_alert_raw=1, n_alert_bucketed=1)
+    _bad3.clusters = [Cluster(rule_id="（无规则号）", session="s", severity="none",
+                              band=BAND_ALERT, n_records=1, n_actions=1,
+                              has_rule=False)]
+    ck(_bad3.balance()["broken"],
+       "alert 带里的无规则号簇没被拦下 —— 它会印成「提醒」，"
+       "而「提醒」的定义是有规则命中")
+
     if fails:
         print("自检失败 %d 项：" % len(fails))
         for f in fails:
             print("  ·", f)
         return 1
-    print("verdict_leg 自检：9 组全通过")
+    print("verdict_leg 自检：13 组全通过")
     return 0
 
 
@@ -678,12 +1130,25 @@ def main() -> int:
             "n_clusters": s.n_clusters(),
             # ★ 本腿**能产出**哪几档（声明，供消费方判断「某一档的 0」是什么 0）。
             "produces": list(PRODUCES),
+            # ★ 提醒面的四个数（原始／不适用／落桶／无档可落）。**不许合成一个**。
+            "n_alert_raw": s.n_alert_raw,
+            "n_alert_non_event": s.n_alert_non_event,
+            "n_alert_bucketed": s.n_alert_bucketed,
+            "untiered_alert": s.untiered_alert,
+            # ★ 漏读面：账本字段说「放行」、产品侧会升级成提醒的记录数。
+            "n_escalated_unread": s.n_escalated_unread,
+            "n_shield_gate": s.n_shield_gate,
+            "n_shield_alert": s.n_shield_alert,
             # ★ 本腿**没读**的出声档，按 decision 取值分开。
             "unread_toast": s.unread_toast,
+            # ★ 守恒账：两条带各自的式子与破裂项。消费方要印就印，不许自己加。
+            "balance": s.balance(),
             "clusters": [
                 {
                     "rule_id": c.rule_id,
                     "session": c.session,
+                    # ★ 带必须随簇出去：消费方要按档分栏，就得知道它在哪一带。
+                    "band": c.band,
                     "decisions": c.decisions,
                     "severity": c.severity,
                     # ★ 两个计数都要出去：一个是拦截口径、一个是记账口径。
@@ -709,8 +1174,8 @@ def main() -> int:
         print("  [%s] %s" % (k, v))
     print()
     for c in sorted(s.clusters, key=lambda c: (-c.n_actions, c.rule_id))[:30]:
-        print("  %-10s %-8s n=%-3d 动作/%-3d 条  %s"
-              % (c.rule_id, c.session, c.n_actions, c.n_records, c.claim()))
+        print("  %-10s %-8s %-6s n=%-3d 动作/%-3d 条  %s"
+              % (c.rule_id, c.session, c.band, c.n_actions, c.n_records, c.claim()))
     if s.undecidable:
         print()
         print("  算不出来：")

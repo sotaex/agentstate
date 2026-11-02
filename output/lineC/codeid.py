@@ -70,6 +70,11 @@ SOURCES: List[str] = [
     #   这是清单式真源的固有风险（漏登记不报错），只能靠「新增模块必须登记」这条纪律。
     os.path.join(LINE_C, "clue_ledger.py"),
     os.path.join(LINE_C, "verdict_leg.py"),
+    # ★ 2026-11-03 补：`jchecks.py`（J1–J6 六条判据）。判据只有一条登记理由：
+    #   **它会不会改变报告上的数字或措辞**。六条判据里 J1/J3/J6 直接判产品形态
+    #   （回指、守恒、措辞），J5 直接判一个分母 —— 换了判据就等于换了验收口径，
+    #   而归档报告的可信度正是靠这个口径。漏登记它，改判据指纹不变。
+    os.path.join(LINE_C, "jchecks.py"),
     os.path.join(LINE_C, "evidence.py"),
     os.path.join(LINE_C, "citecheck.py"),
     os.path.join(LINE_C, "onepager.py"),

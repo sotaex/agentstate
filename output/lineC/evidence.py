@@ -334,13 +334,22 @@ class Evidence:
         return WORD[self.strength]
 
     def strength_note(self) -> str:
-        """强度档的**必带限定语**。单独写在一处，避免渲染层各自发挥。"""
+        """强度档的**必带限定语**。单独写在一处，避免渲染层各自发挥。
+
+        ★ 2026-11-03：这里**不许复述档名**。原文 `K_CHECKED` 那句是
+          「已核对（这是账本自洽性检查，不是拦截结论）」，而「已核对」正是
+          `WORD[K_CHECKED]` —— 于是同一页上这个档的词有两个来源：
+          徽标从 `WORD` 取（能跟着产品侧变），限定语写死（不跟着变）。
+          实测由 `jchecks.py` 的 J6 抓到（把 `WORD` 换成哨兵值后，
+          页面上还剩一个「已核对」）。
+          ⇒ 限定语只说**限定**，不重复档名。
+        """
         return {
             K_HELD: "已由规则拦下（有规则号，可查规则库）",
             K_ALERT: "有规则命中并告警，但动作仍然执行了",
             K_NO_RESPONSE: "已发现，但没有可执行的处置手段",
             K_LOG_ONLY: "已记录，未作判定（不知道是否危险，只知道它变了）",
-            K_CHECKED: "已核对（这是账本自洽性检查，不是拦截结论）",
+            K_CHECKED: "这是账本自洽性检查的结论，不是拦截结论",
         }[self.strength]
 
 
@@ -391,8 +400,22 @@ class Bundle:
     #: 每条腿的实况。**「0 条」的归因只从这里读。**
     legs: List["LegReport"] = field(default_factory=list)
     #: 本腿**没读**的「出声」档记录，按 decision 取值分开（来自第三只腿）。
-    #: 空 ⇒ 没有没读的；非空 ⇒ 「提醒」这一档的 0 是「没腿读」，不是「没有」。
+    #: 空 ⇒ 没有没读的；非空 ⇒ 这一档的 0 是「没腿读」，不是「没有」。
+    #: ★ 2026-11-03 之后：`alert` 已被本腿读走 ⇒ 这里只剩下
+    #:   `TOAST_NOT_A_TIER` 登记的那几个取值。**字段不许改名**（消费面已固定），
+    #:   但它的含义要跟着变：「这一档没腿读」变成「这些取值不属任何一档」。
     unread_toast: Dict[str, int] = field(default_factory=dict)
+    #: ★ 读到了、但**现有各档都装不进去**的记录（按 type 分开数，来自第三只腿）。
+    #:
+    #:   实测 11-02：302 条 `host_changed`（「宿主版本变化——钩子协议可能漂移」），
+    #:   出声、但没有规则号 ⇒ 印成「提醒」就是拿一个核不了的说法顶替一个词
+    #:   （「提醒」的定义是「有规则命中并告警」）。
+    #:   ⇒ 它既不是「结论」也不是「盲区」，是**第四种东西**：读到了、没档可落。
+    #:     三者必须分开说，否则「读了没装」会被读者当成「没有」（铁律 45）。
+    untiered_alert: Dict[str, int] = field(default_factory=dict)
+    #: ★ 守恒账（判据 J3／L2-2），来自第三只腿：`{"rows": [...], "broken": [...]}`。
+    #:   渲染层只许原样印出来，**不许自己算** —— 自己算就是第二套尺子。
+    balance: Dict[str, Any] = field(default_factory=dict)
 
     def leg(self, name: str) -> Optional["LegReport"]:
         for lg in self.legs:
@@ -859,6 +882,30 @@ def need_zero_note(bundle: Optional["Bundle"] = None) -> str:
             % ("、".join(lg.name for lg in dead),
                "；".join(lg.note or "原因见「不可判」" for lg in dead)))
 
+    # ④ 2026-11-03 新增：**读到了、但装不进任何一档**的那一批。
+    #   ★ 它不属于原来那四种 0 —— 四种里最接近的是「读了没装进来（要修的 bug）」，
+    #     而这一批不是 bug：是产品词表里就没有它们的位置。
+    #     不单独说，读者会把它当成「没有」；说成「没腿读」，又冤枉了那条腿
+    #     （它明明读了）。所以必须有第五句话。
+    if bundle.untiered_alert:
+        parts.append(
+            "另有 %d 条记录读到了但没有装进任何一档（%s）—— 它们出声、却没有规则号，"
+            "而「提醒」的定义是有规则命中并告警。这批既不是「没有」，也不是「没读」，"
+            "是「读到了、没档可落」"
+            % (sum(bundle.untiered_alert.values()),
+               "、".join("%s %d 条" % (k, v)
+                         for k, v in sorted(bundle.untiered_alert.items()))))
+
+    # ⑤ 出声档里**不属任何一档**的取值（配置失效／报告类结论）仍然是没读。
+    #   ★ 只有当「提醒」这一档已经有腿读时才走这一支；没有腿读时，上面第 ② 句
+    #     已经把它们说全了 —— 两句都说会变成「同一件事说两遍」，
+    #     而重复会让「一条」看起来像「两条」（见 §9.9b 的排版版）。
+    if bundle.unread_toast and K_ALERT not in no_leg:
+        parts.append(
+            "出声档里还有 %s 不属任何一档，本报告不读它们"
+            % "、".join("%s %d 条" % (k, v)
+                       for k, v in sorted(bundle.unread_toast.items())))
+
     if not parts:
         # 三条腿全跑成、都产出了结论、且三档都有腿 —— 此时 0 是干净的 0。
         # ★ 仍然要带分母，否则它读起来和「没查」一样。
@@ -898,10 +945,11 @@ def from_verdict(survey_json: Dict[str, Any], read_at: str
         claim = c.get("claim") or ""
         rule_id = c.get("rule_id") or ""
         session = c.get("session") or ""
+        band = c.get("band") or ""
         # ★ 无规则号的簇不许被说成「规则挡住了」⇒ 它落 no_response 档，
         #   而 no_response 的措辞由 WORD 统一持有，渲染层不许改写。
         blind = (
-            "只看账本里写好的裁决记录；簇的聚合键是「规则×会话」，"
+            "只看账本里写好的裁决记录；簇的聚合键是「规则×会话×带」，"
             "换一种分法簇数会变（条数守恒、簇数不守恒）"
         )
         if not rule_id or rule_id == "（无规则号）":
@@ -916,7 +964,13 @@ def from_verdict(survey_json: Dict[str, Any], read_at: str
                 #     拆成两簇），而这里若仍读 `c["decision"]`，那个键**已经不存在**
                 #     ⇒ 恒取空串，看起来「稳定」，实际是**一个恒空字段在冒充身份**。
                 #     这种错不会报错，它只会让身份在有人把键加回来时静默改变。
-                eid=_stable_id("VDT", "%s|%s" % (rule_id or "norule", session), ()),
+                #   ★ 2026-11-03 再补一段 `band`：同规则同会话的「挡下」与「提醒」
+                #     是两个不同的簇（`verdict_leg` 已把带写进聚合键），但它们的
+                #     规则号与会话号**完全一样** ⇒ 只用前两段做身份，两条证据会拿到
+                #     同一个 eid。实测 11-02 的 AN-010／g0517rf 就同时有挡下与提醒。
+                #     **两条不同的结论共用一个号**，比「同一个东西两个号」更坏：
+                #     更正链按 eid 指名，指一条会同时改两条。
+                eid=_stable_id("VDT", "%s|%s|%s" % (rule_id or "norule", session, band), ()),
                 claim=claim,
                 strength=strength,
                 cites=cites,
@@ -944,10 +998,15 @@ def verdict_leg_report(survey_json: Dict[str, Any], ran: bool,
       差别不在数字，在于**页面上那个 0 会被读成「今天没有提醒」**。
     """
     produces = tuple(survey_json.get("produces") or ())
-    # ★ 只取**裁决面**这一条主分母进归因句。把四条分母全塞进一句会变成一堵墙，
+    # ★ 只取**两条带的主分母**进归因句。把全部分母塞进一句会变成一堵墙，
     #   而读者在那一句里要回答的只有一个问题：「这条腿读了什么、读了多少」。
     #   其余分母照旧进页脚（`bundle.denominators`），一条不少。
-    dens = str((survey_json.get("denominators") or {}).get("裁决面") or "")
+    # ★ 2026-11-03：从「只取一条」改成「两条带各取一条」。只报停下等人的话，
+    #   读者会以为这条腿只读了那一半 —— 而「提醒面 34 条」正是这次新接上的那一半。
+    _dens = survey_json.get("denominators") or {}
+    dens = "｜".join(
+        "%s：%s" % (k, _dens[k]) for k in ("停下等人", "告警放行") if _dens.get(k)
+    )
     return LegReport(
         name="裁决面",
         ran=ran,
@@ -1055,6 +1114,11 @@ def collect(root: str, *, watch_args: Optional[List[str]] = None) -> Bundle:
         bundle.blind += tuple(plain(x) for x in (verdict.get("blind") or ()))
         # ★ 「没读的那一档」跟着腿一起回来 —— 它是「提醒」这一档 0 的来源。
         bundle.unread_toast.update(verdict.get("unread_toast") or {})
+        # ★ 2026-11-03：读到了但装不进任何一档的那一批（无规则号的出声记录），
+        #   以及守恒账。**两者都必须原样带出来**：前者是「读了没装」与「没有」
+        #   的分界，后者是「每个数加得起来」的唯一凭据。
+        bundle.untiered_alert.update(verdict.get("untiered_alert") or {})
+        bundle.balance = verdict.get("balance") or {}
     # ★ 第三只腿的 `produces` **读它自己的声明**，不在这里推断。
     #   崩了也要有一条实况：`ran=False` 与「读了没有」长得一样，含义相反。
     bundle.legs.append(
@@ -1198,12 +1262,58 @@ def _selfcheck() -> int:
         fails.append("不给腿实况时，归因却给出了肯定结论 —— "
                      "说不出归因的 0 不许被当成「没事」")
 
+    # ---- 2026-11-03 新增：提醒面接上之后的两条归因 ----
+    # ⑨ 「提醒」这一档**有了腿读**，归因必须**跟着变**：
+    #    旧版这里必然是「没有任何一条腿去读」，而现在那句话是假的。
+    #    ★ 这条守的正是「写死的归因会过期」：同一个 0，换了腿的覆盖情况，
+    #      话必须跟着换 —— 否则它就从「盲区说明」退化成「自我安慰」。
+    _b3 = Bundle(read_at="t", root="")
+    _b3.legs = [
+        LegReport(name="账本自洽", ran=True, produces=(K_CHECKED,), denominator="日文件 1 个"),
+        LegReport(name="裁决面", ran=True,
+                  produces=(K_HELD, K_ALERT, K_NO_RESPONSE),
+                  denominator="提醒面 665 条｜落桶 353 条"),
+    ]
+    _n3 = need_zero_note(_b3)
+    if "没有任何一条腿去读" in _n3:
+        fails.append("「提醒」这一档已经有腿读了，归因却还写着没腿读：%r —— "
+                     "过期 24 小时的自我安慰" % (_n3,))
+    if "查了，没有" not in _n3:
+        fails.append("三档都有腿读且都读到 0 条，归因里没有「查了，没有」：%r" % (_n3,))
+    if "665" not in _n3:
+        fails.append("有腿覆盖的档没带分母：%r —— 报数不带分母等于没报" % (_n3,))
+
+    # ⑩ 「读到了、没档可落」必须与「没有」区分开（第五种 0 的雏形）
+    _b4 = Bundle(read_at="t", root="")
+    _b4.legs = [LegReport(name="裁决面", ran=True,
+                          produces=(K_HELD, K_ALERT, K_NO_RESPONSE),
+                          denominator="提醒面 665 条")]
+    _b4.untiered_alert = {"host_changed": 302}
+    _n4 = need_zero_note(_b4)
+    if "302" not in _n4:
+        fails.append("没档可落的那一批没给出条数：%r —— 读者会当成「没有」" % (_n4,))
+    if "读到了、没档可落" not in _n4:
+        fails.append("没档可落的那一批被说成了别的东西：%r —— "
+                     "说成「没有」冤了读者，说成「没读」冤了那条腿" % (_n4,))
+
+    # ⑪ 出声档里不属任何一档的取值（配置失效等）仍然是「没读」，必须说出来
+    _b5 = Bundle(read_at="t", root="")
+    _b5.legs = [LegReport(name="裁决面", ran=True,
+                          produces=(K_HELD, K_ALERT, K_NO_RESPONSE),
+                          denominator="提醒面 665 条")]
+    _b5.unread_toast = {"config_fallback": 7}
+    _n5 = need_zero_note(_b5)
+    if "config_fallback" not in _n5:
+        fails.append("出声档里没读的取值没被说出来：%r —— "
+                     "读者会以为出声档都读过了" % (_n5,))
+
     for f in fails:
         print(f"[自检失败] {f}", file=sys.stderr)
     if fails:
         return 1
-    print("[自检] 九条硬约束全部生效（空出处／无号挡下／合法挡下／词表外／散文星号不外泄／"
-          "盲区三形态／SKIP 进不适用／0 的解释无星号且按实际来源／0 的归因有负控）")
+    print("[自检] 十二条硬约束全部生效（空出处／无号挡下／合法挡下／词表外／散文星号不外泄／"
+          "盲区三形态／SKIP 进不适用／0 的解释无星号且按实际来源／0 的归因有负控／"
+          "提醒面接上后归因跟着变／没档可落的档必须说出来／出声档没读的取值必须说出来）")
     return 0
 
 

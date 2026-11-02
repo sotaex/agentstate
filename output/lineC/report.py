@@ -141,6 +141,22 @@ def produce(root: str, out_path: str, *,
         "not_applicable": b.not_applicable,
         "blind": list(b.blind),
         "denominators": dict(b.denominators),
+        # ★ 2026-11-03：三条腿的实况、守恒账、无档可落的那一批也进机器通道。
+        #   起因：页面上已经有「这次看见了什么」的逐档归因与守恒式，
+        #   而侧车只带 denominators ⇒ **页面与机器通道说的不是同一件事**。
+        #   机器通道读不到「这个 0 是没腿读还是查了没有」，而它恰恰是
+        #   唯一能被程序读的那一份。同一份 bundle 出去，不许各算一套。
+        "legs": [
+            {"name": lg.name, "ran": lg.ran, "produces": list(lg.produces),
+             "denominator": lg.denominator, "note": lg.note}
+            for lg in b.legs
+        ],
+        "tiers_with_no_leg": list(b.tiers_with_no_leg()),
+        "untiered_alert": dict(b.untiered_alert),
+        "unread_toast": dict(b.unread_toast),
+        # ★ 守恒账原样出去（判据 J3）：`rows` 是加得起来的式子，
+        #   `broken` 非空 ⇒ 这张表里的每个数都可能是错的。
+        "balance": b.balance,
         "citecheck_rc": info["citecheck_rc"],
         "void": info["void"],
         "generated_by": "output/lineC/report.py",

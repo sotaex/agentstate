@@ -46,6 +46,7 @@
 import html
 import os
 import sys
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -180,9 +181,51 @@ def _cite_html(c: E.Cite) -> str:
     return '<span class="cite">%s:%d</span>' % (_e(c.day), c.lineno)
 
 
+@dataclass(frozen=True)
+class Balance:
+    """渲染层的守恒账：**候选 ＝ 展示 ＋ 折叠 ＋ 合并 ＋ 不适用**（判据 J3／L2-2）。
+
+    ★ 为什么这一层必须自己有一本账（2026-11-03）：
+      上一版 `pick()` 把证据切成「显示 · 折叠」两堆，然后印一句「另有 N 条」。
+      N 是**说法**，不是**账**：读者没法核「N 加显示是不是等于候选」，
+      而这两件事一旦不相等，就说明有条目在渲染里消失了 ——
+      消失的条目不会报错，它只是不出现，而「不出现」与「本来就没有」同貌。
+
+    ★ 为什么还留着 `merged`／`not_applicable` 两个**在本层恒为 0** 的项：
+      如果把它们删掉，这个式子就变成「候选 ＝ 展示 ＋ 折叠」——
+      它永远成立（`shown + folded = evs[cap:] 与 evs[:cap]` 本来就是同一刀切出来的），
+      **恒成立的式子不是判据，是装饰**。
+      保留它们，是为了让**同一把式子**既能描述渲染层（两项为 0），
+      也能描述记账层（四项都有值，见 `verdict_leg.Survey.balance()`）。
+      ★ 记着这条：本层的 0 是「这一层不这么切」，不是「这里没有东西」。
+    """
+
+    candidates: int
+    shown: int
+    folded: int
+    merged: int = 0
+    not_applicable: int = 0
+
+    def total(self) -> int:
+        return self.shown + self.folded + self.merged + self.not_applicable
+
+    def closed(self) -> bool:
+        return self.total() == self.candidates
+
+    def line(self) -> str:
+        """一行人话。**必须带式子**，否则它只是三个各自成立的数。"""
+        s = ("候选 %d 条 ＝ 展示 %d ＋ 折叠 %d ＋ 合并 %d ＋ 不适用 %d"
+             % (self.candidates, self.shown, self.folded, self.merged,
+                self.not_applicable))
+        if not self.closed():
+            s += "（**对不上**：右边合计 %d，有 %d 条在渲染里消失了）" % (
+                self.total(), self.candidates - self.total())
+        return s.replace("**", "")
+
+
 def pick(evs: Sequence[E.Evidence], cap: int = DEFAULT_CAP
-         ) -> Tuple[List[E.Evidence], List[E.Evidence], str]:
-    """挑出这一页要显示的 N 条。返回 `(显示, 折叠, 取舍规则说明)`。
+         ) -> Tuple[List[E.Evidence], List[E.Evidence], Balance]:
+    """挑出这一页要显示的 N 条。返回 `(显示, 折叠, 守恒账)`。
 
     ★ 裁量必须自报。方案书 §5.4 要求「交付我们看见了什么」，但如果悄悄砍掉
       15 条只留 5 条，读者会以为「就这 5 件事」——那是用排版制造错觉。
@@ -194,16 +237,30 @@ def pick(evs: Sequence[E.Evidence], cap: int = DEFAULT_CAP
     """
     order = sorted(evs, key=lambda e: (PRIORITY.get(e.strength, 9), e.eid))
     shown, folded = order[:cap], order[cap:]
-    if not folded:
-        rule = "全部 %d 条都在这一页（未折叠）" % len(shown)
-    else:
-        rule = (
-            "共 %d 条，这里显示 %d 条、折叠 %d 条。排序规则：按结论强度"
-            "（挡下 → 提醒 → 已发现无法处置 → 已记录未判定 → 已核对），"
-            "同强度按证据 id 字典序。折叠的不代表不重要，只代表这一页放不下。"
-            % (len(evs), len(shown), len(folded))
-        )
-    return shown, folded, rule
+    bal = Balance(candidates=len(evs), shown=len(shown), folded=len(folded))
+    return shown, folded, bal
+
+
+def account_rule(bal: Balance) -> str:
+    """「按什么砍的」这句话。**排序序列从 `PRIORITY` 现取，不许手写第二份。**
+
+    ★ 2026-11-03 修：这句话原来把五个档的中文词**手写**在字符串里
+      （「挡下 → 提醒 → 已发现无法处置 → 已记录未判定 → 已核对」）。
+      手写的第二份词表会漂 —— 改一个词的代价是「改一处漏一处」，
+      而漏的那一处读起来是对的（它只是旧词）。
+      现在从 `evidence.WORD` 与 `PRIORITY` 现取：改词表，这句话跟着变。
+      判据见 `jchecks.py` 的 J6（改 `WORD` 的中文值，页面必须跟着变）。
+    """
+    seq = " → ".join(E.WORD[k] for k in
+                     sorted(E.WORD, key=lambda k: PRIORITY.get(k, 9)))
+    if not bal.folded:
+        return "全部 %d 条都在这一页（未折叠）。%s" % (bal.shown, bal.line())
+    return (
+        "共 %d 条，这里显示 %d 条、折叠 %d 条。排序规则：按结论强度"
+        "（%s），同强度按证据 id 字典序。折叠的不代表不重要，只代表这一页放不下。"
+        "守恒：%s"
+        % (bal.candidates, bal.shown, bal.folded, seq, bal.line())
+    )
 
 
 def _ev_html(e: E.Evidence, corr: Optional["C.Correction"] = None) -> str:
@@ -292,11 +349,15 @@ def render(bundle: E.Bundle, *, cap: int = DEFAULT_CAP,
     才能验出「不完整时页脚会明说」——否则那条分支永远是没跑过的代码。
     """
     by = bundle.by_strength()
-    n_need = sum(len(by.get(k, [])) for k in (E.K_HELD, E.K_ALERT, E.K_NO_RESPONSE))
+    # ★ 2026-11-03：这个数原来在这里**又列了一遍三档**（`K_HELD, K_ALERT, K_NO_RESPONSE`），
+    #   而 `evidence.NEED_TIERS` 已经声明过一次。两处声明一定会漂，而漂了以后
+    #   页面上那个数仍然是个正经数字 —— 没有人会发现它少算了一档。
+    #   现在只读唯一声明处：加一档只需改 `NEED_TIERS`，这里自动跟上。
+    n_need = sum(len(by.get(k, [])) for k in E.NEED_TIERS)
     n_log = len(by.get(E.K_LOG_ONLY, []))
     n_chk = len(by.get(E.K_CHECKED, []))
 
-    shown, folded, rule = pick(bundle.evidence, cap)
+    shown, folded, bal = pick(bundle.evidence, cap)
 
     parts: List[str] = []
     parts.append("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">")
@@ -360,7 +421,8 @@ def render(bundle: E.Bundle, *, cap: int = DEFAULT_CAP,
     # ---- 正文 ----
     if shown:
         parts.append("<h2>这次看见了什么</h2>")
-        parts.append('<div class="note" style="margin-bottom:10px">%s</div>' % _e(rule))
+        parts.append('<div class="note" style="margin-bottom:10px">%s</div>'
+                     % _e(account_rule(bal)))
         parts.extend(
             _ev_html(e, resolved.superseded.get(e.eid) if resolved else None)
             for e in shown)
@@ -447,6 +509,32 @@ def render(bundle: E.Bundle, *, cap: int = DEFAULT_CAP,
         parts.append('<div class="note">被更正的条目<b>仍然显示在上文</b>，'
                      '只加了删除线与说明。报告不改旧内容——'
                      '改过的错会让人怀疑全部记录。</div>')
+
+    # ---- 守恒账（记账层，判据 J3／L2-2）----
+    # ★ 为什么要有这一节：首屏那几个数字（结论／需要你看一眼／只是记录／
+    #   账本自洽检查）各自都对，但它们**加不起来** —— 加不起来的数不是分母，
+    #   是一句注释。产品侧同款式子早就在（`host_shield.py` 的
+    #   `total == used + dup + merged`），C 线这边一直只有一句「另有 N 条」。
+    # ★ 数字**原样来自第三只腿**（`bundle.balance`），本层不重算：
+    #   重算就是第二套尺子，两套尺子守同一件事，其中一套必然漂。
+    _rows = (bundle.balance or {}).get("rows") or []
+    if _rows:
+        parts.append("<h2>守恒账（每个数都加得起来）</h2>")
+        parts.append('<div class="rows">')
+        for r in _rows:
+            formula = ("候选 %d ＝ 进证据 %d ＋ 合并 %d ＋ 不适用 %d"
+                       % (r.get("candidates", 0), r.get("into_evidence", 0),
+                          r.get("merged", 0), r.get("not_applicable", 0)))
+            if r.get("untiered"):
+                formula += " ＋ 无档可落 %d" % r["untiered"]
+            parts.append('<div class="row"><span class="k">%s</span>'
+                         '<span>%s</span></div>'
+                         % (_e(r.get("name", "")), _e(formula)))
+        parts.append("</div>")
+        parts.append('<div class="note">「合并」是同一条带内多条记录并成一个结论'
+                     '（簇里仍带原始条数）；「不适用」是产品侧判为结构上不是事件的；'
+                     '「无档可落」是读到了、但现有各档都装不下。'
+                     '三者都不是「没有」——它们各自有各自的意思。</div>')
 
     # ---- 页脚 ----
     parts.append('<div class="footer">')
@@ -595,6 +683,49 @@ def _selfcheck() -> int:
     if "折叠 7 条" not in hm or "排序规则" not in hm:
         fails.append("折叠了却没自报「砍了哪些、按什么砍」")
 
+    # ---- 守恒账（判据 J3／L2-2，2026-11-03 新增）----
+    # ★ 12 条证据、cap 5 ⇒ 式子必须是 5 + 7 = 12，且**印在页面上**。
+    #   只断言「有折叠」是不够的：那句「另有 7 条」是说法，不是账。
+    if "候选 12 条 ＝ 展示 5 ＋ 折叠 7" not in hm:
+        fails.append("页面上没有守恒式（候选＝展示＋折叠）—— "
+                     "「另有 N 条」是说法，不是账")
+    # 负控：**故意吞掉一条**（候选 12、显示+折叠 11），式子必须自己喊对不上
+    _short = Balance(candidates=12, shown=5, folded=6)
+    if _short.closed():
+        fails.append("守恒负控失效：12 ≠ 5+6 竟被判为闭合")
+    if "对不上" not in _short.line():
+        fails.append("守恒破裂却没在那一行里说出来：%r —— "
+                     "它会把「丢了一条」印成一个正常的式子" % (_short.line(),))
+    # 记账层：`bundle.balance` 里的式子必须**原样**出现在页面上（本层不重算）
+    b_acc = E.Bundle(read_at="t", root="")
+    b_acc.balance = {"rows": [{"band": "gate", "name": "裁决面（停下等人）",
+                               "candidates": 49, "into_evidence": 6,
+                               "merged": 27, "not_applicable": 16,
+                               "untiered": 0}], "broken": []}
+    h_acc = render(b_acc)
+    if "候选 49 ＝ 进证据 6 ＋ 合并 27 ＋ 不适用 16" not in h_acc:
+        fails.append("记账层守恒式没有原样印出来 —— 读者只能相信，不能核对")
+    # 负控：把这一行改坏（候选与右边不等），本层**不许**替它圆场
+    b_bad = E.Bundle(read_at="t", root="")
+    b_bad.balance = {"rows": [{"band": "gate", "name": "裁决面（停下等人）",
+                               "candidates": 99, "into_evidence": 6,
+                               "merged": 27, "not_applicable": 16,
+                               "untiered": 0}], "broken": ["对不上"]}
+    if "候选 99 ＝ 进证据 6 ＋ 合并 27 ＋ 不适用 16" not in render(b_bad):
+        fails.append("记账层式子被渲染层改写了 —— 两个数各说一套，读者无从判断")
+
+    # ---- 排序序列不许手写第二份词表（J6 的同一件事）----
+    # ★ 2026-11-03：`account_rule` 原来把五个中文档名**手写**在字符串里。
+    #   手写的第二份词表会漂，而漂了以后读起来是对的（它只是旧词）。
+    #   负控：改 `E.WORD` 的中文值，这句话必须跟着变。
+    _old = E.WORD[E.K_HELD]
+    try:
+        E.WORD[E.K_HELD] = "（测试用词）"
+        if "（测试用词）" not in account_rule(Balance(3, 2, 1)):
+            fails.append("排序序列写死了中文档名 —— 改词表它不跟着变（第二份词表）")
+    finally:
+        E.WORD[E.K_HELD] = _old
+
     # 折叠的条目**也必须带齐契约属性** —— 否则 report.produce 会以
     # 「渲染丢了 N 条」拒绝落盘（真账本一旦超过 cap 就再也出不来报告）。
     # 实测 2026-11-01：端到端负控 e2／e3 同时红才撞出来，5 条以内永远看不到。
@@ -741,11 +872,13 @@ def _selfcheck() -> int:
         print("[自检失败] %s" % f, file=sys.stderr)
     if fails:
         return 1
-    print("[自检] 二十条全部生效（契约属性／零与不可判／首屏／盲区不折叠／转义／"
+    print("[自检] 二十六条全部生效（契约属性／零与不可判／首屏／盲区不折叠／转义／"
           "裁量自报／折叠条目也带出处／被更正条目仍在／作废横幅在首屏／反向指认／"
           "指纹在页脚／指纹值真等于现算／残缺即明说不完整／WARN 不印成通过／"
           "不适用≠没跑成／0 条必须落进四种归因／没腿的空账本不许说「查了没有」／"
-          "整句盲区不许印两遍／产物无星号／折叠样本无星号）")
+          "整句盲区不许印两遍／产物无星号／折叠样本无星号／"
+          "守恒式印在页面上／守恒破裂必须喊对不上／记账层式子原样印出／"
+          "记账层式子不许被改写／排序序列不写死词表／排序序列跟着 WORD 变）")
     return 0
 
 

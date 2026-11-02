@@ -35,6 +35,7 @@ LINEC = os.path.join(HERE, "lineC")
 sys.path.insert(0, LINEC)
 
 import auditor as A  # noqa: E402
+import evidence as E  # noqa: E402
 import report as R  # noqa: E402
 
 RESULTS = []
@@ -193,11 +194,32 @@ def e1_clean_explains_zero():
     _ATTRS = ("查了，没有", "没有任何一条腿去读", "没跑成", "说不出")
     if not any(m in html for m in _ATTRS):
         return False, "「需要你看一眼 0 条」没给出四种归因之一 —— 读者会读成没事"
-    # 更强的断言（这条是**当前真话**，不是文案）：干净账本上「提醒」这一档
-    # 仍然没有腿读 ⇒ 报告必须说出来。否则那个 0 会被读成「今天没有提醒」。
-    if "没有任何一条腿去读" not in html:
-        return False, ("「提醒」这一档今天没有腿读，报告却没说出来 —— "
-                       "这个 0 会被读成「今天没有提醒」")
+    # ★★ 2026-11-03 改：这条臂原来断言「页面必须说『没有任何一条腿去读』」。
+    #   那句话在**当时**是真的（提醒面确实没有腿读），但它被写成了行为判据
+    #   ⇒ 提醒面接上之后，它会立刻报红，**而红的方向是「不许把腿接上」**。
+    #   这正是 9.8 那条教训的第二次现形：判据守的是「昨天的现状」，不是纪律。
+    #   真正的纪律是：**归因必须与腿的实际覆盖一致** ——
+    #     有档没腿 ⇒ 必须说没腿读，并点名是哪一档；
+    #     三档都有腿 ⇒ 必须说「查了，没有」，且**不许**再说没腿读。
+    #   ⇒ 现取一遍 bundle 判它该说哪句，不写死。
+    _b = E.collect(root)
+    _no_leg = _b.tiers_with_no_leg()
+    if _no_leg:
+        if "没有任何一条腿去读" not in html:
+            return False, ("有档没腿读（%s），报告却没说 —— "
+                           "那个 0 会被读成「今天没有」"
+                           % "、".join(E.WORD[t] for t in _no_leg))
+        for _t in _no_leg:
+            if E.WORD[_t] not in html:
+                return False, ("没腿读的那一档没被点名（%s）—— "
+                               "只说「有一条腿没读」，读者不知道该信哪一格"
+                               % E.WORD[_t])
+    else:
+        if "没有任何一条腿去读" in html:
+            return False, ("三档都有腿读了，报告却说「没有任何一条腿去读」—— "
+                           "归因过期，它已经变成一句自我安慰")
+        if "查了，没有" not in html:
+            return False, "三档都有腿读且读到 0 条，报告却没说「查了，没有」"
     # ★ 2026-11-02 加：0 条不许被说成「都没有发现变化」。
     #   实测撞出：有证据时（n_need=0）报告说「这一层的判据还没接上」，
     #   0 证据时说「两条检查都跑成了，都没有发现变化」—— **同一个 0 两种相反归因**。
