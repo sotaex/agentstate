@@ -769,7 +769,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--ledger", default=DEFAULT_PATH)
     ap.add_argument("--selfcheck", action="store_true")
     ap.add_argument("--dump", action="store_true", help="打印账本现状")
-    ap.add_argument("--ack", metavar="KEY", help="标记某条为「已确认」，永久静默")
+    ap.add_argument(
+        "--ack",
+        metavar="KEY",
+        help="我说这条我看过了（**不是系统检测到你看了**）—— 从此永久静默，"
+             "直到它的内容变化。系统无法验证你是不是真的看过，"
+             "所以它只记录「你说过」，不记录「你看过」。",
+    )
     ap.add_argument("--ack-all", action="store_true", help="全部标记为已确认")
     args = ap.parse_args(argv)
 
@@ -816,11 +822,23 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.dump:
         ents = led.get("entries") or {}
         print("账本 %s｜条目 %d｜更新 %s" % (args.ledger, len(ents), led.get("updated_at")))
+        # ★ 指纹列（v3 遗留项，2026-11-03 补）：人工核对时最常问的两件事是
+        #   「这条我确认过了吗」和「它变了没有」—— 而后者只有指纹能答。
+        #   分开印 `fp`（当前内容指纹）与 `ack`（确认时记下的那个）：
+        #   两者**不等**就是「确认之后内容变了」，也就是它会重新开口。
+        #   只印一个数，读者没法自己判断这件事，只能信我们说的。
+        print("  %-8s %-8s %-40s 见 说 顺延 静默至"
+              % ("指纹", "确认时", "身份"))
         for k, e in sorted(ents.items(), key=lambda kv: -(kv[1].get("n_seen") or 0)):
-            print("  %-46s 见 %2d 次｜说 %2d 次｜顺延 %d｜静默至 %s｜%s"
-                  % (k[:46], e.get("n_seen", 0), e.get("n_told_total", 0),
-                     e.get("n_deferred", 0), e.get("muted_until") or "—",
-                     e.get("subject", "")[:28]))
+            _fp = str(e.get("fingerprint") or "—")[:8]
+            _afp = str(e.get("acked_fingerprint") or "—")[:8]
+            # 两个都在、且不相等 ⇒ 确认之后内容变过。用一个记号点出来。
+            _mark = "≠" if (e.get("fingerprint") and e.get("acked_fingerprint")
+                            and e.get("fingerprint") != e.get("acked_fingerprint")) else " "
+            print("  %-8s %s%-8s %-40s %2d %2d %2d %s"
+                  % (_fp, _mark, _afp, k[:40], e.get("n_seen", 0),
+                     e.get("n_told_total", 0), e.get("n_deferred", 0),
+                     e.get("muted_until") or "—"))
         return 0
 
     print("用法：--selfcheck｜--dump｜--ack KEY｜--ack-all")

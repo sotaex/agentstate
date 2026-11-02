@@ -88,6 +88,15 @@ SHIELD_TYPES = frozenset((
     "host_shield_heartbeat",
 ))
 
+#: ★ 心跳**不算「守不住」**（2026-11-03 定口径）。
+#:
+#:   它在 `SHIELD_TYPES` 里，因为它是宿主盾自检事件的一种，要能按前缀认出来；
+#:   但它写的是「**我在岗**」——把它算进「守不住」会让分母从 63 涨到 227，
+#:   而多出来的 164 条恰恰是守卫**正常运行**的证据。
+#:   「守不住」要数的是「本该守着却没守住」，不是「守了多少次」。
+#:   这两种数混在一起，会让「守卫一直在岗」看起来像「出过 164 次事」。
+SHIELD_HEARTBEAT = "host_shield_heartbeat"
+
 #: 这两个强度档与 `evidence.py` 的 K_* 一一对应。
 #: **不在这里定义新词表** —— 中文措辞由 evidence.WORD 统一持有（铁律 R4）。
 K_HELD = "held"
@@ -318,7 +327,20 @@ class Survey:
     #:   ⇒ **只计数、不装档**，并在归因句与盲区里说出来。要给它一个档，
     #:     得创始人拍板（D-5）——分档就是替人做产品判断。
     untiered_alert: Dict[str, int] = field(default_factory=dict)
-    #: ★ 账本里的「漏读面」：raw decision 不在本腿读的那几个取值上、    #:   但产品侧会把它派生/升级成 alert 的记录数。
+    #: 同一批「无档可落」记录**按身份**的明细：`{type: {身份: 条数}}`。
+    #:
+    #:   ★ 为什么计数还不够（2026-11-03 实测）：302 条 `host_changed` 逐条看下去
+    #:     只有两个身份 —— `5.9.3→5.9.4` 152 次、`5.9.4→5.9.3` 150 次，
+    #:     同一会话、同一天。**这是一次版本抖动被记了 302 次，不是 302 件事。**
+    #:     只印「302 条」，读者会以为宿主被改了 302 回；而真实情况是
+    #:     「宿主版本在两个值之间反复横跳」——这是**一个**需要处理的事实。
+    #:   ⇒ 计数之外必须给身份明细。归属判据不看频次，看**这条记录在说哪件事**。
+    #:     这是铁律 35／39（记录 ≠ 事件；原始条数不丢）在这里的第二次现形。
+    #:   ★ 产品侧可以更彻底地修（同一 `(from,to)` 短时间内不重复写），
+    #:     但那是产品代码；本腿只负责**不说谎**。
+    untiered_detail: Dict[str, Dict[str, int]] = field(default_factory=dict)
+    #: ★ 账本里的「漏读面」：raw decision 不在本腿读的那几个取值上、
+    #:   但产品侧会把它派生/升级成 alert 的记录数。
     #:
     #:   ★ 为什么必须数它：本腿按账本里的 `decision` **字段取值**筛记录，
     #:     而产品侧的 `decision_of()` 会拿 `action`+`severity` **重新派生**
@@ -337,6 +359,21 @@ class Survey:
     #:     属产品词表，须创始人拍板（DEC-27 的 D-3）。计数不是档。
     n_shield_gate: int = 0
     n_shield_alert: int = 0
+    #: 「守不住」这类事件的**全量**，已排除心跳。
+    #:
+    #:   ★ 为什么需要它（2026-11-03 实测，这是「守不住」一栏此前**低报 20 倍**的原因）：
+    #:     11-02 账本里 `host_shield_*` 共 227 条，去掉 164 条心跳，是 **63 条**真事件。
+    #:     而 `n_shield_gate + n_shield_alert` 只报 **3 条** —— 差的 60 条
+    #:     （`revived` 37 ＋ `state_unreadable` 23）是 `decision=allow`，
+    #:     既不进 gate 带也不进 alert 带，于是**一条腿都不数它们**。
+    #:     ★ 但它们并非「该读没读」：产品侧 `notify_policy.explain()` 明确判
+    #:       `face=none`（结构上不通知人）。所以正确的说法不是「漏读」，
+    #:       而是「**读到了、产品侧判不通知**」——两句话指向完全不同的责任方。
+    #:   ⇒ 一栏必须写两个数：该通知你的 / 产品侧判不通知的。只写前者，
+    #:     会让「宿主盾一天只在岗 3 次」变成一个看起来正常的读数。
+    #:   ★ 心跳不算「守不住」：它是「我在岗」的信号，把它算进去会让分母
+    #:     从 63 涨到 227，而多出来的 164 条恰恰是**守卫正常运行**的证据。
+    n_shield_all: int = 0
     #: **本腿没读**的「出声」档记录数，按 decision 取值分开记。
     #:
     #: ★ 为什么必须有这个字段：C 线一页纸有一格叫「提醒」。它由 `alert`
@@ -374,8 +411,22 @@ class Survey:
         ★ 这是**一个计数，不是一档**（见 `n_shield_gate` 的注释）。
           它与「挡下」共用同一批记录 ⇒ 两个数**不许相加**，
           也不许拿它去和簇数相除（分母不同）。
+        ★ 2026-11-03：它只是「该通知你的」那一半。全量见 `n_shield_all`，
+          两半之差见 `shield_silent()` —— **不许把这三者混用**。
         """
         return self.n_shield_gate + self.n_shield_alert
+
+    def shield_silent(self) -> int:
+        """读到了、但产品侧判不通知的「守不住」事件条数。
+
+        ★ 它不是「漏读」：这些记录本腿读到了，产品侧 `notify_policy.explain()`
+          判 `face=none`（结构上不通知人）。区别很重要 ——
+          「没读」是我们的问题，「产品侧判不通知」是产品判断。
+          把它说成漏读，会让人去修一个不存在的东西。
+        ★ 不 clamp 到 0：万一算成负数，页面上会出现「-1 条」——
+          那是显眼异常，比静默抹平成 0 好。自检 「守不住 两半相加等于全量」守着这件事。
+        """
+        return self.n_shield_all - self.n_shield_gate - self.n_shield_alert
 
     def balance(self) -> Dict[str, Any]:
         """守恒账：**每条读到的记录都要在等号右边出现一次，不许有黑洞。**
@@ -486,6 +537,50 @@ def rule_ids_of(rec: Dict[str, Any]) -> List[str]:
     return seen
 
 
+def untiered_identity(rec: Dict[str, Any]) -> str:
+    """一条「无档可落」的记录在说**哪件事**（用于把 302 条还原成 1 件事）。
+
+    ★ 判据只认**记录自己带着的身份字段**，不猜：
+        · `from_version` / `to_version` —— 宿主版本变化事件的真实身份。
+          实测 11-02：302 条只有两个身份（`5.9.3→5.9.4` 152、`5.9.4→5.9.3` 150）。
+          两个身份交替出现 = **同一个抖动**，不是 302 件独立的事。
+        · 没有版本字段就退回 `reason` 前 40 字 —— 宁可退到「粗一点的同义」，
+          也不要退到「用 type 当身份」（那等于说「这一天所有同类事件是一件事」，
+          会把 302 说成 1，方向正相反、同样撒谎）。
+        · 两者都没有 ⇒ 返回空串，调用方按「无身份」处理，**不许静默并进一桶**。
+    """
+    fv = str(rec.get("from_version") or "")
+    tv = str(rec.get("to_version") or "")
+    if fv or tv:
+        return "%s→%s" % (fv or "?", tv or "?")
+    rsn = str(rec.get("reason") or "").strip()
+    if rsn:
+        return rsn[:40]
+    return ""
+
+
+def _repeat_note(detail: Dict[str, int]) -> str:
+    """「这么多条其实只有几个身份」时补一句。
+
+    ★ 为什么必须在分母里补（2026-11-03）：实测 302 条 `host_changed` 只有 2 个身份。
+      只印「302 条」，读者会以为发生了 302 件事；而「302 条记录、2 个身份、
+      来回交替」说的是**一个**事实：宿主版本在抖。
+      **条数是账本的行数，件数是有几个身份** —— 这两个数都要给，
+      只给一个都会让读者算出错误的严重度。
+    ★ 阈值为什么是 `n >= 10 且身份 <= 2`：
+      不是从数据拟合出来的，是「只有极少数身份却有很多条」这个形状本身。
+      身份数 3 以上时不补 —— 那时「多」是真的多，不该被一句话抹平。
+    ★ 只对**无档可落**的那批用：进簇的记录已经有 `n_records/n_actions` 两个口径了。
+    """
+    n = sum(detail.values())
+    if n < 10 or len(detail) > 2:
+        return ""
+    parts = "、".join("%s %d 次" % (k, v)
+                     for k, v in sorted(detail.items(), key=lambda kv: -kv[1]))
+    return ("｜其中 %d 条只有 %d 个身份（%s）⇒ 是同一件事被记了 %d 次，"
+            "不是 %d 件事" % (n, len(detail), parts, n, n))
+
+
 def _day_files(root: str, day: str) -> List[str]:
     p = os.path.join(root, day + ".jsonl")
     return [p] if os.path.exists(p) else []
@@ -573,7 +668,10 @@ def survey(root: str, *, day: str = "", as_of: str = "",
     n_escalated_unread = 0
     n_shield_gate = 0
     n_shield_alert = 0
+    n_shield_all = 0
+    n_shield_heartbeat = 0
     untiered_alert: Dict[str, int] = {}
+    untiered_detail: Dict[str, Dict[str, int]] = {}
     unread_toast: Dict[str, int] = {}
     seen_days: List[str] = []
 
@@ -591,6 +689,17 @@ def survey(root: str, *, day: str = "", as_of: str = "",
                     continue
                 if not isinstance(rec, dict):
                     continue
+                # ★ 「守不住」的全量计数必须放在**所有 continue 之前**（2026-11-03）。
+                #   放在下面任何一处都会漏掉一类：实测 60 条（revived 37 ＋
+                #   state_unreadable 23）是 decision=allow，走 `else` 分支直接 continue，
+                #   于是「守不住」只报 3 条 —— **低报 20 倍，而页面上没有任何一处会红**。
+                #   这正是「分母错的时候页面不会报错，它只会把 63 说成 3」（铁律 22）。
+                _tx = str(rec.get("type") or "")
+                if _tx in SHIELD_TYPES:
+                    if _tx == SHIELD_HEARTBEAT:
+                        n_shield_heartbeat += 1
+                    else:
+                        n_shield_all += 1
                 dec = rec.get("decision")
                 # ★ 2026-11-03：读两面。**选面只看账本字段取值，分档才问产品侧**。
                 #   两面各有自己的原始条数分母 —— 合成一个数就是 F40。
@@ -650,6 +759,14 @@ def survey(root: str, *, day: str = "", as_of: str = "",
                         #   ★ 它**不是「落桶」**：落桶意味着「被装进某一档」。
                         t0 = str(rec.get("type") or "（无 type）")
                         untiered_alert[t0] = untiered_alert.get(t0, 0) + 1
+                        # ★ 计数之外记**身份**（2026-11-03）：只印「302 条」会让
+                        #   读者以为宿主被改了 302 回，而它是**同一个抖动**被记了 302 次。
+                        #   身份判据见 `untiered_identity()` —— 只认记录自带的字段，
+                        #   不许拿 type 当身份（那会把 302 说成 1，方向相反、同样撒谎）。
+                        _ident0 = untiered_identity(rec)
+                        if _ident0:
+                            _dm = untiered_detail.setdefault(t0, {})
+                            _dm[_ident0] = _dm.get(_ident0, 0) + 1
                         continue
                     n_toast += 1
                     n_alert_bucketed += 1
@@ -715,9 +832,11 @@ def survey(root: str, *, day: str = "", as_of: str = "",
         n_alert_non_event=n_alert_non_event,
         n_alert_bucketed=n_alert_bucketed,
         untiered_alert=dict(untiered_alert),
+        untiered_detail={k: dict(v) for k, v in untiered_detail.items()},
         n_escalated_unread=n_escalated_unread,
         n_shield_gate=n_shield_gate,
         n_shield_alert=n_shield_alert,
+        n_shield_all=n_shield_all,
         unread_toast=dict(unread_toast),
         clusters=list(by_key.values()),
     )
@@ -761,14 +880,36 @@ def survey(root: str, *, day: str = "", as_of: str = "",
         + ("（%s）" % "、".join("%s %d" % (k, v)
                              for k, v in sorted(untiered_alert.items()))
            if untiered_alert else "")
+        # ★ 2026-11-03：**「无档可落」还要说清它是几件事**。
+        #   302 条 `host_changed` 只有两个身份（`5.9.3→5.9.4` 152、
+        #   `5.9.4→5.9.3` 150），是同一个版本抖动被记了 302 次。
+        #   只印 302，读者会以为宿主被改了 302 回；而真实情况是
+        #   「它一直在两个版本之间来回横跳」——那是**一个**要处理的事实。
+        + "".join(_repeat_note(untiered_detail[t])
+                  for t in sorted(untiered_detail))
     )
     # ★ 守不住单独一条分母（J5／L2-3）：**不是新增一档，是新增一个计数**。
     #   它与「挡下」共用同一批记录，所以两个数相加没有任何意义 ——
     #   写在这里就是为了让读者知道它们**不许相加**。
+    #
+    # ★★ 2026-11-03 改成**两栏**（此前只印进簇的那 3 条，低报了 20 倍）：
+    #   11-02 实测：`host_shield_*` 227 条 → 去掉 164 条心跳 → **63 条**真事件。
+    #   其中进簇 3 条（`breach` 1 ＋ `dev_drift` 2），其余 60 条
+    #   （`revived` 37 ＋ `state_unreadable` 23）是 `decision=allow`，
+    #   两条带都不收 ⇒ 一条腿都不数它们 ⇒ 页面上写「守不住 3 条」。
+    #   而这 60 条**不是漏读**：产品侧 `notify_policy.explain()` 判 `face=none`
+    #   （结构上不通知人）。所以正确说法是「读到了、产品侧判不通知」，
+    #   不是「没人读」—— 两句话指向的责任方完全不同（见 J4 的三态判据）。
+    #   ⇒ 一栏写两个数。只写「该通知你的 3 条」，会让「宿主盾今天只在岗 3 次」
+    #     变成一个看起来完全正常的读数。
     s.denominators["守不住"] = (
-        "宿主盾自检事件（守卫自己不在岗／状态异常）gate %d 条｜alert %d 条"
+        "宿主盾自检事件（守卫自己不在岗／状态异常）全量 %d 条（已排除 %s %d 条心跳）"
+        "｜该通知你的 %d 条（gate %d、alert %d）"
+        "｜读到了但产品侧判不通知的 %d 条（自愈、状态探不到等）"
         "｜这类记录与「有规则号的命中」共用同一批账本记录，两个数不许相加"
-        % (n_shield_gate, n_shield_alert)
+        % (n_shield_all, SHIELD_HEARTBEAT, n_shield_heartbeat,
+           n_shield_gate + n_shield_alert, n_shield_gate, n_shield_alert,
+           s.shield_silent())
     )
     s.denominators["账本日文件"] = (
         "日文件 %d 个（%s .. %s）"
@@ -1086,12 +1227,99 @@ def _selfcheck() -> int:
        "alert 带里的无规则号簇没被拦下 —— 它会印成「提醒」，"
        "而「提醒」的定义是有规则命中")
 
+    # ── 14. 守不住两栏：全量必须覆盖**所有分流路径**（2026-11-03 新增）───
+    # ★ 为什么必须真跑一遍 survey，而不是构造一个 Survey 验算术：
+    #   这一栏此前低报 20 倍（63 说成 3）的根因**不在算术**，在**计数点位置** ——
+    #   它原来写在「分流进哪条带」之后，于是 `decision=allow` 的 60 条
+    #   在 `else: continue` 里就消失了，一条腿都没数过它们。
+    #   构造 Survey 只能验「全量 - 进簇 = 不通知」这个减法，而那个减法
+    #   **永远成立**（silent 就是减出来的）⇒ 构造法在这里是一条
+    #   永远清白的判据，与真判据同貌（假绿第十四族）。
+    # ⇒ 必须喂一份**造出来的账本**，让真正的分流代码跑过那三种取值。
+    import shutil
+    import tempfile
+    _sd = tempfile.mkdtemp(prefix="vl-shield-")
+    try:
+        _srecs = [
+            # ① gate 带、带规则号 ⇒ 归「挡下」，不是守不住
+            {"ts": "2026-01-01T10:00:00+08:00", "type": "pre_tool_use",
+             "decision": "block", "session": "s1", "rules_hit": ["AN-009"]},
+            # ② gate 带、无规则号 ⇒ 进簇，且算「该通知你的」
+            {"ts": "2026-01-01T10:01:00+08:00", "type": "host_shield_breach",
+             "decision": "deny", "session": "s2", "severity": "warning"},
+            # ③ allow + 心跳 ⇒ **不算守不住**（它写的是「我在岗」）
+            {"ts": "2026-01-01T10:02:00+08:00", "type": "host_shield_heartbeat",
+             "decision": "allow", "session": "", "severity": "none"},
+            # ④ allow + 自愈 ⇒ 算全量，但不进任何带（产品侧判 face=none）
+            {"ts": "2026-01-01T10:03:00+08:00", "type": "host_shield_revived",
+             "decision": "allow", "session": "", "severity": "warning"},
+            # ⑤ allow + 状态探不到 ⇒ 同上
+            {"ts": "2026-01-01T10:04:00+08:00",
+             "type": "host_shield_state_unreadable",
+             "decision": "allow", "session": "", "severity": "warning"},
+        ]
+        with open(os.path.join(_sd, "2026-01-01.jsonl"), "w",
+                  encoding="utf-8") as _fh:
+            for _r in _srecs:
+                _fh.write(json.dumps(_r, ensure_ascii=False) + "\n")
+        _sv = survey(_sd, day="2026-01-01")
+        ck(_sv.n_shield_all == 3,
+           "守不住全量应为 3 条（breach＋revived＋state_unreadable，心跳不算），"
+           "实际 %d —— 计数点没覆盖 allow 分支（这正是低报 20 倍的形状）"
+           % _sv.n_shield_all)
+        ck(_sv.n_shield_gate + _sv.n_shield_alert == 1,
+           "该通知你的应为 1 条（只有 breach 进簇），实际 %d"
+           % (_sv.n_shield_gate + _sv.n_shield_alert))
+        ck(_sv.shield_silent() == 2,
+           "读到了但产品侧判不通知的应为 2 条（revived＋state_unreadable），"
+           "实际 %d" % _sv.shield_silent())
+        ck(_sv.shield_silent() >= 0,
+           "不通知数成了负数 —— 进簇数大于全量，两栏用了不同分母")
+        # ★ 负控①：把心跳那一条改成 revived ⇒ 全量必须 +1（证明确实在数）
+        _srecs[2]["type"] = "host_shield_revived"
+        with open(os.path.join(_sd, "2026-01-01.jsonl"), "w",
+                  encoding="utf-8") as _fh:
+            for _r in _srecs:
+                _fh.write(json.dumps(_r, ensure_ascii=False) + "\n")
+        _sv2 = survey(_sd, day="2026-01-01")
+        ck(_sv2.n_shield_all == _sv.n_shield_all + 1,
+           "把心跳改成真事件后全量没涨 —— 心跳的排除逻辑写反了（%d → %d）"
+           % (_sv.n_shield_all, _sv2.n_shield_all))
+        # ★ 负控②：把 breach 的 decision 改成 alert ⇒ 它应从「该通知」挪到
+        #   「产品侧判不通知」，但**全量不变**（同一件事不该因为换了条带就消失）
+        _srecs[1]["decision"] = "alert"
+        with open(os.path.join(_sd, "2026-01-01.jsonl"), "w",
+                  encoding="utf-8") as _fh:
+            for _r in _srecs:
+                _fh.write(json.dumps(_r, ensure_ascii=False) + "\n")
+        _sv3 = survey(_sd, day="2026-01-01")
+        ck(_sv3.n_shield_all == _sv2.n_shield_all,
+           "换了一条带之后全量变了 —— 全量必须与带无关")
+    finally:
+        shutil.rmtree(_sd, ignore_errors=True)
+
+    # ── 15. 「302 条」必须说清是「几件事」（2026-11-03 新增）───
+    # ★ 守的是 D-5：302 条 `host_changed` 只有两个身份（5.9.3→5.9.4 152、
+    #   5.9.4→5.9.3 150），是**一次版本抖动被记了 302 次**。
+    #   只印条数，读者会把「宿主版本在抖」读成「宿主被改了 302 回」。
+    _shake = _repeat_note({"5.9.3→5.9.4": 152, "5.9.4→5.9.3": 150})
+    ck("2 个身份" in _shake and "302 次" in _shake,
+       "抖动说明没同时说出身份数与条数：%r" % (_shake,))
+    ck(_repeat_note({"a": 10, "b": 10, "c": 10}) == "",
+       "三个身份时不该说成「同一件事」—— 那时「多」是真的多")
+    ck(_repeat_note({"a": 5, "b": 4}) == "",
+       "只有 9 条时不该补这句 —— 阈值失效，会把小数目也说成抖动")
+    ck(_repeat_note({}) == "", "空明细不该补这句")
+    # ★ 单身份也要补：「40 条只有 1 个身份」同样是「一件事被记了 40 次」。
+    ck("1 个身份" in _repeat_note({"x": 40}),
+       "单个身份时也必须说清「这是同一件事」—— 否则 40 条会被读成 40 件")
+
     if fails:
         print("自检失败 %d 项：" % len(fails))
         for f in fails:
             print("  ·", f)
         return 1
-    print("verdict_leg 自检：13 组全通过")
+    print("verdict_leg 自检：15 组全通过")
     return 0
 
 
@@ -1135,10 +1363,17 @@ def main() -> int:
             "n_alert_non_event": s.n_alert_non_event,
             "n_alert_bucketed": s.n_alert_bucketed,
             "untiered_alert": s.untiered_alert,
+            # ★ 「这些条是几件事」的身份明细（2026-11-03）。消费方要印
+            #   「302 条是同一件事被记了 302 次」，就只能从这里取，不许自己数。
+            "untiered_detail": s.untiered_detail,
             # ★ 漏读面：账本字段说「放行」、产品侧会升级成提醒的记录数。
             "n_escalated_unread": s.n_escalated_unread,
             "n_shield_gate": s.n_shield_gate,
             "n_shield_alert": s.n_shield_alert,
+            # ★ 2026-11-03：守不住一栏必须两半都给，否则消费方只能印进簇的 3 条，
+            #   而真事件是 63 条 —— 低报 20 倍且页面上不会红。
+            "n_shield_all": s.n_shield_all,
+            "n_shield_silent": s.shield_silent(),
             # ★ 本腿**没读**的出声档，按 decision 取值分开。
             "unread_toast": s.unread_toast,
             # ★ 守恒账：两条带各自的式子与破裂项。消费方要印就印，不许自己加。

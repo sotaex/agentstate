@@ -128,9 +128,23 @@ def _loads(line: str) -> Any:
     return json.loads(line)
 
 
-RULES_PATH = os.path.join("rules", "default.json")
+#: ★ 规则库路径用**文件自身位置**定位，不用 cwd（2026-11-03 修）。
+#:
+#:   原写法是相对路径 `rules/default.json` ⇒ 从 `output/lineC/` 里跑时**读不到**，
+#:   于是 `_CUR_IDS` 与 `_CUR_CAT` 双双为空 ⇒ 两处过滤**同时静默失效**：
+#:     · `non_rule` 不生效 ⇒ `OUT-01` 这类非规则号混进配对（N-04 的老毛病复发）
+#:     · 意图簇不生效   ⇒ `AN-001→AN-010` 这类噪声配对全部回来（N-05 复发）
+#:   实测（2026-11-03 04:5x）：从 `output/lineC` 跑，11-01 报 4 条且带 `OUT-01`；
+#:   从仓库根跑，报 3 条、`OUT-01` 被滤掉。**同一份代码、同一份账本，两个结果。**
+#:
+#:   ★ 它不报错、不警告，只是**多报** —— 而「多报」在报告里看起来像「检测器很灵敏」。
+#:     这是「配置缺失时的降级」最容易被读成正常的一种形状（铁律 22 的邻域）。
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_REPO = os.path.dirname(os.path.dirname(_HERE))
+RULES_PATH = os.path.join(_REPO, "rules", "default.json")
 _ALIAS: Dict[str, str] | None = None
 _CUR_IDS: set = set()
+_CUR_CAT: Dict[str, str] = {}
 
 
 def load_rule_ids(path: str = RULES_PATH) -> Tuple[Dict[str, str], set]:
@@ -155,10 +169,76 @@ def load_rule_ids(path: str = RULES_PATH) -> Tuple[Dict[str, str], set]:
     return alias, cur
 
 
+def load_rule_categories(path: str = RULES_PATH) -> Dict[str, str]:
+    """`id -> category`。**从规则库读，不手抄一份。**
+
+    实测 37 条规则全都带 `category`，取值 8 类：
+    `secrets`(10) / `destructive`(11) / `network`(4) / `injection`(4) /
+    `supply_chain`(5) / `context`(1) / `metadata`(1) / `canary`(1)。
+    """
+    import json
+
+    if not os.path.isfile(path):
+        return {}
+    with open(path, "r", encoding="utf-8") as fh:
+        data = json.load(fh)
+    out: Dict[str, str] = {}
+    for r in data.get("rules", []):
+        if isinstance(r, dict) and r.get("id") and r.get("category"):
+            out[str(r["id"])] = str(r["category"])
+    return out
+
+
+#: 规则的 `category` → **意图簇**。链只在同一簇内成立（2026-11-03，修 N-05）。
+#:
+#: ★ 这张表解决的是 N-05：`rule_pair` 原来只问「两条规则 5 分钟内先后响过」，
+#:   于是 `AN-001（读密钥配置）→ AN-010（写到项目目录之外）` 被报成一条链。
+#:   而它只是「先读了配置、后来又写了文件」——**两个不相干的动作**，
+#:   先后发生是必然的（两条规则各命中十几次以上，5 分钟内凑一起毫不稀奇）。
+#:
+#: ★ 为什么不用 `category_order` 当判据（先试过了，不行）：
+#:   它也排不出真假 —— `AN-002→AN-014`（真）与 `AN-001→AN-010`（噪声）
+#:   在 `category_order` 里**都是「前进」**（secrets 在 destructive 之前）。
+#:   序号先后说的是「显示顺序」，不是「这两步有没有因果关系」。
+#:
+#: ★ 判据不变量：**同一个意图下的两小步才算一条链。**
+#:     · probe（找信息）：读凭证／枚举环境变量／读元数据 —— 都是「在找」
+#:     · act（已出手）：破坏／外网／注入／供应链／蜜饵外发 —— 都是「动手了」
+#:   跨簇之间没有「因为所以」：找到钥匙，不等于要砸门。
+#:
+#: ★★ 样本量必须坦白：它由 **4 个配对（6 个实例）** 检验，3 真 1 假。
+#:    **这个量不足以证明它**，只够说「它把这 4 条分对了」。
+#:    要证伪它，需要的是下一批**新配对**：若出现「同簇却明显不相干」，
+#:    或「跨簇却真是链」，那是**分簇错**，不是数据噪声。
+#:    ⇒ 所以它写成**可改的表**而不是阈值：改表能说清改了什么，
+#:      改阈值改不出任何可陈述的东西（v4 §四 已用算术证明阈值无解）。
+#:
+#: ★ `canary` 归 act：它命中意味着「内容真的出去了」，是**已经发生的后果**，
+#:   与「在找信息」不是同一件事。归 probe 会让「读文件 → 蜜饵出现」被当成
+#:   一条侦察链，而那时外发已经完成了。
+_CHAIN_CLUSTER: Dict[str, str] = {
+    "secrets": "probe",
+    "context": "probe",
+    "metadata": "probe",
+    "destructive": "act",
+    "network": "act",
+    "injection": "act",
+    "supply_chain": "act",
+    "canary": "act",
+}
+
+
+def chain_cluster(rid: str) -> str:
+    """这条规则属于哪个意图簇；**查不到返回空串**（＝不参与链判定）。"""
+    _ensure_alias()
+    return _CHAIN_CLUSTER.get(_CUR_CAT.get(rid, ""), "")
+
+
 def _ensure_alias() -> None:
-    global _ALIAS, _CUR_IDS
+    global _ALIAS, _CUR_IDS, _CUR_CAT
     if _ALIAS is None:
         _ALIAS, _CUR_IDS = load_rule_ids()
+        _CUR_CAT = load_rule_categories()
 
 
 _LABELS: Dict[str, str] | None = None
@@ -784,6 +864,18 @@ def detect_rule_pairs(
         pair_days.items(), key=lambda kv: -sum(kv[1].values())
     ):
         if a in non_rule or bb in non_rule:
+            continue
+        # ★★ N-05（2026-11-03）：**跨意图簇的两步不算一条链。**
+        #   这一条守的是「这两步算不算一条链」，不是「凑得近不近」。
+        #   实测 4 个配对的判定（v4 金标准）：
+        #     AN-002(secrets)→AN-014(context)   同簇 probe  ⇒ 真   ✓
+        #     AN-014(context)→AN-005(secrets)   同簇 probe  ⇒ 真   ✓
+        #     AN-001(secrets)→AN-002(secrets)   同簇 probe  ⇒ 弱   ✓
+        #     AN-001(secrets)→AN-010(destructive) 跨簇     ⇒ 噪声 ✗（本轮滤掉的就是它）
+        # ★ 查不到簇时**不过滤**，与上面 `non_rule` 同一原则：
+        #   规则库缺项属于配置问题，宁可多报，不许因为配置缺失静默关掉一类线索。
+        _ca, _cb = chain_cluster(a), chain_cluster(bb)
+        if _ca and _cb and _ca != _cb:
             continue
         if solo[a] < min_each or solo[bb] < min_each:
             continue
@@ -1604,9 +1696,210 @@ def render(
     return "\n".join(lines)
 
 
+#: 哪些线索值得**主动弹到屏幕上**。目前只有一种。
+#:
+#: ★ 为什么只有 `rule_pair`（2026-11-03，D-4 落地时的取舍）：
+#:   · `held`（挡下）**不推**：产品侧在**拦截的那一刻**已经弹过了
+#:     （`host_shield.bubble_decision` 那套五条闸）。C 线事后再弹一次，
+#:     用户收到的是同一件事的第二种说法 —— 那是重复打扰，不是主动性。
+#:     主动性的定义是「指向未被注意的事」，不是「把已知的事再说一遍」。
+#:   · `baseline`／`repeat`／`absent` 不推：它们说的是「量和昨天不一样」，
+#:     读者要看到对比才明白，一句话说不清 —— 一页纸里有它们的位置。
+#:   · `rule_pair` 推，因为它是**产品侧实时通道永远看不见的那一类**：
+#:     单次拦截是实时的事实，而「这两条规则今天连着响了、以前从没连过」
+#:     只有在时间维度上才成立。**这是 C 线的独占价值**，
+#:     也应该是它唯一有资格打扰用户的理由。
+NOTIFY_KINDS = ("rule_pair",)
+
+#: 推送用的级别。**必须是产品侧 `URGENT_LEVELS` 里的值，不许自造。**
+#: `L2` ＝「有操作被拦下（未处理）」—— 一条新组合确实意味着有操作被拦下，
+#: 而且是连着两次。用 `R0`（防线没生效）会把强度说高：
+#: **拦截是成功的，防线没有失效。** 对外强度不许超过内部定性（F55）。
+NOTIFY_LEVEL = "L2"
+
+#: 节流键。**必须与产品侧的键分开。**
+#: 产品侧按它自己的 `kind` 节流（`bubble:<kind>`）；共用键会让两边互相抑制：
+#: 要么产品侧刚弹过、C 线永远弹不出来；要么反过来，C 线弹过之后
+#: 产品侧的真告警被静音。两种都是**静默故障**，且都表现为「本来就没那么多事」。
+NOTIFY_KIND = "c_line_pair"
+
+
+def push_clue(clue: "Clue", *, root: str | None = None,
+              pop: Any = None) -> Dict[str, Any]:
+    """把一条线索推到**产品侧弹窗通道**。不新造通道，也不新造级别。
+
+    返回 dict，`ok` 只在窗口真就位时为 True —— 与 `inbox_bubble.pop` 同一契约。
+
+    ★ `pop` 可注入：判据要能在**不起真窗口**的前提下验完整条链。
+      不注入的话，自检会去碰真桌面，而桌面上可能真开着提醒窗 ⇒
+      判据被现实污染（假红或假绿，看起来一模一样）。
+    ★ 一切失败都**如实返回、不抛**：巡检的主体是出一页纸，
+      弹不出来不等于巡检失败 —— 但它必须说出来，否则就是
+      「系统自己知道有事，却什么都没说」。
+    """
+    rep: Dict[str, Any] = {"ok": False, "sent": False, "why": "", "raw": None}
+    if clue.kind not in NOTIFY_KINDS:
+        rep["why"] = "这一类不主动弹（只有 %s 值得打扰）" % "/".join(NOTIFY_KINDS)
+        return rep
+    if pop is None:
+        try:
+            if _REPO not in sys.path:
+                sys.path.insert(0, _REPO)
+            import inbox_bubble as BB  # noqa: PLC0415  产品侧通道，延迟导入
+            pop = BB.pop
+        except Exception as exc:                       # noqa: BLE001
+            rep["why"] = "弹窗通道不可用（%s: %s）" % (type(exc).__name__, exc)
+            return rep
+    try:
+        r = pop(title="发现一条新的动作组合",
+                body=str(clue.subject)[:120],
+                level=NOTIFY_LEVEL, kind=NOTIFY_KIND, root=root)
+    except Exception as exc:                           # noqa: BLE001
+        rep["why"] = "弹窗调用异常（%s: %s）" % (type(exc).__name__, exc)
+        return rep
+    rep["sent"] = True
+    if isinstance(r, dict):
+        rep["raw"] = r
+        rep["ok"] = bool(r.get("ok"))
+        rep["why"] = str(r.get("why") or "")
+    else:
+        rep["why"] = "弹窗返回了非 dict：%r" % (r,)
+    return rep
+
+
+def _selfcheck() -> int:
+    """watchman 自检：只测两件事 —— **配置读得到**、**链的判据能翻面**。
+
+    ★ 为什么需要它（2026-11-03）：`RULES_PATH` 曾经是**相对 cwd** 的。
+      从 `output/lineC/` 里跑就读不到 `rules/default.json` ⇒ `_CUR_IDS` 与
+      `_CUR_CAT` 双双为空 ⇒ 两处过滤**同时静默失效**：
+        · 非规则号（`OUT-01`）混进配对 —— N-04 的老毛病复发；
+        · 跨簇噪声（`AN-001→AN-010`）全部回来 —— N-05 复发。
+      实测同一份账本：仓库根跑报 3 条；`output/lineC` 跑报 4 条且带 `OUT-01`。
+    ★ 它不报错、不警告，只是**多报** —— 而「多报」在报告里看起来像「检测器很灵敏」。
+      所以这条自检必须能翻面：**规则库读不到时它要变红**，不能永远清白。
+    """
+    fails: List[str] = []
+
+    def ck(ok: bool, msg: str) -> None:
+        if not ok:
+            fails.append(msg)
+
+    # ① 配置必须读得到（路径基准必须与 cwd 无关）
+    ck(os.path.isfile(RULES_PATH),
+       "规则库读不到：%s —— 两处过滤会静默失效（只多报、不报错）" % RULES_PATH)
+    _ensure_alias()
+    ck(bool(_CUR_IDS), "规则号集合为空 —— 非规则号不会被过滤（N-04 会复发）")
+    ck(bool(_CUR_CAT), "category 集合为空 —— 意图簇过滤静默失效（N-05 会复发）")
+
+    # ② 分簇必须与规则库一致。**期望的簇从规则库的 category 现取**，
+    #   不在这里写死中文名（写死了产品侧改分类也不会红）。
+    for _rid in ("AN-001", "AN-002", "AN-005", "AN-010", "AN-014"):
+        ck(bool(chain_cluster(_rid)), "%s 没有簇 —— 它不会参与链判定" % _rid)
+    ck(chain_cluster("AN-001") == chain_cluster("AN-002"),
+       "AN-001 与 AN-002 同属 secrets，簇却不一致")
+    ck(chain_cluster("AN-001") != chain_cluster("AN-010"),
+       "AN-001(secrets) 与 AN-010(destructive) 簇相同 —— 分簇表配错了")
+
+    # ③ 可翻面：同簇的配对要留下，跨簇的要滤掉。
+    #    每对只凑 3 次 —— 正好卡在 `max_today`（默认 3）上，多一次会被上界滤掉，
+    #    那时「没报」就不能证明是簇过滤起作用了（假绿）。
+    _mins = [0, 1, 20, 21, 40, 41]
+
+    def _mk(rid_a: str, rid_b: str, sess: str) -> List[Tuple[str, int, Dict[str, Any]]]:
+        out: List[Tuple[str, int, Dict[str, Any]]] = []
+        for k, m in enumerate(_mins):
+            rid = rid_a if k % 2 == 0 else rid_b
+            out.append(("2026-01-01", k + 1,
+                        {"ts": "2026-01-01T10:%02d:00+08:00" % m,
+                         "session": sess, "rules_hit": [rid],
+                         "decision": "block"}))
+        return out
+
+    def _pairs(recs: List[Tuple[str, int, Dict[str, Any]]]) -> set:
+        cl, _st = detect_rule_pairs(recs, recent=1)
+        return {"→".join(c.items) for c in cl}
+
+    _got_same = _pairs(_mk("AN-001", "AN-002", "sc-same"))
+    _got_cross = _pairs(_mk("AN-005", "AN-010", "sc-cross"))
+    ck("AN-001→AN-002" in _got_same,
+       "同簇配对 AN-001→AN-002 被滤掉了 —— 过滤条件写反了：%r" % (_got_same,))
+    ck("AN-005→AN-010" not in _got_cross,
+       "跨簇配对 AN-005→AN-010 没被滤掉 —— 噪声会照旧报出来：%r" % (_got_cross,))
+    # ★ 负控：把簇表清空 ⇒ 跨簇配对**必须回来**。
+    #   不回来就说明「没报」是别的原因（比如门槛把它挡了），这条判据是死的。
+    _saved = dict(_CHAIN_CLUSTER)
+    try:
+        _CHAIN_CLUSTER.clear()
+        _got_off = _pairs(_mk("AN-005", "AN-010", "sc-cross"))
+    finally:
+        _CHAIN_CLUSTER.update(_saved)
+    ck("AN-005→AN-010" in _got_off,
+       "清空簇表后跨簇配对仍不报 —— 说明它本来就被别处挡掉了，"
+       "上面那条「滤掉了」证明不了任何事：%r" % (_got_off,))
+
+    # ④ 主动推送：只弹该弹的，失败必须如实说（2026-11-03，D-4）
+    _calls: List[Dict[str, Any]] = []
+
+    def _fake_pop(**kw: Any) -> Dict[str, Any]:
+        _calls.append(kw)
+        return {"ok": True, "why": ""}
+
+    _pair = Clue(kind="rule_pair", day="2026-01-01", subject="x",
+                 evidence=(("2026-01-01", 1),), note="",
+                 items=("AN-001", "AN-002"))
+    _held = Clue(kind="verdict", day="2026-01-01", subject="y",
+                 evidence=(("2026-01-01", 2),), note="", items=("AN-009",))
+    _r1 = push_clue(_pair, pop=_fake_pop)
+    ck(_r1["ok"], "rule_pair 该弹却没弹：%r" % (_r1,))
+    ck(bool(_calls) and _calls[0].get("level") == NOTIFY_LEVEL,
+       "弹窗级别不是产品侧的 %s（自造级别＝对外强度虚高）：%r"
+       % (NOTIFY_LEVEL, _calls))
+    ck(bool(_calls) and _calls[0].get("kind") == NOTIFY_KIND,
+       "节流键与产品侧撞了 —— 两边会互相静音：%r" % (_calls,))
+    _before = len(_calls)
+    _r2 = push_clue(_held, pop=_fake_pop)
+    ck(not _r2["ok"] and not _r2["sent"],
+       "「挡下」这类不该主动弹（产品侧在拦截那一刻已经弹过了）：%r" % (_r2,))
+    ck(len(_calls) == _before,
+       "不该弹的那一类仍然调用了 pop —— 重复打扰就是这么来的")
+    # 负控①：通道报失败 ⇒ 必须如实转述，不许说成成功
+    _r3 = push_clue(_pair, pop=lambda **kw: {"ok": False, "why": "通道忙"})
+    ck(not _r3["ok"] and "通道忙" in _r3["why"],
+       "弹窗失败时没如实转述：%r" % (_r3,))
+    # 负控②：通道抛异常 ⇒ 不许把巡检带崩，但必须说出来
+    def _boom(**kw: Any) -> Dict[str, Any]:
+        raise RuntimeError("炸了")
+
+    _r4 = push_clue(_pair, pop=_boom)
+    ck(not _r4["ok"] and "炸了" in _r4["why"],
+       "弹窗抛异常时没接住（会让整次巡检崩掉）：%r" % (_r4,))
+
+    if fails:
+        print("自检失败 %d 项：" % len(fails))
+        for f in fails:
+            print("  ·", f)
+        return 1
+    # ★ 不写条数：条数会随臂的增减而漂，而文案没人会同步改
+    #   （「注释里的数字会过期」——本文件已经因为这句话吃过一次亏）。
+    print("watchman 自检：全部通过（规则库可读／分簇与规则库一致／"
+          "同簇配对留下／跨簇配对滤掉／负控能翻面／"
+          "只有 rule_pair 推送／级别与节流键不自造／失败如实转述）")
+    return 0
+
+
 def main(argv: List[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="巡检 Agent 档 1 原型（只读）")
     ap.add_argument("--root", default=".psl/audit")
+    ap.add_argument("--selfcheck", action="store_true", help="自检（不读账本）")
+    ap.add_argument(
+        "--notify",
+        action="store_true",
+        help="把「新出现的动作组合」弹到屏幕上。**默认关闭**。"
+        "只有 rule_pair 会弹（产品侧已经在拦截那一刻弹过「挡下」，"
+        "本模块再弹一次就是重复打扰）。走产品侧 inbox_bubble.pop，"
+        "级别用产品侧的 L2，不自造。",
+    )
     ap.add_argument("--window", type=int, default=14)
     ap.add_argument("--recent", type=int, default=1, help="只报最后几天（主动报告默认只看今天）")
     ap.add_argument(
@@ -1667,6 +1960,21 @@ def main(argv: List[str] | None = None) -> int:
         sys.stdout.reconfigure(encoding="utf-8")  # 中文 Windows 控制台
     except Exception:
         pass
+
+    # ★ 自检必须**在检查账本目录之前**：它不读账本，
+    #   而「配置读得到吗」这件事与账本在不在没关系。
+    #   放在目录检查之后，会让没有账本的机器上报「目录不存在」而不是「配置坏了」——
+    #   归因错了，修的人就会去建目录。
+    if args.selfcheck:
+        return _selfcheck()
+
+    # ★ `--json` 是取证通道，**必须无副作用**（取证时反复跑，不能改变推送节奏）。
+    #   所以两者同时给时直接拒绝，而不是「悄悄忽略一个」——
+    #   悄悄忽略会让脚本以为弹过了，而屏幕上什么都没有。
+    if args.notify and args.json:
+        print("[停] --notify 与 --json 不能同时用：--json 必须无副作用",
+              file=sys.stderr)
+        return 2
 
     if not os.path.isdir(args.root):
         print(f"[停] 目录不存在：{args.root}", file=sys.stderr)
@@ -2014,6 +2322,15 @@ def main(argv: List[str] | None = None) -> int:
                             # 「这条为什么没出现在推送里」。
                             "key": CL.clue_key(c),
                             "ledger_state": st_map.get(id(c)),
+                            # ★ v3 遗留项（2026-11-03 补）：**取证时要的是
+                            #   「这条变了没有」，不是「它叫什么」**。
+                            #   `key` 只回答「是不是同一件事」；指纹回答
+                            #   「同一件事的内容变了没有」—— 两者不可互换，
+                            #   缺了后者，取证时只能靠肉眼比对两个 subject。
+                            #   `magnitude` 一并给：指纹就是 items＋量级算出来的，
+                            #   只给指纹、不给被哈希进去的那个量级，等于给结论不给依据。
+                            "fingerprint": CL.clue_fingerprint(c),
+                            "magnitude": int(getattr(c, "magnitude", 0) or 0),
                         }
                         for c in sorted(clues, key=lambda x: PRIORITY.get(x.kind, 9))
                     ],
@@ -2048,6 +2365,22 @@ def main(argv: List[str] | None = None) -> int:
         except Exception as exc:                                # noqa: BLE001
             print("[警告] 账本写不进去（%s: %s）⇒ 下次会重复说同一批线索"
                   % (type(exc).__name__, exc), file=sys.stderr)
+        # ★ D-4 最小通路（2026-11-03）：**主动推送**，`--notify` 才开。
+        #   候选只从 `shown` 里挑 —— 它已经过账本节流（说 3 次 → 静默 7 天），
+        #   所以不会「同一件事反复弹」。一天最多一枚（只取第一条）。
+        if args.notify:
+            _cand = [c for c in shown if c.kind in NOTIFY_KINDS]
+            if not _cand:
+                print("[推送] 没有值得弹的（只有 %s 会弹）"
+                      % "/".join(NOTIFY_KINDS))
+            else:
+                _r = push_clue(_cand[0])
+                if _r["ok"]:
+                    print("[推送] 已弹出：%s" % str(_cand[0].subject)[:60])
+                else:
+                    # ★ 弹不出来必须印出来。静默失败会让「屏幕上没有东西」
+                    #   与「本来就没东西」长得一模一样。
+                    print("[推送] 没弹出：%s" % (_r["why"] or "未知原因"))
     else:
         if ledger_error:
             meta["ledger_note"] = (

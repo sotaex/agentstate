@@ -93,6 +93,13 @@ CHECKS: List[Tuple[str, List[str], int, int]] = [
     #   它的产物（`held`／`no_response` 两档）直接进一页纸首屏，
     #   所以它自检红了必须让整份报告变红。
     ("第三只腿 --selfcheck", [os.path.join(LINE_C, "verdict_leg.py"), "--selfcheck"], 0, 600),
+    # ★ 2026-11-03 新增：watchman 自检（不读账本）。
+    #   它守的是「规则库读得到」与「链的判据能翻面」两件事。
+    #   为什么必须进闸门：`RULES_PATH` 曾是**相对 cwd** 的，从 `output/lineC/`
+    #   里跑就读不到 `rules/default.json` ⇒ 非规则号（`OUT-01`）与跨簇噪声
+    #   （`AN-001→AN-010`）**同时**回来。而它只表现为「多报」——
+    #   多报在报告里看起来像「检测器很灵敏」，所以没有任何别的东西会红。
+    ("watchman --selfcheck", [os.path.join(LINE_C, "watchman.py"), "--selfcheck"], 0, 300),
     # 它跑 5 次 watchman，成本随账本线性涨：143s（11-02 上午）→ 464s（同日晚）。
     ("负控 账本端到端 5 臂", [os.path.join(OUTPUT, "_p_ledger_e2e.py")], 0, 1200),
     # ★ 2026-11-02 新增：打分器**量具自检**（不是打分）。它只验「还认得金标准」，

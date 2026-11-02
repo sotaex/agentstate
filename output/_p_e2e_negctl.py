@@ -316,11 +316,31 @@ def e7_folded_still_citable():
     没有 data-cites，于是 citecheck 报「渲染丢了 N 条」并**拒绝落盘** ——
     真账本一旦产出 6 条证据，报告就再也写不出来。
     真账本今天正好 5 条，这条分支从没被走过；靠 `--cap 3` 才暴露。
+
+    ★★ 2026-11-03 修：`cap` 原来**写死 2**，而这份夹具的证据数是**别人产出的**
+      （`make()` 造的是 `decision=allow`，一条都不进带；证据全部来自 watchman 的
+      `rule_pair`）。当天 rule_pair 由 3 条变 2 条 ⇒ 证据 3→2 ⇒ `cap=2` 不再折叠
+      ⇒ 这条臂报「折叠没用 <details>」。
+      **它说的不是产品坏了，是它自己没走到那条分支。**
+      而「没走到分支」与「分支坏了」在输出上长得一模一样 —— 这正是假绿族②
+      （夹具与被测方的产出耦合）。
+    ⇒ cap 必须由**这次实际产出的证据数**推出来（`n-1`，必然折叠）；
+      造不出折叠场景（n ≤ 1）时报 SKIP，**不是通过、也不是失败**（铁律 1）。
     """
     root, _ds = fresh()
+    # 先探一次，只为一件事：这条夹具今天能产出几条证据。
+    _probe_dir = tempfile.mkdtemp(prefix="antinel-e2e-probe-")
+    ok0, info0 = R.produce(root, os.path.join(_probe_dir, "probe.html"))
+    if not ok0:
+        return False, "探测时报告就没落盘：%s" % info0.get("error")
+    n = int(info0.get("evidence") or 0)
+    if n <= 1:
+        return None, ("夹具只产出 %d 条证据，造不出「折叠」这一场景"
+                      "（SKIP，不是通过）" % n)
+    cap = n - 1                                  # 必然折叠至少一条
     tmp = tempfile.mkdtemp(prefix="antinel-e2e-out-")
     out = os.path.join(tmp, "cap.html")
-    ok, info = R.produce(root, out, cap=2)      # 强制折叠
+    ok, info = R.produce(root, out, cap=cap)
     if not ok:
         return False, "折叠时报告没落盘：%s" % info.get("error")
     with open(out, "r", encoding="utf-8") as fh:
@@ -330,10 +350,11 @@ def e7_folded_still_citable():
     if n_eid != n_ev:
         return False, "折叠后有 %d 条带 data-eid，上游 %d 条 ⇒ 折叠的条目丢了出处" % (n_eid, n_ev)
     if "<details" not in html:
-        return False, "折叠没用 <details>（零 JS 的原生折叠）"
+        return False, "cap=%d 时折叠没用 <details>（零 JS 的原生折叠）" % cap
     if "**" in html:
         return False, "折叠样本里出现 `**` —— 只在折叠时渲染的文案没被清洗"
-    return True, "cap=2 强制折叠：%d 条全带出处，details 折叠，无星号" % n_eid
+    return True, ("cap=%d（证据 %d 条）强制折叠：%d 条全带出处，details 折叠，无星号"
+                  % (cap, n, n_eid))
 
 
 def main():

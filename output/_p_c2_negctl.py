@@ -73,6 +73,37 @@ def sha(path: str) -> str:
     return h.hexdigest()
 
 
+def last_record_ts(path: str, look_back: int = 40) -> str:
+    """日文件里**最后一条能解析的记录**的 `ts`（读不到返回空串）。
+
+    ★ 为什么需要它（2026-11-03）：判断一个日文件「是不是已经完结」，
+      只看文件名不够 —— 文件名是日期，但内容可能因为时钟回拨、补写、
+      或跨零点续写而仍然属于今天。判据要问的是**内容里的时间**，
+      不是名字里的日期。
+      只倒着看最后 `look_back` 行：正常日文件末尾不会有几十行坏行，
+      看多了反而会把「整文件扫描」的成本带进夹具。
+    """
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            fh.seek(max(0, size - 64 * 1024))
+            tail = fh.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
+    lines = [ln for ln in tail.splitlines() if ln.strip()]
+    for ln in reversed(lines[-look_back:]):
+        try:
+            rec = json.loads(ln)
+        except Exception:
+            continue
+        if isinstance(rec, dict):
+            ts = str(rec.get("ts") or "")
+            if ts:
+                return ts
+    return ""
+
+
 def run(root: str, recent: int = 1, with_gap: bool = False) -> Dict[str, Any]:
     """跑一次 watchman。
 
@@ -505,12 +536,35 @@ def main() -> int:
             print(f"[停] 缺 {p}", file=sys.stderr)
             return 2
 
-    files = sorted(glob.glob(os.path.join(SRC, "2026-*.jsonl")))[-N_FILES:]
+    # ★★ 2026-11-03 修（`nc1_clean` 恒红的真因，不是检测器坏）：
+    #   **正在写的当天账本不是「干净样本」。**
+    #   原写法 `sorted(...)[-N_FILES:]` 取最后 16 个，最后一个就是今天；
+    #   而今天的账本还在追加。11-03 01:02:50 实测：当天 `pre_tool_use` 294 条
+    #   对上「前 8 天同期中位数 31」，偏离 10.5×MAD ⇒ 干净副本自己就报 1 条
+    #   baseline，「干净臂」永远红。
+    #   错的是夹具的前提：它把「**字节没改动**」当成了「**样本正常**」。
+    #   这两件事完全无关 —— 前者说我们没动它，后者说它本来就不异常。
+    #   ⇒ 只取**已完结**的日子（文件名早于今天，且最后一条记录的 ts 也不在今天）。
+    # ★ 代价（明写，不许含糊）：**当天不再被这条负控覆盖**。
+    #   这是覆盖面的收窄，不是精度提升。当天数据本身不是干净样本，
+    #   用它测「干净臂」只能测出「今天很忙」，测不出检测器的假阳性。
+    _today = datetime.now().strftime("%Y-%m-%d")
+    _all = sorted(glob.glob(os.path.join(SRC, "2026-*.jsonl")))
+    files = [f for f in _all if os.path.basename(f)[:10] < _today][-N_FILES:]
     if len(files) < N_FILES:
-        print(f"[停] 日文件只有 {len(files)} 个，不够 {N_FILES} 天前置样本", file=sys.stderr)
+        print(f"[停] 已完结的日文件只有 {len(files)} 个，不够 {N_FILES} 天前置样本",
+              file=sys.stderr)
         return 2
     target = os.path.basename(files[-1])
     day = target[:10]
+    # ★ 夹具自证：拿到的必须是已完结的日子。**不许只信文件名**——
+    #   「名字是昨天、内容还在长」在时钟回拨或补写时会静默发生，
+    #   而它的表现与「今天很忙」一模一样（干净臂红）。
+    _ts_last = last_record_ts(files[-1])
+    if not _ts_last or _ts_last[:10] >= _today:
+        print(f"[停] 目标日 {target} 未完结（最后一条 ts={_ts_last or '读不到'}，"
+              f"今天 {_today}）⇒ 不能当干净样本", file=sys.stderr)
+        return 2
 
     work = tempfile.mkdtemp(prefix="antinel-nc-")
     base = os.path.join(work, "base")
