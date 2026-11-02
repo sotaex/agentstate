@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import ast
 import datetime as dt
+import json
 import os
 import re
 import shutil
@@ -41,6 +42,18 @@ DESTRUCTIVE_CALLS = {
     "rename", "replace", "truncate", "move",
 }
 DESTRUCTIVE_MODS = {"os", "shutil", "pathlib", "send2trash"}
+
+# ★ 2026-11-03：这两类**必须分开数**。
+#   原先它们合成一个 `strong`，结论写「删除／轮转调用 N 处」—— 而实测目标是
+#   `audit_chain.py` 的 3 处，全部是 `os.replace`：
+#     · L102 锁事件日志轮转（`.jsonl` → `.1`，只留一代）—— **真轮转**，但对象不是审计记录；
+#     · L304 偷锁时把残骸改名 `.away` —— 不是记录；
+#     · L593 日锚 manifest 原子写（tmp → 正式）—— **根本不是删除**。
+#   合成一栏的后果：结论说「有 3 处删除／轮转」，读者会以为**审计记录被删**。
+#   这是「异质单位做加减」的变体：删与改名不是同一种事，相加之后的那个数
+#   既不是删除数也不是改名数。
+HARD_DELETE = {"remove", "unlink", "rmdir", "removedirs", "rmtree"}
+SOFT_RENAME = {"rename", "replace", "truncate", "move"}
 
 # 轮转/保留期关键词（只在**字符串常量**里找，属弱证据，单列）
 ROTATE_KEYWORDS = ("retention", "rotate", "prune", "purge")
@@ -59,6 +72,11 @@ def _resolve_target(root: str):
         if os.path.isfile(p):
             return rel, p
     return None, None
+
+
+def _func_name(desc: str) -> str:
+    """从 `os.replace(...)` 取 `replace`。分类只认函数名，不认整串描述。"""
+    return desc.split("(")[0].split(".")[-1]
 
 
 def scan_ast(path: str):
@@ -94,10 +112,33 @@ def _write_sample(dirpath: str, name: str, body: str) -> str:
     return p
 
 
+def emit_json(path: str, payload: dict) -> int:
+    """落盘并**回读自证**，返回可解析内容的字符数。
+
+    ★ 「探针没有牙」这种情况也必须落盘。只在有结论时才写产出件，
+      会让「今天没测出结论」与「今天没跑」在目录里一模一样 ——
+      而这正是本工具要反对的那种同貌。
+    """
+    d = os.path.dirname(os.path.abspath(path))
+    if d:
+        os.makedirs(d, exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False, indent=1, sort_keys=True)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
+    with open(path, encoding="utf-8") as fh:
+        back = json.load(fh)
+    return len(json.dumps(back, ensure_ascii=False))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--audit", default=os.path.join(".psl", "audit"))
     ap.add_argument("--root", default=".")
+    ap.add_argument("--json", dest="json_out", default=None, metavar="PATH",
+                    help="把这次读数写成 json（同一条命令重跑会覆盖，不叠加）")
     a = ap.parse_args()
 
     root = a.root
@@ -164,10 +205,15 @@ def main() -> int:
     print("  被测文件：%s（%d 字节）" % (rel, os.path.getsize(path)))
 
     strong, weak = scan_ast(path)
-    print("  强证据（删除/改名调用）%d 处 ｜ 弱证据（关键词字符串）%d 处"
-          % (len(strong), len(weak)))
-    for ln, desc in strong[:15]:
-        print("    L%-5d %s" % (ln, desc))
+    n_del = [h for h in strong if _func_name(h[1]) in HARD_DELETE]
+    n_ren = [h for h in strong if _func_name(h[1]) in SOFT_RENAME]
+    print("  删除调用（remove/unlink/rmtree…）%d 处 ｜ 改名·截断（rename/replace/move）%d 处"
+          % (len(n_del), len(n_ren)))
+    print("  弱证据（关键词字符串）%d 处" % len(weak))
+    for ln, desc in n_del[:15]:
+        print("    L%-5d [删除] %s" % (ln, desc))
+    for ln, desc in n_ren[:15]:
+        print("    L%-5d [改名] %s" % (ln, desc))
     if len(strong) > 15:
         print("    …… 另 %d 处" % (len(strong) - 15))
     for ln, desc in weak[:5]:
@@ -194,22 +240,81 @@ def main() -> int:
                  [d for _, d in pos_strong]))
         print("\n[腿 3] 负控：纯读样本 ⇒ 必须 0 命中")
         print("  %s 命中 %d 处" % ("✅" if not neg_strong else "❌", len(neg_strong)))
-        teeth = len(pos_strong) >= 2 and not neg_strong
+        # ★ 腿 4（2026-11-03 加）：**分类器必须能翻面**。
+        #   没有这条，`_func_name` 一旦坏了（比如改成取模块名），n_del 与 n_ren
+        #   会同时变 0，结论就变成「删除 0 处」—— 与真的没有删除**一模一样**。
+        #   这是第十四族：永远清白的判据与真判据同貌，只能靠「该进这栏的必须进」来验。
+        _pos_del = [h for h in pos_strong if _func_name(h[1]) in HARD_DELETE]
+        _pos_ren = [h for h in pos_strong if _func_name(h[1]) in SOFT_RENAME]
+        print("\n[腿 4] 分类：正控样本的 os.remove／shutil.rmtree 必须落进「删除」栏")
+        print("  %s 删除 %d 处 ｜ 改名 %d 处（期望 2 / 0）"
+              % ("✅" if len(_pos_del) == 2 and not _pos_ren else "❌",
+                 len(_pos_del), len(_pos_ren)))
+        cls_ok = len(_pos_del) == 2 and not _pos_ren
+        teeth = len(pos_strong) >= 2 and not neg_strong and cls_ok
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+    def _payload(verdict: str) -> dict:
+        return {
+            "read_at": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "audit_dir": os.path.abspath(audit),
+            "target": rel,
+            "target_bytes": os.path.getsize(path) if path else None,
+            "q1": {
+                "files": len(days), "first": first, "last": last,
+                "span_days": span, "records": total_lines,
+                "bytes": total_bytes,
+                "biggest": {"day": biggest[0], "records": biggest[1],
+                            "bytes": biggest[2]},
+                "excluded": skipped,
+                "retention_looks_permanent": True,
+            },
+            "q2": {
+                "strong_n": len(strong),
+                "delete_n": len(n_del),
+                "rename_n": len(n_ren),
+                "delete": [{"line": ln, "desc": d} for ln, d in n_del],
+                "rename": [{"line": ln, "desc": d} for ln, d in n_ren],
+                "weak_n": len(weak),
+            },
+            "teeth": {"positive_hits": len(pos_strong),
+                      "negative_hits": len(neg_strong),
+                      "ok": bool(teeth)},
+            "verdict": verdict,
+        }
+
+    def _write(verdict: str) -> None:
+        if not a.json_out:
+            return
+        try:
+            n = emit_json(a.json_out, _payload(verdict))
+            print("已写 %s（可解析 %d 字符）" % (a.json_out, n))
+        except Exception as exc:                        # noqa: BLE001
+            print("✗ 写出失败：%s: %s" % (type(exc).__name__, exc))
 
     print("\n" + "-" * 74)
     if not teeth:
         print("判定：❌ 探针没有牙 —— 「零删除」不可作为结论")
+        _write("no_teeth")
         return 1
-    print("判定：探针有牙（正控命中、负控 0）")
-    if not strong:
-        print("结论：`%s` 里 **0 处** 删除／轮转调用 ⇒ 保留期在新代码落地前等同永久。"
-              % rel)
+    print("判定：探针有牙（正控命中、负控 0、分类能翻面）")
+    if not n_del:
+        print("结论：`%s` 里**删除调用 0 处** ⇒ 审计记录不会被删，"
+              "保留期在新代码落地前等同永久。" % rel)
         print("     与方案书 §3.3 第 7 段的断言一致，但现在是**可复算读数**，不是引用。")
+        if n_ren:
+            print("     另有 %d 处改名／截断，**不是删除**：%s。"
+                  % (len(n_ren), "、".join("L%d %s" % (ln, d) for ln, d in n_ren)))
+            print("     ⇒ 对象须人读：原子写（tmp ⇒ 正式）与日志轮转在 AST 上同貌，"
+                  "本工具不替它们下结论。")
+        _write("no_delete_call")
     else:
-        print("结论：`%s` 里有 %d 处删除／轮转调用 —— 需逐处判定是「轮转」还是「误删风险」。"
-              % (rel, len(strong)))
+        print("结论：`%s` 里有 %d 处**删除**调用 —— 需逐处判定是否作用于审计记录。"
+              % (rel, len(n_del)))
+        for ln, d in n_del[:10]:
+            print("     L%-5d %s" % (ln, d))
+        _write("has_delete_call")
     return 0
 
 

@@ -1,0 +1,232 @@
+{
+ "audit_dir": "D:\\psl\\poc\\antinel-security\\.psl\\audit",
+ "bad_json": 0,
+ "contradictions": {
+  "action=alert + decision=allow": {
+   "gate": 0,
+   "n": 1063,
+   "none": 1005,
+   "toast": 58
+  },
+  "action=block + decision=deny": {
+   "gate": 220,
+   "n": 220,
+   "none": 0,
+   "toast": 0
+  }
+ },
+ "files": {
+  "daily": 36,
+  "skipped": [
+   "lock_events.jsonl"
+  ]
+ },
+ "n_raise": 0,
+ "non_event": {
+  "notice_budget_merged": 163,
+  "notice_budget_window_closed": 842,
+  "pre_tool_use_summary": 1266,
+  "session_dna": 33,
+  "usage_delta": 46256
+ },
+ "notify": {
+  "gate": 1672,
+  "none": 160866,
+  "other": 0,
+  "sum": 184905,
+  "sum_equals_records": true,
+  "toast": 22367
+ },
+ "pairs": {
+  "None|None": {
+   "gate": 0,
+   "n": 46289,
+   "none": 46289,
+   "toast": 0
+  },
+  "None|alert": {
+   "gate": 0,
+   "n": 9322,
+   "none": 863,
+   "toast": 8459
+  },
+  "None|allow": {
+   "gate": 0,
+   "n": 8340,
+   "none": 8208,
+   "toast": 132
+  },
+  "None|block": {
+   "gate": 0,
+   "n": 403,
+   "none": 403,
+   "toast": 0
+  },
+  "None|deny": {
+   "gate": 1031,
+   "n": 1031,
+   "none": 0,
+   "toast": 0
+  },
+  "alert|None": {
+   "gate": 0,
+   "n": 12,
+   "none": 0,
+   "toast": 12
+  },
+  "alert|alert": {
+   "gate": 0,
+   "n": 13318,
+   "none": 0,
+   "toast": 13318
+  },
+  "alert|allow": {
+   "gate": 0,
+   "n": 1063,
+   "none": 1005,
+   "toast": 58
+  },
+  "alert|config_fallback": {
+   "gate": 0,
+   "n": 10,
+   "none": 0,
+   "toast": 10
+  },
+  "allow|allow": {
+   "gate": 0,
+   "n": 52620,
+   "none": 52242,
+   "toast": 378
+  },
+  "allow|config_refresh": {
+   "gate": 0,
+   "n": 15,
+   "none": 15,
+   "toast": 0
+  },
+  "block|block": {
+   "gate": 421,
+   "n": 421,
+   "none": 0,
+   "toast": 0
+  },
+  "block|deny": {
+   "gate": 220,
+   "n": 220,
+   "none": 0,
+   "toast": 0
+  },
+  "record|None": {
+   "gate": 0,
+   "n": 51841,
+   "none": 51841,
+   "toast": 0
+  }
+ },
+ "policy": "D:\\psl\\poc\\antinel-security\\.worktrees\\notify-l1\\hooks\\notify_policy.py",
+ "raise_samples": [],
+ "read_at": "2026-11-03 06:07:53",
+ "records": 184905,
+ "top_notify_by_type": [
+  {
+   "n": 12235,
+   "notify": "toast",
+   "type": "dst02_bash_path_suspect"
+  },
+  {
+   "n": 8408,
+   "notify": "toast",
+   "type": "host_changed"
+  },
+  {
+   "n": 1083,
+   "notify": "toast",
+   "type": "pre_tool_use"
+  },
+  {
+   "n": 421,
+   "notify": "gate",
+   "type": "pre_tool_use"
+  },
+  {
+   "n": 357,
+   "notify": "toast",
+   "type": "exclude_patterns_allow"
+  },
+  {
+   "n": 301,
+   "notify": "gate",
+   "type": "host_shield_spawn_failed"
+  },
+  {
+   "n": 273,
+   "notify": "gate",
+   "type": "host_shield_tamper"
+  },
+  {
+   "n": 220,
+   "notify": "gate",
+   "type": "command_deletion_permission"
+  },
+  {
+   "n": 208,
+   "notify": "gate",
+   "type": "host_shield_zone_locked"
+  },
+  {
+   "n": 172,
+   "notify": "gate",
+   "type": "host_shield_breach"
+  },
+  {
+   "n": 132,
+   "notify": "toast",
+   "type": "host_shield_state_unreadable"
+  },
+  {
+   "n": 77,
+   "notify": "gate",
+   "type": "host_shield_dev_drift"
+  },
+  {
+   "n": 47,
+   "notify": "toast",
+   "type": "hook_slow"
+  },
+  {
+   "n": 26,
+   "notify": "toast",
+   "type": "host_shield_task_unknown"
+  },
+  {
+   "n": 25,
+   "notify": "toast",
+   "type": "enforcement_probe"
+  },
+  {
+   "n": 14,
+   "notify": "toast",
+   "type": "command_deletion_permission"
+  },
+  {
+   "n": 12,
+   "notify": "toast",
+   "type": "post_tool_use"
+  },
+  {
+   "n": 11,
+   "notify": "toast",
+   "type": "hook_error"
+  },
+  {
+   "n": 10,
+   "notify": "toast",
+   "type": "rules_integrity_fallback"
+  },
+  {
+   "n": 6,
+   "notify": "toast",
+   "type": "sec_path_whitelisted"
+  }
+ ]
+}

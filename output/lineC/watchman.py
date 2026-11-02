@@ -1767,6 +1767,28 @@ def push_clue(clue: "Clue", *, root: str | None = None,
     return rep
 
 
+def _append_push_log(path: str, rec: Dict[str, Any]) -> None:
+    """把一次推送尝试写成一行 jsonl。**失败不抛**：留痕坏了不该让巡检失败。
+
+    ★ 三种结局都必须写进去，一条都不许省：
+        · 跑了、没有值得弹的  → `sent=false`（这是**结论**）
+        · 弹成了              → `sent=true, ok=true`
+        · 该弹、弹不出去      → `sent=true, ok=false, why=…`（这是**故障**）
+      只写成功的那些，等于让「没话可说」与「说了没弹成」在日志上同貌 ——
+      而这正是主动性最不该犯的错：它自己知道有事，却什么都没说。
+    """
+    if not path:
+        return
+    try:
+        d = os.path.dirname(os.path.abspath(path))
+        if d:
+            os.makedirs(d, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:                                   # noqa: BLE001
+        pass
+
+
 def _selfcheck() -> int:
     """watchman 自检：只测两件事 —— **配置读得到**、**链的判据能翻面**。
 
@@ -1899,6 +1921,16 @@ def main(argv: List[str] | None = None) -> int:
         "只有 rule_pair 会弹（产品侧已经在拦截那一刻弹过「挡下」，"
         "本模块再弹一次就是重复打扰）。走产品侧 inbox_bubble.pop，"
         "级别用产品侧的 L2，不自造。",
+    )
+    ap.add_argument(
+        "--push-log",
+        default=None,
+        metavar="PATH",
+        help="把「这一次推送弹没弹成」另写一行 jsonl。只在 --notify 时生效。"
+        "★ 存在的理由：调度器（`nightwatch.py`）要知道「刚才说了什么」，"
+        "而 `--json` 契约上无副作用、不能带推送结果，文本出口的推送结果又只印在屏幕上。"
+        "让它去解析中文文案是脆的（文案一改就静默失效）；写一行结构化留痕，"
+        "才能把「说了 / 没话说 / 说了没弹成」三种情况分开。",
     )
     ap.add_argument("--window", type=int, default=14)
     ap.add_argument("--recent", type=int, default=1, help="只报最后几天（主动报告默认只看今天）")
@@ -2369,18 +2401,37 @@ def main(argv: List[str] | None = None) -> int:
         #   候选只从 `shown` 里挑 —— 它已经过账本节流（说 3 次 → 静默 7 天），
         #   所以不会「同一件事反复弹」。一天最多一枚（只取第一条）。
         if args.notify:
+            _ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             _cand = [c for c in shown if c.kind in NOTIFY_KINDS]
             if not _cand:
                 print("[推送] 没有值得弹的（只有 %s 会弹）"
                       % "/".join(NOTIFY_KINDS))
+                _append_push_log(args.push_log, {
+                    "ts": _ts, "sent": False, "ok": False,
+                    "why": "没有值得弹的（只有 %s 会弹）" % "/".join(NOTIFY_KINDS),
+                    "n_shown": len(shown),
+                })
             else:
                 _r = push_clue(_cand[0])
                 if _r["ok"]:
                     print("[推送] 已弹出：%s" % str(_cand[0].subject)[:60])
+                    _append_push_log(args.push_log, {
+                        "ts": _ts, "sent": True, "ok": True,
+                        "kind": _cand[0].kind,
+                        "subject": str(_cand[0].subject)[:200],
+                        "n_shown": len(shown),
+                    })
                 else:
                     # ★ 弹不出来必须印出来。静默失败会让「屏幕上没有东西」
                     #   与「本来就没东西」长得一模一样。
                     print("[推送] 没弹出：%s" % (_r["why"] or "未知原因"))
+                    _append_push_log(args.push_log, {
+                        "ts": _ts, "sent": True, "ok": False,
+                        "kind": _cand[0].kind,
+                        "subject": str(_cand[0].subject)[:200],
+                        "why": _r["why"] or "未知原因",
+                        "n_shown": len(shown),
+                    })
     else:
         if ledger_error:
             meta["ledger_note"] = (

@@ -1,0 +1,1458 @@
+{
+ "read_at": "2026-11-03 06:08:24",
+ "files": 124,
+ "writers": [
+  {
+   "form": "W2-dictkey",
+   "line": 278,
+   "path": "antinel.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'warning'"
+   },
+   "group": "root-runtime"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 559,
+   "path": "antinel.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'none'"
+   },
+   "group": "root-runtime"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 1049,
+   "path": "antinel.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'none'"
+   },
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 1820,
+   "path": "antinel.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 2163,
+   "path": "antinel.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 2307,
+   "path": "antinel.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 2425,
+   "path": "antinel.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 2499,
+   "path": "antinel.py",
+   "rhs_kind": "ifexp",
+   "rhs": "'allow' if dec.startswith('allow') else 'deny'",
+   "refs": [
+    "allow",
+    "dec",
+    "deny",
+    "startswith"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 821,
+   "path": "antinel.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'none'"
+   },
+   "group": "root-runtime"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 1715,
+   "path": "host_shield.py",
+   "rhs_kind": "call",
+   "rhs": "kw.pop('decision', 'allow')",
+   "refs": [
+    "allow",
+    "decision",
+    "kw",
+    "pop"
+   ],
+   "siblings": {
+    "severity": "kw.pop('severity', 'warning')"
+   },
+   "group": "root-runtime"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 2689,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'config_refresh'",
+   "refs": [
+    "config_refresh"
+   ],
+   "siblings": {
+    "severity": "'info'",
+    "action": "'allow'"
+   },
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 336,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'deny'",
+   "refs": [
+    "deny"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 2650,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'config_skip'",
+   "refs": [
+    "config_skip"
+   ],
+   "siblings": {
+    "severity": "'critical'",
+    "action": "'alert'"
+   },
+   "group": "root-runtime"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 2941,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'config_refresh'",
+   "refs": [
+    "config_refresh"
+   ],
+   "siblings": {
+    "severity": "'info'",
+    "action": "'allow'"
+   },
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 4118,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'deny'",
+   "refs": [
+    "deny"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 4940,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'deny'",
+   "refs": [
+    "deny"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 4945,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'alert'",
+   "refs": [
+    "alert"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 5292,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 5337,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'deny'",
+   "refs": [
+    "deny"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 4091,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'deny'",
+   "refs": [
+    "deny"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 4113,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 4982,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'deny'",
+   "refs": [
+    "deny"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 5321,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'deny'",
+   "refs": [
+    "deny"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 5327,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'deny'",
+   "refs": [
+    "deny"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 3986,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'deny'",
+   "refs": [
+    "deny"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 4034,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'deny'",
+   "refs": [
+    "deny"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 4062,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'deny'",
+   "refs": [
+    "deny"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 4086,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 5183,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'deny'",
+   "refs": [
+    "deny"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 5496,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 4042,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'deny'",
+   "refs": [
+    "deny"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 5021,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'deny'",
+   "refs": [
+    "deny"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 5084,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'deny'",
+   "refs": [
+    "deny"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 5099,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 5116,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 5163,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'deny'",
+   "refs": [
+    "deny"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 5191,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'deny'",
+   "refs": [
+    "deny"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 5414,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 5446,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'deny'",
+   "refs": [
+    "deny"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 5471,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'deny'",
+   "refs": [
+    "deny"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 5031,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'deny'",
+   "refs": [
+    "deny"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 5036,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'deny'",
+   "refs": [
+    "deny"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 5514,
+   "path": "host_shield.py",
+   "rhs_kind": "literal",
+   "rhs": "'deny'",
+   "refs": [
+    "deny"
+   ],
+   "group": "root-runtime"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 381,
+   "path": "inbox_notify.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'warning'"
+   },
+   "group": "root-runtime"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 358,
+   "path": "inbox_tray.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'warning'"
+   },
+   "group": "root-runtime"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 463,
+   "path": "inbox_tray.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'warning'"
+   },
+   "group": "root-runtime"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 391,
+   "path": "hooks/post_tool_use.py",
+   "rhs_kind": "literal",
+   "rhs": "'alert'",
+   "refs": [
+    "alert"
+   ],
+   "siblings": {
+    "severity": "'critical'",
+    "action": "'alert'"
+   },
+   "group": "hooks"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 497,
+   "path": "hooks/post_tool_use.py",
+   "rhs_kind": "literal",
+   "rhs": "'alert'",
+   "refs": [
+    "alert"
+   ],
+   "siblings": {
+    "severity": "'warning'"
+   },
+   "group": "hooks"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 4076,
+   "path": "hooks/pre_tool_use.py",
+   "rhs_kind": "literal",
+   "rhs": "'block'",
+   "refs": [
+    "block"
+   ],
+   "siblings": {},
+   "group": "hooks"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 5466,
+   "path": "hooks/pre_tool_use.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {},
+   "group": "hooks"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 5474,
+   "path": "hooks/pre_tool_use.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'critical'",
+    "action": "'allow'"
+   },
+   "group": "hooks"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 5490,
+   "path": "hooks/pre_tool_use.py",
+   "rhs_kind": "call",
+   "rhs": "_v.get('decision', 'allow')",
+   "refs": [
+    "_v",
+    "allow",
+    "decision",
+    "get"
+   ],
+   "siblings": {
+    "severity": "'critical'",
+    "action": "'allow' if _v.get('decision') == 'allow' else 'block'"
+   },
+   "group": "hooks"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 5505,
+   "path": "hooks/pre_tool_use.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'critical'",
+    "action": "'allow'"
+   },
+   "group": "hooks"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 5516,
+   "path": "hooks/pre_tool_use.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'warning'",
+    "action": "'alert'"
+   },
+   "group": "hooks"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 5530,
+   "path": "hooks/pre_tool_use.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'critical'",
+    "action": "'allow'"
+   },
+   "group": "hooks"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 5549,
+   "path": "hooks/pre_tool_use.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "_sev_by_id.get(rid, 'warning')",
+    "action": "'allow'"
+   },
+   "group": "hooks"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 5568,
+   "path": "hooks/pre_tool_use.py",
+   "rhs_kind": "literal",
+   "rhs": "'alert'",
+   "refs": [
+    "alert"
+   ],
+   "siblings": {
+    "severity": "'warning'",
+    "action": "'alert'"
+   },
+   "group": "hooks"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 5590,
+   "path": "hooks/pre_tool_use.py",
+   "rhs_kind": "literal",
+   "rhs": "'config_rejected'",
+   "refs": [
+    "config_rejected"
+   ],
+   "siblings": {
+    "severity": "'warning'",
+    "action": "'alert'"
+   },
+   "group": "hooks"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 3989,
+   "path": "hooks/pre_tool_use.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'info'",
+    "action": "'alert'"
+   },
+   "group": "hooks"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 4015,
+   "path": "hooks/pre_tool_use.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'info'",
+    "action": "'alert'"
+   },
+   "group": "hooks"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 5418,
+   "path": "hooks/pre_tool_use.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'none'"
+   },
+   "group": "hooks"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 5445,
+   "path": "hooks/pre_tool_use.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'info'",
+    "action": "'allow'"
+   },
+   "group": "hooks"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 5615,
+   "path": "hooks/pre_tool_use.py",
+   "rhs_kind": "name",
+   "rhs": "decision",
+   "refs": [
+    "decision"
+   ],
+   "siblings": {},
+   "group": "hooks"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 5623,
+   "path": "hooks/pre_tool_use.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "group": "hooks"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 5634,
+   "path": "hooks/pre_tool_use.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'warning'",
+    "action": "'alert'"
+   },
+   "group": "hooks"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 1316,
+   "path": "hooks/pre_tool_use.py",
+   "rhs_kind": "literal",
+   "rhs": "'config_fallback'",
+   "refs": [
+    "config_fallback"
+   ],
+   "siblings": {
+    "severity": "'critical'",
+    "action": "'alert'"
+   },
+   "group": "hooks"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 4570,
+   "path": "hooks/pre_tool_use.py",
+   "rhs_kind": "literal",
+   "rhs": "'deny'",
+   "refs": [
+    "deny"
+   ],
+   "group": "hooks"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 5239,
+   "path": "hooks/pre_tool_use.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'critical'",
+    "action": "'alert'"
+   },
+   "group": "hooks"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 5607,
+   "path": "hooks/pre_tool_use.py",
+   "rhs_kind": "ifexp",
+   "rhs": "'block' if h['action'] == 'block' else 'alert'",
+   "refs": [
+    "action",
+    "alert",
+    "block",
+    "h"
+   ],
+   "group": "hooks"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 5735,
+   "path": "hooks/pre_tool_use.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'critical'",
+    "action": "'alert'"
+   },
+   "group": "hooks"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 4546,
+   "path": "hooks/pre_tool_use.py",
+   "rhs_kind": "literal",
+   "rhs": "'deny'",
+   "refs": [
+    "deny"
+   ],
+   "group": "hooks"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 4563,
+   "path": "hooks/pre_tool_use.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "group": "hooks"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 1289,
+   "path": "hooks/pre_tool_use.py",
+   "rhs_kind": "literal",
+   "rhs": "'config_fallback'",
+   "refs": [
+    "config_fallback"
+   ],
+   "siblings": {
+    "severity": "'critical'",
+    "action": "'alert'"
+   },
+   "group": "hooks"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 4540,
+   "path": "hooks/pre_tool_use.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "group": "hooks"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 5344,
+   "path": "hooks/pre_tool_use.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'info'"
+   },
+   "group": "hooks"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 203,
+   "path": "hooks/session_start_banner.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'none'"
+   },
+   "group": "hooks"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 856,
+   "path": "scripts/install.py",
+   "rhs_kind": "literal",
+   "rhs": "'alert'",
+   "refs": [
+    "alert"
+   ],
+   "siblings": {
+    "severity": "'critical'",
+    "action": "'alert'"
+   },
+   "group": "scripts"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 390,
+   "path": "scripts/report.py",
+   "rhs_kind": "boolop",
+   "rhs": "ev.get('decision') or ev.get('action') or ''",
+   "refs": [
+    "action",
+    "decision",
+    "ev",
+    "get"
+   ],
+   "siblings": {
+    "severity": "(ev.get('severity') or rule.get('severity') or 'warning').lower()"
+   },
+   "group": "scripts"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 408,
+   "path": "scripts/report.py",
+   "rhs_kind": "literal",
+   "rhs": "'finding'",
+   "refs": [
+    "finding"
+   ],
+   "siblings": {
+    "severity": "f.get('severity', 'warning')"
+   },
+   "group": "scripts"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 739,
+   "path": "scripts/report.py",
+   "rhs_kind": "subscript",
+   "rhs": "f['decision']",
+   "refs": [
+    "decision",
+    "f"
+   ],
+   "siblings": {},
+   "group": "scripts"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 1375,
+   "path": "scripts/verification_tests.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {},
+   "group": "scripts"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 1372,
+   "path": "scripts/verification_tests.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {},
+   "group": "scripts"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 2748,
+   "path": "scripts/verification_tests.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'none'"
+   },
+   "group": "scripts"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 3078,
+   "path": "scripts/verification_tests.py",
+   "rhs_kind": "literal",
+   "rhs": "'block'",
+   "refs": [
+    "block"
+   ],
+   "siblings": {
+    "severity": "'critical'",
+    "action": "'block'"
+   },
+   "group": "scripts"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 3098,
+   "path": "scripts/verification_tests.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'none'",
+    "action": "'allow'"
+   },
+   "group": "scripts"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 3361,
+   "path": "scripts/verification_tests.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'critical'",
+    "action": "'alert'"
+   },
+   "group": "scripts"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 3516,
+   "path": "scripts/verification_tests.py",
+   "rhs_kind": "literal",
+   "rhs": "'block'",
+   "refs": [
+    "block"
+   ],
+   "siblings": {
+    "severity": "'critical'",
+    "action": "'block'"
+   },
+   "group": "scripts"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 3532,
+   "path": "scripts/verification_tests.py",
+   "rhs_kind": "literal",
+   "rhs": "'block'",
+   "refs": [
+    "block"
+   ],
+   "siblings": {
+    "severity": "'critical'",
+    "action": "'block'"
+   },
+   "group": "scripts"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 3640,
+   "path": "scripts/verification_tests.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'critical'",
+    "action": "'alert'"
+   },
+   "group": "scripts"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 114,
+   "path": "ci/inbox_guards.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'warning'"
+   },
+   "group": "ci"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 123,
+   "path": "ci/inbox_guards.py",
+   "rhs_kind": "literal",
+   "rhs": "'block'",
+   "refs": [
+    "block"
+   ],
+   "siblings": {
+    "severity": "'critical'"
+   },
+   "group": "ci"
+  },
+  {
+   "form": "W1-kwarg",
+   "line": 304,
+   "path": "ci/inbox_guards.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "group": "ci"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 102,
+   "path": "ci/inbox_guards_0353.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {},
+   "group": "ci"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 366,
+   "path": "ci/inbox_guards_0353.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {},
+   "group": "ci"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 1407,
+   "path": "ci/inbox_guards_0353.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {},
+   "group": "ci"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 1726,
+   "path": "ci/inbox_guards_0353.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {},
+   "group": "ci"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 1728,
+   "path": "ci/inbox_guards_0353.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {},
+   "group": "ci"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 1787,
+   "path": "ci/inbox_guards_0353.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {},
+   "group": "ci"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 1789,
+   "path": "ci/inbox_guards_0353.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {},
+   "group": "ci"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 3864,
+   "path": "ci/inbox_guards_0353.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'warning'"
+   },
+   "group": "ci"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 723,
+   "path": "ci/inbox_guards_0353.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {},
+   "group": "ci"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 1217,
+   "path": "ci/inbox_guards_0353.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {},
+   "group": "ci"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 1255,
+   "path": "ci/inbox_guards_0353.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {},
+   "group": "ci"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 1279,
+   "path": "ci/inbox_guards_0353.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {},
+   "group": "ci"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 1305,
+   "path": "ci/inbox_guards_0353.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {},
+   "group": "ci"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 1335,
+   "path": "ci/inbox_guards_0353.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {},
+   "group": "ci"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 1376,
+   "path": "ci/inbox_guards_0372.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {},
+   "group": "ci"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 429,
+   "path": "ci/inbox_guards_0400.py",
+   "rhs_kind": "literal",
+   "rhs": "'deny'",
+   "refs": [
+    "deny"
+   ],
+   "siblings": {
+    "severity": "'critical'"
+   },
+   "group": "ci"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 861,
+   "path": "ci/inbox_guards_0400.py",
+   "rhs_kind": "literal",
+   "rhs": "'deny'",
+   "refs": [
+    "deny"
+   ],
+   "siblings": {
+    "severity": "sev"
+   },
+   "group": "ci"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 97,
+   "path": "ci/inbox_guards_0420.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'warning'",
+    "action": "'alert'"
+   },
+   "group": "ci"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 100,
+   "path": "ci/inbox_guards_0420.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'warning'",
+    "action": "'alert'"
+   },
+   "group": "ci"
+  },
+  {
+   "form": "W2-dictkey",
+   "line": 102,
+   "path": "ci/inbox_guards_0420.py",
+   "rhs_kind": "literal",
+   "rhs": "'allow'",
+   "refs": [
+    "allow"
+   ],
+   "siblings": {
+    "severity": "'warning'",
+    "action": "'alert'"
+   },
+   "group": "ci"
+  }
+ ],
+ "runtime": 89,
+ "guards": 23,
+ "readers": 33,
+ "parse_errors": []
+}

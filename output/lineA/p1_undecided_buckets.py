@@ -119,10 +119,33 @@ def _selfcheck():
             pass
 
 
+def emit_json(path, payload):
+    """落盘并**回读自证**，返回可解析内容的字符数。
+
+    ★ 写前先量「值不值得写」：一个 json 只要结构对，读起来就完全正常，
+      哪怕里面的数是空集。所以回读校验之外还要在调用处给关键分母，
+      让「0 条」与「没读到」在产出件里也是两个不同的东西。
+    """
+    d = os.path.dirname(os.path.abspath(path))
+    if d:
+        os.makedirs(d, exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False, indent=1, sort_keys=True)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
+    with open(path, encoding="utf-8") as fh:
+        back = json.load(fh)
+    return len(json.dumps(back, ensure_ascii=False))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--audit-dir", default=".psl/audit")
     ap.add_argument("--top", type=int, default=25)
+    ap.add_argument("--json", default=None, metavar="PATH",
+                    help="把这次读数写成 json（同一条命令重跑会覆盖，不叠加）")
     args = ap.parse_args()
 
     if not os.path.isdir(args.audit_dir):
@@ -195,6 +218,46 @@ def main():
         nd = by_day_nd.get(d, 0)
         tot = by_day_all[d]
         print("   %s  %6d / %6d  %5.1f%%" % (d, nd, tot, 100.0 * nd / tot if tot else 0.0))
+
+    if args.json:
+        payload = {
+            "read_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "audit_dir": os.path.abspath(args.audit_dir),
+            "files_read": files,
+            "records": total,
+            "with_decision": len(with_d),
+            "without_decision": len(without_d),
+            "selfcheck_ok": True,
+            "by_type": [
+                {"type": t, "total": tot, "without_decision": nd,
+                 "with_decision": wd, "pct_without": round(pct, 2),
+                 "name_looks_alarm": bool(any(h in t.lower() for h in _ALARM_HINTS))}
+                for t, tot, nd, wd, pct in rows
+            ],
+            "types_all_without_decision": {t: all_types[t] for t in only_nd},
+            "types_never_without_decision": sorted(only_wd),
+            "risk": {"n_without_decision_alarm_named": alarm_nd,
+                     "pct_of_without_decision": round(
+                         100.0 * alarm_nd / len(without_d), 2) if without_d else 0.0},
+            "by_day": [{"day": d, "without_decision": by_day_nd.get(d, 0),
+                        "total": by_day_all[d],
+                        "pct_without": round(
+                            100.0 * by_day_nd.get(d, 0) / by_day_all[d], 2)
+                        if by_day_all[d] else 0.0}
+                       for d in sorted(by_day_all)[-12:]],
+        }
+        try:
+            nbytes = emit_json(args.json, payload)
+            print("已写 %s（可解析 %d 字符）" % (args.json, nbytes))
+            # ★ 自证：两侧相加必须等于总量。不等于就是分桶漏了一类，
+            #   而屏幕上「有/无」两行照样各自都对。
+            if len(with_d) + len(without_d) != total:
+                print("★ 两侧之和 %d ≠ 总量 %d —— 分桶漏了"
+                      % (len(with_d) + len(without_d), total))
+                return 1
+        except Exception as exc:                        # noqa: BLE001
+            print("✗ 写出失败：%s: %s" % (type(exc).__name__, exc))
+            return 1
 
     return 0
 

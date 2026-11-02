@@ -1,0 +1,329 @@
+{
+ "audit_dir": "D:\\psl\\poc\\antinel-security\\.psl\\audit",
+ "by_day": [
+  {
+   "day": "2026-10-23",
+   "pct_without": 49.19,
+   "total": 7877,
+   "without_decision": 3875
+  },
+  {
+   "day": "2026-10-24",
+   "pct_without": 56.09,
+   "total": 3473,
+   "without_decision": 1948
+  },
+  {
+   "day": "2026-10-25",
+   "pct_without": 60.62,
+   "total": 5135,
+   "without_decision": 3113
+  },
+  {
+   "day": "2026-10-26",
+   "pct_without": 54.19,
+   "total": 4189,
+   "without_decision": 2270
+  },
+  {
+   "day": "2026-10-27",
+   "pct_without": 53.97,
+   "total": 6878,
+   "without_decision": 3712
+  },
+  {
+   "day": "2026-10-28",
+   "pct_without": 56.53,
+   "total": 6406,
+   "without_decision": 3621
+  },
+  {
+   "day": "2026-10-29",
+   "pct_without": 49.78,
+   "total": 10455,
+   "without_decision": 5205
+  },
+  {
+   "day": "2026-10-30",
+   "pct_without": 57.92,
+   "total": 6380,
+   "without_decision": 3695
+  },
+  {
+   "day": "2026-10-31",
+   "pct_without": 53.51,
+   "total": 10174,
+   "without_decision": 5444
+  },
+  {
+   "day": "2026-11-01",
+   "pct_without": 52.78,
+   "total": 8575,
+   "without_decision": 4526
+  },
+  {
+   "day": "2026-11-02",
+   "pct_without": 56.17,
+   "total": 7387,
+   "without_decision": 4149
+  },
+  {
+   "day": "2026-11-03",
+   "pct_without": 55.31,
+   "total": 3871,
+   "without_decision": 2141
+  }
+ ],
+ "by_type": [
+  {
+   "name_looks_alarm": false,
+   "pct_without": 0.0,
+   "total": 53746,
+   "type": "pre_tool_use",
+   "with_decision": 53746,
+   "without_decision": 0
+  },
+  {
+   "name_looks_alarm": false,
+   "pct_without": 100.0,
+   "total": 51853,
+   "type": "post_tool_use",
+   "with_decision": 0,
+   "without_decision": 51853
+  },
+  {
+   "name_looks_alarm": false,
+   "pct_without": 100.0,
+   "total": 46256,
+   "type": "usage_delta",
+   "with_decision": 0,
+   "without_decision": 46256
+  },
+  {
+   "name_looks_alarm": false,
+   "pct_without": 0.0,
+   "total": 12235,
+   "type": "dst02_bash_path_suspect",
+   "with_decision": 12235,
+   "without_decision": 0
+  },
+  {
+   "name_looks_alarm": true,
+   "pct_without": 0.0,
+   "total": 8408,
+   "type": "host_changed",
+   "with_decision": 8408,
+   "without_decision": 0
+  },
+  {
+   "name_looks_alarm": false,
+   "pct_without": 0.0,
+   "total": 6679,
+   "type": "host_shield_heartbeat",
+   "with_decision": 6679,
+   "without_decision": 0
+  },
+  {
+   "name_looks_alarm": false,
+   "pct_without": 0.0,
+   "total": 1266,
+   "type": "pre_tool_use_summary",
+   "with_decision": 1266,
+   "without_decision": 0
+  },
+  {
+   "name_looks_alarm": false,
+   "pct_without": 0.0,
+   "total": 842,
+   "type": "notice_budget_window_closed",
+   "with_decision": 842,
+   "without_decision": 0
+  },
+  {
+   "name_looks_alarm": false,
+   "pct_without": 0.0,
+   "total": 646,
+   "type": "host_shield_revived",
+   "with_decision": 646,
+   "without_decision": 0
+  },
+  {
+   "name_looks_alarm": false,
+   "pct_without": 0.0,
+   "total": 455,
+   "type": "workspace_root_allow",
+   "with_decision": 455,
+   "without_decision": 0
+  },
+  {
+   "name_looks_alarm": false,
+   "pct_without": 0.0,
+   "total": 395,
+   "type": "session_start",
+   "with_decision": 395,
+   "without_decision": 0
+  },
+  {
+   "name_looks_alarm": false,
+   "pct_without": 0.0,
+   "total": 357,
+   "type": "exclude_patterns_allow",
+   "with_decision": 357,
+   "without_decision": 0
+  },
+  {
+   "name_looks_alarm": false,
+   "pct_without": 0.0,
+   "total": 301,
+   "type": "host_shield_spawn_failed",
+   "with_decision": 301,
+   "without_decision": 0
+  },
+  {
+   "name_looks_alarm": true,
+   "pct_without": 0.0,
+   "total": 273,
+   "type": "host_shield_tamper",
+   "with_decision": 273,
+   "without_decision": 0
+  },
+  {
+   "name_looks_alarm": false,
+   "pct_without": 0.0,
+   "total": 234,
+   "type": "command_deletion_permission",
+   "with_decision": 234,
+   "without_decision": 0
+  },
+  {
+   "name_looks_alarm": false,
+   "pct_without": 0.0,
+   "total": 208,
+   "type": "host_shield_zone_locked",
+   "with_decision": 208,
+   "without_decision": 0
+  },
+  {
+   "name_looks_alarm": true,
+   "pct_without": 0.0,
+   "total": 172,
+   "type": "host_shield_breach",
+   "with_decision": 172,
+   "without_decision": 0
+  },
+  {
+   "name_looks_alarm": false,
+   "pct_without": 0.0,
+   "total": 163,
+   "type": "notice_budget_merged",
+   "with_decision": 163,
+   "without_decision": 0
+  },
+  {
+   "name_looks_alarm": false,
+   "pct_without": 0.0,
+   "total": 132,
+   "type": "host_shield_state_unreadable",
+   "with_decision": 132,
+   "without_decision": 0
+  },
+  {
+   "name_looks_alarm": false,
+   "pct_without": 0.0,
+   "total": 77,
+   "type": "host_shield_dev_drift",
+   "with_decision": 77,
+   "without_decision": 0
+  },
+  {
+   "name_looks_alarm": false,
+   "pct_without": 0.0,
+   "total": 47,
+   "type": "hook_slow",
+   "with_decision": 47,
+   "without_decision": 0
+  },
+  {
+   "name_looks_alarm": false,
+   "pct_without": 100.0,
+   "total": 33,
+   "type": "session_dna",
+   "with_decision": 0,
+   "without_decision": 33
+  },
+  {
+   "name_looks_alarm": false,
+   "pct_without": 0.0,
+   "total": 31,
+   "type": "enforcement_probe",
+   "with_decision": 31,
+   "without_decision": 0
+  },
+  {
+   "name_looks_alarm": false,
+   "pct_without": 0.0,
+   "total": 26,
+   "type": "host_shield_task_unknown",
+   "with_decision": 26,
+   "without_decision": 0
+  },
+  {
+   "name_looks_alarm": false,
+   "pct_without": 0.0,
+   "total": 13,
+   "type": "rules_snapshot_refreshed",
+   "with_decision": 13,
+   "without_decision": 0
+  }
+ ],
+ "files_read": 36,
+ "read_at": "2026-11-03 06:08:05",
+ "records": 184905,
+ "risk": {
+  "n_without_decision_alarm_named": 0,
+  "pct_of_without_decision": 0.0
+ },
+ "selfcheck_ok": true,
+ "types_all_without_decision": {
+  "post_tool_use": 51853,
+  "session_dna": 33,
+  "usage_delta": 46256
+ },
+ "types_never_without_decision": [
+  "autostart_no_window_fixed",
+  "canary_planted",
+  "command_deletion_permission",
+  "credits_snapshot",
+  "dst02_bash_path_suspect",
+  "dst02_path_whitelisted",
+  "enforcement_probe",
+  "exclude_patterns_allow",
+  "hook_alive",
+  "hook_error",
+  "hook_slow",
+  "host_changed",
+  "host_shield_breach",
+  "host_shield_changed",
+  "host_shield_dev_drift",
+  "host_shield_heartbeat",
+  "host_shield_revived",
+  "host_shield_spawn_failed",
+  "host_shield_state_unreadable",
+  "host_shield_tamper",
+  "host_shield_task_unknown",
+  "host_shield_zone_locked",
+  "notice_budget_merged",
+  "notice_budget_window_closed",
+  "policy_changed",
+  "pre_tool_use",
+  "pre_tool_use_summary",
+  "probe_diag",
+  "rules_integrity_fallback",
+  "rules_snapshot_refreshed",
+  "sec_path_whitelisted",
+  "session_start",
+  "workspace_root_allow"
+ ],
+ "with_decision": 86763,
+ "without_decision": 98142
+}

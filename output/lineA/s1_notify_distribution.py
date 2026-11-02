@@ -35,6 +35,31 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_POLICY = os.path.join(os.path.dirname(os.path.dirname(HERE)), "hooks", "notify_policy.py")
 
 
+def emit_json(path: str, payload: dict) -> int:
+    """落盘并**回读自证**，返回可解析内容的字符数。
+
+    ★ 为什么要读回来：`json.dump` 不抛异常，不等于文件可用 —— 磁盘满、
+      编码错、写到一半被杀，都能留下一个「存在且非空」的文件。
+      而「产出件存在」与「产出件可用」在目录列表上**完全一样**。
+      这是本项目反复吃到的那一类：零与不可判同貌。
+
+    ★ 为什么先写 `.tmp` 再 replace：同一个路径第二次跑要**覆盖**而不是追加。
+      追加会让两次读数叠成一个（分母悄悄翻倍），且看起来完全正常。
+    """
+    d = os.path.dirname(os.path.abspath(path))
+    if d:
+        os.makedirs(d, exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False, indent=1, sort_keys=True)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
+    with open(path, encoding="utf-8") as fh:
+        back = json.load(fh)
+    return len(json.dumps(back, ensure_ascii=False))
+
+
 def load_policy(path):
     spec = importlib.util.spec_from_file_location("notify_policy_audit", path)
     mod = importlib.util.module_from_spec(spec)
@@ -58,6 +83,8 @@ def main():
     ap.add_argument("--audit-dir", required=True)
     ap.add_argument("--policy", default=DEFAULT_POLICY)
     ap.add_argument("--top", type=int, default=20)
+    ap.add_argument("--json", default=None, metavar="PATH",
+                    help="把这次读数写成 json（同一条命令重跑会覆盖，不叠加）")
     args = ap.parse_args()
 
     if not os.path.isdir(args.audit_dir):
@@ -184,6 +211,64 @@ def main():
         print("  %-38s %6d 条 → gate %d / toast %d / none %d" % (label, c, nv, nv_t, nv_n))
     print()
     print("★ 结论口径：本表所有数字都是 %s 那一刻的读数；账本 30 天滚动，重算请重跑本脚本。" % read_at)
+
+    if args.json:
+        # ★ 落盘内容与屏幕**同源**：一个 dict 直接从上面那几个计数器组装，
+        #   不重算、不再扫一遍账本。重算就是第二把尺子。
+        pairs = {}
+        for (a, d), c in by_pair.items():
+            pairs["%s|%s" % (a, d)] = {
+                "n": c,
+                "gate": pair_notify.get(((a, d), "gate"), 0),
+                "toast": pair_notify.get(((a, d), "toast"), 0),
+                "none": pair_notify.get(((a, d), "none"), 0),
+            }
+        contrad = {}
+        for key, label in (((("alert"), ("allow")), "action=alert + decision=allow"),
+                           ((("block"), ("deny")), "action=block + decision=deny")):
+            contrad[label] = {
+                "n": by_pair.get(key, 0),
+                "gate": pair_notify.get((key, "gate"), 0),
+                "toast": pair_notify.get((key, "toast"), 0),
+                "none": pair_notify.get((key, "none"), 0),
+            }
+        payload = {
+            "read_at": read_at,
+            "audit_dir": os.path.abspath(args.audit_dir),
+            "policy": os.path.abspath(args.policy),
+            "files": {"daily": len(daily), "skipped": skipped},
+            "records": n_rec,
+            "bad_json": n_bad_json,
+            "n_raise": n_raise,
+            "raise_samples": raise_samples,
+            "notify": {
+                "gate": by_notify.get("gate", 0),
+                "toast": by_notify.get("toast", 0),
+                "none": by_notify.get("none", 0),
+                "other": other,
+                "sum": sum(by_notify.values()),
+                "sum_equals_records": sum(by_notify.values()) == n_rec,
+            },
+            "non_event": {t: non_event_hits.get(t, 0) for t in np.non_event_types()},
+            "pairs": pairs,
+            "top_notify_by_type": [
+                {"type": t, "notify": nv, "n": c} for t, nv, c in rows[:args.top]
+            ],
+            "contradictions": contrad,
+        }
+        try:
+            nbytes = emit_json(args.json, payload)
+            print("已写 %s（可解析 %d 字符）" % (args.json, nbytes))
+            # ★ 自证一条：三档之和必须等于记录数。不等于就说明有记录没被计到任何一档，
+            #   而屏幕上那三行照样各自都对。
+            if not payload["notify"]["sum_equals_records"]:
+                print("★ 三档之和 %d ≠ 记录 %d —— 有记录没落进任何一档"
+                      % (payload["notify"]["sum"], n_rec))
+                return 1
+        except Exception as exc:                        # noqa: BLE001
+            print("✗ 写出失败：%s: %s" % (type(exc).__name__, exc))
+            return 1
+
     return 0
 
 
