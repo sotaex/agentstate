@@ -5822,8 +5822,84 @@ def load_slots():
     return mod
 
 
+def _slot_polarity(op, spec):
+    """给一个谓词，造出「会命中」与「该放行」两种输入（2026-11-02）。
+
+    为什么需要它：一条永远命中或永远清白的判据，等于没有判据。而「恒真」
+    在读数上是看不出来的——19 条和 1900 条都印 hit。只有把输入推向反面、
+    看结论是否跟着翻，才能区分「数据里有事」与「写法上有事」。
+
+    返回 `(pos_val, neg_val, neg_expect)`，`neg_expect` 取 `"clean"` 或
+    `"undecidable"`；算子没有可构造的反面时返回 `None`（跳过，不猜）。
+
+    ★ 为什么 sequence 的 neg 可能期望 undecidable：repeat<=1 时反面是空序列，
+      而「没样本不判」是算子**设计**，不是恒真。把它当 clean 会让这条腿
+      误伤正确实现。
+    """
+    thr = spec.get("threshold")
+    direction = spec.get("direction", "higher_worse")
+    if op == "exists":
+        table = {"true": (True, False), "false": (False, True),
+                 "nonzero": (1, 0), "zero": (0, 1),
+                 "nonempty": (["x"], []), "empty": ([], ["x"])}
+        pair = table.get(spec.get("match"))
+        if pair is None:
+            return None
+        return pair[0], pair[1], "clean"
+    if op in ("count", "monotonic"):
+        if not isinstance(thr, (int, float)):
+            return None
+        return (thr + 1, thr, "clean") if direction != "lower_worse" \
+            else (thr - 1, thr, "clean")
+    if op == "ratio":
+        if not isinstance(thr, (int, float)):
+            return None
+        den = 100
+        if direction == "lower_worse":
+            return (max(0, int(thr * den) - 1), den), (int(thr * den), den), "clean"
+        return (int(thr * den) + 1, den), (int(thr * den), den), "clean"
+    if op == "set_diff":
+        return ["x"], [], "clean"
+    if op == "sequence":
+        rep = spec.get("repeat")
+        if not isinstance(rep, int):
+            return None
+        return (rep, "x"), (rep - 1, "x"), ("undecidable" if rep <= 1 else "clean")
+    return None
+
+
+def _slot_flip_failures(S, slots, swap=False):
+    """跑一遍翻转腿，返回不翻转的槽位清单（空 = 全都能翻）。
+
+    `swap=True` 是这条腿自己的负控：把正负输入互换后**必须**出现失败。
+    若互换后仍然全绿，说明这段检查根本没在比对，绿是空的。
+    """
+    bad = []
+    for s in slots:
+        if s.get("status") == "unregistered":
+            continue
+        p = s.get("predicate") or {}
+        op = p.get("op")
+        if op not in getattr(S, "_APPLY", {}):
+            continue
+        pair = _slot_polarity(op, p)
+        if pair is None:
+            continue
+        pos, neg, expect = pair
+        if swap:
+            pos, neg, expect = neg, pos, "hit"
+        want_neg = S.UNDECIDABLE if expect == "undecidable" else S.CLEAN
+        got_pos = S._APPLY[op](pos, p)[0]
+        got_neg = S._APPLY[op](neg, p)[0]
+        if got_pos != S.HIT or got_neg != want_neg:
+            bad.append("%s/%s op=%s pos=%r→%s neg=%r→%s"
+                       % (s.get("id"), s.get("ext_id"), op,
+                          pos, got_pos, neg, got_neg))
+    return bad
+
+
 def j_slots_registry_and_evaluator():
-    """D-54 槽位登记表与求值器的四个必答题（2026-11-01）。
+    """D-54 槽位登记表与求值器的九个必答题（2026-11-01，2026-11-02 扩两腿）。
 
     ★ 签名必须**无参**：`_checks()` 里带参判据一律写成 `lambda: j_x(m)`，
       直接放函数对象会让 `main()` 的 `fn()` 抛 TypeError ⇒ 这条判据永远红，
@@ -5846,6 +5922,15 @@ def j_slots_registry_and_evaluator():
       ⑦ 执法探针口径腿（2026-11-02）：证据版本过期 / 同版本结论不一致 /
          探针未接通道，一律不定论；但「同版本一致成功」仍须给结论
          —— 最后半句是防「把量具砸了当修好」
+      ⑧ 翻转腿（2026-11-02）：每个已登记的谓词都要能翻 —— 喂「该命中」与
+         「该放行」两种输入，结论必须跟着变。翻不动的就是恒真，而恒真在
+         读数上与真命中长得一模一样（MS1-01 的 19 条就是这么来的）。
+         互换正负输入后必须变红，否则这条腿本身没有分辨力。
+      ⑨ 已知恒真陷阱腿（2026-11-02）：MS1-01 的错不在算子里，在**两处常数
+         的关系**里（判定阈值 2000 vs 写入线 8000）—— 翻转腿抓不到它
+         （thr 推到 1e9 时它确实会变 clean）。所以单列登记：谓词字段不得
+         回退成 p95；`_hook_latency` 在无记录时必须给出 `hook_slow_n=0`
+         而不是空 dict，且**不得**给 p95=0（那是「延迟 0ms」的假 0）。
     """
     S = load_slots()
 
@@ -6036,11 +6121,56 @@ def j_slots_registry_and_evaluator():
             return False, ("⑦ %s：结论对但理由里没有「%s」⇒ 读的人不知道该做什么"
                            % (_nm, _kw))
 
-    return True, ("七腿成立：① 真表 %d 条/%d 登记，分母自洽 ② %d 种变异全部判红 "
+    # ── ⑧ 翻转腿（2026-11-02）──
+    # 这条腿回答的是「这条判据会不会翻」，不是「今天读数是多少」。
+    # 为什么不能靠 ③（空窗口）：③ 只证明「没数据时不给结论」，对「有数据时
+    # 恒给命中」完全无分辨力。MS1-01 就是这种形状 —— 空窗口它老实说判不了，
+    # 一有记录就必命中，中间没有 clean。
+    _bad8 = _slot_flip_failures(S, slots)
+    if _bad8:
+        return False, ("⑧ 翻转腿失效：%d 条谓词翻不动（%s）⇒ 它们命中的原因不在"
+                       "数据里、在写法里；这种判据在读数上与真命中无法区分"
+                       % (len(_bad8), _bad8[:3]))
+    if not _slot_flip_failures(S, slots, swap=True):
+        return False, ("⑧ 负控失效：把正负输入互换后仍然全绿 ⇒ 这条腿没有在比对，"
+                       "绿是空的")
+
+    # ── ⑨ 已知恒真陷阱腿（2026-11-02）──
+    # MS1-01：`hook_slow` 只在端到端 >= SLOW_BUDGET_MS(8000ms) 时写入，
+    # 而原谓词拿 p95 比 2000 ⇒ 只要有一条记录就必命中；n=0 时探针返回 {}
+    # ⇒ 字段缺失 ⇒ 永不可判。两态合起来：**永远不可能说「本窗口没有慢钩子」**。
+    # 这类错在两处常数的关系里，⑧ 抓不到（把 thr 推到 1e9 它确实会 clean），
+    # 所以登记成陷阱，回退即红。
+    _s9 = [s for s in slots if s.get("id") == "SLOT-056"]
+    if not _s9:
+        return False, "⑨ 陷阱登记失效：SLOT-056 不在登记表里（被改号或删除？）"
+    _p9 = _s9[0].get("predicate") or {}
+    if _p9.get("field") != "hook_slow_n":
+        return False, ("⑨ MS1-01 回退到了 %r：hook_slow 的写入线是 8000ms，"
+                       "拿 p95 比 2000 必恒命中，且 n=0 时字段缺失、永无 clean"
+                       % (_p9.get("field"),))
+
+    class _NoRecords9(object):
+        """只实现 `_hook_latency` 用到的那一个方法。"""
+
+        def of_type(self, *types):
+            return []
+
+    _hv9 = S._hook_latency(_NoRecords9())
+    if not isinstance(_hv9, dict) or _hv9.get("hook_slow_n") != 0:
+        return False, ("⑨ `_hook_latency` 在无记录时没有给出 hook_slow_n=0（拿到 %r）"
+                       "⇒ n=0 时字段缺失，MS1-01 重新变成「永不可判」" % (_hv9,))
+    if "hook_slow_p95_ms" in _hv9:
+        return False, ("⑨ 无记录时给了 hook_slow_p95_ms=0 ⇒ 会被读成「延迟 0ms」，"
+                       "而真相是「本窗口没有慢钩子」。假 0 比字段不存在更糟")
+
+    return True, ("九腿成立：① 真表 %d 条/%d 登记，分母自洽 ② %d 种变异全部判红 "
                   "③ 空窗口下 %d 条窗口型槽位一律不定论 ④ 死代码报 no_producer、"
                   "从未触发与普通 0 区分开 ⑤ 四态互斥穷尽 "
                   "⑥ 哈希口径与 manifest 同源（版本行归一化，裸哈希必失配）"
                   " ⑦ 执法探针：旧版本/混杂/未接通道一律不定论，一致成功仍给结论"
+                  " ⑧ 谓词可翻转（互换正负输入即红）"
+                  " ⑨ MS1-01 未回退 p95、无记录时给 n=0 且不给假 p95"
                   % (len(slots), declared_reg, len(muts), len(windowed)))
 
 
@@ -6146,7 +6276,7 @@ def _checks(m):
         ("D-53 硬编码规则说明书必须与代码同源（四条「关不掉」的判定）",
          j_hardcoded_rules_are_truthful),
         # ── 2026-11-01 D-54：46 个槽位接线前，先锁住求值器本身 ──
-        ("D-54 槽位登记表与求值器：正控/负控/空窗口/生产者缺席/四态穷尽/哈希口径/探针口径",
+        ("D-54 槽位登记表与求值器：正控/负控/空窗口/生产者缺席/四态穷尽/哈希口径/探针口径/谓词翻转/恒真陷阱",
          j_slots_registry_and_evaluator),
     ]
 
