@@ -6218,6 +6218,199 @@ def _probe_semantics_failures(S):
     if _v is not None:
         bad.append("CONFIG_HOOKS 找不到任何配置文件却给了结论（%r）⇒ "
                    "「没配置」会被读成「配置正常」" % (_v,))
+
+    # ── EXIT_CODE：构建/检查类命令的退出码（Q1-01）──
+    #   ★ 这条探针最容易犯的错是**把范围放大**：任何非零退出都算「构建失败」。
+    #     那样 `ls` 找不到目录、`grep` 没匹配到，都会变成天天红的构建失败，
+    #     几次之后这条判据就会被人关掉。所以「非构建命令非零退出」必须判 None。
+    def _post(cmd, rc=None, tool="Bash"):
+        r = {"type": "post_tool_use", "tool": tool,
+             "input": {"command": cmd}, "ts": "2026-11-02T10:00:00+08:00"}
+        if rc is not None:
+            r["exit_code"] = rc
+        return r
+
+    # Q1-01 正控：构建命令退出 1 ⇒ 必须报失败
+    _v = S._p_exit_code(_PathCtx(_root, [_post("pytest -q", 1)]))
+    if (not isinstance(_v, dict) or _v.get("build_failed") is not True
+            or _v.get("build_failures") != 1 or _v.get("build_runs") != 1):
+        bad.append("Q1-01 构建命令退出 1，却报 build_failed=%r / failures=%r / "
+                   "runs=%r ⇒ 构建失败量不出来"
+                   % ((_v or {}).get("build_failed"),
+                      (_v or {}).get("build_failures"),
+                      (_v or {}).get("build_runs")))
+    # Q1-01 负控：同一命令退出 0 ⇒ 不许报失败
+    _v = S._p_exit_code(_PathCtx(_root, [_post("pytest -q", 0)]))
+    if isinstance(_v, dict) and (_v.get("build_failed") is not False
+                                or _v.get("build_failures") != 0):
+        bad.append("Q1-01 构建命令退出 0，却报 build_failed=%r / failures=%r ⇒ "
+                   "正常构建被报成失败（判据会被人关掉）"
+                   % (_v.get("build_failed"), _v.get("build_failures")))
+    # ★★ 输入边界 ≠ 规则边界：`ls` 找不到目录也非零退出，但它不是构建。
+    #    算进来就等于把整条判据变成噪声源（假绿十四族 ③）。
+    _v = S._p_exit_code(_PathCtx(_root, [_post("ls /nonexistent_dir_xyz", 2)]))
+    if _v is not None:
+        bad.append("Q1-01 把非构建类命令（ls）的非零退出算成了构建失败（返回 %r）"
+                   " ⇒ 「ls 找不到目录」会天天报构建失败" % (_v,))
+    # 读不到退出码 ⇒ 不许当成失败（缺字段是缺事实，不是「非零」）
+    _v = S._p_exit_code(_PathCtx(_root, [_post("pytest -q")]))
+    if isinstance(_v, dict) and _v.get("build_failures") != 0:
+        bad.append("Q1-01 记录里没有 exit_code，却报 build_failures=%r ⇒ "
+                   "缺字段被当成非零退出" % (_v.get("build_failures"),))
+
+    # ── ARTIFACT_PATH：声称写完的产物现在还在不在（Q1-05）──
+    #   ★ 这条探针只会「看盘」。所以语料必须**真的在盘上造一个文件**，
+    #     造在 `_TMP.tmpdir` 里（本仓有过 tempfile 残骸事故，不裸用 tempfile）。
+    _art = _TMP.tmpdir(prefix="d54art_")
+    _art_alive = os.path.join(str(_art), "claimed_alive.txt")
+    with open(_art_alive, "w", encoding="utf-8") as _f:
+        _f.write("x")
+    _art_gone = os.path.join(str(_art), "claimed_gone.txt")
+
+    def _claim(tool, path):
+        return {"type": "post_tool_use", "tool": tool,
+                "input": {"file_path": path}, "ts": "2026-11-02T10:00:00+08:00"}
+
+    # Q1-05 正控：声称写的文件还在 ⇒ 不许报「产物消失」
+    _v = S._p_artifact_path(_PathCtx(_root, [_claim("Write", _art_alive)]))
+    if (not isinstance(_v, dict) or _v.get("missing_artifact") is not False
+            or _v.get("n_missing") != 0 or _v.get("claimed") != 1):
+        bad.append("Q1-05 声称写的文件确实还在，却报 missing_artifact=%r / "
+                   "n_missing=%r ⇒ 产物会天天被报成消失"
+                   % ((_v or {}).get("missing_artifact"),
+                      (_v or {}).get("n_missing")))
+    # Q1-05 负控：声称写的文件不存在 ⇒ 必须报出来
+    _v = S._p_artifact_path(_PathCtx(_root, [_claim("Edit", _art_gone)]))
+    if (not isinstance(_v, dict) or _v.get("missing_artifact") is not True
+            or _v.get("n_missing") != 1):
+        bad.append("Q1-05 声称写的文件已经不存在，却报 missing_artifact=%r / "
+                   "n_missing=%r ⇒ 「说写完了其实没有」看不见"
+                   % ((_v or {}).get("missing_artifact"),
+                      (_v or {}).get("n_missing")))
+    # ★★ 只有 Write/Edit 的 file_path 才算「声称产物」。命令行里出现的路径是猜的
+    #    —— 一个 `Bash(cat > x)` 携带 file_path 字段时不许被当成声称。
+    _v = S._p_artifact_path(_PathCtx(_root, [_claim("Bash", _art_alive)]))
+    if _v is not None:
+        bad.append("Q1-05 把 Bash 记录里的 file_path 当成了「声称的产物」（返回 %r）"
+                   " ⇒ 命令行里提到的路径会被当成写过的文件" % (_v,))
+    _v = S._p_artifact_path(_PathCtx(_root, [_claim("Read", _art_alive)]))
+    if _v is not None:
+        bad.append("Q1-05 把 Read 记录里的 file_path 当成了「声称的产物」（返回 %r）"
+                   % (_v,))
+
+    # ── CMD_TEXT：动作文本上的规则命中，按 category 切片（A1-01）──
+    #   ★ 三类定义**只能从 products 自己的规则表取**（`rules/default.json` 的
+    #     `category` + `name`）。这里手抄一份 ID 名单就是第二套口径：规则表一改，
+    #     判据不跟（铁律 8）。所以下面的锚点全部现取现报，写死即错。
+    _cats = S._p_rules_categories(_PathCtx(_root, []))
+    if not isinstance(_cats, dict):
+        bad.append("A1-01 规则表读不出来（`rules/default.json`）⇒ CMD_TEXT 永远"
+                   "判不了，A1-01 / A1-05 / K1-02 三条一起失明")
+    else:
+        _dang = S._rule_ids(_cats.get("destructive"))
+        _priv = S._rule_ids(_cats.get("destructive"), name_has="escalation")
+        _sec = S._rule_ids(_cats.get("secrets"), name_has="secret")
+        # 三类都得真存在，否则探针自己会返回 None ⇒ 三条槽位永久 undecidable
+        if not (_dang and _priv and _sec):
+            bad.append("A1-01 规则表缺类：destructive=%d / escalation=%d / "
+                       "secret=%d 条 ⇒ CMD_TEXT 直接返回 None，"
+                       "三条槽位永久判不了"
+                       % (len(_dang), len(_priv), len(_sec)))
+        else:
+            _one_dang = sorted(_dang)[0]
+            _one_sec = sorted(_sec)[0]
+
+            def _hit(ids):
+                return {"type": "pre_tool_use", "tool": "Bash",
+                        "session": "probe-cmd", "ts": "2026-11-02T10:00:00+08:00",
+                        "rules_hit": [{"rule_id": i} for i in ids]}
+
+            # A1-01 正控：命中了 destructive 类 ⇒ dangerous_hit 必须为真
+            _v = S._p_cmd_text(_PathCtx(_root, [_hit([_one_dang])]))
+            if (not isinstance(_v, dict) or _v.get("dangerous_hit") is not True
+                    or _v.get("n_dangerous") != 1):
+                bad.append("A1-01 命中 destructive 规则 %s，却报 dangerous_hit=%r / "
+                           "n_dangerous=%r ⇒ 危险动作看不见"
+                           % (_one_dang, (_v or {}).get("dangerous_hit"),
+                              (_v or {}).get("n_dangerous")))
+            # A1-01 负控：一条规则都没命中 ⇒ 不许报危险
+            _v = S._p_cmd_text(_PathCtx(_root, [_hit([])]))
+            if isinstance(_v, dict) and (_v.get("dangerous_hit") is not False
+                                         or _v.get("n_pre") != 1):
+                bad.append("A1-01 一条规则都没命中，却报 dangerous_hit=%r / "
+                           "n_pre=%r ⇒ 普通命令被报成危险动作"
+                           % (_v.get("dangerous_hit"), _v.get("n_pre")))
+            # ★★ 切片不许互相污染：只命中 secret 时，dangerous 必须是 False。
+            #    这条是 A1-01 的真语义 —— 三类「危险」的定义不同，混用会让
+            #    「读到一份凭证」被报成「删了东西」。
+            _v = S._p_cmd_text(_PathCtx(_root, [_hit([_one_sec])]))
+            if isinstance(_v, dict) and (_v.get("dangerous_hit") is not False
+                                         or _v.get("secret_hit") is not True):
+                bad.append("A1-01 只命中 secret 规则 %s，却报 dangerous_hit=%r / "
+                           "secret_hit=%r ⇒ 三类切片互相污染"
+                           % (_one_sec, _v.get("dangerous_hit"),
+                              _v.get("secret_hit")))
+            # 反向：只命中 destructive 时 secret 必须是 False
+            _v = S._p_cmd_text(_PathCtx(_root, [_hit([_one_dang])]))
+            if isinstance(_v, dict) and _v.get("secret_hit") is not False:
+                bad.append("A1-01 只命中 destructive 规则，却报 secret_hit=%r ⇒ "
+                           "破坏类动作被报成碰到凭证" % (_v.get("secret_hit"),))
+            # 边界：规则表读不到 ⇒ 整段 None，不许给「没有危险动作」
+            _v = S._p_cmd_text(_PathCtx(os.path.join(_root, "no_such_root_xyz"),
+                                        [_hit([_one_dang])]))
+            if _v is not None:
+                bad.append("A1-01 规则表读不到却给了结论（返回 %r）⇒ "
+                           "「不知道什么是危险」会被读成「没有危险」" % (_v,))
+
+    # ── LEDGER_ACTIONS：pre/post 按 content_digest 配对（I1-01）──
+    #   ★ 两个方向必须**是两个字段**：`unpaired`（有 pre 无 post，可能还在跑）
+    #     与 `unpaired_post`（有 post 无 pre，动作做完决策没留痕）。
+    #     把两者映射到同一个字段，会让 I1-01 与 I1-02 对同一事实给出相反结论
+    #     —— 实测过一次：I1-01 判命中 354，I1-02 判清白 2.6%。
+    def _led(typ, digest, sess="probe-i1"):
+        return {"type": typ, "tool": "Bash", "session": sess,
+                "content_digest": digest, "ts": "2026-11-02T10:00:00+08:00"}
+
+    # I1-01 正控：post 侧多出一个 digest（动作做完没留决策）⇒ unpaired_post=1
+    _v = S._p_ledger_actions(_FakeCtx([
+        _led("pre_tool_use", "d1"),
+        _led("post_tool_use", "d1"), _led("post_tool_use", "d2")]))
+    if not isinstance(_v, dict) or _v.get("unpaired_post") != 1:
+        bad.append("I1-01 post 侧多出一个 digest，unpaired_post 却是 %r ⇒ "
+                   "「动作做完了决策没记」看不见" % ((_v or {}).get("unpaired_post"),))
+    # ★ 同一批输入里，另一个方向必须是 0 —— 两方向分离才叫分离
+    if isinstance(_v, dict) and _v.get("unpaired") != 0:
+        bad.append("I1-01 同一批输入里 unpaired=%r（pre 侧一个都没多）⇒ "
+                   "两个方向被并成了一个字段" % (_v.get("unpaired"),))
+    # I1-01 负控：两侧完全配对 ⇒ 两个方向都必须是 0
+    _v = S._p_ledger_actions(_FakeCtx([
+        _led("pre_tool_use", "d1"), _led("post_tool_use", "d1")]))
+    if isinstance(_v, dict) and (_v.get("unpaired") != 0
+                                 or _v.get("unpaired_post") != 0):
+        bad.append("I1-01 两侧完全配对，却报 unpaired=%r / unpaired_post=%r ⇒ "
+                   "留痕完整会被报成缺失"
+                   % (_v.get("unpaired"), _v.get("unpaired_post")))
+    # 反方向：pre 侧多一个（动作还没跑完）⇒ unpaired=1 且 unpaired_post=0
+    _v = S._p_ledger_actions(_FakeCtx([
+        _led("pre_tool_use", "d1"), _led("pre_tool_use", "d2"),
+        _led("post_tool_use", "d1")]))
+    if isinstance(_v, dict) and (_v.get("unpaired") != 1
+                                 or _v.get("unpaired_post") != 0):
+        bad.append("I1-01 pre 侧多出一个 digest，却报 unpaired=%r / "
+                   "unpaired_post=%r ⇒ 两个方向对调了"
+                   % (_v.get("unpaired"), _v.get("unpaired_post")))
+    # 边界：空 digest 不算 digest ⇒ 两侧都只有空串时整段 None
+    #   （空串相等是「相同」，会被读成配对成功，那是凭空的清白）
+    _v = S._p_ledger_actions(_FakeCtx([
+        _led("pre_tool_use", ""), _led("post_tool_use", "")]))
+    if _v is not None:
+        bad.append("LEDGER_ACTIONS 把空 content_digest 当成了配对依据（返回 %r）⇒ "
+                   "凭空的「留痕完整」" % (_v,))
+    # 边界：两侧都空 ⇒ None，不许报「配对率 100%」
+    _v = S._p_ledger_actions(_FakeCtx([]))
+    if _v is not None:
+        bad.append("LEDGER_ACTIONS 在没有一条记录时给了结论（返回 %r）⇒ "
+                   "空集被读成「配对完美」" % (_v,))
     return bad
 
 
@@ -6271,12 +6464,13 @@ def j_slots_registry_and_evaluator():
          34 条历史假记录全部隐形），外加一条「拉起方式清单要自证看过全部
          记录」（否则 0 与「只挑了那几条」同貌）。
       ⑫ 语料腿（2026-11-02 夜）：上面十一条守的都是**求值器**（算子、常数、
-         探针语义），没有一条守「**命中的那 13 条谓词本身对不对**」。实测：
-         13 条命中里 11 条在 ci/ 下没有任何语料，谓词被改坏也不会有人发现。
-         这一腿按**探针**而不是按槽位造语料 —— 13 条命中只用了 7 个探针，
+         探针语义），没有一条守「**命中的那些谓词本身对不对**」。实测当时：
+         已分诊的 13 条命中里 11 条在 ci/ 下没有任何语料，谓词被改坏也不会有人
+         发现。这一腿按**探针**而不是按槽位造语料 —— 命中只用了 9 个探针，
          `WRITE_SET` 一个源就出三个字段，被 Q1-06 / K1-01 / MK1-01 分别消费；
          按槽位各造一份等于把同一件事测三遍，还测不到共用那一段。
-         已做三组（共 18 条语料，全部经变异验证可翻、未变异时零误报）：
+         本腿七组已做（共 39 条语料：前三组 18 条 ＋ 后四组 21 条，全部经变异验证
+         可翻、未变异时零误报；两个变异脚本各自最后会自证「每条腿都被翻红过」）：
            · WRITE_SET（守 3 条命中：Q1-06 验收标准被改 / K1-01 范围漂移 /
              MK1-01 越权观测）：三个字段各自双向 ＋ 只读会话不返回 None。
            · LEDGER_SEQ（守 2 条：S1-02 死循环 / S1-04 步数超限）：最长重复
@@ -6285,10 +6479,30 @@ def j_slots_registry_and_evaluator():
            · CONFIG_HOOKS（守 2 条：P1-03 配置漂移 / MK1-02 观测权声明缺失）：
              变更次数正负 ＋ consent_missing 正负 ＋ 一个配置都找不到时必须
              整段返回 None（不许把「没配置」读成「配置正常」）。
-         变异测试脚本：`output/_p_d54_leg12_mutation.py`（18 条腿逐条推翻）。
-         ★ 剩余 4 个探针（EXIT_CODE / ARTIFACT_PATH / CMD_TEXT /
-           LEDGER_ACTIONS）尚未补语料，对应 Q1-01 / Q1-05 / A1-01 / I1-01
-           四条命中。
+           · EXIT_CODE（守 1 条：Q1-01 构建失败）：退出 1 必报失败 ＋ 退出 0
+             不许报失败 ＋ **非构建命令的非零退出必须整段 None**（否则 `ls`
+             找不到目录天天报构建失败）＋ 缺 exit_code 不算非零。
+           · ARTIFACT_PATH（守 1 条：Q1-05 声称产物消失）：真的是在盘上造文件
+             再问，正负两向 ＋ **Bash/Read 记录里的 file_path 不算「声称产物」**
+             （命令行里的路径是猜的）。
+           · CMD_TEXT（守 3 条：A1-01 危险动作 / A1-05 / K1-02）：三类锚点
+             **现取现报**（`rules/default.json` 的 category＋name，写死即错）
+             ＋ destructive 正负 ＋ **只命中 secret 时 dangerous 必须 False、
+             反之亦然**（三类切片不许互相污染）＋ 规则表读不到必须整段 None。
+           · LEDGER_ACTIONS（守 1 条：I1-01 决策无留痕）：`unpaired` 与
+             `unpaired_post` **必须两个方向分开**（合并会让 I1-01 与 I1-02
+             对同一事实给出相反结论，实测过：命中 354 vs 清白 2.6%）
+             ＋ 完全配对时两向皆 0 ＋ 空 digest 不算 ＋ 空集必须 None。
+         变异测试脚本：`output/_p_d54_leg12_mutation.py`（前三组 18 条腿）、
+         `output/_p_d54_leg12b_mutation.py`（后四组 21 条腿）。
+         ★ 至此命中用到的 **9 个探针全部**有语料腿，没有「零语料」的命中。
+           除此七组，另两个探针的腿就在 ⑪ 正文里（`LEDGER_TS` 守 MI1-02、
+           `SELF_PID` 守 X3-02）—— 它们本来就是探针语义腿，不重复造。
+           读数留时刻（2026-11-03 00:30 现取）：命中 14 条 ＝ 12 real ＋
+           1 defect ＋ 1 calibration；9 个探针分布 WRITE_SET×3 / CONFIG_HOOKS×2
+           / LEDGER_SEQ×2 / LEDGER_TS×2 / ARTIFACT_PATH×1 / CMD_TEXT×1 /
+           EXIT_CODE×1 / LEDGER_ACTIONS×1 / SELF_PID×1。
+           ⚠ 这个 14 与 9 会随分诊变化，**引用前重新数**，别照抄。
     """
     S = load_slots()
 
