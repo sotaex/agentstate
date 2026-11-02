@@ -1,0 +1,69 @@
+fix(probe): 执法探针自报版本停在 0.30.0 —— 三个槽位因此永久判不了
+
+一、根因
+  tools/enforce_probe.py 第 44 行硬编码 `_ANTINEL_VERSION = "0.30.0"`，
+  而产品已是 0.63.2。本文件写出的每条 enforcement_probe 记录都带这个旧版本。
+
+  后果不是「版本号不好看」，而是整条判据链失效：
+    scripts/slots.py::_p_self_probe 的第一道闸是「证据必须来自当前版本」，
+    它拿记录里的值跟 hooks/pre_tool_use.py 里的值比 —— 一份 0.30.0、一份 0.63.2，
+    **永不相等** ⇒ 这个闸永不放行 ⇒
+      XM3-01 执法通道可用性
+      MP1-01 依赖模型可用性
+      XM2a-01 观测权有效性
+    三个槽位**永久 undecidable**。不是没数据，是我们自己的探针把数据标成了过期。
+
+  这是「量具坏了被当产品坏了」的镜像形态：量具把自己标成了坏数据。
+  与 scripts/slots.py 里记的 X2b-06（裸 sha256 与记账值恒不相等 ⇒ 永久判红）
+  是同一形状，只是这次是版本号。
+
+二、为什么这不是「改个常量了事」
+  版本真源是 hooks/pre_tool_use.py 的 _ANTINEL_VERSION。本文件存的是副本。
+  任何硬编码都会再次落后，而落后的表现是「判据永久沉默」，不报错。
+  所以改成 AST 读取真源；读不到就返回 None —— 下游会判 undecidable 并说明
+  「不知道版本」。宁可说不知道，也不写一个看起来合理、实际过期的数字。
+
+  与 scripts/slots.py::_product_version 同法（不 import 执行 hook 脚本）。
+  两处实现目前一致，由 D-54 的腿继续盯着。
+
+三、实测证据
+  修复前：链上 31 条 enforcement_probe，版本分布 {0.30.0: 30, 0.63.2: 0}
+  重跑探针（2026-11-02 22:55:01）：
+    ok=true rc=2 decided=block contract=True legacy=True mode=dual，928 ms
+    版本分布变为 {0.30.0: 30, 0.63.2: 1}
+  ⇒ 执法三通道确实都在信号（exit 2 ＋ stdout contract ＋ legacy block）。
+
+  槽位求值变化（读取时刻 22:55:24）：
+    SLOT-073 XM3-01  undecidable → judged_clean（probe_ok=True）
+    判不了 5 条 → 4 条
+    清白 23 条 → 24 条
+    剩下 4 条的理由同时变精确了：不再是「证据过期」（那会让人以为重跑一次就好），
+    而是「字段在本出口里根本不存在」—— 这是设计缺口，不是数据问题。
+      SLOT-066 MP1-01 / SLOT-068 XM2a-01：探针只跑 deny 三通道，不含这两个探测
+      SLOT-051 X3-04 / SLOT-053 MQ1-01：产品没有任何地方写那两个事件（no_producer）
+
+四、改动范围（四件）
+  tools/enforce_probe.py   硬编码常量 → _product_version()（AST 读真源，带缓存）
+                           模块 docstring 去掉 "v0.30.0"
+  psl/manifest.json        重签 1 条（只有 tools/enforce_probe.py）
+  psl/judgment.json        判定刷新
+  psl/verdict-ledger.jsonl 账本追加两行（第一遍 FAIL、第二遍 PASS，同一 digest）
+
+五、验证
+  回归闸门：45 条判据 PASS 45 / FAIL 0，D-6 与 D-41 均绿
+  判定：第一遍 323/325（改过判定覆盖文件 ⇒ digest 落后 ⇒ antinel_verify 判
+        superseded，这是设计好的「第一遍必红」），第二遍 325/325 PASS
+  清单：需重签 1（tools/enforce_probe.py），已重签；该登记却没登记 0
+
+六、顺手查到但**没有**一起改的（怕发散）
+  同族过期 docstring 还有 7 个文件，最旧写到 v0.28.3：
+    scripts/install.py      v0.30.0
+    scripts/report.py       v0.29.0
+    scripts/scan.py         v0.29.0
+    scripts/verification_tests.py v0.28.3
+    hooks/post_tool_use.py  v0.30.0
+    hooks/pre_tool_use.py   v0.32.2
+    tools/judge_service.py  v0.33.0
+  它们不在 ci/version_check.py 的九处承载件里，所以永远不会被查出，也不会报错。
+  本次只改手上这一个（去掉版本号，让它不可能再过期）。
+  其余 7 个要不要动，留给下一轮决定 —— 一次改 8 个文件属于另一件事。

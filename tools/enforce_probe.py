@@ -2,7 +2,13 @@
 # -*- coding: utf-8 -*-
 # SPDX-License-Identifier: Apache-2.0
 
-"""AgentState v0.30.0 - enforcement self-probe (E-3 closure, signaling half).
+"""AgentState - enforcement self-probe (E-3 closure, signaling half).
+
+★ 2026-11-02：此行原写 `AgentState v0.30.0`。去掉版本号是**故意的**：
+  同目录另有 7 个文件把过期版本写进 docstring（install/report/scan/post_tool_use/
+  pre_tool_use/judge_service/verification_tests，最旧写到 v0.28.3，而产品是 0.63.2），
+  它们不在 `ci/version_check.py` 的九处承载件里，所以永远不会被查出。
+  带版本号的注释**必然**随发布过期，而且过期后一句话都不说 —— 不如不带。
 
 Why this exists (THREAT_MODEL E-3): the guardrail's deny signal rested on
 exit 2 alone; a host that stopped honoring it would silently degrade every
@@ -41,11 +47,57 @@ import sys
 import time
 from datetime import datetime, timezone
 
-_ANTINEL_VERSION = "0.30.0"
-
-
 def _pkg_root():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+_PROBE_VERSION_CACHE = {"done": False, "value": None}
+
+
+def _product_version():
+    """产品版本 —— **唯一真源是 `hooks/pre_tool_use.py` 的 `_ANTINEL_VERSION`**。
+
+    ★ 2026-11-02 修（真缺陷，本机实测）：
+      本文件原先在这一行写死 `_ANTINEL_VERSION = "0.30.0"`，而产品已到 0.63.2。
+      后果不是"版本号不好看"，而是**整条判据链失效**：
+        `scripts/slots.py::_p_self_probe` 的第一道闸是「证据必须来自当前版本」，
+        它拿这里的值跟 `hooks/pre_tool_use.py` 里的值比 —— 一份是 0.30.0、
+        一份是 0.63.2，**永不相等** ⇒ 这个闸永不放行 ⇒
+        XM3-01（执法通道可用性）/ MP1-01（依赖模型可用性）/ XM2a-01（观测权有效性）
+        三个槽位**永久判不了**。不是没数据，是我们自己的探针把数据标成了过期。
+
+      这是「量具坏了被当产品坏了」的镜像形态：量具把自己标成了坏数据。
+      与 `scripts/slots.py` 里那段 docstring 记的 X2b-06 是同一形状
+      （"直接算裸 sha256 ⇒ 与记账值恒不相等 ⇒ 永久判红"）。
+
+    ★ 为什么不留一个"更接近"的硬编码常量：任何硬编码都会再次落后，而落后的
+      表现是"判据永久沉默"，不是报错。宁可返回 None（下游会判 undecidable 并说
+      明"不知道版本"），也不写一个看起来合理、实际过期的数字。
+
+    ★ 与 `scripts/slots.py::_product_version` 同法（AST 读模块级常量，不 import
+      执行 hook 脚本）。两处实现由 D-54 的一条腿钉住必须给出相同结果，分叉即红。
+    """
+    if _PROBE_VERSION_CACHE["done"]:
+        return _PROBE_VERSION_CACHE["value"]
+    ver = None
+    try:
+        import ast as _ast
+        with open(os.path.join(_pkg_root(), "hooks", "pre_tool_use.py"),
+                  "r", encoding="utf-8") as f:
+            tree = _ast.parse(f.read())
+        for node in tree.body:
+            if (isinstance(node, _ast.Assign) and len(node.targets) == 1
+                    and isinstance(node.targets[0], _ast.Name)
+                    and node.targets[0].id == "_ANTINEL_VERSION"
+                    and isinstance(node.value, _ast.Constant)
+                    and isinstance(node.value.value, str)):
+                ver = node.value.value
+                break
+    except Exception:                                          # noqa: BLE001
+        ver = None
+    _PROBE_VERSION_CACHE["done"] = True
+    _PROBE_VERSION_CACHE["value"] = ver
+    return ver
 
 
 def _ac():
@@ -255,7 +307,7 @@ def main():
                "host": host_tag, "probe": "pre_tool_use", "expected": "block",
                "got": ("block" if rc == 2 else ("allow(rc=%d)" % rc)), "exit_code": rc,
                "stdout_channel": channel, "deny_mode": deny_mode,
-               "antinel_version": _ANTINEL_VERSION, "duration_ms": dur,
+               "antinel_version": _product_version(), "duration_ms": dur,
                "decision": "alert" if not ok else "allow",
                "severity": "critical" if not ok else "none",
                "ok": bool(ok), "reason": detail}

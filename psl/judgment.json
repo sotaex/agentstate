@@ -8,7 +8,7 @@
   "value": "current",
   "derivation": "auto",
   "reason": null,
-  "checkedAt": "2026-11-02T13:56:17+08:00",
+  "checkedAt": "2026-11-02T23:10:43+08:00",
   "note": "re-derive any time: python -m tools.antinel_verify (--manifest for all 24 shipped files); which assertions failed: discrimination.failed[]"
  },
  "scope": {
@@ -101,8 +101,8 @@
  "assertions_passed": 325,
  "criteria_independence": "Assertions exercise the hook protocol, rule matching, scanner, installer and reporter as black boxes through subprocesses (stdin JSON in, exit code and stdout/stderr out); they were authored from the design specification ANT-SEC-SPEC-001 v1.1, not from the implementation; third-party re-run supported.",
  "environment": {
-  "python": "3.13.14",
-  "platform": "Windows-11-10.0.26200-SP0",
+  "python": "3.11.4",
+  "platform": "Windows-10-10.0.26200-SP0",
   "stdlib_only": true,
   "network": "none"
  },
@@ -127,11 +127,11 @@
   "audit_chain.py": "sha256:9a4438cbb65d20e8c7e1482c455a5a2a198aaaba6c1ded3eea1154b867d6f634",
   "antinel.py": "sha256:6ff7b14a18c7082be17bbfed30b611c465b4f12c22a5b3cb22eb505bdf33af76",
   "hub.py": "sha256:edcb1b94194e551d5b0023749ae5417e67729b22eb391198fcae74a906668c08",
-  "tools/enforce_probe.py": "sha256:4b9b6b429caf92bd63b5ddd94b7c6b5b750c2351f01259e53b641a963f4c0f0f"
+  "tools/enforce_probe.py": "sha256:1a98f4d93425aca43eda9fc82d08042be5626ed9091d275b33aada84dfdf5d62"
  },
  "run": {
-  "started_at": "2026-11-02T13:45:51+0800",
-  "duration_ms": 626005,
+  "started_at": "2026-11-02T23:06:30+0800",
+  "duration_ms": 252523,
   "duration_note": "wall-clock of a subprocess fan-out suite; machine- and load-dependent, not comparable across environments",
   "executor": "scripts/run_harness.py",
   "exit_code": 0,

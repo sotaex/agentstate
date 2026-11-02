@@ -150,7 +150,7 @@
   "strings.py": "sha256:e5172843ccefbf9c5f288e2fdb7cfe8391f2eb291eb386d62daa17e2469ceebf",
   "tools/HOST_PROBE.md": "sha256:41919acf3e5a486be4861801f13dea2a566eb419ee67cac17c99173392066d53",
   "tools/antinel_verify.py": "sha256:465487671b4d9243ff71b0faffb4765fbaf10a77ad76f6feead704bb6460c501",
-  "tools/enforce_probe.py": "sha256:4b9b6b429caf92bd63b5ddd94b7c6b5b750c2351f01259e53b641a963f4c0f0f",
+  "tools/enforce_probe.py": "sha256:1a98f4d93425aca43eda9fc82d08042be5626ed9091d275b33aada84dfdf5d62",
   "tools/host_matrix.py": "sha256:7f14d2e60b2122b571b128654e5fbedd9c87c1ade8035cf15d529a5a48379da9",
   "tools/judge_service.py": "sha256:0c26ae17b4b0b5a05eeb35333495f112b9a52b5ddd7852653a44b66c00c2b21e",
   "tools/logo.ps1": "sha256:f0362a760872d7b179959b2ee19e6a872f9d857a1eba1bc833ae179c83268cc9",
