@@ -25,7 +25,13 @@
   无 IO、无副作用、不读环境、不写账本、不缓存。同样的 record 永远得同样的结果，
   这样它才能被单测穷举，也才能在值守台与服务端两侧共用同一套判定。
 
-0.64.0 新增。
+★ 判定顺序（三张表，**顺序本身就是语义**）
+  ① `NON_EVENT_TYPES`  结构上不是事件 ⇒ none（不适用，不是静音）
+  ② `_NOTIFY_OF_TYPE`  某几类记录不带 action，回退表必给 none，但产品判它要出声
+  ③ `_NOTIFY_OF_DECISION` 其余一律按 decision 回退，未知值取默认（偏吵）
+  ★ 要加一档，只在 ②③ 里加；**不许在消费方（报告／C 线腿）另写一份例外。**
+
+0.64.0 新增；0.64.x 加 ②（`host_shield_state_unreadable` 升 L1 时）。
 """
 
 # ── 三档 ────────────────────────────────────────────────────────────────────
@@ -99,6 +105,25 @@ _NOTIFY_OF_DECISION = {
     "finding": TOAST,         # 报告类结论
     "config_refresh": NONE,   # 正常配置刷新，不该打扰
     "allow": NONE,            # 放行不打扰
+}
+
+#: 按 **type** 直接定档 —— 只对「结构上不带 action」的那几类用。
+#:
+#: ★ 为什么要第三张表（2026-11-03，创始人裁定「通知人吧」）：
+#:   `host_shield_state_unreadable` 的写入者只给 `decision`（`allow`）不给 action，
+#:   `decision_of()` 于是原样返回 `allow` ⇒ 回退表判 `none` ⇒ 这一类永远进不了
+#:   通知面。而产品判断它**要让人看见**（盲区不等于清白）。
+#:   ★ 为什么不改写入者的 action：那会改动账本语义（它会变成一条「告警」），
+#:     而账本记的是「那一刻发生了什么」，不是「我们要不要通知」。
+#:   ★ 为什么不写在消费方（报告 / C 线第三只腿）：那正是本仓第一顽症
+#:     ——同一事实多处实现。**通知面只有一个真源，就是本文件。**
+#:   ★ 优先级：非事件（`NON_EVENT_TYPES`）**先判**，本表**后判**，最后才看回退表。
+#:     所以本表不可能把「不适用」的东西变成「要通知」。
+_NOTIFY_OF_TYPE = {
+    # 安全状态这一拍读不出来：盲区，不是篡改，也不是自愈 —— 人该知道。
+    # 定 TOAST 而不定 GATE：GATE＝「停下等人处理」，而这一类没有「停下」这个动作；
+    # 也不弹窗：0.59.0 起 L1 及以下一律不敲门（见 `inbox_daemon` 的 tick 注释）。
+    "host_shield_state_unreadable": TOAST,
 }
 
 #: 结构上**不是事件**的 type ⇒ 不进通知面。
@@ -202,6 +227,9 @@ def notify_of(record, default=None):
     t = _clean(record.get("type"))
     if t is not None and t in NON_EVENT_TYPES:
         return NONE
+    # ★ 2026-11-03：类型级定档**在回退表之前**（理由见 `_NOTIFY_OF_TYPE`）。
+    if t is not None and t in _NOTIFY_OF_TYPE:
+        return _NOTIFY_OF_TYPE[t]
 
     d = decision_of(record.get("action"), record.get("severity"), record.get("decision"))
     if d is None:
@@ -222,6 +250,13 @@ def explain(record):
     t = _clean(record.get("type"))
     if t is not None and t in NON_EVENT_TYPES:
         return (NONE, None, "type=%s 结构上不是事件（不适用，非静音）" % t)
+    if t is not None and t in _NOTIFY_OF_TYPE:
+        # ★ 要说清「它的 decision 是什么」，否则读者会以为它被判成了告警。
+        d0 = decision_of(record.get("action"), record.get("severity"),
+                         record.get("decision"))
+        return (_NOTIFY_OF_TYPE[t], d0,
+                "type=%s 按类型定档（该类型不带 action，decision=%s，回退表必给 none）"
+                % (t, d0))
 
     d = decision_of(record.get("action"), record.get("severity"), record.get("decision"))
     if d is None:

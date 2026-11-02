@@ -369,11 +369,27 @@ class Survey:
     #:     ★ 但它们并非「该读没读」：产品侧 `notify_policy.explain()` 明确判
     #:       `face=none`（结构上不通知人）。所以正确的说法不是「漏读」，
     #:       而是「**读到了、产品侧判不通知**」——两句话指向完全不同的责任方。
+    #:       ★ 2026-11-03：`state_unreadable` 那 23 条已升 L1、产品侧改判 `toast`
+    #:         ⇒ 它们现在进 `n_shield_toast`，不进「判不通知」。
+    #:         上面那句「60 条全是 face=none」只在**改档之前**成立。
     #:   ⇒ 一栏必须写两个数：该通知你的 / 产品侧判不通知的。只写前者，
     #:     会让「宿主盾一天只在岗 3 次」变成一个看起来正常的读数。
     #:   ★ 心跳不算「守不住」：它是「我在岗」的信号，把它算进去会让分母
     #:     从 63 涨到 227，而多出来的 164 条恰恰是**守卫正常运行**的证据。
     n_shield_all: int = 0
+    #: 守不住全量里，**产品侧判「要提醒你」（TOAST）**的那几条。
+    #:
+    #:   ★ 2026-11-03 新增：`host_shield_state_unreadable` 由 L0 升到 L1
+    #:     （创始人裁定「通知人吧」），`notify_policy` 同步把这一类从
+    #:     `face=none` 改成 `face=toast`。后果直接落在这个读数上 ——
+    #:     改之前它们被印成「读到了但产品侧判不通知」，
+    #:     **改之后同一句话就成了假话**：产品侧已经判「要提醒」了。
+    #:   ★ 但它**不能并进 gate/alert 两数**：那两数是「有带可落」的记录，
+    #:     而 TOAST 档在本腿**没有对应的带宽**（本腿只读 block/deny/alert 两带）。
+    #:     ⇒ 单开第三段，且三段之和必须等于 `n_shield_all`（守恒）。
+    #:   ★ 为什么不在 `n_shield_all` 之外再数：它已经在全量里了，
+    #:     这一栏是**分流**，不是新分母。
+    n_shield_toast: int = 0
     #: **本腿没读**的「出声」档记录数，按 decision 取值分开记。
     #:
     #: ★ 为什么必须有这个字段：C 线一页纸有一格叫「提醒」。它由 `alert`
@@ -417,16 +433,21 @@ class Survey:
         return self.n_shield_gate + self.n_shield_alert
 
     def shield_silent(self) -> int:
-        """读到了、但产品侧判不通知的「守不住」事件条数。
+        """读到了、但产品侧判**不通知**的「守不住」事件条数。
 
         ★ 它不是「漏读」：这些记录本腿读到了，产品侧 `notify_policy.explain()`
           判 `face=none`（结构上不通知人）。区别很重要 ——
           「没读」是我们的问题，「产品侧判不通知」是产品判断。
           把它说成漏读，会让人去修一个不存在的东西。
+        ★ 2026-11-03：分子分母同改。`state_unreadable` 升 L1 后产品侧判
+          `face=toast`，它**不再是「判不通知」**，必须从这一栏里扣掉
+          （扣在 `n_shield_toast`）—— 只扣分母不扣分子，会算出一个
+          「判不通知的条数没变、而全量涨了」的假象（MI1-02 的同型错误）。
         ★ 不 clamp 到 0：万一算成负数，页面上会出现「-1 条」——
-          那是显眼异常，比静默抹平成 0 好。自检 「守不住 两半相加等于全量」守着这件事。
+          那是显眼异常，比静默抹平成 0 好。自检「守不住 三段相加等于全量」守着这件事。
         """
-        return self.n_shield_all - self.n_shield_gate - self.n_shield_alert
+        return (self.n_shield_all - self.n_shield_gate
+                - self.n_shield_alert - self.n_shield_toast)
 
     def balance(self) -> Dict[str, Any]:
         """守恒账：**每条读到的记录都要在等号右边出现一次，不许有黑洞。**
@@ -667,6 +688,7 @@ def survey(root: str, *, day: str = "", as_of: str = "",
     n_alert_misfit = 0
     n_escalated_unread = 0
     n_shield_gate = 0
+    n_shield_toast = 0
     n_shield_alert = 0
     n_shield_all = 0
     n_shield_heartbeat = 0
@@ -716,6 +738,15 @@ def survey(root: str, *, day: str = "", as_of: str = "",
                     #      ⇒ 进 `n_escalated_unread`。这一类最容易被漏掉：
                     #        它在字段上不是 alert，在本腿的筛选条件上被跳过，
                     #        而产品侧认为它该吵 —— 页面上表现为「提醒比实际少」。
+                    # ★★ 2026-11-03：守不住全量里，「产品侧判要提醒你」的要单独数。
+                    #   `host_shield_state_unreadable` 升 L1 后，产品侧从 `face=none`
+                    #   变成 `face=toast` —— 它属于 `SHIELD_TYPES`，已经算进
+                    #   `n_shield_all`，但**没有带可落**（本腿只读 block/deny/alert）。
+                    #   不单独数，就会继续被印成「判不通知」，而那已经是假话。
+                    if _tx in SHIELD_TYPES:
+                        _face_s, _der_s, _ = NP.explain(rec)
+                        if _face_s == NP.TOAST:
+                            n_shield_toast += 1
                     if dec in _TOAST_DECISIONS:
                         unread_toast[str(dec)] = unread_toast.get(str(dec), 0) + 1
                     else:
@@ -835,6 +866,7 @@ def survey(root: str, *, day: str = "", as_of: str = "",
         untiered_detail={k: dict(v) for k, v in untiered_detail.items()},
         n_escalated_unread=n_escalated_unread,
         n_shield_gate=n_shield_gate,
+        n_shield_toast=n_shield_toast,
         n_shield_alert=n_shield_alert,
         n_shield_all=n_shield_all,
         unread_toast=dict(unread_toast),
@@ -902,14 +934,19 @@ def survey(root: str, *, day: str = "", as_of: str = "",
     #   不是「没人读」—— 两句话指向的责任方完全不同（见 J4 的三态判据）。
     #   ⇒ 一栏写两个数。只写「该通知你的 3 条」，会让「宿主盾今天只在岗 3 次」
     #     变成一个看起来完全正常的读数。
+    #   ★★ 2026-11-03 再改**三段**：`state_unreadable` 升 L1 ⇒ 产品侧判 `toast`。
+    #     它仍然没有带可落（本腿只读 block/deny/alert），但**不能再叫「判不通知」**。
+    #     ⇒ 中间加一段「产品侧说要提醒、本腿没有对应带宽」。三段之和 == 全量；
+    #       只扣分母不扣分子，会算出「判不通知的数没变、全量却涨了」的假象。
     s.denominators["守不住"] = (
         "宿主盾自检事件（守卫自己不在岗／状态异常）全量 %d 条（已排除 %s %d 条心跳）"
         "｜该通知你的 %d 条（gate %d、alert %d）"
-        "｜读到了但产品侧判不通知的 %d 条（自愈、状态探不到等）"
+        "｜产品侧说要提醒、但本腿没有对应带宽的 %d 条（TOAST 档，不计入上面两个数）"
+        "｜读到了但产品侧判不通知的 %d 条（自愈、结构上不通知的）"
         "｜这类记录与「有规则号的命中」共用同一批账本记录，两个数不许相加"
         % (n_shield_all, SHIELD_HEARTBEAT, n_shield_heartbeat,
            n_shield_gate + n_shield_alert, n_shield_gate, n_shield_alert,
-           s.shield_silent())
+           n_shield_toast, s.shield_silent())
     )
     s.denominators["账本日文件"] = (
         "日文件 %d 个（%s .. %s）"
@@ -1270,9 +1307,33 @@ def _selfcheck() -> int:
         ck(_sv.n_shield_gate + _sv.n_shield_alert == 1,
            "该通知你的应为 1 条（只有 breach 进簇），实际 %d"
            % (_sv.n_shield_gate + _sv.n_shield_alert))
-        ck(_sv.shield_silent() == 2,
-           "读到了但产品侧判不通知的应为 2 条（revived＋state_unreadable），"
-           "实际 %d" % _sv.shield_silent())
+        # ★ 2026-11-03：`state_unreadable` 升 L1 后产品侧判 toast ⇒ 单开第三段。
+        ck(_sv.n_shield_toast == 1,
+           "产品侧说要提醒的应为 1 条（state_unreadable），实际 %d —— "
+           "要么 notify_policy 的类型映射没了，要么这一类又被当成了「判不通知」"
+           % _sv.n_shield_toast)
+        ck(_sv.shield_silent() == 1,
+           "读到了但产品侧判不通知的应为 1 条（只剩 revived），实际 %d"
+           % _sv.shield_silent())
+        ck(_sv.n_shield_gate + _sv.n_shield_alert + _sv.n_shield_toast
+           + _sv.shield_silent() == _sv.n_shield_all,
+           "三段之和 != 全量 —— 有记录在两栏之间掉了或被数了两次")
+        # ★ 翻转腿：把产品侧对这一个 type 的映射摘掉 ⇒ toast 栏必须变 0、
+        #   「判不通知」必须变 2。造「该命中」与「该放行」两种输入、互换正负
+        #   会变红，才证明上面那条不是永远成立的减法（假绿第十四族）。
+        _saved = dict(NP._NOTIFY_OF_TYPE)
+        try:
+            NP._NOTIFY_OF_TYPE.pop("host_shield_state_unreadable", None)
+            _sv4 = survey(_sd, day="2026-01-01")
+            ck(_sv4.n_shield_toast == 0 and _sv4.shield_silent() == 2,
+               "摘掉类型映射后 toast 栏=%d、判不通知=%d（应 0 / 2）—— "
+               "这一栏没在问产品侧，是自己算出来的"
+               % (_sv4.n_shield_toast, _sv4.shield_silent()))
+            ck(_sv4.n_shield_all == _sv.n_shield_all,
+               "摘掉映射后全量变了 —— 全量必须与产品侧定档无关")
+        finally:
+            NP._NOTIFY_OF_TYPE.clear()
+            NP._NOTIFY_OF_TYPE.update(_saved)
         ck(_sv.shield_silent() >= 0,
            "不通知数成了负数 —— 进簇数大于全量，两栏用了不同分母")
         # ★ 负控①：把心跳那一条改成 revived ⇒ 全量必须 +1（证明确实在数）
@@ -1373,6 +1434,8 @@ def main() -> int:
             # ★ 2026-11-03：守不住一栏必须两半都给，否则消费方只能印进簇的 3 条，
             #   而真事件是 63 条 —— 低报 20 倍且页面上不会红。
             "n_shield_all": s.n_shield_all,
+            # ★ 2026-11-03：三段之一。产品侧判 toast、但本腿没有带可落。
+            "n_shield_toast": s.n_shield_toast,
             "n_shield_silent": s.shield_silent(),
             # ★ 本腿**没读**的出声档，按 decision 取值分开。
             "unread_toast": s.unread_toast,
