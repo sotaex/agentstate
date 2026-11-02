@@ -6041,11 +6041,76 @@ def _probe_semantics_failures(S):
         bad.append("X3-02 的 revived_modes 没有如实列出窗口里的拉起方式（拿到 %r）"
                    " ⇒ 计数为 0 时读者无法分辨「真没有」与「没看」"
                    % (_v.get("revived_modes"),))
+
+    # ══════════════ ⑫ 探针语料腿（2026-11-02 夜）：按**探针**造正负语料 ══════════
+    #  ★ 为什么按探针而不是按槽位：13 条命中只用了 7 个探针。`WRITE_SET` 一个源
+    #    就出三个字段（protected_hit / out_of_scope / files_read_by_us），被
+    #    Q1-06 / K1-01 / MK1-01 三条槽位分别消费。探针错一处，三条一起错。
+    #    按槽位各造一份语料＝把同一件事测三遍，还测不到共用那一段。
+    #  ★ 每条必须双向：只证明「该命中时命中」，与恒真判据同貌（第十四族）。
+    #    所以每个字段都配一个「该为空」的输入 —— 拿掉判断逻辑就该红。
+    class _PathCtx(_FakeCtx):
+        """WRITE_SET 用 ctx.root 做相对化 ⇒ 语料必须带 root。
+
+        ★ 不传真实 root 就只能造绝对路径，而那会让语料依赖本机盘符；
+          仓根由 regression_gate 自己的 PKG 给出，语料在任何 clone 上都成立。
+        """
+
+        def __init__(self, root, records):
+            _FakeCtx.__init__(self, records)
+            self.root = str(root)
+
+    def _act(tool, path, sess="probe-s1"):
+        return {"type": "pre_tool_use", "tool": tool, "session": sess,
+                "ts": "2026-11-02T10:00:00+08:00",
+                "input": {"file_path": path}}
+
+    _root = str(PKG)
+    _in_guard = os.path.join(_root, "ci", "guard_probe_sample.py")
+    _in_plain = os.path.join(_root, "src", "plain_probe_sample.py")
+    _outside = "C:/ElsewhereProject/x_probe_sample.py"
+
+    # Q1-06 验收标准被改：写验收承载件 ⇒ 非空；写普通源码 ⇒ 必须为空
+    _v = S._p_write_set(_PathCtx(_root, [_act("Write", _in_guard)]))
+    if not isinstance(_v, dict) or not _v.get("protected_hit"):
+        bad.append("Q1-06 写入 ci/ 下的文件，protected_hit 却是空的 ⇒ "
+                   "「验收标准被改」永远看不见")
+    _v = S._p_write_set(_PathCtx(_root, [_act("Write", _in_plain)]))
+    if isinstance(_v, dict) and _v.get("protected_hit"):
+        bad.append("Q1-06 写入普通源码被报成 protected_hit=%r ⇒ 改一行代码就"
+                   "报「验收标准被改」，判据立刻退化成噪声"
+                   % (_v.get("protected_hit"),))
+
+    # K1-01 范围漂移：写仓外 ⇒ 非空；写仓内 ⇒ 必须为空
+    _v = S._p_write_set(_PathCtx(_root, [_act("Write", _outside)]))
+    if not isinstance(_v, dict) or not _v.get("out_of_scope"):
+        bad.append("K1-01 写入仓外路径，out_of_scope 却是空的 ⇒ 范围漂移看不见")
+    _v = S._p_write_set(_PathCtx(_root, [_act("Edit", _in_plain)]))
+    if isinstance(_v, dict) and _v.get("out_of_scope"):
+        bad.append("K1-01 写入仓内文件被报成越界（%r）⇒ 每次正常编辑都报漂移"
+                   % (_v.get("out_of_scope"),))
+
+    # MK1-01 越权观测：读仓外 ⇒ 非空；读仓内 ⇒ 必须为空
+    _v = S._p_write_set(_PathCtx(_root, [_act("Read", _outside)]))
+    if not isinstance(_v, dict) or not _v.get("files_read_by_us"):
+        bad.append("MK1-01 读取仓外路径，files_read_by_us 却是空的 ⇒ 越权观测看不见")
+    _v = S._p_write_set(_PathCtx(
+        _root, [_act("Read", os.path.join(_root, "README.md"))]))
+    if isinstance(_v, dict) and _v.get("files_read_by_us"):
+        bad.append("MK1-01 读取仓内文件被报成越权观测（%r）"
+                   % (_v.get("files_read_by_us"),))
+
+    # 边界：**只有读、没有写**时不能整段返回 None。
+    #   否则「只读会话」永远判不了 —— 而只读恰恰是最该盯越权观测的场景。
+    _v = S._p_write_set(_PathCtx(_root, [_act("Read", _outside)]))
+    if _v is None:
+        bad.append("WRITE_SET 在「只有读、没有写」时返回 None ⇒ 只读会话的"
+                   "越权观测永远判不了")
     return bad
 
 
 def j_slots_registry_and_evaluator():
-    """D-54 槽位登记表与求值器的十二腿（2026-11-01，2026-11-02 扩四腿）。
+    """D-54 槽位登记表与求值器的十三腿（2026-11-01，2026-11-02 扩五腿）。
 
     ★ 签名必须**无参**：`_checks()` 里带参判据一律写成 `lambda: j_x(m)`，
       直接放函数对象会让 `main()` 的 `fn()` 抛 TypeError ⇒ 这条判据永远红，
@@ -6090,6 +6155,17 @@ def j_slots_registry_and_evaluator():
          **无前置终止也要数得到**（这是新谓词存在的全部理由；这条一退，
          34 条历史假记录全部隐形），外加一条「拉起方式清单要自证看过全部
          记录」（否则 0 与「只挑了那几条」同貌）。
+      ⑫ 语料腿（2026-11-02 夜）：上面十一条守的都是**求值器**（算子、常数、
+         探针语义），没有一条守「**命中的那 13 条谓词本身对不对**」。实测：
+         13 条命中里 11 条在 ci/ 下没有任何语料，谓词被改坏也不会有人发现。
+         这一腿按**探针**而不是按槽位造语料 —— 13 条命中只用了 7 个探针，
+         `WRITE_SET` 一个源就出三个字段，被 Q1-06 / K1-01 / MK1-01 分别消费；
+         按槽位各造一份等于把同一件事测三遍，还测不到共用那一段。
+         首批做 WRITE_SET：三个字段各自双向（该非空时非空、该为空时为空），
+         外加「只有读没有写时不返回 None」。六条语料全部经变异验证可翻，
+         未变异时零误报（`output/_p_d54_leg12_mutation.py`）。
+         ★ 剩余 6 个探针（LEDGER_SEQ / CONFIG_HOOKS / EXIT_CODE /
+           ARTIFACT_PATH / CMD_TEXT / LEDGER_ACTIONS）的语料尚未补。
     """
     S = load_slots()
 
@@ -6370,7 +6446,7 @@ def j_slots_registry_and_evaluator():
         return False, ("⑪ 探针语义腿失效：%s"
                        % ("；".join(_bad11[:3]),))
 
-    return True, ("十二腿成立：① 真表 %d 条/%d 登记，分母自洽 ② %d 种变异全部判红 "
+    return True, ("十三腿成立：① 真表 %d 条/%d 登记，分母自洽 ② %d 种变异全部判红 "
                   "③ 空窗口下 %d 条窗口型槽位一律不定论 ④ 死代码报 no_producer、"
                   "从未触发与普通 0 区分开 ⑤ 四态互斥穷尽 "
                   "⑥ 哈希口径与 manifest 同源（版本行归一化，裸哈希必失配）"
@@ -6380,6 +6456,7 @@ def j_slots_registry_and_evaluator():
                   " ⑩ 报告里真出现槽位四态、命中性质、命中环境三行"
                   " ⑪ 探针给的事实对（无终止不判终止、豁免类型不进分母、"
                   "假重启数得到而真重启数不到）"
+                  " ⑫ 语料腿：WRITE_SET 三字段各自双向可翻 ＋ 只读会话不返回 None"
                   % (len(slots), declared_reg, len(muts), len(windowed)))
 
 
@@ -6485,7 +6562,7 @@ def _checks(m):
         ("D-53 硬编码规则说明书必须与代码同源（四条「关不掉」的判定）",
          j_hardcoded_rules_are_truthful),
         # ── 2026-11-01 D-54：46 个槽位接线前，先锁住求值器本身 ──
-        ("D-54 槽位登记表与求值器：正控/负控/空窗口/生产者缺席/四态穷尽/哈希口径/探针口径/谓词翻转/恒真陷阱/报告消费/探针语义",
+        ("D-54 槽位登记表与求值器：正控/负控/空窗口/生产者缺席/四态穷尽/哈希口径/探针口径/谓词翻转/恒真陷阱/报告消费/探针语义/语料",
          j_slots_registry_and_evaluator),
     ]
 
