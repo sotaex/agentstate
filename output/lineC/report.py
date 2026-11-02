@@ -90,29 +90,40 @@ def produce(root: str, out_path: str, *,
     info["report_id"] = res.report_id
     info["void"] = res.void is not None
 
-    # 3 渲染到临时文件（**不是最终路径**）
+    # 3 渲染成**字符串**，先校验，通过了才落盘
+    # ★★ 2026-11-02 改：原来写临时文件 → 校验 → 删掉。删这一步在本机**做不到**：
+    #   宿主对新建文件持有句柄且不释放（实测 WinError 5 持续 60 秒以上，
+    #   见 output/_p_rm_wait.py 的实测输出）。于是「校验不过 ⇒ 丢弃产物」
+    #   这条分支会撞上「删不掉」，红在自检里，理由却和它要验的东西毫无关系。
+    #   现在改成走管道：**根本没有临时文件**，也就不存在删不掉。
+    #   这比原来更强 —— 校验不过时磁盘上什么都没有，而不是「写了一个再删掉」。
     out_dir = os.path.dirname(os.path.abspath(out_path)) or "."
     os.makedirs(out_dir, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix=".report-", suffix=".html", dir=out_dir)
-    os.close(fd)
-    try:
-        with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
-            fh.write(OP.render(b, cap=cap, resolved=res, code_fp=fp))
+    html = OP.render(b, cap=cap, resolved=res, code_fp=fp)
 
-        # 4 回指校验：**校验的是产物**，不是内存里的对象
-        rc, tail = _citecheck(tmp, root, b.count())
-        info["citecheck_rc"] = rc
-        info["citecheck"] = tail
-        if rc != 0:
-            info["error"] = "回指校验未通过，已丢弃产物：%s" % tail
-            return False, info
+    # 4 回指校验：校验的是**即将落盘的那串字节**（不是内存对象，也不是另一个文件）
+    rc, tail = _citecheck(html, root, b.count())
+    info["citecheck_rc"] = rc
+    info["citecheck"] = tail
+    if rc != 0:
+        info["error"] = "回指校验未通过，已丢弃产物：%s" % tail
+        return False, info
 
-        # 5 通过才改名落盘（同盘 rename，原子）
-        os.replace(tmp, out_path)
-        tmp = ""
-    finally:
-        if tmp and os.path.exists(tmp):
-            os.unlink(tmp)
+    # 5 通过才落盘
+    with open(out_path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(html)
+
+    # 5b 写后读回比对：原来「校验磁盘上的产物」防的是编码／换行把内容改掉。
+    #    走管道后少了这一层，所以补一次**逐字节**读回比对 —— 它只回答
+    #    「写下去的和你校验的是不是同一串」，不重复校验语义。
+    with open(out_path, "r", encoding="utf-8", newline="") as fh:
+        back = fh.read()
+    if back != html:
+        info["error"] = (
+            "落盘内容与校验内容不一致（写 %d 字节／读回 %d 字节）"
+            "—— 编码或换行改动了产物" % (len(html), len(back))
+        )
+        return False, info
 
     # 6 sidecar：与报告同生同灭
     side = out_path + ".manifest.json"
@@ -140,11 +151,13 @@ def produce(root: str, out_path: str, *,
     return True, info
 
 
-def _citecheck(html_path: str, root: str, expect: int) -> Tuple[int, str]:
+def _citecheck(html: str, root: str, expect: int) -> Tuple[int, str]:
+    """把 HTML 从**管道**送进 citecheck（不落临时文件，见 produce 里的说明）。"""
     p = subprocess.run(
         [sys.executable, "-E", "-X", "utf8", CITECHECK,
-         "--html", html_path, "--root", root, "--expect", str(expect)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace")
+         "--stdin", "--root", root, "--expect", str(expect)],
+        input=html, capture_output=True, text=True,
+        encoding="utf-8", errors="replace")
     lines = [ln.strip() for ln in (p.stdout or "").splitlines() if ln.strip()]
     tail = lines[-1] if lines else ((p.stderr or "").strip().splitlines() or [""])[-1]
     return p.returncode, tail[:120]
@@ -190,10 +203,13 @@ def _selfcheck() -> int:
             bad("回指越界却在最终路径上留了文件")
         if os.path.exists(out_bad + ".manifest.json"):
             bad("回指越界却写了 sidecar")
-        # 临时文件也不许留
-        leftover = [n for n in os.listdir(work) if n.startswith(".report-")]
-        if leftover:
-            bad("失败后留下了临时文件：%s" % leftover)
+        # 临时文件也不许留 —— 而且现在这条是**确定性**的：
+        # 改走管道后，校验不过时磁盘上除了 audit/ 什么都不该有。
+        # 原来只查 `.report-*` 前缀，那等于「允许留别的名字」；
+        # 现在直接比目录内容，任何人重新引入临时文件都会被这一条抓住。
+        entries = sorted(os.listdir(work))
+        if entries != ["audit"]:
+            bad("校验不过之后目录里还有别的东西：%s" % entries)
 
         # ---- 正向臂：回指合法 ⇒ 必须落盘，且 sidecar 与页脚对得上 ----
         b2 = E.Bundle(read_at="2026-10-12 12:00:00", root=root)

@@ -52,18 +52,48 @@ def arm(name, fn):
 # --------------------------------------------------------------------------- 造账本
 
 
-def make(days=4, per_day=6):
-    """造账本内容（不落盘）。返回 [(day, [rec,...])]，链是按文件的、正确。"""
+#: 轮转命中的规则池。前 3 天每条记录只命中一条，所以**不产生任何配对**；
+#: 三天累计每条 >= 3 次，满足 rule_pair 的 `min_each`。
+_POOL = ("AN-002", "AN-014", "AN-005", "AN-016")
+
+#: 最后一天刻意造的三对（每个 session 两条、间隔 2 分钟）。
+#: 只在这一天出现 ⇒ 「此前从未同时出现过」成立，三条线索全部落在 recent 窗口内。
+_PAIRS = (("AN-002", "AN-014"), ("AN-005", "AN-016"), ("AN-002", "AN-005"))
+
+
+def make(days=4, per_day=6, rules=True):
+    """造账本内容（不落盘）。返回 [(day, [rec,...])]，链是按文件的、正确。
+
+    ★ 「干净但有东西可看」靠 **rule_pair** 产出证据，**不再靠 gap**。
+      原因（2026-11-02）：gap 已被判定「报作息不报异常」并默认关闭
+      （见 `watchman.py` 的 `--with-gap` 说明）。夹具若继续靠 gap，
+      就成了「靠一个已被关掉的检测器产出证据」—— 关掉它的那天夹具全红，
+      而且红得看不出原因（上一轮已经因此白查过一次：`--gap-min` 30→90）。
+
+      ⇒ 夹具的两条新纪律：
+        ① 不许依赖任何默认值（阈值、开关、词表）；
+        ② 不许依赖「即将被关掉」的检测器。有依赖就显式声明。
+
+    ★ `rules=False` 造一份**真正 0 条证据**的账本，给 e1 用 ——
+      「0 条要解释那个 0」这条臂必须有一个能产出 0 的夹具，
+      否则它验的其实是「有线索时报告正常」，而不是那个 0。
+
+    ★ 配对是**跨天首次**：session 名带日期前缀，避免 per_sess 跨天累积。
+      跨天虽然不会误配（窗口 5 分钟），但排序 + break 的逻辑没必要承受这个负担。
+    """
     out = []
     for i in range(days):
         day = "2026-10-%02d" % (10 + i)
+        last = i == days - 1
         recs, prev_full = [], ""
-        for j in range(per_day):
+
+        def emit(ts, sid, hit):
+            nonlocal prev_full
             rec = {
-                "ts": "%sT%02d:00:00+08:00" % (day, 9 + j),
+                "ts": ts,
                 "type": "pre_tool_use",
-                "session": "s%d" % j,
-                "rules_hit": [],
+                "session": sid,
+                "rules_hit": [hit] if hit else [],
                 "decision": "allow",
                 "action": "allow",
             }
@@ -72,6 +102,20 @@ def make(days=4, per_day=6):
             rec["hash"] = A.recompute_hash(rec, prev_full)
             prev_full = rec["hash"]
             recs.append(rec)
+
+        if not rules:
+            for j in range(per_day):
+                emit("%sT%02d:00:00+08:00" % (day, 9 + 2 * j),
+                     "%s-s%d" % (day, j), None)
+        elif last:
+            for k, (a, bb) in enumerate(_PAIRS):
+                sid = "%s-s%d" % (day, k)
+                emit("%sT%02d:00:00+08:00" % (day, 9 + k), sid, a)
+                emit("%sT%02d:02:00+08:00" % (day, 9 + k), sid, bb)
+        else:
+            for j in range(per_day):
+                emit("%sT%02d:00:00+08:00" % (day, 9 + 2 * j),
+                     "%s-s%d" % (day, j), _POOL[j % len(_POOL)])
         out.append((day, recs))
     return out
 
@@ -102,11 +146,11 @@ def write_manifest(root, days, extra=None):
         json.dump(man, fh, ensure_ascii=False)
 
 
-def fresh(days=4, per_day=6):
+def fresh(days=4, per_day=6, rules=True):
     """建一份干净账本（文件与清单一致），返回 (临时根, 天列表)。"""
     d = tempfile.mkdtemp(prefix="antinel-e2e-")
     root = os.path.join(d, "audit")
-    ds = make(days, per_day)
+    ds = make(days, per_day, rules=rules)
     write_days(root, ds)
     write_manifest(root, ds)
     return root, ds
@@ -130,8 +174,13 @@ def render(root):
 
 
 def e1_clean_explains_zero():
-    """干净账本：不该说有事，但必须解释那个 0。"""
-    root, _ds = fresh()
+    """干净账本：不该说有事，但必须解释那个 0。
+
+    ★ 这里必须用 `rules=False`（真正 0 条证据）。用 `fresh()` 会产 3 条
+      rule_pair ⇒ 这条臂验的就不再是「0 条要解释那个 0」，而是
+      「有线索时报告正常」—— 两条完全不同的断言，而它们都叫「绿」。
+    """
+    root, _ds = fresh(rules=False)
     ok, info, html, man = render(root)
     if not ok:
         return False, "干净账本竟然没落盘：%s" % info.get("error")
@@ -139,6 +188,12 @@ def e1_clean_explains_zero():
         return False, "报告里出现「未发现异常」"
     if "结构上产不出来" not in html:
         return False, "「需要你看一眼 0 条」没有解释那个 0 —— 读者会读成没事"
+    # ★ 2026-11-02 加：0 条不许被说成「都没有发现变化」。
+    #   实测撞出：有证据时（n_need=0）报告说「这一层的判据还没接上」，
+    #   0 证据时说「两条检查都跑成了，都没有发现变化」—— **同一个 0 两种相反归因**。
+    #   两句话不可能同时为真：C 线不读规则库 ⇒「挡下／提醒」永远产不出来。
+    if "都没有发现变化" in html:
+        return False, "报告把 0 条说成「都没有发现变化」—— 0 被读成了「查了没有危险」"
     return True, "落盘 OK；0 条有解释；无「未发现异常」；证据 %d 条" % man.get("evidence", -1)
 
 

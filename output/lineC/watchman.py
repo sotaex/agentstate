@@ -1,9 +1,17 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""巡检 Agent · 档 1 原型（只读，零模型）。
+"""巡检 Agent · 档 1 原型（**对账本只读**，零模型）。
 
 问的是「和过去比，什么变了」，不是「这条危不危险」。
 危险是判断，归 rules/default.json；变化是事实，归这里。
+
+★ 「只读」要说准（2026-11-02）：本文件**不写 `.psl/audit` 一个字节**，
+  但它自己有一本账（`clue_ledger.py`，默认 `_watchman_ledger.json`）。
+  那本账记的是「我说过什么」，不是「世界发生了什么」。
+  **两本账不能合并**：观察者的记忆一旦写进被观察的目录，它就同时是证据
+  和对证据的加工 —— 自指的第三种形态。所以默认路径在 `lineC/` 下，不在 `.psl/`。
+  说成「完全只读」是超额声明；准确的说法是「对账本只读；另有一本自己的账」。
+  `--no-ledger` 可关掉那本账（关掉后主动性退回一次性，同一条线索会天天出现）。
 
 三条纪律：
   1. 每条线索必须有 evidence（(day, lineno)），不许空 —— 没回指的线索是「模型说的」；
@@ -13,6 +21,9 @@
 用法：
     python output/lineC/watchman.py
     python output/lineC/watchman.py --root .psl/audit --window 14 --recent 3
+    python output/lineC/watchman.py --no-ledger          # 退回一次性
+    python output/lineC/clue_ledger.py --dump            # 看账本现状
+    python output/lineC/clue_ledger.py --ack <KEY>       # 「知道了，别再说」
 """
 
 from __future__ import annotations
@@ -52,6 +63,26 @@ class Clue:
     evidence: Tuple[Tuple[str, int], ...]
     note: str = ""
     items: Tuple[str, ...] = ()
+    #: 这条线索的**稳定身份**，由产生它的检测器声明（见 clue_ledger.clue_key）。
+    #: 空则退回到「按 kind 猜」。★ 为什么必须由检测器声明：只有它知道
+    #: 「什么算同一件事」。消费方（账本）只能看到 kind/day/subject，而
+    #: subject 里带当天计数（「9 个」→「10 个」）、day 有时恒为 today
+    #: （anchor/absent/verdict 都是），两者都不足以当身份 —— 拿它们猜，
+    #: 结果就是「每天都是新线索」，账本退化成计数器。
+    key: str = ""
+    #: 这条线索的**规模**：当天次数／缺失天数／偏离倍数／涉及条目数。
+    #: 由检测器声明，账本用它算内容指纹（`clue_ledger.clue_fingerprint`）。
+    #:
+    #: ★ 为什么必须有它，而不是从 subject 里抠数字：
+    #:   ① subject 是给人看的一句话，随时会为了可读性重写（本文件 2026-11-02
+    #:      就把 `AN-010` 改成了 `写到项目目录之外（AN-010）`）；抠数字等于
+    #:      把「文案」当「数据」，改文案就换指纹。
+    #:   ② 「同一件事变了没有」必须能回答「1 次 → 40 次算不算变」。
+    #:      只有 items 时，1 次和 40 次的 items 完全一样 ⇒ 指纹不变 ⇒
+    #:      用户按过 `--ack` 之后就**永远听不到**这件事变严重了。
+    #:      那不是「别再说了」，是把眼睛闭上。
+    #:   ③ 所以规模必须由**知道它的那一层**显式交出来，不靠下游猜。
+    magnitude: int = 0
 
     def __post_init__(self) -> None:
         if not self.evidence:
@@ -130,6 +161,41 @@ def _ensure_alias() -> None:
         _ALIAS, _CUR_IDS = load_rule_ids()
 
 
+_LABELS: Dict[str, str] | None = None
+
+
+def load_rule_labels(path: str = RULES_PATH) -> Dict[str, str]:
+    """`id -> 中文名`。**唯一真源是 `rules/default.json`，不许手抄一份。**
+
+    为什么需要它：报告里只写 `AN-010`，用户看不出这是什么规则。
+    「可读性」是记录质量五问之一（铁律 37），而这一条恰恰是主动报告的
+    **全部价值所在** —— 说了但没人看得懂，等于没说，而且还占了注意力预算。
+
+    ★ 只用于**显示**，不用于身份。身份（`Clue.key`）必须用号，因为号稳定、
+      中文名会随文案改；用名字当键，改一次文案就等于「换了一件新事」。
+    """
+    if not os.path.isfile(path):
+        return {}
+    with open(path, "r", encoding="utf-8") as fh:
+        data = json.load(fh)
+    out: Dict[str, str] = {}
+    for r in data.get("rules", []):
+        if isinstance(r, dict) and r.get("id"):
+            lab = r.get("label_zh") or r.get("name") or ""
+            if lab:
+                out[r["id"]] = str(lab)
+    return out
+
+
+def rule_label(rid: str) -> str:
+    """`AN-010` → `写到项目目录之外（AN-010）`。查不到就**只给号，不编**。"""
+    global _LABELS
+    if _LABELS is None:
+        _LABELS = load_rule_labels()
+    lab = _LABELS.get(rid)
+    return f"{lab}（{rid}）" if lab else rid
+
+
 def _rules_raw(rec: Dict[str, Any]) -> List[str]:
     """账本里写的原样 id —— 只在口径统计里用，业务逻辑一律走 `_rules_of`。"""
     raw = rec.get("rules_hit") or []
@@ -202,7 +268,87 @@ def _path_prefix(rec: Dict[str, Any]) -> str | None:
     parts = [p for p in parts if p]
     if len(parts) < 2:
         return None
-    return "/".join(parts[:2])
+    # ★ 2026-11-01 修 N-02：原来取 parts[:2]，把 D:\Application\WB\CN\resources
+    #   压成 D:/Application —— 盘符＋顶层目录，零区分度；同一产品下不同子目录
+    #   还会撞成同一个名字。取前 3 段后，D:/Application/WB 与 D:/Application/Qoder
+    #   能分开（判据见 noise_baseline.json 第 2 条）。
+    return "/".join(parts[:3])
+
+
+BENIGN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "benign.json")
+
+
+def load_benign(path: str = BENIGN_PATH) -> Dict[str, Any]:
+    """读常见物词表。
+
+    ★ 读不到时**不静默降级**：返回带 `_missing` 的**空词表**，调用方必须把它
+      写进报告。否则「词表丢了」会表现成「今天一条噪声都没有」——那是最好的
+      假象，也是最坏的假象。
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        if not isinstance(d, dict):
+            raise ValueError("benign.json 顶层不是对象")
+        return d
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "_missing": f"{type(exc).__name__}: {exc}",
+            "cmd": [], "host_suffix": [], "host_reserved": [], "path_prefix": [],
+        }
+
+
+def is_benign(kind: str, val: str, benign: Dict[str, Any]) -> bool:
+    """这条「首次出现」是不是常见物。
+
+    ★ 只用来决定**报不报**，绝不决定**记不记** —— 账本里它照旧存在，
+      `items` 里照旧出现。忽略的是注意力，不是事实（铁律 34）。
+    """
+    if kind == "cmd":
+        return val in set(benign.get("cmd") or [])
+    if kind == "path":
+        # ★ 目录类默认不报首现（benign.json 的 skip_path_first_seen）。
+        #   实测：路径粒度从 2 段改到 3 段之后，D:/Application 消失了，
+        #   但 C:/Users/x 冒出来 —— 说明根因不是「粒度」，是「目录首现没信息量」。
+        #   用户新建一个项目目录不该被告警；「写到 C:/Windows 危险吗」归规则库。
+        if benign.get("skip_path_first_seen"):
+            return True
+        for p in benign.get("path_prefix") or []:
+            if val == p or val.startswith(p + "/"):
+                return True
+        return False
+    if kind == "host":
+        h = val.lower().strip(".")
+        for r in benign.get("host_reserved") or []:
+            r = r.lower()
+            if h == r or h.endswith("." + r):
+                return True
+        for s in benign.get("host_suffix") or []:
+            s = s.lower()
+            # 按标签边界匹配：x.microsoft.com 命中，notmicrosoft.com **不**命中。
+            # 裸子串匹配会让伪装域名（notmicrosoft.com）被当成常见物放过。
+            if h == s or h.endswith("." + s):
+                return True
+        return False
+    return False
+
+
+def _benign_note(benign: Dict[str, Any] | None, skipped: Dict[str, int]) -> str:
+    """把词表状态写进覆盖注记。
+
+    ★ 三种状态必须长得不一样：未启用／读取失败／生效中。
+      「词表丢了」会表现成「今天一条噪声都没有」—— 那是最坏的假象，
+      因为报告看起来比平时还干净。
+    """
+    if benign is None:
+        return "｜常见物词表：未启用（--no-benign）"
+    if benign.get("_missing"):
+        return f"｜常见物词表：**读取失败**（{benign['_missing']}）⇒ 噪声未被过滤"
+    n = sum(skipped.values()) if skipped else 0
+    if not n:
+        return "｜常见物词表：已启用，本次无命中"
+    detail = "、".join(f"{k} {v}" for k, v in sorted(skipped.items()))
+    return f"｜常见物词表：忽略 {n} 个（{detail}）"
 
 
 # --------------------------------------------------------------------------- 检测器
@@ -272,6 +418,12 @@ def detect_absent(
                 # 假装能指到某一行是造假；指向末行是诚实的边界。
                 evidence=((today, today_lines),),
                 note=f"窗口 {len(prior)} 天｜出现 >= {min_days} 天｜中位数 >= {min_each}｜口径={scope}",
+                # 身份＝「哪个 type 不见了」，与哪天无关：同一个 type 连着三天
+                # 不出现是同一个状态，不是三个事实。
+                key=f"absent|{k}",
+                # 规模＝这个 type 平时一天有多少条。它决定「不见了」有多反常：
+                # 平时 200 条的 type 消失，与平时 3 条的 type 消失，不是一回事。
+                magnitude=int(med),
             )
         )
     return clues
@@ -335,6 +487,11 @@ def detect_baseline(
                     ),
                     evidence=((d, 1),),
                     note=f"MAD={mad:g}｜口径={scope}",
+                    # 身份＝哪一天偏了。这里的 day 就是身份：昨天偏和今天偏
+                    # 是两个事实，不能合并成「一直在偏」。
+                    key=f"baseline|{d}",
+                    # 规模＝当天实际条数（偏离的方向由 subject 说，指纹只认量级）。
+                    magnitude=int(cur),
                 )
             )
         else:
@@ -347,6 +504,8 @@ def detect_baseline(
                         subject=f"{d} pre_tool_use {cur} 条（{scope}），前 {len(prior)} 天同期全部为 {med:g}",
                         evidence=((d, 1),),
                         note=f"MAD=0（前期完全平稳），按绝对差判｜口径={scope}",
+                        key=f"baseline|{d}",
+                        magnitude=int(cur),
                     )
                 )
     return clues
@@ -399,7 +558,8 @@ def detect_repeat(
     stats: ItemStats,
     today: str,
     min_count: int = 3,
-) -> Tuple[List[Clue], set]:
+    benign: Dict[str, Any] | None = None,
+) -> Tuple[List[Clue], set, Dict[str, int]]:
     """D-2b：**第一次见，但今天已经重复 ≥3 次**。
 
     为什么这条要单独报（2026-10-31 深挖出来的）：
@@ -413,6 +573,7 @@ def detect_repeat(
     """
     label = {"cmd": "命令", "host": "域名", "path": "目录"}
     by_kind: Dict[str, List[Tuple[str, int]]] = collections.defaultdict(list)
+    skipped: Dict[str, int] = collections.defaultdict(int)
     used: set = set()
     for key, fd in stats.first_day.items():
         if fd != today:
@@ -421,6 +582,12 @@ def detect_repeat(
         if n < min_count:
             continue
         kind, val = key.split(":", 1)
+        if benign is not None and is_benign(kind, val, benign):
+            skipped[kind] += 1
+            # ★ 被词表忽略的 key 也必须占位：否则 first_seen 会把它再报一次，
+            #   等于「压了又冒出来」，而用户看到的是同一条噪声换了个标题。
+            used.add(key)
+            continue
         by_kind[kind].append((val, n))
         used.add(key)
 
@@ -430,24 +597,34 @@ def detect_repeat(
         names = "、".join(f"{v}({n} 次)" for v, n in pairs[:6])
         more = f" 等 {len(pairs)} 个" if len(pairs) > 6 else ""
         ev = tuple(stats.first_ev[f"{kind}:{v}"] for v, _ in pairs[:5])
+        note = f"门槛：当天首次出现且当天 >= {min_count} 次"
+        if skipped.get(kind):
+            note += f"｜按常见物词表忽略 {skipped[kind]} 个（账本仍记，--no-benign 可看）"
         clues.append(
             Clue(
                 kind="repeat",
                 day=today,
                 subject=f"{today} 今天才第一次出现的{label[kind]}，已经重复 {min_count} 次以上：{names}{more}",
                 evidence=ev,
-                note=f"门槛：当天首次出现且当天 >= {min_count} 次",
+                note=note,
                 items=tuple(v for v, _ in pairs),
+                # 身份＝「这一类里有哪些名字」。与 day 无关：同一个命令
+                # 换一天重复出现仍是同一件事，不该每天重新说一遍。
+                key="repeat|%s|" % kind + "|".join(sorted(v for v, _ in pairs)),
+                # 规模＝这批里出现最多的那个名字重复了几次。
+                # 3 次和 300 次是两件事，而 items 完全一样。
+                magnitude=max((n for _, n in pairs), default=0),
             )
         )
-    return clues, used
+    return clues, used, dict(skipped)
 
 
 def detect_first_seen(
     stats: ItemStats,
     recent: int = 3,
     exclude: set | None = None,
-) -> Tuple[List[Clue], Dict[str, int]]:
+    benign: Dict[str, Any] | None = None,
+) -> Tuple[List[Clue], Dict[str, int], Dict[str, int]]:
     """D-2：什么东西在全部历史里第一次出现。
 
     只报最后 recent 天 —— 33 天窗口下，头几天必然大量「首次出现」，
@@ -461,10 +638,14 @@ def detect_first_seen(
     label = {"cmd": "命令", "host": "域名", "path": "目录"}
 
     per_day: Dict[str, List[Tuple[str, str, Tuple[str, int]]]] = collections.defaultdict(list)
+    skipped: Dict[str, int] = collections.defaultdict(int)
     for key, fd in stats.first_day.items():
         if fd not in tail or key in exclude:
             continue
         kind, val = key.split(":", 1)
+        if benign is not None and is_benign(kind, val, benign):
+            skipped[kind] += 1
+            continue
         per_day[fd].append((kind, val, stats.first_ev[key]))
 
     clues: List[Clue] = []
@@ -489,11 +670,23 @@ def detect_first_seen(
                     day=d,
                     subject=f"{d} 首次出现{label[kind]}：{shown}{more}",
                     evidence=tuple(ev for _, ev in pairs[:5]),
-                    note=f"窗口=全期，只报最后 {recent} 天",
+                    note=(
+                        f"窗口=全期，只报最后 {recent} 天"
+                        + (
+                            f"｜按常见物词表忽略 {skipped[kind]} 个{label[kind]}（账本仍记）"
+                            if skipped.get(kind)
+                            else ""
+                        )
+                    ),
                     items=tuple(names),
+                    # 身份＝「首次出现了哪些名字」。day 属于**事件发生的日子**，
+                    # 但它不是身份：同一个名字的「首次出现」只发生一次。
+                    key="first_seen|%s|" % kind + "|".join(sorted(names)),
+                    # 规模＝这一类首次出现了几个名字。1 个和 20 个不一样。
+                    magnitude=len(names),
                 )
             )
-    return clues, stats.counts
+    return clues, stats.counts, dict(skipped)
 
 
 def rule_pair_index(
@@ -561,6 +754,14 @@ def detect_rule_pairs(
     `min_each` 门槛不能省：两条各只出现过一次，先后出现一次是必然的，不是线索。
     """
     pair_days, pair_ev, solo, n_sess = rule_pair_index(recs, gap_min)
+    # ★ 2026-11-01 修 N-04：非规则号（OUT-01／GOV-01 这类命名空间号）不该进规则配对。
+    #   实测第 8 条就是 `AN-005` → `OUT-01`，报出来用户无法理解「OUT-01 是什么规则」。
+    #   ★ 规则库读不到时（_CUR_IDS 为空）**不过滤** —— 宁可多报，不许因为配置缺失
+    #     把整类线索静默关掉。
+    _ensure_alias()
+    non_rule: set = set()
+    if _CUR_IDS:
+        non_rule = {r for r in solo if r not in _CUR_IDS}
     days = sorted({d for per in pair_days.values() for d in per})
     if not days:
         # ★ 这条回退分支是**没有任何配对**时才会走的：新装机、空账本、
@@ -582,6 +783,8 @@ def detect_rule_pairs(
     for (a, bb), per in sorted(
         pair_days.items(), key=lambda kv: -sum(kv[1].values())
     ):
+        if a in non_rule or bb in non_rule:
+            continue
         if solo[a] < min_each or solo[bb] < min_each:
             continue
         # 「罕见」的判据是**这个组合以前没出现过**，不是「两条规则各自很罕见」。
@@ -603,12 +806,26 @@ def detect_rule_pairs(
                 kind="rule_pair",
                 day=d,
                 subject=(
-                    f"{d} 首次出现组合：同一会话内 `{a}` 之后 {gap_min:g} 分钟内又命中 `{bb}`"
-                    f"（当天 {n} 次）"
+                    f"{d} 首次出现组合：同一会话内 {rule_label(a)} 之后 "
+                    f"{gap_min:g} 分钟内又命中 {rule_label(bb)}（当天 {n} 次）"
                 ),
                 evidence=((d, ln),),
                 note=f"此前从未同时出现过｜各自单独命中 {solo[a]}/{solo[bb]} 次",
                 items=(a, bb),
+                # 身份＝「哪两条规则凑在一起」。**不带 day**：同一对规则换一天
+                # 再凑一次还是同一件事，否则「首次出现」这个说法自相矛盾。
+                # ★ 排序的理由是**归并同一个现象**，不是「遍历次序不定」：
+                #   `rule_pair_index` 里 seq 已按时间排好，`(a, bb)` 天然是
+                #   时间序，方向是确定的。但实测 124 个配对里有 **37 组是双向的**
+                #   （A→B 与 B→A 都出现过），不排序就会把同一组共现报成两条
+                #   「首次出现组合」，注意力预算直接对折。
+                # ⇒ 记账按**无序组合**计数（铁律 35 的「拦截时归并」），
+                #   报告文案里的方向仍按该条证据的真实时间序写。
+                #   代价：方向反转不会触发账本重开（magnitude 跨桶时仍会重开）。
+                key="rule_pair|" + "|".join(sorted((a, bb))),
+                # 规模＝这对组合当天出现了几次。上界 `max_today` 挡的是「新常态」，
+                # 但在上界之内，1 次和 3 次仍然是不同的事实。
+                magnitude=n,
             )
         )
     stats = {
@@ -669,23 +886,53 @@ def detect_gap(
     recs: List[Tuple[str, int, Dict[str, Any]]],
     threshold_min: float = 30.0,
     recent: int = 3,
-) -> List[Clue]:
+    routine_days: int = 7,
+    routine_min: int = 4,
+) -> Tuple[List[Clue], int]:
     """Q3：哪段时间是空的 —— 同一天内两条记录间隔超过阈值。
 
     与 B-1「缺日」分工：B-1 是**跨天**（哪天整个日文件不存在），
     这里是**日内**（那天中间断了两小时）。不同粒度，不重叠。
+
+    ★ 2026-11-01 修 N-06：原来每天固定时段断（早饭、晚饭）都报一次，
+      实测一天报 3 条全是作息。现在先看**前 routine_days 天同一钟点**
+      （起点差 ≤30 分）是不是也常断：≥ routine_min 天也断 ⇒ 判为作息，不报。
+
+    ★ 这条抑制本身养出一个盲区：**攻击者每天同一时段删记录，就会被学成「作息」**。
+      它和 absent 的「基线来自账本本身」是同一个病。已写进 BLIND_SPOTS 第 9 条。
     """
     per_day, _with_ts = _gap_series(recs)
 
     days = sorted(per_day)
+
+    # 先算**全部天**的断层（不只 recent），作息判定要用历史
+    gaps_by_day: Dict[str, List[Tuple[datetime, datetime, int, int]]] = {}
+    for d in days:
+        seq = sorted(per_day[d])
+        lst: List[Tuple[datetime, datetime, int, int]] = []
+        for (t0, ln0), (t1, ln1) in zip(seq, seq[1:]):
+            gm = (t1 - t0).total_seconds() / 60.0
+            if gm >= threshold_min:
+                lst.append((t0, t1, ln0, ln1))
+        gaps_by_day[d] = lst
+
     tail = set(days[-recent:]) if recent > 0 else set(days)
     clues: List[Clue] = []
+    n_routine = 0
     for d in sorted(tail):
-        seq = sorted(per_day[d])
-        for (t0, ln0), (t1, ln1) in zip(seq, seq[1:]):
-            gap_min = (t1 - t0).total_seconds() / 60.0
-            if gap_min < threshold_min:
+        idx = days.index(d)
+        prior = days[max(0, idx - routine_days): idx]
+        for (t0, t1, ln0, ln1) in gaps_by_day[d]:
+            same_slot = 0
+            for pd in prior:
+                for (p0, _p1, _pl0, _pl1) in gaps_by_day.get(pd, []):
+                    if abs((p0 - t0).total_seconds()) <= 1800:
+                        same_slot += 1
+                        break
+            if same_slot >= routine_min:
+                n_routine += 1
                 continue
+            gap_min = (t1 - t0).total_seconds() / 60.0
             h = int(gap_min // 60)
             m = int(gap_min % 60)
             span = f"{h} 小时 {m} 分" if h else f"{m} 分"
@@ -695,10 +942,18 @@ def detect_gap(
                     day=d,
                     subject=f"{d} {t0.strftime('%H:%M')}–{t1.strftime('%H:%M')} 之间有 {span}没有记录",
                     evidence=((d, ln0), (d, ln1)),
-                    note=f"阈值 {threshold_min:g} 分钟",
+                    note=f"阈值 {threshold_min:g} 分钟"
+                         + (f"｜前 {len(prior)} 天同段只断 {same_slot} 天，不是作息" if prior else ""),
+                    # 身份＝哪天的哪个起点。同一天可以有好几个断层，只按 day 分会
+                    # 把它们压成一条（账本自检第 5 臂就是这么撞出来的）。
+                    key=f"gap|{d}|{t0.strftime('%H:%M')}",
+                    # 规模＝断了多少分钟。90 分钟和 8 小时不是一回事。
+                    # （gap 默认已关闭，但保留 magnitude 以免 --with-gap 时
+                    #   指纹退化成「只看起点时间」，那等于每天都是新的。）
+                    magnitude=int(gap_min),
                 )
             )
-    return clues
+    return clues, n_routine
 
 
 def rule_id_census(root: str) -> Dict[str, Any]:
@@ -853,6 +1108,9 @@ def detect_verdict(vc: Dict[str, Any], today: str, today_lines: int) -> List[Clu
                 evidence=((today, today_lines),),
                 note="表外＝(decision, action) 的关系不在这八档里，需人确认是新增裁决还是写错字段",
                 items=items,
+                key="verdict|out|" + "|".join(sorted(f"{t}/{d}/{a}" for (t, d, a) in out)),
+                # 规模＝这些表外组合一共多少条记录。
+                magnitude=sum(out.values()),
             )
         )
     if bad_val:
@@ -867,6 +1125,9 @@ def detect_verdict(vc: Dict[str, Any], today: str, today_lines: int) -> List[Clu
                 evidence=((today, today_lines),),
                 note="值域变了 ⇒ 要么产品加了新裁决，要么字段被写坏；两者都要人看",
                 items=items,
+                key="verdict|badval|" + "|".join(sorted(bad_val)),
+                # 规模＝值域外的取值一共出现多少条。
+                magnitude=sum(bad_val.values()),
             )
         )
     return clues
@@ -888,12 +1149,17 @@ ANCHOR_MISSING = "(有hash但无锚)"  # 有 hash 却没有清单条目 —— �
 
 
 def anchor_census(
-    root: str, recs: List[Tuple[str, int, Dict[str, Any]]]
+    root: str, recs: List[Tuple[str, int, Dict[str, Any]]], as_of: str | None = None
 ) -> Dict[str, Any]:
     """逐日核对日锚。**只读**，零写入。
 
     末条 hash 从已经读进内存的 `recs` 里取（取该日最后一条带 hash 的记录），
     不再读一遍盘 —— 33 个日文件最大 13MB，重读是白花。
+
+    `as_of` 只在**重放**时给：把日锚清单也截到那天，否则「重放 11-01」
+    会把 11-02 的锚读成「账本文件不见了」—— 一个纯属量具的假线索。
+    这类假线索在打分器里会被算成「金标准外」的误报，直接压掉精确率，
+    而真实原因只是「重放没截干净」（铁律 22：先怀疑量具）。
     """
     man_path = os.path.join(root, "day_manifest.json")
     man: Dict[str, Any] = {}
@@ -905,6 +1171,11 @@ def anchor_census(
                 man = got
         except Exception:
             man = {}
+    if as_of:
+        man = {
+            k: v for k, v in man.items()
+            if isinstance(k, str) and k[:10] <= as_of
+        }
 
     # 该日最后一条带 hash 的记录
     last_hash: Dict[str, str] = {}
@@ -994,6 +1265,14 @@ def detect_anchor(
                     "但它是目前唯一能指出「哪一天被动过」的证据"
                 ),
                 items=tuple(parts),
+                # 身份＝「哪几天对不上」。items 里带 size 的数值（每天在变），
+                # 拿它当键会让同一条线索天天变成新的；这里只取日期集合。
+                key="anchor|sizehash|" + "|".join(
+                    sorted({d for d, _a, _b in ac["size_bad"]}
+                           | {d for d, _a, _b in ac["hash_bad"]})
+                ),
+                # 规模＝几天对不上。
+                magnitude=n,
             )
         )
 
@@ -1006,6 +1285,9 @@ def detect_anchor(
                 evidence=ev,
                 note="锚在、文件没了 ⇒ 删除证据（不是「那天没有记录」）",
                 items=tuple(ac["orphan"]),
+                key="anchor|orphan|" + "|".join(sorted(ac["orphan"])),
+                # 规模＝几个锚找不到对应文件。
+                magnitude=len(ac["orphan"]),
             )
         )
 
@@ -1030,6 +1312,10 @@ def detect_anchor(
                     "本工具读不到代码历史，所以只记事实（B 线 b9 已定性 2026-10-05 属后者）"
                 ),
                 items=tuple(f"{d}（{n} 行）" for d, n in real_miss),
+                # 身份只取日期。items 里的「n 行」每天在长，带上它等于每天都是新线索。
+                key="anchor|missing|" + "|".join(sorted(d for d, _n in real_miss)),
+                # 规模＝缺了几天的锚。
+                magnitude=len(real_miss),
             )
         )
     return clues
@@ -1067,10 +1353,18 @@ COVERAGE_KEYS = (
     "anchor", "absent", "verdict", "baseline", "repeat", "first_seen", "gap", "rule_pair",
 )
 
-RAN, EMPTY, UNDECIDABLE, SKIPPED = "ran", "empty", "undecidable", "skipped"
+RAN, EMPTY, FILTERED, UNDECIDABLE, SKIPPED = (
+    "ran", "empty", "filtered", "undecidable", "skipped",
+)
 COV_MARK = {
     RAN: "查了",
     EMPTY: "查了，没有",
+    # ★ 第五态（2026-11-02 补）：查了、有、但全部按常见物词表忽略了。
+    #   与 EMPTY 的区别是「零」与「被压掉」的区别 —— 而这两者长得一模一样：
+    #   报告上都只是「这个检测器没出线索」。压噪声的代价是**看不见压掉了什么**，
+    #   所以被压掉的那部分必须有自己的名字，否则降噪就变成了静默删除。
+    #   （同一条毛病在账本上叫「账本记成说过了而用户没看到」，两面一体。）
+    FILTERED: "查了，有但按常见物忽略",
     UNDECIDABLE: "查了，判不了",
     SKIPPED: "没查",
 }
@@ -1203,7 +1497,25 @@ def render(
     # 首版写成 meta['records']（全期），一句话里两个分母 —— 正是 F40 那一类。
     today_n = meta.get("today_records", 0)
     if not ordered:
-        lines.append(f"今天记了 {today_n:,} 条，没有需要你看的。{legacy_note}")
+        # ★ 「没有需要你看的」是一句**事实断言**，只有在真的没有时才成立。
+        #   账本压掉的那几条不是「没有」，是「说过了／静默了」—— 说成「没有」
+        #   就是零与不可判同貌的又一处出口：读者从此无法区分
+        #   「今天真没事」和「今天有事但被压掉了」。
+        lc = meta.get("ledger_counts") or {}
+        n_said = int(lc.get("said_today", 0) or 0)
+        n_mute = int(lc.get("muted", 0) or 0) + int(lc.get("acked", 0) or 0)
+        if n_said or n_mute:
+            bits = []
+            if n_said:
+                bits.append(f"{n_said} 条今天已经说过")
+            if n_mute:
+                bits.append(f"{n_mute} 条在静默或已按你的确认闭嘴")
+            lines.append(
+                f"今天记了 {today_n:,} 条，**没有新的**要看（{'、'.join(bits)}；"
+                f"明细见下方「账本」一行）。{legacy_note}"
+            )
+        else:
+            lines.append(f"今天记了 {today_n:,} 条，没有需要你看的。{legacy_note}")
     else:
         lines.append(
             f"今天记了 {today_n:,} 条，有 {len(ordered)} 件值得看。{legacy_note}"
@@ -1237,6 +1549,21 @@ def render(
         f"日文件 {meta['files']}｜记录 {meta['records']:,}｜不可解析 {meta['unparsed']}｜"
         f"基线窗口 {meta['window']} 天｜首次出现窗口 {recent} 天｜规则配对 {rp_state}"
     )
+    # ★ 重放必须自报。用 `--as-of` 跑出来的报告与「今天」的报告长得一模一样，
+    #   唯一区别就是这一行。不印出来，读者会把历史结论当今日结论 ——
+    #   这正是 F40 那一类（数都对，分母不是那个分母）。
+    if meta.get("as_of"):
+        lines.append(
+            f"—— 重放 —— 账本截到 {meta['as_of']}（**这不是今天的读数**："
+            f"「今天」= {meta['today']}，是截断后的最后一天，不是挂钟今天）"
+        )
+    # —— 账本口径 ——
+    # ★ 这一行不是装饰：被静默／被顺延的条数如果不出现在报告里，
+    #   读者就无法区分「没事」和「被压掉了」。恒红线索天天占位与恒绿判据
+    #   进清单是同一个毛病，而两者的修法都必须是**把压掉的量说出来**，
+    #   不是把压掉的动作藏起来（铁律 41 的正向应用）。
+    if meta.get("ledger_note"):
+        lines.append(f"—— 账本 —— {meta['ledger_note']}")
     lines.append("")
 
     # —— 裁决口径 ——
@@ -1282,13 +1609,58 @@ def main(argv: List[str] | None = None) -> int:
     ap.add_argument("--root", default=".psl/audit")
     ap.add_argument("--window", type=int, default=14)
     ap.add_argument("--recent", type=int, default=1, help="只报最后几天（主动报告默认只看今天）")
+    ap.add_argument(
+        "--as-of",
+        default=None,
+        metavar="YYYY-MM-DD",
+        help="把账本截到这一天（含）为止再算，用于**重放历史某天**。"
+        "★ 存在的唯一理由是让金标准可复核：noise_baseline.json 是某一天实跑的"
+        "快照，若只能跑「今天」，那么金标准每天都在过期，打分器报的「召回 0%%」"
+        "既可能是代码退化、也可能只是换了采样日 —— 两者在报告上长得一模一样。"
+        "加上这个开关，「拿今天的代码跑昨天的数据」才成为可能，"
+        "金标准的可比性才不依赖运气。",
+    )
     ap.add_argument("--min-each", type=int, default=3)
-    ap.add_argument("--gap-min", type=float, default=30.0, help="日内断层阈值（分钟）")
+    ap.add_argument(
+        "--with-gap",
+        action="store_true",
+        help="启用日内断层检测。**默认关闭**（2026-11-02 决策）。"
+        "理由：实测 gap 报的是作息不是异常 —— 阈值 30 分钟时一天报 5 条，"
+        "内容全是 00:50–06:10 之间的整点空隙，也就是这个人在睡觉；"
+        "阈值 90 分钟时一条不报，不是「调对了」，是刚好把睡眠挡住。"
+        "而「某个钩子挂了」这件事由 absent 用更准的量具抓（日级出现频次，"
+        "不是小时级间隙）。**gap 报作息，absent 报故障。**"
+        "留着 gap 只是让报告多一个会说谎的量具，所以关掉而不是调参。",
+    )
+    ap.add_argument(
+        "--gap-min",
+        type=float,
+        default=90.0,
+        help="日内断层阈值（分钟）。只在 --with-gap 时生效。"
+        "★ 2026-11-01 从 30 提到 90；2026-11-02 起该检测器默认关闭。"
+        "**这个数是拍的，不是算的**——原计划的『按前 7 天同段作息抑制』已被证伪："
+        "这个人没有稳定作息（见结果文档 §4）。",
+    )
     ap.add_argument("--cap", type=int, default=5, help="主动报告上限（注意力预算）")
     ap.add_argument("--repeat-min", type=int, default=3, help="「第二次才算数」的重复门槛")
     ap.add_argument("--pair-gap", type=float, default=5.0, help="规则配对的会话内时间窗（分钟）")
     ap.add_argument("--pair-max", type=int, default=3, help="组合当天出现次数上界（超过算新常态）")
     ap.add_argument("--json", action="store_true", help="输出 JSON（供负控断言用）")
+    ap.add_argument(
+        "--no-benign",
+        action="store_true",
+        help="关掉常见物词表（负控 NC4：被忽略的必须全部回来）",
+    )
+    ap.add_argument(
+        "--no-ledger",
+        action="store_true",
+        help="关掉线索账本（退回一次性：同一条线索会天天出现）",
+    )
+    ap.add_argument(
+        "--ledger",
+        default=None,
+        help="账本路径（默认 lineC/_watchman_ledger.json，**不写进 .psl/audit**）",
+    )
     args = ap.parse_args(argv)
 
     try:
@@ -1300,10 +1672,49 @@ def main(argv: List[str] | None = None) -> int:
         print(f"[停] 目录不存在：{args.root}", file=sys.stderr)
         return 2
 
-    recs = list(iter_records(args.root))
+    # ★ 本工具把**整本账读进内存**（173k 条实测约数百 MB）。这是已知的规模上限，
+    #   不是 bug，但**必须说成「读不完」而不是裸 traceback**：
+    #   2026-11-01 深夜实测撞过一次 `MemoryError` —— 当时总闸门正在跑
+    #   `_p_c2_negctl.py`（它复制 16 个日文件），我又并发跑了几个 watchman。
+    #   裸 traceback 会让人以为「代码坏了」，而真实原因是「内存不够，等一下再跑」。
+    #   两种原因的处理方式完全不同，所以要在出口处把它们分开。
+    try:
+        recs = list(iter_records(args.root))
+    except MemoryError:
+        print(
+            f"[停] 读不完：{args.root} 的记录装不进内存（本工具全量载入，无流式）。\n"
+            "      这不是账本坏了，是本次可用内存不够 —— 常见原因：同时还在跑别的"
+            "重活（总闸门的负控会复制整份账本做夹具）。\n"
+            "      处置：等别的任务跑完再试；或用 --window 缩小窗口（不减少读入量，"
+            "只减少后续计算）。",
+            file=sys.stderr,
+        )
+        return 3
     if not recs:
         print(f"[停] {args.root} 里没有任何日文件记录", file=sys.stderr)
         return 2
+
+    # ★ --as-of：把账本截到某天为止。**截在载入之后、一切计算之前**，
+    #   这样「今天」(`max(daily)`)、同期 cutoff、基线窗口、最近 N 天
+    #   全部自动跟着走 —— 一处过滤，不必在八个检测器里各改一遍
+    #   （铁律：同一件事只许有一处定义，八处各写一份必然漂）。
+    #   注意它截的是「哪一天的记录参与计算」，不是「报哪一天」；
+    #   报哪一天仍由 --recent 决定。两个旋钮不许合并。
+    if args.as_of:
+        if len(args.as_of) != 10 or args.as_of[4] != "-" or args.as_of[7] != "-":
+            print(f"[停] --as-of 要 YYYY-MM-DD：{args.as_of!r}", file=sys.stderr)
+            return 2
+        before = len(recs)
+        earliest = min(r[0] for r in recs)
+        recs = [r for r in recs if r[0] <= args.as_of]
+        if not recs:
+            print(
+                f"[停] --as-of {args.as_of} 之后一条记录都不剩"
+                f"（账本最早一天是 {earliest}，共 {before} 条）。"
+                "这不是「那天没问题」，是「那天没数据」—— 两者必须分开说。",
+                file=sys.stderr,
+            )
+            return 2
     # 报数规矩（协同说明 §七）：任何条数必须带读取时刻 —— 账本 30 天滚动，
     # 明天必不同。这里记的是**读完那一刻**，不是报告生成那一刻，两者差几秒也是差。
     read_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1347,7 +1758,7 @@ def main(argv: List[str] | None = None) -> int:
     today_lines = sum(1 for d, _, _ in recs if d == today)
 
     # 锚先算：它决定「下游读数可不可信」。锚坏了而先报别的，等于在坏尺子上量东西。
-    ac = anchor_census(args.root, recs)
+    ac = anchor_census(args.root, recs, as_of=args.as_of)
     all_days = sorted(per_type)
     recent_days = set(all_days[-args.recent:]) if args.recent > 0 else set(all_days)
     got = detect_anchor(ac, today, today_lines, recent_days)
@@ -1397,35 +1808,65 @@ def main(argv: List[str] | None = None) -> int:
     }
 
     stats = _item_stats(recs)
-    got, used = detect_repeat(stats, today, min_count=args.repeat_min)
+    benign = None if args.no_benign else load_benign()
+    got, used, rep_skip = detect_repeat(
+        stats, today, min_count=args.repeat_min, benign=benign
+    )
     clues += got
+    _bn_note = _benign_note(benign, rep_skip)
+    _n_rep_skip = sum(rep_skip.values()) if rep_skip else 0
     coverage["repeat"] = {
-        "status": RAN if got else EMPTY,
-        "note": f"当天首次出现且当天 >= {args.repeat_min} 次",
+        # 有线索 ⇒ RAN；没线索但压过 ⇒ FILTERED（不是「没有」）；都没 ⇒ EMPTY
+        "status": RAN if got else (FILTERED if _n_rep_skip else EMPTY),
+        "note": f"当天首次出现且当天 >= {args.repeat_min} 次" + _bn_note,
     }
 
-    got, fs_counts = detect_first_seen(stats, recent=args.recent, exclude=used)
+    got, fs_counts, fs_skip = detect_first_seen(
+        stats, recent=args.recent, exclude=used, benign=benign
+    )
     clues += got
+    _n_fs_skip = sum(fs_skip.values()) if fs_skip else 0
     coverage["first_seen"] = {
-        "status": RAN if got else EMPTY,
-        "note": f"全期窗口／只报最后 {args.recent} 天；已剔除 repeat 报过的 {len(used)} 项",
+        "status": RAN if got else (FILTERED if _n_fs_skip else EMPTY),
+        "note": (
+            f"全期窗口／只报最后 {args.recent} 天；已剔除 repeat 报过的 {len(used)} 项"
+            + _benign_note(benign, fs_skip)
+        ),
     }
 
-    got = detect_gap(recs, threshold_min=args.gap_min, recent=args.recent)
-    clues += got
-    # ★ 覆盖状态不能只看「有没有线索」。一条 ts 都不可解析时，
-    #   报「查了，没有」是把**没查成**说成了**查了没有** —— 零与不可判同貌。
-    #   红队 R5 现场：把 ts 全抹成空串，修完崩溃之后 gap 报的正是「查了，没有」。
+    # ★ 2026-11-02 决策：gap 默认关闭。覆盖状态必须说「没查」而不是「查了没有」，
+    #   并且要说清「为什么没查」—— 「按决策关闭」与「还没实现」在报告上都长得像
+    #   「这一项没有输出」，但前者是结论，后者是欠账。混为一谈就是铁律 31 的反面。
     gc = gap_census(recs)
-    coverage["gap"] = {
-        "status": (
-            UNDECIDABLE if gc["with_ts"] == 0 else (RAN if got else EMPTY)
-        ),
-        "note": (
-            f"阈值 {args.gap_min:g} 分钟；带可解析 ts 的记录 {gc['with_ts']:,} 条"
-            f"／共 {gc['total']:,} 条"
-        ),
-    }
+    if args.with_gap:
+        got, n_routine = detect_gap(
+            recs, threshold_min=args.gap_min, recent=args.recent
+        )
+        clues += got
+        # ★ 覆盖状态不能只看「有没有线索」。一条 ts 都不可解析时，
+        #   报「查了，没有」是把**没查成**说成了**查了没有** —— 零与不可判同貌。
+        #   红队 R5 现场：把 ts 全抹成空串，修完崩溃之后 gap 报的正是「查了，没有」。
+        coverage["gap"] = {
+            "status": (
+                UNDECIDABLE if gc["with_ts"] == 0 else (RAN if got else EMPTY)
+            ),
+            "note": (
+                f"阈值 {args.gap_min:g} 分钟；带可解析 ts 的记录 {gc['with_ts']:,} 条"
+                f"／共 {gc['total']:,} 条"
+            ),
+        }
+    else:
+        coverage["gap"] = {
+            "status": SKIPPED,
+            "note": (
+                "按 2026-11-02 决策关闭（--with-gap 可开）。"
+                "实测它报的是作息不是异常：阈值 30 分钟时一天报 5 条，"
+                "全是 00:50–06:10 的整点空隙；阈值 90 分钟时一条不报，"
+                "不是调对了而是刚好把睡眠挡住。「钩子挂了」由 absent 抓"
+                f"（日级频次，不是小时级间隙）。分母仍算清：带可解析 ts 的记录 "
+                f"{gc['with_ts']:,} 条／共 {gc['total']:,} 条"
+            ),
+        }
 
     rp_clues, pair_stats = detect_rule_pairs(
         recs,
@@ -1445,12 +1886,66 @@ def main(argv: List[str] | None = None) -> int:
     }
     _coverage_selfcheck(coverage)
 
+    # ------------------------------------------------------------------ 线索账本
+    # ★ 账本**只作用于主动推送（文本出口）**，不作用于 `--json`。
+    #   这不是偷懒，是分工：
+    #     · 文本出口＝它自己开口找你 ⇒ 主动性 ⇒ 必须压节奏（同一条别天天说）；
+    #     · `--json` 是取证／内部读数，是**你问它**才出的 ⇒ 响应性 ⇒ 必须完整。
+    #   在响应式出口上做静默，等于「你问它，它还替你筛」——那是另一种欺骗。
+    #   但 JSON 里会带 `ledger` 块说明「如果推送，会压掉几条」，让这个差别看得见。
+    #
+    # ★ 记账顺序是硬不变量：annotate → plan → render → commit(shown)。
+    #   在 render 之前 commit，就是「记成说过了而用户没看到」= 永久静默。
+    ledger = None
+    annotated = None
+    ledger_path = None
+    ledger_error = None
+    ledger_notice = None
+    # ★ 身份（clue_key）与账本的开关**是两件事**：`--no-ledger` 关掉的是「记忆」，
+    #   不是「这条线索叫什么」。所以模块总是导入，JSON 出口永远能给出稳定的 key ——
+    #   否则「同一件事」这件事本身就成了可选项。
+    import clue_ledger as CL  # noqa: N813
+
+    # 机制层守自己：新加检测器忘了写 `key` 时，不许静默退回「按 kind 猜」。
+    # 这条检查来自真事：本文件第一版按 `kind|day` 猜身份，同一天的 8 个 gap
+    # 全算成同一个键（账本自检第 8 臂）。猜出来的身份看不出来是猜的。
+    _no_key = sorted({c.kind for c in clues if not c.key})
+    if _no_key:
+        print("[警告] %d 类线索没声明身份 key：%s ⇒ 已退回按 kind/day 推导，"
+              "可能把不同的事合并成一条" % (len(_no_key), "、".join(_no_key)),
+              file=sys.stderr)
+
+    if not args.no_ledger:
+        ledger_path = args.ledger or CL.DEFAULT_PATH
+        ledger = CL.load(ledger_path)
+        # ★ error 与 notice 必须分开：error 是「这次读不了」⇒ 不用账本；
+        #   notice 是「一次性历史事件」⇒ 照常用，只是要说一句。
+        #   第一版把两者合并，结果 key_version 提示让账本永久不可用、
+        #   永远不保存、提示天天重复 —— 一次性的历史事件被写成了恒红状态。
+        ledger_error = ledger.get("ledger_error")
+        ledger_notice = ledger.get("ledger_notice")
+        if ledger_error is None:
+            try:
+                annotated = CL.annotate(clues, ledger, today)
+            except CL.KeyCollision as exc:
+                # 撞键是**检测器的 bug**，不是数据的问题。不许把报告带下去：
+                # 崩溃的表现是「没有那条记录」，比报错更难发现（铁律 45）。
+                # 但也不许静默降级 —— 降级本身要出现在报告里。
+                annotated = None
+                ledger_error = "撞键：%s" % str(exc).splitlines()[0]
+
     today_records = sum(1 for d, _, r in recs if d == today and not r.get("__unparsed__"))
     meta = {
         "today": today,
         "today_records": today_records,
         "read_at": read_at,
-        "files": len(day_files(args.root)),
+        # ★ 重放标记：`as_of` 非空时，这份报告算的是「截至那天的账本」，
+        #   不是「今天的账本」。分母必须跟着变 —— 否则「日文件 35」配
+        #   「记录 173,647」会让人以为丢了 4 千条（F40：一句话两个分母）。
+        "as_of": args.as_of,
+        "files": (
+            len({d for d, _, _ in recs}) if args.as_of else len(day_files(args.root))
+        ),
         "records": len(recs),
         "unparsed": unparsed,
         "window": args.window,
@@ -1469,6 +1964,30 @@ def main(argv: List[str] | None = None) -> int:
     if args.json:
         import json as _json
 
+        # JSON 出口：**不抑制、不记账**，但把「若推送会怎样」算出来一并给出。
+        # 纯读 —— `--json` 不该有副作用（取证时反复跑，不能改变推送节奏）。
+        st_map: Dict[int, str] = {}
+        led_block: Dict[str, Any] = {"path": ledger_path, "error": ledger_error,
+                                      "notice": ledger_notice}
+        if annotated is not None:
+            st_map = {id(c): st for c, _k, st, _e in annotated}
+            try:
+                _s, _d, _sup = CL.plan(annotated, args.cap, PRIORITY)
+                led_block.update(
+                    {
+                        "n_would_say": len(_s),
+                        "n_would_defer": len(_d),
+                        "n_suppressed": len(_sup),
+                        "note": CL.render_note(annotated, _s, _d, ledger_error, ledger_notice),
+                    }
+                )
+            except Exception as exc:                            # noqa: BLE001
+                led_block["error"] = "plan 失败：%s: %s" % (type(exc).__name__, exc)
+        elif ledger_error:
+            led_block["note"] = "账本不可用：%s" % ledger_error
+        if args.no_ledger:
+            led_block["note"] = "账本已关闭（--no-ledger）：本读数与推送完全一致"
+
         print(
             _json.dumps(
                 {
@@ -1482,6 +2001,7 @@ def main(argv: List[str] | None = None) -> int:
                     #    分支」在代码里长得一模一样**，区别只在有没有人从外面数一遍。
                     #    自检抓不到它，因为自检跑的是 render()，不是 JSON 出口。
                     "blind_spots": [{"title": t, "detail": d} for t, d in BLIND_SPOTS],
+                    "ledger": led_block,
                     "clues": [
                         {
                             "kind": c.kind,
@@ -1490,6 +2010,10 @@ def main(argv: List[str] | None = None) -> int:
                             "evidence": c.evidence,
                             "note": c.note,
                             "items": list(c.items),
+                            # 身份与推送状态一起出去：读者才能自己核对
+                            # 「这条为什么没出现在推送里」。
+                            "key": CL.clue_key(c),
+                            "ledger_state": st_map.get(id(c)),
                         }
                         for c in sorted(clues, key=lambda x: PRIORITY.get(x.kind, 9))
                     ],
@@ -1500,7 +2024,36 @@ def main(argv: List[str] | None = None) -> int:
         )
         return 0
 
-    print(plain(render(clues, meta, args.recent, cap=args.cap, coverage=coverage)))
+    # ---------------------------------------------------------------- 主动推送
+    if annotated is not None:
+        shown, deferred, suppressed = CL.plan(annotated, args.cap, PRIORITY)
+        meta["ledger_note"] = CL.render_note(annotated, shown, deferred,
+                                             ledger_error, ledger_notice)
+        _n = CL.counts(annotated)
+        meta["ledger_counts"] = {
+            "new": _n[CL.NEW],
+            "ongoing": _n[CL.ONGOING],
+            "said_today": _n[CL.SAID_TODAY],
+            "muted": _n[CL.MUTED],
+            "acked": _n[CL.ACKED],
+        }
+        # cap 传 len(shown)：让 render 不做二次截断。二次截断＝「账本记了、
+        # 报告没印」，正是那条永久静默的失败模式。
+        print(plain(render(shown, meta, args.recent,
+                           cap=max(1, len(shown)), coverage=coverage)))
+        # ★ 只有确实印出来的那几条才记账（不变量 1）。
+        CL.commit(ledger, annotated, shown, deferred, today)
+        try:
+            CL.save(ledger_path, ledger)
+        except Exception as exc:                                # noqa: BLE001
+            print("[警告] 账本写不进去（%s: %s）⇒ 下次会重复说同一批线索"
+                  % (type(exc).__name__, exc), file=sys.stderr)
+    else:
+        if ledger_error:
+            meta["ledger_note"] = (
+                "★ 账本不可用：%s ⇒ 本次按「没说过」处理，可能重复" % ledger_error
+            )
+        print(plain(render(clues, meta, args.recent, cap=args.cap, coverage=coverage)))
 
     print(
         f"[分母] 记录 {len(recs)}｜不可解析 {unparsed}｜"

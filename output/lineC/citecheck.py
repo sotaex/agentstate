@@ -196,10 +196,18 @@ def check(html_text: str, root: str, expect_n: Optional[int] = None
     if not claims and not contract:
         # 一条都没抽到，且契约也没报错 ⇒ 可能真的是空报告，也可能根本没按契约渲染。
         # 两者都是「没法校验」，不是「通过」。
+        #
+        # ★ 但有一个例外必须分出来：**上游也是 0 条**。
+        #   那时「产物 0 条」不是丢了什么，而是本来就没有可校验的东西 ——
+        #   这叫空真（vacuously true），不是「不可判」。
+        #   分不出来的代价实测过：`report.produce` 把 rc≠0 一律当失败 ⇒
+        #   **「今天没事」这份报告永远产不出来**，而它恰恰是主动报告最常见的输出。
+        if expect_n == 0:
+            return bad, notes, _mk_stats(claims, badges, vacuous=True)
         notes.append(
             "产物里没有抽到任何带 %s 的证据条目 —— 无法校验（可能是空报告，"
             "也可能渲染层没按契约输出；两者都不等于通过）" % A_EID)
-        return bad, notes, {"n_claims": 0, "n_badges": len(badges)}
+        return bad, notes, _mk_stats(claims, badges)
 
     cache = E.DayCache(root)
     for c in claims:
@@ -249,7 +257,29 @@ def check(html_text: str, root: str, expect_n: Optional[int] = None
             "（分母来自上游，不来自产物本身）"
             % (len(claims), expect_n, abs(expect_n - len(claims))))
 
-    stats = {
+    stats = _mk_stats(claims, badges, n_held_word, n_held_claim, n_warn_word, n_warn_claim)
+    return bad, notes, stats
+
+
+def _mk_stats(claims: List[Claim], badges: List[str],
+              n_held_word: int = 0, n_held_claim: int = 0,
+              n_warn_word: int = 0, n_warn_claim: int = 0,
+              vacuous: bool = False) -> Dict[str, object]:
+    """统计字典的**唯一形状定义**。
+
+    ★ 2026-11-02 修：原来「一条证据都没抽到」的早退分支返回的是
+      `{"n_claims": 0, "n_badges": N}` —— **比正常路径少了五个键**，
+      而 `main()` 打印时要读 `stats["by_strength"]` ⇒ `KeyError` ⇒ 退出码 1
+      ⇒ `report.produce` 判「回指校验未通过」⇒ **干净账本根本产不出报告**。
+
+      为什么长期没被发现：`--selfcheck` 直接调 `check()`，**从不经过 `main()` 的打印**。
+      又一次「从未被执行过的分支」—— 只看代码看不出来，必须从外面跑一遍 CLI。
+      （实测：4 天 × 6 条的干净夹具上 7 臂负控红了 5 臂，全是这一条。）
+
+      修法不是补那五个键，而是**让两条路径共用一个形状定义** ——
+      否则下一个早退分支还会漏，而漏的方式和这次一模一样。
+    """
+    return {
         "n_claims": len(claims),
         "n_badges": len(badges),
         "n_held_word": n_held_word,
@@ -257,8 +287,11 @@ def check(html_text: str, root: str, expect_n: Optional[int] = None
         "n_warn_word": n_warn_word,
         "n_warn_claim": n_warn_claim,
         "by_strength": _by_strength(claims),
+        # 「空真」：上游 0 条、产物 0 条 ⇒ 没有可校验的东西，也没有丢东西。
+        # 它既不是「通过」（什么都没核），也不是「不可判」（能确定没有东西可核）。
+        # 单独立一个键，而不是塞进 notes —— notes 会让 produce 拒绝落盘。
+        "vacuous": vacuous,
     }
-    return bad, notes, stats
 
 
 def _by_strength(claims: List[Claim]) -> Dict[str, int]:
@@ -271,9 +304,10 @@ def _by_strength(claims: List[Claim]) -> Dict[str, int]:
 def _selfcheck() -> int:
     """量具自检：**先证明这把尺子会红，再拿它量报告。**
 
-    七条：①合规产物通过 ②越界回指必红 ③缺契约属性必报（不是通过）
+    八条：①合规产物通过 ②越界回指必红 ③缺契约属性必报（不是通过）
           ④缺 rule 的 held 必红 ⑤手写的「挡下」必红 ⑥空产物必报不可判
           ⑦WARN 不许印成和 PASS 一样的徽标（正反两向都验）
+          ⑧空产物与正常路径的 stats **同形**（否则打印侧 KeyError）
     """
     import tempfile
     fails: List[str] = []
@@ -329,11 +363,65 @@ def _selfcheck() -> int:
                          "—— 性质偏离会被读成通过")
 
         empty = "<html><body><p>本次未发现异常</p></body></html>"
-        bad, notes, _ = check(empty, d, expect_n=3)
+        bad, notes, st_empty = check(empty, d, expect_n=3)
         if bad:
             fails.append("空产物被报成错误（应报不可判）：%s" % bad)
         if not notes:
             fails.append("空产物没有报「无法校验」—— 零与不可判同貌")
+
+        # ⑧ **两条路径的 stats 必须同形**。
+        #    2026-11-02 的真事故：空产物分支返回的字典少了 5 个键，
+        #    而 `main()` 打印时读 `stats["by_strength"]` ⇒ KeyError ⇒ 退出码 1
+        #    ⇒ 干净账本产不出报告。`--selfcheck` 当时全绿，因为它只调 `check()`，
+        #    从不走 `main()` 的打印。
+        #    所以这一臂断言的是**形状**，不是某个具体值。
+        _, _, st_ok = check(ok_html, d, expect_n=1)
+        if set(st_empty) != set(st_ok):
+            fails.append(
+                "空产物的 stats 键与正常路径不一致：缺 %s、多 %s"
+                " —— 两条路径返回不同形状，读的一方迟早 KeyError"
+                % (sorted(set(st_ok) - set(st_empty)), sorted(set(st_empty) - set(st_ok)))
+            )
+
+        # ⑨ `--stdin` 与 `--html` 必须同结论。
+        #    这一臂存在的原因不是「多测一条路」：`--stdin` 是 2026-11-02 为绕开
+        #    「宿主锁住新建文件、删不掉」才加的第二条入口。**第二条入口天生会漂**
+        #    —— 它和第一条读的是同一段 `check()`，但入口参数各自解析。
+        #    只验 `check()` 的话，入口写错（比如忘了传 --expect）照样全绿。
+        import io
+        import contextlib
+        p_file = os.path.join(d, "_cc_arm.html")
+        with open(p_file, "w", encoding="utf-8") as fh:
+            fh.write(ok_html)
+        # ★ 这两臂会调 `main()`，而 `main()` 会往 stdout/stderr 印东西。
+        #   不静音的话，闸门取「最后一行」当摘要，摘要就会变成
+        #   `citecheck.py: error: --html 与 --stdin 只能给一个` —— 一条**故意**
+        #   触发的错误盖住了「九条全绿」。摘要被噪声顶掉，等于摘要失效。
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            rc_file = main(["--html", p_file, "--root", d, "--expect", "1"])
+        old_stdin = sys.stdin
+        try:
+            sys.stdin = io.StringIO(ok_html)
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                rc_stdin = main(["--stdin", "--root", d, "--expect", "1"])
+        finally:
+            sys.stdin = old_stdin
+        if rc_file != rc_stdin:
+            fails.append("--stdin 与 --html 结论不一致：%s vs %s"
+                         % (rc_file, rc_stdin))
+
+        # ⑨b 两个入口同时给必须**拒**，不许默认挑一个。
+        #    默认挑一个的后果：调用方以为校验了 A，实际校验的是 B，而两者都绿。
+        try:
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                main(["--html", p_file, "--stdin", "--root", d])
+            fails.append("--html 与 --stdin 同时给出却接受了 —— 校验对象不明时不许猜")
+        except SystemExit as exc:
+            if exc.code not in (2,):
+                fails.append("--html 与 --stdin 同时给出的拒绝方式不对：退出码 %s" % exc.code)
     finally:
         import shutil
         shutil.rmtree(d, ignore_errors=True)
@@ -342,14 +430,23 @@ def _selfcheck() -> int:
         print("[自检失败] %s" % f, file=sys.stderr)
     if fails:
         return 1
-    print("[自检] 七条全部生效（合规／越界／缺契约／缺rule／手写挡下／空产物不可判／"
-          "WARN 不许印成通过）")
+    print("[自检] 九条全部生效（合规／越界／缺契约／缺rule／手写挡下／空产物不可判／"
+          "WARN 不许印成通过／stats 两条路径同形／stdin 与 html 同结论且互斥）")
     return 0
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="回指校验器（只读，档 0）")
     ap.add_argument("--html", help="要校验的 HTML 文件")
+    ap.add_argument(
+        "--stdin",
+        action="store_true",
+        help="从标准输入读 HTML（而不是从文件读）。"
+        "★ 存在的理由不是「方便」：宿主会对**新建的文件**持有句柄且不释放"
+        "（实测 WinError 5 持续 60 秒以上），于是「先写临时文件、校验、再删掉」"
+        "这条路会在删不掉时崩掉 —— 而崩的那条分支只在有坏回指时才走。"
+        "走管道就根本没有文件，也就不存在删不掉。",
+    )
     ap.add_argument("--root", default=".psl/audit")
     ap.add_argument("--expect", type=int, default=None, help="上游证据条数（抓渲染丢条）")
     ap.add_argument("--selfcheck", action="store_true")
@@ -362,18 +459,26 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.selfcheck:
         return _selfcheck()
-    if not args.html:
-        ap.error("要么 --selfcheck，要么给 --html")
-    if not os.path.isfile(args.html):
-        print("[停] 文件不存在：%s" % args.html, file=sys.stderr)
-        return 2
+    if not args.html and not args.stdin:
+        ap.error("要么 --selfcheck，要么给 --html，要么 --stdin")
+    if args.html and args.stdin:
+        # 两个都给就是没说清校验对象 —— 不许默认挑一个（挑错时结论照样是绿的）
+        ap.error("--html 与 --stdin 只能给一个")
 
-    with open(args.html, "r", encoding="utf-8", errors="replace") as fh:
-        text = fh.read()
+    if args.stdin:
+        text = sys.stdin.read()
+        src = "<stdin>"
+    else:
+        if not os.path.isfile(args.html):
+            print("[停] 文件不存在：%s" % args.html, file=sys.stderr)
+            return 2
+        with open(args.html, "r", encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+        src = args.html
 
     bad, notes, stats = check(text, args.root, args.expect)
 
-    print("产物：%s" % args.html)
+    print("产物：%s" % src)
     print("抽出证据 %d 条｜徽标 %d 个｜分布 %s"
           % (stats["n_claims"], stats["n_badges"], stats["by_strength"]))
     if notes:
@@ -388,6 +493,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     if notes:
         # 有不可判但没有坏 —— 不算通过，也不算失败。退出码 3 让调用方区分。
         return 3
+    if stats.get("vacuous"):
+        # 空真：0 条证据、上游也是 0 条。**要说出来**，不能印成「通过」——
+        # 「通过：每条断言都能落到账本的具体位置」在 0 条时是句空话。
+        print("空真：0 条证据，上游也是 0 条 ⇒ 没有可校验的东西，也没有丢东西"
+              "（这不是「校验通过」，是「没东西可校」）")
+        return 0
     print("通过：每条断言都能落到账本的具体位置")
     return 0
 

@@ -73,9 +73,16 @@ ARMS: List[Tuple[str, bool, str]] = []
 # ──────────────────────────────────────────────────────────────────────────
 
 def run_watch(root: str, recent: int = 3) -> Dict[str, Any]:
+    """★ 显式 `--with-gap`：gap 在 2026-11-02 被默认关闭（它报的是作息不是异常）。
+
+    红队仍然要测它 —— r5 臂验的是「ts 全抹成空串时报『判不了』而不是崩」，
+    而 gap 正是那个用 ts 的检测器。**红队不许依赖默认值**：
+    依赖默认值意味着「默认值一改，红队测的东西就悄悄换了」，
+    而它照样显示 30/30 —— 一个没有意义的绿灯。
+    """
     p = subprocess.run(
         [sys.executable, "-E", "-X", "utf8", WATCH,
-         "--root", root, "--json", "--recent", str(recent)],
+         "--root", root, "--json", "--recent", str(recent), "--with-gap"],
         cwd=REPO, capture_output=True, text=True,
         encoding="utf-8", errors="replace")
     if p.returncode != 0:

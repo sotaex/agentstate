@@ -1,0 +1,203 @@
+{
+  "schema": 1,
+  "what": "主动性 v2 噪声金标准：2026-11-01 21:27 实跑 watchman.py 的 12 条线索逐条人工判定",
+  "why": "没有金标准，任何『压噪声』的改动都无法证明是改进还是退步。本文件是 T2-T5 的唯一打分依据。",
+  "generated_at": "2026-11-01T21:40:00+08:00",
+  "generated_by": "人工判定（创始人未复核；复核前不得对外引用本文件的百分比）",
+  "sample_day": "2026-11-01",
+  "replay_note": "★ 2026-11-02 加：本文件是 2026-11-01 的快照，必须用 watchman --as-of 2026-11-01 重放才可比。没有这个字段时打分器只能跑「今天」，于是金标准每天过期，而「过期」与「代码退化」在报告上长得一模一样（铁律 22）。",
+  "source_cmd": "python output/lineC/watchman.py --cap 20 --json",
+  "ledger": {
+    "days": 34,
+    "records": 172067,
+    "today_records": 6998,
+    "read_at": "2026-11-01 21:27:52"
+  },
+  "verdict_legend": {
+    "true": "值得看。用户点开后不会觉得被浪费。",
+    "weak": "可以看，但不看也不损失。占用注意力预算但不算误报。",
+    "noise": "看了会觉得『这也算事？』。属于误报。"
+  },
+  "precision_definition": {
+    "strict": "true / total —— 主口径。作业单 §4.1 的 16.7% 就是这个。",
+    "loose": "(true + weak) / total —— 参考口径。"
+  },
+  "clues": [
+    {
+      "idx": 1,
+      "kind": "repeat",
+      "key": "host:www.microsoft.com",
+      "day": "2026-11-01",
+      "subject": "今天才第一次出现的域名，已经重复 3 次以上：www.microsoft.com(3 次)",
+      "verdict": "noise",
+      "defect": "N-01",
+      "why": "微软官方域名。任何在 Windows 上正常开发的一天都可能出现，且『首次出现』对它没有信息量。"
+    },
+    {
+      "idx": 2,
+      "kind": "repeat",
+      "key": "path:D:/Application",
+      "day": "2026-11-01",
+      "subject": "今天才第一次出现的目录，已经重复 3 次以上：D:/Application(3 次)",
+      "verdict": "noise",
+      "defect": "N-02",
+      "why": "路径前缀只取前两段，把 D:\\Application\\WB\\CN\\resources 压成 D:/Application。盘符＋顶层目录零区分度，且 D:/Application 下不同产品会撞成同一个。"
+    },
+    {
+      "idx": 3,
+      "kind": "first_seen",
+      "key": "cmd:chmod|Get-Location|probe|printf",
+      "day": "2026-10-31",
+      "subject": "首次出现命令：chmod、Get-Location、probe、printf",
+      "verdict": "noise",
+      "defect": "N-01",
+      "why": "四条里三条是常见命令（chmod/Get-Location/printf）。probe 是本仓库自己的脚本名，若单独出现可算弱线索，但被合并进这条后整条没有价值。",
+      "note": "合并策略本身有问题：一条线索里混了噪声与可能的真线索，用户无法分拆。"
+    },
+    {
+      "idx": 4,
+      "kind": "first_seen",
+      "key": "host:evil.example.com|gyznt.cxcyds.com|www.cxcyds.com|www.baidu.com|hjrz.chinatorch.org.cn|rgzn.cxcyds.com|kxjs.tj.gov.cn|gdjtzb.cxcyds.com",
+      "day": "2026-10-31",
+      "subject": "首次出现域名：8 个",
+      "verdict": "noise",
+      "defect": "N-01",
+      "why": "www.baidu.com 是常见站点；evil.example.com 是我们自己负控造的测试假域名（example.com 段保留域，永不存在）；其余是政府/申报类站点的一次性访问。八个名字堆在一条里，用户读不完也判断不了。",
+      "note": "N-03 同族：访问一次与反复访问报法相同，没有频次分布。"
+    },
+    {
+      "idx": 5,
+      "kind": "rule_pair",
+      "key": "AN-002>AN-014",
+      "day": "2026-11-01",
+      "subject": "同一会话内 AN-002 之后 5 分钟内又命中 AN-014（当天 2 次）",
+      "verdict": "true",
+      "defect": null,
+      "why": "全期从未同时出现，且两侧各自命中 4 次与 419 次——低频侧确实罕见。这是八条检测器里唯一能产生『新的失效组合』的一类。"
+    },
+    {
+      "idx": 6,
+      "kind": "rule_pair",
+      "key": "AN-014>AN-005",
+      "day": "2026-11-01",
+      "subject": "同一会话内 AN-014 之后 5 分钟内又命中 AN-005（当天 2 次）",
+      "verdict": "true",
+      "defect": null,
+      "why": "同上。419 与 15 次，低频侧罕见。",
+      "note": "★ 回归红线：T4 加频次门槛时，本条必须活下来。若门槛写成『两侧都 <20』会误杀本条（419 > 20）——所以门槛必须用两侧最小值或期望频次。"
+    },
+    {
+      "idx": 7,
+      "kind": "rule_pair",
+      "key": "AN-001>AN-002",
+      "day": "2026-11-01",
+      "subject": "同一会话内 AN-001 之后 5 分钟内又命中 AN-002（当天 1 次）",
+      "verdict": "weak",
+      "defect": null,
+      "why": "17 与 4 次，两侧都少见，但两者都是高频规则族，同时出现可能是巧合而非新失效。"
+    },
+    {
+      "idx": 8,
+      "kind": "rule_pair",
+      "key": "AN-005>OUT-01",
+      "day": "2026-11-01",
+      "subject": "同一会话内 AN-005 之后 5 分钟内又命中 OUT-01（当天 1 次）",
+      "verdict": "weak",
+      "defect": "N-04",
+      "why": "OUT-01 不是规则号（是命名空间号），不该进规则配对。排除后本条消失。",
+      "note": "★ 若 T4 排除非规则号，本条应从『weak』变『不报』——这不是压掉线索，是修一个归类错误。"
+    },
+    {
+      "idx": 9,
+      "kind": "rule_pair",
+      "key": "AN-001>AN-010",
+      "day": "2026-11-01",
+      "subject": "同一会话内 AN-001 之后 5 分钟内又命中 AN-010（当天 1 次）",
+      "verdict": "noise",
+      "defect": "N-05",
+      "why": "AN-010 命中 56 次，不是罕见规则。『从未同时出现』在低频对里必然成立，这条判据没有绝对频次门槛就会持续产出噪声。"
+    },
+    {
+      "idx": 10,
+      "kind": "gap",
+      "key": "2026-11-01 08:41-09:12",
+      "day": "2026-11-01",
+      "subject": "08:41–09:12 之间有 30 分没有记录",
+      "verdict": "noise",
+      "defect": "N-06",
+      "why": "早间时段。人离开工位，没有记录是正常的。",
+      "suppressed_by": "gap 检测器已于 2026-11-02 默认关闭（--with-gap 可开）。本条不是「被压掉的」，是「量具被撤了」——两者在打分器上都表现为「这次没报」，必须分开记。"
+    },
+    {
+      "idx": 11,
+      "kind": "gap",
+      "key": "2026-11-01 18:13-18:44",
+      "day": "2026-11-01",
+      "subject": "18:13–18:44 之间有 31 分没有记录",
+      "verdict": "noise",
+      "defect": "N-06",
+      "why": "晚饭时段。同上。",
+      "suppressed_by": "gap 检测器已于 2026-11-02 默认关闭。"
+    },
+    {
+      "idx": 12,
+      "kind": "gap",
+      "key": "2026-11-01 18:48-19:34",
+      "day": "2026-11-01",
+      "subject": "18:48–19:34 之间有 45 分没有记录",
+      "verdict": "noise",
+      "defect": "N-06",
+      "why": "同上。一天内出现三次断层，本身就是『这个阈值对这个人太紧』的证据。",
+      "suppressed_by": "gap 检测器已于 2026-11-02 默认关闭。★ 这一条正是关掉它的直接证据：一天三次断层，说明阈值在拟合作息而不是在判异常。"
+    }
+  ],
+  "summary": {
+    "total": 12,
+    "true": 2,
+    "weak": 2,
+    "noise": 8,
+    "precision_strict": 0.1667,
+    "precision_loose": 0.3333,
+    "by_kind": {
+      "repeat": {
+        "total": 2,
+        "true": 0,
+        "weak": 0,
+        "noise": 2
+      },
+      "first_seen": {
+        "total": 2,
+        "true": 0,
+        "weak": 0,
+        "noise": 2
+      },
+      "rule_pair": {
+        "total": 5,
+        "true": 2,
+        "weak": 2,
+        "noise": 1
+      },
+      "gap": {
+        "total": 3,
+        "true": 0,
+        "weak": 0,
+        "noise": 3
+      }
+    }
+  },
+  "acceptance": {
+    "max_output": 3,
+    "must_keep": [
+      5,
+      6
+    ],
+    "precision_strict_target": 0.6667,
+    "note": "压到 3 条但丢了第 5、6 条 ⇒ 判失败。条数与召回同时满足才算过。",
+    "suppressed_note": "带 `suppressed_by` 的条目（本轮 3 条 gap）所在检测器已关闭，本次比对**不覆盖它们**。它们不进召回分母，也不许算成「已压掉」——那会把「撤掉量具」记成「降噪成功」。"
+  },
+  "caveats": [
+    "本判定由 AI 做出，创始人尚未复核。复核前，这个 16.7% 只能内部用，不许对外报。",
+    "『噪声』是产品判断，不是事实判断。创始人若认为第 1 条（微软域名）值得看，改 verdict 即可，不要改判据去迁就它。",
+    "金标准只对 2026-11-01 这一天的账本成立。换一天要重跑并重新判定——但已判定的条目应作为回归集保留。"
+  ]
+}

@@ -73,9 +73,19 @@ def sha(path: str) -> str:
     return h.hexdigest()
 
 
-def run(root: str, recent: int = 1) -> Dict[str, Any]:
+def run(root: str, recent: int = 1, with_gap: bool = False) -> Dict[str, Any]:
+    """跑一次 watchman。
+
+    ★ `with_gap` 不是「方便开关」：2026-11-02 起 gap 检测器**默认关闭**。
+      NC-3 专门测 gap，不显式打开就等于测一个不存在的检测器 ——
+      而它的表现是「gap 线索为空 ⇒ 漏报」，看起来像产品坏了，
+      实际是**夹具依赖了一个被关掉的默认值**（同族错误 11-02 已犯过两次）。
+    """
+    cmd = [sys.executable, WATCH, "--root", root, "--json", "--recent", str(recent)]
+    if with_gap:
+        cmd.append("--with-gap")
     p = subprocess.run(
-        [sys.executable, WATCH, "--root", root, "--json", "--recent", str(recent)],
+        cmd,
         cwd=REPO,
         capture_output=True,
         text=True,
@@ -726,7 +736,8 @@ def main() -> int:
     print(f"[nc3_clean] 负向臂：{'[OK]' if clean_max_gap < GAP_ASSERT_MIN else '[NG]'} "
           f"干净副本最长断层 {clean_max_gap:g} 分钟（须 < {GAP_ASSERT_MIN:g}）")
     print()
-    arm("nc3_tampered", "gap", lambda p: m_gap(p, day), a_gap)
+    arm("nc3_tampered", "gap", lambda p: m_gap(p, day), a_gap,
+        runner=lambda dst: run(dst, with_gap=True))
 
     # ================= NC-5 A4：同格式真倒序仍红、非倒序改动不红 =================
     clean_a4 = a4_count(run_audit(base))

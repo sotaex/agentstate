@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "what": "常见物词表：命中这些的『首次出现』不进主动报告",
+  "why": "first_seen/repeat 把 chmod 和 evil.example.com 同等对待 ⇒ 12 条里 4 条是这类噪声（见 noise_baseline.json N-01）",
+  "status": "★ 初稿，待创始人复核。词表是产品判断，不是技术判断——改这里不用改代码。",
+  "hard_constraints": [
+    "只影响『报不报』，不影响『记不记』：账本照记，items 里仍出现",
+    "词表本身必须进报告：『按 N 条常见物规则忽略了 M 个』",
+    "可一键关闭：--no-benign 时全部回来（负控 NC4）"
+  ],
+  "cmd": [
+    "chmod", "chown", "chgrp", "printf", "echo", "ls", "dir", "cat", "type",
+    "head", "tail", "more", "less", "grep", "findstr", "sed", "awk", "find",
+    "mkdir", "rmdir", "rm", "del", "cp", "copy", "mv", "move", "touch", "pwd",
+    "cd", "which", "where", "whoami", "date", "sleep", "timeout",
+    "curl", "wget", "git", "python", "python3", "pip", "pip3",
+    "node", "npm", "npx", "yarn", "pnpm", "cargo", "go", "rustc",
+    "Get-Location", "Set-Location", "Get-ChildItem", "Get-Content", "Set-Content",
+    "Get-Date", "Get-Item", "Test-Path", "New-Item", "Remove-Item",
+    "Copy-Item", "Move-Item", "Write-Host", "Write-Output", "Select-String",
+    "Start-Process", "Stop-Process", "Get-Process"
+  ],
+  "host_suffix": [
+    "microsoft.com", "windows.com", "windowsupdate.com", "msftconnecttest.com",
+    "msftncsi.com", "live.com", "office.com", "visualstudio.com",
+    "baidu.com", "qq.com", "weixin.qq.com", "tencent.com", "myqcloud.com",
+    "aliyun.com", "aliyuncs.com", "taobao.com", "tmall.com", "jd.com",
+    "github.com", "githubusercontent.com", "githubassets.com",
+    "pypi.org", "python.org", "npmjs.org", "npmjs.com", "nodejs.org",
+    "crates.io", "golang.org", "rust-lang.org",
+    "google.com", "gstatic.com", "googleapis.com", "youtube.com",
+    "cloudflare.com", "jsdelivr.net", "unpkg.com", "cdnjs.cloudflare.com",
+    "anthropic.com", "openai.com", "deepseek.com", "huggingface.co",
+    "w3.org", "mozilla.org", "stackoverflow.com", "wikipedia.org"
+  ],
+  "host_reserved": [
+    "example.com", "example.org", "example.net", "example.edu",
+    "localhost", "127.0.0.1", "0.0.0.0", "::1",
+    "test", "invalid", "local"
+  ],
+  "path_prefix": [],
+  "skip_path_first_seen": true,
+  "notes": {
+    "host_matching": "后缀匹配：www.microsoft.com 命中 microsoft.com；api.github.com 命中 github.com。按标签边界匹配，不做裸子串（防止 notmicrosoft.com 被误伤）。",
+    "host_reserved": "IANA 保留域，永不存在真实服务。命中即判为测试流量。",
+    "path_prefix": "暂空。目录类噪声的根因不是『某个目录常见』，而是『目录首现这个信号本身没有信息量』——见 skip_path_first_seen。",
+    "skip_path_first_seen": "★ 默认 true：目录类不报首次出现。理由：目录是工作场所，命令和域名才是行为。用户新建一个项目目录不该被告警；而『攻击者写到 C:/Windows』这类判断归规则库（G4），不归巡检（只报变化）。设 false 可恢复，恢复后噪声会立刻回来（负控）。"
+  }
+}
