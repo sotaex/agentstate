@@ -77,18 +77,176 @@ K_LOG_ONLY = "log_only"
 K_NO_RESPONSE = "no_response"
 K_CHECKED = "checked"
 
-#: 渲染词。与 `inbox_model.py:156-179` 的产品词表对齐 ——
-#: 「同义必须收敛到一处」，否则改一次词要改三遍，而且第三遍一定会漏。
-WORD = {
-    K_HELD: "挡下",
-    K_ALERT: "提醒",
+
+def _load_product_state_label() -> Dict[str, str]:
+    """从产品侧读六态词表。**读不到就显式降级，不许静默用旧词表。**
+
+    ★ 为什么不许静默降级：静默降级意味着「产品改了词，C 线还在用旧词」，
+      而读者看到的是一个**看起来正常**的旧词 —— 这正是 S08 那个漏洞的翻版
+      （按键名扫 ⇒ 换键名就绕过）。降级必须**说出来**，且要能被负控抓到。
+
+    ★ 为什么用 AST 解析而不是 import：`inbox_model.py` 是个大模块，
+      import 它会把整个产品模型拖进分析工具的依赖里。
+      这里只取那一张表，**不 exec 产品代码**。
+
+    ★ 为什么不能直接 `ast.literal_eval`：`STATE_LABEL` 的键是常量名
+      （`STATE_R0` 等），不是字面量 ⇒ literal_eval 会失败。
+      修法：**先扫出模块顶层的字符串常量赋值**（六态常量都是简单字符串），
+      再用它当环境去解析 `STATE_LABEL`。
+      这仍然**只读字面量、不执行任何产品逻辑**。
+    """
+    import ast
+
+    path = os.path.join(REPO, "inbox_model.py")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            tree = ast.parse(fh.read(), filename=path)
+    except Exception as exc:            # noqa: BLE001
+        WORD_DEGRADED.append(
+            "读不到产品侧词表（%s：%s）—— 中文措辞降级为模块内置值，"
+            "**这不代表产品侧的词是这样**" % (path, exc)
+        )
+        return {}
+
+    # ① 顶层常量环境：只收「简单字符串字面量」的赋值。
+    consts: Dict[str, str] = {}
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        tgt = node.targets[0]
+        if not isinstance(tgt, ast.Name):
+            continue
+        try:
+            val = ast.literal_eval(node.value)
+        except Exception:                # noqa: BLE001
+            continue
+        if isinstance(val, str):
+            consts[tgt.id] = val
+
+    # ② 用这个环境解析 `STATE_LABEL`。
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(t, ast.Name) and t.id == "STATE_LABEL"
+                   for t in node.targets):
+            continue
+        try:
+            val = ast.literal_eval(node.value)   # 键是常量名 ⇒ 这步会失败
+        except Exception:                        # noqa: BLE001
+            val = None
+        if val is None:
+            val = _eval_with_consts(node.value, consts)
+        if isinstance(val, dict):
+            return {str(k): str(v) for k, v in val.items()}
+        WORD_DEGRADED.append("产品侧 STATE_LABEL 解析不出字典 —— 判为读不到")
+        return {}
+    WORD_DEGRADED.append(
+        "产品侧 STATE_LABEL 找不到（%s）—— 中文措辞降级为模块内置值" % path
+    )
+    return {}
+
+
+def _eval_with_consts(node: "ast.AST", consts: Dict[str, str]) -> Any:
+    """在一个只含字符串常量的环境里求值一个**纯字面量表达式**。
+
+    只支持：字符串字面量、字典、列表、元组、集合，以及这些结构里的常量名。
+    **不执行任何函数调用、不做属性访问、不下标运算。**
+    遇到不认识的一律返回 None（⇒ 判为读不到）。
+    """
+    import ast as _ast
+
+    if isinstance(node, _ast.Constant):
+        return node.value
+    if isinstance(node, _ast.Name):
+        return consts.get(node.id)
+    if isinstance(node, _ast.Dict):
+        out = {}
+        for k, v in zip(node.keys, node.values):
+            if k is None:
+                continue
+            kv = _eval_with_consts(k, consts)
+            vv = _eval_with_consts(v, consts)
+            if kv is None or vv is None:
+                return None
+            out[kv] = vv
+        return out
+    if isinstance(node, (_ast.List, _ast.Tuple)):
+        out = []
+        for e in node.elts:
+            ev = _eval_with_consts(e, consts)
+            if ev is None:
+                return None
+            out.append(ev)
+        return out
+    return None
+
+
+#: 降级记录。**非空 ⇒ 报告必须说出来**（不许悄悄用旧词）。
+WORD_DEGRADED: List[str] = []
+
+#: 渲染词。**从产品侧派生，不手抄**（2026-11-02 落实，替代方案判据 L3-2）。
+#:
+#: ★ 为什么改成派生（这是「第二份声明」的修法）：
+#:   旧版这里是一份**手抄**的产品词表，注释还把出处写错了
+#:   （写 `inbox_model.py:156-179`，那里其实是 `TITLE_OF_KIND`，
+#:   真正的六态表在 `:2218-2219` 的 `STATE_LABEL`）。
+#:   手抄的代价是**改一次要改两遍，第二遍一定会漏**；
+#:   更糟的是 S08「第二份中文态名表」判据按**键名**扫六态键
+#:   （`ci/inbox_guards_0372.py:918-919`），C 线用的是 `held/alert/...`
+#:   ⇒ **换一批键名就能绕过那个判据**。
+#:   改成派生后：不再有第二批中文词表可扫 ⇒ 那个漏洞**自动消失**，
+#:   而且产品侧改词，C 线这边跟着变。
+#:
+#: ★ 派生规则：**只映射语义真重合的那两档**。
+#:   `held` ＝ 产品 L2「挡下」；`alert` ＝ 产品 L1「提醒」。
+#:   其余三档（`log_only`／`no_response`／`checked`）**产品侧没有对应态**
+#:   （实测：`inbox_model.py` 与 `glossary.py` 里都没有「已记录未判定」
+#:   「已发现无法处置」「已核对」这三个词）⇒ 它们是**本模块自有**，
+#:   必须显式登记，且**不许被说成产品态**。
+#:   ★ 踩过的坑（铁律 44：同值不同义）：第一版把 `no_response` 映射到产品
+#:     `Ls`，而 `Ls` 是「**缺粮**」（额度告警，见 `inbox_model.py:2205`），
+#:     与「已发现无法处置」语义完全不同 ⇒ 派生出来的是**错词**。
+#:     键名相似不等于语义相同。修法：**只映射经得起语义核对的那两档**。
+PRODUCT_STATE_LABEL: Dict[str, str] = _load_product_state_label()
+
+#: 本模块自有、不在产品六态里的档位。**显式登记**，不许藏在别处。
+LOCAL_ONLY_WORDS: Dict[str, str] = {
     K_LOG_ONLY: "已记录未判定",
     K_NO_RESPONSE: "已发现无法处置",
     K_CHECKED: "已核对",
 }
 
+#: 内部键 → 产品六态键。**只列语义真重合的**。
+#: `no_response` 不在表内：产品没有「已发现无法处置」这个态。
+#: `Ls`＝缺粮（额度告警）≠「已发现无法处置」⇒ 不许硬塞。
+WORD_PRODUCT_STATE_KEY: Dict[str, str] = {
+    K_HELD: "L2",     # 挡下
+    K_ALERT: "L1",    # 提醒
+}
+
+WORD: Dict[str, str] = {
+    k: PRODUCT_STATE_LABEL.get(sk, LOCAL_ONLY_WORDS.get(k, k))
+    for k, sk in WORD_PRODUCT_STATE_KEY.items()
+}
+WORD.update(LOCAL_ONLY_WORDS)
+
+#: 哪些渲染词是产品态、哪些是本模块自有。**报告要能说清**，
+#: 否则读者会把「已记录未判定」当成产品的一个态（它不是）。
+WORD_IS_PRODUCT_STATE: Dict[str, bool] = {
+    k: (k in WORD_PRODUCT_STATE_KEY) for k in WORD
+}
+
 #: 只允许由规则命中产生的那一档。C 线无规则命中数据 ⇒ 恒不产出。
 HELD_ONLY_FROM_RULES = (K_HELD,)
+
+#: 「需要你看一眼」＝这三档之和。**唯一声明处**（onepager 不许自己再列一遍）。
+#:
+#: ★ 为什么要单列：一页纸上那格数字把三档压成了一个数，而**三档的来源不同**。
+#:   `held`／`no_response` 由裁决面这条腿供给；`alert` 今天**没有任何腿读**。
+#:   压成一个数之后，「0」就同时可能是「查了没有」「没跑成」「没腿读」三种意思，
+#:   而页面上只有一个 0（铁律 45：零与不可判同貌）。
+#:   把口径声明在这里，归因函数与渲染层读的是同一份。
+NEED_TIERS: Tuple[str, ...] = (K_HELD, K_ALERT, K_NO_RESPONSE)
 
 
 # --------------------------------------------------------------------------- 模型
@@ -187,6 +345,31 @@ class Evidence:
 
 
 @dataclass
+class LegReport:
+    """一条腿的实况。**「0 条」的归因只能从这里读，不许渲染层自己编。**
+
+    ★ 为什么需要它：一页纸有一格叫「需要你看一眼」。它把三档压成一个数
+      （`NEED_TIERS`），而三档的来源不同 —— 有的腿读、有的腿不读、有的腿崩了。
+      不给每条腿留一份实况，那格「0」就同时可能是三种意思，
+      而页面上只有一个 0（铁律 45）。
+
+    ★ `produces` 是**这条腿自己声明的**，不是这里猜的。
+      第一版想让本模块推断「这条腿能产出哪几档」，推断出来的答案是
+      「三档都查了」——而真答案是「只有两档有腿」。
+    """
+
+    name: str
+    #: 跑成了没有。`False` ⇒ 它没读，不是「读了没有」。
+    ran: bool
+    #: 这条腿能产出哪些强度档（空 ⇒ 它不产结论，只产分母/账）。
+    produces: Tuple[str, ...]
+    #: 查了哪个分母。**报数不带分母等于没报**。
+    denominator: str = ""
+    #: 没跑成的原因，或这条腿的其它限定语。
+    note: str = ""
+
+
+@dataclass
 class Bundle:
     """一次取证的全部产物。三级渲染共用这一份，只换输出。"""
 
@@ -205,6 +388,28 @@ class Bundle:
     denominators: Dict[str, str] = field(default_factory=dict)
     #: 结构性盲区：这批证据整体看不见什么。
     blind: Tuple[str, ...] = ()
+    #: 每条腿的实况。**「0 条」的归因只从这里读。**
+    legs: List["LegReport"] = field(default_factory=list)
+    #: 本腿**没读**的「出声」档记录，按 decision 取值分开（来自第三只腿）。
+    #: 空 ⇒ 没有没读的；非空 ⇒ 「提醒」这一档的 0 是「没腿读」，不是「没有」。
+    unread_toast: Dict[str, int] = field(default_factory=dict)
+
+    def leg(self, name: str) -> Optional["LegReport"]:
+        for lg in self.legs:
+            if lg.name == name:
+                return lg
+        return None
+
+    def tiers_with_no_leg(self) -> Tuple[str, ...]:
+        """哪些「需要你看一眼」的档**没有任何一条腿**去读。
+
+        ★ 这是 0 的第三种来源。前两种是「查了没有」「没跑成」，
+          第三种是「压根没腿」—— 它最容易被写成「今天没有」。
+        """
+        covered = set()
+        for lg in self.legs:
+            covered.update(lg.produces)
+        return tuple(t for t in NEED_TIERS if t not in covered)
 
     def by_strength(self) -> Dict[str, List[Evidence]]:
         out: Dict[str, List[Evidence]] = {}
@@ -579,27 +784,181 @@ def blind_of(payload: Dict[str, Any]) -> Tuple[str, ...]:
     return tuple(out)
 
 
-def need_zero_note() -> str:
+def need_zero_note(bundle: Optional["Bundle"] = None) -> str:
     """「需要你看一眼 0 条」这句话的**唯一解释**。渲染层只许调这里。
 
-    ★ 为什么必须是机制而不是渲染层的文案：0 至少有三种来源（真的没有危险／
-      这一层的判据还没接上／工具根本没跑），而页面上只有一个「0」。
-      交给渲染层自由发挥，三份报告会说三种话，而且都会说成最好听的那种。
+    ★ 为什么必须是机制而不是渲染层的文案：0 至少有**四种**来源，而页面上只有
+      一个「0」。交给渲染层自由发挥，三份报告会说三种话，而且都会说成最好听的那种。
 
-    ★ 今天 C 线只有一种来源：读账本、不读规则库。所以这里写死一种解释。
-      将来接了规则库，这个函数要按**实际来源**返回不同的话 —— 那时它会需要参数，
-      而那时也正是它最容易被人改成一句「一切正常」的时候。
+        ① 查了，没有      —— 有腿读了，读到的就是 0 条（这是结论）
+        ② 没跑成          —— 腿崩了，不知道有没有（这是盲区）
+        ③ 没腿读          —— 这一档今天压根没有腿去读（这是结构性缺口）
+        ④ 读了但没装进来  —— 腿读到了、但契约挡下了（这是要修的 bug）
+
+    ★ 2026-11-02 改版：**这条函数原来是写死一句话的**。
+      原文：「本报告只读账本、不读规则库：『挡下』『提醒』这两档只能由规则命中
+      产生，所以今天结构上产不出来。」
+      这句话在当时是对的 —— 那时只有两条腿，都不读 `decision` 字段。
+      但第三只腿接上之后，**「挡下」已经产得出来了**，这句话就变成了一句
+      **过期 24 小时的自我安慰**：它还在说「产不出来」，而实际已经产出了。
+
+      ⇒ 现在按**实际来源**逐档说话（这正是旧注释预告的那次改写：
+        「将来接了规则库，这个函数要按实际来源返回不同的话 —— 那时它会需要参数，
+        而那时也正是它最容易被人改成一句『一切正常』的时候」）。
+        **参数来了，且没有变成「一切正常」。**
 
     ★ 文案里不许出现 `**`：它会被 `_e()` 原样印进 HTML（同一个字符串有两个消费者，
       就得挑两边都成立的字面）。
     """
-    return ("「需要你看一眼」为 0，是因为本报告只读账本、不读规则库："
-            "「挡下」「提醒」这两档只能由规则命中产生，所以今天结构上产不出来。"
-            "这个 0 不是「查了没有危险」，是「这一层的判据还没接上」。")
+    if bundle is None:
+        # ★ 不给 bundle 就说不出真话 ⇒ 明说「说不出」，**不许**退回那句旧文案。
+        #   旧文案是「过期即撒谎」的典型：它读起来像结论，实际是两天前的现状。
+        return ("「需要你看一眼」为 0，但本报告没有把各条腿的实况传进来，"
+                "所以无法判断这个 0 是「查了没有」「没跑成」还是「这一档没腿读」。"
+                "按规矩，说不出归因的 0 不许被当成「没事」。")
+
+    no_leg = bundle.tiers_with_no_leg()
+    by = bundle.by_strength()
+    parts: List[str] = []
+
+    # ① 有腿覆盖、且**确实读到 0 条**的档：说清「查了，没有」，并带上分母。
+    #   ★ 必须逐档判「是不是真的 0」：本函数在别处被调用时，bundle 里可能有
+    #     非零的档（例如实跑时「挡下」有 9 条）。无脑说「读到 0 条」会在那种
+    #     情况下**直接撒谎**——而撒谎的方向恰好是「把有说成没有」。
+    zero_covered = [t for t in NEED_TIERS
+                    if t not in no_leg and not by.get(t)]
+    if zero_covered:
+        names = "、".join(WORD[t] for t in zero_covered)
+        dens = []
+        for lg in bundle.legs:
+            if lg.ran and set(lg.produces) & set(zero_covered) and lg.denominator:
+                dens.append(lg.denominator)
+        text = "%s：腿读了，读到 0 条 —— 这是「查了，没有」，不是「没查」" % names
+        if dens:
+            text += "。读的分母：%s" % "；".join(dens)
+        parts.append(text)
+
+    # ② 没腿覆盖的档：明说「没腿读」，并给出**这一档今天实际有多少条**。
+    for t in no_leg:
+        text = "「%s」这一档今天没有任何一条腿去读" % WORD[t]
+        if t == K_ALERT and bundle.unread_toast:
+            detail = "、".join("%s %d 条" % (k, v)
+                              for k, v in sorted(bundle.unread_toast.items()))
+            text += ("—— 账本里这样的记录有 %s，一条没进本报告。"
+                     "所以这个 0 是「这一层还没接上」，不是「今天没有提醒」"
+                     % detail)
+        else:
+            text += "—— 这个 0 是「这一层还没接上」，不是「没有」"
+        parts.append(text)
+
+    # ③ 跑没跑成：单独说，**不许**混进上面两句。
+    dead = [lg for lg in bundle.legs if not lg.ran]
+    if dead:
+        parts.append(
+            "%s没跑成（%s）—— 它们负责的档今天既不是「没有」也不是「有」，是「不知道」"
+            % ("、".join(lg.name for lg in dead),
+               "；".join(lg.note or "原因见「不可判」" for lg in dead)))
+
+    if not parts:
+        # 三条腿全跑成、都产出了结论、且三档都有腿 —— 此时 0 是干净的 0。
+        # ★ 仍然要带分母，否则它读起来和「没查」一样。
+        parts.append("三档都有腿读过，且都读到 0 条 —— 这是「查了，没有」")
+
+    return "；".join(parts) + "。"
+
+
+def from_verdict(survey_json: Dict[str, Any], read_at: str
+                 ) -> Tuple[List[Evidence], List[str], Dict[str, str]]:
+    """第三只腿的产物（裁决面普查）→ 证据。
+
+    ★ 为什么要簇而不是一条一条：同一条规则在一次会话里能命中十几次
+      （实测 11-02：AN-009 在一个会话里 9 次）。一页纸放不下十几次，
+      而「挡了 9 次 AN-009」与「9 次都要人看一眼」是两件事
+      ⇒ **簇里保留总条数，报告里一条结论 + 一个总条数，两样都在**
+      （铁律 35：拦截时归并、记账时分开）。
+
+    ★ 强度分档由 `verdict_leg` 判好（带规则号 ⇒ held；不带 ⇒ no_response）。
+      这里**不重判** —— 两处各判一次必然漂（铁律 R4）。
+    """
+    evs: List[Evidence] = []
+    notes: List[str] = []
+    dens: Dict[str, str] = {}
+
+    for c in survey_json.get("clusters") or []:
+        cites = _fmt_evidence(
+            [(d, ln) for d, ln in (c.get("cites") or [])[:5]]
+        )
+        if not cites:
+            notes.append(
+                "裁决簇 %s 没有出处 —— 不装成证据（契约：证据不许无出处）"
+                % (c.get("rule_id") or "?")
+            )
+            continue
+        strength = c.get("strength") or K_LOG_ONLY
+        claim = c.get("claim") or ""
+        rule_id = c.get("rule_id") or ""
+        session = c.get("session") or ""
+        # ★ 无规则号的簇不许被说成「规则挡住了」⇒ 它落 no_response 档，
+        #   而 no_response 的措辞由 WORD 统一持有，渲染层不许改写。
+        blind = (
+            "只看账本里写好的裁决记录；簇的聚合键是「规则×会话」，"
+            "换一种分法簇数会变（条数守恒、簇数不守恒）"
+        )
+        if not rule_id or rule_id == "（无规则号）":
+            blind += "；这一簇没有规则号 —— 它不是「规则挡住了」，是监理自身状态异常"
+        evs.append(
+            Evidence(
+                # ★ 身份＝**簇的聚合键**（规则|会话），不是 claim，也不带裁决取值。
+                #   claim 里嵌着 `n_records`（「挡下 9 次」），账本每长一条它就变
+                #   ⇒ 同一条结论每天换一个 id ⇒ 用这个号指名永远指不中。
+                #   ★ 也不许把 `decision` 放进来（2026-11-02 深夜修）：聚合键本身
+                #     已经不含 decision（block 与 deny 同义，放进去会把同一次动作
+                #     拆成两簇），而这里若仍读 `c["decision"]`，那个键**已经不存在**
+                #     ⇒ 恒取空串，看起来「稳定」，实际是**一个恒空字段在冒充身份**。
+                #     这种错不会报错，它只会让身份在有人把键加回来时静默改变。
+                eid=_stable_id("VDT", "%s|%s" % (rule_id or "norule", session), ()),
+                claim=claim,
+                strength=strength,
+                cites=cites,
+                source="verdict_leg/%s" % (c.get("rule_id") or "（无规则号）"),
+                read_at=read_at,
+                rule_id="" if rule_id in ("", "（无规则号）") else rule_id,
+                blind=blind,
+                items=tuple(c.get("types") or ()),
+            )
+        )
+
+    for k, v in (survey_json.get("denominators") or {}).items():
+        dens["裁决面·%s" % k] = str(v)
+    notes += list(survey_json.get("undecidable") or [])
+    return evs, notes, dens
+
+
+def verdict_leg_report(survey_json: Dict[str, Any], ran: bool,
+                       note: str = "") -> "LegReport":
+    """第三只腿的实况 → `LegReport`。**`produces` 读它自己声明的，不在这里猜。**
+
+    ★ 为什么必须读它的声明而不是推断：第一版想「这条腿当然能产 held 和
+      no_response」，而它实际只读 block/deny ⇒ **「提醒」这一档它压根不读**。
+      推断出来的答案是「三档都有腿」，真答案是「只有两档有腿」。
+      差别不在数字，在于**页面上那个 0 会被读成「今天没有提醒」**。
+    """
+    produces = tuple(survey_json.get("produces") or ())
+    # ★ 只取**裁决面**这一条主分母进归因句。把四条分母全塞进一句会变成一堵墙，
+    #   而读者在那一句里要回答的只有一个问题：「这条腿读了什么、读了多少」。
+    #   其余分母照旧进页脚（`bundle.denominators`），一条不少。
+    dens = str((survey_json.get("denominators") or {}).get("裁决面") or "")
+    return LegReport(
+        name="裁决面",
+        ran=ran,
+        produces=produces,
+        denominator=dens,
+        note=note,
+    )
 
 
 def collect(root: str, *, watch_args: Optional[List[str]] = None) -> Bundle:
-    """跑两条腿，装成一份 Bundle。**任何一条腿崩，都进 undecidable 而不是消失。**"""
+    """跑三条腿，装成一份 Bundle。**任何一条腿崩，都进 undecidable 而不是消失。**"""
     read_at = ""  # 由 auditor / watchman 各自记；这里取二者之一作为整份报告的读数时刻
     bundle = Bundle(read_at="", root=root)
 
@@ -626,6 +985,16 @@ def collect(root: str, *, watch_args: Optional[List[str]] = None) -> Bundle:
     if err_w:
         bundle.undecidable.append(f"变化巡检（watchman）没跑成：{err_w}")
 
+    # ★ 第三只腿（2026-11-02 落实，替代方案判据 L1-1）：
+    #   前两条腿都不读 `decision` 字段 ⇒ 账本里当天真的发生的裁决一条都进不了结论。
+    #   实测 11-02：真账本按产品侧通知面口径有 29 条真裁决，
+    #   而一页纸写「需要你看一眼 0 条」—— 根因在取材层，不在渲染层。
+    #   这条腿**只读账本**，不写账本、不改产品代码。
+    verdict, err_v = _run_json("verdict_leg.py", root)
+
+    if err_v:
+        bundle.undecidable.append(f"裁决面普查（verdict_leg）没跑成：{err_v}")
+
     if audit:
         read_at = audit.get("read_at") or read_at
         evs, notes, na = from_audit(audit, read_at)
@@ -641,6 +1010,16 @@ def collect(root: str, *, watch_args: Optional[List[str]] = None) -> Bundle:
         # auditor 的盲区随 JSON 一起回来，并进「这份报告看不见什么」。
         # **盲区不并进来，读者就会以为没说的地方是没问题的地方。**
         bundle.blind += blind_of(audit)
+    # ★ 每条腿都要留一份实况 —— 「0 条」的归因靠它，不靠渲染层猜。
+    #   `produces` 是**腿自己声明的**：auditor 只产 checked（账本自洽），
+    #   watchman 产 checked＋log_only。这两条腿**都不产** held/alert/no_response。
+    bundle.legs.append(LegReport(
+        name="账本自洽",
+        ran=bool(audit),
+        produces=(K_CHECKED,) if audit else (),
+        denominator=bundle.denominators.get("账本", ""),
+        note="" if audit else (err_a or ""),
+    ))
     if watch:
         read_at = read_at or watch.get("read_at") or (watch.get("meta") or {}).get("read_at", "")
         evs, notes = from_watch(watch, read_at)
@@ -652,6 +1031,37 @@ def collect(root: str, *, watch_args: Optional[List[str]] = None) -> Bundle:
             f"｜今日记录 {meta.get('today_records', '?')} 条"
         )
         bundle.blind += blind_of(watch)
+    bundle.legs.append(LegReport(
+        name="变化巡检",
+        ran=bool(watch),
+        produces=(K_CHECKED, K_LOG_ONLY) if watch else (),
+        denominator=bundle.denominators.get("巡检窗口", ""),
+        note="" if watch else (err_w or ""),
+    ))
+    if verdict:
+        read_at = read_at or verdict.get("read_at") or ""
+        evs, notes, dens = from_verdict(verdict, read_at)
+        bundle.evidence += evs
+        # ★ 2026-11-02 深夜修：`plain()` 必须在这一层就做掉。
+        #   前两条腿的盲区都走 `blind_of()`，那里做了 `plain()`；第三只腿的
+        #   盲区是**现成的字符串列表**，直接 `+=` 就把它跳过了 ——
+        #   于是 `verdict_leg` 里那些「本腿**一条不读**」的星号原样进了 HTML。
+        #   实测由 `端到端负控 e7` 抓到（折叠样本里出现 `**`）。
+        #   ★ 这是 R4（同一件事一处实现）的典型失守：两条路径做同一件事，
+        #     其中一条忘了做，而**忘了的那条不会报错**，它只会少洗一次。
+        bundle.undecidable += [plain(x) for x in notes]
+        # ★ 分母**必须带口径**（F40）：这三个数分列，不许合成一个。
+        bundle.denominators.update(dens)
+        bundle.blind += tuple(plain(x) for x in (verdict.get("blind") or ()))
+        # ★ 「没读的那一档」跟着腿一起回来 —— 它是「提醒」这一档 0 的来源。
+        bundle.unread_toast.update(verdict.get("unread_toast") or {})
+    # ★ 第三只腿的 `produces` **读它自己的声明**，不在这里推断。
+    #   崩了也要有一条实况：`ran=False` 与「读了没有」长得一样，含义相反。
+    bundle.legs.append(
+        verdict_leg_report(verdict, bool(verdict), err_v) if verdict
+        else LegReport(name="裁决面", ran=False, produces=(),
+                       denominator="", note=err_v or "没跑成")
+    )
 
     bundle.read_at = read_at or "（未取到读数时刻）"
     if not bundle.read_at.startswith("20"):
@@ -661,9 +1071,21 @@ def collect(root: str, *, watch_args: Optional[List[str]] = None) -> Bundle:
         )
 
     if not bundle.evidence and not bundle.undecidable:
-        # 两条腿都跑成、且都没报东西。这是**真的干净**，还是**两条腿都哑了**？
-        # 只有「跑成了」才能这么说；此处两条腿都成功，故可报干净。
-        bundle.denominators["结论"] = "两条腿都跑成且都无异常 —— 这是「查了，没有」，不是「没查」"
+        # ★ 三条腿都跑成、且都没报东西。这是**真的干净**，还是**腿都哑了**？
+        #   只有「跑成了」才能这么说。
+        # ★ 这句话原文写「两条腿都跑成」—— 第三只腿接上后它就是错的：
+        #   它会让读者以为「全查过了」，而实际「提醒」那一档今天没有腿读。
+        #   判据 L1-2 说的就是这个：「要修的不是这句话，是它的适用范围」。
+        n_ran = sum(1 for lg in bundle.legs if lg.ran)
+        no_leg = bundle.tiers_with_no_leg()
+        tail = ""
+        if no_leg:
+            tail = ("。但「%s」这一档今天没有腿读 —— 这个干净只覆盖有腿的档"
+                    % "」「".join(WORD[t] for t in no_leg))
+        bundle.denominators["结论"] = (
+            "%d 条腿跑成且都无异常 —— 这是「查了，没有」，不是「没查」%s"
+            % (n_ran, tail)
+        )
     return bundle
 
 
@@ -735,16 +1157,53 @@ def _selfcheck() -> int:
     if not _na or "A5" not in _na[0]:
         fails.append("SKIP 没有进「不适用」：%r" % (_na,))
 
-    # ⑧ 0 条的解释里不许有 `**`（它会被原样印进 HTML）
-    if "**" in need_zero_note():
+    # ⑧ 0 条的解释里不许有 `**`（它会被原样印进 HTML），
+    #    且**必须按实际来源说话**（2026-11-02 新增，本轮改版的判据）。
+    #    ★ 这条负控守的是「归因过期」：旧版这里写死一句「挡下/提醒结构上产不出来」，
+    #      第三只腿接上后那句话就变成了假话。**写死的归因一定会过期** ——
+    #      所以要验的不是「有没有这句话」，而是「换一种腿状态，话会不会跟着变」。
+    _b = Bundle(read_at="t", root="")
+    _b.legs = [
+        LegReport(name="账本自洽", ran=True, produces=(K_CHECKED,), denominator="日文件 1 个"),
+        LegReport(name="变化巡检", ran=True, produces=(K_CHECKED, K_LOG_ONLY)),
+        LegReport(name="裁决面", ran=True, produces=(K_HELD, K_NO_RESPONSE),
+                  denominator="按 decision 值数 43 条"),
+    ]
+    _b.unread_toast = {"alert": 441}
+    _note_ok = need_zero_note(_b)
+    if "**" in _note_ok:
         fails.append("need_zero_note 里有 `**` —— 会原样印进 HTML")
+    if "查了，没有" not in _note_ok:
+        fails.append("有腿覆盖的档没有说「查了，没有」：%r" % (_note_ok,))
+    if "没有任何一条腿去读" not in _note_ok:
+        fails.append("「提醒」这一档没腿读，归因里却没说出来：%r" % (_note_ok,))
+    if "441" not in _note_ok:
+        fails.append("没腿读的档没给出「今天实际有多少条」：%r —— "
+                     "0 会被读成「今天没有提醒」" % (_note_ok,))
+
+    # 负控：把裁决腿改判成「没跑成」，归因**必须**跟着变（不许还说「查了，没有」）
+    _b2 = Bundle(read_at="t", root="")
+    _b2.legs = [
+        LegReport(name="账本自洽", ran=True, produces=(K_CHECKED,)),
+        LegReport(name="裁决面", ran=False, produces=(), note="超时"),
+    ]
+    _note_dead = need_zero_note(_b2)
+    if "查了，没有" in _note_dead and "没跑成" not in _note_dead:
+        fails.append("裁决腿没跑成，归因却仍说「查了，没有」：%r" % (_note_dead,))
+    if "没跑成" not in _note_dead:
+        fails.append("腿没跑成，归因里没说出来：%r" % (_note_dead,))
+
+    # 负控：不给 bundle ⇒ 必须说「说不出」，**不许**退回那句旧文案
+    if "查了，没有" in need_zero_note(None):
+        fails.append("不给腿实况时，归因却给出了肯定结论 —— "
+                     "说不出归因的 0 不许被当成「没事」")
 
     for f in fails:
         print(f"[自检失败] {f}", file=sys.stderr)
     if fails:
         return 1
-    print("[自检] 八条硬约束全部生效（空出处／无号挡下／合法挡下／词表外／散文星号不外泄／"
-          "盲区三形态／SKIP 进不适用／0 的解释无星号）")
+    print("[自检] 九条硬约束全部生效（空出处／无号挡下／合法挡下／词表外／散文星号不外泄／"
+          "盲区三形态／SKIP 进不适用／0 的解释无星号且按实际来源／0 的归因有负控）")
     return 0
 
 

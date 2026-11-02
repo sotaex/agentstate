@@ -130,6 +130,8 @@ margin:6px 0;white-space:pre-wrap;word-break:break-all}
 font-size:13px}
 .row:last-child{border-bottom:0}
 .row .k{flex:none;width:170px;color:var(--muted)}
+/* 整句盲区（没有「标题 —— 详情」结构的那一类）占满一行，不许被挤成两栏 */
+.row .full{flex:1 1 auto}
 .undecide{border:1px dashed var(--l1);background:var(--panel);border-radius:10px;
 padding:10px 14px;margin-bottom:9px;font-size:13px}
 .zero{border:1px solid var(--line);background:var(--panel);border-radius:10px;
@@ -343,15 +345,17 @@ def render(bundle: E.Bundle, *, cap: int = DEFAULT_CAP,
     parts.append("</div>")
 
     # ★ 「需要你看一眼 0 条」必须自己解释这个 0。
-    #   四个数字排在一起，0 会被读成「没事」——而 C 线读的是**账本**、不是规则库，
-    #   所以「挡下」「提醒」这两档今天**结构上就产不出来**（见 evidence 模块头）。
-    #   这个 0 不是「查了没有危险」，是「这一层的判据还没接上」。
-    #   ★ 自检里那条「不许出现『未发现异常』」守的是**字面**，守不住**读起来一个意思**：
-    #     字面没写那四个字，效果一样。这是本轮实测撞出来的第一类盲区。
-    #   ★ 解释来自 evidence.need_zero_note()，不由本层自己编 —— 0 至少有三种来源
-    #     （真没有／判据没接上／工具没跑），页面上只有一个 0。
+    #   ★ 2026-11-02 改版：这句话的**归因已经换过一次**，换的原因是现实变了。
+    #     旧归因（「只读账本、不读规则库 ⇒ 挡下/提醒结构上产不出来」）在当时是真的：
+    #     那时只有两条腿，都不读 `decision` 字段。
+    #     第三只腿接上之后，「挡下」**已经产得出来了** ⇒ 旧文案变成了
+    #     一句过期 24 小时的自我安慰 —— 它还在说「产不出来」。
+    #   ★ 现在归因由 `E.need_zero_note(bundle)` 按**每条腿的实况**逐档说：
+    #     查了没有／没跑成／没腿读，三种 0 必须长得不一样（铁律 45）。
+    #     渲染层只传 bundle，**不许自己编**。
     if n_need == 0 and bundle.evidence:
-        parts.append('<div class="zero">%s</div>' % _e(E.need_zero_note()))
+        parts.append('<div class="zero">%s</div>'
+                     % _e(E.need_zero_note(bundle)))
 
     # ---- 正文 ----
     if shown:
@@ -369,28 +373,19 @@ def render(bundle: E.Bundle, *, cap: int = DEFAULT_CAP,
                          '本报告不含任何结论。原因见下方「不可判」。</div>')
         else:
             # ★ 2026-11-02 修：这里原来写「两条检查都跑成了，都没有发现变化。
-            #   这是「查了，没有」，不是「没查」」—— 与上面 353 行那句
-            #   （`n_need == 0 and bundle.evidence` 时说的「这一层的判据还没接上」）
+            #   这是「查了，没有」，不是「没查」」—— 与上面那句
+            #   （`n_need == 0 and bundle.evidence` 时的归因）
             #   **对同一个 0 给出了相反的归因**。
-            #   两句话不可能同时为真：C 线只读账本、不读规则库 ⇒「挡下／提醒」
-            #   两档无论有没有证据都产不出来。所以「0 条」在**任何**情况下
-            #   都不是「查了没有危险」。
             #   实测怎么发现的：e2e 的 e1 臂改用真正 0 证据的夹具后立刻红
             #   —— 它守的那个字符串（`结构上产不出来`）只在这一条分支之外出现。
             #   「守字面守不住读起来一个意思」，这是同一类盲区的第二次现形。
-            #   现在两句归因**共用一个来源**（`E.need_zero_note()`），
+            # ★ 现在两句归因**共用一个来源**（`E.need_zero_note(bundle)`），
             #   改一处就改全部，不会再漂。
-            # ★ 两句都要有，作用域必须分开：
-            #   ①「查了，没有」—— 说的是**账本自洽**这一层（A 系列真跑了）；
-            #   ②「判据还没接上」—— 说的是**挡下／提醒**这一层（不读规则库）。
-            #   只写①，0 会被读成「查了没有危险」；只写②，读者以为账本也没查。
-            #   两句话各自都真，但覆盖的是不同的层 —— 所以必须同时出现，
-            #   且必须各自带限定语（「这一层」）。
+            # ★ 但它**不能**被写死成「账本自洽检查跑成了」：这句话在 auditor
+            #   崩了的时候也是假的。腿跑没跑成由 `bundle.legs` 说，不由本层猜。
             parts.append("<h2>这次看见了什么</h2>")
-            parts.append('<div class="zero">账本自洽检查跑成了，没有发现变化'
-                         '（这是「查了，没有」，不是「没查」）。'
-                         '但这只是「账本自洽」这一层：%s</div>'
-                         % _e(E.need_zero_note()))
+            parts.append('<div class="zero">%s</div>'
+                         % _e(E.need_zero_note(bundle)))
 
     # ---- 不可判（必须在页脚之前；与「0 条」视觉不同）----
     if bundle.undecidable:
@@ -419,9 +414,18 @@ def render(bundle: E.Bundle, *, cap: int = DEFAULT_CAP,
         parts.append("<h2>这份报告看不见什么</h2>")
         parts.append('<div class="rows">')
         for b in bundle.blind:
-            title, _, rest = b.partition(" —— ")
-            parts.append('<div class="row"><span class="k">%s</span><span>%s</span></div>'
-                         % (_e(title), _e(rest or title)))
+            title, sep, rest = b.partition(" —— ")
+            if sep:
+                parts.append('<div class="row"><span class="k">%s</span><span>%s</span></div>'
+                             % (_e(title), _e(rest)))
+            else:
+                # ★ 2026-11-02 深夜修：没有「——」的盲区是**一整句话**（第三只腿的
+                #   盲区就是这种形态：它没有「标题 —— 详情」的结构）。
+                #   原写法 `rest or title` 会把它印成**两遍**——同一行里同一句话出现
+                #   两次，读者会以为这是两条不同的盲区。
+                #   这是「零与不可判同貌」的排版版：**重复让「一条」看起来像「两条」**，
+                #   而多出来的那条谁也核不了（它不存在）。
+                parts.append('<div class="row"><span class="full">%s</span></div>' % _e(b))
         parts.append("</div>")
 
     # ---- 更正（若有）----
@@ -521,10 +525,31 @@ def _selfcheck() -> int:
     if "查了，没有" in h2:
         fails.append("有不可判却说了「查了，没有」—— 零与不可判同貌")
 
+    # ★ 2026-11-02 深夜修：这一条原来用**没有腿**的空 Bundle 断言「查了，没有」。
+    #   那是把「压根没腿读」当成了「查了没有」—— 正是 `need_zero_note` 改版要治的病。
+    #   真正干净的 0 必须满足：**三条腿都跑成、且覆盖了「需要你看一眼」的三档**。
     b3 = E.Bundle(read_at="t", root="")
+    b3.legs = [
+        E.LegReport(name="账本自洽", ran=True, produces=(E.K_CHECKED,),
+                    denominator="日文件 1 个"),
+        E.LegReport(name="变化巡检", ran=True, produces=(E.K_CHECKED, E.K_LOG_ONLY)),
+        E.LegReport(name="裁决面", ran=True,
+                    produces=(E.K_HELD, E.K_ALERT, E.K_NO_RESPONSE),
+                    denominator="按 decision 值数 0 条"),
+    ]
     h3 = render(b3)
     if "查了，没有" not in h3:
-        fails.append("真的空账本没有说「查了，没有」")
+        fails.append("真的空账本（三档都有腿跑成）没有说「查了，没有」")
+
+    # 负控：**同样的空账本、但没有腿** ⇒ 不许说「查了，没有」。
+    #   这是「零与不可判同貌」的第三个来源：没腿读。两种空账本在页面上长得一样，
+    #   区别只在有没有腿去读，而这句话正是唯一能把它说清的地方。
+    b3b = E.Bundle(read_at="t", root="")
+    h3b = render(b3b)
+    if "查了，没有" in h3b:
+        fails.append("没有腿的空账本说了「查了，没有」—— 把「没腿读」说成了「查了没有」")
+    if "没有任何一条腿去读" not in h3b:
+        fails.append("没有腿的空账本没有说「没有任何一条腿去读」")
 
     # 红线 1：首屏不许是「未发现异常」
     if "未发现异常" in h:
@@ -538,6 +563,18 @@ def _selfcheck() -> int:
         fails.append("有盲区却没有盲区块")
     if "<details" in h4.split("看不见什么")[1][:400]:
         fails.append("盲区被折叠了（details）—— 折叠盲区＝隐藏「我不知道」")
+
+    # ★ 2026-11-02 深夜加：**整句盲区不许被印成两遍**。
+    #   第三只腿的盲区是整句话（没有「标题 —— 详情」结构），而渲染层原来写
+    #   `rest or title` ⇒ 同一行里同一句话出现两次，读者会以为有两条不同的盲区。
+    #   多出来的那一条谁也核不了（它不存在）—— **重复让「一条」看起来像「两条」**，
+    #   这是「零与不可判同貌」的排版版。
+    b5 = E.Bundle(read_at="t", root="")
+    b5.blind = ("这是一整句没有分隔符的盲区，只许出现一次",)
+    h5 = render(b5)
+    if h5.count("这是一整句没有分隔符的盲区") != 1:
+        fails.append("整句盲区被印了 %d 遍 —— 一条盲区看起来像两条"
+                     % h5.count("这是一整句没有分隔符的盲区"))
 
     # XSS：证据内容里的尖括号必须被转义
     ev_x = E.Evidence(eid="X", claim="<script>alert(1)</script>",
@@ -673,8 +710,19 @@ def _selfcheck() -> int:
     # ---- 「需要你看一眼 0 条」必须自己解释这个 0 ----
     # b 里只有一条 log_only ⇒ n_need == 0。字面没写「未发现异常」，
     # 但读者看到的仍然是一个 0 —— 自检守字面，守不住「读起来一个意思」。
-    if "结构上产不出来" not in h:
-        fails.append("「需要你看一眼」为 0 却没解释这个 0 —— 读者会读成「没事」")
+    #
+    # ★ 2026-11-02 深夜修：这一条原来断言页面上有「结构上产不出来」这句话。
+    #   那句话是第三只腿接上**之前**的现状描述，改版后它已经过期 ⇒ 断言过期，
+    #   而**过期的断言比没有断言更糟**：它会把「文案已更新」判成红，逼人把旧话改回去。
+    #   ⇒ 现在断言的是**性质**：这个 0 必须落进四种归因之一，且不许冒充成「没事」。
+    _zero_note = E.need_zero_note(b)
+    _ATTRS = ("查了，没有", "没有任何一条腿去读", "没跑成", "说不出")
+    if not any(m in _zero_note for m in _ATTRS):
+        fails.append("「需要你看一眼」为 0 却没给出四种归因之一：%r —— 读者会读成「没事」"
+                     % (_zero_note,))
+    # 负控：b **没有腿** ⇒ 归因不许说「查了，没有」（那是把没腿读说成查了没有）
+    if "查了，没有" in _zero_note:
+        fails.append("没有腿的 Bundle 归因却说「查了，没有」：%r" % (_zero_note,))
 
     # ---- 产物里不许出现 `**` ----
     # 注意范围：**含 CSS 注释**。第一版只想到「正文里别写星号」，实测产物里
@@ -693,10 +741,11 @@ def _selfcheck() -> int:
         print("[自检失败] %s" % f, file=sys.stderr)
     if fails:
         return 1
-    print("[自检] 十七条全部生效（契约属性／零与不可判／首屏／盲区不折叠／转义／"
+    print("[自检] 二十条全部生效（契约属性／零与不可判／首屏／盲区不折叠／转义／"
           "裁量自报／折叠条目也带出处／被更正条目仍在／作废横幅在首屏／反向指认／"
           "指纹在页脚／指纹值真等于现算／残缺即明说不完整／WARN 不印成通过／"
-          "不适用≠没跑成／0 条必须自己解释／产物无星号）")
+          "不适用≠没跑成／0 条必须落进四种归因／没腿的空账本不许说「查了没有」／"
+          "整句盲区不许印两遍／产物无星号／折叠样本无星号）")
     return 0
 
 

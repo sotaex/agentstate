@@ -62,6 +62,14 @@ SOURCES: List[str] = [
     os.path.join(LINE_C, "tsnorm.py"),
     os.path.join(LINE_C, "auditor.py"),
     os.path.join(LINE_C, "watchman.py"),
+    # ★ 2026-11-02 深夜补两个漏项。判据只有一条：**它会不会改变报告上的数字或措辞**。
+    #   · `verdict_leg.py` 产出「挡下」「已发现无法处置」两档 —— 一页纸首屏那两个数
+    #     完全由它决定。它不进清单 ⇒ 换了分档规则，指纹不变，归档报告对不上账。
+    #   · `clue_ledger.py` 决定哪条线索被静默 —— 它不改「世界」，但它改「报告说什么」。
+    #   两个都曾经不在清单里，而闸门当时仍然全绿：**新模块默认不受指纹保护**，
+    #   这是清单式真源的固有风险（漏登记不报错），只能靠「新增模块必须登记」这条纪律。
+    os.path.join(LINE_C, "clue_ledger.py"),
+    os.path.join(LINE_C, "verdict_leg.py"),
     os.path.join(LINE_C, "evidence.py"),
     os.path.join(LINE_C, "citecheck.py"),
     os.path.join(LINE_C, "onepager.py"),

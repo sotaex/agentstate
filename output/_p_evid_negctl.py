@@ -254,22 +254,50 @@ def a_verify_day_level_empty():
 # --------------------------------------------------------------- 整链臂（真账本，只读）
 
 
-def a_evidence_has_no_held():
-    """★ 硬约束的行为面：真账本跑出来的证据里，**一条「挡下」都不许有**。
+def a_held_only_with_rule():
+    """★ 硬约束的行为面：真账本跑出来的每条「挡下」，**都必须带规则号**。
 
-    九维三（行为判据）——断言的是「产物里有没有」，不是「构造函数抛不抛」。
-    C 线读的是账本、不是规则 ⇒ 它没有任何资格产出「挡下」。
+    ──────────────────────────────────────────────────────────────────────
+    这条臂 2026-11-02 深夜被改写，改写的理由比它本身重要
+    ──────────────────────────────────────────────────────────────────────
+    原文断言：「真账本跑出来的证据里，一条『挡下』都不许有」，
+    理由是「C 线读的是账本、不是规则 ⇒ 它没有任何资格产出挡下」。
+
+    那句话在**只有两条腿**时是对的（auditor／watchman 都不读 `decision`）。
+    但它被写成了一条**行为判据**，于是第三只腿接上、真的从账本里读出
+    `rule_id` 之后，这条臂立刻报红 —— 而红的方向是「不许有结论」。
+
+    ⇒ **判据写错方向，会长期保护一个缺陷。** 它守的其实不是「没有挡下」，
+      而是「挡下必须有规则号」——那才是 `Evidence.__post_init__` 的硬约束。
+      把纪律写成「不许产出」，等于替那条腿的自我阉割背书，而且写得很有道理。
+
+    新判据（三条，都是「强度不许被读强」的不同面）：
+      1. 每条「挡下」必须有非空 rule_id，且不是「（无规则号）」；
+      2. 每条「挡下」的 source 必须形如 `verdict_leg/<规则号>`（出处可回指）；
+      3. 反向对照：**无规则号的簇必须落「已发现无法处置」**，且那一档的
+         `rule_id` 必须为空 —— 否则说明分档把「守卫自己异常」读成了「规则挡住了」。
     """
     root = os.path.join(os.path.dirname(HERE), ".psl", "audit")
     if not os.path.isdir(root):
         return None, "真账本不在（%s）—— SKIP，不是通过" % root
     b = E.collect(root)
     held = [e for e in b.evidence if e.strength == E.K_HELD]
-    if held:
-        return False, "产出了 %d 条「挡下」：%s" % (
-            len(held), "、".join(e.eid for e in held[:3]))
-    return True, "%d 条证据，零「挡下」（四档分布 %s）" % (
-        b.count(), {k: len(v) for k, v in b.by_strength().items()})
+    for e in held:
+        if not e.rule_id or e.rule_id == "（无规则号）":
+            return False, "「挡下」没有规则号：%s（%s）" % (e.eid, e.claim[:40])
+        if not e.source.startswith("verdict_leg/"):
+            return False, "「挡下」的出处不是 verdict_leg：%s → %s" % (e.eid, e.source)
+    no_resp = [e for e in b.evidence if e.strength == E.K_NO_RESPONSE]
+    for e in no_resp:
+        if e.rule_id:
+            return False, ("无规则号的簇被挂上了规则号 %r：%s —— "
+                           "把「守卫自己异常」读成了「规则挡住了」"
+                           % (e.rule_id, e.eid))
+    return True, ("%d 条证据：%d 条「挡下」全部带规则号（%s）；"
+                  "%d 条「已发现无法处置」均无规则号"
+                  % (b.count(), len(held),
+                     "、".join(sorted({e.rule_id for e in held})) or "无",
+                     len(no_resp)))
 
 
 def _frozen_copy(n_days=3):
@@ -448,7 +476,7 @@ def main():
         ("nc13_verify_missing", a_verify_missing_day),
         ("nc14_verify_daylevel", a_verify_day_level),
         ("nc15_verify_empty_day", a_verify_day_level_empty),
-        ("nc16_no_held_in_real", a_evidence_has_no_held),
+        ("nc16_held_only_with_rule", a_held_only_with_rule),
         ("nc17_ids_stable_real", a_evidence_ids_stable_across_runs),
         ("nc18_undecidable", a_undecidable_separated),
         ("nc19_blind_not_dropped", a_blind_not_dropped),
