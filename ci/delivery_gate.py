@@ -1258,6 +1258,37 @@ def _looks_like_noop(out):
 _SLOW_BUDGET = {"0514": 1800}
 
 
+#: 起判据子进程的解释器旗标。
+#:
+#: ★ 2026-11-02 实测（不是推断）：原来这里是裸 `sys.executable`，会**加载 user site**。
+#:   本机 user site 里躺着一份 0.28.0 的旧 `host_shield.py`；而套件是按
+#:   `[sys.executable, <绝对路径>]` 起的，`sys.path[0]` 是这个脚本所在的 `ci/`，
+#:   **仓根不在搜索路径上** ⇒ 判据里裸 `import host_shield` 按 sys.path 命中那份旧的。
+#:   后果：regression 的 D-42 报「resolve_rules_file 不存在」、D-45 报「带现算哈希的
+#:   清单却判红」——两条都是**加载错对象**，不是清单错。
+#:
+#: ★ 同一棵树只换通道的实测对照（2026-11-02，HEAD 228cf29）：
+#:     裸 `sys.executable`  → regression 2 红（D-42 / D-45）
+#:     `-I -X utf8`         → 45 条判据 PASS 45 / FAIL 0
+#:   ⇒ 红在通道，不在被测物。
+#:
+#: ★ 为什么是 `-E -s` 而不是生产钩子那套 `-I -S`：
+#:   生产钩子的旗标只有一处真源（`scripts/install.py` 的 `hook_command()`，`-I -S`），
+#:   钩子不需要第三方依赖。判据套件不同，它们要用 system site-packages，加 `-S` 会崩。
+#:   而 `-I` = `-E -s -P`，那个 **`-P` 是副作用**：它把 `sys.path[0]`（脚本所在目录）也
+#:   摘掉了。实测 2026-11-02：用 `-I` 时 0431 的两条负控双双失效，红项原文
+#:   `ModuleNotFoundError("No module named 'tmpreg'")` —— 负控失效＝判据无法证明自己
+#:   会红，比红更糟。换成 `-E -s` 后 `sys.path[0]` 还在，负控恢复咬合。
+#:   ⇒ 只取「排除 user site」这一件事：`-s`。`-E` 顺带排掉 PYTHONPATH（本机那份指向
+#:   宿主的 `cli/vendor/shim` 垫片），让判据在同一个干净基线上跑。
+#:
+#: ★ 敌对通道不靠这里守：`-s` 让「user site 有旧同名模块」这个情形在闸门里消失了，
+#:   但那是**产品**要扛的事（旧模块劫持），由 0514 的 HSI 族用带 user site 的通道
+#:   显式测降级留痕。两条腿分工：这里量「真实运行环境下判据看见什么」，
+#:   HSI 量「被劫持时产品有没有说出来」。只做前者＝把要抓的东西藏起来。
+_PY_FLAGS = ("-E", "-s", "-X", "utf8")
+
+
 def _run(rel, timeout=900, extra=None):
     """跑一套判据。返回 `(状态, 明细)`，状态 ∈ PASS / RED / CRASH / MISSING / NOOP。
 
@@ -1292,7 +1323,7 @@ def _run(rel, timeout=900, extra=None):
         timeout = _SLOW_BUDGET.get(_km.group(1), timeout)
     t0 = time.time()
     try:
-        r = subprocess.run([sys.executable, p] + list(extra or []),
+        r = subprocess.run([sys.executable, *_PY_FLAGS, p] + list(extra or []),
                            capture_output=True, text=True,
                            encoding="utf-8", errors="replace",
                            timeout=timeout, env=env, cwd=PKG)
