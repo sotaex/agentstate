@@ -4070,6 +4070,18 @@ def _ensure_alive_locked(pkg_root, cause="manual"):
                                creationflags=_CREATE_NO_WINDOW)
                 time.sleep(1)
             ok, pid, mode = spawn_sentinel(pkg_root)
+            if ok and mode == "already-running":
+                # ★★ 2026-11-02（链上实测，5 条假记录）：`already-running` 的语义是
+                #   「进程活着 **且** 心跳新鲜」（见 spawn_sentinel 的幂等分支）——
+                #   也就是**我们一个手指都没动**。而在这种情况下写
+                #   `host_shield_revived`＝「已经强制重启」，就是链上的假话：
+                #   实测记录里旧进程号 = 新进程号，reason 却说「没有心跳、已强制重启」。
+                #   ★ 为什么这条假话能活这么久：哈希完好、prev 接得上，任何完整性校验
+                #     都不报错；而 `bubble_decision()` 对 revived 一律不弹 ⇒ 用户也看不到。
+                #     唯一的破绽是它自己前后矛盾——那只有人读得出来。
+                #   ⇒ 审计链记「发生了什么」，不记「差点发生什么」。什么都没动，就不写记录，
+                #     如实说它在岗（"alive"），由调用方按「在岗」处理。
+                return "alive"
             if ok:
                 record(audit_dir, "host_shield_revived", decision="allow", severity="critical",
                        reason="监理没有心跳（%s，像是卡住了），已经强制重启%s"
@@ -4088,6 +4100,15 @@ def _ensure_alive_locked(pkg_root, cause="manual"):
         _consume_state_write(update_state_fields(last_revive_attempt=now),
                              "revive-throttle-account")
         ok, pid, mode = spawn_sentinel(pkg_root)
+        if ok and mode == "already-running":
+            # ★★ 2026-11-02：与上面同一处理由（7 日窗口 5 条假记录的来源就是这里）。
+            #   `already-running` ＝ 进程活且心跳新鲜 ＝ **没有重启任何东西**。
+            #   它的成因是「同一事实两处实现」：本函数先判它不在岗，spawn_sentinel
+            #   复查却说在岗 —— 两次判断之间隔着心跳文件的更新，结论可以不同。
+            #   调用方不复核就直接写「已重新拉起」，于是链上留下了自相矛盾的一条。
+            #   ⇒ 不写记录，返回 "alive"（真实结论：它在岗）。
+            #   ★ 根因（把两处判活收敛成一个函数）另开，不在本次改动内。
+            return "alive"
         if ok:
             record(audit_dir, "host_shield_revived", decision="allow", severity="warning",
                    reason="监理曾不在岗%s，已由%s重新拉起（拉起方式：%s）。"
