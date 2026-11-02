@@ -6024,7 +6024,8 @@ def j_slots_registry_and_evaluator():
          而不是空 dict，且**不得**给 p95=0（那是「延迟 0ms」的假 0）。
       ⑩ 报告消费腿（2026-11-02）：槽位读数必须真的出现在报告产物里。
          一套没人读的判据等于不存在 —— 这条腿断言的是**渲染出来的那一行**，
-         不是「函数被调用了」。
+         不是「函数被调用了」。三行：四态、命中性质、命中触发环境
+         （第三行不写，用户看到「11 项命中」会以为自己被攻击了）。
       ⑪ 探针语义腿（2026-11-02）：⑧ 管算子、⑨ 管常数，都管不到「探针喂给
          算子的事实是错的」。X3-02 把自愈写成失控、MI1-02 把 schema 明文的
          例外算进分母 —— 两条的算子和常数都没错，错在探针。这条腿直接调
@@ -6283,7 +6284,8 @@ def j_slots_registry_and_evaluator():
             "registered": 46, "covered_hit": 13, "covered_clean": 23,
             "undecidable": ["x"] * 5, "not_collected": ["y"] * 5,
             "by_triage": {"real": 9, "defect": 3, "calibration": 1,
-                          "unclassified": 0}}
+                          "unclassified": 0},
+            "by_env": {"dev": 9, "user": 0, "any": 4}}
         _txt10 = _r10.render_text(_rep10, "fixture")
     except Exception as e:                                       # noqa: BLE001
         return False, "⑩ 渲染失败：%r" % (e,)
@@ -6294,6 +6296,9 @@ def j_slots_registry_and_evaluator():
     if not any(ln.startswith("hit nature: 9 real / 3 ruler-defect") for ln in _lines10):
         return False, ("⑩ 报告里没有「命中性质」那一行 ⇒ 命中数会重新被读成"
                        "「13 个产品缺陷」，而其中 3 条是尺子自己的问题")
+    if not any(ln.startswith("hit env: 9 dev-only / 0 user / 4 any") for ln in _lines10):
+        return False, ("⑩ 报告里没有「命中触发环境」那一行 ⇒ 用户看到 13 项命中"
+                       "会以为自己被攻击了，而其中 9 条是我们自己改 ci/ 触发的")
 
     # ── ⑪ 探针语义腿（2026-11-02）──
     # ⑧ 证明「算子会翻」，⑨ 证明「一处常数陷阱被登记住」。两者都管不到
@@ -6312,7 +6317,7 @@ def j_slots_registry_and_evaluator():
                   " ⑦ 执法探针：旧版本/混杂/未接通道一律不定论，一致成功仍给结论"
                   " ⑧ 谓词可翻转（互换正负输入即红）"
                   " ⑨ MS1-01 未回退 p95、无记录时给 n=0 且不给假 p95"
-                  " ⑩ 报告里真出现槽位四态与命中性质两行"
+                  " ⑩ 报告里真出现槽位四态、命中性质、命中环境三行"
                   " ⑪ 探针给的事实对（无终止不判终止、豁免类型不进分母）"
                   % (len(slots), declared_reg, len(muts), len(windowed)))
 

@@ -1564,17 +1564,26 @@ def summarize(results, reg):
     #   读者把「我们的判据写错了」也算成「产品出事了」，这正是分诊要防的。
     _hit_ids = {r["slot"] for r in judged if r["state"] == HIT}
     by_triage = {"real": 0, "defect": 0, "calibration": 0, "unclassified": 0}
+    # 命中的**触发环境**（2026-11-02）。为什么这一栏必须出现在报告里：
+    #   本机本轮 9 条命中全部由开发动作触发（改自己的 ci/、在临时目录跑夹具、
+    #   长程任务本身几千个动作）。用户第一次看到「11 项命中」会以为被攻击了。
+    # ★ 这不是给命中找借口：env=dev 的条目在用户机器上仍然会发生（只是预期为 0），
+    #   写出来是为了让读者知道「这一条该在哪儿复现」。
+    by_env = {"dev": 0, "user": 0, "any": 0}
     for s in reg["slots"]:
         if s["id"] not in _hit_ids:
             continue
         _cls = (s.get("triage") or {}).get("class")
         by_triage[_cls if _cls in ("real", "defect", "calibration") else "unclassified"] += 1
+        _env = (s.get("triage") or {}).get("env")
+        by_env[_env if _env in ("dev", "user") else "any"] += 1
     return {
         "denominator": reg["denominator"],
         "registered": len(reg_ids),
         "covered_hit": by_state.get(HIT, 0),
         "covered_clean": by_state.get(CLEAN, 0),
         "by_triage": by_triage,
+        "by_env": by_env,
         # 清白里有一部分是「有写入点但从未触发」——单列，别混进已验证
         "never_fired": [r["ext"] for r in judged if r.get("never_fired")],
         "undecidable": [r["ext"] for r in judged if r["state"] == UNDECIDABLE],

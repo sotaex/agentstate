@@ -555,6 +555,14 @@ def render_text(rep, log_label):
                     _t.get("calibration", 0), _t.get("unclassified", 0)))
         L.append("    (a hit = the phenomenon occurred; ruler-defect = our measurement was wrong,"
                  " not the product)")
+        # 命中的触发环境：不写这句，用户第一次看到「11 项命中」会以为被攻击了。
+        # 只在该字段存在时打印 —— 旧 judgment 没有这一项，别硬编一个 0。
+        _e = _sl.get("by_env")
+        if isinstance(_e, dict):
+            L.append("    hit env: %d dev-only / %d user / %d any"
+                     "   (dev-only = triggered by our own edits or test fixtures;"
+                     " expect none on a user machine)"
+                     % (_e.get("dev", 0), _e.get("user", 0), _e.get("any", 0)))
     elif "slots" in st:
         L.append("  slots: not computable (%s)" % (st.get("slots_error") or "unknown"))
     # 0.33.1 (P4-1)：宿主标签可信度（读侧标注，不改链）
@@ -744,16 +752,24 @@ def render_html(rep, log_label):
     _sl = st.get("slots")
     if isinstance(_sl, dict):
         _t = _sl.get("by_triage") or {}
+        _e = _sl.get("by_env") or {}
+        _envline = ""
+        if isinstance(_sl.get("by_env"), dict):
+            _envline = ("<br>hit env: %d dev-only / %d user / %d any"
+                        "<br><span class='muted'>dev-only = triggered by our own edits"
+                        " or test fixtures; expect none on a user machine</span>"
+                        % (_e.get("dev", 0), _e.get("user", 0), _e.get("any", 0)))
         slothtml = ("<p>slots: %d registered | %d hit | %d clean | %d undecidable | %d not collected"
                     "<br>hit nature: %d real / %d ruler-defect / %d calibration / %d unclassified"
                     "<br><span class='muted'>a hit = the phenomenon occurred; ruler-defect = our"
-                    " measurement was wrong, not the product</span></p>"
+                    " measurement was wrong, not the product</span>%s</p>"
                     % (_sl.get("registered", 0), _sl.get("covered_hit", 0),
                        _sl.get("covered_clean", 0),
                        len(_sl.get("undecidable") or []),
                        len(_sl.get("not_collected") or []),
                        _t.get("real", 0), _t.get("defect", 0),
-                       _t.get("calibration", 0), _t.get("unclassified", 0)))
+                       _t.get("calibration", 0), _t.get("unclassified", 0),
+                       _envline))
     elif "slots" in st:
         slothtml = "<p>slots: not computable (%s)</p>" % e(st.get("slots_error") or "unknown")
     else:
