@@ -249,6 +249,42 @@ def _slot_summary(root, audit_dir):
         return None, "%s: %s" % (type(e).__name__, e)
 
 
+def _coverage_gap(root):
+    """判定覆盖缺口 —— 「谁没人管」的常驻读数（0.64）。
+
+    ★ 为什么必须有这一行：`325/325 通过` 只说明**被判定覆盖的那 21 个文件**
+      没出问题，不说明其余文件被检查过。实测（2026-11-02）：
+        manifest 登记 144 个 ｜ 判定覆盖 21 个 ｜ 缺口 123 个
+      缺口里含 29 个仓根运行时模块（host_shield / ui_server / ledger /
+      situation / inbox_* ×15 / egress / heartbeat 等）—— 全都「坏了用户会
+      看见」，但没有一条判据在管。
+      ★ 这不是「补断言的替代品」，是让缺口自己说话。不打印这一行，读者会把
+        「全绿」读成「全都检查过了」，而那正是本项目最忌的过度承诺。
+    ★ 两个分母都必须印：manifest 登记数 与 判定覆盖数。只给缺口数，读者
+      无法判断缺口是 12 还是 123，也就无法判断这件事该不该现在做。
+    ★ 拿不到任一清单就返回 None（报告里说「算不出来」），**不返回全 0** ——
+      全 0 会被读成「没有缺口」。
+    """
+    if root is None:
+        return None
+    try:
+        m = load_json(Path(str(root)) / "psl" / "manifest.json") or {}
+        j = load_json(Path(str(root)) / "psl" / "judgment.json") or {}
+    except Exception:                                            # noqa: BLE001
+        return None
+    mf = m.get("files") if isinstance(m.get("files"), dict) else {}
+    jd = j.get("digests") if isinstance(j.get("digests"), dict) else {}
+    if not mf or not jd:
+        return None
+    gap = sorted(set(mf) - set(jd))
+    # 运行时模块 = 仓根下的 .py。scripts/ tools/ ci/ 是开发件，单列会稀释重点，
+    # 所以只数仓根那一层 —— 那一层坏了，用户当场就看见。
+    runtime = [p for p in gap
+               if p.endswith(".py") and "/" not in p.replace("\\", "/")]
+    return {"manifest": len(mf), "judged": len(jd),
+            "gap": len(gap), "runtime": len(runtime)}
+
+
 def build_report(events, scan, manifest, host_label="", root=None,
                  audit_dir=None, include_slots=False):
     rules = rules_descriptions(root)
@@ -305,6 +341,9 @@ def build_report(events, scan, manifest, host_label="", root=None,
             else os.path.join(str(root), ".psl", "audit"))
         stats["slots"] = _sl
         stats["slots_error"] = _sl_err
+        # 覆盖缺口：与槽位读数同一批算，因为它回答的是同一个问题——
+        # 「我们到底看了多少」。不放进 include_slots 之外：csv/sarif 不需要。
+        stats["coverage_gap"] = _coverage_gap(root)
     # 0.64：整块分档只在拿到唯一实现时才有意义；拿不到时 `stats["notify"]` 是 None，
     # 这里一句不数，渲染处改说「算不出来」—— 不印三个 0（零与不可判同貌）。
     for ev in events:
@@ -563,6 +602,15 @@ def render_text(rep, log_label):
                      "   (dev-only = triggered by our own edits or test fixtures;"
                      " expect none on a user machine)"
                      % (_e.get("dev", 0), _e.get("user", 0), _e.get("any", 0)))
+        # 覆盖缺口：与上面三行同一族 —— 都在回答「我们看了多少」。
+        # ★ 「325/325 通过」只覆盖 21 个文件；不印这一行，读者会把它读成
+        #   「全都检查过了」。
+        _cg = st.get("coverage_gap")
+        if isinstance(_cg, dict):
+            L.append("    coverage: manifest %d | judged %d | gap %d"
+                     " (%d runtime modules not covered)"
+                     % (_cg.get("manifest", 0), _cg.get("judged", 0),
+                        _cg.get("gap", 0), _cg.get("runtime", 0)))
     elif "slots" in st:
         L.append("  slots: not computable (%s)" % (st.get("slots_error") or "unknown"))
     # 0.33.1 (P4-1)：宿主标签可信度（读侧标注，不改链）
