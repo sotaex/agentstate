@@ -5898,8 +5898,99 @@ def _slot_flip_failures(S, slots, swap=False):
     return bad
 
 
+def _probe_semantics_failures(S):
+    """⑪ 探针语义腿：算子会翻不等于**探针喂进去的事实**是对的。
+
+    ★ 为什么 ⑧ 抓不到 X3-02：⑧ 在**算子层**翻转（`_APPLY[op](pos, p)`），
+      而 X3-02 的错在**探针层** —— `revived_after_stop = len(revived) > 0`。
+      算子 `exists == true` 完全会翻，错的是那个数本身把「自愈」说成了
+      「我们让它停它没停」。同一族还有 MI1-02：算子（ratio）没错，
+      错的是分母把 schema 明文豁免的类型算了进去。
+    ★ 所以这条腿直接调探针，喂**真实形状的假记录**，问三件事：
+      ① 该有前置事件才能判的，没有前置事件时必须**给不出字段**；
+      ② 前置事件在前 / 在后，结论必须相反；
+      ③ 按设计豁免的类型必须进不了分母。
+    """
+    bad = []
+
+    class _FakeCtx(object):
+        """只实现这几个探针真用到的方法（鸭子类型，不读盘）。"""
+
+        def __init__(self, records):
+            self.records = list(records)
+            self.why = {}
+            self.host_shield = {"enabled": True}
+            self._cache = {}
+
+        def of_type(self, *types):
+            want = set(types)
+            return [r for r in self.records if r.get("type") in want]
+
+        def cached(self, key, fn):
+            if key not in self._cache:
+                self._cache[key] = fn()
+            return self._cache[key]
+
+    HS = {"hash": "sha256:x"}
+    HB = {"type": "host_shield_heartbeat", "ts": "2026-11-02T12:00:00+08:00"}
+
+    # ── MI1-02：豁免白名单是**登记**，不是「缺 hash 就免」的模糊规则 ──
+    _wl = tuple(getattr(S, "_NO_CHAIN_BY_DESIGN", ()) or ())
+    if _wl != ("session_start",):
+        bad.append("MI1-02 的按设计无链白名单被改成 %r（schema §2 只登记 "
+                   "session_start；加类型必须同时改 schema）" % (_wl,))
+    _v = S._p_ledger_ts(_FakeCtx([
+        {"type": "pre_tool_use", "ts": "2026-11-02T10:00:00+08:00", **HS}]))
+    if _v["records_hashed_in_scope"] != _v["records_should_have_hash"]:
+        bad.append("MI1-02 全带 hash 时分子分母不等（%r/%r）"
+                   % (_v["records_hashed_in_scope"], _v["records_should_have_hash"]))
+    _v = S._p_ledger_ts(_FakeCtx([
+        {"type": "pre_tool_use", "ts": "2026-11-02T10:00:00+08:00", **HS},
+        {"type": "pre_tool_use", "ts": "2026-11-02T10:00:01+08:00"}]))
+    if _v["records_hashed_in_scope"] >= _v["records_should_have_hash"]:
+        bad.append("MI1-02 有一条普通记录缺 hash，分子分母却相等 ⇒ 缺链看不见了")
+    _v = S._p_ledger_ts(_FakeCtx([
+        {"type": "pre_tool_use", "ts": "2026-11-02T10:00:00+08:00", **HS},
+        {"type": "session_start", "ts": "2026-11-02T10:00:02+08:00"}]))
+    if _v["records_hashed_in_scope"] != _v["records_should_have_hash"]:
+        bad.append("MI1-02 把 session_start（schema 明文无链直写）算进了分母"
+                   " ⇒ 每条链永久假红")
+
+    # ── X3-02：没有「让它停」的记录时，不许拿复活记录顶替 ──
+    _v = S._p_self_pid(_FakeCtx([
+        HB,
+        {"type": "host_shield_revived", "ts": "2026-11-02T11:00:00+08:00",
+         "cause": "hook-paramedic"}]))
+    if not isinstance(_v, dict):
+        bad.append("X3-02 无心跳时整个探针返回 None（这是对的），但本用例喂了心跳")
+    elif "revived_after_stop" in _v:
+        bad.append("X3-02 无显式终止记录却给出了 revived_after_stop=%r ⇒ "
+                   "把「自愈救活」读成「停了没停」"
+                   % (_v.get("revived_after_stop"),))
+    _v = S._p_self_pid(_FakeCtx([
+        HB,
+        {"type": "host_shield_stopped", "ts": "2026-11-02T11:00:00+08:00",
+         "cause": "manual"},
+        {"type": "host_shield_revived", "ts": "2026-11-02T11:30:00+08:00",
+         "cause": "hook-paramedic"}]))
+    if _v.get("revived_after_stop") is not True:
+        bad.append("X3-02 停在前、复活在后，却没判成「没停住」（拿到 %r）"
+                   % (_v.get("revived_after_stop"),))
+    _v = S._p_self_pid(_FakeCtx([
+        HB,
+        {"type": "host_shield_revived", "ts": "2026-11-02T11:00:00+08:00",
+         "cause": "hook-paramedic"},
+        {"type": "host_shield_stopped", "ts": "2026-11-02T11:40:00+08:00",
+         "cause": "manual"}]))
+    if _v.get("revived_after_stop") is not False:
+        bad.append("X3-02 复活发生在停止之前，却被判成「没停住」（拿到 %r）"
+                   " ⇒ 先后关系被忽略了"
+                   % (_v.get("revived_after_stop"),))
+    return bad
+
+
 def j_slots_registry_and_evaluator():
-    """D-54 槽位登记表与求值器的九个必答题（2026-11-01，2026-11-02 扩两腿）。
+    """D-54 槽位登记表与求值器的十二腿（2026-11-01，2026-11-02 扩四腿）。
 
     ★ 签名必须**无参**：`_checks()` 里带参判据一律写成 `lambda: j_x(m)`，
       直接放函数对象会让 `main()` 的 `fn()` 抛 TypeError ⇒ 这条判据永远红，
@@ -5934,6 +6025,10 @@ def j_slots_registry_and_evaluator():
       ⑩ 报告消费腿（2026-11-02）：槽位读数必须真的出现在报告产物里。
          一套没人读的判据等于不存在 —— 这条腿断言的是**渲染出来的那一行**，
          不是「函数被调用了」。
+      ⑪ 探针语义腿（2026-11-02）：⑧ 管算子、⑨ 管常数，都管不到「探针喂给
+         算子的事实是错的」。X3-02 把自愈写成失控、MI1-02 把 schema 明文的
+         例外算进分母 —— 两条的算子和常数都没错，错在探针。这条腿直接调
+         探针，喂真实形状的假记录，要求前置事件缺失时**给不出字段**。
     """
     S = load_slots()
 
@@ -6200,7 +6295,17 @@ def j_slots_registry_and_evaluator():
         return False, ("⑩ 报告里没有「命中性质」那一行 ⇒ 命中数会重新被读成"
                        "「13 个产品缺陷」，而其中 3 条是尺子自己的问题")
 
-    return True, ("十腿成立：① 真表 %d 条/%d 登记，分母自洽 ② %d 种变异全部判红 "
+    # ── ⑪ 探针语义腿（2026-11-02）──
+    # ⑧ 证明「算子会翻」，⑨ 证明「一处常数陷阱被登记住」。两者都管不到
+    # X3-02 / MI1-02 的错法：**算子和常数都对，错的是探针喂进去的事实**。
+    # 这类错在读数上更隐蔽 —— 它会给出一个看起来很专业的百分比（0.9977），
+    # 让人以为问题在数据侧。
+    _bad11 = _probe_semantics_failures(S)
+    if _bad11:
+        return False, ("⑪ 探针语义腿失效：%s"
+                       % ("；".join(_bad11[:3]),))
+
+    return True, ("十二腿成立：① 真表 %d 条/%d 登记，分母自洽 ② %d 种变异全部判红 "
                   "③ 空窗口下 %d 条窗口型槽位一律不定论 ④ 死代码报 no_producer、"
                   "从未触发与普通 0 区分开 ⑤ 四态互斥穷尽 "
                   "⑥ 哈希口径与 manifest 同源（版本行归一化，裸哈希必失配）"
@@ -6208,6 +6313,7 @@ def j_slots_registry_and_evaluator():
                   " ⑧ 谓词可翻转（互换正负输入即红）"
                   " ⑨ MS1-01 未回退 p95、无记录时给 n=0 且不给假 p95"
                   " ⑩ 报告里真出现槽位四态与命中性质两行"
+                  " ⑪ 探针给的事实对（无终止不判终止、豁免类型不进分母）"
                   % (len(slots), declared_reg, len(muts), len(windowed)))
 
 
@@ -6313,7 +6419,7 @@ def _checks(m):
         ("D-53 硬编码规则说明书必须与代码同源（四条「关不掉」的判定）",
          j_hardcoded_rules_are_truthful),
         # ── 2026-11-01 D-54：46 个槽位接线前，先锁住求值器本身 ──
-        ("D-54 槽位登记表与求值器：正控/负控/空窗口/生产者缺席/四态穷尽/哈希口径/探针口径/谓词翻转/恒真陷阱/报告消费",
+        ("D-54 槽位登记表与求值器：正控/负控/空窗口/生产者缺席/四态穷尽/哈希口径/探针口径/谓词翻转/恒真陷阱/报告消费/探针语义",
          j_slots_registry_and_evaluator),
     ]
 

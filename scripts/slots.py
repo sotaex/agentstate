@@ -518,6 +518,12 @@ def _p_ledger_actions(ctx):
     }
 
 
+# 「按设计无链直写」的记录类型 —— **白名单，不是「凡是缺 hash 就豁免」**。
+# ★ 唯一依据：`docs/AUDIT_SCHEMA.md` §2「例外（历史遗留）」明文只有 `session_start`。
+#   新增一种必须同时改 schema，否则就是拿「按设计的例外」洗分母（第十五族）。
+_NO_CHAIN_BY_DESIGN = ("session_start",)
+
+
 def _p_ledger_ts(ctx):
     """时间戳与链字段质量。九维 8 的正例：格式不同不是缺失。"""
     if not ctx.records:
@@ -525,12 +531,24 @@ def _p_ledger_ts(ctx):
     lens = {}
     missing = 0
     with_hash = 0
+    exempt = 0          # 按设计无链的类型条数
+    should = 0          # 分母：本该带 hash 的记录数
+    hashed_in_scope = 0  # 分子：其中真带了 hash 的
     prev = None
     max_gap_min = 0.0
     inversions = 0
     for r in ctx.records:
-        if r.get("hash"):
+        _h = bool(r.get("hash"))
+        if _h:
             with_hash += 1
+        if r.get("type") in _NO_CHAIN_BY_DESIGN:
+            # ★ 不计入分子也不计入分母：schema 说它不参与链校验。
+            #   只「从分母里扣」会留下分子 100% 的假象；分子分母同范围才诚实。
+            exempt += 1
+        else:
+            should += 1
+            if _h:
+                hashed_in_scope += 1
         ts = r.get("ts")
         if ts is None:
             missing += 1
@@ -558,6 +576,11 @@ def _p_ledger_ts(ctx):
            "total": len(ctx.records),
            "records_with_hash": with_hash,
            "records_without_hash": len(ctx.records) - with_hash,
+           # 口径 A（旧）：全部记录里带 hash 的比例 —— 分母混进按设计的例外，必假红
+           # 口径 B（现行）：只问「本该带 hash 的都带了吗」
+           "records_exempt_no_hash": exempt,
+           "records_should_have_hash": should,
+           "records_hashed_in_scope": hashed_in_scope,
            "max_gap_minutes": round(max_gap_min, 1)}
     out.update(_hook_latency(ctx))
     return out
@@ -1096,6 +1119,12 @@ def _p_config_hooks(ctx):
             "hook_sha": reg.get("sha256")}
 
 
+# 「显式终止」的**独立事件**类型。★ 当前产品**不写**这一类记录：
+#   今天的处置以 deny 为主、几乎不 kill（X3-02 的 why_partial 早已写明这一点）。
+#   所以这里多半是空集 —— 空集时 X3-02 必须判「不可判定」，不许拿复活记录顶替。
+_STOP_EVENT_TYPES = ("host_shield_stopped", "host_shield_killed")
+
+
 def _p_self_pid(ctx):
     """X2a-01 / X3-02 / MA1-01 共用：监理自身是否还在跑。
 
@@ -1118,15 +1147,37 @@ def _p_self_pid(ctx):
         return None
     alive = gap_min <= 20.0          # 心跳周期实测 10 分钟，两倍容差
     enabled = hs.get("enabled")
-    return {"pid_alive": alive,
-            "expected_alive_but_dead": bool(enabled) and not alive,
-            # 「终止应验」：我们已经让它停，却又有复活记录 ⇒ 说停了没停
-            "revived_after_stop": len(ctx.of_type("host_shield_revived")) > 0,
-            "n_revived": len(ctx.of_type("host_shield_revived")),
-            "gap_min": round(gap_min, 1),
-            "last_heartbeat": stamps[-1],
-            "sentinel_pid": hs.get("sentinel_pid"),
-            "started_at": hs.get("sentinel_started_at")}
+    revived = ctx.of_type("host_shield_revived")
+    out = {"pid_alive": alive,
+           "expected_alive_but_dead": bool(enabled) and not alive,
+           "n_revived": len(revived),
+           "gap_min": round(gap_min, 1),
+           "last_heartbeat": stamps[-1],
+           "sentinel_pid": hs.get("sentinel_pid"),
+           "started_at": hs.get("sentinel_started_at")}
+
+    # 「终止应验」= 我们说停了它，它又活了。**两个条件缺一不可**：
+    #   ① 窗口内有「让它停」的独立事件；② 该事件之后还有复活记录。
+    # ★ 旧实现只看 ①（有 revived 就算），把 `host_shield_revived` 读成「停了没停」——
+    #   而产品写这条记录的场景恰恰是**自愈**（cause 全为 hook-paramedic），
+    #   语义整个反了（第十六族：把自愈读成失控）。
+    # ★ ① 不存在时**不许判 clean**：那是「恒 clean 假绿」；给不出字段 ⇒ undecidable，
+    #   并把原因写成一句话，让读的人知道「不是没事，是没法量」。
+    stops = [r for r in ctx.records if r.get("type") in _STOP_EVENT_TYPES]
+    out["n_stop_events"] = len(stops)
+    if not stops:
+        ctx.why["self_pid"] = (
+            "窗口内没有显式终止记录（产品当前只 deny 不 kill）⇒「停了没停」无从判起；"
+            "不退回「有 revived 就算」——那是把自愈读成失控")
+    else:
+        last_stop = max((r.get("ts") or "") for r in stops)
+        after = [r for r in revived if (r.get("ts") or "") > last_stop]
+        if not last_stop:
+            ctx.why["self_pid"] = "终止记录没有时间戳，先后顺序不成立"
+        else:
+            out["revived_after_stop"] = bool(after)
+            out["n_revived_after_stop"] = len(after)
+    return out
 
 
 _PRODUCT_VERSION_CACHE = {}
