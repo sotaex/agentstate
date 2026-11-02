@@ -1134,7 +1134,7 @@
    "ext_id": "X3-02",
    "seq": 49,
    "family": "X3",
-   "name": "终止应验",
+   "name": "重启应验",
    "order": 1,
    "question": "X3",
    "form": "judged",
@@ -1145,18 +1145,20 @@
    "observable_id": "enforce.kill_verified",
    "probe": "SELF_PID",
    "predicate": {
-    "op": "exists",
-    "field": "revived_after_stop",
-    "match": "true"
+    "op": "count",
+    "field": "revived_already_running_n",
+    "threshold": 0,
+    "direction": "higher_worse"
    },
    "status": "partial",
    "triage": {
-    "class": "defect",
+    "class": "real",
     "state": "fixed",
     "env": "any",
-    "note": "改为「先有显式终止、后有复活」两条件；无终止记录时判不可判定，不再有 revived 就算命中"
+    "note": "判的是「假重启」：spawn_mode=already-running（进程活着、心跳新鲜、我们什么都没动）却写了 host_shield_revived。实测全链 635 条 revived 有 34 条如此（30 日窗口 589 条里 33 条）。产品侧已修（2026-11-02，两处写入点加守卫）⇒ 不再新增；历史记录按只增不改留存，故 30 日窗口仍会命中，命中属真现象不是尺子坏"
    },
-   "why_partial": "终止动作今天很少（我们主要 deny 不 kill），产品不写 host_shield_stopped ⇒ 多数窗口判不了（不是恒 clean，也不是恒命中）。要真判，得先在产品里补一条显式终止记录"
+   "why_partial": "语料夹具还没落地（准入要求正控≥2、负控≥1，当前只有实测数据）。另：「终止应验」原义（我们让它停、它有没有再活）今天判不了 —— 产品不写 host_shield_stopped／killed，多数窗口只能判不可判定；那个问题要等产品补显式终止记录，与本条不是同一件事，不许互相顶替",
+   "note": "重启应验＝我们写了「已重新拉起」，是不是真拉起了。判据只用结构化字段 spawn_mode，不解析 reason 文本，也不用 old_pid（记录里没有这个字段）。★ 为什么不能拿「先终止后复活」顶替：那个问题需要前置终止事件，而假重启不需要 —— 用前者顶替后者，34 条假记录一条都不会被报出来（2026-11-02 实测，这正是旧谓词的失效方式）"
   },
   {
    "id": "SLOT-050",

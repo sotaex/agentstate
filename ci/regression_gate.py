@@ -5986,6 +5986,46 @@ def _probe_semantics_failures(S):
         bad.append("X3-02 复活发生在停止之前，却被判成「没停住」（拿到 %r）"
                    " ⇒ 先后关系被忽略了"
                    % (_v.get("revived_after_stop"),))
+
+    # ── X3-02 第二组：假重启数得到、真重启数不到（2026-11-02）──
+    # 上面三条测的是「终止应验」的探针行为；但 X3-02 现在的谓词问的是**假重启**
+    # ——「它明明活着，我们有没有谎称重启过」。这两件事不是同一个问题，所以
+    # 必须各有一组腿：只留上面那组，新谓词一根腿都没有（改了谓词也不会红）。
+    _v = S._p_self_pid(_FakeCtx([
+        HB,
+        {"type": "host_shield_revived", "ts": "2026-11-02T11:00:00+08:00",
+         "cause": "hook-paramedic", "spawn_mode": "already-running"},
+        {"type": "host_shield_revived", "ts": "2026-11-02T11:05:00+08:00",
+         "cause": "hook-paramedic", "spawn_mode": "already-running"}]))
+    if _v.get("revived_already_running_n") != 2:
+        bad.append("X3-02 两条「已经在运行」的复活记录，假重启计数却是 %r ⇒ "
+                   "链上写假话量不出来" % (_v.get("revived_already_running_n"),))
+    _v = S._p_self_pid(_FakeCtx([
+        HB,
+        {"type": "host_shield_revived", "ts": "2026-11-02T11:00:00+08:00",
+         "cause": "hook-paramedic", "spawn_mode": "detached"},
+        {"type": "host_shield_revived", "ts": "2026-11-02T11:05:00+08:00",
+         "cause": "manual", "spawn_mode": "detached+breakaway"}]))
+    if _v.get("revived_already_running_n") != 0:
+        bad.append("X3-02 真的拉起过却数成假重启（拿到 %r）⇒ 判据恒命中，"
+                   "读数时会被当噪声关掉"
+                   % (_v.get("revived_already_running_n"),))
+    # ★ 第三腿是这条判据存在的全部理由：假重启**不需要前置终止事件**就成立。
+    #   若无显式终止时这个数也跟着消失，等于新谓词被旧谓词的「必须先有终止」
+    #   绑住 —— 34 条历史假记录一条都报不出来。
+    _v = S._p_self_pid(_FakeCtx([
+        HB,
+        {"type": "host_shield_revived", "ts": "2026-11-02T11:00:00+08:00",
+         "cause": "hook-paramedic", "spawn_mode": "already-running"}]))
+    if _v.get("revived_already_running_n") != 1:
+        bad.append("X3-02 没有显式终止记录时假重启计数消失（拿到 %r）⇒ 新谓词"
+                   "退回了旧谓词的样子"
+                   % (_v.get("revived_already_running_n"),))
+    # 伴随读数必须自证「看过全部记录」，否则 0 与「只挑了那几条」同貌。
+    if _v.get("revived_modes") != ["already-running"]:
+        bad.append("X3-02 的 revived_modes 没有如实列出窗口里的拉起方式（拿到 %r）"
+                   " ⇒ 计数为 0 时读者无法分辨「真没有」与「没看」"
+                   % (_v.get("revived_modes"),))
     return bad
 
 
@@ -6030,6 +6070,11 @@ def j_slots_registry_and_evaluator():
          算子的事实是错的」。X3-02 把自愈写成失控、MI1-02 把 schema 明文的
          例外算进分母 —— 两条的算子和常数都没错，错在探针。这条腿直接调
          探针，喂真实形状的假记录，要求前置事件缺失时**给不出字段**。
+         2026-11-02 加第二组：X3-02 的谓词从「终止应验」换成「假重启计数」，
+         于是另立三条腿 —— 假重启数得到（2 条已是 2）、真重启数不到（0 条）、
+         **无前置终止也要数得到**（这是新谓词存在的全部理由；这条一退，
+         34 条历史假记录全部隐形），外加一条「拉起方式清单要自证看过全部
+         记录」（否则 0 与「只挑了那几条」同貌）。
     """
     S = load_slots()
 
@@ -6318,7 +6363,8 @@ def j_slots_registry_and_evaluator():
                   " ⑧ 谓词可翻转（互换正负输入即红）"
                   " ⑨ MS1-01 未回退 p95、无记录时给 n=0 且不给假 p95"
                   " ⑩ 报告里真出现槽位四态、命中性质、命中环境三行"
-                  " ⑪ 探针给的事实对（无终止不判终止、豁免类型不进分母）"
+                  " ⑪ 探针给的事实对（无终止不判终止、豁免类型不进分母、"
+                  "假重启数得到而真重启数不到）"
                   % (len(slots), declared_reg, len(muts), len(windowed)))
 
 

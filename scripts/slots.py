@@ -1156,6 +1156,31 @@ def _p_self_pid(ctx):
            "sentinel_pid": hs.get("sentinel_pid"),
            "started_at": hs.get("sentinel_started_at")}
 
+    # ── 假重启计数（2026-11-02：X3-02 现在的问法）──
+    # 「假重启」＝ 我们一个手指都没动，链上却写了「已重新拉起」。
+    #   产品自己把拉起方式记在 `spawn_mode` 里（实测全链 635 条 revived、
+    #   **无一条缺这个字段**），而 `already-running` 的定义是「进程活着且
+    #   心跳新鲜」（spawn_sentinel 的幂等分支）—— 也就是什么都没发生。
+    #   所以这类记录的存在本身就自相矛盾，不必解析 reason 文本，也不必找
+    #   old_pid（记录里根本没有这个字段，pid 只有新的那一个）。
+    #
+    # ★ 为什么必须另立一个数，不能拿下面那条顶替：
+    #   下面问的是「我们让它停，它有没有再活」（终止应验）——产品今天不写
+    #   显式终止事件，所以它多数窗口只能判不可判定；
+    #   这里问的是「它明明活着，我们有没有谎称重启过」——**不需要前置终止
+    #   事件**就成立，而且实测有 34 条真的发生过。
+    #   旧实现用前者顶替后者 ⇒ 真问题（假重启）根本没有尺子。
+    #
+    # ★ n=0 是诚实结论：窗口内没有 revived 记录，就不可能有假重启。
+    #   链本身读不到的情形由函数顶部 `if not stamps or not newest: return None`
+    #   挡掉，两件事不混（0 与不可判不同貌）。
+    out["revived_already_running_n"] = sum(
+        1 for r in revived if r.get("spawn_mode") == "already-running")
+    # 伴随读数：把窗口里出现过的拉起方式列出来，让「0」能自证看过全部记录，
+    # 而不是只挑了 already-running 那几个（读数要能自证读得到）。
+    out["revived_modes"] = sorted({str(r.get("spawn_mode") or "?")
+                                   for r in revived})
+
     # 「终止应验」= 我们说停了它，它又活了。**两个条件缺一不可**：
     #   ① 窗口内有「让它停」的独立事件；② 该事件之后还有复活记录。
     # ★ 旧实现只看 ①（有 revived 就算），把 `host_shield_revived` 读成「停了没停」——
