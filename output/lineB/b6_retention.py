@@ -227,6 +227,7 @@ def main() -> int:
             "def f(p):\n"
             "    os.remove(p)\n"
             "    shutil.rmtree(p)\n"
+            "    os.replace(p, p + '.bak')\n"
         ))
         neg = _write_sample(tmp, "neg.py", (
             "def f(p):\n"
@@ -234,24 +235,27 @@ def main() -> int:
         ))
         pos_strong, _ = scan_ast(pos)
         neg_strong, _ = scan_ast(neg)
-        print("\n[腿 2] 正控：人造 os.remove ＋ shutil.rmtree ⇒ 必须检出")
+        print("\n[腿 2] 正控：人造 os.remove ＋ shutil.rmtree ＋ os.replace ⇒ 必须检出")
         print("  %s 命中 %d 处 %s"
-              % ("✅" if len(pos_strong) >= 2 else "❌", len(pos_strong),
+              % ("✅" if len(pos_strong) >= 3 else "❌", len(pos_strong),
                  [d for _, d in pos_strong]))
         print("\n[腿 3] 负控：纯读样本 ⇒ 必须 0 命中")
         print("  %s 命中 %d 处" % ("✅" if not neg_strong else "❌", len(neg_strong)))
-        # ★ 腿 4（2026-11-03 加）：**分类器必须能翻面**。
+        # ★ 腿 4（2026-11-03 加）：**分类器必须能翻面，且两栏各有一条正控**。
         #   没有这条，`_func_name` 一旦坏了（比如改成取模块名），n_del 与 n_ren
         #   会同时变 0，结论就变成「删除 0 处」—— 与真的没有删除**一模一样**。
         #   这是第十四族：永远清白的判据与真判据同貌，只能靠「该进这栏的必须进」来验。
+        #   ★ 11-03 补：原先正控样本里只有删除，`改名` 那一栏的期望值是 0 ——
+        #     等于「改名分支坏了」与「没有改名」也同貌。真账本里那 3 处 os.replace
+        #     是外部事实，不能拿它当分类器的牙齿。现在两条正控分别落两栏。
         _pos_del = [h for h in pos_strong if _func_name(h[1]) in HARD_DELETE]
         _pos_ren = [h for h in pos_strong if _func_name(h[1]) in SOFT_RENAME]
-        print("\n[腿 4] 分类：正控样本的 os.remove／shutil.rmtree 必须落进「删除」栏")
-        print("  %s 删除 %d 处 ｜ 改名 %d 处（期望 2 / 0）"
-              % ("✅" if len(_pos_del) == 2 and not _pos_ren else "❌",
+        print("\n[腿 4] 分类：删除样本进「删除」栏、改名样本进「改名」栏（两栏都要非空）")
+        print("  %s 删除 %d 处 ｜ 改名 %d 处（期望 2 / 1）"
+              % ("✅" if len(_pos_del) == 2 and len(_pos_ren) == 1 else "❌",
                  len(_pos_del), len(_pos_ren)))
-        cls_ok = len(_pos_del) == 2 and not _pos_ren
-        teeth = len(pos_strong) >= 2 and not neg_strong and cls_ok
+        cls_ok = len(_pos_del) == 2 and len(_pos_ren) == 1
+        teeth = len(pos_strong) >= 3 and not neg_strong and cls_ok
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -280,6 +284,12 @@ def main() -> int:
             },
             "teeth": {"positive_hits": len(pos_strong),
                       "negative_hits": len(neg_strong),
+                      # ★ 腿 4 也必须进产物（2026-11-03）：只在屏幕上印「分类能翻面」，
+                      #   明天复核的人看不到 —— 而「删除 0 处」这句话的可信度全押在
+                      #   「分类器真的会分」上，押在没人能复查的地方不合适。
+                      "class_flip_ok": bool(cls_ok),
+                      "class_pos_delete": len(_pos_del),
+                      "class_pos_rename": len(_pos_ren),
                       "ok": bool(teeth)},
             "verdict": verdict,
         }

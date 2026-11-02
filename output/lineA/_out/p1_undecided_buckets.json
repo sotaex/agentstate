@@ -69,42 +69,42 @@
   },
   {
    "day": "2026-11-03",
-   "pct_without": 55.31,
-   "total": 3871,
-   "without_decision": 2141
+   "pct_without": 55.33,
+   "total": 4224,
+   "without_decision": 2337
   }
  ],
  "by_type": [
   {
    "name_looks_alarm": false,
    "pct_without": 0.0,
-   "total": 53746,
+   "total": 53847,
    "type": "pre_tool_use",
-   "with_decision": 53746,
+   "with_decision": 53847,
    "without_decision": 0
   },
   {
    "name_looks_alarm": false,
    "pct_without": 100.0,
-   "total": 51853,
+   "total": 51952,
    "type": "post_tool_use",
    "with_decision": 0,
-   "without_decision": 51853
+   "without_decision": 51952
   },
   {
    "name_looks_alarm": false,
    "pct_without": 100.0,
-   "total": 46256,
+   "total": 46353,
    "type": "usage_delta",
    "with_decision": 0,
-   "without_decision": 46256
+   "without_decision": 46353
   },
   {
    "name_looks_alarm": false,
    "pct_without": 0.0,
-   "total": 12235,
+   "total": 12276,
    "type": "dst02_bash_path_suspect",
-   "with_decision": 12235,
+   "with_decision": 12276,
    "without_decision": 0
   },
   {
@@ -118,17 +118,17 @@
   {
    "name_looks_alarm": false,
    "pct_without": 0.0,
-   "total": 6679,
+   "total": 6683,
    "type": "host_shield_heartbeat",
-   "with_decision": 6679,
+   "with_decision": 6683,
    "without_decision": 0
   },
   {
    "name_looks_alarm": false,
    "pct_without": 0.0,
-   "total": 1266,
+   "total": 1267,
    "type": "pre_tool_use_summary",
-   "with_decision": 1266,
+   "with_decision": 1267,
    "without_decision": 0
   },
   {
@@ -142,9 +142,9 @@
   {
    "name_looks_alarm": false,
    "pct_without": 0.0,
-   "total": 646,
+   "total": 648,
    "type": "host_shield_revived",
-   "with_decision": 646,
+   "with_decision": 648,
    "without_decision": 0
   },
   {
@@ -158,17 +158,17 @@
   {
    "name_looks_alarm": false,
    "pct_without": 0.0,
-   "total": 395,
+   "total": 397,
    "type": "session_start",
-   "with_decision": 395,
+   "with_decision": 397,
    "without_decision": 0
   },
   {
    "name_looks_alarm": false,
    "pct_without": 0.0,
-   "total": 357,
+   "total": 358,
    "type": "exclude_patterns_allow",
-   "with_decision": 357,
+   "with_decision": 358,
    "without_decision": 0
   },
   {
@@ -190,9 +190,9 @@
   {
    "name_looks_alarm": false,
    "pct_without": 0.0,
-   "total": 234,
+   "total": 235,
    "type": "command_deletion_permission",
-   "with_decision": 234,
+   "with_decision": 235,
    "without_decision": 0
   },
   {
@@ -222,17 +222,17 @@
   {
    "name_looks_alarm": false,
    "pct_without": 0.0,
-   "total": 132,
+   "total": 134,
    "type": "host_shield_state_unreadable",
-   "with_decision": 132,
+   "with_decision": 134,
    "without_decision": 0
   },
   {
    "name_looks_alarm": false,
    "pct_without": 0.0,
-   "total": 77,
+   "total": 79,
    "type": "host_shield_dev_drift",
-   "with_decision": 77,
+   "with_decision": 79,
    "without_decision": 0
   },
   {
@@ -277,17 +277,17 @@
   }
  ],
  "files_read": 36,
- "read_at": "2026-11-03 06:08:05",
- "records": 184905,
+ "read_at": "2026-11-03 06:29:02",
+ "records": 185258,
  "risk": {
   "n_without_decision_alarm_named": 0,
   "pct_of_without_decision": 0.0
  },
  "selfcheck_ok": true,
  "types_all_without_decision": {
-  "post_tool_use": 51853,
+  "post_tool_use": 51952,
   "session_dna": 33,
-  "usage_delta": 46256
+  "usage_delta": 46353
  },
  "types_never_without_decision": [
   "autostart_no_window_fixed",
@@ -324,6 +324,6 @@
   "session_start",
   "workspace_root_allow"
  ],
- "with_decision": 86763,
- "without_decision": 98142
+ "with_decision": 86920,
+ "without_decision": 98338
 }

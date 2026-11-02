@@ -6,14 +6,14 @@
    "day": "2026-10-22",
    "records": 15911
   },
-  "bytes": 151284755,
+  "bytes": 152057158,
   "excluded": [
    "lock_events.jsonl"
   ],
   "files": 36,
   "first": "2026-09-25",
   "last": "2026-11-03",
-  "records": 184981,
+  "records": 185884,
   "retention_looks_permanent": true,
   "span_days": 40
  },
@@ -38,13 +38,16 @@
   "strong_n": 3,
   "weak_n": 0
  },
- "read_at": "2026-11-03 06:10:17",
+ "read_at": "2026-11-03 07:26:28",
  "target": "audit_chain.py",
  "target_bytes": 29328,
  "teeth": {
+  "class_flip_ok": true,
+  "class_pos_delete": 2,
+  "class_pos_rename": 1,
   "negative_hits": 0,
   "ok": true,
-  "positive_hits": 2
+  "positive_hits": 3
  },
  "verdict": "no_delete_call"
 }

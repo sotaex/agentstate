@@ -393,11 +393,28 @@ def main():
         print("已写 %s" % args.md)
 
     if args.json:
+        # ★ 产物必须自带「牙齿证据」（2026-11-03）：
+        #   自证腿一失败就直接 return，所以**文件存在本身就隐含自检通过** ——
+        #   但那是一层推断，明天复核的人看不见。下面把正控条数与形态清单写进产物，
+        #   读者不用相信「它肯定跑过自检」，能直接核对。
+        #   `forms_seen` 与 `forms_taxonomy` 分开：本仓只出现 2 类，而分类器认 4 类；
+        #   合成一栏会让「只认 2 类」与「本仓只有 2 类」同貌（0 与不可判同貌）。
+        _forms = sorted(set(x["form"] for x in rows))
         with open(args.json, "w", encoding="utf-8") as f:
             json.dump({"read_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                        "files": n_files, "writers": rows,
                        "runtime": len(runtime), "guards": len(guards),
-                       "readers": n_readers, "parse_errors": parse_errors},
+                       "readers": n_readers, "parse_errors": parse_errors,
+                       "selftest": {"passed": not fails, "fails": fails,
+                                    "positive_write_points": nw,
+                                    "positive_read_points": nr},
+                       "forms_taxonomy": ["W1-kwarg", "W2-dictkey",
+                                          "W3-subscript", "W4-attribute"],
+                       "forms_seen": _forms,
+                       "forms_zero": [x for x in
+                                      ("W1-kwarg", "W2-dictkey",
+                                       "W3-subscript", "W4-attribute")
+                                      if x not in _forms]},
                       f, ensure_ascii=False, indent=1)
         print("已写 %s" % args.json)
 

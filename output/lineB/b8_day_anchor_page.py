@@ -25,8 +25,10 @@
   · 只读，仓库零字节写入；夹具建在系统 TEMP。
   · 末行哈希的取法**照抄** `audit_chain.py` 的同刻口径（末个非空行 JSON 的 `hash`），
     不另造第二套。
-  · 三条腿自证：正控（改一字节保持长度 ⇒ 必须 REWRITE）、
-    正控二（截短 ⇒ 必须 SHORT）、负控（原样 ⇒ 必须全 OK）。
+  · 五条腿自证（词表五类各一条）：负控（原样 ⇒ OK）、正控一（同长改内容 ⇒ REWRITE）、
+    正控二（截短 ⇒ SHORT）、正控三（追加 ⇒ APPEND）、正控四（无锚 ⇒ NO_ANCHOR）。
+    追加那条是必须的：真账本里 APPEND 恰好 0 天，没有腿就分不清
+    「查过没有」与「分类器没走到那个分支」—— 两者在页面上都印 0。
 
 用法：
   python output/lineB/b8_day_anchor_page.py [--audit <dir>] [--out <file.md>]
@@ -126,7 +128,7 @@ def build_rows(audit_dir: str):
     return rows, man, man_err
 
 
-def render(rows, man, man_err) -> str:
+def render(rows, man, man_err, teeth=None) -> str:
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     out = []
     out.append("# Antinel · 日锚对照页")
@@ -150,10 +152,23 @@ def render(rows, man, man_err) -> str:
     out.append("")
     out.append("| 判定 | 天数 |")
     out.append("|---|---:|")
+    # ★ 五种判定**全部列出**，0 天也列（2026-11-03 改）：
+    #   原先只印出现的判定 ⇒ 今天只印「一致 34 / 无锚 2」，
+    #   读的人分不出「查过、一天也没被改」和「这一项根本没查」——
+    #   这正是「四种 0 同貌」。列全之后，0 的意思是「**查过且没有**」。
     for k in ("OK", "APPEND", "SHORT", "REWRITE", "NO_ANCHOR"):
-        if cnt.get(k):
-            out.append("| %s | %d |" % (MARK[k], cnt[k]))
+        out.append("| %s | %d |" % (MARK[k], cnt.get(k, 0)))
     out.append("| **合计** | **%d** |" % len(rows))
+    out.append("")
+    out.append("> 表里 **0 天**的意思是「查过、且一天都没有」，不是「这一项没查」："
+               "判定规则本身有牙，证据是下面这一行。")
+    if teeth is not None:
+        _ok, _msgs = teeth
+        out.append("> ")
+        out.append("> **判定规则自证**（生成时实跑）：%s —— %s"
+                   % (("%d 条腿全过" % len(_msgs)) if _ok else "**没通过，本页不可信**",
+                      "；".join("%s %s" % ("✅" if p else "❌", d)
+                                for d, p, _g in _msgs)))
     out.append("")
     out.append("## 逐日明细")
     out.append("")
@@ -180,7 +195,15 @@ def render(rows, man, man_err) -> str:
 
 
 def _fixture(tmp: str):
-    """三条腿：同长改内容 / 截短 / 原样。返回 (ok, 说明列表)。"""
+    """五条腿：原样 / 同长改内容 / 截短 / 追加 / 无锚。返回 (ok, 说明列表)。
+
+    ★ 为什么五条都要有：判定词表有五类，真账本里 `APPEND` 恰好 **0 天**。
+      如果只为前三条写腿，「0 天」就有两种解释 —— 「查过、确实没有」，
+      与「分类器根本没走到那一个分支」。两者在页面上**长得一模一样**
+      （都印 0），所以必须有一条正控把它逼出来，证明那个分支是活的。
+      `NO_ANCHOR` 本来靠真实数据就有 2 天，但腿很便宜，一并补上，
+      让「五类判定全覆盖」这件事可复算，而不是靠观察。
+    """
     lines = [
         json.dumps({"type": "a", "hash": "h1"}, ensure_ascii=False),
         json.dumps({"type": "b", "hash": "h2"}, ensure_ascii=False),
@@ -195,12 +218,17 @@ def _fixture(tmp: str):
     msgs = []
     ok = True
 
+    def _reset():
+        with open(p, "w", encoding="utf-8", newline="\n") as f:
+            f.write("\n".join(lines) + "\n")
+
     # 负控：原样
     v = classify(os.path.getsize(p), last_hash_of(p), anchor)
     ok &= (v == "OK")
     msgs.append(("负控 原样不动 ⇒ OK", v == "OK", v))
 
     # 正控 1：同长度改内容（把 h2 改成 h3 —— 长度一样）
+    _reset()
     txt = open(p, encoding="utf-8").read().replace('"h2"', '"h3"')
     open(p, "w", encoding="utf-8", newline="\n").write(txt)
     v = classify(os.path.getsize(p), last_hash_of(p), anchor)
@@ -208,12 +236,28 @@ def _fixture(tmp: str):
     msgs.append(("正控 同长改内容 ⇒ REWRITE", v == "REWRITE", v))
 
     # 正控 2：截短（删掉最后一行）
+    _reset()
     txt = open(p, encoding="utf-8").read()
     txt = txt.rsplit("\n", 2)[0] + "\n"
     open(p, "w", encoding="utf-8", newline="\n").write(txt)
     v = classify(os.path.getsize(p), last_hash_of(p), anchor)
     ok &= (v == "SHORT")
     msgs.append(("正控 截短 ⇒ SHORT", v == "SHORT", v))
+
+    # 正控 3：追加一行（锚之后又写了新记录 —— 正常状态，必须**不是** SHORT/REWRITE）
+    _reset()
+    with open(p, "a", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps({"type": "c", "hash": "h3"}, ensure_ascii=False) + "\n")
+    v = classify(os.path.getsize(p), last_hash_of(p), anchor)
+    ok &= (v == "APPEND")
+    msgs.append(("正控 追加一行 ⇒ APPEND（真账本 0 天，靠这条腿证明分支是活的）",
+                 v == "APPEND", v))
+
+    # 正控 4：没有锚
+    _reset()
+    v = classify(os.path.getsize(p), last_hash_of(p), None)
+    ok &= (v == "NO_ANCHOR")
+    msgs.append(("正控 无锚 ⇒ NO_ANCHOR", v == "NO_ANCHOR", v))
 
     return ok, msgs
 
@@ -242,24 +286,25 @@ def main() -> int:
     cnt = {}
     for r in rows:
         cnt[r["verdict"]] = cnt.get(r["verdict"], 0) + 1
+    # ★ 五种判定全列，0 天也列 —— 与页面同一口径（页面是本函数的输出，
+    #   两边只印出现的判定的写法会让「查过没有」与「没查」在终端上又同貌一次）。
     for k in ("OK", "APPEND", "SHORT", "REWRITE", "NO_ANCHOR"):
-        if cnt.get(k):
-            print("  %-10s %d 天" % (k, cnt[k]))
+        print("  %-10s %d 天" % (k, cnt.get(k, 0)))
 
-    # ---- 三条腿 ----
+    # ---- 五条腿（词表五类各一条；条数不写死，加了腿文案不会漂）----
     tmp = tempfile.mkdtemp(prefix="b8_fixture_")
     try:
         ok, msgs = _fixture(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-    print("\n[自证] 判定规则的三条腿")
+    print("\n[自证] 判定规则的 %d 条腿" % len(msgs))
     for desc, passed, got in msgs:
         print("  %s %s（得到 %s）" % ("✅" if passed else "❌", desc, got))
     if not ok:
         print("\n判定：❌ 规则没有牙 —— 报告不可信")
         return 1
 
-    page = render(rows, man, man_err)
+    page = render(rows, man, man_err, teeth=(ok, msgs))
     if a.out:
         with open(a.out, "w", encoding="utf-8", newline="\n") as f:
             f.write(page)

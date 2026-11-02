@@ -1,5 +1,5 @@
 {
- "read_at": "2026-11-03 06:08:24",
+ "read_at": "2026-11-03 06:35:32",
  "files": 124,
  "writers": [
   {
@@ -1454,5 +1454,25 @@
  "runtime": 89,
  "guards": 23,
  "readers": 33,
- "parse_errors": []
+ "parse_errors": [],
+ "selftest": {
+  "passed": true,
+  "fails": [],
+  "positive_write_points": 5,
+  "positive_read_points": 3
+ },
+ "forms_taxonomy": [
+  "W1-kwarg",
+  "W2-dictkey",
+  "W3-subscript",
+  "W4-attribute"
+ ],
+ "forms_seen": [
+  "W1-kwarg",
+  "W2-dictkey"
+ ],
+ "forms_zero": [
+  "W3-subscript",
+  "W4-attribute"
+ ]
 }
