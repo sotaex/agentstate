@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 
 REGISTRY_REL = os.path.join("rules", "slots.json")
 
@@ -593,14 +594,51 @@ def _p_day_anchor(ctx):
             "total": len(ctx.days)}
 
 
+_HASH_NORM_CACHE = {}
+
+
+def _hash_normalizer(root):
+    """版本行归一化的**唯一真源在 `host_shield`**；本模块只消费，不自己实现。
+
+    ★ 为什么必须有这一步（2026-11-02 实测）：`hooks/pre_tool_use.py` 是**版本承载件**，
+      写进 `psl/manifest.json` 的是**归一化后**的哈希（`build_package._manifest_hash_of`
+      与 `tools/antinel_verify.py:649` 同法）。本探针原先直接算裸 sha256 ⇒ 与记账值
+      **恒不相等** ⇒ X2b-06「采集器自身被篡改」永久判红。
+      实证：manifest 记 `sha256:5b079c…`（归一化值），裸算 `sha256:ce2cf5…`。
+      那是最吓人的一条结论，一旦恒红，整张槽位表都会被读成噪声。
+
+    ★ 本文件第 3 条设计约束（见模块 docstring）本来就写着「规则哈希一律 import
+      产品模块或读产品产出，不在这里重算」—— 原实现在这一点上违反了它自己的约束。
+      修复不是新发明，是让它遵守已声明的纪律。
+
+    返回 `(norm_bytes|None, bearing_tuple, note)`。拿不到 ⇒ note 非空，调用方必须判
+    undecidable。**不退回裸哈希**：`antinel_verify` 那种"退回裸算并记账"适用于发布
+    验收（宁可假阳性也要有结论），而这里是"有没有被篡改"的告警——假阳性会让人
+    直接关掉告警。
+    """
+    key = os.path.abspath(root)
+    if key in _HASH_NORM_CACHE:
+        return _HASH_NORM_CACHE[key]
+    try:
+        if key not in sys.path:
+            sys.path.insert(0, key)
+        import host_shield as _H
+        got = (_H.norm_version_bytes,
+               tuple(getattr(_H, "VERSION_BEARING_CHAIN_FILES", ())), "")
+    except Exception as e:                                     # noqa: BLE001
+        got = (None, (), "拿不到 host_shield（%r）" % (e,))
+    _HASH_NORM_CACHE[key] = got
+    return got
+
+
 def _p_rules_hash(ctx):
     """X2b-06：采集器自身（hooks + rules）有没有被改过 —— 只查自检钉住的那几个。
 
     ★ 校验对象必须与「谁会被自检钉住」一致：manifest.files 里有、并且属于
       采集器主体的条目。全表比对会把交付文档也拉进来，一次正常改文档就报
       「被篡改」——判据立刻变成噪声。
-    ★ 不在这里重算链/清单口径，只做「文件实际 sha256 vs manifest 记账值」
-      这一件事（口径来自 manifest 本身，铁律 8）。
+    ★ 比对口径**必须与写 manifest 的那一侧同法**（版本承载件先归一化再算），
+      否则恒失配 —— 见 `_hash_normalizer` 的说明。
     """
     if not ctx.manifest:
         return None
@@ -608,6 +646,12 @@ def _p_rules_hash(ctx):
     if not isinstance(files, dict) or not files:
         return None
     import hashlib
+    norm, bearing, note = _hash_normalizer(ctx.root)
+    if norm is None:
+        ctx.why["rules_hash"] = (
+            "%s ⇒ 无法按 manifest 的记账口径比对（版本承载件需归一化，"
+            "裸哈希会让它恒失配）" % note)
+        return None
     watched = [k for k in files
                if k.startswith("hooks/") or k == "rules/default.json"]
     if not watched:
@@ -621,7 +665,10 @@ def _p_rules_hash(ctx):
             continue
         checked += 1
         with open(p, "rb") as f:
-            live = "sha256:" + hashlib.sha256(f.read()).hexdigest()
+            data = f.read()
+        if rel in bearing:
+            data = norm(data)
+        live = "sha256:" + hashlib.sha256(data).hexdigest()
         want = files.get(rel)
         if not str(want).startswith("sha256:"):
             bare = str(want).split(":", 1)[-1]

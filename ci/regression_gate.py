@@ -5834,12 +5834,15 @@ def j_slots_registry_and_evaluator():
     唯一事实来源。**求值器出一处静默错，整份报告就变成精装修的假话**，而它
     不会红、不会报错、只是安静地多算一个「清白」。所以先锁求值器，再谈读数。
 
-    四条腿（缺一条这条判据就是装饰）：
+    六条腿（缺一条这条判据就是装饰）：
       ① 正控：真登记表必须过自己的校验，且分母/条数/四态和自洽
       ② 负控（撤销即红）：把真表变异 5 种，校验器必须**全部**判红
       ③ 空窗口腿：审计目录为空时，窗口型 probe 的槽位**一个都不许**给定论
       ④ 生产者缺席腿：「代码里没这个写入点」必须报 no_producer；
          「有写入点但从未触发」必须与普通 0 区分开
+      ⑤ 四态互斥穷尽
+      ⑥ 哈希口径同源腿（2026-11-02）：X2b-06 比对版本承载件时必须先归一化，
+         否则「采集器被篡改」永久假红 —— 恒红会把整张表读成噪声
     """
     S = load_slots()
 
@@ -5943,9 +5946,55 @@ def j_slots_registry_and_evaluator():
     if int(silent) != 0:
         return False, "④ 「从未触发」的值不是 0：%r" % (silent,)
 
-    return True, ("五腿成立：① 真表 %d 条/%d 登记，分母自洽 ② %d 种变异全部判红 "
+    # ── ⑥ 哈希口径同源腿（2026-11-02）──
+    # X2b-06「采集器自身被篡改」的比对口径必须与**写 manifest 的那一侧同法**：
+    # `hooks/pre_tool_use.py` 是版本承载件，记进 manifest 的是**归一化后**的哈希。
+    # 原实现直接算裸 sha256 ⇒ 与记账值恒不相等 ⇒ 这条最吓人的结论**永久判红**。
+    # 实测：manifest 记 sha256:5b079c…（归一化值），裸算得 sha256:ce2cf5…。
+    # ★ 恒红比漏报更糟：它会让人把整张槽位表读成噪声，连带把真命中一起忽略。
+    #
+    # 三条断言，各自堵一种回退方式：
+    #   ① 归一化函数必须是 host_shield 的**同一个对象**（不是副本/第二实现）
+    #   ② 对「只改版本行」的两段字节，归一化后必须相同、裸哈希必须不同
+    #      —— 证明「用裸哈希必失配」是客观事实，不是我的推断
+    #   ③ `_p_rules_hash` 的函数体里必须真调 `_hash_normalizer`
+    #      —— 防「辅助函数还在，但调用点被改回裸哈希」
+    import host_shield as _HS
+    _norm, _bearing, _note = S._hash_normalizer(str(PKG))
+    if _norm is None:
+        return False, "⑥ 拿不到版本行归一化函数：%s" % _note
+    if _norm is not _HS.norm_version_bytes:
+        return False, ("⑥ 归一化函数不是 host_shield 的那一个 ⇒ 又是一套哈希口径"
+                       "（第一顽症第五形态：判据自造第二套哈希口径）")
+    if "hooks/pre_tool_use.py" not in _bearing:
+        return False, "⑥ 版本承载件清单里没有 hooks/pre_tool_use.py"
+    import re as _re6
+    import hashlib as _hl6
+    _raw = (PKG / "hooks" / "pre_tool_use.py").read_bytes()
+    _m6 = _re6.search(rb'(_ANTINEL_VERSION\s*=\s*)(["\'])([^"\']+)\2', _raw)
+    if not _m6:
+        return False, "⑥ 找不到 `_ANTINEL_VERSION` 赋值行，这条腿量不到东西"
+    _bumped = _raw[:_m6.start(3)] + b"9.9.9-normtest" + _raw[_m6.end(3):]
+    if _norm(_bumped) != _norm(_raw):
+        return False, "⑥ 归一化没有抹掉版本行 ⇒ 一次合法发版会被判成「被篡改」"
+    if _hl6.sha256(_bumped).hexdigest() == _hl6.sha256(_raw).hexdigest():
+        return False, "⑥ 夹具不成立：改版本行后裸哈希竟然没变"
+    import ast as _ast6
+    _tree6 = _ast6.parse((PKG / "scripts" / "slots.py").read_text(encoding="utf-8"))
+    _fn6 = [n for n in _ast6.walk(_tree6)
+            if isinstance(n, _ast6.FunctionDef) and n.name == "_p_rules_hash"]
+    if not _fn6:
+        return False, "⑥ `scripts/slots.py` 里找不到 `_p_rules_hash`"
+    _calls6 = {n.func.id for n in _ast6.walk(_fn6[0])
+               if isinstance(n, _ast6.Call) and isinstance(n.func, _ast6.Name)}
+    if "_hash_normalizer" not in _calls6:
+        return False, ("⑥ `_p_rules_hash` 没有调用 `_hash_normalizer` ⇒ 它又在自己算"
+                       "裸哈希，版本承载件会恒失配（永久假红）")
+
+    return True, ("六腿成立：① 真表 %d 条/%d 登记，分母自洽 ② %d 种变异全部判红 "
                   "③ 空窗口下 %d 条窗口型槽位一律不定论 ④ 死代码报 no_producer、"
-                  "从未触发与普通 0 区分开 ⑤ 四态互斥穷尽"
+                  "从未触发与普通 0 区分开 ⑤ 四态互斥穷尽 "
+                  "⑥ 哈希口径与 manifest 同源（版本行归一化，裸哈希必失配）"
                   % (len(slots), declared_reg, len(muts), len(windowed)))
 
 
