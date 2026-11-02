@@ -1103,6 +1103,39 @@ def _p_self_pid(ctx):
             "started_at": hs.get("sentinel_started_at")}
 
 
+_PRODUCT_VERSION_CACHE = {}
+
+
+def _product_version(root):
+    """当前产品版本 —— 唯一真源是 `hooks/pre_tool_use.py` 的 `_ANTINEL_VERSION`。
+
+    ★ 不用 `psl/manifest.json` 的 `version`：那一个是**发布记录**，按 D-23
+      （鸡生蛋）它会在「代码已升版、manifest 尚未重签」的窗口里落后一版。
+      拿它去比探针版本，会把刚跑出来的新鲜探针误判成过期。
+    """
+    key = os.path.abspath(root)
+    if key in _PRODUCT_VERSION_CACHE:
+        return _PRODUCT_VERSION_CACHE[key]
+    ver = None
+    try:
+        import ast as _ast
+        with open(os.path.join(key, "hooks", "pre_tool_use.py"),
+                  "r", encoding="utf-8") as f:
+            tree = _ast.parse(f.read())
+        for node in tree.body:
+            if (isinstance(node, _ast.Assign) and len(node.targets) == 1
+                    and isinstance(node.targets[0], _ast.Name)
+                    and node.targets[0].id == "_ANTINEL_VERSION"
+                    and isinstance(node.value, _ast.Constant)
+                    and isinstance(node.value.value, str)):
+                ver = node.value.value
+                break
+    except Exception:                                          # noqa: BLE001
+        ver = None
+    _PRODUCT_VERSION_CACHE[key] = ver
+    return ver
+
+
 def _p_self_probe(ctx):
     """XM3-01 / MP1-01 / XM2a-01 共用：产品自带的执法探针结果。
 
@@ -1111,21 +1144,59 @@ def _p_self_probe(ctx):
       而 reason 自己写着 `contract=False legacy=False` —— 那是**探针没接上通道**，
       不是产品不拦。两种解释我们分不开 ⇒ 返回 None（undecidable），
       并把「探针自身可疑」记进 why，让报告说「量具坏了」，而不是说「产品坏了」。
+
+    ★★ 2026-11-02 补两条前置腿（实测踩到，不是假想）：
+
+      ① **证据版本**。实测 12 条探针全部 `antinel_version=0.30.0`，而当前产品是
+         0.63.2 —— 用去年的体检报告回答「今年有没有病」，而且它会给出一条
+         **clean**（因为最后一条恰好 ok=True）。过期证据不是证据。
+
+      ② **不稳定**。实测 11-01 `09:59:19 ok=False` 与 `09:59:20 ok=True`
+         相隔 1 秒，同版本、同探针、结论相反。原实现只取 `pr[-1]` ——
+         那是赌顺序，不是判读。
+
+      这两条不是新规矩：同一个文件的 `_p_self_selftest` 早就写着「跨快照比对
+      才能回答 flaky，只有一份 ⇒ 都返回 None」。这里是同一纪律漏了一处。
     """
     pr = ctx.of_type("enforcement_probe")
     if not pr:
         ctx.why["self_probe"] = "没有任何 enforcement_probe 记录"
         return None
-    gots = {str(r.get("got")) for r in pr}
-    oks = {bool(r.get("ok")) for r in pr}
-    self_suspect = (len(pr) >= 3 and oks == {False} and len(gots) == 1
-                    and "rc=0" in gots.pop())
-    if self_suspect:
+
+    # ── ① 证据必须来自当前产品版本 ──
+    cur = _product_version(ctx.root)
+    vers = sorted({str(r.get("antinel_version") or "?") for r in pr})
+    if cur:
+        fresh = [r for r in pr if str(r.get("antinel_version") or "") == cur]
+        if not fresh:
+            # ★ 两个原因一起写，不许只写版本：MP1-01 / XM2a-01 要的字段
+            #   **即使重跑探针也不会出现**（探针只测 deny 三通道）。只写"证据过期"
+            #   会让读的人以为重跑一次就好了 —— 那是把根因说轻。
+            ctx.why["self_probe"] = (
+                "%d 条执法探针全部来自旧版本（记录版本 %s，当前 %s）⇒ 先重跑探针；"
+                "另：这些探针只跑 pre_tool_use 的 deny 三通道，**不含**依赖可用性"
+                "（MP1-01）与观测权（XM2a-01）探测，即使重跑也不会出现那两个字段"
+                % (len(pr), "/".join(vers), cur))
+            return None
+    else:
+        fresh = pr
+
+    # ── ② 同版本同探针结论不一致 ⇒ 不许只取最后一条 ──
+    oks = {bool(r.get("ok")) for r in fresh}
+    if len(oks) > 1:
+        ctx.why["self_probe"] = (
+            "%d 条探针里 ok 既有 True 又有 False ⇒ 结论不稳定，"
+            "取最后一条等于赌顺序，不足以支撑「通道可用」" % len(fresh))
+        return None
+
+    gots = {str(r.get("got")) for r in fresh}
+    if (len(fresh) >= 3 and oks == {False} and len(gots) == 1
+            and "rc=0" in list(gots)[0]):
         ctx.why["self_probe"] = (
             "%d 条执法探针 ok 全 False 且 got 恒为同一值 ⇒ 探针未建立通道契约，"
-            "结果不可用作产品结论" % len(pr))
+            "结果不可用作产品结论" % len(fresh))
         return None
-    last = pr[-1]
+    last = fresh[-1]
     # ★★ 2026-11-01：这两个键原来写死成 None 占位，于是 evaluate 报
     #   「字段取不到（名字对不上）」—— **原因说错了**。
     #   真相是：执法探针只测 pre_tool_use 的 deny 通道，**从来没有**做过
@@ -1137,7 +1208,7 @@ def _p_self_probe(ctx):
         "（MP1-01）与观测权探测（XM2a-01）⇒ 这两个字段在本出口里根本不存在，"
         "不是名字写错")
     return {"probe_ok": bool(last.get("ok")),
-            "n_probes": len(pr),
+            "n_probes": len(fresh),
             "expected": last.get("expected"), "got": last.get("got")}
 
 

@@ -5834,7 +5834,7 @@ def j_slots_registry_and_evaluator():
     唯一事实来源。**求值器出一处静默错，整份报告就变成精装修的假话**，而它
     不会红、不会报错、只是安静地多算一个「清白」。所以先锁求值器，再谈读数。
 
-    六条腿（缺一条这条判据就是装饰）：
+    七条腿（缺一条这条判据就是装饰）：
       ① 正控：真登记表必须过自己的校验，且分母/条数/四态和自洽
       ② 负控（撤销即红）：把真表变异 5 种，校验器必须**全部**判红
       ③ 空窗口腿：审计目录为空时，窗口型 probe 的槽位**一个都不许**给定论
@@ -5843,6 +5843,9 @@ def j_slots_registry_and_evaluator():
       ⑤ 四态互斥穷尽
       ⑥ 哈希口径同源腿（2026-11-02）：X2b-06 比对版本承载件时必须先归一化，
          否则「采集器被篡改」永久假红 —— 恒红会把整张表读成噪声
+      ⑦ 执法探针口径腿（2026-11-02）：证据版本过期 / 同版本结论不一致 /
+         探针未接通道，一律不定论；但「同版本一致成功」仍须给结论
+         —— 最后半句是防「把量具砸了当修好」
     """
     S = load_slots()
 
@@ -5991,10 +5994,53 @@ def j_slots_registry_and_evaluator():
         return False, ("⑥ `_p_rules_hash` 没有调用 `_hash_normalizer` ⇒ 它又在自己算"
                        "裸哈希，版本承载件会恒失配（永久假红）")
 
-    return True, ("六腿成立：① 真表 %d 条/%d 登记，分母自洽 ② %d 种变异全部判红 "
+    # ── ⑦ 执法探针口径腿（2026-11-02）──
+    # `_p_self_probe` 原先有两处把「不知道」说成「没事」：
+    #   ① 证据版本过期：实测 12 条探针全部 antinel_version=0.30.0，当前 0.63.2，
+    #      而判据只取最后一条（那条恰好 ok=True）⇒ 报 CLEAN。
+    #   ② 结论不稳定：11-01 09:59:19 False 与 09:59:20 True 相隔 1 秒，
+    #      同版本同探针 —— 判据只取 pr[-1]，那是赌顺序。
+    # 四条用例各守一件事；**第 4 条守「修复别把功能关掉」**：永远 undecidable
+    # 也是错，那是把量具砸了当修好。
+    class _ProbeCtx(object):
+        def __init__(self, recs):
+            self.records = recs
+            self.root = str(PKG)
+            self.why = {}
+
+        def of_type(self, t):
+            return [r for r in self.records if r.get("type") == t]
+
+    _pv = S._product_version(str(PKG))
+    if not _pv:
+        return False, "⑦ 取不到产品版本（`_ANTINEL_VERSION`），这条腿量不到东西"
+
+    def _p7(ver, ok, got, n=1):
+        return [{"type": "enforcement_probe", "antinel_version": ver,
+                 "ok": ok, "got": got, "expected": "block"} for _ in range(n)]
+
+    for _nm, _recs, _exp, _kw in (
+            ("证据全部来自旧版本", _p7("0.0.0-old", False, "allow(rc=0)", 3), "none", "旧版本"),
+            ("同版本结论不一致", _p7(_pv, True, "block") + _p7(_pv, False, "allow(rc=0)"),
+             "none", "不稳定"),
+            ("同版本全 False 恒 allow", _p7(_pv, False, "allow(rc=0)", 3), "none", "通道契约"),
+            ("同版本一致成功", _p7(_pv, True, "block", 3), "dict", "")):
+        _pc = _ProbeCtx(_recs)
+        _pr = S._p_self_probe(_pc)
+        _gcd = "dict" if isinstance(_pr, dict) else (
+            "none" if _pr is None else type(_pr).__name__)
+        if _gcd != _exp:
+            return False, ("⑦ %s：拿到 %s，期望 %s ⇒ 探针结论的口径不对"
+                           % (_nm, _gcd, _exp))
+        if _kw and _kw not in str(_pc.why.get("self_probe") or ""):
+            return False, ("⑦ %s：结论对但理由里没有「%s」⇒ 读的人不知道该做什么"
+                           % (_nm, _kw))
+
+    return True, ("七腿成立：① 真表 %d 条/%d 登记，分母自洽 ② %d 种变异全部判红 "
                   "③ 空窗口下 %d 条窗口型槽位一律不定论 ④ 死代码报 no_producer、"
                   "从未触发与普通 0 区分开 ⑤ 四态互斥穷尽 "
                   "⑥ 哈希口径与 manifest 同源（版本行归一化，裸哈希必失配）"
+                  " ⑦ 执法探针：旧版本/混杂/未接通道一律不定论，一致成功仍给结论"
                   % (len(slots), declared_reg, len(muts), len(windowed)))
 
 
@@ -6100,7 +6146,7 @@ def _checks(m):
         ("D-53 硬编码规则说明书必须与代码同源（四条「关不掉」的判定）",
          j_hardcoded_rules_are_truthful),
         # ── 2026-11-01 D-54：46 个槽位接线前，先锁住求值器本身 ──
-        ("D-54 槽位登记表与求值器：正控/负控/空窗口/生产者缺席/四态穷尽",
+        ("D-54 槽位登记表与求值器：正控/负控/空窗口/生产者缺席/四态穷尽/哈希口径/探针口径",
          j_slots_registry_and_evaluator),
     ]
 
