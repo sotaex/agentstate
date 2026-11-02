@@ -35,3 +35,4 @@ console/
 analysis-tmp/
 .zwork/
 .canary/
+output/_d41_mutant_gate.py
