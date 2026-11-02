@@ -6106,6 +6106,57 @@ def _probe_semantics_failures(S):
     if _v is None:
         bad.append("WRITE_SET 在「只有读、没有写」时返回 None ⇒ 只读会话的"
                    "越权观测永远判不了")
+
+    # ── LEDGER_SEQ：一个源出四个字段（S1-02 死循环 / S1-04 步数 / S1-05 重试风暴）──
+    def _seq(sess, digest, tool="Bash"):
+        return {"type": "pre_tool_use", "tool": tool, "session": sess,
+                "content_digest": digest, "ts": "2026-11-02T10:00:00+08:00"}
+
+    def _run(v):
+        """取最长重复次数（`tool+args_digest` 是 (n, what) 元组）。"""
+        if not isinstance(v, dict):
+            return None
+        t = v.get("tool+args_digest")
+        return t[0] if isinstance(t, tuple) and t else None
+
+    # S1-02 正控：同会话 5 次相同动作 ⇒ 5（谓词 repeat=5，>= 即命中）
+    _v = S._p_ledger_seq(_FakeCtx([_seq("s1", "d1") for _ in range(5)]))
+    if _run(_v) != 5:
+        bad.append("S1-02 同会话 5 次相同动作，最长重复却是 %r ⇒ 死循环量不出来"
+                   % (_run(_v),))
+    # S1-02 负控：5 次各不相同的动作 ⇒ 1，不许报死循环
+    _v = S._p_ledger_seq(_FakeCtx([_seq("s1", "d%d" % i) for i in range(5)]))
+    if _run(_v) != 1:
+        bad.append("S1-02 五次各不相同的动作被报成长重复 %r ⇒ 正常会话被报成死循环"
+                   "（判据会被人关掉）" % (_run(_v),))
+    # S1-02 边界：**空 content_digest 不是「相同动作」** —— 空串相等是假重复
+    _v = S._p_ledger_seq(_FakeCtx([_seq("s1", "") for _ in range(5)]))
+    if _run(_v) != 1:
+        bad.append("S1-02 把空 content_digest 当成「相同动作」（最长重复 %r）⇒ "
+                   "空串相等是假重复，实测会造成成片的假死循环" % (_run(_v),))
+    # ★★ 最坏的一种假红：无 session 的记录被并成一个桶。
+    #    实测出现过 38 条无 session、17 个不同 digest，并桶会凭空造出「连续 21 次
+    #    同动作」—— 数字很大，看起来最像真问题。所以这里要求**整段返回 None**，
+    #    而不是给一个看起来合理的数。
+    _v = S._p_ledger_seq(_FakeCtx([_seq(None, "d1") for _ in range(10)]))
+    if _v is not None:
+        bad.append("LEDGER_SEQ 把 10 条无 session 的记录并成了一个会话（返回 %r）⇒ "
+                   "凭空造出「连续 10 次同动作」" % (_v,))
+    # S1-04：单会话步数（谓词 count / session_actions / threshold=2000 / higher_worse）
+    _v = S._p_ledger_seq(_FakeCtx([_seq("s1", "d%d" % i) for i in range(2010)]))
+    if not isinstance(_v, dict) or _v.get("session_actions") != 2010:
+        bad.append("S1-04 单会话 2010 个动作，步数却报 %r ⇒ 预算超限量不出来"
+                   % ((_v or {}).get("session_actions"),))
+    _v = S._p_ledger_seq(_FakeCtx([_seq("s1", "d%d" % i) for i in range(10)]))
+    if isinstance(_v, dict) and _v.get("session_actions") != 10:
+        bad.append("S1-04 10 个动作的会话步数报成 %r ⇒ 步数被多算"
+                   % (_v.get("session_actions"),))
+    # 分桶必须按会话隔离：两个会话各 3 条，最长重复不许跨会话累计
+    _v = S._p_ledger_seq(_FakeCtx(
+        [_seq("s1", "d1") for _ in range(3)] + [_seq("s2", "d1") for _ in range(3)]))
+    if _run(_v) != 3:
+        bad.append("LEDGER_SEQ 跨会话累计重复次数（最长重复 %r，两条会话各 3 次）"
+                   " ⇒ 两个正常会话被拼成一个死循环" % (_run(_v),))
     return bad
 
 
@@ -6161,11 +6212,15 @@ def j_slots_registry_and_evaluator():
          这一腿按**探针**而不是按槽位造语料 —— 13 条命中只用了 7 个探针，
          `WRITE_SET` 一个源就出三个字段，被 Q1-06 / K1-01 / MK1-01 分别消费；
          按槽位各造一份等于把同一件事测三遍，还测不到共用那一段。
-         首批做 WRITE_SET：三个字段各自双向（该非空时非空、该为空时为空），
-         外加「只有读没有写时不返回 None」。六条语料全部经变异验证可翻，
-         未变异时零误报（`output/_p_d54_leg12_mutation.py`）。
-         ★ 剩余 6 个探针（LEDGER_SEQ / CONFIG_HOOKS / EXIT_CODE /
-           ARTIFACT_PATH / CMD_TEXT / LEDGER_ACTIONS）的语料尚未补。
+         已做两组（共 13 条语料，全部经变异验证可翻、未变异时零误报）：
+           · WRITE_SET（守 3 条）：三个字段各自双向（该非空时非空、该为空时
+             为空）＋ 只读会话不返回 None。
+           · LEDGER_SEQ（守 2 条）：最长重复正负 ＋ 空 digest 不算「相同动作」
+             ＋ 无 session 不许并桶（会凭空造出「连续 10 次同动作」）＋
+             步数正负 ＋ 不许跨会话累计重复。
+         变异测试脚本：`output/_p_d54_leg12_mutation.py`。
+         ★ 剩余 5 个探针（CONFIG_HOOKS / EXIT_CODE / ARTIFACT_PATH /
+           CMD_TEXT / LEDGER_ACTIONS）的语料尚未补，覆盖剩下 6 条命中。
     """
     S = load_slots()
 

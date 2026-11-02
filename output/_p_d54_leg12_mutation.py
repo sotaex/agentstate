@@ -1,15 +1,16 @@
 # -*- coding: utf-8 -*-
 """D-54 ⑫ 语料腿的变异测试（只读，不改任何产品文件）。
 
-要证明的事：新加的 WRITE_SET 语料腿**能红**。
-  一条永远不会红的腿与「没有腿」同貌 —— 这是第十四族，今天已经踩过一次
+要证明的事：新加的语料腿**能红**。
+  一条永远不会红的腿与「没有腿」同貌 —— 第十四族，今天已经踩过一次
   （MS1-01 阈值 2000 与写入线 8000，恒真且永不 clean）。
 
-做法：monkey-patch `slots._p_write_set` 成四种错误实现，逐一确认
-`regression_gate._probe_semantics_failures()` 里出现对应的 bad 文案；
-再确认「不改」时一条都不出现。
+做法：monkey-patch 探针成错误实现，逐一确认 `_probe_semantics_failures()`
+里出现对应的 bad 文案；再确认「不改」时一条都不出现。
 
 ★ 每个变异都先断言「真的改成了」，否则「没红」可能只是变异没生效。
+★ 覆盖两个探针：WRITE_SET（守 Q1-06 / K1-01 / MK1-01）、
+  LEDGER_SEQ（守 S1-02 / S1-04）。
 """
 import importlib.util
 import os
@@ -29,16 +30,24 @@ def load(name, rel):
 S = load("slots_probe12", os.path.join("scripts", "slots.py"))
 RG = load("rg_probe12", os.path.join("ci", "regression_gate.py"))
 
-ORIG = S._p_write_set
-
-KEYWORDS = {
+# 每条腿 = (关键字, 断言的文案片段)
+LEGS = {
     "q106_pos": "Q1-06 写入 ci/ 下的文件",
     "q106_neg": "Q1-06 写入普通源码",
     "k101_pos": "K1-01 写入仓外路径",
     "k101_neg": "K1-01 写入仓内文件",
     "mk101_pos": "MK1-01 读取仓外路径",
     "mk101_neg": "MK1-01 读取仓内文件",
+    "s102_pos": "S1-02 同会话 5 次相同动作",
+    "s102_neg": "S1-02 五次各不相同的动作",
+    "s102_empty": "S1-02 把空 content_digest",
+    "s102_nosess": "无 session 的记录并成了一个会话",
+    "s104_pos": "S1-04 单会话 2010 个动作",
+    "s104_neg": "S1-04 10 个动作的会话步数",
+    "s102_cross": "跨会话累计重复次数",
 }
+
+fails = []
 
 
 def run_bad():
@@ -46,87 +55,80 @@ def run_bad():
 
 
 def which(bad):
-    return sorted({k for k, txt in KEYWORDS.items()
-                   if any(txt in b for b in bad)})
+    return sorted({k for k, txt in LEGS.items() if any(txt in b for b in bad)})
 
 
-fails = []
-
-# ── 基线：不改 ⇒ 这六条一条都不该出现 ──
+# ── 基线：不改 ⇒ 一条都不该出现 ──
 base = run_bad()
-hit = which(base)
-print("基线：bad 共 %d 条，命中语料腿关键字 = %r" % (len(base), hit))
-if hit:
-    fails.append("未变异时就有语料腿判红（%r）⇒ 语料本身造错了，先修语料" % (hit,))
+print("基线：bad 共 %d 条，命中语料腿关键字 = %r" % (len(base), which(base)))
+if which(base):
+    fails.append("未变异时就有语料腿判红（%r）⇒ 语料本身造错了，先修语料" % (which(base),))
 
 
-def mutate(name, fn, expect_key):
+def mutate(attr, name, fn, expect_key):
     """植入错误实现，确认「真的改了」且「对应腿红了」。"""
-    S._p_write_set = fn
+    orig = getattr(S, attr)
+    setattr(S, attr, fn)
     try:
-        assert S._p_write_set is not ORIG, "变异没生效（还是原函数）"
+        assert getattr(S, attr) is not orig, "变异没生效（%s 还是原函数）" % attr
         got = which(run_bad())
-        print("  变异 %-22s ⇒ 命中 %r（期望含 %s）" % (name, got, expect_key))
-        if expect_key not in got:
-            fails.append("变异 %s 之后腿没红（只命中 %r）⇒ 这条语料是死的"
-                         % (name, got))
+        ok = expect_key in got
+        print("  %-12s %-22s ⇒ %s（命中 %r）"
+              % (attr, name, "红" if ok else "★没红", got))
+        if not ok:
+            fails.append("变异 %s.%s 之后腿没红（只命中 %r）⇒ 这条语料是死的"
+                         % (attr, name, got))
     finally:
-        S._p_write_set = ORIG
+        setattr(S, attr, orig)
 
 
-print("\n=== 四种变异 ===")
+W = "_p_write_set"
+L = "_p_ledger_seq"
 
-# ① protected_hit 恒空 ⇒ Q1-06 正控腿必须红
-mutate("protected 恒空",
-       lambda ctx: {"protected_hit": [], "out_of_scope": [],
-                    "files_read_by_us": []},
+print("\n=== WRITE_SET 变异（守 Q1-06 / K1-01 / MK1-01）===")
+mutate(W, "protected 恒空",
+       lambda ctx: {"protected_hit": [], "out_of_scope": [], "files_read_by_us": []},
        "q106_pos")
-
-# ② protected_hit 恒非空 ⇒ Q1-06 负控腿必须红
-mutate("protected 恒非空",
-       lambda ctx: {"protected_hit": ["x"], "out_of_scope": [],
-                    "files_read_by_us": []},
+mutate(W, "protected 恒非空",
+       lambda ctx: {"protected_hit": ["x"], "out_of_scope": [], "files_read_by_us": []},
        "q106_neg")
-
-# ③ out_of_scope 恒空 ⇒ K1-01 正控腿必须红
-mutate("out_of_scope 恒空",
-       lambda ctx: {"protected_hit": [], "out_of_scope": [],
-                    "files_read_by_us": []},
+mutate(W, "out_of_scope 恒空",
+       lambda ctx: {"protected_hit": [], "out_of_scope": [], "files_read_by_us": []},
        "k101_pos")
-
-# ④ files_read_by_us 恒非空 ⇒ MK1-01 负控腿必须红
-mutate("files_read 恒非空",
-       lambda ctx: {"protected_hit": [], "out_of_scope": [],
-                    "files_read_by_us": ["x"]},
-       "mk101_neg")
-
-# ⑤ out_of_scope 恒非空 ⇒ K1-01 负控腿必须红
-#   ★ 这条是补的：上面 ③ 只证明了正控（该报时报），没证明负控（不该报时不报）。
-#     只有正控的判据与「恒命中」同貌 —— 每次编辑都报范围漂移，读数的人会关掉它。
-mutate("out_of_scope 恒非空",
-       lambda ctx: {"protected_hit": [], "out_of_scope": ["x"],
-                    "files_read_by_us": []},
+mutate(W, "out_of_scope 恒非空",
+       lambda ctx: {"protected_hit": [], "out_of_scope": ["x"], "files_read_by_us": []},
        "k101_neg")
-
-# ⑥ files_read_by_us 恒空 ⇒ MK1-01 正控腿必须红
-mutate("files_read 恒空",
-       lambda ctx: {"protected_hit": [], "out_of_scope": [],
-                    "files_read_by_us": []},
+mutate(W, "files_read 恒空",
+       lambda ctx: {"protected_hit": [], "out_of_scope": [], "files_read_by_us": []},
        "mk101_pos")
+mutate(W, "files_read 恒非空",
+       lambda ctx: {"protected_hit": [], "out_of_scope": [], "files_read_by_us": ["x"]},
+       "mk101_neg")
+mutate(W, "恒返回 None", lambda ctx: None, "mk101_pos")
 
-# ⑤ 只有读时返回 None ⇒ 边界腿必须红
-S._p_write_set = lambda ctx: None
-try:
-    assert S._p_write_set is not ORIG
-    bad5 = run_bad()
-    got5 = any("只有读、没有写" in b for b in bad5)
-    print("  变异 %-22s ⇒ 边界腿红=%s" % ("恒返回 None", got5))
-    if not got5:
-        fails.append("变异「恒返回 None」之后边界腿没红 ⇒ 那条语料是死的")
-finally:
-    S._p_write_set = ORIG
+print("\n=== LEDGER_SEQ 变异（守 S1-02 / S1-04）===")
 
-assert S._p_write_set is ORIG, "清理失败：函数没还原"
+
+def _seqv(run, steps, dropped=0):
+    return {"tool+args_digest": (run, ("w", "Bash")),
+            "failed_action": (1, None),
+            "session_actions": steps,
+            "max_session": "s1",
+            "sessions": 1,
+            "dropped_no_session": dropped}
+
+
+# 最长重复恒为 1 ⇒ S1-02 正控腿必须红
+mutate(L, "重复次数恒 1", lambda ctx: _seqv(1, 5), "s102_pos")
+# 最长重复恒为 5 ⇒ S1-02 负控 ＋ 空 digest ＋ 跨会话 三条腿都该红
+mutate(L, "重复次数恒 5", lambda ctx: _seqv(5, 5), "s102_neg")
+# 步数恒 0 ⇒ S1-04 正控腿必须红
+mutate(L, "步数恒 0", lambda ctx: _seqv(1, 0), "s104_pos")
+# 步数恒 2010 ⇒ S1-04 负控腿必须红
+mutate(L, "步数恒 2010", lambda ctx: _seqv(1, 2010), "s104_neg")
+# 无 session 时不给 None（并桶）⇒ 最坏假红那条腿必须红
+mutate(L, "无 session 也不返回 None", lambda ctx: _seqv(10, 10, dropped=10),
+       "s102_nosess")
 
 print()
 if fails:
@@ -134,4 +136,4 @@ if fails:
     for f in fails:
         print("   -", f)
     sys.exit(1)
-print("★ PASS：六条语料腿全部能被变异推翻，且未变异时不误报")
+print("★ PASS：两个探针共 13 条腿，全部能被变异推翻，且未变异时零误报")
