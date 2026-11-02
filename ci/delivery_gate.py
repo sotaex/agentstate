@@ -1497,10 +1497,23 @@ def main():
     # ★ 0.48.5：输出**行缓冲**。重定向到文件时 Python 默认整块缓冲 ⇒ 跑 19 分钟的
     #   闸门"一个字都看不到"，只能干等（2026-10-13 实测；我当时改用 `tr` 管道，
     #   结果缓冲更狠）。**进度可见是"不用干等"的前提**，也是效率的一部分。
-    try:
-        sys.stdout.reconfigure(line_buffering=True)
-    except Exception:                                   # noqa: BLE001
-        pass
+    #
+    # ★★ 2026-11-02：**行缓冲之外还必须钉编码**。原来只设 line_buffering，编码仍随
+    #   locale ⇒ 本机控制台是 GBK（936），第 1561 行打印 ✅（U+2705）抛
+    #   UnicodeEncodeError，进程**走不到**「未知 --only 键返回 2」那一行 ⇒
+    #   D-41 报「期望 rc=2 得 rc=1」，输出尾是一段 traceback。
+    #   真因不是判据太严：**产品在普通 Windows 控制台上真的会崩**（含管道/重定向，
+    #   那时 stdout 不是 tty，Python 按 locale 编码）。
+    #   ⇒ 钉成 utf-8 + errors=replace：日志要的是"能读完"，不是"遇生僻字就中止"。
+    #   两级回退 —— 先试「编码＋行缓冲」，流不支持再退回只设行缓冲（保留原行为）。
+    for _st in (sys.stdout, sys.stderr):
+        try:
+            _st.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
+        except Exception:                               # noqa: BLE001
+            try:
+                _st.reconfigure(line_buffering=True)
+            except Exception:                           # noqa: BLE001
+                pass
     ap = argparse.ArgumentParser()
     ap.add_argument("--quick", action="store_true", help="跳过 slow 档（< 10 秒）")
     ap.add_argument("--only", default="", help="只跑指定键（逗号分隔）")

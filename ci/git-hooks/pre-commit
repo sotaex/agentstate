@@ -33,6 +33,23 @@ if [ ! -f "$GATE" ]; then
     exit 0
 fi
 
+# ── 解释器自检（2026-11-02 实测新增）：**把「环境坏了」从「判据红了」里挑出来** ──
+#   实测：本机 `python` 是 Microsoft Store 的占位别名，被禁用时返回 rc=9009 且
+#   **一个字都不打印** ⇒ 下面那段只会印「闸门未通过」，于是"解释器不可用"被读成
+#   "有判据检出缺陷"，排查半小时才发现与判据毫无关系。
+#   ⇒ 三种可能变四种，而第四种（环境坏了）最容易修、却最难看出来，必须先分流。
+#   ★ 代价：每次提交多一次解释器冷启动（本机约 2 秒）。比排查半小时便宜。
+#   ★ 必须放在 GATE 存在性检查**之后**：那是纯 shell，不依赖解释器。
+if ! "$PY" -c "import sys" >/dev/null 2>&1; then
+    echo "" >&2
+    echo "★★ 提交被拦：**闸门解释器不可用**（不是判据红，判据一条都没跑）。" >&2
+    echo "   当前 PY = $PY" >&2
+    echo "   本机 python 可能是 Microsoft Store 占位别名；指定可用解释器后重试：" >&2
+    echo "     ANTINEL_PY=/c/Python311/python.exe git commit ..." >&2
+    echo "   （Windows PowerShell：先 \$env:ANTINEL_PY='C:\\Python311\\python.exe'）" >&2
+    exit 1
+fi
+
 # ── before 基线提醒（§6.1 / 遗留问题 C3）：**出声，但不拦截** ──────────────
 #   §6.1 要求「**开工前**先打 tag `pre-<批次>-<日期>`」——没有 before 就没有
 #   「提升」的证据（实测这一轮没打，before 只能靠旧 commit 的 worktree 补渲染，

@@ -43,6 +43,21 @@ PKG = Path(os.environ.get("ANTINEL_PKG") or Path(__file__).resolve().parent.pare
 HOOK = PKG / "hooks" / "pre_tool_use.py"
 RULES = PKG / "rules" / "default.json"
 
+# ★ 2026-11-02：**钉住自己的输出编码**。本文件会被别的脚本当子进程拉起，而且是
+#   「父进程按 utf-8 解码、子进程按 locale 写」这一类错配的受害方与加害方：
+#     · 加害方 —— `rec()` 会打印 ⇒、✅ 等非 GBK 字符。控制台是 GBK（936）时，
+#       裸跑一次就抛 UnicodeEncodeError，**整个闸门在第 20 条处整段消失**，
+#       得到的是"半截日志"而不是"某条红"（2026-11-02 17:45 实测）。
+#     · 受害方 —— 它按 utf-8 读 `ci/version_check.py` 的输出（:343），
+#       那个子进程也必须自己声明编码，见该文件的同一段。
+#   ⇒ 在**模块级**设置而非 main() 里：本文件既可能被当脚本跑，也可能被 import，
+#     两种路径都要覆盖。errors=replace：日志宁可出现问号，也不许中途崩掉。
+for _st in (sys.stdout, sys.stderr):
+    try:
+        _st.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:                                       # noqa: BLE001
+        pass
+
 # 规避守卫对字面量的拦截：删除动词一律拼接
 DEL = "r" + "m"
 

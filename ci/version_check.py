@@ -57,6 +57,20 @@ from pathlib import Path
 
 PKG = Path(os.environ.get("ANTINEL_PKG") or Path(__file__).resolve().parent.parent)
 
+# ★ 2026-11-02：**钉住自己的输出编码**。本文件的"★ PASS：9 处版本号全部为 X"那一行
+#   是 D-6 判据的**唯一读数口**（`ci/regression_gate.py:343` 用
+#   `subprocess.run(..., encoding="utf-8")` 去读它）。
+#   而子进程的 stdout 是**管道**，不是 tty ⇒ Python 按 locale 编码（本机 GBK/936）
+#   ⇒ 父进程按 utf-8 解出来的是乱码 ⇒ 读不到那行汇总 ⇒ D-6 报
+#   「报绿却读不到汇总行」。**版本号其实九处全对**，错的是这条通道。
+#   ⇒ 自己声明 utf-8。**不能只靠调用方设 PYTHONIOENCODING**：那要求每个调用方
+#     都记得，而"记得"正是本项目反复失效的东西（`-E` 还会把它一并忽略）。
+for _st in (sys.stdout, sys.stderr):
+    try:
+        _st.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:                                       # noqa: BLE001
+        pass
+
 # (显示名, 相对路径, 正则, 分组号)
 # ★ 只在**唯一且必填**的声明处抽取 —— 不要抽注释里的历史标注
 # ★★ 本清单必须 ⊇ tools/antinel_verify.py 的 _VERSION_HARD（判据 4 强制）
