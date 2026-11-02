@@ -1,0 +1,45 @@
+test(D-54): ⑫ 语料腿第三组 —— CONFIG_HOOKS（守 P1-03 配置漂移 / MK1-02 观测权声明缺失）
+
+一、这一组和前两天组的区别
+  前两组（WRITE_SET / LEDGER_SEQ）只读 ctx.records，纯内存造数据。
+  CONFIG_HOOKS 必须读到一份**真实存在**的 settings.json 才会往下算
+  （读不到整段返回 None），所以这一组要造临时配置文件。
+
+  ★ 用本仓统一的 `_TMP.tmpdir()`，不裸用 tempfile ——
+    本仓有过 tempfile 残骸事故（git status 里 560 多个 8 字符随机名）。
+
+二、五条语料
+  P1-03 正控：6 条配置变更记录 ⇒ config_changes=6 > 5（monotonic / threshold=5）
+  P1-03 负控：0 条 ⇒ 0，不许把「没改过」报成漂移
+  MK1-02 正控：没有 hook_registration ⇒ consent_missing=True
+               （这正是本机 2026-11-02 命中的那一条：enabled=true 但无基线）
+  MK1-02 负控：已有基线 ⇒ False，不许恒命中
+  边界：一个配置文件都找不到 ⇒ 整段 None，不许把「没配置」读成「配置正常」
+
+三、MK1-02 这条为什么值得单独造正控
+  它是今天补分诊后定性为 real 的那条：产品 enabled=true，但 state 里没有
+  hook_registration，于是 host_shield.py 的 watchdog 走 `if _reg.get(...)` 恒假、
+  整段静默跳过 —— 「闸门被拔线」这一 breach 子类⑤永远不触发，也不报「我没有基线」。
+  正控腿就是拿这个形状喂进去，确认探针能把它说成 True。
+
+四、变异验证（累计 18 条腿）
+  CONFIG_HOOKS 五条变异：
+    变更次数恒 0        ⇒ p103_pos 红
+    变更次数恒 6        ⇒ p103_neg 红
+    consent 恒 False    ⇒ mk102_pos 红
+    consent 恒 True     ⇒ mk102_neg 红
+    找不到配置也给结论  ⇒ cfg_none 红
+  三个探针 18 条腿全部能被推翻；基线零误报。
+
+五、验证
+  回归闸门：45 条判据 PASS 45 / FAIL 0
+  ci/ 不在 manifest、不在判定覆盖 ⇒ 不需重签、不需重跑判定
+
+六、累计进度（13 条命中的语料覆盖）
+  已覆盖 7 条：Q1-06 / K1-01 / MK1-01（WRITE_SET）、S1-02 / S1-04（LEDGER_SEQ）、
+              P1-03 / MK1-02（CONFIG_HOOKS）
+  另有 2 条早已有腿：SLOT-049（X3-02，在 ⑪ 腿）、SLOT-056（MS1-01，在 ⑨ 腿
+              且槽位号进 ci/）
+  仍缺 4 条：Q1-01（EXIT_CODE）/ Q1-05（ARTIFACT_PATH）/ A1-01（CMD_TEXT）/
+            I1-01（LEDGER_ACTIONS）
+  docstring 已如实标注剩余范围，不假装覆盖完整。

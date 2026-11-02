@@ -45,6 +45,11 @@ LEGS = {
     "s104_pos": "S1-04 单会话 2010 个动作",
     "s104_neg": "S1-04 10 个动作的会话步数",
     "s102_cross": "跨会话累计重复次数",
+    "p103_pos": "P1-03 六条配置变更记录",
+    "p103_neg": "P1-03 没有任何配置变更记录",
+    "mk102_pos": "MK1-02 没有钩子注册基线",
+    "mk102_neg": "MK1-02 已有钩子注册基线",
+    "cfg_none": "CONFIG_HOOKS 找不到任何配置文件",
 }
 
 fails = []
@@ -130,10 +135,30 @@ mutate(L, "步数恒 2010", lambda ctx: _seqv(1, 2010), "s104_neg")
 mutate(L, "无 session 也不返回 None", lambda ctx: _seqv(10, 10, dropped=10),
        "s102_nosess")
 
+print("\n=== CONFIG_HOOKS 变异（守 P1-03 / MK1-02）===")
+C = "_p_config_hooks"
+
+
+def _cfgv(changes=0, consent=False):
+    return {"config_changes": changes, "consent_missing": consent,
+            "hooks_off": False, "n_mcp": 0, "unauthorized_mcp": []}
+
+
+# 变更次数恒 0 ⇒ P1-03 正控腿必须红
+mutate(C, "变更次数恒 0", lambda ctx: _cfgv(0, False), "p103_pos")
+# 变更次数恒 6 ⇒ P1-03 负控腿必须红
+mutate(C, "变更次数恒 6", lambda ctx: _cfgv(6, False), "p103_neg")
+# consent_missing 恒 False ⇒ MK1-02 正控腿必须红
+mutate(C, "consent 恒 False", lambda ctx: _cfgv(0, False), "mk102_pos")
+# consent_missing 恒 True ⇒ MK1-02 负控腿必须红（恒命中与真命中同貌）
+mutate(C, "consent 恒 True", lambda ctx: _cfgv(0, True), "mk102_neg")
+# 找不到配置也返回结论 ⇒ 边界腿必须红
+mutate(C, "找不到配置也给结论", lambda ctx: _cfgv(0, False), "cfg_none")
+
 print()
 if fails:
     print("★ FAIL：%d 条" % len(fails))
     for f in fails:
         print("   -", f)
     sys.exit(1)
-print("★ PASS：两个探针共 13 条腿，全部能被变异推翻，且未变异时零误报")
+print("★ PASS：三个探针共 %d 条腿，全部能被变异推翻，且未变异时零误报" % len(LEGS))

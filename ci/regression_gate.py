@@ -6157,6 +6157,67 @@ def _probe_semantics_failures(S):
     if _run(_v) != 3:
         bad.append("LEDGER_SEQ 跨会话累计重复次数（最长重复 %r，两条会话各 3 次）"
                    " ⇒ 两个正常会话被拼成一个死循环" % (_run(_v),))
+
+    # ── CONFIG_HOOKS：配置面（P1-03 配置漂移 / MK1-02 观测权声明缺失）──
+    #   ★ 这个探针必须读到一份真实 settings.json 才会往下算（读不到整段返回 None），
+    #     所以造一份临时配置。用本仓统一的 `_TMP.tmpdir`，**不裸用 tempfile** ——
+    #     本仓有过 tempfile 残骸事故（git status 里 560 多个 8 字符随机名）。
+    _cfgdir = _TMP.tmpdir(prefix="d54cfg_")
+    _sp = os.path.join(str(_cfgdir), "settings.json")
+    with open(_sp, "w", encoding="utf-8") as _f:
+        json.dump({"hooks": {
+            "PreToolUse": [{"hooks": [{"command": "python hooks/pre_tool_use.py"}]}],
+            "PostToolUse": [{"hooks": [{"command": "python hooks/post_tool_use.py"}]}],
+        }}, _f)
+
+    class _CfgCtx(_PathCtx):
+        """CONFIG_HOOKS 通过 host_shield.hook_registration 找宿主配置文件。
+
+        ★ reg=None 表示「没有钩子注册基线」—— 这正是本机 2026-11-02 的实况
+          （enabled=true 但 state 里没有 hook_registration），也是 MK1-02 命中的原因。
+        """
+
+        def __init__(self, root, records, reg):
+            _PathCtx.__init__(self, root, records)
+            _hs = {"enabled": True}
+            if reg is not None:
+                _hs["hook_registration"] = reg
+            self.host_shield = _hs
+
+    _ok_reg = {"settings_file": _sp, "sha256": "sha256:x"}
+
+    # P1-03 正控：6 条配置变更 ⇒ config_changes=6 > 5（谓词 monotonic / threshold=5）
+    _v = S._p_config_hooks(_CfgCtx(
+        _root, [{"type": "policy_changed", "ts": "2026-11-02T10:00:00+08:00"} for _ in range(6)],
+        _ok_reg))
+    if not isinstance(_v, dict) or _v.get("config_changes") != 6:
+        bad.append("P1-03 六条配置变更记录，config_changes 却报 %r ⇒ 配置漂移量不出来"
+                   % ((_v or {}).get("config_changes"),))
+    # P1-03 负控：0 条 ⇒ 0，不许把「没改过」报成漂移
+    _v = S._p_config_hooks(_CfgCtx(_root, [], _ok_reg))
+    if isinstance(_v, dict) and _v.get("config_changes") != 0:
+        bad.append("P1-03 没有任何配置变更记录，config_changes 却报 %r"
+                   % (_v.get("config_changes"),))
+
+    # MK1-02 正控：没有 hook_registration ⇒ consent_missing=True
+    #   （谓词 exists / consent_missing / match=true —— 这就是本机命中那一条）
+    _v = S._p_config_hooks(_CfgCtx(_root, [], None))
+    if not isinstance(_v, dict) or _v.get("consent_missing") is not True:
+        bad.append("MK1-02 没有钩子注册基线，consent_missing 却是 %r ⇒ "
+                   "「布防了但 watchdog 空转」看不见"
+                   % ((_v or {}).get("consent_missing"),))
+    # MK1-02 负控：已有基线 ⇒ False，不许恒命中
+    _v = S._p_config_hooks(_CfgCtx(_root, [], _ok_reg))
+    if isinstance(_v, dict) and _v.get("consent_missing") is not False:
+        bad.append("MK1-02 已有钩子注册基线，consent_missing 却仍是 %r ⇒ "
+                   "判据恒命中，读的人会把它当噪声关掉"
+                   % (_v.get("consent_missing"),))
+    # 边界：一个配置文件都找不到 ⇒ 整段 None，不许把「没配置」读成「配置正常」
+    _v = S._p_config_hooks(_CfgCtx(
+        os.path.join(_root, "no_such_root_xyz"), [], None))
+    if _v is not None:
+        bad.append("CONFIG_HOOKS 找不到任何配置文件却给了结论（%r）⇒ "
+                   "「没配置」会被读成「配置正常」" % (_v,))
     return bad
 
 
@@ -6212,15 +6273,19 @@ def j_slots_registry_and_evaluator():
          这一腿按**探针**而不是按槽位造语料 —— 13 条命中只用了 7 个探针，
          `WRITE_SET` 一个源就出三个字段，被 Q1-06 / K1-01 / MK1-01 分别消费；
          按槽位各造一份等于把同一件事测三遍，还测不到共用那一段。
-         已做两组（共 13 条语料，全部经变异验证可翻、未变异时零误报）：
-           · WRITE_SET（守 3 条）：三个字段各自双向（该非空时非空、该为空时
-             为空）＋ 只读会话不返回 None。
-           · LEDGER_SEQ（守 2 条）：最长重复正负 ＋ 空 digest 不算「相同动作」
-             ＋ 无 session 不许并桶（会凭空造出「连续 10 次同动作」）＋
-             步数正负 ＋ 不许跨会话累计重复。
-         变异测试脚本：`output/_p_d54_leg12_mutation.py`。
-         ★ 剩余 5 个探针（CONFIG_HOOKS / EXIT_CODE / ARTIFACT_PATH /
-           CMD_TEXT / LEDGER_ACTIONS）的语料尚未补，覆盖剩下 6 条命中。
+         已做三组（共 18 条语料，全部经变异验证可翻、未变异时零误报）：
+           · WRITE_SET（守 3 条命中：Q1-06 验收标准被改 / K1-01 范围漂移 /
+             MK1-01 越权观测）：三个字段各自双向 ＋ 只读会话不返回 None。
+           · LEDGER_SEQ（守 2 条：S1-02 死循环 / S1-04 步数超限）：最长重复
+             正负 ＋ 空 digest 不算「相同动作」＋ 无 session 不许并桶（会凭空
+             造出「连续 10 次同动作」）＋ 步数正负 ＋ 不许跨会话累计重复。
+           · CONFIG_HOOKS（守 2 条：P1-03 配置漂移 / MK1-02 观测权声明缺失）：
+             变更次数正负 ＋ consent_missing 正负 ＋ 一个配置都找不到时必须
+             整段返回 None（不许把「没配置」读成「配置正常」）。
+         变异测试脚本：`output/_p_d54_leg12_mutation.py`（18 条腿逐条推翻）。
+         ★ 剩余 4 个探针（EXIT_CODE / ARTIFACT_PATH / CMD_TEXT /
+           LEDGER_ACTIONS）尚未补语料，对应 Q1-01 / Q1-05 / A1-01 / I1-01
+           四条命中。
     """
     S = load_slots()
 
