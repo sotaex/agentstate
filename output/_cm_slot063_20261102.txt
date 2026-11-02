@@ -1,0 +1,62 @@
+slots(triage): SLOT-063 补分诊 —— 它抓到的是真缺口，只是名字叫错了
+
+一、为什么要动它
+  当前 13 条命中里，只有 SLOT-063（MK1-02 观测权声明缺失）没有 triage 字段，
+  报告里因此长期显示 by_triage.unclassified = 1。这是唯一一个不依赖窗口滑动
+  就能消掉的洞。
+
+二、定性过程（不猜，逐层查证）
+  字段名说的事：consent_missing —— 观测权声明缺失。
+  why_partial 说的事：policy.json 没有 consent 段。
+  探针实现做的事：consent_missing = not bool(hook_registration)
+                    —— 读的是 ~/.antinel/host_shield.json 的 hook_registration 段。
+
+  三处互不相同，所以先把「到底命中了什么」查实：
+    1. 本机状态文件：enabled=true、sentinel_pid=13008、_rev=7177，
+       但顶层键里没有 hook_registration（值为 None）。
+    2. 产品侧写入点只有一处：antinel.py:2209，在 `host-shield enable` 分支里，
+       外层还套着 except: pass。
+    3. 基线数据其实是齐备的：.psl/manifest.json 的 settings_file 指向
+       .qoder/settings.json —— 只是登记动作从没执行过。
+    4. 后果在 host_shield.py:5016：
+         _reg = state.get("hook_registration") or {}
+         if _reg.get("settings_file"):      # ← 空字典 ⇒ 整段静默跳过
+       也就是说「闸门被拔线」这一 breach 子类⑤ 永远不触发，
+       而且不报「我没有基线」。那段注释自己写着 fail-loud 胜过 fail-silent，
+       实现却是 fail-silent。
+
+三、定性结论
+  class = real（不是 defect）
+  理由：命中的事实为真，而且是真的安全缺口 —— 布防后 watchdog 空转且不告。
+        命名不符是另一件事（字段名与实现语义不同），已在 note 里单列，
+        它不改变「这条命中指向真问题」这个判断。
+
+  state = open
+  env   = any
+  理由：任何用户走非 enable 的布防路径都会落到同一状态，不是开发机专属。
+
+四、改动范围
+  只改 rules/slots.json 的 SLOT-063 一条：新增 triage，重写 why_partial
+  （原文只说「policy.json 没有 consent 段」，与探针读 hook_registration 不符，
+   保留会把下一个人引向错误的修法）。
+  谓词、探针、状态一律不动 —— 分诊不改判据。
+
+五、验证（现取现报，读取时刻 2026-11-02 22:48:10）
+  validate_registry：0 问题（分母 82 条自洽）
+  by_triage：{"real": 12, "defect": 0, "calibration": 1, "unclassified": 0}
+  by_env：{"dev": 9, "user": 0, "any": 4}
+  命中 13 ｜ 清白 23 ｜ 判不了 5 ｜ 已登记未采集 5
+  回归闸门：45 条判据 PASS 45 / FAIL 0，D-54 十二腿成立（真表 82 条 / 46 登记）
+  清单重签：需重签 0 / 该登记却没登记 0（rules/slots.json 不在 manifest 内）
+
+六、顺带纠正一个会误导后续工作的口径
+  此前一直说「46 槽」。事实是：槽位真表 82 条，46 是「已登记」
+  （status != unregistered）。所以「接进值守台」要显示的是 82 条，不是 46 条。
+  另：报告印的 not collected = 5，是「已登记里读不到的」；
+  全表未采集是 41 条（另有 36 条从未登记）。两个分母，不能互相顶替。
+
+七、查出来但没修的一件（不在本次范围，待拍）
+  修法二选一：
+    (a) 布防路径补写 hook_registration（antinel.py:2209 那段搬成共用函数）
+    (b) watchdog 在无基线时 fail-loud（与那段注释自己的承诺一致，改动更小）
+  倾向 (b)。未动手：这是产品行为变更，要单独跑一次全量并定版本归属。

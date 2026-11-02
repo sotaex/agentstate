@@ -1481,7 +1481,13 @@
     "match": "true"
    },
    "status": "partial",
-   "why_partial": "「授权记录」要有承载处：policy.json 目前没有 consent 段 ⇒ 要么加字段，要么本槽位记 not_collected"
+   "triage": {
+    "class": "real",
+    "state": "open",
+    "env": "any",
+    "note": "2026-11-02 实测定性：本机 enabled=true 但 state 里没有 hook_registration ⇒ host_shield.py 的 watchdog 走 `if _reg.get(settings_file)` 恒假、整段静默跳过（那段注释自称 fail-loud，实现是 fail-silent）。基线数据其实齐备（.psl/manifest.json 的 settings_file 指向 .qoder/settings.json），只是登记动作从没执行过。另：字段名 consent_missing 与实现 not hook_registration 不是一回事，命名需另行修正；但命中的事实为真，故记 real 不记 defect。"
+   },
+   "why_partial": "钩子注册基线只在 `antinel host-shield enable` 里写（antinel.py:2209，且外层套 except: pass）。本机走的是别的布防路径 ⇒ 从未建立基线 ⇒ 「闸门被拔线」这一 breach 子类⑤永远不触发，而且不报「我没有基线」。修法二选一：布防路径补登记，或 watchdog 在无基线时 fail-loud（倾向后者，与那段注释自己的承诺一致）。"
   },
   {
    "id": "SLOT-064",
