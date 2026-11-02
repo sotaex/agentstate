@@ -1247,13 +1247,13 @@
    "probe": "LEDGER_TS",
    "predicate": {
     "op": "count",
-    "field": "hook_slow_p95_ms",
-    "threshold": 2000,
+    "field": "hook_slow_n",
+    "threshold": 0,
     "direction": "higher_worse"
    },
    "status": "partial",
-   "why_partial": "pre 记录自带 ts，post 也有 ts，「动作到告警」的延迟可以派生；缺的是阈值来源（探针自身有 duration_ms，但那不是告警延迟）",
-   "note": "用 hook_slow.elapsed_ms（钩子端到端，即告警送达延迟）的 p95，2000ms 为上限（宿主超时 10s）。"
+   "why_partial": "2026-11-02 改计数口径：原 p95 判据结构性恒真（写入线 8000 > 阈值 2000），且 n=0 时字段缺失 ⇒ 只有 hit/undecidable 两态、永无 clean。改用条数后可判三态；语料腿在 ci/guard_slots.py 补齐后升 implemented。",
+   "note": "hook_slow 只在钩子端到端 ≥ SLOW_BUDGET_MS(8000ms) 时写入，故 p95 永远 ≥8000；拿它比 2000 是结构性恒真，不是「延迟超标」。本槽改判条数：n>0 ＝ 窗口内至少有一次裁决可能没送达宿主（宿主 10–15s 杀钩子，超时=ALLOW）；n=0 且链读得到 ＝ 本窗口没有慢钩子（clean）；链读不到 ＝ undecidable。若将来把 SLOW_BUDGET_MS 降到 2000 以下，才可改回 p95 口径。"
   },
   {
    "id": "SLOT-057",

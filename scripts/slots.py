@@ -553,15 +553,24 @@ def _hook_latency(ctx):
       两者的差是「命令跑了多久」。实测最大 4102 秒（≈68 分钟的 gate 全量），
       拿它当告警延迟＝把工具执行时长说成告警慢（异质单位做加减，F54）。
       产品自己记了 `hook_slow.elapsed_ms`，用它。
+
+    ★ 为什么 n=0 也要返回字段（2026-11-02）：原先无记录时 `return {}`，
+      字段缺失 ⇒ `_op_count` 判 undecidable ⇒ MS1-01 只有 hit/undecidable
+      两态、**永远不可能 clean**。而「本窗口一条慢钩子都没有」是真实可得的
+      事实（链读到了、就是没有），必须能说出口。链本身读不到的情形由
+      `_p_ledger_ts` 顶端的 `if not ctx.records: return None` 负责，两者不混。
+
+    ★ p95 只在有记录时给：n=0 时给 0 会让人误读成「延迟 0ms」。字段不存在
+      比一个假 0 诚实（0 与不可判不同貌）。
     """
     vals = [r.get("elapsed_ms") for r in ctx.of_type("hook_slow")
             if isinstance(r.get("elapsed_ms"), (int, float))]
-    if not vals:
-        return {}
     vals.sort()
-    return {"hook_slow_max_ms": max(vals),
-            "hook_slow_p95_ms": vals[int(len(vals) * 0.95) - 1 if len(vals) > 1 else 0],
-            "hook_slow_n": len(vals)}
+    out = {"hook_slow_n": len(vals),
+           "hook_slow_max_ms": max(vals) if vals else 0}
+    if vals:
+        out["hook_slow_p95_ms"] = vals[int(len(vals) * 0.95) - 1 if len(vals) > 1 else 0]
+    return out
 
 
 def _p_day_anchor(ctx):
