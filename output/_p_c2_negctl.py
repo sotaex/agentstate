@@ -38,9 +38,9 @@ from datetime import datetime
 from typing import Any, Dict, List, Tuple
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(REPO, "output", "lineC"))
+sys.path.insert(0, os.path.join(REPO, "linec"))
 import watchman as W  # noqa: E402  配对候选/覆盖键都从这里取，不另写一套
-WATCH = os.path.join(REPO, "output", "lineC", "watchman.py")
+WATCH = os.path.join(REPO, "linec", "watchman.py")
 SRC = os.path.join(REPO, ".psl", "audit")
 
 # 基线检测要 >= max(5, window//2) 天前置样本，9 个日文件给 8 天，够。

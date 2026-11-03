@@ -43,9 +43,13 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-LINE_C = os.path.join(HERE, "lineC")
+LINE_C = os.path.join(os.path.dirname(HERE), "linec")
 WATCH = os.path.join(LINE_C, "watchman.py")
-LEDGER = os.path.join(LINE_C, "_watchman_ledger.json")
+#: ★ 2026-11-03：`clue_ledger` 的默认落点已改到中枢（`~/.antinel/lineC/`），
+#:   因为包目录在 `site-packages` 里、升级会被整目录覆盖。本探针要的是一份
+#:   **既有的**节奏账本当夹具起点，所以指向研发区留下的那一份，
+#:   而不是跟着默认值走 —— 跟着默认值走会在安装件里指向一个不存在的文件。
+LEDGER = os.path.join(HERE, "lineC", "_watchman_ledger.json")
 
 
 def run_watch(ledger: str | None, extra: list[str] | None = None) -> str:

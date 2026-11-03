@@ -38,10 +38,11 @@ import tempfile
 from typing import Any, Dict, List, Optional, Tuple
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-LINE_C = HERE if os.path.basename(HERE) == "lineC" else os.path.join(HERE, "lineC")
+LINE_C = HERE
 OUTPUT = os.path.dirname(LINE_C)
 sys.path.insert(0, LINE_C)
 
+import _paths             # noqa: E402
 import evidence as E       # noqa: E402
 import corrections as C    # noqa: E402
 import codeid as CID       # noqa: E402
@@ -287,7 +288,7 @@ def _selfcheck() -> int:
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="交付入口：产出可交出的一页纸报告")
     ap.add_argument("--root", default=".psl/audit")
-    ap.add_argument("--out", default=os.path.join(LINE_C, "out", "报告.html"))
+    ap.add_argument("--out", default=os.path.join(_paths.out_dir(), "报告.html"))
     ap.add_argument("--cap", type=int, default=OP.DEFAULT_CAP)
     ap.add_argument("--selfcheck", action="store_true")
     args = ap.parse_args(argv)

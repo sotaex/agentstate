@@ -83,10 +83,11 @@ import tempfile
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-_OUT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_OUT = os.path.dirname(os.path.abspath(__file__))
 if _OUT not in sys.path:
     sys.path.insert(0, _OUT)
-import _commit                                              # noqa: E402
+import _paths                                              # noqa: E402
+import _commit                                            # noqa: E402
 
 VERSION = 1
 
@@ -152,9 +153,10 @@ DAY_KINDS = frozenset({"anchor", "baseline", "gap"})
 #: 持续状态：day 不属于身份（**仅兜底用**）
 STATUS_KINDS = frozenset({"absent", "verdict", "repeat", "first_seen", "rule_pair"})
 
-DEFAULT_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "_watchman_ledger.json"
-)
+#: ★ 2026-11-03 搬家后**不能**再写包目录（`site-packages` 可能只读，且升级整目录覆盖
+#:   ⇒ 节奏账本会在下一次 `pip install` 时蒸发，而蒸发后每条线索都变 NEW ⇒ 洪泛）。
+#:   改落中枢。研发机要对老账本跑，显式传 `--ledger`。
+DEFAULT_PATH = os.path.join(_paths.state_dir(), "_watchman_ledger.json")
 
 
 # --------------------------------------------------------------------------- 身份
@@ -326,7 +328,7 @@ def save(path: str, ledger: Dict[str, Any]) -> None:
 
     ★ 为什么不再自己写 `.tmp` + `os.replace`：本机 `os.replace` 到已存在目标
       会**偶发** WinError 5（2026-11-03 实测），而账本默认就落在 D 盘仓库目录。
-      重试与退路收在 `output/_commit.py`；这里仍然 raise，不吞异常。
+      重试与退路收在 `output/commit.py`；这里仍然 raise，不吞异常。
     """
     ledger["version"] = VERSION
     ledger["key_version"] = KEY_VERSION

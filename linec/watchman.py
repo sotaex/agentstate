@@ -140,7 +140,7 @@ def _loads(line: str) -> Any:
 #:   ★ 它不报错、不警告，只是**多报** —— 而「多报」在报告里看起来像「检测器很灵敏」。
 #:     这是「配置缺失时的降级」最容易被读成正常的一种形状（铁律 22 的邻域）。
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_REPO = os.path.dirname(os.path.dirname(_HERE))
+_REPO = os.path.dirname(_HERE)
 RULES_PATH = os.path.join(_REPO, "rules", "default.json")
 _ALIAS: Dict[str, str] | None = None
 _CUR_IDS: set = set()

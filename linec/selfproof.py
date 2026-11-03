@@ -42,12 +42,16 @@ import time
 from typing import List, Tuple
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-#: 本文件就在 lineC 里。★ 这里踩过一次：写成 os.path.join(HERE, "lineC") 就会多一层，
+#: 本文件就在包里。★ 这里踩过一次：写成 os.path.join(HERE, "lineC") 就会多一层，
 #: 于是「源文件全部缺失」——而它看起来像「文件真的没了」。同一个错在 redteam.py 也犯过，
 #: 两次都是「凭直觉拼路径」而不是「看一眼 HERE 到底是什么」。
-LINE_C = HERE if os.path.basename(HERE) == "lineC" else os.path.join(HERE, "lineC")
-OUTPUT = os.path.dirname(LINE_C)
+LINE_C = HERE
 sys.path.insert(0, LINE_C)
+
+import _paths  # noqa: E402
+
+#: 研发区（`<repo>/output`）。安装件里是 `None` —— 见下面 `DEV_CHECKS` 的说明。
+OUTPUT = _paths.dev_output_dir()
 
 #: ★ 源文件清单与指纹算法**只有一处真源**：`codeid.py`。
 #: 报告页脚（onepager）与本闸门都从那里取。两份清单一定会漂，而漂了以后
@@ -70,18 +74,6 @@ CHECKS: List[Tuple[str, List[str], int, int]] = [
     ("onepager --selfcheck", [os.path.join(LINE_C, "onepager.py"), "--selfcheck"], 0, 600),
     ("corrections --selfcheck", [os.path.join(LINE_C, "corrections.py"), "--selfcheck"], 0, 600),
     ("report --selfcheck", [os.path.join(LINE_C, "report.py"), "--selfcheck"], 0, 600),
-    ("负控 evidence 19 臂", [os.path.join(OUTPUT, "_p_evid_negctl.py")], 0, 900),
-    ("端到端负控 7 臂", [os.path.join(OUTPUT, "_p_e2e_negctl.py")], 0, 600),
-    # C-2 的 30 臂每臂都复制一份账本做夹具，成本随账本线性涨：
-    # 账本 151MB 时实测 5 臂要 207s ⇒ 30 臂约 1250s。预算给到 2400s。
-    ("负控 C-2 30 臂", [os.path.join(OUTPUT, "_p_c2_negctl.py")], 0, 2400),
-    ("负控 更正端到端 11 臂", [os.path.join(OUTPUT, "_p_corr_e2e.py")], 0, 600),
-    ("红队 C-1 6 臂", [os.path.join(LINE_C, "redteam.py")], 0, 600),
-    ("红队 C-2 5 臂", [os.path.join(LINE_C, "redteam_c2.py")], 0, 900),
-    # ★ 2026-11-02 新增：watchman 降噪负控。它回答的是「少掉的那些，是噪声还是真线索」——
-    #   这个区别在报告上完全看不出来（两者都只是「条数变少」）。缺了这条，
-    #   降噪就等于「以看不见的方式减少输出」，而报告仍然是绿的。
-    ("负控 watchman 3 臂", [os.path.join(OUTPUT, "_p_watchman_negctl.py")], 0, 600),
     # ★ 2026-11-02 新增：线索账本。`--selfcheck` 验函数，`_p_ledger_e2e.py` 验接线。
     #   两者不能互相替代 —— 接入当天两条 bug 都是「函数对、接线错」：
     #   一条把一次性历史事件写成恒红状态，一条在正确静默的同时说了句假话
@@ -100,16 +92,6 @@ CHECKS: List[Tuple[str, List[str], int, int]] = [
     #   （`AN-001→AN-010`）**同时**回来。而它只表现为「多报」——
     #   多报在报告里看起来像「检测器很灵敏」，所以没有任何别的东西会红。
     ("watchman --selfcheck", [os.path.join(LINE_C, "watchman.py"), "--selfcheck"], 0, 300),
-    # 它跑 5 次 watchman，成本随账本线性涨：143s（11-02 上午）→ 464s（同日晚）。
-    ("负控 账本端到端 5 臂", [os.path.join(OUTPUT, "_p_ledger_e2e.py")], 0, 1200),
-    # ★ 2026-11-02 新增：打分器**量具自检**（不是打分）。它只验「还认得金标准」，
-    #   不验「分数达标」—— 后者现在就是红的（精确率 50% < 66.7%），
-    #   把它放进闸门会让闸门永远红，而恒红项等于没有项（铁律 41）。
-    #   为什么必须有这一条：11-02 把 subject 里的规则号换成中文标签后，
-    #   打分器 12 条**全部错配成「金标准外」**，精确率与召回同时归零。
-    #   没有任何东西报警 —— 因为「分数难看」会被当成结论讨论，
-    #   而「量具坏掉」只会被当成事实。这两者在输出上长得一样。
-    ("打分器量具自检 6 臂", [os.path.join(OUTPUT, "_p_score_noise.py"), "--selfcheck"], 0, 600),
     # ★★ 2026-11-03：J1–J6 六条判据进闸门（17 → 23）。
     #   它们此前只在 `output/Antinel·报告形态…（2026-11-02）.md` 里躺着，
     #   而**文档里的判据等于没有判据**：没人跑、红了没人知道、
@@ -127,6 +109,55 @@ CHECKS: List[Tuple[str, List[str], int, int]] = [
     ("J5 守不住不混装", [os.path.join(LINE_C, "jchecks.py"), "--j", "J5"], 0, 300),
     ("J6 措辞单一真源", [os.path.join(LINE_C, "jchecks.py"), "--j", "J6"], 0, 300),
 ]
+
+
+def dev_checks() -> List[Tuple[str, List[str], int, int]]:
+    """研发树专用项：依赖 `<repo>/output/_p_*.py` 与 `redteam*`，**都不随包**。
+
+    ★ 为什么必须与 `CHECKS` 分成两张表（2026-11-03 搬包时定的）
+      装到用户机器上这些文件根本不存在。若留在同一张表里，`subprocess` 拿到
+      一个不存在的路径 ⇒ 这 9 项一起变红，用户看到的是「C 线自检 9 项失败」，
+      而真相是「这 9 项在本机不适用」。
+      **不适用与失败同貌**，正是本仓最忌讳的四种 0 之一。
+    ★ 为什么用函数而不是模块级常量：`OUTPUT` 在安装件里是 `None`，
+      `os.path.join(None, …)` 会在**导入时**抛异常 —— 那就把一个「本机不适用」
+      变成了「模块坏了」，比原来的问题更难查。
+
+    ★ 跳过必须印出来（见 `main`）。「跳过了」与「跑过了」在输出上长得一样，
+      而前者意味着这 9 条判据这一次**没有守任何东西**。
+
+    ★ 为什么 `base = OUTPUT or ""` 而不是提前 `return []`：调用方要知道
+      **跳过了哪几项**，才能把它们印出来。返回空表就只能印一个数字。
+    """
+    base = OUTPUT or ""
+    return [
+        ("负控 evidence 19 臂", [os.path.join(base, "_p_evid_negctl.py")], 0, 900),
+        ("端到端负控 7 臂", [os.path.join(base, "_p_e2e_negctl.py")], 0, 600),
+        # C-2 的 30 臂每臂都复制一份账本做夹具，成本随账本线性涨：
+        # 账本 151MB 时实测 5 臂要 207s ⇒ 30 臂约 1250s。预算给到 2400s。
+        ("负控 C-2 30 臂", [os.path.join(base, "_p_c2_negctl.py")], 0, 2400),
+        ("负控 更正端到端 11 臂", [os.path.join(base, "_p_corr_e2e.py")], 0, 600),
+        # ★ 红队留在研发区原址（`output/lineC/`）：它们是自足的研发工具，
+        #   不进包，也不依赖包里任何一个模块。搬到 `linec/` 只会让它们
+        #   被 setuptools 当包内容打包进去 —— 而 A1 守卫会当场拦住。
+        ("红队 C-1 6 臂", [os.path.join(base, "lineC", "redteam.py")], 0, 600),
+        ("红队 C-2 5 臂", [os.path.join(base, "lineC", "redteam_c2.py")], 0, 900),
+        # ★ 2026-11-02 新增：watchman 降噪负控。它回答的是「少掉的那些，是噪声还是真线索」——
+        #   这个区别在报告上完全看不出来（两者都只是「条数变少」）。缺了这条，
+        #   降噪就等于「以看不见的方式减少输出」，而报告仍然是绿的。
+        ("负控 watchman 3 臂", [os.path.join(base, "_p_watchman_negctl.py")], 0, 600),
+        # 它跑 5 次 watchman，成本随账本线性涨：143s（11-02 上午）→ 464s（同日晚）。
+        ("负控 账本端到端 5 臂", [os.path.join(base, "_p_ledger_e2e.py")], 0, 1200),
+        # ★ 2026-11-02 新增：打分器**量具自检**（不是打分）。它只验「还认得金标准」，
+        #   不验「分数达标」—— 后者现在就是红的（精确率 50% < 66.7%），
+        #   把它放进闸门会让闸门永远红，而恒红项等于没有项（铁律 41）。
+        #   为什么必须有这一条：11-02 把 subject 里的规则号换成中文标签后，
+        #   打分器 12 条**全部错配成「金标准外」**，精确率与召回同时归零。
+        #   没有任何东西报警 —— 因为「分数难看」会被当成结论讨论，
+        #   而「量具坏掉」只会被当成事实。这两者在输出上长得一样。
+        ("打分器量具自检 6 臂",
+         [os.path.join(base, "_p_score_noise.py"), "--selfcheck"], 0, 600),
+    ]
 
 
 def main() -> int:
@@ -153,10 +184,21 @@ def main() -> int:
     print("  ⇒ 它回答「这份结论是哪份代码算的」，**不回答「结论对不对」**。")
 
     # ---- 2 全部检查 ----
+    dev = dev_checks()
+    items = list(CHECKS) + (dev if OUTPUT else [])
+    if not OUTPUT:
+        # ★ 必须逐项印出来。「跳过 9 项」这一个数字不足以让人知道**哪 9 条这一次
+        #   没有守任何东西**，而「跳过了」与「跑过了」在观感上完全一样。
+        print("\n[跳过] 研发树专用 %d 项 —— 本机没有 output/_p_*.py 与 redteam*："
+              % len(dev))
+        for name, _c, _w, _t in dev:
+            print("        · %s（本机不适用，未跑）" % name)
+        print("   ⇒ 这 %d 项这一次**没有守任何东西**。要在研发树上验，"
+              "请在有 output/ 的仓库根跑。" % len(dev))
     print("\n[检查] 逐项跑（全部跑完再报，不中途停）：")
     fails: List[Tuple[str, int, str, List[str]]] = []
     timeouts: List[Tuple[str, int]] = []
-    for name, cmd, want, tmo in CHECKS:
+    for name, cmd, want, tmo in items:
         full = [sys.executable, "-E", "-X", "utf8"] + cmd
         t = time.time()
         timed_out = False
@@ -192,9 +234,12 @@ def main() -> int:
 
     # ---- 3 汇总 ----
     print("\n" + "-" * 78)
-    n_ok = len(CHECKS) - len(fails) - len(timeouts)
+    n_ok = len(items) - len(fails) - len(timeouts)
     print("合计 %d 项：通过 %d ／ 失败 %d ／ 超时 %d ｜ 总耗时 %.1fs ｜ 组指纹 %s"
-          % (len(CHECKS), n_ok, len(fails), len(timeouts), time.time() - t0, gid[:16]))
+          % (len(items), n_ok, len(fails), len(timeouts), time.time() - t0, gid[:16]))
+    if not OUTPUT:
+        print("（另有研发树专用 %d 项未跑，见上「跳过」段 —— 它们不计入上面的分母）"
+              % len(dev))
     if timeouts:
         # 超时**不算通过**，也不许算失败：它没给出结论。单独印，并给出该给的预算。
         print("\n超时项（**没量完，不是量出坏结果**）：")

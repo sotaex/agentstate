@@ -19,7 +19,7 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-LINE_C = os.path.join(HERE, "lineC")
+LINE_C = os.path.join(os.path.dirname(HERE), "linec")
 sys.path.insert(0, LINE_C)
 
 import evidence as E          # noqa: E402

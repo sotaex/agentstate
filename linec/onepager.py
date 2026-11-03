@@ -51,7 +51,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-_OUT = os.path.dirname(HERE)
+_OUT = HERE
 if _OUT not in sys.path:
     sys.path.insert(0, _OUT)
 

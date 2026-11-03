@@ -48,18 +48,29 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 #: ★ 本文件就在 lineC 里。这个坑踩过两次（redteam.py／selfproof.py）：
 #: 写成 os.path.join(HERE, "lineC") 会多一层，于是「源文件全部缺失」——
 #: 而它看起来像「文件真的没了」。
-LINE_C = HERE if os.path.basename(HERE) == "lineC" else os.path.join(HERE, "lineC")
+LINE_C = HERE
 OUTPUT = os.path.dirname(LINE_C)
 
 #: 参与结论计算的源文件。顺序即报告里的显示顺序。
 #:
 #: ★ 只列**会进入结论**的文件。把一次性量具（`output/_p_*.py`）算进来会让
 #:   指纹随量具变动而漂，那指纹就不再是「结论的来源」了。
-#: ★ `redteam.py` 进来是因为它决定了报告里那句「我们只能说这么多」是否仍然
-#:   成立——它证明的是边界，而边界也是结论的一部分。
+#: ★ 2026-11-03 搬进 `linec` 包时重列。判据仍是同一条：**它会不会改变报告上的
+#:   数字或措辞**。三个变化：
+#:   · 摘掉 `auditor.py` / `redteam.py` / `redteam_c2.py` —— 它们不在这条运行时链上，
+#:     也不随包。把它们留在清单里会让用户侧的「源文件齐全」检查**永远差三件**，
+#:     而差三件与「装坏了」同貌。
+#:   · 补 `_paths.py` —— 它决定**读哪个账本**。读错账本，报告上每个数都变，
+#:     却仍然是「看起来正常」的数。这是最该被指纹保护的一份。
+#:   · 补 `nightwatch.py` / `_commit.py` —— 前者决定「跑不跑」，后者决定「写不写得下去」。
+#:     一个决定报告存不存在，一个决定它会不会半截消失。
 SOURCES: List[str] = [
+    os.path.join(LINE_C, "_paths.py"),
+    os.path.join(LINE_C, "_commit.py"),
     os.path.join(LINE_C, "codeid.py"),
     os.path.join(LINE_C, "tsnorm.py"),
+    # ★ `auditor.py` 是**运行时**的一部分，不是研发工具：报告的「账本自洽」
+    #   整条腿由它提供（A1/A2/A3 三档）。它不在包里 ⇒ 用户侧永远少一条腿。
     os.path.join(LINE_C, "auditor.py"),
     os.path.join(LINE_C, "watchman.py"),
     # ★ 2026-11-02 深夜补两个漏项。判据只有一条：**它会不会改变报告上的数字或措辞**。
@@ -80,8 +91,7 @@ SOURCES: List[str] = [
     os.path.join(LINE_C, "onepager.py"),
     os.path.join(LINE_C, "report.py"),
     os.path.join(LINE_C, "corrections.py"),
-    os.path.join(LINE_C, "redteam.py"),
-    os.path.join(LINE_C, "redteam_c2.py"),
+    os.path.join(LINE_C, "nightwatch.py"),
 ]
 
 

@@ -62,7 +62,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_ROOT = os.path.dirname(os.path.dirname(_HERE))  # ← 仓库根（lineC 的上一级）
+_ROOT = os.path.dirname(_HERE)  # ← 仓库根（lineC 的上一级）
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 if os.path.join(_ROOT, "hooks") not in sys.path:

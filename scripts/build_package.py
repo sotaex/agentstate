@@ -295,12 +295,24 @@ py-modules = ["antinel", "audit_chain", "session_dna", "strings",
               # ★ 0.55.0 状态机改造（A/B 双线汇合）：四个新模块。
               #   与仓库 pyproject.toml 及 build() 的 root_mod 清单逐字一致。
               "facts", "situation", "state_registry", "sidecar"]
-packages = ["hooks", "scripts", "tools", "rules", "psl", "assets", "challenge"]
+# ★ 0.64.0：`linec`（C 线的运行时链）进包。
+#   为什么必须进：C 线此前住在 `output/lineC/`，而 `output/` 不随包
+#   ⇒ 装到用户机器上**没有任何组件会启动它**，主动性三要件的第三条
+#   （系统自己发起）在产品里一次都不成立。一个只在人手动敲命令时才有输出的
+#   东西是工具，不是主动性。搬家实测：`linec/nightwatch.py --selfcheck` 十一臂
+#   全过、包内 15 项自检全过、隔离中枢端到端跑通。
+#   与它同批：`output/` 里的研发工具（`auditor`／`redteam*`／`_p_*` 探针）**不进包**。
+packages = ["hooks", "scripts", "tools", "rules", "psl", "assets", "challenge",
+            "linec"]
 
 [tool.setuptools.package-data]
 rules = ["*.json"]
 psl = ["*.json", "*.md"]
 hooks = ["*.py"]
+# ★ 0.64.0：C 线的两个基线（`benign.json` / `noise_baseline.json`）。
+#   它们不是配置，是判据的**常量输入**：缺了以后降噪会退回「什么都报」或
+#   「什么都不报」，而两种都只表现为「报告变了」，不会报错。
+linec = ["*.json"]
 # ★ 0.35.0 Antinel 监理静态资源。实测（_p9_wheeltest 构建中间产物
 #   `build/bdist.*/wheel/assets/`）：**这几条 glob 本身就够**，assets 下 28 个静态
 #   文件全进 wheel（icons 20 + logo 5 mp4 + logo.svg + antinel.ico + sounds 1）。

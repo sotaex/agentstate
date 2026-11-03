@@ -35,7 +35,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-LINE_C = os.path.join(HERE, "lineC")
+LINE_C = os.path.join(os.path.dirname(HERE), "linec")
 BASELINE = os.path.join(LINE_C, "noise_baseline.json")
 WATCHMAN = os.path.join(LINE_C, "watchman.py")
 

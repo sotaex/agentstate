@@ -40,7 +40,7 @@ from datetime import datetime, timedelta
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-LINE_C = os.path.join(HERE, "lineC")
+LINE_C = os.path.join(os.path.dirname(HERE), "linec")
 WATCHMAN = os.path.join(LINE_C, "watchman.py")
 FIXTURE = os.path.join(HERE, "_p_fixture_nc")
 

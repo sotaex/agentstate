@@ -54,8 +54,14 @@ LINE_C = HERE if os.path.basename(HERE) == "lineC" else os.path.join(HERE, "line
 OUTPUT = os.path.dirname(LINE_C)
 REPO = os.path.dirname(OUTPUT)
 SRC = os.path.join(REPO, ".psl", "audit")
-WATCH = os.path.join(LINE_C, "watchman.py")
-AUDIT = os.path.join(LINE_C, "auditor.py")
+#: ★ 2026-11-03：`watchman.py` 搬进了仓库根的 `linec/` 包（要随包），
+#:   而 `auditor.py` 是研发工具、留在 `output/lineC/`。
+#:   两者不再同目录 —— 所以这里必须分成两个变量。
+#:   只改一处（比如把 LINE_C 指到 linec）会让 `auditor.py` 跟着找不到，
+#:   而报出来的是「干净副本就跑不动」，看不出是路径问题。
+RUNTIME = os.path.abspath(os.path.join(HERE, os.pardir, os.pardir, "linec"))
+WATCH = os.path.join(RUNTIME, "watchman.py")
+AUDIT = os.path.join(RUNTIME, "auditor.py")
 
 #: 副本天数。要 >= absent 的基线窗口（7 天），否则「删得比窗口长」这件事
 #: 根本演示不出来 —— 而那条正是 R6 的整个论点。

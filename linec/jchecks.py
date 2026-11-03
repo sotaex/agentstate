@@ -51,7 +51,7 @@ import tempfile
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-LINE_C = HERE if os.path.basename(HERE) == "lineC" else os.path.join(HERE, "lineC")
+LINE_C = HERE
 OUTPUT = os.path.dirname(LINE_C)
 if LINE_C not in sys.path:
     sys.path.insert(0, LINE_C)

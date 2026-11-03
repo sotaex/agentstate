@@ -31,8 +31,13 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-LINEC = os.path.join(HERE, "lineC")
+LINEC = os.path.join(os.path.dirname(HERE), "linec")
 sys.path.insert(0, LINEC)
+#: ★ 2026-11-03：`auditor` 是研发工具、留在 `output/lineC/`（不随包），
+#:   而 `watchman`/`evidence` 等搬进了 `linec/`。两条路径都要在，
+#:   少一条的表现是 `ModuleNotFoundError`，但报出来的位置会指向
+#:   「端到端负控跑不动」，看起来像被测对象坏了。
+sys.path.insert(0, os.path.join(HERE, "lineC"))
 
 import auditor as A  # noqa: E402
 import evidence as E  # noqa: E402

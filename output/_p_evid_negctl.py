@@ -25,7 +25,7 @@ import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-LINEC = os.path.join(HERE, "lineC")
+LINEC = os.path.join(os.path.dirname(HERE), "linec")
 sys.path.insert(0, LINEC)
 
 import evidence as E  # noqa: E402

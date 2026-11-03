@@ -42,17 +42,23 @@ import time
 from datetime import datetime
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_REPO = os.path.dirname(os.path.dirname(_HERE))
-_OUT = os.path.dirname(_HERE)
+_REPO = os.path.dirname(_HERE)
+_OUT = _HERE
 if _OUT not in sys.path:
     sys.path.insert(0, _OUT)
-import _commit                                              # noqa: E402
+import _commit                                            # noqa: E402
+import _paths                                             # noqa: E402
 
 WATCHMAN = os.path.join(_HERE, "watchman.py")
-# ★ 默认账本用**仓根绝对路径**，不用相对 cwd。
+# ★ 默认账本**不再**用「仓根相对路径」。
 #   2026-11-03 实测踩过：从 output/lineC 跑与从仓根跑读到的是两个不同的目录，
 #   而两者的输出都是「查了，没有」—— 静默降级只表现为「多报/少报」。
-DEFAULT_ROOT = os.path.join(_REPO, ".psl", "audit")
+#   ★ 同日搬进 `linec` 包后，「仓根」这个概念在安装件里不存在（上两层是 Lib），
+#   沿用旧写法会指向 `Lib/.psl/audit`：一个永远不存在、因而**永远报「查了没有」**
+#   的目录。所以改走产品侧口径 `_paths.audit_root()`（中枢 rollup）。
+#   后台巡检本来就该用「没有当前项目」的视角 —— 它在 09:00 自己醒来。
+#   要对某个项目的账本跑，显式传 `--root`，不要改这里的默认值。
+DEFAULT_ROOT = _paths.audit_root()
 
 DEFAULT_AT = "09:00"          # 与设计方案书一致
 DEFAULT_INTERVAL = 600        # 常驻时多久判一次（秒）
@@ -68,26 +74,12 @@ RESULT_UNDECIDABLE = "undecidable"
 def hub_linec_dir() -> str:
     """状态目录：**复用产品侧唯一真源**，不自造第二个中枢。
 
-    产品侧的家目录只有一处定义（`host_shield._hub_dir()`：`ANTINEL_HUB_DIR` 或
-    `~/.antinel`）。若这里另写一遍同样的表达式，就成了两份实现 ——
-    沙箱判据设了 `ANTINEL_HUB_DIR` 而这里不认，会出现「两个中枢」，
-    而且两边各写一半状态，谁都不完整。
-
-    ★ 兜底只在产品模块导入失败时生效，且兜底表达式与被复用的那一处**逐字相同**。
-      它不是「另一份定义」，是同一句话的降级副本；导入成功时永不执行。
+    ★ 2026-11-03 搬家时收敛：这里原本自己 try-import `host_shield` 再抄一遍
+      `ANTINEL_HUB_DIR` 兜底表达式。两处实现的风险是——沙箱设了
+      `ANTINEL_HUB_DIR` 而只改了一处，就会出「两个中枢」，两边各写一半状态，
+      谁都不完整。现在只在 `_paths.hub_dir()` 里算一次。
     """
-    base = None
-    try:
-        if _REPO not in sys.path:
-            sys.path.insert(0, _REPO)
-        import host_shield as _HS  # noqa: PLC0415  产品侧，延迟导入
-        base = _HS._hub_dir()
-    except Exception:                                   # noqa: BLE001
-        base = None
-    if not base:
-        base = (os.environ.get("ANTINEL_HUB_DIR")
-                or os.path.join(os.path.expanduser("~"), ".antinel"))
-    return os.path.join(base, "lineC")
+    return _paths.state_dir()
 
 
 def default_state_path() -> str:

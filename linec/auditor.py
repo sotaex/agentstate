@@ -57,7 +57,14 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 # ts 归一唯一实现（入口唯一性）：不许在本文件里再写一遍解析。
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+#: ★ 2026-11-03：`auditor.py` **跟着包走**（它不是研发工具）。
+#:   证据：`report` 的三条腿里「账本自洽」那一条整条由它提供 ——
+#:   它不在包里，用户装完就是「三条腿只有两条」，而少掉的那条会以
+#:   `ran: false` 出现在 sidecar 的 `legs` 里，报告上只表现为
+#:   「不可判 +1」，不会说「缺了一条腿」。
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
 import tsnorm  # noqa: E402
 
 _DAY_FILE = re.compile(r"^(\d{4}-\d{2}-\d{2})\.jsonl$")

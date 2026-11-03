@@ -45,7 +45,10 @@ from typing import Any, Dict, List, Optional, Tuple
 HERE = os.path.dirname(os.path.abspath(__file__))
 #: 本文件就在 lineC 里；但也允许被挪到 output/ 下跑，所以按目录名判断一次。
 LINE_C = HERE if os.path.basename(HERE) == "lineC" else os.path.join(HERE, "lineC")
-AUDITOR = os.path.join(LINE_C, "auditor.py")
+#: ★ 2026-11-03：`auditor.py` 跟着包搬进了仓库根的 `linec/`（它是运行时的一部分，
+#:   报告的「账本自洽」整条腿由它提供），本文件是研发工具、留在原地。
+_runtime = os.path.abspath(os.path.join(HERE, os.pardir, os.pardir, "linec"))
+AUDITOR = os.path.join(_runtime, "auditor.py")
 
 
 # --------------------------------------------------------------------------- 账本构造
