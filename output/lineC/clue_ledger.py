@@ -83,6 +83,11 @@ import tempfile
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+_OUT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _OUT not in sys.path:
+    sys.path.insert(0, _OUT)
+import _commit                                              # noqa: E402
+
 VERSION = 1
 
 #: 身份规则的版本。**改 `clue_key` 或任何检测器的 `key=` 就要 +1。**
@@ -316,15 +321,13 @@ def load(path: str = DEFAULT_PATH) -> Dict[str, Any]:
 
 
 def save(path: str, ledger: Dict[str, Any]) -> None:
-    """原子写。先写 `.tmp` 再 `os.replace` —— 中途断电不会留下半个 JSON。
+    """落盘并回读。半写的账本比没有账本更坏：它会被 `load` 读成「账本坏了」
+    ⇒ 所有线索变 NEW ⇒ 洪泛。
 
-    半个 JSON 会被 `load` 读成「账本坏了」⇒ 所有线索变 NEW ⇒ 洪泛。
-    这正是「让报告变绿」与「抹掉真实偏离」是同一个动作的反面：
-    让文件坏得干净，比让它半好半坏安全。
+    ★ 为什么不再自己写 `.tmp` + `os.replace`：本机 `os.replace` 到已存在目标
+      会**偶发** WinError 5（2026-11-03 实测），而账本默认就落在 D 盘仓库目录。
+      重试与退路收在 `output/_commit.py`；这里仍然 raise，不吞异常。
     """
-    d = os.path.dirname(os.path.abspath(path))
-    if d and not os.path.isdir(d):
-        os.makedirs(d, exist_ok=True)
     ledger["version"] = VERSION
     ledger["key_version"] = KEY_VERSION
     ledger["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -332,17 +335,7 @@ def save(path: str, ledger: Dict[str, Any]) -> None:
     # notice 是这一次性事件（写进新 key_version 后就不该再出现）。
     ledger.pop("ledger_error", None)
     ledger.pop("ledger_notice", None)
-    fd, tmp = tempfile.mkstemp(prefix=".ledger-", suffix=".tmp", dir=d)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
-            json.dump(ledger, fh, ensure_ascii=False, indent=1, sort_keys=True)
-        os.replace(tmp, path)
-    except Exception:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    _commit.write_json(path, ledger)
 
 
 # --------------------------------------------------------------------------- 判定

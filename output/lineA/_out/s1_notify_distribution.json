@@ -1,16 +1,16 @@
 {
- "audit_dir": "D:\\psl\\poc\\antinel-security\\.psl\\audit",
+ "audit_dir": "D:\\psl\\poc\\antinel-security\\.worktrees\\notify-l1\\.psl\\audit",
  "bad_json": 0,
  "contradictions": {
   "action=alert + decision=allow": {
    "gate": 0,
-   "n": 1063,
-   "none": 1005,
+   "n": 1062,
+   "none": 1004,
    "toast": 58
   },
   "action=block + decision=deny": {
-   "gate": 221,
-   "n": 221,
+   "gate": 220,
+   "n": 220,
    "none": 0,
    "toast": 0
   }
@@ -24,24 +24,24 @@
  "n_raise": 0,
  "non_event": {
   "notice_budget_merged": 163,
-  "notice_budget_window_closed": 842,
-  "pre_tool_use_summary": 1267,
+  "notice_budget_window_closed": 841,
+  "pre_tool_use_summary": 1266,
   "session_dna": 33,
-  "usage_delta": 46349
+  "usage_delta": 46149
  },
  "notify": {
-  "gate": 1676,
-  "none": 161159,
+  "gate": 1672,
+  "none": 160519,
   "other": 0,
-  "sum": 185243,
+  "sum": 184520,
   "sum_equals_records": true,
-  "toast": 22408
+  "toast": 22329
  },
  "pairs": {
   "None|None": {
    "gate": 0,
-   "n": 46382,
-   "none": 46382,
+   "n": 46182,
+   "none": 46182,
    "toast": 0
   },
   "None|alert": {
@@ -52,19 +52,19 @@
   },
   "None|allow": {
    "gate": 0,
-   "n": 8350,
-   "none": 8216,
-   "toast": 134
+   "n": 8328,
+   "none": 8199,
+   "toast": 129
   },
   "None|block": {
    "gate": 0,
-   "n": 404,
-   "none": 404,
+   "n": 403,
+   "none": 403,
    "toast": 0
   },
   "None|deny": {
-   "gate": 1033,
-   "n": 1033,
+   "gate": 1031,
+   "n": 1031,
    "none": 0,
    "toast": 0
   },
@@ -76,14 +76,14 @@
   },
   "alert|alert": {
    "gate": 0,
-   "n": 13356,
+   "n": 13283,
    "none": 0,
-   "toast": 13356
+   "toast": 13283
   },
   "alert|allow": {
    "gate": 0,
-   "n": 1063,
-   "none": 1005,
+   "n": 1062,
+   "none": 1004,
    "toast": 58
   },
   "alert|config_fallback": {
@@ -94,9 +94,9 @@
   },
   "allow|allow": {
    "gate": 0,
-   "n": 52717,
-   "none": 52338,
-   "toast": 379
+   "n": 52504,
+   "none": 52126,
+   "toast": 378
   },
   "allow|config_refresh": {
    "gate": 0,
@@ -105,31 +105,31 @@
    "toast": 0
   },
   "block|block": {
-   "gate": 422,
-   "n": 422,
+   "gate": 421,
+   "n": 421,
    "none": 0,
    "toast": 0
   },
   "block|deny": {
-   "gate": 221,
-   "n": 221,
+   "gate": 220,
+   "n": 220,
    "none": 0,
    "toast": 0
   },
   "record|None": {
    "gate": 0,
-   "n": 51936,
-   "none": 51936,
+   "n": 51727,
+   "none": 51727,
    "toast": 0
   }
  },
  "policy": "D:\\psl\\poc\\antinel-security\\.worktrees\\notify-l1\\hooks\\notify_policy.py",
  "raise_samples": [],
- "read_at": "2026-11-03 06:28:39",
- "records": 185243,
+ "read_at": "2026-11-03 08:04:56",
+ "records": 184520,
  "top_notify_by_type": [
   {
-   "n": 12273,
+   "n": 12200,
    "notify": "toast",
    "type": "dst02_bash_path_suspect"
   },
@@ -144,12 +144,12 @@
    "type": "pre_tool_use"
   },
   {
-   "n": 422,
+   "n": 421,
    "notify": "gate",
    "type": "pre_tool_use"
   },
   {
-   "n": 358,
+   "n": 357,
    "notify": "toast",
    "type": "exclude_patterns_allow"
   },
@@ -164,7 +164,7 @@
    "type": "host_shield_tamper"
   },
   {
-   "n": 221,
+   "n": 220,
    "notify": "gate",
    "type": "command_deletion_permission"
   },
@@ -179,12 +179,12 @@
    "type": "host_shield_breach"
   },
   {
-   "n": 134,
+   "n": 129,
    "notify": "toast",
    "type": "host_shield_state_unreadable"
   },
   {
-   "n": 79,
+   "n": 77,
    "notify": "gate",
    "type": "host_shield_dev_drift"
   },

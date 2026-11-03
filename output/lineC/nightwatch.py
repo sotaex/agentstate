@@ -43,6 +43,11 @@ from datetime import datetime
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _REPO = os.path.dirname(os.path.dirname(_HERE))
+_OUT = os.path.dirname(_HERE)
+if _OUT not in sys.path:
+    sys.path.insert(0, _OUT)
+import _commit                                              # noqa: E402
+
 WATCHMAN = os.path.join(_HERE, "watchman.py")
 # ★ 默认账本用**仓根绝对路径**，不用相对 cwd。
 #   2026-11-03 实测踩过：从 output/lineC 跑与从仓根跑读到的是两个不同的目录，
@@ -121,16 +126,14 @@ def load_state(path: str):
 
 
 def save_state(path: str, state: dict) -> None:
-    """先写同目录临时文件再替换：半写的状态文件比没有状态文件更坏
-    —— 它会以「今天跑过了」的样子出现，而实际上什么都没跑。"""
-    d = os.path.dirname(os.path.abspath(path)) or "."
-    os.makedirs(d, exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(state, fh, ensure_ascii=False, indent=1, sort_keys=True)
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.replace(tmp, path)
+    """半写的状态文件比没有状态文件更坏 —— 它会以「今天跑过了」的样子出现，
+    而实际上什么都没跑。
+
+    落盘与回读收在 `output/_commit.py`：本机 `os.replace` 到已存在目标会偶发
+    WinError 5（2026-11-03 实测），重试与退路在那一处统一处理。
+    这里**不吞异常** —— 状态没写下去，调用方必须知道。
+    """
+    _commit.write_json(path, state)
 
 
 def should_run(state, *, today: str, now: datetime, at: str,

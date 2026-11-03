@@ -1,0 +1,144 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Antinel 监理报告 · 2026-11-03 07:47:23</title>
+<style>
+:root{--bg:#fff;--panel:#f6f8fa;--fg:#14212b;--muted:#465866;--line:#d6dee4;
+--brand:#145a72;--brand-dark:#0f4559;--r0:#9b2226;--l2:#c2410c;--l1:#8a6100;
+--ls:#2a5db0;--l0:#226b4a;--lgrey:#5f5e5a;
+--sans:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+--mono:ui-monospace,SFMono-Regular,Consolas,monospace}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1417;--panel:#161d21;--fg:#e7edf1;
+--muted:#9fb0bb;--line:#2a353b;--brand:#5fb4cf;--brand-dark:#8fd0e4}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.6 var(--sans)}
+main{max-width:1000px;margin:0 auto;padding:20px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+padding:11px 16px;margin-bottom:9px}
+h1{font-size:19px;margin:0 0 4px}
+h2{font-size:15px;margin:20px 0 10px}
+.meta{color:var(--muted);font-size:12.5px;margin-bottom:14px}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+gap:12px;margin-bottom:6px}
+.metric{background:var(--panel);border-radius:10px;padding:11px}
+.metric .k{font-size:12px;color:var(--muted)}
+.metric .v{font-size:26px;font-weight:700}
+.metric .unit{font-size:13px;font-weight:600;color:var(--muted)}
+.ev{border:1px solid var(--line);border-left-width:4px;border-radius:10px;
+padding:10px 14px;margin-bottom:10px}
+.ev.st-held{border-left-color:var(--l2)}.ev.st-alert{border-left-color:var(--l1)}
+.ev.st-no_response{border-left-color:var(--ls)}
+.ev.st-log_only{border-left-color:var(--lgrey)}
+.ev.st-checked{border-left-color:var(--l0)}
+.badge{display:inline-block;padding:2px 8px;border-radius:6px;font-size:12px;
+font-weight:700;color:#fff;white-space:nowrap}
+.claim{margin-top:6px}
+.note{color:var(--muted);font-size:12.5px;margin-top:4px}
+.cite{font-family:var(--mono);font-size:12px;color:var(--brand);text-decoration:none;
+border-bottom:1px dotted var(--brand)}
+.daylevel{font-family:var(--mono);font-size:12px;color:var(--muted);font-style:italic}
+details{margin:6px 0}
+details.folded{border:1px solid var(--line);border-radius:10px;padding:6px 12px;margin-top:12px}
+details.folded summary{font-size:13px}
+summary{cursor:pointer;font-size:12.5px;color:var(--brand)}
+pre.raw{background:var(--bg);border:1px solid var(--line);border-radius:6px;
+padding:8px 10px;font-family:var(--mono);font-size:11.5px;overflow-x:auto;
+margin:6px 0;white-space:pre-wrap;word-break:break-all}
+.rows{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.row{display:flex;gap:12px;padding:8px 15px;border-bottom:1px solid var(--line);
+font-size:13px}
+.row:last-child{border-bottom:0}
+.row .k{flex:none;width:170px;color:var(--muted)}
+/* 整句盲区（没有「标题 —— 详情」结构的那一类）占满一行，不许被挤成两栏 */
+.row .full{flex:1 1 auto}
+.undecide{border:1px dashed var(--l1);background:var(--panel);border-radius:10px;
+padding:10px 14px;margin-bottom:9px;font-size:13px}
+.zero{border:1px solid var(--line);background:var(--panel);border-radius:10px;
+padding:10px 14px;font-size:13px;color:var(--muted)}
+/* ---- 更正（设计 §4）：作废用中性色，不用红 ---- */
+/* 作废不等于「出事了」，它是「这一版不再有效」。红色会让读者以为发现了安全问题，
+   而实际可能只是口径修正。颜色的含义必须稳定，否则同一个红在两种意思之间摇摆。 */
+.void{border:1px solid var(--line);border-left:5px solid var(--lgrey);
+background:var(--panel);border-radius:10px;padding:12px 16px;margin-bottom:16px}
+.void .t{font-weight:700;margin-bottom:4px}
+.supersedes{border:1px dashed var(--line);border-radius:10px;padding:8px 14px;
+font-size:12.5px;color:var(--muted);margin-bottom:14px}
+/* 被取代的条目：整条加删除线 + 左侧灰边，但仍在原位置、不折叠、不隐藏 */
+.ev.superseded{border-left-color:var(--lgrey)}
+.ev.superseded .claim{text-decoration:line-through;
+text-decoration-color:var(--muted);text-decoration-thickness:1.5px;opacity:.75}
+.supnote{border-left:3px solid var(--lgrey);padding:6px 10px;margin:0 0 7px;
+font-size:12.5px;color:var(--muted);background:var(--bg);border-radius:0 6px 6px 0}
+.footer{color:var(--muted);font-size:12px;margin-top:28px;
+border-top:1px solid var(--line);padding-top:8px}
+/* 代码组指纹：页脚里唯一一个跨版本可比的字段，所以给它等宽字体 + 加粗，
+   让「两份报告是不是同一份代码算的」可以靠眼睛扫出来 */
+.fp{font-family:var(--mono);font-weight:700;color:var(--brand);
+letter-spacing:.5px;user-select:all}
+.fppairs{font-family:var(--mono);font-size:11px;word-break:break-all}
+.fpbad{border:1px solid var(--r0);border-radius:8px;padding:7px 10px;margin:6px 0;
+color:var(--r0);font-size:12px}
+@media print{body{margin:0}.ev,.undecide,.zero{break-inside:avoid}}
+</style></head><body><main>
+<h1>Antinel 监理 · 一页纸</h1>
+<div class="meta">读数时刻 2026-11-03 07:47:23 ｜ 账本 日文件 36 个｜记录 184126 条</div>
+<div class="metrics">
+<div class="metric"><div class="k">结论</div><div class="v">18<span class="unit">条</span></div></div>
+<div class="metric"><div class="k">需要你看一眼</div><div class="v">14<span class="unit">条</span></div></div>
+<div class="metric"><div class="k">只是记录</div><div class="v">2<span class="unit">条</span></div></div>
+<div class="metric"><div class="k">账本自洽检查</div><div class="v">2<span class="unit">条</span></div></div>
+</div>
+<h2>这次看见了什么</h2>
+<div class="note" style="margin-bottom:10px">共 18 条，这里显示 5 条、折叠 13 条。排序规则：按结论强度（挡下 → 提醒 → 已发现无法处置 → 已记录未判定 → 已核对），同强度按证据 id 字典序。折叠的不代表不重要，只代表这一页放不下。守恒：候选 18 条 ＝ 展示 5 ＋ 折叠 13 ＋ 合并 0 ＋ 不适用 0</div>
+<div class="ev st-held" data-eid="VDT-13025784" data-strength="held" data-cites="2026-11-03:992" data-rule="AN-010"><span class="badge" style="background:var(--l2)">挡下</span><div class="claim">AN-010：动作未执行 1 次（严重度 critical）</div><div class="note">已由规则拦下（有规则号，可查规则库）</div><div class="note">这条看不见什么：只看账本里写好的裁决记录；簇的聚合键是「规则×会话×带」，换一种分法簇数会变（条数守恒、簇数不守恒）</div><div class="note"><span class="cite">2026-11-03:992</span></div></div>
+<div class="ev st-held" data-eid="VDT-1a6f3e9a" data-strength="held" data-cites="2026-11-03:352" data-rule="AN-020"><span class="badge" style="background:var(--l2)">挡下</span><div class="claim">AN-020：动作未执行 1 次（严重度 critical）</div><div class="note">已由规则拦下（有规则号，可查规则库）</div><div class="note">这条看不见什么：只看账本里写好的裁决记录；簇的聚合键是「规则×会话×带」，换一种分法簇数会变（条数守恒、簇数不守恒）</div><div class="note"><span class="cite">2026-11-03:352</span></div></div>
+<div class="ev st-held" data-eid="VDT-45922003" data-strength="held" data-cites="2026-11-03:1879" data-rule="AN-024"><span class="badge" style="background:var(--l2)">挡下</span><div class="claim">AN-024：动作未执行 1 次（严重度 critical）</div><div class="note">已由规则拦下（有规则号，可查规则库）</div><div class="note">这条看不见什么：只看账本里写好的裁决记录；簇的聚合键是「规则×会话×带」，换一种分法簇数会变（条数守恒、簇数不守恒）</div><div class="note"><span class="cite">2026-11-03:1879</span></div></div>
+<div class="ev st-held" data-eid="VDT-8a4d3768" data-strength="held" data-cites="2026-11-03:1314,2026-11-03:1316" data-rule="AN-009"><span class="badge" style="background:var(--l2)">挡下</span><div class="claim">AN-009：动作未执行 1 次（账本 2 条记录，同一次动作被多个钩子各记一遍）（严重度 critical）</div><div class="note">已由规则拦下（有规则号，可查规则库）</div><div class="note">这条看不见什么：只看账本里写好的裁决记录；簇的聚合键是「规则×会话×带」，换一种分法簇数会变（条数守恒、簇数不守恒）</div><div class="note"><span class="cite">2026-11-03:1314</span> <span class="cite">2026-11-03:1316</span></div></div>
+<div class="ev st-held" data-eid="VDT-bd0b29ef" data-strength="held" data-cites="2026-11-03:2,2026-11-03:4,2026-11-03:184,2026-11-03:186,2026-11-03:742" data-rule="AN-009"><span class="badge" style="background:var(--l2)">挡下</span><div class="claim">AN-009：动作未执行 6 次（账本 12 条记录，同一次动作被多个钩子各记一遍）（严重度 critical）</div><div class="note">已由规则拦下（有规则号，可查规则库）</div><div class="note">这条看不见什么：只看账本里写好的裁决记录；簇的聚合键是「规则×会话×带」，换一种分法簇数会变（条数守恒、簇数不守恒）</div><div class="note"><span class="cite">2026-11-03:2</span> <span class="cite">2026-11-03:4</span> <span class="cite">2026-11-03:184</span> <span class="cite">2026-11-03:186</span> 等 5 处</div></div>
+<details class="folded"><summary>另有 13 条（展开看全部，每条都带出处）</summary><div class="ev st-held" data-eid="VDT-d833da5b" data-strength="held" data-cites="2026-11-03:1090" data-rule="AN-020"><span class="badge" style="background:var(--l2)">挡下</span><div class="claim">AN-020：动作未执行 1 次（严重度 critical）</div><div class="note">已由规则拦下（有规则号，可查规则库）</div><div class="note">这条看不见什么：只看账本里写好的裁决记录；簇的聚合键是「规则×会话×带」，换一种分法簇数会变（条数守恒、簇数不守恒）</div><div class="note"><span class="cite">2026-11-03:1090</span></div></div><div class="ev st-held" data-eid="VDT-df3e4c33" data-strength="held" data-cites="2026-11-03:403,2026-11-03:404" data-rule="AN-009"><span class="badge" style="background:var(--l2)">挡下</span><div class="claim">AN-009：动作未执行 1 次（账本 2 条记录，同一次动作被多个钩子各记一遍）（严重度 critical）</div><div class="note">已由规则拦下（有规则号，可查规则库）</div><div class="note">这条看不见什么：只看账本里写好的裁决记录；簇的聚合键是「规则×会话×带」，换一种分法簇数会变（条数守恒、簇数不守恒）</div><div class="note"><span class="cite">2026-11-03:403</span> <span class="cite">2026-11-03:404</span></div></div><div class="ev st-held" data-eid="VDT-ea9513d8" data-strength="held" data-cites="2026-11-03:1494" data-rule="AN-001"><span class="badge" style="background:var(--l2)">挡下</span><div class="claim">AN-001：动作未执行 1 次（严重度 critical）</div><div class="note">已由规则拦下（有规则号，可查规则库）</div><div class="note">这条看不见什么：只看账本里写好的裁决记录；簇的聚合键是「规则×会话×带」，换一种分法簇数会变（条数守恒、簇数不守恒）</div><div class="note"><span class="cite">2026-11-03:1494</span></div></div><div class="ev st-alert" data-eid="VDT-2217c300" data-strength="alert" data-cites="2026-11-03:1190" data-rule="AN-008"><span class="badge" style="background:var(--l1)">提醒</span><div class="claim">AN-008：动作仍然执行了 1 次（严重度 warning）</div><div class="note">有规则命中并告警，但动作仍然执行了</div><div class="note">这条看不见什么：只看账本里写好的裁决记录；簇的聚合键是「规则×会话×带」，换一种分法簇数会变（条数守恒、簇数不守恒）</div><div class="note"><span class="cite">2026-11-03:1190</span></div></div><div class="ev st-alert" data-eid="VDT-7cee1957" data-strength="alert" data-cites="2026-11-03:2483" data-rule="AN-014"><span class="badge" style="background:var(--l1)">提醒</span><div class="claim">AN-014：动作仍然执行了 1 次（严重度 warning）</div><div class="note">有规则命中并告警，但动作仍然执行了</div><div class="note">这条看不见什么：只看账本里写好的裁决记录；簇的聚合键是「规则×会话×带」，换一种分法簇数会变（条数守恒、簇数不守恒）</div><div class="note"><span class="cite">2026-11-03:2483</span></div></div><div class="ev st-alert" data-eid="VDT-96de80dd" data-strength="alert" data-cites="2026-11-03:10,2026-11-03:14,2026-11-03:25,2026-11-03:44,2026-11-03:48" data-rule="AN-010"><span class="badge" style="background:var(--l1)">提醒</span><div class="claim">AN-010：动作仍然执行了 104 次（账本 106 条记录，同一次动作被多个钩子各记一遍）（严重度 warning）</div><div class="note">有规则命中并告警，但动作仍然执行了</div><div class="note">这条看不见什么：只看账本里写好的裁决记录；簇的聚合键是「规则×会话×带」，换一种分法簇数会变（条数守恒、簇数不守恒）</div><div class="note"><span class="cite">2026-11-03:10</span> <span class="cite">2026-11-03:14</span> <span class="cite">2026-11-03:25</span> <span class="cite">2026-11-03:44</span> 等 5 处</div></div><div class="ev st-alert" data-eid="VDT-cf35e98c" data-strength="alert" data-cites="2026-11-03:3,2026-11-03:185,2026-11-03:743,2026-11-03:947,2026-11-03:1814" data-rule="AN-010"><span class="badge" style="background:var(--l1)">提醒</span><div class="claim">AN-010：动作仍然执行了 6 次（严重度 warning）</div><div class="note">有规则命中并告警，但动作仍然执行了</div><div class="note">这条看不见什么：只看账本里写好的裁决记录；簇的聚合键是「规则×会话×带」，换一种分法簇数会变（条数守恒、簇数不守恒）</div><div class="note"><span class="cite">2026-11-03:3</span> <span class="cite">2026-11-03:185</span> <span class="cite">2026-11-03:743</span> <span class="cite">2026-11-03:947</span> 等 5 处</div></div><div class="ev st-alert" data-eid="VDT-fdc7df51" data-strength="alert" data-cites="2026-11-03:325,2026-11-03:562,2026-11-03:566,2026-11-03:567,2026-11-03:571" data-rule="AN-010"><span class="badge" style="background:var(--l1)">提醒</span><div class="claim">AN-010：动作仍然执行了 233 次（账本 321 条记录，同一次动作被多个钩子各记一遍）（严重度 warning）</div><div class="note">有规则命中并告警，但动作仍然执行了</div><div class="note">这条看不见什么：只看账本里写好的裁决记录；簇的聚合键是「规则×会话×带」，换一种分法簇数会变（条数守恒、簇数不守恒）</div><div class="note"><span class="cite">2026-11-03:325</span> <span class="cite">2026-11-03:562</span> <span class="cite">2026-11-03:566</span> <span class="cite">2026-11-03:567</span> 等 5 处</div></div><div class="ev st-no_response" data-eid="VDT-e625b789" data-strength="no_response" data-cites="2026-11-03:3013,2026-11-03:3025"><span class="badge" style="background:var(--ls)">已发现无法处置</span><div class="claim">监理自身异常，动作未执行 2 次（严重度 warning）</div><div class="note">已发现，但没有可执行的处置手段</div><div class="note">这条看不见什么：只看账本里写好的裁决记录；簇的聚合键是「规则×会话×带」，换一种分法簇数会变（条数守恒、簇数不守恒）；这一簇没有规则号 —— 它不是「规则挡住了」，是监理自身状态异常</div><div class="note"><span class="cite">2026-11-03:3013</span> <span class="cite">2026-11-03:3025</span></div></div><div class="ev st-log_only" data-eid="WCH-301fa18c" data-strength="log_only" data-cites="2026-11-03:404"><span class="badge" style="background:var(--lgrey)">已记录未判定</span><div class="claim">2026-11-03 首次出现组合：同一会话内 丢弃工作区改动（AN-020） 之后 5 分钟内又命中 删除文件或目录（AN-009）（当天 1 次）</div><div class="note">已记录，未作判定（不知道是否危险，只知道它变了）</div><div class="note">这条看不见什么：只看两个规则在同一会话里相邻出现，不做因果推断；此前从未同时出现过｜各自单独命中 17/244 次</div><div class="note"><span class="cite">2026-11-03:404</span></div></div><div class="ev st-log_only" data-eid="WCH-91604412" data-strength="log_only" data-cites="2026-11-03:1090"><span class="badge" style="background:var(--lgrey)">已记录未判定</span><div class="claim">2026-11-03 首次出现组合：同一会话内 写到项目目录之外（AN-010） 之后 5 分钟内又命中 丢弃工作区改动（AN-020）（当天 1 次）</div><div class="note">已记录，未作判定（不知道是否危险，只知道它变了）</div><div class="note">这条看不见什么：只看两个规则在同一会话里相邻出现，不做因果推断；此前从未同时出现过｜各自单独命中 59/17 次</div><div class="note"><span class="cite">2026-11-03:1090</span></div></div><div class="ev st-checked" data-eid="AUD-72651c9b" data-strength="checked" data-cites="2026-10-08:215,2026-10-08:218,2026-10-08:250,2026-10-08:255,2026-10-08:262" data-status="WARN"><span class="badge" style="background:var(--l1)">已核对·有偏离</span><div class="claim">A4 时间单调：511 处 ts 比前一条早（共验 184093 条（33 条没有 ts 字段，未参与））。口径＝datetime 归一后比较，无时区按本地墙钟（UTC+8）解释。链未断、内容未变，且 lock_events 显示大量抢锁等待与倒序同量级 ⇒ 事件时间与链上顺序不同序，属并发排队的性质，不是篡改</div><div class="note">这是账本自洽性检查的结论，不是拦截结论</div><div class="note">这条看不见什么：本维度只核账本自身是否自洽，不判断记录内容是否危险</div><div class="note"><span class="cite">2026-10-08:215</span> <span class="cite">2026-10-08:218</span> <span class="cite">2026-10-08:250</span> <span class="cite">2026-10-08:255</span> 等 5 处</div></div><div class="ev st-checked" data-eid="AUD-78877d35" data-strength="checked" data-cites="2026-10-05:0" data-status="WARN"><span class="badge" style="background:var(--l1)">已核对·有偏离</span><div class="claim">A3 日清单：33 个日文件与清单一致；当日文件（2026-11-03）正在写，未参与比对；1 个早于清单末条但记录无 hash ⇒ 锚无处可挂（不适用）：2026-09-25；1 个早于清单末条却有 hash ⇒ 历史缺锚（有 hash 却无清单条目）：2026-10-05</div><div class="note">这是账本自洽性检查的结论，不是拦截结论</div><div class="note">这条看不见什么：本维度只核账本自身是否自洽，不判断记录内容是否危险</div><div class="note"><span class="daylevel">2026-10-05（整天 · 该日无行号可指）</span></div></div></details>
+<h2>不适用（1 项）</h2>
+<div class="undecide">A5 总量 不适用：未给 --declare ⇒ 本维度不适用</div>
+<div class="note">这些项目<b>问了，但这把尺子量不到这件事</b>。它既不是故障，也不是「通过」——它是一条<b>已知的适用边界</b>：这里没有结论，不等于这里没有问题。</div>
+<h2>这份报告看不见什么</h2>
+<div class="rows">
+<div class="row"><span class="k">账本里是否混有本项目自己的测试数据</span><span>负控与红队曾往真账本写过假命令、假域名（evil.example.com 就在 2026-10-31 的「首次出现域名」里，与百度、几个政府网站并列）。账本没有「这是夹具」字段，本报告无法区分夹具与真实事件；线索里出现的每一项都要按「可能是夹具」再复核一遍</span></div>
+<div class="row"><span class="k">A1/A2 不抗整链重算</span><span>A1 是自己算的 hash 跟自己比、A2 是 prev 跟上一条 hash 比。改完内容把整条链重算一遍，两个都必然通过。redteam.py R1 复现：改一条记录＋重算链＋重算清单⇒ A1/A2/A3 全 PASS。</span></div>
+<div class="row"><span class="k">A3 可以被删掉而不是伪造</span><span>day_manifest.json 不存在时 A3 返回 SKIP（不适用），而 SKIP 不进退出码。redteam.py R4 复现：删掉清单 ⇒ A3=SKIP、rc=0 ——「删了证据」与「本来就没有」同貌。</span></div>
+<div class="row"><span class="k">A4 能被「修好」掩盖</span><span>A4 在真账本上天天 WARN（属并发排队；当日实测值见 A4 那一行，这里不写死数字）。把 ts 排成递增就能让它变 PASS —— 让报告变绿与抹掉真实性质偏离是同一个动作。redteam.py R3 复现。</span></div>
+<div class="row"><span class="k">A5 依赖账本之外的声明</span><span>删记录只有 A5 能抓，但 A5 要 --declare。不给声明时 A5=SKIP，删记录不可见。redteam.py R2b/R2c 复现：无声明红队赢、有声明被抓住。</span></div>
+<div class="row"><span class="k">没有 L2 外部锚</span><span>以上四条的共同根因：本工具只做内部自洽（L0）。要排除整链重写需要外部锚，今天没有（铁律 42：L0 ✅／L1 ⚠️／L2 ❌）。</span></div>
+<div class="row"><span class="k">账本以外的一切</span><span>没被钩子拦到的动作不进账本；本工具只看得见账本</span></div>
+<div class="row"><span class="k">记录内容对不对</span><span>本工具只报「什么变了」，不判断是否危险、是否合规</span></div>
+<div class="row"><span class="k">是否被整链重写</span><span>日锚与账本由同一个进程写，整链重写会连锚一起重算 ⇒ 仍报内部自洽（要系统外的锚才算 L2；目前没有）</span></div>
+<div class="row"><span class="k">账本是否被整体替换</span><span>换掉整天文件并同步改 day_manifest 的 size 与 hash，本工具看不出来</span></div>
+<div class="row"><span class="k">absent 的基线来自账本本身</span><span>「某个钩子应该出现」这条判断，用的是前 7 天的账本算出来的中位数。删得比窗口更长，基线就跟着挪 —— 那个钩子「曾经存在」这件事从数据里消失，于是没有任何东西能发现它消失。这是无界盲区：删 3 天没事，删 8 天就干净了。redteam_c2.py R6 复现（对照 R7：不重算锚时 anchor 立刻报）。</span></div>
+<div class="row"><span class="k">锚只钉 size 与末条 hash</span><span>anchor 比的是「文件字节数」和「最后一条记录的 hash」。改中间记录、长度不变、hash 字段没动 ⇒ anchor 零线索。redteam_c2.py R8 复现（平移 5 万行 ts，anchor 一声不响）。这一条 C-1 的 A1 能抓，所以是「C-2 单独看不见，整体不瞎」—— 两句话不许互换。</span></div>
+<div class="row"><span class="k">连链带锚一起重算就没有检测点</span><span>redteam_c2.py R9 实测：删掉某 type 全期记录 ＋ 按文件重算链 ＋ 重算日锚 ⇒ C-1 的 A1/A2/A3 全 PASS、C-2 的 anchor/absent 全静。这是实测不是推断。补法只有一条：账本之外的第二份记录（L2 外部锚），今天没有。任何说「防篡改」的话在这里被证伪。</span></div>
+<div class="row"><span class="k">删掉一整天在 A1/A2 上天生无痕</span><span>链是按文件的（auditor.check_content 每个文件 prev_full 重起），所以整天文件消失时剩下的文件链一点都没断。只有 A3 的日清单管得着 —— 那是 A3 存在的唯一理由，也是它的单点。</span></div>
+<div class="row"><span class="k">账本里是否混有本项目自己的测试数据</span><span>负控与红队曾往真账本写过假命令、假域名（evil.example.com 就在 2026-10-31 的「首次出现域名」里，与百度、几个政府网站并列）。账本没有「这是夹具」字段，本模块无法区分夹具与真实事件；每一条都要按「可能是夹具」再复核一遍</span></div>
+<div class="row"><span class="full">本模块只读账本里已经写好的裁决记录，读不到「当时该挡但没挡」—— 漏挡不在账本里（账本只记发生过什么，不记该发生什么）</span></div>
+<div class="row"><span class="full">聚合键是「规则×会话」，是我选的一种，不是唯一正确分法；换一种分法，簇数会变（条数守恒，簇数不守恒）</span></div>
+<div class="row"><span class="full">账本里还有 6 条记录的 decision 写的是「放行」，但产品侧会按 action 与 severity 把它升级成提醒（notify_policy 的 _SEVERITY_ESCALATE：allow 加 warning 或 critical）。本模块按账本字段取值筛记录 ⇒ 不读它们，所以真实的提醒次数会多于本报告里的数。这是口径差，不是漏报检查</span></div>
+</div>
+<h2>守恒账（每个数都加得起来）</h2>
+<div class="rows">
+<div class="row"><span class="k">裁决面（停下等人）</span><span>候选 36 ＝ 进证据 9 ＋ 合并 14 ＋ 不适用 13</span></div>
+<div class="row"><span class="k">提醒面（告警但放行）</span><span>候选 437 ＝ 进证据 5 ＋ 合并 430 ＋ 不适用 2</span></div>
+</div>
+<div class="note">「合并」是同一条带内多条记录并成一个结论（簇里仍带原始条数）；「不适用」是产品侧判为结构上不是事件的；「无档可落」是读到了、但现有各档都装不下。三者都不是「没有」——它们各自有各自的意思。</div>
+<div class="footer">
+报告编号 <b>R-a098d93668e9</b>（要更正它，就用这个号指名）<br>
+巡检窗口：基线 14 天｜今天 2026-11-03｜今日记录 3486 条<br>
+裁决面·停下等人：按 decision 值数（block+deny）36 条｜其中产品侧判为非事件 13 条（不适用，非静音）｜落桶 23 条<br>
+裁决面·动作数：按（会话+时刻+工具+命令）去重后 360 次动作｜对应 458 条记录｜差额 98 条是「同一次动作被多个钩子各记一遍」（block 与 deny 同义，见 notify_policy 回退表）｜其中挡下 15 次、提醒 345 次<br>
+裁决面·告警放行：按 decision 值数（alert+warn）437 条｜其中产品侧判为非事件 2 条（不适用，非静音）｜落桶 435 条｜无档可落 0 条<br>
+裁决面·守不住：宿主盾自检事件（守卫自己不在岗／状态异常）全量 11 条（已排除 host_shield_heartbeat 42 条心跳）｜该通知你的 2 条（gate 2、alert 0）｜产品侧说要提醒、但本腿没有对应带宽的 7 条（TOAST 档，不计入上面两个数）｜读到了但产品侧判不通知的 2 条（自愈、结构上不通知的）｜这类记录与「有规则号的命中」共用同一批账本记录，两个数不许相加<br>
+裁决面·守恒：裁决面（停下等人） 候选 36 条 ＝ 进证据 9 簇 ＋ 合并 14 ＋ 不适用 13｜提醒面（告警但放行） 候选 437 条 ＝ 进证据 5 簇 ＋ 合并 430 ＋ 不适用 2<br>
+裁决面·账本日文件：日文件 1 个（2026-11-03 .. 2026-11-03）<br>
+裁决面·通知面：gate 23 条｜toast 435 条｜聚合后 14 簇（规则×会话×带）<br>
+账本：日文件 36 个｜记录 184126 条<br>
+本报告由 Antinel 监理生成 ｜ 读数时刻 2026-11-03 07:47:23 ｜ 回指以该时刻为准（当天文件的行号在此之后仍会变）
+<br>代码组指纹 <b class="fp" data-codefp="63258278712b420a3e80dac4eb0d633d204b4c734bcef4f3a7b9b62c867b26fb">63258278712b420a</b>（14 个源文件）<br>
+<span class="fppairs">codeid.py:14e5613c713c、tsnorm.py:8c4076b597d1、auditor.py:0ff29fd137c1、watchman.py:0b62e09c8ca9、clue_ledger.py:8ae22e3ff9f3、verdict_leg.py:86d5d06bdc25、jchecks.py:9564bc7f7033、evidence.py:8008a74c3dc5、citecheck.py:58794adb17a4、onepager.py:6535756c67e5、report.py:eb3b5a77a113、corrections.py:771e2ff53433、redteam.py:61ae59da1d18、redteam_c2.py:45179cc6bcaa</span><br>
+核对办法：跑 <code>python output/lineC/selfproof.py</code>，它打出的组指纹必须与上面一致；不一致 ⇒ 这份报告不是当前代码算的，结论要重算。<br>指纹相同 ⇒ 是同一份代码算的；不等于结论正确——代码自洽与结论为真是两件事。
+</div>
+</main></body></html>

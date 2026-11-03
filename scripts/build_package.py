@@ -493,6 +493,13 @@ GITIGNORE_TEMPLATE = (
     #   ★ 这是同一教训的**第六次**（前五次见上），修法照旧：写进模板才是修法；
     #      仓内那份由模板生成，JDG-05 逐字节兜底。
     "output/_d41_mutant_gate.py\n"
+    # ★★ 2026-11-03（08:0x）：`_commit` 的临时件与实验残留。
+    #   `output/_commit.py` 落盘先写 `<目标>.tmp` 再 replace；replace 成功时它自己
+    #   消失，**只有写失败那一次会留下**——而写失败正是最需要看 git status 的时刻。
+    #   实验残留（`_probe_away/`）同理：本机 D 盘不能删，只能同盘改名让开。
+    #   ⇒ 两者都不许进索引，否则「工作树脏」会被读成「有未提交的改动」。
+    "output/*/_out/*.tmp\n"
+    "output/*/_out/_probe_away/\n"
 )
 
 # ★★ 2026-10-11（0.48.1，策略 v1.1 落地）：主许可 MIT → Apache-2.0。

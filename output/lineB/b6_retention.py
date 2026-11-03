@@ -32,6 +32,11 @@ import shutil
 import sys
 import tempfile
 
+_OUT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _OUT not in sys.path:
+    sys.path.insert(0, _OUT)
+import _commit                                              # noqa: E402
+
 # 账本日文件名的唯一形态（`.psl/audit/lock_events.jsonl` 不是审计记录，
 # 混进来会让 `date.fromisoformat('lock_events')` 直接崩 —— 实测撞过一次）
 _DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.jsonl$")
@@ -112,25 +117,17 @@ def _write_sample(dirpath: str, name: str, body: str) -> str:
     return p
 
 
-def emit_json(path: str, payload: dict) -> int:
-    """落盘并**回读自证**，返回可解析内容的字符数。
+def emit_json(path: str, payload: dict) -> dict:
+    """落盘并**回读自证**，返回 `{chars_parsed, how}`。
 
     ★ 「探针没有牙」这种情况也必须落盘。只在有结论时才写产出件，
       会让「今天没测出结论」与「今天没跑」在目录里一模一样 ——
       而这正是本工具要反对的那种同貌。
+
+    ★ tmp+replace+回读不再自己写：本机 `os.replace` 到已存在目标会偶发
+      WinError 5（2026-11-03 实测），重试与退路收在 `output/_commit.py`。
     """
-    d = os.path.dirname(os.path.abspath(path))
-    if d:
-        os.makedirs(d, exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(payload, fh, ensure_ascii=False, indent=1, sort_keys=True)
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.replace(tmp, path)
-    with open(path, encoding="utf-8") as fh:
-        back = json.load(fh)
-    return len(json.dumps(back, ensure_ascii=False))
+    return _commit.write_json(path, payload)
 
 
 def main() -> int:
@@ -294,14 +291,24 @@ def main() -> int:
             "verdict": verdict,
         }
 
+    write_failed = []
+
     def _write(verdict: str) -> None:
+        """写失败必须记下来 —— 原先只印一行 ✗ 然后照样 return 0。
+
+        那行 ✗ 在屏幕上，而任何按退出码判「跑成了」的自动化都读不到它：
+        产出件没写出来、结论却按「已经留档」往上走。这是本项目
+        「零与不可判同貌」的又一例，只不过这次装作成功的是**落盘**。
+        """
         if not a.json_out:
             return
         try:
-            n = emit_json(a.json_out, _payload(verdict))
-            print("已写 %s（可解析 %d 字符）" % (a.json_out, n))
+            r = emit_json(a.json_out, _payload(verdict))
+            print("已写 %s（%d 字节 / %d 字符，落盘路径 %s）"
+                  % (a.json_out, r["bytes"], r["chars"], r["how"]))
         except Exception as exc:                        # noqa: BLE001
             print("✗ 写出失败：%s: %s" % (type(exc).__name__, exc))
+            write_failed.append("%s: %s" % (type(exc).__name__, exc))
 
     print("\n" + "-" * 74)
     if not teeth:
@@ -325,6 +332,9 @@ def main() -> int:
         for ln, d in n_del[:10]:
             print("     L%-5d %s" % (ln, d))
         _write("has_delete_call")
+    if write_failed:
+        print("✗ 产出件没写成 ⇒ 退出码 1（结论只在屏幕上，没有留档）")
+        return 1
     return 0
 
 

@@ -39,6 +39,7 @@
 
 import argparse
 import ast
+import io
 import json
 import os
 import sys
@@ -46,6 +47,11 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
+
+_OUT = os.path.dirname(HERE)
+if _OUT not in sys.path:
+    sys.path.insert(0, _OUT)
+import _commit                                              # noqa: E402
 
 #: 运行时写入者所在目录（S4 的收窄目标）
 RUNTIME_DIRS = ("hooks", "scripts")
@@ -377,20 +383,22 @@ def main():
     print()
 
     if args.md:
-        with open(args.md, "w", encoding="utf-8") as f:
-            f.write("# S3 decision 写入点定性（%s）\n\n" % time.strftime("%Y-%m-%d %H:%M"))
-            f.write("扫描 %d 个 .py；写入点 %d（运行时 %d ＋ 判据 %d）；读取点 %d。\n\n"
-                    % (n_files, len(rows), len(runtime), len(guards), n_readers))
-            f.write("| 路径 | 行 | 形态 | 右值类型 | 右值 | 引用 action |\n|---|---|---|---|---|---|\n")
-            for x in sorted(runtime, key=lambda y: (y["path"], y["line"])):
-                f.write("| `%s` | %d | %s | %s | `%s` | %s |\n" % (
-                    x["path"], x["line"], x["form"], x["rhs_kind"],
-                    (x["rhs"] or "").replace("|", "\\|")[:80],
-                    "是" if "action" in x["refs"] else ""))
-            f.write("\n## 判据/测试里的写入点（不参与收敛）\n\n")
-            for x in sorted(guards, key=lambda y: (y["path"], y["line"])):
-                f.write("- `%s:%d` %s → `%s`\n" % (x["path"], x["line"], x["form"], x["rhs"][:70]))
-        print("已写 %s" % args.md)
+        f = io.StringIO()
+        f.write("# S3 decision 写入点定性（%s）\n\n" % time.strftime("%Y-%m-%d %H:%M"))
+        f.write("扫描 %d 个 .py；写入点 %d（运行时 %d ＋ 判据 %d）；读取点 %d。\n\n"
+                % (n_files, len(rows), len(runtime), len(guards), n_readers))
+        f.write("| 路径 | 行 | 形态 | 右值类型 | 右值 | 引用 action |\n|---|---|---|---|---|---|\n")
+        for x in sorted(runtime, key=lambda y: (y["path"], y["line"])):
+            f.write("| `%s` | %d | %s | %s | `%s` | %s |\n" % (
+                x["path"], x["line"], x["form"], x["rhs_kind"],
+                (x["rhs"] or "").replace("|", "\\|")[:80],
+                "是" if "action" in x["refs"] else ""))
+        f.write("\n## 判据/测试里的写入点（不参与收敛）\n\n")
+        for x in sorted(guards, key=lambda y: (y["path"], y["line"])):
+            f.write("- `%s:%d` %s → `%s`\n" % (x["path"], x["line"], x["form"], x["rhs"][:70]))
+        r = _commit.write_text(args.md, f.getvalue())
+        print("已写 %s（%d 字节 / %d 字符，落盘路径 %s）"
+              % (args.md, r["bytes"], r["chars"], r["how"]))
 
     if args.json:
         # ★ 产物必须自带「牙齿证据」（2026-11-03）：
@@ -400,23 +408,24 @@ def main():
         #   `forms_seen` 与 `forms_taxonomy` 分开：本仓只出现 2 类，而分类器认 4 类；
         #   合成一栏会让「只认 2 类」与「本仓只有 2 类」同貌（0 与不可判同貌）。
         _forms = sorted(set(x["form"] for x in rows))
-        with open(args.json, "w", encoding="utf-8") as f:
-            json.dump({"read_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-                       "files": n_files, "writers": rows,
-                       "runtime": len(runtime), "guards": len(guards),
-                       "readers": n_readers, "parse_errors": parse_errors,
-                       "selftest": {"passed": not fails, "fails": fails,
-                                    "positive_write_points": nw,
-                                    "positive_read_points": nr},
-                       "forms_taxonomy": ["W1-kwarg", "W2-dictkey",
-                                          "W3-subscript", "W4-attribute"],
-                       "forms_seen": _forms,
-                       "forms_zero": [x for x in
-                                      ("W1-kwarg", "W2-dictkey",
-                                       "W3-subscript", "W4-attribute")
-                                      if x not in _forms]},
-                      f, ensure_ascii=False, indent=1)
-        print("已写 %s" % args.json)
+        r = _commit.write_json(args.json,
+                               {"read_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                "files": n_files, "writers": rows,
+                                "runtime": len(runtime), "guards": len(guards),
+                                "readers": n_readers, "parse_errors": parse_errors,
+                                "selftest": {"passed": not fails, "fails": fails,
+                                             "positive_write_points": nw,
+                                             "positive_read_points": nr},
+                                "forms_taxonomy": ["W1-kwarg", "W2-dictkey",
+                                                   "W3-subscript", "W4-attribute"],
+                                "forms_seen": _forms,
+                                "forms_zero": [x for x in
+                                               ("W1-kwarg", "W2-dictkey",
+                                                "W3-subscript", "W4-attribute")
+                                               if x not in _forms]},
+                               sort_keys=False)
+        print("已写 %s（%d 字节 / %d 字符，落盘路径 %s）"
+              % (args.json, r["bytes"], r["chars"], r["how"]))
 
     return 0
 

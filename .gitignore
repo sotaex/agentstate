@@ -36,3 +36,5 @@ analysis-tmp/
 .zwork/
 .canary/
 output/_d41_mutant_gate.py
+output/*/_out/*.tmp
+output/*/_out/_probe_away/

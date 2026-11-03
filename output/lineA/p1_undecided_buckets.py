@@ -20,6 +20,11 @@ import sys
 import tempfile
 import time
 
+_OUT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _OUT not in sys.path:
+    sys.path.insert(0, _OUT)
+import _commit                                              # noqa: E402
+
 _LOCK_EVENTS = "lock_events.jsonl"
 
 # 这些 type 的名字本身表明"发生过拦截/失守/篡改"，静音要格外小心。
@@ -120,24 +125,17 @@ def _selfcheck():
 
 
 def emit_json(path, payload):
-    """落盘并**回读自证**，返回可解析内容的字符数。
+    """落盘并**回读自证**，返回 `{chars_parsed, how}`。
 
     ★ 写前先量「值不值得写」：一个 json 只要结构对，读起来就完全正常，
       哪怕里面的数是空集。所以回读校验之外还要在调用处给关键分母，
       让「0 条」与「没读到」在产出件里也是两个不同的东西。
+
+    ★ tmp+replace+回读不再自己写：本机 `os.replace` 到已存在目标会偶发
+      WinError 5（2026-11-03 实测），一次瞬时冲突就让产出件没写成。
+      重试与退路收在 `output/_commit.py`，五条线共用一份。
     """
-    d = os.path.dirname(os.path.abspath(path))
-    if d:
-        os.makedirs(d, exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(payload, fh, ensure_ascii=False, indent=1, sort_keys=True)
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.replace(tmp, path)
-    with open(path, encoding="utf-8") as fh:
-        back = json.load(fh)
-    return len(json.dumps(back, ensure_ascii=False))
+    return _commit.write_json(path, payload)
 
 
 def main():
@@ -247,8 +245,9 @@ def main():
                        for d in sorted(by_day_all)[-12:]],
         }
         try:
-            nbytes = emit_json(args.json, payload)
-            print("已写 %s（可解析 %d 字符）" % (args.json, nbytes))
+            r = emit_json(args.json, payload)
+            print("已写 %s（%d 字节 / %d 字符，落盘路径 %s）"
+                  % (args.json, r["bytes"], r["chars"], r["how"]))
             # ★ 自证：两侧相加必须等于总量。不等于就是分桶漏了一类，
             #   而屏幕上「有/无」两行照样各自都对。
             if len(with_d) + len(without_d) != total:

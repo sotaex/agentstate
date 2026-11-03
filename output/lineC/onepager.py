@@ -51,7 +51,11 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+_OUT = os.path.dirname(HERE)
+if _OUT not in sys.path:
+    sys.path.insert(0, _OUT)
 
+import _commit  # noqa: E402
 import evidence as E  # noqa: E402
 import corrections as C  # noqa: E402
 import codeid as CID  # noqa: E402
@@ -589,13 +593,13 @@ def render(bundle: E.Bundle, *, cap: int = DEFAULT_CAP,
 
 
 def write(bundle: E.Bundle, out_path: str, **kw) -> str:
-    """落盘。目录不存在就建（报告是产物，不是产品状态）。"""
-    d = os.path.dirname(os.path.abspath(out_path))
-    if d and not os.path.isdir(d):
-        os.makedirs(d, exist_ok=True)
+    """落盘。目录不存在就建（报告是产物，不是产品状态）。
+
+    回读由 `_commit` 负责：一份**没写全**的报告比没有报告更危险 ——
+    它会被归档、被转发，而缺的那半页没人看得出来。
+    """
     text = render(bundle, **kw)
-    with open(out_path, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(text)
+    _commit.write_text(out_path, text)
     return out_path
 
 

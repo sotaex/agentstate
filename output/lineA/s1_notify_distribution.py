@@ -34,30 +34,25 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_POLICY = os.path.join(os.path.dirname(os.path.dirname(HERE)), "hooks", "notify_policy.py")
 
+_OUT = os.path.dirname(HERE)
+if _OUT not in sys.path:
+    sys.path.insert(0, _OUT)
+import _commit                                              # noqa: E402
 
-def emit_json(path: str, payload: dict) -> int:
-    """落盘并**回读自证**，返回可解析内容的字符数。
+
+def emit_json(path: str, payload: dict) -> dict:
+    """落盘并**回读自证**，返回 `{chars_parsed, how}`。
 
     ★ 为什么要读回来：`json.dump` 不抛异常，不等于文件可用 —— 磁盘满、
       编码错、写到一半被杀，都能留下一个「存在且非空」的文件。
       而「产出件存在」与「产出件可用」在目录列表上**完全一样**。
-      这是本项目反复吃到的那一类：零与不可判同貌。
 
-    ★ 为什么先写 `.tmp` 再 replace：同一个路径第二次跑要**覆盖**而不是追加。
-      追加会让两次读数叠成一个（分母悄悄翻倍），且看起来完全正常。
+    ★ 为什么不再自己写 tmp+replace：本机 `os.replace` 到已存在目标会**偶发**
+      WinError 5（2026-11-03 实测：连测 20 次 0 次、真实跑 1 次命中）。
+      一次瞬时冲突就让产出件没写成，而脚本只会说一句「写出失败」。
+      重试、退路与回读现在都收在 `output/_commit.py`，五条线共用一份。
     """
-    d = os.path.dirname(os.path.abspath(path))
-    if d:
-        os.makedirs(d, exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(payload, fh, ensure_ascii=False, indent=1, sort_keys=True)
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.replace(tmp, path)
-    with open(path, encoding="utf-8") as fh:
-        back = json.load(fh)
-    return len(json.dumps(back, ensure_ascii=False))
+    return _commit.write_json(path, payload)
 
 
 def load_policy(path):
@@ -257,8 +252,9 @@ def main():
             "contradictions": contrad,
         }
         try:
-            nbytes = emit_json(args.json, payload)
-            print("已写 %s（可解析 %d 字符）" % (args.json, nbytes))
+            r = emit_json(args.json, payload)
+            print("已写 %s（%d 字节 / %d 字符，落盘路径 %s）"
+                  % (args.json, r["bytes"], r["chars"], r["how"]))
             # ★ 自证一条：三档之和必须等于记录数。不等于就说明有记录没被计到任何一档，
             #   而屏幕上那三行照样各自都对。
             if not payload["notify"]["sum_equals_records"]:

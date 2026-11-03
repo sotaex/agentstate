@@ -45,6 +45,11 @@ import shutil
 import sys
 import tempfile
 
+_OUT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _OUT not in sys.path:
+    sys.path.insert(0, _OUT)
+import _commit                                              # noqa: E402
+
 _DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.jsonl$")
 
 
@@ -306,9 +311,9 @@ def main() -> int:
 
     page = render(rows, man, man_err, teeth=(ok, msgs))
     if a.out:
-        with open(a.out, "w", encoding="utf-8", newline="\n") as f:
-            f.write(page)
-        print("\n已写出：%s（%d 字节）" % (a.out, len(page.encode("utf-8"))))
+        r = _commit.write_text(a.out, page, newline="\n")
+        print("\n已写出：%s（%d 字节 / %d 字符，落盘路径 %s）"
+              % (a.out, r["bytes"], r["chars"], r["how"]))
     else:
         print("\n" + page)
     return 0
