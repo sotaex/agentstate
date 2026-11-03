@@ -75,12 +75,26 @@ _REQUIRED = ("w", "one", "inc", "unit")
 #   拦截的内容全集＝**规则层**（`rules/default.json`，每条带 description_zh，
 #   antinel_verify INV 强制必备）—— 各按各自的真实深度派生，不硬凑对称。
 
+#: 词条文案的句子预算（ASD-STE100 折算）。**唯一真源**：
+#: `ci/inbox_guards_0514.py` 的 T4-07 直接引用这两个数，不另抄一份 ——
+#: 判据与产品各存一份时，改一处另一处就成了"看不见的第二把尺子"。
+TERM_SENT_MAX = 40
+TERM_SENT_PER_FIELD = 2
+
+
 def _kinds_of(state):
     """事件类型层清单：归该态的每个 kind 的人话标题，剥态名前缀、
     按真源声明序顿号连接。
 
     真源：`inbox_model.LEVEL_OF_KIND` ＋ `TITLE_OF_KIND`。判据 T-02 钉
     "词条 inc 与本函数派生逐字相等" —— 分类真源加了新 kind，词条自动跟上。
+
+    ★★ 0.64.0：**列举过长就另起一句**（`L1` 五类实测 50 字 > 预算 40）。
+      不是改措辞 —— 一个词都没动，只在语义断点处断句（每字段上限
+      `TERM_SENT_PER_FIELD`），因为再多一个 kind 就会把这句话拖进
+      "读者要数一遍才知道说了几件事"的状态。
+      ★ 断点由**长度**算，不写死"前三类一句"：写死的话，`R0` 那四类
+        （30 字，一句正好）会被无谓地断成两句，改的是不该改的东西。
     """
     parts = []
     for kind, lv in _M.LEVEL_OF_KIND.items():
@@ -88,7 +102,17 @@ def _kinds_of(state):
             continue
         t = _M.TITLE_OF_KIND.get(kind) or kind
         parts.append(t.split("：", 1)[1] if "：" in t else t)
-    return "、".join(parts)
+    lines, cur = [], ""
+    for p in parts:
+        cand = (cur + "、" + p) if cur else p
+        if cur and len(cand) > TERM_SENT_MAX:
+            lines.append(cur)
+            cur = p
+        else:
+            cur = cand
+    if cur:
+        lines.append(cur)
+    return "。".join(lines)
 
 
 #: 规则类别 → 中文。**fail-loud**：规则表新增类别没登记中文名 ⇒ 抛错，

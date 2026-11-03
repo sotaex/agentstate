@@ -7956,9 +7956,12 @@ def n_t4_posture_note_only_when_needed():
 #:     这类派生句 —— 扫源码会漏掉派生结果）。各守一层，各配负控。
 
 #: ASD-STE100 折算：一句 ≤20 词 ⇒ 中文按 1 词 ≈ 2 字 ⇒ **一句 ≤40 字**。
-_TERM_SENT_MAX = 40
+#: ★★ 0.64.0：这两个数**由产品拥有**（`glossary.TERM_SENT_MAX`），本文件只引用。
+#:   原因：`glossary._kinds_of()` 要在派生时就按这个预算断句 —— 两边各存一份，
+#:   改一处另一处就成"看不见的第二把尺子"（本仓第一顽症）。
+_TERM_SENT_MAX = GL.TERM_SENT_MAX
 #: 一个字段最多几句：STE 一段 ≤6 句，但词条字段是短说明 ⇒ **2 句封顶**。
-_TERM_SENT_PER_FIELD = 2
+_TERM_SENT_PER_FIELD = GL.TERM_SENT_PER_FIELD
 
 
 def _tw(s):
