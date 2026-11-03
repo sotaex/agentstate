@@ -45,6 +45,7 @@ import contextlib
 import importlib.util
 import io
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -1784,12 +1785,44 @@ def _r64_referenced_names():
     return names
 
 
+def _r64_tracked_probes():
+    """「在册」探针名 —— 走 `git ls-files`，**唯一口径**。
+
+    ★★ 为什么扫描面是「在册」而不是「磁盘上有的」（0.64.0 实测，本条第一版错在这）：
+      `output/` 是草稿区。本机实测磁盘上 `output/_p_*.py` 有 **307 个**，
+      而 git 只跟踪 **31 个**。第一版扫磁盘 ⇒ 判据在主干上**永久变红**，
+      唯一出路是往登记簿里灌 280 行橡皮图章；而登记簿一旦变成豁免本，
+      这条判据就废了（「永远红」与「永远绿」同罪：都没人再看）。
+      判据的意图是「**建了没人跑**」—— 指的是提交进仓、看起来像一条声明的
+      探针。未跟踪的草稿没人能从干净检出里跑到，`git clean` 一走就没，
+      它不构成声明，也就不构成"没人跑"。
+    ★ 但**两个数都要印**（在册 N／未跟踪草稿 M）：只印一个会让人以为
+      "全都归了属"。分类不同不许合并计数。
+    ★ git 取不到（非仓、git 缺失）⇒ **退回磁盘扫描**（更严），并在输出里
+      说明是退路 —— 这一侧错向只能是"多报"，不许是"少报"。
+    返回 (在册名单, 未跟踪数, 说明串)。
+    """
+    import glob as _glob                                     # noqa: PLC0415
+    disk = sorted(os.path.basename(p) for p in
+                  _glob.glob(os.path.join(ROOT, "output", "_p_*.py")))
+    try:
+        r = subprocess.run(["git", "ls-files", "-z", "--", "output/_p_*.py"],
+                           cwd=ROOT, capture_output=True)
+        if r.returncode != 0:
+            raise OSError("git ls-files rc=%d" % r.returncode)
+        tracked = sorted({os.path.basename(x.decode("utf-8", "replace"))
+                          for x in r.stdout.split(b"\0") if x.strip()})
+    except Exception as e:                                   # noqa: BLE001
+        return disk, 0, "git 取不到（%s），退回磁盘扫描 %d 个（退路只会多报）" % (e, len(disk))
+    if not tracked:
+        return disk, 0, "git 说没有在册探针，退回磁盘扫描 %d 个（退路只会多报）" % len(disk)
+    return tracked, len(disk) - len(set(disk) & set(tracked)), ""
+
+
 def _r64_orphans(names=None):
     """既没有判据引用、也没登记为一次性的探针名。"""
-    import glob as _glob                                     # noqa: PLC0415
     if names is None:
-        names = [os.path.basename(p) for p in
-                 sorted(_glob.glob(os.path.join(ROOT, "output", "_p_*.py")))]
+        names = _r64_tracked_probes()[0]
     try:
         with io.open(_PROBE_REGISTRY, encoding="utf-8") as f:
             reg = json.load(f)
@@ -1805,11 +1838,12 @@ def r64g():
     import glob as _glob                                     # noqa: PLC0415
     if not os.path.isfile(_PROBE_REGISTRY):
         return "缺 ci/probe_registry.json —— 归属判据没有对象"
+    tracked, untracked, why_scope = _r64_tracked_probes()
     bad = _r64_orphans()
     if bad is None:
         return "ci/probe_registry.json 读不出来或形状不对"
     if bad:
-        return ("这些探针没有任何判据在跑、也没登记为一次性：%s"
+        return ("这些在册探针没有任何判据在跑、也没登记为一次性：%s"
                 "（「建了没人跑」与「没建」在全量结果上同貌）" % ", ".join(bad))
     with io.open(_PROBE_REGISTRY, encoding="utf-8") as f:
         reg = json.load(f)
@@ -1818,7 +1852,8 @@ def r64g():
     dead = sorted(set(reg.get("one_off") or []) - on_disk)
     if dead:
         return "一次性清单里这些文件已不存在（清单腐烂会让「都登记了」变空话）：%s" % ", ".join(dead)
-    _note("%d 个探针，归属齐全" % len(on_disk))
+    _note("%d 个在册探针，归属齐全；另有 %d 个未跟踪草稿不在本判据范围内%s"
+          % (len(tracked), untracked, ("（" + why_scope + "）") if why_scope else ""))
     return True
 
 

@@ -506,6 +506,18 @@ def console_profile_dir(create=True):
         if os_name() != "nt":
             return None
         base = os.environ.get("LOCALAPPDATA")
+        # ★★ 2026-11-03（P6 红着抓出来的）：`LOCALAPPDATA` 在本机**经常是空的**
+        #   （实测本仓的 python 进程里 `os.environ.get('LOCALAPPDATA')` 为 None，
+        #    而 `USERPROFILE` 有值）。空着就直接 return None ⇒ 开窗那条路
+        #    **静默**退回「复用用户浏览器进程」，于是 `--window-size` /
+        #    `--window-position` 被完全忽略 —— 这正是 0.36.0 那个根因的回潮，
+        #    而且不报错、日志也看不出来。
+        #   ⇒ 退路用 USERPROFILE 拼同一个位置（Windows 上两者指向同一目录）。
+        #     **只在 LOCALAPPDATA 缺失时**才拼，不覆盖宿主给的值。
+        if not base:
+            _up = os.environ.get("USERPROFILE")
+            if _up:
+                base = os.path.join(_up, "AppData", "Local")
         if not base:
             return None
         d = os.path.join(base, "Antinel", "console-browser")
