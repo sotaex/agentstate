@@ -1,5 +1,5 @@
 {
- "read_at": "2026-11-03 07:46:15",
+ "read_at": "2026-11-03 09:04:21",
  "files": 124,
  "writers": [
   {
@@ -12,7 +12,7 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'warning'"
+    "severity": "warning"
    },
    "group": "root-runtime"
   },
@@ -26,7 +26,7 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'none'"
+    "severity": "none"
    },
    "group": "root-runtime"
   },
@@ -40,7 +40,7 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'none'"
+    "severity": "none"
    },
    "group": "root-runtime"
   },
@@ -112,7 +112,7 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'none'"
+    "severity": "none"
    },
    "group": "root-runtime"
   },
@@ -128,9 +128,7 @@
     "kw",
     "pop"
    ],
-   "siblings": {
-    "severity": "kw.pop('severity', 'warning')"
-   },
+   "siblings": {},
    "group": "root-runtime"
   },
   {
@@ -143,8 +141,8 @@
     "config_refresh"
    ],
    "siblings": {
-    "severity": "'info'",
-    "action": "'allow'"
+    "severity": "info",
+    "action": "allow"
    },
    "group": "root-runtime"
   },
@@ -169,8 +167,8 @@
     "config_skip"
    ],
    "siblings": {
-    "severity": "'critical'",
-    "action": "'alert'"
+    "severity": "critical",
+    "action": "alert"
    },
    "group": "root-runtime"
   },
@@ -184,8 +182,8 @@
     "config_refresh"
    ],
    "siblings": {
-    "severity": "'info'",
-    "action": "'allow'"
+    "severity": "info",
+    "action": "allow"
    },
    "group": "root-runtime"
   },
@@ -518,7 +516,7 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'warning'"
+    "severity": "warning"
    },
    "group": "root-runtime"
   },
@@ -532,7 +530,7 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'warning'"
+    "severity": "warning"
    },
    "group": "root-runtime"
   },
@@ -546,7 +544,7 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'warning'"
+    "severity": "warning"
    },
    "group": "root-runtime"
   },
@@ -560,8 +558,8 @@
     "alert"
    ],
    "siblings": {
-    "severity": "'critical'",
-    "action": "'alert'"
+    "severity": "critical",
+    "action": "alert"
    },
    "group": "hooks"
   },
@@ -575,7 +573,7 @@
     "alert"
    ],
    "siblings": {
-    "severity": "'warning'"
+    "severity": "warning"
    },
    "group": "hooks"
   },
@@ -613,8 +611,8 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'critical'",
-    "action": "'allow'"
+    "severity": "critical",
+    "action": "allow"
    },
    "group": "hooks"
   },
@@ -631,8 +629,7 @@
     "get"
    ],
    "siblings": {
-    "severity": "'critical'",
-    "action": "'allow' if _v.get('decision') == 'allow' else 'block'"
+    "severity": "critical"
    },
    "group": "hooks"
   },
@@ -646,8 +643,8 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'critical'",
-    "action": "'allow'"
+    "severity": "critical",
+    "action": "allow"
    },
    "group": "hooks"
   },
@@ -661,8 +658,8 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'warning'",
-    "action": "'alert'"
+    "severity": "warning",
+    "action": "alert"
    },
    "group": "hooks"
   },
@@ -676,8 +673,8 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'critical'",
-    "action": "'allow'"
+    "severity": "critical",
+    "action": "allow"
    },
    "group": "hooks"
   },
@@ -691,8 +688,7 @@
     "allow"
    ],
    "siblings": {
-    "severity": "_sev_by_id.get(rid, 'warning')",
-    "action": "'allow'"
+    "action": "allow"
    },
    "group": "hooks"
   },
@@ -706,8 +702,8 @@
     "alert"
    ],
    "siblings": {
-    "severity": "'warning'",
-    "action": "'alert'"
+    "severity": "warning",
+    "action": "alert"
    },
    "group": "hooks"
   },
@@ -721,8 +717,8 @@
     "config_rejected"
    ],
    "siblings": {
-    "severity": "'warning'",
-    "action": "'alert'"
+    "severity": "warning",
+    "action": "alert"
    },
    "group": "hooks"
   },
@@ -736,8 +732,8 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'info'",
-    "action": "'alert'"
+    "severity": "info",
+    "action": "alert"
    },
    "group": "hooks"
   },
@@ -751,8 +747,8 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'info'",
-    "action": "'alert'"
+    "severity": "info",
+    "action": "alert"
    },
    "group": "hooks"
   },
@@ -766,7 +762,7 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'none'"
+    "severity": "none"
    },
    "group": "hooks"
   },
@@ -780,8 +776,8 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'info'",
-    "action": "'allow'"
+    "severity": "info",
+    "action": "allow"
    },
    "group": "hooks"
   },
@@ -818,8 +814,8 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'warning'",
-    "action": "'alert'"
+    "severity": "warning",
+    "action": "alert"
    },
    "group": "hooks"
   },
@@ -833,8 +829,8 @@
     "config_fallback"
    ],
    "siblings": {
-    "severity": "'critical'",
-    "action": "'alert'"
+    "severity": "critical",
+    "action": "alert"
    },
    "group": "hooks"
   },
@@ -859,8 +855,8 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'critical'",
-    "action": "'alert'"
+    "severity": "critical",
+    "action": "alert"
    },
    "group": "hooks"
   },
@@ -888,8 +884,8 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'critical'",
-    "action": "'alert'"
+    "severity": "critical",
+    "action": "alert"
    },
    "group": "hooks"
   },
@@ -925,8 +921,8 @@
     "config_fallback"
    ],
    "siblings": {
-    "severity": "'critical'",
-    "action": "'alert'"
+    "severity": "critical",
+    "action": "alert"
    },
    "group": "hooks"
   },
@@ -951,7 +947,7 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'info'"
+    "severity": "info"
    },
    "group": "hooks"
   },
@@ -965,7 +961,7 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'none'"
+    "severity": "none"
    },
    "group": "hooks"
   },
@@ -979,8 +975,8 @@
     "alert"
    ],
    "siblings": {
-    "severity": "'critical'",
-    "action": "'alert'"
+    "severity": "critical",
+    "action": "alert"
    },
    "group": "scripts"
   },
@@ -996,9 +992,7 @@
     "ev",
     "get"
    ],
-   "siblings": {
-    "severity": "(ev.get('severity') or rule.get('severity') or 'warning').lower()"
-   },
+   "siblings": {},
    "group": "scripts"
   },
   {
@@ -1010,9 +1004,7 @@
    "refs": [
     "finding"
    ],
-   "siblings": {
-    "severity": "f.get('severity', 'warning')"
-   },
+   "siblings": {},
    "group": "scripts"
   },
   {
@@ -1062,7 +1054,7 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'none'"
+    "severity": "none"
    },
    "group": "scripts"
   },
@@ -1076,8 +1068,8 @@
     "block"
    ],
    "siblings": {
-    "severity": "'critical'",
-    "action": "'block'"
+    "severity": "critical",
+    "action": "block"
    },
    "group": "scripts"
   },
@@ -1091,8 +1083,8 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'none'",
-    "action": "'allow'"
+    "severity": "none",
+    "action": "allow"
    },
    "group": "scripts"
   },
@@ -1106,8 +1098,8 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'critical'",
-    "action": "'alert'"
+    "severity": "critical",
+    "action": "alert"
    },
    "group": "scripts"
   },
@@ -1121,8 +1113,8 @@
     "block"
    ],
    "siblings": {
-    "severity": "'critical'",
-    "action": "'block'"
+    "severity": "critical",
+    "action": "block"
    },
    "group": "scripts"
   },
@@ -1136,8 +1128,8 @@
     "block"
    ],
    "siblings": {
-    "severity": "'critical'",
-    "action": "'block'"
+    "severity": "critical",
+    "action": "block"
    },
    "group": "scripts"
   },
@@ -1151,8 +1143,8 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'critical'",
-    "action": "'alert'"
+    "severity": "critical",
+    "action": "alert"
    },
    "group": "scripts"
   },
@@ -1166,7 +1158,7 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'warning'"
+    "severity": "warning"
    },
    "group": "ci"
   },
@@ -1180,7 +1172,7 @@
     "block"
    ],
    "siblings": {
-    "severity": "'critical'"
+    "severity": "critical"
    },
    "group": "ci"
   },
@@ -1289,7 +1281,7 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'warning'"
+    "severity": "warning"
    },
    "group": "ci"
   },
@@ -1387,7 +1379,7 @@
     "deny"
    ],
    "siblings": {
-    "severity": "'critical'"
+    "severity": "critical"
    },
    "group": "ci"
   },
@@ -1400,9 +1392,7 @@
    "refs": [
     "deny"
    ],
-   "siblings": {
-    "severity": "sev"
-   },
+   "siblings": {},
    "group": "ci"
   },
   {
@@ -1415,8 +1405,8 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'warning'",
-    "action": "'alert'"
+    "severity": "warning",
+    "action": "alert"
    },
    "group": "ci"
   },
@@ -1430,8 +1420,8 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'warning'",
-    "action": "'alert'"
+    "severity": "warning",
+    "action": "alert"
    },
    "group": "ci"
   },
@@ -1445,8 +1435,8 @@
     "allow"
    ],
    "siblings": {
-    "severity": "'warning'",
-    "action": "'alert'"
+    "severity": "warning",
+    "action": "alert"
    },
    "group": "ci"
   }
@@ -1474,5 +1464,29 @@
  "forms_zero": [
   "W3-subscript",
   "W4-attribute"
- ]
+ ],
+ "pairs": {
+  "total": 46,
+  "consistent": 12,
+  "derived": 11,
+  "config_face": 5,
+  "unpaired": 17,
+  "conflict": 0,
+  "unregistered_decision": 1,
+  "taxonomy_source": "hooks/notify_policy.py: _DECISION_FROM_CONFIG_FACE / _RANK / _DECISION_ALIAS（本脚本不留副本）",
+  "taxonomy_loaded": true,
+  "taxonomy_error": null,
+  "derived_rule": "action=alert + decision=allow（派生告警，产品侧设计如此）",
+  "config_face_rule": "decision ∈ _DECISION_FROM_CONFIG_FACE（契约 §3：配置/报告面事实，action 表达不了）",
+  "unpaired_rule": "同 dict 里没有 action 键（policy_changed／canary_planted 等非裁决记录）⇒ 无从配对，不是矛盾",
+  "conflict_items": [],
+  "unregistered_items": [
+   {
+    "path": "host_shield.py",
+    "line": 2650,
+    "action": "alert",
+    "decision": "config_skip"
+   }
+  ]
+ }
 }

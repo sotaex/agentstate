@@ -3,12 +3,12 @@
  "card_id": "antinel-security-suite",
  "skill": "antinel-security",
  "skill_version": "0.63.2",
- "verdict": "PASS",
+ "verdict": "FAIL",
  "status": {
   "value": "current",
   "derivation": "auto",
   "reason": null,
-  "checkedAt": "2026-11-02T23:53:36+08:00",
+  "checkedAt": "2026-11-03T09:40:34+08:00",
   "note": "re-derive any time: python -m tools.antinel_verify (--manifest for all 24 shipped files); which assertions failed: discrimination.failed[]"
  },
  "scope": {
@@ -51,10 +51,15 @@
    "op": "black-box subprocess assertions (stdin JSON in, exit code + stdout/stderr out)"
   },
   "assertions": {
-   "passed": 325,
-   "total": 325
+   "passed": 327,
+   "total": 328
   },
-  "failed": [],
+  "failed": [
+   {
+    "name": "F-09 host-shield 自检查不出来时不谎报已安装（三态：None != True）",
+    "detail": "注入(启动项不在+schtasks抛错)=None；对照(不注入)=None｜注入没生效（对照也是 None）⇒ 本判具此刻无分辨力"
+   }
+  ],
   "by_kind": {
    "taxonomy": {
     "product": "产品缺陷：代码行为不符合声言（默认类，fail-closed）",
@@ -70,17 +75,22 @@
    },
    "counts": {
     "product": 0,
-    "instrument": 0,
+    "instrument": 1,
     "environment": 0,
     "process-stale": 0
    },
-   "per_failure": [],
+   "per_failure": [
+    {
+     "name": "F-09 host-shield 自检查不出来时不谎报已安装（三态：None != True）",
+     "kind": "instrument",
+     "basis": "负控衰减：注入 OSError 欲使 subprocess.run 抛错，但 0.35.3 起 task_installed() 文件系统事实优先（os.path.isfile(shim) 早退 return True）⇒ 注入永远到不了被测分支；本机 shim 存在 ⇒ 产品行为反而更安全。"
+    }
+   ],
    "stale_entries": [
     "UX: 同类提醒当天只提示一次（第二次静默记录）",
     "0.16.0 AN-009 URL /rd/ segment is not a delete (AN-006 warns, no block)",
     "0.16.0 antinel_verify derives current on an intact package",
     "0.17.0 P-B1 without --manifest, a shipped file outside the digest set is out of scope (documented)",
-    "F-09 host-shield 自检查不出来时不谎报已安装（三态：None != True）",
     "F-13 paramedic 复活死亡监理并留痕（死因 RC5 回归）",
     "F-15 门闸高危事件实时推送＋同类 30 分钟节流（0.28.2 报警 v1）",
     "F-17 心跳判死：无心跳/心跳陈旧的监理会被强制重启（B2）",
@@ -90,15 +100,15 @@
     "count": 0,
     "files": []
    },
-   "invariant": "sum(counts.values()) == len(failed) == 0"
+   "invariant": "sum(counts.values()) == len(failed) == 1"
   },
   "partial": false
  },
  "platformSpec": true,
  "objectOwnership": "self",
  "objectOwnershipBasis": "subject github.com/sotaex is in the signed namespace list",
- "assertions_total": 325,
- "assertions_passed": 325,
+ "assertions_total": 328,
+ "assertions_passed": 327,
  "criteria_independence": "Assertions exercise the hook protocol, rule matching, scanner, installer and reporter as black boxes through subprocesses (stdin JSON in, exit code and stdout/stderr out); they were authored from the design specification ANT-SEC-SPEC-001 v1.1, not from the implementation; third-party re-run supported.",
  "environment": {
   "python": "3.11.4",
@@ -117,11 +127,11 @@
   "rules/economics/qoder.json": "sha256:5f51a86cbe0625f44519ce1308e562286c9d3410d0b7284006ac26b068396a3d",
   "rules/economics/generic.json": "sha256:4849374b3d2443dd77329b09d348dec03794863aa8f991d98ea5380a9849b82f",
   "hooks/pre_tool_use.py": "sha256:5b079c5253b9c3b57cc236a4fa17d284453cc93417001b66cff14281c0e13cd6",
-  "hooks/post_tool_use.py": "sha256:066d6c5dc4bda900d2931cd999e691751051ab23169e416e417507ff20fe3481",
+  "hooks/post_tool_use.py": "sha256:4376d53f4b390935afe11c000f747b0b5cb7eb488ac93f332e616d5f6a3ed3c8",
   "scripts/scan.py": "sha256:e27ce9ae619422b990d8b0d48e94e0403ee9f57e87d9a7f51365c54c01342154",
   "scripts/install.py": "sha256:0a5b21e2792e69f2aaedaa28ad6c2872eb56fb56e2509c510d7f6d5ccd2b5df8",
   "scripts/report.py": "sha256:caaf0c4ac32b06831482027453f40dbe526afd54a539556d213ad62d507d2836",
-  "scripts/verification_tests.py": "sha256:0361be4ebeed0a981539bf981303528e50db5121620cd5041a54232121c49f3f",
+  "scripts/verification_tests.py": "sha256:a6af630203ac6d517f0fab1c9c8b029bc8070cd8a115bd9252191017b09bb239",
   "session_dna.py": "sha256:38b2bd765fdf2308fa698eb507e53c4ba7fbe2bf11c94216d95ad5dd116fb205",
   "transcript_reader.py": "sha256:c0ce99c5bdfb255f170ca744c011ae64ceb9569d1c9dd8efc1a2c096ff89dc1c",
   "audit_chain.py": "sha256:9a4438cbb65d20e8c7e1482c455a5a2a198aaaba6c1ded3eea1154b867d6f634",
@@ -130,11 +140,11 @@
   "tools/enforce_probe.py": "sha256:1a98f4d93425aca43eda9fc82d08042be5626ed9091d275b33aada84dfdf5d62"
  },
  "run": {
-  "started_at": "2026-11-02T23:50:38+0800",
-  "duration_ms": 177961,
+  "started_at": "2026-11-03T09:36:02+0800",
+  "duration_ms": 271933,
   "duration_note": "wall-clock of a subprocess fan-out suite; machine- and load-dependent, not comparable across environments",
   "executor": "scripts/run_harness.py",
-  "exit_code": 0,
+  "exit_code": 1,
   "bootstrap": false
  },
  "re_run": "python -m scripts.run_harness",

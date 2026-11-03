@@ -393,6 +393,63 @@ def handle_actions(root=None, opener=None, console_url=None):
     return res
 
 
+def _knock_daily_path(root):
+    return os.path.join(root, ".psl", "state", "knock_daily.json")
+
+
+def _knock_daily_read(root):
+    """读额度账。读不到 ⇒ 空 dict（不是"今天敲过了"）。"""
+    try:
+        with open(_knock_daily_path(root), encoding="utf-8") as fh:
+            rec = json.load(fh)
+        return rec if isinstance(rec, dict) else {}
+    except Exception:                       # noqa: BLE001
+        return {}
+
+
+def _knock_daily_take(root, today, now_ts=None):
+    """跨规则共享的「每天最多敲一次」额度 —— **唯一实现**。返回 (拿到没有, 理由)。
+
+    ★ 为什么要有它（2026-11-03，创始人裁定「四项都做」的第①项）：
+      0.59.0 把 L1 的敲门通道整个关掉（连根去除原生 toast）之后，
+      「主动性」第三条要件（**系统自己发起**）在产品侧不再成立 —— 所有 L1
+      只进收件箱、托盘角标与台账，一像素不占屏幕。
+      裁定是「只开每日一次窗口」：要的是「它主动说了一次」，不是「它一直在说」。
+
+    ★ 为什么额度是**跨 kind 共享**而不是每 kind 一份：
+      `inbox_bubble.MIN_INTERVAL = 1800` 已经是「同类 30 分钟一次」，
+      实测结果是每天几十对（`notice_log.jsonl` 五天来每 30–45 分钟一对）。
+      按 kind 各发一份额度，等于把那条节奏原样搬回来，只是换了个执行者。
+
+    ★ 为什么记账失败 ⇒ **不给额度**（方向是"不敲"）：
+      这与通知面「拿不到账本宁可多提示」的方向**故意相反**。区别在于代价：
+      通知面漏报不可逆，这边多敲一次只是烦。拿不准就不打扰用户。
+
+    ★ 日期用调用方给的 `today`（`self.today()` 可注入）——
+      自己再取一次 `time.strftime` 就是第二份时间真源，跨零点的判据会打架。
+      `at` 的**日期段也从 `today` 取**，只补时分秒：账本里两个时间字段必须同源，
+      否则会写出「date=2026-11-04 / at=2026-11-03 09:12」这种自相矛盾的一行
+      （注入 today 的判据一跑就现形）。
+    """
+    now_ts = now_ts or ("%s %s" % (today, time.strftime("%H:%M:%S")))
+    rec = _knock_daily_read(root)
+    if rec.get("date") == today:
+        return False, "这一天已提醒过（%s），不再重复" % (rec.get("at") or "?")
+    p = _knock_daily_path(root)
+    try:
+        d = os.path.dirname(p)
+        if d:
+            os.makedirs(d, exist_ok=True)
+        tmp = p + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump({"date": today, "at": now_ts}, fh, ensure_ascii=False)
+        os.replace(tmp, p)
+    except Exception as exc:                # noqa: BLE001
+        return False, "敲门额度账写不进去，按不敲处理（%s: %s）" % (
+            type(exc).__name__, exc)
+    return True, "这一天第一次提醒（%s）" % now_ts
+
+
 def _should_knock(it):
     """这一条记录该不该"敲门"（弹任何窗）—— **只问一把尺子**。
 
@@ -561,6 +618,7 @@ class Daemon:
                "unhandled": M.unhandled_count(items), "notified": [],
                "emphasis": [], "fallback": [], "actions": [], "errors": [],
                "bubble": [], "quiet": [],
+               "knock_daily": [],
                "heartbeat": None}
 
         # ①b 首检提醒（T1.3，设计 v1.11 §29.1）：装好 ≥24h 仍没体检过 ⇒
@@ -631,16 +689,41 @@ class Daemon:
                                 _HSq.note_bubble_suppressed(it.kind, _why_k)
                             except Exception:        # noqa: BLE001
                                 pass                 # 记账失败不影响"不敲门"
-                        else:
+                        elif not bool(cfg.get("knock_daily", True)):
+                            # 开关关掉 ⇒ 回到 0.59.0 之后的行为（一像素不占屏幕）。
+                            # 留这个开关不是为了"两面讨好"：它是**回退位**——
+                            # 每日一次窗口真出问题时，改配置就能停，不必回滚版本。
                             out["quiet"].append(
                                 {"id": it.id,
-                                 "why": "L1 提醒不敲门：进收件箱与托盘角标"})
+                                 "why": "knock_daily 关闭：L1 只进收件箱与托盘角标"})
                             try:
                                 import host_shield as _HSq2
                                 _HSq2.note_bubble_suppressed(
-                                    it.kind, "L1 提醒不敲门（只进收件箱与角标）")
+                                    it.kind, "knock_daily 关闭（只进收件箱与角标）")
                             except Exception:        # noqa: BLE001
                                 pass
+                        else:
+                            # ★ 2026-11-03（第①项）：L1 开「每天最多一次」的窗口。
+                            #   尺子仍然是 `_should_knock`（不新增判定），
+                            #   这里只加**额度**：今天还没敲过 ⇒ 敲这一次。
+                            #   单独一栏 `knock_daily`，不与急事（`bubble`）混：
+                            #   两类动作混一栏，明天的读数就分不清「响了 3 次」
+                            #   是 3 件急事还是 3 天各一次。
+                            _got, _why_q = _knock_daily_take(self.root, today)
+                            if _got:
+                                _rep_d = self._pop_bubble(it)
+                                out["knock_daily"].append(
+                                    {"id": it.id, "ok": bool(_rep_d.get("ok")),
+                                     "why": _rep_d.get("why", ""),
+                                     "quota": _why_q})
+                            else:
+                                out["quiet"].append(
+                                    {"id": it.id, "why": _why_q})
+                                try:
+                                    import host_shield as _HSq3
+                                    _HSq3.note_bubble_suppressed(it.kind, _why_q)
+                                except Exception:    # noqa: BLE001
+                                    pass
                 except Exception as e:          # noqa: BLE001
                     out["errors"].append("notify: %s" % e)
             if M.PRIORITY.get(it.level, 0) >= M.PRIORITY["R0"]:

@@ -324,8 +324,10 @@ def once(*, root: str, state_path: str, at: str = DEFAULT_AT, force: bool = Fals
                                       "why": why}
                 try:
                     save_state(state_path, state)
-                except OSError:
-                    pass
+                except OSError as exc:
+                    # 留痕丢了不改判「明天该不该跑」（last_run_date 没动），
+                    # 但**不许静默** —— 静默失败与「写成功了」在磁盘上一模一样。
+                    print("[损] 跳过留痕没写进去：%s" % exc, file=sys.stderr)
             return out
 
         push_log = state_path + ".push.jsonl"
@@ -363,8 +365,14 @@ def once(*, root: str, state_path: str, at: str = DEFAULT_AT, force: bool = Fals
         try:
             save_state(state_path, new_state)
         except OSError as exc:
+            # ★ 这不只是一行日志（2026-11-03 修）：状态没落盘 ⇒ 明天 `should_run`
+            #   读到旧 `last_run_date` ⇒ 重跑重推。常驻模式下每 interval 重读磁盘、
+            #   原本没有任何内存态保护 ⇒ **无限重跑重推**，正是 host_changed 302 条
+            #   那场病的机制。所以：① 进退出码（`--once`）；② 把待写内容交回调用方
+            #   （`--loop` 用它补写，补上就回到单真源）。
             out["why"] += "｜状态写不进去：%s" % exc
             out["state_write_failed"] = True
+            out["state_pending"] = new_state
         return out
     finally:
         if lock:
@@ -373,7 +381,12 @@ def once(*, root: str, state_path: str, at: str = DEFAULT_AT, force: bool = Fals
 
 # --------------------------------------------------------------------------- 自检
 def _selfcheck() -> int:
-    """七臂。**全部注入**，不读真账本、不起真窗口、不碰真状态。"""
+    """十一臂。**全部注入**，不读真账本、不起真窗口、不碰真状态。
+
+    臂数从九加到十一（2026-11-03）：⑩ 状态写失败（原先这条路径从未被走过，
+    所以「写失败返回 0」能潜伏到实测才暴露）、⑪ 跨天（要件①的唯一机器证据，
+    靠 `should_run()` 是纯函数，不必真等一天）。
+    """
     tmp = tempfile.mkdtemp(prefix="nightwatch_sc_")
     ok = True
 
@@ -474,6 +487,46 @@ def _selfcheck() -> int:
         fd, why = acquire_lock(lp)
         ck(fd is not None, "⑨ 陈旧锁自愈", why or "拿到锁")
         release_lock(fd, lp)
+
+        # ⑩ 状态写不进去 ⇒ 必须报出来，并把待写内容交回调用方
+        #    （2026-11-03 加，起因：实测 `--state` 指目录时返回 0 且印「结果 ok」，
+        #      tmp 残留 1240 字节；常驻下每 interval 重跑重推。旧版实测跑 2 次、退出 0。）
+        #    注入方式选「把 replace 打成必失败」而不是「--state 指目录」：
+        #    后者会在临时目录里留一个删不掉的子目录，污染 finally 的清理。
+        import _commit as _C
+        _real_replace = _C._replace_with_retry
+
+        def _never(tmp_, path_):
+            raise OSError(13, "injected: replace 一律失败")
+
+        _C._replace_with_retry = _never
+        try:
+            r = once(root=tmp, state_path=sp("wf"), now=now,
+                     runner=mk_runner([{"sent": False}]), lock=False)
+        finally:
+            _C._replace_with_retry = _real_replace
+        ck(r["ran"] and r.get("state_write_failed") is True
+           and isinstance(r.get("state_pending"), dict),
+           "⑩ 状态写不进去 ⇒ 必须报出来",
+           "ran=%s failed=%s pending=%s"
+           % (r["ran"], r.get("state_write_failed"),
+              type(r.get("state_pending")).__name__))
+
+        # ⑪ 跨天（主动性要件①的机器证据）
+        #    ⑪ 是纯函数臂：`should_run()` 的入参里就有 `today`，**不必真等一天**。
+        #    三条腿缺一不可 —— 只有「昨天跑过⇒该跑」那条的话，
+        #    「永远该跑」也能通过（那就是去重坏了的形态，正是 302 条 host_changed）。
+        _y = {"last_run_date": "2026-11-02", "last_run_at": "2026-11-02 09:00:05",
+              "last_result": RESULT_OK}
+        d1, _ = should_run(_y, today="2026-11-03", now=now, at="09:00",
+                           force=False, gate_by_clock=True)
+        d2, _ = should_run(dict(_y, last_result=RESULT_FAILED), today="2026-11-03",
+                           now=now, at="09:00", force=False, gate_by_clock=True)
+        d3, why3 = should_run(dict(_y, last_run_date="2026-11-03"), today="2026-11-03",
+                              now=now, at="09:00", force=False, gate_by_clock=True)
+        ck(d1 and d2 and (not d3),
+           "⑪ 跨天该跑／同日不跑（纯函数，不必等一天）",
+           "昨天跑过=%s 昨天失败=%s 同日=%s(%s)" % (d1, d2, d3, why3[:18]))
     finally:
         for n in os.listdir(tmp):
             try:
@@ -486,7 +539,7 @@ def _selfcheck() -> int:
             pass
 
     print()
-    print("自检 %s（九臂）" % ("全过" if ok else "有失败"))
+    print("自检 %s（十一臂）" % ("全过" if ok else "有失败"))
     return 0 if ok else 1
 
 
@@ -565,6 +618,12 @@ def main(argv=None) -> int:
         print("[跑了] %s（%.1fs）结果 %s" % (r["today"], r.get("seconds") or 0,
                                             r["result"]))
         print("[推送] %s" % json.dumps(r["push"], ensure_ascii=False))
+        if r.get("state_write_failed"):
+            # 退出码 3 与「跑失败＝1」分开：这一轮**跑成功了**，丢的是状态。
+            # 混成一个码会让「跑了但明天会重跑」与「压根没跑成」同貌。
+            print("[损] 状态没写进去 ⇒ 明天会重跑重推；修好之前不要连跑第二天",
+                  file=sys.stderr)
+            return 3
         return 0 if r["result"] == RESULT_OK else 1
 
     # ---- 常驻 ----
@@ -572,9 +631,26 @@ def main(argv=None) -> int:
                                                           args.root))
     print("[常驻] 状态 %s" % state_path)
     rounds = 0
+    # ★ 常驻内存里「上一轮跑完、但状态没落盘」的那份内容。
+    #   它**不是第二个真源**：唯一用途是补写磁盘状态，补上就清空。
+    #   没有它，一次瞬时占用会让循环每 interval 重跑一遍并重推一遍。
+    mem_pending = None
     try:
         while True:
             rounds += 1
+            stamp = datetime.now().strftime("%H:%M:%S")
+            if mem_pending is not None:
+                try:
+                    save_state(state_path, mem_pending)
+                    print("[%s] 补写状态成功（上一轮写失败的已补齐）" % stamp)
+                    mem_pending = None
+                except OSError as exc:
+                    print("[%s] 状态仍写不进去（%s）⇒ 本轮不重跑，避免重推"
+                          % (stamp, exc))
+                    if args.max_rounds and rounds >= args.max_rounds:
+                        return 3
+                    time.sleep(max(10, args.interval))
+                    continue
             r = once(root=args.root, state_path=state_path, at=args.at,
                      gate_by_clock=True, watchman_py=args.watchman)
             stamp = datetime.now().strftime("%H:%M:%S")
@@ -583,9 +659,13 @@ def main(argv=None) -> int:
                                                   (r["push"] or {}).get("state")))
             else:
                 print("[%s] 没跑：%s" % (stamp, r["why"]))
+            if r.get("state_write_failed"):
+                mem_pending = r.get("state_pending")
+                print("[%s] 状态没写进去 ⇒ 已记为待补写；下一轮先补再判，不重跑"
+                      % stamp, file=sys.stderr)
             if args.max_rounds and rounds >= args.max_rounds:
                 print("[常驻] 到 --max-rounds=%d，退出" % args.max_rounds)
-                return 0
+                return 3 if mem_pending is not None else 0
             time.sleep(max(10, args.interval))
     except KeyboardInterrupt:
         print("\n[常驻] 收到中断，退出")

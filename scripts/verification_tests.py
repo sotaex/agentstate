@@ -3687,6 +3687,46 @@ def main():
            _hc_txt2.count('"host_changed"') == _n_before,
            "before=%d after=%s" % (_n_before, _hc_txt2.count('"host_changed"')))
 
+    # ★★ 2026-11-03 补：A→B→A→B 来回横跳必须**只报一次**。
+    #   原两条判据（W1-c 变要报、W1-d 同版本不重复）都覆盖不到这个形状，
+    #   而真账本里 8,408 条几乎全是它（成对且近似相等：2336/2332、1177/1165、667/667）。
+    #   判据缺这一条 ⇒ 「只在第一次发现新版本时报」与「每交替一次就报」同貌。
+    _hf = WORK / "hcflap"
+    (_hf / ".psl" / "audit").mkdir(parents=True, exist_ok=True)
+    for ver in ("9.9", "10.0", "9.9", "10.0", "9.9", "10.0"):
+        hook("Read", {"file_path": str(_hf / "x.txt")}, _hf,
+             script="post_tool_use.py",
+             extra={"tool_response": "ok", "version": ver})
+    _hf_day = _hf / ".psl" / "audit" / (time.strftime("%Y-%m-%d") + ".jsonl")
+    _hf_txt = _hf_day.read_text(encoding="utf-8", errors="replace") if _hf_day.exists() else ""
+    _hf_n = _hf_txt.count('"host_changed"')
+    record("W1-e 版本来回横跳 6 次 → host_changed 只报 1 条（新版本只发现一次）",
+           _hf_n == 1, "实际 %d 条（期望 1）" % _hf_n)
+
+    # ★ W1-f：回到见过的版本必须**留档**，不能因为不上链就当没发生。
+    #   只压条数不记抖动次数 ⇒ 「宿主稳定」与「抖了 5 次但被压掉了」同貌。
+    _hf_state = _hf / ".psl" / "state" / "host_seen.json"
+    try:
+        _hfs = json.loads(_hf_state.read_text(encoding="utf-8"))
+    except Exception:
+        _hfs = {}
+    _flap = int(_hfs.get("flap_count") or 0)
+    record("W1-f 横跳被压掉的次数进 flap_count（不静默丢弃）",
+           _flap >= 1, "flap_count=%d（期望 ≥1）" % _flap)
+    # ★ 反向腿：真·升级仍要报。没有这一条，「只报首次」可以退化成「永远不报」而全绿。
+    _hf2 = WORK / "hcnewver"
+    (_hf2 / ".psl" / "audit").mkdir(parents=True, exist_ok=True)
+    for ver in ("9.9", "10.0", "9.9", "11.0"):
+        hook("Read", {"file_path": str(_hf2 / "x.txt")}, _hf2,
+             script="post_tool_use.py",
+             extra={"tool_response": "ok", "version": ver})
+    _hf2_day = _hf2 / ".psl" / "audit" / (time.strftime("%Y-%m-%d") + ".jsonl")
+    _hf2_txt = _hf2_day.read_text(encoding="utf-8", errors="replace") if _hf2_day.exists() else ""
+    record("W1-g 出现第三个新版本 11.0 → 仍要上链（压横跳不等于不报新版本）",
+           '"to_version": "11.0"' in _hf2_txt and _hf2_txt.count('"host_changed"') == 2,
+           "条数=%d 含11.0=%s" % (_hf2_txt.count('"host_changed"'),
+                                  '"to_version": "11.0"' in _hf2_txt))
+
     # ★ 2026-10-31：把「非 bool 的 ok」记成一条**普通 FAIL**，放在汇总之前。
     #   为什么放在汇总前：要让这条进分母、进 passed 统计，与其它判据同权。
     #   放在汇总后就成了「附属说明」—— 读 SUMMARY 的人看不见它，等于没记。

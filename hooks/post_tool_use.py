@@ -482,7 +482,35 @@ def _maybe_enforce_probe(event):
 def _host_seen_update(event):
     """0.32.2 (A1): 宿主版本事实入 state——版本变化即上链 host_changed（W2 对冲：
     宿主升级是钩子协议漂移的头号来源，E-3 即实例）。宿主未带 version 时只更新
-    last_seen（缺失不造假）。每次 post 都读一个小 JSON；仅版本变化时写盘与上链。"""
+    last_seen（缺失不造假）。每次 post 都读一个小 JSON；仅版本变化时写盘与上链。
+
+    ★★★ 2026-11-03 修「来回抖刷屏」（实测 8,408 条，21 天）：
+      原实现只存 `last_version` ＝ **最后一个说话者的版本**。当同一个项目目录上
+      有两个不同版本的宿主交替接活时，版本会 A→B→A→B 来回覆盖，
+      **每交替一次就上链一条 host_changed**。盘上读数（`.psl/audit/*.jsonl`，37 个
+      日文件，读数时刻 2026-11-03 09:1x）：
+
+          5.8.4 → 5.8.3   2336 条      5.8.3 → 5.8.4   2332 条     ← 几乎相等
+          5.7.6 → 5.8.2   1177 条      5.8.2 → 5.7.6   1165 条     ← 几乎相等
+          5.9.3 → 5.9.4    667 条      5.9.4 → 5.9.3    667 条     ← 完全相等
+
+      成对且近似相等，是「来回横跳」的指纹，不是「宿主升级了 8,408 次」。
+      12 种版本对里只有 7 个不同的版本值 —— 一个版本值被反复"发现"了上千次。
+
+    ★ 为什么这比"少报几条"严重：这些记录全部 `decision=alert`。
+      8408 条 = 8408 次提醒，把提醒预算整个吃掉，真事件反而进不来。
+      **有牙但咬错对象，比没牙更坏**。
+
+    ★ 修法：state 里除了 `last_version`，再存**见过的版本集合** `known_versions`。
+      · 出现集合外的版本 ⇒ 真·新版本 ⇒ 上链（这就是原判据要保护的那件事）；
+      · 回到见过的版本 ⇒ **不上链**，只把 `flap_count` 加一（抖动次数留档，
+        不静默丢弃 —— 但也不假装它是 8408 个独立事件）。
+      这样宿主真的升级仍然报得到，来回横跳不再刷屏。
+
+    ★ 为什么不"加个时间窗节流"：节流会把「真升级」也一起压掉，
+      且窗口长度是个必须由人拍的数字。集合法不需要新阈值 —— 一件事报一次，
+      这是判据本身的定义，不是调参。
+    """
     try:
         ver = event.get("version") or None
         pdir = os.path.join(os.getcwd(), ".psl")
@@ -491,15 +519,30 @@ def _host_seen_update(event):
             st = json.load(open(st_p, encoding="utf-8"))
         except Exception:
             st = {}
+        if not isinstance(st, dict):
+            st = {}
         now_ts = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
         prev = st.get("last_version")
+        # 老 state 没有 known_versions ⇒ 用 last_version 播种，不把历史当空白
+        known = st.get("known_versions")
+        if not isinstance(known, list):
+            known = [prev] if prev else []
         if ver and prev and ver != prev:
-            append_jsonl({"ts": now_ts, "type": "host_changed", "tool": "-",
-                          "session": "", "host": "generic", "decision": "alert",
-                          "severity": "warning", "from_version": prev, "to_version": ver,
-                          "reason": "宿主版本变化——钩子协议可能漂移（E-3 类风险），"
-                                    "建议重跑 probe_host.py 与 enforce_probe.py"})
+            if ver not in known:
+                append_jsonl({"ts": now_ts, "type": "host_changed", "tool": "-",
+                              "session": "", "host": "generic", "decision": "alert",
+                              "severity": "warning", "from_version": prev,
+                              "to_version": ver,
+                              "reason": "宿主版本变化——钩子协议可能漂移（E-3 类风险），"
+                                        "建议重跑 probe_host.py 与 enforce_probe.py"})
+            else:
+                # 回到一个见过的版本：不算新事件，只累计抖动次数（留档不刷屏）
+                st["flap_count"] = int(st.get("flap_count") or 0) + 1
+                st["flap_last_at"] = now_ts
         if ver:
+            if ver not in known:
+                known.append(ver)
+            st["known_versions"] = known[-32:]      # 有界，避免无限增长
             st["last_version"] = ver
             st["last_seen"] = now_ts
             os.makedirs(os.path.dirname(st_p), exist_ok=True)

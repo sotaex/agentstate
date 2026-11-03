@@ -1,4 +1,4 @@
-# S3 decision 写入点定性（2026-11-03 07:46）
+# S3 decision 写入点定性（2026-11-03 09:04）
 
 扫描 124 个 .py；写入点 112（运行时 89 ＋ 判据 23）；读取点 33。
 
@@ -93,6 +93,22 @@
 | `scripts/verification_tests.py` | 3516 | W2-dictkey | literal | `'block'` |  |
 | `scripts/verification_tests.py` | 3532 | W2-dictkey | literal | `'block'` |  |
 | `scripts/verification_tests.py` | 3640 | W2-dictkey | literal | `'allow'` |  |
+
+## 同一 dict 里 action 与 decision 的配对
+
+字面量对 46 条：一致 12 ／ 派生告警 11 ／ 配置面 5 ／ 无对可判 17 ／ 档位打架 **0** ／ 取值未登记 **1**。（六栏相加＝总数）
+
+档位打架 **0 条** —— 查过且没有，不是「没查」。
+
+### decision 取值未登记（不是矛盾，是没人认领）
+
+这些值既不是档位词，也不在 `hooks/notify_policy.py` 的 `_DECISION_FROM_CONFIG_FACE` 里。运行时它们落**默认档**，而默认档会打扰用户 —— 所以这不是命名问题，是行为问题。
+
+| 路径 | 行 | action | decision |
+|---|---|---|---|
+| `host_shield.py` | 2650 | alert | config_skip |
+
+> 分类口径**不来自本文件**：`config_face` 认哪些值，取自 `hooks/notify_policy.py` 的 `_DECISION_FROM_CONFIG_FACE`（契约 §3 定稿）；档位词取自同文件 `_RANK` ∪ `_DECISION_ALIAS`。本文件不留副本 —— 产品改口径，这里跟着变；读不到真源就整节判红，不退回内置抄本。
 
 ## 判据/测试里的写入点（不参与收敛）
 
