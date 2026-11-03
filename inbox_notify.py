@@ -116,6 +116,28 @@ def default_backend():
     return NullBackend()
 
 
+#: sent 之后多久未见算逾期（秒）。N12 原设计＝30 分钟；是冻结值，不从别处派生。
+NOTICE_WINDOW = 1800.0
+
+#: `notice_log` 的通道取值域。`file` ＝ 无头走文件账（**不是坏通道**）。
+#: ★★ 2026-11-03 恢复：`toast` 必须留在取值域里，即使本版已不再发系统通知 ——
+#:   旧账里写着这个值，删掉它就会把历史上真发过的通知整批读成坏行。
+#:   **能力可以退役，取值域不能。**
+CHANNELS = ("toast", "bubble", "file")
+
+#: 用户动作的两种来源。别的值一律抛错 —— 用户动作不许猜。
+SEEN_HOW = ("open", "ack")
+
+#: 降级链的取值域。`none` ＝ 没有可用的降级通道（有通道但失败记最后尝试的那道）。
+DOWNGRADES = ("tray", "banner", "none")
+
+#: 无头的通道名。抽成常量是为了让负控能换掉**同一份判定**去证明它承重。
+HEADLESS_CHANNEL = "file"
+
+#: 没有降级执行器时报这个。★ 不许写 `"unknown"` —— "不知道能不能降级"不是"降级失败"。
+NO_DOWNGRADER_STATE = "undecidable"
+
+
 def notice_log_path(root=None):
     """通知账的落点（F7：`~/.antinel/console/notice_log.jsonl`，**不进链**）。
 

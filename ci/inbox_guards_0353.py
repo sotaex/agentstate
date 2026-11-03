@@ -740,15 +740,21 @@ def c_page_grouped_buckets():
                                 "can_fix": False, "fix": None, "fix_hint": ""},
                        items=items)
     # ★ 0.50.4（Q-05）：归并计数从「×2」改成「2 条（本级共 N 条）」——
-    #   乘号在中文里不是"共"，且与后面的分母连读像算式。判据**跟着产品文案
-    #   同步锚点**（与 0490 N-U05 同型）：断言的仍是"归并行给出了计数"，
-    #   不是放宽 —— 计数不在了照样红。
+    #   乘号在中文里不是"共"，且与后面的分母连读像算式。
+    # ★★ 2026-11-03：产品又改成只写「2 条」（撤掉了那个括号，理由见
+    #   `inbox_server._group_html` 的注释：N 是整档条数、每行重复、
+    #   与行内真实条数矛盾）。判据**跟着产品同步锚点**——断言的仍是
+    #   "归并行给出了本组条数"，计数不在了照样红，不是放宽。
     # ★★ S48：中文断言**必须显式选层**（`body()` 剥 style/注释、留词条浮层）——
     #   裸 `in h` 会被 <style> 里的说明文字误红（本套 0.50.4 实测被 S48 抓）。
-    # ★ 0.53.5（STE100 体检 S-10）：「这一档共」→「本级共」—— 锚点跟着
-    #   产品措辞走（判据绑文案第六次现场）。断言的仍是"归并行给出计数"，
-    #   计数不在了照样红，不是放宽。
-    return ("按类型归并" in PC.body(h) and "2 条（本级共" in PC.body(h)
+    # ★★ 2026-11-03（F3 满态走查）：产品撤掉了「（本级共 N 条）」
+    #   （那个 N 是整档条数，每行都印，与行内真正的条数矛盾）。
+    #   锚点从「2 条（本级共」改成**归并行自己的计数 pill**——
+    #   这是归并行独有的形状（全仓只有 `_group_html` 用 `pill sm`），
+    #   比裸「2 条」精确：裸串会被钻取链接「看这 2 条」满足 ⇒ 空转假绿。
+    #   断言的仍是「归并行给出了本组条数」，计数没了照样红。
+    return ("按类型归并" in PC.body(h)
+            and 'class="pill sm">2 条</span>' in h
             and "看这 2 条" in PC.body(h))
 
 
@@ -772,8 +778,14 @@ def n_page_grouped_buckets():
                        items=items)
     # ★★ S48：中文断言必须显式选层（负控与正判据同口径 —— 一边选层一边不选，
     #   等于给负控装了个不同的量具）。
+    # ★★ 2026-11-03：产品撤掉「（本级共 N 条）」后，这两条负控的锚点
+    #   跟着换。原锚「"2 条（本级共" not in body」是"不许出现归并计数"，
+    #   新锚等价且更精确：`pill sm">2 条` 只在**两条并成一行**时出现。
+    #   ⇒ 行数为 2、且没有 2 条的 pill ⇒ 证明两条各自成行、没被合并。
+    #   注意：**不能**断言"没有 item grp"——每条记录自己也是一组，
+    #   单条同样带 grp 壳（实测：负控夹具下 grp 出现 2 次）。
     return (h.count('class="item ') == 2
-            and "2 条（本级共" not in PC.body(h))
+            and 'class="pill sm">2 条</span>' not in h)
 
 
 def c_page_action_grouped_not_hidden():
@@ -804,7 +816,8 @@ def c_page_action_grouped_not_hidden():
     # ★★ S48：中文断言必须显式选层（`body()`）；纯 ASCII 结构标记
     #   （class=/value=）不在中文注释里出现，可留裸判（选层口径见
     #   `ci/page_caliber.py`：触发条件是「左操作数可能含中文」）。
-    return (h.count('class="item grp') == 1 and "3 条（本级共" in PC.body(h)
+    return (h.count('class="item grp') == 1
+            and 'class="pill sm">3 条</span>' in h
             and "监理进程不在岗" in PC.body(h)    # ① 原因
             and 'value="done_all"' in h           # ② 批量动作
             and "看这 3 条" in PC.body(h))        # ③ 钻取
@@ -830,7 +843,9 @@ def n_page_action_grouped_not_hidden():
                        items=items)
     # ★★ S48：中文断言必须显式选层（负控与正判据同口径 —— 一边选层一边不选，
     #   等于给负控装了个不同的量具）。
-    return h.count('class="item ') == 3 and "3 条（本级共" not in PC.body(h)
+    # ★★ 2026-11-03：锚点同 `n_page_grouped_buckets` 的理由 ——
+    #   三行各自成条、且没有 3 条的 pill ⇒ 证明没被并成一行。
+    return h.count('class="item ') == 3 and 'class="pill sm">3 条</span>' not in h
 
 
 def c_server_done_all_marks_group():
