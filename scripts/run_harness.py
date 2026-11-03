@@ -125,7 +125,9 @@ _BY_KIND_OVERRIDES = {
     "F-09 host-shield 自检查不出来时不谎报已安装（三态：None != True）": ("instrument",
         "负控衰减：注入 OSError 欲使 subprocess.run 抛错，但 0.35.3 起 task_installed() "
         "文件系统事实优先（os.path.isfile(shim) 早退 return True）⇒ 注入永远到不了"
-        "被测分支；本机 shim 存在 ⇒ 产品行为反而更安全。"),
+        "被测分支；本机 shim 存在 ⇒ 产品行为反而更安全。"
+        "★ 0.64.0 已改判具：三段自足夹具（只在临时 APPDATA 上造启动项），"
+        "不再读本机真实启动项 —— 本条此后若再红，是产品的事，不是行星的事。"),
     "F-13 paramedic 复活死亡监理并留痕（死因 RC5 回归）": ("environment",
         "pid=999999999 是负控自造的假 pid，spawn-failed 属 spawn 环境问题；该条在"
         "10-08 重跑中未复现（失败集合成员漂移的实例）。"),

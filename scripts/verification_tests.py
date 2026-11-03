@@ -2612,29 +2612,57 @@ def main():
     #   ★ 同时加**正向对照**：不注入时不许返回 None ——
     #     否则"注入没生效"与"产品是对的"无法区分 ⇒ 判具没有分辨力，
     #     改完题目就绿，等于把红项擦掉了。
-    _f09 = ("import sys,types,os,tempfile;os.environ['APPDATA']=tempfile.mkdtemp();"
-            "sys.path.insert(0,r'%s');import host_shield as hs;"
-            "hs.subprocess=types.SimpleNamespace(run=lambda *a,**k:"
-            "(_ for _ in ()).throw(OSError('policy-blocked')));"
-            "print(repr(hs.task_installed()))" % str(PKG))
-    _f09_base = ("import sys;sys.path.insert(0,r'%s');import host_shield as hs;"
-                 "print(repr(hs.task_installed()))" % str(PKG))
-    _p09 = subprocess.run([PY, "-c", _f09], capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", timeout=60, creationflags=_CREATE_NO_WINDOW)
-    _p09b = subprocess.run([PY, "-c", _f09_base], capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=60, creationflags=_CREATE_NO_WINDOW)
-    _got09 = _p09.stdout.strip()
-    _got09b = _p09b.stdout.strip()
-    _ok09 = (_got09 == "None" and _got09b != "None")
+    # ★★ 0.64.0 修（**判具仍在本机状态上**，2026-11-03 实测翻红）：
+    #   0.37.1 那一版加了「不注入的对照」，但对照腿读的是**本机真实启动项**。
+    #   本机实测：真启动项不在（用户侧换成 .lnk 前的旧装已清）、schtasks 又被
+    #   宿主黑名单拦死 ⇒ 对照腿**也**返回 None ⇒ 判具判「注入没生效」⇒ 红。
+    #   病根不是产品，是**判据的期望值取自行星（本机状态）**：机器一换，题目就变。
+    #   ⇒ 改成**三段自足夹具**，全部只依赖一个临时 APPDATA：
+    #       ① 负控：启动项不在 ＋ schtasks 抛错 ⇒ None（查不出来，不许说"没有"）
+    #       ② 正控：临时 APPDATA 里造 `antinel-shield.cmd` ⇒ True（文件系统事实优先）
+    #       ③ 三态：启动项不在 ＋ schtasks 能查且说没有（rc=1）⇒ False（确定没有）
+    #     三段合起来才证明"三态真的分得开"——只有 ① 时，
+    #     "永远返回 None"也能过，那等于没判。
+    _f09_tpl = ("import sys,types,os,tempfile\n"
+                "ap=tempfile.mkdtemp()\n"
+                "os.environ['APPDATA']=ap\n"
+                "sys.path.insert(0, r'%(pkg)s')\n"
+                "import host_shield as hs\n"
+                "%(fixture)s"
+                "hs.subprocess=types.SimpleNamespace(run=%(stub)s)\n"
+                "print(repr(hs.task_installed()))\n")
+    _f09_legs = [
+        # (名字, 是否造启动项, subprocess 替身, 期望)
+        ("负控 启动项不在+schtasks抛错", False,
+         "lambda *a,**k: (_ for _ in ()).throw(OSError('policy-blocked'))", "None"),
+        ]
+    _mk_shim = ("d=os.path.join(ap,'Microsoft','Windows','Start Menu','Programs','Startup')\n"
+                "os.makedirs(d)\n"
+                "open(os.path.join(d,'antinel-shield.cmd'),'w').close()\n")
+    _f09_legs.append(
+        ("正控 启动项在", True,
+         "lambda *a,**k: (_ for _ in ()).throw(OSError('policy-blocked'))", "True"))
+    _f09_legs.append(
+        ("三态 启动项不在+schtasks说没有（rc=1）", False,
+         "lambda *a,**k: types.SimpleNamespace(returncode=1)", "False"))
+    _got09 = {}
+    for _nm, _mk, _stub, _want in _f09_legs:
+        _code = _f09_tpl % {"pkg": str(PKG),
+                            "fixture": _mk_shim if _mk else "",
+                            "stub": _stub}
+        _pr = subprocess.run([PY, "-c", _code], capture_output=True, text=True,
+                             encoding="utf-8", errors="replace", timeout=60,
+                             creationflags=_CREATE_NO_WINDOW)
+        _got09[_nm] = (_pr.stdout.strip() or "<空>") if _pr.returncode == 0 \
+            else "<rc=%d>%s" % (_pr.returncode, (_pr.stderr or "").strip()[:60])
+    _ok09 = all(_got09[nm] == want for nm, _mk, _st, want in _f09_legs)
     record("F-09 host-shield 自检查不出来时不谎报已安装（三态：None != True）",
            _ok09,
-           "注入(启动项不在+schtasks抛错)=%s；对照(不注入)=%s｜%s"
-           % (_got09 or "?", _got09b or "?",
-              "两条路径都堵住才返回 None ✅"
-              if _ok09 else
-              ("注入没生效（对照也是 None）⇒ 本判具此刻无分辨力"
-               if _got09b == "None" else
-               "查不出来却返回了 %s ⇒ 把「没查」说成「没问题」" % (_got09 or "?",))))
+           "；".join("%s=%s（应 %s）" % (nm, _got09[nm], want)
+                     for nm, _mk, _st, want in _f09_legs) + "｜" +
+           ("三态分得开 ✅" if _ok09 else
+            "三态没分开 ⇒ 要么产品把「查不出来」说成「没问题」，"
+            "要么这条判具本身没分辨力"))
 
     # F-10: 会写进链的事件类型必须全部登记在随包 schema 里（§4 自称"枚举"）。
     # ★★ 0.35.2 修（**判据不许二次实现**）：不再自己扫，直接调权威量具

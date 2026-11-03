@@ -1594,6 +1594,253 @@ def hk60d():
     return True
 
 
+# ═════════════ R-64：主动性接线（0.64.0 · D-1 发起者 ＋ 三条腿进闸门） ═════════════
+#
+# ★ 为什么并进 0517 而不是立新套件：A2 常驻套件上限 29 **已满**
+#   （实测 `delivery_gate.resident_suite_count() == 29 == cap`）⇒ P5 扩展优先的
+#   答案只有「并入现有」。并入这里的理由不是凑数：0517 守的本来就是
+#   **「谁来发起」**（daemon 委托开窗／活得比调用方久），而本次三条腿
+#   （每日一次敲门窗口／横跳到点／到点自己起巡检）问的是同一个问题的另三个面。
+#
+# ★★ 这一块补的是 2026-11-03 实测出来的三处**闸门外的已验证行为**：
+#   ① 每日一次敲门窗口四腿（首轮敲 1 次／同日 0 次／跨日 1 次／关掉 0 次）
+#   ② 横跳只报一次（W1-c 回归 ＋ W1-e/f/g）
+#   ③ 到点自己起巡检（D-1）—— 这条当时**根本没有发起者**：全仓除自身与文档外
+#      **0 处** 引用 `nightwatch`。装出去的产品里「系统自己发起」一次都不成立，
+#      而每份报告都写着它成立。
+#   三条的病根是同一个：**探针建了，没人跑它**。而「有探针没人跑」与「没有探针」
+#   在全量结果上完全同貌（都全绿）⇒ 只能靠一条判据专门去问「谁在跑它」。
+#
+# ★ 为什么用**子进程**跑探针而不是 import 进来：`ANTINEL_HUB_DIR` 必须在 import
+#   产品模块**之前**设好（`linec._paths` 与 `host_shield` 的中枢在 import 期就定了），
+#   而探针自己要建临时中枢。import 进本进程会污染同一趟闸门里后面的套件 ——
+#   那种错的表现是「某些套件忽然红了」，与真缺陷同貌，属于量具污染。
+
+_PROBE_REGISTRY = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "probe_registry.json")
+
+
+def _run_probe(name, timeout):
+    """跑 `output/<name> <repo> <tmp_root>`，退出码 0 才算过。
+
+    ★ 找不到探针 ⇒ **判红**，不许当成「本机不适用」：本仓踩过太多次
+      「文件不在所以跳过」变成「新克隆的机器上全绿，而那一条从没跑过」。
+    """
+    p = os.path.join(ROOT, "output", name)
+    if not os.path.isfile(p):
+        return "探针不存在：output/%s（没有对象的检查项＝假守卫）" % name
+    tmp = _TMP.tmpdir(prefix="linec-gate-")
+    try:
+        r = _subprocess.run([sys.executable, "-E", "-X", "utf8", p, ROOT, tmp],
+                            capture_output=True, text=True, encoding="utf-8",
+                            errors="replace", timeout=timeout, cwd=ROOT)
+    except _subprocess.TimeoutExpired:
+        return "探针 %s 超过 %ds 没跑完（超时≠通过）" % (name, timeout)
+    if r.returncode != 0:
+        tail = [ln for ln in (r.stdout + r.stderr).splitlines() if ln.strip()]
+        tail = tail[-6:] if tail else ["（无输出）"]
+        return "探针 %s 退出码 %d：%s" % (name, r.returncode, " ｜ ".join(tail))
+    return True
+
+
+@check("R-64a ★ 每日一次敲门窗口四腿（首轮敲／同日不敲／跨日重开／关掉不敲）")
+def r64a():
+    return _run_probe("_p_knock_window.py", 300)
+
+
+@check("R-64b ★ 敲门 tick 接线（首轮敲 1 次／同日不重敲／跨日重开／开关可停）")
+def r64b():
+    return _run_probe("_p_knock_tick.py", 300)
+
+
+@check("R-64c ★ 横跳只报一次（W1-c 回归 ＋ W1-e/f/g 反向腿）")
+def r64c():
+    return _run_probe("_p_w1_driver.py", 420)
+
+
+@check("R-64d ★ 巡检接线（该跑／没到点不跑／跑过不跑／起失败留痕／默认不变）")
+def r64d():
+    return _run_probe("_p_linec_wiring.py", 300)
+
+
+def _r64_daemon_calls(src):
+    """`*run_daemon(...)` 调用点 ⇒ `[{kw: 是否**字面** True}]`。
+
+    ★ 用 AST 不按字面查：`linec=True` 出现在注释里也该算没写
+      （本仓踩过 —— 注释里的声明被当成了实现）。
+    """
+    out = []
+    for node in ast.walk(ast.parse(src)):
+        if not isinstance(node, ast.Call):
+            continue
+        fn = node.func
+        nm = getattr(fn, "attr", None) or getattr(fn, "id", None)
+        if nm != "run_daemon":
+            continue
+        kw = {}
+        for k in node.keywords:
+            if k.arg:
+                kw[k.arg] = (isinstance(k.value, ast.Constant)
+                             and k.value.value is True)
+        out.append(kw)
+    return out
+
+
+@check("R-64e ★ 「系统自己发起」有发起者：生产入口显式 run_daemon(linec=True)")
+def r64e():
+    with io.open(os.path.join(ROOT, "inbox_cli.py"), encoding="utf-8") as f:
+        src = f.read()
+    calls = _r64_daemon_calls(src)
+    if not calls:
+        return "inbox_cli.py 里找不到 run_daemon(…) 调用 —— 守护进程入口变了？"
+    if not any(c.get("linec") for c in calls):
+        return ("生产入口没传 linec=True ⇒ 巡检**没有任何发起者**，"
+                "「系统自己发起」这条要件不成立，而报告会写着它成立")
+    _note("生产入口 run_daemon(…, linec=True)")
+    return True
+
+
+@check("N-64e 负控：把 linec=True 抹掉 ⇒ R-64e 必须红（同一把尺子只换输入）")
+def n64e():
+    with io.open(os.path.join(ROOT, "inbox_cli.py"), encoding="utf-8") as f:
+        src = f.read()
+    mut = src.replace(", linec=True", "")
+    if mut == src:
+        return "变异无效：抹不掉 `linec=True`（写法变了？）—— 先修负控再谈通过"
+    if any(c.get("linec") for c in _r64_daemon_calls(mut)):
+        return "负控失效：抹掉之后 R-64e 仍然绿"
+    _note("变异体：无 linec=True ⇒ 判红")
+    return True
+
+
+@check("R-64f ★ 默认关：run_daemon 的 linec 默认 False（既有调用方行为不变）")
+def r64f():
+    with io.open(os.path.join(ROOT, "inbox_daemon.py"), encoding="utf-8") as f:
+        src = f.read()
+    fn = next((n for n in ast.walk(ast.parse(src))
+               if isinstance(n, ast.FunctionDef) and n.name == "run_daemon"), None)
+    if fn is None:
+        return "inbox_daemon.py 里找不到 run_daemon —— 入口被改名/删除了？"
+    args = [a.arg for a in fn.args.args]
+    if "linec" not in args:
+        return "run_daemon 没有 linec 形参 ⇒ 生产入口的 linec=True 会被拒收"
+    idx = args.index("linec") - (len(args) - len(fn.args.defaults))
+    if idx < 0:
+        return "linec 没有默认值（会被当成必填）—— 既有调用方全部会炸"
+    d = fn.args.defaults[idx]
+    if not (isinstance(d, ast.Constant) and d.value is False):
+        return ("run_daemon 的 linec 默认不是 False ⇒ 所有既有调用方"
+                "（含 `run_daemon(max_ticks=1)` 这类判据）都被顺带打开主动性")
+    _note("默认 linec=False；生产入口是唯一显式打开处")
+    return True
+
+
+@check("N-64f 负控：把默认值改成 True ⇒ R-64f 必须红")
+def n64f():
+    with io.open(os.path.join(ROOT, "inbox_daemon.py"), encoding="utf-8") as f:
+        src = f.read()
+    mut = src.replace("linec=False, linec_every", "linec=True, linec_every", 1)
+    if mut == src:
+        return "变异无效：改不动默认值（签名写法变了？）—— 先修负控再谈通过"
+    fn = next(n for n in ast.walk(ast.parse(mut))
+              if isinstance(n, ast.FunctionDef) and n.name == "run_daemon")
+    args = [a.arg for a in fn.args.args]
+    idx = args.index("linec") - (len(args) - len(fn.args.defaults))
+    if isinstance(fn.args.defaults[idx], ast.Constant) and fn.args.defaults[idx].value is False:
+        return "负控失效：默认值改成 True 之后 R-64f 仍然绿"
+    _note("变异体：默认 True ⇒ 判红")
+    return True
+
+
+def _r64_referenced_names():
+    """「真的被写进代码里要跑」的探针名集合 —— **走 AST，不走文本匹配**。
+
+    ★ 为什么不能用 `名字 in 源码文本`（本文件第一版就这么写，当场翻车）：
+      负控造了一个假名字，而那个假名字**正写在负控自己的源码里** ⇒ 文本匹配
+      把它当成"已被引用" ⇒ 负控永远抓不到 ⇒ 这条判据只是「永远绿」。
+      同型还有更常见的一种：探针名只出现在**注释**里（写"这里该跑 X"），
+      文本匹配也算数 —— 那正是「注释里的声明被当成实现」。
+    ★ 为什么 AST 常量还够：真正会去跑的写法只有两种 ——
+      `_run_probe("X.py", …)` 与 `os.path.join(base, "X.py")`，两者都是常量串。
+      （模块 docstring 里的名字仍会被算进来，这一点留着：它至少说明
+        「作者认为这条在跑」，而本次要堵的是"没有任何人认为它在跑"。）
+    """
+    import glob as _glob                                     # noqa: PLC0415
+    names = set()
+    files = [os.path.join(ROOT, "linec", "selfproof.py")]
+    files += sorted(_glob.glob(os.path.join(ROOT, "ci", "*.py")))
+    for p in files:
+        if not os.path.isfile(p):
+            continue
+        try:
+            with io.open(p, encoding="utf-8") as f:
+                tree = ast.parse(f.read())
+        except (OSError, SyntaxError):
+            continue
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                    and node.value.endswith(".py")):
+                names.add(os.path.basename(node.value))
+    return names
+
+
+def _r64_orphans(names=None):
+    """既没有判据引用、也没登记为一次性的探针名。"""
+    import glob as _glob                                     # noqa: PLC0415
+    if names is None:
+        names = [os.path.basename(p) for p in
+                 sorted(_glob.glob(os.path.join(ROOT, "output", "_p_*.py")))]
+    try:
+        with io.open(_PROBE_REGISTRY, encoding="utf-8") as f:
+            reg = json.load(f)
+    except Exception:                                        # noqa: BLE001
+        return None
+    one_off = set(reg.get("one_off") or [])
+    ref = _r64_referenced_names()
+    return sorted(n for n in names if n not in ref and n not in one_off)
+
+
+@check("R-64g ★ 探针有归属：每个 _p_* 要么被判据跑，要么登记为一次性")
+def r64g():
+    import glob as _glob                                     # noqa: PLC0415
+    if not os.path.isfile(_PROBE_REGISTRY):
+        return "缺 ci/probe_registry.json —— 归属判据没有对象"
+    bad = _r64_orphans()
+    if bad is None:
+        return "ci/probe_registry.json 读不出来或形状不对"
+    if bad:
+        return ("这些探针没有任何判据在跑、也没登记为一次性：%s"
+                "（「建了没人跑」与「没建」在全量结果上同貌）" % ", ".join(bad))
+    with io.open(_PROBE_REGISTRY, encoding="utf-8") as f:
+        reg = json.load(f)
+    on_disk = {os.path.basename(p)
+               for p in _glob.glob(os.path.join(ROOT, "output", "_p_*.py"))}
+    dead = sorted(set(reg.get("one_off") or []) - on_disk)
+    if dead:
+        return "一次性清单里这些文件已不存在（清单腐烂会让「都登记了」变空话）：%s" % ", ".join(dead)
+    _note("%d 个探针，归属齐全" % len(on_disk))
+    return True
+
+
+@check("N-64g 负控：凭空多一个没人跑的探针 ⇒ R-64g 必须红")
+def n64g():
+    import glob as _glob                                     # noqa: PLC0415
+    on_disk = sorted(os.path.basename(p)
+                     for p in _glob.glob(os.path.join(ROOT, "output", "_p_*.py")))
+    if not on_disk:
+        return "SKIP 本机没有 output/_p_*.py，无从构造负控"
+    # ★ 假名字**必须拼出来**，不许写字面量：写成字面量就等于把它登记进了
+    #   本文件的 AST 常量表 ⇒ 负控自己满足了自己（本文件第一版就这么翻的车）。
+    fake = "_p_" + "totally_fake_probe" + ".py"
+    caught = _r64_orphans(names=on_disk + [fake])
+    if caught is None:
+        return "ci/probe_registry.json 读不出来，负控无法成立"
+    if fake not in caught:
+        return "负控失效：凭空多出的探针没有被判红（这条判据只是「永远绿」）"
+    _note("变异体：多一个无人引用的探针 ⇒ 判红")
+    return True
+
+
 def main():
     print("=" * 78)
     print("0517 判据 —— Antinel 监理窗口寿命：daemon 委托开窗（起得来，更要活得久）")

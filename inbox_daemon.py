@@ -26,8 +26,10 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import inbox_config as CFG
 import inbox_bubble as BB
@@ -281,13 +283,17 @@ def read_daemon_stamp(root=None):
 
 
 def run_daemon(root=None, interval=2.0, max_ticks=None, supervise=True,
-               ensure=None, supervise_every=15.0):
+               ensure=None, supervise_every=15.0,
+               linec=False, linec_every=600.0, linec_spawn=None):
     """**常驻入口**（B1）：单例 + 监督。返回 `(ticks, why)`。
 
     ★ 单例：已有**别的**活守护进程 ⇒ 不跑（返回 `(0, "already-running")`），
       不报错、不抢锁 —— 与 `run_sentinel` 同一条纪律。
     ★ `supervise=True`（默认，CLI 入口用）：顺带监督Antinel 监理服务，被杀掉后按
       原端口/口令重拉（URL 不变）。
+    ★ `linec=False`（默认）：**不**起夜间巡检。生产入口 `inbox_cli.py` 显式传 True
+      —— 默认关是为了让既有判据与 `run_daemon(max_ticks=1)` 这类调用一个字不变，
+      同时让「谁真的打开了主动性」在源码里可数（只有一处）。
     ★ 退出时清掉自己的 pid 登记（不是自己写的不清 —— 别替别人擦桌子）。
     """
     alive, pid = daemon_alive(root)
@@ -297,7 +303,9 @@ def run_daemon(root=None, interval=2.0, max_ticks=None, supervise=True,
     try:
         n = Daemon(root=root).run(interval=interval, max_ticks=max_ticks,
                                   supervise=supervise, ensure=ensure,
-                                  supervise_every=supervise_every)
+                                  supervise_every=supervise_every,
+                                  linec=linec, linec_every=linec_every,
+                                  linec_spawn=linec_spawn)
         return n, "ok"
     finally:
         try:
@@ -477,6 +485,147 @@ def _should_knock(it):
     return HS.bubble_decision(it.kind, rec)
 
 
+# ═════════════════ 主动性 C 线：到点由守护进程起一次巡检（D-1） ═════════════════
+#
+# ★ 为什么挂在守护进程上，而不是再养一个常驻进程：
+#   ① 守护进程本来就在自启链里（`antinel.py` 的 schtasks／启动文件夹两条路），
+#      「谁来发起」这个问题已经被回答过一次，不该回答第二次；
+#   ② 主动性三要件的第三条是「系统自己发起」。一个要人手动敲的脚本，
+#      无论它多自动都不满足这条 —— 它满足的是「人到点了记得敲」。
+#   实测（2026-11-03）：全仓除自身与文档外 **0 处** 引用 `nightwatch`
+#   ⇒ 装出去的产品里，「主动性」一次都不会发生，而报告每一份都写着它成立。
+#   这正是本项目反复吃过的那个形状：**机制建好了，没挂上**（同 release-entry）。
+#
+# ★ 为什么判定写在 `run()` 而不是 `tick()`：与 `supervise` 同一条纪律 ——
+#   `tick()` 是「一轮业务」，判据大量直接调它，它不该带起进程的副作用。
+# ★ 为什么「该不该跑」不在这里重新实现：`nightwatch.should_run()` 是唯一实现
+#   （already-ran-today / before-at / force 三种理由都在那一处）。这里只做三件事：
+#   **问它** / **起进程** / **把没起成的原因留下来**。
+#   若在这里再写一遍「今天跑过没有」，就长出第二份真源 —— 两份迟早不一致，
+#   而不一致的表现是「本机天天跑」或「本机从来不跑」，两者都看不出是判据坏了。
+
+LINEC_RETRY_GAP = 600.0        # 起失败后至少隔这么久再试（防「每 2 秒起一次」的风暴）
+LINEC_SPAWN_LOG_MAX = 20       # 台账只留最近 20 条：写日志不许自己变成新的问题
+
+
+def linec_spawn_log_path():
+    """起停台账的**唯一**落点：`<中枢>/lineC/daemon_spawn.json`。
+
+    ★ 与 `nightwatch` 的状态同目录 —— 两处都描述「这条线今天做了什么」，
+      分开放就会出现「巡检说跑过、守护进程说没起」这种谁也判不了的局面。
+    ★ 落点由 `linec._paths.hub_dir()` 决定（产品侧唯一真源 `host_shield._hub_dir()`），
+      这里不另算表达式。
+    """
+    try:
+        import linec.nightwatch as _NW
+        return os.path.join(_NW.hub_linec_dir(), "daemon_spawn.json")
+    except Exception:                                   # noqa: BLE001
+        base = (os.environ.get("ANTINEL_HUB_DIR")
+                or os.path.join(os.path.expanduser("~"), ".antinel"))
+        return os.path.join(base, "lineC", "daemon_spawn.json")
+
+
+def _linec_spawn_note(entry):
+    """记一条「起了 / 没起」。**写失败返回原因串，不许静默**。
+
+    ★ 为什么必须留痕：这条线失败的样子是「什么都没发生」—— 巡检没跑、报告没出、
+      界面上看不出任何区别。而主动性恰恰只靠「到点自己动过」这件事被证明
+      ⇒ 没留痕就等于没发生，也等于事后查不出没发生。
+    ★ 为什么写失败要返回：`tick()` 里对同类问题（`note_bubble_suppressed`）是
+      `pass` 掉的，理由是「记账失败不影响不敲门」。这里相反 —— 记账失败本身
+      就是这条线唯一的失败证据，吞掉它等于把证据删了。
+    """
+    path = linec_spawn_log_path()
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        d = {"entries": []}
+        if os.path.isfile(path):
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    old = json.load(fh)
+                if isinstance(old, dict) and isinstance(old.get("entries"), list):
+                    d = old
+                else:
+                    d["note"] = "旧台账形状不对，已重开（原文保留在 .bak 之外不留）"
+            except Exception:                           # noqa: BLE001
+                d["note"] = "旧台账读不出来，已重开"
+        ent = list(d.get("entries") or [])
+        # ★ 连续同一条**合并计数**，不重复追加。
+        #   为什么（2026-11-03 实测）：账本目录还不存在时，子进程 0.1 秒就退，
+        #   状态不落盘 ⇒ `should_run` 仍说该跑 ⇒ 每 `linec_every` 再试一次。
+        #   一天 144 条一模一样的行会把「真出事了」淹掉，而台账的全部价值就是
+        #   「一眼看出最后一次是什么」。合并后仍是留痕：最后一次的时刻 + 次数。
+        same = (bool(ent)
+                and ent[-1].get("started") == entry.get("started")
+                and ent[-1].get("why") == entry.get("why")
+                and (ent[-1].get("error") or "") == (entry.get("error") or ""))
+        if same:
+            ent[-1]["at"] = entry.get("at")
+            ent[-1]["repeats"] = int(ent[-1].get("repeats") or 1) + 1
+        else:
+            ent.append(entry)
+        d["entries"] = ent[-LINEC_SPAWN_LOG_MAX:]
+        d["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+        try:
+            import linec._commit as _CM                 # noqa: PLC0415
+            _CM.write_json(path, d)
+        except Exception:                               # noqa: BLE001
+            with open(path, "w", encoding="utf-8", newline="\n") as fh:
+                json.dump(d, fh, ensure_ascii=False, indent=1)
+        return ""
+    except Exception as e:                              # noqa: BLE001
+        return "%s: %s" % (type(e).__name__, e)
+
+
+def linec_due(now=None, at=None):
+    """纯判定：现在该不该起一次巡检。返回 `(bool, why)`。
+
+    ★ 三种「读不到状态」必须分开（`nightwatch.load_state()` 已经分开了，这里只是
+      别把它合回去）：文件不存在 ⇒ 第一次跑，该跑；文件坏了 ⇒ **不可判**，
+      既不当作「没跑过」（会重复打扰），也不当作「跑过了」（会永久沉默）。
+    """
+    try:
+        import linec.nightwatch as NW                   # noqa: PLC0415
+    except Exception as e:                              # noqa: BLE001
+        return False, "linec 未随包（%s）—— 主动性不会发生" % e
+    now = now or datetime.now()
+    state, why_state = NW.load_state(NW.default_state_path())
+    if state is None:
+        return False, "状态不可判：%s" % (why_state or "?",)
+    return NW.should_run(state, today=now.strftime("%Y-%m-%d"), now=now,
+                         at=at or NW.DEFAULT_AT, force=False, gate_by_clock=True)
+
+
+def _spawn_linec(script):
+    """起一个**独立**的巡检进程，返回 pid。失败抛异常（由调用方留痕）。
+
+    ★ 为什么是子进程而不是 import 进来跑：单次巡检实测 **13.3 秒**（2026-11-03
+      06:06 真跑），而心跳是 2 秒一次。同步跑会把这 13 秒塞进每一轮心跳里。
+    ★ 为什么 stderr 不丢：`pythonw` 类场景下 `sys.stdout is None`，异常会静默消失
+      （本仓已踩过）。这里显式落到 `<中枢>/lineC/nightwatch_subprocess.log`。
+    ★ 为什么不 `detach` 到「逃出进程树」：守护进程死时巡检也该一起收，
+      否则会留下一个没人管的巡检进程反复写账本。
+    """
+    kw = {}
+    if os.name == "nt":
+        kw["creationflags"] = 0x08000000                # CREATE_NO_WINDOW，不弹黑窗
+    logp = os.path.join(os.path.dirname(linec_spawn_log_path()),
+                        "nightwatch_subprocess.log")
+    os.makedirs(os.path.dirname(logp), exist_ok=True)
+    fh = open(logp, "a", encoding="utf-8", newline="\n")
+    try:
+        fh.write("\n===== %s 起：%s --once =====\n"
+                 % (time.strftime("%Y-%m-%dT%H:%M:%S"), script))
+        fh.flush()
+        p = subprocess.Popen([sys.executable, script, "--once"],
+                             stdin=subprocess.DEVNULL, stdout=fh, stderr=fh,
+                             cwd=os.path.dirname(script) or None,
+                             close_fds=True, **kw)
+        return p.pid
+    finally:
+        fh.close()          # 父进程只关自己那份；子进程已 dup 过去
+
+
 class Daemon:
     def __init__(self, root=None, backend=None, sound=None, overlay=None,
                  sender=None, poster=None, clock=None, cfg=None, today=None,
@@ -499,6 +648,47 @@ class Daemon:
         self.console_url = console_url
         # ★ 0.49.0：紧急提醒发射点（可注入 —— 判据不起真浏览器、不响真声音）。
         self.bubbler = bubbler
+        # ★ 0.64.0：最近一次「该不该起巡检」的决定（只读观测面，判据直接读它）。
+        self.last_linec = None
+
+    def linec_once(self, at=None, now=None, spawn=None):
+        """到点就起一次巡检（**子进程**），返回本轮决定 dict。
+
+        `spawn(script)` 可注入：判据用替身验「该起时会去起」，不真起 13 秒的子进程。
+
+        ★ 返回里 `due` 与 `started` 是**两件事**：到点了 ≠ 起来了。
+          只记 `started` 会把「该跑但没跑起来」记成「今天不用跑」；
+          只记 `due` 会把「只是到了点」记成「跑过了」。两者都必须留。
+        """
+        out = {"due": False, "why": "", "started": False, "pid": None,
+               "error": "", "log_error": ""}
+        due, why = linec_due(now=now, at=at)
+        out["due"], out["why"] = bool(due), why
+        if not due:
+            # 没到点／今天跑过 ⇒ **不写台账**。每 2 秒一条会把台账淹掉，
+            # 而淹掉之后的台账与「什么都没发生」没有区别。
+            self.last_linec = out
+            return out
+        script = ""
+        try:
+            import linec.nightwatch as NW                # noqa: PLC0415
+            script = os.path.abspath(getattr(NW, "__file__", "") or "")
+        except Exception as e:                           # noqa: BLE001
+            out["error"] = "linec 未随包（%s）" % e
+        if script:
+            try:
+                this_pid = (spawn or _spawn_linec)(script)
+                out["pid"] = this_pid
+                out["started"] = this_pid is not None
+            except Exception as e:                       # noqa: BLE001
+                out["error"] = "%s: %s" % (type(e).__name__, e)
+        out["log_error"] = _linec_spawn_note({
+            "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "due": out["due"], "why": out["why"],
+            "started": out["started"], "pid": out["pid"],
+            "error": out["error"] or ""})
+        self.last_linec = out
+        return out
 
     def _open_console(self):
         """★ 0.35.2：把托盘的 `open` 动作**真的**接上。
@@ -787,7 +977,8 @@ class Daemon:
 
     # ---------------------------------------------------------------- #
     def run(self, interval=2.0, max_ticks=None, supervise=False,
-            ensure=None, supervise_every=15.0):
+            ensure=None, supervise_every=15.0,
+            linec=False, linec_every=600.0, linec_spawn=None):
         """常驻循环。`max_ticks` 只为测试用（None ＝ 一直跑）。
 
         ★★ 0.48.5（B1）：`supervise=True` ⇒ 顺带**监督Antinel 监理服务** ——
@@ -798,9 +989,19 @@ class Daemon:
           记账/刷托盘），判据大量直接调它，且它不该带起进程的副作用。
         ★ 默认 `supervise=False` ⇒ 既有调用方行为**一个字不变**（维四）。
         ★ `ensure` 可注入（判据用替身验"到点会去确保"，不去真起进程）。
+
+        ★★ 0.64.0（D-1）：`linec=True` ⇒ 每 `linec_every` 秒问一次「今天该不该
+          跑巡检」，该跑就起子进程。**默认 False，生产入口显式打开**
+          （`run_daemon(linec=True)`）—— 与 `supervise` 同一条纪律：
+          默认关，所以所有既有判据的行为一个字不变；打开的地方只有一处，可数。
+          ★ 为什么放在 `run()` 而不是 `tick()`：同 `supervise`，且单次巡检
+            13.3 秒，塞进 2 秒心跳会把心跳拖成「每 15 秒一轮」。
         """
         n = 0
         next_sup = 0.0
+        next_linec = 0.0
+        _cfg = self.cfg or CFG.load(self.root)
+        linec_on = bool(linec) and bool(_cfg.get("linec_auto", True))
         while max_ticks is None or n < max_ticks:
             try:
                 self.tick()
@@ -814,6 +1015,27 @@ class Daemon:
                     except Exception:           # noqa: BLE001
                         pass                    # 重拉失败不许把守护进程打死
                     next_sup = now + float(supervise_every)
+            if linec_on:
+                now = time.time()
+                if now >= next_linec:
+                    try:
+                        _r = self.linec_once(spawn=linec_spawn)
+                    except Exception as e:      # noqa: BLE001
+                        # 连判定函数都崩了 —— 同样留痕，不许只 pass。
+                        _r = {"due": False, "why": "", "started": False,
+                              "pid": None, "error": "linec_once 抛错：%r" % (e,),
+                              "log_error": ""}
+                        _r["log_error"] = _linec_spawn_note({
+                            "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                            "due": False, "why": "判定函数抛错",
+                            "started": False, "pid": None,
+                            "error": _r["error"]})
+                        self.last_linec = _r
+                    # 到点了却没起来 ⇒ 退到更长的重试间隔，否则每 2 秒一次就是 spawn 风暴
+                    next_linec = now + (
+                        LINEC_RETRY_GAP
+                        if (_r.get("due") and not _r.get("started"))
+                        else float(linec_every))
             n += 1
             if max_ticks is not None and n >= max_ticks:
                 break

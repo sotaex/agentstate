@@ -436,7 +436,13 @@ def cmd_daemon(a):
         return 0
     print("Antinel 监理守护进程已启动（每 %.1f 秒一轮%s）。Ctrl+C 停。"
           % (a.interval, "；顺带监督 Antinel 监理服务" if sup else ""))
-    DM.run_daemon(interval=a.interval, supervise=sup)
+    # ★★ 0.64.0（D-1）：**这里就是「主动性」唯一的发起者**。
+    #   在此之前，`nightwatch` 全仓除自身与文档外 0 处引用 —— 巡检脚本写得再全，
+    #   装到用户机器上也没有任何东西会去启动它 ⇒ 「系统自己发起」这条要件
+    #   一次都不成立，而每份报告都写着它成立。
+    #   为什么传 True 而不是让 `run_daemon` 默认开：默认关才让既有判据与
+    #   `run_daemon(max_ticks=1)` 这类调用行为不变，且「谁打开了主动性」在源码里可数。
+    DM.run_daemon(interval=a.interval, supervise=sup, linec=True)
     return 0
 
 

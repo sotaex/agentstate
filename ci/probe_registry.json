@@ -1,0 +1,43 @@
+{
+  "_note": [
+    "一次性取证量具清单（`output/_p_*.py`）。由 ci/guard_linec_wiring.py 的 S7 消费。",
+    "",
+    "★ 为什么需要这张表：`.gitignore` 里 `_p_*` 让未入库的探针从 `git status` 消失，",
+    "  于是「探针建了但没有任何判据跑它」这件事既看不见也报不出 —— 而它有探针",
+    "  与没有探针**在全量结果上完全同貌**（都全绿）。2026-11-03 实测：31 个探针里",
+    "  22 个引用者为零，其中就包含「每日一次敲门」那四条腿 —— 它们当时已经验证过，",
+    "  但下一次谁改 `inbox_daemon.tick()`，四条腿不会红。",
+    "",
+    "★ 规则：每个 `output/_p_*.py` 必须二选一 ——",
+    "  ① 被某个套件或 `linec/selfproof.py` 引用（＝在闸门里跑）；",
+    "  ② 或登记在这里（＝一次性取证，取证完成即退场，留档只为复现）。",
+    "  新加一个探针而两条都不满足 ⇒ S7 判红并指名。",
+    "",
+    "★ 这张表**不是豁免**，是分类。把还在守东西的探针挪进来，等于把判据擦掉；",
+    "  反过来，把一次性探针塞进套件，等于让闸门跑一堆不再有意义的东西。",
+    "",
+    "★ 表中不许留已不存在的文件名（清单腐烂会让「都登记了」变成一句空话），S7 反查。"
+  ],
+  "one_off": [
+    "_p_alert_surface.py",
+    "_p_anchor_check.py",
+    "_p_anchor_probe.py",
+    "_p_d54_cov_mutation.py",
+    "_p_d54_leg12_mutation.py",
+    "_p_d54_leg12b_mutation.py",
+    "_p_day_denominator.py",
+    "_p_denominator_gap.py",
+    "_p_dispatch_surface.py",
+    "_p_dst08_mutant.py",
+    "_p_dst08_probe.py",
+    "_p_dst08_reach.py",
+    "_p_fake_revived_negctl.py",
+    "_p_fake_revived_verify.py",
+    "_p_popup_probe.py",
+    "_p_pure_manifest_0632.py",
+    "_p_regen_rules_md.py",
+    "_p_untraceable_split.py",
+    "_p_verdict_probe.py",
+    "_p_x302_read_20261102.py"
+  ]
+}
