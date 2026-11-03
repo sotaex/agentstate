@@ -11908,13 +11908,16 @@ def _hsid_records(proj, sid):
 def c_hsi01():
     proj, env = _hook_project("g0514_hsi01_")
     base = os.path.dirname(proj)
-    # ★ 用户站目录名带解释器版本（Windows：%PYTHONUSERBASE%\PythonXY\site-packages）。
-    #   这里写死 Python311 ⇒ 换解释器后假模块被放进一个**永不加载**的目录，
-    #   遮蔽根本没造出来，HSI-01 于是报「拦下了但没报降级」——实测 3.13.14 下
-    #   就是这么假红的（同一句话在产品真错时也会出现，所以它骗过了一整轮）。
-    #   夹具的形状必须跟着**当前解释器**走：否则这条判据测的是「本机是不是 3.11」，
-    #   不是「被遮蔽时产品报不报降级」。
-    us = os.path.join(base, "ub", "Python%d%d" % sys.version_info[:2], "site-packages")
+    # ★ 遮蔽通道：**PYTHONPATH**，不是 user site（2026-11-03 实测后换的）。
+    #   旧版走 `%PYTHONUSERBASE%\PythonXY\site-packages`：先写死 Python311（换解释器
+    #   就永不加载），7baf522 改成跟解释器版本走 —— 本机**仍然**造不出来，因为
+    #   这个托管解释器 `site.ENABLE_USER_SITE` 恒 False（`sys.flags.no_user_site`
+    #   却是 0，是 sitecustomize 关的）⇒ 放进 user site 的假模块永远不会被加载。
+    #   两版坏的是同一件事：**量具没造出遮蔽，报出来的却是产品的错**。
+    #   被判的命题是「同名旧模块挡在前面时产品报不报降级」，与它走哪条路进
+    #   sys.path 无关 ⇒ 换通道不改语义。自证腿保留：通道再坏一次，仍然当场说
+    #   「先修夹具，别改产品」。
+    us = os.path.join(base, "shadow")
     os.makedirs(us, exist_ok=True)
     with io.open(os.path.join(us, "host_shield.py"), "w", encoding="utf-8") as f:
         f.write(_HSI_FAKE)
@@ -11923,18 +11926,18 @@ def c_hsi01():
     #   后者是产品坏了，修法相反。本机实测：写死 Python311 时遮蔽从未存在，
     #   而失败文案说的是后者 ⇒ 一整轮被引向错误的对象。
     import subprocess
-    _ub = os.path.join(base, "ub")
+    _senv = _hsid_env(env)
+    _senv["PYTHONPATH"] = us
     _p = subprocess.run(
         [sys.executable, "-c",
          "import importlib.util as u;s=u.find_spec('host_shield');print(s.origin if s else 'NONE')"],
-        env=_hsid_env(env, userbase=_ub), cwd=proj, capture_output=True, text=True,
+        env=_senv, cwd=proj, capture_output=True, text=True,
         encoding="utf-8", errors="replace", timeout=60)
     _org = (_p.stdout or "").strip().splitlines()[-1] if (_p.stdout or "").strip() else ""
     if not _org.replace("\\", "/").lower().startswith(us.replace("\\", "/").lower()):
         return ("夹具没造出遮蔽：PYTHONUSERBASE 下 find_spec 解析到 %r，不是 %r ⇒ "
                 "这条腿此刻测的不是「被遮蔽」（先修夹具，别改产品）" % (_org, us))
-    out, rc = _hsid_fire(proj, _hsid_env(env, userbase=os.path.join(base, "ub")),
-                         "hsi01", _SEC05_POS[0][1])
+    out, rc = _hsid_fire(proj, _senv, "hsi01", _SEC05_POS[0][1])
     if "Antinel 拦截" not in out:
         return ("遮蔽在时没拦下 ⇒ 旧模块仍能把整道防线打哑（rc=%d，尾部 %r）"
                 % (rc, out[-220:]))
