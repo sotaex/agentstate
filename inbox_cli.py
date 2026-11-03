@@ -210,8 +210,84 @@ def cmd_report(a):
     return 0
 
 
+def _redirect_output(path):
+    """把 stdout/stderr 接到文件。**必须在任何 print 之前**调。
+
+    ★ 计划任务用 `pythonw.exe` 起，它的 `sys.stdout` 是 `None`
+      ⇒ 先 print 就是先崩，日志里连"我崩了"都留不下。
+    """
+    try:
+        d = os.path.dirname(os.path.abspath(path))
+        if d and not os.path.isdir(d):
+            os.makedirs(d, exist_ok=True)
+        f = open(path, "a", encoding="utf-8", buffering=1)
+        sys.stdout = f
+        sys.stderr = f
+    except Exception:                                     # noqa: BLE001
+        pass
+
+
+def _spawn_serve(log_path=None):
+    """分离起一个 **不带 `--ensure`** 的服务进程（带它就递归了）。
+
+    ★ 必须 DETACHED：调用方是计划任务的一次触发，那个任务实例要能立刻结束。
+      若在这里前台 `serve_forever()`，任务实例会长命，而
+      `MultipleInstances=IgnoreNew` 会把之后每一次触发全部丢掉
+      （2026-11-03 实测：服务停掉后 5 分钟内无人拉起，日志一行都没有）。
+    """
+    import subprocess
+    here = os.path.dirname(os.path.abspath(__file__))
+    exe = sys.executable or ""
+    if exe.lower().endswith("python.exe"):
+        cand = exe[:-len("python.exe")] + "pythonw.exe"
+        if os.path.exists(cand):
+            exe = cand
+    import inbox_server as _SV
+    cmd = [exe, "-E", "-X", "utf8", os.path.join(here, "antinel.py"),
+           "inbox", "serve", "--port", str(_SV.DEFAULT_PORT)]
+    if log_path:
+        cmd += ["--log", log_path]
+    DETACHED, NO_WINDOW = 0x00000008, 0x08000000
+    try:
+        subprocess.Popen(cmd, cwd=here, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         creationflags=DETACHED | NO_WINDOW)
+        return True, "已在后台拉起（本次调用立刻退出，不再占着任务实例）"
+    except Exception as e:                                # noqa: BLE001
+        return False, "起不来（%r）" % (e,)
+
+
 def cmd_serve(a):
     import inbox_server
+    # ★ `--log` 必须在**任何 print 之前**（pythonw 下 sys.stdout 是 None）。
+    _log = getattr(a, "log", None)
+    if _log:
+        _redirect_output(_log)
+    # ★★ 2026-11-03：`--ensure` ＝ **幂等拉起**（计划任务每 5 分钟触发一次）。
+    #   为什么长在 serve 上、不新开一个命令：幂等只是 serve 的前置判断，
+    #   另开一个入口就是第二套实现（第一顽症：同一事实多处实现）。
+    if getattr(a, "ensure", False):
+        alive, rec, why = inbox_server.console_status()
+        if alive:
+            print("监理已在跑：pid %s 端口 %s（%s）—— 本次不重复起"
+                  % ((rec or {}).get("pid"), (rec or {}).get("port"), why))
+            return 0
+        print("监理没在跑（%s）—— 改由后台拉起" % (why,))
+        okk, say = _spawn_serve(log_path=_log)
+        print("服务：%s" % (say,))
+        if okk:
+            # 给新进程一点时间落 url.json，好在日志里留下「这次到底起没起」。
+            import time as _t
+            for _ in range(20):
+                alive2, rec2, w2 = inbox_server.console_status()
+                if alive2:
+                    print("监理已就位：pid %s 端口 %s（%s）"
+                          % ((rec2 or {}).get("pid"), (rec2 or {}).get("port"), w2))
+                    break
+                _t.sleep(0.5)
+            else:
+                print("⚠ 10 秒内没看到服务落位 —— 下一次触发（5 分钟后）会再踢一脚。")
+        return 0 if okk else 1
     # ★ 0.48.5（B1）：口令/中枢根可传入（守护进程重拉时沿用旧口令 ⇒ URL 不变）
     inbox_server.serve(port=a.port, root=getattr(a, "root", None),
                        open_browser=a.open, token=getattr(a, "token", None))
@@ -591,6 +667,19 @@ def build_parser():
     p.add_argument("--token", default=None,
                    help="复用指定口令（守护进程重拉时用；缺省随机生成）")
     p.add_argument("--root", default=None, help="中枢根目录（判据/多实例隔离用）")
+    # ★★★ 2026-11-03（F3 满态走查当场抓到）：`--ensure` / `--log` 这两个开关
+    #   `cmd_serve` 早就在读，但**从来没在 argparse 里注册过** ⇒ 计划任务按
+    #   `serve --ensure --log "<日志>"` 调用时，argparse 直接报
+    #   "unrecognized arguments" 并以退出码 2 结束 —— `Get-ScheduledTaskInfo`
+    #   里那个 `RESULT=2` 就是它。
+    #   后果：**保活任务每一次都失败**，服务停了没人拉；而日志里一行都没有
+    #   （argparse 在写日志之前就退出了）⇒「静默失败好几天」的形状，
+    #   而且它长得像"已经修好了"。
+    #   ⇒ 纪律：**参数定义与消费点必须成对出现**。
+    p.add_argument("--ensure", action="store_true",
+                   help="幂等：服务已在跑就不再起一个（计划任务用这条）")
+    p.add_argument("--log", default=None,
+                   help="把输出写进这个文件（pythonw 下没有 stdout）")
     p.add_argument("--open", action="store_true"); p.set_defaults(fn=cmd_serve)
     # ★ 0.35.2：「打开Antinel 监理」的稳定入口（气泡点击 / 托盘 / 外部调用都用它）
     sub.add_parser("open").set_defaults(fn=cmd_open)
