@@ -78,5 +78,5 @@ if [ "$rc" -ne 0 ]; then
 fi
 
 echo "[gate] 快道全绿，放行提交。" >&2
-echo "[gate] 提醒：快道**不是全量凭证** —— 打包前请跑 $PY ci/delivery_gate.py（全量 30 套）" >&2
+echo "[gate] 提醒：快道**不是全量凭证** —— 打包前请跑 $PY ci/delivery_gate.py（全量；套件数由闸门自己印）" >&2
 exit 0

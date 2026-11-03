@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# SPDX-License-Identifier: CC-BY-SA-4.0
+# SPDX-License-Identifier: Apache-2.0
 """更正机制：报告一旦发出就不许改，更正只能追加。
 
 出处：《C 线更正机制设计 v1.0》§3（数据结构）／§4（渲染规则）。

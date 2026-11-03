@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# SPDX-License-Identifier: CC-BY-SA-4.0
+# SPDX-License-Identifier: Apache-2.0
 """一页纸渲染：把 Bundle 变成一份可以打印、可以归档、可以被核对的 HTML。
 
 出处：方案书 §5.2（三种读者＝三种报告）、§5.4（第一份报告必须交付「我们看见了

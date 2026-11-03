@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: Apache-2.0
 """产物落盘：`output/` 下各线共用的唯一实现。
 
 三条实测事实决定这里的写法（2026-11-03，本机 Windows + D 盘）：

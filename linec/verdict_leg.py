@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# SPDX-License-Identifier: CC-BY-SA-4.0
+# SPDX-License-Identifier: Apache-2.0
 """第三只腿：**从账本里读「今天真的挡下了什么」**。
 
 ★ 为什么需要这只腿（2026-11-02 实测）

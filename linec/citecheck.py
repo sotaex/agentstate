@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# SPDX-License-Identifier: CC-BY-SA-4.0
+# SPDX-License-Identifier: Apache-2.0
 """回指校验器：一份报告里每句结论，都能落到账本的具体一行吗？
 
 出处：方案书 §5.7「报告里每一句『已发现／已拦截／已记录』都要能回指一条审计

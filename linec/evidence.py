@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# SPDX-License-Identifier: CC-BY-SA-4.0
+# SPDX-License-Identifier: Apache-2.0
 """C-3 取证 Agent：把「什么变了」变成「可以出示的证据」。
 
 出处：方案书 §5.1「监理的交付物是报告，不是没出事」；§5.7「每一句已发现／

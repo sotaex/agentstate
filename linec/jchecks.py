@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# SPDX-License-Identifier: CC-BY-SA-4.0
+# SPDX-License-Identifier: Apache-2.0
 """J1–J6：**六条判据，每条自带正控与负控**。
 
 ──────────────────────────────────────────────────────────────────────────

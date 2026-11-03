@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# SPDX-License-Identifier: CC-BY-SA-4.0
+# SPDX-License-Identifier: Apache-2.0
 """代码指纹：回答「这份结论，是哪份代码算出来的」。
 
 ──────────────────────────────────────────────────────────────────────────

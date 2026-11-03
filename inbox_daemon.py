@@ -507,6 +507,16 @@ def _should_knock(it):
 LINEC_RETRY_GAP = 600.0        # 起失败后至少隔这么久再试（防「每 2 秒起一次」的风暴）
 LINEC_SPAWN_LOG_MAX = 20       # 台账只留最近 20 条：写日志不许自己变成新的问题
 
+#: 起子进程的「无窗」标志。**必须写成字面 kwarg 传下去，不许塞进 `**kwargs`** ——
+#: `ci/inbox_guards_0353.py` 的 P12 是**静态扫描**（AST 找 `creationflags=`），
+#: 经 `**kw` 传它看不见 ⇒ 判据红。而这条判据红得对：本仓实测过「后台进程
+#: 每轮闪一个黑窗」是创始人报障的原话。
+#: ★ 值从 `host_shield` 复用（同一事实只有一处定义），导入失败才退回等价字面量。
+try:                                                        # noqa: SIM105
+    from host_shield import _CREATE_NO_WINDOW as _NO_WINDOW
+except Exception:                                           # noqa: BLE001
+    _NO_WINDOW = 0x08000000 if os.name == "nt" else 0
+
 
 def linec_spawn_log_path():
     """起停台账的**唯一**落点：`<中枢>/lineC/daemon_spawn.json`。
@@ -606,9 +616,6 @@ def _spawn_linec(script):
     ★ 为什么不 `detach` 到「逃出进程树」：守护进程死时巡检也该一起收，
       否则会留下一个没人管的巡检进程反复写账本。
     """
-    kw = {}
-    if os.name == "nt":
-        kw["creationflags"] = 0x08000000                # CREATE_NO_WINDOW，不弹黑窗
     logp = os.path.join(os.path.dirname(linec_spawn_log_path()),
                         "nightwatch_subprocess.log")
     os.makedirs(os.path.dirname(logp), exist_ok=True)
@@ -620,7 +627,7 @@ def _spawn_linec(script):
         p = subprocess.Popen([sys.executable, script, "--once"],
                              stdin=subprocess.DEVNULL, stdout=fh, stderr=fh,
                              cwd=os.path.dirname(script) or None,
-                             close_fds=True, **kw)
+                             close_fds=True, creationflags=_NO_WINDOW)
         return p.pid
     finally:
         fh.close()          # 父进程只关自己那份；子进程已 dup 过去
